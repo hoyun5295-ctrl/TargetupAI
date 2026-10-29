@@ -22,6 +22,7 @@ import { shapeIssues } from '../utils/copy-shape';
 import { applyCopyExitGuards, compareCopyAttempts, takeGenerationSlot, type CopyExitFlags } from '../utils/copy-exit-guards';
 // ★ 2026-07-02 브랜드 링크 토큰 치환 ({{LINK:라벨}} → 등록 URL) + 브랜드보이스 형태 검증(CT-100) 배선
 import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
+import { resolveFormLink, type VoiceFormDecision } from '../utils/voice-form-slots';
 import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
 import { scoreSpamRisk, SPAM_FAIL_THRESHOLD } from '../utils/copy-spam-risk';
@@ -1145,6 +1146,8 @@ export async function generateMessages(
      */
     contentType?: CopyContentType | string | null;
     purpose?: CopyPurpose | null;
+    /** ★ 2026-10-29 목소리 꼴 칸 결정(질문 단계 답 · 저장된 결정 · voice-form-slots) — 지시문 · 링크 치환 · 링크 생략이 같은 결정 */
+    voiceForm?: VoiceFormDecision | null;
     /**
      * ★ 2026-10-28 AI 메모리 설계 K1-4 — 날짜 기준일(「내일」 · 「이번 주말」을 푸는 날 · 달력 · 없는 날짜 검사).
      *   자동마케팅 = 회차 발송일(D-1 에 만들어도 발송일 기준). 안 주면 지금(옛 동작 그대로).
@@ -1328,7 +1331,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
   );
   const composed = await composeVoicePrompt({
     companyId: extraContext?.companyId, producer: 'generate-messages', mode: 'write', kind: voiceKind, contentType: intent.contentType,
-    channel, isAd, basePrompt: house.system, brandLinks: true, outputFormat: VOICE_JSON_OUTPUT,
+    channel, isAd, basePrompt: house.system, brandLinks: true, outputFormat: VOICE_JSON_OUTPUT, formDecision: extraContext?.voiceForm ?? null,
   });
   const baseEnriched = composed.system;
   // 문안 두뇌: 캠페인 문자(SMS/LMS/MMS) 성과 RAG + 시의성 + 브랜드 키트 주입 (companyId 있을 때만)
@@ -1357,6 +1360,9 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       brandLinks = [];
     }
   }
+  // ★ 2026-10-29 링크 결정 한 곳(§7-3) — 지시문(composeVoicePrompt)과 같은 resolveFormLink · 1회용 링크 = 치환 목록에 · 생략 = 출구에서 줄 지움(§8-1)
+  const formLink = resolveFormLink(brandLinks, extraContext?.voiceForm ?? null);
+  brandLinks = formLink.links;
 
   // ★ 2026-09-30 프롬프트 점검 WP2 — 혜택 값의 근거(사용자 요청 · 상품 · 할인율 · 행사 · 브랜드 정보). 최근 발송 문안은 근거가 아니다
   //   (지난 행사의 "30%"를 이번 문안에 옮기면 지어낸 혜택이다). 판정 = copy-benefit-detector 값 기준(표현이 달라도 같은 값은 통과).
@@ -1389,7 +1395,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       channel, isAd, bannedWords, benefitGround, baseDate,
       validationVars: usePersonalization && personalizationVars.length > 0 ? personalizationVars : availableVars,
       stripAllVars: !!exactVars && exactVars.length === 0,
-      brandLinks, senderNames: [senderName],
+      brandLinks, linkOmit: formLink.mode === 'omit', senderNames: [senderName],
       // ★ K2-3 스타일 후처리 = 목소리 회사 기준값(구분선 · 빈 줄) · 아니면 지금
       style: voiceMode ? { keepDividers: !!voiceShape?.evidence.divider, maxBlankRun: voiceShape?.maxBlankRun ?? null } : undefined,
     };

@@ -19,6 +19,7 @@
  *   - callAIWithFallback의 cache_control ephemeral과 결합 (D167) → 90% 비용 절감
  */
 
+import type { VoiceFormDecision } from '../utils/voice-form-slots';
 import { UserFacingError } from '../utils/http-error';
 import { listRecentHumanSentTexts } from '../utils/human-sent-messages';
 import Anthropic from '@anthropic-ai/sdk';
@@ -93,6 +94,8 @@ export interface AgentContext {
   // ★ 2026-06-26: 자동마케팅 채널 고정(#1) + 관리자 입력 혜택(#4) — 옵셔널, 미설정 시 기존 동작(AI 추천 채널·placeholder 유지).
   forcedChannel?: string;          // 'sms'|'lms'|'mms' — 설정 시 AI 추천 대신 이 채널로 문안·검수·발송 일관
   benefitContent?: string | null;  // 관리자 직접 입력 혜택 — 생성 문안의 [혜택 ...] placeholder 치환
+  /** ★ 2026-10-29 목소리 꼴 칸 결정(자동마케팅 질문 답 · 저장된 운영자 · voice-form-slots) */
+  voiceForm?: VoiceFormDecision | null;
   // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고. true면 AI 판정과 무관하게 is_ad 고정 →
   //   문안 생성·검수·스팸테스트·발송((광고)+무료거부 080 자동 합성)까지 전 하류 일관.
   forcedIsAd?: boolean;
@@ -566,6 +569,7 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
     },
     {
       brandName: ctx.companyInfo.brand_name || ctx.companyInfo.company_name,
+      voiceForm: ctx.voiceForm ?? null,
       brandSlogan: ctx.companyInfo.brand_slogan,
       brandDescription: ctx.companyInfo.brand_description,
       brandTone: ctx.companyInfo.brand_tone,
@@ -898,6 +902,7 @@ async function _orchestrateWithAIImpl(ctx: AgentContext): Promise<OrchestratorRe
           },
           {
             brandName: ctx.companyInfo.brand_name || ctx.companyInfo.company_name,
+            voiceForm: ctx.voiceForm ?? null,
             brandSlogan: ctx.companyInfo.brand_slogan,
             brandDescription: ctx.companyInfo.brand_description,
             brandTone: ctx.companyInfo.brand_tone,

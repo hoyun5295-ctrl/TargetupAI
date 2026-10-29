@@ -69,7 +69,14 @@ const TIER_SRC = {
   'linux-modern': 'release/sync-agent-linux-modern',
   'linux-legacy': 'release/sync-agent-linux-legacy',
 };
-const TIER_NODE = { 'win-modern': 20, 'win-mid': 16, 'win-legacy': 12, 'linux-modern': 20, 'linux-legacy': 16 };
+const TIER_NODE = { 'win-modern': 24, 'win-mid': 16, 'win-legacy': 12, 'linux-modern': 24, 'linux-legacy': 16 };
+// ★ 2026-10-29 실린 Node 판 = 산출물에서 읽는다(뿌리 R21 넓힘) — 표의 메이저 숫자가 아니라 exe 안의 판으로 보안판을 대조한다
+const embeddedNodeVersion = (tier) => {
+  const exe = path.join(ROOT, `release/sync-agent-${tier}${tier.startsWith('win-') ? '.exe' : ''}`);
+  if (!fs.existsSync(exe)) return null;
+  const m = /nodejs\.org\/download\/release\/v(\d+\.\d+\.\d+)/.exec(fs.readFileSync(exe).toString('latin1'));
+  return m ? m[1] : null;
+};
 const TIER_BUNDLE = { 'win-modern': false, 'win-mid': true, 'win-legacy': true, 'linux-modern': false, 'linux-legacy': false };
 
 const dlDir = path.join(ROOT, 'dist-tiers/downloads');
@@ -138,6 +145,9 @@ for (const [tier, src] of Object.entries(TIER_SRC)) {
       else { console.warn('경고: oracledb 사이드카 스테이징 실패 — node_modules/oracledb(win32-x64 .node) 확인.'); blockers.push('oracledb 사이드카 미동봉'); }
     }
     if (driver === 'oracle' && !WIN_TIERS_WITH_IC.includes(tier)) blockers.push('Linux Instant Client 미동봉 — 12.1+ thin 만 가능(10g·11g 불가)');
+    const nodeVersion = embeddedNodeVersion(tier);
+    if (!nodeVersion) blockers.push('실린 Node 판을 산출물에서 못 읽음');
+    else if (Number(nodeVersion.split('.')[0]) !== TIER_NODE[tier]) blockers.push(`실린 Node ${nodeVersion} ≠ 티어 표 node${TIER_NODE[tier]}`);
     zipTo(src, packageKey);
     if (needIC && fs.existsSync(icDest)) fs.rmSync(icDest, { recursive: true, force: true }); // 다른 driver zip 전 제거
     if (needSidecar && fs.existsSync(sidecarDest)) fs.rmSync(sidecarDest, { recursive: true, force: true });
@@ -146,6 +156,7 @@ for (const [tier, src] of Object.entries(TIER_SRC)) {
       buildTier: tier,
       driver,
       node: TIER_NODE[tier],
+      nodeVersion,
       runtimeBundle: TIER_BUNDLE[tier],
       // 실연결 스모크 통과 시 백엔드 VERIFIED_COMBOS(osTierId__dbId)에 등록 → 위저드 verified 노출.
       state: 'candidate',

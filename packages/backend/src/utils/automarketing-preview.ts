@@ -7,6 +7,8 @@
 //   창 편집(칸 · 기준 · 주기 · 번호 · 직접 쓴 문안)은 문안을 만들지 않고 다시 센다.
 //   실행 중 자동 마케팅의 [다음 승인] · [조건 확인]도 같은 계산(AI 문안 없이)을 쓴다.
 // ============================================================
+import { voiceFormAsksFor } from './brand-voice-prompt';
+import { readVoiceFormDecision, voiceFormPrint } from './voice-form-slots';
 import { UserFacingError } from './http-error';
 import { createHash, randomUUID } from 'crypto';
 import { query } from '../config/database';
@@ -174,6 +176,8 @@ interface PreviewEntry {
   bodyPrint: string;
   /** ★ 1024 이 창에서 ③ · ② 답으로 주기를 「매월로」 바꿨다 — 승인 창 저장이 이때만 주기를 넘긴다(그 밖 = 지금 저장된 주기 그대로 · 옛 창 값으로 덮지 않는다) */
   scheduleAnswered?: true;
+  /** ★ 2026-10-29 이 창에서 목소리 꼴 칸에 답했다(다시 묻지 않는다 · 승인 저장이 이때만 결정을 넘긴다) */
+  voiceAnswered?: true;
   /** ★ 1024 승인 창을 열 때 운영자의 일정 — 승인 저장이 잠근 행과 비교한다(창을 연 뒤 바뀌었으면 409) */
   scheduleSeen?: OperatorScheduleShape;
 }
@@ -380,6 +384,8 @@ function copyPrint(e: PreviewEntry): string {
     ch: normalizeOperatorChannel(e.input.channel),
     m: e.input.copyMode === 'fixed' ? 'fixed' : 'ai',
     st: e.input.copyStyle ?? null,
+    // ★ 2026-10-29 꼴 칸 결정이 바뀌면 문안이 묵는다(§7-2 · 결정이 없으면 옛 지문 그대로)
+    ...(voiceFormPrint(readVoiceFormDecision(e.input.voiceForm)) ? { vf: voiceFormPrint(readVoiceFormDecision(e.input.voiceForm)) } : {}),
   })).digest('hex').slice(0, 16);
 }
 
@@ -435,11 +441,17 @@ async function settleQuestions(e: PreviewEntry): Promise<PreviewBlock | null> {
   const everyoneCount = needAxes
     ? await countContractAudience({ companyId: e.companyId, ownerUserId: owner, schedule: 'monthly', segmentKey: 'all' }).catch(() => null)
     : null;
+  // ★ 2026-10-29 목소리 꼴 칸(자동마케팅 = 광고 = 마케팅 성격) · 저장된 결정은 다시 묻지 않는다(§7-1)
+  //   ★ Codex 구현 1R — 저장 결정은 미리 채워 이 창에서 한 번 보여 준다(정정 길 · 갱신 포함) · 이 창에서 답했으면 다시 묻지 않는다
+  const savedVoice = readVoiceFormDecision(e.input.voiceForm);
+  const voiceAsks = e.voiceAnswered ? [] : (await voiceFormAsksFor(e.companyId, { kinds: ['marketing'] })).asks;
   e.questions = buildOperatorQuestions({
     translation: tr, axes, everyoneCount,
     schedule: e.input.schedule || 'monthly',
     benefitAsk: renewal ? null : e.benefitAsk,
     callbackCandidates, adminPhoneMissing,
+    voiceAsks,
+    voicePrefill: savedVoice,
   });
   return block;
 }
@@ -731,6 +743,10 @@ async function applyAnswers(e: PreviewEntry, a: ReturnType<typeof decideOperator
   }
   if (ans.callback) e.input = { ...e.input, callback: await checkOperatorCallback(e.companyId, e.input.createdBy || e.userId, { callbackNumber: ans.callback }) };
   if (ans.adminPhone) e.input = { ...e.input, adminPhoneNumbers: [ans.adminPhone] };
+  if (ans.voiceForm) {
+    e.input = { ...e.input, voiceForm: { ...readVoiceFormDecision(e.input.voiceForm), ...ans.voiceForm } };
+    e.voiceAnswered = true;
+  }
 }
 
 /**
@@ -921,7 +937,7 @@ export async function previewOperatorApproval(companyId: string, operatorId: str
       companyId, createdBy: owner, name: op.name, objective: op.objective, schedule: op.schedule, scheduleTime: op.scheduleTime,
       scheduleDayOfWeek: op.scheduleDayOfWeek, scheduleDayOfMonth: op.scheduleDayOfMonth, scheduleMonth: op.scheduleMonth,
       channel: op.channel, benefitContent: op.benefitContent, copyStyle: op.copyStyle,
-      copyMode: op.copyMode, fixedCopy: op.fixedCopy,
+      copyMode: op.copyMode, fixedCopy: op.fixedCopy, voiceForm: op.voiceForm,
     }, tr);
     // 승인 창도 서버 보관본 하나 — 편집(preview/update) · 승인(approve-window)이 이것만 쓴다. 보는 사람이 주인(잠금 · 꺼내기)
     const entry: PreviewEntry = {
@@ -979,6 +995,7 @@ export async function approveOperatorFromScreen(companyId: string, operatorId: s
       },
       copy: { mode: copyMode, fixedCopy },
       benefitContent: e.input.benefitContent ?? null,
+      voiceForm: e.voiceAnswered ? readVoiceFormDecision(e.input.voiceForm) : null,
       window: confirmedWindow(out),
       // ③ · ② 「매월로」 답일 때만 창이 보여 준 주기를 저장한다(창의 회차 = 이 주기) · 답이 없으면 넘기지 않는다(창을 연 뒤 바뀐 주기를 옛 값으로 덮지 않게)
       schedule: e.scheduleAnswered ? { schedule: e.input.schedule as any, scheduleDayOfWeek: e.input.scheduleDayOfWeek ?? null, scheduleDayOfMonth: e.input.scheduleDayOfMonth ?? null } : null,

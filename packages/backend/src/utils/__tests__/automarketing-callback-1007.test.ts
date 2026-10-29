@@ -52,8 +52,8 @@ describe('회신번호 저장 = 등록 · 수정 한 문장(Codex 1R high)', () 
   const op = back('utils/continuous-operator.ts');
   const routes = back('routes/ai.ts');
   it('등록 INSERT 에 같이 들어간다(차감과 같은 트랜잭션 · ★ 1024 registerOperator)', () => {
-    expect(op).toContain('schedule_month, target_hint, mms_image_paths${segCols}${cbCols}${v2Cols}${winCols},');
-    expect(op).toContain('$25, $26, $27::text[]${segVals}${cbVals}${v2Vals}${winVals},');
+    expect(op).toContain('schedule_month, target_hint, mms_image_paths${segCols}${cbCols}${v2Cols}${winCols}${vfCols},');
+    expect(op).toContain('$25, $26, $27::text[]${segVals}${cbVals}${v2Vals}${winVals}${vfVals},');
   });
   it('수정 UPDATE 에 같이 들어간다', () => {
     expect(op).toContain("${patch.callback ? `callback_number = $${28 + (withSegment ? 2 : 0) + (withHintParam ? 1 : 0)}, use_individual_callback = $${29 + (withSegment ? 2 : 0) + (withHintParam ? 1 : 0)},` : ''}");

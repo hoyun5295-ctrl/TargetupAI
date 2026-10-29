@@ -13,6 +13,7 @@ import { findBannedWords } from './copy-similarity-guard';
 import { findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, findInventedDates, replaceInventedDates, hasAiFillPlaceholder } from './copy-benefit-detector';
 import { cleanLeftoverVars, ensureSenderName } from './messageUtils';
 import { applyBrandLinkTokens, type BrandLink } from './brand-link-core';
+import { stripLinkLines } from './voice-form-slots';
 
 /**
  * 메시지 내 개인화 변수 검증
@@ -125,6 +126,8 @@ export interface CopyExitContext {
   /** 칼럼 0개(변수 없이) = 남은 %변수% 전부 지움 */
   stripAllVars: boolean;
   brandLinks: BrandLink[];
+  /** ★ 2026-10-29 링크 생략 결정(voice-form-slots) — 링크 토큰 · 자리 표시가 든 줄을 지운다(AI 재호출 0 · §8-1) */
+  linkOmit?: boolean;
   senderNames: ReadonlyArray<string | null | undefined>;
   /**
    * ★ K2-3 스타일 후처리 = 규칙이 살아 있을 때만 · 회사 기준값.
@@ -248,6 +251,7 @@ export function applyCopyExitGuards(
   // ★ 2026-10-18 exactVars = [] (칼럼 0개 = 변수 없이) — 남은 %변수% 전부 지운다
   if (ctx.stripAllVars) msgField = cleanLeftoverVars(msgField).replace(/  +/g, ' ').trim();
 
+  if (ctx.linkOmit) msgField = stripLinkLines(msgField);
   // ★ 2026-07-02 브랜드 링크 토큰 치환 — 미등록 라벨 = [링크를 입력해주세요] placeholder → 발송 전 가드가 차단.
   const linkApplied = applyBrandLinkTokens(msgField, ctx.brandLinks);
   if (linkApplied.replacedCount > 0 || linkApplied.unresolvedCount > 0) {

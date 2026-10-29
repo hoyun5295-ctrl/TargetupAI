@@ -1212,6 +1212,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
         companyId: auth.companyId, userId: auth.userId, channel: 'email', steps, payload: stepsPayload,
         attemptLockKey: oneLineInflightKey(auth.companyId, 'email', attemptToken),
         products: lineProducts, actor: lineActor, pageCheck: !!compDef, nowMs: stepsNow,
+        voiceFormRaw: req.body?.voice_form,   // ★ 2026-10-29 목소리 꼴 칸 답(판정 = 주문 한 곳)
         cook: async ({ cards, page }) => {
           if (compDef) {
             // ★ 2026-10-22 구성 = 한줄 CT 요리(문구 AI 1회 · 묶음 안 · 값 = 코드) · 상품 · 사진 · 주소는 구성 조립이 놓는다(1017 끼우기 · 몰 이름 첨부 0)

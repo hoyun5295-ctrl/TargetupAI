@@ -8,6 +8,9 @@
  *   차감은 여정 설계(journey-ai-generate 단가 × 만든 여정 수)에서만 한다 — 질문만 보고 그만두면 0.
  *   (Harold 승인 "요금 = 기존 여정 AI 생성 요금 기준 재사용" · 설계서 §5)
  */
+import { createHash } from 'crypto';
+import { voiceFormAsksFor } from './brand-voice-prompt';
+import type { VoiceFormSlot } from './voice-form-slots';
 import { extractJsonFromAiText } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { runInCreditBundle } from './ai-credit-context';
@@ -26,7 +29,7 @@ import { generateJourneyPackage } from './journey-ai-generator';
 import { JourneyInputError } from './journey-step-limits';
 import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft } from './journey-draft-save';
 import {
-  buildInterviewQuestions, decideJourneySpec, sanitizeInterviewPlans, MAX_INTERVIEW_PLANS, kstTodayYmd,
+  buildInterviewQuestions, decideJourneySpec, sanitizeInterviewPlans, MAX_INTERVIEW_PLANS, kstTodayYmd, voiceInterviewQuestions, decideJourneyVoiceForm,
   type InterviewAnswers, type InterviewPlan, type InterviewQuestion, type TriggerAvailability,
 } from './journey-interview';
 
@@ -83,6 +86,11 @@ export interface InterviewPrepared {
   notes: string[];
 }
 
+/** ★ 2026-10-29 여정 = 마케팅 · 안부 단계를 함께 만든다(VOICE_KIND_BY_STEP) → 두 성격의 꼴 칸 중 회사 값 · 결정이 없는 칸 */
+async function journeyVoiceAsks(companyId: string): Promise<VoiceFormSlot[]> {
+  return (await voiceFormAsksFor(companyId, { kinds: ['marketing', 'notice'] })).asks;
+}
+
 /**
  * ★ 2026-10-23 한 줄 여정 한 길 — 문장 → 계획(AI 해석 · 차감 0) + 듣기(listenLine · AI 0)로 혜택 · 마감일을 칸에 채워 둔다.
  *   한 줄 입구 · 지도 한 줄 · 문장으로 만들기가 모두 이 함수 하나다(옛: 한 줄은 패키지를 화면에 돌려주는 다른 길 · 돌려보기마다 차감).
@@ -95,9 +103,13 @@ export async function prepareInterview(companyId: string, sentence: string): Pro
   ]);
   const intent = listenLine(sentence);
   const said = String(sentence || '').trim().slice(0, MAX_INTERVIEW_SENTENCE);
+  const voiceAsks = (await journeyVoiceAsks(companyId));
   return {
     plans: plans.map((p) => ({ ...p, sentence: said })),   // 대상 조건은 해석 AI 가 옮긴 목표문이 아니라 이 한 줄에서 읽는다(Codex 1R)
-    questions: buildInterviewQuestions(plans, availability, { benefit: intent.concreteBenefit ? intent.benefit : null, entryEndsOn: intent.periodEnd }),
+    questions: [
+      ...buildInterviewQuestions(plans, availability, { benefit: intent.concreteBenefit ? intent.benefit : null, entryEndsOn: intent.periodEnd }),
+      ...plans.flatMap((p) => voiceInterviewQuestions(p.key, voiceAsks)),
+    ],
     callback: { defaultPhone: defaultCallbackOf(numbers), options: numbers.map((n) => ({ phone: n.phone, description: n.description })) },
     costPerJourney: getCreditCost('journey-ai-generate'),
     notes: checkRecurringLine(intent, 'journeys').map((n) => n.text),
@@ -119,9 +131,13 @@ export async function prepareInterviewPreset(companyId: string, input: { trigger
   if (!plan) throw new JourneyInputError('만들 수 없는 시작 사건이에요. 다시 골라 주세요.');
   const [availability, numbers] = await Promise.all([loadInterviewAvailability(companyId), listJourneyCallbackNumbers(companyId)]);
   const intent = objective ? listenLine(objective) : null;
+  const voiceAsks = await journeyVoiceAsks(companyId);
   return {
     plans: [plan],
-    questions: buildInterviewQuestions([plan], availability, intent ? { benefit: intent.concreteBenefit ? intent.benefit : null, entryEndsOn: intent.periodEnd } : {}),
+    questions: [
+      ...buildInterviewQuestions([plan], availability, intent ? { benefit: intent.concreteBenefit ? intent.benefit : null, entryEndsOn: intent.periodEnd } : {}),
+      ...voiceInterviewQuestions(plan.key, voiceAsks),
+    ],
     callback: { defaultPhone: defaultCallbackOf(numbers), options: numbers.map((n) => ({ phone: n.phone, description: n.description })) },
     costPerJourney: getCreditCost('journey-ai-generate'),
     notes: [],
@@ -161,7 +177,14 @@ export async function designJourneyFromInterview(input: {
   /** ★ 2026-10-09 AI 진단 추천 — 서버가 다시 계산한 칸 시점(누적 일수) · 휴면 기준일. 화면 값이 아니다(라우트가 다시 계산해 넘긴다). */
   timing?: { daysFromStart: number[]; dormantDays?: number | null };
 }): Promise<InterviewDesignResult> {
-  const key = `${input.companyId}:${input.interviewId}:${input.plan.key}`;
+  // ★ 2026-10-29 Codex 구현 1R — 꼴 칸 답 정정 = 다른 설계(지문 = 결정 · 결정이 없으면 옛 키 그대로)
+  const voiceAsksAtKey = await journeyVoiceAsks(input.companyId);
+  const voicePre = decideJourneyVoiceForm(input.plan.key, voiceAsksAtKey, input.answers || {});
+  // ★ Codex 구현 3R — 꼴 틀린 답은 캐시 · 진행 중 조회 전에 거절(빈 지문으로 앞선 성공 결과를 돌려주지 않게)
+  if (!voicePre.ok) throw new JourneyInputError(`${input.plan.title || '여정'}: ${voicePre.error}`);
+  const vfPrint = voicePre.print;
+  const vfSuffix = vfPrint ? `:vf=${createHash('sha256').update(vfPrint).digest('hex').slice(0, 16)}` : '';
+  const key = `${input.companyId}:${input.interviewId}:${input.plan.key}${vfSuffix}`;
   const now = Date.now();
   for (const [k, v] of designDone) if (now - v.at > DESIGN_TTL_MS) designDone.delete(k);
   const done = designDone.get(key);
@@ -178,6 +201,9 @@ export async function designJourneyFromInterview(input: {
     const decided = decideJourneySpec(plan, buildInterviewQuestions([plan], availability), input.answers || {}, kstTodayYmd());
     if (!decided.ok) throw new JourneyInputError(decided.error);
     const spec = decided.spec;
+    // ★ 2026-10-29 꼴 칸 답 → 결정(서버가 다시 계산한 질문 · 비움 = 생략)
+    const voiceDecided = decideJourneyVoiceForm(plan.key, voiceAsksAtKey, input.answers || {});
+    if (!voiceDecided.ok) throw new JourneyInputError(`${plan.title}: ${voiceDecided.error}`);
 
     const numbers = await listJourneyCallbackNumbers(input.companyId);
     const wanted = String(input.callbackNumber || '').replace(/-/g, '').trim();
@@ -188,7 +214,7 @@ export async function designJourneyFromInterview(input: {
       throw new JourneyMigrationPendingError('새 고객 받는 마지막 날을 저장할 준비가 아직 안 됐어요. DB 마이그레이션 필요: 운영자에게 여정 표 ALTER 실행을 요청하거나 마지막 날을 비우고 만들어 주세요.');
     }
     const cost = getCreditCost('journey-ai-generate');
-    const chargeKey = await nextDraftChargeKey(input.companyId, `journey-interview:${input.companyId}:${input.interviewId}:${plan.key}`);
+    const chargeKey = await nextDraftChargeKey(input.companyId, `journey-interview:${input.companyId}:${input.interviewId}:${plan.key}${vfSuffix}`);
     await checkCredit(input.companyId, cost);
     // 추천 시점은 AI 호출 **전에** 목표 문장에 싣는다(문안의 경과 표현이 실제 시점과 맞게 · 회의론자 D3) · 생성 뒤 같은 값으로 다시 고정.
     const timingText = input.timing && input.timing.daysFromStart.length > 0
@@ -202,6 +228,7 @@ export async function designJourneyFromInterview(input: {
       audienceLine: plan.sentence,
       benefitText: spec.benefitText,   // null = 질문표에서 비움(목표문을 혜택 근거로 쓰지 않는다 · Codex 1R)
       timing: input.timing,
+      voiceForm: voiceDecided.decision,
     });
     const pkg = await runInCreditBundle(async () => {
       try {

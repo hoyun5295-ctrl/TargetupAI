@@ -26,6 +26,7 @@
  */
 
 // ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
+import { readVoiceFormDecision, type VoiceFormDecision } from './voice-form-slots';
 import { UserFacingError } from './http-error';
 import { runWithRegenBudget, generationSlotsLeft } from './copy-exit-guards';
 import { sendSystemAlert } from './system-alert';
@@ -134,6 +135,8 @@ export interface CreateOperatorInput {
   // ★ 2026-06-26: 생성 시에도 저장(기존 누락 → #1 채널·#3 담당자·#4 혜택·예산 드롭 사고 fix)
   channel?: string;                    // 'sms' | 'lms' | 'mms' — 발송 채널 (default 'lms')
   benefitContent?: string | null;      // 관리자 직접 입력 혜택 (placeholder 치환)
+  /** ★ 2026-10-29 목소리 꼴 칸 결정(질문 답 · voice-form-slots) — 회차마다 생성이 읽는다 */
+  voiceForm?: VoiceFormDecision | null;
   adminPhoneNumbers?: string[];        // 담당자 연락처 (1~3)
   backupAdminPhone?: string | null;    // 백업 담당자
   adminAlertChannel?: 'sms' | 'kakao' | 'email';  // 담당자 알림 채널 (default 'sms')
@@ -219,6 +222,8 @@ export interface ContinuousOperator {
   // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
   channel: 'sms' | 'lms' | 'mms';                   // 발송 채널 (default 'lms')
   benefitContent: string | null;                    // 관리자 직접 입력 혜택 (placeholder 치환)
+  /** ★ 2026-10-29 목소리 꼴 칸 결정(칸 미생성 · NULL = 빈 결정 = 회사 값 · 값 없는 칸 줄 없이) */
+  voiceForm: VoiceFormDecision;
   // ★ Phase3 C (2026-06-26): 다단계 시퀀스 (1차 → N일 후 미반응자 리마인드)
   sequenceEnabled: boolean;                         // default false
   sequenceDelayDays: number | null;                 // 1~30일 (리마인드 대기)
@@ -526,6 +531,16 @@ export async function registerOperator(
     winCols = ', approved_until, approval_meta';
     winVals = `, $${insertParams.length - 1}, $${insertParams.length}::jsonb`;
   }
+  // ★ 2026-10-29 목소리 꼴 칸 결정 — 결정이 있을 때만 칸을 참조(DDL 전 옛 등록 그대로 · 결정이 있는데 칸이 없으면 마이그레이션 안내)
+  let vfCols = '';
+  let vfVals = '';
+  const vf = readVoiceFormDecision(input.voiceForm);
+  if (Object.keys(vf).length > 0) {
+    if (!(await hasVoiceFormColumn())) throw new Error('DB 마이그레이션 필요: continuous_operators voice_form column does not exist');
+    insertParams.push(JSON.stringify(vf));
+    vfCols = ', voice_form';
+    vfVals = `, $${insertParams.length}::jsonb`;
+  }
   insertParams.push(opts.id);
   const idParam = `$${insertParams.length}::uuid`;
   const insertSql =
@@ -535,7 +550,7 @@ export async function registerOperator(
       channel, benefit_content, admin_phone_numbers, backup_admin_phone, admin_alert_channel,
       auto_send_lead_minutes, budget_monthly, budget_daily, budget_alert_threshold, delivery_policy,
       sequence_enabled, sequence_delay_days, sequence_reminder_content, send_time_mode, copy_style,
-      schedule_month, target_hint, mms_image_paths${segCols}${cbCols}${v2Cols}${winCols},
+      schedule_month, target_hint, mms_image_paths${segCols}${cbCols}${v2Cols}${winCols}${vfCols},
       created_at, updated_at
     ) VALUES (
       ${idParam}, $1::uuid, $2::uuid, $3, $4,
@@ -543,7 +558,7 @@ export async function registerOperator(
       $10, $11, $12, $13, $14,
       $15, $16, $17, $18, $19,
       $20, $21, $22, $23, $24,
-      $25, $26, $27::text[]${segVals}${cbVals}${v2Vals}${winVals},
+      $25, $26, $27::text[]${segVals}${cbVals}${v2Vals}${winVals}${vfVals},
       NOW(), NOW()
     ) ON CONFLICT (id) DO NOTHING RETURNING *`;
 
@@ -1049,6 +1064,7 @@ export async function loadOperatorCompanyContext(companyId: string): Promise<Ope
 
 /** 오케스트레이터 문맥에 쓰는 오퍼레이터 값(등록 전 미리보기는 id = null — 상태 축은 id 를 쓰지 않는다 · 변화 축은 미리보기를 하지 않는다) */
 export type OperatorOrchestrateInput = Pick<ContinuousOperator, 'companyId' | 'objective' | 'copyStyle' | 'channel' | 'benefitContent' | 'targetHint' | 'segmentKey' | 'segmentParams'> & {
+  voiceForm?: VoiceFormDecision | null;
   id: string | null;
   createdBy: string | null;
   /** ★ 2026-10-05 칸 조건 계약 · 주기(회차 기간) · 회차 기준 시각 */
@@ -1072,6 +1088,7 @@ export function buildOperatorOrchestrateContext(op: OperatorOrchestrateInput, lo
       buildCopyStylePromptBlock(op.copyStyle),
     ].filter(Boolean).join('\n'),
     // ★ 2026-06-26: 폼에서 고정한 채널(#1) + 관리자 입력 혜택(#4) 주입 → 제안·테스트·발송 일관
+    voiceForm: op.voiceForm ?? null,
     forcedChannel: op.channel,
     benefitContent: op.benefitContent,
     // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 마케팅 = 무조건 광고 — (광고)+무료거부 080 자동 합성 전제.
@@ -1122,6 +1139,7 @@ export function operatorContextFields(input: CreateOperatorInput): Omit<Operator
     copyStyle: normalizeCopyStyle(input.copyStyle),
     channel: normalizeOperatorChannel(input.channel),
     benefitContent: normalizeOperatorBenefit(input.benefitContent),
+    voiceForm: readVoiceFormDecision(input.voiceForm),
     targetHint: segKey ? null : normalizeTargetHint(input.targetHint),
     segmentKey: segKey,
     segmentParams: segParams,
@@ -1666,7 +1684,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
             const regen = await runInCreditBundle(() => generateMessages(
               buildSpamRegeneratePrompt(operator.objective, buildCopyStylePromptBlock(operator.copyStyle)),
               { total_count: recipientCount },
-              { channel: channelForSpam, isAd: !!isAd, rejectNumber: adOpt080 || ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId, purpose: { operatorTargetHint: operator.targetHint } },
+              { channel: channelForSpam, isAd: !!isAd, rejectNumber: adOpt080 || ctx.reject_number || undefined, model: 'opus', companyId: operator.companyId, voiceForm: operator.voiceForm, purpose: { operatorTargetHint: operator.targetHint } },
             ));
             const nv = regen.variants?.[0] as any;
             if (!nv) return null;
@@ -3614,6 +3632,15 @@ async function dispatchProposalSend(
  *   준비 전 = 칸 조건 · 직접 쓴 문안 · 승인 기간만 503, 축 계약 · 회차 · 발송은 그대로. 회차 기록 쓰기는 건너뛴다.
  */
 let operatorV2ColumnsReadyCache = false;
+/** ★ 2026-10-29 목소리 꼴 칸 결정 칸 준비 여부(준비됨만 캐시 · DDL 뒤 재기동 없이 활성) */
+let voiceFormColumnReadyCache = false;
+export async function hasVoiceFormColumn(): Promise<boolean> {
+  if (voiceFormColumnReadyCache) return true;
+  const r = await query(`SELECT 1 FROM information_schema.columns WHERE table_name = 'continuous_operators' AND column_name = 'voice_form'`);
+  voiceFormColumnReadyCache = r.rows.length > 0;
+  return voiceFormColumnReadyCache;
+}
+
 export async function hasOperatorV2Columns(): Promise<boolean> {
   if (operatorV2ColumnsReadyCache) return true;
   const r = await query(
@@ -3769,6 +3796,8 @@ export async function approveOperatorWindow(input: {
   contract?: { segmentKey: string | null; segmentParams: Record<string, number> | null; conditions: AudienceCondition[] | null } | null;
   copy?: { mode: 'ai' | 'fixed'; fixedCopy: FixedCopy | null } | null;
   benefitContent?: string | null;
+  /** ★ 2026-10-29 이 창에서 다시 답한 목소리 꼴 칸 결정(없으면 그대로) */
+  voiceForm?: VoiceFormDecision | null;
   /** 화면이 확인한 승인 기간 — 있으면 그대로 저장(지금 시각으로 다시 계산하면 본 것과 다른 기간이 된다 · Codex 3R) */
   window?: { startAt: Date; until: Date; rounds: Date[] } | null;
   /** ★ 1024 승인 창에서 답한 주기(③ · ② 「매월로」) — 있으면 주기 · 날짜 · 다음 생성 시각을 함께 저장한다(창이 보여 준 회차 = 저장한 일정 · Codex 2R · 3R) */
@@ -3820,6 +3849,11 @@ export async function approveOperatorWindow(input: {
     if (input.benefitContent !== undefined) {
       params.push(normalizeOperatorBenefit(input.benefitContent));
       sets.push(`benefit_content = $${params.length}`);
+    }
+    if (input.voiceForm) {
+      if (!(await hasVoiceFormColumn())) throw new Error('DB 마이그레이션 필요: continuous_operators voice_form column does not exist');
+      params.push(JSON.stringify(readVoiceFormDecision(input.voiceForm)));
+      sets.push(`voice_form = $${params.length}::jsonb`);
     }
     // ★ 2026-10-24 승인 창 ③ 「매월로」 = 그 주기 · 날짜로 저장(다음 생성 시각도 같은 함수로 · 편집과 같은 계산 · 주기가 같아도 날짜는 창의 값)
     if (input.schedule) {
@@ -4435,6 +4469,7 @@ export function mapRowToOperator(row: any): ContinuousOperator {
     // ★ 2026-06-26: 발송 채널 + 관리자 입력 혜택
     channel: (['sms', 'lms', 'mms'].includes(row.channel) ? row.channel : 'lms') as 'sms' | 'lms' | 'mms',
     benefitContent: row.benefit_content || null,
+    voiceForm: readVoiceFormDecision(row.voice_form),
     // ★ Phase3 C (2026-06-26): 다단계 시퀀스
     sequenceEnabled: row.sequence_enabled === true,
     sequenceDelayDays: row.sequence_delay_days !== null && row.sequence_delay_days !== undefined ? Number(row.sequence_delay_days) : null,

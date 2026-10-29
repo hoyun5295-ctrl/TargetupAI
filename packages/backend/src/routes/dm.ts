@@ -1041,6 +1041,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
         companyId, userId: req.user?.userId, channel: 'dm', steps, payload: stepsPayload,
         attemptLockKey: oneLineInflightKey(companyId, 'dm', attemptToken),
         products: lineProducts, actor: lineActor, pageCheck: !!compDef, nowMs: stepsNow,
+        voiceFormRaw: req.body?.voice_form,   // ★ 2026-10-29 목소리 꼴 칸 답(판정 = 주문 한 곳)
         cook: async ({ cards, page }) => {
           // ★ 2026-10-17 확정 카드 = 몰 상품(재조회 ok) + 직접 넣은 상품(사진 + 가격) · 대표 사진 · 버튼 주소는 서버가 정해 생성기가 놓는다
           const allCards: LineMallCard[] = [...cards, ...steps.manualCards];

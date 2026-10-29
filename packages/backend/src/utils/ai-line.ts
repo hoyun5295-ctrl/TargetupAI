@@ -9,6 +9,7 @@
  *   - 조건 출처는 AI 자기 신고가 아니라 **조각이 원문에 실제로 있는가**로 서버가 정한다. 모르면 「AI 가 보탬」(끌 수 있는 쪽).
  *   - 원장 키 = 회사 + 날짜/시도 + 입력 지문. 같은 날 같은 한 줄 = 기본 0 · 같은 시도 재요청 = 0.
  */
+import { VOICE_FORM_ASK, type VoiceFormSlot } from './voice-form-slots';
 import { createHash } from 'crypto';
 import { oneLineGaps, hasPromotionIntent, hasConcreteBenefit } from './one-line-facts';
 import { linePeriodMentioned, lineFingerprint } from './one-line-steps';
@@ -112,7 +113,7 @@ export function sanitizeAiAsks(raw: unknown, line: string): AiLineAsk[] {
  * (순수) 묻는 목록 한 자리 — AI 가 판단한 질문 + 규칙 안전망(AI 가 혜택 · 기간을 놓쳤을 때만 보탠다).
  * 순서 = 혜택 → 기간 → 그 밖. 다 갖춘 한 줄이면 빈 목록(이 단계 없이 다음).
  */
-export function mergeLineAsks(line: string, aiAsks: AiLineAsk[]): AiLineAsk[] {
+export function mergeLineAsks(line: string, aiAsks: AiLineAsk[], voiceAsks: readonly AiLineAsk[] = []): AiLineAsk[] {
   const g = lineRuleGaps(line);
   const all = [...aiAsks];
   if (g.benefit && !all.some((a) => a.kind === 'benefit')) {
@@ -121,8 +122,33 @@ export function mergeLineAsks(line: string, aiAsks: AiLineAsk[]): AiLineAsk[] {
   if (g.period && !all.some((a) => a.kind === 'period')) {
     all.push({ id: 'period', kind: 'period', text: '혜택은 언제까지인가요?', why: '문안에 「언제까지」가 들어가야 혜택이 분명해져요', options: [], source: 'rule' });
   }
+  // ★ 2026-10-29 목소리 꼴 칸(voice-form-slots · 규칙) = 혜택 · 기간 다음 · AI 의 그 밖 질문 앞(상한에 밀려 빠지지 않게)
   const order: AiLineAskKind[] = ['benefit', 'period', 'text'];
-  return order.flatMap((k) => all.filter((a) => a.kind === k)).slice(0, AI_LINE_ASKS_MAX);
+  const ordered = order.flatMap((k) => all.filter((a) => a.kind === k));
+  const head = ordered.filter((a) => a.kind !== 'text');
+  const tail = ordered.filter((a) => a.kind === 'text');
+  return [...head, ...voiceAsks, ...tail].slice(0, AI_LINE_ASKS_MAX);
+}
+
+/** ★ 2026-10-29 (순수) 목소리 꼴 칸 질문 → AI 한줄로 묻는 목록 꼴(글 = 서버 상수 · 답 식별 키) */
+export function voiceLineAsks(asks: readonly VoiceFormSlot[]): AiLineAsk[] {
+  return asks.map((s) => ({ id: `voice_${s}`, kind: 'text' as const, text: VOICE_FORM_ASK[s].label, why: VOICE_FORM_ASK[s].help, options: [], source: 'rule' as const }));
+}
+
+/** ★ 2026-10-29 (순수) 답 목록을 꼴 칸 답과 그 밖 답으로 가른다(꼴 칸 답 = 서버가 다시 계산한 질문의 글과 같은 q 만) */
+export function splitVoiceLineAnswers(answers: readonly AiLineAnswer[], asks: readonly VoiceFormSlot[]): {
+  voice: Partial<Record<VoiceFormSlot, string>>; others: AiLineAnswer[];
+} {
+  const voice: Partial<Record<VoiceFormSlot, string>> = {};
+  const others: AiLineAnswer[] = [];
+  // ★ Codex 구현 1R — 식별 = 서버 상수 글 셋 전부(그 사이 회사 값이 생겨 질문에서 빠진 칸의 답도 꼴 칸 답 · 근거 글로 새지 않는다)
+  for (const a of answers) {
+    const s = (Object.keys(VOICE_FORM_ASK) as VoiceFormSlot[]).find((x) => VOICE_FORM_ASK[x].label === a.q);
+    if (s) voice[s] = a.a;
+    else if (a.a) others.push(a);
+  }
+  void asks;
+  return { voice, others };
 }
 
 export interface AiLineAnswer { q: string; a: string }
@@ -131,12 +157,14 @@ export function readLineAnswers(raw: unknown): AiLineAnswer[] | 'invalid' {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw) || raw.length > AI_LINE_ASKS_MAX) return 'invalid';
   const out: AiLineAnswer[] = [];
+  const voiceLabels = new Set(Object.values(VOICE_FORM_ASK).map((v) => v.label));
   for (const x of raw) {
     if (!x || typeof x !== 'object' || Array.isArray(x)) return 'invalid';
     const q = tidyAsk((x as any).q, 80);
     const a = tidyAsk((x as any).a, 200);
     if (!q) return 'invalid';
-    if (a) out.push({ q, a });
+    // ★ 2026-10-29 목소리 꼴 칸 답 = 빈 답도 남긴다(「이 줄 없이」 = 명시 생략 · Codex 구현 1R)
+    if (a || voiceLabels.has(q)) out.push({ q, a });
   }
   return out;
 }

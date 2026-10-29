@@ -1,7 +1,8 @@
+import { voiceFormQuestions } from '../utils/voice-form-slots';
 import { CURRENT_BRIEF_DATE_SQL } from '../utils/daily-brief-policy';
 import { Request, Response, Router } from 'express';
 import { isCopyContentType } from '../utils/copy-content-type';
-import { voiceLearned } from '../utils/brand-voice-prompt';
+import { voiceLearned, voiceFormAsksFor } from '../utils/brand-voice-prompt';
 import { listRecentHumanSentTexts } from '../utils/human-sent-messages';
 import { isDemoCompany } from '../utils/demo-company';   // ★ 2026-10-09 시연 회사 = 여정 활성화 비용 0
 import { query, pool } from '../config/database';
@@ -810,6 +811,12 @@ router.post('/one-line/gaps', async (req: Request, res: Response) => {
         };
         plan = buildLineStepsPlan(planInput);
         compositions = { infos: compositionInfos(), ranks: heard.rank, plans: buildCompositionPlans(planInput, heard) };
+        // ★ 2026-10-29 목소리 꼴 칸 질문 = 기본 판 · 구성 판 같은 질문(한 번 계산 · 묶음 B)
+        const voiceQs = voiceFormQuestions((await voiceFormAsksFor(companyId, { kinds: ['marketing', 'notice'], scope: 'tone' })).asks);
+        if (voiceQs.length > 0) {
+          plan = { ...plan, voice: voiceQs };
+          for (const k of Object.keys(compositions.plans) as Array<keyof typeof compositions.plans>) compositions.plans[k] = { ...compositions.plans[k], voice: voiceQs } as any;
+        }
       } catch (err: any) {
         // 단계 판정이 실패해도 판정 응답 자체는 지킨다(plan 없음 = 화면은 지금 흐름) · 원인은 남긴다
         console.log(`[one-line steps] plan 실패 company=${companyId} menu=${menu} err=${err?.message}`);

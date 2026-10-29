@@ -15,6 +15,7 @@
  *   - (광고)+080+KISA 제목 = 시스템 자동 합성 (직접 작성 X)
  */
 
+import type { VoiceFormDecision } from './voice-form-slots';
 import { UserFacingError } from './http-error';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
@@ -82,6 +83,8 @@ export interface JourneyAIGenerateInput {
    *   undefined 만 옛 하위호환(목표문의 혜택이 근거)이다.
    */
   benefitText?: string | null;
+  /** ★ 2026-10-29 목소리 꼴 칸 결정(질문표 답 · voice-form-slots) — 없으면 회사 값만 · 값 없는 칸 줄 없이 */
+  voiceForm?: VoiceFormDecision | null;
   /**
    * ★ 2026-10-23 담당자가 쓴 한 줄 그대로(문장으로 만들기). 시작 사건이 정해져도 이 한 줄이 말한 대상 조건은 남긴다
    *   (검증 = partitionCustomerConditions · 담지 못한 조건 = 「반영 안 됨」). 없으면(카드 · 빠른 시작) 조건을 비운다(0808 그대로).
@@ -668,7 +671,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
   // ★ D225+ Brand Voice Learning — 회사별 가이드라인 자동 주입 (회사 등록 미존재 시 옛 흐름 그대로)
   // ★ 2026-10-28 AI 메모리 설계 K11-4 — 여정 패키지 = 한 호출이 여러 단계 · 성격별 목소리 블록 둘 + 단계마다 contentType 칸(목소리 없는 회사 = 지금 글자)
   system = (await composeVoicePrompt({
-    companyId: input.companyId, producer: 'journey-package', mode: 'write', kind: VOICE_KIND_BY_STEP, channel: 'LMS', isAd: true, basePrompt: system,
+    companyId: input.companyId, producer: 'journey-package', mode: 'write', kind: VOICE_KIND_BY_STEP, channel: 'LMS', isAd: true, basePrompt: system, formDecision: input.voiceForm ?? null,
     outputFormat: '[출력 다시 확인] 앞에서 정한 JSON 하나 · steps 마다 "contentType" 칸을 더한다.',
   })).system;
 

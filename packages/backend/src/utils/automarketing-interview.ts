@@ -7,6 +7,7 @@
  * 그 밖은 추천으로 채우고 멈추지 않는다(결과 문장에 보인다). 질문을 고르고 답을 검증하는 것은 순수 함수다(AI 0 · DB 0).
  *   대상 판정을 AI 에 넘기지 않는 원칙(신뢰 설계 §2-1) — AI 는 대상 번역 1회 · 문안에만 쓴다.
  */
+import { voiceFormQuestions, decideVoiceForm, type VoiceFormSlot, type VoiceFormDecision } from './voice-form-slots';
 import { pickAnswer, type LineAnswers, type LineQuestion, type LineQuestionOption } from './one-line-ct/questions';
 import { checkSchedulePairing, getSegmentContract } from './automarketing-segment';
 import type { AudienceTranslation } from './audience-translate';
@@ -31,6 +32,10 @@ export interface OperatorQuestionFacts {
   callbackCandidates: string[] | null;
   /** ⑥ 담당자 알림 번호가 없다 */
   adminPhoneMissing: boolean;
+  /** ⑦ ★ 2026-10-29 목소리 꼴 칸 중 회사 값이 없는 칸(voice-form-slots) · 없으면 빈 배열 */
+  voiceAsks?: VoiceFormSlot[];
+  /** ⑦ 저장된 결정(미리 채운 답 · 정정 길) */
+  voicePrefill?: VoiceFormDecision;
 }
 
 export type OperatorQuestion = LineQuestion & { required: true };
@@ -150,6 +155,11 @@ export function buildOperatorQuestions(f: OperatorQuestionFacts): OperatorQuesti
       maxLength: 13,
     });
   }
+  // ⑦ 목소리 꼴 칸 — 답하거나 「이 줄 없이」를 눌러야 넘어간다(회차마다 같은 값을 쓴다 · 비움 = 명시 생략)
+  for (const q of voiceFormQuestions(f.voiceAsks || [])) {
+    const saved = f.voicePrefill?.[q.id.slice('voice:'.length) as VoiceFormSlot];
+    out.push({ ...q, required: true, ...(saved && 'value' in saved ? { recommended: saved.value } : {}) });
+  }
   return out;
 }
 
@@ -165,6 +175,8 @@ export interface OperatorAnswerPatch {
   benefit?: string | null;
   callback?: string;
   adminPhone?: string;
+  /** ★ 2026-10-29 목소리 꼴 칸 결정(물은 칸만) */
+  voiceForm?: VoiceFormDecision;
 }
 
 /**
@@ -195,6 +207,7 @@ export function decideOperatorAnswers(
   answers: LineAnswers,
 ): { ok: true; patch: OperatorAnswerPatch } | { ok: false; error: string } {
   const patch: OperatorAnswerPatch = { fields: {} };
+  const voiceRaw: Partial<Record<VoiceFormSlot, string>> = {};
   for (const q of questions) {
     const a = pickAnswer(q, answers || {});
     if (!a.ok) return a;
@@ -216,7 +229,13 @@ export function decideOperatorAnswers(
       const d = v.replace(/\D/g, '');
       if (!/^01\d{8,9}$/.test(d)) return { ok: false, error: '휴대폰 번호를 다시 확인해 주세요.' };
       patch.adminPhone = d;
-    }
+    } else if (q.id.startsWith('voice:')) voiceRaw[q.id.slice('voice:'.length) as VoiceFormSlot] = v;
+  }
+  const voiceSlots = Object.keys(voiceRaw) as VoiceFormSlot[];
+  if (voiceSlots.length > 0) {
+    const vd = decideVoiceForm(voiceSlots, voiceRaw);
+    if (!vd.ok) return { ok: false, error: vd.error };
+    patch.voiceForm = vd.decision;
   }
   return { ok: true, patch };
 }

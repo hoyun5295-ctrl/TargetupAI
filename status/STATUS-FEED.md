@@ -214,6 +214,14 @@
 > W1 한줄전단 API(별개 저장소 hanjulDM · 원장 = hanjulDM status/STATUS.md 1027 절) = 첫 경보로 찾음 → 같은 날 닫음. 의존성 = 운영 audit 치명 1 · 높음 19 → 0(puppeteer 25 · xlsx 공식 0.20.3 · zod 제거 · allowScripts = puppeteer@25.16.0 만) · W3 렌더 크롬 = 기동 한 곳 `utils/flyer/product/render-browser.ts` · --no-sandbox 0 · 같은 /opt/hanjul-chrome · 못 뜨면 실패 · W2 로그인 요청 제한 = 비밀번호 · OTP · 등록 토큰 확인 5곳 `middlewares/login-limiter.ts`(같은 IP 처리 중 + 1분 안 실패 > 10 = 429 · 들어올 때 세고 성공하면 뺌 · Codex 1R 「동시 정상 11건째 429」는 끝난 실패만 세면 몰아 보내는 추측이 한도 없이 통과해 불수용 · 두 동작 시험 고정) · 함께 닫음 = xlsx 0.20.3 이 날짜 칸을 서버 시각대 자정으로 줘 고객 업로드 생일이 KST 에서 하루 앞 → CT `sheetDateToYmd`. 검증 = tsc 0 · vitest 375 · 변이 5 · Codex 적대 2R approve(1R 은 요청문이 파일 읽기까지 막아 4개만 읽음 = 재발 기록). 실측(09:10) = audit 운영 0 · build:safe · 새 dist 크롬 = /opt 156 · 샌드박스 끄는 인자 0 · PDF · PNG 생성 · restart 뒤 online · Node 24.22.1 · health 200 · nginx 경유 없는 아이디 11번 = 401 10 → 429(도메인 DNS = .62 직결 · CDN 없음) · 에러 로그 새 줄 0.
 > 남은 것 = 3 밤 창 apt 99 + 커널 재부팅 · 4 SSH 키 전용(두 번째 문 실측 먼저) · 5 패널 2단계(Harold) · 6 떠돌이 파일 · 8 이상 행위 경보(기준값 실데이터) · 9 백업 복구 훈련 · A4 HMAC(IMC 업체 키 발급 요청) · A1 · A5 · 미실측 = 재시작 뒤 정상 080 콜백 등록 줄 · 한줄전단 실제 전단 PDF · OG 경로 첫 요청 · 범위 밖 기록 = 한줄전단 고객 화면 파일 업로드 응답 계약 불일치(success · fileId) · pdfkit 미사용 선언 · 한줄로 프론트 react-router 7(닿지 않는 2건) · pos-agent 의존성(별도 배포본)
 
+<a id="c80"></a>
+
+### C80 · ★1029 싱크에이전트 1.7.4 · 실린 Node 24.22.1 · 설치 마법사 이 PC 전용 — Codex 적대 3R approve · 미커밋
+> 호출어 **"KMC 공지 / Node 보안판 / 마법사 이 PC 전용 / 1.7.4"** → [설계서](../docs/2026-10-29-sync-agent-node24-wizard-loopback-design.md) §8 · [기능 문서](../docs/FEATURE-SYNC-AGENT.md) §7 2026-10-29 · 원장 C80-G1 · 뿌리 = R28 신설 · R21 점검표 넓힘
+> 계기 = 한국모바일인증 공지(PHP · Node 취약점 · 보호나라 1023) 점검. KMC 본인확인 = 별도 실행 파일 spawn 이라 무관 · 우리 서버 PHP 0 · .62 실행 중 Node 24.22.1(해결 판) · .65 관리 API = Ubuntu Node 18.19.1 · Brotli 는 libbrotli 1.1.0-2ubuntu0.1(10-28 06:52) 뒤 재시작(11:59)이라 닫힘 · .66 = Node 20.11.1(nvm) · 22.23.2(/opt · 근태 앱 4000 모든 망) · 24.21.0(CureOPS) 전부 해결 판 아래(.65 · .66 처방 = Harold 와 나중에).
+> 한 것 = 마법사 `app.listen(9876)` 모든 망 · 인증 없음(설정 저장까지) → 127.0.0.1 + Host 허용 목록(DNS 재바인딩) · body-parser 2 가 br 을 풀던 입력 자리 → `express.json({ inflate: false })`(415 · 구형 티어 16 · 12 도 닫힘) · 실린 Node 20.20.0(지원 끝) → 24.22.1(pkg 6.24.0 · pkg-fetch 3.6.7 · 외부 코드 관문 통과 · manifest nodeVersion = exe 안 판) · 빌드 PC Node 22 미만 = modern 빌드 중단 · 엠티 1.7.4 = `Downloads\엠티콜렉션_SyncAgent_v1.7.4\`(zip 168,916,499B · sha256 `273f6570…ab15` · 안내서 PDF 11쪽).
+> 검증 = 에이전트 tsc 0 · vitest 33파일 288건(Node 20.19.4 · Node 24.22.1 둘 다) · 백엔드 tsc 0 · root-ledger 198+1 · 변이 5 · exe `--version` 1.7.4 · Codex 적대 1R medium 1(R28 이름표가 스코프 무시) → 2R medium 1(글자 거름이 주석 낀 호출을 버림 · 같은 부류 두 번째 = 판정을 구문 트리 하나로) → 3R approve. 남은 것 = 커밋 · 엠티 VM 재검증(Harold 승인) 뒤 전달 · 전 회사 1.7.4 출고는 별도 결정 · 범위 밖 = 싱크에이전트 운영 audit 16건(치명 1).
+
 <a id="c77"></a>
 
 ### C77 · ★1028 사내 회사 운영 경보 제외(B-1028-3) · 실 PG 시험 자리 · 배포 도구(B-1028-4) — Codex 적대 3R approve · 배포 대기

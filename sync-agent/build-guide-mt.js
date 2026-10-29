@@ -1,11 +1,12 @@
-/* 엠티콜렉션(메트로시티) 전용 Sync Agent v1.7.3 설치 안내서 빌드 스크립트 (2026-10-28 · 1.7.2 판 2026-10-15 를 갱신)
+/* 엠티콜렉션(메트로시티) 전용 Sync Agent v1.7.4 설치 안내서 빌드 스크립트 (2026-10-29 · 1.7.3 판 2026-10-28 · 1.7.2 판 2026-10-15 를 갱신)
+ * 1.7.4 = 1.7.3 + 실린 Node 24.22.1 · 설치 마법사 이 PC 전용(설계서 docs/2026-10-29-sync-agent-node24-wizard-loopback-design.md) · 고객 문장 변화 0(판 번호 · zip 만)
  * 실행: node build-guide-mt.js <출력.docx> <전달 zip 경로>   (docx 모듈 위치는 DOCX_MODULE 로 바꿀 수 있다)
  * 고객에게는 Word 로 변환한 PDF 만 준다(docx 는 우리 쪽 원본). 모양은 build-manual.js 와 같다.
  * 값의 근거 = 엠티 사전 질의서 1028 회신(고객 뷰 27컬럼 · 판매 뷰 6컬럼 · 일시 컬럼 없음 · YN_WITHDRAW='탈퇴' · YN_SMS 수신/미수신)
  *            + ERP 연동 컬럼 정리표(23컬럼) + 설계서 docs/2026-10-28-sync-value-check-summary-guard-design.md(값 확인 · 1.7.3).
  * zip 해시 · 크기는 손으로 적지 않고 넘긴 zip 에서 계산한다(옛 판은 상수였다 · 재빌드 때 낡은 값이 남을 수 있었다).
  * ⛔ 고객에게 나가는 문장에 가운뎃점(·) · 줄표 금지(memory feedback_no_middle_dot_in_outward_copy · feedback_no_em_dash_in_copy) — 이 파일 맨 아래 검사가 막는다.
- * ⛔ 1.7.3 VM 재검증 전에는 이 안내서를 고객에게 보내지 않는다(원장 C76 · 전달 = Harold).
+ * ⛔ 1.7.4 VM 재검증 전에는 이 안내서를 고객에게 보내지 않는다(배포 원장 1.7.4 카드 · 전달 = Harold).
  */
 const {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
@@ -16,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const VERSION = '1.7.3';
+const VERSION = '1.7.4';
 const outPath = process.argv[2];
 const zipPath = process.argv[3];
 if (!outPath || !zipPath) { console.error('사용: node build-guide-mt.js <출력.docx> <전달 zip 경로>'); process.exit(1); }

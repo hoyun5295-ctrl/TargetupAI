@@ -226,7 +226,7 @@ describe('P2 R1 · 헤드라인 돈 · 값 · 누출 정정(Codex)', () => {
   it('부모 = 만드는 중 잠금(다음 · 건너뛰기 · 만들기 · 단계 이동) · 결과는 시작 때 보존 키로', () => {
     const modal = readFileSync(join(FE, 'components/zone/LineStepsModal.tsx'), 'utf8');
     expect(modal).toContain('disabled={nextDisabled || headlineBusy}');
-    expect(modal).toContain("disabled={cost === null || !!short || headlineBusy || judging}");
+    expect(modal).toContain("disabled={cost === null || !!short || headlineBusy || judging || voiceLeft > 0}");
     expect(modal).toContain('const go = (id: string) => { if (!headlineBusy) setCursor(id); };');
     expect(modal).toContain('if (key === storeKeyRef.current) {');
     expect(modal).toContain("disabled={judging || headlineBusy} onClick={() => setPane('pick')}");

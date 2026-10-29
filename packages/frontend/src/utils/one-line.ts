@@ -62,7 +62,12 @@ export interface LineStep {
 }
 /** generate = 다시 만들기 값 · total = 이번에 낼 값 · judged = 판단 2 를 이미 냈는가 */
 export interface LineStepsCost { generate: number; complete: number; total: number; judged?: boolean }
+/** ★ 2026-10-29 목소리 꼴 칸 질문(서버 판 · 만들기 단계에서 답) */
+export interface LineVoiceQuestion { id: string; label: string; help?: string; placeholder?: string; maxLength?: number; noneLabel?: string }
+
 export interface LineStepsPlan {
+  /** ★ 2026-10-29 목소리 꼴 칸 질문(id = voice:link · voice:store · voice:phone) · 없으면 묻지 않는다 */
+  voice?: LineVoiceQuestion[];
   v: 1;
   channel: LineStepsChannel;
   line_fp: string;

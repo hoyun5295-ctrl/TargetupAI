@@ -10,6 +10,7 @@
  *   - 판정 규칙은 `one-line-facts.ts` 함수를 그대로 쓴다(혜택 · 검색어 · 금액 · 의도). 같은 규칙 두 벌 금지.
  *   - 원문 자리에는 사용자가 친 글자 · 칸에 적은 답만(원스텝 §0-6). 몰 값은 넣지 않는다.
  */
+import type { LineQuestion } from './one-line-ct/questions';
 import { createHash } from 'crypto';
 import { oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments, isValidLineBenefit } from './one-line-facts';
 import { getLineTemplate, type LineTemplateId, type LineLayout } from './design-core/line-templates';
@@ -249,6 +250,8 @@ export interface LineStepsPlanInput {
 }
 
 export interface LineStepsPlan {
+  /** ★ 2026-10-29 목소리 꼴 칸 질문(만들기 단계에서 답 · 비움 = 이 줄 없이 · 서버가 다시 계산해 검증) */
+  voice?: LineQuestion[];
   v: 1;
   channel: LineStepsChannel;
   line_fp: string;

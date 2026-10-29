@@ -3,7 +3,7 @@
  *
  * 실행: sync-agent.exe --setup
  * 동작:
- *   1. Express 서버 시작 (localhost:9876)
+ *   1. Express 서버 시작 (127.0.0.1:9876 — 이 PC 만 · Host 대조 · 압축 본문 거절 = 뿌리 R28 · 2026-10-29)
  *   2. 브라우저 자동 열기
  *   3. 설정 완료 → config.enc (암호화) 저장 → 서버 종료
  *   4. (선택) Agent 자동 시작
@@ -54,10 +54,13 @@ const IE_NOTICE_HTML = `<!doctype html>
 <p><strong>명령 프롬프트 설치 마법사</strong>로 진행해 주세요. 설치 폴더에서 아래 명령을 실행하면 됩니다.</p>
 <div class="cmd">sync-agent.exe --setup-cli</div>
 <p>기능은 동일합니다. DB 연결, 컬럼 자동 매핑, 동기화 설정까지 모두 진행됩니다.</p>
-<div class="note">Microsoft Edge 또는 Chrome이 설치되어 있다면, 그 브라우저에서 <strong>http://localhost:9876</strong> 을 열어 이 화면 대신 마법사를 사용할 수 있습니다.</div>
+<div class="note">Microsoft Edge 또는 Chrome이 설치되어 있다면, 그 브라우저에서 <strong>http://127.0.0.1:9876</strong> 을 열어 이 화면 대신 마법사를 사용할 수 있습니다.</div>
 </div></body></html>`;
 
 const PORT = 9876;
+/** ★ 2026-10-29 이 PC 만 — 주소 없이 열면 모든 망에 열려 같은 망 누구나 설정 저장까지 부를 수 있었다(뿌리 R28) */
+const SETUP_HOST = '127.0.0.1';
+const SETUP_URL = `http://${SETUP_HOST}:${PORT}`;
 const DEV_MODE = process.env.DEV_MODE === 'true';
 
 export interface SetupWizardOptions {
@@ -65,17 +68,26 @@ export interface SetupWizardOptions {
   autoLaunchAgent?: boolean;
 }
 
-export async function startSetupWizard(
-  options: SetupWizardOptions = {}
-): Promise<void> {
-  const { autoLaunchAgent = false } = options;
+/** 이 PC 브라우저가 보내는 Host 만 받는다 — 악성 페이지가 DNS 재바인딩으로 같은 출처가 되어 들어오는 길을 닫는다 */
+export function isSetupHostAllowed(host: string | undefined, port: number): boolean {
+  const h = String(host || '').toLowerCase();
+  return h === `127.0.0.1:${port}` || h === `localhost:${port}`;
+}
 
-  // 기본 로거 초기화
-  initLogger({ level: 'info', maxFiles: 30, maxSize: '20m' });
+/**
+ * 마법사 앱(주소 · 입구 거름). 서버 열기와 떼어 둔 것은 시험이 빈 포트에 띄우기 위해서다.
+ * onSaved = 설정 저장 2초 뒤 부른다(서버 닫기 · Agent 시작은 부르는 쪽).
+ */
+export function createSetupApp(port: number, onSaved: () => void): express.Express {
   const logger = getLogger('setup');
 
   const app = express();
-  app.use(express.json());
+  app.use((req, res, next) => {
+    if (isSetupHostAllowed(req.headers.host, port)) return next();
+    res.status(403).type('text').send('Forbidden');
+  });
+  // ★ 압축 본문은 풀지 않는다(415) — 마법사 화면은 압축하지 않는다 · 공격자 Brotli 를 node:zlib 로 푸는 자리(CVE-2026-111497)가 Node 판과 무관하게 닫힌다
+  app.use(express.json({ inflate: false }));
 
   // ─── API: DB 접속 테스트 ────────────────────────────────
   app.post('/api/setup/test-db', async (req, res) => {
@@ -317,43 +329,8 @@ export async function startSetupWizard(
         });
       }
 
-      // 3) 저장 후 Express 서버 닫고 → Agent 시작
-      setTimeout(() => {
-        // Express 서버 먼저 종료 (포트 9876 해제)
-        server.close(() => {
-          logger.info('설치 마법사 웹 서버 종료');
-
-          if (autoLaunchAgent) {
-            logger.info('Agent 자동 시작...');
-            console.log('');
-            console.log('╔══════════════════════════════════════════════════╗');
-            console.log('║  ✅ 설정 완료! Agent를 시작합니다...              ║');
-            if (!DEV_MODE) {
-              console.log('║  🔒 설정은 AES-256-GCM으로 암호화 저장됨          ║');
-            }
-            console.log('╚══════════════════════════════════════════════════╝');
-            console.log('');
-
-            import('../index').catch((err) => {
-              logger.error('Agent 시작 실패', { error: err });
-              console.error('❌ Agent 시작 실패:', err);
-              process.exit(1);
-            });
-          } else {
-            console.log('');
-            console.log('╔══════════════════════════════════════════════════╗');
-            console.log('║  ✅ 설정 완료!                                   ║');
-            if (!DEV_MODE) {
-              console.log('║  🔒 설정은 AES-256-GCM으로 암호화 저장됨          ║');
-            }
-            console.log('║  이제 sync-agent.exe 를 실행하면 동기화가         ║');
-            console.log('║  시작됩니다.                                     ║');
-            console.log('╚══════════════════════════════════════════════════╝');
-            console.log('');
-            process.exit(0);
-          }
-        });
-      }, 2000);
+      // 3) 저장 후 Express 서버 닫고 → Agent 시작(부르는 쪽 onSaved)
+      setTimeout(onSaved, 2000);
     } catch (error) {
       res.json({
         success: false,
@@ -384,13 +361,64 @@ export async function startSetupWizard(
   //   미동작 → 메인(express5/node20)과 레거시(express4/node16) 빌드가 같은 소스로 SPA fallback.
   app.get(/.*/, serveSetupPage);
 
+  return app;
+}
+
+export async function startSetupWizard(
+  options: SetupWizardOptions = {}
+): Promise<void> {
+  const { autoLaunchAgent = false } = options;
+
+  // 기본 로거 초기화
+  initLogger({ level: 'info', maxFiles: 30, maxSize: '20m' });
+  const logger = getLogger('setup');
+
+  const onSaved = () => {
+    // Express 서버 먼저 종료 (포트 9876 해제)
+    server.close(() => {
+      logger.info('설치 마법사 웹 서버 종료');
+
+      if (autoLaunchAgent) {
+        logger.info('Agent 자동 시작...');
+        console.log('');
+        console.log('╔══════════════════════════════════════════════════╗');
+        console.log('║  ✅ 설정 완료! Agent를 시작합니다...              ║');
+        if (!DEV_MODE) {
+          console.log('║  🔒 설정은 AES-256-GCM으로 암호화 저장됨          ║');
+        }
+        console.log('╚══════════════════════════════════════════════════╝');
+        console.log('');
+
+        import('../index').catch((err) => {
+          logger.error('Agent 시작 실패', { error: err });
+          console.error('❌ Agent 시작 실패:', err);
+          process.exit(1);
+        });
+      } else {
+        console.log('');
+        console.log('╔══════════════════════════════════════════════════╗');
+        console.log('║  ✅ 설정 완료!                                   ║');
+        if (!DEV_MODE) {
+          console.log('║  🔒 설정은 AES-256-GCM으로 암호화 저장됨          ║');
+        }
+        console.log('║  이제 sync-agent.exe 를 실행하면 동기화가         ║');
+        console.log('║  시작됩니다.                                     ║');
+        console.log('╚══════════════════════════════════════════════════╝');
+        console.log('');
+        process.exit(0);
+      }
+    });
+  };
+
+  const app = createSetupApp(PORT, onSaved);
+
   // ─── 서버 시작 ─────────────────────────────────────────
-  const server = app.listen(PORT, () => {
-    logger.info(`설치 마법사 시작: http://localhost:${PORT}`);
+  const server = app.listen(PORT, SETUP_HOST, () => {
+    logger.info(`설치 마법사 시작: ${SETUP_URL}`);
     console.log('');
     console.log('╔══════════════════════════════════════════╗');
     console.log('║   Sync Agent 설치 마법사                  ║');
-    console.log(`║   http://localhost:${PORT}                  ║`);
+    console.log(`║   ${SETUP_URL}                  ║`);
     console.log('║   브라우저가 자동으로 열립니다              ║');
     if (DEV_MODE) {
       console.log('║   ⚠️  개발 모드 — 평문 저장                ║');
@@ -404,7 +432,7 @@ export async function startSetupWizard(
     console.log('');
 
     // 브라우저 자동 열기
-    openBrowser(`http://localhost:${PORT}`);
+    openBrowser(SETUP_URL);
   });
 }
 

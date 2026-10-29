@@ -10,9 +10,9 @@ const path = require('path');
 const isWatch = process.argv.includes('--watch');
 
 // ★ 레거시(node16) 빌드 지원: `node esbuild.config.js --target=node16`
-//   기본은 메인 빌드 node20. 구형 OS(2008 R2 / Win7) 고객사 전용 레거시 빌드만 node16으로 트랜스파일.
+//   기본은 메인 빌드 node24(★2026-10-29 node20 → node24). 구형 OS(2008 R2 / Win7) 고객사 전용 레거시 빌드만 node16으로 트랜스파일.
 const targetArg = process.argv.find((a) => a.startsWith('--target='));
-const buildTarget = targetArg ? targetArg.split('=')[1] : 'node20';
+const buildTarget = targetArg ? targetArg.split('=')[1] : 'node24';
 
 /** @type {import('esbuild').BuildOptions} */
 const buildOptions = {

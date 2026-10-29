@@ -100,9 +100,11 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const asksOk = (!askBenefit || benefitNone || benefitDraft.trim().length > 0)
     && (!askPeriod || periodNone || !!periodPick);
   const submitAsks = () => {
+    // ★ 2026-10-29 목소리 꼴 칸(id voice_*) = 빈 답도 보낸다(「이 줄 없이」 = 명시 생략 · 서버가 결정)
     const answers = askTexts
-      .map((a) => ({ q: a.text, a: (textAns[a.id] || '').trim().slice(0, 200) }))
-      .filter((x) => x.a.length > 0);
+      .map((a) => ({ id: a.id, q: a.text, a: (textAns[a.id] || '').trim().slice(0, 200) }))
+      .filter((x) => x.a.length > 0 || x.id.startsWith('voice_'))
+      .map(({ q, a }) => ({ q, a }));
     onRun({
       ...run,
       facts: {

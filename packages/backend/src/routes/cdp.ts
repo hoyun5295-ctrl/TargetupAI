@@ -1611,6 +1611,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
         companyId: auth.companyId, userId: auth.userId, channel: 'inapp', steps, payload: stepsPayload,
         attemptLockKey: oneLineInflightKey(auth.companyId, 'inapp', steps.token),   // ★ 1024 세 채널 한 함수(옛: 라우트 안 글자)
         products: lineProducts, actor, pageCheck: !!compDef, nowMs: stepsNow,
+        voiceFormRaw: req.body?.voice_form,   // ★ 2026-10-29 목소리 꼴 칸 답(판정 = 주문 한 곳)
         cook: async ({ cards, page }) => {
           const allCards: LineMallCard[] = [...cards, ...steps.manualCards];
           const delivery = await resolveLineStepsDelivery(auth.companyId, actor, steps, { channel: 'inapp', line: rawLine, cards: allCards });

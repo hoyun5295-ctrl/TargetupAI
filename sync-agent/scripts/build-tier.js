@@ -69,17 +69,19 @@ function modelNameGate() {
 }
 
 // 티어 정의 — OS 바닥 / node / pkg 타깃 / 구형 런타임 동봉(legacy) / 레거시 의존성 핀(deps).
-//   node 바닥: node20=Win10·2016·glibc2.28 / node16=Win8.1·2012R2·glibc2.17 / node12=Win7·2008R2·2012(비R2).
+//   node 바닥: node24=Win10·2016·glibc2.28(node20 과 같음 · nodejs BUILDING.md v24.x · v20.x 대조) / node16=Win8.1·2012R2·glibc2.17 / node12=Win7·2008R2·2012(비R2).
+//   ★ 2026-10-29 modern 두 티어 node20 → node24 — node20 지원 끝(2026-04-30)이라 보안판(2026-10-21 Brotli RCE 등)이 안 나온다(설계서 docs/2026-10-29-sync-agent-node24-wizard-loopback-design.md §2-3).
+//     실제 실린 판(24.22.1 등)은 pkg-fetch 판이 정한다 → build-tiers.js 가 산출물에서 읽어 manifest nodeVersion 에 찍는다.
 //   deps = 메인(express5/mssql11/oracledb6 thin)을 그 node가 받는 버전으로 내린 핀(modern=null=메인 그대로).
 //     node12: oracledb 5.x thick(thin은 6.0+/node14.6+ 불가, 11g도 thick 필요) +
 //             mssql 8.1.4(9.0이 node10/12 제거·??문법) + mysql2 3.2.0(3.2.1부터 node12 깨짐) +
 //             pg 8.7.3(node12 시절) + nodemailer6. DB 4종 모두 node12 파싱 가능해야 함.
 //     node16: mssql10(node14+) — oracledb는 메인 6.x thin 유지(node14.6+ OK).
 const TIERS = {
-  'win-modern':   { node: 'node20', pkg: 'node20-win-x64',   out: 'release/sync-agent-win-modern.exe',   legacy: false, deps: null },
+  'win-modern':   { node: 'node24', pkg: 'node24-win-x64',   out: 'release/sync-agent-win-modern.exe',   legacy: false, deps: null },
   'win-mid':      { node: 'node16', pkg: 'node16-win-x64',   out: 'release/sync-agent-win-mid.exe',       legacy: true,  deps: 'express@4.22.2 mssql@10.0.4 tedious@16.7.1' },
   'win-legacy':   { node: 'node12', pkg: 'node12-win-x64',   out: 'release/sync-agent-win-legacy.exe',    legacy: true,  deps: 'express@4.22.2 mssql@8.1.4 tedious@14.7.0 mysql2@3.2.0 lru-cache@7.18.3 pg@8.7.3 oracledb@5.5.0 nodemailer@6.9.16 sql.js@1.8.0' },
-  'linux-modern': { node: 'node20', pkg: 'node20-linux-x64', out: 'release/sync-agent-linux-modern',      legacy: false, deps: null },
+  'linux-modern': { node: 'node24', pkg: 'node24-linux-x64', out: 'release/sync-agent-linux-modern',      legacy: false, deps: null },
   'linux-legacy': { node: 'node16', pkg: 'node16-linux-x64', out: 'release/sync-agent-linux-legacy',      legacy: true,  deps: 'express@4.22.2 mssql@10.0.4 tedious@16.7.1' },
 };
 
@@ -91,9 +93,14 @@ if (!t) {
 }
 
 console.log(`\n=== build tier ${tierId} (${t.node}) ===`);
+// ★ 2026-10-29 modern = @yao-pkg/pkg 6.24(engines node >=22) — 빌드 PC Node 가 22 미만이면 시작 전에 멈춘다(돌다 엉뚱하게 깨지지 않게)
+if (!t.legacy && Number(process.versions.node.split('.')[0]) < 22) {
+  console.error(`modern 티어 빌드는 Node 22 이상에서 돌린다(지금 ${process.version} · @yao-pkg/pkg 6.24 요구).`);
+  process.exit(1);
+}
 modelNameGate(); // 모델명 노출 차단 (위반 시 빌드 즉시 중단)
 try {
-  // 레거시 티어: 그 node가 받는 의존성 핀(t.deps)으로 임시 다운, 빌드 후 npm ci로 원복(메인 node20 무손).
+  // 레거시 티어: 그 node가 받는 의존성 핀(t.deps)으로 임시 다운, 빌드 후 npm ci로 원복(메인 빌드 의존성 무손).
   if (t.legacy && t.deps) sh(`npm i ${t.deps} --no-save`);
   sh(`node esbuild.config.js --target=${t.node}`);
   sh('npm run prebundle:wasm');
@@ -117,6 +124,6 @@ try {
   // ★ win-legacy: oracledb 네이티브 모듈을 exe 옆 외부로 동봉(스냅샷이 .node를 못 실음). 원복 전 지금 떠둔다.
   if (tierId === 'win-legacy') stageOracledb();
 } finally {
-  if (t.legacy) sh('npm ci'); // 의존성 원복 (메인 node20 빌드 무손)
+  if (t.legacy) sh('npm ci'); // 의존성 원복 (메인 빌드 의존성 무손)
 }
 console.log(`완료: ${t.out}`);

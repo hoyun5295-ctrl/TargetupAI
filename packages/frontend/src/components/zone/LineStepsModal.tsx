@@ -219,6 +219,10 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   const storeKey = basePlan ? lineStepsStoreKey(user?.company?.id || '-', user?.id || '-', channel, basePlan.line_fp) : '';
 
   const [answers, setAnswers] = useState<LineStepsAnswers>(emptyLineStepsAnswers);
+  // ★ 2026-10-29 목소리 꼴 칸 답(질문 id → 글 · null = 이 줄 없이 · 없음 = 아직) — 만들기 단계에서 답한다
+  const [voiceAns, setVoiceAns] = useState<Record<string, string | null>>({});
+  // ★ Codex 구현 1R — 다른 한 줄 · 다시 연 창 = 꼴 칸 답 처음부터(앞 요청의 링크 · 매장 · 생략이 새 요청에 실리지 않게)
+  useEffect(() => { setVoiceAns({}); }, [storeKey, open]);
   const [cursor, setCursor] = useState<string>(MAKE);
   const [linkOpened, setLinkOpened] = useState(false);
   const [cands, setCands] = useState<LineCandidatesResult | 'loading' | 'failed'>('loading');
@@ -1112,15 +1116,21 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   const products = lineStepsProducts(answers, channel, termOrder);
   const manual = lineStepsManual(answers, termOrder);
   const short = balance?.enabled && cost !== null && balance.total < cost;
+  const voiceQs = plan?.voice || [];
+  const voiceLeft = voiceQs.filter((q) => voiceAns[q.id] === undefined || (typeof voiceAns[q.id] === 'string' && !String(voiceAns[q.id]).trim())).length;
   const make = () => {
-    if (cost === null || short || !plan) return;
+    if (cost === null || short || !plan || voiceLeft > 0) return;
     // 필수 칸이 비었다고 서버가 판정했으면 만들지 않고 그 칸으로(판정을 아직 모르면 보낸다 · 서버 요리 관문이 마지막으로 본다 · 0원)
     const missing = visible.find((s) => s.required && slotFilled(s) === false);
     if (missing) { setCursor(lineStepId(missing)); return; }
     const b = tplMode && chosenId
       ? buildLineTemplateBody(plan, answers, visible, cost, { id: chosenId as LineCompositionId, layout })
       : buildLineStepsBody(plan, answers, visible, cost);
-    onMake({ body: b, cost, storeKey, readLicensed: answers.readLicensed === true });
+    // ★ 2026-10-29 꼴 칸 답 = 본문 voice_form(빈 글 = 이 줄 없이 · 서버가 다시 계산한 질문으로 검증)
+    const voiceForm = voiceQs.length > 0
+      ? Object.fromEntries(voiceQs.map((q) => [q.id.replace(/^voice:/, ''), voiceAns[q.id] === null ? '' : String(voiceAns[q.id] || '').trim()]))
+      : null;
+    onMake({ body: voiceForm ? { ...b, voice_form: voiceForm } : b, cost, storeKey, readLicensed: answers.readLicensed === true });
   };
 
   const stepOf = (key: string, item?: string) => visible.find((s) => s.key === key && (item === undefined || s.item === item));
@@ -1248,6 +1258,30 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
           </>
         )}
       </ul>
+      {voiceQs.length > 0 && (
+        <div className="rounded-2xl border border-violet-200 bg-violet-50/50 px-4 py-3 space-y-3">
+          <p className="text-[13px] font-semibold text-slate-900">학습한 우리 회사 문자에 들어가는 칸이에요</p>
+          {voiceQs.map((q) => {
+            const v = voiceAns[q.id];
+            const none = v === null;
+            return (
+              <div key={q.id} className="space-y-1.5">
+                <label htmlFor={`lv-${q.id}`} className="block text-[13px] text-slate-800">{q.label}</label>
+                {q.help && <p className="text-[12px] text-slate-500">{q.help}</p>}
+                <div className="flex gap-2">
+                  <input id={`lv-${q.id}`} value={typeof v === 'string' ? v : ''} disabled={none} maxLength={q.maxLength}
+                    placeholder={q.placeholder} onChange={(e) => setVoiceAns({ ...voiceAns, [q.id]: e.target.value })}
+                    className="flex-1 min-w-0 h-10 px-3 rounded-lg border border-slate-200 bg-white text-[13px] disabled:bg-slate-100 disabled:text-slate-400" />
+                  <button type="button" onClick={() => setVoiceAns({ ...voiceAns, [q.id]: none ? '' : null })}
+                    className={`shrink-0 h-10 px-3 rounded-lg border text-[12.5px] font-semibold ${none ? 'border-violet-600 bg-violet-50 text-violet-800' : 'border-slate-200 bg-white text-slate-600'}`}>
+                    {q.noneLabel || '이 줄 없이'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       {state.reads.length > 0 && <LineReadToggle read={{ checked: answers.readLicensed === true, onChange: (v) => setA({ readLicensed: v }) }} />}
       <div className="rounded-2xl bg-slate-50 border border-slate-200 px-4 py-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1262,6 +1296,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
         </p>
         {short && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">크레딧이 부족해요. 충전한 뒤 만들 수 있어요</p>}
         {blockedLeft > 0 && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">꼭 필요한 칸 {blockedLeft}개를 채우면 만들 수 있어요</p>}
+        {voiceLeft > 0 && <p className="text-[12.5px] font-semibold text-rose-600 mt-1.5">우리 회사 문자 칸 {voiceLeft}개를 적거나 「이 줄 없이」를 눌러 주세요</p>}
       </div>
     </div>
   );
@@ -1317,7 +1352,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
         {current === MAKE ? (
           <>
             <button type="button" disabled={headlineBusy} onClick={compMode ? () => setPane('pick') : idx > 0 ? prev : onClose} className="disabled:opacity-40 h-11 px-4 rounded-xl border border-slate-200 bg-white text-[14px] font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap">{compMode ? '구성' : idx > 0 ? '이전' : '취소'}</button>
-            <button type="button" onClick={make} disabled={cost === null || !!short || headlineBusy || judging} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-[14px] font-bold text-slate-900 inline-flex items-center justify-center gap-2 disabled:opacity-40 whitespace-nowrap">
+            <button type="button" onClick={make} disabled={cost === null || !!short || headlineBusy || judging || voiceLeft > 0} className="flex-1 h-11 rounded-xl bg-amber-500 hover:bg-amber-400 text-[14px] font-bold text-slate-900 inline-flex items-center justify-center gap-2 disabled:opacity-40 whitespace-nowrap">
               <Gift className="w-4 h-4" />만들기{cost !== null ? ` · ${cost}크레딧` : ''}
             </button>
           </>

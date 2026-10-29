@@ -30,14 +30,15 @@ import { acquireInflightWait, releaseInflight } from '../utils/inflight-lock';
 import { lineJudgeCovered } from '../utils/line-steps-context';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import { enrichWithCustomFields } from '../utils/messageUtils';
-import { getBrandVoiceFit, getBrandVoiceSnapshot, voiceStatusOfSnapshot } from '../utils/brand-voice-prompt';
+import { getBrandVoiceFit, getBrandVoiceSnapshot, voiceStatusOfSnapshot, voiceFormAsksFor } from '../utils/brand-voice-prompt';
+import { decideVoiceForm } from '../utils/voice-form-slots';
 import type { VoiceStatus } from '../utils/brand-voice-state';
 import { COPY_CONTENT_TYPES, COPY_CONTENT_TYPE_LABEL, isCopyContentType, kindOfContentType, type CopyContentType } from '../utils/copy-content-type';
 import { variantNamesFor } from '../utils/copy-house-rules';
 import {
   AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK, AI_LINE_MAX_AUDIENCE,
   aiLineBaseKey, aiLineBaseKeys, aiLineCopyKey, aiLineDecoKey, aiLineComposeCost, filterChipText, quoteInLine, styleToType, maskName,
-  lineMentionsAllCustomers, aiLineLineFp, sanitizeAiAsks, mergeLineAsks, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind,
+  lineMentionsAllCustomers, aiLineLineFp, sanitizeAiAsks, mergeLineAsks, voiceLineAsks, splitVoiceLineAnswers, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind,
   type AiLineCopyType, type AiLineAsk, type AiLineAnswer,
 } from '../utils/ai-line';
 
@@ -413,7 +414,9 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
     .map((x) => String(x || '').replace(/%/g, '').trim()).filter(Boolean))];
   const { top, sampleCustomer, columns } = await audienceDetail(v.companyId, audience, count, recommendedVars);
   // ★ 2026-10-20 묻는 목록 = AI 가 한 줄을 읽고 판단한 질문 + 규칙 안전망(한 자리 · 설계서 §17)
-  const asks = mergeLineAsks(line, sanitizeAiAsks(target.copy_questions, line));
+  // ★ 2026-10-29 목소리 꼴 칸(링크 · 매장 · 연락처) 중 회사 값이 없는 칸 = 규칙 질문(설계서 docs/2026-10-29-voice-form-slots-ask-design.md · 성격 = 아직 모름 → 둘 다)
+  const voiceForm = await voiceFormAsksFor(v.companyId, { kinds: ['marketing', 'notice'] });
+  const asks = mergeLineAsks(line, sanitizeAiAsks(target.copy_questions, line), voiceLineAsks(voiceForm.asks));
   const voice = await lineVoiceFit(v.companyId);
 
   // ★ 2026-10-19 받는 사람을 한 줄에서 못 읽음 = 「누구에게」를 먼저 묻는다 · 그동안 기본을 걷지 않는다
@@ -569,7 +572,14 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   const periodLine = input.facts.periodEnd ? `\n[기간] ${formatLinePeriodEnd(input.facts.periodEnd)}까지` : '';
   // ★ 2026-10-20 AI 가 물은 그 밖 질문의 답 = 근거 글의 「확인한 사실」(사람이 적은 답만 · 묻고 답하지 않은 것은 쓰지 않는다)
   //   ★ Codex R1 high — 질문 글(AI 가 씀)은 근거 글에 넣지 않고 참고 글로만(질문 속 혜택이 근거가 되지 않게)
-  const answers = input.facts.answers || [];
+  // ★ 2026-10-29 꼴 칸 답 = 결정(값 · 비움 = 명시 생략 · 서버가 다시 계산한 질문만) · 그 밖 답만 근거 · 참고 글(주소를 AI 가 옮겨 쓰지 않게)
+  const voiceAsk = await voiceFormAsksFor(v.companyId, { kinds: ['marketing', 'notice'] });
+  const split = splitVoiceLineAnswers(input.facts.answers || [], voiceAsk.asks);
+  // 사람이 답한 칸(값 · 빈 답 = 생략) + 지금 물을 칸(답이 없으면 생략) = 결정 · 회사 값이 나중에 생겨도 사람이 정한 것이 앞선다
+  const decideSlots = [...new Set([...voiceAsk.asks, ...(Object.keys(split.voice) as Array<keyof typeof split.voice>)])];
+  const voiceDecided = decideVoiceForm(decideSlots, split.voice);
+  if (!voiceDecided.ok) throw new AiLineError('VOICE_FORM_INVALID', voiceDecided.error);
+  const answers = split.others;
   const licenseText = `${buildLineEventText(input.line, { benefit: input.facts.benefit })}${periodLine}${lineAnswersLicense(answers)}`;
 
   const generated = await runInCreditBundle(async () => {
@@ -606,6 +616,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
         // ★ 2026-10-28 K4-4 — 사람이 고른 종류가 있으면 성격은 종류에서(광고 여부는 법 축만)
         voiceKind: input.contentType ? kindOfContentType(input.contentType) : lineVoiceKind(input.isAd),
         ...(input.contentType ? { contentType: input.contentType } : {}),
+        voiceForm: voiceDecided.decision,
       },
     );
   });

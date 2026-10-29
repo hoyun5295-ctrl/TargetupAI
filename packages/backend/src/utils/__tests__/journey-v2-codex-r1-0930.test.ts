@@ -117,7 +117,7 @@ describe('AI 초안 과금 = 차감 확정 → 저장(무과금 초안 0) · 저
       expect(s).toMatch(/save: \(\) => saveJourneyPackageAsDraft\(/);
       expect(s.indexOf('await nextDraftChargeKey(input.companyId')).toBeLessThan(s.indexOf('runInCreditBundle(async'));
     }
-    expect(SRC('journey-interview-ai.ts')).toContain('`journey-interview:${input.companyId}:${input.interviewId}:${plan.key}`');
+    expect(SRC('journey-interview-ai.ts')).toContain('`journey-interview:${input.companyId}:${input.interviewId}:${plan.key}${vfSuffix}`');   // ★ 1029 꼴 칸 결정 지문(결정 없으면 빈 꼬리 = 옛 키)
     expect(SRC('journey-product-create.ts')).toContain('`journey-product:${input.companyId}:${input.userId}:${input.requestId}`');
   });
 });

@@ -18,6 +18,11 @@ import { parseState, voiceStatusOf, type BrandVoiceState, type ReviewedPhrases, 
 import type { CompanyShape } from './copy-shape';
 import { textHash } from './brand-voice-skeleton';
 import { isCopyContentType, kindOfContentType, type CopyContentType } from './copy-content-type';
+import {
+  voiceFormSlotsOf, pickableSkeletons, companyFormValuesOf, voiceFormAsksOf, resolveFormLink, voiceFormPromptSection, currentVoiceForm,
+  type VoiceFormDecision, type VoiceFormSlot, type CompanyFormValues,
+} from './voice-form-slots';
+import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -461,6 +466,8 @@ export interface ComposeVoiceInput {
    *   (모양 · 이모지 = 그 채널 규칙 · 문자 뼈대를 싣지 않는다)
    */
   scope?: 'text' | 'tone';
+  /** ★ 2026-10-29 목소리 꼴 칸 결정(질문 단계 답 · 저장된 결정 · 설계서 docs/2026-10-29-voice-form-slots-ask-design.md) */
+  formDecision?: VoiceFormDecision | null;
 }
 
 export interface ComposeVoiceResult {
@@ -469,6 +476,50 @@ export interface ComposeVoiceResult {
   shape: CompanyShape | null;
   voiceLearned: boolean;
   exampleCount: number;
+}
+
+/**
+ * ★ 2026-10-29 (순수) 성격 하나의 꼴 칸 — 생성이 그 성격 · 범위에서 실제로 싣는 글과 같은 자료(§7-4 · §7-5).
+ *   text = 고를 수 있는 뼈대 예시 전부 + 확인된 문구 칸 · tone = 뼈대 0 · 서명 · 어미 예시(voiceSectionFor 가 tone 에도 싣는 칸)
+ */
+export function voiceFormSlotsForData(
+  data: Pick<BrandVoiceCacheEntry, 'guideline' | 'noticeGuideline' | 'state' | 'admin' | 'messages'>,
+  kind: BrandVoiceKind, scope: 'text' | 'tone' = 'text',
+): VoiceFormSlot[] {
+  const g = resolveGuidelineFor(data, kind);
+  if (!g) return [];
+  const tone = scope === 'tone';
+  const live = liveSkeletons(data.state, data.messages);
+  const skeletons = tone ? [] : pickableSkeletons((c) => pickVoiceExamples(live, kind, c));
+  const phrases = [
+    g.signature, ...(g.sentence_ending_examples || []),
+    ...(tone ? [] : [g.greeting_pattern, ...g.cta_patterns, ...g.frequent_expressions]),
+  ].filter((x): x is string => typeof x === 'string' && x.length > 0);
+  return voiceFormSlotsOf({ skeletons, phrases });
+}
+
+async function companyFormValues(companyId: string, links: readonly BrandLink[]): Promise<CompanyFormValues> {
+  const kit = await getCompanyBrandKitRaw(companyId).catch(() => null);
+  return companyFormValuesOf(links, (kit as any)?.contact);
+}
+
+/**
+ * ★ 2026-10-29 질문 단계가 부르는 한 자리 — 꼴 칸 · 회사 값 · 물을 칸(결정 제외). 목소리 미학습 · 조회 실패 = 빈 목록(지금 동작).
+ * kinds = 그 입구가 만들 수 있는 성격(모르면 둘 다) · scope = 그 생산자의 목소리 범위.
+ */
+export async function voiceFormAsksFor(
+  companyId: string | undefined, opts: { kinds: readonly BrandVoiceKind[]; scope?: 'text' | 'tone'; decision?: VoiceFormDecision | null },
+): Promise<{ slots: VoiceFormSlot[]; values: CompanyFormValues; asks: VoiceFormSlot[] }> {
+  const empty = { slots: [], values: { link: false, phone: null }, asks: [] };
+  if (!companyId) return empty;
+  let data: BrandVoiceCacheEntry;
+  try { data = await getBrandVoiceData(companyId); } catch { return empty; }
+  const set = new Set<VoiceFormSlot>();
+  for (const k of opts.kinds) for (const s of voiceFormSlotsForData(data, k, opts.scope || 'text')) set.add(s);
+  const slots = (['link', 'store', 'phone'] as const).filter((s) => set.has(s));
+  if (slots.length === 0) return { ...empty };
+  const values = await companyFormValues(companyId, data.links);
+  return { slots, values, asks: voiceFormAsksOf(slots, values, opts.decision) };
 }
 
 /** 성격 하나의 목소리 절(확인된 묶음 · 사람 행만 · I16) */
@@ -542,7 +593,13 @@ export async function composeVoicePrompt(input: ComposeVoiceInput): Promise<Comp
     console.error(`[Brand Voice] ${input.producer} DB 조회 실패 — basePrompt 그대로:`, (err as Error)?.message);
     return none(input.basePrompt);
   }
-  const linkSection = input.brandLinks ? buildBrandLinkPromptSection(data.links, data.guideline?.link_habit || null) : '';
+  // ★ 2026-10-29 링크 결정 한 곳(§7-3) — 지시문과 치환(services/ai generateMessages)이 같은 resolveFormLink 결과를 쓴다
+  const formDecision = input.formDecision ?? currentVoiceForm();   // 묶음 B = 한 줄 단계 창 요리 문맥
+  const formLink = resolveFormLink(data.links, formDecision);
+  const linkSection = !input.brandLinks ? ''
+    : formLink.mode === 'omit'
+      ? '\n\n## 링크 (이번 문자)\n\n- 이번 문자에는 링크를 넣지 않는다(토큰 · 주소 · 자리 표시 모두 쓰지 않는다).'
+      : buildBrandLinkPromptSection(formLink.links, data.guideline?.link_habit || null);
   const kinds: BrandVoiceKind[] = input.kind === VOICE_KIND_BY_STEP ? ['marketing', 'notice'] : [input.kind];
   const sections = kinds.map((k) => ({ k, s: voiceSectionFor(data, k, input) })).filter((x) => x.s) as Array<{ k: BrandVoiceKind; s: NonNullable<ReturnType<typeof voiceSectionFor>> }>;
   if (sections.length === 0) return none(`${input.basePrompt}${linkSection}`);
@@ -568,7 +625,17 @@ ${sections.map((x) => x.s.text).join('\n')}`
   const rewriteRule = input.mode === 'rewrite'
     ? '\n## 고치기 규칙\n- 원문의 줄바꿈 · 빈 줄 · 기호 · 머리 · 맺음 꼴은 그대로 두고, 지시한 곳만 고친다.\n'
     : '';
-  const section = `${body}${habitSection}${rewriteRule}
+  // ★ 2026-10-29 꼴 칸 값(§3-③) · 호칭 반복 금지(§3-④ · Harold 1029 「%고객명% 고객님, / %고객등급% 고객님께」)
+  const slotSet = new Set<VoiceFormSlot>();
+  for (const x of sections) for (const sl of voiceFormSlotsForData(data, x.k, input.scope || 'text')) slotSet.add(sl);
+  const formSlots = (['link', 'store', 'phone'] as const).filter((sl) => slotSet.has(sl));
+  const formSection = formSlots.length > 0
+    ? voiceFormPromptSection({ slots: formSlots, values: await companyFormValues(input.companyId, data.links), decision: formDecision, useLinkTokens: !!input.brandLinks })
+    : '';
+  const honorific = input.mode === 'write'
+    ? '\n## 호칭\n- 고객 호칭(이름 · 등급 · 「고객님」)은 문안에서 한 번만 부른다. 이어지는 줄에서 「고객님」을 다시 부르지 않는다.\n'
+    : '';
+  const section = `${body}${habitSection}${rewriteRule}${formSection}${honorific}
 ## 우선순위
 
 - 법(광고 표기 · 수신거부 · 전송자 명칭 · 바이트 · 없는 혜택 · 날짜 · 효능) > 발송 규칙 > 이번 요청 > 이 회사 목소리 > 기본 문체.

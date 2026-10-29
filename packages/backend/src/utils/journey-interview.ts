@@ -15,6 +15,7 @@ import {
   TRIGGER_CONTRACTS, aiSelectableTriggerEvents, defaultGoalExitFor, laneForTrigger, triggerLabel,
 } from './journey-trigger-capability';
 import type { LineQuestion, LineQuestionOption } from './one-line-ct/questions';
+import { voiceFormQuestions, decideSentVoiceForm, VOICE_FORM_SLOTS, type VoiceFormSlot } from './voice-form-slots';
 
 export const MAX_INTERVIEW_PLANS = 4;
 export const MAX_BENEFIT_CHARS = 200;
@@ -155,6 +156,25 @@ export interface JourneyDesignSpec {
 }
 
 export type InterviewAnswers = Record<string, string>;
+
+/**
+ * ★ 2026-10-29 목소리 꼴 칸 질문(voice-form-slots · 설계서 docs/2026-10-29-voice-form-slots-ask-design.md) — 계획마다(화면이 계획별로 묶어 그리고 보낸다)
+ *   id = `${planKey}:voice:칸` · 비우면 그 줄 없이(명시 생략).
+ */
+export function voiceInterviewQuestions(planKey: string, asks: readonly VoiceFormSlot[]): InterviewQuestion[] {
+  return voiceFormQuestions(asks).map((q) => ({ ...q, id: `${planKey}:${q.id}`, planKey }));
+}
+
+/** ★ 2026-10-29 (순수) 한 계획의 꼴 칸 답 → 결정 + 지문(보낸 칸 = 사람 결정 · 지금 물을 칸인데 안 보낸 칸 = 생략 · 지문 = 보낸 칸만 · Codex 구현 2R) */
+export function decideJourneyVoiceForm(planKey: string, asks: readonly VoiceFormSlot[], answers: InterviewAnswers):
+  ReturnType<typeof decideSentVoiceForm> {
+  const sent: Partial<Record<VoiceFormSlot, string>> = {};
+  for (const s of VOICE_FORM_SLOTS) {
+    const k = `${planKey}:voice:${s}`;
+    if (answers && Object.prototype.hasOwnProperty.call(answers, k)) sent[s] = answers[k];
+  }
+  return decideSentVoiceForm(asks, sent);
+}
 
 /**
  * 한 계획의 답을 검증하고 설계 입력을 정한다. 답이 없으면 추천 답을 쓴다([이대로 만들기]).

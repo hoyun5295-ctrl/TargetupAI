@@ -3382,3 +3382,79 @@ describe('R27(1029) 창 안에서 여는 창 = 부모 창보다 위 — 고정 �
     expect(low).toEqual([]);
   });
 });
+
+describe('R28(1029) 인증 없는 내부 입구 = 127.0.0.1 — 서버를 여는 곳(.listen) 전수(싱크에이전트 설치 마법사가 모든 망에 열렸다)', () => {
+  const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
+  /** 서버 열기 호출 판정 = 구문 트리 하나(글자 꼴 거름 0 · 주석 · 줄바꿈이 끼거나 app['listen'] 꼴도 같다 · Codex 2R) */
+  const isListenCall = (n: ts.Node): n is ts.CallExpression => ts.isCallExpression(n) && (
+    (ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'listen')
+    || (ts.isElementAccessExpression(n.expression) && ts.isStringLiteralLike(n.expression.argumentExpression) && n.expression.argumentExpression.text === 'listen'));
+  const hasListenCall = (n: ts.Node): boolean => isListenCall(n) || (ts.forEachChild(n, hasListenCall) ?? false);
+  /**
+   * 파일 하나의 .listen(포트, 주소, …) 주소 인자 → 글자(못 풀면 null = 열림으로 센다).
+   * 주소 = 글자 그대로 · 또는 이름이 **실제로 가리키는 선언**이 const 글자(TypeScript 심벌 · 같은 이름 매개변수 · 안쪽 변수가 가리면 그 선언 · Codex 1R).
+   */
+  function listenHosts(fileName: string, text: string): Array<string | null> {
+    const opts: ts.CompilerOptions = { noLib: true, noResolve: true, target: ts.ScriptTarget.Latest };
+    const host = ts.createCompilerHost(opts);
+    const base = host.getSourceFile.bind(host);
+    host.getSourceFile = (f, lv) => (f === fileName ? ts.createSourceFile(f, text, lv, true) : base(f, lv));
+    host.readFile = (f) => (f === fileName ? text : ts.sys.readFile(f));
+    host.fileExists = (f) => f === fileName || ts.sys.fileExists(f);
+    const program = ts.createProgram([fileName], opts, host);
+    const checker = program.getTypeChecker();
+    const hostText = (e: ts.Expression | undefined): string | null => {
+      if (!e) return null;
+      if (ts.isStringLiteralLike(e)) return e.text;
+      if (!ts.isIdentifier(e)) return null;
+      const d = checker.getSymbolAtLocation(e)?.valueDeclaration;
+      return d && ts.isVariableDeclaration(d) && d.initializer && ts.isStringLiteralLike(d.initializer)
+        && ts.isVariableDeclarationList(d.parent) && (d.parent.flags & ts.NodeFlags.Const) ? d.initializer.text : null;
+    };
+    const out: Array<string | null> = [];
+    const visit = (n: ts.Node): void => {
+      if (isListenCall(n)) out.push(hostText(n.arguments[1]));
+      ts.forEachChild(n, visit);
+    };
+    visit(program.getSourceFile(fileName)!);
+    return out;
+  }
+
+  it('백엔드 · 싱크에이전트 소스의 X.listen(포트, 주소, …) 둘째 인자 = 루프백 · 아니면 이유 있는 목록', () => {
+    const SA = join(BE, '..', '..', '..', 'sync-agent', 'src');
+    // 면제 = 인증을 거치는 공개 입구만(내부 입구가 아니다) · 늘리면 그 줄에 이유
+    const OPEN_OK: Record<string, string> = {
+      'backend/app.ts': '공개 API — 요청마다 인증 · nginx 뒤 · ufw 가 외부 포트를 막는다(내부 입구 아님)',
+    };
+    const open: string[] = [];
+    let calls = 0;
+    for (const [tag, root] of [['backend', BE], ['sync-agent', SA]] as const) {
+      for (const f of sourceFiles(root, /\.ts$/)) {
+        const text = read(join(root, f));
+        // 심벌 풀기(프로그램)는 서버 열기 호출이 있는 파일만 — 있는지는 같은 구문 트리 판정으로 본다
+        if (!hasListenCall(ts.createSourceFile(f, text, ts.ScriptTarget.Latest, true))) continue;
+        for (const h of listenHosts(join(root, f).replace(/\\/g, '/'), text)) {
+          calls += 1;
+          if (!(h && LOOPBACK.has(h))) open.push(`${tag}/${f}`);
+        }
+      }
+    }
+    expect(calls).toBeGreaterThanOrEqual(4);
+    expect(open.sort()).toEqual(Object.keys(OPEN_OK).sort());
+    for (const [k, why] of Object.entries(OPEN_OK)) expect(why.length, k).toBeGreaterThan(5);
+  });
+
+  it('주소 풀기 = 이름이 실제로 가리키는 선언(같은 이름 매개변수 · 안쪽 const 가 가리면 그것 · let = 못 풂)', () => {
+    const f = '/virtual/r28-sample.ts';
+    expect(listenHosts(f, "const host = '127.0.0.1'; function start(host = '0.0.0.0') { server.listen(9876, host); } start();")).toEqual([null]);
+    expect(listenHosts(f, "const h = '127.0.0.1'; { const h = '0.0.0.0'; s.listen(1, h); }")).toEqual(['0.0.0.0']);
+    expect(listenHosts(f, "let h = '127.0.0.1'; s.listen(1, h);")).toEqual([null]);
+    expect(listenHosts(f, "const HOST = '127.0.0.1'; function go() { app.listen(1, HOST, () => {}); }")).toEqual(['127.0.0.1']);
+    expect(listenHosts(f, "app.listen(1, '::1'); app.listen(2); app.listen(3, cfg.host);")).toEqual(['::1', null, null]);
+    // 수집 = 주석 · 줄바꿈이 끼거나 속성 꼴도 센다(전수 거름과 같은 판정)
+    const odd = "app.listen /* 내부 입구 */ (9876, '0.0.0.0');\nconst HOST = '127.0.0.1';\napp\n  .listen(1, HOST);\napp['listen'](2, '0.0.0.0');";
+    expect(hasListenCall(ts.createSourceFile(f, odd, ts.ScriptTarget.Latest, true))).toBe(true);
+    expect(listenHosts(f, odd)).toEqual(['0.0.0.0', '127.0.0.1', '0.0.0.0']);
+    expect(hasListenCall(ts.createSourceFile(f, "const listen = 1; server.close(); emitter.on('listen', x);", ts.ScriptTarget.Latest, true))).toBe(false);
+  });
+});

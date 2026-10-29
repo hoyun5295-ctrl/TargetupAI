@@ -9,6 +9,8 @@
  * ⛔ 잠금 · 착지 기억은 프로세스 메모리(pm2 fork 1개 전제 · inflight-lock · line-draft-memo 와 같은 전제).
  * 시험 = deps 를 가짜로 바꿔 끼운다(원장 · 몰 · 페이지 · 잔액 · 차감 · 잠금).
  */
+import { voiceFormAsksFor } from '../brand-voice-prompt';
+import { decideSentVoiceForm, runWithVoiceForm } from '../voice-form-slots';
 import { chargedKeysAmong, checkCredit, deductCreditOutcome, type DeductOutcome } from '../ai-credit';
 import { runInCreditBundle } from '../ai-credit-context';
 import { tryAcquireInflight, releaseInflight } from '../inflight-lock';
@@ -70,6 +72,8 @@ export interface LineOrderInput<R> {
   /** 만들기 — 크레딧 묶음 안에서 불린다(안쪽 AI 차감 0) · 던지면 차감 0 · 초안 0 */
   cook: (ctx: { cards: LineMallCard[]; page: LinePageMaterial | null; cost: number }) => Promise<R>;
   adapter: LineOrderAdapter<R>;
+  /** ★ 2026-10-29 목소리 꼴 칸 답(요청 본문 voice_form · { link · store · phone } 글 · 비움 = 이 줄 없이) */
+  voiceFormRaw?: unknown;
 }
 
 export type LineOrderOutcome<R> =
@@ -92,7 +96,16 @@ export async function runLineCookOrder<R>(input: LineOrderInput<R>, deps: LineOr
     // 같은 한 줄 = 금액 확정부터 차감까지 하나씩(다른 시도가 한 줄 완성을 두 번 내지 않게 · Codex 1017 1R)
     if (!deps.tryLock(lineLock)) return refuse(409, 'IN_FLIGHT', '같은 한 줄로 지금 만드는 중이에요. 완성되면 다시 시도해 주세요.');
     lineLockHeld = true;
-    const keys = lineStepsAttemptKeys(steps, companyId, channel, input.payload);
+    // ★ 2026-10-29 꼴 칸 답 → 결정(질문 = 서버가 다시 계산 · 화면이 보낸 질문을 믿지 않는다 · 비움 = 명시 생략) · 꼴 틀림 = 차감 0 거절
+    const voiceAsks = (await voiceFormAsksFor(companyId, { kinds: ['marketing', 'notice'], scope: 'tone' })).asks;
+    const rawVoice = input.voiceFormRaw && typeof input.voiceFormRaw === 'object' && !Array.isArray(input.voiceFormRaw) ? input.voiceFormRaw as Record<string, unknown> : {};
+    // ★ Codex 구현 2R — 요청이 보낸 칸(서버 화이트리스트) = 사람의 결정 · 그 결정만으로 지문(회사 값이 바뀌어도 같은 요청 = 같은 지문)
+    //   지금 물을 칸인데 요청에 없는 칸 = 생략(결정 · 지문 밖)
+    const voiceDecided = decideSentVoiceForm(voiceAsks, rawVoice as any);
+    if (!voiceDecided.ok) return refuse(400, 'VOICE_FORM_INVALID', voiceDecided.error);
+    // ★ Codex 구현 1R — 꼴 칸 답만 고친 요청 = 다른 시도(결정이 없으면 옛 지문 그대로)
+    const vfPrint = voiceDecided.print;
+    const keys = lineStepsAttemptKeys(steps, companyId, channel, vfPrint ? { payload: input.payload, vf: vfPrint } : input.payload);
     const idemKey = keys[0];
     // (DM) 같은 시도의 착지 초안: 낸 것 = 그대로 돌려준다 · 거두지 못한 미과금 초안 = 다시 거둔다(못 거두면 503 · 새로 만들지 않는다 · Codex 1010 2R)
     if (input.adapter.kind === 'draft') {
@@ -135,7 +148,7 @@ export async function runLineCookOrder<R>(input: LineOrderInput<R>, deps: LineOr
     await deps.checkCredit(companyId, price.cost);
     let draftId: string | null = null;
     const made = await deps.inBundle(async () => {
-      const result = await input.cook({ cards, page, cost: price.cost });
+      const result = await runWithVoiceForm(voiceDecided.decision, () => input.cook({ cards, page, cost: price.cost }));
       // (DM) 초안 행을 먼저 만들고 차감한다(응답이 유실돼도 낸 돈의 결과가 남는다 · 1010 계약)
       if (input.adapter.kind === 'draft') draftId = await input.adapter.persist(result);
       let outcome: DeductOutcome | '' = '';

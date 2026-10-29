@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: c7879512 · 2026-10-29 · Harold pull 보고(C77 · push 통과 = pre-push 가 새 자리 스탬프를 읽음)
-- deployed_head: c7879512 · 2026-10-29 · Harold 보고 = backend build:safe · pm2 reload(이 범위 프론트 변경 0 · 프론트 빌드 안 함) · ENV 는 아직(C77-ENV-1 · 넣을 때 restart --update-env)
+- pulled_head: 8ee58bd7 · 2026-10-29 · Harold 배포 완료 보고(C78)
+- deployed_head: 8ee58bd7 · 2026-10-29 · Harold 「배포완료했어」(C78 = 백엔드 + 프론트) · C77-ENV-1 은 아직
 - 이번 창 확인 출력: backend-build · reload
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -25,7 +25,9 @@
 | C75 | 00e093bf |
 | C76 | 00e093bf |
 | C77 | c7879512 |
-| C78 | 미커밋 |
+| C78 | 8ee58bd7 |
+| C79 | 미커밋 |
+| C80 | 미커밋 |
 
 ## §1 대기
 
@@ -231,6 +233,29 @@ CREATE UNIQUE INDEX CONCURRENTLY uq_cdp_events_purchase_order ON cdp_events (com
 - 의미 바꿈: 예(목록의 회사 일 = 운영 경보 문자 0 · 로그 「사내 회사 경보 생략」 한 줄만 · 비어 있으면 시연 회사만 = 지금 동작)
 - 기대: 쉼표로 이은 회사 uuid · 테스트계정 a0990249-3550-4baa-92ca-32e45b185e83 (그 밖 사내 회사 = Harold 확인 뒤 더함) · 비밀값 아님
 - 확인: restart --update-env 뒤 프로세스 env 에 그 이름이 있는가(값 길이만) · 다음 테스트계정 경보가 문자 대신 로그 한 줄로 남는가
+
+### C79-DDL-1 · continuous_operators.voice_form(목소리 꼴 칸 결정 · B-1029-3)
+- 카드: C79
+- 단계: DDL
+- 선행: 코드 배포
+- 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 결정이 있는 자동마케팅 등록 · 승인만 「DB 마이그레이션 필요」 · 기존 등록 · 회차 그대로)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'continuous_operators' AND column_name = 'voice_form';
+- 확인: voice_form · jsonb 한 줄
+
+> C79-DDL-1 · 자동마케팅 목소리 꼴 칸 결정 칸(배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해)
+
+```sql ddl:C79-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
+```
+
+### C80-G1 · 싱크에이전트 1.7.4(Node 24.22.1 · 마법사 이 PC 전용)를 서버에 올리지 않는다(엠티 개별 전달 · 다른 회사 영향 0)
+- 카드: C80
+- 단계: 출고
+- 선행: 없음(서버 코드 변경 0 · 바뀐 백엔드 파일 = 계약 시험 root-ledger.test.ts 한 개 · DDL 0 · ENV 0)
+- 기대: C76-G1 과 같다 — `npm run upload:releases` · 슈퍼관리자 릴리즈 등록 · `npm run upload:agents`(`build:tiers:deploy`) 셋 다 하지 않는다 · `CURRENT_AGENT_VERSION` 1.7.2 · 서버 룰표 `agent-build-tiers.ts` modern `node: 20` 그대로(서버가 내주는 1.7.2 를 설명 · Node 24 판을 서버에 올리는 날 같은 배포에 24 로) · 엠티 zip(`Downloads\엠티콜렉션_SyncAgent_v1.7.4\`) = VM 재검증(Harold 승인) 뒤 개별 전달 · 1.7.3 폴더는 보내지 않는다
+- 확인: 배포 창 SQL `SELECT version, tier, is_active FROM sync_releases WHERE is_active ORDER BY released_at DESC LIMIT 5;` 에 1.7.3 · 1.7.4 없음
+- 결과:
 
 ## §2 덤프 뒤 적용분
 
