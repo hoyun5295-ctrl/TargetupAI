@@ -12,8 +12,8 @@ import { detectLiquidSyntax, flattenLiquidToPlainText } from './liquid-templatin
 import { findBannedWords } from './copy-similarity-guard';
 import { findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, findInventedDates, replaceInventedDates, hasAiFillPlaceholder } from './copy-benefit-detector';
 import { cleanLeftoverVars, ensureSenderName } from './messageUtils';
-import { applyBrandLinkTokens, type BrandLink } from './brand-link-core';
-import { stripLinkLines } from './voice-form-slots';
+import { applyBrandLinkTokens, protectLinkTokens, type BrandLink } from './brand-link-core';
+import { stripLinkLines, ensureOnceLink } from './voice-form-slots';
 
 /**
  * 메시지 내 개인화 변수 검증
@@ -128,6 +128,8 @@ export interface CopyExitContext {
   brandLinks: BrandLink[];
   /** ★ 2026-10-29 링크 생략 결정(voice-form-slots) — 링크 토큰 · 자리 표시가 든 줄을 지운다(AI 재호출 0 · §8-1) */
   linkOmit?: boolean;
+  /** ★ 2026-10-31 사람이 정한 링크(once) 주소 — 결과에 꼭 있게 한다(ensureOnceLink · 설계서 docs/2026-10-31-ai-line-answer-link-design.md P2) */
+  onceLink?: string | null;
   senderNames: ReadonlyArray<string | null | undefined>;
   /**
    * ★ K2-3 스타일 후처리 = 규칙이 살아 있을 때만 · 회사 기준값.
@@ -152,7 +154,9 @@ export function applyCopyExitGuards(
 ): { message_text: string; subject: string | undefined; flags: CopyExitFlags } {
   const flags: CopyExitFlags = { liquid: false, inventedBenefits: [], efficacyDropped: [], inventedDates: [], placeholderLeft: false, senderAdded: false };
   const channel = ctx.channel;
-  let msgField = String(input.message_text || '');
+  // ★ 2026-10-31 링크 토큰은 맨 앞에서 감추고 링크 단계 직전에 되돌린다(P0 · 템플릿 문법 · 구분선 · 금지어 · 혜택 · 날짜 단계가 {{LINK:라벨}} 을 지우거나 깎지 않게)
+  const linkMask = protectLinkTokens(String(input.message_text || ''));
+  let msgField = linkMask.text;
 
   // ★ 안전장치: AI가 (광고), 무료거부 등을 포함했으면 자동 제거
   //   D137: 기존 `\n?무료...` 패턴에서 `\n?` 제거 → 텍스트만 제거, 앞 개행은 원본 그대로 보존.
@@ -251,7 +255,14 @@ export function applyCopyExitGuards(
   // ★ 2026-10-18 exactVars = [] (칼럼 0개 = 변수 없이) — 남은 %변수% 전부 지운다
   if (ctx.stripAllVars) msgField = cleanLeftoverVars(msgField).replace(/  +/g, ' ').trim();
 
+  msgField = linkMask.restore(msgField);
   if (ctx.linkOmit) msgField = stripLinkLines(msgField);
+  // ★ 2026-10-31 정해진 링크(once) = 토큰 · 자리 표시를 그 주소로 · 없으면 마지막 줄에(R32 · 등록 라벨 토큰도 사람이 정한 주소로)
+  if (ctx.onceLink) {
+    const once = ensureOnceLink(msgField, ctx.onceLink);
+    msgField = once.text;
+    if (once.appended) console.log('[brand-link] 정해진 링크가 문안에 없어 마지막 줄에 붙임');
+  }
   // ★ 2026-07-02 브랜드 링크 토큰 치환 — 미등록 라벨 = [링크를 입력해주세요] placeholder → 발송 전 가드가 차단.
   const linkApplied = applyBrandLinkTokens(msgField, ctx.brandLinks);
   if (linkApplied.replacedCount > 0 || linkApplied.unresolvedCount > 0) {
@@ -264,7 +275,8 @@ export function applyCopyExitGuards(
   const sender = ensureSenderName(msgField, { isAd: ctx.isAd, channel, subject: subject || null, names: ctx.senderNames });
   if (sender.added) { msgField = sender.text; flags.senderAdded = true; }
   // ★ K12-3 출력에 남은 직접 채울 칸 = 법 문제(재생성 조건 · 남으면 발송 길목이 막는다)
-  flags.placeholderLeft = hasAiFillPlaceholder(msgField) || (!!subject && hasAiFillPlaceholder(subject));
+  // ★ 2026-10-31 미등록 라벨 토큰(자리 표시로 바뀜) = 같은 재생성 조건(P0 · 자동 발송은 사람이 고칠 자리가 없다 · Codex 설계 2R ② 마지막 대입이 덮지 않게 OR)
+  flags.placeholderLeft = hasAiFillPlaceholder(msgField) || (!!subject && hasAiFillPlaceholder(subject)) || linkApplied.unresolvedCount > 0;
   return { message_text: msgField, subject, flags };
 }
 

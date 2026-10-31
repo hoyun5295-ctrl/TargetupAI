@@ -86,6 +86,8 @@ export default function ImageStudioPage() {
   const [busyMsg, setBusyMsg] = useState('');
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
   const make = useStudioMake(template);
+  // ★ 2026-10-31 포스터를 만든 뒤 템플릿을 다시 고르면 새 제작 = 입력 칸을 처음으로(Harold 「이미 제작할 때 넣었던 것들이 그대로 있어」 · 결과의 「문구·상품 수정」은 그대로 둔다)
+  const madeRef = useRef(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
 
   // 내 라이브러리(저장 소재) — 갤러리 첫 화면 폴더. 소재 클릭 = 채널 발사대(인앱/DM/이메일).
@@ -138,6 +140,7 @@ export default function ImageStudioPage() {
     const r = await make.generate();
     if (!r) return;
     if (r.preview) objectUrls.current.push(r.preview);
+    madeRef.current = true;
     setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title }, ...prev]);
     setStage('result');
   };
@@ -296,7 +299,7 @@ export default function ImageStudioPage() {
       <div className="space-y-6">
         {/* 1단계 — 템플릿 고르기. ⛔ 언마운트하지 않고 숨긴다(보던 쪽 유지 · 감싸개에 display 클래스 금지). */}
         <div hidden={stage !== 'gallery'}>
-          <TemplatePicker onPick={(t) => { setTemplate(t); setStage('setup'); }} rootExtra={libraryStrip} />
+          <TemplatePicker onPick={(t) => { if (busy) return; if (madeRef.current) { make.restart(t); madeRef.current = false; } setTemplate(t); setStage('setup'); }} rootExtra={libraryStrip} />
         </div>
 
         {/* 2단계 — 상품 + 문구 (공용 StudioMake · DM 삽입 창과 같은 부품) */}

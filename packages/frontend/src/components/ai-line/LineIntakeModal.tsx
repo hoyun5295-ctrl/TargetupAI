@@ -26,6 +26,8 @@ import {
 } from '../../utils/ai-line';
 
 const MAX_AUDIENCE = 10000;
+/** 답 칸 상한(긴 링크 주소가 잘리지 않게 · 서버 readLineAnswers 와 같은 500) */
+const ANSWER_MAX = 500;
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 function periodChips(): Array<{ label: string; value: string }> {
   const now = new Date();
@@ -102,7 +104,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const submitAsks = () => {
     // ★ 2026-10-29 목소리 꼴 칸(id voice_*) = 빈 답도 보낸다(「이 줄 없이」 = 명시 생략 · 서버가 결정)
     const answers = askTexts
-      .map((a) => ({ id: a.id, q: a.text, a: (textAns[a.id] || '').trim().slice(0, 200) }))
+      .map((a) => ({ id: a.id, q: a.text, a: (textAns[a.id] || '').trim().slice(0, ANSWER_MAX) }))
       .filter((x) => x.a.length > 0 || x.id.startsWith('voice_'))
       .map(({ q, a }) => ({ q, a }));
     onRun({
@@ -181,6 +183,20 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
     setTemplates(null); setTplPick(null); setTplError(false); setWhoDraft(''); setBoardError(null);
     setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setTextAns({});
   }, [run.runId]);
+  // ★ 2026-10-31 서버가 미리 채운 답(링크 질문 = 한 줄 속 주소) = 비어 있는 칸만 채운다(다시 입력 0 · 사람이 고친 · 지운 글은 덮지 않는다)
+  const prefillKey = askTexts.map((a) => `${a.id}=${a.prefill ?? ''}`).join('|');
+  useEffect(() => {
+    // ★ Codex 1R(뒤로가기) — 미리 채움 = 첫 「다음」 전에만(답을 낸 뒤 다시 들어와도 저장된 답(바꾼 값 · 빈 답)을 처음 채움이 덮지 않게 · 복원은 goBack 이 저장된 답으로)
+    if (run.facts !== null) return;
+    const fills = askTexts.filter((a) => a.prefill);
+    if (fills.length === 0) return;
+    setTextAns((cur) => {
+      const next = { ...cur };
+      for (const a of fills) if (next[a.id] === undefined) next[a.id] = a.prefill as string;
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [run.runId, prefillKey]);
   // ★ Codex B2 medium — 창을 다시 열면 템플릿 오류를 지우고 다시 불러온다(안내 문장 「닫았다가 다시 열어 주세요」와 맞춘다)
   useEffect(() => { if (open) setTplError(false); }, [open]);
 
@@ -298,6 +314,32 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const lacking = creditTotal != null && !directOnly && !alimtalk && creditTotal < total;
 
   const [busy, setBusy] = useState(false);
+  // ★ 2026-10-31 뒤로가기(Harold 「단계에서 잘못된 게 있으면 뒤로 가서 그 부분으로」 · 설계서 docs/2026-10-31-ai-line-answer-link-design.md §9)
+  //   빠진 정보 질문 → 채널(카톡을 되물은 한 줄만) · 누구에게 · 확인 판 → 빠진 정보(문자 갈래 · 물은 것이 있을 때) · 칼럼 → 확인 판(지금 그대로)
+  //   돌아가면 적은 답(혜택 · 기간 · 질문 답)을 칸에 다시 채운다(다시 입력 0 · 지금 적고 있는 칸은 덮지 않는다).
+  const kakaoAsked = read?.branch === 'ask_kakao';
+  const backTo: 'kakao' | 'asks' | null = step === 'asks'
+    ? (kakaoAsked ? 'kakao' : null)
+    : step === 'board' ? (run.branch === 'sms' && asks.length > 0 ? 'asks' : kakaoAsked ? 'kakao' : null) : null;
+  const goBack = () => {
+    setBoardError(null);
+    if (backTo === 'kakao') { setStep('kakao'); return; }
+    const f = run.facts;
+    if (f) {
+      if (askBenefit && !benefitDraft.trim() && !benefitNone) { if (f.benefit) setBenefitDraft(f.benefit); else setBenefitNone(true); }
+      if (askPeriod && !periodPick && !periodNone) { if (f.period_end) setPeriodPick(f.period_end); else setPeriodNone(true); }
+      setTextAns((cur) => {
+        const next = { ...cur };
+        for (const a of askTexts) {
+          if (next[a.id] !== undefined) continue;
+          const hit = f.answers?.find((x) => x.q === a.text);
+          if (hit) next[a.id] = hit.a;
+        }
+        return next;
+      });
+    }
+    setStep('asks');
+  };
   /** varsArg = 칼럼 단계에서 고른 칼럼(「넣지 않고 만들기」 = []) */
   const make = async (varsArg: string[] = usableVars) => {
     if (!intake || lock || busy) return;
@@ -503,7 +545,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                       <input
                         value={a.options.includes(val) ? '' : val}
                         onChange={(e) => setTextAns((cur) => ({ ...cur, [a.id]: e.target.value }))}
-                        maxLength={200}
+                        maxLength={ANSWER_MAX}
                         placeholder={a.options.length > 0 ? '직접 적기' : '답을 적어 주세요'}
                         className="w-full h-11 rounded-xl border border-slate-300 px-3 text-[16px] [@media(pointer:fine)]:text-[14px] outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100"
                       />
@@ -520,6 +562,12 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
             )}
           </div>
           <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex justify-end gap-2 shrink-0">
+            {backTo && (
+              <button type="button" onClick={goBack} disabled={busy}
+                className="mr-auto h-11 px-3 rounded-lg text-[13px] font-semibold text-slate-600 hover:bg-slate-100 inline-flex items-center gap-1 disabled:opacity-40">
+                <ChevronLeft className="w-4 h-4" />{backTo === 'kakao' ? '채널' : '빠진 정보'}
+              </button>
+            )}
             <button type="button" onClick={onClose} className="h-10 px-4 rounded-lg border border-slate-200 bg-white text-[13.5px] font-semibold text-slate-700">나중에</button>
             <button type="button" onClick={submitAsks} disabled={!intake || !asksOk} className="h-10 px-5 rounded-lg bg-slate-900 text-white text-[13.5px] font-semibold disabled:opacity-40">다음</button>
           </div>
@@ -566,6 +614,12 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
             {boardError && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-800">{boardError}</p>}
           </div>
           <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex justify-end gap-2 shrink-0">
+            {backTo && (
+              <button type="button" onClick={goBack} disabled={busy}
+                className="mr-auto h-11 px-3 rounded-lg text-[13px] font-semibold text-slate-600 hover:bg-slate-100 inline-flex items-center gap-1 disabled:opacity-40">
+                <ChevronLeft className="w-4 h-4" />{backTo === 'kakao' ? '채널' : '빠진 정보'}
+              </button>
+            )}
             <button type="button" onClick={onClose} className="h-10 px-4 rounded-lg border border-slate-200 bg-white text-[13.5px] font-semibold text-slate-700">나중에</button>
           </div>
         </>
@@ -817,7 +871,13 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
             {boardError && <p className="mx-5 mb-3 rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-800">{boardError}</p>}
           </div>
           <div className="px-5 py-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2 shrink-0 sticky bottom-0 bg-white">
-            {(lock || lacking) && <p className="mr-auto text-[12px] text-slate-500">{lock || '크레딧이 모자라요. 충전한 뒤 다시 눌러 주세요'}</p>}
+            {backTo && (
+              <button type="button" onClick={goBack} disabled={busy}
+                className="mr-auto h-11 px-3 rounded-lg text-[13px] font-semibold text-slate-600 hover:bg-slate-100 inline-flex items-center gap-1 disabled:opacity-40">
+                <ChevronLeft className="w-4 h-4" />{backTo === 'kakao' ? '채널' : '빠진 정보'}
+              </button>
+            )}
+            {(lock || lacking) && <p className={`${backTo ? '' : 'mr-auto '}text-[12px] text-slate-500`}>{lock || '크레딧이 모자라요. 충전한 뒤 다시 눌러 주세요'}</p>}
             <button type="button" onClick={onClose} className="h-11 px-4 rounded-lg border border-slate-200 text-[13.5px] font-semibold text-slate-700">닫기(결과 보존)</button>
             {toVars ? (
               <button type="button" onClick={goVars} disabled={!!lock || lacking || busy}
@@ -873,7 +933,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                 넣으면 이렇게 바뀌어요 · {usableVars.map((t) => `%${t}% → ${aud.columns.find((x) => x.token === t)?.value ?? '빈칸'}`).join(' · ')}
               </p>
             )}
-            <p className="text-[11.5px] text-slate-500">%칼럼% 자리는 받는 사람마다 그 고객의 값으로 바뀌어요 · 채움 % = 이 대상 안에서 값이 있는 비율 · 30% 미만은 잠금{usableVars.length > 0 && run.channel === 'SMS' ? ' · 칼럼을 넣으면 장문(LMS)으로 보내요' : ''}</p>
+            <p className="text-[11.5px] text-slate-500">%칼럼% 자리는 받는 사람마다 그 고객의 값으로 바뀌어요 · 채움 % = 이 대상 안에서 값이 있는 비율 · 30% 미만은 잠금{run.channel === 'SMS' ? ' · 칼럼이나 링크가 들어가면 장문(LMS)으로 보내요' : ''}</p>
             {amountBox}
             {boardError && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-800">{boardError}</p>}
           </div>

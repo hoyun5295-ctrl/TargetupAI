@@ -22,7 +22,7 @@ import { shapeIssues } from '../utils/copy-shape';
 import { applyCopyExitGuards, compareCopyAttempts, takeGenerationSlot, type CopyExitFlags } from '../utils/copy-exit-guards';
 // ★ 2026-07-02 브랜드 링크 토큰 치환 ({{LINK:라벨}} → 등록 URL) + 브랜드보이스 형태 검증(CT-100) 배선
 import { applyBrandLinkTokens, type BrandLink } from '../utils/brand-link-core';
-import { resolveFormLink, type VoiceFormDecision } from '../utils/voice-form-slots';
+import { resolveFormLink, rewriteDropsLinks, type VoiceFormDecision } from '../utils/voice-form-slots';
 import { validateBrandVoiceCompliance, buildRetryHintFromIssues } from '../utils/brand-voice-validator';
 import { composeCopyBrain } from '../utils/copy-prompt-composer';
 import { scoreSpamRisk, SPAM_FAIL_THRESHOLD } from '../utils/copy-spam-risk';
@@ -1391,8 +1391,10 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     let inventedDatesLastRun: string[] = [];
     // ★ 2026-10-28 K12-3 — 직전 실행 출력에 직접 채울 칸이 남았는지(뼈대 칸 포함 · 법 문제)
     let placeholderLastRun = 0;
+    // ★ 2026-10-31 정해진 링크(once) 주소 = 출구가 결과에 꼭 있게 한다(R32 · 치환 값과 같은 asciiLink 값)
+    const onceLink = formLink.once ?? null;
     const exitCtx = {
-      channel, isAd, bannedWords, benefitGround, baseDate,
+      channel, isAd, bannedWords, benefitGround, baseDate, onceLink,
       validationVars: usePersonalization && personalizationVars.length > 0 ? personalizationVars : availableVars,
       stripAllVars: !!exactVars && exactVars.length === 0,
       brandLinks, linkOmit: formLink.mode === 'omit', senderNames: [senderName],
@@ -2060,10 +2062,10 @@ ${varCatalogPrompt}
 - "content_type": 이 문자의 종류 하나(promo · launch · howto · greeting · notice · 모르면 null):
 ${CONTENT_TYPE_JUDGE_RULES.split('\n').map((l) => `  ${l}`).join('\n')}
 - "style_reason": 그 종류를 고른 이유 한 줄(25자 안쪽 · 마침표 없이).
-- "copy_questions": [ { "kind": "benefit 또는 period 또는 text", "question": "질문", "why": "왜 묻는지 한 줄", "options": ["고르기"] } ]:
+- "copy_questions": [ { "kind": "benefit 또는 period 또는 link 또는 text", "question": "질문", "why": "왜 묻는지 한 줄", "options": ["고르기"] } ]:
   이 목표로 고객에게 보낼 문자 문안을 쓰려면 꼭 알아야 하는데 **목표 문장에 없는 사실**을 이 목표에 맞게 직접 판단해 묻는다. 정해진 항목을 채우는 것이 아니다.
   · 목표 문장에 이미 있는 사실은 묻지 않는다. 받는 사람 · 채널 · 문안 개수 · 문안 종류는 묻지 않는다(따로 묻는다).
-  · kind: benefit = 혜택(할인 · 쿠폰 · 증정 등)이 무엇인지 목표에 없을 때 · period = 혜택이나 행사가 언제까지인지 목표에 없을 때(「최근 30일 미구매」 · 「24시간 이탈」 같은 받는 사람 조건의 기간은 행사 기간이 아니다) · text = 그 밖(어떤 상품인지 · 어디서 쓰는지 · 사용 조건 · 링크 등).
+  · kind: benefit = 혜택(할인 · 쿠폰 · 증정 등)이 무엇인지 목표에 없을 때 · period = 혜택이나 행사가 언제까지인지 목표에 없을 때(「최근 30일 미구매」 · 「24시간 이탈」 같은 받는 사람 조건의 기간은 행사 기간이 아니다) · link = 문자에 넣을 링크 주소(URL)를 받는 질문(주소를 묻는 질문은 반드시 link · 시스템이 정해진 질문 글로 바꿔 묻는다 · 링크로 접속해야 하는지 같은 사용 조건 질문은 text) · text = 그 밖(어떤 상품인지 · 어디서 쓰는지 · 사용 조건 등).
   · options: text 질문의 답이 몇 가지로 나뉠 때만 짧은 고르기 2~4개. 혜택 값(% · 원 · 무료 · 증정 · 적립)이나 숫자는 절대 넣지 않는다(혜택은 사람이 적는다). 그 밖은 빈 배열.
   · question 은 고객사 마케터에게 묻는 존댓말 한 문장, why 는 25자 안쪽. 필요한 만큼만 묻고, 다 갖춘 목표면 빈 배열 [].
 - "copy_vars": ["변수명"]: 이 문안에 넣으면 좋은 개인화 변수 0~2개(위 「사용 가능한 개인화 변수」 목록에 있는 이름만 · %없이). 이 목표에 어울리지 않으면 [].` : ''}`;
@@ -2679,7 +2681,8 @@ function validateAndNormalizeRefinedCandidates(
     //   시스템이 (a-3)에서 다시 붙인 수신거부 문구(회사 번호)는 AI 가 지어낸 것이 아니다 → 대조 원문에 포함(Codex 0930 1R).
     const factSource = `${originalMessage}\n${rejectFooterToRestore}`;
     // ★ 2026-10-24 세 채널 구조체크 ② — 다시 쓰기 판정 하나(새 숫자 ∥ 지어낸 혜택 ∥ 근거 없는 효능 · rewriteAddsFacts)
-    if (rewriteAddsFacts(text, factSource)) {
+    // ★ 2026-10-31 원문 주소를 뺀(바꾼) 후보도 뺀다(설계서 docs/2026-10-31-ai-line-answer-link-design.md P6 · 지시문 「URL 100% 보존」을 판정으로 · 최종 다듬은 글 기준)
+    if (rewriteAddsFacts(text, factSource) || rewriteDropsLinks(text, originalMessage)) {
       dropCounts.fabricated += 1;
       continue;
     }

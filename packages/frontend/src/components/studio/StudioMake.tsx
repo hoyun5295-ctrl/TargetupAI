@@ -34,6 +34,8 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busyMsg, setBusyMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  /** ★ 2026-10-31 상품 준비 차례 — 처음 상태로 돌리면 올려 진행 중 준비의 늦은 응답을 버린다(Codex 1R · 새 제작에 지난 상품이 다시 들어오지 않게) */
+  const prepSeq = useRef(0);
   const autoRef = useRef<StudioTexts>(EMPTY_STUDIO_TEXTS);
 
   // 템플릿·상품이 바뀌면 자동 채움 — 비어 있거나 직전 자동값 그대로인 칸만(사람 값 · 호출부 문구 보존 · lib/studio-texts)
@@ -52,6 +54,8 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
 
   /** 처음 상태로(DM 창이 넣기 성공 뒤 · 새로 열 때). 다음 템플릿을 고르면 자동 채움이 다시 돈다. */
   const reset = useCallback((next: StudioTexts = EMPTY_STUDIO_TEXTS) => {
+    prepSeq.current += 1;
+    setBusyMsg('');
     autoRef.current = EMPTY_STUDIO_TEXTS;
     setTexts(next);
     setHint('');
@@ -61,8 +65,20 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     setCutoutBlob(null);
   }, []);
 
+  /**
+   * ★ 2026-10-31 새 제작 시작(이미지 스튜디오 · 포스터를 만든 뒤 템플릿을 다시 고르면) = 처음 상태 + 그 템플릿 기본 문구.
+   *   자동 채움 기준(autoRef)도 그 기본 문구로 둔다(같은 템플릿을 다시 골라 효과가 돌지 않아도 · 뒤에 상품을 고르면 기본 문구 칸이 상품으로 바뀐다).
+   */
+  const restart = useCallback((t: StudioTemplatePublic | null) => {
+    const auto = t ? autoStudioTexts(t.defaultTexts, null) : EMPTY_STUDIO_TEXTS;
+    reset(auto);
+    autoRef.current = auto;
+  }, [reset]);
+
   // ── 상품 준비: 인제스트/업로드 → 누끼 ─────────────────────────
   const prepareProduct = async (imageUrl: string | null, fromUpload?: File) => {
+    const seq = ++prepSeq.current;
+    const live = () => seq === prepSeq.current;
     setBusyMsg('상품 이미지 준비 중...');
     try {
       let sourceTempId: string | null = null;
@@ -78,17 +94,22 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
         sourceTempId = data.source.tempId;
       }
       if (!sourceTempId) throw new Error('상품 이미지가 없습니다');
+      if (!live()) return;
 
       setBusyMsg('제품 누끼 따는 중... (배경 자동 제거)');
       const { ok, data } = await studioPost('/api/image-studio/remove-bg', { sourceTempId });
+      if (!live()) return;
       if (!ok) throw new Error(data?.error || '누끼에 실패했어요');
+      // 누끼 ID 는 미리보기보다 먼저 남긴다(미리보기를 못 받아도 상품은 포스터에 들어간다 · Codex 1031 ①)
       setCutoutTempId(data.cutout.tempId);
-      setCutoutBlob(await fetchAuthObjectUrl(`/api/image-studio/temp/${data.cutout.tempId}`));
+      const blob = await fetchAuthObjectUrl(`/api/image-studio/temp/${data.cutout.tempId}`);
+      if (!live()) { URL.revokeObjectURL(blob); return; }
+      setCutoutBlob(blob);
       toast.success('제품 준비 완료. 원본 그대로 포스터에 들어갑니다');
     } catch (e: any) {
-      toast.error(e?.message || '상품 준비에 실패했어요');
+      if (live()) toast.error(e?.message || '상품 준비에 실패했어요');
     } finally {
-      setBusyMsg('');
+      if (live()) setBusyMsg('');
     }
   };
 
@@ -140,7 +161,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   return {
     template, texts, setTexts, hint, setHint, textPosition, setTextPosition,
     product, cutoutTempId, cutoutBlob, pickerOpen, setPickerOpen, fileRef,
-    busyMsg, reset, onPickMall, onUpload, generate,
+    busyMsg, reset, restart, onPickMall, onUpload, generate,
   };
 }
 

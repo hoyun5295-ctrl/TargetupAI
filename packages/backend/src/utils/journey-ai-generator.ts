@@ -15,7 +15,7 @@
  *   - (광고)+080+KISA 제목 = 시스템 자동 합성 (직접 작성 X)
  */
 
-import type { VoiceFormDecision } from './voice-form-slots';
+import { ensureOnceLink, type VoiceFormDecision } from './voice-form-slots';
 import { UserFacingError } from './http-error';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
@@ -727,6 +727,8 @@ VIP 회원님께 먼저 전하는 이번 안내,
   // ★ 2026-09-29 V2 0차 ⑧ — 옛: 5칸 넘으면 조용히 잘랐다. 이제 여정 칸 상한(CT)을 넘을 때만 거부한다(자르지 않는다).
   // ★ 2026-09-30 V2 4차 — 생성기 칸은 전부 문자다(문자 칸 7 상한 · 0차 의미 그대로).
   assertStepsWithinLimit(rawSteps.map(() => ({ stepType: 'message' })), 'AI 생성 결과');
+  // ★ 2026-10-31 꼴 칸 링크 결정(once) = 단계마다 결과에 꼭 있다(설계서 docs/2026-10-31-ai-line-answer-link-design.md P2 · 뿌리 대장 R32 · 정제 뒤 ASCII 주소)
+  const onceLink = input.voiceForm?.link && 'value' in input.voiceForm.link ? input.voiceForm.link.value : null;
   const steps: GeneratedStep[] = rawSteps.map((s: any, idx: number) => {
     const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
     // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
@@ -758,7 +760,8 @@ VIP 회원님께 먼저 전하는 이번 안내,
         const season = dropSeasonSentences(g.body, seasonGround);
         seasonDroppedPkg += season.dropped.length;
         const subject = findSeasonWords(g.subject, seasonGround).length > 0 ? '' : g.subject;
-        const named = ensureSenderName(season.text, { isAd: resolveJourneyAdFlag(channel, s.isAd), channel, subject, names: [ctx.brandName, ctx.companyName] });
+        const linked = ensureOnceLink(season.text, onceLink).text;
+        const named = ensureSenderName(linked, { isAd: resolveJourneyAdFlag(channel, s.isAd), channel, subject, names: [ctx.brandName, ctx.companyName] });
         return { messageTemplate: named.text, subject };
       })(dropInventedEfficacyTitledBody(
         stripUnauthorizedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),

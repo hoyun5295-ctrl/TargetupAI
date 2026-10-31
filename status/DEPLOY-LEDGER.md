@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 18cc05e2 · 2026-10-31 · Harold 실행 출력 `git log --oneline -1` = 18cc05e2(HEAD -> main, origin/main)
-- deployed_head: 18cc05e2 · 2026-10-30 · Harold 「세션 마무리하자」(C83-S2 · 백엔드 reload + 프론트 build:safe 보고 · 빌드 출력 원문은 안 받음) · 그 전 5264fa99(1029 · C79~C83 1차) · C77-ENV-1 은 아직
+- pulled_head: bb719adf · 2026-10-31 · Harold 실행 출력 `git pull` = 18cc05e2..bb719adf Fast-forward 53파일(C84 · C85)
+- deployed_head: bb719adf · 2026-10-31 · Harold 보고 「여기까지 했어」(backend · frontend build:safe · pm2 reload targetup-backend · 빌드 출력 원문은 안 받음) · 그 전 18cc05e2(1030 C83 후속) · C77-ENV-1 은 아직
 - 이번 창 확인 출력: backend-build · frontend-build · reload(Harold 보고 · 출력 원문은 안 받음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -31,8 +31,10 @@
 | C81 | ec8b59d4 |
 | C82 | 5264fa99 |
 | C83 | 18cc05e2 |
-| C84 | 미커밋 |
-| C85 | 미커밋 |
+| C84 | bb719adf |
+| C85 | bb719adf |
+| C86 | 미커밋 |
+| C87 | 미커밋 |
 
 ## §1 대기
 
@@ -295,47 +297,6 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 확인: 배포 창 SQL `SELECT host(a.cidr) AS ip, a.reason, a.is_active, a.created_at FROM access_origin_allowlist a JOIN users u ON u.company_id = a.company_id WHERE u.login_id = 'hoyun' AND a.scope = 'company_agent' ORDER BY a.created_at DESC LIMIT 5;` 맨 위 = 방금 넣은 IP · 활성
 - 결과:
 
-### C84-DDL-2 · journey_pretest_schedules.notice_attempts(여정 발송 전 안내 시도 수 · 배포 전)
-- 카드: C84
-- 단계: DDL
-- 선행: 없음(배포 전에 실행 · 옛 코드 INSERT 는 칸 이름을 적어 넣어 기본값 0)
-- 의미 바꿈: 아니오(칸 추가 · 기본값 0 · PG 15 = 카탈로그만 바뀜 · 옛 코드는 이 칸을 읽지 않는다)
-- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = 'journey_pretest_schedules' AND column_name = 'notice_attempts';
-- 확인: notice_attempts · smallint · NO · 0 한 줄
-- 결과:
-
-> C84-DDL-2 · 설계서 docs/2026-10-31-journey-step-gate-notice-design.md §8 · 되돌리기 = 칸을 남겨도 무해(옛 코드가 읽지 않음)
-
-```sql ddl:C84-DDL-2
-SET lock_timeout = '3s';
-ALTER TABLE journey_pretest_schedules ADD COLUMN IF NOT EXISTS notice_attempts smallint NOT NULL DEFAULT 0;
-```
-
-### C84-DDL-1 · journey_step_campaigns 결과 안내 기록 칸 셋 + 기준선(배포 뒤 · 한 트랜잭션)
-- 카드: C84
-- 단계: DDL
-- 선행: C84 코드 배포(옛 결과 안내 경로가 사라진 뒤 · 그 전에 넣으면 옛 경로가 알린 날을 새 경로가 또 알린다)
-- 의미 바꿈: 예(기존 행 = 「결과를 이미 알림」 기준선 · 소급 안내 0 · 배포와 이 블록 사이 결과 안내 0)
-- 기대: 서버 psql 에서 아래 블록(BEGIN ~ COMMIT 통째로) · 확인 1 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journey_step_campaigns' AND column_name LIKE 'result_notice%' ORDER BY 1; · 확인 2 = SELECT COUNT(*) FROM journey_step_campaigns jsc JOIN campaigns c ON c.id = jsc.campaign_id WHERE jsc.result_notice_at IS NULL;
-- 확인: 확인 1 = result_notice_at · timestamp with time zone · YES / result_notice_attempts · smallint · NO / result_notice_sent · integer · YES · 확인 2 = 0
-- 결과:
-
-> C84-DDL-1 · 설계서 §2-6 · §8 · 되돌리기 = 칸을 남겨도 무해(새 코드는 칸이 없으면 결과 안내를 건너뛴다)
-
-```sql ddl:C84-DDL-1
-BEGIN;
-SET LOCAL lock_timeout = '3s';
-ALTER TABLE journey_step_campaigns
-  ADD COLUMN IF NOT EXISTS result_notice_sent integer NULL,
-  ADD COLUMN IF NOT EXISTS result_notice_at timestamptz NULL,
-  ADD COLUMN IF NOT EXISTS result_notice_attempts smallint NOT NULL DEFAULT 0;
-UPDATE journey_step_campaigns jsc
-   SET result_notice_sent = COALESCE(c.sent_count, 0), result_notice_at = NOW()
-  FROM campaigns c
- WHERE c.id = jsc.campaign_id AND jsc.result_notice_at IS NULL;
-COMMIT;
-```
-
 ### C84-S1 · 여정 담당자 안내 실측(배포 뒤 1건 · 테스트계정)
 - 카드: C84
 - 단계: 사후
@@ -349,6 +310,22 @@ COMMIT;
 - 단계: 사후
 - 선행: 코드 배포(백엔드 + 프론트 · DDL 0 · ENV 0)
 - 기대: ① 한줄로 「다음 달 생일 고객」 제안 → 추천 타겟 상세 「추출 대상 리스트 보기」 생일 칸 = `YYYY-MM-DD`(시각 꼬리 0 · DB 값 그대로) ② 직접발송 직접입력 번호 1개 → 주소록 [발송 목록에 더하기] → 직접입력 번호가 남고 주소록 번호가 뒤에 붙음 · 알림 「N명을 지금 명단에 더했어요」 ③ 알림톡 창 [중복제거] 켜짐 = 이미 있는 번호는 「중복 M명 제외」 · 설계서 `docs/2026-10-31-target-date-addressbook-append-design.md`
+- 확인: 화면(Harold · 테스트계정) · 서버 명령 0
+- 결과:
+
+### C86-S1 · AI 오퍼레이터 되묻기 링크 실측(배포 뒤 · 테스트계정)
+- 카드: C86
+- 단계: 사후
+- 선행: 코드 배포(백엔드 + 프론트 · DDL 0 · ENV 0)
+- 기대: ① AI 오퍼레이터 AI 한줄로에 주소가 든 한 줄(예: 「가을 신상 할인 문자 https://테스트계정 쇼핑몰 주소」) → 되묻기 단계에 「문자에 넣을 링크 주소」 칸이 그 주소로 미리 채워져 있음 → 만들기 → 문안마다 그 주소 한 번 · 채널 SMS 였으면 결과 카드 LMS ② 주소 없는 한 줄 + AI 가 링크를 물으면 그 칸에 `www.` 주소를 적어도 받음 → 문안에 적은 그대로 `www.…`(Harold 1031 「적은 그대로 넣기」) ③ 링크를 등록한 회사(테스트계정에 브랜드 링크 1개)로 만들기 → 문안에 등록 링크 주소(지금은 사라짐) ④ 결과 카드 꾸미기 · 다듬기 뒤에도 주소 그대로 · 설계서 `docs/2026-10-31-ai-line-answer-link-design.md` ⑤ 뒤로가기: 빠진 정보 질문에 답한 뒤 확인 판에서 「‹ 빠진 정보」 → 적은 답이 칸에 그대로 · 고쳐 다음 → 확인 판(대상 · 칼럼 그대로) · 카톡 한 줄이면 빠진 정보에서 「‹ 채널」
+- 확인: 화면(Harold · 테스트계정) · 서버 명령 0
+- 결과:
+
+### C87-S1 · 이미지 스튜디오 새 제작 = 입력 칸 처음으로(배포 뒤 · 테스트계정)
+- 카드: C87
+- 단계: 사후
+- 선행: 코드 배포(프론트 · DDL 0 · ENV 0)
+- 기대: 포스터 하나 만들기(문구 · 장면 힌트 · 상품) → 「템플릿으로」 → 같은 템플릿 또는 다른 템플릿 고르기 → 문구 칸 = 그 템플릿 기본 문구 · 장면 힌트 · 상품 = 비어 있음 / 결과 화면 「문구·상품 수정」 = 방금 넣은 값 그대로
 - 확인: 화면(Harold · 테스트계정) · 서버 명령 0
 - 결과:
 
@@ -382,3 +359,25 @@ SET lock_timeout = '3s';
 ALTER TABLE cdp_identity_links ADD COLUMN server_verified_at timestamptz NULL;
 ```
 
+> C84-DDL-2 · 1031 Harold 실행(코드 bb719adf 배포 뒤 · 순서 바뀜 · 그 사이 발송 전 안내는 건너뛰고 경보 · 발송은 진행) · journey_pretest_schedules.notice_attempts 있음(smallint · NOT NULL · 기본 0) · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음) · 정의 해시 대조 = 다음 대조 때
+
+```sql ddl:C84-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE journey_pretest_schedules ADD COLUMN IF NOT EXISTS notice_attempts smallint NOT NULL DEFAULT 0;
+```
+
+> C84-DDL-1 · 1031 Harold 실행(코드 bb719adf 배포 뒤 · C84-DDL-2 다음) · journey_step_campaigns.result_notice_at(timestamp with time zone · NULL 허용) · result_notice_attempts(smallint · NOT NULL · 기본 0) · result_notice_sent(integer · NULL 허용) 있음 · 기준선 UPDATE 10 · 남은 NULL 0 · 되돌리기 = 남겨도 무해(새 코드는 칸이 없으면 결과 안내를 건너뛴다) · 정의 해시 대조 = 다음 대조 때
+
+```sql ddl:C84-DDL-1
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+ALTER TABLE journey_step_campaigns
+  ADD COLUMN IF NOT EXISTS result_notice_sent integer NULL,
+  ADD COLUMN IF NOT EXISTS result_notice_at timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS result_notice_attempts smallint NOT NULL DEFAULT 0;
+UPDATE journey_step_campaigns jsc
+   SET result_notice_sent = COALESCE(c.sent_count, 0), result_notice_at = NOW()
+  FROM campaigns c
+ WHERE c.id = jsc.campaign_id AND jsc.result_notice_at IS NULL;
+COMMIT;
+```

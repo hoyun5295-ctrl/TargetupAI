@@ -3726,3 +3726,47 @@ describe('R31 받는 사람 불러오기 = 지금 명단에 더한다 · 중복 
     expect(ct).toMatch(/return \(prev\) => \{\s*const plan = planAppendBy\(rows, prev\.map\(phoneOf\), dedup, phoneOf\);\s*onPlan\(plan\);/);
   });
 });
+
+// ── R32(1031 · AI 오퍼레이터 되묻기 답 링크) — 사람이 정한 링크가 결과에 들어갔는지 판정하는 자리가 없음 ──
+const R32_EXIT_EXEMPT: Record<string, string> = {
+  'utils/one-line-ct/order.ts': '한 줄 단계 창(DM · 이메일 · 인앱) = 링크의 진실이 구조 칸(사람 확인 단계 link · event_page · link_default · 버튼 url) · 꼴 칸 링크 답은 말투 문구 지시로만 간다(설계서 docs/2026-10-31-ai-line-answer-link-design.md §6)',
+};
+describe('R32 사람이 정한 링크(once)는 생성 출구에서 결과에 꼭 있다 · 링크 토큰은 출구 거름을 지나간다', () => {
+  const files = sourceFiles(BE, /\.ts$/);
+  const src = (f: string) => stripComments(be(f));
+  const producers = files.filter((f) => /\bformDecision:/.test(src(f)));
+  const ctxProducers = files.filter((f) => /\brunWithVoiceForm\(/.test(src(f)) && f !== 'utils/voice-form-slots.ts');
+  it('사람 링크 결정을 받는 생산자를 뽑았다(composeVoicePrompt 에 formDecision · 요리 문맥 runWithVoiceForm)', () => {
+    expect(producers).toEqual(expect.arrayContaining(['services/ai.ts', 'utils/journey-ai-generator.ts']));
+    expect(ctxProducers).toEqual(expect.arrayContaining(['utils/one-line-ct/order.ts']));
+  });
+  it('생산자마다: 출구가 ensureOnceLink 를 지나거나 onceLink 를 출구 CT(applyCopyExitGuards)에 넘긴다 · 면제는 이유 줄', () => {
+    const bad: string[] = [];
+    for (const f of [...producers, ...ctxProducers]) {
+      if (R32_EXIT_EXEMPT[f]) continue;
+      const s = src(f);
+      const direct = /\bensureOnceLink\(/.test(s);
+      const viaExit = /\bapplyCopyExitGuards\(/.test(s) && /\bonceLink\b/.test(s);
+      if (!direct && !viaExit) bad.push(f);
+    }
+    expect(bad).toEqual([]);
+    for (const [f, why] of Object.entries(R32_EXIT_EXEMPT)) expect(why.length, f).toBeGreaterThan(20);
+  });
+  it('출구 CT: 링크 토큰 감춤 = 맨 앞 · 되돌림 = 생략 줄 지움 직전 · once = ensureOnceLink · 미등록 라벨 = 재생성 조건(마지막 판정에 OR)', () => {
+    const s = src('utils/copy-exit-guards.ts');
+    const body = s.slice(s.indexOf('export function applyCopyExitGuards('));
+    const iMask = body.indexOf('protectLinkTokens(');
+    const iFirstGuard = body.indexOf('광고');   // 첫 문안 거름 = (광고) 지움(주석은 걷었다)
+    const iRestore = body.indexOf('linkMask.restore(');
+    const iOmit = body.indexOf('stripLinkLines(');
+    const iEnsure = body.indexOf('ensureOnceLink(');
+    const iApply = body.indexOf('applyBrandLinkTokens(');
+    expect(iMask).toBeGreaterThan(0);
+    expect(iMask).toBeLessThan(iFirstGuard);
+    expect(iRestore).toBeLessThan(iOmit);
+    expect(body).toMatch(/msgField = linkMask\.restore\(msgField\);\s*if \(ctx\.linkOmit\) msgField = stripLinkLines\(msgField\);/);
+    expect(iEnsure).toBeGreaterThan(iOmit);
+    expect(iEnsure).toBeLessThan(iApply);
+    expect(body).toMatch(/flags\.placeholderLeft = [^;]*linkApplied\.unresolvedCount > 0;/);
+  });
+});

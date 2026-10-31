@@ -19,7 +19,7 @@ import type { CompanyShape } from './copy-shape';
 import { textHash } from './brand-voice-skeleton';
 import { isCopyContentType, kindOfContentType, type CopyContentType } from './copy-content-type';
 import {
-  voiceFormSlotsOf, pickableSkeletons, companyFormValuesOf, voiceFormAsksOf, resolveFormLink, voiceFormPromptSection, currentVoiceForm,
+  voiceFormSlotsOf, pickableSkeletons, companyFormValuesOf, voiceFormAsksOf, resolveFormLink, voiceFormPromptSection, currentVoiceForm, onceLinkPromptSection,
   type VoiceFormDecision, type VoiceFormSlot, type CompanyFormValues,
 } from './voice-form-slots';
 import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
@@ -599,7 +599,10 @@ export async function composeVoicePrompt(input: ComposeVoiceInput): Promise<Comp
   const linkSection = !input.brandLinks ? ''
     : formLink.mode === 'omit'
       ? '\n\n## 링크 (이번 문자)\n\n- 이번 문자에는 링크를 넣지 않는다(토큰 · 주소 · 자리 표시 모두 쓰지 않는다).'
-      : buildBrandLinkPromptSection(formLink.links, data.guideline?.link_habit || null);
+      // ★ 2026-10-31 사람이 정한 링크 = 그 토큰 하나 · 꼭 한 번(설계서 docs/2026-10-31-ai-line-answer-link-design.md P2 · 등록 목록과 경쟁하지 않게)
+      : formLink.mode === 'once'
+        ? onceLinkPromptSection(data.guideline?.link_habit || null)
+        : buildBrandLinkPromptSection(formLink.links, data.guideline?.link_habit || null);
   const kinds: BrandVoiceKind[] = input.kind === VOICE_KIND_BY_STEP ? ['marketing', 'notice'] : [input.kind];
   const sections = kinds.map((k) => ({ k, s: voiceSectionFor(data, k, input) })).filter((x) => x.s) as Array<{ k: BrandVoiceKind; s: NonNullable<ReturnType<typeof voiceSectionFor>> }>;
   if (sections.length === 0) return none(`${input.basePrompt}${linkSection}`);

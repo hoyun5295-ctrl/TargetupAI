@@ -31,7 +31,29 @@ export interface LinkHabit {
 export const LINK_PLACEHOLDER = '[링크를 입력해주세요]';
 
 /** AI 출력 토큰 — {{LINK:라벨}} (내부 공백 허용) */
-const LINK_TOKEN_RE = /\{\{\s*LINK\s*:\s*([^{}]{1,100}?)\s*\}\}/g;
+export const LINK_TOKEN_RE = /\{\{\s*LINK\s*:\s*([^{}]{1,100}?)\s*\}\}/g;
+
+/** 감춘 토큰 자리 = 사설 영역 글자 하나씩(숫자 · 혜택 낱말 0 · 이모지 지움 범위 밖) */
+const LINK_MASK_BASE = 0xe100;
+const LINK_MASK_RE = /[-]/g;
+
+/**
+ * ★ 2026-10-31 (순수) 링크 토큰 감추기(설계서 docs/2026-10-31-ai-line-answer-link-design.md P0) — 출구 문안 거름(템플릿 문법 · 금지어 · 혜택 · 날짜)이
+ *   `{{LINK:라벨}}` 을 템플릿 문법으로 읽어 지우거나 라벨을 깎는 길을 닫는다. restore = 감춘 자리를 원래 토큰으로(빠진 자리는 그대로 빠짐).
+ *   토큰이 256개를 넘으면 넘는 것은 감추지 않는다(문안 하나에 링크 1개 · 형식 상한).
+ */
+export function protectLinkTokens(text: string): { text: string; restore: (t: string) => string } {
+  const tokens: string[] = [];
+  const masked = String(text ?? '').replace(new RegExp(LINK_TOKEN_RE.source, 'g'), (m) => {
+    if (tokens.length >= 256) return m;
+    tokens.push(m);
+    return String.fromCharCode(LINK_MASK_BASE + tokens.length - 1);
+  });
+  return {
+    text: masked,
+    restore: (t: string) => String(t ?? '').replace(LINK_MASK_RE, (c) => tokens[c.charCodeAt(0) - LINK_MASK_BASE] ?? ''),
+  };
+}
 
 /** 문안 안 URL 스캔용 (habit 판별) */
 const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;

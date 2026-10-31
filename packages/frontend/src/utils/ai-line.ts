@@ -39,6 +39,8 @@ export interface AiLineAsk {
   why: string;
   options: string[];
   source: 'ai' | 'rule';
+  /** ★ 2026-10-31 미리 채울 답(링크 질문 = 한 줄 속 주소 · 서버가 정한다 · 지우면 그 뜻이 이긴다) */
+  prefill?: string;
 }
 
 /** ★ 2026-10-28 문자 종류(행사 · 신제품 · 기능 · 안부 · 공지) */

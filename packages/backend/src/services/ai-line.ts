@@ -31,14 +31,14 @@ import { lineJudgeCovered } from '../utils/line-steps-context';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
 import { enrichWithCustomFields } from '../utils/messageUtils';
 import { getBrandVoiceFit, getBrandVoiceSnapshot, voiceStatusOfSnapshot, voiceFormAsksFor } from '../utils/brand-voice-prompt';
-import { decideVoiceForm } from '../utils/voice-form-slots';
+import { decideVoiceForm, readLinkText, LINK_INVALID_ERROR } from '../utils/voice-form-slots';
 import type { VoiceStatus } from '../utils/brand-voice-state';
 import { COPY_CONTENT_TYPES, COPY_CONTENT_TYPE_LABEL, isCopyContentType, kindOfContentType, type CopyContentType } from '../utils/copy-content-type';
 import { variantNamesFor } from '../utils/copy-house-rules';
 import {
   AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK, AI_LINE_MAX_AUDIENCE,
   aiLineBaseKey, aiLineBaseKeys, aiLineCopyKey, aiLineDecoKey, aiLineComposeCost, filterChipText, quoteInLine, styleToType, maskName,
-  lineMentionsAllCustomers, aiLineLineFp, sanitizeAiAsks, mergeLineAsks, voiceLineAsks, splitVoiceLineAnswers, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind,
+  lineMentionsAllCustomers, aiLineLineFp, sanitizeAiAsks, mergeLineAsks, voiceLineAsks, splitVoiceLineAnswers, withLinkToken, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind,
   type AiLineCopyType, type AiLineAsk, type AiLineAnswer,
 } from '../utils/ai-line';
 
@@ -416,7 +416,8 @@ export async function runLineIntake(v: AiLineViewer, line: string, now: Date = n
   // ★ 2026-10-20 묻는 목록 = AI 가 한 줄을 읽고 판단한 질문 + 규칙 안전망(한 자리 · 설계서 §17)
   // ★ 2026-10-29 목소리 꼴 칸(링크 · 매장 · 연락처) 중 회사 값이 없는 칸 = 규칙 질문(설계서 docs/2026-10-29-voice-form-slots-ask-design.md · 성격 = 아직 모름 → 둘 다)
   const voiceForm = await voiceFormAsksFor(v.companyId, { kinds: ['marketing', 'notice'] });
-  const asks = mergeLineAsks(line, sanitizeAiAsks(target.copy_questions, line), voiceLineAsks(voiceForm.asks));
+  // ★ 2026-10-31 링크 질문 한 자리(설계서 docs/2026-10-31-ai-line-answer-link-design.md P1) · 한 줄 속 주소 = 그 질문의 미리 채움(다시 입력 0 · 지우면 그 뜻)
+  const asks = mergeLineAsks(line, sanitizeAiAsks(target.copy_questions, line), voiceLineAsks(voiceForm.asks), readLinkText(line)?.url ?? null);
   const voice = await lineVoiceFit(v.companyId);
 
   // ★ 2026-10-19 받는 사람을 한 줄에서 못 읽음 = 「누구에게」를 먼저 묻는다 · 그동안 기본을 걷지 않는다
@@ -549,11 +550,18 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   const count = await countHubAudience(audience);
   assertCountSendable(count);
 
-  // 칼럼을 넣으면 SMS 는 LMS 로 올린다(치환 뒤 길이 · 지금 허브 규칙과 같다)
-  const channel: 'SMS' | 'LMS' | 'MMS' = input.vars.length > 0 && input.channel === 'SMS' ? 'LMS' : input.channel;
+  // ★ 2026-10-31 문자 링크 = 링크 질문 한 자리의 답(P1 · 목소리 링크 답이 있으면 그것 · 없으면 LINE_LINK_ASK 답) · 입력만으로 정해진다(채널 · 키 앞)
+  const split = splitVoiceLineAnswers(input.facts.answers || [], []);
+  const sentLink = split.voice.link !== undefined ? split.voice.link : split.lineLink;
+  const humanLink = sentLink ? readLinkText(sentLink) : null;
+  if (sentLink && !humanLink) throw new AiLineError('VOICE_FORM_INVALID', LINK_INVALID_ERROR);
+  // 칼럼을 넣으면 SMS 는 LMS 로 올린다(치환 뒤 길이 · 지금 허브 규칙과 같다) · ★ 2026-10-31 정해진 링크도(P3 · Harold 1031 결정)
+  //   원장 키 채널 = 옛 규칙(칼럼만 · Codex 설계 1R ① · 배포 전에 낸 시도를 배포 뒤 같은 attemptToken 으로 불러도 같은 키 · 출력 채널은 키 입력만으로 정해진다)
+  const keyChannel: 'SMS' | 'LMS' | 'MMS' = input.vars.length > 0 && input.channel === 'SMS' ? 'LMS' : input.channel;
+  const channel: 'SMS' | 'LMS' | 'MMS' = (input.vars.length > 0 || humanLink) && input.channel === 'SMS' ? 'LMS' : input.channel;
   const copyKey = aiLineCopyKey(v.companyId, input.attemptToken, {
     line: input.line, facts: input.facts, filters: input.filters, allCustomers: input.allCustomers,
-    types: input.types, vars: input.vars, channel, isAd: input.isAd,
+    types: input.types, vars: input.vars, channel: keyChannel, isAd: input.isAd,
     ...(input.contentType ? { contentType: input.contentType } : {}),   // 종류 없음 = 옛 모양(같은 시도 재요청 키 무변)
   });
   return withKeyLock(copyKey, async () => {
@@ -574,13 +582,14 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   //   ★ Codex R1 high — 질문 글(AI 가 씀)은 근거 글에 넣지 않고 참고 글로만(질문 속 혜택이 근거가 되지 않게)
   // ★ 2026-10-29 꼴 칸 답 = 결정(값 · 비움 = 명시 생략 · 서버가 다시 계산한 질문만) · 그 밖 답만 근거 · 참고 글(주소를 AI 가 옮겨 쓰지 않게)
   const voiceAsk = await voiceFormAsksFor(v.companyId, { kinds: ['marketing', 'notice'] });
-  const split = splitVoiceLineAnswers(input.facts.answers || [], voiceAsk.asks);
   // 사람이 답한 칸(값 · 빈 답 = 생략) + 지금 물을 칸(답이 없으면 생략) = 결정 · 회사 값이 나중에 생겨도 사람이 정한 것이 앞선다
   const decideSlots = [...new Set([...voiceAsk.asks, ...(Object.keys(split.voice) as Array<keyof typeof split.voice>)])];
   const voiceDecided = decideVoiceForm(decideSlots, split.voice);
   if (!voiceDecided.ok) throw new AiLineError('VOICE_FORM_INVALID', voiceDecided.error);
-  const answers = split.others;
-  const licenseText = `${buildLineEventText(input.line, { benefit: input.facts.benefit })}${periodLine}${lineAnswersLicense(answers)}`;
+  // ★ 2026-10-31 정해진 링크 = 결정의 링크 칸(once · LINE_LINK_ASK 답은 목소리 결정에 없던 칸이어도) · 같은 주소의 사실 글 자리 = 그 토큰(P1)
+  const voiceForm = humanLink ? { ...voiceDecided.decision, link: { value: humanLink.url } } : voiceDecided.decision;
+  const answers = split.others.map((x) => ({ q: x.q, a: withLinkToken(x.a, humanLink) }));
+  const licenseText = `${buildLineEventText(withLinkToken(input.line, humanLink), { benefit: input.facts.benefit })}${periodLine}${lineAnswersLicense(answers)}`;
 
   const generated = await runInCreditBundle(async () => {
     const { companyInfo, customerStats } = await loadHubCompanyContext(v.companyId, v.userId, { userId: v.userId, userType: v.userType });
@@ -616,7 +625,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
         // ★ 2026-10-28 K4-4 — 사람이 고른 종류가 있으면 성격은 종류에서(광고 여부는 법 축만)
         voiceKind: input.contentType ? kindOfContentType(input.contentType) : lineVoiceKind(input.isAd),
         ...(input.contentType ? { contentType: input.contentType } : {}),
-        voiceForm: voiceDecided.decision,
+        voiceForm,
       },
     );
   });

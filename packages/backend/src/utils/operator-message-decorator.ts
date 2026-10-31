@@ -21,6 +21,7 @@ import { extractJsonFromAiText } from './ai-json';
 // ★ 2026-09-30 WP2 — 꾸미기는 변수만 녹인다. 원문에 없던 사실이 생겼는가(지시는 확률적 · 서버가 다시 본다).
 // ★ 2026-10-24 세 채널 구조체크 ② — 판정 = CT rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능 · 옛 손 판정 decoratedAddsFacts 삭제)
 import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { rewriteDropsLinks } from './voice-form-slots';
 
 export interface DecorateMessageInput {
   companyId: string;
@@ -105,10 +106,14 @@ export async function decorateOperatorMessages(
         const cand = Array.isArray(arr) ? arr[i] : undefined;
         // ★ 2026-09-30 WP2 — 원문에 없던 숫자 · 혜택 값이 생긴 문안은 원문 유지(파싱 실패와 같은 처리 · 발송 영향 0)
         const ok = typeof cand === 'string' && cand.trim().length >= 5 && !rewriteAddsFacts(cand.trim(), orig);
+        const origOut = sanitizeForSms(orig.slice(0, 2000)).sanitized;
         const decorated = ok ? (cand as string).trim() : orig;
-        const out = sanitizeForSms(decorated.slice(0, 2000)).sanitized;
+        const made = sanitizeForSms(decorated.slice(0, 2000)).sanitized;
+        // ★ 2026-10-31 원문 주소가 빠진(잘리거나 바뀐) 안 = 원문 유지(설계서 docs/2026-10-31-ai-line-answer-link-design.md P6 · 판정 = 자르기 · 정제 뒤 최종 글)
+        const linkKept = !ok || !rewriteDropsLinks(made, origOut);
+        const out = linkKept ? made : origOut;
         // ★ 1026 Codex 1R — 원문과 같은 글이면 바뀐 안이 아니다(옛: 그대로 돌려준 안도 꾸민 안으로 세어 걷었다)
-        if (!ok || out === sanitizeForSms(orig.slice(0, 2000)).sanitized) kept.push(i);
+        if (!ok || !linkKept || out === origOut) kept.push(i);
         return out;
       });
       return { messages, kept };

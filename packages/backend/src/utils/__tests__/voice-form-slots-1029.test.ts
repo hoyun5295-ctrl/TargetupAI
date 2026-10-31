@@ -81,7 +81,8 @@ describe('링크 결정 한 곳 · 생략 = 줄 지움', () => {
   const reg = [{ label: '홈페이지', url: 'https://a.co' }];
   it('registered · once(1회용 라벨 하나 더) · omit · none', () => {
     expect(resolveFormLink(reg, null).mode).toBe('registered');
-    expect(resolveFormLink([], { link: { value: 'https://b.co' } })).toEqual({ mode: 'once', links: [{ label: ONCE_LINK_LABEL, url: 'https://b.co' }] });
+    // ★ 1031 C86 — once 주소를 결정 값에서 바로 돌려주는 once 필드가 더해졌다(라벨로 거꾸로 찾지 않는다 · 1회용 라벨 하나 더는 그대로)
+    expect(resolveFormLink([], { link: { value: 'https://b.co' } })).toEqual({ mode: 'once', links: [{ label: ONCE_LINK_LABEL, url: 'https://b.co' }], once: 'https://b.co' });
     expect(resolveFormLink(reg, { link: { omit: true } })).toEqual({ mode: 'omit', links: [] });
     expect(resolveFormLink([], null).mode).toBe('none');
   });
