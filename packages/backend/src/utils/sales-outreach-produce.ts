@@ -373,6 +373,8 @@ export const OUTREACH_TEMPLATE_MONTHS: Readonly<Record<string, readonly number[]
   'event-season-backtoschool': [2, 8], 'event-season-heatwave': [7, 8], 'event-season-firstcold': [10, 11],
   // ★ 2026-10-16 시즌·명절 행사 보강
   'event-season-giftguide': [11, 12], 'event-season-holiday-edition': [11, 12], 'event-season-winter-kids': [12, 1, 2], 'event-season-holiday-hours': [1, 2, 9, 10], 'event-season-yearend-thanks': [12], 'event-season-spring-preview': [2, 3], 'event-season-newyear-reset': [12, 1],
+  // ★ 2026-10-31 시즌·명절 행사 보강(의류 · 뷰티 시즌 행사)
+  'event-season-layering-week': [3, 4, 9, 10], 'event-season-outer-fair': [10, 11], 'event-season-vacation-look': [6, 7], 'event-season-party-look': [12],
   // 데이·기념일
   'event-day-valentine': [2], 'event-day-whiteday': [3], 'event-day-carnation': [5], 'event-day-children': [5], 'event-day-newsemester': [2, 3],
   'event-day-suneung': [11], 'event-day-halloween': [10], 'event-day-roseday': [5], 'event-day-pepero': [11], 'event-day-teacher': [5],
@@ -396,6 +398,15 @@ export const OUTREACH_TEMPLATE_ANY_MONTH: readonly string[] = [
  */
 export const OUTREACH_TEMPLATE_SKIP_INDUSTRIES: Readonly<Record<string, readonly IndustryCode[]>> = {
   'sale-new-arrival': ['etc'],
+  // ★ 2026-10-31 의류 · 뷰티 행사 보강 — 옷걸이 · 피팅 · 메이크업 장면은 공용 행사 카테고리를 함께 쓰는 다른 업종 자동 선택에서 뺀다.
+  //   시즌 룩 4종은 옷 · 가방 자체를 그려서 의류(fashion)에서도 뺀다(영업 행사 배경은 상품 0 · 지어낸 옷이 그 회사 상품처럼 보인다 · Codex 1R)
+  'event-pop-trunk-show': ['food', 'sports', 'etc'], 'event-pop-sample-room': ['food', 'sports', 'etc'], 'event-pop-beauty-bar': ['food', 'sports', 'etc'],
+  'event-pop-makeover-booth': ['food', 'sports', 'etc'], 'event-pop-fitting-lounge': ['food', 'sports', 'etc'],
+  'event-mem-vip-fitting': ['beauty', 'health', 'finance'], 'event-mem-styling-day': ['beauty', 'health', 'finance'], 'event-mem-early-rack': ['beauty', 'health', 'finance'],
+  'event-season-layering-week': ['fashion', 'home', 'travel'], 'event-season-outer-fair': ['fashion', 'home', 'travel'],
+  'event-season-vacation-look': ['fashion', 'home', 'travel'], 'event-season-party-look': ['fashion', 'home', 'travel'],
+  'event-class-personal-color': ['edu', 'culture'], 'event-class-makeup-oneday': ['edu', 'culture'], 'event-class-styling-lesson': ['edu', 'culture'],
+  'event-open-beauty-lounge': ['digital', 'service'],
 };
 
 /** 이 업종 자동 선택에 써도 되는 템플릿인가(표에 없으면 전 업종). */

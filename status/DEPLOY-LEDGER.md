@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: bb719adf · 2026-10-31 · Harold 실행 출력 `git pull` = 18cc05e2..bb719adf Fast-forward 53파일(C84 · C85)
-- deployed_head: bb719adf · 2026-10-31 · Harold 보고 「여기까지 했어」(backend · frontend build:safe · pm2 reload targetup-backend · 빌드 출력 원문은 안 받음) · 그 전 18cc05e2(1030 C83 후속) · C77-ENV-1 은 아직
+- pulled_head: 33b7cdde · 2026-10-31 · Harold 보고 「배포완료」(C86 · C87 · tp-push 커밋 33b7cdde · pull 출력 원문은 안 받음)
+- deployed_head: 33b7cdde · 2026-10-31 · Harold 보고 「배포완료」(백엔드 + 프론트 · 빌드 · reload 출력 원문은 안 받음) · 그 전 bb719adf(C84 · C85) · C77-ENV-1 은 아직
 - 이번 창 확인 출력: backend-build · frontend-build · reload(Harold 보고 · 출력 원문은 안 받음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -33,8 +33,9 @@
 | C83 | 18cc05e2 |
 | C84 | bb719adf |
 | C85 | bb719adf |
-| C86 | 미커밋 |
-| C87 | 미커밋 |
+| C86 | 33b7cdde |
+| C87 | 33b7cdde |
+| C88 | 미커밋 |
 
 ## §1 대기
 
@@ -327,6 +328,14 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 선행: 코드 배포(프론트 · DDL 0 · ENV 0)
 - 기대: 포스터 하나 만들기(문구 · 장면 힌트 · 상품) → 「템플릿으로」 → 같은 템플릿 또는 다른 템플릿 고르기 → 문구 칸 = 그 템플릿 기본 문구 · 장면 힌트 · 상품 = 비어 있음 / 결과 화면 「문구·상품 수정」 = 방금 넣은 값 그대로
 - 확인: 화면(Harold · 테스트계정) · 서버 명령 0
+- 결과:
+
+### C88-S1 · 이미지 스튜디오 예시 서빙본 미리 만들기 · 새 템플릿 예시 생성(배포 뒤 · 서버 안)
+- 카드: C88
+- 단계: 사후
+- 선행: 백엔드 배포(build:safe + reload · 프론트 무변경 · DDL 0 · ENV 0)
+- 기대: ① `scripts/studio-samples.ts warm` = 기존 582장 서빙본(1400px) 미리 만듦 · 원본 합 1.5GB → 서빙본 합 출력(AI 0) ② `make 20` = 첫 20장 · 첫 줄 엔진 이름 · 실패 3 이면 멈춤 → Google 청구로 장당 값 대조 ③ 나머지 `make 180` · 끝 줄 「남은 예시 없는 템플릿 0개」 · 봄 · 여름 두 장은 파일 자체가 갈라져 있으면 옆 폴더로 옮긴 뒤 `make 2 fashion-spring-outing,fashion-summer-resort`
+- 확인: 서버 출력(Harold) · 화면 = 갤러리 첫 쪽 카드가 바로 뜸 · 쇼핑몰·상품컷 · 신상·기획전 탭 · 패션 세부 아우터 · 상의 · 하의·원피스 · 뷰티 세부 보습 예시 그림
 - 결과:
 
 ## §2 덤프 뒤 적용분

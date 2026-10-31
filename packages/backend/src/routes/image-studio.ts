@@ -31,6 +31,7 @@ import { resolveOwnerScope } from '../utils/owner-scope';
 import { LIMITS } from '../config/defaults';
 import { checkCredit, settleCreditAfterSuccess, settleOrUndo, reportCreditMiss, InsufficientCreditError, isChargedByKey } from '../utils/ai-credit';
 import { runSerial } from '../utils/inflight-lock';
+import { getServePath } from '../utils/image-serve';
 import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../utils/image-studio-attempt';
 // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
 import { aiZonePlanBlocked } from '../utils/plan-guard';
@@ -48,17 +49,20 @@ export const imageStudioRouter = Router();
 // ── GET /template-sample/:id — 템플릿 예시 실샘플 서빙 (★인증 미들웨어 앞 = 공개) ──
 //   갤러리 카드가 <img src>로 직접 로드(인증 헤더 없음). 은닉 정보 없음(완성 목업 이미지뿐).
 //   경로는 카탈로그 실존 id로만 조립(getTemplate 검증) — 임의 경로 조작 차단.
-imageStudioRouter.get('/template-sample/:id', (req: any, res: Response) => {
+imageStudioRouter.get('/template-sample/:id', async (req: any, res: Response) => {
   const id = String(req.params.id || '');
   if (!getTemplate(id)) return res.status(404).json({ success: false, error: '템플릿을 찾을 수 없습니다.' });
   const sample = findTemplateSample(id);
   if (!sample) return res.status(404).json({ success: false, error: '예시 이미지가 아직 없습니다.' });
   res.setHeader('Content-Type', sample.mime);
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  // ★ 2026-11-01 목록이 준 주소(?v=파일 시각)는 1년 캐시 — 파일을 다시 만들면 v 가 바뀐다. v 없는 옛 주소는 1시간 그대로.
+  res.setHeader('Cache-Control', req.query.v ? 'public, max-age=31536000, immutable' : 'public, max-age=3600');
   // ★ 2026-09-09 아웃리치 공개 샘플 페이지가 PUBLIC_BASE 와 다른 호스트에서 <img> 로 불러온다 —
   //   helmet 기본 Cross-Origin-Resource-Policy(same-origin)가 교차 로드를 막으므로 명시 허용(cdp.ts 인앱 이미지 서빙과 동일).
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  return res.sendFile(sample.absPath);
+  // ★ 2026-11-01 표시 기준(1400px) 변환본 서빙(utils/image-serve.ts · cdp.ts 인앱 이미지와 같은 CT) — 원본 1792×2400 평균 2.6MB 를
+  //   갤러리 카드 10장이 한꺼번에 받아 시연 때 느렸다(Harold 실측 582장 1.5GB). 변환본도 같은 확장자라 Content-Type 그대로.
+  return res.sendFile(path.resolve(await getServePath(sample.absPath)));
 });
 
 imageStudioRouter.use(authenticate);
@@ -102,10 +106,10 @@ imageStudioRouter.get('/status', (req: any, res: Response) => {
 //   ★2026-10-16 industryCategories = 이 회사 업종(뷰티·의류·요식만)의 제품 카테고리 · 그 밖·미설정·조회 실패 = null.
 //     ⛔ 회사별 값이 섞인 응답이다 · 공용 캐시(Cache-Control public 등)를 붙이지 않는다(다른 회사로 샌다).
 imageStudioRouter.get('/templates', async (req: any, res: Response) => {
-  const templates = listTemplatesPublic().map((t) => ({
-    ...t,
-    exampleUrl: t.exampleUrl || (findTemplateSample(t.id) ? `/api/image-studio/template-sample/${t.id}` : null),
-  }));
+  const templates = listTemplatesPublic().map((t) => {
+    const s = t.exampleUrl ? null : findTemplateSample(t.id);
+    return { ...t, exampleUrl: t.exampleUrl || (s ? `/api/image-studio/template-sample/${t.id}?v=${s.v}` : null) };
+  });
   const companyId = req.user?.companyId;
   const industryCategories = companyId ? studioIndustryCategories(await resolveCompanyIndustry(companyId)) : null;
   // ★ 2026-10-06 subOrder = 카테고리별 세부 칩 순서(화면이 이 순서로 칩을 그린다)

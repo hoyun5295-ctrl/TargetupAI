@@ -14,7 +14,7 @@ import {
   TEMPLATE_POOLS, INDUSTRY_TEMPLATE_MAP, pickTemplate, sanitizeDmCopyBenefits, fillOutreachDmMedia, sectionsFromAiJson,
   buildProposalEmailSections, buildOutreachPlainText, assembleProposalEmail, generateSubjectIntro, buildEmailIntroPrompt, buildOutreachSubject,
   buildOutreachMaterialBlock, buildDmSectionsPrompt, buildEmailSectionsPrompt, countBenefitPlaceholders, type ProposalEmailInput,
-  studioIndustryCategories,
+  studioIndustryCategories, OUTREACH_TEMPLATE_SKIP_INDUSTRIES, outreachTemplatePool,
 } from '../sales-outreach-produce';
 import { STUDIO_TEMPLATES } from '../image-studio-templates';
 import { getActiveStyleGuide } from '../sales-outreach-style';
@@ -65,6 +65,18 @@ describe('A-4 템플릿 풀·선택', () => {
     expect(ids.size).toBeGreaterThan(1);
     expect(TEMPLATE_POOLS.etc.event.some((t) => t.id === pickTemplate(null, 'x:0', false).id)).toBe(true);
     expect(pickTemplate('fashion', 'x:0', false).kind).toBe('event');
+  });
+  // ★ 2026-10-31 제외 표 줄마다 실제 템플릿이고, 그 업종 풀에 실제로 들어오는 것이어야 한다(오탈자 · 죽은 줄 = 장면이 그대로 샌다)
+  it('업종 제외 표의 줄은 살아 있다 · 그 업종 자동 선택 풀에는 없다', () => {
+    for (const [id, codes] of Object.entries(OUTREACH_TEMPLATE_SKIP_INDUSTRIES)) {
+      expect(STUDIO_TEMPLATES.some((t) => t.id === id), id).toBe(true);
+      for (const code of codes) {
+        expect(TEMPLATE_POOLS[code].product.concat(TEMPLATE_POOLS[code].event).some((t) => t.id === id), `${id} · ${code} 풀에 원래 없다(죽은 줄)`).toBe(true);
+        for (const kind of ['product', 'event'] as const) {
+          for (const m of [0, 3, 6, 9, 11]) expect(outreachTemplatePool(code, kind, new Date(2026, m, 15)).some((t) => t.id === id), `${id} · ${code}`).toBe(false);
+        }
+      }
+    }
   });
 });
 

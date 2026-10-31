@@ -41,16 +41,54 @@ export const STUDIO_TEMP_TTL_DAYS = Number(process.env.STUDIO_TEMP_TTL_DAYS) || 
 const STUDIO_SAMPLE_BASE = process.env.STUDIO_SAMPLE_PATH || path.resolve('./uploads/studio-samples');
 const SAMPLE_EXTS = ['jpg', 'jpeg', 'png', 'webp'] as const;
 
-export function findTemplateSample(templateId: string): { absPath: string; mime: string } | null {
-  try {
-    for (const ext of SAMPLE_EXTS) {
-      const p = path.join(STUDIO_SAMPLE_BASE, `${templateId}.${ext}`);
-      if (fs.existsSync(p)) {
-        return { absPath: p, mime: ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg' };
-      }
-    }
-  } catch { /* noop */ }
+/** v = 파일 수정 시각(ms) — 주소에 붙여 긴 캐시를 건다(파일을 다시 만들면 v 가 바뀌어 새로 받는다). */
+export function findTemplateSample(templateId: string): { absPath: string; mime: string; v: number } | null {
+  for (const ext of SAMPLE_EXTS) {
+    const p = path.join(STUDIO_SAMPLE_BASE, `${templateId}.${ext}`);
+    try {
+      const st = fs.statSync(p);
+      return { absPath: p, mime: ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg', v: Math.floor(st.mtimeMs) };
+    } catch { /* 이 확장자 없음 */ }
+  }
   return null;
+}
+
+// ── ★ 2026-11-01 예시 생성 = 서버 스크립트 전용(scripts/studio-samples.ts) · 주소 없음(1025 R15 로 지운 /template-samples/generate 대신) ──
+/** 예시 파일이 아직 없는 템플릿(ids 를 주면 그 안에서만) — 카탈로그 순서 그대로. */
+export function templatesMissingSample<T extends { id: string; exampleUrl?: string | null }>(all: readonly T[], ids?: readonly string[] | null): T[] {
+  return all.filter((t) => !t.exampleUrl && !findTemplateSample(t.id) && (!ids || ids.includes(t.id)));
+}
+
+/** 예시 한 장 저장 — 임시 파일에 쓰고 옮긴다(반쪽 파일이 서빙되거나 「있음」으로 세지지 않게). 확장자 = 모델이 준 형식. */
+export function saveTemplateSample(templateId: string, img: { base64: string; mime: string }): string {
+  fs.mkdirSync(STUDIO_SAMPLE_BASE, { recursive: true });
+  const ext = img.mime.includes('png') ? 'png' : img.mime.includes('webp') ? 'webp' : 'jpg';
+  const out = path.join(STUDIO_SAMPLE_BASE, `${templateId}.${ext}`);
+  const tmp = path.join(STUDIO_SAMPLE_BASE, `.tmp-${crypto.randomUUID()}`);
+  fs.writeFileSync(tmp, Buffer.from(img.base64, 'base64'));
+  fs.renameSync(tmp, out);
+  return out;
+}
+
+/** 예시 배치 — 앞에서부터 count 장 · 실패가 maxFail 번 쌓이면 멈춘다(장애 때 돈이 새지 않게). */
+export async function runSampleBatch<T extends { id: string }>(
+  list: readonly T[], count: number, makeOne: (t: T) => Promise<void>,
+  log: (line: string) => void = console.log, maxFail = 3,
+): Promise<{ made: string[]; failed: string[] }> {
+  const made: string[] = [];
+  const failed: string[] = [];
+  for (const t of list.slice(0, count)) {
+    try {
+      await makeOne(t);
+      made.push(t.id);
+      log(`[${made.length + failed.length}/${Math.min(count, list.length)}] ${t.id} 완료`);
+    } catch (e: any) {
+      failed.push(t.id);
+      log(`[${made.length + failed.length}/${Math.min(count, list.length)}] ${t.id} 실패: ${String(e?.code || e?.message || e).slice(0, 120)}`);
+      if (failed.length >= maxFail) { log(`실패 ${failed.length}번 · 멈춤`); break; }
+    }
+  }
+  return { made, failed };
 }
 
 /** 스튜디오 사용 가능 여부(키 미설정 = 카드 "준비 중", 500 금지 §5-3). */
