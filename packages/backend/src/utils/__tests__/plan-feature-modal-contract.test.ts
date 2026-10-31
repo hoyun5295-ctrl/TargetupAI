@@ -263,7 +263,10 @@ describe('Codex 1R — 적용 조건까지 적는다 · 짧은 화면', () => {
     expect(INTROS_RAW).toContain('그 달 발송 처리가 시작되기 전에 취소하면');
     expect(INTROS_RAW).not.toContain('아무것도 나가지 않은 채 취소하면');
     expect(INTROS_RAW).toContain('직접 쓴 문안은 같은 문안이 한 번 통과했으면 그 결과를 쓰고');
-    expect(INTROS_RAW).toContain('통과 알림은 단계별로 켜고 끌 수 있습니다(기본은 첫 단계와 마지막 단계)');
+    // ★ 1031 여정 검사 시점 = 보내기 전(보통 2시간 전 · 바로 보내는 단계는 그날 첫 발송 전) · 기본 = 첫 · 마지막 메시지 단계(설계서 2026-10-31 §2-7)
+    expect(INTROS_RAW).toContain('통과 알림은 단계별로 켜고 끌 수 있습니다(기본은 첫 메시지 단계와 마지막 메시지 단계)');
+    expect(INTROS_RAW).toContain('단계마다 보내기 전에 검사합니다(보통 2시간 전 · 바로 보내는 단계는 그날 첫 발송 전)');
+    expect(INTROS_RAW).not.toContain('단계마다 보내기 2시간 전에 검사합니다');
     expect(INTROS_RAW).toContain('행사 포스터는 문구 위치도 고릅니다');
     expect(INTROS_RAW).not.toContain('문구는 적은 그대로 넣고 위치를 고릅니다');
   });

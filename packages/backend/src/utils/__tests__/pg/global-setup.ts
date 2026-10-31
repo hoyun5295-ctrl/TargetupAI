@@ -15,6 +15,12 @@ import { parseLedger } from '../../../../scripts/deploy-ledger-lib.mjs';
 
 export const TEMPLATES = ['t_tpl', 't_tpl_closed', 't_tpl_after'] as const;
 export const LEDGER_PATH = join(BACKEND_ROOT, '..', '..', 'status', 'DEPLOY-LEDGER.md');
+/** ★ 2026-10-31 원장 SQL 블록 하나(시험 파일이 자기 사본에 대기 DDL 을 얹을 때 · 원장 SQL 도 함께 검증) */
+export function ledgerBlockSql(id: string): string {
+  const b = parseLedger(readFileSync(LEDGER_PATH, 'utf8')).blocks.find((x: any) => x.id === id);
+  if (!b) throw new Error(`원장 블록 ${id} 없음`);
+  return b.sql;
+}
 
 async function onDb<T>(db: string, work: (c: Client) => Promise<T>): Promise<T> {
   const c = new Client({ connectionString: pgTestUrl(db) });

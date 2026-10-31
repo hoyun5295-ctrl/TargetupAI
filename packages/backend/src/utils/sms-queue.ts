@@ -1585,8 +1585,12 @@ export async function bulkInsertSmsQueue(
   rows: any[][],
   useNow: boolean = false,
   ctx?: SpamBlockContext,
+  // ★ 2026-10-31 배치 INSERT 를 실행할 함수 — 여정 담당자 안내만 상한 있는 연결(withBoundedMysql)을 넘긴다.
+  //   없으면 지금처럼 공용 풀(mysqlQuery) · 금칙어 탐지 · 시연 막기 · 라인 나누기 · 실패 배치 미집계는 그대로(설계서 2026-10-31 §2-8).
+  opts?: { run?: (sql: string, params?: any[]) => Promise<any> },
 ): Promise<number> {
   if (rows.length === 0) return 0;
+  const exec = opts?.run ?? mysqlQuery;
   // ★ 2026-10-09 시연 회사 최후 방어 — 회사 = ctx 또는 행의 app_etc2(row[7])
   for (const id of new Set([(ctx as any)?.companyId, ...rows.map((r) => r[7])].filter((v) => typeof v === 'string' && v))) await guardDemoLeak('bulkInsertSmsQueue', id as string);
 
@@ -1630,7 +1634,7 @@ export async function bulkInsertSmsQueue(
           // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 사용
           const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
           const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9], row[10]]).flat();
-          await mysqlQuery(
+          await exec(
             `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
             flatValues
           );
@@ -1638,7 +1642,7 @@ export async function bulkInsertSmsQueue(
           // 예약/분할: sendTime(row[5]) 파라미터 그대로 사용
           const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
           const flatValues = batch.flat();
-          await mysqlQuery(
+          await exec(
             `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
             flatValues
           );

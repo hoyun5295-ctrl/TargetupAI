@@ -4,6 +4,7 @@ import {
   PencilLine, Upload, Users, Check, Info, Loader2, Inbox,
 } from 'lucide-react';
 import { cellToString } from '../utils/formatDate';
+import { appendUpdater } from '../utils/recipient-paste';
 import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 
 /**
@@ -71,6 +72,8 @@ interface AddressBookModalProps {
   directRecipients: { phone: string; name: string; extra1: string; extra2: string; extra3: string }[];
   setDirectRecipients: React.Dispatch<React.SetStateAction<{ phone: string; name: string; extra1: string; extra2: string; extra3: string }[]>>;
   setToast: (t: { show: boolean; type: 'error' | 'success'; message: string }) => void;
+  /** 불러온 줄의 중복 규칙 = 여는 창의 직접입력 규칙(알림톡 = 그 창 [중복제거] · 직접발송 = 안 넘김 = 전부 더하고 보낼 때 뺀다) */
+  dedupOnAdd?: boolean;
 }
 
 export default function AddressBookModal({
@@ -79,6 +82,7 @@ export default function AddressBookModal({
   directRecipients,
   setDirectRecipients,
   setToast,
+  dedupOnAdd = false,
 }: AddressBookModalProps) {
   const [addressGroups, setAddressGroups] = useState<AddressGroup[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -193,6 +197,33 @@ export default function AddressBookModal({
     setTimeout(() => setToast({ show: false, type: 'success', message: '' }), 3000);
   };
 
+  /**
+   * ★ 2026-10-31 접수 cmvuih2n(뿌리 대장 R31) — 주소록 불러오기 = 지금 명단에 **더한다**.
+   *   옛: 명단을 통째로 바꿔 먼저 직접입력한 번호가 사라졌다(0925 알림톡 붙여넣기 「추가인데 교체」와 같은 부류).
+   *   판정 = planAppendBy(직접입력 붙여넣기의 planAppend 와 같은 함수) · 중복 규칙 = dedupOnAdd(여는 창의 직접입력 규칙).
+   *   판정 = 갱신 함수 하나(appendUpdater · 그 순간 명단 prev 기준) · 알림 · 창 닫힘 = 반영(커밋) 뒤 효과가 그 판정을 읽는다(Codex C85 1R · 2R).
+   *   두 갱신(명단 · noticeSeq)은 같은 비동기 이어짐에서 걸려 같은 우선순위로 한 번에 그려진다 → 효과가 읽는 판정 = 반영된 명단의 판정.
+   */
+  const noticeRef = React.useRef<{ add: number; dup: number; dedup: boolean; empty: boolean; label: string; onAdded: () => void } | null>(null);
+  const [noticeSeq, setNoticeSeq] = useState(0);
+  const addToList = (rows: Contact5[], label: string, onAdded: () => void) => {
+    setDirectRecipients(appendUpdater(rows, dedupOnAdd, (r) => r.phone, (plan) => {
+      noticeRef.current = { add: plan.add.length, dup: plan.dup, dedup: dedupOnAdd, empty: rows.length === 0, label, onAdded };
+    }));
+    setNoticeSeq((n) => n + 1);
+  };
+  React.useEffect(() => {
+    const n = noticeRef.current;
+    if (!n) return;
+    noticeRef.current = null;
+    if (n.add === 0) {
+      showError(n.empty ? '주소록에 번호가 없어요' : '고른 주소록 번호가 모두 이미 명단에 있어요');
+      return;
+    }
+    showSuccess(`${n.label}${n.add.toLocaleString()}명을 지금 명단에 더했어요${n.dedup && n.dup > 0 ? ` · 중복 ${n.dup.toLocaleString()}명 제외` : ''}`);
+    n.onAdded();
+  }, [noticeSeq]);
+
   /** 그룹 목록 다시 읽기 → 고를 주소록: 방금 저장한 이름 → 지금 고른 것 → 맨 위 */
   const refreshGroups = async (prefer?: { key?: string; name?: string }) => {
     const token = localStorage.getItem('token');
@@ -299,16 +330,15 @@ export default function AddressBookModal({
       const data = await res.json();
       if (seq !== loadSeqRef.current) return;   // 그 사이 창이 닫혔다 — 명단에 쓰지 않는다
       if (data.success) {
-        setDirectRecipients(data.contacts.map((c: any) => ({
+        const rows: Contact5[] = data.contacts.map((c: any) => ({
           // ★ D150-3 (2026-05-09) PDF #5: 0/'0' 보존
           phone: c.phone,
           name: cellToString(c.name),
           extra1: cellToString(c.extra1),
           extra2: cellToString(c.extra2),
           extra3: cellToString(c.extra3)
-        })));
-        onClose();
-        showSuccess(`${data.contacts.length}명 불러오기 완료`);
+        }));
+        addToList(rows, '', onClose);
       } else {
         showError(data.error || '주소록을 불러오지 못했습니다.');
       }
@@ -350,10 +380,10 @@ export default function AddressBookModal({
         } catch (e) { /* 한 그룹 실패해도 다음 진행 */ }
       }
       if (seq !== loadSeqRef.current) return;   // 그 사이 창이 닫혔다 — 명단에 쓰지 않는다
-      setDirectRecipients(allContacts);
-      setSelectedGroupNames(new Set());
-      onClose();
-      showSuccess(`${selectedGroupNames.size}개 그룹 ${allContacts.length}명 불러오기 완료 (중복 제거)`);
+      addToList(allContacts, `${picked.length}개 그룹에서 `, () => {
+        setSelectedGroupNames(new Set());
+        onClose();
+      });
     } finally {
       if (seq === loadSeqRef.current) setListLoading(false);
     }
@@ -644,7 +674,7 @@ export default function AddressBookModal({
         </div>
         <button type="button" className={`${BTN} border-stone-600 bg-transparent text-stone-200 hover:bg-stone-800`} onClick={() => setSelectedGroupNames(new Set())}>고르기 풀기</button>
         <button type="button" className={BTN_EM} onClick={handleLoadMultipleGroups}>
-          {selectedGroupNames.size > 1 ? `고른 ${selectedGroupNames.size}개 합쳐서 불러오기` : '고른 1개 불러오기'}
+          {selectedGroupNames.size > 1 ? `고른 ${selectedGroupNames.size}개 합쳐서 더하기` : '고른 1개 더하기'}
         </button>
       </footer>
     );
@@ -878,7 +908,7 @@ export default function AddressBookModal({
         </div>
         <div className="flex flex-wrap gap-2 items-center px-4 md:px-6 pb-3.5">
           <button type="button" className={BTN_EM} onClick={() => loadGroupIntoRecipients(viewGroup)} disabled={isUploading}>
-            <ArrowDownToLine className="w-4 h-4" />발송 목록으로 불러오기
+            <ArrowDownToLine className="w-4 h-4" />발송 목록에 더하기
           </button>
           {/* ★ D219+ Part 2 (2026-05-27): 박과장님 신고 — 추가 · 다운로드(xlsx) */}
           <button type="button" className={BTN_LINE} onClick={() => handleStartAppend(viewGroup)} disabled={isUploading}>

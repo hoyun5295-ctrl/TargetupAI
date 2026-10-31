@@ -34,8 +34,13 @@ import {
   isAnchorCycleComplete,
   shiftToSendableHour,
 } from './send-time-util';
+// ★ 2026-10-31 앞보기 창 = 발송 전 스캔과 같은 상수(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-3)
+import { PRETEST_LEAD_HOURS } from './journey-pretest-notifier';
 
 const DEFAULT_ANCHOR_HOUR_KST = 10;
+
+/** ★ 2026-10-31 칸 하나 뽑아 넣기의 결과 종류(「그날 처리함」 기억은 결과에서 · 대상 0 만 메모리) */
+export type AnchorDispatchKind = 'dispatched' | 'no_target' | 'capped' | 'not_active';
 
 interface AnchorJourneyRow {
   id: string;
@@ -66,8 +71,29 @@ let workerRunning = false;
 // ★ 2026-09-28 한줄로 V2 R261 — (여정 · 스텝 · 발송일) 처리 완료 표식. 발송 시각이 지나면 그날 남은 30분 틱마다
 //   대상 전체를 다시 뽑고 ON CONFLICT로 버렸다(무거운 추출 반복). 게다가 그 사이 대상이 늘어 상한을 넘으면
 //   이미 보낸 뒤에 여정이 정지됐다. 지정일 발송은 발송 시각의 대상이 기준이다 → 한 번 처리한 날은 다시 뽑지 않는다.
-//   표식은 프로세스 메모리 — 재시작하면 한 번 더 뽑지만 ON CONFLICT가 중복 발송을 막는다(전과 같다).
-const _anchorStepDone = new Map<string, string>(); // `${journeyId}:${stepId}` → 처리한 발송일(KST)
+// ★ 2026-10-31 「그날 처리함」 = 결과에서 끌어낸다(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-3 · Codex 설계 1R ② · 2R).
+//   뽑아 넣음 = journey_anchor_dispatch 에 (여정 · 칸 · 발송일) 행이 있음(DB · 재시작해도 다시 안 뽑음) ·
+//   대상 0 = 이 메모리에만 그날 기억(행이 없다 · 재시작하면 한 번 더 뽑는다) · 상한 초과 · 꺼짐 = 아무것도 기억하지 않는다(같은 날 다시 켜면 다시 뽑음).
+//   옛: 결과와 상관없이 메모리에 찍어 재시작 뒤 다시 뽑아 상한 초과로 잡아 둔 발송까지 멈췄고, 상한 초과 날 다시 켜도 안 뽑았다.
+const _anchorNoTarget = new Map<string, string>(); // `${journeyId}:${stepId}` → 대상 0 이던 발송일(KST)
+
+/** ★ 2026-10-31 칸 발송 판정 — 발송 예정일이 오늘(KST)이고 보낼 시각 2시간 전(스캔 앞보기 창)이 됐는가. 앞서 만든 실행은 next_run_at = runAt. */
+export function anchorDispatchDue(runAt: Date, now: Date): boolean {
+  if (kstDateStr(runAt) !== kstDateStr(now)) return false;
+  return now.getTime() >= runAt.getTime() - PRETEST_LEAD_HOURS * 60 * 60 * 1000;
+}
+
+/** (여정 · 칸 · 발송일)을 이미 뽑아 넣었는가(PK 앞부분 = journey_id · step_id). */
+export async function anchorStepDispatched(journeyId: string, stepId: string, sendDate: string): Promise<boolean> {
+  const r = await query(
+    `SELECT 1 FROM journey_anchor_dispatch WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3::date LIMIT 1`,
+    [journeyId, stepId, sendDate],
+  );
+  return r.rows.length > 0;
+}
+
+/** 시험 전용. */
+export function resetAnchorNoTargetMemory(): void { _anchorNoTarget.clear(); }
 
 export async function runJourneyAnchorScheduler(now: Date = new Date()): Promise<{ journeys: number; dispatched: number; enqueued: number }> {
   if (workerRunning) return { journeys: 0, dispatched: 0, enqueued: 0 };
@@ -124,16 +150,16 @@ async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ d
     const offset = step.anchor_offset_days != null ? Number(step.anchor_offset_days) : 0;
     const stepHour = step.target_hour_kst != null ? Number(step.target_hour_kst) : hourKst;
     const runAt = computeAnchorStepRunAt(anchorDate, offset, stepHour);
-    // 발송 예정일이 오늘(KST)이고 발송 시각이 도래했는가.
-    if (kstDateStr(runAt) !== todayKst) continue;
-    if (now.getTime() < runAt.getTime()) continue;
+    // ★ 2026-10-31 발송 예정일이 오늘(KST)이고 보낼 시각 2시간 전이 됐는가(앞서 만든 실행 = 2시간 전 검사 · 담당자 안내 · 정지 링크가 그대로 걸린다).
+    if (!anchorDispatchDue(runAt, now)) continue;
 
     const sendDate = kstDateStr(runAt); // = todayKst
     const doneKey = `${j.id}:${step.id}`;
-    if (_anchorStepDone.get(doneKey) === sendDate) continue; // ★ R261 오늘 이미 처리한 스텝
+    for (const [k, d] of _anchorNoTarget) if (d !== todayKst) _anchorNoTarget.delete(k);
+    if (_anchorNoTarget.get(doneKey) === sendDate) continue;              // 오늘 대상 0 이던 칸(메모리)
+    if (await anchorStepDispatched(j.id, step.id, sendDate)) continue;   // 오늘 이미 뽑아 넣은 칸(DB)
     const res = await dispatchAnchorStep(j, step, runAt, sendDate, now);
-    _anchorStepDone.set(doneKey, sendDate); // 성공(던지지 않음)한 뒤에만 표시 — 실패는 다음 틱에 다시 시도
-    for (const [k, d] of _anchorStepDone) if (d !== todayKst) _anchorStepDone.delete(k);
+    if (res.kind === 'no_target') _anchorNoTarget.set(doneKey, sendDate); // 상한 초과 · 꺼짐 = 기억 0(같은 날 다시 켜면 다시 뽑음)
     dispatched++;
     enqueued += res.enqueued;
   }
@@ -175,12 +201,12 @@ async function dispatchAnchorStep(
   runAt: Date,
   sendDate: string,
   now: Date,
-): Promise<{ enqueued: number }> {
+): Promise<{ kind: AnchorDispatchKind; enqueued: number }> {
   // 대상 추출 — 안전필터 + 대상 조건(audience). 대량 차단(threshold) 적용.
   const cap = j.threshold_recipients_per_step;
   const extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
   const ids = await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, extractLimit, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id));
-  if (ids.length === 0) return { enqueued: 0 };
+  if (ids.length === 0) return { kind: 'no_target', enqueued: 0 };
   if (cap != null && entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
     await query(
       `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
@@ -188,7 +214,7 @@ async function dispatchAnchorStep(
       [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`],
     );
     console.warn(`[JourneyAnchor] 대량 차단 — journey=${j.id} step=${step.step_order} 후보=${ids.length} 상한=${cap} → 정지`);
-    return { enqueued: 0 };
+    return { kind: 'capped', enqueued: 0 };
   }
 
   // 멱등 dispatch + 단발 execution 생성을 한 트랜잭션 — ON CONFLICT로 (journey,step,customer,날짜) 1회.
@@ -200,7 +226,7 @@ async function dispatchAnchorStep(
     // ★ 2026-10-25 Codex 1R — 넣기 관문(같은 계보 잠금 안 · 그사이 끝내기 · 멈추기면 넣지 않는다)
     if (!(await lockEntryIfActive(client, j.id)).ok) {
       await client.query('ROLLBACK');
-      return { enqueued: 0 };
+      return { kind: 'not_active', enqueued: 0 };
     }
     const claimed = await client.query(
       `INSERT INTO journey_anchor_dispatch (journey_id, step_id, customer_id, send_date)
@@ -242,7 +268,7 @@ async function dispatchAnchorStep(
   if (enqueued > 0) {
     console.log(`[JourneyAnchor] journey=${j.id} step=${step.step_order} (${sendDate}) 단발 enqueue=${enqueued}`);
   }
-  return { enqueued };
+  return { kind: 'dispatched', enqueued };
 }
 
 /**

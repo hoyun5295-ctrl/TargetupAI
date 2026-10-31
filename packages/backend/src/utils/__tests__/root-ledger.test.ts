@@ -1107,10 +1107,15 @@ describe('R8 넓힘 — 여정 실행 · 재검사의 재시도에 상한', () =
     expect(bad).toEqual([]);
     expect(be('utils/journey-executor.ts')).toMatch(/const EXECUTION_ERROR_MAX = \d+;/);
   });
-  it('2시간 전 재검사의 검사 장애 = 같은 날 상한(PRETEST_CHECK_ERROR_MAX) 뒤 멈춤 · 고친 문안 검사 장애도 같은 상한', () => {
+  it('2시간 전 재검사의 검사 장애 = 같은 날 상한(PRETEST_CHECK_ERROR_MAX) 뒤 멈춤 · 고친 문안 검사 장애도 같은 상한 · ★1031 묶음 처리 예외 · 안내 시도도 상한', () => {
     const pn = stripComments(be('utils/journey-pretest-notifier.ts'));
     expect(pn).toMatch(/const PRETEST_CHECK_ERROR_MAX = \d+;/);
-    expect((pn.match(/if \(n < PRETEST_CHECK_ERROR_MAX\) continue;/g) || []).length).toBe(2);
+    expect((pn.match(/if \(n < PRETEST_CHECK_ERROR_MAX\) return;/g) || []).length).toBe(2);
+    // ★ 1031 묶음 처리 예외(기록 쓰기 실패 등) = 같은 날 상한 뒤 그 묶음을 SQL 안에서 뺀다 · 안내 시도 = DB 시도 수(3)
+    expect(pn).toMatch(/const PRETEST_BUNDLE_EXCEPTION_MAX = \d+;/);
+    expect(pn).toContain('if (n >= PRETEST_BUNDLE_EXCEPTION_MAX) {');
+    expect(pn).toContain("AND notice_attempts < $2 RETURNING id`,");
+    expect(stripComments(be('utils/journey-notice-once.ts'))).toMatch(/export const NOTICE_MAX_ATTEMPTS = 3;/);
   });
 });
 
@@ -1129,7 +1134,9 @@ describe('R12 넓힘 — 여정 SQL 의 묶음 LIMIT 은 순서가 정해져 있
   it('재검사 후보 = 그날 처리 거름 · 묶음 하나 = 한 행이 LIMIT 앞(SQL)', () => {
     const pn = stripComments(be('utils/journey-pretest-notifier.ts'));
     const sql = pn.slice(pn.indexOf('SELECT DISTINCT ON (je.journey_id, s.id'), pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
-    expect(sql).toContain('FROM journey_pretest_schedules ps');
+    // ★ 1031 그날 마침 = 판정 조각 한 곳(pretestDoneSql) · 그날 처리를 멈춘 묶음도 LIMIT 앞에서 뺀다
+    expect(sql).toContain("OR NOT ${pretestDoneSql('je.journey_id', 's.id', day)}");
+    expect(sql).toContain('= ANY($1::text[]))');
     expect(sql).toContain('ORDER BY b.next_run_at ASC');
   });
 });
@@ -1588,7 +1595,6 @@ const PLAIN_ERROR_OK: Record<string, string> = {
   "utils/cafe24-client.ts|카페24 OAuth 환경변수가 설정되지 않았": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
   "utils/cafe24-client.ts|카페24 토큰 교환 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
   "utils/cafe24-client.ts|카페24 API 호출 실패 (…): …": "외부 연동 · 조회 실패 원문(로그 · 고객에게는 라우트 안내 문장)",
-  "utils/campaign-sync-worker.ts|여정 결과 안내 적재 0건": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/cdp-member-token.ts|회원 토큰 서명 키가 없습니다(서버 설정).": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
   "utils/channel-eligibility.ts|안전하지 않은 테이블 alias: …": "내부 불변식(SQL 조각 안전)",
   "utils/charge-approve-link.ts|JWT_SECRET 미설정: 승인 토큰을 서": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
@@ -2127,6 +2133,7 @@ const R6_CLOSERS: Record<string, { file?: string; has?: RegExp; why: string }> =
   'email_campaigns|scheduled': { file: 'utils/email-send-sweeper.ts', has: /WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= NOW\(\)/, why: '예약 시각이 되면 집어 보낸다(집은 뒤 sending)' },
   'email_campaigns|sending': { file: 'utils/email-send-sweeper.ts', why: '30분 정체 = 실패 종결' },
   'journey_executions|active': { why: '여정 실행 상태 = R6 여정 시험이 값 · 멈춤 사유를 덮는다' },
+  'journey_pretest_schedules|notified': { why: '★1031 그날 그 칸 검사 · 담당자 안내를 마친 기록(그 날 관문 판정에만 쓰인다 · 날이 지나면 읽히지 않는 종결 기록 · 설계서 2026-10-31 §2-1)' },
   'journey_executions|paused': { why: '여정 실행 상태 = R6 여정 시험이 덮는다' },
   'journeys|active': { why: '사람이 켜고 끄는 여정' },
   'journeys|draft': { why: '사람이 만드는 중인 여정(켜기 전)' },
@@ -3628,5 +3635,94 @@ describe('R29(1029) 쓸 수 있는 싱크 자격이 생기는 곳 = 출발지 �
   it('R1 출발지 INSERT = geo-access.ts 한 곳', () => {
     const hits = filesOf().filter((f) => /INSERT\s+INTO\s+access_origin_allowlist/i.test(f.src)).map((f) => f.rel);
     expect(hits).toEqual(['src/utils/geo-access.ts']);
+  });
+});
+
+// ── R30 칸 관문 · 담당자 안내 = 그 칸 발송에 묶는다(1031 · 설계서 docs/2026-10-31-journey-step-gate-notice-design.md §4) ──
+describe('R30(1031) 여정 칸 관문 · 담당자 안내 = 그 칸 발송 사건에 묶는다(앞날 스캔 · 실행 완료에 걸려 바로 칸 · 날짜 기준 · 중간 칸 안내가 빠졌다)', () => {
+  const SRC = SERVER_SRC.map((rel) => ({ rel, src: stripComments(be(rel)) }));
+  const SENDING_INSERT = /INSERT\s+INTO\s+journey_step_logs[\s\S]{0,400}?'sending'/;
+  const PS_STATUS_CMP = /journey_pretest_schedules[\s\S]{0,300}?status\s*(=|IN)\s*\(?'/;
+  const NOTIFY_DEFAULT = /(stepOrder|step_order)\s*===\s*1\s*\|\|/;
+  it('여정 문자 발송 표식(journey_step_logs · sending INSERT)을 쓰는 파일 = 관문 판정 조각을 부르고 · 같은 함수에서 표식 INSERT 보다 앞', () => {
+    const senders = SRC.filter((f) => SENDING_INSERT.test(f.src));
+    expect(senders.map((f) => f.rel)).toEqual(['utils/journey-executor.ts']);   // 새 발송 자리가 생기면 여기서 실패 → 그 파일도 관문을 받는다
+    for (const f of senders) {
+      const ins = f.src.search(SENDING_INSERT);
+      const body = f.src.slice(f.src.lastIndexOf('\nasync function ', ins), ins);
+      expect(body).toMatch(/pretestDoneSql\(/);
+      expect(body).toMatch(/if \(!gate\.rows\[0\]\?\.checked_today\)/);
+    }
+  });
+  it('journey_pretest_schedules 를 읽는 SELECT · EXISTS = 판정 주인(notifier) 한 파일 · 상태 직접 비교 = 그 파일 밖 0 · 조각을 부르는 파일 = 실행기 · notifier', () => {
+    expect(SRC.filter((f) => /(SELECT|EXISTS)[\s\S]{0,300}?FROM\s+journey_pretest_schedules/.test(f.src)).map((f) => f.rel)).toEqual(['utils/journey-pretest-notifier.ts']);
+    expect(SRC.filter((f) => f.rel !== 'utils/journey-pretest-notifier.ts' && PS_STATUS_CMP.test(f.src)).map((f) => f.rel)).toEqual([]);
+    expect(SRC.filter((f) => /\bpretestDoneSql\(/.test(f.src)).map((f) => f.rel).sort()).toEqual(['utils/journey-executor.ts', 'utils/journey-pretest-notifier.ts']);
+  });
+  it('칸 결과 안내 후보 = 칸 · 날짜 단계 캠페인(실행 완료로 고르지 않는다) · result_notified_at 쓰기 = 플래너 월간 표만(면제 · 다른 표 · 월간 1회 멱등)', () => {
+    const r = stripComments(be('utils/journey-result-notice.ts'));
+    expect(r).toMatch(/FROM journey_step_campaigns jsc/);
+    expect(r).not.toMatch(/status\s*=\s*'completed'/);
+    expect(SRC.filter((f) => /result_notified_at\s*=\s*(NOW|NULL)/.test(f.src)).map((f) => f.rel)).toEqual(['utils/planner-report.ts']);
+  });
+  it('알림 기본값 계산(첫 칸 OR 꼴) = journey-step-notify 밖 0(서버 · 화면)', () => {
+    expect(SRC.filter((f) => NOTIFY_DEFAULT.test(f.src)).map((f) => f.rel)).toEqual([]);
+    expect(sourceFiles(FE, /\.tsx?$/).filter((rel) => NOTIFY_DEFAULT.test(stripComments(read(join(FE, rel)))))).toEqual([]);
+  });
+  it('반례 = 각 판정이 실제로 잡는다', () => {
+    const fake = "async function x() { const q = `INSERT INTO journey_step_logs (id, status) VALUES (gen_random_uuid(), 'sending')`; }";
+    expect(SENDING_INSERT.test(fake)).toBe(true);
+    expect(/pretestDoneSql\(/.test(fake)).toBe(false);
+    expect(PS_STATUS_CMP.test("SELECT 1 FROM journey_pretest_schedules ps WHERE ps.status = 'notified'")).toBe(true);
+    expect(PS_STATUS_CMP.test("AND ps.status IN ('notified', 'cancelled')".replace('AND', 'FROM journey_pretest_schedules ps WHERE'))).toBe(true);
+    expect(NOTIFY_DEFAULT.test('const on = stepOrder === 1 || stepOrder === totalSteps;')).toBe(true);
+    expect(/result_notified_at\s*=\s*(NOW|NULL)/.test('UPDATE journey_executions SET result_notified_at = NOW() WHERE id = ANY($1)')).toBe(true);
+  });
+});
+
+// ── R16 넓힘(1031 · 접수 cmvujgxpe) — 추천 타겟 리스트 조건 칸 · 여정 대상 날짜 칸 = 글자 ──
+describe('R16 넓힘(1031) — 화면 명단으로 가는 FIELD_MAP 날짜 칸은 글자로 읽는다', () => {
+  it('FIELD_MAP 에서 뽑은 date 칸마다 조건 칸 조각 = ::text', async () => {
+    const { FIELD_MAP } = await import('../standard-field-map');
+    const { resolveConditionColumns } = await import('../operator-recipients');
+    const dateCols = FIELD_MAP.filter((f) => f.dataType === 'date' && f.storageType === 'column');
+    expect(dateCols.map((f) => f.fieldKey)).toEqual(expect.arrayContaining(['birth_date', 'recent_purchase_date']));
+    const cols = resolveConditionColumns(Object.fromEntries(dateCols.map((f) => [f.fieldKey, { operator: 'gte', value: '2026-01-01' }])), FIELD_MAP);
+    expect(cols.filter((c) => !c.select.endsWith(`::text AS ${c.key}`)).map((c) => c.select)).toEqual([]);
+    expect(cols).toHaveLength(dateCols.length);
+  });
+  it('여정 대상 명단 = 날짜 칸을 Date 로 감싸 표시하지 않는다', () => {
+    const ai = stripComments(be('routes/ai.ts'));
+    expect(ai).toContain('recent_purchase_date::text AS recent_purchase_date');
+    expect(ai).not.toMatch(/new Date\(r\.(birth_date|recent_purchase_date)\)\.toLocale/);
+  });
+});
+
+// ── R31(1031 · 접수 cmvuih2n) — 받는 사람 불러오기가 지금 명단을 말없이 바꿈 ──
+describe('R31 받는 사람 불러오기 = 지금 명단에 더한다 · 중복 규칙 = 여는 창의 직접입력 규칙', () => {
+  const hosts = sourceFiles(FE, /\.tsx$/).filter((f) => /<AddressBookModal\b/.test(stripComments(read(join(FE, f)))));
+  it('주소록 창을 여는 곳을 뽑았다', () => {
+    expect(hosts).toEqual(expect.arrayContaining(['pages/Dashboard.tsx', 'components/AlimtalkSendModal.tsx']));
+  });
+  it('여는 곳마다: 그 파일 붙여넣기가 [중복제거] 토글로 planAppend 하면 dedupOnAdd={dedupEnabled} · 아니면 넘기지 않는다', () => {
+    const bad: string[] = [];
+    for (const f of hosts) {
+      const src = stripComments(read(join(FE, f)));
+      const togglePaste = /planAppend\([^;]*\bdedupEnabled\)/.test(src);
+      const passes = /dedupOnAdd=\{dedupEnabled\}/.test(src);
+      const passesAny = /\bdedupOnAdd=/.test(src);
+      if (togglePaste && !passes) bad.push(`${f} 토글 규칙인데 dedupOnAdd 없음`);
+      if (!togglePaste && passesAny) bad.push(`${f} 토글 규칙이 아닌데 dedupOnAdd`);
+    }
+    expect(bad).toEqual([]);
+  });
+  it('주소록 창 안 명단 쓰기 = 한 곳 · 갱신 함수(appendUpdater · 그 순간 prev 로 판정) · 바꾸기 0', () => {
+    const src = stripComments(read(join(FE, 'components/AddressBookModal.tsx')));
+    const writes = src.split('\n').filter((l) => /setDirectRecipients\(/.test(l));
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatch(/setDirectRecipients\(appendUpdater\(/);
+    expect(src).not.toMatch(/flushSync/);
+    const ct = stripComments(read(join(FE, 'utils/recipient-paste.ts')));
+    expect(ct).toMatch(/return \(prev\) => \{\s*const plan = planAppendBy\(rows, prev\.map\(phoneOf\), dedup, phoneOf\);\s*onPlan\(plan\);/);
   });
 });

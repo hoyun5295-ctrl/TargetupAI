@@ -153,18 +153,21 @@ describe('B 2R 받는 사람 문형(허용 목록)', () => {
 describe('C 알림 · 정지 결과', () => {
   it('★ C 2R — 알림 성공 = 큐에 실제로 한 건(보낼 것 없음 = 성공 · 적재 0건 = 실패)', () => {
     const src = read('../journey-pretest-notifier.ts');
-    const fn = src.slice(src.indexOf('async function notifyManagerForStep('));
+    // ★ 1031 안내 = 만들기(buildManagerNotice · null = 보낼 것 없음) + 적재(enqueueManagerNotice · 상한 있는 연결)
+    const fn = src.slice(src.indexOf('async function enqueueManagerNotice('));
     expect(fn).toMatch(/Promise<boolean>/);
-    expect(fn).toContain('const inserted = await bulkInsertSmsQueue(');
+    expect(fn).toContain('const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(');
     expect(fn).toContain('return inserted === 1;');
     expect((fn.slice(0, fn.indexOf('const inserted')).match(/return;/g) || []).length).toBe(0);
-    expect(src).toContain('const ok = await notifyManagerForStep(b, preview, mode);');
+    const safe = src.slice(src.indexOf('async function safeNotify('));
+    inOrder(safe, ['const notice = await buildManagerNotice(b, preview, mode);', 'if (!notice) return true;', 'const ok = await enqueueManagerNotice(notice, b.companyId);', 'return ok;']);
   });
   it('자동 보정 = 알림 성공 뒤에만 본문 갱신 · 실패 = 여정 정지', () => {
     const src = read('../journey-pretest-notifier.ts');
     expect(src.indexOf("if (r2.verdict === 'pass') {")).toBeGreaterThan(-1);   // ★1025 #14 — 판정 = 공용 3값
     const seg = src.slice(src.indexOf("if (r2.verdict === 'pass') {"));
-    inOrder(seg, ["if (!(await safeNotify(b, regenBody, 'pretest_autofixed'))) {", 'await pauseJourney(', 'continue;', 'UPDATE journey_step_snapshots SET message_body']);
+    // ★ 1031 본문 · 표식 · 기록 = 판 확인 쓰기 한 트랜잭션(recordIfCurrent · newBody)
+    inOrder(seg, ["if (!(await safeNotify(b, regenBody, 'pretest_autofixed'))) {", 'await pauseJourney(', 'return;', "await recordIfCurrent(b, snapId, { status: 'notified', newBody: regenBody });"]);
   });
   it('정지 커밋 뒤 집계 · 조회 실패 = 실패로 답하지 않는다', () => {
     const src = read('../journey-pause-handler.ts');

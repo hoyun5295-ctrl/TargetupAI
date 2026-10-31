@@ -133,16 +133,23 @@ async function resolvePauseDate(payload: PauseTokenPayload): Promise<string> {
   return kstToday();
 }
 
-/** 그 여정 · 그 단계 · 그날 · active 실행을 고르는 조건(조회 · 잠금이 같은 문장 조각을 쓴다) */
-const DUE_EXECUTIONS_SQL = `
+/**
+ * 그 여정 · 그 단계 · 그날 · active 실행을 고르는 조건(조회 · 잠금이 같은 문장 조각을 쓴다).
+ * ★ 2026-10-31 조각 함수로 내보낸다 — 여정 보낸 결과 안내(journey-result-notice)가 「그날 그 칸 예정분이 다 나갔나」를 같은 조각으로 본다(R1).
+ *   식 = 부르는 쪽 SQL 식(바인드 자리표 또는 칸 식 · 날 = date 식). 실행 별칭 = je.
+ */
+export function dueExecutionsSql(journeyExpr: string, stepExpr: string, dayExpr: string): string {
+  return `
   FROM journey_executions je
   JOIN LATERAL (
     SELECT s.id FROM journey_steps s
      WHERE s.journey_id = je.journey_id AND s.step_order > je.current_step_order
      ORDER BY s.step_order ASC LIMIT 1
-  ) nx ON nx.id = $2::uuid
- WHERE je.journey_id = $1::uuid AND je.status = 'active'
-   AND (je.next_run_at AT TIME ZONE 'Asia/Seoul')::date = $3::date`;
+  ) nx ON nx.id = ${stepExpr}
+ WHERE je.journey_id = ${journeyExpr} AND je.status = 'active'
+   AND (je.next_run_at AT TIME ZONE 'Asia/Seoul')::date = ${dayExpr}`;
+}
+const DUE_EXECUTIONS_SQL = dueExecutionsSql('$1::uuid', '$2::uuid', '$3::date');
 
 /** 그 단계 · 그날 이미 보내기 시작했거나(sending) 보낸(sent) 건수 — 정지가 막지 못한 몫을 사실대로 답한다(B9). */
 async function countStartedSends(db: { query: (t: string, p?: any[]) => Promise<any> }, journeyId: string, stepId: string, date: string): Promise<number> {

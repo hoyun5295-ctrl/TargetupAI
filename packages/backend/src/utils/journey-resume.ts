@@ -49,6 +49,18 @@ export const RESUME_SHIFT_SQL =
       AND next_run_at IS NOT NULL AND next_run_at > $2::timestamptz
    RETURNING id`;
 
+/**
+ * ★ 2026-10-31 날짜 기준 여정 = 지난 날(KST)의 진행 중 실행을 끝낸다(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-3).
+ *   날짜 기준 여정은 이제 보낼 시각 2시간 앞서 실행을 만든다 → 그 사이 멈췄다가 날이 지나 다시 켜면 지난 날 행사 문자가 늦게 나가던 것을 막는다(날짜가 뜻).
+ *   같은 날 다시 켜면 그대로(정한 시각 또는 지금 나간다). 한 번 보내기는 손대지 않는다(지금 그대로).
+ */
+export const RESUME_STALE_ANCHOR_SQL =
+  `UPDATE journey_executions SET status = 'ended', completed_at = NOW()
+    WHERE journey_id = $1::uuid AND status = 'active'
+      AND next_run_at IS NOT NULL
+      AND (next_run_at AT TIME ZONE 'Asia/Seoul')::date < (NOW() AT TIME ZONE 'Asia/Seoul')::date
+   RETURNING id`;
+
 /** 쓰고 있던 커서만 다시 켠 시각으로($2 = 활성화 UPDATE 가 찍은 approved_at). */
 export const RESUME_CURSOR_SQL =
   `UPDATE journeys SET
@@ -75,14 +87,19 @@ export async function applyResumeAdjustments(
   journeyId: string,
   prev: ResumePrev,
   approvedAt: unknown,
-): Promise<{ revived: number; shifted: number; cursorReset: boolean }> {
-  if (prev.status !== 'paused') return { revived: 0, shifted: 0, cursorReset: false };
+): Promise<{ revived: number; shifted: number; staleEnded: number; cursorReset: boolean }> {
+  if (prev.status !== 'paused') return { revived: 0, shifted: 0, staleEnded: 0, cursorReset: false };
   const revived = await run.query(RESUME_REVIVE_SQL, [journeyId, [...RESUME_REVIVE_REASONS]]);
   let shifted = 0;
   if (prev.pausedRaw && !isSingleShotStartKind(prev.startKind)) {
     const sh = await run.query(RESUME_SHIFT_SQL, [journeyId, prev.pausedRaw]);
     shifted = sh?.rows?.length || 0;
   }
+  let staleEnded = 0;
+  if (prev.startKind === 'date_anchor') {
+    const st = await run.query(RESUME_STALE_ANCHOR_SQL, [journeyId]);
+    staleEnded = st?.rows?.length || 0;
+  }
   await run.query(RESUME_CURSOR_SQL, [journeyId, approvedAt]);
-  return { revived: revived?.rows?.length || 0, shifted, cursorReset: true };
+  return { revived: revived?.rows?.length || 0, shifted, staleEnded, cursorReset: true };
 }

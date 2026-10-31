@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 5264fa99 · 2026-10-29 · Harold 「배포하고 이거까지 완료」(git pull · backend · frontend build:safe · pm2 reload targetup-backend)
-- deployed_head: 5264fa99 · 2026-10-29 · 같은 보고(C79 · C80 · C81 · C82 · C83 = 백엔드 + 프론트) · 계산상 restart-env = 새 env 이름 INTERNAL_TEST_COMPANY_IDS 가 범위에 보여서 · 그 값은 아직 안 넣음(C77-ENV-1) → reload 로 충분 · C77-ENV-1 은 아직
+- pulled_head: 18cc05e2 · 2026-10-31 · Harold 실행 출력 `git log --oneline -1` = 18cc05e2(HEAD -> main, origin/main)
+- deployed_head: 18cc05e2 · 2026-10-30 · Harold 「세션 마무리하자」(C83-S2 · 백엔드 reload + 프론트 build:safe 보고 · 빌드 출력 원문은 안 받음) · 그 전 5264fa99(1029 · C79~C83 1차) · C77-ENV-1 은 아직
 - 이번 창 확인 출력: backend-build · frontend-build · reload(Harold 보고 · 출력 원문은 안 받음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -30,7 +30,9 @@
 | C80 | 35966174 |
 | C81 | ec8b59d4 |
 | C82 | 5264fa99 |
-| C83 | 5264fa99 |
+| C83 | 18cc05e2 |
+| C84 | 미커밋 |
+| C85 | 미커밋 |
 
 ## §1 대기
 
@@ -283,7 +285,7 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 선행: 커밋(작업 트리 = SecurityNoticeCard.tsx · SecurityReportPage.tsx · security-report.ts · CustomerNoticeAckTab.tsx · customer-notice.ts(정렬) · customer-notice-1029.test.ts)
 - 기대: 백엔드(정렬 한 곳 · reload) + 프론트(build:safe) · DDL 0 · ENV 0 · 배포본 C 문구 = 「교체한 뒤 서비스가 정상 동작하는 것을 확인했습니다」(1차 배포본의 「로그인, 발송, 결과 조회」 문장 사라짐) · D = 10개씩 · 기본 전체 · 확인한 업체가 1쪽 먼저 · 「확인한 업체」 버튼
 - 확인: 배포 뒤 hanjul.ai `/security-report` 화면 문구 · 슈퍼관리자 공지 확인 현황 1쪽 10개 · 쪽 번호 · 고객 계정 로그인 때 B 카드 · 「확인했습니다」 뒤 카드 사라짐
-- 결과:
+- 결과: 커밋 76605ad7(19:40) · 18cc05e2(1029 밤) · 배포 = Harold 1030 「세션 마무리하자」로 완료로 받음(메모리 session_wrap_means_deployed) · 서버 머리 = 1031 Harold 출력 18cc05e2 로 맞춤(pulled · deployed_head)
 
 ### C82-S1 · 싱크 키 발급 = 설치 서버 공인 IP 필수 · 출발지 등록 한 번에(배포 뒤 실측 · 테스트계정)
 - 카드: C82
@@ -291,6 +293,63 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 선행: 코드 배포(백엔드 + 프론트 · DDL 0 · ENV 0 · 새 컬럼 0)
 - 기대: 슈퍼관리자 테스트계정 고객사 상세 Sync 탭 = 「접속 허용 IP」 칸이 뜬다 · 「API Key 재발급」 확인 칸에 「설치 서버 공인 IP」(빈 칸이면 확인 잠김 · 192.168 같은 사설 주소는 사유와 함께 거절) · 시험 PC 공인 IP 로 재발급 = 완료 알림에 「접속 허용 IP … 를 국외 접근 통제에 함께 등록했습니다」 · 칸에 그 IP 한 줄(사유 「싱크에이전트 키 발급 출발지」) · 설계서 `docs/2026-10-29-sync-key-origin-required-design.md` §2
 - 확인: 배포 창 SQL `SELECT host(a.cidr) AS ip, a.reason, a.is_active, a.created_at FROM access_origin_allowlist a JOIN users u ON u.company_id = a.company_id WHERE u.login_id = 'hoyun' AND a.scope = 'company_agent' ORDER BY a.created_at DESC LIMIT 5;` 맨 위 = 방금 넣은 IP · 활성
+- 결과:
+
+### C84-DDL-2 · journey_pretest_schedules.notice_attempts(여정 발송 전 안내 시도 수 · 배포 전)
+- 카드: C84
+- 단계: DDL
+- 선행: 없음(배포 전에 실행 · 옛 코드 INSERT 는 칸 이름을 적어 넣어 기본값 0)
+- 의미 바꿈: 아니오(칸 추가 · 기본값 0 · PG 15 = 카탈로그만 바뀜 · 옛 코드는 이 칸을 읽지 않는다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = 'journey_pretest_schedules' AND column_name = 'notice_attempts';
+- 확인: notice_attempts · smallint · NO · 0 한 줄
+- 결과:
+
+> C84-DDL-2 · 설계서 docs/2026-10-31-journey-step-gate-notice-design.md §8 · 되돌리기 = 칸을 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C84-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE journey_pretest_schedules ADD COLUMN IF NOT EXISTS notice_attempts smallint NOT NULL DEFAULT 0;
+```
+
+### C84-DDL-1 · journey_step_campaigns 결과 안내 기록 칸 셋 + 기준선(배포 뒤 · 한 트랜잭션)
+- 카드: C84
+- 단계: DDL
+- 선행: C84 코드 배포(옛 결과 안내 경로가 사라진 뒤 · 그 전에 넣으면 옛 경로가 알린 날을 새 경로가 또 알린다)
+- 의미 바꿈: 예(기존 행 = 「결과를 이미 알림」 기준선 · 소급 안내 0 · 배포와 이 블록 사이 결과 안내 0)
+- 기대: 서버 psql 에서 아래 블록(BEGIN ~ COMMIT 통째로) · 확인 1 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journey_step_campaigns' AND column_name LIKE 'result_notice%' ORDER BY 1; · 확인 2 = SELECT COUNT(*) FROM journey_step_campaigns jsc JOIN campaigns c ON c.id = jsc.campaign_id WHERE jsc.result_notice_at IS NULL;
+- 확인: 확인 1 = result_notice_at · timestamp with time zone · YES / result_notice_attempts · smallint · NO / result_notice_sent · integer · YES · 확인 2 = 0
+- 결과:
+
+> C84-DDL-1 · 설계서 §2-6 · §8 · 되돌리기 = 칸을 남겨도 무해(새 코드는 칸이 없으면 결과 안내를 건너뛴다)
+
+```sql ddl:C84-DDL-1
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+ALTER TABLE journey_step_campaigns
+  ADD COLUMN IF NOT EXISTS result_notice_sent integer NULL,
+  ADD COLUMN IF NOT EXISTS result_notice_at timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS result_notice_attempts smallint NOT NULL DEFAULT 0;
+UPDATE journey_step_campaigns jsc
+   SET result_notice_sent = COALESCE(c.sent_count, 0), result_notice_at = NOW()
+  FROM campaigns c
+ WHERE c.id = jsc.campaign_id AND jsc.result_notice_at IS NULL;
+COMMIT;
+```
+
+### C84-S1 · 여정 담당자 안내 실측(배포 뒤 1건 · 테스트계정)
+- 카드: C84
+- 단계: 사후
+- 선행: C84-DDL-2 · 코드 배포 · C84-DDL-1
+- 기대: 테스트계정에서 1번 칸 「바로」 · 문자 칸 여정을 켜고 시험 고객 1명 진입 → 첫 발송이 10~20분 미뤄지고 그 전에 「[발송 전 안내]」(바로 보내는 칸 줄 · 짧은 정지 주소)가 만든 계정 번호로 옴 → 그 뒤 고객 문자 → 결과가 나오면 「[여정 발송 결과]」 1통 · 같은 날 두 번째 고객은 미루지 않고 바로
+- 확인: 배포 창 SQL(안내 기록 · 큐 행 · 결과 기록) · 그 시각에 하나씩
+- 결과:
+
+### C85-S1 · 추천 타겟 날짜 칸 · 주소록 더하기 실측(배포 뒤 · 테스트계정)
+- 카드: C85
+- 단계: 사후
+- 선행: 코드 배포(백엔드 + 프론트 · DDL 0 · ENV 0)
+- 기대: ① 한줄로 「다음 달 생일 고객」 제안 → 추천 타겟 상세 「추출 대상 리스트 보기」 생일 칸 = `YYYY-MM-DD`(시각 꼬리 0 · DB 값 그대로) ② 직접발송 직접입력 번호 1개 → 주소록 [발송 목록에 더하기] → 직접입력 번호가 남고 주소록 번호가 뒤에 붙음 · 알림 「N명을 지금 명단에 더했어요」 ③ 알림톡 창 [중복제거] 켜짐 = 이미 있는 번호는 「중복 M명 제외」 · 설계서 `docs/2026-10-31-target-date-addressbook-append-design.md`
+- 확인: 화면(Harold · 테스트계정) · 서버 명령 0
 - 결과:
 
 ## §2 덤프 뒤 적용분

@@ -20,11 +20,11 @@
 import { query } from '../config/database';
 import { syncCampaignResults } from './campaign-lifecycle';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, getPlatformNoticeCallback } from './sms-queue';
+import { smsCampaignCountsSafe } from './sms-queue';
 import { shouldFinalizeCampaign, shouldSkipReconcileWrite } from './sms-table-split';
 import { recordedLiveTables } from './stats-table-scope';
 import { resolveCampaignTableGroups } from './stats-aggregation';
-import { pickOwnerContact } from './owner-contact';
+import { notifyJourneyStepResults } from './journey-result-notice';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -110,214 +110,19 @@ async function runOnce(): Promise<void> {
     }
     const elapsedMs = Date.now() - startedAt;
     log(`사이클 완료 — 회사 ok ${okCount} / fail ${failCount}, 총 sync ${totalSynced}건, ${elapsedMs}ms`);
-
-    // ★ D218+ (2026-05-26) 여정 발송 결과 알림 LMS 통합 — 첫/마지막 step default ON.
-    //   본 영역 = sync 종결 직후 = 통신사 reply 수집 완료 영역.
-    //   step별 default (첫/마지막 ON / 중간 OFF) 적용 · 받는 사람 = 여정을 만든 계정 → 회사 관리자(★ 2026-10-28 B-1028-1 · pickOwnerContact).
-    try {
-      await notifyJourneyResultsToManagers();
-    } catch (notifyErr: any) {
-      log('여정 결과 알림 사고 (skip):', notifyErr?.message || notifyErr);
-    }
   } catch (err: any) {
     log('전체 오류:', err?.message || err);
   } finally {
-    _running = false;
-  }
-}
-
-/**
- * ★ D218+ (2026-05-26) 여정 발송 결과 알림 LMS — 첫/마지막 step default ON.
- *   - journey_executions.status='completed' + result_notified_at IS NULL + 최근 3h 완료 대상(보류 한도 2h보다 길게 · m115).
- *   - notify_manager_on_pretest TRUE = 무조건 발송 / NULL = 첫/마지막 step default ON / FALSE = skip.
- *   - 담당자 phone = 여정을 만든 계정 → 회사 관리자(★ 2026-10-28 B-1028-1 · `utils/owner-contact.ts` 한 곳 · 자동마케팅 · 2시간 전 안내와 같은 판정).
- *     옛: 회사 알림톡 검수 수신자 명단(kakao_alarm_users) 첫 행 = 여정을 만든 담당자 대신 그 명단의 사람이 받았다.
- *   - LMS 본문 = 여정명 + step + 성공/실패 카운트 + 다음 step 예정 영역.
- *   - 발송 종결 후 result_notified_at = NOW() UPDATE (재발송 차단 의무).
- */
-async function notifyJourneyResultsToManagers(): Promise<void> {
-  const completedRes = await query(
-    `SELECT e.id AS execution_id, j.company_id, e.journey_id, e.current_step_order,
-            j.name AS journey_name,
-            s.id AS step_id, s.step_order, s.notify_manager_on_pretest, s.channel,
-            (SELECT COUNT(*) FROM journey_steps WHERE journey_id = e.journey_id AND COALESCE(step_type,'message')='message') AS total_steps,
-            -- ★ 2026-07-27 정정: step_logs의 'sent'는 **큐 적재 성공** 마커지 도달 결과가 아니다.
-            --   이 값을 성공 건수로 쓰던 탓에 알림톡이 차단된 번호까지 "성공"으로 보고됐다
-            --   (직원 실측: 실제 5성공 + 1대기인데 "성공 6건"으로 통보). 6원칙 ② 위반.
-            --   여기서는 적재 건수로만 쓰고, 성공/실패/대기는 공유 campaign의 실결과에서 가져온다.
-            (SELECT COUNT(*) FROM journey_step_logs jsl WHERE jsl.execution_id = e.id AND jsl.status = 'sent') AS queued_count,
-            (SELECT jsl.campaign_id FROM journey_step_logs jsl
-              WHERE jsl.execution_id = e.id AND jsl.status = 'sent' AND jsl.campaign_id IS NOT NULL
-              ORDER BY jsl.sent_at DESC LIMIT 1) AS campaign_id,
-            j.created_by AS journey_created_by,
-            EXTRACT(EPOCH FROM (NOW() - e.completed_at)) AS completed_ago_sec
-       FROM journey_executions e
-       JOIN journeys j ON j.id = e.journey_id
-       JOIN journey_steps s ON s.journey_id = e.journey_id AND s.step_order = e.current_step_order
-      WHERE e.status = 'completed'
-        AND e.result_notified_at IS NULL
-        AND e.completed_at IS NOT NULL
-        -- ★ 2026-09-28 한줄로 V2 m115 — 조회 창은 아래 보류 한도(2시간)보다 길어야 한다. 같은 2시간이면
-        --   "2시간 지나면 대기를 밝히고 보낸다" 분기에 닿기 전에 후보에서 빠져, 대기가 남는 단계는 안내가 영영 안 갔다.
-        AND e.completed_at >= NOW() - INTERVAL '3 hours'
-        AND COALESCE(s.step_type, 'message') = 'message'
-      ORDER BY e.completed_at DESC
-      -- ★ 2026-07-27 묶음 발송으로 바뀌면서 상한을 올렸다. 실행행 50개에서 잘리면 같은 여정이
-      --   두 주기에 걸쳐 알림을 두 번 받는다(묶음의 의미가 사라진다). 행은 가볍고 발송은 묶음당 1건이다.
-      LIMIT 500`
-  );
-
-  if (completedRes.rows.length === 0) return;
-
-  // ★ 2026-07-27 (Harold 지적) 실행행(고객)마다 1통 → **(여정, step)당 1통**으로 묶는다.
-  //   실측 사고: 회원가입 감사안내 여정에 6명이 진입하자 담당자에게 같은 내용 LMS가 **6통** 갔다
-  //   (전부 "성공 1건 / 실패 0건"). 담당자가 알고 싶은 건 "이 여정이 몇 명에게 나갔나"지
-  //   고객 한 명 한 명이 아니다. 게다가 이 안내도 고객사 과금분이라 6배로 새어 나간다.
-  const groups = new Map<string, any[]>();
-  for (const exec of completedRes.rows) {
-    const key = `${exec.journey_id}::${exec.step_order}`;
-    const bucket = groups.get(key);
-    if (bucket) bucket.push(exec); else groups.set(key, [exec]);
-  }
-
-  /** 묶음 전체를 통지 완료로 마킹 — 발송했든 skip했든 재조회를 막는다(중복 알림 차단). */
-  const markNotified = async (rows: any[]): Promise<void> => {
-    await query(
-      `UPDATE journey_executions SET result_notified_at = NOW() WHERE id = ANY($1::uuid[])`,
-      [rows.map((r) => r.execution_id)],
-    );
-  };
-
-  // 담당자 번호는 (회사 · 만든 계정)당 한 번만 조회한다(묶음마다 같은 주인을 반복 조회하지 않도록).
-  const managerCache = new Map<string, string | null>();
-  const resolveManagerPhone = async (companyId: string, createdBy: string | null): Promise<string | null> => {
-    const key = `${companyId}:${createdBy || ''}`;
-    const cached = managerCache.get(key);
-    if (cached !== undefined) return cached;
-    const phone = (await pickOwnerContact(companyId, createdBy))?.phone ?? null;
-    managerCache.set(key, phone);
-    return phone;
-  };
-
-  for (const [key, rows] of groups) {
-    const head = rows[0];
+    // ★ D218+ (2026-05-26) 여정 발송 결과 알림 LMS — sync 종결 직후 = 통신사 reply 수집 완료 자리.
+    // ★ 2026-10-31 칸 · 날짜 단위(journey-result-notice CT · 설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-6).
+    //   옛: 고객이 여정을 다 마친(completed) 실행만 후보라 중간 칸 결과가 오지 않았다(오류접수 cmvujpa3w).
+    //   ★ Codex 구현 1R ③ — 사이클마다 돈다(동기화 대상 회사 0 의 조기 종료 · 동기화 오류와 무관 · 하루 합계 · 재시도가 멈추지 않게).
     try {
-      // step별 default 적용 — 첫/마지막 ON / 중간 OFF / 명시 TRUE/FALSE 우선. (묶음 내 step은 동일)
-      const totalSteps = Number(head.total_steps || 0);
-      const stepOrder = Number(head.step_order || 0);
-      const shouldNotify =
-        head.notify_manager_on_pretest === true ||
-        (head.notify_manager_on_pretest === null &&
-          (stepOrder === 1 || stepOrder === totalSteps));
-
-      if (!shouldNotify) {
-        await markNotified(rows);
-        continue;
-      }
-
-      // 담당자 phone 조회(여정을 만든 계정 → 회사 관리자 · ★ 2026-10-28 B-1028-1)
-      const managerPhone = await resolveManagerPhone(head.company_id, head.journey_created_by || null);
-      if (!managerPhone) {
-        // 담당자 등록 X 또는 번호 형식 이상 = 발송 skip + 재조회 차단
-        await markNotified(rows);
-        continue;
-      }
-
-      const targetCount = rows.length;
-
-      // ★ 2026-07-27 성공/실패/대기는 **공유 campaign의 실결과**에서 가져온다(6원칙 ②).
-      //   옛 코드는 journey_step_logs의 'sent'(=큐 적재 성공)를 성공으로 세어,
-      //   알림톡이 차단된 번호까지 "성공"으로 보고했다(직원 실측: 실제 5성공+1대기 → "성공 6건").
-      //   발송결과 화면·정산이 쓰는 집계 함수를 그대로 써서 같은 숫자를 보게 한다.
-      const campaignId = rows.map((r) => r.campaign_id).find((v) => !!v) || null;
-      let successCount = 0;
-      let failedCount = 0;
-      let pendingCount = 0;
-      let countsKnown = false;
-      if (campaignId) {
-        try {
-          const tables = await getCompanySmsTablesWithLogs(head.company_id, head.journey_created_by || undefined);
-          if (tables.length > 0) {
-            const agg = await smsCampaignCountsSafe(tables, [campaignId]);
-            const c = agg.get(String(campaignId));
-            if (c) {
-              successCount = Number(c.success || 0);
-              failedCount = Number(c.fail || 0);
-              pendingCount = Number(c.pending || 0);
-              countsKnown = true;
-            }
-          }
-        } catch (aggErr) {
-          log('여정 결과 집계 실패 campaign=' + campaignId + ':', aggErr instanceof Error ? aggErr.message : aggErr);
-        }
-      }
-
-      // 결과가 아직 안 나왔거나 대기가 남아 있으면 **알리지 않는다**.
-      //   result_notified_at을 찍지 않으므로 다음 5분 주기에 다시 본다 = 확정 후 1통.
-      //   무한 보류는 막는다 — 완료 후 2시간(조회 윈도우와 동일)이 지나면 대기 건수를 밝히고 보낸다.
-      const agedSec = Number(head.completed_ago_sec || 0);
-      const AGED_LIMIT_SEC = 2 * 60 * 60;
-      if (!countsKnown && agedSec < AGED_LIMIT_SEC) {
-        log('여정 결과 집계 전 — 알림 보류 journey=' + head.journey_name + ' step=' + stepOrder);
-        continue;
-      }
-      if (countsKnown && pendingCount > 0 && agedSec < AGED_LIMIT_SEC) {
-        log('여정 결과 대기 ' + pendingCount + '건 — 알림 보류 journey=' + head.journey_name + ' step=' + stepOrder);
-        continue;
-      }
-
-      const isLastStep = stepOrder === totalSteps;
-      const resultLine = countsKnown
-        ? '성공: ' + successCount + '건 / 실패: ' + failedCount + '건' + (pendingCount > 0 ? ' / 대기: ' + pendingCount + '건' : '')
-        : '결과 집계 전. 발송결과 화면에서 확인해 주세요';
-      const lmsBody = [
-        '[여정 발송 결과]',
-        '',
-        '여정: ' + (head.journey_name || '여정 자동 발송'),
-        'step ' + stepOrder + ' / ' + totalSteps + ' ' + (isLastStep ? '(최종)' : ''),
-        '대상: ' + targetCount + '명',
-        resultLine,
-        '',
-        isLastStep ? '여정 완료: 다음 step 없음' : '다음 step 자동 진행 예정',
-      ].join('\n');
-
-      // ★ 2026-09-27 한줄로 V2 m087 — 안내 표시를 적재보다 먼저(적재 뒤 표시가 실패하면 다음 주기에 같은 안내가 또 나갔다).
-      //   적재가 실패하면 표시를 되돌려 다음 주기에 다시 시도한다.
-      await markNotified(rows);
-      const authTable = await getAuthSmsTable();
-      try {
-      // ★ 2026-09-28 한줄로 V2 m132 — 적재 함수는 MySQL 오류를 던지지 않고 적재 건수(0)로 돌려준다.
-      //   반환값을 안 보면 장애 중 안내가 적재 0건인데도 완료로 남았다 → 0이면 실패로 보고 표시를 되돌린다.
-      const loaded = await bulkInsertSmsQueue(
-        [authTable],
-        [[
-          managerPhone,                // dest_no
-          getPlatformNoticeCallback(), // call_back — ★ 2026-07-27 한줄로 대표번호.
-                                       //   옛 코드는 수신자 본인 번호를 발신으로 써서 번호도용차단 가입 담당자는 통째로 못 받았다
-                                       //   (2026-07-09 여정 사전알림·자동마케팅에서 고친 것과 같은 결함이 이 경로에만 남아 있었다).
-          lmsBody,                     // msg_contents
-          'L',                         // msg_type (LMS)
-          `[여정 발송 결과]`.slice(0, 40), // title_str
-          null,                        // sendreq_time (useNow)
-          '',                          // app_etc1
-          head.company_id,             // app_etc2
-          '', '', '',                  // file_name1~3
-        ]],
-        true,
-      );
-      if (loaded === 0) throw new Error('여정 결과 안내 적재 0건');
-      } catch (queueErr) {
-        await query(
-          `UPDATE journey_executions SET result_notified_at = NULL WHERE id = ANY($1::uuid[])`,
-          [rows.map((r) => r.execution_id)],
-        ).catch(() => { /* 되돌림 실패 = 이번 안내 1회 누락(중복보다 안전) */ });
-        throw queueErr;
-      }
-
-      log(`✓ 여정 결과 LMS 발송 journey=${head.journey_name} step=${stepOrder} 대상 ${targetCount}명 (성공 ${successCount}/실패 ${failedCount}/대기 ${pendingCount})`);
-    } catch (oneErr: any) {
-      log(`✗ 여정 결과 알림 묶음 사고 ${key}:`, oneErr?.message || oneErr);
+      await notifyJourneyStepResults();
+    } catch (notifyErr: any) {
+      log('여정 결과 알림 사고 (skip):', notifyErr?.message || notifyErr);
     }
+    _running = false;
   }
 }
 

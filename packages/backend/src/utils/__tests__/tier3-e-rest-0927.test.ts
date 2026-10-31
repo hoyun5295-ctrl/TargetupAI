@@ -74,11 +74,16 @@ describe('CDP', () => {
 });
 
 describe('JRN', () => {
-  it('m087 결과 안내는 표시 먼저(적재 실패면 되돌림)', () => {
-    const w = src('campaign-sync-worker.ts');
-    const b = between(w, "const lmsBody = [\n        '[여정 발송 결과]',", 'log(`✓ 여정 결과 LMS 발송');
-    expect(b.indexOf('await markNotified(rows);')).toBeLessThan(b.indexOf('await bulkInsertSmsQueue('));
-    expect(b).toContain('SET result_notified_at = NULL WHERE id = ANY($1::uuid[])');
+  it('m087 → ★1031 결과 안내 = 안내 쓰기 한 꼴(시도 잡기 → 적재 → 기록 · 시도 상한 = 두 번 가지 않는다)', () => {
+    const once = src('journey-notice-once.ts');
+    const body = between(once, 'export async function sendNoticeOnce(', '\n}');
+    expect(body.indexOf('await steps.claim()')).toBeGreaterThan(-1);
+    expect(body.indexOf('await steps.claim()')).toBeLessThan(body.indexOf('await steps.enqueue()'));
+    expect(body.indexOf('await steps.enqueue()')).toBeLessThan(body.indexOf('await steps.finalize()'));
+    const r = src('journey-result-notice.ts');
+    expect(r).toContain('AND result_notice_sent IS NOT DISTINCT FROM $4::int AND result_notice_attempts < $5');
+    expect(r).toContain('const result = await sendNoticeOnce({');
+    expect(src('campaign-sync-worker.ts')).not.toContain('result_notified_at');
   });
   it('R298 자동 재진입 = 옵션 규칙과 같은 판정(★1020 V.3 §4-1 · 켜진 채 그 자리 · 표식은 판정이 정함 · 읽은 상태를 쓰기 조건)', () => {
     const a = src('..', 'routes', 'ai.ts');

@@ -53,8 +53,9 @@ describe('B-1028-1 받는 사람 = 주인 한 함수', () => {
   it('여정 안내 두 종 · 자동마케팅 · 플래너 = 같은 함수를 부른다', () => {
     const src = (f: string) => SOURCES.find((s) => s.rel === f)!.text;
     expect(src('utils/journey-pretest-notifier.ts')).toContain('await pickOwnerContact(b.companyId, b.createdBy || null)');
-    expect(src('utils/campaign-sync-worker.ts')).toContain('await pickOwnerContact(companyId, createdBy)');
-    expect(src('utils/campaign-sync-worker.ts')).toContain('await resolveManagerPhone(head.company_id, head.journey_created_by || null)');
+    // ★ 1031 결과 안내 = 칸 · 날짜 CT(journey-result-notice)로 옮김 · 같은 함수
+    expect(src('utils/journey-result-notice.ts')).toContain('await pickOwnerContact(row.company_id, row.created_by || null)');
+    expect(src('utils/campaign-sync-worker.ts')).not.toMatch(/kakao_alarm_users|resolveManagerPhone/);
     expect(src('utils/continuous-operator.ts')).toContain('await pickOwnerContact(operator.companyId, operator.createdBy || null)');
     expect(src('utils/planner-recheck.ts').match(/pickOwnerContact\(p\.ev\.companyId, p\.ev\.createdBy\)/g)).toHaveLength(2);
     // 같은 판정의 사본 0(옛 이름 · 옛 조회)

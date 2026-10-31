@@ -70,19 +70,46 @@ const digitsOf = (v: unknown) => String(v ?? '').replace(/\D/g, '');
  * 비교는 숫자만으로 한다(표기 차이 010-… / 010… 를 같은 번호로 본다).
  */
 export function planAppend(phones: readonly string[], existing: Iterable<unknown>, dedup: boolean): { add: string[]; dup: number } {
+  return planAppendBy(phones, existing, dedup, (p) => p);
+}
+
+/**
+ * ★ 2026-10-31 planAppend 의 줄 판(같은 판정 한 곳) — 줄 객체를 그대로 돌려준다(주소록 불러오기 · 접수 cmvuih2n · 뿌리 대장 R31).
+ *   phoneOf = 줄에서 번호를 꺼내는 함수.
+ */
+export function planAppendBy<T>(items: readonly T[], existing: Iterable<unknown>, dedup: boolean, phoneOf: (item: T) => unknown): { add: T[]; dup: number } {
   const seen = new Set<string>();
   for (const e of existing) { const k = digitsOf(e); if (k) seen.add(k); }
-  const add: string[] = [];
+  const add: T[] = [];
   let dup = 0;
-  for (const p of phones) {
-    const k = digitsOf(p);
+  for (const it of items) {
+    const k = digitsOf(phoneOf(it));
     if (seen.has(k)) {
       dup++;
       if (dedup) continue;
     } else {
       seen.add(k);
     }
-    add.push(p);
+    add.push(it);
   }
   return { add, dup };
+}
+
+/**
+ * ★ 2026-10-31 더하기 갱신 함수(Codex C85 1R · 2R) — 판정은 이 갱신 함수 하나가 그 순간의 명단(prev)으로 한다.
+ *   React 가 큐에 쌓인 앞 갱신(보내기 접수 뒤 비움 등)을 먼저 적용한 prev 로 부르므로 명단 · 더한 수가 같은 계산에서 나온다.
+ *   onPlan = 그 판정을 부르는 쪽에 알린다(값만 담는다 · 알림 · 창 닫힘은 부르는 쪽이 반영 뒤 효과에서) · 0 = prev 그대로(같은 배열).
+ *   옛 1R 처방(flushSync 로 바로 처리)은 React 18 동시 모드에서 기본 우선순위 갱신(비동기 뒤 비움)을 건너뛰고 계산해 알림이 옛 값을 따를 수 있었다.
+ */
+export function appendUpdater<T>(
+  rows: readonly T[],
+  dedup: boolean,
+  phoneOf: (item: T) => unknown,
+  onPlan: (plan: { add: T[]; dup: number }) => void,
+): (prev: T[]) => T[] {
+  return (prev) => {
+    const plan = planAppendBy(rows, prev.map(phoneOf), dedup, phoneOf);
+    onPlan(plan);
+    return plan.add.length === 0 ? prev : [...prev, ...plan.add];
+  };
 }

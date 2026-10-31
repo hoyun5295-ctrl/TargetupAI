@@ -51,14 +51,19 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     expect(jb).toContain('VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 0)');
     const pn = readFileSync(join(__dirname, '..', 'journey-pretest-notifier.ts'), 'utf8');
     expect(pn.indexOf("if (verdict === 'pass') {")).toBeGreaterThan(-1);
-    expect(pn.indexOf('await markSnapshotChecked(snap.id);')).toBeGreaterThan(pn.indexOf("if (verdict === 'pass') {"));
+    // ★ 1031 통과 = 그 판 100 + pending 기록 = 판 확인 쓰기 한 트랜잭션(recordIfCurrent · markChecked)
+    expect(pn.indexOf("const w = await recordIfCurrent(b, snapId, { status: 'pending', markChecked: true });")).toBeGreaterThan(pn.indexOf("if (verdict === 'pass') {"));
+    const rif = pn.slice(pn.indexOf('export async function recordIfCurrent('));
+    expect(rif).toContain('SET confidence_score = 100 WHERE id = $1::uuid AND confidence_score < 100');
     expect(pn).toContain('SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid');
     // F4 — 재검사 전 판은 날짜별 처리 기록으로 건너뛰지 않는다(★1025 #2 = 후보 SQL 안 · LIMIT 앞) · 조회 실패는 문자 칸을 미룬다
-    expect(pn).toMatch(/ORDER BY ss\.created_at DESC LIMIT 1\), 100\) < 100\s+OR NOT EXISTS \(SELECT 1 FROM journey_pretest_schedules/);
-    expect(pn.indexOf('FROM journey_pretest_schedules ps')).toBeLessThan(pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
+    expect(pn).toMatch(/ORDER BY ss\.created_at DESC LIMIT 1\), 100\) < 100\s+OR NOT \$\{pretestDoneSql\('je\.journey_id', 's\.id', day\)\}/);
+    expect(pn.indexOf("OR NOT ${pretestDoneSql('je.journey_id', 's.id', day)}")).toBeLessThan(pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
     expect(ex).toContain('snapshotReadFailed = true;');
     expect(ex.indexOf("if (snapshotReadFailed && ['sms', 'lms', 'mms']")).toBeGreaterThan(ex.indexOf('const gate = await query('));
     expect(jb).not.toContain('UPDATE journey_executions je SET next_run_at');
-    expect(jb).toContain('if (isActive && upd.rows.length > 0) await createStepSnapshot(companyId, journeyId, stepId, run);');
+    // ★ 1031 새 스냅숏 · 그 칸 검사 기록 지우기 = 같은 트랜잭션(run · 설계서 2026-10-31 §2-8 · Codex 설계 7R)
+    expect(jb).toContain("    if (isActive && upd.rows.length > 0) {\n      await createStepSnapshot(companyId, journeyId, stepId, run);\n      await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);\n    }");
+    expect(jb).not.toContain('pretest dedup 리셋 skip');
   });
 });

@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { applyResumeAdjustments, RESUME_REVIVE_SQL, RESUME_SHIFT_SQL, RESUME_CURSOR_SQL, RESUME_REVIVE_REASONS } from '../journey-resume';
+import { applyResumeAdjustments, RESUME_REVIVE_SQL, RESUME_SHIFT_SQL, RESUME_CURSOR_SQL, RESUME_REVIVE_REASONS, RESUME_STALE_ANCHOR_SQL } from '../journey-resume';
 
 function recorder() {
   const calls: Array<{ text: string; params: any[] }> = [];
@@ -25,19 +25,27 @@ describe('applyResumeAdjustments', () => {
     expect(calls[0].params).toEqual(['J', ['balance_insufficient', 'carrier_temp_fail', 'auto_retry_exhausted']]);
     expect(calls[1].params).toEqual(['J', '2026-10-18 09:00:00.123456+09']);
     expect(calls[2].params).toEqual(['J', '2026-10-20T03:00:00Z']);
-    expect(r).toEqual({ revived: 1, shifted: 1, cursorReset: true });
+    expect(r).toEqual({ revived: 1, shifted: 1, staleEnded: 0, cursorReset: true });
   });
   it('첫 켜기(초안)는 아무것도 안 한다', async () => {
     const { calls, run } = recorder();
-    expect(await applyResumeAdjustments(run, 'J', { status: 'draft', pausedRaw: null, startKind: 'event' }, 'x')).toEqual({ revived: 0, shifted: 0, cursorReset: false });
+    expect(await applyResumeAdjustments(run, 'J', { status: 'draft', pausedRaw: null, startKind: 'event' }, 'x')).toEqual({ revived: 0, shifted: 0, staleEnded: 0, cursorReset: false });
     expect(calls).toEqual([]);
   });
-  it('날짜 기준 · 한 번 보내기는 밀지 않는다(되살리기 · 커서는 한다)', async () => {
-    for (const k of ['date_anchor', 'one_shot']) {
-      const { calls, run } = recorder();
-      await applyResumeAdjustments(run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: k }, 'x');
-      expect(calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_CURSOR_SQL]);
-    }
+  it('날짜 기준 · 한 번 보내기는 밀지 않는다(되살리기 · 커서는 한다) · ★1031 날짜 기준만 지난 날 실행을 끝낸다', async () => {
+    const anchor = recorder();
+    const r = await applyResumeAdjustments(anchor.run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'date_anchor' }, 'x');
+    expect(anchor.calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_STALE_ANCHOR_SQL, RESUME_CURSOR_SQL]);
+    expect(anchor.calls[1].params).toEqual(['J']);
+    expect(r.staleEnded).toBe(1);
+    const one = recorder();
+    await applyResumeAdjustments(one.run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'one_shot' }, 'x');
+    expect(one.calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_CURSOR_SQL]);
+  });
+  it('★1031 지난 날 끝냄 = 그 여정 · 진행 중 실행 · 보낼 날(KST)이 오늘보다 앞인 것만 · ended', () => {
+    expect(RESUME_STALE_ANCHOR_SQL).toContain("SET status = 'ended', completed_at = NOW()");
+    expect(RESUME_STALE_ANCHOR_SQL).toContain("WHERE journey_id = $1::uuid AND status = 'active'");
+    expect(RESUME_STALE_ANCHOR_SQL).toContain("(next_run_at AT TIME ZONE 'Asia/Seoul')::date < (NOW() AT TIME ZONE 'Asia/Seoul')::date");
   });
   it('멈춘 시각이 없으면 밀지 않는다', async () => {
     const { calls, run } = recorder();

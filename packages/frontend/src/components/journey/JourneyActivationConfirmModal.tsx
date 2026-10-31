@@ -419,7 +419,7 @@ export default function JourneyActivationConfirmModal({
                   <TrendingUp className="w-4 h-4 text-violet-700 flex-shrink-0 mt-0.5" />
                   <div className="text-[12px] text-violet-900 leading-relaxed">
                     켜는 순간 모든 칸과 A/B 문안을 그대로 저장해요. 켠 뒤 칸을 고쳐도 켤 때 문안으로 나가요.
-                    보내기 2시간 전에는 담당자에게 확인 문자를 보내요.
+                    문자 칸은 보내기 전에 스팸 검사를 다시 하고 담당자에게 확인 문자를 보내요(보통 2시간 전 · 바로 보내는 칸은 그날 첫 발송 10~20분 전).
                   </div>
                 </div>
               </div>

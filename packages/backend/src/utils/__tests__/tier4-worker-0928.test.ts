@@ -82,11 +82,12 @@ describe('m132 적재 0건 = 보낸 것이 아니다', () => {
     expect(queryMock.mock.calls.some(([s]) => String(s).includes('INSERT INTO system_alert_state'))).toBe(true);
     process.env.SYSTEM_ALERT_PHONES = old;
   });
-  it('여정 결과 안내: 적재 0건이면 던져서 표시를 되돌린다 · 조회 창 3시간 > 보류 2시간(m115)', () => {
-    const s = src('utils/campaign-sync-worker.ts');
-    expect(s).toContain("if (loaded === 0) throw new Error('여정 결과 안내 적재 0건');");
-    expect(s).toContain("AND e.completed_at >= NOW() - INTERVAL '3 hours'");
-    expect(s).toContain('const AGED_LIMIT_SEC = 2 * 60 * 60;');
+  it('여정 결과 안내: 적재 0건 = 보낸 것이 아니다(기록 안 함) · ★1031 칸 · 날짜 단위(창 = 오늘 · 어제 · 그제 · 대기는 다음 날 아침 밝힘 = m115 의 「영영 안 감」 0)', () => {
+    const s = src('utils/journey-result-notice.ts');
+    expect(s).toContain('const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(');
+    expect(s).toContain('return inserted === 1;');
+    expect(s).toContain("WHERE jsc.send_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - ${RESULT_NOTICE_WINDOW_DAYS}");
+    expect(src('utils/campaign-sync-worker.ts')).toContain('await notifyJourneyStepResults();');
   });
 });
 
@@ -138,10 +139,12 @@ describe('반복 부하·알림 남용', () => {
     expect((s.match(/\[recentlyDoneIds\(_(dm|email)DoneAt, Date\.now\(\)\)\]/g) || []).length).toBe(2);
     expect(s).not.toContain('doneRecently(');
   });
-  it('R261 지정일 스텝은 하루 한 번 추출(성공한 뒤에만 표시)', () => {
+  it('R261 지정일 스텝은 하루 한 번 추출 · ★1031 「처리함」 = 결과에서(뽑아 넣음 = DB 행 · 대상 0 = 메모리 · 상한 · 꺼짐 = 기억 0)', () => {
     const s = src('utils/journey-anchor-scheduler.ts');
-    expect(s).toContain('if (_anchorStepDone.get(doneKey) === sendDate) continue;');
-    expect(s.indexOf('_anchorStepDone.set(doneKey, sendDate);')).toBeGreaterThan(s.indexOf('const res = await dispatchAnchorStep('));
+    expect(s).toContain('if (_anchorNoTarget.get(doneKey) === sendDate) continue;');
+    expect(s).toContain('if (await anchorStepDispatched(j.id, step.id, sendDate)) continue;');
+    expect(s.indexOf("if (res.kind === 'no_target') _anchorNoTarget.set(doneKey, sendDate);")).toBeGreaterThan(s.indexOf('const res = await dispatchAnchorStep('));
+    expect(s).not.toContain('_anchorStepDone');
   });
   it('R306 무통장 요청: 10분 안 대기 요청이 있으면 담당자 문자 생략(요청은 받는다)', () => {
     const s = src('routes/balance.ts');

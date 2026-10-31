@@ -156,6 +156,8 @@ export interface ConditionFieldDef {
   displayName: string;
   storageType: 'column' | 'custom_fields';
   columnName: string;
+  /** FIELD_MAP dataType — 'date' 칸은 글자(YYYY-MM-DD)로 읽는다(뿌리 대장 R16) */
+  dataType?: string;
 }
 
 /** 해석된 조건 컬럼 — select는 주입된 defs(FIELD_MAP 상수)로만 합성되어 SQL 주입이 차단된다 */
@@ -190,9 +192,13 @@ export function resolveConditionColumns(filters: any, defs: ConditionFieldDef[])
     .map((d) => ({
       key: d.fieldKey,
       label: d.displayName,
+      // ★ 2026-10-31 접수 cmvujgxpe(R16) — date 칸을 그대로 읽으면 드라이버가 서버 로컬 자정 시각으로 바꿔
+      //   화면에 `2003-11-05T15:00:00.000Z`(하루 앞 · 시각 꼬리)가 그려졌다 → 글자로 읽는다.
       select: d.storageType === 'custom_fields'
         ? `c.custom_fields->>'${d.columnName}' AS ${d.fieldKey}`
-        : `c.${d.columnName} AS ${d.fieldKey}`,
+        : d.dataType === 'date'
+          ? `c.${d.columnName}::text AS ${d.fieldKey}`
+          : `c.${d.columnName} AS ${d.fieldKey}`,
     }));
 }
 

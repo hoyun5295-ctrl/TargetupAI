@@ -1111,7 +1111,7 @@ export async function activateJourney(
         { status: String(prev.status || ''), pausedRaw: prev.paused_raw ?? null, startKind: prev.start_kind ?? null },
         r.rows[0].approved_at,
       );
-      if (adj.cursorReset) console.log(`[activateJourney] 다시 켜기 보정 journey=${journeyId} 되살림=${adj.revived} 밀림=${adj.shifted}`);
+      if (adj.cursorReset) console.log(`[activateJourney] 다시 켜기 보정 journey=${journeyId} 되살림=${adj.revived} 밀림=${adj.shifted} 지난 날 끝냄=${adj.staleEnded}`);
     }
     if (r.rows.length > 0 && closeOthers) {
       // ★ 0930 Codex 3R · 4R — 닫기 전에 켜진 옛 판 커서 이어받기. 이어받을 판이 둘 이상(비정상)이면 켜지 않는다(누락 · 재처리 0).
@@ -1411,24 +1411,21 @@ export async function updateJourneyStep(
     // ★ 2026-10-19 B-1009-6 — 켜진 여정의 새 스냅샷은 문안 변경과 **한 트랜잭션**(새 문안이 보이는 순간 재검사 전 표식(confidence_score 0)도 보인다).
     //   실행기가 발송 직전 「최신 스냅샷이 재검사 전」이면 문자 칸 발송을 미룬다(journey-executor · 새 진입 · 다음 칸 전진 · 이미 차례 모두 같은 자리)
     //   → 재검사 스캐너(journey-pretest-notifier)가 그 판을 검사하고 통과면 100 으로 올린다. 실패 = 문안 저장도 되돌린다.
-    if (isActive && upd.rows.length > 0) await createStepSnapshot(companyId, journeyId, stepId, run);
+    // ★ 2026-07-11 활성 중 문안 수정 — 발송은 최신 snapshot을 소비(D218 ORDER BY created_at DESC)하므로
+    //   새 snapshot을 만들어야 수정 본문이 실제 발송에 반영된다. 함께 이 step의 pretest dedup을 지워
+    //   발송 전 자동 스팸 재검사(scanAndPretest)가 새 본문을 다시 검사하게 강제한다(기존 파이프라인 재사용).
+    // ★ 2026-10-31 기록 지우기 = 새 스냅숏과 같은 트랜잭션(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-8 · Codex 설계 7R).
+    //   옛: 커밋 뒤 따로 지우고 실패는 로그만 → 그 틈에 스캐너가 새 판에 남긴 기록까지 지워 같은 판을 다시 유료 검사 · 다시 안내했다.
+    //   실패 = 문안 저장도 되돌린다(새 문안 공개와 옛 기록 무효화가 한 번에 보인다 · 스캐너 쓰기는 같은 journeys 행 잠금 뒤 최신 판만 쓴다).
+    if (isActive && upd.rows.length > 0) {
+      await createStepSnapshot(companyId, journeyId, stepId, run);
+      await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);
+    }
     return upd;
   }, { keepMarker })) ?? { rows: [] as any[] };
   // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
   //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
   //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
-
-  // ★ 2026-07-11 활성 중 문안 수정 — 발송은 최신 snapshot을 소비(D218 ORDER BY created_at DESC)하므로
-  //   새 snapshot을 만들어야 수정 본문이 실제 발송에 반영된다. 함께 이 step의 pretest dedup을 지워
-  //   발송 2시간 전 자동 스팸 재검사(scanAndPretest)가 새 본문을 다시 검사하게 강제한다(기존 파이프라인 재사용).
-  //   snapshot 실패 = throw(문안만 바뀌고 발송은 옛 본문인 어긋남을 사용자에게 즉시 알림).
-  if (isActive && r.rows.length > 0) {
-    // ★ 2026-08-02 §13-1: snapshot 생성은 createStepSnapshot 단일 정의(추가 API와 공용) · ★ 1019 위 트랜잭션 안에서 만든다.
-    await query(
-      `DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`,
-      [journeyId, stepId]
-    ).catch((e: any) => console.log(`[JourneyBuilder] pretest dedup 리셋 skip: ${e?.message || e}`));
-  }
   return r.rows.length > 0;
 }
 

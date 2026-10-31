@@ -298,6 +298,11 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   }, [detail, stepId]);
 
   const rawById = useMemo(() => new Map((detail?.steps || []).map((s) => [s.id, s] as const)), [detail]);
+  // ★ 2026-10-31 담당자 알림 기본값 = 첫 · 마지막 메시지 칸(utils/journey-step-notify · 서버와 같은 판정 · step_order 기준)
+  const messageStepBounds = useMemo(() => {
+    const orders = (detail?.steps || []).filter((s) => (s.step_type || 'message') === 'message').map((s) => Number(s.step_order));
+    return orders.length > 0 ? { first: Math.min(...orders), last: Math.max(...orders) } : { first: null, last: null };
+  }, [detail]);
   const rawMapRef = useRef(rawById);
   rawMapRef.current = rawById;
   const originalOf = (id: string) => { const r = rawById.get(id); return r ? toStudio(r) : null; };
@@ -995,7 +1000,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                           journeyId={journeyId!}
                           stepId={selRaw.id}
                           stepOrder={selRaw.step_order}
-                          totalSteps={detail.steps.filter((s) => s.step_type === 'message').length}
+                          firstMessageOrder={messageStepBounds.first}
+                          lastMessageOrder={messageStepBounds.last}
+                          channel={String(selRaw.channel || '')}
                           currentValue={selRaw.notify_manager_on_pretest ?? null}
                           token={localStorage.getItem('token') || ''}
                           onChange={() => { if (journeyId) void load(journeyId, false, 'sync'); }}

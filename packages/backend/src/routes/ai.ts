@@ -3760,7 +3760,7 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     let recipients: any[] = [];
     if (ids.length > 0) {
       const rowsRes = await query(
-        `SELECT name, phone, grade, gender, region, age, points, recent_purchase_date
+        `SELECT name, phone, grade, gender, region, age, points, recent_purchase_date::text AS recent_purchase_date
            FROM customers
           WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
           ORDER BY array_position($2::uuid[], id)`,
@@ -3774,9 +3774,8 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
         region: r.region || null,
         age: r.age != null ? Number(r.age) : null,
         points: r.points != null ? Number(r.points).toLocaleString() : null,
-        recent_purchase: r.recent_purchase_date
-          ? new Date(r.recent_purchase_date).toLocaleDateString('ko-KR')
-          : null,
+        // ★ 2026-10-31 R16 — date 칸 = 글자 그대로(옛: new Date(..).toLocaleDateString = 서버 시간대에 기대는 꼴)
+        recent_purchase: r.recent_purchase_date || null,
       }));
     }
 

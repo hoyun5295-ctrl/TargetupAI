@@ -380,18 +380,23 @@ describe('7. 늦게 끝난 불러오기는 사람이 고친 명단을 덮지 않
 
   it('주소록 — 두 불러오기 모두 세대 확인 뒤에만 명단을 쓴다 · 닫힘·언마운트에 세대를 올린다', () => {
     const multi = between(ab, 'const handleLoadMultipleGroups = async () => {', '// 모달 열릴 때 그룹 로드');
-    expect(multi.indexOf('if (seq !== loadSeqRef.current) return;')).toBeLessThan(multi.indexOf('setDirectRecipients(allContacts);'));
+    // ★1031 R31 — 명단 쓰기는 더하기 한 곳(addToList) · 세대 확인은 그것을 부르기 전
+    expect(multi).toContain('addToList(allContacts');
+    expect(multi.indexOf('if (seq !== loadSeqRef.current) return;')).toBeLessThan(multi.indexOf('addToList(allContacts'));
     expect(multi).toContain('if (seq === loadSeqRef.current) setListLoading(false);');
     // ★0929 주소록 창 개편 — 그룹 하나 불러오기가 버튼 안 인라인에서 함수(loadGroupIntoRecipients)로 옮겨졌다(규칙은 같다)
     const single = between(ab, 'const loadGroupIntoRecipients = async (group: AddressGroup) => {', 'const handleLoadMultipleGroups = async () => {');
     expect(single.indexOf('const seq = ++loadSeqRef.current;')).toBeLessThan(single.indexOf('setListLoading(true);'));
     expect(single).toContain('if (seq !== loadSeqRef.current) return;');   // 없으면 아래 indexOf(-1) 비교가 거짓 통과한다
-    expect(single.indexOf('if (seq !== loadSeqRef.current) return;')).toBeLessThan(single.indexOf('setDirectRecipients(data.contacts.map('));
+    expect(single).toContain('addToList(rows');
+    expect(single.indexOf('if (seq !== loadSeqRef.current) return;')).toBeLessThan(single.indexOf('addToList(rows'));
     expect(ab).toContain('React.useEffect(() => () => { loadSeqRef.current++; }, []);');
     const hide = between(ab, 'if (!show) {', 'setLoaded(false);');
     expect(hide).toContain('loadSeqRef.current++;');
-    // 명단에 쓰는 곳은 이 두 곳뿐
-    expect((ab.match(/setDirectRecipients\(/g) || []).length).toBe(2);
+    // 명단에 쓰는 곳은 더하기 한 곳뿐(★1031 R31 · 두 불러오기가 그것만 부른다)
+    expect((ab.match(/setDirectRecipients\(/g) || []).length).toBe(1);
+    expect((ab.match(/setDirectRecipients\(appendUpdater\(/g) || []).length).toBe(1);
+    expect((ab.match(/addToList\(/g) || []).length).toBe(2);
   });
 
   it('직접발송 파일 매핑 — 닫기·취소 = 불러오기 취소(세대) · 창이 닫히면 늦은 결과를 쓰지 않는다 · 닫기는 잠그지 않는다', () => {

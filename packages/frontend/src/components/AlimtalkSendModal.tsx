@@ -1231,6 +1231,8 @@ export default function AlimtalkSendModal({
         directRecipients={recipients}
         setDirectRecipients={setRecipients}
         setToast={setToast}
+        // ★ 2026-10-31 주소록 불러오기 = 더하기 · 중복 규칙 = 이 창 붙여넣기와 같은 [중복제거](R31)
+        dedupOnAdd={dedupEnabled}
       />
 
       {/* ★ 2026-09-14 알림톡 예약 시각 선택: 직접발송과 같은 창(z-[2150]이라 이 창 위에 뜬다). 값은 이 창의 상태에만 쓴다. */}

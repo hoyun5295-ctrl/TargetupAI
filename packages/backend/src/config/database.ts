@@ -141,6 +141,65 @@ export const mysqlQuery = async (sql: string, params?: any[]) => {
   }
 };
 
+/** 상한 있는 연결로 실행하는 함수(withBoundedMysql 이 넘긴다 · 반환 = mysqlQuery 와 같은 rows) */
+export type BoundedMysqlRun = (sql: string, params?: any[]) => Promise<any>;
+/** withBoundedMysql 이 받는 풀 모양(시험이 가짜 풀을 넘긴다) */
+export interface BoundedMysqlPool {
+  getConnection(): Promise<{ query(sql: string, params?: any[]): Promise<any>; release(): void; destroy(): void }>;
+}
+
+class BoundedMysqlTimeout extends Error {}
+
+/** 기다림을 상한으로 자른다. 진 쪽 약속의 늦은 거절은 삼킨다(처리 안 된 거절 0). */
+function raceBounded<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  work.catch(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const limit = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new BoundedMysqlTimeout(`MySQL ${what} 상한 ${ms}ms 넘김`)), Math.max(0, ms));
+  });
+  return Promise.race([work, limit]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+/**
+ * ★ 2026-10-31 상한 있는 MySQL 연결 하나(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-8).
+ *   공용 풀은 질의 시간 상한이 없고 연결이 모자라면 무한히 기다린다(waitForConnections) · mysql2 3.24.6 의 질의 시간 상한은
+ *   오류만 내고 연결을 끊지 않는다(node_modules/mysql2/lib/commands/query.js 354~368).
+ *   → 연결 받기 · 실행을 합쳐 timeoutMs 안에서만 기다리고, 넘기면 그 연결을 destroy(풀에서 빠짐 · 풀은 새로 연다).
+ *     늦게 온 연결은 받자마자 destroy. 멈춘 적재가 공용 발송 풀을 쌓아 막지 않는다.
+ *   쓰는 곳 = 여정 담당자 안내(발송 전 안내 · 정지 · 자동 보정 · 보낸 결과)만. 넘김 = 던짐(부르는 쪽이 실패로 센다).
+ *   ⚠ 끊어도 서버 쪽 INSERT 는 끝날 수 있다(그 경우의 한 통 더는 시도 수 상한이 막는다 · 설계서 §2-8).
+ */
+export async function withBoundedMysql<T>(
+  timeoutMs: number,
+  work: (run: BoundedMysqlRun) => Promise<T>,
+  pool: BoundedMysqlPool = mysqlPool as unknown as BoundedMysqlPool,
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  const acquiring = pool.getConnection();
+  let conn: Awaited<typeof acquiring>;
+  try {
+    conn = await raceBounded(acquiring, timeoutMs, '연결 받기');
+  } catch (err) {
+    acquiring.then((late) => late.destroy(), () => undefined);
+    throw err;
+  }
+  let destroyed = false;
+  const run: BoundedMysqlRun = async (sql, params) => {
+    try {
+      const [rows] = await raceBounded(conn.query(sql, params), deadline - Date.now(), '실행');
+      return rows;
+    } catch (err) {
+      if (err instanceof BoundedMysqlTimeout && !destroyed) { destroyed = true; conn.destroy(); }
+      throw err;
+    }
+  };
+  try {
+    return await work(run);
+  } finally {
+    if (!destroyed) conn.release();
+  }
+}
+
 // ============================================================
 //  정산 집계 전용 MySQL 풀 (★ 2026-07-26)
 // ============================================================

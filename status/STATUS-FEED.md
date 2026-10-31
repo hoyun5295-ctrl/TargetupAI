@@ -220,23 +220,24 @@
 > 호출어 **"안심 팝업 / 공지 확인 현황 / Node 보안판 / KMC 공지"** → [설계서](../docs/2026-10-29-customer-security-notice-ack-design.md) · 원장 C83-S1 · S2 · 메모리 `project_2026_1029_kmc_notice_node_security_check`
 > 서버(Harold 실행 · 실측) = .66 근태 22.23.2 → 22.23.4 · ERP web · api · jobs 20.11.1 → 24.22.1(ready 35 영역 전후 같음) · 발송 콘솔 앱 · pm2 데몬 20.11.1 → 24.22.1(유닛 drop-in · 재부팅 생존) · CureOPS 24.21.0 → 24.22.1 · .65 관리 API apt 18.19.1 → /opt 24.22.1(직전 v1 발송 0 · health 200) · 옛 판은 되돌리기용으로 남김.
 > 화면 = B 카드(App 전역 · 확인은 204 뒤에만) · C `/security-report`(에이전트 회사 허용) · D 슈퍼관리자 보안 · 인증(ceo · suran). 원천 = audit_logs 사건 3(새 칸 0 · DDL 0) · CT `utils/customer-notice.ts`.
-> 검증 = tsc 0 · vitest 전체 722 파일 · 변이 9 · 시험 DB SQL 4 · 개발 서버 DOM 실측 1440 · 390 · Codex 설계 3R · 구현 1R 2 → 2R 1(같은 뿌리) → 3R approve → 4R approve(문구 한 줄 · 실측보다 앞선 「로그인, 발송, 결과 조회」 문장 정정). 1차 커밋 5264fa99 = 구현 1R 수정본(C82 와 한 커밋 · 1029 배포) · 2R 수정 · 열람 재시도 · 문구 정정 · D 10개씩 쪽 넘김과 확인한 업체 먼저(Harold 운영 화면 보고 지시)는 작업 트리(C83-S2 · 백엔드 + 프론트).
+> 검증 = tsc 0 · vitest 전체 722 파일 · 변이 9 · 시험 DB SQL 4 · 개발 서버 DOM 실측 1440 · 390 · Codex 설계 3R · 구현 1R 2 → 2R 1(같은 뿌리) → 3R approve → 4R approve(문구 한 줄 · 실측보다 앞선 「로그인, 발송, 결과 조회」 문장 정정). 커밋 = 5264fa99(구현 1R 수정본 · C82 와 한 커밋 · 1029 배포) → 76605ad7(2R · 열람 재시도 · 문구 정정) → 18cc05e2(D 10개씩 쪽 넘김 · 확인한 업체 1쪽 먼저 · 「확인한 업체」 버튼 · Harold 운영 화면 보고 지시 · Codex 구현 5R approve) · 배포 = Harold 1030 마무리 지시(서버 확인 출력 없음 · 원장 C83-S2).
+> 남은 것 = C83-S1 운영 판정 · 집계 쿼리 EXPLAIN(다음 배포 창 · Harold 실행) · (1030 끝) 저장소 판 고정 4곳 = bito-console engines · Dockerfile · OPS · STATUS / vito-erp engines · deploy 유닛 · OPS / CureOPS setup-runtime.sh · DEPLOY_66 · OPS(git 아님) / 게이트웨이 OPS 를 24.22.1 로 · Node 24.22.1 시험 통과 · Codex approve · 범위 밖 기록 = .66 근태 Node 22 계열 지원 종료 2027-04-30 · security-watch.sh 가 .62 만 · 메이저만 본다 · STATUS.md 상한 근접.
 
 <a id="c82"></a>
 
-### C82 · ★1029 싱크에이전트 키 발급 = 설치 서버 공인 IP 필수 · 출발지 등록 한 번에 — 구조체크 8회 · Codex 설계 3R · 구현 3R approve · 미커밋
+### C82 · ★1029 싱크에이전트 키 발급 = 설치 서버 공인 IP 필수 · 출발지 등록 한 번에 — 구조체크 8회 · Codex 설계 3R · 구현 3R approve · 5264fa99 배포 1029
 > 호출어 **"키 발급 IP 필수 / 접속 허용 IP / 출발지 등록"** → [설계서](../docs/2026-10-29-sync-key-origin-required-design.md) §8 구조체크 · §9 Codex 설계 · §10 구현 · 원장 C82-S1 · 뿌리 = R29 신설
 > 계기 = 엠티 VM 재검증에서 운영 출발지 통제(시행 중)에 테스트계정 에이전트가 모든 싱크 API 403 · 키 발급과 출발지 등록이 따로라 빠뜨리면 조용히 막힘 → Harold 「키 · 시크릿 발급할 때 상대 IP 필수로 개발 경로 변경」.
 > 한 것 = 발급 CT `sync-key-issue.ts`(등급 = 국외 접근 통제 쓰기 · IP 표준 꼴 · 한 트랜잭션 = 키 · 이전 발급 출발지 회수 · 덮음 확인 · 등록 · 커밋 뒤 감사) · 출발지 INSERT CT 한 벌 · 새 `GET /companies/:id/sync-origins`(회사 단위 · 등급 · 시행 여부) · 싱크 탭 IP 칸 · 접속 허용 IP 칸(조회 · 회수) · 요청 상한 · 차례 · 탭 수명 · support 등급은 발급 못 함(Harold 채택).
-> 검증 = backend · frontend tsc 0 · vitest 전체 · 실 PG 15파일 75건 · 변이 18 전부 잡힘 · Codex 구현 1R 2 → 2R 3(같은 부류 두 번째 = 단위 넓힘) → 3R approve. 범위 밖 기록 = 모달 키 조회(CompanyDetailModal.tsx:143) · 기존 사용 토글에 수명 검사 없음(같은 부류 · 착수 판단 Harold) · 자사몰 SDK 키 IP 필수(R29 알려진 빈칸) · 결과 코드 515~518 → 9999 매핑(코넥스솔루션 문의). 남은 것 = 커밋(팝업 세션과 한 번에) · 배포 · C82-S1 실측 · 엠티 키 = 엠티 서버 IP 로 발급.
+> 검증 = backend · frontend tsc 0 · vitest 전체 · 실 PG 15파일 75건 · 변이 18 전부 잡힘 · Codex 구현 1R 2 → 2R 3(같은 부류 두 번째 = 단위 넓힘) → 3R approve. 범위 밖 기록 = 모달 키 조회(CompanyDetailModal.tsx:143) · 기존 사용 토글에 수명 검사 없음(같은 부류 · 착수 판단 Harold) · 자사몰 SDK 키 IP 필수(R29 알려진 빈칸) · 결과 코드 515~518 → 9999 매핑(코넥스솔루션 문의). 배포 = 5264fa99(C83 과 한 커밋 · 1029 Harold pull · build:safe 둘 · reload). 남은 것 = C82-S1 실측(테스트계정 Sync 탭 재발급) · 엠티 키 = 엠티 서버 IP 로 발급.
 
 <a id="c81"></a>
 
-### C81 · ★1029 싱크에이전트 1.7.5 · Oracle · PG 표준 날짜 칸 하루 당김 정정 — Codex 적대 4R approve · 미커밋
+### C81 · ★1029 싱크에이전트 1.7.5 · Oracle · PG 표준 날짜 칸 하루 당김 정정 — Codex 적대 4R approve · ec8b59d4
 > 호출어 **"날짜 하루 당김 / 1.7.5 / 엠티 VM 재검증"** → [설계서](../docs/2026-10-29-sync-agent-node24-wizard-loopback-design.md) §9 · [기능 문서](../docs/FEATURE-SYNC-AGENT.md) §7 2026-10-29 오후 · §10 · 원장 C81-G1 · 뿌리 = R16 넓힘
 > 계기 = 1.7.4 엠티 VM 재검증(테스트계정) · 생일 · 최근구매일이 원본보다 하루 앞(Harold 운영 PG 3행). 뿌리 = PG · Oracle 어댑터 `toISOString()` → `normalizeDate` 앞 10글자 · 0913 custom 처방은 `'postgresql'` 비교로 PG 에서 죽은 갈래.
 > 한 것 = 매핑에서 원본 컬럼 타입(date · datetime)으로 벽시계 글자(`ISO_DATE_CONNECTORS` · 어댑터 값 · source_row_key · 커서 불변) · 글자 추측 삭제 · 타입 못 읽음 = `DATE_COLUMN_TYPE_UNKNOWN` 잠금 · 경보 = `SyncError.operational`(손 등재 목록 삭제) · 엠티 1.7.5 = `Downloads\엠티콜렉션_SyncAgent_v1.7.5\`(zip sha256 `494d081d…5ab58c` · 안내서 PDF 11쪽).
-> 검증 = 에이전트 tsc 0 · vitest 34파일 305건(Node 20.19.4 · 24.22.1) · 변이 14 · Codex 1R 1 → 2R 2 → 3R 1 → 4R approve · VM 1.7.5 고객 198/200 · 운영 PG 날짜 4칸 198/198(Harold 실행). 남은 것 = 커밋 · 엠티 전달(엠티 서버 IP 국외 접근 통제 등록 · 판매 뷰 휴대폰 P1 = 출고 조건).
+> 검증 = 에이전트 tsc 0 · vitest 34파일 305건(Node 20.19.4 · 24.22.1) · 변이 14 · Codex 1R 1 → 2R 2 → 3R 1 → 4R approve · VM 1.7.5 고객 198/200 · 운영 PG 날짜 4칸 198/198(Harold 실행). 커밋 = ec8b59d4(1029 · 서버 반영 = 5264fa99 pull · 에이전트 판이라 서버 동작 변화 0). 남은 것 = C81-G1 확인 · 엠티 전달(엠티 서버 IP 로 키 발급 = C82 · 판매 뷰 휴대폰 P1 = 출고 조건).
 
 <a id="c80"></a>
 

@@ -135,8 +135,10 @@ describe('Codex 1R — 검사 우회 0', () => {
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
     const pn = readFileSync(join(__dirname, '..', 'journey-pretest-notifier.ts'), 'utf8');
-    const hold = pn.indexOf('UPDATE journey_step_snapshots SET confidence_score = 0 WHERE id = $1::uuid');
+    // ★ 1031 보류(0) 쓰기 = 판 확인 쓰기(recordIfCurrent · markUnchecked) · 그 함수 안이 그 판만 0 으로
+    const hold = pn.indexOf('await recordIfCurrent(b, snapId, { markUnchecked: true });');
     expect(hold).toBeGreaterThan(-1);
+    expect(pn.slice(pn.indexOf('export async function recordIfCurrent('))).toContain('UPDATE journey_step_snapshots SET confidence_score = 0 WHERE id = $1::uuid');
     expect(hold).toBeLessThan(pn.indexOf('regenBody = await regenerateStepAvoidingSpam('));
     expect(hold).toBeGreaterThan(pn.indexOf('if (variantRows.length > 0) {', pn.indexOf("if (verdict === 'pass') {")));
   });

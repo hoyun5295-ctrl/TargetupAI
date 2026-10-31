@@ -78,6 +78,8 @@ import { aiOperatorAllowedForWorker } from './plan-guard';
 import { lineageColumnsReady } from './journey-lineage';
 import { applyVariantToStep } from './journey-step-versions';
 import { PURCHASED_SINCE_ENTRY_ONE_SQL, isSignupTrigger } from './journey-goal-purchase';
+// ★ 2026-10-31 칸 관문 — 「그날 검사를 마쳤다」 판정 조각 한 곳(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-1 · §2-2 · 뿌리 R30)
+import { pretestDoneSql } from './journey-pretest-notifier';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -221,6 +223,31 @@ export const EXECUTION_ERROR_LOG_KEEP = 20;
 /** ★ 2026-10-19 B-1009-6 — 재검사 전 수정 문안의 문자 발송을 다시 볼 간격(재검사 스캔 5분 주기 × 2) · 미루는 상한(스캐너 앞보기 창 2시간) */
 export const PRETEST_PENDING_RECHECK_MINUTES = 10;
 export const PRETEST_PENDING_MAX_HOURS = 2;
+
+/**
+ * ★ 2026-10-31 칸 관문이 미룰 시각(설계서 §2-2) = 지금 + 10분 · 그 시각이 발송 시간 밖이면 다음 발송 창 시작
+ *   (발송 시간 검사가 옮기는 자리와 같은 함수 · 20:54 → 다음 날 08시 = 그날 검사비 0 · 다음 날 06시 스캔이 그 날짜로 검사).
+ */
+export function pretestHoldUntil(now: Date = new Date()): Date {
+  const t = new Date(now.getTime() + PRETEST_PENDING_RECHECK_MINUTES * 60 * 1000);
+  return isWithinSendHours(t) ? t : computeNextSendWindow(t);
+}
+
+/** ★ 2026-10-31 같은 묶음(여정 · 칸 · 날)을 이만큼 넘게 미루면 운영 경보(스캐너 멈춤 · 그 묶음 처리만 계속 실패 둘 다 잡는다). */
+export const GATE_HOLD_ALERT_MINUTES = 30;
+/** 묶음 키 → 처음 미룬 시각 · 경보 보냄(프로세스 메모리 · 통과하면 지움 · 지난 날 키 버림) */
+const _gateHolds = new Map<string, { since: number; alerted: boolean }>();
+/** 미룰 때 부른다 — 이번에 경보를 보내야 하면 true(묶음마다 한 번). */
+export function trackGateHold(key: string, nowMs: number = Date.now()): boolean {
+  const today = key.slice(-10);
+  for (const k of [..._gateHolds.keys()]) if (k.slice(-10) < today) _gateHolds.delete(k);
+  const h = _gateHolds.get(key);
+  if (!h) { _gateHolds.set(key, { since: nowMs, alerted: false }); return false; }
+  if (!h.alerted && nowMs - h.since >= GATE_HOLD_ALERT_MINUTES * 60 * 1000) { h.alerted = true; return true; }
+  return false;
+}
+/** 관문을 지나면 부른다. */
+export function clearGateHold(key: string): void { _gateHolds.delete(key); }
 
 export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number; goalExited: number }> {
   if (workerRunning) {
@@ -701,11 +728,13 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   문자(SMS · LMS · MMS) 칸만(재검사 대상과 같다). 적재 중 표식 정리 · 이미 보냄 판정은 위에서 끝났다(그 둘은 막지 않는다).
   //   ★ 2026-10-23 여정 결함 0 — 2시간이 넘어도 검사 없이 보내지 않는다(옛: [PRETEST-MISS] 로 그냥 나갔다 = 스팸 검사 우회).
   //   계속 미루고(검사가 끝나는 즉시 나간다) 우리 쪽 장애이므로 운영 경보를 한 번 보낸다(6시간 쿨다운 · 여정마다).
+  // ★ 2026-10-31 칸 관문(설계서 §2-2 · 뿌리 R30) — checked_today = 보내는 날(KST) 그 칸 검사를 마친 기록이 있는가(판정 조각 = pretestDoneSql 한 곳).
   const gate = await query(
     `SELECT (next_run_at <= NOW()) AS due,
-            ($2::timestamptz IS NOT NULL AND $2::timestamptz > NOW() - INTERVAL '${PRETEST_PENDING_MAX_HOURS} hours') AS pending
+            ($2::timestamptz IS NOT NULL AND $2::timestamptz > NOW() - INTERVAL '${PRETEST_PENDING_MAX_HOURS} hours') AS pending,
+            ${pretestDoneSql('$3::uuid', '$4::uuid', `(NOW() AT TIME ZONE 'Asia/Seoul')::date`)} AS checked_today
        FROM journey_executions WHERE id = $1::uuid`,
-    [exec.execution_id, pendingSnapshotAt],
+    [exec.execution_id, pendingSnapshotAt, exec.journey_id, step.id],
   );
   if (!gate.rows[0]?.due) return 'waited';
   if (snapshotReadFailed && ['sms', 'lms', 'mms'].includes(String(step.channel))) {
@@ -733,6 +762,39 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
     }
     return 'waited';
   }
+  // 2. 발송 시간 검증 (KST 08:00 ~ 21:00)
+  //   ★ 2026-10-31 Codex 구현 1R ① — 아래 칸 관문보다 먼저 한 번만 판정한다(옛: 관문과 이 검사가 따로 시각을 읽어
+  //   07:59:59 에 관문을 건너뛰고 변이 조회 사이 08:00 을 넘기면 검사 기록 없이 나갔다). 창 밖 = 다음 창으로 옮기고 끝.
+  if (!isWithinSendHours()) {
+    const nextWindow = computeNextSendWindow();
+    await query(
+      `UPDATE journey_executions SET next_run_at = $2 WHERE id = $1::uuid`,
+      [exec.execution_id, nextWindow]
+    );
+    return 'skipped_hours';
+  }
+
+  // ★ 2026-10-31 칸 관문 — 문자 칸은 보내는 날 그 칸 검사 기록(통과 · 안내까지 끝)이 있어야 나간다(발송 시간 안 · 조건 없이 늘).
+  //   없으면(바로 보내는 칸의 그날 첫 발송 · 날짜 기준 · 스캔이 놓친 발송) 미룬다 → 미룬 실행은 앞날이라 다음 스캔이 검사 · 담당자 안내 · 기록 → 다음 회차에 나간다.
+  //   미룰 시각이 창 밖이면 다음 창 시작(pretestHoldUntil).
+  if (['sms', 'lms', 'mms'].includes(String(step.channel))) {
+    const holdKey = `${exec.journey_id}:${step.id}:${new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)}`;
+    if (!gate.rows[0]?.checked_today) {
+      await query(`UPDATE journey_executions SET next_run_at = $2 WHERE id = $1::uuid AND status = 'active'`, [exec.execution_id, pretestHoldUntil()]);
+      if (trackGateHold(holdKey)) {
+        console.warn(`[JourneyExecutor][PRETEST-GATE] journey=${exec.journey_id} step=${step.step_order} 그날 발송 전 검사 기록 없이 ${GATE_HOLD_ALERT_MINUTES}분 넘게 미루는 중`);
+        await sendSystemAlert({
+          companyId: exec.company_id,
+          dedupKey: `journey-pretest-gate-hold:${exec.journey_id}`,
+          title: `여정 문자 칸이 발송 전 검사를 ${GATE_HOLD_ALERT_MINUTES}분 넘게 기다리고 있습니다.`,
+          details: ['확인할 곳: 발송 전 검사 스캐너 로그(journey-pretest-scan) · 스팸 검사 대기열 · 담당자 안내 적재'],
+          action: '검사 · 안내 기록이 생기면 그 자리에서 나갑니다. 슈퍼관리자 여정 화면에서 회사를 확인해 주세요.',
+        }).catch((e: any) => console.warn('[JourneyExecutor] 관문 대기 경보 실패:', e?.message));
+      }
+      return 'waited';
+    }
+    clearGateHold(holdKey);
+  }
 
   // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.
   //   step에 variants ≥ 1건 있으면 선택 후 step 변수 덮어쓰기. 발송 후 recordJourneyStepVariantReward 호출.
@@ -749,16 +811,6 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       Object.assign(step, applyVariantToStep(step, rec.variant));
       console.log(`[JourneyExecutor] step=${step.step_order} variant ${rec.variant.variantId} 선택 — ${rec.reasoning}`);
     }
-  }
-
-  // 2. 발송 시간 검증 (KST 08:00 ~ 21:00)
-  if (!isWithinSendHours()) {
-    const nextWindow = computeNextSendWindow();
-    await query(
-      `UPDATE journey_executions SET next_run_at = $2 WHERE id = $1::uuid`,
-      [exec.execution_id, nextWindow]
-    );
-    return 'skipped_hours';
   }
 
   // 3. 고객 조회 + opt-in 검증
