@@ -47,6 +47,8 @@ import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL } from './journe
 import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
 import { JourneyInputError, backfillPerDayOf, entryCapExceeded, ENTERED_TODAY_KST_SQL, dailyRoomInLock } from './journey-step-limits';
 import { readAfterConfig, startGenOf } from './journey-after-config';
+import { interleaveByCompany } from './concurrency';
+import { sendSystemAlert } from './system-alert';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -158,6 +160,21 @@ export const STATE_TRIGGER_EVENTS = new Set(['customer.dormant', 'customer.birth
 export const STATE_TRIGGER_INTERVAL_MS = 60 * 60 * 1000;
 const _stateTriggerRanAt = new Map<string, number>();
 
+/** ★ 2026-11-02 엔진 재설계 E2-2 — 진입 감시 한 회차 예산(5분 주기 안) · 넘으면 다음 회차가 그 자리부터 이어서 */
+export const WATCHER_TICK_BUDGET_MS = 4 * 60 * 1000;
+/** ★ E1-3 — 사건 · 원장 문의 여정 몫(묶음 1000 을 이 시간 안에서 이어 읽는다 · 넘으면 다음 회차) */
+export const JOURNEY_DOOR_SLICE_MS = 20 * 1000;
+/** 예산으로 멈춘 회차가 남긴 다음 여정 id(프로세스 메모리 · 재시작 = 처음부터 · 빠짐 아님) */
+let _watcherResumeAt: string | null = null;
+/** 시험 전용. */
+export function resetWatcherResume(): void { _watcherResumeAt = null; }
+
+/** ★ E2-2 — 이어서: 직전 회차가 멈춘 여정부터 한 바퀴(그 여정이 목록에 없으면 처음부터). */
+export function rotateFrom<T extends { id: string }>(list: readonly T[], startId: string | null): T[] {
+  const i = startId ? list.findIndex((x) => x.id === startId) : -1;
+  return i <= 0 ? [...list] : [...list.slice(i), ...list.slice(0, i)];
+}
+
 export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enqueued: number; skipped: number }> {
   if (workerRunning) {
     return { matched: 0, enqueued: 0, skipped: 0 };
@@ -183,7 +200,21 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
     const activeIds = new Set((activeRes.rows as ActiveJourney[]).map((x) => x.id));
     for (const id of Array.from(_stateTriggerRanAt.keys())) if (!activeIds.has(id)) _stateTriggerRanAt.delete(id);
 
-    for (const j of activeRes.rows as ActiveJourney[]) {
+    // ★ 2026-11-02 엔진 재설계 E2-2 — 회사 돌아가며 섞고(한 회사 여정이 앞자리를 다 차지하지 않게) · 직전 회차가 멈춘 자리부터 · 4분 예산.
+    const startedAt = Date.now();
+    const ordered = rotateFrom(interleaveByCompany(activeRes.rows as ActiveJourney[], (x) => String(x.company_id)), _watcherResumeAt);
+    _watcherResumeAt = null;
+    for (const j of ordered) {
+      if (Date.now() - startedAt >= WATCHER_TICK_BUDGET_MS) {
+        _watcherResumeAt = j.id;
+        console.warn(`[JourneyTrigger] 회차 예산(${WATCHER_TICK_BUDGET_MS / 60000}분) 초과 — 다음 회차가 journey=${j.id} 부터 이어서`);
+        // ★ E9 ② — 한 회차에 다 못 돈 여정이 있다 = 운영 경보(원인 하나 · 회사 없음 · 1시간)
+        void sendSystemAlert({
+          companyId: null, dedupKey: 'journey-watcher-budget', cooldownMs: 60 * 60 * 1000,
+          message: `여정 진입 감시가 한 회차(${WATCHER_TICK_BUDGET_MS / 60000}분) 안에 켜진 여정을 다 돌지 못했습니다. 남은 여정은 다음 회차에 이어서 봅니다(켜진 여정 ${ordered.length}개).`,
+        }).catch(() => undefined);
+        break;
+      }
       const isStateTrigger = STATE_TRIGGER_EVENTS.has(j.trigger_event);
       if (isStateTrigger && Date.now() - (_stateTriggerRanAt.get(j.id) || 0) < STATE_TRIGGER_INTERVAL_MS) continue;
       try {
@@ -263,12 +294,12 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   //   옛 구매가 다 들어오기 전에 「이전 구매 없음」으로 읽으면 단골에게 첫 구매 문자가 나간다.
   if (cursorEvent && judgesPriorPurchase(j) && await isFirstImportRunning(j.company_id)) return { matched: 0, enqueued: 0, skipped: 0 };
   if (cursorEvent) {
-    const fromEvents = await processCdpCursorJourney(j, cursorEvent);
+    const fromEvents = await drainCursorDoor(() => processCdpCursorJourney(j, cursorEvent));
     // ★ 2026-08-01 §11-4: 구매는 문이 둘이다(자사몰 cdp_events / 싱크 purchases 원장).
     //   원장을 이벤트로 복사하지 않고 그대로 읽는다 — 진실이 하나여야 중복 진입이 구조로 막힌다.
     //   앞 문에서 대량 차단으로 정지했으면 뒤 문은 돌리지 않는다(정지한 여정에 진입을 더 넣지 않는다).
     if (!usesPurchaseLedger(j.trigger_event) || fromEvents.paused) return fromEvents;
-    const fromLedger = await processPurchaseLedgerJourney(j);
+    const fromLedger = await drainCursorDoor(() => processPurchaseLedgerJourney(j));
     return {
       matched: fromEvents.matched + fromLedger.matched,
       enqueued: fromEvents.enqueued + fromLedger.enqueued,
@@ -297,7 +328,8 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   //   휴면·생일·포인트는 진입 안티조인으로 회차마다 다음 분이 들어와 501번째+ 누락이 없다.
   const reentry = { allowReentry: j.allow_reentry, cooldownDays: Number(j.reentry_cooldown_days || 0), lineageIds: j.lineageIds };
   // ★ Fix #2 (2026-06-05): 대량 차단기를 LIMIT 500이 무력화하던 문제 정정.
-  //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정(무제한)이면 500 스로틀로 회차 분산.
+  //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정이면 한 회차 최대 JOURNEY_COUNT_CAP(10만) · 남은 분은 다음 회차(위 진입 안티조인 · 버리지 않는다 · 뿌리 R40).
+  //   ★ 2026-11-01 정정 — 옛 주석 「500 스로틀로 회차 분산」은 상수 값(100000)과 달랐다(값을 읽고 쓴다).
   const cap = j.threshold_recipients_per_step;
   let extractLimit = cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP;
   // ★ 2026-10-20 여정 V.3 §8-1 — 하루 몫(backfill_per_day · 상한과 다른 값): 기존 고객을 KST 하루 몫만큼 나눠 받는다.
@@ -385,6 +417,26 @@ interface CursorRunResult {
   skipped: number;
   /** 대량 차단으로 여정을 정지시켰는가 — 뒤따르는 문을 돌리지 않기 위한 신호. */
   paused?: boolean;
+  /** ★ 2026-11-02 E1-3 — 묶음이 잘렸는가(남은 분이 있다) · 커서가 앞으로 갔는가(이어 읽어도 같은 묶음을 다시 잡지 않는다) */
+  truncated?: boolean;
+  advanced?: boolean;
+}
+
+/**
+ * ★ 2026-11-02 엔진 재설계 E1-3 — 사건 · 원장 문 = 묶음(1000)을 여정 몫(20초) 안에서 이어 읽는다(한 묶음 = 한 트랜잭션 그대로).
+ *   멈춤(대량 차단) · 커서 안 움직임 · 잘리지 않음 · 몫 넘음 = 끝(남은 분 = 다음 회차 · 버림 0).
+ */
+async function drainCursorDoor(door: () => Promise<CursorRunResult>): Promise<CursorRunResult> {
+  const startedAt = Date.now();
+  const sum: CursorRunResult = { matched: 0, enqueued: 0, skipped: 0 };
+  for (;;) {
+    const r = await door();
+    sum.matched += r.matched;
+    sum.enqueued += r.enqueued;
+    sum.skipped += r.skipped;
+    if (r.paused) return { ...sum, paused: true };
+    if (!r.truncated || !r.advanced || Date.now() - startedAt >= JOURNEY_DOOR_SLICE_MS) return sum;
+  }
 }
 
 /** 커서 한 회차에 읽는 최대 행 수. 남은 것은 다음 회차가 이어 읽는다(누락 0). */
@@ -531,8 +583,8 @@ async function finishCursorBatch(
   );
   // step 없거나 후보 0이어도 커서는 전진(이 창/chunk 처리 완료 표시 — 누락 방지).
   if (firstStepRes.rows.length === 0 || ids.length === 0) {
-    await query(guardedCursorSql, guardedParams);
-    return { matched: ids.length, enqueued: 0, skipped: ids.length };
+    const moved = await query(guardedCursorSql, guardedParams);
+    return { matched: ids.length, enqueued: 0, skipped: ids.length, truncated: batch.truncated, advanced: (moved.rowCount || 0) > 0 };
   }
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
 
@@ -543,6 +595,7 @@ async function finishCursorBatch(
   const replaceEntry = usesEntryReplacement(j.trigger_filters) && j.allow_reentry === true;
   let enqueued = 0;
   let skipped = 0;
+  let advanced = false;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -580,7 +633,8 @@ async function finishCursorBatch(
       await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, JSON.stringify(entryProps), holdoutPct]);
       enqueued++;
     }
-    await client.query(guardedCursorSql, guardedParams);
+    const moved = await client.query(guardedCursorSql, guardedParams);
+    advanced = (moved.rowCount || 0) > 0;
     if (enqueued > 0) {
       await client.query(
         `UPDATE journeys SET stats_total_entered = stats_total_entered + $2, updated_at = NOW() WHERE id = $1::uuid`,
@@ -595,7 +649,7 @@ async function finishCursorBatch(
     client.release();
   }
 
-  return { matched: ids.length, enqueued, skipped };
+  return { matched: ids.length, enqueued, skipped, truncated: batch.truncated, advanced };
 }
 
 /**

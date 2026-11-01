@@ -103,7 +103,7 @@ describe('보류 = 실패 · 정지 · 다시 쓰기 0(구현 2라운드)', () =
   it('같은 키 재조회 = 잠금을 쥔 그 연결로(풀에서 연결을 더 기다리지 않는다)', () => {
     const q = src('spam-test-queue.ts');
     expect(q).toContain('const late = await reusable((sql, params) => client.query(sql, params));');
-    expect(q).toMatch(/export async function spamCheckFor\(k: SpamCheckKey, run: SqlRun = query\)/);
+    expect(q).toMatch(/export async function spamCheckFor\(k: SpamCheckKey, run: SqlRun = query, windowDays\?: number\)/);
     expect(q).toContain('const { outcome } = await readSpamTestOutcome(String(t.id), run);');
   });
   it('대안 합산 = 통과 > 확인 중 > 검사 중 > 차단 > 장애(차례 검사와 같은 뜻 · 뒤 안이 확인 중이면 앞 안 차단으로 정지하지 않는다)', () => {
@@ -146,8 +146,9 @@ describe('보류 = 실패 · 정지 · 다시 쓰기 0(구현 2라운드)', () =
     expect(src('ai-credit.ts')).toContain('  accept: (result: T) => boolean;');
     // ★ Codex 구현 3R — 소유권을 잃은 null 은 생성 실패가 아니다(조용히 끝) · 후보 갈래의 정지 = 판 확인과 한 트랜잭션
     expect(n).toMatch(/if \(!\(await candidateStillMine\(snapId!, claim\.token\)\.catch\(\(\) => false\)\)\) \{[\s\S]{0,200}return;\s*\}/);
-    expect(n).toMatch(/async function pauseCurrent\([\s\S]{0,300}FOR UPDATE[\s\S]{0,200}if \(\(await latestSnapshotIdTx\(run, b\)\) !== snapId\) return false;\s*await pauseJourney\(b\.journeyId, reason, run\);/);
-    const tc = n.slice(n.indexOf('async function testCandidate('), n.indexOf('async function pauseCurrent('));
-    expect(tc).not.toContain('await pauseJourney(');
+    // ★ 1102 E3-3 — 후보 갈래 = 그 판 보류(holdCurrent · 판 확인 · 직전 결정 · 보류 기록 한 트랜잭션 · 여정 멈춤 0)
+    expect(n).toMatch(/async function holdCurrent\([\s\S]{0,400}FOR UPDATE[\s\S]{0,200}if \(\(await latestSnapshotIdTx\(run, b\)\) !== snapId\) return null;/);
+    const tc = n.slice(n.indexOf('async function testCandidate('), n.indexOf('async function holdCurrent('));
+    expect(tc).not.toContain('pauseJourney(');
   });
 });

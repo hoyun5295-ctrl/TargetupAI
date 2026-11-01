@@ -122,7 +122,8 @@ describe('세 경로가 빈 조건을 같은 판정으로 읽는다', () => {
   });
   it('화면(AiOperatorPage): 제안의 allCustomers 를 리스트·발송 요청에 그대로 넘긴다', () => {
     expect(page).toContain('allCustomers?: boolean;');
-    expect((page.match(/allCustomers: proposal\.target\.allCustomers === true/g) || []).length).toBe(2);
+    // ★ 2026-11-02 E1-4 — 1만 넘는 대상의 서버 적재 요청도 같은 신호를 넘긴다(리스트 · 발송 · 적재 = 3)
+    expect((page.match(/allCustomers: proposal\.target\.allCustomers === true/g) || []).length).toBe(3);
   });
 });
 

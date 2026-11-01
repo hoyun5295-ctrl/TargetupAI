@@ -147,10 +147,10 @@ describe('⑤ 공개 API · 화면', () => {
 describe('⑥ 안내 문자', () => {
   it('링크가 없으면 링크 줄만 빠진다', () => {
     const at = new Date('2026-10-20T01:00:00Z');
-    const withLink = buildPretestLmsBody({ journeyName: '여정', stepOrder: 2, scheduledSendAt: at, messagePreview: '미리', pauseUrl: 'https://hanjul.ai/journey-pause#t=x', mode: 'pretest_pass' });
+    const withLink = buildPretestLmsBody({ journeyName: '여정', stepOrder: 2, scheduledSendAt: at, messagePreview: '미리', pauseUrl: 'https://hanjul.ai/journey-pause#t=x', mode: 'pretest_autofixed' });
     expect(withLink).toContain('즉시 정지: https://hanjul.ai/journey-pause#t=x');
-    const noLink = buildPretestLmsBody({ journeyName: '여정', stepOrder: 2, scheduledSendAt: at, messagePreview: '미리', pauseUrl: null, mode: 'pretest_paused' });
-    expect(noLink).toContain('[발송 정지 안내]');
+    const noLink = buildPretestLmsBody({ journeyName: '여정', stepOrder: 2, scheduledSendAt: at, messagePreview: '미리', pauseUrl: null, mode: 'pretest_held' });
+    expect(noLink).toContain('[발송 보류 안내]');
     expect(noLink).not.toMatch(/https?:\/\//);
   });
 

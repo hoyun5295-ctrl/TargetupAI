@@ -38,7 +38,9 @@
 | C88 | 3d5e09ef |
 | C89 | d6e05ff5 |
 | C90 | d6e05ff5 |
-| C91 | 미커밋 |
+| C91 | 0b4562da |
+| C92 | 미커밋 |
+| C93 | 미커밋 |
 
 ## §1 대기
 
@@ -459,6 +461,14 @@ CREATE TABLE IF NOT EXISTS journey_pretest_candidates (
 - 확인: 화면 · 그 시각 SQL 하나씩
 - 결과:
 
+### C92-S1 · 여정 작업 화면 후속 실측(화면 전체 · 휴대폰 280 · 최대 인원 선택 · 날짜 기준 · 한 번 보내기 대상 전원 · 배포 뒤 · 테스트계정)
+- 카드: C92
+- 단계: 사후
+- 선행: 코드 배포(DDL 0)
+- 기대: ① 여정 작업 화면 = 창이 화면 전체(둥근 모서리 0) · 큰 화면은 작업대 가운데 1360 · 휴대폰 틀 280 · PC 글 13 ② 켜기 확인 창 · 일괄 켜기에서 최대 인원을 비우면 위험 안내 한 줄 · 비운 채 켜짐(저장값 NULL) ③ 상한을 비운 한 번 보내기 · 날짜 기준 여정 = 대상 수 = 실행 수(B-1101-7 ①② · 10만 넘는 실 사례는 운영에 없음 · 실 PG 시험이 묶음 3 으로 7명 전원 확인)
+- 확인: 화면 · 테스트계정 여정 하나 켠 뒤 그 여정의 실행 수 SQL 하나(docker exec 포함 한 줄로 드린다)
+- 결과:
+
 ### C91-S1 · 여정 재발 방지 배포 2 실측(3단 칸 화면 · 점검 판 · 칸 저장 뒤 자동 스팸 검사 · 메모리 · AI 출구 · 배포 뒤 · 테스트계정)
 - 카드: C91
 - 단계: 사후
@@ -513,6 +523,84 @@ CREATE TABLE IF NOT EXISTS plan_month_credits (
 
 ```sql ddl:C90-DDL-2
 CREATE INDEX CONCURRENTLY IF NOT EXISTS ai_credit_tx_company_seq ON ai_credit_transactions (company_id, seq);
+```
+
+### C93-S0 · 엔진 재설계 사전 실측(켜진 채 실행 0 인 한 번 보내기 · DDL-1 앞)
+- 카드: C93
+- 단계: 사전
+- 선행: 없음
+- 기대: 켜진 한 번 보내기 중 실행 0 인 여정 수 = 0(있으면 DDL-1 이 「넣음」으로 찍기 전에 그 여정을 확인 · 설계서 §5 SC-4)
+- 확인: 결과 수 그대로(SQL = 그 창에서 docker 한 줄)
+- 결과: 2026-11-02 Harold 실행 · active_one_shot_no_exec = 0
+
+### C93-S1 · 엔진 재설계 실측(배포 뒤 · 테스트계정)
+- 카드: C93
+- 단계: 사후
+- 선행: C93-DDL-1 · C93-DDL-2 · C93-DDL-3 · 코드 배포
+- 기대: ① 테스트계정 한 번 보내기 켜기 = 실행 수 = 대상 수 · one_shot_dispatched_at 찍힘 · 넣기 대기 NULL ② 문자 칸 문안을 고치면 그 칸만 검사를 기다리고 통과 뒤 나감 · 담당자 「발송 전 안내」 문자 0 ③ 상황판 주소(주간 요약 또는 직접 발급) = 한눈에 · 여정 · 자동마케팅 · 플래너 메뉴 · 휴대폰 폭 ④ 충전 승인 링크 = 누르면 확인 창 ⑤ 자동마케팅 수정 창 오른쪽 점검 판 ⑥ 배포 뒤 첫 시간 운영 경보에 journey-executor-lag · journey-watcher-budget · spam-queue-lag 0
+- 확인: 화면(Harold · 테스트계정) · 그 시각 SQL 하나씩(docker 한 줄)
+- 결과:
+
+### C93-DDL-1 · journeys 한 번 보내기 넣기 대기 · 넣기 완료 시각(엔진 재설계 E1-2) · ★ 배포 앞
+- 카드: C93
+- 단계: DDL
+- 선행: 없음(배포 앞 · 앞 확인 SQL = 켜진 채 실행 0 인 한 번 보내기 수)
+- 의미 바꿈: 아니오(칸 추가 · 옛 코드는 읽지 않는다 · 초안이 아닌 한 번 보내기 = 「넣음」으로 찍어 배포 뒤 다시 뽑지 않는다 · 초안 = NULL 그대로 · 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §5)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'journeys' AND column_name IN ('one_shot_dispatch_pending_at', 'one_shot_dispatched_at') ORDER BY 1; + 초안 아닌 한 번 보내기 중 one_shot_dispatched_at NULL 0
+- 확인: 두 줄 timestamp with time zone · NULL 0
+- 결과: 2026-11-02 Harold 실행 · ALTER TABLE · UPDATE 0 · 두 칸 timestamp with time zone · 초안 아닌 한 번 보내기 NULL 0
+
+> C93-DDL-1 · 배포 앞 · 추가 + 기준선 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C93-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE journeys
+  ADD COLUMN IF NOT EXISTS one_shot_dispatch_pending_at timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS one_shot_dispatched_at timestamptz NULL;
+UPDATE journeys SET one_shot_dispatched_at = NOW()
+ WHERE start_kind = 'one_shot' AND one_shot_dispatched_at IS NULL AND status <> 'draft';
+```
+
+### C93-DDL-2 · manager_weekly_digests(담당자 주간 요약 기록 · 엔진 재설계 E4-2)
+- 카드: C93
+- 단계: DDL
+- 선행: 없음
+- 의미 바꿈: 아니오(새 표 · 없으면 주간 요약을 건너뛰고 운영 경보)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name FROM information_schema.tables WHERE table_name = 'manager_weekly_digests';
+- 확인: 한 줄
+- 결과: 2026-11-02 Harold 실행 · CREATE TABLE · information_schema.tables 한 줄
+
+> C93-DDL-2 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해
+
+```sql ddl:C93-DDL-2
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS manager_weekly_digests (
+  company_id uuid NOT NULL,
+  owner_key  text NOT NULL,
+  week_start date NOT NULL,
+  attempts   smallint NOT NULL DEFAULT 0,
+  sent_at    timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (company_id, owner_key, week_start)
+);
+```
+
+### C93-DDL-3 · journey_pretest_schedules.snapshot_id · notice_sent_at(검사 기록에 검사한 판 · 담당자 안내 원장 · 엔진 재설계 E3-2 · E3-3 · Codex 구현 1R) · ★ 배포 앞
+- 카드: C93
+- 단계: DDL
+- 선행: 없음
+- 의미 바꿈: 아니오(칸 추가 · 옛 코드는 넣지 않는다 · 새 코드는 칸이 없으면 검사 스캔을 열지 않고 운영 경보 · 통과한 글은 그대로 나감 · notice_sent_at = 보류 · 지연 안내를 보냈는가(NULL = 보낼 것))
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'journey_pretest_schedules' AND column_name IN ('snapshot_id', 'notice_sent_at') ORDER BY 1;
+- 확인: notice_sent_at · timestamp with time zone / snapshot_id · uuid 두 줄
+- 결과: 2026-11-02 Harold 실행 · ALTER TABLE · notice_attempts smallint(C84) · notice_sent_at timestamp with time zone · snapshot_id uuid 세 줄
+
+> C93-DDL-3 · 배포 앞 · 넓힘 · 되돌리기 = 남겨도 무해
+
+```sql ddl:C93-DDL-3
+SET lock_timeout = '3s';
+ALTER TABLE journey_pretest_schedules
+  ADD COLUMN IF NOT EXISTS snapshot_id uuid NULL,
+  ADD COLUMN IF NOT EXISTS notice_sent_at timestamptz NULL;
 ```
 
 ## §2 덤프 뒤 적용분

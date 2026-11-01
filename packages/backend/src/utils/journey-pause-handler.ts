@@ -53,29 +53,18 @@ function sign(body: string, secret: string): string {
 }
 
 /**
- * 정지 token 발급 (24h TTL).
- * 옛 short-url 패턴 정합 (HMAC-SHA256 서명). 키가 없으면 던진다 — 부르는 쪽이 링크 줄만 빼고 안내는 보낸다.
+ * ★ 2026-11-02 엔진 재설계 E5-1 — 담당자 링크 서명 한 곳(정지 링크 · 상황판 링크가 같은 비밀 · 같은 꼴).
+ *   서로의 토큰으로 서로를 못 연다 = 읽는 쪽이 몸의 필수 칸(정지 = 칸 · 여정 · 회사 / 상황판 = kind · 회사 · 담당자)을 따로 본다.
+ *   키 없음 = 발급 null · 읽기 null(fail-closed).
  */
-export async function generatePauseToken(input: PauseTokenInput): Promise<string> {
+export function signLinkToken(payload: object): string | null {
   const secret = pauseSecret();
-  if (!secret) throw new Error('JOURNEY_PAUSE_TOKEN_SECRET 미설정: 여정 정지 링크를 발급할 수 없습니다.');
-  const payload: PauseTokenPayload = {
-    step_id: input.stepId,
-    execution_id: input.executionId,
-    company_id: input.companyId,
-    journey_id: input.journeyId,
-    expires_at: Date.now() + TOKEN_TTL_MS,
-    ...(input.phone ? { phone: String(input.phone).replace(/\D/g, '').slice(0, 20) } : {}),
-    ...(input.sendDate && /^\d{4}-\d{2}-\d{2}$/.test(input.sendDate) ? { send_date: input.sendDate } : {}),
-  };
+  if (!secret) return null;
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   return `${body}.${sign(body, secret)}`;
 }
-
-/**
- * Token 검증 + payload 반환. 만료/위조/키 없음 시 null.
- */
-export async function verifyPauseToken(token: string): Promise<PauseTokenPayload | null> {
+/** 서명 · 만료(expires_at)만 확인한 몸 · 틀리면 null */
+export function readLinkToken(token: string): Record<string, any> | null {
   const secret = pauseSecret();
   if (!secret) return null;
   const parts = String(token || '').split('.');
@@ -85,13 +74,41 @@ export async function verifyPauseToken(token: string): Promise<PauseTokenPayload
   const given = Buffer.from(String(sig || ''));
   if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) return null;
   try {
-    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as PauseTokenPayload;
-    if (!payload || !Number.isFinite(Number(payload.expires_at)) || payload.expires_at < Date.now()) return null;
-    if (!payload.step_id || !payload.journey_id || !payload.company_id) return null;
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (!payload || typeof payload !== 'object' || !Number.isFinite(Number(payload.expires_at)) || Number(payload.expires_at) < Date.now()) return null;
     return payload;
   } catch {
     return null;
   }
+}
+
+/**
+ * 정지 token 발급 (24h TTL).
+ * 옛 short-url 패턴 정합 (HMAC-SHA256 서명). 키가 없으면 던진다 — 부르는 쪽이 링크 줄만 빼고 안내는 보낸다.
+ */
+export async function generatePauseToken(input: PauseTokenInput): Promise<string> {
+  const payload: PauseTokenPayload = {
+    step_id: input.stepId,
+    execution_id: input.executionId,
+    company_id: input.companyId,
+    journey_id: input.journeyId,
+    expires_at: Date.now() + TOKEN_TTL_MS,
+    ...(input.phone ? { phone: String(input.phone).replace(/\D/g, '').slice(0, 20) } : {}),
+    ...(input.sendDate && /^\d{4}-\d{2}-\d{2}$/.test(input.sendDate) ? { send_date: input.sendDate } : {}),
+  };
+  const token = signLinkToken(payload);
+  if (!token) throw new Error('JOURNEY_PAUSE_TOKEN_SECRET 미설정: 여정 정지 링크를 발급할 수 없습니다.');
+  return token;
+}
+
+/**
+ * Token 검증 + payload 반환. 만료/위조/키 없음 시 null.
+ */
+export async function verifyPauseToken(token: string): Promise<PauseTokenPayload | null> {
+  const payload = readLinkToken(token) as PauseTokenPayload | null;
+  if (!payload || (payload as any).kind) return null;   // ★ 1102 E5-1 — 종류가 실린 토큰(상황판)은 정지권이 아니다
+  if (!payload.step_id || !payload.journey_id || !payload.company_id) return null;
+  return payload;
 }
 
 /** 담당자 문자에 싣는 정지 주소 — 토큰은 # 뒤(서버 접근 로그 · Referer 로 새지 않는다 · 대행 · 플래너와 같은 축). */

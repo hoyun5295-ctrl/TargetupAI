@@ -194,10 +194,13 @@ describe('② 만들기 돈 순서', () => {
     expect(m.generateMessages).not.toHaveBeenCalled();
     expect(m.settle).not.toHaveBeenCalled();
   });
-  it('1만 명 초과 = 차감 전 거절', async () => {
+  // ★ 2026-11-02 엔진 재설계 E1-4 — 1만 명 입구 거절을 없앴다(발송은 서버 적재 · 명단 서명 경로) · 옛 「1만 초과 = 거절」을 뒤집는다
+  it('1만 명 초과도 만들기는 진행(입구 거절 0)', async () => {
     countIs(10001);
-    await expect(runLineCompose(V, composeInput())).rejects.toMatchObject({ code: 'TARGET_TOO_MANY' });
-    expect(m.settle).not.toHaveBeenCalled();
+    const err = await runLineCompose(V, composeInput()).then(() => null, (e: any) => e);
+    expect(err?.code).not.toBe('TARGET_TOO_MANY');
+    const src = readFileSync(join(__dirname, '..', '..', 'services', 'ai-line.ts'), 'utf8');
+    expect(src).not.toContain("'TARGET_TOO_MANY'");
   });
   it('조건이 비고 전체 선언이 없으면 거절', async () => {
     countIs(5);

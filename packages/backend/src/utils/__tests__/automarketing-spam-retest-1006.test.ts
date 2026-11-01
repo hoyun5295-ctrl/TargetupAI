@@ -127,9 +127,10 @@ describe('서버 — 자동 검사와 같은 검사 · 실제 발송과 같은 �
     expect(back('utils/spam-test-queue.ts')).toContain('skipPrepaid: true');
   });
 
-  it('정지 문자가 화면에서 할 일을 알려 준다', () => {
-    expect(op).toContain('제안 상세에서 다른 추천 문안을 고르거나 문안을 고친 뒤 스팸 검사를 하고 승인할 수 있습니다');
+  it('정지 문자가 화면에서 할 일을 알려 준다 · ★1102 E3-6 ② 운영자 멈춤 0(그 회차만 검토)', () => {
+    expect(op).toContain('제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인할 수 있어요');
     expect(op).not.toContain('문안 검토 후 재개해주세요');
+    expect(op).not.toContain("UPDATE continuous_operators SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'");
   });
 });
 

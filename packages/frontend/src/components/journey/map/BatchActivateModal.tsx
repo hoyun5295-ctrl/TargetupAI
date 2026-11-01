@@ -1,7 +1,7 @@
 /**
  * BatchActivateModal — 켜기 전 점검 · 모두 켜기 (★ 2026-09-30 여정 V2 2차 · 설계서 §5 "켜기")
  *
- * 한 창에서: 여정마다 사전 검증(기존 pretest-validate · 여정마다 차례로) · 한 번에 보낼 최대 인원(필수) ·
+ * 한 창에서: 여정마다 사전 검증(기존 pretest-validate · 여정마다 차례로) · 한 번에 보낼 최대 인원(★ 2026-11-01 선택 · 비우면 제한 없음) ·
  *   처음 켜는 요금(서버 단가 × 초안 수) · 소급 없음 안내 · 겹치는 쌍마다 고르기(알고 둘 다 보냄 / 한쪽 빼기)
  *   → [모두 켜기] = 서버 activate-batch(받는 여정 먼저 · 여정마다 단건과 같은 게이트) → 카드별 결과.
  *
@@ -115,7 +115,9 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
   const selectedList = candidates.filter((c) => selected.has(c.id));
   // ★ V.3 §5-1 — 처음 켜기 크레딧은 서버가 여정마다 정한다(새 판 초안 = 0 · 화면이 상태로 매기지 않는다).
   const credit = selectedList.reduce((s, c) => s + (Number(c.activationCost) || 0), 0);
-  const capOk = (id: string) => { const n = Math.floor(Number(caps[id])); return !!caps[id]?.trim() && Number.isFinite(n) && n >= 1; };
+  // ★ 2026-11-01 Harold — 최대 인원 = 선택(비움 = 제한 없음 · 넣으면 1 이상)
+  const capOf = (id: string): number | null => (caps[id]?.trim() ? Math.floor(Number(caps[id])) : null);
+  const capOk = (id: string) => { const n = capOf(id); return n == null || (Number.isFinite(n) && n >= 1); };
   const allPass = selectedList.every((c) => checks[c.id]?.state === 'pass');
   const allCaps = selectedList.every((c) => capOk(c.id));
   const allAck = pairs.every((o) => acks.has(pairKey(o)));
@@ -127,14 +129,14 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
     setError(null);
     try {
       // 바뀐 최대 인원 먼저 저장 → 서버가 검증 통과를 지우므로 그 여정은 다시 검증한 뒤 켠다.
-      const changed = selectedList.filter((c) => Math.floor(Number(caps[c.id])) !== savedCaps[c.id]);
+      const changed = selectedList.filter((c) => capOf(c.id) !== (savedCaps[c.id] ?? null));
       for (const c of changed) {
         const res = await fetch(`/api/ai/operator/journeys/${c.id}/options`, {
-          method: 'PATCH', headers: headers(), body: JSON.stringify({ thresholdRecipients: Math.floor(Number(caps[c.id])) }),
+          method: 'PATCH', headers: headers(), body: JSON.stringify({ thresholdRecipients: capOf(c.id) }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok || !d?.success) { setError(`${c.name}: ${d?.error || '최대 인원을 저장하지 못했어요.'}`); return; }
-        setSavedCaps((prev) => ({ ...prev, [c.id]: Math.floor(Number(caps[c.id])) }));
+        setSavedCaps((prev) => ({ ...prev, [c.id]: capOf(c.id) }));
       }
       if (changed.length > 0) {
         const rid = ++runId.current;
@@ -205,7 +207,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold text-slate-900">{it.name || nameOf(it.journeyId)}</div>
                   <p className="mt-0.5 text-[11px] text-slate-500">
-                    {it.result.ok ? (it.result.charged > 0 ? `켰어요 · ${it.result.charged} 크레딧` : it.result.firstActivation ? '켰어요 · 추가 크레딧 0' : '다시 켰어요') : it.result.message}
+                    {it.result.ok ? `${it.result.charged > 0 ? `켰어요 · ${it.result.charged} 크레딧` : it.result.firstActivation ? '켰어요 · 추가 크레딧 0' : '다시 켰어요'}${it.result.dispatchPending ? ' · 받는 분을 넣는 중(30분 안에 자동)' : ''}` : it.result.message}
                   </p>
                 </div>
                 {!it.result.ok && it.result.code === 'CALLBACK_CONFIRM_REQUIRED' && (
@@ -247,12 +249,16 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                             value={caps[c.id] ?? ''}
                             onChange={(e) => setCaps((prev) => ({ ...prev, [c.id]: e.target.value.replace(/[^0-9]/g, '') }))}
                             inputMode="numeric"
-                            placeholder="예: 500"
+                            placeholder="비우면 제한 없음"
                             disabled={running}
                             className={`w-28 h-8 px-2 rounded-lg bg-white border text-xs tabular-nums focus:outline-none focus:border-violet-400 ${capOk(c.id) ? 'border-slate-200' : 'border-amber-300'}`}
                           />
                           <span className="text-slate-400">명</span>
                         </label>
+                        {/* ★ 2026-11-01 Codex C92 1R — 단건 확인 창과 같은 위험 안내(비운 여정마다) */}
+                        {capOf(c.id) == null && (
+                          <p className="text-[11px] text-amber-800">정하지 않으면 제한 없이 보내요. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요.</p>
+                        )}
                         {ck?.state === 'pass' && (ck.weeklyCount != null) && (
                           <p className="text-[11px] text-slate-400 tabular-nums">7일 예상 {Number(ck.weeklyCount).toLocaleString('ko-KR')}건 · 발송비 약 {Number(ck.weeklyCost || 0).toLocaleString('ko-KR')}원</p>
                         )}
@@ -326,7 +332,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
           <>
             <span className="flex-1 text-[11px] text-slate-500 tabular-nums">
               {selectedList.length}개 켜기 · {credit > 0 ? `처음 켜기 ${credit} 크레딧` : '크레딧 0'}
-              {!allCaps && selectedList.length > 0 ? ' · 최대 인원을 정해 주세요' : !allPass && selectedList.length > 0 ? ' · 검증을 통과해야 켤 수 있어요' : !allAck ? ' · 함께 시작되는 여정을 골라 주세요' : ''}
+              {!allCaps && selectedList.length > 0 ? ' · 최대 인원은 1 이상으로 넣거나 비워 주세요' : !allPass && selectedList.length > 0 ? ' · 검증을 통과해야 켤 수 있어요' : !allAck ? ' · 함께 시작되는 여정을 골라 주세요' : ''}
             </span>
             <button type="button" onClick={() => void run()} disabled={!ready} className="h-9 px-4 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 inline-flex items-center gap-1.5">
               {running && <Loader2 className="w-4 h-4 animate-spin" />}

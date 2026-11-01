@@ -4,27 +4,23 @@
  * 그리는 값 = 서버 점검 응답(GET /api/ai/operator/journeys/:id/check) 그대로. 화면은 판정하지 않는다(판정 유틸 import 0).
  *   맨 위 = 판정 문장(켜기 칩 · 레일 점과 같은 값) · 이 칸 항목 · 여정 전체 항목 · 다른 칸에 남은 것(누르면 그 칸으로).
  *   5어 = 검사 전 · 검사 중 · 확인 중 · 통과 · 고칠 것.
+ * ★ 2026-11-02 엔진 재설계 E7-2 — 그리는 부품(항목 줄 · 판 머리)은 공용 components/check/CheckPanel 로 옮겼다(자동마케팅 점검 판과 같이 씀 · 화면 변화 0).
  */
-import { AlertTriangle, CheckCircle2, CircleDashed, Loader2, ShieldCheck, Hourglass, Beaker } from 'lucide-react';
+import { Beaker } from 'lucide-react';
+import { CheckItemRow as ItemRow, CheckHead, CHECK_LEVEL_WORD, type CheckLevel, type CheckItem, type CheckVerdict } from '../../check/CheckPanel';
 
-export type JourneyCheckLevel = 'before' | 'running' | 'confirming' | 'pass' | 'fix';
-export interface JourneyCheckItem {
-  key: string;
-  level: JourneyCheckLevel;
-  title: string;
-  detail: string;
+export type JourneyCheckLevel = CheckLevel;
+export interface JourneyCheckItem extends CheckItem {
   fixTarget: 'body' | 'subject' | 'alimtalk' | 'spam' | 'journey' | null;
   variantId: string | null;
 }
 export interface JourneyCheckData {
-  verdict: { canActivate: boolean; sentence: string; fix: number; hold: number; before: number };
+  verdict: CheckVerdict;
   steps: Record<string, JourneyCheckItem[]>;
   journey: JourneyCheckItem[];
 }
 
-export const CHECK_LEVEL_WORD: Record<JourneyCheckLevel, string> = {
-  before: '검사 전', running: '검사 중', confirming: '확인 중', pass: '통과', fix: '고칠 것',
-};
+export { CHECK_LEVEL_WORD };
 
 /** 칸 하나의 점 색(레일) — 고칠 것 = 빨강 · 검사 전 · 검사 중 · 확인 중 = 노랑 · 그 밖 = 없음 */
 export function stepDotOf(items: readonly JourneyCheckItem[] | undefined): 'fix' | 'hold' | null {
@@ -32,28 +28,6 @@ export function stepDotOf(items: readonly JourneyCheckItem[] | undefined): 'fix'
   if (items.some((i) => i.level === 'fix')) return 'fix';
   if (items.some((i) => i.level === 'before' || i.level === 'running' || i.level === 'confirming')) return 'hold';
   return null;
-}
-
-const levelIcon = (l: JourneyCheckLevel) =>
-  l === 'fix' ? <AlertTriangle className="h-4 w-4 text-rose-600" aria-hidden />
-    : l === 'pass' ? <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
-      : l === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-amber-600" aria-hidden />
-        : l === 'confirming' ? <Hourglass className="h-4 w-4 text-amber-600" aria-hidden />
-          : <CircleDashed className="h-4 w-4 text-slate-400" aria-hidden />;
-
-function ItemRow({ it }: { it: JourneyCheckItem }) {
-  return (
-    <li className="flex gap-2.5 px-3.5 py-2.5">
-      <span className="mt-0.5 shrink-0">{levelIcon(it.level)}</span>
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-x-2 text-[13px] font-medium text-slate-900">
-          {it.title}
-          <span className={`text-[11.5px] font-semibold ${it.level === 'fix' ? 'text-rose-700' : it.level === 'pass' ? 'text-emerald-700' : it.level === 'before' ? 'text-slate-500' : 'text-amber-700'}`}>{CHECK_LEVEL_WORD[it.level]}</span>
-        </div>
-        {it.detail && <p className="mt-0.5 text-[12px] leading-relaxed text-slate-500">{it.detail}</p>}
-      </div>
-    </li>
-  );
 }
 
 interface Props {
@@ -80,19 +54,9 @@ export default function JourneyCheckPanel({ check, loading, error, stepId, stepL
   const v = check?.verdict;
   return (
     <aside aria-label="점검" className="min-w-0 self-start rounded-2xl border border-slate-200 bg-white">
-      <div className={`rounded-t-2xl px-4 py-3.5 ${!v ? 'bg-slate-50' : v.canActivate ? 'bg-emerald-50' : 'bg-rose-50'}`}>
-        <div className="flex items-center gap-2 text-[12px] font-semibold text-slate-500"><ShieldCheck className="h-4 w-4" aria-hidden />점검</div>
-        {loading && !check ? (
-          <div className="mt-1.5 flex items-center gap-2 text-[14px] text-slate-600"><Loader2 className="h-4 w-4 animate-spin" aria-hidden />보는 중</div>
-        ) : error && !check ? (
-          <div className="mt-1.5 text-[13px] text-rose-700">{error} <button type="button" onClick={onRetry} className="ml-1 underline">다시</button></div>
-        ) : v ? (
-          <p className={`mt-1 text-[15px] font-semibold ${v.canActivate ? 'text-emerald-800' : 'text-rose-800'}`}>{v.sentence}</p>
-        ) : null}
-        {/* ★ Codex 구현 1R #3 — 이미 결과가 있어도 다시 보기 실패를 보이고 다시 누를 수 있게 */}
-        {error && check && <p className="mt-1 text-[12px] text-rose-700">새 결과를 못 받았어요. <button type="button" onClick={onRetry} className="font-semibold underline">다시 보기</button></p>}
+      <CheckHead verdict={v} loaded={!!check} loading={loading} error={error} onRetry={onRetry}>
         {unsaved && <p className="mt-1 text-[12px] text-slate-500">고친 곳은 저장한 뒤 점검해요.</p>}
-      </div>
+      </CheckHead>
 
       {stepId && (
         <div className="border-t border-slate-100">

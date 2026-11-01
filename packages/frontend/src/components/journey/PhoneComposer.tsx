@@ -143,31 +143,31 @@ export default function PhoneComposer({
         {tab('see', '받는 모습', Eye)}
       </div>
 
-      {/* 휴대폰 틀 — 폭 320(★ 2026-11-01 배포 2 C6) · 좁은 화면은 화면 폭에 맞춘다 · 오른쪽 = 볼륨 · 전원 버튼 */}
-      <div className="relative w-full max-w-[320px]">
-        <span className="absolute -right-[3px] top-[96px] h-14 w-[3px] rounded-r bg-slate-700" aria-hidden />
-        <span className="absolute -right-[3px] top-[164px] h-9 w-[3px] rounded-r bg-slate-700" aria-hidden />
-        <span className="absolute -left-[3px] top-[120px] h-12 w-[3px] rounded-l bg-slate-700" aria-hidden />
-      <div className="w-full rounded-[2.4rem] bg-slate-900 p-[9px] shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)]">
-        <div className="relative flex min-h-[480px] flex-col overflow-hidden rounded-[1.95rem] bg-white">
-          <div className="flex justify-center pt-2.5"><span className="h-[22px] w-[96px] rounded-full bg-slate-900" aria-hidden /></div>
-          <div className="flex flex-col items-center gap-1 border-b border-slate-100 px-5 pb-3 pt-2">
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-slate-500" aria-hidden>
-              <User className="h-5 w-5" />
+      {/* 휴대폰 틀 — 폭 280(★ 2026-11-01 Harold 「핸드폰 화면 너무 크다 · 글씨도 크고」 · 옛 380 → 320 → 280) · 좁은 화면은 화면 폭에 맞춘다 · 오른쪽 = 볼륨 · 전원 버튼 */}
+      <div className="relative w-full max-w-[280px]">
+        <span className="absolute -right-[3px] top-[76px] h-12 w-[3px] rounded-r bg-slate-700" aria-hidden />
+        <span className="absolute -right-[3px] top-[136px] h-8 w-[3px] rounded-r bg-slate-700" aria-hidden />
+        <span className="absolute -left-[3px] top-[96px] h-10 w-[3px] rounded-l bg-slate-700" aria-hidden />
+      <div className="w-full rounded-[2.1rem] bg-slate-900 p-[8px] shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)]">
+        <div className="relative flex min-h-[360px] flex-col overflow-hidden rounded-[1.7rem] bg-white">
+          <div className="flex justify-center pt-2.5"><span className="h-[18px] w-[76px] rounded-full bg-slate-900" aria-hidden /></div>
+          <div className="flex flex-col items-center gap-1 border-b border-slate-100 px-4 pb-2.5 pt-1.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-slate-500" aria-hidden>
+              <User className="h-4 w-4" />
             </span>
             <span className="max-w-full truncate text-[12px] text-slate-500">{senderLabel || '문자 메시지'}</span>
           </div>
 
-          <div className="flex-1 px-4 pb-4 pt-3">
+          <div className="flex-1 px-3 pb-3 pt-2.5">
             <div className="mb-2 text-center text-[12px] text-slate-400">{stepChannelLabel(channel)}</div>
-            <div className={`max-w-[94%] rounded-[20px] rounded-bl-md bg-[#e9e9eb] px-4 py-3 text-slate-900 ${mode === 'write' && !readOnly ? 'focus-within:ring-2 focus-within:ring-indigo-300' : ''}`}>
+            <div className={`max-w-[94%] rounded-[20px] rounded-bl-md bg-[#e9e9eb] px-3.5 py-2.5 text-slate-900 ${mode === 'write' && !readOnly ? 'focus-within:ring-2 focus-within:ring-indigo-300' : ''}`}>
               {mode === 'see' && serverBusy ? (
                 <div className="flex items-center gap-2 py-6 text-[14px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />받는 모습을 만드는 중</div>
               ) : mode === 'see' ? (
                 <>
-                  {channel !== 'sms' && subjectSeen && <div className="mb-2 border-b border-slate-300/70 pb-2 text-[16px] font-semibold leading-snug md:text-[14px]">{subjectSeen}</div>}
+                  {channel !== 'sms' && subjectSeen && <div className="mb-2 border-b border-slate-300/70 pb-2 text-[16px] font-semibold leading-snug md:text-[13px]">{subjectSeen}</div>}
                   {imageCount > 0 && <ImageChip n={imageCount} />}
-                  <div className="whitespace-pre-wrap break-words text-[16px] leading-[1.65] md:text-[14px]">
+                  <div className="whitespace-pre-wrap break-words text-[16px] leading-[1.65] md:text-[13px]">
                     {seeText ? (server || sampleCustomer ? seeText : highlightVars(seeText)) : <span className="text-slate-400">문안이 비어 있어요.</span>}
                   </div>
                 </>
@@ -186,7 +186,7 @@ export default function PhoneComposer({
                         }}
                         placeholder="제목"
                         aria-label="제목"
-                        className="min-w-0 flex-1 bg-transparent text-[16px] font-semibold leading-snug md:text-[14px] placeholder:font-normal placeholder:text-slate-400 focus:outline-none"
+                        className="min-w-0 flex-1 bg-transparent text-[16px] font-semibold leading-snug md:text-[13px] placeholder:font-normal placeholder:text-slate-400 focus:outline-none"
                       />
                     </div>
                   )}
@@ -200,7 +200,7 @@ export default function PhoneComposer({
                     rows={5}
                     placeholder={placeholder || '고객에게 보낼 문안을 여기에 써요.'}
                     aria-label="문안"
-                    className="block w-full resize-none overflow-hidden bg-transparent text-[16px] leading-[1.65] md:text-[14px] placeholder:text-slate-400 focus:outline-none"
+                    className="block w-full resize-none overflow-hidden bg-transparent text-[16px] leading-[1.65] md:text-[13px] placeholder:text-slate-400 focus:outline-none"
                   />
                   {footerLine && <div className="mt-1"><LockedMark text={footerLine} /></div>}
                 </>
@@ -213,7 +213,7 @@ export default function PhoneComposer({
       </div>
 
       {/* 바이트 막대 — 실제 나가는 형태 기준 */}
-      <div className="mt-3 w-full max-w-[320px]">
+      <div className="mt-3 w-full max-w-[280px]">
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
           <div className={`h-full rounded-full transition-[width] ${over ? 'bg-rose-500' : shownBytes / maxBytes > 0.85 ? 'bg-amber-400' : 'bg-indigo-500'}`}
             style={{ width: `${Math.min(100, Math.max(2, (shownBytes / maxBytes) * 100))}%` }} />
@@ -236,7 +236,7 @@ export default function PhoneComposer({
 
 function LockedMark({ text }: { text: string }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-300/50 px-1.5 py-0.5 text-[13px] text-slate-500" title="발송할 때 자동으로 붙어요">
+    <span className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-300/50 px-1.5 py-0.5 text-[13px] text-slate-500 md:text-[12px]" title="발송할 때 자동으로 붙어요">
       <Lock className="h-3 w-3 shrink-0" aria-hidden /><span className="truncate">{text}</span>
     </span>
   );

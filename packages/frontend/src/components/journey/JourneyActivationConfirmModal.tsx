@@ -31,7 +31,7 @@ interface Props {
   journeyStatus: string;
   /** ★ 2026-07-10 목표 달성 시 자동 종료 — 활성화 직전 마지막 확인 표시(옵션 상태) */
   goalExitEnabled?: boolean;
-  /** ★ 2026-08-02 §13-5 — 현재 저장된 "한 번에 보낼 최대 인원". 전 트리거 필수라 없으면 활성화가 거부된다. */
+  /** ★ 2026-08-02 §13-5 — 현재 저장된 "한 번에 보낼 최대 인원". ★ 2026-11-01 선택(없으면 제한 없음). */
   thresholdRecipients?: number | null;
   /** ★ 2026-10-20 V.3 §5-1 — 이번에 켜면 내는 처음 켜기 크레딧(서버 판정 · 계보당 1번 · 새 판 초안 · 다시 켜기 = 0). 0 이면 크레딧 확인 창을 띄우지 않는다. */
   activationCost?: number;
@@ -172,12 +172,14 @@ export default function JourneyActivationConfirmModal({
     // ⛔ 2026-08-02 Codex 4R — 저장·비교·표시가 **같은 값**을 써야 한다.
     //   1.5를 넣으면 서버엔 1이 저장되는데 입력칸은 1.5로 남아, 다음 확인에서도 다르다고 판정해
     //   저장과 재검증만 무한히 반복하고 활성화에 도달하지 못한다.
-    const capNum = Math.floor(Number(capInput));
-    if (!capInput.trim() || !Number.isFinite(capNum) || capNum < 1) {
-      toast.warning('한 번에 보낼 최대 인원을 1 이상 정수로 정해 주세요.');
+    // ★ 2026-11-01 Harold — 최대 인원 = 선택. 비우면 제한 없음(null · 조건에 맞는 분 모두 · 날짜 기준 · 한 번 보내기 = 끝까지 · 사건 · 상태 = 회차당 10만 · 남은 분 다음 회차) · 넣으면 1 이상 정수.
+    const capEmpty = !capInput.trim();
+    const capNum: number | null = capEmpty ? null : Math.floor(Number(capInput));
+    if (capNum != null && (!Number.isFinite(capNum) || capNum < 1)) {
+      toast.warning('한 번에 보낼 최대 인원은 1 이상 정수로 넣거나 비워 주세요.');
       return;
     }
-    if (String(capNum) !== capInput.trim()) setCapInput(String(capNum));
+    if (capNum != null && String(capNum) !== capInput.trim()) setCapInput(String(capNum));
     if (capNum !== savedCap) {
       try {
         const optRes = await fetch(`/api/ai/operator/journeys/${journeyId}/options`, {
@@ -197,7 +199,7 @@ export default function JourneyActivationConfirmModal({
       // ⛔ 2026-08-02 Codex 3R — 설정을 바꿨으면 **바꾼 구성으로 다시 검증**해야 켤 수 있다.
       //   옵션 변경은 서버에서 사전검사 통과를 무효로 만든다(검사받지 않은 구성으로 발송이 시작되는 것을 막는 규약).
       setSavedCap(capNum);
-      toast.info('최대 인원을 저장했습니다. 바뀐 설정으로 다시 검증합니다.');
+      toast.info(capNum == null ? '최대 인원을 비웠어요. 바뀐 설정으로 다시 검증합니다.' : '최대 인원을 저장했습니다. 바뀐 설정으로 다시 검증합니다.');
       await runValidate();
       return;
     }
@@ -215,7 +217,8 @@ export default function JourneyActivationConfirmModal({
         return;
       }
       if (res.ok && data.success) {
-        toast.success('여정이 활성화되었습니다');
+        // ★ 2026-11-02 E1-2 — 한 번 보내기 받는 분 넣기가 잠깐 막힘 = 켜짐 그대로 · 30분 안에 자동으로 다시 넣는다
+        toast.success(data.dispatchPending ? '켰어요. 받는 분을 넣는 중이에요(30분 안에 자동으로 다시 넣어요).' : '여정이 활성화되었습니다');
         onActivated();
         onClose();
       } else if (data?.callbackConfirmRequired) {
@@ -345,23 +348,25 @@ export default function JourneyActivationConfirmModal({
           {/* 통과 — 비용 + 잔액 + 확인 카드 */}
           {phase === 'ready' && result && (
             <div className="space-y-3">
-              {/* ★ 2026-08-02 §13-5 — 한 번에 보낼 최대 인원. 전 트리거 필수라 받는 자리를 여기 만든다.
-                  옛 화면은 값이 없으면 활성화가 거부되는데 그 값을 넣을 곳이 없었다. */}
+              {/* ★ 2026-08-02 §13-5 — 한 번에 보낼 최대 인원 받는 자리 · ★ 2026-11-01 Harold — 선택(비우면 제한 없음 · 돈이 나가는 갈림길이라 이유 한 줄) */}
               <div className="p-4 rounded-xl bg-white border border-slate-200">
                 <div className="flex items-center gap-2 mb-1.5">
                   <ShieldCheck className="w-4 h-4 text-violet-700" />
                   <span className="text-[12px] font-semibold text-slate-700">한 번에 보낼 최대 인원</span>
+                  <span className="text-[11px] text-slate-400">선택</span>
                 </div>
                 <input
                   type="number"
                   min={1}
                   value={capInput}
                   onChange={(e) => setCapInput(e.target.value)}
-                  placeholder="예: 500"
-                  className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-300 focus:border-violet-300 focus:outline-none"
+                  placeholder="비우면 제한 없음"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-300 focus:outline-none"
                 />
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                  고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다. 한 회차에 이 인원을 넘지 않습니다.
+                <p className={`text-[11px] mt-1.5 ${capInput.trim() ? 'text-slate-400' : 'text-amber-800'}`}>
+                  {capInput.trim()
+                    ? '한 회차에 이 인원을 넘으면 자동으로 멈추고 알려 드려요.'
+                    : '정하지 않으면 제한 없이 보내요. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요.'}
                 </p>
               </div>
 
@@ -421,7 +426,7 @@ export default function JourneyActivationConfirmModal({
                   <TrendingUp className="w-4 h-4 text-violet-700 flex-shrink-0 mt-0.5" />
                   <div className="text-[12px] text-violet-900 leading-relaxed">
                     켜는 순간 모든 칸과 A/B 문안을 그대로 저장해요. 켠 뒤 칸을 고쳐도 켤 때 문안으로 나가요.
-                    문자 칸은 보내기 전에 스팸 검사를 다시 하고 담당자에게 확인 문자를 보내요(보통 2시간 전 · 바로 보내는 칸은 그날 첫 발송 10~20분 전).
+                    문자 칸은 켤 때 검사한 문안으로 나가요. 문안을 고치면 그 자리에서, 그 밖에는 일주일에 한 번 다시 검사해요. 검사에 걸리면 그 칸만 잠시 멈추고 바로 알려 드려요(여정은 멈추지 않아요).
                   </div>
                 </div>
               </div>

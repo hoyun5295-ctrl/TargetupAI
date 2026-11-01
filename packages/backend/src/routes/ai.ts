@@ -16,6 +16,7 @@ import {
 import { operatorGate, operatorError } from '../utils/operator-route';   // ★ 2026-10-24 자동 마케팅 문 · 오류 한 벌
 import { translateAudience } from '../utils/audience-translate';   // ★ 2026-10-05 대상 번역(신뢰 설계 §2-2)
 import { validateOperatorInput, isOperatorReactivation, HUMAN_APPROVED_PROPOSAL_SQL } from '../utils/continuous-operator';
+import { operatorCheck } from '../utils/operator-check';   // ★ 2026-11-02 E7-1 자동마케팅 점검 판
 import { isAboutPageViewer } from '../utils/about-page-access';   // ★ 2026-10-07 소개 페이지 숨김(hoyun 전용)
 import { getGenderVariants, isUuid } from '../utils/normalize';
 import { FIELD_MAP, FIELD_DISPLAY_MAP, reverseDisplayValue } from '../utils/standard-field-map';
@@ -25,7 +26,9 @@ import { mapSampleCustomerRow, SAMPLE_CUSTOMER_COLUMNS } from '../utils/sample-c
 import { loadHubCompanyContext } from '../utils/hub-company-context';
 import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerConsent, viewerBrandConsent } from '../utils/mall-consent';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
-import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
+import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildSendableStagingInsertSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
+import { planIndividualCallbackExclusion, effectiveUnsubFilter, stagingSendSignature, dedupStagingRows } from '../utils/direct-send-core';   // ★ 2026-11-02 E1-4 AI 한줄로 서버 적재
+import { callbackAssignmentUserId } from '../utils/callback-filter';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
 // ★ 2026-08-03 타겟팅 재설계 A-1: 자동마케팅 대상 수·명단은 발송과 같은 게이트를 쓰는 단일 문 경유.
 import {
@@ -1160,6 +1163,41 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
 
     // ★ 2026-10-02 수신동의 읽기 = CT(요청 사용자 기준 · 몰 동의 회사가 아니면 옛 글자)
     const recipientGates = { consentTrue: (await viewerConsentSql(companyId, req.user, 'c')).isTrue };
+
+    // ★ 2026-11-02 엔진 재설계 E1-4 — stage = 같은 조건 · 같은 게이트로 전원을 서버 적재(1만 자르기 없음 · 자동마케팅 실발송과 같은 SQL) ·
+    //   명단 고정(중복 · 회신번호 제외를 적재 표에서 실제로 뺀다 · 판정 = 자동마케팅 · commit 과 같은 CT) · 응답 = 최종 수 · 표본 · 제외 수 · 명단 서명.
+    //   확정 = /api/campaigns/direct-send/commit(stagingId + 서명 · 서명이 다르면 차감 전에 409).
+    if (req.body?.stage === true) {
+      const individual = req.body?.individualCallback === true;
+      const stagingId = randomUUID();
+      const ins = buildSendableStagingInsertSql(stagingId, baseParams, filterWhere, filterParams, storeFilter, recipientGates, { callbackFromStorePhone: individual });
+      await query(ins.sql, ins.params);
+      const duplicates = await dedupStagingRows(stagingId, companyId);
+      let callbackExcluded = 0;
+      if (individual) {
+        const plan = await planIndividualCallbackExclusion(stagingId, companyId, callbackAssignmentUserId(userType, userId) ?? undefined, true);
+        if (plan.moveIds.length > 0) {
+          await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid AND id = ANY($3::bigint[])`, [stagingId, companyId, plan.moveIds]);
+        }
+        callbackExcluded = plan.removed;
+      }
+      const signature = await stagingSendSignature(stagingId, companyId, String(userId || ''), true, effectiveUnsubFilter(req.body?.adEnabled === true, true));
+      const sample = await query(
+        `SELECT phone, name FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid ORDER BY id LIMIT 100`,
+        [stagingId, companyId],
+      );
+      const dcb = await query(
+        `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+        [companyId],
+      );
+      return res.json({
+        success: true, staged: true, stagingId, signature,
+        total: Number(signature.split(':')[0]) || 0,
+        excluded: { duplicates, callback: callbackExcluded },
+        sample: sample.rows, defaultCallback: dcb.rows[0]?.phone || null,
+      });
+    }
+
     const { sql, params } = buildSendableRecipientsSql(filterWhere, filterParams, baseParams, storeFilter, recipientGates);
 
     const result = await query(sql, params);
@@ -2206,6 +2244,19 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
     return res.json({ success: true, operator });
   } catch (err: any) {
     return operatorError(res, err, 'continuous PUT', '자동 마케팅을 고치지 못했습니다. 잠시 뒤 다시 시도해 주세요.');
+  }
+});
+
+// GET /api/ai/operator/continuous/:id/check — ★ 2026-11-02 엔진 재설계 E7-1 자동마케팅 점검 판(읽기 · 기존 판정 함수만 · 여정 점검과 같은 꼴)
+router.get('/operator/continuous/:id/check', async (req: Request, res: Response) => {
+  try {
+    const gate = await operatorGate(req, res, { plan: true });   // 크레딧 확인을 부른다 = 요금제 문 먼저(R2)
+    if (!gate) return;
+    const check = await operatorCheck(gate.companyId, String(req.params.id), gate.ownOnly ? gate.userId : null);
+    if (!check) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
+    return res.json({ success: true, ...check });
+  } catch (err: any) {
+    return operatorError(res, err, 'continuous check', '점검을 불러오지 못했습니다.');
   }
 });
 
@@ -3422,7 +3473,8 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
       await persistOverlapAcks(companyId, [journeyId], requestAcks).catch((e: any) => console.warn('[Journeys activate] 고른 겹침 저장 실패(켜기는 유지):', e?.message));
       // ★ V.3 §6-5 — 같은 계보의 멈춘 옛 판(진행 중 고객 마무리분)도 다시 켠다(사람 멈춤이 계보 전체를 멈췄다).
       const siblings = r.firstActivation ? { resumed: [], failed: [] } : await resumeLineageSiblings(companyId, journeyId, userId);
-      return res.json({ success: true, charged: r.charged, olderResumed: siblings.resumed.length, olderFailed: siblings.failed.length });
+      // ★ 2026-11-02 E1-2 — dispatchPending = 켜짐 · 받는 분 넣기는 회복이 이어 감(화면 안내 한 줄)
+      return res.json({ success: true, charged: r.charged, dispatchPending: r.dispatchPending === true, olderResumed: siblings.resumed.length, olderFailed: siblings.failed.length });
     }
     switch (r.code) {
       case 'NOT_FOUND': return res.status(404).json({ success: false, error: r.message });
@@ -3438,6 +3490,7 @@ router.post('/operator/journeys/:id/activate', async (req: Request, res: Respons
         });
       case 'INSUFFICIENT_CREDIT': return res.status(402).json({ success: false, error: r.message, code: 'INSUFFICIENT_CREDIT' });
       case 'CREDIT_SETTLE_FAILED': return res.status(503).json({ success: false, error: r.message, code: r.code });
+      case 'DISPATCH_FAILED': return res.status(503).json({ success: false, error: r.message, code: r.code });   // ★ 2026-11-01 Codex C92 3R — 한 번 보내기 적재 실패 = 멈춤 · 다시 켜면 다시 넣는다
       default: return res.status(400).json({ success: false, error: r.message });
     }
   } catch (err: any) {

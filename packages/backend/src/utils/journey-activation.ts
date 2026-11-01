@@ -19,25 +19,28 @@ import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
 import { filterByIndividualCallback } from './callback-filter';
 import { activateJourney } from './journey-builder';
-import { dispatchOneShotJourney } from './journey-anchor-scheduler';
+import { dispatchOneShotJourney, settleAndDispatchOneShot } from './journey-anchor-scheduler';
 import { nextTriggerEvents } from './journey-trigger-capability';
 import { buildLifecycleMap } from './journey-lifecycle-map';
 import { lineageColumnsReady, pausedClosedSiblings } from './journey-lineage';
 import { chargesFirstActivation } from './journey-activation-cost';   // ★ V.3 §5-1 처음 켜기 200 = 계보당 1번(판정 한 곳)
 
 export type GuardedActivation =
-  | { ok: true; firstActivation: boolean; charged: number }
-  | { ok: false; code: 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED' | 'CREDIT_SETTLE_FAILED'; message: string }
+  | { ok: true; firstActivation: boolean; charged: number; /** ★ 2026-11-02 E1-2 — 켜짐 · 받는 분 넣기는 회복이 이어 감 */ dispatchPending?: boolean }
+  | { ok: false; code: 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED' | 'CREDIT_SETTLE_FAILED' | 'DISPATCH_FAILED'; message: string }
   | { ok: false; code: 'CALLBACK_CONFIRM_REQUIRED'; message: string; callbackUnregisteredCount: number; unregisteredDetails: unknown };
 
 /**
  * 여정 하나 켜기(게이트 전부). 옛 라우트 본문과 같은 순서:
  *   ①상태 · 검증 마커 조회(컬럼 없음 = 마이그레이션 필요) ②검증 마커 없음 = 거부 ③매장번호 모드 미등록 회신 확인
- *   ④최초 활성화면 크레딧 확인 ⑤activateJourney ⑥최초면 차감(멱등키 고정) ⑦1회 발송 첫 적재(최초만 · 실패 격리)
+ *   ④최초 활성화면 크레딧 확인 ⑤activateJourney ⑥최초면 차감(멱등키 고정) ⑦1회 발송 적재(켤 때마다 · 이미 넣음 = 0 · 실패 = 멈춤 + DISPATCH_FAILED)
  * ★ 2026-10-25 성공 뒤 차감 한 규칙(원장 docs/2026-10-25-oneline-all-structure-check.md §8-2 D1 A) — 차감이 동시 소진(잔액 부족) ·
  *   원장 쓰기 실패로 끝나면 방금 켠 첫 켜기를 초안으로 되돌리고 거절한다(옛: 켜진 채 0크레딧). 1회 발송 적재는 차감이 끝난 **뒤**로 옮겼다
  *   (되돌린 여정의 발송이 이미 줄에 서지 않게). 실패한 시도는 원장에 행이 없어 다음 켜기가 같은 키로 정상 차감한다.
  */
+/** ★ 2026-11-01 Codex C92 3R — 한 번 보내기 적재 실패 = 멈춤 사유 · 화면 안내(같은 문장 · 다시 켜면 다시 넣는다). */
+export const ONE_SHOT_DISPATCH_FAILED_REASON = '받는 분을 넣지 못해 여정을 멈춰 두었어요. 잠시 뒤 다시 켜 주세요(크레딧은 다시 받지 않아요).';
+
 export async function activateJourneyGuarded(
   companyId: string,
   journeyId: string,
@@ -105,6 +108,14 @@ export async function activateJourneyGuarded(
   const result = await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource });
   if (!result.ok) return { ok: false, code: 'ACTIVATE_FAILED', message: result.reason || '활성화 실패' };
 
+  // ★ 2026-11-02 엔진 재설계 E1-2 — 한 번 보내기 · 이번 켜기가 넣기 대기를 찍은 판 = 정산 · 되돌리기 · 적재를 여정 잠금 안에서(토큰 = 이번 시도만).
+  //   한 번 보내기가 아닌 여정 · 칸 없음(DDL 전) · 이미 넣은 판은 아래 옛 길 그대로.
+  if (String(row.start_kind) === 'one_shot' && result.oneShot === 'pending' && result.attemptToken) {
+    const os = await settleAndDispatchOneShot(companyId, journeyId, userId, { token: result.attemptToken, firstActivation });
+    if (!os.ok) return { ok: false, code: os.code, message: os.message };
+    return { ok: true, firstActivation, charged: os.charged ? getCreditCost('journey-activate') : 0, dispatchPending: os.dispatchPending };
+  }
+
   // ★ V.3 Codex 적대 A8 — charged = 실제로 받은 크레딧(차감 결말 그대로). 크레딧제 미적용 = 0(화면이 받지 않은 금액을 말하지 않게).
   let charged = 0;
   if (charge) {
@@ -132,12 +143,22 @@ export async function activateJourneyGuarded(
     charged = outcome === 'deducted' || outcome === 'duplicate' ? getCreditCost('journey-activate') : 0;
   }
 
-  if (firstActivation && String(row.start_kind) === 'one_shot') {
+  // ★ 2026-11-01 Codex C92 3R(뿌리 R6) — 한 번 보내기 적재 = 켤 때마다 부른다(적재가 잠금 안에서 「이미 넣음」을 보고 0 으로 끝낸다) ·
+  //   실패하면 켜기 성공으로 끝내지 않는다 = 이 여정만 멈추고 사유를 남겨 알린다 → 다시 켜면 다시 넣는다(멈춤 → 켜기 = 크레딧 0).
+  //   옛: 첫 켜기만 불렀고 실패는 로그 한 줄 · 켜짐 그대로 → 실패 한 번이 「켜짐 · 아무도 안 받음」으로 남았다(다시 켜도 안 불렀다).
+  // ★ 2026-11-02 E1-2 — 칸이 있으면 위 길(넣기 대기) 또는 이미 넣음(다시 넣지 않음) · 여기는 칸 없음(DDL 전)일 때만
+  if (String(row.start_kind) === 'one_shot' && result.oneShot === 'untracked') {
     try {
       const dr = await dispatchOneShotJourney(companyId, journeyId);
       console.log(`[Journeys activate] one_shot dispatch journey=${journeyId} enqueued=${dr.enqueued} reason=${dr.reason || ''}`);
     } catch (dispErr: any) {
-      console.error('[Journeys activate] one_shot dispatch 실패:', dispErr?.message);
+      console.error('[Journeys activate] one_shot dispatch 실패 → 멈춤:', dispErr?.message);
+      await query(
+        `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $3, updated_at = NOW()
+          WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
+        [journeyId, companyId, ONE_SHOT_DISPATCH_FAILED_REASON],
+      );
+      return { ok: false, code: 'DISPATCH_FAILED', message: ONE_SHOT_DISPATCH_FAILED_REASON };
     }
   }
   return { ok: true, firstActivation, charged };

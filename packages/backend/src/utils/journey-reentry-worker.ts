@@ -32,6 +32,7 @@ import { journeyOwnerConsent } from './mall-consent';
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { calculateNextRunAt } from './send-time-util';
 import { backfillPerDayOf, entryCapExceeded, dailyRoomInLock } from './journey-step-limits';
+import { interleaveByCompany } from './concurrency';
 
 /**
  * ★ 2026-10-25 여정 구조체크 2차 #6(뿌리 대장 R1) — 재진입도 진입 감시와 같은 진입 규칙 셋을 지난다.
@@ -93,7 +94,9 @@ async function runReentryBatch(): Promise<void> {
        ORDER BY id`
     );
 
-    for (const j of journeyRes.rows) {
+    // ★ 2026-11-02 엔진 재설계 E2-5 — 회사 돌아가며
+    const ordered = interleaveByCompany(journeyRes.rows as any[], (x) => String(x.company_id));
+    for (const j of ordered) {
       try {
         const journeyId = j.id;
         const companyId = j.company_id;

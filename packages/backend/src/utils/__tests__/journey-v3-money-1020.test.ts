@@ -14,7 +14,7 @@ vi.mock('../ai-credit', () => {
   return { checkCredit: vi.fn(), deductCreditOutcome: vi.fn(), InsufficientCreditError };
 });
 vi.mock('../journey-builder', () => ({ activateJourney: vi.fn() }));
-vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn() }));
+vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn(), settleAndDispatchOneShot: vi.fn(async () => ({ ok: true, charged: false, dispatchPending: false })) }));
 vi.mock('../journey-target-extractor', () => ({ selectJourneyTargetCustomerIds: vi.fn(), JOURNEY_COUNT_CAP: 100000 }));
 vi.mock('../store-scope', () => ({ getJourneyOwnerScopeSql: vi.fn() }));
 vi.mock('../callback-filter', () => ({ filterByIndividualCallback: vi.fn() }));
@@ -24,7 +24,7 @@ vi.mock('../journey-lineage', () => ({ lineageColumnsReady: vi.fn(async () => tr
 import { query } from '../../config/database';
 import { checkCredit, deductCreditOutcome } from '../ai-credit';
 import { activateJourney } from '../journey-builder';
-import { dispatchOneShotJourney } from '../journey-anchor-scheduler';
+import { dispatchOneShotJourney, settleAndDispatchOneShot } from '../journey-anchor-scheduler';
 import { lineageColumnsReady } from '../journey-lineage';
 import { activateJourneyGuarded, activateJourneysInOrder } from '../journey-activation';
 
@@ -101,10 +101,12 @@ describe('처음 켜기 200 = 계보당 1번', () => {
     expect(r).toEqual({ ok: true, firstActivation: false, charged: 0 });
     expect(credit).not.toHaveBeenCalled();
   });
-  it('one_shot 첫 발송은 판마다(새 판 초안도 적재 · 과금은 0)', async () => {
+  it('one_shot 첫 발송은 판마다(새 판 초안도 적재 · 과금은 0) · ★ 1102 E1-2 넣기 대기 = 잠금 안 정산 · 적재(뿌리 아님 = 차감 0 은 정산 함수가 판정)', async () => {
     mockJourneys([{ id: V2, status: 'draft', lineage_id: ROOT, start_kind: 'one_shot' }]);
+    act.mockResolvedValue({ ok: true, oneShot: 'pending', attemptToken: 't' });
     const r = await activateJourneyGuarded('c', V2, 'u');
-    expect(oneShot).toHaveBeenCalledWith('c', V2);
+    expect(settleAndDispatchOneShot).toHaveBeenCalledWith('c', V2, 'u', { token: 't', firstActivation: true });
+    expect(deduct).not.toHaveBeenCalled();
     expect(r).toMatchObject({ ok: true, charged: 0 });
   });
   it('계보 컬럼이 없으면 옛 동작(초안 = 200)', async () => {

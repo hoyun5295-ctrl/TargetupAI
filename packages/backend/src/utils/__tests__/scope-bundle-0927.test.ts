@@ -301,6 +301,7 @@ describe('S5-04 소비처 배선', () => {
     const w = src('journey-trigger-watcher.ts');
     expect((w.match(/await getJourneyOwnerScopeSql\(j\.company_id, j\.id\)/g) || []).length).toBe(4);
     const a = src('journey-anchor-scheduler.ts');
-    expect((a.match(/await getJourneyOwnerScopeSql\(/g) || []).length).toBe(2);
+    // ★ 2026-11-01 B-1101-7(C92) — 한 문장 넣기(audienceSource)도 같은 작성자 범위를 넘긴다(입구 +1)
+    expect((a.match(/await getJourneyOwnerScopeSql\(/g) || []).length).toBe(3);
   });
 });

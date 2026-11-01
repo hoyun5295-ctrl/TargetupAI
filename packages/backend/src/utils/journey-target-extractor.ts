@@ -526,14 +526,17 @@ export async function selectAfterJourneyCandidates(
  *   안전필터 항상 + (옵션) points_min + (옵션) customer_conditions. execution 안티조인 없음
  *   (날짜축은 step·날짜 단위 발송이라 journey_anchor_dispatch가 멱등을 담당 — execution dedup이 D-3 대상을 빼면 안 됨).
  *   no_target_auto_relax: 0건이면 빈 배열(자동완화 없음). 회사 격리 company_id 필수.
+ *
+ * ★ 2026-11-01 B-1101-7 ①②(뿌리 R40 · Codex C92 2R) — 날짜축 · 한 번 보내기 대상 SQL 한 벌(LIMIT · 순서 없음).
+ *   넣기는 이 SQL 을 `INSERT … SELECT` 한 문장에 넣는다 = 한 시점의 대상 전원(10만 자르기 · 묶음 사이 기준 바뀜 0).
+ *   params 는 $1(회사) 부터 · 호출부는 뒤에 자기 값을 붙인다.
  */
-export async function selectAnchorAudienceIds(
+export function anchorAudienceSql(
   companyId: string,
   triggerFilters: Record<string, any>,
-  limit: number,
-  scopeSql = '',   // ★ 2026-09-27 S5-04 — 여정 작성자 분류코드 범위
-  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
-): Promise<string[]> {
+  scopeSql = '',
+  consent?: JourneyConsent,
+): { sql: string; params: any[] } {
   const f = triggerFilters || {};
   const params: any[] = [companyId];
   let pointsClause = '';
@@ -543,17 +546,27 @@ export async function selectAnchorAudienceIds(
     pointsClause = `AND c.points IS NOT NULL AND c.points >= $${params.length}::int`;
   }
   const cond = applyCustomerConditions(f.customer_conditions || [], f.logic || 'AND', params, consent);
-  params.push(String(limit));
-  const r = await query(
-    `SELECT id AS customer_id FROM customers c
+  return {
+    sql: `SELECT c.id AS customer_id FROM customers c
      WHERE c.company_id = $1::uuid
        AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${pointsClause}
-       ${cond ? ` AND ${cond}` : ''}
-     ORDER BY c.id
-     LIMIT $${params.length}::int`,
+       ${cond ? ` AND ${cond}` : ''}`,
     params,
-  );
+  };
+}
+
+export async function selectAnchorAudienceIds(
+  companyId: string,
+  triggerFilters: Record<string, any>,
+  limit: number,
+  scopeSql = '',   // ★ 2026-09-27 S5-04 — 여정 작성자 분류코드 범위
+  consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
+): Promise<string[]> {
+  const a = anchorAudienceSql(companyId, triggerFilters, scopeSql, consent);
+  const r = await query(`${a.sql}
+     ORDER BY c.id
+     LIMIT $${a.params.length + 1}::int`, [...a.params, String(limit)]);
   return r.rows.map((x: any) => x.customer_id);
 }
 
@@ -709,7 +722,7 @@ export async function selectCdpEventRowsForCursor(
        AND e.customer_id IS NOT NULL
        AND ${cursorClause}
        AND e.${axis} <= $4::timestamptz
-       AND e.occurred_at >= NOW() - ($5 || ' hours')::interval
+       AND e.occurred_at >= e.created_at - ($5 || ' hours')::interval
        AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
        ${usedClause}
@@ -778,7 +791,7 @@ export async function selectPurchaseLedgerRowsForCursor(
         AND ${cursorClause}
         AND p.created_at <= ($3::timestamptz AT TIME ZONE current_setting('TimeZone'))
         AND p.purchase_date IS NOT NULL
-        AND p.purchase_date >= ((NOW() - ($4 || ' hours')::interval) AT TIME ZONE 'Asia/Seoul')
+        AND (p.purchase_date AT TIME ZONE 'Asia/Seoul') >= (p.created_at AT TIME ZONE current_setting('TimeZone')) - ($4 || ' hours')::interval
         AND p.purchase_date <= (NOW() AT TIME ZONE 'Asia/Seoul')
         AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
         ${cond ? ` AND ${cond}` : ''}

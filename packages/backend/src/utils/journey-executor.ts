@@ -79,7 +79,8 @@ import { lineageColumnsReady } from './journey-lineage';
 import { applyVariantToStep } from './journey-step-versions';
 import { PURCHASED_SINCE_ENTRY_ONE_SQL, isSignupTrigger } from './journey-goal-purchase';
 // ★ 2026-10-31 칸 관문 — 「그날 검사를 마쳤다」 판정 조각 한 곳(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-1 · §2-2 · 뿌리 R30)
-import { pretestDoneSql } from './journey-pretest-notifier';
+import { stepHeldSql } from './journey-pretest-notifier';
+import { runCompanyLanes } from './concurrency';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -210,6 +211,10 @@ const JOURNEY_TICK_BUDGET_MS = 4 * 60 * 1000;
 /** 한 묶음 크기(종전과 같다) · 묶음 안 회사당 상한(큰 회사가 묶음을 독차지하지 않게 — 다음 묶음에서 이어 받는다) */
 const JOURNEY_BATCH_SIZE = 100;
 const JOURNEY_PER_COMPANY_PER_BATCH = 25;
+/** ★ 2026-11-02 엔진 재설계 E9 ① — 밀림 경보 문턱(분) */
+export const EXECUTOR_LAG_ALERT_MINUTES = 30;
+/** ★ 2026-11-02 엔진 재설계 E2-1 — 묶음 안 회사 줄 동시 수(회사 안 = 차례 · DB 연결 20 중 4) */
+export const JOURNEY_EXECUTOR_CONCURRENCY = 4;
 
 /**
  * ★ 2026-10-25 여정 구조체크 2차 #3(뿌리 대장 R8) — 처리 예외로 같은 실행을 다시 보는 상한.
@@ -224,30 +229,8 @@ export const EXECUTION_ERROR_LOG_KEEP = 20;
 export const PRETEST_PENDING_RECHECK_MINUTES = 10;
 export const PRETEST_PENDING_MAX_HOURS = 2;
 
-/**
- * ★ 2026-10-31 칸 관문이 미룰 시각(설계서 §2-2) = 지금 + 10분 · 그 시각이 발송 시간 밖이면 다음 발송 창 시작
- *   (발송 시간 검사가 옮기는 자리와 같은 함수 · 20:54 → 다음 날 08시 = 그날 검사비 0 · 다음 날 06시 스캔이 그 날짜로 검사).
- */
-export function pretestHoldUntil(now: Date = new Date()): Date {
-  const t = new Date(now.getTime() + PRETEST_PENDING_RECHECK_MINUTES * 60 * 1000);
-  return isWithinSendHours(t) ? t : computeNextSendWindow(t);
-}
-
-/** ★ 2026-10-31 같은 묶음(여정 · 칸 · 날)을 이만큼 넘게 미루면 운영 경보(스캐너 멈춤 · 그 묶음 처리만 계속 실패 둘 다 잡는다). */
-export const GATE_HOLD_ALERT_MINUTES = 30;
-/** 묶음 키 → 처음 미룬 시각 · 경보 보냄(프로세스 메모리 · 통과하면 지움 · 지난 날 키 버림) */
-const _gateHolds = new Map<string, { since: number; alerted: boolean }>();
-/** 미룰 때 부른다 — 이번에 경보를 보내야 하면 true(묶음마다 한 번). */
-export function trackGateHold(key: string, nowMs: number = Date.now()): boolean {
-  const today = key.slice(-10);
-  for (const k of [..._gateHolds.keys()]) if (k.slice(-10) < today) _gateHolds.delete(k);
-  const h = _gateHolds.get(key);
-  if (!h) { _gateHolds.set(key, { since: nowMs, alerted: false }); return false; }
-  if (!h.alerted && nowMs - h.since >= GATE_HOLD_ALERT_MINUTES * 60 * 1000) { h.alerted = true; return true; }
-  return false;
-}
-/** 관문을 지나면 부른다. */
-export function clearGateHold(key: string): void { _gateHolds.delete(key); }
+/** ★ 2026-11-02 엔진 재설계 E3-1 — 보류 칸(지금 판의 가장 최근 결정 = 보류)을 다시 볼 간격(분) · 장애가 아니라 경보 0 */
+export const PRETEST_HELD_RECHECK_MINUTES = 60;
 
 export async function runJourneyExecutor(): Promise<{ processed: number; sent: number; skipped: number; waited: number; conditionPassed: number; conditionFailed: number; paused: number; failed: number; goalExited: number }> {
   if (workerRunning) {
@@ -297,8 +280,9 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
     if (dueRes.rows.length === 0) break;
     batches++;
 
-    for (const row of dueRes.rows as ExecutionRow[]) {
-      pickedThisTick.push(row.execution_id);
+    // ★ 2026-11-02 엔진 재설계 E2-1 — 회사끼리 동시 · 회사 안 차례(processExecution 그대로 · 한 회사의 느린 적재가 다른 회사를 막지 않는다)
+    for (const row of dueRes.rows as ExecutionRow[]) pickedThisTick.push(row.execution_id);
+    await runCompanyLanes(dueRes.rows as ExecutionRow[], (r) => String(r.company_id), JOURNEY_EXECUTOR_CONCURRENCY, async (row) => {
       summary.processed++;
       try {
         const outcome = await processExecution(row);
@@ -353,8 +337,25 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
           console.error(`[JourneyExecutor] execution=${row.execution_id} 실패 기록 실패:`, logErr?.message || logErr);
         }
       }
+    });
+
     }
 
+    // ★ 2026-11-02 엔진 재설계 E9 ① — 발송 시간 안 가장 오래 밀린 실행이 30분을 넘으면 운영 경보(원인 하나 · 회사 없음 · 1시간)
+    if (isWithinSendHours()) {
+      await query(
+        `SELECT COUNT(*)::int AS n, EXTRACT(EPOCH FROM (NOW() - MIN(e.next_run_at)))::int AS lag_s
+           FROM journey_executions e JOIN journeys j ON j.id = e.journey_id
+          WHERE e.status = 'active' AND j.status = 'active' AND e.next_run_at <= NOW() - INTERVAL '${EXECUTOR_LAG_ALERT_MINUTES} minutes'`,
+      ).then((lag) => {
+        const n = Number(lag.rows[0]?.n || 0);
+        if (n > 0) {
+          void sendSystemAlert({
+            companyId: null, dedupKey: 'journey-executor-lag', cooldownMs: 60 * 60 * 1000,
+            message: `여정 실행이 밀리고 있습니다. 보낼 시각이 ${EXECUTOR_LAG_ALERT_MINUTES}분 넘게 지난 실행 ${n}건 · 가장 오래된 것 ${Math.round(Number(lag.rows[0]?.lag_s || 0) / 60)}분.`,
+          }).catch(() => undefined);
+        }
+      }).catch((e: any) => console.warn('[JourneyExecutor] 밀림 확인 실패:', e?.message || e));
     }
 
     if (summary.processed > 0) {
@@ -728,15 +729,23 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
   //   문자(SMS · LMS · MMS) 칸만(재검사 대상과 같다). 적재 중 표식 정리 · 이미 보냄 판정은 위에서 끝났다(그 둘은 막지 않는다).
   //   ★ 2026-10-23 여정 결함 0 — 2시간이 넘어도 검사 없이 보내지 않는다(옛: [PRETEST-MISS] 로 그냥 나갔다 = 스팸 검사 우회).
   //   계속 미루고(검사가 끝나는 즉시 나간다) 우리 쪽 장애이므로 운영 경보를 한 번 보낸다(6시간 쿨다운 · 여정마다).
-  // ★ 2026-10-31 칸 관문(설계서 §2-2 · 뿌리 R30) — checked_today = 보내는 날(KST) 그 칸 검사를 마친 기록이 있는가(판정 조각 = pretestDoneSql 한 곳).
+  // ★ 2026-11-02 엔진 재설계 E3-1 — 1031 「그날 검사 기록이 있어야 나간다」 관문을 없앴다(정기 재검사는 발송을 막지 않는다 · 검사 큐 용량 SC-16).
+  //   관문 = ① 보류(지금 판의 가장 최근 결정 = held · stepHeldSql 한 조각) = 1시간 뒤 · 경보 0 ② 표식 < 100(새 글 · 고친 글) = 검사를 기다림(아래 그대로).
   const gate = await query(
     `SELECT (next_run_at <= NOW()) AS due,
             ($2::timestamptz IS NOT NULL AND $2::timestamptz > NOW() - INTERVAL '${PRETEST_PENDING_MAX_HOURS} hours') AS pending,
-            ${pretestDoneSql('$3::uuid', '$4::uuid', `(NOW() AT TIME ZONE 'Asia/Seoul')::date`)} AS checked_today
+            ${stepHeldSql('$3::uuid', '$4::uuid')} AS held
        FROM journey_executions WHERE id = $1::uuid`,
     [exec.execution_id, pendingSnapshotAt, exec.journey_id, step.id],
   );
   if (!gate.rows[0]?.due) return 'waited';
+  if (gate.rows[0]?.held && ['sms', 'lms', 'mms'].includes(String(step.channel))) {
+    await query(
+      `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '${PRETEST_HELD_RECHECK_MINUTES} minutes' WHERE id = $1::uuid AND status = 'active'`,
+      [exec.execution_id],
+    );
+    return 'waited';
+  }
   if (snapshotReadFailed && ['sms', 'lms', 'mms'].includes(String(step.channel))) {
     await query(
       `UPDATE journey_executions SET next_run_at = NOW() + INTERVAL '${PRETEST_PENDING_RECHECK_MINUTES} minutes' WHERE id = $1::uuid AND status = 'active'`,
@@ -772,28 +781,6 @@ async function processExecution(exec: ExecutionRow): Promise<StepOutcome> {
       [exec.execution_id, nextWindow]
     );
     return 'skipped_hours';
-  }
-
-  // ★ 2026-10-31 칸 관문 — 문자 칸은 보내는 날 그 칸 검사 기록(통과 · 안내까지 끝)이 있어야 나간다(발송 시간 안 · 조건 없이 늘).
-  //   없으면(바로 보내는 칸의 그날 첫 발송 · 날짜 기준 · 스캔이 놓친 발송) 미룬다 → 미룬 실행은 앞날이라 다음 스캔이 검사 · 담당자 안내 · 기록 → 다음 회차에 나간다.
-  //   미룰 시각이 창 밖이면 다음 창 시작(pretestHoldUntil).
-  if (['sms', 'lms', 'mms'].includes(String(step.channel))) {
-    const holdKey = `${exec.journey_id}:${step.id}:${new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)}`;
-    if (!gate.rows[0]?.checked_today) {
-      await query(`UPDATE journey_executions SET next_run_at = $2 WHERE id = $1::uuid AND status = 'active'`, [exec.execution_id, pretestHoldUntil()]);
-      if (trackGateHold(holdKey)) {
-        console.warn(`[JourneyExecutor][PRETEST-GATE] journey=${exec.journey_id} step=${step.step_order} 그날 발송 전 검사 기록 없이 ${GATE_HOLD_ALERT_MINUTES}분 넘게 미루는 중`);
-        await sendSystemAlert({
-          companyId: exec.company_id,
-          dedupKey: `journey-pretest-gate-hold:${exec.journey_id}`,
-          title: `여정 문자 칸이 발송 전 검사를 ${GATE_HOLD_ALERT_MINUTES}분 넘게 기다리고 있습니다.`,
-          details: ['확인할 곳: 발송 전 검사 스캐너 로그(journey-pretest-scan) · 스팸 검사 대기열 · 담당자 안내 적재'],
-          action: '검사 · 안내 기록이 생기면 그 자리에서 나갑니다. 슈퍼관리자 여정 화면에서 회사를 확인해 주세요.',
-        }).catch((e: any) => console.warn('[JourneyExecutor] 관문 대기 경보 실패:', e?.message));
-      }
-      return 'waited';
-    }
-    clearGateHold(holdKey);
   }
 
   // ★ D188 Phase 2-B-3 (2026-05-21): variants 선택 — Bandit Thompson Sampling.

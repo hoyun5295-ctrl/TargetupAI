@@ -32,14 +32,14 @@ import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 // ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
-import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, requiresRecipientCap, CAP_EXEMPT_TRIGGERS, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT } from './journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT } from './journey-trigger-capability';
 import { readAfterConfig } from './journey-after-config';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 필터 검증(상품 · 문) · 키 규칙은 journey-product 한 곳.
 import { normalizeProductFilters } from './journey-product';
 // ★ 2026-09-30 여정 V2 4차 — 활성화는 그래프 CT 의 구조 결함(닿지 않는 칸 · 첫 칸이 끝 칸)을 막는다(그림과 같은 규칙).
 import { buildJourneyGraph } from './journey-graph';
 // ★ 2026-09-30 여정 V2 5차 — 새 판을 켜면 같은 트랜잭션에서 같은 계보의 옛 판 진입을 닫는다(진행 중 고객만 마무리).
-import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL, pauseJourneyLineage, endJourneyLineage, entryEndsColumnReady } from './journey-lineage';
+import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, INHERIT_ENTRY_CURSORS_SQL, pauseJourneyLineage, endJourneyLineage, entryEndsColumnReady, oneShotColumnsReady } from './journey-lineage';
 import { activationCostOf } from './journey-activation-cost';
 import { pauseReasonView } from './journey-pause-reason';
 import { applyResumeAdjustments } from './journey-resume';
@@ -728,13 +728,10 @@ export function validateJourneyEntryConfig(row: {
       return '포인트 기준값을 1 이상으로 지정해 주세요. 0이면 포인트가 없는 분까지 전원 대상이 됩니다.';
     }
   }
-  // ★ 이관 배치가 유예 만료일에 통째로 들어오는 것은 유예가 못 막는다(단조 조건).
-  //   그것을 막는 것은 수신자 상한이라 **커서 경로가 아닌 트리거**는 상한을 필수로 받는다.
-  //   ⛔ 5R 정정 — 유예 대상과 상한 필수 대상은 다른 집합이다. 옛 코드가 둘을 묶어 생일이 빠졌었다.
-  //     생일은 유예가 필요 없지만(실제 날짜), 생년월일 대량 적재는 그날 코호트를 한꺼번에 만든다.
-  if (requiresRecipientCap(triggerEvent) && row.threshold_recipients_per_step == null) {
-    return '한 번에 보낼 최대 인원을 정해 주세요. 고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다.';
-  }
+  // ★ 2026-11-01 Harold 「고객사가 최대 인원을 안 정하면 안 해도 된다」 — 한 번에 보낼 최대 인원 = 선택(옛 0801 §9-C6 = 전 여정 필수).
+  //   정하지 않은 여정 = 조건에 맞는 분 모두 · 날짜 기준 · 한 번 보내기 = 넣기 한 문장이 한 시점 전원(journey-anchor-scheduler audienceSource · B-1101-7 ①②) ·
+  //   사건 · 상태 여정 = 회차당 JOURNEY_COUNT_CAP(10만) · 남은 분은 다음 회차(진입 안티조인 · journey-trigger-watcher).
+  //   정하면 그 수를 넘는 회차 = 자동 멈춤(대량 진입 감지). 켜기 확인 창이 「정하지 않으면 한꺼번에 나간다」 한 줄을 보인다.
   return null;
 }
 
@@ -1037,7 +1034,13 @@ export async function activateJourney(
   companyId: string, journeyId: string, userId: string,
   /** ★ V.3 Codex 적대 A2 — 새 모양 복제본을 켤 때 원본 id. 같은 계보 잠금 안에서 원본이 아직 켜져 있을 때만 켠다(그사이 사람이 멈췄으면 그만둔다). */
   opts: { requireActiveSource?: string } = {},
-): Promise<{ ok: boolean; reason?: string }> {
+): Promise<{
+  ok: boolean; reason?: string;
+  /** ★ 2026-11-02 E1-2 — 이 켜기가 찍은 approved_at(글자 · 마이크로초) = 이번 시도 토큰(한 번 보내기 되돌리기가 이 시도만 건드린다) */
+  attemptToken?: string;
+  /** ★ E1-2 — 한 번 보내기 넣기 상태: pending = 이번 켜기가 넣기 대기를 찍음 · dispatched = 이미 넣음 · untracked = 칸 없음(DDL 전 · 옛 동작) */
+  oneShot?: 'pending' | 'dispatched' | 'untracked';
+}> {
   // ★ 2026-11-01 배포 2 C5 — 정의 검사 = activationBlockReason 한 곳(점검 응답 · 켜기 같은 함수 · 원문 그대로 옮김)
   const blocked = await activationBlockReason(companyId, journeyId);
   if (blocked) return { ok: false, reason: blocked };
@@ -1073,8 +1076,10 @@ export async function activateJourney(
   //   DDL(lineage_id · entry_closed_at) 전이면 닫기 문장을 내지 않는다(옛 동작 그대로).
   //   ★ 0930 Codex 2R — 확인 오류를 "DDL 전"으로 접지 않는다. 모르면 켜지 않는다(켜고 옛 판 닫기를 건너뛰면 두 판이 새 고객을 받는다).
   let closeOthers: boolean;
+  let oneShotCols: boolean;
   try {
     closeOthers = await lineageColumnsReady();
+    oneShotCols = await oneShotColumnsReady();
   } catch (e: any) {
     console.warn('[activateJourney] 계보 컬럼 확인 실패 — 활성화 중단:', e?.message);
     return { ok: false, reason: '여정 상태를 확인하지 못해 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
@@ -1113,19 +1118,18 @@ export async function activateJourney(
       approved_at = NOW(),
       paused_at = NULL,
       pause_reason = NULL,
-      updated_at = NOW()
+      updated_at = NOW()${oneShotCols ? `,
+      one_shot_dispatch_pending_at = CASE WHEN start_kind = 'one_shot' AND one_shot_dispatched_at IS NULL THEN NOW() ELSE one_shot_dispatch_pending_at END` : ''}
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('draft', 'paused')
-       AND (threshold_recipients_per_step IS NOT NULL OR trigger_event = ANY($4::text[]))
        AND last_pretest_passed_at IS NOT NULL
-     RETURNING id, approved_at`,
-    // ★ 2026-08-01 Codex 5R — 상한 검사를 쓰기와 원자화한다.
-    //   위에서 SELECT로 확인만 하면, 그 사이 옵션 저장이 상한을 비워도 활성화가 그대로 성사돼
-    //   상한 NULL인 활성 여정이 남는다(워커는 상한이 없으면 상한 검사를 건너뛴다).
-    //   면제 목록은 CT 단일 출처 — 커서 트리거만 상한 없이 켤 수 있다.
+     RETURNING id, approved_at, approved_at::text AS approved_token${oneShotCols ? `,
+       CASE WHEN COALESCE(start_kind, '') <> 'one_shot' THEN NULL WHEN one_shot_dispatched_at IS NOT NULL THEN 'dispatched' ELSE 'pending' END AS one_shot_state` : ''}`,
+    // ★ 2026-11-02 E1-2 — 한 번 보내기 · 아직 안 넣은 판 = 같은 UPDATE 에서 넣기 대기를 찍는다(커밋 뒤 정산 전에 죽어도 회복이 원장으로 정산 · 적재)
+    // ★ 2026-11-01 Harold — 한 번에 보낼 최대 인원 = 선택(옛 0801 Codex 5R 「상한 필수를 쓰기와 원자화」 조건을 지웠다 · 상한 없는 여정 = 한 회차 최대 10만까지 한꺼번에)
     // ★ 2026-08-02 Codex 2R — **사전검사 마커도 같은 문장 안으로 옮겼다(같은 교훈의 두 번째 적용).**
     //   라우트가 SELECT로 마커를 확인한 뒤 여기까지 오는 사이에 스텝이 추가되면(추가는 마커를 NULL로 만든다)
     //   확인은 통과했는데 검사받지 않은 문안이 켜진다. 확인과 반영이 갈라져 있으면 그 틈이 곧 구멍이다.
-    [journeyId, companyId, userId, CAP_EXEMPT_TRIGGERS]
+    [journeyId, companyId, userId]
     );
     // ★ V.3 §6-1 ~ §6-3 — 멈춤 → 다시 켜기 보정(밀린 문자 일 단위 밀기 · 멈춘 동안 사건 안 받기 · 굳은 고객 되살리기). 첫 켜기는 손대지 않는다.
     //   실패 = 트랜잭션 되돌림(안 켜지는 방향 · 계보 컬럼 유무와 무관).
@@ -1216,7 +1220,11 @@ export async function activateJourney(
     }
   }
 
-  return { ok: r.rows.length > 0 };
+  const st = r.rows[0]?.one_shot_state;
+  return { ok: r.rows.length > 0,
+    attemptToken: r.rows[0]?.approved_token ? String(r.rows[0].approved_token) : undefined,
+    oneShot: !oneShotCols ? 'untracked' : st === 'pending' ? 'pending' : st === 'dispatched' ? 'dispatched' : undefined,
+  };
 }
 
 /**

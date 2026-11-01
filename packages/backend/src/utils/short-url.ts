@@ -29,7 +29,8 @@ const SHORT_URL_BASE = (process.env.SHORT_URL_BASE || 'https://app.hanjul.ai/c')
  *   cdp_events 에 기록하지 않는다(토큰이 든 원래 주소가 회사 이벤트 조회로 새지 않게 · 발송 시각 학습 등 고객 클릭 통계에 섞이지 않게).
  *   옛: 이동 처리의 정규식이 승인 링크 둘(충전 · 대행)만 알아 자동마케팅 멈춤 링크는 기록됐다. 새 담당자 링크 = 이 목록에 같은 커밋으로(계약 시험이 원천에서 뽑아 대조).
  */
-export const MANAGER_LINK_PATHS = ['charge-approve', 'agency-approve', 'autosend-stop', 'journey-pause', 'planner-confirm', 'planner-recheck'] as const;
+// ★ 2026-11-02 엔진 재설계 E5-4 — 담당자 상황판(manager-board)도 담당자 링크(토큰이 고객 클릭 기록에 남지 않게)
+export const MANAGER_LINK_PATHS = ['charge-approve', 'agency-approve', 'autosend-stop', 'journey-pause', 'planner-confirm', 'planner-recheck', 'manager-board'] as const;
 const MANAGER_LINK_RE = new RegExp(`/(?:${MANAGER_LINK_PATHS.join('|')})(?:#|\\?|$)`);
 export function isManagerLinkUrl(fullUrl: string): boolean {
   return MANAGER_LINK_RE.test(String(fullUrl || ''));

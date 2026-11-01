@@ -4,6 +4,8 @@
  *   담당자 알림 여부를 결정한다. DB import 0 — 순수 (테스트 가능).
  * ★ 2026-10-31 알림 판정 = journey-step-notify.ts isStepNotifyOn 한 곳(첫 · 마지막 메시지 칸 · 설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-5)
  *   · 바로 보내는 칸 표식(안내 본문 한 줄 · §2-4).
+ * ★ 2026-11-02 엔진 재설계 E3(docs/2026-11-01-journey-automarketing-engine-design.md) — 스캔이 칸마다 한 줄(가장 이른 실행)을 주고
+ *   묶음에 지금 판 · 가장 최근 결정 · 오늘 시도 수를 싣는다(보류 재검사 갈래 판정 = recheckHeld).
  */
 
 import { isStepNotifyOn } from './journey-step-notify';
@@ -27,6 +29,12 @@ export interface PretestScanRow {
   start_kind?: string | null;
   delay_mode?: string | null;
   delay_hours?: number | null;
+  /** ★ 2026-11-02 엔진 재설계 E3 — 그 칸의 지금 판 · 가장 최근 결정 기록 · 지금 판 오늘 시도 수(스캔 SQL 이 같이 읽는다) */
+  snapshot_id?: string | null;
+  snapshot_created_at?: Date | string | null;
+  last_status?: string | null;
+  last_snapshot_id?: string | null;
+  errors_today?: number | string | null;
 }
 
 export interface PretestBundle {
@@ -44,6 +52,12 @@ export interface PretestBundle {
   scheduledSendAt: Date;
   executionId: string;
   sendDateKst: string;
+  /** ★ 2026-11-02 E3-2 ③ — 지금 판이 보류이고 7일 지난 보류 재검사 묶음(원문을 다시 검사 · 재작성 후보로 일찍 끝내지 않는다) */
+  recheckHeld: boolean;
+  /** 지금 판의 오늘(KST) 검사 시도(error) 수 — DB 셈(재시작 무관) */
+  errorsToday: number;
+  /** 지금 판이 만들어진 시각(새 글 검사가 2시간 넘게 못 끝났는가) */
+  snapshotCreatedAt: Date | null;
 }
 
 /** KST(UTC+9) 기준 YYYY-MM-DD. */
@@ -83,6 +97,9 @@ export function groupPretestBundles(rows: PretestScanRow[]): PretestBundle[] {
         scheduledSendAt: sendAt,
         executionId: r.execution_id,
         sendDateKst,
+        recheckHeld: r.last_status === 'held' && String(r.last_snapshot_id ?? '') === String(r.snapshot_id ?? ''),
+        errorsToday: Number(r.errors_today || 0),
+        snapshotCreatedAt: r.snapshot_created_at ? new Date(r.snapshot_created_at) : null,
       });
     } else if (sendAt.getTime() < existing.scheduledSendAt.getTime()) {
       existing.scheduledSendAt = sendAt;

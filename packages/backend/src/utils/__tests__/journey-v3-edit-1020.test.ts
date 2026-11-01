@@ -94,9 +94,9 @@ describe('켜기 관문 검사 공용(validateJourneyEntryConfig)', () => {
     const { validateJourneyEntryConfig } = await import('../journey-builder');
     expect(validateJourneyEntryConfig(base)).toBeNull();
   });
-  it('상한 비우기 = 거절', async () => {
+  it('상한 비우기 = 통과(★ 2026-11-01 Harold — 한 번에 보낼 최대 인원 = 선택 · 비우면 한 회차 최대 10만까지 한꺼번에)', async () => {
     const { validateJourneyEntryConfig } = await import('../journey-builder');
-    expect(validateJourneyEntryConfig({ ...base, threshold_recipients_per_step: null })).toBe('한 번에 보낼 최대 인원을 정해 주세요. 고객 정보를 한꺼번에 옮겨 올 때 예상보다 많은 분께 나가는 것을 막습니다.');
+    expect(validateJourneyEntryConfig({ ...base, threshold_recipients_per_step: null })).toBeNull();
   });
   it('허용 밖 고객 조건 = 거절(조건을 고칠 수 있으니 새로 만들라고 하지 않는다)', async () => {
     const { validateJourneyEntryConfig } = await import('../journey-builder');

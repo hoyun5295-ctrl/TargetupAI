@@ -6,11 +6,13 @@
  * ⛔ 이 화면이 하는 일은 승인 하나뿐이다. 거절·보류 해소는 시스템 관리 화면 소유.
  * ⛔ 서버가 주는 것만 그린다(잔액·다른 요청 없음). 승인 가능 판정은 전부 서버가 한다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔 라이트.
+ * ★ 2026-11-02 엔진 재설계 E6-1 — 승인 = 누르면 확인 창(LinkConfirmSheet) → 확정해야 실행(다른 담당자 링크 화면과 같은 되묻기).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, Loader2, Wallet } from 'lucide-react';
 import { CUI_BTN_PRIMARY } from '../utils/console-ui';
 import { useApproveToken } from '../hooks/useApproveToken';
+import LinkConfirmSheet from '../components/link/LinkConfirmSheet';
 
 interface ChargeApprovalView {
   kind: 'deposit' | 'agent_order';
@@ -72,6 +74,7 @@ export default function ChargeApprovePage() {
   // 토큰이 바뀌면(재진입) 즉시 화면 재료를 비운다 — 옛 금액 화면으로 새 토큰을 승인하는 창을 없앤다
   useEffect(() => { setState({ kind: 'loading' }); load(); }, [load]);
 
+  const [asking, setAsking] = useState(false);
   const approve = async () => {
     if (approving || state.kind !== 'ready' || state.forToken !== token) return;
     setApproving(true);
@@ -192,7 +195,7 @@ export default function ChargeApprovePage() {
           <>
             <button
               type="button"
-              onClick={approve}
+              onClick={() => setAsking(true)}
               disabled={approving}
               className={`${CUI_BTN_PRIMARY} w-full h-12 text-[15px] justify-center`}
             >
@@ -200,8 +203,22 @@ export default function ChargeApprovePage() {
               입금 확인했습니다. 승인합니다
             </button>
             <p className="mt-2.5 text-center text-[12.5px] text-neutral-500">
-              누르는 즉시 <b className="tabular-nums">{r.amount.toLocaleString()}원</b>이 충전 처리됩니다
+              누르면 확인 창이 한 번 더 열려요. 확정하면 <b className="tabular-nums">{r.amount.toLocaleString()}원</b>이 충전 처리됩니다
             </p>
+            <LinkConfirmSheet
+              open={asking}
+              title="충전을 승인할까요?"
+              rows={[
+                { label: '회사', value: r.companyName },
+                { label: '금액', value: `${r.amount.toLocaleString()}원` },
+                { label: '입금자', value: r.depositorName },
+              ]}
+              notes={[{ tone: 'warn', text: '입금을 확인하셨을 때만 승인해 주세요. 승인하면 바로 충전되고, 되돌리려면 시스템 관리 화면에서 처리해야 해요.' }]}
+              confirmLabel="승인합니다"
+              busy={approving}
+              onConfirm={async () => { await approve(); setAsking(false); }}
+              onCancel={() => setAsking(false)}
+            />
           </>
         ) : (
           <div className="rounded-xl border border-neutral-200 bg-white p-5 text-center">

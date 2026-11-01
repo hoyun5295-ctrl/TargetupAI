@@ -802,7 +802,8 @@ export async function recordEmailEvent(input: EmailEventInput): Promise<void> {
     let firstOccurrence = false;
     if (column) {
       const seen = await client.query(
-        `SELECT 1 FROM email_events WHERE campaign_id = $1::uuid AND email = $2 AND event_type = $3 LIMIT 1`,
+        // ★ 2026-11-02 엔진 재설계 E8-2 — 첫 발생 확인도 잠금 키와 같은 소문자 비교(대소문자만 다른 같은 사람이 두 번 세지 않게)
+        `SELECT 1 FROM email_events WHERE campaign_id = $1::uuid AND lower(email) = lower($2) AND event_type = $3 LIMIT 1`,
         [campaignId, email, eventType]
       );
       firstOccurrence = seen.rows.length === 0;

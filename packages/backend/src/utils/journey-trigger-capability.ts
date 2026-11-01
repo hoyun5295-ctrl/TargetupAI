@@ -418,22 +418,8 @@ export function triggerTemplateCode(triggerEvent: string): CatalogTemplateCode |
   return CONTRACT_BY_EVENT.get(triggerEvent)?.templateCode ?? null;
 }
 
-/**
- * 수신자 상한 — **전 트리거 필수** (2026-08-02 §11-5, §9-C6 종결).
- *
- * ⛔ 옛 판정(상태형만 필수)은 "커서 트리거는 대량 적재가 과거 이벤트를 만들지 않는다"에 기댔는데,
- *   §11-4 원장 문이 그 전제를 깼다 — 첫 full sync가 발생 시각 창(3일) 안 구매를 한꺼번에 만든다.
- *   면제 집합을 조건부로 유지하는 것보다 전면 필수가 단순하고, 예외가 없으면 빠질 것도 없다.
- */
-export function requiresRecipientCap(_triggerEvent: string): boolean {
-  return true;
-}
-
-/**
- * 상한을 요구하지 않는 트리거 목록 — 활성화 UPDATE의 원자 조건에 쓴다.
- * §9-C6 종결로 빈 배열(전 트리거 필수). requiresRecipientCap의 여집합 — parity 테스트가 고정한다.
- */
-export const CAP_EXEMPT_TRIGGERS: string[] = [];
+// ★ 2026-11-01 Harold — 수신자 상한(한 번에 보낼 최대 인원) = 선택. 옛 「전 트리거 필수」(0802 §9-C6) 판정 함수 · 면제 목록은 지웠다.
+//   상한 없는 여정 = 조건에 맞는 분 모두(날짜 기준 · 한 번 보내기 = 끝까지 한 번에 · 사건 · 상태 = 회차당 10만 · 남은 분 다음 회차) · 상한 있는 여정 = 넘는 회차 자동 멈춤.
 
 /** 화면이 쓰기 좋은 형태 — key → 가능 여부·사유. */
 export function toAvailabilityMap(list: TriggerAvailability[]): Record<string, { available: boolean; reason: string }> {

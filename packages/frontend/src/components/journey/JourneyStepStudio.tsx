@@ -198,7 +198,7 @@ export default function JourneyStepStudio({
         <div className="mx-4 mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-[12.5px] leading-relaxed text-slate-600 md:mx-5">{lockNote}</div>
       )}
 
-      <div className="grid grid-cols-1 gap-5 p-4 md:grid-cols-[320px_minmax(0,1fr)] md:p-5">
+      <div className="grid grid-cols-1 gap-5 p-4 md:grid-cols-[280px_minmax(0,1fr)] md:p-5">
         {/* 왼쪽 — 큰 휴대폰(받은 문자 모양 그대로 쓴다) */}
         <div className="min-w-0">
           <PhoneComposer

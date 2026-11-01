@@ -869,7 +869,8 @@ export default function AiLinePage() {
     setSendError(null);
     try {
       const token = localStorage.getItem('token');
-      const sendRes = await fetch('/api/campaigns/direct-send', {
+      // ★ 2026-11-02 E1-4 — 서버 적재(1만 넘음) = 적재 확정 경로(차감 전 명단 서명 대조 · 다르면 409 = 다시 확인)
+      const sendRes = await fetch(sendBody.stagingId ? '/api/campaigns/direct-send/commit' : '/api/campaigns/direct-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(sendBody),
@@ -897,7 +898,7 @@ export default function AiLinePage() {
       }
       setSendResult({
         campaignId: sendData.campaignId,
-        sentCount: sendData.sentCount || 0,
+        sentCount: sendData.sentCount || sendData.accepted || 0,
         failCount: sendData.failCount || 0,
         unsubscribeCount: sendData.unsubscribeCount || 0,
         message: sendData.message || '',
@@ -939,9 +940,19 @@ export default function AiLinePage() {
       }
       // ★ 2026-09-25 한줄로 전수점검 C-07: 조회는 1만 명까지만 싣는다. 실제 대상이 더 많으면 일부만 조용히 나가던 것을
       //   막는다(누가 빠질지도 정해지지 않았다). 서버가 실제 대상 수(total)를 함께 준다.
+      // ★ 2026-11-02 엔진 재설계 E1-4 — 1만을 넘으면 거절 대신 서버가 같은 조건으로 전원을 적재(명단 고정 · 서명) → 확정은 적재 경로(commit).
       const audienceTotal = Number(previewData.total) || recipients.length;
+      let staged: { stagingId: string; signature: string; total: number; excluded: number } | null = null;
       if (audienceTotal > recipients.length) {
-        throw new Error(`발송 대상이 ${audienceTotal.toLocaleString()}명이라 보내지 않았습니다. AI 운영자 승인 발송은 한 번에 ${recipients.length.toLocaleString()}명까지 보낼 수 있습니다. 조건을 좁혀 다시 제안받아 주세요.`);
+        const stRes = await fetch('/api/ai/operator/preview-recipients', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ filters: proposal.target.filters, allCustomers: proposal.target.allCustomers === true, stage: true, adEnabled, individualCallback: cbChoice === INDIVIDUAL_CB }),
+        });
+        const st = await stRes.json().catch(() => ({}));
+        if (!stRes.ok || !st?.success || !st.stagingId) throw new Error(st?.error || '받는 분 명단을 준비하지 못했어요. 잠시 후 다시 시도해 주세요.');
+        if (!Number(st.total)) throw new Error('보낼 수 있는 받는 분이 없어요(회신번호 · 중복 · 수신거부를 빼고 0명).');
+        staged = { stagingId: String(st.stagingId), signature: String(st.signature), total: Number(st.total), excluded: Number(st.excluded?.duplicates || 0) + Number(st.excluded?.callback || 0) };
       }
       const individualCb = cbChoice === INDIVIDUAL_CB;
       const chosenCb = individualCb ? '' : (cbChoice || previewData.defaultCallback || '');
@@ -1031,7 +1042,8 @@ export default function AiLinePage() {
         // ★ 2026-10-07 개별 회신 = 고객별 매장번호(store_phone) · 미보유·미등록 고객은 /direct-send CT-08이 제외 확인을 돌려준다
         callback: individualCb ? undefined : chosenCb,
         useIndividualCallback: individualCb,
-        recipients,
+        // ★ 2026-11-02 E1-4 — 서버 적재면 번호 목록 대신 적재 id · 명단 서명(commit 이 차감 전에 대조)
+        ...(staged ? { stagingId: staged.stagingId, signature: staged.signature } : { recipients }),
         adEnabled, // ★ 2026-07-22 사용자 광고표기 토글(직접발송 미러·기본 ON) — /direct-send가 D143로 사용자 선택 존중
         scheduled,
         scheduledAt,
@@ -1074,14 +1086,15 @@ export default function AiLinePage() {
         if (chip.state === 'queued' || chip.state === 'running' || chip.state === 'busy') return '스팸 검사가 아직 끝나지 않았어요.\n';
         if (chip.state === 'warn') return '스팸 검사 결과를 받지 못했어요.\n';
         return '';
-      })();
+      })() + (staged && staged.excluded > 0 ? `회신번호가 없거나 중복인 ${staged.excluded.toLocaleString()}명을 빼고 보내요.\n` : '');
+      const sendCount = staged ? staged.total : recipients.length;
 
       // ★ D170+ (Harold 명시 안전장치): 즉시 발송 시 사용자 확인 — 회수 불가 안내
       if (!scheduled) {
         const isAiPast = sendMode === 'aiRecommended';
         const confirmMsg = isAiPast
-          ? `AI 추천 시점이 과거이거나 임박해서 ${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`
-          : `${recipients.length.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`;
+          ? `AI 추천 시점이 과거이거나 임박해서 ${sendCount.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`
+          : `${sendCount.toLocaleString()}명에게 지금 즉시 발송됩니다.\n발송 후 회수 불가합니다. 진행하시겠습니까?`;
         setConfirm({
           mode: 'warning',
           title: '즉시 발송: 회수 불가',
@@ -1103,7 +1116,7 @@ export default function AiLinePage() {
       setConfirm({
         mode: 'info',
         title: '예약 발송: 지금 나가지 않습니다',
-        description: `${spamNote}${recipients.length.toLocaleString()}명에게 ${scheduledLabel}에 발송됩니다.\n지금은 나가지 않으며, 그전까지 예약내역에서 취소할 수 있습니다.`,
+        description: `${spamNote}${sendCount.toLocaleString()}명에게 ${scheduledLabel}에 발송됩니다.\n지금은 나가지 않으며, 그전까지 예약내역에서 취소할 수 있습니다.`,
         confirmLabel: '예약하기',
         onConfirm: () => { void performDirectSend(sendBody, suggestedName); },
       });

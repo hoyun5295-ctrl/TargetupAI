@@ -112,44 +112,23 @@ describe('데이터로 만들 수 없는 여정은 활성화되지 않는다', (
   });
 });
 
-describe('상태형 여정은 수신자 상한 없이 켜지지 않는다', () => {
+// ★ 2026-11-01 Harold 「고객사가 최대 인원을 안 정하면 안 해도 된다」 — 수신자 상한 = 선택(옛: 전 트리거 필수 · 0801 §9-C6).
+describe('수신자 상한은 선택이다 — 비워도 켜진다(트리거 종류 무관)', () => {
   beforeEach(() => { vi.clearAllMocks(); facts.mockResolvedValue(ALL_FACTS); });
 
-  it('상한이 비어 있으면 거부한다 — 유예는 이관 폭발을 미룰 뿐 막지 못한다', async () => {
-    mockJourney({ trigger_event: 'customer.dormant', threshold_recipients_per_step: null });
-
-    const r = await activate();
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain('최대 인원');
-    expect(didActivate()).toBe(false);
-  });
-
-  it('상시 세그먼트도 상한이 필요하다', async () => {
-    mockJourney({ trigger_event: 'custom', start_kind: 'standing', threshold_recipients_per_step: null });
-
-    const r = await activate();
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain('최대 인원');
-  });
-
-  // ★ 2026-08-01 5R 정정 — 생일도 상한 대상이 됐다. 생년월일 대량 적재가 그날 코호트를 한꺼번에 만든다.
-  it('생일도 상한이 필요하다', async () => {
-    mockJourney({ trigger_event: 'customer.birthday_approaching', threshold_recipients_per_step: null });
-
-    const r = await activate();
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain('최대 인원');
-  });
-
-  it('커서 트리거도 상한이 필요하다 — §11-5(§9-C6 종결)', async () => {
-    // 옛 면제 근거("대량 적재가 과거 이벤트를 만들지 않는다")는 §11-4 원장 문이 깼다 —
-    // 첫 full sync가 발생 시각 창(3일) 안 구매를 한꺼번에 만든다. 전면 필수가 정답.
-    mockJourney({ trigger_event: 'cdp.purchase', threshold_recipients_per_step: null });
-
-    const r = await activate();
-    expect(r.ok).toBe(false);
-    expect(r.reason).toContain('최대 인원');
-  });
+  for (const [trigger, extra] of [
+    ['customer.dormant', {}],
+    ['custom', { start_kind: 'standing' }],
+    ['customer.birthday_approaching', {}],
+    ['cdp.purchase', {}],
+  ] as Array<[string, Record<string, unknown>]>) {
+    it(`${trigger} — 상한이 비어 있어도 켜진다`, async () => {
+      mockJourney({ trigger_event: trigger, threshold_recipients_per_step: null, ...extra });
+      const r = await activate();
+      expect(r.ok).toBe(true);
+      expect(didActivate()).toBe(true);
+    });
+  }
 });
 
 describe('조건을 갖추면 통과한다', () => {

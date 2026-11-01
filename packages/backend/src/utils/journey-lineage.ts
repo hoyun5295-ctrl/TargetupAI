@@ -69,6 +69,28 @@ export function resetEntryEndsCache(value?: boolean): void {
   endsAbsentUntil = value === false ? Date.now() + RECHECK_MS : 0;
 }
 
+// ★ 2026-11-02 엔진 재설계 E1-2 — 한 번 보내기 넣기 대기 · 넣기 완료 칸(원장 C93-DDL-1). 없으면 옛 동작(C92 = 적재 실패 시 멈춤).
+let oneShotReady = false;
+let oneShotAbsentUntil = 0;
+export async function oneShotColumnsReady(): Promise<boolean> {
+  if (oneShotReady) return true;
+  if (Date.now() < oneShotAbsentUntil) return false;
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'journeys' AND column_name IN ('one_shot_dispatch_pending_at', 'one_shot_dispatched_at')`,
+  );
+  const ok = Number(r.rows[0]?.n || 0) === 2;
+  if (ok) oneShotReady = true;
+  else oneShotAbsentUntil = Date.now() + RECHECK_MS;
+  return ok;
+}
+
+/** 테스트 전용. */
+export function resetOneShotColumnsCache(value?: boolean): void {
+  oneShotReady = value === true;
+  oneShotAbsentUntil = value === false ? Date.now() + RECHECK_MS : 0;
+}
+
 /** 마지막 날 조건(KST 오늘까지 받음) — 목록 조각 · 잠금 뒤 판정 · 끝남 처리가 같은 식을 쓴다. */
 export const ENTRY_ENDS_OPEN_SQL = (alias: string) => `(${alias ? `${alias}.` : ''}entry_ends_on IS NULL OR ${alias ? `${alias}.` : ''}entry_ends_on >= (NOW() AT TIME ZONE 'Asia/Seoul')::date)`;
 
@@ -206,7 +228,9 @@ export const CLOSE_OTHER_VERSIONS_ENTRY_SQL =
       AND o.entry_closed_at IS NULL AND o.status IN ('active', 'paused')`;
 
 // 복제 때 상태로 되돌리는(비우는) 칸. 이름 규칙으로 고른다(stats_* = 0 · *cursor* = NULL) — 없는 칸은 무시된다.
-const RESET_NULL = ['archived_at', 'paused_at', 'pause_reason', 'approved_by', 'approved_at', 'last_pretest_passed_at', 'entry_closed_at', 'entry_baseline_at'];
+// ★ 2026-11-02 E1-2(SC-3) — 한 번 보내기 넣기 표식은 새 판이 물려받지 않는다(새 판 = 켤 때 다시 넣는다)
+const RESET_NULL = ['archived_at', 'paused_at', 'pause_reason', 'approved_by', 'approved_at', 'last_pretest_passed_at', 'entry_closed_at', 'entry_baseline_at',
+  'one_shot_dispatch_pending_at', 'one_shot_dispatched_at'];
 
 export interface NewVersionResult { journeyId: string; existing: boolean; stepsCopied: number; variantsNotCopied: number; variantsCopied?: number }
 

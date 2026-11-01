@@ -308,6 +308,8 @@ export interface StepSpamParams {
   /** 표본 고객을 고를 여정(없으면 변수 자리를 비운 글로 검사). */
   journeyId?: string;
   variantId?: string;
+  /** ★ 2026-11-02 E3-2 — 같은 글 재사용 창(일 · 기본 그날 · 정기 재검사 = 7) */
+  reuseDays?: number;
 }
 
 /** 판마다 스팸 상태(점검 응답 · ★ 2026-11-01 배포 2 C5) — 차단 · 장애는 failedSteps 가 들고 있다 */
@@ -386,6 +388,7 @@ export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamT
       skipPrepaid: false,
       // ★ 2026-11-01 B1-4(J15) — 같은 날 같은 글 = 같은 검사 이어 보기(차감 0 · 옛: 회차마다 새 검사 · 새 차감)
       reuseSameDay: true,
+      reuseDays: params.reuseDays,
     });
     if (!enqueueResult.ok) {
       return { verdict: 'error', ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: enqueueResult.error || enqueueResult.errorCode || 'enqueue_failed' };

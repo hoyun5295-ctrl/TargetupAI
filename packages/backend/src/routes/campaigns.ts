@@ -73,7 +73,7 @@ import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, brandSendWindowError, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
-import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter } from '../utils/direct-send-core';
+import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter, stagingSendSignature } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
@@ -1920,6 +1920,8 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
       kakaoBubbleType, kakaoSenderKey, kakaoTargeting, kakaoAttachmentJson, kakaoCarouselJson, kakaoResendType,
       alimtalkTemplateCode, alimtalkVariableMap, alimtalkButtonJson,
       alimtalkNextType, alimtalkNextContents, alimtalkNextSubject,
+      // ★ 2026-11-02 엔진 재설계 E1-4 — AI 한줄로 서버 적재(1만 넘음): 명단 서명(있을 때만 대조) · 출처 · 캠페인명(동기 /direct-send 와 같은 규칙)
+      signature, sendType, campaignName,
     } = req.body;
 
     if (!stagingId) return res.status(400).json({ success: false, error: 'stagingId 누락' });
@@ -2076,11 +2078,19 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
       try {
         const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
         if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
+        // ★ 2026-11-02 E1-4 — 서명이 왔으면(AI 한줄로 서버 적재) 자기 제외를 마친 실제 발송 집합으로 다시 내 차감 전에 대조(다르면 409 · 다시 확인)
+        if (typeof signature === 'string' && signature) {
+          const now = await stagingSendSignature(stagingId, companyId, userId, dedupEnabled !== false, effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled));
+          if (now !== signature) {
+            return res.status(409).json({ success: false, code: 'RECIPIENTS_CHANGED', error: '확인하신 뒤에 받는 분 명단이 바뀌었어요. 다시 확인하고 보내 주세요.' });
+          }
+        }
 
         // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
         try {
           const { campaignId, accepted } = await createDirectSendCampaign({
-            stagingId, campaignName: `직접발송 ${new Date().toLocaleString('ko-KR')}`,
+            stagingId, campaignName: (typeof campaignName === 'string' && campaignName.trim() ? campaignName.trim().slice(0, 200) : `직접발송 ${new Date().toLocaleString('ko-KR')}`),
+            sendType: typeof sendType === 'string' ? sendType : null,   // ★ 1102 E1-4 — 값 판정 = direct-send-spec(isDirectPipelineSendType · 밖이면 'direct')
             msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
             scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
             callbackFilterUserId: commitCallbackUserId ?? null,

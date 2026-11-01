@@ -20,7 +20,7 @@ import { Request, Response, Router } from 'express';
 import { resolveShortUrl, isManagerLinkUrl } from '../utils/short-url';
 import { trackEvent } from '../utils/cdp-events';
 import { recordVariantClickConversion } from '../utils/bandit-optimizer';
-import { detectKoreanEcommerce, isMobileUserAgent } from '../utils/korean-ecommerce-domains';
+import { detectKoreanEcommerce, isMobileUserAgent, isLinkPreviewAgent } from '../utils/korean-ecommerce-domains';
 import { identifyCustomer } from '../utils/cdp-identity';
 import { query } from '../config/database';
 
@@ -68,6 +68,8 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
     // ───────────────────────────────────────────────────────────
 
     const userAgent = req.headers['user-agent'] ? String(req.headers['user-agent']) : '';
+    // ★ 2026-11-02 엔진 재설계 E8-1 — 링크 미리보기 · 검색 로봇 · HEAD 요청 = 고객 클릭 아님(클릭 수 · 클릭 사건 · A/B 보상 0 · 넘김은 위에서 이미 했다)
+    if (req.method === 'HEAD' || isLinkPreviewAgent(userAgent)) return;
     const uaHash = userAgent
       ? Buffer.from(userAgent).toString('base64').substring(0, 32)
       : `anon_${Date.now()}`;

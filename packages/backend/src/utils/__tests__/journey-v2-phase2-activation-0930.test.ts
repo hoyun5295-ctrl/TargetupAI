@@ -15,7 +15,7 @@ vi.mock('../ai-credit', () => {
   return { checkCredit: vi.fn(), deductCreditOutcome: vi.fn(), InsufficientCreditError };
 });
 vi.mock('../journey-builder', () => ({ activateJourney: vi.fn() }));
-vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn() }));
+vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn(), settleAndDispatchOneShot: vi.fn() }));
 vi.mock('../journey-target-extractor', () => ({ selectJourneyTargetCustomerIds: vi.fn(), JOURNEY_COUNT_CAP: 100000 }));
 vi.mock('../store-scope', () => ({ getJourneyOwnerScopeSql: vi.fn() }));
 vi.mock('../callback-filter', () => ({ filterByIndividualCallback: vi.fn() }));
@@ -25,7 +25,7 @@ vi.mock('../journey-lifecycle-map', () => ({ buildLifecycleMap: vi.fn(async () =
 import { query } from '../../config/database';
 import { checkCredit, deductCreditOutcome, InsufficientCreditError } from '../ai-credit';
 import { activateJourney } from '../journey-builder';
-import { dispatchOneShotJourney } from '../journey-anchor-scheduler';
+import { dispatchOneShotJourney, settleAndDispatchOneShot } from '../journey-anchor-scheduler';
 import { selectJourneyTargetCustomerIds } from '../journey-target-extractor';
 import { filterByIndividualCallback } from '../callback-filter';
 import { getCreditCost } from '../ai-credit-calc';
@@ -37,6 +37,7 @@ const credit = checkCredit as unknown as ReturnType<typeof vi.fn>;
 const deduct = deductCreditOutcome as unknown as ReturnType<typeof vi.fn>;
 const act = activateJourney as unknown as ReturnType<typeof vi.fn>;
 const oneShot = dispatchOneShotJourney as unknown as ReturnType<typeof vi.fn>;
+const settle = settleAndDispatchOneShot as unknown as ReturnType<typeof vi.fn>;
 const ACT = getCreditCost('journey-activate');
 
 const ID = (n: number) => `00000000-0000-4000-8000-00000000000${n}`;
@@ -57,7 +58,7 @@ function mockJourneys(rows: Row[]) {
 }
 
 beforeEach(() => {
-  q.mockReset(); credit.mockReset(); deduct.mockReset(); act.mockReset(); oneShot.mockReset();
+  q.mockReset(); credit.mockReset(); deduct.mockReset(); act.mockReset(); oneShot.mockReset(); settle.mockReset();
   credit.mockResolvedValue(undefined);
   deduct.mockResolvedValue('deducted');   // ★1020 V.3(Codex 적대 A8) — 차감 결말(실제로 받은 크레딧)
   act.mockResolvedValue({ ok: true });
@@ -106,12 +107,53 @@ describe('단건 켜기 게이트', () => {
     expect(r).toMatchObject({ ok: false, code: 'ACTIVATE_FAILED', message: '회신번호가 없습니다' });
     expect(deduct).not.toHaveBeenCalled();
   });
-  it('1회 발송은 최초 활성화 때만 적재', async () => {
+  // ★ 2026-11-01 Codex C92 3R — 옛 「최초 활성화 때만 적재」를 뒤집는다: 적재가 잠금 안에서 「이미 넣음」을 보고 0 으로 끝내므로(실 PG 시험
+  //   journey-anchor-paging-1101 동시 두 번 = 한 번) 켤 때마다 불러도 두 번 넣지 않는다 · 첫 적재가 실패한 여정은 다시 켜야 넣을 길이 생긴다.
+  // ★ 2026-11-02 E1-2 — 이 길은 넣기 칸이 없을 때(DDL 전 · oneShot = untracked)만 남는다.
+  it('칸 없음(DDL 전) = 1회 발송 적재 = 켤 때마다 부른다(최초 · 다시 켜기 둘 다 · 다시 켜기는 크레딧 0)', async () => {
     mockJourneys([{ id: ID(1), status: 'draft', trigger_event: 'custom', start_kind: 'one_shot' }, { id: ID(2), status: 'paused', trigger_event: 'custom', start_kind: 'one_shot' }]);
+    act.mockResolvedValue({ ok: true, oneShot: 'untracked' });
     await activateJourneyGuarded('c', ID(1), 'u');
     await activateJourneyGuarded('c', ID(2), 'u');
-    expect(oneShot).toHaveBeenCalledTimes(1);
-    expect(oneShot).toHaveBeenCalledWith('c', ID(1));
+    expect(oneShot.mock.calls).toEqual([['c', ID(1)], ['c', ID(2)]]);
+    expect(deduct).toHaveBeenCalledTimes(1);
+  });
+  it('칸 없음(DDL 전) · 1회 발송 적재가 실패하면 켜기 성공이 아니다 — 이 여정만 멈추고(사유) DISPATCH_FAILED', async () => {
+    mockJourneys([{ id: ID(1), status: 'draft', trigger_event: 'custom', start_kind: 'one_shot' }]);
+    act.mockResolvedValue({ ok: true, oneShot: 'untracked' });
+    oneShot.mockRejectedValue(new Error('canceling statement due to statement timeout'));
+    const r = await activateJourneyGuarded('c', ID(1), 'u');
+    expect(r).toMatchObject({ ok: false, code: 'DISPATCH_FAILED' });
+    const pause = q.mock.calls.find(([sql]) => /UPDATE journeys SET status = 'paused'/.test(sql));
+    expect(pause?.[1]).toEqual([ID(1), 'c', expect.stringMatching(/다시 켜 주세요/)]);
+    expect(pause?.[0]).toMatch(/WHERE id = \$1::uuid AND company_id = \$2::uuid AND status = 'active'/);
+  });
+  // ★ 2026-11-02 엔진 재설계 E1-2 — 넣기 대기를 찍은 한 번 보내기 = 정산 · 되돌리기 · 적재를 여정 잠금 안 한 함수(settleAndDispatchOneShot)가 맡는다.
+  it('넣기 대기(pending) = 바깥 차감 0 · 토큰 · 첫 켜기 여부를 넘겨 잠금 안에서 정산 · 적재 · 받는 분 넣기 대기를 그대로 돌려준다', async () => {
+    mockJourneys([{ id: ID(1), status: 'draft', trigger_event: 'custom', start_kind: 'one_shot' }, { id: ID(2), status: 'paused', trigger_event: 'custom', start_kind: 'one_shot' }]);
+    act.mockResolvedValue({ ok: true, oneShot: 'pending', attemptToken: '2026-11-02 01:02:03.456789+00' });
+    settle.mockResolvedValueOnce({ ok: true, charged: true, dispatchPending: true }).mockResolvedValueOnce({ ok: true, charged: false, dispatchPending: false });
+    expect(await activateJourneyGuarded('c', ID(1), 'u')).toEqual({ ok: true, firstActivation: true, charged: ACT, dispatchPending: true });
+    expect(await activateJourneyGuarded('c', ID(2), 'u')).toEqual({ ok: true, firstActivation: false, charged: 0, dispatchPending: false });
+    expect(settle.mock.calls).toEqual([
+      ['c', ID(1), 'u', { token: '2026-11-02 01:02:03.456789+00', firstActivation: true }],
+      ['c', ID(2), 'u', { token: '2026-11-02 01:02:03.456789+00', firstActivation: false }],
+    ]);
+    expect(deduct).not.toHaveBeenCalled();
+    expect(oneShot).not.toHaveBeenCalled();
+  });
+  it('넣기 대기 · 정산 실패 = 그 결과 코드 그대로(되돌리기는 잠금 안 함수가 이번 시도만)', async () => {
+    mockJourneys([{ id: ID(1), status: 'draft', trigger_event: 'custom', start_kind: 'one_shot' }]);
+    act.mockResolvedValue({ ok: true, oneShot: 'pending', attemptToken: 't' });
+    settle.mockResolvedValue({ ok: false, code: 'INSUFFICIENT_CREDIT', message: '부족' });
+    expect(await activateJourneyGuarded('c', ID(1), 'u')).toEqual({ ok: false, code: 'INSUFFICIENT_CREDIT', message: '부족' });
+  });
+  it('이미 넣은 한 번 보내기(dispatched) = 다시 넣지 않는다 · 잠금 정산 0 · 적재 0', async () => {
+    mockJourneys([{ id: ID(1), status: 'paused', trigger_event: 'custom', start_kind: 'one_shot' }]);
+    act.mockResolvedValue({ ok: true, oneShot: 'dispatched', attemptToken: 't' });
+    expect(await activateJourneyGuarded('c', ID(1), 'u')).toEqual({ ok: true, firstActivation: false, charged: 0 });
+    expect(settle).not.toHaveBeenCalled();
+    expect(oneShot).not.toHaveBeenCalled();
   });
   it('매장번호 모드 미등록 회신 = 확인 요청(확인 전 켜지 않음) · 확인하면 켠다', async () => {
     mockJourneys([{ id: ID(1), status: 'draft', trigger_event: 'customer.created', callback_mode: 'store' }]);

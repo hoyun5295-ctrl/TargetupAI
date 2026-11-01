@@ -14,8 +14,6 @@ import {
   toAvailabilityMap,
   hasAnyAvailableTrigger,
   triggerKeyForEvent,
-  requiresRecipientCap,
-  CAP_EXEMPT_TRIGGERS,
   type CompanyJourneyFacts,
 } from './journey-trigger-capability';
 
@@ -129,30 +127,7 @@ describe('저장값 → 화면 key 매핑 (표 기반 전수)', () => {
   });
 });
 
-describe('수신자 상한 필수 대상 — 유예 대상과 다른 집합이다', () => {
-  it('커서 경로는 상한을 요구하지 않는다 — 적재가 과거 이벤트를 만들지 않는다', () => {
-    for (const t of CAP_EXEMPT_TRIGGERS) expect(requiresRecipientCap(t)).toBe(false);
-  });
-
-  it('생일도 상한 대상이다 — 생년월일 대량 적재는 그날 코호트를 한꺼번에 만든다', () => {
-    expect(requiresRecipientCap('customer.birthday_approaching')).toBe(true);
-  });
-
-  it('신규가입·휴면·포인트·상시도 상한 대상이다', () => {
-    for (const t of ['customer.created', 'customer.dormant', 'customer.points_expiring', 'custom']) {
-      expect(requiresRecipientCap(t)).toBe(true);
-    }
-  });
-
-  it('모르는 값은 상한 대상이다 — fail-closed', () => {
-    expect(requiresRecipientCap('customer.made_up_thing')).toBe(true);
-  });
-
-  it('면제 목록과 판정 함수가 어긋나지 않는다', () => {
-    const exemptFromFn = STORED_EVENTS.map(([e]) => e).filter((e) => !requiresRecipientCap(e));
-    expect([...exemptFromFn].sort()).toEqual([...CAP_EXEMPT_TRIGGERS].sort());
-  });
-});
+// ★ 2026-11-01 Harold — 수신자 상한 = 선택(옛 「전 트리거 필수」 판정 · 면제 목록 시험은 지웠다 · 선택 계약 = __tests__/journey-v3-edit-1020.test.ts · journey-deploy2-1101.test.ts)
 
 describe('사유는 고객 언어로만 쓴다', () => {
   const allReasons = [

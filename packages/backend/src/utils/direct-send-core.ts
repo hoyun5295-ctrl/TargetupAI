@@ -73,6 +73,36 @@ export async function countStagingFiltered(
 }
 
 /**
+ * ★ 2026-11-02 엔진 재설계 E1-4(설계 1R D1-5 · 2R D2-4) — 명단 서명 = 실제 발송 집합(중복 제거 · 수신거부 거름 = countStagingFiltered 와 같은 기준)의
+ *   번호마다 md5 앞 63비트를 numeric 으로 더한 정확한 합 + 수. 순서 무관 · 정렬 0 · 500만 행도 한 번 훑기.
+ *   「보여 준 명단 = 나가는 명단」 — 적재 응답이 이 값을 주고 commit 이 자기 제외를 마친 뒤 같은 값으로 대조한다(수가 같아도 사람이 바뀌면 잡는다).
+ */
+export async function stagingSendSignature(
+  stagingId: string, companyId: string, unsubUserId: string, dedupEnabled: boolean, applyUnsub: boolean,
+): Promise<string> {
+  const r = await query(
+    `SELECT COUNT(*)::bigint AS n,
+            COALESCE(SUM((('x' || substr(md5(x.phone), 1, 16))::bit(64)::bigint & 9223372036854775807)::numeric), 0)::text AS sig
+       FROM (SELECT ${dedupEnabled ? 'DISTINCT ' : ''}s.phone FROM campaign_send_staging s
+              WHERE s.staging_id = $1 AND s.company_id = $2
+                ${applyUnsub ? 'AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $3 AND u.phone = s.phone)' : ''}) x`,
+    applyUnsub ? [stagingId, companyId, unsubUserId] : [stagingId, companyId],
+  );
+  return `${r.rows[0]?.n ?? 0}:${r.rows[0]?.sig ?? '0'}`;
+}
+
+/** ★ 2026-11-02 E1-4 — 적재 표에서 번호당 첫 행만 남긴다(명단 고정 · 지운 행 수) */
+export async function dedupStagingRows(stagingId: string, companyId: string): Promise<number> {
+  const r = await query(
+    `DELETE FROM campaign_send_staging s USING campaign_send_staging t
+      WHERE s.staging_id = $1::uuid AND t.staging_id = $1::uuid AND s.company_id = $2::uuid AND t.company_id = $2::uuid
+        AND s.phone = t.phone AND s.id > t.id`,
+    [stagingId, companyId],
+  );
+  return r.rowCount || 0;
+}
+
+/**
  * ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 발송이 옛 동기 경로(/direct-send)에서 받던 확인 두 가지를 적재 경로에서도 준다(더하기만).
  *   ① 이름 빈 행 수(%이름% 경고 · 옛 화면 판정 `!r.name || 공백` 과 같다)
  *   ② 수신자별 회신번호 제외 판정 — callback-filter CT 그대로(없음·미등록·배정) · 응답 모양도 동기 경로와 같다.

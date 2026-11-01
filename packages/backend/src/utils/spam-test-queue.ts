@@ -80,6 +80,8 @@ export interface SpamTestEnqueueParams {
    *   새로 걸지 않고 그 검사를 돌려준다(차감 0 · reused). 장애로 끝났으면 새 검사. 사람이 누른 수동 검사는 넘기지 않는다(늘 새 검사).
    */
   reuseSameDay?: boolean;
+  /** ★ 2026-11-02 엔진 재설계 E3-2 — 재사용 창(일 · 기본 = 그날 · 여정 정기 재검사만 7 · reuseSameDay 와 함께 쓴다) */
+  reuseDays?: number;
 }
 
 export interface SpamTestEnqueueResult {
@@ -135,6 +137,8 @@ export interface AutoSpamTestResult {
   passedVariantId?: string | null;
   totalTestCount: number;
   totalRegenerateCount: number;
+  /** ★ 2026-11-02 엔진 재설계 E3-6 — 안마다 마지막으로 건 검사 id(기다림이 끝난 뒤 결과를 다시 읽는다 · 이어 보기면 그 검사) */
+  testIds?: Record<string, string>;
 }
 
 // ============================================================
@@ -436,12 +440,14 @@ export interface SpamCheckKey {
  *   부르는 쪽: 진행 중 · 확인 중 = 새로 걸지 않고 기다림 · 통과 · 차단 = 재사용 · 장애 = 새 검사(장애 재시도 상한은 부르는 쪽 기존 규칙).
  *   ⛔ 날짜를 넘기면 새 검사(통신사 필터는 날마다 바뀐다) · 제목을 모르는 옛 장문 검사는 재사용에서 빠진다(IS NOT DISTINCT FROM).
  */
-export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query): Promise<{ testId: string; status: string; createdAt: Date; outcome: SpamVerdict } | null> {
+export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query, windowDays?: number): Promise<{ testId: string; status: string; createdAt: Date; outcome: SpamVerdict } | null> {
   if (!k.hash) return null;
+  // ★ 2026-11-02 엔진 재설계 E3-2 — 재사용 창 = 기본 그날(지금 그대로 · 점검 판 엿보기 · AI 한줄로 · 자동마케팅) · 여정 정기 재검사만 N일(SC-25)
+  const since = windowDays && windowDays > 1 ? `(${KST_TODAY_START_SQL} - INTERVAL '${Math.floor(windowDays) - 1} days')` : KST_TODAY_START_SQL;
   const found = await run(
     `SELECT t.id, t.status, t.created_at FROM spam_filter_tests t
       WHERE t.company_id = $1 AND REPLACE(t.callback_number, '-', '') = $2 AND t.message_hash = $3
-        AND t.created_at >= ${KST_TODAY_START_SQL}
+        AND t.created_at >= ${since}
         AND t.subject IS NOT DISTINCT FROM $5
         AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
       ORDER BY t.created_at DESC LIMIT 1`,
@@ -513,7 +519,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
   const {
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
-    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false,
+    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays,
   } = params;
 
   try {
@@ -524,7 +530,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     //   여기는 빠른 길(잠금 없음) · 동시에 같은 키 둘이 「없음」을 보면 아래 트랜잭션이 키 잠금 아래에서 다시 찾는다(Codex 구현 1R #1 · 이중 차감 0)
     const checkKey: SpamCheckKey | null = reuseSameDay ? hashed.key : null;
     const reusable = async (run?: SqlRun) => {
-      const same = checkKey ? await spamCheckFor(checkKey, run) : null;
+      const same = checkKey ? await spamCheckFor(checkKey, run, reuseDays) : null;
       return same && same.outcome !== 'error' ? same : null;
     };
     const early = await reusable();
@@ -779,11 +785,68 @@ export async function cleanupStaleActiveTests(thresholdMs: number): Promise<numb
   return staleIds.length;
 }
 
+/**
+ * ★ 2026-11-02 엔진 재설계 E2-4 — 다음 검사 고르기(순수 함수 · 한 번에 한 검사 그대로).
+ *   ① 줄 = 사람이 기다리는 검사(manual · trial = 0) · 그 밖 자동(1) · 사람 줄을 3건 연달아 꺼냈으면 다음 한 건은 자동 줄(자동 줄 굶김 0)
+ *   ② 줄 안 = 회전 커서(마지막으로 꺼낸 회사 다음 회사 · 회사 id 순 · 끝이면 처음)의 가장 오래된 검사 · 커서 = 줄마다 하나.
+ *   heads = (줄 · 회사)마다 가장 오래된 queued 한 건.
+ */
+export interface SpamQueueHead { id: string; companyId: string; lane: 0 | 1 }
+export interface SpamQueueCursor { lastCompany: [string | null, string | null]; humanStreak: number }
+export const SPAM_HUMAN_STREAK_MAX = 3;
+export function pickNextSpamTest(heads: readonly SpamQueueHead[], cursor: SpamQueueCursor): { pick: SpamQueueHead | null; cursor: SpamQueueCursor } {
+  const human = heads.filter((h) => h.lane === 0);
+  const auto = heads.filter((h) => h.lane === 1);
+  const lane: 0 | 1 | null = human.length > 0 && (cursor.humanStreak < SPAM_HUMAN_STREAK_MAX || auto.length === 0) ? 0 : auto.length > 0 ? 1 : null;
+  if (lane === null) return { pick: null, cursor };
+  const list = (lane === 0 ? human : auto).slice().sort((a, b) => (a.companyId < b.companyId ? -1 : a.companyId > b.companyId ? 1 : 0));
+  const last = cursor.lastCompany[lane];
+  const pick = (last ? list.find((h) => h.companyId > last) : undefined) ?? list[0];
+  const lastCompany: [string | null, string | null] = [...cursor.lastCompany];
+  lastCompany[lane] = pick.companyId;
+  return { pick, cursor: { lastCompany, humanStreak: lane === 0 ? cursor.humanStreak + 1 : 0 } };
+}
+/** (줄 · 회사)마다 가장 오래된 queued 한 건 */
+export async function spamQueueHeads(): Promise<SpamQueueHead[]> {
+  const r = await query(
+    `SELECT DISTINCT ON (lane, company_id) id, company_id, lane
+       FROM (SELECT id, company_id, created_at,
+                    CASE WHEN source IN ('manual', 'trial') THEN 0 ELSE 1 END AS lane
+               FROM spam_filter_tests WHERE status = 'queued') q
+      ORDER BY lane, company_id, created_at ASC, id ASC`
+  );
+  return r.rows.map((x: any) => ({ id: String(x.id), companyId: String(x.company_id), lane: Number(x.lane) === 0 ? 0 : 1 }));
+}
+/** 큐 워커 커서(워커 한 곳 · 재시작 = 처음부터 · 굶김 아님) */
+let _spamQueueCursor: SpamQueueCursor = { lastCompany: [null, null], humanStreak: 0 };
+/** 시험 전용. */
+export function resetSpamQueueCursor(): void { _spamQueueCursor = { lastCompany: [null, null], humanStreak: 0 }; }
+
+/** ★ 2026-11-02 엔진 재설계 E9 ③ — 가장 오래 기다린 검사가 이 분을 넘으면 운영 경보(1분에 한 번만 본다) */
+export const SPAM_QUEUE_LAG_ALERT_MINUTES = 30;
+let _lastLagCheckAt = 0;
+async function checkSpamQueueLag(): Promise<void> {
+  if (Date.now() - _lastLagCheckAt < 60_000) return;
+  _lastLagCheckAt = Date.now();
+  const r = await query(
+    `SELECT COUNT(*)::int AS n, EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))::int AS lag_s FROM spam_filter_tests
+      WHERE status = 'queued' AND created_at <= NOW() - INTERVAL '${SPAM_QUEUE_LAG_ALERT_MINUTES} minutes'`,
+  );
+  const n = Number(r.rows[0]?.n || 0);
+  if (n > 0) {
+    void sendSystemAlert({
+      companyId: null, dedupKey: 'spam-queue-lag', cooldownMs: 60 * 60 * 1000,
+      message: `스팸 검사 줄이 밀리고 있습니다. ${SPAM_QUEUE_LAG_ALERT_MINUTES}분 넘게 기다린 검사 ${n}건 · 가장 오래된 것 ${Math.round(Number(r.rows[0]?.lag_s || 0) / 60)}분(시험 폰 상태 확인).`,
+    }).catch(() => undefined);
+  }
+}
+
 export async function processSpamTestQueue(): Promise<void> {
   if (queueWorkerRunning) return; // 중복 실행 방지
   queueWorkerRunning = true;
 
   try {
+    await checkSpamQueueLag().catch((e: any) => console.warn('[SpamTestQueue] 밀림 확인 실패:', e?.message || e));
     // ★ 2026-09-26 F45·F46 — 멈춘 active 정리를 **먼저** 한다(옛: active가 있으면 반환 → 이 정리에 닿지 못함).
     await cleanupStaleActiveTests(TIMEOUTS.spamFilterSafety);
 
@@ -795,16 +858,18 @@ export async function processSpamTestQueue(): Promise<void> {
       return; // 실행 중인 테스트 있음 → 대기
     }
 
-    // 다음 queued 건 조회 (FIFO)
+    // ★ 2026-11-02 엔진 재설계 E2-4 — 다음 검사 = 줄 + 회사 돌아가며(옛: created_at FIFO 한 줄 · 한 회사 1,000건 뒤에 다른 회사 1건이 줄 섰다)
+    const picked = pickNextSpamTest(await spamQueueHeads(), _spamQueueCursor);
+    if (!picked.pick) return; // 큐 비어있음
     const nextTest = await query(
       `SELECT id, company_id, user_id, callback_number,
               message_content_sms, message_content_lms, source
        FROM spam_filter_tests
-       WHERE status = 'queued'
-       ORDER BY created_at ASC
-       LIMIT 1`
+       WHERE id = $1::uuid AND status = 'queued'`,
+      [picked.pick.id],
     );
-    if (nextTest.rows.length === 0) return; // 큐 비어있음
+    if (nextTest.rows.length === 0) return; // 그사이 취소 · 정리 = 다음 회차
+    _spamQueueCursor = picked.cursor;
 
     const test = nextTest.rows[0];
 
@@ -1348,6 +1413,7 @@ export async function autoSpamTestWithRegenerate(params: {
   const resultVariants: AutoSpamTestResult['variants'] = [];
   let totalTestCount = 0;
   let totalRegenerateCount = 0;
+  const testIds: Record<string, string> = {};
 
   // 한 문안을 한 번 검사한다(광고 표기 · 큐 등록 · 완료 대기 · 통신사별 결과). 큐 등록 실패 = enqueued false.
   const runOneTest = async (variantId: string, message: string, subj?: string): Promise<{
@@ -1386,6 +1452,7 @@ export async function autoSpamTestWithRegenerate(params: {
     }
 
     totalTestCount++;
+    testIds[variantId] = enqueueResult.testId!;
 
     // 테스트 완료 대기
     const verdict = await waitForTestCompletion(enqueueResult.testId!);
@@ -1428,6 +1495,7 @@ export async function autoSpamTestWithRegenerate(params: {
       totalTestCount,
       totalRegenerateCount: seq.regenerateCount,
       passedVariantId: seq.passedVariantId,
+      testIds,
     };
   }
 
@@ -1486,6 +1554,7 @@ export async function autoSpamTestWithRegenerate(params: {
     variants: resultVariants,
     totalTestCount,
     totalRegenerateCount,
+    testIds,
   };
 }
 

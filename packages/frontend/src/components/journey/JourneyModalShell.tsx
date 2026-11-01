@@ -41,6 +41,8 @@ interface Props {
   disableDismiss?: boolean;
   /** ★ 2026-10-20 V.3 §9-1 — 여정 작업 화면(전체 높이 창). 기본 false = 내용 높이 · 화면 92% 상한(기존 소비처 불변). */
   fullHeight?: boolean;
+  /** ★ 2026-11-01 Harold — 직접발송처럼 화면을 꽉 채운다(둘레 여백 · 둥근 모서리 0) */
+  fullScreen?: boolean;
 }
 
 export default function JourneyModalShell({
@@ -49,6 +51,7 @@ export default function JourneyModalShell({
   zIndexClassName = 'z-[60]',
   disableDismiss = false,
   fullHeight = false,
+  fullScreen = false,
 }: Props) {
   const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -132,7 +135,7 @@ export default function JourneyModalShell({
   return createPortal(
     <div
       ref={rootRef}
-      className={`fixed inset-0 ${zIndexClassName} flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm md:items-center md:p-6`}
+      className={`fixed inset-0 ${zIndexClassName} flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm md:items-center ${fullScreen ? '' : 'md:p-6'}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget && !disableDismiss) onClose(); }}
     >
       <div
@@ -141,7 +144,7 @@ export default function JourneyModalShell({
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={`flex ${fullHeight ? 'h-[100dvh] md:h-[96vh]' : 'max-h-[92vh]'} flex-col overflow-hidden rounded-t-2xl border shadow-2xl outline-none md:rounded-2xl ${light ? 'border-slate-200 bg-white' : 'border-white/10 bg-slate-900'} ${panelClassName}`}
+        className={`flex ${fullScreen ? 'h-[100dvh] w-screen max-w-none rounded-none border-0' : `${fullHeight ? 'h-[100dvh] md:h-[96vh]' : 'max-h-[92vh]'} rounded-t-2xl border md:rounded-2xl`} flex-col overflow-hidden shadow-2xl outline-none ${light ? 'border-slate-200 bg-white' : 'border-white/10 bg-slate-900'} ${fullScreen ? '' : panelClassName}`}
       >
         {children}
       </div>

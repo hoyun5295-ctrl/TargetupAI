@@ -100,7 +100,9 @@ import { registerAllProviders } from './utils/register-providers';
 // ★ D180 (2026-05-19): Email 채널 (SendGrid Web API v3)
 import emailRoutes from './routes/email';
 import shortUrlRoutes from './routes/short-url';  // D183: 단축 URL redirect (/c/:hash) — 공개 endpoint
-import journeyPausePublicRouter from './routes/journey-pause-public';  // ★ D218+ · 2026-10-18 여정 즉시 정지 링크 — 공개 endpoint (/api/journey-pause/*)
+import journeyPausePublicRouter from './routes/journey-pause-public';
+import managerBoardPublicRouter from './routes/manager-board-public';  // ★ 2026-11-02 엔진 재설계 E5 — 담당자 상황판(무인증 · 읽기 전용 · /api/manager-board/*)
+import { startWeeklyDigestWorker } from './utils/manager-weekly-digest';  // ★ 2026-11-02 E4-2 월요일 주간 요약  // ★ D218+ · 2026-10-18 여정 즉시 정지 링크 — 공개 endpoint (/api/journey-pause/*)
 import autosendStopPublicRouter from './routes/autosend-stop-public';  // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크 — 공개 endpoint
 import sendPolicyRouter from './routes/send-policy';   // ★ 2026-10-25 원장 #40 서버 발송 규칙 값(무인증 · 화면이 숫자를 박지 않게)
 import plannerRecheckPublicRouter from './routes/planner-recheck-public';  // ★ 2026-10-18 플래너 당일 재확인 링크 — 공개 endpoint
@@ -337,7 +339,8 @@ const approveLimiterOpts = {
 } as const;
 app.use('/api/agency-approve', rateLimit({ ...approveLimiterOpts }));
 app.use('/api/charge-approve', rateLimit({ ...approveLimiterOpts }));
-app.use('/api/journey-pause', rateLimit({ ...approveLimiterOpts })); // ★ 2026-10-18 여정 정지 링크(무인증 · 버킷 따로)
+app.use('/api/journey-pause', rateLimit({ ...approveLimiterOpts }));
+app.use('/api/manager-board', rateLimit({ ...approveLimiterOpts })); // ★ 2026-11-02 담당자 상황판(무인증 · 버킷 따로) // ★ 2026-10-18 여정 정지 링크(무인증 · 버킷 따로)
 app.use('/api/planner-recheck', rateLimit({ ...approveLimiterOpts })); // ★ 2026-10-18 플래너 당일 재확인 링크(무인증 · 버킷 따로)
 app.use('/api/autosend-stop', rateLimit({ ...approveLimiterOpts })); // ★ 2026-10-18 자동마케팅 예고 문자 멈춤 링크(무인증 · 버킷 따로)
 const shortUrlLimiter = rateLimit({
@@ -470,6 +473,7 @@ app.use('/api/help', helpRoutes); // ★ 2026-08-22 도움말 봇 · 기능 카�
 app.use('/api/agency-send', agencySendRoutes); // ★ 2026-08-22 대행발송 셀프 접수(docs/2026-08-22-agency-send-design.md)
 app.use('/api/agency-approve', agencyApproveRoutes); // ★ 2026-08-25 대행발송 담당자 링크 승인(무인증 · 토큰 = 문자 안 주소)
 app.use('/api/charge-approve', chargeApproveRoutes); // ★ 2026-08-28(3) 충전 승인 링크(무인증 · 토큰 = 문자 안 주소)
+app.use('/api/manager-board', managerBoardPublicRouter); // ★ 2026-11-02 담당자 상황판(무인증 · 토큰 = 헤더 · 읽기 전용)
 app.use('/api/journey-pause', journeyPausePublicRouter); // ★ 2026-10-18 여정 정지 링크(무인증 · 토큰 = 헤더 · 옛 루트 마운트 /journey-pause/:token 폐기 = 화면 라우트와 겹침)
 app.use('/api/planner-recheck', plannerRecheckPublicRouter);
 app.use('/api/send-policy', sendPolicyRouter);
@@ -695,6 +699,7 @@ app.listen(PORT, () => {
   startJourneyTriggerWatcher();
   // ★ 2026-06-30 여정 일반화 — 날짜축 여정(date_anchor) 스케줄러: 지정일 D-N 묶음 발송 + D-0 후 정지/반복.
   startJourneyAnchorScheduler();
+  startWeeklyDigestWorker();
 
   // ★ D217+ (2026-05-26 Harold 명시 진단 정정): 카카오 templateCode 동기화 (30분 주기)
   //   옛 D147 영역 = 검수 통과 후 IMC 안 진정 카카오 templateCode 영역 = 한줄로 안 동기화 누락 사고 정정

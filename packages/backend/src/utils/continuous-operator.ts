@@ -51,7 +51,7 @@ import { objectiveForRounds } from './automarketing-interview';
 import { buildLineEventText } from './one-line-facts';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts, readSpamTestOutcome } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
 import { InsufficientCreditError, deductCreditSafe, deductCreditOutcome, hasCreditForStrict, refundCredit } from './ai-credit';
@@ -93,6 +93,9 @@ import { eucKrByteLength } from './message-byte';
 // ★ Phase3 C (2026-06-26): 리마인드 발송 시각을 발송 가능 시간대로 정렬(shiftToSendableHour).
 import { pickBestSendHour, computeOptimalSendAt, shiftToSendableHour } from './send-time-util';
 import { buildSeasonPromptBlock, getSeasonContext } from './season-context';
+import { runCompanyLanes } from './concurrency';
+import { createScanCursor } from './scan-cursor';
+import { sendNoticeOnce } from './journey-notice-once';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -1204,9 +1207,25 @@ export async function findOpenProposalForOperator(operatorId: string, companyId:
  *   오케스트레이터 호출만 건너뛰고 그 뒤 판정(0명 · 자율 자격 · 예약 중복 · 스팸 · 통지 · 통계)은 그대로 탄다.
  */
 export async function generateProposalForOperator(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null }): Promise<OperatorProposal | null> {
-  // ★ 2026-10-28 AI 메모리 설계 K12-2 — 한 회차 = 생성 호출 상한 하나(첫 생성 · 안쪽 품질 재생성 · 스팸 재생성이 함께 쓴다)
-  return runWithRegenBudget(() => generateProposalForOperatorRound(operatorId, opts));
+  // ★ 2026-11-02 엔진 재설계 E2-3(설계 1R D1-3) — 생성 중 표식(생성이 검사 전 scheduled 를 저장하고 안내를 보내기까지 발송 패스가 그 제안을 집지 않는다)
+  generatingOperators.set(operatorId, (generatingOperators.get(operatorId) || 0) + 1);
+  try {
+    // ★ 2026-10-28 AI 메모리 설계 K12-2 — 한 회차 = 생성 호출 상한 하나(첫 생성 · 안쪽 품질 재생성 · 스팸 재생성이 함께 쓴다)
+    return await runWithRegenBudget(() => generateProposalForOperatorRound(operatorId, opts));
+  } finally {
+    const n = (generatingOperators.get(operatorId) || 1) - 1;
+    if (n <= 0) generatingOperators.delete(operatorId);
+    else generatingOperators.set(operatorId, n);
+  }
 }
+
+/**
+ * ★ 2026-11-02 E2-3 — 지금 제안을 만드는 중인 운영자(프로세스 메모리 · 한 프로세스 전제 = PM2 fork 1 · 프로세스 분리 때 다시 본다 · 설계서 §9).
+ *   재시작으로 비면 지금과 같은 동작(통과 기록 없는 예약 = 발송 패스가 검토로 내림).
+ */
+const generatingOperators = new Map<string, number>();
+/** 회사 줄 동시 수(제안 생성 · 회사 안 = 차례) */
+export const OPERATOR_GENERATE_CONCURRENCY = 3;
 
 async function generateProposalForOperatorRound(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null }): Promise<OperatorProposal | null> {
   // 1. Operator 조회 — ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent 영역 sub-query 통합
@@ -1736,7 +1755,16 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       const passedFinal = passedIndex != null ? operatorFinalCopyAt(testedPj, passedIndex, copyCtx) : null;
       const spamCheck = {
         passedIndex,
-        results: tested.map((v) => ({ index: letterIndex(v.variantId), result: v.spamResult, regenerated: !!v.regenerated })),
+        // ★ 2026-11-02 E3-6 — 안마다 검사 id · 검사한 모양 지문(확인 중 · 검사 중으로 검토에 둔 회차를 결과가 나온 뒤 회복이 다시 읽는다)
+        results: tested.map((v) => {
+          const idx = letterIndex(v.variantId);
+          const f = operatorFinalCopyAt(testedPj, idx, copyCtx);
+          return {
+            index: idx, result: v.spamResult, regenerated: !!v.regenerated,
+            testId: spamResult.testIds?.[v.variantId] ?? null,
+            fp: copyFingerprint({ callback: copyCtx.callback, opt080: copyCtx.opt080, msgType: testType, subject: String(v.subject ?? f?.subject ?? ''), body: String(v.messageText ?? f?.body ?? '') }),
+          };
+        }),
         fp: passedFinal && passedTested
           ? copyFingerprint({ callback: copyCtx.callback, opt080: copyCtx.opt080, msgType: testType, subject: String(passedTested.subject ?? passedFinal.subject ?? ''), body: String(passedTested.messageText ?? passedFinal.body) })
           : null,
@@ -1771,12 +1799,14 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
 
       if (outcome.hold) {
         // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 자동 발송만 보류(담당자 검토) · 운영자 정지 · 정지 알림 없음(차단 아님)
+        // ★ 2026-11-02 E3-6 — 보류 전 발송 시각을 남긴다(결과가 나오면 회복이 그 시각 · 지났으면 다음 발송 창으로 되돌린다)
         await query(
-          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL, auto_execute_reason = $2
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL, auto_execute_reason = $2,
+                  proposal_json = jsonb_set(proposal_json, '{spamCheck,heldSendAt}', to_jsonb(scheduled_send_at), true)
            WHERE id = $1::uuid AND status = 'scheduled' AND reviewed_at IS NULL`,
           [proposalRes.rows[0].id, outcome.reason],
         );
-        console.log(`[ContinuousOperator] ${operator.name} 스팸 검사 ${finalResult === 'pending' ? '진행 중' : '확인 중'} → 자동 발송 보류(정지 없음)`);
+        console.log(`[ContinuousOperator] ${operator.name} 스팸 검사 ${finalResult === 'pending' ? '진행 중' : '확인 중'} → 자동 발송 보류(정지 없음 · 결과가 나오면 회복)`);
       } else if (outcome.status === 'admin_review') {
         // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단 + scheduled 해제, 자동 폐기 X)
         //   ★ Codex 1R — 검사 중 사람이 승인·중지했으면(reviewed_at · 상태 변경) 그 판단을 덮지 않고 정지·통지도 하지 않는다.
@@ -1793,13 +1823,12 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
             `'${operator.name}' 보여 드린 문안이 스팸 검사에 걸려 첫 회차를 멈췄어요. 한줄로 자동마케팅 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인해 주세요.`)
             .catch((e: any) => console.warn('[ContinuousOperator] 첫 회차 멈춤 알림 경고:', e?.message));
         } else if (downgraded.rows.length > 0) {
-          console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 (재생성 ${regenCount}회) → 담당자 검토 대기`);
-          // ★ 스팸 2회 재생성 후에도 실패 → 운영자 일시정지 + 담당자 사유 알림(설계 §1)
-          await query(`UPDATE continuous_operators SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND status = 'active'`, [operator.id]).catch(() => {});
-          // ★ 2026-10-03 따옴표 안은 자동마케팅 이름이다(옛 문구는 문안 이름처럼 읽혔다) · 검사한 안 수를 함께 알린다
-          await notifyOperatorAdmins(operator, '[AI 자동마케팅] 일시정지', isFixedCopy
-            ? `'${operator.name}' 자동마케팅의 직접 쓰신 문안이 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 문안을 고친 뒤 재개해주세요.`
-            : `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 자동마케팅을 일시정지했습니다. 한줄로 자동마케팅 화면의 제안 상세에서 다른 추천 문안을 고르거나 문안을 고친 뒤 스팸 검사를 하고 승인할 수 있습니다. 확인 후 자동마케팅을 재개해주세요.`).catch((e: any) => console.warn('[ContinuousOperator] 정지 알림 경고:', e?.message));
+          console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 (재생성 ${regenCount}회) → 그 회차만 담당자 검토(운영자 멈춤 0)`);
+          // ★ 2026-11-02 엔진 재설계 E3-6 ② — 운영자 멈춤 0(옛: 스팸 미통과 = 자동마케팅 일시정지 · 검사 오탐 한 번이 운영을 세웠다) ·
+          //   그 회차만 담당자 검토 + 안내 · 다음 회차는 새 글로 다시 검사한다.
+          await notifyOperatorAdmins(operator, '[AI 자동마케팅] 이번 회차 검토 필요', isFixedCopy
+            ? `'${operator.name}' 자동마케팅의 직접 쓰신 문안이 스팸필터를 통과하지 못해 이번 회차만 보내지 않고 담당자 검토로 두었어요. 문안을 고친 뒤 제안 상세에서 스팸 검사를 하고 승인해 주세요. 자동마케팅은 그대로 돌아가요.`
+            : `'${operator.name}' 자동마케팅의 추천 문안 ${tested.length}안이 모두 스팸필터를 통과하지 못해 이번 회차만 보내지 않고 담당자 검토로 두었어요. 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인할 수 있어요. 다음 회차는 새 문안으로 다시 검사해요.`).catch((e: any) => console.warn('[ContinuousOperator] 회차 검토 알림 경고:', e?.message));
         } else {
           console.warn(`[ContinuousOperator] ${operator.name} 스팸 미통과 — 검사 중 담당자가 이미 처리한 제안이라 상태·정지·통지를 바꾸지 않음`);
         }
@@ -2464,19 +2493,17 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
   let failed = 0;
 
   try {
-    // ★ 2026-09-27 한줄로 V2 m107 — 발송 패스를 먼저 돈다. 옛: 운영자 최대 100건의 제안 생성(AI·스팸 실검사)을 순차로 끝낸 뒤에야
-    //   돌아 예약 발송 시각이 밀렸다. 제안마다 상태 선점을 거치므로 순서를 바꿔도 이중 발송은 없다.
-    await runAutoSendPass().catch((e: any) => console.error('[ContinuousOperator AutoSend] 패스 예외:', e?.message || e));
-
+    // ★ 2026-11-02 엔진 재설계 E2-3 — 발송 패스는 자기 주기 · 자기 가드(runAutoSendPassTick · 1분)로 뺐다(옛 m107: 이 함수 앞에서 돌아
+    //   제안 생성이 길어지면 다음 분 발송까지 건너뛰었다). 제안 생성 = 회사 줄 · 줄끼리 동시(회사 안 차례).
     const dueRes = await query(
-      `SELECT id FROM continuous_operators
+      `SELECT id, company_id FROM continuous_operators
        WHERE status IN ('active', 'paused_no_credit')
          AND (next_run_at IS NULL OR next_run_at <= NOW())
        ORDER BY next_run_at NULLS FIRST
        LIMIT 100`
     );
 
-    for (const row of dueRes.rows) {
+    await runCompanyLanes(dueRes.rows as Array<{ id: string; company_id: string }>, (r) => String(r.company_id), OPERATOR_GENERATE_CONCURRENCY, async (row) => {
       try {
         await generateProposalForOperator(row.id);
         processed++;
@@ -2490,7 +2517,7 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
           [row.id],
         ).catch((e2: any) => console.warn(`[ContinuousOperator Worker] ${row.id} 다음 시각 밀기 경고:`, e2?.message));
       }
-    }
+    });
 
     if (dueRes.rows.length > 0) {
       console.log(`[ContinuousOperator Worker] 처리 완료 — ${processed} 성공 / ${failed} 실패`);
@@ -2498,12 +2525,250 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
     // ★ 2026-10-05 승인 기간 끝나기 하루 전 = 요약 + 다음 승인 요청 1통(신뢰 설계 §2-6)
     await runApprovalRenewalNotices().catch((e: any) => console.error('[ContinuousOperator Approval] 갱신 안내 예외:', e?.message || e));
 
-    // (발송 패스는 위 제안 생성 앞에서 돈다 — m107)
   } finally {
     workerRunning = false;
   }
 
   return { processed, failed };
+}
+
+/** ★ 2026-11-02 E2-3 — 보낼 때가 된 예약 제안 · 생성 중인 운영자의 제안은 LIMIT 앞에서 뺀다(검사 · 안내 전에 선점 · 검토로 내리기 0) */
+export async function dueScheduledProposals(limit: number, excludeOperators: string[]): Promise<{ rows: Array<{ id: string }> }> {
+  return query(
+    `SELECT id FROM operator_proposals
+     WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW()
+       AND operator_id <> ALL($2::uuid[])
+     ORDER BY scheduled_send_at ASC
+     LIMIT $1`,
+    [limit, excludeOperators],
+  );
+}
+
+/** ★ 2026-11-02 E2-3 — 발송 패스 자기 가드(제안 생성과 따로 · 1분 주기) */
+let sendPassRunning = false;
+export async function runAutoSendPassTick(): Promise<void> {
+  if (sendPassRunning) return;
+  sendPassRunning = true;
+  try {
+    await recoverHeldProposals().catch((e: any) => console.error('[ContinuousOperator Recover] 보류 회차 회복 예외:', e?.message || e));
+    await deliverRecoveryNotices().catch((e: any) => console.error('[ContinuousOperator Recover] 회복 안내 예외:', e?.message || e));
+    await runAutoSendPass();
+  } catch (e: any) {
+    console.error('[ContinuousOperator AutoSend] 패스 예외:', e?.message || e);
+  } finally {
+    sendPassRunning = false;
+  }
+}
+
+/** ★ 2026-11-02 E3-6 — 확인 중 · 검사 중으로 검토에 둔 회차를 이 시간까지 결과를 기다린다(넘으면 사람 판단 · 안내 한 번) */
+export const HELD_RECOVERY_GIVEUP_HOURS = 6;
+const COMPANY_AUTO_SQL = `COALESCE(c.cdp_auto_execute_enabled, false) AND COALESCE((to_jsonb(pl) ->> 'advanced_access_enabled')::boolean, pl.plan_code IN ('ENTERPRISE', 'BUSINESS'), false)`;
+
+/** 회복 회차의 발송 시각 = 보류 전 시각(아직 오지 않았으면) · 지났으면 다음 발송 창 */
+export function restoredSendAt(heldSendAt: Date | null, now: Date): Date {
+  if (heldSendAt && heldSendAt.getTime() > now.getTime() + 60_000) return heldSendAt;
+  const soon = new Date(now.getTime() + 60_000);
+  return isSendableHourKst(soon, SEND_HOURS.start, SEND_HOURS.end) ? soon : shiftToSendableHour(soon);
+}
+
+/**
+ * ★ 2026-11-02 엔진 재설계 E3-6 ① — 확인 중 · 검사 중으로 담당자 검토에 둔 회차 = 그 회차가 기다린 검사(spamCheck.results[].testId)를 다시 읽는다.
+ *   생성 중인 운영자(E2-3)의 회차 · 사람이 손댄 회차(reviewed_at)는 건드리지 않는다.
+ *   통과 = 그 안의 검사 지문으로 자율 자격을 지금 다시 판정(운영자 행 FOR UPDATE · 회사 행 FOR SHARE · 같은 판정 isWithinApprovalWindow + 회사 자율)
+ *     → 자격 있음 = 예약으로 되돌림(restoredAt) · 없음 = 검토 그대로 / 막힘 · 장애 · 6시간 넘게 결과 없음 = 검토 그대로.
+ *   ★ Codex 구현 1R — 후보 = 제안 id 순 회전 커서(R12 · 결과를 기다리는 앞 50건이 뒤에서 통과한 회차를 막지 않는다) ·
+ *     담당자 안내 = 결말과 같은 문장에 안내 원장(recovery.notice)으로 남기고 보내기는 deliverRecoveryNotices(실패 = 다음 패스 · 3번 · R14).
+ */
+const _heldRecoveryCursor = createScanCursor();
+export const HELD_RECOVERY_BATCH = 50;
+/** 시험 전용. */
+export function resetHeldRecoveryCursor(): void { _heldRecoveryCursor.reset(); }
+export async function recoverHeldProposals(): Promise<{ restored: number; settled: number }> {
+  const out = { restored: 0, settled: 0 };
+  const rows = await query(
+    `SELECT p.id, p.operator_id, p.company_id, p.created_at, p.proposal_json->'spamCheck' AS sc
+       FROM operator_proposals p
+      WHERE p.status = 'admin_review' AND p.reviewed_at IS NULL
+        AND p.spam_test_status IN ('pending', 'unconfirmed')
+        AND p.proposal_json->'spamCheck'->'recovery' IS NULL
+        AND p.operator_id <> ALL($1::uuid[])
+        AND ($2::uuid IS NULL OR p.id > $2::uuid)
+      ORDER BY p.id
+      LIMIT ${HELD_RECOVERY_BATCH}`,
+    [[...generatingOperators.keys()], _heldRecoveryCursor.after],
+  );
+  _heldRecoveryCursor.advance(rows.rows.map((r: any) => String(r.id)), HELD_RECOVERY_BATCH);
+  for (const row of rows.rows as Array<{ id: string; operator_id: string; company_id: string; created_at: Date; sc: any }>) {
+    try {
+      const tested = (Array.isArray(row.sc?.results) ? row.sc.results : []).filter((r: any) => r?.testId && r?.fp);
+      // 옛 회차(검사 id 를 남기기 전) = 사람 판단 그대로 · 안내 0
+      if (tested.length === 0) { await markRecovery(row.id, 'legacy', null); continue; }
+      const read = await Promise.all(tested.map(async (r: any) => ({ index: Number(r.index), fp: String(r.fp), outcome: (await readSpamTestOutcome(String(r.testId))).outcome })));
+      const pass = read.filter((x) => x.outcome === 'pass').sort((a, b) => a.index - b.index)[0];
+      if (pass) {
+        const r = await restoreHeldProposal(row, pass);
+        out.settled++;
+        if (r === 'restored') out.restored++;
+        continue;
+      }
+      const waiting = read.some((x) => isSpamHold(x.outcome));
+      const old = Date.now() - new Date(row.created_at).getTime() >= HELD_RECOVERY_GIVEUP_HOURS * 60 * 60 * 1000;
+      if (waiting && !old) continue;
+      const result = waiting ? 'late' : read.some((x) => x.outcome === 'blocked') ? 'blocked' : 'error';
+      const name = await operatorNameOf(row.operator_id);
+      if (await markRecovery(row.id, result, {
+        title: '[AI 자동마케팅] 이번 회차 검토 필요',
+        body: result === 'late'
+          ? `'${name}' 이번 회차 스팸 검사 결과가 ${HELD_RECOVERY_GIVEUP_HOURS}시간 넘게 나오지 않아 담당자 검토로 두었어요. 제안 상세에서 다시 검사하거나 승인해 주세요.`
+          : `'${name}' 이번 회차 문안이 스팸필터를 통과하지 못해 담당자 검토로 두었어요. 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인해 주세요. 자동마케팅은 그대로 돌아가요.`,
+      })) out.settled++;
+    } catch (err: any) {
+      // R8 — 예상 밖 실패 = 종결 표식(매 분 다시 집지 않는다 · 회차는 이미 담당자 검토라 사람 길이 남아 있다)
+      console.error(`[ContinuousOperator Recover] ${row.id} 회복 실패 → 담당자 검토 그대로:`, err?.message || err);
+      await markRecovery(row.id, 'error', null).catch(() => false);
+    }
+  }
+  return out;
+}
+
+type RecoveryNotice = { title: string; body: string } | null;
+/** 안내 원장 값(보낼 것 = sentAt null · attempts 0 · 없으면 null) */
+const noticeJson = (n: RecoveryNotice) => (n ? JSON.stringify({ title: n.title, body: n.body, attempts: 0, sentAt: null }) : null);
+
+/** 회복 결말 표식(한 번만 · 표식이 있으면 회복이 다시 보지 않는다) + 안내 원장(같은 문장) */
+async function markRecovery(proposalId: string, result: string, notice: RecoveryNotice, run: (sql: string, params?: any[]) => Promise<{ rows: any[] }> = query): Promise<boolean> {
+  const r = await run(
+    `UPDATE operator_proposals
+        SET proposal_json = jsonb_set(proposal_json, '{spamCheck}',
+              COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || jsonb_build_object('recovery',
+                jsonb_strip_nulls(jsonb_build_object('at', NOW(), 'result', $2::text, 'notice', $3::jsonb))), true)
+      WHERE id = $1::uuid AND status = 'admin_review' AND reviewed_at IS NULL AND proposal_json->'spamCheck'->'recovery' IS NULL
+      RETURNING id`,
+    [proposalId, result, noticeJson(notice)],
+  );
+  return r.rows.length > 0;
+}
+
+async function operatorNameOf(operatorId: string): Promise<string> {
+  const r = await query(`SELECT name FROM continuous_operators WHERE id = $1::uuid`, [operatorId]);
+  return String(r.rows[0]?.name || '자동마케팅');
+}
+
+async function loadOperatorForNotice(operatorId: string): Promise<ContinuousOperator | null> {
+  const r = await query(`SELECT * FROM continuous_operators WHERE id = $1::uuid`, [operatorId]);
+  return r.rows[0] ? mapRowToOperator(r.rows[0]) : null;
+}
+
+/**
+ * 통과한 보류 회차 되돌리기 — 한 트랜잭션: 운영자 행 FOR UPDATE · 회사 행 FOR SHARE → 자격 판정(운영자 켜짐 + (회사 자율 또는 승인 기간)) →
+ *   자격 있음 = 예약 + 통과 안 · 지문 · restoredAt(운영자당 예약 1건 계약 안에서) / 없음 = 통과 안 · 지문만 남기고 검토 그대로.
+ *   결말과 담당자 안내 원장을 같은 문장에 쓴다(보내기 = deliverRecoveryNotices).
+ */
+async function restoreHeldProposal(
+  row: { id: string; operator_id: string; company_id: string; sc: any },
+  pass: { index: number; fp: string },
+): Promise<'restored' | 'review'> {
+  return withTransaction(async (run) => {
+    const op = (await run(`SELECT status, approved_until, approval_meta, name FROM continuous_operators WHERE id = $1::uuid FOR UPDATE`, [row.operator_id])).rows[0];
+    const co = (await run(
+      `SELECT (${COMPANY_AUTO_SQL}) AS company_auto FROM companies c LEFT JOIN plans pl ON pl.id = c.plan_id WHERE c.id = $1::uuid FOR SHARE OF c`,
+      [row.company_id],
+    )).rows[0];
+    const name = String(op?.name || '자동마케팅');
+    const sendAt = restoredSendAt(row.sc?.heldSendAt ? new Date(row.sc.heldSendAt) : null, new Date());
+    const meta = typeof op?.approval_meta === 'string' ? JSON.parse(op.approval_meta) : op?.approval_meta;
+    const eligible = String(op?.status || '') === 'active'
+      && (co?.company_auto === true || isWithinApprovalWindow(op?.approved_until ? new Date(op.approved_until) : null, meta?.windowStart ?? null, sendAt));
+    const keepPass = `COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || jsonb_build_object('passedIndex', $2::int, 'fp', $3::text`;
+    if (eligible) {
+      const label = sendAt.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+      const up = await run(
+        `UPDATE operator_proposals
+            SET status = 'scheduled', scheduled_send_at = $4::timestamptz, auto_executed = true, spam_test_status = 'pass',
+                auto_execute_reason = '스팸 검사 결과가 늦게 나와 통과 · 자동 발송 다시 예약',
+                proposal_json = jsonb_set(proposal_json, '{spamCheck}', ${keepPass},
+                  'restoredAt', NOW(), 'recovery', jsonb_build_object('at', NOW(), 'result', 'restored', 'notice', $5::jsonb)), true)
+          WHERE id = $1::uuid AND status = 'admin_review' AND reviewed_at IS NULL AND proposal_json->'spamCheck'->'recovery' IS NULL
+            AND NOT EXISTS (SELECT 1 FROM operator_proposals o2
+                             WHERE o2.operator_id = operator_proposals.operator_id AND o2.status = 'scheduled'
+                               AND COALESCE(o2.proposal_json->'meta'->>'is_reminder', 'false') <> 'true')
+          RETURNING id`,
+        [row.id, pass.index, pass.fp, sendAt, noticeJson({
+          title: '[AI 자동마케팅] 자동 발송 다시 예약',
+          body: `'${name}' 이번 회차 스팸 검사 결과가 늦게 나와 통과했어요. ${label}에 자동으로 보내요. 보내기 전까지 제안 상세에서 [정지]로 취소할 수 있어요.`,
+        })],
+      );
+      if (up.rows.length > 0) return 'restored' as const;
+    }
+    const why = eligible ? '이미 다음 회차가 예약돼 있어 이 회차는 자동으로 보내지 않았어요' : '자동 발송 승인 기간이 아니라 자동으로 보내지 않았어요';
+    await run(
+      `UPDATE operator_proposals
+          SET spam_test_status = 'pass',
+              proposal_json = jsonb_set(proposal_json, '{spamCheck}', ${keepPass},
+                'recovery', jsonb_build_object('at', NOW(), 'result', 'pass_review', 'notice', $4::jsonb)), true)
+        WHERE id = $1::uuid AND status = 'admin_review' AND reviewed_at IS NULL AND proposal_json->'spamCheck'->'recovery' IS NULL`,
+      [row.id, pass.index, pass.fp, noticeJson({
+        title: '[AI 자동마케팅] 검사 통과 · 승인 필요',
+        body: `'${name}' 이번 회차 스팸 검사는 통과했지만 ${why}. 제안 상세에서 확인하고 승인해 주세요.`,
+      })],
+    );
+    return 'review' as const;
+  });
+}
+
+/** 회복 안내 보내기 한 회차 수 · 시도 상한(안내 한 통 꼴) */
+export const RECOVERY_NOTICE_BATCH = 50;
+export const RECOVERY_NOTICE_MAX_ATTEMPTS = 3;
+/**
+ * ★ Codex 구현 1R(R14) — 회복 결말의 담당자 안내 원장(spamCheck.recovery.notice)을 보낸다: 시도 잡기(attempts + 1) → 적재 → 성공 기록(sentAt).
+ *   실패 = 다음 패스(3번) · 3번 다 실패 = 운영 경보(그 운영자 · 원인 하나). 원장은 결말과 같은 문장에서 생겼다(결말만 남고 안내가 사라지는 갈래 0).
+ */
+export async function deliverRecoveryNotices(): Promise<number> {
+  const rows = await query(
+    `SELECT p.id, p.operator_id, p.company_id, p.proposal_json->'spamCheck'->'recovery'->'notice' AS n
+       FROM operator_proposals p
+      WHERE p.proposal_json->'spamCheck'->'recovery'->'notice' IS NOT NULL
+        AND p.proposal_json->'spamCheck'->'recovery'->'notice'->>'sentAt' IS NULL
+        AND COALESCE((p.proposal_json->'spamCheck'->'recovery'->'notice'->>'attempts')::int, 0) < ${RECOVERY_NOTICE_MAX_ATTEMPTS}
+      ORDER BY p.id
+      LIMIT ${RECOVERY_NOTICE_BATCH}`,
+  );
+  let sent = 0;
+  for (const row of rows.rows as Array<{ id: string; operator_id: string; company_id: string; n: any }>) {
+    const path = `'{spamCheck,recovery,notice}'`;
+    const result = await sendNoticeOnce({
+      claim: async () => (await query(
+        `UPDATE operator_proposals
+            SET proposal_json = jsonb_set(proposal_json, ${path},
+                  (proposal_json #> ${path}) || jsonb_build_object('attempts', COALESCE((proposal_json #>> '{spamCheck,recovery,notice,attempts}')::int, 0) + 1), true)
+          WHERE id = $1::uuid AND proposal_json #>> '{spamCheck,recovery,notice,sentAt}' IS NULL
+            AND COALESCE((proposal_json #>> '{spamCheck,recovery,notice,attempts}')::int, 0) < $2
+          RETURNING id`,
+        [row.id, RECOVERY_NOTICE_MAX_ATTEMPTS],
+      )).rows.length > 0,
+      enqueue: async () => {
+        const op = await loadOperatorForNotice(row.operator_id);
+        if (!op) return true;   // 운영자가 없다 = 보낼 곳 없음(마감)
+        return notifyOperatorAdmins(op, String(row.n?.title || '[AI 자동마케팅] 안내'), String(row.n?.body || ''));
+      },
+      finalize: async () => (await query(
+        `UPDATE operator_proposals
+            SET proposal_json = jsonb_set(proposal_json, '{spamCheck,recovery,notice,sentAt}', to_jsonb(NOW()), true)
+          WHERE id = $1::uuid AND proposal_json #>> '{spamCheck,recovery,notice,sentAt}' IS NULL
+          RETURNING id`,
+        [row.id],
+      )).rows.length > 0,
+    });
+    if (result === 'sent') { sent++; continue; }
+    if (result === 'enqueue_failed' && Number(row.n?.attempts || 0) + 1 >= RECOVERY_NOTICE_MAX_ATTEMPTS) {
+      void sendSystemAlert({
+        companyId: row.company_id,
+        dedupKey: `operator-recovery-notice-giveup:${row.operator_id}`,
+        message: `자동마케팅 회차 회복 안내를 ${RECOVERY_NOTICE_MAX_ATTEMPTS}번 보내지 못했습니다(담당자 번호 · 문자 큐 확인 · 회차 상태는 화면에 있습니다). operator=${row.operator_id}`,
+      }).catch(() => undefined);
+    }
+  }
+  return sent;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -2518,13 +2783,7 @@ export async function runAutoSendPass(limit: number = 20): Promise<{ sent: numbe
   //   하나라도 남으면 "예약은 되는데 다음 패스가 전부 정지시키는" 반쪽 되살림이 된다(Codex 1R-b).
   //   옛 형식(코호트 정보 없는 배포 전 예약분)은 dispatch 코호트 분기가 primary_campaign_id 부재로
   //   취소+통지하므로 1차 미수신자에게 나갈 길은 그대로 닫혀 있다 — fail-closed는 그 한 곳이 소유한다.
-  const due = await query(
-    `SELECT id FROM operator_proposals
-     WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW()
-     ORDER BY scheduled_send_at ASC
-     LIMIT $1`,
-    [limit],
-  );
+  const due = await dueScheduledProposals(limit, [...generatingOperators.keys()]);
   for (const row of due.rows) {
     try {
       const r = await sendScheduledProposal(row.id);
@@ -2944,11 +3203,37 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   }
 
   // claim (scheduled → sending) — 동시 발송/중복 방지 · 검증 조건을 같은 문장에도 건다(두 문장 사이 변화 대비)
-  const claim = await query(
-    `UPDATE operator_proposals SET status = 'sending', reviewed_at = NOW()
-     WHERE id = $1::uuid AND status = 'scheduled' AND ${AUTO_SEND_SPAM_VERIFIED_SQL} RETURNING *`,
-    [proposalId],
-  );
+  // ★ 2026-11-02 E3-6(설계 3R D3-2) — 회복으로 되돌린 회차 = 운영자 행 FOR UPDATE · 회사 행 FOR SHARE → 지금 자격 판정 → 선점이 한 트랜잭션
+  //   (승인 철회 · 회사 자율 끄기가 같은 행을 바꾸므로 판정과 선점 사이에 끼어들 수 없다 · 자격 없음 = 검토로 내림).
+  const claim = await withTransaction(async (run) => {
+    const pre = await run(
+      `SELECT operator_id, company_id, scheduled_send_at, proposal_json->'spamCheck'->>'restoredAt' AS restored FROM operator_proposals WHERE id = $1::uuid AND status = 'scheduled'`,
+      [proposalId],
+    );
+    const pr = pre.rows[0];
+    if (pr?.restored) {
+      const op = (await run(`SELECT status, approved_until, approval_meta FROM continuous_operators WHERE id = $1::uuid FOR UPDATE`, [pr.operator_id])).rows[0];
+      const co = (await run(`SELECT (${COMPANY_AUTO_SQL}) AS company_auto FROM companies c LEFT JOIN plans pl ON pl.id = c.plan_id WHERE c.id = $1::uuid FOR SHARE OF c`, [pr.company_id])).rows[0];
+      const meta = typeof op?.approval_meta === 'string' ? JSON.parse(op.approval_meta) : op?.approval_meta;
+      const at = pr.scheduled_send_at ? new Date(pr.scheduled_send_at) : new Date();
+      const ok = String(op?.status || '') === 'active'
+        && (co?.company_auto === true || isWithinApprovalWindow(op?.approved_until ? new Date(op.approved_until) : null, meta?.windowStart ?? null, at));
+      if (!ok) {
+        await run(
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
+             auto_execute_reason = '자동 발송 자격(승인 기간 · 회사 자율)이 바뀌어 보내지 않았습니다. 담당자 검토 필요'
+           WHERE id = $1::uuid AND status = 'scheduled'`,
+          [proposalId],
+        );
+        return { rows: [] as any[] };
+      }
+    }
+    return run(
+      `UPDATE operator_proposals SET status = 'sending', reviewed_at = NOW()
+       WHERE id = $1::uuid AND status = 'scheduled' AND ${AUTO_SEND_SPAM_VERIFIED_SQL} RETURNING *`,
+      [proposalId],
+    );
+  });
   if (claim.rows.length === 0) return 'skipped'; // 다른 패스가 선점했거나 담당자가 정지함
   const p = claim.rows[0];
 
@@ -4195,6 +4480,7 @@ export function startContinuousOperatorScheduler(): void {
     runOperatorWorker().catch((err) => {
       console.error('[ContinuousOperator Worker] 예외:', err);
     });
+    void runAutoSendPassTick();   // ★ 2026-11-02 E2-3 — 발송 패스 = 자기 가드 · 제안 생성이 길어도 매 분
   }, intervalMs);
   // boot 60초 후 1회 실행
   setTimeout(() => {

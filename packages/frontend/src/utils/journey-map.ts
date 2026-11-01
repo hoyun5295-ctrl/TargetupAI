@@ -244,5 +244,5 @@ export interface BatchActivationItem {
   journeyId: string;
   name: string;
   /** ★ V.3 §5-1 — charged = 이번에 낸 처음 켜기 크레딧(계보당 1번 · 새 판 초안 · 다시 켜기 = 0). */
-  result: { ok: true; firstActivation: boolean; charged: number } | { ok: false; code: BatchResultCode; message: string; callbackUnregisteredCount?: number };
+  result: { ok: true; firstActivation: boolean; charged: number; dispatchPending?: boolean } | { ok: false; code: BatchResultCode; message: string; callbackUnregisteredCount?: number };
 }

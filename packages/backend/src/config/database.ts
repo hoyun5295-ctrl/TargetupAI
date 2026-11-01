@@ -51,6 +51,21 @@ pool.on('error', (err) => {
   console.error('❌ PostgreSQL 에러:', err);
 });
 
+/**
+ * ★ 2026-11-02 엔진 재설계 Codex 구현 1R(R41) — 키마다 **기다리는** 세션 잠금(pg_advisory_lock) 전용 작은 풀.
+ *   잠금을 쥔 연결이 작업 풀(pool)에서 나오면, 동시 요청이 작업 풀 크기만큼 잠금을 쥐거나 기다릴 때 그 안의 작업이 연결을 못 받아 서로를 기다린다.
+ *   잠금은 이 풀에서만 잡고 작업은 pool 에서 한다(잠금 연결은 쿼리 0 · 기다림만). 잡기 시도(pg_try_advisory_lock) · 트랜잭션 잠금은 해당 없음.
+ */
+export const lockPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: Number(process.env.DB_LOCK_POOL_MAX) || 4,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 30000,
+});
+lockPool.on('error', (err) => {
+  console.error('❌ PostgreSQL 잠금 풀 에러:', err);
+});
+
 // 쿼리 헬퍼
 export const query = (text: string, params?: any[]) => {
   return pool.query(text, params);

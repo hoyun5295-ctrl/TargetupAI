@@ -23,6 +23,7 @@ import OAuthConfirmPage from './pages/OAuthConfirmPage';
 // ★ D184 (2026-05-20): 이니시스 결제 결과 fallback 페이지 (새 창 자동 close 차단 시 fallback 표시)
 import PaymentResultPage from './pages/PaymentResultPage';
 import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정지 페이지 (인증 X)
+import ManagerBoardPage from './pages/ManagerBoardPage'; // ★ 2026-11-02 엔진 재설계 E5 — 담당자 상황판(인증 X · 읽기 전용)
 // ★ 2026-08-16 AI 마케팅 진단 공개 페이지(퍼널 B — 영업 링크 착지) — 공개 동선이라 정적 import(0718 사고 전례)
 import DiagnosisPage from './pages/DiagnosisPage';
 import { rememberLoginReturn } from './utils/login-return';
@@ -822,6 +823,7 @@ function App() {
         <Route path="/payment/result" element={<PaymentResultPage />} />
 
         {/* ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 알림 안 단축 URL 진입 페이지 (인증 X) */}
+        <Route path="/manager-board" element={<ManagerBoardPage />} />
         <Route path="/journey-pause" element={<JourneyPausePage />} />
         <Route path="/journey-pause/:token" element={<JourneyPausePage />} />  {/* ★ 2026-10-18 이미 나간 옛 주소(경로 토큰) · 화면이 읽고 주소에서 지운다 */}
 

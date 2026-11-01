@@ -151,6 +151,18 @@ export const STATUS_CODE_MAP: Record<number, StatusCodeInfo> = {
   68:   { label: '친구톡파일 총한도 초과', type: 'fail' },
 };
 
+/** ★ 2026-11-02 엔진 재설계 E3-5 — 실발송 결과 중 스팸 차단 코드(이름에 「스팸」이 든 코드 · 위 표에서 기계로 뽑는다 · 손 목록 0) */
+export const SPAM_BLOCK_STATUS_CODES: readonly number[] = Object.entries(STATUS_CODE_MAP)
+  .filter(([, v]) => v.label.includes('스팸'))
+  .map(([k]) => Number(k));
+/** 스팸 차단 몰림 경계 — 그 칸 · 그날 20건 이상이고 결과(성공 + 실패)의 30% 이상 */
+export const SPAM_SURGE_MIN = 20;
+export const SPAM_SURGE_RATIO = 0.3;
+/** (순수) 스팸 차단 몰림인가 — 안내 + 상황판만(자동 보류 0 · 코드 해석은 우리 쪽 판정이라 멈추지 않는다 · 설계 SC-8) */
+export function isSpamBlockSurge(spamBlocked: number, results: number): boolean {
+  return spamBlocked >= SPAM_SURGE_MIN && results > 0 && spamBlocked / results >= SPAM_SURGE_RATIO;
+}
+
 /** 성공 코드 배열 — SQL WHERE 조건 등에 사용 */
 export const SUCCESS_CODES: readonly number[] = [6, 1000, 1800, 7830, 7831];
 

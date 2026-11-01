@@ -35,7 +35,7 @@ import type { VoiceStatus } from '../utils/brand-voice-state';
 import { COPY_CONTENT_TYPES, COPY_CONTENT_TYPE_LABEL, isCopyContentType, kindOfContentType, type CopyContentType } from '../utils/copy-content-type';
 import { variantNamesFor } from '../utils/copy-house-rules';
 import {
-  AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK, AI_LINE_MAX_AUDIENCE,
+  AI_LINE_SOURCE, AI_LINE_TYPE_BY_VARIANT, AI_LINE_TYPE_LABEL, AI_LINE_COLUMN_EXCLUDE, AI_LINE_FILL_LOCK,
   aiLineBaseKey, aiLineBaseKeys, aiLineCopyKey, aiLineDecoKey, aiLineComposeCost, filterChipText, quoteInLine, styleToType, maskName,
   lineMentionsAllCustomers, aiLineLineFp, sanitizeAiAsks, mergeLineAsks, voiceLineAsks, splitVoiceLineAnswers, withLinkToken, lineAnswersLicense, lineAnswersContext, missingLineVars, lineVoiceKind,
   type AiLineCopyType, type AiLineAsk, type AiLineAnswer,
@@ -111,9 +111,7 @@ function assertFiltersTranslated(filters: unknown): void {
 
 function assertCountSendable(count: number): void {
   if (count <= 0) throw new AiLineError('TARGET_ZERO', '조건에 맞는 고객이 0명이에요. 조건을 바꿔 다시 시도해 주세요. 크레딧은 빠지지 않았어요.');
-  if (count > AI_LINE_MAX_AUDIENCE) {
-    throw new AiLineError('TARGET_TOO_MANY', `받는 사람이 ${count.toLocaleString()}명이에요. 한 번에 ${AI_LINE_MAX_AUDIENCE.toLocaleString()}명까지 보낼 수 있어요. 조건을 좁혀 주세요.`);
-  }
+  // ★ 2026-11-02 엔진 재설계 E1-4 — 1만 명 입구 거절을 없앴다(화면이 1만을 넘으면 서버 적재 경로 · 전원 · 명단 서명으로 보낸다).
 }
 
 /** 칩 라벨 — FIELD_MAP 표시 이름(커스텀 칸은 회사 라벨을 모르면 키) */

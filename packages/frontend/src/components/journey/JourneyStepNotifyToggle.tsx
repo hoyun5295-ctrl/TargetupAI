@@ -1,12 +1,12 @@
 /**
  * JourneyStepNotifyToggle.tsx — D218+ (2026-05-26) 신설
  *
- * 본질: step별 담당자 알림 (보내기 전 안내 + 보낸 결과) ON/OFF/default 3 상태 토글.
+ * 본질: step별 담당자 알림 (보낸 결과) ON/OFF/default 3 상태 토글.
+ * ★ 2026-11-02 엔진 재설계 E4-1 — 「보내기 전 안내」(매일 검사 통과 문자)를 없앴다 · 스팸 검사 = 문안을 고칠 때 + 7일마다 · 걸리면 그 칸만 보류 + 바로 안내.
  *   - true  = 항상 ON (사용자 명시)
  *   - false = 항상 OFF (사용자 명시 — 첫/마지막 메시지 칸에서도 X)
  *   - null  = default (첫/마지막 메시지 칸 ON / 그 밖 OFF · 판정 = utils/journey-step-notify 한 곳 · 서버와 같은 함수)
- * ★ 2026-10-31 문구 = 실제 시점(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-7 · 오류접수 cmvujpa3w)
- *   문자 칸 = 보내기 2시간 전 안내 · 바로 보내는 칸은 그날 첫 발송 전 검사 뒤 안내(그날 첫 발송 10~20분 늦어짐) / 알림톡 칸 = 보낸 결과만.
+ * ★ 2026-10-31 문구 = 실제 시점 · ★ 2026-11-02 보내기 전 안내 없음(스팸 검사 = 고칠 때 + 7일마다 · 걸리면 그 칸만 보류 + 바로 안내) / 알림톡 칸 = 보낸 결과만.
  *   - PATCH /api/ai/operator/journeys/:id/steps/:stepId body { notifyManagerOnPretest: true|false|null }
  *
  * 영구 룰 정합:
@@ -91,7 +91,7 @@ export default function JourneyStepNotifyToggle({
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center gap-1.5 text-[12px] text-slate-500">
         <BellRing className="w-3 h-3" />
-        {isText ? '담당자 알림(보내기 전 · 보낸 결과)' : '담당자 알림(보낸 결과)'}
+        담당자 알림(보낸 결과)
         {saving && <Loader2 className="w-3 h-3 animate-spin text-violet-700" />}
       </div>
       <div className="inline-flex items-center bg-white border border-slate-200 rounded-lg p-0.5 gap-0.5">
@@ -122,7 +122,7 @@ export default function JourneyStepNotifyToggle({
       </div>
       <div className="text-[12px] leading-relaxed text-slate-400">
         {isText && (
-          <p>보내기 2시간 전에 안내해요. 바로 보내는 칸은 그날 첫 발송 전에 스팸 검사를 하느라 그날 첫 발송이 10~20분 늦어지고, 안내는 그 검사 뒤에 와요.</p>
+          <p>스팸 검사는 문안을 고칠 때와 일주일에 한 번 해요. 걸리면 이 칸만 잠시 멈추고 바로 알려 드려요.</p>
         )}
         <p>보낸 결과는 그날 이 칸 발송이 끝나고 결과가 다 나오면 와요. 하루 내내 이어서 나가는 칸은 다음 날 아침에 하루 합계가 한 번 더 와요.</p>
         <p>기본은 첫 메시지 칸과 마지막 메시지 칸만 켜요.</p>

@@ -8,6 +8,8 @@
  *   - 날짜 기준 = 보낼 시각 2시간 전부터 같은 날에만 만든다
  *   - 안내 쓰기 = 시도 잡기 → 적재 → 기록(적재 실패 = 기록 0)
  *   - 상한 있는 MySQL = 넘기면 그 연결 destroy · 늦게 온 연결 destroy · 공용 풀을 쌓아 막지 않는다
+ * ★ 2026-11-02 엔진 재설계 E3(docs/2026-11-01-journey-automarketing-engine-design.md) — 옛 「그날 검사 기록 관문 · 미룰 시각 · 묶음 경보 · 통과 안내」를 뒤집었다:
+ *   관문 = 지금 판의 가장 최근 결정이 보류면 1시간 뒤(경보 0) · 표식 < 100 = 검사를 기다림 · 통과 안내 문자 0 · 보류 · 자동 보정 · 지연 안내만.
  */
 import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
@@ -15,10 +17,10 @@ import * as path from 'path';
 import { isStepNotifyOn } from '../journey-step-notify';
 import { isStepNotifyOn as isStepNotifyOnScreen } from '../../../../frontend/src/utils/journey-step-notify';
 import { decideResultNotice, buildResultNoticeBody, type ResultNoticeFacts } from '../journey-result-notice';
-import { buildPretestLmsBody, IMMEDIATE_STEP_NOTICE_LINE, PRETEST_LEAD_HOURS, pretestDoneSql } from '../journey-pretest-notifier';
+import { buildPretestLmsBody, IMMEDIATE_STEP_NOTICE_LINE, PRETEST_LEAD_HOURS, stepHeldSql, PRETEST_DECISION_STATUSES } from '../journey-pretest-notifier';
 import { isImmediateStep, groupPretestBundles } from '../journey-pretest-scan';
 import { anchorDispatchDue } from '../journey-anchor-scheduler';
-import { pretestHoldUntil, trackGateHold, clearGateHold, GATE_HOLD_ALERT_MINUTES } from '../journey-executor';
+import { PRETEST_HELD_RECHECK_MINUTES } from '../journey-executor';
 import { sendNoticeOnce } from '../journey-notice-once';
 import { withBoundedMysql } from '../../config/database';
 
@@ -63,21 +65,29 @@ describe('바로 보내는 칸 판정', () => {
   });
 });
 
-describe('발송 전 안내 본문(§2-4)', () => {
+describe('발송 전 안내 본문(§2-4 · ★ 1102 통과 안내 없음)', () => {
   const at = kst('2026-10-31T10:10:00');
-  it('제목 = [발송 전 안내] · 바로 칸이면 이어서 나간다는 줄', () => {
-    const b = buildPretestLmsBody({ journeyName: '여정', stepOrder: 1, scheduledSendAt: at, messagePreview: '미리', pauseUrl: 'https://app.hanjul.ai/c/x', mode: 'pretest_pass', immediate: true });
-    expect(b.startsWith('[발송 전 안내]')).toBe(true);
+  it('자동 보정 = 바로 칸이면 이어서 나간다는 줄 · 즉시 정지 링크', () => {
+    const b = buildPretestLmsBody({ journeyName: '여정', stepOrder: 1, scheduledSendAt: at, messagePreview: '미리', pauseUrl: 'https://app.hanjul.ai/c/x', mode: 'pretest_autofixed', immediate: true });
+    expect(b.startsWith('[발송 전 자동 보정 안내]')).toBe(true);
     expect(b).toContain(IMMEDIATE_STEP_NOTICE_LINE);
     expect(b).toContain('즉시 정지: https://app.hanjul.ai/c/x');
-    expect(b).not.toContain('2시간');
   });
-  it('늦은 칸 · 정지 안내 = 바로 칸 줄 없음', () => {
-    expect(buildPretestLmsBody({ journeyName: '여정', stepOrder: 1, scheduledSendAt: at, messagePreview: '', pauseUrl: null, mode: 'pretest_pass', immediate: false })).not.toContain(IMMEDIATE_STEP_NOTICE_LINE);
-    expect(buildPretestLmsBody({ journeyName: '여정', stepOrder: 1, scheduledSendAt: at, messagePreview: '', pauseUrl: null, mode: 'pretest_paused', immediate: true })).not.toContain(IMMEDIATE_STEP_NOTICE_LINE);
+  it('보류 · 지연 안내 = 그 칸만 · 여정의 다른 칸은 그대로 · 바로 칸 줄 없음', () => {
+    const held = buildPretestLmsBody({ journeyName: '여정', stepOrder: 1, scheduledSendAt: at, messagePreview: '', pauseUrl: 'https://app.hanjul.ai/c/x', mode: 'pretest_held', immediate: true });
+    expect(held.startsWith('[발송 보류 안내]')).toBe(true);
+    expect(held).toContain('여정의 다른 칸은 그대로 나가요');
+    expect(held).not.toContain(IMMEDIATE_STEP_NOTICE_LINE);
+    expect(held).toContain('확인·여정 일시정지: https://app.hanjul.ai/c/x');
+    const late = buildPretestLmsBody({ journeyName: '여정', stepOrder: 1, scheduledSendAt: at, messagePreview: '', pauseUrl: null, mode: 'pretest_late', immediate: false });
+    expect(late.startsWith('[검사 지연 안내]')).toBe(true);
+    expect(late).toContain('여정의 다른 칸은 그대로 나가요');
   });
-  it('멈춤 사유 · 경보 문장에 「2시간 전」 0(바로 칸은 2시간 전이 아니다)', () => {
-    expect(read('journey-pretest-notifier.ts')).not.toMatch(/'발송 2시간 전 스팸|`여정 발송 2시간 전|\[발송 2시간 전 안내\]/);
+  it('멈춤 사유 · 경보 문장에 「2시간 전」 0 · 여정 멈춤 호출 0(★ 1102 보류만)', () => {
+    const n = read('journey-pretest-notifier.ts');
+    expect(n).not.toMatch(/'발송 2시간 전 스팸|`여정 발송 2시간 전|\[발송 2시간 전 안내\]/);
+    expect(n).not.toMatch(/\bpauseJourney\(/);
+    expect(n).not.toMatch(/'pretest_pass'|'pretest_paused'/);
   });
 });
 
@@ -117,22 +127,19 @@ describe('결과 안내 판정(§2-6)', () => {
   });
 });
 
-describe('실행기 관문 미룰 시각 · 묶음 경보(§2-2)', () => {
-  it('지금 + 10분 · 창 밖이면 다음 날 08시', () => {
-    expect(pretestHoldUntil(kst('2026-10-31T13:00:00')).toISOString()).toBe(kst('2026-10-31T13:10:00').toISOString());
-    expect(pretestHoldUntil(kst('2026-10-31T20:49:00')).toISOString()).toBe(kst('2026-10-31T20:59:00').toISOString());
-    expect(pretestHoldUntil(kst('2026-10-31T20:54:00')).toISOString()).toBe(kst('2026-11-01T08:00:00').toISOString());
+describe('실행기 관문 = 보류만(★ 1102 E3-1 · 옛 그날 기록 · 미룰 시각 · 묶음 경보 뒤집음)', () => {
+  it('보류 판정 = 결정 기록 중 가장 최근이 held · 지금 판(가장 최근 스냅숏)과 같을 때만', () => {
+    const sql = stepHeldSql('$1', '$2');
+    expect(sql).toContain("last_dec.status = 'held'");
+    expect(sql).toContain('ORDER BY ps_h.notify_at DESC, ps_h.id DESC LIMIT 1');
+    expect(sql).toContain('last_dec.snapshot_id IS NOT DISTINCT FROM');
+    expect(sql).toContain('FROM journey_step_snapshots ss_h WHERE ss_h.step_id = $2 AND ss_h.journey_id = $1');
+    expect([...PRETEST_DECISION_STATUSES]).toEqual(['notified', 'unverified', 'cancelled', 'held', 'paused', 'pending']);
+    expect([...PRETEST_DECISION_STATUSES]).not.toContain('error');
+    expect([...PRETEST_DECISION_STATUSES]).not.toContain('late');
   });
-  it('같은 묶음 29분 = 0 · 31분 = 1회 · 지나면 지움', () => {
-    const key = 'j:s:2026-10-31';
-    const t0 = kst('2026-10-31T10:00:00').getTime();
-    expect(trackGateHold(key, t0)).toBe(false);
-    expect(trackGateHold(key, t0 + 29 * 60_000)).toBe(false);
-    expect(trackGateHold(key, t0 + 31 * 60_000)).toBe(true);
-    expect(trackGateHold(key, t0 + 40 * 60_000)).toBe(false);
-    clearGateHold(key);
-    expect(trackGateHold(key, t0 + 41 * 60_000)).toBe(false);
-    expect(GATE_HOLD_ALERT_MINUTES).toBe(30);
+  it('보류 다시 보기 간격 = 60분', () => {
+    expect(PRETEST_HELD_RECHECK_MINUTES).toBe(60);
   });
 });
 
@@ -215,25 +222,25 @@ describe('상한 있는 MySQL 연결(§2-8 · withBoundedMysql)', () => {
 });
 
 describe('소스 계약', () => {
-  it('실행기 = 재검사 전 관문 → 발송 시간 판정 한 번(창 밖 = 바로 끝) → 조건 없는 칸 관문 → 변이 고르기 → 발송 표식(Codex 구현 1R ①)', () => {
+  it('실행기 = 보류 관문 → 재검사 전 관문 → 발송 시간 판정 한 번(창 밖 = 바로 끝) → 변이 고르기 → 발송 표식(★ 1102 그날 기록 관문 0)', () => {
     const ex = read('journey-executor.ts');
+    const held = ex.indexOf("if (gate.rows[0]?.held && ['sms', 'lms', 'mms'].includes(String(step.channel))) {");
+    const pending = ex.indexOf('if (pendingSnapshotAt && [');
     const hours = ex.indexOf('if (!isWithinSendHours()) {');
-    const gate = ex.indexOf("if (['sms', 'lms', 'mms'].includes(String(step.channel))) {");
-    expect(ex.lastIndexOf('if (!isWithinSendHours()) {')).toBe(hours);
-    expect(ex.match(/isWithinSendHours\(\)/g)).toHaveLength(1);
-    expect(ex.slice(hours, gate)).toContain("return 'skipped_hours';");
-    expect(hours).toBeGreaterThan(ex.indexOf('if (pendingSnapshotAt && ['));
-    expect(gate).toBeGreaterThan(hours);
-    expect(gate).toBeLessThan(ex.indexOf('let activeVariantId: string | null = null;'));
-    expect(gate).toBeLessThan(ex.indexOf("gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sending', $4"));
-    expect(ex).toContain("${pretestDoneSql('$3::uuid', '$4::uuid', `(NOW() AT TIME ZONE 'Asia/Seoul')::date`)} AS checked_today");
+    expect(held).toBeGreaterThan(-1);
+    expect(held).toBeLessThan(ex.indexOf('if (snapshotReadFailed && ['));
+    expect(pending).toBeGreaterThan(held);
+    expect(hours).toBeGreaterThan(pending);
+    // 실행 하나의 처리 경로(processExecution) 안 = 발송 시간 판정 한 번(★ 1102 E9 ① 밀림 경보는 회차 끝 · 그 밖)
+    const pe = ex.slice(ex.indexOf('async function processExecution('), ex.indexOf('async function chargeJourneyOperationCredit('));
+    expect(pe.match(/isWithinSendHours\(\)/g)).toHaveLength(1);
+    expect(hours).toBeLessThan(ex.indexOf('let activeVariantId: string | null = null;'));
+    expect(ex).toContain("${stepHeldSql('$3::uuid', '$4::uuid')} AS held");
     expect(ex).toContain('[exec.execution_id, pendingSnapshotAt, exec.journey_id, step.id]');
-    expect(ex).toContain('pretestHoldUntil()]');
+    expect(ex).not.toMatch(/checked_today|pretestHoldUntil|trackGateHold|pretestDoneSql/);
   });
-  it('그날 마침 판정 = notified · cancelled 만', () => {
-    const sql = pretestDoneSql('$1', '$2', '$3');
-    expect(sql).toContain("ps_done.status IN ('notified', 'cancelled')");
-    expect(sql).not.toMatch(/'pending'|'paused'/);
+  it('보류 판정 조각을 부르는 곳 = 실행기 관문(옛 「그날 마침」 조각 없음)', () => {
+    expect(read('journey-pretest-notifier.ts')).not.toContain('export function pretestDoneSql(');
   });
   it('날짜 기준 = 판정 함수 · 앞보기 창 상수 · 옛 「now < runAt」 0', () => {
     const a = read('journey-anchor-scheduler.ts');
@@ -270,12 +277,15 @@ describe('소스 계약', () => {
     const toggle = fe('components', 'journey', 'JourneyStepNotifyToggle.tsx');
     const act = fe('components', 'journey', 'JourneyActivationConfirmModal.tsx');
     const edit = fe('components', 'journey', 'JourneyMessageEditModal.tsx');
-    expect(toggle).toContain("{isText ? '담당자 알림(보내기 전 · 보낸 결과)' : '담당자 알림(보낸 결과)'}");
-    expect(toggle).toContain('바로 보내는 칸은 그날 첫 발송 전에 스팸 검사를 하느라 그날 첫 발송이 10~20분 늦어지고');
+    expect(toggle).toContain('담당자 알림(보낸 결과)');
+    expect(toggle).not.toContain('보내기 전 · 보낸 결과');
+    expect(toggle).toContain('스팸 검사는 문안을 고칠 때와 일주일에 한 번 해요. 걸리면 이 칸만 잠시 멈추고 바로 알려 드려요.');
+    expect(toggle).not.toContain('10~20분');
     expect(toggle).toContain('isStepNotifyOn(null, stepOrder, firstMessageOrder, lastMessageOrder)');
     expect(toggle).not.toContain('보내기 2시간 전 · 보낸 결과');
     expect(act).not.toContain('보내기 2시간 전에는 담당자에게 확인 문자를 보내요.');
-    expect(act).toContain('바로 보내는 칸은 그날 첫 발송 10~20분 전');
+    expect(act).toContain('그 밖에는 일주일에 한 번 다시 검사해요. 검사에 걸리면 그 칸만 잠시 멈추고 바로 알려 드려요(여정은 멈추지 않아요).');
+    expect(act).not.toContain('10~20분');
     expect(edit).not.toContain('2시간 이내로 예정된 발송에는');
     for (const src of [toggle, act, edit]) {
       const strings = [...src.matchAll(/['"`]([^'"`\n]*[가-힣][^'"`\n]*)['"`]/g)].map((m) => m[1]).join('\n');

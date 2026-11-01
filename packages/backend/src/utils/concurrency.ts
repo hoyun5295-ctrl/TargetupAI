@@ -44,3 +44,50 @@ export async function mapWithConcurrency<T, R>(
   await Promise.all(Array.from({ length: max }, () => worker()));
   return out;
 }
+
+/**
+ * ★ 2026-11-02 엔진 재설계 E2-2 · E2-5 — 회사 돌아가며 섞기(순수 함수). 회사마다 원래 순서를 지키며 한 회사에 하나씩 번갈아 꺼낸다
+ *   (회사 순서 = 그 회사 첫 항목이 나온 순서). 한 회사의 여정 40개가 앞자리를 다 차지해 다른 회사가 회차 예산 밖으로 밀리는 일을 막는다.
+ */
+export function interleaveByCompany<T>(items: readonly T[], companyOf: (item: T) => string): T[] {
+  const queues = groupByCompany(items, companyOf);
+  const total = queues.reduce((n, q) => n + q.length, 0);
+  const out: T[] = [];
+  for (let round = 0; out.length < total; round++) {
+    for (const q of queues) if (round < q.length) out.push(q[round]);
+  }
+  return out;
+}
+
+/** 회사별 줄(회사 순서 = 첫 항목이 나온 순서 · 줄 안 = 원래 순서) */
+function groupByCompany<T>(items: readonly T[], companyOf: (item: T) => string): T[][] {
+  const lanes = new Map<string, T[]>();
+  for (const it of Array.isArray(items) ? items : []) {
+    const k = String(companyOf(it));
+    const lane = lanes.get(k);
+    if (lane) lane.push(it);
+    else lanes.set(k, [it]);
+  }
+  return [...lanes.values()];
+}
+
+/**
+ * ★ 2026-11-02 엔진 재설계 E2-1 · E2-3 — 회사 줄: 같은 회사 항목은 한 줄에서 차례로(예산 · 잔액 · 피로도 판정이 지금과 같다) ·
+ *   회사 줄끼리는 동시에 최대 `limit` 개. 항목 하나의 실패는 fn 이 맡는다(던지면 그 회사 줄만 멈추고 나머지 줄은 끝까지 간다 · 첫 오류를 끝에 던짐).
+ */
+export async function runCompanyLanes<T>(
+  items: readonly T[],
+  companyOf: (item: T) => string,
+  limit: number,
+  fn: (item: T) => Promise<void>,
+): Promise<void> {
+  let firstErr: unknown = null;
+  await mapWithConcurrency(groupByCompany(items, companyOf), limit, async (lane) => {
+    try {
+      for (const it of lane) await fn(it);
+    } catch (e) {
+      if (firstErr === null) firstErr = e;
+    }
+  });
+  if (firstErr !== null) throw firstErr;
+}

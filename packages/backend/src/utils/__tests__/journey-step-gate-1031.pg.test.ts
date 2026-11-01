@@ -3,30 +3,29 @@
  * 여정 칸 관문 · 담당자 안내 — 실 PostgreSQL 판(★ 2026-10-31 · 설계서 docs/2026-10-31-journey-step-gate-notice-design.md §5-2)
  *
  * 운영 문장을 글자 그대로 돌린다. 바깥(스팸 검사 · MySQL 적재 · 결과 집계 · 운영 경보)만 시험이 쥔다.
- * 새 칸(원장 C84-DDL-2 · C84-DDL-1)은 이 파일의 사본에 원장 블록을 그대로 실행해 만든다(원장 SQL 도 함께 검증).
+ * 새 칸(원장 C84-DDL-1 · C93-DDL-3)은 이 파일의 사본에 원장 블록을 그대로 실행해 만든다(원장 SQL 도 함께 검증).
+ * ★ 2026-11-02 엔진 재설계 E3(docs/2026-11-01-journey-automarketing-engine-design.md) — 옛 「그날 검사 기록 관문 · 통과 안내 · 안내 시도」를 뒤집었다:
+ *   관문 = 지금 판의 가장 최근 결정이 보류일 때만(stepHeldSql) · 스캔 = ① 고친 글 ② 통과한 글 7일 재검사 ③ 7일 지난 보류 재검사(4번) · 오늘 시도 6번 상한.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
 
 const ctl = vi.hoisted(() => ({
-  failFinalize: false,
+  verdict: 'pass' as 'pass' | 'blocked' | 'error',
   enqueue: [] as string[],
   enqueueResult: 1 as number,
-  onEnqueue: null as null | (() => Promise<void>),
   onSpamTest: null as null | (() => Promise<void>),
   spamCalls: 0,
   alerts: [] as string[],
   counts: new Map<string, { success: number; fail: number; pending: number }>(),
+  spam: new Map<string, number>(),
+  spamThrow: false,
+  /** 다음 적재 한 번에 끼우는 일(앞 안내를 보내는 사이 바뀌는 상태 · Codex 구현 2R) */
+  onEnqueue: null as null | (() => Promise<void>),
 }));
 
 vi.mock('../../config/database', async (orig) => {
   const real: any = await orig();
-  const query = (text: string, params?: any[]) => {
-    if (ctl.failFinalize && text.includes("SET status = 'notified' WHERE id = $1::uuid AND status = 'pending'")) {
-      return Promise.reject(new Error('주입: 기록(③) 실패'));
-    }
-    return real.query(text, params);
-  };
-  return { ...real, query, withBoundedMysql: async (_ms: number, work: any) => work(async () => []) };
+  return { ...real, withBoundedMysql: async (_ms: number, work: any) => work(async () => []) };
 });
 vi.mock('../sms-queue', async (orig) => {
   const real: any = await orig();
@@ -34,12 +33,18 @@ vi.mock('../sms-queue', async (orig) => {
     ...real,
     getAuthSmsTable: async () => 'SMSQ_TEST',
     bulkInsertSmsQueue: async (_t: string[], rows: any[][]) => {
-      if (ctl.onEnqueue) await ctl.onEnqueue();
       ctl.enqueue.push(String(rows[0][2]));
+      const f = ctl.onEnqueue;
+      ctl.onEnqueue = null;
+      if (f) await f();
       return ctl.enqueueResult;
     },
     getCompanySmsTablesWithLogs: async () => ['SMSQ_TEST'],
     smsCampaignCountsSafe: async (_t: string[], ids: string[]) => new Map(ids.filter((id) => ctl.counts.has(String(id))).map((id) => [String(id), ctl.counts.get(String(id))!])),
+    smsCampaignSpamCountsSafe: async (_t: string[], ids: string[]) => {
+      if (ctl.spamThrow) throw new Error('주입: 스팸 수 읽기 실패');
+      return new Map(ids.map((id) => [String(id), ctl.spam.get(String(id)) ?? 0]));
+    },
   };
 });
 vi.mock('../journey-pretest-validator', async (orig) => {
@@ -49,7 +54,8 @@ vi.mock('../journey-pretest-validator', async (orig) => {
     runStepSpamTest: async () => {
       ctl.spamCalls++;
       if (ctl.onSpamTest) await ctl.onSpamTest();
-      return { verdict: 'pass', ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 100 };
+      const v = ctl.verdict;
+      return { verdict: v, ok: v === 'pass', enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: v === 'pass' ? 100 : 0, error: v === 'error' ? '주입: 검사 장애' : undefined };
     },
   };
 });
@@ -58,7 +64,10 @@ vi.mock('../system-alert', () => ({ sendSystemAlert: async (p: any) => { ctl.ale
 import { pool } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
 import { ledgerBlockSql } from './pg/global-setup';
-import { scanAndPretest, pretestDoneSql, resetPretestScanMemory } from '../journey-pretest-notifier';
+import {
+  scanAndPretest, stepHeldSql, resetPretestScanMemory,
+  PRETEST_ERROR_DAILY_MAX, PRETEST_RECHECK_ERROR_MAX, PRETEST_HELD_RECHECK_MAX,
+} from '../journey-pretest-notifier';
 import { notifyJourneyStepResults, resetResultNoticeColumnsCache, RESULT_NOTICE_SCAN_LIMIT } from '../journey-result-notice';
 import { updateJourneyStep } from '../journey-builder';
 import { applyResumeAdjustments } from '../journey-resume';
@@ -71,17 +80,30 @@ const J = '00000000-0000-0000-0000-00000000e031';
 const S1 = '00000000-0000-0000-0000-00000000f031';
 const S2 = '00000000-0000-0000-0000-00000000f032';
 const SNAP = '00000000-0000-0000-0000-00000000b031';
+const NEWSNAP = '00000000-0000-0000-0000-00000000b032';
+const OLDSNAP = '00000000-0000-0000-0000-00000000b033';
 const EXE = '00000000-0000-0000-0000-000000009031';
 
 const runLedgerBlock = async (id: string) => { await pool.query(ledgerBlockSql(id)); };
 const kstToday = () => new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 10);
 const records = async () => (await pool.query(
-  `SELECT id, status, notice_attempts FROM journey_pretest_schedules WHERE journey_id = $1 AND step_id = $2 ORDER BY notify_at DESC, id DESC`, [J, S1],
+  `SELECT id, status, snapshot_id FROM journey_pretest_schedules WHERE journey_id = $1 AND step_id = $2 AND status <> 'seen' ORDER BY notify_at DESC, id DESC`, [J, S1],
 )).rows;
-const gateOpen = async () => (await pool.query(`SELECT ${pretestDoneSql('$1::uuid', '$2::uuid', '$3::date')} AS ok`, [J, S1, kstToday()])).rows[0].ok as boolean;
+const statuses = async () => (await records()).map((r) => String(r.status));
+/** 결정 · 시도 기록 하나(ago = 얼마 전) */
+const put = (status: string, snapshotId: string | null, ago: string, step = S1) => pool.query(
+  `INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, execution_id, scheduled_send_at, notify_at, status, snapshot_id, notice_sent_at)
+   VALUES ($1, $2, $3, $4, NOW(), NOW() - $5::interval, $6, $7, NOW())`,   // 지난 기록 = 안내는 이미 보냄(안내 원장 마감)
+  [CO, J, step, EXE, ago, status, snapshotId]);
+const held = async (step = S1) => (await pool.query(`SELECT ${stepHeldSql('$1::uuid', '$2::uuid')} AS h`, [J, step])).rows[0].h as boolean;
+const confidence = async (id = SNAP) => Number((await pool.query(`SELECT confidence_score FROM journey_step_snapshots WHERE id = $1`, [id])).rows[0].confidence_score);
+const setConfidence = (n: number, id = SNAP) => pool.query(`UPDATE journey_step_snapshots SET confidence_score = $2 WHERE id = $1`, [id, n]);
+const ageRecords = (by: string) => pool.query(`UPDATE journey_pretest_schedules SET notify_at = notify_at - $2::interval WHERE journey_id = $1`, [J, by]);
+/** 지연 기다림의 시작(seen)을 앞당긴다 */
+const ageSeen = (by: string) => pool.query(`UPDATE journey_pretest_schedules SET notify_at = notify_at - $2::interval WHERE journey_id = $1 AND status = 'seen'`, [J, by]);
 
 beforeAll(async () => {
-  await runLedgerBlock('C84-DDL-2');
+  await runLedgerBlock('C93-DDL-3');
   await insertMinimalRow(pool, 'companies', { id: CO });
   await insertMinimalRow(pool, 'users', { id: OWNER, company_id: CO, user_type: 'user', is_active: true, phone: '010-0000-0031', login_id: 't-1031-owner' });
   await insertMinimalRow(pool, 'customers', { id: CUST, company_id: CO, phone: '01000009999' });
@@ -94,76 +116,206 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await pool.query(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1`, [J]);
+  await pool.query(`DELETE FROM journey_step_snapshots WHERE step_id = $1 AND id <> $2`, [S1, SNAP]);
+  await pool.query(`DELETE FROM journey_step_snapshots WHERE step_id = $1`, [S2]);
+  await pool.query(`UPDATE journey_step_snapshots SET confidence_score = 100, created_at = NOW() - INTERVAL '1 day' WHERE id = $1`, [SNAP]);
+  await pool.query(`DELETE FROM spam_filter_tests WHERE company_id = $1`, [CO]);
   await pool.query(`UPDATE journey_executions SET status = 'active', current_step_order = 0, next_run_at = NOW() + INTERVAL '10 minutes' WHERE id = $1`, [EXE]);
   await pool.query(`UPDATE journeys SET status = 'active' WHERE id = $1`, [J]);
   resetPretestScanMemory(true);
-  Object.assign(ctl, { failFinalize: false, enqueue: [], enqueueResult: 1, onEnqueue: null, onSpamTest: null, spamCalls: 0, alerts: [] });
+  Object.assign(ctl, { verdict: 'pass', enqueue: [], enqueueResult: 1, onSpamTest: null, spamCalls: 0, alerts: [], spamThrow: false, onEnqueue: null });
 });
 
-describe('2-1 그날 마침 판정 조각', () => {
-  it('오늘 notified · cancelled = 참 · paused · pending · 어제 · 다른 칸 · 다른 여정 = 거짓', async () => {
-    const put = (status: string, at: string, step = S1, journey = J) => pool.query(
-      `INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, execution_id, scheduled_send_at, notify_at, status) VALUES ($1, $2, $3, $4, $5, NOW(), $6)`,
-      [CO, journey, step, EXE, at, status]);
-    const today = `${kstToday()}T10:00:00+09:00`;
-    const yesterday = new Date(new Date(today).getTime() - 86400_000).toISOString();
-    for (const st of ['paused', 'pending']) { await put(st, today); expect(await gateOpen()).toBe(false); }
-    await put('notified', yesterday); expect(await gateOpen()).toBe(false);
-    await put('notified', today, S2); expect(await gateOpen()).toBe(false);
-    await put('cancelled', today); expect(await gateOpen()).toBe(true);
-    await pool.query(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1`, [J]);
-    await put('notified', today); expect(await gateOpen()).toBe(true);
+describe('E3-1 보류 판정 조각 = 지금 판의 가장 최근 결정(stepHeldSql)', () => {
+  it('보류 = 참 · 시도 기록(error · late)은 결정이 아님 · 다른 칸 · 그 뒤 통과 · 옛 판 보류 · 옛 paused = 거짓', async () => {
+    expect(await held()).toBe(false);
+    await put('held', SNAP, '3 hours');
+    expect(await held()).toBe(true);
+    await put('error', SNAP, '2 hours');
+    await put('late', SNAP, '1 hour');
+    expect(await held()).toBe(true);
+    expect(await held(S2)).toBe(false);
+    await put('notified', SNAP, '50 minutes');
+    expect(await held()).toBe(false);
+    await put('held', OLDSNAP, '40 minutes');
+    expect(await held()).toBe(false);
+    await put('held', SNAP, '30 minutes');
+    expect(await held()).toBe(true);
+    await put('paused', SNAP, '20 minutes');
+    expect(await held()).toBe(false);
   });
 });
 
-describe('2-8 묶음 상태표 · 안내 쓰기 한 꼴', () => {
-  it('기록 없음 · 통과 · 적재 성공 = pending → notified · 검사 1 · 적재 1 · 시도 1 · 관문 열림', async () => {
-    expect(await gateOpen()).toBe(false);
+describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대로)', () => {
+  it('통과한 글 · 결정 없음 = 정기 재검사 1 · 통과 = notified(판 id) · 담당자 문자 0 · 7일 안 = 다시 검사 0', async () => {
     await scanAndPretest();
     expect(ctl.spamCalls).toBe(1);
-    expect(ctl.enqueue).toHaveLength(1);
-    expect(ctl.enqueue[0]).toContain('[발송 전 안내]');
-    expect((await records()).map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['notified', 1]]);
-    expect(await gateOpen()).toBe(true);
+    expect(ctl.enqueue).toHaveLength(0);
+    expect((await records()).map((r) => [r.status, r.snapshot_id])).toEqual([['notified', SNAP]]);
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
   });
-  it('적재 실패 = pending · 관문 닫힘 → 다음 회차 검사 0 · 안내만(시도 2) → 성공', async () => {
+  it('마지막 결정 6일 전 = 검사 0 · 8일 전 = 다시 검사', async () => {
+    await put('notified', SNAP, '6 days');
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(0);
+    await ageRecords('2 days');
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
+  });
+  it('검사 큐 5건 이상 = 통과한 글 정기 재검사 0 · 고친 글(표식 < 100)은 그대로 검사 → 통과 = 표식 100', async () => {
+    for (let i = 0; i < 5; i++) {
+      await insertMinimalRow(pool, 'spam_filter_tests', { company_id: CO, user_id: OWNER, callback_number: '0212345678', status: 'queued' });
+    }
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(0);
+    await setConfidence(0);
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
+    expect(await statuses()).toEqual(['notified']);
+    expect(await confidence()).toBe(100);
+  });
+  it(`고친 글 막힘 = 그 판 보류 + 안내 1 · 여정 멈춤 0 · 다음 회차 0 · 7일 지난 보류 = 재검사 · 또 막힘 = 보류 기록만 · ${PRETEST_HELD_RECHECK_MAX}번 뒤 재검사 0`, async () => {
+    await setConfidence(0);
+    ctl.verdict = 'blocked';
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
+    expect(await statuses()).toEqual(['held']);
+    expect(ctl.enqueue).toHaveLength(1);
+    expect(ctl.enqueue[0]).toContain('[발송 보류 안내]');
+    expect(await held()).toBe(true);
+    expect((await pool.query(`SELECT status FROM journeys WHERE id = $1`, [J])).rows[0].status).toBe('active');
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
+    for (let i = 0; i < PRETEST_HELD_RECHECK_MAX + 1; i++) {
+      await ageRecords('8 days');
+      await scanAndPretest();
+    }
+    expect(ctl.spamCalls).toBe(PRETEST_HELD_RECHECK_MAX);
+    expect(await statuses()).toEqual(Array(PRETEST_HELD_RECHECK_MAX).fill('held'));
+    expect(ctl.enqueue).toHaveLength(1);
+    expect(await held()).toBe(true);
+  });
+  it('보류 재검사 통과 = notified · 표식 100 · 관문 열림 · 안내 0', async () => {
+    await setConfidence(0);
+    await put('held', SNAP, '8 days');
+    expect(await held()).toBe(true);
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
+    expect((await statuses())[0]).toBe('notified');
+    expect(await confidence()).toBe(100);
+    expect(await held()).toBe(false);
+    expect(ctl.enqueue).toHaveLength(0);
+  });
+  it('판이 바뀌면 옛 판 보류는 관문을 막지 않는다 · 새 판 = 검사 → 통과', async () => {
+    await put('held', SNAP, '1 hour');
+    await insertMinimalRow(pool, 'journey_step_snapshots', { id: NEWSNAP, journey_id: J, step_id: S1, message_body: '고친 문안', confidence_score: 0 });
+    expect(await held()).toBe(false);
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(1);
+    expect((await records())[0]).toMatchObject({ status: 'notified', snapshot_id: NEWSNAP });
+    expect(await confidence(NEWSNAP)).toBe(100);
+  });
+  it('검사 도중 새 판(수정) = 옛 판 결과 버림(쓰기 0) → 다음 회차 새 판 검사', async () => {
+    ctl.onSpamTest = async () => {
+      ctl.onSpamTest = null;
+      await insertMinimalRow(pool, 'journey_step_snapshots', { id: NEWSNAP, journey_id: J, step_id: S1, message_body: '고친 문안', confidence_score: 0 });
+    };
+    await scanAndPretest();
+    expect(await records()).toEqual([]);
+    expect(await confidence(NEWSNAP)).toBe(0);
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(2);
+    expect((await records())[0]).toMatchObject({ status: 'notified', snapshot_id: NEWSNAP });
+    expect(await confidence(NEWSNAP)).toBe(100);
+  });
+  it(`고친 글 검사 장애 = 시도 기록(판) · 보류 아님 · 오늘 ${PRETEST_ERROR_DAILY_MAX}번이면 스캔이 뺀다 · 2시간 넘은 판 = 지연 안내 한 번`, async () => {
+    await pool.query(`UPDATE journey_step_snapshots SET confidence_score = 0, created_at = NOW() - INTERVAL '3 hours' WHERE id = $1`, [SNAP]);
+    ctl.verdict = 'error';
+    await scanAndPretest();
+    expect(ctl.enqueue).toHaveLength(0);   // 처음 본 지금부터 잰다(판 생성 3시간 전 = 지연 아님)
+    await ageSeen('3 hours');
+    for (let i = 0; i < PRETEST_ERROR_DAILY_MAX + 1; i++) await scanAndPretest();
+    expect(ctl.spamCalls).toBe(PRETEST_ERROR_DAILY_MAX);
+    const st = await statuses();
+    expect(st.filter((s) => s === 'error')).toHaveLength(PRETEST_ERROR_DAILY_MAX);
+    expect(st.filter((s) => s === 'late')).toHaveLength(1);
+    expect(ctl.enqueue).toHaveLength(1);
+    expect(ctl.enqueue[0]).toContain('[검사 지연 안내]');
+    expect(ctl.alerts).toContain('journey-pretest-new-copy-late');
+    expect(await held()).toBe(false);
+    expect(await confidence()).toBe(0);
+  });
+  it(`통과한 글 정기 재검사 장애 ${PRETEST_RECHECK_ERROR_MAX}번 = 확인 못 함(unverified) · 경보 · 보류 0 · 그 뒤 7일 검사 0`, async () => {
+    ctl.verdict = 'error';
+    for (let i = 0; i < PRETEST_RECHECK_ERROR_MAX + 2; i++) await scanAndPretest();
+    expect(ctl.spamCalls).toBe(PRETEST_RECHECK_ERROR_MAX);
+    expect(await statuses()).toEqual(['unverified', ...Array(PRETEST_RECHECK_ERROR_MAX).fill('error')]);
+    expect(ctl.alerts).toContain('journey-pretest-recheck-error');
+    expect(ctl.enqueue).toHaveLength(0);
+    expect(await held()).toBe(false);
+    expect(await confidence()).toBe(100);
+  });
+  it('옛 「통과 · 안내 전」(pending) = 문자 없이 notified · 7일 안이라 검사 0', async () => {
+    await put('pending', null, '1 hour');
+    await scanAndPretest();
+    expect(await statuses()).toEqual(['notified']);
+    expect(ctl.enqueue).toHaveLength(0);
+    expect(ctl.spamCalls).toBe(0);
+  });
+  it('★ Codex 구현 1R(R14) 보류 안내 적재 실패 = 원장에 남아 다음 회차에 다시(보류 기록은 한 번) · 3번 다 실패 = 운영 경보', async () => {
+    await setConfidence(0);
+    ctl.verdict = 'blocked';
     ctl.enqueueResult = 0;
     await scanAndPretest();
-    expect((await records()).map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['pending', 1]]);
-    expect(await gateOpen()).toBe(false);
+    expect(await statuses()).toEqual(['held']);
+    const att = async () => (await pool.query(`SELECT notice_attempts, notice_sent_at IS NOT NULL AS sent FROM journey_pretest_schedules WHERE journey_id = $1 AND status = 'held'`, [J])).rows[0];
+    expect(await att()).toMatchObject({ notice_attempts: 1, sent: false });
     ctl.enqueueResult = 1;
     await scanAndPretest();
     expect(ctl.spamCalls).toBe(1);
-    expect(ctl.enqueue).toHaveLength(2);
-    expect((await records()).map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['notified', 2]]);
-    expect(await gateOpen()).toBe(true);
-  });
-  it('적재 성공 · 기록(③) 실패를 재시작을 끼워 되풀이 = 적재 총 3 · 넷째 = 적재 0 · notified + 경보', async () => {
-    ctl.failFinalize = true;
+    expect(await att()).toMatchObject({ notice_attempts: 2, sent: true });
+    expect(ctl.enqueue.filter((b) => b.includes('[발송 보류 안내]'))).toHaveLength(2);   // 첫 시도(적재 0 · 큐에 안 들어감 · 가짜가 본문만 받음) + 둘째 성공
     await scanAndPretest();
-    await scanAndPretest();
-    resetPretestScanMemory(true);   // 재시작(메모리 셈 0)
-    await scanAndPretest();
-    expect(ctl.enqueue).toHaveLength(3);
-    expect(await gateOpen()).toBe(false);
-    ctl.failFinalize = false;
-    await scanAndPretest();
-    expect(ctl.enqueue).toHaveLength(3);
-    expect((await records()).map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['notified', 3]]);
-    expect(ctl.alerts).toContain(`journey-pretest-notice-giveup:${J}`);
-    expect(ctl.spamCalls).toBe(1);
-  });
-  it('기록(③) 실패를 재시작 없이 네 회차 → 복구 = 묶음 멈춤 0 · 적재 3 · notified · 관문 열림(Codex 구현 1R ②)', async () => {
-    ctl.failFinalize = true;
+    expect(ctl.enqueue.filter((b) => b.includes('[발송 보류 안내]'))).toHaveLength(2);
+    // 3번 다 실패
+    await pool.query(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1`, [J]);
+    ctl.enqueueResult = 0;
     for (let i = 0; i < 4; i++) await scanAndPretest();
-    expect(ctl.enqueue).toHaveLength(3);
-    expect(await gateOpen()).toBe(false);
-    ctl.failFinalize = false;
+    expect(await att()).toMatchObject({ notice_attempts: 3, sent: false });
+    expect(ctl.alerts).toContain(`journey-pretest-notice-giveup:${J}`);
+  });
+  it('★ Codex 구현 1R(R14) 검사 시도 상한(하루 6번)에 먼저 닿아도 2시간 넘은 새 글 = 지연 안내 한 번(검사 0 회 더)', async () => {
+    await pool.query(`UPDATE journey_step_snapshots SET confidence_score = 0, created_at = NOW() - INTERVAL '1 hour' WHERE id = $1`, [SNAP]);
+    ctl.verdict = 'error';
+    for (let i = 0; i < PRETEST_ERROR_DAILY_MAX + 1; i++) await scanAndPretest();
+    expect(ctl.spamCalls).toBe(PRETEST_ERROR_DAILY_MAX);
+    expect(ctl.enqueue).toHaveLength(0);
+    await ageSeen('3 hours');
     await scanAndPretest();
-    expect((await records()).map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['notified', 3]]);
-    expect(await gateOpen()).toBe(true);
-    expect(ctl.spamCalls).toBe(1);
-    expect(ctl.alerts).not.toContain(`journey-pretest-bundle-error:${J}`);
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(PRETEST_ERROR_DAILY_MAX);
+    expect(ctl.enqueue.filter((b) => b.startsWith('[검사 지연 안내]'))).toHaveLength(1);
+    expect((await statuses()).filter((s) => s === 'late')).toHaveLength(1);
+  });
+  it('★ Codex 구현 2R(R12) 앞 칸 안내를 보내는 사이 뒤 칸의 판이 바뀜 = 뒤 칸은 보내지 않고 마감(시도 0 · 옛 글 안내 0)', async () => {
+    const SNAP2 = '00000000-0000-0000-0000-00000000b034';
+    const SNAP2B = '00000000-0000-0000-0000-00000000b035';
+    await insertMinimalRow(pool, 'journey_step_snapshots', { id: SNAP2, journey_id: J, step_id: S2, message_body: '두 번째 옛 글', confidence_score: 0 });
+    const heldPending = (step: string, snap: string, ago: string) => pool.query(
+      `INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, execution_id, scheduled_send_at, notify_at, status, snapshot_id)
+       VALUES ($1, $2, $3, $4, NOW(), NOW() - $5::interval, 'held', $6)`, [CO, J, step, EXE, ago, snap]);
+    await heldPending(S1, SNAP, '2 minutes');
+    await heldPending(S2, SNAP2, '1 minute');
+    ctl.onEnqueue = async () => {
+      await insertMinimalRow(pool, 'journey_step_snapshots', { id: SNAP2B, journey_id: J, step_id: S2, message_body: '두 번째 새 글', confidence_score: 100 });
+    };
+    await scanAndPretest();
+    expect(ctl.enqueue.filter((b) => b.includes('[발송 보류 안내]'))).toHaveLength(1);
+    expect(ctl.enqueue.some((b) => b.includes('두 번째 옛 글'))).toBe(false);
+    const r2 = (await pool.query(
+      `SELECT notice_attempts, notice_sent_at IS NOT NULL AS closed FROM journey_pretest_schedules WHERE step_id = $1 AND status = 'held'`, [S2])).rows[0];
+    expect(r2).toMatchObject({ notice_attempts: 0, closed: true });
   });
   it('유료 검사 뒤 예외는 그대로 센다 = 검사 3 회차 뒤 그날 멈춤 · 경보', async () => {
     ctl.onSpamTest = async () => { throw new Error('주입: 검사 중 예외'); };
@@ -171,61 +323,18 @@ describe('2-8 묶음 상태표 · 안내 쓰기 한 꼴', () => {
     expect(ctl.spamCalls).toBe(3);
     expect(ctl.alerts).toContain(`journey-pretest-bundle-error:${J}`);
   });
-  it('적재 중 칸 수정 경로의 DELETE = 기다리지 않음 · 옛 ③ 0행 → 다음 회차 새 행(시도 0 부터)', async () => {
-    let oldId = '';
-    ctl.onEnqueue = async () => {
-      oldId = String((await records())[0].id);
-      await pool.query(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [J, S1]);
-    };
+  it('DDL-3 칸 없음 = 스캔을 열지 않음(검사 0) · 운영 경보 · 칸이 생기면 다시 돈다', async () => {
+    await pool.query(`ALTER TABLE journey_pretest_schedules DROP COLUMN snapshot_id`);
+    try {
+      resetPretestScanMemory(true, false);
+      await scanAndPretest();
+      expect(ctl.spamCalls).toBe(0);
+      expect(ctl.alerts).toContain('journey-pretest-snapshot-ddl');
+    } finally {
+      await runLedgerBlock('C93-DDL-3');
+    }
     await scanAndPretest();
-    expect(await records()).toEqual([]);
-    ctl.onEnqueue = null;
-    ctl.enqueueResult = 0;
-    await scanAndPretest();
-    const now = await records();
-    expect(now.map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['pending', 1]]);
-    const old = await pool.query(`UPDATE journey_pretest_schedules SET status = 'notified' WHERE id = $1::uuid AND status = 'pending' RETURNING id`, [oldId]);
-    expect(old.rows).toHaveLength(0);
-    expect((await records())[0].status).toBe('pending');
-  });
-  it('옛 판 결과 버림: 검사 도중 새 스냅숏(수정) = 쓰기 0 → 다음 회차 새 판 검사 · 안내 실패 = 관문 닫힘 → 안내만 다시', async () => {
-    const NEWSNAP = '00000000-0000-0000-0000-00000000b032';
-    ctl.onSpamTest = async () => {
-      ctl.onSpamTest = null;
-      await insertMinimalRow(pool, 'journey_step_snapshots', { id: NEWSNAP, journey_id: J, step_id: S1, message_body: '고친 문안', confidence_score: 0 });
-    };
-    await scanAndPretest();
-    expect(await records()).toEqual([]);
-    expect(Number((await pool.query(`SELECT confidence_score FROM journey_step_snapshots WHERE id = $1`, [NEWSNAP])).rows[0].confidence_score)).toBe(0);
-    ctl.enqueueResult = 0;
-    await scanAndPretest();
-    expect(ctl.spamCalls).toBe(2);
-    expect(Number((await pool.query(`SELECT confidence_score FROM journey_step_snapshots WHERE id = $1`, [NEWSNAP])).rows[0].confidence_score)).toBe(100);
-    expect(await gateOpen()).toBe(false);
-    ctl.enqueueResult = 1;
-    await scanAndPretest();
-    expect(ctl.spamCalls).toBe(2);
-    expect((await records()).map((r) => [r.status, Number(r.notice_attempts)])).toEqual([['notified', 2]]);
-    await pool.query(`DELETE FROM journey_step_snapshots WHERE id = $1`, [NEWSNAP]);
-  });
-  it('pending 인데 그사이 알림을 끔 = 안내 필요를 다시 판단 · 적재 0 · notified(Codex 설계 2R ②)', async () => {
-    ctl.enqueueResult = 0;
-    await scanAndPretest();
-    expect((await records()).map((r) => r.status)).toEqual(['pending']);
-    await pool.query(`UPDATE journey_steps SET notify_manager_on_pretest = false WHERE id = $1`, [S1]);
-    ctl.enqueue = [];
-    await scanAndPretest();
-    expect(ctl.enqueue).toHaveLength(0);
-    expect((await records()).map((r) => r.status)).toEqual(['notified']);
-    expect(await gateOpen()).toBe(true);
-    await pool.query(`UPDATE journey_steps SET notify_manager_on_pretest = true WHERE id = $1`, [S1]);
-  });
-  it('DDL-2 칸 없음(캐시 거짓) = 안내 시도 0 · notified · 경보', async () => {
-    resetPretestScanMemory(false);
-    await scanAndPretest();
-    expect(ctl.enqueue).toHaveLength(0);
-    expect((await records()).map((r) => r.status)).toEqual(['notified']);
-    expect(ctl.alerts).toContain('journey-pretest-notice-attempts-ddl');
+    expect(ctl.spamCalls).toBe(1);
   });
 });
 
@@ -325,6 +434,74 @@ describe('2-6 결과 안내 = 칸 · 날짜 · DDL-1 기준선', () => {
     const row = (await pool.query(`SELECT result_notice_sent, result_notice_attempts FROM journey_step_campaigns WHERE campaign_id = $1`, [CAMP])).rows[0];
     expect([Number(row.result_notice_sent), Number(row.result_notice_attempts)]).toEqual([2, 0]);
     expect(ctl.alerts).toContain(`journey-result-notice-giveup:${J}`);
+  });
+});
+
+describe('E3-5 실발송 스팸 차단 몰림(★ 1102 엔진 재설계)', () => {
+  it('알림 끈 칸 · 몰림(20건 · 30% 이상) = 첫 단계 한 번 [여정 스팸 차단 안내] · 다시 = 0 · 몰림 아님 = 기록만', async () => {
+    const S5 = '00000000-0000-0000-0000-00000000f035';
+    const S6 = '00000000-0000-0000-0000-00000000f036';
+    const C5 = '00000000-0000-0000-0000-00000000c135';
+    const C6 = '00000000-0000-0000-0000-00000000c136';
+    await pool.query(`UPDATE journey_executions SET status = 'completed' WHERE id = $1`, [EXE]);
+    await insertMinimalRow(pool, 'journey_steps', { id: S5, journey_id: J, step_order: 5, step_type: 'message', channel: 'lms', message_template: 'x', notify_manager_on_pretest: false });
+    await insertMinimalRow(pool, 'journey_steps', { id: S6, journey_id: J, step_order: 6, step_type: 'message', channel: 'lms', message_template: 'x', notify_manager_on_pretest: false });
+    await insertMinimalRow(pool, 'campaigns', { id: C5, company_id: CO, message_type: 'LMS', status: 'sending', sent_count: 70 });
+    await insertMinimalRow(pool, 'campaigns', { id: C6, company_id: CO, message_type: 'LMS', status: 'sending', sent_count: 70 });
+    await pool.query(`INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id) VALUES ($1, $2, $3::date, $4), ($1, $5, $3::date, $6)`, [J, S5, kstToday(), C5, S6, C6]);
+    ctl.counts.set(C5, { success: 40, fail: 30, pending: 0 });
+    ctl.spam.set(C5, 25);
+    ctl.counts.set(C6, { success: 60, fail: 10, pending: 0 });
+    ctl.spam.set(C6, 5);
+    resetResultNoticeColumnsCache(true);
+    await notifyJourneyStepResults();
+    await notifyJourneyStepResults();
+    const surge = ctl.enqueue.filter((b) => b.startsWith('[여정 스팸 차단 안내]'));
+    expect(surge).toHaveLength(1);
+    expect(surge[0]).toContain('25건(36%)');
+    const rec = (await pool.query(`SELECT campaign_id, result_notice_sent FROM journey_step_campaigns WHERE campaign_id = ANY($1::uuid[]) ORDER BY campaign_id`, [[C5, C6]])).rows;
+    expect(rec.map((r) => Number(r.result_notice_sent))).toEqual([70, 70]);
+  });
+  it('★ Codex 구현 1R(R14) 알림 끈 칸 · 결과 대기가 날을 넘겨도 마감 0 → 결과가 다 들어와 몰림이면 그때 한 번', async () => {
+    const S7 = '00000000-0000-0000-0000-00000000f037';
+    const C7 = '00000000-0000-0000-0000-00000000c137';
+    await pool.query(`UPDATE journey_executions SET status = 'completed' WHERE id = $1`, [EXE]);
+    await insertMinimalRow(pool, 'journey_steps', { id: S7, journey_id: J, step_order: 7, step_type: 'message', channel: 'lms', message_template: 'x', notify_manager_on_pretest: false });
+    await insertMinimalRow(pool, 'campaigns', { id: C7, company_id: CO, message_type: 'LMS', status: 'sending', sent_count: 100 });
+    await pool.query(`INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id) VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1, $3)`, [J, S7, C7]);
+    ctl.counts.set(C7, { success: 30, fail: 10, pending: 60 });
+    ctl.spam.set(C7, 5);
+    resetResultNoticeColumnsCache(true);
+    await notifyJourneyStepResults();
+    const sent = async () => (await pool.query(`SELECT result_notice_sent FROM journey_step_campaigns WHERE campaign_id = $1`, [C7])).rows[0].result_notice_sent;
+    expect(await sent()).toBeNull();
+    ctl.counts.set(C7, { success: 50, fail: 50, pending: 0 });
+    ctl.spam.set(C7, 40);
+    await notifyJourneyStepResults();
+    expect(ctl.enqueue.filter((b) => b.startsWith('[여정 스팸 차단 안내]') && b.includes('40건'))).toHaveLength(1);
+    expect(Number(await sent())).toBe(100);
+  });
+});
+
+describe('★ Codex 구현 2R(R7) 스팸 수를 못 읽음 ≠ 0', () => {
+  it('알림 끈 칸 · 결과는 다 들어왔지만 스팸 수를 못 읽음 = 마감 0 → 다음에 읽어 몰림이면 그때 한 번', async () => {
+    const S8 = '00000000-0000-0000-0000-00000000f038';
+    const C8 = '00000000-0000-0000-0000-00000000c138';
+    await pool.query(`UPDATE journey_executions SET status = 'completed' WHERE id = $1`, [EXE]);
+    await insertMinimalRow(pool, 'journey_steps', { id: S8, journey_id: J, step_order: 8, step_type: 'message', channel: 'lms', message_template: 'x', notify_manager_on_pretest: false });
+    await insertMinimalRow(pool, 'campaigns', { id: C8, company_id: CO, message_type: 'LMS', status: 'completed', sent_count: 100 });
+    await pool.query(`INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id) VALUES ($1, $2, (NOW() AT TIME ZONE 'Asia/Seoul')::date - 1, $3)`, [J, S8, C8]);
+    ctl.counts.set(C8, { success: 50, fail: 50, pending: 0 });
+    ctl.spam.set(C8, 45);
+    ctl.spamThrow = true;
+    resetResultNoticeColumnsCache(true);
+    await notifyJourneyStepResults();
+    const sent = async () => (await pool.query(`SELECT result_notice_sent FROM journey_step_campaigns WHERE campaign_id = $1`, [C8])).rows[0].result_notice_sent;
+    expect(await sent()).toBeNull();
+    ctl.spamThrow = false;
+    await notifyJourneyStepResults();
+    expect(ctl.enqueue.filter((b) => b.startsWith('[여정 스팸 차단 안내]') && b.includes('45건'))).toHaveLength(1);
+    expect(Number(await sent())).toBe(100);
   });
 });
 

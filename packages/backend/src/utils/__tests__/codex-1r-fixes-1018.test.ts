@@ -162,14 +162,14 @@ describe('C 알림 · 정지 결과', () => {
     const safe = src.slice(src.indexOf('async function safeNotify('));
     inOrder(safe, ['const notice = await buildManagerNotice(b, preview, mode);', 'if (!notice) return true;', 'const ok = await enqueueManagerNotice(notice, b.companyId);', 'return ok;']);
   });
-  it('자동 보정 = 알림 성공 뒤에만 본문 갱신 · 실패 = 여정 정지', () => {
+  it('자동 보정 = 알림 성공 뒤에만 본문 갱신 · 실패 = 그 판 보류(★ 1102 E3-3 · 여정 멈춤 0)', () => {
     const src = read('../journey-pretest-notifier.ts');
     expect(src.indexOf("if (r2.verdict === 'pass') {")).toBeGreaterThan(-1);   // ★1025 #14 — 판정 = 공용 3값
     const seg = src.slice(src.indexOf("if (r2.verdict === 'pass') {"));
     // ★ 1031 본문 · 표식 · 기록 = 판 확인 쓰기 한 트랜잭션(recordIfCurrent · newBody)
     // ★ 2026-11-01 B1-4 — 재작성 후보 검사(testCandidate) 한 곳 · 통과 = 알린 뒤에만 그 판 본문을 후보로
     // ★ Codex 구현 3R — 후보 갈래의 정지 = pauseCurrent(그 판이 최신일 때만 · 판 확인과 한 트랜잭션)
-    inOrder(seg, ["if (!(await safeNotify(b, candBody, 'pretest_autofixed'))) {", 'await pauseCurrent(', 'return;', "const w = await recordIfCurrent(b, snapId, { status: 'notified', newBody: candBody, candidatePassed: true });"]);
+    inOrder(seg, ["if (!(await safeNotify(b, candBody, 'pretest_autofixed'))) {", 'await holdCurrent(', 'return;', "const w = await recordIfCurrent(b, snapId, { status: 'notified', newBody: candBody, candidatePassed: true });"]);
   });
   it('정지 커밋 뒤 집계 · 조회 실패 = 실패로 답하지 않는다', () => {
     const src = read('../journey-pause-handler.ts');

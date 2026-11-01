@@ -128,10 +128,12 @@ describe('R197 · R198 · m107 운영자', () => {
     expect(o).toContain('} else if (!autoPath && recipientTotal > 0) {');
     expect(o).toContain('// ★ 2026-09-27 한줄로 V2 R198');
   });
-  it('자율 발송 패스가 제안 생성보다 먼저', () => {
+  // ★ 2026-11-02 엔진 재설계 E2-3 — 옛 「발송 패스를 제안 생성 앞에서」를 넘어 발송 패스를 자기 주기 · 자기 가드로 뺐다(제안 생성이 길어도 매 분 발송)
+  it('자율 발송 패스 = 자기 주기 · 자기 가드(제안 생성과 따로)', () => {
     const o = src('continuous-operator.ts');
     const b = between(o, 'export async function runOperatorWorker(', '\nexport ');
-    expect(b.indexOf('await runAutoSendPass()')).toBeGreaterThan(0);
-    expect(b.indexOf('await runAutoSendPass()')).toBeLessThan(b.indexOf('await generateProposalForOperator(row.id);'));
+    expect(b).not.toContain('await runAutoSendPass()');
+    expect(o).toContain('void runAutoSendPassTick();');
+    expect(between(o, 'export async function runAutoSendPassTick(', '\n}')).toContain('if (sendPassRunning) return;');
   });
 });

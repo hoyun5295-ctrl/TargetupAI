@@ -182,3 +182,42 @@ describe('C7 화면 입구 하나', () => {
     expect(fe('components/journey/JourneyVariantsEditor.tsx')).toMatch(/aiCopyEntriesAll\(/);
   });
 });
+
+describe('C91 후속(Harold 1101 화면) — 작업 화면 전체 화면 · 최대 인원 선택 · 0% 빠짐', () => {
+  const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
+  const fe = (rel: string) => stripComments(readFileSync(join(FE, rel), 'utf8').replace(/\r\n/g, '\n'));
+
+  it('작업 화면 = 직접발송처럼 화면을 꽉 채운다(창 껍데기 fullScreen = 둘레 여백 · 둥근 모서리 0)', () => {
+    expect(fe('components/journey/workspace/JourneyWorkspace.tsx')).toMatch(/labelledBy="jws-title"[\s\S]{0,200}fullHeight fullScreen>/);
+    const shell = fe('components/journey/JourneyModalShell.tsx');
+    expect(shell).toMatch(/fullScreen \? '' : 'md:p-6'/);
+    expect(shell).toMatch(/fullScreen \? 'h-\[100dvh\] w-screen max-w-none rounded-none border-0'/);
+  });
+
+  it('최대 인원 = 선택 — 켜기 · 정의 검사에 필수 조건 0 · 판정 함수 · 면제 목록 0', () => {
+    const b = read('utils/journey-builder.ts');
+    expect(b).not.toMatch(/threshold_recipients_per_step IS NOT NULL OR trigger_event = ANY/);
+    expect(b).not.toMatch(/한 번에 보낼 최대 인원을 정해 주세요/);
+    for (const f of files) expect({ f, ok: !/\brequiresRecipientCap\b|\bCAP_EXEMPT_TRIGGERS\b/.test(read(f)) }).toEqual({ f, ok: true });
+  });
+
+  it('켜기 확인 창 · 일괄 켜기 · 시작 카드 = 비워도 된다(비우면 「한꺼번에 나간다」 한 줄)', () => {
+    const confirm = fe('components/journey/JourneyActivationConfirmModal.tsx');
+    expect(confirm).toMatch(/const capNum: number \| null = capEmpty \? null/);
+    expect(confirm).toMatch(/정하지 않으면 제한 없이 보내요\. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요\./);
+    expect(confirm).not.toMatch(/회차마다 나눠/);   // 실제 값(JOURNEY_COUNT_CAP 100000)과 다른 말 금지
+    expect(fe('components/journey/map/BatchActivateModal.tsx')).toMatch(/const capOk = \(id: string\) => \{ const n = capOf\(id\); return n == null \|\|/);
+    expect(fe('components/journey/map/BatchActivateModal.tsx')).toMatch(/capOf\(c\.id\) == null && \([\s\S]{0,120}정하지 않으면 제한 없이 보내요\. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요\./);   // Codex C92 1R
+    expect(fe('components/journey/workspace/JourneyStartCard.tsx')).toMatch(/placeholder="비우면 제한 없음"/);
+  });
+
+  it('상한 없는 회차 = 회차당 JOURNEY_COUNT_CAP(10만) · 날짜 기준 · 한 번 보내기는 끝까지(R40) — 주석 · 문구가 상수 값과 같다', async () => {
+    const { JOURNEY_COUNT_CAP } = await import('../journey-target-extractor');
+    expect(JOURNEY_COUNT_CAP).toBe(100000);
+    expect(read('utils/journey-trigger-watcher.ts')).not.toMatch(/500 스로틀로 회차 분산/);
+  });
+
+  it('레일 둘째 줄 이탈 = 실제로 빠진 사람이 있을 때만(0% 빠짐 소음 0)', () => {
+    expect(fe('components/journey/workspace/JourneyWorkspace.tsx')).toMatch(/dg\.severity !== 'good' && Math\.round\(Number\(dg\.dropoutRate \|\| 0\) \* 100\) > 0/);
+  });
+});

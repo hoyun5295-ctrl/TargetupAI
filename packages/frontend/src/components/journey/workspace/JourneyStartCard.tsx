@@ -177,7 +177,7 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
       {/* 받는 양 */}
       <div className={`${sec} space-y-2.5`}>
         <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-slate-700">
-          한 번에 최대 <NumField label="한 번에 보낼 최대 인원" value={form.thresholdRecipients} onChange={(v) => setField('thresholdRecipients', v)} unit="명" placeholder="꼭 정해요" disabled={locked} min={1} />
+          한 번에 최대 <NumField label="한 번에 보낼 최대 인원" value={form.thresholdRecipients} onChange={(v) => setField('thresholdRecipients', v)} unit="명" placeholder="비우면 제한 없음" disabled={locked} min={1} />
         </div>
         {STANDING_TRIGGERS.includes(te) && (
           <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-slate-700">

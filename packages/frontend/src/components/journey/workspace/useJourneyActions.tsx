@@ -76,7 +76,8 @@ export function useJourneyActions({ onChanged, operationCost }: { onChanged: () 
       const r = await fetch(`/api/ai/operator/journeys/${j.id}/activate`, { method: 'POST', headers: authJson(), body: JSON.stringify({ acknowledgedOverlaps: acks }) });
       const d = await r.json().catch(() => ({}));
       if (r.ok && d?.success) {
-        toast.success(Number(d.olderResumed) > 0 ? '다시 켰어요. 옛 모양으로 마무리하던 고객도 이어서 받아요.' : '다시 켰어요.');
+        toast.success(d.dispatchPending ? '다시 켰어요. 받는 분을 넣는 중이에요(30분 안에 자동으로 다시 넣어요).'
+          : Number(d.olderResumed) > 0 ? '다시 켰어요. 옛 모양으로 마무리하던 고객도 이어서 받아요.' : '다시 켰어요.');
         setResumeFor(null);
         setOverlapPairs(null);
         onChanged();

@@ -186,6 +186,15 @@ export function getKoreanEcommerceLabel(provider: KoreanEcommerceProvider): stri
  * 모바일 user-agent 인지 (한국 모바일 점유율 80%+ 정합 — 모바일 우선 정합)
  * - 향후 모바일 URL 자동 정정 영역 (PC/모바일 URL 분리된 자사몰 영역)
  */
+/**
+ * ★ 2026-11-02 엔진 재설계 E8-1 — 링크 미리보기 · 검색 로봇 요청인가(순수). 문자 · 메신저에 주소를 붙이면 앱이 미리보기를 위해 먼저 연다 →
+ *   그 요청을 고객 클릭으로 세면 클릭률 · 클릭 분기 · A/B 보상이 부풀어 오른다. 넘김(302)은 그대로 · 세는 것만 건너뛴다.
+ */
+const LINK_PREVIEW_AGENT_RE = /kakaotalk-scrap|facebookexternalhit|facebot|slackbot|slack-imgproxy|twitterbot|discordbot|telegrambot|whatsapp|linkedinbot|googlebot|google-inspectiontool|bingbot|yeti|naverbot|daumoa|applebot|\bbot\b|bot\/|crawler|spider|preview/i;
+export function isLinkPreviewAgent(userAgent: string | undefined | null): boolean {
+  return LINK_PREVIEW_AGENT_RE.test(String(userAgent || ''));
+}
+
 export function isMobileUserAgent(userAgent: string | undefined | null): boolean {
   if (!userAgent) return false;
   return /Mobile|Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);

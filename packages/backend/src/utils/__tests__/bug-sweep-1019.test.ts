@@ -51,13 +51,15 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     expect(jb).toContain('VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 0)');
     const pn = readFileSync(join(__dirname, '..', 'journey-pretest-notifier.ts'), 'utf8');
     expect(pn.indexOf("if (verdict === 'pass') {")).toBeGreaterThan(-1);
-    // ★ 1031 통과 = 그 판 100 + pending 기록 = 판 확인 쓰기 한 트랜잭션(recordIfCurrent · markChecked)
-    expect(pn.indexOf("const w = await recordIfCurrent(b, snapId, { status: 'pending', markChecked: true });")).toBeGreaterThan(pn.indexOf("if (verdict === 'pass') {"));
+    // ★ 1031 통과 = 그 판 100 + 기록 = 판 확인 쓰기 한 트랜잭션(recordIfCurrent · markChecked) · ★ 1102 E3-3 기록 = notified(통과 안내 문자 0)
+    expect(pn.indexOf("await recordIfCurrent(b, snapId, { status: 'notified', markChecked: true });")).toBeGreaterThan(pn.indexOf("if (verdict === 'pass') {"));
     const rif = pn.slice(pn.indexOf('export async function recordIfCurrent('));
     expect(rif).toContain('SET confidence_score = 100 WHERE id = $1::uuid AND confidence_score < 100');
     expect(pn).toContain('SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid');
     // F4 — 재검사 전 판은 날짜별 처리 기록으로 건너뛰지 않는다(★1025 #2 = 후보 SQL 안 · LIMIT 앞) · 조회 실패는 문자 칸을 미룬다
-    expect(pn).toMatch(/ORDER BY ss\.created_at DESC LIMIT 1\), 100\) < 100\s+OR NOT \$\{pretestDoneSql\('je\.journey_id', 's\.id', day\)\}/);
+    // ★ 1102 E3-2 — 후보 SQL 안 · LIMIT 앞: 지금 판 표식 < 100 = 고름(지금 판 보류만 빼고 · 날짜 기록과 무관)
+    expect(pn).toContain('COALESCE(snap.confidence_score, 100) AS confidence');
+    expect(pn).toContain('(b.confidence < 100 AND NOT ${heldNow})');
     expect(pn.indexOf("OR NOT ${pretestDoneSql('je.journey_id', 's.id', day)}")).toBeLessThan(pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
     expect(ex).toContain('snapshotReadFailed = true;');
     expect(ex.indexOf("if (snapshotReadFailed && ['sms', 'lms', 'mms']")).toBeGreaterThan(ex.indexOf('const gate = await query('));

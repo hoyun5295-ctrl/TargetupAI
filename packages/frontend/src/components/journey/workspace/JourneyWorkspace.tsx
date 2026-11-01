@@ -805,7 +805,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
 
   return (
     <>
-      <JourneyModalShell open={open} onClose={askClose} labelledBy="jws-title" panelClassName="w-full max-w-[1480px]" disableDismiss={dirtyCount > 0 || saving || reshaping} fullHeight>
+      <JourneyModalShell open={open} onClose={askClose} labelledBy="jws-title" panelClassName="w-full max-w-[1480px]" disableDismiss={dirtyCount > 0 || saving || reshaping} fullHeight fullScreen>
         <div className="relative flex min-h-0 flex-1 flex-col bg-slate-50 text-slate-900">
           {/* 머리 띠 */}
           <header {...inertProps} className="shrink-0 px-4 py-3.5 text-white md:px-6" style={{ background: zoneBand('journeys') }}>
@@ -921,7 +921,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                             {ms ? (ms.waitingHere > 0 ? `지금 ${ms.waitingHere.toLocaleString('ko-KR')}명 기다림` : '기다리는 사람 없음') : (r.timingLabel || '')}
                             {lp?.avgWaitDays != null && ms && ms.waitingHere > 0 ? ` · 평균 ${Number(lp.avgWaitDays) < 1 ? '오늘' : `${Math.round(Number(lp.avgWaitDays))}일째`}` : ''}
                             {/* 이탈 진단은 점검 판정과 별개 — 둘째 줄 글자 */}
-                            {dg && dg.severity !== 'good' ? ` · ${Math.round(Number(dg.dropoutRate || 0) * 100)}% 빠짐` : ''}
+                            {dg && dg.severity !== 'good' && Math.round(Number(dg.dropoutRate || 0) * 100) > 0 ? ` · ${Math.round(Number(dg.dropoutRate || 0) * 100)}% 빠짐` : ''}
                           </div>
                           {failed[r.id] && <div className="mt-0.5 truncate text-[12px] text-rose-700">{failed[r.id]}</div>}
                           {del && <div className="mt-0.5 text-[12px] text-rose-700">저장하면 빠져요</div>}
@@ -997,7 +997,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                 </div>
               )}
               {detail && selected !== 'start' && selStudio && (
-                <div className="grid grid-cols-1 gap-4 p-3 md:p-5 min-[1440px]:grid-cols-[minmax(0,1fr)_300px]">
+                <div className="mx-auto grid w-full max-w-[1360px] grid-cols-1 gap-4 p-3 md:p-5 min-[1440px]:grid-cols-[minmax(0,1fr)_320px]">
                   <div className="min-w-0">
                   {selEditable && !selDeleting ? (
                     <fieldset disabled={filling} aria-busy={filling} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white disabled:opacity-60">

@@ -9,7 +9,7 @@ import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry }
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
-import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_FALLBACK_SMS_CODE, KAKAO_FALLBACK_LMS_CODE } from './sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_FALLBACK_SMS_CODE, KAKAO_FALLBACK_LMS_CODE, SPAM_BLOCK_STATUS_CODES } from './sms-result-map';
 import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import type { AlimtalkResultAgg } from './refund-calc';
 import { splitLinesByMsgType } from './sms-line-split';
@@ -539,6 +539,19 @@ export function smsMsgTypeScopeSql(msgTypeScope: SmsRowScope): string {
  * 과대 집계가 구조적으로 불가능하고, 이동 순간의 일시 과소는 다음 사이클에 자연 수렴한다.
  * 소비처: sync(AI/직접)·cleanup·reconcile·refund-sweeper·aggregateSmsCountsByCampaign.
  */
+/**
+ * ★ 2026-11-02 엔진 재설계 E3-5 — 캠페인별 스팸 차단 결과 수(결과 테이블만 · smsCampaignCountsSafe 와 같은 표 판정 classifyResultTables · 이중 셈 0).
+ */
+export async function smsCampaignSpamCountsSafe(tables: string[], ids: (string | number)[], groupField: string = 'app_etc1'): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (tables.length === 0 || ids.length === 0 || SPAM_BLOCK_STATUS_CODES.length === 0) return out;
+  const { resultTables } = classifyResultTables(tables);
+  if (resultTables.length === 0) return out;
+  const agg = await smsBatchAggByGroup(resultTables, groupField, `SUM(CASE WHEN status_code IN (${SPAM_BLOCK_STATUS_CODES.join(',')}) THEN 1 ELSE 0 END) as sp`, ids);
+  for (const id of ids) out.set(String(id), Number(agg.get(String(id))?.sp || 0));
+  return out;
+}
+
 export async function smsCampaignCountsSafe(
   tables: string[],
   ids: (string | number)[],

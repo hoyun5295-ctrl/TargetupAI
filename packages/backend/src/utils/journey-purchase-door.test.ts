@@ -139,11 +139,12 @@ describe('원장 커서 조회 — 무엇을 자르는가', () => {
   const CURSOR = { at: new Date('2026-08-01T00:00:00Z'), rowId: '33333333-3333-3333-3333-333333333333' };
   const WINDOW_END = new Date('2026-08-01T01:00:00Z');
 
-  it('과거분 소급은 발생 시각으로 막는다 — 도착 시각으로는 못 막는다', async () => {
+  it('과거분 소급은 발생 시각으로 막는다 — 도착 시각으로는 못 막는다 · ★1102 E1-3 나이 = 도착 기준(우리가 밀려도 버리지 않음)', async () => {
     await selectPurchaseLedgerRowsForCursor(COMPANY_ID, {}, CURSOR, WINDOW_END, 24, 1000);
     const sql = String(q.mock.calls[0][0]);
-    expect(sql, '이관은 오늘 도착한다 — 도착 축으로 자르면 3년 치가 통째로 통과한다')
-      .toMatch(/p\.purchase_date >= \(\(NOW\(\) - \(\$4 \|\| ' hours'\)::interval\) AT TIME ZONE 'Asia\/Seoul'\)/);
+    expect(sql, '이관은 오늘 도착한다 — 도착 축으로 자르면 3년 치가 통째로 통과한다 · 나이는 도착 시각에서 잰다(처리 시각 아님)')
+      .toContain("(p.purchase_date AT TIME ZONE 'Asia/Seoul') >= (p.created_at AT TIME ZONE current_setting('TimeZone')) - ($4 || ' hours')::interval");
+    expect(sql).not.toMatch(/purchase_date >= \(\(NOW\(\)/);
     expect(sql).toMatch(/p\.purchase_date IS NOT NULL/);
     expect(sql, '미래 구매(ERP 시계 오류)는 트리거가 아니다')
       .toMatch(/p\.purchase_date <= \(NOW\(\) AT TIME ZONE 'Asia\/Seoul'\)/);
@@ -260,7 +261,7 @@ describe('커서 정밀도 — DB 밖을 다녀오면 안 된다 (2026-08-02 F1)
     expect(
       String(q.mock.calls[0][0]),
       '커서는 도착 축이라 소급분이 전부 커서 앞에 선다 — 막는 것은 발생 시각뿐이다(고도몰 백필 90일이 그대로 발송됐다)',
-    ).toMatch(/e\.occurred_at >= NOW\(\) - \(\$5 \|\| ' hours'\)::interval/);
+    ).toMatch(/e\.occurred_at >= e\.created_at - \(\$5 \|\| ' hours'\)::interval/);   // ★1102 E1-3 도착 기준 나이
   });
 
   it('워커가 두 문에 같은 상수를 넘긴다 (한쪽만 막으면 자사몰 소급분이 그대로 나간다)', () => {

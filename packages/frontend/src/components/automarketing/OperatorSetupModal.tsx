@@ -13,6 +13,20 @@ import { normalizePhoneKr } from '../../utils/formatDate';
 import SegmentPicker from './SegmentPicker';
 // ★ 2026-07-30 (임은지 접수): MMS 이미지 첨부 — 여정 MMS 업로더 재사용(300KB JPG·최대 3장·라이브러리 자동 변환)
 import JourneyMmsUploader from '../journey/JourneyMmsUploader';
+// ★ 2026-11-02 엔진 재설계 E7-3 — 수정 창 오른쪽(좁은 화면 = 아래) 점검 판(여정 점검 판과 같은 부품)
+import OperatorCheckPanel from './OperatorCheckPanel';
+
+/** ★ 2026-11-02 E7-4 — 원 단위 콤마 입력(비우면 제한 없음 · 여정 최대 인원과 같은 모양) */
+function WonInput({ value, onChange, placeholder }: { value: number | null | undefined; onChange: (v: number | null) => void; placeholder: string }) {
+  return (
+    <div className="relative">
+      <input type="text" inputMode="numeric" value={value != null ? Number(value).toLocaleString('ko-KR') : ''}
+        onChange={(e) => { const d = e.target.value.replace(/\D/g, ''); onChange(d === '' ? null : Number(d)); }}
+        className={`${INP} pr-8 tabular-nums`} placeholder={placeholder} />
+      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-400">원</span>
+    </div>
+  );
+}
 
 const INP = 'w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-300 transition-colors';
 const LAB = 'text-xs font-medium text-slate-600 block mb-1.5';
@@ -53,7 +67,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className={`bg-white border border-slate-200 rounded-2xl shadow-2xl w-full ${isEdit ? 'max-w-5xl' : 'max-w-xl'} max-h-[90vh] overflow-hidden flex flex-col`} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-3 p-5 border-b border-slate-200 shrink-0">
           <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
             <Brain className="w-5 h-5 text-indigo-700" />
@@ -67,7 +81,8 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto space-y-4">
+        <div className={`p-5 overflow-y-auto ${isEdit ? 'lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-5 lg:items-start' : ''}`}>
+          <div className="space-y-4 min-w-0">
           <div className="text-xs text-slate-400">기본</div>
 
           <div>
@@ -288,17 +303,23 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             <div className="text-[10px] text-slate-400 leading-relaxed">발송 희망 시각의 준비 시간(기본 120분) 전에 문안을 생성해 스팸필터 테스트를 거치고, 담당자에게 실제 문안과 발송 정보(일시·대상·예상 비용)를 문자로 안내합니다. 희망 시각 정각에 자동 발송되며, 그 전까지 [정지]로 취소할 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
           </Section>
 
-          <Section icon={<Wallet className="w-4 h-4" />} title="비용 제어" summary={editing.budgetMonthly ? `월 ${won(editing.budgetMonthly)}` : '예산 무제한'} accent>
+          <Section icon={<Wallet className="w-4 h-4" />} title="비용 제어" summary={editing.budgetMonthly ? `월 ${won(editing.budgetMonthly)}` : editing.budgetDaily ? `하루 ${won(editing.budgetDaily)}` : '제한 없음'} accent>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] text-slate-500 block mb-1">월 예산 (원)</label>
-                <input type="number" min="0" step="10000" value={editing.budgetMonthly ?? ''} onChange={(e) => setEditing({ ...editing, budgetMonthly: e.target.value === '' ? null : Number(e.target.value) })} className={INP} placeholder="예: 2000000" />
+                <label className="text-[11px] text-slate-500 block mb-1">월 예산 (선택)</label>
+                <WonInput value={editing.budgetMonthly} onChange={(v) => setEditing({ ...editing, budgetMonthly: v })} placeholder="비우면 제한 없음" />
               </div>
               <div>
-                <label className="text-[11px] text-slate-500 block mb-1">일별 한도 (원)</label>
-                <input type="number" min="0" step="5000" value={editing.budgetDaily ?? ''} onChange={(e) => setEditing({ ...editing, budgetDaily: e.target.value === '' ? null : Number(e.target.value) })} className={INP} placeholder="비움 = 무제한" />
+                <label className="text-[11px] text-slate-500 block mb-1">하루 한도 (선택)</label>
+                <WonInput value={editing.budgetDaily} onChange={(v) => setEditing({ ...editing, budgetDaily: v })} placeholder="비우면 제한 없음" />
               </div>
             </div>
+            {editing.budgetMonthly == null && editing.budgetDaily == null && (
+              <div className="flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[11.5px] text-amber-900">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                예산을 비우면 발송비에 상한이 없어요. 회차마다 받는 분 수만큼 나가요.
+              </div>
+            )}
             <div>
               <label className="text-[11px] text-slate-500 block mb-1">알림 임계값 (%)</label>
               <input type="number" min="50" max="100" step="5" value={editing.budgetAlertThreshold ?? 80} onChange={(e) => setEditing({ ...editing, budgetAlertThreshold: Number(e.target.value) })} className={INP} />
@@ -310,6 +331,12 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
             <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-800 flex items-start gap-2">
               <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <div>{error}</div>
+            </div>
+          )}
+          </div>
+          {isEdit && editing.id && (
+            <div className="mt-4 lg:mt-0 lg:sticky lg:top-0">
+              <OperatorCheckPanel operatorId={String(editing.id)} />
             </div>
           )}
         </div>

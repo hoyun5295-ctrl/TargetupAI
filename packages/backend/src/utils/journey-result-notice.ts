@@ -13,7 +13,8 @@
 
 import { query, withBoundedMysql } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, getPlatformNoticeCallback } from './sms-queue';
+import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsCampaignSpamCountsSafe, getPlatformNoticeCallback } from './sms-queue';
+import { isSpamBlockSurge } from './sms-result-map';
 import { pickOwnerContact } from './owner-contact';
 import { isStepNotifyOn, messageStepBoundsSql } from './journey-step-notify';
 import { dueExecutionsSql } from './journey-pause-handler';
@@ -65,15 +66,20 @@ export function decideResultNotice(f: ResultNoticeFacts): ResultNoticeDecision {
 export function buildResultNoticeBody(p: {
   journeyName: string; stepOrder: number; messageSteps: number; isLast: boolean; sendDay: string;
   sentCount: number; countsKnown: boolean; success: number; fail: number; pending: number; dayTotal: boolean;
+  /** ★ 2026-11-02 E3-5 — 스팸 차단 몰림이면 그 수(머리 · 경고 줄이 바뀐다) */
+  spamBlocked?: number;
 }): string {
   const [, mm, dd] = p.sendDay.split('-');
   const dayLabel = `${Number(mm)}월 ${Number(dd)}일`;
   const resultLine = p.countsKnown
     ? `성공: ${p.success}건 / 실패: ${p.fail}건${p.pending > 0 ? ` / 대기: ${p.pending}건` : ''}`
     : '결과 집계 전. 발송결과 화면에서 확인해 주세요';
+  const spam = p.spamBlocked && p.spamBlocked > 0 ? p.spamBlocked : 0;
+  const spamPct = spam > 0 ? Math.round((spam / Math.max(1, p.success + p.fail)) * 100) : 0;
   return [
-    '[여정 발송 결과]',
+    spam > 0 ? SPAM_SURGE_NOTICE_TITLE : '[여정 발송 결과]',
     '',
+    ...(spam > 0 ? [`통신사가 이 칸 문자 ${spam}건(${spamPct}%)을 스팸으로 막았어요. 문안을 확인해 주세요(여정은 그대로 나가요).`, ''] : []),
     `여정: ${p.journeyName || '여정 자동 발송'}`,
     `step ${p.stepOrder} / ${p.messageSteps}${p.isLast ? ' (최종)' : ''}`,
     `날짜: ${dayLabel}`,
@@ -84,6 +90,9 @@ export function buildResultNoticeBody(p: {
     p.isLast ? '여정 마지막 칸입니다.' : '다음 칸은 정한 때에 이어서 나갑니다.',
   ].join('\n');
 }
+
+/** ★ 2026-11-02 E3-5 — 스팸 차단 몰림 안내 제목(결과 안내와 같은 한 통 · 머리만 바뀐다) */
+export const SPAM_SURGE_NOTICE_TITLE = '[여정 스팸 차단 안내]';
 
 // ── 기록 칸(C84-DDL-1) 확인 — 참은 기억 · 거짓은 5분 뒤 다시(journey-lineage 와 같은 규약) ──
 let _ready = false;
@@ -171,23 +180,31 @@ async function handleStepDay(row: any): Promise<void> {
     [...pk, sentCount, oldSent],
   )).rows.length > 0;
 
-  const contact = isStepNotifyOn(row.notify_manager_on_pretest, row.step_order, row.first_message_order, row.last_message_order)
-    ? await pickOwnerContact(row.company_id, row.created_by || null)
-    : null;
+  // ★ 2026-11-02 엔진 재설계 E3-5 — 스팸 차단 몰림은 사람이 볼 일이라 결과 알림을 끈 칸도 센다(받는 사람 = 같은 함수 · 결과 안내와 같은 한 통 장치)
+  const notifyOn = isStepNotifyOn(row.notify_manager_on_pretest, row.step_order, row.first_message_order, row.last_message_order);
+  const owner = await pickOwnerContact(row.company_id, row.created_by || null);
+  const contact = notifyOn ? owner : null;
 
-  let success = 0; let fail = 0; let pending = 0; let countsKnown = false;
-  if (contact) {
+  let success = 0; let fail = 0; let pending = 0; let countsKnown = false; let spamBlocked = 0;
+  if (owner) {
     try {
       const tables = await getCompanySmsTablesWithLogs(row.company_id, row.created_by || undefined);
       if (tables.length > 0) {
         const agg = await smsCampaignCountsSafe(tables, [row.campaign_id]);
         const c = agg.get(String(row.campaign_id));
-        if (c) { success = Number(c.success || 0); fail = Number(c.fail || 0); pending = Number(c.pending || 0); countsKnown = true; }
+        if (c) { success = Number(c.success || 0); fail = Number(c.fail || 0); pending = Number(c.pending || 0); }
+        spamBlocked = Number((await smsCampaignSpamCountsSafe(tables, [row.campaign_id])).get(String(row.campaign_id)) || 0);
+        countsKnown = !!c;   // 스팸 수까지 읽어야 안다(못 읽음 ≠ 0 · 0 으로 읽으면 알림 끈 칸이 몰림을 못 보고 마감 · ★ Codex 구현 2R · R7)
       }
     } catch (aggErr: any) {
       console.warn(`[journey-result] 결과 집계 실패 campaign=${row.campaign_id}:`, aggErr?.message || aggErr);
     }
   }
+  const surge = countsKnown && isSpamBlockSurge(spamBlocked, success + fail);
+  // 알림을 끈 칸 = 결과가 다 들어올 때까지 기록을 미룬다(날짜가 바뀌어도 · 결과를 못 읽어도 · 그 뒤에 드러나는 몰림을 놓치지 않게 ·
+  //   안내는 몰림일 때 첫 단계 한 번 · 기다림의 끝 = 후보 창 RESULT_NOTICE_WINDOW_DAYS · ★ Codex 구현 1R · R14)
+  if (!notifyOn && owner && !surge && (!countsKnown || pending > 0 || row.still_due)) return;
+  const surgeOnly = !notifyOn && surge && !row.noticed && !!owner;
 
   const decision = decideResultNotice({
     notifyOn: !!contact, sendDay: String(row.send_day), todayKst: String(row.today_kst), kstHour: Number(row.kst_hour),
@@ -195,12 +212,14 @@ async function handleStepDay(row: any): Promise<void> {
     stillDue: !!row.still_due, countsKnown, pending,
   });
   if (decision === 'wait') return;
-  if (decision === 'record_only' || !contact) { await finalize(); return; }
+  if (!surgeOnly && (decision === 'record_only' || !contact)) { await finalize(); return; }
+  const to = (contact || owner)!;
 
   const body = buildResultNoticeBody({
     journeyName: String(row.journey_name || ''), stepOrder: Number(row.step_order), messageSteps: Number(row.message_steps || 0),
     isLast: Number(row.step_order) === Number(row.last_message_order), sendDay: String(row.send_day),
     sentCount, countsKnown, success, fail, pending, dayTotal: decision === 'day_total',
+    spamBlocked: surge ? spamBlocked : 0,
   });
   const result = await sendNoticeOnce({
     claim: async () => (await query(
@@ -214,7 +233,7 @@ async function handleStepDay(row: any): Promise<void> {
       const authTable = await getAuthSmsTable();
       const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(
         [authTable],
-        [[contact.phone, getPlatformNoticeCallback(), body, 'L', '[여정 발송 결과]', null, '', row.company_id, '', '', '']],
+        [[to.phone, getPlatformNoticeCallback(), body, 'L', surge ? SPAM_SURGE_NOTICE_TITLE : '[여정 발송 결과]', null, '', row.company_id, '', '', '']],
         true,
         undefined,
         { run },

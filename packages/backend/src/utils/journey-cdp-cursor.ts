@@ -181,7 +181,7 @@ export type JourneyTriggerClass = 'event_cursor' | 'event_special' | 'state';
  *   - event_special: cart_abandon — 이벤트 기반이나 "이후 결제 없음" 파생 상태라 별도 properties 동봉(trigger-watcher).
  *   - state: 휴면/생일/포인트/신규/자유 세그먼트 — 진입 이벤트 없음(properties 원천 부재, 설계상 정상).
  * 새 이벤트성 트리거 추가 시 event_cursor면 resolveCdpCursorEventName도 함께 추가(verify 가드가 강제).
- * ★ 수신자 상한 필수 판정(journey-trigger-capability.requiresRecipientCap)도 이 분류를 쓴다 — state가 대상.
+ * (옛: 수신자 상한 필수 판정도 이 분류를 썼다 — ★ 2026-11-01 상한 = 선택으로 판정 함수가 없어졌다)
  */
 export function classifyJourneyTrigger(triggerEvent: string): JourneyTriggerClass {
   switch (triggerEvent) {
