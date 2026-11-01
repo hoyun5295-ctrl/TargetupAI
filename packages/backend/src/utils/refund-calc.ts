@@ -210,3 +210,54 @@ export function calcAlimtalkUnitDiff(p: {
   }
   return Math.round(total * 100) / 100;
 }
+
+/*
+ * ── ★ 2026-11-01 B-1101-4 · 뿌리 R37 — 정산 기준(본 적 있는 가장 큰 값) ──
+ *   설계서 docs/2026-11-01-result-read-shrink-guard-design.md §3.
+ *   실제로는 늘기만 하는 수(성공 행 · 대체 행 · 알림톡 결과별 차액 · 분리 축 적재 · 성공)를 정산이 읽기로 내리지 않는다.
+ *   MySQL 읽기가 행 일부를 못 보면(1101 .62 SMSQ_SEND_15 인덱스 어긋남 · 0926 라인 재배정) 그 수가 줄어 보이고,
+ *   줄어든 값이 미적재 · 실패 목표 · 회수 한도에 들어가 실제로 나간 문자 값을 환불하거나 정당한 환불을 회수했다.
+ *   전체 축 적재 기준은 campaigns.sent_count(적재 경로 기록 · 읽기로 올리기만) · 그 밖은 send_config.readHigh.
+ *   실패는 기준을 두지 않는다(7305 → 성공처럼 실제로 줄 수 있다).
+ */
+export interface ReadHigh {
+  success: number;
+  /** 여정 알림톡 대체 행 수(smsCampaignSubRowCounts) */
+  sub: number;
+  /** 알림톡 결과별 단가 차액(원 · 모호 판정이 아닌 회차의 값으로만 올린다) */
+  unitDiff: number;
+  brandLoaded: number;
+  brandSuccess: number;
+  nonBrandLoaded: number;
+  nonBrandSuccess: number;
+}
+export const READ_HIGH_KEYS = ['success', 'sub', 'unitDiff', 'brandLoaded', 'brandSuccess', 'nonBrandLoaded', 'nonBrandSuccess'] as const;
+
+/** send_config.readHigh(jsonb · 없음 · 옛 값) → 기준. 못 읽는 값은 0(= 기준 없음 = 종전 동작). */
+export function parseReadHigh(raw: unknown): ReadHigh {
+  const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const num = (v: unknown): number => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  return {
+    success: num(o.success), sub: num(o.sub), unitDiff: num(o.unitDiff),
+    brandLoaded: num(o.brandLoaded), brandSuccess: num(o.brandSuccess),
+    nonBrandLoaded: num(o.nonBrandLoaded), nonBrandSuccess: num(o.nonBrandSuccess),
+  };
+}
+
+/** 이번 읽기를 기준에 얹는다(칸마다 큰 값 · 넘기지 않은 칸은 그대로). 차액은 원 단위 소수 둘째 자리. */
+export function mergeReadHigh(prev: ReadHigh, seen: Partial<ReadHigh>): ReadHigh {
+  const next = { ...prev };
+  for (const k of READ_HIGH_KEYS) {
+    const v = Number(seen[k]);
+    if (Number.isFinite(v) && v > next[k]) next[k] = k === 'unitDiff' ? Math.round(v * 100) / 100 : Math.floor(v);
+  }
+  return next;
+}
+
+/** 기준이 하나라도 커졌는가(커질 때만 기록을 쓴다). */
+export function readHighGrew(prev: ReadHigh, next: ReadHigh): boolean {
+  return READ_HIGH_KEYS.some((k) => next[k] > prev[k]);
+}

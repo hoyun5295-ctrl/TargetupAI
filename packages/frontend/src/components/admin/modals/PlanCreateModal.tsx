@@ -6,8 +6,8 @@ import type { Dispatch, SetStateAction } from 'react';
 
 export interface PlanCreateModalProps {
   loadPlans: () => Promise<void>;
-  newPlan: { planCode: string; planName: string; maxCustomers: number; monthlyPrice: number; };
-  setNewPlan: Dispatch<SetStateAction<{ planCode: string; planName: string; maxCustomers: number; monthlyPrice: number; }>>;
+  newPlan: { planCode: string; planName: string; maxCustomers: number; monthlyPrice: number; aiCreditsPerMonth: string; };
+  setNewPlan: Dispatch<SetStateAction<{ planCode: string; planName: string; maxCustomers: number; monthlyPrice: number; aiCreditsPerMonth: string; }>>;
   setShowPlanModal: Dispatch<SetStateAction<boolean>>;
   showAlert: (title: string, message: string, variant?: 'success' | 'error' | 'warning' | 'info') => void;
 }
@@ -25,14 +25,15 @@ export default function PlanCreateModal(props: PlanCreateModalProps) {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(newPlan)
+        // ★ 2026-11-01 크레딧 컨트롤타워 C10 — 월 AI 크레딧 필수(비우면 그 요금제 회사의 AI 차감이 통째로 꺼졌다)
+        body: JSON.stringify({ ...newPlan, aiCreditsPerMonth: newPlan.aiCreditsPerMonth === '' ? null : Number(newPlan.aiCreditsPerMonth) })
       });
       
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '등록 실패');
       
       setShowPlanModal(false);
-      setNewPlan({ planCode: '', planName: '', maxCustomers: 1000, monthlyPrice: 0 });
+      setNewPlan({ planCode: '', planName: '', maxCustomers: 1000, monthlyPrice: 0, aiCreditsPerMonth: '' });
       loadPlans();
       showAlert('성공', '요금제가 등록되었습니다.', 'success');
     } catch (error: any) {
@@ -81,12 +82,26 @@ export default function PlanCreateModal(props: PlanCreateModalProps) {
                   required
                 />
               </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">월 AI 크레딧 *</label>
+                <input
+                  type="number"
+                  value={newPlan.aiCreditsPerMonth}
+                  onChange={(e) => setNewPlan({ ...newPlan, aiCreditsPerMonth: e.target.value })}
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-green-500 outline-none"
+                  min="0"
+                  step="1"
+                  placeholder="예: 300 (AI를 주지 않는 요금제는 0)"
+                  required
+                />
+                <p className="mt-1 text-[11px] text-gray-400">매월 1일에 이 양이 지급되고, 달 중간에 바꾸면 남은 날만큼 일할됩니다.</p>
+              </div>
               <div className="flex gap-3 pt-4">
                 <button
                   type="button"
                   onClick={() => {
                     setShowPlanModal(false);
-                    setNewPlan({ planCode: '', planName: '', maxCustomers: 1000, monthlyPrice: 0 });
+                    setNewPlan({ planCode: '', planName: '', maxCustomers: 1000, monthlyPrice: 0, aiCreditsPerMonth: '' });
                   }}
                   className="whitespace-nowrap flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50"
                 >

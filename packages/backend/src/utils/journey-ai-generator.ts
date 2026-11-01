@@ -15,7 +15,8 @@
  *   - (광고)+080+KISA 제목 = 시스템 자동 합성 (직접 작성 X)
  */
 
-import { ensureOnceLink, type VoiceFormDecision } from './voice-form-slots';
+import { ensureOnceLink, rewriteDropsLinks, stripOmittedLinks, type VoiceFormDecision } from './voice-form-slots';
+import { journeyCopyFacts, journeyCopyGround, fillBenefitSpots, hasBenefitSpot, type JourneyCopyFacts } from './journey-copy-facts';
 import { UserFacingError } from './http-error';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
@@ -49,7 +50,7 @@ import { formatConditionMenuForAi } from './journey-condition-fields';
 // 추천 문구의 단일 출처 — "이어서 만들기"와 기회 카드가 같은 목표 골격을 쓴다.
 import { presetObjectiveFor } from './journey-opportunities';
 // ★ 2026-08-02 (Codex 1R): AI가 지어낸 혜택 기계 차단 — 프롬프트는 경계가 아니다.
-import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacyTitledBody, efficacyNote, findSeasonWords, dropSeasonSentences, seasonNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { BENEFIT_PLACEHOLDER, findNewNumbers, findInventedBenefits, replaceInventedBenefits, claimsInventedEfficacy, dropInventedEfficacyTitledBody, efficacyNote, findSeasonWords, dropSeasonSentences, seasonNote, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 // ★ 2026-09-27 한줄로 V2 R260 — 여정 자동 생성은 사전 확인 → 묶음 생성 → 1회 차감
 import { checkCredit, deductCreditOutcome, isChargedByKey, CreditSettleError, runChargedAi } from './ai-credit';
 import { joinInflight } from './inflight-lock';
@@ -161,6 +162,11 @@ export interface JourneyAIPackage {
    */
   presetTriggerEvent: string | null;
   /**
+   * ★ 2026-11-01 여정 재발 방지 B1-3(Codex 구현 1R B #4) — 질문표에서 사람이 정한 값(저장 때 사람 값 원장으로 간다) · 세 갈래 그대로:
+   *   benefits = 정함 [글] · 「혜택 없음」 [] · 안 정함 null / link = 정함 주소 · 「링크 뺌」 'omit' · 안 정함 null
+   */
+  decidedFacts?: { benefits: string[] | null; link: string | 'omit' | null };
+  /**
    * ★ 2026-08-08 혜택 입력 — 이 패키지 생성에 실제로 쓰인 혜택(정규화 후). null = 미입력.
    *   재생성이 이 값을 다시 실어야 다시 만들기 한 번에 혜택이 placeholder로 되돌아가지 않는다
    *   (프리셋 유실과 같은 뿌리 — 패키지를 다시 만드는 자리가 축을 떨어뜨린다).
@@ -200,6 +206,8 @@ export interface JourneyStepAiContext {
 
 export interface StepRefineInput {
   companyId: string;
+  /** ★ 2026-11-01 여정 재발 방지 B1-3 — 저장된 여정의 사람 값 원장(혜택 · 링크). 없으면(새 여정 · 남의 여정 · DDL 전) 옛 근거. */
+  copyFacts?: JourneyCopyFacts | null;
   /** 비어 있으면 **생성 모드** — 여정 맥락(journey)으로 처음부터 쓴다(§13-3). */
   currentMessage: string;
   channel: 'sms' | 'lms' | 'mms';
@@ -224,6 +232,8 @@ export interface StepRefineCandidate {
 
 export interface StepSpamRegenInput {
   companyId: string;
+  /** ★ 2026-11-01 여정 재발 방지 B1-3 — 그 여정의 사람 값 원장(재작성 = 고치기 모드 근거 · 없으면 원문만) */
+  copyFacts?: JourneyCopyFacts | null;
   currentMessage: string;
   channel: 'sms' | 'lms' | 'mms';
   isAd: boolean;
@@ -631,6 +641,9 @@ VIP 회원님께 먼저 전하는 이번 안내,
   //   strip은 지우기만 할 수 있다 — AI가 더 엄격한 프롬프트를 따라 placeholder를 내면 승인된 혜택을 복원할 길이 없다.
   //   그래서 분기마다 basis와 같은 집합을 프롬프트에 선언한다: 전용 입력이 있으면 그것 하나 / 없으면 목표문의 혜택.
   if (benefitText) {
+    // ★ 2026-11-01 여정 재발 방지 B1-3(J3) — 혜택이 정해졌으면 지시문 · 예시의 혜택 자리표시를 그 혜택으로 바꿔 둔다
+    //   (옛: 예시 문단이 자리표시를 그대로 보여 줘 AI 가 일부 칸에 자리표시를 남겼다 · 1101 Harold 「마지막엔 10% 할인쿠폰 · 위엔 직접입력해주세요」)
+    system = system.split(BENEFIT_PLACEHOLDER).join(benefitText);
     system += `
 
 [★ 예외: 회사가 승인한 혜택 (위 placeholder 규칙보다 우선)]
@@ -647,7 +660,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
 
   let userMessage: string;
   if (objectiveText.length >= 3) {
-    userMessage = `여정 목표: ${objectiveText}\n\n위 회사 컨텍스트 + 메모리를 종합하여 완전한 여정 패키지 JSON을 응답하세요. 계절·월·날씨 언급 없이 시간 불문 감성으로 풍성하게 작성하고, 혜택 영역은 placeholder로 처리하세요.`;
+    userMessage = `여정 목표: ${objectiveText}\n\n위 회사 컨텍스트 + 메모리를 종합하여 완전한 여정 패키지 JSON을 응답하세요. 계절·월·날씨 언급 없이 시간 불문 감성으로 풍성하게 작성하고, ${benefitText ? '혜택은 아래 [사용 가능한 혜택]을 모든 문자 단계에 같은 값으로 쓰세요.' : '혜택 영역은 placeholder로 처리하세요.'}`;
   } else {
     userMessage = `7 표준 시리즈 단축 진입: ${input.templateHint}\n\n위 회사 컨텍스트 + 메모리에 맞춰 ${input.templateHint} 시리즈의 표준 흐름을 계절 언급 없이 풍성하게 작성한 JSON 응답하세요.`;
   }
@@ -662,7 +675,7 @@ VIP 회원님께 먼저 전하는 이번 안내,
   }
 
   // ★ 2026-08-08 혜택 입력 — placeholder 대신 사용자가 준 혜택을 처음부터 녹인다.
-  //   이 지시는 문장을 자연스럽게 하려는 것이고, 경계는 아래 stripUnauthorizedBenefits가 잡는다
+  //   이 지시는 문장을 자연스럽게 하려는 것이고, 경계는 아래 replaceInventedBenefits(값 · 종류 짝)가 잡는다
   //   (이 혜택 밖의 %·원·쿠폰·무료는 근거가 없어 여전히 placeholder로 되돌아간다).
   if (benefitText) {
     userMessage += `\n\n[사용 가능한 혜택: 이것 하나뿐] "${benefitText}"\n[혜택 안내: 직접 수정해주세요] placeholder를 쓰지 말고 이 혜택을 본문에 자연스럽게 녹이세요. 이 혜택 외의 다른 구체 혜택은 절대 쓰지 마세요.`;
@@ -760,12 +773,14 @@ VIP 회원님께 먼저 전하는 이번 안내,
         const season = dropSeasonSentences(g.body, seasonGround);
         seasonDroppedPkg += season.dropped.length;
         const subject = findSeasonWords(g.subject, seasonGround).length > 0 ? '' : g.subject;
-        const linked = ensureOnceLink(season.text, onceLink).text;
+        // ★ 1101 B1-3(J3) — 정해진 혜택이 있는데 자리표시가 남았으면 그 혜택으로 채운다(칸마다 혜택이 갈리지 않게)
+        const benefitFilled = !!benefitText && hasBenefitSpot(season.text);
+        const linked = ensureOnceLink(benefitFilled ? fillBenefitSpots(season.text, benefitText) : season.text, onceLink).text;
         const named = ensureSenderName(linked, { isAd: resolveJourneyAdFlag(channel, s.isAd), channel, subject, names: [ctx.brandName, ctx.companyName] });
         return { messageTemplate: named.text, subject };
       })(dropInventedEfficacyTitledBody(
-        stripUnauthorizedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),
-        stripUnauthorizedBenefits(stripAdParts(messageSan.sanitized), benefitBasis),
+        replaceInventedBenefits(stripAdParts(subjectSan.sanitized), benefitBasis),
+        replaceInventedBenefits(stripAdParts(messageSan.sanitized), benefitBasis),
         efficacyBasis,
       )),
       isAd: resolveJourneyAdFlag(channel, s.isAd),
@@ -845,6 +860,10 @@ VIP 회원님께 먼저 전하는 이번 안내,
     triggerFilters,
     presetTriggerEvent: presetTrigger,
     benefitText: benefitText || null,
+    decidedFacts: {
+      benefits: benefitText ? [benefitText] : input.benefitText === null ? [] : null,
+      link: onceLink ? onceLink : input.voiceForm?.link && 'omit' in input.voiceForm.link ? 'omit' : null,
+    },
     steps,
     allowReentry: reentry ? reentry.allowReentry : !!parsed.allowReentry,
     reentryCooldownDays: reentry ? reentry.cooldownDays : (parsed.reentryCooldownDays != null ? Math.max(0, Math.min(3650, Number(parsed.reentryCooldownDays))) : null),
@@ -922,6 +941,16 @@ async function refineStepMessageWithAi(input: StepRefineInput): Promise<{ candid
 
   const maxBytes = input.channel === 'sms' ? 90 : 2000;
 
+  // ★ 2026-11-01 여정 재발 방지 B1-3 — 혜택 근거 = journeyCopyGround 한 곳(여정 생산자 공통 규칙).
+  //   고치기(본문 있음) = 원장 혜택 + 지금 본문 · 쓰기(빈 칸) = 원장 혜택 · 원장이 없으면 앞 칸 글(같은 여정의 혜택이 칸마다 갈리지 않게 · Harold 1101).
+  const facts = journeyCopyFacts(input.copyFacts);
+  const prevText = (jc?.previousMessages || []).map((p) => p.message).join('\n');
+  const benefitGround = journeyCopyGround(input.copyFacts, hasBody ? 'fix' : 'write', hasBody ? '' : prevText, input.currentMessage || '');
+  const factBenefit = facts.benefit.state === 'set' ? facts.benefit.ground.split('\n')[0] : '';
+  const factsBlock = facts.benefit.state === 'set'
+    ? `\n[정해진 혜택: 사람이 정한 값 · 이것만 쓴다]\n${facts.benefit.ground}\n이 혜택은 자리표시 없이 자연스럽게 녹여 쓰고, 그 밖의 구체 혜택(% · 원 · 쿠폰 · 무료)은 쓰지 않는다.`
+    : facts.benefit.state === 'none' ? '\n[정해진 혜택: 없음] 구체 혜택(% · 원 · 쿠폰 · 무료)은 쓰지 않고 혜택 자리표시도 넣지 않는다.' : '';
+
   // ★ 2026-08-08 (Harold 접수) — 후보 3개를 늘어놓고 고르게 하는 것은 선택 피로다.
   //   화면이 한 안만 쓰면 나머지 둘은 시간·토큰만 쓰고 버려진다. 몇 개를 만들지는 호출부가 정한다.
   const wantCount = input.variants === 1 ? 1 : 3;
@@ -944,12 +973,12 @@ ${EFFICACY_REWRITE_RULE}
 ${memoryContext}
 
 [step 의도] ${input.stepIntent || '(미지정)'}
-${buildJourneyContextBlock(jc, hasBody)}
+${buildJourneyContextBlock(jc, hasBody)}${factsBlock}
 
 [다듬기 원칙]
-✓ 원본의 의미 / 변수 / 혜택 placeholder([혜택 안내: 직접 수정해주세요]) / URL placeholder 모두 보존
+✓ 원본의 의미 / 변수 / ${facts.benefit.state === 'unset' ? '혜택 placeholder([혜택 안내: 직접 수정해주세요]) / ' : ''}URL placeholder 모두 보존
 ✓ 안내문 / 인사 / 감성 텍스트는 회사 톤에 맞춰 풍성하게 정련 (계절 단어 없이)
-✗ 구체 혜택 (% / 원 / 무료 / 쿠폰) 임의 생성 금지: placeholder 유지
+✗ 구체 혜택 (% / 원 / 무료 / 쿠폰) 임의 생성 금지: ${facts.benefit.state === 'set' ? '[정해진 혜택]만 쓴다' : facts.benefit.state === 'none' ? '혜택 문장을 쓰지 않는다' : 'placeholder 유지'}
 ✗ (광고) / 무료수신거부 080 직접 작성 X
 ${buildWeatherRefineRule()}
 ✓ 최대 ${maxBytes}바이트 안
@@ -982,7 +1011,7 @@ ${single
   const countPhrase = single ? '가장 알맞은 안 하나로' : '3가지 톤 후보로';
   const userMessage = hasBody
     ? `원본 메시지:\n${input.currentMessage}\n\n위 메시지를 ${countPhrase} 다듬어 JSON으로 응답하세요. 혜택 placeholder + 변수는 그대로 유지하고 안내문/감성 텍스트만 정련하세요.`
-    : `이 스텝의 문안을 처음부터 ${countPhrase} 써서 JSON으로 응답하세요. 위 [여정 맥락]의 트리거·목적·순번·발송 시점에 맞추고, [앞 스텝 문안]과 내용이 겹치지 않게 하세요. 구체 혜택은 지어내지 말고 placeholder로 두세요.`;
+    : `이 스텝의 문안을 처음부터 ${countPhrase} 써서 JSON으로 응답하세요. 위 [여정 맥락]의 트리거·목적·순번·발송 시점에 맞추고, [앞 스텝 문안]과 내용이 겹치지 않게 하세요. ${facts.benefit.state === 'set' ? '[정해진 혜택]을 자연스럽게 넣으세요.' : facts.benefit.state === 'none' ? '혜택 문장은 쓰지 마세요.' : '구체 혜택은 지어내지 말고 placeholder로 두세요.'}`;
 
   // ★ 2026-10-28 AI 메모리 설계 K11-1 · K11-4 — 본문이 있으면 고치기(예시 0 · 원문 꼴 유지) · 없으면 쓰기 · 성격 = 그 단계 종류(없으면 광고 여부)
   system = (await composeVoicePrompt({
@@ -1023,7 +1052,11 @@ ${single
     const rawMsg = aiStr(c.message).slice(0, maxBytes * 2);
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);
-    const pure = stripUnauthorizedBenefits(stripAdParts(san.sanitized), input.currentMessage || '');
+    let pure = replaceInventedBenefits(stripAdParts(san.sanitized), benefitGround);
+    // ★ 1101 B1-3 — 원장 혜택이 있으면 남은 자리표시는 그 혜택으로(AI 가 자리표시를 남겨도 사람 값이 들어간다) · 링크도 원장 그대로
+    if (factBenefit && hasBenefitSpot(pure)) pure = fillBenefitSpots(pure, factBenefit);
+    if (facts.link.state === 'set') pure = ensureOnceLink(pure, facts.link.url).text;
+    else if (facts.link.state === 'omit') pure = stripOmittedLinks(pure, input.currentMessage || '');   // ★ Codex 구현 2R B #4 — AI 가 넣은 주소 줄도(본문에 있던 주소는 사람 글이라 둔다)
     return {
       message: pure, // 순수 본문 — (광고)는 발송/미리보기 합성 (이중부착 방지)
       tone: validTones.includes(c.tone) ? c.tone : '감성적',
@@ -1035,9 +1068,11 @@ ${single
     //   혜택 낱말 없이도 고객에게는 약속이다. 다 버려지면 빈 목록 = 화면 "다듬은 결과가 없습니다. 다시 시도해 주세요."
     //   생성 모드(본문 없음)는 대조할 원문이 없어 이 검사를 하지 않는다(혜택은 위 CT가 자리표시로 바꾼다).
     .filter((c) => c.message.trim().length > 0)   // ★ 1026 Codex 3R — 빈 후보({} · 다 지워진 글) = 후보 아님(쓸 결과 판정)
-    .filter((c) => !hasBody || findNewNumbers(c.message, input.currentMessage || '').length === 0)
+    .filter((c) => !hasBody || findNewNumbers(c.message, [input.currentMessage || '', benefitGround, facts.link.url || ''].join('\n')).length === 0)
+    // ★ 1101 B1-3 — 고치기는 원문의 링크를 잃은 안을 버린다(R32 · 원장 링크가 없을 때만 · 있으면 위에서 원장 주소를 붙였다)
+    .filter((c) => !hasBody || facts.link.state !== 'unset' || !rewriteDropsLinks(c.message, input.currentMessage || ''))
     // ★ 2026-10-24 ② 근거(currentMessage · 혜택과 같은 근거) 없는 효능 단정이 든 안은 버린다(생성 모드 = 근거 0 · 혜택과 같은 엄격함)
-    .filter((c) => !claimsInventedEfficacy(c.message, input.currentMessage || ''))
+    .filter((c) => !claimsInventedEfficacy(c.message, [input.currentMessage || '', benefitGround].join('\n')))
     // ★ 2026-10-28 K11-1 고치기 출구 대조 — 원문이 있으면 그 꼴이 무너진 안은 버린다(I12)
     .filter((c) => !hasBody || rewriteShapeDrift(input.currentMessage, c.message).length === 0)
     // ★ 2026-10-28 K1-7 — 근거(원문 · 여정 목표)에 없는 계절 · 월 낱말이 든 안은 버린다(여정은 연중 나간다)
@@ -1125,8 +1160,8 @@ ${memoryContext}
   const benefitBasis = String(input.objective || '');
   // ★ 2026-10-24 ② 혜택 → 효능(같은 근거 · 제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 제목 = 비워도 되는 칸)
   const g = dropInventedEfficacyTitledBody(
-    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.subject).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
-    stripUnauthorizedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.message).slice(0, 4000)).sanitized), benefitBasis),
+    replaceInventedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.subject).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
+    replaceInventedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.message).slice(0, 4000)).sanitized), benefitBasis),
     benefitBasis,
   );
   // ★ 2026-10-28 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문 · 제목은 비워도 되는 칸) · K1-1 기준일 단계 = LMS 광고 → 첫 줄 또는 제목에 전송자 명칭
@@ -1222,11 +1257,20 @@ async function makeAnchorJourneyPlan(input: { companyId: string; objective: stri
 //   source 'journey-ai-refine' → callAIWithFallback가 1크레딧 자동 차감.
 //   혜택/숫자/약속/placeholder/Liquid는 그대로 보존 (거짓 혜택 생성 금지).
 // ════════════════════════════════════════════════════════════════════
-export async function regenerateStepAvoidingSpam(...args: Parameters<typeof regenerateStepAvoidingSpamWithAi>): ReturnType<typeof regenerateStepAvoidingSpamWithAi> {
+export async function regenerateStepAvoidingSpam(
+  input: StepSpamRegenInput,
+  /** ★ 2026-11-01 B1-4 — 보내기 전 재작성 후보: 차감 키 고정(판마다) · 정산 직전 「아직 내 후보인가」 확인(아니면 0원) */
+  charge?: { idempotencyKey: string; stillMine: () => Promise<boolean> },
+): Promise<string | null> {
   // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다시 쓴 문안이 나올 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
   const { result } = await runChargedAi({
-    companyId: args[0].companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
-    run: () => regenerateStepAvoidingSpamWithAi(...args),
+    companyId: input.companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
+    ...(charge ? { idempotencyKey: charge.idempotencyKey } : {}),
+    // 정산 직전 확인 = AI 결과 바로 뒤 · 정산 바로 앞(run 끝) — 아직 내 후보가 아니면 쓸 결과가 아니다(null = 0원 · ai-credit 계약은 그대로)
+    run: async () => {
+      const r = await regenerateStepAvoidingSpamWithAi(input);
+      return r !== null && charge && !(await charge.stillMine()) ? null : r;
+    },
     accept: (r) => r !== null,
   });
   return result;
@@ -1279,18 +1323,25 @@ ${EFFICACY_REWRITE_RULE}
   const out = san.sanitized || null;
   // ★ 2026-09-26 한줄로 V2 R1-44 — 이 재작성은 사람 검토 없이 실발송 스냅샷을 바꾼다. 원본에 없던 혜택을 AI가 만들었으면
   //   재작성을 버린다(대행 다듬기와 같은 혜택 차단 CT · 프롬프트 지시는 경계가 아니다). 버리면 자동 교체 없이 담당자 안내로 간다.
-  if (out && stripUnauthorizedBenefits(out, input.currentMessage) !== out) {
+  // ★ 1101 B1-3 — 근거 = journeyCopyGround(고치기 = 원장 혜택 + 원문) · 사람이 정한 혜택을 다르게 쓴 재작성이 버려지지 않게
+  const regenGround = journeyCopyGround(input.copyFacts, 'fix', '', input.currentMessage);
+  if (out && findInventedBenefits(out, regenGround).length > 0) {
     console.log(`[journey-ai-refine] 원본에 없던 혜택이 생겨 재작성을 버림 company=${input.companyId}`);
     return null;
   }
   // ★ 2026-09-30 WP2 — 원문에 없던 숫자(기한 · 수량 · 시간)도 같은 이유로 버린다(사람 검토 없이 실발송 스냅샷을 바꾼다)
-  if (out && findNewNumbers(out, input.currentMessage).length > 0) {
+  if (out && findNewNumbers(out, regenGround).length > 0) {
     console.log(`[journey-ai-refine] 원본에 없던 숫자가 생겨 재작성을 버림 company=${input.companyId}`);
     return null;
   }
   // ★ 2026-10-24 ② 원본에 없던 효능 단정도 같은 이유로 버린다
-  if (out && claimsInventedEfficacy(out, input.currentMessage)) {
+  if (out && claimsInventedEfficacy(out, regenGround)) {
     console.log(`[journey-ai-refine] 원본에 없던 효능 말이 생겨 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
+  // ★ 1101 B1-3(R32 넓힘) — 원문의 링크를 잃은 재작성은 버린다(사람 검토 없이 실발송 판을 바꾼다)
+  if (out && rewriteDropsLinks(out, input.currentMessage)) {
+    console.log(`[journey-ai-refine] 원문 링크가 빠져 재작성을 버림 company=${input.companyId}`);
     return null;
   }
   // ★ 2026-10-28 K11-1 고치기 출구 대조 — 원문의 줄바꿈 · 빈 줄 · 기호 꼴이 무너진 다시 쓰기는 버린다(I12)

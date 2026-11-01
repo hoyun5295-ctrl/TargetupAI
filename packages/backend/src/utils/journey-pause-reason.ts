@@ -27,7 +27,7 @@ const RULES: Array<{ test: RegExp; view: PauseReasonView }> = [
   { test: /라인그룹|발송 테이블/, view: { kind: 'line', text: '발송 설정이 아직 끝나지 않아 멈췄어요. 담당 매니저에게 문의해 주세요.', fix: { action: 'contact', label: '문의하기' } } },
   { test: /회신번호/, view: { kind: 'callback', text: '보내는 번호(회신번호)가 비어 있어 멈췄어요. 회신번호를 정해 주세요.', fix: { action: 'edit_callback', label: '회신번호 정하기' } } },
   { test: /알림톡 템플릿|카카오 템플릿/, view: { kind: 'template', text: '알림톡 템플릿을 쓸 수 없어 멈췄어요. 템플릿을 확인한 뒤 다시 켜 주세요.', fix: { action: 'edit_step', label: '템플릿 확인하기' } } },
-  { test: /제목이 비어/, view: { kind: 'subject', text: '장문 문자의 제목이 비어 있어 멈췄어요. 제목을 넣어 주세요.', fix: { action: 'edit_step', label: '제목 넣기' } } },
+  { test: /제목이 비어/, view: { kind: 'subject', text: 'LMS 제목이 비어 있어 멈췄어요. 제목을 넣어 주세요.', fix: { action: 'edit_step', label: '제목 넣기' } } },
   { test: /월 예산/, view: { kind: 'budget', text: '이번 달 예산을 넘어 멈췄어요. 예산을 늘리거나 다음 달에 다시 켜 주세요.', fix: { action: 'edit_options', label: '예산 바꾸기' } } },
   { test: /임계값|step 비용/, view: { kind: 'cost', text: '한 번에 나가는 발송비가 정해 둔 한도를 넘어 멈췄어요. 한도를 확인해 주세요.', fix: { action: 'edit_options', label: '한도 바꾸기' } } },
   { test: /통신사 일시 발송 실패/, view: { kind: 'carrier', text: '통신사 쪽 일시 오류로 멈췄어요. 잠시 뒤 다시 켜 주세요.', fix: { action: 'resume', label: '다시 켜기' } } },

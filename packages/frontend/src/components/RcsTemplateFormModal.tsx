@@ -63,8 +63,8 @@ interface Props {
 }
 
 const RCS_MESSAGE_TYPES = [
-  { value: 'rcs_sms', label: 'RCS SMS', desc: '단문 (100자 이내)' },
-  { value: 'rcs_lms', label: 'RCS LMS', desc: '장문 (1,300자 이내)' },
+  { value: 'rcs_sms', label: 'RCS SMS', desc: '100자 이내' },
+  { value: 'rcs_lms', label: 'RCS LMS', desc: '1,300자 이내' },
   { value: 'rcs_mms', label: 'RCS MMS', desc: '이미지/동영상 포함' },
   { value: 'rcs_template', label: 'RCS 템플릿', desc: '사전 등록 템플릿' },
 ];

@@ -49,6 +49,9 @@ const SPAM_RESULT_CHIP: Record<string, { text: string; cls: string }> = {
   blocked: { text: '스팸 차단', cls: 'bg-rose-50 text-rose-700' },
   timeout: { text: '검사 결과 없음', cls: 'bg-slate-100 text-slate-500' },
   failed: { text: '검사 실패', cls: 'bg-slate-100 text-slate-500' },
+  // ★ 2026-11-01 B1-4 — 통신사는 보냈는데 검사폰 확인이 늦음 · 같은 글 검사가 아직 진행 중
+  unconfirmed: { text: '스팸 검사 확인 중', cls: 'bg-amber-50 text-amber-700' },
+  pending: { text: '스팸 검사 중', cls: 'bg-slate-100 text-slate-600' },
 };
 /** ★ 2026-10-06 화면 스팸 검사 횟수(서버 PROPOSAL_SPAM_RETEST_LIMIT 와 같은 값 · 서버가 막는다) */
 const SPAM_RETEST_LIMIT = 5;

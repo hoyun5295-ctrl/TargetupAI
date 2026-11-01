@@ -16,7 +16,8 @@ import { escapeHtml } from '../utils/dm/dm-section-renderer';
 import { normalizeOpt080Input, findLinkDefectInText, findLinkDefectDeep, webLinkReason } from '../utils/normalize';
 import { grantFreeTrial, isTrialApplyOpen, ADMIN_WEEK_TRIAL } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
-import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+import { recordPlanChange, alertPlanChangeFailure, todayKst } from '../utils/plan-change-log';
+import { expireTrialLeftover } from '../utils/ai-credit-tx';
 import { noticeForUser, parseNoticeEvent, recordNoticeEvent, CUSTOMER_NOTICE_RATE } from '../utils/customer-notice'; // ★ 2026-10-29 고객 보안 공지
 // ★ 2026-10-04 선불 요금제 이용 기간 — 관리 중 게이트 · my-plan 표시(docs/2026-10-04-prepaid-plan-term-design.md)
 import { planTermManagedSql, PlanTermError, getPlanTermView, getScheduledFromForPlan } from '../utils/plan-term';
@@ -1752,7 +1753,8 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
     //   → 집계 1회 GROUP BY JOIN. 값 동일(상관 COUNT 0 ↔ 그룹 부재 COALESCE 0).
     const result = await query(
       `SELECT c.*, p.plan_name, p.plan_code,
-              COALESCE(cust.cnt, 0) as total_customers
+              -- ★ 2026-11-01 COUNT 는 bigint 라 드라이버가 글자로 넘겨 화면 천 단위 쉼표가 안 붙었다(431971) · 화면 타입(number)대로 숫자로 보낸다
+              COALESCE(cust.cnt, 0)::int as total_customers
        FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
        LEFT JOIN (SELECT company_id, COUNT(*) AS cnt FROM customers WHERE is_active = true GROUP BY company_id) cust
@@ -2020,34 +2022,40 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
   try {
     const { id } = req.params;
     const freeRes = await query(
-      `SELECT id, COALESCE(ai_credits_per_month, 0) AS credits FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
+      `SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
     );
     if (freeRes.rows.length === 0) return res.status(500).json({ error: 'FREE 요금제가 존재하지 않습니다.' });
-    // ⛔ 크레딧 불변식: base만 FREE(0)로, purchased 컬럼 미포함 = 보존.
+    // ⛔ 크레딧 불변식(★ 2026-11-01 크레딧 컨트롤타워 C1): 잔액 · 리셋 시각은 여기서 쓰지 않는다 — 원장 CT 가 남은 체험 크레딧을 소멸한다.
     // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
     const client = await pool.connect();
     let updated: any;
     try {
       await client.query('BEGIN');
+      // 갱신 전 값(요금제 · 만료 시각)을 잠금 아래에서 본다 — 이력 첫 행 from_plan 힌트 · 체험 끝 원장 키
+      const before = await client.query(
+        `SELECT plan_id, to_char(trial_expires_at, 'YYYYMMDD"T"HH24MISSUS') AS trial_key FROM companies WHERE id = $1 FOR UPDATE`,
+        [id],
+      );
       updated = await client.query(
         `UPDATE companies
             SET plan_id                   = $1,
                 subscription_status       = 'trial_expired',
                 -- ★ 2026-07-28 만료일도 함께 비운다(재부여 시 옛 만료일이 살아나는 것을 막는다).
                 trial_expires_at          = NULL,
-                ai_credits_base_remaining = $2,
-                ai_credits_reset_at       = NOW(),
                 updated_at                = NOW()
-          WHERE id = $3 AND subscription_status = 'trial'
+          WHERE id = $2 AND subscription_status = 'trial'
             -- ★ 2026-10-04 선불 이용 기간 중인 회사는 체험 취소로 FREE가 되지 않는다(회의론자 최종 #7)
             AND NOT ${planTermManagedSql('companies')}
         RETURNING id, plan_id, subscription_status`,
-        [freeRes.rows[0].id, Number(freeRes.rows[0].credits) || 0, id],
+        [freeRes.rows[0].id, id],
       );
       if (updated.rows.length === 0) {
         await client.query('ROLLBACK');
         return res.status(400).json({ error: '취소할 활성 무료체험이 없습니다.' });
       }
+      const trialKey = before.rows[0]?.trial_key;
+      const creditNow = new Date();   // 사건 하나 = 시계 하나(소멸 · 이력 · 일할이 같은 달로 판정)
+      await expireTrialLeftover(client, id, trialKey ? `trial-end:${id}:${trialKey}` : `trial-end:${id}:cleanup:${todayKst(creditNow.getTime())}`, creditNow);
       await recordPlanChange({
         client,
         companyId: id,
@@ -2055,6 +2063,8 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
         changeType: 'trial_expire',
         changedBy: (req as any).user?.userId || null,
         reason: 'BASIC 무료체험 취소(관리자)',
+        prevPlanIdHint: before.rows[0]?.plan_id ? String(before.rows[0].plan_id) : null,
+        now: creditNow,
       });
       await client.query('COMMIT');
     } catch (err) {

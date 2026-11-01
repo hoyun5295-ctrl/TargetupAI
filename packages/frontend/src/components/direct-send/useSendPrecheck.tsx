@@ -119,17 +119,17 @@ export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
     }
     prevSpamModalOpenRef.current = spamModalOpen;
   }, [spamModalOpen, refreshCheckStatus]);
-  // 검사가 진행 중이면(창을 닫고 계속 쓰는 동안) 5초마다 결과를 따라간다
+  // 검사가 진행 중이면(창을 닫고 계속 쓰는 동안) 5초마다 결과를 따라간다 · ★ 1101 B1-4 확인 중이면 15초마다(확정될 때까지)
   useEffect(() => {
-    if (spamCheck?.verdict !== 'running' || spamModalOpen) return;
-    const t = setInterval(() => { void refreshSpamCheckRef.current(); }, 5000);
+    if ((spamCheck?.verdict !== 'running' && spamCheck?.verdict !== 'checking') || spamModalOpen) return;
+    const t = setInterval(() => { void refreshSpamCheckRef.current(); }, spamCheck?.verdict === 'checking' ? 15000 : 5000);
     return () => clearInterval(t);
   }, [spamCheck?.verdict, spamModalOpen]);
 
   const spamTrialEligible = !!checkStatus?.spamTrial?.eligible;
   const spamTrialRemaining = spamTrialEligible ? Math.max(0, Number(checkStatus?.spamTrial?.remaining ?? 0)) : null;
   const carriersOf = (r: RecentSpamCheck | null) =>
-    ((r?.verdict === 'warn' ? r?.missingCarriers : r?.blockedCarriers) || []).map(carrierLabel).join(' · ') || '통신사';
+    ((r?.verdict === 'warn' || r?.verdict === 'checking' ? r?.missingCarriers : r?.blockedCarriers) || []).map(carrierLabel).join(' · ') || '통신사';
   const spamCarriersText = carriersOf(spamCheck);
   const spamTileState: SpamTileState = (() => {
     if (spamCheck?.checked && spamCheck.verdict) return spamCheck.verdict;

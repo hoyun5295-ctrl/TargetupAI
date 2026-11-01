@@ -76,10 +76,10 @@ async function generateDmAlertCopyWithAi(input: {
   // ★ 2026-07-02(3) 계절·시기 감성 주입 — DM 내용 + 시즌감으로 풍성한 카피 (구체 사실 창작은 여전히 금지)
   const { monthLabel, seasonHint } = getSeasonContext();
   const lengthRule = lengthMode === 'sms'
-    ? `- 단문(SMS) 우선: %DM링크%는 발송 시 22자 내외 단축링크로 치환됩니다. 링크를 제외한 본문은 한글 기준 28자 안(전체 90바이트 안)으로: 감성 후크 반 줄 + 핵심 한 조각 + %DM링크%. 줄바꿈 없이 한 줄.`
+    ? `- SMS 우선: %DM링크%는 발송 시 22자 내외 단축링크로 치환됩니다. 링크를 제외한 본문은 한글 기준 28자 안(전체 90바이트 안)으로: 감성 후크 반 줄 + 핵심 한 조각 + %DM링크%. 줄바꿈 없이 한 줄.`
     : `- 밋밋한 나열 대신 감성 후크(첫 줄) + 핵심 내용 + 행동 유도 흐름으로.
 - 80~250자. 줄바꿈은 실제 줄바꿈 문자로.`;
-  const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 ${lengthMode === 'sms' ? '단문(SMS)' : 'LMS'} 문자 본문 1개만 작성합니다.
+  const baseSystem = `당신은 한줄로 SMS/LMS 마케팅 카피라이터입니다. 아래 조건으로 ${lengthMode === 'sms' ? 'SMS' : 'LMS'} 문자 본문 1개만 작성합니다.
 - 반드시 %DM링크% 를 문안 안 자연스러운 위치에 1회 포함(수신자별 개인화 링크가 여기 들어갑니다).
 - 혜택·쿠폰·이벤트는 [DM 페이지 편집 내용]에 실제 적힌 표현만 그대로 인용. 거기 없는 혜택(%/원/쿠폰/무료/할인/사은품/적립) 임의 창작 절대 금지.
 - 지금은 ${monthLabel}(${seasonHint}). 계절감과 시기 감성을 가벼운 수식·인사로 자연스럽게 녹여 카피를 풍성하게. 단 시즌 묘사는 일반적 사실만, 통계·행사 등 구체 사실 지어내기 금지.
@@ -101,7 +101,7 @@ ${EFFICACY_PROMPT_RULES}
   const text = await callAIWithFallback({
     system,
     // ★ 2026-10-25 원장 #82 — 단문(SMS)을 고른 요청은 사용자 지시도 단문(옛: 늘 「LMS 문안 1개」 · 시스템 지시와 갈렸다)
-    userMessage: `${userPrompt ? `추가 요청: ${userPrompt}\n\n` : ''}[DM 페이지 편집 내용]을 고객에게 알리는 ${lengthMode === 'sms' ? '단문(SMS)' : 'LMS'} 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
+    userMessage: `${userPrompt ? `추가 요청: ${userPrompt}\n\n` : ''}[DM 페이지 편집 내용]을 고객에게 알리는 ${lengthMode === 'sms' ? 'SMS' : 'LMS'} 문안 1개를 본문 텍스트로만 작성하세요. %DM링크% 를 포함하세요.`,
     model: 'sonnet',
     maxTokens: 800,
     temperature: 0.7,

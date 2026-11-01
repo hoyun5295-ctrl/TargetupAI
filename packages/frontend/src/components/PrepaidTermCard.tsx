@@ -7,7 +7,7 @@
  * - 1개월 연장: 누를 때마다 서버 견적 → 확인 창("추가 결제를 하시겠습니까?") → 결제. 남은 기간 뒤에 이어 붙는다.
  *   요청마다 requestId 하나 — 응답이 끊겨 다시 눌러도 서버가 첫 결과를 돌려준다(두 번 결제 없음).
  * - 자동 연장 스위치: 켜기는 바로, 끄기는 확인 한 단계(만료되면 잠긴다는 것을 알릴 유일한 자리).
- * - 잠김: 원래 요금제 이름 · 사유 · 되는 것 · [잔액 충전] [1개월 연장하고 다시 열기].
+ * - 잠김: 원래 요금제 이름 · 사유 · 되는 것 · [잔액 충전] [이번 달 결제하고 다시 열기](★ 2026-11-01 C11 · 오늘 ~ 말일 일할).
  * - 조작은 회사 관리자만(서버 can_manage). 다른 사용자는 읽기 전용.
  */
 import { useCallback, useEffect, useState } from 'react';
@@ -247,13 +247,13 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
                   </button>
                   <button type="button" onClick={openExtend} disabled={quoting}
                     className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-[13px] font-semibold text-white bg-gradient-to-r from-rose-500 to-red-500 hover:from-rose-400 hover:to-red-400 shadow-md shadow-rose-200 disabled:opacity-50 inline-flex items-center justify-center gap-1.5">
-                    <CalendarPlus className="w-4 h-4" />{quoting ? '불러오는 중...' : '1개월 연장하고 다시 열기'}
+                    <CalendarPlus className="w-4 h-4" />{quoting ? '불러오는 중...' : '이번 달 결제하고 다시 열기'}
                   </button>
                 </div>
               ) : (
                 <p className="mt-3 text-[12.5px] text-slate-500">다시 열기는 회사 관리자만 할 수 있습니다.</p>
               )}
-              <p className="mt-3 text-[11.5px] text-slate-500">충전한 뒤 1개월 연장을 누르면 바로 다시 열립니다. 충전만으로는 자동으로 열리지 않습니다.</p>
+              <p className="mt-3 text-[11.5px] text-slate-500">충전한 뒤 다시 열기를 누르면 이번 달 남은 기간 요금을 결제하고 바로 다시 열립니다. 충전만으로는 자동으로 열리지 않습니다.</p>
               <p className="mt-1 text-[10px] text-slate-400">금액은 부가세 포함</p>
             </div>
           </div>
@@ -374,7 +374,7 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
         tone={quote?.restoring ? 'rose' : 'emerald'}
         icon={<CalendarPlus className="w-5 h-5 text-white" />}
         title="추가 결제를 하시겠습니까?"
-        subtitle={quote ? `${quote.plan_name} 요금제 1개월 ${quote.restoring ? '다시 열기' : '연장'}` : undefined}
+        subtitle={quote ? (quote.restoring ? `${quote.plan_name} 요금제 다시 열기(이번 달 말일까지)` : `${quote.plan_name} 요금제 1개월 연장`) : undefined}
         onCancel={closeExtend}
         confirmLabel={quote ? (quote.enough ? `${won(quote.total)} 결제하고 ${quote.restoring ? '다시 열기' : '연장'}` : '잔액 충전하기') : undefined}
         onConfirm={pay}
@@ -385,7 +385,8 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
         {quote && (
           <div>
             <DialogHeadline value={Math.floor(quote.total).toLocaleString('ko-KR')} unit="원" label="결제 금액 (부가세 포함)" tone={quote.restoring ? 'rose' : 'emerald'} />
-            <p className="mt-1.5 text-[11.5px] text-slate-400">월 요금 {won(quote.supply)} + 부가세 {won(quote.vat)}</p>
+            {/* ★ 2026-11-01 크레딧 컨트롤타워 C11 — 다시 열기 = 이번 달 남은 기간 일할(견적 = 실제 차감) */}
+            <p className="mt-1.5 text-[11.5px] text-slate-400">{quote.restoring ? '이번 달 남은 기간 요금' : '월 요금'} {won(quote.supply)} + 부가세 {won(quote.vat)}</p>
             <div className="mt-3">
               {quote.restoring ? (
                 <DialogRow label="이용 기간" value={`${formatDate(quote.starts_on)} ~ ${formatDate(quote.new_expires)}`} accent="blue" />
@@ -398,7 +399,10 @@ export default function PrepaidTermCard({ term, onChanged, onOpenCharge }: {
               <DialogRow label="충전 잔액" value={`${won(quote.balance)} → ${won(quote.balance_after)}`} accent={quote.enough ? undefined : 'rose'} />
             </div>
             {quote.restoring ? (
-              <p className="mt-3 text-[12px] text-slate-600 leading-relaxed">결제하면 {quote.plan_name} 요금제가 바로 다시 열립니다.</p>
+              <p className="mt-3 text-[12px] text-slate-600 leading-relaxed">
+                결제하면 {quote.plan_name} 요금제가 바로 다시 열리고 {formatDate(quote.new_expires)}까지 이용합니다.
+                {quote.auto_renew && ' 다음 달부터는 매월 1일에 자동 결제됩니다.'}
+              </p>
             ) : (
               <p className="mt-3 text-[12px] text-slate-600 leading-relaxed">
                 남은 {quote.days_left}일은 그대로 두고 {formatDate(quote.starts_on)}부터 {formatDate(quote.new_expires)}까지 1개월을 이어 붙입니다.

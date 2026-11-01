@@ -27,7 +27,7 @@ export function stripComments(src: string): string {
 }
 
 export const EFFICACY_CT = ['claimsEfficacy', 'claimsInventedEfficacy', 'dropInventedEfficacy\\w*', 'pairClaimsInventedEfficacy', 'rewriteAddsFacts', 'headlineClaimsEfficacy', 'guardReadingSequence'];
-export const BENEFIT_CT = ['findInventedBenefits', 'replaceInventedBenefits\\w*', 'copyFactsExistInText', 'stripUnauthorizedBenefits', 'findNewNumbers'];
+export const BENEFIT_CT = ['findInventedBenefits', 'replaceInventedBenefits\\w*', 'copyFactsExistInText', 'stripUnlicensedQuoteBenefits', 'findNewNumbers'];
 export interface FnUnit { key: string; file: string; name: string | null; body: string; start: number; end: number }
 const RAW_AI_RE = /\bcallAIWithFallback\(|\bmessages(?:\s+as\s+any\))?\.(?:batches\.)?create\(/;
 const RAW_AI_CALLEE_RE = /^(?:callAIWithFallback|.*\bmessages(?:\s+as\s+any\))?\)?\.(?:batches\.)?create)$/;

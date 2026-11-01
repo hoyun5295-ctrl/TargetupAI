@@ -14,7 +14,8 @@
  * - 위생 검사(checkExemplarHygiene)는 마스킹과 **다른, 더 넓은 탐지기**를 쓴다(7자리 이상 숫자열 · @ · 도메인 꼬리 · 사업자·신고번호 · 주소 접두 · 대표자 · 별칭 · 모델명). 하나라도 남으면 저장 거부.
  * - 예시 머리줄 "[예시 · 채널 · 업종군]"은 여기서 붙이지 않는다(업종군은 읽는 시점에 계산).
  */
-import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
+import { BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
+import { stripUnlicensedQuoteBenefits } from './sales-outreach-copy-guard';
 
 export const EXEMPLAR_MASK = {
   brand: '〔브랜드〕',
@@ -265,7 +266,7 @@ export function maskExemplarText(text: string, ctx: MaskContext): string {
   // 3) 혜택 · 날짜(표식 보호)
   {
     const p = protectMarks(t);
-    let s = stripUnauthorizedBenefits(p.text, '').split(BENEFIT_PLACEHOLDER).join(EXEMPLAR_MASK.benefit);
+    let s = stripUnlicensedQuoteBenefits(p.text, '').split(BENEFIT_PLACEHOLDER).join(EXEMPLAR_MASK.benefit);
     s = s.replace(/\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}/g, EXEMPLAR_MASK.date)
       .replace(/\d{1,2}월\s?\d{1,2}일/g, EXEMPLAR_MASK.date)
       .replace(/(?<![\d.])\d{1,2}\s*[./]\s*\d{1,2}(?![\d.%])(?=\s*(?:까지|부터|~|-|\(|\)|$))/g, EXEMPLAR_MASK.date)

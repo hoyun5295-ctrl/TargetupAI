@@ -22,6 +22,8 @@
  */
 
 import { nightRangeKo, sendWindowKo } from './send-time-util';
+import { readJourneyCopyFacts, journeyCopyGround, journeyCopyFacts, fillBenefitSpots, hasBenefitSpot } from './journey-copy-facts';
+import { ensureOnceLink, stripOmittedLinks } from './voice-form-slots';
 import { composeVoicePrompt, VOICE_KIND_BY_STEP } from './brand-voice-prompt';
 import { extractJsonFromAiText } from './ai-json';
 import { UserFacingError } from './http-error';
@@ -29,7 +31,7 @@ import { getCreditCost } from './ai-credit-calc';
 import { runChargedAi, InsufficientCreditError } from './ai-credit';
 import { query } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
-import { stripUnauthorizedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMPT_RULES, dropSeasonSentences, findSeasonWords } from './copy-benefit-detector';
+import { replaceInventedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMPT_RULES, dropSeasonSentences, findSeasonWords } from './copy-benefit-detector';
 import { ensureSenderName } from './messageUtils';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
@@ -326,6 +328,18 @@ JSON 형식으로만 응답하세요.`;
     return `${idx + 1}. message [${s.channel || 'sms'}] delay=${s.delay_hours}h: "${(s.message_template || '').slice(0, 60)}..."`;
   }).join('\n');
 
+  // ★ 2026-11-01 B1-3(Codex 구현 1R B #5) — 사람 값 원장(혜택 · 링크)을 AI 호출 **전에** 읽어 지시문 · 결과에 함께 쓴다
+  //   (옛: 결과 거름 근거로만 읽어, 혜택 · 링크를 정한 여정에서도 자리표시 · 링크 없는 추천이 나왔다 = 첫 증상 재발)
+  const recFacts = await readJourneyCopyFacts(companyId, journeyId).catch(() => null);
+  const factsView = journeyCopyFacts(recFacts);
+  const benefitRule = factsView.benefit.state === 'set'
+    ? `본문 (혜택은 이 여정에 정해진 「${factsView.benefit.ground}」 그대로만 · 다른 구체 혜택 · 자리표시 금지)`
+    : factsView.benefit.state === 'none'
+      ? '본문 (이 여정은 혜택 없음 · 혜택 언급과 자리표시 없이)'
+      : '본문 (구체 혜택 절대 금지, [혜택 안내: 직접 수정해주세요] placeholder)';
+  const linkRule = factsView.link.state === 'set' ? `\n- 링크: 문자 단계 본문 끝에 이 주소 한 줄 = ${factsView.link.url}`
+    : factsView.link.state === 'omit' ? '\n- 링크: 이 여정은 링크 없이(링크 줄 · 자리표시 쓰지 않음)' : '';
+
   const userMessage = `## 회사 정보
 - 회사명: ${company.brand_name || company.company_name || '브랜드'}
 - 업종: ${company.business_type || '기타'}
@@ -345,7 +359,7 @@ ${stepsDescription || '(단계 영역 없음)'}
 - stepType: message / wait / condition 중 하나
 - delayHours: 직전 단계 후 대기 시간 (h)
 - channel: sms / lms / mms (message 영역만)
-- messageTemplate: 본문 (구체 혜택 절대 금지, [혜택 안내: 직접 수정해주세요] placeholder)
+- messageTemplate: ${benefitRule}${linkRule}
 - subject: LMS/MMS 영역 제목 (40자 이내)
 - reasoning: 추천 사유 한 줄
 - expectedImpact: 예상 영향 한 줄
@@ -393,18 +407,25 @@ ${stepsDescription || '(단계 영역 없음)'}
         const parsed: any = extractJsonFromAiText(text);
         // ★ 2026-10-24 세 채널 구조체크 ② — 추천 문안도 고객 글이다(이 생산자만 거름이 없었다 · R13).
         //   근거 = 이 여정에 이미 저장된 본문 · 제목(사람이 확인한 글) · 혜택 → 자리표시 · 효능 → 문장 빼기(제목 = 비움)
-        const recGround = existingSteps.map((s: any) => `${s?.message_template || ''}\n${s?.subject || ''}`).join('\n');
+        // ★ 2026-11-01 여정 재발 방지 B1-3 — 근거 = journeyCopyGround(다음 칸 = 쓰기 · 원장 혜택 · 없으면 있는 칸 글)
+        const recGround = journeyCopyGround(recFacts, 'write', existingSteps.map((s: any) => `${s?.message_template || ''}\n${s?.subject || ''}`).join('\n'));
         //   제목 + 본문 = 이어 읽는 단위(CT dropInventedEfficacyTitledBody · 여정 생성과 같은 규칙)
         const guardPair = (s: any) => {
           const g = dropInventedEfficacyTitledBody(
-            typeof s?.subject === 'string' ? stripUnauthorizedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
-            typeof s?.messageTemplate === 'string' ? stripUnauthorizedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
+            typeof s?.subject === 'string' ? replaceInventedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
+            typeof s?.messageTemplate === 'string' ? replaceInventedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
             recGround,
           );
           // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(제목 = 비움) · K1-1 문자 단계(여정 = 늘 광고) = 첫 줄 또는 제목에 전송자 명칭
           const subject = findSeasonWords(g.subject, recGround).length > 0 ? '' : g.subject;
           let body = dropSeasonSentences(g.body, recGround).text;
-          if (['sms', 'lms', 'mms'].includes(s?.channel)) body = ensureSenderName(body, { isAd: true, channel: s.channel, subject, names: [company.brand_name, company.company_name] }).text;
+          if (['sms', 'lms', 'mms'].includes(s?.channel)) {
+            // ★ 1101 B1-3 — 정해진 혜택 = 남은 자리표시를 그 혜택으로 · 정한 링크 = 한 번 넣기 · 뺀 링크 = 링크 줄 지움(여정 생성 출구와 같은 순서 · 전송자 명칭 앞)
+            if (factsView.benefit.state === 'set' && hasBenefitSpot(body)) body = fillBenefitSpots(body, factsView.benefit.ground.split('\n')[0]);
+            if (factsView.link.state === 'set' && factsView.link.url) body = ensureOnceLink(body, factsView.link.url).text;
+            else if (factsView.link.state === 'omit') body = stripOmittedLinks(body);   // 새 칸 = 주소 줄 전부(Codex 구현 2R B #4)
+            body = ensureSenderName(body, { isAd: true, channel: s.channel, subject, names: [company.brand_name, company.company_name] }).text;
+          }
           return { subject, body };
         };
         const mapStep = (s: any): RecommendedStep => ({

@@ -151,6 +151,18 @@ export async function runPredictiveBatchNow(): Promise<{
         }
       } catch (err: any) {
         console.warn('[PredictiveWorker] 회사 batch 오류, skip:', row.id, err?.message);
+        // ★ 2026-11-01 크레딧 컨트롤타워 C6(P10) — 회사 하나의 분석 · 차감 실패를 사람에게 알린다(회사 · 날짜당 하나 · 사내 회사는 경보 CT 가 거른다).
+        //   옛: 경고 로그 한 줄로 끝나 이에스페이먼트 분석이 10/7 ~ 11/1 26일 멈춘 것을 아무도 몰랐다(B-1101-5).
+        try {
+          const { sendSystemAlert } = await import('./system-alert');
+          await sendSystemAlert({
+            companyId: String(row.id),
+            dedupKey: `predictive-fail:${row.id}:${todayKst}`,
+            message: `고객 예측 분석 · 분석 차감 실패(회사 ${row.id}): ${String(err?.message || err).slice(0, 200)}`,
+          });
+        } catch (alertErr: any) {
+          console.warn('[PredictiveWorker] 실패 경보 발송 실패:', row.id, alertErr?.message);
+        }
       }
     }
 

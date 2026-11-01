@@ -300,8 +300,13 @@ export async function pauseJourneyByToken(token: string): Promise<{ ok: true; ch
  *   모든 execution 발송을 한 번에 차단. 스캐너 등 외부 호출 공용 CT.
  *   (journey-executor.ts 안 file-local pauseJourney와 동일 UPDATE — 컬럼은 journeys 실재 확인.)
  */
-export async function pauseJourney(journeyId: string, reason: string): Promise<void> {
-  await query(
+export async function pauseJourney(
+  journeyId: string,
+  reason: string,
+  /** ★ 2026-11-01 B1-4(Codex 구현 3R) — 판 확인과 같은 트랜잭션에서 멈출 때 그 실행자(기본 = 풀) */
+  run: (sql: string, params?: any[]) => Promise<unknown> = query,
+): Promise<void> {
+  await run(
     `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
       WHERE id = $1::uuid AND status = 'active'`,
     [journeyId, reason.slice(0, 500)],

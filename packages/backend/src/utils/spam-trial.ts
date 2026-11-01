@@ -117,7 +117,7 @@ export async function countSpamTrialsInTx(client: { query: (sql: string, params?
 
 // ─────────────── 검사 판정(한 벌) ───────────────
 
-export type SpamVerdict = 'running' | 'pass' | 'blocked' | 'warn';
+export type SpamVerdict = 'running' | 'pass' | 'blocked' | 'checking' | 'warn';
 
 export interface SpamResultRow {
   carrier: string;
@@ -127,13 +127,15 @@ export interface SpamResultRow {
 
 /**
  * 검사 한 건의 판정(순수) — 막힘이 하나라도 있으면 blocked · 전부 받았으면 pass ·
- * 진행 중이면 running · 끝났는데 못 받은 곳(시간 초과·전달 실패)이 있으면 warn.
+ * 진행 중이면 running · 끝났는데 확인 중(통신사 전달 성공 + 앱 보고 없음 · ★ 2026-11-01 B1-4)이 있으면 checking(확인 문자가 17분 안에 닫는다) ·
+ * 끝났는데 못 받은 곳(시간 초과·전달 실패)이 있으면 warn.
  * ⛔ 판정 전에 `withExpectedSpamDevices`로 기대 테스트폰을 채운 행을 넣는다(일부 행만으로 통과 금지). 화면은 서버 판정값만 쓴다.
  */
 export function judgeSpamVerdict(status: string, rows: readonly SpamResultRow[]): SpamVerdict {
   if (rows.some((r) => r.result === 'blocked')) return 'blocked';
   if (rows.length > 0 && rows.every((r) => r.received || r.result === 'pass')) return 'pass';
   if (status !== 'completed') return 'running';
+  if (rows.some((r) => r.result === 'unconfirmed')) return 'checking';
   return 'warn';
 }
 

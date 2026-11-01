@@ -15,14 +15,14 @@
 
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = AI 크레딧 차감 0
 import { pool } from '../config/database';
-import { needsMonthlyReset } from './ai-credit-calc';
+import { needsMonthlyReset, kstDateTag } from './ai-credit-calc';
+import { projectBaseAfterClose, creditSeqReady, monthKeyOf } from './ai-credit-month';
 import { setCreditEvent } from './request-context';
 import { UserFacingError } from './http-error';
 import {
   loadCreditRow,
   applyResetIfNeeded,
   creditOverageAllowance,
-  carriedBaseOnReset,
   _deductWithClient,
   adjustCreditWithClient,
   refundCreditWithClient,
@@ -38,7 +38,7 @@ import {
 export { InsufficientCreditError };
 export type { CreditState, DeductResult, DeductOpts, RefundOpts, RefundResult };
 
-/** 현재 크레딧 상태 조회(읽기 전용). 리셋 필요 시 base를 요금제 기본분으로 환산해 표시. */
+/** 현재 크레딧 상태 조회(읽기 전용). 월 마감이 필요하면 쓰지 않고 계산한 마감 뒤 기본분으로 표시(★ 2026-11-01 C7 · 확인 · 차감과 같은 함수). */
 export async function getCreditState(companyId: string): Promise<CreditState> {
   const empty: CreditState = {
     baseRemaining: 0, purchased: 0, total: 0, monthlyCap: null, planCredits: 0, creditEnabled: false, resetAt: null,
@@ -52,7 +52,7 @@ export async function getCreditState(companyId: string): Promise<CreditState> {
     const purchased = Number(row.purchased) || 0;
     const creditEnabled = row.plan_credits != null || purchased > 0;  // 크레딧제 적용 여부
     const resetAt = row.reset_at ? new Date(row.reset_at) : null;
-    const baseRemaining = needsMonthlyReset(resetAt, new Date()) ? planCredits : (Number(row.base) || 0);
+    const baseRemaining = await projectBaseAfterClose(pool, companyId, row, new Date());
     return {
       baseRemaining,
       purchased,
@@ -96,20 +96,24 @@ export async function hasCreditForStrict(companyId: string, cost: number, source
   const row = await loadCreditRow(pool, companyId, false);
   if (!row) return true;
   if (row.plan_credits == null && (Number(row.purchased) || 0) === 0) return true;
-  const resetAt = row.reset_at ? new Date(row.reset_at) : null;
-  const base = needsMonthlyReset(resetAt, new Date()) ? carriedBaseOnReset(row) : (Number(row.base) || 0);
+  // ★ 2026-11-01 C7 — 표시 · 사전 확인 · 차감과 같은 함수(월 마감 계산)
+  const base = await projectBaseAfterClose(pool, companyId, row, new Date());
   const purchased = Number(row.purchased) || 0;
   return (base + purchased) - cost >= -creditOverageAllowance(row, source);
 }
 
-/** 호출 전 사전 차단 — 보유 크레딧이 작업 비용보다 적으면 throw InsufficientCreditError. */
-export async function checkCredit(companyId: string, cost: number): Promise<void> {
+/**
+ * 호출 전 사전 차단 — 보유 크레딧이 작업 비용보다 적으면 throw InsufficientCreditError.
+ * ★ 2026-11-01 크레딧 컨트롤타워 C7 — 허용 한도 = 차감과 같은 `creditOverageAllowance(row, source)`(원천 생략 = 일반 AI = 종전 결과 ·
+ *   발송 크레딧 원천을 넘기면 0). 기본분 = 표시 · 차감과 같은 월 마감 계산.
+ */
+export async function checkCredit(companyId: string, cost: number, source: string = 'ai-generic'): Promise<void> {
   if (!companyId || !cost || cost <= 0) return;
   if (await isDemoCompany(companyId)) return;   // ★ 2026-10-09 시연 회사 = 크레딧 차단 없음(차감도 0)
   const st = await getCreditState(companyId);
   if (!st.creditEnabled) return;  // 크레딧제 미적용(요금제 크레딧 미설정) → 통과(차단 X)
-  // ★ D227+ 후불은 추가 사용 한도까지 통과(월말 청구). 선불은 보유 부족 시 차단.
-  const overageAllowed = st.billingType === 'postpaid' ? Math.max(0, st.overageLimit) : 0;
+  const row = await loadCreditRow(pool, companyId, false);
+  const overageAllowed = row ? creditOverageAllowance(row, source) : 0;
   if (st.total + overageAllowed < cost) {
     throw new InsufficientCreditError(cost, st.total);
   }
@@ -497,6 +501,52 @@ export async function resetMonthlyCreditsIfNeeded(companyId: string): Promise<bo
   }
 }
 
+/** 이력 목록 정렬 꼬리 — 같은 시각 줄(한 거래의 마감 · 차감)을 잠금 순서(seq)로 · seq 칸 전이면 id(★ 2026-11-01 C5 · P11) */
+async function txOrderTail(): Promise<string> {
+  return (await creditSeqReady(pool)) ? ', t.seq DESC NULLS LAST, t.id DESC' : ', t.id DESC';
+}
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 C2 — 매월 1일 지급 패스(월 워커가 선불 이용 기간 정산 다음에 부른다 · 10분 주기 · 기동 즉시).
+ * 대상 = 리셋이 이번 달 전인 회사 중 크레딧이 걸린 회사(요금제 월분 칸 있음 · 구매분 > 0 · 기본분 ≠ 0).
+ * 회사마다 자기 트랜잭션(잠금 · 다시 판정)이고 실패는 회사 · 날짜당 경보 하나(R14 · 다른 회사는 계속).
+ */
+export async function grantMonthlyCreditsPass(now: Date = new Date()): Promise<{ closed: number; failed: number }> {
+  const cur = monthKeyOf(now);
+  const targets = await pool.query(
+    `SELECT c.id FROM companies c
+       LEFT JOIN plans p ON p.id = c.plan_id
+      WHERE (c.ai_credits_reset_at IS NULL OR c.ai_credits_reset_at < ($1::date)::timestamp AT TIME ZONE 'Asia/Seoul')
+        AND (p.ai_credits_per_month IS NOT NULL OR COALESCE(c.ai_credits_purchased, 0) > 0 OR COALESCE(c.ai_credits_base_remaining, 0) <> 0)
+      ORDER BY c.id`,
+    [`${cur}-01`],
+  );
+  let closed = 0;
+  let failed = 0;
+  for (const t of targets.rows) {
+    try {
+      if (await resetMonthlyCreditsIfNeeded(String(t.id))) closed++;
+    } catch (err: any) {
+      failed++;
+      console.warn('[ai-credit] 월 마감 실패:', t.id, err?.message || err);
+      const { sendSystemAlert } = await import('./system-alert');
+      await sendSystemAlert({
+        companyId: String(t.id),
+        dedupKey: `credit-close:${t.id}:${kstDateTag(now)}`,
+        message: `AI 크레딧 월 마감 실패(회사 ${t.id}): ${String(err?.message || err).slice(0, 200)}`,
+      }).catch(() => undefined);
+    }
+  }
+  if (closed > 0 || failed > 0) console.log(`[ai-credit] 월 마감 ${closed}곳 · 실패 ${failed}곳`);
+  return { closed, failed };
+}
+
+/** 발행 전 그 회사 월 마감(★ 2026-11-01 C8 · 짧은 자기 트랜잭션 · 발행 트랜잭션 안에서 하지 않는다 = 외래키 넣기 막힘 방지) */
+export async function closeCreditMonthsNow(companyId: string): Promise<void> {
+  if (!companyId) return;
+  await resetMonthlyCreditsIfNeeded(companyId);
+}
+
 /**
  * 이번 달(KST) 크레딧 순사용량 = 차감 − 환불.
  * ★ 2026-08-13: 환불 축이 생겨(마케팅 플래너 대행 취소) deduct만 세면 되돌려준 것까지 사용량으로 보인다.
@@ -543,12 +593,12 @@ export async function getCreditTransactions(
   const [list, cnt] = await Promise.all([
     pool.query(
       `SELECT t.id, t.type, t.amount, t.bucket, t.source, t.balance_purchased_after, t.balance_base_after,
-              t.created_by, t.created_at, t.reason,
+              t.created_by, t.created_at, t.reason, t.overage_credits,
               COALESCE(u.name, u.login_id) AS created_by_name
          FROM ai_credit_transactions t
          LEFT JOIN users u ON u.id = t.created_by
         WHERE t.company_id = $1::uuid
-        ORDER BY t.created_at DESC
+        ORDER BY t.created_at DESC${await txOrderTail()}
         LIMIT $2 OFFSET $3`,
       [companyId, pageSize, offset]
     ),
@@ -573,13 +623,13 @@ export async function getAllCreditTransactions(
   const [list, cnt] = await Promise.all([
     pool.query(
       `SELECT t.id, t.company_id, t.type, t.amount, t.bucket, t.source,
-              t.balance_base_after, t.balance_purchased_after, t.created_at, t.reason,
+              t.balance_base_after, t.balance_purchased_after, t.created_at, t.reason, t.overage_credits,
               c.company_name, COALESCE(u.name, u.login_id) AS created_by_name
          FROM ai_credit_transactions t
          LEFT JOIN companies c ON c.id = t.company_id
          LEFT JOIN users u ON u.id = t.created_by
          ${whereSql}
-        ORDER BY t.created_at DESC
+        ORDER BY t.created_at DESC${await txOrderTail()}
         LIMIT $${i++} OFFSET $${i++}`,
       [...params, pageSize, offset],
     ),

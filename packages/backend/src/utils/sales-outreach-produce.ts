@@ -26,7 +26,8 @@ import * as path from 'path';
 import { AsyncLocalStorage } from 'async_hooks';
 import helmet from 'helmet';
 import { callAIWithFallback } from '../services/ai';
-import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER, claimsInventedEfficacy, dropInventedEfficacy, pairClaimsInventedEfficacy, guardReadingSequence, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
+import { BENEFIT_PLACEHOLDER, claimsInventedEfficacy, dropInventedEfficacy, pairClaimsInventedEfficacy, guardReadingSequence, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
+import { stripUnlicensedQuoteBenefits } from './sales-outreach-copy-guard';
 import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-style';
 import {
   isStudioReady, writeTempBuffer, allocTempPath, writeTempMeta, findTempFile, moveTempToPermanent,
@@ -2096,7 +2097,7 @@ export function fillOutreachDmMedia(
   const captionOf = (alt: string | null | undefined): string | null => {
     const c = cleanBannerCaption(alt, media.companyName);
     if (!c) return null;
-    const t = stripUnauthorizedBenefits(c, quoteForCaption);
+    const t = stripUnlicensedQuoteBenefits(c, quoteForCaption);
     // ★ 2026-10-24 ② 효능 캡션도 버린다(혜택과 같은 근거 · 캡션 없음 = 지금 대체값)
     return t.includes(BENEFIT_PLACEHOLDER) || claimsInventedEfficacy(t, quoteForCaption) ? null : t.trim() || null;
   };
@@ -2370,7 +2371,7 @@ function fillOutreachDmMediaV3(sections: readonly Section[], media: OutreachFill
   const captionOf = (alt: string | null | undefined): string | null => {
     const c = cleanBannerCaption(alt, media.companyName);
     if (!c) return null;
-    const t = stripUnauthorizedBenefits(c, quoteForCaption);
+    const t = stripUnlicensedQuoteBenefits(c, quoteForCaption);
     // ★ 2026-10-24 ② 효능 캡션도 버린다(혜택과 같은 근거 · 캡션 없음 = 지금 대체값)
     return t.includes(BENEFIT_PLACEHOLDER) || claimsInventedEfficacy(t, quoteForCaption) ? null : t.trim() || null;
   };
@@ -2709,7 +2710,7 @@ export function sanitizeDmCopyBenefits(
         if (Array.isArray(p.buttons)) {
           p.buttons = p.buttons.map((b: any) => {
             const label = String(b?.label || '');
-            const t = stripUnauthorizedBenefits(label, licensedQuote);
+            const t = stripUnlicensedQuoteBenefits(label, licensedQuote);
             if (t !== label) stripped++;
             if (!t.includes(BENEFIT_PLACEHOLDER) && claimsInventedEfficacy(t, licensedQuote)) { efficacyStripped++; return { ...b, label: '자세히 보기' }; }
             return { ...b, label: t.includes(BENEFIT_PLACEHOLDER) ? '자세히 보기' : t };
@@ -2718,7 +2719,7 @@ export function sanitizeDmCopyBenefits(
         continue;
       }
       if (typeof p[k] !== 'string' || !p[k]) continue;
-      const t = stripUnauthorizedBenefits(p[k], licensedQuote);
+      const t = stripUnlicensedQuoteBenefits(p[k], licensedQuote);
       if (t !== p[k]) stripped++;
       if (t.includes(BENEFIT_PLACEHOLDER)) {
         p[k] = LONG_TEXT_PROPS.has(k) ? dropPlaceholderSentences(t) : '';
@@ -2750,7 +2751,7 @@ export function sanitizeDmCopyBenefits(
 export function licensedPreheaderOf(preheader: string | null | undefined, licensedQuote: string): string {
   const raw = String(preheader || '').trim();
   if (!raw) return '';
-  const t = stripUnauthorizedBenefits(raw, licensedQuote);
+  const t = stripUnlicensedQuoteBenefits(raw, licensedQuote);
   return t.includes(BENEFIT_PLACEHOLDER) || claimsInventedEfficacy(t, licensedQuote) ? '' : t.trim().slice(0, 90);
 }
 
@@ -3486,7 +3487,7 @@ export async function produceOutreachBrandEmail(input: Omit<ProduceDmInput, 'com
   const pruned = pruneEmptyDmSections(sanitized.sections);
   const looked = applyOutreachLook(pruned.sections, 'EMAIL', dims);
   const subjectRaw = String(gen.raw?.subject || '').trim();
-  const subjectStripped = stripUnauthorizedBenefits(subjectRaw, input.licensedQuote).split(BENEFIT_PLACEHOLDER).join('').trim().slice(0, 40);
+  const subjectStripped = stripUnlicensedQuoteBenefits(subjectRaw, input.licensedQuote).split(BENEFIT_PLACEHOLDER).join('').trim().slice(0, 40);
   // ★ 2026-10-24 ② 제목 · 프리헤더도 같은 근거로 효능을 거른다(빈 제목 = 소비처가 이름으로 대체 · 프리헤더 = 비워도 되는 칸)
   //   프리헤더는 옛: 소비처 한 곳(campaign-quick 템플릿 갈래)만 혜택을 걸렀다 → 출구 한 곳으로.
   const subject = claimsInventedEfficacy(subjectStripped, input.licensedQuote) ? '' : subjectStripped;
@@ -3558,13 +3559,13 @@ export async function generateSubjectIntro(guide: OutreachStyleGuide, input: Sub
     const block = raw.match(/\{[\s\S]*\}/);
     const parsed = block ? extractJsonFromAiText(block[0]) : {};
     if (typeof parsed.subject === 'string' && parsed.subject.trim()) {
-      const s = stripUnauthorizedBenefits(parsed.subject.trim(), licensedQuote);
+      const s = stripUnlicensedQuoteBenefits(parsed.subject.trim(), licensedQuote);
       // ★ 2026-10-24 ② 효능 제목 = 기본 제목(혜택 자리와 같은 대체값)
       if (!s.includes(BENEFIT_PLACEHOLDER) && s.length <= 40 && !claimsInventedEfficacy(s, licensedQuote)) subject = s;
     }
     if (typeof parsed.intro === 'string' && parsed.intro.trim()) {
       // ★ 2026-10-24 ② 효능 문장은 뺀다 · 다 빠지면 기본 서두
-      const eff = dropInventedEfficacy(stripUnauthorizedBenefits(parsed.intro.trim().slice(0, 500), licensedQuote), licensedQuote);
+      const eff = dropInventedEfficacy(stripUnlicensedQuoteBenefits(parsed.intro.trim().slice(0, 500), licensedQuote), licensedQuote);
       intro = eff.text === EFFICACY_PLACEHOLDER ? '' : eff.text;
       generated = !!intro;
     }

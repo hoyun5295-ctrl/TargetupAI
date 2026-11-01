@@ -7,7 +7,7 @@
  * 문안 생성(generateMessages)과 규칙이 다르다:
  *   - 새로 짓는 게 아니라 **바꿔 쓴다.** 원문에 없던 내용이 들어오면 그 결과를 버린다.
  *   - 날짜·시각·금액·전화번호·주소는 **글자 그대로 남아야 한다.** 행사 날짜가 하루 밀리면 그건 다른 발송이다.
- *   - 혜택은 원문에 있는 것만. 판정은 기존 CT(`stripUnauthorizedBenefits`)에 맡긴다.
+ *   - 혜택은 원문에 있는 것만. 판정은 공용 CT(`findInventedBenefits` · 값 · 종류 짝)에 맡긴다.
  *
  * 회차별 세기(설계서 §4-4 A):
  *   1회차 = 표현을 폭넓게 다듬는다. 2회차 = 핵심을 건드리지 않고 **표현만 최소 수정**.
@@ -20,7 +20,7 @@ import { composeVoicePrompt } from './brand-voice-prompt';
 import { resolveCopyIntent } from './copy-content-type';
 import { rewriteShapeDrift } from './copy-shape';
 import { AI_MODELS, claudeRequestShape } from '../config/defaults';
-import { findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { findNewNumbers, findInventedBenefits, claimsInventedEfficacy, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { recordAiCall } from './ai-rate-limit';
 
 export const AGENCY_REFINE_SOURCE = 'agency-send-refine';
@@ -78,7 +78,7 @@ export function checkRefined(original: string, refined: string): RefineCheck {
   if (lost.length > 0) return { ok: false, reason: `anchor-lost:${lost.slice(0, 3).join(',')}` };
 
   // ② 원문에 없던 혜택을 지어내지 않았는가(기존 CT가 판정한다. 바뀐 곳이 있으면 지어낸 것)
-  if (stripUnauthorizedBenefits(text, original) !== text) {
+  if (findInventedBenefits(text, original).length > 0) {
     return { ok: false, reason: 'benefit-invented' };
   }
 

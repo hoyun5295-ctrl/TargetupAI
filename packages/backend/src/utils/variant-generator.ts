@@ -96,7 +96,7 @@ export async function generateVariantsFromMessage(input: {
 ${EFFICACY_REWRITE_RULE}
 - %이름% 같은 변수와 [혜택 안내: 직접 수정해주세요] 같은 채울 자리는 글자 그대로 둡니다.
 - 바꾸는 것은 인사 · 연결 문장 · 마무리 · 문장 리듬입니다. 세 변형은 도입과 마무리가 서로 확실히 달라야 합니다(같은 문장에 낱말만 바꾼 변형은 실패입니다).
-- 길이: 문자(SMS) 90바이트 · 장문(LMS · MMS) 2000바이트 이내.
+- 길이: SMS 90바이트 · LMS · MMS 2000바이트 이내.
 - 문자 채널에는 이모지를 쓰지 않습니다. 강조가 필요하면 ★ ▶ ※ 【】 같은 문자 호환 기호만 씁니다.
 - (광고) 표기 · 무료수신거부 번호는 시스템이 붙이므로 쓰지 않습니다.
 
@@ -190,7 +190,7 @@ ${baseMessage}
         if (channel === 'sms') {
           variants.forEach((v) => {
             if (v.byteCount > 90) {
-              warnings.push(`${v.tone} 변형이 ${v.byteCount}바이트라 문자(SMS) 90바이트를 넘어요. 장문(LMS)으로 바꾸거나 본문을 줄여 주세요.`);
+              warnings.push(`${v.tone} 변형이 ${v.byteCount}바이트라 SMS 90바이트를 넘어요. LMS로 바꾸거나 본문을 줄여 주세요.`);
             }
           });
         }

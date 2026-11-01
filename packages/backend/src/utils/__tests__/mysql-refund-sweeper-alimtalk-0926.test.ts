@@ -26,6 +26,8 @@ const state = {
 const queryMock = vi.fn(async (sql: string, _params?: any[]) => {
   const s = String(sql);
   if (s.includes('JOIN companies co ON co.id = c.company_id')) return { rows: [state.camp] };
+  // ★ 1101 B-1101-4 — 정산 기준 기록(readHigh)은 운영 PG 처럼 1행을 쓴다(0행 = 세대가 바뀜 → 그 캠페인을 이번 주기에 건너뛴다)
+  if (s.includes("'{readHigh}'")) return { rows: [], rowCount: 1 };
   if (s.includes("type = 'deduct'") && s.includes('SELECT amount, description, created_at FROM balance_transactions')) return { rows: state.dedRows };
   return { rows: [] };
 });

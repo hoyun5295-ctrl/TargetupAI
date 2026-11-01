@@ -10,7 +10,7 @@ import { pool, query } from '../config/database';
 import { isDemoCompany } from '../utils/demo-company';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { buildAdMessage, buildAdSubject, getOpt080Number, prepareFieldMappings, replaceVariables } from '../utils/messageUtils';
-import { enqueueSpamTest, computeMessageHash, spamTestStartedAtMs, loadDefaultSpamFirstRecipient } from '../utils/spam-test-queue';
+import { enqueueSpamTest, computeMessageHash, spamTestStartedAtMs, loadDefaultSpamFirstRecipient, spamCheckFor } from '../utils/spam-test-queue';
 import { judgeSpamVerdict, withExpectedSpamDevices, isAutoSpamSource } from '../utils/spam-trial';
 import { resolveHubStoreScope } from '../utils/store-scope';
 import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
@@ -18,7 +18,7 @@ import type { AiLineViewer } from './ai-line';
 
 /** 칩 상태 — 화면은 이 값만 그린다 */
 export type LineSpamState =
-  | 'queued' | 'running' | 'pass' | 'blocked' | 'warn'
+  | 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn'
   | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device';
 
 export interface LineSpamStart {
@@ -30,7 +30,7 @@ export interface LineSpamStart {
 
 export interface LineSpamRead {
   state: LineSpamState;
-  carriers: Array<{ carrier: string; result: 'pass' | 'blocked' | 'none' }>;
+  carriers: Array<{ carrier: string; result: 'pass' | 'blocked' | 'checking' | 'none' }>;
   aheadCount: number;
   elapsedSec: number;
 }
@@ -73,12 +73,14 @@ async function verdictOf(testId: string, status: string, createdAt: Date, msgTyp
     : verdict === 'running' ? 'running'
     : verdict === 'pass' ? 'pass'
     : verdict === 'blocked' ? 'blocked'
+    : verdict === 'checking' ? 'checking'
     : 'warn';
-  const byCarrier = new Map<string, 'pass' | 'blocked' | 'none'>();
+  const byCarrier = new Map<string, 'pass' | 'blocked' | 'checking' | 'none'>();
   for (const r of rows) {
     const cur = byCarrier.get(r.carrier);
-    const val: 'pass' | 'blocked' | 'none' = r.result === 'blocked' ? 'blocked' : (r.received || r.result === 'pass') ? 'pass' : 'none';
-    if (cur === 'blocked' || (cur === 'pass' && val === 'none')) continue;
+    const val: 'pass' | 'blocked' | 'checking' | 'none' = r.result === 'blocked' ? 'blocked' : (r.received || r.result === 'pass') ? 'pass'
+      : r.result === 'unconfirmed' ? 'checking' : 'none';
+    if (cur === 'blocked' || (cur === 'checking' && val !== 'blocked') || (cur === 'pass' && val === 'none')) continue;
     byCarrier.set(r.carrier, val);
   }
   return {
@@ -135,23 +137,13 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
   }
 
   async function startLocked(): Promise<LineSpamStart> {
-  // 같은 회사 · 발신번호 · 유형 · 제목 · 치환 뒤 글 = 24시간 안 검사 재사용(통과 · 막힘 · 진행 중만 · 결과 없음은 다시)
+  // 같은 회사 · 발신번호 · 유형 · 제목 · 치환 뒤 글 = 같은 검사 이어 보기(통과 · 막힘 · 진행 중 · 확인 중 · 결과 없음은 다시)
   //   ★ Codex 1R medium — 유형(결과 행 · 큐 검사도 등록 때 결과 행이 생긴다)과 제목까지 같아야 한다. 제목을 모르는 옛 검사는 장문 재사용에서 빠진다.
-  if (hash) {
-    const found = await query(
-      `SELECT t.id, t.status, t.created_at FROM spam_filter_tests t
-        WHERE t.company_id = $1 AND REPLACE(t.callback_number, '-', '') = $2 AND t.message_hash = $3
-          AND t.created_at > NOW() - INTERVAL '24 hours'
-          AND t.subject IS NOT DISTINCT FROM $5
-          AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
-        ORDER BY t.created_at DESC LIMIT 1`,
-      [v.companyId, cb, hash, msgType, subject || null],
-    );
-    const t = found.rows[0];
-    if (t) {
-      const read = await verdictOf(String(t.id), String(t.status), t.created_at, msgType);
-      if (read.state !== 'warn') return { state: read.state, testId: String(t.id), reused: true };
-    }
+  //   ★ 2026-11-01 B1-4 — 찾기 = 공용 spamCheckFor 한 곳(같은 한국 날짜 · 옛 24시간 창 대신)
+  const same = hash ? await spamCheckFor({ companyId: v.companyId, callback: cb, hash, msgType, subject: subject || null }) : null;
+  if (same) {
+    const read = await verdictOf(same.testId, same.status, same.createdAt, msgType);
+    if (read.state !== 'warn') return { state: read.state, testId: same.testId, reused: true };
   }
 
   // 사용자당 줄에 선 자동 검사 1건(끝나면 화면이 다음 카드를 보낸다)

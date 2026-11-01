@@ -167,7 +167,9 @@ describe('C 알림 · 정지 결과', () => {
     expect(src.indexOf("if (r2.verdict === 'pass') {")).toBeGreaterThan(-1);   // ★1025 #14 — 판정 = 공용 3값
     const seg = src.slice(src.indexOf("if (r2.verdict === 'pass') {"));
     // ★ 1031 본문 · 표식 · 기록 = 판 확인 쓰기 한 트랜잭션(recordIfCurrent · newBody)
-    inOrder(seg, ["if (!(await safeNotify(b, regenBody, 'pretest_autofixed'))) {", 'await pauseJourney(', 'return;', "await recordIfCurrent(b, snapId, { status: 'notified', newBody: regenBody });"]);
+    // ★ 2026-11-01 B1-4 — 재작성 후보 검사(testCandidate) 한 곳 · 통과 = 알린 뒤에만 그 판 본문을 후보로
+    // ★ Codex 구현 3R — 후보 갈래의 정지 = pauseCurrent(그 판이 최신일 때만 · 판 확인과 한 트랜잭션)
+    inOrder(seg, ["if (!(await safeNotify(b, candBody, 'pretest_autofixed'))) {", 'await pauseCurrent(', 'return;', "const w = await recordIfCurrent(b, snapId, { status: 'notified', newBody: candBody, candidatePassed: true });"]);
   });
   it('정지 커밋 뒤 집계 · 조회 실패 = 실패로 답하지 않는다', () => {
     const src = read('../journey-pause-handler.ts');

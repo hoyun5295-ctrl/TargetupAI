@@ -49,6 +49,7 @@ import { buildCompositionPlans, compositionInfos, runLineJudge, LineJudgeBusyErr
 import { checkRecurringLine } from '../utils/one-line-ct/recurring';
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from '../utils/journey-message-render';
 import { journeyGate, journeyError, canAccessJourney, journeyOptionsOffOnly } from '../utils/journey-route';
+import { readJourneyCopyFacts } from '../utils/journey-copy-facts';
 import { accessibleJourneyIds } from '../utils/journey-access';
 import type { LineCompositionId } from '../utils/line-compositions';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
@@ -104,7 +105,7 @@ import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
 // ★ D181 (2026-05-19): Anthropic Citations (AI 응답 근거 박음 — 사용자 신뢰)
 import { buildCompanyDocuments, callAIWithCitations } from '../utils/citations';
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 (Opus 4.7)
-import { createJourneyFromTemplate, pauseJourney, endJourney, archiveJourney, unarchiveJourney, deleteJourney, listJourneys, getJourneyDetail, updateJourneyStep, addJourneyStep, deleteJourneyStep, JourneyInputError, validateJourneyEntryConfig, JOURNEY_TEMPLATES, JourneyTemplateCode, JourneyStatus } from '../utils/journey-builder';
+import { createJourneyFromTemplate, pauseJourney, endJourney, archiveJourney, unarchiveJourney, deleteJourney, listJourneys, getJourneyDetail, updateJourneyStep, addJourneyStep, deleteJourneyStep, fillJourneyCopyFacts, JourneyInputError, validateJourneyEntryConfig, JOURNEY_TEMPLATES, JourneyTemplateCode, JourneyStatus } from '../utils/journey-builder';
 import { AlimtalkFallbackError } from '../utils/alimtalk-fallback';
 // ★ 2026-08-02 §13-5: 구매 문 판정·마지막 도착 시각 — 판정은 CT가 소유하고 라우트는 그대로 전달만 한다.
 import { getPurchaseDoorStatus } from '../utils/journey-purchase-ledger';
@@ -3283,6 +3284,8 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       anchorRecurrenceDay,
       anchorHourKst,
       oneShotScheduledAt,
+      // ★ 2026-11-01 여정 재발 방지 B1-3 — 생성 화면이 받은 패키지의 혜택 · 링크(질문표 · 서버가 돌려준 값) → 사람 값 원장
+      copyFacts,
     } = req.body || {};
 
     if (!templateCode || !JOURNEY_TEMPLATES[templateCode as JourneyTemplateCode]) {
@@ -3317,6 +3320,15 @@ router.post('/operator/journeys', async (req: Request, res: Response) => {
       anchorRecurrenceDay,
       anchorHourKst,
       oneShotScheduledAt,
+      // ★ 1101 Codex 구현 1R B #4 — 세 갈래 그대로(정함 · 없음 [] · 안 정함 null / 정함 · 뺌 'omit' · 안 정함 null) · 모양이 다르면 안 정함
+      copyFacts: copyFacts && typeof copyFacts === 'object'
+        ? {
+          // ★ Codex 구현 2R B #3 — 원소가 하나라도 글이 아니면(빈 글 포함) 안 정함(null) · 빈 배열만 「혜택 없음」(형식 오류를 사람 결정으로 바꾸지 않는다)
+          benefits: Array.isArray(copyFacts.benefits) && copyFacts.benefits.every((t: unknown) => typeof t === 'string' && t.trim() !== '')
+            ? copyFacts.benefits.slice(0, 5) : null,
+          link: typeof copyFacts.link === 'string' ? copyFacts.link : null,
+        }
+        : undefined,
     });
 
     const detail = await getJourneyDetail(companyId, journeyId);
@@ -3611,6 +3623,26 @@ router.post('/operator/journeys/:id/detach', async (req: Request, res: Response)
     return res.json({ success: true, triggerEvent: out.triggerEvent });
   } catch (err: any) {
     return journeyError(res, err, 'detach', '처리하지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+  }
+});
+
+// POST /api/ai/operator/journeys/:id/copy-facts — 「혜택 넣기 · 링크 넣기」 한 번에 그 여정 모든 문자 칸을 채운다
+//   ★ 2026-11-01 여정 재발 방지 설계 B1-2 · B1-3 — 사람 값 원장(journeys.copy_facts · by=fill) + 칸 자리표시 → 값(한 트랜잭션 · 칸 갱신 길 그대로).
+//   칸이 없으면(DDL-A 전) 503 DB_MIGRATION_PENDING(journeyError) · 못 고치는 상태 = 409(칸 관문과 같은 판정).
+router.post('/operator/journeys/:id/copy-facts', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const { companyId } = gate;
+    const { benefit, url } = req.body || {};
+    const out = await fillJourneyCopyFacts(companyId, String(req.params.id), {
+      ...(typeof benefit === 'string' && benefit.trim() ? { benefit } : {}),
+      ...(typeof url === 'string' && url.trim() ? { url } : {}),
+    });
+    if (!out) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    return res.json({ success: true, steps: out.steps });
+  } catch (err: any) {
+    return journeyError(res, err, 'copy-facts', '넣지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -4096,7 +4128,7 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
     // ★ 2026-08-02 §13-3: 본문이 비어도 **여정 맥락이 있으면** 생성 모드로 간다.
     //   옛 흐름은 사람이 먼저 열 글자를 써야 AI를 부를 수 있었다(추가 입력 요구 = 1클릭 원칙 위반).
     //   맥락도 본문도 없을 때만 거절한다 — 지어낼 근거가 없기 때문이다.
-    const { message, channel, isAd, stepIntent, journey, variants, contentType } = req.body || {};
+    const { message, channel, isAd, stepIntent, journey, variants, contentType, journeyId } = req.body || {};
     const body = message != null ? String(message) : '';
     const jc = journey && typeof journey === 'object' ? journey : undefined;
     const hasContext = !!jc && (!!jc.triggerLabel || !!jc.objective || (Array.isArray(jc.previousMessages) && jc.previousMessages.length > 0));
@@ -4104,8 +4136,12 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
       return res.status(400).json({ success: false, error: '메시지 본문이 비어있습니다.' });
     }
     const ch = ['sms', 'lms', 'mms'].includes(channel) ? channel : 'lms';
+    // ★ 2026-11-01 여정 재발 방지 B1-3 — 저장된 여정이면 사람 값 원장(혜택 · 링크)으로 근거를 잡는다(남의 여정 = 원장 없음 = 옛 근거)
+    const copyFacts = typeof journeyId === 'string' && /^[0-9a-f-]{36}$/i.test(journeyId) && (await canAccessJourney(gate, journeyId))
+      ? await readJourneyCopyFacts(companyId, journeyId) : null;
     const { candidates } = await refineStepMessage({
       companyId,
+      copyFacts,
       currentMessage: body,
       channel: ch,
       isAd: isAd !== false,

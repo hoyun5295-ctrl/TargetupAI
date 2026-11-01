@@ -555,8 +555,13 @@ describe('③ 소스 계약', () => {
     expect(s).toContain("if (!locked) return { state: 'busy' };");
     expect(s).toContain('|| await loadDefaultSpamFirstRecipient(v.companyId, userId, fieldMappings)');   // ★ 2R — 등록과 같은 기본 고객
     expect(s).toContain('`ai-line-spam:${v.companyId}`');
-    expect(s).toContain('t.subject IS NOT DISTINCT FROM $5');
-    expect(s).toContain('AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)');
+    // ★ 2026-11-01 B1-4 — 재사용 찾기 = 공용 spamCheckFor(유형 · 제목까지 같은 키 · 같은 한국 날짜) · 결과 읽기는 이 화면 판정 그대로
+    expect(s).toContain('await spamCheckFor({ companyId: v.companyId, callback: cb, hash, msgType, subject: subject || null })');
+    expect(s).toContain('const read = await verdictOf(same.testId, same.status, same.createdAt, msgType);');
+    const q = read('utils/spam-test-queue.ts');
+    const f = q.slice(q.indexOf('export async function spamCheckFor('));
+    expect(f).toContain('AND t.subject IS NOT DISTINCT FROM $5');
+    expect(f).toContain('AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)');
     expect(s).toContain('return verdictOf(String(t.id), String(t.status), t.created_at, msgType);');
   });
   it('자동 검사 = 수동과 같은 선불 경로(skipPrepaid 없음 · 출처 auto_ai)', () => {

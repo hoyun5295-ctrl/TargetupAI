@@ -7,7 +7,7 @@
  */
 import { AlertTriangle, Ban, Check, ChevronRight, Loader2, Lock, RotateCcw, ShieldCheck } from 'lucide-react';
 
-export type SpamTileState = 'todo' | 'running' | 'pass' | 'blocked' | 'warn' | 'stale' | 'locked';
+export type SpamTileState = 'todo' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn' | 'stale' | 'locked';
 export type SpellTileState = 'todo' | 'running' | 'issues' | 'clean' | 'stale' | 'locked';
 
 interface Props {
@@ -37,6 +37,9 @@ export default function DirectCheckTiles({ spam, spell, onSpam, onSpell }: Props
   } else if (spam.state === 'blocked') {
     spamCls = 'ds-tile--issue'; spamIcon = <Ban size={18} strokeWidth={2.2} />;
     spamTitle = `${spam.carriersText}에서 막힘`; spamSub = '글을 고친 뒤 다시 검사해 주세요'; spamGo = '보기';
+  } else if (spam.state === 'checking') {
+    spamCls = 'ds-tile--run'; spamIcon = <Loader2 size={18} strokeWidth={2} className="animate-spin" />;
+    spamTitle = '결과 확인 중'; spamSub = `${spam.carriersText} 확인이 늦어요 · 길어도 20분`; spamGo = '보기';
   } else if (spam.state === 'warn') {
     spamCls = 'ds-tile--stale'; spamIcon = <AlertTriangle size={18} strokeWidth={2.2} />;
     spamTitle = '결과 없는 통신사'; spamSub = `${spam.carriersText} 결과가 오지 않았어요`; spamGo = '다시';

@@ -58,7 +58,7 @@ export function applyAgencySpellFixes(content: string, issues: SpellIssue[] | nu
   for (const id of want) {
     const it = issues.find((x) => x.id === id);
     if (!it) return { ok: false, code: 'SPELL_STALE', error: '문안이 바뀌어 맞춤법 결과가 달라졌어요. 화면을 새로 고쳐 주세요.' };
-    if (it.blocked) return { ok: false, code: 'SPELL_BLOCKED', error: '고치면 단문 글자 수를 넘는 곳이 있어 그곳은 고칠 수 없어요.' };
+    if (it.blocked) return { ok: false, code: 'SPELL_BLOCKED', error: '고치면 SMS 글자 수(90바이트)를 넘는 곳이 있어 그곳은 고칠 수 없어요.' };
     if (content.slice(it.start, it.end) !== it.before) return { ok: false, code: 'SPELL_STALE', error: '문안이 바뀌어 맞춤법 결과가 달라졌어요. 화면을 새로 고쳐 주세요.' };
     picked.push(it);
   }

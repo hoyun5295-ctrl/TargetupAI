@@ -38,9 +38,8 @@
 
 import type { PoolClient } from 'pg';
 import { sendSystemAlert } from './system-alert';
-import { needsMonthlyReset } from './ai-credit-calc';
-import { loadCreditRow, applyResetIfNeeded } from './ai-credit-tx';
-import { planChangeCreditDelta } from './plan-proration';
+import { loadCreditRow, applyResetIfNeeded, expireTrialLeftover, insertedRows, CYCLE_ROW_TIME_SQL, cycleRowTimeParams } from './ai-credit-tx';
+import { monthEntitlementNow, grantedInMonth, isEffectiveDateInCurrentMonth, monthTag, LEDGER_SEQ_SQL } from './ai-credit-month';
 
 export type PlanChangeType =
   | 'initial'       // 회사 생성 시 최초 플랜
@@ -62,8 +61,29 @@ export interface RecordPlanChangeParams {
   changeType: PlanChangeType | 'auto';
   changedBy?: string | null;
   reason?: string | null;
-  /** 요금 적용 기준일(YYYY-MM-DD). 미지정 시 오늘(KST) */
+  /** 요금 적용 기준일(YYYY-MM-DD). 미지정 시 오늘(KST). ★ 2026-11-01 크레딧 컨트롤타워 C4 — 이번 달 1일 ~ 오늘만 받는다 */
   effectiveDate?: string;
+  /**
+   * ★ 2026-11-01 C4(Codex R3-2) — 호출부가 plan_id 를 바꾸기 **전에** 본 요금제 id. 이력이 하나도 없는 회사의 첫 이력 from_plan 으로만 쓴다
+   *   (없으면 변경 전 날들의 권리가 0 이 된다). 이력이 있으면 무시한다(직전 이력이 진실).
+   */
+  prevPlanIdHint?: string | null;
+  /**
+   * ★ 2026-11-01 C4(Codex 구현 1R-2 · 1R-3 같은 뿌리) — 크레딧 판정 시각. 사건 하나 = 시계 하나:
+   *   체험 부여 · 만료 · 취소처럼 CT 둘을 잇는 호출부는 같은 값을 둘에 넘긴다. 없으면 지금.
+   */
+  now?: Date;
+}
+
+/**
+ * 호출 계약 위반 · 원장 어긋남(★ 2026-11-01 크레딧 컨트롤타워 C4) — 사용자 조건이 아니라 코드 · 데이터 결함이다(호출부 트랜잭션 롤백 · 실패 알림).
+ *   적용일 = 이번 달 1일 ~ 오늘만 · 일할 원장 키 중복 = 같은 이력 행을 두 번 반영하려 함.
+ */
+export class PlanChangeContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PlanChangeContractError';
+  }
 }
 
 export interface RecordPlanChangeResult {
@@ -105,7 +125,15 @@ export function classifyPlanChange(fromPrice: number | null | undefined, toPrice
  */
 export async function recordPlanChange(params: RecordPlanChangeParams): Promise<RecordPlanChangeResult> {
   const { client, companyId, toPlanId, changedBy, reason } = params;
-  const effectiveDate = params.effectiveDate || todayKst();
+  // ★ 2026-11-01 크레딧 컨트롤타워 C4 — 시계는 한 번만 읽는다(오늘 · 적용일 기본값 · 월 마감 시각이 자정을 사이에 두고 갈리지 않게).
+  const creditNow = params.now ?? new Date();
+  const today = todayKst(creditNow.getTime());
+  const effectiveDate = params.effectiveDate || today;
+  // 미래 · 지난달 적용일은 받지 않는다(달 경계 시간표 = 그때 요금제 하나 · 지난달 몫은 줄 자리가 없다).
+  //   운영 호출부 전부 오늘을 넘긴다(생략 = 오늘 · 선불 패스 = 기준일). 호출부 트랜잭션이 롤백된다.
+  if (!isEffectiveDateInCurrentMonth(effectiveDate, today)) {
+    throw new PlanChangeContractError(`요금제 적용일 ${effectiveDate} 은 받을 수 없습니다(이번 달 1일 ~ 오늘 ${today} 만).`);
+  }
 
   // 회사별 직렬화 — "직전 조회 → 판정 → INSERT"가 다른 변경과 교차하지 않게 한다.
   // 트랜잭션 종료 시 자동 해제된다.
@@ -129,7 +157,16 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
       LIMIT 1`,
     [companyId],
   );
-  const prev = prevRes.rows[0] || null;
+  let prev = prevRes.rows[0] || null;
+  // ★ C4(Codex 구현 1R-1) — 이력이 없으면 힌트(호출부가 바꾸기 전에 읽은 요금제)가 곧 직전 요금제다. 같은 요금제면 아래 same_plan 에서 끝난다
+  //   (같다고 힌트를 버리면 「최초 가입」 이력이 생겨 그 달 앞 날들의 권리가 0 이 되고, 이미 준 월분을 회수했다).
+  if (!prev && params.prevPlanIdHint) {
+    const hint = await client.query(
+      `SELECT id AS to_plan_id, plan_code AS to_plan_code, monthly_price AS to_monthly_price FROM plans WHERE id = $1::uuid`,
+      [params.prevPlanIdHint],
+    );
+    prev = hint.rows[0] || null;
+  }
 
   if (prev && String(prev.to_plan_id) === String(toPlanId)) {
     return { recorded: false, skipped: 'same_plan' };
@@ -184,6 +221,10 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
   }
   const reasonWithActor = `${reason || ''}${actorNote}`.trim() || null;
 
+  // ★ 2026-11-01 크레딧 컨트롤타워 C4 — 회사 행 잠금 → 월 마감(이력 INSERT 전 · 그 달 지급 = 바뀌기 전 시간표) → 이력 → 차이.
+  let creditRow = await loadCreditRow(client, companyId, true);
+  if (creditRow) creditRow = await applyResetIfNeeded(client, companyId, creditRow, creditNow);
+
   const inserted = await client.query(
     `INSERT INTO company_plan_changes (
        company_id, from_plan_id, to_plan_id, from_plan_code, to_plan_code,
@@ -210,19 +251,14 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
     `type=${changeType} effective=${effectiveDate}`,
   );
 
-  // ★ 2026-10-26 남은 기간 크레딧. 체험 부여 · 만료는 그 경로가 기본 칸을 직접 정하므로 건너뛴다.
-  const creditAdjust: PlanCreditAdjustResult =
-    changeType === 'trial_start' || changeType === 'trial_expire' || to.plan_code === 'TRIAL'
-      ? { applied: false, skipped: 'trial' }
-      : await applyPlanCreditDelta(client, {
-          companyId,
-          changeId: String(inserted.rows[0]?.id || ''),
-          prevPlanId: prev?.to_plan_id ? String(prev.to_plan_id) : null,
-          prevPlanCode: prev?.to_plan_code ? String(prev.to_plan_code) : null,
-          toPlanCode: String(to.plan_code || ''),
-          toCredits: Number(to.credits) || 0,
-          effectiveDate,
-        });
+  const historyId = String(inserted.rows[0]?.id || '');
+  const creditAdjust: PlanCreditAdjustResult = creditRow
+    ? await applyPlanCreditDelta(client, {
+        companyId, historyId, today, now: creditNow, toPlanCode: String(to.plan_code || ''),
+        leavingTrial: prev?.to_plan_code === 'TRIAL' && to.plan_code !== 'TRIAL',
+        purchased: Number(creditRow.purchased) || 0,
+      })
+    : { applied: false, skipped: 'no_company' };
 
   return { recorded: true, changeType, creditAdjust };
 }
@@ -230,80 +266,55 @@ export async function recordPlanChange(params: RecordPlanChangeParams): Promise<
 export interface PlanCreditAdjustResult {
   applied: boolean;
   /** 건너뛴 이유 — 운영에서 "왜 안 들어왔나"를 로그로 되짚을 수 있어야 한다 */
-  skipped?: 'trial' | 'no_company' | 'future_month' | 'no_change' | 'duplicate';
+  skipped?: 'no_company' | 'no_change';
   delta?: number;
   baseAfter?: number;
-  remainingDays?: number;
-  monthDays?: number;
+  /** 그 달 권리(이 변경 뒤) */
+  entitlement?: number;
+  /** 이 변경 전 그 달 원장 지급 합 */
+  granted?: number;
 }
 
 /**
- * 요금제가 바뀐 날 그 달 남은 기간 크레딧을 기본 칸에 반영한다(★ 2026-10-26 · 산식 = `planChangeCreditDelta`).
- * `recordPlanChange` 안에서만 부른다 — 이력 INSERT 와 같은 트랜잭션 · 같은 회사 잠금.
- *
- * ★ 이번 달 리셋 전(`reset_at`이 지난달)이면 **직전 요금제로 리셋부터** 돌린다.
- *   그냥 두면 다음 AI 사용 때 lazy 리셋이 새 요금제 한 달치를 통째로 넣어 일할이 무너진다.
- * ★ 원장 INSERT 가 먼저고, 실제로 들어간 경우에만 기본 칸을 고친다(재시도 이중 반영 차단 · 키 = 이력 행 id).
+ * ★ 2026-11-01 크레딧 컨트롤타워 C4(5판) — 요금제가 바뀐 달의 크레딧 = **E(이 변경 뒤 그 달 시간표) − 그 달 원장 지급 합**.
+ *   그 달 합이 언제나 마지막 E 가 된다(변경마다 반올림하던 옛 식 `planChangeCreditDelta` 의 1씩 어긋남 · 이력 없는 회사 · 옛 반올림이 다음 변경에서 맞춰진다).
+ *   TRIAL 을 떠나는 변경은 먼저 남은 체험 크레딧을 소멸한다(만료 · 취소 · 승인 · 선불 첫 결제 어느 길이든 같은 규칙 · I7).
+ *   `recordPlanChange` 안에서만 부른다(이력 INSERT 뒤 · 같은 트랜잭션 · 회사 행 잠금 · 월 마감은 이미 끝).
+ *   원장 INSERT 가 먼저이고 실제로 들어간 경우에만 기본 칸을 고친다(키 = 이력 행 id).
  */
 async function applyPlanCreditDelta(
   client: PoolClient,
-  o: {
-    companyId: string; changeId: string; prevPlanId: string | null; prevPlanCode: string | null;
-    toPlanCode: string; toCredits: number; effectiveDate: string;
-  },
+  o: { companyId: string; historyId: string; today: string; now: Date; toPlanCode: string; leavingTrial: boolean; purchased: number },
 ): Promise<PlanCreditAdjustResult> {
-  const now = new Date();
-  let row = await loadCreditRow(client, o.companyId, true);
+  // 체험 소멸도 이 변경의 시각으로(Codex 구현 1R-2 · 다시 읽으면 이력 INSERT 와 소멸 사이 자정에 다음 달 지급분을 체험 잔여로 지웠다)
+  if (o.leavingTrial) await expireTrialLeftover(client, o.companyId, `trial-end:${o.historyId}`, o.now);
+  const month = o.today.slice(0, 7);
+  const entitlement = await monthEntitlementNow(client, o.companyId, month, o.toPlanCode);
+  const granted = await grantedInMonth(client, o.companyId, month);
+  const delta = entitlement - granted;
+  const row = await loadCreditRow(client, o.companyId, true);
   if (!row) return { applied: false, skipped: 'no_company' };
-
-  let fromCredits = 0;
-  if (o.prevPlanId) {
-    const r = await client.query(
-      `SELECT COALESCE(ai_credits_per_month, 0) AS credits FROM plans WHERE id = $1::uuid`,
-      [o.prevPlanId],
-    );
-    fromCredits = Number(r.rows[0]?.credits) || 0;
-  }
-
-  if (needsMonthlyReset(row.reset_at ? new Date(row.reset_at) : null, now)) {
-    row = await applyResetIfNeeded(client, o.companyId, { ...row, plan_credits: fromCredits }, now);
-  }
-
-  const d = planChangeCreditDelta({
-    effectiveDate: o.effectiveDate,
-    today: todayKst(now.getTime()),
-    fromCredits,
-    toCredits: o.toCredits,
-    fromTrial: o.prevPlanCode === 'TRIAL',
-    base: Number(row.base) || 0,
-    carriesNegative: String(row.billing_type) === 'prepaid',
-  });
-  if (!d) {
-    console.log(`[plan-credit] company=${o.companyId} 변경일 ${o.effectiveDate} 이 다음 달 이후라 크레딧 반영 건너뜀`);
-    return { applied: false, skipped: 'future_month' };
-  }
-  if (d.delta === 0) return { applied: false, skipped: 'no_change', delta: 0, baseAfter: d.newBase };
-
-  const purchased = Number(row.purchased) || 0;
+  const base = Number(row.base) || 0;
+  if (delta === 0) return { applied: false, skipped: 'no_change', delta: 0, baseAfter: base, entitlement, granted };
+  const newBase = base + delta;
   // amount 의 **부호가 방향**이다(양수 = 지급 · 음수 = 회수). 다른 type 과 달리 type 이 방향을 담지 않는다.
+  // 키 = plan-prorate:그 달:이력 id(Codex 구현 2R-2 · 그 달 지급 합이 이 줄을 키로 센다 · 이력 행이 지워져도 · 줄 시각과 무관하게)
+  const key = `plan-prorate:${monthTag(month)}:${o.historyId}`;
   const ins = await client.query(
     `INSERT INTO ai_credit_transactions
-       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, reason)
-     VALUES ($1::uuid, 'plan_prorate', $2, 'base', 'plan-prorate', $3, $4, $5, $6)
-     ON CONFLICT (idempotency_key) DO NOTHING`,
+       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, reason, created_at, seq)
+     VALUES ($1::uuid, 'plan_prorate', $2, 'base', 'plan-prorate', $3, $4, $5, $6, ${CYCLE_ROW_TIME_SQL(7)}, ${LEDGER_SEQ_SQL})
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING id`,
     [
-      o.companyId, d.delta, `plan-prorate:${o.changeId}`, d.newBase, purchased,
-      `요금제 변경 남은 기간 크레딧: ${o.prevPlanCode || '(없음)'} → ${o.toPlanCode} · ${d.remainingDays}/${d.monthDays}일`,
+      o.companyId, delta, key, newBase, Number(row.purchased) || 0,
+      `요금제 변경 일할: ${o.toPlanCode} · ${month} 권리 ${entitlement} − 이미 지급 ${granted}`, ...cycleRowTimeParams(row, o.now),
     ],
   );
-  if ((ins.rowCount || 0) === 0) return { applied: false, skipped: 'duplicate' };
-  await client.query(
-    `UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`,
-    [o.companyId, d.newBase],
-  );
-
-  console.log(`[plan-credit] company=${o.companyId} ${o.prevPlanCode || '(없음)'}→${o.toPlanCode} ${d.remainingDays}/${d.monthDays}일 ${d.delta >= 0 ? '+' : ''}${d.delta} base=${Number(row.base) || 0}→${d.newBase}`);
-  return { applied: true, delta: d.delta, baseAfter: d.newBase, remainingDays: d.remainingDays, monthDays: d.monthDays };
+  if (insertedRows(ins) === 0) throw new PlanChangeContractError(`요금제 변경 일할 원장 키가 이미 있습니다: ${key}`);
+  await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [o.companyId, newBase]);
+  console.log(`[plan-credit] company=${o.companyId} → ${o.toPlanCode} ${month} E=${entitlement} 지급=${granted} ${delta >= 0 ? '+' : ''}${delta} base=${base}→${newBase}`);
+  return { applied: true, delta, baseAfter: newBase, entitlement, granted };
 }
 
 /**

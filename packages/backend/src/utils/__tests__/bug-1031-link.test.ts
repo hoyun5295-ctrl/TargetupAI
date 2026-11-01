@@ -236,7 +236,8 @@ describe('배선(계약)', () => {
   });
   it('여정 출구: 정제 · 거름 뒤 · 전송자 명칭 앞에 ensureOnceLink', () => {
     const j = read(BACK, 'utils/journey-ai-generator.ts');
-    expect(j).toContain('const linked = ensureOnceLink(season.text, onceLink).text;');
+    // ★ 2026-11-01 B1-3(J3) — 정해진 혜택이 있으면 남은 자리표시를 그 혜택으로 채운 뒤 링크(순서 = 거름 → 혜택 채움 → 링크 → 전송자 명칭)
+    expect(j).toContain('const linked = ensureOnceLink(benefitFilled ? fillBenefitSpots(season.text, benefitText) : season.text, onceLink).text;');
     expect(j).toContain('const named = ensureSenderName(linked,');
   });
   it('화면: 답 칸 500 · 미리 채움(빈 칸만) · LMS 안내 · 모델명 0', () => {
@@ -245,7 +246,7 @@ describe('배선(계약)', () => {
     expect(m).toContain('maxLength={ANSWER_MAX}');
     expect(m).toContain("a: (textAns[a.id] || '').trim().slice(0, ANSWER_MAX)");
     expect(m).toContain('for (const a of fills) if (next[a.id] === undefined) next[a.id] = a.prefill as string;');
-    expect(m).toContain('칼럼이나 링크가 들어가면 장문(LMS)으로 보내요');
+    expect(m).toContain('칼럼이나 링크가 들어가면 LMS로 보내요');   // ★1101 B1-5 채널 이름 = SMS · LMS · MMS
     expect(m).toMatch(/onChange=\{\(e\) => setTextAns\(\(cur\) => \(\{ \.\.\.cur, \[a\.id\]: e\.target\.value \}\)\)\}\s*maxLength=\{ANSWER_MAX\}/);
     expect(m).not.toMatch(/Opus|Sonnet|Haiku|Claude|Anthropic|GPT/);
     expect(read(FRONT, 'utils/ai-line.ts')).toMatch(/prefill\?: string;/);

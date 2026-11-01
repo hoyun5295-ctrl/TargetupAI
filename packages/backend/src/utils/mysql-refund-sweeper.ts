@@ -33,7 +33,7 @@ import { isStepCampaignDayClosed } from './journey-step-campaign';
 import { prepaidRefund, prepaidReverseOverRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-06-11: 환불 누적 단일 산식 — 정당 환불 = 차감 실측 − 성공 − 대기 (미적재분 과소 환불 근본 fix)
 // ★ 2026-06-29: refundInvariantGap — 차감 = 성공 + 순환불 머니 불변식 감시
-import { calcRefundParts, refundInvariantGap, resolveAlimtalkMix, calcAlimtalkUnitDiff, isZeroLoadShape, isDeductSettledForZeroLoad } from './refund-calc';
+import { calcRefundParts, refundInvariantGap, resolveAlimtalkMix, calcAlimtalkUnitDiff, isZeroLoadShape, isDeductSettledForZeroLoad, parseReadHigh, mergeReadHigh, readHighGrew, type ReadHigh } from './refund-calc';
 // ★ 2026-09-26 한줄로 V2 CRASH — 적재 0 고착 정산은 영속 환불 의무로 넘긴다(재시도 워커가 갚는다)
 import { settleZeroLoadAsObligation, countZeroLoadRawRows } from './refund-pending';
 // ★ 2026-06-29: 머니 불변식 위반 시 운영자 LMS 경보 (쿨다운·미설정 시 무발송)
@@ -90,6 +90,30 @@ interface CampaignRow {
   send_base: Date | string | null;
   status: string | null;          // ★ 2026-09-26 한줄로 V2 CRASH — 적재 0 고착 판정(sending·draft·failed)
   zero_load_settled: boolean | null; // ★ 2026-09-26 CRASH — 이미 의무로 넘긴 캠페인(send_config.zeroLoadSettled)
+  read_high?: unknown;               // ★ 2026-11-01 B-1101-4 · R37 — 정산 기준(send_config.readHigh · 늘기만 하는 수의 본 적 있는 가장 큰 값)
+  read_high_gen?: number | null;     // ★ 2026-11-01 R37(Codex 구현 1R #1) — 기준 세대(취소 정산이 기준을 지울 때 올린다 · 낡은 읽기의 쓰기를 거절)
+}
+
+/**
+ * ★ 2026-11-01 B-1101-4 · R37 — 정산 기준을 올린다(칸마다 SQL 안에서 GREATEST · 여러 프로세스가 겹쳐도 큰 값만 남는다).
+ *   updated_at 은 건드리지 않는다(적재 중 정리 판정 · 4-1 과 같은 이유).
+ */
+const readHighCell = (k: string, i: number) => `'${k}', GREATEST(COALESCE(NULLIF(send_config->'readHigh'->>'${k}', '')::numeric, 0), $${i}::numeric)`;
+/** 기준 세대 조각 — 취소 정산이 readHigh 를 지울 때 1 올린다(cancel-settle) · 쓰기는 읽을 때의 세대와 같을 때만 */
+export const READ_HIGH_GEN_SQL = `COALESCE(NULLIF(send_config->>'readHighGen', ''), '0')::int`;
+/**
+ * 정산 기준 기록 문장($1 = 캠페인 id · $2~$8 = READ_HIGH_KEYS 순서 · $9 = 집계 전에 읽은 세대) — 실 PG 시험(result-read-floor-1101.pg)이 같은 문장을 돌린다.
+ *   ★ Codex 구현 1R #1 — 집계와 쓰기 사이에 취소 정산이 대기 행을 지우고 기준을 지웠으면(세대가 바뀜) 취소 전 읽기를 다시 쓰지 않는다.
+ */
+export const READ_HIGH_UPDATE_SQL = `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{readHigh}', jsonb_build_object(
+       ${readHighCell('success', 2)}, ${readHighCell('sub', 3)}, ${readHighCell('unitDiff', 4)},
+       ${readHighCell('brandLoaded', 5)}, ${readHighCell('brandSuccess', 6)}, ${readHighCell('nonBrandLoaded', 7)}, ${readHighCell('nonBrandSuccess', 8)}))
+      WHERE id = $1 AND ${READ_HIGH_GEN_SQL} = $9::int`;
+/** @returns 반영했는가 — 0행 = 세대가 바뀌었다(취소 정산이 끼었다) → 부르는 쪽은 이 캠페인의 이번 주기 돈 계산을 멈춘다(Codex 구현 2R) */
+async function persistReadHigh(campaignId: string, next: ReadHigh, gen: number): Promise<boolean> {
+  const r = await query(READ_HIGH_UPDATE_SQL,
+    [campaignId, next.success, next.sub, next.unitDiff, next.brandLoaded, next.brandSuccess, next.nonBrandLoaded, next.nonBrandSuccess, gen]);
+  return (r.rowCount ?? 0) > 0;
 }
 
 // ★ 2026-06-13 차등 주기 마커 — 캠페인별 마지막 실집계 시각(메모리).
@@ -199,6 +223,8 @@ async function runOnce(): Promise<void> {
              (c.send_config ? 'journeyLedger') AS journey_ledger,
              c.success_count, c.fail_count, c.sent_count, c.send_phase, c.status,
              (c.send_config ? 'zeroLoadSettled') AS zero_load_settled,
+             c.send_config->'readHigh' AS read_high,
+             COALESCE(NULLIF(c.send_config->>'readHighGen', ''), '0')::int AS read_high_gen,
              COALESCE(c.scheduled_at, c.sent_at, c.created_at) AS send_base
       FROM campaigns c
       JOIN companies co ON co.id = c.company_id
@@ -334,6 +360,29 @@ async function runOnce(): Promise<void> {
         // draft = AI 발송이 아직 적재 중인 모양이다. 고착이 아니면 아무 정산도 하지 않는다(부분 적재를 미적재로 환불하지 않는다).
         if (camp.status === 'draft') continue;
 
+        // ★ 2026-11-01 B-1101-4 · R37 — 정산 기준(본 적 있는 가장 큰 값). 아래 환불 · 회수 · 불변식은 max(기준, 이번 읽기)로 잰다.
+        //   차액 기준은 4-2-A 가 모호가 아닌 회차에만 올린다(Codex 설계 4R #1).
+        const readHighPrev = parseReadHigh(camp.read_high);
+        const subRead = subRowMap.get(camp.id) || 0;
+        const brandRead = brandAggMap.get(camp.id);
+        const nonBrandRead = nonBrandAggMap.get(camp.id);
+        let readHighNext = mergeReadHigh(readHighPrev, {
+          success: mysqlSuccess,
+          sub: subRead,
+          ...(brandRead ? { brandLoaded: Number(brandRead.total || 0), brandSuccess: Number(brandRead.success || 0) } : {}),
+          ...(nonBrandRead ? { nonBrandLoaded: Number(nonBrandRead.total || 0), nonBrandSuccess: Number(nonBrandRead.success || 0) } : {}),
+        });
+        // ★ Codex 구현 1R #2 — 본 기준은 돈 계산 **전에** 남긴다(뒤 원장 조회 등이 실패해도 관측한 증가를 잃지 않는다)
+        const readHighGen = Number(camp.read_high_gen || 0);
+        let readHighSaved = readHighPrev;
+        if (readHighGrew(readHighSaved, readHighNext)) {
+          if (!(await persistReadHigh(camp.id, readHighNext, readHighGen))) {
+            log(`[정산기준] campaign=${camp.id} 집계 뒤 기준 세대가 바뀜(취소 정산) — 이번 주기 건너뜀(다음 주기가 새 세대로 다시 센다)`);
+            continue;
+          }
+          readHighSaved = readHighNext;
+        }
+
         // === 4-1. PG count 동시 갱신 (화면 보조) — 결과가 하나라도 있을 때만 ===
         // target_count는 절대 건드리지 않음 (protect_completed_target_count trigger 호환)
         // ★ 2026-06-11: sent_count 덮어쓰기 제거 — sent_count는 적재 실측(worker 기록)이 진실.
@@ -358,8 +407,10 @@ async function runOnce(): Promise<void> {
                      --   대량 적재 워커는 청크마다 updated_at을 찍고, 10분 넘게 멈춘 processing을 주인 없는 적재로 보고 정리한다.
                      --   여기서 30초마다 밀면 적재가 죽어도 결과가 안정될 때까지 정리(미적재 환불)가 늦어졌다.
                      updated_at = CASE WHEN send_phase = 'processing' THEN updated_at ELSE NOW() END
-               WHERE id = $3 AND status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})`,
-              [mysqlSuccess, mysqlFail, camp.id, loaded]
+               WHERE id = $3 AND status IN (${SWEEPABLE_CAMPAIGN_STATUS_SQL})
+                 -- ★ 2026-11-01 R37(Codex 구현 1R #1) 집계 뒤 취소 정산이 끼었으면(세대 바뀜) 취소 전 읽기를 쓰지 않는다
+                 AND ${READ_HIGH_GEN_SQL} = $5::int`,
+              [mysqlSuccess, mysqlFail, camp.id, loaded, readHighGen]
             );
             pgUpdateCount++;
           }
@@ -388,8 +439,12 @@ async function runOnce(): Promise<void> {
             const axisSuccess = Number(axisCounts.success || 0);
             const axisFail = Number(axisCounts.fail || 0);
             const axisPending = Number(axisCounts.pending || 0);
-            // 분리 축은 PG sent_count(전 채널 합)를 못 쓴다 — MySQL 실측만으로 처리수를 잡는다.
-            const axisSentCount = axis.scope === 'all' ? Number(camp.sent_count || 0) : 0;
+            // 분리 축은 PG sent_count(전 채널 합)를 못 쓴다 — ★ 2026-11-01 R37 축 적재 기준(본 적 있는 가장 큰 축 합 · 옛 = 0 = 읽기만).
+            const axisSentCount = axis.scope === 'all' ? Number(camp.sent_count || 0)
+              : axis.scope === 'brand' ? readHighNext.brandLoaded : readHighNext.nonBrandLoaded;
+            // ★ 2026-11-01 R37 — 회수 한도 · 불변식의 성공 = 성공 기준(성공은 늘기만 한다 · 덜 읽히면 행 기준 실패 환불의 넘친 몫을 못 거뒀다)
+            const axisSuccessUsed = Math.max(axisSuccess, axis.scope === 'all' ? readHighNext.success
+              : axis.scope === 'brand' ? readHighNext.brandSuccess : readHighNext.nonBrandSuccess);
 
             // ★ 2026-07-26 **차감 원장을 먼저 읽는다**(Codex #5·#6).
             //   그 전에는 ①`현재 단가 > 0`인지로 환불 진입을 판정하고 ②차감 건수를 `총차감액 ÷ 현재단가`로
@@ -455,6 +510,8 @@ async function runOnce(): Promise<void> {
               //   실패만 수신자 기준으로 바꾸면 미적재가 줄어 미환불이 난다. 행 기준 합은 정당 환불 건수와 같고 넘친 몫은 4-3 회수가 맞춘다.
               //   차액을 먼저 돌려준다 — 실패 환불이 한도를 먼저 채우면 차액 항아리가 비어 기록이 흐려진다(금액은 4-3이 맞춘다).
               let unitDiffAmt = 0;
+              // ★ 2026-11-01 R37 — 회수 한도 · 불변식에 넣는 차액 = max(차액 기준, 이번 차액) · 지급은 모호가 아닌 회차만(Codex 설계 4R #1)
+              let unitDiffLegit = axis.scope === 'all' ? readHighPrev.unitDiff : 0;
               const alimUnits = axis.scope === 'all' ? resolveAlimtalkLedgerUnits(dedRes.rows as any[]) : null;
               if (alimUnits) {
                 const tables = tablesByKey.get(`${camp.company_id}::${camp.created_by || ''}`) || [];
@@ -471,8 +528,21 @@ async function runOnce(): Promise<void> {
                   }).catch(() => { /* 경보 실패가 sweep을 막지는 않는다 */ });
                 } else {
                   unitDiffAmt = calcAlimtalkUnitDiff({ deductUnit: unit, units: alimUnits, mix, freeCount });
+                  // 기준은 모호가 아닌 회차의 차액으로만 올린다 · 지급 목표 = 기준(덜 읽힌 회차가 목표를 줄이지 않는다)
+                  readHighNext = mergeReadHigh(readHighNext, { unitDiff: unitDiffAmt });
+                  // ★ Codex 구현 1R #2 — 차액 기준도 지급 전에 남긴다
+                  if (readHighGrew(readHighSaved, readHighNext)) {
+                    // 저장이 거절되면(세대 바뀜) 지급 · 회수 · 불변식을 이번 주기에 하지 않는다 — 기준 없이 준 차액을 다음 주기가 회수하지 않게(Codex 구현 2R)
+                    if (!(await persistReadHigh(camp.id, readHighNext, readHighGen))) {
+                      log(`[정산기준] campaign=${camp.id} ${axis.type} 차액 기준 저장 거절(세대 바뀜) — 이번 주기 정산 중단`);
+                      break;
+                    }
+                    readHighSaved = readHighNext;
+                  }
+                  unitDiffAmt = Math.max(unitDiffAmt, readHighPrev.unitDiff);
                 }
               }
+              unitDiffLegit = Math.max(unitDiffLegit, unitDiffAmt);
               if (unitDiffAmt > 0) {
                 const r = await prepaidRefund(
                   camp.company_id, 0, axis.type, camp.id, '알림톡 결과별 단가 차액 환불',
@@ -503,7 +573,8 @@ async function runOnce(): Promise<void> {
                 //   목표 = min(자리 잡은 차감, 수신자 기준 실패 + 미적재) — 알림톡은 행 실패 − 대체 행(K 실패 + 대체 성공 = 실패 아님).
                 //   미적재 = 자리 잡은 부담 − 적재(발송 수는 실행기가 성공마다 +1 · 차감 → 적재라 발송 수 0이면 정말 전부 미적재).
                 //   회수 한도(아래 4-3 = 전체 차감 − 성공 − 대기)는 이 목표보다 작아질 수 없다(적재 ≥ 성공 + 실패 + 대기) → 요동 없음.
-                const failR = Math.max(0, axisFail - (subRowMap.get(camp.id) || 0));
+                // ★ 2026-11-01 R37 — 대체 행은 늘기만 한다(재전송 엔진 INSERT 만) · 덜 읽히면 실패가 늘어 성공한 몫을 환불했다(Codex 설계 2R #1)
+                const failR = Math.max(0, axisFail - Math.max(subRead, readHighNext.sub));
                 const processedR = Math.max(axisSentCount, axisSuccess + failR + axisPending);
                 const notLoadedR = Math.max(0, partsDeducted + partsFree - processedR);
                 const target = Math.min(partsDeducted, failR + notLoadedR);
@@ -551,13 +622,14 @@ async function runOnce(): Promise<void> {
               if (axisPending === 0 && (axisSuccess + axisFail) > 0 && ageMs > 30 * 60 * 1000) {
                 // ★ 2026-08-05 정당 한도는 **부담 − 성공 − 대기**다. 차감만으로 재면 무료 제공이 낀 캠페인에서
                 //   성공이 차감보다 커져 한도가 0이 되고, **정상 실패 환불을 초과로 오인해 회수한다**(설계 §5-1-B).
-                const maxLegitRefund = Math.max(0, coveredCount - axisSuccess - axisPending);
+                const maxLegitRefund = Math.max(0, coveredCount - axisSuccessUsed - axisPending);
                 // ★ 2026-09-26 알림톡 결과별 차액은 정당 환불이다 — 한도에 더하지 않으면 30분 뒤 차액을 다시 빼간다.
-                const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, axis.type, camp.id, unitDiffAmt, ledger.referenceType);
+                //   ★ 2026-11-01 R37 — 더하는 차액 = 차액 기준 포함(덜 읽힌 회차 · 모호 회차가 정당한 차액을 회수하지 않게 · Codex 설계 3R #1)
+                const rev = await prepaidReverseOverRefund(camp.company_id, maxLegitRefund, axis.type, camp.id, unitDiffLegit, ledger.referenceType);
                 if (rev.reversed > 0) {
                   reverseOverCount++;
                   totalReverseOverAmount += rev.reversed;
-                  log(`✓ campaign=${camp.id} ${axis.type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 부담 ${coveredCount} − 성공 ${axisSuccess})`);
+                  log(`✓ campaign=${camp.id} ${axis.type} 초과환불 회수 ${rev.reversed}원 (정당한도 ${maxLegitRefund}건 = 부담 ${coveredCount} − 성공 ${axisSuccessUsed})`);
                 }
 
                 // === 4-4. ★ 2026-06-29: 머니 불변식 감시 — 차감 = 성공 + 순환불(환불−회수). 깨지면 즉시 경보 ===
@@ -570,15 +642,18 @@ async function runOnce(): Promise<void> {
                 if (!rev.skipped && invariantDue) {
                   const netRefundedCnt = Math.round(rev.netRefundedAmt / unit);
                   // ★ 2026-09-26 차액은 정당 환불 — 순환불에서 빼고 본다(못 돌려줬으면 gap > 0 미환불로 드러난다).
-                  const gapCnt = refundInvariantGap({ deductedCount, freeCount, successCount: axisSuccess, netRefundedCount: netRefundedCnt, unitDiffCount: unitDiffAmt / unit });
+                  const gapCnt = refundInvariantGap({ deductedCount, freeCount, successCount: axisSuccessUsed, netRefundedCount: netRefundedCnt, unitDiffCount: unitDiffLegit / unit });
                   if (Math.abs(gapCnt) >= INVARIANT_ALERT_THRESHOLD) {
                     invariantAlertCount++;
-                    const dir = gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
-                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 부담 ${coveredCount} ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt}${unitDiffAmt > 0 ? ` (결과별 차액 ${unitDiffAmt}원)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir})`);
+                    // ★ 2026-11-01 R37 — 읽은 행이 기준보다 적으면 돈 문제가 아니라 읽기 문제다(1101 경보가 「미환불 의심」이라 원인을 잘못 가리켰다)
+                    const readShort = (axisSuccess + axisFail + axisPending) < axisSentCount || axisSuccess < axisSuccessUsed;
+                    const dir = readShort ? '결과 행 일부가 안 읽힘(읽기 이상 의심 · 돈 안 움직임)' : gapCnt > 0 ? '미환불 의심(고객 손해)' : '초과환불 잔존';
+                    const readNote = readShort ? ` · 읽은 처리 ${axisSuccess + axisFail + axisPending}/적재 기준 ${axisSentCount} · 읽은 성공 ${axisSuccess}/성공 기준 ${axisSuccessUsed}` : '';
+                    log(`[불변식위반] campaign=${camp.id} ${axis.type} 부담 ${coveredCount} ≠ 성공 ${axisSuccessUsed} + 순환불 ${netRefundedCnt}${unitDiffLegit > 0 ? ` (결과별 차액 ${unitDiffLegit}원)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir}${readNote})`);
                     await sendSystemAlert({
                       companyId: camp.company_id,
                       dedupKey: `refund-invariant:${camp.id}:${axis.type}`,
-                      message: `환불 불변식 위반 — ${axis.type} 캠페인: 부담 ${coveredCount}건(차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''}) ≠ 성공 ${axisSuccess} + 순환불 ${netRefundedCnt}${unitDiffAmt > 0 ? ` (알림톡 결과별 차액 ${unitDiffAmt}원 포함)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir}). campaign=${camp.id}`,
+                      message: `환불 불변식 위반 · ${axis.type} 캠페인: 부담 ${coveredCount}건(차감 ${deductedCount}${freeCount > 0 ? ` + 무료 ${freeCount}` : ''}) ≠ 성공 ${axisSuccessUsed} + 순환불 ${netRefundedCnt}${unitDiffLegit > 0 ? ` (알림톡 결과별 차액 ${unitDiffLegit}원 포함)` : ''} (차이 ${Math.round(gapCnt * 10) / 10}건, ${dir}${readNote}). campaign=${camp.id}`,
                     });
                   }
                 }

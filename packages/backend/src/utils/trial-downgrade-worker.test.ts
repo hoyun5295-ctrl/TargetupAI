@@ -14,6 +14,8 @@
  *   4. targets SELECT와 UPDATE가 같은 술어 상수를 공유하고, 술어는 status 축·TRIAL plan 축·
  *      만료일 근거(IS NOT NULL + < NOW())를 전부 담는다 — 축 하나를 지우면 여기가 빨간불.
  *   5. 경쟁 탈락(UPDATE 0행)은 이력 없이 ROLLBACK. 이력 실패는 그 회사만 경보, 나머지는 계속.
+ *   6. ★ 2026-11-01 크레딧 컨트롤타워 C1 — 강등 UPDATE 는 잔액 칸을 쓰지 않고, 남은 체험 크레딧은 원장 CT(expireTrialLeftover)가
+ *      이력(recordPlanChange) **앞에** 소멸한다(키 = 갱신 전 만료 시각 · 상태 청소는 KST 날짜).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -24,10 +26,13 @@ vi.mock('../config/database', () => {
 vi.mock('./plan-change-log', () => ({
   recordPlanChange: vi.fn(),
   alertPlanChangeFailure: vi.fn(),
+  todayKst: () => '2026-11-01',
 }));
+vi.mock('./ai-credit-tx', () => ({ expireTrialLeftover: vi.fn() }));
 
 import pool, { query } from '../config/database';
 import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
+import { expireTrialLeftover } from './ai-credit-tx';
 import {
   runTrialDowngradeJob,
   TRIAL_DOWNGRADE_TARGET_WHERE,
@@ -38,11 +43,12 @@ const q = query as unknown as ReturnType<typeof vi.fn>;
 const connect = pool.connect as unknown as ReturnType<typeof vi.fn>;
 const record = recordPlanChange as unknown as ReturnType<typeof vi.fn>;
 const alertFail = alertPlanChangeFailure as unknown as ReturnType<typeof vi.fn>;
+const expireLeft = expireTrialLeftover as unknown as ReturnType<typeof vi.fn>;
 
 const FREE_PLAN_ID = 'ffffffff-0000-0000-0000-000000000000';
 const TRIAL_PLAN_ID = 'tttttttt-0000-0000-0000-000000000000';
 
-type Fixture = { id: string; company_name: string; plan_id: string | null; plan_code: string | null; monthly_price: string | null };
+type Fixture = { id: string; company_name: string; plan_id: string | null; plan_code: string | null; monthly_price: string | null; trial_key?: string | null };
 
 const clientQuery = vi.fn();
 const client = { query: clientQuery, release: vi.fn() };
@@ -82,7 +88,7 @@ function clientSqlKinds(): string[] {
   });
 }
 
-const T1: Fixture = { id: '11111111-1111-1111-1111-111111111111', company_name: '만료체험사', plan_id: TRIAL_PLAN_ID, plan_code: 'TRIAL', monthly_price: '0.00' };
+const T1: Fixture = { id: '11111111-1111-1111-1111-111111111111', company_name: '만료체험사', plan_id: TRIAL_PLAN_ID, plan_code: 'TRIAL', monthly_price: '0.00', trial_key: '20261031T090000000000' };
 const T2: Fixture = { id: '22222222-2222-2222-2222-222222222222', company_name: '두번째사', plan_id: TRIAL_PLAN_ID, plan_code: 'TRIAL', monthly_price: '0.00' };
 const PAID: Fixture = { id: '33333333-3333-3333-3333-333333333333', company_name: '유료잔존사', plan_id: 'pppppppp-0000-0000-0000-000000000000', plan_code: 'PRO', monthly_price: '1000000.00' };
 const FREE_CLEANUP: Fixture = { id: '55555555-5555-5555-5555-555555555555', company_name: '상태잔존사', plan_id: FREE_PLAN_ID, plan_code: 'FREE', monthly_price: '0.00' };
@@ -95,6 +101,7 @@ describe('trial-downgrade-worker — 술어·유료 가드', () => {
     vi.clearAllMocks();
     record.mockResolvedValue(undefined);
     alertFail.mockResolvedValue(undefined);
+    expireLeft.mockResolvedValue(undefined);
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -113,7 +120,14 @@ describe('trial-downgrade-worker — 술어·유료 가드', () => {
       companyId: T1.id,
       toPlanId: FREE_PLAN_ID,
       changeType: 'trial_expire',
+      prevPlanIdHint: TRIAL_PLAN_ID,
     }));
+    // 남은 체험 크레딧 소멸 = 원장 CT · 이력 앞 · 키 = 갱신 전 만료 시각 · UPDATE 는 잔액 칸을 쓰지 않는다
+    expect(expireLeft).toHaveBeenCalledWith(client, T1.id, `trial-end:${T1.id}:20261031T090000000000`, expect.any(Date));
+    expect(expireLeft.mock.calls[0][3]).toBe(record.mock.calls[0][0].now);   // 소멸 · 이력 = 같은 판정 시각
+    expect(expireLeft.mock.invocationCallOrder[0]).toBeLessThan(record.mock.invocationCallOrder[0]);
+    const upd = clientQuery.mock.calls.map(([sql]) => String(sql)).find((x) => /^\s*UPDATE companies/.test(x));
+    expect(upd).not.toMatch(/ai_credits_base_remaining|ai_credits_reset_at/);
     expect(r.downgraded).toBe(1);
   });
 
@@ -181,10 +195,10 @@ describe('trial-downgrade-worker — 술어·유료 가드', () => {
     expect(updateSql).toContain(TRIAL_DOWNGRADE_TARGET_WHERE);
     expect(updateSql).toContain(PAID_PLAN_DOWNGRADE_GUARD_WHERE);
     // 2R high — 이력 생략 판정(조회 시점 plan_id)과 갱신의 원자 결합 조건이 UPDATE에 실려 나간다.
-    expect(updateSql).toContain('companies.plan_id = $4::uuid');
+    expect(updateSql).toContain('companies.plan_id = $3::uuid');   // ★ 2026-11-01 잔액 칸이 빠져 자리표시자가 하나 당겨졌다(관찰한 plan_id 일치 조건은 그대로)
     const updateParams = clientQuery.mock.calls.find(([s]) => /^UPDATE companies/.test(String(s).trim()))?.[1];
-    expect(updateParams).toHaveLength(4);
-    expect(updateParams?.[3]).toBe(T1.plan_id);
+    expect(updateParams).toHaveLength(3);
+    expect(updateParams?.[2]).toBe(T1.plan_id);
   });
 
   it('경쟁 탈락(UPDATE 0행)은 이력 없이 ROLLBACK — 정상 스킵', async () => {

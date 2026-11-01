@@ -332,7 +332,7 @@ describe('⑧ Codex 1R 구조 정정(돈 원자성 · 실행 소유권 · 행사
     expect(del).toContain("e.meta->'building' IS NULL");
     const copy = read('planner-copy.ts');
     expect(copy).not.toContain('setTouchpointState(');
-    expect((copy.match(/setTouchpointMetaIfCopyIs\(companyId, carrier\.id, (before|cur),/g) || []).length).toBe(6);   // ★ 1026 고친 글 검사 장애 사유 기록 1 더
+    expect((copy.match(/setTouchpointMetaIfCopyIs\(companyId, carrier\.id, (before|cur),/g) || []).length).toBe(9);   // ★ 1026 고친 글 검사 장애 사유 기록 1 더 · ★ 1101 B1-4 검사 확인 중 3(고친 글 확인 중 · 확인 중 AI 글 막힘 · 만든 글 확인 중)
     const edit = copy.slice(copy.indexOf('export async function editPlannerCopy('), copy.indexOf('export async function runPlannerCopyPass('));
     expect(edit.indexOf("FOR UPDATE")).toBeLessThan(edit.indexOf("UPDATE planner_touchpoints SET exec_meta"));
     expect(edit).toContain("await client.query('COMMIT');");

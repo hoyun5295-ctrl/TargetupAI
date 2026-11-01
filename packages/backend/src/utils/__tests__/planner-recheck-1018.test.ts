@@ -39,7 +39,10 @@ const src = (p: string) => readFileSync(join(SRC, p), 'utf8');
 describe('① 검사 판정 3분할(B6)', () => {
   const r = (spamResult: string, carrierResults: Array<{ result: string }>, totalTestCount = 1) => ({ variants: [{ spamResult, carrierResults }], totalTestCount });
   it('통과 = 결과 1개 이상 + 시간 초과 · 실패 0', () => {
-    expect(plannerSpamVerdict(r('pass', [{ result: 'received' }, { result: 'received' }]))).toBe('pass');
+    // ★ 2026-11-01 B1-4 — 통과 = 통신사 결과 전부 pass(서버가 쓰는 값 · 옛 시험의 'received' 는 결과 칸에 없는 값) · 확인 중 = unconfirmed
+    expect(plannerSpamVerdict(r('pass', [{ result: 'pass' }, { result: 'pass' }]))).toBe('pass');
+    expect(plannerSpamVerdict(r('pass', [{ result: 'pass' }, { result: 'error' }]))).toBe('error');
+    expect(plannerSpamVerdict(r('pass', [{ result: 'pass' }, { result: 'unconfirmed' }]))).toBe('unconfirmed');
   });
   it('결과 0행 · NULL(시간 초과로 바뀜) · 실패는 error', () => {
     expect(plannerSpamVerdict(r('pass', []))).toBe('error');
@@ -260,7 +263,7 @@ describe('⑥ 배선 계약', () => {
     const fn = r.slice(r.indexOf('async function checkCarrierAfterApproval'));
     expect(fn).toMatch(/enterPairRecheck\(/);
     expect(fn).not.toMatch(/revertEventToReview\(/);
-    expect(fn).toMatch(/check\.verdict === 'error'\) return 'skip'/);
+    expect(fn).toMatch(/check\.verdict === 'error' \|\| isSpamHold\(check\.verdict\)\) return 'skip'/);   // ★ 1101 B1-4 확인 중 · 검사 중도 다음 주기
   });
 
   it('B4 — 행사 단위 전이 4곳이 recheck 를 지운다', () => {

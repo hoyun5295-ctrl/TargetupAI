@@ -208,7 +208,7 @@ export default function PhoneComposer({
           {mode === 'see' && serverBytes != null && serverBytes !== bytes && (
             <span className="text-slate-500">고객 값이 들어가면 {bytes.toLocaleString('ko-KR')}바이트에서 {serverBytes.toLocaleString('ko-KR')}바이트가 돼요</span>
           )}
-          {over && channel === 'sms' && <span className="text-rose-700">90바이트를 넘으면 문자가 잘리지 않게 장문 문자로 보내야 해요</span>}
+          {over && channel === 'sms' && <span className="text-rose-700">90바이트를 넘으면 문자가 잘리지 않게 LMS로 보내야 해요</span>}
           {subjectOver && <span className="text-rose-700">제목이 {LMS_SUBJECT_MAX_CHARS}자를 넘어요. 줄여 주세요</span>}
         </div>
         {sampleNote && <p className="mt-1 text-[12px] text-slate-500">{sampleNote}</p>}

@@ -320,7 +320,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                           <b className="text-emerald-700">{i.after}</b>
                           <span className="ml-2 text-[11.5px] text-neutral-500">
                             {i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}
-                            {i.blocked === 'sms_bytes' ? ' · 고치면 단문 길이를 넘어요' : ''}
+                            {i.blocked === 'sms_bytes' ? ' · 고치면 SMS 길이(90바이트)를 넘어요' : ''}
                           </span>
                         </div>
                         {spellPut.has(i.id) ? (

@@ -41,6 +41,7 @@ import { CREDIT_EDIT_FREE } from '../../../utils/journey-credit-copy';
 import { stepChannelLabel, formatDelayAfter } from '../../../utils/journey-labels';
 import { buildAdMessageFront, buildAdSubjectFront, LMS_SUBJECT_MAX_CHARS } from '../../../utils/formatDate';
 import { STATUS_META, countText, triggerWhen, journeyApiErrorText, type LifecycleMapData, type MapJourney, type StepEditPolicy } from '../../../utils/journey-map';
+import { isSendableUrl } from '../../../utils/message-placeholders';
 import { JOURNEY_STATUS_LABEL } from '../../../utils/journey-row-actions';
 import { TRIGGER_EVENTS } from '../../../utils/journey-trigger-catalog';
 
@@ -172,15 +173,19 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const [undo, setUndo] = useState<{ id: string; text: string } | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [saving, setSaving] = useState(false);
+  // ★ 2026-11-01 B1-2(Codex 구현 1R B #6) — 혜택 · 링크 넣기 중 = 칸 편집 · 저장 · AI 잠금(요청 ~ 다시 읽기 끝까지 · 넣은 글을 옛 글이 덮지 않게)
+  const [filling, setFilling] = useState(false);
   const [reshaping, setReshaping] = useState(false);
   // ★ V.3 §18(Codex 적대 B 1R) — 떼는 동안도 편집 · 닫기를 잠근다(뗀 뒤 시작 카드를 서버 값으로 다시 읽어 고친 값이 덮이지 않게).
   const [detaching, setDetaching] = useState(false);
   const editLockRef = useRef(false);
-  editLockRef.current = saving || reshaping || detaching;
+  editLockRef.current = saving || reshaping || detaching || filling;   // ★ 1101 Codex 구현 2R B #5 — 혜택 · 링크 넣기 중도 공통 편집 잠금
   const [confirmShape, setConfirmShape] = useState(false);
   const [overlapAsk, setOverlapAsk] = useState<string[] | null>(null);
   const [variantsOpen, setVariantsOpen] = useState<string | null>(null);
   const [nextRec, setNextRec] = useState<{ loading: boolean; data: any | null }>({ loading: false, data: null });
+  // ★ 1101 Codex 구현 2R B #5 — 다음 칸 추천 세대(혜택 · 링크를 넣으면 올린다 · 그 전 원장으로 받은 추천 · 진행 중 응답은 버린다)
+  const recGenRef = useRef(0);
   const [simOpen, setSimOpen] = useState(false);
   const [sim, setSim] = useState<{ loading: boolean; data: any | null; error: string | null }>({ loading: false, data: null, error: null });
   const [pauseLogsOpen, setPauseLogsOpen] = useState(false);
@@ -273,7 +278,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   useEffect(() => {
     if (!journeyId) { loadSeq.current++; setDetail(null); return; }
     setDetail(null); setDrafts({}); setNewSteps([]); setDeleteIds(new Set()); setFailed({}); setUndo(null);
-    setConfirmShape(false); setOverlapAsk(null); setVariantsOpen(null); setNextRec({ loading: false, data: null }); setSim({ loading: false, data: null, error: null });
+    setConfirmShape(false); setOverlapAsk(null); setVariantsOpen(null); recGenRef.current += 1; setNextRec({ loading: false, data: null }); setSim({ loading: false, data: null, error: null });
     setCount({ loading: false, matched: null, cap: null, approximate: false, message: null });
     void load(journeyId, !map);
   }, [journeyId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -434,6 +439,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
         .filter(({ r, s }) => r.step_type === 'message' && s.messageTemplate.trim())
         .map(({ s, h }) => ({ stepOrder: s.stepOrder, hoursFromTrigger: h, message: s.messageTemplate.trim() }));
       const r = await sendJson('/api/ai/operator/journeys-refine-step', 'POST', {
+        // ★ 2026-11-01 여정 재발 방지 B1-3 — 저장된 여정이면 그 여정의 혜택 · 링크(사람 값 원장)를 근거로 다듬는다
+        journeyId: journeyId || undefined,
         message: cur.messageTemplate, channel: cur.channel, isAd: cur.isAd,
         journey: { triggerLabel, objective: journey?.name, stepOrder: cur.stepOrder, hoursFromTrigger: hoursFromStart(id), previousMessages: prevMsgs },
         variants: 1,
@@ -445,6 +452,26 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       toast.error(e?.message || 'AI 다듬기를 받지 못했어요.');
     } finally {
       setAiBusy(false);
+    }
+  };
+  // ★ 2026-11-01 여정 재발 방지 B1-2 — 「혜택 넣기 · 링크 넣기」 = 서버가 사람 값 원장에 남기고 그 여정 모든 문자 칸의 자리표시를 값으로 바꾼다
+  //   (옛: 받는 함수를 이 화면이 넘기지 않아 채우기 줄이 어디에도 안 떴다 · 1101 Harold 「혜택을 넣었는데도 직접 넣으라고 나온다」)
+  const fillFacts = async (body: { benefit?: string; url?: string }) => {
+    const jid = journeyId;
+    if (!jid || filling || aiBusy || saving) return;
+    if (dirtyCount > 0) { toast.warning('고친 곳을 먼저 저장한 뒤 넣어 주세요. 모든 칸에 한 번에 넣어요.'); return; }
+    if (body.url !== undefined && !isSendableUrl(body.url)) { toast.warning('링크는 https:// 로 시작하는 주소로 넣어 주세요.'); return; }
+    setFilling(true);
+    recGenRef.current += 1;
+    setNextRec({ loading: false, data: null });
+    try {
+      const r = await sendJson(`/api/ai/operator/journeys/${jid}/copy-facts`, 'POST', body);
+      if (jid !== journeyIdRef.current) return;   // 그사이 다른 여정을 열었다(이 화면에 그 결과를 쓰지 않는다)
+      if (!r.ok) { toast.error(journeyApiErrorText(r.data, '넣지 못했어요.')); return; }
+      toast.success(body.benefit !== undefined ? '모든 문자 칸에 혜택을 넣었어요.' : '모든 문자 칸에 링크를 넣었어요.');
+      await load(jid, false, 'sync');
+    } finally {
+      setFilling(false);
     }
   };
   const runDecorate = async (tokens: string[]) => {
@@ -505,7 +532,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       if (!s.messageTemplate.trim()) return `${label} 문안이 비어 있어요.`;
       if (s.channel !== 'sms' && !(s.subject || '').trim()) return `${label} 제목을 써 주세요.`;
       if (s.channel !== 'sms' && (s.subject || '').length > LMS_SUBJECT_MAX_CHARS) return `${label} 제목이 ${LMS_SUBJECT_MAX_CHARS}자를 넘어요.`;
-      if (s.channel === 'mms' && (s.mmsImagePaths?.length ?? 0) === 0) return `${label} 사진 문자에 사진이 없어요.`;
+      if (s.channel === 'mms' && (s.mmsImagePaths?.length ?? 0) === 0) return `${label} MMS에 사진이 없어요.`;
       return null;
     };
     for (const id of dirtyIds) { const s = drafts[id]; const e = s && check(s, `${s.stepOrder}번째 칸`); if (e) return e; }
@@ -514,7 +541,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   };
 
   const save = async (acks?: string[]) => {
-    if (!journeyId || !ready || dirtyCount === 0 || saving) return;
+    if (!journeyId || !ready || dirtyCount === 0 || saving || filling) return;
     const bad = validateCopy();
     if (bad) { toast.warning(bad); return; }
     if (needsShape && !confirmShape) { setConfirmShape(true); return; }
@@ -668,10 +695,19 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     catch (e: any) { setSim({ loading: false, data: null, error: e?.message || '미리 보지 못했어요.' }); }
   };
   const loadNextRec = async () => {
-    if (!journeyId || nextRec.loading) return;
+    if (!journeyId || nextRec.loading || filling) return;
+    // ★ Codex 구현 3R B #4 — 세대 + 요청 때 여정(여정이 바뀌면 세대도 오른다 · A→B→A 도 옛 세대) · 둘 다 같을 때만 반영
+    const gen = recGenRef.current;
+    const jid = journeyId;
+    const mine = () => gen === recGenRef.current && jid === journeyIdRef.current;
     setNextRec({ loading: true, data: null });
-    try { const d = await getJson(`/api/ai/operator/journeys/${journeyId}/recommend-next-step`); setNextRec({ loading: false, data: d.recommendation || null }); }
-    catch (e: any) { toast.error(e?.message || '추천을 받지 못했어요.'); setNextRec({ loading: false, data: null }); }
+    try {
+      const d = await getJson(`/api/ai/operator/journeys/${jid}/recommend-next-step`);
+      if (mine()) setNextRec({ loading: false, data: d.recommendation || null });
+    } catch (e: any) {
+      if (!mine()) return;
+      toast.error(e?.message || '추천을 받지 못했어요.'); setNextRec({ loading: false, data: null });
+    }
   };
   const runAction = async () => {
     if (!journeyId || !actionMode) return;
@@ -859,7 +895,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-700"><Sparkles className="h-3.5 w-3.5 text-indigo-600" aria-hidden />AI 다음 칸 추천</div>
                         {!nextRec.data ? (
-                          <button type="button" onClick={() => void loadNextRec()} disabled={nextRec.loading} className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[12.5px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-indigo-200 disabled:opacity-50">
+                          <button type="button" onClick={() => void loadNextRec()} disabled={nextRec.loading || filling} className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[12.5px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-indigo-200 disabled:opacity-50">
                             {nextRec.loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Sparkles className="h-3.5 w-3.5" aria-hidden />}{nextRec.loading ? '흐름을 보는 중' : '추천 받기'}
                           </button>
                         ) : (
@@ -906,7 +942,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               {detail && selected !== 'start' && selStudio && (
                 <div className="p-3 md:p-5">
                   {selEditable && !selDeleting ? (
-                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <fieldset disabled={filling} aria-busy={filling} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white disabled:opacity-60">
                       <JourneyStepStudio
                         steps={[selStudio]}
                         index={0}
@@ -916,6 +952,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         onAi={() => void runAi()}
                         onDecorate={(_i, tokens) => void runDecorate(tokens)}
                         onSpamTest={() => { if (!selStudio.messageTemplate.trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; } if (!journey?.callback_number) { toast.warning('회신번호가 없어 검사할 수 없어요.'); return; } setSpamFor(selStudio); }}
+                        onFillBenefit={journeyId && !selected.startsWith(NEW_STEP_PREFIX) ? (b) => void fillFacts({ benefit: b }) : undefined}
+                        onFillUrl={journeyId && !selected.startsWith(NEW_STEP_PREFIX) ? (u) => void fillFacts({ url: u }) : undefined}
+                        factsUnset={!!journey?.copy_facts_view && (journey.copy_facts_view.benefit.state === 'unset' || journey.copy_facts_view.link.state === 'unset')}
                         decorateVars={decorateVars}
                         variables={decorateVars.map((v) => v.token.replace(/%/g, ''))}
                         opt080Number={opt080}
@@ -931,7 +970,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         lockTiming={!edit.timing && !reshapeAllowed && !selected.startsWith(NEW_STEP_PREFIX)}
                         lockNote={selected.startsWith(NEW_STEP_PREFIX) ? (isActive ? '새 칸은 새로 들어오는 고객부터 받아요.' : undefined) : edit.reason}
                       />
-                    </div>
+                    </fieldset>
                   ) : selNew?.sent ? (
                     <div className="mx-auto max-w-xl rounded-2xl border border-amber-200 bg-amber-50 p-4 text-[14px] leading-relaxed text-amber-900">
                       이 칸은 보냈지만 들어갔는지 아직 확인하지 못했어요. 저장을 누르면 같은 칸으로 확인해요(두 번 들어가지 않아요). 확인된 뒤 그 칸에서 고칠 수 있어요.
@@ -1039,9 +1078,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <p className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-slate-500">{bottomLine}</p>
-                <button type="button" onClick={discardAll} disabled={saving} className="h-10 rounded-lg border border-slate-200 px-3 text-[13px] text-slate-600 hover:bg-slate-50 disabled:opacity-40">되돌리기</button>
+                <button type="button" onClick={discardAll} disabled={saving || filling} className="h-10 rounded-lg border border-slate-200 px-3 text-[13px] text-slate-600 hover:bg-slate-50 disabled:opacity-40">되돌리기</button>
                 {confirmShape && <button type="button" onClick={() => setConfirmShape(false)} disabled={saving} className="h-10 rounded-lg border border-slate-200 px-3 text-[13px] text-slate-600 hover:bg-slate-50 disabled:opacity-40">취소</button>}
-                <button type="button" onClick={() => void save(overlapAsk || undefined)} disabled={saving || locked || !ready}
+                <button type="button" onClick={() => void save(overlapAsk || undefined)} disabled={saving || filling || locked || !ready}
                   className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-slate-900 px-4 text-[13px] font-semibold text-white hover:bg-slate-800 disabled:opacity-40">
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
                   {overlapAsk ? '그대로 저장' : confirmShape ? '이렇게 바꾸기' : `고친 곳 ${dirtyCount}개 저장`}

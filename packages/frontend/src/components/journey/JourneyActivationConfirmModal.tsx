@@ -43,7 +43,7 @@ interface Props {
 interface FailedStep {
   stepId: string;
   variantId?: string;
-  reason: 'placeholder_unedited' | 'variable_mapping_invalid' | 'spam_filter_failed' | 'spam_check_unavailable' | 'subject_missing';
+  reason: 'placeholder_unedited' | 'variable_mapping_invalid' | 'spam_filter_failed' | 'spam_check_unavailable' | 'spam_check_pending' | 'subject_missing';
   details: string;
   matchedStopWords?: string[];
 }
@@ -71,13 +71,15 @@ const REASON_LABEL: Record<FailedStep['reason'], string> = {
   spam_filter_failed: '스팸 차단에 걸려요',
   // ★ 2026-10-25 #14 — 검사 장애(시간 초과 등)는 문안 문제가 아니다 → 고치기 대신 다시 검증
   spam_check_unavailable: '스팸 검사를 마치지 못했어요',
-  subject_missing: '장문 문자 제목이 없어요',
+  // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중(문안 문제 아님 · 잠시 뒤 다시 켜면 같은 검사를 이어 봄)
+  spam_check_pending: '스팸 검사 결과를 확인하고 있어요',
+  subject_missing: 'LMS 제목이 없어요',
 };
 
 const SUB_AGENT_CARDS = [
   { icon: FileText, label: '채울 자리 확인', color: 'from-violet-500 to-purple-500' },
   { icon: Hash, label: '알림톡 변수 연결 확인', color: 'from-fuchsia-500 to-pink-500' },
-  { icon: MessageSquare, label: '장문 문자 제목 확인', color: 'from-indigo-500 to-blue-500' },
+  { icon: MessageSquare, label: 'LMS 제목 확인', color: 'from-indigo-500 to-blue-500' },
   { icon: ShieldCheck, label: '통신 3사 스팸 검사', color: 'from-cyan-500 to-teal-500' },
   { icon: Calculator, label: '비용 · 7일 예상', color: 'from-emerald-500 to-green-500' },
   { icon: Wallet, label: '잔액 확인', color: 'from-amber-500 to-orange-500' },
@@ -464,7 +466,7 @@ export default function JourneyActivationConfirmModal({
                             걸린 말: {fs.matchedStopWords.slice(0, 5).join(', ')}
                           </div>
                         )}
-                        {fs.reason === 'spam_check_unavailable' ? (
+                        {fs.reason === 'spam_check_unavailable' || fs.reason === 'spam_check_pending' ? (
                           <button
                             onClick={() => void runValidate()}
                             className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold transition-colors"

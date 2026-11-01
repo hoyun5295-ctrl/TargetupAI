@@ -36,13 +36,15 @@ export default function PlanEditModal(props: PlanEditModalProps) {
         })
       });
       
-      if (!res.ok) throw new Error('수정 실패');
-      
+      // ★ 2026-11-01 크레딧 컨트롤타워 C10 — 서버 문구를 그대로 보인다(월 크레딧 = 다음 달 1일부터 · 고정표 없으면 거절 사유)
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || '수정 실패');
+
       setEditingPlan(null);
       loadPlans();
-      showAlert('성공', '수정되었습니다.', 'success');
-    } catch (error) {
-      showAlert('오류', '수정 실패', 'error');
+      showAlert('성공', data.message || '수정되었습니다.', 'success');
+    } catch (error: any) {
+      showAlert('오류', error?.message || '수정 실패', 'error');
     }
   };
   return (
@@ -92,8 +94,10 @@ export default function PlanEditModal(props: PlanEditModalProps) {
                   onChange={(e) => setEditingPlan({ ...editingPlan, ai_credits_per_month: e.target.value === '' ? null : Number(e.target.value) })}
                   className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] focus:ring-2 focus:ring-violet-500 outline-none"
                   min="0"
-                  placeholder="비워두면 크레딧 차감 미적용 (NULL)"
+                  step="1"
+                  placeholder="예: 300"
                 />
+                <p className="mt-1 text-[11px] text-gray-400">바꾸면 다음 달 1일부터 적용됩니다. 이번 달 지급과 일할은 지금 값 그대로입니다.</p>
               </div>
               <div className="flex items-center gap-2">
                 <input

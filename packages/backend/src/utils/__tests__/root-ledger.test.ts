@@ -11,6 +11,7 @@ import { join } from 'path';
 import { builtinModules } from 'module';
 import * as ts from 'typescript';
 import { extractJsonFromAiText } from '../ai-json';
+import { findInventedBenefits, replaceInventedBenefits, BENEFIT_PLACEHOLDER } from '../copy-benefit-detector';
 
 const BE = join(__dirname, '..', '..');
 const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
@@ -589,7 +590,7 @@ describe('R11 화면 하한 — 출처 줄 0 · native dialog 0 · 모델명 0(�
 //   옛: 효능 판정은 문자 생성 · 한 줄 CT 에만 걸려 DM · 이메일 · 인앱 · AI 영업 · 형제 생산자 출구는 효능을 거르지 않았다(혜택 · 숫자만).
 //   대상은 소스에서 기계로 뽑는다(함수 단위 · 라우터는 파일 단위) · 면제 = 이유 필수 · 낡은 면제 = 실패.
 const EFFICACY_CT = ['claimsEfficacy', 'claimsInventedEfficacy', 'dropInventedEfficacy\\w*', 'pairClaimsInventedEfficacy', 'rewriteAddsFacts', 'headlineClaimsEfficacy', 'guardReadingSequence'];
-const BENEFIT_CT = ['findInventedBenefits', 'replaceInventedBenefits\\w*', 'copyFactsExistInText', 'stripUnauthorizedBenefits', 'findNewNumbers'];
+const BENEFIT_CT = ['findInventedBenefits', 'replaceInventedBenefits\\w*', 'copyFactsExistInText', 'stripUnlicensedQuoteBenefits', 'findNewNumbers'];
 interface FnUnit { key: string; file: string; name: string | null; body: string; start: number; end: number }
 const RAW_AI_RE = /\bcallAIWithFallback\(|\bmessages(?:\s+as\s+any\))?\.(?:batches\.)?create\(/;
 const RAW_AI_CALLEE_RE = /^(?:callAIWithFallback|.*\bmessages(?:\s+as\s+any\))?\)?\.(?:batches\.)?create)$/;
@@ -756,6 +757,8 @@ const R13_PAIR_EXEMPT: Record<string, string> = {
   'utils/event-brief.ts#copyFactsExistInText': '혜택 판정의 정의(판정 함수 자체)',
   'utils/sales-outreach-exemplar-mask.ts#maskExemplarText': 'AI 영업 예시 가리기(프롬프트 재료 · 고객에게 나가지 않는다)',
   'utils/sales-outreach-jobs.ts#stripMaterialForPrompt': '프롬프트 재료 정리(모델이 면허 밖 혜택을 보지 않게 · 고객에게 나가지 않는다)',
+  'utils/sales-outreach-copy-guard.ts#stripUnlicensedQuoteBenefits': '혜택 판정의 정의(AI 영업 전용 글자 대조 거름 함수 자체 · 1101 B1-1 에 copy-benefit-detector 에서 옮김)',
+  'utils/sns-caption-ai.ts#keepPhotoSafeSentences': '사진 초안 문장 거름 도우미 · 부르는 쪽(같은 파일 499~501)이 같은 면허로 dropInventedEfficacy 를 바로 건다',
 };
 /** AI 를 부르지만 고객에게 나가는 글을 만들지 않는 자리(이유 필수 · 새 AI 호출은 분류 전까지 실패) */
 const R13_AI_NOT_COPY: Record<string, string> = {
@@ -1084,8 +1087,12 @@ describe('R6 여정 실행 상태 — 쓰는 값은 아는 값만 · 멈춤은 �
 describe('R7 넓힘 — 스팸 검사 결과를 직접 읽는 파일도 공용 판정(통과 · 차단 · 검사 장애)', () => {
   it('getSpamTestBatchResults 를 부르는 파일은 spamVerdictOf · batchVerdictOf 로 읽는다(옛: 여정 검사만 낮은 층을 직접 읽어 장애 = 차단)', () => {
     const users = BE_FILES.filter((f) => /\bgetSpamTestBatchResults\(/.test(stripComments(be(f))));
-    expect(users).toContain('utils/journey-pretest-validator.ts');
     expect(users.filter((f) => !/\b(spamVerdictOf|batchVerdictOf)\(/.test(stripComments(be(f))))).toEqual([]);
+    // ★ 2026-11-01 B1-4 — 여정 검사 = 검사 번호로 읽는 공용 결과(readSpamTestOutcome = spamTestOutcomeOf · 같은 검사 이어 보기 = 다른 묶음일 수 있다)
+    const pv = stripComments(be('utils/journey-pretest-validator.ts'));
+    expect(pv).toContain('await readSpamTestOutcome(testId)');
+    expect(pv).not.toMatch(/\bgetSpamTestBatchResults\(/);
+    expect(stripComments(be('utils/spam-test-queue.ts'))).toMatch(/export async function readSpamTestOutcome\([\s\S]{0,1200}spamTestOutcomeOf\(/);
     const pn = stripComments(be('utils/journey-pretest-notifier.ts'));
     expect(pn).toMatch(/verdict === 'error'|\.verdict === 'error'/);
   });
@@ -2152,6 +2159,9 @@ const R6_CLOSERS: Record<string, { file?: string; has?: RegExp; why: string }> =
   'sns_post_targets|scheduled': { file: 'utils/sns-publish-worker.ts', why: '예약 시각에 올린다 · 지난 예약 = 실패 종결 + 통지' },
   'sns_post_targets|submitted': { file: 'utils/sns-reconcile-worker.ts', has: /SET verify_gave_up_at = NOW\(\)[\s\S]{0,300}WHERE status = 'submitted'[\s\S]{0,200}COALESCE\(claimed_at, updated_at\) < NOW\(\)/, why: '대조 워커 게시 확인 · 포기 시계 종결 표식(#97)' },
   'sns_accounts|pending': { file: 'utils/sns-accounts.ts', has: /SNS_PENDING_STUCK_MINUTES/, why: '계정 고르기 대기 · 오래된 대기 = 연결 화면이 「멈춤」으로 보이고 다시 연결' },
+  // ★ 2026-11-01 B1-4 — 재작성 후보 검사 중 = 다음 회차가 이어 봐 닫고 · 7일 넘으면 failed(버려진 옛 판 · 쓰지 못한 재작성 환불)
+  'journey_pretest_candidates|testing': { file: 'utils/journey-pretest-candidate.ts', why: '보내기 전 재작성 후보 검사 중 = 다음 회차 이어 보기 · 7일 넘음 = failed' },
+  'journey_pretest_candidates|passed': { why: '후보 끝 상태(그 판에 반영됨 · 판 PK 라 사람이 고친 새 판은 새 흐름)' },
 };
 describe('R6 넓힘(1025) — 12기능 모듈이 쓰는 비종결 상태마다 닫는 자리(파일) 또는 살아 있는 상태 이유', () => {
   const writes = new Set<string>();
@@ -2586,30 +2596,46 @@ describe('R20 사건 없는 상태값 — 상태 칸은 사건이 쓴다(DB 기�
 });
 
 // ── ★1026 오류접수 2건(남지현 · 여정 문자 타입 표기 / 임은지 · 자동마케팅 담당 매장 지정) — 같은 사실을 여러 곳이 따로 정함 ──
-describe('R1 넓힘(1026) — 여정 칸 채널 이름 = journey-labels 한 곳 · 매장 범위 판정 = getStoreScope 한 곳', () => {
+describe('R1 넓힘(1026 → 1101) — 채널 이름 = 주인 표 하나(SMS · LMS · MMS) · 매장 범위 판정 = getStoreScope 한 곳', () => {
+  //   ★1101 Harold 「전체 SMS LMS MMS 로 통일 · 왜 AI 오퍼레이터엔 SMS 라고 해 놓고 여긴 단문 장문 사진이냐」(여정 재발 방지 설계 B1-5)
+  //   옛 계약(1026 · 여정 화면 = 「~ 문자」 · 영문 금지)을 뒤집었다. 주인 = frontend utils/campaign-axis.ts MSG_TYPE_LABEL.
   const JOURNEY_SCREENS = sourceFiles(FE, /\.tsx?$/).filter((f) => /^components\/journey\//.test(f) || /^pages\/Journey\w*\.tsx$/.test(f));
-  it('여정 화면은 채널 값을 사람 말로 직접 바꾸지 않는다(삼항 · 이름 표 0) · 문장에 영문 채널 이름 0 · 「단문 · 장문」은 「~ 문자」로만', () => {
-    expect(JOURNEY_SCREENS.length).toBeGreaterThan(30);
-    const NAME = /문자|단문|장문|사진|SMS|LMS|MMS/;   // 채널 이름이 되는 말(광고 표기 같은 다른 글은 아니다)
-    const TERNARY = new RegExp(`===\\s*['"](sms|lms|mms)['"]\\s*\\?\\s*['"][^'"]*(${NAME.source})`);
-    const NAME_MAP = new RegExp(`\\b(sms|lms|mms)\\s*:\\s*['"][^'"]*(${NAME.source})`);
+  const OLD_CHANNEL_WORD = /(?<![가-힣])(?:단문|장문)|사진\s?문자/;
+  const CHANNEL_WORD_EXEMPT: Record<string, string> = {
+    'pages/TermsPage.tsx': '이용약관 원문(법률 문서는 Harold 결정 없이 바꾸지 않는다 · 설계 B1-5 면제)',
+  };
+  it('제품 전체(화면 · 서버) 주석 밖에 채널 뜻 「단문 · 장문 · 사진 문자」 0 · 면제는 이유 줄', () => {
     const bad: string[] = [];
-    for (const f of JOURNEY_SCREENS) {
-      stripComments(read(join(FE, f))).split('\n').forEach((ln, i) => {
-        const hangul = /[가-힣]/.test(ln);
-        if (TERNARY.test(ln) || NAME_MAP.test(ln) || (hangul && /\b(SMS|LMS|MMS)\b/.test(ln)) || /(단문|장문)(?! 문자)/.test(ln)) bad.push(`${f}:${i + 1} ${ln.trim().slice(0, 70)}`);
-      });
+    for (const f of sourceFiles(FE, /\.tsx?$/)) {
+      if (CHANNEL_WORD_EXEMPT[f]) continue;
+      stripComments(read(join(FE, f))).split('\n').forEach((ln, i) => { if (OLD_CHANNEL_WORD.test(ln)) bad.push(`frontend/${f}:${i + 1} ${ln.trim().slice(0, 70)}`); });
+    }
+    for (const f of sourceFiles(BE, /\.ts$/)) {
+      stripComments(be(f)).split('\n').forEach((ln, i) => { if (OLD_CHANNEL_WORD.test(ln)) bad.push(`backend/${f}:${i + 1} ${ln.trim().slice(0, 70)}`); });
     }
     expect(bad).toEqual([]);
-    // 살아 있음 — 채널 이름을 그리는 화면(탭 · 휴대폰 미리보기 · 문안 고치기 창 · 옛 칸 고르기 · 지도 · 작업대)이 공용 함수를 부른다
+    for (const [f, why] of Object.entries(CHANNEL_WORD_EXEMPT)) {
+      expect(why.length, f).toBeGreaterThan(12);
+      expect(OLD_CHANNEL_WORD.test(stripComments(read(join(FE, f)))), `낡은 면제 ${f}`).toBe(true);
+    }
+  });
+  it('채널 이름 표(소문자 채널 키 → 이름)는 주인 파일 밖 0 · 여정 화면은 채널 값을 삼항으로 이름 짓지 않는다', () => {
+    const NAME_MAP = /\b(sms|lms|mms)\s*:\s*['"]/;
+    const maps = sourceFiles(FE, /\.tsx?$/).filter((f) => f !== 'utils/campaign-axis.ts' && NAME_MAP.test(stripComments(read(join(FE, f)))));
+    expect(maps).toEqual([]);
+    const TERNARY = /===\s*['"](sms|lms|mms)['"]\s*\?\s*['"][^'"]*(문자|SMS|LMS|MMS)/;
+    const bad: string[] = [];
+    for (const f of JOURNEY_SCREENS) stripComments(read(join(FE, f))).split('\n').forEach((ln, i) => { if (TERNARY.test(ln)) bad.push(`${f}:${i + 1}`); });
+    expect(bad).toEqual([]);
+  });
+  it('살아 있음 — 주인 표가 SMS · LMS · MMS 를 내고 여정 화면 넷이 stepChannelLabel 을 부른다(그 함수는 주인 표를 읽는다)', () => {
+    const owner = stripComments(read(join(FE, 'utils/campaign-axis.ts')));
+    expect(owner).toMatch(/sms:\s*'SMS',\s*lms:\s*'LMS',\s*mms:\s*'MMS'/);
+    expect(owner).toMatch(/SMS:\s*'SMS',\s*LMS:\s*'LMS',\s*MMS:\s*'MMS'/);
+    expect(stripComments(read(join(FE, 'utils/journey-labels.ts')))).toMatch(/export function stepChannelLabel[\s\S]*?MSG_TYPE_LABEL\[/);
+    expect(JOURNEY_SCREENS.length).toBeGreaterThan(30);
     const users = JOURNEY_SCREENS.filter((f) => /\bstepChannelLabel\(/.test(stripComments(read(join(FE, f)))));
     for (const f of ['components/journey/JourneyStepStudio.tsx', 'components/journey/PhoneComposer.tsx', 'components/journey/JourneyMessageEditModal.tsx', 'pages/JourneysPage.tsx']) expect(users).toContain(f);
-  });
-  it('여정 서버가 고객에게 돌려주는 입력 · 상태 오류에 영문 채널 이름 0(화면 이름과 같은 말)', () => {
-    const MSG = /new (?:JourneyInputError|JourneyStepGateError)\(\s*(['`"])((?:(?!\1)[\s\S])*)\1/g;
-    const bad: string[] = [];
-    for (const f of JOURNEY_UTILS) for (const m of stripComments(be(f)).matchAll(MSG)) if (/\b(SMS|LMS|MMS)\b/.test(m[2])) bad.push(`${f}: ${m[2].slice(0, 60)}`);
-    expect(bad).toEqual([]);
   });
   it('「회사에 분류 체계가 있는가」(customer_stores 회사 전체 존재)를 묻는 SQL 은 store-scope.ts 밖에 0 — 감싸는 함수가 범위 판정을 다시 하지 않는다', () => {
     const ASK = /EXISTS\s*\(\s*SELECT 1 FROM customer_stores WHERE company_id = \$\d+(?:::uuid)?\s+LIMIT 1\s*\)/;
@@ -3243,6 +3269,8 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/retention-sweeper.ts \'retention-pdf-outside\'': '보관 폴더 밖 경로 = 저장소 · 여러 회사 작업',
     'utils/system-monitor-worker.ts \'queue-abnormal-status\'': '발송 대기열 상태값 이상 = 서버 · 회사 무관',
     'utils/system-monitor-worker.ts dedupKey': '발송 큐 지연 = 게이트웨이 · 에이전트 처리 속도 · 여러 캠페인 집계',
+    'utils/spam-probe.ts `spam-probe-device:${carrier}:${phone}`': '스팸 검사 단말 = 우리 장비(여러 회사 검사가 같은 단말 · 회사 무관)',
+    "utils/spam-probe.ts 'spam-verdict-after-decided'": '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관)',
     'utils/watch-alert.ts concurrent ? `watch:${e.loginId}:${e.kind}:${ip}:${otherIp}` : `watch:${e.loginId}:login:${ip}:${day}`': '보안 감시(동시 · 새 위치 로그인) = 늘 보낸다',
   };
   it('sendSystemAlert 에 companyId: null 을 싣는 자리 = 목록과 같다', () => {
@@ -3768,5 +3796,445 @@ describe('R32 사람이 정한 링크(once)는 생성 출구에서 결과에 꼭
     expect(iEnsure).toBeGreaterThan(iOmit);
     expect(iEnsure).toBeLessThan(iApply);
     expect(body).toMatch(/flags\.placeholderLeft = [^;]*linkApplied\.unresolvedCount > 0;/);
+  });
+});
+
+// ── R33 혜택 판정 = 값 · 종류 짝 한 벌 · 글자 대조는 AI 영업 전용(★ 2026-11-01 여정 재발 방지 설계 §2 B1-1) ──
+//   옛: 판정이 두 벌(글자 대조 stripUnauthorizedBenefits · 값 대조 find/replace)이라 여정은 사람이 적은 「10% 할인쿠폰」을
+//   「10% 할인 쿠폰」으로 쓴 문장도 자리표시로 바꿨다(1101 Harold 「혜택을 넣었는데 직접 넣으라고 나온다」).
+//   대상은 소스에서 기계로 뽑는다 · 변환 표는 손 예시가 아니라 근거마다 같은 변환을 돌린다(양방향).
+const R33_SPAN_PARSER_ALLOWED: Record<string, string> = {
+  'utils/copy-benefit-detector.ts': '판정 본체(값 · 종류 짝 · 근거 지우기 withoutBenefitSpans)',
+  'utils/sales-outreach-copy-guard.ts': 'AI 영업 전용 · 허가 인용문 글자 그대로(LESSONS 1018 R1) · 영업 파일만 부른다',
+  'utils/sns-caption-ai.ts': '혜택 자리를 SNS 가림 · 맞춤법 보호 구간으로만 쓴다(판정은 replaceInventedBenefits · findInventedBenefits)',
+  'utils/spell-check.ts': '맞춤법 교정이 혜택 글자를 한 자도 바꾸지 않았는가(글자 불변 검사 · 혜택 판정 아님)',
+  'utils/sms-spell-check.ts': '맞춤법 검사에서 혜택 자리를 건너뛰는 보호 구간',
+  'utils/sns-spell-check.ts': '맞춤법 검사에서 혜택 자리를 건너뛰는 보호 구간',
+};
+describe('R33 혜택 판정 = 값 · 종류 짝 한 벌 · 글자 대조는 AI 영업 전용', () => {
+  const files = sourceFiles(BE, /\.ts$/);
+  it('옛 이름 stripUnauthorizedBenefits 가 저장소(소스 · 주석 포함)에 0', () => {
+    expect(files.filter((f) => be(f).includes('stripUnauthorizedBenefits'))).toEqual([]);
+  });
+  it('영업 전용 글자 대조는 영업 파일에서만 부른다', () => {
+    const callers = files.filter((f) => /\bstripUnlicensedQuoteBenefits\(/.test(stripComments(be(f))));
+    expect(callers.length).toBeGreaterThanOrEqual(3);
+    expect(callers.filter((f) => !/^utils\/sales-outreach-/.test(f))).toEqual([]);
+  });
+  it('혜택 덩어리 파서(findBenefitSpans)를 부르는 파일 = 이유 있는 자리뿐(새 판정 벌 0 · 래칫)', () => {
+    const users = files.filter((f) => /\bfindBenefitSpans\(/.test(stripComments(be(f))));
+    expect(users.filter((f) => !(f in R33_SPAN_PARSER_ALLOWED))).toEqual([]);
+    expect(Object.keys(R33_SPAN_PARSER_ALLOWED).filter((f) => !users.includes(f)), '낡은 허용').toEqual([]);
+    for (const [f, why] of Object.entries(R33_SPAN_PARSER_ALLOWED)) expect(why.length, f).toBeGreaterThan(12);
+  });
+
+  // 양방향 변환 표 — 근거 혜택마다 같은 변환을 돌린다(손으로 고른 통과 예시가 아니다)
+  const LIVE_RULES: Array<[string, (v: string, k: string, extra: string) => string]> = [
+    ['그대로', (v, k, e) => `${v} ${k}${e}`],
+    ['공백 넣기', (v, k, e) => `${v} ${k} ${e}`.trim()],
+    ['공백 빼기 · 붙여 쓰기', (v, k, e) => `${v}${k}${e}`],
+    ['뒤 낱말 생략', (v, k) => `${v} ${k}`],
+    ['어순 바꿈', (v, k) => `${k} ${v}`],
+    ['사이 말 끼움', (v, k) => `최대 ${v}까지 ${k}`],
+    ['조사 붙임', (v, k) => `${v}나 ${k}`],
+  ];
+  const GROUNDS: Array<{ ground: string; v: string; k: string; extra: string }> = [
+    { ground: '첫 구매 10% 할인쿠폰', v: '10%', k: '할인', extra: '쿠폰' },
+    { ground: '회원 가입하면 5,000원 적립', v: '5,000원', k: '적립', extra: '' },
+    { ground: '오늘만 30% 세일', v: '30%', k: '할인', extra: '' },
+  ];
+  it.each(GROUNDS.flatMap((g) => LIVE_RULES.map(([name, f]) => [g.ground, name, f(g.v, g.k, g.extra)] as const)))(
+    '산다 · 근거 「%s」 · %s → 「%s」', (ground, _rule, out) => {
+      expect(findInventedBenefits(`이번 주 ${out} 드려요`, ground)).toEqual([]);
+      expect(replaceInventedBenefits(`이번 주 ${out} 드려요`, ground)).not.toContain(BENEFIT_PLACEHOLDER);
+    });
+  it('산다 · 「쿠폰」만 · 「할인」만 · 숫자만(절에 숫자 하나)', () => {
+    for (const out of ['10% 쿠폰', '10% 할인', '10% 드려요']) expect(findInventedBenefits(out, '첫 구매 10% 할인쿠폰'), out).toEqual([]);
+    expect(findInventedBenefits('5천원 적립', '회원 가입하면 5,000원 적립')).toEqual([]);
+  });
+  const DIE: Array<[string, string, string]> = [
+    ['값 바꿈', '첫 구매 10% 할인쿠폰', '20% 할인쿠폰'],
+    ['종류 바꿈', '첫 구매 10% 할인쿠폰', '10% 적립'],
+    ['지어낸 낱말', '첫 구매 10% 할인쿠폰', '무료배송 해드려요'],
+    ['지어낸 낱말 둘', '첫 구매 10% 할인쿠폰', '사은품 증정'],
+    ['교차 짝(구분점)', '10% 할인 · 5% 적립', '5% 할인'],
+    ['교차 짝(구분점)', '10% 할인 · 5% 적립', '10% 적립'],
+    ['교차 짝(구분점 없음)', '10% 할인 5% 적립', '5% 할인'],
+    ['교차 짝(구분점 없음)', '10% 할인 5% 적립', '10% 적립'],
+    ['숫자열 교차', '10% 적립 · 5% 할인', '10%, 5% 할인'],
+    ['범위 교차', '10% 적립 · 20% 할인', '10~20% 할인'],
+    ['종류 없는 숫자 둘(모호)', '10% 할인 · 5% 적립', '10% 5% 드려요'],
+    ['금액 값 바꿈', '회원 가입하면 5,000원 적립', '5만원 적립'],
+  ];
+  it.each(DIE)('죽는다 · %s · 근거 「%s」 → 「%s」', (_n, ground, out) => {
+    expect(findInventedBenefits(out, ground).length).toBeGreaterThan(0);
+    expect(replaceInventedBenefits(out, ground)).toContain(BENEFIT_PLACEHOLDER);
+  });
+  it('1101 Harold 재현 — 사람 혜택 「첫 구매 10% 할인쿠폰」을 칸마다 다르게 써도 자리표시 0', () => {
+    const ground = '첫 구매 10% 할인쿠폰';
+    for (const out of ['첫 구매 고객님께 10% 할인 쿠폰을 드려요', '지금 10%할인쿠폰 받아 가세요', '할인 10% 쿠폰, 오늘까지만', '첫 구매라면 최대 10%까지 할인돼요', '10% 쿠폰으로 가볍게 시작해 보세요']) {
+      expect(replaceInventedBenefits(out, ground), out).not.toContain(BENEFIT_PLACEHOLDER);
+    }
+  });
+  it('숫자열 · 범위는 근거와 같은 꼴이면 산다', () => {
+    expect(findInventedBenefits('10% 할인', '10%, 5% 할인')).toEqual([]);
+    expect(findInventedBenefits('5% 할인', '10%, 5% 할인')).toEqual([]);
+    expect(findInventedBenefits('10~20% 할인', '이번 주 10~20% 할인')).toEqual([]);
+  });
+
+  // ── ★ B1-1a 짝 판정 구조 교체(설계 §2 B1-1a · Codex 설계 4R approve) — P1 글자 그대로는 산다 · P2 짝은 확실할 때만 ──
+  //   흔한 꼴 표 = 사람이 실제로 쓰는 혜택 문장 · 지어낸 짝 · 구현 1R~6R · 설계 1R~3R 반례. 「비용」 = P2 로 받아들인 안전 쪽 죽음(자리표시 · 사람이 채움).
+  const COMMON: Array<[string, string, '산다' | '죽는다' | '비용']> = [
+    ['첫 구매 10% 할인쿠폰', '첫 구매 고객님께 10% 할인 쿠폰을 드려요', '산다'],
+    ['10% 포인트 적립', '구매 금액의 10% 포인트 적립 혜택', '산다'],
+    ['5만원 이상 구매 시 무료배송', '5만원 이상 구매하시면 무료배송', '산다'],
+    ['신규 가입 시 5천원 쿠폰 증정', '신규 가입하면 5천원 쿠폰을 증정해 드려요', '산다'],
+    ['전 품목 20% 할인', '전 품목 20% 할인 중이에요', '산다'],
+    ['최대 30% 할인', '최대 30%까지 할인', '산다'],
+    ['10% 할인, 5% 적립', '10% 할인에 5% 적립까지', '산다'],
+    ['할인율 15%', '15% 할인', '산다'],
+    ['적립금 3천원', '3천원 적립', '산다'],
+    ['5천원 할인 쿠폰', '5천원 할인 쿠폰 지급', '산다'],
+    ['3만원 이상 구매 시 5천원 할인', '3만원 이상 구매하시면 5천원 할인', '산다'],
+    ['10% 할인', '10% OFF', '산다'],
+    ['30프로 세일', '30% 할인', '산다'],
+    ['구매 금액의 5% 적립', '5% 적립해 드려요', '산다'],
+    ['생일 쿠폰 1만원', '생일 축하 1만원 쿠폰', '산다'],
+    ['회원 전용 15% 추가 할인', '회원님만 15% 추가 할인', '산다'],
+    ['전 상품 10% 할인 + 무료배송', '전 상품 10% 할인에 무료배송까지', '산다'],
+    ['5만원 이상 구매 시 1만원 할인 쿠폰 증정', '5만원 이상 구매하면 1만원 할인 쿠폰 증정', '산다'],
+    ['10%씩 적립', '구매할 때마다 10%씩 적립', '산다'],
+    ['할인 10%, 적립 5%', '적립 5%', '산다'],
+    ['10% 할인, 적립 5%', '5% 적립', '산다'],
+    ['10% 할인 혜택은 5만원 결제 시 제공', '10% 할인', '산다'],
+    ['전 상품 10% 할인 (5만원 이상 구매 시)', '전 상품 10% 할인', '산다'],
+    ['5천원 쿠폰 증정', '신규 가입 고객께 5천원 쿠폰 증정', '산다'],
+    ['신규 회원 5천원 쿠폰, 첫 구매 10% 할인', '첫 구매 10% 할인', '산다'],
+    ['가입 혜택: 5천원 할인 사은품 증정', '5천원 할인', '산다'],
+    ['10% 할인 쿠폰 증정', '10% 할인 쿠폰', '산다'],
+    ['쿠폰 할인 10%', '10% 쿠폰 할인', '산다'],
+    ['10% 적립 포인트 증정', '10% 포인트 적립', '산다'],
+    ['10% 할인 5% 적립', '5% 할인', '죽는다'],
+    ['10% 할인 5% 적립', '10% 적립', '죽는다'],
+    ['10% 할인 · 5% 적립', '5% 할인', '죽는다'],
+    ['10% 할인 5% 적립', '할인 5%', '죽는다'],
+    ['첫 구매 10% 할인쿠폰', '20% 할인쿠폰', '죽는다'],
+    ['첫 구매 10% 할인쿠폰', '10% 적립', '죽는다'],
+    ['5천원 쿠폰 증정은 10% 적립과 중복 적용됩니다.', '10% 쿠폰', '죽는다'],
+    ['적립률 10% 쿠폰: 5천원 이용권', '10% 쿠폰', '죽는다'],
+    ['할인 10% 적립 5%', '할인 5%', '죽는다'],
+    ['10% 할인, 적립 5%', '10% 적립', '죽는다'],
+    ['쿠폰: 5만원 이상 구매 시 5천원 할인', '5만원 쿠폰', '죽는다'],
+    ['10% 할인 혜택은 5만원 결제 시 제공', '5만원 할인', '죽는다'],
+    ['적립은 결제액의 10% 추가 할인은 5% 쿠폰으로 제공', '10% 할인', '죽는다'],
+    ['신규 회원 5천원 쿠폰, 첫 구매 10% 할인', '5천원 할인', '죽는다'],
+    ['신규 회원 5천원 쿠폰, 첫 구매 10% 할인', '10% 쿠폰', '죽는다'],
+    ['10% 할인', '10%씩 적립', '죽는다'],
+    ['쿠폰1 5% 할인', '쿠폰 15% 할인', '죽는다'],
+    ['쿠폰 5천원 포인트 적립 비율 10%', '5천원 포인트 적립', '죽는다'],
+    ['적립률 10% 쿠폰: 5천원 결제 할인', '10% 쿠폰', '죽는다'],
+    ['적립 비율 10% 쿠폰 5% 할인', '10% 쿠폰', '죽는다'],
+    ['적립률 10% 쿠폰: 5천원 이상 구매 시 증정', '10% 쿠폰', '죽는다'],
+    ['기존 5%에서 적립률 10% 쿠폰: 5천원 이상 구매 시 증정', '10% 쿠폰', '죽는다'],
+    ['적립 비율 10% 쿠폰: 5천원 이상 구매 시 증정', '10% 쿠폰', '죽는다'],
+    ['가입 혜택: 5천원 할인 사은품 증정', '5천원 사은품 증정', '죽는다'],
+    ['10% 할인 쿠폰 적립', '10% 적립', '죽는다'],
+    ['10% 적립 쿠폰 할인율은 미정', '10% 할인', '죽는다'],
+    ['10% 할인 쿠폰 적립률은 미정', '10% 적립', '죽는다'],
+    ['적립률 10% 쿠폰', '10% 쿠폰', '죽는다'],
+    ['증정 금액 5천원 할인 금액은 미정', '5천원 할인', '죽는다'],
+    ['상품가 10만원 쿠폰 5천원 결제 시점에 적용', '10만원 쿠폰', '죽는다'],
+    ['신규 가입 시 5천원 쿠폰 증정', '5천원 쿠폰 증정', '산다'],
+    ['5천원 쿠폰 사용 시 사은품 증정', '5천원 쿠폰 증정', '죽는다'],
+    ['상품가 5천원, 사은품 증정', '5천원 증정', '죽는다'],
+    ['할인 10%, 5천원 증정', '5천원 할인', '죽는다'],
+    ['할인: 5천원 증정: 키링', '5천원 증정', '죽는다'],
+    ['결제 금액의 10%를 포인트로 적립', '10% 포인트 적립', '비용'],
+    ['할인 10% 적립 5%', '적립 5%', '비용'],
+    ['10% 할인 5% 적립', '5% 적립', '비용'],
+    ['10% 할인 5% 적립', '10% 할인', '비용'],
+    ['적립금 5천원 증정', '적립금 5천원을 드려요', '비용'],
+    ['쿠폰 5천원 증정', '5천원 쿠폰', '비용'],
+  ];
+  it.each(COMMON)('흔한 꼴 · 근거 「%s」 → 「%s」 · %s', (ground, out, want) => {
+    expect(findInventedBenefits(out, ground).length === 0).toBe(want === '산다');
+  });
+  // 조건 역할 표 — 근거의 조건 금액은 출력에서도 조건 금액일 때만(종류 있음 / 없음 · 절에 숫자 하나 / 둘)
+  const ROLE: Array<[string, string, boolean]> = [
+    ['3만원 이상 구매 시 5천원 할인', '3만원 이상 구매하시면 5천원 할인', true],
+    ['3만원 이상 구매 시 5천원 할인', '혜택은 3만원입니다', false],
+    ['3만원 이상 구매 시 5천원 할인', '3만원 할인', false],
+    ['3만원 이상 구매 시 5천원 할인', '할인 5천원에서 3만원', false],
+    ['3만원 이상 구매 시 5천원 할인', '5천원 이상 구매 시 3만원 할인', false],
+    ['5만원 이상 구매 시 무료배송', '최대 5만원 할인', false],
+    ['5만원 이상 구매 시 무료배송', '5만원 이상 구매하시면 무료배송', true],
+    ['5천원 할인', '5천원 이상 구매 시', false],
+    ['10% 할인 혜택은 5만원 이상 구매 시에 제공', '5만원 할인', false],
+  ];
+  it.each(ROLE)('조건 역할 · 근거 「%s」 → 「%s」 · 산다 = %s', (ground, out, live) => {
+    expect(findInventedBenefits(out, ground).length === 0).toBe(live);
+  });
+  // T1 글자 그대로 — 손으로 고르지 않는다: 이 describe 의 근거 + 혜택 판정 시험 파일의 dead(출력, 근거) 근거 전부 + 줄을 넘는 근거
+  const unesc = (t: string) => t.replace(/\\n/g, '\n').replace(/\\'/g, "'");
+  const LIT = /'((?:[^'\\]|\\.)*)'/g;
+  const detectorTests = be('utils/copy-benefit-detector.test.ts');
+  const COUNTER_GROUNDS = [
+    // dead(출력, 근거) · replaceInventedBenefits(출력, 근거) 의 근거
+    ...Array.from(detectorTests.matchAll(/(?:dead|replaceInventedBenefits)\('(?:[^'\\]|\\.)*',\s*'((?:[^'\\]|\\.)*)'\)/g)).map((m) => m[1]),
+    // for (const g of [ ... ]) 반복 근거
+    ...Array.from(detectorTests.matchAll(/for \(const g of \[([^\]]*)\]\)/g)).flatMap((m) => Array.from(m[1].matchAll(LIT)).map((x) => x[1])),
+    // 이 describe 안의 직접 호출 근거(findInventedBenefits(출력, 근거))
+    ...Array.from(be('utils/__tests__/root-ledger.test.ts').matchAll(/findInventedBenefits\('(?:[^'\\]|\\.)*',\s*'((?:[^'\\]|\\.)*)'\)/g)).map((m) => m[1]),
+  ].map(unesc);
+  const ALL_GROUNDS = Array.from(new Set([
+    ...GROUNDS.map((g) => g.ground), ...DIE.map((d) => d[1]), ...COMMON.map((c) => c[0]), ...ROLE.map((r) => r[0]), ...COUNTER_GROUNDS,
+    '아이폰 16\n프로 10% 할인', '무료\n체험', '10% 할인\n5% 적립', '쿠폰1 5% 할인',
+  ]));
+  it('T1 근거 글을 소스에서 모았다(빈 표 = 실패)', () => { expect(COUNTER_GROUNDS.length).toBeGreaterThanOrEqual(30); });
+  it.each(ALL_GROUNDS)('T1 글자 그대로 산다 · 「%s」', (g) => {
+    expect(findInventedBenefits(g, g)).toEqual([]);
+    expect(replaceInventedBenefits(g, g)).toBe(g);
+  });
+  it('T3 줄을 넘는 자리 — 덮는 절 묶음이 근거와 다르면 자리 전체를 대조한다(잘라 내지 않는다)', () => {
+    expect(findInventedBenefits('무료\n배송', '무료\n체험').length).toBeGreaterThan(0);
+    expect(replaceInventedBenefits('무료\n배송', '무료\n체험')).toContain(BENEFIT_PLACEHOLDER);
+    expect(findInventedBenefits('10% 할인\n20% 적립', '10% 할인')).toContain('20%');
+    expect(replaceInventedBenefits('10% 할인\n20% 적립', '10% 할인')).toContain(BENEFIT_PLACEHOLDER);
+    // 끊김 글자 · 연속성 — 절 글이 같아도 끊김 글자가 다르거나 이어지지 않으면 글자 그대로가 아니다
+    for (const g of ['무료.배송', '무료\n체험.배송']) {
+      expect(findInventedBenefits('무료\n배송', g).length, g).toBeGreaterThan(0);
+      expect(replaceInventedBenefits('무료\n배송', g), g).toContain(BENEFIT_PLACEHOLDER);
+    }
+  });
+});
+
+// ── R37 결과 읽기가 줄면 진실로 덮는다(★ 2026-11-01 B-1101-4 · 설계서 docs/2026-11-01-result-read-shrink-guard-design.md) ──
+//   1101 .62 SMSQ_SEND_15 인덱스 어긋남: 742행 중 274행만 읽히자 재대조가 sent 742 → 274 로 낮추고 정산이 468건을 미적재로 환불할 뻔했다
+//   (0914 0건 · 0926 라인 재배정과 같은 뿌리 · 앞 두 번은 증상별로 막았다). 규칙 = 늘기만 하는 수는 읽기로 내리지 않는다.
+const R37_PLAIN_SENT_EXEMPT: Record<string, string> = {
+  'routes/campaigns.ts': '적재 경로가 적재 결과로 쓴다(실행 행 · 즉시 직접발송 = INSERT 성공 수) · 이 파일의 MySQL 읽기는 예약 큐 작업(수신자 삭제 = 지운 수 빼기)',
+  'utils/direct-send-worker.ts': '적재 끝 = 워커가 넣은 행 수 · 이 파일의 MySQL 읽기는 적재 중단 뒤 결말(취소 정산 CT 위임)',
+  'utils/cancel-settle.ts': '취소 정산 = 대기 행을 지운 사건 뒤 남은 행(지운 수를 따로 들고 있지 않음 · 설계서 §8 추가 과제) · 같은 문장에서 정산 기준 readHigh 를 지운다',
+};
+// ── R36 스팸 판정 정확도(★ 2026-11-01 B1-4 · B-1101-3) ──
+describe('R36 스팸 차단 = 확인 문자 수신만 · 확인 중 · 기다림은 자동 행동 0 · 확인 중은 닫히고 하루 측정이 돈다', () => {
+  const VERDICT_SRC = /\b(?:spamVerdictOf|spamVerdictWithRetry|spamCheckPlannerVerdict|runStepSpamTest|mergeSpamVerdicts|batchVerdictOf)\(/;
+  it('결과 행에 차단을 쓰는 자리 = 확인 문자 수신 하나(서버 전수 · 판정 쓰기 함수에 BLOCKED 0)', () => {
+    const hits = SERVER_SRC.flatMap((f) => {
+      const s = stripComments(be(f));
+      const out: string[] = [];
+      if (/decideSpamResult\(\s*(?:SPAM_RESULT\.BLOCKED|'blocked')/.test(s)) out.push(`${f} decideSpamResult(blocked)`);
+      if (/\bresult\s*=\s*SPAM_RESULT\.BLOCKED\b/.test(s)) out.push(`${f} result = BLOCKED`);
+      if (/decideUnconfirmed\([^)]*'blocked'\)/.test(s) && f !== 'utils/spam-probe.ts') out.push(`${f} decideUnconfirmed(blocked)`);
+      if (/SET\s+result\s*=\s*'blocked'/i.test(s)) out.push(`${f} SET result = 'blocked'`);
+      return out;
+    });
+    expect(hits).toEqual([]);
+    // 차단을 쓰는 자리 = 확인 문자 받음 한 곳(확인 문자 닫기와 원 행 확정 = 한 문장 closeProbes · Codex 구현 1R #5)
+    const probeSrc = stripComments(be('utils/spam-probe.ts'));
+    expect((probeSrc.match(/'received', 'blocked',?\s*\)/g) || []).length).toBe(1);
+    expect(probeSrc).toMatch(/WITH p AS \([\s\S]{0,300}UPDATE spam_test_probes[\s\S]{0,400}UPDATE spam_filter_test_results t SET result = \$/);
+  });
+  it('「통신사 전달 성공 + 앱 보고 없음」 네 자리 = 공용 판정(deliveredUnreportedResult)', () => {
+    for (const f of ['utils/spam-test-queue.ts', 'routes/spam-filter.ts']) {
+      expect((stripComments(be(f)).match(/deliveredUnreportedResult\(\)/g) || []).length, f).toBe(2);
+    }
+  });
+  it('판정을 받는 파일(서버 전수) = 기다림 갈래를 따로 받는다(isSpamHold · 다섯 값 이름표 · 공용 판정 파일)', () => {
+    const owners = new Set(['utils/spam-test-queue.ts', 'utils/journey-pretest-validator.ts']);
+    const users = SERVER_SRC.filter((f) => !owners.has(f) && VERDICT_SRC.test(stripComments(be(f))));
+    expect(users.length).toBeGreaterThan(5);
+    expect(users.filter((f) => !/\bisSpamHold\(|\bSPAM_VERDICT_WORD\[/.test(stripComments(be(f))))).toEqual([]);
+    expect(stripComments(be('utils/journey-pretest-validator.ts'))).toMatch(/if \(isSpamHold\(r\.verdict\)\) \{[\s\S]{0,200}reason: 'spam_check_pending'/);
+  });
+  it('보내기 전 검사 · 자동 검사 = 같은 검사 이어 보기 · 사람이 누른 수동 검사는 늘 새 검사', () => {
+    expect(stripComments(be('utils/journey-pretest-validator.ts'))).toContain('reuseSameDay: true,');
+    const q = stripComments(be('utils/spam-test-queue.ts'));
+    const auto = q.slice(q.indexOf('export async function autoSpamTestWithRegenerate('));
+    expect(auto).toContain('reuseSameDay: true,');
+    expect(stripComments(be('routes/spam-filter.ts'))).not.toMatch(/reuseSameDay/);
+  });
+  it('확인 중은 닫힌다(확인 문자 주기 · 기한 · 재claim 상한 · 창 닫힘) · 하루 측정 · 둘 다 서버가 띄운다', () => {
+    const p = stripComments(be('utils/spam-probe.ts'));
+    expect(p).toMatch(/closeProbes\(`status = 'sent' AND deadline_at < NOW\(\)`/);
+    expect(p).toMatch(/WHERE p\.result_id = t\.id AND p\.status IN \('received', 'expired'\) AND t\.result = /);   // 대조 복구
+    expect(p).toMatch(/p\.attempts < \$\{PROBE_MAX_ATTEMPTS\}/);
+    expect(p).toMatch(/t\.completed_at < NOW\(\) - INTERVAL '\$\{SPAM_LATE_REPORT_MINUTES\} minutes'/);
+    expect(p).toContain('await measureSpamVerdicts();');
+    expect(stripComments(be('app.ts'))).toMatch(/startSpamTestQueueWorker\(\);\s*startSpamProbeWorker\(\);/);
+  });
+});
+
+describe('R37 적재 기준은 읽기로 내리지 않는다 · 정산은 늘기만 하는 수의 기준으로 잰다', () => {
+  const files = sourceFiles(BE, /\.ts$/);
+  it('MySQL 결과를 읽는 파일의 sent_count 쓰기 = GREATEST · 0/NULL 채움 · 지운 수 빼기뿐(바로 대입은 면제표 · 이유 줄)', () => {
+    const READ_FN = /\b(?:smsCampaignCountsSafe|smsCountAll)\(/;
+    const PLAIN = /\bsent_count\s*=\s*\$\d/;
+    const hits = files.filter((f) => { const s = stripComments(be(f)); return READ_FN.test(s) && PLAIN.test(s); });
+    expect(hits.filter((f) => !(f in R37_PLAIN_SENT_EXEMPT))).toEqual([]);
+    expect(Object.keys(R37_PLAIN_SENT_EXEMPT).filter((f) => !hits.includes(f)), '낡은 면제').toEqual([]);
+    for (const [f, why] of Object.entries(R37_PLAIN_SENT_EXEMPT)) expect(why.length, f).toBeGreaterThan(20);
+  });
+  it('재대조 · 예약 정리의 적재 수 쓰기 = GREATEST(올리기만)', () => {
+    expect(stripComments(be('utils/campaign-sync-worker.ts'))).toMatch(/sent_count = GREATEST\(COALESCE\(sent_count, 0\), \$3::int\)/);
+    expect(stripComments(be('utils/campaign-lifecycle.ts'))).toMatch(/sent_count = GREATEST\(COALESCE\(sent_count, 0\), \$2::int\)/);
+  });
+  it('정산 스위퍼: 회수 한도 · 불변식 = 성공 기준 · 여정 실패 = 대체 기준 · 분리 축 적재 기준 = readHigh · 차액 = 기준(지급은 모호 아닌 회차만)', () => {
+    const s = stripComments(be('utils/mysql-refund-sweeper.ts'));
+    expect(s).toMatch(/coveredCount - axisSuccessUsed - axisPending/);
+    expect(s).not.toMatch(/coveredCount - axisSuccess - axisPending/);
+    expect(s).toMatch(/successCount: axisSuccessUsed/);
+    expect(s).toMatch(/axisFail - Math\.max\(subRead, readHighNext\.sub\)/);
+    expect(s).toMatch(/axis\.scope === 'brand' \? readHighNext\.brandLoaded : readHighNext\.nonBrandLoaded/);
+    expect(s).toMatch(/prepaidReverseOverRefund\([^)]*unitDiffLegit/);
+    // 차액 기준은 모호 판정 갈래 밖(else)에서만 올린다
+    const amb = s.indexOf('if (ambiguous) {');
+    const bump = s.indexOf('readHighNext = mergeReadHigh(readHighNext, { unitDiff: unitDiffAmt });');
+    const elseAt = s.indexOf('} else {', amb);
+    expect(amb).toBeGreaterThan(0);
+    expect(bump).toBeGreaterThan(elseAt);
+    // 기준은 돈 계산 전에 남긴다(Codex 구현 1R #2) · 쓰기는 세대 조건(1R #1)
+    const firstPersist = s.indexOf('await persistReadHigh(camp.id, readHighNext, readHighGen)');
+    // 저장이 거절되면(0행 · 세대 바뀜) 돈 계산을 멈춘다(Codex 구현 2R)
+    expect(s.match(/if \(!\(await persistReadHigh\(camp\.id, readHighNext, readHighGen\)\)\)/g)?.length).toBe(2);
+    expect(s).toMatch(/return \(r\.rowCount \?\? 0\) > 0;/);
+    expect(firstPersist).toBeGreaterThan(0);
+    expect(firstPersist).toBeLessThan(s.indexOf('await prepaidRefund('));
+    expect(s).toMatch(/WHERE id = \$1 AND \$\{READ_HIGH_GEN_SQL\} = \$9::int/);
+    expect(s).toMatch(/AND \$\{READ_HIGH_GEN_SQL\} = \$5::int/);
+    expect(stripComments(be('utils/cancel-settle.ts'))).toMatch(/- 'readHigh', '\{readHighGen\}',\s*to_jsonb\(COALESCE\(NULLIF\(send_config->>'readHighGen', ''\), '0'\)::int \+ 1\)\)/);
+  });
+});
+
+// ── R38 크레딧 잔액 = 원장 CT 만 · 원장 먼저 · 모든 변동 = 원장 한 줄(★ 2026-11-01 크레딧 컨트롤타워 설계서 §5-4 · 체험 3곳이 원장 없이 잔액을 덮어씀) ──
+const R38_WRITERS = ['utils/ai-credit-recharge.ts', 'utils/ai-credit-tx.ts', 'utils/plan-change-log.ts'];
+const CREDIT_BALANCE_COL = /\bai_credits_(?:base_remaining|purchased|reset_at)\b/;
+/** SQL 한 덩어리가 회사 잔액 칸(기본분 · 구매분 · 리셋 시각)을 쓰는가 = UPDATE companies 의 SET 절 · INSERT INTO companies 의 칸 목록 */
+function writesCreditBalance(sql: string): boolean {
+  const s = sql.replace(/\s+/g, ' ');
+  for (const m of s.matchAll(/\bUPDATE companies(?: \w+)? SET (.*?)(?=\bWHERE\b|\bRETURNING\b|\bFROM\b|$)/gi)) if (CREDIT_BALANCE_COL.test(m[1])) return true;
+  for (const m of s.matchAll(/\bINSERT INTO companies ?\(([^)]*)\)/gi)) if (CREDIT_BALANCE_COL.test(m[1])) return true;
+  return false;
+}
+/** 여는 괄호 자리부터 짝이 맞는 괄호까지의 본문 */
+function parenBodyAt(s: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === '(') depth++;
+    else if (s[i] === ')' && --depth === 0) return s.slice(open + 1, i);
+  }
+  throw new Error('닫는 괄호 없음');
+}
+/** 맨 위 쉼표로 자른다(함수 호출 속 쉼표는 그대로) */
+function splitTopLevel(s: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of s) {
+    if (ch === '(') depth++;
+    if (ch === ')') depth--;
+    if (ch === ',' && depth === 0) { out.push(cur.trim()); cur = ''; } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+const creditTxTypeList = (src: string) => Array.from(((src.match(/export const CREDIT_TX_TYPES[^=]*=\s*(?:new Set\()?\[([^\]]*)\]/) || [])[1] || '').matchAll(/'(\w+)'/g), (m) => m[1]);
+/** 자리표($n)로 type 을 받는 원장 INSERT = 이 표의 함수만 · 그 함수가 받는 글자 출처(새 자리표 INSERT = 분류 없음 = 실패) */
+const R38_PARAM_TYPE_SOURCES: Record<string, (src: string) => string[]> = {
+  'utils/ai-credit-tx.ts#insertLedgerRow': (src) => Array.from(src.matchAll(/\binsertLedgerRow\(\s*\w+\s*,\s*\{[^}]*?\btype:\s*'(\w+)'/g), (m) => m[1]),
+  'utils/ai-credit-tx.ts#adjustCreditWithClient': (src) => Array.from(((src.match(/interface AdjustOpts \{[^}]*?\btype:\s*([^;]+);/) || [])[1] || '').matchAll(/'(\w+)'/g), (m) => m[1]),
+};
+function ledgerInsertTypes(): { types: Set<string>; unclassified: string[] } {
+  const types = new Set<string>();
+  const unclassified: string[] = [];
+  for (const f of R38_WRITERS) {
+    const text = read(join(BE, f));
+    const src = stripComments(text);
+    for (const u of unitsOfSource(f, text).units) {
+      for (const t of sqlTemplates(u.body)) {
+        const at = t.sql.indexOf('INSERT INTO ai_credit_transactions');
+        if (at < 0) continue;
+        const cols = splitTopLevel(parenBodyAt(t.sql, t.sql.indexOf('(', at)));
+        const vals = splitTopLevel(parenBodyAt(t.sql, t.sql.indexOf('(', t.sql.indexOf('VALUES', at))));
+        const v = vals[cols.indexOf('type')] || '';
+        const lit = v.match(/^'(\w+)'$/);
+        if (lit) { types.add(lit[1]); continue; }
+        const from = R38_PARAM_TYPE_SOURCES[`${f}#${u.name}`];
+        const got = from ? from(src) : [];
+        if (got.length === 0) unclassified.push(`${f}#${u.name} type=${v}`);
+        got.forEach((x) => types.add(x));
+      }
+    }
+  }
+  return { types, unclassified };
+}
+describe('R38 크레딧 잔액 = 원장 CT 만 · 원장 먼저 · 모든 변동 = 원장 한 줄', () => {
+  it('① 잔액 칸(기본분 · 구매분 · 리셋 시각)을 쓰거나 원장 줄을 넣는 파일 = 원장 CT 세 파일', () => {
+    const writers = BE_FILES.filter((f) => sqlTemplates(stripComments(be(f))).some((t) => writesCreditBalance(t.sql) || t.sql.includes('INSERT INTO ai_credit_transactions')));
+    expect(writers.sort()).toEqual(R38_WRITERS);
+  });
+  it('② 원장에 넣는 type ⊆ 서버 표 · 서버 표 = 화면 표(목록 · 증감 함수 글자 같음) · 이름표가 다 있다', async () => {
+    const { CREDIT_TX_TYPES, creditTxDelta } = await import('../ai-credit-calc');
+    const { types, unclassified } = ledgerInsertTypes();
+    expect(unclassified).toEqual([]);
+    expect(types.size).toBeGreaterThanOrEqual(9);
+    expect([...types].filter((t) => !CREDIT_TX_TYPES.has(t) || creditTxDelta({ type: t, amount: 1 }) === null)).toEqual([]);
+    const calc = be('utils/ai-credit-calc.ts');
+    expect(creditTxTypeList(FRONT_CREDIT)).toEqual(creditTxTypeList(calc));
+    const fnText = (src: string) => stripComments(src.slice(src.indexOf('export function creditTxDelta('), src.indexOf('\n}\n', src.indexOf('export function creditTxDelta(')))).replace(/\s+/g, ' ');
+    expect(fnText(FRONT_CREDIT)).toBe(fnText(calc));
+    const labels = new Set(Array.from(stripComments(objectBodyOf(FRONT_CREDIT, 'export const CREDIT_TYPE_LABELS')).matchAll(/(\w+)\s*:\s*'/g), (m) => m[1]));
+    expect(creditTxTypeList(calc).filter((t) => !labels.has(t))).toEqual([]);
+  });
+  it('③ 잔액 칸을 쓰는 함수마다 같은 함수 안에서 원장 줄을 먼저 넣는다', () => {
+    const bad: string[] = [];
+    for (const f of R38_WRITERS) {
+      for (const u of unitsOfSource(f, read(join(BE, f))).units) {
+        const firstWrite = sqlTemplates(u.body).find((t) => writesCreditBalance(t.sql));
+        if (!firstWrite) continue;
+        const ledgerAt = [u.body.indexOf('INSERT INTO ai_credit_transactions'), u.body.search(/\binsertLedgerRow\(/)].filter((x) => x >= 0);
+        if (!(Math.min(...ledgerAt) < u.body.indexOf(firstWrite.sql))) bad.push(`${f}#${u.name}`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+  it('⑦ 새 원장 줄 = 언제나 seq(원장 INSERT 마다 seq 칸 = LEDGER_SEQ_SQL · 옛 코드 줄만 seq 없음 · Codex 구현 5R 구조 처방)', () => {
+    const bad: string[] = [];
+    let n = 0;
+    for (const f of R38_WRITERS) {
+      for (const u of unitsOfSource(f, read(join(BE, f))).units) {
+        for (const t of sqlTemplates(u.body)) {
+          const at = t.sql.indexOf('INSERT INTO ai_credit_transactions');
+          if (at < 0) continue;
+          n++;
+          const cols = splitTopLevel(parenBodyAt(t.sql, t.sql.indexOf('(', at)));
+          const vals = splitTopLevel(parenBodyAt(t.sql, t.sql.indexOf('(', t.sql.indexOf('VALUES', at))));
+          if (vals[cols.indexOf('seq')] !== '${LEDGER_SEQ_SQL}') bad.push(`${f}#${u.name}`);
+        }
+      }
+    }
+    expect(n).toBeGreaterThanOrEqual(7);
+    expect(bad).toEqual([]);
+  });
+  it('④ fresh 체험 부여(재시도를 연장으로 막지 못함)를 넘기는 호출부 = 회사당 1회 기록이 있는 진단 지급 한 곳', () => {
+    expect(BE_FILES.filter((f) => /\bfresh:\s*true\b/.test(stripComments(be(f))))).toEqual(['utils/marketing-diagnosis-grant.ts']);
+  });
+  it('⑤ 발행 코어 두 곳 = 월 마감(자기 트랜잭션) → 정산 잠금 → 마감 확인', () => {
+    const { units } = unitsOfSource('utils/billing-issue.ts', read(join(BE, 'utils/billing-issue.ts')));
+    for (const name of ['issueBilling', 'issueMinimumChargeBilling']) {
+      const u = units.find((x) => x.name === name);
+      expect(u, name).toBeTruthy();
+      const close = u!.body.indexOf('await closeCreditMonthsNow(company_id)');
+      const lock = u!.body.indexOf('await lockCompanyForBilling(client, company_id)');
+      const check = u!.body.indexOf('await assertCreditMonthsClosed(client, company_id, billing_start, billing_end)');
+      expect([close >= 0, close < lock, lock < check], name).toEqual([true, true, true]);
+    }
+  });
+  it('⑥ 원장 줄을 그리는 화면은 type 글자를 직접 비교하지 않는다(부호 · 숫자 · 색 = creditTxView 한 곳)', () => {
+    const t = `(?:${creditTxTypeList(be('utils/ai-credit-calc.ts')).join('|')})`;
+    const cmp = new RegExp(`[!=]==?\\s*'${t}'|'${t}'\\s*[!=]==?|case\\s+'${t}'\\s*:`);
+    const viewers = sourceFiles(FE, /\.tsx$/).filter((f) => /\bcreditTxView\(|\bcreditTxLabel\b|my-credit\/transactions|credit-transactions/.test(read(join(FE, f))));
+    expect(viewers.length).toBeGreaterThanOrEqual(3);
+    expect(viewers.filter((f) => cmp.test(stripComments(read(join(FE, f)))))).toEqual([]);
   });
 });

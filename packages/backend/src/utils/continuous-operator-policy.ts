@@ -41,6 +41,8 @@ export interface SpamOutcome {
   status: SpamOutcomeStatus;
   autoExecuteBlocked: boolean;
   reason: string;
+  /** ★ 2026-11-01 B1-4 — 확인 중 · 검사 중(자동 발송만 보류 · 운영자 정지 · 정지 알림 없음) */
+  hold?: boolean;
 }
 
 /**
@@ -50,9 +52,17 @@ export interface SpamOutcome {
  *   ★ Harold 2026-05-31: 끝내 통과 못한 문안은 자동 폐기 X, 담당자가 직접 판단.
  */
 export function decideSpamOutcome(
-  finalResult: 'pass' | 'blocked' | 'failed' | 'timeout',
+  finalResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending',
   regenerateCount: number,
 ): SpamOutcome {
+  if (finalResult === 'unconfirmed' || finalResult === 'pending') {
+    return {
+      status: 'admin_review',
+      autoExecuteBlocked: true,
+      hold: true,
+      reason: `스팸 검사 결과를 ${SPAM_VERDICT_LABEL[finalResult]}이라 자동 발송을 보류했어요. 제안 상세에서 다시 검사하거나 승인해 주세요`,
+    };
+  }
   if (finalResult === 'pass') {
     return {
       status: 'spam_passed',
@@ -76,6 +86,9 @@ export const SPAM_VERDICT_LABEL: Record<string, string> = {
   blocked: '차단',
   timeout: '결과를 받지 못함',
   failed: '검사 실패',
+  // ★ 2026-11-01 B1-4 — 통신사 전달 성공 + 앱 보고 없음(확인 문자가 가른다) · 같은 글 검사가 아직 진행 중
+  unconfirmed: '확인 중',
+  pending: '검사 중',
 };
 
 /**

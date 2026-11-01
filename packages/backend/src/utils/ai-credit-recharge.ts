@@ -13,6 +13,7 @@
 
 import { pool } from '../config/database';
 import { calcRechargeAmount, CREDIT_UNIT_PRICE } from './ai-credit-calc';
+import { LEDGER_SEQ_SQL } from './ai-credit-month';
 
 export class RechargeError extends Error {
   code?: string;
@@ -68,20 +69,20 @@ export async function rechargePrepaid(opts: { companyId: string; credits: number
     );
     const newBalance = Number(balRes.rows[0].balance);
 
-    // 2) 구매분 크레딧 지급
+    // 2) 크레딧 이력 (purchase) — ★ 2026-11-01 크레딧 컨트롤타워 C1(뿌리 대장 R38) 원장 먼저 · 그다음 구매분 칸
     const purchasedAfter = (Number(row.purchased) || 0) + c;
-    await client.query(`UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`, [opts.companyId, purchasedAfter]);
-
-    // 3) 크레딧 이력 (purchase)
     const txRes = await client.query(
       `INSERT INTO ai_credit_transactions
-         (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, created_by, reason)
-       VALUES ($1::uuid, 'purchase', $2, 'purchased', 'credit-recharge', $3, $4, $5, $6, $7)
+         (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, created_by, reason, seq)
+       VALUES ($1::uuid, 'purchase', $2, 'purchased', 'credit-recharge', $3, $4, $5, $6, $7, ${LEDGER_SEQ_SQL})
        RETURNING id`,
       [opts.companyId, c, opts.idempotencyKey || idemKey('recharge', opts.companyId), Number(row.base) || 0, purchasedAfter, opts.userId || null,
         `선불 충전 ${c.toLocaleString()} 크레딧 (VAT 포함 ${total.toLocaleString()}원)`]
     );
     const creditTxId = txRes.rows[0].id;
+
+    // 3) 구매분 크레딧 지급
+    await client.query(`UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`, [opts.companyId, purchasedAfter]);
 
     // 4) 선불 잔액 이력 (deduct) — 선불충전금 사용 이력
     await client.query(
@@ -162,17 +163,17 @@ export async function approveRechargeRequest(opts: { requestId: string; adminId:
       throw new RechargeError('요청 뒤 결제 방식이 후불이 아니게 바뀐 회사입니다. 이 요청은 거절해 주세요(선불 회사는 잔액으로 바로 충전합니다).', 'BILLING_TYPE_CHANGED');
     }
 
+    // ★ 2026-11-01 크레딧 컨트롤타워 C1(뿌리 대장 R38) 원장 먼저 · 그다음 구매분 칸
     const purchasedAfter = (Number(co.rows[0].purchased) || 0) + credits;
-    await client.query(`UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`, [req.company_id, purchasedAfter]);
-
     const txRes = await client.query(
       `INSERT INTO ai_credit_transactions
-         (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, created_by, reason)
-       VALUES ($1::uuid, 'postpaid_grant', $2, 'purchased', 'credit-recharge', $3, $4, $5, $6, $7)
+         (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, created_by, reason, seq)
+       VALUES ($1::uuid, 'postpaid_grant', $2, 'purchased', 'credit-recharge', $3, $4, $5, $6, $7, ${LEDGER_SEQ_SQL})
        RETURNING id`,
       [req.company_id, credits, idemKey('recharge-approve', req.company_id), Number(co.rows[0].base) || 0, purchasedAfter, opts.adminId,
         `후불 충전 승인 ${credits.toLocaleString()} 크레딧 (월말 청구 ${Number(req.total_amount).toLocaleString()}원)`]
     );
+    await client.query(`UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`, [req.company_id, purchasedAfter]);
 
     await client.query(
       `UPDATE ai_credit_requests

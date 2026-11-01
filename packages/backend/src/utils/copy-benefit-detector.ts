@@ -176,39 +176,9 @@ export function withoutBenefitSpans(text: string): string {
   return out.replace(/\s{2,}/g, ' ').trim();
 }
 
-/**
- * **AI가 지어낸 구체 혜택을 자리째 되돌린다.**
- *
- * 프롬프트는 경계가 아니다 — "구체 혜택을 쓰지 마라"는 지시를 어긴 응답은 그대로 저장·발송될 수 있다.
- * @param originalBody 사람이 쓴 원본 본문. **여기 그대로 있던 것만** 남는다.
- *   비우면(처음부터 쓰는 생성 모드) 구체 혜택은 전부 placeholder가 된다 — 지어낼 근거가 없기 때문이다.
- */
-export function stripUnauthorizedBenefits(message: string, originalBody = ''): string {
-  const text = String(message || '');
-  if (!text.trim()) return text;
-
-  const spans = findBenefitSpans(text);
-  if (spans.length === 0) return text;
-
-  // ⛔ 원본도 **같은 파서로** 자리를 뽑아 자리끼리 대조한다 (Codex 5R).
-  //   `includes`로 보면 출력의 '5% 할인'이 원본 '15% 할인' 한가운데 걸려 다른 금액인데도 통과한다.
-  //   비교 키는 공백만 정리한다(줄바꿈으로 쓴 '무료\n배송'과 '무료 배송'은 같은 자리다).
-  //   ⚠ 한계 — 원본이 "무료배송은 제공하지 않습니다"여도 그 자리는 근거로 인정된다.
-  //     부정 문맥 판정은 다시 열린 문제라 여기서 풀지 않는다. 다듬기는 사람이 후보를 골라 넣는 흐름이라 그 자리에서 걸러진다.
-  const spanKey = (t: string) => t.replace(/\s+/g, ' ').trim();
-  const allowed = new Set(findBenefitSpans(String(originalBody || '')).map((s) => spanKey(s.text)));
-  const invented = spans.filter((s) => !allowed.has(spanKey(s.text)));
-  if (invented.length === 0) return text;
-
-  // 뒤에서부터 바꾼다 — 앞을 먼저 바꾸면 뒤 자리의 위치가 밀린다.
-  let out = text;
-  for (const s of invented.sort((a, b) => b.start - a.start)) {
-    out = out.slice(0, s.start) + BENEFIT_PLACEHOLDER + out.slice(s.end);
-  }
-  // 붙어 버린 placeholder 중복 정리.
-  const dup = BENEFIT_PLACEHOLDER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return out.replace(new RegExp(`(?:${dup})(?:[\\s,]*${dup})+`, 'g'), BENEFIT_PLACEHOLDER);
-}
+// ★ 2026-11-01 B1-1 — 옛 글자 대조 거름은 여기서 지웠다. 혜택 판정 = 아래 값 · 종류 짝 하나
+//   (findInventedBenefits · replaceInventedBenefits). AI 영업 전용 「허가 인용문 글자 그대로」 거름은
+//   sales-outreach-copy-guard.ts stripUnlicensedQuoteBenefits(뿌리 대장 R33).
 
 type Channel = 'SMS' | 'LMS' | 'MMS' | '카카오' | 'KAKAO' | 'EMAIL' | string;
 
@@ -244,12 +214,11 @@ export function buildBenefitEmphasis(tokens: string[], channel: Channel): string
 // ════════════════════════════════════════════════════════════════════
 // ★ 2026-09-30 프롬프트 점검 WP2 — **새로 쓰는 문안**의 혜택 대조(값 기준) · **다시 쓰는 문안**의 새 숫자 대조
 //
-//   stripUnauthorizedBenefits 는 "원문에 글자 그대로 있던 혜택 덩어리만" 통과시킨다 — AI 가 혜택을 아예 쓰지 않아야 하는
-//   여정 · 다듬기 계열에 맞다. 기본 · 맞춤 · DM · 이메일 생성은 사용자가 요청에 "30% 할인"을 적고 그것을 **주인공으로 강조하라**고
+//   (옛) 글자 대조 거름은 "원문에 글자 그대로 있던 혜택 덩어리만" 통과시켰다 — 1101 B1-1 에서 여정 · 다듬기도 이 값 대조로 모였다. 기본 · 맞춤 · DM · 이메일 생성은 사용자가 요청에 "30% 할인"을 적고 그것을 **주인공으로 강조하라**고
 //   지시하는 흐름이라, 글자 대조를 쓰면 "30% OFF" · "할인 혜택" 같은 정상 표현이 자리표시가 된다(품질 저하).
 //   그래서 여기서는 **값**을 본다 — 숫자 혜택(%·원·N+N)은 정규화한 값이, 구체 혜택 낱말(무료 · 사은품 · 쿠폰 · 적립 · 경품 · 증정 · 반값)은
 //   낱말이 근거에 있어야 통과. 일반 낱말('할인' 등)은 보지 않는다(값이 없으면 지어낸 사실이 아니다).
-//   ⚠ 한계(알고 둔다): 근거에 "10% 할인 · 5% 적립"이 있을 때 결과의 "5% 할인"(값과 낱말 교차)은 통과한다.
+//   ★ 1101 원자 짝(아래)으로 교차(근거 "10% 할인 · 5% 적립" → 결과 "5% 할인")도 막는다.
 // ════════════════════════════════════════════════════════════════════
 
 const FIGURE_AMOUNT_RE = /(?<![\d.,제])\d+(?:[.,]\d+)*\s*(?:만\s*(?:\d+\s*천)?\s*원|천\s*원|원|%)(?!칙)/g;
@@ -366,33 +335,231 @@ function normalizeOutputText(t: string, groundFlat: string): string {
   });
 }
 
-interface BenefitGround { figures: Set<string>; text: string; rawFlat: string }
+interface BenefitGround { figures: Set<string>; atoms: BenefitAtom[]; text: string; rawFlat: string }
 
-/** 근거 글에서 혜택 값 · 낱말을 모은다(비율 · 금액은 값 키로). */
+/*
+ * ── ★ 2026-11-01 원자 짝(설계서 docs/2026-11-01-journey-recurrence-prevention-design.md §2 B1-1 · Codex 설계 1R~3R) ──
+ *   값만 따로 · 낱말만 따로 보면 근거 「10% 할인 · 5% 적립」에서 「5% 할인」(1018 실사고) · 「10% 적립」이 산다.
+ *   숫자 하나(또는 범위 하나)와 그 숫자에 딸린 혜택 낱말을 한 원자로 묶어 원자끼리 대조한다.
+ *   ① 절 = 마침표 · 느낌표 · 물음표 · 줄바꿈 · 「;」 · 「·」 · 「/」로 자른다(쉼표는 자르지 않는다 — 「10%, 5% 할인」 숫자열).
+ *   ② 숫자열 = 숫자 사이가 쉼표 · 와 · 과 · 및 · 또는 · 이나 · 공백뿐인 연속 → 그 옆 낱말은 숫자열 전부에 붙는다.
+ *   ③ 그 밖의 낱말은 확실할 때만 숫자에 붙는다(B1-1a · benefitAtoms 머리 주석).
+ *   ④ 범위(「10~20%」 · 「1만~3만원」)는 한 원자 · 못 읽는 범위 = 통째 죽음.
+ *   사는 조건 = 근거에 같은 키 · 같은 역할(조건 금액 여부)의 원자가 있고 출력 종류 ⊆ 근거 종류 · 종류 없는 숫자는 조건 금액이거나 그 절에 숫자가 하나일 때만.
+ *   글자 그대로 = 혜택 자리를 덮는 절 묶음이 근거와 같으면 대조하지 않는다(B1-1a ①).
+ */
+const ATOM_CLAUSE_BREAK_RE = /[.!?。\n;·/]/;
+/** 숫자에 딸리는 혜택 낱말(종류) — 일반 낱말(할인 · 세일)도 종류다(Codex 설계 1R #3 · 예외 없음). */
+const ATOM_KIND_WORDS = ['무료배송', '무료증정', '할인', '세일', '적립', '쿠폰', '증정', '사은품', '페이백', '캐시백', '포인트', '반값', '경품', 'off', 'OFF', 'Off', 'DC', 'dc'];
+const ATOM_UNIT = '(?:만\\s*(?:\\d+\\s*천)?\\s*원|천\\s*원|원|%)';
+const ATOM_RANGE_RE = new RegExp(`(?<![\\d.,제])(\\d+(?:[.,]\\d+)*)\\s*(${ATOM_UNIT})?\\s*[~\\-]\\s*(\\d+(?:[.,]\\d+)*)\\s*(${ATOM_UNIT})?`, 'g');
+const ATOM_SEQ_GAP_RE = /^[\s,]*(?:와|과|및|또는|이나)?[\s,]*$/;
+/** 낱말이 앞 숫자 뒤에 붙음(「10% 할인」 · 「10%를 할인」 · 「10%씩 적립」) · 뒤 숫자 앞에 붙음(「할인율 10%」 · 「적립은 5%」 · 「적립 혜택: 5%」) */
+const ATOM_POST_GAP_RE = /^\s*(?:(?:즉시|추가|특별|단독|바로|더|상당(?:의)?|이상|이하|까지|씩)\s*)?(?:[을를의]\s*)?$/;
+const ATOM_PRE_GAP_RE = /^(?:[율률금])?\s*(?:[은는이가]\s*)?(?:혜택\s*(?:[은는이가]\s*)?)?[:：]?\s*$/;
+/** 조건 금액 = 숫자 뒤 조건 어미까지 · 어미 뒤는 낱말 끝(「5만원 이상 구매 시」 · 「5만원 결제하시면」) — 문턱 값은 혜택 값을 받지 못한다(「결제 할인」 · 「이용권」 · 「결제 시점」은 조건 아님) */
+const ATOM_CONDITION_AFTER_RE = /^\s*(?:(?:이상|이하|초과|미만)\s*)?(?:구매|결제|주문|이용)\s*(?:시(?:에는|에|엔)?|하면|하시면|할\s*때|하실\s*때|하는\s*경우(?:에는|에|엔)?)(?![가-힣])/;
+/** 목록의 구분 = 쉼표 · + · & · 묶음 바로 뒤 와/과/및/그리고/에 · 사이의 및/그리고(「·」 · 줄바꿈이 절을 끊는 것과 같은 자리) */
+const ATOM_SEPARATOR_RE = /[,+&]|^\s*(?:와|과|및|그리고|에)(?=\s|$)|\s(?:및|그리고)\s/;
+/** 한 묶음이 되는 이웃 낱말 차례(허용 표 · 같은 뜻 세일 · OFF · DC = 할인) — 나르는 낱말이 있다는 것만으로 묶지 않는다(「할인 사은품 증정」 = 끊김) */
+const ATOM_LINKS = new Set(['할인>쿠폰', '쿠폰>할인', '적립>쿠폰', '적립>포인트', '포인트>적립', '쿠폰>증정', '포인트>증정', '사은품>증정']);
+/** 값의 뜻을 정하는 종류 — 한 묶음에 둘이면 그 묶음은 근거 허가 0(적립률이 할인율로 옮겨 가지 않는다) */
+const ATOM_VALUE_KINDS = new Set(['할인', '적립', '페이백', '캐시백']);
+
+export interface BenefitAtom { start: number; end: number; key: string; kinds: Set<string>; bad: boolean; clauseFigures: number; cond: boolean }
+
+/** (순수) 절 구간 — 마침표 · 느낌표 · 물음표 · 줄바꿈 · 「;」 · 「·」 · 「/」(소수점 「1.5%」의 마침표는 끊김 아님). 원자와 글자 그대로 허가가 같은 자르기를 쓴다. */
+function atomClauses(src: string): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  let start = 0;
+  for (let i = 0; i <= src.length; i += 1) {
+    const decimal = src[i] === '.' && /\d/.test(src[i - 1] || '') && /\d/.test(src[i + 1] || '');
+    if (i === src.length || (ATOM_CLAUSE_BREAK_RE.test(src[i]) && !decimal)) { out.push([start, i]); start = i + 1; }
+  }
+  return out;
+}
+
+/** (순수) 글 → 혜택 원자들(위치는 넘긴 글 그대로 · 글은 이미 정규화된 것을 넘긴다). */
+/**
+ * ★ 2026-11-01 B1-1a(설계 §2 B1-1a · Codex 설계 4R approve) — 낱말 → 숫자 짝 = **확실할 때만 허가**(P2) · 근거 · 출력 같은 함수.
+ *   묶음 = 허용 표(ATOM_LINKS)의 이웃 낱말 · 후보 = 묶음 바로 앞 · 뒤 숫자열(구분이 낀 쪽 · 조건 금액 쪽은 후보 아님).
+ *   근거(tie 'none') = 후보 하나 + 그쪽 붙음일 때만. 후보 둘 · 붙음 아님 · 값 종류 둘인 묶음 · 바로 앞과 뒤에 묶음을 다 가진 숫자(방향 섞임) = 허가 0.
+ *   방향 섞임에 예외는 없다 — 주는 동작(증정)만 든 묶음도 똑같이 센다(구현 1R~4R 에 넣었던 증정 예외는 빈틈이 이어져 지웠다).
+ *   출력(tie 'both') = 후보 모두에 붙인다(모르면 더 엄하게).
+ *   조건 금액(조건 어미까지) = 낱말을 받지 못하는 원자(cond) · 대조는 역할이 같은 근거 원자와만(atomSupported).
+ *   영문 낱말(off · DC)은 앞뒤가 영문이 아닐 때만 낱말이다(「Coffee」 속 off 0).
+ *   (구현 1R~6R 의 붙음 승부 규칙 = 표지 승부 · 이웃 판정 · 조건 금액 빼기 · 제공 묶음은 이 교체로 지웠다)
+ */
+export function benefitAtoms(text: string, opts: { tie?: 'both' | 'none' } = {}): BenefitAtom[] {
+  const tie = opts.tie ?? 'both';
+  const src = String(text || '');
+  const atoms: BenefitAtom[] = [];
+  for (const [cs, ce] of atomClauses(src)) {
+    const clause = src.slice(cs, ce);
+    const figs: Array<{ start: number; end: number; key: string; bad: boolean }> = [];
+    const taken: Array<[number, number]> = [];
+    for (const m of clause.matchAll(ATOM_RANGE_RE)) {
+      if (m.index == null) continue;
+      const unitLo = m[2] ? m[2].replace(/\s+/g, '') : '';
+      const unitHi = m[4] ? m[4].replace(/\s+/g, '') : '';
+      if (!unitLo && !unitHi) continue;   // 단위 없는 「3-5」 류 = 혜택 범위 아님
+      const bad = !!unitLo && !unitHi;     // 단위가 아래끝에만 = 못 읽는 범위
+      const lo = figureKey(`${m[1]}${unitLo || unitHi}`);
+      const hi = figureKey(`${m[3]}${unitHi || unitLo}`);
+      figs.push({ start: cs + m.index, end: cs + m.index + m[0].length, key: `${lo}~${hi}`, bad });
+      taken.push([m.index, m.index + m[0].length]);
+    }
+    const free = (s: number, e: number) => !taken.some(([a, b]) => s < b && e > a);
+    for (const m of clause.matchAll(FIGURE_AMOUNT_RE)) {
+      if (m.index == null || !free(m.index, m.index + m[0].length)) continue;
+      figs.push({ start: cs + m.index, end: cs + m.index + m[0].length, key: figureKey(m[0]), bad: false });
+    }
+    for (const m of clause.matchAll(FIGURE_NPLUSN_RE)) {
+      if (m.index == null || !free(m.index, m.index + m[0].length)) continue;
+      figs.push({ start: cs + m.index, end: cs + m.index + m[0].length, key: m[0].replace(/\s+/g, ''), bad: false });
+    }
+    if (figs.length === 0) continue;
+    figs.sort((a, b) => a.start - b.start);
+    // 숫자열 묶기
+    const seqs: Array<{ start: number; end: number; members: number[] }> = [];
+    figs.forEach((f, i) => {
+      const last = seqs[seqs.length - 1];
+      if (last && ATOM_SEQ_GAP_RE.test(src.slice(figs[last.members[last.members.length - 1]].end, f.start))) {
+        last.members.push(i);
+        last.end = f.end;
+      } else {
+        seqs.push({ start: f.start, end: f.end, members: [i] });
+      }
+    });
+    const kinds: Array<Set<string>> = figs.map(() => new Set<string>());
+    // 종류 낱말 토큰 = 한 번만 뽑는다(긴 낱말 먼저 · 겹침 · 숫자 안 · 영문 경계)
+    const tokens: Array<{ ws: number; we: number; w: string }> = [];
+    for (const w of ATOM_KIND_WORDS) {
+      const latin = /^[A-Za-z]+$/.test(w);
+      for (let at = clause.indexOf(w); at !== -1; at = clause.indexOf(w, at + w.length)) {
+        const ws = cs + at;
+        const we = ws + w.length;
+        const bounded = !latin || (!/[A-Za-z]/.test(clause[at - 1] || '') && !/[A-Za-z]/.test(clause[at + w.length] || ''));
+        if (bounded && !tokens.some((t) => ws < t.we && we > t.ws) && !figs.some((f) => ws < f.end && we > f.start)) tokens.push({ ws, we, w });
+      }
+    }
+    tokens.sort((x, y) => x.ws - y.ws);
+    // 묶음 = 허용 표의 이웃 낱말만(붙여 쓰거나 공백만 사이)
+    const groups: Array<{ ws: number; we: number; kinds: string[] }> = [];
+    for (const t of tokens) {
+      // 같은 뜻 = 같은 종류(세일 · OFF · DC = 할인) — 「30프로 세일」 근거로 「30% 할인」은 산다(0930 WP2)
+      const kind = /^(off|OFF|Off|DC|dc|세일)$/.test(t.w) ? '할인' : t.w;
+      const last = groups[groups.length - 1];
+      if (last && /^\s*$/.test(src.slice(last.we, t.ws)) && ATOM_LINKS.has(`${last.kinds[last.kinds.length - 1]}>${kind}`)) { last.we = t.we; last.kinds.push(kind); }
+      else groups.push({ ws: t.ws, we: t.we, kinds: [kind] });
+    }
+    const cond = seqs.map((q) => ATOM_CONDITION_AFTER_RE.test(src.slice(q.end)));
+    // 바로 옆 = 사이에 다른 묶음 · 숫자열이 없다 · 구분이 끼면 그쪽은 없다
+    const between = (a: number, b: number) => groups.some((h) => h.ws >= a && h.we <= b) || seqs.some((p) => p.start >= a && p.end <= b);
+    const groupLeftOf = seqs.map(() => false);
+    const groupRightOf = seqs.map(() => false);
+    const near = groups.map((g) => {
+      const L = seqs.reduce<number | undefined>((acc, q, qi) => (q.end <= g.ws && !between(q.end, g.ws) ? qi : acc), undefined);
+      const r = seqs.findIndex((q) => q.start >= g.we && !between(g.we, q.start));
+      const R = r >= 0 ? r : undefined;
+      const gapL = L !== undefined ? src.slice(seqs[L].end, g.ws) : '';
+      const gapR = R !== undefined ? src.slice(g.we, seqs[R].start) : '';
+      const nearL = L !== undefined && !ATOM_SEPARATOR_RE.test(gapL);
+      const nearR = R !== undefined && !ATOM_SEPARATOR_RE.test(gapR);
+      if (nearL) groupRightOf[L!] = true;
+      if (nearR) groupLeftOf[R!] = true;
+      return { L, R, gapL, gapR, candL: nearL && !cond[L!], candR: nearR && !cond[R!] };
+    });
+    const mixed = (qi: number) => groupLeftOf[qi] && groupRightOf[qi];   // 방향 섞임(배정 · 붙음과 상관없이 바로 옆 묶음 유무)
+    groups.forEach((g, gi) => {
+      const x = near[gi];
+      let targets: number[] = [];
+      if (tie === 'both') {
+        targets = [x.candL ? x.L : undefined, x.candR ? x.R : undefined].filter((q): q is number => q !== undefined);
+      } else if (new Set(g.kinds.filter((k) => ATOM_VALUE_KINDS.has(k))).size <= 1) {
+        if (x.candL && !x.candR && ATOM_POST_GAP_RE.test(x.gapL) && !mixed(x.L!)) targets = [x.L!];
+        else if (x.candR && !x.candL && ATOM_PRE_GAP_RE.test(x.gapR) && !mixed(x.R!)) targets = [x.R!];
+      }
+      for (const qi of targets) for (const fi of seqs[qi].members) for (const k of g.kinds) kinds[fi].add(k);
+    });
+    figs.forEach((f, i) => atoms.push({ start: f.start, end: f.end, key: f.key, kinds: kinds[i], bad: f.bad, clauseFigures: figs.length, cond: seqs.some((q, qi) => cond[qi] && q.members.includes(i)) }));
+  }
+  return atoms;
+}
+
+/** 근거 글에서 혜택 원자 · 낱말을 모은다. */
 function groundOf(ground: string): BenefitGround {
   const g = normalizeGroundText(String(ground || ''));
   const figures = new Set<string>();
-  for (const m of g.matchAll(FIGURE_AMOUNT_RE)) figures.add(figureKey(m[0]));
-  for (const m of g.matchAll(FIGURE_NPLUSN_RE)) figures.add(m[0].replace(/\s+/g, ''));
-  return { figures, text: g.replace(/\s+/g, ''), rawFlat: toHalfwidth(String(ground || '')).replace(/\s+/g, '') };
+  const atoms = benefitAtoms(g, { tie: 'none' });
+  for (const a of atoms) figures.add(a.key);
+  return { figures, atoms, text: g.replace(/\s+/g, ''), rawFlat: toHalfwidth(String(ground || '')).replace(/\s+/g, '') };
 }
 
-/** 한 조각(혜택 자리) 안에서 근거에 없는 값 · 낱말. */
-function inventedIn(piece: string, g: BenefitGround): string[] {
+/** 원자 하나가 근거로 사는가(같은 키 · 같은 역할 = 조건 금액 여부가 먼저 · 종류 ⊆ · 종류 없으면 조건 금액이거나 절에 숫자 하나일 때만). */
+function atomSupported(a: BenefitAtom, g: BenefitGround): boolean {
+  if (a.bad) return false;
+  const same = g.atoms.filter((x) => x.key === a.key && !x.bad && x.cond === a.cond);
+  if (same.length === 0) return false;
+  if (a.kinds.size === 0) return a.cond || a.clauseFigures === 1;
+  return same.some((x) => Array.from(a.kinds).every((k) => x.kinds.has(k)));
+}
+
+/** 한 조각(혜택 자리) 안에서 근거에 없는 값 · 낱말 · 짝. */
+function inventedIn(piece: string, g: BenefitGround, atomsHere: BenefitAtom[]): string[] {
   const out: string[] = [];
-  for (const m of piece.matchAll(FIGURE_AMOUNT_RE)) { const k = figureKey(m[0]); if (!g.figures.has(k)) out.push(k); }
-  for (const m of piece.matchAll(FIGURE_NPLUSN_RE)) { const k = m[0].replace(/\s+/g, ''); if (!g.figures.has(k)) out.push(k); }
+  // 반환 = 값 키(옛 계약 그대로 · 화면 · 로그가 값만 본다) — 종류가 틀린 짝도 그 값으로 드러난다
+  for (const a of atomsHere) if (!atomSupported(a, g)) out.push(a.key);
   const flat = piece.replace(/\s+/g, '');
   for (const w of CONCRETE_BENEFIT_WORDS) if (flat.includes(w) && !g.text.includes(w)) out.push(w);
   if (FREE_WORD_RE.test(piece) && !FREE_WORD_RE.test(g.text)) out.push('무료');
   return Array.from(new Set(out));
 }
 
+/**
+ * 글자 그대로(설계 B1-1a ①) = 혜택 자리를 덮는 절 묶음(사이 끊김 글자 포함)이 근거의 연속 절 묶음과 같다.
+ *   비교 = 정규화 전 글(반각 · 공백 연속은 한 칸 · 지우지 않는다 — 「쿠폰1 5%」 ≠ 「쿠폰 15%」).
+ *   줄을 넘는 자리(「무료\n배송」)는 묶음 전체가 같을 때만 · 같지 않으면 자리 전체를 대조한다(잘라 내지 않는다).
+ */
+function verbatimCover(text: string, ground: string): (start: number, end: number) => boolean {
+  const oRaw = toHalfwidth(text);
+  const gRaw = toHalfwidth(String(ground || ''));
+  const oc = atomClauses(oRaw);
+  const gc = atomClauses(gRaw);
+  const flat = (t: string) => t.replace(/\s+/g, ' ').trim();
+  const gT = gc.map(([cs, ce]) => flat(gRaw.slice(cs, ce)));
+  const gS = gc.map(([, ce]) => gRaw[ce] ?? '');
+  const oT = oc.map(([cs, ce]) => flat(oRaw.slice(cs, ce)));
+  const oS = oc.map(([, ce]) => oRaw[ce] ?? '');
+  return (start, end) => {
+    let a = 0;
+    oc.forEach(([cs], ci) => { if (cs <= start) a = ci; });
+    let b = a;
+    oc.forEach(([cs], ci) => { if (cs < end) b = ci; });
+    for (let k = 0; k + (b - a) < gc.length; k += 1) {
+      let same = true;
+      for (let t = 0; t <= b - a && same; t += 1) same = gT[k + t] === oT[a + t] && (t === b - a || gS[k + t] === oS[a + t]);
+      if (same) return true;
+    }
+    return false;
+  };
+}
+
 /** 지어낸 혜택 자리(위치 = 원문 그대로 · 정규화가 길이를 보존한다). */
 function inventedSpans(text: string, ground: string): Array<{ start: number; end: number; invented: string[] }> {
   const g = groundOf(ground);
-  return findBenefitSpans(normalizeOutputText(text, g.rawFlat))
-    .map((s) => ({ start: s.start, end: s.end, invented: inventedIn(s.text, g) }))
+  const norm = normalizeOutputText(text, g.rawFlat);
+  const outAtoms = benefitAtoms(norm);
+  const verbatim = verbatimCover(text, ground);
+  return findBenefitSpans(norm)
+    .filter((s) => !verbatim(s.start, s.end))
+    .map((s) => {
+      const here = outAtoms.filter((a) => a.start < s.end && a.end > s.start);
+      // 범위 원자는 덩어리보다 앞에서 시작한다(「10~20% 할인」의 「10~」) — 막힌 자리는 원자 전체를 덮는다(반쪽 남김 0)
+      const start = Math.min(s.start, ...here.map((a) => a.start));
+      const end = Math.max(s.end, ...here.map((a) => a.end));
+      return { start, end, invented: inventedIn(s.text, g, here) };
+    })
     .filter((s) => s.invented.length > 0);
 }
 

@@ -31,7 +31,8 @@ interface TestResult {
   message_type: string;
   received: boolean;
   received_at: string | null;
-  result: 'received' | 'blocked' | 'timeout' | 'failed' | null;
+  /** ★ 2026-11-01 B1-4 unconfirmed = 통신사는 보냈는데 검사폰 보고가 없음(확인 문자가 차단 · 장애를 가른다) */
+  result: 'received' | 'blocked' | 'timeout' | 'failed' | 'unconfirmed' | 'error' | null;
   /** ★ 2026-09-29 발송 실패 사유(서버가 결과 코드로 판정 · 없으면 옛 문구) — rejected = 게이트웨이가 보내기 전에 막음 · carrier = 통신사 실패 */
   failKind?: 'rejected' | 'carrier';
   failLabel?: string;
@@ -86,6 +87,10 @@ export default function SpamFilterTestModal({
   const [checkStatus, setCheckStatus] = useState<SendCheckStatus | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // ★ 2026-11-01 B1-4 — 확인 중 행이 있는 닫힌 검사 = 서버가 준 finalBy 까지 15초마다 다시 읽는다
+  const slowRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const liveIdRef = useRef<string | null>(null);
+  const [finalBy, setFinalBy] = useState<number | null>(null);
   // 서버 시작 시간 기준 타이머용
   const serverCreatedAtRef = useRef<number | null>(null);
   // ★2026-09-25 도착 시간 표시용 — 서버 시각끼리만 뺀다(타이머 기준과 섞지 않는다 · 시계 차이 방지)
@@ -96,6 +101,7 @@ export default function SpamFilterTestModal({
   const clearTimers = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+    if (slowRef.current) { clearInterval(slowRef.current); slowRef.current = null; }
   }, []);
 
   // 서버 created_at 기준 남은 초 계산
@@ -116,12 +122,15 @@ export default function SpamFilterTestModal({
       if (remaining <= 0) {
         clearTimers();
         setStatus('completed');
+        // 60초 끝 = 마지막으로 한 번 더 읽는다(45초 판정 · 확인 중을 놓치지 않게 · 확인 중이면 그 읽기가 느린 읽기를 건다)
+        if (liveIdRef.current) void pollResults(liveIdRef.current);
       }
     }, 1000);
   }, [calcRemaining, clearTimers]);
 
   // 폴링 시작
   const startPolling = useCallback((id: string) => {
+    liveIdRef.current = id;
     pollRef.current = setInterval(() => pollResults(id), 2000);
   }, []);
 
@@ -184,6 +193,8 @@ export default function SpamFilterTestModal({
     setCountdown(60);
     setError('');
     setTotalCount(0);
+    setFinalBy(null);
+    liveIdRef.current = null;
     serverCreatedAtRef.current = null;
     serverTestCreatedRef.current = null;
   }, [clearTimers]);
@@ -272,7 +283,17 @@ export default function SpamFilterTestModal({
       if (data.results) setResults(data.results);
       if (data.test?.created_at) serverTestCreatedRef.current = new Date(data.test.created_at).getTime();
       if (data.test?.status === 'completed') {
-        clearTimers();
+        const by = data.finalBy ? Date.parse(data.finalBy) : NaN;
+        const waiting = Number.isFinite(by) && Date.now() < by;
+        setFinalBy(Number.isFinite(by) ? by : null);
+        if (waiting) {
+          // 확인 중 = 빠른 읽기 · 남은 시간만 멈추고 15초 읽기로 바꾼다(창을 닫아도 서버가 확정한다)
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+          if (!slowRef.current) slowRef.current = setInterval(() => pollResults(id), 15000);
+        } else {
+          clearTimers();
+        }
         setStatus('completed');
       }
     } catch (err) { console.error('폴링 오류:', err); }
@@ -281,13 +302,19 @@ export default function SpamFilterTestModal({
   // ── 판정(원본 규칙 그대로) ──
   const receivedCount = results.filter(r => r.received).length;
   const blockedList = status === 'completed' ? results.filter(r => r.result === 'blocked') : [];
-  const missingList = status === 'completed' ? results.filter(r => !r.received && (r.result === 'timeout' || r.result === 'failed' || r.result == null)) : [];
-  const verdict: 'ready' | 'run' | 'pass' | 'block' | 'warn' =
+  // ★ 2026-11-01 B1-4 — 확인 중 행 = finalBy 안이면 「확인 중」 · 넘으면 「결과를 받지 못했어요」(서버가 아직 못 닫은 것)
+  const checkingOpen = finalBy != null && Date.now() < finalBy;
+  const checkingList = status === 'completed' ? results.filter(r => !r.received && r.result === 'unconfirmed') : [];
+  const missingList = status === 'completed'
+    ? results.filter(r => !r.received && r.result !== 'blocked' && !(r.result === 'unconfirmed' && checkingOpen))
+    : [];
+  const verdict: 'ready' | 'run' | 'pass' | 'block' | 'check' | 'warn' =
     status === 'ready' ? 'ready'
       : status === 'testing' ? 'run'
         : blockedList.length > 0 ? 'block'
           : missingList.length > 0 ? 'warn'
-            : 'pass';
+            : checkingList.length > 0 ? 'check'
+              : 'pass';
   const namesOf = (rows: TestResult[]) => [...new Set(rows.map((r) => carrierLabel(r.carrier)))].join(' · ');
 
   // ★ D97: 미리보기 변수 치환 — replaceDirectVars 컨트롤타워 사용 (인라인 금지)
@@ -295,7 +322,7 @@ export default function SpamFilterTestModal({
   const previewMessage = firstRecipient
     ? replaceDirectVars(rawPreview, firstRecipient, callbackNumber)
     : rawPreview;
-  const typeLabel = messageType === 'SMS' ? '단문(SMS)' : messageType === 'LMS' ? '장문(LMS)' : '사진(MMS)';
+  const typeLabel = messageType === 'SMS' ? 'SMS' : messageType === 'LMS' ? 'LMS' : 'MMS';
   const trial = checkStatus?.spamTrial;
   const isTrial = !!trial?.eligible;
 
@@ -310,8 +337,14 @@ export default function SpamFilterTestModal({
     }
     if (status === 'completed') {
       if (r.result === 'blocked') return { cls: 'block', chip: '막혔어요', sub: '통신사 스팸 차단에 걸렸어요' };
+      if (r.result === 'unconfirmed' && checkingOpen) {
+        const base = serverTestCreatedRef.current;
+        const min = base ? Math.max(1, Math.round((Date.now() - base) / 60000)) : null;
+        return { cls: 'run', chip: '확인 중', sub: `통신사는 보냈어요 · 검사폰 확인을 기다려요${min ? ` (${min}분째)` : ''}` };
+      }
       if (r.result === 'failed' && r.failKind === 'rejected') return { cls: 'block', chip: '보내지 못했어요', sub: `보내기 전에 막혔어요: ${r.failLabel || '문자 규격 오류'}` };
       if (r.result === 'failed') return { cls: 'block', chip: '전달 실패', sub: '통신사가 문자를 받지 않았어요' };
+      if (r.result === 'error' || r.result === 'unconfirmed') return { cls: 'warn', chip: '결과 없음', sub: '검사폰 확인을 받지 못했어요(막힘으로 보지 않아요)' };
       return { cls: 'warn', chip: '결과 없음', sub: '60초 안에 통신사 결과가 오지 않았어요' };
     }
     return { cls: 'run', chip: '확인 중', sub: '통신사 결과를 확인하고 있어요' };
@@ -439,6 +472,14 @@ export default function SpamFilterTestModal({
                     <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">이대로 보내면 {namesOf(blockedList)} 고객에게는 도착하지 않을 수 있어요.</p>
                   </div>
                 </div>
+              ) : verdict === 'check' ? (
+                <div className="rounded-2xl p-4 flex items-center gap-3.5 border border-amber-200 bg-amber-50">
+                  <span className="w-14 h-14 rounded-2xl grid place-items-center bg-amber-500 text-white shrink-0"><Loader2 className="w-6 h-6 animate-spin" strokeWidth={2.4} /></span>
+                  <div className="min-w-0">
+                    <h4 className="text-[16px] font-extrabold leading-snug text-amber-800 break-keep">{namesOf(checkingList)} 결과를 확인하고 있어요</h4>
+                    <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">통신사는 문자를 보냈는데 검사폰 확인이 늦어요. 길어도 20분 안에 확정되고, 창을 닫아도 확인은 계속돼요.</p>
+                  </div>
+                </div>
               ) : verdict === 'warn' ? (
                 <div className="rounded-2xl p-4 flex items-center gap-3.5 border border-amber-200 bg-amber-50">
                   <span className="w-14 h-14 rounded-2xl grid place-items-center bg-amber-500 text-white shrink-0"><AlertTriangle className="w-6 h-6" strokeWidth={2.4} /></span>
@@ -488,7 +529,7 @@ export default function SpamFilterTestModal({
 
               {/* 보내는 양 · 요금 */}
               <div className="flex flex-wrap gap-1.5">
-                <span className="text-[11.5px] text-stone-600 bg-stone-100 rounded-[7px] px-2 py-1">{messageType === 'SMS' ? '단문(SMS)' : '장문(LMS)'} <b className="text-stone-900">1통씩</b> · 통신사 3사</span>
+                <span className="text-[11.5px] text-stone-600 bg-stone-100 rounded-[7px] px-2 py-1">{messageType === 'SMS' ? 'SMS' : 'LMS'} <b className="text-stone-900">1통씩</b> · 통신사 3사</span>
                 {checkStatus && (isTrial ? (
                   <span className="text-[11.5px] text-violet-700 bg-violet-50 ring-1 ring-inset ring-violet-200 rounded-[7px] px-2 py-1">
                     무료 체험 <b className="tabular-nums">{Math.max(0, trial?.remaining ?? 0)}</b>회 남음 · 차감 없음
@@ -573,6 +614,8 @@ export default function SpamFilterTestModal({
                                   : r.result === 'blocked' ? ['막혔어요', 'bg-rose-50 text-rose-700 ring-rose-200']
                                     : r.result === 'failed' ? [r.failKind === 'rejected' ? '보내지 못했어요' : '전달 실패', 'bg-rose-50 text-rose-700 ring-rose-200']
                                       : r.result === 'timeout' ? ['결과 없음', 'bg-amber-50 text-amber-800 ring-amber-200']
+                                        : r.result === 'unconfirmed' ? ['확인 중', 'bg-amber-50 text-amber-700 ring-amber-200']
+                                          : r.result === 'error' ? ['결과 없음', 'bg-amber-50 text-amber-800 ring-amber-200']
                                         : ['확인 중', 'bg-stone-100 text-stone-500 ring-transparent'];
                                 return (
                                   <div key={idx} className="flex items-center justify-between text-xs font-semibold">

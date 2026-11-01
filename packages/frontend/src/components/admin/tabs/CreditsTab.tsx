@@ -4,7 +4,7 @@
  */
 import type { Dispatch, SetStateAction } from 'react';
 import { formatDateTime } from '../../../utils/formatDate';
-import { creditTxLabel } from '../../../constants/credit';
+import { creditTxView } from '../../../constants/credit';
 import type { ModalState } from '../admin-types';
 import { ADMIN_TABLE_ONELINE, AdminLongText } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
 
@@ -280,15 +280,15 @@ export default function CreditsTab(props: CreditsTabProps) {
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">사용 이력이 없습니다.</td></tr>
                     ) : (
                       creditTxAll.map((tx) => {
-                        // ★ 2026-08-13 환불(refund)도 잔액이 늘어나는 축 — CreditHistoryModal isPlus와 같은 기준.
-                        const plus = tx.type === 'grant' || tx.type === 'purchase' || tx.type === 'postpaid_grant' || tx.type === 'refund';
+                        // ★ 2026-11-01 크레딧 컨트롤타워 C5 — 부호 · 숫자 · 색 = 원장 뜻 함수 하나(고객 창과 같다 · P9 일할 「-8」 · 리셋 빨간 마이너스 해소).
+                        const view = creditTxView(tx);
                         const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
                         return (
                           <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
                             <td className="px-4 py-2 text-gray-900"><AdminLongText text={tx.company_name} max={180} label="회사" /></td>
-                            <td className="px-4 py-2 text-gray-700">{creditTxLabel(tx.type, tx.source)}</td>
+                            <td className="px-4 py-2 text-gray-700">{view.label}</td>
                             <td className="px-4 py-2 text-gray-600">{tx.created_by_name || '자동'}</td>
-                            <td className={`px-4 py-2 text-right font-semibold ${plus ? 'text-emerald-600' : 'text-rose-600'}`}>{plus ? '+' : '-'}{Number(tx.amount).toLocaleString()}</td>
+                            <td className={`px-4 py-2 text-right font-semibold ${view.tone === 'month' || view.tone === 'zero' ? 'text-cyan-600' : view.tone === 'plus' ? 'text-emerald-600' : 'text-rose-600'}`}>{view.sign}{Math.abs(view.delta).toLocaleString()}</td>
                             <td className="px-4 py-2 text-right text-gray-500">{after.toLocaleString()}</td>
                             <td className="px-4 py-2 text-right text-gray-400 whitespace-nowrap">{formatDateTime(tx.created_at)}</td>
                           </tr>

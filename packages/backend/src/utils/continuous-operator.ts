@@ -51,7 +51,7 @@ import { objectiveForRounds } from './automarketing-interview';
 import { buildLineEventText } from './one-line-facts';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
 import { InsufficientCreditError, deductCreditSafe, deductCreditOutcome, hasCreditForStrict, refundCredit } from './ai-credit';
@@ -1707,11 +1707,12 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       const passedTestedRaw = spamResult.passedVariantId ? tested.find((v) => v.variantId === spamResult.passedVariantId) : undefined;
       const passedIndex = passedTestedRaw && spamVerdictOf(passedTestedRaw as any, Number(spamResult.totalTestCount ?? 1)) === 'pass' ? letterIndex(spamResult.passedVariantId) : null;
       const firstTested = tested[0];
-      // 최종 판정 = 통과 안이 있으면 통과 · 없으면 차단이 하나라도 있으면 차단 · 그 밖은 1안의 판정
+      // 최종 판정 = 통과 안이 있으면 통과 · 없으면 대안 합산(차례 검사와 같은 뜻 · ★ 1101 Codex 구현 1R #3: 확인 중 · 검사 중인 안이 있으면 그 판정 = 보류 · 차단 안보다 먼저)
+      //   그 밖(장애)은 1안의 원값(판정이 통과가 아닌데 원값이 pass 면 통과로 접지 않는다)
+      const altVerdict = mergeAlternativeVerdicts(tested.map((v) => spamVerdictOf(v as any, Number(spamResult.totalTestCount ?? 1))));
       const finalResult = (passedIndex != null ? 'pass'
-        : tested.some((v) => spamVerdictOf(v as any, Number(spamResult.totalTestCount ?? 1)) === 'blocked') ? 'blocked'
-          // 판정이 통과가 아닌데 원값이 pass 면(검사 장애) 통과로 접지 않는다
-          : (firstTested?.spamResult && firstTested.spamResult !== 'pass' ? firstTested.spamResult : 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout';
+        : isSpamHold(altVerdict) || altVerdict === 'blocked' ? altVerdict
+          : (firstTested?.spamResult && firstTested.spamResult !== 'pass' ? firstTested.spamResult : 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending';
       const regenCount = firstTested?.regenerateCount || 0;
       if (isFixedCopy && !cachedPass) {
         await recordFixedCopySpam(operator.id, fixedHash, finalResult)
@@ -1768,7 +1769,15 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
         [proposalRes.rows[0].id, finalResult, regenCount, outcome.reason],
       );
 
-      if (outcome.status === 'admin_review') {
+      if (outcome.hold) {
+        // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 자동 발송만 보류(담당자 검토) · 운영자 정지 · 정지 알림 없음(차단 아님)
+        await query(
+          `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL, auto_execute_reason = $2
+           WHERE id = $1::uuid AND status = 'scheduled' AND reviewed_at IS NULL`,
+          [proposalRes.rows[0].id, outcome.reason],
+        );
+        console.log(`[ContinuousOperator] ${operator.name} 스팸 검사 ${finalResult === 'pending' ? '진행 중' : '확인 중'} → 자동 발송 보류(정지 없음)`);
+      } else if (outcome.status === 'admin_review') {
         // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단 + scheduled 해제, 자동 폐기 X)
         //   ★ Codex 1R — 검사 중 사람이 승인·중지했으면(reviewed_at · 상태 변경) 그 판단을 덮지 않고 정지·통지도 하지 않는다.
         const downgraded = await query(
@@ -2200,7 +2209,8 @@ export async function recheckOpenProposals(operatorId: string, companyId: string
           : `UPDATE operator_proposals
                 SET proposal_json = jsonb_set(proposal_json, '{systemRecheck,result}', to_jsonb($3::text), true)
               WHERE id = $1::uuid AND proposal_json->'systemRecheck'->>'token' = $2`,
-        passed ? [row.id, token, final.fingerprint, final.variantIndex] : [row.id, token, check.verdict === 'blocked' ? 'blocked' : 'unchecked'],
+        // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 'checking'(화면 = 다시 검사 중 · 10분 뒤 다시 잡을 수 있다) · 장애만 'unchecked'
+        passed ? [row.id, token, final.fingerprint, final.variantIndex] : [row.id, token, check.verdict === 'blocked' ? 'blocked' : isSpamHold(check.verdict) ? 'checking' : 'unchecked'],
       ).catch((e: any) => console.warn(`[ContinuousOperator Recheck] ${row.id} 결과 기록 경고:`, e?.message));
     })();
   }
@@ -4145,7 +4155,8 @@ async function scheduleSequenceReminder(
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error('spam-verify-timeout')), 5 * 60 * 1000)),
       ]), { label: `ContinuousOperator Sequence ${reminderId}` });
       spamPassed = check.verdict === 'pass';
-      spamUnchecked = check.verdict === 'error';
+      // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 「검사를 마치지 못함」 갈래(미통과로 적지 않는다 · 사람이 검사 · 승인)
+      spamUnchecked = check.verdict === 'error' || isSpamHold(check.verdict);
       spamNote = check.raw;
     } catch (e: any) {
       console.warn('[ContinuousOperator Sequence] 리마인드 스팸 검증 예외:', e?.message);

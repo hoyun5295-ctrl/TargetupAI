@@ -55,22 +55,24 @@ describe('R192 · R194 운영자', () => {
     const tx = src('ai-credit-tx.ts');
     expect(tx).toContain('export function creditOverageAllowance(row: any, source: string): number {');
     expect(tx).toContain('const overageAllowed = creditOverageAllowance(row, opts.source);');
-    expect(tx).toContain('export function carriedBaseOnReset(row: any): number {');
-    expect(tx).toContain('const carriedBase = carriedBaseOnReset(row);');
+    // ★ 2026-11-01 크레딧 컨트롤타워 C7 — 월 리셋 뒤 기본분 = 차감과 같은 월 마감 계산(쓰기 없이) 한 함수
     const c = src('ai-credit.ts');
     const b = between(c, 'export async function hasCreditForStrict(', '\n}\n');
     expect(b).toContain('const row = await loadCreditRow(pool, companyId, false);');
     expect(b).not.toContain('catch');
+    expect(b).toContain('const base = await projectBaseAfterClose(pool, companyId, row, new Date());');
     expect(b).toContain('return (base + purchased) - cost >= -creditOverageAllowance(row, source);');
-    const { creditOverageAllowance, carriedBaseOnReset } = await import('../ai-credit-tx');
+    const { creditOverageAllowance } = await import('../ai-credit-tx');
     // ★ 2026-10-24 X1 — 자동 마케팅 회차 발송 = 마이너스 0(선불 · 후불) · 그 외 = 후불 한도(선불 0)
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'postpaid', overage_limit: 1000 }, 'continuous-operator-send')).toBe(0);
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'postpaid', overage_limit: 1000 }, 'ai-operator-explain')).toBe(1000);
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'prepaid', overage_limit: 1000 }, 'ai-operator-explain')).toBe(0);
-    // 월 리셋 = 기본분 + (선불만) 지난달 음수 상계
-    expect(carriedBaseOnReset({ plan_credits: 100, base: -30, billing_type: 'prepaid' })).toBe(70);
-    expect(carriedBaseOnReset({ plan_credits: 100, base: -30, billing_type: 'postpaid' })).toBe(100);
-    expect(carriedBaseOnReset({ plan_credits: 100, base: 40, billing_type: 'prepaid' })).toBe(100);
+    // 월 마감 = 다음 달 E + (선불만) 지난달 음수 넘김 · 양수 소멸(같은 순수 함수 · ai-credit-month-1101.test.ts 가 표 전부)
+    const { simulateClose } = await import('../ai-credit-month');
+    const one = (billingType: string, base: number) => simulateClose({ base, billingType, months: [{ month: '2026-10', trialAtEnd: false, nextEntitlement: 100, overageRecorded: 0 }] }).base;
+    expect(one('prepaid', -30)).toBe(70);
+    expect(one('postpaid', -30)).toBe(100);
+    expect(one('prepaid', 40)).toBe(100);
   });
   it('다음 회차 생성의 미처리 만료가 리마인드를 건드리지 않는다', () => {
     const o = src('continuous-operator.ts');

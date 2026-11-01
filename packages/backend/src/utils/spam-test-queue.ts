@@ -20,10 +20,11 @@ import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { unsupportedSmsCharCodes } from './sms-charset';
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql, deliveredUnreportedResult } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
+import { KST_TODAY_START_SQL } from './stats-aggregation';
 // ★ 2026-09-26 한줄로 V2 F49 — 무료 자동 검사 표시값·자동 판정(청구 제외 판정 CT와 한 벌)
 import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource } from './spam-trial';
 
@@ -74,11 +75,18 @@ export interface SpamTestEnqueueParams {
   variantId?: string;
   batchId?: string;
   skipPrepaid?: boolean;
+  /**
+   * ★ 2026-11-01 B1-4(J15) — 같은 검사 이어 보기(spamCheckFor). 참이면 같은 키 · 같은 한국 날짜의 검사가 진행 중 · 확인 중 · 통과 · 차단이면
+   *   새로 걸지 않고 그 검사를 돌려준다(차감 0 · reused). 장애로 끝났으면 새 검사. 사람이 누른 수동 검사는 넘기지 않는다(늘 새 검사).
+   */
+  reuseSameDay?: boolean;
 }
 
 export interface SpamTestEnqueueResult {
   ok: boolean;
   testId?: string;
+  /** ★ 2026-11-01 B1-4 — 오늘 같은 키의 검사를 이어 본다(새 검사 · 차감 0) */
+  reused?: boolean;
   error?: string;
   errorCode?: string;
   insufficientBalance?: boolean;
@@ -93,7 +101,7 @@ export interface SpamTestBatchResult {
     variantId: string;
     testId: string;
     status: string;
-    overallResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'pending';
+    overallResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'pending' | 'unconfirmed';
     carrierResults: Array<{
       carrier: string;
       messageType: string;
@@ -114,7 +122,7 @@ export interface AutoSpamTestResult {
     variantId: string;
     messageText: string;
     subject?: string;
-    spamResult: 'pass' | 'blocked' | 'failed' | 'timeout';
+    spamResult: AutoSpamVerdict;
     carrierResults: Array<{
       carrier: string;
       messageType: string;
@@ -288,7 +296,11 @@ export async function resolveSpamReportTest(o: {
     if (sameText.rows.length > 0) {
       const own = sameText.rows[0];
       // 그 문자의 검사는 이것이다. 고칠 수 있는 때가 지났으면 무시한다 — 다른 검사로 넘어가지 않는다
-      if (own.correctable !== true) return null;
+      if (own.correctable !== true) {
+        // ★ 2026-11-01 B1-4(R36) — 판정이 굳은 뒤 닿은 수신 = 「확정 뒤 수신」 기록(판정은 그대로 · 하루 측정이 세어 경보 · 칸 없으면 건너뜀)
+        await noteAfterDecidedReport(String(own.id), o.devicePhone, o.carrier, o.messageType).catch(() => undefined);
+        return null;
+      }
       return { testId: String(own.id), late: own.status !== 'active', via: 'hash' };
     }
   }
@@ -314,6 +326,134 @@ export async function resolveSpamReportTest(o: {
 // ★ D103: 인라인 getTestSmsTable/insertSmsQueue 삭제 → sms-queue.ts CT-04 컨트롤타워(getTestSmsTables, insertTestSmsQueue) 사용
 
 // ============================================================
+// ★ 2026-11-01 여정 재발 방지 B1-4 — 결과 행 판정 기록 · 같은 검사 이어 보기
+//   설계서 docs/2026-11-01-journey-recurrence-prevention-design.md §2 B1-4 · §4 DDL-B
+// ============================================================
+
+/** DDL-B 칸(first_result · decided_at · late_report_at) 유무 — 참은 기억 · 거짓은 5분 뒤 다시(칸이 없으면 기록만 건너뛴다 · 판정은 그대로) */
+let _stampReady = false;
+let _stampAbsentUntil = 0;
+export async function spamStampReady(): Promise<boolean> {
+  if (_stampReady) return true;
+  if (Date.now() < _stampAbsentUntil) return false;
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.columns
+      WHERE table_name = 'spam_filter_test_results' AND column_name IN ('first_result', 'decided_at', 'late_report_at')`,
+  );
+  const ok = Number(r.rows[0]?.n || 0) === 3;
+  if (ok) _stampReady = true;
+  else _stampAbsentUntil = Date.now() + 5 * 60_000;
+  return ok;
+}
+/** 시험 전용 */
+export function resetSpamStampCache(value?: boolean): void {
+  _stampReady = value === true;
+  _stampAbsentUntil = value === false ? Date.now() + 5 * 60_000 : 0;
+}
+
+/**
+ * 아직 판정 안 된 행에 처음 판정을 쓴다(큐 · 수동 라우트 공용 · 옛 SPAM_RESULT_DECIDE_SQL 자리 전부). 쓴 행 수를 돌려준다.
+ *   칸이 있으면 처음 판정(first_result)과 최종 확정 시각(decided_at · 확인 중은 최종이 아니다)을 함께 남긴다 — 늦은 보고 · 확인 문자가
+ *   뒤에 덮어써도 「처음에 확인 중이었다」가 남는다(오탐률 측정 R36).
+ */
+export async function decideSpamResult(result: string, rowId: string): Promise<number> {
+  const stamped = await spamStampReady().catch(() => false);
+  const r = await query(
+    stamped
+      ? `UPDATE spam_filter_test_results
+            SET result = $1::varchar, first_result = $1::varchar,
+                decided_at = CASE WHEN $1::varchar = '${SPAM_RESULT.UNCONFIRMED}' THEN NULL ELSE NOW() END
+          WHERE id = $2 AND received = false AND result IS NULL`
+      : SPAM_RESULT_DECIDE_SQL,
+    [result, rowId],
+  );
+  return r.rowCount ?? 0;
+}
+
+/**
+ * 확인 중(unconfirmed) 행을 최종으로 닫는다 — 확인 문자 수신 = blocked · 확인 문자 없음 · 단말 확인 불가 = error.
+ *   조건부 UPDATE(WHERE result = 'unconfirmed') — 늦은 보고(통과로 고침)와 엇갈려도 한쪽만 쓴다. 쓴 행 수를 돌려준다.
+ */
+export async function noteAfterDecidedReport(testId: string, phone: string, carrier: string, messageType: string): Promise<void> {
+  if (!(await spamStampReady())) return;
+  await query(
+    `UPDATE spam_filter_test_results SET late_report_at = COALESCE(late_report_at, NOW())
+      WHERE test_id = $1 AND phone = $2 AND carrier = $3 AND message_type = $4 AND received = false`,
+    [testId, phone, carrier, messageType],
+  );
+}
+
+export async function decideUnconfirmed(resultId: string, final: 'blocked' | 'error'): Promise<number> {
+  const stamped = await spamStampReady().catch(() => false);
+  const r = await query(
+    `UPDATE spam_filter_test_results SET result = $2${stamped ? ', decided_at = NOW()' : ''}
+      WHERE id = $1 AND result = '${SPAM_RESULT.UNCONFIRMED}'`,
+    [resultId, final],
+  );
+  return r.rowCount ?? 0;
+}
+
+/**
+ * 검사 한 건의 지금 결과(순수) — 이어 보기 · 여정 보내기 전 검사가 읽는 한 곳.
+ *   blocked = 막힘 확정 행이 있다 · pending = 아직 끝나지 않았다 · unconfirmed = 끝났지만 확인 중 행이 있다(확인 문자가 닫는다) ·
+ *   pass = 결과 행 전부 통과 · error = 그 밖(결과 0행 · 시간 초과 · 발송 실패 · 단말 확인 불가).
+ */
+export function spamTestOutcomeOf(status: string, results: ReadonlyArray<{ result?: string | null }>): SpamVerdict {
+  if (results.some((r) => r.result === SPAM_RESULT.BLOCKED)) return 'blocked';
+  if (status !== 'completed') return 'pending';
+  if (results.length === 0) return 'error';
+  if (results.some((r) => r.result === SPAM_RESULT.UNCONFIRMED)) return 'unconfirmed';
+  return results.every((r) => r.result === SPAM_RESULT.PASS) ? 'pass' : 'error';
+}
+
+/** SQL 실행자(기본 = 풀 · 트랜잭션 안에서는 그 연결을 넘긴다 — 잠금을 쥔 채 풀 연결을 하나 더 기다리지 않게 · Codex 구현 2R #1) */
+type SqlRun = (sql: string, params?: any[]) => Promise<{ rows: any[] }>;
+
+/** 검사 한 건을 읽어 지금 결과 + 통신사별 행(spamTestOutcomeOf) */
+export async function readSpamTestOutcome(testId: string, run: SqlRun = query): Promise<{ outcome: SpamVerdict; carrierResults: Array<{ carrier: string; messageType: string; result: string | null }> }> {
+  const t = await run(`SELECT status FROM spam_filter_tests WHERE id = $1`, [testId]);
+  const rows = await run(`SELECT carrier, message_type, result FROM spam_filter_test_results WHERE test_id = $1 ORDER BY carrier, message_type`, [testId]);
+  const carrierResults = rows.rows.map((r: any) => ({ carrier: String(r.carrier), messageType: String(r.message_type), result: r.result ?? null }));
+  return { outcome: t.rows[0] ? spamTestOutcomeOf(String(t.rows[0].status), carrierResults) : 'error', carrierResults };
+}
+
+/** 같은 검사 키의 트랜잭션 잠금 이름(등록 함수 한 곳만 잡는다) */
+export function spamCheckLockKey(k: SpamCheckKey): string {
+  return `spam-check:${k.companyId}:${String(k.callback || '').replace(/\D/g, '')}:${k.hash}:${k.msgType}:${k.subject ?? ''}`;
+}
+
+/** 같은 검사의 키 — 회사 · 회신번호(숫자만) · 치환 뒤 발송 꼴 글 해시 · 유형(SMS · LMS) · 제목 */
+export interface SpamCheckKey {
+  companyId: string;
+  callback: string;
+  hash: string;
+  msgType: 'SMS' | 'LMS';
+  subject: string | null;
+}
+
+/**
+ * ★ 2026-11-01 B1-4(J15 · Codex 설계 1R #1) — 같은 키 · 같은 한국 날짜의 가장 최근 검사와 그 지금 결과. 없으면 null.
+ *   부르는 쪽: 진행 중 · 확인 중 = 새로 걸지 않고 기다림 · 통과 · 차단 = 재사용 · 장애 = 새 검사(장애 재시도 상한은 부르는 쪽 기존 규칙).
+ *   ⛔ 날짜를 넘기면 새 검사(통신사 필터는 날마다 바뀐다) · 제목을 모르는 옛 장문 검사는 재사용에서 빠진다(IS NOT DISTINCT FROM).
+ */
+export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query): Promise<{ testId: string; status: string; createdAt: Date; outcome: SpamVerdict } | null> {
+  if (!k.hash) return null;
+  const found = await run(
+    `SELECT t.id, t.status, t.created_at FROM spam_filter_tests t
+      WHERE t.company_id = $1 AND REPLACE(t.callback_number, '-', '') = $2 AND t.message_hash = $3
+        AND t.created_at >= ${KST_TODAY_START_SQL}
+        AND t.subject IS NOT DISTINCT FROM $5
+        AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
+      ORDER BY t.created_at DESC LIMIT 1`,
+    [k.companyId, String(k.callback || '').replace(/\D/g, ''), k.hash, k.msgType, k.subject || null],
+  );
+  const t = found.rows[0];
+  if (!t) return null;
+  const { outcome } = await readSpamTestOutcome(String(t.id), run);
+  return { testId: String(t.id), status: String(t.status), createdAt: t.created_at, outcome };
+}
+
+// ============================================================
 // [1] 큐에 스팸 테스트 등록
 // ============================================================
 /**
@@ -337,7 +477,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
     firstRecipient: clientFirstRecipient,
-    source = 'manual', variantId, batchId, skipPrepaid = false,
+    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false,
   } = params;
 
   try {
@@ -359,6 +499,21 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const spamAddressBookFields = callbackNumber ? { callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
     const personalizedForHash = replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
     const messageHash = computeMessageHash(personalizedForHash);
+
+    // ★ 2026-11-01 B1-4(J15) — 같은 키 · 같은 날 검사가 진행 중 · 확인 중 · 통과 · 차단이면 그 검사를 이어 본다(새 검사 · 차감 0)
+    //   여기는 빠른 길(잠금 없음) · 동시에 같은 키 둘이 「없음」을 보면 아래 트랜잭션이 키 잠금 아래에서 다시 찾는다(Codex 구현 1R #1 · 이중 차감 0)
+    const checkKey: SpamCheckKey | null = reuseSameDay && messageHash
+      ? { companyId, callback: callbackNumber, hash: messageHash, msgType: isLmsType ? 'LMS' : 'SMS', subject: (isLmsType ? subject : '') || null }
+      : null;
+    const reusable = async (run?: SqlRun) => {
+      const same = checkKey ? await spamCheckFor(checkKey, run) : null;
+      return same && same.outcome !== 'error' ? same : null;
+    };
+    const early = await reusable();
+    if (early) {
+      console.log(`[SpamTestQueue] 같은 검사 이어 보기 — testId=${early.testId}, outcome=${early.outcome}, source=${source}`);
+      return { ok: true, testId: early.testId, reused: true };
+    }
 
     // 2) 디바이스 조회 + 발송 건수 계산
     const devices = await query(
@@ -415,6 +570,17 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     let testId = '';
     try {
       await client.query('BEGIN');
+      if (checkKey) {
+        // 같은 키 = 트랜잭션 잠금 하나(회사 잠금보다 먼저 · 같은 키를 잡는 길은 이 순서 하나) → 앞 요청이 커밋한 검사를 다시 찾는다
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [spamCheckLockKey(checkKey)]);
+        // 다시 찾기 = 이 연결로(잠금을 쥔 채 풀에서 연결을 더 기다리지 않는다 · READ COMMITTED = 앞 요청이 커밋한 검사가 보인다)
+        const late = await reusable((sql, params) => client.query(sql, params));
+        if (late) {
+          await client.query('ROLLBACK');
+          console.log(`[SpamTestQueue] 같은 검사 이어 보기(잠금 뒤) — testId=${late.testId}, outcome=${late.outcome}, source=${source}`);
+          return { ok: true, testId: late.testId, reused: true };
+        }
+      }
       if (!skipPrepaid) await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
       const testResult = await client.query(
         `INSERT INTO spam_filter_tests
@@ -758,8 +924,9 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
                 result = null;
               } else if (spamBlockedDue({ nowMs: Date.now(), startedAtMs: activatedAt, successSeenAtMs: qtmsgSuccessTime.get(rowKey), graceMs })) {
                 // ★ 2026-10-02 유예 + 검사 시작 뒤 45초가 지나야 확정한다(늦게 닿는 보고를 기다린다)
-                result = SPAM_RESULT.BLOCKED;
-                console.log(`[SpamTestQueue] BLOCKED — testId=${testId}, phone=${row.phone}, grace=${graceMs}ms, 시작 뒤 ${Math.round((Date.now() - activatedAt) / 1000)}초`);
+                // ★ 2026-11-01 B1-4 — 차단이 아니라 「확인 중」(전달 성공 + 보고 없음 · 확인 문자가 차단 · 장애를 가른다)
+                result = deliveredUnreportedResult();
+                console.log(`[SpamTestQueue] UNCONFIRMED — testId=${testId}, phone=${row.phone}, grace=${graceMs}ms, 시작 뒤 ${Math.round((Date.now() - activatedAt) / 1000)}초`);
               } else {
                 result = null;
               }
@@ -771,8 +938,8 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
 
             if (result) {
               // ★ 2026-09-29 차수 5 — 아직 판정 안 된 행만(CT) · 이번에 쓴 때만 환불 신호
-              const w = await query(SPAM_RESULT_DECIDE_SQL, [result, row.id]);
-              if ((w.rowCount ?? 0) > 0 && result === SPAM_RESULT.FAILED) wroteFailed = true;
+              const w = await decideSpamResult(result, row.id);
+              if (w > 0 && result === SPAM_RESULT.FAILED) wroteFailed = true;
             }
           }
         } finally {
@@ -802,8 +969,9 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
           clearInterval(pollInterval);
           for (const row of remaining.rows) {
             const rowKey = row.id;
-            const finalResult = qtmsgSuccessTime.has(rowKey) ? SPAM_RESULT.BLOCKED : SPAM_RESULT.TIMEOUT;
-            await query(SPAM_RESULT_DECIDE_SQL, [finalResult, row.id]);
+            // ★ 2026-11-01 B1-4 — 전달 성공 + 보고 없음 = 확인 중(공용 판정) · 통신사 결과조차 없음 = 시간 초과
+            const finalResult = qtmsgSuccessTime.has(rowKey) ? deliveredUnreportedResult() : SPAM_RESULT.TIMEOUT;
+            await decideSpamResult(finalResult, row.id);
           }
           await query(
             `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -877,7 +1045,7 @@ export async function getSpamTestBatchResults(batchId: string): Promise<SpamTest
     const carrierResults = resultsByTest.get(String(test.id)) || [];
 
     // 전체 결과 판정
-    let overallResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'pending' = 'pending';
+    let overallResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'pending' | 'unconfirmed' = 'pending';
     if (test.status === 'completed' || test.status === 'active') {
       const allResults = carrierResults.map(r => r.result).filter(Boolean);
       // ★ 2026-09-26 한줄로 V2 F48 — 판정 대기(NULL) 통신사를 버리지 않는다. 차단 판정은 유예(수십 초) 뒤라 통과 리포트(수 초)보다
@@ -886,6 +1054,9 @@ export async function getSpamTestBatchResults(batchId: string): Promise<SpamTest
       const hasUnjudged = carrierResults.some(r => !r.result);
       if (allResults.some(r => r === SPAM_RESULT.BLOCKED)) {
         overallResult = 'blocked';
+      } else if (allResults.some(r => r === SPAM_RESULT.UNCONFIRMED)) {
+        // ★ 2026-11-01 B1-4 — 확인 중 행이 있으면 묶음도 확인 중(차단 · 통과 아님 · 확인 문자가 닫는다)
+        overallResult = 'unconfirmed';
       } else if (hasUnjudged) {
         overallResult = test.status === 'active' ? 'pending' : 'timeout';
       } else if (allResults.length === 0) {
@@ -896,6 +1067,8 @@ export async function getSpamTestBatchResults(batchId: string): Promise<SpamTest
         overallResult = 'timeout';
       } else if (allResults.every(r => r === SPAM_RESULT.PASS)) {
         overallResult = 'pass';
+      } else {
+        overallResult = 'failed';   // ★ 2026-11-01 B1-4 — 그 밖의 값(검사폰 확인 불가 error) = 검사 장애(통과 · 대기 아님)
       }
     }
 
@@ -940,19 +1113,24 @@ async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUT
           const allResults = results.rows.map((r: any) => r.result).filter(Boolean);
           if (allResults.some(r => r === SPAM_RESULT.BLOCKED)) {
             resolve('blocked');
+          } else if (allResults.some(r => r === SPAM_RESULT.UNCONFIRMED)) {
+            resolve('unconfirmed');   // ★ 2026-11-01 B1-4
           } else if (allResults.some(r => r === SPAM_RESULT.FAILED)) {
             resolve('failed');
           } else if (allResults.some(r => r === SPAM_RESULT.TIMEOUT)) {
             resolve('timeout');
-          } else {
+          } else if (allResults.length > 0 && allResults.every(r => r === SPAM_RESULT.PASS)) {
             resolve('pass');
+          } else {
+            resolve('failed');   // ★ 2026-11-01 B1-4 — 통과는 전부 pass 일 때만(결과 0행 · 새 값 = 장애)
           }
           return;
         }
 
         if (Date.now() - startTime > timeoutMs) {
           clearInterval(checkInterval);
-          resolve('timeout');
+          // ★ 2026-11-01 B1-4 — 기다림 만료 = 검사가 아직 진행 중(장애 아님) · 다음 회차에 같은 키로 이어 본다(spamCheckFor)
+          resolve('pending');
         }
       } catch (err) {
         console.error('[SpamTestQueue] 완료 대기 오류:', err);
@@ -965,10 +1143,25 @@ async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUT
 // [6] 자동 스팸테스트 + 재생성 통합 (AI route에서 호출)
 // ============================================================
 
-type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout';
+type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending';
 
-/** 검사 판정 3분할(통과 · 차단 · 검사 장애) */
-export type SpamVerdict = 'pass' | 'blocked' | 'error';
+/**
+ * 검사 판정(★ 2026-11-01 여정 재발 방지 B1-4 · 옛 3분할에 둘을 더함) — 통과 · 확인 중 · 기다림 · 차단 · 검사 장애.
+ *   unconfirmed = 통신사 전달 성공 + 앱 보고 없음(확인 문자가 차단 · 장애를 가른다) · pending = 같은 글의 오늘 검사가 아직 진행 중(같은 검사 이어 보기).
+ *   ⛔ 두 값 모두 자동 행동 0(재작성 · 정지 · 차감 · 발송 없음) · 장애 횟수에 세지 않는다 · 다음 회차에 같은 글로 다시 묻는다.
+ *   부르는 쪽은 switch + never 로 다섯 값을 모두 받는다(새 값이 생기면 tsc 가 빠진 자리를 잡는다).
+ */
+export type SpamVerdict = 'pass' | 'unconfirmed' | 'pending' | 'blocked' | 'error';
+
+/** 기다림 판정(확인 중 · 검사 중) — 자동 행동 0 갈래. 부르는 쪽은 이 갈래를 따로 받고, 통과 갈래 앞에 `satisfies` 로 남김없이 받았는지 tsc 에 맡긴다. */
+export function isSpamHold(v: SpamVerdict): v is 'pending' | 'unconfirmed' {
+  return v === 'pending' || v === 'unconfirmed';
+}
+
+/** 판정 값의 사람 말(서버 문장 · 기록) — Record 라 새 값이 생기면 tsc 가 빈 칸을 잡는다 */
+export const SPAM_VERDICT_WORD: Record<SpamVerdict, string> = {
+  pass: '통과', unconfirmed: '확인 중', pending: '검사 중', blocked: '차단', error: '검사 못 함',
+};
 
 /**
  * ★ 2026-10-24 검사 판정 한 곳(뿌리 대장 R7 · 1018 플래너 B6 판정을 공용으로 · docs/ROOT-LEDGER.md) — 순수.
@@ -983,12 +1176,15 @@ export function spamVerdictOf(
 ): SpamVerdict {
   if (!v) return 'error';
   if (v.spamResult === 'blocked') return 'blocked';
+  if (v.spamResult === 'unconfirmed') return 'unconfirmed';   // ★ 2026-11-01 B1-4
+  if (v.spamResult === 'pending') return 'pending';
   if (v.spamResult !== 'pass') return 'error';
   if (Number(totalTestCount) === 0) return 'pass';   // 시연 회사 — 검사 발송 0(아래 절단점)
   const results = Array.isArray(v.carrierResults) ? v.carrierResults : [];
   if (results.length === 0) return 'error';
-  if (results.some((r) => r?.result === 'timeout' || r?.result === 'failed' || !r?.result)) return 'error';
-  return 'pass';
+  if (results.some((r) => r?.result === 'unconfirmed')) return 'unconfirmed';
+  // ★ 2026-11-01 B1-4 — 통과 = 통신사 결과 전부 pass 일 때만(옛: 시간 초과 · 실패 · 빈 값만 장애로 골라 새 값 error 가 통과로 샜다)
+  return results.every((r) => r?.result === 'pass') ? 'pass' : 'error';
 }
 
 /** 검사 장애 때 다시 검사하는 횟수 상한 · 사이 쉼(★ 2026-10-25 원장 #18 · #19) */
@@ -1025,6 +1221,16 @@ export async function spamVerdictWithRetry(
 }
 
 /**
+ * ★ 2026-11-01 B1-4(Codex 구현 1R #3) — 대안 여럿(어느 하나만 통과하면 되는 안)의 판정 하나 · 차례 검사(sequenceSpamVariants)와 같은 뜻.
+ *   통과 > 확인 중 > 검사 중 > 차단 > 장애 — 통과 안이 없어도 확인 중 · 검사 중인 안이 있으면 그 안이 아직 통과할 수 있다(정지 · 재작성 0).
+ *   판 여럿을 모두 보내는 쪽(켜기 검증 · 보내기 전 검사)은 mergeSpamVerdicts(전부 통과일 때만 통과)를 쓴다.
+ */
+export function mergeAlternativeVerdicts(vs: readonly SpamVerdict[]): SpamVerdict {
+  for (const v of ['pass', 'unconfirmed', 'pending', 'blocked'] as const) if (vs.includes(v)) return v;
+  return 'error';
+}
+
+/**
  * ★ 2026-10-03 안을 차례로 검사하고 첫 통과에서 멈춘다(순수 · 검사·재생성은 주입) — 임은지 접수
  * 「1안이 스팸에 걸리면 2안·3안을 자동으로 검사해 통과한 문안으로 승인 문자」.
  *   1) 원안을 순서대로 검사 → 통과한 안에서 멈춘다(그 뒤 안은 검사하지 않는다).
@@ -1054,6 +1260,8 @@ export async function sequenceSpamVariants(p: {
       spamResult: r.spamResult, carrierResults: r.carrierResults, regenerated: false, regenerateCount: 0,
     });
     if (r.spamResult === 'pass') return { variants: out, passedVariantId: v.variantId, regenerateCount: 0 };
+    // ★ 2026-11-01 B1-4 — 기다림 · 확인 중 = 자동 행동 0(다음 안 검사 · 재생성 없음 · 다음 회차에 같은 글로 다시 묻는다)
+    if (r.spamResult === 'pending' || r.spamResult === 'unconfirmed') return { variants: out, passedVariantId: null, regenerateCount: 0 };
   }
   const first = out[0];
   const firstSrc = p.variants[0];
@@ -1151,6 +1359,7 @@ export async function autoSpamTestWithRegenerate(params: {
       variantId,
       batchId,
       skipPrepaid: true, // 자동 검사 = 요금제 무관 무료(자동마케팅 진입 = 유료 요금제 전부 · 사용량은 크레딧)
+      reuseSameDay: true, // ★ 2026-11-01 B1-4 — 같은 날 같은 글 = 이어 보기(대행 · 자동발송 · 상시 운영 · 플래너 공통)
     });
 
     if (!enqueueResult.ok) {

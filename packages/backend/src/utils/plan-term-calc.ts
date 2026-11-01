@@ -62,6 +62,25 @@ export function monthlyCharge(monthlyPrice: number | string | null | undefined):
   return { supply, vat, total: supply + vat };
 }
 
+/** (순수) 새 회사 첫 결제 · 다시 열기의 끝 = 그 달 말일(★ 2026-11-01 C11 · 그 뒤 연장은 1일부터 → periodEnd(1일) = 그 달 말일) */
+export function firstTermEnd(start: string): string | null {
+  if (!isYmd(start)) return null;
+  const [y, m] = start.split('-').map(Number);
+  return `${start.slice(0, 7)}-${String(daysInMonth(y, m)).padStart(2, '0')}`;
+}
+
+/**
+ * (순수) 한 달 안 일할 금액 = 월 공급가 × 구간 일수 ÷ 그 달 일수(원 미만 절사 1회) + 부가세(★ 2026-11-01 C11).
+ * 1일 ~ 말일이면 monthlyCharge 와 같다. 달을 넘는 구간 · 거꾸로 된 구간은 0(일할 결제는 한 달 안에서만 쓴다).
+ */
+export function proratedCharge(monthlyPrice: number | string | null | undefined, from: string, to: string): { supply: number; vat: number; total: number } {
+  if (!isYmd(from) || !isYmd(to) || from > to || from.slice(0, 7) !== to.slice(0, 7)) return { supply: 0, vat: 0, total: 0 };
+  const [y, m] = from.split('-').map(Number);
+  const supply = floorWon((Number(monthlyPrice) || 0) * daySpan(from, to) / daysInMonth(y, m));
+  const vat = vatOfSupply(supply);
+  return { supply, vat, total: supply + vat };
+}
+
 function covers(e: TermEvent, day: string): boolean {
   return !!e.covers_from && !!e.covers_to && e.covers_from <= day && day <= e.covers_to;
 }
@@ -81,10 +100,20 @@ export function planOfDay(events: TermEvent[], day: string): { planId: string | 
   return e ? { planId: e.plan_id, price: Number(e.monthly_price) || 0 } : null;
 }
 
-/** (순수) 그날의 일할 분모 = 그날을 산 구매 구간 일수. 구매가 아닌 구간(start·admin_adjust)은 그 달 실제 일수 */
+/**
+ * (순수) 그날의 일할 분모 = 그날을 산 구매 구간 일수. 구매가 아닌 구간(start·admin_adjust)은 그 달 실제 일수.
+ * ★ 2026-11-01 C11 — 한 달 안에서 말일까지 산 구매(새 회사 첫 결제 · 다시 열기 = 월 요금 × 남은 일수 ÷ 그 달 일수)는
+ *   그 달 일수가 분모다(구간 일수로 나누면 하루치가 부풀어 올림 차액을 더 받는다). 1일 ~ 말일은 둘이 같다.
+ */
 export function denomOfDay(events: TermEvent[], day: string): number {
   const p = latest(events, day, PURCHASE_EVENT_TYPES);
-  if (p && p.covers_from && p.covers_to) return daySpan(p.covers_from, p.covers_to);
+  if (p && p.covers_from && p.covers_to) {
+    if (p.covers_from.slice(0, 7) === p.covers_to.slice(0, 7) && p.covers_to === firstTermEnd(p.covers_from)) {
+      const [py, pm] = p.covers_from.split('-').map(Number);
+      return daysInMonth(py, pm);
+    }
+    return daySpan(p.covers_from, p.covers_to);
+  }
   const [y, m] = day.split('-').map(Number);
   return daysInMonth(y, m);
 }

@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Ban, ChevronRight, CircleCheck, Filter, Loader2, MailX, Receipt, ShieldCheck, X } from 'lucide-react';
 
-export type SendWarnVariant = 'none' | 'blocked' | 'running' | 'warn' | 'spell';
+export type SendWarnVariant = 'none' | 'blocked' | 'running' | 'checking' | 'warn' | 'spell';
 
 interface Props {
   open: boolean;
@@ -54,7 +54,7 @@ export default function SendSpamWarnModal({
         <div className="ds-dlg__head">
           {variant === 'blocked' ? (
             <span className="ds-dlg__ic ds-dlg__ic--rose"><Ban size={17} strokeWidth={2.2} /></span>
-          ) : variant === 'running' ? (
+          ) : variant === 'running' || variant === 'checking' ? (
             <span className="ds-dlg__ic ds-dlg__ic--stone"><Loader2 size={17} strokeWidth={2} className="animate-spin" /></span>
           ) : variant === 'spell' ? (
             <span className="ds-dlg__ic ds-dlg__ic--emerald">가</span>
@@ -66,6 +66,7 @@ export default function SendSpamWarnModal({
               {variant === 'none' && '발송 전에 스팸 검사를 하셨나요?'}
               {variant === 'blocked' && `이 문자는 ${carriersText}에서 막혔어요`}
               {variant === 'running' && '스팸 검사가 아직 끝나지 않았어요'}
+              {variant === 'checking' && `${carriersText} 결과를 확인하고 있어요`}
               {variant === 'warn' && '결과를 받지 못한 통신사가 있어요'}
               {variant === 'spell' && '맞춤법 고칠 곳이 남아 있어요'}
             </b>
@@ -73,6 +74,7 @@ export default function SendSpamWarnModal({
               {variant === 'none' && '정상 문자도 고객 스팸함으로 갈 수 있어요'}
               {variant === 'blocked' && '글을 고친 뒤 다시 검사해 보세요'}
               {variant === 'running' && '결과가 나온 뒤 보내면 막히는지 확인할 수 있어요. 1분 안에 끝나요.'}
+              {variant === 'checking' && '통신사는 문자를 보냈는데 검사폰 확인이 늦어요. 길어도 20분 안에 확정돼요.'}
               {variant === 'warn' && `${carriersText}의 결과가 오지 않았어요. 다시 검사해 보세요.`}
               {variant === 'spell' && '고친 뒤 보내면 받는 사람이 보는 글이 깔끔해져요.'}
             </small>

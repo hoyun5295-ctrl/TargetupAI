@@ -103,7 +103,7 @@ export default function PlanChangeModal({
               </p>
             </div>
             <p className="w-full rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left text-[13px] leading-relaxed text-white/75">
-              문자 직접 발송, 수신거부, 발송결과는 그대로 쓸 수 있습니다. 충전한 뒤 요금제 페이지에서 1개월 연장을 누르면 바로 다시 열립니다.
+              문자 직접 발송, 수신거부, 발송결과는 그대로 쓸 수 있습니다. 충전한 뒤 요금제 페이지에서 다시 열기를 누르면 바로 다시 열립니다.
             </p>
             <div className="mt-1 flex w-full flex-col gap-2">
               <button type="button" onClick={() => { onClose(); onGoPricing?.(); }}

@@ -11,7 +11,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   periodEnd, monthlyCharge, planOfDay, denomOfDay, upgradeCharge, upgradeRuns, currentTermEvents, lastPlanSetterPlanId,
-  daysLeft, decideSettle, decidePlanRequest, type TermEvent,
+  daysLeft, decideSettle, decidePlanRequest, firstTermEnd, proratedCharge, type TermEvent,
 } from '../plan-term-calc';
 
 describe('periodEnd — 달력 기준 1개월(D1)', () => {
@@ -220,5 +220,48 @@ describe('decidePlanRequest — 신청 승인 판정표(§5-2)', () => {
     const u = { ...active, managed: false };
     expect(decidePlanRequest({ ...u, target: pro }).kind).toBe('first_charge');
     expect(decidePlanRequest({ ...u, target: free }).kind).toBe('unhandled');
+  });
+});
+
+// ★ 2026-11-01 크레딧 컨트롤타워 C11(Harold 「새 회사만 1일 맞춤」) — 첫 결제 · 다시 열기 = 오늘 ~ 그달 말일 일할 → 다음 연장부터 1일
+describe('firstTermEnd · proratedCharge — 새 회사 첫 결제는 그달 말일까지 일할(C11)', () => {
+  it('끝 = 그달 말일', () => {
+    expect(firstTermEnd('2026-11-15')).toBe('2026-11-30');
+    expect(firstTermEnd('2026-11-01')).toBe('2026-11-30');
+    expect(firstTermEnd('2028-02-10')).toBe('2028-02-29');
+    expect(firstTermEnd('2026-13-01')).toBeNull();
+  });
+  it('1일 시작이면 한 달 값 = monthlyCharge 와 같다', () => {
+    expect(proratedCharge(150000, '2026-11-01', '2026-11-30')).toEqual({ supply: 150000, vat: 15000, total: 165000 });
+  });
+  it('11/15 ~ 11/30 = 16일 ÷ 30 → 80,000 + 8,000', () => {
+    expect(proratedCharge(150000, '2026-11-15', '2026-11-30')).toEqual({ supply: 80000, vat: 8000, total: 88000 });
+  });
+  it('말일 하루 = 5,000 + 500 · 2월(28일) 14일 = 75,000 + 7,500', () => {
+    expect(proratedCharge(150000, '2026-11-30', '2026-11-30')).toEqual({ supply: 5000, vat: 500, total: 5500 });
+    expect(proratedCharge(150000, '2026-02-15', '2026-02-28')).toEqual({ supply: 75000, vat: 7500, total: 82500 });
+  });
+  it('소수 월정액은 일할 뒤 원 미만 절사(99,999.99 × 16 ÷ 30 = 53,333.33 → 53,333 + 5,333)', () => {
+    expect(proratedCharge('99999.99', '2026-11-15', '2026-11-30')).toEqual({ supply: 53333, vat: 5333, total: 58666 });
+  });
+  it('구간이 달을 넘거나 거꾸로면 0(일할 결제는 한 달 안에서만)', () => {
+    expect(proratedCharge(150000, '2026-11-15', '2026-12-14')).toEqual({ supply: 0, vat: 0, total: 0 });
+    expect(proratedCharge(150000, '2026-11-20', '2026-11-15')).toEqual({ supply: 0, vat: 0, total: 0 });
+  });
+});
+
+describe('denomOfDay — 일할로 산 구간의 하루치 = 월 요금 ÷ 그 달 일수(C11 · SC32)', () => {
+  const events = [ev(1, 'first_charge', 'STARTER', 150000, '2026-11-15', '2026-11-30')];
+  it('같은 달 안 · 말일까지인 구매의 분모 = 그 달 일수(구간 일수 16 이 아니다)', () => {
+    expect(denomOfDay(events, '2026-11-20')).toBe(30);
+  });
+  it('그 구간 안 올림 차액 = 200,000 × 11 ÷ 30 = 73,333 + 7,333', () => {
+    expect(upgradeCharge(events, '2026-11-20', '2026-11-30', { planId: 'BASIC', price: 350000 })).toEqual({ supply: 73333, vat: 7333, total: 80666 });
+  });
+  it('1일 ~ 말일 구매 · 결제일 기준 구매는 지금 그대로(구간 일수)', () => {
+    const full = [ev(1, 'renew', 'STARTER', 150000, '2026-12-01', '2026-12-31')];
+    expect(denomOfDay(full, '2026-12-10')).toBe(31);
+    const anniversary = [ev(1, 'renew', 'STARTER', 150000, '2026-11-02', '2026-12-01')];
+    expect(denomOfDay(anniversary, '2026-11-10')).toBe(30);
   });
 });

@@ -135,7 +135,7 @@ function SpamBody({ d }: { d: SpamDetail }) {
                 <tr className="text-left text-xs text-gray-500">
                   <th className="px-3 py-2 font-medium whitespace-nowrap">통신사</th>
                   {g.types.map((t) => (
-                    <th key={t} className="px-3 py-2 font-medium whitespace-nowrap">{t === 'SMS' ? '단문(SMS)' : t === 'LMS' ? '장문(LMS)' : t}</th>
+                    <th key={t} className="px-3 py-2 font-medium whitespace-nowrap">{t}</th>
                   ))}
                 </tr>
               </thead>

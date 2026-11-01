@@ -472,7 +472,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
       if (!res.ok || !data.success) { toast.error(data?.error || '발송에 실패했습니다.'); return; }
       setSentCount(data.sent);
       // 실제로 접수된 문자 종류를 그대로 말한다(짧게를 골랐어도 90바이트를 넘으면 장문)
-      const kind = data.msgType === 'SMS' ? '단문(SMS)' : '장문(LMS)';
+      const kind = data.msgType === 'SMS' ? 'SMS' : 'LMS';
       toast.success(scheduledAtVal ? `${Number(data.sent).toLocaleString()}명 ${kind} 예약 완료.` : `${Number(data.sent).toLocaleString()}명에게 ${kind}로 발송했습니다. 열람 현황은 DM 카드의 [발송 추적]에서 확인하세요.`);
       // ★ 2026-07-02(5) 발송 완료 = 창 닫기 (Harold 지시) — 토스트는 z-9990이라 닫힌 뒤에도 표시됨
       onClose();
@@ -544,7 +544,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                       {/* ★ 2026-07-07(4) SMS 우선 옵션 — hlj.kr 단축링크(22자)로 90바이트 단문 발송 가능 (원가 절감) */}
                       <div className="flex items-center gap-1.5 mb-1.5">
                         <span className="text-[10px] text-slate-400">길이</span>
-                        {([['lms', 'LMS 여유 (80~250자)'], ['sms', 'SMS 짧게 (90바이트 안이면 단문 단가)']] as const).map(([v, label]) => (
+                        {([['lms', 'LMS 여유 (80~250자)'], ['sms', 'SMS 짧게 (90바이트 안이면 SMS 단가)']] as const).map(([v, label]) => (
                           <button
                             key={v}
                             onClick={() => setCopyLen(v)}
@@ -564,7 +564,7 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
                   {/* ★ 2026-09-12 (접수 `cmtwbdljp00a7jnlu4508oiik`) 문자 제목 — DM 제목과 별개로 정한다.
                       종전에는 DM 제목이 그대로 수신함에 찍혔다. 기본값이 DM 제목이라 안 고치면 종전과 같다. */}
                   <div>
-                    <label className="text-[11px] text-slate-500 mb-1 block">문자 제목 <span className="text-slate-400">{copyLen === 'sms' ? '(장문으로 나갈 때만 표시 · 90바이트 안 단문은 제목 없음)' : '(수신함에 표시)'}</span></label>
+                    <label className="text-[11px] text-slate-500 mb-1 block">문자 제목 <span className="text-slate-400">{copyLen === 'sms' ? '(LMS로 나갈 때만 표시 · 90바이트 안 SMS는 제목 없음)' : '(수신함에 표시)'}</span></label>
                     <div className="relative">
                       {isAd && (
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-fuchsia-700 pointer-events-none select-none">(광고)</span>

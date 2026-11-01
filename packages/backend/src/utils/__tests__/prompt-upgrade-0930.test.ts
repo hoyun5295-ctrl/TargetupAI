@@ -129,11 +129,11 @@ describe('WP2 배선 — 문안을 새로 쓰거나 다시 쓰는 AI 출구마�
     expect(has(SRC('utils', 'variant-generator.ts'), 'rewriteAddsFacts(')).toBe(true);
     expect(has(SRC('utils', 'operator-message-decorator.ts'), 'rewriteAddsFacts(')).toBe(true);
     expect(has(SRC('utils', 'dm', 'dm-quick-action.ts'), 'rewriteAddsFacts(')).toBe(true);
-    expect(has(SRC('utils', 'agency-send-refine.ts'), 'stripUnauthorizedBenefits(', 'findNewNumbers(', 'claimsInventedEfficacy(')).toBe(true);
-    expect(has(SRC('utils', 'inapp-quick-action.ts'), 'stripUnauthorizedBenefits(', 'rewriteAddsFacts(')).toBe(true);
+    expect(has(SRC('utils', 'agency-send-refine.ts'), 'findInventedBenefits(', 'findNewNumbers(', 'claimsInventedEfficacy(')).toBe(true);
+    expect(has(SRC('utils', 'inapp-quick-action.ts'), 'findInventedBenefits(', 'rewriteAddsFacts(')).toBe(true);
     const j = SRC('utils', 'journey-ai-generator.ts');
     expect((j.match(/findNewNumbers\(/g) || []).length).toBe(2);   // 다듬기 후보 + 자동 재작성
-    expect(has(SRC('utils', 'sns-caption-ai.ts'), 'stripUnauthorizedBenefits(', 'findNewNumbers(')).toBe(true);
+    expect(has(SRC('utils', 'sns-caption-ai.ts'), 'replaceInventedBenefits(', 'findNewNumbers(')).toBe(true);
   });
 });
 

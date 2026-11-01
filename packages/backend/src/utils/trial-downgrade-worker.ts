@@ -25,7 +25,8 @@
  */
 
 import pool, { query } from '../config/database';
-import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
+import { recordPlanChange, alertPlanChangeFailure, todayKst } from './plan-change-log';
+import { expireTrialLeftover } from './ai-credit-tx';
 
 function log(tag: string, ...args: any[]) {
   console.log(`[trial-downgrade][${tag}]`, ...args);
@@ -74,15 +75,14 @@ export const PAID_PLAN_DOWNGRADE_GUARD_WHERE = `
 export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   // FREE plan id 조회 (plans 캐시 대신 매번 조회 — plan_id 바뀔 위험 낮고 안전성 우선)
   const freeRes = await query(
-    `SELECT id, COALESCE(ai_credits_per_month, 0) AS base_credits FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
+    `SELECT id FROM plans WHERE plan_code = 'FREE' LIMIT 1`,
   );
   if (freeRes.rows.length === 0) {
     logErr('job', new Error('FREE plan 미존재'));
     return { downgraded: 0 };
   }
   const freePlanId = freeRes.rows[0].id;
-  // ★ 체험 잔여 AI 크레딧 제거 — 강등 시 base를 FREE 월 기본분(=0)으로 리셋. purchased(구매분)는 미변경.
-  const freeBaseCredits = Number(freeRes.rows[0].base_credits) || 0;
+  // ★ 체험 잔여 AI 크레딧 = 원장 CT 가 소멸한다(★ 2026-11-01 크레딧 컨트롤타워 C1 · 아래 expireTrialLeftover). purchased(구매분)는 미변경.
 
   // ★ TRIAL 카탈로그 이상 관측(2026-08-16 Codex 적대 1R medium 수용) — 술어의 plan 축은 EXISTS라
   //   행 수와 무관하게 안전하지만, 0행(축 무력화)·복수 행(카탈로그 오염)은 운영 결함이므로 경고로 드러낸다.
@@ -100,13 +100,14 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
   // plan_code·monthly_price는 유료 강등 금지 가드, plan_id는 동일 플랜(FREE→FREE) 이력 생략 판정용
   // (LEFT JOIN — plan 미배정도 행 유지).
   const targets = await query(
-    `SELECT companies.id, companies.company_name, companies.plan_id, p.plan_code, p.monthly_price
+    `SELECT companies.id, companies.company_name, companies.plan_id, p.plan_code, p.monthly_price,
+            to_char(companies.trial_expires_at, 'YYYYMMDD"T"HH24MISSUS') AS trial_key
        FROM companies
        LEFT JOIN plans p ON p.id = companies.plan_id
       WHERE ${TRIAL_DOWNGRADE_TARGET_WHERE}`,
   );
 
-  type TargetRow = { id: string; company_name: string; plan_id: string | null; plan_code: string | null; monthly_price: string | null };
+  type TargetRow = { id: string; company_name: string; plan_id: string | null; plan_code: string | null; monthly_price: string | null; trial_key: string | null };
   const rows: Array<{ id: string; company_name: string }> = [];
   for (const t of targets.rows as TargetRow[]) {
     // ★ 유료 플랜 강등 절대 금지 가드(경위 = 파일 상단 🔒 절) — 건너뛰고 경고만 남긴다.
@@ -125,10 +126,9 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
                 -- ★ 2026-07-28 만료일을 비운다. 남겨 두면 그 회사에 체험을 다시 줄 때
                 --   옛 만료일이 살아나 부여 즉시 만료 상태가 된다(WHERE는 갱신 전 값으로 판정되므로 안전).
                 trial_expires_at          = NULL,
-                ai_credits_base_remaining = $2,
-                ai_credits_reset_at       = NOW(),
+                -- ★ 2026-11-01 크레딧 컨트롤타워 C1 — 잔액 · 리셋 시각은 쓰지 않는다(아래 원장 CT 가 남은 체험 크레딧을 소멸)
                 updated_at                = NOW()
-          WHERE id = $3
+          WHERE id = $2
             AND ${TRIAL_DOWNGRADE_TARGET_WHERE}
             AND ${PAID_PLAN_DOWNGRADE_GUARD_WHERE}
             -- ★ 2026-08-16 Codex 적대 2R high 수용: 이력 생략 판정(아래 t.plan_id)은 조회 시점 값이다.
@@ -136,11 +136,16 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
             --   허위로 남는다(실FREE→FREE인데 기록). 관찰한 plan_id와 다르면 0행으로 스킵해
             --   판정과 갱신을 원자 결합한다 — 스킵된 행은 만료일·상태가 보존되므로 다음 실행이 재관측한다.
             --   (IS NOT DISTINCT FROM 전개형 — NULL(미배정)끼리도 일치로 본다)
-            AND (companies.plan_id = $4::uuid OR (companies.plan_id IS NULL AND $4::uuid IS NULL))
+            AND (companies.plan_id = $3::uuid OR (companies.plan_id IS NULL AND $3::uuid IS NULL))
         RETURNING id`,
-        [freePlanId, freeBaseCredits, t.id, t.plan_id],
+        [freePlanId, t.id, t.plan_id],
       );
       if (upd.rows.length > 0) {
+        // ★ 2026-11-01 C1 · I7 — 체험 끝 = 남은 양수 기본분 소멸(원장 먼저 · recordPlanChange 앞 · 키 = 갱신 전 만료 시각 · 상태 청소는 KST 날짜)
+        const creditNow = new Date();   // 사건 하나 = 시계 하나(소멸 · 이력 · 일할이 같은 달로 판정)
+        await expireTrialLeftover(client, t.id, t.trial_key
+          ? `trial-end:${t.id}:${t.trial_key}`
+          : `trial-end:${t.id}:cleanup:${todayKst(creditNow.getTime())}`, creditNow);
         // ★ 동일 플랜(이미 FREE)이면 플랜 변경 이력을 남기지 않는다(2026-08-16 Codex 적대 1R medium 수용).
         //   plan이 안 바뀌는 상태 청소(FREE+trial 잔존 29건 부류)에 trial_expire 경계를 쓰면 청구 구간
         //   소비처가 FREE→FREE 전이를 해석해야 하는 부담이 생긴다 — 사건이 없으면 기록도 없다.
@@ -155,6 +160,8 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
             toPlanId: freePlanId,
             changeType: 'trial_expire',
             reason: '무료체험 만료 자동 강등(trial-downgrade-worker)',
+            prevPlanIdHint: t.plan_id,
+            now: creditNow,
           });
         }
         await client.query('COMMIT');

@@ -933,7 +933,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                 넣으면 이렇게 바뀌어요 · {usableVars.map((t) => `%${t}% → ${aud.columns.find((x) => x.token === t)?.value ?? '빈칸'}`).join(' · ')}
               </p>
             )}
-            <p className="text-[11.5px] text-slate-500">%칼럼% 자리는 받는 사람마다 그 고객의 값으로 바뀌어요 · 채움 % = 이 대상 안에서 값이 있는 비율 · 30% 미만은 잠금{run.channel === 'SMS' ? ' · 칼럼이나 링크가 들어가면 장문(LMS)으로 보내요' : ''}</p>
+            <p className="text-[11.5px] text-slate-500">%칼럼% 자리는 받는 사람마다 그 고객의 값으로 바뀌어요 · 채움 % = 이 대상 안에서 값이 있는 비율 · 30% 미만은 잠금{run.channel === 'SMS' ? ' · 칼럼이나 링크가 들어가면 LMS로 보내요' : ''}</p>
             {amountBox}
             {boardError && <p className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-[12.5px] text-rose-800">{boardError}</p>}
           </div>

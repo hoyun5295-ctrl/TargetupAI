@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { X, Sparkles, ArrowDownRight, ArrowUpRight, RotateCcw, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
-import { creditTxLabel } from '../../constants/credit';
+import { creditTxView } from '../../constants/credit';
 
 /**
  * CreditHistoryModal — AI 크레딧 사용/충전 이력 모달 (D229+).
@@ -16,6 +16,7 @@ interface CreditTx {
   balance_base_after?: number;
   balance_purchased_after?: number;
   reason?: string | null;
+  overage_credits?: number | null;  // ★ 2026-11-01 환불 = 지난 주기 부채로 갚은 양(잔액 변동에서 뺀다) · 맞춤 줄 = 그 달 초과
   created_at: string;
   created_by_name?: string | null;  // 사용자명(시스템 자동 차감은 null → '자동' 표기)
 }
@@ -42,9 +43,8 @@ const fmtDate = (s: string) => {
   return `${d.getMonth() + 1}.${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-// ★ 2026-08-13 환불(refund) = 잔액이 늘어나는 축 — 마이너스로 표시하면 이력이 거짓말이 된다.
-const isPlus = (t: string) => t === 'grant' || t === 'purchase' || t === 'postpaid_grant' || t === 'refund';
-const isReset = (t: string) => t === 'reset';
+// ★ 2026-11-01 크레딧 컨트롤타워 C5 — 부호 · 숫자 · 색은 원장 뜻 함수 하나(creditTxView · 슈퍼관리자 표와 같다).
+//   옛: 화면마다 type 목록으로 +/- 를 정해 일할(+8)이 「-8」, 회수가 「--」, 리셋이 부호 없이 보였다(P9).
 
 export default function CreditHistoryModal({ onClose, onGoPricing, creditInfo }: Props) {
   const [rows, setRows] = useState<CreditTx[]>([]);
@@ -124,17 +124,17 @@ export default function CreditHistoryModal({ onClose, onGoPricing, creditInfo }:
             </div>
           ) : (
             rows.map((tx) => {
-              const plus = isPlus(tx.type);
-              const reset = isReset(tx.type);
+              const view = creditTxView(tx);
+              const month = view.tone === 'month' || view.tone === 'zero';
               const after = Number(tx.balance_base_after || 0) + Number(tx.balance_purchased_after || 0);
-              const Icon = reset ? RotateCcw : plus ? ArrowUpRight : ArrowDownRight;
-              const tone = reset ? 'text-cyan-600 bg-cyan-50' : plus ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50';
-              const amtTone = reset ? 'text-cyan-600' : plus ? 'text-emerald-600' : 'text-rose-600';
+              const Icon = month ? RotateCcw : view.tone === 'plus' ? ArrowUpRight : ArrowDownRight;
+              const tone = month ? 'text-cyan-600 bg-cyan-50' : view.tone === 'plus' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50';
+              const amtTone = month ? 'text-cyan-600' : view.tone === 'plus' ? 'text-emerald-600' : 'text-rose-600';
               return (
                 <div key={tx.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-gray-50">
                   <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${tone}`}><Icon className="h-4 w-4" /></div>
                   <div className="w-24 flex-shrink-0 min-w-0">
-                    <div className="truncate text-sm font-medium text-gray-800">{creditTxLabel(tx.type, tx.source)}</div>
+                    <div className="truncate text-sm font-medium text-gray-800">{view.label}</div>
                     <div className="truncate text-[11px] text-gray-400">{fmtDate(tx.created_at)}</div>
                   </div>
                   <div className="flex-1 min-w-0 px-2 text-center">
@@ -142,7 +142,7 @@ export default function CreditHistoryModal({ onClose, onGoPricing, creditInfo }:
                     {tx.reason ? <div className="truncate text-[10px] text-gray-400">{tx.reason}</div> : null}
                   </div>
                   <div className="flex-shrink-0 text-right">
-                    <div className={`text-sm font-bold tabular-nums ${amtTone}`}>{reset ? '' : plus ? '+' : '-'}{fmt(tx.amount)}</div>
+                    <div className={`text-sm font-bold tabular-nums ${amtTone}`}>{view.sign}{fmt(Math.abs(view.delta))}</div>
                     <div className="text-[10px] text-gray-400">잔여 {fmt(after)}</div>
                   </div>
                 </div>

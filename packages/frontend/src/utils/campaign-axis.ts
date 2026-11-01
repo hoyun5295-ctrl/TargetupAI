@@ -54,11 +54,14 @@ export function normalizeAiMessageChannel(raw: unknown): AiMessageChannel {
 /**
  * 메시지 유형 코드 → 표시명.
  * `F`는 옛 이름이 '친구톡'이었으나 그 상품은 폐지됐고 지금 실체는 브랜드메시지다.
+ * ★ 2026-11-01 채널 이름의 유일한 주인(여정 재발 방지 설계 B1-5 · Harold 「전체 SMS LMS MMS 로 통일」) —
+ *   여정 칸 채널 값(소문자 sms · lms · mms · kakao · email)도 여기서 꺼낸다. 「단문 · 장문 · 사진 문자」 이름은 제품에 두지 않는다.
  */
 export const MSG_TYPE_LABEL: Record<string, string> = {
   SMS: 'SMS', LMS: 'LMS', MMS: 'MMS',
   S: 'SMS', L: 'LMS', M: 'MMS',
   K: '알림톡', F: '브랜드메시지',
+  sms: 'SMS', lms: 'LMS', mms: 'MMS', kakao: '알림톡', email: '이메일',
 };
 
 export interface CampaignAxisRow {

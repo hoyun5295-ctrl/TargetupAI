@@ -91,7 +91,7 @@ describe('omitCompanySecrets: 고객사 행 응답에서 비밀값 컬럼을 뺀
     const admin = fs.readFileSync(path.join(__dirname, '../../routes/admin.ts'), 'utf8');
 
     // 자르기 표지(주석·에러 문구)가 바뀌면 slice가 빈 문자열이 되어 toContain이 엉뚱하게 실패한다 — 길이부터 본다
-    const list = companies.slice(companies.indexOf('COALESCE(cust.cnt, 0) as total_customers'), companies.indexOf('고객사 목록 조회 에러'));
+    const list = companies.slice(companies.indexOf('COALESCE(cust.cnt, 0)::int as total_customers'), companies.indexOf('고객사 목록 조회 에러'));
     expect(list.length).toBeGreaterThan(0);
     expect(list).toContain('companies: result.rows.map(omitCompanySecrets)');
 

@@ -8,6 +8,8 @@
  *   화면이 같은 사실을 다른 말로 하면 담당자는 어느 쪽도 믿지 못한다 — 표기는 여기 한 곳에서 꺼낸다.
  */
 
+import { MSG_TYPE_LABEL } from './campaign-axis';
+
 /** 칸 종류 → 사람 말. 모르는 값은 "알 수 없는 칸"(영문 식별자를 화면에 내지 않는다). */
 export const STEP_TYPE_LABEL: Record<string, string> = {
   message: '문자',
@@ -48,17 +50,9 @@ export function funnelBarClass(pct: number): string {
 /**
  * 여정 문자 칸 채널 → 사람 말(★ 2026-09-29 V2 1차 생애 지도). 모르는 값은 "문자".
  * ★ 2026-10-26 남지현 접수(여정 생성 시 문자 타입 표기) — 채널 고르기 탭 · 휴대폰 미리보기 · 문안 고치기 창 · 칸 고르기가
- *   「문자 / SMS」를 따로 적어 같은 단문 칸이 화면마다 다른 이름이었다. 여정 화면의 채널 이름은 이 함수 하나가 정한다(계약 시험 root-ledger R1).
- *   email = 서버 칸 채널 값(journey-builder ChannelType)에 있어 "문자"로 떨어지지 않게 둔다.
+ *   같은 칸을 화면마다 다른 이름으로 적었다. 여정 화면의 채널 이름은 이 함수 하나로 부른다(계약 시험 root-ledger R1).
+ * ★ 2026-11-01 이름 표는 제품 전체 주인(campaign-axis MSG_TYPE_LABEL)으로 옮겼다 — SMS · LMS · MMS(B1-5).
  */
-export const STEP_CHANNEL_LABEL: Record<string, string> = {
-  sms: '단문 문자',
-  lms: '장문 문자',
-  mms: '사진 문자',
-  kakao: '알림톡',
-  email: '이메일',
-};
-
 export function stepChannelLabel(channel: string | null | undefined): string {
-  return STEP_CHANNEL_LABEL[String(channel || '')] || '문자';
+  return MSG_TYPE_LABEL[String(channel || '')] || '문자';
 }

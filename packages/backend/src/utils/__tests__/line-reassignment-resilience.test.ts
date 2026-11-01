@@ -138,7 +138,7 @@ describe('재대조 워커 계약 — 0건 가드를 지나고, 판정에 쓸 se
   });
   it('UPDATE 앞에 shouldSkipReconcileWrite 판정이 있다', () => {
     const guardAt = fn.indexOf('shouldSkipReconcileWrite(');
-    const updateAt = fn.indexOf('SET status = $2, sent_count = $3');
+    const updateAt = fn.indexOf('SET status = $2, sent_count = GREATEST(COALESCE(sent_count, 0), $3::int)');   // ★1101 R37 올리기만
     expect(guardAt).toBeGreaterThan(-1);
     expect(updateAt).toBeGreaterThan(guardAt);
   });

@@ -66,6 +66,8 @@ interface Props {
   onFillBenefit?: (benefit: string) => void;
   /** 링크 줄 — `[URL 입력]`이 남아 있을 때. 형식 판정·치환은 페이지가 소유한다. */
   onFillUrl?: (url: string) => void;
+  /** ★ 2026-11-01 여정 재발 방지 B1-3 — 저장된 여정에 사람 값(혜택 · 링크)이 아직 없으면 자리표시가 없어도 채우기 줄을 보인다 */
+  factsUnset?: boolean;
   /**
    * ★ 2026-08-08 — 미리보기 치환용 타겟 최상위 고객 1명(페이지가 이미 들고 있다).
    *   없으면 원문으로 보여주고 그 사실을 알린다 — 지어낸 값으로 채우지 않는다.
@@ -128,7 +130,7 @@ const MAX_DELAY_HOURS = 8760;   // 365일
 
 export default function JourneyStepStudio({
   steps, index, onIndex, onPatch, onAdd, onDelete, onSave,
-  onAi, onDecorate, onSpamTest, onFillBenefit, onFillUrl,
+  onAi, onDecorate, onSpamTest, onFillBenefit, onFillUrl, factsUnset,
   sampleCustomer = null, sampleCustomerFields = null, opt080Number = '', journeyId, senderLabel,
   variables = [], decorateVars = [], triggerLabel, objective,
   aiBusy = false, saving = false, maxSteps,
@@ -312,7 +314,7 @@ export default function JourneyStepStudio({
               <div className="mb-2 flex items-center gap-2">
                 <ImageIcon className="h-3.5 w-3.5 text-violet-700" />
                 <span className="text-[12px] font-semibold text-slate-600">이미지 첨부</span>
-                <span className="text-[12px] text-slate-400">사진 문자는 이미지가 함께 나갑니다</span>
+                <span className="text-[12px] text-slate-400">MMS는 이미지가 함께 나갑니다</span>
               </div>
               <JourneyMmsUploader
                 value={step.mmsImagePaths || []}
@@ -320,7 +322,7 @@ export default function JourneyStepStudio({
               />
               {(step.mmsImagePaths?.length ?? 0) === 0 && (
                 <p className="mt-2 text-[12px] leading-relaxed text-amber-800">
-                  아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 장문 문자로 되돌려 주세요.
+                  아직 이미지가 없습니다. 이대로 두면 글자만 나가니, 이미지를 넣거나 LMS로 되돌려 주세요.
                 </p>
               )}
             </div>
@@ -328,14 +330,14 @@ export default function JourneyStepStudio({
 
           {/* ★ 2026-08-08 — 혜택·링크는 값으로 받는다. 문안 속 placeholder를 손으로 고치게 하지 않는다.
               남은 자리만큼만 줄이 뜨고, 입력 한 번이 전 스텝을 채운다. */}
-          {((benefitSlots && onFillBenefit) || (urlSlots && onFillUrl)) && (
+          {((benefitSlots && onFillBenefit) || (urlSlots && onFillUrl) || (factsUnset && (onFillBenefit || onFillUrl))) && (
             <div className="space-y-2.5 rounded-xl border border-fuchsia-200 bg-fuchsia-50 p-3">
               <div className="flex items-center gap-1.5">
                 <Gift className="h-3.5 w-3.5 text-fuchsia-700" />
                 <span className="text-xs font-semibold text-slate-700">마지막 한 가지만 알려 주세요. 문장은 그대로 잇습니다</span>
               </div>
 
-              {benefitSlots && onFillBenefit && (
+              {(benefitSlots || factsUnset) && onFillBenefit && (
                 <div>
                   <p className="mb-1.5 text-[12px] leading-relaxed text-slate-500">
                     문안의 혜택 자리에 들어갈 실제 혜택입니다. 입력하면 모든 스텝에 한 번에 채워 드려요.
@@ -366,7 +368,7 @@ export default function JourneyStepStudio({
                 </div>
               )}
 
-              {urlSlots && onFillUrl && (
+              {(urlSlots || factsUnset) && onFillUrl && (
                 <div>
                   <p className="mb-1.5 text-[12px] leading-relaxed text-slate-500">
                     문안에 넣을 링크 주소입니다. 주소는 발송할 때 짧은 링크로 바뀝니다.

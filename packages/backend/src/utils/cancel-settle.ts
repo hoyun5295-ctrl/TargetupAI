@@ -135,8 +135,12 @@ export async function settleCancelOutcome(p: {
     //   (동기화 COALESCE(NULLIF)·스위퍼 GREATEST는 이 값을 낮추지 않는다). 상태는 예약·초안일 때만 completed로 바꾼다.
     //   취소로 굳은 캠페인은 건드리지 않는다 — 반영 0행이면 모순이라 의무를 남기고 경보(ok=false).
     const upd = await query(
+      // ★ 2026-11-01 B-1101-4 · R37 — 대기 행을 지운 사건 뒤라 정산 기준(readHigh · 분리 축 적재 등)을 지운다 · 다음 정산이 다시 쌓는다.
+      //   이 자리의 적재 수 낮춤은 R37 면제(지운 사건 자리 · 지운 행 수를 따로 들고 있지 않음 · 설계서 §8).
       `UPDATE campaigns SET status = CASE WHEN status IN ('scheduled', 'draft') THEN 'completed' ELSE status END,
               sent_count = $1, success_count = $2, fail_count = $3,
+              send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'readHigh', '{readHighGen}',
+                to_jsonb(COALESCE(NULLIF(send_config->>'readHighGen', ''), '0')::int + 1)),
               sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW()
         WHERE id = $4 AND status <> 'cancelled'`,
       [Number(agg?.total || 0), Number(agg?.success || 0), Number(agg?.fail || 0), c.id],

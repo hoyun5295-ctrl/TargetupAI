@@ -400,13 +400,13 @@ export async function createRequestCore(
       } else {
         return {
           ok: false, status: 400, code: 'SUBJECT_REQUIRED_LONG',
-          error: `문안이 단문 한도(${SMS_MAX_BYTES}바이트)를 넘어(가장 긴 문장 ${smsBytes}바이트) 장문으로 보냅니다. 제목을 입력해 주세요.`,
+          error: `문안이 SMS 한도(${SMS_MAX_BYTES}바이트)를 넘어(가장 긴 문장 ${smsBytes}바이트) LMS로 보냅니다. 제목을 입력해 주세요.`,
         };
       }
     } else if (smsBytes > SMS_MAX_BYTES) {
       return {
         ok: false, status: 400, code: 'SMS_TOO_LONG',
-        error: `단문(SMS)은 ${SMS_MAX_BYTES}바이트까지 보낼 수 있습니다. 광고 표기와 무료거부 문구를 넣으면 가장 긴 문장이 ${smsBytes}바이트라 장문(LMS)으로 접수해 주세요.`,
+        error: `SMS는 ${SMS_MAX_BYTES}바이트까지 보낼 수 있습니다. 광고 표기와 무료거부 문구를 넣으면 가장 긴 문장이 ${smsBytes}바이트라 LMS로 접수해 주세요.`,
       };
     }
   }

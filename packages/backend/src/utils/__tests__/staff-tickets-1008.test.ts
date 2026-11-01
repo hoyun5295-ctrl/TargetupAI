@@ -92,7 +92,9 @@ describe('직원 접수 1008', () => {
     expect(route).toContain("const week = (req.body as any)?.kind === 'week';");
     expect(route).toContain('grantFreeTrial(id, days, week ? { credits: ADMIN_WEEK_TRIAL.credits } : {})');
     const ct = read('backend/src/utils/basic-trial.ts');
-    expect(ct).toContain("CASE WHEN $5::boolean THEN ai_credits_base_remaining ELSE $3 END");   // 연장 = 크레딧 그대로
+    // ★ 2026-11-01 크레딧 컨트롤타워 C1 — 연장 = 크레딧 그대로 · 새 체험만 원장 CT 가 체험 크레딧을 넣는다(잔액 칸 직접 쓰기 0)
+    expect(ct).toContain('if (!extended) await applyTrialStart(client, companyId, trialCredits, String(updated.rows[0].trial_key), creditNow);');
+    expect(ct).not.toMatch(/ai_credits_base_remaining\s*=/);
     const ui = readAdminScreenSource(); // 부여 버튼 = 고객사 상세 설정 창(파일 분리 E로 옮겨 감)
     expect(ui).toContain("body: JSON.stringify(week ? { kind: 'week' } : { days: 30 })");
   });

@@ -294,16 +294,19 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
 
       // 발송 기록이 있는 failed = 오판 → completed 복원. 진짜 0건 실패는 failed 유지.
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;
+      // ★ 2026-11-01 B-1101-4 · R37 — 적재 수는 읽기로 내리지 않는다(올리기만). 1101 .62 인덱스 어긋남으로 742행 중 274행만 읽히자
+      //   이 자리가 sent 742 → 274 로 덮어 정산이 468건(12,097.8원)을 미적재로 환불할 뻔했다(0926 F36 라인 재배정과 같은 뿌리).
+      const sentWritten = Math.max(Number(camp.sent_count || 0), sentCount);
       // ★ 2026-06-13 굳힘 탈출구(위 finalize) — 방금 쓴 실측값 그대로 굳힘(화면 숫자 연속). 선불은 굳힘 후에도 sweeper가 14일까지 보정.
       const changed =
         newStatus !== camp.status ||
-        sentCount !== Number(camp.sent_count || 0) ||
+        sentWritten !== Number(camp.sent_count || 0) ||
         successCount !== Number(camp.success_count || 0) ||
         failCount !== Number(camp.fail_count || 0);
 
       await query(
         `UPDATE campaigns
-            SET status = $2, sent_count = $3, success_count = $4, fail_count = $5,
+            SET status = $2, sent_count = GREATEST(COALESCE(sent_count, 0), $3::int), success_count = $4, fail_count = $5,
                 result_final = CASE WHEN $6::boolean THEN true ELSE result_final END,
                 result_synced_at = NOW(), updated_at = NOW()
           WHERE id = $1`,
@@ -313,7 +316,7 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
       if (changed) {
         fixed++;
         log(`재대조 교정 campaign=${camp.id} status ${camp.status}→${newStatus}, ` +
-            `succ ${camp.success_count}→${successCount}, fail ${camp.fail_count}→${failCount}, sent ${camp.sent_count}→${sentCount}${finalize ? ', 굳힘(72h)' : ''}`);
+            `succ ${camp.success_count}→${successCount}, fail ${camp.fail_count}→${failCount}, sent ${camp.sent_count}→${sentWritten}${sentWritten > sentCount ? `(읽은 ${sentCount} · 적재 수 유지)` : ''}${finalize ? ', 굳힘(72h)' : ''}`);
       }
     } catch (oneErr: any) {
       log(`재대조 1건 오류 campaign=${camp.id} (skip):`, oneErr?.message || oneErr);

@@ -13,7 +13,7 @@
  *   ① 링크·맨 도메인·금액·혜택 덩어리·문장 속 #태그를 `{{k#}}` 로 가려 넘기고 되돌린다 — 하나라도 잃으면 **결과를 버린다**
  *   ② 결과의 링크 호스트 ⊆ 원문 링크 호스트 — 아니면 버린다
  *   ③ 원문에 없던 #태그는 지운다(원문에 그 낱말이 있으면 # 만 뗀다)
- *   ④ 출구에서 `stripUnauthorizedBenefits(결과, 원문)`
+ *   ④ 출구에서 `replaceInventedBenefits(결과, 원문)`(값 · 종류 짝)
  *   ⑤ 글 끝 태그 줄은 떼어 두었다가 그대로 다시 붙인다(모델이 만지지 않는다)
  * ⛔ 버렸으면 **버렸다고 말한다**(0924 K9 · 전에는 원문을 성공처럼 돌려줬다).
  * ★ 2026-09-25 사진 초안 = **두 단계**(Harold 0925 A안 · 포스터 문구가 한 글자도 안 들어가던 결함)
@@ -30,7 +30,7 @@ import { callAIWithFallback } from '../services/ai';
 import { query } from '../config/database';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { snsOwnerClause } from './sns-accounts';
-import { findBenefitSpans, findNewNumbers, stripUnauthorizedBenefits, claimsInventedEfficacy, dropInventedEfficacy, efficacyNote, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { findBenefitSpans, findInventedBenefits, findNewNumbers, replaceInventedBenefits, claimsInventedEfficacy, dropInventedEfficacy, efficacyNote, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import {
   buildSnsCaption, countSnsCaption, findBodyHashtagSpans, findSnsLinkSpans, normalizeSnsTags, snsLinkHost,
   extractBodyHashtags, type SnsCaptionSpec, type SnsTextSpan,
@@ -207,8 +207,6 @@ function keepPhotoSafeSentences(text: string, license = ''): string {
   const licLower = lic.toLowerCase();
   const licDigits = lic.replace(/\s+/g, '');
   const licHosts = new Set(findSnsLinkSpans(lic).map((s) => snsLinkHost(s.text)));
-  const spanKey = (t: string) => t.replace(/\s+/g, ' ').trim();
-  const licBenefits = new Set(findBenefitSpans(lic).map((s) => spanKey(s.text)));
   const wordLicensed = (w: string) => licLower.includes(w.toLowerCase()) || !!PHOTO_FACT_WORD_EQUIV[w]?.test(lic);
 
   const lines = String(text ?? '').split('\n');
@@ -220,7 +218,8 @@ function keepPhotoSafeSentences(text: string, license = ''): string {
       if (!t) return false;
       if ((t.match(/\d+/g) ?? []).some((d) => !licDigits.includes(d))) return false;
       if (findSnsLinkSpans(t).some((l) => !licHosts.has(snsLinkHost(l.text)))) return false;
-      if (findBenefitSpans(t).some((b) => !licBenefits.has(spanKey(b.text)))) return false;
+      // ★ 1101 B1-1 — 혜택 판정 한 벌(값 · 종류 짝 · 뿌리 대장 R33) · 옛 글자 대조는 사진 속 「10%할인」을 「10% 할인」으로 쓴 문장도 뺐다
+      if (findInventedBenefits(t, lic).length > 0) return false;
       if (PHOTO_DRAFT_FACT_WORDS.some((w) => t.includes(w) && !wordLicensed(w))) return false;
       return true;
     });
@@ -517,7 +516,7 @@ export async function generateSnsCaption(input: SnsAiCaptionInput): Promise<SnsA
   }
   // ③ 원문에 없던 #태그 · ④ 원문에 없던 혜택
   let out = dropInventedHashtags(restored, original);
-  out = stripUnauthorizedBenefits(out, original);
+  out = replaceInventedBenefits(out, original);
   if (!out.trim()) return { ...unchanged(mode, original, '글을 다듬지 못했어요. 한 번 더 눌러 주세요.'), tags };
   // ⑤-0 원문에 없던 숫자(★ 2026-09-30 WP2 — 금액 · 링크는 가림 토큰이 지키지만 "3일만" · "선착순 50명" 같은 새 숫자는 못 잡는다)
   if (findNewNumbers(out, original).length > 0) {

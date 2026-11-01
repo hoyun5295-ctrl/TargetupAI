@@ -43,13 +43,15 @@ export interface LineResultCardsProps {
 function chipView(chip: AiLineSpamChip | undefined, stale: boolean): { tone: string; icon: 'ok' | 'bad' | 'wait' | 'none'; text: string } {
   if (stale && chip && !RUNNING.includes(chip.state)) return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '글이 바뀌었어요 · 다시 검사' };
   if (!chip || chip.state === 'idle') return { tone: 'bg-slate-100 text-slate-600', icon: 'wait', text: '검사 전' };
-  const carriersBy = (r: 'pass' | 'blocked') => (chip.carriers || []).filter((c) => c.result === r).map((c) => c.carrier);
+  const carriersBy = (r: 'pass' | 'blocked' | 'checking') => (chip.carriers || []).filter((c) => c.result === r).map((c) => c.carrier);
   switch (chip.state) {
     case 'queued': return { tone: 'bg-slate-100 text-slate-700', icon: 'wait', text: chip.aheadCount ? `줄 대기 · 앞 ${chip.aheadCount}건` : '줄 대기' };
     case 'busy': return { tone: 'bg-slate-100 text-slate-700', icon: 'wait', text: '줄 대기' };
     case 'running': return { tone: 'bg-indigo-50 text-indigo-800', icon: 'wait', text: `확인 중${chip.elapsedSec ? ` · ${chip.elapsedSec}초` : ''}` };
     case 'pass': return { tone: 'bg-emerald-50 text-emerald-800', icon: 'ok', text: `스팸 통과${carriersBy('pass').length ? ` · ${carriersBy('pass').length}사` : ''}` };
     case 'blocked': return { tone: 'bg-rose-50 text-rose-800', icon: 'bad', text: `막힘 · ${carriersBy('blocked').join(' · ') || '통신사'}` };
+    // ★ 2026-11-01 B1-4 — 통신사는 보냈는데 검사폰 보고가 늦음(길어도 20분 안에 확정 · 다시 걸어도 같은 검사를 이어 본다)
+    case 'checking': return { tone: 'bg-amber-50 text-amber-800', icon: 'wait', text: `확인 중 · ${carriersBy('checking').join(' · ') || '통신사'}` };
     case 'warn': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '결과 없음 · 다시 검사' };
     case 'demo': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '시연 계정은 검사하지 않아요' };
     case 'unavailable': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '요금제에 스팸 검사가 없어요' };
@@ -130,8 +132,10 @@ export default function LineResultCards(p: LineResultCardsProps) {
   // 카드마다 지금 읽는 요청의 표(자기 요청이 끝날 때만 지운다 · 늦게 끝난 옛 요청이 새 요청의 잠금을 풀지 않게)
   const pollingRef = useRef<Map<string, object>>(new Map());
   useEffect(() => {
-    const live = types.filter((t) => RUNNING.includes(run.spam[t]?.state as any) && run.spam[t]?.testId);
+    // ★ 2026-11-01 B1-4 — 확인 중 칩도 확정될 때까지 읽는다(다른 카드 자동 검사는 막지 않는다 · 확인 중만 남으면 15초)
+    const live = types.filter((t) => (RUNNING.includes(run.spam[t]?.state as any) || run.spam[t]?.state === 'checking') && run.spam[t]?.testId);
     if (live.length === 0) return;
+    const slow = live.every((t) => run.spam[t]?.state === 'checking');
     const timer = setInterval(() => {
       for (const t of live) {
         const chip = latest.current.run.spam[t];
@@ -147,7 +151,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
           cur.onSpamPatch(t, { ...now, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec });
         }).catch(() => { /* 다음 읽기에서 다시(제한 시간 10초) */ }).finally(() => { if (pollingRef.current.get(t) === mark) pollingRef.current.delete(t); });
       }
-    }, POLL_MS);
+    }, slow ? 15_000 : POLL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spamKey]);
@@ -251,7 +255,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
         })}
       </div>
       <p className="text-[11.5px] text-slate-500">
-        고른 문안은 아래에서 보고 고쳐요. 스팸 칩은 실제로 나가는 글(광고 표기 · 080 · 제목 포함)에 묶여 글이 바뀌면 「다시 검사」로 바뀝니다. 검사는 문자 요금(요금제 무료 문자 먼저) · 같은 글은 24시간 동안 다시 걷지 않아요.{p.channel === 'MMS' ? ' 사진 문자(MMS)는 글만 검사해요.' : ''}{!p.callback ? ' 등록된 회신번호가 있어야 검사해요.' : ''}
+        고른 문안은 아래에서 보고 고쳐요. 스팸 칩은 실제로 나가는 글(광고 표기 · 080 · 제목 포함)에 묶여 글이 바뀌면 「다시 검사」로 바뀝니다. 검사는 문자 요금(요금제 무료 문자 먼저) · 같은 글은 24시간 동안 다시 걷지 않아요.{p.channel === 'MMS' ? ' MMS는 글만 검사해요.' : ''}{!p.callback ? ' 등록된 회신번호가 있어야 검사해요.' : ''}
       </p>
     </div>
   );

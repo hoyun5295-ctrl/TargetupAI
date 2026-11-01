@@ -51,7 +51,7 @@ import { autoCampaignLockReason } from './plan-guard';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
-import { autoSpamTestWithRegenerate, spamVerdictOf } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, SPAM_VERDICT_WORD } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 // ★ D114 P7: personalFields → displayName 변환용
 import { getFieldByKey } from './standard-field-map';
@@ -1506,7 +1506,7 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
     const verdict = spamVerdictOf(finalVariant, spamResult.totalTestCount);
     const isBlocked = verdict === 'blocked';
     // ★ D111 P6: 순수 '통과'/'차단' 문자열로 단순화. 이전 '통과 ✓' → 빌더 내부 replace(✓→'통과')와 겹쳐 '통과 통과' 중복 발생
-    const resultLabel = verdict === 'pass' ? '통과' : isBlocked ? '차단' : '검사 못 함';
+    const resultLabel = SPAM_VERDICT_WORD[verdict];   // ★ 2026-11-01 B1-4 — 판정 다섯 값의 사람 말 한 곳
 
     console.log(`${logPrefix} 스팸테스트 완료 — ${resultLabel}`);
 

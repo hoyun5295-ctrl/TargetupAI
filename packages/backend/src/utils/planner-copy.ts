@@ -20,7 +20,7 @@ import { getCompanyCosts } from '../config/defaults';
 import { orchestrate } from '../services/ai-orchestrator';
 import { generateMessages } from '../services/ai';
 import { buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { autoSpamTestWithRegenerate, spamVerdictOf, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, type SpamVerdict } from './spam-test-queue';
 import { unsupportedSmsCharCodes } from './sms-charset';
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
@@ -86,10 +86,13 @@ export async function loadPlannerDefaultCallback(companyId: string): Promise<str
   return r.rows[0]?.phone || null;
 }
 
-/** 사전 스팸용 가짜 링크 — 같은 단축 도메인 · 실재하지 않는 7자 코드(검사 형태 = 나갈 형태). */
-export function plannerFakeDmLink(): string {
+/**
+ * 사전 스팸용 가짜 링크 — 같은 단축 도메인 · 실재하지 않는 7자 코드(검사 형태 = 나갈 형태).
+ * ★ 2026-11-01 B1-4(Codex 구현 1R #6) — seed(접점 id)를 주면 늘 같은 코드 = 같은 글 = 같은 검사를 이어 본다(확인 중 · 검사 중이 새 검사를 끝없이 걸지 않게).
+ */
+export function plannerFakeDmLink(seed?: string): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-  const b = randomBytes(7);
+  const b = seed ? createHash('sha256').update(`planner-fake-dm:${seed}`).digest() : randomBytes(7);
   let code = '';
   for (let i = 0; i < 7; i++) code += chars[b[i] % chars.length];
   return dmShortUrlOf(code);
@@ -123,6 +126,8 @@ export interface PlannerCopy {
   editedAt?: string;
   /** ★ 2026-10-18 쌍 재확인 그 회차에 실주소 링크로 검사한 문안이면 그 회차 번호(planner-recheck · 다른 회차의 통과는 이 회차 승인 근거가 아니다) */
   recheckRound?: number;
+  /** ★ 2026-11-01 B1-4 — AI 가 만든 글의 검사가 확인 중 · 검사 중(spam = pending · 사람이 고친 글 아님) · 다음 패스가 같은 글 = 같은 검사를 이어 본다 */
+  held?: boolean;
 }
 
 /** 고친 문안이 검사에서 걸렸을 때의 사유(고객 문장) */
@@ -301,17 +306,23 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
       if (isCopyValid(carrier.execMeta, inputHash)) continue;
       allReady = false;
       const cur = carrier.execMeta?.copy as PlannerCopy | undefined;
-      if (cur?.edited && cur.inputHash === inputHash) {
+      if ((cur?.edited || cur?.held) && cur.inputHash === inputHash) {
         // 담당자가 고친 문안 — 다시 만들지 않고 검사만 한다(재생성 0). 걸린 문안은 사람이 다시 고칠 때까지 그대로.
+        // ★ 2026-11-01 B1-4 — 검사 확인 중이던 AI 글(held)도 여기서 같은 검사를 이어 본다(막히면 아래에서 새로 만든다)
         if (cur.spam !== 'pending') continue;
         const cb = await loadPlannerDefaultCallback(companyId);
         const o80 = await getOpt080Number(ev.createdBy || null, companyId);
         if (!cb || !o80) continue;
-        const fake = withDmLink ? plannerFakeDmLink() : '';
+        const fake = withDmLink ? plannerFakeDmLink(carrier.id) : '';
         // ★ 2026-10-25 원장 #46 — 판정 셋(재확인 checkEditedCopy 와 같은 함수) · 검사 장애 = 다음 주기에 다시(옛: 막힘 · 장애가 둘 다 「통과 못 함」으로 굳었다)
         const check = await spamCheckPlannerVerdict({
           tp: carrier, body: appendDmLink(cur.text, fake), subject: cur.subject, callback: cb, rejectNumber: o80, link: fake, withDmLink, regenerate: false,
         });
+        // ★ 2026-11-01 B1-4(Codex 구현 1R #6) — 확인 중 · 검사 중 = 실패 수에 안 셈 · 글 그대로 · 다음 패스가 같은 검사를 이어 본다(가짜 링크 = 접점마다 고정)
+        if (isSpamHold(check.verdict)) {
+          await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur, { copy_error: { reason: PLANNER_REASON.copyChecking, at: new Date().toISOString() } }).catch(() => false);
+          continue;
+        }
         if (check.verdict === 'error') {
           // ★ 1026 Codex 1R — 검사 장애도 같은 리비전 실패 수에 센다(상한 = 문안 패스 후보 SQL · 옛: 상한 없이 매 주기 같은 검사)
           // ★ 1026 Codex 2R — 이번이 상한이면 「검사 중」으로 두지 않는다: 검사 못 함(fail) + 다시 저장 안내(저장 = 리비전 + 1 = 다시 검사)
@@ -326,11 +337,18 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
             { eventRevision: { eventId, revision } }).catch(() => false);   // ★ 1026 Codex 3R — 읽은 실패 수의 리비전일 때만
           continue;
         }
+        void (check.verdict satisfies 'pass' | 'blocked');
         const verdict = check.verdict === 'pass';
         const checkedAt = new Date().toISOString();
+        if (!verdict && cur.held && !cur.edited) {
+          // 확인 중이던 AI 글이 막혔다 = 만들기 실패(실패 수에 센다) · 글을 비워 다음 패스가 새로 만든다(사람이 고친 글은 아래처럼 그대로 둔다)
+          generationFailed = true;
+          await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur, { copy: null, copy_error: { reason: PLANNER_REASON.spamFailed, at: checkedAt } }).catch(() => false);
+          continue;
+        }
         // ⛔ 검사한 문안이 그대로일 때만 결과를 쓴다(★ Codex 1R M10) — 검사 수 분 동안 담당자가 다시 고쳤으면 옛 결과가 새 문안을 덮지 않는다
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur, verdict
-          ? { copy: { ...cur, spam: 'pass', checkedAt }, copy_error: null }
+          ? { copy: { ...cur, spam: 'pass', checkedAt, held: undefined }, copy_error: null }
           : { copy: { ...cur, spam: 'fail', checkedAt }, copy_error: { reason: EDITED_COPY_SPAM_FAILED, at: checkedAt } });
         continue;
       }
@@ -354,12 +372,22 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
           { copy_error: { reason: PLANNER_REASON.copyFailed, at: new Date().toISOString() } }).catch(() => false);
         continue;
       }
-      const link = withDmLink ? plannerFakeDmLink() : '';
+      const link = withDmLink ? plannerFakeDmLink(carrier.id) : '';
       // ★ 2026-10-25 원장 #46 같은 뿌리 — 판정 셋 · 검사 장애는 「스팸에 걸림」이 아니라 「준비 못 함 · 다시 준비」(실패 수 상한은 그대로)
       const check = await spamCheckPlannerVerdict({
         tp: carrier, body: appendDmLink(draft.body, link), subject: draft.subject,
         callback, rejectNumber: opt080, link, withDmLink, regenerate: true,
       });
+      if (isSpamHold(check.verdict)) {
+        // ★ 2026-11-01 B1-4(Codex 구현 1R #6) — 확인 중 · 검사 중 = 만든 글(재생성됐으면 그 글)을 검사 대기로 남긴다(실패 수 0 · 다음 패스 = 같은 검사 이어 보기)
+        const held: PlannerCopy = {
+          text: stripDmLink(check.body, link), subject: check.subject || '', inputHash, spam: 'pending', checkedAt: null, withDmLink, held: true,
+        };
+        // ★ Codex 구현 2R #2 — 저장이 던지면(장애) 만든 글을 잃는다 = 만들기 실패로 센다(실패 수 상한 · 끝없이 다시 만들지 않게) · 거짓(그사이 글이 바뀜)은 다음 패스가 새 글을 본다
+        const saved = await setTouchpointMetaIfCopyIs(companyId, carrier.id, before, { copy: held, copy_error: { reason: PLANNER_REASON.copyChecking, at: new Date().toISOString() } }).catch(() => null);
+        if (saved === null) generationFailed = true;
+        continue;
+      }
       if (check.verdict !== 'pass') {
         generationFailed = true;
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, before,

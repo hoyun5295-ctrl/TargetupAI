@@ -70,6 +70,7 @@ import { inspectDmForCarry, isDmCarryable } from './planner-dm-check';
 import { checkChannelReadiness } from './planner-channel-gate';
 import { computeTouchpointFingerprints, plannerNumbersMatch, plannerNumbersOf, plannerSendNumberTexts } from './planner-confirm';
 import { spamCheckPlannerVerdict } from './planner-copy';
+import { isSpamHold } from './spam-test-queue';
 import { enterPairRecheck, kickPlannerReview, recheckPastDeadlineNotice, revertEventToReview, settleEventIfFinished } from './planner-review';
 import { kickPlannerRecheck, runPlannerRecheckPass } from './planner-recheck';
 import { firstSendDate } from './planner-event';
@@ -273,6 +274,14 @@ export const PLANNER_SPAM_ERROR_LIMIT = 2;
  * ★ 2026-10-18 검사 장애(error) — 차단이 아니다. 문안을 버리지 않고 선점을 놓아 다음 주기(10분)에 다시 검사한다.
  * 같은 날 상한에 닿으면 캐리어와 DM 을 **한 문장으로** 잠근다(쌍 규칙 · 예외 경로처럼 DM 만 먼저 ready 로 돌아가지 않게 · B11).
  */
+async function spamCheckHold(tp: PlannerTouchpointRow, link: CarryLink, claim: ClaimCtx): Promise<ExecOutcome> {
+  const ids = [tp, ...(link.dm ? [link.dm] : [])];
+  await setTouchpointStates(tp.companyId, ids.map((r) => ({ id: r.id, status: 'ready', lockReason: null })), ['producing'], claim.token)
+    .catch((e: any) => console.warn(`[planner-executor] 검사 확인 중 선점 놓기 실패 tp=${tp.id}(회수 워커가 정리):`, e?.message || e));
+  console.log(`[planner-executor] 스팸 검사 확인 중 tp=${tp.id} — 다음 주기에 이어 본다`);
+  return 'not_due';
+}
+
 async function spamCheckDown(tp: PlannerTouchpointRow, link: CarryLink, claim: ClaimCtx, today: string): Promise<ExecOutcome> {
   const prev = tp.execMeta?.spam_error;
   const count = (prev && prev.date === today ? Number(prev.count) || 0 : 0) + 1;
@@ -421,6 +430,9 @@ async function executeMessagingCore(
   await touchClaim(tp.companyId, claimIds);
   if (check.verdict === 'error') return spamCheckDown(tp, link, claim, today);
   if (check.verdict === 'blocked') return recheckPair(tp, link, claim);
+  // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 선점만 놓는다(장애 횟수 0 · 다음 주기에 같은 글 = 같은 검사를 이어 본다)
+  if (isSpamHold(check.verdict)) return spamCheckHold(tp, link, claim);
+  void (check.verdict satisfies 'pass');
 
   // ⑤ 대상
   const mode = resolveAudienceMode(tp.channel, tp.timing);

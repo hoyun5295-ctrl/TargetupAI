@@ -2571,8 +2571,8 @@ const campaignData = {
                       onChange={(e) => setCampaign({ ...campaign, messageType: e.target.value })}
                       className="w-full px-3 py-2 border rounded-lg"
                     >
-                      <option value="SMS">SMS (단문)</option>
-                      <option value="LMS">LMS (장문)</option>
+                      <option value="SMS">SMS</option>
+                      <option value="LMS">LMS</option>
                       <option value="MMS">MMS (사진)</option>
                     </select>
                   </div>

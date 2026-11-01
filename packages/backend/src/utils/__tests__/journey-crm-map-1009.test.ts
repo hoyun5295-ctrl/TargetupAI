@@ -61,10 +61,12 @@ describe('칸 편집 정책 — 한 곳 · 묶음별', () => {
   });
   it('PATCH 게이트 = 잠금 안에서 진행 중을 세고 같은 정책 · 거절은 409 코드(일반 Error 500 아님)', () => {
     const b = src('journey-builder.ts');
+    // ★ 2026-11-01 B1-3 — 칸 갱신 몸통 = applyStepPatchInLock(채우기 주소도 같은 몸통) · 판정은 잠금 안(옛 계약의 assertStepEditAllowed 는 소스에 없던 이름)
     const body = b.slice(b.indexOf('export async function updateJourneyStep('), b.indexOf('// ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제'));
-    expect(body).toContain('withJourneyValidationReset(companyId, journeyId, async (run, journey) => {');
-    expect(body).toContain('await assertStepEditAllowed(run, journey.status, journey.startKind);');
-    expect(body).toContain("countInProgressExecutions(run, journeyId)");
+    expect(body).toContain('withJourneyValidationReset(companyId, journeyId, (run, journey) => applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch), { keepMarker })');
+    const inLock = body.slice(body.indexOf('export async function applyStepPatchInLock('));
+    expect(inLock).toContain('const policy = stepEditPolicy(journey.status, inProgress, journey.startKind);');
+    expect(inLock).toContain("countInProgressExecutions(run, journeyId)");
     expect(body).toContain("new JourneyStepGateError(stepEditBlockedMessage(policy, blocked), 'STEP_EDIT_LOCKED')");
     expect(body).not.toContain('활성 상태 여정은 문안(본문·제목)만 수정할 수 있습니다');
     // 라우트가 대기 방식 · 보낼 시각을 넘긴다(편집 창 "보내는 시각도 정하기"가 저장되게)

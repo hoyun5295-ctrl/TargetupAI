@@ -70,9 +70,15 @@ describe('소스 계약 — 두 경로가 같은 판정 함수를 쓴다', () =>
     expect(queue).toContain('const MANUAL_GRACE_MS = 20000;');
     expect(queue).toContain('const AUTO_GRACE_MS = 25000;');
   });
-  it('검사 제한 시간에 남은 행을 닫는 규칙은 그대로다(통신사 성공을 봤으면 차단 · 아니면 시간초과)', () => {
-    expect(manual).toMatch(/if \(qtmsgSuccessTime\.has\(rowKey\)\) \{\s+finalResult = SPAM_RESULT\.BLOCKED;/);
-    expect(worker).toContain('const finalResult = qtmsgSuccessTime.has(rowKey) ? SPAM_RESULT.BLOCKED : SPAM_RESULT.TIMEOUT;');
+  // ★ 2026-11-01 B1-4 뒤집음(설계서 2026-11-01-journey-recurrence-prevention-design.md §5) — 옛: 45초 · 제한 시간 = 「통신사 성공을 봤으면 차단」.
+  //   지금: 「통신사 전달 성공 + 앱 보고 없음」은 네 자리 모두 공용 판정(deliveredUnreportedResult = 확인 중) · 차단은 확인 문자 수신만 쓴다.
+  it('45초 확정 · 검사 제한 시간에 남은 행 = 확인 중(공용 판정) · 통신사 결과조차 없으면 시간초과', () => {
+    expect(manual).toMatch(/if \(qtmsgSuccessTime\.has\(rowKey\)\) \{\s+finalResult = deliveredUnreportedResult\(\);/);
+    expect(worker).toContain('const finalResult = qtmsgSuccessTime.has(rowKey) ? deliveredUnreportedResult() : SPAM_RESULT.TIMEOUT;');
+    for (const src of [manual, worker]) {
+      expect(src).toMatch(/graceMs(?:: BLOCKED_GRACE_MS,\s*\}\)|\s*\}\))\) \{[\s\S]{0,200}?result = deliveredUnreportedResult\(\);/);
+      expect(src).not.toMatch(/result = SPAM_RESULT\.BLOCKED/);
+    }
   });
   it('확정을 미루는 시간은 검사 화면이 결과 읽기를 멈추는 60초보다 15초(수동 검사의 확인 간격) 이상 앞선다', () => {
     // 화면(SpamFilterTestModal)은 시작 뒤 60초에 읽기를 멈춘다. 수동 검사는 15초마다 확인한다 → 화면에 보이는 마지막 확인 = 45초

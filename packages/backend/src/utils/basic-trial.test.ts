@@ -10,7 +10,8 @@
  * 못 박는 것
  *   1. 무주입 = 기존 동작: BEGIN→플랜조회→FOR UPDATE→UPDATE→이력(trial_start)→COMMIT→release,
  *      반환에 trial_expires_at·plan_code·extended가 실린다(응답 계약 — companies.ts:1951이 그대로 싣는다).
- *   2. 연장 판정 = 잠근 행의 갱신 전 값(status trial + 미래 만료) → extended true·크레딧 불변 파라미터.
+ *   2. 연장 판정 = 잠근 행의 갱신 전 값(status trial + 미래 만료) → extended true · 체험 크레딧 0(★ 2026-11-01 크레딧 컨트롤타워 C1 —
+ *      새 체험만 원장 CT applyTrialStart 가 체험 크레딧을 넣는다 · 이 파일은 잔액 칸을 쓰지 않는다).
  *   3. 무주입 실패 = ROLLBACK + 실패 알림 + rethrow.
  *   4. 주입 = BEGIN/COMMIT/ROLLBACK/알림/pool.connect 전부 0회 — 트랜잭션·알림은 호출부 소유.
  *      모든 SQL(플랜 조회 포함)과 recordPlanChange가 주입 client를 탄다.
@@ -26,14 +27,18 @@ vi.mock('./plan-change-log', () => ({
   recordPlanChange: vi.fn(),
   alertPlanChangeFailure: vi.fn(),
 }));
+vi.mock('./ai-credit-tx', () => ({ applyTrialStart: vi.fn() }));
 
 import pool from '../config/database';
 import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
+import { applyTrialStart } from './ai-credit-tx';
 import { grantFreeTrial } from './basic-trial';
 
 const connect = (pool as any).connect as ReturnType<typeof vi.fn>;
 const record = recordPlanChange as unknown as ReturnType<typeof vi.fn>;
 const alertFail = alertPlanChangeFailure as unknown as ReturnType<typeof vi.fn>;
+const trialStart = applyTrialStart as unknown as ReturnType<typeof vi.fn>;
+const TRIAL_KEY = '20261108T120000000000';
 
 const TRIAL_PLAN_ID = 'aaaaaaaa-0000-0000-0000-000000000000';
 const COMPANY_ID = 'cccccccc-0000-0000-0000-000000000000';
@@ -65,7 +70,7 @@ function makeClient(opts: ClientOpts = {}) {
       return {
         rows: [{
           id: COMPANY_ID, plan_id: TRIAL_PLAN_ID, subscription_status: 'trial',
-          trial_expires_at: FUTURE, plan_code: 'TRIAL',
+          trial_expires_at: FUTURE, plan_code: 'TRIAL', trial_key: TRIAL_KEY,
         }],
         rowCount: 1,
       };
@@ -91,6 +96,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   record.mockResolvedValue(undefined);
   alertFail.mockResolvedValue(undefined);
+  trialStart.mockResolvedValue(undefined);
 });
 
 describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
@@ -109,10 +115,15 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
     expect(r).toMatchObject({
       id: COMPANY_ID, plan_code: 'TRIAL', trial_expires_at: FUTURE, extended: false,
     });
+    expect(r).not.toHaveProperty('trial_key');
+    // 새 체험 = 원장 CT 가 체험 크레딧(TRIAL 월분 750)을 같은 client 로 · 이력 뒤 · 이력과 같은 판정 시각(사건 하나 = 시계 하나)
+    expect(trialStart).toHaveBeenCalledWith(client, COMPANY_ID, 750, TRIAL_KEY, expect.any(Date));
+    expect(trialStart.mock.calls[0][4]).toBe(record.mock.calls[0][0].now);
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(trialStart.mock.invocationCallOrder[0]);
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
-  it('연장: 잠근 행이 trial+미래 만료면 extended=true·추가 부여 reason·크레딧 보존 파라미터', async () => {
+  it('연장: 잠근 행이 trial+미래 만료면 extended=true·추가 부여 reason·체험 크레딧 0', async () => {
     const { client, calls } = makeClient({
       companyRow: { subscription_status: 'trial', trial_expires_at: FUTURE },
     });
@@ -123,7 +134,9 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
     expect(r.extended).toBe(true);
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ reason: '무료체험 30일 추가 부여' }));
     const upd = calls.find((c) => /^UPDATE companies/.test(c.sql));
-    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 30, 750, COMPANY_ID, true, false]);
+    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 30, COMPANY_ID, false]);
+    expect(upd?.sql).not.toMatch(/ai_credits_base_remaining|ai_credits_reset_at/);
+    expect(trialStart).not.toHaveBeenCalled();
   });
 
   // ★ 2026-10-21 진단 7일(Codex 1R medium) — 체험 이력과 별개로 지급하므로 남은 만료일이 미래여도 그 위에 더하지 않는다(오늘부터 7일 · 크레딧 새로)
@@ -138,8 +151,9 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
     expect(r.extended).toBe(false);
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ reason: '무료체험 7일 부여' }));
     const upd = calls.find((c) => /^UPDATE companies/.test(c.sql));
-    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 7, 750, COMPANY_ID, false, true]);
-    expect(upd?.sql).toMatch(/trial_expires_at\s+= CASE WHEN \$6::boolean THEN NOW\(\) ELSE GREATEST\(COALESCE\(trial_expires_at, NOW\(\)\), NOW\(\)\) END/);
+    expect(upd?.params).toEqual([TRIAL_PLAN_ID, 7, COMPANY_ID, true]);
+    expect(upd?.sql).toMatch(/trial_expires_at\s+= CASE WHEN \$4::boolean THEN NOW\(\) ELSE GREATEST\(COALESCE\(trial_expires_at, NOW\(\)\), NOW\(\)\) END/);
+    expect(trialStart).toHaveBeenCalledWith(client, COMPANY_ID, 750, TRIAL_KEY, expect.any(Date));
   });
 
   it('실패(UPDATE throw): ROLLBACK + 실패 알림 + rethrow', async () => {
@@ -150,6 +164,7 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
     expect(kinds(calls)).toContain('ROLLBACK');
     expect(alertFail).toHaveBeenCalledWith(COMPANY_ID, expect.any(Error));
     expect(record).not.toHaveBeenCalled();
+    expect(trialStart).not.toHaveBeenCalled();
     expect(client.release).toHaveBeenCalledTimes(1);
   });
 
@@ -169,6 +184,7 @@ describe('grantFreeTrial — client 주입(마케팅 진단 submit 전용 경로
     expect(connect).not.toHaveBeenCalled();                       // 풀에서 새 커넥션을 얻지 않는다
     expect(kinds(calls)).toEqual(['PLAN', 'LOCK', 'UPDATE']);     // BEGIN/COMMIT/ROLLBACK 없음
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ client, changeType: 'trial_start' }));
+    expect(trialStart).toHaveBeenCalledWith(client, COMPANY_ID, 750, TRIAL_KEY, expect.any(Date));
     expect(alertFail).not.toHaveBeenCalled();
     expect(client.release).not.toHaveBeenCalled();                // 커넥션 수명도 호출부 소유
     expect(r).toMatchObject({ trial_expires_at: FUTURE, extended: false });

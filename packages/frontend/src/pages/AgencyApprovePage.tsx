@@ -274,7 +274,7 @@ export default function AgencyApprovePage() {
                             <span className="text-rose-600 line-through">{i.before}</span>
                             <span className="mx-1.5 text-neutral-400">→</span>
                             <b className="text-emerald-700">{i.after}</b>
-                            <span className="ml-1.5 text-[11.5px] text-neutral-500">{i.blocked ? '고치면 단문 글자 수를 넘어 고칠 수 없어요' : i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}</span>
+                            <span className="ml-1.5 text-[11.5px] text-neutral-500">{i.blocked ? '고치면 SMS 글자 수(90바이트)를 넘어 고칠 수 없어요' : i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}</span>
                           </span>
                         </button>
                       </li>

@@ -73,11 +73,11 @@ m = computeMessageTypePerformance(
 );
 assert.equal(m[0].rawType, 'L');
 
-// 7) 길이 분포 — 단문(≤90)/중문(91~2000)/장문(>2000) 통신 규격
+// 7) 길이 분포 — 90바이트 이하 / 91~2,000바이트 / 2,000바이트 초과 통신 규격
 let d = computeLengthDistribution([10, 50, 90, 200, 1500, 2500]);
-assert.equal(d.find((x) => x.bucket === '단문')!.count, 3);
-assert.equal(d.find((x) => x.bucket === '중문')!.count, 2);
-assert.equal(d.find((x) => x.bucket === '장문')!.count, 1);
+assert.equal(d.find((x) => x.bucket === '90바이트 이하')!.count, 3);
+assert.equal(d.find((x) => x.bucket === '91~2,000바이트')!.count, 2);
+assert.equal(d.find((x) => x.bucket === '2,000바이트 초과')!.count, 1);
 
 // 8) 빈 길이 → 3버킷 전부 0
 d = computeLengthDistribution([]);

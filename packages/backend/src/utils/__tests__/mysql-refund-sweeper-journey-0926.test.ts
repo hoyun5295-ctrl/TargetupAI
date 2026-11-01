@@ -29,6 +29,8 @@ const state = {
 const queryMock = vi.fn(async (sql: string, _params?: any[]) => {
   const s = String(sql);
   if (s.includes('JOIN companies co ON co.id = c.company_id')) return { rows: [state.camp] };
+  // ★ 1101 B-1101-4 — 정산 기준 기록(readHigh)은 운영 PG 처럼 1행을 쓴다(0행 = 세대가 바뀜 → 그 캠페인을 이번 주기에 건너뛴다)
+  if (s.includes("'{readHigh}'")) return { rows: [], rowCount: 1 };
   // 회사 단가(getUnitPrice) — 운영처럼 단가가 있다(빈 행이면 단가 0으로 정산 블록 전체를 건너뛰어 운영보다 관대해진다)
   if (s.includes('FROM companies WHERE id = $1') && s.includes('cost_per_lms')) {
     return { rows: [{ unit_price_basis: 'vat_included', cost_per_sms: 11, cost_per_lms: 27.5, cost_per_mms: 60, cost_per_kakao: 8.8, cost_per_brand: 20, cost_per_brand_nonfriend: 20 }] };

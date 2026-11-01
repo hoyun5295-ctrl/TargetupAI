@@ -668,7 +668,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                     <p className={CUI_HINT}>제목은 모든 수신자에게 같은 문장으로 나갑니다.</p>
                     {longHint && (
                       <p className={`${CUI_HINT} text-amber-600`}>
-                        문안이 단문 한도(90바이트)를 넘어 장문으로 보냅니다(가장 긴 문장 {Number(smsBytes || 0).toLocaleString()}바이트). 제목을 넣어 주세요.
+                        문안이 SMS 한도(90바이트)를 넘어 LMS로 보냅니다(가장 긴 문장 {Number(smsBytes || 0).toLocaleString()}바이트). 제목을 넣어 주세요.
                       </p>
                     )}
                   </div>
@@ -747,7 +747,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                                 <span className="text-rose-600 line-through">{i.before}</span>
                                 <span className="mx-1.5 text-neutral-400">→</span>
                                 <b className="text-emerald-700">{i.after}</b>
-                                <span className="ml-1.5 text-[11px] text-neutral-500">{i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}{i.blocked === 'sms_bytes' ? ' · 고치면 단문 길이를 넘어요' : ''}</span>
+                                <span className="ml-1.5 text-[11px] text-neutral-500">{i.reason || (i.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}{i.blocked === 'sms_bytes' ? ' · 고치면 SMS 길이(90바이트)를 넘어요' : ''}</span>
                               </div>
                               <button type="button" onClick={() => setSpell({ ...spell, done: new Set(spell.done).add(i.id) })} className={CUI_BTN_GHOST}>그대로 두기</button>
                               <button type="button" onClick={() => fixComposerSpell([i])} disabled={!!i.blocked} className={CUI_BTN_OUTLINE}>고치기</button>

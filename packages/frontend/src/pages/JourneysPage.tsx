@@ -354,6 +354,8 @@ interface AIJourneyPackage {
   presetTriggerEvent?: string | null;
   /** ★ 2026-08-08 혜택 입력 — 이 패키지 생성에 실제로 쓰인 혜택. 재생성이 다시 싣는다. */
   benefitText?: string | null;
+  /** ★ 2026-11-01 여정 재발 방지 B1-3 — 질문표에서 정한 혜택 · 링크(서버가 돌려준 세 갈래 그대로) · 저장 때 사람 값 원장으로 간다 */
+  decidedFacts?: { benefits: string[] | null; link: string | null };
   /** ★ 2026-09-29 여정 V2 0차 ⑪ — "목표를 이루면 남은 문자 안 보냄" 기본값(서버가 트리거 계약에서 파생 · 화면 목록 아님). */
   goalExitDefault?: boolean;
   /** ★ 2026-09-29 여정 V2 0차 ② — AI 가 낸 대상 조건 중 쓸 수 없어 뺀 것("반영 안 됨"으로 보인다). */
@@ -507,13 +509,13 @@ function collectStepIssues(steps: AIGeneratedStep[]): Array<{ stepOrder: number;
       continue;
     }
     if ((s.channel === 'lms' || s.channel === 'mms') && (!s.subject || !s.subject.trim())) {
-      out.push({ stepOrder: s.stepOrder, message: '제목 없음(장문 문자, 사진 문자는 제목 필수)' });
+      out.push({ stepOrder: s.stepOrder, message: '제목 없음(LMS · MMS는 제목 필수)' });
       continue;
     }
     // ★ 2026-08-02 Harold 지시 — 이미지 없는 MMS는 저장하지 않는다.
     //   그대로 두면 LMS보다 비싼 단가로 글자만 나간다(고객사 돈이 새는 방향).
     if (s.channel === 'mms' && (s.mmsImagePaths?.length ?? 0) === 0) {
-      out.push({ stepOrder: s.stepOrder, message: '이미지 없음(사진 문자는 이미지 필수)' });
+      out.push({ stepOrder: s.stepOrder, message: '이미지 없음(MMS는 이미지 필수)' });
     }
   }
   return out;
@@ -1283,6 +1285,8 @@ export default function JourneysPage() {
         body.triggerEvent = aiPkg.triggerEvent;
         body.triggerFilters = aiPkg.triggerFilters || {};
       }
+      // ★ 2026-11-01 여정 재발 방지 B1-3 — 질문표의 혜택 · 링크를 여정에 남긴다(그 뒤 칸 다듬기 · 다음 칸 · 재작성이 같은 값을 근거로 쓴다)
+      if (aiPkg.decidedFacts) body.copyFacts = aiPkg.decidedFacts;
       const res = await fetch('/api/ai/operator/journeys', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },

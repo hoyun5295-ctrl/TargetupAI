@@ -17,8 +17,14 @@
 
 import { grantFreeMessagingForCurrentMonth, revokeFreeMessagingForTrials } from './free-messaging';
 import { runPlanTermPass } from './plan-term';
+import { grantMonthlyCreditsPass } from './ai-credit';
+import { runCreditReconcilePass } from './ai-credit-reconcile';
+import { kstDateTag } from './ai-credit-calc';
 
 const PASS_INTERVAL_MS = 10 * 60 * 1000;
+/** 원장 대조는 하루 한 번 · KST 04:30 뒤 첫 패스(★ 2026-11-01 크레딧 컨트롤타워 C9) */
+const RECONCILE_AFTER_KST_MINUTES = 4 * 60 + 30;
+let _reconciledOn = '';
 
 let _scheduled = false;
 let _timer: NodeJS.Timeout | null = null;
@@ -59,7 +65,34 @@ export async function runFreeMessagingGrantPass(): Promise<{ granted: number; sk
     console.error('[무료메시징][지급] 패스 실패:', err?.message || err);
     return { granted: 0, skipped: true };
   } finally {
-    _running = false;
+    // 무료 메시징 회수 · 지급이 실패해도 크레딧 월 마감 · 대조는 돈다(서로 막지 않는다 · 겹침 방지 안에서)
+    try {
+      await runCreditMonthlyAndReconcile();
+    } finally {
+      _running = false;
+    }
+  }
+}
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 C2 · C9 — 선불 이용 기간 정산 **다음**에 AI 크레딧 월 마감 · 1일 지급(회사별 실패 = 경보),
+ *   하루 한 번(KST 04:30 뒤 첫 패스) 원장 · 잔액 대조. 무료 메시징 지급과 서로 막지 않는다(각자 try).
+ */
+async function runCreditMonthlyAndReconcile(now: Date = new Date()): Promise<void> {
+  try {
+    await grantMonthlyCreditsPass(now);
+  } catch (e: any) {
+    console.warn('[크레딧][월 마감] 패스 실패:', e?.message || e);
+  }
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const today = kstDateTag(now);
+  if (_reconciledOn !== today && kst.getUTCHours() * 60 + kst.getUTCMinutes() >= RECONCILE_AFTER_KST_MINUTES) {
+    _reconciledOn = today;
+    try {
+      await runCreditReconcilePass(now);
+    } catch (e: any) {
+      console.warn('[크레딧][대조] 패스 실패:', e?.message || e);
+    }
   }
 }
 

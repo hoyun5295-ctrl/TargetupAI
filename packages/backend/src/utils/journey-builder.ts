@@ -22,7 +22,9 @@ import { getCreditCost } from './ai-credit-calc';
 import { runChargedAi } from './ai-credit';
 import { query, pool } from '../config/database';
 import { callAIWithFallback } from '../services/ai';
-import { stripUnauthorizedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES, dropSeasonSentences } from './copy-benefit-detector';
+import { buildCopyFactsPatch, writeJourneyCopyFacts, fillBenefitSpots, journeyCopyFacts, parseCopyFacts, copyFactsColumnReady } from './journey-copy-facts';
+import { fillLinkSpots } from './voice-form-slots';
+import { replaceInventedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES, dropSeasonSentences } from './copy-benefit-detector';
 import { ensureSenderName } from './messageUtils';
 import { buildMemoryPromptContext } from './company-memory';
 import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
@@ -130,6 +132,8 @@ export interface JourneyTemplate {
 export interface CreateJourneyInput {
   companyId: string;
   createdBy: string;
+  /** ★ 2026-11-01 여정 재발 방지 B1-3 — 생성 때 사람이 정한 혜택 · 링크(질문표) → 사람 값 원장(by=question · 칸이 있을 때만 · 없으면 옛 동작) */
+  copyFacts?: { benefits: string[] | null; link: string | 'omit' | null };
   templateCode: JourneyTemplateCode;
   name?: string;
   customObjective?: string;
@@ -467,6 +471,15 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
 
   const journeyId = journeyRes.rows[0].id as string;
 
+  // ★ 2026-11-01 여정 재발 방지 B1-3 — 질문표에서 정한 혜택 · 링크를 원장에 남긴다(그 뒤 모든 여정 문안 생산자의 근거 · 칸이 없으면 건너뜀)
+  //   ★ Codex 구현 1R B #3 · #4 — 「혜택 없음」([]) · 「링크 뺌」('omit')도 정한 값이다 · 혜택과 링크는 따로(링크를 못 읽어도 혜택은 남긴다)
+  if (input.copyFacts && (input.copyFacts.benefits !== null || input.copyFacts.link !== null) && (await copyFactsColumnReady())) {
+    const pb = input.copyFacts.benefits !== null ? buildCopyFactsPatch({ benefits: input.copyFacts.benefits }, 'question') : {};
+    const pl = input.copyFacts.link !== null ? buildCopyFactsPatch({ link: input.copyFacts.link }, 'question') : {};
+    if (pl.error) console.warn(`[journey-builder] 질문표 링크를 원장에 못 씀(혜택만 남김) journey=${journeyId} — ${pl.error}`);
+    await writeJourneyCopyFacts((t, pr) => query(t, pr), journeyId, { benefits: pb.benefits, link: pl.error ? undefined : pl.link });
+  }
+
   // ★ 2026-08-02 §13-1: step INSERT는 insertJourneyStepRow 단일 정의를 쓴다.
   //   저장 후 스텝 추가 API(addJourneyStep)가 같은 컬럼 집합을 두 번째로 적으면 알림톡·MMS·앵커 컬럼이
   //   한쪽에만 추가되는 어긋남이 생긴다 — 그래서 생성 경로도 같은 함수를 부른다.
@@ -650,7 +663,7 @@ JSON 형식만 응답:
       base.channel = ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms';
       // ★ 2026-10-24 세 채널 구조체크 ② — 이 생산자만 거름이 없었다(R13 · 다른 여정 생성 경로와 같은 근거 = 회사가 준 목표문).
       //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
-      base.messageTemplate = dropInventedEfficacy(stripUnauthorizedBenefits(aiStr(s.messageTemplate).slice(0, 2000), objective), objective).text;
+      base.messageTemplate = dropInventedEfficacy(replaceInventedBenefits(aiStr(s.messageTemplate).slice(0, 2000), objective), objective).text;
       base.isAd = s.isAd !== undefined ? !!s.isAd : true;
       // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문) · K1-1 문자 광고 단계 = 첫 줄에 전송자 명칭
       const seasonless = dropSeasonSentences(base.messageTemplate || '', objective).text;
@@ -1246,11 +1259,7 @@ export async function createJourneyStepSnapshots(companyId: string, journeyId: s
 
 // step 본문 갱신 (활성화 전 회사 admin이 직접 편집)
 // ★ D188 Phase 2-B-1 (2026-05-21): step_type + conditionJsonb patch 추가 — wait/condition step 편집 영역.
-export async function updateJourneyStep(
-  companyId: string,
-  journeyId: string,
-  stepId: string,
-  patch: {
+export interface JourneyStepPatch {
     messageTemplate?: string;
     subject?: string;
     channel?: ChannelType;
@@ -1274,7 +1283,13 @@ export async function updateJourneyStep(
     // ★ 2026-07-11 활성 중 문안 수정 — 라우트 명시 opt-in. 문안 키(messageTemplate/subject)만 허용,
     //   구조 키(채널·일정·조건·알림톡·MMS)는 활성 중 계속 차단. 수정 후 새 snapshot + 스팸 재검사 강제.
     allowActiveMessageEdit?: boolean;
-  }
+}
+
+export async function updateJourneyStep(
+  companyId: string,
+  journeyId: string,
+  stepId: string,
+  patch: JourneyStepPatch,
 ): Promise<boolean> {
   // ★ 2026-09-29 여정 V2 0차 ⑩ (회의론자 0차 검증 3) — 칸 편집 경로에도 칸 종류 화이트리스트를 건다.
   //   옛: `step_type = COALESCE($n, step_type)`로 모르는 값이 그대로 저장됐다(실행기는 이제 그 칸을 보내지 않고 끝낸다 = 조용한 0건).
@@ -1289,13 +1304,6 @@ export async function updateJourneyStep(
   //   여기서 미리 읽으면 그 직후 활성화가 먼저 잠금을 가져갔을 때, 운영 중 여정을 비활성인 줄 알고 고친다.
   // ★ 2026-10-09 고객 관계 지도 — 판정 = stepEditPolicy 한 곳(지도 응답과 같은 함수 · 설계서 §4).
   //   진행 중 수도 같은 잠금 안에서 센다. 거절 = JourneyStepGateError(409 · 옛: 일반 Error 500).
-  const assertStepEditAllowed = async (run: SqlRunner, status: string, startKind: string | null): Promise<void> => {
-    const inProgress = status === 'paused' ? await countInProgressExecutions(run, journeyId) : 0;
-    const policy = stepEditPolicy(status, inProgress, startKind);
-    const blocked = blockedStepEditGroups(policy, patch as Record<string, unknown>, status);
-    if (blocked.length > 0) throw new JourneyStepGateError(stepEditBlockedMessage(policy, blocked), 'STEP_EDIT_LOCKED');
-  };
-  const touchesCopy = patch.messageTemplate !== undefined || patch.subject !== undefined;
 
   // ★ D188 Phase 2-B-1: step_type 변경 시 conditionJsonb 정합 검증 (condition은 conditionJsonb 필수).
   if (patch.stepType === 'condition' && (!patch.conditionJsonb || typeof patch.conditionJsonb !== 'object')) {
@@ -1350,17 +1358,41 @@ export async function updateJourneyStep(
 
   // ⛔ 2026-08-02 Codex 4R — 스텝 변경과 검증 무효화를 **한 트랜잭션**에서 커밋한다.
   //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 문안을 옛 통과 마커로 켠다.
-  let isActive = false;
   // ★ 2026-10-20 V.3 §4-4 — 간격 · 담당자 알림만 고치면 사전검사 표식을 지킨다(판 = updated_at 은 늘 올림). 그 밖 키가 하나라도 있으면 지금처럼 비운다.
   const keepMarker = keepsPretestMarkerForStep(patch as Record<string, unknown>);
-  const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
-    await assertStepEditAllowed(run, journey.status, journey.startKind);   // 잠근 상태로 판정(5R)
+  const r = (await withJourneyValidationReset(companyId, journeyId, (run, journey) => applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch), { keepMarker })) ?? { rows: [] as any[] };
+  // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
+  //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
+  //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
+  return r.rows.length > 0;
+}
+
+/**
+ * ★ 2026-11-01 여정 재발 방지 B1-2(Codex 설계 1R #5) — 칸 갱신의 **잠금 안** 몸통(옛 updateJourneyStep 안 콜백 그대로 옮김).
+ *   여정 행 잠금(withJourneyValidationReset) 안에서만 부른다 · 채우기 길(fillJourneyCopyFacts)이 여러 칸을 한 트랜잭션에서 같은 규칙으로 고친다.
+ *   상태 판정(stepEditPolicy) · 날짜 예약 시각 · UPDATE · 켜진 여정의 새 스냅숏 + 검사 기록 지우기가 한 몸통이다.
+ */
+export async function applyStepPatchInLock(
+  run: SqlRunner,
+  journey: { status: string; startKind: string | null },
+  companyId: string,
+  journeyId: string,
+  stepId: string,
+  patch: JourneyStepPatch,
+): Promise<{ rows: any[] }> {
+  const touchesCopy = patch.messageTemplate !== undefined || patch.subject !== undefined;
+  {
+    const inProgress = journey.status === 'paused' ? await countInProgressExecutions(run, journeyId) : 0;
+    const policy = stepEditPolicy(journey.status, inProgress, journey.startKind);
+    const blocked = blockedStepEditGroups(policy, patch as Record<string, unknown>, journey.status);
+    if (blocked.length > 0) throw new JourneyStepGateError(stepEditBlockedMessage(policy, blocked), 'STEP_EDIT_LOCKED');   // 잠근 상태로 판정(5R)
+  }
     // ★ 2026-10-25 #8 — 날짜 예약 칸의 보내는 시각도 발송 창 안(만들기와 같은 판정)
     if (journey.startKind === 'date_anchor') {
       const hourIssue = anchorSendHourIssue(patch.targetHourKst);
       if (hourIssue) throw new JourneyInputError(hourIssue);
     }
-    isActive = journey.status === 'active' && touchesCopy;
+    const isActive = journey.status === 'active' && touchesCopy;
     const upd = await run(
     `UPDATE journey_steps SET
        message_template = COALESCE($4, message_template),
@@ -1422,11 +1454,49 @@ export async function updateJourneyStep(
       await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);
     }
     return upd;
-  }, { keepMarker })) ?? { rows: [] as any[] };
-  // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
-  //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
-  //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
-  return r.rows.length > 0;
+}
+
+/**
+ * ★ 2026-11-01 여정 재발 방지 B1-2 · B1-3 — 「혜택 넣기 · 링크 넣기」 = 사람 값 원장(by=fill) + 그 여정 **모든 문자 칸**의 자리표시를 값으로.
+ *   여정 잠금 하나 · 한 트랜잭션(원장 · 칸 글 · 켜진 여정의 새 미검사 판 · 검사 기록 무효화가 한 번에 · Codex 설계 1R #5).
+ *   못 고치는 상태면 기존 오류(STEP_EDIT_LOCKED) · 원장도 안 쓴다(같은 트랜잭션이 되돌린다).
+ */
+export async function fillJourneyCopyFacts(
+  companyId: string,
+  journeyId: string,
+  input: { benefit?: string; url?: string },
+): Promise<{ steps: Array<{ id: string; messageTemplate: string; subject: string | null }> } | null> {
+  const patch = buildCopyFactsPatch({
+    ...(input.benefit !== undefined ? { benefits: [input.benefit] } : {}),
+    ...(input.url !== undefined ? { link: input.url } : {}),
+  }, 'fill');
+  if (patch.error) throw new JourneyInputError(patch.error);
+  const benefit = patch.benefits?.[0]?.text || '';
+  const url = patch.link && 'url' in patch.link ? patch.link.url : '';
+  if (!benefit && !url) throw new JourneyInputError('넣을 혜택이나 링크를 적어 주세요.');
+  return withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
+    await writeJourneyCopyFacts(run, journeyId, { ...(benefit ? { benefits: patch.benefits } : {}), ...(url ? { link: patch.link } : {}) });
+    const rows = (await run(
+      `SELECT id, message_template, subject FROM journey_steps WHERE journey_id = $1::uuid AND step_type = 'message' ORDER BY step_order`,
+      [journeyId],
+    )).rows as Array<{ id: string; message_template: string | null; subject: string | null }>;
+    const out: Array<{ id: string; messageTemplate: string; subject: string | null }> = [];
+    for (const row of rows) {
+      let msg = String(row.message_template || '');
+      let subj = row.subject;
+      if (benefit) { msg = fillBenefitSpots(msg, benefit); if (subj) subj = fillBenefitSpots(subj, benefit); }
+      if (url) msg = fillLinkSpots(msg, url).text;
+      if (msg !== String(row.message_template || '') || subj !== row.subject) {
+        await applyStepPatchInLock(run, journey, companyId, journeyId, row.id, {
+          messageTemplate: msg,
+          ...(subj !== row.subject ? { subject: subj || '' } : {}),
+          allowActiveMessageEdit: true,
+        });
+      }
+      out.push({ id: row.id, messageTemplate: msg, subject: subj });
+    }
+    return { steps: out };
+  });
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1542,7 +1612,7 @@ function assertMmsHasImage(stepType: unknown, channel: unknown, images: unknown)
   if (String(channel || '') !== 'mms') return;
   if (Array.isArray(images) && images.length > 0) return;
   throw new JourneyStepGateError(
-    '사진 문자는 이미지를 넣어야 저장할 수 있습니다. 이미지를 올리거나 장문 문자로 바꿔 주세요.',
+    'MMS는 이미지를 넣어야 저장할 수 있습니다. 이미지를 올리거나 LMS로 바꿔 주세요.',
     'MMS_IMAGE_REQUIRED'
   );
 }
@@ -2077,7 +2147,9 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
   const pauseView = j.rows[0].status === 'paused' ? pauseReasonView(j.rows[0].pause_reason) : null;
   const { entry_ends_on_text: endsText, ...row } = j.rows[0];
   return {
-    journey: { ...row, entry_ends_on: endsReady ? (endsText ?? null) : undefined, entry_ends_ready: endsReady, activation_cost: activationCostOf(row), pause_view: pauseView },
+    // ★ 2026-11-01 여정 재발 방지 B1-3 — 사람 값 원장 상태(혜택 · 링크 · 정함 여부). 칸이 없으면(DDL-A 전) null = 화면이 채우기 줄을 늘 보이지 않는다.
+    journey: { ...row, entry_ends_on: endsReady ? (endsText ?? null) : undefined, entry_ends_ready: endsReady, activation_cost: activationCostOf(row), pause_view: pauseView,
+      copy_facts_view: 'copy_facts' in row ? journeyCopyFacts(parseCopyFacts(row.copy_facts)) : null },
     steps: stepsWithLabels,
   };
 }

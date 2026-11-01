@@ -20,10 +20,10 @@ import { randomUUID } from 'crypto';
 import pool, { query } from '../config/database';
 import { recordPlanChange, todayKst } from './plan-change-log';
 import { sendSystemAlert } from './system-alert';
-import { shiftDayKey } from './plan-proration';
+import { shiftDayKey, daySpan } from './plan-proration';
 import {
   periodEnd, monthlyCharge, planOfDay, upgradeCharge, upgradeRuns, currentTermEvents, lastPlanSetterPlanId, daysLeft,
-  decideSettle, decidePlanRequest, isYmd, PURCHASE_EVENT_TYPES, type TermEvent,
+  decideSettle, decidePlanRequest, isYmd, PURCHASE_EVENT_TYPES, firstTermEnd, proratedCharge, type TermEvent,
 } from './plan-term-calc';
 
 export const PLAN_TERM_REFERENCE_TYPE = 'plan_term';
@@ -85,7 +85,11 @@ interface TermRow {
   version: number;
 }
 
-interface TermState { row: TermRow; events: (TermEvent & { id: string; created_at: string; detail: any })[]; today: string }
+interface TermState {
+  row: TermRow; events: (TermEvent & { id: string; created_at: string; detail: any })[]; today: string;
+  /** ★ 2026-11-01 크레딧 컨트롤타워 C4 — writeTerm 이 plan_id 를 바꾸기 직전 값(이력 없는 회사의 첫 이력 from_plan 힌트) */
+  prevPlanIdForHint?: string | null;
+}
 
 // ════════════════════════════════════════════════════════════
 // 읽기
@@ -219,7 +223,10 @@ async function writeTerm(client: PoolClient, s: TermState, ch: TermChanges): Pro
   if ('auto_renew' in ch) s.row.auto_renew = !!ch.auto_renew;
   if ('restore_plan_id' in ch) s.row.restore_plan_id = ch.restore_plan_id ?? null;
   if ('next_plan_id' in ch) s.row.next_plan_id = ch.next_plan_id ?? null;
-  if (ch.plan) s.row.plan_id = ch.plan.id;
+  if (ch.plan) {
+    s.prevPlanIdForHint = s.row.plan_id;
+    s.row.plan_id = ch.plan.id;
+  }
   return v;
 }
 
@@ -303,6 +310,7 @@ async function changePlan(
   await recordPlanChange({
     client, companyId: s.row.id, toPlanId: toPlan.id, changeType: 'auto',
     changedBy: actor.type === 'system' ? null : (actor.id ?? null), reason, effectiveDate: s.today,
+    prevPlanIdHint: s.prevPlanIdForHint ?? null,
   });
 }
 
@@ -316,17 +324,22 @@ async function alertOnce(companyId: string, key: string, message: string): Promi
 // 동작
 // ════════════════════════════════════════════════════════════
 
-/** 1개월 구매(자동 결제·직접 연장·복구·첫 결제). 부족하면 PlanTermError 402 */
+/**
+ * 구매(자동 결제·직접 연장·복구·첫 결제). 부족하면 PlanTermError 402.
+ * ★ 2026-11-01 크레딧 컨트롤타워 C11(Harold 「새 회사만 1일 맞춤」) — 첫 결제 · 다시 열기 = 오늘 ~ 그달 말일 일할(그 뒤 연장은 1일부터 한 달).
+ *   연장 · 자동 결제 = 만료 다음 날부터 한 달(지금 그대로 · 결제일 기준으로 도는 회사는 그대로).
+ */
 async function purchase(
   client: PoolClient, s: TermState,
   o: { kind: 'first_charge' | 'renew' | 'extend' | 'restore'; plan: PlanRow; coversFrom: string; actor: TermActor; requestId?: string | null },
-): Promise<void> {
-  const coversTo = periodEnd(o.coversFrom);
+): Promise<{ supply: number; vat: number; total: number; coversTo: string }> {
+  const prorated = o.kind === 'first_charge' || o.kind === 'restore';
+  const coversTo = prorated ? firstTermEnd(o.coversFrom) : periodEnd(o.coversFrom);
   if (!coversTo) throw new PlanTermError(500, { code: 'BAD_DATE', error: '이용 기간 날짜를 계산하지 못했습니다.' });
-  const charge = monthlyCharge(o.plan.monthly_price);
+  const charge = prorated ? proratedCharge(o.plan.monthly_price, o.coversFrom, coversTo) : monthlyCharge(o.plan.monthly_price);
   const eventId = randomUUID();
   const d = await deduct(client, s, charge.total, eventId,
-    `[요금제 이용료] ${o.plan.plan_name} 1개월 ${o.coversFrom}~${coversTo} (공급가 ${won(charge.supply)} + 부가세 ${won(charge.vat)})`, o.actor);
+    `[요금제 이용료] ${o.plan.plan_name} ${prorated ? '이번 달 남은 기간' : '1개월'} ${o.coversFrom}~${coversTo} (공급가 ${won(charge.supply)} + 부가세 ${won(charge.vat)})`, o.actor);
   if (!d.ok) {
     throw new PlanTermError(402, {
       code: 'INSUFFICIENT_BALANCE', error: `잔액이 부족합니다. 필요 ${won(charge.total)} / 현재 ${won(s.row.balance)}`,
@@ -348,6 +361,7 @@ async function purchase(
   // ★ 2026-10-26 AI 크레딧은 changePlan → recordPlanChange 가 그 달 남은 기간 몫으로 반영한다(다시 열기 · 첫 결제 공통).
   //   옛 「잠긴 동안 월 리셋이 돌았으면 한 달치 보충」(topUpAiCreditsOnRestore)은 지웠다 — 남겨 두면 일할 위에 한 달치가 겹친다.
   if (planChanged) await changePlan(client, s, o.plan, o.actor, `선불 이용 기간 ${o.kind === 'restore' ? '다시 열기' : '시작'}(${o.plan.plan_code})`);
+  return { ...charge, coversTo };
 }
 
 /** 잠금: plan_id ← FREE, 복구할 요금제 기억(D2). subscription_status는 건드리지 않는다(expired는 발송까지 막는다). */
@@ -504,8 +518,9 @@ async function buildQuote(client: PoolClient, s: TermState): Promise<PlanTermQuo
   if (!plan) throw new PlanTermError(409, { code: 'PLAN_NOT_FOUND', error: '연장할 요금제를 찾지 못했습니다.' });
   assertSettled(s);
   const startsOn = restoring ? s.today : shiftDayKey(s.row.expires_on!, 1);
-  const newExpires = periodEnd(startsOn)!;
-  const charge = monthlyCharge(plan.monthly_price);
+  // ★ 2026-11-01 C11 — 다시 열기 = 오늘 ~ 그달 말일 일할(purchase 와 같은 계산 · 견적 = 실제 차감)
+  const newExpires = (restoring ? firstTermEnd(startsOn) : periodEnd(startsOn))!;
+  const charge = restoring ? proratedCharge(plan.monthly_price, startsOn, newExpires) : monthlyCharge(plan.monthly_price);
   return {
     version: s.row.version,
     plan_name: plan.plan_name,
@@ -626,14 +641,14 @@ export async function applyPlanRequestWithClient(
     case 'reject':
       throw new PlanTermError(d.status, { code: d.code, error: d.error });
     case 'first_charge': {
-      await purchase(client, s, { kind: 'first_charge', plan: target, coversFrom: s.today, actor: input.actor });
-      return { handled: true, outcome: 'first_charge', charged: monthlyCharge(target.monthly_price).total,
-        message: `${target.plan_name} 요금제를 시작했습니다. 1개월 요금 ${won(monthlyCharge(target.monthly_price).total)}(부가세 포함)을 충전 잔액에서 차감했고 ${s.row.expires_on}까지 이용합니다.` };
+      const c = await purchase(client, s, { kind: 'first_charge', plan: target, coversFrom: s.today, actor: input.actor });
+      return { handled: true, outcome: 'first_charge', charged: c.total,
+        message: `${target.plan_name} 요금제를 시작했습니다. 이번 달 남은 ${daySpan(s.today, c.coversTo)}일 요금 ${won(c.total)}(부가세 포함)을 충전 잔액에서 차감했고 ${c.coversTo}까지 이용합니다. 다음 달부터 매월 1일에 ${won(monthlyCharge(target.monthly_price).total)}이 자동 결제됩니다.` };
     }
     case 'restore': {
-      await purchase(client, s, { kind: 'restore', plan: target, coversFrom: s.today, actor: input.actor });
-      return { handled: true, outcome: 'restore', charged: monthlyCharge(target.monthly_price).total,
-        message: `${target.plan_name} 요금제로 다시 열었습니다. 1개월 요금 ${won(monthlyCharge(target.monthly_price).total)}(부가세 포함)을 차감했고 ${s.row.expires_on}까지 이용합니다.` };
+      const c = await purchase(client, s, { kind: 'restore', plan: target, coversFrom: s.today, actor: input.actor });
+      return { handled: true, outcome: 'restore', charged: c.total,
+        message: `${target.plan_name} 요금제로 다시 열었습니다. 이번 달 남은 ${daySpan(s.today, c.coversTo)}일 요금 ${won(c.total)}(부가세 포함)을 차감했고 ${c.coversTo}까지 이용합니다. 다음 달부터 매월 1일에 ${won(monthlyCharge(target.monthly_price).total)}이 자동 결제됩니다.` };
     }
     case 'end': {
       await endTerm(client, s, input.actor, '잠긴 상태에서 미가입 신청 승인');

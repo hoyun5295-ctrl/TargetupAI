@@ -417,6 +417,10 @@ export const SPAM_RESULT = {
   BLOCKED: 'blocked', // 스팸 차단됨
   FAILED: 'failed',   // 발송 자체 실패
   TIMEOUT: 'timeout',  // 시간 초과 (판정 불가)
+  // ★ 2026-11-01 여정 재발 방지 B1-4 — 통신사 전달 성공 + 앱 보고 없음 = 「확인 중」(차단 아님 · 확인 문자 · 늦은 보고로 닫힌다)
+  UNCONFIRMED: 'unconfirmed',
+  // ★ 2026-11-01 B1-4 — 확인 중이 확인 문자로도 닫히지 않음(검사폰이 확인 문자를 보고하지 않음 · 단말 확인 불가) = 검사 장애(차단 아님)
+  ERROR: 'error',
 } as const;
 
 export type SpamResultType = typeof SPAM_RESULT[keyof typeof SPAM_RESULT];
@@ -453,12 +457,23 @@ export function spamResultRowStatus(result: string | null | undefined): 'pending
  */
 export const SPAM_RESULT_DECIDE_SQL = `UPDATE spam_filter_test_results SET result = $1 WHERE id = $2 AND received = false AND result IS NULL`;
 
+/**
+ * ★ 2026-11-01 여정 재발 방지 B1-4(Codex 설계 2R #4) — 「통신사 전달 성공 + 앱 보고 없음」으로 끝나는 **모든** 자리의 공용 판정.
+ *   옛: 45초 확정 · 시간 초과 두 갈래(큐 · 수동)가 차단으로 적어, 실제로 받은 LG U+ 문자도 「차단」이었다(B-1101-3 · 10-30 실측 3건).
+ *   차단(blocked)을 쓰는 길은 확인 문자 수신 하나뿐이다(spam-probe) — 계약 시험이 SQL 자리를 센다.
+ */
+export function deliveredUnreportedResult(): SpamResultType {
+  return SPAM_RESULT.UNCONFIRMED;
+}
+
 /** 스팸필터 result → 표시명 */
 export const SPAM_RESULT_LABEL: Record<string, string> = {
   [SPAM_RESULT.PASS]: '정상',
   [SPAM_RESULT.BLOCKED]: '차단',
   [SPAM_RESULT.FAILED]: '실패',
   [SPAM_RESULT.TIMEOUT]: '시간초과',
+  [SPAM_RESULT.UNCONFIRMED]: '확인 중',
+  [SPAM_RESULT.ERROR]: '검사폰 확인 불가',
 };
 
 /** 스팸필터 result → 표시명 (null/undefined → '대기') */

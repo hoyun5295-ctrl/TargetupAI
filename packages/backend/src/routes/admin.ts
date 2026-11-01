@@ -78,6 +78,7 @@ import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+import { planMonthCreditsReady, snapshotOpenMonths } from '../utils/ai-credit-month';
 // ★ 2026-10-04 선불 요금제 이용 기간 — 승인 판정·차감 CT · 관리 중 게이트(docs/2026-10-04-prepaid-plan-term-design.md §5)
 import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
@@ -607,8 +608,8 @@ router.get('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
   try {
     const result = await query(`
       SELECT c.*, p.plan_name,
-        (SELECT COUNT(*) FROM customers WHERE company_id = c.id) as total_customers,
-        (SELECT COUNT(*) FROM users WHERE company_id = c.id AND COALESCE(is_system, false) = false) as total_users
+        (SELECT COUNT(*) FROM customers WHERE company_id = c.id)::int as total_customers,
+        (SELECT COUNT(*) FROM users WHERE company_id = c.id AND COALESCE(is_system, false) = false)::int as total_users
       FROM companies c
       LEFT JOIN plans p ON c.plan_id = p.id
       WHERE c.id = $1
@@ -1760,6 +1761,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
           changeType: 'auto',
           changedBy: (req as any).user?.userId || null,
           reason: '회사 수정(요금제 변경·슈퍼관리자)',
+          prevPlanIdHint: beforePlan.rows[0]?.plan_id ? String(beforePlan.rows[0].plan_id) : null,
         });
       }
       if (trialViaCt && result.rows.length > 0) {
@@ -2771,18 +2773,23 @@ router.get('/plans', authenticate, requireSuperAdmin, async (req: Request, res: 
 
 // 요금제 추가
 router.post('/plans', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
-  const { planCode, planName, maxCustomers, monthlyPrice } = req.body;
+  const { planCode, planName, maxCustomers, monthlyPrice, aiCreditsPerMonth } = req.body;
   
   if (!planCode || !planName || maxCustomers === undefined || monthlyPrice === undefined) {
     return res.status(400).json({ error: '모든 항목을 입력해주세요.' });
   }
+  // ★ 2026-11-01 크레딧 컨트롤타워 C10(P13) — 월 크레딧 없이 만든 요금제는 그 요금제 회사의 AI 차감이 통째로 꺼졌다(크레딧제 미적용 = 무제한 무료).
+  const credits = Number(aiCreditsPerMonth);
+  if (aiCreditsPerMonth === undefined || aiCreditsPerMonth === null || aiCreditsPerMonth === '' || !Number.isInteger(credits) || credits < 0) {
+    return res.status(400).json({ error: '월 AI 크레딧(0 이상 정수)을 입력해주세요.' });
+  }
   
   try {
     const result = await query(`
-      INSERT INTO plans (plan_code, plan_name, max_customers, monthly_price)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO plans (plan_code, plan_name, max_customers, monthly_price, ai_credits_per_month)
+      VALUES ($1, $2, $3, $4, $5)
       RETURNING *
-    `, [planCode, planName, maxCustomers, monthlyPrice]);
+    `, [planCode, planName, maxCustomers, monthlyPrice, credits]);
     
     res.json({ 
       message: '요금제가 등록되었습니다.',
@@ -2801,9 +2808,31 @@ router.post('/plans', authenticate, requireSuperAdmin, async (req: Request, res:
 router.put('/plans/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { planName, maxCustomers, monthlyPrice, isActive, aiCreditsPerMonth } = req.body;
-  
+  const creditsGiven = aiCreditsPerMonth !== undefined && aiCreditsPerMonth !== null && aiCreditsPerMonth !== '';
+  const credits = creditsGiven ? Number(aiCreditsPerMonth) : null;
+  if (creditsGiven && (!Number.isInteger(credits) || (credits as number) < 0)) {
+    return res.status(400).json({ error: '월 AI 크레딧은 0 이상 정수여야 합니다.' });
+  }
+
+  // ★ 2026-11-01 크레딧 컨트롤타워 C10(P14 · Codex R3-3) — 월 크레딧은 그 달에 고정한다. 바꾸기 **전에** 아직 닫히지 않았을 수 있는 달
+  //   전부를 지금(수정 전) 값으로 고정하고 같은 트랜잭션에서 바꾼다 → 새 값은 다음 달 1일부터. 고정표가 없으면(DDL 전) 월 크레딧 수정은 거절.
+  const client = await pool.connect();
   try {
-    const result = await query(`
+    await client.query('BEGIN');
+    const cur = await client.query(`SELECT ai_credits_per_month FROM plans WHERE id = $1 FOR UPDATE`, [id]);
+    if (cur.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: '요금제를 찾을 수 없습니다.' });
+    }
+    const creditsChanging = creditsGiven && Number(cur.rows[0].ai_credits_per_month ?? -1) !== credits;
+    if (creditsChanging) {
+      if (!(await planMonthCreditsReady(client))) {
+        await client.query('ROLLBACK');
+        return res.status(503).json({ code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: plan_month_credits 표 CREATE 실행 요청(그 전에는 월 크레딧을 바꿀 수 없습니다)' });
+      }
+      await snapshotOpenMonths(client, new Date());
+    }
+    const result = await client.query(`
       UPDATE plans 
       SET plan_name = COALESCE($1, plan_name),
           max_customers = COALESCE($2, max_customers),
@@ -2812,16 +2841,22 @@ router.put('/plans/:id', authenticate, requireSuperAdmin, async (req: Request, r
           ai_credits_per_month = COALESCE($6, ai_credits_per_month)
       WHERE id = $5
       RETURNING *
-    `, [planName, maxCustomers, monthlyPrice, isActive, id, aiCreditsPerMonth]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: '요금제를 찾을 수 없습니다.' });
+    `, [planName, maxCustomers, monthlyPrice, isActive, id, credits]);
+    await client.query('COMMIT');
+    res.json({
+      message: creditsChanging ? '수정되었습니다. 월 AI 크레딧은 다음 달 1일부터 적용됩니다.' : '수정되었습니다.',
+      plan: result.rows[0],
+    });
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 이미 끝난 트랜잭션 */ }
+    const msg = String(error?.message || '');
+    if (msg.includes('plan_month_credits') && msg.includes('does not exist')) {
+      return res.status(503).json({ code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: plan_month_credits 표 CREATE 실행 요청' });
     }
-    
-    res.json({ message: '수정되었습니다.', plan: result.rows[0] });
-  } catch (error) {
     console.error('요금제 수정 실패:', error);
     res.status(500).json({ error: '요금제 수정 실패' });
+  } finally {
+    client.release();
   }
 });
 
@@ -2947,6 +2982,8 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
       // ★ 2026-07-25 플랜 변경과 이력을 한 트랜잭션으로(Codex 지적 C).
       //   승급/강등 판정은 recordPlanChange 안에서 INSERT에 쓰는 바로 그 직전 값으로 한다(지적 F) —
       //   호출부가 미리 계산하면 그 사이 다른 변경이 끼어들 때 방향이 뒤집힌다.
+      // ★ 2026-11-01 크레딧 컨트롤타워 C4 — 바꾸기 전 요금제(이력 없는 회사의 첫 이력 from_plan 힌트)를 잠금 아래에서 본다.
+      const priorPlan = await client.query(`SELECT plan_id FROM companies WHERE id = $1 FOR UPDATE`, [request.company_id]);
       const planUpd = await client.query(
         `UPDATE companies SET plan_id = $1, subscription_status = $2, updated_at = NOW() WHERE id = $3
          RETURNING id`,
@@ -2960,6 +2997,7 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
           changeType: 'auto',
           changedBy: (req as any).user?.userId || null,
           reason: '요금제 신청 승인(슈퍼관리자)',
+          prevPlanIdHint: priorPlan.rows[0]?.plan_id ? String(priorPlan.rows[0].plan_id) : null,
         });
       }
     }

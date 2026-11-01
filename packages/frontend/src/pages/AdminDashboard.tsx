@@ -511,6 +511,7 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
     planName: '',
     maxCustomers: 1000,
     monthlyPrice: 0,
+    aiCreditsPerMonth: '',
   });
 
   // 충전 관리 (통합)

@@ -92,7 +92,7 @@ export interface AiLineAudience {
 export interface AiLineCard { type: AiLineType; label: string; body: string; subject: string; byteCount: number }
 
 export type AiLineSpamState =
-  | 'queued' | 'running' | 'pass' | 'blocked' | 'warn'
+  | 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn'
   | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device';
 
 export interface AiLineSpamChip {
@@ -100,7 +100,7 @@ export interface AiLineSpamChip {
   testId?: string;
   /** 칩이 묶인 글 지문(본문 · 제목 · 채널 · 광고 · 발신번호) — 달라지면 「다시 검사」 */
   fp?: string;
-  carriers?: Array<{ carrier: string; result: 'pass' | 'blocked' | 'none' }>;
+  carriers?: Array<{ carrier: string; result: 'pass' | 'blocked' | 'checking' | 'none' }>;
   aheadCount?: number;
   elapsedSec?: number;
   autoRuns?: number;

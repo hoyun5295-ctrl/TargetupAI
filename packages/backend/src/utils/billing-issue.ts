@@ -17,6 +17,8 @@ import { randomUUID } from 'crypto';
 import pool from '../config/database';
 import type { PoolClient } from 'pg';
 import { CREDIT_UNIT_PRICE } from './ai-credit-calc';
+import { closeCreditMonthsNow } from './ai-credit';
+import { creditMonthsOpenInPeriod } from './ai-credit-month';
 import {
   buildCompanyUsageByDay, buildBillingTotals, resolveBillingUnitPricesDetailed, logUnbillableUsageKeys,
   buildBillingUsageRows, diffBillingRowsVsDayData, priceBillingRows,
@@ -351,6 +353,20 @@ ${EXTRA_ITEM_SOURCE_JOIN}
   return { rows: extraRes.rows, blocking: extraRowsBlockingIssue(extraRes.rows) };
 }
 
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 C8 · I10 — 청구 기간에 말일이 든 달이 크레딧 월 마감 전이면 발행하지 않는다(정산 잠금 뒤 읽기만).
+ * 발행 전에 `closeCreditMonthsNow` 가 닫으므로 여기서 걸리면 그 회사 월 마감이 실패한 것이다(경보가 이미 나갔다).
+ */
+async function assertCreditMonthsClosed(client: any, companyId: string, billingStart: string, billingEnd: string): Promise<void> {
+  const open = await creditMonthsOpenInPeriod(client, companyId, billingStart, billingEnd);
+  if (open.length > 0) {
+    throw new BillingIssueError(422, {
+      error: `AI 크레딧 월 마감 전인 달(${open.join(', ')})이 있어 발행하지 않았습니다. 월 마감(매월 1일 0시대)이 끝난 뒤 다시 발행해주세요.`,
+      code: 'CREDIT_MONTH_NOT_CLOSED',
+    });
+  }
+}
+
 export async function issueBilling(input: IssueBillingInput): Promise<any> {
   const { company_id, user_id, billing_start, billing_end } = input;
   const adminId = input.adminId ?? null;
@@ -370,6 +386,9 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       code: 'BILLING_PERIOD_OPEN',
     });
   }
+  // ★ 2026-11-01 크레딧 컨트롤타워 C8 — 그 회사 AI 크레딧 월 마감(후불 월말 맞춤 줄)을 먼저 닫는다(짧은 자기 트랜잭션).
+  //   발행 트랜잭션 안에서 하지 않는다 — 회사 행을 FOR UPDATE 로 올리면 그 회사를 가리키는 외래키 넣기가 발행 내내 막힌다.
+  await closeCreditMonthsNow(company_id);
 
   // ★ 2026-08-20 정산월 = 사람이 정하는 라벨(기본 종료월) — 파생 소유자는 resolveBillingLabelMonth 하나.
   //   옛 파생(시작일 Date 파싱)은 중간정산을 시작월로 굳혔고 TZ 잠복 결함도 있었다(함수 주석 참조).
@@ -659,6 +678,7 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
     // 같은 회사 정산을 동시에 생성하면 위 1번 중복검사를 양쪽 다 통과할 수 있다 — 직렬화한다.
     // ★ 2026-07-26 잠금 축은 **회사 단위**다. ★ 2026-08-05 두 겹(advisory + 회사 행)을 CT 하나가 소유한다.
     await lockCompanyForBilling(client, company_id);
+    await assertCreditMonthsClosed(client, company_id, billing_start, billing_end);
 
     // 잠금을 기다리는 동안 다른 요청이 먼저 만들었을 수 있다 — 잠금 획득 후 재검사.
     // ★ 2026-07-29 수동 정산완료도 **같은 잠금 아래에서** 본다. 사람이 따로 청구한 구간을 자동 청구서가
@@ -1107,6 +1127,8 @@ export async function issueMinimumChargeBilling(input: {
       code: 'MIN_CHARGE_MONTH_OPEN',
     });
   }
+  // ★ 2026-11-01 크레딧 컨트롤타워 C8 — 일반 발행과 같다(월 마감 먼저 · 자기 트랜잭션).
+  await closeCreditMonthsNow(company_id);
 
   // ★ 2026-09-26 한줄로 V2 F14 — 해지·수동 정산 회사를 함께 읽는다(아래 거절 · 일반 일괄발급 filterBillableCompanies와 같은 기준).
   const coRes = await pool.query(
@@ -1148,6 +1170,7 @@ export async function issueMinimumChargeBilling(input: {
     //   아래에서 잡으면 그 사이에 소급 요금제 변경이 커밋될 수 있고, 표기가 갈린 두 발행도 못 막는다.
     //   ★ Codex 2R 수용분(크레딧 승인·차감 경로 직렬화)은 그대로다 — 같은 행, 더 이른 시점일 뿐이다.
     await lockCompanyForBilling(client, company_id);
+    await assertCreditMonthsClosed(client, company_id, billing_start, billing_end);
 
     // ★ 2026-08-04 일반 발행과 **같은 판정 문**(readBillingPeriodConflicts) — 정액 경로만 문구·필드가
     //   달라 운영자가 같은 사유를 다른 말로 받던 것을 함께 통일했다.

@@ -53,7 +53,7 @@ export function assessMaterialSufficiency(counts: MaterialGateCounts, now: Date 
 const BENEFIT_WORD_RE = /%|할인|쿠폰|증정|무료|사은품|적립|세일|특가|이벤트/;
 
 /**
- * 재료에서 그대로 뽑은 사실 수치 문자열(가격) — `stripUnauthorizedBenefits`의 originalBody 에 면허 인용문 뒤에 이어 붙이는 근거.
+ * 재료에서 그대로 뽑은 사실 수치 문자열(가격) — `stripUnlicensedQuoteBenefits`의 originalBody 에 면허 인용문 뒤에 이어 붙이는 근거.
  * 공용 CT 시그니처는 바꾸지 않는다(불변 20 · 호출부가 근거 원문을 넓힌다). 코드가 만든 문장·할인율·혜택어는 넣지 않는다.
  */
 export function factQuoteOf(materials: { products?: readonly OutreachProduct[] | null; proof?: ProofSignals | null } | null | undefined): string {

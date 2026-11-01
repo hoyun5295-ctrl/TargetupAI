@@ -23,7 +23,7 @@
 import pool, { query } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate, spamVerdictOf, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, type SpamVerdict } from './spam-test-queue';
 import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
@@ -380,11 +380,20 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   finalContent: string;   // 치환 전 원문 기준(원장에 저장할 값)
   rounds: number;
   detail: any;
+  /** ★ 2026-11-01 B1-4 — 확인 중 · 검사 중으로 멈춘 다듬은 문장(원문과 다를 때만 · 다음 주기에 이 글부터 같은 검사를 이어 본다) */
+  heldContent?: string | null;
 }> {
   const original = String(row.current_content || '');
   let content = original;
   let rounds = startRound;
   let detail: any = null;
+  // ★ 2026-11-01 B1-4(Codex 구현 1R #7) — 지난 주기에 검사 중이던 다듬은 문장이 있으면(같은 문안 버전) 원문을 다시 다듬지 않고 그 글부터 이어 본다
+  //   (같은 글 = 같은 검사 · 새 검사 · 새 다듬기 0) · 그 글을 검사한 회차를 다시 쓴다(회차 상한은 주기를 넘어 그대로)
+  const held = row.last_test_result?.heldCandidate;
+  if (held && Number(held.version) === Number(row.content_version || 0) && typeof held.content === 'string' && held.content.trim() && held.content !== original) {
+    content = held.content;
+    rounds = Math.max(startRound, Math.min(MAX_TEST_ROUNDS - 1, (Number(held.rounds) || 1) - 1));
+  }
 
   // ★ 2026-10-24 검사 단계(표본 · 실검사 · 다듬기)가 던진 예외도 검사 장애다(Codex 1024 1R) — 호출부의 catch 로 새면
   //   spam_check_error 를 남기지 않아 대기 · 3회 상한을 우회하고 매 주기 실검사를 다시 일으켰다. 발송 배관 예외는 이 함수 밖이라 섞이지 않는다.
@@ -412,7 +421,10 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
       const verdict = spamVerdictOf(v, result.totalTestCount);
       if (verdict === 'error') return { verdict, passed: false, finalContent: original, rounds, detail };
+      // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 원문 그대로 잡기 전 상태로(장애 횟수에 안 셈) · 다듬은 문장이면 그 글을 남겨 다음 주기에 이어 본다
+      if (isSpamHold(verdict)) return { verdict, passed: false, finalContent: original, rounds, detail, heldContent: content !== original ? content : null };
       if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };
+      void (verdict satisfies 'blocked');
 
       await logEvent(row.id, 'spam_blocked', { round: rounds, carriers: v.carrierResults });
       if (rounds >= MAX_TEST_ROUNDS) break;
@@ -470,6 +482,31 @@ async function settleSpamCheckError(row: any, token: string, backTo: 'received' 
   // 상태 변경 결과를 본 뒤에만 기록한다(소유권을 잃었으면 가져간 쪽이 자기 기록을 남긴다 · ⓕ)
   const back = await setStatus(row.id, backTo, { ...RELEASE }, token).catch(() => false);
   if (back) console.warn(`${LOG} 스팸 검사 장애(${n}/${SPAM_CHECK_ERROR_LIMIT}) request=${row.id} phase=${phase} — ${SPAM_CHECK_ERROR_BACKOFF_MINUTES}분 뒤 다시 검사`);
+}
+
+/**
+ * ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 통과도 반려도 장애도 아니다. 사건만 남기고 잡기 전 상태로 돌린다(장애 횟수 · 대기 0).
+ *   다음 주기에 같은 문안을 다시 집으면 같은 검사를 이어 본다(spamCheckFor · 새 검사 0) · 확인 중은 확인 문자가 17분 안에 닫는다.
+ */
+async function settleSpamHold(row: any, token: string, backTo: 'received' | 'approved', phase: 'first' | 'final', verdict: SpamVerdict, detail: any, heldContent: string | null, rounds: number): Promise<void> {
+  await logEvent(row.id, 'spam_check_hold', { phase, verdict, version: Number(row.content_version || 0), batchId: detail?.batchId ?? null, held: !!heldContent });
+  // 검사 중인 다듬은 문장 = 결과 칸(last_test_result)의 heldCandidate(발송 문안 · 버전은 그대로 · 담당자가 고치면 결과 칸째 지워진다) · 원문이 검사 중이면 지난 후보를 지운다
+  //   ★ Codex 구현 2R #2 — 후보 · 회차 저장과 상태 되돌림 = 한 문장(setStatus · 소유권 토큰 조건) · 저장이 던지면 정상 보류가 아니라 검사 장애(횟수 상한) 갈래
+  const back = await setStatus(row.id, backTo, { ...RELEASE, last_test_result: heldResultJson(row, heldContent, rounds) }, token)
+    .catch(async (e: any) => {
+      console.warn(`${LOG} 검사 중 후보 · 상태 저장 실패 request=${row.id}(검사 장애로 센다):`, e?.message || e);
+      await settleSpamCheckError(row, token, backTo, phase, detail).catch(() => undefined);
+      return false;
+    });
+  if (back) console.log(`${LOG} 스팸 검사 ${verdict === 'pending' ? '진행 중' : '확인 중'} request=${row.id} phase=${phase} — 다음 주기에 이어 본다`);
+}
+
+/** (순수) 결과 칸에 검사 중 후보를 얹거나(다듬은 글 · 그 글을 검사한 회차 · 그 행 문안 버전) 지운 값 · 남는 것이 없으면 null(옛 값 그대로 = 비어 있음) */
+export function heldResultJson(row: { last_test_result?: any; content_version?: any }, heldContent: string | null, rounds: number): string | null {
+  const prev: Record<string, any> = row.last_test_result && typeof row.last_test_result === 'object' && !Array.isArray(row.last_test_result) ? { ...row.last_test_result } : {};
+  delete prev.heldCandidate;
+  const next = heldContent ? { ...prev, heldCandidate: { content: heldContent, rounds, version: Number(row.content_version || 0) } } : prev;
+  return Object.keys(next).length > 0 ? JSON.stringify(next) : null;
 }
 
 /** 고르기 SQL 조각 — 방금(대기 시간 안) 검사 장애가 난 건은 다시 집지 않는다(LIMIT 앞 · B-0823-1 착수 주의) */
@@ -542,9 +579,10 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     try {
       // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
       if (!(await touchTestingLock(row.id, token))) continue;
-      const { verdict, passed, finalContent, rounds, detail } = await runSpamRound(row, 0);
+      const { verdict, passed, finalContent, rounds, detail, heldContent } = await runSpamRound(row, 0);
       // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 접수 상태로 돌리고 대기 뒤 다시(같은 버전 3번째 = 사람 판단)
       if (verdict === 'error') { await settleSpamCheckError(row, token, 'received', 'first', detail); continue; }
+      if (isSpamHold(verdict)) { await settleSpamHold(row, token, 'received', 'first', verdict, detail, heldContent ?? null, rounds); continue; }
       // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
       //   담당자가 이미 문안을 고쳤는데 옛 문안으로 "승인해 주세요"를 보내면 그 문자가 거짓이 된다.
       const savedVersion = await saveTestResult(row, finalContent, rounds, detail, token);
@@ -731,9 +769,10 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
   const label = shortLabel(target.file_name || target.original_content);
 
   try {
-    const { verdict, passed, finalContent, rounds, detail } = await runSpamRound(target, 0);
+    const { verdict, passed, finalContent, rounds, detail, heldContent } = await runSpamRound(target, 0);
     // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 승인 상태로 돌리고 대기 뒤 다시(시각이 지나면 만료 단계가 맡는다 · 같은 버전 3번째 = 사람 판단)
     if (verdict === 'error') { await settleSpamCheckError(target, token, 'approved', 'final', detail); return; }
+    if (isSpamHold(verdict)) { await settleSpamHold(target, token, 'approved', 'final', verdict, detail, heldContent ?? null, rounds); return; }
     const version = await saveTestResult(target, finalContent, rounds, detail, token);
     if (version === null) return; // 소유권을 잃었다. 알림도 보내지 않는다
     // 통과한 문안에는 "오늘 검사를 지났다"는 표시를 남긴다. 재승인 뒤 재검사를 건너뛰는 근거이자,

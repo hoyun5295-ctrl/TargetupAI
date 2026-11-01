@@ -9,6 +9,7 @@
  * 식별자 매핑(화면 키 ↔ DB provider ↔ 이벤트 source) 자체는 `cdp-provider-keys.ts`가 소유하고,
  * 여기는 **사람에게 보여줄 이름**만 갖는다. 두 파일의 역할을 섞지 않는다.
  */
+import { MSG_TYPE_LABEL } from './campaign-axis';
 
 export const SOURCE_LABEL: Record<string, string> = {
   custom_sdk: '자체 SDK',
@@ -27,8 +28,8 @@ export const SOURCE_LABEL: Record<string, string> = {
 
 export const CHANNEL_LABEL: Record<string, string> = {
   KAKAO: '알림톡',
-  LMS: '장문 SMS',
-  SMS: '단문 SMS',
+  LMS: MSG_TYPE_LABEL.LMS,
+  SMS: MSG_TYPE_LABEL.SMS,
   EMAIL: '이메일',
   WEB_PUSH: '웹 푸시',
   IN_APP: '인앱',

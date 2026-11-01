@@ -263,3 +263,29 @@ export function sumDeductRows(rows: Array<{ type: string; amount: number | strin
     return sum;
   }, 0);
 }
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 §5-2 — 원장 줄 한 줄이 잔액을 얼마나 바꾸는가(순수 · 유일한 표).
+ *   대조 워커(I3) · 이력 화면 부호 · 계약 시험이 이 표 하나를 쓴다(프론트 `constants/credit.ts` 는 같은 표 사본 · 시험이 대조).
+ *   bucket = 'base'(기본분만) · 'purchased'(구매분만) · 'split'(차감 · 환불 = 두 항아리 합 · 차감은 둘 다 ≤ 0 · 환불은 둘 다 ≥ 0).
+ *   차감 amount 0 = 후불 월말 맞춤 줄(변동 0 · overage_credits = U). 환불 overage_credits = 지난 주기 부채로 갚은 양(잔액에 안 들어감).
+ *   원장에 넣는 type 은 전부 이 표에 있어야 한다(없으면 null — 대조 워커가 어긋남으로 본다).
+ */
+export const CREDIT_TX_TYPES: ReadonlySet<string> = new Set([
+  'reset', 'expire', 'trial_credit', 'plan_prorate', 'deduct', 'refund', 'grant', 'purchase', 'postpaid_grant', 'admin_deduct',
+]);
+
+export function creditTxDelta(
+  tx: { type: string; amount: number | string; overage_credits?: number | string | null },
+): { bucket: 'base' | 'purchased' | 'split'; delta: number } | null {
+  const amount = Number(tx.amount) || 0;
+  switch (tx.type) {
+    case 'reset': case 'trial_credit': return { bucket: 'base', delta: amount };
+    case 'expire': case 'plan_prorate': return { bucket: 'base', delta: amount };   // 부호 있는 amount
+    case 'grant': case 'purchase': case 'postpaid_grant': return { bucket: 'purchased', delta: amount };
+    case 'admin_deduct': return { bucket: 'purchased', delta: 0 - amount };   // 0 - x: amount 0 이면 -0 이 아니라 0
+    case 'deduct': return { bucket: 'split', delta: 0 - amount };
+    case 'refund': return { bucket: 'split', delta: amount - (Number(tx.overage_credits) || 0) };
+    default: return null;
+  }
+}

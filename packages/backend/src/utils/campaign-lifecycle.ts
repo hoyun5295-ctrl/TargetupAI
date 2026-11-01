@@ -96,7 +96,8 @@ export async function cleanupScheduledCampaigns(filter: CleanupScheduledFilter =
       // ★ 2026-09-27 한줄로 V2 m096 — 예약 상태일 때만 바꾼다(후보를 고른 뒤 MySQL을 세는 사이 취소되면 completed로 되돌렸다 →
       //   스위퍼 미적재 환불 뒤 회수). 못 바꿨으면 이 캠페인은 다른 경로(취소 정산)가 가졌다 — 환불도 하지 않고 다음으로.
       const moved = await query(
-        `UPDATE campaigns SET status = $1, sent_count = $2, success_count = $3, fail_count = $4,
+        // ★ 2026-11-01 B-1101-4 · R37 — 적재 수는 읽기로 내리지 않는다(적재 경로가 적은 값 · 읽기가 일부를 못 보면 미적재 환불이 된다).
+        `UPDATE campaigns SET status = $1, sent_count = GREATEST(COALESCE(sent_count, 0), $2::int), success_count = $3, fail_count = $4,
          sent_at = COALESCE(sent_at, scheduled_at, NOW()), updated_at = NOW() WHERE id = $5 AND status = 'scheduled'`,
         [newStatus, sentCount, successCount, failCount, camp.id]
       );

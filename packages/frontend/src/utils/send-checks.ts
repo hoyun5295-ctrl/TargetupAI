@@ -8,7 +8,8 @@
  * ⛔ 검사 결과로 글을 바꾸지 않는다. 바뀌는 것은 사용자가 [고치기]를 누를 때뿐이다.
  */
 
-export type SpamVerdict = 'running' | 'pass' | 'blocked' | 'warn';
+/** ★ 2026-11-01 B1-4 checking = 통신사는 보냈는데 검사폰 확인이 늦음(길어도 20분 안에 확정) */
+export type SpamVerdict = 'running' | 'pass' | 'blocked' | 'checking' | 'warn';
 
 export const CARRIER_LABEL: Record<string, string> = { SKT: 'SKT', KT: 'KT', LGU: 'LG U+' };
 export function carrierLabel(c: string): string {

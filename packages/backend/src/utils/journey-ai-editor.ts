@@ -13,6 +13,7 @@
  */
 
 import { UserFacingError } from './http-error';
+import { journeyCopyGround } from './journey-copy-facts';
 import { composeVoicePrompt, VOICE_KIND_BY_STEP } from './brand-voice-prompt';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
@@ -29,7 +30,7 @@ import { partitionCustomerConditions } from './journey-target-extractor';
 import { formatConditionMenuForAi } from './journey-condition-fields';
 import { describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 — 편집 결과도 생성과 같은 기계 차단을 지난다(프롬프트는 경계가 아니다).
-import { stripUnauthorizedBenefits, claimsInventedEfficacy, readingUnit, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE, findSeasonWords } from './copy-benefit-detector';
+import { replaceInventedBenefits, claimsInventedEfficacy, readingUnit, EFFICACY_PROMPT_RULES, EFFICACY_REWRITE_RULE, findSeasonWords } from './copy-benefit-detector';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
 
@@ -240,16 +241,16 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   //   이미 있던 혜택은 산다. 요청문에 쓴 새 혜택도 사용자 입력이라 산다. AI 창작만 죽는다).
   //   kakao 스텝은 승인 템플릿이 본체라 무접촉, wait·condition은 본문이 비어 대상이 아니다.
   const curSteps: any[] = Array.isArray(cur.steps) ? cur.steps : [];
-  const editBasis = [
-    instruction,
-    benefitText || '',
-    ...curSteps.map((s) => String(s?.messageTemplate || '')),
-    ...curSteps.map((s) => String(s?.subject || '')),
-  ].filter(Boolean).join('\n');
+  // ★ 2026-11-01 여정 재발 방지 B1-3 — 근거 = journeyCopyGround(편집 = 고치기 · 사람 값(요청문 · 승인 혜택) + 지금 본문 · 같은 규칙 한 곳)
+  const editBasis = journeyCopyGround(
+    null, 'fix',
+    [instruction, benefitText || ''].filter(Boolean).join('\n'),
+    [...curSteps.map((s) => String(s?.messageTemplate || '')), ...curSteps.map((s) => String(s?.subject || ''))].filter(Boolean).join('\n'),
+  );
   for (const s of steps) {
     if (s.stepType !== 'message' || s.channel === 'kakao') continue;
-    s.messageTemplate = stripUnauthorizedBenefits(String(s.messageTemplate || ''), editBasis);
-    s.subject = stripUnauthorizedBenefits(String(s.subject || ''), editBasis);
+    s.messageTemplate = replaceInventedBenefits(String(s.messageTemplate || ''), editBasis);
+    s.subject = replaceInventedBenefits(String(s.subject || ''), editBasis);
   }
   // ★ 2026-10-24 ② Codex 1R — 편집 = 다시 쓰기. 같은 근거(편집 전 글 + 요청 + 승인 혜택)에 없던 효능 말이 생기면 **수정 전체를 적용하지 않는다**
   //   (원래 패키지 그대로 · 고객 글을 말없이 바꾸지 않는다 · 편집은 무과금이라 다시 누르면 된다). 제목 + 본문 = 이어 읽는 단위.

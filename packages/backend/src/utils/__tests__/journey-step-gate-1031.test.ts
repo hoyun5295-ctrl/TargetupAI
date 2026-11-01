@@ -257,10 +257,13 @@ describe('소스 계약', () => {
     expect(r).not.toMatch(/AT TIME ZONE 'Asia\/Seoul'\) >= \$|result_notice_at IS NULL/);
   });
   it('문안 수정의 기록 지우기 = 스냅숏과 같은 트랜잭션(run)', () => {
+    // ★ 2026-11-01 B1-3 — 칸 갱신 몸통이 applyStepPatchInLock(run 을 받는다)으로 옮겨 감 · 잠금 · 트랜잭션은 부르는 쪽 withJourneyValidationReset 하나
     const jb = read('journey-builder.ts');
-    const at = jb.indexOf('await createStepSnapshot(companyId, journeyId, stepId, run);');
-    expect(jb.indexOf('await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);')).toBeGreaterThan(at);
-    expect(jb.indexOf('}, { keepMarker })) ?? { rows: [] as any[] };')).toBeGreaterThan(at);
+    const fn = jb.slice(jb.indexOf('export async function applyStepPatchInLock('));
+    const at = fn.indexOf('await createStepSnapshot(companyId, journeyId, stepId, run);');
+    expect(at).toBeGreaterThan(-1);
+    expect(fn.indexOf('await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);')).toBeGreaterThan(at);
+    expect(jb).toContain('(await withJourneyValidationReset(companyId, journeyId, (run, journey) => applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch), { keepMarker })) ?? { rows: [] as any[] };');
   });
   it('화면 문구 = 실제 시점 · 채널별 머리 · 옛 약속 0 · 모델명 · native dialog · 줄표 0', () => {
     const fe = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', ...p), 'utf8');

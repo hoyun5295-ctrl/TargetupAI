@@ -30,7 +30,7 @@ import { randomUUID } from 'crypto';
 import { query } from '../config/database';
 import { createVariant, VariantOfVariantError } from './inapp-variant-optimizer';
 // ★ 2026-09-26 한줄로 V2 R1-45 — AI가 지어낸 혜택 차단 CT(원본에 있던 혜택만 통과)
-import { rewriteAddsFacts, stripUnauthorizedBenefits, efficacyNote, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { rewriteAddsFacts, findInventedBenefits, efficacyNote, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { buildHourlyDistribution } from './inapp-funnel-stats';
 
 // ════════════════════════════════════════════════════════════════════
@@ -158,7 +158,7 @@ ${parent.body || ''}`;
         //   (혜택 보존은 프롬프트 지시뿐 · 지시는 경계가 아니다).
         const variantText = `${v.title}
 ${v.body}`;
-        if (stripUnauthorizedBenefits(variantText, parentText) !== variantText) {
+        if (findInventedBenefits(variantText, parentText).length > 0) {
           console.warn(`[CT-84 quickActionAIRefine] 원본에 없던 혜택이 생겨 안을 건너뜀 (tone=${v.tone})`);
           continue;
         }

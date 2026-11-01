@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'vitest';
-import { detectBenefits, buildBenefitEmphasis, stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER } from './copy-benefit-detector';
+import { detectBenefits, buildBenefitEmphasis, BENEFIT_PLACEHOLDER, findInventedBenefits, replaceInventedBenefits } from './copy-benefit-detector';
+// ★ 1101 B1-1 — 글자 대조 거름은 AI 영업 전용으로 옮겼다(원본 복사 · 동작 같음) · 시험도 그 함수를 본다
+import { stripUnlicensedQuoteBenefits as stripUnauthorizedBenefits } from './sales-outreach-copy-guard';
 
 describe('detectBenefits — 구체 혜택 토큰 감지', () => {
   test('퍼센트 할인 감지', () => {
@@ -137,5 +139,110 @@ describe('stripUnauthorizedBenefits — 5R', () => {
 
   test('금액은 여전히 잡는다 — 경계 보강이 fail-open으로 이어지지 않는다', () => {
     expect(stripUnauthorizedBenefits('5000원 할인', '')).toContain(BENEFIT_PLACEHOLDER);
+  });
+});
+
+// ★ 2026-11-01 여정 재발 방지 B1-1 · Codex 구현 1R(B #1 · #2) — 값 · 종류 짝의 반례
+describe('값 · 종류 짝 — 영문 낱말 경계 · 같은 거리 낱말은 절의 꼴로', () => {
+  const dead = (t: string, g: string) => findInventedBenefits(t, g).length > 0;
+  test('상품명 속 off 는 할인이 아니다(Coffee 5,000원 근거로 5,000원 할인 = 지어냄)', () => {
+    expect(dead('5,000원 할인', 'Coffee 5,000원')).toBe(true);
+    expect(dead('Coffee 5,000원', 'Coffee 5,000원')).toBe(false);
+    expect(dead('30% OFF', '30% OFF 이벤트')).toBe(false);
+    expect(dead('30% 할인', '30프로 세일')).toBe(false);
+  });
+  test('할인율 · 적립률 = 뒤 숫자의 종류(10% 적립 = 지어냄)', () => {
+    expect(dead('10% 적립', '할인율 10%, 적립률 5%')).toBe(true);
+    expect(dead('5% 적립', '할인율 10%, 적립률 5%')).toBe(false);
+    expect(dead('10% 할인', '할인율 10%, 적립률 5%')).toBe(false);
+  });
+  test('2R 반례 — 영문 경계를 지난 낱말만 절의 꼴을 정한다 · 같은 거리는 붙음(「적립 혜택: 5%」)으로 가른다', () => {
+    expect(dead('5% 할인', 'Coffee 10% 할인 5% 적립')).toBe(true);
+    // B1-1a(P2) — 구분 없이 이어 쓴 목록은 짝 허가 0 · 하나만 뽑아 쓰면 자리표시(안전 쪽) · 그대로 쓰면 산다
+    expect(dead('10% 할인', 'Coffee 10% 할인 5% 적립')).toBe(true);
+    expect(dead('5% 적립', 'Coffee 10% 할인 5% 적립')).toBe(true);
+    expect(dead('Coffee 10% 할인 5% 적립', 'Coffee 10% 할인 5% 적립')).toBe(false);
+    expect(dead('10% 적립', '10% 할인, 적립 혜택: 5%')).toBe(true);
+    expect(dead('5% 적립', '10% 할인, 적립 혜택: 5%')).toBe(false);
+    expect(dead('10% 할인', '10% 할인, 적립 혜택: 5%')).toBe(false);
+    expect(dead('10% 할인 쿠폰', '첫 구매 10% 할인쿠폰')).toBe(false);
+    expect(dead('20% 할인쿠폰', '첫 구매 10% 할인쿠폰')).toBe(true);
+  });
+  test('3R 반례 — 짝 = 붙음 문법(조건 낱말이 방향을 뒤집지 않는다 · 「적립은 5%」 조사 꼴도 붙음)', () => {
+    expect(dead('5% 할인', '쿠폰 사용 시 10% 할인 5% 적립')).toBe(true);
+    // B1-1a(P2) — 구분 없이 이어 쓴 목록은 짝 허가 0 · 그대로 쓰면 산다
+    expect(dead('10% 할인', '쿠폰 사용 시 10% 할인 5% 적립')).toBe(true);
+    expect(dead('5% 적립', '쿠폰 사용 시 10% 할인 5% 적립')).toBe(true);
+    expect(dead('쿠폰 사용 시 10% 할인 5% 적립', '쿠폰 사용 시 10% 할인 5% 적립')).toBe(false);
+    expect(dead('5% 적립', '할인 10%, 적립은 5%')).toBe(false);
+    expect(dead('10% 적립', '할인 10%, 적립은 5%')).toBe(true);
+    expect(dead('10% 쿠폰', '첫 구매 10% 할인쿠폰')).toBe(false);
+    // B1-1a(구현 4R) — 숫자 앞뒤에 다 붙은 꼴(적립금 · 증정)은 바꿔 쓰면 자리표시(받아들인 비용) · 그대로 쓰면 산다
+    expect(dead('적립금 5천원', '적립금 5천원 증정')).toBe(true);
+    expect(dead('적립금 5천원 증정', '적립금 5천원 증정')).toBe(false);
+    expect(dead('10% 할인', '회원 10% 추가 할인')).toBe(false);
+  });
+  test('4R 반례 — 근거 글은 확실히 붙은 짝만(거리 · 짐작 0) · 표지가 이긴다 · 조건 금액 = 값 아님 · 할인과 적립은 묶지 않는다', () => {
+    expect(dead('5% 할인', '10% 즉시 할인과 5% 적립')).toBe(true);
+    expect(dead('10% 즉시 할인', '10% 즉시 할인과 5% 적립')).toBe(false);
+    expect(dead('10% 할인', '적립은 결제액의 10% 할인은 5% 쿠폰으로 제공')).toBe(true);
+    expect(dead('10% 적립', '10% 할인 적립금 5천원')).toBe(true);
+    expect(dead('적립금 5천원', '10% 할인 적립금 5천원')).toBe(false);
+    expect(dead('10% 할인', '10% 할인 혜택은 5만원 이상 구매 시 제공')).toBe(false);
+    expect(dead('500원 적립', '적립 포인트 500원')).toBe(false);
+    expect(dead('3천원 할인', '결제 시 3천원 즉시 할인')).toBe(false);
+    expect(dead('5천원 쿠폰', '신규 가입 5천원 쿠폰')).toBe(false);
+  });
+  test('5R 반례 — 양쪽 표지 충돌 = 근거 허가 0 · 결제 · 구매 조건 금액 = 값 아님 · 근거와 같은 글은 산다', () => {
+    expect(dead('10% 할인', '적립은 결제액의 10% 추가 할인은 5% 쿠폰으로 제공')).toBe(true);
+    expect(dead('5만원 할인', '10% 할인 혜택은 5만원 결제 시 제공')).toBe(true);
+    expect(dead('10% 할인', '10% 할인 혜택은 5만원 결제 시 제공')).toBe(false);
+    expect(dead('5천원 쿠폰 증정', '5천원 쿠폰 증정')).toBe(false);
+    expect(dead('5천원 쿠폰 증정', '신규 가입 고객께 5천원 쿠폰 증정')).toBe(false);
+    expect(dead('10% 이상 할인', '10% 이상 할인')).toBe(false);
+    expect(dead('5만원 이상 무료배송', '5만원 이상 무료배송')).toBe(false);
+  });
+  test('B1-1a — 구분 없이 이어 쓴 목록은 짝 허가 0(P2 · 그대로 쓰면 산다) · 구분(쉼표 · 와 · 줄바꿈)으로 나누면 하나씩 산다 · 섞은 짝은 늘 죽는다', () => {
+    for (const g of ['10% 할인 5% 적립', '할인 10% 적립 5%']) {
+      expect(dead(g, g)).toBe(false);
+      expect(dead('10% 할인', g)).toBe(true);
+      expect(dead('5% 적립', g)).toBe(true);
+      expect(dead('10% 적립', g)).toBe(true);
+    }
+    for (const g of ['10% 할인, 5% 적립', '10% 할인과 5% 적립', '10% 할인\n5% 적립', '할인 10%, 적립 5%']) {
+      expect(dead('10% 할인', g)).toBe(false);
+      expect(dead('5% 적립', g)).toBe(false);
+      expect(dead('10% 적립', g)).toBe(true);
+      expect(dead('5% 할인', g)).toBe(true);
+    }
+  });
+  test('B1-1a — 주는 동작(증정)도 다른 낱말과 똑같다(방향 섞임 예외 없음 · 구현 4R 승인 설계 복귀) · 무엇을 주는가의 연결은 지킨다', () => {
+    // 숫자 앞뒤에 다 붙은 꼴 = 그대로 쓰면 산다 · 바꿔 쓰면 자리표시(받아들인 비용)
+    expect(dead('적립금 5천원 증정', '적립금 5천원 증정')).toBe(false);
+    expect(dead('적립금 5천원', '적립금 5천원 증정')).toBe(true);
+    expect(dead('5천원 쿠폰', '쿠폰 5천원 증정')).toBe(true);
+    // 숫자 한쪽에만 붙은 꼴은 바꿔 써도 산다
+    expect(dead('5천원 쿠폰 증정', '신규 가입 시 5천원 쿠폰 증정')).toBe(false);
+    expect(dead('5천원 쿠폰을 증정해 드려요', '신규 가입 시 5천원 쿠폰 증정')).toBe(false);
+    expect(dead('10% 쿠폰', '적립률 10% 쿠폰 증정')).toBe(true);
+    // 구현 1R~4R 반례 — 다른 대상의 증정 · 숫자 앞 증정 · 숫자열 · 따로 선 증정 항목
+    for (const [out, g] of [
+      ['5천원 할인', '증정 금액 5천원 할인 금액은 미정'],
+      ['5천원 쿠폰 증정', '5천원 쿠폰 사용 시 사은품 증정'],
+      ['5천원 증정', '상품가 5천원, 사은품 증정'],
+      ['5천원 할인', '할인 10%, 5천원 증정'],
+      ['5천원 증정', '할인: 5천원 증정: 키링'],
+    ]) {
+      expect(dead(out, g), `${g} → ${out}`).toBe(true);
+      expect(replaceInventedBenefits(out, g), `${g} → ${out}`).toContain(BENEFIT_PLACEHOLDER);
+      expect(dead(g, g), g).toBe(false);
+    }
+  });
+  test('B1-1a 구현 1R #2 — 조건 어미는 낱말 끝까지(「결제 시점」 · 「구매하면서」는 조건 아님 · 「구매 시에」는 조건)', () => {
+    expect(dead('10만원 쿠폰', '상품가 10만원 쿠폰 5천원 결제 시점에 적용')).toBe(true);
+    expect(replaceInventedBenefits('10만원 쿠폰', '상품가 10만원 쿠폰 5천원 결제 시점에 적용')).toContain(BENEFIT_PLACEHOLDER);
+    expect(dead('10% 할인', '10% 할인 혜택은 5만원 이상 구매 시에 제공')).toBe(false);
+    expect(dead('5만원 할인', '10% 할인 혜택은 5만원 이상 구매 시에 제공')).toBe(true);
+    expect(dead('3만원 이상 구매하시면 5천원 할인', '3만원 이상 구매 시 5천원 할인')).toBe(false);
   });
 });

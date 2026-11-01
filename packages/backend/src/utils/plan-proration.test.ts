@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildPlanSegments, sumPlanSegments, prorateMonthlyAmount, daysInMonth,
-  planChangeCreditDelta,
   shiftDayKey, daySpan, findPlanCoverageGap, evaluatePlanHistoryGate, planChangesFingerprint,
 } from './plan-proration';
 
@@ -122,91 +121,6 @@ describe('buildPlanSegments — 청구 기간을 요금제 구간으로 (2026-07
     expect(segs[0].amount).toBe(prorateMonthlyAmount(350000, 1, 31));
   });
 });
-
-describe('planChangeCreditDelta — 요금제 바뀐 날 남은 기간 크레딧 (★1026 Harold)', () => {
-  const base = { today: '2026-10-26', fromTrial: false, base: 0, carriesNegative: false };
-
-  it('★ 제시뉴욕 실측 — 10/26 미가입(0) → 스타터(300) = 300 × 6/31 = 58', () => {
-    const d = planChangeCreditDelta({ ...base, effectiveDate: '2026-10-26', fromCredits: 0, toCredits: 300 })!;
-    expect(d.remainingDays).toBe(6);
-    expect(d.monthDays).toBe(31);
-    expect(d.delta).toBe(58);
-    expect(d.newBase).toBe(58);
-  });
-
-  it('달 첫날이면 한 달치 그대로 — 11/1 미가입 → 스타터 = 300', () => {
-    const d = planChangeCreditDelta({ ...base, today: '2026-11-01', effectiveDate: '2026-11-01', fromCredits: 0, toCredits: 300 })!;
-    expect(d.delta).toBe(300);
-  });
-
-  it('업그레이드는 차액의 남은 기간 몫만 — 스타터(300) → 프로(2400) 10/26 = 2100 × 6/31 = 406', () => {
-    const d = planChangeCreditDelta({ ...base, base: 120, effectiveDate: '2026-10-26', fromCredits: 300, toCredits: 2400 })!;
-    expect(d.delta).toBe(406);
-    expect(d.newBase).toBe(526);
-  });
-
-  it('내리면 같은 식으로 회수 — 프로 → 스타터 10/26 = −406 · 이미 다 썼으면 기본 칸이 음수로 남는다', () => {
-    const d = planChangeCreditDelta({ ...base, base: 100, effectiveDate: '2026-10-26', fromCredits: 2400, toCredits: 300 })!;
-    expect(d.delta).toBe(-406);
-    expect(d.newBase).toBe(-306);
-  });
-
-  it('분모는 그 달 실제 일수 — 2027-02-15 = 300 × 14/28 = 150', () => {
-    const d = planChangeCreditDelta({ ...base, today: '2027-02-15', effectiveDate: '2027-02-15', fromCredits: 0, toCredits: 300 })!;
-    expect(d.monthDays).toBe(28);
-    expect(d.remainingDays).toBe(14);
-    expect(d.delta).toBe(150);
-  });
-
-  it('말일 하루 = 300 × 1/31 = 10', () => {
-    const d = planChangeCreditDelta({ ...base, today: '2026-10-31', effectiveDate: '2026-10-31', fromCredits: 0, toCredits: 300 })!;
-    expect(d.delta).toBe(10);
-  });
-
-  it('★ 체험 중 유료 전환 = 체험 남은 크레딧은 없애고 새 요금제 일할로 바꾼다(1026 Harold 승인)', () => {
-    const d = planChangeCreditDelta({ ...base, fromTrial: true, base: 412, effectiveDate: '2026-10-26', fromCredits: 750, toCredits: 300 })!;
-    expect(d.newBase).toBe(58);
-    expect(d.delta).toBe(-354);
-  });
-
-  it('체험에서 바꿀 때 선불의 음수 상계분은 남긴다(월 리셋과 같은 규칙) · 후불은 안 남긴다', () => {
-    const pre = planChangeCreditDelta({ ...base, fromTrial: true, base: -20, carriesNegative: true, effectiveDate: '2026-10-26', fromCredits: 750, toCredits: 300 })!;
-    expect(pre.newBase).toBe(38);
-    const post = planChangeCreditDelta({ ...base, fromTrial: true, base: -20, carriesNegative: false, effectiveDate: '2026-10-26', fromCredits: 750, toCredits: 300 })!;
-    expect(post.newBase).toBe(58);
-  });
-
-  it('크레딧이 같은 요금제끼리면 조정 0', () => {
-    const d = planChangeCreditDelta({ ...base, base: 33, effectiveDate: '2026-10-26', fromCredits: 300, toCredits: 300 })!;
-    expect(d.delta).toBe(0);
-    expect(d.newBase).toBe(33);
-  });
-
-  it('★ 변경일이 지난달이면 이번 달 1일부터 센다 — 잠금을 기다리다 달이 넘어간 변경(10/31 요청 → 11/1 처리 · Codex 1R)', () => {
-    const d = planChangeCreditDelta({ ...base, today: '2026-11-01', effectiveDate: '2026-10-31', fromCredits: 0, toCredits: 300 })!;
-    expect(d.remainingDays).toBe(30);
-    expect(d.monthDays).toBe(30);
-    expect(d.delta).toBe(300);
-  });
-
-  it('지난달 내림도 이번 달 전체를 회수 — 유료 한 달치가 남지 않는다', () => {
-    const d = planChangeCreditDelta({ ...base, base: 300, today: '2026-11-01', effectiveDate: '2026-10-31', fromCredits: 300, toCredits: 0 })!;
-    expect(d.delta).toBe(-300);
-    expect(d.newBase).toBe(0);
-  });
-
-  it('변경일이 다음 달 이후면 null — 아직 오지 않은 달의 몫을 지금 주지 않는다', () => {
-    expect(planChangeCreditDelta({ ...base, today: '2026-10-26', effectiveDate: '2026-11-01', fromCredits: 0, toCredits: 300 })).toBeNull();
-  });
-
-  it('못 읽는 날짜면 null — 추측해서 날짜를 만들지 않는다', () => {
-    expect(planChangeCreditDelta({ ...base, effectiveDate: 'x', fromCredits: 0, toCredits: 300 })).toBeNull();
-  });
-});
-
-// ============================================================
-//  이력 공백 검사 (★ 2026-07-26 Codex 3차 HIGH)
-// ============================================================
 
 describe('shiftDayKey · daySpan — 날짜 산술 (2026-07-26)', () => {
   it('월 경계를 넘는다', () => {

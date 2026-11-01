@@ -134,6 +134,8 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
   'ai-memory-search': '메모리 검색', 'ai-usage-search': '사용 검색',
   'ai-segment-generator': '세그먼트 생성', 'ai-column-mapper': '컬럼 매핑',
   'brand-voice-extract': '목소리 배우기', 'brand-voice-sample': '목소리 견본', 'parse-briefing': '브리핑 분석',
+  // ★ 2026-11-01 크레딧 컨트롤타워 C5 — 후불 월말 맞춤 줄(amount 0 · 초과분 = 그 달 청구)
+  'month-end-overage': '초과 사용 정산',
 };
 
 /**
@@ -211,17 +213,54 @@ export function creditText(key: string): string {
 /** ai_credit_transactions.type → 한글. deduct는 source 라벨 우선. */
 export const CREDIT_TYPE_LABELS: Record<string, string> = {
   deduct: 'AI 작업', grant: '관리자 지급', admin_deduct: '관리자 차감',
-  purchase: '크레딧 충전', reset: '월 기본분 리셋', postpaid_grant: '후불 지급',
+  purchase: '크레딧 충전', reset: '월 기본분 지급', postpaid_grant: '후불 지급',
   // ★ 2026-08-13 환불 축 — 마케팅 플래너 월간 대행 취소(그 달 제작·발송 0건일 때 전액).
   refund: '환불',
+  // ★ 2026-11-01 크레딧 컨트롤타워 C5 — 원장에 넣는 type 은 전부 여기 있어야 한다(없으면 영어 type 이 화면에 그대로 나왔다 · P9)
+  plan_prorate: '요금제 변경 일할', expire: '남은 기본분 소멸', trial_credit: '무료체험 크레딧',
 };
 
-/** 크레딧 거래 1건 → 표시 라벨 (deduct·refund=작업명, 그 외=type 라벨). */
-export function creditTxLabel(type: string, source?: string | null): string {
+/** 크레딧 거래 1건 → 표시 라벨 (deduct·refund=작업명, 그 외=type 라벨). amount 는 소멸 줄 방향을 가른다(+ = 후불 초과를 청구로 정리). */
+export function creditTxLabel(type: string, source?: string | null, amount?: number | string | null): string {
   if (type === 'deduct') return (source && CREDIT_SOURCE_LABELS[source]) || 'AI 작업';
   // 환불도 무엇을 되돌렸는지가 중요하다 — source 라벨 + '환불'.
   if (type === 'refund') return source && CREDIT_SOURCE_LABELS[source] ? `${CREDIT_SOURCE_LABELS[source]} 환불` : '환불';
+  if (type === 'expire' && Number(amount) > 0) return '초과 사용 청구로 정리';
   return CREDIT_TYPE_LABELS[type] || type;
+}
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 C5 · §5-2 — 원장 줄 한 줄이 잔액을 얼마나 바꾸는가.
+ *   백엔드 `ai-credit-calc.ts` 의 creditTxDelta 와 **같은 표**다(백엔드 시험이 두 표를 대조한다). 화면 부호 · 숫자 · 색은 이것만 쓴다.
+ *   차감 amount 0 = 후불 월말 맞춤 줄(잔액 변동 0 · 초과분은 그 달 청구) · 환불은 지난 주기 부채로 갚은 양(overage_credits)을 뺀다.
+ */
+export const CREDIT_TX_TYPES: readonly string[] = [
+  'reset', 'expire', 'trial_credit', 'plan_prorate', 'deduct', 'refund', 'grant', 'purchase', 'postpaid_grant', 'admin_deduct',
+];
+export function creditTxDelta(
+  tx: { type: string; amount: number | string; overage_credits?: number | string | null },
+): { bucket: 'base' | 'purchased' | 'split'; delta: number } | null {
+  const amount = Number(tx.amount) || 0;
+  switch (tx.type) {
+    case 'reset': case 'trial_credit': return { bucket: 'base', delta: amount };
+    case 'expire': case 'plan_prorate': return { bucket: 'base', delta: amount };
+    case 'grant': case 'purchase': case 'postpaid_grant': return { bucket: 'purchased', delta: amount };
+    case 'admin_deduct': return { bucket: 'purchased', delta: 0 - amount };
+    case 'deduct': return { bucket: 'split', delta: 0 - amount };
+    case 'refund': return { bucket: 'split', delta: amount - (Number(tx.overage_credits) || 0) };
+    default: return null;
+  }
+}
+
+/** 이력 한 줄 표시 — 부호 · 숫자 · 색 묶음(달 단위 기본분 줄 = 지급 · 소멸 · 일할 · 체험 = month 색). 화면은 type 글자를 직접 비교하지 않는다(R38). */
+export function creditTxView(
+  tx: { type: string; amount: number | string; source?: string | null; overage_credits?: number | string | null },
+): { label: string; delta: number; sign: '+' | '-' | ''; tone: 'month' | 'plus' | 'minus' | 'zero' } {
+  const d = creditTxDelta(tx);
+  const delta = d ? d.delta : 0;
+  const sign: '+' | '-' | '' = delta > 0 ? '+' : delta < 0 ? '-' : '';
+  const tone = delta === 0 ? 'zero' : d && d.bucket === 'base' ? 'month' : delta > 0 ? 'plus' : 'minus';
+  return { label: creditTxLabel(tx.type, tx.source, tx.amount), delta, sign, tone };
 }
 
 /**

@@ -61,7 +61,7 @@ export default function DirectSpellModal({ open, rows, quotaText, onFix, onKeep,
                 </div>
                 <div className="ds-spell-why">
                   {issue.reason || (issue.kind === 'spacing' ? '띄어쓰기' : '맞춤법')}
-                  {issue.blocked === 'sms_bytes' && status === 'open' && <span className="ds-spell-lock"> · 고치면 단문 길이(90byte)를 넘어요</span>}
+                  {issue.blocked === 'sms_bytes' && status === 'open' && <span className="ds-spell-lock"> · 고치면 SMS 길이(90바이트)를 넘어요</span>}
                 </div>
               </div>
               {status === 'fixed' && <span className="ds-spell-state">고쳤어요</span>}
@@ -74,7 +74,7 @@ export default function DirectSpellModal({ open, rows, quotaText, onFix, onKeep,
                     className="ds-spell-fix"
                     onClick={() => onFix(issue)}
                     disabled={!!issue.blocked}
-                    title={issue.blocked ? '고치면 단문 길이를 넘어요' : undefined}
+                    title={issue.blocked ? '고치면 SMS 길이(90바이트)를 넘어요' : undefined}
                   >
                     <Check size={13} strokeWidth={2.6} />고치기
                   </button>
@@ -83,7 +83,7 @@ export default function DirectSpellModal({ open, rows, quotaText, onFix, onKeep,
             </div>
           ))}
           <div className="ds-spell-protect">
-            %이름% 같은 변수 · (광고) · 080 수신거부 · 링크 · 전화번호 · 기호는 건드리지 않아요. 단문이 90byte를 넘게 되는 고치기는 잠겨요.
+            %이름% 같은 변수 · (광고) · 080 수신거부 · 링크 · 전화번호 · 기호는 건드리지 않아요. SMS가 90바이트를 넘게 되는 고치기는 잠겨요.
           </div>
         </div>
 

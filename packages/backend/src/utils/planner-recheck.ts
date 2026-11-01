@@ -15,7 +15,7 @@
  *   - 승인 직후 즉시 실행은 이 파일이 하지 않는다(실행부 순환 import 금지) — 라우트가 `kickPlannerTouchpointNow`(실행부 · 발송 시간대 안에서만 · B1)를 부른다.
  *   - 고객 문장은 사유 사전(planner-reasons) · 원문 오류는 로그에만 · 줄표 0.
  */
-import { SPAM_ERROR_RETRY_MAX } from './spam-test-queue';
+import { SPAM_ERROR_RETRY_MAX, isSpamHold } from './spam-test-queue';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { pool, query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
@@ -636,6 +636,12 @@ async function prepareProposal(p: RecheckPair, today: string): Promise<void> {
         const check = await spamCheckPlannerVerdict({
           tp: p.carrier, body: appendDmLink(draft.body, url), subject: draft.subject, callback, rejectNumber: opt080, link: url, withDmLink, regenerate: !p.recheck.proposalDraft,
         });
+        if (isSpamHold(check.verdict)) {
+          // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 만든 글을 두고 다음 주기에 같은 검사를 이어 본다(실주소 링크 = 같은 글 · 장애 횟수 그대로)
+          //   검사한 글 = 판정 함수가 돌려준 글(재생성됐으면 그 글) · 링크는 떼어 둔다(다음 주기에 같은 링크를 다시 붙인다)
+          await patchRecheck(p, { proposalDraft: { body: stripDmLink(check.body, url), subject: check.subject || '' }, proposalCheckErrors: Number(p.recheck.proposalCheckErrors || 0) });
+          return;
+        }
         if (check.verdict === 'error') {
           // ★ 2026-10-25 원장 #48 — 검사 장애 = 통과도 차단도 아니다. 만든 글을 두고 다음 주기에 다시 검사(상한 · 넘으면 오늘은 「만들지 못함」)
           const errors = Number(p.recheck.proposalCheckErrors || 0) + 1;
@@ -674,7 +680,8 @@ async function checkEditedCopy(p: RecheckPair): Promise<void> {
   const check = await spamCheckPlannerVerdict({
     tp: p.carrier, body: appendDmLink(c.text, url), subject: c.subject, callback, rejectNumber: opt080, link: url, withDmLink: withDmLinkOf(p), regenerate: false,
   });
-  if (check.verdict === 'error') return;
+  if (check.verdict === 'error' || isSpamHold(check.verdict)) return;   // ★ 1101 B1-4 — 확인 중 · 검사 중 = 다음 주기에 이어 본다
+  void (check.verdict satisfies 'pass' | 'blocked');
   const checkedAt = new Date().toISOString();
   await setTouchpointMetaIfCopyIs(p.ev.companyId, p.carrier.id, c, check.verdict === 'pass'
     ? { copy: { ...c, spam: 'pass', checkedAt }, copy_error: null }

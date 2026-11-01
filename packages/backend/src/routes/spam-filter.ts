@@ -5,11 +5,12 @@ import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { replaceVariables, prepareFieldMappings, getOpt080Number, buildAdSubject } from '../utils/messageUtils';
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailDetail } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, spamFailDetail, deliveredUnreportedResult } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from '../utils/system-alert';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-queue';
-import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt, spamBlockedDue } from '../utils/spam-test-queue';
+import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt, spamBlockedDue, decideSpamResult, spamStampReady } from '../utils/spam-test-queue';
+import { matchProbeReport, spamProbeSchemaReady, spamTestFinalBy } from '../utils/spam-probe';
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -419,9 +420,9 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
                 successSeenAtMs: qtmsgSuccessTime.get(rowKey),
                 graceMs: BLOCKED_GRACE_MS,
               })) {
-                // 유예 10초 + 검사 시작 뒤 45초 경과 — 앱 미수신 확정 → BLOCKED
-                result = SPAM_RESULT.BLOCKED;
-                console.log(`[SpamFilter] BLOCKED 판정 — row=${rowKey}, phone=${row.phone} (QTmsg 성공 후 ${Math.round((Date.now() - qtmsgSuccessTime.get(rowKey)!) / 1000)}초 경과, 앱 미수신)`);
+                // 유예 10초 + 검사 시작 뒤 45초 경과 — 앱 미수신 → 확인 중(★ 2026-11-01 B1-4 · 차단은 확인 문자가 가른다)
+                result = deliveredUnreportedResult();
+                console.log(`[SpamFilter] 확인 중 판정 — row=${rowKey}, phone=${row.phone} (QTmsg 성공 후 ${Math.round((Date.now() - qtmsgSuccessTime.get(rowKey)!) / 1000)}초 경과, 앱 미수신)`);
               } else {
                 // 아직 확정할 때가 아니다 — 계속 대기
                 result = null;
@@ -434,8 +435,8 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
 
             if (result) {
               // ★ 2026-09-29 차수 5 — 아직 판정 안 된 행만(CT) · 이번에 쓴 때만 센다
-              const w = await query(SPAM_RESULT_DECIDE_SQL, [result, row.id]);
-              if ((w.rowCount ?? 0) > 0) {
+              const w = await decideSpamResult(result, row.id);
+              if (w > 0) {
                 updatedCount++;
                 if (result === SPAM_RESULT.FAILED) wroteFailed = true;
               }
@@ -471,11 +472,11 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
             const rowKey = row.id;
             let finalResult: string;
             if (qtmsgSuccessTime.has(rowKey)) {
-              finalResult = SPAM_RESULT.BLOCKED; // QTmsg 성공이었으면 BLOCKED
+              finalResult = deliveredUnreportedResult(); // ★ 2026-11-01 B1-4 — 전달 성공 + 보고 없음 = 확인 중(공용 판정)
             } else {
               finalResult = SPAM_RESULT.TIMEOUT; // QTmsg 결과조차 없으면 TIMEOUT
             }
-            await query(SPAM_RESULT_DECIDE_SQL, [finalResult, row.id]);
+            await decideSpamResult(finalResult, row.id);
           }
           await query(
             `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -525,8 +526,12 @@ router.post('/report', async (req: Request, res: Response) => {
     }
 
     // 2) 디바이스 확인 + last_seen 업데이트
+    //   ★ 2026-11-01 B1-4(DDL-E · Codex 설계 4R #2) — 본문이 있는 보고면 같은 문장에서 last_body_report_at 도(짝짓기 전 · 확인 문자 자격 = 7일 안)
+    //   칸이 없으면(DDL 전) last_seen_at 만 · 503 없음(보고 경로를 막지 않는다)
+    const hasBody = typeof messageContent === 'string' && messageContent.trim() !== '';
+    const bodyCol = hasBody && (await spamProbeSchemaReady().catch(() => ({ probes: false, body: false }))).body;
     const deviceResult = await query(
-      `UPDATE spam_filter_devices SET last_seen_at = NOW()
+      `UPDATE spam_filter_devices SET last_seen_at = NOW()${bodyCol ? ', last_body_report_at = NOW()' : ''}
        WHERE device_id = $1 AND is_active = true
        RETURNING id, carrier, phone`,
       [deviceId]
@@ -551,6 +556,17 @@ router.post('/report', async (req: Request, res: Response) => {
 
     console.log(`[SpamFilter] 리포트 수신 — device=${device.phone}(${device.carrier}), sender=${senderClean}${reportAge}${reportTry}${reportApp}`);
 
+    // ★ 2026-11-01 B1-4 — 확인 문자 보고가 먼저(그 확인 문자 하나에만 붙는다 · 다른 검사를 통과시키지 않는다) ·
+    //   확인 문자를 쓰는 단말의 본문 없는 보고는 어떤 검사에도 붙이지 않는다(가를 수 없다 · Codex 설계 2R #3 · 3R #3)
+    const probe = await matchProbeReport({
+      devicePhone: device.phone, carrier: device.carrier,
+      messageContent: typeof messageContent === 'string' ? messageContent : '',
+    });
+    if (probe !== 'none') {
+      console.log(`[SpamFilter] 리포트 = ${probe === 'probe' ? '확인 문자' : '본문 없는 보고(확인 문자 단말 · 무시)'} — device=${device.phone}(${device.carrier})${reportAge}`);
+      return res.json({ success: true, matched: probe === 'probe', probe: probe === 'probe' });
+    }
+
     const target = await resolveSpamReportTest({
       senderClean,
       devicePhone: device.phone,
@@ -568,9 +584,10 @@ router.post('/report', async (req: Request, res: Response) => {
     console.log(`[SpamFilter] 리포트 매칭 성공 — testId=${testId}, carrier=${device.carrier}, type=${detectedType}, via=${target.via}${target.late ? ', late' : ''}`);
 
     // 5) 결과 업데이트
+    const stamped = await spamStampReady().catch(() => false);
     const updateResult = await query(
       `UPDATE spam_filter_test_results
-       SET received = true, received_at = NOW(), result = $4
+       SET received = true, received_at = NOW(), result = $4${stamped ? ', first_result = COALESCE(first_result, $4), decided_at = NOW()' : ''}
        WHERE test_id = $1 AND carrier = $2 AND message_type = $3 AND phone = $5 AND received = false
          AND (result IS NULL OR result <> $6)
        RETURNING id`,
@@ -649,7 +666,7 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
         [test.id]
       );
       for (const row of stillUnresolved.rows) {
-        await query(SPAM_RESULT_DECIDE_SQL, [SPAM_RESULT.TIMEOUT, row.id]);
+        await decideSpamResult(SPAM_RESULT.TIMEOUT, row.id);
       }
       await query(
         `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -862,7 +879,7 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
           [testId]
         );
         for (const row of stillUnresolved.rows) {
-          await query(SPAM_RESULT_DECIDE_SQL, [SPAM_RESULT.TIMEOUT, row.id]);
+          await decideSpamResult(SPAM_RESULT.TIMEOUT, row.id);
         }
         await query(
           `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
@@ -875,7 +892,9 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
 
     res.json({
       test: testData,
-      results: resultRows
+      results: resultRows,
+      // ★ 2026-11-01 B1-4 — 확인 중 행이 있으면 화면은 이 시각까지 15초마다 다시 읽는다(넘으면 「결과를 받지 못했어요」로 멈춤)
+      finalBy: spamTestFinalBy(testData.completed_at, resultRows),
     });
 
   } catch (err) {

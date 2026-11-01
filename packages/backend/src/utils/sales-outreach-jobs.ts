@@ -21,7 +21,8 @@ import { query } from '../config/database';
 // ★ v3 AI 호출은 아웃리치 계수기 진입점(callOutreachAi · produce.ts)만 — 공용 호출기 직접 호출 0
 import { fetchHtmlGuarded } from './dm/dm-brand-extractor';
 import { buildOutreachEventMaterial } from './sales-outreach-extract';
-import { stripUnauthorizedBenefits, BENEFIT_PLACEHOLDER, dropInventedEfficacy, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
+import { BENEFIT_PLACEHOLDER, dropInventedEfficacy, EFFICACY_PLACEHOLDER, EFFICACY_PROMPT_RULES } from './copy-benefit-detector';
+import { stripUnlicensedQuoteBenefits } from './sales-outreach-copy-guard';
 import { getActiveStyleGuide, type OutreachStyleGuide } from './sales-outreach-style';
 import { isSalesOutreachOperator } from './audit-log';
 import { isIndustryCode, industryLabel } from './industry-codes';
@@ -360,7 +361,7 @@ export function materialText(eventTextFull: string | null | undefined, excerpt: 
 /** 프롬프트 재료에서 면허 밖 혜택 자리를 지운다(모델이 애초에 보지 않게 · placeholder 발생률 원천 감소) */
 export function stripMaterialForPrompt(material: string, licensedQuote: string): string {
   if (!material) return '';
-  return stripUnauthorizedBenefits(material, licensedQuote || '').split(BENEFIT_PLACEHOLDER).join('').replace(/[ \t]{2,}/g, ' ').trim();
+  return stripUnlicensedQuoteBenefits(material, licensedQuote || '').split(BENEFIT_PLACEHOLDER).join('').replace(/[ \t]{2,}/g, ' ').trim();
 }
 
 export interface CopyPromptInput {
@@ -1663,7 +1664,7 @@ async function runProductionMetered(jobId: string, lockToken: string, meter: Out
         // 상품명이 든 줄은 대상 밖(상품명 안 숫자 오염 방지 · 재료 상품 목록 기준).
         const productNames: string[] = Array.isArray(bp.media?.products) ? bp.media.products.map((p: any) => String(p.name || '').slice(0, 12)).filter((s: string) => s.length >= 4) : [];
         const lines = aiText.replace(/^\[Web발신\]\s*/i, '').trim().split('\n')
-          .map((l) => (productNames.some((n) => l.includes(n)) ? l : stripUnauthorizedBenefits(l, quoteBasis)));
+          .map((l) => (productNames.some((n) => l.includes(n)) ? l : stripUnlicensedQuoteBenefits(l, quoteBasis)));
         let body = lines.join('\n').trim();
         // ★ 2026-10-24 세 채널 구조체크 ② — 같은 근거(면허 인용)로 근거 없는 효능 문장을 뺀다(상품명 줄도 대상 · 효능 판정은 상품명 숫자에 걸리지 않는다) · 다 빠지면 빈 문안 = 아래 오류
         const eff = dropInventedEfficacy(body, quoteBasis);

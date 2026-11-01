@@ -15,11 +15,14 @@
 //   - 담당자 안내 적재 = 상한 있는 MySQL 연결(withBoundedMysql) · 이 스캐너가 멈추면 여정 문자 발송이 묶인다.
 
 import { isDemoCompany } from './demo-company';
+import { readJourneyCopyFacts } from './journey-copy-facts';
 import { query, withTransaction, withBoundedMysql } from '../config/database';
 import { buildJourneyPauseShortUrl, generatePauseToken, pauseJourney } from './journey-pause-handler';
 import { pickOwnerContact } from './owner-contact';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
-import { runStepSpamTest } from './journey-pretest-validator';
+import { runStepSpamTest, mergeSpamVerdicts } from './journey-pretest-validator';
+import { isSpamHold } from './spam-test-queue';
+import { candidatesReady, readCandidate, claimCandidate, candidateStillMine, saveCandidate, moveCandidate, regenChargeKey, sweepPretestCandidates, markCandidatePassedInTx } from './journey-pretest-candidate';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
 import { groupPretestBundles, kstDateOf, PretestScanRow, PretestBundle } from './journey-pretest-scan';
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
@@ -87,6 +90,9 @@ export async function scanAndPretest(): Promise<{
 }> {
   const startedAt = Date.now();
   const summary = { scanned: 0, bundles: 0, tested: 0, passed: 0, regenerated: 0, paused: 0, notified: 0 };
+
+  // ★ 2026-11-01 B1-4 — 재작성 후보 정리(10분 넘은 만드는 중 = 실패 · 실패 후보의 실제 차감 = 크레딧 환불) · 실패해도 스캔은 간다
+  await sweepPretestCandidates().catch((e: any) => console.warn('[journey-pretest-scan] 후보 정리 실패:', e?.message || e));
 
   // 지난 날 묶음의 셈은 버린다(키 끝 = 발송일 KST)
   const today = kstDateOf(new Date());
@@ -206,9 +212,26 @@ async function processBundle(b: PretestBundle, summary: { tested: number; passed
     return;
   }
 
+  // ★ 2026-11-01 B1-4 — 이 판의 재작성 후보(DDL-D)가 있으면 원문을 다시 보지 않는다:
+  //   만드는 중 = 기다림 · 검사 중(testing) = 후보 검사를 이어 봄 · 끝난 실패(차단 · 만들지 못함 · 10분 넘은 만드는 중) = 여정 정지 · 통과 = 그 판에 반영됐다(원문 흐름 그대로)
+  const candOn = !!snapId && variantRows.length === 0 && (await candidatesReady().catch(() => false));
+  const cand = candOn ? await readCandidate(snapId!) : null;
+  if (cand && cand.status === 'generating' && !cand.stale) return;
+  if (cand && (cand.status === 'failed' || cand.status === 'blocked' || cand.status === 'generating')) {
+    if (cand.status === 'generating') await moveCandidate(snapId!, ['generating'], 'failed');
+    await pauseCurrent(b, summary, snapId, cand.status === 'blocked'
+      ? '발송 전 스팸필터 통과 실패 (자동 재생성 후에도 차단). 문안 직접 확인 필요'
+      : '발송 전 스팸필터 통과 실패 (자동으로 고친 문안을 만들지 못함). 문안 직접 확인 필요', body);
+    return;
+  }
+
   // ★ 2026-06-06: 2시간전 재검도 활성화 검증과 같은 회신번호로 테스트 — 빈 callback이면 테스트 발송이 실패해 오탐 정지 위험.
   const cbRes = await query(`SELECT regexp_replace(callback_number, '[^0-9]', '', 'g') AS cb FROM journeys WHERE id = $1::uuid`, [b.journeyId]);   // ★ 1019 B-1005-5② 같은 뿌리(숫자만)
   const stepCallback = String(cbRes.rows[0]?.cb || '');
+  if (cand && cand.status === 'testing' && cand.body) {
+    await testCandidate(b, summary, snapId!, cand.body, cand.subject, body, stepCallback);
+    return;
+  }
   summary.tested++;
   const tests = [];
   for (const v of versions) {
@@ -220,8 +243,8 @@ async function processBundle(b: PretestBundle, summary: { tested: number; passed
     }));
   }
   const r1 = tests[0];
-  // 판 전부의 판정(하나라도 차단 = 차단 · 차단 없이 하나라도 장애 = 장애 · 전부 통과 = 통과 · 켜기 검사와 같은 규칙)
-  const verdict = tests.some((t) => t.verdict === 'blocked') ? 'blocked' : tests.every((t) => t.verdict === 'pass') ? 'pass' : 'error';
+  // 판 전부의 판정(켜기 검사와 같은 함수 · 전부 통과일 때만 통과 · ★ 1101 B1-4 차단 > 장애 > 확인 중 > 검사 중)
+  const verdict = mergeSpamVerdicts(tests.map((t) => t.verdict));
 
   // 통과 → 그 판 = 검사 통과(confidence_score 100) + pending 기록(판 확인 쓰기 한 트랜잭션) → 같은 회차에 안내(§2-8 상태표)
   if (verdict === 'pass') {
@@ -229,6 +252,13 @@ async function processBundle(b: PretestBundle, summary: { tested: number; passed
     _checkErrors.delete(b.bundleKey);
     const w = await recordIfCurrent(b, snapId, { status: 'pending', markChecked: true });
     if (w.recordId && (await finishPending(b, w.recordId, body))) summary.notified++;
+    return;
+  }
+
+  // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 자동 행동 0(재작성 · 정지 · 기록 · 장애 횟수 없음) · 다음 회차에 같은 글 = 같은 검사를 이어 본다(차감 0).
+  //   검사 전 판은 실행기가 기다리고, 이미 통과한 판은 켤 때 검사한 글 그대로 나간다(장애와 같은 규칙).
+  if (isSpamHold(verdict)) {
+    console.log(`[journey-pretest-scan] 스팸 검사 ${verdict === 'pending' ? '진행 중' : '확인 중'}(다음 회차에 이어 봄) journey=${b.journeyId} step=${b.stepId}`);
     return;
   }
 
@@ -256,6 +286,7 @@ async function processBundle(b: PretestBundle, summary: { tested: number; passed
     }).catch(() => undefined);
     return;
   }
+  void (verdict satisfies 'blocked');
 
   // ★ 2026-10-25 #1 — 변이 칸은 자동으로 고치지 않는다(켜진 여정의 변이는 사람이 고칠 수 없는 칸이라 모르는 문안으로 바꾸지 않는다 · 덜 보내는 방향).
   if (variantRows.length > 0) {
@@ -270,59 +301,133 @@ async function processBundle(b: PretestBundle, summary: { tested: number; passed
   //   고친 문안이 통과할 때만 100(아래) · 고친 문안 검사 장애로 다시 볼 때도 보류 유지.
   await recordIfCurrent(b, snapId, { markUnchecked: true });
 
-  // 진짜 스팸 걸림 → 1회 재생성(1크레딧 자동) + 재테스트.
+  // ★ 2026-11-01 B1-4 — 확정 차단의 재작성 = 판마다 한 번(후보 표 · claim · 차감 키 고정). 표가 없으면(DDL 전) 재작성 없이 정지(차감 0).
+  if (!candOn) {
+    await pauseCurrent(b, summary, snapId, '발송 전 스팸필터 통과 실패 (통신사 차단). 문안 직접 확인 필요', body);
+    return;
+  }
+  const claim = await claimCandidate(b.journeyId, b.stepId, snapId!);
+  if (claim === 'stale') return;   // 그사이 사람이 새 판을 커밋 — AI 호출 전에 끝(차감 0) · 다음 회차가 새 판을 본다
+  if (claim === 'taken') {
+    // ★ Codex 구현 1R #4 — 「이미 있음」은 실패가 아니다. 다시 읽어 상태대로: 만드는 중(다른 손) = 기다림 · 검사 중 = 이어 봄 ·
+    //   통과(고친 문안이 반영된 판이 다시 막힘 · 재작성 상한 1) · 차단 · 실패 = 정지
+    const again = await readCandidate(snapId!);
+    if (!again || (again.status === 'generating' && !again.stale)) return;
+    if (again.status === 'testing' && again.body) {
+      await testCandidate(b, summary, snapId!, again.body, again.subject, body, stepCallback);
+      return;
+    }
+    if (again.status === 'generating') await moveCandidate(snapId!, ['generating'], 'failed');
+    await pauseCurrent(b, summary, snapId, '발송 전 스팸필터 통과 실패 (자동 재생성 후에도 차단). 문안 직접 확인 필요', body);
+    return;
+  }
+
+  // 진짜 스팸 걸림 → 1회 재생성(1크레딧 · 차감 키 = 판) — 정산 직전에 이 후보가 아직 내 것인지 다시 읽는다(만료 · 다른 손이면 0원)
   let regenBody: string | null = null;
   try {
     regenBody = await regenerateStepAvoidingSpam({
-      companyId: b.companyId, currentMessage: body,
+      // ★ 1101 B1-3 — 그 여정의 사람 값 원장(혜택 · 링크)을 근거로(없으면 원문만 · DDL 전 = 옛 동작)
+      companyId: b.companyId, currentMessage: body, copyFacts: await readJourneyCopyFacts(b.companyId, b.journeyId).catch(() => null),
       channel: b.channel, isAd: b.isAd, matchedStopWords: r1.matchedStopWords || [],
-    });
+    }, { idempotencyKey: regenChargeKey(b.companyId, snapId!), stillMine: () => candidateStillMine(snapId!, claim.token) });
   } catch (regenErr: any) {
     console.log(`[journey-pretest-scan] 재생성 실패 journey=${b.journeyId} step=${b.stepId} — ${regenErr?.message || regenErr}`);
   }
-
-  if (regenBody && regenBody.trim() && regenBody.trim() !== body) {
-    summary.regenerated++;
-    const r2 = await runStepSpamTest({
-      companyId: b.companyId, userId: b.createdBy || '',
-      body: regenBody, subject: versions[0]?.subject ?? null,
-      channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, journeyId: b.journeyId,
-    });
-    if (r2.verdict === 'error') {
-      // 고친 문안의 검사가 장애 = 고친 문안을 쓰지 않는다(검사 못 한 글) · 원 문안은 차단이라 보낼 수 없다 → 같은 장애 상한으로 다시 본다
-      const n = (_checkErrors.get(b.bundleKey) || 0) + 1;
-      _checkErrors.set(b.bundleKey, n);
-      if (n < PRETEST_CHECK_ERROR_MAX) return;
-      _checkErrors.delete(b.bundleKey);
-      summary.paused++;
-      // 원 문안은 차단이었다 → 멈춘 이유 = 문안(「스팸필터」 사유 · 문안 고치기)
-      await pauseJourney(b.journeyId, '발송 전 스팸필터 통과 실패 (고친 문안을 검사하지 못함). 문안 직접 확인 필요');
-      await safeNotify(b, body, 'pretest_paused');
-      await recordIfCurrent(b, snapId, { status: 'paused' });
+  if (!regenBody || !regenBody.trim() || regenBody.trim() === body) {
+    // ★ Codex 구현 3R — 이 후보가 더는 내 것이 아니면(만료 · 다른 손 · 사람이 새 판) 생성 실패가 아니다 = 아무것도 안 하고 끝(차감 0 · 정지 · 안내 0)
+    if (!(await candidateStillMine(snapId!, claim.token).catch(() => false))) {
+      console.log(`[journey-pretest-scan] 재작성 후보를 잃음(만료 · 다른 손) · 결과 버림 journey=${b.journeyId} step=${b.stepId}`);
       return;
     }
-    if (r2.verdict === 'pass') {
-      // ★ 2026-10-18 J2 — 사람이 본 적 없는 문안으로 바뀐다 · 단계 알림 설정과 상관없이 늘 알린다(설계서 2026-10-18 §0).
-      // ★ Codex C 1R — **먼저 알리고, 알린 뒤에만** 발송 본문을 바꾼다. 못 알리면(문자 큐 장애) 바꾸지 않고 여정을 멈춘다.
-      if (!(await safeNotify(b, regenBody, 'pretest_autofixed'))) {
-        summary.paused++;
-        await pauseJourney(b.journeyId, '발송 전 스팸필터를 통과하도록 고친 문안을 담당자에게 알리지 못해 여정을 멈췄습니다. 문안을 확인한 뒤 재개해 주세요.');
-        await safeNotify(b, body, 'pretest_paused');
-        await recordIfCurrent(b, snapId, { status: 'paused' });
-        return;
-      }
-      // ★ 1019 B-1009-6 고친 문안 = 검사 통과 · ★ 1031 본문 · 표식 · 기록 = 판 확인 쓰기 한 트랜잭션(그사이 사람이 고쳤으면 아무것도 안 씀)
-      await recordIfCurrent(b, snapId, { status: 'notified', newBody: regenBody });
-      summary.passed++;
-      return;
-    }
+    // 재생성으로 고친 글이 없다 → 후보 실패 · 여정 정지 + 담당자 수동확인 안내(그 판이 아직 최신일 때만)
+    await moveCandidate(snapId!, ['generating'], 'failed');
+    await pauseCurrent(b, summary, snapId, '발송 전 스팸필터 통과 실패 (자동 재생성 후에도 차단). 문안 직접 확인 필요', body);
+    return;
   }
+  summary.regenerated++;
+  const candSubject = versions[0]?.subject ?? null;
+  // 저장 = 아직 내 claim 일 때만(만료로 넘어갔으면 0행 — 그 판은 다음 회차가 실패로 정지한다)
+  if (!(await saveCandidate(snapId!, claim.token, regenBody, candSubject))) return;
+  await testCandidate(b, summary, snapId!, regenBody, candSubject, body, stepCallback);
+}
 
-  // 재생성으로도 통과 못 함 → 여정 정지 + 담당자 수동확인 안내.
+/**
+ * ★ 2026-11-01 B1-4 — 재작성 후보 검사(만든 회차 · 다음 회차 이어 보기 공용) — 확인 중 · 검사 중 = 다음 회차 · 장애 = 묶음 장애 상한 ·
+ *   통과 = 먼저 알리고 알린 뒤에만 그 판 본문을 바꾼다(그사이 사람이 고쳤으면 안 바꿈) · 차단 = 여정 정지(재작성 상한 1).
+ */
+async function testCandidate(
+  b: PretestBundle, summary: { tested: number; passed: number; regenerated: number; paused: number; notified: number },
+  snapId: string, candBody: string, candSubject: string | null, origBody: string, stepCallback: string,
+): Promise<void> {
+  summary.tested++;
+  const r2 = await runStepSpamTest({
+    companyId: b.companyId, userId: b.createdBy || '',
+    body: candBody, subject: candSubject,
+    channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, journeyId: b.journeyId,
+  });
+  if (isSpamHold(r2.verdict)) {
+    console.log(`[journey-pretest-scan] 고친 문안 스팸 검사 ${r2.verdict === 'pending' ? '진행 중' : '확인 중'}(다음 회차에 이어 봄) journey=${b.journeyId} step=${b.stepId}`);
+    return;
+  }
+  if (r2.verdict === 'error') {
+    // 고친 문안의 검사가 장애 = 고친 문안을 쓰지 않는다(검사 못 한 글) · 원 문안은 차단이라 보낼 수 없다 → 같은 장애 상한으로 다시 본다
+    const n = (_checkErrors.get(b.bundleKey) || 0) + 1;
+    _checkErrors.set(b.bundleKey, n);
+    if (n < PRETEST_CHECK_ERROR_MAX) return;
+    _checkErrors.delete(b.bundleKey);
+    // 원 문안은 차단이었다 → 멈춘 이유 = 문안(「스팸필터」 사유 · 문안 고치기)
+    await pauseCurrent(b, summary, snapId, '발송 전 스팸필터 통과 실패 (고친 문안을 검사하지 못함). 문안 직접 확인 필요', origBody);
+    return;
+  }
+  if (r2.verdict === 'pass') {
+    // ★ 2026-10-18 J2 — 사람이 본 적 없는 문안으로 바뀐다 · 단계 알림 설정과 상관없이 늘 알린다(설계서 2026-10-18 §0).
+    // ★ Codex C 1R — **먼저 알리고, 알린 뒤에만** 발송 본문을 바꾼다. 못 알리면(문자 큐 장애) 바꾸지 않고 여정을 멈춘다.
+    if (!(await safeNotify(b, candBody, 'pretest_autofixed'))) {
+      await pauseCurrent(b, summary, snapId, '발송 전 스팸필터를 통과하도록 고친 문안을 담당자에게 알리지 못해 여정을 멈췄습니다. 문안을 확인한 뒤 재개해 주세요.', origBody);
+      return;
+    }
+    // ★ 1019 B-1009-6 고친 문안 = 검사 통과 · ★ 1031 본문 · 표식 · 기록 = 판 확인 쓰기 한 트랜잭션(그사이 사람이 고쳤으면 아무것도 안 씀)
+    // ★ Codex 구현 1R #2 — 후보 passed · 본문 · 표식 · 기록 = 한 트랜잭션(후보가 아직 testing 일 때만 · 만료 · 실패와 엇갈리면 아무것도 안 씀)
+    const w = await recordIfCurrent(b, snapId, { status: 'notified', newBody: candBody, candidatePassed: true });
+    if (w.current) summary.passed++;
+    return;
+  }
+  void (r2.verdict satisfies 'blocked');
+  // 고친 문안도 막힘 → 여정 정지 + 담당자 수동확인 안내(재작성 상한 1)
+  await moveCandidate(snapId, ['testing'], 'blocked');
+  await pauseCurrent(b, summary, snapId, '발송 전 스팸필터 통과 실패 (자동 재생성 후에도 차단). 문안 직접 확인 필요', origBody);
+}
+
+/**
+ * ★ 2026-11-01 B1-4(Codex 구현 3R) — 재작성 후보 갈래의 정지 = 그 칸의 최신 판이 검사한 판일 때만 · 판 확인과 정지가 한 트랜잭션
+ *   (문안 수정 경로와 같은 journeys 행 잠금 · 사람이 새 판을 커밋했으면 옛 판 결과로 여정을 멈추지 않는다 · 다음 회차가 새 판을 본다).
+ */
+async function pauseCurrent(
+  b: PretestBundle, summary: { paused: number }, snapId: string | null, reason: string, preview: string,
+): Promise<void> {
+  const paused = await withTransaction(async (run) => {
+    const lock = await run(`SELECT id FROM journeys WHERE id = $1::uuid FOR UPDATE`, [b.journeyId]);
+    if (lock.rows.length === 0) return false;
+    if ((await latestSnapshotIdTx(run, b)) !== snapId) return false;
+    await pauseJourney(b.journeyId, reason, run);
+    return true;
+  });
+  if (!paused) {
+    console.log(`[journey-pretest-scan] 그사이 문안이 바뀌어 옛 판 결과로 멈추지 않음 journey=${b.journeyId} step=${b.stepId}`);
+    return;
+  }
   summary.paused++;
-  await pauseJourney(b.journeyId, '발송 전 스팸필터 통과 실패 (자동 재생성 후에도 차단). 문안 직접 확인 필요');
-  await safeNotify(b, body, 'pretest_paused');
+  await safeNotify(b, preview, 'pretest_paused');
   await recordIfCurrent(b, snapId, { status: 'paused' });
+}
+
+/** 그 칸의 최신 판 id(트랜잭션 안 · 판 확인 쓰기 · 판 확인 정지 공용) */
+async function latestSnapshotIdTx(run: (sql: string, params?: any[]) => Promise<{ rows: any[] }>, b: PretestBundle): Promise<string | null> {
+  const latest = await run(
+    `SELECT id FROM journey_step_snapshots WHERE step_id = $1::uuid AND journey_id = $2::uuid ORDER BY created_at DESC LIMIT 1`,
+    [b.stepId, b.journeyId],
+  );
+  return latest.rows[0]?.id ? String(latest.rows[0].id) : null;
 }
 
 /** 그날 그 묶음의 가장 최근 기록(운영 INSERT 가 notify_at = NOW() 를 넣는다 · §2-8). */
@@ -347,6 +452,8 @@ export interface RecordWrite {
   markUnchecked?: boolean;
   /** 자동 보정 본문(통과 표식 100 을 함께) */
   newBody?: string;
+  /** ★ 2026-11-01 B1-4 — 이 판의 재작성 후보를 testing → passed 로 같은 트랜잭션에서(아니면 아무것도 안 씀) */
+  candidatePassed?: boolean;
 }
 
 /**
@@ -360,13 +467,13 @@ export async function recordIfCurrent(b: PretestBundle, testedSnapshotId: string
   return withTransaction(async (run) => {
     const lock = await run(`SELECT id FROM journeys WHERE id = $1::uuid FOR UPDATE`, [b.journeyId]);
     if (lock.rows.length === 0) return { current: false, recordId: null };
-    const latest = await run(
-      `SELECT id FROM journey_step_snapshots WHERE step_id = $1::uuid AND journey_id = $2::uuid ORDER BY created_at DESC LIMIT 1`,
-      [b.stepId, b.journeyId],
-    );
-    const latestId: string | null = latest.rows[0]?.id ? String(latest.rows[0].id) : null;
+    const latestId = await latestSnapshotIdTx(run, b);
     if (latestId !== testedSnapshotId) {
       console.log(`[journey-pretest-scan] 검사한 판이 최신이 아님(그사이 문안 수정) · 결과 버림 journey=${b.journeyId} step=${b.stepId}`);
+      return { current: false, recordId: null };
+    }
+    if (w.candidatePassed && (!testedSnapshotId || !(await markCandidatePassedInTx(run, testedSnapshotId)))) {
+      console.log(`[journey-pretest-scan] 재작성 후보가 검사 중이 아님(만료 · 실패) · 반영 안 함 journey=${b.journeyId} step=${b.stepId}`);
       return { current: false, recordId: null };
     }
     if (testedSnapshotId) {

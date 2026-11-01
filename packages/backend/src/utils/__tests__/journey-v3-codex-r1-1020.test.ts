@@ -125,7 +125,7 @@ describe('화면 B1~B8', () => {
     expect(ws).toContain('const current = () => seq === loadSeq.current && jid === journeyIdRef.current;');
     expect(ws).toContain('if (!current()) return;');
     expect(ws).toContain("const ready = !!detail && String(detail.journey?.id || '') === String(journeyId || '');");
-    expect(ws).toContain('if (!journeyId || !ready || dirtyCount === 0 || saving) return;');
+    expect(ws).toContain('if (!journeyId || !ready || dirtyCount === 0 || saving || filling) return;');   // ★ 1101 B1-2 혜택 · 링크 넣기 중 저장 잠금
   });
   it('B2 칸 빼기 · 넣기 = 성공하면 바로 대기 목록에서 지운다(결과 모름 판정은 2R 에서 내용 지문으로 · journey-v3-codex-r2)', () => {
     expect(ws).toContain('setDeleteIds((m) => { const n = new Set(m); n.delete(id); return n; });');

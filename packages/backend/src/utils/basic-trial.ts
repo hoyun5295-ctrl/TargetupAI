@@ -6,13 +6,15 @@
  * (no_inline_duplication). 만료 자동 강등 = trial-downgrade-worker (status='trial' 또는 TRIAL plan + 만료일 · 유료 플랜 강등 금지 가드).
  *
  * ⛔ 크레딧 불변식 (Harold 강조 — 매우 중요)
- *   - base(기본 부여) 크레딧만 갱신: ai_credits_base_remaining + ai_credits_reset_at.
- *   - purchased(구매분) 컬럼은 SQL에 포함하지 않음 = 보존(월 넘어가도 이월).
+ *   - ★ 2026-11-01 크레딧 컨트롤타워 C1 — 이 파일은 잔액 칸 · 리셋 시각 칸을 쓰지 않는다. 체험 크레딧은 원장 CT `applyTrialStart`
+ *     (월 마감 → 남은 양수 기본분 소멸 → 체험 크레딧 한 번)가 원장 먼저 넣는다. 연장은 크레딧 0.
+ *   - purchased(구매분)는 어느 경우든 그대로(월 넘어가도 이월).
  */
 
 import type { PoolClient } from 'pg';
 import pool from '../config/database';
 import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
+import { applyTrialStart } from './ai-credit-tx';
 import { planTermManagedSql, planTermManagedError, PlanTermError } from './plan-term';
 
 /**
@@ -113,7 +115,7 @@ async function grantFreeTrialWithClient(
 
   // 연장인지 신규인지는 **잠근 행의 갱신 전 값**으로 판정한다(동시 클릭이 서로의 판정을 오염시키지 않게).
   const cur = await client.query(
-    `SELECT subscription_status, trial_expires_at, ${planTermManagedSql('companies')} AS plan_term_managed
+    `SELECT subscription_status, trial_expires_at, plan_id, ${planTermManagedSql('companies')} AS plan_term_managed
        FROM companies WHERE id = $1::uuid FOR UPDATE`,
     [companyId],
   );
@@ -133,27 +135,32 @@ async function grantFreeTrialWithClient(
         SET plan_id                   = $1,
             subscription_status       = 'trial',
             -- 남은 기간이 미래면 그 위에 더한다(연장). 없거나 지났으면 오늘부터. 새로 지급($6)은 언제나 오늘부터.
-            trial_expires_at          = CASE WHEN $6::boolean THEN NOW() ELSE GREATEST(COALESCE(trial_expires_at, NOW()), NOW()) END
+            trial_expires_at          = CASE WHEN $4::boolean THEN NOW() ELSE GREATEST(COALESCE(trial_expires_at, NOW()), NOW()) END
                                         + ($2::int || ' days')::interval,
-            -- ⛔ 크레딧 불변식: 연장에서는 base를 그대로 둔다(재충전 금지). purchased는 어느 경우든 미포함 = 보존.
-            ai_credits_base_remaining = CASE WHEN $5::boolean THEN ai_credits_base_remaining ELSE $3 END,
-            ai_credits_reset_at       = CASE WHEN $5::boolean THEN ai_credits_reset_at ELSE NOW() END,
+            -- ⛔ 크레딧 불변식(★ 2026-11-01 C1): 잔액 · 리셋 시각은 여기서 쓰지 않는다 — 아래 원장 CT 가 넣는다.
             updated_at                = NOW()
-      WHERE id = $4
+      WHERE id = $3
     RETURNING id, plan_id, subscription_status, trial_expires_at,
+              to_char(trial_expires_at, 'YYYYMMDD"T"HH24MISSUS') AS trial_key,
               (SELECT plan_code FROM plans WHERE id = $1) AS plan_code`,
-    [trialPlanId, days, trialCredits, companyId, extended, fresh],
+    [trialPlanId, days, companyId, fresh],
   );
 
   if (updated.rows.length > 0) {
+    const creditNow = new Date();   // 사건 하나 = 시계 하나(이력 · 일할 · 체험 크레딧이 같은 달로 판정)
     await recordPlanChange({
       client,
       companyId,
       toPlanId: trialPlanId,
       changeType: 'trial_start',
       reason: extended ? `무료체험 ${days}일 추가 부여` : `무료체험 ${days}일 부여`,
+      prevPlanIdHint: cur.rows[0].plan_id ? String(cur.rows[0].plan_id) : null,
+      now: creditNow,
     });
+    // ★ 2026-11-01 C1 · D-A — 체험 크레딧은 체험 한 번에 한 번(연장 = 0). 일할 회수(유료 → 체험)가 끝난 뒤라 순서가 맞다.
+    if (!extended) await applyTrialStart(client, companyId, trialCredits, String(updated.rows[0].trial_key), creditNow);
   }
 
-  return { ...updated.rows[0], extended };
+  const { trial_key: _trialKey, ...out } = updated.rows[0] || {};
+  return { ...out, extended };
 }

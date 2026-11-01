@@ -30,7 +30,8 @@ const REASON_TEXT: Record<string, string> = {
   variable_mapping_invalid: '알림톡 변수 연결이 비었어요',
   spam_filter_failed: '스팸 차단에 걸리는 문구가 있어요',
   spam_check_unavailable: '스팸 검사를 마치지 못했어요(잠시 뒤 다시 켜 주세요)',
-  subject_missing: '장문 문자 제목이 없어요',
+  spam_check_pending: '스팸 검사 결과를 확인하고 있어요(잠시 뒤 다시 켜 주세요)',
+  subject_missing: 'LMS 제목이 없어요',
 };
 
 function headers(): Record<string, string> {

@@ -11,13 +11,15 @@
 
 import { UserFacingError } from './http-error';
 import {
-  needsMonthlyReset,
   splitDeduction,
   buildIdempotencyKey,
-  kstMonthTag,
   isOperationSource,
   SEND_CREDIT_SOURCES,
 } from './ai-credit-calc';
+import {
+  loadCloseInputs, simulateClose, addMonths, monthTag, monthLastDay, cycleUnbilledOverageRows, creditSeqReady, billedMonthly, monthKeyOf, TS_US_SQL,
+  LEDGER_SEQ_SQL,
+} from './ai-credit-month';
 
 export class InsufficientCreditError extends Error {
   constructor(public required: number, public available: number) {
@@ -75,7 +77,8 @@ export async function loadCreditRow(client: any, companyId: string, forUpdate: b
             c.ai_credits_reset_at        AS reset_at,
             c.billing_type               AS billing_type,
             c.postpaid_overage_limit     AS overage_limit,
-            p.ai_credits_per_month       AS plan_credits
+            p.ai_credits_per_month       AS plan_credits,
+            p.plan_code                  AS plan_code
        FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
       WHERE c.id = $1::uuid${forUpdate ? '\n      FOR UPDATE OF c' : ''}`,
@@ -103,43 +106,166 @@ export function creditOverageAllowance(row: any, source: string): number {
     : (String(row.billing_type) === 'postpaid' ? Math.max(0, Number(row.overage_limit) || 0) : 0);
 }
 
-/**
- * ★ 2026-09-27 한줄로 V2 R192(Codex 차수3 1R) — 월 리셋 뒤 기본분(순수). applyResetIfNeeded와 엄격 확인이 같은 값을 쓴다.
- * v2 음수 상계 — 지난달 운영 과금으로 base가 음수면 이번달 grant에서 그만큼 차감(덮어쓰기 X). 양수 잔액은 이월 안 함.
- * ★ 2026-09-25 한줄로 전수점검 C-08: 음수 상계는 **선불만** 한다(후불은 overage_credits로 월 정산에서 현금 청구 — 두 번 받지 않는다).
- */
-export function carriedBaseOnReset(row: any): number {
-  const planCredits = Number(row.plan_credits) || 0;
-  const prevBase = Number(row.base) || 0;
-  const carriesNegative = String(row.billing_type) === 'prepaid';
-  return planCredits + (carriesNegative ? Math.min(0, prevBase) : 0);
+/** 원장 키 충돌 · 설명 못 하는 잔액 = 원장과 회사 칸이 어긋났다(조용히 건너뛰지 않는다 · 크레딧 컨트롤타워 C2) */
+export class CreditLedgerConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'CreditLedgerConflictError';
+  }
 }
 
-/** 트랜잭션 내부 월 리셋. base = 요금제 기본 크레딧 + reset 이력(월 1회 idempotent). */
-export async function applyResetIfNeeded(client: any, companyId: string, row: any, now: Date): Promise<any> {
-  const resetAt = row.reset_at ? new Date(row.reset_at) : null;
-  if (!needsMonthlyReset(resetAt, now)) return row;
+type LedgerAt = { kind: 'inCycle'; params: CycleRowTimeParams } | { kind: 'instant'; at: Date } | { kind: 'monthStart'; month: string } | { kind: 'monthEnd'; month: string };
 
-  const planCredits = Number(row.plan_credits) || 0;
-  const purchased = Number(row.purchased) || 0;
-  // carriedBase = grant + (선불만) min(0, 지난 base) — 계산은 carriedBaseOnReset이 소유(엄격 확인과 같은 값).
-  const carriedBase = carriedBaseOnReset(row);
-  await client.query(
-    `UPDATE companies
-        SET ai_credits_base_remaining = $2,
-            ai_credits_reset_at = NOW()
-      WHERE id = $1::uuid`,
-    [companyId, carriedBase]
-  );
-  // amount = 월 grant(gross), balance_base_after = 상계 후 실제 base(carriedBase). 둘의 차 = 지난달 음수 상계분.
-  await client.query(
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워(Codex 구현 2R-1 · 1R-2 · 1R-3 과 같은 부류 세 번째 → 쓰는 쪽 규칙) — 줄 시각 = 주기 순서.
+ *   주기 시작 줄(리셋) = 리셋 시각 그대로(달 경계 · 첫 지급 판정 시각). 마감 뒤에 CT 가 쓰는 줄 = **판정 시각**을 그 줄이 실제로 든 주기
+ *   [마감 뒤 리셋 시각, 그 달 다음 달 1일 0시) 안으로 묶은 시각: max(판정 시각 · 주기 시작 + 1µs) 를 주기 끝 − 1µs 로 자른다.
+ *   DB 시계(거래 시작 NOW() · 실행 clock_timestamp)로 찍으면 자정에 판정 주기와 줄 시각의 달이 갈린다(Codex 구현 2R-1 · 3R-1 · 4R-1 · 같은 뿌리).
+ *   줄 시각은 청구 달만 맡는다 — 줄 순서는 seq(새 줄은 언제나 LEDGER_SEQ_SQL · 5R 구조 처방)라 같은 시각 두 줄이 생겨도 순서가 흔들리지 않는다.
+ *   SQL 조각 계약: $n · $n+1 · $n+2 = cycleRowTimeParams(판정 시각 · 주기 시작 · 주기 끝).
+ */
+export type CycleRowTimeParams = [string, string | null, string];
+export const CYCLE_ROW_TIME_SQL = (n: number) =>
+  `LEAST(GREATEST($${n}::timestamptz, $${n + 1}::timestamptz + INTERVAL '1 microsecond'), $${n + 2}::timestamptz - INTERVAL '1 microsecond')`;
+/** row = 마감 뒤 회사 크레딧 행(reset_at = 그 줄이 든 주기의 시작) · now = 판정 시각 */
+export function cycleRowTimeParams(row: any, now: Date): CycleRowTimeParams {
+  const t = row?.reset_at ? new Date(row.reset_at) : null;
+  const start = t && !Number.isNaN(t.getTime()) ? t.toISOString() : null;
+  const cycleMonth = monthKeyOf(start ? new Date(start) : now);
+  return [now.toISOString(), start, kstMonthStartIso(addMonths(cycleMonth, 1))];
+}
+
+/** INSERT … ON CONFLICT DO NOTHING 결과 넣은 행 수(pg = rowCount · 0 = 같은 키가 이미 있다) */
+export function insertedRows(r: { rowCount?: number | null; rows?: any[] }): number {
+  return r.rowCount ?? (r.rows || []).length;
+}
+
+/**
+ * 원장 한 줄(★ 2026-11-01 크레딧 컨트롤타워 I1 · 원장 먼저). 키가 이미 있으면 던진다(호출부 트랜잭션 롤백).
+ * 시각: inCycle = 마감 뒤 줄(위 규칙) · instant = 판정 시각 그대로(첫 지급 리셋 줄 = 리셋 시각)
+ *   · monthStart = 그 달 1일 0시(KST) · monthEnd = 그 달 말일 끝(다음 달 1일 0시 − 1µs).
+ * 경계 시각은 SQL 이 계산한다(JS Date 는 ms 라 1µs 를 못 만든다).
+ */
+async function insertLedgerRow(client: any, r: {
+  companyId: string; type: string; amount: number; bucket: string; source: string; key: string;
+  baseAfter: number; purchasedAfter: number; overage?: number; reason?: string | null; at: LedgerAt;
+}): Promise<void> {
+  const params: any[] = [r.companyId, r.type, r.amount, r.bucket, r.source, r.key, r.baseAfter, r.purchasedAfter, r.overage ?? 0, r.reason ?? null];
+  let at: string;
+  if (r.at.kind === 'inCycle') {
+    params.push(...r.at.params);
+    at = CYCLE_ROW_TIME_SQL(11);
+  } else if (r.at.kind === 'instant') {
+    params.push(r.at.at.toISOString());
+    at = '$11::timestamptz';
+  } else if (r.at.kind === 'monthStart') {
+    params.push(`${r.at.month}-01`);
+    at = `($11::date)::timestamp AT TIME ZONE 'Asia/Seoul'`;
+  } else {
+    params.push(monthLastDay(r.at.month));
+    at = `(($11::date + 1)::timestamp AT TIME ZONE 'Asia/Seoul') - INTERVAL '1 microsecond'`;
+  }
+  const ins = await client.query(
     `INSERT INTO ai_credit_transactions
-       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after)
-     VALUES ($1::uuid, 'reset', $2, 'base', 'monthly-reset', $3, $4, $5)
-     ON CONFLICT (idempotency_key) DO NOTHING`,
-    [companyId, planCredits, `reset:${companyId}:${kstMonthTag(now)}`, carriedBase, purchased]
+       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, overage_credits, reason, created_at, seq)
+     VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, ${at}, ${LEDGER_SEQ_SQL})
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING id`,
+    params,
   );
-  return { ...row, base: carriedBase, reset_at: now.toISOString() };
+  if (insertedRows(ins) === 0) throw new CreditLedgerConflictError(`원장 키가 이미 있습니다: ${r.key}`);
+}
+
+/** 그 주기 미청구 초과분을 최근 것부터 줄인다(C8 · U < 0). 청구된 것 때문에 다 못 줄이면 경보(사람 처리 · 크레딧으로 바꿔 주지 않는다) */
+async function reduceUnbilledOverage(client: any, companyId: string, cycleMonth: string, resetAt: Date, amount: number): Promise<void> {
+  let left = amount;
+  for (const r of await cycleUnbilledOverageRows(client, companyId, cycleMonth, resetAt)) {
+    if (left <= 0) break;
+    const cut = Math.min(left, r.overage);
+    await client.query(
+      `UPDATE ai_credit_transactions SET overage_credits = overage_credits - $2 WHERE id = $1::uuid AND billed_billing_id IS NULL`,
+      [r.id, cut],
+    );
+    left -= cut;
+  }
+  if (left > 0) {
+    const { sendSystemAlert } = await import('./system-alert');
+    await sendSystemAlert({
+      companyId,
+      dedupKey: `credit-overage-unreduced:${companyId}:${monthTag(cycleMonth)}`,
+      message: `${cycleMonth} 후불 초과 맞춤: 이미 청구된 초과 ${left}크레딧은 줄이지 못했습니다(크레딧으로 돌려주지 않음 · 사람 확인 · 회사 ${companyId})`,
+    }).catch(() => undefined);
+  }
+}
+
+/** 'YYYY-MM' 1일 0시(KST)의 ISO */
+function kstMonthStartIso(month: string): string {
+  return new Date(`${month}-01T00:00:00+09:00`).toISOString();
+}
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 C2 — 월 마감(W1). 이름은 옛 「월 리셋」 그대로(부르는 곳 = 차감 · 환불 · 요금제 변경 · 체험 · 1일 패스 · 발행).
+ * 회사 행을 FOR UPDATE 로 잠근 채 부른다. 리셋 시각의 달부터 지난달까지 **한 달씩**:
+ *   ① 후불 맞춤 U = max(0, −b) − R(> 0 = 맞춤 줄 · < 0 = 미청구 초과 줄임) ② 소멸(후불 음수 정리 · 양수 소멸 · 경계가 체험이면 양수 남김 · 선불 음수 넘김)
+ *   ③ 다음 달 E 지급(후불은 0 이어도 줄 = 주기 경계). 줄 시각 = 그 달 경계(I10). 끝에 리셋 시각 = 이번 달 1일 0시.
+ * 리셋 시각이 없으면 첫 지급(E · 시각 = 지금). 그때 기본분 ≠ 0 이면 던진다(원장으로 설명 못 하는 잔액).
+ */
+export async function applyResetIfNeeded(client: any, companyId: string, row: any, now: Date): Promise<any> {
+  const inp = await loadCloseInputs(client, companyId, row, now, 'snapshot');
+  if (inp.kind === 'none') return row;
+  const purchased = Number(row.purchased) || 0;
+  const postpaid = billedMonthly(row.billing_type);
+  let b = Number(row.base) || 0;
+
+  if (inp.kind === 'first') {
+    if (b !== 0) throw new CreditLedgerConflictError(`리셋 시각이 없는데 기본분이 ${b} 입니다(원장으로 설명 못 하는 잔액 · 회사 ${companyId})`);
+    // 달 키 · 줄 시각 · 리셋 시각 = 판정에 쓴 now 하나(Codex 구현 1R-3 · DB 의 거래 시작 시각을 저장하면 자정을 끼운 거래에서
+    //   키는 새 달 · 리셋 시각은 지난달이 되어 다음 마감이 같은 키를 다시 넣다 영구히 실패했다)
+    if (inp.entitlement > 0 || postpaid) {
+      b += inp.entitlement;
+      await insertLedgerRow(client, {
+        companyId, type: 'reset', amount: inp.entitlement, bucket: 'base', source: 'monthly-reset',
+        key: `reset:${companyId}:${monthTag(inp.month)}`, baseAfter: b, purchasedAfter: purchased, at: { kind: 'instant', at: now },
+      });
+    }
+    await client.query(`UPDATE companies SET ai_credits_base_remaining = $2, ai_credits_reset_at = $3::timestamptz WHERE id = $1::uuid`, [companyId, b, now.toISOString()]);
+    return { ...row, base: b, reset_at: now.toISOString() };
+  }
+
+  const resetAt = new Date(row.reset_at);
+  const sim = simulateClose({ base: b, billingType: String(row.billing_type || ''), months: inp.months });
+  for (const st of sim.steps) {
+    const next = addMonths(st.month, 1);
+    if (st.settle > 0) {
+      await insertLedgerRow(client, {
+        companyId, type: 'deduct', amount: 0, bucket: 'overage', source: 'month-end-overage',
+        key: `overage-settle:${companyId}:${monthTag(st.month)}`, baseAfter: b, purchasedAfter: purchased, overage: st.settle,
+        reason: `월말 초과 사용 맞춤 ${st.month}`, at: { kind: 'monthEnd', month: st.month },
+      });
+    } else if (st.settle < 0) {
+      await reduceUnbilledOverage(client, companyId, st.month, resetAt, -st.settle);
+    }
+    if (st.expire !== 0) {
+      b += st.expire;
+      await insertLedgerRow(client, {
+        companyId, type: 'expire', amount: st.expire, bucket: 'base', source: 'monthly-close',
+        key: `expire:${companyId}:${monthTag(st.month)}`, baseAfter: b, purchasedAfter: purchased,
+        reason: st.expire < 0 ? `남은 기본분 소멸 ${st.month}` : `초과 사용 청구로 정리 ${st.month}`, at: { kind: 'monthEnd', month: st.month },
+      });
+    }
+    if (st.grant > 0 || postpaid) {
+      b += st.grant;
+      await insertLedgerRow(client, {
+        companyId, type: 'reset', amount: st.grant, bucket: 'base', source: 'monthly-reset',
+        key: `reset:${companyId}:${monthTag(next)}`, baseAfter: b, purchasedAfter: purchased, at: { kind: 'monthStart', month: next },
+      });
+    }
+  }
+  await client.query(
+    `UPDATE companies SET ai_credits_base_remaining = $2, ai_credits_reset_at = ($3::date)::timestamp AT TIME ZONE 'Asia/Seoul' WHERE id = $1::uuid`,
+    [companyId, b, `${inp.curMonth}-01`],
+  );
+  return { ...row, base: b, reset_at: kstMonthStartIso(inp.curMonth) };
 }
 
 /**
@@ -197,25 +323,31 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
 
   const baseAfter = base - fromBase - shortfall;  // 후불 초과분은 base가 음수로 누적(= 월말 청구 대상)
   const purchasedAfter = purchased - fromPurchased;
+
+  // ★ 2026-11-01 크레딧 컨트롤타워 I1 — 원장 먼저. 들어가지 않았으면(같은 키) 잔액을 바꾸지 않는다.
+  const bucket = shortfall > 0 ? 'overage' : (fromBase > 0 && fromPurchased > 0 ? 'mixed' : (fromPurchased > 0 ? 'purchased' : 'base'));
+  const ins = await client.query(
+    `INSERT INTO ai_credit_transactions
+       (company_id, type, amount, bucket, source, ai_call_log_id, idempotency_key,
+        balance_base_after, balance_purchased_after, created_by, overage_credits, created_at, seq)
+     VALUES ($1::uuid, 'deduct', $2, $3, $4, $5, $6, $7, $8, $9, $10, ${CYCLE_ROW_TIME_SQL(11)}, ${LEDGER_SEQ_SQL})
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING id`,
+    [
+      opts.companyId, opts.cost, bucket, opts.source.slice(0, 60),
+      opts.aiCallLogId || null, idemKey, baseAfter, purchasedAfter, opts.createdBy || null, shortfall, ...cycleRowTimeParams(row, now),
+    ]
+  );
+  if (insertedRows(ins) === 0) {
+    await rollback();
+    return { ...empty, skipReason: 'duplicate' };
+  }
   await client.query(
     `UPDATE companies
         SET ai_credits_base_remaining = $2,
             ai_credits_purchased = $3
       WHERE id = $1::uuid`,
     [opts.companyId, baseAfter, purchasedAfter]
-  );
-
-  const bucket = shortfall > 0 ? 'overage' : (fromBase > 0 && fromPurchased > 0 ? 'mixed' : (fromPurchased > 0 ? 'purchased' : 'base'));
-  await client.query(
-    `INSERT INTO ai_credit_transactions
-       (company_id, type, amount, bucket, source, ai_call_log_id, idempotency_key,
-        balance_base_after, balance_purchased_after, created_by, overage_credits)
-     VALUES ($1::uuid, 'deduct', $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     ON CONFLICT (idempotency_key) DO NOTHING`,
-    [
-      opts.companyId, opts.cost, bucket, opts.source.slice(0, 60),
-      opts.aiCallLogId || null, idemKey, baseAfter, purchasedAfter, opts.createdBy || null, shortfall,
-    ]
   );
 
   if (own) await client.query('COMMIT');
@@ -297,10 +429,11 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
   let bucket = 'base';
   let originalAmount = 0;
   let origRow: any = null;
+  const seqOk = await creditSeqReady(client);
   if (opts.originalIdempotencyKey) {
     const orig = await client.query(
-      `SELECT id, amount, bucket, overage_credits, billed_billing_id, created_at,
-              balance_base_after, balance_purchased_after
+      `SELECT id, amount, bucket, overage_credits, billed_billing_id, created_at, ${TS_US_SQL('created_at')} AS created_at_us,
+              balance_base_after, balance_purchased_after${seqOk ? ', seq::text AS seq' : ''}
          FROM ai_credit_transactions
         WHERE idempotency_key = $1 AND company_id = $2::uuid AND type = 'deduct'
         LIMIT 1`,
@@ -314,14 +447,6 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
     origRow = row;
     originalAmount = Number(row.amount) || 0;
     bucket = String(row.bucket || 'base');
-    const overage = Number(row.overage_credits) || 0;
-    if (overage > 0 && !row.billed_billing_id) {
-      const remain = Math.max(0, overage - amount);
-      await client.query(
-        `UPDATE ai_credit_transactions SET overage_credits = $2 WHERE id = $1 AND billed_billing_id IS NULL`,
-        [row.id, remain],
-      );
-    }
   }
   // ⛔ **전액 환불만 지원한다.** 부분 환불을 허용하면 (a)구성분 반올림이 누적되어 항아리가 뒤바뀌고
   //   (b)서로 다른 멱등키로 나눠 환불해 원 차감액을 넘길 수 있다. 우리 환불 축(월간 대행 취소)은
@@ -346,95 +471,134 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
 
   const base = Number(row0.base) || 0;
   const purchased = Number(row0.purchased) || 0;
-  /**
-   * 버킷 복원 —
-   *  - 원 차감이 base만/purchased만이면 그 항아리로 그대로 되돌린다(정확).
-   *  - mixed·overage는 분할 비율이 원장에 남지 않는다. 그때는 **음수 base를 먼저 0까지 메우고
-   *    나머지를 purchased로** 되돌린다. 전액을 base로 넣으면 월 리셋에서 양수 base가 소멸해
-   *    고객이 돈으로 산 구매분이 사라진다(mixed 1000 환불 → purchased 900 소멸).
-   */
-  let toBase = 0;
-  let toPurchased = 0;
-  /**
-   * ★ 2026-09-25 한줄로 전수점검 C-08 (Codex 1R high) — **선불이 아닌 회사의 초과분(overage)은 크레딧이 아니라 청구 부채다.**
-   *   월 리셋이 비선불의 음수 base를 더는 다음 달로 상계하지 않으므로(applyResetIfNeeded), 초과분을 옛 규칙대로
-   *   purchased에 넣으면 부채(overage_credits)는 지워지고 크레딧만 생긴다(쓰지 않은 구매분 발생).
-   *   청구 전(billed_billing_id NULL) 초과분은 위에서 overage_credits를 줄여 부채를 지웠다. 크레딧 쪽은
-   *   - 같은 주기(원 차감이 현재 리셋 뒤)면 그만큼 음수였던 base를 되메운다(차감 전 상태 그대로).
-   *   - 리셋이 지났으면 그 음수 base는 리셋이 이미 없앴다 → 어디에도 더하지 않는다(부채 취소만).
-   *   선불·이미 청구된 행은 종전 규칙 그대로다(overagePart = 0).
-   */
-  const isPrepaid = String(row0.billing_type) === 'prepaid';
-  const origOverage = origRow ? (Number(origRow.overage_credits) || 0) : 0;
-  const overagePart = (!isPrepaid && origRow && !origRow.billed_billing_id && origOverage > 0)
-    ? Math.min(amount, origOverage)
-    : 0;
-  if (overagePart > 0) {
-    const resetAt = row0.reset_at ? new Date(row0.reset_at) : null;
-    const sameCycle = !resetAt || Number.isNaN(resetAt.getTime()) || new Date(origRow.created_at) >= resetAt;
-    if (sameCycle) toBase += overagePart;
-  }
-  const restAmount = amount - overagePart;
-  /**
-   * ★ 2026-08-13 Codex 2R — **원 차감의 실제 구성분을 복원한다.**
-   * 원장에 from_base/from_purchased 컬럼은 없지만, 차감 행의 `balance_*_after`와
-   * **그 직전 거래 행의 after**가 있으면 차이로 정확히 계산된다(before − after).
-   * 그것을 못 구할 때만 coarse bucket 규칙으로 내려간다.
-   */
-  let split: { fromBase: number; fromPurchased: number } | null = null;
-  if (origRow) {
-    const prev = await client.query(
-      `SELECT balance_base_after, balance_purchased_after
-         FROM ai_credit_transactions
-        WHERE company_id = $1::uuid AND (created_at, id) < ($2, $3)
-        ORDER BY created_at DESC, id DESC LIMIT 1`,
-      [opts.companyId, origRow.created_at, origRow.id],
+  const isPrepaid = !billedMonthly(row0.billing_type);
+  const resetAt = row0.reset_at ? new Date(row0.reset_at) : null;
+  // ★ 2026-11-01 C8 — 같은 주기 = 원 차감이 지금 주기 리셋 줄보다 뒤. 둘 다 seq(잠금 순서)가 있으면 seq · 아니면 그 리셋 줄 시각 ·
+  //   리셋 줄이 없으면(옛 행 · 선불 E 0) 리셋 시각(옛 규칙). 줄 시각(거래 시작)은 자정 직전에 시작한 거래면 지난달로 찍힌다.
+  let sameCycle = !origRow || !resetAt || Number.isNaN(resetAt.getTime()) || new Date(origRow.created_at) >= resetAt;
+  if (origRow && resetAt && !Number.isNaN(resetAt.getTime())) {
+    const cur = await client.query(
+      `SELECT ${seqOk ? 'seq::text' : 'NULL::text'} AS seq, ${TS_US_SQL('created_at')} AS at_us FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2`,
+      [opts.companyId, `reset:${opts.companyId}:${monthTag(monthKeyOf(resetAt))}`],
     );
-    const p0 = prev.rows[0];
-    if (p0) {
-      const fromBase = Math.max(0, Number(p0.balance_base_after) - Number(origRow.balance_base_after));
-      const fromPurchased = Math.max(0, Number(p0.balance_purchased_after) - Number(origRow.balance_purchased_after));
-      // ⛔ **자가 검증** — 구성분 합이 (차감액 − 초과사용분)과 정확히 맞을 때만 신뢰한다.
-      //   같은 트랜잭션에 월 리셋 행이 함께 들어간 경우처럼 "직전 행"이 애매할 수 있어,
-      //   맞지 않으면 코스한 bucket 규칙으로 내려간다(틀린 정밀도보다 안전한 근사가 낫다).
-      const expected = originalAmount - (Number(origRow.overage_credits) || 0);
-      if (fromBase + fromPurchased === expected && expected > 0) split = { fromBase, fromPurchased };
+    const start = cur.rows[0];
+    if (start && origRow.seq != null && start.seq != null) sameCycle = BigInt(String(origRow.seq)) > BigInt(String(start.seq));
+    else if (start) sameCycle = String(origRow.created_at_us) >= String(start.at_us);   // 같은 꼴(UTC µs) 글자 비교 = 시각 비교
+  }
+
+  /**
+   * ★ 2026-11-01 크레딧 컨트롤타워 C8(5판 · Codex R3-1) — **원 차감의 구성 셋**(기본분 몫 · 구매분 몫 · 초과 몫)을 다시 계산한다.
+   *   차감은 기본분(양수만) → 구매분 → 초과(기본분을 음수로) 순이라, 원 행과 그 직전 행 잔액으로 정확히 나온다:
+   *   fromBase = min(max(0, 직전 기본분), amount) · fromPurchased = 직전 구매분 − 원 행 구매분 · shortfall = 나머지.
+   *   검사 = 직전 기본분 − 원 행 기본분 = fromBase + shortfall(옛 검사는 초과 몫을 기본분 몫에 섞어 맞지 않으면
+   *   폴백으로 구매분을 기본분에 넣었다 · 지난 주기 반례 (−100, 0) → (0, 0) · 정답 (−100, 100)).
+   *   직전 행 = seq(둘 다 있으면) · 아니면 created_at 순(옛 규칙).
+   */
+  let comp: { fromBase: number; fromPurchased: number; shortfall: number } | null = null;
+  if (origRow) {
+    let p0: any = null;
+    if (seqOk && origRow.seq != null) {
+      const bySeq = await client.query(
+        `SELECT balance_base_after, balance_purchased_after FROM ai_credit_transactions
+          WHERE company_id = $1::uuid AND seq < $2::bigint ORDER BY seq DESC LIMIT 1`,
+        [opts.companyId, origRow.seq],
+      );
+      p0 = bySeq.rows[0] || null;
+      if (!p0) {
+        const old = await client.query(
+          `SELECT balance_base_after, balance_purchased_after FROM ai_credit_transactions
+            WHERE company_id = $1::uuid AND seq IS NULL ORDER BY created_at DESC, id DESC LIMIT 1`,
+          [opts.companyId],
+        );
+        p0 = old.rows[0] || null;
+      }
+    } else {
+      const prev = await client.query(
+        `SELECT balance_base_after, balance_purchased_after
+           FROM ai_credit_transactions
+          WHERE company_id = $1::uuid AND (created_at, id) < ($2::timestamptz, $3::uuid)
+          ORDER BY created_at DESC, id DESC LIMIT 1`,
+        [opts.companyId, origRow.created_at_us, origRow.id],   // µs 그대로(같은 거래 줄 · 주기 시작 + 1µs 를 놓치지 않게)
+      );
+      p0 = prev.rows[0] || null;
+    }
+    if (p0 && p0.balance_base_after != null && p0.balance_purchased_after != null
+        && origRow.balance_base_after != null && origRow.balance_purchased_after != null) {
+      const pB = Number(p0.balance_base_after);
+      const pP = Number(p0.balance_purchased_after);
+      const oB = Number(origRow.balance_base_after);
+      const oP = Number(origRow.balance_purchased_after);
+      const fromBase = Math.min(Math.max(0, pB), originalAmount);
+      const fromPurchased = pP - oP;
+      const shortfall = originalAmount - fromBase - fromPurchased;
+      if (fromPurchased >= 0 && shortfall >= 0 && pB - oB === fromBase + shortfall) comp = { fromBase, fromPurchased, shortfall };
     }
   }
-  // 아래는 초과분을 뺀 나머지(restAmount)의 복원 — 선불·청구된 행은 restAmount = amount라 종전과 같다.
-  if (split) {
-    // 전액 환불이라 구성분을 그대로 되돌린다(반올림 없음).
-    const b = Math.min(restAmount, split.fromBase);
-    toBase += b;
-    toPurchased += restAmount - b;
-  } else if (bucket === 'purchased') {
-    toPurchased += restAmount;
-  } else if (bucket === 'base') {
-    toBase += restAmount;
+
+  /**
+   * 부채 취소 = 원 행의 **지금** 미청구 초과분 중 이번 환불의 초과 몫까지(후불만 · 선불 초과는 청구가 아니라 다음 달 상계).
+   *   같은 주기 = 그 몫을 기본분으로 되메운다(차감 전 상태) · 지난 주기 = 그 음수는 마감이 이미 정리했으니 부채만 지운다
+   *   → 환불 행 overage_credits = 그 부채 취소분(대조 규칙 = amount − overage_credits · §5-2).
+   *   청구된 행(billed_billing_id)은 건드리지 않는다 — 발행된 문서를 뒤에서 바꾸지 않는다(크레딧으로 돌려준다).
+   */
+  const origOverageNow = origRow && !origRow.billed_billing_id ? (Number(origRow.overage_credits) || 0) : 0;
+  const shortfallPart = comp ? comp.shortfall : (origRow ? Math.min(amount, Number(origRow.overage_credits) || 0) : 0);
+  const debtCancel = !isPrepaid ? Math.min(shortfallPart, origOverageNow) : 0;
+  if (debtCancel > 0) {
+    await client.query(
+      `UPDATE ai_credit_transactions SET overage_credits = overage_credits - $2 WHERE id = $1 AND billed_billing_id IS NULL`,
+      [origRow.id, debtCancel],
+    );
+  }
+  const refundOverage = sameCycle ? 0 : debtCancel;
+
+  let toBase = 0;
+  let toPurchased = 0;
+  if (comp) {
+    // 구매분 몫은 언제나 구매분(지금 기본분이 음수여도) · 기본분 몫 + (지난 주기면 부채로 갚은 만큼 뺀) 초과 몫은 기본분
+    toPurchased = comp.fromPurchased;
+    toBase = comp.fromBase + comp.shortfall - refundOverage;
   } else {
-    const curBase = base + toBase;
-    const fill = curBase < 0 ? Math.min(restAmount, -curBase) : 0;
-    toBase += fill;
-    toPurchased += restAmount - fill;
+    // 폴백(직전 행을 못 구했거나 맞지 않음 · 옛 bucket 규칙) — 초과 몫은 위 부채 규칙, 나머지는 bucket 으로.
+    const overagePart = Math.min(amount, shortfallPart);
+    toBase += overagePart - refundOverage;
+    const restAmount = amount - overagePart;
+    if (bucket === 'purchased') {
+      toPurchased += restAmount;
+    } else if (bucket === 'base') {
+      toBase += restAmount;
+    } else {
+      const curBase = base + toBase;
+      const fill = curBase < 0 ? Math.min(restAmount, -curBase) : 0;
+      toBase += fill;
+      toPurchased += restAmount - fill;
+    }
   }
   const baseAfter = base + toBase;
   const purchasedAfter = purchased + toPurchased;
   const recordBucket = toBase > 0 && toPurchased > 0 ? 'mixed' : (toPurchased > 0 ? 'purchased' : 'base');
-  await client.query(
-    `UPDATE companies SET ai_credits_base_remaining = $2, ai_credits_purchased = $3 WHERE id = $1::uuid`,
-    [opts.companyId, baseAfter, purchasedAfter],
-  );
-  await client.query(
+  // ★ 2026-11-01 크레딧 컨트롤타워 I1 — 원장 먼저(같은 키는 잠금 뒤 걸렀다 · 0행이면 잔액을 바꾸지 않는다).
+  const ins = await client.query(
     `INSERT INTO ai_credit_transactions
        (company_id, type, amount, bucket, source, idempotency_key,
-        balance_base_after, balance_purchased_after, created_by, reason)
-     VALUES ($1::uuid, 'refund', $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (idempotency_key) DO NOTHING`,
+        balance_base_after, balance_purchased_after, created_by, reason, overage_credits, created_at, seq)
+     VALUES ($1::uuid, 'refund', $2, $3, $4, $5, $6, $7, $8, $9, $10, ${CYCLE_ROW_TIME_SQL(11)}, ${LEDGER_SEQ_SQL})
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING id`,
     [
       opts.companyId, amount, recordBucket, opts.source.slice(0, 60), opts.idempotencyKey,
       baseAfter, purchasedAfter, opts.createdBy || null,
       `${(opts.reason || '').slice(0, 420)}${opts.originalIdempotencyKey ? ` ${ORIG_TAG_PREFIX}${opts.originalIdempotencyKey}]` : ''}`.slice(0, 500),
+      refundOverage, ...cycleRowTimeParams(row0, now),
     ],
+  );
+  if (insertedRows(ins) === 0) {
+    await rollback();
+    return { refunded: false, amount: 0, skipReason: 'duplicate' };
+  }
+  await client.query(
+    `UPDATE companies SET ai_credits_base_remaining = $2, ai_credits_purchased = $3 WHERE id = $1::uuid`,
+    [opts.companyId, baseAfter, purchasedAfter],
   );
   if (manageTx) await client.query('COMMIT');
   return { refunded: true, amount };
@@ -484,23 +648,77 @@ export async function adjustCreditWithClient(client: any, opts: AdjustOpts, now:
     throw new UserFacingError(402, 'INSUFFICIENT_PURCHASED', `구매 크레딧이 부족합니다 (보유 ${purchased.toLocaleString()}).`);
   }
 
-  await client.query(
-    `UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`,
-    [opts.companyId, purchasedAfter]
-  );
-
+  // ★ 2026-11-01 크레딧 컨트롤타워 I1 — 원장 먼저(같은 키는 위에서 잠금 뒤 걸렀다 · 들어간 경우에만 잔액).
   await client.query(
     `INSERT INTO ai_credit_transactions
        (company_id, type, amount, bucket, source, idempotency_key,
-        balance_base_after, balance_purchased_after, created_by, reason)
-     VALUES ($1::uuid, $2, $3, 'purchased', $4, $5, $6, $7, $8, $9)`,
+        balance_base_after, balance_purchased_after, created_by, reason, seq)
+     VALUES ($1::uuid, $2, $3, 'purchased', $4, $5, $6, $7, $8, $9, ${LEDGER_SEQ_SQL})`,
     [
       opts.companyId, opts.type, opts.amount, `admin-${opts.type}`,
       opts.idempotencyKey || `${opts.type}:${opts.companyId}:${now.getTime()}:${Math.floor(Math.random() * 1e9)}`,
       base, purchasedAfter, opts.adminId, (opts.reason || '').slice(0, 500),
     ]
   );
+  await client.query(
+    `UPDATE companies SET ai_credits_purchased = $2 WHERE id = $1::uuid`,
+    [opts.companyId, purchasedAfter]
+  );
 
   await client.query('COMMIT');
   return { purchasedAfter };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 체험 크레딧(★ 2026-11-01 크레딧 컨트롤타워 C1 · I7 · D-A) — 체험 경로는 잔액 칸을 직접 쓰지 않고 이 두 함수만 부른다
+// ════════════════════════════════════════════════════════════════════
+
+/**
+ * 체험 시작 = 월 마감 → 남은 양수 기본분 소멸 → 체험 크레딧(체험 한 번에 한 번). 음수는 그대로(선불 빚 · 후불은 달 경계 맞춤).
+ * basic-trial 이 **연장이 아닐 때만** recordPlanChange **뒤에** 부른다(유료 → 체험이면 일할 회수가 먼저다).
+ * trialKey = 새 체험 만료 시각(같은 체험의 재시도는 연장이라 여기 안 온다 · fresh 재시도는 호출부 1회 기록이 막는다).
+ */
+export async function applyTrialStart(client: any, companyId: string, credits: number, trialKey: string, now: Date = new Date()): Promise<void> {
+  const locked = await loadCreditRow(client, companyId, true);
+  if (!locked) return;
+  const row = await applyResetIfNeeded(client, companyId, locked, now);
+  const purchased = Number(row.purchased) || 0;
+  let b = Number(row.base) || 0;
+  if (b > 0) {
+    const leftover = b;
+    b = 0;
+    await insertLedgerRow(client, {
+      companyId, type: 'expire', amount: -leftover, bucket: 'base', source: 'trial-start',
+      key: `trial-start-expire:${companyId}:${trialKey}`, baseAfter: b, purchasedAfter: purchased,
+      reason: '무료체험 시작 전 남은 기본분 소멸', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
+    });
+  }
+  const c = Math.max(0, Math.floor(Number(credits) || 0));
+  if (c > 0) {
+    b += c;
+    await insertLedgerRow(client, {
+      companyId, type: 'trial_credit', amount: c, bucket: 'base', source: 'trial-start',
+      key: `trial-credit:${companyId}:${trialKey}`, baseAfter: b, purchasedAfter: purchased,
+      reason: '무료체험 크레딧', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
+    });
+  }
+  await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [companyId, b]);
+}
+
+/**
+ * 체험 끝(만료 · 취소 · 유료 전환) = 월 마감 → 남은 양수 기본분 소멸. 0 이하면 줄 없음(음수 빚은 그대로).
+ * 체험 만료 워커 · 체험 취소는 recordPlanChange **앞에**, recordPlanChange 는 TRIAL 을 떠나는 변경의 이력 INSERT 뒤에 부른다.
+ */
+export async function expireTrialLeftover(client: any, companyId: string, key: string, now: Date = new Date()): Promise<void> {
+  const locked = await loadCreditRow(client, companyId, true);
+  if (!locked) return;
+  const row = await applyResetIfNeeded(client, companyId, locked, now);
+  const b = Number(row.base) || 0;
+  if (b <= 0) return;
+  await insertLedgerRow(client, {
+    companyId, type: 'expire', amount: -b, bucket: 'base', source: 'trial-end',
+    key, baseAfter: 0, purchasedAfter: Number(row.purchased) || 0,
+    reason: '무료체험 종료 · 남은 체험 크레딧 소멸', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
+  });
+  await client.query(`UPDATE companies SET ai_credits_base_remaining = 0 WHERE id = $1::uuid`, [companyId]);
 }

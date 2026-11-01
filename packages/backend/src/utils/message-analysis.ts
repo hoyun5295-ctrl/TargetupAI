@@ -65,7 +65,7 @@ export function computeMessageTypePerformance(
     .sort((a, b) => b.sent - a.sent);
 }
 
-/** 본문 byte 길이 분포 — 단문(≤90)/중문(91~2000)/장문(>2000). 항상 3버킷(빈 입력도 count 0). */
+/** 본문 byte 길이 분포 — 90바이트 이하 / 91~2,000바이트 / 2,000바이트 초과(★1101 B1-5 · 채널 이름이 아니라 길이 구간 이름). 항상 3버킷(빈 입력도 count 0). */
 export function computeLengthDistribution(byteLengths: number[]): LengthBucket[] {
   let short = 0;
   let mid = 0;
@@ -77,8 +77,8 @@ export function computeLengthDistribution(byteLengths: number[]): LengthBucket[]
     else long += 1;
   }
   return [
-    { bucket: '단문', count: short },
-    { bucket: '중문', count: mid },
-    { bucket: '장문', count: long },
+    { bucket: '90바이트 이하', count: short },
+    { bucket: '91~2,000바이트', count: mid },
+    { bucket: '2,000바이트 초과', count: long },
   ];
 }

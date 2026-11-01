@@ -21,6 +21,7 @@ import {
 import { PlannerEventRow, firstSendDate, mapEventRow, patchEventMeta, staleBuildChannels } from './planner-event';
 import { PLANNER_APPROVAL_DEADLINE_HOUR, buildPlannerConfirmLink, hashPreviewToken, issuePlannerPreviewToken, isPreviewValid } from './planner-confirm';
 import { carrierGroups, loadPlannerDefaultCallback, runPlannerCopyPass, spamCheckPlannerVerdict } from './planner-copy';
+import { isSpamHold } from './spam-test-queue';
 import { PLANNER_REASON } from './planner-reasons';
 import { tryAcquireInflight, releaseInflight } from './inflight-lock';
 import { computeTouchpointDate, TimingRule } from './marketing-planner';
@@ -421,7 +422,8 @@ async function checkCarrierAfterApproval(carrier: PlannerTouchpointRow): Promise
     await clearExecMetaKeys(carrier.companyId, carrier.id, ['post_approval_spam'], { post_approval_spam_at: new Date().toISOString() });
     return 'pass';
   }
-  if (check.verdict === 'error') return 'skip';
+  if (check.verdict === 'error' || isSpamHold(check.verdict)) return 'skip';   // ★ 1101 B1-4 — 확인 중 · 검사 중 = 표식을 두고 다음 주기에
+  void (check.verdict satisfies 'blocked');
   // ★ 2026-10-18 차단 = 그 쌍만 재확인(행사 승인 · 다른 날 발송은 그대로 · 옛: 행사 전체를 재료 단계로 되돌렸다)
   //   통지 · 새 문안 · 링크는 재확인 패스(planner-recheck · 실행 워커 10분 주기)가 한다.
   const siblings = (await loadEventTouchpoints(carrier.companyId, carrier.eventId));

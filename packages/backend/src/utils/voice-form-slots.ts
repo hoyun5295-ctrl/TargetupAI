@@ -116,6 +116,15 @@ function linkShape(s: string): boolean {
   if (/^https?:\/\//i.test(s)) return httpLinkOk(s);
   return BARE_DOMAIN_RE.test(s) && httpLinkOk(`https://${s}`);
 }
+/**
+ * ★ 2026-11-01 B1-3(Codex 구현 1R B #3) — 사람이 적은 한 덩어리 링크(적은 그대로 · https:// 없는 도메인 꼴 포함) · 아니면 null.
+ *   질문표 답(readLinkText)과 여정 사람 값 원장(journey-copy-facts)이 같은 판정을 쓴다(옛: 원장만 http(s) 를 요구해 질문표가 받은 주소를 버렸다).
+ */
+export function wholeLink(raw: unknown): string | null {
+  const s = String(raw ?? '').trim();
+  return !/\s/.test(s) && isWholeLink(s) ? s : null;
+}
+
 /** (순수) 사람이 적은 한 덩어리가 링크인가 = 꼴 + 길이(사람이 적은 글자 ≤ LINK_MAX) */
 function isWholeLink(s: string): boolean {
   return !!s && s.length <= LINK_MAX && linkShape(s);
@@ -283,6 +292,21 @@ export function stripLinkLines(text: string): string {
 }
 
 /**
+ * ★ 2026-11-01 B1-3(Codex 구현 2R B #4) — 여정 「링크 뺌」 결정(사람 값 원장 omit) = 링크 토큰 · 자리표시 줄(stripLinkLines) + 실제 주소가 든 줄도 지운다.
+ *   keepFrom(고치기 모드 = 지금 본문)에 이미 있던 주소는 사람이 쓴 것이라 둔다 · 새 칸(쓰기 모드)은 keepFrom 없음 = 주소 줄 전부.
+ *   공용 출구(copy-exit-guards linkOmit)는 stripLinkLines 그대로(그 계약은 넓히지 않는다).
+ */
+export function stripOmittedLinks(text: string, keepFrom = ''): string {
+  const keep = new Set(linkSpans(keepFrom).map((sp) => sp.link));
+  // 여정 링크 자리표시(채우기가 아는 자리 전부 = LINK_SPOTS) · 실제 주소(본문에 없던 것) 줄을 지운다
+  //   ★ Codex 구현 3R B #3 — 주소 = 명시 꼴만(http(s):// · www. · 경로 / 가 있는 도메인) · 「Node.js」 같은 점 있는 낱말 줄은 둔다
+  const explicit = (link: string) => /^(?:https?:\/\/|www\.)/i.test(link) || link.includes('/');
+  const kept = stripLinkLines(text).split('\n')
+    .filter((l) => !LINK_SPOTS.some((spot) => l.includes(spot)) && !linkSpans(l).some((sp) => explicit(sp.link) && !keep.has(sp.link)));
+  return kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
  * ★ 2026-10-31 (순수) 사람이 정한 링크(once)의 지시문 절(설계서 P2) — 등록 링크 목록 대신 이번 문자 링크 하나 · 꼭 한 번.
  *   composeVoicePrompt 링크 절 한 곳이 once 일 때 부른다(등록 · 습관 · 생략 갈래는 그대로).
  */
@@ -310,12 +334,24 @@ export function ensureOnceLink(text: string, url: string | null | undefined): { 
   const src = String(text ?? '');
   if (!url || !String(url).trim()) return { text: src, appended: false };
   const link = asciiLink(url);
+  const filled = fillLinkSpots(src, url);
+  if (filled.hit || textLinks(filled.text).includes(link)) return { text: filled.text, appended: false };
+  return { text: `${filled.text.replace(/\s+$/, '')}\n${link}`, appended: true };
+}
+
+/**
+ * ★ 2026-11-01 여정 재발 방지 B1-2 (순수) — 링크 토큰 · 링크 자리 표시만 그 주소로 바꾼다(붙이기 없음 · 여정 「링크 넣기」가 전 칸에 쓴다).
+ *   ensureOnceLink 와 같은 바꾸기(한 곳) · url 이 없으면 그대로.
+ */
+export function fillLinkSpots(text: string, url: string | null | undefined): { text: string; hit: boolean } {
+  const src = String(text ?? '');
+  if (!url || !String(url).trim()) return { text: src, hit: false };
+  const link = asciiLink(url);
   // ★ Codex 구현 1R ④ — 주소는 글자 그대로 넣는다(치환 문자열의 $ 문법 0 · 콜백) · ② 있음 = 바꾼 자리가 있거나 꺼낸 주소가 글자 그대로 같다
   let hit = false;
   let out = src.replace(new RegExp(LINK_TOKEN_RE.source, 'g'), () => { hit = true; return link; });
   for (const spot of LINK_SPOTS) if (out.includes(spot)) { hit = true; out = out.split(spot).join(link); }
-  if (hit || textLinks(out).includes(link)) return { text: out, appended: false };
-  return { text: `${out.replace(/\s+$/, '')}\n${link}`, appended: true };
+  return { text: out, hit };
 }
 
 /**

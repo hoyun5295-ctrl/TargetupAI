@@ -257,8 +257,8 @@ export default function CompanyCostTab(props: CompanyCostTabProps) {
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {([
-                      ['costPerSms', 'SMS', '단문 문자'],
-                      ['costPerLms', 'LMS', '장문 문자'],
+                      ['costPerSms', 'SMS', 'SMS'],
+                      ['costPerLms', 'LMS', 'LMS'],
                       ['costPerMms', 'MMS', '이미지 문자'],
                       ['costPerKakao', '알림톡', '카카오 알림톡'],
                       ['costPerBrand', '브랜드메시지 친구', '채널 친구 대상 · 알림톡과 별도'],

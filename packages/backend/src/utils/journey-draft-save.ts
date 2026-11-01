@@ -83,6 +83,8 @@ export async function saveJourneyPackageAsDraft(
     triggerEvent,
     triggerFilters: pkg.triggerFilters || {},
     entryEndsOn: opts.entryEndsOn || null,
+    // ★ 2026-11-01 여정 재발 방지 B1-3 — 질문표 혜택 · 링크 → 사람 값 원장
+    copyFacts: pkg.decidedFacts,
   });
   return journeyId;
 }

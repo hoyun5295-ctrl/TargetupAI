@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: 33b7cdde · 2026-10-31 · Harold 보고 「배포완료」(C86 · C87 · tp-push 커밋 33b7cdde · pull 출력 원문은 안 받음)
-- deployed_head: 33b7cdde · 2026-10-31 · Harold 보고 「배포완료」(백엔드 + 프론트 · 빌드 · reload 출력 원문은 안 받음) · 그 전 bb719adf(C84 · C85) · C77-ENV-1 은 아직
-- 이번 창 확인 출력: backend-build · frontend-build · reload(Harold 보고 · 출력 원문은 안 받음)
+- pulled_head: 3d5e09ef · 2026-11-01 · Harold 보고 「전부 배포완료」(C88 · tp-push 커밋 3d5e09ef · pull 출력 원문은 안 받음 · 배포 전 서버 33b7cdde 확인)
+- deployed_head: 3d5e09ef · 2026-11-01 · Harold 보고 「전부 배포완료」(백엔드 + 프론트 빌드 · reload) · 그 전 33b7cdde(C86 · C87) · C77-ENV-1 은 아직
+- 이번 창 확인 출력: frontend-build 끝 줄(atomic swap 완료) · reload ✓(원문 받음) · backend-build(Harold 보고 · 원문은 안 받음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -35,7 +35,9 @@
 | C85 | bb719adf |
 | C86 | 33b7cdde |
 | C87 | 33b7cdde |
-| C88 | 미커밋 |
+| C88 | 3d5e09ef |
+| C89 | 미커밋 |
+| C90 | 미커밋 |
 
 ## §1 대기
 
@@ -336,7 +338,165 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 선행: 백엔드 배포(build:safe + reload · 프론트 무변경 · DDL 0 · ENV 0)
 - 기대: ① `scripts/studio-samples.ts warm` = 기존 582장 서빙본(1400px) 미리 만듦 · 원본 합 1.5GB → 서빙본 합 출력(AI 0) ② `make 20` = 첫 20장 · 첫 줄 엔진 이름 · 실패 3 이면 멈춤 → Google 청구로 장당 값 대조 ③ 나머지 `make 180` · 끝 줄 「남은 예시 없는 템플릿 0개」 · 봄 · 여름 두 장은 파일 자체가 갈라져 있으면 옆 폴더로 옮긴 뒤 `make 2 fashion-spring-outing,fashion-summer-resort`
 - 확인: 서버 출력(Harold) · 화면 = 갤러리 첫 쪽 카드가 바로 뜸 · 쇼핑몰·상품컷 · 신상·기획전 탭 · 패션 세부 아우터 · 상의 · 하의·원피스 · 뷰티 세부 보습 예시 그림
+- 결과: ① warm 1101 = 582장 원본 합 1473.8MB → 서빙본 합 199.3MB(한 장 평균 2.5MB → 0.3MB · Harold 출력) ② make 200 = GPT 로 시작 → Harold 1101 「이번까지만 제미나이」로 멈추고 STUDIO_IMAGE_ENGINE=gemini 로 다시 띄움(GPT 로 이미 만든 장은 그대로) · 진행 중
+
+### C89-DDL-1 · journeys.copy_facts(여정 사람 값 원장 · 설계서 2026-11-01-journey-recurrence-prevention-design.md §4 DDL-A)
+- 카드: C89
+- 단계: DDL
+- 선행: 코드 배포
+- 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 원장 안 정함 = 옛 동작 · 채우기 주소만 「DB 마이그레이션 필요」)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'journeys' AND column_name = 'copy_facts';
+- 확인: copy_facts · jsonb 한 줄
 - 결과:
+
+> C89-DDL-1 · 배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해
+
+```sql ddl:C89-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE journeys ADD COLUMN IF NOT EXISTS copy_facts jsonb NULL;
+```
+
+### C89-DDL-2 · spam_filter_test_results 첫 판정 · 확정 시각 · 확정 뒤 수신(설계서 §4 DDL-B)
+- 카드: C89
+- 단계: DDL
+- 선행: 코드 배포
+- 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 판정은 그대로 · 기록과 하루 측정만 건너뜀)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'spam_filter_test_results' AND column_name IN ('first_result', 'decided_at', 'late_report_at') ORDER BY 1;
+- 확인: decided_at · first_result · late_report_at 세 줄 · result 칸 CHECK 제약 없음(시험 DB 1101 확인 · 운영은 같은 확인 SQL 로)
+- 결과:
+
+> C89-DDL-2 · 배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해
+
+```sql ddl:C89-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE spam_filter_test_results
+  ADD COLUMN IF NOT EXISTS first_result varchar(20) NULL,
+  ADD COLUMN IF NOT EXISTS decided_at timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS late_report_at timestamptz NULL;
+```
+
+### C89-DDL-3 · spam_test_probes(스팸 검사 확인 문자 · 설계서 §4 DDL-C)
+- 카드: C89
+- 단계: DDL
+- 선행: 코드 배포
+- 의미 바꿈: 아니오(새 표 · 만들기 전 = 확인 문자 0 · 창 닫힌 확인 중 = 검사 장애 + 경보)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name FROM information_schema.tables WHERE table_name = 'spam_test_probes';
+- 확인: spam_test_probes 한 줄
+- 결과:
+
+> C89-DDL-3 · 배포 뒤 · 새 표 · 되돌리기 = 남겨도 무해(코드가 표 없음으로 돌아간다)
+
+```sql ddl:C89-DDL-3
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS spam_test_probes (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  result_id uuid NOT NULL UNIQUE REFERENCES spam_filter_test_results(id) ON DELETE CASCADE,
+  phone varchar(20) NOT NULL,
+  carrier varchar(20) NOT NULL,
+  nonce varchar(12) NOT NULL,
+  message_hash varchar(64) NOT NULL UNIQUE,
+  status varchar(12) NOT NULL CHECK (status IN ('claimed', 'sent', 'received', 'expired')),
+  attempts smallint NOT NULL DEFAULT 1,
+  claimed_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz NULL,
+  deadline_at timestamptz NULL,
+  decided_at timestamptz NULL
+);
+CREATE INDEX IF NOT EXISTS idx_spam_test_probes_open ON spam_test_probes (status, deadline_at) WHERE status IN ('claimed', 'sent');
+CREATE INDEX IF NOT EXISTS idx_spam_test_probes_device ON spam_test_probes (phone, carrier);
+```
+
+### C89-DDL-4 · spam_filter_devices.last_body_report_at(본문 보고 단말 · 설계서 §4 DDL-E)
+- 카드: C89
+- 단계: DDL
+- 선행: 코드 배포
+- 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 확인 문자 0 · 보고 경로는 last_seen_at 만 · 503 없음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'spam_filter_devices' AND column_name = 'last_body_report_at';
+- 확인: last_body_report_at · timestamp with time zone 한 줄
+- 결과:
+
+> C89-DDL-4 · 배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해
+
+```sql ddl:C89-DDL-4
+SET lock_timeout = '3s';
+ALTER TABLE spam_filter_devices ADD COLUMN IF NOT EXISTS last_body_report_at timestamptz NULL;
+```
+
+### C89-DDL-5 · journey_pretest_candidates(여정 보내기 전 재작성 후보 · 설계서 §4 DDL-D)
+- 카드: C89
+- 단계: DDL
+- 선행: 코드 배포
+- 의미 바꿈: 아니오(새 표 · 만들기 전 = 확정 차단에서 재작성 없이 여정 정지 · 차감 0)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name FROM information_schema.tables WHERE table_name = 'journey_pretest_candidates';
+- 확인: journey_pretest_candidates 한 줄
+- 결과:
+
+> C89-DDL-5 · 배포 뒤 · 새 표 · 되돌리기 = 남겨도 무해
+
+```sql ddl:C89-DDL-5
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS journey_pretest_candidates (
+  snapshot_id uuid PRIMARY KEY REFERENCES journey_step_snapshots(id) ON DELETE CASCADE,
+  step_id uuid NOT NULL,
+  body text NULL,
+  subject text NULL,
+  check_key varchar(64) NULL,
+  status varchar(12) NOT NULL CHECK (status IN ('generating', 'testing', 'passed', 'blocked', 'failed')),
+  claim_token uuid NULL,
+  claimed_at timestamptz NULL,
+  regen_count smallint NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+### C90-S1 · 크레딧 컨트롤타워 사전 실측(이력 없는 회사 · 미래 · 소급 적용일 · 후불 11월 리셋 전 초과 · 리셋 시각 없는 잔액 · 결제 방식 값)
+- 카드: C90
+- 단계: 사전
+- 선행: 없음
+- 기대: ② 미래 0 · ③ 0행 · ④ 0 · ⑤ prepaid · postpaid 두 줄뿐(설계서 docs/2026-11-01-credit-control-tower-design.md §9 사전 SQL ①~⑤ · ① 은 수를 보고 대체값 대상만 기록)
+- 확인: 다섯 결과 그대로(SQL 원문 = 설계서 §9)
+- 결과:
+
+### C90-DDL-1 · ai_credit_transactions.seq(원장 순번) · plan_month_credits(그 달 월 크레딧 고정표) · ★ 배포 앞
+- 카드: C90
+- 단계: DDL
+- 선행: C90-S1
+- 의미 바꿈: 아니오(칸 · 표 추가만 · seq 는 기본값 없음 = 옛 코드 줄은 seq 없음 · 옛 코드는 이 칸 · 표를 읽지도 쓰지도 않는다 · 새 코드는 원장 INSERT 마다 nextval 로 채우므로 **배포 앞**에 넣는다 = 새 줄은 언제나 seq · Codex 구현 5R 구조 처방)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, column_default FROM information_schema.columns WHERE table_name = 'ai_credit_transactions' AND column_name = 'seq'; SELECT table_name FROM information_schema.tables WHERE table_name = 'plan_month_credits';
+- 확인: seq 한 줄(column_default 비어 있음 = 정상 · 새 코드가 nextval 로 채운다) · plan_month_credits 한 줄
+- 결과:
+
+> C90-DDL-1 · 배포 앞 · 추가만 · 되돌리기 = 설계서 docs/2026-11-01-credit-control-tower-design.md §7 되돌리기 줄(새 코드를 내린 뒤에만)
+
+```sql ddl:C90-DDL-1
+SET lock_timeout = '3s';
+CREATE SEQUENCE IF NOT EXISTS ai_credit_tx_seq;
+ALTER TABLE ai_credit_transactions ADD COLUMN IF NOT EXISTS seq bigint;
+ALTER SEQUENCE ai_credit_tx_seq OWNED BY ai_credit_transactions.seq;
+CREATE TABLE IF NOT EXISTS plan_month_credits (
+  month      date        NOT NULL,
+  plan_code  varchar(20) NOT NULL,
+  credits    integer     NOT NULL CHECK (credits >= 0),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (month, plan_code)
+);
+```
+
+### C90-DDL-2 · ai_credit_tx_company_seq 색인(대조 워커 · 환불 직전 행)
+- 카드: C90
+- 단계: DDL
+- 선행: C90-DDL-1
+- 의미 바꿈: 아니오(색인 · 트랜잭션 밖에서 단독 실행)
+- 기대: 서버 psql 에서 아래 한 문장 · 확인 = SELECT indexname FROM pg_indexes WHERE tablename = 'ai_credit_transactions' AND indexname = 'ai_credit_tx_company_seq';
+- 확인: 한 줄
+- 결과:
+
+> C90-DDL-2 · 배포 뒤 · 단독 실행(CONCURRENTLY)
+
+```sql ddl:C90-DDL-2
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ai_credit_tx_company_seq ON ai_credit_transactions (company_id, seq);
+```
 
 ## §2 덤프 뒤 적용분
 

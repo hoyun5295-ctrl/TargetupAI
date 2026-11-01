@@ -1945,7 +1945,7 @@ kind별 payload 키:
 |------|------|------|
 | id | uuid PK | gen_random_uuid() |
 | company_id | uuid FK | companies(id) |
-| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant / **refund**(★2026-08-13 신설 — 마케팅 플래너 월간 대행 취소 환불) / **plan_prorate**(★1026 요금제 변경 남은 기간 크레딧 · **amount 부호 = 방향**(양수 지급 · 음수 회수) · 키 `plan-prorate:{company_plan_changes.id}` · 쓰는 곳 = `plan-change-log.ts` 한 곳) |
+| type | varchar(20) | deduct / grant / purchase / reset / postpaid_grant / **refund**(★2026-08-13 신설 — 마케팅 플래너 월간 대행 취소 환불) / **plan_prorate**(★1026 요금제 변경 남은 기간 크레딧 · **amount 부호 = 방향**(양수 지급 · 음수 회수) · 키 `plan-prorate:YYYYMM:{company_plan_changes.id}`(★1101 그 달을 키에 박음 · 옛 1026 키 = `plan-prorate:{id}`) · 쓰는 곳 = `plan-change-log.ts` 한 곳) / **expire** · **trial_credit**(★2026-11-01 크레딧 컨트롤타워 · 월 마감 소멸 · 후불 음수 정리 · 체험 시작 · 끝 · expire 는 amount 부호 = 방향 · 줄마다 잔액 증감 = `creditTxDelta` 표 한 곳(`ai-credit-calc.ts` = 화면 `constants/credit.ts`) · 후불 월말 맞춤 = `deduct` amount 0 · overage = 맞춤량 · source `month-end-overage` · 키 `overage-settle:회사:YYYYMM` · 설계서 docs/2026-11-01-credit-control-tower-design.md §5-2) |
 | amount | integer | 크레딧 양 (항상 양수, 방향은 type) |
 | bucket | varchar(10) | base / purchased / mixed (reset=base) |
 | source | varchar(60) | AI 작업 source (orchestrate / dm-ai / generate-messages 등) |
@@ -1956,6 +1956,7 @@ kind별 payload 키:
 | created_by | uuid | 차감 유발 사용자 (nullable) |
 | created_at | timestamptz | DEFAULT now() |
 | reason | text NULL | ★2026-07-26 실측 등재. 슈퍼관리자 수동 지급/조정 사유(`adjustCreditWithClient`) |
+| seq | bigint NULL · **기본값 없음** · 시퀀스 `ai_credit_tx_seq` | ★2026-11-01 C90-DDL-1(**배포 앞** 실행 대기 · 원문 = 배포 원장 C90-DDL-1 · 설계서 §7). 원장 순번 = 회사 잠금 아래 쓴 순서. 새 코드가 원장 INSERT 마다 `nextval`(`LEDGER_SEQ_SQL` · 7곳 · 뿌리 대장 R38 ⑦) · 옛 코드 줄 = NULL(= 옛 행 · 순서는 created_at 폴백). 색인 `ai_credit_tx_company_seq (company_id, seq)` = C90-DDL-2(배포 뒤 · CONCURRENTLY 단독) |
 | overage_credits | integer NULL | ★2026-07-26 실측 등재. 후불 초과 사용분(base가 음수로 간 양). 정산이 이 합을 청구한다(`billing.ts` overage 집계) |
 | billed_billing_id | uuid NULL **FK → billings(id) ON DELETE SET NULL** | ★2026-07-26 ALTER 신설. 초과사용분 **청구 완료 마커**. 없던 동안은 기간으로만 합산해서, 기간 경계를 UTC→KST로 옮기면 KST 00~09시 9시간 구간이 두 청구서에 두 번 들어갈 수 있었다(기간 중복검사는 날짜만 본다). `ai_credit_requests.billed_invoice_id`가 FK가 아니라 돈이 샌 전례가 있어 이쪽은 **FK로** 걸었다 — 청구서를 지우면 자동으로 NULL이 되어 다시 청구 대상이 된다. INDEX `idx_ai_credit_tx_billed_billing (billed_billing_id) WHERE billed_billing_id IS NOT NULL` |
 
@@ -1976,6 +1977,10 @@ kind별 payload 키:
     "승인 → 무작업 취소·환불 → 재승인"이 duplicate로 끝나 **무료 대행**이 된다(Codex 1R high).
 
 > CT `utils/ai-credit.ts` (checkCredit/deductCredit/resetMonthlyCreditsIfNeeded) 단일 진입점. 2버킷(base→purchased) 트랜잭션 차감 + SELECT FOR UPDATE 음수 방지 + idempotency_key 중복 차단. 순수 계산은 `utils/ai-credit-calc.ts`(node:assert 검증). 차감=호출 성공 후(실패 시 미차감). 인덱스 `idx_ai_credit_tx_company_created (company_id, created_at DESC)`.
+
+### plan_month_credits (그 달 요금제 월 크레딧 고정표) — ★2026-11-01 C90-DDL-1 신설(배포 뒤 실행 대기)
+`month date NOT NULL`(그 달 1일) · `plan_code varchar(20) NOT NULL` · `credits integer NOT NULL CHECK (credits >= 0)` · `created_at timestamptz NOT NULL DEFAULT now()` · PK(month, plan_code).
+그 달 권리(E) 계산이 처음 쓸 때 `plans.ai_credits_per_month` 값을 넣고(ON CONFLICT DO NOTHING) 그 뒤로는 이 값만 읽는다(`monthCredits` · 요금제 월 크레딧을 달 중간에 바꿔도 그 달은 그대로). 요금제 수정이 월 크레딧을 바꾸면 아직 닫히지 않았을 수 있는 달을 수정 전 값으로 먼저 넣는다(`snapshotOpenMonths`). 표가 없는 동안 = `plans` 지금 값 · 월 크레딧 수정은 503 `DB_MIGRATION_PENDING`.
 
 ### ai_credit_requests (후불 AI 크레딧 충전 요청) — ★2026-10-26 information_schema · pg_constraint 실측 등재(Harold)
 `id uuid PK DEFAULT gen_random_uuid()` · `company_id uuid NOT NULL FK companies` · `user_id uuid NULL` · `credits integer NOT NULL` · `unit_price integer NOT NULL DEFAULT 2000` · `supply_amount numeric NOT NULL` · `vat numeric NOT NULL` · `total_amount numeric NOT NULL` · `billing_type varchar NOT NULL` · `payment_method varchar NOT NULL` · `status varchar NOT NULL DEFAULT 'pending'`(pending · approved · rejected · **CHECK 없음**) · `processed_by uuid NULL` · `processed_at timestamptz NULL` · `admin_note text NULL` · `billed boolean NOT NULL DEFAULT false` · `billed_invoice_id uuid NULL`(FK 아님) · `credit_tx_id uuid NULL` · `created_at timestamptz NOT NULL DEFAULT now()`. 제약 = PK · FK(company_id) 둘뿐.

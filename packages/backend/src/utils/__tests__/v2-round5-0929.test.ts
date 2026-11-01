@@ -80,7 +80,9 @@ describe('① 체험 검사 — 전부 발송 실패면 세지 않는다', () =>
 describe('② 앱 수신 보고 — 발송 실패 행은 통과가 되지 않는다', () => {
   const route = read('routes/spam-filter.ts');
   const start = route.indexOf('UPDATE spam_filter_test_results\n       SET received = true');
-  const sql = route.slice(start, route.indexOf('RETURNING id', start) + 'RETURNING id'.length);
+  // ★ 2026-11-01 B1-4 — 칸이 있으면 처음 판정 · 확정 시각을 함께 쓴다(그 조각을 뺀 문장 = 칸 없는 운영 문장 그대로)
+  const sql = route.slice(start, route.indexOf('RETURNING id', start) + 'RETURNING id'.length)
+    .replace("${stamped ? ', first_result = COALESCE(first_result, $4), decided_at = NOW()' : ''}", '');
 
   it('UPDATE 에 failed 제외 조건과 값이 있다', () => {
     expect(sql).toContain('AND (result IS NULL OR result <> $6)');
@@ -206,8 +208,11 @@ describe('②-2 스팸 결과 판정 쓰기 = 아직 판정 안 된 행만(Codex
   it('쓰는 자리 6곳이 CT 한 문장을 쓴다 · 조건 없는 id 덮어쓰기 0', () => {
     const route = codeOnly(read('routes/spam-filter.ts'));
     const q = codeOnly(read('utils/spam-test-queue.ts'));
-    expect((route.match(/SPAM_RESULT_DECIDE_SQL, \[/g) || []).length).toBe(4);
-    expect((q.match(/SPAM_RESULT_DECIDE_SQL, \[/g) || []).length).toBe(2);
+    // ★ 2026-11-01 B1-4 — 여섯 자리 = 판정 쓰기 함수 decideSpamResult(안에서 CT 문장 · 칸이 있으면 처음 판정 · 확정 시각을 같은 조건으로)
+    expect((route.match(/decideSpamResult\(/g) || []).length).toBe(4);
+    expect((q.match(/await decideSpamResult\(/g) || []).length).toBe(2);
+    expect(route).not.toMatch(/SPAM_RESULT_DECIDE_SQL/);
+    expect(q).toMatch(/WHERE id = \$2 AND received = false AND result IS NULL`\s*: SPAM_RESULT_DECIDE_SQL,/);
     for (const s of [route, q]) expect(s).not.toMatch(/UPDATE spam_filter_test_results SET result = \$[12] WHERE id = \$[12]`/);
   });
   it('실제 실행: 실패·통과·시간 초과로 판정된 행은 그대로 · 대기 행만 쓴다', async () => {
