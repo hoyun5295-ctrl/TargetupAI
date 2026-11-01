@@ -33,7 +33,6 @@ import { randomUUID } from 'crypto';
 import { checkCredit, settleCreditAfterSuccess } from './ai-credit';
 import { isInCreditBundle, runInCreditBundle } from './ai-credit-context';
 import { getCreditCost } from './ai-credit-calc';
-import { buildMemoryPromptContext } from './company-memory';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
 import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
@@ -442,7 +441,6 @@ export async function generateInAppMessagePackage(
   }
 
   const ctx = await loadCompanyContext(input.companyId);
-  const memoryContext = await buildMemoryPromptContext(input.companyId, 30).catch(() => '');
   const season = getSeasonContext();
   const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
   const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
@@ -463,8 +461,6 @@ export async function generateInAppMessagePackage(
 [현재 시점 컨텍스트: KST]
 - 현재 월: ${season.month}월 (${season.season})
 - 시즌 키워드: ${season.keywords.join(', ')}
-
-${memoryContext}
 
 ${eventText ? `${buildEventPromptBlock(eventText)}\n${(() => { const h = buildEventTemplateHintBlock(eventText); return h ? `${h}\n` : ''; })()}` : ''}
 [★ ★ ★ 영구 룰: 절대 위반 X ★ ★ ★]

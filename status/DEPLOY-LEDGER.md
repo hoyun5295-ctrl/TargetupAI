@@ -36,8 +36,9 @@
 | C86 | 33b7cdde |
 | C87 | 33b7cdde |
 | C88 | 3d5e09ef |
-| C89 | 미커밋 |
-| C90 | 미커밋 |
+| C89 | d6e05ff5 |
+| C90 | d6e05ff5 |
+| C91 | 미커밋 |
 
 ## §1 대기
 
@@ -347,7 +348,7 @@ ALTER TABLE continuous_operators ADD COLUMN IF NOT EXISTS voice_form jsonb NULL;
 - 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 원장 안 정함 = 옛 동작 · 채우기 주소만 「DB 마이그레이션 필요」)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'journeys' AND column_name = 'copy_facts';
 - 확인: copy_facts · jsonb 한 줄
-- 결과:
+- 결과: 1101 Harold 실행(배포 d6e05ff5 뒤) · 출력 SET · ALTER TABLE · 통합 확인 SQL 12행 중 `journeys.copy_facts | jsonb` → 기대값 같음
 
 > C89-DDL-1 · 배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해
 
@@ -363,7 +364,7 @@ ALTER TABLE journeys ADD COLUMN IF NOT EXISTS copy_facts jsonb NULL;
 - 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 판정은 그대로 · 기록과 하루 측정만 건너뜀)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'spam_filter_test_results' AND column_name IN ('first_result', 'decided_at', 'late_report_at') ORDER BY 1;
 - 확인: decided_at · first_result · late_report_at 세 줄 · result 칸 CHECK 제약 없음(시험 DB 1101 확인 · 운영은 같은 확인 SQL 로)
-- 결과:
+- 결과: 1101 Harold 실행 · 출력 SET · ALTER TABLE · 통합 확인 SQL = decided_at · late_report_at timestamp with time zone · first_result character varying · spam_filter_test_results CHECK 제약 0행(pg_constraint contype 'c') → 기대값 같음
 
 > C89-DDL-2 · 배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해
 
@@ -382,7 +383,7 @@ ALTER TABLE spam_filter_test_results
 - 의미 바꿈: 아니오(새 표 · 만들기 전 = 확인 문자 0 · 창 닫힌 확인 중 = 검사 장애 + 경보)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name FROM information_schema.tables WHERE table_name = 'spam_test_probes';
 - 확인: spam_test_probes 한 줄
-- 결과:
+- 결과: 1101 Harold 실행 · 출력 SET · CREATE TABLE · CREATE INDEX × 2 · 통합 확인 SQL = spam_test_probes table · idx_spam_test_probes_open · idx_spam_test_probes_device index → 기대값 같음
 
 > C89-DDL-3 · 배포 뒤 · 새 표 · 되돌리기 = 남겨도 무해(코드가 표 없음으로 돌아간다)
 
@@ -413,7 +414,7 @@ CREATE INDEX IF NOT EXISTS idx_spam_test_probes_device ON spam_test_probes (phon
 - 의미 바꿈: 아니오(칸 추가 · 넣기 전 = 확인 문자 0 · 보고 경로는 last_seen_at 만 · 503 없음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'spam_filter_devices' AND column_name = 'last_body_report_at';
 - 확인: last_body_report_at · timestamp with time zone 한 줄
-- 결과:
+- 결과: 1101 Harold 실행 · 출력 SET · ALTER TABLE · 통합 확인 SQL = `spam_filter_devices.last_body_report_at | timestamp with time zone` → 기대값 같음
 
 > C89-DDL-4 · 배포 뒤 · 넓힘 · 되돌리기 = 남겨도 무해
 
@@ -429,7 +430,7 @@ ALTER TABLE spam_filter_devices ADD COLUMN IF NOT EXISTS last_body_report_at tim
 - 의미 바꿈: 아니오(새 표 · 만들기 전 = 확정 차단에서 재작성 없이 여정 정지 · 차감 0)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name FROM information_schema.tables WHERE table_name = 'journey_pretest_candidates';
 - 확인: journey_pretest_candidates 한 줄
-- 결과:
+- 결과: 1101 Harold 실행 · 출력 SET · CREATE TABLE · 통합 확인 SQL = journey_pretest_candidates table → 기대값 같음
 
 > C89-DDL-5 · 배포 뒤 · 새 표 · 되돌리기 = 남겨도 무해
 
@@ -450,13 +451,29 @@ CREATE TABLE IF NOT EXISTS journey_pretest_candidates (
 );
 ```
 
+### C89-S1 · 여정 재발 방지 배포 1 실측(배포 뒤 · 테스트계정)
+- 카드: C89
+- 단계: 사후
+- 선행: 코드 배포 · C89-DDL-1~5
+- 기대: 설계서 docs/2026-11-01-journey-recurrence-prevention-design.md §9 배포 1 · 회귀 두 줄 그대로(질문표 혜택 「첫 구매 10% 할인쿠폰」 + 링크 여정 = 칸마다 혜택 · 링크 · 자리표시 0 / 늦은 통신사 = 「확인 중 · n분째」 → 통과 / 확인 중 회차 다음 회차 = 새 검사 0 · 차감 0)
+- 확인: 화면 · 그 시각 SQL 하나씩
+- 결과:
+
+### C91-S1 · 여정 재발 방지 배포 2 실측(3단 칸 화면 · 점검 판 · 칸 저장 뒤 자동 스팸 검사 · 메모리 · AI 출구 · 배포 뒤 · 테스트계정)
+- 카드: C91
+- 단계: 사후
+- 선행: 코드 배포(DDL 0)
+- 기대: 설계서 docs/2026-11-01-journey-recurrence-prevention-design.md §9 배포 2 그대로(3단 화면 1440 · 1280 · 390 / 점검 판 판정 문장 = 켜기 칩 = 레일 점 / 칸을 저장하면 20초 안팎에 점검 판 「검사 중」 → 통과 · 같은 날 같은 글 다시 저장 = 새 차감 0 / 메모리 = 목소리 없는 회사 생성 지시문에 메모리 블록(로그 길이만 · 원문 출력 금지) / AI 다듬기 결과에 「고칠 것」 줄)
+- 확인: 화면 · 그 시각 SQL 하나씩(차감 = 크레딧 · 선불 원장 그 시각)
+- 결과:
+
 ### C90-S1 · 크레딧 컨트롤타워 사전 실측(이력 없는 회사 · 미래 · 소급 적용일 · 후불 11월 리셋 전 초과 · 리셋 시각 없는 잔액 · 결제 방식 값)
 - 카드: C90
 - 단계: 사전
 - 선행: 없음
-- 기대: ② 미래 0 · ③ 0행 · ④ 0 · ⑤ prepaid · postpaid 두 줄뿐(설계서 docs/2026-11-01-credit-control-tower-design.md §9 사전 SQL ①~⑤ · ① 은 수를 보고 대체값 대상만 기록)
-- 확인: 다섯 결과 그대로(SQL 원문 = 설계서 §9)
-- 결과:
+- 기대: ② 미래 0 · ③ 0행 · ④ 0 · ⑤ prepaid · postpaid 두 줄뿐 · ⑥ not_first_row 전부 0 · 11월 날짜 줄 0 · ⑦ 0 · ⑧ 0행(설계서 docs/2026-11-01-credit-control-tower-design.md §9 사전 SQL ①~⑧ · ① 은 수를 보고 대체값 대상만 기록)
+- 확인: 여덟 결과 그대로(SQL 원문 = 설계서 §9)
+- 결과: 1101 Harold 실행 ①~⑤ · ① 0 · ② 미래 0 · 소급 141 · ③ 0행 · ④ 0 · ⑤ postpaid 89 · prepaid 59 → ②~⑤ 기대값 같음 · 소급 141 은 ② SQL 이 전 기간을 세어 판정 못 함 → ⑥~⑧ 추가(시험 그릇 칸 · 문법 + 손 이력 기대값 같음) · ⑥ 2026-07-26 141 · not_first 0(표 신설 기준선 행) · ⑦ 0 · ⑧ 0행 → 기대값 같음
 
 ### C90-DDL-1 · ai_credit_transactions.seq(원장 순번) · plan_month_credits(그 달 월 크레딧 고정표) · ★ 배포 앞
 - 카드: C90
@@ -465,7 +482,7 @@ CREATE TABLE IF NOT EXISTS journey_pretest_candidates (
 - 의미 바꿈: 아니오(칸 · 표 추가만 · seq 는 기본값 없음 = 옛 코드 줄은 seq 없음 · 옛 코드는 이 칸 · 표를 읽지도 쓰지도 않는다 · 새 코드는 원장 INSERT 마다 nextval 로 채우므로 **배포 앞**에 넣는다 = 새 줄은 언제나 seq · Codex 구현 5R 구조 처방)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, column_default FROM information_schema.columns WHERE table_name = 'ai_credit_transactions' AND column_name = 'seq'; SELECT table_name FROM information_schema.tables WHERE table_name = 'plan_month_credits';
 - 확인: seq 한 줄(column_default 비어 있음 = 정상 · 새 코드가 nextval 로 채운다) · plan_month_credits 한 줄
-- 결과:
+- 결과: **순서 어긋남** · C90 이 C89 커밋 d6e05ff5(1101 18:43)에 함께 들어가 DDL-1 보다 먼저 배포 → 18:48 1일 지급 패스가 회사마다 「column seq … does not exist」로 실패 · 회사마다 경보 1통(100통 넘음) · 1101 Harold 이 블록 실행 = 세 객체 이미 있음(NOTICE already exists × 3 · 그 전에 넣은 것 = C89 세션이 경보 문자 접수(18:49 화면) 뒤 드린 같은 블록 · Harold 출력 SET · CREATE SEQUENCE · ALTER TABLE · ALTER SEQUENCE · CREATE TABLE · 그 뒤 이번 달 마감 안 된 대상 회사 0 · Harold 실측) · seq column_default 빈칸 · plan_month_credits 1행 → 기대값 같음
 
 > C90-DDL-1 · 배포 앞 · 추가만 · 되돌리기 = 설계서 docs/2026-11-01-credit-control-tower-design.md §7 되돌리기 줄(새 코드를 내린 뒤에만)
 
@@ -490,7 +507,7 @@ CREATE TABLE IF NOT EXISTS plan_month_credits (
 - 의미 바꿈: 아니오(색인 · 트랜잭션 밖에서 단독 실행)
 - 기대: 서버 psql 에서 아래 한 문장 · 확인 = SELECT indexname FROM pg_indexes WHERE tablename = 'ai_credit_transactions' AND indexname = 'ai_credit_tx_company_seq';
 - 확인: 한 줄
-- 결과:
+- 결과: 1101 Harold 실행(C89 세션 안내 · 단독 문장) · 출력 CREATE INDEX · 통합 확인 SQL = ai_credit_tx_company_seq index 한 줄 · indisvalid 거짓 0행 → 기대값 같음
 
 > C90-DDL-2 · 배포 뒤 · 단독 실행(CONCURRENTLY)
 

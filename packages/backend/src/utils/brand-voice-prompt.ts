@@ -12,6 +12,7 @@
  */
 
 import { query } from '../config/database';
+import { buildMemoryPromptContext } from './company-memory';
 import { parseVoiceEdit, editFormLines, type VoiceEditRow } from './voice-habits';
 import { buildBrandLinkPromptSection, type BrandLink, type LinkHabit } from './brand-link-core';
 import { parseState, voiceStatusOf, type BrandVoiceState, type ReviewedPhrases, type VoiceStatus } from './brand-voice-state';
@@ -578,20 +579,34 @@ ${!tone && String(input.channel || '').toUpperCase() === 'SMS' ? smsSectionOf(us
   return { text, g, shape, exampleCount: examples.length };
 }
 
+/** 회사 학습 메모리 블록(앞 빈 줄 포함 · 없거나 실패 = '' · 생산자 흐름을 막지 않는다) */
+async function companyMemorySection(companyId: string, producer: string): Promise<string> {
+  try {
+    const ctx = (await buildMemoryPromptContext(companyId, 6)).trim();
+    return ctx ? `\n\n${ctx.slice(0, 1200)}` : '';
+  } catch (err) {
+    console.warn(`[Brand Voice] ${producer} 회사 메모리 조회 실패 — 메모리 없이 진행:`, (err as Error)?.message);
+    return '';
+  }
+}
+
 /**
  * 이관된 생산자의 목소리 조립. 목소리 없는 회사(가이드라인 · 사람 행 0) = basePrompt 그대로(+ 링크 규칙) = I15.
  * 회사 문안 글자 = 사람 글(사람 행 · 키트) + 확인된 묶음(뼈대 · 문구 칸)뿐 · 확인 대기 0 · 원문 0(I16).
  * mode rewrite = 예시 0 · 원문 꼴을 지키는 규칙 줄(I12) · kind by_step = 성격별 블록 둘(여정 패키지 · K11-4).
+ * ★ 2026-11-01 배포 2 C1 — 회사 학습 메모리(상위 6 · 1,200자)도 여기 한 곳에서 넣는다(목소리 없는 회사 포함 · 이른 반환 셋 앞).
  */
 export async function composeVoicePrompt(input: ComposeVoiceInput): Promise<ComposeVoiceResult> {
   const none = (system: string): ComposeVoiceResult => ({ system, guideline: null, shape: null, voiceLearned: false, exampleCount: 0 });
   if (!input.companyId) return none(input.basePrompt);
+  const memory = await companyMemorySection(input.companyId, input.producer);
+  const base = `${input.basePrompt}${memory}`;
   let data: BrandVoiceCacheEntry;
   try {
     data = await getBrandVoiceData(input.companyId);
   } catch (err) {
     console.error(`[Brand Voice] ${input.producer} DB 조회 실패 — basePrompt 그대로:`, (err as Error)?.message);
-    return none(input.basePrompt);
+    return none(base);
   }
   // ★ 2026-10-29 링크 결정 한 곳(§7-3) — 지시문과 치환(services/ai generateMessages)이 같은 resolveFormLink 결과를 쓴다
   const formDecision = input.formDecision ?? currentVoiceForm();   // 묶음 B = 한 줄 단계 창 요리 문맥
@@ -605,7 +620,7 @@ export async function composeVoicePrompt(input: ComposeVoiceInput): Promise<Comp
         : buildBrandLinkPromptSection(formLink.links, data.guideline?.link_habit || null);
   const kinds: BrandVoiceKind[] = input.kind === VOICE_KIND_BY_STEP ? ['marketing', 'notice'] : [input.kind];
   const sections = kinds.map((k) => ({ k, s: voiceSectionFor(data, k, input) })).filter((x) => x.s) as Array<{ k: BrandVoiceKind; s: NonNullable<ReturnType<typeof voiceSectionFor>> }>;
-  if (sections.length === 0) return none(`${input.basePrompt}${linkSection}`);
+  if (sections.length === 0) return none(`${base}${linkSection}`);
 
   const byStep = input.kind === VOICE_KIND_BY_STEP;
   const body = byStep
@@ -648,7 +663,7 @@ ${input.outputFormat ? `\n${input.outputFormat}` : ''}`;
   const first = sections[0].s;
   const kindForLearned = byStep ? undefined : (input.kind as BrandVoiceKind);
   return {
-    system: `${input.basePrompt}${section}${linkSection}`,
+    system: `${base}${section}${linkSection}`,
     guideline: first.g,
     shape: first.shape,
     voiceLearned: voiceLearnedOf(data, kindForLearned) || voiceLearnedOf(data),

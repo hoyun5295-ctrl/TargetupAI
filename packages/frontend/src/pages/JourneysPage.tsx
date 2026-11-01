@@ -1,6 +1,7 @@
 import ZoneFrame from '../components/zone/ZoneFrame';
 import { fetchOneLineEnabled } from '../utils/one-line';   // ★ 2026-10-05 한줄로 시그니처
 import { decorateOutcome } from '../utils/decorate-outcome';
+import { aiCopyEntry, aiCopyEntriesAll, AI_CHECK_MISSING } from '../utils/ai-copy-entry';
 import ZoneEmphasis from '../components/zone/ZoneEmphasis';
 import ZoneRowActions from '../components/zone/ZoneRowActions';
 import ZoneSection from '../components/zone/ZoneSection';
@@ -937,6 +938,9 @@ export default function JourneysPage() {
         body: JSON.stringify({ package: aiPkg, instruction }),
       });
       const data = await res.json();
+      // ★ 배포 2 C7 — 문자 칸 글마다 서버 출구 검사가 붙어 있어야 넣는다(하나라도 없으면 통째로 안 넣음)
+      const entry = data.success && data.package ? aiCopyEntriesAll(Array.isArray(data.package.steps) ? data.package.steps : [], (s: any) => s?.stepType === 'message' && s?.channel !== 'kakao') : null;
+      if (entry && !entry.ok) { toast.error(entry.error); return; }
       if (data.success && data.package) {
         setAiPkg(data.package);
         setEditingStepIdx(null);
@@ -1079,7 +1083,9 @@ export default function JourneysPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setRefining({ stepIdx: idx, candidates: data.candidates || [] });
+        const cands = (Array.isArray(data.candidates) ? data.candidates : []).filter((c: any) => aiCopyEntry(c).ok);
+        if ((data.candidates || []).length > 0 && cands.length === 0) { toast.error(AI_CHECK_MISSING); return; }
+        setRefining({ stepIdx: idx, candidates: cands });
       } else {
         toast.error(data.error || 'AI 다듬기 실패');
       }
@@ -1187,7 +1193,13 @@ export default function JourneysPage() {
         body: JSON.stringify({ objective, requestId: reqId }),
       });
       const data = await res.json();
-      if (data.success) { anchorKeys.current.settled(objective); return Array.isArray(data.steps) ? data.steps : []; }
+      if (data.success) {
+        anchorKeys.current.settled(objective);
+        const steps = Array.isArray(data.steps) ? data.steps : [];
+        const entry = aiCopyEntriesAll(steps);   // ★ 배포 2 C7 — 칸마다 서버 출구 검사
+        if (!entry.ok) { toast.error(entry.error); return null; }
+        return steps;
+      }
       toast.error(data.error || 'AI 자동 생성 실패');
       return null;
     } catch (e: any) {
@@ -1205,7 +1217,11 @@ export default function JourneysPage() {
         body: JSON.stringify({ message, channel: 'lms', isAd: true, stepIntent: '날짜축 안내' }),
       });
       const data = await res.json();
-      if (data.success) return Array.isArray(data.candidates) ? data.candidates : [];
+      if (data.success) {
+        const cands = (Array.isArray(data.candidates) ? data.candidates : []).filter((c: any) => aiCopyEntry(c).ok);
+        if ((data.candidates || []).length > 0 && cands.length === 0) { toast.error(AI_CHECK_MISSING); return null; }
+        return cands;
+      }
       toast.error(data.error || 'AI 다듬기 실패');
       return null;
     } catch (e: any) {
@@ -1226,7 +1242,11 @@ export default function JourneysPage() {
       if (data.success) {
         const o = decorateOutcome(data);
         if (o.tone === 'info') toast.info(o.text);
-        return o.changed ? String(data.message || '') : null;
+        if (!o.changed) return null;
+        const e = aiCopyEntry({ message: data.message, check: data.check });   // ★ 배포 2 C7
+        if (!e.ok) { toast.error(e.error); return null; }
+        if (e.note) toast.info(e.note);
+        return e.text;
       }
       toast.error(data.error || 'AI 꾸미기 실패');
       return null;

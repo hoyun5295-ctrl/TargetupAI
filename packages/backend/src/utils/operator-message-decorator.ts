@@ -22,6 +22,7 @@ import { extractJsonFromAiText } from './ai-json';
 // ★ 2026-10-24 세 채널 구조체크 ② — 판정 = CT rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능 · 옛 손 판정 decoratedAddsFacts 삭제)
 import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { rewriteDropsLinks } from './voice-form-slots';
+import { finishMany, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳(정산 안)
 
 export interface DecorateMessageInput {
   companyId: string;
@@ -44,7 +45,7 @@ export interface DecorateMessageInput {
  */
 export async function decorateOperatorMessages(
   input: Omit<DecorateMessageInput, 'message'> & { messages: string[] },
-): Promise<{ messages: string[]; kept: number[]; charged: boolean }> {
+): Promise<{ messages: string[]; kept: number[]; checks: QuickCheck[]; charged: boolean }> {
   const vars = (input.selectedVars || [])
     .filter((v) => typeof v === 'string' && v.trim())
     .map((v) => v.trim().replace(/%/g, ''));
@@ -105,10 +106,11 @@ export async function decorateOperatorMessages(
       const messages = msgs.map((orig, i) => {
         const cand = Array.isArray(arr) ? arr[i] : undefined;
         // ★ 2026-09-30 WP2 — 원문에 없던 숫자 · 혜택 값이 생긴 문안은 원문 유지(파싱 실패와 같은 처리 · 발송 영향 0)
-        const ok = typeof cand === 'string' && cand.trim().length >= 5 && !rewriteAddsFacts(cand.trim(), orig);
+        // ★ 2026-11-01 Codex 구현 3R #2 — 사실 판정 = 정제한 글끼리(옛: 정제 전 판정 · 보이지 않는 글자로 끊은 효능 말이 정제 뒤 살아났다)
         const origOut = sanitizeForSms(orig.slice(0, 2000)).sanitized;
-        const decorated = ok ? (cand as string).trim() : orig;
-        const made = sanitizeForSms(decorated.slice(0, 2000)).sanitized;
+        const candOut = typeof cand === 'string' ? sanitizeForSms(cand.trim().slice(0, 2000)).sanitized : '';
+        const ok = candOut.trim().length >= 5 && !rewriteAddsFacts(candOut, origOut);
+        const made = ok ? candOut : origOut;
         // ★ 2026-10-31 원문 주소가 빠진(잘리거나 바뀐) 안 = 원문 유지(설계서 docs/2026-10-31-ai-line-answer-link-design.md P6 · 판정 = 자르기 · 정제 뒤 최종 글)
         const linkKept = !ok || !rewriteDropsLinks(made, origOut);
         const out = linkKept ? made : origOut;
@@ -116,9 +118,13 @@ export async function decorateOperatorMessages(
         if (!ok || !linkKept || out === origOut) kept.push(i);
         return out;
       });
-      return { messages, kept };
+      // ★ 2026-11-01 배포 2 C2 — 출구 = 정산 안 · 검사 + 표식 · 글은 그대로(사실 판정 = 위 정제한 글 대조 · Codex 구현 3R) · 안마다 즉시 검사
+      const fin = await finishMany(messages.map((m, i) => ({ text: m, before: sanitizeForSms(msgs[i].slice(0, 2000)).sanitized })),
+        { companyId: input.companyId, producer: 'decorate', mode: 'rewrite', channel: input.channel, isAd: !!input.isAd });
+      const checks: QuickCheck[] = fin.map((c, i) => { messages[i] = copyResponse(c).message; return c.check; });
+      return { messages, kept, checks };
     },
     accept: (r) => r.kept.length < msgs.length,
   });
-  return { messages: result.messages, kept: result.kept, charged };
+  return { messages: result.messages, kept: result.kept, checks: result.checks, charged };
 }

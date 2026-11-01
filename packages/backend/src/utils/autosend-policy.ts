@@ -411,16 +411,10 @@ export function applyBenefitToBody(body: string, benefit: string | null | undefi
 }
 
 /**
- * 미편집 혜택 placeholder 잔존 검출 (순수) — 자동마케팅 발송 출구 가드.
- *  2026-07-07: 이메일(hasPlaceholder)·인앱(blocksHaveUneditedPlaceholder)·여정(활성화 차단)과
- *  같은 클래스의 코드 가드를 오퍼레이터 발송 경로에도 — "AI 지시는 확률적, 보장은 출구 코드"(Harold 2026-07-06).
- *  대상: [혜택 ...] 대괄호 placeholder + "직접 입력/작성해주세요" 문구 잔존.
+ * 미편집 혜택 자리 잔존 검출 — 자동마케팅 발송 출구 가드(2026-07-07 · "AI 지시는 확률적, 보장은 출구 코드").
+ *  ★ 2026-11-01 배포 2 C4 — 판정 주인 = send-placeholder-gate(여정 판정과 한 파일) · 여기는 소비처 import 를 지키는 다시 내보내기.
  */
-export function hasUneditedBenefitPlaceholder(text: string): boolean {
-  const s = String(text || '');
-  if (!s) return false;
-  return /\[혜택[^\]]*\]/.test(s) || s.includes('직접 입력해주세요') || s.includes('직접 작성해주세요');
-}
+export { hasUneditedBenefitPlaceholder } from './send-placeholder-gate';
 
 /**
  * 승인 대기 만료 임박 리마인드 판정 (순수) — 2026-07-07 마케팅 캘린더 완비.

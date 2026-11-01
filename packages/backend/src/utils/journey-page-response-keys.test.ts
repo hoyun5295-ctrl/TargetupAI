@@ -108,7 +108,7 @@ describe('꾸미기 칩 — 이미 쓰인 컬럼은 선택돼 있다 (AI Operato
     const src = studio();
     const block = src.slice(src.indexOf('setSelectedVars(used)'));
     const deps = block.slice(0, block.indexOf('\n\n'));
-    expect(deps).toMatch(/\[index, decorateVars\]/);
+    expect(deps).toMatch(/\[stepKey, decorateVars\]/);   // ★ 1101 배포 2 C6 — 칸 하나 = 칸 번호(stepKey)가 바뀔 때만
     expect(deps, '본문을 의존성에 넣으면 사용자가 푼 선택이 즉시 되살아난다').not.toMatch(/messageTemplate\]/);
   });
 });
@@ -117,6 +117,6 @@ describe('빈 상태를 화면이 말한다', () => {
   it('꾸미기 컬럼이 0이어도 카드를 숨기지 않는다 (숨기면 원인이 화면에서 안 보인다)', () => {
     const src = front('components/journey/JourneyStepStudio.tsx');
     expect(src).not.toMatch(/\{decorateVars\.length > 0 && \(/);
-    expect(src).toMatch(/문안에 넣을 수 있는 고객 데이터 항목이 아직 없습니다/);
+    expect(src).toMatch(/문안에 넣을 수 있는 고객 데이터 항목이 아직 없어요/);
   });
 });

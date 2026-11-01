@@ -22,7 +22,6 @@ import { getColumnFields, getFieldByKey } from '../utils/standard-field-map';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { hasCreditForStrict, chargedAmountByKey, settleCreditAfterSuccess, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
-import { buildMemoryPromptContext as buildCompanyMemoryPromptContext } from '../utils/company-memory';
 import { buildMessageObjective } from '../utils/season-context';
 import { buildLineEventText } from '../utils/one-line-facts';
 import { formatLinePeriodEnd, lineFpLockKey } from '../utils/one-line-steps';
@@ -598,10 +597,10 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     // ★ 2026-10-20 고른 회사 칼럼 = 변수 표에 싣는다(표에 없으면 생성기가 「목록 밖 변수」로 피한다 · 발송 치환과 같은 출처)
     await enrichWithCustomFields(varCatalog, v.companyId);
     for (const t of input.vars) if (varCatalog[t] && !availableVars.includes(t)) availableVars.push(t);
-    const memory = await buildCompanyMemoryPromptContext(v.companyId, 20).catch(() => '');
+    // ★ 2026-11-01 배포 2 C1 — 회사 학습 메모리는 generateMessages → composeVoicePrompt 한 곳에서 들어간다(여기서 또 넣으면 두 번)
     const audienceBlock = `[실제 발송 대상: 이 대상에게 맞게 쓴다]\n${audienceText}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`;
     return generateMessages(
-      buildMessageObjective(licenseText, [audienceBlock, lineAnswersContext(answers), memory].filter(Boolean).join('\n\n')),
+      buildMessageObjective(licenseText, [audienceBlock, lineAnswersContext(answers)].filter(Boolean).join('\n\n')),
       {
         total_count: count,
         avg_purchase_count: parseFloat(customerStats?.avg_purchase_count) || 0,

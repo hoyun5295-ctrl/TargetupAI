@@ -35,6 +35,9 @@ import { ZoneMoreMenu } from '../../zone/ZoneHeader';
 import { zoneBand } from '../../zone/zone-color';
 import { useToast } from '../../ToastProvider';
 import JourneyStartCard, { type EntryCount } from './JourneyStartCard';
+import JourneyCheckPanel, { stepDotOf, type JourneyCheckData } from './JourneyCheckPanel';
+import { hasBenefitPlaceholder, hasUrlPlaceholder } from '../../../utils/message-placeholders';
+import { aiCopyEntry } from '../../../utils/ai-copy-entry';
 import { formFromJourney, optionsDiff, entryCountBody, hasIncompleteCondition, rebaseForm, shapeOptionKeys as shapeOptionKeysOf, ENTRY_FORM_KEYS, type OptionForm } from '../../../utils/journey-start-form';
 import { useJourneyActions } from './useJourneyActions';
 import { CREDIT_EDIT_FREE } from '../../../utils/journey-credit-copy';
@@ -192,6 +195,10 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const [actionMode, setActionMode] = useState<JourneyActionMode | null>(null);
   const [spamFor, setSpamFor] = useState<StudioStep | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // ★ 2026-11-01 배포 2 C5 · C6 — 서버 점검 응답(오른쪽 점검 판 · 레일 점 · 켜기 칩이 같은 값을 쓴다)
+  const [check, setCheck] = useState<{ data: JourneyCheckData | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
+  const checkSeq = useRef(0);
+  const checkRounds = useRef(0);
   const tempSeq = useRef(0);
 
   const mapData = map ?? ownMap;
@@ -272,10 +279,40 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     if (withMap) getJson('/api/ai/operator/journeys/lifecycle-map').then((m) => { if (mine()) setOwnMap(m.map || null); }).catch(() => undefined);
     getJson(`/api/ai/operator/journeys/${jid}/live-positions`).then((x) => { if (mine()) setLive(x.snapshot || null); }).catch(() => { if (mine()) setLive(null); });
     getJson(`/api/ai/operator/journeys/${jid}/step-diagnosis`).then((x) => { if (mine()) setDiag(x.diagnosis || null); }).catch(() => { if (mine()) setDiag(null); });
+    // ★ Codex 구현 1R #4 — 그사이 다른 여정을 열었으면 점검을 부르지 않는다(늦은 옛 여정 읽기가 지금 여정 점검 순번을 밀어내지 않게)
+    if (mine()) { checkRounds.current = 0; void loadCheck(jid); }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** 점검 응답 한 차례(요청 순번 + 지금 여정일 때만 반영 · 차감 0 · 검사 등록 0) */
+  const loadCheck = useCallback(async (jid: string) => {
+    if (jid !== journeyIdRef.current) return;   // 지금 여정이 아니면 순번 · 상태를 건드리지 않는다
+    const seq = ++checkSeq.current;
+    const mine = () => seq === checkSeq.current && jid === journeyIdRef.current;
+    setCheck((c) => ({ ...c, loading: true, error: null }));
+    try {
+      const d = await getJson(`/api/ai/operator/journeys/${jid}/check`);
+      if (mine()) setCheck({ data: { verdict: d.verdict, steps: d.steps || {}, journey: d.journey || [] }, loading: false, error: null });
+    } catch (e: any) {
+      if (mine()) setCheck((c) => ({ ...c, loading: false, error: e?.message || '점검 결과를 불러오지 못했어요.' }));
+    }
   }, []);
+
+  // ★ Codex 구현 1R #5 — A/B 창을 닫으면(만들기 · 고치기 · 빼기 뒤) 점검을 다시 읽는다(빠진 판의 결과가 남지 않게)
+  const closeVariants = () => { setVariantsOpen(null); if (journeyId) { checkRounds.current = 0; void loadCheck(journeyId); } };
+
+  // 검사 전 · 검사 중 · 확인 중이 남아 있으면 20초마다 다시 본다(칸 저장 뒤 자동 검사가 끝나 바뀐다 · 한 여정에 최대 60번 = 20분)
+  //   ★ Codex 구현 1R #3 — 한 차례가 끝날 때마다(성공 · 실패 둘 다 = check 가 새 값) 다음을 잡는다 · 실패해도 멈추지 않는다
+  useEffect(() => {
+    const v = check.data?.verdict;
+    if (!journeyId || check.loading || !v || (v.hold === 0 && v.before === 0) || checkRounds.current >= 60) return;
+    const jid = journeyId;
+    const t = window.setTimeout(() => { checkRounds.current += 1; void loadCheck(jid); }, 20_000);
+    return () => window.clearTimeout(t);
+  }, [check, journeyId, loadCheck]);
 
   // 창을 열 때 · 다른 여정으로 옮길 때 = 고친 값 전부 비우고 다시 읽는다.
   useEffect(() => {
+    checkSeq.current++; setCheck({ data: null, loading: false, error: null });
     if (!journeyId) { loadSeq.current++; setDetail(null); return; }
     setDetail(null); setDrafts({}); setNewSteps([]); setDeleteIds(new Set()); setFailed({}); setUndo(null);
     setConfirmShape(false); setOverlapAsk(null); setVariantsOpen(null); recGenRef.current += 1; setNextRec({ loading: false, data: null }); setSim({ loading: false, data: null, error: null });
@@ -445,9 +482,11 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
         journey: { triggerLabel, objective: journey?.name, stepOrder: cur.stepOrder, hoursFromTrigger: hoursFromStart(id), previousMessages: prevMsgs },
         variants: 1,
       });
-      const next = r.data?.candidates?.[0]?.message;
-      if (!r.ok || !next) throw new Error(r.data?.error || 'AI 다듬기를 받지 못했어요.');
-      applyAiBody(id, cur.messageTemplate, String(next), 'AI가 다듬은 문안을 넣었어요. 저장해야 반영돼요.');
+      if (!r.ok || !r.data?.candidates?.[0]) throw new Error(r.data?.error || 'AI 다듬기를 받지 못했어요.');
+      // ★ 배포 2 C7 — 서버 출구 검사가 붙은 글만 넣는다(입구 하나)
+      const e = aiCopyEntry(r.data.candidates[0]);
+      if (!e.ok) throw new Error(e.error);
+      applyAiBody(id, cur.messageTemplate, e.text, `AI가 다듬은 문안을 넣었어요. 저장해야 반영돼요.${e.note ? ` ${e.note}` : ''}`);
     } catch (e: any) {
       toast.error(e?.message || 'AI 다듬기를 받지 못했어요.');
     } finally {
@@ -485,7 +524,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       if (!r.ok || !r.data?.message) throw new Error(r.data?.error || 'AI 꾸미기를 받지 못했어요.');
       const o = decorateOutcome(r.data);
       if (!o.changed) { toast.info(o.text); return; }
-      applyAiBody(id, cur.messageTemplate, String(r.data.message), `고객 정보를 문안에 녹였어요. 저장해야 반영돼요.${o.tone === 'info' ? ` ${o.text}` : ''}`);
+      const e = aiCopyEntry({ message: r.data.message, check: r.data.check });
+      if (!e.ok) throw new Error(e.error);
+      applyAiBody(id, cur.messageTemplate, e.text, `고객 정보를 문안에 녹였어요. 저장해야 반영돼요.${o.tone === 'info' ? ` ${o.text}` : ''}${e.note ? ` ${e.note}` : ''}`);
     } catch (e: any) {
       toast.error(e?.message || 'AI 꾸미기를 받지 못했어요.');
     } finally {
@@ -725,6 +766,12 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const liveById = useMemo(() => new Map(((live?.positions || []) as any[]).map((p) => [String(p.stepId), p] as const)), [live]);
   const diagById = useMemo(() => new Map(((diag?.steps || []) as any[]).map((s) => [String(s.stepId), s] as const)), [diag]);
   const olderActive = (mj?.olderVersions || []).reduce((s, v) => s + Number(v.activeNow || 0), 0);
+  // 혜택 · 링크 자리가 이 여정 어느 칸에든 남았는가(고친 값 포함 · 혜택 · 링크 줄을 보일지 · 입력 한 번이 전 칸을 채운다)
+  const slotsLeft = useMemo(() => {
+    const all = [...(detail?.steps || []).map((r) => (drafts[r.id] || toStudio(r))), ...newSteps.map((n) => n.step)];
+    const has = (fn: (t: string) => boolean) => all.some((x) => fn(x.messageTemplate || '') || fn(x.subject || ''));
+    return { benefit: has(hasBenefitPlaceholder), url: has(hasUrlPlaceholder) };
+  }, [detail, drafts, newSteps]);
   const selRaw = selected !== 'start' && !selected.startsWith(NEW_STEP_PREFIX) ? rawById.get(selected) || null : null;
   const selStudio = selected === 'start' ? null : currentOf(selected);
   const selNew = selected.startsWith(NEW_STEP_PREFIX) ? newSteps.find((n) => n.tempId === selected) || null : null;
@@ -781,6 +828,12 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                   className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] font-semibold text-slate-900 hover:bg-slate-100">
                   {status === 'paused' ? <Play className="h-4 w-4" aria-hidden /> : <Power className="h-4 w-4" aria-hidden />}{status === 'paused' ? '다시 켜기' : '켜기'}
                 </button>
+              )}
+              {/* ★ 배포 2 C6 — 좁은 화면(점검 판이 아래로 내려감)에서 켜기 옆 판정 칩 · 넓은 화면은 오른쪽 점검 판 맨 위가 같은 문장 */}
+              {check.data && !archived && status !== 'ended' && (
+                <span className={`hidden h-9 max-w-[260px] shrink-0 items-center truncate rounded-lg px-3 text-[12.5px] font-semibold sm:inline-flex min-[1440px]:hidden ${check.data.verdict.canActivate ? 'bg-emerald-400/20 text-emerald-50' : 'bg-rose-400/25 text-rose-50'}`}>
+                  {check.data.verdict.sentence}
+                </span>
               )}
               <ZoneMoreMenu items={menuItems} tone="dark" />
               <button type="button" onClick={askClose} aria-label="작업 화면 닫기" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white/80 hover:bg-white/10 hover:text-white">
@@ -848,6 +901,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     const ms = mapStepById.get(r.id);
                     const lp = liveById.get(r.id);
                     const dg = diagById.get(r.id);
+                    const dot = stepDotOf(check.data?.steps[r.id]);
                     const Icon = r.step_type === 'wait' ? Hourglass : r.step_type === 'condition' ? GitBranch : MessageSquare;
                     const cur = currentOf(r.id) || toStudio(r);
                     const dirty = dirtyIds.includes(r.id);
@@ -860,11 +914,14 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                           <div className={`flex items-center gap-1.5 text-[13px] font-medium ${del ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
                             <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden /><span className="truncate">{stepTitle({ ...r, channel: cur.channel })}</span>
                             {dirty && <span className="ml-auto h-2 w-2 shrink-0 rounded-full bg-indigo-500" aria-label="고침" />}
-                            {dg && dg.severity !== 'good' && <span className={`ml-auto h-2 w-2 shrink-0 rounded-full ${dg.severity === 'critical' ? 'bg-rose-500' : 'bg-amber-400'}`} aria-label="살펴볼 칸" />}
+                            {/* ★ 배포 2 C6 — 레일 점 = 점검 판정만(빨강 = 고칠 것 · 노랑 = 검사 전 · 검사 중 · 확인 중) */}
+                            {dot && <span className={`${dirty ? '' : 'ml-auto '}h-2 w-2 shrink-0 rounded-full ${dot === 'fix' ? 'bg-rose-500' : 'bg-amber-400'}`} aria-label={dot === 'fix' ? '고칠 것' : '확인 중'} />}
                           </div>
                           <div className="mt-0.5 truncate text-[12px] tabular-nums text-slate-500">
                             {ms ? (ms.waitingHere > 0 ? `지금 ${ms.waitingHere.toLocaleString('ko-KR')}명 기다림` : '기다리는 사람 없음') : (r.timingLabel || '')}
                             {lp?.avgWaitDays != null && ms && ms.waitingHere > 0 ? ` · 평균 ${Number(lp.avgWaitDays) < 1 ? '오늘' : `${Math.round(Number(lp.avgWaitDays))}일째`}` : ''}
+                            {/* 이탈 진단은 점검 판정과 별개 — 둘째 줄 글자 */}
+                            {dg && dg.severity !== 'good' ? ` · ${Math.round(Number(dg.dropoutRate || 0) * 100)}% 빠짐` : ''}
                           </div>
                           {failed[r.id] && <div className="mt-0.5 truncate text-[12px] text-rose-700">{failed[r.id]}</div>}
                           {del && <div className="mt-0.5 text-[12px] text-rose-700">저장하면 빠져요</div>}
@@ -940,21 +997,22 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                 </div>
               )}
               {detail && selected !== 'start' && selStudio && (
-                <div className="p-3 md:p-5">
+                <div className="grid grid-cols-1 gap-4 p-3 md:p-5 min-[1440px]:grid-cols-[minmax(0,1fr)_300px]">
+                  <div className="min-w-0">
                   {selEditable && !selDeleting ? (
                     <fieldset disabled={filling} aria-busy={filling} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white disabled:opacity-60">
                       <JourneyStepStudio
-                        steps={[selStudio]}
-                        index={0}
-                        onIndex={() => undefined}
-                        onPatch={(_i, p) => patchSelected(p)}
-                        onSave={() => void save()}
+                        step={selStudio}
+                        first={selected.startsWith(NEW_STEP_PREFIX) ? (detail.steps.length === 0 && newSteps[0]?.tempId === selected) : detail.steps[0]?.id === selected}
+                        onPatch={(p) => patchSelected(p)}
                         onAi={() => void runAi()}
-                        onDecorate={(_i, tokens) => void runDecorate(tokens)}
-                        onSpamTest={() => { if (!selStudio.messageTemplate.trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; } if (!journey?.callback_number) { toast.warning('회신번호가 없어 검사할 수 없어요.'); return; } setSpamFor(selStudio); }}
+                        onDecorate={(tokens) => void runDecorate(tokens)}
+                        onUndoAi={undo && undo.id === selected ? () => { patchSelected({ messageTemplate: undo.text }); setUndo(null); } : undefined}
                         onFillBenefit={journeyId && !selected.startsWith(NEW_STEP_PREFIX) ? (b) => void fillFacts({ benefit: b }) : undefined}
                         onFillUrl={journeyId && !selected.startsWith(NEW_STEP_PREFIX) ? (u) => void fillFacts({ url: u }) : undefined}
                         factsUnset={!!journey?.copy_facts_view && (journey.copy_facts_view.benefit.state === 'unset' || journey.copy_facts_view.link.state === 'unset')}
+                        benefitSlots={slotsLeft.benefit}
+                        urlSlots={slotsLeft.url}
                         decorateVars={decorateVars}
                         variables={decorateVars.map((v) => v.token.replace(/%/g, ''))}
                         opt080Number={opt080}
@@ -962,13 +1020,42 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         senderLabel={journey?.callback_number || undefined}
                         triggerLabel={triggerLabel}
                         aiBusy={aiBusy}
-                        saving={saving}
-                        maxSteps={1}
-                        single
-                        bare
                         lockChannel={!edit.structure && !reshapeAllowed && !selected.startsWith(NEW_STEP_PREFIX)}
                         lockTiming={!edit.timing && !reshapeAllowed && !selected.startsWith(NEW_STEP_PREFIX)}
                         lockNote={selected.startsWith(NEW_STEP_PREFIX) ? (isActive ? '새 칸은 새로 들어오는 고객부터 받아요.' : undefined) : edit.reason}
+                        headerActions={(
+                          <>
+                            {selRaw && selRaw.step_type === 'message' && selRaw.channel !== 'kakao' && (
+                              <button type="button" onClick={() => setVariantsOpen(selRaw.id)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-slate-300">
+                                <Beaker className="h-4 w-4" aria-hidden />A/B
+                              </button>
+                            )}
+                            {selRaw && canShapeSteps && detail.steps.length - deleteIds.size + newSteps.length > 1 && (
+                              <button type="button" onClick={() => toggleDelete(selRaw.id)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] text-slate-600 ring-1 ring-slate-200 hover:text-rose-700 hover:ring-rose-200">
+                                <Trash2 className="h-4 w-4" aria-hidden />칸 빼기
+                              </button>
+                            )}
+                            {selected.startsWith(NEW_STEP_PREFIX) && (
+                              <button type="button" onClick={() => toggleDelete(selected)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] text-slate-600 ring-1 ring-slate-200 hover:text-rose-700 hover:ring-rose-200">
+                                <Trash2 className="h-4 w-4" aria-hidden />새 칸 지우기
+                              </button>
+                            )}
+                          </>
+                        )}
+                        notifyControl={selRaw && selRaw.step_type === 'message' && !locked ? (
+                          <JourneyStepNotifyToggle
+                          key={`n:${selRaw.id}:${String(selRaw.notify_manager_on_pretest)}`}
+                          journeyId={journeyId!}
+                          stepId={selRaw.id}
+                          stepOrder={selRaw.step_order}
+                          firstMessageOrder={messageStepBounds.first}
+                          lastMessageOrder={messageStepBounds.last}
+                          channel={String(selRaw.channel || '')}
+                          currentValue={selRaw.notify_manager_on_pretest ?? null}
+                          token={localStorage.getItem('token') || ''}
+                          onChange={() => { if (journeyId) void load(journeyId, false, 'sync'); }}
+                        />
+                        ) : undefined}
                       />
                     </fieldset>
                   ) : selNew?.sent ? (
@@ -992,7 +1079,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                       )}
                     </div>
                   ) : null}
-
+                  {/* 고칠 수 없는 칸(알림톡 · 기다리기 · 조건 · 빼기로 표시한 칸 · 잠긴 여정) = 옛 도구 줄 그대로 */}
+                  {!(selEditable && !selDeleting) && (
+                    <>
                   {/* 이 칸 도구 — A/B · 담당자 알림 · 진단 · 빼기 */}
                   {selRaw && (
                     <div className="mx-auto mt-3 max-w-[1100px] space-y-3">
@@ -1030,7 +1119,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                           defaultMessageTemplate={selRaw.message_template || ''}
                           defaultSubject={selRaw.subject || ''}
                           opt080Number={opt080}
-                          onClose={() => setVariantsOpen(null)}
+                          onClose={closeVariants}
                         />
                       )}
                       {selRaw.step_type === 'message' && !locked && (
@@ -1049,13 +1138,29 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                       )}
                     </div>
                   )}
-                  {selected.startsWith(NEW_STEP_PREFIX) && (
+                    </>
+                  )}
+                  {!(selEditable && !selDeleting) && selected.startsWith(NEW_STEP_PREFIX) && (
                     <div className="mx-auto mt-3 flex max-w-[1100px] justify-end">
                       <button type="button" onClick={() => toggleDelete(selected)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[13px] text-slate-600 hover:border-rose-200 hover:text-rose-700">
                         <Trash2 className="h-4 w-4" aria-hidden />새 칸 지우기
                       </button>
                     </div>
                   )}
+                  </div>
+                  {/* ★ 배포 2 C6 — 오른쪽 점검 판(1440 이상) · 좁으면 아래로 */}
+                  <JourneyCheckPanel
+                    check={check.data}
+                    loading={check.loading}
+                    error={check.error}
+                    stepId={selRaw ? selRaw.id : null}
+                    stepLabel={(id) => { const r = rawById.get(id); return r ? `${r.step_order}번째 칸 · ${stepTitle(r)}` : '칸'; }}
+                    onPickStep={(id) => pickStep(id)}
+                    onSpamTest={selEditable && !selDeleting ? () => { if (!selStudio.messageTemplate.trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; } if (!journey?.callback_number) { toast.warning('회신번호가 없어 검사할 수 없어요.'); return; } setSpamFor(selStudio); } : undefined}
+                    unsaved={dirtyCount > 0}
+                    dropNote={selEditable && !selDeleting && selRaw && diagById.get(selRaw.id) && diagById.get(selRaw.id).severity !== 'good' ? `이 칸에서 ${Math.round(Number(diagById.get(selRaw.id).dropoutRate || 0) * 100)}%가 빠져요. ${diagById.get(selRaw.id).recommendation || ''}` : null}
+                    onRetry={() => { if (journeyId) void loadCheck(journeyId); }}
+                  />
                 </div>
               )}
             </main>
@@ -1096,6 +1201,31 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               {(reshaping || needsShape) && <p className="text-[12.5px] text-slate-500">점검하고 켜는 데 10초쯤 걸려요. 창을 닫지 말아 주세요.</p>}
             </div>
           )}
+        </div>
+      </JourneyModalShell>
+
+      {/* ★ 배포 2 C6 — A/B 편집 = 자기 창 */}
+      <JourneyModalShell open={!!variantsOpen && !!selRaw && variantsOpen === selRaw.id && selEditable && !selDeleting} onClose={closeVariants} labelledBy="jws-ab-title" panelClassName="w-full max-w-4xl" zIndexClassName="z-[70]">
+        <div className="flex min-h-0 flex-col text-slate-900">
+          <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
+            <h2 id="jws-ab-title" className="flex-1 text-[15px] font-semibold">{selRaw ? `${selRaw.step_order}번째 칸 A/B 문안 시험` : 'A/B 문안 시험'}</h2>
+            <button type="button" onClick={closeVariants} aria-label="닫기" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          </div>
+          <div className="min-h-0 overflow-y-auto p-4">
+            {selRaw && variantsOpen === selRaw.id && (
+              <JourneyVariantsEditor
+                key={`v:${selRaw.id}`}
+                stepId={selRaw.id}
+                journeyId={journeyId!}
+                journeyStatus={status === 'ended' ? 'paused' : (status as 'draft' | 'active' | 'paused')}
+                defaultChannel={(selRaw.channel || 'sms') as 'sms' | 'lms' | 'mms' | 'kakao'}
+                defaultMessageTemplate={selRaw.message_template || ''}
+                defaultSubject={selRaw.subject || ''}
+                opt080Number={opt080}
+                onClose={closeVariants}
+              />
+            )}
+          </div>
         </div>
       </JourneyModalShell>
 

@@ -8,7 +8,7 @@
  * ⛔ 080 번호 · 샘플 고객은 호출부가 넘긴다(작업 화면 훅이 채운다). 비어 있으면 「무료수신거부」만 보인다(지어내지 않는다).
  * ⛔ 제목 상한 = LMS_SUBJECT_MAX_CHARS(서버 JOURNEY_SUBJECT_MAX_CHARS 와 같은 40). 이미 넘은 제목은 자르지 않고 알린다(고객 문안을 몰래 바꾸지 않는다).
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Eye, Image as ImageIcon, Loader2, Lock, PenLine, User } from 'lucide-react';
 import { buildAdMessageFront, buildAdSubjectFront, calculateSmsBytes, LMS_SUBJECT_MAX_CHARS, startsWithAdMark } from '../../utils/formatDate';
 import { highlightVars, mergeVarsPlain } from '../../utils/highlightVars';
@@ -110,7 +110,18 @@ export default function PhoneComposer({
     }
   };
 
-  const lines = (body || '').split('\n').length;
+  // ★ 2026-11-01 배포 2 C6 — 휴대폰 높이 = 글 길이(안쪽 스크롤 0 · 옛: 18줄에서 잘리고 안쪽 스크롤 · 줄바꿈된 긴 줄은 세지 못했다)
+  useLayoutEffect(() => {
+    const ta = taRef.current;
+    if (!ta || mode !== 'write') return;
+    const fit = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+    fit();
+    // 창 크기가 바뀌면 글 크기(휴대폰 16 · PC 14) · 폭 · 줄바꿈이 달라진다 — 그때도 다시 맞춘다(실측 1101: 390 → 1440 에서 옛 높이가 남았다)
+    let raf = 0;
+    const onResize = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(fit); };
+    window.addEventListener('resize', onResize);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', onResize); };
+  }, [body, mode, channel, taRef]);
   const subjectSeen = mode === 'see' && server ? server.subject : buildAdSubjectFront(subject || '', msgType, isAd);
   const seeText = server ? server.message : localSeen;
   const sampleNote = mode !== 'see' ? null
@@ -132,9 +143,13 @@ export default function PhoneComposer({
         {tab('see', '받는 모습', Eye)}
       </div>
 
-      {/* 휴대폰 틀 — 폭 360~380 · 좁은 화면은 화면 폭에 맞춘다 */}
-      <div className="w-full max-w-[380px] rounded-[2.6rem] bg-slate-900 p-[10px] shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)]">
-        <div className="relative flex min-h-[520px] flex-col overflow-hidden rounded-[2.1rem] bg-white">
+      {/* 휴대폰 틀 — 폭 320(★ 2026-11-01 배포 2 C6) · 좁은 화면은 화면 폭에 맞춘다 · 오른쪽 = 볼륨 · 전원 버튼 */}
+      <div className="relative w-full max-w-[320px]">
+        <span className="absolute -right-[3px] top-[96px] h-14 w-[3px] rounded-r bg-slate-700" aria-hidden />
+        <span className="absolute -right-[3px] top-[164px] h-9 w-[3px] rounded-r bg-slate-700" aria-hidden />
+        <span className="absolute -left-[3px] top-[120px] h-12 w-[3px] rounded-l bg-slate-700" aria-hidden />
+      <div className="w-full rounded-[2.4rem] bg-slate-900 p-[9px] shadow-[0_24px_60px_-20px_rgba(15,23,42,0.45)]">
+        <div className="relative flex min-h-[480px] flex-col overflow-hidden rounded-[1.95rem] bg-white">
           <div className="flex justify-center pt-2.5"><span className="h-[22px] w-[96px] rounded-full bg-slate-900" aria-hidden /></div>
           <div className="flex flex-col items-center gap-1 border-b border-slate-100 px-5 pb-3 pt-2">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-200 text-slate-500" aria-hidden>
@@ -145,14 +160,14 @@ export default function PhoneComposer({
 
           <div className="flex-1 px-4 pb-4 pt-3">
             <div className="mb-2 text-center text-[12px] text-slate-400">{stepChannelLabel(channel)}</div>
-            <div className={`max-w-[92%] rounded-[22px] rounded-bl-md bg-[#e9e9eb] px-4 py-3 text-slate-900 ${mode === 'write' && !readOnly ? 'focus-within:ring-2 focus-within:ring-indigo-300' : ''}`}>
+            <div className={`max-w-[94%] rounded-[20px] rounded-bl-md bg-[#e9e9eb] px-4 py-3 text-slate-900 ${mode === 'write' && !readOnly ? 'focus-within:ring-2 focus-within:ring-indigo-300' : ''}`}>
               {mode === 'see' && serverBusy ? (
                 <div className="flex items-center gap-2 py-6 text-[14px] text-slate-500"><Loader2 className="h-4 w-4 animate-spin" />받는 모습을 만드는 중</div>
               ) : mode === 'see' ? (
                 <>
-                  {channel !== 'sms' && subjectSeen && <div className="mb-2 border-b border-slate-300/70 pb-2 text-[16px] font-semibold leading-snug">{subjectSeen}</div>}
+                  {channel !== 'sms' && subjectSeen && <div className="mb-2 border-b border-slate-300/70 pb-2 text-[16px] font-semibold leading-snug md:text-[14px]">{subjectSeen}</div>}
                   {imageCount > 0 && <ImageChip n={imageCount} />}
-                  <div className="whitespace-pre-wrap break-words text-[16px] leading-[1.65]">
+                  <div className="whitespace-pre-wrap break-words text-[16px] leading-[1.65] md:text-[14px]">
                     {seeText ? (server || sampleCustomer ? seeText : highlightVars(seeText)) : <span className="text-slate-400">문안이 비어 있어요.</span>}
                   </div>
                 </>
@@ -171,7 +186,7 @@ export default function PhoneComposer({
                         }}
                         placeholder="제목"
                         aria-label="제목"
-                        className="min-w-0 flex-1 bg-transparent text-[16px] font-semibold leading-snug placeholder:font-normal placeholder:text-slate-400 focus:outline-none"
+                        className="min-w-0 flex-1 bg-transparent text-[16px] font-semibold leading-snug md:text-[14px] placeholder:font-normal placeholder:text-slate-400 focus:outline-none"
                       />
                     </div>
                   )}
@@ -182,10 +197,10 @@ export default function PhoneComposer({
                     value={body || ''}
                     readOnly={readOnly}
                     onChange={(e) => onBody?.(e.target.value)}
-                    rows={Math.min(18, Math.max(5, lines + 1))}
+                    rows={5}
                     placeholder={placeholder || '고객에게 보낼 문안을 여기에 써요.'}
                     aria-label="문안"
-                    className="block w-full resize-none bg-transparent text-[16px] leading-[1.65] placeholder:text-slate-400 focus:outline-none"
+                    className="block w-full resize-none overflow-hidden bg-transparent text-[16px] leading-[1.65] md:text-[14px] placeholder:text-slate-400 focus:outline-none"
                   />
                   {footerLine && <div className="mt-1"><LockedMark text={footerLine} /></div>}
                 </>
@@ -195,9 +210,10 @@ export default function PhoneComposer({
           </div>
         </div>
       </div>
+      </div>
 
       {/* 바이트 막대 — 실제 나가는 형태 기준 */}
-      <div className="mt-3 w-full max-w-[380px]">
+      <div className="mt-3 w-full max-w-[320px]">
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
           <div className={`h-full rounded-full transition-[width] ${over ? 'bg-rose-500' : shownBytes / maxBytes > 0.85 ? 'bg-amber-400' : 'bg-indigo-500'}`}
             style={{ width: `${Math.min(100, Math.max(2, (shownBytes / maxBytes) * 100))}%` }} />

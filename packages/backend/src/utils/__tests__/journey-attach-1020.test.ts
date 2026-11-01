@@ -342,7 +342,7 @@ describe('5. 만들기 길 차단 · 켜기 검사 · 감시 배선', () => {
       .toBe('앞 여정 설정이 없어 켤 수 없어요. 지도에서 다시 붙여 주세요.');
     expect(validateJourneyEntryConfig({ trigger_event: 'journey.after', allow_reentry: false, reentry_cooldown_days: null, trigger_filters: { after_root: A, after_outcome: 'any' }, threshold_recipients_per_step: 100 })).toBeNull();
     const b = SRC('journey-builder.ts');
-    expect(b).toContain("return { ok: false, reason: '앞 여정이 없거나 끝나서 켤 수 없어요. 떼거나 다른 여정 뒤에 붙여 주세요.' };");
+    expect(b).toContain("return '앞 여정이 없거나 끝나서 켤 수 없어요. 떼거나 다른 여정 뒤에 붙여 주세요.';");   // ★ 1101 배포 2 C5 — 정의 검사 = activationBlockReason(켜기 · 점검 같은 함수)
     // 첫 켜기 기준 시각 = 켜기 트랜잭션 안 · 커서 이어받기 뒤 · COMMIT 앞(Codex 적대 A 1R) · 커밋 뒤 늦은 커서 목록에는 없다
     const at1 = b.indexOf("WHERE id = $1::uuid AND trigger_event = 'journey.after' AND last_event_cursor IS NULL");
     expect(at1).toBeGreaterThan(b.indexOf('INHERIT_ENTRY_CURSORS_SQL, [journeyId]'));

@@ -21,6 +21,7 @@
 import { useState, useEffect, useCallback } from 'react';
 // ★ 2026-10-20 V.3 §9-4 — 변형마다 같은 큰 휴대폰(실제 나가는 형태 · (광고) · 무료수신거부 합성 바이트 · 받는 모습 = 서버 미리보기).
 import PhoneComposer from './PhoneComposer';
+import { aiCopyEntriesAll } from '../../utils/ai-copy-entry';
 import { Beaker, Plus, Trash2, Save, Loader2, X, BarChart3, Info, Trophy, Activity, MousePointerClick, ShoppingCart, Sparkles, AlertTriangle } from 'lucide-react';
 
 type ChannelType = 'sms' | 'lms' | 'mms' | 'kakao';
@@ -252,8 +253,11 @@ export default function JourneyVariantsEditor({
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'AI 자동 생성 실패');
       }
+      // ★ 2026-11-01 배포 2 C7 — 서버 출구 검사가 붙은 변형만 보인다(입구 하나 · 하나라도 빠지면 통째로 안 넣음)
+      const entry = aiCopyEntriesAll(Array.isArray(data.variants) ? data.variants : []);
+      if (!entry.ok) throw new Error(entry.error);
       setGeneratedVariants(data.variants || []);
-      setGenerationWarnings(data.warnings || []);
+      setGenerationWarnings([...(data.warnings || []), ...entry.notes]);
     } catch (err: any) {
       setError(err?.message || 'AI 문안을 만들지 못했어요.');
     } finally {

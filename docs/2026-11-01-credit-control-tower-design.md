@@ -266,7 +266,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS ai_credit_tx_company_seq ON ai_credit_tr
 - Codex 적대 리뷰: 설계 4판 → 구현 각각 approve 까지.
 
 ## 9. 실측
-**사전 SQL(배포 전 · 읽기 전용)**: ① 이력 0 인 회사 수(I5 폴백 대상) ② 이번 달 적용일이 미래 · 지난달인 이력 행 수(0 이어야 C4 가 운영과 맞음) ③ 후불 회사 11월 초과 차감 중 그 회사 11월 리셋 줄보다 created_at 이 앞선 행(0 이어야 12/1 첫 맞춤의 created_at 폴백이 정확) ④ 리셋 시각 NULL 인데 기본분 ≠ 0 인 회사(0 이어야 C2 첫 지급 규칙이 맞음).
+**사전 SQL(배포 전 · 읽기 전용)**: ① 이력 0 인 회사 수(I5 폴백 대상) ② 이번 달 적용일이 미래 · 지난달인 이력 행 수(0 이어야 C4 가 운영과 맞음) ③ 후불 회사 11월 초과 차감 중 그 회사 11월 리셋 줄보다 created_at 이 앞선 행(0 이어야 12/1 첫 맞춤의 created_at 폴백이 정확) ④ 리셋 시각 NULL 인데 기본분 ≠ 0 인 회사(0 이어야 C2 첫 지급 규칙이 맞음). ⑥ ~ ⑧(1101 ① ~ ⑤ 실행에서 ② 소급 141 이 나와 추가 · ② SQL 은 전 기간을 세어 이번 달 행을 가르지 못한다): ⑥ 소급 행을 기록한 날(KST)별 수 · 그 회사 첫 행이 아닌 수(전부 0 · 11월 날짜 줄 0 이어야 함) ⑦ 뒤에 쓴 행이 앞 행보다 이른 적용일인 행(0 이어야 이력 순서 = 쓴 순서) ⑧ 이력 마지막 요금제 ≠ 지금 요금제인 회사(0행 이어야 함 · 이력이 있는 회사는 크레딧을 이력으로만 센다 · ① = 0 이라 전 회사).
 ```sql
 -- ① 이력 0 인 회사
 SELECT count(*) FROM companies c WHERE NOT EXISTS (SELECT 1 FROM company_plan_changes h WHERE h.company_id = c.id);
@@ -284,6 +284,27 @@ SELECT c.company_name, count(*) AS early_overage_rows
 SELECT count(*) FROM companies WHERE ai_credits_reset_at IS NULL AND COALESCE(ai_credits_base_remaining, 0) <> 0;
 -- ⑤ 결제 방식 값 분포(빈 값 · 그 밖 글자 = 월 마감은 후불로 읽고 추가 사용 한도 · 충전은 막힌다 · 있으면 값부터 정한다)
 SELECT COALESCE(billing_type, '(빈 값)') AS billing_type, count(*) FROM companies GROUP BY 1 ORDER BY 1;
+-- ⑥ 소급 행을 기록한 날(KST)별 수 · 그 회사 첫 행이 아닌 수
+SELECT (b.changed_at AT TIME ZONE 'Asia/Seoul')::date AS recorded_on,
+       count(*) AS backdated_rows,
+       count(*) FILTER (WHERE EXISTS (SELECT 1 FROM company_plan_changes a
+                                       WHERE a.company_id = b.company_id AND a.changed_at < b.changed_at)) AS not_first_row
+  FROM company_plan_changes b
+ WHERE b.effective_date < (b.changed_at AT TIME ZONE 'Asia/Seoul')::date
+ GROUP BY 1 ORDER BY 1;
+-- ⑦ 뒤에 쓴 행이 앞 행보다 이른 적용일인 행
+SELECT count(*) AS misordered
+  FROM company_plan_changes b
+ WHERE EXISTS (SELECT 1 FROM company_plan_changes a
+                WHERE a.company_id = b.company_id AND a.changed_at < b.changed_at AND a.effective_date > b.effective_date);
+-- ⑧ 이력 마지막 요금제 ≠ 지금 요금제인 회사
+SELECT c.company_name, p.plan_code AS now_plan, h.to_plan_code AS history_plan
+  FROM companies c
+  LEFT JOIN plans p ON p.id = c.plan_id
+  LEFT JOIN LATERAL (SELECT x.to_plan_code FROM company_plan_changes x WHERE x.company_id = c.id
+                      ORDER BY x.effective_date DESC, x.changed_at DESC LIMIT 1) h ON true
+ WHERE p.plan_code IS DISTINCT FROM h.to_plan_code
+ ORDER BY 1;
 ```
 ### 9-1. 이에스 분석 진단 기록 (B-1101-5 · Harold 1101 실행)
 - ③ 원장 표 제약 = 시험 그릇(`t_tpl_closed` · 운영 정의 대조 덤프)에서 type · amount CHECK 0 · `amount integer NOT NULL` · `created_at DEFAULT now()` · seq 없음(1101).
@@ -299,6 +320,8 @@ SELECT COALESCE(billing_type, '(빈 값)') AS billing_type, count(*) FROM compan
 
 ## 10. 배포 순서
 업무시간 밖 · 사전 SQL(§9 · C90-S1) → **DDL-1(§7 · 배포 앞)** → DDL-1 확인 → 커밋 · 푸시 → 백엔드 · 프론트 한 번에(빌드 = `npm run build:safe`) → 재기동 → 기동 패스 확인 → DDL-2(색인 · 단독) → 다음 04:30 대조 → 다음 9시대 분석. 배포 달(11월)만의 차이: 배포 전 11월 안에서 요금제가 바뀐 회사는 그 변경이 옛 반올림으로 들어가 11월 합이 E 와 1까지 다를 수 있다(12월 1일 지급부터 0) · 그런 회사 수 = `SELECT count(DISTINCT company_id) FROM company_plan_changes WHERE effective_date >= '2026-11-01';`
+
+**실제 배포 경위(1101)**: C90 이 C89 커밋 d6e05ff5(18:43)에 함께 실려 DDL-1 보다 먼저 배포됐다(공용 작업 트리). 18:48:33 ~ 18:49:05 기동 패스 = 마감 56(원장 줄 쓸 일 없는 선불 지급 0) · 실패 85(전부 seq 칸 없음 · 회사마다 경보 1통) · 원장 대조는 seq 칸 확인에서 건너뜀(경보 0). 그 뒤 C89 세션 안내로 DDL-1 → 18:58:02 패스 = 마감 85 · 실패 0 · 남은 대상 0(Harold 실측) · DDL-2 유효. 그 사이 다른 크레딧 경로(AI 차감 = [CREDIT][MISS] 줄이 반드시 남는 경로 · 환불 · 충전 · 요금제 변경 · 체험)의 seq 오류 로그 0줄 → 고객 쪽 실패 기록 0 · 남은 영향 = 경보 문자 · 마감 10분 늦음. 후속 = 경보 한 주기 1통 · 배포 앞 DDL 남음 = 배포 멈춤(설계안 · Harold 동의 대기).
 
 ## 11. Harold 결정
 - **D-A 체험 크레딧** = 체험 한 번에 한 번(추천안으로 진행 · Harold 1101 「전부 결함 닫고」).

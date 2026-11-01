@@ -50,6 +50,8 @@ import { checkRecurringLine } from '../utils/one-line-ct/recurring';
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from '../utils/journey-message-render';
 import { journeyGate, journeyError, canAccessJourney, journeyOptionsOffOnly } from '../utils/journey-route';
 import { readJourneyCopyFacts } from '../utils/journey-copy-facts';
+import { finishMany, copyResponse } from '../utils/copy-finish';
+import { checkJourney, startJourneyStepSpamChecks } from '../utils/journey-check';
 import { accessibleJourneyIds } from '../utils/journey-access';
 import type { LineCompositionId } from '../utils/line-compositions';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
@@ -3518,6 +3520,10 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       targetHourKst: targetHourKst !== undefined && targetHourKst !== null && Number.isFinite(Number(targetHourKst)) ? Number(targetHourKst) : undefined,
     });
     if (!ok) return res.status(404).json({ success: false, error: '단계를 찾을 수 없거나 고칠 권한이 없어요.' });
+    // ★ 2026-11-01 배포 2 C5 · D1 — 글 · 제목 · 채널 · 광고 여부가 바뀌면 그 칸 판으로 통신사 검사를 건다(기다리지 않는다 · 같은 글 = 이어 보기)
+    if (messageTemplate !== undefined || subject !== undefined || channel !== undefined || isAd !== undefined) {
+      void startJourneyStepSpamChecks(companyId, req.params.id, req.params.stepId, gate.userId);
+    }
     return res.json({ success: true });
   } catch (err: any) {
     // ★ 2026-07-27: 전환재발송 규칙 위반은 입력 오류라 400으로 돌린다(500 = 서버 결함으로 오인).
@@ -3571,6 +3577,7 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
       waitTimeoutHours: waitTimeoutHours != null ? Number(waitTimeoutHours) : undefined,
     }, { clientStepId: clientStepId != null ? String(clientStepId) : undefined });
     if (!result) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 수정 권한이 없습니다.' });
+    if (!result.existed) void startJourneyStepSpamChecks(companyId, req.params.id, result.stepId, gate.userId);   // ★ 배포 2 C5 · D1
     return res.json({ success: true, stepId: result.stepId, stepOrder: result.stepOrder, existed: result.existed === true });
   } catch (err: any) {
     return journeyError(res, err, 'add step', 'step 추가 실패');
@@ -3640,9 +3647,25 @@ router.post('/operator/journeys/:id/copy-facts', async (req: Request, res: Respo
       ...(typeof url === 'string' && url.trim() ? { url } : {}),
     });
     if (!out) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    // ★ 배포 2 C5 · D1 — 채운 칸마다 새 글로 통신사 검사(기다리지 않는다 · 하나씩 · 같은 글 = 이어 보기)
+    void (async () => { for (const s of out.steps) await startJourneyStepSpamChecks(companyId, String(req.params.id), s.id, gate.userId); })();
     return res.json({ success: true, steps: out.steps });
   } catch (err: any) {
     return journeyError(res, err, 'copy-facts', '넣지 못했어요. 잠시 뒤 다시 시도해 주세요.');
+  }
+});
+
+// GET /api/ai/operator/journeys/:id/check — ★ 2026-11-01 배포 2 C5 점검 응답(켜기와 같은 판정을 칸별로 · 차감 0 · 검사 등록 0)
+router.get('/operator/journeys/:id/check', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    if (!gate.userId) return res.status(403).json({ success: false, error: '회사/사용자 권한이 필요합니다.' });
+    if (!(await canAccessJourney(gate, String(req.params.id)))) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
+    const check = await checkJourney(gate.companyId, String(req.params.id), gate.userId);
+    return res.json({ success: true, ...check });
+  } catch (err: any) {
+    return journeyError(res, err, 'check', '점검 결과를 불러오지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
 });
 
@@ -4166,6 +4189,7 @@ router.post('/operator/journeys-refine-step', async (req: Request, res: Response
           }
         : undefined,
     });
+    // ★ 2026-11-01 배포 2 C2(Codex 구현 1R #1) — 출구 = 생산자 정산 안(refineStepMessage) · 후보마다 check 가 붙어 온다(출구를 못 지난 안 = 쓸 결과 아님 = 0원)
     return res.json({ success: true, candidates, mode: body.trim() ? 'refine' : 'create' });
   } catch (err: any) {
     return journeyError(res, err, 'refine step', 'AI 다듬기 실패');
@@ -4220,7 +4244,11 @@ router.post('/operator/journeys/anchor-generate-plan', async (req: Request, res:
     if (steps.length === 0) {
       return res.status(502).json({ success: false, error: 'AI 자동 생성에 실패했습니다. 잠시 후 다시 시도해주세요.' });
     }
-    return res.json({ success: true, steps });
+    // ★ 배포 2 C2 — 출구(검사 + 표식 · 글은 그대로 · 사실 판정 = 생산자) · 칸마다 즉시 검사
+    const fin = await finishMany((steps as any[]).map((s) => ({ text: String(s?.message || ''), subject: typeof s?.subject === 'string' ? s.subject : null })),
+      { companyId, producer: 'journey-anchor-plan', mode: 'write', channel: 'lms', isAd: true });
+    const finished = (steps as any[]).map((s, i) => ({ ...s, ...copyResponse(fin[i]) }));
+    return res.json({ success: true, steps: finished });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
       return res.status(402).json({ success: false, error: '자동 생성에 필요한 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
@@ -4243,6 +4271,11 @@ router.post('/operator/journeys-ai-edit', async (req: Request, res: Response) =>
       return res.status(400).json({ success: false, error: '수정 요청 문구를 입력해주세요.' });
     }
     const pkg = await editJourneyPackage({ companyId, currentPackage, instruction: String(instruction) });
+    // ★ 배포 2 C2 — 문자 칸 글 = 출구(검사 + 표식 · 글은 그대로 · 사실 판정 = 편집기) · 칸마다 즉시 검사(check)
+    const msgSteps = (Array.isArray(pkg?.steps) ? pkg.steps : []).filter((s: any) => s?.stepType === 'message' && s?.channel !== 'kakao');
+    const fin = await finishMany(msgSteps.map((s: any) => ({ text: String(s.messageTemplate || ''), subject: typeof s.subject === 'string' ? s.subject : null })),
+      { companyId, producer: 'journey-ai-edit', mode: 'write', channel: 'lms', isAd: true });
+    msgSteps.forEach((s: any, i: number) => { const r = copyResponse(fin[i]); s.messageTemplate = r.message; s.subject = r.subject ?? s.subject; s.check = r.check; });
     return res.json({ success: true, package: pkg });
   } catch (err: any) {
     return journeyError(res, err, 'AI edit', 'AI 수정 실패');
@@ -4280,7 +4313,8 @@ router.post('/operator/decorate-message', async (req: Request, res: Response) =>
     const keptNote = d.kept.length === 0 ? null
       : d.kept.length === list.length ? '칼럼을 넣지 못해 원문 그대로 두었어요. 크레딧은 빠지지 않았어요.'
       : `${d.kept.length}개 문안은 원문 그대로 두었어요(원문에 없는 말이 생겨서).`;
-    return res.json({ success: true, messages: d.messages, message: d.messages[0], kept: d.kept, charged: d.charged, ...(keptNote ? { notes: [keptNote] } : {}) });
+    // ★ 배포 2 C2(Codex 구현 1R #1) — 출구 = 생산자 정산 안(decorateOperatorMessages) · 안마다 즉시 검사(checks · 원문으로 둔 안 = 원문 검사)
+    return res.json({ success: true, messages: d.messages, message: d.messages[0], checks: d.checks, check: d.checks[0], kept: d.kept, charged: d.charged, ...(keptNote ? { notes: [keptNote] } : {}) });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     if (respondUserError(res, err)) return;

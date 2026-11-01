@@ -11,12 +11,13 @@
 //   - journey_executions 7일 트리거 패턴 (예상 비용)
 
 import { query } from '../config/database';
-import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, type SpamVerdict } from './spam-test-queue';
+import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, type SpamVerdict } from './spam-test-queue';
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from './journey-message-render';
 import { getCompanyCosts } from '../config/defaults';
 import { randomUUID } from 'crypto';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-10 시연 회사 = 검사 발송 0(발송 2시간 전 스캐너 · 활성화 검증 공용)
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
+import { hasUneditedJourneyPlaceholder } from './send-placeholder-gate';   // ★ 2026-11-01 배포 2 C4 — 켜기 관문과 같은 자리 판정
 
 export type FailedReason =
   | 'placeholder_unedited'
@@ -65,7 +66,14 @@ export async function validateJourneyForActivation(
   companyId: string,
   journeyId: string,
   userId: string,
+  /**
+   * ★ 2026-11-01 배포 2 C5 — 점검 응답이 같은 판정을 칸별로 펼친다(판정 두 벌 0).
+   *   spam = 칸 판의 스팸 결과를 얻는 길(기본 = 검사를 걸고 기다림 · 점검 응답 = peekStepSpam 엿보기 · null = 검사 전)
+   *   spamStates = 판마다 스팸 상태(통과 · 검사 중 · 확인 중 · 검사 전)를 받아 갈 그릇
+   */
+  opts: { spam?: (p: StepSpamParams) => Promise<StepSpamTestResult | null>; spamStates?: StepSpamState[] } = {},
 ): Promise<ValidationResult> {
+  const spam = opts.spam ?? runStepSpamTest;
   // 1. step 조회 (step_type='message'만 — wait/condition 검증 제외)
   const stepsRes = await query(
     `SELECT s.id AS step_id, s.channel, s.message_template, s.subject,
@@ -106,12 +114,12 @@ export async function validateJourneyForActivation(
 
     for (const msg of messagesToValidate) {
       // a. placeholder 잔존 검증 (옛 D187-fix2 영구 룰 정합)
-      if (hasUneditedPlaceholder(msg.body)) {
+      if (hasUneditedJourneyPlaceholder(msg.body)) {
         failedSteps.push({
           stepId: step.step_id,
           variantId: msg.variantId,
           reason: 'placeholder_unedited',
-          details: '[직접 작성해주세요] 또는 [URL 입력] placeholder 잔존',
+          details: '채울 자리 [...]가 남아 있음',
         });
         continue;
       }
@@ -146,7 +154,7 @@ export async function validateJourneyForActivation(
       } else if (step.channel === 'sms' || step.channel === 'lms' || step.channel === 'mms') {
         // SMS/LMS/MMS = 스팸필터테스트 (공용 runStepSpamTest — 스캐너와 동일 경로)
         const stIsAd = step.is_ad !== false;
-        const r = await runStepSpamTest({
+        const r = await spam({
           companyId,
           userId,
           body: msg.body,
@@ -157,6 +165,11 @@ export async function validateJourneyForActivation(
           journeyId,
           variantId: msg.variantId || undefined,
         });
+        // ★ 2026-11-01 배포 2 C5 — 점검 응답(엿보기)에서 오늘 같은 글 검사가 없으면 = 검사 전(문안 문제 아님 · 켜기는 여기서 검사를 건다)
+        if (r === null) {
+          opts.spamStates?.push({ stepId: step.step_id, variantId: msg.variantId, state: 'before' });
+          continue;
+        }
         // ★ 2026-10-25 #14(R7) — 결과 = 공용 판정(통과 · 차단 · 검사 장애). 장애를 「통신사 차단」으로 적어 문안을 고치게 하지 않는다.
         if (r.verdict === 'error') {
           failedSteps.push({
@@ -168,6 +181,7 @@ export async function validateJourneyForActivation(
           continue;
         }
         if (isSpamHold(r.verdict)) {
+          opts.spamStates?.push({ stepId: step.step_id, variantId: msg.variantId, state: r.verdict });
           failedSteps.push({
             stepId: step.step_id,
             variantId: msg.variantId,
@@ -189,6 +203,7 @@ export async function validateJourneyForActivation(
           continue;
         }
         void (r.verdict satisfies 'pass');
+        opts.spamStates?.push({ stepId: step.step_id, variantId: msg.variantId, state: 'pass' });
         confidenceSum += r.score;
         scoredCount += 1;
       }
@@ -210,12 +225,6 @@ export async function validateJourneyForActivation(
 // ============================================================
 // 헬퍼 함수
 // ============================================================
-
-function hasUneditedPlaceholder(body: string): boolean {
-  if (/\[직접 작성해주세요\]/.test(body)) return true;
-  if (/\[URL[^\]]*\]/.test(body)) return true;
-  return false;
-}
 
 function validateAlimtalkVariableMap(body: string, varMap: Record<string, string>): boolean {
   const vars = body.match(/#\{([^}]+)\}/g) || [];
@@ -288,7 +297,7 @@ export interface StepSpamTestResult {
   error?: string;
 }
 
-export async function runStepSpamTest(params: {
+export interface StepSpamParams {
   companyId: string;
   userId: string;
   body: string;
@@ -299,7 +308,68 @@ export async function runStepSpamTest(params: {
   /** 표본 고객을 고를 여정(없으면 변수 자리를 비운 글로 검사). */
   journeyId?: string;
   variantId?: string;
-}): Promise<StepSpamTestResult> {
+}
+
+/** 판마다 스팸 상태(점검 응답 · ★ 2026-11-01 배포 2 C5) — 차단 · 장애는 failedSteps 가 들고 있다 */
+export interface StepSpamState {
+  stepId: string;
+  variantId: string | null;
+  state: 'before' | 'pending' | 'unconfirmed' | 'pass';
+}
+
+/** 검사에 넣는 글(실발송 · 미리보기와 같은 render · 표본 = 이 여정 대상 1명) — 등록 · 엿보기 공용 */
+async function stepSpamInput(params: StepSpamParams) {
+  const rendered = await renderJourneySmsMessage({
+    companyId: params.companyId,
+    createdBy: params.userId || null,
+    template: params.body,
+    subject: params.subject,
+    channel: params.channel,
+    isAd: params.isAd,
+    customer: await pickJourneySampleCustomer(params.companyId, params.journeyId),
+  });
+  return {
+    companyId: params.companyId,
+    userId: params.userId,
+    callbackNumber: params.callbackNumber || '',
+    messageContentSms: params.channel === 'sms' ? rendered.message : '',
+    messageContentLms: params.channel !== 'sms' ? rendered.message : '',
+    messageType: rendered.msgType,
+    subject: rendered.subject || undefined,
+  };
+}
+
+/**
+ * 칸 판의 오늘 검사를 엿본다(등록 · 차감 0 · 기다림 0 · ★ 2026-11-01 배포 2 C5 점검 응답).
+ *   null = 검사 전(오늘 같은 글 검사 없음 · 지난 검사가 장애) · 그 밖 = runStepSpamTest 와 같은 꼴의 지금 결과.
+ */
+export async function peekStepSpam(params: StepSpamParams): Promise<StepSpamTestResult | null> {
+  if (await isDemoCompany(params.companyId)) {
+    return { verdict: 'pass', ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 100 };
+  }
+  const seen = await peekSpamCheck(await stepSpamInput(params));
+  if (!seen || seen.outcome === 'error') return null;   // 장애 = 켜기 · 자동 검사가 새로 건다(등록 함수의 재사용 규칙과 같다)
+  if (seen.outcome !== 'blocked') return { verdict: seen.outcome, ok: seen.outcome === 'pass', enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: seen.outcome === 'pass' ? 100 : 0 };
+  const r = await readSpamTestOutcome(seen.testId);
+  const failedCarriers = r.carrierResults.filter((x) => x.result === 'blocked').map((x) => x.carrier);
+  return { verdict: 'blocked', ok: false, enqueueOk: true, failedCarriers, matchedStopWords: [], score: 0 };
+}
+
+/**
+ * 칸 저장 뒤 통신사 검사를 건다(기다리지 않는다 · ★ 2026-11-01 배포 2 C5 · D1 · D2).
+ *   같은 날 같은 글 = 이어 보기(차감 0) · 새 글 = 단가표대로 차감(켜기 · 보내기 전 검사와 같은 등록 길) · 실패는 로그만(저장을 막지 않는다).
+ */
+export async function startStepSpamCheck(params: StepSpamParams): Promise<void> {
+  try {
+    if (await isDemoCompany(params.companyId)) return;
+    const r = await enqueueSpamTest({ ...(await stepSpamInput(params)), source: 'auto_ai', variantId: params.variantId || undefined, batchId: randomUUID(), skipPrepaid: false, reuseSameDay: true });
+    if (!r.ok) console.warn(`[journey-auto-spam] 칸 저장 뒤 검사 못 걸음 journey=${params.journeyId} — ${r.errorCode || r.error}`);
+  } catch (err: any) {
+    console.warn(`[journey-auto-spam] 칸 저장 뒤 검사 오류 journey=${params.journeyId} — ${err?.message || err}`);
+  }
+}
+
+export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamTestResult> {
   // ★ 2026-10-10 시연 회사 = 실제 검사 발송 0 — 검사하지 않고 통과로 본다(자동마케팅 autoSpamTestWithRegenerate 와 같은 규칙).
   //   옛: 발송 2시간 전 스캐너가 시연 회사도 검사 대기열에 넣어 선불 차감 최후 방어에서 [DEMO-LEAK] 로 막히고 주기마다 다시 시도했다(1010 운영 로그).
   //   판정 조회 실패는 아래 catch 가 받는다(enqueueOk false = 기존 실패 처리 · 스캐너는 다음 주기 재시도).
@@ -308,26 +378,8 @@ export async function runStepSpamTest(params: {
       return { verdict: 'pass', ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 100 };
     }
     const batchId = randomUUID();
-    const rendered = await renderJourneySmsMessage({
-      companyId: params.companyId,
-      createdBy: params.userId || null,
-      template: params.body,
-      subject: params.subject,
-      channel: params.channel,
-      isAd: params.isAd,
-      customer: await pickJourneySampleCustomer(params.companyId, params.journeyId),
-    });
-    const stMsgType = rendered.msgType;
-    const adBody = rendered.message;
-    const adSubject = rendered.subject;
     const enqueueResult = await enqueueSpamTest({
-      companyId: params.companyId,
-      userId: params.userId,
-      callbackNumber: params.callbackNumber || '',
-      messageContentSms: params.channel === 'sms' ? adBody : '',
-      messageContentLms: params.channel !== 'sms' ? adBody : '',
-      messageType: stMsgType,
-      subject: adSubject || undefined,
+      ...(await stepSpamInput(params)),
       source: 'auto_ai',
       variantId: params.variantId || undefined,
       batchId,

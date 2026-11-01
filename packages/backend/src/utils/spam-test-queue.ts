@@ -472,39 +472,57 @@ export async function loadDefaultSpamFirstRecipient(companyId: string, userId: s
   return firstResult.rows[0] || {};
 }
 
+/** 검사 등록과 같은 치환 · 해시 · 같은 검사 키(★ 2026-11-01 배포 2 C5 — 등록 함수에서 원문 그대로 옮김 · 점검 응답의 엿보기도 이것을 쓴다) */
+async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient'>) {
+  const { companyId, userId, callbackNumber, messageContentSms, messageContentLms, messageType, subject, firstRecipient: clientFirstRecipient } = params;
+  // 1) 메시지 해시 계산 (변수 치환 후)
+  const isLmsType = messageType === 'LMS' || messageType === 'MMS';
+  const rawContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
+
+  // ★ D102: prepareFieldMappings 컨트롤타워로 통합
+  const fieldMappings = await prepareFieldMappings(companyId);
+
+  let firstCustomer: Record<string, any>;
+  if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {
+    firstCustomer = clientFirstRecipient;
+  } else {
+    firstCustomer = await loadDefaultSpamFirstRecipient(companyId, userId, fieldMappings);
+  }
+
+  // ★ D92: %회신번호% 치환 — callbackNumber를 addressBookFields로 전달하여 스팸테스트에서도 맵핑
+  const spamAddressBookFields = callbackNumber ? { callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
+  const personalizedForHash = replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
+  const messageHash = computeMessageHash(personalizedForHash);
+  const key: SpamCheckKey | null = messageHash
+    ? { companyId, callback: callbackNumber, hash: messageHash, msgType: isLmsType ? 'LMS' : 'SMS', subject: (isLmsType ? subject : '') || null }
+    : null;
+  return { isLmsType, fieldMappings, firstCustomer, spamAddressBookFields, messageHash, key };
+}
+
+/**
+ * 같은 글의 오늘 검사를 **엿본다**(등록 · 차감 0 · ★ 2026-11-01 배포 2 C5 점검 응답).
+ *   null = 오늘 같은 키 검사 없음(검사 전) · 그 밖 = 그 검사의 지금 결과(장애도 그대로 — 부르는 쪽이 「다시 검사」로 읽는다).
+ */
+export async function peekSpamCheck(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient'>): Promise<{ testId: string; outcome: SpamVerdict } | null> {
+  const { key } = await spamHashInputsOf(params);
+  const same = key ? await spamCheckFor(key) : null;
+  return same ? { testId: same.testId, outcome: same.outcome } : null;
+}
+
 export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<SpamTestEnqueueResult> {
   const {
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
-    firstRecipient: clientFirstRecipient,
     source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false,
   } = params;
 
   try {
-    // 1) 메시지 해시 계산 (변수 치환 후)
-    const isLmsType = messageType === 'LMS' || messageType === 'MMS';
-    const rawContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
-
-    // ★ D102: prepareFieldMappings 컨트롤타워로 통합
-    const fieldMappings = await prepareFieldMappings(companyId);
-
-    let firstCustomer: Record<string, any>;
-    if (clientFirstRecipient && typeof clientFirstRecipient === 'object' && Object.keys(clientFirstRecipient).length > 0) {
-      firstCustomer = clientFirstRecipient;
-    } else {
-      firstCustomer = await loadDefaultSpamFirstRecipient(companyId, userId, fieldMappings);
-    }
-
-    // ★ D92: %회신번호% 치환 — callbackNumber를 addressBookFields로 전달하여 스팸테스트에서도 맵핑
-    const spamAddressBookFields = callbackNumber ? { callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
-    const personalizedForHash = replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
-    const messageHash = computeMessageHash(personalizedForHash);
+    const hashed = await spamHashInputsOf(params);
+    const { isLmsType, fieldMappings, firstCustomer, spamAddressBookFields, messageHash } = hashed;
 
     // ★ 2026-11-01 B1-4(J15) — 같은 키 · 같은 날 검사가 진행 중 · 확인 중 · 통과 · 차단이면 그 검사를 이어 본다(새 검사 · 차감 0)
     //   여기는 빠른 길(잠금 없음) · 동시에 같은 키 둘이 「없음」을 보면 아래 트랜잭션이 키 잠금 아래에서 다시 찾는다(Codex 구현 1R #1 · 이중 차감 0)
-    const checkKey: SpamCheckKey | null = reuseSameDay && messageHash
-      ? { companyId, callback: callbackNumber, hash: messageHash, msgType: isLmsType ? 'LMS' : 'SMS', subject: (isLmsType ? subject : '') || null }
-      : null;
+    const checkKey: SpamCheckKey | null = reuseSameDay ? hashed.key : null;
     const reusable = async (run?: SqlRun) => {
       const same = checkKey ? await spamCheckFor(checkKey, run) : null;
       return same && same.outcome !== 'error' ? same : null;

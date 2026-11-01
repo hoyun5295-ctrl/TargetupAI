@@ -27,6 +27,8 @@ import { query } from '../config/database';
 import { sanitizeForSms } from './message-sanitizer';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
+import { rewriteDropsLinks } from './voice-form-slots';
+import { finishMany, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -40,6 +42,8 @@ export interface GeneratedVariant {
   subject: string | null;
   byteCount: number;
   reasoning: string;
+  /** ★ 2026-11-01 배포 2 C2 — 출구(finishCopy) 즉시 검사 */
+  check?: QuickCheck;
 }
 
 export interface VariantGenerationResult {
@@ -173,14 +177,22 @@ ${baseMessage}
           // ★ 2026-09-30 WP2 — 변형은 톤만 바꾼다. 기준 문안에 없던 숫자(기간 · 수량 · 시간)나 혜택 값 · 낱말이 생긴 변형은 뺀다
           //   (프롬프트 "혜택 표현 유지"는 확률적 · 30%가 40%로 바뀐 변형이 A/B 로 발송되면 지어낸 혜택).
           .filter((v: GeneratedVariant) => {
-            // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능)
-            const bad = rewriteAddsFacts(v.messageTemplate, baseMessage);
+            // ★ 2026-10-24 ② 판정 = rewriteAddsFacts(숫자 ∥ 혜택 ∥ 효능) · ★ 2026-11-01 배포 2 — 기준 문안의 링크가 빠진 변형도(사실 판정 = 생산자 한 곳)
+            const bad = rewriteAddsFacts(v.messageTemplate, baseMessage) || rewriteDropsLinks(v.messageTemplate, baseMessage);
             if (bad) droppedFabricated++;
             return !bad;
           });
 
+        // ★ 2026-11-01 배포 2 C2 — 응답 글 = 출구(정산 안 · 검사 + 표식 · 글은 그대로 · 사실 판정 = 위 거름) · 변형마다 즉시 검사
+        const fin = await finishMany(variants.map((v) => ({ text: v.messageTemplate, subject: v.subject, before: baseMessage })),
+          { companyId, producer: 'variant-generator', mode: 'rewrite', channel, isAd: true });
+        variants.forEach((v, i) => {
+          const o = copyResponse(fin[i]);
+          variants[i] = { ...v, messageTemplate: o.message, subject: o.subject, byteCount: computeByteCountSafe(o.message), check: o.check };
+        });
+
         if (droppedFabricated > 0) {
-          warnings.push(`기준 문안에 없던 숫자 · 혜택 · 효능 말이 생긴 변형 ${droppedFabricated}개는 뺐어요.`);
+          warnings.push(`기준 문안에 없던 숫자 · 혜택 · 효능 말이 생기거나 링크가 빠진 변형 ${droppedFabricated}개는 뺐어요.`);
         }
         if (variants.length === 0) {
           warnings.push('만들어진 변형이 없어요. 잠시 뒤 다시 시도해 주세요.');

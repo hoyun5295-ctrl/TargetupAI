@@ -4045,7 +4045,8 @@ describe('R36 스팸 차단 = 확인 문자 수신만 · 확인 중 · 기다림
     const users = SERVER_SRC.filter((f) => !owners.has(f) && VERDICT_SRC.test(stripComments(be(f))));
     expect(users.length).toBeGreaterThan(5);
     expect(users.filter((f) => !/\bisSpamHold\(|\bSPAM_VERDICT_WORD\[/.test(stripComments(be(f))))).toEqual([]);
-    expect(stripComments(be('utils/journey-pretest-validator.ts'))).toMatch(/if \(isSpamHold\(r\.verdict\)\) \{[\s\S]{0,200}reason: 'spam_check_pending'/);
+    // ★ 1101 배포 2 C5 — 같은 갈래가 점검 응답용 판 상태(spamStates)도 적는다(한 줄 더 · 창 200 → 400)
+    expect(stripComments(be('utils/journey-pretest-validator.ts'))).toMatch(/if \(isSpamHold\(r\.verdict\)\) \{[\s\S]{0,400}reason: 'spam_check_pending'/);
   });
   it('보내기 전 검사 · 자동 검사 = 같은 검사 이어 보기 · 사람이 누른 수동 검사는 늘 새 검사', () => {
     expect(stripComments(be('utils/journey-pretest-validator.ts'))).toContain('reuseSameDay: true,');

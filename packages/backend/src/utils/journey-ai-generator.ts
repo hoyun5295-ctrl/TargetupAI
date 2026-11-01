@@ -21,10 +21,10 @@ import { UserFacingError } from './http-error';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback, getKoreanCalendar } from '../services/ai';
 import { randomUUID, createHash } from 'crypto';
-import { buildMemoryPromptContext } from './company-memory';
 // ★ D225+ (2026-05-28 Harold 명시): Brand Voice Learning — 회사별 LMS 대표 문안 5건 + 가이드라인 자동 주입.
 import { composeVoicePrompt, VOICE_KIND_BY_STEP, getBrandVoiceSnapshot, voiceLearnedOf, resolveGuidelineFor } from './brand-voice-prompt';
 import { resolveCopyIntent, isCopyContentType, type CopyContentType } from './copy-content-type';
+import { finishMany, finishCopy, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
 import { rewriteShapeDrift, shapeIssues } from './copy-shape';
 // ★ 2026-06-23: 비카카오 여정 광고 표기 강제 정책 — AI 정보성 오판으로 (광고) 누락 차단.
 import { resolveJourneyAdFlag } from './journey-ad-policy';
@@ -141,6 +141,8 @@ export interface GeneratedStep {
   stepIntent: string;
   /** ★ 2026-10-28 AI 메모리 설계 K11-4 — 이 단계 종류(목소리 회사 = 단계마다 받는다 · 없으면 null = 목적 코드 → 광고 여부 순) · 단계 다듬기가 이어받는다 */
   contentType?: CopyContentType | null;
+  /** ★ 2026-11-01 배포 2 C2 — 출구(finishCopy) 즉시 검사 */
+  check?: QuickCheck;
 }
 
 export interface JourneyAIPackage {
@@ -228,6 +230,8 @@ export interface StepRefineCandidate {
   tone: '감성적' | '실용적' | '캐주얼';
   bytes: number;
   reasoning: string;
+  /** ★ 2026-11-01 배포 2 C2 — 출구(finishCopy) 즉시 검사 */
+  check?: QuickCheck;
 }
 
 export interface StepSpamRegenInput {
@@ -321,7 +325,6 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   const audienceLine = String(input.audienceLine || '').trim().slice(0, 300);
 
   const ctx = await loadCompanyContext(input.companyId);
-  const memoryContext = await buildMemoryPromptContext(input.companyId, 30).catch(() => '');
   // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 (CT-58).
   //   AI 시스템 프롬프트 안 안전/분기/차단 3단계 분류 동적 주입.
   const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
@@ -347,8 +350,6 @@ ${EFFICACY_PROMPT_RULES}
 
 ${getKoreanCalendar()}
 ⚠️ 날짜에 요일을 표기할 때(예: "7월 30일(목)") 반드시 위 달력의 요일을 그대로 사용하세요. 직접 요일을 계산하지 마세요. 위 달력에 없는 월의 날짜는 요일을 괄호로 표기하지 마세요 (날짜만 표기).
-
-${memoryContext}
 
 [설계 원칙]
 1. 시작 사건(triggerEvent): 아래 목록의 값 중 하나만 쓴다(목록 밖 값은 저장되지 않는다).
@@ -853,6 +854,11 @@ VIP 회원님께 먼저 전하는 이번 안내,
   //   옛: AI 가 재진입을 끄면 "첫 구매 → 주문 완료" 선이 두 번째 구매부터 끊긴 채로 만들어졌다.
   const reentry = contractReentryPolicy(triggerEvent);
 
+  // ★ 2026-11-01 배포 2 C2 — 응답 글 = 출구(검사 + 표식 · 글은 그대로 · 사실 판정 = 위 거름) · 칸마다 즉시 검사
+  const fin = await finishMany(steps.map((s) => ({ text: s.messageTemplate, subject: s.subject })),
+    { companyId: input.companyId, producer: 'journey-package', mode: 'write', channel: 'lms', isAd: true });
+  steps.forEach((s, i) => { const o = copyResponse(fin[i]); s.messageTemplate = o.message; s.subject = o.subject ?? s.subject; s.check = o.check; });
+
   return {
     name: aiStr(parsed.name, '여정').slice(0, 100),
     templateCode,
@@ -937,7 +943,6 @@ async function refineStepMessageWithAi(input: StepRefineInput): Promise<{ candid
   }
 
   const ctx = await loadCompanyContext(input.companyId);
-  const memoryContext = await buildMemoryPromptContext(input.companyId, 20).catch(() => '');
 
   const maxBytes = input.channel === 'sms' ? 90 : 2000;
 
@@ -969,8 +974,6 @@ ${EFFICACY_REWRITE_RULE}
 
 [상시 발송 원칙: 계절 언급 금지]
 이 문안은 여정에서 연중 상시 자동 발송됩니다. 계절·월·날씨·명절 언급 절대 금지 (원본에 있던 계절 표현도 시간 불문 감성으로 교체).
-
-${memoryContext}
 
 [step 의도] ${input.stepIntent || '(미지정)'}
 ${buildJourneyContextBlock(jc, hasBody)}${factsBlock}
@@ -1048,7 +1051,7 @@ ${single
   //     "30% 행사를 알리고 싶다"는 말이 AI에게 그 숫자를 문안에 렌더링할 면허는 아니다(혜택은 사용자가 편집기에서 쓴다).
   //     생성 모드는 원본이 없으므로 구체 혜택이 전부 placeholder가 된다 = 의도한 동작.
   // 절단은 위(raw)에서 요청한 수만큼 이미 끝났다 — 여기서 다시 3으로 자르면 그 계약이 무의미해진다.
-  const candidates: StepRefineCandidate[] = raw.map((c: any) => {
+  const filtered: StepRefineCandidate[] = raw.map((c: any) => {
     const rawMsg = aiStr(c.message).slice(0, maxBytes * 2);
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);
@@ -1076,12 +1079,17 @@ ${single
     // ★ 2026-10-28 K11-1 고치기 출구 대조 — 원문이 있으면 그 꼴이 무너진 안은 버린다(I12)
     .filter((c) => !hasBody || rewriteShapeDrift(input.currentMessage, c.message).length === 0)
     // ★ 2026-10-28 K1-7 — 근거(원문 · 여정 목표)에 없는 계절 · 월 낱말이 든 안은 버린다(여정은 연중 나간다)
-    .filter((c) => findSeasonWords(c.message, [input.currentMessage || '', jc?.objective || ''].join('\n')).length === 0)
+    .filter((c) => findSeasonWords(c.message, [input.currentMessage || '', jc?.objective || ''].join('\n')).length === 0);
+
+  // ★ 2026-11-01 배포 2 C2 — 출구 = 정산 안(Codex 구현 1R #1) · 검사 + 표식 · 글은 그대로(사실 판정 = 위 거름 · 3R) · 전송자 명칭을 붙이기 앞(꼴 검사 = 원문 대조)
+  const fin = await finishMany(filtered.map((c) => ({ text: c.message, before: hasBody ? input.currentMessage : null })),
+    { companyId: input.companyId, producer: 'journey-step-refine', mode: hasBody ? 'rewrite' : 'write', channel: input.channel, isAd: input.isAd });
+  const candidates = filtered.map((c, i) => {
+    const o = copyResponse(fin[i]);
     // ★ 2026-10-28 K1-1 — 광고 단계 = 첫 줄에 전송자 명칭(숫자 대조 뒤에 붙인다 · 이름의 숫자가 새 숫자로 잡히지 않게)
-    .map((c) => {
-      const n = ensureSenderName(c.message, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] });
-      return n.added ? { ...c, message: n.text, bytes: getBytes(n.text) } : c;
-    });
+    const n = ensureSenderName(o.message, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] });
+    return { ...c, message: n.text, bytes: getBytes(n.text), check: o.check };
+  });
 
   return { candidates };
 }
@@ -1098,7 +1106,6 @@ export async function generateAnchorStepMessage(input: {
   offsetDays: number;
 }): Promise<{ subject: string; message: string }> {
   const ctx = await loadCompanyContext(input.companyId);
-  const memoryContext = await buildMemoryPromptContext(input.companyId, 20).catch(() => '');
   const offset = Math.max(0, Math.floor(Number(input.offsetDays) || 0));
   const timing = offset === 0 ? '기준일 당일(D-0, 마지막 안내)' : `기준일 ${offset}일 전(D-${offset})`;
 
@@ -1115,8 +1122,6 @@ ${EFFICACY_PROMPT_RULES}
 [계절 언급 원칙]
 발송일은 회사가 지정한 기준 날짜에 따라 반복될 수 있습니다. 오늘(생성 시점)의 계절·월·날씨를 언급하지 마세요.
 여정 목표문에 계절·명절·특정 시기가 명시된 경우(예: "추석 감사 인사")에만 그 시기를 반영합니다.
-
-${memoryContext}
 
 [발송 시점] ${timing}. D-0에 가까울수록 남은 기간 긴박감을 자연스럽게 높이세요.
 
@@ -1354,6 +1359,9 @@ ${EFFICACY_REWRITE_RULE}
     console.log(`[journey-ai-refine] 원본에 없던 계절 낱말이 생겨 재작성을 버림 company=${input.companyId}`);
     return null;
   }
+  if (!out) return out;
+  // ★ 2026-11-01 배포 2 C2 — 출구 = 정산 안 · 검사 + 표식 · 글은 그대로(사실 판정 = 위 거름) · 전송자 명칭 앞
+  const fin = await finishCopy({ companyId: input.companyId, producer: 'journey-pretest-regen', mode: 'rewrite', text: out, before: input.currentMessage, channel: input.channel, isAd: input.isAd });
   // ★ 2026-10-28 K1-1 광고 단계 = 첫 줄에 전송자 명칭(위 대조가 끝난 뒤)
-  return out ? ensureSenderName(out, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] }).text : out;
+  return ensureSenderName(fin.text, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] }).text;
 }

@@ -333,6 +333,7 @@ async function processBundle(b: PretestBundle, summary: { tested: number; passed
   } catch (regenErr: any) {
     console.log(`[journey-pretest-scan] 재생성 실패 journey=${b.journeyId} step=${b.stepId} — ${regenErr?.message || regenErr}`);
   }
+  // ★ 2026-11-01 배포 2 C2(Codex 구현 1R #1) — 출구는 재작성 생산자의 정산 안(regenerateStepAvoidingSpam)에서 지난다(못 지나면 null = 0원 · 여기서 다시 거르면 차감 뒤 빈손)
   if (!regenBody || !regenBody.trim() || regenBody.trim() === body) {
     // ★ Codex 구현 3R — 이 후보가 더는 내 것이 아니면(만료 · 다른 손 · 사람이 새 판) 생성 실패가 아니다 = 아무것도 안 하고 끝(차감 0 · 정지 · 안내 0)
     if (!(await candidateStillMine(snapId!, claim.token).catch(() => false))) {

@@ -92,7 +92,7 @@ describe('AI 꾸미기 — 고른 컬럼만 넘긴다', () => {
   it('칩은 토큰을 들고 라벨을 보여 준다 (꾸미기 API가 받는 값이 토큰이다)', () => {
     const src = studioSrc();
     expect(src).toMatch(/selectedVars\.has\(v\.token\)/);
-    expect(src).toMatch(/onDecorate\(index, Array\.from\(selectedVars\)\)/);
+    expect(src).toMatch(/onDecorate\(Array\.from\(selectedVars\)\)/);   // ★ 1101 배포 2 C6 — 칸 하나 화면(번호 인자 없음)
   });
 });
 

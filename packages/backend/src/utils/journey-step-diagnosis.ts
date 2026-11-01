@@ -35,6 +35,7 @@ import { replaceInventedBenefits, dropInventedEfficacyTitledBody, EFFICACY_PROMP
 import { ensureSenderName } from './messageUtils';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
+import { finishMany, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -88,6 +89,8 @@ export interface RecommendedStep {
   conditionType: string | null;
   reasoning: string;
   expectedImpact: string;
+  /** ★ 2026-11-01 배포 2 C2 — 출구(finishCopy) 즉시 검사(문자 칸 글이 있을 때만) */
+  check?: QuickCheck;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -439,14 +442,21 @@ ${stepsDescription || '(단계 영역 없음)'}
           expectedImpact: typeof s?.expectedImpact === 'string' ? s.expectedImpact : '',
         });
 
+        // ★ 2026-11-01 배포 2 C2 — 응답 글 = 출구(검사 + 표식 · 글은 그대로 · 사실 판정 = 위 guardPair) · 칸마다 즉시 검사
+        const recs = [mapStep(parsed.recommended || {}), ...(Array.isArray(parsed.alternatives) ? parsed.alternatives.slice(0, 3).map(mapStep) : [])];
+        const fin = await finishMany(recs.map((r) => ({ text: r.messageTemplate || '', subject: r.subject })),
+          { companyId, producer: 'journey-next-step', mode: 'write', channel: 'lms', isAd: true });
+        recs.forEach((r, i) => {
+          if (!r.messageTemplate) return;
+          const o = copyResponse(fin[i]);
+          r.messageTemplate = o.message; r.subject = o.subject; r.check = o.check;
+        });
         return {
           journeyId,
           recommendedAt: new Date(),
           currentStepCount: existingSteps.length,
-          recommended: mapStep(parsed.recommended || {}),
-          alternatives: Array.isArray(parsed.alternatives)
-            ? parsed.alternatives.slice(0, 3).map(mapStep)
-            : [],
+          recommended: recs[0],
+          alternatives: recs.slice(1),
           reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : '',
         };
   

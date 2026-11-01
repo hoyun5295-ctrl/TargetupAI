@@ -17,8 +17,6 @@ import { hasIdentifierLeak } from './copy-deidentify';
 // ★ 2026-07-04 진화(specs/2026-07-04-best-copy-evolution-design.md): 시드 사용 기록 + 업종 승리 공식 주입
 import { recordSeedUsage, getIndustryFormula } from './best-copy-assets';
 import { renderFormulaBlock } from './industry-formula';
-// ★ 2026-07-04 학습 루프 ③: 회사 축적 메모리(성공 패턴·채널 성과·피할 것)를 문안 생성에도 주입 — Operator 전용이던 학습의 첫 생성 연결
-import { buildMemoryPromptContext } from './company-memory';
 
 export interface BrandKit {
   signatureLocked?: string;
@@ -33,8 +31,6 @@ export interface ComposeInput {
   channels: string[]; // 우선 채널 (예: ['EMAIL'] 또는 ['SMS','LMS','MMS'])
   isAd: boolean;
   now?: Date;
-  /** ★ 2026-10-28 K6-3 호출자가 학습 메모리를 이미 넣었으면 건너뛴다(AI 한줄로 두 번 주입 V15) */
-  memoryIncluded?: boolean;
 }
 
 /** 회사 업종 코드 조회 (companies.industry_code — 미설정 시 null, 실패해도 null)
@@ -197,17 +193,7 @@ export async function composeCopyBrain(input: ComposeInput): Promise<ComposeResu
     }
   }
 
-  // ★ 2026-07-04 학습 루프 ③: 회사 축적 메모리 상위 6건(성공 패턴·채널 성과·거부 학습 포함) 주입.
-  //   실패·빈 결과 = 빈 문자열(기존 흐름 무영향). 과길이 방어 1,200자 cap.
-  let memoryBlock = '';
-  if (!input.memoryIncluded) try {
-    const ctx = await buildMemoryPromptContext(input.companyId, 6);
-    if (ctx && ctx.trim()) memoryBlock = ctx.trim().slice(0, 1200);
-  } catch (err) {
-    console.warn('[copy-brain] 회사 메모리 조회 실패 — 메모리 없이 진행:', (err as Error)?.message);
-  }
-
-  let promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock, voiceMode: brandVoiceRegistered });
-  if (memoryBlock) promptSuffix = `${promptSuffix}\n\n${memoryBlock}`;
+  // ★ 2026-11-01 배포 2 C1 — 회사 학습 메모리는 composeVoicePrompt 한 곳에서 넣는다(문안 두뇌를 부르는 단위는 모두 그 함수에도 닿는다 · 계약 시험)
+  const promptSuffix = buildCopyBrainPrompt({ examples, industryFeatures, contextLine, kit, channel, formulaBlock, voiceMode: brandVoiceRegistered });
   return { promptSuffix, examples, bannedWords: kit.bannedWords || [] };
 }
