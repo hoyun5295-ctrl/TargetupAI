@@ -17,7 +17,7 @@ const m = vi.hoisted(() => ({
 vi.mock('@anthropic-ai/sdk', () => ({ default: class { messages = { create: m.claude }; } }));
 vi.mock('openai', () => ({ default: class { chat = { completions: { create: m.gpt } }; } }));
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })), pool: { query: vi.fn(async () => ({ rows: [] })), connect: vi.fn() } }));
-vi.mock('../ai-rate-limit', () => ({ checkAiRateLimit: vi.fn(async () => undefined), isAiCallLimitExempt: () => false, recordAiCall: vi.fn(async () => 'log-1') }));
+vi.mock('../ai-rate-limit', () => ({ recordAiCall: vi.fn(async () => 'log-1') }));
 vi.mock('../ai-cache', () => ({
   generateCacheKey: () => 'k1',
   getCachedResponse: (...a: any[]) => (m.getCache as any)(...a),
@@ -33,7 +33,7 @@ import { callAIWithFallback } from '../../services/ai';
 import { InsufficientCreditError, CreditSettleError } from '../ai-credit';
 
 const COMPANY = '11111111-1111-4111-8111-111111111111';
-const call = () => callAIWithFallback({ system: 's', userMessage: 'u', maxTokens: 100, companyId: COMPANY, source: 'test-source', creditCost: 3 } as any);
+const call = () => callAIWithFallback({ system: 's', userMessage: 'u', maxTokens: 100, companyId: COMPANY, source: 'generate-messages' } as any);   // ★ 1101 §16-3 — 금액 = 크레딧 CT 단가표(옛 금액 칸 creditCost 삭제)
 const claudeOk = { content: [{ type: 'text', text: '결과' }], usage: { input_tokens: 1, output_tokens: 1 } };
 
 describe('AI 공용 호출 — 정산 예외는 공급자 실패가 아니다 · 캐시는 정산 뒤', () => {

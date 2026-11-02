@@ -494,9 +494,12 @@ describe('③ 소스 계약', () => {
   it('단가표 백 · 프론트 일치', () => {
     const be = read('utils/ai-credit-calc.ts');
     const fe = readFileSync(join(FE, 'constants', 'credit.ts'), 'utf8');
+    // ★ 2026-11-01 크레딧 컨트롤타워 §16-2(D1) — 화면 값 = 백엔드 CT 에서 만든 파일 · constants/credit.ts 는 키만
+    const gen = readFileSync(join(FE, 'constants', 'credit.generated.ts'), 'utf8');
     for (const [k, v] of [['ai-line-intake', 2], ['ai-line-compose', 2], ['ai-line-decorate', 1]] as const) {
       expect(be).toContain(`'${k}': ${v},`);
-      expect(fe).toContain(`'${k}': ${v},`);
+      expect(gen).toContain(`'${k}': ${v},`);
+      expect(fe).toContain(`'${k}',`);
       expect(fe).toMatch(new RegExp(`'${k}': 'AI 한줄로`));
     }
     expect(be).toContain("'ai-operator-propose': 5,");

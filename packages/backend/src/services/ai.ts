@@ -33,9 +33,10 @@ import { extractJsonFromAiText } from '../utils/ai-json';
 // ★ 2026-07-06 Liquid 출구 가드 — %변수% 세계(캠페인·오퍼레이터) 생성물에 템플릿 문법 잔존 0 기계 보장
 import { detectLiquidSyntax, flattenLiquidToPlainText } from '../utils/liquid-templating';
 // ★ D227+ 종량제: 작업당 크레딧 단가 맵 (순수 함수, DB 의존 0)
-import { getCreditCost } from '../utils/ai-credit-calc';
+import { getCreditCost, type AiCallCharge } from '../utils/ai-credit-calc';
 // ★ D227+ 종량제: orchestrate 묶음 차감 컨텍스트 (묶음 안 sub 호출은 차감 skip)
-import { isInCreditBundle } from '../utils/ai-credit-context';
+import { entryCreditCost } from '../utils/ai-credit-context';
+import { duePrice } from '../utils/ai-credit-price';
 // ★ 2026-08-04 계약 필수화 — 등록 1회 축 매핑(suggestSegmentForObjective)이 계약 정의·범위를 읽는다.
 import { getSegmentContract, normalizeSegmentParams } from '../utils/automarketing-segment';
 import { customFieldRef } from '../utils/safe-field-name';
@@ -98,15 +99,15 @@ export async function callAIWithFallback(params: {
   //   - 'sonnet' (기본, 미박힘 시): 기존 한줄로AI 흐름 (Sonnet 4.6) — 절대 변경 X
   //   - 'opus': AI Operator 신메뉴 전용 (Opus 4.7)
   model?: 'sonnet' | 'opus';
-  // ★ D209+ (Harold 명시 2026-05-22): Phase D 비용 안전 매트릭스 통합 — 회사별 한도 + cache + 통계
+  // ★ D209+ (Harold 명시 2026-05-22): Phase D 비용 안전 매트릭스 통합 — cache + 통계
   //   companyId 박힘 영역만 자동 통합 (옛 호출부 영향 0 = 점진 통합 정합).
-  //   - checkAiRateLimit: plans.ai_calls_per_month 초과 시 throw AiRateLimitExceeded
+  //   ★ 2026-11-01 월 AI 호출 수 한도 삭제(Harold 「한도를 두는거 자체가 문제 · 어짜피 지들 크레딧 소모」) — 쓰는 양은 크레딧 하나로 막는다.
   //   - getCachedResponse: 동일 system + userMessage 5분 cache hit 시 AI 호출 X
   //   - recordAiCall: 정상 응답 시 ai_call_log INSERT (월 통계)
   companyId?: string;
   source?: string;
-  // ★ D227+ 종량제: 작업당 크레딧. 미지정 시 source 맵(getCreditCost). orchestrate sub-agent는 0 전달(묶음 회피).
-  creditCost?: number;
+  // ★ 2026-11-01 §16-3 — 따로 걷지 않는 호출의 사실(금액 아님 · 금액은 크레딧 CT aiCallCost 가 정한다)
+  charge?: AiCallCharge;
   userId?: string;  // 차감 이력 created_by
   // ★ 2026-07-08 vision — 행사 이미지 판독 등 이미지 입력(base64). 미지정 시 기존 텍스트 전용 동작 불변. images 있으면 cache 우회.
   images?: Array<{ media_type: string; data: string }>;
@@ -114,22 +115,14 @@ export async function callAIWithFallback(params: {
   noCache?: boolean;
 }): Promise<string> {
   const system = withCopyRules(params.system);  // ★ 2026-08-21 공통 문장 부호 규칙(캐시키·Claude·GPT 폴백 전부 같은 system)
-  // ★ D227+ 종량제: 작업당 크레딧 (creditCost 우선, 없으면 source 맵).
-  //   orchestrate 묶음(runInCreditBundle) 안의 sub 호출은 0 — 진입점에서 1회만 차감(과차감 방지).
-  const creditCost = isInCreditBundle() ? 0 : (params.creditCost ?? getCreditCost(params.source));
+  // ★ 2026-11-01 §16-3(P1) — 이 호출의 금액 = 크레딧 CT 한 곳(묶음 안 · 따로 걷지 않는 사실 = 0 · 아니면 원천 단가)
+  const callCost = entryCreditCost(params.source, params.charge);
   // ★ 2026-07-08 vision 요청 여부 — 이미지 포함 시 cache 우회(이미지 데이터가 cacheKey에 안 담겨 서로 다른 이미지가 충돌). 차감·통계는 그대로 유지.
   const hasImages = !!(params.images && params.images.length);
   const skipCache = hasImages || params.noCache === true;
-  // ★ D209+ Phase D: Rate limit 검증 + cache 조회 (companyId 박힘 영역만)
+  // ★ D209+ Phase D: cache 조회 (companyId 박힘 영역만)
   let cacheKey: string | null = null;
   if (params.companyId) {
-    // ★ 2026-09-25 한도 면제 source(맞춤법)는 월 AI 호출 한도를 보지 않는다 — 판정 = CT-55 목록 한 벌(셈에서도 같은 목록으로 뺀다).
-    //   캐시·기록·크레딧 판정은 그대로다. 한도 0인 미가입 회사도 맞춤법 무료 월 5회를 쓸 수 있어야 한다.
-    const { checkAiRateLimit, isAiCallLimitExempt } = await import('../utils/ai-rate-limit');
-    if (!isAiCallLimitExempt(params.source)) {
-      await checkAiRateLimit(params.companyId);  // 초과 시 throw AiRateLimitExceeded
-    }
-
     const { generateCacheKey, getCachedResponse } = await import('../utils/ai-cache');
     cacheKey = generateCacheKey(params.companyId, system, params.userMessage);
     // ★ 2026-07-08 vision 요청은 cache 조회 우회 — cacheKey가 이미지 데이터를 안 담아 다른 이미지가 같은 텍스트면 오탐 hit. (차감 게이트용 cacheKey 자체는 유지)
@@ -142,9 +135,9 @@ export async function callAIWithFallback(params: {
     }
 
     // ★ D227+ 종량제: cache miss 시점 크레딧 사전 체크 (부족 시 throw → 호출측 안내, AI 호출 안 함)
-    if (creditCost > 0) {
+    if (callCost > 0) {
       const { checkCredit } = await import('../utils/ai-credit');
-      await checkCredit(params.companyId, creditCost);
+      await checkCredit(params.companyId, callCost);
     }
   }
 
@@ -163,10 +156,10 @@ export async function callAIWithFallback(params: {
     } catch (trackErr: any) {
       console.warn('[AI] Phase D 통계 기록 skip:', trackErr?.message);
     }
-    if (creditCost > 0) {
+    if (callCost > 0) {
       const { settleCreditAfterSuccess } = await import('../utils/ai-credit');
       await settleCreditAfterSuccess({
-        companyId: params.companyId, cost: creditCost, source: params.source || 'unknown',
+        companyId: params.companyId, cost: callCost, source: params.source || 'unknown',
         aiCallLogId: aiCallLogId ?? null, createdBy: params.userId || currentUserId() || null,
       });
     }
@@ -1402,7 +1395,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       style: voiceMode ? { keepDividers: !!voiceShape?.evidence.divider, maxBlankRun: voiceShape?.maxBlankRun ?? null } : undefined,
     };
     const VARIANT_INDEX: Record<string, number> = { A: 0, B: 1, C: 2 };
-    // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = creditCost 0, 추가 차감 없음)
+    // ★ 2026-07-02 생성 1회 실행 — CT-100 검증 미달 시 재생성에서 재사용 (재생성 = 보정 재시도 사실 · 추가 차감 없음)
     const runGenerateOnce = async (retryHint: string): Promise<AIRecommendResult> => {
     liquidDetectedLastRun = false;
     inventedBenefitsLastRun = [];
@@ -1419,7 +1412,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       thinking: extraContext?.model === 'opus' ? undefined : (copyThinkingEnabled() || undefined),
       companyId: extraContext?.companyId,
       source: 'generate-messages', // ★ D227+ 종량제: 문안 생성 2크레딧 (orchestrate 묶음 안에선 자동 0)
-      ...(retryHint ? { creditCost: 0 } : {}),
+      ...(retryHint ? { charge: { kind: 'retry', of: 'generate-messages' } as const } : {}),
     });
 
     // ★ D227+ 안전 파싱 — 코드펜스 없이 설명문 혼입돼도 JSON 추출 (CT ai-json). 본문 0 bytes 사고 정정.
@@ -1756,7 +1749,7 @@ ${axisLines}
       companyId,
       userId: userId || undefined,
       source: 'operator-segment-map',
-      creditCost: 0,   // 등록 1회 매핑 — 등록 크레딧에 포함(별도 차감 없음)
+      charge: { kind: 'included-in', parent: 'continuous-operator' },   // 등록 1회 매핑 — 자동 마케팅 등록 크레딧에 포함
     });
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) return null;
@@ -1841,7 +1834,7 @@ ${buildFilterFieldsPrompt(fields)}
       companyId,
       userId: userId || undefined,
       source: 'operator-audience-translate',
-      creditCost: 0,   // 등록 1회 번역 — 축 매핑과 같은 무과금(등록 크레딧에 포함)
+      charge: { kind: 'included-in', parent: 'continuous-operator' },   // 등록 1회 번역 — 축 매핑과 같이 등록 크레딧에 포함
     });
     return parseConditionTranslation(raw);
   } catch (e: any) {
@@ -2075,7 +2068,7 @@ ${CONTENT_TYPE_JUDGE_RULES.split('\n').map((l) => `  ${l}`).join('\n')}
     //   바깥 묶음(오케스트레이터 · AI 한줄로 · CRM 대행)이면 걷지 않는다(그 입구가 걷는다). ★ D227+ 안전 파싱(CT ai-json).
     const { runChargedAi } = await import('../utils/ai-credit');
     const { result } = await runChargedAi({
-      companyId: companyId || '', cost: companyId ? getCreditCost('recommend-target') : 0, source: 'recommend-target',
+      companyId: companyId || '', cost: duePrice('recommend-target', { applies: !!companyId }), source: 'recommend-target',
       run: async () => extractJsonFromAiText(await callAIWithFallback({
         system: '당신은 CRM 마케팅 타겟팅 전문가입니다. 주어진 목표에 최적화된 고객 세그먼트와 최적의 발송 채널을 추천해주세요. recommended_time은 반드시 현재 시각 이후의 미래 시간이어야 합니다. JSON 형식으로만 응답하세요.',
         userMessage,

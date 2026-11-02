@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseLedger, headHash, requiredSteps, advanceDeployedHead, recomputeCards, EVIDENCE } from './deploy-ledger-lib.mjs';
+import { parseLedger, headHash, requiredSteps, advanceDeployedHead, recomputeCards, pendingPreDeploy, EVIDENCE } from './deploy-ledger-lib.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 // ★ 2026-10-28 B-1028-4 — 범위가 크면 `git log -p` 출력이 기본 버퍼(1MB)를 넘어 ENOBUFS 로 멈췄다(C73~C76 한 커밋) → 512MB
@@ -38,6 +38,10 @@ const notRunning = rangeChanges(deployed, pulled);
 const toPull = rangeChanges(pulled, 'origin/main');
 
 const print = (s = '') => console.log(s);
+// ★ 2026-11-01 §16-7(B) — 결과가 빈 「배포 앞」 항목 = 맨 위 · 실패 코드(push · 배포 안내 전에 서버에서 먼저 실행하고 결과 칸을 채운다)
+const firstRun = pendingPreDeploy(ledger);
+for (const it of firstRun) print(`[먼저 실행] ${it.id} · ${it.title} — 결과 칸이 비었다(서버에서 먼저 실행 · 확인 출력을 결과에 적은 뒤 push · 배포)`);
+if (firstRun.length) process.exitCode = 1;
 print(`[원장] 작업 트리 미커밋 ${dirty.length}파일${dirty.length ? ' · 다른 세션 tp-push 가 전부 실을 수 있다' : ''}`);
 print(`[원장] 대기 항목 ${ledger.items.length} · DDL 블록 ${ledger.blocks.filter((b) => b.section === 'pending' && b.kind === 'ddl').length}`);
 if (notRunning.commits.length) {

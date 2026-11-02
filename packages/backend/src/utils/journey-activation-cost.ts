@@ -5,9 +5,9 @@
  *   원 여정 lineage_id 는 첫 새 판 때 자기 id 로 채워지고(journey-lineage createNewVersion) 새 판은 뿌리를 물려받는다 → 원장 조회 0회.
  *   계보 컬럼이 없으면(lineage_id 미조회 = undefined) 옛 동작(초안 = 200).
  * 켜기 게이트(journey-activation) · 목록 · 상세 · 지도 응답이 이 함수 하나를 쓴다 → 화면이 상태로 200 을 다시 매기지 않는다.
- * (journey-activation ↔ journey-lifecycle-map 순환 import 를 피하려고 따로 둔다 · 의존 = 단가표뿐)
+ * (journey-activation ↔ journey-lifecycle-map 순환 import 를 피하려고 따로 둔다 · 의존 = 크레딧 CT 값 모듈뿐)
  */
-import { getCreditCost } from './ai-credit-calc';
+import { duePrice } from './ai-credit-price';
 
 export function chargesFirstActivation(row: { id: string; status: string; lineage_id?: string | null }): boolean {
   if (String(row.status) !== 'draft') return false;
@@ -16,5 +16,5 @@ export function chargesFirstActivation(row: { id: string; status: string; lineag
 
 /** 화면에 보일 처음 켜기 크레딧(0 = 이번 켜기는 무료). */
 export function activationCostOf(row: { id: string; status: string; lineage_id?: string | null }): number {
-  return chargesFirstActivation(row) ? getCreditCost('journey-activate') : 0;
+  return duePrice('journey-activate', { paid: !chargesFirstActivation(row) });   // ★ 1101 §16-3 P3 — 금액 규칙 = 크레딧 CT · 여기는 「계보 첫 켜기인가」만
 }

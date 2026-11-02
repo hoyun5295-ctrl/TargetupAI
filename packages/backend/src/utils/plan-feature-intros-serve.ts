@@ -17,6 +17,7 @@ import { PLAN_FEATURE_INTROS, PLAN_FEATURE_MIN_PLAN, type PlanFeatureIntro } fro
 import { ABOUT_GROUPS, ABOUT_GUARDS, ABOUT_HERO, ABOUT_SLOT_IDS } from '../content/about-page';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
 import { isAboutPageViewer } from './about-page-access';
+import { getCreditCost } from './ai-credit-calc';
 
 export const MEDIA_DIR = path.join(__dirname, '../../assets/plan-feature');
 /** 서명 주소 유효 시간 — 창을 열어 둔 채 오래 있어도 재생되게 넉넉히(화면은 이보다 일찍 다시 받는다) */
@@ -70,9 +71,12 @@ export async function shouldWatermarkFeatureIntro(u: FeatureIntroUser): Promise<
   return trial || !isActivePaidPlan(ctx);
 }
 
+/** 내려주는 안내 항목 — 크레딧 줄마다 금액(= 크레딧 CT 단가표 · 원장 글에는 숫자가 없다 · ★ 2026-11-01 §16-2 D2) */
+export type PlanFeatureIntroServed = Omit<PlanFeatureIntro, 'costs'> & { costs: { label: string; source: string; credits: number }[] };
+
 export interface FeatureIntrosPayload {
   minPlan: string;
-  intros: PlanFeatureIntro[];
+  intros: PlanFeatureIntroServed[];
   watermark: boolean;
   /** /about 구성 — 허용 계정(ABOUT_PAGE_VIEWER_IDS)에만 */
   about: { groups: typeof ABOUT_GROUPS; hero: typeof ABOUT_HERO; slotIds: typeof ABOUT_SLOT_IDS; guards: typeof ABOUT_GUARDS } | null;
@@ -80,9 +84,11 @@ export interface FeatureIntrosPayload {
 
 export async function buildFeatureIntrosPayload(u: FeatureIntroUser): Promise<FeatureIntrosPayload> {
   const uid = String(u.userId || '');
-  const intros = PLAN_FEATURE_INTROS.map((f) => (f.video
-    ? { ...f, video: { src: signedMediaUrl(f.video.src, uid), poster: signedMediaUrl(f.video.poster, uid) } }
-    : f));
+  const intros = PLAN_FEATURE_INTROS.map((f) => ({
+    ...f,
+    costs: f.costs.map((c) => ({ ...c, credits: getCreditCost(c.source) })),
+    ...(f.video ? { video: { src: signedMediaUrl(f.video.src, uid), poster: signedMediaUrl(f.video.poster, uid) } } : {}),
+  }));
   return {
     minPlan: PLAN_FEATURE_MIN_PLAN,
     intros,

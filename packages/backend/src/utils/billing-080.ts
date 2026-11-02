@@ -13,7 +13,7 @@
  *    이용료 9,900(부가세포함)=9,000 / KT 부가서비스 4,400=4,000 / 통화료=명세서 공급가 그대로.
  *  - **돈이라 자동 반영 금지** — 판독 결과는 화면 확인 후 [반영]으로만 저장(6원칙 ②⑤).
  *  - 검산은 AI가 아니라 코드가 한다. 명세서 자체의 080 소계와 어긋나면 fail-closed(반영 불가).
- *  - creditCost 0 — 슈퍼관리자 내부 운영 기능(biz-registration-extract와 동일).
+ *  - 크레딧 밖(charge internal) — 슈퍼관리자 내부 운영 기능(biz-registration-extract와 동일).
  */
 
 import { extractJsonFromAiText, aiStr } from './ai-json';   // ★ 2026-09-30 WP4 AI 응답 JSON 파싱 = CT(문자열 안 제어문자 복구) · ★ 2026-10-26 S8 칸 = aiStr
@@ -352,7 +352,7 @@ export async function extractKtStatement(params: { image: EventImageInput; admin
     maxTokens: 3000,
     temperature: 0,
     source: 'kt-statement-extract',
-    creditCost: 0, // 슈퍼관리자 내부 기능 — 고객사 크레딧 미차감
+    charge: { kind: 'internal', why: '슈퍼관리자 내부 기능(고객사 크레딧 미차감)' },
     userId: params.adminId || undefined,
     images: [params.image],
   });

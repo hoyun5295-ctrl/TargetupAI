@@ -46,7 +46,7 @@ import { countStagingFiltered, createDirectSendCampaign } from './direct-send-co
 import { DirectSendError } from './direct-send-spec';
 import { SPAM_BLOCKED_CODE } from './spam-block';
 import { getOpt080Number } from './messageUtils';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, alertPassFailures } from './system-alert';
 // ★2026-09-13(3) 단계 격리의 마이그레이션 전 판정(판정 한 벌) · tick 단계 겹침 가드(B-0825-7)
 import { isMissingSchemaError } from './db-errors';
 import { createStageGuard } from './stage-guard';
@@ -1856,17 +1856,18 @@ async function takeOverStuckAttempt(
   }
 }
 
-/** 멈춘 예약 시도를 인수했을 때 운영자에게 알린다(붙잡힌 연결·약속은 재시작 전까지 남는다) */
-async function alertStuckAttempt(): Promise<void> {
-  try {
-    await sendSystemAlert({
-      companyId: null,
-      dedupKey: 'agency-dispatch-stuck',
-      title: '대행발송 예약 시도가 끝나지 않아 멈춘 것으로 처리했습니다.',
-      details: [`예약 시각이 ${ATTEMPT_STUCK_AFTER_DUE_MINUTES}분 넘게 지난 시도`],
-      action: '붙잡힌 연결이 남아 있을 수 있습니다. 서버 로그를 확인하고 백엔드를 재시작해 주세요.',
-    });
-  } catch { /* 경보 실패가 복구를 멈추게 두지 않는다 */ }
+/**
+ * 멈춘 예약 시도를 인수했을 때 운영자에게 알린다(붙잡힌 연결·약속은 재시작 전까지 남는다).
+ * ★ 2026-11-02 설계 §17-4 A3 — 접수마다 한 항목(옛: 공용 키 6시간 = 재시작 뒤 6시간 안에 또 멈춘 시도는 알리지 않았다) ·
+ *   인수 뒤에 넣는다(인수와 넣기 사이에 프로세스가 죽으면 그 재기동이 붙잡힌 연결을 이미 푼다) · 보내기는 기다리지 않는다.
+ */
+export function alertStuckAttempt(requestId: string): void {
+  void alertPassFailures({
+    pass: 'agency-dispatch-stuck',
+    title: '대행발송 예약 시도가 끝나지 않아 멈춘 것으로 처리했습니다.',
+    action: '붙잡힌 연결이 남아 있을 수 있습니다. 서버 로그를 확인하고 백엔드를 재시작해 주세요.',
+    failures: [{ companyId: null, key: requestId, error: `예약 시각이 ${ATTEMPT_STUCK_AFTER_DUE_MINUTES}분 넘게 지난 시도` }],
+  }).catch(() => undefined);   // 경보 실패가 복구를 멈추게 두지 않는다
 }
 
 async function runLockRecovery(): Promise<void> {
@@ -1908,7 +1909,7 @@ async function runLockRecovery(): Promise<void> {
         const taken = await takeOverStuckAttempt(row);
         if (!taken) continue;
         await logEvent(row.id, 'dispatch_stuck_recovered', { from: row.status, to: taken.to, campaignId: taken.campaignId });
-        await alertStuckAttempt();
+        alertStuckAttempt(String(row.id));
         console.warn(`${LOG} 멈춘 시도 인수 request=${row.id} ${row.status} → ${taken.to}`);
         continue;
       }

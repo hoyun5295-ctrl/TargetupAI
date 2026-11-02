@@ -13,7 +13,8 @@ import { VOICE_FORM_ASK, LINK_MAX, ONCE_LINK_LABEL, linkSpans, type VoiceFormSlo
 import { createHash } from 'crypto';
 import { oneLineGaps, hasPromotionIntent, hasConcreteBenefit } from './one-line-facts';
 import { linePeriodMentioned, lineFingerprint } from './one-line-steps';
-import { kstDateTag, getCreditCost } from './ai-credit-calc';
+import { kstDateTag } from './ai-credit-calc';
+import { aiLineComposePrice } from './ai-credit-price';
 import { SENDABLE_RECIPIENTS_LIMIT } from './operator-recipients';
 
 // ★ 2026-10-19 스위치 삭제(Harold 「스위치고 뭐고」) — 새 흐름 = 전 회사 · AI 한줄로의 유일한 흐름.
@@ -380,9 +381,7 @@ export function aiLineDecoKey(companyId: string, attemptToken: string, payload: 
 
 /** (순수) 만들기 금액 = 기본(아직 안 냈으면) + 종류마다 문안 단가 */
 export function aiLineComposeCost(copyCount: number, basePaid: boolean): { base: number; copies: number; total: number } {
-  const base = basePaid ? 0 : getCreditCost(AI_LINE_SOURCE.intake);
-  const copies = Math.max(0, Math.floor(copyCount)) * getCreditCost(AI_LINE_SOURCE.compose);
-  return { base, copies, total: base + copies };
+  return aiLineComposePrice(copyCount, basePaid);   // 규칙 = 크레딧 CT(★ 2026-11-01 §16-3 P3)
 }
 
 /** 한 번에 보낼 수 있는 대상 상한 = 승인 발송 명단 상한(같은 값 하나) */

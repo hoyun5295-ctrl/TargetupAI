@@ -19,6 +19,7 @@ import { listenLine } from '../one-line-ct/listen';
 import { lineBenefitPrefill, lineBenefitFragments } from '../one-line-facts';
 import { clampToSendableTime, parseTimeFromText } from '../autosend-policy';
 import { creditOverageAllowance } from '../ai-credit-tx';
+import { resultSettled } from '../ai-credit-calc';
 
 const SRC = (...p: string[]) => readFileSync(join(__dirname, '..', '..', ...p), 'utf8').replace(/\r\n/g, '\n');
 
@@ -197,7 +198,8 @@ describe('원문 계약 — 등록 · 발송 돈 · 닫기 · 승인', () => {
     expect(order.every((x) => x > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(reg).toContain('ON CONFLICT (id) DO NOTHING RETURNING *');
-    expect(reg).toContain("charged = d.deducted || d.skipReason === 'duplicate' || d.skipReason === 'not_applicable';");
+    expect(reg).toContain("charged = resultSettled(d);   // 걷힘 판정 = 크레딧 CT 한 벌(§16-1 F19)");
+    expect(resultSettled({ deducted: false, skipReason: 'duplicate' }) && resultSettled({ deducted: false, skipReason: 'not_applicable' })).toBe(true);
     expect(reg).toContain('await markCalendarRegistrationWith(client, input.companyId, opts.calendarMonth, opts.id);');
     expect(reg).toContain("winCols = ', approved_until, approval_meta';");
     expect(co).not.toContain('export async function createOperator(');
@@ -218,16 +220,23 @@ describe('원문 계약 — 등록 · 발송 돈 · 닫기 · 승인', () => {
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'prepaid' }, 'continuous-operator-send')).toBe(0);
     expect(creditOverageAllowance({ plan_credits: 100, billing_type: 'postpaid', overage_limit: 500 }, 'continuous-operator-send')).toBe(0);
   });
-  it('되돌림 = 캠페인 없음 · 그 묶음으로 발송 중 아님 · 30분 · release: 키 — 거르는 조건은 모두 LIMIT 앞(Codex 1R)', () => {
+  it('되돌림 = 캠페인 없음 · 그 묶음으로 발송 중 아님 · 30분 · release: 키 — 거르는 조건은 모두 LIMIT 앞(Codex 1R · ★ 1101 원장 쪽 = 크레딧 CT)', async () => {
     const rel = co.slice(co.indexOf('async function releaseUnsentSendCharges('), co.indexOf("/** 'sending'에 정지된 제안 복구"));
-    expect(rel).toContain("AND t.created_at < NOW() - INTERVAL '30 minutes'");
-    const camp = rel.indexOf("AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))");
-    const live = rel.indexOf("AND op.status = 'sending' AND op.proposal_json->'meta'->>'sendStagingId' = split_part(t.idempotency_key, ':', 3))");
-    expect(camp).toBeGreaterThan(0);
-    expect(live).toBeGreaterThan(camp);
-    expect(live).toBeLessThan(rel.indexOf('LIMIT 20'));
+    // 기능이 넘기는 사실 = 캠페인 없음 · 그 묶음으로 보내는 중 아님 · 30분 · 7일 · 20건
+    expect(rel).toContain("NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))");
+    expect(rel).toContain("AND op.status = 'sending' AND op.proposal_json->'meta'->>'sendStagingId' = split_part(t.idempotency_key, ':', 3))");
+    expect(rel).toMatch(/minAgeMinutes: 30, lookbackDays: 7, limit: 20/);
     expect(rel).not.toContain('const camp = await query(');   // 고른 뒤 JS 에서 다시 거르지 않는다(자리 차지의 뿌리)
-    expect(rel).toContain('idempotencyKey: `release:${key}`, originalIdempotencyKey: key,');
+    expect(rel).not.toContain('FROM ai_credit_transactions');   // 원장은 CT 로만
+    // CT 가 만든 SQL = 기능 사실이 LIMIT 앞 · release: 키 거름
+    const { unsentReleaseCandidatesSql } = await import('../ai-credit-release');
+    const sql = unsentReleaseCandidatesSql({ source: 's', pass: 'p', keyLike: 'k:%:%', minAgeMinutes: 30, lookbackDays: 7, limit: 20, notSentSql: 'NOT EXISTS (SELECT 1 FROM campaigns c)', reason: 'r' });
+    expect(sql).toContain("AND t.created_at < NOW() - INTERVAL '30 minutes'");
+    expect(sql).toContain("x.idempotency_key = 'release:' || t.idempotency_key");
+    expect(sql.indexOf('NOT EXISTS (SELECT 1 FROM campaigns c)')).toBeLessThan(sql.indexOf('LIMIT 20'));
+    const ct = readFileSync(join(__dirname, '..', 'ai-credit-release.ts'), 'utf-8');
+    expect(ct).toContain('idempotencyKey: `release:${o.key}`');
+    expect(ct).toContain('originalIdempotencyKey: o.key');
   });
   it('통과 지문 = 검사한 모양(검사 채널 · 검사 본문) · 재생성 글이 다른 채널이면 통과 0 · 지문 번호 = 발송 번호(Codex 1R)', () => {
     const base = { callback: '0212345678', opt080: '0801234567', msgType: 'SMS', subject: '', body: '안녕하세요' };

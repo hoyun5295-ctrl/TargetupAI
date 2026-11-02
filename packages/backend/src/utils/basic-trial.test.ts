@@ -57,8 +57,10 @@ function makeClient(opts: ClientOpts = {}) {
     calls.push({ sql: s, params });
     if (/^BEGIN|^COMMIT|^ROLLBACK/.test(s)) return { rows: [], rowCount: 0 };
     if (/FROM plans WHERE plan_code = 'TRIAL'/.test(s)) {
-      return { rows: opts.trialPlanRows ?? [{ id: TRIAL_PLAN_ID, credits: 750 }] };
+      return { rows: opts.trialPlanRows ?? [{ id: TRIAL_PLAN_ID }] };
     }
+    // ★ 2026-11-01 §16-1 F15 — 체험 크레딧 양 = 크레딧 CT(planMonthCreditsOf · 같은 client)
+    if (/^SELECT ai_credits_per_month FROM plans WHERE id = \$1/.test(s)) return { rows: [{ ai_credits_per_month: 750 }] };
     if (/FOR UPDATE/.test(s)) {
       const row = opts.companyRow === undefined
         ? { subscription_status: null, trial_expires_at: null }
@@ -86,6 +88,7 @@ function kinds(calls: Array<{ sql: string }>): string[] {
     if (/^COMMIT/.test(sql)) return 'COMMIT';
     if (/^ROLLBACK/.test(sql)) return 'ROLLBACK';
     if (/FROM plans WHERE plan_code = 'TRIAL'/.test(sql)) return 'PLAN';
+    if (/^SELECT ai_credits_per_month FROM plans WHERE id/.test(sql)) return 'CREDITS';
     if (/FOR UPDATE/.test(sql)) return 'LOCK';
     if (/^UPDATE companies/.test(sql)) return 'UPDATE';
     return 'OTHER';
@@ -106,7 +109,7 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
 
     const r = await grantFreeTrial(COMPANY_ID, 7);
 
-    expect(kinds(calls)).toEqual(['BEGIN', 'PLAN', 'LOCK', 'UPDATE', 'COMMIT']);
+    expect(kinds(calls)).toEqual(['BEGIN', 'PLAN', 'CREDITS', 'LOCK', 'UPDATE', 'COMMIT']);
     expect(record).toHaveBeenCalledWith(expect.objectContaining({
       client, companyId: COMPANY_ID, toPlanId: TRIAL_PLAN_ID, changeType: 'trial_start',
       reason: '무료체험 7일 부여',
@@ -182,7 +185,7 @@ describe('grantFreeTrial — client 주입(마케팅 진단 submit 전용 경로
     const r = await grantFreeTrial(COMPANY_ID, 7, { client: client as any });
 
     expect(connect).not.toHaveBeenCalled();                       // 풀에서 새 커넥션을 얻지 않는다
-    expect(kinds(calls)).toEqual(['PLAN', 'LOCK', 'UPDATE']);     // BEGIN/COMMIT/ROLLBACK 없음
+    expect(kinds(calls)).toEqual(['PLAN', 'CREDITS', 'LOCK', 'UPDATE']);     // BEGIN/COMMIT/ROLLBACK 없음
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ client, changeType: 'trial_start' }));
     expect(trialStart).toHaveBeenCalledWith(client, COMPANY_ID, 750, TRIAL_KEY, expect.any(Date));
     expect(alertFail).not.toHaveBeenCalled();

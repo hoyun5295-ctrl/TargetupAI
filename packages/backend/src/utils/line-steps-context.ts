@@ -6,7 +6,7 @@
  * ⛔ 금액은 원장이 진실이다 — 「오늘 이 한 줄로 한 줄 완성을 냈는가」는 원장 접두 조회(조회 실패 = 모름 = 금액 null · 생성 라우트는 503).
  */
 import { listMallProviders } from './mall-providers';
-import { getCreditCost } from './ai-credit-calc';
+import { getCreditCost, outcomeSettled } from './ai-credit-calc';
 import { hasChargeWithKeyPrefix, chargedKeysAmong, type DeductOutcome } from './ai-credit';
 import {
   lineStepsKeyPrefix, lineStepsLegacyKeyPrefix, kstDayOf, lineStepsCharge, sanitizeLineUrl, LINE_COMPLETE_SOURCE, LINE_PRICE, sanitizeLineStepsBody, lineStepsFp, lineUrls, lineFpLockKey, LINE_STEPS_CHANNELS,
@@ -221,7 +221,7 @@ export function lineStepsLineLockKey(p: LineStepsPrepared, companyId: string, _c
  *   세 채널 한 규칙 · DM 착지와 같은 집합). 잔액 부족은 `throwOnInsufficient` 로 따로 던진다.
  */
 export function lineStepsCollected(outcome: DeductOutcome | ''): boolean {
-  return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';
+  return outcomeSettled(outcome);   // 걷힘 판정 = 크레딧 CT 한 벌(★ 2026-11-01 §16-1 F19)
 }
 
 /**

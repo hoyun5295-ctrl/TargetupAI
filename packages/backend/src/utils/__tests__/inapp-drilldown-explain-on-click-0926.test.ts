@@ -28,7 +28,9 @@ describe('드릴다운 AI 분석 = 버튼', () => {
 
   it('라벨 단가는 원장에서 읽는다', () => {
     expect(page).toContain("AI_GENERATE_COSTS['inapp-explainer']");
-    expect(credit).toMatch(/'inapp-explainer': 1,/);
+    // ★ 2026-11-01 §16-2(D1) — 값 = 백엔드 CT 에서 만든 파일 · constants/credit.ts 는 키만
+    expect(credit).toMatch(/'inapp-explainer',/);
+    expect(readFileSync(join(FE, 'constants', 'credit.generated.ts'), 'utf8')).toMatch(/'inapp-explainer': 1,/);
   });
 });
 

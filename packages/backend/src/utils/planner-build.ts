@@ -29,6 +29,7 @@ import {
 import { checkChannelReadiness } from './planner-channel-gate';
 import { InsufficientCreditError, isChargedByKey } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
+import { duePrice, genSourceOf } from './ai-credit-price';
 import { runInCreditBundle } from './ai-credit-context';
 import { getLineTemplate, type LineTemplate } from './design-core/line-templates';
 import { draftLineTemplate, buildLineTemplateDm, buildLineTemplateEmail, lineTemplateBrand, lineTemplateDmMarker } from './line-template-run';
@@ -178,8 +179,8 @@ function plannerSlotMin(comp: LineComposition, channel: 'dm' | 'email', key: key
 
 /** (순수) 템플릿 견적 — 엔진과 같은 키 · 같은 단가(판독 0) · 크레딧제 미적용 = 0 */
 export function plannerTemplateQuote(channel: 'dm' | 'email', creditEnabled: boolean): { total: number; parts: Array<{ key: string; label: string; cost: number }> } {
-  const key = channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate';
-  const cost = creditEnabled ? getCreditCost(key) : 0;
+  const key = genSourceOf(channel);
+  const cost = duePrice(key, { applies: creditEnabled });   // 금액 규칙 = 크레딧 CT
   return { total: cost, parts: [{ key, label: channel === 'email' ? '이메일 생성' : '모바일 DM 생성', cost }] };
 }
 

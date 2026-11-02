@@ -465,7 +465,7 @@ async function accumulateAvoidPatterns(): Promise<number> {
         maxTokens: 500,
         temperature: 0.2,
         model: 'sonnet',
-        creditCost: 0, // 내부 학습 — 사용자 크레딧 차감 없음
+        charge: { kind: 'internal', why: '내부 학습(사용자 크레딧 차감 없음)' },
       });
       const m = raw.match(/\[[\s\S]*\]/);
       if (!m) { noteAvoidTried(row.company_id); continue; }

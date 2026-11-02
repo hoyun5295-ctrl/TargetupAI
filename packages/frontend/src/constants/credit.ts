@@ -1,9 +1,13 @@
 import { Sparkles, Route, Smartphone, Layers, PenLine, Wand2, Repeat, Play, Send, Mail, Link2, ImagePlus, type LucideIcon } from 'lucide-react';
+import { CREDIT_COSTS, CREDIT_UNIT_PRICE, creditTxDelta } from './credit.generated';
+
+// ★ 2026-11-01 크레딧 컨트롤타워 §16-2(D1) — 단가 · 충전 단가 · 부가세 · 일일 분석 식 · 원장 증감 = 백엔드 CT 에서 만든 파일(손 수정 금지 · 시험 대조)
+export { CREDIT_COSTS, CREDIT_UNIT_PRICE, CREDIT_VAT_RATE, CREDIT_TX_TYPES, dailyDbAnalysisCredits, calcRechargeAmount, creditTxDelta } from './credit.generated';
 
 /**
  * 종량제 크레딧 공용 상수 (D229+ UI 폴리시).
  * 프론트 전 영역(PricingPage 요약 바·AI Operator 칩 등)에서 같은 값을 쓰도록 단일 소스로 모음.
- * 작업당 단가는 백엔드 utils/ai-credit-calc.ts CREDIT_COST_MAP과 1:1 일치해야 함 — 한쪽만 바꾸지 말 것.
+ * 작업당 단가 = 생성 파일 CREDIT_COSTS(백엔드 CREDIT_COST_MAP 에서 만든다 · 여기에 숫자를 적지 않는다).
  */
 
 export interface CreditTaskCost {
@@ -16,28 +20,27 @@ export interface CreditTaskCost {
 }
 
 /**
- * 작업당 AI 크레딧 단가 — 백엔드 CREDIT_COST_MAP 기준 (가치 기반 v2 2026-06-30, 1크레딧 = 500원).
- *  풀분석 300 · 자동마케팅 200·발송 10 · 여정 활성화 200·운영 10 · DM 발행 100 · 인앱 게시 100 · 이메일 발행 50 · 인터랙션 발행 120 · 문안·분석 5 · 꾸미기 3 · 생성·돌려보기 3 · 다듬기·질문 1.
+ * 작업당 AI 크레딧 요약표(요금 화면) — 줄 = 서버 단가 키(source) · 금액 = 생성 단가표(백엔드 CREDIT_COST_MAP · 1크레딧 = 500원).
  *  스팸필터 테스트는 비대상(0, 미표기).
  */
-export const CREDIT_TASK_COSTS: CreditTaskCost[] = [
-  { key: 'full', label: '풀분석', cost: 300, source: 'orchestrate', icon: Sparkles },
-  { key: 'auto', label: '자동 마케팅', cost: 200, source: 'continuous-operator', icon: Repeat },
-  { key: 'journey', label: '여정 활성화', cost: 200, source: 'journey-activate', icon: Route },
-  { key: 'dm', label: 'DM 발행', cost: 100, source: 'dm-builder', icon: Smartphone },
-  { key: 'inapp', label: '인앱 게시', cost: 100, source: 'inapp-publish', icon: Layers },
+export const CREDIT_TASK_COSTS: CreditTaskCost[] = ([
+  { key: 'full', label: '풀분석', source: 'orchestrate', icon: Sparkles },
+  { key: 'auto', label: '자동 마케팅', source: 'continuous-operator', icon: Repeat },
+  { key: 'journey', label: '여정 활성화', source: 'journey-activate', icon: Route },
+  { key: 'dm', label: 'DM 발행', source: 'dm-builder', icon: Smartphone },
+  { key: 'inapp', label: '인앱 게시', source: 'inapp-publish', icon: Layers },
   // ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) · ★ 2026-10-25 원장 Z3 100 → 20(서버는 2026-09-16 부터 20 · 이 줄만 옛 값이었다)
-  { key: 'shortlink', label: '단축 URL 발급', cost: 20, source: 'dm-custom-short-link', icon: Link2 },
-  { key: 'email', label: '이메일 발행', cost: 50, source: 'email-campaign-complete', icon: Mail },
-  { key: 'operation', label: '여정·운영 발송', cost: 10, source: 'journey-operation', icon: Send },
-  { key: 'copy', label: '문안·분석', cost: 5, source: 'ai-operator-propose', icon: PenLine },
+  { key: 'shortlink', label: '단축 URL 발급', source: 'dm-custom-short-link', icon: Link2 },
+  { key: 'email', label: '이메일 발행', source: 'email-campaign-complete', icon: Mail },
+  { key: 'operation', label: '여정·운영 발송', source: 'journey-operation', icon: Send },
+  { key: 'copy', label: '문안·분석', source: 'ai-operator-propose', icon: PenLine },
   // ★ 2026-10-25 원장 Z3 — 옛 「생성·돌려보기 3」 한 줄은 DM 생성(5)을 3으로 보였다 · 두 줄로 가른다
-  { key: 'dm-generate', label: 'DM 생성', cost: 5, source: 'dm-ai-generate', icon: Play },
-  { key: 'generate', label: '이메일·인앱·여정 생성', cost: 3, source: 'email-ai-generate', icon: Play },
-  { key: 'decorate', label: '꾸미기', cost: 3, source: 'ai-operator-decorate', icon: Wand2 },
-  { key: 'image', label: '이미지 생성', cost: 2, source: 'image-studio-generate', icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·편집 1 · 4K 격상은 2026-09-30 제거 · 아래 'image-studio-4k' 이름표는 지난 차감 이력 표시용)
-  { key: 'refine', label: '다듬기·질문', cost: 1, source: 'refine-direct', icon: Wand2 },
-];
+  { key: 'dm-generate', label: 'DM 생성', source: 'dm-ai-generate', icon: Play },
+  { key: 'generate', label: '이메일·인앱·여정 생성', source: 'email-ai-generate', icon: Play },
+  { key: 'decorate', label: '꾸미기', source: 'ai-operator-decorate', icon: Wand2 },
+  { key: 'image', label: '이미지 생성', source: 'image-studio-generate', icon: ImagePlus }, // ★ 2026-07-19 P4 이미지 스튜디오 (생성 2·편집 1 · 4K 격상은 2026-09-30 제거 · 아래 'image-studio-4k' 이름표는 지난 차감 이력 표시용)
+  { key: 'refine', label: '다듬기·질문', source: 'refine-direct', icon: Wand2 },
+] as Omit<CreditTaskCost, 'cost'>[]).map((t) => ({ ...t, cost: CREDIT_COSTS[t.source] ?? 0 }));
 
 /**
  * 크레딧 → 대표 작업 환산 횟수. 단가표 값(풀분석 · DM 발행 · 문안)으로만 계산 — 임의 상수 없음.
@@ -52,17 +55,6 @@ export function creditConversions(credits: number) {
     dm: Math.floor(c / per('dm-builder')),
     copy: Math.floor(c / per('ai-operator-propose')),
   };
-}
-
-/**
- * DB 규모 일일 분석 차감 (연동 회사 매일 1회) — 백엔드 ai-credit-calc.ts dailyDbAnalysisCredits와 1:1.
- *  매일 = round(3 + (ceil(고객수/10만)−1)×1.5). 0명 = 0. 예: 10만 3 / 20만 5 / 100만 17 / 300만 47.
- */
-export function dailyDbAnalysisCredits(customerCount: number): number {
-  const n = Math.max(0, Math.floor(Number(customerCount) || 0));
-  if (n === 0) return 0;
-  const blocks = Math.ceil(n / 100000);
-  return Math.round(3 + (blocks - 1) * 1.5);
 }
 
 export interface PlanInfra {
@@ -148,55 +140,60 @@ export const CREDIT_SOURCE_LABELS: Record<string, string> = {
  * ★ 2026-09-14 T6 — 작은 생성 차감의 화면 표기 단가(백엔드 CREDIT_COST_MAP 미러 · 버튼 라벨 "(N크레딧)"의 단일 출처).
  * 라벨에 숫자를 손으로 적지 않는다(옛 "3크레딧" 표기가 DM 생성 5로 오른 뒤에도 남아 있었다). 실제 차감은 서버 견적·원장이 정한다.
  */
-export const AI_GENERATE_COSTS: Record<string, number> = {
-  'dm-ai-generate': 5,
-  'email-ai-generate': 3,
-  'event-image-extract': 3,
-  'catalog-dm-build': 10,
-  'inapp-explainer': 1,   // ★ 2026-09-26 한줄로 V2 R1-42 인앱 AI 영향 요인 분석 버튼 라벨(백엔드 CREDIT_COST_MAP 미러)
-  'ai-operator-propose': 5,   // ★ 2026-10-05 자동 마케팅 [제안 받기] 미리보기 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 허브 제안과 같은 키)
-  'journey-ai-generate': 3,   // ★ 2026-10-10 한 줄 묻기 — 여정 답 카드 · 「이 문장 그대로 만들기」 라벨(백엔드 CREDIT_COST_MAP 미러)
-  'inapp-ai-generator': 3,    // ★ 2026-10-10 한 줄 묻기 — 인앱 답 카드 라벨(백엔드 CREDIT_COST_MAP 'inapp-ai-generator' 미러)
-  // ★ 2026-10-18 AI 한줄로 — 확인 판 금액 줄 · 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 실제 차감은 서버 원장)
-  'ai-line-intake': 2,
-  'ai-line-compose': 2,
-  'ai-line-decorate': 1,
-  // ★ 2026-10-25 원장 #91 · #105 · #116 · Z3 — 화면 문장에 숫자로 박혀 있던 단가(값 = 백엔드 CREDIT_COST_MAP · 값까지 대조 = 백엔드 credit-price-parity 시험)
-  'refine-direct': 1,
-  'ai-segment-generator': 1,
-  'ai-operator-decorate': 3,
-  'dm-copy-generate': 3,
-  'image-studio-generate': 2,
-  'image-studio-edit': 1,
-  'email-refine': 1,
-  'email-precheck': 1,
-  'email-performance-insight': 5,
-  'marketing-calendar-month': 10,
-  'oneline-judge': 2,
-  'oneline-recook': 3,
-  'journey-operation': 10,
-  'multi-goal-decisioning': 5,
-  // ★ 2026-10-28 AI 메모리 설계 K7-4 — 목소리 배우기 = 추출 + 견본(화면 금액은 서버 GET 이 내린 값 · 여기는 미러)
-  'brand-voice-extract': 1,
-  'generate-messages': 5,
-};
+/** 키 목록 → { 키: 생성 단가표 값 }(단가표에 없는 키 = 0 · 백엔드 시험이 키가 단가표에 있는지 본다) */
+function pickCosts(keys: string[]): Record<string, number> {
+  return Object.fromEntries(keys.map((k) => [k, CREDIT_COSTS[k] ?? 0]));
+}
 
-export const CONFIRM_CREDIT_COSTS: Record<string, number> = {
-  'dm-ai-generate': 5,           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
-  'catalog-dm-build': 10,        // ★ 2026-09-15 카탈로그 DM 생성(AI 자동제작 카탈로그 채널 · Harold 확정 10 · 자동제작 흐름의 확인 모달 1회에 라벨·단가 공급)
-  'dm-builder': 100,             // DM 발행
-  'dm-interaction-publish': 120, // 인터랙션 발행 (룰렛·추첨·설문)
-  'dm-custom-short-link': 20,    // ★ 2026-09-16 100 → 20 (Harold 확정 · AI 0 · 되돌릴 수 없는 발급이라 확인 모달 유지)
-  'email-campaign-complete': 50, // ★ 2026-07-02 Email 캠페인 완성 (AI/수동/템플릿 불문 1회 — 발송·이력 무료)
-  'email-ai-publish': 50,        // (구) Email AI 캠페인 발송 확정 — 2026-07-02부터 미사용(완성 요금 대체)
-  'inapp-publish': 100,          // 인앱 게시
-  'journey-activate': 200,       // 여정 활성화
-  'continuous-operator': 200,    // 자동 마케팅 저장
-  'marketing-calendar': 50,      // ★ 2026-07-02 (Harold 명시): 캘린더 1년 설계 — 생성·재생성 매회
-  'orchestrate': 300,            // 풀분석
+export const AI_GENERATE_COSTS: Record<string, number> = pickCosts([
+  'dm-ai-generate',
+  'email-ai-generate',
+  'event-image-extract',
+  'catalog-dm-build',
+  'inapp-explainer',   // ★ 2026-09-26 한줄로 V2 R1-42 인앱 AI 영향 요인 분석 버튼 라벨(백엔드 CREDIT_COST_MAP 미러)
+  'ai-operator-propose',   // ★ 2026-10-05 자동 마케팅 [제안 받기] 미리보기 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 허브 제안과 같은 키)
+  'journey-ai-generate',   // ★ 2026-10-10 한 줄 묻기 — 여정 답 카드 · 「이 문장 그대로 만들기」 라벨(백엔드 CREDIT_COST_MAP 미러)
+  'inapp-ai-generator',    // ★ 2026-10-10 한 줄 묻기 — 인앱 답 카드 라벨(백엔드 CREDIT_COST_MAP 'inapp-ai-generator' 미러)
+  // ★ 2026-10-18 AI 한줄로 — 확인 판 금액 줄 · 버튼 라벨(백엔드 CREDIT_COST_MAP 미러 · 실제 차감은 서버 원장)
+  'ai-line-intake',
+  'ai-line-compose',
+  'ai-line-decorate',
+  // ★ 2026-10-25 원장 #91 · #105 · #116 · Z3 — 화면 문장에 숫자로 박혀 있던 단가(값 = 백엔드 CREDIT_COST_MAP · 값까지 대조 = 백엔드 credit-price-parity 시험)
+  'refine-direct',
+  'ai-segment-generator',
+  'ai-operator-decorate',
+  'dm-copy-generate',
+  'image-studio-generate',
+  'image-studio-edit',
+  'email-refine',
+  'email-precheck',
+  'email-performance-insight',
+  'marketing-calendar-month',
+  'oneline-judge',
+  'oneline-recook',
+  'journey-operation',
+  'multi-goal-decisioning',
+  // ★ 2026-10-28 AI 메모리 설계 K7-4 — 목소리 배우기 = 추출 + 견본(화면 금액은 서버 GET 이 내린 값 · 여기는 미러)
+  'brand-voice-extract',
+  'generate-messages',
+]);
+
+export const CONFIRM_CREDIT_COSTS: Record<string, number> = pickCosts([
+  'dm-ai-generate',           // 모바일 DM 생성 (AI 자동 생성 — 생성 전 확인, 범위 넓어 5)
+  'catalog-dm-build',        // ★ 2026-09-15 카탈로그 DM 생성(AI 자동제작 카탈로그 채널 · Harold 확정 10 · 자동제작 흐름의 확인 모달 1회에 라벨·단가 공급)
+  'dm-builder',             // DM 발행
+  'dm-interaction-publish', // 인터랙션 발행 (룰렛·추첨·설문)
+  'dm-custom-short-link',    // ★ 2026-09-16 100 → 20 (Harold 확정 · AI 0 · 되돌릴 수 없는 발급이라 확인 모달 유지)
+  'email-campaign-complete', // ★ 2026-07-02 Email 캠페인 완성 (AI/수동/템플릿 불문 1회 — 발송·이력 무료)
+  'email-ai-publish',        // (구) Email AI 캠페인 발송 확정 — 2026-07-02부터 미사용(완성 요금 대체)
+  'inapp-publish',          // 인앱 게시
+  'journey-activate',       // 여정 활성화
+  'continuous-operator',    // 자동 마케팅 저장
+  'marketing-calendar',      // ★ 2026-07-02 (Harold 명시): 캘린더 1년 설계 — 생성·재생성 매회
+  'orchestrate',            // 풀분석
   // ★ 2026-08-13 마케팅 플래너 월간 대행 — 승인 버튼이 그 달 계약을 확정한다(승인 화면이 확인 모달을 띄운다).
-  'planner-monthly-agency': 1000,
-};
+  'planner-monthly-agency',
+]);
 
 /**
  * ★ 2026-10-25 원장 #91 · #105 · #116 — 화면 금액의 단일 입구. 문장 · 버튼에 「N크레딧」 숫자를 손으로 적지 않는다.
@@ -229,29 +226,6 @@ export function creditTxLabel(type: string, source?: string | null, amount?: num
   return CREDIT_TYPE_LABELS[type] || type;
 }
 
-/**
- * ★ 2026-11-01 크레딧 컨트롤타워 C5 · §5-2 — 원장 줄 한 줄이 잔액을 얼마나 바꾸는가.
- *   백엔드 `ai-credit-calc.ts` 의 creditTxDelta 와 **같은 표**다(백엔드 시험이 두 표를 대조한다). 화면 부호 · 숫자 · 색은 이것만 쓴다.
- *   차감 amount 0 = 후불 월말 맞춤 줄(잔액 변동 0 · 초과분은 그 달 청구) · 환불은 지난 주기 부채로 갚은 양(overage_credits)을 뺀다.
- */
-export const CREDIT_TX_TYPES: readonly string[] = [
-  'reset', 'expire', 'trial_credit', 'plan_prorate', 'deduct', 'refund', 'grant', 'purchase', 'postpaid_grant', 'admin_deduct',
-];
-export function creditTxDelta(
-  tx: { type: string; amount: number | string; overage_credits?: number | string | null },
-): { bucket: 'base' | 'purchased' | 'split'; delta: number } | null {
-  const amount = Number(tx.amount) || 0;
-  switch (tx.type) {
-    case 'reset': case 'trial_credit': return { bucket: 'base', delta: amount };
-    case 'expire': case 'plan_prorate': return { bucket: 'base', delta: amount };
-    case 'grant': case 'purchase': case 'postpaid_grant': return { bucket: 'purchased', delta: amount };
-    case 'admin_deduct': return { bucket: 'purchased', delta: 0 - amount };
-    case 'deduct': return { bucket: 'split', delta: 0 - amount };
-    case 'refund': return { bucket: 'split', delta: amount - (Number(tx.overage_credits) || 0) };
-    default: return null;
-  }
-}
-
 /** 이력 한 줄 표시 — 부호 · 숫자 · 색 묶음(달 단위 기본분 줄 = 지급 · 소멸 · 일할 · 체험 = month 색). 화면은 type 글자를 직접 비교하지 않는다(R38). */
 export function creditTxView(
   tx: { type: string; amount: number | string; source?: string | null; overage_credits?: number | string | null },
@@ -261,21 +235,6 @@ export function creditTxView(
   const sign: '+' | '-' | '' = delta > 0 ? '+' : delta < 0 ? '-' : '';
   const tone = delta === 0 ? 'zero' : d && d.bucket === 'base' ? 'month' : delta > 0 ? 'plus' : 'minus';
   return { label: creditTxLabel(tx.type, tx.source, tx.amount), delta, sign, tone };
-}
-
-/**
- * 크레딧 충전 단가 — 백엔드 ai-credit-calc.ts와 동일값(미리보기 전용).
- * 실제 청구 금액은 백엔드가 계산(진실의 원천). 화면에 단가 자체를 노출하지 말 것. 보너스 없음.
- */
-export const CREDIT_UNIT_PRICE = 500;
-export const CREDIT_VAT_RATE = 0.1;
-
-/** 충전 크레딧 수량 → 결제 금액(공급가/부가세/합계). */
-export function calcRechargeAmount(credits: number): { credits: number; supply: number; vat: number; total: number } {
-  const c = Math.max(0, Math.floor(Number(credits) || 0));
-  const supply = c * CREDIT_UNIT_PRICE;
-  const vat = Math.round(supply * CREDIT_VAT_RATE);
-  return { credits: c, supply, vat, total: supply + vat };
 }
 
 /**

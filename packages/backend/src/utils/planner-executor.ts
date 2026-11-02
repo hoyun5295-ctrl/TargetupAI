@@ -28,7 +28,8 @@ import { randomUUID } from 'crypto';
 import { query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
 import { isSendableHourKst, hasUneditedBenefitPlaceholder } from './autosend-policy';
-import { checkCredit, deductCreditOutcome, refundCredit, InsufficientCreditError } from './ai-credit';
+import { checkCredit, deductCreditOutcome, InsufficientCreditError } from './ai-credit';
+import { releaseUnsentSendCharges, releaseOneSendCharge } from './ai-credit-release';
 import { lineStepsCollected } from './line-steps-context';
 import { getCreditCost } from './ai-credit-calc';
 import { createDirectSendCampaign } from './direct-send-core';
@@ -521,7 +522,10 @@ async function executeMessagingCore(
       await clearSendAttempt(tp, link.dm, String(e.code));
       hooks.onAbort();
       // ★ 2026-10-24 R4 — 이번 시도에 잡은 문안비를 돌려준다(확실히 안 나갔다 · 실패하면 대조 워커가 30분 뒤 다시)
-      if (chargedNow) await releasePlannerSendCharge(tp.companyId, chargeKey, cost);
+      if (chargedNow) {
+        await releaseOneSendCharge({ companyId: tp.companyId, key: chargeKey, amount: cost, source: PLANNER_SEND_SOURCE, reason: '마케팅 플래너 발송이 접수되지 않아 문안비를 돌려드림', pass: 'planner-send' })
+          .catch((err: any) => console.error(`[planner-executor][REFUND-MISS] 문안비 되돌림 실패 key=${chargeKey}(대조 워커가 다시):`, err?.message || err));
+      }
       console.warn(`[planner-executor] 발송 접수 거부 tp=${tp.id} code=${e.code}: ${String(e.message || '').slice(0, 200)}`);
       if (e.code === 'INSUFFICIENT_BALANCE') {
         return end('held', PLANNER_REASON.creditShort, `'${tp.title}' ${label} 발송 잔액이 부족해 보류했습니다. 충전 후 [다시 시작]을 눌러 주세요.`);
@@ -552,19 +556,6 @@ async function executeMessagingCore(
   return 'sent';
 }
 
-/** ★ 2026-10-24 R4 — 확실히 안 나간 시도의 문안비 되돌림(`release:` 키 · 같은 키 두 번 환불 0 · 실패 = 대조 워커가 다시) */
-async function releasePlannerSendCharge(companyId: string, key: string, amount: number): Promise<void> {
-  try {
-    const out = await refundCredit({
-      companyId, amount, source: PLANNER_SEND_SOURCE,
-      reason: '마케팅 플래너 발송이 접수되지 않아 문안비를 돌려드림', idempotencyKey: `release:${key}`, originalIdempotencyKey: key,
-    });
-    if (out.refunded) console.log(`[planner-executor] 접수 안 된 시도 문안비 ${out.amount} 되돌림 key=${key}`);
-  } catch (e: any) {
-    console.error(`[planner-executor][REFUND-MISS] 문안비 되돌림 실패 key=${key}(대조 워커가 다시):`, e?.message || e);
-  }
-}
-
 /**
  * ★ 2026-10-24 R4 — 잡아 둔 문안비 중 **보내지 못한 시도**만 30분 뒤 돌려준다(대조 워커 · 1시간 주기).
  *   보내지 못한 시도 = 그 적재 묶음으로 만든 캠페인이 없고 · 접점의 시도 기록이 **더는 그 묶음을 들고 있지 않다**(상태 무관).
@@ -572,24 +563,17 @@ async function releasePlannerSendCharge(companyId: string, key: string, amount: 
  *   보내는 중 · 잠금(보낸 여부 모름 · recoverStale)은 기록이 남아 있으므로 되돌리지 않는다(사람 판정 · Codex 1024 1R).
  *   거르는 조건은 전부 SQL 안(LIMIT 앞) — 정상 차감이 자리를 차지하지 않게(자동마케팅 1024 Codex 1R 과 같은 꼴).
  *   캠페인이 있으면 전량 실패여도 남긴다(발송 결과는 캠페인 마감이 정한다 · 알려진 천장).
+ *   ★ 2026-11-01 원장 쪽(후보 줄 · 30분 · 7일 · 이미 돌려준 키 · 되돌림 줄 · 실패 경보)은 크레딧 CT 하나(§16-1 F5) — 여기는 「접수 안 됨」 사실만 넘긴다.
  */
 export async function releaseUnsentPlannerSendCharges(): Promise<number> {
-  const r = await query(
-    `SELECT t.company_id, t.amount, t.idempotency_key
-       FROM ai_credit_transactions t
-      WHERE t.type = 'deduct' AND t.source = $1
-        AND t.idempotency_key LIKE 'planner-send:%:%'
-        AND t.created_at < NOW() - INTERVAL '30 minutes' AND t.created_at > NOW() - INTERVAL '7 days'
-        AND NOT EXISTS (SELECT 1 FROM ai_credit_transactions x WHERE x.idempotency_key = 'release:' || t.idempotency_key)
-        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))
+  const out = await releaseUnsentSendCharges({
+    source: PLANNER_SEND_SOURCE, pass: 'planner-send', keyLike: 'planner-send:%:%', minAgeMinutes: 30, lookbackDays: 7, limit: 20,
+    notSentSql: `NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))
         AND NOT EXISTS (SELECT 1 FROM planner_touchpoints p WHERE p.id::text = split_part(t.idempotency_key, ':', 2)
-                          AND p.exec_meta ? 'send_started_at' AND p.exec_meta->>'staging_id' = split_part(t.idempotency_key, ':', 3))
-      ORDER BY t.created_at ASC
-      LIMIT 20`,
-    [PLANNER_SEND_SOURCE],
-  );
-  for (const row of r.rows as any[]) await releasePlannerSendCharge(String(row.company_id), String(row.idempotency_key), Number(row.amount) || 0);
-  return r.rows.length;
+                          AND p.exec_meta ? 'send_started_at' AND p.exec_meta->>'staging_id' = split_part(t.idempotency_key, ':', 3))`,
+    reason: '마케팅 플래너 발송이 접수되지 않아 문안비를 돌려드림',
+  });
+  return out.candidates;
 }
 
 /** 메일 — 승인 때 완성(50)한 캠페인을 예정일에 보낸다. 지문 · 준비 판정 · 내용 잠금 · 완성 여부를 다 본 뒤에만. */

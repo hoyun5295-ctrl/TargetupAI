@@ -9,6 +9,7 @@
  *  - 월 마감 = 한 달씩(I10): 후불 맞춤 U = max(0, −b) − R → 소멸(후불 음수 정리 · 양수 소멸 · 경계가 체험이면 양수 남김 · 선불 음수 넘김) → 다음 달 E 지급.
  */
 import { daysInMonth } from './plan-proration';
+import { isTrialOver } from './ai-credit-calc';
 
 /** KST 기준 'YYYY-MM' */
 export function monthKeyOf(d: Date): string {
@@ -293,7 +294,8 @@ export async function loadCloseInputs(db: Db, companyId: string, row: any, now: 
 
 /** 월 마감을 쓰지 않고 계산한 기본분(C7 · 표시 · 사전 확인 · 엄격 확인이 이것만) */
 export async function projectBaseAfterClose(db: Db, companyId: string, row: any, now: Date): Promise<number> {
-  const base = Number(row.base) || 0;
+  // ★ 2026-11-01 §16-5 — 만료 시각이 지난 체험 = 남은 양수 기본분 0(쓰는 쪽 applyResetIfNeeded 와 같은 판정 · 강등 전이라도)
+  const base = isTrialOver(row, now) ? Math.min(Number(row.base) || 0, 0) : Number(row.base) || 0;
   const inp = await loadCloseInputs(db, companyId, row, now, 'read');
   if (inp.kind === 'none') return base;
   if (inp.kind === 'first') return base + inp.entitlement;

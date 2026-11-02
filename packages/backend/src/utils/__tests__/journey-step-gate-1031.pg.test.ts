@@ -59,7 +59,11 @@ vi.mock('../journey-pretest-validator', async (orig) => {
     },
   };
 });
-vi.mock('../system-alert', () => ({ sendSystemAlert: async (p: any) => { ctl.alerts.push(String(p.dedupKey)); return 1; } }));
+vi.mock('../system-alert', () => ({
+  sendSystemAlert: async (p: any) => { ctl.alerts.push(String(p.dedupKey)); return 1; },
+  // ★ 1102 설계서 docs/2026-11-01-credit-control-tower-design.md §17-4 C1 — 묶음 예외 상한 = 경보 CT 모아 보내기 · 항목 = 묶음 키(여정:칸:날짜)
+  alertPassFailures: async (o: any) => { for (const f of o.failures) ctl.alerts.push(`${o.pass}:${f.key}`); return 1; },
+}));
 
 import { pool } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
@@ -321,7 +325,7 @@ describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대
     ctl.onSpamTest = async () => { throw new Error('주입: 검사 중 예외'); };
     for (let i = 0; i < 4; i++) await scanAndPretest();
     expect(ctl.spamCalls).toBe(3);
-    expect(ctl.alerts).toContain(`journey-pretest-bundle-error:${J}`);
+    expect(ctl.alerts.filter((k) => k.startsWith(`journey-pretest-bundle-error:${J}:`)).length).toBeGreaterThan(0);   // 항목 = 그 묶음(옛 단언 toContain 과 같은 세기)
   });
   it('DDL-3 칸 없음 = 스캔을 열지 않음(검사 0) · 운영 경보 · 칸이 생기면 다시 돈다', async () => {
     await pool.query(`ALTER TABLE journey_pretest_schedules DROP COLUMN snapshot_id`);

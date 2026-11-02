@@ -78,7 +78,7 @@ import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
-import { planMonthCreditsReady, snapshotOpenMonths } from '../utils/ai-credit-month';
+import { setPlanMonthCredits, setPostpaidOverageLimit, listLowCreditCompanies, isCreditSchemaPending } from '../utils/ai-credit-admin';
 // ★ 2026-10-04 선불 요금제 이용 기간 — 승인 판정·차감 CT · 관리 중 게이트(docs/2026-10-04-prepaid-plan-term-design.md §5)
 import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
@@ -2814,34 +2814,34 @@ router.put('/plans/:id', authenticate, requireSuperAdmin, async (req: Request, r
     return res.status(400).json({ error: '월 AI 크레딧은 0 이상 정수여야 합니다.' });
   }
 
-  // ★ 2026-11-01 크레딧 컨트롤타워 C10(P14 · Codex R3-3) — 월 크레딧은 그 달에 고정한다. 바꾸기 **전에** 아직 닫히지 않았을 수 있는 달
-  //   전부를 지금(수정 전) 값으로 고정하고 같은 트랜잭션에서 바꾼다 → 새 값은 다음 달 1일부터. 고정표가 없으면(DDL 전) 월 크레딧 수정은 거절.
+  // ★ 2026-11-01 크레딧 컨트롤타워 C10(P14 · Codex R3-3) — 월 크레딧은 그 달에 고정한다(바꾸기 전 고정표 스냅숏 · 같은 거래 · 새 값은 다음 달 1일부터).
+  //   월 크레딧 바꾸기 = 크레딧 CT `setPlanMonthCredits` 하나(§16-1 F13) · 고정표가 없으면(DDL 전) 월 크레딧 수정은 거절.
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const cur = await client.query(`SELECT ai_credits_per_month FROM plans WHERE id = $1 FOR UPDATE`, [id]);
+    const cur = await client.query(`SELECT id FROM plans WHERE id = $1 FOR UPDATE`, [id]);
     if (cur.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: '요금제를 찾을 수 없습니다.' });
     }
-    const creditsChanging = creditsGiven && Number(cur.rows[0].ai_credits_per_month ?? -1) !== credits;
-    if (creditsChanging) {
-      if (!(await planMonthCreditsReady(client))) {
+    let creditsChanging = false;
+    if (creditsGiven) {
+      const outcome = await setPlanMonthCredits(client, id, credits as number, new Date());
+      if (outcome === 'migration_pending') {
         await client.query('ROLLBACK');
         return res.status(503).json({ code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: plan_month_credits 표 CREATE 실행 요청(그 전에는 월 크레딧을 바꿀 수 없습니다)' });
       }
-      await snapshotOpenMonths(client, new Date());
+      creditsChanging = outcome === 'changed';
     }
     const result = await client.query(`
-      UPDATE plans 
+      UPDATE plans
       SET plan_name = COALESCE($1, plan_name),
           max_customers = COALESCE($2, max_customers),
           monthly_price = COALESCE($3, monthly_price),
-          is_active = COALESCE($4, is_active),
-          ai_credits_per_month = COALESCE($6, ai_credits_per_month)
+          is_active = COALESCE($4, is_active)
       WHERE id = $5
       RETURNING *
-    `, [planName, maxCustomers, monthlyPrice, isActive, id, credits]);
+    `, [planName, maxCustomers, monthlyPrice, isActive, id]);
     await client.query('COMMIT');
     res.json({
       message: creditsChanging ? '수정되었습니다. 월 AI 크레딧은 다음 달 1일부터 적용됩니다.' : '수정되었습니다.',
@@ -2849,8 +2849,7 @@ router.put('/plans/:id', authenticate, requireSuperAdmin, async (req: Request, r
     });
   } catch (error: any) {
     try { await client.query('ROLLBACK'); } catch { /* 이미 끝난 트랜잭션 */ }
-    const msg = String(error?.message || '');
-    if (msg.includes('plan_month_credits') && msg.includes('does not exist')) {
+    if (isCreditSchemaPending(error)) {
       return res.status(503).json({ code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: plan_month_credits 표 CREATE 실행 요청' });
     }
     console.error('요금제 수정 실패:', error);
@@ -4111,13 +4110,10 @@ router.put('/companies/:id/postpaid-overage-limit', authenticate, requireSuperAd
     return res.status(400).json({ error: '한도는 0 이상 정수여야 합니다.' });
   }
   try {
-    const result = await query(
-      'UPDATE companies SET postpaid_overage_limit = $1, updated_at = NOW() WHERE id = $2 RETURNING company_name, postpaid_overage_limit',
-      [Math.floor(limit), id]
-    );
-    if (result.rows.length === 0) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
-    console.log(`[후불한도] ${result.rows[0].company_name}: ${result.rows[0].postpaid_overage_limit} 크레딧`);
-    res.json({ message: '후불 한도가 저장되었습니다.', overageLimit: Number(result.rows[0].postpaid_overage_limit) });
+    const saved = await setPostpaidOverageLimit(id, limit);   // 크레딧 CT(★ 2026-11-01 §16-1 F11)
+    if (!saved) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    console.log(`[후불한도] ${saved.companyName}: ${saved.overageLimit} 크레딧`);
+    res.json({ message: '후불 한도가 저장되었습니다.', overageLimit: saved.overageLimit });
   } catch (err: any) {
     console.error('후불 한도 설정 실패:', err);
     res.status(500).json({ error: '후불 한도 설정 실패' });
@@ -4191,32 +4187,10 @@ router.get('/credit-transactions-all', authenticate, requireSuperAdmin, async (r
 });
 
 // GET /credit-risk-companies — 크레딧 위험 회사 (소진 임박·0·마이너스·상한 근접). 해지방어·업셀 레이더 (크레딧 모델 v2 2026-06-30).
-//   잔액(기본+구매) ≤ 월 grant 20%인 회사만. 마이너스 = 운영 과금(여정·자동마케팅 실행) 음수 누적분. 상한 = −1개월 grant.
+//   ★ 2026-11-01 판정 · 값 = 크레딧 CT(§16-1 F12 · F17 · 표시와 같은 투영 · 여정 담당자 안내와 같은 「월 기본 20% 밑」).
 router.get('/credit-risk-companies', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
   try {
-    const r = await query(
-      `SELECT c.id, c.company_name,
-              c.ai_credits_base_remaining AS base,
-              COALESCE(c.ai_credits_purchased, 0) AS purchased,
-              p.ai_credits_per_month AS plan_credits,
-              p.plan_name
-         FROM companies c
-         JOIN plans p ON c.plan_id = p.id
-        WHERE p.ai_credits_per_month IS NOT NULL AND p.ai_credits_per_month > 0
-          AND (c.ai_credits_base_remaining + COALESCE(c.ai_credits_purchased, 0)) <= p.ai_credits_per_month * 0.2
-        ORDER BY (c.ai_credits_base_remaining + COALESCE(c.ai_credits_purchased, 0)) ASC
-        LIMIT 200`
-    );
-    const companies = r.rows.map((row: any) => {
-      const base = Number(row.base) || 0;
-      const purchased = Number(row.purchased) || 0;
-      const planCredits = Number(row.plan_credits) || 0;
-      const total = base + purchased;
-      // 위험 등급: 마이너스(운영 과금 음수 누적) > 소진(0) > 소진 임박(80%+ 사용)
-      const risk: 'negative' | 'depleted' | 'low' = total < 0 ? 'negative' : total === 0 ? 'depleted' : 'low';
-      const nearCap = planCredits > 0 && base <= -(planCredits * 0.8);  // −1개월 grant 상한 80% 근접
-      return { id: row.id, companyName: row.company_name, planName: row.plan_name, base, purchased, total, planCredits, risk, nearCap };
-    });
+    const companies = await listLowCreditCompanies(200);
     res.json({ companies });
   } catch (err: any) {
     console.error('크레딧 위험 회사 조회 실패:', err);

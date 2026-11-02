@@ -1,19 +1,20 @@
 /**
- * ai-usage-threshold-alert.ts — AI 사용량 한도 알림 발송 (★ 2026-09-27 한줄로 V2 R075)
+ * ai-usage-threshold-alert.ts — AI 크레딧 사용률 알림 발송 (★ 2026-09-27 한줄로 V2 R075 · ★ 2026-11-01 크레딧 기준)
  *
  * 옛: 한도 알림 설정(companies.ai_usage_threshold_config)은 저장·표시만 되고 그 값을 읽어 알림을 보내는 코드가 없었다.
- * 이제: 10분마다 설정이 켜진 회사의 이번 달 사용률(getMonthlyUsage · 한도 판정과 같은 셈)을 보고, 기준을 처음 넘은 달에 한 번 알린다.
+ * 이제: 10분마다 설정이 켜진 회사의 이번 달 크레딧 사용률(크레딧 CT creditUsageThisMonth · AI 사용량 화면과 같은 셈)을 보고,
+ *   기준을 처음 넘은 달에 한 번 알린다. ★ 2026-11-01 월 AI 호출 수 한도 삭제(Harold) — 옛 기준(호출 수 ÷ 한도)은 없다.
  *   - 달마다 한 번 = 같은 jsonb의 last_alerted_month(새 칸 0)를 조건부 UPDATE로 먼저 선점한 경우에만 보낸다(재시작·중복 실행에도 1회).
  *   - 채널: sms = 담당자 무과금 안내 문자(notifyOperatorAdmins · 담당자 번호가 비면 회사 관리자로 폴백) ·
  *           email = 회사 연락 메일(회사 SMTP가 설정된 경우만 · 미설정이면 건너뛴다) ·
  *           inapp = AI 사용량 화면 표시(화면이 사용률로 판정 · 여기서는 보낼 것이 없다).
  */
 import { query } from '../config/database';
-import { getMonthlyUsage } from './ai-rate-limit';
 import { kstMonthString } from './planner-execution';
 import { notifyOperatorAdmins } from './continuous-operator';
 import { sendEmail, isSmtpConfigured } from './company-smtp-client';
-import { getCreditState, type CreditState } from './ai-credit';
+import { getCreditState, creditUsageThisMonth, type CreditState } from './ai-credit';
+import { isCreditLow } from './ai-credit-calc';
 import { isDemoCompany } from './demo-company';
 import { releaseUnusedOperationCredits } from './journey-operation-release';
 
@@ -44,9 +45,9 @@ export async function runAiUsageThresholdAlerts(): Promise<{ alerted: number }> 
       const threshold = Number(cfg.threshold_percent);
       if (!ALLOWED_THRESHOLDS.includes(threshold)) continue;
       if (String(cfg.last_alerted_month || '') === month) continue;
-      const usage = await getMonthlyUsage(String(row.id));
-      if (usage.limit === null || usage.limit <= 0) continue;
-      const percent = Math.round((usage.used / usage.limit) * 100);
+      const usage = await creditUsageThisMonth(String(row.id));
+      if (usage.percent === null) continue;   // 크레딧제 요금제가 아니다
+      const percent = usage.percent;
       if (percent < threshold) continue;
 
       // 선점 — 이번 달 알림 표시를 먼저 남긴 경우에만 보낸다
@@ -61,8 +62,8 @@ export async function runAiUsageThresholdAlerts(): Promise<{ alerted: number }> 
       if (claim.rows.length === 0) continue;
 
       const channels: string[] = Array.isArray(cfg.channels) ? cfg.channels : [];
-      const title = '[한줄로 AI 사용량 안내]';
-      const body = `이번 달 AI 호출이 ${percent}%(${usage.used.toLocaleString()} / ${usage.limit.toLocaleString()}회)로 알림 기준 ${threshold}%에 도달했습니다. AI 사용량 화면에서 확인해 주세요.`;
+      const title = '[한줄로 AI 크레딧 안내]';
+      const body = `이번 달 AI 크레딧을 ${percent}%(사용 ${usage.used.toLocaleString()} · 남은 ${usage.remaining.toLocaleString()}) 써서 알림 기준 ${threshold}%에 도달했습니다. AI 사용량 화면에서 확인해 주세요.`;
       if (channels.includes('sms')) {
         await notifyOperatorAdmins(
           { adminPhoneNumbers: [], backupAdminPhone: null, companyId: String(row.id), createdBy: null },
@@ -77,7 +78,7 @@ export async function runAiUsageThresholdAlerts(): Promise<{ alerted: number }> 
             await sendEmail({
               companyId: String(row.id),
               to: String(row.contact_email),
-              subject: `${title} 이번 달 AI 호출 ${percent}%`,
+              subject: `${title} 이번 달 AI 크레딧 ${percent}%`,
               htmlBody: `<p style="font-size:14px;line-height:1.7;">${body}</p>`,
             });
           }
@@ -100,10 +101,7 @@ export async function runAiUsageThresholdAlerts(): Promise<{ alerted: number }> 
  *   새 알림 길을 만들지 않는다: 위 AI 사용량 알림과 같은 담당자 무과금 안내 문자(notifyOperatorAdmins) · 같은 선점 방식(같은 jsonb 의 다른 키).
  */
 export function shouldAlertJourneyCredit(st: Pick<CreditState, 'creditEnabled' | 'planCredits' | 'total'>): boolean {
-  if (!st.creditEnabled) return false;
-  const plan = Number(st.planCredits) || 0;
-  if (plan <= 0) return false;
-  return Number(st.total) < plan * 0.2;
+  return isCreditLow(st);   // 판정 = 크레딧 CT 한 벌(★ 2026-11-01 §16-1 F17 · 관리자 위험 회사와 같은 기준)
 }
 
 export async function runJourneyCreditAlerts(): Promise<{ alerted: number }> {
@@ -161,5 +159,5 @@ export function startAiUsageThresholdAlertWorker(): void {
       .catch((e: any) => console.error('[Journey Operation Release] 스캔 오류:', e?.message))
       .finally(() => { running = false; });
   }, INTERVAL_MS);
-  console.log('[AI Usage Alert] 시작 — 10분 주기 한도 알림');
+  console.log('[AI Usage Alert] 시작 — 10분 주기 크레딧 사용률 알림');
 }

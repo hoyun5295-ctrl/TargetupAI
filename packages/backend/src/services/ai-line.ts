@@ -22,6 +22,7 @@ import { getColumnFields, getFieldByKey } from '../utils/standard-field-map';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 import { hasCreditForStrict, chargedAmountByKey, settleCreditAfterSuccess, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
+import { aiLineBasePrice, aiLineComposePrice } from '../utils/ai-credit-price';
 import { buildMessageObjective } from '../utils/season-context';
 import { buildLineEventText } from '../utils/one-line-facts';
 import { formatLinePeriodEnd, lineFpLockKey } from '../utils/one-line-steps';
@@ -393,7 +394,7 @@ async function lineVoiceFit(companyId: string): Promise<LineIntakeResult['voice'
 export async function runLineIntake(v: AiLineViewer, line: string, now: Date = new Date()): Promise<LineIntakeResult> {
   const baseCost = getCreditCost(AI_LINE_SOURCE.intake);
   const basePaid = await aiLineBasePaid(v.companyId, line, now);
-  if (!basePaid) await assertCreditFor(v.companyId, baseCost, AI_LINE_SOURCE.intake);
+  await assertCreditFor(v.companyId, aiLineBasePrice(basePaid), AI_LINE_SOURCE.intake);   // 같은 날 같은 한 줄 = 0(규칙 = 크레딧 CT)
 
   const { companyInfo, customerStats } = await loadHubCompanyContext(v.companyId, v.userId, { userId: v.userId, userType: v.userType });
   const target = await runInCreditBundle(() => recommendTarget(v.companyId, line, customerStats, companyInfo, { model: 'opus', lineIntake: true }));
@@ -684,7 +685,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   let baseCharged = 0;
   if (!basePaid && await settleBaseOnce(v, input.line)) baseCharged = quote.base;
   const unit = getCreditCost(AI_LINE_SOURCE.compose);
-  const copyCost = cards.length * unit;
+  const copyCost = aiLineComposePrice(cards.length, true).copies;   // 문안 몫(규칙 = 크레딧 CT)
   await settleCreditAfterSuccess({
     companyId: v.companyId, cost: copyCost, source: AI_LINE_SOURCE.compose, createdBy: v.userId,
     idempotencyKey: copyKey,

@@ -6,6 +6,7 @@
  * 광고 여부는 법 축(바이트 · 광고 문장)만 정한다 · 종류 · 성격이 바꾸지 못한다(K4-5).
  */
 import type { BrandVoiceKind } from './brand-voice-prompt';
+import type { AiCallCharge } from './ai-credit-calc';
 
 export const COPY_CONTENT_TYPES = ['promo', 'launch', 'howto', 'greeting', 'notice'] as const;
 export type CopyContentType = typeof COPY_CONTENT_TYPES[number];
@@ -92,7 +93,7 @@ function classifyKey(companyId: string, text: string): string {
 export async function classifyCopyIntent(
   companyId: string,
   text: string,
-  callAI: (p: { system: string; userMessage: string; maxTokens: number; temperature: number; source: string; creditCost: number }) => Promise<string>,
+  callAI: (p: { system: string; userMessage: string; maxTokens: number; temperature: number; source: string; charge: AiCallCharge }) => Promise<string>,
 ): Promise<CopyContentType | null> {
   const src = String(text || '').trim().slice(0, 500);
   if (!companyId || src.length < 2) return null;
@@ -107,7 +108,7 @@ export async function classifyCopyIntent(
       maxTokens: 10,
       temperature: 0,
       source: 'copy-intent-classify',
-      creditCost: 0,
+      charge: { kind: 'included-in', parent: 'generate-messages' },   // 사람이 누른 생성 한 번의 안쪽 호출
     });
     const word = String(raw || '').trim().toLowerCase().replace(/[^a-z]/g, '');
     type = isCopyContentType(word) ? word : null;

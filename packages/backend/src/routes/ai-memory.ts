@@ -31,6 +31,7 @@ import { extractJsonFromAiText, plainTextFromAi } from '../utils/ai-json';
 import { publicErrorText, respondUserError } from '../utils/http-error';
 import { runChargedAi, checkCredit, settleCreditInTx, InsufficientCreditError } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
+import { brandVoicePrices } from '../utils/ai-credit-price';
 import { randomUUID } from 'crypto';
 const router = Router();
 router.use(authenticate);
@@ -261,9 +262,6 @@ ${memoryContext}
         code: 'DB_MIGRATION_PENDING',
       });
     }
-    if (err?.name === 'AiRateLimitExceeded') {
-      return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });
-    }
     return res.status(500).json({ success: false, error: publicErrorText(err, '검색 실패') });
   }
 });
@@ -363,12 +361,7 @@ function sanitizeBrandKit(input: any): Partial<Pick<BrandGuidelineValue,
 // ─────────────────────────────────────────────────────────────
 
 const BV_EXTRACT = 'brand-voice-extract';
-const BV_SAMPLE = 'generate-messages';
-const bvPrices = () => {
-  const extract = getCreditCost(BV_EXTRACT);
-  const sample = getCreditCost(BV_SAMPLE);
-  return { extract, sample, learn: extract + sample };
-};
+const bvPrices = brandVoicePrices;   // 금액 규칙 = 크레딧 CT(★ 2026-11-01 §16-3 P3 · 견본 = 문안 생성 단가)
 
 function bvCanEdit(req: Request): boolean {
   const t = req.user?.userType;
@@ -768,12 +761,11 @@ router.post('/brand-voice/extract-guideline', async (req: Request, res: Response
         model: 'sonnet',
         companyId,
         source: BV_EXTRACT,
-        creditCost: 0,
+        charge: { kind: 'settled-by', by: 'brand-voice-extract' },   // 라우트가 성공 뒤 한 거래로 걷는다
         noCache: true,
       });
     } catch (aiErr: any) {
       await bvMarkExtractError(companyId, g, 'ai');
-      if (aiErr?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, error: aiErr.message, code: 'AI_RATE_LIMIT' });
       return res.status(503).json({ success: false, error: 'AI 응답이 늦어 아직 못 배웠어요. 크레딧은 빠지지 않았어요. 잠시 뒤 [다시 배우기]를 눌러 주세요.', code: 'AI_DELAYED' });
     }
 

@@ -9,23 +9,26 @@
  *     DM 발송(`send-to-target`)은 같은 경우를 `creditEnabled`로 이미 거르고 있었다 — 이메일만 빠져 있었다.
  *
  * ⛔ 조회 실패는 삼키지 않는다(throw = 라우트 500). 실패를 "완성"으로 접으면 돈을 안 낸 캠페인이 나간다(fail-closed).
- * ⛔ 미적용 판정은 `ai-credit-tx`의 not_applicable 과 **같은 식**이어야 한다: plan_credits == null && purchased == 0.
+ * ⛔ 미적용 판정 = 크레딧 CT `creditApplies` 하나(차감의 not_applicable 과 같은 함수 · ★ 2026-11-01 §16-1 F18).
  *    둘이 갈리면 "차감은 건너뛰었는데 완성은 아님" 교착이 다시 생긴다.
+ * ⛔ 원장은 크레딧 CT 로만 묻는다(★ 2026-11-01 §16-1 F7 · 뿌리 R39).
  *
  * 소비처 = routes/email.ts `/complete` · `/send` · `/test-send` · `/export-html` · 목록 `completed` 플래그.
  */
-import { query, pool } from '../../config/database';
+import { pool } from '../../config/database';
 import { loadCreditRow } from '../ai-credit-tx';
+import { creditApplies } from '../ai-credit-calc';
+import { chargedKeysAmong } from '../ai-credit';
+import { ledgerKeysWithPrefixes } from '../ai-credit-ledger';
 
 /** 완성 원장 멱등키(신·구 둘 다 인정 = 이중과금 0) */
 export function emailCompletionKeysOf(campaignId: string): string[] {
   return [`email-campaign-complete:${campaignId}`, `email-ai-publish:${campaignId}`];
 }
 
-/** 크레딧제 미적용 회사인가 — `ai-credit-tx` not_applicable · no_credit_row 와 같은 판정(순수). */
+/** 크레딧제 미적용 회사인가 — 크레딧 CT `creditApplies` 의 반대(행 없음 = 미적용 · 순수). */
 export function isCreditNotApplicableRow(row: { plan_credits?: unknown; purchased?: unknown } | null | undefined): boolean {
-  if (!row) return true;
-  return row.plan_credits == null && (Number(row.purchased) || 0) === 0;
+  return !creditApplies(row);
 }
 
 export type EmailCompletionDeps = {
@@ -34,15 +37,7 @@ export type EmailCompletionDeps = {
 };
 
 export const defaultEmailCompletionDeps: EmailCompletionDeps = {
-  hasCompletionRow: async (companyId, campaignId) => {
-    const r = await query(
-      `SELECT 1 FROM ai_credit_transactions
-        WHERE company_id = $1::uuid AND idempotency_key = ANY($2)
-        LIMIT 1`,
-      [companyId, emailCompletionKeysOf(campaignId)],
-    );
-    return r.rows.length > 0;
-  },
+  hasCompletionRow: async (companyId, campaignId) => (await chargedKeysAmong(companyId, emailCompletionKeysOf(campaignId))).size > 0,
   loadCreditRow: (companyId) => loadCreditRow(pool, companyId, false),
 };
 
@@ -68,22 +63,9 @@ export async function emailCompletionContextOf(
   const notApplicable = isCreditNotApplicableRow(await loadCreditRow(pool, companyId, false));
   // 크레딧제 미적용이면 전부 완성 — 키를 볼 필요가 없다.
   if (notApplicable) return { notApplicable, paidIds: new Set<string>() };
-  const keysRes = campaignIds
-    ? (campaignIds.length === 0
-      ? { rows: [] as any[] }
-      : await query(
-          `SELECT idempotency_key FROM ai_credit_transactions
-            WHERE company_id = $1::uuid AND idempotency_key = ANY($2::text[])`,
-          [companyId, campaignIds.flatMap((id) => [`email-campaign-complete:${id}`, `email-ai-publish:${id}`])],
-        ))
-    : await query(
-        `SELECT idempotency_key FROM ai_credit_transactions
-          WHERE company_id = $1::uuid
-            AND (idempotency_key LIKE 'email-campaign-complete:%' OR idempotency_key LIKE 'email-ai-publish:%')`,
-        [companyId],
-      );
-  const paidIds = new Set<string>(
-    keysRes.rows.map((r: any) => String(r.idempotency_key || '').split(':')[1]).filter(Boolean),
-  );
+  const keys: string[] = campaignIds
+    ? [...(await chargedKeysAmong(companyId, campaignIds.flatMap((id) => emailCompletionKeysOf(id))))]
+    : await ledgerKeysWithPrefixes(pool, companyId, ['email-campaign-complete:', 'email-ai-publish:']);
+  const paidIds = new Set<string>(keys.map((k) => String(k || '').split(':')[1]).filter(Boolean));
   return { notApplicable, paidIds };
 }

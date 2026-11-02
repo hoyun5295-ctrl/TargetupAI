@@ -153,7 +153,7 @@ async function judgeBatch(batch: CorpusItem[], job: MiningJob): Promise<MiningCa
       maxTokens: 2000,
       temperature: 0.2,
       model: 'sonnet',
-      creditCost: 0, // 내부 관리자 도구 — 사용자 크레딧 차감 없음
+      charge: { kind: 'internal', why: '내부 관리자 도구(사용자 크레딧 차감 없음)' },
     });
     const m = raw.match(/\[[\s\S]*\]/);
     if (!m) { job.failedBatches++; return []; }

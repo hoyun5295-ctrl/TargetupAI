@@ -8,7 +8,14 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
-vi.mock('../ai-credit', () => ({ isCreditEnabledStrict: vi.fn(async () => true) }));
+// ★ 2026-11-01 발행비 납부는 크레딧 CT(isChargedByKey)로 묻는다(§16-1 F6) — 시험은 옛 조회 순서(납부 원장 먼저)를 그대로 쓰도록 db 모의로 넘긴다
+vi.mock('../ai-credit', async () => {
+  const db = await import('../../config/database');
+  return {
+    isCreditEnabledStrict: vi.fn(async () => true),
+    isChargedByKey: vi.fn(async (c: string, k: string) => ((await (db.query as any)('SELECT 1 FROM ledger WHERE key', [c, k])).rows.length > 0)),
+  };
+});
 vi.mock('./dm-interaction', () => ({ isInteractionCampaign: vi.fn(async () => false) }));
 
 import { query } from '../../config/database';

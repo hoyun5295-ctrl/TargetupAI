@@ -8,7 +8,7 @@
  * 크레딧 (CREDIT_COST_MAP 1:1)
  *   email-ai-generate 3 / email-refine 1 / email-precheck 1 /
  *   email-performance-insight 5 / email-send-time-recommend 5
- *   - 본 파일의 callAIWithFallback은 전부 creditCost: 0 — 차감은 route에서 작업 성공 후 1회만 (이중 차감 차단 + 실패 시 차감 0).
+ *   - 본 파일의 callAIWithFallback은 전부 「진입점이 걷음」 사실(charge settled-by 그 원천) — 차감은 route에서 작업 성공 후 1회만 (이중 차감 차단 + 실패 시 차감 0).
  *
  * ⛔ 영구 원칙
  *   - 구체 혜택(%/원/쿠폰/무료/사은품) 임의 생성 절대 금지 → [혜택을 직접 입력해주세요] placeholder
@@ -220,7 +220,7 @@ export function binOpenHours(rows: Array<{ hour: number; cnt: number }>): {
 }
 
 // ════════════════════════════════════════════════════════════════════
-// AI 호출 — 전부 creditCost: 0 (차감은 route에서 성공 후 1회)
+// AI 호출 — 전부 charge settled-by(차감은 route에서 성공 후 1회 · 금액 = 크레딧 CT)
 // ════════════════════════════════════════════════════════════════════
 
 const EMAIL_HTML_RULES = `
@@ -317,7 +317,7 @@ export async function generateEmailSections(input: {
     companyId: input.companyId,
     userId: input.userId,
     source: 'email-ai-generate',
-    creditCost: 0,
+    charge: { kind: 'settled-by', by: 'email-ai-generate' },
   });
 
   const parsed = extractJsonFromAiText<{ name?: string; subjects?: string[]; preheader?: string; blocks?: unknown[] }>(text);
@@ -403,7 +403,7 @@ ${EFFICACY_REWRITE_RULE}
     companyId: input.companyId,
     userId: input.userId,
     source: 'email-refine',
-    creditCost: 0,
+    charge: { kind: 'settled-by', by: 'email-refine' },
   });
 
   const parsed = extractJsonFromAiText<{ subject?: string; html_body?: string }>(text);
@@ -465,7 +465,7 @@ export async function refineEmailSections(input: {
     companyId: input.companyId,
     userId: input.userId,
     source: 'email-refine',
-    creditCost: 0,
+    charge: { kind: 'settled-by', by: 'email-refine' },
   });
 
   const parsed = extractJsonFromAiText<{ texts?: unknown }>(text);
@@ -520,7 +520,7 @@ export async function analyzeSpamRisk(input: {
     companyId: input.companyId,
     userId: input.userId,
     source: 'email-precheck',
-    creditCost: 0,
+    charge: { kind: 'settled-by', by: 'email-precheck' },
   });
 
   const parsed = extractJsonFromAiText<{ risk_level?: string; reasons?: string[]; suggestions?: string[] }>(text);
@@ -560,7 +560,7 @@ export async function buildPerformanceInsight(input: {
     companyId: input.companyId,
     userId: input.userId,
     source: 'email-performance-insight',
-    creditCost: 0,
+    charge: { kind: 'settled-by', by: 'email-performance-insight' },
   });
 
   const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);
@@ -610,7 +610,7 @@ export async function buildEmailAccountInsight(input: {
     companyId: input.companyId,
     userId: input.userId,
     source: 'email-performance-insight',
-    creditCost: 0,
+    charge: { kind: 'settled-by', by: 'email-performance-insight' },
   });
 
   const parsed = extractJsonFromAiText<{ top_insight?: string; suggestions?: Array<{ title?: string; description?: string }> }>(text);

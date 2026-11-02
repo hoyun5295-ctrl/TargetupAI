@@ -19,6 +19,7 @@ import type { PoolClient } from 'pg';
 import { CREDIT_UNIT_PRICE } from './ai-credit-calc';
 import { closeCreditMonthsNow } from './ai-credit';
 import { creditMonthsOpenInPeriod } from './ai-credit-month';
+import { loadCreditBillingLines, markCreditBillingLines, hasUnbilledCreditLines } from './ai-credit-billing';
 import {
   buildCompanyUsageByDay, buildBillingTotals, resolveBillingUnitPricesDetailed, logUnbillableUsageKeys,
   buildBillingUsageRows, diffBillingRowsVsDayData, priceBillingRows,
@@ -722,37 +723,10 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
 
     // ★ D229+ 후불 AI 크레딧 충전 합산 — 이 기간 승인·미청구분. FOR UPDATE = 합산 행과 billed 처리 행 일치 보장.
     // ★ 2026-07-26 크레딧은 **항상** 청구한다 — 회사 전체 발행이라 공통 장에 들어간다.
-    let creditChargeRes: { rows: any[] } = { rows: [] };
-    {
-      creditChargeRes = await client.query(
-        `SELECT id, credits, supply_amount FROM ai_credit_requests
-          WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
-            -- ★ 2026-07-26 KST 경계. date 캐스트는 세션 TZ(Etc/UTC) 기준이라 KST 09:00에서 잘렸다.
-            AND processed_at >= ($2 || ' 00:00:00+09')::timestamptz
-            AND processed_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-          FOR UPDATE`,
-        [company_id, billing_start, billing_end]
-      );
-    }
-    const chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
-    const chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
-    // ★ #3 후불 overage 합산 — 청구 완료 마커(billed_billing_id)로 이중 청구 차단(Codex 3차 HIGH 수용).
-    let overageCount = 0;
-    let overageTxIds: string[] = [];
-    {
-      const overageRes = await client.query(
-        `SELECT id, overage_credits FROM ai_credit_transactions
-          WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
-            AND billed_billing_id IS NULL
-            -- ★ 2026-07-26 KST 경계.
-            AND created_at >= ($2 || ' 00:00:00+09')::timestamptz
-            AND created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-          FOR UPDATE`,
-        [company_id, billing_start, billing_end]
-      );
-      overageCount = (overageRes.rows as any[]).reduce((s, r) => s + (Number(r.overage_credits) || 0), 0);
-      overageTxIds = (overageRes.rows as any[]).map((r) => String(r.id));
-    }
+    // ★ #3 후불 overage 합산 — 청구 완료 마커(billed_billing_id)로 이중 청구 차단(Codex 3차 HIGH 수용) · KST 경계(★ 2026-07-26).
+    //   청구 줄 읽기 · 잠금 = 크레딧 CT 한 곳(★ 2026-11-01 §16-1 F10 · 미리보기와 같은 조건)
+    const creditLines = await loadCreditBillingLines(client, company_id, billing_start, billing_end);
+    const { chargeSupply, chargeCount, overageCount } = creditLines;
     aiCreditCount = chargeCount + overageCount;                       // 충전 + 초과사용 크레딧 수량
     aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE; // 공급가(크레딧×단가=공급가 일관)
 
@@ -911,22 +885,9 @@ export async function issueBilling(input: IssueBillingInput): Promise<any> {
       issuedSheets.push(sheetBilling);
       if (carries || !billing) billing = sheetBilling;   // 응답 대표 = 회사 단위 항목을 실은 장
 
-      // ★ D229+ 후불 크레딧 충전 행을 billed 처리 (id 배열로 정확히 — 중복 청구 차단)
-      //   크레딧을 실은 장에만 건다.
-      if (carries && creditChargeRes.rows.length > 0) {
-        await client.query(
-          `UPDATE ai_credit_requests SET billed = true, billed_invoice_id = $1::uuid WHERE id = ANY($2::uuid[])`,
-          [sheetBilling.id, creditChargeRes.rows.map((r: any) => r.id)]
-        );
-      }
-
-      // ★ 2026-07-26 초과사용 크레딧에도 같은 마커. FK(`ON DELETE SET NULL`)가 삭제 시 자동 복귀.
-      if (carries && overageTxIds.length > 0) {
-        await client.query(
-          `UPDATE ai_credit_transactions SET billed_billing_id = $1::uuid WHERE id = ANY($2::uuid[])`,
-          [sheetBilling.id, overageTxIds]
-        );
-      }
+      // ★ D229+ 후불 크레딧 충전 행 · ★ 2026-07-26 초과사용 행을 billed 처리(id 배열로 정확히 — 중복 청구 차단 · FK `ON DELETE SET NULL` 이 삭제 시 자동 복귀)
+      //   크레딧을 실은 장에만 건다 · 표시 = 크레딧 CT(★ 2026-11-01 §16-1 F10)
+      if (carries) await markCreditBillingLines(client, sheetBilling.id, creditLines);
 
       // ★ 2026-07-30 월별 추가 항목(080 등) 소비 마킹 — 크레딧과 같은 계약.
       //   이 마커가 분할 기간 재발행의 이중청구를 막고, 발행 삭제 시 FK가 자동 복귀시킨다(Codex 1R critical 수용).
@@ -1291,24 +1252,8 @@ ${EXTRA_ITEM_SOURCE_JOIN}
     // Codex 2R 수용분은 그대로 성립한다 — KST 자정 경계의 미커밋 크레딧 트랜잭션은 그 잠금 뒤에 보인다.
     // ★ Codex 1R 수용 — 미청구 AI 크레딧(승인 충전·초과사용)이 있으면 정액 발행 거부(fail-closed).
     //   정액 청구서가 그 기간을 덮으면 겹침 차단 때문에 일반 발행이 막혀 크레딧이 영구 미청구가 된다.
-    const unbilledCredit = await client.query(
-      `SELECT 1 FROM ai_credit_requests
-        WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
-          AND processed_at >= ($2 || ' 00:00:00+09')::timestamptz
-          AND processed_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-        LIMIT 1`,
-      [company_id, billing_start, billing_end],
-    );
-    const unbilledOverage = unbilledCredit.rows.length > 0 ? null : await client.query(
-      `SELECT 1 FROM ai_credit_transactions
-        WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
-          AND billed_billing_id IS NULL
-          AND created_at >= ($2 || ' 00:00:00+09')::timestamptz
-          AND created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz
-        LIMIT 1`,
-      [company_id, billing_start, billing_end],
-    );
-    if (unbilledCredit.rows.length > 0 || (unbilledOverage && unbilledOverage.rows.length > 0)) {
+    // 판정 = 크레딧 CT(★ 2026-11-01 §16-1 F10 · 발행 · 미리보기와 같은 조건)
+    if (await hasUnbilledCreditLines(client, company_id, billing_start, billing_end)) {
       throw new BillingIssueError(422, {
         error: `${co.company_name}에 이 기간 미청구 AI 크레딧(충전·초과사용)이 있습니다. 정액으로 발행하면 크레딧이 영구 미청구가 되므로 일반 발행(일괄발급)으로 청구해주세요.`,
         code: 'MIN_CHARGE_CREDIT_EXISTS',

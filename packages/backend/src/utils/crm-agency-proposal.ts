@@ -5,7 +5,7 @@
 // ★ 최상위 불변식 (Harold 2026-07-09): 업체 단일 스코프 — 아래 모든 쿼리·CT 호출은
 //   인자로 받은 companyId 하나만 바라본다 (WHERE company_id = $1). 교차 오염 절대 금지.
 // ★ 무과금 (Harold 확정): 전 AI 호출을 runInCreditBundle로 감싸 고객사 크레딧 차감 0.
-//   (callAIWithFallback은 creditCost 미지정 시 source 맵으로 자동 차감 — 번들이 이를 차단)
+//   (호출마다 내부 사실(charge internal)도 함께 적는다 — 묶음 밖으로 옮겨도 걷지 않는다)
 // 타겟 실측 = 기존 검증 경로 재사용: recommendTarget(자연어→필터) + countFilteredCustomers(공통 안전필터 COUNT).
 import { query } from '../config/database';
 import { resolveConsentScope, consentJoinSql } from './mall-consent';
@@ -161,7 +161,7 @@ export async function analyzeAgencyIntakeImages(
       temperature: 0.2,
       companyId,
       source: 'crm-agency-intake',
-      creditCost: 0,  // ★ 무과금 명시 (번들이 이미 0 처리 — 이중 안전)
+      charge: { kind: 'internal', why: '슈퍼관리자 CRM 대행 제안서(고객사 크레딧 미차감 · 묶음과 이중 안전)' },
       images,
     });
     const raw = extractJsonFromAiText(aiText);
@@ -210,7 +210,7 @@ export async function generateAgencyProposal(
       model: 'opus',
       companyId,
       source: 'crm-agency-proposal',
-      creditCost: 0,  // ★ 무과금 명시 (번들이 이미 0 처리 — 이중 안전)
+      charge: { kind: 'internal', why: '슈퍼관리자 CRM 대행 제안서(고객사 크레딧 미차감 · 묶음과 이중 안전)' },
     });
     const parsed = extractJsonFromAiText(aiText);
     // 이미지 전사 = 고객 제출물 — 혜택 출구가드 허용 텍스트에 포함

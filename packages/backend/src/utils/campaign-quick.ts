@@ -19,6 +19,7 @@ import { getCompanyBrandKit } from './dm/dm-brand-kit';
 import { catalogPagesOf } from './dm/dm-catalog-pages';
 import { getBrandBasicInfo } from './brand-basic-info';
 import { getCreditCost } from './ai-credit-calc';
+import { duePrice, quickGenPrice } from './ai-credit-price';
 import { checkCredit, deductCreditOutcome, getCreditState, InsufficientCreditError, CreditSettleError, reportCreditMiss, type DeductOutcome } from './ai-credit';
 import { loadPlanContext, canUseFeature } from './plan-guard';
 import { normalizeEventText, EVENT_TEXT_MAX } from './event-brief';
@@ -413,10 +414,10 @@ export function quoteBuildMaterials(input: { channel: BuildChannel; textChars: n
   const priced = input.creditEnabled !== false;
   // ★ 2026-09-15 카탈로그 DM 채널 = 생성 키 'catalog-dm-build'(Harold 확정 10 · ai-credit-calc 원장) 1부품 · 판독 0(쪽 이미지를 읽지 않는다) · 크레딧제 미적용 = 0
   if (input.channel === 'catalog') {
-    const cost = priced ? getCreditCost('catalog-dm-build') : 0;
+    const cost = duePrice('catalog-dm-build', { applies: priced });
     return { total: cost, parts: [{ key: 'catalog-dm-build', label: '카탈로그 DM 생성', cost }] };
   }
-  const costOf = (key: string) => (priced ? getCreditCost(key) : 0);
+  const costOf = (key: string) => duePrice(key, { applies: priced });   // 금액 규칙 = 크레딧 CT(★ 2026-11-01 §16-3 P3)
   const parts: QuickQuote['parts'] = [];
   // 판독 부품 = 텍스트 0 + 이미지 있음 + **캐시에 없음**(적중이면 판독도 차감도 없다 · 견적과 생성이 같은 판정)
   if (input.textChars <= 0 && input.imageCount > 0 && !input.visionCached) parts.push({ key: 'event-image-extract', label: '이미지 글자 읽기', cost: costOf('event-image-extract') });
@@ -640,8 +641,7 @@ async function buildCatalogDm(input: { m: BuildMaterials; images: BuildImage[]; 
   const draftId = String(dm.id);
   const materialsHash = buildMaterialsHash(m, []);
   const idempotencyKey = buildIdempotencyKey(companyId, 'catalog', m.attemptToken, billingHash);
-  const genKey = 'catalog-dm-build';
-  const genCost = getCreditCost(genKey);
+  const { key: genKey, cost: genCost } = quickGenPrice('catalog');
   // ★ 2026-10-25 성공 뒤 차감 한 규칙(D1 A) — 못 걷으면(402 · 503) 만든 행을 거두고 던진다(DM 채널과 같은 함수)
   let deductOutcome: DeductOutcome;
   try {
@@ -813,8 +813,7 @@ export async function generateFromBuildMaterials(
   };
   const materialsHash = buildMaterialsHash(m, roles);
   const idempotencyKey = buildIdempotencyKey(companyId, m.channel, m.attemptToken, billingHash);
-  const genKey = m.channel === 'email' ? 'email-ai-generate' : 'dm-ai-generate';
-  const genCost = getCreditCost(genKey);
+  const { key: genKey, cost: genCost } = quickGenPrice(m.channel);
 
   // 조립 → 초안 행 → 차감. 이메일 렌더는 행 앞(렌더 실패 = 행 0).
   let draftId = '';

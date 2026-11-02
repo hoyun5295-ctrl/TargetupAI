@@ -237,7 +237,7 @@ describe('⑥ 추출 창', () => {
 describe('⑦ 안내 원장', () => {
   it('target-extract = 직접 타겟 추출 · 말로 고르기 1크레딧 · 옛 send-target 자리', () => {
     expect(INTROS).toMatch(/id: 'target-extract', title: '직접 타겟 추출'/);
-    expect(INTROS).toMatch(/costs: \[\{ label: '말로 고르기', source: 'ai-segment-generator', credits: 1 \}\]/);
+    expect(INTROS).toMatch(/costs: \[\{ label: '말로 고르기', source: 'ai-segment-generator' \}\]/);   // 금액 = 내려줄 때 단가표(§16-2 D2)
     expect(INTROS).not.toMatch(/id: 'send-target'/);
   });
 });

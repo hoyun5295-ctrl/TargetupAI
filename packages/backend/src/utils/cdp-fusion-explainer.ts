@@ -18,9 +18,7 @@ import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { randomUUID } from 'crypto';
 import { checkCredit, settleCreditAfterSuccess, InsufficientCreditError } from './ai-credit';
-import { isInCreditBundle, runInCreditBundle } from './ai-credit-context';
-import { getCreditCost } from './ai-credit-calc';
-import { AiRateLimitExceeded } from './ai-rate-limit';
+import { entryCreditCost, runInCreditBundle } from './ai-credit-context';
 import type { CdpDiagnosticsResult } from './cdp-diagnostics';
 
 export interface CdpExplainFactor {
@@ -117,7 +115,7 @@ ${conflictSummary}
 
   // ★ 2026-09-27 한줄로 V2 R183 — 잔액 확인 → 묶음 실행(캐시 안 함) → 파싱·조립 성공 뒤 1회 차감(R246과 같은 모양).
   //   옛: 모든 오류를 삼켜 '건강도 50점'을 실제 결과처럼 돌려줬고, 파싱 실패에도 호출 시점에 차감됐다.
-  const explainCost = isInCreditBundle() ? 0 : getCreditCost('cdp-fusion-explainer');
+  const explainCost = entryCreditCost('cdp-fusion-explainer');   // 바깥 묶음 = 0(금액 = 크레딧 CT)
   if (explainCost > 0) await checkCredit(companyId, explainCost);
   try {
     const text = await runInCreditBundle(() => callAIWithFallback({
@@ -166,7 +164,7 @@ ${conflictSummary}
     }
     return result;
   } catch (err) {
-    if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded || err instanceof UserFacingError) throw err;
+    if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;
     console.error('[CdpFusionExplainer] AI 호출 실패:', err);
     throw new UserFacingError(502, 'AI_RESULT_EMPTY', 'AI 진단 결과를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.');
   }

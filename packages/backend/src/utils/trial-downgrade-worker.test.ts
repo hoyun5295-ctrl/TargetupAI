@@ -25,13 +25,14 @@ vi.mock('../config/database', () => {
 });
 vi.mock('./plan-change-log', () => ({
   recordPlanChange: vi.fn(),
-  alertPlanChangeFailure: vi.fn(),
   todayKst: () => '2026-11-01',
 }));
+vi.mock('./system-alert', () => ({ alertPassFailures: vi.fn(async () => 0) }));
 vi.mock('./ai-credit-tx', () => ({ expireTrialLeftover: vi.fn() }));
 
 import pool, { query } from '../config/database';
-import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
+import { recordPlanChange } from './plan-change-log';
+import { alertPassFailures } from './system-alert';
 import { expireTrialLeftover } from './ai-credit-tx';
 import {
   runTrialDowngradeJob,
@@ -42,7 +43,7 @@ import {
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const connect = pool.connect as unknown as ReturnType<typeof vi.fn>;
 const record = recordPlanChange as unknown as ReturnType<typeof vi.fn>;
-const alertFail = alertPlanChangeFailure as unknown as ReturnType<typeof vi.fn>;
+const alertPass = alertPassFailures as unknown as ReturnType<typeof vi.fn>;
 const expireLeft = expireTrialLeftover as unknown as ReturnType<typeof vi.fn>;
 
 const FREE_PLAN_ID = 'ffffffff-0000-0000-0000-000000000000';
@@ -100,7 +101,7 @@ describe('trial-downgrade-worker — 술어·유료 가드', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     record.mockResolvedValue(undefined);
-    alertFail.mockResolvedValue(undefined);
+    alertPass.mockResolvedValue(0);
     expireLeft.mockResolvedValue(undefined);
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -210,13 +211,14 @@ describe('trial-downgrade-worker — 술어·유료 가드', () => {
     expect(r.downgraded).toBe(0);
   });
 
-  it('이력 기록 실패는 그 회사만 ROLLBACK+경보 — 나머지 회사는 계속 처리된다', async () => {
+  it('이력 기록 실패는 그 회사만 ROLLBACK · 실패를 모아 한 주기 1통(§16-6) — 나머지 회사는 계속 처리된다', async () => {
     mockDb([T1, T2]);
     record.mockRejectedValueOnce(new Error('이력 기록 실패'));
     const r = await runTrialDowngradeJob();
 
-    expect(alertFail).toHaveBeenCalledTimes(1);
-    expect(alertFail.mock.calls[0][0]).toBe(T1.id);
+    expect(alertPass).toHaveBeenCalledTimes(1);
+    expect(alertPass.mock.calls[0][0].failures).toEqual([{ companyId: T1.id, error: '이력 기록 실패' }]);
+    expect(alertPass.mock.calls[0][0].total).toBe(2);
     expect(clientSqlKinds()).toEqual(['BEGIN', 'UPDATE', 'ROLLBACK', 'BEGIN', 'UPDATE', 'COMMIT']);
     expect(r.downgraded).toBe(1);
   });

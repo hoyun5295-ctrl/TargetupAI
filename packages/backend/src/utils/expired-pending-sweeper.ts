@@ -17,7 +17,7 @@
  */
 import { getQueueTableSets, smsCountAll, smsExecAll, smsGroupByAll } from './sms-queue';
 import { ABNORMAL_STATUS_MIN } from './sms-result-map';
-import { sendSystemAlert } from './system-alert';
+import { persistPassFailures, flushPassAlerts } from './system-alert';
 
 const INTERVAL_MS = 60 * 1000; // 1분 — cancelled-queue-sweeper와 동일 주기
 let _timer: ReturnType<typeof setInterval> | null = null;
@@ -41,14 +41,14 @@ const ABNORMAL_WHERE = `status_code >= ${ABNORMAL_STATUS_MIN} AND mobsend_time I
  *   4000 = 전송 시간 초과(실패) · Agent 가 결과코드로 보고 발송 안 함 + 화면 「실패」 · DELETE 아닌 마킹(직원 인지 · 실패 집계).
  *   효과 검증 = 마킹 뒤 잔존 재카운트(0 이어야 함 · 남으면 다음 주기 재시도). 캠페인별 건수는 로그로 남긴다.
  */
-async function markFailed(tables: string[], where: string, label: string): Promise<{ failed: number; remain: number }> {
+async function markFailed(tables: string[], where: string, label: string, params: any[] = []): Promise<{ failed: number; remain: number }> {
   if (tables.length === 0) return { failed: 0, remain: 0 };
-  const before = await smsCountAll(tables, where, []);
+  const before = await smsCountAll(tables, where, params);
   if (before === 0) return { failed: 0, remain: 0 };
   let byCamp: Record<string, number> = {};
-  try { byCamp = await smsGroupByAll(tables, 'app_etc1', where, []); } catch { /* 로그용이라 실패 무시 */ }
-  await smsExecAll(tables, `UPDATE SMSQ_SEND SET status_code = 4000, repmsg_recvtm = NOW() WHERE ${where}`, []);
-  const remain = await smsCountAll(tables, where, []);
+  try { byCamp = await smsGroupByAll(tables, 'app_etc1', where, params); } catch { /* 로그용이라 실패 무시 */ }
+  await smsExecAll(tables, `UPDATE SMSQ_SEND SET status_code = 4000, repmsg_recvtm = NOW() WHERE ${where}`, params);
+  const remain = await smsCountAll(tables, where, params);
   console.log(`[expired-pending-sweeper] ${label} ${before}건 실패 마킹(발송 차단) — 캠페인별 ${JSON.stringify(byCamp)} / 잔존 ${remain}`);
   return { failed: before - remain, remain };
 }
@@ -59,21 +59,46 @@ export async function sweepExpiredPendingOnce(): Promise<{ failed: number; remai
   // ① QTmsg 규칙 — 표 = 활성 bulk 만(옛 동작 그대로 · 비토 100 결과 대기는 대상 아님)
   const qtmsg = await markFailed(bulk, EXPIRE_WHERE, `rsv1=3 만료(${EXPIRE_HOURS}h+) 미발송`);
   // ② 이상 상태값 — 닫기 전에 이 워커가 직접 알린다(Codex 1R medium · 감시 5분보다 이 워커 1분이 먼저 닫으면 경보가 영영 안 나갔다)
-  const abnormalCount = await smsCountAll(all, ABNORMAL_WHERE, []);
-  if (abnormalCount > 0) {
-    let codes: Record<string, number> = {};
-    try { codes = await smsGroupByAll(all, 'status_code', ABNORMAL_WHERE, []); } catch { /* 경보 본문용이라 실패 무시 */ }
-    await sendSystemAlert({
-      companyId: null,
-      dedupKey: 'queue-abnormal-status-closed',
-      cooldownMs: 12 * 60 * 60 * 1000,
-      title: '발송 대기열의 결과 코드가 아닌 상태값 행을 실패로 닫습니다.',
-      details: [`${abnormalCount.toLocaleString()}행 (한 번도 안 나감 · ${EXPIRE_HOURS}시간 지남)`, `상태값 ${JSON.stringify(codes)}`],
-      action: '서버 상태(메모리 · 커널 기록)를 점검해 주세요.',
-    }).catch((e: any) => console.error('[expired-pending-sweeper] 이상 상태값 경보 실패:', e?.message));
-  }
-  const abnormal = await markFailed(all, ABNORMAL_WHERE, `이상 상태값(${ABNORMAL_STATUS_MIN}+ · ${EXPIRE_HOURS}h+ · 미전송)`);
+  const abnormal = await closeAbnormalRows(all);
   return { failed: qtmsg.failed + abnormal.failed, remain: qtmsg.remain + abnormal.remain };
+}
+
+/**
+ * ★ 2026-11-02 설계 §17-4 A4 — 이상 상태값 묶음 = 캠페인 · 상태값(같은 행 = 같은 묶음 = 같은 경보 항목 · 닫기 조건과 같은 글).
+ *   옛: 공용 키 12시간이라 그 안에 다시 깨진 행(48시간 지나 깨지면 감시 5분보다 이 워커가 먼저 닫는다)은 경보 없이 닫혔다.
+ */
+const ABNORMAL_GROUP = `CONCAT(COALESCE(app_etc1, ''), '|', status_code)`;
+
+/** ② 묶음마다 경보 원장에 넣고 넣은 묶음만 실패로 닫는다(닫기 계약 · 묶음 조회 · 원장 넣기 실패 = 이번 분 닫지 않고 다음 분에 다시) */
+async function closeAbnormalRows(all: string[]): Promise<{ failed: number; remain: number }> {
+  if (all.length === 0) return { failed: 0, remain: 0 };
+  let groups: Record<string, number>;
+  try {
+    groups = await smsGroupByAll(all, ABNORMAL_GROUP, ABNORMAL_WHERE, []);
+  } catch (e: any) {
+    console.error('[expired-pending-sweeper] 이상 상태값 묶음 조회 실패(이번 분 닫지 않음):', e?.message);
+    return { failed: 0, remain: 0 };
+  }
+  const grps = Object.keys(groups);
+  if (grps.length === 0) return { failed: 0, remain: 0 };
+  const spec = {
+    pass: 'queue-abnormal-status-closed',
+    title: '발송 대기열의 결과 코드가 아닌 상태값 행을 실패로 닫습니다.',
+    action: '서버 상태(메모리 · 커널 기록)를 점검해 주세요.',
+    failures: grps.map((g) => {
+      const i = g.lastIndexOf('|');
+      return { companyId: null, key: `${g.slice(0, i) || '-'}:${g.slice(i + 1)}`, error: `상태값 ${g.slice(i + 1)} · ${groups[g]}행(한 번도 안 나감 · ${EXPIRE_HOURS}시간 지남)` };
+    }),
+  };
+  if (!(await persistPassFailures(spec))) {
+    const rows = grps.reduce((n, g) => n + groups[g], 0);
+    console.error(`[expired-pending-sweeper] 이상 상태값 ${rows}행 경보 원장 기록 실패(이번 분 닫지 않음)`);
+    return { failed: 0, remain: rows };
+  }
+  const closed = await markFailed(all, ABNORMAL_WHERE + ` AND ${ABNORMAL_GROUP} IN (${grps.map(() => '?').join(', ')})`,
+    `이상 상태값(${ABNORMAL_STATUS_MIN}+ · ${EXPIRE_HOURS}h+ · 미전송)`, grps);
+  void flushPassAlerts(spec.pass).catch(() => undefined);
+  return closed;
 }
 
 /** app.ts 등록 — 1분 주기 */

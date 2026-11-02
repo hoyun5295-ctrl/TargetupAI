@@ -19,6 +19,7 @@ const FE = (rel: string) => fs.readFileSync(path.join(__dirname, '..', '..', '..
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
 vi.mock('../ai-credit', () => ({ refundCredit: vi.fn() }));
 vi.mock('../journey-lineage', () => ({ lineageColumnsReady: vi.fn(async () => true) }));
+vi.mock('../system-alert', () => ({ alertPassFailures: vi.fn(async () => 0), sendSystemAlert: vi.fn(async () => 0) }));
 
 describe('운영 크레딧 잡아 둔 날 되돌리기', () => {
   let db: any; let credit: any;
@@ -30,9 +31,11 @@ describe('운영 크레딧 잡아 둔 날 되돌리기', () => {
   it('후보 = 지난 날(KST) 운영 차감 · 아직 안 되돌림 · 그 계보 · 그 날짜 발송(sent · sending) 0건', async () => {
     const { releaseCandidatesSql } = await import('../journey-operation-release');
     const sql = releaseCandidatesSql('COALESCE(j.lineage_id, j.id)');
-    expect(sql).toContain("t.source = 'journey-operation' AND t.type = 'deduct'");
+    // ★ 2026-11-01 원장 쪽 조건 = 크레딧 CT(ai-credit-release · 원천 = 자리표 $1 · 아래 호출 인자로 고정)
+    expect(sql).toContain("t.type = 'deduct' AND t.source = $1");
     expect(sql).toContain("split_part(t.idempotency_key, ':', 3) < to_char((NOW() AT TIME ZONE 'Asia/Seoul')::date, 'YYYYMMDD')");
-    expect(sql).toContain("r.idempotency_key = 'release:' || t.idempotency_key");
+    expect(sql).toContain("x.idempotency_key = 'release:' || t.idempotency_key");
+    expect(sql.indexOf('LIMIT 500')).toBeGreaterThan(sql.indexOf("l.status IN ('sent', 'sending')"));   // 거르는 조건은 LIMIT 앞
     expect(sql).toContain("l.status IN ('sent', 'sending')");   // 결과 모름 표식 = 보낸 것으로(모르면 돌려주지 않는다)
     expect(sql).toContain("to_char((l.sent_at AT TIME ZONE 'Asia/Seoul')::date, 'YYYYMMDD') = split_part(t.idempotency_key, ':', 3)");
     // 키 둘째 마디 = 계보 뿌리(V.3) 또는 옛 판 여정 id(V.3 전) — 둘 다 그 계보의 발송
@@ -45,6 +48,7 @@ describe('운영 크레딧 잡아 둔 날 되돌리기', () => {
     const { releaseUnusedOperationCredits } = await import('../journey-operation-release');
     const r = await releaseUnusedOperationCredits();
     expect(r.released).toBe(1);
+    expect(db.query).toHaveBeenCalledWith(expect.stringContaining('FROM ai_credit_transactions t'), ['journey-operation', null, expect.any(Array), null, null, null]);   // ★ 1102 $3 = 기다리는 키(1R-1) · $4 · $5 = 커서 · $6 = 바퀴 상한(처음 = NULL · 3R · 4R)
     expect(credit.refundCredit).toHaveBeenCalledWith(expect.objectContaining({
       companyId: 'c1', amount: 10, source: 'journey-operation',
       idempotencyKey: 'release:journey-operation:root1:20261019', originalIdempotencyKey: 'journey-operation:root1:20261019',

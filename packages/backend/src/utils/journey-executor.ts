@@ -33,7 +33,7 @@ import {
   recordCampaignSentTables,
   insertAlimtalkQueue,
 } from './sms-queue';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-alert';
 import { toQtmsgType, subjectForMsgType } from './qtmsg-type';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { convertButtonsToQTmsg } from './alimtalk-button';
@@ -279,6 +279,7 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
     );
     if (dueRes.rows.length === 0) break;
     batches++;
+    const closedFailed: PassFailure[] = [];   // 이 묶음에서 실패로 닫은 실행(묶음 끝에 원장으로)
 
     // ★ 2026-11-02 엔진 재설계 E2-1 — 회사끼리 동시 · 회사 안 차례(processExecution 그대로 · 한 회사의 느린 적재가 다른 회사를 막지 않는다)
     for (const row of dueRes.rows as ExecutionRow[]) pickedThisTick.push(row.execution_id);
@@ -327,17 +328,25 @@ export async function runJourneyExecutor(): Promise<{ processed: number; sent: n
           );
           if (up.rows[0]?.status === 'failed') {
             console.error(`[JourneyExecutor] execution=${row.execution_id} 처리 실패 ${EXECUTION_ERROR_MAX}회 → 실패로 닫음`);
-            void sendSystemAlert({
-              companyId: row.company_id,
-              dedupKey: `journey-exec-failed:${row.journey_id}`,
-              message: `여정 실행이 ${EXECUTION_ERROR_MAX}번 연속 처리 오류로 실패 처리됐습니다(더 보내지 않음). journey=${row.journey_id} execution=${row.execution_id} 마지막 오류: ${reason.slice(0, 200)}`,
-            }).catch(() => undefined);
+            closedFailed.push({ companyId: row.company_id, key: String(row.execution_id), error: reason.slice(0, 200) });
           }
         } catch (logErr: any) {
           console.error(`[JourneyExecutor] execution=${row.execution_id} 실패 기록 실패:`, logErr?.message || logErr);
         }
       }
     });
+
+    // ★ 2026-11-02 설계서 docs/2026-11-01-credit-control-tower-design.md §16-6 · §17-2 — 실패로 닫은 실행 = 묶음마다 원장에 넣고 모아 보낸다(이름당 1시간 1통 · 항목 = 실행)
+    //   (옛: 반복문 catch 에서 실행마다 여정 키로 1통 = 원인 하나에 N통 · 같은 여정의 다른 실행은 6시간 묻혔다 · 계약 ⑥)
+    //   묶음마다 = 다음 묶음 조회가 던져도 이미 실패로 닫은 실행의 경보는 사라지지 않는다.
+    if (closedFailed.length > 0) {
+      await alertPassFailures({
+        pass: 'journey-exec-failed',
+        title: `여정 실행이 ${EXECUTION_ERROR_MAX}번 연속 처리 오류로 실패 처리됐습니다(더 보내지 않음).`,
+        action: '서버 로그 [JourneyExecutor] 처리 실패 줄의 실행으로 원인을 확인해 주세요(실행 행 error_log 에도 남아 있습니다).',
+        failures: closedFailed,
+      }).catch(() => undefined);
+    }
 
     }
 

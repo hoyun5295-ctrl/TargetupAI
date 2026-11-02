@@ -19,6 +19,7 @@ import { getCreditCost, kstMonthTag } from './ai-credit-calc';
 import { notifyOperatorAdmins } from './continuous-operator';
 import { evaluateCancelRefund, plannerRefundKey, plannerAgencyDeductKey, PLANNER_NOTICE_HEADER } from './planner-execution';
 import { refundCreditWithClient } from './ai-credit-tx';
+import { countLedgerRows, ledgerAmountByKey } from './ai-credit-ledger';
 import { countMonthWork } from './planner-touchpoint';
 
 // ── 요금 축 ──────────────────────────────────────────────────────────
@@ -46,13 +47,8 @@ export function buildApprovalIdempotencyKey(companyId: string, planMonth: string
  * 조회 실패는 전파한다 — 회차를 모른 채 차감·환불 키를 만들면 이중 결제·이중 환불의 문이 열린다.
  */
 async function loadChargeCycle(companyId: string, planMonth: string): Promise<number> {
-  const r = await query(
-    `SELECT COUNT(*)::int AS cnt FROM ai_credit_transactions
-      WHERE company_id = $1::uuid AND type = 'refund' AND source = $2
-        AND idempotency_key LIKE $3`,
-    [companyId, PLANNER_AGENCY_SOURCE, `${plannerRefundKey(companyId, planMonth)}%`],
-  );
-  return Number(r.rows[0]?.cnt) || 0;
+  // 원장은 크레딧 CT 로만 묻는다(★ 2026-11-01 §16-1 F1)
+  return countLedgerRows(pool, { companyId, type: 'refund', source: PLANNER_AGENCY_SOURCE, keyPrefix: plannerRefundKey(companyId, planMonth) });
 }
 
 // ── 월 축 ────────────────────────────────────────────────────────────
@@ -79,13 +75,7 @@ async function loadApprovalRow(companyId: string, planMonth: string): Promise<an
  *    회사·유형·source까지 조건으로 걸어야 다른 회사 행 하나가 이 회사의 복구 경로를 여는 일이 없다.
  */
 async function hasAgencyDeduction(companyId: string, idempotencyKey: string): Promise<boolean> {
-  const r = await query(
-    `SELECT 1 FROM ai_credit_transactions
-      WHERE idempotency_key = $1 AND company_id = $2::uuid AND type = 'deduct' AND source = $3
-      LIMIT 1`,
-    [idempotencyKey, companyId, PLANNER_AGENCY_SOURCE],
-  );
-  return r.rows.length > 0;
+  return (await ledgerAmountByKey(pool, { companyId, key: idempotencyKey, type: 'deduct', source: PLANNER_AGENCY_SOURCE })) !== null;
 }
 
 /**
@@ -153,12 +143,7 @@ export async function cancelMonthlyApproval(
       throw new PlannerApprovalError('취소할 결재 내역이 없습니다.', 'NOT_SUBMITTED');
     }
     // ⛔ 회차 키도 **잠금 안에서** 계산한다(잠금 밖에서 잡으면 그 사이 승인·환불이 끼어들어 옛 회차만 환불한다).
-    const cycleRes = await client.query(
-      `SELECT COUNT(*)::int AS cnt FROM ai_credit_transactions
-        WHERE company_id = $1::uuid AND type = 'refund' AND source = $2 AND idempotency_key LIKE $3`,
-      [companyId, PLANNER_AGENCY_SOURCE, `${plannerRefundKey(companyId, planMonth)}%`],
-    );
-    const cycle = Number(cycleRes.rows[0]?.cnt) || 0;
+    const cycle = await countLedgerRows(client, { companyId, type: 'refund', source: PLANNER_AGENCY_SOURCE, keyPrefix: plannerRefundKey(companyId, planMonth) });
     const idempotencyKey = buildApprovalIdempotencyKey(companyId, planMonth, cycle);
     const refundKey = plannerRefundKey(companyId, planMonth, cycle);
     const lockedStatus = String(lock.rows[0].status);
@@ -192,14 +177,10 @@ export async function cancelMonthlyApproval(
     work = await countMonthWork(companyId, planMonth, client);
 
     // ★ 2026-10-25 원장 #52 — 환불 금액 = 원 차감 원장 행의 금액(옛: 월 원장 agency_credits = 승인 때마다 그때 단가로 덮어쓴 값 · 다르면 환불 거절)
-    const paidRes = await client.query(
-      `SELECT amount FROM ai_credit_transactions
-        WHERE idempotency_key = $1 AND company_id = $2::uuid AND type = 'deduct' AND source = $3 LIMIT 1`,
-      [idempotencyKey, companyId, PLANNER_AGENCY_SOURCE],
-    );
+    const paid = await ledgerAmountByKey(client, { companyId, key: idempotencyKey, type: 'deduct', source: PLANNER_AGENCY_SOURCE });
     verdict = evaluateCancelRefund({
-      agencyPaid: paidRes.rows.length > 0,
-      agencyCredits: Number(paidRes.rows[0]?.amount) || 0,
+      agencyPaid: paid !== null,
+      agencyCredits: paid ?? 0,
       executedCount: work.executed,
     });
 

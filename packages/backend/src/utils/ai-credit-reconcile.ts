@@ -71,7 +71,7 @@ export async function runCreditReconcilePass(now: Date = new Date()): Promise<{ 
   const since = new Date(now.getTime() - RECONCILE_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const companies = await pool.query(`SELECT id FROM companies ORDER BY id`);
   let checked = 0;
-  let mismatched = 0;
+  const failures: Array<{ companyId: string; error: string }> = [];
   for (const c of companies.rows) {
     const companyId = String(c.id);
     const client = await pool.connect();
@@ -107,14 +107,15 @@ export async function runCreditReconcilePass(now: Date = new Date()): Promise<{ 
     if (rowCount === 0 && problems.length === 0) continue;   // seq 줄이 없는 회사(DDL 뒤 크레딧 변동 없음)
     checked++;
     if (problems.length === 0) continue;
-    mismatched++;
-    const { sendSystemAlert } = await import('./system-alert');
-    await sendSystemAlert({
-      companyId,
-      dedupKey: `credit-reconcile:${companyId}:${today}`,
-      message: `AI 크레딧 원장 · 잔액 어긋남(회사 ${companyId}) ${problems.length}건: ${problems.slice(0, 3).join(' / ').slice(0, 400)}`,
-    }).catch(() => undefined);
+    failures.push({ companyId, error: problems[0] });
+    console.warn(`[credit-reconcile] 어긋남 company=${companyId} ${problems.length}건: ${problems.slice(0, 3).join(' / ').slice(0, 400)}`);
   }
-  console.log(`[credit-reconcile] 대조 ${checked}곳 · 어긋남 ${mismatched}곳`);
-  return { checked, mismatched };
+  console.log(`[credit-reconcile] 대조 ${checked}곳 · 어긋남 ${failures.length}곳`);
+  // ★ 2026-11-01 §16-6 — 한 주기 1통(옛: 회사마다 1통)
+  const { alertPassFailures } = await import('./system-alert');
+  await alertPassFailures({
+    pass: 'credit-reconcile', title: 'AI 크레딧 원장과 잔액이 어긋난 회사가 있습니다.', failures, total: checked, now,
+    action: '서버 로그 [credit-reconcile] 어긋남 줄의 회사 원장을 확인해 주세요.',
+  }).catch(() => undefined);
+  return { checked, mismatched: failures.length };
 }

@@ -15,7 +15,7 @@
 
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = AI 크레딧 차감 0
 import { pool } from '../config/database';
-import { needsMonthlyReset, kstDateTag } from './ai-credit-calc';
+import { needsMonthlyReset, creditApplies } from './ai-credit-calc';
 import { projectBaseAfterClose, creditSeqReady, monthKeyOf } from './ai-credit-month';
 import { setCreditEvent } from './request-context';
 import { UserFacingError } from './http-error';
@@ -50,7 +50,7 @@ export async function getCreditState(companyId: string): Promise<CreditState> {
     if (!row) return empty;
     const planCredits = Number(row.plan_credits) || 0;
     const purchased = Number(row.purchased) || 0;
-    const creditEnabled = row.plan_credits != null || purchased > 0;  // 크레딧제 적용 여부
+    const creditEnabled = creditApplies(row);  // 크레딧제 적용 여부(CT 판정 한 벌 · §16-1 F18)
     const resetAt = row.reset_at ? new Date(row.reset_at) : null;
     const baseRemaining = await projectBaseAfterClose(pool, companyId, row, new Date());
     return {
@@ -82,7 +82,7 @@ export async function isCreditEnabledStrict(companyId: string): Promise<boolean>
   if (!companyId) return false;
   const row = await loadCreditRow(pool, companyId, false);
   if (!row) return false;                                   // 행 부재 = 크레딧제 미적용(오류가 아니다)
-  return row.plan_credits != null || (Number(row.purchased) || 0) > 0;
+  return creditApplies(row);
 }
 
 /**
@@ -95,7 +95,7 @@ export async function hasCreditForStrict(companyId: string, cost: number, source
   if (!companyId || !cost || cost <= 0) return true;
   const row = await loadCreditRow(pool, companyId, false);
   if (!row) return true;
-  if (row.plan_credits == null && (Number(row.purchased) || 0) === 0) return true;
+  if (!creditApplies(row)) return true;
   // ★ 2026-11-01 C7 — 표시 · 사전 확인 · 차감과 같은 함수(월 마감 계산)
   const base = await projectBaseAfterClose(pool, companyId, row, new Date());
   const purchased = Number(row.purchased) || 0;
@@ -401,18 +401,21 @@ export class CreditSettleError extends UserFacingError {
 
 /**
  * ★ 2026-10-25 차감을 끝내 기록하지 못했다 = 사람에게 닿아야 한다(원장 Z1 · 뿌리 R14).
- * 옛: `[CREDIT][MISS]` stdout 한 줄이 전부라 아무도 몰랐다. 이제 로그(검색 꼬리표 그대로) + 운영 경보(공용 입구 · 1시간 1회 묶음).
+ * 옛: `[CREDIT][MISS]` stdout 한 줄이 전부라 아무도 몰랐다. 이제 로그(검색 꼬리표 그대로) + 운영 경보(모아 보내기 · 꼬리표마다 한 이름).
+ * ★ 2026-11-02 Codex 구현 1R-2 같은 뿌리 — 옛 키 = 꼬리표 하나(credit-miss · 1시간 · 보류 24시간)라 그 안에 생긴 다른 키의 사건은 버려졌다 →
+ *   항목 = 그 키(같은 키 = 한 번 알림) · 못 보낸 항목은 다음 통에 싣는다(system-alert alertPassFailures).
+ *   ★ 2026-11-02 설계 §17-3 — 한 번뿐인 사건 = 사건 모드(total 없음 · 옛 total 1 = 문자가 「마지막 주기 실패 1곳 / 대상 1곳」) · 못 보낸 항목 = PG 원장(재기동에도 남음).
  * 경보는 기다리지 않는다(차감 경로를 늦추지 않게) · 경보 실패는 경보 함수가 삼킨다.
  */
-export function reportCreditMiss(info: { companyId: string | null; source: string; cost: number; key?: string | null; reason: string; tag?: 'MISS' | 'ORPHAN' }): void {
+export function reportCreditMiss(info: { companyId: string | null; source: string; cost: number; key?: string | null; reason: string; tag?: 'MISS' | 'ORPHAN' | 'HOLD' }): void {
   const tag = info.tag || 'MISS';
   console.log(`[CREDIT][${tag}] company=${info.companyId} source=${info.source} cost=${info.cost} key=${info.key || 'none'} reason=${info.reason}`);
-  void import('./system-alert').then(({ sendSystemAlert }) => sendSystemAlert({
-    companyId: info.companyId,
-    dedupKey: `credit-${tag.toLowerCase()}`,
-    cooldownMs: 60 * 60 * 1000,
-    title: tag === 'MISS' ? '크레딧 차감을 기록하지 못했습니다.' : '돈을 받지 않은 결과(초안 · 발행 · 게시 · 그림)를 거두지 못했습니다.',
-    details: [`기능: ${info.source}`, `금액: ${info.cost}`, `사유: ${info.reason.slice(0, 80)}`],
+  void import('./system-alert').then(({ alertPassFailures }) => alertPassFailures({
+    pass: `credit-${tag.toLowerCase()}`,
+    title: tag === 'MISS' ? '크레딧 차감을 기록하지 못했습니다.'
+      : tag === 'HOLD' ? '끝난 체험 · 요금제 수명의 크레딧 환불을 보류했습니다(원 차감 구성을 몰라 자동으로 돌려주지 않음).'
+      : '돈을 받지 않은 결과(초안 · 발행 · 게시 · 그림)를 거두지 못했습니다.',
+    failures: [{ companyId: info.companyId, error: `${info.source}: ${info.reason.slice(0, 80)}`, key: info.key || `${info.companyId}:${info.source}:${info.reason.slice(0, 80)}` }],
     action: `서버 로그에서 [CREDIT][${tag}] 줄을 찾아 같은 키로 처리해 주세요.`,
   })).catch(() => undefined);
 }
@@ -467,7 +470,12 @@ export async function refundCredit(opts: RefundOpts): Promise<RefundResult> {
   if (!opts.companyId || !opts.amount || opts.amount <= 0) return { refunded: false, amount: 0 };
   const client = await pool.connect();
   try {
-    return await refundCreditWithClient(client, opts, new Date());
+    const out = await refundCreditWithClient(client, opts, new Date());
+    // ★ §16-5 보류 경보 = 이 함수 한 곳(되돌림 · 인앱 · 여정 초안 · 재작성 환불이 지난다 · 월 대행 취소는 그 경로의 환불 실패 경보)
+    if (out.skipReason === 'held_after_lifetime_end') {
+      reportCreditMiss({ companyId: opts.companyId, source: opts.source, cost: opts.amount, key: opts.idempotencyKey, reason: `원 차감 ${opts.originalIdempotencyKey} 뒤 수명 끝 · 구성분 모름`, tag: 'HOLD' });
+    }
+    return out;
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch { /* 이미 종료된 트랜잭션 */ }
     throw err;
@@ -522,23 +530,23 @@ export async function grantMonthlyCreditsPass(now: Date = new Date()): Promise<{
     [`${cur}-01`],
   );
   let closed = 0;
-  let failed = 0;
+  const failures: Array<{ companyId: string; error: string }> = [];
   for (const t of targets.rows) {
     try {
       if (await resetMonthlyCreditsIfNeeded(String(t.id))) closed++;
     } catch (err: any) {
-      failed++;
+      failures.push({ companyId: String(t.id), error: String(err?.message || err) });
       console.warn('[ai-credit] 월 마감 실패:', t.id, err?.message || err);
-      const { sendSystemAlert } = await import('./system-alert');
-      await sendSystemAlert({
-        companyId: String(t.id),
-        dedupKey: `credit-close:${t.id}:${kstDateTag(now)}`,
-        message: `AI 크레딧 월 마감 실패(회사 ${t.id}): ${String(err?.message || err).slice(0, 200)}`,
-      }).catch(() => undefined);
     }
   }
-  if (closed > 0 || failed > 0) console.log(`[ai-credit] 월 마감 ${closed}곳 · 실패 ${failed}곳`);
-  return { closed, failed };
+  if (closed > 0 || failures.length > 0) console.log(`[ai-credit] 월 마감 ${closed}곳 · 실패 ${failures.length}곳`);
+  // ★ 2026-11-01 §16-6 — 한 주기 1통(옛: 회사마다 1통 · 원인 하나에 100통 넘게)
+  const { alertPassFailures } = await import('./system-alert');
+  await alertPassFailures({
+    pass: 'credit-close', title: 'AI 크레딧 월 마감이 일부 회사에서 실패했습니다.', failures, total: targets.rows.length, now,
+    action: '서버 로그 [ai-credit] 월 마감 실패 줄을 확인해 주세요(10분마다 다시 시도합니다).',
+  }).catch(() => undefined);
+  return { closed, failed: failures.length };
 }
 
 /** 발행 전 그 회사 월 마감(★ 2026-11-01 C8 · 짧은 자기 트랜잭션 · 발행 트랜잭션 안에서 하지 않는다 = 외래키 넣기 막힘 방지) */
@@ -567,6 +575,19 @@ export async function getMonthlyUsage(companyId: string): Promise<number> {
     console.warn('[ai-credit] getMonthlyUsage 오류:', err?.message);
     return 0;
   }
+}
+
+/**
+ * ★ 2026-11-01 §16-4 — 이번 달 크레딧 사용률(AI 사용량 화면 · 사용량 알림이 같이 쓴다 · 월 AI 호출 수 한도를 지운 자리).
+ *   사용률 = 이번 달 쓴 크레딧 ÷ (쓴 크레딧 + 남은 크레딧(음수 = 0)) · 크레딧제가 아니면 null.
+ */
+export async function creditUsageThisMonth(companyId: string): Promise<{ used: number; remaining: number; percent: number | null }> {
+  const [st, net] = await Promise.all([getCreditState(companyId), getMonthlyUsage(companyId)]);
+  const used = Math.max(0, net);
+  const remaining = Number(st.total) || 0;
+  if (!st.creditEnabled) return { used, remaining, percent: null };
+  const denom = used + Math.max(0, remaining);
+  return { used, remaining, percent: denom > 0 ? Math.round((used / denom) * 100) : 0 };
 }
 
 /** 슈퍼관리자 수동 크레딧 지급/조정 (트랜잭션 + 구매분 버킷). */

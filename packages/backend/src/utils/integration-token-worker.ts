@@ -8,7 +8,7 @@
  *   - 대상 = SQL WHERE 의 active 행만 · 회차 상한(LIMIT 앞 거름 · R8 · R12)
  */
 import { query } from '../config/database';
-import { sendSystemAlert } from './system-alert';
+import { alertPassFailures, type PassFailure } from './system-alert';
 import { isDefinitiveTokenRejection } from './integration-token-error';
 import { listTokenKeepaliveTargets, type ReceiveProvider } from './integration-token';
 import { getCafe24Integration, getCafe24ByoCredentials, ensureFreshCafe24Token, registerCafe24AllowedOrigins } from './cafe24-client';
@@ -31,16 +31,17 @@ async function refreshOne(provider: ReceiveProvider, companyId: string, mallId: 
   }
 }
 
-async function companyName(companyId: string): Promise<string> {
-  const r = await query(`SELECT company_name FROM companies WHERE id = $1::uuid`, [companyId]).catch(() => ({ rows: [] as any[] }));
-  return String(r.rows[0]?.company_name || '고객사');
-}
-
 /** 한 회차 — 갱신한 행 수 */
 export async function runTokenKeepalivePass(): Promise<number> {
   let refreshed = 0;
+  let total = 0;
+  // ★ 2026-11-01 §16-6 — 실패를 모아 한 주기 1통씩(옛: 몰마다 1통 · 몰 쪽 장애 하나에 연동 수만큼) · 몰 · 회사 = 로그
+  const rejected: PassFailure[] = [];
+  const failing: PassFailure[] = [];
   for (const provider of ['cafe24', 'imweb'] as const) {
-    for (const t of await listTokenKeepaliveTargets(provider)) {
+    const targets = await listTokenKeepaliveTargets(provider);
+    total += targets.length;
+    for (const t of targets) {
       try {
         await refreshOne(provider, t.companyId, t.mallId);
         await query(`UPDATE company_integrations SET meta = meta - 'token_keepalive_fails' WHERE id = $1::uuid AND meta ? 'token_keepalive_fails'`, [t.id]);
@@ -48,14 +49,7 @@ export async function runTokenKeepalivePass(): Promise<number> {
       } catch (err: any) {
         if (isDefinitiveTokenRejection(err)) {
           console.warn(`[Token Keepalive] ${provider} 갱신 거절 → 만료 표시 company=${t.companyId} mall=${t.mallId}`);
-          await sendSystemAlert({
-            companyId: t.companyId,
-            dedupKey: `token-rejected:${provider}:${t.id}`,
-            cooldownMs: 24 * 60 * 60 * 1000,
-            title: `${LABEL[provider]} 연동 토큰이 거절되어 다시 연결이 필요합니다.`,
-            details: [`고객사: ${await companyName(t.companyId)}`, `몰: ${t.mallId}`],
-            action: '유예 기간 동안은 웹훅을 계속 받습니다. 고객사에 그 몰을 다시 연결해 달라고 안내해 주세요.',
-          });
+          rejected.push({ companyId: t.companyId, error: `${LABEL[provider]} 토큰 거절: ${err?.message || err}`, key: String(t.id) });
           continue;
         }
         const r = await query(
@@ -67,19 +61,18 @@ export async function runTokenKeepalivePass(): Promise<number> {
         ).catch(() => ({ rows: [] as any[] }));
         const fails = Number(r.rows[0]?.fails || 0);
         console.warn(`[Token Keepalive] ${provider} 일시 실패 ${fails}회 company=${t.companyId} mall=${t.mallId}: ${err?.message || err}`);
-        if (fails >= FAIL_ALERT_AT) {
-          await sendSystemAlert({
-            companyId: t.companyId,
-            dedupKey: `token-keepalive:${provider}:${t.id}`,
-            cooldownMs: 12 * 60 * 60 * 1000,
-            title: `${LABEL[provider]} 연동 토큰 갱신이 ${fails}번 연속 실패했습니다.`,
-            details: [`고객사: ${await companyName(t.companyId)}`, `몰: ${t.mallId}`],
-            action: '몰 쪽 장애인지 확인해 주세요. 갱신 토큰이 끊기기 전에 살아나지 않으면 다시 연결이 필요합니다.',
-          });
-        }
+        if (fails >= FAIL_ALERT_AT) failing.push({ companyId: t.companyId, error: `${LABEL[provider]} 갱신 연속 실패: ${err?.message || err}`, key: String(t.id) });
       }
     }
   }
+  await alertPassFailures({
+    pass: 'token-rejected', title: '자사몰 연동 토큰이 거절되어 다시 연결이 필요한 몰이 있습니다.', failures: rejected, total,
+    action: '서버 로그 [Token Keepalive] 갱신 거절 줄의 몰을 고객사에 다시 연결해 달라고 안내해 주세요(유예 기간 동안은 웹훅을 계속 받습니다).',
+  }).catch((e: any) => console.warn('[Token Keepalive] 경보 발송 실패:', e?.message));
+  await alertPassFailures({
+    pass: 'token-keepalive', title: `자사몰 연동 토큰 갱신이 ${FAIL_ALERT_AT}번 넘게 연속 실패한 몰이 있습니다.`, failures: failing, total,
+    action: '몰 쪽 장애인지 확인해 주세요(서버 로그 [Token Keepalive] 일시 실패 줄). 갱신 토큰이 끊기기 전에 살아나지 않으면 다시 연결이 필요합니다.',
+  }).catch((e: any) => console.warn('[Token Keepalive] 경보 발송 실패:', e?.message));
   return refreshed;
 }
 

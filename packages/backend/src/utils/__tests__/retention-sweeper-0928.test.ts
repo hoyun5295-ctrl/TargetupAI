@@ -91,7 +91,9 @@ describe('풀분석 PDF', () => {
     expect(fs.existsSync(inside)).toBe(false);
     expect(fs.existsSync(outside)).toBe(true);
     const sel = calls.find((c) => c.sql.includes('FROM full_analysis_jobs'))!;
-    expect(sel.sql).toContain("status = 'done' AND pdf_path IS NOT NULL AND updated_at < NOW() - INTERVAL '90 days'");
+    expect(sel.sql).toContain("status = 'done' AND pdf_path IS NOT NULL");
+    expect(sel.sql).toContain("updated_at < COALESCE($3::timestamptz, NOW() - INTERVAL '90 days')");   // ★ 1102 설계 §17-4 A5 = 커서 순환 · 바퀴 상한
+    expect(sel.params).toEqual([null, null, null]);   // 첫 회차 = 커서 없음
     const upd = calls.find((c) => c.sql.startsWith('UPDATE full_analysis_jobs'))!;
     expect(upd.sql).toContain('SET pdf_path = NULL');
     expect(upd.params).toEqual([['job-1']]);

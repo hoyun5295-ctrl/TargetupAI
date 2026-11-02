@@ -310,7 +310,9 @@ describe('7. 배선 계약', () => {
     const tail = dmRoute.slice(dmRoute.indexOf('// ─── 아래 = 한 줄이 아닌 일반 생성'));
     expect(tail).not.toMatch(/recallLineDraft|rememberLineDraft|forgetLineDraft|lineChargeFailed/);
     // ★ 2026-10-17 결말 판정 = 세 채널 한 규칙(line-steps-context lineStepsCollected · 같은 집합 = 냄 · 같은 키로 이미 냄 · 크레딧제 미적용)
-    expect(BACK('utils', 'line-steps-context.ts')).toContain("return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';");
+    //   ★ 2026-11-01 §16-1 F19 — 그 규칙 한 벌 = 크레딧 CT outcomeSettled
+    expect(BACK('utils', 'line-steps-context.ts')).toContain('return outcomeSettled(outcome);');
+    expect(BACK('utils', 'ai-credit-calc.ts')).toContain("return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';");
     // 단계 요청의 DM 착지 = 주문의 draft adapter 가 같은 규칙(낸 초안 재사용 · 결말 판정 · orphan)
     const order = BACK('utils', 'one-line-ct', 'order.ts');
     expect(order).toContain("if (prior.state === 'paid') return { kind: 'reused', draftId: prior.draftId };");

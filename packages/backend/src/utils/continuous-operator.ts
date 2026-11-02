@@ -54,10 +54,11 @@ import { getOpt080Number, buildAdMessage } from './messageUtils';
 import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts, readSpamTestOutcome } from './spam-test-queue';
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
-import { InsufficientCreditError, deductCreditSafe, deductCreditOutcome, hasCreditForStrict, refundCredit } from './ai-credit';
+import { InsufficientCreditError, deductCreditSafe, deductCreditOutcome, hasCreditForStrict } from './ai-credit';
+import { releaseUnsentSendCharges as releaseUnsentSendChargesCt } from './ai-credit-release';
 import { _deductWithClient } from './ai-credit-tx';
 import { markCalendarRegistrationWith, isMissingTable as isMissingTableError } from './marketing-calendar-store';
-import { getCreditCost } from './ai-credit-calc';
+import { getCreditCost, resultSettled } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 // ★ 2026-08-04 변화 축 settle — 캠페인 종결 후 실수신 번호를 발송 큐에서 되읽는다(보호 영역은 읽기만).
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback, getCampaignSmsTables, smsSelectAll } from './sms-queue';
@@ -586,7 +587,7 @@ export async function registerOperator(
         companyId: input.companyId, cost: saveCost, source: 'continuous-operator',
         createdBy: input.createdBy, idempotencyKey: `continuous-operator:${opts.id}`,
       }, new Date(), { manageTx: false });
-      charged = d.deducted || d.skipReason === 'duplicate' || d.skipReason === 'not_applicable';
+      charged = resultSettled(d);   // 걷힘 판정 = 크레딧 CT 한 벌(§16-1 F19)
     }
     const ins = await client.query(insertSql, insertParams);
     if (ins.rows.length === 0) {
@@ -3075,46 +3076,25 @@ async function settlePendingCharges(): Promise<void> {
  *   캠페인이 있으면 전량 실패여도 남긴다(알려진 천장 · 발송 결과는 캠페인 마감이 정한다).
  *   ★ Codex 1R — 거르는 조건은 모두 SQL 안(LIMIT 앞)이다: 정상 차감이 20칸을 차지해 못 보낸 시도가 밀려나지 않는다.
  *   ponytail: 한 번에 20건 · 7일 안 차감만 본다(못 보낸 시도는 30분 뒤 첫 패스에 잡힌다 · 7일 = 쌓이는 정상 차감을 매번 훑지 않는 상한).
+ *   ★ 2026-11-01 원장 쪽(후보 줄 · 30분 · 7일 · 이미 돌려준 키 · 되돌림 줄 · 실패 경보 한 주기 1통)은 크레딧 CT 하나(§16-1 F5 · §16-6) —
+ *     여기는 「캠페인 없음 · 그 묶음으로 보내는 중 아님」 사실과 키 모양만 넘긴다(옛: 실패 경보가 회사마다).
  */
 let lastReleaseAt = 0;
 async function releaseUnsentSendCharges(): Promise<void> {
   if (Date.now() - lastReleaseAt < 10 * 60 * 1000) return;   // 10분에 한 번(발송 패스는 1분마다 돈다)
   lastReleaseAt = Date.now();
-  const r = await query(
-    `SELECT t.company_id, t.amount, t.idempotency_key
-       FROM ai_credit_transactions t
-      WHERE t.type = 'deduct' AND t.source = 'continuous-operator-send'
-        AND t.idempotency_key LIKE 'continuous-operator-send:%:%'
-        AND t.created_at < NOW() - INTERVAL '30 minutes' AND t.created_at > NOW() - INTERVAL '7 days'
-        AND NOT EXISTS (SELECT 1 FROM ai_credit_transactions x WHERE x.idempotency_key = 'release:' || t.idempotency_key)
-        -- 보내지 못한 시도만(Codex 1R) — 그 묶음으로 만든 캠페인이 있거나 아직 그 묶음으로 보내는 중이면 고르지 않는다(정상 차감이 자리를 차지하지 않게)
-        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))
+  await releaseUnsentSendChargesCt({
+    source: 'continuous-operator-send', pass: 'operator-send', keyLike: 'continuous-operator-send:%:%', minAgeMinutes: 30, lookbackDays: 7, limit: 20,
+    // 보내지 못한 시도만(Codex 1R) — 그 묶음으로 만든 캠페인이 있거나 아직 그 묶음으로 보내는 중이면 고르지 않는다(정상 차감이 자리를 차지하지 않게)
+    notSentSql: `NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.company_id = t.company_id AND c.staging_id::text = split_part(t.idempotency_key, ':', 3))
         AND NOT EXISTS (SELECT 1 FROM operator_proposals op WHERE op.id::text = split_part(t.idempotency_key, ':', 2)
-                          AND op.status = 'sending' AND op.proposal_json->'meta'->>'sendStagingId' = split_part(t.idempotency_key, ':', 3))
-      ORDER BY t.created_at ASC
-      LIMIT 20`,
-  );
-  for (const row of r.rows) {
-    const key = String(row.idempotency_key);
-    const [, proposalId, stagingId] = key.split(':');
-    if (!isUuid(proposalId) || !isUuid(stagingId)) continue;
-    try {
-      const out = await refundCredit({
-        companyId: row.company_id, amount: Number(row.amount) || 0, source: 'continuous-operator-send',
-        reason: '자동 마케팅 회차를 보내지 못해 발송 크레딧을 돌려드림', idempotencyKey: `release:${key}`, originalIdempotencyKey: key,
-      });
-      if (out.refunded) console.log(`[ContinuousOperator Charge] ${proposalId} 보내지 못한 시도 ${stagingId} 발송 크레딧 ${out.amount} 되돌림`);
-    } catch (e: any) {
-      console.warn(`[ContinuousOperator Charge] ${key} 되돌림 경고(다음 패스 재시도):`, e?.message);
-      // ★ 2026-10-25 원장 #24 — 되돌림 실패 = 사람에게(옛: 로그만 · 7일 창을 벗어나면 영영 안 돌려줌)
-      //   ponytail: 창은 7일 그대로 — 실패가 이어지면 그 7일 동안 1시간마다 경보가 간다(표식 쓰기는 같은 DB 장애에 같이 실패해 더하지 않음)
-      void sendSystemAlert({
-        companyId: row.company_id,
-        dedupKey: `operator-release-fail:${row.company_id}`,
-        message: `자동마케팅 보내지 못한 회차의 발송 크레딧 되돌림 실패 — 키 ${key} · ${Number(row.amount) || 0}크레딧 · 7일 안에 자동 재시도, 계속 실패하면 같은 키로 수동 환불 필요`,
-      });
-    }
-  }
+                          AND op.status = 'sending' AND op.proposal_json->'meta'->>'sendStagingId' = split_part(t.idempotency_key, ':', 3))`,
+    reason: '자동 마케팅 회차를 보내지 못해 발송 크레딧을 돌려드림',
+    acceptKey: (key) => {
+      const [, proposalId, stagingId] = key.split(':');
+      return isUuid(proposalId) && isUuid(stagingId);
+    },
+  });
 }
 
 /** 'sending'에 정지된 제안 복구(decideStuckSendingRecovery 순수 정책). campaign 'sending' 자동정리 패턴 미러. */

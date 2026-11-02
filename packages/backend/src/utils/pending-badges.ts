@@ -71,7 +71,7 @@ export async function getPendingBadgeCounts(): Promise<PendingBadgeCounts> {
     countOne('plan_requests', () => countPending('plan_requests')),
     countOne('deposit_requests', () => countPending('deposit_requests')),
     countOne('agent_charge_orders', () => countPending('agent_charge_orders')),
-    countOne('ai_credit_requests', () => countRechargeRequests('pending')),
+    countOne('credit-recharge-requests', () => countRechargeRequests('pending')),   // 로그 이름표(표는 크레딧 CT 가 센다 · R39)
     countOne('kakao_sender_profiles', countSenderProfilesPending),
   ]);
   return { planRequests, deposits, agentChargeOrders, credits, senderProfiles };

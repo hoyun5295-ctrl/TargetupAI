@@ -653,7 +653,6 @@ router.post('/typo-check', async (req: Request, res: Response) => {
     if (out.failed) return res.status(502).json({ success: false, code: 'SPELL_UNREADABLE', error: '검사 결과를 읽지 못했어요. 한 번 더 눌러 주세요.' });
     return res.json({ success: true, bodyHash: out.bodyHash, issues: out.issues });
   } catch (err: any) {
-    if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
     console.error('[SNS typo-check] 오류:', err);
     if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: '맞춤법을 검사하지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
@@ -706,7 +705,6 @@ router.post('/caption', async (req: Request, res: Response) => {
       imageText: out.imageText,
     });
   } catch (err: any) {
-    if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
     if (isMissingSnsTable(err)) return sendDbPending(res);
     console.error('[SNS caption] 오류:', err);
     if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로

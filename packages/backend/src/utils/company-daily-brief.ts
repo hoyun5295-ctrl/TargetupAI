@@ -111,7 +111,7 @@ export async function generateCompanyDailyBrief(companyId: string): Promise<Dail
         model: 'opus',
         companyId,
         source: 'daily-brief',
-        creditCost: 0, // 일일 분석 차감(predictive-daily 멱등 1회)에 포함 — 별도 차감 0 (Harold 확정 2026-07-02)
+        charge: { kind: 'included-in', parent: 'predictive-daily' }, // 일일 분석 차감(멱등 1회)에 포함 (Harold 확정 2026-07-02)
       });
       aiCalled = true;
       const parsed = extractJsonObject(text);

@@ -6,6 +6,7 @@ import pool, { mysqlQuery } from '../config/database';
 import { SUCCESS_CODES_SQL } from '../utils/sms-result-map';
 import { INVITO_INFO } from '../config/defaults';
 import { CREDIT_UNIT_PRICE } from '../utils/ai-credit-calc';
+import { previewCreditBillingLines, unmarkCreditBillingLines } from '../utils/ai-credit-billing';
 // ★ 2026-07-25 사용량 집계 CT — 청구서(이 파일)와 발송통계 엑셀이 같은 집계를 쓴다(정산 정합).
 //   미리보기(/preview)도 여기를 거친다 — 미리보기와 발행 금액이 갈라지지 않게 하는 유일한 장치다.
 import {
@@ -2599,22 +2600,11 @@ const handleBillingDelete = async (req: Request, res: Response) => {
       [targetIds],
     );
 
-    const restored = await client.query(
-      `UPDATE ai_credit_requests
-          SET billed = false, billed_invoice_id = NULL
-        WHERE billed_invoice_id = ANY($1::uuid[])
-        RETURNING id`,
-      [targetIds]
-    );
-
-    // ★ 2026-07-26 초과사용 크레딧 마커 되돌림. FK가 `ON DELETE SET NULL`이라 아래 DELETE만으로도
-    //   풀리지만, 몇 건이 다시 청구 대상이 됐는지 로그로 남기려면 명시 UPDATE가 필요하다.
-    const restoredOverage = await client.query(
-      `UPDATE ai_credit_transactions SET billed_billing_id = NULL
-        WHERE billed_billing_id = ANY($1::uuid[])
-        RETURNING id`,
-      [targetIds]
-    );
+    // 후불 크레딧 충전 · 초과사용 마커 되돌림 = 크레딧 CT(★ 2026-11-01 §16-1 F10).
+    //   ★ 2026-07-26 초과사용 FK 가 `ON DELETE SET NULL`이라 아래 DELETE 만으로도 풀리지만, 몇 건이 다시 청구 대상이 됐는지 로그로 남기려면 명시 UPDATE 가 필요하다.
+    const unmarked = await unmarkCreditBillingLines(client, targetIds);
+    const restored = { rowCount: unmarked.requests };
+    const restoredOverage = { rowCount: unmarked.overage };
 
     // billing_items는 ON DELETE CASCADE로 자동 삭제 (billing_items_billing_id_fkey confdeltype='c' 실측)
     await client.query('DELETE FROM billings WHERE id = ANY($1::uuid[])', [targetIds]);
@@ -2907,29 +2897,8 @@ router.get('/preview', async (req: Request, res: Response) => {
     //    사용자 지정이면 발행이 크레딧을 청구하지 않으므로 미리보기도 0으로 둔다(금액 일치).
     let chargeSupply = 0, chargeCount = 0, overageCount = 0;
     if (!userId) {
-      const creditChargeRes = await pool.query(
-        `SELECT credits, supply_amount FROM ai_credit_requests
-          WHERE company_id = $1::uuid AND status = 'approved' AND billed = false
-            -- ★ 2026-07-26 KST 경계 — 발행과 같은 축이라야 미리보기 금액이 갈라지지 않는다.
-            AND processed_at >= ($2 || ' 00:00:00+09')::timestamptz
-            AND processed_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz`,
-        [companyId, startDate, endDate]
-      );
-      chargeSupply = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.supply_amount || 0), 0);
-      chargeCount = creditChargeRes.rows.reduce((s: number, r: any) => s + Number(r.credits || 0), 0);
-      const overageRes = await pool.query(
-        `SELECT COALESCE(SUM(overage_credits), 0) AS oc FROM ai_credit_transactions
-          WHERE company_id = $1::uuid AND type = 'deduct' AND overage_credits > 0
-            -- ★ 2026-07-26 청구 완료 마커를 발행과 같은 기준으로 본다 — 이미 청구된 초과사용분을
-            -- 미리보기가 다시 세면 미리보기 금액과 실제 청구액이 갈라진다.
-            AND billed_billing_id IS NULL
-            -- ★ 2026-07-26 KST 경계. PG 세션 TZ가 Etc/UTC라 date 캐스트로 쓰면 경계가 KST 09:00이 된다.
-            -- 발송 집계는 KST 자정으로 고쳤는데 크레딧만 UTC로 남아 있어 청구 월이 또 어긋났다.
-            AND created_at >= ($2 || ' 00:00:00+09')::timestamptz
-            AND created_at < (($3::date + INTERVAL '1 day')::date::text || ' 00:00:00+09')::timestamptz`,
-        [companyId, startDate, endDate]
-      );
-      overageCount = Number(overageRes.rows[0]?.oc) || 0;
+      // 발행과 같은 기준(한국 날짜 경계 · 청구 완료 마커) = 크레딧 CT 한 곳(★ 2026-11-01 §16-1 F10)
+      ({ chargeSupply, chargeCount, overageCount } = await previewCreditBillingLines(pool, companyId, startDate, endDate));
     }
     const aiCreditCount = chargeCount + overageCount;
     const aiCreditSupply = chargeSupply + overageCount * CREDIT_UNIT_PRICE;

@@ -40,7 +40,6 @@ import { buildCdpDiagnostics, buildCdpFunnel, buildCdpTimeline24h } from '../uti
 import { buildCdpActiveCustomers } from '../utils/cdp-active-customers';
 import { groupCustomersByChannel, getCompanyChannelCapabilities } from '../utils/source-aware-channel-selector';
 import { explainCdpDiagnostics } from '../utils/cdp-fusion-explainer';
-import { AiRateLimitExceeded } from '../utils/ai-rate-limit';
 // ★ D189 #4 (2026-05-22): Journey Step A/B/Bandit 트래킹 — SDK 호출용 endpoint
 import { recordJourneyStepVariantReward } from '../utils/bandit-optimizer';
 import { listProvidersForUI } from '../utils/provider-registry';
@@ -2330,9 +2329,8 @@ router.post('/explain', async (req: Request, res: Response) => {
     const explanation = await explainCdpDiagnostics(companyId, diagnostics, companyInfo);
     return res.json({ success: true, explanation });
   } catch (err: any) {
-    // ★ 2026-09-27 한줄로 V2 R183 — 크레딧 부족·월 한도는 그대로 알린다(옛: 진단 함수가 삼켜 '건강도 50점'을 실제 결과처럼 보였다)
+    // ★ 2026-09-27 한줄로 V2 R183 — 크레딧 부족은 그대로 알린다(옛: 진단 함수가 삼켜 '건강도 50점'을 실제 결과처럼 보였다 · 월 호출 한도는 2026-11-01 삭제)
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-    if (err instanceof AiRateLimitExceeded) return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });
     if (respondUserError(res, err)) return;
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {

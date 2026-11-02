@@ -39,7 +39,7 @@ import {
 import { PRETEST_LEAD_HOURS } from './journey-pretest-notifier';
 import { deductCreditOutcome, isChargedByKey, InsufficientCreditError, type DeductOutcome } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-alert';
 import { interleaveByCompany } from './concurrency';
 
 const DEFAULT_ANCHOR_HOUR_KST = 10;
@@ -575,6 +575,7 @@ export async function recoverPendingOneShots(): Promise<{ checked: number; dispa
     [_oneShotCursor.after],
   );
   _oneShotCursor.advance(rows.rows.map((r: any) => String(r.id)), ONE_SHOT_RECOVERY_LIMIT);
+  const dispatchFailures: PassFailure[] = [];   // 이번 회차 받는 분 넣기 실패(아래 한 통)
   for (const j of rows.rows as Array<{ id: string; company_id: string; approved_by: string | null }>) {
     out.checked++;
     try {
@@ -601,13 +602,18 @@ export async function recoverPendingOneShots(): Promise<{ checked: number; dispa
       if (r.locked && r.value) out.dispatched++;
     } catch (err: any) {
       console.error(`[JourneyAnchor] 한 번 보내기 회복 실패 journey=${j.id}:`, err?.message || err);
-      void sendSystemAlert({
-        companyId: String(j.company_id),
-        dedupKey: `journey-one-shot-dispatch:${j.id}`,
-        cooldownMs: 6 * 60 * 60 * 1000,
-        message: `켜진 한 번 보내기 여정의 받는 분 넣기가 회복 회차에서도 실패했습니다(30분마다 다시 시도). journey=${j.id} — ${String(err?.message || err).slice(0, 200)}`,
-      }).catch(() => undefined);
+      dispatchFailures.push({ companyId: String(j.company_id), key: String(j.id), error: String(err?.message || err).slice(0, 200) });
     }
+  }
+  // ★ 2026-11-02 설계서 docs/2026-11-01-credit-control-tower-design.md §16-6 · §17-2 — 넣기 실패 = 한 회차 1통 · 항목 = 여정(6시간 안 알린 여정은 거름 = 종전 여정당 6시간)
+  //   (옛: 반복문 catch 에서 여정마다 1통 = 원인 하나에 N통 · 계약 ⑥)
+  if (dispatchFailures.length > 0) {
+    await alertPassFailures({
+      pass: 'journey-one-shot-dispatch',
+      title: '켜진 한 번 보내기 여정의 받는 분 넣기가 회복 회차에서도 실패했습니다(30분마다 다시 시도).',
+      action: '서버 로그 [JourneyAnchor] 한 번 보내기 회복 실패 줄의 여정으로 원인을 확인해 주세요.',
+      failures: dispatchFailures, total: rows.rows.length,
+    }).catch(() => undefined);
   }
   // ★ E9 ④ — 넣기 대기가 30분을 넘은 판 = 운영 경보(원인 하나 · 회사 없음 · 1시간)
   const late = await query(

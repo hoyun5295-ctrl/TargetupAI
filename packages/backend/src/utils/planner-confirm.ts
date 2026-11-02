@@ -14,10 +14,12 @@
  *   - 미리보기 HTML은 렌더러 출력 그대로 내보내고 화면이 sandbox iframe(스크립트 0 · 열람 비콘 0)으로 그린다.
  */
 import { createHash, randomBytes } from 'crypto';
-import { query } from '../config/database';
+import { query, pool } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
 import { getCreditCost } from './ai-credit-calc';
+import { duePrice } from './ai-credit-price';
 import { getCreditState, isCreditEnabledStrict } from './ai-credit';
+import { sumDeductedByKeyLikes } from './ai-credit-ledger';
 import { buildAdMessage, getOpt080Number } from './messageUtils';
 import { getDmDetail } from './dm/dm-builder';
 import { renderDmViewerHtml } from './dm/dm-viewer';
@@ -159,7 +161,7 @@ export interface ApprovalQuote {
 export async function quoteEventApproval(ev: Pick<PlannerEventRow, 'companyId' | 'planMonth'>, tps: FpTouchpoint[]): Promise<ApprovalQuote> {
   const creditEnabled = await isCreditEnabledStrict(ev.companyId);
   const pay = await loadAgencyPaymentState(ev.companyId, ev.planMonth);
-  const agencyCost = creditEnabled && !pay.paid ? getCreditCost(PLANNER_AGENCY_SOURCE) : 0;
+  const agencyCost = duePrice(PLANNER_AGENCY_SOURCE, { applies: creditEnabled, paid: pay.paid });   // 금액 규칙 = 크레딧 CT
   // 남은 접점만(승인이 발행·완성하는 대상과 같은 집합 · planner-approve)
   const live = tps.filter((t) => t.status !== 'skipped' && t.status !== 'sent');
   const dmId = live.find((t) => t.channel === 'dm' && t.assetRef)?.assetRef || null;
@@ -175,7 +177,7 @@ export async function quoteEventApproval(ev: Pick<PlannerEventRow, 'companyId' |
   let email: ApprovalQuote['email'] = null;
   if (emailId) {
     const completed = await isEmailCampaignCompleted(ev.companyId, emailId);
-    email = { campaignId: emailId, cost: creditEnabled && !completed ? getCreditCost('email-campaign-complete') : 0, completed };
+    email = { campaignId: emailId, cost: duePrice('email-campaign-complete', { applies: creditEnabled, paid: completed }), completed };
   }
   const parts: ApprovalQuotePart[] = [];
   if (agencyCost > 0) parts.push({ key: 'agency', label: '이달 대행료', cost: agencyCost });
@@ -329,12 +331,7 @@ async function loadBuildPaid(ev: PlannerEventRow): Promise<number> {
   const tokens = Object.values(ev.meta.build || {}).map((b) => b?.token).filter((t): t is string => !!t);
   if (tokens.length === 0) return 0;
   const likes = tokens.flatMap((t) => [`quick:${ev.companyId}:%:${t}:%`, `quick-read:${ev.companyId}:${t}:%`]);
-  const r = await query(
-    `SELECT COALESCE(SUM(amount), 0)::int AS paid FROM ai_credit_transactions
-      WHERE company_id = $1::uuid AND type = 'deduct' AND idempotency_key LIKE ANY($2::text[])`,
-    [ev.companyId, likes],
-  );
-  return Number(r.rows[0]?.paid) || 0;
+  return sumDeductedByKeyLikes(pool, ev.companyId, likes);   // 원장은 크레딧 CT 로만(★ 2026-11-01 §16-1 F4)
 }
 
 /**

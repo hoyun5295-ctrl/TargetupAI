@@ -12,7 +12,7 @@
 import { randomUUID } from 'crypto';
 import { query, withTransaction } from '../config/database';
 import { chargedAmountByKey, refundCredit } from './ai-credit';
-import { sendSystemAlert } from './system-alert';
+import { alertPassFailures, type PassFailure } from './system-alert';
 
 export const CANDIDATE_GENERATING_TTL_MINUTES = 10;
 export const CANDIDATE_REFUND_WINDOW_DAYS = 7;
@@ -147,6 +147,7 @@ export async function sweepPretestCandidates(): Promise<{ expired: number; refun
        FROM journey_pretest_candidates c JOIN journey_step_snapshots s ON s.id = c.snapshot_id
       WHERE c.status = 'failed' AND c.updated_at > NOW() - INTERVAL '${CANDIDATE_REFUND_WINDOW_DAYS} days'`,
   );
+  const failures: PassFailure[] = [];
   for (const row of failed.rows as any[]) {
     const companyId = String(row.company_id);
     const snapshotId = String(row.snapshot_id);
@@ -162,12 +163,17 @@ export async function sweepPretestCandidates(): Promise<{ expired: number; refun
       if (rr.refunded) out.refunded++;
     } catch (e: any) {
       console.warn(`${LOG} 재작성 환불 대조 실패 snapshot=${snapshotId}:`, e?.message || e);
-      void sendSystemAlert({
-        companyId,
-        dedupKey: `journey-pretest-regen-refund:${snapshotId}`,
-        message: `여정 발송 전 자동 재작성 차감을 되돌리지 못했습니다(다음 회차 다시 · ${CANDIDATE_REFUND_WINDOW_DAYS}일 동안). 키=${key} — ${String(e?.message || e).slice(0, 160)}`,
-      }).catch(() => undefined);
+      failures.push({ companyId, key: snapshotId, error: String(e?.message || e).slice(0, 160) });
     }
+  }
+  // ★ 2026-11-02 설계 §17-4 C1 — 한 주기 1통(옛: 반복문 catch 에서 판마다 1통 = 원인 하나에 N통 · 계약 ⑥ 이 타이머 없는 파일이라 못 봤다)
+  if (failures.length > 0) {
+    await alertPassFailures({
+      pass: 'journey-pretest-regen-refund',
+      title: `여정 발송 전 자동 재작성 차감을 되돌리지 못한 판이 있습니다(다음 회차 다시 · ${CANDIDATE_REFUND_WINDOW_DAYS}일 동안).`,
+      action: `서버 로그 ${LOG} 재작성 환불 대조 실패 줄의 판(snapshot)으로 확인해 주세요.`,
+      failures, total: failed.rows.length,
+    }).catch(() => undefined);
   }
   if (out.expired || out.refunded) console.log(`${LOG} 만료 ${out.expired} · 환불 ${out.refunded}`);
   return out;

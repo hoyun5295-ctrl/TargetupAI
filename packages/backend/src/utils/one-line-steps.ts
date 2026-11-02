@@ -12,6 +12,7 @@
  */
 import type { LineQuestion } from './one-line-ct/questions';
 import { createHash } from 'crypto';
+import { linePriceTable, lineStepsPrice } from './ai-credit-price';
 import { oneLineGaps, hasPromotionIntent, lineProductTerms, lineMoneyAmounts, lineWithoutReads, lineSegments, isValidLineBenefit } from './one-line-facts';
 import { getLineTemplate, type LineTemplateId, type LineLayout } from './design-core/line-templates';
 import { isLineCompositionId, type LineCompositionId, type LineSlotLevel, type LineSlotFill } from './line-compositions';
@@ -714,16 +715,15 @@ export const LINE_RECOOK_SOURCE = 'oneline-recook';
 export const LINE_JUDGE_SOURCE = 'oneline-judge';
 
 /**
- * ★ 2026-10-22 Harold 확정 단가(설계서 §11-3) — 입구 무관.
- *   판단 2 · 판단을 거친 첫 결과물 13(합계 15) · 판단 없이 첫 결과물 15 · 같은 한 줄 그릇 추가 · 다시 만들기 3.
+ * ★ 2026-10-22 Harold 확정 규칙(설계서 §11-3) — 입구 무관. 판단 · 판단을 거친 첫 결과물(합계) · 다시 만들기.
+ *   ★ 2026-11-01 §16-3(P3) — 금액 = 크레딧 CT 단가표(ai-credit-price) · 여기에 숫자를 적지 않는다(옛: 2 · 15 · 3 이 단가표와 두 벌).
  */
-export const LINE_PRICE = { judge: 2, total: 15, again: 3 } as const;
+export const LINE_PRICE = linePriceTable();
 
 /**
  * (순수) 이번 생성의 금액 · 원천.
  *   오늘(또는 어제) 이 한 줄로 완성을 이미 냈으면 = 다시 만들기 3 · 아니면 첫 결과물 = 15 에서 이미 낸 판단 2 를 뺀 값.
  */
 export function lineStepsCharge(completionPaid: boolean, judgePaid: boolean): { cost: number; source: string; completionDue: boolean } {
-  if (completionPaid) return { cost: LINE_PRICE.again, source: LINE_RECOOK_SOURCE, completionDue: false };
-  return { cost: LINE_PRICE.total - (judgePaid ? LINE_PRICE.judge : 0), source: LINE_COMPLETE_SOURCE, completionDue: true };
+  return lineStepsPrice(completionPaid, judgePaid);   // 규칙 = 크레딧 CT
 }

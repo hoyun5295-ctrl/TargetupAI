@@ -52,7 +52,7 @@ import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
 // ★ 2026-09-02 브랜드 이미지의 카카오 콘텐츠 서버 확정 — img_url에는 업로드본만 실을 수 있다(IMC 회신).
 //   조립기가 우리 서빙 URL을 거절하므로, 조립기를 부르는 경로는 그 앞에서 이 치환을 거쳐야 한다.
 // (판정 → 치환 순서는 prepareBrandAttachmentForSend가 소유한다 — brand-message에서 가져온다)
-import { prepaidDeduct, prepaidRefund, REFUND_KEYS, deductFailureHttp } from '../utils/prepaid';
+import { prepaidDeduct, prepaidRefund, REFUND_KEYS, deductFailureHttp, reportTestRefundMiss } from '../utils/prepaid';
 // ★ 2026-07-29 브랜드메시지 판정은 CT 하나에서만 한다 — 채널 리터럴을 라우트에 다시 적으면
 //   집계(일자·상세)와 차감·환불이 서로 다른 기준을 갖게 되고, 그 차이가 곧 미청구나 발행 차단이다.
 import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType, BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
@@ -410,11 +410,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
             const rev = await prepaidRefund(companyId, managerContacts.length, doneType, TEST_REF, `${axis.type} 차감 실패로 ${doneType} 차감분 회수`, 'test', { refundKey: REFUND_KEYS.TEST });
             if (!rev.ok) {
               console.error(`[테스트발송][보상미완] company=${companyId} ${doneType} ${managerContacts.length}건 — 수동 환불 필요`);
-              void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 미완 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
+              await reportTestRefundMiss({ companyId, ref: TEST_REF, type: doneType, count: managerContacts.length, kind: '보상 환불 미완' });   // ★ 1102 설계 §17-4 B1
             }
           } catch (revertErr) {
             console.error(`[테스트발송][보상실패] ${doneType} ${managerContacts.length}건 회수 실패:`, revertErr);
-            void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${doneType}`, message: `테스트 발송 보상 환불 실패 — company=${companyId} ${doneType} ${managerContacts.length}건 수동 확인 필요` });
+            await reportTestRefundMiss({ companyId, ref: TEST_REF, type: doneType, count: managerContacts.length, kind: '보상 환불 실패' });
           }
         }
         // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500 · 충전 안내를 띄우지 않는다)
@@ -512,11 +512,11 @@ router.post('/test-send', async (req: Request, res: Response) => {
           const refundRes = await prepaidRefund(companyId, axisFail, axis.type, TEST_REF, '테스트 발송 실패 자동 환불', 'test', { refundKey: REFUND_KEYS.TEST });
           if (!refundRes.ok) {
             console.error(`[테스트발송][환불미완] company=${companyId} ${axis.type} ${axisFail}건 — 수동 환불 필요`);
-            void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 미완 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
+            await reportTestRefundMiss({ companyId, ref: TEST_REF, type: axis.type, count: axisFail, kind: '실패 환불 미완' });
           }
         } catch (refundErr) {
           console.error(`[테스트발송][환불오류] company=${companyId} ${axis.type} ${axisFail}건:`, refundErr);
-          void sendSystemAlert({ companyId: companyId, dedupKey: `test-refund-miss:${companyId}:${axis.type}`, message: `테스트 발송 실패 환불 오류 — company=${companyId} ${axis.type} ${axisFail}건 수동 확인 필요` });
+          await reportTestRefundMiss({ companyId, ref: TEST_REF, type: axis.type, count: axisFail, kind: '실패 환불 오류' });
         }
       }
     }

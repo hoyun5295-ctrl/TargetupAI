@@ -18,6 +18,7 @@ import { grantFreeTrial, isTrialApplyOpen, ADMIN_WEEK_TRIAL } from '../utils/bas
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure, todayKst } from '../utils/plan-change-log';
 import { expireTrialLeftover } from '../utils/ai-credit-tx';
+import { planMonthCreditsOf } from '../utils/ai-credit-admin';
 import { noticeForUser, parseNoticeEvent, recordNoticeEvent, CUSTOMER_NOTICE_RATE } from '../utils/customer-notice'; // ★ 2026-10-29 고객 보안 공지
 // ★ 2026-10-04 선불 요금제 이용 기간 — 관리 중 게이트 · my-plan 표시(docs/2026-10-04-prepaid-plan-term-design.md)
 import { planTermManagedSql, PlanTermError, getPlanTermView, getScheduledFromForPlan } from '../utils/plan-term';
@@ -623,10 +624,8 @@ router.post('/plan-request', demoBlock, async (req: Request, res: Response) => {
     // ★ 2026-10-20 여정 V.3 §5-5 — 켜 둔 여정의 예상 운영 크레딧이 바꿀 요금제의 월 기본보다 많으면 한 번 확인받는다(고객사가 정한다 · 막지 않음).
     //   크레딧이 모자라면 여정이 멈춘다(D1) · 요금제는 우리가 올리지 않는다.
     if (acknowledgeJourneyCredit !== true) {
-      const planRes = await query(`SELECT ai_credits_per_month FROM plans WHERE id = $1`, [requestedPlanId]);
-      const planCredits = planRes.rows[0]?.ai_credits_per_month;
+      const planCreditsNum = await planMonthCreditsOf(requestedPlanId);   // 요금제 월 크레딧 = 크레딧 CT(★ 2026-11-01 §16-1 F14)
       const forecast = await journeyCreditForecast(companyId);
-      const planCreditsNum = planCredits == null ? null : Number(planCredits);
       if (journeyCreditOverPlan(forecast, planCreditsNum)) {
         return res.status(409).json({
           error: '켜 둔 여정 · 자동 마케팅이 쓰는 크레딧이 바꿀 요금제의 한 달 기본 크레딧보다 많아요.',

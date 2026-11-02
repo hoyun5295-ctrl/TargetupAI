@@ -49,7 +49,7 @@ const USE_CASES: UseCase[] = [
     label: '여정 단계별 사전 생성',
     gradient: 'from-violet-400 to-purple-500',
     scenario: '여정 6단계 × 50명 × 다양한 톤 사전 생성',
-    realtime: '300회 호출 즉시: 한도 빠른 소진',
+    realtime: '300회 호출 즉시: 크레딧 빠른 소진',
     batch: '300회 야간 일괄: 다음 날 활용',
     recommend: 'batch',
   },
@@ -115,7 +115,7 @@ export default function BatchModeGuideModal({ open, onClose }: Props) {
                 <li>· 즉시 응답 (5~10초)</li>
                 <li>· 회사 admin 화면 인터랙션</li>
                 <li>· 기본 단가 적용</li>
-                <li>· 한도 빠르게 소진</li>
+                <li>· 크레딧 빠르게 소진</li>
               </ul>
             </div>
             <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl">
@@ -127,7 +127,7 @@ export default function BatchModeGuideModal({ open, onClose }: Props) {
                 <li>· 24시간 SLA 처리</li>
                 <li>· 대량 일괄 작업</li>
                 <li>· <strong className="text-emerald-700">50% 비용 절감</strong></li>
-                <li>· 한도 절감 효과</li>
+                <li>· 크레딧 절감 효과</li>
               </ul>
             </div>
           </div>

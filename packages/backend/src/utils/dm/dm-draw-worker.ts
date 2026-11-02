@@ -7,7 +7,7 @@
  */
 import { loadDrawableLuckyDraws, runLuckyDrawForCampaign, type DrawableCampaign } from './dm-interaction';
 import { notifyOperatorAdmins } from '../continuous-operator';
-import { sendSystemAlert } from '../system-alert';
+import { alertPassFailures, type PassFailure } from '../system-alert';
 
 const INTERVAL_MS = 60 * 1000; // 1분 — draw_at 분 단위 도래 충분
 let _timer: ReturnType<typeof setInterval> | null = null;
@@ -20,12 +20,13 @@ let _running = false;
  */
 const DRAW_FAIL_NOTIFY = 5;
 const drawFails = new Map<string, { count: number; nextAt: number }>();
-async function noteDrawFailure(c: DrawableCampaign, err: any): Promise<void> {
+/** 돌려줌 = 이번이 알릴 차례인가(DRAW_FAIL_NOTIFY 번째 실패) — 운영 경보는 부르는 패스가 모아 1통 */
+async function noteDrawFailure(c: DrawableCampaign, err: any): Promise<boolean> {
   const prev = drawFails.get(c.campaignId) || { count: 0, nextAt: 0 };
   const count = prev.count + 1;
   const waitMin = Math.min(60, 2 ** (count - 1));
   drawFails.set(c.campaignId, { count, nextAt: Date.now() + waitMin * 60 * 1000 });
-  if (count !== DRAW_FAIL_NOTIFY) return;
+  if (count !== DRAW_FAIL_NOTIFY) return false;
   const title = c.title ? `'${c.title}'` : '모바일 DM';
   await notifyOperatorAdmins(
     { adminPhoneNumbers: [], backupAdminPhone: null, companyId: c.companyId, createdBy: c.createdBy || null },
@@ -33,11 +34,7 @@ async function noteDrawFailure(c: DrawableCampaign, err: any): Promise<void> {
     `${title} 마감 추첨을 ${count}번 시도했지만 당첨자를 뽑지 못했어요. 늦춰 가며 다시 시도하고 있어요. 계속되면 고객센터로 알려 주세요.`,
     { noticeHeader: '[한줄로 모바일 DM 안내문자]' },
   ).catch((e: any) => console.warn('[dm-draw-worker] 추첨 실패 통지 경고:', e?.message));
-  void sendSystemAlert({
-    companyId: c.companyId,
-    dedupKey: `dm-draw-fail:${c.campaignId}`,
-    message: `DM 마감 추첨 ${count}회 연속 실패 — 캠페인 ${c.campaignId} · 회사 ${c.companyId} · 마지막 오류: ${String(err?.message || err).slice(0, 120)}`,
-  });
+  return true;
 }
 
 /** 1회 스캔 — 마감 도래한 미추첨 캠페인 추첨. */
@@ -55,6 +52,7 @@ export async function runDmDrawOnce(): Promise<{ scanned: number; drawn: number;
     throw err;
   }
 
+  const failures: PassFailure[] = [];
   for (const c of targets) {
     const f = drawFails.get(c.campaignId);
     if (f && f.nextAt > Date.now()) continue;   // 실패 뒤 늦춘 다음 시도 시각 전
@@ -69,9 +67,14 @@ export async function runDmDrawOnce(): Promise<{ scanned: number; drawn: number;
       }
     } catch (err: any) {
       console.error(`[dm-draw-worker] 캠페인 ${c.campaignId} 추첨 오류:`, err?.message);
-      await noteDrawFailure(c, err);
+      if (await noteDrawFailure(c, err)) failures.push({ companyId: c.companyId, error: String(err?.message || err), key: c.campaignId });
     }
   }
+  // ★ 2026-11-01 §16-6 — 운영 경보 = 한 주기 1통(옛: 캠페인마다 1통) · 캠페인 = 로그 · 담당자 통지는 캠페인마다 그대로
+  await alertPassFailures({
+    pass: 'dm-draw', title: `DM 마감 추첨이 ${DRAW_FAIL_NOTIFY}번 연속 실패한 캠페인이 있습니다.`, failures, total: scanned,
+    action: '서버 로그 [dm-draw-worker] 추첨 오류 줄을 확인해 주세요(늦춰 가며 다시 시도합니다).',
+  }).catch((e: any) => console.warn('[dm-draw-worker] 경보 발송 실패:', e?.message));
   return { scanned, drawn, winners };
 }
 

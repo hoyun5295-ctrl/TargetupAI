@@ -153,9 +153,6 @@ function withImageUpload(handler: (req: any, res: Response) => Promise<any>) {
       }
       try { await handler(req, res); } catch (err: any) {
         if (missingRelationResponse(res, err)) return;
-        if (err?.name === 'AiRateLimitExceeded') {
-          return res.status(429).json({ success: false, error: err.message });
-        }
         console.error('[캠페인대행 업로드 핸들러] 오류:', err?.message || err);
         return res.status(err?.statusCode === 400 ? 400 : 500).json({ success: false, error: publicErrorText(err, '처리 실패') });
       }

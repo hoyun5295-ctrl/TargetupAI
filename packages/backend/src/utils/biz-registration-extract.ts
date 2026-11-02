@@ -7,8 +7,8 @@
  *
  * 원칙:
  *  - vision 호출 패턴은 `event-image-extract.ts`를 미러(검증된 자산 재사용 — no_inline_duplication).
- *  - **creditCost 0** — 슈퍼관리자 내부 운영 기능이라 고객사 크레딧을 차감하지 않는다
- *    (services/ai.ts: creditCost 0이면 체크·차감 모두 없음 실측 확인).
+ *  - **크레딧 밖(charge internal)** — 슈퍼관리자 내부 운영 기능이라 고객사 크레딧을 차감하지 않는다
+ *    (크레딧 CT aiCallCost: 사실이 있으면 0 → 체크 · 차감 모두 없음).
  *  - 자동입력 결과는 화면 입력칸에 채워질 뿐 저장은 사람이 [저장]으로 확정한다 — 오판독은 눈으로 걸러진다.
  *  - 이미지에 없는 값은 빈 문자열(추정 금지 — AI 혜택 날조 금지 계열과 같은 원칙).
  */
@@ -92,7 +92,7 @@ export async function extractBizRegistration(params: {
     maxTokens: 800,
     temperature: 0,
     source: 'biz-registration-extract',
-    creditCost: 0, // 슈퍼관리자 내부 기능 — 고객사 크레딧 미차감
+    charge: { kind: 'internal', why: '슈퍼관리자 내부 기능(고객사 크레딧 미차감)' },
     userId: params.adminId || undefined,
     images: [image],
   });

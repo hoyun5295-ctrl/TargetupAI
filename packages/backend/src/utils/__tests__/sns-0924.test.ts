@@ -406,9 +406,9 @@ describe('라우트 정적 계약', () => {
     expect(ROUTE).not.toMatch(/user\?\.id\b/);
   });
 
-  it('게시는 CT 한 곳(composeSnsPost)만 · AI 한도 초과는 429', () => {
+  it('게시는 CT 한 곳(composeSnsPost)만 · 월 AI 호출 한도는 없다(★ 2026-11-01)', () => {
     expect(ROUTE).toMatch(/composeSnsPost\(/);
-    expect(ROUTE).toMatch(/AiRateLimitExceeded'\) return res\.status\(429\)/);
+    expect(ROUTE).not.toMatch(/AiRateLimitExceeded|AI_RATE_LIMIT/);
   });
 
   it('다시 연결은 같은 응답에 승인 주소를 싣는다(C2 1탭)', () => {

@@ -13,6 +13,7 @@ import { redis } from '../config/defaults';
 import { createJourneyFromTemplate, type JourneyTemplateCode } from './journey-builder';
 import type { JourneyAIPackage, GeneratedStep } from './journey-ai-generator';
 import { deductCreditOutcome, refundCredit, CreditSettleError } from './ai-credit';
+import { ledgerRowsByKeyPrefix } from './ai-credit-ledger';
 import { JourneyInputError } from './journey-step-limits';
 
 export interface CallbackNumberRow {
@@ -129,15 +130,11 @@ async function rememberedDraft(companyId: string, requestKey: string): Promise<s
  * 조회 오류는 던진다(모르는 것을 "안 냈다"로 접지 않는다).
  */
 export async function nextDraftChargeKey(companyId: string, requestKey: string): Promise<string> {
-  const r = await query(
-    `SELECT idempotency_key, type FROM ai_credit_transactions
-      WHERE company_id = $1::uuid AND idempotency_key LIKE $2`,
-    [companyId, `${requestKey}#%`],
-  );
+  const rows = await ledgerRowsByKeyPrefix({ query }, companyId, `${requestKey}#`);   // 원장은 크레딧 CT 로만(★ 2026-11-01 §16-1 F9)
   const refunded = new Set(
-    (r.rows as any[]).filter((x) => x.type === 'refund').map((x) => String(x.idempotency_key).replace(/:refund$/, '')),
+    rows.filter((x) => x.type === 'refund').map((x) => String(x.idempotency_key).replace(/:refund$/, '')),
   );
-  const charged = (r.rows as any[]).filter((x) => x.type === 'deduct').map((x) => String(x.idempotency_key));
+  const charged = rows.filter((x) => x.type === 'deduct').map((x) => String(x.idempotency_key));
   if (charged.some((k) => !refunded.has(k))) throw new JourneyInputError(DRAFT_ALREADY_MADE, await rememberedDraft(companyId, requestKey));
   return `${requestKey}#${charged.length + 1}`;
 }

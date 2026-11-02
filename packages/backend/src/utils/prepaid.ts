@@ -11,7 +11,7 @@ import { buildDeductDescription, type AlimtalkSettleUnits } from './deduct-refer
 //   선불 잔액은 고객이 입금한 현금이라 **부가세 포함가**로 깎아야 한다.
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
 import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed, type BrandPricingInput } from './unit-price';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, queuePassFailures, flushPassAlerts } from './system-alert';
 import { parseDeductDescription, parseFreeCount, ledgerMessageTypeSql } from './deduct-reference';
 // ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
 //   호출부 11곳에 흩뿌리면 "발송 5경로 부분 패치"가 그대로 재발한다.
@@ -83,6 +83,22 @@ async function loadDeductLedger(
  * 원인을 고치면 **다음 사이클에 자동으로 밀린 환불이 나간다.** 반대로 틀린 금액이 한 번 나가면
  * 되돌리는 경로(reverse)를 또 태워야 한다.
  */
+/**
+ * 테스트 발송 차감을 돌려주지 못함 = 수동 환불 대상(캠페인 레코드가 없어 의무 기록 · 자동 재시도가 없다 · 경보가 유일한 흔적).
+ * ★ 2026-11-02 설계 §17-4 B1 — 요청 참조:종류마다 한 항목(옛: 회사 · 종류 키 6시간 = 그 안의 다른 요청 환불 실패가 버려졌다) ·
+ *   응답 전에 원장에 넣고(못 쓰면 메모리 대기) 보내기는 기다리지 않는다.
+ */
+export async function reportTestRefundMiss(o: { companyId: string; ref: string; type: string; count: number; kind: string }): Promise<void> {
+  const spec = {
+    pass: 'test-refund-miss',
+    title: '테스트 발송 차감을 돌려주지 못했습니다(캠페인 기록이 없어 자동으로 다시 시도하지 않습니다).',
+    action: '서버 로그 [테스트발송] 줄의 회사 · 종류 · 건수로 수동 환불해 주세요.',
+    failures: [{ companyId: o.companyId, key: `${o.ref}:${o.type}`, error: `${o.kind} · ${o.type} ${o.count}건` }],
+  };
+  await queuePassFailures(spec).catch(() => undefined);
+  void flushPassAlerts(spec.pass).catch(() => undefined);
+}
+
 async function warnUnresolvedLedger(companyId: string, referenceId: string, messageType: string, where: string) {
   const msg = `[선불정산중단] ${where}: 차감 원장 설명을 되읽지 못해 정산을 멈췄다. company=${companyId} ref=${referenceId} ${messageType}`;
   console.error(msg);

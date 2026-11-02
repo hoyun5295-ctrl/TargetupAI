@@ -8,7 +8,7 @@
  * 3주기:
  *   ① 적재 스캔(5분): kakao_templates(APPROVED) × gateway_bill_mappings(auto_push_enabled) → desired 행 INSERT(pending)
  *   ② 푸시(1분): pending/재시도 도래분 배치(상한 50) → upsert → 효과 검증(GET 재조회) → synced.
- *      실패=백오프(1m→5m→30m→2h→6h), 8회 초과=failed + sendSystemAlert
+ *      실패=백오프(1m→5m→30m→2h→6h), 8회 초과=failed + 한 주기 1통 경보(alertPassFailures · ★ 1101 §16-6)
  *   ③ 대조(6h): bill별 GET 전량 ↔ desired diff(4필드) — 고아 행 표시(자동 삭제 절대 X — 0611 원칙),
  *      드리프트=pending 재전환+알림, last_seen_at 갱신
  *
@@ -22,7 +22,7 @@
  */
 
 import { query } from '../config/database';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-alert';
 import {
   GatewayServer,
   buildMappingPayload,
@@ -149,6 +149,7 @@ export async function runPushPass(): Promise<PushPassResult> {
 
   result.picked = rows.length;
 
+  const failures: PassFailure[] = [];
   for (const row of rows) {
     const server = String(row.server) as GatewayServer;
 
@@ -171,11 +172,8 @@ export async function runPushPass(): Promise<PushPassResult> {
       // payload 결함 = 재시도 무의미 — failed 확정 + 알림 (데이터 정정 후 수동 재개)
       await markFailed(row.id, `payload 결함: ${built.error}`);
       result.failed += 1;
-      await sendSystemAlert({
-        companyId: row.company_id ?? null,
-        dedupKey: `gtm-payload:${row.bill_id}:${row.tmplcd}`,
-        message: `게이트웨이 매핑 payload 결함 — bill=${row.bill_id} tmplcd=${row.tmplcd} (${built.error})`,
-      });
+      log(`payload 결함 — bill=${row.bill_id} tmplcd=${row.tmplcd} (${built.error})`);
+      failures.push({ companyId: row.company_id ?? null, error: `payload 결함: ${built.error}`, key: String(row.id) });
       continue;
     }
 
@@ -207,12 +205,17 @@ export async function runPushPass(): Promise<PushPassResult> {
       }
 
       const permanent = !verify.upsert.ok && !verify.upsert.retryable;
-      await handlePushFailure(row, verify.error || verify.upsert.message, permanent, result);
+      await handlePushFailure(row, verify.error || verify.upsert.message, permanent, result, failures);
     } catch (err: any) {
       // 네트워크 예외(타임아웃·무응답 reject 포함) = 재시도 가능 — 멱등 upsert라 안전 (§4-9-C 8)
-      await handlePushFailure(row, `호출 예외: ${err?.message || err}`, false, result);
+      await handlePushFailure(row, `호출 예외: ${err?.message || err}`, false, result, failures);
     }
   }
+  // ★ 2026-11-01 §16-6 — 확정 실패를 모아 한 주기 1통(옛: 행마다 1통 · 게이트웨이 장애 하나에 매핑 수만큼) · 행 = 로그 · 매핑 표 last_error
+  await alertPassFailures({
+    pass: 'gtm-push', title: '게이트웨이 템플릿 매핑 push 가 확정 실패한 행이 있습니다.', failures, total: result.picked,
+    action: '서버 로그 게이트웨이 매핑 줄 · 매핑 표 last_error 를 확인해 데이터 정정 뒤 수동 재개해 주세요.',
+  }).catch((e: any) => log(`확정 실패 경보 발송 실패: ${e?.message || e}`));
 
   if (result.picked > 0) {
     log(
@@ -227,6 +230,7 @@ async function handlePushFailure(
   errorMsg: string,
   permanent: boolean,
   result: PushPassResult,
+  failures: PassFailure[],
 ): Promise<void> {
   const attempts = (Number(row.attempts) || 0) + 1;
   const backoff = permanent ? null : computeBackoffMs(attempts);
@@ -234,11 +238,8 @@ async function handlePushFailure(
   if (backoff === null) {
     await markFailed(row.id, errorMsg, attempts);
     result.failed += 1;
-    await sendSystemAlert({
-      companyId: row.company_id ?? null,
-      dedupKey: `gtm-failed:${row.bill_id}:${row.tmplcd}`,
-      message: `게이트웨이 매핑 push ${permanent ? '영구 오류' : `${MAX_PUSH_ATTEMPTS}회 초과`} — bill=${row.bill_id} tmplcd=${row.tmplcd} (${errorMsg.slice(0, 80)})`,
-    });
+    log(`push ${permanent ? '영구 오류' : `${MAX_PUSH_ATTEMPTS}회 초과`} — bill=${row.bill_id} tmplcd=${row.tmplcd} (${errorMsg.slice(0, 80)})`);
+    failures.push({ companyId: row.company_id ?? null, error: `${permanent ? '영구 오류' : `${MAX_PUSH_ATTEMPTS}회 초과`}: ${errorMsg}`, key: String(row.id) });
     return;
   }
 

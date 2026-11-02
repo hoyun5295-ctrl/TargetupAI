@@ -16,7 +16,7 @@ import { dmWideOneOverflow, flatSectionsOfBody, dmWideOneError } from './dm-sect
 import { query } from '../../config/database';
 import { findLinkDefectDeep } from '../normalize';
 import { PLACEHOLDER_PATTERN } from '../email-ai';
-import { isCreditEnabledStrict } from '../ai-credit';
+import { isCreditEnabledStrict, isChargedByKey } from '../ai-credit';
 import { getCreditCost } from '../ai-credit-calc';
 import { validateDm, type ValidationItem } from './dm-validate';
 import { extractFlatSectionsFromDm } from './dm-builder';
@@ -147,13 +147,9 @@ export async function dmPublishFeeSourceOf(companyId: string, dmId: string): Pro
   return { source, cost: getCreditCost(source) };
 }
 
-/** 발행비가 이미 원장에 있는가(멱등키 `dm-publish:{id}`) */
+/** 발행비가 이미 원장에 있는가(멱등키 `dm-publish:{id}` · 원장은 크레딧 CT 로만 묻는다 · ★ 2026-11-01 §16-1 F6) */
 export async function isDmPublishFeeCharged(companyId: string, dmId: string): Promise<boolean> {
-  const r = await query(
-    `SELECT 1 FROM ai_credit_transactions WHERE company_id = $1::uuid AND idempotency_key = $2 LIMIT 1`,
-    [companyId, `dm-publish:${dmId}`],
-  );
-  return r.rows.length > 0;
+  return isChargedByKey(companyId, `dm-publish:${dmId}`);
 }
 
 /**

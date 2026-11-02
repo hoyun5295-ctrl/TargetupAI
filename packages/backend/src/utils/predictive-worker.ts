@@ -98,6 +98,7 @@ export async function runPredictiveBatchNow(): Promise<{
         ORDER BY c.id`
     );
 
+    const failures: Array<{ companyId: string; error: string }> = [];
     for (const row of companyRes.rows) {
       // DB 규모 기준 일일 분석 차감액 (요금제 가입 회사 매일 1회, v2). 고객 수 0 = 차감 0 → skip.
       const cntRes = await query(`SELECT COUNT(*)::int AS n FROM customers WHERE company_id = $1::uuid`, [row.id]);
@@ -151,20 +152,17 @@ export async function runPredictiveBatchNow(): Promise<{
         }
       } catch (err: any) {
         console.warn('[PredictiveWorker] 회사 batch 오류, skip:', row.id, err?.message);
-        // ★ 2026-11-01 크레딧 컨트롤타워 C6(P10) — 회사 하나의 분석 · 차감 실패를 사람에게 알린다(회사 · 날짜당 하나 · 사내 회사는 경보 CT 가 거른다).
+        // ★ 2026-11-01 크레딧 컨트롤타워 C6(P10) — 회사 하나의 분석 · 차감 실패를 사람에게 알린다(사내 회사는 경보 CT 가 거른다).
         //   옛: 경고 로그 한 줄로 끝나 이에스페이먼트 분석이 10/7 ~ 11/1 26일 멈춘 것을 아무도 몰랐다(B-1101-5).
-        try {
-          const { sendSystemAlert } = await import('./system-alert');
-          await sendSystemAlert({
-            companyId: String(row.id),
-            dedupKey: `predictive-fail:${row.id}:${todayKst}`,
-            message: `고객 예측 분석 · 분석 차감 실패(회사 ${row.id}): ${String(err?.message || err).slice(0, 200)}`,
-          });
-        } catch (alertErr: any) {
-          console.warn('[PredictiveWorker] 실패 경보 발송 실패:', row.id, alertErr?.message);
-        }
+        //   ★ §16-6 — 실패를 모아 한 주기 1통(회사마다 1통이면 원인 하나에 회사 수만큼)
+        failures.push({ companyId: String(row.id), error: String(err?.message || err) });
       }
     }
+    const { alertPassFailures } = await import('./system-alert');
+    await alertPassFailures({
+      pass: 'predictive-daily', title: '고객 예측 분석 · 분석 차감이 일부 회사에서 실패했습니다.', failures, total: companyRes.rows.length,
+      action: '서버 로그 [PredictiveWorker] 회사 batch 오류 줄을 확인해 주세요(다음 날 사이클이 다시 시도합니다).',
+    }).catch((e: any) => console.warn('[PredictiveWorker] 실패 경보 발송 실패:', e?.message));
 
     // ★ 2026-07-12 C-5: 자동마케팅 통지·귀속 독립 패스 — 예측 차감과 분리(크레딧 부족 회사도 통지·귀속 진행).
     //   대상 = 요금제 가입(만료·정지 제외) + 살아있는 오퍼레이터 보유 회사. 각 함수는 자체 멱등 마커 보유

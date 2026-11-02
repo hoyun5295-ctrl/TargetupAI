@@ -9,7 +9,7 @@
  *   → customers/campaigns/templates 등 데이터는 유지. 직접발송·기본 기능은 계속 사용 가능.
  *
  * 🕓 실행 주기
- *   매일 04:00 KST (기존 Tomcat 주간 재시작 04시와 겹치지만 PG 작업이라 무관)
+ *   1분마다(★ 2026-11-01 §16-5 · 옛: 매일 04:00 KST — 만료 뒤 최대 하루 동안 체험 크레딧이 남았다)
  *   ↳ 기준 설계: auto-campaign-worker.ts / alimtalk-jobs.ts 의 setInterval 패턴 준수.
  *
  * 🔒 대상 회사 조건 (★2026-08-16 술어 상수 TRIAL_DOWNGRADE_TARGET_WHERE — SELECT·UPDATE 공유)
@@ -25,7 +25,8 @@
  */
 
 import pool, { query } from '../config/database';
-import { recordPlanChange, alertPlanChangeFailure, todayKst } from './plan-change-log';
+import { recordPlanChange, todayKst } from './plan-change-log';
+import { alertPassFailures, type PassFailure } from './system-alert';
 import { expireTrialLeftover } from './ai-credit-tx';
 
 function log(tag: string, ...args: any[]) {
@@ -109,6 +110,7 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
 
   type TargetRow = { id: string; company_name: string; plan_id: string | null; plan_code: string | null; monthly_price: string | null; trial_key: string | null };
   const rows: Array<{ id: string; company_name: string }> = [];
+  const failures: PassFailure[] = [];
   for (const t of targets.rows as TargetRow[]) {
     // ★ 유료 플랜 강등 절대 금지 가드(경위 = 파일 상단 🔒 절) — 건너뛰고 경고만 남긴다.
     if (Number(t.monthly_price) > 0 && t.plan_code !== 'TRIAL') {
@@ -170,66 +172,54 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
         // 조회~갱신 사이에 상태가 바뀐 경우(다른 경로가 먼저 처리) — 정상 스킵
         await client.query('ROLLBACK');
       }
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
-      await alertPlanChangeFailure(t.id, err);
+    } catch (err: any) {
+      try { await client.query('ROLLBACK'); } catch { /* 아래 경보에 포함 */ }
+      // ★ 2026-11-01 §16-6 — 실패를 모아 한 주기 1통(옛: 회사마다 1통 · 1분마다 도는 패스라 원인 하나에 회사 수만큼)
+      console.log(`[plan-change][MISS] 체험 강등 롤백 company=${t.id}: ${err?.message || err}`);
+      failures.push({ companyId: t.id, error: String(err?.message || err) });
     } finally {
       client.release();
     }
   }
+  await alertPassFailures({
+    pass: 'trial-downgrade', title: '무료체험 만료 강등이 일부 회사에서 실패했습니다.', failures, total: targets.rows.length,
+    action: '서버 로그 [plan-change][MISS] 줄을 확인해 주세요(1분마다 다시 시도합니다).',
+  }).catch((e: any) => console.log(`[plan-change][ALERT_FAIL] 체험 강등 경보: ${e?.message || e}`));
 
+  // 1분마다 돌므로 강등이 있을 때만 남긴다(빈 회차 로그 0)
   if (rows.length > 0) {
     log('job', `${rows.length}개 회사 FREE(미가입) 강등 완료:`,
       rows.map(r => `${r.company_name}(${r.id.slice(0, 8)})`).join(', '));
-  } else {
-    log('job', '만료 대상 없음');
   }
   return { downgraded: rows.length };
 }
 
 // ════════════════════════════════════════════════════════════
 // 스케줄러 부트스트랩 (app.ts listen 콜백에서 1회 호출)
+// ★ 2026-11-01 §16-5(Harold 「체험크레딧은 체험 종료가 되면 그냥 사라져야」) — 하루 한 번 04:00 → 1분마다.
+//   만료 시각이 지나면 1분 안에 FREE · 그 사이 크레딧 일은 원장 CT 가 만료 시각 기준으로 먼저 소멸한다(applyResetIfNeeded).
 // ════════════════════════════════════════════════════════════
 
 let _scheduled = false;
+let _running = false;
 let _timer: NodeJS.Timeout | null = null;
-
-function msUntilNextKst04(): number {
-  // 현재 UTC → KST → 다음 04:00 KST까지 ms
-  const now = new Date();
-  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const target = new Date(kstNow);
-  target.setUTCHours(4, 0, 0, 0);
-  if (target.getTime() <= kstNow.getTime()) {
-    target.setUTCDate(target.getUTCDate() + 1);
-  }
-  return target.getTime() - kstNow.getTime();
-}
 
 export function startTrialDowngradeWorker(): void {
   if (_scheduled) return;
   _scheduled = true;
-
-  const wait = msUntilNextKst04();
-  log('scheduler', `started (next run in ${Math.round(wait / 60000)}분 / 매일 04:00 KST)`);
-
-  _timer = setTimeout(async () => {
-    try {
-      await runTrialDowngradeJob();
-    } catch (err) {
-      logErr('first-tick', err);
-    }
-    // 이후 24시간 주기
-    _timer = setInterval(() => {
-      runTrialDowngradeJob().catch((e) => logErr('interval', e));
-    }, 24 * 60 * 60 * 1000);
-  }, wait);
+  log('scheduler', 'started (1분마다 · 만료 시각이 지난 체험 강등)');
+  _timer = setInterval(() => {
+    if (_running) return;
+    _running = true;
+    runTrialDowngradeJob()
+      .catch((e) => logErr('interval', e))
+      .finally(() => { _running = false; });
+  }, 60 * 1000);
 }
 
 export function stopTrialDowngradeWorker(): void {
   if (_timer) {
-    clearTimeout(_timer);
-    clearInterval(_timer as any);
+    clearInterval(_timer);
     _timer = null;
   }
   _scheduled = false;

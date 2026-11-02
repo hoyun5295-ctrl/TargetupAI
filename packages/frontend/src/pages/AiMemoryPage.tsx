@@ -372,9 +372,6 @@ export default function AiMemoryPage() {
           related: data.related_memories || [],
           noData: data.no_data,
         });
-      } else if (data.code === 'AI_RATE_LIMIT') {
-        toast.warning(`AI 호출 한도 초과: ${data.error || '이번 달 한도를 초과했습니다.'}`);
-        setNaturalResult(null);
       } else {
         toast.error(`검색 실패: ${data.error || '알 수 없는 오류'}`);
         setNaturalResult(null);

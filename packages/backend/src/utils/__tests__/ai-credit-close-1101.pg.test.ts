@@ -13,7 +13,8 @@ import { insertMinimalRow } from './pg/fixtures';
 import { ledgerBlockSql } from './pg/global-setup';
 
 const sendSystemAlert = vi.fn(async () => 0);
-vi.mock('../system-alert', () => ({ sendSystemAlert: (...a: any[]) => (sendSystemAlert as any)(...a) }));
+const passAlerts = vi.fn(async (_o: any) => 0);   // ★ 1101 §16-6 — 주기 패스 경보 = 한 주기 1통
+vi.mock('../system-alert', () => ({ sendSystemAlert: (...a: any[]) => (sendSystemAlert as any)(...a), alertPassFailures: (...a: any[]) => (passAlerts as any)(...a) }));
 
 import { loadCreditRow, applyResetIfNeeded, refundCreditWithClient, applyTrialStart, expireTrialLeftover, CreditLedgerConflictError, _deductWithClient } from '../ai-credit-tx';
 import { recordPlanChange } from '../plan-change-log';
@@ -34,6 +35,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   sendSystemAlert.mockClear();
+  passAlerts.mockClear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -442,7 +444,11 @@ describe('환불(C8 · R3-1) — 구성 셋 · 구매분 몫은 언제나 구매
 });
 
 describe('1일 지급 패스(C2) · 대조(C9) — 운영 SQL 그대로', () => {
-  const alertsFor = (id: string) => (sendSystemAlert.mock.calls as any[]).filter((a) => a[0]?.companyId === id).map((a) => String(a[0].message));
+  /** 그 회사 경보 = 직접 경보 + 패스 경보의 실패 줄(한 주기 1통 안의 회사별 사실) */
+  const alertsFor = (id: string) => [
+    ...(sendSystemAlert.mock.calls as any[]).filter((a) => a[0]?.companyId === id).map((a) => String(a[0].message)),
+    ...(passAlerts.mock.calls as any[]).flatMap((a) => a[0].failures).filter((f: any) => f.companyId === id).map((f: any) => String(f.error)),
+  ];
 
   it('1일 패스 = 리셋이 이번 달 전인 회사를 한 달씩 닫는다(리셋 시각 = 11월 1일 0시)', async () => {
     const { grantMonthlyCreditsPass } = await import('../ai-credit');
@@ -463,6 +469,7 @@ describe('1일 지급 패스(C2) · 대조(C9) — 운영 SQL 그대로', () => 
     // 그 뒤 밀린 마감이 지난 날짜로 넣은 줄(큰 seq · 9/30)
     await ledger(id, { type: 'expire', amount: -300, key: `t-c:${id}`, base: 0, purchased: 150, createdAt: '2026-09-30 23:59:59.999999+09' });
     sendSystemAlert.mockClear();
+    passAlerts.mockClear();
     await runCreditReconcilePass(at('2026-11-20T10:00:00+09:00'));
     expect(alertsFor(id)).toEqual([expect.stringMatching(/grant 100: .*구매 0→150/)]);
   });
@@ -476,6 +483,7 @@ describe('1일 지급 패스(C2) · 대조(C9) — 운영 SQL 그대로', () => 
     await inTx(async (c) => applyResetIfNeeded(c, id, await loadCreditRow(c, id, true), now));
     expect((await query(`SELECT seq::int AS s FROM ai_credit_transactions WHERE company_id = $1::uuid ORDER BY seq`, [id])).rows.map((r: any) => r.s)).toEqual([99, 100]);
     sendSystemAlert.mockClear();
+    passAlerts.mockClear();
     await runCreditReconcilePass(now);
     expect(alertsFor(id)).toEqual([]);
     await query(`UPDATE companies SET ai_credits_base_remaining = 999 WHERE id = $1::uuid`, [id]);

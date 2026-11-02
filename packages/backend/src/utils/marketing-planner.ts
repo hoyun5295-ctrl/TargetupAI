@@ -11,7 +11,7 @@
  *     여기서 0으로 두되 화면이 "실행 시 별도"로 말한다 — 0을 "공짜"로 읽히게 두지 않는다.
  *   - 단가의 진실 = `getCreditCost`(ai-credit-calc) 하나. 여기 숫자를 쓰지 않는다.
  */
-import { getCreditCost } from './ai-credit-calc';
+import { channelMakePrice } from './ai-credit-price';
 
 // ── 채널 축 ──────────────────────────────────────────────────────────
 export const PLANNER_CHANNELS = ['sms', 'alimtalk', 'email', 'dm', 'inapp'] as const;
@@ -73,18 +73,7 @@ export function computeTouchpointDate(rule: TimingRule, startsOn: string, endsOn
  * null = "실행 시 별도 과금"(문자 당일 생성·알림톡 검수 대행) — 0과 다르다.
  */
 export function estimateChannelCredits(channel: PlannerChannel): number | null {
-  switch (channel) {
-    case 'email':
-      return getCreditCost('email-campaign-complete');
-    case 'dm':
-      // AI 생성 + 발행이 한 세트다(설계서 §3-2 — 5 + 100).
-      return getCreditCost('dm-ai-generate') + getCreditCost('dm-builder');
-    case 'inapp':
-      return getCreditCost('inapp-publish');
-    case 'sms':
-    case 'alimtalk':
-      return null;
-  }
+  return channelMakePrice(channel);   // 규칙 = 크레딧 CT(★ 2026-11-01 §16-3)
 }
 
 /** (순수) 터치포인트 목록의 예상 제작 크레딧 합계 — null(실행 축)은 합계에 안 들어간다. */

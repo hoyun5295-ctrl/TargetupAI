@@ -15,6 +15,7 @@
 import { query } from '../config/database';
 import { lineageColumnsReady } from './journey-lineage';
 import { getCreditCost } from './ai-credit-calc';
+import { deductStatsByKeySegment, deductCountSince } from './ai-credit-ledger';
 
 export interface ForecastLineage {
   rootId: string;
@@ -90,18 +91,11 @@ async function loadOperationLedger(companyId: string, now: Date, rootSql: string
   ledger: Array<{ journeyKey: string; n30: number; firstAt: Date | string | null }>;
 }> {
   const all = await query(`SELECT id, ${rootSql} AS root FROM journeys WHERE company_id = $1::uuid`, [companyId]);
-  const led = await query(
-    `SELECT split_part(idempotency_key, ':', 2) AS journey_key,
-            COUNT(*) FILTER (WHERE created_at > $2::timestamptz - INTERVAL '${FORECAST_WINDOW_DAYS} days')::int AS n30,
-            MIN(created_at) AS first_at
-       FROM ai_credit_transactions
-      WHERE company_id = $1::uuid AND source = 'journey-operation' AND type = 'deduct'
-      GROUP BY 1`,
-    [companyId, now.toISOString()],
-  );
+  // 원장은 크레딧 CT 로만(★ 2026-11-01 §16-1 F8) — 키 둘째 칸 = 계보 뿌리(또는 옛 여정 id)
+  const led = await deductStatsByKeySegment({ query }, { companyId, source: 'journey-operation', segment: 2, windowDays: FORECAST_WINDOW_DAYS, now });
   return {
     idToRoot: new Map(all.rows.map((r: any) => [String(r.id), String(r.root)])),
-    ledger: led.rows.map((r: any) => ({ journeyKey: String(r.journey_key || ''), n30: Number(r.n30) || 0, firstAt: r.first_at || null })),
+    ledger: led.map((r) => ({ journeyKey: r.segment, n30: r.n, firstAt: r.firstAt })),
   };
 }
 
@@ -129,13 +123,8 @@ export async function journeyCreditForecast(companyId: string, now: Date = new D
       ORDER BY ${ready ? 'entry_closed_at NULLS FIRST, ' : ''}created_at ASC`,
     [companyId],
   );
-  const am = await query(
-    `SELECT COUNT(*)::int AS n FROM ai_credit_transactions
-      WHERE company_id = $1::uuid AND source = 'continuous-operator-send' AND type = 'deduct'
-        AND created_at > $2::timestamptz - INTERVAL '${FORECAST_WINDOW_DAYS} days'`,
-    [companyId, now.toISOString()],
-  );
-  const autoMarketing30 = (Number(am.rows[0]?.n) || 0) * getCreditCost('continuous-operator-send');
+  const amCount = await deductCountSince({ query }, { companyId, source: 'continuous-operator-send', windowDays: FORECAST_WINDOW_DAYS, now });
+  const autoMarketing30 = amCount * getCreditCost('continuous-operator-send');
   if (act.rows.length === 0) return { total: autoMarketing30, autoMarketing30, basis: 'measured', perLineage: [] };
   const { idToRoot, ledger } = await loadOperationLedger(companyId, now, rootSql);
   const f = computeJourneyCreditForecast({

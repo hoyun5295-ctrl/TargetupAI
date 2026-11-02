@@ -9,16 +9,19 @@
  * 반드시 loadCreditRow(FOR UPDATE) → dup 체크 순서를 지킨다.
  */
 
+import type { PoolClient } from 'pg';
 import { UserFacingError } from './http-error';
 import {
   splitDeduction,
   buildIdempotencyKey,
   isOperationSource,
   SEND_CREDIT_SOURCES,
+  creditApplies,
+  isTrialOver,
 } from './ai-credit-calc';
 import {
   loadCloseInputs, simulateClose, addMonths, monthTag, monthLastDay, cycleUnbilledOverageRows, creditSeqReady, billedMonthly, monthKeyOf, TS_US_SQL,
-  LEDGER_SEQ_SQL,
+  LEDGER_SEQ_SQL, monthEntitlementNow, grantedInMonth,
 } from './ai-credit-month';
 
 export class InsufficientCreditError extends Error {
@@ -78,7 +81,12 @@ export async function loadCreditRow(client: any, companyId: string, forUpdate: b
             c.billing_type               AS billing_type,
             c.postpaid_overage_limit     AS overage_limit,
             p.ai_credits_per_month       AS plan_credits,
-            p.plan_code                  AS plan_code
+            p.plan_code                  AS plan_code,
+            -- ★ 2026-11-01 §16-5 체험 수명(만료 시각이 지나면 강등 전이라도 남은 기본분 소멸) — 만료 시각은 UTC 벽시계 칸 · 키는 강등 작업과 같은 꼴
+            c.subscription_status        AS subscription_status,
+            (c.trial_expires_at AT TIME ZONE 'UTC') AS trial_ends_at,
+            to_char(c.trial_expires_at, 'YYYYMMDD"T"HH24MISSUS') AS trial_key,
+            p.monthly_price              AS plan_monthly_price
        FROM companies c
        LEFT JOIN plans p ON c.plan_id = p.id
       WHERE c.id = $1::uuid${forUpdate ? '\n      FOR UPDATE OF c' : ''}`,
@@ -111,6 +119,17 @@ export class CreditLedgerConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CreditLedgerConflictError';
+  }
+}
+
+/**
+ * 호출 계약 위반 · 원장 어긋남(★ 2026-11-01 크레딧 컨트롤타워 C4) — 사용자 조건이 아니라 코드 · 데이터 결함이다(호출부 트랜잭션 롤백 · 실패 알림).
+ *   적용일 = 이번 달 1일 ~ 오늘만 · 일할 원장 키 중복 = 같은 이력 행을 두 번 반영하려 함.
+ */
+export class PlanChangeContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PlanChangeContractError';
   }
 }
 
@@ -189,11 +208,14 @@ async function reduceUnbilledOverage(client: any, companyId: string, cycleMonth:
     left -= cut;
   }
   if (left > 0) {
-    const { sendSystemAlert } = await import('./system-alert');
-    await sendSystemAlert({
-      companyId,
-      dedupKey: `credit-overage-unreduced:${companyId}:${monthTag(cycleMonth)}`,
-      message: `${cycleMonth} 후불 초과 맞춤: 이미 청구된 초과 ${left}크레딧은 줄이지 못했습니다(크레딧으로 돌려주지 않음 · 사람 확인 · 회사 ${companyId})`,
+    // ★ 2026-11-01 §16-6 — 모아 보내기(옛: 회사마다 1통 · 월 마감 패스 한 번에 회사 수만큼) · 항목 = 회사 · 달(한 번뿐인 사건 = 못 보내면 다음 통에 · Codex 구현 1R-2) · 양 = 로그
+    // ★ 2026-11-02 설계 §17-3 — 사건 모드(total 없음 · 옛 total 1 = 「마지막 주기 실패 1곳 / 대상 1곳」 오해 글)
+    console.warn(`[CREDIT][OVERAGE-UNREDUCED] ${cycleMonth} 이미 청구된 초과 ${left}크레딧 못 줄임 company=${companyId}`);
+    const { alertPassFailures } = await import('./system-alert');
+    await alertPassFailures({
+      pass: 'credit-overage-unreduced', title: '후불 초과 맞춤에서 이미 청구된 초과를 줄이지 못한 회사가 있습니다(크레딧으로 돌려주지 않음 · 사람 확인).',
+      failures: [{ companyId, error: `${cycleMonth} 이미 청구된 초과 못 줄임`, key: `${companyId}:${monthTag(cycleMonth)}` }],
+      action: '서버 로그 [CREDIT][OVERAGE-UNREDUCED] 줄의 회사 · 양을 확인해 주세요.',
     }).catch(() => undefined);
   }
 }
@@ -211,6 +233,8 @@ function kstMonthStartIso(month: string): string {
  * 리셋 시각이 없으면 첫 지급(E · 시각 = 지금). 그때 기본분 ≠ 0 이면 던진다(원장으로 설명 못 하는 잔액).
  */
 export async function applyResetIfNeeded(client: any, companyId: string, row: any, now: Date): Promise<any> {
+  // ★ 2026-11-01 §16-5 — 만료 시각이 지난 체험 = 강등 작업 전이라도 남은 기본분 소멸(월 마감보다 먼저 · 그 줄은 체험이 끝난 주기에 든다)
+  if (isTrialOver(row, now)) row = await expireEndedTrial(client, companyId, row, now);
   const inp = await loadCloseInputs(client, companyId, row, now, 'snapshot');
   if (inp.kind === 'none') return row;
   const purchased = Number(row.purchased) || 0;
@@ -291,7 +315,7 @@ export async function _deductWithClient(client: any, opts: DeductOpts, now: Date
 
   // ★ D227+ 크레딧제 미적용(요금제 크레딧 미설정 + 구매분 0) → 차감 skip(차단 X).
   //   plans.ai_credits_per_month에 값을 넣는 순간 자동으로 차감이 활성화된다.
-  if (locked.plan_credits == null && (Number(locked.purchased) || 0) === 0) {
+  if (!creditApplies(locked)) {
     await rollback();
     return { ...empty, skipReason: 'not_applicable' };
   }
@@ -381,7 +405,7 @@ export interface RefundOpts {
 export interface RefundResult {
   refunded: boolean;
   amount: number;
-  skipReason?: 'duplicate' | 'no_credit_row' | 'no_original' | 'partial_not_supported' | 'already_refunded';
+  skipReason?: 'duplicate' | 'no_credit_row' | 'no_original' | 'partial_not_supported' | 'already_refunded' | 'held_after_lifetime_end';
 }
 
 /**
@@ -536,6 +560,29 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
   }
 
   /**
+   * ★ 2026-11-01 §16-5 — 원 차감 **뒤에** 기본분 수명이 끝났나(체험 시작 · 체험 끝 줄 = source trial-start · trial-end · 금액 0 경계 줄 포함 ·
+   *   비교 = seq · seq 없는 옛 원 행 = 시각). 끝났으면 되메운 지급 크레딧 몫(fromBase)은 아래에서 같은 거래로 바로 소멸한다.
+   *   구성분을 모르면(폴백) 자동 환불하지 않는다 = 보류(Codex 설계 4R-1) — 판정은 원 행 부채 취소 등 어떤 쓰기보다 먼저(호출부 거래에서도 쓴 것 0).
+   */
+  let lifetimeEnded = false;
+  if (origRow) {
+    const bySeq = seqOk && origRow.seq != null;
+    const ended = await client.query(
+      `SELECT 1 FROM ai_credit_transactions
+        WHERE company_id = $1::uuid AND source IN ('trial-start', 'trial-end')
+          AND ${bySeq ? 'seq > $2::bigint' : 'created_at > $2::timestamptz'}
+        LIMIT 1`,
+      [opts.companyId, bySeq ? origRow.seq : origRow.created_at_us],
+    );
+    lifetimeEnded = ended.rows.length > 0;
+    if (lifetimeEnded && !comp) {
+      console.warn(`[CREDIT][HOLD] company=${opts.companyId} key=${opts.idempotencyKey} orig=${opts.originalIdempotencyKey} 원 차감 뒤 기본분 수명이 끝났고 구성분을 몰라 자동 환불하지 않음(원장으로 판정해 같은 키로 수동 환불)`);
+      await rollback();
+      return { refunded: false, amount: 0, skipReason: 'held_after_lifetime_end' };
+    }
+  }
+
+  /**
    * 부채 취소 = 원 행의 **지금** 미청구 초과분 중 이번 환불의 초과 몫까지(후불만 · 선불 초과는 청구가 아니라 다음 달 상계).
    *   같은 주기 = 그 몫을 기본분으로 되메운다(차감 전 상태) · 지난 주기 = 그 음수는 마감이 이미 정리했으니 부채만 지운다
    *   → 환불 행 overage_credits = 그 부채 취소분(대조 규칙 = amount − overage_credits · §5-2).
@@ -576,6 +623,8 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
   }
   const baseAfter = base + toBase;
   const purchasedAfter = purchased + toPurchased;
+  // 끝난 수명의 지급 크레딧 몫 = 바로 소멸(fromBase 그대로 · 상한 없음 = 새 수명의 빚을 끝난 크레딧이 갚지 않는다 · 부채 취소분은 남는다 · §16-5)
+  const endExpire = lifetimeEnded && comp ? comp.fromBase : 0;
   const recordBucket = toBase > 0 && toPurchased > 0 ? 'mixed' : (toPurchased > 0 ? 'purchased' : 'base');
   // ★ 2026-11-01 크레딧 컨트롤타워 I1 — 원장 먼저(같은 키는 잠금 뒤 걸렀다 · 0행이면 잔액을 바꾸지 않는다).
   const ins = await client.query(
@@ -596,9 +645,16 @@ export async function refundCreditWithClient(client: any, opts: RefundOpts, now:
     await rollback();
     return { refunded: false, amount: 0, skipReason: 'duplicate' };
   }
+  if (endExpire > 0) {
+    await insertLedgerRow(client, {
+      companyId: opts.companyId, type: 'expire', amount: -endExpire, bucket: 'base', source: 'trial-end-refund',
+      key: `trial-end-refund:${opts.idempotencyKey}`, baseAfter: baseAfter - endExpire, purchasedAfter,
+      reason: '끝난 수명의 기본분 = 환불 즉시 소멸', at: { kind: 'inCycle', params: cycleRowTimeParams(row0, now) },
+    });
+  }
   await client.query(
     `UPDATE companies SET ai_credits_base_remaining = $2, ai_credits_purchased = $3 WHERE id = $1::uuid`,
-    [opts.companyId, baseAfter, purchasedAfter],
+    [opts.companyId, baseAfter - endExpire, purchasedAfter],
   );
   if (manageTx) await client.query('COMMIT');
   return { refunded: true, amount };
@@ -701,24 +757,114 @@ export async function applyTrialStart(client: any, companyId: string, credits: n
       key: `trial-credit:${companyId}:${trialKey}`, baseAfter: b, purchasedAfter: purchased,
       reason: '무료체험 크레딧', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
     });
+  } else if (Number(row.base) <= 0) {
+    // ★ §16-5 수명 경계 줄 = 소멸 줄도 체험 크레딧 줄도 없으면 0 줄(그 뒤 환불이 끝난 수명의 기본분을 되살리지 않게 · Codex 설계 2R-1)
+    await insertLedgerRow(client, {
+      companyId, type: 'expire', amount: 0, bucket: 'base', source: 'trial-start',
+      key: `trial-start-expire:${companyId}:${trialKey}`, baseAfter: b, purchasedAfter: purchased,
+      reason: '무료체험 시작 · 수명 경계(소멸 0)', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
+    });
   }
   await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [companyId, b]);
 }
 
 /**
- * 체험 끝(만료 · 취소 · 유료 전환) = 월 마감 → 남은 양수 기본분 소멸. 0 이하면 줄 없음(음수 빚은 그대로).
+ * 체험 끝(만료 · 취소 · 유료 전환) = 월 마감 → 남은 양수 기본분 소멸. 음수 빚은 그대로.
  * 체험 만료 워커 · 체험 취소는 recordPlanChange **앞에**, recordPlanChange 는 TRIAL 을 떠나는 변경의 이력 INSERT 뒤에 부른다.
+ * ★ §16-5 — 남은 기본분이 0 이하여도 0 줄을 남긴다(수명 경계 · 다 쓰고 끝난 체험의 환불이 기본분을 되살리지 않게 · Codex 설계 2R-1).
+ *   같은 키가 이미 있으면 = 만료 시각이 지난 뒤 첫 크레딧 일이 먼저 소멸했다(expireEndedTrial) → 넘어간다. 그때 기본분이 양수면
+ *   환불 규칙상 생길 수 없는 잔액이라 던진다(호출부 거래 롤백 · 소리 내 멈춤).
  */
 export async function expireTrialLeftover(client: any, companyId: string, key: string, now: Date = new Date()): Promise<void> {
   const locked = await loadCreditRow(client, companyId, true);
   if (!locked) return;
   const row = await applyResetIfNeeded(client, companyId, locked, now);
   const b = Number(row.base) || 0;
-  if (b <= 0) return;
+  const dup = await client.query(`SELECT 1 FROM ai_credit_transactions WHERE idempotency_key = $1 LIMIT 1`, [key]);
+  if (dup.rows.length > 0) {
+    if (b > 0) throw new CreditLedgerConflictError(`체험 끝 원장 줄(${key})이 이미 있는데 기본분이 ${b} 입니다(회사 ${companyId})`);
+    return;
+  }
+  const leftover = Math.max(0, b);
   await insertLedgerRow(client, {
-    companyId, type: 'expire', amount: -b, bucket: 'base', source: 'trial-end',
-    key, baseAfter: 0, purchasedAfter: Number(row.purchased) || 0,
+    companyId, type: 'expire', amount: -leftover, bucket: 'base', source: 'trial-end',
+    key, baseAfter: b - leftover, purchasedAfter: Number(row.purchased) || 0,
     reason: '무료체험 종료 · 남은 체험 크레딧 소멸', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
   });
-  await client.query(`UPDATE companies SET ai_credits_base_remaining = 0 WHERE id = $1::uuid`, [companyId]);
+  if (leftover > 0) await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [companyId, b - leftover]);
+}
+
+/**
+ * ★ 2026-11-01 §16-5 — 만료 시각이 지난 체험(isTrialOver) = 강등 작업을 기다리지 않고 남은 양수 기본분 소멸 · 0 이하여도 0 줄(수명 경계).
+ *   키 = 강등 작업 · 체험 취소와 같은 `trial-end:{회사}:{만료 시각}`(같은 키가 있으면 이미 소멸 · 두 번 지움 0).
+ *   applyResetIfNeeded 맨 앞에서만 부른다(회사 행 잠금 · 월 마감 전).
+ */
+async function expireEndedTrial(client: any, companyId: string, row: any, now: Date): Promise<any> {
+  const key = `trial-end:${companyId}:${row.trial_key}`;
+  const dup = await client.query(`SELECT 1 FROM ai_credit_transactions WHERE idempotency_key = $1 LIMIT 1`, [key]);
+  if (dup.rows.length > 0) return row;
+  const b = Number(row.base) || 0;
+  const leftover = Math.max(0, b);
+  await insertLedgerRow(client, {
+    companyId, type: 'expire', amount: -leftover, bucket: 'base', source: 'trial-end',
+    key, baseAfter: b - leftover, purchasedAfter: Number(row.purchased) || 0,
+    reason: '무료체험 만료 · 남은 체험 크레딧 소멸', at: { kind: 'inCycle', params: cycleRowTimeParams(row, now) },
+  });
+  if (leftover > 0) await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [companyId, b - leftover]);
+  console.log(`[CREDIT][TRIAL-END] company=${companyId} 만료 시각 지남 · 남은 기본분 ${leftover} 소멸(강등 전)`);
+  return { ...row, base: b - leftover };
+}
+
+export interface PlanCreditAdjustResult {
+  applied: boolean;
+  /** 건너뛴 이유 — 운영에서 "왜 안 들어왔나"를 로그로 되짚을 수 있어야 한다 */
+  skipped?: 'no_company' | 'no_change';
+  delta?: number;
+  baseAfter?: number;
+  /** 그 달 권리(이 변경 뒤) */
+  entitlement?: number;
+  /** 이 변경 전 그 달 원장 지급 합 */
+  granted?: number;
+}
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 C4(5판) — 요금제가 바뀐 달의 크레딧 = **E(이 변경 뒤 그 달 시간표) − 그 달 원장 지급 합**.
+ *   그 달 합이 언제나 마지막 E 가 된다(변경마다 반올림하던 옛 식 `planChangeCreditDelta` 의 1씩 어긋남 · 이력 없는 회사 · 옛 반올림이 다음 변경에서 맞춰진다).
+ *   TRIAL 을 떠나는 변경은 먼저 남은 체험 크레딧을 소멸한다(만료 · 취소 · 승인 · 선불 첫 결제 어느 길이든 같은 규칙 · I7).
+ *   `recordPlanChange` 안에서만 부른다(이력 INSERT 뒤 · 같은 트랜잭션 · 회사 행 잠금 · 월 마감은 이미 끝).
+ *   원장 INSERT 가 먼저이고 실제로 들어간 경우에만 기본 칸을 고친다(키 = 이력 행 id).
+ */
+export async function applyPlanCreditDelta(
+  client: PoolClient,
+  o: { companyId: string; historyId: string; today: string; now: Date; toPlanCode: string; leavingTrial: boolean; purchased: number },
+): Promise<PlanCreditAdjustResult> {
+  // 체험 소멸도 이 변경의 시각으로(Codex 구현 1R-2 · 다시 읽으면 이력 INSERT 와 소멸 사이 자정에 다음 달 지급분을 체험 잔여로 지웠다)
+  if (o.leavingTrial) await expireTrialLeftover(client, o.companyId, `trial-end:${o.historyId}`, o.now);
+  const month = o.today.slice(0, 7);
+  const entitlement = await monthEntitlementNow(client, o.companyId, month, o.toPlanCode);
+  const granted = await grantedInMonth(client, o.companyId, month);
+  const delta = entitlement - granted;
+  const row = await loadCreditRow(client, o.companyId, true);
+  if (!row) return { applied: false, skipped: 'no_company' };
+  const base = Number(row.base) || 0;
+  if (delta === 0) return { applied: false, skipped: 'no_change', delta: 0, baseAfter: base, entitlement, granted };
+  const newBase = base + delta;
+  // amount 의 **부호가 방향**이다(양수 = 지급 · 음수 = 회수). 다른 type 과 달리 type 이 방향을 담지 않는다.
+  // 키 = plan-prorate:그 달:이력 id(Codex 구현 2R-2 · 그 달 지급 합이 이 줄을 키로 센다 · 이력 행이 지워져도 · 줄 시각과 무관하게)
+  const key = `plan-prorate:${monthTag(month)}:${o.historyId}`;
+  const ins = await client.query(
+    `INSERT INTO ai_credit_transactions
+       (company_id, type, amount, bucket, source, idempotency_key, balance_base_after, balance_purchased_after, reason, created_at, seq)
+     VALUES ($1::uuid, 'plan_prorate', $2, 'base', 'plan-prorate', $3, $4, $5, $6, ${CYCLE_ROW_TIME_SQL(7)}, ${LEDGER_SEQ_SQL})
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING id`,
+    [
+      o.companyId, delta, key, newBase, Number(row.purchased) || 0,
+      `요금제 변경 일할: ${o.toPlanCode} · ${month} 권리 ${entitlement} − 이미 지급 ${granted}`, ...cycleRowTimeParams(row, o.now),
+    ],
+  );
+  if (insertedRows(ins) === 0) throw new PlanChangeContractError(`요금제 변경 일할 원장 키가 이미 있습니다: ${key}`);
+  await client.query(`UPDATE companies SET ai_credits_base_remaining = $2 WHERE id = $1::uuid`, [o.companyId, newBase]);
+  console.log(`[plan-credit] company=${o.companyId} → ${o.toPlanCode} ${month} E=${entitlement} 지급=${granted} ${delta >= 0 ? '+' : ''}${delta} base=${base}→${newBase}`);
+  return { applied: true, delta, baseAfter: newBase, entitlement, granted };
 }

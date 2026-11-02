@@ -41,6 +41,7 @@
 | C91 | 0b4562da |
 | C92 | bec5d5d5 |
 | C93 | bec5d5d5 |
+| C94 | 미커밋 |
 | C95 | 미커밋 |
 
 ## §1 대기
@@ -603,6 +604,40 @@ ALTER TABLE journey_pretest_schedules
   ADD COLUMN IF NOT EXISTS snapshot_id uuid NULL,
   ADD COLUMN IF NOT EXISTS notice_sent_at timestamptz NULL;
 ```
+
+### C94-DDL-1 · system_alert_pending(경보 원장 · 못 보낸 한 번뿐인 사건 · 설계서 docs/2026-11-01-credit-control-tower-design.md §17-3) · ★ 배포 앞
+- 카드: C94
+- 단계: DDL
+- 선행: 없음(C93 = bec5d5d5 배포 끝 1102)
+- 의미 바꿈: 아니오(새 표 · 옛 코드는 읽지도 쓰지도 않는다 · 새 코드는 표가 없으면 사건을 닫지 않고 「경보 원장 표 없음」 경보 = **배포 앞**에 넣는다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'system_alert_pending' ORDER BY ordinal_position;
+- 확인: 8줄(pass text · item_key text · company_id text · error text · title text · action text · total integer · created_at timestamp with time zone)
+- 결과: 2026-11-02 Harold 실행 · 출력 SET · CREATE TABLE(already exists 알림 없음 = 새로 만듦) · 확인 SQL 8줄(pass · item_key · company_id · error · title · action = text · total = integer · created_at = timestamp with time zone) → 기대값 같음
+
+> C94-DDL-1 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C94-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS system_alert_pending (
+  pass       text        NOT NULL,
+  item_key   text        NOT NULL,
+  company_id text,
+  error      text        NOT NULL,
+  title      text        NOT NULL,
+  action     text        NOT NULL,
+  total      integer,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (pass, item_key)
+);
+```
+
+### C94-S1 · 크레딧 편입 · 경보 편입 실측(배포 뒤)
+- 카드: C94
+- 단계: 사후
+- 선행: C94-DDL-1 · 코드 배포
+- 기대: ① 배포 뒤 첫 시간 백엔드 로그에 `경보 원장 넣기 실패` · `system_alert_pending` 오류 0 ② `SELECT pass, COUNT(*) FROM system_alert_pending GROUP BY pass` = 0행이거나 한 시간 안에 비워짐(쌓이지 않음) ③ AI 사용량 화면 · 크레딧 화면 정상(한도 칸 없음 · 크레딧 사용률) ④ 운영 경보 문자 = 같은 원인 여러 곳이 한 통으로
+- 확인: 로그 줄 · SQL 결과 · 화면(Harold)
+- 결과:
 
 ### C95-S1 · 엔진 빈칸 묶음 실측(배포 뒤 · 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §16)
 - 카드: C95

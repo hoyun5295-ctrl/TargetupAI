@@ -115,9 +115,9 @@ function exec(sql: string, p: any[] = []): any {
   }
   // recordPlanChange
   if (s.startsWith('SELECT pg_advisory_xact_lock')) return { rows: [] };
-  if (s.startsWith('SELECT plan_code, monthly_price, COALESCE(ai_credits_per_month, 0) AS credits FROM plans')) {
+  if (s.startsWith('SELECT plan_code, monthly_price FROM plans WHERE id = $1::uuid')) {   // ★ 2026-11-01 §16-1 F16 — 요금제 월 크레딧 칸은 읽지 않는다
     const pl = byId(p[0]);
-    return { rows: pl ? [{ plan_code: pl.plan_code, monthly_price: pl.monthly_price, credits: pl.ai_credits_per_month }] : [] };
+    return { rows: pl ? [{ plan_code: pl.plan_code, monthly_price: pl.monthly_price }] : [] };
   }
   if (s.startsWith('SELECT to_plan_id, to_plan_code, to_monthly_price FROM company_plan_changes')) {
     return { rows: db.planChanges.length ? [db.planChanges[db.planChanges.length - 1]] : [] };
@@ -136,7 +136,10 @@ vi.mock('../../config/database', () => ({
   pool: { connect: async () => client, query: async (sql: string, p?: any[]) => exec(sql, p) },
   query: async (sql: string, p?: any[]) => exec(sql, p),
 }));
-vi.mock('../system-alert', () => ({ sendSystemAlert: vi.fn(async (a: any) => { db.alerts.push(a.message); return 0; }) }));
+vi.mock('../system-alert', () => ({
+  sendSystemAlert: vi.fn(async (a: any) => { db.alerts.push(a.message); return 0; }),
+  alertPassFailures: vi.fn(async (o: any) => { for (const f of o.failures) db.alerts.push(`${o.title} ${f.error}`); return 0; }),
+}));
 // 원장 CT 경계 — 회사 행이 없다고 답해 크레딧 SQL 을 타지 않는다(크레딧 금액 = 실 PG 시험). 위임 자체(같은 client)는 아래에서 본다.
 vi.mock('../ai-credit-tx', () => ({
   loadCreditRow: vi.fn(async () => null),

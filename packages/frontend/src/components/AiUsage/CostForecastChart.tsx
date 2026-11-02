@@ -2,14 +2,13 @@
  * CostForecastChart.tsx — AI 사용량 비용 예측 라인 차트 (D217+ 2026-05-25)
  *
  * 옛 30일 실제 + 향후 30일 예측 (선형 회귀 — backend forecast endpoint).
- * 월 한도 수평 dashed line 시각화.
+ * ★ 2026-11-01 월 AI 호출 수 한도 삭제 — 한도 선 · 한도 도달 예측을 지웠다(쓰는 양 = 크레딧).
  *
  * SVG 직접 구현 — recharts 의존 X (단일 차트 + 다크 톤 정합 우선).
  */
 
 import { OUI_CHART_GRID } from '../../utils/operator-ui';
 import { useMemo } from 'react';
-import { TrendingUp, AlertTriangle } from 'lucide-react';
 
 export interface ForecastPoint {
   date: string;
@@ -20,7 +19,6 @@ export interface ForecastPoint {
 
 interface Props {
   forecast: ForecastPoint[];
-  monthlyLimit: number | null;
   loading: boolean;
 }
 
@@ -31,14 +29,10 @@ const PADDING_RIGHT = 20;
 const PADDING_TOP = 20;
 const PADDING_BOTTOM = 40;
 
-export default function CostForecastChart({ forecast, monthlyLimit, loading }: Props) {
+export default function CostForecastChart({ forecast, loading }: Props) {
   const stats = useMemo(() => {
     if (forecast.length === 0) return null;
-    const maxCalls = Math.max(
-      ...forecast.map((p) => p.predicted_calls),
-      monthlyLimit !== null ? monthlyLimit / 30 : 0,
-      1,
-    );
+    const maxCalls = Math.max(...forecast.map((p) => p.predicted_calls), 1);
     const yMax = Math.ceil(maxCalls * 1.2);
     const chartW = W - PADDING_LEFT - PADDING_RIGHT;
     const chartH = H - PADDING_TOP - PADDING_BOTTOM;
@@ -73,24 +67,6 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
       ? 'M ' + forecastPoints.map((p) => `${p.x} ${p.y}`).join(' L ')
       : '';
 
-    // 한도 일평균 line
-    const limitDaily = monthlyLimit !== null ? monthlyLimit / 30 : null;
-    const limitY = limitDaily !== null
-      ? PADDING_TOP + chartH - (limitDaily / yMax) * chartH
-      : null;
-
-    // 한도 도달 예측 시점
-    let limitReachedIdx: number | null = null;
-    if (limitDaily !== null) {
-      for (let i = 0; i < forecast.length; i++) {
-        if (forecast[i].is_forecast && forecast[i].predicted_calls >= limitDaily) {
-          limitReachedIdx = i;
-          break;
-        }
-      }
-    }
-    const limitReachedDate = limitReachedIdx !== null ? forecast[limitReachedIdx].date : null;
-
     // y축 눈금 5개
     const yTicks: Array<{ value: number; y: number }> = [];
     for (let t = 0; t <= 4; t++) {
@@ -120,13 +96,10 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
       bridgePath,
       actualPoints,
       forecastPoints,
-      limitY,
-      limitDaily,
-      limitReachedDate,
       yTicks,
       xTicks,
     };
-  }, [forecast, monthlyLimit]);
+  }, [forecast]);
 
   if (loading) {
     return (
@@ -172,30 +145,6 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
               </text>
             </g>
           ))}
-
-          {/* 한도 line */}
-          {stats.limitY !== null && (
-            <g>
-              <line
-                x1={PADDING_LEFT}
-                y1={stats.limitY}
-                x2={W - PADDING_RIGHT}
-                y2={stats.limitY}
-                stroke="#fb7185"
-                strokeWidth="1.5"
-                strokeDasharray="6 4"
-              />
-              <text
-                x={W - PADDING_RIGHT}
-                y={stats.limitY - 4}
-                textAnchor="end"
-                className="fill-rose-300"
-                style={{ fontSize: '10px', fontWeight: 600 }}
-              >
-                일평균 한도 ({Math.round(stats.limitDaily!).toLocaleString()}회)
-              </text>
-            </g>
-          )}
 
           {/* 옛 데이터 line */}
           {stats.actualPath && (
@@ -285,25 +234,6 @@ export default function CostForecastChart({ forecast, monthlyLimit, loading }: P
         </svg>
       </div>
 
-      {/* 한도 도달 예측 경고 */}
-      {stats.limitReachedDate && (
-        <div className="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 text-rose-700 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-slate-700 leading-relaxed">
-            <strong className="text-rose-800">한도 도달 예측:</strong> 현재 추세가 유지되면 <strong className="text-slate-900">{stats.limitReachedDate}</strong> 경 일평균 한도를 초과할 가능성이 있습니다.
-            Batch 처리 모드 전환 또는 한도 알림 설정을 권장합니다.
-          </div>
-        </div>
-      )}
-
-      {!stats.limitReachedDate && monthlyLimit !== null && (
-        <div className="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2">
-          <TrendingUp className="w-4 h-4 text-emerald-700 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-slate-700 leading-relaxed">
-            <strong className="text-emerald-800">안정적 운영 중:</strong> 향후 30일 예측에서 일평균 한도 초과 시점이 발견되지 않았습니다.
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -149,6 +149,265 @@ export function stripInternalIds(text: string): string {
     .trim();
 }
 
+/**
+ * ★ 2026-11-01 주기 패스 경보 = 한 주기 1통(설계서 docs/2026-11-01-credit-control-tower-design.md §16-6 · 1101 월 마감 실패가 회사마다 1통 = 100통 넘게).
+ *   주기 작업(워커 · 패스)은 항목마다 sendSystemAlert 를 부르지 않는다 — 실패를 모아 이 함수 하나에 넘긴다(항목별 사실 = 로그).
+ *   원인 하나가 N곳을 동시에 막아도 문자는 1통이다 · 사내 회사 실패는 빼고 센다(전부 사내면 로그만).
+ * ★ 2026-11-02 Codex 구현 1R-2 — 쿨다운이 한 번뿐인 확정 실패를 삼키지 않게(옛: 키 = 이름 + 날짜 · 6시간 · 그 안에 생긴 다른 실패는 버려졌다):
+ *   · 이름(pass)마다 알린 항목(key)을 기억하고, 아직 안 알린 항목이 있을 때만 보낸다(같은 항목이 이어지면 6시간 뒤 다시 = 되새김).
+ *   · 한 이름당 1시간에 한 통까지(키 = pass:이름 · 쿨다운은 PG 영속 · 재기동에도 유지).
+ *   · 보낼 항목은 보내기 전에 고정하고 그것만 끝낸다 · 같은 이름은 한 번에 한 통(보내는 동안 들어온 항목은 남는다 · Codex 구현 2R-1).
+ * ★ 2026-11-02 설계 §17(대장 R14 넓힘 · 다른 기능의 한 번뿐인 사건 경보도 이 길):
+ *   · 사건 모드 = total 없음 → 첫 줄 「새 N건」 · 글 숫자 그대로(주기 모드 = 「새 실패 N곳 …」 · 숫자를 N 으로 묶음).
+ *   · 못 보낸 항목 = PG 원장 system_alert_pending(재기동에도 남는다 · 옛: 프로세스 메모리라 쿨다운 안에 재기동하면 사라졌다 · 설계 1R-1).
+ *   · 사건을 닫는 자리는 persistPassFailures 가 참일 때만 · 기록한 항목만 닫는다(닫기 계약 · 설계 2R · 거짓 = 닫지 않음 = 다음 주기 같은 키).
+ *   · 원장에 못 쓰면 메모리 대기(닫기 없는 경보만 = alertPassFailures · queuePassFailures) · 보낼 때마다 원장으로 옮겨 본다.
+ *   · 다시 보내기 = 늘 도는 10분 타이머(원장에 줄이 있는 이름 + 메모리 대기 이름) · 부팅 때 켜고 바로 한 번(startPassAlertFlusher).
+ *   ponytail: 알린 항목(6시간) · 마지막 주기 수는 프로세스 메모리 — 재기동하면 같은 항목을 한 번 더 알릴 수 있다(중복 · 사라짐 아님).
+ */
+export interface PassFailure {
+  companyId: string | null;
+  error: string;
+  /** 항목 이름(같은 항목 = 한 번 알림 · 6시간 뒤 다시) — 없으면 회사 · 회사도 없으면 오류 글 */
+  key?: string;
+}
+/** total 없음 = 사건 모드(한 번뿐인 사건) · 있음 = 주기 모드(그 주기 대상 수) */
+export interface PassAlertSpec { pass: string; title: string; failures: PassFailure[]; total?: number; action: string; now?: Date }
+type AlertSend = (p: SystemAlertParams) => Promise<number>;
+interface PassState {
+  title: string | null;
+  action: string | null;
+  /** 대상 수 · null = 사건 모드 · undefined = 이 프로세스에서 부름 없음(재기동 뒤 = 원장 줄 값) */
+  total: number | null | undefined;
+  /** 마지막 부름의 실패 수(사내 제외) · null = 모름 */
+  current: number | null;
+  /** 알린 항목 → 알린 시각 */
+  told: Map<string, number>;
+  /** 원장에 못 쓴 항목(DB 장애 · 표 없음) */
+  pending: Map<string, PassFailure>;
+  /** 상한을 넘어 싣지 못한 항목 수(다음 통에 「생략 N곳」 · 항목 = 로그) */
+  dropped: number;
+  /** 보내는 중(같은 이름 한 번에 한 통) */
+  sending: boolean;
+  send: AlertSend;
+}
+interface PendingRow { item_key: string; company_id: string | null; error: string; title: string; action: string; total: number | null }
+const PASS_GAP_MS = 60 * 60 * 1000;
+const PASS_REMIND_MS = 6 * 60 * 60 * 1000;
+const PASS_FLUSH_MS = 10 * 60 * 1000;
+const PASS_PENDING_CAP = 500;
+/** 한 통에 원장에서 읽는 줄 수(넘으면 「남은 항목은 다음 통」) */
+const PASS_READ_MAX = 1000;
+const passStates = new Map<string, PassState>();
+let passFlushTimer: ReturnType<typeof setInterval> | null = null;
+
+function stateOf(pass: string): PassState {
+  let st = passStates.get(pass);
+  if (!st) {
+    st = { title: null, action: null, total: undefined, current: null, told: new Map(), pending: new Map(), dropped: 0, sending: false, send: sendSystemAlert };
+    passStates.set(pass, st);
+  }
+  return st;
+}
+
+/** 원장 칸 글 = NUL 제거 · 길이 상한(독 항목 하나가 닫기를 영영 막지 않게 · 설계 §17-3) */
+const cell = (v: unknown, max: number): string => String(v ?? '').replace(/\u0000/g, '').slice(0, max);
+
+/** 이번 부름의 새 항목 = 사내 회사 · 6시간 안에 알린 항목을 뺀 것(원장 · 메모리 대기 넣기가 같은 판정) */
+async function freshItems(st: PassState, o: PassAlertSpec, nowMs: number): Promise<Array<[string, PassFailure]>> {
+  st.title = o.title;
+  st.action = o.action;
+  st.total = o.total ?? null;
+  const out: Array<[string, PassFailure]> = [];
+  let current = 0;
+  for (const f of o.failures) {
+    if (f.companyId && await isInternalCompany(f.companyId).catch(() => false)) continue;
+    current += 1;
+    const k = cell(f.key ?? f.companyId ?? f.error, 300);
+    const toldAt = st.told.get(k);
+    if (toldAt !== undefined && nowMs - toldAt < PASS_REMIND_MS) continue;   // 6시간 안에 알린 항목
+    out.push([k, f]);
+  }
+  st.current = current;
+  if (o.failures.length > 0 && current === 0) log(`사내 회사 실패만 — ${o.pass} 경보 생략(${o.failures.length}곳)`);
+  return out;
+}
+
+/** 원장 넣기(같은 항목 = 한 줄 · 처음 들어온 글 그대로) — 실패는 던진다 */
+async function insertPending(pass: string, st: PassState, items: Array<[string, PassFailure]>): Promise<void> {
+  await query(
+    `INSERT INTO system_alert_pending (pass, item_key, company_id, error, title, action, total)
+       SELECT $1, k, c, e, $5, $6, $7::int FROM unnest($2::text[], $3::text[], $4::text[]) AS u(k, c, e)
+     ON CONFLICT (pass, item_key) DO NOTHING`,
+    [pass, items.map(([k]) => k), items.map(([, f]) => f.companyId), items.map(([, f]) => cell(f.error, 500)), cell(st.title, 300), cell(st.action, 500), st.total ?? null],
+  );
+}
+
+/** 원장 넣기 실패 = 로그 · 표가 없으면(배포 앞 DDL 빠짐) 이어지는 상태 경보(닫는 자리는 그동안 닫지 않는다) */
+function noteLedgerError(pass: string, n: number, err: any): void {
+  log(`경보 원장 넣기 실패 — ${pass} ${n}건: ${err?.message || err}`);
+  if (err?.code !== '42P01') return;
+  void sendSystemAlert({
+    companyId: null,
+    dedupKey: 'system-alert-pending-ddl',
+    title: '경보 원장 표가 없어 한 번뿐인 사건을 닫지 못하고 있습니다.',
+    details: ['표: system_alert_pending'],
+    action: '배포 원장의 경보 원장 DDL 을 실행해 주세요(그동안 그 사건은 닫지 않고 남겨 둡니다).',
+  }).catch(() => undefined);
+}
+
+async function persistItems(pass: string, st: PassState, items: Array<[string, PassFailure]>): Promise<boolean> {
+  if (items.length === 0) return true;
+  try {
+    await insertPending(pass, st, items);
+  } catch (err: any) {
+    noteLedgerError(pass, items.length, err);
+    return false;
+  }
+  // 사건 모드 = 새 항목마다 로그 한 줄(문자에는 글 셋까지만 실린다 · 나머지는 여기서 찾는다)
+  if (st.total === null) for (const [k, f] of items) log(`새 항목 — ${pass} ${k}: ${cell(f.error, 120)}`);
+  ensurePassFlusher();
+  return true;
+}
+
+/**
+ * 원장에만 쓴다 — 참 = 이번 부름의 새 항목이 전부 원장에 있다(새 항목 0 이면 참).
+ * 사건을 닫는 자리(반려 · 실패로 닫음 · 경로 비움)는 참일 때만, 기록한 항목만 닫고 그 뒤 flushPassAlerts 를 부른다(설계 §17-3 닫기 계약).
+ */
+export async function persistPassFailures(o: PassAlertSpec): Promise<boolean> {
+  const st = stateOf(o.pass);
+  return persistItems(o.pass, st, await freshItems(st, o, (o.now ?? new Date()).getTime()));
+}
+
+/** 원장에 넣는다 · 못 쓰면 메모리 대기 — 닫기가 없는 경보(요청 경로가 응답 전에 기다리고 보내기만 따로) */
+export async function queuePassFailures(o: PassAlertSpec): Promise<void> {
+  const st = stateOf(o.pass);
+  const items = await freshItems(st, o, (o.now ?? new Date()).getTime());
+  if (await persistItems(o.pass, st, items)) return;
+  for (const [k, f] of items) {
+    if (!st.pending.has(k) && st.pending.size >= PASS_PENDING_CAP) {
+      st.dropped += 1;
+      log(`남은 항목 상한(${PASS_PENDING_CAP}) — ${o.pass} 항목 생략(다음 통에 수로): ${k}`);
+      continue;
+    }
+    st.pending.set(k, f);
+  }
+  ensurePassFlusher();
+}
+
+/** 모아 보내기 = 넣기(원장 · 못 쓰면 메모리) + 그 이름 보내기 */
+export async function alertPassFailures(o: PassAlertSpec, send: AlertSend = sendSystemAlert): Promise<number> {
+  stateOf(o.pass).send = send;
+  await queuePassFailures(o);
+  return flushPassAlert(o.pass, stateOf(o.pass), (o.now ?? new Date()).getTime());
+}
+
+/** 그 이름의 남은 항목을 지금 보내 본다(닫는 자리가 기록 · 닫기 뒤에 부른다 · 기다리지 않아도 된다) */
+export async function flushPassAlerts(pass: string, now: Date = new Date()): Promise<number> {
+  return flushPassAlert(pass, stateOf(pass), now.getTime());
+}
+
+/** 그 이름의 남은 항목을 한 통으로(원장 줄 + 메모리 대기 · 보낸 것만 지운다 · 못 보냈거나 보내는 동안 들어온 항목은 남아 10분 뒤 다시) */
+async function flushPassAlert(pass: string, st: PassState, nowMs: number): Promise<number> {
+  for (const [k, at] of st.told) if (nowMs - at >= PASS_REMIND_MS) st.told.delete(k);
+  if (st.sending) return 0;   // 같은 이름 한 통씩 — 보내는 동안 들어온 항목은 남아 다음에(Codex 구현 2R-1)
+  st.sending = true;
+  try {
+    // 메모리 대기 = 원장으로 옮겨 본다(DB 가 돌아왔으면 · 쿨다운 판정 전 · 설계 2R-1)
+    if (st.pending.size > 0) {
+      const moving = [...st.pending];
+      try {
+        await insertPending(pass, st, moving);
+        for (const [k] of moving) st.pending.delete(k);
+      } catch { /* 메모리 그대로 */ }
+    }
+    let rows: PendingRow[] = [];
+    let more = false;
+    try {
+      const r = await query(
+        `SELECT item_key, company_id, error, title, action, total FROM system_alert_pending
+          WHERE pass = $1 ORDER BY created_at, item_key LIMIT ${PASS_READ_MAX + 1}`,
+        [pass],
+      );
+      more = r.rows.length > PASS_READ_MAX;
+      rows = (r.rows as PendingRow[]).slice(0, PASS_READ_MAX);
+    } catch (err: any) {
+      log(`경보 원장 읽기 실패 — ${pass}: ${err?.message || err}`);
+    }
+    const mem = new Map(st.pending);   // 보낼 항목 고정
+    const dropped = st.dropped;
+    if (rows.length === 0 && mem.size === 0 && dropped === 0) return 0;
+    const last = rows[rows.length - 1];
+    const total = st.total !== undefined ? st.total : (last ? last.total : null);
+    const event = total === null;
+    const items: PassFailure[] = [...rows.map((r) => ({ companyId: r.company_id, error: r.error })), ...mem.values()];
+    // 줄 = 주기 모드 「오류 N곳: 글」(숫자 = N · 같은 원인은 한 줄) · 사건 모드 = 글 그대로(같은 글이 여럿이면 「(N건)」)
+    const kinds = new Map<string, number>();
+    for (const f of items) {
+      const t = stripInternalIds(String(f.error || '알 수 없음'));
+      const k = (event ? t : t.replace(/\d+/g, 'N')).slice(0, 60);
+      kinds.set(k, (kinds.get(k) || 0) + 1);
+    }
+    const top = [...kinds.entries()].sort((x, y) => y[1] - x[1]).slice(0, 3)
+      .map(([k, n]) => (event ? (n > 1 ? `${k} (${n}건)` : k) : `오류 ${n}곳: ${k}`));
+    const head = event ? `새 ${items.length}건`
+      : st.current !== null && st.total !== undefined ? `새 실패 ${items.length}곳 · 마지막 주기 실패 ${st.current}곳 / 대상 ${total}곳`
+        : `새 실패 ${items.length}곳 / 대상 ${total}곳`;
+    let sent = 0;
+    try {
+      sent = await st.send({
+        companyId: null,
+        dedupKey: `pass:${pass}`,
+        cooldownMs: PASS_GAP_MS,
+        title: st.title ?? last?.title ?? pass,
+        details: [head, ...(more ? ['남은 항목은 다음 통에 싣습니다'] : []), ...(dropped > 0 ? [`상한을 넘어 생략 ${dropped}${event ? '건' : '곳'}(서버 로그)`] : []), ...top],
+        action: st.action ?? last?.action ?? '서버 로그를 확인해 주세요.',
+      });
+    } catch (err: any) {
+      log(`패스 경보 오류 — ${pass}: ${err?.message || err}`);
+    }
+    if (sent > 0) {
+      if (rows.length > 0) {
+        await query(`DELETE FROM system_alert_pending WHERE pass = $1 AND item_key = ANY($2::text[])`, [pass, rows.map((r) => r.item_key)])
+          .catch((err: any) => log(`경보 원장 지우기 실패(다음 통에 다시 실림) — ${pass}: ${err?.message || err}`));
+      }
+      for (const r of rows) st.told.set(r.item_key, nowMs);
+      for (const k of mem.keys()) { st.pending.delete(k); st.told.set(k, nowMs); }
+      st.dropped -= dropped;
+    }
+    return sent;
+  } finally {
+    st.sending = false;
+  }
+}
+
+/** 남은 항목을 이름마다 다시 보내 본다(10분 타이머 · 부팅 · 시험이 직접 부른다) — 원장에 줄이 있는 이름 + 메모리 대기 이름 */
+export async function flushPendingPassAlerts(now: Date = new Date()): Promise<void> {
+  let names: string[] = [];
+  try {
+    names = (await query(`SELECT DISTINCT pass FROM system_alert_pending`)).rows.map((r: any) => String(r.pass));
+  } catch (err: any) {
+    log(`경보 원장 이름 목록 실패: ${err?.message || err}`);
+  }
+  for (const [p, st] of passStates) if ((st.pending.size > 0 || st.dropped > 0) && !names.includes(p)) names.push(p);
+  for (const p of names) await flushPassAlert(p, stateOf(p), now.getTime());
+}
+
+/** 늘 도는 다시 보내기 타이머(끄지 않는다 · unref) */
+function ensurePassFlusher(): void {
+  if (passFlushTimer) return;
+  passFlushTimer = setInterval(() => {
+    flushPendingPassAlerts().catch((err: any) => log(`남은 패스 경보 다시 보내기 오류: ${err?.message || err}`));
+  }, PASS_FLUSH_MS);
+  passFlushTimer.unref?.();
+}
+
+/** 부팅 = 타이머를 켜고 원장에 남은 항목(재기동 전에 못 보낸 사건)을 바로 한 번 보낸다(설계 §17-3) */
+export function startPassAlertFlusher(): void {
+  ensurePassFlusher();
+  void flushPendingPassAlerts().catch((err: any) => log(`부팅 경보 원장 보내기 오류: ${err?.message || err}`));
+}
+
 /** 알림 본문 조립 — 구조화 입력이면 줄로 나누고, 옛 `message`는 그대로 쓴다 */
 export function buildSystemAlertBody(p: SystemAlertParams): string {
   if (p.title) {

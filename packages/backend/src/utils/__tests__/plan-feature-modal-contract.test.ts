@@ -53,11 +53,11 @@ const introByPath = new Map([...INTROS.matchAll(/\bid:\s*'([a-z-]+)',\s*path:\s*
 const cardPaths = [...MODULES.matchAll(/path:\s*'([^']+)'/g)].map((m) => m[1]);
 
 describe('요금제 공통 안내 창 — 원장', () => {
-  it('크레딧 칩 숫자는 백엔드 단가표와 같다', () => {
-    const costs = [...INTROS.matchAll(/source:\s*'([^']+)',\s*credits:\s*(\d+)/g)].map((m) => ({ source: m[1], credits: Number(m[2]) }));
-    expect(costs.length, '크레딧 칩 추출이 0이면 이 게이트가 죽은 것이다').toBeGreaterThanOrEqual(20);
-    const bad = costs.filter((c) => CREDIT_COST_MAP[c.source] !== c.credits).map((c) => `${c.source}: 화면 ${c.credits} · 단가표 ${CREDIT_COST_MAP[c.source]}`);
-    expect(bad).toEqual([]);
+  it('크레딧 칩 = 원장 글에 숫자 0 · 줄마다 서버 단가 키(금액은 내려줄 때 크레딧 CT 단가표 · ★ 2026-11-01 §16-2 D2)', () => {
+    expect(INTROS.match(/\bcredits:\s*\d/g) || []).toEqual([]);
+    const sources = [...INTROS.matchAll(/\{ label: '[^']+', source: '([^']+)' \}/g)].map((m) => m[1]);
+    expect(sources.length, '크레딧 칩 추출이 0이면 이 게이트가 죽은 것이다').toBeGreaterThanOrEqual(20);
+    expect(sources.filter((src) => !(src in CREDIT_COST_MAP))).toEqual([]);
   });
 
   it('AI Operator 허브 카드마다 안내 항목이 있다', () => {

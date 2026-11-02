@@ -63,7 +63,7 @@ export async function distillIndustryFormula(industryCode: string): Promise<Dist
     maxTokens: 800,
     temperature: 0.2,
     model: 'sonnet',
-    creditCost: 0, // 내부 관리자 도구
+    charge: { kind: 'internal', why: '내부 관리자 도구' },
   });
   const parsed = extractJson(formulaRaw);
   if (!parsed || !parsed.structure) return { ok: false, reason: 'ai_parse_failed' };
@@ -90,7 +90,7 @@ export async function distillIndustryFormula(industryCode: string): Promise<Dist
     maxTokens: 1500,
     temperature: 0.7,
     model: 'sonnet',
-    creditCost: 0,
+    charge: { kind: 'internal', why: '내부 관리자 도구(업종 예시 문안)' },
   });
   const exArr = extractJson(exampleRaw);
   let discarded = 0;

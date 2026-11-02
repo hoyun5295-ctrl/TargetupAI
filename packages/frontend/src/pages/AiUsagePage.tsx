@@ -12,7 +12,7 @@ import { AI_MEMORY_TABS } from '../components/zone/zone-tabs';
  *   3. 자연어 입력 + 빠른 시작 5 카드
  *   4. 5 metric 요약 + 지난달 같은 기간 대비 격차
  *   5. AI 비용 예측 라인 차트 (CostForecastChart)
- *   6. 1-click 액션 3 카드 (예측 / Batch 가이드 / 한도 알림)
+ *   6. 1-click 액션 3 카드 (예측 / Batch 가이드 / 크레딧 알림)
  *   7. 자세히 분석 토글 (4 차트)
  *   8. Source caption
  *
@@ -50,10 +50,11 @@ interface ModelDistRow {
 interface OverviewResponse {
   success: boolean;
   monthly_calls: number;
-  monthly_limit: number | null;
-  monthly_percent: number;
+  /** ★ 2026-11-01 월 AI 호출 수 한도 삭제 — 쓰는 양 = 크레딧(사용률 = 쓴 ÷ (쓴 + 남은) · 크레딧제가 아니면 null) */
+  credit_used: number;
+  credit_remaining: number;
+  credit_percent: number | null;
   daily_avg: number;
-  predicted_days_to_limit: number | null;
   cache_hit_rate: number;
   cache_size: number;
   cache_hit: number;
@@ -161,8 +162,8 @@ const QUICK_START_CARDS: QuickStartCard[] = [
   {
     id: 'threshold',
     icon: Bell,
-    label: '한도 알림 설정',
-    hint: '50% / 80% / 95% 임계값',
+    label: '크레딧 알림 설정',
+    hint: '50% / 80% / 95% 사용률',
     gradient: 'from-rose-400 to-pink-500',
     action: 'threshold',
   },
@@ -256,7 +257,7 @@ export default function AiUsagePage() {
       if (data.success) {
         setOverview(data);
         setMigrationPending(data.threshold_config?._migration_pending
-          ? 'DB 마이그레이션 필요: 한도 알림 설정 기능을 사용하려면 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행을 요청해주세요.'
+          ? 'DB 마이그레이션 필요: 크레딧 알림 설정 기능을 사용하려면 운영자에게 companies ALTER (ai_usage_threshold_config jsonb) 실행을 요청해주세요.'
           : null);
       } else if (data.code === 'DB_MIGRATION_PENDING') {
         setMigrationPending(data.error || 'DB 마이그레이션이 필요합니다.');
@@ -337,9 +338,6 @@ export default function AiUsagePage() {
       const data = await r.json();
       if (data.success) {
         setNaturalResult({ query, answer: data.answer, noData: data.no_data });
-      } else if (data.code === 'AI_RATE_LIMIT') {
-        toast.warning(`AI 호출 한도 초과: ${data.error || '이번 달 한도를 초과했습니다.'}`);
-        setNaturalResult(null);
       } else {
         toast.error(`검색 실패: ${data.error || '알 수 없는 오류'}`);
         setNaturalResult(null);
@@ -368,7 +366,7 @@ export default function AiUsagePage() {
     }
   };
 
-  // ── 한도 알림 설정 저장
+  // ── 크레딧 알림 설정 저장
   const handleThresholdSave = async (config: { threshold_percent: number; channels: Array<'email' | 'sms' | 'inapp'>; enabled: boolean }) => {
     const r = await fetch('/api/ai-usage/threshold-alert', {
       method: 'POST',
@@ -380,7 +378,7 @@ export default function AiUsagePage() {
       throw new Error(data.error || '저장 실패');
     }
     setShowThresholdModal(false);
-    toast.success(`한도 알림 ${config.enabled ? '활성화' : '비활성화'} 완료: 임계값 ${config.threshold_percent}% / 채널 ${config.channels.length}개`);
+    toast.success(`크레딧 알림 ${config.enabled ? '활성화' : '비활성화'} 완료: 임계값 ${config.threshold_percent}% / 채널 ${config.channels.length}개`);
     await loadOverview();
   };
 
@@ -433,11 +431,11 @@ export default function AiUsagePage() {
       command={{
         facts: overview ? [
           { label: '이번 달', value: `${overview.monthly_calls.toLocaleString()}회` },
-          ...(overview.monthly_limit !== null ? [{ label: '한도', value: `${overview.monthly_percent}%`, tone: (overview.monthly_percent >= 80 ? 'amber' : undefined) as 'amber' | undefined }] : []),
+          ...(overview.credit_percent !== null ? [{ label: '크레딧', value: `${overview.credit_percent}%`, tone: (overview.credit_percent >= 80 ? 'amber' : undefined) as 'amber' | undefined }] : []),
           { label: '일평균', value: `${overview.daily_avg.toLocaleString()}회` },
         ] : [{ label: '이번 달', value: '—' }],
-        note: '회사별 AI 호출 · 한도 · 캐시 효율 · 비용 예측',
-        actions: [{ label: '한도 알림', icon: Bell, onClick: () => setShowThresholdModal(true) }],
+        note: '회사별 AI 호출 · 크레딧 사용률 · 캐시 효율 · 비용 예측',
+        actions: [{ label: '크레딧 알림', icon: Bell, onClick: () => setShowThresholdModal(true) }],
       }}
       emphasis={
         <ZoneEmphasis kind="ai" title="AI 자율 진단" meta="실시간">
@@ -450,11 +448,6 @@ export default function AiUsagePage() {
             <p className="text-sm text-slate-800 leading-relaxed">{overview.top_insight}</p>
           ) : (
             <p className="text-sm text-slate-500">진단 정보를 불러올 수 없습니다.</p>
-          )}
-          {overview && overview.predicted_days_to_limit !== null && (
-            <div className="mt-2 text-[12px] text-slate-500">
-              한도 도달 예측 <strong className="text-amber-700">약 {overview.predicted_days_to_limit}일 후</strong>
-            </div>
           )}
         </ZoneEmphasis>
       }
@@ -570,17 +563,17 @@ export default function AiUsagePage() {
           />
           <MetricCard
             icon={Gauge}
-            label="한도 사용률"
-            value={overview && overview.monthly_limit !== null ? `${overview.monthly_percent}` : '—'}
-            unit={overview?.monthly_limit !== null ? '%' : ''}
-            gradient={overview && overview.monthly_percent >= 80 ? 'from-rose-400 to-pink-500' : 'from-emerald-400 to-teal-500'}
-            footer={overview?.monthly_limit === null
-              ? <span className="text-[10px] text-emerald-700">무제한 요금제</span>
-              : overview && (
+            label="크레딧 사용률"
+            value={overview && overview.credit_percent !== null ? `${overview.credit_percent}` : '—'}
+            unit={overview && overview.credit_percent !== null ? '%' : ''}
+            gradient={overview && overview.credit_percent !== null && overview.credit_percent >= 80 ? 'from-rose-400 to-pink-500' : 'from-emerald-400 to-teal-500'}
+            footer={overview && (overview.credit_percent === null
+              ? <span className="text-[10px] text-slate-400">크레딧제 요금제가 아닙니다</span>
+              : (
                 <span className="text-[10px] text-slate-500">
-                  / {overview.monthly_limit?.toLocaleString()}회
+                  사용 {overview.credit_used.toLocaleString()} · 남은 {overview.credit_remaining.toLocaleString()}
                 </span>
-              )}
+              ))}
           />
           <MetricCard
             icon={Database}
@@ -600,9 +593,7 @@ export default function AiUsagePage() {
             value={overview ? overview.daily_avg.toLocaleString() : '—'}
             unit="회"
             gradient="from-violet-400 to-purple-500"
-            footer={overview?.predicted_days_to_limit !== null && overview
-              ? <span className="text-[10px] text-amber-700">한도 도달 {overview.predicted_days_to_limit}일 후 예측</span>
-              : <span className="text-[10px] text-slate-400">직전 30일 평균</span>}
+            footer={<span className="text-[10px] text-slate-400">직전 30일 평균</span>}
           />
           <MetricCard
             icon={Layers}
@@ -632,7 +623,6 @@ export default function AiUsagePage() {
           </div>
           <CostForecastChart
             forecast={forecast?.daily_forecast || []}
-            monthlyLimit={overview?.monthly_limit || null}
             loading={forecastLoading}
           />
         </div>
@@ -652,7 +642,7 @@ export default function AiUsagePage() {
             </div>
             <div className="text-sm font-semibold text-slate-900 mb-1">비용 예측 보기</div>
             <div className="text-[11px] text-slate-500 leading-relaxed">
-              향후 30일 호출 + 비용 예측 + 한도 도달 시점.
+              향후 30일 호출 + 비용 예측.
             </div>
           </button>
 
@@ -677,9 +667,9 @@ export default function AiUsagePage() {
             <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
               <Bell className="w-5 h-5 text-white" />
             </div>
-            <div className="text-sm font-semibold text-slate-900 mb-1">한도 알림 설정</div>
+            <div className="text-sm font-semibold text-slate-900 mb-1">크레딧 알림 설정</div>
             <div className="text-[11px] text-slate-500 leading-relaxed">
-              50% / 80% / 95% 임계값 + 이메일/SMS/앱 알림 채널.
+              크레딧 사용률 50% / 80% / 95% + 이메일/SMS/앱 알림 채널.
             </div>
             {overview?.threshold_config?.enabled && !migrationPending && (
               <div className="text-[10px] text-emerald-700 mt-1.5">
@@ -689,10 +679,10 @@ export default function AiUsagePage() {
             {/* ★ 2026-09-27 R075 — '앱 알림' 채널 = 이 화면 표시: 이번 달 사용률이 설정한 기준 이상이면 알린다 */}
             {overview?.threshold_config?.enabled && !migrationPending
               && (overview.threshold_config.channels || []).includes('inapp')
-              && overview.monthly_limit !== null
-              && overview.monthly_percent >= Number(overview.threshold_config.threshold_percent || 0) && (
+              && overview.credit_percent !== null
+              && overview.credit_percent >= Number(overview.threshold_config.threshold_percent || 0) && (
               <div className="text-[10px] text-amber-700 mt-1">
-                이번 달 사용량이 알림 기준 {overview.threshold_config.threshold_percent}%에 도달했습니다
+                이번 달 크레딧 사용률이 알림 기준 {overview.threshold_config.threshold_percent}%에 도달했습니다
               </div>
             )}
           </button>

@@ -32,7 +32,7 @@ import { candidatesReady, readCandidate, claimCandidate, candidateStillMine, sav
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
 import { groupPretestBundles, kstDateOf, PretestScanRow, PretestBundle } from './journey-pretest-scan';
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-alert';
 import { messageStepBoundsSql } from './journey-step-notify';
 import { NOTICE_ENQUEUE_TIMEOUT_MS, NOTICE_MAX_ATTEMPTS, sendNoticeOnce } from './journey-notice-once';
 
@@ -239,6 +239,7 @@ export async function scanAndPretest(): Promise<{
   const bundles = groupPretestBundles(rowsRes.rows as PretestScanRow[]);
   summary.bundles = bundles.length;
 
+  const bundleFailures: PassFailure[] = [];
   for (const b of bundles) {
     const testedBefore = summary.tested;
     try {
@@ -255,13 +256,18 @@ export async function scanAndPretest(): Promise<{
       _bundleExceptions.set(b.bundleKey, n);
       console.log(`[journey-pretest-scan] bundle 처리 실패 ${n}/${PRETEST_BUNDLE_EXCEPTION_MAX} journey=${b.journeyId} step=${b.stepId} — ${bundleErr?.message || bundleErr}`);
       if (n >= PRETEST_BUNDLE_EXCEPTION_MAX) {
-        void sendSystemAlert({
-          companyId: b.companyId,
-          dedupKey: `journey-pretest-bundle-error:${b.journeyId}`,
-          message: `여정 발송 전 검사 묶음 처리가 ${PRETEST_BUNDLE_EXCEPTION_MAX}번 실패해 오늘 그 칸 검사를 멈췄습니다(그 칸 문자는 검사 기록이 생길 때까지 나가지 않습니다). journey=${b.journeyId} step=${b.stepId} — ${String(bundleErr?.message || bundleErr).slice(0, 200)}`,
-        }).catch(() => undefined);
+        bundleFailures.push({ companyId: b.companyId, key: b.bundleKey, error: String(bundleErr?.message || bundleErr).slice(0, 200) });
       }
     }
+  }
+  // ★ 2026-11-02 설계 §17-4 C1 — 한 주기 1통(옛: 반복문 catch 에서 여정마다 1통 · 여정 키라 같은 여정의 다른 칸은 6시간 묻혔다 · 계약 ⑥ 이 타이머 없는 파일이라 못 봤다)
+  if (bundleFailures.length > 0) {
+    await alertPassFailures({
+      pass: 'journey-pretest-bundle-error',
+      title: `여정 발송 전 검사 묶음 처리가 ${PRETEST_BUNDLE_EXCEPTION_MAX}번 실패해 오늘 그 칸 검사를 멈췄습니다(그 칸 문자는 검사 기록이 생길 때까지 나가지 않습니다).`,
+      action: '서버 로그 [journey-pretest-scan] bundle 처리 실패 줄의 여정 · 칸으로 확인해 주세요.',
+      failures: bundleFailures, total: bundles.length,
+    }).catch(() => undefined);
   }
 
   // 이번 회차에 생긴 보류 안내도 같은 회차에(같은 원장 · 같은 상한)

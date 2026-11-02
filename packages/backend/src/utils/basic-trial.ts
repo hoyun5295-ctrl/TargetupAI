@@ -15,6 +15,7 @@ import type { PoolClient } from 'pg';
 import pool from '../config/database';
 import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
 import { applyTrialStart } from './ai-credit-tx';
+import { planMonthCreditsOf } from './ai-credit-admin';
 import { planTermManagedSql, planTermManagedError, PlanTermError } from './plan-term';
 
 /**
@@ -105,13 +106,13 @@ async function grantFreeTrialWithClient(
   /** 새로 지급(위 grantFreeTrial opts.fresh) — 연장으로 치지 않고 오늘부터 */
   fresh = false,
 ): Promise<any> {
-  const trial = await client.query(
-    `SELECT id, COALESCE(ai_credits_per_month, 0) AS credits
-       FROM plans WHERE plan_code = 'TRIAL' AND is_active = true LIMIT 1`,
-  );
-  if (trial.rows.length === 0) throw new Error('무료체험 요금제가 존재하지 않습니다.');
-  const trialPlanId = trial.rows[0].id;
-  const trialCredits = creditsOverride !== undefined ? Math.max(0, Math.floor(creditsOverride)) : (Number(trial.rows[0].credits) || 0);
+  // 체험 요금제 id = 체험 CT 한 곳(뿌리 R6) · 체험 크레딧 양 = 크레딧 CT 가 같은 거래로 읽는다(★ 2026-11-01 §16-1 F15)
+  const planRes = await client.query(`SELECT id FROM plans WHERE plan_code = 'TRIAL' AND is_active = true LIMIT 1`);
+  if (planRes.rows.length === 0) throw new Error('무료체험 요금제가 존재하지 않습니다.');
+  const trialPlanId = String(planRes.rows[0].id);
+  const trialCredits = creditsOverride !== undefined
+    ? Math.max(0, Math.floor(creditsOverride))
+    : (await planMonthCreditsOf(trialPlanId, client)) ?? 0;
 
   // 연장인지 신규인지는 **잠근 행의 갱신 전 값**으로 판정한다(동시 클릭이 서로의 판정을 오염시키지 않게).
   const cur = await client.query(

@@ -96,6 +96,14 @@ export function parseLedger(text) {
   return out;
 }
 
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 §16-7(B) — 결과 칸이 빈 「배포 앞」 항목(머리에 「배포 앞」 · 코드보다 먼저 서버에서 실행할 DDL 등).
+ *   하나라도 있으면 배포 원장이 맨 위에 [먼저 실행]을 찍고 실패 코드로 끝난다(C90 은 배포 앞 DDL-1 이 코드보다 늦게 실행돼 1일 지급 패스가 회사마다 멈췄다).
+ */
+export function pendingPreDeploy(ledger) {
+  return ledger.items.filter((it) => /배포 앞/.test(it.title) && !(it.fields['결과'] || '').trim());
+}
+
 /** 세미콜론으로 끝나는 문장 수(주석 · 문자열 · $$ 본문 안은 세지 않는다 · 블록 판정용) */
 export function statementCount(sql) {
   const s = sql.replace(/--[^\n]*/g, '').replace(/\$\$[\s\S]*?\$\$/g, '$$').replace(/'(?:[^']|'')*'/g, "''");

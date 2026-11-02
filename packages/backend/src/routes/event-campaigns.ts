@@ -74,9 +74,6 @@ eventCampaignRouter.post('/extract-image', (req: any, res: Response) => {
       if (err instanceof InsufficientCreditError) {
         return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
       }
-      if (err?.name === 'AiRateLimitExceeded') {
-        return res.status(429).json({ success: false, error: err.message });
-      }
       if (respondUserError(res, err)) return;   // ★ 2026-10-25 이미지 없음 400 · 읽지 못함 422 · 원장 쓰기 실패 503
       console.error('[event-campaigns extract-image] 오류:', err?.message);
       return res.status(500).json({ success: false, error: publicErrorText(err, '이미지 판독 실패') });
@@ -189,7 +186,6 @@ eventCampaignRouter.post('/materials', requirePlanFeature('mobile_dm'), (req: an
       return res.json({ success: true, images, event_text: text, events, extracted });
     } catch (err: any) {
       if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: err.message, code: 'INSUFFICIENT_CREDIT' });
-      if (err?.name === 'AiRateLimitExceeded') return res.status(429).json({ success: false, error: err.message });
       if (respondUserError(res, err)) return;   // ★ 2026-10-25 이미지 없음 400 · 읽지 못함 422 · 원장 쓰기 실패 503
       console.error('[event-campaigns materials] 오류:', err?.message);
       return res.status(500).json({ success: false, error: '재료를 저장하지 못했습니다. 잠시 후 다시 시도해주세요.' });

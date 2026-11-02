@@ -1,5 +1,5 @@
 /**
- * ThresholdAlertModal.tsx — AI 사용량 한도 알림 설정 모달 (D217+ 2026-05-25)
+ * ThresholdAlertModal.tsx — AI 크레딧 사용률 알림 설정 모달 (D217+ 2026-05-25 · ★ 2026-11-01 월 AI 호출 수 한도 삭제 → 크레딧 기준)
  *
  * 다크 톤 + violet 액센트 정합 + ESC + backdrop click.
  * 임계값 3 (50% / 80% / 95%) + 채널 (email / sms / inapp) + 활성/비활성.
@@ -25,7 +25,7 @@ interface Props {
 const THRESHOLD_OPTIONS: Array<{ value: 50 | 80 | 95; label: string; tone: string; description: string }> = [
   { value: 50, label: '50%',  tone: 'text-sky-700',     description: '여유 있게 미리 알림: 추세 모니터링 우선' },
   { value: 80, label: '80%',  tone: 'text-amber-700',   description: '주의 단계 알림: 일반적인 권장 임계값' },
-  { value: 95, label: '95%',  tone: 'text-rose-700',    description: '곧 차단 단계 알림: 즉시 조치 필요' },
+  { value: 95, label: '95%',  tone: 'text-rose-700',    description: '거의 다 쓴 단계 알림: 충전 · 요금제 상향 필요' },
 ];
 
 const CHANNEL_OPTIONS: Array<{ value: 'email' | 'sms' | 'inapp'; label: string; icon: typeof Mail; description: string }> = [
@@ -97,8 +97,8 @@ export default function ThresholdAlertModal({ open, onClose, initial, onSave }: 
             <Bell className="w-4 h-4 text-white" />
           </div>
           <div className="flex-1">
-            <h3 className="text-base font-bold text-slate-900">한도 알림 설정</h3>
-            <p className="text-xs text-slate-500 mt-0.5">AI 호출 한도 도달 전 사전 알림. 차단 사고 예방</p>
+            <h3 className="text-base font-bold text-slate-900">크레딧 알림 설정</h3>
+            <p className="text-xs text-slate-500 mt-0.5">이번 달 크레딧 사용률이 기준에 닿으면 미리 알려 드려요</p>
           </div>
           <button
             onClick={() => !saving && onClose()}
@@ -115,7 +115,7 @@ export default function ThresholdAlertModal({ open, onClose, initial, onSave }: 
           <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg">
             <div>
               <div className="text-sm font-medium text-slate-900">알림 활성화</div>
-              <div className="text-[11px] text-slate-500 mt-0.5">비활성 시 한도 알림이 발송되지 않습니다</div>
+              <div className="text-[11px] text-slate-500 mt-0.5">끄면 크레딧 알림이 발송되지 않습니다</div>
             </div>
             <button
               onClick={() => setEnabled(!enabled)}
@@ -191,7 +191,6 @@ export default function ThresholdAlertModal({ open, onClose, initial, onSave }: 
           <div className="p-3 bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-lg">
             <div className="text-[11px] text-slate-600 leading-relaxed">
               <strong className="text-amber-800">알림 발송 흐름:</strong> 회사 admin에게 발송됩니다. 동일 임계값은 이번 달 중복 발송되지 않습니다 (월 1회).
-              한도 100% 도달 시 별도 차단 알림이 자동 발송됩니다.
             </div>
           </div>
 

@@ -1089,15 +1089,23 @@ async function runPlanTermPassOnce(today: string): Promise<PlanTermPassResult> {
   }
   let processed = 0;
   const failed: string[] = [];
+  const failures: Array<{ companyId: string; error: string }> = [];
   for (const id of candidates) {
     try {
       await withTx(async (client) => { await enter(client, id, today); });
       processed++;
     } catch (err: any) {
       failed.push(id);
-      await alertOnce(id, `worker-fail:${id}`, `회사 ${id.slice(0, 8)} 정산 실패: ${err?.message || err}`);
+      // ★ 2026-11-01 §16-6 — 실패를 모아 한 주기 1통(옛: 회사마다 1통)
+      console.warn(`[plan-term] 정산 실패 company=${id}: ${err?.message || err}`);
+      failures.push({ companyId: id, error: String(err?.message || err) });
     }
   }
+  const { alertPassFailures } = await import('./system-alert');
+  await alertPassFailures({
+    pass: 'plan-term', title: '요금제 기간 정산 · 정렬이 일부 회사에서 실패했습니다.', failures, total: candidates.length,
+    action: '서버 로그 [plan-term] 정산 실패 줄을 확인해 주세요(다음 회차에 다시 시도합니다).',
+  }).catch((e: any) => console.warn('[plan-term] 실패 경보 발송 실패:', e?.message));
   if (processed > 0) console.log(`[plan-term] 정산·정렬 ${processed}곳`);
   return { processed, failed, today };
 }

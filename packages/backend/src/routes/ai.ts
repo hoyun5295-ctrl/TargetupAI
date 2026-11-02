@@ -61,7 +61,7 @@ import { getBrandBasicInfo } from '../utils/brand-basic-info';
 import { resolveIntegrationActor } from '../utils/integration-scope';
 import { getCompanyCosts } from '../config/defaults';
 // ★ D209+ (Harold 명시 2026-05-22) Phase D 비용 안전 매트릭스 — 회사별 월 한도 + cache 통계
-import { getMonthlyUsage, getDailyUsage, getModelBreakdown, checkAiRateLimit, AiRateLimitExceeded, recordAiCall } from '../utils/ai-rate-limit';
+import { getMonthlyCallCount, getDailyUsage, getModelBreakdown, recordAiCall } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 import { orchestrate, orchestrateWithAI } from '../services/ai-orchestrator';
 // ★ 크레딧 종량제 — 여정 저장(활성화) 등 endpoint 직접 차감용 (callAIWithFallback 경유 외)
@@ -1969,7 +1969,7 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
 
     // ★ 2026-07-05 차감 구조 정정 — 옛 구조는 AI 응답 시점에 50 차감 → sanitize가 혜택 포함 달을 버려
     //   0건이면 차감 후 502(빈손), 일부 걸러지면 결손 캘린더였다.
-    //   사전 잔액 확인 → 무과금 호출(creditCost 0) → 결손 달 1회 보정 재호출(무과금) →
+    //   사전 잔액 확인 → 무과금 호출(charge settled-by = 이 라우트가 성공 뒤 걷는다) → 결손 달 1회 보정 재호출(무과금) →
     //   반환할 결과가 있을 때만 50 차감(멱등키). 매회 차감 정책(Harold 명시)은 "성공 반환당 1회"로 유지.
     const cost = getCreditCost('marketing-calendar');
     await checkCredit(companyId, cost);
@@ -1983,7 +1983,7 @@ router.post('/operator/marketing-calendar/generate', async (req: Request, res: R
       companyId,
       userId,
       source: 'marketing-calendar',
-      creditCost: 0,
+      charge: { kind: 'settled-by', by: 'marketing-calendar' },   // ★ 1101 §16-3 P2 — 아래 settleCreditAfterSuccess 가 성공 뒤 한 번 걷는다
     });
 
     let entries = sanitizeCalendarEntries(extractJsonObject(await callOnce(buildCalendarUserMessage(calendarInput)))?.entries);
@@ -2082,7 +2082,7 @@ router.post('/operator/marketing-calendar/regenerate-month', async (req: Request
       companyId,
       userId,
       source: 'marketing-calendar-month',
-      creditCost: 0,
+      charge: { kind: 'settled-by', by: 'marketing-calendar-month' },   // ★ 1101 §16-3 P2 — 아래 settleCreditAfterSuccess 가 성공 뒤 한 번 걷는다
     });
     const regenerated = sanitizeCalendarEntries(extractJsonObject(text)?.entries);
     const entry = regenerated.find((e) => e.month === month);
@@ -2929,9 +2929,8 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
 추측/창작 X. document에 없는 내용은 "정보가 없습니다"로 응답.
 한국어 존댓말 (~입니다 / ~합니다).`;
 
-    // ★ 2026-09-27 한줄로 V2 R082 — 이 호출은 AI 관문(services/ai)을 거치지 않아 월 호출 한도·크레딧이 없었다.
-    //   한도·잔액을 먼저 보고 호출 · 성공 뒤 1회 차감(단가표 5 = R1-20 선례).
-    await checkAiRateLimit(companyId);
+    // ★ 2026-09-27 한줄로 V2 R082 — 이 호출은 AI 관문(services/ai)을 거치지 않아 크레딧이 없었다.
+    //   잔액을 먼저 보고 호출 · 성공 뒤 1회 차감(단가표 5 = R1-20 선례).
     const explainCost = getCreditCost('ai-operator-explain');
     await checkCredit(companyId, explainCost);
     const answer = await callAIWithCitations({
@@ -2941,7 +2940,7 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
       documents,
       maxTokens: 1500,
     });
-    // ★ 2026-09-27 한줄로 V2 R082(Codex 차수3 1R) — 월 호출 기록(한도는 ai_call_log로 센다 · 옛: 기록이 없어 한도를 소진하지 않았다)
+    // ★ 2026-09-27 한줄로 V2 R082(Codex 차수3 1R) — 월 호출 기록(사용량 화면 통계 · ai_call_log)
     await recordAiCall({ companyId, source: 'ai-operator-explain', modelType: 'opus', success: true });
     // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
     await settleCreditAfterSuccess({ companyId, cost: explainCost, source: 'ai-operator-explain', idempotencyKey: `ai-explain:${randomUUID()}` });
@@ -2954,7 +2953,6 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDIT', error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.' });
-    if (err instanceof AiRateLimitExceeded) return res.status(429).json({ success: false, code: 'AI_RATE_LIMIT', error: err.message });
     if (respondUserError(res, err)) return;
     console.error('[AI Operator explain] 오류:', err);
     return res.status(500).json({ success: false, error: publicErrorText(err, '분석 실패') });
@@ -5055,7 +5053,7 @@ router.post('/operator/alimtalk/match', async (req: Request, res: Response) => {
 });
 
 // ★ D209+ Phase D 비용 안전 매트릭스 — 회사별 AI 사용량 진단 endpoint
-//   회사 admin 진입 시 월 사용량 + 한도 + 30일 일별 통계 + cache 통계 반환
+//   회사 admin 진입 시 월 호출 수 + 30일 일별 통계 + cache 통계 반환(★ 2026-11-01 월 호출 한도 없음 · limit = null)
 router.get('/usage', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
@@ -5063,7 +5061,7 @@ router.get('/usage', async (req: Request, res: Response) => {
 
     // ★ D210+ Phase 3 B-8 (2026-05-23 Harold 명시): 모델별 분포 영역 매트릭스 추가
     const [monthly, daily, breakdown] = await Promise.all([
-      getMonthlyUsage(companyId),
+      getMonthlyCallCount(companyId).then((used) => ({ used, limit: null })),
       getDailyUsage(companyId, 30),
       getModelBreakdown(companyId, 30),
     ]);

@@ -174,6 +174,7 @@ import { startWoocommerceSyncWorker } from './utils/woocommerce-sync-worker';
 import { logMallConsentGate } from './utils/mall-consent';
 // ★ 2026-06-13: 시스템 크리티컬 감지 워커 (발송 큐 지연 정체 + 싱크에이전트 중단 → 운영자 문자 통지)
 import { startSystemMonitorWorker } from './utils/system-monitor-worker';
+import { startPassAlertFlusher } from './utils/system-alert';
 // ★ 2026-07-05: 발송 피로도 보호 — send_fatigue_daily 45일 초과 버킷 프루닝 (6시간 주기)
 import { startFatiguePruneWorker } from './utils/fatigue-guard';
 // ★ 2026-09-28 한줄로 V2 차수 4 — 보관 기한 정리(로그 13개월 · 임시·작성 중 · 파일) 하루 1번
@@ -765,6 +766,8 @@ app.listen(PORT, () => {
   // ★ 2026-06-13: 시스템 크리티컬 감지 (5분 주기) — 발송 큐 지연 정체 + 싱크에이전트 중단을
   //   운영자 문자(SYSTEM_ALERT_PHONES)로 직접 통지. 톤28 지연 실발송·인비토 동기화 중단 실측 후속.
   startSystemMonitorWorker();
+  // ★ 2026-11-02 설계 §17-3 — 경보 원장(system_alert_pending)에 남은 항목 = 10분마다 다시 · 부팅 때 바로 한 번(재기동 전에 못 보낸 한 번뿐인 사건)
+  startPassAlertFlusher();
 
   // ★ 2026-07-05: 발송 피로도 보호 — 일일 버킷 프루닝 (6시간 주기, 42P01 무해)
   startFatiguePruneWorker();

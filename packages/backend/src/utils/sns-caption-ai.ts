@@ -312,7 +312,6 @@ export async function transcribeSnsImageText(input: {
       images: input.images,
     });
   } catch (err: any) {
-    if (err?.name === 'AiRateLimitExceeded') throw err;
     console.error('[SNS caption] 사진 속 글 읽기 실패(보이는 것만으로 이어 감):', err?.message || err);
     return [];
   }

@@ -78,7 +78,7 @@ export function buildIdempotencyKey(source: string, aiCallLogId?: string | null)
  * 작업 source → 크레딧 비용 (가치 기반 재설계 — 2026-06-01, 1크레딧 = 500원).
  *  - 풀분석 300 / 여정 생성 3·저장 150 / 자동마케팅 저장 200·발송 3 / DM 생성 5·발행 100 / 인앱 생성 3·게시 100 / 문안·분석 5 / 다듬기·질문·매핑 1.
  *    (★ 2026-10-19 B-1017-1② 발행 · 게시 금액 주석을 표 값에 맞춤 · 진실은 아래 표)
- *  - orchestrate·continuous-operator는 진입점 1회만 차감, 내부 sub 호출은 호출측이 creditCost:0 명시(묶음 회피).
+ *  - orchestrate·continuous-operator는 진입점 1회만 차감, 내부 sub 호출은 묶음(runInCreditBundle) 또는 사실(AiCallCharge)로 0.
  *  - 미등록 source는 getCreditCost가 0 반환(차감 안 함) — 신규 작업 추가 시 여기 등록 의무.
  *  - ★ 기준점 (Harold 명시 2026-07-02): 사용자 버튼 트리거 + 20크레딧 이상 = frontend CONFIRM_CREDIT_COSTS
  *    등록 + 트리거 지점 CreditConfirmModal 의무. 자동/백그라운드 차감은 설정 화면 안내로 고지.
@@ -208,6 +208,24 @@ export const CREDIT_COST_MAP: Record<string, number> = {
   'image-studio-edit': 1,
 };
 
+/**
+ * ★ 2026-11-01 §16-3(P2) — AI 호출 하나를 따로 걷지 않는 「사실」(호출부는 금액을 넘기지 않는다 · 금액은 aiCallCost 하나가 정한다).
+ *   retry = 같은 작업의 보정 재시도(of = 그 작업 원천) · settled-by = 부른 진입점이 성공 뒤 한 번 걷음(by = 그 원천) ·
+ *   included-in = 다른 과금에 포함(parent = 그 원천) · internal = 고객 크레딧 밖(슈퍼관리자 · 학습 · 관리자 도구 · why = 이유).
+ *   계약 = of · by · parent 는 단가표 값 > 0 인 원천(고객이 진입점 과금 없이 되풀이하는 AI 호출 0 · credit-ct-contract ⑦).
+ */
+export type AiCallCharge =
+  | { kind: 'retry'; of: string }
+  | { kind: 'settled-by'; by: string }
+  | { kind: 'included-in'; parent: string }
+  | { kind: 'internal'; why: string };
+
+/** AI 호출 하나의 금액(P1) — 묶음 안 · 사실이 있으면 0 · 아니면 원천 단가 */
+export function aiCallCost(source: string | undefined | null, charge: AiCallCharge | undefined, inBundle: boolean): number {
+  if (inBundle || charge) return 0;
+  return getCreditCost(source);
+}
+
 /** source → 크레딧 비용. 미등록·미전달 source는 0 (차감 안 함). */
 export function getCreditCost(source: string | undefined | null): number {
   if (!source) return 0;
@@ -237,6 +255,53 @@ export const SEND_CREDIT_SOURCES: ReadonlySet<string> = new Set(['continuous-ope
 const OPERATION_SOURCES = new Set(['continuous-operator-send']);
 export function isOperationSource(source: string | undefined | null): boolean {
   return !!source && OPERATION_SOURCES.has(source);
+}
+
+/**
+ * ★ 2026-11-01 크레딧 컨트롤타워 편입(설계서 §16-1 F18) — 크레딧제 적용 회사인가 = 요금제 월 크레딧 칸이 있거나(0 포함) 구매분이 남아 있다.
+ *   표시 · 사전 확인 · 엄격 확인 · 차감 · 이메일 완성이 이 하나를 쓴다(옛: 같은 식 다섯 벌 · 구매분은 음수가 되지 않는다).
+ */
+export function creditApplies(row: { plan_credits?: unknown; purchased?: unknown } | null | undefined): boolean {
+  if (!row) return false;
+  return row.plan_credits != null || (Number(row.purchased) || 0) > 0;
+}
+
+/**
+ * ★ 2026-11-01 §16-5 — 체험 만료 시각이 지났는데 아직 강등 전인 행인가(체험 강등 작업과 같은 술어 · 유료 요금제 강등 금지 가드 포함).
+ *   (구독 상태 체험 또는 TRIAL 요금제) · 만료 시각 있음 · 만료 시각 < 판정 시각 · 유료 요금제(월 가격 > 0 · TRIAL 아님)는 아니다.
+ *   row = loadCreditRow 행(subscription_status · plan_code · plan_monthly_price · trial_ends_at).
+ */
+export function isTrialOver(
+  row: { subscription_status?: unknown; plan_code?: unknown; plan_monthly_price?: unknown; trial_ends_at?: unknown } | null | undefined,
+  now: Date,
+): boolean {
+  if (!row?.trial_ends_at) return false;
+  if (row.subscription_status !== 'trial' && row.plan_code !== 'TRIAL') return false;
+  if ((Number(row.plan_monthly_price) || 0) > 0 && row.plan_code !== 'TRIAL') return false;
+  const end = new Date(row.trial_ends_at as any).getTime();
+  return !Number.isNaN(end) && end < now.getTime();
+}
+
+/** (§16-1 F19) 차감 결과 글자가 「걷힘」인가 = 차감 · 같은 키로 이미 걷음 · 크레딧제 미적용(걷을 것 없음) */
+export function outcomeSettled(outcome: string | null | undefined): boolean {
+  return outcome === 'deducted' || outcome === 'duplicate' || outcome === 'not_applicable';
+}
+
+/** (§16-1 F19) 차감 결과 꼴(deducted · skipReason)이 「걷힘」인가 — outcomeSettled 와 같은 규칙 */
+export function resultSettled(r: { deducted?: boolean; skipReason?: string | null } | null | undefined): boolean {
+  return !!r && (r.deducted === true || r.skipReason === 'duplicate' || r.skipReason === 'not_applicable');
+}
+
+/**
+ * (§16-1 F17) 크레딧 모자람 = 남은 크레딧(기본 + 구매) < 월 기본 × 20%. 여정 담당자 안내 · 관리자 위험 회사가 같이 쓴다
+ *   (옛: 여정 = 「20% 밑」 · 관리자 = 「20% 이하」로 두 벌 · 값은 표시와 같은 투영 `getCreditState`).
+ */
+export const CREDIT_LOW_RATIO = 0.2;
+export function isCreditLow(st: { creditEnabled: boolean; planCredits: number; total: number }): boolean {
+  if (!st.creditEnabled) return false;
+  const plan = Number(st.planCredits) || 0;
+  if (plan <= 0) return false;
+  return Number(st.total) < plan * CREDIT_LOW_RATIO;
 }
 
 // ── 크레딧 충전 단가 (D229+ 종량제 — Harold 확정) ─────────────────

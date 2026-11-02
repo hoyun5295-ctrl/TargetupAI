@@ -79,7 +79,7 @@ describe('R258 · R257 인앱 변형', () => {
 describe('R246 인앱 AI = 성공 뒤 차감', () => {
   it('잔액 확인 → 묶음 실행(캐시 안 함) → 파싱·조립 성공 뒤 1회 차감 · 바깥 묶음이면 0', () => {
     const g = src('inapp-ai-generator.ts');
-    expect(g).toContain("const inappCost = isInCreditBundle() ? 0 : getCreditCost('inapp-ai-generator');");
+    expect(g).toContain("const inappCost = entryCreditCost('inapp-ai-generator');");   // ★ 1101 §16-3 — 바깥 묶음 = 0 판정은 크레딧 CT
     expect(g).toContain('if (inappCost > 0) await checkCredit(input.companyId, inappCost);');
     expect(g).toContain('const aiResult = await runInCreditBundle(() => callAIWithFallback({');
     expect(g).toContain('noCache: true,');
@@ -97,11 +97,11 @@ describe('R082 AI 근거 질의', () => {
     expect(c).not.toContain('status_code IN');
     expect(c).toContain('SELECT campaign_name AS name, message_content, sent_at, COALESCE(success_count, 0) AS success_count');
   });
-  it('월 호출 한도 · 크레딧 확인 뒤 호출 · 성공 뒤 차감(단가표)', () => {
+  it('크레딧 확인 뒤 호출 · 성공 뒤 차감(단가표) · 월 호출 한도 없음(★ 1101 Harold)', () => {
     expect(src('ai-credit-calc.ts')).toContain("'ai-operator-explain': 5,");
     const a = src('..', 'routes', 'ai.ts');
     const b = between(a, "router.post('/operator/explain'", '\nrouter.');
-    expect(b).toContain('await checkAiRateLimit(companyId);');
+    expect(b).not.toContain('checkAiRateLimit');
     expect(b).toContain("const explainCost = getCreditCost('ai-operator-explain');");
     expect(b.indexOf('await checkCredit(companyId, explainCost);')).toBeLessThan(b.indexOf('await callAIWithCitations('));
     expect(b.indexOf('await callAIWithCitations(')).toBeLessThan(b.indexOf("source: 'ai-operator-explain'"));

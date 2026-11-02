@@ -1842,7 +1842,7 @@ dmRouter.get('/:id/recipient-detail', requireDmAccess, async (req: any, res: any
 });
 
 // POST /api/dm/:id/generate-copy — DM 발송용 문안 1개 생성 (브랜드보이스 주입, %DM링크% 포함) — P4 편집기
-//   경량 단일 생성(캠페인 다변형 generate-message와 별개). 종량제 3크레딧(callAIWithFallback creditCost).
+//   경량 단일 생성(캠페인 다변형 generate-message와 별개). 종량제 3크레딧(금액 = 크레딧 CT aiCallCost · 원천 단가).
 //   ★ 2026-07-02(3) Harold 지시 — 문안은 "DM 편집 내용"에 근거해 생성(섹션 요약 주입) + JSON 응답 방어 파싱.
 dmRouter.post('/:id/generate-copy', requireDmAccess, async (req: any, res: any) => {
   try {

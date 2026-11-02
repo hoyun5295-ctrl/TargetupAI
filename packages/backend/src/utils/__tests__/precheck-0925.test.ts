@@ -51,9 +51,6 @@ import { readAgencySpell } from '../agency-send-spell';
 import { buildPassedNotify } from '../agency-send-notify';
 import { eucKrByteLength } from '../message-byte';
 import { judgeSpamVerdict, spamBillableTestSql, withExpectedSpamDevices, SPAM_TRIAL_LIMIT, SPAM_TRIAL_SOURCE } from '../spam-trial';
-import {
-  AI_CALL_LIMIT_EXEMPT_SOURCES, aiLimitCountedSql, isAiCallLimitExempt,
-} from '../ai-rate-limit';
 import { AGENCY_SPELL_SOURCE } from '../agency-send-spell';
 import {
   DIRECT_SPELL_SOURCE, finishSpellUse, reserveSpellUse, resetSpellMinuteWindow, takeSpellMinuteSlot, SPELL_FREE_MONTHLY_LIMIT, SPELL_PER_MINUTE_LIMIT,
@@ -374,38 +371,26 @@ describe('6. 맞춤법 한도', () => {
   });
 });
 
-describe('7. 월 AI 호출 한도 면제 = 문자 맞춤법만 · 검사와 셈이 같은 목록(★Harold B안)', () => {
-  it('면제 목록 = 직접발송·대행 맞춤법 source 둘 · 이름은 CT-55가 소유', () => {
-    expect([...AI_CALL_LIMIT_EXEMPT_SOURCES]).toEqual([DIRECT_SPELL_SOURCE, AGENCY_SPELL_SOURCE]);
-    expect(isAiCallLimitExempt(DIRECT_SPELL_SOURCE)).toBe(true);
-    expect(isAiCallLimitExempt(AGENCY_SPELL_SOURCE)).toBe(true);
-    for (const other of ['sns-typo-check', 'help-ask', 'agency-send-refine', 'unknown', '', null, undefined]) {
-      expect(isAiCallLimitExempt(other as any)).toBe(false);
-    }
-  });
-  it('관문은 목록으로 판정한다(호출마다 붙이는 면제 표시 없음)', () => {
+describe('7. 월 AI 호출 수 한도 = 없음(★ 2026-11-01 Harold 「한도를 두는거 자체가 문제」 · 맞춤법 면제 목록도 없다)', () => {
+  it('관문은 한도를 보지 않는다(호출마다 붙이는 면제 표시도 없음)', () => {
     const ai = read('services/ai.ts');
-    expect(ai).toMatch(/const \{ checkAiRateLimit, isAiCallLimitExempt \} = await import\('\.\.\/utils\/ai-rate-limit'\);\s*if \(!isAiCallLimitExempt\(params\.source\)\) \{\s*await checkAiRateLimit\(params\.companyId\);/);
+    expect(ai).not.toMatch(/checkAiRateLimit|isAiCallLimitExempt/);
     for (const f of ['services/ai.ts', 'utils/spell-check.ts', 'utils/sms-spell-check.ts', 'utils/sns-spell-check.ts']) {
       expect(read(f)).not.toContain('rateLimitExempt');
     }
   });
-  it('셈 조각 — 면제 source 를 빼고 NULL source 옛 행은 센다', () => {
-    expect(aiLimitCountedSql()).toBe("COALESCE(source, '') NOT IN ('direct-send-spell', 'agency-send-spell')");
-  });
-  it('한도와 비교되는 숫자 전부가 같은 조각을 쓴다 · 출처별 분포는 그대로 보인다', () => {
+  it('통계 숫자 = 모든 호출(면제 조각 없음) · 출처별 분포 · 원가 그대로', () => {
     const rl = read('utils/ai-rate-limit.ts');
-    const monthly = rl.slice(rl.indexOf('export async function getMonthlyUsage('), rl.indexOf('export async function checkAiRateLimit('));
-    expect(monthly).toContain('AND ${aiLimitCountedSql()}`');
+    const monthly = rl.slice(rl.indexOf('export async function getMonthlyCallCount('), rl.indexOf('export async function recordAiCall('));
+    expect(monthly).toContain('SELECT COUNT(*)::int AS cnt');
+    expect(monthly).not.toContain('NOT IN');
     const daily = rl.slice(rl.indexOf('export async function getDailyUsage('), rl.indexOf('export async function getModelBreakdown('));
-    expect(daily).toContain('(COUNT(*) FILTER (WHERE ${aiLimitCountedSql()}))::int AS count');
+    expect(daily).toContain('COUNT(*)::int AS count,');
     expect(daily).toContain('COALESCE(SUM(cost_won), 0)::int AS cost');
-    const breakdown = rl.slice(rl.indexOf('export async function getModelBreakdown('));
-    expect(breakdown).not.toContain('aiLimitCountedSql');
     const usage = read('routes/ai-usage.ts');
     const prev = usage.slice(usage.indexOf('const prevMonthRes = await query('), usage.indexOf('const prevMonthCalls ='));
-    expect(prev).toContain('AND ${aiLimitCountedSql()}`');
-    // 라우트에 ai_call_log 를 직접 세는 곳이 전월 한 곳뿐이다(새로 생기면 같은 조각을 쓰는지 여기서 걸린다)
+    expect(prev).not.toContain('NOT IN');
+    // 라우트에 ai_call_log 를 직접 세는 곳이 전월 한 곳뿐이다
     expect((usage.match(/FROM ai_call_log/g) || []).length).toBe(1);
   });
 });

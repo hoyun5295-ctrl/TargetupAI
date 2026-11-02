@@ -1091,7 +1091,7 @@ router.post('/recipients/preview', async (req: Request, res: Response) => {
 
 // ════════════════════════════════════════════════════════════════════
 // AI — 원샷 생성(3) / 다듬기(1) / 발송 전 진단(1) / 발송 후 성과(5) / 발송 시간(5)
-//   차감 = checkCredit → 작업 성공 → settleCreditAfterSuccess(실패 시 차감 0 · ★1025 동시 소진 402 · 원장 실패 503 = 결과 안 줌). 내부 callAIWithFallback은 creditCost:0.
+//   차감 = checkCredit → 작업 성공 → settleCreditAfterSuccess(실패 시 차감 0 · ★1025 동시 소진 402 · 원장 실패 503 = 결과 안 줌). 내부 callAIWithFallback은 「진입점이 걷음」 사실(charge settled-by).
 // ════════════════════════════════════════════════════════════════════
 
 // 비주얼 빌더 — AI가 이메일 블록 Section[]을 생성(이미지·혜택은 빈 자리). 크레딧 3.

@@ -193,7 +193,7 @@ export function applySpellIssue(text: string, issue: Pick<SpellIssue, 'start' | 
 
 /**
  * 검사 실행 — AI 후보 → 판정.
- * 월 AI 호출 한도 면제 여부는 `source`로 정해진다(CT-55 `AI_CALL_LIMIT_EXEMPT_SOURCES` · 문자 맞춤법만 · SNS 는 한도 적용).
+ * 호출 원천(`source`) = 사용량 통계 · 맞춤법 무료 횟수 셈의 이름(★ 2026-11-01 월 AI 호출 수 한도 삭제 · 면제 목록도 없다).
  */
 export async function runSpellCheck(input: {
   companyId: string;

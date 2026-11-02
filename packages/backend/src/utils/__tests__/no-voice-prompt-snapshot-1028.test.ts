@@ -25,7 +25,7 @@ vi.mock('../../config/database', () => ({
   query: vi.fn(async () => ({ rows: [] })),
   pool: { query: vi.fn(async () => ({ rows: [] })), connect: vi.fn() },
 }));
-vi.mock('../ai-rate-limit', async (orig) => ({ ...(await orig<any>()), checkAiRateLimit: vi.fn(async () => {}), recordAiCall: vi.fn(async () => null) }));
+vi.mock('../ai-rate-limit', async (orig) => ({ ...(await orig<any>()), recordAiCall: vi.fn(async () => null) }));
 vi.mock('../ai-cache', async (orig) => ({ ...(await orig<any>()), getCachedResponse: vi.fn(() => null), setCachedResponse: vi.fn() }));
 vi.mock('../ai-credit', async (orig) => ({ ...(await orig<any>()), checkCredit: vi.fn(async () => {}), settleCreditAfterSuccess: vi.fn(async () => {}) }));
 

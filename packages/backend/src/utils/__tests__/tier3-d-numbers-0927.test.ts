@@ -184,16 +184,16 @@ describe('R078 · R193 고객 평균 구매 = 표준 컬럼', () => {
 });
 
 describe('R183 자사몰 AI 진단', () => {
-  it('크레딧·한도는 그대로 던지고 실패는 실패로 · 성공 뒤 차감', () => {
+  it('크레딧은 그대로 던지고 실패는 실패로 · 성공 뒤 차감(월 AI 호출 한도 = 없음 · ★ 2026-11-01)', () => {
     const x = src('cdp-fusion-explainer.ts');
-    expect(x).toContain('if (err instanceof InsufficientCreditError || err instanceof AiRateLimitExceeded || err instanceof UserFacingError) throw err;');   // ★ 1025 R10 사용자 조건 · 원장 실패(503)도 그대로
+    expect(x).toContain('if (err instanceof InsufficientCreditError || err instanceof UserFacingError) throw err;');   // ★ 1025 R10 사용자 조건 · 원장 실패(503)도 그대로
     expect(x).not.toContain('자사몰 진단 영역 일시 오류');
     expect(x).toContain('const text = await runInCreditBundle(() => callAIWithFallback({');
     expect(x.indexOf('const parsed = JSON.parse(jsonStr);')).toBeLessThan(x.indexOf("source: 'cdp-fusion-explainer', idempotencyKey: `cdp-explain:${randomUUID()}`"));
     const c = src('..', 'routes', 'cdp.ts');
     const b = between(c, "router.post('/explain'", '\nrouter.');
     expect(b).toContain('if (err instanceof InsufficientCreditError) return res.status(402)');
-    expect(b).toContain('if (err instanceof AiRateLimitExceeded) return res.status(429)');
+    expect(b).not.toContain('AiRateLimitExceeded');
   });
 });
 

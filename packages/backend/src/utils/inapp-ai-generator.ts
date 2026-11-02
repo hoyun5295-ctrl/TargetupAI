@@ -31,8 +31,7 @@ import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { randomUUID } from 'crypto';
 import { checkCredit, settleCreditAfterSuccess } from './ai-credit';
-import { isInCreditBundle, runInCreditBundle } from './ai-credit-context';
-import { getCreditCost } from './ai-credit-calc';
+import { entryCreditCost, runInCreditBundle } from './ai-credit-context';
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 import { query } from '../config/database';
 import { getCompanyBrandKitRaw } from './dm/dm-brand-kit';
@@ -693,7 +692,7 @@ ${brandAccent
   // ★ 2026-09-27 한줄로 V2 R246 — 성공 뒤 차감. 옛: AI 호출 안에서 3크레딧이 먼저 빠져 응답 JSON이 깨져도 돌려받지 못했고,
   //   깨진 응답이 5분 캐시에 남아 다시 눌러도 같은 실패였다. 잔액만 먼저 확인 → 묶음 실행(안쪽 차감 0 · 캐시 안 함) →
   //   파싱·조립이 끝난 뒤 1회 차감(R260과 같은 방식). 바깥이 이미 묶음 차감을 소유하면(플래너 등) 여기서는 빼지 않는다.
-  const inappCost = isInCreditBundle() ? 0 : getCreditCost('inapp-ai-generator');
+  const inappCost = entryCreditCost('inapp-ai-generator');   // 바깥 묶음 = 0(금액 = 크레딧 CT)
   if (inappCost > 0) await checkCredit(input.companyId, inappCost);
   // ★ 2026-10-24 ② 1회 생성 = AI 호출 + 파싱(재생성도 같은 함수 · 같은 묶음 = 안쪽 차감 0)
   const generateOnce = async (retryHint?: string): Promise<any> => {

@@ -15,8 +15,8 @@ vi.mock('../system-alert', () => ({ sendSystemAlert: vi.fn(async () => undefined
 vi.mock('../ai-credit-tx', () => ({
   loadCreditRow: vi.fn(async () => null),
   applyResetIfNeeded: vi.fn(),
-  expireTrialLeftover: vi.fn(),
-  insertedRows: (r: any) => r?.rowCount ?? r?.rows?.length ?? 0,
+  applyPlanCreditDelta: vi.fn(),   // ★ 2026-11-01 §16-1 F16 — 일할 원장 쓰기는 크레딧 CT 로 옮겼다
+  PlanChangeContractError: class extends Error {},
 }));
 
 import { recordPlanChange } from '../plan-change-log';
@@ -36,9 +36,9 @@ const client = {
   query: async (sql: string, p: any[] = []) => {
     const s = sql.replace(/\s+/g, ' ').trim();
     if (s.startsWith('SELECT pg_advisory_xact_lock')) return { rows: [] };
-    if (s.startsWith('SELECT plan_code, monthly_price, COALESCE(ai_credits_per_month, 0) AS credits FROM plans WHERE id = $1::uuid')) {
+    if (s.startsWith('SELECT plan_code, monthly_price FROM plans WHERE id = $1::uuid')) {
       const pl = byId(p[0]);
-      return { rows: pl ? [{ plan_code: pl.plan_code, monthly_price: pl.monthly_price, credits: pl.credits }] : [] };
+      return { rows: pl ? [{ plan_code: pl.plan_code, monthly_price: pl.monthly_price }] : [] };
     }
     if (s.startsWith('SELECT to_plan_id, to_plan_code, to_monthly_price FROM company_plan_changes')) {
       return { rows: [{ to_plan_id: PLANS.FREE.id, to_plan_code: 'FREE', to_monthly_price: 0 }] };

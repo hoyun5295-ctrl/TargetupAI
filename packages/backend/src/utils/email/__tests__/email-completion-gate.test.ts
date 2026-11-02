@@ -34,9 +34,11 @@ describe('S2 이메일 완성 판정', () => {
     expect(isCreditNotApplicableRow({ plan_credits: null, purchased: '0' })).toBe(true);
     expect(isCreditNotApplicableRow({ plan_credits: 0, purchased: 0 })).toBe(false);
     expect(isCreditNotApplicableRow(null)).toBe(true);
-    // ai-credit-tx 의 not_applicable 조건 원문과 같은 식인지(갈리면 교착 재발)
+    // 차감의 not_applicable 과 같은 판정 = 크레딧 CT creditApplies 한 함수(★ 2026-11-01 §16-1 F18 · 갈리면 교착 재발)
     const tx = fs.readFileSync(path.join(__dirname, '../../ai-credit-tx.ts'), 'utf-8');
-    expect(tx).toContain('locked.plan_credits == null && (Number(locked.purchased) || 0) === 0');
+    expect(tx).toContain('if (!creditApplies(locked))');
+    const ec = fs.readFileSync(path.join(__dirname, '../email-completion.ts'), 'utf-8');
+    expect(ec).toContain('return !creditApplies(row);');
   });
   it('조회 실패는 삼키지 않는다(fail-closed · 돈을 안 낸 캠페인이 나가지 않게)', async () => {
     await expect(isEmailCampaignCompleted(C, ID, deps({ loadCreditRow: async () => { throw new Error('db down'); } }))).rejects.toThrow('db down');

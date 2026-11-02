@@ -43,7 +43,7 @@ import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
 import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, persistPassFailures, flushPassAlerts } from './system-alert';
 import { soleCompanyId } from './internal-company';
 
 const TICK_MS = 60_000;
@@ -284,8 +284,11 @@ function buildRejectedReply(reasons: string[], listHeaders?: string[]): string {
 
 interface IntakeRow { id: string; status: string; attempt_count: number }
 
-async function claimIntake(mailbox: string, uidl: string, messageId: string | null, messageHash: string, fromEmail: string | null): Promise<IntakeRow | null> {
+/** (시험이 부른다 · 설계 §17-4 A2 닫기 계약) */
+export async function claimIntake(mailbox: string, uidl: string, messageId: string | null, messageHash: string, fromEmail: string | null, judgedReason: string | null = null): Promise<IntakeRow | null> {
   // 재처리 경로: failed(재시도 창) · claimed(10분 초과 = 중간 사망)를 관찰값 CAS로 다시 잡는다
+  // ★ 2026-11-02 Codex 구현 2R — 판정 사유(미등록 발신 = 'unregistered')는 선점과 같은 쓰기에 남긴다(판정과 표식 사이 틈 0 ·
+  //   옛: 선점 뒤 표식 UPDATE 가 따로라 그 사이 실패를 일반 catch 가 원장 없이 failed 로 닫을 수 있었다)
   const existing = await query(
     `SELECT id, status, attempt_count, claimed_at, next_attempt_at FROM agency_send_email_intake WHERE mailbox = $1 AND uidl = $2`,
     [mailbox, uidl],
@@ -295,9 +298,9 @@ async function claimIntake(mailbox: string, uidl: string, messageId: string | nu
     if (row.status === 'failed' && Number(row.attempt_count) < FAIL_MAX_ATTEMPTS
       && (!row.next_attempt_at || new Date(row.next_attempt_at).getTime() <= Date.now())) {
       const re = await query(
-        `UPDATE agency_send_email_intake SET status = 'claimed', claimed_at = NOW(), attempt_count = attempt_count + 1, updated_at = NOW()
+        `UPDATE agency_send_email_intake SET status = 'claimed', claimed_at = NOW(), attempt_count = attempt_count + 1, reason = COALESCE($2, reason), updated_at = NOW()
           WHERE id = $1 AND status = 'failed' RETURNING id, status, attempt_count`,
-        [row.id],
+        [row.id, judgedReason],
       );
       return re.rows[0] || null;
     }
@@ -309,27 +312,14 @@ async function claimIntake(mailbox: string, uidl: string, messageId: string | nu
       //   프로세스가 죽는 것은 못 잡는다. 그러면 이 행이 claimed로 남아 10분마다 영구히 재선점되며
       //   틱 슬롯을 계속 먹는다. 다중은 한 통의 작업량을 최대 5배로 키워 그 확률을 직접 올린다.
       //   failed 경로에는 이미 같은 상한이 있다(위 분기) — 같은 규율을 이 자리에도 적용한다.
-      if (Number(row.attempt_count) >= FAIL_MAX_ATTEMPTS) {
-        await query(
-          `UPDATE agency_send_email_intake
-              SET status = 'failed', reason = COALESCE(reason, 'claim_exhausted'), decided_at = NOW(), updated_at = NOW()
-            WHERE id = $1 AND status = 'claimed'`,
-          [row.id],
-        );
-        await sendSystemAlert({
-          companyId: null,
-          dedupKey: `agency-mail-claim-exhausted:${mailbox}`,
-          message: `대행발송 메일 한 통이 처리 중 ${FAIL_MAX_ATTEMPTS}회 연속으로 끊겨 종결 처리했습니다(uidl=${uidl}). 첨부가 지나치게 크거나 파싱이 프로세스를 죽였을 수 있습니다.`,
-          cooldownMs: 60 * 60 * 1000,
-        });
-        return null;
-      }
+      // ★ 2026-11-02 상한에 닿은 행(선점 소진) = 틱 앞 단계 closeAlertPendingIntakes 가 경보 원장에 넣고 실패로 닫는다(설계 §17-4 A2 · Codex 구현 1R) —
+      //   틱은 그 행을 처리 목록에 넣지 않는다 · 여기 오더라도 아래 UPDATE 의 attempt_count < 상한이 0행 = null.
       const re = await query(
-        `UPDATE agency_send_email_intake SET claimed_at = NOW(), attempt_count = attempt_count + 1, updated_at = NOW()
+        `UPDATE agency_send_email_intake SET claimed_at = NOW(), attempt_count = attempt_count + 1, reason = COALESCE($4, reason), updated_at = NOW()
           WHERE id = $1 AND status = 'claimed' AND claimed_at < NOW() - ($2::int * interval '1 millisecond')
             AND attempt_count < $3
           RETURNING id, status, attempt_count`,
-        [row.id, CLAIM_STALE_MS, FAIL_MAX_ATTEMPTS],
+        [row.id, CLAIM_STALE_MS, FAIL_MAX_ATTEMPTS, judgedReason],
       );
       return re.rows[0] || null;
     }
@@ -337,11 +327,11 @@ async function claimIntake(mailbox: string, uidl: string, messageId: string | nu
   }
   try {
     const ins = await query(
-      `INSERT INTO agency_send_email_intake (mailbox, uidl, message_id, message_hash, from_email, status)
-       VALUES ($1, $2, $3, $4, $5, 'claimed')
+      `INSERT INTO agency_send_email_intake (mailbox, uidl, message_id, message_hash, from_email, status, reason)
+       VALUES ($1, $2, $3, $4, $5, 'claimed', $6)
        ON CONFLICT (mailbox, uidl) DO NOTHING
        RETURNING id, status, attempt_count`,
-      [mailbox, uidl, messageId, messageHash, fromEmail],
+      [mailbox, uidl, messageId, messageHash, fromEmail, judgedReason],
     );
     return ins.rows[0] || null;
   } catch (err: any) {
@@ -378,6 +368,135 @@ async function finalizeIntake(id: string, status: 'rejected' | 'failed' | 'accep
     [id, status, fields.reason?.slice(0, 200) ?? null, fields.companyId ?? null, fields.userId ?? null,
       fields.requestIds ?? null, fields.replyStatus ?? null, fields.nextAttemptMin ?? null],
   );
+}
+
+// ────────────── 경보만 남은 접수(★ 2026-11-02 설계 §17-4 A1 · A2 · Codex 구현 1R) ──────────────
+
+/** 틱이 원장에서 읽는 칸 */
+export interface KnownIntake {
+  id: string; uidl: string; status: string; attempt_count: number;
+  claimed_at: Date | string | null; next_attempt_at: Date | string | null; reason: string | null; from_email: string | null;
+}
+
+/**
+ * 사건은 판정됐고 경보 원장 넣기만 남은 접수 = 미등록 발신 판정(선점 그대로 · reason unregistered = A1) · 선점 소진(상한 도달 + 10분 넘음 = A2).
+ *   이 행은 일반 처리(처리 슬롯 · 헤더 받기 · 일반 catch)에 다시 넣지 않는다 — 원장에 못 넣는 동안 앞자리를 차지해 뒤 메일이 굶거나 ·
+ *   헤더 받기 오류를 일반 catch 가 원장 없이 실패로 닫았다(Codex 구현 1R). 닫기 = closeAlertPendingIntakes 한 곳.
+ */
+export function alertPendingKind(r: KnownIntake, nowMs: number): 'unknown-sender' | 'claim-exhausted' | null {
+  if (r.status !== 'claimed') return null;
+  if (r.reason === 'unregistered') return 'unknown-sender';
+  if (Number(r.attempt_count) >= FAIL_MAX_ATTEMPTS && r.claimed_at && nowMs - new Date(r.claimed_at).getTime() > CLAIM_STALE_MS) return 'claim-exhausted';
+  return null;
+}
+
+/** 원장 대조 — 메일함에 있는 UIDL 의 접수 행(POP3에는 커서가 없다 · UIDL 전량 대조가 유일한 축 · §18-8 6) */
+export async function readKnownIntakes(mailbox: string, uidls: string[]): Promise<KnownIntake[]> {
+  const r = await query(
+    `SELECT id, uidl, status, attempt_count, claimed_at, next_attempt_at, reason, from_email FROM agency_send_email_intake
+      WHERE mailbox = $1 AND uidl = ANY($2::text[])`,
+    [mailbox, uidls],
+  );
+  return r.rows as KnownIntake[];
+}
+
+/** 이번 틱에 처리할 메일 = 새 메일 · 재시도 창이 온 실패 · 10분 넘게 잡힌 선점(경보만 남은 접수 제외) · 앞에서 MAX_PER_TICK 통 */
+export function pickIntakeTodo<T extends { uidl: string }>(uidls: T[], known: KnownIntake[], nowMs: number): T[] {
+  const knownMap = new Map(known.map((r) => [r.uidl, r]));
+  return uidls.filter((u) => {
+    const row = knownMap.get(u.uidl);
+    if (!row) return true;
+    if (alertPendingKind(row, nowMs)) return false;
+    if (row.status === 'failed' && Number(row.attempt_count) < FAIL_MAX_ATTEMPTS
+      && (!row.next_attempt_at || new Date(row.next_attempt_at).getTime() <= nowMs)) return true;
+    if (row.status === 'claimed' && row.claimed_at && nowMs - new Date(row.claimed_at).getTime() > CLAIM_STALE_MS) return true;
+    return false;
+  }).slice(0, MAX_PER_TICK);
+}
+
+/**
+ * 경보만 남은 접수를 경보 원장에 넣고, 넣은 때만 닫는다(닫기 계약 · 설계 §17-3) — 미등록 발신 = 보낸 주소마다 한 항목 → 반려 ·
+ *   선점 소진 = 메일함:uidl 마다 한 항목 → 실패. 못 넣으면 행 그대로(다음 틱 앞 단계가 다시 · 처리 슬롯 · 메일함 호출 0).
+ */
+export async function closeAlertPendingIntakes(mailbox: string, rows: KnownIntake[], nowMs: number = Date.now()): Promise<void> {
+  const unknown = rows.filter((r) => alertPendingKind(r, nowMs) === 'unknown-sender');
+  const exhausted = rows.filter((r) => alertPendingKind(r, nowMs) === 'claim-exhausted');
+  if (unknown.length > 0) {
+    // ★ A1 — 보낸 주소마다 한 항목(옛: 공용 키 6시간 = 그 안에 온 다른 고객의 메일은 회신도 경보도 없이 묻혔다)
+    const spec = {
+      pass: 'agency-mail-unknown-sender',
+      title: '대행발송 메일함에 등록되지 않은 주소에서 메일이 왔습니다(회신 없이 기록했습니다).',
+      action: '고객사가 보낸 메일이면 그 주소를 대행발송 허용 이메일에 등록하고 다시 보내 달라고 안내해 주세요.',
+      failures: unknown.map((r) => ({ companyId: null, key: r.from_email ? r.from_email.toLowerCase() : `intake:${r.id}`, error: `보낸 주소 ${r.from_email || '(주소 없음)'}` })),
+    };
+    if (await persistPassFailures(spec)) {
+      for (const r of unknown) await finalizeIntake(r.id, 'rejected', { reason: 'unregistered', replyStatus: 'skipped' });
+      void flushPassAlerts(spec.pass).catch(() => undefined);
+    }
+  }
+  if (exhausted.length > 0) {
+    // ★ A2 — 메일마다 한 항목(옛: 메일함 키 1시간 = 그 안에 끊긴 다른 메일은 경보 없이 닫혔다) · 본문은 다시 읽지 않는다
+    const spec = {
+      pass: 'agency-mail-claim-exhausted',
+      title: `대행발송 메일 한 통이 처리 중 ${FAIL_MAX_ATTEMPTS}번 연속으로 끊겨 실패로 닫았습니다.`,
+      action: '첨부가 지나치게 크거나 파싱이 프로세스를 죽였을 수 있습니다. 대행발송 접수 기록에서 그 메일을 찾아 보낸 분께 알려 주세요.',
+      failures: exhausted.map((r) => ({ companyId: null, key: `${mailbox}:${r.uidl}`, error: `메일함 ${mailbox} · uidl ${r.uidl}` })),
+    };
+    if (await persistPassFailures(spec)) {
+      await query(
+        `UPDATE agency_send_email_intake
+            SET status = 'failed', reason = COALESCE(reason, 'claim_exhausted'), decided_at = NOW(), updated_at = NOW()
+          WHERE id = ANY($1::bigint[]) AND status = 'claimed'`,
+        [exhausted.map((r) => r.id)],
+      );
+      void flushPassAlerts(spec.pass).catch(() => undefined);
+    }
+  }
+}
+
+/**
+ * 통 단위 격리: 우리 쪽 일시 장애만 백오프 재시도(파싱·신원 반려는 위에서 이미 확정됐다) · (시험이 부른다)
+ *   ★ 2026-11-02 Codex 구현 2R — 경보만 남은 접수(미등록 판정 · 선점 소진)는 실패로 덮지 않는다(닫기 = closeAlertPendingIntakes 한 곳 ·
+ *   옛 꼴이면 마지막 시도의 실패 기록이 그 행을 failed 로 끝내 원장 없이 사건이 사라졌다).
+ */
+export async function markProcessFailure(mailbox: string, uidl: string, err: any): Promise<void> {
+  log(`통 처리 실패(재시도 예약): uidl=${uidl} ${err?.message || err}`);
+  try {
+    const row = (await readKnownIntakes(mailbox, [uidl]))[0];
+    if (row && alertPendingKind(row, Date.now())) {
+      log(`경보만 남은 접수는 실패로 덮지 않는다(틱 앞 단계가 닫는다): uidl=${uidl}`);
+    } else if (row) {
+      const attempts = Number(row.attempt_count) || 0;
+      const stepMin = RETRY_STEPS_MIN[Math.min(attempts, RETRY_STEPS_MIN.length - 1)];
+      await finalizeIntake(row.id, 'failed', { reason: String(err?.message || 'error').slice(0, 180), nextAttemptMin: stepMin });
+    } else {
+      // ★적대 검토: 선점(TOP·신원) **전**에 죽는 독약 메일은 행이 없어 매 틱 무백오프 재시도로
+      //   처리 슬롯을 영구 점유한다 — 실패 행을 만들어 같은 백오프 계단에 태운다(4회 뒤 failed 종결).
+      await query(
+        `INSERT INTO agency_send_email_intake (mailbox, uidl, message_hash, status, reason, attempt_count, next_attempt_at, decided_at)
+         VALUES ($1, $2, $3, 'failed', $4, 1, NOW() + interval '1 minute', NOW())
+         ON CONFLICT (mailbox, uidl) DO NOTHING`,
+        [mailbox, uidl, sha256(`poison:${mailbox}:${uidl}`), String(err?.message || 'error').slice(0, 180)],
+      );
+    }
+  } catch (markErr: any) {
+    if (!isMissingRelation(markErr)) log(`실패 기록 불가: ${markErr?.message}`);
+  }
+}
+
+/**
+ * 틱 앞 단계 = 그 메일함의 경보만 남은 접수를 DB 에서 읽어 닫는다(메일함 목록과 무관 · 메일이 서버에서 지워져도 닫힌다).
+ *   후보 = 선점 중이면서 미등록 판정 표식이거나 시도 상한에 닿은 행 · 경보만 남았는가(10분 넘음)는 alertPendingKind 가 정한다(판정 한 곳).
+ *   ponytail: 한 번에 500 행(닫히면 후보에서 빠져 다음 틱이 다음 줄을 본다 · 원장 장애 동안 쌓이는 수가 그보다 많으면 그때 커서).
+ */
+export async function closeAlertPendingForMailbox(mailbox: string): Promise<void> {
+  const r = await query(
+    `SELECT id, uidl, status, attempt_count, claimed_at, next_attempt_at, reason, from_email FROM agency_send_email_intake
+      WHERE mailbox = $1 AND status = 'claimed' AND (reason = 'unregistered' OR attempt_count >= $2::int)
+      ORDER BY id LIMIT 500`,
+    [mailbox, FAIL_MAX_ATTEMPTS],
+  );
+  await closeAlertPendingIntakes(mailbox, r.rows as KnownIntake[]);
 }
 
 /**
@@ -579,9 +698,10 @@ export function buildIntakeUnits(
 
 // ────────────── 메시지 1통 처리(통 단위 격리 · §18-5) ──────────────
 
-interface TickCtx { client: Pop3Client; mailbox: string; octets: Map<number, number>; now: Date }
+export interface TickCtx { client: Pop3Client; mailbox: string; octets: Map<number, number>; now: Date }
 
-async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<void> {
+/** (시험이 부른다 · 설계 §17-4 A1 닫기 계약) */
+export async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<void> {
   // 1) 헤더만 받는다 — 신원 판정 전 첨부 미다운로드(§18-5)
   const headerBuf = await ctx.client.top(seq);
   const head: ParsedMail = await simpleParser(headerBuf);
@@ -598,7 +718,7 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
   const sender = await resolveEmailSender(fromAddr);
 
   // 3) 선점 — 본문 내려받기 전(멱등 1층 arbiter)
-  const claimed = await claimIntake(ctx.mailbox, uidl, messageId, messageHash, fromAddr || null);
+  const claimed = await claimIntake(ctx.mailbox, uidl, messageId, messageHash, fromAddr || null, !isAuto && sender.outcome === 'unregistered' ? 'unregistered' : null);
   if (!claimed) return;
 
   if (isAuto) {
@@ -606,13 +726,11 @@ async function processMessage(ctx: TickCtx, seq: number, uidl: string): Promise<
     return;
   }
   if (sender.outcome === 'unregistered') {
-    await finalizeIntake(claimed.id, 'rejected', { reason: 'unregistered', replyStatus: 'skipped' });
-    await sendSystemAlert({
-      companyId: null,
-      dedupKey: 'agency-mail-unknown-sender',
-      message: `대행발송 메일함에 미등록 발신 메일이 왔습니다(회신 없이 기록). 최근 예: ${fromAddr || '(주소 없음)'}`,
-      cooldownMs: 6 * 60 * 60 * 1000,
-    });
+    // ★ 2026-11-02 설계 §17-4 A1 · Codex 구현 1R · 2R — 판정은 선점과 같은 쓰기에 이미 남았다(reason unregistered = 경보만 남은 접수) →
+    //   경보 원장 넣기 · 반려 닫기 = closeAlertPendingIntakes 한 곳(못 넣으면 틱 앞 단계가 다시 · 처리 슬롯 · 헤더 받기를 다시 쓰지 않는다)
+    await closeAlertPendingIntakes(ctx.mailbox, [{
+      id: claimed.id, uidl, status: 'claimed', attempt_count: claimed.attempt_count, claimed_at: null, next_attempt_at: null, reason: 'unregistered', from_email: fromAddr || null,
+    }]);
     return;
   }
   if (sender.outcome === 'owner_inactive') {
@@ -1214,6 +1332,9 @@ export async function runAgencyMailTick(): Promise<void> {
     if (!lock.rows[0]?.ok) return;
     held = true;
 
+    // ★ 2026-11-02 Codex 구현 1R · 2R — 경보만 남은 접수 닫기 = 메일함 상태 · 연결 · 빈 메일함과 무관하게 틱마다 먼저(원장 행으로 · 실패해도 이번 틱은 이어 간다)
+    await closeAlertPendingForMailbox(mailbox).catch((err: any) => log(`경보만 남은 접수 닫기 실패(다음 틱 다시): ${err?.message || err}`));
+
     const state = await loadMailState(mailbox);
     if (state?.pausedAt) return; // 사람이 재개할 때까지 멈춘다(paused_at NULL)
 
@@ -1263,21 +1384,9 @@ export async function runAgencyMailTick(): Promise<void> {
       await retryPendingReplies(mailbox);
 
       if (uidls.length === 0) return;
-      // 원장 대조 — 처리할 것만 남긴다(POP3에는 커서가 없다 · UIDL 전량 대조가 유일한 축 · §18-8 6)
-      const known = await query(
-        `SELECT uidl, status, attempt_count, claimed_at, next_attempt_at FROM agency_send_email_intake
-          WHERE mailbox = $1 AND uidl = ANY($2::text[])`,
-        [mailbox, uidls.map((u) => u.uidl)],
-      );
-      const knownMap = new Map<string, any>(known.rows.map((r: any) => [r.uidl, r]));
-      const todo = uidls.filter((u) => {
-        const row = knownMap.get(u.uidl);
-        if (!row) return true;
-        if (row.status === 'failed' && Number(row.attempt_count) < FAIL_MAX_ATTEMPTS
-          && (!row.next_attempt_at || new Date(row.next_attempt_at).getTime() <= Date.now())) return true;
-        if (row.status === 'claimed' && row.claimed_at && Date.now() - new Date(row.claimed_at).getTime() > CLAIM_STALE_MS) return true;
-        return false;
-      }).slice(0, MAX_PER_TICK);
+      // 원장 대조 — 처리할 것만 남긴다(경보만 남은 접수는 빠진다 · 위 닫기 단계 몫)
+      const known = await readKnownIntakes(mailbox, uidls.map((u) => u.uidl));
+      const todo = pickIntakeTodo(uidls, known, Date.now());
 
       const now = new Date();
       for (const u of todo) {
@@ -1289,29 +1398,8 @@ export async function runAgencyMailTick(): Promise<void> {
             continue;
           }
           if (isMissingRelation(err)) return; // 마이그레이션 전 — 다음 배포 순서에 맡긴다
-          // 통 단위 격리: 우리 쪽 일시 장애만 백오프 재시도(파싱·신원 반려는 위에서 이미 확정됐다)
-          log(`통 처리 실패(재시도 예약): uidl=${u.uidl} ${err?.message || err}`);
-          try {
-            const row = await query(
-              `SELECT id, attempt_count FROM agency_send_email_intake WHERE mailbox = $1 AND uidl = $2`, [mailbox, u.uidl],
-            );
-            if (row.rows[0]) {
-              const attempts = Number(row.rows[0].attempt_count) || 0;
-              const stepMin = RETRY_STEPS_MIN[Math.min(attempts, RETRY_STEPS_MIN.length - 1)];
-              await finalizeIntake(row.rows[0].id, 'failed', { reason: String(err?.message || 'error').slice(0, 180), nextAttemptMin: stepMin });
-            } else {
-              // ★적대 검토: 선점(TOP·신원) **전**에 죽는 독약 메일은 행이 없어 매 틱 무백오프 재시도로
-              //   처리 슬롯을 영구 점유한다 — 실패 행을 만들어 같은 백오프 계단에 태운다(4회 뒤 failed 종결).
-              await query(
-                `INSERT INTO agency_send_email_intake (mailbox, uidl, message_hash, status, reason, attempt_count, next_attempt_at, decided_at)
-                 VALUES ($1, $2, $3, 'failed', $4, 1, NOW() + interval '1 minute', NOW())
-                 ON CONFLICT (mailbox, uidl) DO NOTHING`,
-                [mailbox, u.uidl, sha256(`poison:${mailbox}:${u.uidl}`), String(err?.message || 'error').slice(0, 180)],
-              );
-            }
-          } catch (markErr: any) {
-            if (!isMissingRelation(markErr)) log(`실패 기록 불가: ${markErr?.message}`);
-          }
+          // 통 단위 격리: 우리 쪽 일시 장애만 백오프 재시도 = markProcessFailure(경보만 남은 접수는 실패로 덮지 않는다)
+          await markProcessFailure(mailbox, u.uidl, err);
         }
       }
     } finally {

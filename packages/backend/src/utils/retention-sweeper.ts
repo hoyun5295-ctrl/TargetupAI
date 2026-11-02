@@ -12,7 +12,7 @@
  * 실측 = 2026-09-28 information_schema(기준 칸 14개 · 이 표들을 가리키는 외래키 0). 기간 인덱스는 sns_oauth_states.expires_at 뿐이라
  *   하루 1번 · 5,000행씩 끊어 지운다(잠금·WAL 폭주 방지). 실패는 표·파일마다 격리한다(정리 실패가 서비스를 막지 않는다).
  */
-import { sendSystemAlert } from './system-alert';
+import { sendSystemAlert, persistPassFailures, flushPassAlerts } from './system-alert';
 import * as fs from 'fs';
 import * as path from 'path';
 import { query } from '../config/database';
@@ -75,22 +75,37 @@ function isInsideDir(dir: string, p: unknown): p is string {
   return resolved.startsWith(root) && resolved.length > root.length;
 }
 
+/**
+ * ★ 2026-11-02 설계 §17-4 A5 · 설계 3R — 후보 = 커서 순환(지난 회차 마지막 (updated_at · id) 뒤부터 · 덜 차면 새 바퀴 ·
+ *   바퀴 상한 = 바퀴 시작 때 DB 의 「지금 − 90일」 고정 · 프로세스 기억 = 재기동하면 처음부터 한 바퀴).
+ *   옛 「오래된 순 LIMIT 1000」은 닫지 못한 줄(원장에 못 넣은 밖 경로 · 지우지 못한 파일)이 1,000 이면 그 뒤 PDF 를 영영 안 지웠다.
+ */
+const PDF_BATCH = 1000;
+let pdfCursor: { at: string; id: string; bound: string } | null = null;
+
 /** 90일 지난 풀분석 PDF 파일을 지우고 경로를 비운다(다운로드는 「보관 기간이 지났다」로 답한다). 보관 폴더 밖 경로는 건드리지 않는다. */
 export async function sweepExpiredAnalysisPdfs(opts: { pdfDir?: string } = {}): Promise<number> {
   const pdfDir = opts.pdfDir || FULL_ANALYSIS_PDF_DIR;
   const r = await query(
-    `SELECT id, pdf_path FROM full_analysis_jobs
-      WHERE status = 'done' AND pdf_path IS NOT NULL AND updated_at < NOW() - INTERVAL '${PDF_DAYS} days'
+    `SELECT id, pdf_path, updated_at::text AS at_text, COALESCE($3::timestamptz, NOW() - INTERVAL '${PDF_DAYS} days')::text AS bound_text
+       FROM full_analysis_jobs
+      WHERE status = 'done' AND pdf_path IS NOT NULL
+        AND updated_at < COALESCE($3::timestamptz, NOW() - INTERVAL '${PDF_DAYS} days')
+        AND ($1::timestamptz IS NULL OR (updated_at, id) > ($1::timestamptz, $2::uuid))
       ORDER BY updated_at ASC, id
-      LIMIT 1000`,
+      LIMIT ${PDF_BATCH}`,
+    [pdfCursor?.at ?? null, pdfCursor?.id ?? null, pdfCursor?.bound ?? null],
   );
+  const rows = r.rows as any[];
+  const lastRow = rows[rows.length - 1];
+  pdfCursor = rows.length < PDF_BATCH ? null : { at: String(lastRow.at_text), id: String(lastRow.id), bound: String(lastRow.bound_text) };
   // ★ 2026-10-25 원장 #11 — 옛: 폴더 밖 경로 · 삭제 실패 행이 표식 없이 남고 순서 없는 LIMIT 1000 → 쌓이면 뒤 PDF 를 영영 안 지웠다(보관 기한 위반)
   //   폴더 밖 경로 = 지우지 않고(우리 폴더가 아니다) 경로를 비워 줄에서 빼고 사람에게 알린다 · 삭제 실패 = 다음 날 다시 + 사람에게
   const cleared: string[] = [];
-  const outside: string[] = [];
+  const outside: Array<{ id: string; path: string }> = [];
   const failed: string[] = [];
-  for (const row of r.rows as any[]) {
-    if (!isInsideDir(pdfDir, row.pdf_path)) { outside.push(String(row.id)); continue; }
+  for (const row of rows) {
+    if (!isInsideDir(pdfDir, row.pdf_path)) { outside.push({ id: String(row.id), path: String(row.pdf_path ?? '') }); continue; }
     try {
       if (fs.existsSync(row.pdf_path)) fs.unlinkSync(row.pdf_path);
       cleared.push(String(row.id));
@@ -104,8 +119,20 @@ export async function sweepExpiredAnalysisPdfs(opts: { pdfDir?: string } = {}): 
   }
   const head = (ids: string[]) => `${ids.slice(0, 5).join(', ')}${ids.length > 5 ? ' 외' : ''}`;
   if (outside.length > 0) {
-    const ok = await query(`UPDATE full_analysis_jobs SET pdf_path = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[])`, [outside]).then(() => true, () => false);
-    void sendSystemAlert({ companyId: null, dedupKey: 'retention-pdf-outside', message: `풀분석 PDF 보관 기한 지남 · 보관 폴더 밖 경로 ${outside.length}건(작업 ${head(outside)}) — ${ok ? '경로를 비워 줄에서 뺐습니다' : '경로 비우기 실패 · 내일 다시'}. 그 파일이 남아 있으면 직접 지워 주세요.` });
+    // ★ 2026-11-02 설계 §17-4 A5 — 작업마다 한 항목(옛: 공용 키 6시간 = 재기동 10분 뒤 회차가 그 안이면 경보 없이 경로만 비웠다) ·
+    //   원장에 넣은 때만 경로를 비운다(닫기 계약 · 못 넣으면 그대로 두고 다음 바퀴에 다시)
+    console.warn(`[retention] 풀분석 PDF 보관 폴더 밖 경로 ${outside.length}건 — ${outside.map((o) => `${o.id} ${o.path}`).join(' · ')}`);
+    const spec = {
+      pass: 'retention-pdf-outside',
+      title: '보관 기한이 지난 풀분석 PDF 중 보관 폴더 밖 경로가 있어 파일을 지우지 않았습니다.',
+      action: '그 파일이 남아 있으면 직접 지워 주세요(작업 id · 전체 경로 = 서버 로그 [retention]). 경로 비우기가 실패한 작업은 다음 날 다시 알립니다.',
+      failures: outside.map((o) => ({ companyId: null, key: o.id, error: `경로 ${o.path}` })),
+    };
+    if (await persistPassFailures(spec)) {
+      await query(`UPDATE full_analysis_jobs SET pdf_path = NULL, updated_at = NOW() WHERE id = ANY($1::uuid[])`, [outside.map((o) => o.id)])
+        .catch((err: any) => console.warn('[retention] 보관 폴더 밖 경로 비우기 실패(다음 바퀴에 다시):', err?.message || err));
+      void flushPassAlerts(spec.pass).catch(() => undefined);
+    }
   }
   if (failed.length > 0) {
     void sendSystemAlert({ companyId: null, dedupKey: 'retention-pdf-delete-fail', message: `풀분석 PDF 보관 기한 지남 · 삭제 실패 ${failed.length}건(작업 ${head(failed)}) — 내일 다시 시도합니다. 계속되면 보관 폴더 권한을 확인해 주세요.` });

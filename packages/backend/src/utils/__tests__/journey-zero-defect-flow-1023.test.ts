@@ -123,7 +123,7 @@ describe('7. 화면 · 주소에 남은 결함', () => {
     expect(r).not.toContain("'/operator/preview-target-samples'");
     expect(r).not.toContain("'/operator/journeys-ai-generate'");
     const f = read('utils/journey-credit-forecast.ts');
-    expect(f).toContain("source = 'continuous-operator-send'");
+    expect(f).toContain("source: 'continuous-operator-send'");   // ★ 2026-11-01 §16-1 F8 — 원장 읽기 = 크레딧 CT(deductCountSince)
     expect(f).toContain('total: f.total + autoMarketing30');
   });
 });

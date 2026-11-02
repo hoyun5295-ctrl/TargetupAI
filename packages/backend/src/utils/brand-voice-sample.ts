@@ -79,7 +79,7 @@ export async function generateBrandVoiceSamples(companyId: string): Promise<Bran
       temperature: 0.6,
       companyId,
       source: 'brand-voice-sample',
-      creditCost: 0,
+      charge: { kind: 'settled-by', by: 'generate-messages' },   // 견본 금액 = 문안 생성 단가 · 라우트가 성공 뒤 걷는다
       noCache: true,
     });
     const parsed: any = extractJsonFromAiText(raw);

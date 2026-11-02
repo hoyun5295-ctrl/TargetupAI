@@ -380,7 +380,8 @@ describe('워커 등재 — 선언이 아니라 부팅 호출이 가동의 근�
     // 취소도 잠금 안에서 회차를 계산한다
     const approval = readFileSync(path.join(__dirname, 'planner-approval.ts'), 'utf8');
     const cancel = approval.slice(approval.indexOf('export async function cancelMonthlyApproval'));
-    expect(cancel.indexOf('FOR UPDATE')).toBeLessThan(cancel.indexOf('const cycle = Number(cycleRes'));
+    expect(cancel.indexOf('FOR UPDATE')).toBeGreaterThan(0);
+    expect(cancel.indexOf('FOR UPDATE')).toBeLessThan(cancel.indexOf('const cycle = await countLedgerRows(client, {'));   // ★ 1101 F — 회차 = 크레딧 CT 원장 읽기(그 잠금 · 그 거래)
   });
 
   it('참여 투영은 대조 워커 한 경로뿐이다 — 겹치면 중복 적재가 된다', () => {

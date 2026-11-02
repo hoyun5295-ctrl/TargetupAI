@@ -1298,6 +1298,10 @@ function objectBodyOf(src: string, anchor: string): string {
   throw new Error(`닫는 괄호 없음: ${anchor}`);
 }
 const pairsOf = (body: string) => Array.from(stripComments(body).matchAll(/'([a-zA-Z][\w-]*)'\s*:\s*(\d+)/g), (m) => [m[1], Number(m[2])] as const);
+/** ★ 1101 §16-2(D1) — 화면 단가 값 = 백엔드 CT 에서 만든 파일(credit.generated.ts) · constants/credit.ts 의 두 표는 키 목록(pickCosts([...])) */
+const FRONT_GENERATED = read(join(FE, 'constants', 'credit.generated.ts'));
+const generatedCost = (k: string): number | undefined => { const m = new RegExp(`'${k}': (\\d+),`).exec(FRONT_GENERATED); return m ? Number(m[1]) : undefined; };
+const keyListOf = (name: string): string[] => { const at = FRONT_CREDIT.indexOf(`export const ${name}: Record<string, number> = pickCosts([`); return at < 0 ? [] : Array.from(stripComments(FRONT_CREDIT.slice(at, FRONT_CREDIT.indexOf(']);', at))).matchAll(/'([a-zA-Z][\w-]*)'/g), (m) => m[1]); };
 /** 서버 단가 숫자 박기 — 단가는 getCreditCost(키) 로만 읽는다 */
 const SERVER_PRICE_LITERAL: Array<[string, RegExp]> = [
   ['creditCost: 숫자', /\bcreditCost\s*:\s*[1-9]/],
@@ -1319,18 +1323,18 @@ describe('R1 단가 두 벌 — 단가 = 서버 단가표 한 곳 · 화면은 �
   });
   it('화면 단가표 두 벌(작은 생성 · 확인 창) 금액 = 서버 단가표 금액(값까지)', async () => {
     const { CREDIT_COST_MAP } = await import('../ai-credit-calc');
-    const pairs = [...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const AI_GENERATE_COSTS')), ...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const CONFIRM_CREDIT_COSTS'))];
+    const pairs = [...keyListOf('AI_GENERATE_COSTS'), ...keyListOf('CONFIRM_CREDIT_COSTS')].map((k) => [k, generatedCost(k)] as const);
     expect(pairs.length).toBeGreaterThan(30);
     expect(pairs.filter(([k, v]) => CREDIT_COST_MAP[k] !== v).map(([k, v]) => `${k} 화면 ${v} · 서버 ${CREDIT_COST_MAP[k]}`)).toEqual([]);
   });
   it('요금 요약표 줄마다 서버 단가 키가 있고 금액이 같다', async () => {
     const { CREDIT_COST_MAP } = await import('../ai-credit-calc');
-    const body = stripComments(FRONT_CREDIT.slice(FRONT_CREDIT.indexOf('export const CREDIT_TASK_COSTS'), FRONT_CREDIT.indexOf('];', FRONT_CREDIT.indexOf('export const CREDIT_TASK_COSTS'))));
+    const body = stripComments(FRONT_CREDIT.slice(FRONT_CREDIT.indexOf('export const CREDIT_TASK_COSTS'), FRONT_CREDIT.indexOf('] as Omit<CreditTaskCost', FRONT_CREDIT.indexOf('export const CREDIT_TASK_COSTS'))));
     const rows = Array.from(body.matchAll(/\{\s*key:\s*'([^']+)'[^}]*\}/g), (m) => m[0]);
     expect(rows.length).toBeGreaterThan(10);
     const bad = rows.map((r) => {
-      const cost = Number((r.match(/cost:\s*(\d+)/) || [])[1]);
       const source = (r.match(/source:\s*'([^']+)'/) || [])[1];
+      const cost = source ? generatedCost(source) : undefined;   // ★ 1101 D1 — 금액 = CT 생성 파일(요약표는 source 만)
       return !source ? `${r.slice(0, 40)} · source 없음` : CREDIT_COST_MAP[source] !== cost ? `${source} 화면 ${cost} · 서버 ${CREDIT_COST_MAP[source]}` : '';
     }).filter(Boolean);
     expect(bad).toEqual([]);
@@ -1349,7 +1353,7 @@ describe('R1 단가 두 벌 — 단가 = 서버 단가표 한 곳 · 화면은 �
   });
   it('화면이 부르는 단가 키(creditText · creditCost)는 화면 단가표와 서버 단가표에 있다(없으면 0크레딧으로 보인다)', async () => {
     const { CREDIT_COST_MAP } = await import('../ai-credit-calc');
-    const front = new Set([...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const AI_GENERATE_COSTS')), ...pairsOf(objectBodyOf(FRONT_CREDIT, 'export const CONFIRM_CREDIT_COSTS'))].map(([k]) => k));
+    const front = new Set([...keyListOf('AI_GENERATE_COSTS'), ...keyListOf('CONFIRM_CREDIT_COSTS')]);
     const used = new Set<string>();
     for (const rel of sourceFiles(FE, /\.tsx?$/)) {
       for (const m of read(join(FE, rel)).matchAll(/\bcredit(?:Text|Cost)\(\s*'([^']+)'\s*\)/g)) used.add(m[1]);
@@ -2129,7 +2133,7 @@ describe('R4 넓힘(1025) ② — 회사 크레딧 AI 호출 = 묶음 안이거�
     expect(body).toContain('if (claudeOut) return finishPaidCall(claudeOut);');
     expect(body).toContain('return finishPaidCall(gptOut);');
     expect(body).not.toMatch(/deductCredit(?:Safe|Outcome)\(/);
-    expect(body).toMatch(/isInCreditBundle\(\) \? 0 :/);   // 묶음 안 = 단가 0(묶음 주인이 한 번 걷는다)
+    expect(body).toMatch(/entryCreditCost\(params\.source/);   // 묶음 안 = 단가 0(묶음 주인이 한 번 걷는다 · ★ 1101 §16-3 판정 = 크레딧 CT entryCreditCost)
   });
 });
 
@@ -2221,7 +2225,7 @@ const R8_CATCH_OK: Record<string, string> = {
   "utils/email-send-sweeper.ts:get_spec) : row.target_spec; }": "예약 조건 값 해석 실패 = 빈 조건(아래가 실패 종결 + 통지)",
   "utils/email-send-sweeper.ts:[campaignId], ); }": "실패 종결 기록 실패 = 30분 정체 정리가 다시 닫는다",
   "utils/journey-anchor-scheduler.ts:mary.enqueued += r.enqueued; }": "여정 하나 실패 = 다음 주기 다시(실행 넣기만 · 실행마다 상한 = 실행기 error_count)",
-  "utils/journey-executor.ts:() => undefined); } }": "실패 기록의 기록 실패(로그) · 실행 상한 = error_count(R8 여정 시험)",
+  "utils/journey-executor.ts:slice(0, 200) }); } }": "실패 기록의 기록 실패(로그) · 실행 상한 = error_count(R8 여정 시험) · ★1102 닫은 실행 경보 = 반복 뒤 한 통(closedFailed)",
   "utils/journey-executor.ts:).catch(() => undefined); } }": "적재 표식 정리 실패(로그) · 다음 주기 같은 판정",
   "utils/journey-reentry-worker.ts:wait client.query('COMMIT'); }": "재진입 묶음 되돌림(그 여정 이번 주기 건너뜀 · 다음 주기 같은 기준)",
   "utils/journey-reentry-worker.ts:t; journeysProcessed++; }": "재진입 여정 하나 실패 = 다음 주기(발송 0 · 실행 넣기만)",
@@ -2260,7 +2264,7 @@ describe('R8 넓힘(1025) — 주기 작업의 행마다 실패 갈래 = 횟수 
     expect(ex).toContain('pre_send_failures');
     const dw = stripComments(be('utils/dm/dm-draw-worker.ts'));
     expect(dw).toMatch(/drawFails/);
-    expect(dw).toMatch(/sendSystemAlert\(/);
+    expect(dw).toMatch(/alertPassFailures\(/);   // ★ 1101 §16-6 — 운영 경보 = 한 주기 1통(옛: 캠페인마다)
   });
 });
 
@@ -3256,9 +3260,6 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'routes/admin.ts `agent-charge-order-stuck:${requestId}`': '슈퍼관리자가 해소한 실행 단위(여러 발송 ID · 여러 회사) · 주문 되돌리기 실패 직후라 다시 읽지 않는다',
     'utils/agency-send-mail-worker.ts \'agency-mail-login-fail\'': '공용 메일함 로그인 · 회사 없음',
     'utils/agency-send-mail-worker.ts \'agency-mail-poll-fail\'': '공용 메일함 폴링 · 회사 없음',
-    'utils/agency-send-mail-worker.ts \'agency-mail-unknown-sender\'': '미등록 발신자 · 회사 없음',
-    'utils/agency-send-mail-worker.ts `agency-mail-claim-exhausted:${mailbox}`': '선점 단계 · 발신자 판정 전 · 회사 없음',
-    'utils/agency-send-worker.ts \'agency-dispatch-stuck\'': '처리기 건강(붙잡힌 연결 · 재시작 필요) · 회사 무관',
     'utils/agency-send-worker.ts `agency-worker-stage-stall:${name}`': '처리기 단계 정체 · 회사 무관',
     'utils/agent-charge-core.ts `agent-charge-claim-stuck:${requestId}`': '슈퍼관리자 충전 실행 단위(여러 발송 ID) · 내부 통제 경보',
     'utils/agent-charge-core.ts `agent-charge-high:${requestId}`': '슈퍼관리자 고액 충전 · 내부 통제 경보(회사 무관하게 늘 보낸다)',
@@ -3266,7 +3267,6 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/cafe24-client.ts \'cafe24-api-version-rejected\'': '앱 고정 API 판 = 전 몰 공통 · 몰 하나는 계기일 뿐',
     'utils/cdp-webhook-retry-worker.ts \'cdp-webhook-backlog\'': '처리기 적체(워커가 못 따라감) · 회사 무관',
     'utils/direct-send-worker.ts \'direct-preparing-stale\'': '처리기가 차감 중간에 죽은 흔적 · 여러 회사 집계 · 회사 무관',
-    'utils/expired-pending-sweeper.ts \'queue-abnormal-status-closed\'': '발송 대기열 상태값 이상 = 서버 · 커널 · 회사 무관',
     'utils/gateway-template-mapping-worker.ts \'gtm-auth-error\'': '게이트웨이 인증 = 전 호출 공통',
     'utils/gateway-template-mapping-worker.ts \'gtm-drift\'': '게이트웨이 대조 드리프트 = 동기화 처리기 · 여러 발송 ID 집계',
     'utils/kakao-template-sync.ts \'kakao-template-list-cap\'': '카카오 템플릿 목록 상한 = 플랫폼 공통',
@@ -3274,7 +3274,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/pay-ingest-monitor.ts \'pay-db:ingest-stall\'': '통계DB 적재 정체 = 인프라',
     'utils/pay-ingest-monitor.ts \'pay-db:unreachable\'': '통계DB 연결 불가 = 인프라',
     'utils/retention-sweeper.ts \'retention-pdf-delete-fail\'': '보관 파일 삭제 실패 = 저장소 · 여러 회사 작업',
-    'utils/retention-sweeper.ts \'retention-pdf-outside\'': '보관 폴더 밖 경로 = 저장소 · 여러 회사 작업',
+    'utils/system-alert.ts \'system-alert-pending-ddl\'': '경보 원장 표 없음 = 스키마(배포 앞 DDL 빠짐) · 회사 무관(★1102 설계 §17-3)',
     'utils/system-monitor-worker.ts \'queue-abnormal-status\'': '발송 대기열 상태값 이상 = 서버 · 회사 무관',
     'utils/system-monitor-worker.ts dedupKey': '발송 큐 지연 = 게이트웨이 · 에이전트 처리 속도 · 여러 캠페인 집계',
     'utils/spam-probe.ts `spam-probe-device:${carrier}:${phone}`': '스팸 검사 단말 = 우리 장비(여러 회사 검사가 같은 단말 · 회사 무관)',
@@ -3316,9 +3316,10 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     // 래퍼 = 경보(또는 래퍼) 호출의 회사 식이 둘러싼 함수의 매개변수에서 온 함수 · 고정점까지 넓힌다 · 회사 인자 = 그 자리(객체면 그 칸)
     const WRAPPER_NULL_OK: Record<string, string> = {
       'utils/inicis-client.ts alertNetCancelFail': '요청이 보낸 망취소 주소가 이니시스 밖 = 변조 신호 = 보안 경보처럼 늘 보낸다',
+      'utils/system-alert.ts send': '모아 보내기 한 통 = 여러 회사 항목을 한 통에 · 사내 회사 거름은 항목을 넣을 때 이미 했다(경보 CT 상태 칸 send · 설계 §16-6 · §17)',
     };
     type W = { idx: number; key: string | null };
-    const wrappers = new Map<string, W>([['sendSystemAlert', { idx: 0, key: 'companyId' }]]);
+    const wrappers = new Map<string, W>([['sendSystemAlert', { idx: 0, key: 'companyId' }], ['reportCreditMiss', { idx: 0, key: 'companyId' }]]);   // ★ 1102 reportCreditMiss = 모아 보내기(alertPassFailures)로 간다 · 회사 칸은 그대로 받는 경보 입구
     const files = sourceFiles(BE, /\.ts$/).map((f) => ({ f, sf: ts.createSourceFile(f, be(f), ts.ScriptTarget.Latest, true) }));
     const rootOf = (e: ts.Expression): { id: string; prop: string | null } | null => {
       let prop: string | null = null;
@@ -3373,6 +3374,101 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     expect(wrappers.size).toBeGreaterThan(15);
     expect(wrappers.has('reportCreditMiss') && wrappers.has('deleteLineDraftWithRetry')).toBe(true);
     expect(nullAt.sort()).toEqual(Object.keys(WRAPPER_NULL_OK).sort());
+  });
+});
+
+describe('R14 넓힘(1102 설계 docs/2026-11-01-credit-control-tower-design.md §17) 한 번뿐인 사건 경보 = 경보 CT 항목 키 · 상수 키 경보 = 이어지는 상태만', () => {
+  // 상수 키(글자 · 식 없는 템플릿)로 sendSystemAlert = 쿨다운 안의 다른 사건을 삼킨다 → 남아 있어 다시 감지되는 상태일 때만 쓴다(이유 표).
+  // 감지 뒤 닫히는 사건 = alertPassFailures · persistPassFailures 의 항목 키(못 보낸 항목 = PG 원장 · 닫기 = 원장 기록 참일 때만).
+  // 단위 키(메일함 · 회사 · 여정)는 기계로 못 가른다 = 대장 R14 점검표(설계 §17-1 세 질문 · 구조체크 · Codex 요청문 ④).
+  const STATE_KEYS: Record<string, string> = {
+    "utils/agency-send-mail-worker.ts 'agency-mail-login-fail'": '메일함 로그인 실패 = 고칠 때까지 매 틱 다시',
+    "utils/agency-send-mail-worker.ts 'agency-mail-poll-fail'": '메일함 폴링 실패 = 고칠 때까지 매 틱 다시',
+    "utils/cafe24-client.ts 'cafe24-api-version-rejected'": '고정한 API 판 거절 = 모든 호출이 다시 실패',
+    "utils/cdp-webhook-retry-worker.ts 'cdp-webhook-exhausted'": '하루 창 집계(24시간) > 쿨다운(12시간) = 쿨다운 안 사건도 다음 경보 수에 다시',
+    "utils/cdp-webhook-retry-worker.ts 'cdp-webhook-backlog'": '적체 수 = 남아 있는 동안 다시',
+    "utils/direct-send-worker.ts 'direct-preparing-stale'": '차감 중간 잔존 수 = 남아 있는 동안 다시(0731 10R 설계)',
+    "utils/gateway-template-mapping-worker.ts 'gtm-auth-error'": '게이트웨이 인증 실패 = 모든 호출이 다시 실패',
+    "utils/gateway-template-mapping-worker.ts 'gtm-drift'": '대조 드리프트 수 = 남아 있는 동안 다시',
+    "utils/journey-anchor-scheduler.ts 'journey-one-shot-lag'": '넣지 못한 한 번 보내기 수 = 남아 있는 동안 다시',
+    "utils/journey-anchor-scheduler.ts 'journey-one-shot-legacy-undispatched'": '옛 코드로 켜진 한 번 보내기 수 = 남아 있는 동안 다시',
+    "utils/journey-executor.ts 'journey-executor-lag'": '실행기 밀림 = 남아 있는 동안 다시',
+    "utils/direct-send-worker.ts 'direct-send-queue-lag'": '직접발송 줄 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
+    "utils/operator-lag.ts 'operator-send-lag'": '자동마케팅 발송 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
+    "utils/operator-lag.ts 'operator-generate-lag'": '자동마케팅 생성 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
+    "utils/journey-pretest-notifier.ts 'journey-pretest-snapshot-ddl'": '검사 기록 판 칸 없음 = DDL 전까지 다시',
+    "utils/journey-pretest-notifier.ts 'journey-pretest-recheck-error'": '검사 큐 · 시험 폰 원인 하나의 증상 · 발송은 이어짐(설계 §17-2 질문 2)',
+    "utils/journey-pretest-notifier.ts 'journey-pretest-new-copy-late'": '판마다 담당자 안내 원장이 맡음 · 경보 = 원인 신호(질문 3)',
+    "utils/journey-trigger-watcher.ts 'journey-watcher-budget'": '진입 감시 예산 초과 = 이어지는 동안 다시',
+    "utils/kakao-template-sync.ts 'kakao-template-list-cap'": '목록 상한 = 넘는 동안 매 동기화 다시',
+    "utils/pay-ingest-monitor.ts 'pay-db:unreachable'": '통계DB 연결 불가 = 이어지는 동안 다시',
+    "utils/pay-ingest-monitor.ts 'pay-db:aborted-spike'": '인증 실패 급증 = 이어지는 동안 다시',
+    "utils/pay-ingest-monitor.ts 'pay-db:ingest-stall'": '적재 정체 = 이어지는 동안 다시',
+    "utils/retention-sweeper.ts 'retention-pdf-delete-fail'": '지우지 못한 줄은 남아 다음 날 다시',
+    "utils/spam-probe.ts 'spam-verdict-after-decided'": '하루 한 번 측정 · 날이 다르면 24시간 > 쿨다운 · 같은 날 재측정 = 같은 자료',
+    "utils/spam-test-queue.ts 'spam-queue-lag'": '검사 줄 밀림 = 이어지는 동안 다시',
+    "utils/system-monitor-worker.ts 'queue-abnormal-status'": '깨진 행 수 = 48시간 닫기 전까지 다시',
+    "utils/system-alert.ts 'system-alert-pending-ddl'": '경보 원장 표 없음 = DDL 전까지 다시',
+  };
+  it('상수 키 sendSystemAlert 자리 = 이어지는 상태 표와 같다(새 자리 · 낡은 줄 = 실패)', () => {
+    const found: string[] = [];
+    for (const f of sourceFiles(BE, /\.ts$/)) {
+      const src = be(f);
+      if (!src.includes('sendSystemAlert(')) continue;
+      const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node): void => {
+        if (ts.isCallExpression(n) && n.expression.getText(sf) === 'sendSystemAlert' && n.arguments[0] && ts.isObjectLiteralExpression(n.arguments[0])) {
+          const dk = n.arguments[0].properties.find((p) => p.name?.getText(sf) === 'dedupKey');
+          if (dk && ts.isPropertyAssignment(dk) && (ts.isStringLiteral(dk.initializer) || ts.isNoSubstitutionTemplateLiteral(dk.initializer))) {
+            found.push(`${f} '${dk.initializer.text}'`);
+          }
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(found.length).toBeGreaterThan(15);   // 뽑기가 죽지 않았다
+    expect(found.sort()).toEqual(Object.keys(STATE_KEYS).sort());
+    for (const [k, why] of Object.entries(STATE_KEYS)) expect(why.length, k).toBeGreaterThan(5);
+  });
+});
+
+describe('R25 넓힘(1102 설계 §17-5) 경보 CT 명세(pass · failures)의 회사 null = 이유 있는 목록 — 사건을 옮겨도 사내 회사 거름 보장은 그대로', () => {
+  // 명세 = pass(글자) · failures 를 가진 객체 리터럴(alertPassFailures · persistPassFailures · queuePassFailures 에 넘긴다) · 그 안 companyId: null 자리 = 이름마다
+  const PASS_NULL_OK: Record<string, string> = {
+    'utils/agency-send-mail-worker.ts agency-mail-unknown-sender': '미등록 발신자 · 회사 없음',
+    'utils/agency-send-mail-worker.ts agency-mail-claim-exhausted': '선점 단계 · 발신자 판정 전 · 회사 없음',
+    'utils/agency-send-worker.ts agency-dispatch-stuck': '처리기 건강(붙잡힌 연결 · 재시작 필요) · 회사 무관',
+    'utils/expired-pending-sweeper.ts queue-abnormal-status-closed': '발송 대기열 상태값 이상 = 서버 · 커널 · 회사 무관',
+    'utils/retention-sweeper.ts retention-pdf-outside': '보관 폴더 밖 경로 = 저장소 · 여러 회사 작업',
+  };
+  it('명세 안 companyId: null 자리 = 목록과 같다 · 명세 뽑기가 살아 있다', () => {
+    const found = new Set<string>();
+    let specs = 0;
+    for (const f of sourceFiles(BE, /\.ts$/)) {
+      const src = be(f);
+      if (!/failures/.test(src)) continue;
+      const sf = ts.createSourceFile(f, src, ts.ScriptTarget.Latest, true);
+      const visit = (n: ts.Node): void => {
+        if (ts.isObjectLiteralExpression(n)) {
+          const pass = n.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === 'pass');
+          const hasFailures = n.properties.some((p) => p.name?.getText(sf) === 'failures');
+          if (pass && ts.isPropertyAssignment(pass) && ts.isStringLiteral(pass.initializer) && hasFailures) {
+            specs += 1;
+            const scan = (m: ts.Node): void => {
+              if (ts.isPropertyAssignment(m) && m.name.getText(sf) === 'companyId' && m.initializer.kind === ts.SyntaxKind.NullKeyword) found.add(`${f} ${pass.initializer.getText(sf).slice(1, -1)}`);
+              ts.forEachChild(m, scan);
+            };
+            scan(n);
+          }
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(specs).toBeGreaterThan(8);
+    expect([...found].sort()).toEqual(Object.keys(PASS_NULL_OK).sort());
+    for (const [k, why] of Object.entries(PASS_NULL_OK)) expect(why.length, k).toBeGreaterThan(5);
   });
 });
 
@@ -4126,7 +4222,7 @@ describe('R37 적재 기준은 읽기로 내리지 않는다 · 정산은 늘기
 });
 
 // ── R38 크레딧 잔액 = 원장 CT 만 · 원장 먼저 · 모든 변동 = 원장 한 줄(★ 2026-11-01 크레딧 컨트롤타워 설계서 §5-4 · 체험 3곳이 원장 없이 잔액을 덮어씀) ──
-const R38_WRITERS = ['utils/ai-credit-recharge.ts', 'utils/ai-credit-tx.ts', 'utils/plan-change-log.ts'];
+const R38_WRITERS = ['utils/ai-credit-recharge.ts', 'utils/ai-credit-tx.ts'];   // ★ 1101 §16-1 F16 — 요금제 변경 일할은 ai-credit-tx 로 옮겼다
 const CREDIT_BALANCE_COL = /\bai_credits_(?:base_remaining|purchased|reset_at)\b/;
 /** SQL 한 덩어리가 회사 잔액 칸(기본분 · 구매분 · 리셋 시각)을 쓰는가 = UPDATE companies 의 SET 절 · INSERT INTO companies 의 칸 목록 */
 function writesCreditBalance(sql: string): boolean {
@@ -4199,9 +4295,9 @@ describe('R38 크레딧 잔액 = 원장 CT 만 · 원장 먼저 · 모든 변동
     expect(types.size).toBeGreaterThanOrEqual(9);
     expect([...types].filter((t) => !CREDIT_TX_TYPES.has(t) || creditTxDelta({ type: t, amount: 1 }) === null)).toEqual([]);
     const calc = be('utils/ai-credit-calc.ts');
-    expect(creditTxTypeList(FRONT_CREDIT)).toEqual(creditTxTypeList(calc));
+    expect(creditTxTypeList(FRONT_GENERATED)).toEqual(creditTxTypeList(calc));   // ★ 1101 D1 — 화면 표 = CT 생성 파일
     const fnText = (src: string) => stripComments(src.slice(src.indexOf('export function creditTxDelta('), src.indexOf('\n}\n', src.indexOf('export function creditTxDelta(')))).replace(/\s+/g, ' ');
-    expect(fnText(FRONT_CREDIT)).toBe(fnText(calc));
+    expect(fnText(FRONT_GENERATED)).toBe(fnText(calc));
     const labels = new Set(Array.from(stripComments(objectBodyOf(FRONT_CREDIT, 'export const CREDIT_TYPE_LABELS')).matchAll(/(\w+)\s*:\s*'/g), (m) => m[1]));
     expect(creditTxTypeList(calc).filter((t) => !labels.has(t))).toEqual([]);
   });

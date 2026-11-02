@@ -30,8 +30,8 @@ export interface PlanFeatureIntro {
   /** AI Operator 허브 카드와 연결되는 경로. 허브 밖 기능은 없다 */
   path?: string;
   steps: { icon: string; title: string; text: string }[];
-  /** 드는 크레딧. credits = 백엔드 CREDIT_COST_MAP[source] */
-  costs: { label: string; source: string; credits: number }[];
+  /** 드는 크레딧 줄 — 금액은 적지 않는다(★ 2026-11-01 §16-2 D2 · 내려줄 때 크레딧 CT 단가표 getCreditCost(source)로 채운다) */
+  costs: { label: string; source: string }[];
   /** costs가 비었을 때 보여줄 한 줄(★2026-10-06 영상 창에서는 크레딧 표 아래에도 보인다) */
   costNote?: string;
   /**
@@ -66,9 +66,9 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Send', title: '검사 결과 보고 발송', text: '요금제에 스팸 검사가 있으면 만든 문안마다 검사 결과가 붙습니다. 고른 문안을 즉시 보내거나 예약합니다.' },
     ],
     costs: [
-      { label: '대상 찾기', source: 'ai-line-intake', credits: 2 },
-      { label: '문안 1종', source: 'ai-line-compose', credits: 2 },
-      { label: '칼럼 더 넣기', source: 'ai-line-decorate', credits: 1 },
+      { label: '대상 찾기', source: 'ai-line-intake' },
+      { label: '문안 1종', source: 'ai-line-compose' },
+      { label: '칼럼 더 넣기', source: 'ai-line-decorate' },
     ],
     costNote: '스팸 검사는 크레딧이 아니라 검사 문자 요금으로 빠집니다.',
     // 화면에 실제로 있는 것만(근거 = LineIntakeModal.tsx 확인 판 · 칼럼 단계 · LineResultCards.tsx · AiLinePage.tsx 예약 검사)
@@ -100,7 +100,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'ListChecks', title: '제안서 확인', text: '대상 인원, 문안 후보, 추천 발송 시점이 한 장으로 나옵니다.' },
       { icon: 'Send', title: '승인하면 발송', text: '마음에 들지 않으면 고칠 점을 한 줄로 적어 다시 받습니다.' },
     ],
-    costs: [{ label: '제안 받기', source: 'ai-operator-propose', credits: 5 }],
+    costs: [{ label: '제안 받기', source: 'ai-operator-propose' }],
   },
   {
     id: 'journeys', path: '/ai-journeys', title: '여정 자동화', icon: 'Workflow', gradient: 'from-fuchsia-400 to-purple-500',
@@ -132,10 +132,10 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '멈춰도 손해 없음', text: '언제든 일시정지할 수 있고, 다시 켤 때는 활성화 크레딧이 다시 들지 않습니다.' },
     ],
     costs: [
-      { label: '단계 설계(AI 만들기 한 번)', source: 'journey-ai-generate', credits: 3 },
-      { label: '활성화(처음 한 번)', source: 'journey-activate', credits: 200 },
-      { label: '발송하는 날(그날 여러 통이어도 한 번)', source: 'journey-operation', credits: 10 },
-      { label: '스팸에 걸린 문안 AI 재작성', source: 'journey-ai-refine', credits: 1 },
+      { label: '단계 설계(AI 만들기 한 번)', source: 'journey-ai-generate' },
+      { label: '활성화(처음 한 번)', source: 'journey-activate' },
+      { label: '발송하는 날(그날 여러 통이어도 한 번)', source: 'journey-operation' },
+      { label: '스팸에 걸린 문안 AI 재작성', source: 'journey-ai-refine' },
     ],
     costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
@@ -175,9 +175,9 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '언제든 정지', text: '실행 중 목록에서 일시 중지하거나 예약된 회차의 자동 발송을 멈출 수 있습니다.' },
     ],
     costs: [
-      { label: '첫 제안 미리보기(문안 직접 쓰면 무료)', source: 'ai-operator-propose', credits: 5 },
-      { label: '시작(처음 한 번)', source: 'continuous-operator', credits: 200 },
-      { label: '발송하는 회차마다', source: 'continuous-operator-send', credits: 10 },
+      { label: '첫 제안 미리보기(문안 직접 쓰면 무료)', source: 'ai-operator-propose' },
+      { label: '시작(처음 한 번)', source: 'continuous-operator' },
+      { label: '발송하는 회차마다', source: 'continuous-operator-send' },
     ],
     costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
@@ -206,13 +206,13 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '취소 환불', text: '그 달 발송 처리가 시작되기 전에 취소하면 대행료를 전액 돌려드립니다.' },
     ],
     costs: [
-      { label: '월간 대행(그 달 첫 승인 때 한 번)', source: 'planner-monthly-agency', credits: 1000 },
-      { label: '모바일 DM 만들기', source: 'dm-ai-generate', credits: 5 },
-      { label: '모바일 DM 발행', source: 'dm-builder', credits: 100 },
-      { label: '룰렛·추첨·설문 같은 참여 칸이 있는 DM 발행', source: 'dm-interaction-publish', credits: 120 },
-      { label: '이메일 만들기', source: 'email-ai-generate', credits: 3 },
-      { label: '이메일 완성', source: 'email-campaign-complete', credits: 50 },
-      { label: '발송하는 날 문자 문안', source: 'planner-touchpoint-send', credits: 10 },
+      { label: '월간 대행(그 달 첫 승인 때 한 번)', source: 'planner-monthly-agency' },
+      { label: '모바일 DM 만들기', source: 'dm-ai-generate' },
+      { label: '모바일 DM 발행', source: 'dm-builder' },
+      { label: '룰렛·추첨·설문 같은 참여 칸이 있는 DM 발행', source: 'dm-interaction-publish' },
+      { label: '이메일 만들기', source: 'email-ai-generate' },
+      { label: '이메일 완성', source: 'email-campaign-complete' },
+      { label: '발송하는 날 문자 문안', source: 'planner-touchpoint-send' },
     ],
     costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
@@ -246,10 +246,10 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '발행 크레딧은 한 번', text: '처음 발행할 때 한 번만 듭니다(「링크만 받기」로 주소만 받을 때도 발행입니다). 같은 DM을 다시 보내도 다시 들지 않습니다.' },
     ],
     costs: [
-      { label: '만들기', source: 'dm-ai-generate', credits: 5 },
-      { label: '카탈로그 DM 만들기', source: 'catalog-dm-build', credits: 10 },
-      { label: '발행(처음 발행할 때 한 번 · 링크만 받기 포함)', source: 'dm-builder', credits: 100 },
-      { label: '참여 칸이 있는 DM 발행', source: 'dm-interaction-publish', credits: 120 },
+      { label: '만들기', source: 'dm-ai-generate' },
+      { label: '카탈로그 DM 만들기', source: 'catalog-dm-build' },
+      { label: '발행(처음 발행할 때 한 번 · 링크만 받기 포함)', source: 'dm-builder' },
+      { label: '참여 칸이 있는 DM 발행', source: 'dm-interaction-publish' },
     ],
     costNote: '문자 발송비는 크레딧과 별도로 요금표대로 나갑니다',
   },
@@ -278,8 +278,8 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '완성 크레딧은 한 번', text: '처음 완성할 때 한 번만 듭니다(보내지 않고 완성만 해도 완성입니다). 다시 보내도 다시 들지 않습니다.' },
     ],
     costs: [
-      { label: '만들기', source: 'email-ai-generate', credits: 3 },
-      { label: '완성(처음 완성할 때 한 번)', source: 'email-campaign-complete', credits: 50 },
+      { label: '만들기', source: 'email-ai-generate' },
+      { label: '완성(처음 완성할 때 한 번)', source: 'email-campaign-complete' },
     ],
   },
   {
@@ -311,8 +311,8 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '관리자만', text: '인앱메시지는 회사 관리자 계정에서만 만들고 게시합니다.' },
     ],
     costs: [
-      { label: '만들기', source: 'inapp-ai-generator', credits: 3 },
-      { label: '게시', source: 'inapp-publish', credits: 100 },
+      { label: '만들기', source: 'inapp-ai-generator' },
+      { label: '게시', source: 'inapp-publish' },
     ],
   },
   {
@@ -337,10 +337,10 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '누르기 전에 금액 확인', text: '만들기를 누르면 드는 크레딧을 먼저 보여 주고, 확인한 뒤에만 만듭니다.' },
     ],
     costs: [
-      { label: '모바일 DM', source: 'dm-ai-generate', credits: 5 },
-      { label: '이메일', source: 'email-ai-generate', credits: 3 },
-      { label: '카탈로그 DM', source: 'catalog-dm-build', credits: 10 },
-      { label: '사진 글자 읽기(글 없이 사진만 넣었을 때)', source: 'event-image-extract', credits: 3 },
+      { label: '모바일 DM', source: 'dm-ai-generate' },
+      { label: '이메일', source: 'email-ai-generate' },
+      { label: '카탈로그 DM', source: 'catalog-dm-build' },
+      { label: '사진 글자 읽기(글 없이 사진만 넣었을 때)', source: 'event-image-extract' },
     ],
     costNote: '보낼 때 드는 발행·완성 크레딧은 모바일 DM·이메일과 같습니다',
   },
@@ -368,8 +368,8 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '성공해야 차감', text: '포스터가 완성되어 저장된 뒤에만 크레딧이 나갑니다.' },
     ],
     costs: [
-      { label: '포스터 만들기(한 장)', source: 'image-studio-generate', credits: 2 },
-      { label: 'AI로 고치기', source: 'image-studio-edit', credits: 1 },
+      { label: '포스터 만들기(한 장)', source: 'image-studio-generate' },
+      { label: 'AI로 고치기', source: 'image-studio-edit' },
     ],
     costNote: '배경 지우기·채널 크기 변환은 크레딧이 들지 않습니다',
   },
@@ -391,7 +391,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
     safeguards: [
       { title: '관리자만 바꿈', text: '학습 추가·정리·삭제는 회사 관리자만 할 수 있습니다.' },
     ],
-    costs: [{ label: '질문', source: 'ai-memory-search', credits: 1 }],
+    costs: [{ label: '질문', source: 'ai-memory-search' }],
   },
   {
     id: 'sns', path: '/sns', title: 'SNS 채널', icon: 'Share2', gradient: 'from-sky-400 to-violet-500',
@@ -469,8 +469,8 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '검토 뒤 발송', text: '바로 실행으로 설계된 캠페인도 검토하고 보내기를 눌러야 나갑니다.' },
     ],
     costs: [
-      { label: 'AI 진단', source: 'performance-explainer', credits: 5 },
-      { label: '풀분석 보고서', source: 'orchestrate', credits: 300 },
+      { label: 'AI 진단', source: 'performance-explainer' },
+      { label: '풀분석 보고서', source: 'orchestrate' },
     ],
   },
   {
@@ -481,7 +481,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Target', title: '고객별 점수', text: '이탈 가능성·구매 가능성·선호 채널을 봅니다.' },
       { icon: 'Send', title: '캠페인으로', text: '그 그룹 그대로 캠페인을 시작합니다.' },
     ],
-    costs: [{ label: '매일 분석', source: 'predictive-daily', credits: 3 }],
+    costs: [{ label: '매일 분석', source: 'predictive-daily' }],
   },
 
   // ───────── 대시보드·발송 화면 ─────────
@@ -494,7 +494,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Users', title: '인원 바로 확인', text: '조건을 바꿀 때마다 대상 인원을 바로 셉니다.' },
       { icon: 'Send', title: '담아서 보내기', text: '고른 고객에게 이름·등급 같은 항목을 넣은 문자를 바로 보내거나 예약합니다.' },
     ],
-    costs: [{ label: '말로 고르기', source: 'ai-segment-generator', credits: 1 }],
+    costs: [{ label: '말로 고르기', source: 'ai-segment-generator' }],
     costNote: '조건 고르기와 담기는 크레딧이 들지 않고 문자 발송 요금만 나갑니다',
     safeguards: [
       { title: '수신거부', text: '광고 문자는 수신거부 번호를 항상 빼고 보냅니다.' },
@@ -509,7 +509,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'ListChecks', title: '항목 맞추기', text: '이름·번호·등급 같은 항목을 AI가 알아서 맞춥니다.' },
       { icon: 'Users', title: '바로 쓰기', text: '올린 명단으로 조건 발송과 캠페인을 시작합니다.' },
     ],
-    costs: [{ label: 'AI 항목 맞추기', source: 'ai-column-mapper', credits: 1 }],
+    costs: [{ label: 'AI 항목 맞추기', source: 'ai-column-mapper' }],
   },
   {
     id: 'view-customer', title: '고객 DB', icon: 'Users', gradient: 'from-sky-400 to-indigo-500',
@@ -530,7 +530,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'ListChecks', title: '후보 고르기', text: '길이와 광고 표기를 맞춘 후보 중에서 고릅니다.' },
       { icon: 'Send', title: '고쳐서 보내기', text: '고른 문안을 자유롭게 고쳐서 보냅니다.' },
     ],
-    costs: [{ label: '문구 추천', source: 'generate-messages', credits: 5 }],
+    costs: [{ label: '문구 추천', source: 'generate-messages' }],
   },
   {
     id: 'ai-decorate', title: 'AI 꾸미기', icon: 'Wand2', gradient: 'from-violet-500 to-fuchsia-500',
@@ -540,7 +540,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Wand2', title: '꾸미기', text: '항목이 어색하지 않게 문장을 다시 씁니다.' },
       { icon: 'Eye', title: '확인하고 보내기', text: '바뀐 문장을 보고 그대로 쓰거나 되돌립니다.' },
     ],
-    costs: [{ label: '꾸미기', source: 'ai-operator-decorate', credits: 3 }],
+    costs: [{ label: '꾸미기', source: 'ai-operator-decorate' }],
   },
   {
     id: 'ai-refine', title: 'AI 문안 다듬기', icon: 'PenLine', gradient: 'from-violet-500 to-fuchsia-500',
@@ -550,7 +550,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Wand2', title: '다듬기', text: '톤·길이·광고 표기를 맞춘 문안이 나옵니다.' },
       { icon: 'Send', title: '골라서 보내기', text: '마음에 드는 것을 골라 그대로 보냅니다.' },
     ],
-    costs: [{ label: '다듬기', source: 'refine-direct', credits: 1 }],
+    costs: [{ label: '다듬기', source: 'refine-direct' }],
   },
   {
     id: 'check-spam', title: '스팸필터 테스트', icon: 'ShieldCheck', gradient: 'from-amber-400 to-orange-500',
@@ -571,7 +571,7 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { icon: 'Filter', title: '조건 확인', text: 'AI가 만든 조건과 해당 인원을 확인합니다.' },
       { icon: 'Send', title: '그대로 보내기', text: '고른 고객에게 바로 보냅니다.' },
     ],
-    costs: [{ label: '대상 추출', source: 'ai-segment-generator', credits: 1 }],
+    costs: [{ label: '대상 추출', source: 'ai-segment-generator' }],
   },
 ];
 

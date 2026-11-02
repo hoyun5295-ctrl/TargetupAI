@@ -85,15 +85,16 @@ describe('journeyCreditForecast (원장 조회 1번)', () => {
     q.mockReset();
   });
   it('켜진 계보 · 계보 표 · 원장 묶음을 읽어 계산한다(원장은 journey-operation 차감만)', async () => {
-    q.mockImplementation(async (sql: string) => {
-      if (/FROM ai_credit_transactions/.test(sql) && /continuous-operator-send/.test(sql)) {
+    // ★ 2026-11-01 §16-1 F8 — 원장 읽기 = 크레딧 CT(ai-credit-ledger) · 원천은 자리표 $2 로 넘어온다
+    q.mockImplementation(async (sql: string, params: any[] = []) => {
+      if (/FROM ai_credit_transactions/.test(sql) && params[1] === 'continuous-operator-send') {
         expect(sql).toContain("type = 'deduct'");
         return { rows: [{ n: 2 }] };   // ★ 2026-10-23 자동 마케팅 운영 2일 × 10
       }
       if (/FROM ai_credit_transactions/.test(sql)) {
-        expect(sql).toContain("source = 'journey-operation'");
+        expect(params[1]).toBe('journey-operation');
         expect(sql).toContain("type = 'deduct'");
-        return { rows: [{ journey_key: 'A', n30: 3, first_at: daysAgo(45) }] };
+        return { rows: [{ seg: 'A', n: 3, first_at: daysAgo(45) }] };
       }
       if (/status = 'active'/.test(sql)) return { rows: [{ id: 'A', name: '신규 가입', root: 'A' }] };
       if (/FROM journeys/.test(sql)) return { rows: [{ id: 'A', root: 'A' }] };

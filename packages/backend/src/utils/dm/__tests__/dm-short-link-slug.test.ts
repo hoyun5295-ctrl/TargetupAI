@@ -16,7 +16,7 @@ const read = (p: string) => readFileSync(resolve(__dirname, p), 'utf8');
 const ctSrc = read('../dm-custom-short-link.ts');
 const routeSrc = read('../../../routes/dm.ts');
 const creditSrc = read('../../ai-credit-calc.ts');
-const feCreditSrc = read('../../../../../frontend/src/constants/credit.ts');
+const feCreditSrc = read('../../../../../frontend/src/constants/credit.generated.ts');   // ★ 1101 §16-2 — 프론트 단가 = 백엔드 CT 에서 만든 파일
 const modalSrc = read('../../../../../frontend/src/components/dm/DmShortLinkModal.tsx');
 
 describe('한글 주소 — 두 입구가 같은 규칙을 쓴다', () => {

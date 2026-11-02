@@ -312,8 +312,9 @@ describe('소스 계약 — 엔진 격리 · 라우트 분기', () => {
     expect(quick).not.toContain('deductCreditSafe(');
     expect(quick).toContain("approval_status: 'draft'");
     // ★ 2026-09-15 예외 1개 = 카탈로그 DM 채널 생성 키 'catalog-dm-build'(Harold 확정 10 · FEATURE-AI-AUTO-BUILD §2-8 예외). 그 밖 신규 키는 여전히 0.
-    expect(quick).not.toMatch(/getCreditCost\('(?!dm-ai-generate'|event-image-extract'|email-ai-generate'|catalog-dm-build')/);
-    expect(quick).toContain("getCreditCost('catalog-dm-build')");
+    //   ★ 1101 §16-3 — 금액 = 크레딧 CT(getCreditCost · duePrice · costOf · quickGenPrice 채널 → 원천)
+    expect(quick).not.toMatch(/(?:getCreditCost|duePrice|costOf)\('(?!dm-ai-generate'|event-image-extract'|email-ai-generate'|catalog-dm-build')/);
+    expect(quick).toContain("duePrice('catalog-dm-build'");
   });
   it('★ S6 이메일 합류 — 재료 = v1 조립(옛 v0 generateEmailFromMaterials 삭제) · 재료 없으면 기존 경로(분기 뒤에 옛 검사가 그대로)', () => {
     const quick = code('utils/campaign-quick.ts');

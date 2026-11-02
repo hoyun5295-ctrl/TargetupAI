@@ -6,12 +6,12 @@
  *   - GET  /api/ai-usage/overview         — 5 metric + 자율 진단 한 줄 (이번 달 / Cache / 모델 분포 / Batch / 전월 대비)
  *   - GET  /api/ai-usage/forecast         — 향후 30일 예측 (옛 30일 선형 회귀)
  *   - POST /api/ai-usage/search-natural   — 자연어 질문 → AI 답변 (호출 데이터 근거)
- *   - POST /api/ai-usage/threshold-alert  — 한도 알림 임계값 + 채널 설정 (companies.ai_usage_threshold_config)
+ *   - POST /api/ai-usage/threshold-alert  — 크레딧 사용률 알림 기준 + 채널 설정 (companies.ai_usage_threshold_config)
  *
  * DB 의존:
  *   - ai_call_log (회사별 월/일 호출 + 모델 + 비용)
  *   - companies.ai_usage_threshold_config jsonb (D217+ 신규 ALTER 의무)
- *   - plans.ai_calls_per_month (월 한도)
+ *   - 크레딧 사용률 = 크레딧 CT creditUsageThisMonth(★ 2026-11-01 월 AI 호출 수 한도 삭제 · 설계서 §16-4)
  *   - ai_batch_jobs (Batch 처리 건수)
  */
 
@@ -21,12 +21,12 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { callAIWithFallback } from '../services/ai';
 import { plainTextFromAi } from '../utils/ai-json';
-import { aiLimitCountedSql, getMonthlyUsage, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
+import { getMonthlyCallCount, getDailyUsage, getModelBreakdown } from '../utils/ai-rate-limit';
 import { getCacheStats } from '../utils/ai-cache';
 import { kstDateString } from '../utils/planner-execution';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
-import { runChargedAi, checkCredit, settleCreditAfterSuccess, InsufficientCreditError } from '../utils/ai-credit';
+import { runChargedAi, checkCredit, settleCreditAfterSuccess, InsufficientCreditError, creditUsageThisMonth } from '../utils/ai-credit';
 import { getCreditCost } from '../utils/ai-credit-calc';
 /** ★ 2026-09-27 한줄로 V2 R074 — 사용량 일평균·예측의 창(일). 일평균 = 이 창의 합 ÷ 이 일수(호출 없는 날도 0으로 센다). */
 const USAGE_WINDOW_DAYS = 30;
@@ -58,8 +58,9 @@ router.get('/overview', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
 
-    const [monthly, daily, breakdown] = await Promise.all([
-      getMonthlyUsage(companyId),
+    const [monthlyCalls, credit, daily, breakdown] = await Promise.all([
+      getMonthlyCallCount(companyId),
+      creditUsageThisMonth(companyId),
       getDailyUsage(companyId, USAGE_WINDOW_DAYS),
       getModelBreakdown(companyId, USAGE_WINDOW_DAYS),
     ]);
@@ -80,16 +81,11 @@ router.get('/overview', async (req: Request, res: Response) => {
       cost: v.cost,
     })).sort((a, b) => b.count - a.count);
 
-    // 일평균 + 한도 도달 예상일 (선형 추정)
-    // ★ 2026-09-27 한줄로 V2 R074 — 최근 30일 합 ÷ 30(옛: 호출 있는 날 수로 나눠 부풀었다 · 한도 도달 예상일이 당겨졌다)
+    // 일평균 호출
+    // ★ 2026-09-27 한줄로 V2 R074 — 최근 30일 합 ÷ 30(옛: 호출 있는 날 수로 나눠 부풀었다)
     const dailyAvg = daily.reduce((s, d) => s + d.count, 0) / USAGE_WINDOW_DAYS;
-    let predictedDaysToLimit: number | null = null;
-    if (monthly.limit !== null && monthly.limit > 0 && dailyAvg > 0) {
-      const remaining = Math.max(0, monthly.limit - monthly.used);
-      predictedDaysToLimit = Math.floor(remaining / dailyAvg);
-    }
 
-    // 전월 대비 격차 — 이번 달(getMonthlyUsage)과 같은 기준(한도에 세는 호출 · ★2026-09-25 면제 source 제외)
+    // 전월 대비 격차 — 이번 달(getMonthlyCallCount)과 같은 기준(모든 호출)
     // ★ 2026-09-27 한줄로 V2 R074 — 지난달 **같은 기간**(1일 ~ 이번 달 경과 시간만큼)과 비교한다.
     //   옛: 이번 달 누계를 지난달 전체와 비교해 월초엔 늘 크게 줄어든 것처럼 보였다. 지난달이 짧으면 지난달 끝에서 멈춘다.
     const prevMonthRes = await query(
@@ -100,13 +96,12 @@ router.get('/overview', async (req: Request, res: Response) => {
          AND called_at <  LEAST(
                ((date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '1 month') AT TIME ZONE 'Asia/Seoul')
                  + (NOW() - (date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')),
-               date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')
-         AND ${aiLimitCountedSql()}`,
+               date_trunc('month', NOW() AT TIME ZONE 'Asia/Seoul') AT TIME ZONE 'Asia/Seoul')`,
       [companyId],
     );
     const prevMonthCalls = Number(prevMonthRes.rows[0]?.cnt) || 0;
     const prevMonthDeltaPercent = prevMonthCalls > 0
-      ? Math.round(((monthly.used - prevMonthCalls) / prevMonthCalls) * 100)
+      ? Math.round(((monthlyCalls - prevMonthCalls) / prevMonthCalls) * 100)
       : null;
 
     // Batch 처리 건수 (옛 ai_batch_jobs 안 30일)
@@ -124,7 +119,7 @@ router.get('/overview', async (req: Request, res: Response) => {
       batchCalls = 0;
     }
 
-    // 한도 알림 설정 (companies.ai_usage_threshold_config)
+    // 크레딧 알림 설정 (companies.ai_usage_threshold_config)
     let thresholdConfig: Record<string, unknown> = {};
     try {
       const cfgRes = await query(
@@ -140,32 +135,29 @@ router.get('/overview', async (req: Request, res: Response) => {
       }
     }
 
-    // 진단 한 줄
-    const monthlyPercent = monthly.limit !== null && monthly.limit > 0
-      ? Math.round((monthly.used / monthly.limit) * 100)
-      : 0;
+    // 진단 한 줄 — 쓰는 양 = 크레딧 사용률(★ 2026-11-01 월 AI 호출 수 한도 삭제)
+    const pct = credit.percent;
+    const hit = `${(cache.hitRate * 100).toFixed(1)}%`;
     let topInsight = '';
-    if (monthly.limit === null) {
-      topInsight = `이번 달 ${monthly.used.toLocaleString()}회 호출. 무제한 요금제 사용 중입니다. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 로 비용을 절감하고 있습니다.`;
-    } else if (monthlyPercent >= 95) {
-      topInsight = `한도 ${monthlyPercent}% 도달. 곧 AI 호출이 차단됩니다. Batch 처리 모드 전환 또는 요금제 업그레이드를 권장합니다.`;
-    } else if (monthlyPercent >= 80) {
-      topInsight = `한도 ${monthlyPercent}% 사용. ${predictedDaysToLimit !== null ? `약 ${predictedDaysToLimit}일 후 한도 도달 예상` : '주의 필요'}. 한도 알림 설정을 권장합니다.`;
+    if (pct === null) {
+      topInsight = `이번 달 ${monthlyCalls.toLocaleString()}회 호출. cache 히트율 ${hit} 로 비용을 절감하고 있습니다.`;
+    } else if (pct >= 80) {
+      topInsight = `이번 달 크레딧 ${pct}% 사용(남은 ${credit.remaining.toLocaleString()}). 크레딧 충전 또는 요금제 상향을 권장합니다.`;
     } else if (cache.hitRate >= 0.3) {
-      topInsight = `한도 ${monthlyPercent}% 사용 중. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 로 효율적으로 운영되고 있습니다.`;
-    } else if (monthly.used > 100 && cache.hitRate < 0.1) {
-      topInsight = `한도 ${monthlyPercent}% 사용. cache 히트율 ${(cache.hitRate * 100).toFixed(1)}% 가 낮습니다. 자연어 질문 반복 시 5분 내 동일 입력은 자동 cache 되므로 비용 절감 가능합니다.`;
+      topInsight = `이번 달 크레딧 ${pct}% 사용 중. cache 히트율 ${hit} 로 효율적으로 운영되고 있습니다.`;
+    } else if (monthlyCalls > 100 && cache.hitRate < 0.1) {
+      topInsight = `이번 달 크레딧 ${pct}% 사용. cache 히트율 ${hit} 가 낮습니다. 자연어 질문 반복 시 5분 내 동일 입력은 자동 cache 되므로 비용 절감 가능합니다.`;
     } else {
-      topInsight = `이번 달 ${monthly.used.toLocaleString()}회 호출. 한도 ${monthlyPercent}% 사용 중입니다.`;
+      topInsight = `이번 달 ${monthlyCalls.toLocaleString()}회 호출 · 크레딧 ${pct}% 사용 중입니다.`;
     }
 
     return res.json({
       success: true,
-      monthly_calls: monthly.used,
-      monthly_limit: monthly.limit,
-      monthly_percent: monthlyPercent,
+      monthly_calls: monthlyCalls,
+      credit_used: credit.used,
+      credit_remaining: credit.remaining,
+      credit_percent: credit.percent,
       daily_avg: Math.round(dailyAvg * 10) / 10,
-      predicted_days_to_limit: predictedDaysToLimit,
       cache_hit_rate: cache.hitRate,
       cache_size: cache.size,
       cache_hit: cache.hit,
@@ -301,14 +293,15 @@ router.post('/search-natural', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '질문은 500자 이내로 입력해주세요.' });
     }
 
-    const [monthly, daily, breakdown] = await Promise.all([
-      getMonthlyUsage(companyId),
+    const [monthlyCalls, credit, daily, breakdown] = await Promise.all([
+      getMonthlyCallCount(companyId),
+      creditUsageThisMonth(companyId),
       getDailyUsage(companyId, 30),
       getModelBreakdown(companyId, 30),
     ]);
     const cache = getCacheStats(companyId);   // ★ 2026-09-27 R073 — 그 회사 몫만
 
-    if (daily.length === 0 && monthly.used === 0) {
+    if (daily.length === 0 && monthlyCalls === 0) {
       return res.json({
         success: true,
         answer: '아직 이번 달 AI 호출 데이터가 없어서 분석할 근거가 없습니다. 캠페인 생성 또는 AI 추천 메뉴를 사용하시면 데이터가 쌓입니다.',
@@ -329,7 +322,8 @@ router.post('/search-natural', async (req: Request, res: Response) => {
 ## 회사 사용량 데이터 (분석 근거)
 
 ### 이번 달 요약
-- 호출 횟수: ${monthly.used.toLocaleString()}회 / 한도 ${monthly.limit !== null ? monthly.limit.toLocaleString() + '회' : '무제한'}
+- 호출 횟수: ${monthlyCalls.toLocaleString()}회
+- 크레딧: ${credit.percent === null ? '크레딧제 요금제 아님' : `이번 달 사용 ${credit.used.toLocaleString()} · 남은 ${credit.remaining.toLocaleString()} (사용률 ${credit.percent}%)`}
 - Cache 히트율: ${(cache.hitRate * 100).toFixed(1)}% (hit ${cache.hit.toLocaleString()}, miss ${cache.miss.toLocaleString()})
 
 ### 최근 14일 일별
@@ -343,7 +337,7 @@ ${topSources || '(데이터 없음)'}
 2. **모델명을 절대 노출하지 마세요**. "고급 추론 모드 / 표준 추론 모드 / 보조 추론 모드" 추상 명칭만 사용.
 3. **구체 혜택(%, 원, 무료, 쿠폰) 임의 생성 금지**. 회사 정책 데이터가 없습니다.
 4. 답변은 한국어 3~6문장으로 간결하게 작성하세요.
-5. 비용 절감 추천 시 = Batch 처리 모드 (24시간 SLA, 50% 절감) + cache 히트율 향상 + 한도 알림 설정 중심으로 안내.
+5. 비용 절감 추천 시 = Batch 처리 모드 (24시간 SLA, 50% 절감) + cache 히트율 향상 + 크레딧 알림 설정 중심으로 안내.
 6. "~인 것 같습니다" 가설 표현 금지. 근거 명확하면 단언, 부족하면 "데이터 부족" 명시.
 7. 호출 출처는 영문 이름(예: generate-messages)을 그대로 쓰지 말고 우리말 작업 이름으로 풀어 쓰세요(예: 문구 생성 · 타겟 추천).
 8. 화면에 글자 그대로 보이므로 굵은 글씨(**) · 머리글(#) · 표 같은 마크다운 기호는 쓰지 않는다. 목록이 필요하면 줄마다 "· "로 시작한다.`;
@@ -368,8 +362,8 @@ ${topSources || '(데이터 없음)'}
       answer: plainTextFromAi(answer),   // ★ 2026-09-30 WP6 — 마크다운 기호 출구 정리(화면 = whitespace-pre-wrap 글자 그대로)
       no_data: false,
       context_summary: {
-        monthly_used: monthly.used,
-        monthly_limit: monthly.limit,
+        monthly_used: monthlyCalls,
+        credit_percent: credit.percent,
         cache_hit_rate: cache.hitRate,
         top_sources_count: breakdown.length,
         daily_data_points: daily.length,
@@ -379,15 +373,12 @@ ${topSources || '(데이터 없음)'}
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.', code: 'INSUFFICIENT_CREDIT' });
     if (respondUserError(res, err)) return;
     console.error('[AI Usage search-natural] 오류:', err);
-    if (err?.name === 'AiRateLimitExceeded') {
-      return res.status(429).json({ success: false, error: err.message, code: 'AI_RATE_LIMIT' });
-    }
     return res.status(500).json({ success: false, error: publicErrorText(err, '검색 실패') });
   }
 });
 
 // ════════════════════════════════════════════════════════════════════
-// 4. POST /api/ai-usage/threshold-alert — 한도 알림 설정
+// 4. POST /api/ai-usage/threshold-alert — 크레딧 사용률 알림 설정
 // ════════════════════════════════════════════════════════════════════
 
 interface ThresholdConfigInput {
@@ -404,7 +395,7 @@ router.post('/threshold-alert', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
     if (userType !== 'company_admin') {
-      return res.status(403).json({ success: false, error: '한도 알림 설정은 회사 관리자만 가능합니다.' });
+      return res.status(403).json({ success: false, error: '크레딧 알림 설정은 회사 관리자만 가능합니다.' });
     }
 
     const body = req.body as ThresholdConfigInput;
