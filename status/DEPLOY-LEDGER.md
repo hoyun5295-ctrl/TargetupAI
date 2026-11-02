@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: 3d5e09ef · 2026-11-01 · Harold 보고 「전부 배포완료」(C88 · tp-push 커밋 3d5e09ef · pull 출력 원문은 안 받음 · 배포 전 서버 33b7cdde 확인)
-- deployed_head: 3d5e09ef · 2026-11-01 · Harold 보고 「전부 배포완료」(백엔드 + 프론트 빌드 · reload) · 그 전 33b7cdde(C86 · C87) · C77-ENV-1 은 아직
-- 이번 창 확인 출력: frontend-build 끝 줄(atomic swap 완료) · reload ✓(원문 받음) · backend-build(Harold 보고 · 원문은 안 받음)
+- pulled_head: bec5d5d5 · 2026-11-02 · Harold 보고 「여기까지 완료」(C92 · C93 · push 0b4562da..bec5d5d5 원문 받음 · 그 전 3d5e09ef)
+- deployed_head: bec5d5d5 · 2026-11-02 · Harold 보고 「여기까지 완료」(백엔드 build:safe · reload 07:45:30 · 프론트 build:safe · pm2 status 원문 받음) · 그 전 3d5e09ef(C88) · C77-ENV-1 은 아직
+- 이번 창 확인 출력: push 끝 줄(0b4562da..bec5d5d5) · pm2 status · describe · logs(원문 받음) · build:safe 끝 줄(Harold 보고 · 원문은 안 받음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -39,8 +39,9 @@
 | C89 | d6e05ff5 |
 | C90 | d6e05ff5 |
 | C91 | 0b4562da |
-| C92 | 미커밋 |
-| C93 | 미커밋 |
+| C92 | bec5d5d5 |
+| C93 | bec5d5d5 |
+| C95 | 미커밋 |
 
 ## §1 대기
 
@@ -539,7 +540,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS ai_credit_tx_company_seq ON ai_credit_tr
 - 선행: C93-DDL-1 · C93-DDL-2 · C93-DDL-3 · 코드 배포
 - 기대: ① 테스트계정 한 번 보내기 켜기 = 실행 수 = 대상 수 · one_shot_dispatched_at 찍힘 · 넣기 대기 NULL ② 문자 칸 문안을 고치면 그 칸만 검사를 기다리고 통과 뒤 나감 · 담당자 「발송 전 안내」 문자 0 ③ 상황판 주소(주간 요약 또는 직접 발급) = 한눈에 · 여정 · 자동마케팅 · 플래너 메뉴 · 휴대폰 폭 ④ 충전 승인 링크 = 누르면 확인 창 ⑤ 자동마케팅 수정 창 오른쪽 점검 판 ⑥ 배포 뒤 첫 시간 운영 경보에 journey-executor-lag · journey-watcher-budget · spam-queue-lag 0
 - 확인: 화면(Harold · 테스트계정) · 그 시각 SQL 하나씩(docker 한 줄)
-- 결과:
+- 결과: 2026-11-02 배포 bec5d5d5(pull · 백엔드 build:safe · reload 07:45:30 · 프론트 build:safe) · 기동 = 새 워커 시작 줄(weekly-digest · 여정 · 자동마케팅) · 재시작 뒤 오류 로그 0 · 첫 주간 요약 받는 회사 = 주식회사 인비토 하나(켜진 여정 2 · 자동마케팅 0 · 직원이 받아 ③ 확인) · ①②④⑤⑥ 남음
 
 ### C93-DDL-1 · journeys 한 번 보내기 넣기 대기 · 넣기 완료 시각(엔진 재설계 E1-2) · ★ 배포 앞
 - 카드: C93
@@ -602,6 +603,14 @@ ALTER TABLE journey_pretest_schedules
   ADD COLUMN IF NOT EXISTS snapshot_id uuid NULL,
   ADD COLUMN IF NOT EXISTS notice_sent_at timestamptz NULL;
 ```
+
+### C95-S1 · 엔진 빈칸 묶음 실측(배포 뒤 · 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §16)
+- 카드: C95
+- 단계: 사후
+- 선행: 코드 배포(DDL 0 · ENV 0 · 백엔드만)
+- 기대: ① 재시작 뒤 백엔드 로그에 직접발송 워커 시작 줄 · `처리 실패` 0 ② 배포 뒤 첫 시간 운영 경보에 direct-send-queue-lag · operator-send-lag · operator-generate-lag 0 ③ 테스트계정 직접발송 1건 = 접수 → 적재 → 완료(campaigns.send_phase 끝 · send_config 에 loadParkedAt · loadChunk · loadFinalizing 남지 않음) ④ 테스트계정 여정 켜기 확인 창 = 매장번호 확인 정상 · [타겟 확인] 날짜 기준 수에 「+」 없음
+- 확인: 로그 줄 · 경보 수 SQL · 화면(Harold · 테스트계정)
+- 결과:
 
 ## §2 덤프 뒤 적용분
 

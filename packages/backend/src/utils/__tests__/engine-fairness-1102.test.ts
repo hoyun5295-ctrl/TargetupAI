@@ -125,7 +125,17 @@ describe('배선(소스 계약)', () => {
     expect(worker).toContain('await runCompanyLanes(dueRes.rows as Array<{ id: string; company_id: string }>, (r) => String(r.company_id), OPERATOR_GENERATE_CONCURRENCY,');
     expect(op).toContain('void runAutoSendPassTick();');
     expect(op).toContain('AND operator_id <> ALL($2::uuid[])');
-    expect(op).toContain('const due = await dueScheduledProposals(limit, [...generatingOperators.keys()]);');
+    // ★ 2026-11-02 §16 G5 — 줄 풀(기다림 없음 · 회사 대표 · 이번 패스에 집은 회차 · 지금 보내는 회사는 LIMIT 앞에서 뺀다)
+    expect(op).toContain('const due = await dueScheduledProposals(1, [...generatingOperators.keys()], tried, [...inFlight.keys()]);');
+    const pass = op.slice(op.indexOf('export async function runAutoSendPass('), op.indexOf('// \'sending\' 정지 복구'));
+    expect(pass).toContain('if (inFlight.size >= OPERATOR_SEND_CONCURRENCY) { await Promise.race(inFlight.values()); continue; }');
+    expect(pass).toContain('inFlight.set(co, sendOne(String(row.id)).finally(() => { inFlight.delete(co); }));');
+    expect(pass).toContain('  } finally {\n    await Promise.allSettled(inFlight.values());\n  }');   // Codex 구현 1R #2 · 동작 = operator-send-pass-1102.test.ts
+    expect(pass).not.toMatch(/for \(const row of due\.rows\)/);   // 옛 차례 처리 0
+    const due = op.slice(op.indexOf('export async function dueScheduledProposals('), op.indexOf('export const OPERATOR_SEND_CONCURRENCY'));
+    expect(due).toContain('SELECT DISTINCT ON (company_id) id, company_id');
+    expect(due).toContain('AND NOT (company_id = ANY($4::uuid[]))');
+    expect(due).toContain('ORDER BY (r.rc <= ${OPERATOR_SEND_SMALL_MAX}) DESC, r.scheduled_send_at ASC, r.id');
     const gen = op.slice(op.indexOf('export async function generateProposalForOperator('), op.indexOf('async function generateProposalForOperatorRound('));
     expect(gen).toMatch(/generatingOperators\.set\(operatorId[\s\S]*finally[\s\S]*generatingOperators\.delete\(operatorId\)/);
   });

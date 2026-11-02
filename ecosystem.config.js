@@ -41,6 +41,9 @@ module.exports = {
       exec_mode: 'fork',
       autorestart: true,
       watch: false,
+      // ★ 2026-11-02 설계서 §16 G6 ④ — 종료 신호 뒤 대량 직접발송 줄이 청크 경계에서 내려놓을 시간(워커 기다림 상한 8초보다 길게).
+      //   기본 1.6초면 경계에 못 닿고 끊긴다(끊김 복구가 받지만 청크 중이면 종결 = 일부만 발송). 이 값은 pm2 가 이 파일을 다시 읽을 때 반영된다.
+      kill_timeout: 12000,
 
       // 로그 영역 — 기존 PM2 default 경로 정합
       error_file: '/home/administrator/.pm2/logs/targetup-backend-error.log',

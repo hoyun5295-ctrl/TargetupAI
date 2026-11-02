@@ -3286,6 +3286,9 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     "utils/journey-executor.ts 'journey-executor-lag'": '실행기 밀림 = 플랫폼 처리량 원인 하나(★1102 E9 ①)',
     "utils/journey-trigger-watcher.ts 'journey-watcher-budget'": '진입 감시 회차 예산 초과 = 플랫폼 원인 하나(★1102 E9 ②)',
     "utils/spam-test-queue.ts 'spam-queue-lag'": '스팸 검사 줄 밀림 = 시험 폰 · 큐 원인 하나(★1102 E9 ③)',
+    "utils/direct-send-worker.ts 'direct-send-queue-lag'": '대량 직접발송 줄 밀림 = 워커 처리량 원인 하나(★1102 §16 G3)',
+    "utils/operator-lag.ts 'operator-send-lag'": '자동마케팅 발송 패스 밀림 = 패스 처리량 원인 하나(★1102 §16 G3)',
+    "utils/operator-lag.ts 'operator-generate-lag'": '자동마케팅 제안 생성 밀림 = 생성 처리량 원인 하나(★1102 §16 G3)',
   };
   it('sendSystemAlert 에 companyId: null 을 싣는 자리 = 목록과 같다', () => {
     const found: string[] = [];
@@ -4262,11 +4265,8 @@ describe('R38 크레딧 잔액 = 원장 CT 만 · 원장 먼저 · 모든 변동
  *   날짜 기준 · 한 번 보내기는 상수를 쓰지 않는다 = 넣기 한 문장이 한 시점 전원(Codex C92 2R · 묶음으로 나누면 묶음마다 기준 시점이 다르다).
  */
 const R40_CAP_USERS: Record<string, string> = {
-  'utils/journey-target-extractor.ts': '정의 · 인원 세기(넘음 = capped 표시)',
+  'utils/journey-target-extractor.ts': '정의(인원 세기 · 켜기 회신 확인 = 대상 SQL 한 벌을 상한 없이 감싸 센다 · ★ 1102 §16 G2)',
   'utils/journey-trigger-watcher.ts': '사건 · 상태 = 회차당 · 남은 분 다음 회차(진입 안티조인)',
-  'utils/journey-simulator.ts': '인원 세기(넘으면 「그만큼까지만 셌어요」)',
-  'utils/journey-activation.ts': '켜기 전 회신번호 미등록 안내 수(발송은 매 건 isCallbackRegistered 판정 · 넣기 아님)',
-  'routes/ai.ts': '여정 설정 저장 · 미리보기 인원(화면 수 · 상한 넘음 판정 · 넣기 아님)',
 };
 describe('R41 잠금을 쥔 연결이 같은 풀을 다시 기다리지 않는다(키마다 기다리는 잠금 = 잠금 전용 풀)', () => {
   it('pg_advisory_lock( 을 쓰는 파일 = lockPool.connect() 로 잠금 연결 · lockPool 정의 = config/database 한 곳', () => {
@@ -4303,5 +4303,39 @@ describe('R40 양 상한에서 자른 나머지를 버리지 않는다(한 문�
     const sqlFn = ext.slice(ext.indexOf('export function anchorAudienceSql('), ext.indexOf('export async function selectAnchorAudienceIds('));
     expect(sqlFn.length).toBeGreaterThan(100);
     expect(sqlFn).not.toMatch(/\bLIMIT\b/);
+  });
+});
+
+// ── R42 한 회사의 양이 공용 줄을 막는다(★ 2026-11-02 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §16 G6 · G5) ──
+describe('R42 공용 발송 줄 = 회사 대표 · 한 회사 한 줄 · 몫마다 양보(직접발송 워커 · 자동마케팅 발송 패스)', () => {
+  const picksQueuedCampaigns = (sql: string) => /\bSELECT\b/i.test(sql) && !/\bCOUNT\s*\(/i.test(sql) && /\bcampaigns\b/.test(sql) && /send_phase\s*=\s*'queued'/.test(sql);
+  const picksDueProposals = (sql: string) => /\bSELECT\b/i.test(sql) && !/\bCOUNT\s*\(/i.test(sql) && /operator_proposals/.test(sql) && /status\s*=\s*'scheduled'/.test(sql) && /scheduled_send_at\s*<=\s*NOW\(\)(?!\s*-)/.test(sql);   // 「지금 − 30분」 = 밀림 판정 · 경보 안내 글(고르기 아님)
+  it('① queued 캠페인 · 때가 된 자동마케팅 회차를 고르는 SQL = 주인 파일 밖 0(새 고르기 = 회사 대표를 거쳐야 한다)', () => {
+    const out: string[] = [];
+    for (const f of BE_FILES) {
+      if (f === 'utils/direct-send-worker.ts' || f === 'utils/continuous-operator.ts') continue;
+      for (const t of sqlTemplates(stripComments(be(f)))) {
+        if (picksQueuedCampaigns(t.sql)) out.push(`${f}:${t.line} queued 캠페인`);
+        if (picksDueProposals(t.sql)) out.push(`${f}:${t.line} 예약 회차`);
+      }
+    }
+    expect(out).toEqual([]);
+  });
+  it('② 직접발송 워커 = 회사 대표 고르기 · 회사 단위 순환 열쇠 · 한 회사 한 줄 · 옛 오래된 순 LIMIT 5 0', () => {
+    const w = stripComments(be('utils/direct-send-worker.ts'));
+    const cand = w.slice(w.indexOf('function candidateSql('), w.indexOf('function releasedKeyArrays('));
+    expect(cand).toContain('SELECT DISTINCT ON (company_id) * FROM sized');
+    expect(cand).toContain('LEFT JOIN unnest($3::uuid[], $4::timestamptz[]) AS k(company_id, released_at)');
+    expect(cand).toContain('AND NOT (c.company_id = ANY($1::uuid[]))');
+    expect(w).not.toMatch(/send_phase = 'queued' ORDER BY created_at ASC LIMIT/);
+    expect(w).toMatch(/const r = await query\(`\$\{candidateSql\(!generalFree\)\} LIMIT 1`, \[busyCompanyIds\(\)/);
+  });
+  it('③ 자동마케팅 발송 패스 = 회사 대표 · 줄 풀(차례 처리 0)', () => {
+    const op = stripComments(be('utils/continuous-operator.ts'));
+    const due = op.slice(op.indexOf('export async function dueScheduledProposals('), op.indexOf('export const OPERATOR_SEND_CONCURRENCY'));
+    expect(due).toContain('SELECT DISTINCT ON (company_id) id, company_id');
+    const pass = op.slice(op.indexOf('export async function runAutoSendPass('), op.indexOf('await reconcileStuckSending()'));
+    expect(pass).toContain('dueScheduledProposals(1, [...generatingOperators.keys()], tried, [...inFlight.keys()])');
+    expect(pass).not.toMatch(/for \(const row of due\.rows\)/);
   });
 });

@@ -107,7 +107,9 @@ describe('여정 트리거 카탈로그 ↔ 백엔드 실동작', () => {
   it('extractor의 default는 빈 배열을 돌려준다 (미지원 트리거가 발송으로 새지 않는다)', () => {
     const extractor = readFileSync(EXTRACTOR, 'utf8');
     const tail = extractor.slice(extractor.indexOf('    default:'));
-    expect(tail.startsWith('    default:\n      return [];')).toBe(true);
+    // ★ 2026-11-02 §16 G2 — 갈래 = 대상 SQL 한 벌(buildJourneyTargetQuery) · 미지원 = null → 목록(selectJourneyTargetCustomerIds) = 빈 배열
+    expect(tail.startsWith('    default:\n      return null;')).toBe(true);
+    expect(extractor).toContain('  if (!q) return [];\n  return (await runTargetSql(q, q.sql, q.params)).map((x: any) => x.customer_id);');
   });
 });
 

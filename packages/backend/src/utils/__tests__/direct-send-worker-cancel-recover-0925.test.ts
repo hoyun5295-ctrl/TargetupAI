@@ -21,7 +21,10 @@ const between = (a: string, b: string) => {
 
 describe('C-10 적재 중·적재 전 취소', () => {
   it('due 조회는 취소된 queued도 집는다', () => {
-    expect(src).toContain("`SELECT id FROM campaigns WHERE send_phase = 'queued' ORDER BY created_at ASC LIMIT 5`");
+    // ★ 2026-11-02 §16 G6 — 고르기 = 회사 대표(candidateSql) · 취소 · 적재 중단 표식 대표가 맨 앞(내려놓은 취소도 · SC-28)
+    expect(src).toContain("WHERE (c.send_phase = 'queued' OR (c.send_phase = 'processing' AND COALESCE(c.send_config, '{}'::jsonb) ? '${LOAD_PARKED}'))");
+    expect(src).toContain("(c.status = 'cancelled' OR COALESCE((c.send_config->>'${LOAD_CANCEL_FLAG}')::boolean, false)) AS stopped");
+    expect(src).toContain('ORDER BY rep.stopped DESC,');
     expect(src).not.toContain("send_phase = 'queued' AND status != 'cancelled'");
   });
 
@@ -61,7 +64,8 @@ describe('C-10 적재 중·적재 전 취소', () => {
     expect(iTry).toBeLessThan(branch.indexOf('DELETE FROM SMSQ_SEND'));
     expect(branch).toContain('} catch (settleErr: any) {');
     // 바깥 최후 안전망은 어떤 캠페인도 failed로 바꾸지 않는다(★0926 F02·F37 — recover가 다시 봐야 한다)
-    const outer = between('처리 실패:`, e);', '// ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도는');
+    // ★ 2026-11-02 §16 G6 — 바깥 최후 안전망 = 줄 실행(runLane)의 catch(옛 due 루프 catch 본문 그대로)
+    const outer = between('처리 실패:`, e);', '  } finally {\n    lanes.delete(campaignId);');
     expect(outer).not.toContain("send_phase = 'failed'");
   });
 
@@ -101,7 +105,7 @@ describe('C-11 끊긴 적재', () => {
  * recover가 적재에만 쓰는 준비(필드 매핑·080 번호·브랜드 이미지)에 막히면 영영 정산을 못 하므로 그 준비는 적재할 때만 한다.
  */
 describe('F02·F37 적재 루프 밖 예외', () => {
-  const outer = () => between('처리 실패:`, e);', '// ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도는');
+  const outer = () => between('처리 실패:`, e);', '  } finally {\n    lanes.delete(campaignId);');   // ★ §16 G6 runLane catch
 
   it('바깥 catch는 단계를 바꾸지 않고 사유만 남긴다', () => {
     const o = outer();

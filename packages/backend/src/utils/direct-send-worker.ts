@@ -22,7 +22,7 @@ import { prepareBrandAttachmentForSend } from './brand-message';
 import { resolveRefundAxes, isBrandOnlyChannel } from './billing-types';
 import { sendSystemAlert } from './system-alert';
 // ★ 2026-09-26 한줄로 V2 F10·F31·F32 — 대행 취소(queueOnly)의 적재 중단 표식도 취소로 본다(CT 하나).
-import { isLoadStopped, isLoadingSendPhase, NOT_LOAD_STOPPED_SQL, LOAD_CANCELLED_SELECT, LOADING_SEND_PHASES_SQL } from './load-cancel';
+import { isLoadStopped, isLoadingSendPhase, NOT_LOAD_STOPPED_SQL, LOAD_CANCELLED_SELECT, LOADING_SEND_PHASES_SQL, LOAD_CANCEL_FLAG } from './load-cancel';
 // ★ 2026-09-26 (Codex 4차 5R) 취소 의무 쓰기 직렬화(취소 CT와 같은 잠금)
 import { withCancelObligationLock } from './keyed-lock';
 // ★ 2026-09-26 한줄로 V2 F19 — 개별 회신번호 등록 검사(동기 경로와 같은 CT)
@@ -31,7 +31,55 @@ import { filterByIndividualCallback, callbackAssignmentUserId, fixedCallbackReje
 import { countCampaignRows, settleCancelledLoadRefund, settleCancelOutcome, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
 
 const CHUNK = 10000;
-let running = false;
+// ★ 2026-11-02 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §16 G6 — 회사별 줄 · 회사 단위 순환 · 시간 몫 양보 · 정확한 재개.
+//   옛: running 하나로 전 회사 한 줄(오래된 순 5개 · 캠페인 하나를 끝까지) = 한 회사 대량 발송이 직접발송 · 모바일 DM · 대행 · 자동마케팅 · 플래너를 모두 막았다.
+//   한 회사 = 한 줄(같은 회사 캠페인 둘을 동시에 넣지 않는다) · 주인 = DB 선점 UPDATE 하나 · 아래 표는 이 프로세스 안 줄 배정만(PM2 fork 1).
+/** 일반 줄 수(PG 풀 20 을 엔진 줄 전체가 나눠 쓴다 · §16 SC-40) */
+export const DIRECT_SEND_LANES = 2;
+/** 작은 줄 = 남은 수가 이 값 이하인 캠페인(일반 줄이 다 차도 바로) */
+export const SMALL_CAMPAIGN_MAX = 10000;
+/** 시간 몫 — 이만큼 넣고 다른 회사가 기다리면 청크 경계에서 내려놓는다 */
+export const DIRECT_SEND_SLICE_MS = 2 * 60 * 1000;
+/** 종료 신호 뒤 줄이 경계에서 내려놓기를 기다리는 상한(ecosystem kill_timeout 12초보다 짧게) */
+export const DIRECT_SEND_PARK_WAIT_MS = 8000;
+/** 멈춤 복구 이어 넣기 연속 상한(넘으면 지금처럼 종결 · 청크 진행 기록이 성공하면 0) */
+export const LOAD_RESUME_MAX = 3;
+/** 직접발송 대기 밀림 경보 문턱(분 · §16 G3) */
+export const DIRECT_SEND_LAG_MINUTES = 30;
+const LOAD_PARKED = 'loadParkedAt';
+const lanes = new Map<string, { companyId: string; small: boolean }>();
+/** 회사가 마지막으로 줄을 놓은 시각(회사 단위 순환 열쇠 · 하루 넘게 안 쓴 회사는 지운다) */
+const companyReleasedAt = new Map<string, number>();
+let filling = false;
+let maintaining = false;
+let stopping = false;
+/** 재시작 뒤 첫 줄 채우기 전에 순환 열쇠를 DB 에서 한 번 되살렸는가(Codex 설계 3R · 4R) */
+let keysRestored = false;
+/** 청크 크기 · 몫 길이 = 운영 값(시험만 __directSendTest.tune 으로 줄인다) */
+const tuning = { chunk: CHUNK, sliceMs: DIRECT_SEND_SLICE_MS, smallMax: SMALL_CAMPAIGN_MAX };
+
+/** 시험 전용(실 PG 시험이 줄 · 몫 · 재시작 · 종료 신호를 흉내 낸다 · 운영 코드가 부르지 않는다) */
+export const __directSendTest = {
+  reset(): void {
+    lanes.clear(); companyReleasedAt.clear(); keysRestored = false;
+    filling = false; maintaining = false; stopping = false;
+    tuning.chunk = CHUNK; tuning.sliceMs = DIRECT_SEND_SLICE_MS; tuning.smallMax = SMALL_CAMPAIGN_MAX;
+  },
+  tune(o: { chunk?: number; sliceMs?: number; smallMax?: number }): void {
+    if (o.chunk != null) tuning.chunk = o.chunk;
+    if (o.sliceMs != null) tuning.sliceMs = o.sliceMs;
+    if (o.smallMax != null) tuning.smallMax = o.smallMax;
+  },
+  laneSnapshot: (): Array<[string, { companyId: string; small: boolean }]> => [...lanes.entries()],
+  releasedSnapshot: (): Array<[string, number]> => [...companyReleasedAt.entries()],
+  /** 재시작 흉내 = 메모리 표만 비운다(DB 는 그대로) */
+  simulateRestart(): void { lanes.clear(); companyReleasedAt.clear(); keysRestored = false; filling = false; maintaining = false; stopping = false; },
+  stop(): void { stopping = true; },
+  async idle(timeoutMs = 20000): Promise<void> {
+    const until = Date.now() + timeoutMs;
+    while ((lanes.size > 0 || filling) && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
+  },
+};
 // ★ 2026-07-31 (10R): preparing 잔존 경보 — 미종료 작업 1개 상한(in-flight, settle 시에만 해제)
 //   + 시도 간 최소 간격 10분. hang이면 그 1개가 복구 시 유일한 발송이 된다(누적·폭주 구조 불가).
 let _preparingAlertInFlight = false;
@@ -295,71 +343,39 @@ async function measureLoadedRows(
   return isBrandOnlyChannel(sendChannel) ? { sent: all, brandSent: all } : { sent: all, brandSent: 0 };
 }
 
-/** queued 캠페인을 순차 처리 (동시 진입 방지 플래그) */
+/** ★ §16 G6 — 회차 = 빈 줄 채우기(줄 안 처리는 기다리지 않는다) + 정리 일(끊김 복구 · 환불 재시도 · preparing 잔존 감시 · 자기 가드) */
 export async function runDirectSendOnce(): Promise<void> {
-  if (running) return;
-  running = true;
+  if (stopping) return;   // 종료 신호 뒤 = 새 줄 · 새 정리(끊김 복구 종결)를 시작하지 않는다(재기동 뒤 그대로 받는다)
+  await fillLanes().catch((e: any) => console.error('[direct-send-worker] 줄 채우기 오류:', e?.message || e));
+  if (maintaining) return;
+  maintaining = true;
   try {
     // ★ 2026-09-25 한줄로 전수점검 C-11: 적재 중(processing) 프로세스가 죽으면(배포 reload·OOM 재시작) 그 캠페인을
     //   되돌리는 코드가 없었다 — 나머지 미발송 · 선차감 미적재분 미환불 · 화면 "발송 중" 고정.
-    //   `running` 가드로 이 프로세스의 적재와 겹치지 않고, 적재 루프는 청크마다 updated_at을 갱신하므로
+    //   이 프로세스가 지금 넣는 캠페인(줄 표)은 고르지 않아 적재와 겹치지 않고(★ §16 G6 · 옛 running 가드), 적재 루프는 청크마다 updated_at을 갱신하므로
     //   10분 넘게 멈춘 processing은 주인 없는 적재다. 이어서 적재하지 않는다(마지막 청크 적재·processed_count 기록 사이에
     //   죽었으면 그 청크가 두 번 나간다) — MySQL 실측 적재 수로 종결해 적재분은 발송, 나머지는 미적재 환불.
+    // ★ §16 G6 ③ — 끊김 복구 다섯 갈래(옛: 무조건 종결). 내려놓은 캠페인 · 지금 이 프로세스가 넣고 있는 캠페인은 주인 없음이 아니다.
     const orphans = await query(
       `SELECT id FROM campaigns
         WHERE send_phase = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'
-        ORDER BY updated_at ASC LIMIT 5`
+          AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')
+          AND NOT (id = ANY($1::uuid[]))
+        ORDER BY updated_at ASC LIMIT 5`,
+      [[...lanes.keys()]],
     );
     for (const row of orphans.rows) {
       try {
-        await processCampaign(row.id, 'recover');
+        if ((await classifyStaleLoad(String(row.id))) === 'recover') await processCampaign(row.id, 'recover');
       } catch (e: any) {
         console.error(`[direct-send-worker] 캠페인 ${row.id} 끊긴 적재 정리 실패:`, e?.message || e);
       }
     }
 
-    // ★ 2026-09-25 C-10: 적재 전에 취소된 queued도 집는다. 옛 조건(status != 'cancelled')은 취소된 캠페인을 영영 집지 않아
-    //   선차감 전액이 환불되지 않았다(취소는 큐 대기 행 수만 환불 — 적재 전이면 0건). 집으면 적재 없이 종결 블록으로 간다.
-    const due = await query(
-      `SELECT id FROM campaigns WHERE send_phase = 'queued' ORDER BY created_at ASC LIMIT 5`
-    );
-    for (const row of due.rows) {
-      try {
-        await processCampaign(row.id);
-      } catch (e: any) {
-        console.error(`[direct-send-worker] 캠페인 ${row.id} 처리 실패:`, e);
-        // ★ 2026-07-27 (B-0727-1): 여기는 최후 안전망이다. 적재 중 예외는 processCampaign 안에서 잡아
-        //   정상 종결 블록(환불·건수·staging 정리)을 태우므로, 이 catch까지 오는 건 종결 블록 자체가 실패한 경우뿐.
-        //   그때는 환불·집계가 수렴하지 않으므로 사유를 남겨 사람이 찾을 수 있게 한다.
-        //   ⛔ status는 건드리지 않는다 — failed로 바꾸면 예약 캠페인이 예약 목록·취소 게이트(scheduled/draft만 허용)
-        //   에서 빠지는데 이미 적재된 큐 행은 예약 시각에 그대로 나간다(취소 불가).
-        //   ⛔ `send_phase IS DISTINCT FROM 'sent'` 가드 필수 — 종결 UPDATE는 성공했는데 그 뒤 staging 삭제만
-        //   실패해도 여기로 온다. 가드가 없으면 정상 종결된 'sent'를 'failed'로 강등해, 실제로 나간 발송이
-        //   후불 집계(send_phase='sent' AND status='completed')와 선불 sweeper에서 통째로 빠진다.
-        // ★ 2026-09-25 C-10 (Codex 2R high): 취소된 캠페인은 failed로 바꾸지 않는다 — processing으로 남아야
-        //   끊긴 적재 정리(recover · 10분)가 캠페인 전체 기준으로 다시 정산한다. failed가 되면 아무도 다시 보지 않아
-        //   선차감이 영구 미환불로 남는다(적재 전 취소는 취소 경로의 환불도 0건이다).
-        // ★ 2026-09-26 한줄로 V2 F02·F37: 취소 여부와 무관하게 **어떤 캠페인도** failed로 바꾸지 않는다.
-        //   적재 루프 앞(적재 테이블·필드 매핑·브랜드 이미지 준비·정제)이나 뒤(종결 전 조회)에서 난 예외가 여기로 오는데,
-        //   failed는 recover(processing만)·sweeper('sent'·NULL만)·환불 재시도(refundPending만) 누구도 다시 보지 않아
-        //   선차감 전액이 영구 미환불로 굳었다. 단계를 그대로 두면 queued는 다음 주기에 다시 선점되고,
-        //   processing은 10분 뒤 recover가 MySQL 실측 적재 수로 종결한다(적재분은 발송 · 나머지는 미적재 환불).
-        //   사유만 남긴다 — updated_at 갱신이 recover의 10분 대기를 여기서부터 다시 센다.
-        const failure = JSON.stringify({
-          at: new Date().toISOString(),
-          reason: String(e?.message || e).slice(0, 300),
-        });
-        await query(
-          `UPDATE campaigns
-              SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{failure}', $2::jsonb),
-                  updated_at = NOW()
-            WHERE id = $1 AND send_phase IS DISTINCT FROM 'sent'`,
-          [row.id, failure],
-        ).catch(() => {});
-      }
-    }
+    // ★ §16 G6 — 옛: 여기서 queued 를 오래된 순 5개 골라 차례로 끝까지 넣었다 → 줄 채우기(fillLanes)가 맡는다(위 · 기다리지 않음).
     // ★ 2026-07-27 (B-0727-1): 미완료 환불 재시도는 **신규 발송 처리 뒤**에 돈다.
     //   앞에 두면 밀린 환불 재시도가 발송 적재를 지연시킨다(발송이 늦는 편이 더 눈에 띄는 사고).
+    //   ★ §16 G6 — 줄 채우기가 기다리지 않고 돌아오므로 정리 일은 적재와 따로 회차마다 돈다(옛: 캠페인 적재가 끝날 때까지 함께 밀렸다).
     await retryPendingRefunds();
     // ★ 2026-07-30 (3R): 'preparing' 잔존 감시 — commit이 차감 도중 죽으면 캠페인이 preparing으로 남는다.
     //   발송은 구조적으로 불가(fail-closed)지만 차감 여부가 불명이라 자동 환불하지 않는다 —
@@ -402,9 +418,219 @@ export async function runDirectSendOnce(): Promise<void> {
     } catch (staleErr: any) {
       console.error('[direct-send-worker] preparing 잔존 감시 오류:', staleErr?.message || staleErr);
     }
+    // ★ §16 G3 — 직접발송 대기 밀림 = 줄을 30분 넘게 못 받은 캠페인(아직 시작 못 한 즉시 · 시각 지난 예약 / 30분 넘게 다음 몫을 못 받은 내려놓음).
+    //   원인 하나 = 공용 키 한 통(회사마다 0 · 쿨다운은 경보 공용). 큰 캠페인이 몫마다 돌아가며 오래 넣는 것은 밀림이 아니다(설계 상한 I14 안).
+    try {
+      const lag = await query(
+        `SELECT COUNT(*)::int AS cnt
+           FROM campaigns
+          WHERE (send_phase = 'queued' AND created_at <= NOW() - INTERVAL '${DIRECT_SEND_LAG_MINUTES} minutes'
+                 AND COALESCE(scheduled_at, created_at) <= NOW() - INTERVAL '${DIRECT_SEND_LAG_MINUTES} minutes')
+             OR (send_phase = 'processing' AND COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}'
+                 AND (send_config->>'${LOAD_PARKED}')::timestamptz <= NOW() - INTERVAL '${DIRECT_SEND_LAG_MINUTES} minutes')`,
+      );
+      const lagCnt = Number(lag.rows[0]?.cnt || 0);
+      if (lagCnt > 0) {
+        void sendSystemAlert({
+          companyId: null,
+          dedupKey: 'direct-send-queue-lag',
+          message: `대량 직접발송 대기 밀림 — 줄을 ${DIRECT_SEND_LAG_MINUTES}분 넘게 못 받은 캠페인 ${lagCnt}건(줄 ${lanes.size}/${DIRECT_SEND_LANES + 1} 사용 중). 목록: SELECT id, company_id, send_phase, created_at, scheduled_at FROM campaigns WHERE send_phase = 'queued' OR (send_phase = 'processing' AND send_config ? '${LOAD_PARKED}') ORDER BY created_at`,
+        }).catch(() => undefined);
+      }
+    } catch (lagErr: any) {
+      console.error('[direct-send-worker] 대기 밀림 감시 오류:', lagErr?.message || lagErr);
+    }
   } finally {
-    running = false;
+    maintaining = false;
   }
+}
+
+/** 같은 고르기 SQL(후보 · 회사 대표 · 회사 단위 순환) — 줄 채우기 · 몫 양보 판정이 같이 쓴다 */
+function candidateSql(smallOnly: boolean, extraWhere = ''): string {
+  return `WITH cand AS (
+      SELECT c.id, c.company_id, c.created_at, c.scheduled_at,
+             GREATEST(COALESCE(c.target_count, 0) - COALESCE(c.processed_count, 0), 0) AS remaining,
+             (c.status = 'cancelled' OR COALESCE((c.send_config->>'${LOAD_CANCEL_FLAG}')::boolean, false)) AS stopped,
+             (c.send_config->>'${LOAD_PARKED}')::timestamptz AS parked_at
+        FROM campaigns c
+       WHERE (c.send_phase = 'queued' OR (c.send_phase = 'processing' AND COALESCE(c.send_config, '{}'::jsonb) ? '${LOAD_PARKED}'))
+         AND NOT (c.company_id = ANY($1::uuid[]))
+         AND NOT (c.id = ANY($2::uuid[]))${extraWhere}
+    ), sized AS (
+      SELECT * FROM cand ${smallOnly ? `WHERE stopped OR remaining <= ${tuning.smallMax}` : ''}
+    ), rep AS (
+      SELECT DISTINCT ON (company_id) * FROM sized
+       ORDER BY company_id, stopped DESC, (parked_at IS NOT NULL) DESC, COALESCE(scheduled_at, created_at) ASC, created_at ASC, id
+    )
+    SELECT rep.id, rep.company_id, rep.remaining, rep.stopped, (rep.parked_at IS NOT NULL) AS parked
+      FROM rep LEFT JOIN unnest($3::uuid[], $4::timestamptz[]) AS k(company_id, released_at) ON k.company_id = rep.company_id
+     ORDER BY rep.stopped DESC, COALESCE(k.released_at, rep.parked_at) ASC NULLS FIRST,
+              COALESCE(rep.scheduled_at, rep.created_at) ASC, rep.created_at ASC, rep.id`;
+}
+
+/** 순환 열쇠 배열(LIMIT 앞 정렬에 넘긴다 · 하루 넘은 회사는 지움) */
+function releasedKeyArrays(): [string[], string[]] {
+  const cutoff = Date.now() - 24 * 3600_000;
+  for (const [co, at] of companyReleasedAt) if (at < cutoff) companyReleasedAt.delete(co);
+  const entries = [...companyReleasedAt.entries()];
+  return [entries.map(([co]) => co), entries.map(([, at]) => new Date(at).toISOString())];
+}
+
+function busyCompanyIds(): string[] {
+  return [...new Set([...lanes.values()].map((l) => l.companyId))];
+}
+
+/**
+ * ★ §16 G6 ① (Codex 설계 3R #1 · 4R #1) — 재시작 = 회사 순환 열쇠를 DB 사건에서 되살린다(내려놓은 시각 · 끝나지 않은 processing 의 마지막 활동 시각 · 지난 하루 종결 시각).
+ *   옛 메모리 표만 쓰면 재시작 직전에 줄을 놓은 회사가 재시작 뒤 맨 앞에 서서 대기 상한(I14)을 한 바퀴 넘겼다.
+ */
+async function restoreReleasedKeys(): Promise<void> {
+  if (keysRestored) return;
+  keysRestored = true;   // 실패해도 다시 시도하지 않는다 = 이 조회가 줄 채우기를 막지 않는다(빈 표 = 한 바퀴 느슨 · 발송은 계속)
+  const r = await query(
+    `SELECT company_id, MAX(released_at) AS released_at FROM (
+       SELECT company_id, (send_config->>'${LOAD_PARKED}')::timestamptz AS released_at
+         FROM campaigns WHERE send_phase = 'processing' AND COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}'
+       UNION ALL
+       -- ★ Codex 설계 4R #1 — 오류로 줄을 놓은 것(processing 그대로 · 바깥 catch 가 updated_at 을 찍는다) · 재시작 전에 죽은 것 = 마지막 활동 시각
+       SELECT company_id, updated_at FROM campaigns
+        WHERE send_phase = 'processing' AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')
+       UNION ALL
+       SELECT company_id, sent_at FROM campaigns
+        WHERE send_phase = 'sent' AND sent_at > NOW() - INTERVAL '1 day' AND staging_id IS NOT NULL
+     ) x GROUP BY company_id`,
+  );
+  for (const row of r.rows) {
+    const at = row.released_at ? new Date(row.released_at).getTime() : NaN;
+    if (Number.isFinite(at) && !companyReleasedAt.has(String(row.company_id))) companyReleasedAt.set(String(row.company_id), at);
+  }
+}
+
+/** ★ §16 G6 ① — 빈 줄마다 하나씩 고르고 선점한 뒤 바로 돌아온다(줄 안 처리는 runLane) */
+async function fillLanes(): Promise<void> {
+  if (filling || stopping) return;
+  filling = true;
+  try {
+    await restoreReleasedKeys().catch((e: any) => console.error('[direct-send-worker] 순환 열쇠 복원 실패(빈 표로 계속):', e?.message || e));
+    for (let n = 0; n < DIRECT_SEND_LANES + 1; n++) {
+      const used = [...lanes.values()];
+      const generalFree = used.filter((l) => !l.small).length < DIRECT_SEND_LANES;
+      const smallFree = !used.some((l) => l.small);
+      if (!generalFree && !smallFree) return;
+      const [keyCos, keyAts] = releasedKeyArrays();
+      const r = await query(`${candidateSql(!generalFree)} LIMIT 1`, [busyCompanyIds(), [...lanes.keys()], keyCos, keyAts]);
+      const pick = r.rows[0];
+      if (!pick) {
+        if (generalFree && smallFree) return;
+        // 일반 줄만 비었는데 후보 0 → 끝 · 작은 줄만 비었는데 작은 후보 0 → 끝
+        return;
+      }
+      const isSmall = pick.stopped || Number(pick.remaining) <= tuning.smallMax;
+      const toSmall = smallFree && (isSmall || !generalFree);
+      lanes.set(String(pick.id), { companyId: String(pick.company_id), small: toSmall });
+      void runLane(String(pick.id), pick.parked ? 'resume' : 'normal');
+    }
+  } finally {
+    filling = false;
+  }
+}
+
+/** 줄 하나 = 캠페인 하나(선점 · 적재 · 몫 끝 내려놓기 또는 종결) · 끝나면 그 회사 순환 열쇠를 찍고 빈 줄을 바로 채운다 */
+async function runLane(campaignId: string, mode: 'normal' | 'resume'): Promise<void> {
+  const lane = lanes.get(campaignId);
+  const row = { id: campaignId };
+  try {
+    await processCampaign(campaignId, mode);
+  } catch (e: any) {
+    console.error(`[direct-send-worker] 캠페인 ${row.id} 처리 실패:`, e);
+    // ★ 2026-07-27 (B-0727-1): 여기는 최후 안전망이다. 적재 중 예외는 processCampaign 안에서 잡아
+    //   정상 종결 블록(환불·건수·staging 정리)을 태우므로, 이 catch까지 오는 건 종결 블록 자체가 실패한 경우뿐.
+    //   그때는 환불·집계가 수렴하지 않으므로 사유를 남겨 사람이 찾을 수 있게 한다.
+    //   ⛔ status는 건드리지 않는다 — failed로 바꾸면 예약 캠페인이 예약 목록·취소 게이트(scheduled/draft만 허용)
+    //   에서 빠지는데 이미 적재된 큐 행은 예약 시각에 그대로 나간다(취소 불가).
+    //   ⛔ `send_phase IS DISTINCT FROM 'sent'` 가드 필수 — 종결 UPDATE는 성공했는데 그 뒤 staging 삭제만
+    //   실패해도 여기로 온다. 가드가 없으면 정상 종결된 'sent'를 'failed'로 강등해, 실제로 나간 발송이
+    //   후불 집계(send_phase='sent' AND status='completed')와 선불 sweeper에서 통째로 빠진다.
+    // ★ 2026-09-25 C-10 (Codex 2R high): 취소된 캠페인은 failed로 바꾸지 않는다 — processing으로 남아야
+    //   끊긴 적재 정리(recover · 10분)가 캠페인 전체 기준으로 다시 정산한다. failed가 되면 아무도 다시 보지 않아
+    //   선차감이 영구 미환불로 남는다(적재 전 취소는 취소 경로의 환불도 0건이다).
+    // ★ 2026-09-26 한줄로 V2 F02·F37: 취소 여부와 무관하게 **어떤 캠페인도** failed로 바꾸지 않는다.
+    //   적재 루프 앞(적재 테이블·필드 매핑·브랜드 이미지 준비·정제)이나 뒤(종결 전 조회)에서 난 예외가 여기로 오는데,
+    //   failed는 recover(processing만)·sweeper('sent'·NULL만)·환불 재시도(refundPending만) 누구도 다시 보지 않아
+    //   선차감 전액이 영구 미환불로 굳었다. 단계를 그대로 두면 queued는 다음 주기에 다시 선점되고,
+    //   processing은 10분 뒤 recover가 MySQL 실측 적재 수로 종결한다(적재분은 발송 · 나머지는 미적재 환불).
+    //   사유만 남긴다 — updated_at 갱신이 recover의 10분 대기를 여기서부터 다시 센다.
+    const failure = JSON.stringify({
+      at: new Date().toISOString(),
+      reason: String(e?.message || e).slice(0, 300),
+    });
+    await query(
+      `UPDATE campaigns
+          SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{failure}', $2::jsonb),
+              updated_at = NOW()
+        WHERE id = $1 AND send_phase IS DISTINCT FROM 'sent'`,
+      [row.id, failure],
+    ).catch(() => {});
+  } finally {
+    lanes.delete(campaignId);
+    if (lane) companyReleasedAt.set(lane.companyId, Date.now());
+    if (!stopping) void fillLanes().catch((e: any) => console.error('[direct-send-worker] 줄 채우기 오류:', e?.message || e));
+  }
+}
+
+/** 몫이 끝났을 때 다른 회사가 기다리는가(같은 고르기 SQL · 작은 후보는 작은 줄이 비면 기다리지 않는다) */
+async function othersWaiting(selfCampaignId: string): Promise<boolean> {
+  const smallBusy = [...lanes.values()].some((l) => l.small);
+  const [keyCos, keyAts] = releasedKeyArrays();
+  const r = await query(
+    `SELECT 1 FROM (${candidateSql(false)}) w WHERE w.id <> $5::uuid AND (w.stopped OR w.remaining > ${tuning.smallMax} OR $6::boolean) LIMIT 1`,
+    [busyCompanyIds(), [...lanes.keys()], keyCos, keyAts, selfCampaignId, smallBusy],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * ★ §16 G6 ③ — 10분 넘게 멈춘 processing(내려놓음 아님 · 이 프로세스 줄 아님) 판정.
+ *   종결 진입 표식 · 진행 기록 없음(옛 코드 · 정제 전) · 연속 복구 상한 = 지금처럼 종결(recover) / 경계에서 멈춤 = 이어 넣기(내려놓음 표식 · 횟수 +1) /
+ *   청크 중에 멈춤 = MySQL 실측이 진행 기록과 같을 때만 이어 넣기 · 그 밖 종결(추측으로 돈 0).
+ */
+async function classifyStaleLoad(campaignId: string): Promise<'recover' | 'parked' | 'skip'> {
+  const r = await query(
+    `SELECT company_id, created_by, created_at, scheduled_at, send_config,
+            send_config->'loadProgress' AS lp,
+            COALESCE(send_config, '{}'::jsonb) ? 'loadChunk' AS in_chunk,
+            COALESCE(send_config, '{}'::jsonb) ? 'loadFinalizing' AS finalizing,
+            COALESCE((send_config->>'loadResumeAttempts')::int, 0) AS attempts
+       FROM campaigns
+      WHERE id = $1 AND send_phase = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'
+        AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')`,
+    [campaignId],
+  );
+  const c = r.rows[0];
+  if (!c) return 'skip';
+  const lp = c.lp && typeof c.lp === 'object' ? c.lp : null;
+  if (c.finalizing || !lp || Number(c.attempts) >= LOAD_RESUME_MAX) return 'recover';
+  const cfg: any = c.send_config || {};
+  if (isLoadStopped(null, cfg[LOAD_CANCEL_FLAG])) return 'recover';
+  if (c.in_chunk) {
+    const tables: string[] = Array.isArray(cfg.sentTables) ? cfg.sentTables.filter((t: any) => typeof t === 'string' && t) : [];
+    if (tables.length === 0) return 'recover';
+    const measured = await measureLoadedRows(c.company_id, c.created_by, campaignId, cfg.sendChannel || 'sms', tables, campaignRefDates(c));
+    const both = String(cfg.sendChannel || '').trim() === 'both';
+    if (measured.sent !== Number(lp.sent || 0) || (both && measured.brandSent !== Number(lp.brandSent || 0))) return 'recover';
+  }
+  const parked = await query(
+    `UPDATE campaigns
+        SET send_config = jsonb_set(jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadChunk', '{${LOAD_PARKED}}', to_jsonb(NOW())),
+                                    '{loadResumeAttempts}', to_jsonb($2::int)),
+            updated_at = NOW()
+      WHERE id = $1 AND send_phase = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'
+        AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')
+      RETURNING id`,
+    [campaignId, Number(c.attempts) + 1],
+  );
+  if (parked.rows.length > 0) console.warn(`[direct-send-worker] 캠페인 ${campaignId} 멈춘 적재 → 이어 넣기 대기(복구 ${Number(c.attempts) + 1}/${LOAD_RESUME_MAX})`);
+  return parked.rows.length > 0 ? 'parked' : 'skip';
 }
 
 /**
@@ -413,13 +639,21 @@ export async function runDirectSendOnce(): Promise<void> {
  *  - 'recover' : 10분 넘게 멈춘 processing(주인 없는 적재 · C-11)을 다시 선점해 **적재하지 않고** 종결한다.
  *                적재 수는 MySQL 실측(결과 이력 + 라이브 대기 · 선불 sweeper와 같은 산식)으로 잡는다.
  */
-async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 'normal'): Promise<void> {
+async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 'resume' = 'normal'): Promise<void> {
   // queued → processing claim (동시 처리/중복 발송 방지)
   // ★ 2026-09-25 C-10: 취소 여부로 거르지 않는다 — 취소된 queued도 선점해 적재 없이 종결(선차감 환불)한다.
   const claim = mode === 'recover'
     ? await query(
         `UPDATE campaigns SET updated_at = NOW()
          WHERE id = $1 AND send_phase = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'
+         RETURNING company_id, created_by, target_count, processed_count, staging_id, send_config, status, created_at, scheduled_at`,
+        [campaignId]
+      )
+    : mode === 'resume'
+    // ★ §16 G6 ③ — 내려놓은 캠페인 이어 넣기 = 표식을 지우는 선점 UPDATE 하나가 주인을 정한다
+    ? await query(
+        `UPDATE campaigns SET send_config = COALESCE(send_config, '{}'::jsonb) - '${LOAD_PARKED}', updated_at = NOW()
+         WHERE id = $1 AND send_phase = 'processing' AND COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}'
          RETURNING company_id, created_by, target_count, processed_count, staging_id, send_config, status, created_at, scheduled_at`,
         [campaignId]
       )
@@ -488,7 +722,11 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   //   ⛔ 여기서 던지면 아래 루프에 들어가지 않고 실행이 중단된다 — 캠페인은 processing으로 남고(★0926 F02·F37 바깥 catch)
   //      10분 뒤 끊긴 적재 정리가 실측 적재 수(0)로 종결해 선차감을 미적재 환불로 되돌린다(recover는 이 준비를 건너뛴다).
   //   적재하지 않는 경우(skipLoad)는 올릴 이유가 없다.
-  const brandPreflight = !skipLoad && (cfg.sendChannel === 'kakao' || cfg.sendChannel === 'both')
+  //   ★ §16 G6 ③ — 이어 넣기는 처음 준비한 결과(loadPreflight)를 다시 쓴다(내려놓았다 이어도 캠페인당 한 번).
+  const storedPreflight = cfg.loadPreflight && typeof cfg.loadPreflight === 'object' ? cfg.loadPreflight : null;
+  const brandPreflight = storedPreflight
+    ? { attachmentJson: storedPreflight.attachmentJson ?? null, aiGenerated: storedPreflight.aiGenerated === true }
+    : !skipLoad && (cfg.sendChannel === 'kakao' || cfg.sendChannel === 'both')
     ? await prepareBrandAttachmentForSend({
         companyId,
         userId: userId || null,
@@ -496,6 +734,12 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
         attachmentJson: cfg.kakaoAttachmentJson || null,
       })
     : { attachmentJson: (cfg.kakaoAttachmentJson || null), aiGenerated: false };
+  if (!storedPreflight && !skipLoad && (cfg.sendChannel === 'kakao' || cfg.sendChannel === 'both')) {
+    await query(
+      `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadPreflight}', $2::jsonb) WHERE id = $1`,
+      [campaignId, JSON.stringify({ attachmentJson: brandPreflight.attachmentJson ?? null, aiGenerated: brandPreflight.aiGenerated === true })],
+    );
+  }
 
   let processed: number = c.processed_count || 0;
   let sent = 0;
@@ -509,6 +753,17 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   let callbackExcluded = 0;
   // ★ 2026-09-27 한줄로 V2 m126 — 광고 적재 중 발송 창이 닫혀 멈춘 남은 건수(종결 블록이 미적재로 환불)
   let nightStopped = 0;
+  // ★ §16 G6 ③ — 셈은 진행 기록(loadProgress · 청크 경계마다)에서 이어 받는다(내려놓기 · 멈춤 복구 이어 넣기 · 끊김 정리의 제외 사유)
+  const lp = cfg.loadProgress && typeof cfg.loadProgress === 'object' ? cfg.loadProgress : null;
+  if (lp) {
+    sent = Number(lp.sent) || 0;
+    brandSent = Number(lp.brandSent) || 0;
+    chunkSkipped = Number(lp.chunkSkipped) || 0;
+    callbackExcluded = Number(lp.callbackExcluded) || 0;
+    unsubRemoved = Number(lp.unsubRemoved) || 0;
+    dupRemoved = Number(lp.dupRemoved) || 0;
+  }
+  const progressJson = () => JSON.stringify({ sent, brandSent, chunkSkipped, callbackExcluded, unsubRemoved, dupRemoved });
 
   // ★ 2026-06-04 정정: commit에서 옮긴 정제 — 발송 직전 1회. count/commit과 같은 기준이라 모달=차감=발송 일치.
   //   첫 처리(processed===0)에만 수행(재시작 시 중복 정제 방지). dedup/unsub은 send_config 기준.
@@ -535,6 +790,15 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
       dupRemoved = r2.rowCount || 0;
     }
   }
+  // ★ §16 G6 ③ — 첫 진행 기록(정제 직후 · 첫 청크 전) = 「경계마다 셈을 남기는 새 코드 캠페인」 표시(SC-41 · 없으면 끊김 복구가 지금처럼 종결)
+  if (!skipLoad && !lp) {
+    await query(
+      `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadProgress}', $2::jsonb), updated_at = NOW() WHERE id = $1`,
+      [campaignId, progressJson()],
+    );
+  }
+  const sliceStartedAt = Date.now();
+  let parkedHere = false;
 
   // ★ 2026-07-27 (B-0727-1): 적재 중 예외가 나면 종결 블록(미적재분 환불 → 최종 상태·건수 기록 → staging 정리)에
   //   도달하지 못한 채 바깥 catch로 빠져나가, 선차감분이 환불되지 않고 실제로 나간 발송분도 후불 집계에서 빠졌다.
@@ -549,7 +813,10 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     // ★ 2026-09-25 C-10·C-11: 끊긴 적재 정리 · 적재 전 취소는 적재하지 않고 곧장 종결 블록으로 간다
     if (skipLoad) break;
     if (fixedCallbackBlock) {
-      failureReason = `${fixedCallbackBlock} · 적재하지 않고 전량 환불합니다`;
+      // ★ §16 G6 Codex 구현 1R #1 — 이어 넣기(processed > 0)면 앞 몫은 이미 적재됐다 = 남은 몫만 멈추고 환불
+      failureReason = processed > 0
+        ? `${fixedCallbackBlock} · 남은 ${total - processed}건은 적재하지 않고 환불합니다`
+        : `${fixedCallbackBlock} · 적재하지 않고 전량 환불합니다`;
       break;
     }
     // ★ 2026-06-11: 적재 중 취소 감지 — 취소되면 적재를 멈춘다 (취소-적재 경합 차단).
@@ -588,7 +855,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     // ★ 2026-09-26 한줄로 V2 F38 — 차감한 건수(total)까지만 읽는다. 커밋 뒤 준비분에 덧붙은 행(더 큰 id)은
     //   차감도 정제도 거치지 않은 행이라 읽으면 무료 발송이 된다. 정제(중복 제거)는 가장 작은 id를 남기므로
     //   total까지 읽으면 커밋 때의 행만 나간다.
-    const chunkLimit = Math.min(CHUNK, total - processed);
+    const chunkLimit = Math.min(tuning.chunk, total - processed);
     const chunkRes: Awaited<ReturnType<typeof query>> = lastId === null
       ? await query(
           `SELECT id, phone, name, extra1, extra2, extra3, callback
@@ -622,6 +889,11 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     // ★ 2026-09-26 한줄로 V2 F19 — 개별 회신번호 모드면 적재 전에 등록 여부를 거른다(동기 /direct-send와 같은 CT).
     //   commit은 대표 번호만 등록을 확인하고 개별 번호는 건너뛰어, 미등록 발신번호로 적재됐다(사전등록제 위반).
     //   걸러진 행은 적재하지 않는다 → 종결 블록의 미적재 환불로 돌아간다.
+    // ★ §16 G6 ③ — 청크 중 표식(이 청크 직전 id · 읽은 행 수) · 진행 기록 UPDATE 가 지운다 = 끊김 복구가 「청크 중에 멈춤」을 가린다
+    await query(
+      `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadChunk}', $2::jsonb), updated_at = NOW() WHERE id = $1`,
+      [campaignId, JSON.stringify({ firstId: chunkRes.rows[0]?.id != null ? String(chunkRes.rows[0].id) : null, rows: chunkRes.rows.length, at: new Date().toISOString() })],
+    );
     let chunkRecipients = recipients;
     if (cfg.useIndividualCallback) {
       const cb = await filterByIndividualCallback(recipients, companyId, callbackFilterUserId);
@@ -658,13 +930,35 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
       }).catch(() => undefined);
     }
 
-    await query(`UPDATE campaigns SET processed_count = $1, updated_at = NOW() WHERE id = $2`, [processed, campaignId]);
+    // ★ §16 G6 ③ — 진행 기록 = 처리 수 + 셈 + 청크 중 표식 지움 + 복구 횟수 0 (한 UPDATE · 이 문장 직후가 청크 경계)
+    await query(
+      `UPDATE campaigns SET processed_count = $1, updated_at = NOW(),
+              send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadChunk' - 'loadResumeAttempts', '{loadProgress}', $3::jsonb)
+        WHERE id = $2`,
+      [processed, campaignId, progressJson()],
+    );
     await new Promise((res) => setImmediate(res)); // 이벤트루프 양보 — 다른 요청 블로킹 방지
+    // ★ §16 G6 ② ④ — 경계에서 내려놓기: 종료 신호 · 몫 끝 + 다른 회사가 기다림(남은 행이 있을 때만)
+    if (processed < total && (stopping || (Date.now() - sliceStartedAt >= tuning.sliceMs && await othersWaiting(campaignId)))) {
+      const park = await query(
+        `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{${LOAD_PARKED}}', to_jsonb(NOW())), updated_at = NOW()
+          WHERE id = $1 AND send_phase = 'processing' RETURNING id`,
+        [campaignId],
+      );
+      if (park.rows.length > 0) {
+        parkedHere = true;
+        console.log(`[direct-send-worker] 캠페인 ${campaignId} ${stopping ? '종료 신호' : '몫 끝 · 다른 회사 대기'} — ${processed}/${total} 에서 내려놓음`);
+        break;
+      }
+    }
   }
   } catch (loopErr: any) {
     failureReason = String(loopErr?.message || loopErr).slice(0, 300);
     console.error(`[direct-send-worker] 캠페인 ${campaignId} 적재 중단 (적재 ${sent}/${total}):`, loopErr);
   }
+
+  // ★ §16 G6 ② — 내려놓았으면 종결하지 않는다(다음 차례에 이어 넣는다 · 셈 · 자리 = 진행 기록)
+  if (parkedHere) return;
 
   // ★ 2026-09-25 C-11: 끊긴 적재 정리 — 적재 수를 MySQL 실측으로 잡는다(메모리 카운트는 죽은 프로세스와 함께 사라졌다).
   //   실측이 실패하면 추측으로 돈을 움직이지 않는다 — 던져서 이번 사이클을 멈추고, 선점이 updated_at을 갱신했으므로 10분 뒤 재시도.
@@ -675,6 +969,14 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
     failureReason = '서버 재시작으로 적재가 중단됨(자동 정리 · 적재된 건만 발송 · 나머지 환불)';
     console.warn(`[direct-send-worker] 캠페인 ${campaignId} 끊긴 적재 정리 — 실측 적재 ${sent}/${total}(브랜드 ${brandSent})${cancelledAtClaim ? ' · 취소됨' : ''}`);
   }
+
+  // ★ §16 G6 ③ — 종결 진입 표식(첫 환불보다 먼저 · 실패하면 던진다 = 환불 0 · processing 그대로 → 끊김 복구가 받는다).
+  //   표식이 있는 캠페인은 다시 넣지 않는다(남은 행 = 환불 몫 · 끊김 복구 = 정산만 · Codex 설계 1R #1).
+  await query(
+    `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadFinalizing}', to_jsonb(NOW()))
+      WHERE id = $1 AND NOT (COALESCE(send_config, '{}'::jsonb) ? 'loadFinalizing')`,
+    [campaignId],
+  );
 
   // 미적재분(정제 제외 + 큐 INSERT skip) 환불 — 즉시성. 최종 수렴은 mysql-refund-sweeper 단일 산식이 보장.
   // ★ 2026-07-27 (B-0727-1): 환불 결과를 확인한다. prepaidRefund는 실패해도 throw하지 않고 refunded=0을
@@ -731,7 +1033,8 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
   //   취소 표시를 덮어쓰던 구멍 차단. 가드에 걸리면 적재분 큐 행도 삭제.
   // ★ 2026-06-11 (근원 C): 제외 사유 기록 — 첫 기록만 보존(재시작 시 정제 카운트 0이라 덮지 않음).
   // ★ Codex E1 — 고정 회신번호 재판정 거절(적재 전 · 0건) = 예약이라도 실패로 마감(전량 환불했는데 예약 목록에 남았다)
-  const finalStatus = fixedCallbackBlock ? 'failed' : cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
+  // ★ §16 G6 Codex 구현 1R #1 — 이어 넣기에서 거절 = 앞 몫이 큐에 있다 → 적재가 있으면 정상 결말(예약 = scheduled 유지 · 예약 취소로 큐를 지울 수 있다)
+  const finalStatus = fixedCallbackBlock && sent === 0 ? 'failed' : cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
   const exclusions = JSON.stringify({
     unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped, callbackExcluded, nightStopped,
     deducted: total, loaded: sent, recordedAt: new Date().toISOString(),
@@ -818,7 +1121,22 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' = 
 /** app.ts 등록 — 5초 주기 queued 캠페인 처리 */
 export function startDirectSendWorker(): void {
   setInterval(() => { void runDirectSendOnce(); }, 5000);
-  console.log('[direct-send-worker] 시작 — 5초 주기 + commit 즉시 트리거');
+  // ★ §16 G6 ④ — 종료 신호(배포 재시작 · 메모리 재시작) = 줄마다 다음 청크 경계에서 내려놓고 끝(상한 8초 · ecosystem kill_timeout 12초).
+  //   처리기를 걸면 Node 기본 「SIGINT = 바로 끝」이 사라지므로 끝에서 반드시 process.exit · once = 두 번째 신호는 기본 동작(바로 끝).
+  const onSignal = (sig: string) => {
+    if (stopping) return;
+    stopping = true;
+    const deadline = Date.now() + DIRECT_SEND_PARK_WAIT_MS;
+    console.log(`[direct-send-worker] ${sig} — 적재 중 ${lanes.size}개를 청크 경계에서 내려놓고 끝냅니다(최대 ${DIRECT_SEND_PARK_WAIT_MS}ms)`);
+    const wait = () => {
+      if (lanes.size === 0 || Date.now() >= deadline) process.exit(0);
+      else setTimeout(wait, 200);
+    };
+    wait();
+  };
+  process.once('SIGINT', () => onSignal('SIGINT'));
+  process.once('SIGTERM', () => onSignal('SIGTERM'));
+  console.log(`[direct-send-worker] 시작 — 5초 주기 + commit 즉시 트리거 · 회사별 줄 ${DIRECT_SEND_LANES} + 작은 줄 1 · 몫 ${DIRECT_SEND_SLICE_MS / 1000}초`);
 }
 
 /** commit 직후 즉시 트리거 (5초 대기 없이) */

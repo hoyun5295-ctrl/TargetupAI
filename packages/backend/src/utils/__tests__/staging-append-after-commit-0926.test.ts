@@ -41,8 +41,10 @@ describe('/direct-send/stage 덧붙이기 차단', () => {
 
 describe('워커 청크 = 남은 건수까지만', () => {
   it('청크 크기를 total − processed로 자른다', () => {
-    expect(worker).toContain('const chunkLimit = Math.min(CHUNK, total - processed);');
-    const i = worker.indexOf('const chunkLimit = Math.min(CHUNK, total - processed);');
+    // ★ 2026-11-02 §16 G6 — 청크 크기 = tuning.chunk(운영 = CHUNK · 시험 손잡이만 줄인다)
+    expect(worker).toContain('const tuning = { chunk: CHUNK,');
+    expect(worker).toContain('const chunkLimit = Math.min(tuning.chunk, total - processed);');
+    const i = worker.indexOf('const chunkLimit = Math.min(tuning.chunk, total - processed);');
     const chunkQuery = worker.slice(i, worker.indexOf('if (chunkRes.rows.length === 0) break;', i));
     expect(chunkQuery).not.toMatch(/\[stagingId, CHUNK/);
     expect((chunkQuery.match(/chunkLimit/g) || []).length).toBeGreaterThanOrEqual(3);

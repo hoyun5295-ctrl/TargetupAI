@@ -100,10 +100,32 @@ describe('E2-3 자동마케팅 발송 패스 = 생성 중 운영자 제외(실 P
     };
     const p1 = await prop(OP1);
     const p2 = await prop(OP2);
-    const all = (await dueScheduledProposals(100, [])).rows.map((r) => r.id);
-    expect(all).toEqual(expect.arrayContaining([p1, p2]));
+    // ★ 2026-11-02 §16 G5 — 회사마다 대표 하나(가장 이른 회차) · 집은 회차를 빼면 같은 회사 다음 회차 · 지금 보내는 회사는 빠진다
+    const first = (await dueScheduledProposals(100, [])).rows.map((r) => r.id).filter((id) => id === p1 || id === p2);
+    expect(first).toHaveLength(1);
+    const second = (await dueScheduledProposals(100, [], first)).rows.map((r) => r.id);
+    expect(second).toContain(first[0] === p1 ? p2 : p1);
+    expect((await dueScheduledProposals(100, [], [], [CO])).rows.map((r) => r.id)).not.toEqual(expect.arrayContaining([p1]));
     const without = (await dueScheduledProposals(100, [OP1])).rows.map((r) => r.id);
     expect(without).toContain(p2);
     expect(without).not.toContain(p1);
+  });
+
+  it('★ §16 G5 작은 회차(받는 분 1만 이하)가 큰 회차보다 먼저 · 회사 사이는 그다음 이른 순', async () => {
+    const OP3 = randomUUID();
+    await insertMinimalRow(pool, 'continuous_operators', { id: OP3, company_id: CO2, status: 'active' });
+    const mk = async (op: string, co: string, rc: number, ago: string) => {
+      const id = randomUUID();
+      await insertMinimalRow(pool, 'operator_proposals', { id, operator_id: op, company_id: co, status: 'scheduled', proposal_json: {}, recipient_count: rc });
+      await pool.query(`UPDATE operator_proposals SET scheduled_send_at = NOW() - $2::interval WHERE id = $1::uuid`, [id, ago]);
+      return id;
+    };
+    await pool.query(`UPDATE operator_proposals SET status = 'sent' WHERE status = 'scheduled'`);
+    const OP4 = randomUUID();
+    await insertMinimalRow(pool, 'continuous_operators', { id: OP4, company_id: CO, status: 'active' });
+    const bigOld = await mk(OP4, CO, 500_000, '30 minutes');
+    const smallNew = await mk(OP3, CO2, 300, '1 minute');
+    const order = (await dueScheduledProposals(10, [])).rows.map((r) => r.id);
+    expect(order.indexOf(smallNew)).toBeLessThan(order.indexOf(bigOld));
   });
 });

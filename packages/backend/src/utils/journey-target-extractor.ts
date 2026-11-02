@@ -40,6 +40,37 @@ import { lineageColumnsReady } from './journey-lineage';
 // ★ 2026-10-23 여정 결함 0 — 대상 조건 칸 표 한 곳(추출 · 검증 · 사람 말 · AI 메뉴 공용)
 import { CUSTOMER_CONDITION_FIELDS, BIRTH_MONTH_SQL, normalizeGenderCode, conditionFieldLabelList } from './journey-condition-fields';
 import { getGenderVariants } from './normalize';
+// ★ 2026-11-02 §16 G2 — 매장번호 회신 미등록 판정 = 실행기와 같은 함수
+import { isCallbackRegistered } from './callback-filter';
+import { normalizePhone } from './normalize-phone';
+
+/**
+ * ★ 2026-11-02 설계서 §16 G2 — 대상 SQL 한 벌(트리거 갈래마다 고객 id 를 고르는 문장 + 값 · 글자는 옛 갈래 그대로).
+ *   LIMIT = 마지막 값 · null = 전원(PG `LIMIT NULL` = 제한 없음) · 갈래가 바로 0명이면 null.
+ *   목록(selectJourneyTargetCustomerIds) · 전원 집계(countJourneyTargets · storeCallbackExposure)가 같은 문장을 돌린다 = 집계 상한 0.
+ */
+export interface TargetQuery {
+  sql: string;
+  params: any[];
+  /** 판정 근거 표가 없으면(42703 · 42P01) 0명으로 닫는다(등급 상승 · 추정해서 보내지 않는다) — 돌리는 자리 한 곳(runTargetSql)이 판정 */
+  zeroOnMissingSchema?: boolean;
+}
+
+/** LIMIT 값 · null = 전원 */
+function limitParam(limit: number | null): string | null {
+  return limit == null ? null : String(limit);
+}
+
+/** 대상 SQL 을 돌린다(감싼 문장 포함) · 근거 표 없음 = 0명(옛 등급 상승 갈래 안 catch 와 같은 판정 · 한 곳) */
+async function runTargetSql(q: TargetQuery, sql: string, params: any[]): Promise<any[]> {
+  try {
+    return (await query(sql, params)).rows;
+  } catch (err: any) {
+    if (!q.zeroOnMissingSchema || (err?.code !== '42703' && err?.code !== '42P01')) throw err;
+    console.warn(`[JourneyExtractor] 등급 상승 — 판정 근거 미비(${err?.code}) → 0건. DDL 실행 필요`);
+    return [];
+  }
+}
 
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
@@ -47,12 +78,27 @@ export async function selectJourneyTargetCustomerIds(
   triggerFilters: Record<string, any>,
   limit: number,
   journeyId?: string,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },
+  scopeSql = '',
+  consent?: JourneyConsent,
+): Promise<string[]> {
+  const q = await buildJourneyTargetQuery(companyId, triggerEvent, triggerFilters, limit, journeyId, reentry, scopeSql, consent);
+  if (!q) return [];
+  return (await runTargetSql(q, q.sql, q.params)).map((x: any) => x.customer_id);
+}
+
+export async function buildJourneyTargetQuery(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  limit: number | null,
+  journeyId?: string,
   reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // ★ 0930 V2 5차 lineageIds = 같은 계보(새 판 · 옛 판)
   // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자(또는 미리보기 요청자)의 분류코드 범위 조각(store-scope · 관리자 = 빈 조각).
   //   추출 SQL **안**(LIMIT 앞)에 건다 — 뒤에서 거르면 범위 밖 고객이 진입하지 않은 채 매 회차 상한을 차지해 범위 안 고객이 굶는다.
   scopeSql = '',
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
-): Promise<string[]> {
+): Promise<TargetQuery | null> {
   const filters = triggerFilters || {};
   // 이관 유예 일수 — 대상 트리거 목록은 CT가 소유한다(isBulkStateTrigger). 대상이 아니면 0 = 조건 없음.
   const graceDays = isBulkStateTrigger(triggerEvent) ? resolveIntakeGraceDays(filters) : 0;
@@ -81,7 +127,7 @@ export async function selectJourneyTargetCustomerIds(
       //     기존 여정이 사유 없이 죽는다("조용한 0건"은 우리가 고치려는 병 자체다) → 추출 동작은 보존하고 관측만.
       const existingPred = buildExistingCustomerPredicate('c', params);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
+      params.push(limitParam(limit));
       // ★ 2026-08-01 Codex 2R 수용 — 같은 회차 안 중복 진입 차단.
       //   판정을 사람 단위로 좁혀도 "이전 회차 기록"만 막힌다. 같은 전화번호의 무매장·매장 행이
       //   한 회차에 함께 후보가 되면 둘 다 원장 이전 상태를 보고 통과해 **같은 번호로 두 번 나간다**.
@@ -89,8 +135,7 @@ export async function selectJourneyTargetCustomerIds(
       //   먼저 걸면 중복이 정원을 먹어 실제 신규가 밀린다.
       //   전화번호 없는 행은 후보에서 뺀다 — 발송도 못 하고 진입 원장 기록(phone <> '')도 안 되어
       //   매회 후보로 되살아나며 대량 차단 판정만 부풀린다.
-      const r = await query(
-        `SELECT s.customer_id FROM (
+      return { sql: `SELECT s.customer_id FROM (
            SELECT DISTINCT ON (c.phone) c.id AS customer_id, c.created_at
              FROM customers c
             WHERE c.company_id = $1::uuid
@@ -102,28 +147,25 @@ export async function selectJourneyTargetCustomerIds(
             ORDER BY c.phone, c.created_at DESC
          ) s
          ORDER BY s.created_at DESC
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // 2. 재구매 / 6. 예약 (cdp_events 직전 N분)
     // 라이브 발송은 trigger-watcher가 selectCdpEvent를 커서 모드로 직접 호출. 여기(미리보기)는 추정 모드.
     case 'cdp.purchase':
-      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consent);
+      return cdpEventTargetQuery(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consent);
     // ★ §11-5 #2·#5 — 같은 구매 스트림의 분기(자격 필터는 라이브 경로가 적용). 미리보기는 구매 근사치.
     case 'purchase.first':
     case 'customer.dormant_return':
-      return selectCdpEvent(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consent);
+      return cdpEventTargetQuery(companyId, 'purchase', filters, limit, undefined, undefined, scopeSql, consent);
     // ★ 2026-09-30 V2 3차 — 상품 재구매. 미리보기 · 인원 = 최근 7일 고른 상품 구매자(저장된 문 기준). 라이브는 커서 경로 + 상품 자격 필터.
     case 'purchase.product':
-      return selectRecentProductBuyers(companyId, filters, limit, scopeSql, consent);
+      return productBuyersTargetQuery(companyId, filters, limit, scopeSql, consent);
     case 'cdp.reservation_created':
-      return selectCdpEvent(companyId, 'reservation_created', filters, limit, undefined, undefined, scopeSql, consent);
+      return cdpEventTargetQuery(companyId, 'reservation_created', filters, limit, undefined, undefined, scopeSql, consent);
     // ★ 2026-06-22: 배송 시작 = 자사몰 custom 이벤트(cdp_events.event_name='custom_order_shipped'). 라이브는 watcher가 커서 경로 호출, 여기는 미리보기·카운트 추정.
     case 'custom_order_shipped':
-      return selectCdpEvent(companyId, 'custom_order_shipped', filters, limit, undefined, undefined, scopeSql, consent);
+      return cdpEventTargetQuery(companyId, 'custom_order_shipped', filters, limit, undefined, undefined, scopeSql, consent);
 
     // 3. 휴면 (customers.recent_purchase_date < NOW - N일)
     case 'customer.dormant': {
@@ -142,9 +184,8 @@ export async function selectJourneyTargetCustomerIds(
       // 이관 유예 — 3년 전 최근구매일이 오늘 적재되면 그 사람은 즉시 휴면 대상이 된다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `SELECT id AS customer_id FROM customers c
+      params.push(limitParam(limit));
+      return { sql: `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND c.recent_purchase_date IS NOT NULL
@@ -154,10 +195,7 @@ export async function selectJourneyTargetCustomerIds(
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.recent_purchase_date DESC
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // 4. 장바구니 포기 (cdp_events cart_add 직전 abandon_hours, 이후 checkout_start/purchase 없음)
@@ -166,9 +204,8 @@ export async function selectJourneyTargetCustomerIds(
       const params: any[] = [companyId, String(h)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `WITH abandoned AS (
+      params.push(limitParam(limit));
+      return { sql: `WITH abandoned AS (
            SELECT DISTINCT ON (customer_id) customer_id, occurred_at AS cart_add_at
            FROM cdp_events
            WHERE company_id = $1::uuid
@@ -201,10 +238,7 @@ export async function selectJourneyTargetCustomerIds(
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // ★ §11-5 #12 — 상품 조회 후 N일 미구매 (장바구니와 같은 창 구조, 구매 부재는 양 문 합산)
@@ -214,9 +248,8 @@ export async function selectJourneyTargetCustomerIds(
       const params: any[] = [companyId, String(h)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `WITH viewed AS (
+      params.push(limitParam(limit));
+      return { sql: `WITH viewed AS (
            SELECT DISTINCT ON (customer_id) customer_id, occurred_at AS viewed_at
            FROM cdp_events
            WHERE company_id = $1::uuid
@@ -243,10 +276,7 @@ export async function selectJourneyTargetCustomerIds(
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
          ${antiJoin}
          ${cond ? ` AND ${cond}` : ''}
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // ★ §11-5 #6 — 구매 주기 이탈: 그 고객 평균 구매 간격 × 계수를 넘겼다 (구매 3건 이상만 성립 — §3-1).
@@ -257,9 +287,8 @@ export async function selectJourneyTargetCustomerIds(
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `WITH hist AS (
+      params.push(limitParam(limit));
+      return { sql: `WITH hist AS (
            SELECT u.customer_id,
                   EXTRACT(EPOCH FROM MIN(u.d)) AS first_e,
                   EXTRACT(EPOCH FROM MAX(u.d)) AS last_e,
@@ -285,10 +314,7 @@ export async function selectJourneyTargetCustomerIds(
          ${grace ? ` AND ${grace}` : ''}
          ${cond ? ` AND ${cond}` : ''}
          ORDER BY h.last_e DESC
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // ★ §11-5 #7 — 등급: 원장 state(이전 등급)와 현재 등급을 **서열로 비교**해 올라간 사람만 진입.
@@ -301,17 +327,17 @@ export async function selectJourneyTargetCustomerIds(
     //   ⛔ 양쪽 중 하나라도 표에 없거나 순서 없음(NULL)이면 **제외**한다. 모르는 값을 추측해 넣으면 그 순간 오발송이다.
     //   ⛔ 같은 순위(같은 급)는 상승이 아니다 — 이름만 바뀐 이동으로 축하가 나가지 않는다.
     case 'customer.grade_changed': {
-      if (!journeyId) return [];
+      if (!journeyId) return null;
       const params: any[] = [companyId, journeyId];
       const antiJoin = reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      try {
-        const r = await query(
-          // ⛔ 2026-08-02 Codex — **최신 고객행을 먼저 확정한 뒤** 상승 조건을 건다.
-          //   WHERE가 DISTINCT ON보다 먼저 걸리면, 같은 번호의 최신 행이 하락이라 걸러졌을 때
-          //   **오래된 중복행(옛 상위 등급)이 대신 뽑혀 하락한 사람에게 축하가 나간다.**
-          `WITH latest AS (
+      params.push(limitParam(limit));
+      // ⛔ 2026-08-02 Codex — **최신 고객행을 먼저 확정한 뒤** 상승 조건을 건다.
+      //   WHERE가 DISTINCT ON보다 먼저 걸리면, 같은 번호의 최신 행이 하락이라 걸러졌을 때
+      //   **오래된 중복행(옛 상위 등급)이 대신 뽑혀 하락한 사람에게 축하가 나간다.**
+      // 42703 = state_value 컬럼 미마이그레이션 / 42P01 = 등급 서열표 미생성 = 둘 다 0건(판정 근거가 없는데 보내는 것보다 안 보내는 쪽이 안전 · 돌리는 자리 runTargetSql)
+      return {
+        sql: `WITH latest AS (
              SELECT DISTINCT ON (c.phone) c.*
                FROM customers c
               WHERE c.company_id = $1::uuid AND COALESCE(c.phone, '') <> ''
@@ -336,16 +362,9 @@ export async function selectJourneyTargetCustomerIds(
                 ${cond ? ` AND ${cond}` : ''}
            ) s
            LIMIT $${params.length}::int`,
-          params,
-        );
-        return r.rows.map((x: any) => x.customer_id);
-      } catch (err: any) {
-        // 42703 = state_value 컬럼 미마이그레이션 / 42P01 = 등급 서열표 미생성.
-        // 둘 다 **0건으로 닫는다** — 판정 근거가 없는데 보내는 것보다 안 보내는 쪽이 안전하다.
-        if (err?.code !== '42703' && err?.code !== '42P01') throw err;
-        console.warn(`[JourneyExtractor] 등급 상승 — 판정 근거 미비(${err?.code}) → 0건. DDL 실행 필요`);
-        return [];
-      }
+        params,
+        zeroOnMissingSchema: true,
+      };
     }
 
     // 5. 생일 (D-N): NOW + N days의 MM-DD가 customers.birth_month_day 또는 birth_date와 일치
@@ -358,9 +377,8 @@ export async function selectJourneyTargetCustomerIds(
       const params: any[] = [companyId, String(days)];
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds) : '';
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `SELECT id AS customer_id FROM customers c
+      params.push(limitParam(limit));
+      return { sql: `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND (
@@ -370,10 +388,7 @@ export async function selectJourneyTargetCustomerIds(
            )
            ${antiJoin}
            ${cond ? ` AND ${cond}` : ''}
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // 8. 포인트 소멸 임박 (Phase 8): points 임계 + (미사용 또는 연 단위 소멸일 D-N). 둘 다 공통 안전필터.
@@ -382,7 +397,7 @@ export async function selectJourneyTargetCustomerIds(
       const params: any[] = [companyId, String(cfg.pointsMin)];
       let edgeClause: string;
       if (cfg.mode === 'annual_date') {
-        if (!cfg.expiryMonthDay) return [];  // 소멸일 미설정 = 발송 0 (안전)
+        if (!cfg.expiryMonthDay) return null;  // 소멸일 미설정 = 발송 0 (안전)
         params.push(String(cfg.daysBefore));   // $3
         params.push(cfg.expiryMonthDay);       // $4
         edgeClause = `TO_CHAR((${KST_TODAY_DATE_SQL} + ($3 || ' days')::interval), 'MM-DD') = $4`;
@@ -394,9 +409,8 @@ export async function selectJourneyTargetCustomerIds(
       // 이관 유예 — inactivity 모드는 최근구매일 기반이라 이관 배치가 통째로 걸린다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `SELECT id AS customer_id FROM customers c
+      params.push(limitParam(limit));
+      return { sql: `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND c.points IS NOT NULL AND c.points >= $2::int
@@ -405,16 +419,13 @@ export async function selectJourneyTargetCustomerIds(
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.points DESC
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     // ★ 2026-10-20 V.3 §18 — 앞 여정을 마치면(미리보기 · 인원 = 최근 7일 마친 고객 · 라이브 = 감시가 표식과 함께 selectAfterJourneyCandidates 직접).
     //   뒤 여정 id 를 넘기지 않는다 — 넘기면 기준 시각(켠 시각)이 비어 있는 초안은 늘 0명으로 센다(인원 미리 세기 = 「약」 표시).
     case 'journey.after':
-      return (await selectAfterJourneyCandidates(companyId, filters, limit, undefined, undefined, scopeSql, consent)).map((x) => x.customerId);
+      return afterJourneyTargetQuery(companyId, filters, limit, undefined, undefined, scopeSql, consent);
 
     // 7. 자유여정(custom) — audience(customer_conditions) + 안전필터 + 미진입(execution 안티조인) 고객만.
     //   조건 없으면 전체 활성 고객(브로드캐스트). 진입한 고객 제외 → 폴마다 미진입분만, 각 1회.
@@ -432,23 +443,19 @@ export async function selectJourneyTargetCustomerIds(
       // 이관 유예 — 상시 세그먼트는 조건 맞는 전원이 들어오므로 이관 배치가 그대로 폭발한다.
       const grace = buildIntakeGraceClause('c', params, graceDays);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-      params.push(String(limit));
-      const r = await query(
-        `SELECT id AS customer_id FROM customers c
+      params.push(limitParam(limit));
+      return { sql: `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            ${dedupClause}
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.id
-         LIMIT $${params.length}::int`,
-        params,
-      );
-      return r.rows.map((x: any) => x.customer_id);
+         LIMIT $${params.length}::int`, params };
     }
 
     default:
-      return [];
+      return null;
   }
 }
 
@@ -467,13 +474,29 @@ export async function selectAfterJourneyCandidates(
   reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },
   scopeSql = '',
   consent?: JourneyConsent,
-  /** 감시 = 뒤 여정 기준 시각(last_event_cursor::text · 넣기가 같은 값으로 다시 확인한다). journeyId 가 있는데 없으면 0건(소급 0). */
   sinceCursor?: string | null,
 ): Promise<Array<{ customerId: string; afterExecId: string }>> {
+  const q = await afterJourneyTargetQuery(companyId, triggerFilters, limit, journeyId, reentry, scopeSql, consent, sinceCursor);
+  if (!q) return [];
+  return (await query(q.sql, q.params)).rows.map((x: any) => ({ customerId: String(x.customer_id), afterExecId: String(x.after_exec_id) }));
+}
+
+/** ★ 2026-11-02 §16 G2 — 앞 여정 뒤 대상 SQL 한 벌(옛 selectAfterJourneyCandidates 본문 그대로 · 고르는 칸 = customer_id · after_exec_id) */
+export async function afterJourneyTargetQuery(
+  companyId: string,
+  triggerFilters: Record<string, any>,
+  limit: number | null,
+  journeyId?: string,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },
+  scopeSql = '',
+  consent?: JourneyConsent,
+  /** 감시 = 뒤 여정 기준 시각(last_event_cursor::text · 넣기가 같은 값으로 다시 확인한다). journeyId 가 있는데 없으면 0건(소급 0). */
+  sinceCursor?: string | null,
+): Promise<TargetQuery | null> {
   const filters = triggerFilters || {};
   const cfg = readAfterConfig(filters);
-  if (!cfg) return [];
-  if (journeyId && !sinceCursor) return [];
+  if (!cfg) return null;
+  if (journeyId && !sinceCursor) return null;
   const lineage = await lineageColumnsReady();
   const params: any[] = [companyId, cfg.root, outcomeStatuses(cfg.outcome), String(AFTER_JOURNEY_WINDOW_DAYS)];
   const rootMatch = lineage ? `(aj.id = $2::uuid OR aj.lineage_id = $2::uuid)` : `aj.id = $2::uuid`;
@@ -496,9 +519,8 @@ export async function selectAfterJourneyCandidates(
     if (reentry) reentryClause = buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.lineageIds);
   }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-  params.push(String(limit));
-  const r = await query(
-    `SELECT s.customer_id, s.after_exec_id FROM (
+  params.push(limitParam(limit));
+  return { sql: `SELECT s.customer_id, s.after_exec_id FROM (
        SELECT DISTINCT ON (c.id) c.id AS customer_id, ae.id AS after_exec_id, ae.completed_at
          FROM journey_executions ae
          JOIN journeys aj ON aj.id = ae.journey_id
@@ -515,10 +537,7 @@ export async function selectAfterJourneyCandidates(
         ORDER BY c.id, ae.completed_at ASC
      ) s
      ORDER BY s.completed_at ASC
-     LIMIT $${params.length}::int`,
-    params,
-  );
-  return (r.rows as any[]).map((x) => ({ customerId: String(x.customer_id), afterExecId: String(x.after_exec_id) }));
+     LIMIT $${params.length}::int`, params };
 }
 
 /**
@@ -556,6 +575,18 @@ export function anchorAudienceSql(
   };
 }
 
+/** ★ 2026-11-02 §16 G2 — 날짜 기준 · 한 번 보내기 대상 전원 수(같은 SQL 한 벌 · 옛 [타겟 확인] = 1만 + 1 목록으로 셌다) */
+export async function countAnchorAudience(
+  companyId: string,
+  triggerFilters: Record<string, any>,
+  scopeSql = '',
+  consent?: JourneyConsent,
+): Promise<number> {
+  const a = anchorAudienceSql(companyId, triggerFilters, scopeSql, consent);
+  const r = await query(`SELECT COUNT(*)::int AS n FROM (${a.sql}) t`, a.params);
+  return Number(r.rows[0]?.n || 0);
+}
+
 export async function selectAnchorAudienceIds(
   companyId: string,
   triggerFilters: Record<string, any>,
@@ -574,18 +605,18 @@ export async function selectAnchorAudienceIds(
  * ★ 2026-09-30 여정 V2 3차 — 최근 7일 고른 상품을 산 고객(미리보기 · 대상 인원 추정). 상품 · 문이 없으면 0명(만들 수 없는 여정).
  * 안전 필터 · 대상 조건 · 작성자 범위는 다른 트리거와 같다.
  */
-async function selectRecentProductBuyers(
+async function productBuyersTargetQuery(
   companyId: string,
   filters: Record<string, any>,
-  limit: number,
+  limit: number | null,
   scopeSql = '',
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
-): Promise<string[]> {
+): Promise<TargetQuery | null> {
   let pf;
-  try { pf = normalizeProductFilters(filters); } catch { return []; }
+  try { pf = normalizeProductFilters(filters); } catch { return null; }
   const params: any[] = [companyId, pf.product_keys];
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-  params.push(String(limit));
+  params.push(limitParam(limit));
   const buyers = pf.door === 'mall'
     ? `SELECT DISTINCT e.customer_id FROM cdp_events e, ${mallItemsSql('e')} it
         WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
@@ -595,15 +626,11 @@ async function selectRecentProductBuyers(
         WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
           AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '7 days')
           AND ${ledgerProductKeySql('p')} = ANY($2::text[])`;
-  const r = await query(
-    `SELECT b.customer_id FROM (${buyers}) b
+  return { sql: `SELECT b.customer_id FROM (${buyers}) b
        INNER JOIN customers c ON c.id = b.customer_id AND c.company_id = $1::uuid
       WHERE ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
         ${cond ? ` AND ${cond}` : ''}
-      LIMIT $${params.length}::int`,
-    params,
-  );
-  return r.rows.map((x: any) => x.customer_id);
+      LIMIT $${params.length}::int`, params };
 }
 
 // ★ Phase 3: 이벤트 커서 — cursorStart+windowEnd 주어지면(라이브) 그 창의 이벤트 전수,
@@ -615,9 +642,24 @@ export async function selectCdpEvent(
   limit: number,
   cursorStart?: Date | string | null,
   windowEnd?: Date | string | null,
+  scopeSql = '',
+  consent?: JourneyConsent,
+): Promise<string[]> {
+  const q = await cdpEventTargetQuery(companyId, eventName, filters, limit, cursorStart, windowEnd, scopeSql, consent);
+  return (await query(q.sql, q.params)).rows.map((x: any) => x.customer_id);
+}
+
+/** ★ 2026-11-02 §16 G2 — 사건 갈래 대상 SQL 한 벌(옛 selectCdpEvent 본문 그대로) */
+export async function cdpEventTargetQuery(
+  companyId: string,
+  eventName: string,
+  filters: Record<string, any>,
+  limit: number | null,
+  cursorStart?: Date | string | null,
+  windowEnd?: Date | string | null,
   scopeSql = '',   // ★ 2026-09-27 S5-04
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
-): Promise<string[]> {
+): Promise<TargetQuery> {
   const params: any[] = [companyId, eventName];
   let timeClause: string;
   if (cursorStart && windowEnd) {
@@ -628,9 +670,8 @@ export async function selectCdpEvent(
     timeClause = `e.occurred_at >= NOW() - INTERVAL '7 days'`;
   }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
-  params.push(String(limit));
-  const r = await query(
-    `SELECT DISTINCT e.customer_id FROM cdp_events e
+  params.push(limitParam(limit));
+  return { sql: `SELECT DISTINCT e.customer_id FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
        AND e.event_name = $2
@@ -638,10 +679,7 @@ export async function selectCdpEvent(
        AND ${timeClause}
        AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
        ${cond ? ` AND ${cond}` : ''}
-     LIMIT $${params.length}::int`,
-    params,
-  );
-  return r.rows.map((x: any) => x.customer_id);
+     LIMIT $${params.length}::int`, params };
 }
 
 // ★ Fix #11 (2026-06-05): cdp 커서용 — 커서 이후 창의 이벤트를 chunk만큼(안전필터+조건).
@@ -879,8 +917,8 @@ export async function selectCartAbandonProperties(
 
 // ════════════════════════════════════════════════════════════════════
 // 전체 매칭 수 + 등급 분포 — 미리보기·시뮬레이션 공용 (Phase 9)
-//   발송과 동일한 selectJourneyTargetCustomerIds로 ID를 받아(상한 JOURNEY_COUNT_CAP) 등급만 집계.
-//   → 미리보기·시뮬레이션 = 실발송 대상 100% 일치(같은 함수). 상한 초과 시 capped=true(정직 표기).
+//   ★ 2026-11-02 §16 G2 — 발송과 같은 대상 SQL(buildJourneyTargetQuery)을 상한 없이 감싸 센다(countJourneyTargets · averageTargetScores).
+//   옛: 그 SQL 로 10만 id 를 받아 id 목록으로 셌다(넘으면 capped). JOURNEY_COUNT_CAP 은 진입 감시 회차 몫 · 옵션 저장 판정만 쓴다.
 //   grade/company_id/id = information_schema 확인 컬럼(2026-06-04).
 // ════════════════════════════════════════════════════════════════════
 
@@ -892,43 +930,7 @@ export interface JourneyTargetCount {
   capped: boolean;
 }
 
-/** 주어진 customer id 집합의 등급 분포(grade GROUP BY → 셰이핑). */
-export async function gradeBreakdownForIds(
-  companyId: string,
-  ids: string[],
-): Promise<{ total: number; segments: SegmentBreakdown[] }> {
-  if (ids.length === 0) return { total: 0, segments: [] };
-  const r = await query(
-    `SELECT COALESCE(grade, '일반') AS segment, COUNT(*)::int AS cnt
-     FROM customers
-     WHERE company_id = $1::uuid AND id = ANY($2::uuid[])
-     GROUP BY COALESCE(grade, '일반')`,
-    [companyId, ids],
-  );
-  return buildSegmentBreakdown(r.rows);
-}
-
-/** 주어진 customer id 집합의 실데이터 평균 — 객단가·전환·클릭. 행/값 없으면 null(추정 생략용). */
-export async function averageScoresForIds(
-  companyId: string,
-  ids: string[],
-): Promise<{ avgOrderValue: number | null; avgConversion: number | null; avgClick: number | null }> {
-  if (ids.length === 0) return { avgOrderValue: null, avgConversion: null, avgClick: null };
-  const r = await query(
-    `SELECT AVG(c.avg_order_value) AS aov,
-            AVG(p.purchase_likelihood) AS conv,
-            AVG(p.click_score) AS clk
-     FROM customers c
-     LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id
-     WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[])`,
-    [companyId, ids],
-  );
-  const row = r.rows[0] || {};
-  const num = (v: any) => (v != null ? Number(v) : null);
-  return { avgOrderValue: num(row.aov), avgConversion: num(row.conv), avgClick: num(row.clk) };
-}
-
-/** 전체 매칭 수 + 등급 분포 (미리보기·시뮬레이션 공용). 발송과 동일 함수로 ID 추출. */
+/** 전체 매칭 수 + 등급 분포 (미리보기·시뮬레이션 공용). 발송과 같은 대상 SQL 을 전원으로 센다. */
 export async function countJourneyTargetCustomers(
   companyId: string,
   triggerEvent: string,
@@ -937,9 +939,82 @@ export async function countJourneyTargetCustomers(
   scopeSql = '',   // ★ 2026-09-27 S5-04
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<JourneyTargetCount> {
-  const ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, JOURNEY_COUNT_CAP, journeyId, undefined, scopeSql, consent);
-  const { total, segments } = await gradeBreakdownForIds(companyId, ids);
-  return { total, segments, capped: ids.length >= JOURNEY_COUNT_CAP };
+  // ★ 2026-11-02 §16 G2 — 발송과 같은 대상 SQL 을 전원으로 센다(옛: 10만 목록을 받아 세어 넘으면 capped · 응답 칸은 남긴다 = 늘 거짓)
+  const { total, segments } = await countJourneyTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent);
+  return { total, segments, capped: false };
+}
+
+/** 대상 SQL 을 상한 없이 감싸 돌린다(고객 한 사람 한 번 · 회사 범위 · 근거 표 없음 = 0명) */
+async function aggregateTargets(
+  companyId: string, triggerEvent: string, triggerFilters: Record<string, any>, journeyId: string | undefined, scopeSql: string, consent: JourneyConsent | undefined,
+  select: (from: string) => string,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },
+): Promise<any[] | null> {
+  const q = await buildJourneyTargetQuery(companyId, triggerEvent, triggerFilters, null, journeyId, reentry, scopeSql, consent);
+  if (!q) return null;
+  // $1 = 회사(모든 갈래 공통 첫 값) · 안쪽 문장의 LIMIT 값 = null = 전원
+  const from = `(SELECT DISTINCT t.customer_id FROM (${q.sql}) t) tc JOIN customers c ON c.id = tc.customer_id AND c.company_id = $1::uuid`;
+  return runTargetSql(q, select(from), q.params);
+}
+
+/** ★ 2026-11-02 §16 G2 — 대상 전원 수 · 등급 분포(옛 id 목록 집계와 같은 식 · 상한 0) */
+export async function countJourneyTargets(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  journeyId?: string,
+  scopeSql = '',
+  consent?: JourneyConsent,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // 옵션 저장 판정 = 목록과 같은 재진입 조건
+): Promise<{ total: number; segments: SegmentBreakdown[] }> {
+  const rows = await aggregateTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent,
+    (from) => `SELECT COALESCE(c.grade, '일반') AS segment, COUNT(*)::int AS cnt FROM ${from} GROUP BY COALESCE(c.grade, '일반')`, reentry);
+  if (!rows || rows.length === 0) return { total: 0, segments: [] };
+  return buildSegmentBreakdown(rows);
+}
+
+/** ★ 2026-11-02 §16 G2 — 대상 전원 실데이터 평균(옛 id 목록 평균과 같은 식 · 시뮬레이터) */
+export async function averageTargetScores(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  journeyId?: string,
+  scopeSql = '',
+  consent?: JourneyConsent,
+): Promise<{ avgOrderValue: number | null; avgConversion: number | null; avgClick: number | null }> {
+  const rows = await aggregateTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent,
+    (from) => `SELECT AVG(c.avg_order_value) AS aov, AVG(p.purchase_likelihood) AS conv, AVG(p.click_score) AS clk
+                 FROM ${from} LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id`);
+  const row = rows?.[0] || {};
+  const num = (v: any) => (v != null ? Number(v) : null);
+  return { avgOrderValue: num(row.aov), avgConversion: num(row.conv), avgClick: num(row.clk) };
+}
+
+/**
+ * ★ 2026-11-02 §16 G2 — 매장번호 회신 여정의 미등록 매장번호(대상 전원 · 실행기와 같은 판정).
+ *   실행기(journey-executor 5-2) = 고객 매장번호가 있고 그 번호가 isCallbackRegistered(회사, 번호, 여정 만든 계정)가 아니면 그 고객만 실패.
+ *   여기서 같은 판정을 매장번호마다 한 번 한다(옛: 켜기 확인이 10만 목록 + 켠 사람 기준 다른 판정).
+ */
+export async function storeCallbackExposure(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  createdBy: string | null,
+  journeyId?: string,
+  scopeSql = '',
+  consent?: JourneyConsent,
+): Promise<{ callbackUnregisteredCount: number; unregisteredDetails: Array<{ phone: string; excludedCount: number }> }> {
+  const rows = await aggregateTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent,
+    (from) => `SELECT btrim(c.store_phone) AS store_phone, COUNT(*)::int AS cnt FROM ${from}
+                WHERE COALESCE(btrim(c.store_phone), '') <> '' GROUP BY btrim(c.store_phone)`);
+  const unregisteredDetails: Array<{ phone: string; excludedCount: number }> = [];
+  for (const r of rows || []) {
+    if (!(await isCallbackRegistered(companyId, String(r.store_phone), createdBy || undefined))) {
+      unregisteredDetails.push({ phone: normalizePhone(String(r.store_phone)) || String(r.store_phone), excludedCount: Number(r.cnt) || 0 });
+    }
+  }
+  unregisteredDetails.sort((a, b) => b.excludedCount - a.excludedCount);
+  return { callbackUnregisteredCount: unregisteredDetails.reduce((n, d) => n + d.excludedCount, 0), unregisteredDetails };
 }
 
 // ════════════════════════════════════════════════════════════════════

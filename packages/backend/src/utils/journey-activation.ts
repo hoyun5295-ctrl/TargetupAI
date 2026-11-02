@@ -14,10 +14,9 @@
 import { query } from '../config/database';
 import { checkCredit, deductCreditOutcome, InsufficientCreditError, type DeductOutcome } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
-import { selectJourneyTargetCustomerIds, JOURNEY_COUNT_CAP } from './journey-target-extractor';
+import { storeCallbackExposure } from './journey-target-extractor';
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
-import { filterByIndividualCallback } from './callback-filter';
 import { activateJourney } from './journey-builder';
 import { dispatchOneShotJourney, settleAndDispatchOneShot } from './journey-anchor-scheduler';
 import { nextTriggerEvents } from './journey-trigger-capability';
@@ -51,7 +50,7 @@ export async function activateJourneyGuarded(
   try {
     const lineageReady = await lineageColumnsReady();
     stRow = await query(
-      `SELECT status, last_pretest_passed_at, start_kind, callback_mode, trigger_event, trigger_filters${lineageReady ? ', lineage_id' : ''} FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT status, last_pretest_passed_at, start_kind, callback_mode, trigger_event, trigger_filters, created_by${lineageReady ? ', lineage_id' : ''} FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
       [journeyId, companyId]
     );
   } catch (colErr: any) {
@@ -69,22 +68,20 @@ export async function activateJourneyGuarded(
 
   if (row.callback_mode === 'store' && row.trigger_event && !opts.confirmCallbackExclusion) {
     try {
-      const cbIds = await selectJourneyTargetCustomerIds(companyId, row.trigger_event, row.trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId));
-      if (cbIds.length > 0) {
-        const cbCust = await query(
-          `SELECT store_phone, callback, custom_fields FROM customers WHERE company_id = $1::uuid AND id = ANY($2::uuid[])`,
-          [companyId, cbIds]
-        );
-        const cbResult = await filterByIndividualCallback(cbCust.rows, companyId, userId, 'store_phone');
-        if (cbResult.callbackUnregisteredCount > 0) {
-          return {
-            ok: false,
-            code: 'CALLBACK_CONFIRM_REQUIRED',
-            callbackUnregisteredCount: cbResult.callbackUnregisteredCount,
-            unregisteredDetails: cbResult.unregisteredDetails,
-            message: `매장번호가 등록 발신번호가 아닌 고객 ${cbResult.callbackUnregisteredCount}명은 발송이 자동 실패 처리됩니다. 계속 활성화할까요?`,
-          };
-        }
+      // ★ 2026-11-02 §16 G2 — 대상 전원 · 실행기와 같은 판정(매장번호마다 isCallbackRegistered(회사, 번호, 여정 만든 계정))
+      //   옛: 대상 10만 목록만 보고(넘는 대상의 미등록 수가 빠지거나 창이 안 떴다) · 켠 사람 기준 다른 판정이었다.
+      const cbResult = await storeCallbackExposure(
+        companyId, row.trigger_event, row.trigger_filters || {}, row.created_by ? String(row.created_by) : null,
+        undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+      );
+      if (cbResult.callbackUnregisteredCount > 0) {
+        return {
+          ok: false,
+          code: 'CALLBACK_CONFIRM_REQUIRED',
+          callbackUnregisteredCount: cbResult.callbackUnregisteredCount,
+          unregisteredDetails: cbResult.unregisteredDetails,
+          message: `매장번호가 등록 발신번호가 아닌 고객 ${cbResult.callbackUnregisteredCount}명은 발송이 자동 실패 처리됩니다. 계속 활성화할까요?`,
+        };
       }
     } catch (cbErr: any) {
       console.warn('[Journeys activate] 미등록 회신번호 pre-flight 검증 실패(무시):', cbErr?.message);

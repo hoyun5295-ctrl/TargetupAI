@@ -359,7 +359,8 @@ describe('5. 만들기 길 차단 · 켜기 검사 · 감시 배선', () => {
     expect(ws).toContain("void load(journeyId, !map, detail ? 'sync' : 'open')");   // 다시 읽기 = 고친 값 유지(Codex 적대 B 2R)
   });
   it('인원 미리 세기 · 미리보기 = 기준 시각 없이 최근 7일(초안이 늘 0명으로 보이지 않게) · 화면 「때」 문구는 붙인 여정에 붙이지 않는다', () => {
-    expect(SRC('journey-target-extractor.ts')).toContain('return (await selectAfterJourneyCandidates(companyId, filters, limit, undefined, undefined, scopeSql, consent)).map((x) => x.customerId);');
+    // ★ 2026-11-02 §16 G2 — 갈래 = 대상 SQL 한 벌(같은 인자 · 뒤 여정 id · 기준 시각 없음 = 최근 7일)
+    expect(SRC('journey-target-extractor.ts')).toContain('return afterJourneyTargetQuery(companyId, filters, limit, undefined, undefined, scopeSql, consent);');
     const fe = fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'utils', 'journey-map.ts'), 'utf-8');
     expect(fe).toContain("export const triggerWhen = (label: string, triggerEvent: string | null | undefined): string => (triggerEvent === 'journey.after' ? label : `${label} 때`);");
   });

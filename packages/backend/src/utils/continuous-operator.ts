@@ -94,6 +94,7 @@ import { eucKrByteLength } from './message-byte';
 import { pickBestSendHour, computeOptimalSendAt, shiftToSendableHour } from './send-time-util';
 import { buildSeasonPromptBlock, getSeasonContext } from './season-context';
 import { runCompanyLanes } from './concurrency';
+import { checkOperatorLag, OPERATOR_GENERATE_STATUS_SQL } from './operator-lag';   // ★ 2026-11-02 §16 G3
 import { createScanCursor } from './scan-cursor';
 import { sendNoticeOnce } from './journey-notice-once';
 
@@ -2497,7 +2498,7 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
     //   제안 생성이 길어지면 다음 분 발송까지 건너뛰었다). 제안 생성 = 회사 줄 · 줄끼리 동시(회사 안 차례).
     const dueRes = await query(
       `SELECT id, company_id FROM continuous_operators
-       WHERE status IN ('active', 'paused_no_credit')
+       WHERE ${OPERATOR_GENERATE_STATUS_SQL}
          AND (next_run_at IS NULL OR next_run_at <= NOW())
        ORDER BY next_run_at NULLS FIRST
        LIMIT 100`
@@ -2533,16 +2534,34 @@ export async function runOperatorWorker(): Promise<{ processed: number; failed: 
 }
 
 /** ★ 2026-11-02 E2-3 — 보낼 때가 된 예약 제안 · 생성 중인 운영자의 제안은 LIMIT 앞에서 뺀다(검사 · 안내 전에 선점 · 검토로 내리기 0) */
-export async function dueScheduledProposals(limit: number, excludeOperators: string[]): Promise<{ rows: Array<{ id: string }> }> {
+/**
+ * ★ 2026-11-02 설계서 §16 G5 — 발송 패스 고르기 = 회사마다 가장 이른 회차 하나(대표) · 작은 회차(받는 분 1만 이하) 먼저 · 그다음 이른 순.
+ *   옛: 오래된 순 LIMIT 20 을 차례로 = 한 회사의 큰 회차(대상 적재 한 문장)가 끝날 때까지 다른 회사 회차가 모두 기다렸다.
+ *   이번 패스에서 이미 집은 회차 · 지금 보내는 회사는 LIMIT 앞에서 뺀다(같은 회사 회차 둘을 동시에 보내지 않는다 = 예산 · 선점 회사 안 차례).
+ */
+export const OPERATOR_SEND_SMALL_MAX = 10000;
+export async function dueScheduledProposals(
+  limit: number, excludeOperators: string[], excludeIds: string[] = [], excludeCompanies: string[] = [],
+): Promise<{ rows: Array<{ id: string; company_id: string }> }> {
   return query(
-    `SELECT id FROM operator_proposals
-     WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW()
-       AND operator_id <> ALL($2::uuid[])
-     ORDER BY scheduled_send_at ASC
+    `SELECT r.id, r.company_id FROM (
+       SELECT DISTINCT ON (company_id) id, company_id, scheduled_send_at, COALESCE(recipient_count, 0) AS rc
+         FROM operator_proposals
+        WHERE status = 'scheduled' AND scheduled_send_at IS NOT NULL AND scheduled_send_at <= NOW()
+          AND operator_id <> ALL($2::uuid[])
+          AND NOT (id = ANY($3::uuid[]))
+          AND NOT (company_id = ANY($4::uuid[]))
+        ORDER BY company_id, scheduled_send_at ASC, id
+     ) r
+     ORDER BY (r.rc <= ${OPERATOR_SEND_SMALL_MAX}) DESC, r.scheduled_send_at ASC, r.id
      LIMIT $1`,
-    [limit, excludeOperators],
+    [limit, excludeOperators, excludeIds, excludeCompanies],
   );
 }
+
+/** ★ §16 G5 — 발송 패스 줄 수(회사끼리 동시 · 회사 안 차례 · PG 풀 20 을 엔진 줄 전체가 나눠 쓴다) · 패스 예산 */
+export const OPERATOR_SEND_CONCURRENCY = 2;
+export const OPERATOR_SEND_PASS_BUDGET_MS = 50_000;
 
 /** ★ 2026-11-02 E2-3 — 발송 패스 자기 가드(제안 생성과 따로 · 1분 주기) */
 let sendPassRunning = false;
@@ -2553,6 +2572,8 @@ export async function runAutoSendPassTick(): Promise<void> {
     await recoverHeldProposals().catch((e: any) => console.error('[ContinuousOperator Recover] 보류 회차 회복 예외:', e?.message || e));
     await deliverRecoveryNotices().catch((e: any) => console.error('[ContinuousOperator Recover] 회복 안내 예외:', e?.message || e));
     await runAutoSendPass();
+    // ★ 2026-11-02 §16 G3 — 자동마케팅 밀림 경보(발송 패스 · 제안 생성 · 원인 하나 한 통)
+    await checkOperatorLag().catch((e: any) => console.error('[ContinuousOperator Lag] 밀림 감시 예외:', e?.message || e));
   } catch (e: any) {
     console.error('[ContinuousOperator AutoSend] 패스 예외:', e?.message || e);
   } finally {
@@ -2783,21 +2804,46 @@ export async function runAutoSendPass(limit: number = 20): Promise<{ sent: numbe
   //   하나라도 남으면 "예약은 되는데 다음 패스가 전부 정지시키는" 반쪽 되살림이 된다(Codex 1R-b).
   //   옛 형식(코호트 정보 없는 배포 전 예약분)은 dispatch 코호트 분기가 primary_campaign_id 부재로
   //   취소+통지하므로 1차 미수신자에게 나갈 길은 그대로 닫혀 있다 — fail-closed는 그 한 곳이 소유한다.
-  const due = await dueScheduledProposals(limit, [...generatingOperators.keys()]);
-  for (const row of due.rows) {
+  // ★ 2026-11-02 §16 G5 — 줄 풀(기다림 없음): 빈 줄마다 회사 대표 하나를 골라 바로 보내고, 한 줄이 끝나면 그 자리에 다음을 넣는다.
+  //   큰 회차 하나가 대상 적재로 오래 걸려도 다른 줄은 계속 돈다(옛: 차례 처리 = 큰 회차 하나 뒤에 전 회사가 줄을 섰다).
+  //   이번 패스에서 집은 회차는 다시 집지 않는다(고른 회차는 모든 갈래에서 상태가 바뀐다 · 굶김 0 · 예산 = 새로 집기만 멈춤).
+  const passStartedAt = Date.now();
+  const tried: string[] = [];
+  const inFlight = new Map<string, Promise<void>>();
+  let picked = 0;
+  const sendOne = async (id: string): Promise<void> => {
     try {
-      const r = await sendScheduledProposal(row.id);
+      const r = await sendScheduledProposal(id);
       if (r === 'sent') sent++; else skipped++;
     } catch (err: any) {
       skipped++;
-      console.error(`[ContinuousOperator AutoSend] ${row.id} 발송 실패:`, err?.message || err);
+      console.error(`[ContinuousOperator AutoSend] ${id} 발송 실패:`, err?.message || err);
       // ★ 2026-10-25 R8 — 예상 밖 실패 = 담당자 검토로 옮긴다(옛: 예약 그대로 두어 1분마다 다시 집었다) · 보내는 중으로 넘어간 행은 멈춘 발송 마감이 받는다
       await query(
         `UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류. 담당자 검토'
           WHERE id = $1::uuid AND status = 'scheduled'`,
-        [row.id],
-      ).catch((e2: any) => console.warn(`[ContinuousOperator AutoSend] ${row.id} 검토 옮기기 경고:`, e2?.message));
+        [id],
+      ).catch((e2: any) => console.warn(`[ContinuousOperator AutoSend] ${id} 검토 옮기기 경고:`, e2?.message));
     }
+  };
+  // ★ §16 G5 Codex 구현 1R #2 — 고르기가 던져도 보내는 중인 줄이 다 끝난 뒤에 패스를 놓는다(줄 표 = 이 패스 안에만 있다 · tick 가드가 먼저 풀리면 다음 패스가 같은 회사를 또 집는다)
+  try {
+    while (picked < limit * 10 && Date.now() - passStartedAt < OPERATOR_SEND_PASS_BUDGET_MS) {
+      if (inFlight.size >= OPERATOR_SEND_CONCURRENCY) { await Promise.race(inFlight.values()); continue; }
+      const due = await dueScheduledProposals(1, [...generatingOperators.keys()], tried, [...inFlight.keys()]);
+      const row = due.rows[0];
+      if (!row) {
+        if (inFlight.size === 0) break;
+        await Promise.race(inFlight.values());
+        continue;
+      }
+      tried.push(String(row.id));
+      picked++;
+      const co = String(row.company_id);
+      inFlight.set(co, sendOne(String(row.id)).finally(() => { inFlight.delete(co); }));
+    }
+  } finally {
+    await Promise.allSettled(inFlight.values());
   }
   // 'sending' 정지 복구 — 매 패스 점검: campaign_id 있으면 'sent' 마감, 없고 claim 후 노후면 'admin_review'(자동 재발송 X).
   await reconcileStuckSending().catch((e: any) => console.error('[ContinuousOperator AutoSend] 정지 복구 예외:', e?.message || e));
@@ -2812,8 +2858,8 @@ export async function runAutoSendPass(limit: number = 20): Promise<{ sent: numbe
   //   (admin_review = due 밖) 사유가 영원히 "검증 중"이면 화면이 거짓말이다. 10분 넘은 행을 확인 요청으로 전환+통지.
   await sweepStaleSpamPendingReminders().catch((e: any) => console.error('[ContinuousOperator Sequence] 검증 잔존 대조 예외:', e?.message || e));
 
-  if (due.rows.length > 0) {
-    console.log(`[ContinuousOperator AutoSend] ${sent} 발송 / ${skipped} 스킵`);
+  if (picked > 0) {
+    console.log(`[ContinuousOperator AutoSend] ${sent} 발송 / ${skipped} 스킵 · 회차 ${picked} · ${Date.now() - passStartedAt}ms`);
   }
   return { sent, skipped };
 }

@@ -128,7 +128,7 @@ import { suggestJourneyTrigger } from '../utils/journey-trigger-suggest';
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
-import { countJourneyTargetCustomers, selectAnchorAudienceIds, JOURNEY_COUNT_CAP } from '../utils/journey-target-extractor';
+import { countJourneyTargetCustomers, selectAnchorAudienceIds, countAnchorAudience, countJourneyTargets } from '../utils/journey-target-extractor';
 import { describeJourneyTrigger } from '../utils/journey-step-format';
 import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
@@ -3854,10 +3854,9 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     let capped = false;
     if (startKind === 'date_anchor') {
       ids = await selectAnchorAudienceIds(companyId, triggerFilters, 100, targetScopeSql, targetConsent);
-      // 앵커 대상 전용 count 헬퍼 없음 — 10,000 상한 실측(정직 표기)
-      const totalProbe = await selectAnchorAudienceIds(companyId, triggerFilters, 10001, targetScopeSql, targetConsent);
-      capped = totalProbe.length > 10000;
-      displayTotal = capped ? 10000 : totalProbe.length;
+      // ★ 2026-11-02 §16 G2 — 전원 수 = 넣기와 같은 대상 SQL 한 벌(옛: 1만 + 1 목록으로 세어 넘으면 「1만+」)
+      displayTotal = await countAnchorAudience(companyId, triggerFilters, targetScopeSql, targetConsent);
+      capped = false;
     } else {
       ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql, targetConsent);
       const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql, targetConsent);
@@ -3988,14 +3987,17 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     let matched: number | null = null;
     const cap = merged.threshold_recipients_per_step;
     if (dryRun || (status === 'active' && touchesEntry)) {
-      const ids = await selectJourneyTargetCustomerIds(
-        companyId, merged.trigger_event, mergedFilters,
-        cap != null ? Number(cap) + 1 : JOURNEY_COUNT_CAP,
-        journeyId,
-        { allowReentry: merged.allow_reentry, cooldownDays: Number(merged.reentry_cooldown_days || 0) },
-        await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
-      );
-      matched = ids.length;
+      // ★ 2026-11-02 §16 G2 — 상한이 있으면 상한 + 1 까지(넘음 판정) · 없으면 전원 수(옛: 10만에서 잘린 수를 보였다) · 같은 대상 SQL 한 벌
+      const reentry = { allowReentry: merged.allow_reentry, cooldownDays: Number(merged.reentry_cooldown_days || 0) };
+      matched = cap != null
+        ? (await selectJourneyTargetCustomerIds(
+          companyId, merged.trigger_event, mergedFilters, Number(cap) + 1, journeyId, reentry,
+          await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+        )).length
+        : (await countJourneyTargets(
+          companyId, merged.trigger_event, mergedFilters, journeyId,
+          await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId), reentry,
+        )).total;
       // 켜진 상시 · 휴면 여정에서 넓힌 결과가 상한을 넘으면 저장하지 않는다(다음 회차에 여정 전체가 자동 멈춘다 · 진입 감시 대량 차단).
       //   하루 몫(backfill_per_day)이 있으면 나눠 받으므로 막지 않는다.
       if (!dryRun && status === 'active' && STANDING_COUNT_TRIGGERS.has(merged.trigger_event) && cap != null && matched > Number(cap)

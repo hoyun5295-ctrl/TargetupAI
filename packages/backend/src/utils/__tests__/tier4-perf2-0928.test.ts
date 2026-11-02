@@ -90,8 +90,11 @@ describe('R266 · R265 여정', () => {
     expect(ex).not.toContain('export async function previewJourneyTargets(');
     expect(ex).not.toContain('export async function buildJourneyPreviewSamples(');
     // 남은 인원 세기 = 발송과 같은 추출 한 번
-    const fn = ex.slice(ex.indexOf('export async function countJourneyTargetCustomers('), ex.indexOf('// customer_conditions 복합 조건'));
-    expect((fn.match(/selectJourneyTargetCustomerIds\(/g) || []).length).toBe(1);
+    // ★ 2026-11-02 §16 G2 — 인원 = 발송과 같은 대상 SQL 한 벌(buildJourneyTargetQuery)을 전원으로 감싸 한 번 센다(옛: 10만 id 목록 한 번)
+    const fn = ex.slice(ex.indexOf('export async function countJourneyTargetCustomers('), ex.indexOf('/** 대상 SQL 을 상한 없이 감싸 돌린다'));
+    expect((fn.match(/countJourneyTargets\(/g) || []).length).toBe(1);
+    const agg = ex.slice(ex.indexOf('async function aggregateTargets('), ex.indexOf('export async function countJourneyTargets('));
+    expect((agg.match(/buildJourneyTargetQuery\(/g) || []).length).toBe(1);
   });
 });
 

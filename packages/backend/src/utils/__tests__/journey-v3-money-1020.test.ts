@@ -15,9 +15,8 @@ vi.mock('../ai-credit', () => {
 });
 vi.mock('../journey-builder', () => ({ activateJourney: vi.fn() }));
 vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn(), settleAndDispatchOneShot: vi.fn(async () => ({ ok: true, charged: false, dispatchPending: false })) }));
-vi.mock('../journey-target-extractor', () => ({ selectJourneyTargetCustomerIds: vi.fn(), JOURNEY_COUNT_CAP: 100000 }));
+vi.mock('../journey-target-extractor', () => ({ storeCallbackExposure: vi.fn() }));   // ★ 2026-11-02 §16 G2
 vi.mock('../store-scope', () => ({ getJourneyOwnerScopeSql: vi.fn() }));
-vi.mock('../callback-filter', () => ({ filterByIndividualCallback: vi.fn() }));
 vi.mock('../journey-lifecycle-map', () => ({ buildLifecycleMap: vi.fn(async () => ({ overlaps: [] })) }));
 vi.mock('../journey-lineage', () => ({ lineageColumnsReady: vi.fn(async () => true) }));
 

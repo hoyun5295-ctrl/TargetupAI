@@ -129,11 +129,13 @@ describe('R264 여정 실시간 위치', () => {
 });
 
 describe('R296 · R417 · R204 표시', () => {
-  it('매장번호 사전 확인 = 미리보기 수와 같은 상한', () => {
+  it('매장번호 사전 확인 = 대상 전원 · 실행기와 같은 판정(★ 2026-11-02 §16 G2 · 옛: 미리보기 수와 같은 10만 상한)', () => {
     // ★ 0930 V2 2차 — 켜기 게이트가 라우트에서 CT(journey-activation.ts activateJourneyGuarded)로 옮겨졌다(단건 · 묶음 공용).
     const a = src('journey-activation.ts');
     const b = between(a, 'export async function activateJourneyGuarded', '\nexport ');
-    expect(b).toContain('row.trigger_filters || {}, JOURNEY_COUNT_CAP, undefined, undefined,');
+    expect(b).toContain('const cbResult = await storeCallbackExposure(');
+    expect(b).toContain('row.created_by ? String(row.created_by) : null,');
+    expect(b).not.toMatch(/JOURNEY_COUNT_CAP|filterByIndividualCallback/);
     expect(src('..', 'routes', 'ai.ts')).toContain('activateJourneyGuarded(companyId, journeyId, userId');   // ★ 1020 V.3 — 단건 주소가 겹침 확인을 위해 id 를 먼저 꺼낸다
   });
   it('식별 고객 수 = 전체', () => {

@@ -18,12 +18,7 @@ import { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
-import {
-  selectJourneyTargetCustomerIds,
-  gradeBreakdownForIds,
-  averageScoresForIds,
-  JOURNEY_COUNT_CAP,
-} from './journey-target-extractor';
+import { countJourneyTargets, averageTargetScores } from './journey-target-extractor';
 import { buildProjection, SegmentBreakdown, ProjectionStep } from './journey-simulator-core';
 import { backfillPerDayOf, entryCapExceeded } from './journey-step-limits';
 import { resolveCdpCursorEventName } from './journey-cdp-cursor';
@@ -80,14 +75,17 @@ export async function simulateJourney(
     kakao: resolveChargeUnitPrice(c, 'KAKAO'),
   };
 
-  // 발송과 동일 함수로 매칭 ID 1회 추출 → 등급 분포 + 실데이터 평균(객단가·전환·클릭).
-  const ids = await selectJourneyTargetCustomerIds(
-    companyId, journey.trigger_event, journey.trigger_filters || {}, JOURNEY_COUNT_CAP, journeyId,
-    undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),   // ★ 2026-09-27 S5-04 — 발송과 같은 범위
+  // 발송과 같은 대상 SQL(한 벌)을 전원으로 감싸 센다 → 등급 분포 + 실데이터 평균(객단가·전환·클릭).
+  // ★ 2026-11-02 §16 G2 — 옛: 10만 목록을 받아 세어 넘으면 「그만큼까지만 셌어요」(capped = 늘 거짓 · 응답 칸은 남긴다).
+  const capped = false;
+  const { total: matched, segments } = await countJourneyTargets(
+    companyId, journey.trigger_event, journey.trigger_filters || {}, journeyId,
+    await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),   // ★ 2026-09-27 S5-04 — 발송과 같은 범위
   );
-  const capped = ids.length >= JOURNEY_COUNT_CAP;
-  const { total: matched, segments } = await gradeBreakdownForIds(companyId, ids);
-  const { avgOrderValue, avgConversion, avgClick } = await averageScoresForIds(companyId, ids);
+  const { avgOrderValue, avgConversion, avgClick } = await averageTargetScores(
+    companyId, journey.trigger_event, journey.trigger_filters || {}, journeyId,
+    await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+  );
 
   const projection = buildProjection({
     matched,
@@ -111,7 +109,6 @@ export async function simulateJourney(
   if (firstRoundIsMatched && backfill != null && matched > backfill) {
     warnings.push(`하루에 ${backfill.toLocaleString()}명씩 나눠 들어와요. 예상 발송 · 비용은 모두 들어왔을 때 기준이에요.`);
   }
-  if (capped) warnings.push(`대상이 ${JOURNEY_COUNT_CAP.toLocaleString()}명을 넘어 그만큼까지만 셌어요.`);
   if (projection.dataNote) warnings.push(projection.dataNote);
 
   return {
