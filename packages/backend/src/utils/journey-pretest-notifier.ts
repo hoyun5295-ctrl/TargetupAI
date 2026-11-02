@@ -28,10 +28,13 @@ import { pickOwnerContact } from './owner-contact';
 import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
 import { runStepSpamTest, mergeSpamVerdicts } from './journey-pretest-validator';
 import { isSpamHold } from './spam-test-queue';
-import { candidatesReady, readCandidate, claimCandidate, candidateStillMine, saveCandidate, moveCandidate, regenChargeKey, sweepPretestCandidates, markCandidatePassedInTx } from './journey-pretest-candidate';
+import { candidatesReady, readCandidate, claimCandidate, candidateStillMine, saveCandidate, moveCandidate, regenChargeKey, sweepPretestCandidates, CANDIDATE_GENERATING_TTL_MINUTES } from './journey-pretest-candidate';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
 import { groupPretestBundles, kstDateOf, PretestScanRow, PretestBundle } from './journey-pretest-scan';
-import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
+import { stepSendVersions, loadStepVariantRows, latestSnapshotSql } from './journey-step-versions';
+import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
+import { journeyCopyIssue } from './send-placeholder-gate';   // ★ 2026-11-02 보낼 글 판정 CT(설계서 3-0 CT-J10)
+import { journeyCopyContext, journeyStepCopyIssueNow } from './journey-message-render';
 import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-alert';
 import { messageStepBoundsSql } from './journey-step-notify';
 import { NOTICE_ENQUEUE_TIMEOUT_MS, NOTICE_MAX_ATTEMPTS, sendNoticeOnce } from './journey-notice-once';
@@ -46,16 +49,12 @@ interface ScanSummary { tested: number; passed: number; regenerated: number; hel
 export const PRETEST_DECISION_STATUSES = ['notified', 'unverified', 'cancelled', 'held', 'paused', 'pending'] as const;
 // 결정이 아닌 기록 = error(검사 시도) · late(지연 안내) · seen(스캔이 보낼 때가 가까운 미검사 판을 처음 본 시각 · Codex 구현 1R)
 const DECISION_SQL_LIST = PRETEST_DECISION_STATUSES.map((x) => `'${x}'`).join(', ');
-/** 정기 재검사 간격(일) — 마지막 결정 기록이 이보다 오래되면 다시 검사(발송은 막지 않는다 · E3-2 ②) */
+/** 보류 재검사 간격(일) · 같은 글 이어 보기 기간 — 보류 결정이 이보다 오래되면 다시 검사(★ 2026-11-02 통과한 글 정기 재검사 = 주간 묶음 검사 몫 · 설계서 3-9) */
 export const PRETEST_RECHECK_DAYS = 7;
 /** 그 판 KST 하루 검사 시도(error) 상한 — DB 셈(재시작 · 동시 무관 · 설계 1R D1-9 · R8) · 넘으면 스캔이 LIMIT 앞에서 뺀다 */
 export const PRETEST_ERROR_DAILY_MAX = 6;
-/** 통과한 글의 정기 재검사 장애가 이만큼이면 「확인 못 함」 결정(발송 계속 · E3-3) */
-export const PRETEST_RECHECK_ERROR_MAX = 3;
 /** 같은 판 보류 재검사 상한(주 1회 × 4 · 그 뒤는 문안을 고칠 때까지 보류 · 설계 3R) */
 export const PRETEST_HELD_RECHECK_MAX = 4;
-/** 정기 재검사는 검사 큐가 이보다 짧을 때만 넣는다(사람이 기다리는 검사를 밀지 않는다 · E3-2 ②) */
-export const PRETEST_RECHECK_QUEUE_MAX = 5;
 /** 새 글 · 고친 글 검사가 이 시간 넘게 못 끝나면 담당자 안내 한 번(판마다 · E3-3) */
 export const PRETEST_LATE_NOTICE_HOURS = 2;
 
@@ -69,9 +68,19 @@ export function stepHeldSql(journeyExpr: string, stepExpr: string): string {
        WHERE ps_h.journey_id = ${journeyExpr} AND ps_h.step_id = ${stepExpr} AND ps_h.status IN (${DECISION_SQL_LIST})
        ORDER BY ps_h.notify_at DESC, ps_h.id DESC LIMIT 1) last_dec
      WHERE last_dec.status = 'held'
-       AND last_dec.snapshot_id IS NOT DISTINCT FROM (
-         SELECT ss_h.id FROM journey_step_snapshots ss_h WHERE ss_h.step_id = ${stepExpr} AND ss_h.journey_id = ${journeyExpr}
-          ORDER BY ss_h.created_at DESC LIMIT 1))`;
+       AND last_dec.snapshot_id IS NOT DISTINCT FROM (SELECT ls_h.id FROM ${latestSnapshotSql(journeyExpr, stepExpr)} ls_h))`;
+}
+
+/**
+ * ★ 2026-11-02 「이 판을 지금 보낼 수 있는가」 판정 조각 하나(설계서 3-18 · 3-0 CT-J1 · Codex 설계 2R #1 = 판정을 세 번 다른 시각에 읽어 틈).
+ *   = 그 칸 최신 판 id = 넘긴 판 id(읽은 뒤 새 판이 커밋되면 거짓) · 그 판 신뢰도 100(검사 통과 · 칸 NULL = 옛 판 = 통과) · 그 판 보류 아님.
+ *   결정 = 실행기 발송 선점 문장 WHERE 한 곳(확인과 선점 사이 틈 0) · 관문 · 단위 확인은 이 결정을 미리 보는 빠른 길.
+ *   판 id 가 NULL(판이 없는 옛 여정) = 그동안 판이 생기지 않았을 때만 참.
+ */
+export function stepSendableSql(journeyExpr: string, stepExpr: string, snapshotIdExpr: string): string {
+  return `((SELECT ls_s.id FROM ${latestSnapshotSql(journeyExpr, stepExpr)} ls_s) IS NOT DISTINCT FROM ${snapshotIdExpr}
+     AND COALESCE((SELECT ss_c.confidence_score FROM journey_step_snapshots ss_c WHERE ss_c.id = ${snapshotIdExpr}), 100) >= 100
+     AND NOT ${stepHeldSql(journeyExpr, stepExpr)})`;
 }
 
 /**
@@ -169,15 +178,12 @@ export async function scanAndPretest(): Promise<{
   // ★ Codex 구현 1R(R14) — 사람에게 가야 할 안내는 검사 · 결정과 따로: 지연 감지(검사 시도 상한 · 확인 중과 무관) → 안내 원장 보내기(실패 = 다음 회차 · 3번)
   await detectLateNewCopy().catch((e: any) => console.warn('[journey-pretest-scan] 지연 감지 실패(다음 회차 다시):', e?.message || e));
   await deliverPendingNotices().catch((e: any) => console.warn('[journey-pretest-scan] 안내 보내기 실패(다음 회차 다시):', e?.message || e));
-  // ★ E3-2 ② — 정기 재검사는 검사 큐가 짧을 때만(늦어도 발송은 안 막힌다)
-  const queued = await query(`SELECT COUNT(*)::int AS n FROM spam_filter_tests WHERE status = 'queued'`);
-  const recheckOpen = Number(queued.rows[0]?.n || 0) < PRETEST_RECHECK_QUEUE_MAX;
+  // ★ 2026-11-02 설계서 3-9 — 통과한 글의 7일 정기 재검사 갈래를 지웠다(주간 회사 묶음 검사 journey-weekly-check 가 켜진 문자 칸 판 전부를 본다 · 검사 두 벌 0)
 
   // 임박 발송(2시간 안) + 다음 step이 message(sms/lms/mms)인 active execution — 칸마다 한 줄(가장 이른 실행).
   //   다음 step = current_step_order보다 큰 최소 step_order (LATERAL). kakao는 스팸필터 무관이라 제외.
   // ★ 2026-10-25 #2(R12) — 거름 · 묶기 · 순서를 전부 SQL 안(LIMIT 앞)에서.
-  // ★ 2026-11-02 E3-2 — 고를 칸 = ① 새 글 · 고친 글(표식 < 100 · 지금 판 보류 아님) ② 통과한 글 정기 재검사(마지막 결정 7일 지남 · 큐 짧을 때)
-  //   ③ 지금 판 보류 재검사(보류 7일 지남 · 4번까지) · 지금 판 오늘 시도 6번 찬 칸 = 뺌.
+  // ★ 2026-11-02 E3-2 — 고를 칸 = ① 새 글 · 고친 글(표식 < 100 · 지금 판 보류 아님) ③ 지금 판 보류 재검사(보류 7일 지남 · 4번까지) · 지금 판 오늘 시도 6번 찬 칸 = 뺌.
   const bounds = messageStepBoundsSql('je.journey_id');
   const heldNow = `(b.last_status = 'held' AND b.last_snapshot_id IS NOT DISTINCT FROM b.snapshot_id)`;
   const rowsRes = await query(
@@ -188,7 +194,7 @@ export async function scanAndPretest(): Promise<{
               s.id AS step_id, s.step_order, s.channel, s.is_ad, s.subject, s.notify_manager_on_pretest,
               s.delay_mode, s.delay_hours,
               ${bounds.first} AS first_message_order, ${bounds.last} AS last_message_order,
-              snap.id AS snapshot_id, snap.created_at AS snapshot_created_at, COALESCE(snap.confidence_score, 100) AS confidence,
+              snap.id AS snapshot_id, snap.created_at AS snapshot_created_at, COALESCE(snap.confidence, 100) AS confidence,
               dec.status AS last_status, dec.snapshot_id AS last_snapshot_id, dec.notify_at AS last_at,
               (SELECT COUNT(*)::int FROM journey_pretest_schedules pe
                 WHERE pe.journey_id = je.journey_id AND pe.step_id = s.id AND pe.status = 'error'
@@ -204,11 +210,7 @@ export async function scanAndPretest(): Promise<{
             WHERE journey_id = je.journey_id AND step_order > je.current_step_order
             ORDER BY step_order ASC LIMIT 1
          ) s ON TRUE
-         LEFT JOIN LATERAL (
-           SELECT ss.id, ss.created_at, ss.confidence_score FROM journey_step_snapshots ss
-            WHERE ss.step_id = s.id AND ss.journey_id = je.journey_id
-            ORDER BY ss.created_at DESC LIMIT 1
-         ) snap ON TRUE
+         LEFT JOIN LATERAL ${latestSnapshotSql('je.journey_id', 's.id')} snap ON TRUE
          LEFT JOIN LATERAL (
            SELECT ps.status, ps.snapshot_id, ps.notify_at FROM journey_pretest_schedules ps
             WHERE ps.journey_id = je.journey_id AND ps.step_id = s.id AND ps.status IN (${DECISION_SQL_LIST})
@@ -225,13 +227,11 @@ export async function scanAndPretest(): Promise<{
        AND NOT ((b.journey_id::text || ':' || b.step_id::text || ':' || ((b.next_run_at AT TIME ZONE 'Asia/Seoul')::date)::text) = ANY($1::text[]))
        AND (
          (b.confidence < 100 AND NOT ${heldNow})
-         OR ($2::boolean AND b.confidence >= 100 AND NOT ${heldNow}
-             AND (b.last_at IS NULL OR b.last_at < NOW() - INTERVAL '${PRETEST_RECHECK_DAYS} days'))
          OR (${heldNow} AND b.last_at < NOW() - INTERVAL '${PRETEST_RECHECK_DAYS} days' AND b.held_count < ${PRETEST_HELD_RECHECK_MAX})
        )
      ORDER BY b.next_run_at ASC
      LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}`,
-    [halted, recheckOpen],
+    [halted],
   );
   summary.scanned = rowsRes.rows.length;
   if (rowsRes.rows.length === 0) return summary;
@@ -281,14 +281,12 @@ async function processBundle(b: PretestBundle, summary: ScanSummary): Promise<vo
   // 최신 snapshot 본문 (executor가 실제 발송하는 본문).
   //   ★ 2026-10-19 B-1009-6 — 재검사 전 판(confidence_score < 100 · 켜진 여정 수정본)은 검사를 기다린다(새 글은 검사 없이 안 보냄).
   const snapRes = await query(
-    `SELECT id, message_body, message_subject, confidence_score FROM journey_step_snapshots
-      WHERE step_id = $1::uuid AND journey_id = $2::uuid
-      ORDER BY created_at DESC LIMIT 1`,
+    `SELECT snap.id, snap.message_body, snap.message_subject, snap.confidence FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`,
     [b.stepId, b.journeyId]
   );
   const snap = snapRes.rows[0];
   const snapId: string | null = snap?.id ? String(snap.id) : null;
-  const unchecked = !!snap && snap.confidence_score != null && Number(snap.confidence_score) < 100;
+  const unchecked = !!snap && snap.confidence != null && Number(snap.confidence) < 100;
 
   // ★ 2026-10-25 #1(R5) — 이 칸이 보낼 수 있는 판(변이가 있으면 변이마다) = 실행기 · 켜기 검사와 같은 목록(journey-step-versions).
   const stepRow = await query(`SELECT message_template, subject FROM journey_steps WHERE id = $1::uuid`, [b.stepId]);
@@ -302,6 +300,13 @@ async function processBundle(b: PretestBundle, summary: ScanSummary): Promise<vo
 
   if (variantRows.length === 0 && (!snap || !body)) {
     await recordIfCurrent(b, snapId, { status: 'cancelled' });
+    return;
+  }
+
+  // ★ 2026-11-02 설계서 3-3 ② · 3-13 — 보낼 글 판정(CT-J10 · 실행기 · 켜기와 같은 함수)이 걸리면 유료 스팸 검사 전에 그 판 보류(검사 0원 · 안내 = 고칠 곳 문구)
+  const trig = (await query(`SELECT trigger_event FROM journeys WHERE id = $1::uuid`, [b.journeyId])).rows[0]?.trigger_event ?? null;
+  if (journeyCopyIssue({ bodies: versions.map((v) => v.body), subjects: versions.map((v) => v.subject) }, await journeyCopyContext(b.companyId, trig, versions.map((v) => v.body)))) {
+    await holdCurrent(b, summary, snapId, body);
     return;
   }
 
@@ -429,23 +434,14 @@ async function processBundle(b: PretestBundle, summary: ScanSummary): Promise<vo
 
 /**
  * ★ 2026-11-02 E3-3 — 검사 장애 = 시도 기록(error · 판 · DB 셈 · 하루 6번이면 스캔이 뺀다) · 여정 멈춤 0.
- *   통과한 글의 정기 재검사 = 3번이면 「확인 못 함」 결정(unverified · 발송 계속 · 운영 경보 원인 하나).
- *   새 글 · 고친 글 · 보류 재검사 = 기다림(검사 없이 안 보냄) · 2시간 넘게 못 끝난 새 글 안내 = detectLateNewCopy(검사 상한과 무관 · Codex 구현 1R).
+ *   이 스캔이 고르는 판 = 새 글 · 고친 글 · 보류 재검사뿐(★ 2026-11-02 통과한 글 정기 재검사 · 그 「확인 못 함」 갈래 지움 = 주간 묶음 검사 몫 · 설계서 3-9)
+ *   = 기다림(검사 없이 안 보냄) · 2시간 넘게 못 끝난 새 글 안내 = detectLateNewCopy(검사 상한과 무관 · Codex 구현 1R).
  */
-async function onCheckError(b: PretestBundle, snapId: string | null, unchecked: boolean, _preview: string, why: string): Promise<void> {
+async function onCheckError(b: PretestBundle, snapId: string | null, _unchecked: boolean, _preview: string, why: string): Promise<void> {
   const w = await recordIfCurrent(b, snapId, { status: 'error' });
   if (!w.current) return;
   const n = b.errorsToday + 1;
   console.log(`[journey-pretest-scan] 스팸 검사 장애 ${n}/${PRETEST_ERROR_DAILY_MAX}(오늘 이 판) journey=${b.journeyId} step=${b.stepId} — ${why}`);
-  if (!unchecked && !b.recheckHeld && n >= PRETEST_RECHECK_ERROR_MAX) {
-    await recordIfCurrent(b, snapId, { status: 'unverified' });
-    void sendSystemAlert({
-      companyId: b.companyId,
-      dedupKey: 'journey-pretest-recheck-error',
-      cooldownMs: 60 * 60 * 1000,
-      message: `여정 정기 스팸 재검사가 ${PRETEST_RECHECK_ERROR_MAX}번 장애로 끝나 「확인 못 함」으로 두고 발송을 이어 갑니다(검사 큐 · 시험 폰 상태 확인).`,
-    }).catch(() => undefined);
-  }
 }
 
 /**
@@ -461,12 +457,11 @@ async function detectLateNewCopy(): Promise<void> {
        JOIN journeys j ON j.id = je.journey_id AND j.status = 'active'
        JOIN LATERAL (SELECT id, channel FROM journey_steps
                       WHERE journey_id = je.journey_id AND step_order > je.current_step_order ORDER BY step_order ASC LIMIT 1) s ON TRUE
-       JOIN LATERAL (SELECT ss.id, ss.confidence_score FROM journey_step_snapshots ss
-                      WHERE ss.step_id = s.id AND ss.journey_id = je.journey_id ORDER BY ss.created_at DESC LIMIT 1) snap ON TRUE
+       JOIN LATERAL ${latestSnapshotSql('je.journey_id', 's.id')} snap ON TRUE
       WHERE je.status = 'active'
         AND je.next_run_at <= NOW() + INTERVAL '${PRETEST_LEAD_HOURS} hours'
         AND s.channel IN ('sms', 'lms', 'mms')
-        AND snap.confidence_score < 100
+        AND snap.confidence < 100
         AND NOT ${stepHeldSql('je.journey_id', 's.id')}`;
   const mark = (status: 'seen' | 'late', extra: string) => `
      INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, execution_id, scheduled_send_at, notify_at, status, snapshot_id)
@@ -497,16 +492,15 @@ async function detectLateNewCopy(): Promise<void> {
  *   ★ Codex 구현 2R(R12) — 아직 유효한가(지금 판 · 보류는 지금 보류 · 지연은 보류 아님 + 미검사)는 시도 잡기 한 문장 안에서 보고, 본문도 그 문장이
  *   잡은 판에서 읽는다(묶음을 먼저 읽고 차례로 보내는 사이 판이 바뀌면 옛 글로 안내했다). 유효하지 않아 못 잡은 행 = 보내지 않고 마감.
  */
-const NOTICE_STILL_VALID_SQL = `(ps.snapshot_id IS NOT DISTINCT FROM (SELECT ss.id FROM journey_step_snapshots ss
-                                        WHERE ss.step_id = ps.step_id AND ss.journey_id = ps.journey_id ORDER BY ss.created_at DESC LIMIT 1)
+const NOTICE_STILL_VALID_SQL = `(ps.snapshot_id IS NOT DISTINCT FROM (SELECT ls_n.id FROM ${latestSnapshotSql('ps.journey_id', 'ps.step_id')} ls_n)
   AND CASE WHEN ps.status = 'held' THEN ${stepHeldSql('ps.journey_id', 'ps.step_id')}
            ELSE NOT ${stepHeldSql('ps.journey_id', 'ps.step_id')}
                 AND COALESCE((SELECT ss.confidence_score FROM journey_step_snapshots ss WHERE ss.id = ps.snapshot_id), 100) < 100 END)`;
 
 async function deliverPendingNotices(): Promise<void> {
   const rows = await query(
-    `SELECT ps.id, ps.company_id, ps.journey_id, ps.step_id, ps.execution_id, ps.scheduled_send_at, ps.status,
-            j.created_by, s.channel, s.is_ad, s.subject
+    `SELECT ps.id, ps.company_id, ps.journey_id, ps.step_id, ps.execution_id, ps.scheduled_send_at, ps.status, ps.snapshot_id,
+            j.created_by, j.trigger_event, s.channel, s.is_ad, s.subject
        FROM journey_pretest_schedules ps
        JOIN journeys j ON j.id = ps.journey_id
        JOIN journey_steps s ON s.id = ps.step_id
@@ -518,7 +512,7 @@ async function deliverPendingNotices(): Promise<void> {
     const sendAt = new Date(r.scheduled_send_at);
     const b = {
       bundleKey: '', journeyId: String(r.journey_id), companyId: String(r.company_id), createdBy: r.created_by ? String(r.created_by) : null,
-      stepId: String(r.step_id), channel: r.channel, isAd: !!r.is_ad, subject: r.subject ?? null, notifyManager: true, immediate: false,
+      stepId: String(r.step_id), channel: r.channel, isAd: resolveJourneyAdFlag(r.channel, r.is_ad), subject: r.subject ?? null, notifyManager: true, immediate: false,
       scheduledSendAt: sendAt, executionId: String(r.execution_id), sendDateKst: kstDateOf(sendAt),
       recheckHeld: false, errorsToday: 0, snapshotCreatedAt: null,
     } as PretestBundle;
@@ -536,7 +530,11 @@ async function deliverPendingNotices(): Promise<void> {
         return c.rows.length > 0;
       },
       enqueue: async () => {
-        const notice = await buildManagerNotice(b, body, mode);
+        // ★ 2026-11-02 보류 까닭 = 보낼 글 판정(CT-J10)이 걸리면 그 문구(스팸필터 문구 0) · 아니면 스팸필터
+        const copy = mode === 'pretest_held' ? await journeyStepCopyIssueNow(b.companyId, b.journeyId, b.stepId, r.trigger_event) : null;
+        // ★ 2026-11-02 설계서 3-9 — 그 판 수정안이 통과해 있으면 「수정안 준비 · [이 글로 보내기]」 문구
+        const ready = mode === 'pretest_held' && !copy && r.snapshot_id ? (await readCandidate(String(r.snapshot_id)).catch(() => null))?.status === 'passed' : false;
+        const notice = await buildManagerNotice(b, body, mode, copy?.message ?? null, ready);
         return notice ? enqueueManagerNotice(notice, b.companyId) : true;   // 받을 담당자 없음 · 시연 회사 = 보낼 것 없음(마감)
       },
       finalize: async () => (await query(
@@ -587,16 +585,10 @@ async function testCandidate(
     return;
   }
   if (r2.verdict === 'pass') {
-    // ★ 2026-10-18 J2 — 사람이 본 적 없는 문안으로 바뀐다 · 단계 알림 설정과 상관없이 늘 알린다(설계서 2026-10-18 §0).
-    // ★ Codex C 1R — **먼저 알리고, 알린 뒤에만** 발송 본문을 바꾼다. 못 알리면(문자 큐 장애) 바꾸지 않고 그 판을 보류한다(★ 1102 여정 멈춤 0).
-    if (!(await safeNotify(b, candBody, 'pretest_autofixed'))) {
-      await holdCurrent(b, summary, snapId, origBody);
-      return;
-    }
-    // ★ 1019 B-1009-6 고친 문안 = 검사 통과 · ★ 1031 본문 · 표식 · 기록 = 판 확인 쓰기 한 트랜잭션(그사이 사람이 고쳤으면 아무것도 안 씀)
-    // ★ Codex 구현 1R #2 — 후보 passed · 본문 · 표식 · 기록 = 한 트랜잭션(후보가 아직 testing 일 때만 · 만료 · 실패와 엇갈리면 아무것도 안 씀)
-    const w = await recordIfCurrent(b, snapId, { status: 'notified', newBody: candBody, candidatePassed: true });
-    if (w.current) summary.passed++;
+    // ★ 2026-11-02 설계서 3-9 — 수정안 통과 = 원문은 바꾸지 않는다(사람이 상황판 · 화면에서 [이 글로 보내기]를 눌러야 반영 · CT-J12 applyPassedCandidate).
+    //   그 판은 보류 유지 + 담당자 안내(수정안 준비) · 옛 「안내 뒤 자동 반영」 갈래(판 확인 쓰기의 본문 덮어쓰기 칸) 지움 · 메모리 「고객 문안 불변」.
+    if (await moveCandidate(snapId, ['testing'], 'passed')) summary.passed++;
+    await holdCurrent(b, summary, snapId, origBody);
     return;
   }
   void (r2.verdict satisfies 'blocked');
@@ -639,10 +631,20 @@ async function holdCurrent(b: PretestBundle, summary: { held: number }, snapId: 
   void preview;   // 안내 본문 = 보낼 때 그 판 본문(안내 원장 패스)
 }
 
+/**
+ * ★ 2026-11-02 설계서 3-3 ① · 3-13 — 실행기가 보낼 글 판정(CT-J10)에 걸린 칸을 보류(보내기 전 검사의 보류와 같은 기록 · 안내 원장 · 여정 멈춤 0).
+ *   반환 = 그 판이 최신이라 보류를 남겼는가(그사이 새 판이 커밋됐으면 false · 다음 회차가 새 판을 본다).
+ */
+export async function holdStepForCopyIssue(at: { companyId: string; journeyId: string; stepId: string; executionId: string; scheduledSendAt: Date }, snapId: string | null): Promise<boolean> {
+  const summary = { held: 0 };
+  await holdCurrent(at as PretestBundle, summary, snapId, '');
+  return summary.held > 0;
+}
+
 /** 그 칸의 최신 판 id(트랜잭션 안 · 판 확인 쓰기 · 판 확인 정지 공용) */
 async function latestSnapshotIdTx(run: (sql: string, params?: any[]) => Promise<{ rows: any[] }>, b: PretestBundle): Promise<string | null> {
   const latest = await run(
-    `SELECT id FROM journey_step_snapshots WHERE step_id = $1::uuid AND journey_id = $2::uuid ORDER BY created_at DESC LIMIT 1`,
+    `SELECT snap.id FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`,
     [b.stepId, b.journeyId],
   );
   return latest.rows[0]?.id ? String(latest.rows[0].id) : null;
@@ -655,10 +657,6 @@ export interface RecordWrite {
   markChecked?: boolean;
   /** 검사한 스냅숏 = 검사 전(0 · 원 문안 차단) */
   markUnchecked?: boolean;
-  /** 자동 보정 본문(통과 표식 100 을 함께) */
-  newBody?: string;
-  /** ★ 2026-11-01 B1-4 — 이 판의 재작성 후보를 testing → passed 로 같은 트랜잭션에서(아니면 아무것도 안 씀) */
-  candidatePassed?: boolean;
   /** ★ Codex 구현 1R(R14) — 이 기록은 보낼 안내가 없다(안내 원장 마감 · 이미 보류인 판의 재검사 보류) */
   noticeDone?: boolean;
 }
@@ -679,14 +677,8 @@ export async function recordIfCurrent(b: PretestBundle, testedSnapshotId: string
       console.log(`[journey-pretest-scan] 검사한 판이 최신이 아님(그사이 문안 수정) · 결과 버림 journey=${b.journeyId} step=${b.stepId}`);
       return { current: false, recordId: null };
     }
-    if (w.candidatePassed && (!testedSnapshotId || !(await markCandidatePassedInTx(run, testedSnapshotId)))) {
-      console.log(`[journey-pretest-scan] 재작성 후보가 검사 중이 아님(만료 · 실패) · 반영 안 함 journey=${b.journeyId} step=${b.stepId}`);
-      return { current: false, recordId: null };
-    }
     if (testedSnapshotId) {
-      if (w.newBody != null) {
-        await run(`UPDATE journey_step_snapshots SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid`, [testedSnapshotId, w.newBody]);
-      } else if (w.markChecked) {
+      if (w.markChecked) {
         await run(`UPDATE journey_step_snapshots SET confidence_score = 100 WHERE id = $1::uuid AND confidence_score < 100`, [testedSnapshotId]);
       } else if (w.markUnchecked) {
         await run(`UPDATE journey_step_snapshots SET confidence_score = 0 WHERE id = $1::uuid`, [testedSnapshotId]);
@@ -708,25 +700,9 @@ export async function recordIfCurrent(b: PretestBundle, testedSnapshotId: string
   });
 }
 
-/** 반환 = 알림이 실패하지 않았는가(받을 담당자가 없거나 시연 회사 = 보낼 것이 없음 = true · 큐 적재 0건 · 오류 = false) */
-async function safeNotify(b: PretestBundle, preview: string, mode: PretestMode): Promise<boolean> {
-  try {
-    const notice = await buildManagerNotice(b, preview, mode);
-    if (!notice) return true;
-    const ok = await enqueueManagerNotice(notice, b.companyId);
-    if (!ok) console.log(`[journey-pretest-scan] 담당자 알림 큐 적재 0건 journey=${b.journeyId} mode=${mode}`);
-    return ok;
-  } catch (e: any) {
-    console.log(`[journey-pretest-scan] 담당자 알림 실패(skip) journey=${b.journeyId} — ${e?.message || e}`);
-    return false;
-  }
-}
+export interface ManagerNotice { phone: string; body: string; title: string }
 
-interface ManagerNotice { phone: string; body: string; title: string }
-
-// ── 담당자 LMS 알림 (발송 전 안내 / 자동보정 / 정지) — 인증 라인 큐 ──
-/** 보낼 안내 한 통(받는 사람 · 본문 · 제목) · null = 보낼 것이 없음(시연 회사 · 받을 담당자 없음 · 번호 형식 아님). 정지 링크는 여기서 만든다(적재 전에 다 만든다). */
-async function buildManagerNotice(b: PretestBundle, messagePreview: string, mode: PretestMode): Promise<ManagerNotice | null> {
+async function buildManagerNotice(b: PretestBundle, messagePreview: string, mode: PretestMode, copyIssue: string | null = null, candidateReady = false): Promise<ManagerNotice | null> {
   if (await isDemoCompany(b.companyId)) return null;   // ★ 2026-10-09 시연 회사 = 담당자 문자 0(설계서 docs/2026-10-09-demo-company-design.md §2)
   // ★ 2026-10-28 B-1028-1 — 받는 사람 = 여정을 만든 계정 → 회사 관리자(자동마케팅 · 플래너와 같은 함수 · 뿌리 R1 · R3).
   const contact = await pickOwnerContact(b.companyId, b.createdBy || null);
@@ -760,13 +736,13 @@ async function buildManagerNotice(b: PretestBundle, messagePreview: string, mode
     title: titleForMode(mode).slice(0, 40),
     body: buildPretestLmsBody({
       journeyName, stepOrder, scheduledSendAt: b.scheduledSendAt,
-      messagePreview: String(messagePreview).slice(0, 100), pauseUrl, mode, immediate: b.immediate,
+      messagePreview: String(messagePreview).slice(0, 100), pauseUrl, mode, immediate: b.immediate, copyIssue, candidateReady,
     }),
   };
 }
 
 /** 안내 한 통 적재 = 상한 있는 연결(★ 1031 §2-8 · 스캐너가 MySQL 에 묶여 멈추지 않게). 반환 = 큐에 한 건 들어갔는가. */
-async function enqueueManagerNotice(notice: ManagerNotice, companyId: string): Promise<boolean> {
+export async function enqueueManagerNotice(notice: ManagerNotice, companyId: string): Promise<boolean> {
   const authTable = await getAuthSmsTable();
   const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(
     [authTable],
@@ -802,6 +778,10 @@ export function buildPretestLmsBody(params: {
   messagePreview: string; pauseUrl: string | null; mode: PretestMode;
   /** ★ 1031 바로 보내는 칸(통과 · 자동 보정 안내에 한 줄) */
   immediate?: boolean;
+  /** ★ 2026-11-02 보류 까닭이 보낼 글 판정(CT-J10)이면 그 문장(스팸필터 문구 대신) */
+  copyIssue?: string | null;
+  /** ★ 2026-11-02 그 판 수정안이 검사를 통과해 있다(설계서 3-9 · 반영 = 상황판 · 화면 [이 글로 보내기]) */
+  candidateReady?: boolean;
 }): string {
   const dateStr = new Date(params.scheduledSendAt).toLocaleString('ko-KR', {
     timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
@@ -811,7 +791,11 @@ export function buildPretestLmsBody(params: {
     params.mode === 'pretest_autofixed'
       ? '[발송 전 자동 보정 안내]\n스팸필터에 걸려 문안을 자동으로 보정했습니다. 아래 내용으로 발송됩니다.'
       : params.mode === 'pretest_held'
-        ? '[발송 보류 안내]\n스팸필터에 걸려 이 칸 발송을 잠시 멈췄어요. 여정의 다른 칸은 그대로 나가요. 문안을 고치면 다시 검사해 통과하는 즉시 이어서 보내요.'
+        ? (params.copyIssue
+          ? `[발송 보류 안내]\n보낼 글에 고칠 곳이 있어 이 칸 발송을 잠시 멈췄어요. ${params.copyIssue} 여정의 다른 칸은 그대로 나가요. 고치면 이어서 보내요.`
+          : params.candidateReady
+          ? '[발송 보류 안내]\n스팸필터에 걸려 이 칸 발송을 잠시 멈췄어요. 검사를 통과한 수정안을 준비했어요. 상황판에서 [이 글로 보내기]를 누르면 바로 이어서 보내요. 여정의 다른 칸은 그대로 나가요.'
+          : '[발송 보류 안내]\n스팸필터에 걸려 이 칸 발송을 잠시 멈췄어요. 여정의 다른 칸은 그대로 나가요. 문안을 고치면 다시 검사해 통과하는 즉시 이어서 보내요.')
         : `[검사 지연 안내]\n고친 문안의 스팸필터 검사가 ${PRETEST_LATE_NOTICE_HOURS}시간 넘게 끝나지 않아 이 칸 발송을 기다리고 있어요. 검사가 끝나는 즉시 보내요(여정의 다른 칸은 그대로 나가요).`;
   return [
     head, '',
@@ -824,4 +808,125 @@ export function buildPretestLmsBody(params: {
       ? ['', `${params.mode === 'pretest_autofixed' ? '즉시 정지' : '확인·여정 일시정지'}: ${params.pauseUrl}`]
       : ['', '정지가 필요하면 한줄로 여정 화면에서 일시정지해 주세요.']),
   ].join('\n');
+}
+
+/** ★ 2026-11-02 주간 검사 고를 칸(설계서 3-9) — 켜진 여정 문자 칸 · 지금 판 · 이번 주 결정(없음 · 보류만) · 오늘 시도 상한 · 다음 발송 이른 순(판 읽기 · 결정 기록 읽기 = 이 파일) */
+/** ★ 2026-11-02 주간 검사 「그 판 이번 주 일 마침」 기록(결정 아님 · 수정안을 만들 수 없는 보류 = 보낼 글 판정 보류) — 고르기가 LIMIT 앞에서 뺀다(설계서 3-9 · R12) */
+export const WEEKLY_DONE_STATUS = 'week_done';
+
+/**
+ * ★ 2026-11-02 설계서 3-9 · CT-J12 — 주간 검사 고르기 = 이번 주 그 칸 지금 판의 일이 남은 칸만(판정 = 이 SQL 한 곳 · LIMIT 앞 · R12).
+ *   남음 = 이번 주 결정 없음 · 또는 보류인데 수정안 일이 남음(변이 칸 · 마침 기록 · 후보 passed · blocked · failed · 만드는 중 10분 안 = 남지 않음 · 후보 표 없음 = 남지 않음).
+ */
+export async function weeklyCheckRows(weekStartIso: string, candOn: boolean, limit: number): Promise<any[]> {
+  const heldPending = candOn
+    ? `(snap.id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM journey_step_variants v WHERE v.step_id = s.id)
+        AND NOT EXISTS (SELECT 1 FROM journey_pretest_schedules wd WHERE wd.journey_id = s.journey_id AND wd.step_id = s.id
+                         AND wd.status = '${WEEKLY_DONE_STATUS}' AND wd.snapshot_id IS NOT DISTINCT FROM snap.id AND wd.notify_at >= $1::timestamptz)
+        AND NOT EXISTS (SELECT 1 FROM journey_pretest_candidates c WHERE c.snapshot_id = snap.id
+                         AND (c.status IN ('passed', 'blocked', 'failed')
+                              OR (c.status = 'generating' AND c.claimed_at >= NOW() - INTERVAL '${CANDIDATE_GENERATING_TTL_MINUTES} minutes')
+                              OR (c.status = 'testing' AND c.body IS NULL))))`
+    : 'false';
+  return (await query(
+    `SELECT s.id AS step_id, s.journey_id, s.channel, s.is_ad, s.subject, s.step_order, j.company_id, j.created_by,
+            snap.id AS snapshot_id, dec.status AS decision,
+            (SELECT MIN(e.next_run_at) FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'active') AS next_run_at,
+            (SELECT e.id FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'active' ORDER BY e.next_run_at ASC NULLS LAST LIMIT 1) AS execution_id
+       FROM journey_steps s
+       JOIN journeys j ON j.id = s.journey_id AND j.status = 'active'
+       LEFT JOIN LATERAL ${latestSnapshotSql('s.journey_id', 's.id')} snap ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT ps.status FROM journey_pretest_schedules ps
+          WHERE ps.journey_id = s.journey_id AND ps.step_id = s.id AND ps.snapshot_id IS NOT DISTINCT FROM snap.id
+            AND ps.notify_at >= $1::timestamptz AND ps.status IN (${DECISION_SQL_LIST})
+          ORDER BY ps.notify_at DESC, ps.id DESC LIMIT 1) dec ON TRUE
+      WHERE COALESCE(s.step_type, 'message') = 'message' AND s.channel IN ('sms', 'lms', 'mms')
+        AND (dec.status IS NULL OR (dec.status = 'held' AND ${heldPending}))
+        AND (SELECT COUNT(*) FROM journey_pretest_schedules pe
+              WHERE pe.journey_id = s.journey_id AND pe.step_id = s.id AND pe.status = 'error'
+                AND pe.snapshot_id IS NOT DISTINCT FROM snap.id AND pe.notify_at >= ${KST_TODAY_START_SQL}) < ${PRETEST_ERROR_DAILY_MAX}
+      ORDER BY next_run_at ASC NULLS LAST, s.journey_id, s.step_order
+      LIMIT ${Number(limit)}`,
+    [weekStartIso],
+  )).rows;
+}
+
+/**
+ * ★ 2026-11-02 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-9 — 주간 회사 묶음 검사 한 칸(journey-weekly-check 가 1분마다 부른다).
+ *   보내기 전 검사와 같은 길: 보낼 글 판정(유료 앞 · CT-J10) → 판마다 스팸 검사(지난주 결과를 다시 쓰지 않는다 = reuseDays 없음 · 같은 날 검사만 이어 봄)
+ *   → 통과 = 결정 기록 notified · 막힘 = 그 칸 · 그 판 보류(holdCurrent · 여정 멈춤 0) → 수정안(후보 · 1회 · 차감 키 = 판) → 수정안 검사 → 결과는 후보에 · 원문은 그대로.
+ *   held = 이번 주에 이미 보류된 칸(수정안 일만 이어 한다) · 변이 칸 · 보낼 글 판정 보류 = 수정안을 만들지 않는다.
+ */
+export async function weeklyCheckStep(b: PretestBundle, held: boolean): Promise<void> {
+  const summary: ScanSummary = { tested: 0, passed: 0, regenerated: 0, held: 0, notified: 0 };
+  const snapRes = await query(
+    `SELECT snap.id, snap.message_body, snap.message_subject, snap.confidence FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`,
+    [b.stepId, b.journeyId],
+  );
+  const snap = snapRes.rows[0];
+  const snapId: string | null = snap?.id ? String(snap.id) : null;
+  const stepRow = await query(`SELECT message_template, subject FROM journey_steps WHERE id = $1::uuid`, [b.stepId]);
+  const variantRows = await loadStepVariantRows(b.stepId);
+  const versions = stepSendVersions(
+    { message_template: stepRow.rows[0]?.message_template ?? null, subject: stepRow.rows[0]?.subject ?? b.subject },
+    snap ?? null,
+    variantRows,
+  );
+  const body = String(versions[0]?.body || '').trim();
+  if (variantRows.length === 0 && !body) { await recordIfCurrent(b, snapId, { status: 'cancelled' }); return; }
+  const trig = (await query(`SELECT trigger_event FROM journeys WHERE id = $1::uuid`, [b.journeyId])).rows[0]?.trigger_event ?? null;
+  const copyIssue = journeyCopyIssue({ bodies: versions.map((v) => v.body), subjects: versions.map((v) => v.subject) }, await journeyCopyContext(b.companyId, trig, versions.map((v) => v.body)));
+  if (copyIssue) {   // 보낼 글 판정 보류 = 수정안 0(사람이 고칠 자리) · 이번 주 이 판 일 마침(고르기에서 빠진다 · 매분 같은 칸을 다시 고르지 않게)
+    if (!held) await holdCurrent(b, summary, snapId, body);
+    await query(
+      `INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, execution_id, scheduled_send_at, notify_at, status, snapshot_id, notice_sent_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, NULL, NOW(), NOW(), '${WEEKLY_DONE_STATUS}', $4::uuid, NOW())`,
+      [b.companyId, b.journeyId, b.stepId, snapId],
+    );
+    return;
+  }
+  const cbRes = await query(`SELECT regexp_replace(callback_number, '[^0-9]', '', 'g') AS cb FROM journeys WHERE id = $1::uuid`, [b.journeyId]);
+  const stepCallback = String(cbRes.rows[0]?.cb || '');
+  let stopWords: string[] = [];
+  if (!held) {
+    const tests = [];
+    for (const v of versions) {
+      tests.push(await runStepSpamTest({
+        companyId: b.companyId, userId: b.createdBy || '', body: v.body, subject: v.subject,
+        channel: b.channel, isAd: b.isAd, callbackNumber: stepCallback, journeyId: b.journeyId, variantId: v.variantId || undefined,
+      }));
+    }
+    const verdict = mergeSpamVerdicts(tests.map((t) => t.verdict));
+    if (verdict === 'pass') { await recordIfCurrent(b, snapId, { status: 'notified', markChecked: true }); return; }
+    if (isSpamHold(verdict)) return;   // 확인 중 · 검사 중 = 다음 분에 같은 검사를 이어 본다(차감 0)
+    if (verdict === 'error') { await recordIfCurrent(b, snapId, { status: 'error', noticeDone: true }); return; }   // 시도 기록 · 하루 상한 = 고르는 쪽
+    await holdCurrent(b, summary, snapId, body);
+    stopWords = tests[0]?.matchedStopWords || [];
+  }
+  // 수정안 일(변이 칸 · 후보 표 없음 = 만들지 않는다 · 원문 불변)
+  if (variantRows.length > 0 || !snapId || !(await candidatesReady().catch(() => false))) return;
+  const cand = await readCandidate(snapId);
+  if (cand && cand.status === 'generating' && !cand.stale) return;
+  if (cand && cand.status === 'generating') { await moveCandidate(snapId, ['generating'], 'failed'); return; }
+  if (cand && cand.status === 'testing' && cand.body) { await testCandidate(b, summary, snapId, cand.body, cand.subject, body, stepCallback, true); return; }
+  if (cand) return;   // passed · blocked · failed = 끝
+  const claim = await claimCandidate(b.journeyId, b.stepId, snapId);
+  if (claim === 'stale' || claim === 'taken') return;
+  let regenBody: string | null = null;
+  try {
+    regenBody = await regenerateStepAvoidingSpam({
+      companyId: b.companyId, currentMessage: body, copyFacts: await readJourneyCopyFacts(b.companyId, b.journeyId).catch(() => null),
+      channel: b.channel, isAd: b.isAd, matchedStopWords: stopWords,
+    }, { idempotencyKey: regenChargeKey(b.companyId, snapId), stillMine: () => candidateStillMine(snapId, claim.token) });
+  } catch (e: any) {
+    console.log(`[journey-weekly-check] 수정안 만들기 실패 journey=${b.journeyId} step=${b.stepId} — ${e?.message || e}`);
+  }
+  if (!regenBody || !regenBody.trim() || regenBody.trim() === body) {
+    if (await candidateStillMine(snapId, claim.token).catch(() => false)) await moveCandidate(snapId, ['generating'], 'failed');
+    return;
+  }
+  if (!(await saveCandidate(snapId, claim.token, regenBody, versions[0]?.subject ?? null))) return;
+  await testCandidate(b, summary, snapId, regenBody, versions[0]?.subject ?? null, body, stepCallback, true);
 }

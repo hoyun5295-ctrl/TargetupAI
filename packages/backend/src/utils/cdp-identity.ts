@@ -25,6 +25,7 @@ import { query } from '../config/database';
 // ★ 2026-08-14: normalizeDate 추가 — 자사몰(카페24 등)이 준 생일 문자열이 정규화 없이 SQL 파라미터로
 //   들어가 달력에 없는 값이면 PG가 행을 거절하던 자리(sync·upload와 동일 결함).
 import { normalizePhone, normalizeDate } from './normalize';
+import { joinedAtUpsertSql, joinedAtFromSource } from './customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
 // ★ D214+ (2026-05-24) Unified Customer Profile 정합 — link 변경 시 active_sources 재계산 fire-and-forget
 import { recomputeProfile } from './unified-customer-profile';
 // ★ 2026-06-25 (A1·A4) phone 자동 갱신 + identity 충돌 판정 순수 함수 + 검수 플래그 recorder
@@ -61,6 +62,8 @@ export interface IdentifyInput {
    * - undefined: 기존 고객은 현재 값 유지, 신규 생성은 false (동의 확인 전 발송 차단이 안전)
    */
   smsOptIn?: boolean;
+  /** ★ 2026-11-02 자사몰이 준 회원 가입 시각(설계서 3-6 · CT-J6) — 회원 사건만 넘긴다(주문 · 백필 = 없음 · 가입 사실이 아니다) */
+  joinedAt?: string | null;
   /**
    * ★2026-10-02 「이 호출은 그 회원의 **회원 정보**이고, 그 동의 키로 읽었는데 값이 없다」 + 읽은 동의 키 이름 + 그 몰의 회원 연결 식별자 모양.
    * - 실렸을 때만 「회원 정보에 값이 없으면 동의」 규칙(CT mall-consent · 연동 행 meta.consent_missing_agree_key)이 그 몰 소속 행의 모름을 채운다.
@@ -289,6 +292,7 @@ async function identifyCustomerRow(
         companyId, normalizedPhone, input.name || null, email, input.gender || null,
         normalizeDate(input.birthDate) || null, input.grade || null, input.address || null,
         JSON.stringify(input.customFields || {}), `cdp_${input.source}`, insertOptIn, conflictOptIn,
+        joinedAtFromSource(input.joinedAt),   // $13 가입 시각(CT-J6 · 시각까지 · 못 읽으면 NULL)
       ];
       let atRef = '';
       if (clock) { params.push(consentAt); atRef = `$${params.length}::timestamptz`; }
@@ -300,12 +304,12 @@ async function identifyCustomerRow(
         id, company_id, phone, name, email,
         gender, birth_date, grade, address,
         custom_fields, source, is_active, sms_opt_in,${clock ? ' consent_source_at,' : ''}
-        created_at, updated_at
+        joined_at, created_at, updated_at
       ) VALUES (
         gen_random_uuid(), $1::uuid, $2, $3, $4,
         $5, $6, $7, $8,
         $9::jsonb, $10, true, COALESCE($11::boolean, false),${clock ? ` CASE WHEN $11::boolean IS NOT NULL THEN ${atRef} END,` : ''}
-        NOW(), NOW()
+        $13::timestamptz, NOW(), NOW()
       )
       ON CONFLICT (company_id, phone)
       DO UPDATE SET
@@ -315,6 +319,7 @@ async function identifyCustomerRow(
         birth_date = ${keep('birth_date')},
         grade = ${keep('grade')},
         address = ${keep('address')},
+        joined_at = ${joinedAtUpsertSql('customers.joined_at', 'EXCLUDED.joined_at')},
         sms_opt_in = CASE WHEN ${ok} THEN $12::boolean ELSE customers.sms_opt_in END,${clock ? `
         consent_source_at = CASE WHEN ${ok} THEN ${atRef} ELSE customers.consent_source_at END,` : ''}
         updated_at = NOW()
@@ -642,6 +647,7 @@ async function syncCustomerFields(
       JSON.stringify(input.customFields || {}),
       input.smsOptIn ?? null,
       companyId,
+      joinedAtFromSource(input.joinedAt),   // $11 ★ 2026-11-02 Codex 구현 1R — 이미 있는 고객(주문이 먼저 만든 행)에 회원 가입 시각(CT-J6 · 이른 값)
     ];
     let atRef = '';
     if (clock) { params.push(consentSourceAt(input.consentAt)); atRef = `$${params.length}::timestamptz`; }
@@ -656,6 +662,7 @@ async function syncCustomerFields(
       grade = ${fieldWriteSql(input, '$6', 'grade')},
       address = ${fieldWriteSql(input, '$7', 'address')},
       custom_fields = ${input.tier === 'order' ? `$8::jsonb || COALESCE(custom_fields, '{}'::jsonb)` : `COALESCE(custom_fields, '{}'::jsonb) || $8::jsonb`},
+      joined_at = ${joinedAtUpsertSql('customers.joined_at', '$11::timestamptz')},
       sms_opt_in = CASE WHEN ${ok} THEN $9::boolean ELSE sms_opt_in END,${clock ? `
       consent_source_at = CASE WHEN ${ok} THEN ${atRef} ELSE consent_source_at END,` : ''}
       updated_at = NOW()

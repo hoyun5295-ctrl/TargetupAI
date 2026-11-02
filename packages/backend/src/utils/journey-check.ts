@@ -10,6 +10,7 @@
  */
 import { query } from '../config/database';
 import { activationBlockReason } from './journey-builder';
+import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 import { validateJourneyForActivation, peekStepSpam, startStepSpamCheck, type FailedStep, type StepSpamState } from './journey-pretest-validator';
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
 
@@ -42,6 +43,10 @@ export function itemOfFailure(f: FailedStep, states: readonly StepSpamState[]): 
       return { ...base, level: 'fix', title: `제목이 비어 있어요${ab}`, detail: 'LMS · MMS 는 제목이 있어야 보낼 수 있어요.', fixTarget: 'subject' };
     case 'variable_mapping_invalid':
       return { ...base, level: 'fix', title: '알림톡 변수 연결이 빠졌어요', detail: '본문 #{...} 변수마다 넣을 고객 정보를 골라 주세요.', fixTarget: 'alimtalk' };
+    case 'copy_issue':
+      return { ...base, level: 'fix', title: `보낼 글에 고칠 곳이 있어요${ab}`, detail: f.details, fixTarget: 'body' };
+    case 'alimtalk_template_unusable':
+      return { ...base, level: 'fix', title: '알림톡 템플릿을 지금 보낼 수 없어요', detail: f.details, fixTarget: 'alimtalk' };
     case 'spam_filter_failed':
       return { ...base, level: 'fix', title: `스팸 검사에서 막혔어요${ab}`, detail: f.details, fixTarget: 'spam' };
     case 'spam_check_pending': {
@@ -137,7 +142,7 @@ export async function startJourneyStepSpamChecks(companyId: string, journeyId: s
       );
       if (alive.rows.length === 0) return;
       await startStepSpamCheck({
-        companyId, userId, body: msg.body, subject: msg.subject, channel: step.channel, isAd: step.is_ad !== false,
+        companyId, userId, body: msg.body, subject: msg.subject, channel: step.channel, isAd: resolveJourneyAdFlag(step.channel, step.is_ad),
         callbackNumber: String(step.callback_number), journeyId, variantId: msg.variantId || undefined,
       });
     }

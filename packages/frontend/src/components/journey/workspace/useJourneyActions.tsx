@@ -107,7 +107,7 @@ export function useJourneyActions({ onChanged, operationCost }: { onChanged: () 
           <div className="flex flex-col text-slate-900">
             <div className="px-5 pt-5">
               <h2 id="jresume-title" className="text-[16px] font-semibold">{resumeFor.name} 다시 켜기</h2>
-              <p className="mt-2 text-[14px] leading-relaxed text-slate-600">{resumeLine(operationCost)}</p>
+              <p className="mt-2 text-[14px] leading-relaxed text-slate-600">{resumeLine(operationCost, resumeFor.pause?.kind ?? null)}</p>
               {resumeFor.pause && resumeFor.pause.kind !== 'manual' && (
                 <p className="mt-2 text-[13px] leading-relaxed text-slate-500">멈춘 이유: {resumeFor.pause.text}</p>
               )}

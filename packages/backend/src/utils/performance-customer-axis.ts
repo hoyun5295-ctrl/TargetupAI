@@ -21,6 +21,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import {
   GradePerformanceRow,
   GradeComponents,
@@ -135,7 +136,7 @@ export async function buildGradePerformance(companyId: string, days: number): Pr
              FROM cdp_events e
              JOIN customers cu ON cu.id = e.customer_id AND cu.company_id = $1::uuid
             WHERE e.company_id = $1::uuid
-              AND e.event_name IN ('purchase', 'order')
+              AND ${netPurchaseSql('e')}   -- ★ 2026-11-02 CT-J3
               AND e.customer_id IS NOT NULL
               AND e.occurred_at > NOW() - ($2 || ' days')::interval
             GROUP BY 1`,
@@ -231,7 +232,7 @@ export async function buildRecipientAttribution(
               COALESCE(SUM((e.properties->>'total_amount')::numeric), 0)::float AS revenue
          FROM cdp_events e
         WHERE e.company_id = $1::uuid
-          AND e.event_name IN ('purchase', 'order')
+          AND ${netPurchaseSql('e')}   -- ★ 2026-11-02 CT-J3
           AND e.customer_id IS NOT NULL
           AND e.occurred_at > NOW() - ($3 || ' days')::interval
           AND EXISTS (

@@ -4,13 +4,15 @@
  * 손으로 정한 기대(독립 출처 = 설계서 문장):
  *   - 옛 상태가 멈춤일 때만 · 첫 켜기(초안)는 손대지 않는다
  *   - 굳은 고객 되살리기 = 자동 멈춤 사유 3가지(잔액 · 통신사 · 재시도 소진)만 · 멈출 때 active 였던 실행만
- *   - 밀기 = 멈춘 기간 일 단위 올림 · 멈춘 시각 뒤 실행만 · 날짜 기준 · 한 번 보내기는 밀지 않음
- *   - 커서 = 쓰고 있던 것만 다시 켠 시각으로 · id 비움
+ *   - ★ 2026-11-02 밀기 지움(설계서 3-12 · §4 ⑧ · 때가 된 실행 = 실행기 발송 창 관문 · 앞날 일정 불변)
+ *   - 커서 = 쓰고 있던 것만 다시 켠 시각으로 · id 비움 · ★ 2026-11-02 사람 멈춤만(시스템 멈춤 = 그대로 · 3-5 ②)
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { applyResumeAdjustments, RESUME_REVIVE_SQL, RESUME_SHIFT_SQL, RESUME_CURSOR_SQL, RESUME_REVIVE_REASONS, RESUME_STALE_ANCHOR_SQL } from '../journey-resume';
+import { applyResumeAdjustments, RESUME_REVIVE_SQL, RESUME_CURSOR_SQL, RESUME_REVIVE_REASONS, RESUME_STALE_ANCHOR_SQL } from '../journey-resume';
+import * as resumeMod from '../journey-resume';
+import { MANUAL_PAUSE_REASON } from '../journey-pause-reason';
 
 function recorder() {
   const calls: Array<{ text: string; params: any[] }> = [];
@@ -18,28 +20,33 @@ function recorder() {
 }
 
 describe('applyResumeAdjustments', () => {
-  it('멈춤 → 다시 켜기 = 되살리기 → 밀기 → 커서', async () => {
+  it('사람 멈춤 → 다시 켜기 = 되살리기 → 커서(밀기 0)', async () => {
     const { calls, run } = recorder();
-    const r = await applyResumeAdjustments(run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00.123456+09', startKind: 'event' }, '2026-10-20T03:00:00Z');
-    expect(calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_SHIFT_SQL, RESUME_CURSOR_SQL]);
+    const r = await applyResumeAdjustments(run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00.123456+09', startKind: 'event', pauseReason: MANUAL_PAUSE_REASON }, '2026-10-20T03:00:00Z');
+    expect(calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_CURSOR_SQL]);
     expect(calls[0].params).toEqual(['J', ['balance_insufficient', 'carrier_temp_fail', 'auto_retry_exhausted']]);
-    expect(calls[1].params).toEqual(['J', '2026-10-18 09:00:00.123456+09']);
-    expect(calls[2].params).toEqual(['J', '2026-10-20T03:00:00Z']);
-    expect(r).toEqual({ revived: 1, shifted: 1, staleEnded: 0, cursorReset: true });
+    expect(calls[1].params).toEqual(['J', '2026-10-20T03:00:00Z']);
+    expect(r).toEqual({ revived: 1, staleEnded: 0, cursorReset: true });
+  });
+  it('★ 2026-11-02 시스템 멈춤 → 다시 켜기 = 커서 그대로(멈춘 동안 도착한 사건 72시간 안을 받는다 · 3-5 ②)', async () => {
+    const { calls, run } = recorder();
+    const r = await applyResumeAdjustments(run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'event', pauseReason: '잔액 부족' }, 'x');
+    expect(calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL]);
+    expect(r.cursorReset).toBe(false);
   });
   it('첫 켜기(초안)는 아무것도 안 한다', async () => {
     const { calls, run } = recorder();
-    expect(await applyResumeAdjustments(run, 'J', { status: 'draft', pausedRaw: null, startKind: 'event' }, 'x')).toEqual({ revived: 0, shifted: 0, staleEnded: 0, cursorReset: false });
+    expect(await applyResumeAdjustments(run, 'J', { status: 'draft', pausedRaw: null, startKind: 'event' }, 'x')).toEqual({ revived: 0, staleEnded: 0, cursorReset: false });
     expect(calls).toEqual([]);
   });
   it('날짜 기준 · 한 번 보내기는 밀지 않는다(되살리기 · 커서는 한다) · ★1031 날짜 기준만 지난 날 실행을 끝낸다', async () => {
     const anchor = recorder();
-    const r = await applyResumeAdjustments(anchor.run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'date_anchor' }, 'x');
+    const r = await applyResumeAdjustments(anchor.run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'date_anchor', pauseReason: MANUAL_PAUSE_REASON }, 'x');
     expect(anchor.calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_STALE_ANCHOR_SQL, RESUME_CURSOR_SQL]);
     expect(anchor.calls[1].params).toEqual(['J']);
     expect(r.staleEnded).toBe(1);
     const one = recorder();
-    await applyResumeAdjustments(one.run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'one_shot' }, 'x');
+    await applyResumeAdjustments(one.run, 'J', { status: 'paused', pausedRaw: '2026-10-18 09:00:00+09', startKind: 'one_shot', pauseReason: MANUAL_PAUSE_REASON }, 'x');
     expect(one.calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_CURSOR_SQL]);
   });
   it('★1031 지난 날 끝냄 = 그 여정 · 진행 중 실행 · 보낼 날(KST)이 오늘보다 앞인 것만 · ended', () => {
@@ -47,7 +54,7 @@ describe('applyResumeAdjustments', () => {
     expect(RESUME_STALE_ANCHOR_SQL).toContain("WHERE journey_id = $1::uuid AND status = 'active'");
     expect(RESUME_STALE_ANCHOR_SQL).toContain("(next_run_at AT TIME ZONE 'Asia/Seoul')::date < (NOW() AT TIME ZONE 'Asia/Seoul')::date");
   });
-  it('멈춘 시각이 없으면 밀지 않는다', async () => {
+  it('멈춘 이유가 비어 있으면(옛 사람 멈춤) = 사람 멈춤', async () => {
     const { calls, run } = recorder();
     await applyResumeAdjustments(run, 'J', { status: 'paused', pausedRaw: null, startKind: 'event' }, 'x');
     expect(calls.map((c) => c.text)).toEqual([RESUME_REVIVE_SQL, RESUME_CURSOR_SQL]);
@@ -62,11 +69,9 @@ describe('보정 문장의 뜻', () => {
     expect(RESUME_REVIVE_REASONS).not.toContain('manager_manual');
     expect(RESUME_REVIVE_REASONS).not.toContain('phone_invalid');
   });
-  it('밀기 = 일 단위 올림(최소 1일) · 멈춘 시각 뒤 실행만 · 켜진 실행만', () => {
-    expect(RESUME_SHIFT_SQL).toContain('CEIL(EXTRACT(EPOCH FROM (NOW() - $2::timestamptz)) / 86400.0)');
-    expect(RESUME_SHIFT_SQL).toContain('GREATEST(1,');
-    expect(RESUME_SHIFT_SQL).toContain('next_run_at > $2::timestamptz');
-    expect(RESUME_SHIFT_SQL).toContain("status = 'active'");
+  it('★ 2026-11-02 다시 켜기는 실행 시각을 손대지 않는다(밀기 문장 0 · 3-12)', () => {
+    expect((resumeMod as any).RESUME_SHIFT_SQL).toBeUndefined();
+    expect(fs.readFileSync(path.join(__dirname, '..', 'journey-resume.ts'), 'utf-8')).not.toMatch(/SET next_run_at = next_run_at \+/);
   });
   it('커서 = 쓰고 있던 것만 · id 비움', () => {
     expect(RESUME_CURSOR_SQL).toContain('CASE WHEN last_event_cursor IS NOT NULL THEN $2::timestamptz ELSE NULL END');

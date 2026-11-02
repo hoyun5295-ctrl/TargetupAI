@@ -9,6 +9,7 @@
  */
 
 import { isStepNotifyOn } from './journey-step-notify';
+import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 
 export interface PretestScanRow {
   execution_id: string;
@@ -90,7 +91,7 @@ export function groupPretestBundles(rows: PretestScanRow[]): PretestBundle[] {
         createdBy: r.created_by ?? null,
         stepId: r.step_id,
         channel: r.channel as 'sms' | 'lms' | 'mms',
-        isAd: r.is_ad !== false,
+        isAd: resolveJourneyAdFlag(r.channel, r.is_ad),   // ★ 2026-11-02 광고 판정 CT(CT-J8)
         subject: r.subject ?? null,
         notifyManager: isStepNotifyOn(r.notify_manager_on_pretest, r.step_order, r.first_message_order, r.last_message_order),
         immediate: isImmediateStep(r.start_kind, r.delay_mode, r.delay_hours),

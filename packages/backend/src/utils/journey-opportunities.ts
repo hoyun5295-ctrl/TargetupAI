@@ -32,6 +32,7 @@ import {
 } from './journey-trigger-capability';
 // ★ 정답표를 갖지 않는다 — 이 회사가 그 트리거를 판정할 수 있는지는 회사 데이터가 정한다.
 import { getCompanyJourneyFacts } from './company-data-profile';
+import { newSignupSql } from './customer-joined-at';   // ★ 2026-11-02 신규 가입 판정 CT(CT-J6)
 // ★ 2026-09-29 여정 V2 1차 — 정보 알림(알림톡 · 광고 아님)은 마케팅 구간을 채운 것으로 세지 않는다(생애 지도와 같은 판정).
 import { MARKETING_JOURNEY_SQL } from './journey-lifecycle-map';
 import { triggerLabel, isProductPickTrigger } from './journey-trigger-capability';
@@ -136,7 +137,7 @@ export async function buildJourneyOpportunities(companyId: string, ownerUserId?:
                 FILTER (WHERE last_cart_add_at >= NOW() - INTERVAL '14 days'
                           AND (recent_purchase_date IS NULL OR recent_purchase_date < last_cart_add_at::date)), 0) AS cart_val,
 
-       COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS onb_cnt,
+       COUNT(*) FILTER (WHERE ${newSignupSql('c', `NOW() - INTERVAL '7 days'`)}) AS onb_cnt,   -- ★ 2026-11-02 지난 7일 신규 = 가입 근거(CT-J6 · D20 넓힘 · 별칭 = 아래 FROM customers c)
 
        COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL
                           AND (CURRENT_DATE - recent_purchase_date) > $2) AS dorm_cnt,

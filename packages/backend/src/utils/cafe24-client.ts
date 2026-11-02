@@ -733,6 +733,7 @@ export const cafe24Adapter: IProviderAdapter = {
           gender: resource.gender,
           grade: resource.group_no ? `group_${resource.group_no}` : undefined,
           address: [resource.address1, resource.address2].filter(Boolean).join(' '),
+          joinedAt: resource.created_date || null,   // ★ 2026-11-02 몰 회원 가입 시각 = 가입 근거(설계서 3-6 · CT-J6)
           customFields: {
             cafe24_group_no: resource.group_no,
             cafe24_member_grade: resource.member_grade,

@@ -104,7 +104,7 @@ function normalizeStep(s: any, idx: number): any {
   // 순수 본문/제목만 보존 — (광고)/무료수신거부는 발송·미리보기 시 합성 (이중부착 방지)
   base.messageTemplate = stripAdParts(sanitizeForSms(rawMessage).sanitized);
   base.subject = stripAdParts(sanitizeForSms(rawSubject).sanitized);
-  base.isAd = channel === 'kakao' ? false : resolveJourneyAdFlag(channel, s?.isAd);
+  base.isAd = resolveJourneyAdFlag(channel, s?.isAd);   // ★ 2026-11-02 알림톡 = 정보성도 CT 안(CT-J8)
 
   // 알림톡(kakao) 설정 보존
   if (channel === 'kakao') {

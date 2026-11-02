@@ -39,17 +39,19 @@ describe('3-1 트리거 계약 = 발송 갈래 강제(설계서 표 그대로)',
 });
 
 describe('3-2 하루 묶음 첫 칸 시각', () => {
+  // ★ 2026-11-02 핵심 처방 §4 ⑤ — 칸 시각 없는 첫 발송 = 밤 도착 시각(발송 창 시작 · 8시) · 다음 평일 = 9시(따로)
+  const at8 = (y: number, mo: number, d: number) => kst(y, mo, d, 8);
   const at9 = (y: number, mo: number, d: number) => kst(y, mo, d, 9);
-  it('그날 = KST 00:00:00 ~ 23:59:59 · 다음날 아침 9시(칸 시각 없음)', () => {
-    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 2, 0, 0, 0))).toEqual(at9(2026, 11, 3));
-    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 2, 13, 5))).toEqual(at9(2026, 11, 3));
-    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 2, 23, 59, 59))).toEqual(at9(2026, 11, 3));
-    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 3, 0, 0, 0))).toEqual(at9(2026, 11, 4));
+  it('그날 = KST 00:00:00 ~ 23:59:59 · 다음날 아침 8시(칸 시각 없음)', () => {
+    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 2, 0, 0, 0))).toEqual(at8(2026, 11, 3));
+    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 2, 13, 5))).toEqual(at8(2026, 11, 3));
+    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 2, 23, 59, 59))).toEqual(at8(2026, 11, 3));
+    expect(dailyFirstRunAt('relative', 0, null, kst(2026, 11, 3, 0, 0, 0))).toEqual(at8(2026, 11, 4));
   });
   it('지연 = max(1, ceil(시간 / 24))일 · 칸 시각', () => {
-    expect(dailyFirstRunAt('relative', 2, null, kst(2026, 11, 2, 20))).toEqual(at9(2026, 11, 3));
-    expect(dailyFirstRunAt('relative', 24, null, kst(2026, 11, 2, 1))).toEqual(at9(2026, 11, 3));
-    expect(dailyFirstRunAt('relative', 36, null, kst(2026, 11, 2, 1))).toEqual(at9(2026, 11, 4));
+    expect(dailyFirstRunAt('relative', 2, null, kst(2026, 11, 2, 20))).toEqual(at8(2026, 11, 3));
+    expect(dailyFirstRunAt('relative', 24, null, kst(2026, 11, 2, 1))).toEqual(at8(2026, 11, 3));
+    expect(dailyFirstRunAt('relative', 36, null, kst(2026, 11, 2, 1))).toEqual(at8(2026, 11, 4));
     expect(dailyFirstRunAt('relative_at_hour', 72, 10, kst(2026, 11, 2, 22))).toEqual(kst(2026, 11, 5, 10));
   });
   it('specific_hour = 다음날 그 시각 · next_business_day = 다음날 이후 첫 평일 9시', () => {
@@ -57,19 +59,19 @@ describe('3-2 하루 묶음 첫 칸 시각', () => {
     expect(dailyFirstRunAt('next_business_day', 0, null, kst(2026, 11, 6, 15))).toEqual(at9(2026, 11, 9));   // 금 → 월
     expect(dailyFirstRunAt('next_business_day', 0, null, kst(2026, 11, 2, 15))).toEqual(at9(2026, 11, 3));   // 월 → 화
   });
-  it('칸 시각이 발송 창 밖이면 창 안으로(22시 = 그다음 날 9시)', () => {
-    expect(dailyFirstRunAt('specific_hour', 0, 22, kst(2026, 11, 2, 3))).toEqual(at9(2026, 11, 4));
+  it('칸 시각이 발송 창 밖이면 창 안으로(22시 = 그다음 날 8시)', () => {
+    expect(dailyFirstRunAt('specific_hour', 0, 22, kst(2026, 11, 2, 3))).toEqual(at8(2026, 11, 4));
   });
   it('firstRunAtFor: immediate = 지금 규칙 · daily = 하루 묶음', () => {
     const t = kst(2026, 11, 2, 14);
     expect(firstRunAtFor('immediate', 'relative', 0, null, t)).toEqual(calculateNextRunAt('relative', 0, null, t));
-    expect(firstRunAtFor('daily', 'relative', 0, null, t)).toEqual(at9(2026, 11, 3));
+    expect(firstRunAtFor('daily', 'relative', 0, null, t)).toEqual(at8(2026, 11, 3));
   });
 });
 
 describe('화면 문구 = 계약 한 곳(설계서 3-6 · SC-40)', () => {
   it('하루 묶음 · 즉시 갈래 한 줄 · 한 번 보내기 · 날짜 기준 = 없음(갈래 규정 밖)', () => {
-    expect(sendTimingLine('customer.created', 'event')).toContain('다음날 아침 9시');
+    expect(sendTimingLine('customer.created', 'event')).toContain('다음날 아침 8시');
     expect(sendTimingLine('cdp.purchase', 'event')).toContain('몇 분 안에');
     expect(sendTimingLine('custom_order_shipped', null)).toContain('몇 분 안에');
     expect(sendTimingLine('customer.created', 'one_shot')).toBeNull();

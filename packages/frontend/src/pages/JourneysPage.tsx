@@ -78,6 +78,8 @@ import { useToast } from '../components/ToastProvider';
 import { useLineAsk } from '../hooks/useLineAsk';
 import LineAnswer from '../components/zone/LineAnswer';
 import { AI_GENERATE_COSTS } from '../constants/credit';
+import { resolveJourneyAdFlag } from '../utils/journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
+import { getSendPolicy, nextBusinessDayText } from '../utils/send-policy';   // ★ 2026-11-02 「다음 평일」 시각 = 서버 값(CT-J7)
 
 // D187-fix3 (2026-05-21): One-shot AI Operator — 자연어 한 줄 → AI가 완전 패키지 자동 생성 → 1 페이지 검토 → 활성화
 //   영구 룰: AI는 흐름/안내문/감성 텍스트만 풍성하게 / 구체 혜택(% / 원 / 무료 / 쿠폰)은 회사 admin 직접 작성
@@ -446,7 +448,7 @@ function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt0
 
 // ★ 2026-06-22: 스텝 타임라인 지연 표시 — 이전 스텝 후 대기 시간을 사람이 읽기 쉽게
 function formatStepDelay(s: AIGeneratedStep): string {
-  if (s.delayMode === 'next_business_day') return '다음 평일 09시';
+  if (s.delayMode === 'next_business_day') return nextBusinessDayText(getSendPolicy());   // ★ 2026-11-02 시각 = 서버 값(CT-J7)
   if (s.delayMode === 'specific_hour') return `${s.targetHourKst ?? 9}시`;
   const h = s.delayHours ?? 0;
   if (h === 0) return '바로';
@@ -740,6 +742,41 @@ export default function JourneysPage() {
     const n = new URLSearchParams(prev); n.set('journey', id); if (step) n.set('step', step); else n.delete('step'); return n;
   }, { replace: searchParams.has('journey') });
   const closeWorkspace = () => setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('journey'); n.delete('step'); return n; }, { replace: true });
+  // ★ 2026-11-02 설계서 3-9 · CT-J12 — 상황판 [이 글로 보내기] = ?candidate=판 id · 검사를 통과한 수정안을 보여 주고 한 번 누르면 그 칸 글로(원문은 사람이 누를 때만)
+  const wsCandidate = searchParams.get('candidate');
+  useEffect(() => {
+    if (!wsJourney || !wsStep || !wsCandidate) return;
+    let alive = true;
+    const drop = () => setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('candidate'); return n; }, { replace: true });
+    void (async () => {
+      const r = await fetch(`/api/ai/operator/journeys/${wsJourney}/steps/${wsStep}/candidate`, { headers: { Authorization: `Bearer ${token()}` } });
+      const d = await r.json().catch(() => null);
+      if (!alive) return;
+      const c = d?.candidate;
+      if (!r.ok || !c || c.snapshotId !== wsCandidate) {
+        toast.warning('그사이 문안이 바뀌어 이 수정안은 쓸 수 없어요. 칸을 열어 직접 고쳐 주세요.');
+        drop();
+        return;
+      }
+      setConfirm({
+        mode: 'info',
+        title: '검사를 통과한 수정안으로 바꿀까요?',
+        description: String(c.body || ''),
+        confirmLabel: '이 글로 바꾸기',
+        onConfirm: async () => {
+          const a = await fetch(`/api/ai/operator/journeys/${wsJourney}/steps/${wsStep}/apply-candidate`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` }, body: JSON.stringify({ snapshotId: c.snapshotId }),
+          });
+          const ad = await a.json().catch(() => null);
+          if (!a.ok || !ad?.success) { toast.error(ad?.error || '수정안으로 바꾸지 못했어요.'); return; }
+          toast.success('수정안으로 바꿨어요. 기다리던 고객에게 다음 회차에 나가요.');
+          drop();
+          void loadAll();
+        },
+      });
+    })();
+    return () => { alive = false; };
+  }, [wsJourney, wsStep, wsCandidate]);   // eslint-disable-line react-hooks/exhaustive-deps
   const [operationCost, setOperationCost] = useState(10);
   const journeyActions = useJourneyActions({ onChanged: () => { void loadAll(); }, operationCost });
   const presetHandledRef = useRef(false);
@@ -2011,7 +2048,7 @@ export default function JourneysPage() {
                           >
                             <option value="relative">상대 시간 (N시간 후)</option>
                             <option value="specific_hour">특정 시간 (오늘/내일 N시 KST)</option>
-                            <option value="next_business_day">다음 평일 (월~금) 09시 KST</option>
+                            <option value="next_business_day">{nextBusinessDayText(getSendPolicy())} (월~금)</option>
                           </select>
                         </div>
 
@@ -2060,7 +2097,7 @@ export default function JourneysPage() {
                         {/* mode 3: next_business_day */}
                         {s.delayMode === 'next_business_day' && (
                           <div className="text-[10px] text-sky-800 leading-relaxed">
-                            다음 평일(월~금) 09시에 보내요. 주말이나 금요일 09시 뒤에 들어오면 다음 월요일 09시예요.
+                            {nextBusinessDayText(getSendPolicy())}(월~금)에 보내요. 주말이나 금요일 그 시각 뒤에 들어오면 다음 월요일 그 시각이에요.
                           </div>
                         )}
                       </div>
@@ -2464,7 +2501,7 @@ export default function JourneysPage() {
                           channel={(s.channel === 'sms' || s.channel === 'mms' ? s.channel : 'lms') as 'sms' | 'lms' | 'mms'}
                           subject={s.subject || ''}
                           body={s.messageTemplate || ''}
-                          isAd={s.isAd !== false}
+                          isAd={resolveJourneyAdFlag(s.channel, s.isAd)}
                           opt080Number={opt080Number}
                           onSubject={(v) => updateStep(idx, { subject: v })}
                           onBody={(v) => updateStep(idx, { messageTemplate: v })}
@@ -2621,7 +2658,7 @@ export default function JourneysPage() {
                     <div className="rounded-lg border border-slate-200 bg-white p-3">
                       <div className="mb-2 flex items-center gap-2">
                         <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">지금 문안</span>
-                        <span className="text-[10px] text-slate-400">{calculateSmsBytes(buildAdMessageFront(before, String(aiPkg?.steps[refining.stepIdx]?.channel || 'lms').toUpperCase(), aiPkg?.steps[refining.stepIdx]?.isAd !== false, opt080Number))} bytes</span>
+                        <span className="text-[10px] text-slate-400">{calculateSmsBytes(buildAdMessageFront(before, String(aiPkg?.steps[refining.stepIdx]?.channel || 'lms').toUpperCase(), resolveJourneyAdFlag(aiPkg?.steps[refining.stepIdx]?.channel, aiPkg?.steps[refining.stepIdx]?.isAd), opt080Number))} bytes</span>
                       </div>
                       <div className="whitespace-pre-wrap break-words font-mono text-[13px] leading-relaxed text-slate-500">{before || '(비어 있음)'}</div>
                     </div>

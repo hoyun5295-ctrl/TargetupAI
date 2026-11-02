@@ -30,7 +30,7 @@ export function digestWindow(now: Date): { open: boolean; weekStart: string } {
 }
 
 /** (순수) 본문 */
-export function buildWeeklyDigestBody(p: { companyName: string; weekStart: string; journeys: number; operators: number; sent: number; successRate: number | null; todos: number; boardUrl: string }): string {
+export function buildWeeklyDigestBody(p: { companyName: string; weekStart: string; journeys: number; operators: number; sent: number; successRate: number | null; todos: number; boardUrl: string; heldSteps?: number }): string {
   const [, mm, dd] = p.weekStart.split('-');
   const end = new Date(Date.UTC(Number(p.weekStart.slice(0, 4)), Number(mm) - 1, Number(dd) + 6));
   return [
@@ -39,6 +39,8 @@ export function buildWeeklyDigestBody(p: { companyName: string; weekStart: strin
     `${Number(mm)}월 ${Number(dd)}일 ~ ${end.getUTCMonth() + 1}월 ${end.getUTCDate()}일`,
     `켜진 여정 ${p.journeys}개 · 자동마케팅 ${p.operators}개`,
     `보낸 수 ${p.sent.toLocaleString('ko-KR')}건${p.successRate != null ? ` · 성공률 ${p.successRate}%` : ''}`,
+    // ★ 2026-11-02 설계서 3-9 — 주간 검사 결과(걸린 칸 = 그 칸만 보류 · 다른 칸은 나간다)
+    ...((p.heldSteps ?? 0) > 0 ? [`스팸 검사에 걸린 칸 ${p.heldSteps}개(그 칸만 멈춤 · 상황판에서 수정안 확인)`] : []),
     p.todos > 0 ? `확인할 일 ${p.todos}건이 있어요.` : '확인할 일은 없어요.',
     '',
     `상황판: ${p.boardUrl}`,
@@ -119,6 +121,7 @@ async function sendDigestTo(companyId: string, contact: { userId: string; phone:
         journeys: board.numbers.activeJourneys, operators: board.numbers.activeOperators,
         sent: board.numbers.sent7d, successRate: board.numbers.successRate,
         todos: board.todos.filter((t) => t.action).length, boardUrl: await buildManagerBoardShortUrl(companyId, token),
+        heldSteps: board.todos.filter((t) => t.kind === 'held_step').length,
       });
       const authTable = await getAuthSmsTable();
       const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(

@@ -10,6 +10,7 @@
  *    이 CT 가 돌려주는 조각 · 목록이 비어 있거나 자기 자신뿐이다(발송 워커가 42703 으로 멈추지 않게).
  */
 import { randomUUID } from 'crypto';
+import { pausedSetSql, MANUAL_PAUSE_REASON } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { query, pool } from '../config/database';
 import { JourneyInputError } from './journey-step-limits';
 
@@ -351,13 +352,14 @@ export async function pauseJourneyLineage(companyId: string, journeyId: string, 
   try {
     await client.query('BEGIN');
     await lockLineage(client, journeyId);
+    const pp: any[] = [journeyId, companyId];
     const r = await client.query(
-      `UPDATE journeys j SET status = 'paused', paused_at = NOW(), pause_reason = $3, updated_at = NOW()
+      `UPDATE journeys j SET ${pausedSetSql(pp, reason || MANUAL_PAUSE_REASON)}, updated_at = NOW()
         WHERE j.company_id = $2::uuid AND j.status = 'active'
           AND (j.id = $1::uuid${ready ? `
                OR (j.lineage_id IS NOT NULL AND j.lineage_id = (SELECT s.lineage_id FROM journeys s WHERE s.id = $1::uuid AND s.company_id = $2::uuid))` : ''})
         RETURNING j.id`,
-      [journeyId, companyId, reason],
+      pp,
     );
     await client.query('COMMIT');
     return r.rows.map((x: any) => String(x.id));

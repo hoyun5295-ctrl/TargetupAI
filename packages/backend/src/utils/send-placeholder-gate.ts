@@ -17,6 +17,8 @@
  */
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core';
 import { findAiFillPlaceholder } from './copy-benefit-detector';
+import { findVarTokens, unknownVarNames } from './var-tokens';
+import { hasCartLiquidVars, detectLiquidSyntax } from './liquid-templating';
 
 export type SendPlaceholderCode = 'LINK_PLACEHOLDER_UNEDITED' | 'BENEFIT_PLACEHOLDER_UNEDITED';
 
@@ -45,6 +47,39 @@ const JOURNEY_PLACEHOLDER_PATTERN = /\[[^\[\]\n]{0,80}(직접|작성해|수정�
 /** 여정 칸 글에 채우지 않은 자리가 남았는가(켜기 관문 · 보내기 전 검사 · 점검 응답 공용 · 빈 글 = false — 빈 글은 길이 판정이 본다) */
 export function hasUneditedJourneyPlaceholder(text: string | null | undefined): boolean {
   return !!text && JOURNEY_PLACEHOLDER_PATTERN.test(text);
+}
+
+export type JourneyCopyIssueCode = 'PLACEHOLDER_UNEDITED' | 'UNKNOWN_VARIABLE' | 'CART_VARIABLE' | 'SUBJECT_VARIABLE';
+export interface JourneyCopyIssue { code: JourneyCopyIssueCode; message: string }
+
+/**
+ * ★ 2026-11-02 여정 문자 칸의 보낼 글 판정 한 곳(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-3 · 3-13 · 3-0 CT-J10).
+ *   켜기 · 켜기 검증 · 켜진 여정 칸 저장 · 보내기 전 검사 · 실행기 · 상황판 · 담당자 안내가 이 함수 하나를 부른다(검사는 통과 · 발송은 빈칸 = 0).
+ *   - 채울 자리([... 직접/작성해/수정해/입력해/URL ...]) = 그대로 나가면 고객이 본다
+ *   - 없는 변수 = 그 회사 매핑에 없는 %이름% = 치환이 지워 빈칸으로 나간다(knownVarNames = prepareFieldMappings 의 키)
+ *   - 장바구니 변수({{ cart.* }}) = 시작이 장바구니가 아닌 여정에서는 값이 그 여정과 무관한 최근 장바구니거나 빈 값
+ *   - 제목의 변수 · 개인화 문법 = 제목은 치환하지 않아(messageUtils prepareSendMessage) 글자 그대로 나간다
+ */
+export function journeyCopyIssue(
+  copy: { bodies: Array<string | null | undefined>; subjects: Array<string | null | undefined> },
+  ctx: { knownVarNames: ReadonlySet<string>; cartJourney: boolean },
+): JourneyCopyIssue | null {
+  const bodies = copy.bodies.map((t) => String(t || ''));
+  const subjects = copy.subjects.map((t) => String(t || ''));
+  for (const t of [...bodies, ...subjects]) {
+    const m = JOURNEY_PLACEHOLDER_PATTERN.exec(t);
+    if (m) return { code: 'PLACEHOLDER_UNEDITED', message: `채울 자리(${m[0]})가 남아 있어요. 내용을 직접 적거나 그 줄을 지워 주세요.` };
+  }
+  const subjVar = subjects.find((t) => findVarTokens(t).length > 0 || detectLiquidSyntax(t));
+  if (subjVar) return { code: 'SUBJECT_VARIABLE', message: '제목에는 고객 정보 변수를 넣을 수 없어요(제목은 글자 그대로 나가요). 변수를 빼고 적어 주세요.' };
+  const unknown = [...new Set(bodies.flatMap((t) => unknownVarNames(t, ctx.knownVarNames)))];
+  if (unknown.length > 0) {
+    return { code: 'UNKNOWN_VARIABLE', message: `고객 정보에 없는 변수(${unknown.map((n) => `%${n}%`).join(', ')})는 보낼 때 빈칸이 돼요. 있는 항목으로 바꾸거나 지워 주세요.` };
+  }
+  if (!ctx.cartJourney && bodies.some((t) => hasCartLiquidVars(t))) {
+    return { code: 'CART_VARIABLE', message: '장바구니 상품 변수({{ cart.… }})는 장바구니 여정에서만 채워져요. 지우거나 다른 문구로 바꿔 주세요.' };
+  }
+  return null;
 }
 
 /**

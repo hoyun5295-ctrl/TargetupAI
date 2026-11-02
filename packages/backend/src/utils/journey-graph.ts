@@ -17,6 +17,8 @@
  *   - 모르는 칸 종류: 보내지 않고 그 실행을 끝낸다(0차 ⑩).
  *   - ★ 2026-09-30 V2 4차 끝 칸: 발송 0 · 도착하면 그 자리에서 completed. 나가는 간선이 없다 — 끝 칸 뒤 칸은 조건 칸의 "아니면"만 가리킬 수 있다.
  */
+import { BUSINESS_DAY_HOUR } from './send-time-util';
+import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 
 export type GraphNodeKind = 'message' | 'wait' | 'condition' | 'end' | 'unknown';
 
@@ -82,13 +84,18 @@ function kindOf(t: string): GraphNodeKind {
 }
 
 /** 칸 사이 간격 문구 — 시간 표기는 journey-labels(프론트)와 같은 규칙: 바로 · N시간 뒤 · N일 뒤 · N일 M시간 뒤. */
+/** 0~23 시 → 「오전 9시」 · 「오후 2시」(칸 사이 간격 문구) */
+function clockKo(hour: number): string {
+  const hh = Math.max(0, Math.min(23, Number(hour)));
+  return hh < 12 ? `오전 ${hh === 0 ? 12 : hh}시` : `오후 ${hh === 12 ? 12 : hh - 12}시`;
+}
+
 export function formatInterval(delayHours: number, delayMode?: string | null, targetHourKst?: number | null): string {
   const h = Math.max(0, Math.floor(Number(delayHours) || 0));
-  if (delayMode === 'next_business_day') return '다음 평일 오전 9시';
+  if (delayMode === 'next_business_day') return `다음 평일 ${clockKo(BUSINESS_DAY_HOUR)}`;   // ★ 2026-11-02 시각 = CT 상수(설계서 3-0 CT-J7)
   const base = h === 0 ? '바로' : h < 24 ? `${h}시간 뒤` : h % 24 === 0 ? `${h / 24}일 뒤` : `${Math.floor(h / 24)}일 ${h % 24}시간 뒤`;
   if ((delayMode === 'specific_hour' || delayMode === 'relative_at_hour') && targetHourKst != null) {
-    const hh = Math.max(0, Math.min(23, Number(targetHourKst)));
-    const clock = hh < 12 ? `오전 ${hh === 0 ? 12 : hh}시` : `오후 ${hh === 12 ? 12 : hh - 12}시`;
+    const clock = clockKo(Number(targetHourKst));
     return h === 0 ? clock : `${base} ${clock}`;
   }
   return base;
@@ -176,7 +183,7 @@ export function buildJourneyGraph(
       order,
       kind,
       channel: s.channel ?? null,
-      isAd: s.is_ad !== false,
+      isAd: resolveJourneyAdFlag(s.channel, s.is_ad),   // ★ 2026-11-02 광고 판정 CT(CT-J8 · 알림톡 = 정보성)
       delayHours: delay,
       waitsForEvent,
       cumulativeMinHours: isAnchor || !c ? null : c.min,

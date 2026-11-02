@@ -12,6 +12,7 @@
  *    그래도 중간 실패가 나면 이미 켜진 것은 그대로 두고 카드별 결과를 돌려준다(되돌리지 않는다 · 켜짐은 사용자가 확인한 동작).
  */
 import { query } from '../config/database';
+import { pausedSetSql } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { checkCredit, deductCreditOutcome, InsufficientCreditError, type DeductOutcome } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { storeCallbackExposure } from './journey-target-extractor';
@@ -150,10 +151,11 @@ export async function activateJourneyGuarded(
       console.log(`[Journeys activate] one_shot dispatch journey=${journeyId} enqueued=${dr.enqueued} reason=${dr.reason || ''}`);
     } catch (dispErr: any) {
       console.error('[Journeys activate] one_shot dispatch 실패 → 멈춤:', dispErr?.message);
+      const pp: any[] = [journeyId, companyId];
       await query(
-        `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $3, updated_at = NOW()
+        `UPDATE journeys SET ${pausedSetSql(pp, ONE_SHOT_DISPATCH_FAILED_REASON)}, updated_at = NOW()
           WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
-        [journeyId, companyId, ONE_SHOT_DISPATCH_FAILED_REASON],
+        pp,
       );
       return { ok: false, code: 'DISPATCH_FAILED', message: ONE_SHOT_DISPATCH_FAILED_REASON };
     }

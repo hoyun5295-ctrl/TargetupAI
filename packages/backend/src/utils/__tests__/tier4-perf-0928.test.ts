@@ -73,7 +73,8 @@ describe('R263 여정 등급별 통계', () => {
   it('전환은 첫 진입 뒤 구매 1건당 1번 · 클릭은 여정 id 를 글자로 비교', () => {
     expect(fn).toContain('MIN(e.entered_at) AS first_entered_at');
     expect(fn).toContain('ce.occurred_at > ex.first_entered_at');
-    expect(fn).toContain("lower(ce.properties->>'journey_id') = lower($1::text)");
+    // ★ 2026-11-02 클릭 = 여정 링크 클릭 CT(journey-click journeyClickSql · 여정 id 를 글자로 비교 · 회사 조건 · 설계서 3-0 CT-J9)
+    expect(fn).toContain("${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid' })}");
   });
 });
 

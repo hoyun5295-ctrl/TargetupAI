@@ -33,6 +33,7 @@ import { ensureAnonymousLink, linkBrowserMember } from './cdp-identity';
 // ★ 2026-06-25 (gap 5): 자사몰 전송 시각 미래 클램프(커서·통계 왜곡 차단)
 import { clampOccurredAt } from './cdp-occurred-at';
 import { isUuid } from './normalize';
+import { hasCartLiquidVars } from './liquid-templating';   // ★ 2026-11-02 장바구니 Liquid 판정 = 순수 파일 한 곳(보낼 글 판정 CT-J10 과 같은 함수)
 import { maskPII } from './pii-masking';
 import { isOverMonthlyCdpLimit, recordCdpApiCall } from './cdp-auth';
 // ★ 2026-10-04 브라우저 식별 = 회원 토큰 확인 뒤에만(C1·C2)
@@ -307,10 +308,8 @@ export interface RecentEventsResult {
 //   템플릿이 {{ cart.* }} 참조할 때만 조회(불요 쿼리 0) + 실패 시 빈 객체(발송 차단 X).
 // ═══════════════════════════════════════════════════════════
 
-/** 본문에 {{ cart.* }} Liquid 변수가 있는지 (게이팅) */
-export function hasCartLiquidVars(template: string): boolean {
-  return /\{\{\s*cart\./.test(template || '');
-}
+/** 본문에 {{ cart.* }} Liquid 변수가 있는지 (게이팅) — ★ 2026-11-02 판정 = liquid-templating 한 곳(보낼 글 판정과 같은 함수) */
+export { hasCartLiquidVars };
 
 /**
  * 고객의 가장 최근 cart_add 이벤트 properties를 Liquid 컨텍스트 { cart: {...} }로 반환.

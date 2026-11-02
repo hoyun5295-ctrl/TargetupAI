@@ -9,11 +9,11 @@ import {
 
 const FULL: CompanySegmentFacts = {
   hasRecentPurchaseDate: true, hasBirthday: true, hasGradeValues: true, hasGradeOrder: true,
-  hasPurchaseCount: true, hasPurchaseAmount: true,
+  hasPurchaseCount: true, hasPurchaseAmount: true, hasJoinedAt: true,
 };
 const NONE: CompanySegmentFacts = {
   hasRecentPurchaseDate: false, hasBirthday: false, hasGradeValues: false, hasGradeOrder: false,
-  hasPurchaseCount: false, hasPurchaseAmount: false,
+  hasPurchaseCount: false, hasPurchaseAmount: false, hasJoinedAt: false,
 };
 /** 변화 축은 비교할 지난 회차가 있어야 컴파일된다 — 순수 테스트에서는 이 id 하나로 표현한다. */
 const OPERATOR = '44444444-4444-4444-4444-444444444444';
@@ -51,9 +51,11 @@ describe('resolveSegmentAvailability — 근거가 있는 축만 열린다', () 
     expect(noAmount.find((a) => a.key === 'first_purchase')!.available).toBe(true);
   });
 
-  it('근거가 하나도 없으면 전체·신규만 열린다 (나머지는 잠긴다)', () => {
+  // ★ 2026-11-02 D20 — 새로 가입 축도 근거(가입 근거 칸)가 있어야 열린다(옛: 등록 시각 = 늘 열림)
+  it('근거가 하나도 없으면 전체만 열린다 (나머지는 잠긴다)', () => {
     const open = resolveSegmentAvailability(NONE).filter((a) => a.available).map((a) => a.key);
-    expect(open).toEqual(['all', 'new_customers']);
+    expect(open).toEqual(['all']);
+    expect(resolveSegmentAvailability({ ...NONE, hasJoinedAt: true }).filter((a) => a.available).map((a) => a.key)).toEqual(['all', 'new_customers']);
   });
 
   it('최근 구매일이 없으면 휴면·최근구매가 함께 잠긴다', () => {
@@ -149,10 +151,11 @@ describe('buildSegmentPredicate — 축이 정해지면 SQL이 정해진다(결�
     expect(() => buildSegmentPredicate('vip', null, ['CID'], { now })).toThrow();
   });
 
-  it('신규 등록 = 등록 시각 기준 N일 이내', () => {
+  it('새로 가입 = 가입 근거 기준 N일 이내(CT-J6 · 등록 시각 아님)', () => {
     const params: any[] = ['CID'];
     const sql = buildSegmentPredicate('new_customers', { days: 30 }, params, { now });
-    expect(sql).toContain('c.created_at >= $2');
+    expect(sql).toContain('c.joined_at IS NOT NULL AND c.joined_at >= $2::timestamptz');
+    expect(sql).not.toContain('created_at');
     expect(params[1]).toBe('2026-07-04T05:00:00.000Z');
   });
 

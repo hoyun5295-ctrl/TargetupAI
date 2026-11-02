@@ -312,7 +312,8 @@ export interface PreviewOutcome {
   forecast: Array<{ date: string; count: number }> | null;
   window: { startAt: string; until: string; rounds: string[]; schedule: string; scheduleTime: string };
   copy: { mode: 'ai' | 'fixed'; subject: string; body: string; benefit: string | null; variables: string[] };
-  limits: { maxRecipients: number; maxCost: number; unitCost: number; channel: string };
+  /** ★ 2026-11-02 설계서 3-2 A ④ — 승인 기간 회차 = 예산만 본다(회사 자동 상한 = 회사 자율 회차 몫 · 판정 = operatorCapPolicy) → 창에는 예산을 보인다 */
+  limits: { budgetMonthly: number | null; budgetDaily: number | null; unitCost: number; channel: string };
   appliedSegment: { key: string; label: string } | null;
   segment: { key: string | null; params: Record<string, number> | null };
 }
@@ -509,8 +510,8 @@ async function refreshEntry(
       variables: vars.available,
     },
     limits: {
-      maxRecipients: Number(loaded.ctx.cdp_auto_execute_max_recipients) || 0,
-      maxCost: Number(loaded.ctx.cdp_auto_execute_max_cost_krw) || 0,
+      budgetMonthly: e.input.budgetMonthly ?? null,
+      budgetDaily: e.input.budgetDaily ?? null,
       unitCost: Number(costs[channel]) || Number(costs.sms) || 0,
       channel: channel.toUpperCase(),
     },
@@ -867,7 +868,7 @@ export async function startOperatorFromPreview(previewId: string, companyId: str
     // 등록은 끝났다 — 첫 회차 저장이 실패해도 등록 · 차감은 유효하다(정해진 회차에 다시 만든다).
     let proposal: OperatorProposal | null = null;
     try {
-      proposal = await generateProposalForOperator(operator.id, useResult ? { precomputed: useResult, variantIndex: vi } : undefined);
+      proposal = await generateProposalForOperator(operator.id, useResult ? { precomputed: useResult, variantIndex: vi, manual: true } : { manual: true });   // ★ 2026-11-02 사람이 고른 회차 = 교체(3-1 ②)
     } catch (err: any) {
       console.warn('[AutomarketingPreview] 첫 회차 저장 중 오류(등록 유지 · 저장 상태로 판정):', err?.message || err);
     }
@@ -938,6 +939,7 @@ export async function previewOperatorApproval(companyId: string, operatorId: str
       scheduleDayOfWeek: op.scheduleDayOfWeek, scheduleDayOfMonth: op.scheduleDayOfMonth, scheduleMonth: op.scheduleMonth,
       channel: op.channel, benefitContent: op.benefitContent, copyStyle: op.copyStyle,
       copyMode: op.copyMode, fixedCopy: op.fixedCopy, voiceForm: op.voiceForm,
+      budgetMonthly: op.budgetMonthly, budgetDaily: op.budgetDaily,   // ★ 2026-11-02 3-2 A ④ 창에 보이는 예산 = 그 운영자 값
     }, tr);
     // 승인 창도 서버 보관본 하나 — 편집(preview/update) · 승인(approve-window)이 이것만 쓴다. 보는 사람이 주인(잠금 · 꺼내기)
     const entry: PreviewEntry = {

@@ -157,7 +157,7 @@ describe('⑥ 안내 문자', () => {
   it('자동 보정은 단계 알림 설정과 무관하게 알린다 · 발급 실패는 삼키고 안내를 보낸다', () => {
     const n = src('utils/journey-pretest-notifier.ts');
     expect(n).not.toMatch(/if \(b\.notifyManager\) await safeNotify\(b, regenBody, 'pretest_autofixed'\)/);
-    expect(n).toMatch(/await safeNotify\(b, candBody, 'pretest_autofixed'\)/);
+    expect(n).not.toMatch(/safeNotify/);   // ★ 2026-11-02 자동 보정 안내 · 반영 지움(설계서 3-9)
     expect(n).toMatch(/정지 링크 발급 실패\(링크 없이 안내\)/);
   });
 });

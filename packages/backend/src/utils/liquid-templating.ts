@@ -61,6 +61,11 @@ const LIQUID_DETECT_PATTERN = /\{\{|\{%/;
 // Public API
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+/** 본문에 {{ cart.* }} Liquid 변수가 있는지(장바구니 값 조회 게이팅 · 보낼 글 판정 · ★ 2026-11-02 cdp-events 에서 옮김 = 순수 판정 한 곳) */
+export function hasCartLiquidVars(template: string): boolean {
+  return /\{\{\s*cart\./.test(template || '');
+}
+
 export function detectLiquidSyntax(text: string): boolean {
   if (!text) return false;
   return LIQUID_DETECT_PATTERN.test(text);

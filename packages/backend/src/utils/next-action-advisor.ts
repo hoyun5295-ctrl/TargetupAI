@@ -15,6 +15,8 @@
  */
 
 import { query } from '../config/database';
+import { newSignupSql } from './customer-joined-at';   // ★ 2026-11-02 신규 가입 판정 CT(CT-J6)
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { aggregateCampaignPerformance, aggregateSmsCountsByCampaign } from './stats-aggregation';
 // (2026-07-30) 브랜드 SMSQ 합류 — 옛 카카오 IMC 집계 import 폐기
 import { computeRoasMetric } from './performance-roas-core';
@@ -95,7 +97,7 @@ export async function buildFunnelStats(companyId: string, days = 30): Promise<Fu
        COUNT(*) FILTER (WHERE event_name = 'page_view')::int AS view_count,
        COUNT(*) FILTER (WHERE event_name = 'cart_add')::int AS cart_count,
        COUNT(*) FILTER (WHERE event_name = 'wishlist_add')::int AS wishlist_count,
-       COUNT(*) FILTER (WHERE event_name IN ('order', 'purchase'))::int AS purchase_count
+       COUNT(*) FILTER (WHERE ${netPurchaseSql('cdp_events')})::int AS purchase_count   -- ★ 2026-11-02 구매 수 = 결제된 구매(CT-J3)
      FROM cdp_events
      WHERE company_id = $1::uuid
        AND occurred_at > NOW() - ($2 || ' days')::interval`,
@@ -165,7 +167,7 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
     `SELECT COALESCE(SUM((properties->>'total_amount')::numeric), 0) AS total
      FROM cdp_events
      WHERE company_id = $1::uuid
-       AND event_name = 'purchase'
+       AND ${netPurchaseSql('cdp_events')}   -- ★ 2026-11-02 매출 = 결제된 구매(CT-J3)
        AND occurred_at > NOW() - INTERVAL '30 days'`,
     [companyId]
   );
@@ -175,7 +177,7 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
   // 실제 활성 고객 기준 = cdp_events 행동(purchase / page_view / cart_add 등) 일치.
   const customerStats = await query(
     `SELECT
-        (SELECT COUNT(*)::int FROM customers WHERE company_id = $1::uuid AND created_at > NOW() - INTERVAL '30 days') AS new_customers,
+        (SELECT COUNT(*)::int FROM customers WHERE company_id = $1::uuid AND ${newSignupSql('customers', `NOW() - INTERVAL '30 days'`)}) AS new_customers,   -- ★ 2026-11-02 신규 = 가입 근거(CT-J6)
         (SELECT COUNT(DISTINCT customer_id)::int FROM cdp_events WHERE company_id = $1::uuid AND occurred_at > NOW() - INTERVAL '30 days' AND customer_id IS NOT NULL) AS active_via_cdp`,
     [companyId]
   );
@@ -421,7 +423,7 @@ export async function buildPerformanceSnapshotV2(
         COALESCE(SUM((properties->>'total_amount')::numeric), 0)::float AS revenue
       FROM cdp_events
       WHERE company_id = $2::uuid
-        AND event_name IN ('purchase', 'order')
+        AND ${netPurchaseSql('cdp_events')}   -- ★ 2026-11-02 CT-J3
         AND occurred_at > NOW() - ($3 || ' days')::interval
       GROUP BY bucket`,
     [days, companyId, days * 2]

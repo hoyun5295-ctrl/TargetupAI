@@ -17,13 +17,14 @@ describe('여정 통계 이벤트', () => {
     expect((STANDARD_EVENT_NAMES as readonly string[])).not.toContain('order');
     expect(src).not.toContain("ce.event_name = 'order'");
     // 고친 두 곳 · ★ 2026-10-25 #13 — 대조군 비교는 목표 판정 한 곳(journey-goal-purchase · 그 안도 purchase)
-    expect((src.match(/ce\.event_name = 'purchase'/g) || []).length).toBe(2);
+    // ★ 2026-11-02 두 곳 = 결제된 구매 CT(netPurchaseSql · 그 안이 purchase 이름 + 결제 · 취소 0 · 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-0 CT-J3)
+    expect((src.match(/\$\{netPurchaseSql\('ce'\)\}/g) || []).length).toBe(2);
+    expect(src).not.toMatch(/ce\.event_name = 'purchase'/);
     expect(src).toContain("${purchasedSinceEntrySql('e', 'j.company_id', `j.trigger_event = 'customer.created'`)} AS conv");
   });
 
   it('단계 클릭 수는 그 여정 회사의 이벤트만', () => {
-    const i = src.indexOf("WHERE ce.event_name = 'message_click'\n           AND (ce.properties->>'step_id')::uuid = s.id");
-    expect(i).toBeGreaterThan(-1);
-    expect(src.slice(i, i + 300)).toContain('AND ce.company_id = (SELECT company_id FROM journeys WHERE id = $1::uuid)');
+    // ★ 2026-11-02 클릭 = CT-J9 조각(회사 · 여정 · 칸 · journey-click journeyClickSql)
+    expect(src).toContain("WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid', stepExpr: 's.id' })}");
   });
 });

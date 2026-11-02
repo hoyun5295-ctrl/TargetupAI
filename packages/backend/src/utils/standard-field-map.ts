@@ -89,6 +89,8 @@ export const FIELD_MAP: StandardFieldMapping[] = [
   { fieldKey: 'store_phone',       category: 'store', displayName: '매장전화번호', dataType: 'string', storageType: 'column', columnName: 'store_phone',       normalizeFunction: 'normalizeStorePhone', sortOrder: 14 },
   // ★ B-D70-17: store_name은 customer-filter/CustomerDBModal에서 사용되지만 FIELD_MAP에 누락
   { fieldKey: 'store_name',        category: 'store', displayName: '매장명',       dataType: 'string', storageType: 'column', columnName: 'store_name',        normalizeFunction: 'trim',           sortOrder: 14.5 },
+  // ★ 2026-11-02 설계서 3-6(D19) — 고객이 실제로 가입한 때(원천 가입일 · 신규 가입 판정의 근거 · 쓰기 · 읽기 = customer-joined-at CT · DDL-2 customers.joined_at)
+  { fieldKey: 'joined_at',         category: 'store', displayName: '가입일',       dataType: 'date',   storageType: 'column', columnName: 'joined_at',         normalizeFunction: 'normalizeDate',  sortOrder: 14.7 },
 
   // ── membership (등급/포인트) — 2개 ──
   // ★ D131 후속(2026-04-21): 고객사별 등급 체계(시세이도 '일반/실버/골든', 타사 '블루/블랙' 등)는
@@ -525,6 +527,7 @@ export const FIELD_DISPLAY_FORMAT_MAP: Record<string, (value: any) => string> = 
   total_purchase_amount:  fmtMoneyDisplay,
   purchase_count:         fmtIntDisplay,
   recent_purchase_date:   fmtDateDisplay,
+  joined_at:              fmtDateDisplay,   // ★ 2026-11-02 가입일(설계서 3-6 · %가입일% = 날짜로 · 시각 원문 노출 0)
   // ── store 5 ──
   store_code:        fmtStringDisplay,
   registration_type: fmtStringDisplay,

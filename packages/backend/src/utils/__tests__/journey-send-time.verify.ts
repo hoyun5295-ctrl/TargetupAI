@@ -19,8 +19,8 @@ const midnightKst = new Date('2026-06-04T15:00:00Z');
 console.log('[journey-send-time] relative');
 ok('relative +2h, 주간 → now+2h 그대로', () =>
   assert.strictEqual(calculateNextRunAt('relative', 2, null, noonKst).toISOString(), '2026-06-04T04:00:00.000Z'));
-ok('relative 야간 진입 → 다음 09시 KST(00:00Z)', () =>
-  assert.strictEqual(calculateNextRunAt('relative', 0, null, midnightKst).toISOString(), '2026-06-05T00:00:00.000Z'));
+ok('relative 야간 진입 → 다음 발송 창 시작 08시 KST(전날 23:00Z · ★ 2026-11-02 §4 ⑤)', () =>
+  assert.strictEqual(calculateNextRunAt('relative', 0, null, midnightKst).toISOString(), '2026-06-04T23:00:00.000Z'));
 
 console.log('[journey-send-time] specific_hour');
 ok('target 15시, 현재 11시 → 오늘 15시 KST(06:00Z)', () =>

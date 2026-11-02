@@ -13,11 +13,13 @@
  */
 
 import { UserFacingError } from './http-error';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { query } from '../config/database';
 import { purchasedSinceEntrySql } from './journey-goal-purchase';
 import { isMallPurchaseDoorForJourneyStats } from './journey-purchase-ledger';
 // ★ Phase2 A (2026-06-26): 사후확률 α/β는 실측 count(sent/click)에서 도출 — bandit-arm 단일 진실.
 import { deriveBanditArm } from './bandit-arm';
+import { journeyClickSql } from './journey-click';   // ★ 2026-11-02 여정 링크 클릭 판정 CT(설계서 3-0 CT-J9)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -239,15 +241,13 @@ async function getJourneyStepStats(journeyId: string, mallDoor: boolean): Promis
        (
          SELECT COUNT(*)
          FROM cdp_events ce
-         WHERE ce.event_name = 'message_click'
-           AND (ce.properties->>'step_id')::uuid = s.id
-           -- ★ 2026-09-26 한줄로 V2 R1-43 — 그 여정 회사의 이벤트만(옛: 전 회사 message_click을 훑었다)
-           AND ce.company_id = (SELECT company_id FROM journeys WHERE id = $1::uuid)
+         -- ★ 2026-09-26 한줄로 V2 R1-43 — 그 여정 회사의 이벤트만 · ★ 2026-11-02 클릭 = CT-J9(그 여정 · 그 칸 링크)
+         WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid', stepExpr: 's.id' })}
        ) AS click_count,
        ${mallDoor ? `(
          SELECT COUNT(DISTINCT ce.customer_id)
          FROM cdp_events ce
-         WHERE ce.event_name = 'purchase'   -- ★ 2026-09-26 R1-43 주문은 표준 이름 purchase로 저장된다(cdp-orders · 옛 'order'는 저장되지 않아 전환이 항상 0)
+         WHERE ${netPurchaseSql('ce')}   -- ★ 2026-11-02 전환 = 결제된 구매(CT-J3 · 옛 R1-43 이름 판정)
            AND ce.customer_id IN (
              SELECT e2.customer_id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid
            )
@@ -341,15 +341,14 @@ async function getJourneySegmentStats(journeyId: string, mallDoor: boolean): Pro
        SELECT ex.customer_id, COUNT(*) AS click_count
        FROM ex
        INNER JOIN cdp_events ce ON ce.customer_id = ex.customer_id
-       WHERE ce.event_name = 'message_click'
-         AND lower(ce.properties->>'journey_id') = lower($1::text)
+       WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid' })}   -- ★ 2026-11-02 CT-J9
        GROUP BY ex.customer_id
      ),
      conv AS (${mallDoor ? `
        SELECT ex.customer_id, COUNT(*) AS conversion_count
        FROM ex
        INNER JOIN cdp_events ce ON ce.customer_id = ex.customer_id
-       WHERE ce.event_name = 'purchase'   -- ★ 2026-09-26 R1-43 주문은 표준 이름 purchase로 저장된다(cdp-orders)
+       WHERE ${netPurchaseSql('ce')}   -- ★ 2026-11-02 CT-J3
          AND ce.occurred_at > ex.first_entered_at
        GROUP BY ex.customer_id` : `
        SELECT ex.customer_id, COUNT(DISTINCT p.purchase_date::date) AS conversion_count
@@ -404,8 +403,7 @@ async function getJourneyHourlyStats(journeyId: string): Promise<JourneyHourlySt
        EXTRACT(HOUR FROM (ce.occurred_at AT TIME ZONE 'Asia/Seoul'))::int AS hour,
        COUNT(*) AS click_count
      FROM cdp_events ce
-     WHERE ce.event_name = 'message_click'
-       AND (ce.properties->>'journey_id')::uuid = $1::uuid
+     WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid' })}   -- ★ 2026-11-02 CT-J9
      GROUP BY hour
      ORDER BY hour`,
     [journeyId]
@@ -446,8 +444,7 @@ async function getJourneyWeekdayStats(journeyId: string): Promise<JourneyWeekday
        EXTRACT(DOW FROM (ce.occurred_at AT TIME ZONE 'Asia/Seoul'))::int AS weekday,
        COUNT(*) AS click_count
      FROM cdp_events ce
-     WHERE ce.event_name = 'message_click'
-       AND (ce.properties->>'journey_id')::uuid = $1::uuid
+     WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid' })}   -- ★ 2026-11-02 CT-J9
      GROUP BY weekday`,
     [journeyId]
   );

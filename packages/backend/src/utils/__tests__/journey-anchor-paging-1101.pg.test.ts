@@ -87,3 +87,50 @@ describe('R40 날짜 기준 · 한 번 보내기 = 대상 전원 한 번(실 PG)
     expect(await execCount(J4)).toBe(7);
   });
 });
+
+// ★ 2026-11-02 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-17 · §7 — (여정 · 칸 · 날) 뽑기 = 잠금 안 한 번 · 상한 멈춤도 잠금 안
+describe('3-17 날짜 기준 뽑기 한 번 · 상한 멈춤 = 잠금 안(실 PG)', () => {
+  const anchorJourney = async (o: { threshold?: number | null; steps?: number } = {}) => {
+    const j = randomUUID();
+    const steps = Array.from({ length: o.steps ?? 1 }, () => randomUUID());
+    await insertMinimalRow(pool, 'journeys', {
+      id: j, company_id: CO, created_by: OWNER, status: 'active', trigger_event: 'custom', trigger_filters: {}, callback_number: '0212345678',
+      name: '날짜 기준 3-17', start_kind: 'date_anchor', anchor_date: '2026-11-02', threshold_recipients_per_step: o.threshold ?? null,
+    });
+    for (const [i, s2] of steps.entries()) {
+      await insertMinimalRow(pool, 'journey_steps', { id: s2, journey_id: j, step_order: i + 1, step_type: 'message', channel: 'sms', message_template: '안내', delay_mode: 'relative', delay_hours: 0 });
+    }
+    return {
+      j: { id: j, company_id: CO, anchor_day: '2026-11-02', anchor_recurrence: null, anchor_recurrence_day: null, anchor_hour_kst: 10, trigger_filters: {}, threshold_recipients_per_step: o.threshold ?? null },
+      steps: steps.map((id, i) => ({ id, step_order: i + 1, anchor_offset_days: i, target_hour_kst: 10 })),
+    };
+  };
+  const status = async (j: string) => (await pool.query(`SELECT status FROM journeys WHERE id = $1::uuid`, [j])).rows[0].status;
+
+  it('두 연결이 같은 (칸 · 날)을 함께 뽑음 = 한 번만(7명 · 다른 쪽 0)', async () => {
+    const { j, steps } = await anchorJourney();
+    const [a, b] = await Promise.all([dispatchAnchorStep(j, steps[0], AT, '2026-11-02', AT), dispatchAnchorStep(j, steps[0], AT, '2026-11-02', AT)]);
+    expect([a.enqueued, b.enqueued].sort()).toEqual([0, 7]);
+    expect(await execCount(j.id)).toBe(7);
+  });
+
+  it('뽑은 뒤 대상이 상한을 넘게 늘어도 같은 날 다시 = 아무것도 안 함(멈춤 0 · 이미 넣은 발송 그대로)', async () => {
+    const { j, steps } = await anchorJourney({ threshold: 7 });
+    expect((await dispatchAnchorStep(j, steps[0], AT, '2026-11-02', AT)).enqueued).toBe(7);
+    const extra = [randomUUID(), randomUUID()];
+    for (const [i, id] of extra.entries()) await insertMinimalRow(pool, 'customers', { id, company_id: CO, phone: `0100000${String(7200 + i)}`, is_active: true, sms_opt_in: true });
+    try {
+      expect((await dispatchAnchorStep(j, steps[0], AT, '2026-11-02', AT)).enqueued).toBe(0);
+      expect(await status(j.id)).toBe('active');
+    } finally {
+      await pool.query(`UPDATE customers SET is_active = false WHERE id = ANY($1::uuid[])`, [extra]);   // 이 파일 뒤 시험의 대상 수(7) 그대로
+    }
+  });
+
+  it('2칸 여정 · 1칸 실행이 아직 진행 중인데 2칸 날이 옴 = 2칸 실행도 생김(같은 고객 진행 중 실행이 여럿 = 정상)', async () => {
+    const { j, steps } = await anchorJourney({ steps: 2 });
+    expect((await dispatchAnchorStep(j, steps[0], AT, '2026-11-02', AT)).enqueued).toBe(7);
+    expect((await dispatchAnchorStep(j, steps[1], AT, '2026-11-03', AT)).enqueued).toBe(7);
+    expect(await execCount(j.id)).toBe(14);
+  });
+});

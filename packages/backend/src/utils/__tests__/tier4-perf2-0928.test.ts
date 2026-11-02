@@ -80,7 +80,8 @@ describe('R266 · R265 여정', () => {
     expect(src).toContain('export const STATE_TRIGGER_INTERVAL_MS = 60 * 60 * 1000;');
     expect(src).toContain('const isStateTrigger = STATE_TRIGGER_EVENTS.has(j.trigger_event);');
     expect(src).toContain('if (isStateTrigger && Date.now() - (_stateTriggerRanAt.get(j.id) || 0) < STATE_TRIGGER_INTERVAL_MS) continue;');
-    expect(src).toContain('if (isStateTrigger && !result.paused) _stateTriggerRanAt.set(j.id, Date.now());');
+    // ★ 2026-11-02 설계서 3-7 — 잘린 회차(회차 상한에 닿음)도 기록하지 않는다 = 다음 회차에 이어서
+    expect(src).toContain('if (isStateTrigger && !result.paused && !result.truncated) _stateTriggerRanAt.set(j.id, Date.now());');
     expect(src).toContain('return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };');
     expect(src).toContain('for (const id of Array.from(_stateTriggerRanAt.keys())) if (!activeIds.has(id)) _stateTriggerRanAt.delete(id);');
   });

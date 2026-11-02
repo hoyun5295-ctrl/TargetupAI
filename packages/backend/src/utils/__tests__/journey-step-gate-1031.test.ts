@@ -19,6 +19,7 @@ import { isStepNotifyOn as isStepNotifyOnScreen } from '../../../../frontend/src
 import { decideResultNotice, buildResultNoticeBody, type ResultNoticeFacts } from '../journey-result-notice';
 import { buildPretestLmsBody, IMMEDIATE_STEP_NOTICE_LINE, PRETEST_LEAD_HOURS, stepHeldSql, PRETEST_DECISION_STATUSES } from '../journey-pretest-notifier';
 import { isImmediateStep, groupPretestBundles } from '../journey-pretest-scan';
+import { latestSnapshotSql } from '../journey-step-versions';
 import { anchorDispatchDue } from '../journey-anchor-scheduler';
 import { PRETEST_HELD_RECHECK_MINUTES } from '../journey-executor';
 import { sendNoticeOnce } from '../journey-notice-once';
@@ -133,7 +134,8 @@ describe('실행기 관문 = 보류만(★ 1102 E3-1 · 옛 그날 기록 · 미
     expect(sql).toContain("last_dec.status = 'held'");
     expect(sql).toContain('ORDER BY ps_h.notify_at DESC, ps_h.id DESC LIMIT 1');
     expect(sql).toContain('last_dec.snapshot_id IS NOT DISTINCT FROM');
-    expect(sql).toContain('FROM journey_step_snapshots ss_h WHERE ss_h.step_id = $2 AND ss_h.journey_id = $1');
+    // ★ 2026-11-02 지금 판 = 판 읽기 CT(journey-step-versions latestSnapshotSql · 설계서 3-0 CT-J1)
+    expect(sql).toContain(`(SELECT ls_h.id FROM ${latestSnapshotSql('$1', '$2')} ls_h)`);
     expect([...PRETEST_DECISION_STATUSES]).toEqual(['notified', 'unverified', 'cancelled', 'held', 'paused', 'pending']);
     expect([...PRETEST_DECISION_STATUSES]).not.toContain('error');
     expect([...PRETEST_DECISION_STATUSES]).not.toContain('late');
@@ -227,16 +229,17 @@ describe('소스 계약', () => {
     // ★ 1102 묶음 발송 — 관문 = 칸마다 한 번(processMessageBatch) · 발송 창 = 판정 함수 하나(sendWindowState · I7) · 단위마다 다시(창 · 보류 · R30)
     const held = ex.indexOf('if (gate.rows[0]?.held && isTextChannel) {');
     const pending = ex.indexOf('if (snap.pendingSnapshotAt && isTextChannel) {');
-    const hours = ex.indexOf('const win = sendWindowState();');
+    const hours = ex.indexOf('const win = sendWindowStateFor(new Date(), isNightExemptStep(step));');
     expect(held).toBeGreaterThan(-1);
     expect(held).toBeLessThan(ex.indexOf('if (snap.snapshotReadFailed && isTextChannel) {'));
     expect(pending).toBeGreaterThan(held);
     expect(hours).toBeGreaterThan(pending);
-    // 발송 창 판정 = sendWindowState 한 함수(시작 = 지금 · 끝 = 지금 + 여유 · 다음 창 = 같은 기준 시각)
-    const sw = ex.slice(ex.indexOf('function sendWindowState('), ex.indexOf('async function setNextRunAt('));
+    // 발송 창 판정 = sendWindowStateFor 한 함수(send-time-util · ★ 2026-11-02 CT-J7 · 시작 = 지금 · 끝 = 지금 + 여유 · 다음 창 = 같은 기준 시각)
+    const util = read('send-time-util.ts');
+    const sw = util.slice(util.indexOf('export function sendWindowStateFor('), util.indexOf('export function sendableAt('));
     expect(sw.match(/isWithinSendHours\(/g)).toHaveLength(2);
     expect(sw).toContain('const t = new Date(now.getTime() + NIGHT_AD_LOAD_LEAD_MS);');
-    expect(sw).toContain('return { open: false, next: computeNextSendWindow(t) };');
+    expect(sw).toContain('return { open: false, next: nextSendWindowStart(t) };');
     const mb = ex.slice(ex.indexOf('async function processMessageBatch('), ex.indexOf('async function applyRowOutcomes('));
     expect(mb.match(/isWithinSendHours\(/g)).toBeNull();
     expect(hours).toBeLessThan(ex.indexOf('const variants = await listJourneyStepVariants(step.id);'));
@@ -275,7 +278,9 @@ describe('소스 계약', () => {
     const at = fn.indexOf('await createStepSnapshot(companyId, journeyId, stepId, run);');
     expect(at).toBeGreaterThan(-1);
     expect(fn.indexOf('await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);')).toBeGreaterThan(at);
-    expect(jb).toContain('(await withJourneyValidationReset(companyId, journeyId, (run, journey) => applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch), { keepMarker })) ?? { rows: [] as any[] };');
+    // ★ 2026-11-02 — 잠금 안 콜백(A/B 칸 관문 · 몸통 · 보낼 글 판정 · 설계서 3-16 · 3-3 ③)이 같은 트랜잭션 하나
+    expect(jb).toContain('(await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {');
+    expect(jb).toContain('    const out = await applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch);\n');
   });
   it('화면 문구 = 실제 시점 · 채널별 머리 · 옛 약속 0 · 모델명 · native dialog · 줄표 0', () => {
     const fe = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'frontend', 'src', ...p), 'utf8');

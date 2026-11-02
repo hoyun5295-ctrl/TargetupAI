@@ -20,6 +20,7 @@
  */
 
 import { query, pool, lockPool } from '../config/database';
+import { pausedSetSql, pausedCaseSetSql, ANCHOR_COMPLETED_PAUSE_REASON } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { createScanCursor } from './scan-cursor';
 // ★ 2026-09-30 여정 V2 5차 — 진입이 닫힌 옛 판은 새 날짜 사이클을 받지 않는다.
 import { entryOpenClause, lockEntryIfActive, lineageColumnsReady, oneShotColumnsReady } from './journey-lineage';
@@ -33,7 +34,8 @@ import {
   computeAnchorStepRunAt,
   computeNextAnchor,
   isAnchorCycleComplete,
-  shiftToSendableHour,
+  sendableAt,
+  isNightExemptStep,
 } from './send-time-util';
 // ★ 2026-10-31 앞보기 창 = 발송 전 스캔과 같은 상수(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-3)
 import { PRETEST_LEAD_HOURS } from './journey-pretest-notifier';
@@ -64,6 +66,8 @@ interface AnchorStepRow {
   step_order: number;
   anchor_offset_days: number | null;
   target_hour_kst: number | null;
+  channel: string | null;
+  alimtalk_next_type: string | null;
 }
 
 /** KST 기준 날짜 문자열(YYYY-MM-DD). */
@@ -88,9 +92,12 @@ export function anchorDispatchDue(runAt: Date, now: Date): boolean {
   return now.getTime() >= runAt.getTime() - PRETEST_LEAD_HOURS * 60 * 60 * 1000;
 }
 
-/** (여정 · 칸 · 발송일)을 이미 뽑아 넣었는가(PK 앞부분 = journey_id · step_id). */
-export async function anchorStepDispatched(journeyId: string, stepId: string, sendDate: string): Promise<boolean> {
-  const r = await query(
+/**
+ * (여정 · 칸 · 발송일)을 이미 뽑아 넣었는가(PK 앞부분 = journey_id · step_id).
+ *   ★ 2026-11-02 설계서 3-17 — 회차 루프의 잠금 밖 확인은 빠른 길 · 결정은 넣기 트랜잭션의 계보 잠금 안에서 같은 함수(run = 그 연결)로 다시 본다.
+ */
+export async function anchorStepDispatched(journeyId: string, stepId: string, sendDate: string, run: SqlRun = query): Promise<boolean> {
+  const r = await run(
     `SELECT 1 FROM journey_anchor_dispatch WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3::date LIMIT 1`,
     [journeyId, stepId, sendDate],
   );
@@ -147,7 +154,7 @@ async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ d
   const todayKst = kstDateStr(now);
 
   const stepsRes = await query(
-    `SELECT id, step_order, anchor_offset_days, target_hour_kst
+    `SELECT id, step_order, anchor_offset_days, target_hour_kst, channel, alimtalk_next_type
      FROM journey_steps
      WHERE journey_id = $1::uuid AND COALESCE(step_type, 'message') = 'message'
      ORDER BY step_order ASC`,
@@ -194,12 +201,12 @@ async function processAnchorJourney(j: AnchorJourneyRow, now: Date): Promise<{ d
     } else {
       // ★ 2026-10-25 #8 — 그 회차 실행이 아직 남아 있으면 멈추지 않는다(밤 경계로 다음 날 아침에 밀린 D-0 이 자정 멈춤에 걸려 안 나가던 것).
       //   실행기는 여정이 켜져 있어야 보낸다 → 남은 회차가 다 나간 다음 30분 회차에 멈춘다.
+      const pp: any[] = [j.id];
       const r = await query(
-        `UPDATE journeys SET status = 'paused', paused_at = NOW(),
-           pause_reason = $2, updated_at = NOW()
+        `UPDATE journeys SET ${pausedSetSql(pp, ANCHOR_COMPLETED_PAUSE_REASON)}, updated_at = NOW()
          WHERE id = $1::uuid AND status = 'active' AND start_kind = 'date_anchor'
            AND NOT EXISTS (SELECT 1 FROM journey_executions e WHERE e.journey_id = $1::uuid AND e.status = 'active')`,
-        [j.id, '지정일 D-0 발송 완료. 다음 기준 날짜 지정 시 재가동'],
+        pp,
       );
       if ((r?.rowCount || 0) > 0) console.log(`[JourneyAnchor] 여정=${j.id} D-0 완료 → 자동 정지(none)`);
     }
@@ -229,21 +236,13 @@ export async function dispatchAnchorStep(
 ): Promise<{ kind: AnchorDispatchKind; enqueued: number }> {
   // 대상 추출 — 안전필터 + 대상 조건(audience). 대량 차단(threshold) 적용.
   const cap = j.threshold_recipients_per_step;
-  // 상한 정함 = 상한 + 1 까지 세어 넘으면 멈춤(옛 그대로) · 안 정함 = 대상이 있는가만 본다(넣기는 아래 한 문장이 전원).
-  const ids = await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, cap != null ? Number(cap) + 1 : 1, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id));
-  if (ids.length === 0) return { kind: 'no_target', enqueued: 0 };
-  if (cap != null && entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
-    await query(
-      `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
-       WHERE id = $1::uuid AND status = 'active'`,
-      [j.id, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`],
-    );
-    console.warn(`[JourneyAnchor] 대량 차단 — journey=${j.id} step=${step.step_order} 후보=${ids.length} 상한=${cap} → 정지`);
-    return { kind: 'capped', enqueued: 0 };
-  }
+  const scopeSql = await getJourneyOwnerScopeSql(j.company_id, j.id);
+  const consent = await journeyOwnerConsent(j.company_id, j.id);
+  // ★ 2026-11-02 설계서 3-17 · Codex 설계 4R #1 — 잠금 앞 셈 = 「대상 0 이면 잠금도 잡지 않는다」 빠른 길만(상한 셈 · 멈춤은 잠금 안 · 이미 뽑았나 뒤).
+  if ((await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, 1, scopeSql, consent)).length === 0) return { kind: 'no_target', enqueued: 0 };
 
   // 멱등 dispatch + 단발 execution 생성을 한 트랜잭션 — ON CONFLICT로 (journey,step,customer,날짜) 1회.
-  const nextRunAt = now.getTime() >= runAt.getTime() ? shiftToSendableHour(now) : runAt;
+  const nextRunAt = now.getTime() >= runAt.getTime() ? sendableAt(now, isNightExemptStep(step)) : runAt;   // ★ 2026-11-02 정보성 알림톡 = 밤 예외(CT-J7)
   let enqueued = 0;
   const client = await pool.connect();
   try {
@@ -253,9 +252,35 @@ export async function dispatchAnchorStep(
       await client.query('ROLLBACK');
       return { kind: 'not_active', enqueued: 0 };
     }
+    // ★ 2026-11-02 설계서 3-17 · Codex 설계 3R — 「이 칸 · 이날 이미 뽑았나」를 잠금 안에서 다시 본다(잠금 밖 확인을 두 회차가 함께 지나면 뒤 회차가
+    //   잠금을 얻은 뒤 표식 없는 줄을 또 뽑았다) → (여정 · 칸 · 날) 뽑기 = 정확히 한 번 · 상한 멈춤도 이 뒤(이미 넣은 정상 발송을 멈추지 않는다 · 4R #1).
+    if (await anchorStepDispatched(j.id, step.id, sendDate, (t, p) => client.query(t, p))) {
+      await client.query('ROLLBACK');
+      return { kind: 'dispatched', enqueued: 0 };
+    }
+    // 상한 정함 = 잠금 안에서 상한 + 1 까지 세어 넘으면 멈춤(같은 트랜잭션 · CT-J2 조각) · 넣기 대상 = 센 그 id · 안 정함 = 넣기 한 문장이 전원.
+    let ids: string[] | null = null;
+    if (cap != null) {
+      ids = await selectAnchorAudienceIds(j.company_id, j.trigger_filters || {}, Number(cap) + 1, scopeSql, consent);
+      if (ids.length === 0) {
+        await client.query('ROLLBACK');
+        return { kind: 'no_target', enqueued: 0 };
+      }
+      if (entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
+        const pp: any[] = [j.id];
+        await client.query(
+          `UPDATE journeys SET ${pausedSetSql(pp, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`)}, updated_at = NOW()
+           WHERE id = $1::uuid AND status = 'active'`,
+          pp,
+        );
+        await client.query('COMMIT');
+        console.warn(`[JourneyAnchor] 대량 차단 — journey=${j.id} step=${step.step_order} 후보=${ids.length} 상한=${cap} → 정지`);
+        return { kind: 'capped', enqueued: 0 };
+      }
+    }
     const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 최초 진입에서만 배정
     // ★ 2026-11-01 B-1101-7 ① — 표식(여정 · 칸 · 고객 · 날) + 실행을 한 문장에(대상 = 한 시점 전원 · 이미 표식 있는 분 = 넣지 않음).
-    const src = await audienceSource(j.company_id, j.id, j.trigger_filters || {}, cap != null ? ids : null);
+    const src = await audienceSource(j.company_id, j.id, j.trigger_filters || {}, ids);
     const n = src.params.length;
     const ins = await client.query(
       `WITH aud AS (${src.sql}),
@@ -326,7 +351,7 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
 
   // 발송 step(첫 message step) 조회.
   const stepRes = await query(
-    `SELECT id, step_order FROM journey_steps
+    `SELECT id, step_order, channel, alimtalk_next_type FROM journey_steps
      WHERE journey_id = $1::uuid AND COALESCE(step_type, 'message') = 'message'
      ORDER BY step_order ASC LIMIT 1`,
     [journeyId],
@@ -335,21 +360,14 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
   const step = stepRes.rows[0];
 
   const cap = j.threshold_recipients_per_step;
-  // 상한 정함 = 상한 + 1 까지 세어 넘으면 멈춤(옛 그대로) · 안 정함 = 대상이 있는가만 본다(넣기는 아래 한 문장이 전원).
-  const ids = await selectAnchorAudienceIds(companyId, j.trigger_filters || {}, cap != null ? Number(cap) + 1 : 1, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId));
-  if (ids.length === 0) return done('no_target');
-  if (cap != null && entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
-    await query(
-      `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
-       WHERE id = $1::uuid AND status = 'active'`,
-      [journeyId, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`],
-    );
-    return { enqueued: 0, reason: 'threshold_exceeded' };
-  }
+  const scopeSql = await getJourneyOwnerScopeSql(companyId, journeyId);
+  const consent = await journeyOwnerConsent(companyId, journeyId);
+  // ★ 2026-11-02 설계서 3-17 · Codex 설계 4R #1 — 잠금 앞 셈 = 「대상 0 이면 잠금도 잡지 않는다」 빠른 길만(상한 셈 · 멈춤은 잠금 안 · 멱등 확인 뒤).
+  if ((await selectAnchorAudienceIds(companyId, j.trigger_filters || {}, 1, scopeSql, consent)).length === 0) return done('no_target');
 
   // 발송 시각 = 예약 시각 || 즉시(발송가능 시각으로 가드).
   const scheduledAt = j.one_shot_scheduled_at ? new Date(j.one_shot_scheduled_at) : null;
-  const nextRunAt = scheduledAt && scheduledAt.getTime() > now.getTime() ? scheduledAt : shiftToSendableHour(now);
+  const nextRunAt = scheduledAt && scheduledAt.getTime() > now.getTime() ? scheduledAt : sendableAt(now, isNightExemptStep(step));   // ★ 2026-11-02 CT-J7
 
   let enqueued = 0;
   const client = await pool.connect();
@@ -367,9 +385,29 @@ export async function dispatchOneShotJourney(companyId: string, journeyId: strin
       await client.query(tracked ? 'COMMIT' : 'ROLLBACK');
       return { enqueued: 0, reason: 'already_dispatched' };
     }
+    // 상한 정함 = 잠금 · 멱등 확인 뒤에 상한 + 1 까지 세어 넘으면 멈춤(같은 트랜잭션 · CT-J2 조각) · 넣기 대상 = 센 그 id · 안 정함 = 넣기 한 문장이 전원.
+    let ids: string[] | null = null;
+    if (cap != null) {
+      ids = await selectAnchorAudienceIds(companyId, j.trigger_filters || {}, Number(cap) + 1, scopeSql, consent);
+      if (ids.length === 0) {
+        if (tracked) await markOneShotDispatched((t, p) => client.query(t, p), journeyId);   // 대상 0 = 넣음(잠금 밖 done 과 같은 판정)
+        await client.query(tracked ? 'COMMIT' : 'ROLLBACK');
+        return { enqueued: 0, reason: 'no_target' };
+      }
+      if (entryCapExceeded(cap, null, ids.length)) {   // 날짜축 = 하루 몫 없음(정한 날 한 번에)
+        const pp: any[] = [journeyId];
+        await client.query(
+          `UPDATE journeys SET ${pausedSetSql(pp, `대량 진입 감지 (${ids.length}건 > 상한 ${Number(cap)}건). 자동 정지, 담당자 확인 필요`)}, updated_at = NOW()
+           WHERE id = $1::uuid AND status = 'active'`,
+          pp,
+        );
+        await client.query('COMMIT');
+        return { enqueued: 0, reason: 'threshold_exceeded' };
+      }
+    }
     const holdoutPct = await getJourneyHoldoutPct(journeyId);  // ★ 2026-07-11 홀드아웃 — 최초 진입에서만 배정
     // ★ 2026-11-01 B-1101-7 ② — 대상 = 한 시점 전원(한 문장 · 10만 자르기 없음).
-    const src = await audienceSource(companyId, journeyId, j.trigger_filters || {}, cap != null ? ids : null);
+    const src = await audienceSource(companyId, journeyId, j.trigger_filters || {}, ids);
     const n = src.params.length;
     const ins = await client.query(
       `INSERT INTO journey_executions (id, journey_id, customer_id, current_step_order, status, entered_at, next_run_at, created_at)
@@ -482,8 +520,7 @@ async function revertOneShotAttempt(companyId: string, journeyId: string, token:
       `UPDATE journeys SET status = $4::text,
               approved_by = CASE WHEN $4::text = 'draft' THEN NULL ELSE approved_by END,
               approved_at = CASE WHEN $4::text = 'draft' THEN NULL ELSE approved_at END,
-              paused_at = CASE WHEN $4::text = 'paused' THEN NOW() ELSE paused_at END,
-              pause_reason = CASE WHEN $4::text = 'paused' THEN $5::text ELSE pause_reason END,
+              ${pausedCaseSetSql('$4::text', '$5::text')},
               last_event_cursor = CASE WHEN $4::text = 'draft' AND trigger_event = 'journey.after' THEN NULL ELSE last_event_cursor END,
               one_shot_dispatch_pending_at = NULL,
               updated_at = NOW()

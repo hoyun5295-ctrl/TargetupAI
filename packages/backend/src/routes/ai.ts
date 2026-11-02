@@ -52,6 +52,7 @@ import { buildCompositionPlans, compositionInfos, runLineJudge, LineJudgeBusyErr
 import { checkRecurringLine } from '../utils/one-line-ct/recurring';
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from '../utils/journey-message-render';
 import { journeyGate, journeyError, canAccessJourney, journeyOptionsOffOnly } from '../utils/journey-route';
+import { applyPassedCandidate, readPassedCandidateForStep } from '../utils/journey-pretest-candidate';   // ★ 2026-11-02 수정안 반영 CT(CT-J12)
 import { readJourneyCopyFacts } from '../utils/journey-copy-facts';
 import { finishMany, copyResponse } from '../utils/copy-finish';
 import { checkJourney, startJourneyStepSpamChecks } from '../utils/journey-check';
@@ -119,6 +120,7 @@ import { listCompanyGradeValues, saveGradeRanks, hasUsableGradeOrder, hasGradeOr
 // ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
 import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
+import { MANUAL_PAUSE_REASON } from '../utils/journey-pause-reason';   // ★ 2026-11-02 CT-J2
 // ★ 2026-06-30 여정 일반화 — one_shot 활성 시점 단발 dispatch.
 // ★ D187-fix3 (2026-05-21): Journey AI Generator — One-shot 자연어 + 시즌 + 회사 메모리
 import { refineStepMessage, generateAnchorJourneyPlan } from '../utils/journey-ai-generator';
@@ -2391,7 +2393,7 @@ router.post('/operator/continuous/:id/run-now', async (req: Request, res: Respon
     // ★ 2026-07-09 권한: 회사 관리자 OR 본인이 만든 operator만 실행 · ★ 1024 주인 판정 한 함수(operatorGate)
     const gate = await operatorGate(req, res, { plan: true });
     if (!gate) return;
-    const proposal = await generateProposalForOperator(req.params.id);
+    const proposal = await generateProposalForOperator(req.params.id, { manual: true });   // ★ 2026-11-02 지금 실행 = 대기 회차 교체(3-1 ②)
     if (!proposal) {
       // ★ 2026-10-05 사유 판정은 CT(explainEmptyRound)로 옮겼다 — 미리보기 시작과 같은 함수(동작 동일).
       return res.json({ success: true, proposal: null, message: await explainEmptyRound(req.params.id, gate.companyId) });
@@ -3721,6 +3723,30 @@ router.get('/operator/journeys/:id/check', async (req: Request, res: Response) =
 });
 
 // DELETE /api/ai/operator/journeys/:id/steps/:stepId — step 삭제 + 재번호
+// ★ 2026-11-02 설계서 3-9 · 3-0 CT-J12 — 검사를 통과한 수정안 보기 · [이 글로 바꾸기](원문은 사람이 누를 때만 · 상황판 [이 글로 보내기]가 이 화면으로 온다)
+router.get('/operator/journeys/:id/steps/:stepId/candidate', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    return res.json({ success: true, candidate: await readPassedCandidateForStep(gate.companyId, req.params.id, req.params.stepId) });
+  } catch (err: any) {
+    return journeyError(res, err, 'read candidate', '수정안을 읽지 못했어요');
+  }
+});
+router.post('/operator/journeys/:id/steps/:stepId/apply-candidate', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    const snapshotId = String(req.body?.snapshotId || '');
+    if (!isUuid(snapshotId)) return res.status(400).json({ success: false, error: '화면을 새로 연 뒤 다시 눌러 주세요.', code: 'CANDIDATE_REQUIRED' });
+    const r = await applyPassedCandidate(gate.companyId, req.params.id, req.params.stepId, snapshotId);
+    if (r !== 'applied') return res.status(409).json({ success: false, error: '그사이 문안이 바뀌어 이 수정안은 쓸 수 없어요. 화면을 새로 열어 주세요.', code: 'CANDIDATE_STALE' });
+    return res.json({ success: true });
+  } catch (err: any) {
+    return journeyError(res, err, 'apply candidate', '수정안으로 바꾸지 못했어요');
+  }
+});
+
 router.delete('/operator/journeys/:id/steps/:stepId', async (req: Request, res: Response) => {
   try {
     const gate = await journeyGate(req, res, { plan: false });
@@ -3775,9 +3801,7 @@ router.post('/operator/journeys/:journeyId/steps/:stepId/variants', async (req: 
     // 회사 격리 + 활성 여정 차단 (active 시 variant 신규 X)
     const j = await query(`SELECT status FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [req.params.journeyId, companyId]);
     if (j.rows.length === 0) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
-    if (j.rows[0].status === 'active') {
-      return res.status(409).json({ success: false, error: '켜진 여정의 A/B 문안은 고칠 수 없어요. 먼저 멈춰 주세요.' });
-    }
+    // ★ 2026-11-02 설계서 3-9 — 켜진 여정 = 그 칸이 지금 보류일 때만(판정 = createJourneyStepVariant 잠금 안 · 아니면 409)
     const { variantId, messageTemplate, subject, channel, alimtalkTemplateCode, alimtalkVariableMap, trafficWeight } = req.body || {};
     if (!variantId || typeof variantId !== 'string' || !variantId.trim()) {
       return res.status(400).json({ success: false, error: '문안 이름(A · B · C)을 골라 주세요.' });
@@ -3811,12 +3835,13 @@ router.delete('/operator/journeys/variants/:variantId', async (req: Request, res
       `SELECT 1 FROM journey_step_variants v
        JOIN journey_steps s ON v.step_id = s.id
        JOIN journeys j ON s.journey_id = j.id
-       WHERE v.id = $1::uuid AND j.company_id = $2::uuid AND j.status != 'active'`,
+       WHERE v.id = $1::uuid AND j.company_id = $2::uuid`,
       [req.params.variantId, companyId]
     );
     if (own.rows.length === 0) {
-      return res.status(404).json({ success: false, error: 'A/B 문안을 찾을 수 없거나 켜진 여정이에요. 먼저 멈춰 주세요.' });
+      return res.status(404).json({ success: false, error: 'A/B 문안을 찾을 수 없어요. 화면을 새로 열어 주세요.' });
     }
+    // ★ 2026-11-02 설계서 3-9 — 켜진 여정 = 그 칸이 지금 보류일 때만(판정 = deleteJourneyStepVariant 잠금 안 · 아니면 409)
     const ok = await deleteJourneyStepVariant(req.params.variantId);
     return res.json({ success: ok });
   } catch (err: any) {
@@ -4383,8 +4408,8 @@ router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) 
     if (!gate) return;
     const { companyId } = gate;
 
-    const reason = String(req.body?.reason || '관리자 일시정지');
-    const ok = await pauseJourney(companyId, req.params.id, reason);
+    // ★ 2026-11-02 사람 멈춤 사유 = 서버 상수(화면이 보낸 글자를 쓰지 않는다 · 설계서 3-5 · 3-0 CT-J2)
+    const ok = await pauseJourney(companyId, req.params.id, MANUAL_PAUSE_REASON);
     if (!ok) return res.status(404).json({ success: false, error: '켜져 있는 여정만 잠시 멈출 수 있어요.' });
     return res.json({ success: true });
   } catch (err: any) {

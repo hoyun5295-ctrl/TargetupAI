@@ -15,6 +15,7 @@
 // (2026-08-02 §11-5) 상한 전면 필수화로 classifyJourneyTrigger 의존이 사라졌다 — 커서 규약은 journey-cdp-cursor가 계속 소유.
 
 import { isSingleStepKind } from './journey-start-kind';
+import { nightArriveLabelKo } from './send-time-util';
 
 /** 화면 트리거 key — 프론트 카탈로그(journey-trigger-catalog.ts)의 key와 같다. */
 export type TriggerKey =
@@ -313,7 +314,7 @@ export function sendTimingForTrigger(triggerEvent: string): 'immediate' | 'daily
 export function sendTimingLine(triggerEvent: string | null | undefined, startKind?: string | null): string | null {
   if (isSingleStepKind(startKind ?? null)) return null;
   return sendTimingForTrigger(String(triggerEvent || '')) === 'daily'
-    ? '그날 들어온 고객을 모아 다음날 아침 9시에 보내요(칸에 기다림 · 시각을 정하면 그에 맞춰).'
+    ? `그날 들어온 고객을 모아 다음날 ${nightArriveLabelKo()}에 보내요(칸에 기다림 · 시각을 정하면 그에 맞춰).`   // ★ 2026-11-02 시각 = CT 상수(설계서 3-0 CT-J7 · 옛 「아침 9시」 글자)
     : '사건이 생기면 몇 분 안에 보내요(첫 칸에 기다림을 정하면 그만큼 뒤).';
 }
 

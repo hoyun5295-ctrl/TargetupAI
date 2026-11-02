@@ -58,7 +58,8 @@ export interface OperatorPreviewData {
   forecast: Array<{ date: string; count: number }> | null;
   window: { startAt: string; until: string; rounds: string[]; schedule: string; scheduleTime: string };
   copy: { mode: 'ai' | 'fixed'; subject: string; body: string; benefit: string | null; variables: string[] };
-  limits: { maxRecipients: number; maxCost: number; unitCost: number; channel: string };
+  /** ★ 2026-11-02 승인 기간 회차 = 예산만(회사 자동 상한은 걸지 않는다 · 서버 operatorCapPolicy) */
+  limits: { budgetMonthly: number | null; budgetDaily: number | null; unitCost: number; channel: string };
   appliedSegment: { key: string; label: string } | null;
   segment: { key: string | null; params: Record<string, number> | null };
   /** 다음 승인 창 전용 */
@@ -639,11 +640,11 @@ export default function OperatorPreviewModal({
                 <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2">
                   <Cell label="채널" value={channel} />
                   <Cell label={daily ? '7일 예상 발송비' : '회차 예상 발송비'} value={won(expectedCost)} />
-                  <Cell label="회차당 자동 상한" value={`${(d.limits.maxRecipients || 0).toLocaleString()}명`} />
-                  <Cell label="회차당 비용 상한" value={won(d.limits.maxCost)} />
+                  <Cell label="월 예산" value={d.limits.budgetMonthly != null ? won(d.limits.budgetMonthly) : '정하지 않음'} />
+                  <Cell label="하루 한도" value={d.limits.budgetDaily != null ? won(d.limits.budgetDaily) : '정하지 않음'} />
                 </div>
                 <ul className="mt-2 space-y-1 text-[12.5px] text-slate-600">
-                  <li>· 상한이나 예산을 넘는 날은 그 회차만 멈추고 다시 여쭤요. 월 예산은 정하지 않았어요(시작한 뒤 실행 중 [수정]에서 정할 수 있어요).</li>
+                  <li>· 승인하신 기간의 회차는 대상이 많아도 그대로 보내요. 예산을 넘는 날만 그 회차를 멈추고 다시 여쭤요.{d.limits.budgetMonthly == null && d.limits.budgetDaily == null ? ' 예산은 정하지 않았어요(시작한 뒤 실행 중 [수정]에서 정할 수 있어요).' : ''}</li>
                   <li>· 매 회차 발송 전에 담당자 문자로 그날 문안과 대상 수를 알려 드려요. 실행 중 화면의 [정지]로 그 회차만 멈출 수 있어요.</li>
                   <li>· 승인 기간이 끝나기 하루 전에 지난 회차 요약과 함께 다음 승인을 여쭤요. 승인하지 않으면 그 뒤로는 회차마다 승인 대기로 남아요.</li>
                   {mode === 'new' && <li>· 사진 · 리마인드는 시작한 뒤 실행 중 [수정]에서 붙일 수 있어요.</li>}

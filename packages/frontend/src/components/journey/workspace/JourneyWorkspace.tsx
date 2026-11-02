@@ -26,6 +26,7 @@ import {
 import JourneyModalShell from '../JourneyModalShell';
 import JourneyStepStudio, { type StudioStep, type StudioDelayMode } from '../JourneyStepStudio';
 import JourneyVariantsEditor from '../JourneyVariantsEditor';
+import JourneyAbCopyList, { abCopyLocked, type AbVariantCopy } from '../JourneyAbCopyList';
 import JourneyStepNotifyToggle from '../JourneyStepNotifyToggle';
 import JourneyPauseLogsModal from '../JourneyPauseLogsModal';
 import JourneyActionConfirmModal, { type JourneyActionMode } from '../JourneyActionConfirmModal';
@@ -47,6 +48,7 @@ import { STATUS_META, countText, triggerWhen, journeyApiErrorText, type Lifecycl
 import { isSendableUrl } from '../../../utils/message-placeholders';
 import { JOURNEY_STATUS_LABEL } from '../../../utils/journey-row-actions';
 import { TRIGGER_EVENTS } from '../../../utils/journey-trigger-catalog';
+import { resolveJourneyAdFlag } from '../../../utils/journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 
 interface Props {
   journeyId: string | null;
@@ -76,6 +78,8 @@ interface RawStep {
   notify_manager_on_pretest?: boolean | null;
   timingLabel?: string;
   conditionLabel?: string | null;
+  /** ★ 2026-11-02 설계서 3-16 — 이 칸의 A/B 문안(서버 상세가 싣는다) */
+  ab_variants?: AbVariantCopy[];
 }
 
 /** 새 칸(아직 서버에 없음). sent = 결과를 못 받은 넣기(넣기 전 서버 칸 id · 보낸 내용 지문) — 다음 저장 때 먼저 서버에서 찾는다(Codex 적대 B 2R). */
@@ -97,7 +101,7 @@ function toStudio(r: RawStep): StudioStep {
     channel: String(r.channel || 'lms'),
     messageTemplate: String(r.message_template || ''),
     subject: r.subject || '',
-    isAd: r.is_ad !== false,
+    isAd: resolveJourneyAdFlag(r.channel, r.is_ad),   // ★ 2026-11-02 광고 판정 = 서버와 같은 함수(CT-J8)
     delayHours: Number(r.delay_hours || 0),
     delayMode: (r.delay_mode || 'relative') as StudioDelayMode,
     targetHourKst: r.target_hour_kst ?? undefined,
@@ -520,7 +524,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     if (cur.messageTemplate.trim().length < 5) { toast.warning('꾸밀 문안을 먼저 써 주세요. AI 문안생성을 눌러도 돼요.'); return; }
     setAiBusy(true);
     try {
-      const r = await sendJson('/api/ai/operator/decorate-message', 'POST', { message: cur.messageTemplate, selectedVars: tokens, channel: cur.channel, isAd: cur.isAd !== false });
+      const r = await sendJson('/api/ai/operator/decorate-message', 'POST', { message: cur.messageTemplate, selectedVars: tokens, channel: cur.channel, isAd: resolveJourneyAdFlag(cur.channel, cur.isAd) });
       if (!r.ok || !r.data?.message) throw new Error(r.data?.error || 'AI 꾸미기를 받지 못했어요.');
       const o = decorateOutcome(r.data);
       if (!o.changed) { toast.info(o.text); return; }
@@ -777,6 +781,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const selNew = selected.startsWith(NEW_STEP_PREFIX) ? newSteps.find((n) => n.tempId === selected) || null : null;
   const selEditable = !locked && !!selStudio && (selNew ? !selNew.sent : (selRaw?.step_type === 'message' && STUDIO_CHANNELS.includes(String(selRaw?.channel || '').toLowerCase())));
   const selDeleting = !!selRaw && deleteIds.has(selRaw.id);
+  // ★ 2026-11-02 설계서 3-16 — 켜진 여정 A/B 칸 = 본문 잠금(서버도 409 · 같은 판정)
+  const selAbLocked = !!selRaw && abCopyLocked(status, selRaw.ab_variants);
   const canShapeSteps = !locked && (edit.structure || reshapeAllowed);
   const statusMeta = STATUS_META[status] || STATUS_META.draft;
 
@@ -1042,6 +1048,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                             )}
                           </>
                         )}
+                        copyLock={selRaw && selAbLocked ? (
+                          <JourneyAbCopyList variants={selRaw.ab_variants || []} baseBody={selRaw.message_template} baseSubject={selRaw.subject} onOpenAb={() => setVariantsOpen(selRaw.id)} />
+                        ) : undefined}
                         notifyControl={selRaw && selRaw.step_type === 'message' && !locked ? (
                           <JourneyStepNotifyToggle
                           key={`n:${selRaw.id}:${String(selRaw.notify_manager_on_pretest)}`}
@@ -1068,8 +1077,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         <p className="text-[14px] text-slate-700">이 칸은 저장하면 빠져요. 그대로 두려면 아래 [빼지 않기]를 눌러 주세요.</p>
                       ) : selRaw.step_type === 'message' ? (
                         <>
-                          {selRaw.subject && <div className="mb-1.5 text-[14px] font-semibold">{buildAdSubjectFront(selRaw.subject, String(selRaw.channel || 'lms').toUpperCase(), selRaw.is_ad !== false)}</div>}
-                          <pre className="whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed text-slate-700">{selRaw.channel === 'kakao' ? (selRaw.message_template || '문안이 비어 있어요.') : buildAdMessageFront(selRaw.message_template || '', String(selRaw.channel || 'lms').toUpperCase(), selRaw.is_ad !== false, opt080)}</pre>
+                          {selRaw.subject && <div className="mb-1.5 text-[14px] font-semibold">{buildAdSubjectFront(selRaw.subject, String(selRaw.channel || 'lms').toUpperCase(), resolveJourneyAdFlag(selRaw.channel, selRaw.is_ad))}</div>}
+                          <pre className="whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed text-slate-700">{selRaw.channel === 'kakao' ? (selRaw.message_template || '문안이 비어 있어요.') : buildAdMessageFront(selRaw.message_template || '', String(selRaw.channel || 'lms').toUpperCase(), resolveJourneyAdFlag(selRaw.channel, selRaw.is_ad), opt080)}</pre>
                           <p className="mt-2 text-[12.5px] text-slate-500">{stepChannelLabel(selRaw.channel)} 칸은 등록한 템플릿으로 나가요. 문안 수정 창에서 고쳐요.</p>
                         </>
                       ) : selRaw.step_type === 'wait' ? (
@@ -1275,7 +1284,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       )}
       {spamFor && journey?.callback_number && (() => {
         const ch = String(spamFor.channel || 'lms').toUpperCase() as 'SMS' | 'LMS' | 'MMS';
-        const sentBody = buildAdMessageFront(spamFor.messageTemplate, ch, spamFor.isAd !== false, opt080);
+        const spamIsAd = resolveJourneyAdFlag(spamFor.channel, spamFor.isAd);   // ★ 2026-11-02 광고 판정 = 서버와 같은 함수(CT-J8)
+        const sentBody = buildAdMessageFront(spamFor.messageTemplate, ch, spamIsAd, opt080);
         return (
           <SpamFilterTestModal
             onClose={() => setSpamFor(null)}
@@ -1283,8 +1293,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
             messageContentLms={spamFor.channel !== 'sms' ? sentBody : undefined}
             callbackNumber={String(journey.callback_number)}
             messageType={ch}
-            subject={buildAdSubjectFront(spamFor.subject || '', ch, spamFor.isAd !== false)}
-            isAd={spamFor.isAd !== false}
+            subject={buildAdSubjectFront(spamFor.subject || '', ch, spamIsAd)}
+            isAd={spamIsAd}
           />
         );
       })()}

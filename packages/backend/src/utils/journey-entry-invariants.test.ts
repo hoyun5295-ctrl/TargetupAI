@@ -63,12 +63,14 @@ describe('신규 고객 추출 불변식 (journey-target-extractor)', () => {
     expect(src).toMatch(/COALESCE\(c\.phone, ''\) <> ''/);
   });
 
-  it('기존 고객 술어를 부정으로 건다', () => {
-    expect(src).toMatch(/AND NOT \$\{existingPred\}/);
+  // ★ 2026-11-02 설계서 3-6(D19) — 신규 = 가입 근거(customer-joined-at newSignupSql) · 「구매 · 포인트 없음」 술어 지움
+  it('신규 판정 = 가입 근거 조각(켠 뒤 · 72시간 · 원장)', () => {
+    expect(src).toMatch(/entryClause = `\$\{buildLedgerAntiJoin\('c', params\.length\)\} AND \$\{newSignupSql\('c', since\)\}`;/);
+    expect(src).not.toMatch(/existingPred|buildExistingCustomerPredicate/);
   });
 
   it('판정 CT를 직접 쓴다 — 인라인 재구현 금지', () => {
-    expect(src).toMatch(/from '\.\/journey-identity-signals'/);
+    expect(src).toMatch(/from '\.\/customer-joined-at'/);
   });
 
   // ★ 2026-08-01 Codex 3R — 추출은 회사 능력을 조회하지 않는다.
@@ -155,7 +157,8 @@ describe('판정 불가 런타임 차단 (journey-trigger-watcher)', () => {
   });
 
   it('판정 불가면 사유를 남기고 정지한다 — 조용한 0건 금지', () => {
-    expect(src).toMatch(/pause_reason/);
+    // ★ 2026-11-02 사유와 같이 멈추는 쓰기 = CT-J2 조각(journey-pause-reason pausedSetSql · 사유 칸을 같은 문장에 쓴다)
+    expect(src).toMatch(/pausedSetSql\(params, reason\)/);
     expect(src).toMatch(/신규 고객 판정 불가/);
   });
 });

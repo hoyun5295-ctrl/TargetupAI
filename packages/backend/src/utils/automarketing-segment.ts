@@ -33,6 +33,7 @@
  */
 
 import { UserFacingError } from './http-error';
+import { newSignupSql, NO_JOINED_AT_REASON } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6)
 /** 상태 축(명부 한 장으로 판정) */
 type StateSegmentKey = 'all' | 'dormant' | 'recent_buyers' | 'vip' | 'birthday' | 'new_customers';
 /** 변화 축(지난 회차 스냅샷과 비교해 판정 — 자동마케팅 고유) */
@@ -85,6 +86,8 @@ export interface CompanySegmentFacts {
   hasPurchaseCount: boolean;
   /** 누적 구매 금액이 채워진 고객이 있는가 — 구매 증가 축의 근거. */
   hasPurchaseAmount: boolean;
+  /** ★ 2026-11-02 가입 근거(customers.joined_at)가 있는 고객이 있는가 — 새로 가입한 고객 축의 근거(CT-J6 · D20) */
+  hasJoinedAt: boolean;
 }
 
 export interface SegmentAvailability {
@@ -318,14 +321,16 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
   },
   {
     key: 'new_customers',
-    label: '새로 등록된 고객',
-    description: '고객 정보가 등록된 지 기준일 이내인 고객입니다. 등록 시점은 한줄로에 고객 정보가 들어온 때를 말합니다.',
-    params: [DAYS_PARAM('등록 후', 30)],
-    // 등록 시각은 모든 고객 행에 남는다 — 회사 데이터 사정과 무관하게 언제나 판정 가능하다.
-    resolve: () => ({ available: true, reason: '최근에 등록된 고객에게 보냅니다.' }),
+    label: '새로 가입한 고객',
+    description: '가입한 지 기준일 이내인 고객입니다. 가입한 때는 자사몰 회원 가입 · 싱크 가입일 · 화면에서 추가한 때를 말합니다.',
+    params: [DAYS_PARAM('가입 후', 30)],
+    // ★ 2026-11-02 설계서 3-6(D20 · CT-J6) — 등록 시각(created_at) = 우리가 처음 본 때라 오늘 엑셀로 올린 옛 고객도 잡혔다 → 가입 근거로 · 근거 있는 고객이 없으면 잠금
+    resolve: (f) => (f.hasJoinedAt
+      ? { available: true, reason: '최근에 가입한 고객에게 보냅니다.' }
+      : { available: false, reason: NO_JOINED_AT_REASON }),
     build: (params, values, ctx) => {
       params.push(new Date(ctx.now.getTime() - values.days * 24 * 60 * 60 * 1000).toISOString());
-      return `AND c.created_at >= $${params.length}`;
+      return `AND ${newSignupSql('c', `$${params.length}::timestamptz`)}`;
     },
   },
 

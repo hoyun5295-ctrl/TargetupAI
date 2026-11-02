@@ -30,9 +30,9 @@ ok('월 경계 롤오버 (07-02 D-3 → 06-29)', () => {
   const r = computeAnchorStepRunAt('2026-07-02', 3, 10);
   assert.strictEqual(kstDateStr(r), '2026-06-29');
 });
-ok('야간(03시) → 발송가능 09시 KST로 가드', () => {
+ok('야간(03시) → 발송 창 시작 08시 KST로 가드(★ 2026-11-02 §4 ⑤)', () => {
   const r = computeAnchorStepRunAt('2026-06-30', 0, 3);
-  assert.strictEqual(kstHourOf(r), 9); // shiftToSendableHour ARRIVE_HOUR
+  assert.strictEqual(kstHourOf(r), 8); // shiftToSendableHour NIGHT_ARRIVE_HOUR = SEND_HOURS.start
 });
 
 // computeNextAnchor

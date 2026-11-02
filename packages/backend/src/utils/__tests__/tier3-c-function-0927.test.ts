@@ -76,7 +76,8 @@ describe('R192 · R194 운영자', () => {
   });
   it('다음 회차 생성의 미처리 만료가 리마인드를 건드리지 않는다', () => {
     const o = src('continuous-operator.ts');
-    const b = between(o, "`UPDATE operator_proposals SET status = 'expired'\n      WHERE operator_id = $1::uuid", ']');
+    // ★ 2026-11-02 설계서 3-1 — 지난 회차 만료 = 회차 잠금 안 넣기 앞(같은 리마인드 제외 조건)
+    const b = between(o, "`UPDATE operator_proposals SET status = 'expired'\n        WHERE operator_id = $1::uuid", ']');
     expect(b).toContain("AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'");
   });
 });

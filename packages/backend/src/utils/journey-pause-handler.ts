@@ -13,9 +13,11 @@
 //   ⑤ 정지 기록의 번호 = 토큰에 실린 받은 번호(옛: 담당자 직접 입력) · 결과는 사실대로(이미 보내는 중인 건수를 센다)
 
 import crypto from 'crypto';
+import { MANUAL_PAUSE_REASON } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { query, pool } from '../config/database';
 import { pauseJourneyLineage } from './journey-lineage';
 import { createShortUrl } from './short-url';
+import { latestSnapshotSql } from './journey-step-versions';   // ★ 2026-11-02 판 읽기 CT(설계서 3-0 CT-J1)
 
 export interface PauseTokenInput {
   stepId: string;
@@ -201,11 +203,9 @@ export async function loadPauseView(token: string): Promise<PauseView | null> {
   if (!payload) return null;
   const snap = await query(
     `SELECT s.message_body, s.message_subject, s.channel, j.name AS journey_name, j.status AS journey_status, jstep.step_order
-       FROM journey_step_snapshots s
-       JOIN journeys j ON j.id = s.journey_id AND j.company_id = $3::uuid
-       JOIN journey_steps jstep ON jstep.id = s.step_id
-      WHERE s.step_id = $1::uuid AND s.journey_id = $2::uuid
-      ORDER BY s.created_at DESC LIMIT 1`,
+       FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} s
+       JOIN journeys j ON j.id = $2::uuid AND j.company_id = $3::uuid
+       JOIN journey_steps jstep ON jstep.id = $1::uuid`,
     [payload.step_id, payload.journey_id, payload.company_id],
   );
   const row = snap.rows[0];
@@ -256,9 +256,7 @@ export async function pauseStepForDay(token: string, pauseTriggerSource = 'manag
       paused = up.rows.length;
     }
     const snapRes = await client.query(
-      `SELECT id, message_body FROM journey_step_snapshots
-        WHERE step_id = $1 AND journey_id = $2
-        ORDER BY created_at DESC LIMIT 1`,
+      `SELECT snap.id, snap.message_body FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`,
       [payload.step_id, payload.journey_id],
     );
     const snapshot = snapRes.rows[0];
@@ -299,7 +297,7 @@ export async function pauseJourneyByToken(token: string): Promise<{ ok: true; ch
   if (!before.rows[0]) return { ok: false, error: 'token_invalid_or_expired' };
   const wasActive = String(before.rows[0].status) === 'active';
   // ★ 2026-10-20 여정 V.3 §6-5 — 사람 멈춤 = 같은 계보의 켜진 판 전부(옛 판 마무리분 포함).
-  await pauseJourneyLineage(payload.company_id, payload.journey_id, '담당자가 안내 문자 링크에서 여정 전체를 일시정지했습니다.');
+  await pauseJourneyLineage(payload.company_id, payload.journey_id, MANUAL_PAUSE_REASON);   // ★ 2026-11-02 사람 멈춤 = 상수(CT-J2)
   // ★ Codex C 1R — 멈춤은 위 CT 가 끝냈다. 뒤 조회 · 기록이 실패해도 실패로 답하지 않는다(조회 실패 = 멈춘 CT 가 성공한 것으로 · 기록 실패 = 로그)
   const after = await query(`SELECT status FROM journeys WHERE id = $1::uuid`, [payload.journey_id]).catch(() => null);
   const changed = wasActive && (after ? String(after.rows[0]?.status) === 'paused' : true);
@@ -312,23 +310,7 @@ export async function pauseJourneyByToken(token: string): Promise<{ ok: true; ch
   return { ok: true, changed };
 }
 
-/**
- * 여정 전체 정지 (status='active' → 'paused'). 스팸 끝까지 걸린 step·잔액 부족 등 그 step 본문 자체가 문제일 때
- *   모든 execution 발송을 한 번에 차단. 스캐너 등 외부 호출 공용 CT.
- *   (journey-executor.ts 안 file-local pauseJourney와 동일 UPDATE — 컬럼은 journeys 실재 확인.)
- */
-export async function pauseJourney(
-  journeyId: string,
-  reason: string,
-  /** ★ 2026-11-01 B1-4(Codex 구현 3R) — 판 확인과 같은 트랜잭션에서 멈출 때 그 실행자(기본 = 풀) */
-  run: (sql: string, params?: any[]) => Promise<unknown> = query,
-): Promise<void> {
-  await run(
-    `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
-      WHERE id = $1::uuid AND status = 'active'`,
-    [journeyId, reason.slice(0, 500)],
-  );
-}
+// ★ 2026-11-02 옛 내보내기 pauseJourney(가져다 쓰는 곳 0 · 죽은 쓰기) 지움 — 여정 멈춤 쓰기 = 각 자리 문장 + CT-J2 조각(journey-pause-reason pausedSetSql)
 
 /**
  * 자동 정지 (잔액 부족 / 통신사 fail 등 시스템 발화).
@@ -360,9 +342,7 @@ export async function autoPauseExecution(params: {
 
     // snapshot 조회
     const snapRes = await client.query(
-      `SELECT id, message_body FROM journey_step_snapshots
-        WHERE step_id = $1 AND journey_id = $2
-        ORDER BY created_at DESC LIMIT 1`,
+      `SELECT snap.id, snap.message_body FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`,
       [params.stepId, params.journeyId],
     );
     const snapshot = snapRes.rows[0];

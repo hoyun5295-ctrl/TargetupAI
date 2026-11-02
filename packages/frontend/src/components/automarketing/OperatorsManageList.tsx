@@ -61,7 +61,9 @@ export default function OperatorsManageList({ operators, onRunNow, onEdit, onApp
               <div className="mt-2 text-[13px] leading-relaxed text-slate-600 line-clamp-2 break-keep" title={op.objective}>{op.objective}</div>
               <div className="mt-2 space-y-0.5 text-xs text-slate-500">
                 <div><Clock className="w-3 h-3 inline" /> {POLICY_LABEL[op.schedule] || op.schedule}{op.schedule === 'yearly' && op.scheduleMonth ? ` ${op.scheduleMonth}월 ${op.scheduleDayOfMonth ?? 1}일` : ''} {op.scheduleTime} (KST)</div>
-                <div>다음 실행 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR') : '-'}</div>
+                {/* ★ 2026-11-02 설계서 3-2 C — 다음 발송 · 제안 준비 두 줄(옛: 「다음 실행」 = 제안 준비 시각만 보여 발송 시각으로 읽혔다) */}
+                <div>다음 발송 {op.nextSendAt ? new Date(op.nextSendAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : op.nextRunAt ? 'AI 최적 시각' : '-'}</div>
+                <div>제안 준비 {op.nextRunAt ? new Date(op.nextRunAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '-'}</div>
                 <div>제안 {op.totalProposals}건 (승인 {op.totalApproved} / 거부 {op.totalRejected} / 자동 {op.totalAutoExecuted})</div>
               </div>
 

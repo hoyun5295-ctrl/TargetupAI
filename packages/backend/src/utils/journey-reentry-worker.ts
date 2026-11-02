@@ -1,7 +1,7 @@
 /**
  * journey-reentry-worker.ts — D210+ Phase 3 (2026-05-23 Harold 명시)
  *
- * 자동 재진입 worker (6시간 cron)
+ * 자동 재진입 worker (1시간 cron · ★ 2026-11-02 설계서 3-7 · 옛 6시간)
  *
  * 본질 (사용자 승인하 자동화 매트릭스):
  *   - Harold 명시 본질 = "AI 자기 맘대로 X / 사용자 승인하 진행"
@@ -22,18 +22,20 @@
  *   - 회사 격리 — journey 영역 통한 company_id FK 정합 (journey_executions 영역 직접 X)
  *   - 한줄로 운영 영향 0 — worker 실패 시 발송 영향 0
  *   - workerRunning guard — 중복 진입 차단
- *   - 한 회사 batch limit 1,000명 (큰 회사 영역 분산 정합 — 다음 cron 영역 잔존 매트릭스 정합)
+ *   - 한 여정 회차 상한 = JOURNEY_COUNT_CAP(진입 감시와 같은 상수 · 남은 분 = 다음 회차 · ★ 2026-11-02 3-7 · 옛 1,000명 · 6시간)
  */
 
 import { query, pool } from '../config/database';
+import { pausedSetSql } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { entryOpenClause, lockEntryIfActive } from './journey-lineage';
 import { buildJourneySafetyFilter } from './journey-safety-filter';
 import { journeyOwnerConsent } from './mall-consent';
 import { getJourneyOwnerScopeSql } from './store-scope';
-import { firstRunAtFor } from './send-time-util';
+import { firstRunAtFor, isNightExemptStep } from './send-time-util';
 import { sendTimingForTrigger } from './journey-trigger-capability';
 import { backfillPerDayOf, entryCapExceeded, dailyRoomInLock } from './journey-step-limits';
 import { interleaveByCompany } from './concurrency';
+import { JOURNEY_COUNT_CAP, entryPropsFor } from './journey-target-extractor';
 
 /**
  * ★ 2026-10-25 여정 구조체크 2차 #6(뿌리 대장 R1) — 재진입도 진입 감시와 같은 진입 규칙 셋을 지난다.
@@ -42,8 +44,7 @@ import { interleaveByCompany } from './concurrency';
  */
 export const REENTRY_CAP_PAUSE_REASON = (n: number, cap: number) => `대량 진입 감지 (재진입 ${n}건 > 상한 ${cap}건). 자동 정지, 담당자 확인 필요`;
 
-const WORKER_INTERVAL_MS = 6 * 60 * 60 * 1000;  // 6h
-const PER_JOURNEY_BATCH_LIMIT = 1000;  // 한 journey당 1 cron 진입 영역 limit (큰 회사 영역 분산 정합)
+const WORKER_INTERVAL_MS = 60 * 60 * 1000;  // ★ 2026-11-02 설계서 3-7 · D4 — 1시간(옛 6시간 · 큰 회사 재진입이 하루 4천 명에 묶였다)
 
 let workerRunning = false;
 let workerInterval: ReturnType<typeof setInterval> | null = null;
@@ -53,7 +54,7 @@ export function startJourneyReentryWorker(): void {
     console.log('[JourneyReentryWorker] 옛 worker 진입 중 — skip');
     return;
   }
-  console.log('[JourneyReentryWorker] 6시간 주기 worker 시작 — 자동 재진입 진입 (회사 admin 명시 활성 영역만)');
+  console.log('[JourneyReentryWorker] 1시간 주기 worker 시작 — 자동 재진입 진입 (회사 admin 명시 활성 영역만)');
 
   // 진입 직후 1회 실행 (서버 재시작 직후 옛 due 영역 즉시 진입)
   void runReentryBatch();
@@ -74,7 +75,8 @@ export function stopJourneyReentryWorker(): void {
 /** 진입 잠금 뒤 보니 그 판의 진입이 닫혔다 — 롤백하고 이 여정만 건너뛴다(오류 아님). */
 class EntryClosedSkip extends Error {}
 
-async function runReentryBatch(): Promise<void> {
+/** 시험에서도 부른다(★ 2026-11-02 3-8 실 PG · 회차 한 번). */
+export async function runReentryBatch(): Promise<void> {
   if (workerRunning) {
     console.log('[JourneyReentryWorker] 옛 batch 진행 중 — skip');
     return;
@@ -108,7 +110,7 @@ async function runReentryBatch(): Promise<void> {
         const scopeSql = await getJourneyOwnerScopeSql(companyId, journeyId);
         // ★ 2026-10-25 #6 ② — 첫 칸 보낼 시각(진입 감시와 같은 CT · 옛: 지금 바로)
         const first = await query(
-          `SELECT delay_hours, delay_mode, target_hour_kst FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+          `SELECT delay_hours, delay_mode, target_hour_kst, step_type, channel, alimtalk_next_type FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
           [journeyId],
         );
         if (first.rows.length === 0) continue;
@@ -116,7 +118,7 @@ async function runReentryBatch(): Promise<void> {
         //   ★ Codex 1R — 상한 판정용 뽑기는 cap + 1(회차 1,000 명으로 먼저 자르면 상한 1,000 이상에서 넘침을 못 본다) · 1,000 명은 상한 통과 뒤 넣을 때
         const cap = j.threshold_recipients_per_step != null ? Number(j.threshold_recipients_per_step) : null;
         const backfill = backfillPerDayOf(j);
-        let pickLimit = cap != null ? cap + 1 : PER_JOURNEY_BATCH_LIMIT;
+        let pickLimit = cap != null ? cap + 1 : JOURNEY_COUNT_CAP;
 
         // 2) 진입 조건 매트릭스 매칭 → 상한 판정 → 신규 execution INSERT(같은 트랜잭션)
         // ★ 0930 Codex 2R — 진입 워커와 같은 진입 잠금 안에서 넣고 합계까지 한 트랜잭션(두 워커가 같은 고객을 동시에 넣지 않는다).
@@ -131,7 +133,7 @@ async function runReentryBatch(): Promise<void> {
           const lineage = fresh.lineageIds;
           if (!fresh.ok || !fresh.autoReentryEnabled) throw new EntryClosedSkip();
           const room = await dailyRoomInLock(client, j);
-          if (room != null) pickLimit = Math.max(0, Math.min(room, cap ?? room, PER_JOURNEY_BATCH_LIMIT));
+          if (room != null) pickLimit = Math.max(0, Math.min(room, cap ?? room, JOURNEY_COUNT_CAP));
           const cand = await client.query(
             `SELECT je.customer_id
              FROM journey_executions je
@@ -169,26 +171,29 @@ async function runReentryBatch(): Promise<void> {
           const picked: string[] = cand.rows.map((x: any) => String(x.customer_id));
           if (cap != null && entryCapExceeded(cap, backfill, picked.length)) {
             // 넣지 않고 멈춘다(진입 감시 대량 차단과 같은 규칙 · 같은 사유 · 같은 트랜잭션)
+            const pp: any[] = [journeyId, companyId];
             await client.query(
-              `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $3, updated_at = NOW()
+              `UPDATE journeys SET ${pausedSetSql(pp, REENTRY_CAP_PAUSE_REASON(picked.length, cap))}, updated_at = NOW()
                 WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
-              [journeyId, companyId, REENTRY_CAP_PAUSE_REASON(picked.length, cap)],
+              pp,
             );
             await client.query('COMMIT');
             console.warn(`[JourneyReentryWorker] 대량 재진입 차단 — journey=${journeyId} 후보=${picked.length} 상한=${cap} → 정지`);
             continue;
           }
-          const ids = picked.slice(0, PER_JOURNEY_BATCH_LIMIT);   // 회차 상한(남은 분 = 다음 회차 · 완료가 이른 순)
+          const ids = picked.slice(0, JOURNEY_COUNT_CAP);   // 회차 상한(진입 감시와 같은 상수 · 남은 분 = 다음 회차 · 완료가 이른 순)
+          // ★ 2026-11-02 설계서 3-8 · D5 — 진입 정보 = 진입 감시와 같은 함수(포인트 소멸 = 진입 때 포인트 · 장바구니 = 담은 상품 · 그 밖 = 없음 · 진입 표식 없음)
+          const props = await entryPropsFor(j, ids);
           // ★ 2026-11-02 첫 칸 시각 = 갈래(트리거 계약 · 진입 감시와 같은 함수 · 설계서 3-2 ②) · 진입 시각 = 이 트랜잭션의 NOW()(넣는 entered_at 과 같은 값 · Codex 구현 1R)
           const txNow: Date = (await client.query('SELECT NOW() AS now')).rows[0].now;
-          const nextRunAt = firstRunAtFor(sendTimingForTrigger(String(j.trigger_event || '')), String(first.rows[0].delay_mode || 'relative'), Number(first.rows[0].delay_hours || 0), first.rows[0].target_hour_kst ?? null, txNow);
+          const nextRunAt = firstRunAtFor(sendTimingForTrigger(String(j.trigger_event || '')), String(first.rows[0].delay_mode || 'relative'), Number(first.rows[0].delay_hours || 0), first.rows[0].target_hour_kst ?? null, txNow, { nightExempt: isNightExemptStep(first.rows[0]) });
           const r = ids.length === 0 ? { rows: [] as any[] } : await client.query(
             `INSERT INTO journey_executions
-               (id, journey_id, customer_id, current_step_order, status, next_run_at, entered_at, created_at)
-             SELECT gen_random_uuid(), $1::uuid, t.cid, 0, 'active', $2, NOW(), NOW()
+               (id, journey_id, customer_id, current_step_order, status, next_run_at, entered_at, created_at, entry_event_properties)
+             SELECT gen_random_uuid(), $1::uuid, t.cid, 0, 'active', $2, NOW(), NOW(), $4::jsonb -> (t.cid::text)
                FROM unnest($3::uuid[]) AS t(cid)
              RETURNING id`,
-            [journeyId, nextRunAt, ids],
+            [journeyId, nextRunAt, ids, JSON.stringify(props || {})],
           );
 
           reenteredCount = r.rows.length;

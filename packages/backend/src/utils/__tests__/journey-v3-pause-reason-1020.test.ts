@@ -61,8 +61,8 @@ describe('pauseReasonView', () => {
     const raws = [...src.matchAll(/(?:pauseJourney\(\w+\.journey_id, |pauseText: )(['`])([^'`]+)\1/g)].map((m) => m[2].replace(/\$\{[^}]+\}/g, 'X'));
     expect(raws.length).toBeGreaterThan(10);
     for (const r of raws) expect(pauseReasonView(r).kind, r).not.toBe('unknown');
-    // 이상치 관문(변수 글자) = 다시 켜기로 승인
-    expect(src).toContain('const text = `하루 묶음 인원이 평소보다 크게 많아 발송 전에 멈춤(');
+    // ★ 2026-11-02 이상치 관문 지움(설계서 3-6 · §4 ①) — 새로 쓰지 않는다 · 이미 그 글자로 멈춘 옛 행은 그대로 다시 켜기로 읽힌다
+    expect(src).not.toContain('평소보다 크게 많아');
     expect(pauseReasonView('하루 묶음 인원이 평소보다 크게 많아 발송 전에 멈춤(2026-11-01 진입 9,000명 · 지난 30일 하루 최대 100명)').fix?.action).toBe('resume');
   });
 });

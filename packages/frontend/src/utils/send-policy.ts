@@ -13,6 +13,8 @@ export interface SendPolicy {
   plannerDeadlineHour: number;
   plannerReviewLeadDays: number;
   plannerCopyMax: number;
+  /** ★ 2026-11-02 칸 대기 「다음 평일」 시각(서버 BUSINESS_DAY_HOUR · 설계서 3-0 CT-J7) */
+  businessDayHour: number;
 }
 
 let cached: SendPolicy | null = null;
@@ -25,7 +27,7 @@ export function loadSendPolicy(): Promise<SendPolicy | null> {
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         const p = d?.policy;
-        const ok = p && ['startHour', 'endHour', 'nightArriveHour', 'plannerDeadlineHour', 'plannerReviewLeadDays', 'plannerCopyMax'].every((k) => Number.isFinite(Number(p[k])));
+        const ok = p && ['startHour', 'endHour', 'nightArriveHour', 'plannerDeadlineHour', 'plannerReviewLeadDays', 'plannerCopyMax', 'businessDayHour'].every((k) => Number.isFinite(Number(p[k])));
         if (ok) cached = p as SendPolicy;
         return cached;
       })
@@ -66,6 +68,11 @@ export const hh = (h: number) => String(Math.floor(h)).padStart(2, '0');
 /** 플래너 발송 시각 문장 — 「오전 8시」(받기 전 = 빈 글 · ★ 2026-10-25 원장 #62 옛: 화면마다 「오전 8시」를 박았다) */
 export function plannerSendAtText(p: SendPolicy | null): string {
   return p ? koHour(p.startHour, 'ampm') : '';
+}
+
+/** 「다음 평일 오전 9시」(칸 대기 next_business_day · 서버 지도 문구와 같은 꼴 · 받기 전 = 「다음 평일」) */
+export function nextBusinessDayText(p: SendPolicy | null): string {
+  return p ? `다음 평일 ${koHour(p.businessDayHour, 'ampm')}` : '다음 평일';
 }
 
 /** 「밤 9시~아침 8시」(야간 광고 제한 구간) */

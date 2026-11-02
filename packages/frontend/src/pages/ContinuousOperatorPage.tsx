@@ -8,6 +8,7 @@
 //   세부설정 · 시나리오 · 오늘의 추천 · 한 줄 답 카드도 이 창 하나로 시작한다(POST /operator/continuous = 마케팅 캘린더 전용).
 //   [문안 직접 쓰기] = AI 문안 없이 대상만(미리보기 0크레딧) · 창 편집(칸 · 기준 · 문안 분기 · 혜택)은 서버가 다시 계산한다.
 //   탭 = 승인할 제안 / 실행 중(`?tab=running` · 허브 "관리 →" 착지). 핸들러·저장 계약은 그대로.
+// ★ 2026-11-02 회차 승인 = 정한 시각에 보낸다(아직이면 그 시각 예약 · 지났으면 확인 창이 묻고 지금 · 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-2 B).
 // native dialog 0(ConfirmModal·useToast). 모델명 0.
 import { getSendPolicy, isNightAdTime, nightRangeText, koHour } from '../utils/send-policy';
 import { useEffect, useRef, useState } from 'react';
@@ -536,10 +537,13 @@ export default function ContinuousOperatorPage() {
     const policy = getSendPolicy();
     const nightNow = !!policy && isNightAdTime(policy, new Date());
     const nightLine = nightNow && policy ? `지금은 야간(${nightRangeText(policy)})이라 ${koHour(policy.nightArriveHour, 'ampm')}에 나가요.` : '';
+    // ★ 2026-11-02 설계서 3-2 B — 회차 승인 = 정한 시각에 보낸다(서버 approveProposal 이 그 시각에 예약 · 지났으면 지금)
+    const future = !!sched && !passed;
     setConfirmState({
-      mode: passed ? 'warning' : 'default', title: '제안 승인 + 발송', confirmLabel: nightNow ? '승인 + 아침 발송 예약' : '승인 + 발송',
+      mode: passed ? 'warning' : 'default', title: future ? '제안 승인 + 예약' : '제안 승인 + 발송', confirmLabel: future ? '승인 + 정한 시각 예약' : nightNow ? '승인 + 아침 발송 예약' : '승인 + 발송',
       description: passed
-        ? `발송 예정 시각(${schedLabel})이 이미 ${passedDays >= 1 ? `${passedDays}일 ` : ''}지났습니다.\n${nightLine || '지금 승인하면 예정일과 무관하게 즉시 발송됩니다.'} 시즌·기념일 캠페인이라면 시점이 맞는지 확인해 주세요.`
+        ? `정한 시각(${schedLabel})이 이미 ${passedDays >= 1 ? `${passedDays}일 ` : ''}지났어요. 지금 보낼까요?\n${nightLine || '승인하면 바로 보내요.'} 시즌·기념일 캠페인이라면 시점이 맞는지 확인해 주세요.`
+        : future ? `승인하면 ${schedLabel}에 보내요. 보내기 전에 안내 문자를 드려요.`
         : nightLine ? `이 제안을 승인할까요?\n${nightLine}` : '이 제안을 승인하고 바로 발송하시겠습니까?\n승인 즉시 대상 고객에게 발송됩니다.',
       onConfirm: async () => {
         const d = await proposalAction(`${p.id}/approve`, selection);

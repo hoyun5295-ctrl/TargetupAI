@@ -14,7 +14,12 @@ import { LinkShell, LinkLoading, LinkInvalid, LinkNotice } from '../components/l
 import { stepChannelLabel } from '../utils/journey-labels';
 
 type StepCheck = 'passed' | 'unverified' | 'held' | 'waiting' | 'none';
-interface Todo { kind: string; title: string; reason: string; action: { label: string; href: string } | null }
+interface Todo {
+  kind: string; title: string; reason: string; action: { label: string; href: string } | null;
+  /** ★ 2026-11-02 걸린 원문 · 검사를 통과한 수정안(서버가 준 글 그대로 · 바꾸기 = 로그인 화면) */
+  compare?: { original: string; candidate: string } | null;
+  altAction?: { label: string; href: string } | null;
+}
 interface Board {
   companyName: string;
   scope: 'company' | 'mine';
@@ -132,11 +137,30 @@ export default function ManagerBoardPage() {
                       <li key={i} className="py-3">
                         <p className="text-[13.5px] font-semibold text-slate-900">{t.title}</p>
                         <p className="mt-1 text-[12.5px] leading-relaxed text-slate-600">{t.reason}</p>
-                        {t.action && (
-                          <a href={t.action.href} className="mt-2 inline-flex items-center gap-1 text-[12.5px] font-semibold text-indigo-700">
-                            {t.action.label}<ChevronRight className="w-3.5 h-3.5" />
-                          </a>
+                        {t.compare && (
+                          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                              <p className="text-[11px] font-semibold text-slate-500">걸린 문안</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-slate-600">{t.compare.original}</p>
+                            </div>
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
+                              <p className="text-[11px] font-semibold text-emerald-700">검사를 통과한 수정안</p>
+                              <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-relaxed text-slate-800">{t.compare.candidate}</p>
+                            </div>
+                          </div>
                         )}
+                        <div className="mt-2 flex flex-wrap items-center gap-3">
+                          {t.action && (
+                            <a href={t.action.href} className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-indigo-700">
+                              {t.action.label}<ChevronRight className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                          {t.altAction && (
+                            <a href={t.altAction.href} className="inline-flex items-center gap-1 text-[12.5px] font-medium text-slate-600">
+                              {t.altAction.label}<ChevronRight className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
                       </li>
                     ))}
                   </ul>

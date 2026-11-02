@@ -38,6 +38,16 @@ export function findVarTokens(text: string): VarToken[] {
   return out;
 }
 
+/**
+ * ★ 2026-11-02 보내면 빈칸이 될 %변수% 이름 — 치환(messageUtils replaceVariables 2단계 = 매핑 이름마다 `%이름%` · 남은 조각 = cleanLeftoverVars 가 지움)과
+ *   같은 쪼개기(findVarTokens) · 넘긴 이름 = 그 회사 매핑 이름(prepareFieldMappings 의 키 · 여정 렌더가 쓰는 것과 같은 값) · 설계서 3-13 · CT-J10.
+ */
+export function unknownVarNames(text: string | null | undefined, knownNames: ReadonlySet<string>): string[] {
+  const out: string[] = [];
+  for (const t of findVarTokens(String(text || ''))) if (!knownNames.has(t.name) && !out.includes(t.name)) out.push(t.name);
+  return out;
+}
+
 /** 조각마다 바꿀 값을 받아 문장을 다시 잇는다(값이 undefined면 그 조각은 원문 그대로) */
 export function replaceVarTokens(text: string, fn: (name: string) => string | undefined): string {
   if (!text) return '';

@@ -20,7 +20,7 @@ vi.mock('../journey-lineage', async (orig) => ({
   lockLineage: vi.fn(async (run: any, id: string) => { await run.query(`SELECT pg_advisory_xact_lock(hashtext('journey-entry'), 1) FROM journeys WHERE id = $1::uuid`, [id]); }),
 }));
 vi.mock('../journey-trigger-db', async (orig) => ({ ...(await orig<any>()), dbAcceptsTriggerEvent: vi.fn(async () => true) }));
-vi.mock('../journey-entry-ledger', async (orig) => ({ ...(await orig<any>()), seedBaselineForJourney: vi.fn(async () => ({ seeded: 0 })), seedGradeStateForJourney: vi.fn(async () => ({ seeded: 0 })) }));
+vi.mock('../journey-entry-ledger', async (orig) => ({ ...(await orig<any>()), reseedOnActivate: vi.fn(async () => ({ reseeded: true, seeded: 0 })) }));
 
 import { query, pool } from '../../config/database';
 import { judgeAttach, representativeOf, attachJourney, detachJourney, AttachBlockedError, type AttachJourneyRow } from '../journey-attach';
@@ -30,7 +30,7 @@ import { placeAttached, orderAttached, attachLineState, journeyHealth } from '..
 import { isCreatableTriggerEvent, isImplementedTriggerEvent, aiSelectableTriggerEvents, formatTriggerMenuForAi } from '../journey-trigger-capability';
 import { validateJourneyEntryConfig } from '../journey-builder';
 import { dbAcceptsTriggerEvent, JourneyMigrationPendingError } from '../journey-trigger-db';
-import { seedBaselineForJourney } from '../journey-entry-ledger';
+import { reseedOnActivate } from '../journey-entry-ledger';
 
 const q = query as unknown as ReturnType<typeof vi.fn>;
 const connect = (pool as any).connect as ReturnType<typeof vi.fn>;
@@ -171,7 +171,7 @@ const dbRow = (id: string, over: Record<string, any> = {}) => ({
 });
 
 describe('3. 붙이기 · 떼기', () => {
-  beforeEach(() => { q.mockReset(); connect.mockReset(); (dbAcceptsTriggerEvent as any).mockResolvedValue(true); (seedBaselineForJourney as any).mockClear(); });
+  beforeEach(() => { q.mockReset(); connect.mockReset(); (dbAcceptsTriggerEvent as any).mockResolvedValue(true); (reseedOnActivate as any).mockClear(); });
 
   it('붙이기 — 계보 잠금 → 행 잠금 → 잠금 안 다시 점검 → 바꿈(시작 사건 · 결과 · 원래 시작 · 켜진 여정 기준 시각 = 지금)', async () => {
     const calls = mockClient([
@@ -252,8 +252,9 @@ describe('3. 붙이기 · 떼기', () => {
     ]);
     const out = await detachJourney(CO, B);
     expect(out.triggerEvent).toBe('customer.created');
-    expect(seedBaselineForJourney).toHaveBeenCalledWith(B, CO);
-    expect((seedBaselineForJourney as any).mock.invocationCallOrder[0]).toBeLessThan(connect.mock.invocationCallOrder[0]);
+    // ★ 2026-11-02 기준선 = CT-J11 한 곳(떼기 = 사람 조작 = 심는다 · 바꾸기 전)
+    expect(reseedOnActivate).toHaveBeenCalledWith(expect.any(Function), B, CO, 'customer.created', 'detach');
+    expect((reseedOnActivate as any).mock.invocationCallOrder[0]).toBeLessThan(connect.mock.invocationCallOrder[0]);
     const upd = calls.find((c) => /UPDATE journeys SET trigger_event/.test(c.text))!;
     expect(upd.params?.slice(2, 4)).toEqual(['customer.created', 'event']);
     expect(JSON.parse(upd.params?.[4])).toEqual({ recent_hours: 24, customer_conditions: [{ field: 'region', op: '==', value: '서울' }], start_gen: 3 });   // 떼기도 세대 +1
@@ -367,7 +368,8 @@ describe('5. 만들기 길 차단 · 켜기 검사 · 감시 배선', () => {
   it('감시 — after 갈래가 앞 실행 id 를 표식으로 싣고 상한 판정 뒤 같은 넣기 함수로', () => {
     const w = SRC('journey-trigger-watcher.ts');
     expect(w).toContain("afterProps = Object.fromEntries(rows.map((x) => [x.customerId, { __entry: { src: 'after', key: x.afterExecId } }]));");
-    expect(w.indexOf('if (afterProps) return enqueueCandidates(j, ids, afterProps, expect);')).toBeGreaterThan(w.indexOf('대량 진입 감지'));
+    // ★ 2026-11-02 설계서 3-8 — 넣기 한 자리(앞 여정 표식 · 그 밖 = 진입 정보 한 함수)
+    expect(w.indexOf('const r = await enqueueCandidates(j, ids, afterProps ?? await entryPropsFor(j, ids), expect);')).toBeGreaterThan(w.indexOf('대량 진입 감지'));
     // 넣기 · 커서 넣기 · 멈춤 = 같은 시작 설정 조각(시작 사건 · after 면 앞 여정 · 결과 · 기준 시각 원문)으로 쓰기 직전에 다시 본다(Codex 적대 A 1R · 2R)
     expect(w).toContain("sql += ` AND ${a}trigger_filters->>'after_root' = $${n - 2} AND ${a}trigger_filters->>'after_outcome' = $${n - 1} AND ${a}last_event_cursor = $${n}::timestamptz`;");
     // 세대(start_gen) 비교 — 붙였다 떼는 왕복도 가른다(Codex 적대 A 3R)

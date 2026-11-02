@@ -69,6 +69,7 @@ import { insertMinimalRow } from './pg/fixtures';
 import { ledgerBlockSql } from './pg/global-setup';
 import { runJourneyExecutor } from '../journey-executor';
 import { pickStepCampaignForUnits, resetStepCampaignSeqCache, type StepCampaignSpec } from '../journey-step-campaign';
+import { stepSendableSql, stepHeldSql } from '../journey-pretest-notifier';
 
 /** 옛 코드(배포본 journey-step-campaign.ts getOrCreateStepCampaign)의 매핑 문장 글자 그대로 */
 const OLD_MAPPING_SQL = `INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id)
@@ -451,10 +452,10 @@ describe('묶음 발송(DDL-1 뒤 = 배포 직후 상태)', () => {
     expect(ctl.units).toHaveLength(0);
   });
 
-  it('하루 묶음 이상치 관문 = 지난 30일 하루 최대 × 3 넘으면 멈춤 + 그날 기록 + 경보 · 다시 켜면(승인) 그대로 나간다', async () => {
+  // ★ 2026-11-02 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-6 · D2 — 하루 묶음 이상치 관문 없앰(양으로 작은 여정을 통째로 멈췄다 · 신규 판정 = 가입 근거)
+  it('이상치 관문 없음 = 지난 날 하루 1명 · 어제 4명 = 그대로 4명 나감 · 멈춤 0 · 이상치 기록 0', async () => {
     const yday = kstDay(-1);
     const s = await seed({ trigger: 'customer.created', customers: Array.from({ length: 4 }, () => ({ enteredAt: kstNoon(yday) })) });
-    // 지난 8일 하루 1명씩(끝난 실행 = 때가 아니다)
     for (let k = 2; k <= 9; k++) {
       const c = randomUUID();
       await insertMinimalRow(pool, 'customers', { id: c, company_id: s.co, phone: `0108${String(k).padStart(7, '0')}`, is_active: true, sms_opt_in: true });
@@ -462,37 +463,10 @@ describe('묶음 발송(DDL-1 뒤 = 배포 직후 상태)', () => {
       await pool.query(`UPDATE journey_executions SET entered_at = $2 WHERE customer_id = $1`, [c, kstNoon(kstDay(-k)).toISOString()]);
     }
     await runJourneyExecutor();
-    expect(ctl.units).toHaveLength(0);
-    const js = await journeyStatus(s);
-    expect(js.status).toBe('paused');
-    expect(js.pause_reason).toContain('평소보다 크게 많아');
-    const pl = await pool.query(`SELECT pause_trigger_source, target_count_snapshot FROM journey_step_pause_logs WHERE journey_id = $1 AND pause_reason = 'daily_volume_anomaly'`, [s.j]);
-    expect(pl.rows).toEqual([{ pause_trigger_source: `daily_volume_gate:${yday}`, target_count_snapshot: 4 }]);
-    expect(ctl.alerts).toContain(`journey-daily-volume:${s.j}:${yday}`);
-
-    await pool.query(`UPDATE journeys SET status = 'active', pause_reason = NULL WHERE id = $1`, [s.j]);
-    await runJourneyExecutor();
     expect(ctl.units.flatMap((u) => u.phones)).toHaveLength(4);
     expect((await journeyStatus(s)).status).toBe('active');
-  });
-
-  it('하루 묶음 이상치 관문 = 한 묶음에 섞인 진입 날짜마다(평범한 앞날 + 이상치인 다음 날 = 다음 날에서 멈춤 · Codex 구현 1R)', async () => {
-    const d2 = kstDay(-2); const d1 = kstDay(-1);
-    const s = await seed({ trigger: 'customer.created', customers: [{ enteredAt: kstNoon(d2) }, ...Array.from({ length: 4 }, () => ({ enteredAt: kstNoon(d1) }))] });
-    for (let k = 3; k <= 10; k++) {
-      const c = randomUUID();
-      await insertMinimalRow(pool, 'customers', { id: c, company_id: s.co, phone: `0108${String(k).padStart(7, '0')}`, is_active: true, sms_opt_in: true });
-      await insertMinimalRow(pool, 'journey_executions', { id: randomUUID(), journey_id: s.j, customer_id: c, current_step_order: 1, status: 'completed' });
-      await pool.query(`UPDATE journey_executions SET entered_at = $2 WHERE customer_id = $1`, [c, kstNoon(kstDay(-k)).toISOString()]);
-    }
-    await runJourneyExecutor();
-    expect(ctl.units).toHaveLength(0);
-    expect((await journeyStatus(s)).status).toBe('paused');
-    const pl = await pool.query(`SELECT pause_trigger_source FROM journey_step_pause_logs WHERE journey_id = $1 AND pause_reason = 'daily_volume_anomaly'`, [s.j]);
-    expect(pl.rows.map((r: any) => r.pause_trigger_source)).toEqual([`daily_volume_gate:${d1}`]);
-    await pool.query(`UPDATE journeys SET status = 'active', pause_reason = NULL WHERE id = $1`, [s.j]);
-    await runJourneyExecutor();
-    expect(ctl.units.flatMap((u) => u.phones)).toHaveLength(5);
+    const pl = await pool.query(`SELECT 1 FROM journey_step_pause_logs WHERE journey_id = $1 AND pause_reason = 'daily_volume_anomaly'`, [s.j]);
+    expect(pl.rows).toEqual([]);
   });
 });
 
@@ -551,5 +525,138 @@ describe('단계 캠페인 — DDL-1 상태 · DDL-2 뒤(I3 · I6)', () => {
     }
     const old = await pool.query(OLD_MAPPING_SQL, [s.j, s.s1, kstDay(), randomUUID()]).then(() => null, (e: any) => e?.code);
     expect(old).toBe('42P10');
+  });
+});
+
+// ★ 2026-11-02 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md §7 — 실행기 효과 자리(3-4 ② · 3-4 ④ · 3-3 (c) · 3-18)
+describe('C98 핵심 처방 — 실행기(실 PG)', () => {
+  beforeAll(async () => {
+    await pool.query(ledgerBlockSql('C96-DDL-1'));
+    resetStepCampaignSeqCache();
+  });
+  const PAID = { revenue_applied: true, status: 'paid' };
+  const purchase = async (co: string, cust: string) => {
+    const id = randomUUID();
+    await insertMinimalRow(pool, 'cdp_events', { id, company_id: co, customer_id: cust, event_name: 'purchase', source: 'test', properties: PAID });
+    return id;
+  };
+  const reverse = (ev: string) => pool.query(`UPDATE cdp_events SET properties = properties || '{"revenue_reversed": true, "status": "cancelled"}'::jsonb WHERE id = $1`, [ev]);
+
+  it('3-4 ② 구매로 들어온 뒤 그 구매 취소 = 그 실행 끝(ended · order_cancelled · 발송 0) · 결제 그대로 = 발송', async () => {
+    const s = await seed({ trigger: 'cdp.purchase', customers: [{}, {}] });
+    for (const [i, ex] of s.execs.entries()) {
+      const ev = await purchase(s.co, s.custs[i]);
+      await pool.query(`UPDATE journey_executions SET entry_event_properties = $2::jsonb WHERE id = $1`, [ex, JSON.stringify({ __entry: { src: 'trigger', key: ev } })]);
+      if (i === 1) await reverse(ev);
+    }
+    await runJourneyExecutor();
+    expect(ctl.units.flatMap((u) => u.phones)).toHaveLength(1);
+    const st = await execState(s);
+    expect(st.get(s.execs[1]).status).toBe('ended');
+    expect((await logsOf(s)).filter((l: any) => l.execution_id === s.execs[1]).map((l: any) => `${l.status}:${l.error_reason}`)).toEqual(['skipped:order_cancelled']);
+  });
+
+  it('3-4 ④ 가입으로 시작한 여정의 「구매했으면」 조건 + 취소한 구매 = 안 산 갈래(끝) · 결제한 구매 = 산 갈래', async () => {
+    const s = await seed({ trigger: 'customer.created', customers: [{}, {}] });
+    await pool.query(
+      `UPDATE journey_steps SET step_type = 'condition', condition_jsonb = '{"type": "cdp_event_exists", "event_name": "purchase", "within_days": 7}'::jsonb WHERE id = $1`, [s.s1]);
+    await purchase(s.co, s.custs[0]);
+    await reverse(await purchase(s.co, s.custs[1]));
+    await runJourneyExecutor();
+    const logs = await logsOf(s);
+    expect(logs.find((l: any) => l.execution_id === s.execs[0])?.error_reason).toBe('condition_passed');
+    expect((await execState(s)).get(s.execs[1]).status).toBe('ended');
+    expect(ctl.units).toHaveLength(0);
+  });
+
+  it('3-3 (c) 판에 채울 자리 = 실행기가 그 칸 보류 · 발송 0 · 여정 멈춤 0 · 담당자 안내 원장 1', async () => {
+    const s = await seed({ customers: [{}, {}] });
+    const snap = randomUUID();
+    await insertMinimalRow(pool, 'journey_step_snapshots', { id: snap, journey_id: s.j, step_id: s.s1, message_body: '[혜택 안내: 직접 수정해주세요] 이번 주 안내드려요.', confidence_score: 100 });
+    await runJourneyExecutor();
+    expect(ctl.units).toHaveLength(0);
+    expect((await journeyStatus(s)).status).toBe('active');
+    expect((await pool.query(`SELECT ${stepHeldSql('$1::uuid', '$2::uuid')} AS h`, [s.j, s.s1])).rows[0].h).toBe(true);
+    const held = (await pool.query(`SELECT snapshot_id, notice_sent_at FROM journey_pretest_schedules WHERE journey_id = $1 AND step_id = $2 AND status = 'held'`, [s.j, s.s1])).rows;
+    expect(held).toHaveLength(1);
+    expect(String(held[0].snapshot_id)).toBe(snap);
+    expect(held[0].notice_sent_at).toBeNull();   // 안내 = 원장에 남김(보내기 = 보내기 전 검사 스캔의 안내 패스)
+    expect([...(await execState(s)).values()].every((e: any) => e.status === 'active' && Number(e.current_step_order) === 0)).toBe(true);
+  });
+
+  it('3-18 발송 선점 판정 = 읽은 판 그대로일 때만(다른 연결이 새 판 · 보류를 커밋하면 거짓)', async () => {
+    const s = await seed({ customers: [] });
+    const read = (await pool.query(`SELECT id FROM journey_step_snapshots WHERE step_id = $1 ORDER BY created_at DESC LIMIT 1`, [s.s1])).rows[0].id;
+    const ok = async () => (await pool.query(`SELECT ${stepSendableSql('$1::uuid', '$2::uuid', '$3::uuid')} AS ok`, [s.j, s.s1, read])).rows[0].ok;
+    expect(await ok()).toBe(true);
+    const other = await pool.connect();
+    try {
+      await other.query('BEGIN');
+      const nid = randomUUID();
+      await insertMinimalRow(other, 'journey_step_snapshots', { id: nid, company_id: s.co, journey_id: s.j, step_id: s.s1, message_body: '고친 글', confidence_score: 0 });
+      await other.query(`UPDATE journey_step_snapshots SET created_at = NOW() + INTERVAL '1 second' WHERE id = $1`, [nid]);
+      expect(await ok()).toBe(true);   // 커밋 전 = 아직 그 판
+      await other.query('COMMIT');
+    } finally { other.release(); }
+    expect(await ok()).toBe(false);   // 새 판(검사 전)이 커밋됨 = 읽은 판으로는 선점 0
+    const s2 = await seed({ customers: [] });
+    const read2 = (await pool.query(`SELECT id FROM journey_step_snapshots WHERE step_id = $1`, [s2.s1])).rows[0].id;
+    await pool.query(
+      `INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, scheduled_send_at, notify_at, status, snapshot_id) VALUES ($1, $2, $3, NOW(), NOW(), 'held', $4)`,
+      [s2.co, s2.j, s2.s1, read2]);
+    expect((await pool.query(`SELECT ${stepSendableSql('$1::uuid', '$2::uuid', '$3::uuid')} AS ok`, [s2.j, s2.s1, read2])).rows[0].ok).toBe(false);
+  });
+});
+
+// ★ 2026-11-02 설계서 3-15 · CT-J9 — 클릭 = 그 여정 · 그 칸 링크(조건 두 꼴 · 목표 · 실 PG)
+describe('C98 CT-J9 여정 링크 클릭(실행기 · 실 PG)', () => {
+  beforeAll(async () => {
+    await pool.query(ledgerBlockSql('C96-DDL-1'));
+    resetStepCampaignSeqCache();
+  });
+  /** 1칸을 보낸 뒤(로그 sent · 1시간 전) 다음 차례가 된 실행 · 고객 0 = 이 여정 1칸 링크 클릭 · 고객 1 = 다른 여정 링크 클릭 */
+  const afterFirst = async (o: { trigger?: string } = {}) => {
+    const s = await seed({ trigger: o.trigger ?? 'customer.created', customers: [{}, {}] });
+    for (const ex of s.execs) {
+      await pool.query(`INSERT INTO journey_step_logs (execution_id, step_id, sent_at, status) VALUES ($1, $2, NOW() - INTERVAL '1 hour', 'sent')`, [ex, s.s1]);
+      await pool.query(`UPDATE journey_executions SET current_step_order = 1, next_run_at = NOW() - INTERVAL '1 minute' WHERE id = $1`, [ex]);
+    }
+    const click = (cust: string, journeyId: string) => insertMinimalRow(pool, 'cdp_events', {
+      id: randomUUID(), company_id: s.co, customer_id: cust, event_name: 'message_click', source: 'short_url',
+      properties: { journey_id: journeyId, step_id: s.s1 },
+    });
+    await click(s.custs[0], s.j);
+    await click(s.custs[1], randomUUID());
+    return s;
+  };
+  const toCondition = (s: Seeded, cond: Record<string, unknown>) => pool.query(
+    `UPDATE journey_steps SET step_type = 'condition', condition_jsonb = $2::jsonb WHERE journey_id = $1 AND step_order = 2`, [s.j, JSON.stringify(cond)]);
+
+  it('조건 「이 칸 링크를 눌렀나」(step_link_clicked) = 이 여정 그 칸 링크만', async () => {
+    const s = await afterFirst();
+    await toCondition(s, { type: 'step_link_clicked', step_id: s.s1 });
+    await runJourneyExecutor();
+    const st = await execState(s);
+    expect(st.get(s.execs[1]).status).toBe('ended');
+    expect(st.get(s.execs[0]).status).not.toBe('ended');
+    expect((await logsOf(s)).find((l: any) => l.execution_id === s.execs[0] && l.error_reason === 'condition_passed')).toBeTruthy();
+  });
+
+  it('옛 조건 「앞 칸 클릭」(journey_step_clicked · 칸 순번) = 이 여정 그 칸 링크만', async () => {
+    const s = await afterFirst();
+    await toCondition(s, { type: 'journey_step_clicked', step_order: 1, within_days: 7 });
+    await runJourneyExecutor();
+    const st = await execState(s);
+    expect(st.get(s.execs[1]).status).toBe('ended');
+    expect(st.get(s.execs[0]).status).not.toBe('ended');
+  });
+
+  it('목표 「클릭」 = 이 여정 링크를 누른 실행만 목표 달성(goal_met) · 다른 여정 링크 = 계속', async () => {
+    const s = await afterFirst();
+    await pool.query(`UPDATE journeys SET goal_exit_enabled = true, goal_kind = 'click' WHERE id = $1`, [s.j]);
+    await runJourneyExecutor();
+    const st = await execState(s);
+    expect(st.get(s.execs[0]).status).toBe('goal_met');
+    expect(st.get(s.execs[1]).status).not.toBe('goal_met');
   });
 });

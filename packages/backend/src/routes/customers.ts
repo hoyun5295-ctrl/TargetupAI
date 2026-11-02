@@ -6,7 +6,7 @@ import { respondUserError } from '../utils/http-error';
 // ★ 2026-09-11 전송자격인증 4.2 — 삭제 감사 기록의 전화번호는 저장 시점에 가린다(마스킹 CT 재사용)
 import { maskPhone } from '../utils/mfa';
 import * as XLSX from 'xlsx';
-import { query, mysqlQuery, pool } from '../config/database';
+import { query, mysqlQuery, pool, withTransaction } from '../config/database';
 // ★ 2026-09-27 한줄로 V2 R111 — KST 현재 연도 SQL CT
 import { KST_CURRENT_YEAR_SQL } from '../utils/stats-aggregation';
 import { authenticate } from '../middlewares/auth';
@@ -31,6 +31,8 @@ import { getTestSmsTables } from '../utils/sms-queue';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
 import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
+import { stampFirstSeenJoinedAt, insertedPhonesOf } from '../utils/customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
+import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';   // ★ 2026-11-02 db_alter_safety_net(고객 쓰기 = customers.joined_at · C98-DDL-2)
 import { detectEnabledFields, buildDynamicSelectExpr, buildEnabledFieldsPayload, clearEnabledFieldsCache, enabledFieldsGenKey, ENABLED_FIELDS_HARD_TTL_SEC } from '../utils/enabled-fields';
 import { swrCache } from '../utils/swr-cache';
 
@@ -570,7 +572,12 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       custom_fields: customFields ? JSON.stringify(customFields) : null,
     };
     const { sql: manualSql, values: manualValues } = manualUpsertBuilder.buildBatch(companyId, [manualRow]);
-    const result = await query(manualSql, manualValues);
+    // ★ 2026-11-02 설계서 3-6 — 화면에서 고객 추가 = 처음 만든 행이면 가입(CT-J6) · 업서트와 한 트랜잭션(Codex 구현 1R · 따로면 다시 시도 때 is_insert 거짓 = 가입 기록 영영 0)
+    const result = await withTransaction(async (run) => {
+      const r = await run(manualSql, manualValues);
+      await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));
+      return r;
+    });
     // 신규 행 기본 true 백필 (기존 행은 COALESCE 보존이라 null이 될 수 없음)
     if (smsOptIn == null) {
       const backfill = buildSmsOptInBackfill(companyId, [phone]);
@@ -599,6 +606,7 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       customer: result.rows[0],
     });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.joined_at 칸(ALTER · 원장 C98-DDL-2)'));
     console.error('고객 추가 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -672,9 +680,14 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
       const chunk = bulkRows.slice(ci, ci + BULK_CHUNK);
       try {
         const { sql: bulkSql, values: bulkValues } = bulkUpsertBuilder.buildBatch(companyId, chunk);
-        await query(bulkSql, bulkValues);
+        await withTransaction(async (run) => {   // ★ 2026-11-02 CT-J6 · 업서트 + 가입 시각 한 트랜잭션(Codex 구현 1R)
+          const bulkRes = await run(bulkSql, bulkValues);
+          await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(bulkRes.rows));
+        });
         successCount += chunk.length;
       } catch (chunkErr: any) {
+        // ★ 2026-11-02 칸 없음(DDL 전) = 이 요청 전체 503(db_alter_safety_net · 아래 바깥 catch) — 행 실패로 접어 200 을 주지 않는다
+        if (isMissingSchemaError(chunkErr)) throw chunkErr;
         // ★ 2026-08-14 (Codex 2R): 계통 오류(연결·구문·자원)는 단건 폴백 금지 — 같은 실패를
         //   최대 500회 반복하며 장애 중 DB에 부하를 증폭한다. 행 데이터 오류(22xxx·23xxx)만 격리.
         if (!isRowLevelDbError(chunkErr)) {
@@ -685,7 +698,10 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         for (const row of chunk) {
           try {
             const { sql: rowSql, values: rowValues } = bulkUpsertBuilder.buildBatch(companyId, [row]);
-            await query(rowSql, rowValues);
+            await withTransaction(async (run) => {   // ★ 2026-11-02 CT-J6 · 한 트랜잭션(Codex 구현 1R)
+              const rowRes = await run(rowSql, rowValues);
+              await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(rowRes.rows));
+            });
             successCount++;
           } catch (rowErr: any) {
             failCount++;
@@ -717,6 +733,7 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
       errors: errors.slice(0, 10),
     });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.joined_at 칸(ALTER · 원장 C98-DDL-2)'));
     console.error('고객 일괄 추가 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }

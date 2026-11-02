@@ -20,12 +20,10 @@ describe('resolveJourneyAdFlag — 비카카오 여정은 무조건 광고 표�
     expect(resolveJourneyAdFlag(undefined, false)).toBe(true);
   });
 
-  test('카카오(알림톡)는 정보성 허용 — isAd=false면 false 유지', () => {
+  // ★ 2026-11-02 설계서 3-11(D16) — 알림톡 = 늘 정보성(저장값 · 요청값과 무관)
+  test('카카오(알림톡)는 늘 정보성(false) — 요청값이 true · 미지정이어도', () => {
     expect(resolveJourneyAdFlag('kakao', false)).toBe(false);
-  });
-
-  test('카카오 isAd 미지정/true는 true (기본 광고)', () => {
-    expect(resolveJourneyAdFlag('KAKAO', undefined)).toBe(true);
-    expect(resolveJourneyAdFlag('kakao', true)).toBe(true);
+    expect(resolveJourneyAdFlag('KAKAO', undefined)).toBe(false);
+    expect(resolveJourneyAdFlag('kakao', true)).toBe(false);
   });
 });

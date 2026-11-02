@@ -19,6 +19,7 @@ import {
   User, ShoppingCart, Store, Award, Megaphone, Folder,
 } from 'lucide-react';
 import UploadMappingConflictModal, { type MappingConflict, type ConflictResolution } from './UploadMappingConflictModal';
+import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 import { formatPreviewValue } from '../utils/formatDate';
 import { useToast } from './ToastProvider';
 import {
@@ -74,6 +75,9 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
   const toast = useToast();
   // Step
   const [step, setStep] = useState<'upload' | 'mapping'>('upload');
+  // ★ 2026-11-02 설계서 3-6 — 켜진 신규 가입 여정 + 새 번호 = 저장 전 한 번 묻기(서버 /validate-mapping signupQuestion)
+  const [signupQ, setSignupQ] = useState<{ newPhones: number; journeys: string[] } | null>(null);
+  const [signupAsk, setSignupAsk] = useState<ConfirmState | null>(null);
 
   // 파일 정보
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -339,6 +343,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         return;
       }
 
+      setSignupQ(validateData.signupQuestion || null);
       const conflicts: MappingConflict[] = validateData.conflicts || [];
       const errorConflicts = conflicts.filter((c: MappingConflict) => c.severity === 'error');
 
@@ -353,18 +358,38 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         return;
       }
 
-      // 충돌 없음 → 저장
-      await handleSaveCore(mapping, customLabels);
+      // 충돌 없음 → 저장(새 번호 · 신규 가입 여정이면 한 번 묻고)
+      await saveAsking(mapping, customLabels, validateData.signupQuestion || null);
     } catch {
       toast.error('저장 요청 중 오류가 발생했습니다.');
       setLoading(false);
     }
   };
 
+  /** 저장 전 한 번 묻기 — 새 번호가 켜진 신규 가입 여정 환영 문자를 받는가(기본 = 기존 고객으로 · 고르면 바로 저장) */
+  const saveAsking = async (
+    finalMapping: Record<string, string | null>,
+    finalLabels: Record<string, string>,
+    q: { newPhones: number; journeys: string[] } | null,
+  ) => {
+    if (!q) { await handleSaveCore(finalMapping, finalLabels, false); return; }
+    setLoading(false);
+    setSignupAsk({
+      mode: 'info',
+      title: `처음 보는 번호 ${q.newPhones.toLocaleString('ko-KR')}명이 들어 있어요`,
+      description: `'${q.journeys.join("', '")}' 여정은 새로 가입한 고객에게 환영 문자를 보내요. 기존 고객으로 올리면 이 번호들에게 보내지 않아요.`,
+      confirmLabel: '기존 고객으로 올리기',
+      onConfirm: () => { setLoading(true); return handleSaveCore(finalMapping, finalLabels, false); },
+      altLabel: '신규 고객으로 올리기',
+      onAlt: () => { setLoading(true); return handleSaveCore(finalMapping, finalLabels, true); },
+    });
+  };
+
   // 실제 /save 호출 — 해결된 매핑 사용
   const handleSaveCore = async (
     finalMapping: Record<string, string | null>,
-    finalLabels: Record<string, string>
+    finalLabels: Record<string, string>,
+    asNewCustomers = false,
   ) => {
     try {
       const res = await fetch('/api/upload/save', {
@@ -373,7 +398,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
           'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({ fileId, mapping: finalMapping, customLabels: finalLabels }),
+        body: JSON.stringify({ fileId, mapping: finalMapping, customLabels: finalLabels, asNewCustomers }),
       });
       const data = await res.json();
 
@@ -424,7 +449,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
       }
     }
 
-    await handleSaveCore(newMapping, newLabels);
+    await saveAsking(newMapping, newLabels, signupQ);
   };
 
   // 전체 닫기
@@ -938,6 +963,7 @@ export default function FileUploadMappingModal({ show, onClose, onSaveStart, onP
         }}
         onResolve={handleConflictResolve}
       />
+      <ConfirmModal state={signupAsk} onClose={() => setSignupAsk(null)} />
     </div>
   );
 }

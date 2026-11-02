@@ -20,6 +20,7 @@ import {
 } from '../utils/standard-field-map';
 import { callAiMapping, AiMappingQuotaExceeded, AiMappingUnavailable, SupportedDbType, MappingTarget } from '../utils/ai-mapping';
 import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError } from '../utils/customer-upsert';
+import { stampFirstSeenJoinedAt, insertedPhonesOf } from '../utils/customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
 // ★2026-09-12 시크릿 해시 비교(원문 저장 폐지 · 전환기 폴백은 42703로만 판정)
 import { hashSecret, verifySecret } from '../utils/secret-hash';
 import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
@@ -844,7 +845,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       try {
         await withTransaction(async (run) => {
           const { sql, values } = upsertBuilder.buildBatch(companyId, chunk);
-          await run(sql, values);
+          const up = await run(sql, values);
+          // ★ 2026-11-02 설계서 3-6 — incremental 에서 그 회사에 없던 번호 = 가입(원천 가입일이 없으면 받은 시각) · full = 기존 고객(CT-J6)
+          if (mode === 'incremental') await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(up.rows));
 
           // customer_stores 벌크 처리 (sync 경로 전용 — upload.ts는 별도 매핑 로직 사용)
           // ★ 2026-09-02 chunk 배열이 아니라 그 폰들의 매장 전량을 쓴다 — 폰 dedupe로 두 번째 행을
@@ -894,6 +897,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
               const { sql: rowSql, values: rowValues } = upsertBuilder.buildBatch(companyId, [row]);
               const rowResult = await run(rowSql, rowValues);
               rowCount = rowResult.rowCount || 1;
+              if (mode === 'incremental') await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(rowResult.rows));   // ★ 2026-11-02 CT-J6
 
               // customer_stores 단건 처리 (chunk 일괄 실패 시 fallback)
               // ★ 2026-09-02 이 폰의 매장 전량을 넣는다 — 벌크 경로와 같은 규칙이라야

@@ -13,6 +13,7 @@ import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFie
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError } from '../utils/customer-upsert';
+import { stampFirstSeenJoinedAt, insertedPhonesOf, uploadSignupQuestion } from '../utils/customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
 // ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
@@ -387,7 +388,15 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
       sampleData
     );
 
-    return res.json({ success: true, ...result });
+    // ★ 2026-11-02 설계서 3-6 — 켜진 신규 가입 여정 + 그 회사에 없는 번호 = 저장 전에 한 번 묻는다(가입 근거 CT-J6 · 파일 전체 번호)
+    const phoneIdx = headers.findIndex((h) => mapping[h] === 'phone');
+    const filePhones = phoneIdx < 0 ? [] : [...new Set(split.rows.map((r) => String(normalizeByFieldKey('phone', r[phoneIdx]) || '')).filter(Boolean))];
+    const signupQuestion = await uploadSignupQuestion(companyId, filePhones).catch((e: any) => {
+      if (e?.code === '42703') return null;   // 가입 근거 칸 전(DDL-2) = 묻지 않는다(옛 동작)
+      throw e;
+    });
+
+    return res.json({ success: true, ...result, signupQuestion });
   } catch (error: any) {
     console.error('매핑 검증 에러:', error);
     return res.status(500).json({ error: publicErrorText(error, '매핑 검증 중 오류가 발생했습니다.') });
@@ -400,6 +409,8 @@ router.post('/validate-mapping', authenticate, async (req: Request, res: Respons
 router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: Response) => {
   try {
     const { fileId, mapping, customLabels } = req.body;
+    // ★ 2026-11-02 설계서 3-6 — [신규 고객으로 올리기]를 골랐을 때만 이 파일이 처음 만든 고객 = 가입(기본 = 기존 고객 · 가입 근거 CT-J6)
+    const asNewCustomers = req.body?.asNewCustomers === true;
     const companyId = req.user?.companyId;
     const userId = (req as any).user?.userId;
 
@@ -462,7 +473,7 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
     res.json({ success: true, fileId, totalRows, message: '백그라운드 처리 시작' });
 
     // 백그라운드 처리 (res 반환 이후 실행)
-    processUploadInBackground(fileId, filePath, mapping, companyId, userId, startedAt, customLabels).catch(err => {
+    processUploadInBackground(fileId, filePath, mapping, companyId, userId, startedAt, customLabels, asNewCustomers).catch(err => {
       console.error('[업로드 백그라운드] 치명적 에러:', err);
     });
 
@@ -482,7 +493,8 @@ async function processUploadInBackground(
   companyId: string,
   userId: string | null,
   startedAt: string,
-  customLabels?: Record<string, string>
+  customLabels?: Record<string, string>,
+  asNewCustomers = false,
 ) {
   let insertCount = 0;
   let duplicateCount = 0;
@@ -706,6 +718,7 @@ async function processUploadInBackground(
           );
           const result = await withTransaction(async (run) => {
             const r = await run(sql, queryValues);
+            if (asNewCustomers) await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));   // ★ 2026-11-02 CT-J6
             await applySmsOptInDefaults(run, companyId, batchRows.map((row) => String(row.phone)), unknownConsentSet);
             return r;
           });
@@ -732,6 +745,7 @@ async function processUploadInBackground(
                 );
                 const rowResult = await withTransaction(async (run) => {
                   const r = await run(rowSql, rowValues);
+                  if (asNewCustomers) await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));   // ★ 2026-11-02 CT-J6
                   await applySmsOptInDefaults(run, companyId, [String(row.phone)], unknownConsentSet);
                   return r;
                 });

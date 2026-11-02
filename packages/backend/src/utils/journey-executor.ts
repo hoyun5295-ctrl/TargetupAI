@@ -26,6 +26,8 @@
  */
 
 import { query } from '../config/database';
+import { cdpEventNameMatchSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
+import { pausedSetSql } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import {
   getCompanySmsTables,
   hasCompanyLineGroup,
@@ -37,7 +39,9 @@ import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-a
 import { toQtmsgType, subjectForMsgType } from './qtmsg-type';
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { convertButtonsToQTmsg } from './alimtalk-button';
-import { buildAlimtalkEtcJson, type RepresentLink } from './alimtalk-emphasize';
+import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
+import { kakaoStepVerdict, type KakaoTemplateRow } from './journey-kakao-step';
+import { journeyClickSql } from './journey-click';   // ★ 2026-11-02 여정 링크 클릭 판정 CT(설계서 3-0 CT-J9)   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { buildDefaultFallbacks } from './var-fallback';
@@ -59,12 +63,12 @@ import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts, SEND_HOURS, NIGHT_AD_LOAD_LEAD_MS } from '../config/defaults';
 import { shortenUrlsInTexts } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
-import { calculateNextRunAt, clampPersonalSendHour, dailyBatchDay } from './send-time-util';
+import { calculateNextRunAt, clampPersonalSendHour, isWithinSendHours, sendWindowStateFor, isNightExemptStep, nextDaySendWindowStart } from './send-time-util';
 import { pickStepCampaignForUnits } from './journey-step-campaign';
 import { judgeLoadUnit, recordLoadUnit, clearLoadUnit, confirmLoadUnit } from './journey-send-claim';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
-import { renderJourneySmsMessage, loadJourneyRenderShared } from './journey-message-render';
+import { renderJourneySmsMessage, loadJourneyRenderShared, journeyCopyContext } from './journey-message-render';
 import { flattenLiquidToPlainText } from './liquid-templating';
 import { readOwnerConsentForCustomers } from './mall-consent';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
@@ -75,10 +79,11 @@ import { isSingleStepKind } from './journey-start-kind';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
 import { aiOperatorAllowedForWorker } from './plan-guard';
 import { lineageColumnsReady } from './journey-lineage';
-import { applyVariantToStep } from './journey-step-versions';
-import { purchasedSinceEntrySql, isSignupTrigger } from './journey-goal-purchase';
+import { applyVariantToStep, latestSnapshotSql, stepSendVersions } from './journey-step-versions';   // ★ 2026-11-02 판 읽기 CT(설계서 3-0 CT-J1)
+import { purchasedSinceEntrySql, isSignupTrigger, ENTRY_PURCHASE_VOIDED_SQL } from './journey-goal-purchase';
 // ★ 2026-10-31 칸 관문 — 「그날 검사를 마쳤다」 판정 조각 한 곳(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-1 · §2-2 · 뿌리 R30)
-import { stepHeldSql } from './journey-pretest-notifier';
+import { stepHeldSql, stepSendableSql, holdStepForCopyIssue } from './journey-pretest-notifier';
+import { journeyCopyIssue } from './send-placeholder-gate';   // ★ 2026-11-02 보낼 글 판정 CT(설계서 3-0 CT-J10)   // ★ 2026-11-02 보낼 판 판정 CT(설계서 3-0 CT-J1 · 3-18)
 import { runCompanyLanes } from './concurrency';
 import { enrichCustomersWithPredictions } from './predictive-suite';
 
@@ -107,7 +112,7 @@ interface ExecutionRow {
   created_by: string | null;
   journey_callback_number: string | null;
   callback_mode: string | null;
-  // ★ 2026-11-02 발송 갈래(트리거 계약 sendTiming · 하루 묶음 = 같은 고객 한 통 · 이상치 관문)
+  // ★ 2026-11-02 발송 갈래(트리거 계약 sendTiming · 하루 묶음 = 같은 고객 한 통) · 구매로 시작한 여정인가(purchaseStream · 3-4 ②)
   trigger_event: string | null;
   // ★ 2026-06-30 여정 일반화 — date_anchor/one_shot은 단발(1 step 후 완료, 상대 advance 안 함).
   start_kind: string | null;
@@ -545,20 +550,34 @@ async function processStepBatch(input: ExecutionRow[]): Promise<BatchResult> {
   }
   const step = stepRes.rows[0] as StepRow;
 
-  let pendingSnapshotAt: string | Date | null = null;   // ★ 1019 B-1009-6 최신 스냅샷이 재검사 전(confidence_score < 100)이면 그 시각(아래 관문)
+  // ★ 2026-11-02 설계서 3-4 ② — 구매로 들어온 뒤 그 구매가 취소 · 환불되면 남은 칸 없이 끝(문자 · 대기 · 조건 칸 공통 · 발송 0).
+  //   판정 = journey-goal-purchase 한 곳 · 조회 실패 = 던진다(묶음 실패 기록 · 다음 회차 · 취소된 주문에 보내지 않는 쪽).
+  if (getTriggerContract(String(head.trigger_event || ''))?.purchaseStream) {
+    const voided = await query(ENTRY_PURCHASE_VOIDED_SQL, [execs.map((e) => e.execution_id), head.company_id]);
+    if (voided.rows.length > 0) {
+      const ended = await query(
+        `UPDATE journey_executions SET status = 'ended', completed_at = NOW() WHERE id = ANY($1::uuid[]) AND status = 'active' RETURNING id`,
+        [voided.rows.map((x: any) => String(x.id))],
+      );
+      const endedIds = new Set<string>(ended.rows.map((x: any) => String(x.id)));
+      await logStepMany([...endedIds], step.id, 'skipped', 'order_cancelled');
+      console.log(`[JourneyExecutor] journey=${head.journey_id} 진입 구매 취소 · 환불 ${endedIds.size}명 → 발송 없이 끝`);
+      res.progressed = true;
+      execs = execs.filter((e) => !voided.rows.some((x: any) => String(x.id) === e.execution_id));
+      if (execs.length === 0) return res;
+    }
+  }
+
+  let pendingSnapshotAt: string | Date | null = null;   // ★ 1019 B-1009-6 최신 판이 재검사 전(신뢰도 < 100)이면 그 시각(아래 관문)
+  let snapshotId: string | null = null;                 // ★ 2026-11-02 본문과 같이 읽은 판 id = 발송 선점 판 확인(설계서 3-18 · CT-J1)
   let snapshotReadFailed = false;                      // ★ 1019 B-1009-6 조회 실패 = 검사 여부를 모른다(문자 칸은 미룬다 · F4)
   // ★ D218+ (2026-05-26) snapshot 우선 조회 — 활성화 시점 본문 보존 안전망(칸마다 한 번 · 묶음 안 모든 고객이 같은 확정 문안).
   try {
-    const snapRes = await query(
-      `SELECT message_body, message_subject, created_at, confidence_score
-         FROM journey_step_snapshots
-        WHERE step_id = $1::uuid AND journey_id = $2::uuid
-        ORDER BY created_at DESC LIMIT 1`,
-      [step.id, head.journey_id]
-    );
+    const snapRes = await query(`SELECT snap.* FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`, [step.id, head.journey_id]);
     if (snapRes.rows.length > 0) {
       const snap = snapRes.rows[0];
-      if (snap.confidence_score != null && Number(snap.confidence_score) < 100) pendingSnapshotAt = snap.created_at ?? null;
+      snapshotId = snap.id ? String(snap.id) : null;
+      if (snap.confidence != null && Number(snap.confidence) < 100) pendingSnapshotAt = snap.created_at ?? null;
       if (snap.message_body) step.message_template = snap.message_body;
       if (snap.message_subject) step.subject = snap.message_subject;
     }
@@ -590,17 +609,10 @@ async function processStepBatch(input: ExecutionRow[]): Promise<BatchResult> {
     res.progressed = true;
     return res;
   }
-  return processMessageBatch(execs, step, res, { pendingSnapshotAt, snapshotReadFailed });
+  return processMessageBatch(execs, step, res, { pendingSnapshotAt, snapshotReadFailed, snapshotId });
 }
 
 /** 발송 창(I7 · 시작 = 실제 지금 · 끝 = 지금 + 여유 · 다음 창 = 판정과 같은 기준 시각) */
-function sendWindowState(now: Date = new Date()): { open: boolean; next: Date } {
-  if (!isWithinSendHours(now)) return { open: false, next: computeNextSendWindow(now) };
-  const t = new Date(now.getTime() + NIGHT_AD_LOAD_LEAD_MS);
-  if (!isWithinSendHours(t)) return { open: false, next: computeNextSendWindow(t) };
-  return { open: true, next: now };
-}
-
 async function setNextRunAt(ids: string[], at: Date | string): Promise<void> {
   if (ids.length === 0) return;
   await query(`UPDATE journey_executions SET next_run_at = $2 WHERE id = ANY($1::uuid[]) AND status = 'active'`, [ids, at]);
@@ -612,7 +624,7 @@ async function delayExecutions(ids: string[], minutes: number): Promise<void> {
 
 async function processMessageBatch(
   input: ExecutionRow[], step: StepRow, res: BatchResult,
-  snap: { pendingSnapshotAt: string | Date | null; snapshotReadFailed: boolean },
+  snap: { pendingSnapshotAt: string | Date | null; snapshotReadFailed: boolean; snapshotId: string | null },
 ): Promise<BatchResult> {
   const head = input[0];
   let execs = input;
@@ -711,24 +723,33 @@ async function processMessageBatch(
     return res;
   }
   // ── 10 발송 창(I7) ──
-  const win = sendWindowState();
+  const win = sendWindowStateFor(new Date(), isNightExemptStep(step));   // ★ 2026-11-02 발송 창 = CT 한 곳 · 정보성 알림톡 = 밤 예외(설계서 3-10)
   if (!win.open) {
     await setNextRunAt(ids0, win.next);
     res.skipped += execs.length;   // 옛 'skipped_hours'
     res.progressed = true;
     return res;
   }
-  // ── 하루 묶음 첫 칸 이상치 관문(3-2 ⑤ · 멈춤 = 이 묶음 아무것도 안 함) ──
+  // ★ 2026-11-02 설계서 3-6 · §4 ① — 하루 묶음 이상치 관문 없앰(양으로 판정 오류를 뒤늦게 잡아 작은 여정을 통째로 멈췄다 · 신규 판정은 가입 근거로 들어오는 자리에서)
   const dailyLane = !isSingleStepKind(head.start_kind) && sendTimingForTrigger(String(head.trigger_event || '')) === 'daily';
-  if (dailyLane && head.current_step_order === 0) {
-    // 묶음에 섞인 진입 날짜마다(밀린 날 · 늦은 날이 한 묶음이어도 날마다 판정 · 하나라도 멈추면 이 묶음 아무것도 안 함 · Codex 구현 1R)
-    for (const day of [...new Set(execs.map((e) => dailyBatchDay(new Date(e.entered_at))))].sort()) {
-      if (await dailyVolumeGate(head, step, day)) { res.paused += execs.length; return res; }
-    }
-  }
 
   // ★ D188 Phase 2-B-3 — 변이(Bandit) · 조회 실패 = 처리 예외(★ 1025 R7 · 검사하지 않은 글이 나가지 않게)
   const variants = await listJourneyStepVariants(step.id);
+
+  // ── 보낼 글 판정(★ 2026-11-02 설계서 3-3 ① · 3-13 · CT-J10 · 켜기 · 칸 저장 · 보내기 전 검사와 같은 함수 = 효과 자리) ──
+  //   채울 자리 · 없는 변수 · 장바구니 변수 · 제목 변수가 남은 판 = 그 칸 보류(여정 멈춤 0 · 담당자 안내 원장 · 보류 관문이 60분마다 다시 본다)
+  if (isTextChannel) {
+    const versions = stepSendVersions(step, null, variants.map((v) => ({ id: v.id, message_template: v.messageTemplate, subject: v.subject })));
+    const bodies = versions.map((v) => v.body);
+    const copyIssue = journeyCopyIssue({ bodies, subjects: versions.map((v) => v.subject) }, await journeyCopyContext(head.company_id, head.trigger_event, bodies));
+    if (copyIssue) {
+      await holdStepForCopyIssue({ companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, executionId: execs[0].execution_id, scheduledSendAt: new Date(execs[0].next_run_at ?? Date.now()) }, snap.snapshotId);
+      await delayExecutions(execs.map((e) => e.execution_id), PRETEST_HELD_RECHECK_MINUTES);
+      console.warn(`[JourneyExecutor] journey=${head.journey_id} step=${step.step_order} 보낼 글 판정(${copyIssue.code}) → 그 칸 보류 · ${execs.length}명 ${PRETEST_HELD_RECHECK_MINUTES}분 뒤 다시`);
+      res.waited += execs.length;
+      return res;
+    }
+  }
 
   // ── 11 고객 ──
   const custRes = await query(`SELECT * FROM customers WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`, [execs.map((e) => e.customer_id), head.company_id]);
@@ -756,34 +777,10 @@ async function processMessageBatch(
   const isKakao = channelLower === 'kakao';
   const channelType = (step.channel || 'lms').toUpperCase();
   const msgType = isKakao ? 'KAKAO' : (channelType === 'LMS' || channelType === 'MMS' ? channelType : 'SMS');
-  let kakaoTemplateRow: { id: string; template_code: string; content: string; buttons: any[]; status: string; emphasize_title?: string | null; represent_link?: RepresentLink | null; profile_key?: string | null } | null = null;
-  let kakaoBlock: { reason: string; pauseText: string } | null = null;
-  if (isKakao) {
-    if (!step.alimtalk_template_code) {
-      kakaoBlock = { reason: 'alimtalk_template_code_empty', pauseText: `step ${step.step_order} 알림톡 템플릿 코드가 비어있어 발송 차단` };
-    } else {
-      const tplRes = await query(
-        `SELECT t.id, t.template_code, t.content, t.buttons, t.status, t.emphasize_title, t.represent_link, p.profile_key
-           FROM kakao_templates t
-           LEFT JOIN kakao_sender_profiles p ON p.id = t.profile_id
-          WHERE t.template_code = $1 AND t.company_id = $2::uuid LIMIT 1`,
-        [step.alimtalk_template_code, head.company_id]
-      );
-      if (tplRes.rows.length === 0) {
-        kakaoBlock = { reason: 'alimtalk_template_not_found', pauseText: `step ${step.step_order} 알림톡 템플릿(${step.alimtalk_template_code}) 미존재 또는 회사 격리 위반` };
-      } else {
-        kakaoTemplateRow = tplRes.rows[0] as any;
-        if (!['APPROVED', 'APR'].includes(String(kakaoTemplateRow!.status || '').toUpperCase())) {
-          kakaoBlock = { reason: 'alimtalk_template_not_approved', pauseText: `step ${step.step_order} 알림톡 템플릿 미승인 (status=${kakaoTemplateRow!.status})` };
-        } else {
-          // ★ CT-87 (2026-06-10): 카카오 활성상태(A) 가드 — 활성 대기(R) 템플릿은 카카오가 전부 7300 거부
-          const { decideKakaoTemplateSendable, getImcTemplateStatusSafe } = await import('./kakao-template-guard');
-          const journeyTplGuard = decideKakaoTemplateSendable(await getImcTemplateStatusSafe(head.company_id, step.alimtalk_template_code));
-          if (!journeyTplGuard.sendable) kakaoBlock = { reason: 'alimtalk_template_inactive', pauseText: `step ${step.step_order} ${journeyTplGuard.reason || '카카오 템플릿 비활성'}` };
-        }
-      }
-    }
-  }
+  // ★ 2026-11-02 알림톡 칸 판정 = CT-J5 한 곳(켜기 · 켜기 검증과 같은 함수 · 템플릿 코드 · 존재 · 승인 · 카카오 활성 · 템플릿 본문 변수 연결 · 설계서 3-14)
+  const kakaoVerdict = isKakao ? await kakaoStepVerdict(head.company_id, step) : null;
+  const kakaoTemplateRow: KakaoTemplateRow | null = kakaoVerdict?.row ?? null;
+  const kakaoBlock = kakaoVerdict?.block ?? null;
 
   // ── 1단계(렌더 앞 갈래 11 ~ 21 · 코드 순서) ──
   const outcomes: Array<{ exec: ExecutionRow; out: RowOutcome | null }> = [];
@@ -795,8 +792,9 @@ async function processMessageBatch(
     if (!customer) return { kind: 'skip', reason: 'customer_not_found' };
     // ★ Fix #1 (2026-06-05) 발송 직전 안전필터 재적용 · ★ 2026-10-02 몰 동의 회사 = 여정 작성자 기준 소속 행 동의(묶음 한 문장)
     const consent = mallConsent === null ? null : (mallConsent.get(String(customer.id)) === true);
-    if (!isCustomerSendable(consent === null ? customer : { ...customer, sms_opt_in: consent })) return { kind: 'skip', reason: 'opt_out_or_inactive' };
-    if (unsubPhones.has(String(customer.phone))) return { kind: 'skip', reason: 'unsubscribed' };
+    // ★ 2026-11-02 설계서 3-11 · §4 ⑦ — 알림톡 칸(광고 판정 CT = false) = 활성 · 번호 유효만 · 080 거부는 광고 칸만
+    if (!isCustomerSendable(consent === null ? customer : { ...customer, sms_opt_in: consent }, { informational: !isAd })) return { kind: 'skip', reason: 'opt_out_or_inactive' };
+    if (isAd && unsubPhones.has(String(customer.phone))) return { kind: 'skip', reason: 'unsubscribed' };
     if (dailyLane) {
       if (seenCustomers.has(String(customer.id))) return { kind: 'skip', reason: 'duplicate_in_batch' };
       seenCustomers.add(String(customer.id));   // 먼저 생긴 실행(next_run_at 순 첫째) = 이 고객의 한 통
@@ -920,7 +918,7 @@ async function processMessageBatch(
 
     // ── 31 적재(⑤ 적재 단위 계약) — 비발송 결말보다 먼저. 적재가 중간에 멈추면(돈 · 창 · 보류 · 바깥 멈춤 · 안 들어감 · 결과 불명) 그 자리 뒤 고객은
     //    이번 회차 결말 0(경계 계약 = 한 건 판의 「멈춘 뒤 진입 시점 정지」 · 다음 회차가 그 자리부터 다시 본다 · Codex 구현 1R) ──
-    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec }, res) : null;
+    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId }, res) : null;
     const end = boundary < 0 ? outcomes.length : boundary;
     await applyRowOutcomes(head, step, outcomes, stopIdx == null ? end : Math.min(stopIdx, end), res);
 
@@ -1001,7 +999,7 @@ async function applyBoundaryPause(head: ExecutionRow, step: StepRow, row: { exec
  */
 async function sendUnits(
   head: ExecutionRow, step: StepRow, rows: Array<SendRow & { idx: number }>,
-  c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null> },
+  c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null>; snapshotId: string | null },
   res: BatchResult,
 ): Promise<number | null> {
   const prepaidMsgType = c.msgType === 'KAKAO' ? 'KAKAO' : c.msgType;
@@ -1014,7 +1012,7 @@ async function sendUnits(
   });
   if ('blocked' in pick) {
     // I6 — 이어 붙임이 아직 닫혀 있다(DDL-2 전) = 그 (여정 · 칸)은 오늘 새 단위 0 → 다음날 발송 창 시작
-    await setNextRunAt(rows.map((r) => r.exec.execution_id), nextDayWindowStart());
+    await setNextRunAt(rows.map((r) => r.exec.execution_id), nextDaySendWindowStart());
     res.waited += rows.length;
     return rows[0].idx;
   }
@@ -1048,21 +1046,15 @@ async function sendUnits(
     const unit = rows.slice(off, off + QUEUE_UNIT_MAX);
     const rest = rows.slice(off);
     // I7 — 단위마다 발송 창
-    const win = sendWindowState();
+    const win = sendWindowStateFor(new Date(), isNightExemptStep(step));
     if (!win.open) {
       await setNextRunAt(rest.map((r) => r.exec.execution_id), win.next);
       res.skipped += rest.length;
       return unit[0].idx;
     }
-    // R30 · ★ 1102 E3-1 — 칸 관문(보류)도 단위마다(관문 = 발송 사건에 묶는다 · 묶음 중간에 담당자가 보류하면 그 단위부터 보내지 않는다)
-    if (['sms', 'lms', 'mms'].includes(String(step.channel))) {
-      const held = await query(`SELECT ${stepHeldSql('$1::uuid', '$2::uuid')} AS held`, [head.journey_id, step.id]);
-      if (held.rows[0]?.held) {
-        await delayExecutions(rest.map((r) => r.exec.execution_id), PRETEST_HELD_RECHECK_MINUTES);
-        res.waited += rest.length;
-        return unit[0].idx;
-      }
-    }
+    // R30 · ★ 2026-11-02 3-18 — 칸 관문(보낼 수 있는 판인가 = 최신 판 = 본문을 읽은 판 · 검사 통과 · 보류 아님)은 아래 선점 문장 WHERE 한 곳(발송 사건에 묶는다 ·
+    //   묶음 중간에 보류 · 고치기가 커밋되면 그 단위부터 선점 0 = 보내지 않음 · 옛 단위마다 보류만 보던 확인은 판정을 다른 시각에 읽어 틈이 있었다 · Codex 설계 2R #1)
+    const textStep = ['sms', 'lms', 'mms'].includes(String(step.channel));
     // ★ D190 #1 단축 URL(문자 · 이 단위 줄만 · 묶음 한 문장 · 변환 실패 = 원문 그대로)
     if (!c.isKakao) {
       const shortened = await shortenUrlsInTexts(unit.map((r) => ({
@@ -1102,13 +1094,14 @@ async function sendUnits(
                             || jsonb_build_array(jsonb_build_object('reason', 'load_attempt', 'step_id', $2::text, 'campaign_id', $3::text, 'at', NOW()))
            FROM journeys j
           WHERE e.id = ANY($1::uuid[]) AND j.id = e.journey_id AND e.status = 'active' AND j.status = 'active'
-            AND ${loadAttemptsSql('e', '$2')} < ${LOAD_ATTEMPT_MAX}
+            AND ${loadAttemptsSql('e', '$2')} < ${LOAD_ATTEMPT_MAX}${textStep ? `
+            AND ${stepSendableSql('j.id', '$2::uuid', '$5::uuid')}` : ''}
          RETURNING e.id
        )
        INSERT INTO journey_step_logs (id, execution_id, step_id, campaign_id, sent_at, status, cost)
        SELECT gen_random_uuid(), att.id, $2::uuid, $3::uuid, NOW(), 'sending', $4 FROM att
        RETURNING id, execution_id, sent_at`,
-      [unit.map((r) => r.exec.execution_id), step.id, campaignId, c.sendCost],
+      textStep ? [unit.map((r) => r.exec.execution_id), step.id, campaignId, c.sendCost, c.snapshotId] : [unit.map((r) => r.exec.execution_id), step.id, campaignId, c.sendCost],
     );
     const claimByExec = new Map<string, { id: string; sentAt: Date }>(claimRes.rows.map((x: any) => [String(x.execution_id), { id: String(x.id), sentAt: new Date(x.sent_at) }]));
     const claimed = unit.filter((r) => claimByExec.has(r.exec.execution_id));
@@ -1364,7 +1357,7 @@ async function processWaitBatch(execs: ExecutionRow[], step: StepRow, res: Batch
        JOIN unnest($1::uuid[], $2::timestamptz[]) AS a(id, at) ON a.id = e.id
       WHERE EXISTS (SELECT 1 FROM cdp_events c
                      WHERE c.company_id = $3::uuid AND c.customer_id = e.customer_id
-                       AND c.event_name = $4 AND c.occurred_at >= a.at)`,
+                       AND ${cdpEventNameMatchSql('c', '$4')} AND c.occurred_at >= a.at)`,   // ★ 2026-11-02 기다리기 사건이 구매면 결제된 구매(3-4 ④)
     [ids, ids.map((id) => anchorAt.get(id)!.toISOString()), head.company_id, waitEventName],
   );
   const arrived = new Set(ev.rows.map((x: any) => String(x.id)));
@@ -1452,26 +1445,6 @@ async function processConditionBatch(execs: ExecutionRow[], step: StepRow, res: 
 }
 
 // ════════════════════════════════════════════════════════════════════
-// 발송 시간 검증 (KST 08:00 ~ 21:00) — 광고 자동 검증 #3
-// ════════════════════════════════════════════════════════════════════
-
-function isWithinSendHours(now: Date = new Date()): boolean {
-  const kstHour = (now.getUTCHours() + 9) % 24;
-  return kstHour >= SEND_HOURS.start && kstHour < SEND_HOURS.end;   // ★ 2026-09-27 V2 m109 플랫폼 창(ENV) — 옛 8~21 하드코딩
-}
-
-function computeNextSendWindow(now: Date = new Date()): Date {
-  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  const kstTarget = new Date(kstNow);
-  const kstHour = kstNow.getUTCHours();
-  if (kstHour >= SEND_HOURS.end) {
-    kstTarget.setUTCDate(kstTarget.getUTCDate() + 1);
-  }
-  kstTarget.setUTCHours(SEND_HOURS.start, 0, 0, 0);
-  return new Date(kstTarget.getTime() - 9 * 60 * 60 * 1000);
-}
-
-// ════════════════════════════════════════════════════════════════════
 // execution advance / complete / pause / log
 // ════════════════════════════════════════════════════════════════════
 
@@ -1489,14 +1462,6 @@ async function chargeJourneyOperationCredit(exec: ExecutionRow, sentAt: Date): P
     idempotencyKey: `journey-operation:${operationCreditRoot(exec)}:${kstDateTag(sentAt)}`,
     createdBy: exec.created_by || null,
   });
-}
-
-/** 다음날 발송 창 시작(KST) — I6 이어 붙임이 아직 닫힌 (여정 · 칸)의 남은 실행 자리 */
-function nextDayWindowStart(now: Date = new Date()): Date {
-  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  kst.setUTCDate(kst.getUTCDate() + 1);
-  kst.setUTCHours(SEND_HOURS.start, 0, 0, 0);
-  return new Date(kst.getTime() - 9 * 60 * 60 * 1000);
 }
 
 /** 실행 집합 로그 한 문장(skipped · failed · 비용 0 · 옛 logSkippedStep · logFailedStep 의 묶음 판) */
@@ -1522,7 +1487,7 @@ async function advanceExecutions(head: ExecutionRow, currentStep: StepRow, items
     return;
   }
   const nextRes = await query(
-    `SELECT id, step_type, step_order, delay_hours, delay_mode, target_hour_kst FROM journey_steps
+    `SELECT id, step_type, step_order, delay_hours, delay_mode, target_hour_kst, channel, alimtalk_next_type FROM journey_steps
      WHERE journey_id = $1::uuid AND step_order > $2
      ORDER BY step_order ASC LIMIT 1`,
     [head.journey_id, currentStep.step_order]
@@ -1539,7 +1504,8 @@ async function advanceExecutions(head: ExecutionRow, currentStep: StepRow, items
   const nextDelayHours = Number(nextRow.delay_hours || 0);
   const nextDelayMode = String(nextRow.delay_mode || 'relative');
   const nextTargetHourKst = nextRow.target_hour_kst != null ? Number(nextRow.target_hour_kst) : null;
-  const baseRunAt = calculateNextRunAt(nextDelayMode, nextDelayHours, nextTargetHourKst);
+  const nightExemptOpts = { nightExempt: isNightExemptStep(nextRow) };   // ★ 2026-11-02 다음 칸이 정보성 알림톡 · 보내지 않는 칸 = 밤에 밀지 않음(설계서 3-10)
+  const baseRunAt = calculateNextRunAt(nextDelayMode, nextDelayHours, nextTargetHourKst, undefined, nightExemptOpts);
   const preferredHour = new Map<string, number>();
   // ★ 2026-07-11 send-time 개인화 — 켜진 여정 · 다음 칸이 시각 지정 모드일 때만(데이터 부족 · 오류 · 미마이그레이션 = 기본 시각)
   if (nextTargetHourKst != null && (nextDelayMode === 'specific_hour' || nextDelayMode === 'relative_at_hour')) {
@@ -1551,7 +1517,7 @@ async function advanceExecutions(head: ExecutionRow, currentStep: StepRow, items
              SELECT customer_id, EXTRACT(HOUR FROM (occurred_at AT TIME ZONE 'Asia/Seoul'))::int AS h, COUNT(*)::int AS c
                FROM cdp_events
               WHERE company_id = $1::uuid AND customer_id = ANY($2::uuid[])
-                AND event_name IN ('message_click', 'page_view', 'purchase')
+                AND event_name IN ('message_click', 'page_view', 'purchase')   -- ct-observe: 개인화 발송 시각 = 고객 활동 시간대(구매 판정 아님 · 설계서 3-0 CT-J3 · CT-J9)
                 AND occurred_at >= NOW() - INTERVAL '90 days'
               GROUP BY customer_id, 2 HAVING COUNT(*) >= 3
            ) t
@@ -1568,7 +1534,7 @@ async function advanceExecutions(head: ExecutionRow, currentStep: StepRow, items
   const runAt = (customerId: string): Date => {
     const ph = preferredHour.get(customerId);
     if (ph == null) return baseRunAt;
-    if (!runAtByHour.has(ph)) runAtByHour.set(ph, calculateNextRunAt(nextDelayMode, nextDelayHours, ph));
+    if (!runAtByHour.has(ph)) runAtByHour.set(ph, calculateNextRunAt(nextDelayMode, nextDelayHours, ph, undefined, nightExemptOpts));
     return runAtByHour.get(ph)!;
   };
   await query(
@@ -1626,14 +1592,14 @@ async function finishExecutions(items: Array<{ id: string; addedCost: number }>,
 /** ★ 2026-07-11 분기 — targetOrder 이상 첫 칸 직전으로 이동 + 그 칸의 지연으로 next_run_at(묶음 판 · 대상 칸 없으면 false = 호출부 완료) */
 async function jumpExecutions(ids: string[], journeyId: string, targetOrder: number): Promise<boolean> {
   const t = await query(
-    `SELECT step_order, delay_hours, delay_mode, target_hour_kst FROM journey_steps
+    `SELECT step_order, delay_hours, delay_mode, target_hour_kst, step_type, channel, alimtalk_next_type FROM journey_steps
       WHERE journey_id = $1::uuid AND step_order >= $2
       ORDER BY step_order ASC LIMIT 1`,
     [journeyId, targetOrder]
   );
   if (t.rows.length === 0) return false;
   const row = t.rows[0];
-  const nextRunAt = calculateNextRunAt(String(row.delay_mode || 'relative'), Number(row.delay_hours || 0), row.target_hour_kst != null ? Number(row.target_hour_kst) : null);
+  const nextRunAt = calculateNextRunAt(String(row.delay_mode || 'relative'), Number(row.delay_hours || 0), row.target_hour_kst != null ? Number(row.target_hour_kst) : null, undefined, { nightExempt: isNightExemptStep(row) });
   await query(`UPDATE journey_executions SET current_step_order = $2, next_run_at = $3 WHERE id = ANY($1::uuid[])`, [ids, Number(row.step_order) - 1, nextRunAt]);
   return true;
 }
@@ -1676,8 +1642,7 @@ async function goalConvertedExecutionIds(execs: ExecutionRow[]): Promise<Set<str
         `SELECT DISTINCT jsl.execution_id AS id FROM journey_step_logs jsl
            JOIN journey_executions je ON je.id = jsl.execution_id
            JOIN cdp_events ce ON ce.customer_id = je.customer_id
-            AND ce.company_id = $2::uuid
-            AND ce.event_name = 'message_click'
+            AND ${journeyClickSql('ce', { companyExpr: '$2::uuid', journeyExpr: 'je.journey_id', stepExpr: 'jsl.step_id' })}   -- ★ 2026-11-02 목표 클릭 = 이 여정 · 그 칸 링크(CT-J9 · D13)
             AND ce.occurred_at >= jsl.sent_at
           WHERE jsl.execution_id = ANY($1::uuid[]) AND jsl.status = 'sent'`,
         [ids, head.company_id]
@@ -1761,7 +1726,7 @@ async function evaluateConditionBatch(
     try {
       const r = await query(
         `SELECT DISTINCT customer_id FROM cdp_events
-          WHERE customer_id = ANY($1::uuid[]) AND company_id = $2::uuid AND event_name = $3
+          WHERE customer_id = ANY($1::uuid[]) AND company_id = $2::uuid AND ${cdpEventNameMatchSql('cdp_events', '$3')}
             AND occurred_at >= NOW() - ($4 * INTERVAL '1 day')`,
         [execs.map((e) => e.customer_id), companyId, eventName, withinDays]
       );
@@ -1781,11 +1746,11 @@ async function evaluateConditionBatch(
            JOIN journey_steps js ON js.id = jsl.step_id
            JOIN journey_executions je ON je.id = jsl.execution_id
            JOIN cdp_events ce ON ce.customer_id = je.customer_id
-             AND ce.event_name = 'message_click'
+             AND ${journeyClickSql('ce', { companyExpr: '$4::uuid', journeyExpr: 'je.journey_id', stepExpr: 'jsl.step_id' })}   -- ★ 2026-11-02 그 칸 링크만(CT-J9 · D12)
              AND ce.occurred_at >= jsl.sent_at
              AND ce.occurred_at <= jsl.sent_at + ($1 * INTERVAL '1 day')
           WHERE jsl.execution_id = ANY($2::uuid[]) AND js.step_order = $3 AND jsl.status = 'sent'`,
-        [withinDays, ids, stepOrder]
+        [withinDays, ids, stepOrder, companyId]
       );
       return byHit(new Set(r.rows.map((x: any) => String(x.execution_id))), (e) => e.execution_id, condJsonb.clicked !== false);
     } catch (err: any) {
@@ -1815,9 +1780,7 @@ async function evaluateConditionBatch(
         `SELECT DISTINCT jsl.execution_id FROM journey_step_logs jsl
            JOIN journey_executions je ON je.id = jsl.execution_id
            JOIN cdp_events ce ON ce.customer_id = je.customer_id
-            AND ce.company_id = $3::uuid
-            AND ce.event_name = 'message_click'
-            AND ce.properties->>'step_id' = $2::text
+            AND ${journeyClickSql('ce', { companyExpr: '$3::uuid', journeyExpr: 'je.journey_id', stepExpr: '$2::uuid' })}   -- ★ 2026-11-02 CT-J9
             AND ce.occurred_at >= jsl.sent_at
           WHERE jsl.execution_id = ANY($1::uuid[]) AND jsl.step_id = $2::uuid AND jsl.status = 'sent'`,
         [ids, targetStepId, companyId]
@@ -1831,63 +1794,12 @@ async function evaluateConditionBatch(
   return all('not_met');   // 미지원 종류 — 발송 안 함
 }
 
-/**
- * ★ 2026-11-02 이상치 관문(설계서 3-2 ⑤ · H3 · 가입 재업로드 사고 D232 기원) — 하루 묶음 첫 칸 인원이 그 여정의 지난 30일 하루 최대 × 3 을 넘으면
- *   보내지 않고 여정을 멈춘다(사유 = 화면 · 상황판 · 멈춤 기록 · 운영 경보 · 다시 켜면 그대로 나간다 = 승인). 표본 7일 미만 = 관문 없음(Harold 미결 · 추천값).
- *   그날(진입 KST 날짜)마다 한 번(그날 묶음의 멈춤 기록 = 다시 켜기로 승인됨 → 다시 묻지 않는다 · 통과 = 프로세스 기억 · 멈춤 먼저 · 기록 뒤 = 기록이 실패해도 승인 없이 나가지 않는다).
- */
-export const DAILY_VOLUME_GATE_FACTOR = 3;
-export const DAILY_VOLUME_GATE_MIN_DAYS = 7;
-const dailyGatePassed = new Map<string, number>();
-async function dailyVolumeGate(head: ExecutionRow, step: StepRow, day: string): Promise<boolean> {
-  const key = `${head.journey_id}:${day}`;
-  // 그날 묶음의 멈춤 기록 = 진입 날짜를 단다(배포 전 실행이 같은 날 처리돼도 · 앞날 묶음의 승인이 다음 날 묶음을 넘기지 않게 · varchar(30) 안)
-  const gateTag = `daily_volume_gate:${day}`;
-  if (dailyGatePassed.has(key)) return false;
-  for (const [k, at] of dailyGatePassed) if (at < Date.now() - 3 * 24 * 3600_000) dailyGatePassed.delete(k);
-  const r = await query(
-    `WITH d AS (
-       SELECT (e.entered_at AT TIME ZONE 'Asia/Seoul')::date AS day, COUNT(*)::int AS n
-         FROM journey_executions e
-        WHERE e.journey_id = $1::uuid
-          AND e.entered_at >= (($2::date - 30)::timestamp AT TIME ZONE 'Asia/Seoul')
-          AND e.entered_at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Seoul')
-        GROUP BY 1
-     )
-     SELECT COALESCE((SELECT n FROM d WHERE day = $2::date), 0) AS today,
-            COALESCE((SELECT MAX(n) FROM d WHERE day < $2::date), 0) AS max_prev,
-            (SELECT COUNT(*) FROM d WHERE day < $2::date)::int AS days,
-            EXISTS (SELECT 1 FROM journey_step_pause_logs p
-                     WHERE p.journey_id = $1::uuid AND p.pause_reason = 'daily_volume_anomaly' AND p.pause_trigger_source = $3) AS gated`,
-    [head.journey_id, day, gateTag],
-  );
-  const today = Number(r.rows[0]?.today || 0);
-  const maxPrev = Number(r.rows[0]?.max_prev || 0);
-  const days = Number(r.rows[0]?.days || 0);
-  if (r.rows[0]?.gated || days < DAILY_VOLUME_GATE_MIN_DAYS || today <= maxPrev * DAILY_VOLUME_GATE_FACTOR) {
-    dailyGatePassed.set(key, Date.now());
-    return false;
-  }
-  const text = `하루 묶음 인원이 평소보다 크게 많아 발송 전에 멈춤(${day} 진입 ${today.toLocaleString()}명 · 지난 30일 하루 최대 ${maxPrev.toLocaleString()}명)`;
-  await pauseJourney(head.journey_id, text);
-  await query(
-    `INSERT INTO journey_step_pause_logs (company_id, journey_id, step_id, execution_id, pause_reason, pause_trigger_source, target_count_snapshot, execution_status_at_pause)
-     VALUES ($1::uuid, $2::uuid, $3::uuid, NULL, 'daily_volume_anomaly', $5, $4, 'held')`,
-    [head.company_id, head.journey_id, step.id, today, gateTag],
-  );
-  void sendSystemAlert({
-    companyId: head.company_id,
-    dedupKey: `journey-daily-volume:${head.journey_id}:${day}`,
-    message: `여정 하루 묶음 인원이 평소보다 크게 많아 보내기 전에 멈췄습니다(${day} 진입 ${today}명 · 지난 30일 하루 최대 ${maxPrev}명 · journey=${head.journey_id}). 명단이 맞으면 담당자가 다시 켜면 그대로 나갑니다.`,
-  }).catch(() => undefined);
-  return true;
-}
-
 async function pauseJourney(journeyId: string, reason: string): Promise<void> {
+  const pp: any[] = [journeyId];
   await query(
-    `UPDATE journeys SET status = 'paused', paused_at = NOW(), pause_reason = $2, updated_at = NOW()
+    `UPDATE journeys SET ${pausedSetSql(pp, reason)}, updated_at = NOW()
      WHERE id = $1::uuid AND status = 'active'`,
-    [journeyId, reason.slice(0, 500)]
+    pp,
   );
   console.warn(`[JourneyExecutor] 여정 일시정지 — journey=${journeyId} reason="${reason}"`);
 }

@@ -138,8 +138,9 @@ describe('보류 = 실패 · 정지 · 다시 쓰기 0(구현 2라운드)', () =
     const n = src('journey-pretest-notifier.ts');
     const taken = n.slice(n.indexOf("if (claim === 'taken') {"));
     expect(taken).toMatch(/const again = await readCandidate\(snapId!\);\s*if \(!again \|\| \(again\.status === 'generating' && !again\.stale\)\) return;/);
-    expect(n).toContain("const w = await recordIfCurrent(b, snapId, { status: 'notified', newBody: candBody, candidatePassed: true });");
-    expect(n).toMatch(/if \(w\.candidatePassed && \(!testedSnapshotId \|\| !\(await markCandidatePassedInTx\(run, testedSnapshotId\)\)\)\)/);
+    // ★ 2026-11-02 설계서 3-9 — 통과 반영 = 사람이 누를 때(applyPassedCandidate) · 검사 통과 = 후보 passed 만
+    expect(n).toContain("if (await moveCandidate(snapId, ['testing'], 'passed')) summary.passed++;");
+    expect(n).not.toMatch(/newBody|candidatePassed|markCandidatePassedInTx/);
     // 정산 직전 확인 = 재작성 함수 run 끝(AI 결과 바로 뒤 · 정산 바로 앞) · 아직 내 후보가 아니면 null = 0원(ai-credit 계약은 그대로)
     const g = src('journey-ai-generator.ts');
     expect(g).toMatch(/return r !== null && charge && !\(await charge\.stillMine\(\)\) \? null : r;\s*\},\s*accept: \(r\) => r !== null,/);

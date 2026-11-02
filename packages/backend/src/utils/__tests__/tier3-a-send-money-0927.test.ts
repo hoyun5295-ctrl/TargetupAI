@@ -126,7 +126,8 @@ describe('R197 · R198 · m107 운영자', () => {
   });
   it('수동 승인 발송도 실측 수량·비용 기록', () => {
     const o = src('continuous-operator.ts');
-    expect(o).toContain('} else if (!autoPath && recipientTotal > 0) {');
+    // ★ 2026-11-02 갈래 판정(CT-O2) — 상한 · 예산을 보지 않는 갈래(지금 승인 · 사람 승인 예약)도 실측 기록
+    expect(o).toContain('} else if (recipientTotal > 0) {');
     expect(o).toContain('// ★ 2026-09-27 한줄로 V2 R198');
   });
   // ★ 2026-11-02 엔진 재설계 E2-3 — 옛 「발송 패스를 제안 생성 앞에서」를 넘어 발송 패스를 자기 주기 · 자기 가드로 뺐다(제안 생성이 길어도 매 분 발송)

@@ -19,6 +19,7 @@ import JourneyMmsUploader from './JourneyMmsUploader';
 // ★ 2026-08-08 — 혜택·링크 자리는 텍스트 수술이 아니라 값 입력으로 채운다(판정·치환 단일 정의).
 import { hasBenefitPlaceholder, hasUrlPlaceholder } from '../../utils/message-placeholders';
 import { stepChannelLabel } from '../../utils/journey-labels';
+import { resolveJourneyAdFlag } from '../../utils/journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 
 export type StudioChannel = 'sms' | 'lms' | 'mms';
 export type StudioDelayMode = 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
@@ -79,6 +80,8 @@ interface Props {
   headerActions?: ReactNode;
   /** 담당자 알림 줄의 고르기(작업 화면이 넘긴다 · 저장된 칸만) */
   notifyControl?: ReactNode;
+  /** ★ 2026-11-02 설계서 3-16 — 본문을 잠그고 휴대폰 자리에 보일 것(켜진 여정 A/B 칸 = A/B 문안) · AI · 혜택 · 넣을 데이터 줄도 숨긴다 */
+  copyLock?: ReactNode;
 }
 
 /**
@@ -114,7 +117,7 @@ export default function JourneyStepStudio({
   step, first, onPatch, onAi, onDecorate, onUndoAi, onFillBenefit, onFillUrl, factsUnset, benefitSlots = false, urlSlots = false,
   sampleCustomer = null, sampleCustomerFields = null, opt080Number = '', journeyId, senderLabel,
   variables = [], decorateVars = [], triggerLabel, aiBusy = false,
-  lockChannel = false, lockTiming = false, lockNote, headerActions, notifyControl,
+  lockChannel = false, lockTiming = false, lockNote, headerActions, notifyControl, copyLock,
 }: Props) {
   const sendPolicy = useSendPolicy();   // ★ 2026-10-25 원장 #40 야간 창 · 이월 시각 = 서버 값
   const taRef = useRef<HTMLTextAreaElement | null>(null);
@@ -145,7 +148,7 @@ export default function JourneyStepStudio({
   }, [stepKey, decorateVars]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const channel = (step.channel === 'sms' || step.channel === 'mms' ? step.channel : 'lms') as StudioChannel;
-  const isAdStep = step.isAd !== false;
+  const isAdStep = resolveJourneyAdFlag(step.channel, step.isAd);   // ★ 2026-11-02 광고 판정 = 서버와 같은 함수(CT-J8)
 
   /** 프리셋에 없는 값이면 직접 입력이 진실이다 — 저장된 여정을 열었을 때 5일(120시간)이 아무 데도 안 걸리면 안 된다. */
   const delayHoursNow = Math.max(0, Number(step.delayHours) || 0);
@@ -201,6 +204,7 @@ export default function JourneyStepStudio({
       <div className="grid grid-cols-1 gap-5 p-4 md:grid-cols-[280px_minmax(0,1fr)] md:p-5">
         {/* 왼쪽 — 큰 휴대폰(받은 문자 모양 그대로 쓴다) */}
         <div className="min-w-0">
+          {copyLock ?? (
           <PhoneComposer
             channel={channel}
             subject={step.subject || ''}
@@ -218,6 +222,7 @@ export default function JourneyStepStudio({
             placeholder="이 칸에서 보낼 문안이에요. 비워 두고 AI 문안 쓰기를 눌러도 돼요."
             resetKey={stepKey}
           />
+          )}
         </div>
 
         {/* 가운데 — 설정 한 판(이름 | 고르기) */}
@@ -233,7 +238,7 @@ export default function JourneyStepStudio({
             </fieldset>
           </Row>
 
-          {(onAi || onDecorate || onUndoAi) && (
+          {!copyLock && (onAi || onDecorate || onUndoAi) && (
             <Row name="AI">
               <div className="flex flex-wrap gap-2">
                 {onAi && (
@@ -260,7 +265,7 @@ export default function JourneyStepStudio({
           )}
 
           {/* ★ 2026-08-08 — 혜택·링크는 값으로 받는다(입력 한 번이 전 칸을 채운다 · B1-2 원장 + 전 칸 한 트랜잭션). */}
-          {factsRow && (
+          {!copyLock && factsRow && (
             <Row name="혜택 · 링크">
               <div className="space-y-2.5">
                 {(benefitSlots || factsUnset) && onFillBenefit && (
@@ -290,6 +295,7 @@ export default function JourneyStepStudio({
           )}
 
           {/* 넣을 데이터 — 회사가 가진 컬럼만(우리가 지어내지 않는다) · 0이어도 줄을 숨기지 않는다(왜 없는지 보이게) */}
+          {!copyLock && (
           <Row name="넣을 데이터">
             {decorateVars.length === 0 ? (
               <p className="pt-1 text-[12.5px] leading-relaxed text-amber-800">문안에 넣을 수 있는 고객 데이터 항목이 아직 없어요. 고객 정보를 올리면 여기에 나타나요.</p>
@@ -325,6 +331,7 @@ export default function JourneyStepStudio({
               </>
             )}
           </Row>
+          )}
 
           <Row name="보내는 때">
             <fieldset disabled={lockTiming} className="disabled:opacity-60">

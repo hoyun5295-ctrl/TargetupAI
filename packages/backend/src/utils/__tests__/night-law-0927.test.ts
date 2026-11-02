@@ -8,13 +8,17 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('m109 여정 발송 시간 = 플랫폼 창', () => {
-  const src = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
+  // ★ 2026-11-02 발송 창 판정 본문 = send-time-util 한 곳(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-0 CT-J7 · 옛 실행기 사본 지움)
+  const util = readFileSync(join(__dirname, '..', 'send-time-util.ts'), 'utf8');
+  const ex = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
   it('하드코딩 8·21 없음 · SEND_HOURS를 쓴다', () => {
-    const f1 = src.slice(src.indexOf('function isWithinSendHours('), src.indexOf('function computeNextSendWindow('));
-    const f2 = src.slice(src.indexOf('function computeNextSendWindow('), src.indexOf('function computeNextSendWindow(') + 700);
-    expect(f1).toContain('return kstHour >= SEND_HOURS.start && kstHour < SEND_HOURS.end;');
-    expect(f2).toContain('if (kstHour >= SEND_HOURS.end) {');
+    const f1 = util.slice(util.indexOf('export function isWithinSendHours('), util.indexOf('export function nextDaySendWindowStart('));
+    const f2 = util.slice(util.indexOf('function nextSendWindowStart('), util.indexOf('export function sendWindowStateFor('));
+    expect(f1).toContain('startHour: number = SEND_HOURS.start, endHour: number = SEND_HOURS.end');
+    expect(f1).toContain('return kstHour >= startHour && kstHour < endHour;');
+    expect(f2).toContain('if (kstNow.getUTCHours() >= SEND_HOURS.end) kstTarget.setUTCDate(kstTarget.getUTCDate() + 1);');
     expect(f2).toContain('kstTarget.setUTCHours(SEND_HOURS.start, 0, 0, 0);');
+    expect(ex).not.toMatch(/function (?:isWithinSendHours|computeNextSendWindow|sendWindowState|nextDayWindowStart)\(/);
   });
 });
 

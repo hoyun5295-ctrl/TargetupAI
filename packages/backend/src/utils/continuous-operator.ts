@@ -26,6 +26,7 @@
  */
 
 // ★ 2026-09-27 한줄로 V2 R197 — 운영자 일·월 예산 창 = KST(옛 CURRENT_DATE·date_trunc는 UTC 세션 기준)
+import { roundKeyOf, roundKeySql, roundState, withRoundLock, replaceRoundCas } from './operator-round';   // ★ 2026-11-02 회차 정체 CT(설계서 3-0 CT-O1)
 import { readVoiceFormDecision, type VoiceFormDecision } from './voice-form-slots';
 import { UserFacingError } from './http-error';
 import { runWithRegenBudget, generationSlotsLeft } from './copy-exit-guards';
@@ -44,6 +45,8 @@ import { insertProposalVariants, recommendVariantForProposal, recordVariantRewar
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
 import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT } from './continuous-operator-policy';
 import { buildAutosendStopUrl } from './autosend-stop-link';
+import { operatorCapPolicy, operatorCapPathOf, autoSendLeadMinutesSql, type OperatorCapPath } from './autosend-policy';
+import { NOTICE_MAX_ATTEMPTS } from './journey-notice-once';   // ★ 2026-11-02 안내 시도 상한(한 정책 · 회차 안내도 같은 값)   // ★ 2026-11-02 상한 갈래 CT(설계서 3-0 CT-O2)
 import { resolveAutoSendLeadMinutes, computeScheduledSendAt, decideSendOutcome, decideStuckSendingRecovery, decideBudgetGuard, decideBudgetAlert, isSendableHourKst, validateScheduleTimeSendable, buildAutoSendPrepInfoBody, buildPendingReviewNoticeBody, computeNextOccurrence, computeNextGenerationRun, normalizeSendTimeMode, SendTimeMode, normalizeCopyStyle, buildCopyStylePromptBlock, CopyStyle, wrapOperatorNoticeBody, normalizeTargetHint, TargetHint, applyBenefitToBody, hasUneditedBenefitPlaceholder, detectMissedOperatorRound , computeApprovalWindow, buildRenewalNoticeBody, countEmptyRounds, isWithinApprovalWindow, approvalSummarySince } from './autosend-policy';
 import { stableJson } from './agent-protocol';
 import { operatorFinalCopy, operatorFinalCopyAt, proposalSendIndex, finalCopyCleared, copyFingerprint, type OperatorFinalCopy, type OperatorCopyContext } from './operator-final-copy';
@@ -198,6 +201,8 @@ export interface ContinuousOperator {
   status: OperatorStatus;
   lastRunAt: Date | null;
   nextRunAt: Date | null;
+  /** ★ 2026-11-02 설계서 3-2 C — 다음 발송 시각(고정 = 다음 제안 준비 + 준비 시간 · AI 최적 = null = 「AI 최적 시각」) */
+  nextSendAt: Date | null;
   totalProposals: number;
   totalApproved: number;
   totalRejected: number;
@@ -1208,7 +1213,7 @@ export async function findOpenProposalForOperator(operatorId: string, companyId:
  * 회차 1건 생성. `opts.precomputed` = 미리보기에서 이미 만든 오케스트레이터 결과(★ 2026-10-05 · 설계서 §2-5) —
  *   오케스트레이터 호출만 건너뛰고 그 뒤 판정(0명 · 자율 자격 · 예약 중복 · 스팸 · 통지 · 통계)은 그대로 탄다.
  */
-export async function generateProposalForOperator(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null }): Promise<OperatorProposal | null> {
+export async function generateProposalForOperator(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null; manual?: boolean }): Promise<OperatorProposal | null> {
   // ★ 2026-11-02 엔진 재설계 E2-3(설계 1R D1-3) — 생성 중 표식(생성이 검사 전 scheduled 를 저장하고 안내를 보내기까지 발송 패스가 그 제안을 집지 않는다)
   generatingOperators.set(operatorId, (generatingOperators.get(operatorId) || 0) + 1);
   try {
@@ -1229,7 +1234,7 @@ const generatingOperators = new Map<string, number>();
 /** 회사 줄 동시 수(제안 생성 · 회사 안 = 차례) */
 export const OPERATOR_GENERATE_CONCURRENCY = 3;
 
-async function generateProposalForOperatorRound(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null }): Promise<OperatorProposal | null> {
+async function generateProposalForOperatorRound(operatorId: string, opts?: { precomputed?: any; variantIndex?: number | null; manual?: boolean }): Promise<OperatorProposal | null> {
   // 1. Operator 조회 — ★ D212+ 5번 (2026-05-23 Harold 명시): budget_spent 영역 sub-query 통합
   const operRes = await query(
     `SELECT o.*, c.id AS c_id,
@@ -1301,6 +1306,17 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   )) {
     console.log(`[ContinuousOperator] ${operator.name} 이미 발송 예약된 추천 존재 → 신규 생성 skip (이중 예약 방지)`);
     await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    return null;
+  }
+
+  // ★ 2026-11-02 설계서 3-1 · CT-O1 — 회차 키 = 일정의 그 회차 시각. 끝을 낸 회차(예약 · 보냄 · 승인 · 거부 · 생략 · 멈춤) = 만들지 않고 다음 회차로 ·
+  //   담당자 손에 있는 회차(대기 · 검토) = 워커는 만들지 않는다(지금 실행 = 아래 회차 잠금 안 교체 · AI 앞 빠른 길 · 잠금 안에서 다시 본다)
+  const roundKey = roundKeyOf(operator);
+  const roundAt = new Date(roundKey);
+  const preRound = await roundState((t, p) => query(t, p), operator.id, roundKey);
+  if (preRound.done || (!opts?.manual && preRound.openIds.length > 0)) {
+    console.log(`[ContinuousOperator] ${operator.name} ${roundKey} 회차 = ${preRound.done ? '이미 끝을 냄' : '담당자 확인 중'} → 만들지 않고 다음 회차로`);
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0, false, roundAt);
     return null;
   }
 
@@ -1545,10 +1561,12 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   const companyAuto = !!(ctx.cdp_auto_execute_enabled && ctx.advanced_access_enabled);
   //   승인 기간 = 첫 승인 회차의 날부터 끝까지(시작 경계 포함 · Codex 1R — 끝만 보면 승인 전 회차가 통과한다)
   const approvalActive = isWithinApprovalWindow(operator.approvedUntil, operator.approvalMeta?.windowStart, scheduledSendAt);
+  // ★ 2026-11-02 설계서 3-2 A · CT-O2 — 상한 갈래 = 판정 함수 하나(회사 자율 = 상한 + 예산 · 승인 기간 = 예산만)
+  // ★ Codex 구현 1R — 승인 기간이 유효하면 회사 자율보다 먼저(사람이 이 기간 회차를 미리 승인했다 · 회사 상한으로 다시 막지 않는다 · 3-2 A)
+  const capPath: OperatorCapPath | null = approvalActive ? 'approval_window' : companyAuto ? 'company_auto' : null;
+  const capRule = capPath ? operatorCapPolicy(capPath, { recipients: recipientCount, cost: costEstimate, maxRecipients: ctx.cdp_auto_execute_max_recipients, maxCost: ctx.cdp_auto_execute_max_cost_krw }) : null;
   const autoExecuteEligible =
-    (companyAuto || approvalActive) &&
-    recipientCount <= ctx.cdp_auto_execute_max_recipients &&
-    costEstimate <= ctx.cdp_auto_execute_max_cost_krw &&
+    !!capRule && !capRule.overReason &&
     riskWithinThreshold &&
     compliance.passed &&
     canAutoSend &&
@@ -1557,9 +1575,8 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   const autoExecuteReason = autoExecuteEligible
     ? `자동 실행 임계값 통과(${companyAuto ? '회사 자율' : '승인 기간'}): ${recipientCount}명 / ${costEstimate.toLocaleString()}원 / ${compliance.riskLevel} risk (회사 max ${ctx.cdp_auto_execute_max_risk}) / 광고`
     : `자동 실행 미통과: ${[
-        !companyAuto && !approvalActive && '승인 기간 아님(회차마다 승인)',
-        recipientCount > ctx.cdp_auto_execute_max_recipients && `${recipientCount}건 > ${ctx.cdp_auto_execute_max_recipients}`,
-        costEstimate > ctx.cdp_auto_execute_max_cost_krw && `${costEstimate}원 > ${ctx.cdp_auto_execute_max_cost_krw}원`,
+        !capPath && '승인 기간 아님(회차마다 승인)',
+        capRule?.overReason,
         !riskWithinThreshold && `compliance ${compliance.riskLevel} > 회사 max ${ctx.cdp_auto_execute_max_risk}`,
         !compliance.passed && 'compliance fail',
         !canAutoSend && '발신번호·문안·채널(SMS/LMS) 미충족',
@@ -1567,7 +1584,23 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       ].filter(Boolean).join(', ')}`;
 
   // 7. 제안서 INSERT — auto-eligible은 'scheduled'(T에 자율 발송), 아니면 'pending'(수동 검토).
-  const proposalRes = await query(
+  // ★ 2026-11-02 설계서 3-1 ③ · CT-O1 — 확인 · 교체 · 넣기 = (운영자 · 회차 키) 잠금 안 한 트랜잭션(AI 호출은 잠금 밖 · 위 빠른 길을 잠금 안에서 다시 본다)
+  const proposalRes = await withRoundLock(operator.id, roundKey, async (run) => {
+    const st = await roundState(run, operator.id, roundKey);
+    if (st.done || (!opts?.manual && st.openIds.length > 0)) return { rows: [] as any[] };
+    // 지금 실행 = 본 대기 · 검토 회차만 만료(그 상태일 때만 · 돌아온 수 = 본 수일 때만 넣는다 · 그사이 승인 = 롤백 · 새 회차 0)
+    if (!(await replaceRoundCas(run, st.openIds))) {
+      throw new UserFacingError(409, 'ROUND_APPROVED_MEANWHILE', '그사이 이 회차를 승인하셨어요. 새로 만들지 않았어요.');
+    }
+    // 지난 회차의 대기 · 검토 = 만료(운영자당 미처리 추천 1건 · 리마인드 제외 · 옛 규칙 그대로 · 넣기 앞)
+    await run(
+      `UPDATE operator_proposals SET status = 'expired'
+        WHERE operator_id = $1::uuid AND status IN ('pending', 'admin_review')
+          AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
+          AND ${roundKeySql('operator_proposals')} IS DISTINCT FROM $2`,
+      [operator.id, roundKey],
+    );
+    return run(
     `INSERT INTO operator_proposals (
       id, operator_id, company_id, proposal_json, recipient_count, cost_estimate,
       status, auto_executed, auto_execute_reason, scheduled_send_at, expires_at, created_at
@@ -1592,7 +1625,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
     [
       operator.id,
       operator.companyId,
-      JSON.stringify(orchestratorResult),
+      JSON.stringify({ ...orchestratorResult, meta: { ...(orchestratorResult?.meta || {}), roundKey, ...(capPath ? { capPath } : {}) } }),
       recipientCount,
       costEstimate,
       autoExecuteEligible ? 'scheduled' : 'pending',
@@ -1600,14 +1633,15 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       autoExecuteReason,
       scheduledSendAt,
     ]
-  );
+    );
+  });
 
   // 0행 = 위 WHERE(또는 부분 UNIQUE 인덱스)가 막았다 = 이 오퍼레이터에 이미 예약된 회차가 있다(동시 실행).
   //   발송·과금 중복보다 이번 회차 제안 하나를 포기하는 쪽이 싸다(AI 비용 1회 손실 < 2회 발송·2회 과금).
   //   run-now는 라우트가 "0건 매칭"과 구분해 안내한다(routes/ai.ts — 기준선 안내보다 먼저 판정).
   if (proposalRes.rows.length === 0) {
-    console.log(`[ContinuousOperator] ${operator.name} 동시 생성 감지 — 이미 예약된 회차가 있어 신규 제안 미생성`);
-    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0);
+    console.log(`[ContinuousOperator] ${operator.name} 동시 생성 감지 — 이 회차가 이미 있거나 예약된 회차가 있어 신규 제안 미생성`);
+    await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 0, false, roundAt);
     return null;
   }
 
@@ -1616,12 +1650,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   //   'scheduled'(자율발송·리마인드)는 발송 확정분이라 건드리지 않음. operator_proposals엔 updated_at 컬럼 없음 → status만 set.
   //   ★ 2026-09-27 한줄로 V2 R194 — 리마인드(meta.is_reminder)는 회차 추천이 아니라 별개 발송이다. 스팸 검증 대기(admin_review)
   //   리마인드가 다음 회차 생성에 알림 없이 만료되던 것을 막는다(위 이중 예약 가드와 같은 제외 조건).
-  await query(
-    `UPDATE operator_proposals SET status = 'expired'
-      WHERE operator_id = $1::uuid AND status IN ('pending', 'admin_review') AND id <> $2::uuid
-        AND COALESCE(proposal_json->'meta'->>'is_reminder', 'false') <> 'true'`,
-    [operator.id, proposalRes.rows[0].id],
-  );
+  // ★ 2026-11-02 설계서 3-1 — 만료는 넣기 앞(회차 잠금 안 · 같은 회차 = 본 id 조건 · 지난 회차 = 운영자당 1건)으로 옮겼다(「방금 만든 것 제외」 조건 불필요)
 
   // 8. D177 Self-Optimizing — message variants 생성 (Bandit 학습 기반)
   const messages: any[] = (orchestratorResult.messages as any[]) || [];
@@ -1890,7 +1919,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   } catch { /* 기록은 부가 정보 */ }
 
   // 11. Operator 통계 갱신
-  await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible);
+  await updateOperatorAfterRun(operator.id, operator.schedule, operator.scheduleTime, 1, autoExecuteEligible, roundAt);   // ★ 2026-11-02 다음 생성 = 이 회차 다음 회차(3-1 ①)
 
   console.log(`[ContinuousOperator] ${operator.name} 제안서 생성 완료 (${recipientCount}명 / ${costEstimate}원 / ${autoExecuteEligible ? '자동 실행' : 'pending'} / variants ${messages.length}건 / 정책 ${operator.deliveryPolicy})`);
 
@@ -1947,7 +1976,9 @@ async function updateOperatorAfterRun(
   schedule: OperatorSchedule,
   scheduleTime: string,
   proposalIncrement: number,
-  autoExecuted: boolean = false
+  autoExecuted: boolean = false,
+  /** ★ 2026-11-02 설계서 3-1 ① — 이 회차(시각)를 만들었거나 끝을 냈으면 그 다음 회차로(기준 = max(지금, 회차 + 1분)) · 없음 = 지금 기준(다시 시도) */
+  afterRoundAt: Date | null = null,
 ): Promise<void> {
   // 지정 요일/날짜 반영 — 컬럼 미존재(ALTER 전) 환경에서도 안전하게 fallback
   let dow: number | null = null;
@@ -1965,7 +1996,8 @@ async function updateOperatorAfterRun(
     lead = dayRes.rows[0]?.auto_send_lead_minutes ?? null;
   } catch { /* 컬럼 미존재 시 기존 동작 유지 */ }
   // ★ 2026-07-02 1단계 B: 다음 생성 = 다음 발송 희망 시각 − 준비시간 (같은 주기 재선정 없음 — computeNextGenerationRun이 보장)
-  const nextRunAt = computeNextGenerationRun(schedule, scheduleTime, dow, dom, mon, resolveAutoSendLeadMinutes(lead)).nextRunAt;
+  const ref = afterRoundAt ? new Date(Math.max(Date.now(), afterRoundAt.getTime() + 60_000)) : new Date();
+  const nextRunAt = computeNextGenerationRun(schedule, scheduleTime, dow, dom, mon, resolveAutoSendLeadMinutes(lead), ref).nextRunAt;
   await query(
     `UPDATE continuous_operators SET
        last_run_at = NOW(),
@@ -2146,8 +2178,11 @@ export async function approveProposal(
   // ★ 2026-07-12 C-1: 야간 승인 = 즉시 발송 대신 다음 발송 가능 시각(오전 9시) 자율 발송 예약(광고 야간 전송 제한).
   //   userSelection · 사람 승인 지문은 이미 proposal_json에 병합돼 있어 예약 발송에도 그대로 반영된다.
   const nowApprove = new Date();
-  if (!isSendableHourKst(nowApprove, SEND_HOURS.start, SEND_HOURS.end)) {
-    const sendAt = shiftToSendableHour(nowApprove);
+  // ★ 2026-11-02 설계서 3-2 B — 회차 승인 = 정한 시각(T)에 보낸다: 아직이면 T 예약 · 지났으면(화면이 확인 창으로 물었다) 지금 · 야간이면 다음 발송 창
+  const roundTime = claim.rows[0].scheduled_send_at ? new Date(claim.rows[0].scheduled_send_at) : null;
+  const atRound = roundTime && roundTime.getTime() > nowApprove.getTime() ? shiftToSendableHour(roundTime) : null;
+  if (atRound || !isSendableHourKst(nowApprove, SEND_HOURS.start, SEND_HOURS.end)) {
+    const sendAt = atRound ?? shiftToSendableHour(nowApprove);
     try {
       await query(
         `UPDATE operator_proposals SET status = 'scheduled', scheduled_send_at = $2
@@ -2177,7 +2212,9 @@ export async function approveProposal(
     const label = sendAt.toLocaleString('ko-KR', {
       timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
     });
-    return { ok: true, action: 'skipped', reason: `야간에는 광고 발송이 제한되어 지금은 발송하지 않습니다. ${label}에 자동 발송되도록 예약했습니다. 발송 전까지 [정지] 버튼으로 취소할 수 있습니다.` };
+    return { ok: true, action: 'skipped', reason: atRound
+      ? `승인했어요. 정한 시각(${label})에 보내요. 보내기 전에 안내 문자를 드려요. 그 전까지 [정지]로 취소할 수 있어요.`
+      : `야간에는 광고 발송이 제한되어 지금은 발송하지 않습니다. ${label}에 자동 발송되도록 예약했습니다. 발송 전까지 [정지] 버튼으로 취소할 수 있습니다.` };
   }
 
   // 발송 — dispatchProposalSend 공유. 발송 크레딧은 보내기 직전 1회(키 = 제안 · 적재 묶음).
@@ -2573,6 +2610,8 @@ export async function runAutoSendPassTick(): Promise<void> {
     await recoverHeldProposals().catch((e: any) => console.error('[ContinuousOperator Recover] 보류 회차 회복 예외:', e?.message || e));
     await deliverRecoveryNotices().catch((e: any) => console.error('[ContinuousOperator Recover] 회복 안내 예외:', e?.message || e));
     await runAutoSendPass();
+    // ★ 2026-11-02 설계서 3-2 D — 회차 안내(사람이 승인해 예약된 회차 = 발송 전 안내 · 승인 대기 회차 = 「승인하지 않으면 보내지 않아요」 · 회차마다 한 통)
+    await deliverRoundNotices().catch((e: any) => console.error('[ContinuousOperator Notice] 회차 안내 예외:', e?.message || e));
     // ★ 2026-11-02 §16 G3 — 자동마케팅 밀림 경보(발송 패스 · 제안 생성 · 원인 하나 한 통)
     await checkOperatorLag().catch((e: any) => console.error('[ContinuousOperator Lag] 밀림 감시 예외:', e?.message || e));
   } catch (e: any) {
@@ -3233,7 +3272,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   //   (승인 철회 · 회사 자율 끄기가 같은 행을 바꾸므로 판정과 선점 사이에 끼어들 수 없다 · 자격 없음 = 검토로 내림).
   const claim = await withTransaction(async (run) => {
     const pre = await run(
-      `SELECT operator_id, company_id, scheduled_send_at, proposal_json->'spamCheck'->>'restoredAt' AS restored FROM operator_proposals WHERE id = $1::uuid AND status = 'scheduled'`,
+      `SELECT operator_id, company_id, scheduled_send_at, proposal_json->'spamCheck'->>'restoredAt' AS restored, (reviewed_by IS NOT NULL) AS human FROM operator_proposals WHERE id = $1::uuid AND status = 'scheduled'`,
       [proposalId],
     );
     const pr = pre.rows[0];
@@ -3243,7 +3282,7 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
       const meta = typeof op?.approval_meta === 'string' ? JSON.parse(op.approval_meta) : op?.approval_meta;
       const at = pr.scheduled_send_at ? new Date(pr.scheduled_send_at) : new Date();
       const ok = String(op?.status || '') === 'active'
-        && (co?.company_auto === true || isWithinApprovalWindow(op?.approved_until ? new Date(op.approved_until) : null, meta?.windowStart ?? null, at));
+        && (pr.human === true || co?.company_auto === true || isWithinApprovalWindow(op?.approved_until ? new Date(op.approved_until) : null, meta?.windowStart ?? null, at));   // ★ 2026-11-02 사람 승인 회차 = 자격 다시 안 봄(3-2 A)
       if (!ok) {
         await run(
           `UPDATE operator_proposals SET status = 'admin_review', auto_executed = false, scheduled_send_at = NULL,
@@ -3267,7 +3306,9 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
   //   예산을 소진했을 수 있어 발송 직전 1회 더 확인. 월/일 = 당월/당일 로그 SUM(누적 컬럼 X — 여정 J2),
   //   status 집합은 listOperators 예산 sub-query와 동일 유지. 초과 또는 검증 불가 시 admin_review 보류(돈 보호 fail-safe, 자동 발송 X).
   //   수동 승인 경로(approveProposal→dispatchProposalSend)는 사람이 이미 검토했으므로 가드 대상 아님 — 자율 발송 전용.
-  try {
+  // ★ 2026-11-02 설계서 3-2 A — 사람이 승인해 예약된 회차 = 예산 · 상한을 다시 보지 않는다(정한 시각에 나간다 · CT-O2)
+  const sendPath = operatorCapPathOf(p);
+  if (operatorCapPolicy(sendPath, { recipients: 0, cost: 0, maxRecipients: 0, maxCost: 0 }).checksBudget) try {
     const budRes = await query(
       `SELECT o.budget_monthly, o.budget_daily, o.name, o.admin_phone_numbers, o.backup_admin_phone,
          ${operatorSpendSql('o', 'month', '$2::uuid')} AS spent_month,
@@ -3309,8 +3350,8 @@ async function sendScheduledProposal(proposalId: string): Promise<'sent' | 'skip
     return 'skipped';
   }
 
-  // 자율 발송 경로 — 발송 직전 실측 건수로 상한·예산을 한 번 더 본다(7R).
-  const r = await dispatchProposalSend(p, true);
+  // 예약 발송 — 발송 직전 실측 건수로 그 갈래의 상한 · 예산을 한 번 더 본다(7R · ★ 2026-11-02 갈래 = CT-O2)
+  const r = await dispatchProposalSend(p, sendPath);
   return r.action;
 }
 
@@ -3334,8 +3375,8 @@ async function lookupProposalVariantId(proposalId: string, variantIndex: number)
  */
 async function dispatchProposalSend(
   p: any,
-  // ⛔ 7R: 자율 발송 경로에서만 발송 직전 상한·예산 재검사를 한다(수동 승인은 사람이 검토했다는 기존 계약 유지).
-  autoPath = false,
+  // ⛔ 7R: 예약 발송 경로에서만 발송 직전 재검사(★ 2026-11-02 무엇을 보나 = 갈래 판정 CT-O2 · null = 지금 승인 발송 = 사람이 검토했다)
+  capPath: OperatorCapPath | null = null,
 ): Promise<{ action: 'sent' | 'skipped'; campaignId?: string; sentCount?: number; reason?: string }> {
   const proposalId: string = p.id;
   const companyId: string = p.company_id;
@@ -3625,7 +3666,8 @@ async function dispatchProposalSend(
     // ⛔ 7R 정정: 재추출된 **실제 건수**로 상한·예산을 다시 본다. 종전엔 제안 시점 수로 통과한 뒤
     //   발송 직전 추출에서 대상이 늘어도 검사가 없어, 설정한 자율 발송 상한과 예산을 넘겨 실발송·실차감했다.
     //   (자율 경로 전용 — 수동 승인은 사람이 이미 검토했다는 기존 계약을 유지한다.)
-    if (autoPath && recipientTotal > 0) {
+    const sendRule = capPath ? operatorCapPolicy(capPath, { recipients: 0, cost: 0, maxRecipients: 0, maxCost: 0 }) : null;
+    if (sendRule && (sendRule.checksCap || sendRule.checksBudget) && recipientTotal > 0) {
       // ⛔ 8R 정정: 제안서에 적힌 옛 단가로 검사하면 그 사이 단가가 바뀐 회사에서 검사와 실차감이 갈린다
       //   (9.9원으로 통과시키고 20원으로 차감). 확정된 채널과 **지금 회사 단가**로 계산한다.
       // ⛔ 8R 정정(원자성): 검사와 예약을 한 트랜잭션에서 한다. 종전엔 SUM 조회와 발송 사이에 잠금이 없고
@@ -3661,11 +3703,10 @@ async function dispatchProposalSend(
             overReason = '발송 단가를 확인하지 못했습니다';
           } else {
             actualCost = Math.round(unit * recipientTotal);
-            if (recipientTotal > Number(L.max_recipients)) {
-              overReason = `발송 직전 대상이 ${recipientTotal.toLocaleString()}명으로 자동 발송 상한(${Number(L.max_recipients).toLocaleString()}명)을 넘었습니다`;
-            } else if (actualCost > Number(L.max_cost)) {
-              overReason = `발송 직전 예상 비용이 ${actualCost.toLocaleString()}원으로 자동 발송 한도(${Number(L.max_cost).toLocaleString()}원)를 넘었습니다`;
-            } else {
+            const capOver = operatorCapPolicy(capPath!, { recipients: recipientTotal, cost: actualCost, maxRecipients: Number(L.max_recipients), maxCost: Number(L.max_cost) }).overReason;
+            if (capOver) {
+              overReason = `발송 직전 ${capOver}`;
+            } else if (sendRule.checksBudget) {
               const g = decideBudgetGuard({
                 budgetMonthly: L.budget_monthly != null ? Number(L.budget_monthly) : null,
                 budgetDaily: L.budget_daily != null ? Number(L.budget_daily) : null,
@@ -3708,7 +3749,7 @@ async function dispatchProposalSend(
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' ${overReason}. 담당자 검토가 필요합니다.`);
         return { action: 'skipped', reason: overReason };
       }
-    } else if (!autoPath && recipientTotal > 0) {
+    } else if (recipientTotal > 0) {
       // ★ 2026-09-27 한줄로 V2 R198 — 수동 승인 발송도 재추출한 실제 수량 · 지금 회사 단가로 기록한다(검사는 자율 경로만 · 기록은 둘 다).
       //   옛: 기록이 자율 분기 안에만 있어 수동 승인분은 제안 시점 추정치가 남아 운영자 일·월 예산 합계가 실제와 어긋났다.
       //   기록 실패는 발송을 막지 않는다(사람이 이미 승인한 발송 · 예산 합계 표시만 추정치로 남는다).
@@ -3925,6 +3966,7 @@ async function dispatchProposalSend(
     await scheduleSequenceReminder(
       op, p, pj, companyId, campaignId, callback, msgType,
       primarySentAt || new Date(), recipientTotal,
+      capPath ?? 'human_approved',   // ★ 2026-11-02 설계서 3-2 A — 리마인드 = 1차가 따른 갈래(null = 지금 승인 발송 = 사람 승인)
     ).catch(async (e: any) => {
       console.warn('[ContinuousOperator Sequence] 리마인드 예약 경고:', e?.message);
       await notify('[AI 자동마케팅] 리마인드 예약 실패',
@@ -4362,6 +4404,8 @@ async function scheduleSequenceReminder(
   primarySentAt: Date,
   /** 1차 실발송 실측 수(staging 적재 rowCount) — claim 시점 recipient_count가 아니다(2R #6). */
   actualRecipients: number,
+  /** ★ 2026-11-02 설계서 3-2 A — 1차가 따른 상한 갈래(리마인드 발송 때 operatorCapPathOf 가 읽는다) */
+  parentCapPath: OperatorCapPath,
 ): Promise<void> {
   const notifyCtx = {
     adminPhoneNumbers: Array.isArray(op.admin_phone_numbers) ? op.admin_phone_numbers : [],
@@ -4414,6 +4458,7 @@ async function scheduleSequenceReminder(
     messages: [{ variantId: 'reminder', variantName: '미반응자 리마인드', body: content, subject: reminderSubject }],
     meta: {
       is_reminder: true,
+      capPath: parentCapPath,
       primary_campaign_id: primaryCampaignId,
       // 미클릭 판정 기준 시각 = 1차 발송 커밋 직후 — 이 함수까지 오는 사이의 클릭도 반응으로 인정된다.
       excludeClickedSince: primarySentAt.toISOString(),
@@ -4763,6 +4808,8 @@ export function mapRowToOperator(row: any): ContinuousOperator {
     status: row.status,
     lastRunAt: row.last_run_at ? new Date(row.last_run_at) : null,
     nextRunAt: row.next_run_at ? new Date(row.next_run_at) : null,
+    nextSendAt: row.next_run_at && normalizeSendTimeMode(row.send_time_mode) !== 'ai_optimal'
+      ? new Date(new Date(row.next_run_at).getTime() + resolveAutoSendLeadMinutes(row.auto_send_lead_minutes) * 60_000) : null,
     totalProposals: row.total_proposals || 0,
     totalApproved: row.total_approved || 0,
     totalRejected: row.total_rejected || 0,
@@ -4845,4 +4892,76 @@ function mapRowToProposal(row: any): OperatorProposal {
     operatorName: row.operator_name,
     operatorObjective: row.operator_objective,
   };
+}
+
+
+/** ★ 2026-11-02 설계서 3-2 D — 한 패스에 보내는 회차 안내 수(발송 시각 이른 순 · 남은 것 = 다음 분) */
+export const ROUND_NOTICE_BATCH = 20;
+
+/**
+ * ★ 2026-11-02 설계서 3-2 D — 회차 안내(상태에서 고르는 패스 · 발송 패스 1분 안 · 회차마다 한 통).
+ *   ① 사람이 승인해 예약된 회차 = 발송 시각 − 준비 시간에 「발송 예정 안내(멈춤 링크)」(원장 = admin_notified_at · 자동 예약 회차는 만들 때 이미 보낸다).
+ *   ② 승인 대기 회차 = 같은 시각에 「승인하지 않으면 ○시 회차는 보내지 않아요」(원장 = proposal_json.meta.unapprovedNoticeAt).
+ *   기록 = 보낸 뒤에만(못 보내면 다음 분 · 발송 시각이 지나면 고르지 않는다).
+ */
+export async function deliverRoundNotices(): Promise<void> {
+  const rows = (await query(
+    `SELECT p.id, p.status, p.scheduled_send_at, p.recipient_count, p.cost_estimate, o.id AS operator_id, o.name, o.company_id, o.auto_send_lead_minutes,
+            o.admin_phone_numbers, o.backup_admin_phone
+       FROM operator_proposals p JOIN continuous_operators o ON o.id = p.operator_id
+      WHERE p.scheduled_send_at IS NOT NULL AND p.scheduled_send_at > NOW()
+        AND p.scheduled_send_at <= NOW() + INTERVAL '24 hours'
+        AND COALESCE(p.proposal_json->'meta'->>'is_reminder', 'false') <> 'true'
+        AND ((p.status = 'scheduled' AND p.reviewed_by IS NOT NULL AND p.admin_notified_at IS NULL)
+          OR (p.status = 'pending' AND p.proposal_json->'meta'->>'unapprovedNoticeAt' IS NULL))
+        -- 안내 시각 = 발송 시각 − 준비 시간(운영자 값 · 규칙 = resolveAutoSendLeadMinutes 의 SQL 판) · 거름 · 순서 = LIMIT 앞(R12 · 안내 때가 안 된 회차가 앞자리를 차지하지 않게)
+        AND p.scheduled_send_at - (${autoSendLeadMinutesSql('o.auto_send_lead_minutes')} * INTERVAL '1 minute') <= NOW()
+        -- 못 보낸 시도 = 상한(받을 번호 없음 · 큐 장애가 앞자리를 영영 차지하지 않게 · 상한 = 운영 경보 · R8 · R12)
+        AND COALESCE((p.proposal_json->'meta'->>'roundNoticeAttempts')::int, 0) < ${NOTICE_MAX_ATTEMPTS}
+      ORDER BY p.scheduled_send_at ASC, p.id ASC
+      LIMIT ${ROUND_NOTICE_BATCH}`,
+  )).rows as any[];
+  for (const r of rows) {
+    const op = { id: String(r.operator_id), name: String(r.name || ''), companyId: String(r.company_id), adminPhoneNumbers: Array.isArray(r.admin_phone_numbers) ? r.admin_phone_numbers : [], backupAdminPhone: r.backup_admin_phone || null };
+    const at = new Date(r.scheduled_send_at);
+    const when = at.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    if (r.status === 'scheduled') {
+      const stopUrl = await buildAutosendStopUrl({ proposalId: String(r.id), operatorId: op.id, companyId: op.companyId, sendAt: at }).catch(() => null);
+      const ok = await notifyOperatorAdmins(op, '[AI 자동마케팅] 발송 예정 안내', buildAutoSendPrepInfoBody({
+        sendAtLabel: when, recipientCount: Number(r.recipient_count) || 0, costEstimate: Number(r.cost_estimate) || 0, channelLabel: '', unitCost: 0, stopUrl, approved: true,
+      })).catch(() => false);
+      if (ok) await query(`UPDATE operator_proposals SET admin_notified_at = NOW() WHERE id = $1::uuid AND admin_notified_at IS NULL`, [r.id]);
+      else await countRoundNoticeFailure(String(r.id), op);
+    } else {
+      const ok = await notifyOperatorAdmins(op, '[AI 자동마케팅] 승인 대기 안내',
+        `'${op.name}' ${when} 회차가 아직 승인 전이에요. 승인하지 않으면 이 회차는 보내지 않아요. 한줄로 자동마케팅 화면에서 확인해 주세요.`,
+      ).catch(() => false);
+      if (ok) await query(
+        // meta 가 없는 옛 행도 기록이 남게(jsonb_set 은 중간 열쇠가 없으면 아무것도 바꾸지 않는다 → 매분 다시 보냄)
+        `UPDATE operator_proposals SET proposal_json = jsonb_set(proposal_json, '{meta}',
+              (CASE WHEN jsonb_typeof(proposal_json->'meta') = 'object' THEN proposal_json->'meta' ELSE '{}'::jsonb END) || jsonb_build_object('unapprovedNoticeAt', NOW()::text), true)
+          WHERE id = $1::uuid AND status = 'pending' AND proposal_json->'meta'->>'unapprovedNoticeAt' IS NULL`,
+        [r.id],
+      );
+      else await countRoundNoticeFailure(String(r.id), op);
+    }
+  }
+}
+
+/** 회차 안내를 못 보냈다 = 시도 수 하나 더(제안 meta · 상한이면 고르기에서 빠진다 · 그때 운영 경보 한 통) */
+async function countRoundNoticeFailure(proposalId: string, op: { companyId: string; name: string }): Promise<void> {
+  const up = await query(
+    `UPDATE operator_proposals SET proposal_json = jsonb_set(proposal_json, '{meta}',
+          (CASE WHEN jsonb_typeof(proposal_json->'meta') = 'object' THEN proposal_json->'meta' ELSE '{}'::jsonb END)
+            || jsonb_build_object('roundNoticeAttempts', COALESCE((proposal_json->'meta'->>'roundNoticeAttempts')::int, 0) + 1), true)
+      WHERE id = $1::uuid
+      RETURNING (proposal_json->'meta'->>'roundNoticeAttempts')::int AS n`,
+    [proposalId],
+  ).catch(() => ({ rows: [] as any[] }));
+  if (Number(up.rows[0]?.n) >= NOTICE_MAX_ATTEMPTS) {
+    void sendSystemAlert({
+      companyId: op.companyId, dedupKey: `operator-round-notice:${proposalId}`,
+      message: `자동마케팅 '${op.name}' 회차 안내 문자를 ${NOTICE_MAX_ATTEMPTS}번 보내지 못했습니다(담당자 번호 · 인증 라인 큐 확인 · 회차는 정한 대로 진행 · 제안 ${proposalId}).`,
+    }).catch(() => undefined);
+  }
 }

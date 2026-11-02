@@ -63,7 +63,10 @@ describe('칸 편집 정책 — 한 곳 · 묶음별', () => {
     const b = src('journey-builder.ts');
     // ★ 2026-11-01 B1-3 — 칸 갱신 몸통 = applyStepPatchInLock(채우기 주소도 같은 몸통) · 판정은 잠금 안(옛 계약의 assertStepEditAllowed 는 소스에 없던 이름)
     const body = b.slice(b.indexOf('export async function updateJourneyStep('), b.indexOf('// ★ 2026-08-02 §13-1 — 저장 후 스텝 추가·삭제'));
-    expect(body).toContain('withJourneyValidationReset(companyId, journeyId, (run, journey) => applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch), { keepMarker })');
+    // ★ 2026-11-02 설계서 3-16 · 3-3 ③ — 잠금 안 콜백이 A/B 칸 관문 → 몸통 → 보낼 글 판정(같은 잠금 · 같은 트랜잭션)
+    expect(body).toContain('withJourneyValidationReset(companyId, journeyId, async (run, journey) => {');
+    expect(body).toContain('    const out = await applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch);\n');
+    expect(body).toContain('  }, { keepMarker })) ?? { rows: [] as any[] };');
     const inLock = body.slice(body.indexOf('export async function applyStepPatchInLock('));
     expect(inLock).toContain('const policy = stepEditPolicy(journey.status, inProgress, journey.startKind);');
     expect(inLock).toContain("countInProgressExecutions(run, journeyId)");

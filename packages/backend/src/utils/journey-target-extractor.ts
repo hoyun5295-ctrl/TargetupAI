@@ -17,6 +17,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql, cdpEventNameMatchSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { KST_TODAY_DATE_SQL } from './stats-aggregation';
 import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
 import type { JourneyConsent } from './mall-consent';
@@ -26,7 +27,7 @@ import { orderAttemptSql } from './journey-purchase-ledger';
 // ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
 //   추출은 회사 능력을 조회하지 않는다(Codex 3R). 술어는 데이터로만 평가되고,
 //   "판정 가능한가" 게이트는 발송 진입 경로(journey-trigger-watcher)가 소유한다.
-import { buildExistingCustomerPredicate } from './journey-identity-signals';
+import { newSignupSql, journeySignupSinceSql } from './customer-joined-at';   // ★ 2026-11-02 신규 가입 판정 CT(CT-J6)
 // ★ 2026-08-01 §3-0-3 — 이관 유예. "우리가 오늘 처음 봤다"는 "오늘 무언가 했다"가 아니다.
 //   기존 고객 DB를 처음 연동하면 수만 명의 created_at이 전부 오늘이라 상태형 트리거가 통째로 발화한다.
 import { isBulkStateTrigger, resolveIntakeGraceDays, buildIntakeGraceClause } from './journey-intake-grace';
@@ -108,15 +109,19 @@ export async function buildJourneyTargetQuery(
     case 'customer.created': {
       // ★ Phase 2: created_at 의존 제거 — 활성(baseline 적재됨) 여정은 진입 원장에 없는 식별자만 신규.
       //   초안/미리보기(baseline 없음)는 created_at 최근 창으로 "추정"만(실발송 아님).
+      // ★ 2026-11-02 설계서 3-6(D19 · CT-J6) — 신규 = 가입 근거(joined_at)가 켠 뒤(기준 시각 = journeySignupSinceSql · 시각이 있으면 기준선 시각 · 날짜뿐이면 그날 KST 시작) · 72시간 안 +
+      //   원장에 번호 없음 + 번호 한 행. 옛 「처음 본 때(created_at) · 구매 · 포인트 · 등급 없음」 판정을 지웠다.
       const params: any[] = [companyId];
       const useLedger = !!journeyId && (await hasBaseline(journeyId));
       let entryClause: string;
       if (useLedger) {
         params.push(journeyId);                                     // $2 = journeyId
-        entryClause = buildLedgerAntiJoin('c', params.length);
+        const jRef = `$${params.length}::uuid`;
+        const since = journeySignupSinceSql('c', `(SELECT entry_baseline_at FROM journeys WHERE id = ${jRef})`);
+        entryClause = `${buildLedgerAntiJoin('c', params.length)} AND ${newSignupSql('c', since)}`;
       } else {
-        params.push(String(Number(filters.recent_hours || 24)));    // $2 = hours (추정)
-        entryClause = `c.created_at > NOW() - ($${params.length} || ' hours')::interval`;
+        params.push(String(Number(filters.recent_hours || 24)));    // $2 = hours (추정 · 미리보기)
+        entryClause = newSignupSql('c', `NOW() - ($${params.length} || ' hours')::interval`);
       }
       // ★ 2026-08-01 §3-0-2: 원장에 없다고 신규가 아니다.
       //   자사몰로 먼저 등록된 고객(매장코드 없음)을 싱크가 매장코드와 함께 올리면 customers upsert 키
@@ -125,7 +130,6 @@ export async function buildJourneyTargetQuery(
       //   회사가 준 근거로 "전에도 고객이었다"를 걸러낸다 — 근거는 회사마다 다르다(설계서 §2-3).
       //   ⚠ 근거가 없는 회사를 생성·활성화 시점에 막는 것은 다음 조각이다. 여기서 빈 배열을 돌려주면
       //     기존 여정이 사유 없이 죽는다("조용한 0건"은 우리가 고치려는 병 자체다) → 추출 동작은 보존하고 관측만.
-      const existingPred = buildExistingCustomerPredicate('c', params);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(limitParam(limit));
       // ★ 2026-08-01 Codex 2R 수용 — 같은 회차 안 중복 진입 차단.
@@ -142,7 +146,6 @@ export async function buildJourneyTargetQuery(
               AND COALESCE(c.phone, '') <> ''
               AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
               AND ${entryClause}
-              AND NOT ${existingPred}
               ${cond ? ` AND ${cond}` : ''}
             ORDER BY c.phone, c.created_at DESC
          ) s
@@ -297,7 +300,7 @@ export async function buildJourneyTargetQuery(
                -- 같은 구매가 양 문에 다 있으면(혼합 회사) cnt가 부풀어 간격이 준다(Codex 지적) —
                -- 발생 시각 분 단위로 합쳐 한 건으로 센다. 같은 분의 실제 별건 구매는 마케팅상 한 건이다.
                SELECT DISTINCT e.customer_id, date_trunc('minute', e.occurred_at) AS d FROM cdp_events e
-                WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+                WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
                UNION
                SELECT DISTINCT p.customer_id, date_trunc('minute', p.purchase_date AT TIME ZONE 'Asia/Seoul') FROM purchases p
                 WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
@@ -619,7 +622,7 @@ async function productBuyersTargetQuery(
   params.push(limitParam(limit));
   const buyers = pf.door === 'mall'
     ? `SELECT DISTINCT e.customer_id FROM cdp_events e, ${mallItemsSql('e')} it
-        WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+        WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
           AND e.occurred_at >= NOW() - INTERVAL '7 days'
           AND ${mallItemKeySql('it')} = ANY($2::text[])`
     : `SELECT DISTINCT p.customer_id FROM purchases p
@@ -674,7 +677,7 @@ export async function cdpEventTargetQuery(
   return { sql: `SELECT DISTINCT e.customer_id FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
-       AND e.event_name = $2
+       AND ${cdpEventNameMatchSql('e', '$2')}   -- ★ 2026-11-02 구매 이름이면 결제된 구매(3-4 ① · CT-J3)
        AND e.customer_id IS NOT NULL
        AND ${timeClause}
        AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
@@ -756,7 +759,7 @@ export async function selectCdpEventRowsForCursor(
             e.properties FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
-       AND e.event_name = $2
+       AND ${cdpEventNameMatchSql('e', '$2')}   -- ★ 2026-11-02 진입 커서 = 결제된 구매(3-4 ① · CT-J3)
        AND e.customer_id IS NOT NULL
        AND ${cursorClause}
        AND e.${axis} <= $4::timestamptz
@@ -872,7 +875,7 @@ export async function selectLastPriorPurchase(
             GREATEST(
               (SELECT MAX(e.occurred_at) FROM cdp_events e
                 WHERE e.company_id = $1::uuid AND e.customer_id = c.customer_id
-                  AND e.event_name = 'purchase' AND e.occurred_at < c.entered_at),
+                  AND ${netPurchaseSql('e')} AND e.occurred_at < c.entered_at),   -- ★ 2026-11-02 이전 구매 = 결제된 구매(CT-J3)
               (SELECT MAX(p.purchase_date AT TIME ZONE 'Asia/Seoul') FROM purchases p
                 WHERE p.company_id = $1::uuid AND p.customer_id = c.customer_id
                   AND p.purchase_date IS NOT NULL
@@ -913,6 +916,28 @@ export async function selectCartAbandonProperties(
     if (x.properties && typeof x.properties === 'object') map[x.customer_id] = x.properties;
   }
   return map;
+}
+
+/**
+ * ★ 2026-11-02 설계서 3-8 · D5 — 진입 정보 = 한 함수(진입 감시 · 재진입이 부른다 · 옛: 재진입은 진입 정보 없이 넣어 포인트 목표 · 장바구니 변수가 비었다).
+ *   장바구니 이탈 = 그 고객의 담은 상품 사건 · 포인트 소멸 = 진입 때 포인트(종료 신호 points_used 의 기준) · 그 밖 = 없음(undefined).
+ *   진입 표식(__entry)은 넣지 않는다 — 트리거 사건 · 앞 여정 표식은 그 넣기 자리가 싣는다(재진입 행 = 표식 없음 · 생애 지도 규칙).
+ */
+export async function entryPropsFor(
+  j: { company_id: string; trigger_event: string | null; trigger_filters?: Record<string, any> | null },
+  customerIds: string[],
+): Promise<Record<string, Record<string, any>> | undefined> {
+  if (customerIds.length === 0) return undefined;
+  if (j.trigger_event === 'cdp.cart_abandon') {
+    return selectCartAbandonProperties(j.company_id, customerIds, Number((j.trigger_filters || {}).abandon_hours || 24));
+  }
+  if (j.trigger_event === 'customer.points_expiring') {
+    const pr = await query(`SELECT id, points FROM customers WHERE id = ANY($1::uuid[]) AND company_id = $2::uuid`, [customerIds, j.company_id]);
+    const out: Record<string, Record<string, any>> = {};
+    for (const row of pr.rows as any[]) out[row.id] = { points_at_entry: Number(row.points) || 0 };
+    return out;
+  }
+  return undefined;
 }
 
 // ════════════════════════════════════════════════════════════════════

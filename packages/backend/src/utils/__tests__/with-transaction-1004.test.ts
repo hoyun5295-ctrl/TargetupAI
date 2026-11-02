@@ -71,7 +71,8 @@ describe('업로드 경로 계약 — 업서트와 수신동의 기본값은 한
   const src = fs.readFileSync(path.resolve(__dirname, '../../routes/upload.ts'), 'utf-8');
 
   it('일괄 · 단건 폴백 모두 withTransaction 안에서 업서트 직후 applySmsOptInDefaults', () => {
-    const pattern = /withTransaction\(async \(run\) => \{\s*const r = await run\((?:sql, queryValues|rowSql, rowValues)\);\s*await applySmsOptInDefaults\(run,/g;
+    // ★ 2026-11-02 설계서 3-6 — [신규 고객으로 올리기] = 같은 트랜잭션에서 처음 만든 행에 가입 시각(stampFirstSeenJoinedAt) 뒤 수신동의 기본값
+    const pattern = /withTransaction\(async \(run\) => \{\s*const r = await run\((?:sql, queryValues|rowSql, rowValues)\);\s*(?:if \(asNewCustomers\) await stampFirstSeenJoinedAt\(run, companyId, insertedPhonesOf\(r\.rows\)\);[^\n]*\n\s*)?await applySmsOptInDefaults\(run,/g;
     expect((src.match(pattern) || []).length).toBe(2);
   });
 

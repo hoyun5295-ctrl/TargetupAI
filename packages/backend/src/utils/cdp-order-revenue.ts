@@ -79,6 +79,15 @@ export function netPurchaseSql(alias: string): string {
     + ` AND COALESCE(${p}->'revenue_reversed' = 'true'::jsonb, false) = false)`;
 }
 
+/**
+ * ★ 2026-11-02 사건 이름을 매개변수로 비교하는 자리의 조각(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-4 ④ · 3-0 CT-J3).
+ *   이름이 같고 · 그 이름이 구매(purchase)면 「매출 반영된 결제 주문」(netPurchaseSql)까지 — 취소 · 환불 · 결제 전 주문은 구매가 아니다.
+ *   구매가 아닌 이름은 지금 결과 그대로(조건 칸 · 기다리기 칸 · 사건 커서). 매개변수는 text 로 한 번만 형을 정한다(42P08 방지).
+ */
+export function cdpEventNameMatchSql(alias: string, paramRef: string): string {
+  return `(${alias}.event_name = ${paramRef}::text AND (${paramRef}::text <> 'purchase' OR ${netPurchaseSql(alias)}))`;
+}
+
 /** 기존 purchase 이벤트가 이미 차감까지 끝났는지 */
 export function isRevenueReversed(existing: ExistingPurchaseEvent | null): boolean {
   return !!existing?.properties && existing.properties.revenue_reversed === true;

@@ -21,6 +21,7 @@ import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildAudienceCountSql, AudienceGates } from './operator-recipients';
 import { ownerConsentSql, ownerBrandConsent } from './mall-consent';
 import { hasUsableGradeOrder } from './customer-grade-rank';
+import { hasJoinedAtEvidence } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6 · D20)
 import {
   CompanySegmentFacts, SegmentAvailability, SegmentKey, RoundPeriod,
   buildSegmentPredicate, normalizeSegmentKey, resolveSegmentAvailability, getSegmentContract,
@@ -117,7 +118,7 @@ export async function countCompiledAudience(input: {
  * ⛔ 조회 실패를 false로 뭉개지 않는다 — 전파해서 화면이 "판정 못 함"을 알게 한다(잠긴 축을 열지 않는 방향).
  */
 export async function loadCompanySegmentFacts(companyId: string): Promise<CompanySegmentFacts> {
-  const [fill, gradeOrder] = await Promise.all([
+  const [fill, gradeOrder, joined] = await Promise.all([
     query(
       `SELECT
          COUNT(*) FILTER (WHERE recent_purchase_date IS NOT NULL)::int AS recent_purchase,
@@ -129,6 +130,7 @@ export async function loadCompanySegmentFacts(companyId: string): Promise<Compan
       [companyId],
     ),
     hasUsableGradeOrder(companyId),
+    hasJoinedAtEvidence(companyId),
   ]);
   const r = fill.rows[0] || {};
   return {
@@ -140,6 +142,7 @@ export async function loadCompanySegmentFacts(companyId: string): Promise<Compan
     //   첫 구매·구매 증가 축이 영원히 아무도 못 맞히는 조건이 된다 — 잠긴 채 사유를 보이는 쪽이 맞다.
     hasPurchaseCount: Number(r.purchase_count_filled) > 0,
     hasPurchaseAmount: Number(r.purchase_amount_filled) > 0,
+    hasJoinedAt: joined,
   };
 }
 

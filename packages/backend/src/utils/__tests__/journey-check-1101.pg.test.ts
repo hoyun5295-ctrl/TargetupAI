@@ -19,7 +19,9 @@ vi.mock('../spam-test-queue', async (orig) => {
     enqueueSpamTest: async (p: any) => { ctl.enqueued.push(p); return { ok: true, testId: randomUUID() }; },
   };
 });
-vi.mock('../journey-message-render', () => ({
+// ★ 2026-11-02 보낼 글 판정 회사 값(journeyCopyContext · CT-J10) = 원본 그대로(실 PG 매핑) · 렌더 · 표본만 시험이 쥔다
+vi.mock('../journey-message-render', async (orig) => ({
+  ...(await orig<any>()),
   renderJourneySmsMessage: async (p: any) => ({ message: String(p.template || ''), subject: p.subject || '', msgType: p.channel === 'sms' ? 'SMS' : 'LMS' }),
   pickJourneySampleCustomer: async () => ({}),
 }));

@@ -31,7 +31,7 @@ describe('E1-3 나이 = 도착 기준(실 PG)', () => {
   it('사건 문 = 발생이 도착보다 72시간 넘게 앞선 것(소급)만 거른다 · 4일 전에 도착한 4일 전 사건(우리가 밀림)은 받는다', async () => {
     const put = async (occurredAgo: string, createdAgo: string) => {
       const id = randomUUID();
-      await insertMinimalRow(pool, 'cdp_events', { id, company_id: CO, customer_id: CUST, event_name: 'purchase', properties: {} });
+      await insertMinimalRow(pool, 'cdp_events', { id, company_id: CO, customer_id: CUST, event_name: 'purchase', properties: { revenue_applied: true, status: 'paid' } });   // ★ 2026-11-02 진입 커서 = 결제된 구매(CT-J3 · 설계서 3-4 ①)
       await pool.query(`UPDATE cdp_events SET occurred_at = NOW() - $2::interval, created_at = NOW() - $3::interval WHERE id = $1::uuid`, [id, occurredAgo, createdAgo]);
       return id;
     };

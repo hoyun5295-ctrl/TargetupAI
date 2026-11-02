@@ -15,6 +15,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { buildCustomerFilter } from './customer-filter';
 import type { SegmentConditions } from './inapp-ai-generator';
 
@@ -117,7 +118,7 @@ function buildEventExistsClauses(
       SELECT 1 FROM cdp_events e
       WHERE e.company_id = c.company_id
         AND e.customer_id = c.id
-        AND e.event_name IN ('purchase', 'order.completed', 'order.created')
+        AND (${netPurchaseSql('e')} OR e.event_name IN ('order.completed', 'order.created'))   -- ★ 2026-11-02 purchase = 결제된 구매(CT-J3) · 다른 이름은 그대로
         AND e.occurred_at >= NOW() - (INTERVAL '1 day' * $${idx}::integer)
     )`);
     params.push(ev.purchase_within_days);

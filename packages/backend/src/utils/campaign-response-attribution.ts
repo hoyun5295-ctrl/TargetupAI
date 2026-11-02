@@ -19,6 +19,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 
 export interface AttributionWindow {
   windowLabel: string;             // '24h' / '7d' / '30d'
@@ -110,7 +111,7 @@ export async function buildCampaignAttribution(
             COALESCE(SUM((properties->>'total_amount')::numeric), 0)::float AS revenue
           FROM cdp_events e
           WHERE e.company_id = $1::uuid
-            AND e.event_name IN ('purchase', 'order')
+            AND ${netPurchaseSql('e')}   -- ★ 2026-11-02 결제된 구매 = CT(취소 · 환불 0 · 설계서 3-0 CT-J3)
             AND EXISTS (
               SELECT 1
                 FROM campaigns c

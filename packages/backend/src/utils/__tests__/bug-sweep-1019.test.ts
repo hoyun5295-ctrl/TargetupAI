@@ -45,7 +45,8 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     const { join } = await import('path');
     const ex = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
     const jb = readFileSync(join(__dirname, '..', 'journey-builder.ts'), 'utf8');
-    expect(ex).toContain('SELECT message_body, message_subject, created_at, confidence_score');
+    // ★ 2026-11-02 판 읽기 = CT-J1 조각(journey-step-versions latestSnapshotSql · 본문 · 제목 · 시각 · 신뢰도 · id 한 SELECT)
+    expect(ex).toContain("SELECT snap.* FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap");
     expect(ex.indexOf('pendingSnapshotAt = snap.created_at ?? null;')).toBeLessThan(ex.indexOf('const gate = await query('));
     expect(ex).not.toContain('last_pretest_passed_at');
     expect(jb).toContain('VALUES ($1, $2, $3, NULL, $4, $5, $6, $7, $8, $9, $10, 0)');
@@ -55,10 +56,11 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     expect(pn.indexOf("await recordIfCurrent(b, snapId, { status: 'notified', markChecked: true });")).toBeGreaterThan(pn.indexOf("if (verdict === 'pass') {"));
     const rif = pn.slice(pn.indexOf('export async function recordIfCurrent('));
     expect(rif).toContain('SET confidence_score = 100 WHERE id = $1::uuid AND confidence_score < 100');
-    expect(pn).toContain('SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid');
+    // ★ 2026-11-02 설계서 3-9 — 판 본문 덮어쓰기(자동 반영) 지움 · 수정안 반영 = 새 판(applyPassedCandidate)
+    expect(pn).not.toContain('SET message_body = $2, confidence_score = 100 WHERE id = $1::uuid');
     // F4 — 재검사 전 판은 날짜별 처리 기록으로 건너뛰지 않는다(★1025 #2 = 후보 SQL 안 · LIMIT 앞) · 조회 실패는 문자 칸을 미룬다
     // ★ 1102 E3-2 — 후보 SQL 안 · LIMIT 앞: 지금 판 표식 < 100 = 고름(지금 판 보류만 빼고 · 날짜 기록과 무관)
-    expect(pn).toContain('COALESCE(snap.confidence_score, 100) AS confidence');
+    expect(pn).toContain('COALESCE(snap.confidence, 100) AS confidence');
     expect(pn).toContain('(b.confidence < 100 AND NOT ${heldNow})');
     expect(pn.indexOf("OR NOT ${pretestDoneSql('je.journey_id', 's.id', day)}")).toBeLessThan(pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
     expect(ex).toContain('snapshotReadFailed = true;');
@@ -67,7 +69,10 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     expect(ex.indexOf('if (snap.snapshotReadFailed && isTextChannel)')).toBeGreaterThan(ex.indexOf('const gate = await query('));
     expect(jb).not.toContain('UPDATE journey_executions je SET next_run_at');
     // ★ 1031 새 스냅숏 · 그 칸 검사 기록 지우기 = 같은 트랜잭션(run · 설계서 2026-10-31 §2-8 · Codex 설계 7R)
-    expect(jb).toContain("    if (isActive && upd.rows.length > 0) {\n      await createStepSnapshot(companyId, journeyId, stepId, run);\n      await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);\n    }");
+    // ★ 2026-11-02 켜진 여정 칸 저장 = 새 판 · 기록 지우기 · 보낼 글 판정(CT-J10 · 409)이 한 트랜잭션(판정이 던지면 저장 · 새 판 · 지우기가 함께 되돌아간다)
+    expect(jb).toContain("      await createStepSnapshot(companyId, journeyId, stepId, run);\n      await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);\n    }");
+    expect(jb).toContain('    const out = await applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch);\n');
+    expect(jb).toContain('      await assertStepCopySendable(run, companyId, stepId);\n');
     expect(jb).not.toContain('pretest dedup 리셋 skip');
   });
 });

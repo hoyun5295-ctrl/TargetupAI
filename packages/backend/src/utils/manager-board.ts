@@ -11,6 +11,9 @@ import { query } from '../config/database';
 import { signLinkToken, readLinkToken, generatePauseToken, buildJourneyPauseUrl } from './journey-pause-handler';
 import { createShortUrl } from './short-url';
 import { latestDecisionLateralSql, pretestSnapshotColumnReady } from './journey-pretest-notifier';
+import { latestSnapshotSql } from './journey-step-versions';   // ★ 2026-11-02 판 읽기 CT(설계서 3-0 CT-J1)
+import { journeyStepCopyIssueNow } from './journey-message-render';   // ★ 2026-11-02 보낼 글 판정 CT(설계서 3-0 CT-J10)
+import { readPassedCandidateForStep } from './journey-pretest-candidate';   // ★ 2026-11-02 수정안(CT-J12)
 import { oneShotColumnsReady } from './journey-lineage';
 import { pauseReasonView } from './journey-pause-reason';
 import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsCampaignSpamCountsSafe } from './sms-queue';
@@ -54,7 +57,13 @@ export function stepCheckOf(s: { channel: string; confidence: number | null; dec
   return 'passed';
 }
 
-export interface BoardTodo { kind: 'held_step' | 'spam_surge' | 'dispatch_pending' | 'paused_journey' | 'proposal_review' | 'planner_confirm'; title: string; reason: string; action: { label: string; href: string } | null }
+export interface BoardTodo {
+  kind: 'held_step' | 'spam_surge' | 'dispatch_pending' | 'paused_journey' | 'proposal_review' | 'planner_confirm'; title: string; reason: string; action: { label: string; href: string } | null;
+  /** ★ 2026-11-02 설계서 3-9 — 걸린 원문 · 검사를 통과한 수정안(읽기만 · 바꾸기 = 로그인 화면 그 칸) */
+  compare?: { original: string; candidate: string } | null;
+  /** 둘째 행동([직접 고치기]) */
+  altAction?: { label: string; href: string } | null;
+}
 /** (순수) 판정 문장 */
 export function boardVerdict(todos: readonly BoardTodo[]): { tone: 'ok' | 'warn'; sentence: string } {
   const need = todos.filter((t) => t.action).length;
@@ -105,7 +114,7 @@ export async function loadManagerBoardFor(companyId: string, userId: string): Pr
 
   const oneShotTracked = await oneShotColumnsReady().catch(() => false);
   const jr = await query(
-    `SELECT j.id, j.name, j.status, j.pause_reason,
+    `SELECT j.id, j.name, j.status, j.pause_reason, j.trigger_event,
             ${oneShotTracked ? `(j.start_kind = 'one_shot' AND j.status = 'active' AND j.one_shot_dispatch_pending_at IS NOT NULL AND j.one_shot_dispatched_at IS NULL)` : 'false'} AS dispatch_pending,
             COALESCE((SELECT SUM(c.sent_count) FROM journey_step_campaigns jsc JOIN campaigns c ON c.id = jsc.campaign_id
                        WHERE jsc.journey_id = j.id AND jsc.send_date >= ${KST_TODAY} - 6), 0)::int AS sent7d
@@ -118,12 +127,11 @@ export async function loadManagerBoardFor(companyId: string, userId: string): Pr
 
   const snapReady = await pretestSnapshotColumnReady().catch(() => false);
   const stepRes = journeyIds.length === 0 ? { rows: [] as any[] } : await query(
-    `SELECT s.journey_id, s.id, s.step_order, s.channel, snap.confidence_score,
+    `SELECT s.journey_id, s.id, s.step_order, s.channel, snap.confidence,
             dec.status AS dec_status, dec.notify_at AS dec_at,
             ${snapReady ? 'dec.snapshot_id IS NOT DISTINCT FROM snap.id' : 'true'} AS dec_current
        FROM journey_steps s
-       LEFT JOIN LATERAL (SELECT ss.id, ss.confidence_score FROM journey_step_snapshots ss
-                           WHERE ss.step_id = s.id AND ss.journey_id = s.journey_id ORDER BY ss.created_at DESC LIMIT 1) snap ON TRUE
+       LEFT JOIN LATERAL ${latestSnapshotSql('s.journey_id', 's.id')} snap ON TRUE
        LEFT JOIN LATERAL ${latestDecisionLateralSql('s.journey_id', 's.id', snapReady)} dec ON TRUE
       WHERE s.journey_id = ANY($1::uuid[]) AND COALESCE(s.step_type, 'message') = 'message'
       ORDER BY s.journey_id, s.step_order`,
@@ -132,6 +140,7 @@ export async function loadManagerBoardFor(companyId: string, userId: string): Pr
 
   const todos: BoardTodo[] = [];
   const nameOf = new Map(jr.rows.map((r: any) => [String(r.id), String(r.name || '여정')]));
+  const triggerOf = new Map<string, string | null>(jr.rows.map((r: any) => [String(r.id), r.trigger_event ?? null]));
   const journeys: ManagerBoardView['journeys'] = jr.rows.map((r: any) => ({
     id: String(r.id), name: String(r.name || '여정'), status: String(r.status),
     pauseReason: r.status === 'paused' ? pauseReasonView(r.pause_reason).text : null,
@@ -139,14 +148,27 @@ export async function loadManagerBoardFor(companyId: string, userId: string): Pr
   }));
   const byId = new Map(journeys.map((j) => [j.id, j]));
   for (const s of stepRes.rows as any[]) {
-    const check = stepCheckOf({ channel: String(s.channel), confidence: s.confidence_score == null ? null : Number(s.confidence_score), decStatus: s.dec_status ?? null, decCurrent: s.dec_current === true });
+    const check = stepCheckOf({ channel: String(s.channel), confidence: s.confidence == null ? null : Number(s.confidence), decStatus: s.dec_status ?? null, decCurrent: s.dec_current === true });
     byId.get(String(s.journey_id))?.steps.push({ order: Number(s.step_order), channel: String(s.channel), check, checkedAt: s.dec_at ? new Date(s.dec_at).toISOString() : null });
     if (check === 'held') {
+      // ★ 2026-11-02 보류 까닭 = 보낼 글 판정(CT-J10)이 걸리면 그 문장 · 아니면 스팸 검사(담당자 안내 문구와 같은 판정)
+      const copy = await journeyStepCopyIssueNow(who.companyId, String(s.journey_id), String(s.id), triggerOf.get(String(s.journey_id)) ?? null);
+      // ★ 2026-11-02 설계서 3-9 — 검사를 통과한 수정안이 있으면 원문 · 수정안 + [이 글로 보내기](로그인 화면 그 칸 · 한 번 누르면 바뀐다) · [직접 고치기]
+      const cand = copy ? null : await readPassedCandidateForStep(who.companyId, String(s.journey_id), String(s.id)).catch(() => null);
+      const stepHref = `/ai-journeys?journey=${encodeURIComponent(String(s.journey_id))}&step=${encodeURIComponent(String(s.id))}`;
       todos.push({
         kind: 'held_step',
         title: `${nameOf.get(String(s.journey_id))} ${s.step_order}번 칸이 잠시 멈췄어요`,
-        reason: '스팸 검사에 걸려 이 칸만 보내지 않고 있어요. 여정의 다른 칸은 그대로 나가요. 문안을 고치면 바로 다시 검사해요.',
-        action: { label: '문안 고치러 가기', href: `/ai-journeys?journey=${encodeURIComponent(String(s.journey_id))}&step=${encodeURIComponent(String(s.id))}` },
+        reason: copy
+          ? `보낼 글에 고칠 곳이 있어 이 칸만 보내지 않고 있어요. ${copy.message} 여정의 다른 칸은 그대로 나가요.`
+          : cand
+          ? '스팸 검사에 걸려 이 칸만 보내지 않고 있어요. 검사를 통과한 수정안을 준비했어요. [이 글로 보내기]를 누르면 이어서 보내요.'
+          : '스팸 검사에 걸려 이 칸만 보내지 않고 있어요. 여정의 다른 칸은 그대로 나가요. 문안을 고치면 바로 다시 검사해요.',
+        action: cand
+          ? { label: '이 글로 보내기', href: `${stepHref}&candidate=${encodeURIComponent(cand.snapshotId)}` }
+          : { label: '문안 고치러 가기', href: stepHref },
+        compare: cand ? { original: cand.original, candidate: cand.body } : null,
+        altAction: cand ? { label: '직접 고치기', href: stepHref } : null,
       });
     }
   }

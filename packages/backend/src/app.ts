@@ -113,6 +113,7 @@ import { startSpamProbeWorker } from './utils/spam-probe';
 import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 // ★ D218+ (2026-05-26) 여정 발송 2시간 전 담당자 알림 + 7일 KPI 학습 worker
 import { startJourneyPretestNotifierWorker } from './utils/journey-pretest-notifier-worker';
+import { startWeeklyStepCheckWorker } from './utils/journey-weekly-check';   // ★ 2026-11-02 주간 회사 묶음 스팸 검사(설계서 3-9)
 import { startAiMemoryAccumulatorWorker } from './utils/ai-memory-accumulator-worker';
 import { startCopyLabelSweeperWorker } from './utils/copy-label-sweeper';
 import { startPayIngestMonitor } from './utils/pay-ingest-monitor';
@@ -656,6 +657,7 @@ app.listen(PORT, () => {
 
   // ★ D218+ (2026-05-26): 여정 발송 2시간 전 담당자 LMS 자동 발송 (5분 cron)
   startJourneyPretestNotifierWorker();
+  startWeeklyStepCheckWorker();
 
   // ★ 2026-08-22 대행발송 셀프 접수 워커 (5분 cron) — 1차 검사·당일 재검사·만료·대조·복구
   //   docs/2026-08-22-agency-send-design.md §4-4. 테이블이 없으면 조용히 넘어간다(마이그레이션 전 안전).

@@ -24,6 +24,7 @@
  *   부정 신호는 전부 COALESCE로 감싸 절대 NULL을 돌려주지 않는다.
  *   `NOT (신호)`가 NULL이 되면 그 행이 통째로 걸러져 **신규가 0건이 된다**(반대 방향 사고).
  */
+import { NO_JOINED_AT_REASON } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6)
 
 /** 판정 근거 종류. exact > strong > weak 순으로 신뢰도가 낮아진다. */
 export type IdentitySignalKey =
@@ -121,14 +122,10 @@ export interface NewCustomerJudgement {
  * 못 하면 "명단에 없으니 신규"로 폴백하지 않는다. 그건 10년 단골에게 환영 문자를 보내는 길이다.
  */
 export function resolveNewCustomerJudgement(cap: CompanyIdentityCapability): NewCustomerJudgement {
-  const basis = availableSignals(cap);
+  // ★ 2026-11-02 설계서 3-6(D19) — 근거 = 가입 사실(가입일)만. 구매 · 포인트 · 등급은 「기존 근거」로 쓰지 않는다(가입 포인트 · 첫 구매가 같이 온 진짜 신규가 빠졌다).
+  const basis = availableSignals(cap).filter((k) => k === 'signup_date');
   if (basis.length === 0) {
-    return {
-      canJudge: false,
-      basis: [],
-      strength: null,
-      reason: '기존 고객과 신규 고객을 구분할 근거가 없습니다. 구매이력이나 가입일을 연동하면 이 여정을 만들 수 있습니다.',
-    };
+    return { canJudge: false, basis: [], strength: null, reason: NO_JOINED_AT_REASON };
   }
   const strength = SIGNAL_STRENGTH[basis[0]];
   const labels = basis.map((k) => SIGNAL_LABELS[k]).join('·');
@@ -140,70 +137,4 @@ export function resolveNewCustomerJudgement(cap: CompanyIdentityCapability): New
   };
 }
 
-/** 술어에 회사 설정이 필요한 근거만 옵션으로 받는다. 데이터로 평가되는 신호는 항상 들어간다. */
-export interface ExistingPredicateOptions {
-  /** 회사가 기본등급을 정한 경우에만 등급을 근거로 쓴다. 미설정이면 그 절을 만들지 않는다. */
-  defaultGrade?: string | null;
-}
-
-/**
- * "이 사람은 전에도 고객이었다"를 뜻하는 SQL 조각(OR 결합).
- * 호출부는 신규 추출에서 `AND NOT (${조각})`으로 쓴다.
- *
- * ★ 2026-08-01 Codex 3R 수용 — **회사 능력(capability)으로 술어를 고르지 않는다.**
- *   옛 구조는 capability로 두 가지를 했다: (1) 판정 가능 여부 게이트 (2) 어떤 절을 넣을지 선택.
- *   (2)는 불필요한 결합이었고 그것이 경합을 만들었다 — capability를 읽은 시점과 고객 행을 읽는
- *   시점이 달라, 그 사이 근거 컬럼이 비면 stale한 선택으로 만든 술어가 무력해진다.
- *   그런데 애초에 고를 이유가 없다. 회사가 그 데이터를 안 주면 그 컬럼은 전부 비어 있어
- *   `COALESCE(purchase_count,0) > 0`이 자연히 전원 거짓이 된다. 켜든 끄든 결과가 같다.
- *   그래서 데이터 신호는 **항상** 넣고, capability는 게이트(resolveNewCustomerJudgement)에만 쓴다.
- *   덕분에 추출은 회사 능력을 조회할 이유가 없어지고 판정-추출 경합이 구조적으로 사라진다.
- *
- * 반환 조각은 **절대 NULL을 돌려주지 않는다**(전부 COALESCE/IS NOT NULL). `NOT (조각)`이 NULL이면
- * 그 행이 통째로 걸러져 신규가 0건이 된다(반대 방향 사고).
- *
- * purchase 원장 EXISTS는 넣지 않는다 — purchases의 회사 단독 인덱스를 확인하지 않았고,
- * 아래 구매 요약 컬럼들이 같은 사실을 이미 말해준다.
- */
-export function buildExistingCustomerPredicate(
-  alias: string,
-  params: any[],
-  opts?: ExistingPredicateOptions,
-): string {
-  const a = assertAlias(alias);
-  const clauses: string[] = [
-    `COALESCE(${a}.purchase_count, 0) > 0`,
-    `${a}.recent_purchase_date IS NOT NULL`,
-    // last_purchase_date는 text('YYYY-MM-DD') — cdp-orders·customer-upsert가 그렇게 쓴다(타입 실측 확인).
-    `COALESCE(${a}.last_purchase_date, '') <> ''`,
-    `COALESCE(${a}.total_purchase_amount, 0) > 0`,
-    // 적립은 거래의 결과다. 가입 축하 포인트를 주는 회사가 있어 신뢰도는 낮지만, 근거로는 유효하다.
-    `COALESCE(${a}.points, 0) > 0`,
-  ];
-  const dg = String(opts?.defaultGrade ?? '').trim();
-  if (dg) {
-    // 등급도 거래의 결과다. 기본등급이 뭔지는 회사가 정해줘야 한다(우리가 지어내면 그게 정답표다).
-    params.push(dg);
-    clauses.push(`(COALESCE(${a}.grade, '') <> '' AND ${a}.grade IS DISTINCT FROM $${params.length})`);
-  }
-  return `(${clauses.join(' OR ')})`;
-}
-
-/**
- * 고객사가 가입일을 주는 경우의 "신규임" 조건 — 가입일이 최근 N일 이내.
- * 화이트리스트 밖 컬럼명이면 null(그 근거를 안 쓴다 = 안전 방향).
- * recentDays는 호출부가 클램프한 정수를 준다.
- */
-export function buildSignupDatePredicate(
-  alias: string,
-  params: any[],
-  signupDateColumn: string | null | undefined,
-  recentDays: number,
-): string | null {
-  const a = assertAlias(alias);
-  const col = String(signupDateColumn || '').trim();
-  if (!col || !SAFE_IDENT.test(col) || !ALLOWED_SIGNUP_COLUMNS.has(col)) return null;
-  const days = Math.max(1, Math.min(3650, Math.floor(Number(recentDays) || 1)));
-  params.push(String(days));
-  return `(${a}.${col} IS NOT NULL AND ${a}.${col} > NOW() - ($${params.length} || ' days')::interval)`;
-}
+// ★ 2026-11-02 설계서 3-6(D19) — 「전에도 고객이었다」 술어(구매 · 포인트 · 등급) · 가입일 술어를 지웠다: 신규 판정 = 가입 근거 한 곳(customer-joined-at newSignupSql).

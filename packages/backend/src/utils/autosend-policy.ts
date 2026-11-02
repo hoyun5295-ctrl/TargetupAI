@@ -7,12 +7,17 @@
  * - normalizeCdpAutoExecuteGate: 슈퍼관리자 자율발송 게이트 입력 정규화(clamp·화이트리스트).
  */
 import { clampInt } from './journey-points-trigger'; // 순수(DB 미import) CT — 테스트 DB-free 유지
-import { shiftToSendableHour } from './send-time-util'; // 순수(설정 상수만) — ★ 2026-10-05 승인 기간
+import { shiftToSendableHour, isWithinSendHours } from './send-time-util'; // 순수(설정 상수만) — ★ 2026-10-05 승인 기간 · ★ 2026-11-02 창 판정 본문
 
 export function resolveAutoSendLeadMinutes(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw));
   if (!Number.isFinite(n) || n <= 0) return 120;
   return Math.min(n, 1440);
+}
+
+/** ★ 2026-11-02 resolveAutoSendLeadMinutes 의 SQL 판(같은 규칙 · 비었거나 0 이하 = 120 · 상한 1440) — 「지금 안내할 회차」를 LIMIT 앞에서 거른다(R12 · 설계서 3-2 D) */
+export function autoSendLeadMinutesSql(expr: string): string {
+  return `(CASE WHEN ${expr} IS NULL OR ${expr} <= 0 THEN 120 ELSE LEAST(${expr}, 1440) END)`;
 }
 
 export function computeScheduledSendAt(now: Date, leadMinutes: number): Date {
@@ -103,8 +108,7 @@ export function decideBudgetGuard(input: BudgetGuardInput): BudgetGuardResult {
 
 /** now가 KST 발송 가능 시간대([startHour, endHour))인지 — 광고 자동 발송 허용 판정. */
 export function isSendableHourKst(now: Date, startHour: number, endHour: number): boolean {
-  const kstHour = new Date(now.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
-  return kstHour >= startHour && kstHour < endHour;
+  return isWithinSendHours(now, startHour, endHour);   // ★ 2026-11-02 판정 본문 = send-time-util 한 곳(설계서 3-0 CT-J7)
 }
 
 /**
@@ -373,7 +377,7 @@ export const TARGET_HINTS: Array<{ key: TargetHint; label: string; directive: st
   { key: 'recent_buyers', label: '최근 구매 고객', directive: '최근에 구매한 고객을 대상으로 한다. 회사 스키마의 최근 구매일 필드 기준 최근 구간 조건으로 구성한다.' },
   { key: 'vip', label: 'VIP·상위 등급', directive: 'VIP 또는 상위 등급 고객을 대상으로 한다. 회사 스키마의 등급(grade) 필드 실제 값 중 상위 등급으로 구성한다.' },
   { key: 'birthday', label: '이달 생일 고객', directive: '발송 월에 생일이 있는 고객을 대상으로 한다. 생일(birth) 필드의 월 일치 조건으로 구성한다.' },
-  { key: 'new_customers', label: '신규 등록 고객', directive: '최근에 신규 등록된 고객을 대상으로 한다. 등록일 기준 최근 구간 조건으로 구성한다.' },
+  { key: 'new_customers', label: '새로 가입한 고객', directive: '최근에 가입한 고객을 대상으로 한다. 가입일(자사몰 회원 가입 · 싱크 가입일 · 화면 추가) 기준 최근 구간 조건으로 구성한다.' },   // ★ 2026-11-02 D20 · CT-J6
 ];
 
 export function normalizeTargetHint(raw: unknown): TargetHint | null {
@@ -464,6 +468,8 @@ export interface PrepNoticeInput {
   unitCost: number;         // 회사 단가(원/건)
   /** ★2026-10-18 멈춤 링크(예고 문자 안 · 없으면 옛 문장 그대로 · utils/autosend-stop-link.ts) */
   stopUrl?: string | null;
+  /** ★ 2026-11-02 설계서 3-2 D — 사람이 승인해 예약된 회차(문안 문자를 앞에 보내지 않는다 · 승인 때 본 문안) */
+  approved?: boolean;
 }
 
 export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
@@ -474,7 +480,9 @@ export function buildAutoSendPrepInfoBody(input: PrepNoticeInput): string {
     ? `예상 비용 약 ${total.toLocaleString()}원 (${input.channelLabel} ${unit.toLocaleString()}원 × ${count.toLocaleString()}건)`
     : `예상 비용 약 ${total.toLocaleString()}원`;
   return [
-    `${input.sendAtLabel}에 위 문안이 ${count.toLocaleString()}명에게 자동 발송됩니다.`,
+    input.approved
+      ? `${input.sendAtLabel}에 승인하신 문안이 ${count.toLocaleString()}명에게 발송됩니다.`
+      : `${input.sendAtLabel}에 위 문안이 ${count.toLocaleString()}명에게 자동 발송됩니다.`,
     costLine,
     // ★ 2026-08-03 A-1: 이 수는 화면·발송 추출과 같은 기준으로 지금 센 값이다. 남는 차이는 통지 이후의 변동뿐이라
     //   그 사실을 문구에 밝힌다(수를 확정처럼 말하면 담당자가 정지 판단을 잘못한다).
@@ -750,4 +758,36 @@ export function parseScheduleFromText(text: string): {
   if (candidates.length === 0) return null;
   candidates.sort((x, y) => x.at - y.at);
   return { ...candidates[0].v, scheduleTime };
+}
+
+
+/**
+ * ★ 2026-11-02 자동마케팅 상한 갈래 판정 한 곳(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-2 A · 3-0 CT-O2 · B-1102-1).
+ *   회사 자율 회차 = 회사 상한(자동 실행 대상 수 · 비용) + 예산 / 승인 기간 회차 = 예산만 / 사람이 그 회차를 승인 = 상한 · 예산 보지 않음.
+ *   옛: 승인 기간 회차도 회사 상한(기본 1,000명 · 5만 원)에 걸려 매번 검토로 내려가고, 사람이 승인해 예약된 회차가 발송 직전 예산에 걸려 정한 시각에 안 나갔다.
+ *   위험도 · 준법 · 발신번호 · 080 · 스팸 관문은 이 판정 밖(모든 갈래 그대로).
+ */
+export type OperatorCapPath = 'company_auto' | 'approval_window' | 'human_approved';
+
+export function operatorCapPolicy(
+  path: OperatorCapPath,
+  v: { recipients: number; cost: number; maxRecipients: number; maxCost: number },
+): { checksCap: boolean; checksBudget: boolean; overReason: string | null } {
+  const checksCap = path === 'company_auto';
+  const checksBudget = path !== 'human_approved';
+  let overReason: string | null = null;
+  if (checksCap && v.recipients > v.maxRecipients) overReason = `대상 ${v.recipients.toLocaleString()}명이 자동 발송 상한(${v.maxRecipients.toLocaleString()}명)을 넘었습니다`;
+  else if (checksCap && v.cost > v.maxCost) overReason = `예상 비용 ${v.cost.toLocaleString()}원이 자동 발송 한도(${v.maxCost.toLocaleString()}원)를 넘었습니다`;
+  return { checksCap, checksBudget, overReason };
+}
+
+/** 제안 행의 갈래 — 사람 승인(reviewed_by · approveProposal 만 찍는다) · 생성 때 정한 갈래(meta.capPath) · 리마인드 = 1차가 따른 갈래(만들 때 싣는다) · 옛 행 = 회사 자율(더 엄격) */
+export function operatorCapPathOf(p: { reviewed_by?: string | null; proposal_json?: any }): OperatorCapPath {
+  if (p.reviewed_by) return 'human_approved';
+  const pj = typeof p.proposal_json === 'string' ? (() => { try { return JSON.parse(p.proposal_json); } catch { return {}; } })() : (p.proposal_json || {});
+  const c = pj?.meta?.capPath;
+  if (c === 'approval_window') return 'approval_window';
+  // ★ 2026-11-02 설계서 3-2 A — 리마인드 = 1차가 따른 갈래(사람이 승인한 1차의 리마인드 = 사람 승인 갈래 · 회차 생성은 이 값을 쓰지 않는다)
+  if (c === 'human_approved' && pj?.meta?.is_reminder === true) return 'human_approved';
+  return 'company_auto';
 }

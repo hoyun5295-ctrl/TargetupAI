@@ -12,7 +12,7 @@ import { query, pool } from '../config/database';
 import { AFTER_JOURNEY_EVENT, triggerLabel } from './journey-trigger-capability';
 import { lineageColumnsReady, lockLineage } from './journey-lineage';
 import { dbAcceptsTriggerEvent, JourneyMigrationPendingError } from './journey-trigger-db';
-import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
+import { reseedOnActivate } from './journey-entry-ledger';
 import { AFTER_OUTCOMES, AFTER_OUTCOME_LABEL, readAfterConfig, startGenOf, type AfterOutcome } from './journey-after-config';
 
 export { AFTER_OUTCOMES, AFTER_OUTCOME_LABEL, readAfterConfig, type AfterOutcome } from './journey-after-config';
@@ -280,8 +280,7 @@ export async function detachJourney(companyId: string, journeyId: string): Promi
   // 기준선은 바꾸기 **전에** 심는다(켜기와 같은 순서 · 실패 = 떼지 않음). 멱등이고 상태와 무관하게 무해하다(덜 보내는 방향).
   const pre = await query(`SELECT trigger_filters->'attach_prev'->>'trigger_event' AS prev FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [journeyId, companyId]);
   const prevEvent = String(pre.rows[0]?.prev || '');
-  if (prevEvent === 'customer.created') await seedBaselineForJourney(journeyId, companyId);
-  if (prevEvent === 'customer.grade_changed') await seedGradeStateForJourney(journeyId, companyId);
+  await reseedOnActivate((t, p) => query(t, p), journeyId, companyId, prevEvent, 'detach');   // ★ 2026-11-02 기준선 CT(CT-J11 · 떼기 = 사람 조작 = 심는다)
   const client = await pool.connect();
   let restored = '';
   try {

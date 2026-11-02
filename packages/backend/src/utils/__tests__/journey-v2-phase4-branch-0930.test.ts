@@ -17,6 +17,8 @@ vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn
 vi.mock('../company-data-profile', () => ({ getCompanyJourneyFacts: vi.fn() }));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(), getKoreanCalendar: vi.fn(() => '') }));
 vi.mock('../company-memory', () => ({ buildMemoryPromptContext: vi.fn() }));
+// ★ 2026-11-02 켜기 관문의 보낼 글 판정(CT-J10) 회사 매핑 이름 = 시험 회사 표준 이름(실 매핑 읽기는 실 PG 시험이 덮는다)
+vi.mock('../journey-message-render', async (orig) => ({ ...(await orig<any>()), journeyCopyContext: vi.fn(async () => ({ knownVarNames: new Set(['고객명', '이름', '등급', '포인트']), cartJourney: false })) }));
 
 import { query } from '../../config/database';
 import { getCompanyJourneyFacts } from '../company-data-profile';
@@ -195,11 +197,12 @@ describe('실행기 배선(원문)', () => {
     const goal = src.slice(src.indexOf('async function goalConvertedExecutionIds('), src.indexOf('async function evaluateConditionBatch('));
     expect(goal).toContain("${purchasedSinceEntrySql('e', '$2::uuid', '$3::boolean')}");
     expect(goal).toContain('[ids, head.company_id, signupJourney]');
-    const cond = src.slice(src.indexOf('async function evaluateConditionBatch('), src.indexOf('export const DAILY_VOLUME_GATE_FACTOR'));
+    const cond = src.slice(src.indexOf('async function evaluateConditionBatch('), src.indexOf('async function pauseJourney('));
     expect(cond).toContain("${purchasedSinceEntrySql('e', '$2::uuid', '$3::boolean')}");
     expect(cond).toContain("type === 'purchase_since_entry'");
     expect(cond).toContain("type === 'step_link_clicked'");
     expect((cond.match(/return all\('error'\);/g) || []).length).toBeGreaterThanOrEqual(4);
-    expect(cond).toContain("ce.properties->>'step_id' = $2::text");
+    // ★ 2026-11-02 그 칸 링크 클릭 = CT-J9 조각(칸 id · 여정 id · 회사)
+    expect(cond).toContain("${journeyClickSql('ce', { companyExpr: '$3::uuid', journeyExpr: 'je.journey_id', stepExpr: '$2::uuid' })}");
   });
 });

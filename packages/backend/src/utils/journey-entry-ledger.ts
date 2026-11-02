@@ -14,6 +14,9 @@
  */
 
 import { query } from '../config/database';
+import { isHumanPause } from './journey-pause-reason';
+
+type SqlRun = (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
 
 /**
  * 신규가입 추출용 안티조인 SQL 조각 — 원장에 없는 **사람**만 통과.
@@ -46,8 +49,8 @@ export function buildLedgerAntiJoin(custAlias: string, journeyParamIndex: number
  * 활성화 시점 baseline 적재 — 그 시점 회사 전체 고객 식별자를 'baseline'으로 1회.
  * 멱등(ON CONFLICT DO NOTHING). entry_baseline_at은 아직 NULL일 때만 설정(첫 활성화 1회).
  */
-export async function seedBaselineForJourney(journeyId: string, companyId: string): Promise<{ seeded: number }> {
-  const r = await query(
+export async function seedBaselineForJourney(journeyId: string, companyId: string, run: SqlRun = query): Promise<{ seeded: number }> {
+  const r = await run(
     `INSERT INTO journey_entry_ledger (journey_id, company_id, store_code, phone, kind)
      SELECT $1::uuid, c.company_id, c.store_code, c.phone, 'baseline'
        FROM customers c
@@ -55,10 +58,8 @@ export async function seedBaselineForJourney(journeyId: string, companyId: strin
      ON CONFLICT (journey_id, company_id, COALESCE(store_code, '__NONE__'), phone) DO NOTHING`,
     [journeyId, companyId],
   );
-  await query(
-    `UPDATE journeys SET entry_baseline_at = NOW() WHERE id = $1::uuid AND entry_baseline_at IS NULL`,
-    [journeyId],
-  );
+  // ★ 2026-11-02 설계서 3-5 ② — 심는 때 = 기준 시각도 지금(옛: 처음 한 번만 · 사람이 멈춘 동안 가입했는데 다시 켠 뒤 늦게 적재된 고객이 신규로 들어왔다)
+  await run(`UPDATE journeys SET entry_baseline_at = NOW() WHERE id = $1::uuid`, [journeyId]);
   return { seeded: r.rowCount || 0 };
 }
 
@@ -95,8 +96,8 @@ export async function recordEnteredWithClient(
  * ⛔ Codex 2R — 거부된 활성화·정지 기간의 낡은 기준선이 다음 활성화 첫 회차에 변동을 몰아 발화시킨다.
  *   재기준은 그 변동을 보내지 않는 방향(덜 보냄)이다.
  */
-export async function seedGradeStateForJourney(journeyId: string, companyId: string): Promise<{ seeded: number }> {
-  const r = await query(
+export async function seedGradeStateForJourney(journeyId: string, companyId: string, run: SqlRun = query): Promise<{ seeded: number }> {
+  const r = await run(
     `INSERT INTO journey_entry_ledger (journey_id, company_id, store_code, phone, kind, state_value)
      SELECT $1::uuid, s.company_id, NULL, s.phone, 'state', s.grade
        FROM (
@@ -110,11 +111,30 @@ export async function seedGradeStateForJourney(journeyId: string, companyId: str
      DO UPDATE SET state_value = EXCLUDED.state_value`,
     [journeyId, companyId],
   );
-  await query(
-    `UPDATE journeys SET entry_baseline_at = NOW() WHERE id = $1::uuid AND entry_baseline_at IS NULL`,
-    [journeyId],
-  );
+  await run(`UPDATE journeys SET entry_baseline_at = NOW() WHERE id = $1::uuid`, [journeyId]);
   return { seeded: r.rowCount || 0 };
+}
+
+/**
+ * ★ 2026-11-02 기준선을 다시 심는가 — 판정 한 곳(설계서 3-5 ② · 3-6 · 3-0 CT-J11).
+ *   심음 = 초안에서 켜기 · 사람이 멈춘 여정 다시 켜기 · 떼기(시작을 바꾸는 사람 조작) / 안 심음 = 시스템이 멈춘 여정 다시 켜기
+ *   (시스템 멈춤 동안 가입한 고객 · 오른 등급이 다시 켜는 순간 「전에 본 것」이 되어 영영 빠지던 것).
+ */
+export function baselineReseedDue(from: { status: string; pauseReason: string | null } | 'detach'): boolean {
+  if (from === 'detach') return true;
+  return from.status !== 'paused' || isHumanPause(from.pauseReason);
+}
+
+/** 켜기 · 떼기의 기준선 심기 한 곳(신규 가입 = 회사 번호 원장 + 기준 시각 지금 · 등급 = 값 재기준) · run = 부르는 쪽 트랜잭션 */
+export async function reseedOnActivate(
+  run: SqlRun, journeyId: string, companyId: string, triggerEvent: string | null | undefined,
+  from: { status: string; pauseReason: string | null } | 'detach',
+): Promise<{ reseeded: boolean; seeded: number }> {
+  if (!baselineReseedDue(from)) return { reseeded: false, seeded: 0 };
+  if (triggerEvent === 'customer.created') return { reseeded: true, ...(await seedBaselineForJourney(journeyId, companyId, run)) };
+  // ⛔ 등급 기준선 = state_value 칸이 없으면(42703) 던진다 → 켜기 거부(기준 없이 켜면 첫 회차가 전 고객을 변동으로 오판)
+  if (triggerEvent === 'customer.grade_changed') return { reseeded: true, ...(await seedGradeStateForJourney(journeyId, companyId, run)) };
+  return { reseeded: false, seeded: 0 };
 }
 
 /**

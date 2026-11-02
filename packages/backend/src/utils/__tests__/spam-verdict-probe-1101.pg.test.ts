@@ -40,7 +40,7 @@ import { withTransaction } from '../../config/database';
 import { heldResultJson } from '../agency-send-worker';
 import { runSpamProbeCycle, matchProbeReport, measureSpamVerdicts, probeText, resetSpamProbeSchemaCache } from '../spam-probe';
 import {
-  claimCandidate, saveCandidate, readCandidate, sweepPretestCandidates, regenChargeKey, resetCandidatesReady, candidateStillMine, markCandidatePassedInTx,
+  claimCandidate, saveCandidate, readCandidate, sweepPretestCandidates, regenChargeKey, resetCandidatesReady, candidateStillMine, moveCandidate,
 } from '../journey-pretest-candidate';
 
 const CO = '00000000-0000-0000-0000-0000000c1101';
@@ -71,7 +71,8 @@ async function newTest(o: { minutesAgo: number; rows: Array<{ phone: string; car
 const resultOf = async (id: string) => (await pool.query(`SELECT result, first_result, decided_at, late_report_at FROM spam_filter_test_results WHERE id = $1`, [id])).rows[0];
 
 beforeAll(async () => {
-  for (const id of ['C89-DDL-1', 'C89-DDL-2', 'C89-DDL-3', 'C89-DDL-4', 'C89-DDL-5']) await pool.query(ledgerBlockSql(id));
+  // ★ 2026-11-02 C98-DDL-2 = 가입 근거 칸(표준 필드 「가입일」 = customers.joined_at · 첫 수신자 표본이 표준 칸을 읽는다)
+  for (const id of ['C89-DDL-1', 'C89-DDL-2', 'C89-DDL-3', 'C89-DDL-4', 'C89-DDL-5', 'C98-DDL-2']) await pool.query(ledgerBlockSql(id));
   resetSpamStampCache();
   resetSpamProbeSchemaCache();
   resetCandidatesReady();
@@ -279,9 +280,9 @@ describe('보내기 전 재작성 후보(DDL-D)', () => {
     expect(await candidateStillMine(SNAP, token)).toBe(false);
     const row = await readCandidate(SNAP);
     expect([row?.status, row?.body]).toEqual(['testing', '고친 글']);
-    // 통과 반영 = 판 확인 쓰기 트랜잭션 안에서 testing → passed(한 번만)
-    expect(await withTransaction((run) => markCandidatePassedInTx(run, SNAP))).toBe(true);
-    expect(await withTransaction((run) => markCandidatePassedInTx(run, SNAP))).toBe(false);
+    // ★ 2026-11-02 검사 통과 = testing → passed(한 번만 · 원문 반영은 applyPassedCandidate)
+    expect(await moveCandidate(SNAP, ['testing'], 'passed')).toBe(true);
+    expect(await moveCandidate(SNAP, ['testing'], 'passed')).toBe(false);
     expect((await readCandidate(SNAP))?.status).toBe('passed');
   });
   it('만드는 중 10분 넘음 = failed · 실제 차감이 있으면 크레딧 환불(원 키 · 고정 환불 키) · 차감 0 이면 환불 0', async () => {

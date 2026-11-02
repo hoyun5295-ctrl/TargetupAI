@@ -44,6 +44,7 @@
 | C94 | 8372eb16 |
 | C95 | 450b5295 |
 | C96 | 33f049c2 |
+| C98 | 미커밋 |
 
 ## §1 대기
 
@@ -712,6 +713,95 @@ ALTER TABLE journey_step_campaigns
 - 기대: ① 배포 뒤 첫 회차 백엔드 로그 `[JourneyExecutor] 처리 완료(차례 N)` 줄 · `적재 단위 결과 불명` · `처리 실패` 0 ② 테스트계정 여정 1건 발송 = 그날 단계 캠페인 send_config 에 loadProtocol unit · loadUnit 남지 않음 · journey_step_logs sent 수 = campaigns.sent_count ③ 하루 묶음 여정(회원가입 등)의 새 진입 next_run_at = 다음날 아침 9시(칸 시각을 정했으면 그 시각) · 즉시 여정(구매 · 배송 · 예약)은 지금처럼 ④ 배포 뒤 첫 시간 운영 경보에 journey-step-campaign-seq-missing · journey-unit-unprovable 0
 - 확인: 로그 줄 · 그 시각 SQL 하나씩(docker 한 줄) · 화면(Harold · 테스트계정)
 - 화면 빌드: 1102 밤 배포에 프론트 build:safe 포함 · 23시 점검 취소로 점검 안내 창은 daab49e1(0a780fa3 되돌림 · 같은 날 15:49 push)에서 지워짐 · 서버 8372eb16 → daab49e1 프론트 순변경 = C96 두 파일뿐(JourneyActivationConfirmModal · JourneyStartCard · `git log --name-only 8372eb16..daab49e1 -- packages/frontend` = 0a780fa3 · 33f049c2 · daab49e1 세 커밋 · 점검 안내 세 파일은 `git log -p` 로 0a780fa3 과 daab49e1 패치가 줄 · 덩어리 머리 모두 정확히 뒤집힘 = 순변경 0 실측) · pull 끝 = daab49e1
+- 결과:
+
+### C98-S0 · 여정 · 자동마케팅 핵심 처방 사전 실측(배포 앞 · 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md §5)
+- 카드: C98
+- 단계: 사전
+- 선행: 없음
+- 기대: ① 켜진 여정 최신 판에 채울 자리([… 직접 · 작성해 · 수정해 · 입력해 · URL …])가 남은 문자 칸 수(0 이 아니면 그 칸 = 배포 뒤 첫 회차에 보류 · 담당자 안내 · 3-3) ② 「새로 가입한 고객」 축을 쓰는 켜진 자동마케팅 수(0 이 아니면 가입 근거가 생길 때까지 잠금 사유로 멈춤 · 3-6 D20) ③ 최근 7일 시스템 멈춤 여정 수(배포 뒤 첫 5분에 담당자 안내 한 통씩 · 7일 전 멈춤 = DDL-1 기준선 · 3-5 ①) ④ 카페24 가입일 값 꼴 분포(DML-2 의 형 변환 전) ⑤ standard_fields 행(field_key · category · data_type · sort_order · DML-1 전 같은 키 유무)
+- 확인: 결과 그대로(SQL = 그 창에서 docker 한 줄씩)
+- 결과: 1103 Harold 실행 = ① 0 · ② 0 · ③ 0행(최근 7일 멈춤 없음 = 배포 직후 멈춤 안내 0통) · ④ 0행(카페24 가입일 값 없음 · DML-2 예상 UPDATE 0) · ⑤ 32행 · joined_at 키 없음 · category store · data_type date 있음 · 최대 순서 32. Harold 「자사몰 연동은 전부 테스트 · 이에스페이먼츠만 우커머스 연동 · 여정 생성 없음」
+
+### C98-DDL-1 · journeys 멈춤 안내 원장(pause_notice_for · pause_notice_attempts · 설계서 3-5 ①) · ★ 배포 앞
+- 카드: C98
+- 단계: DDL
+- 선행: C98-S0
+- 의미 바꿈: 아니오(칸 추가 · 옛 코드는 읽지 않는다 · 7일보다 오래된 멈춤 = 안내한 것으로 기준선 = 배포 직후 옛 멈춤 안내 0 · 새 코드는 칸이 없으면 안내 패스만 쉬고 운영 경보 journey-pause-notice-ddl)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, column_default, is_nullable FROM information_schema.columns WHERE table_name = 'journeys' AND column_name IN ('pause_notice_for', 'pause_notice_attempts') ORDER BY 1;
+- 확인: pause_notice_attempts · smallint · 0 · NO / pause_notice_for · timestamp with time zone · (빈칸) · YES 두 줄
+- 결과: 1103 Harold 실행 = SET · ALTER TABLE · UPDATE 3(7일보다 오래된 멈춤 3 = 안내 마침 기준선) · 확인 두 줄 기대 그대로
+
+> C98-DDL-1 · 배포 앞 · 칸 추가 + 기준선 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C98-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE journeys
+  ADD COLUMN IF NOT EXISTS pause_notice_for timestamptz NULL,
+  ADD COLUMN IF NOT EXISTS pause_notice_attempts smallint NOT NULL DEFAULT 0;
+UPDATE journeys SET pause_notice_for = paused_at
+ WHERE status = 'paused' AND paused_at IS NOT NULL AND paused_at < NOW() - INTERVAL '7 days' AND pause_notice_for IS NULL;
+```
+
+### C98-DDL-2 · customers.joined_at(가입 근거 · 설계서 3-6 · D19 · D20) · ★ 배포 앞
+- 카드: C98
+- 단계: DDL
+- 선행: C98-S0
+- 의미 바꿈: 아니오(빈 칸 추가 · 옛 코드는 읽지 않는다 · 새 코드는 칸이 없으면 가입 근거 없음 = 신규 가입 여정 · 새로 가입 축 잠금)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'joined_at';
+- 확인: joined_at · timestamp with time zone · YES 한 줄
+- 결과: 1103 Harold 실행 = SET · ALTER TABLE · 확인 한 줄 기대 그대로
+
+> C98-DDL-2 · 배포 앞 · 빈 칸 추가(표 다시 쓰기 0) · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C98-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS joined_at timestamptz NULL;
+```
+
+### C98-DML-1 · standard_fields 「가입일」 행(설계서 3-6 · 표준 필드 = standard-field-map FIELD_MAP 과 같은 키)
+- 카드: C98
+- 단계: DML
+- 선행: C98-S0 ⑤(같은 field_key 행 0 · category 값 확인) · C98-DDL-2
+- 의미 바꿈: 아니오(행 추가 · 같은 키가 있으면 아무것도 안 함 · 읽는 곳 = 슈퍼관리자 표준 필드 화면 두 곳) · 서버 명령에 한글을 넣지 않으려고 표시 이름 = U& 이스케이프(= 「가입일」 · 실 PG 대조) · 설명 칸 비움
+- 기대: INSERT 0 1 · 확인 = SELECT field_key, display_name, category, data_type, sort_order, is_active FROM standard_fields WHERE field_key = 'joined_at';
+- 확인: joined_at · 가입일 · store · date · (맨 끝 순서) · t 한 줄
+- 결과: 1103 Harold 실행 = INSERT 0 1 · 확인 = joined_at · 가입일 · store · date · 33 · t
+
+> C98-DML-1 · 배포 앞 · 행 추가 · 되돌리기 = DELETE FROM standard_fields WHERE field_key = 'joined_at';
+
+```sql dml:C98-DML-1
+INSERT INTO standard_fields (field_key, display_name, category, data_type, sort_order, is_active)
+SELECT 'joined_at', U&'\AC00\C785\C77C', 'store', 'date', COALESCE(MAX(sort_order), 0) + 1, true FROM standard_fields
+ON CONFLICT (field_key) DO NOTHING;
+```
+
+### C98-DML-2 · 카페24 가입일 → customers.joined_at(배포 뒤 한 번 · 설계서 3-6)
+- 카드: C98
+- 단계: DML
+- 선행: C98-DDL-2 · 코드 배포 · C98-S0 ④(값 꼴 = 시각대 붙은 ISO · 꼴이 다르면 이 블록을 고친 뒤)
+- 의미 바꿈: 예(그 회사에 가입 근거가 생겨 신규 가입 여정 켜기 · 새로 가입 축이 열린다 · 옛 가입 시각은 기준선 · 72시간 규칙으로 진입 0)
+- 기대: UPDATE n(S0 ④ 의 수 이하) · 확인 = SELECT COUNT(*) FROM customers WHERE joined_at IS NOT NULL;
+- 확인: UPDATE 수와 같다(배포 뒤 새 가입이 있으면 그만큼 더)
+- 결과:
+
+> C98-DML-2 · 배포 뒤 · 빈 칸 채우기(이른 값만) · 되돌리기 = 채운 행만 되돌리는 블록은 그때 따로(배포 뒤 새 가입 행과 가른다)
+
+```sql dml:C98-DML-2
+SET lock_timeout = '3s';
+UPDATE customers
+   SET joined_at = (custom_fields->>'cafe24_join_date')::timestamptz
+ WHERE custom_fields ? 'cafe24_join_date'
+   AND custom_fields->>'cafe24_join_date' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}[+-][0-9]{2}:[0-9]{2}$'
+   AND (joined_at IS NULL OR joined_at > (custom_fields->>'cafe24_join_date')::timestamptz);
+```
+
+### C98-S1 · 여정 · 자동마케팅 핵심 처방 실측(배포 뒤 · 테스트계정 · 직원 시트)
+- 카드: C98
+- 단계: 사후
+- 선행: C98-DDL-1 · C98-DDL-2 · C98-DML-1 · 코드 배포 · C96-DDL-2A · C96-DDL-2B
+- 기대: ① 배포 뒤 첫 회차 새 PID ERROR 0 · 운영 경보 journey-pause-notice-ddl 0 ② 직원 지시문(설계서 §6 · 엑셀) 전 시트 기대 결과 그대로 ③ 첫 5분 = C98-S0 ③ 수만큼 멈춤 안내 · journeys.pause_notice_for 찍힘
+- 확인: 로그 줄 · 그 시각 SQL 하나씩(docker 한 줄) · 직원 시트 결과
 - 결과:
 
 ## §2 덤프 뒤 적용분

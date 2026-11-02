@@ -9,7 +9,7 @@
 
 export type PauseKind =
   | 'credit' | 'balance' | 'plan' | 'line' | 'callback' | 'template' | 'subject' | 'cost' | 'budget'
-  | 'carrier' | 'condition' | 'cap' | 'identity' | 'pretest' | 'manual' | 'unknown';
+  | 'carrier' | 'condition' | 'cap' | 'identity' | 'pretest' | 'dispatch' | 'manual' | 'completed' | 'unknown';
 
 export type PauseFixAction = 'plan_upgrade' | 'charge' | 'edit_callback' | 'edit_step' | 'edit_options' | 'resume' | 'contact';
 
@@ -35,6 +35,8 @@ const RULES: Array<{ test: RegExp; view: PauseReasonView }> = [
   // ★ 2026-11-02 묶음 발송 이상치 관문(설계서 3-2 ⑤) — 명단이 맞으면 다시 켜면 그대로 나간다(승인 = 다시 켜기)
   { test: /평소보다 크게 많아/, view: { kind: 'cap', text: '하루 동안 들어온 고객이 평소보다 크게 많아 보내기 전에 멈췄어요. 고객 명단이 맞으면 다시 켜 주세요. 그대로 나갑니다.', fix: { action: 'resume', label: '확인하고 다시 켜기' } } },
   { test: /대량 진입 감지/, view: { kind: 'cap', text: '한 번에 들어온 고객이 최대 인원보다 많아 멈췄어요. 최대 인원을 늘리거나 조건을 좁힌 뒤 다시 켜 주세요.', fix: { action: 'edit_options', label: '최대 인원 바꾸기' } } },
+  // ★ 2026-11-02 한 번 보내기 넣기 실패(journey-activation ONE_SHOT_DISPATCH_FAILED_REASON · 옛: 「이유를 확인해 주세요」로 읽혀 안내 문구가 비었다)
+  { test: /받는 분을 넣지 못해/, view: { kind: 'dispatch', text: '받는 분을 넣지 못해 멈췄어요. 잠시 뒤 다시 켜 주세요. 크레딧은 다시 받지 않아요.', fix: { action: 'resume', label: '다시 켜기' } } },
   { test: /신규 고객 판정 불가/, view: { kind: 'identity', text: '새 고객을 가려낼 정보가 없어 멈췄어요. 고객 데이터 연동을 확인해 주세요.', fix: { action: 'contact', label: '문의하기' } } },
   // ★ 2026-10-25 #14 — 검사 장애로 멈춤은 문안 탓이 아니다(스팸필터 줄보다 먼저 · 다시 켜기)
   { test: /검사 장애/, view: { kind: 'pretest', text: '보내기 전 스팸 검사를 마치지 못해 멈췄어요. 문안 문제는 아니니 잠시 뒤 다시 켜 주세요.', fix: { action: 'resume', label: '다시 켜기' } } },
@@ -43,11 +45,44 @@ const RULES: Array<{ test: RegExp; view: PauseReasonView }> = [
 ];
 
 const MANUAL: PauseReasonView = { kind: 'manual', text: '멈춰 둔 여정이에요.', fix: { action: 'resume', label: '다시 켜기' } };
+/** ★ 2026-11-02 날짜 기준 여정이 정한 날 보내기를 마친 멈춤(시스템 고장이 아니다 · 담당자 안내 0 · 설계서 3-5) */
+const COMPLETED: PauseReasonView = { kind: 'completed', text: '정한 날 보내기를 마쳤어요. 다음 기준 날짜를 정하면 다시 켤 수 있어요.', fix: { action: 'edit_options', label: '기준 날짜 정하기' } };
+
+/**
+ * ★ 2026-11-02 사람 멈춤 사유 = 서버 상수 하나(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-5 · 3-0 CT-J2).
+ *   화면 · 안내 문자 링크 두 입구가 이 상수만 쓴다(옛: 화면이 보낸 글자 · 「관리자 일시정지」 · 링크 문장 셋으로 갈렸다) → 「사람 멈춤인가」 = 글자 맞추기가 아니라 상수 비교.
+ */
+export const MANUAL_PAUSE_REASON = '담당자가 여정을 일시정지했어요.';
+/** 날짜 기준 여정이 정한 날 보내기를 마친 멈춤 사유(상수 비교 · 담당자 안내 0) */
+export const ANCHOR_COMPLETED_PAUSE_REASON = '지정일 D-0 발송 완료. 다음 기준 날짜 지정 시 재가동';
+
+/**
+ * ★ 2026-11-02 여정 멈춤 쓰기의 SET 조각 한 곳(설계서 3-0 CT-J2 · Codex 설계 4R #2 = 쓰기 함수가 아니라 조각).
+ *   각 자리의 UPDATE 문장 · WHERE(세대 비교 · 승인 토큰 · 회사 일치) · 함께 쓰는 칸 · 영향 행 반환은 그 자리 그대로 두고 멈춤 칸만 이 조각으로 쓴다.
+ *   사유는 매개변수로만 더한다(params 에 넣고 그 번호를 쓴다) · 500자.
+ */
+export function pausedSetSql(params: any[], reason: string): string {
+  params.push(String(reason || '').slice(0, 500));
+  return `status = 'paused', paused_at = NOW(), pause_reason = $${params.length}`;
+}
+
+/** 상태를 매개변수로 받는 문장(초안으로 · 멈춤으로 되돌리기)의 멈춤 칸 조각 — 상태 식이 'paused' 일 때만 멈춤 칸을 쓴다 */
+export function pausedCaseSetSql(statusExpr: string, reasonRef: string): string {
+  return `paused_at = CASE WHEN ${statusExpr} = 'paused' THEN NOW() ELSE paused_at END, `
+    + `pause_reason = CASE WHEN ${statusExpr} = 'paused' THEN ${reasonRef} ELSE pause_reason END`;
+}
 const UNKNOWN: PauseReasonView = { kind: 'unknown', text: '멈춰 있어요. 이유를 확인해 주세요.', fix: { action: 'contact', label: '문의하기' } };
+
+/** ★ 2026-11-02 사람이 멈춘 여정인가(설계서 3-5 ② · 다시 켤 때 기준선 다시 심기 · 사건 커서 옮기기 = 사람 멈춤만 · 시스템 멈춤 = 그동안 생긴 일을 받는다) */
+export function isHumanPause(raw: string | null | undefined): boolean {
+  return pauseReasonView(raw).kind === 'manual';
+}
 
 export function pauseReasonView(raw: string | null | undefined): PauseReasonView {
   const s = String(raw || '').trim();
   if (!s) return MANUAL;
+  if (s === MANUAL_PAUSE_REASON) return MANUAL;              // ★ 2026-11-02 상수 비교가 먼저(아래 글자 규칙 = 옛 행)
+  if (s === ANCHOR_COMPLETED_PAUSE_REASON) return COMPLETED;
   for (const r of RULES) if (r.test.test(s)) return r.view;
   return UNKNOWN;
 }

@@ -32,6 +32,8 @@ const REASON_TEXT: Record<string, string> = {
   spam_check_unavailable: '스팸 검사를 마치지 못했어요(잠시 뒤 다시 켜 주세요)',
   spam_check_pending: '스팸 검사 결과를 확인하고 있어요(잠시 뒤 다시 켜 주세요)',
   subject_missing: 'LMS 제목이 없어요',
+  alimtalk_template_unusable: '알림톡 템플릿을 지금 보낼 수 없어요',
+  copy_issue: '보낼 글에 고칠 곳이 있어요',
 };
 
 function headers(): Record<string, string> {

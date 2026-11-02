@@ -13,6 +13,7 @@
  *
  * 다시 켜는 트랜잭션(journey-builder activateJourney) 안에서 활성화 UPDATE 바로 뒤에 부른다. 첫 켜기(초안)에는 부르지 않는다.
  */
+import { isHumanPause } from './journey-pause-reason';   // ★ 2026-11-02 사람 멈춤 판정 CT(설계서 3-5 ② · CT-J2)
 
 /** 되살리는 자동 멈춤 사유(journey-pause-handler autoPauseExecution 의 pauseReason 중 시스템 일시 장애만). */
 export const RESUME_REVIVE_REASONS = ['balance_insufficient', 'carrier_temp_fail', 'auto_retry_exhausted'] as const;
@@ -41,13 +42,8 @@ export const RESUME_REVIVE_SQL =
        )
    RETURNING e.id`;
 
-/** 멈춘 기간을 일 단위 올림만큼 민다($2 = 멈춘 시각 원문 · 같은 문장 안에서 일수를 정한다). */
-export const RESUME_SHIFT_SQL =
-  `UPDATE journey_executions
-      SET next_run_at = next_run_at + make_interval(days => GREATEST(1, CEIL(EXTRACT(EPOCH FROM (NOW() - $2::timestamptz)) / 86400.0)::int))
-    WHERE journey_id = $1::uuid AND status = 'active'
-      AND next_run_at IS NOT NULL AND next_run_at > $2::timestamptz
-   RETURNING id`;
+// ★ 2026-11-02 설계서 3-12 · §4 ⑧ — 옛 「멈춘 기간 일 단위 밀기」(RESUME_SHIFT_SQL)를 지웠다: 멈춤과 무관한 앞날 일정까지 하루씩 밀었다(D8).
+//   멈춘 동안 때가 된 실행 = 그대로 두면 실행기 발송 창 관문(send-time-util sendWindowStateFor · 칸 채널)이 다음 발송 창에 보낸다(문자 = 밤이면 8시 · 알림톡 = 바로) · 앞날 실행 = 그대로.
 
 /**
  * ★ 2026-10-31 날짜 기준 여정 = 지난 날(KST)의 진행 중 실행을 끝낸다(설계서 docs/2026-10-31-journey-step-gate-notice-design.md §2-3).
@@ -75,6 +71,8 @@ export interface ResumePrev {
   /** 멈춘 시각 원문(::text · µs 절사 없이) · 없으면 null */
   pausedRaw: string | null;
   startKind: string | null;
+  /** ★ 2026-11-02 멈춘 이유 원문(사람 멈춤 = 커서를 다시 켠 시각으로 · 시스템 멈춤 = 그대로 = 그동안 도착한 사건 72시간 안을 받는다 · 3-5 ②) */
+  pauseReason?: string | null;
 }
 
 export function isSingleShotStartKind(startKind: string | null | undefined): boolean {
@@ -87,19 +85,16 @@ export async function applyResumeAdjustments(
   journeyId: string,
   prev: ResumePrev,
   approvedAt: unknown,
-): Promise<{ revived: number; shifted: number; staleEnded: number; cursorReset: boolean }> {
-  if (prev.status !== 'paused') return { revived: 0, shifted: 0, staleEnded: 0, cursorReset: false };
+): Promise<{ revived: number; staleEnded: number; cursorReset: boolean }> {
+  if (prev.status !== 'paused') return { revived: 0, staleEnded: 0, cursorReset: false };
   const revived = await run.query(RESUME_REVIVE_SQL, [journeyId, [...RESUME_REVIVE_REASONS]]);
-  let shifted = 0;
-  if (prev.pausedRaw && !isSingleShotStartKind(prev.startKind)) {
-    const sh = await run.query(RESUME_SHIFT_SQL, [journeyId, prev.pausedRaw]);
-    shifted = sh?.rows?.length || 0;
-  }
   let staleEnded = 0;
   if (prev.startKind === 'date_anchor') {
     const st = await run.query(RESUME_STALE_ANCHOR_SQL, [journeyId]);
     staleEnded = st?.rows?.length || 0;
   }
-  await run.query(RESUME_CURSOR_SQL, [journeyId, approvedAt]);
-  return { revived: revived?.rows?.length || 0, shifted, staleEnded, cursorReset: true };
+  // 사건 커서 = 사람 멈춤만 다시 켠 시각으로(멈춘 동안 생긴 일은 받지 않는다) · 시스템 멈춤 = 그대로(★ 2026-11-02 3-5 ② · 판정 = journey-pause-reason isHumanPause)
+  const human = isHumanPause(prev.pauseReason ?? null);
+  if (human) await run.query(RESUME_CURSOR_SQL, [journeyId, approvedAt]);
+  return { revived: revived?.rows?.length || 0, staleEnded, cursorReset: human };
 }

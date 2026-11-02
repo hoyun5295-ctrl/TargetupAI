@@ -14,6 +14,18 @@
  */
 import { query } from '../config/database';
 
+/**
+ * ★ 2026-11-02 그 칸의 최신 판(스냅샷) 서브쿼리 — 판 읽기 한 곳(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-0 CT-J1).
+ *   최신 = 그 (여정 · 칸)의 created_at 가장 늦은 행 · 실행기 · 검사 스캔 · 보낼 판 판정 · 상황판 · 정지 화면 · 후보가 모두 이것을 부른다.
+ *   신뢰도는 `confidence` 별칭으로 준다(칸 이름은 판 쓰기 · 판정 파일 밖에 쓰지 않는다).
+ *   쓰는 꼴: `FROM ${latestSnapshotSql(...)} snap` · `LEFT JOIN LATERAL ${latestSnapshotSql(...)} snap ON TRUE` · `(SELECT x.id FROM ${latestSnapshotSql(...)} x)`.
+ */
+export function latestSnapshotSql(journeyExpr: string, stepExpr: string): string {
+  return `(SELECT ss_l.id, ss_l.confidence_score AS confidence, ss_l.created_at, ss_l.message_body, ss_l.message_subject, ss_l.channel
+      FROM journey_step_snapshots ss_l WHERE ss_l.step_id = ${stepExpr} AND ss_l.journey_id = ${journeyExpr}
+     ORDER BY ss_l.created_at DESC LIMIT 1)`;
+}
+
 export interface StepSendVersion {
   /** journey_step_variants.id · 변이가 없으면 null */
   variantId: string | null;
@@ -50,11 +62,31 @@ export function stepSendVersions(
   });
 }
 
+export interface StepVariantRow { id: string; variant_id: string; message_template: string | null; subject: string | null }
+
+/**
+ * ★ 2026-11-02 설계서 3-16 · D14 — 칸마다 변이 행(여러 칸 한 번 · 상세 화면 · 켜진 여정 칸 고치기 판정이 읽는다).
+ *   run = 잠금을 쥔 트랜잭션에서 부를 때 그 연결(고치기 판정 = 여정 행 잠금 안).
+ */
+export async function loadVariantRowsByStep(
+  stepIds: string[],
+  run: (sql: string, params?: any[]) => Promise<{ rows: any[] }> = query,
+): Promise<Map<string, StepVariantRow[]>> {
+  const out = new Map<string, StepVariantRow[]>();
+  if (stepIds.length === 0) return out;
+  const r = await run(
+    `SELECT id, step_id, variant_id, message_template, subject FROM journey_step_variants WHERE step_id = ANY($1::uuid[]) ORDER BY step_id, variant_id`,
+    [stepIds],
+  );
+  for (const x of r.rows as any[]) {
+    const k = String(x.step_id);
+    if (!out.has(k)) out.set(k, []);
+    out.get(k)!.push({ id: String(x.id), variant_id: String(x.variant_id ?? ''), message_template: x.message_template ?? null, subject: x.subject ?? null });
+  }
+  return out;
+}
+
 /** 그 칸의 변이(검사 · 재검사가 읽는다 · 실행기는 고르기용 목록을 bandit-optimizer 에서 따로 읽는다). */
 export async function loadStepVariantRows(stepId: string): Promise<Array<{ id: string; message_template: string | null; subject: string | null }>> {
-  const r = await query(
-    `SELECT id, message_template, subject FROM journey_step_variants WHERE step_id = $1::uuid ORDER BY variant_id`,
-    [stepId],
-  );
-  return r.rows.map((x: any) => ({ id: String(x.id), message_template: x.message_template ?? null, subject: x.subject ?? null }));
+  return (await loadVariantRowsByStep([stepId])).get(stepId) ?? [];
 }

@@ -3,6 +3,7 @@
 //   종전 notify_at 도달 schedule 처리 방식 폐기 → 실제 next_run_at 스캔으로 교체.
 
 import { scanAndPretest } from './journey-pretest-notifier';
+import { notifyPausedJourneys } from './journey-pause-notice';   // ★ 2026-11-02 시스템 멈춤 담당자 안내(설계서 3-5 ①)
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 let _workerTimer: NodeJS.Timeout | null = null;
@@ -19,6 +20,12 @@ export async function runJourneyPretestNotifierTick(): Promise<void> {
     await scanAndPretest();
   } catch (err: any) {
     console.log(`[journey-pretest-notifier] tick 오류 — ${err?.message || 'unknown'}`);
+  }
+  try {
+    // 검사 패스가 실패해도 멈춤 안내는 따로 돈다(같은 회차 · 실패 = 다음 회차 · 시도 3번)
+    await notifyPausedJourneys();
+  } catch (err: any) {
+    console.log(`[journey-pause-notice] tick 오류 — ${err?.message || 'unknown'}`);
   } finally {
     _workerRunning = false;
   }

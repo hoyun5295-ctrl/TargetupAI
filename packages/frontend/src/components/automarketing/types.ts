@@ -24,6 +24,8 @@ export interface ContinuousOperator {
   status: OperatorStatus;
   lastRunAt: string | null;
   nextRunAt: string | null;
+  /** ★ 2026-11-02 다음 발송 시각(서버 계산 · null = AI 최적 시각) */
+  nextSendAt?: string | null;
   totalProposals: number;
   totalApproved: number;
   totalRejected: number;

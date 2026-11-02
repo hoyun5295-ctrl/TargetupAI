@@ -90,10 +90,13 @@ describe('여정 트리거 카탈로그 ↔ 백엔드 실동작', () => {
     const cursorBlock = cursorSrc.slice(cursorSrc.indexOf('export function resolveCdpCursorEventName'));
     const cursorTriggers = Array.from(cursorBlock.matchAll(/case '([^']+)':\s*return '/g)).map((m) => m[1]);
 
-    // 경로 ②: 장바구니 전용 — selectCartAbandonProperties로 properties를 실어 보낸다
+    // 경로 ②: 장바구니 전용 — 진입 정보 한 함수(entryPropsFor · ★ 2026-11-02 설계서 3-8)가 selectCartAbandonProperties로 싣고 진입 감시가 그 함수를 부른다
     const watcherSrc = readFileSync(WATCHER, 'utf8');
-    const cartCarries = /trigger_event === 'cdp\.cart_abandon'/.test(watcherSrc)
-      && /selectCartAbandonProperties/.test(watcherSrc);
+    const exSrc = readFileSync(EXTRACTOR, 'utf8');
+    const propsFn = exSrc.slice(exSrc.indexOf('export async function entryPropsFor('), exSrc.indexOf('\n}\n', exSrc.indexOf('export async function entryPropsFor(')));
+    const cartCarries = /trigger_event === 'cdp\.cart_abandon'/.test(propsFn)
+      && /selectCartAbandonProperties/.test(propsFn)
+      && /entryPropsFor\(j, ids\)/.test(watcherSrc);
 
     const backend = new Set(cursorTriggers);
     if (cartCarries) backend.add('cdp.cart_abandon');

@@ -11,6 +11,7 @@
  *   ① 프로필 최근 구매일 > 진입일(KST · 엄격) ② 자사몰 구매 사건 > 진입 시각 ③ 매장 원장 구매일 > 진입 시각(KST naive)
  *   ④ 가입 여정만: 고객 행이 들어온 뒤(도착 축) 들어온 원장 구매(싱크가 가입 고객과 그 구매를 한 묶음으로 보낸다)
  */
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 
 /**
  * 판정 SQL 조각. e = 실행 행 별칭(customer_id · entered_at 칸) · companyParam = 회사 id 자리($n) · signupExpr = 가입 여정인가(SQL 불리언).
@@ -24,7 +25,7 @@ export function purchasedSinceEntrySql(e: string, companyParam: string, signupEx
                AND pc.recent_purchase_date > (${e}.entered_at AT TIME ZONE 'Asia/Seoul')::date)
     OR EXISTS (SELECT 1 FROM cdp_events pe
                 WHERE pe.company_id = ${companyParam} AND pe.customer_id = ${e}.customer_id
-                  AND pe.event_name = 'purchase' AND pe.occurred_at > ${e}.entered_at)
+                  AND ${netPurchaseSql('pe')} AND pe.occurred_at > ${e}.entered_at)   -- ★ 2026-11-02 목표 = 결제된 구매(3-4 ③ · CT-J3)
     OR EXISTS (SELECT 1 FROM purchases pp
                 WHERE pp.company_id = ${companyParam} AND pp.customer_id = ${e}.customer_id
                   AND pp.purchase_date IS NOT NULL
@@ -40,6 +41,20 @@ export function purchasedSinceEntrySql(e: string, companyParam: string, signupEx
 export const PURCHASED_SINCE_ENTRY_ONE_SQL =
   `SELECT ${purchasedSinceEntrySql('e', '$1::uuid', '$4::boolean')} AS hit
      FROM (SELECT $2::uuid AS customer_id, $3::timestamptz AS entered_at) e`;
+
+/**
+ * ★ 2026-11-02 설계서 3-4 ② — 구매로 들어온 실행 중 그 진입 구매가 지금 결제된 구매가 아닌 것(취소 · 환불 · 결제 되돌림) · $1 실행 id 들 · $2 회사.
+ *   진입 표식(__entry = { src: 'trigger', key: 사건 id } · 트리거 진입 반복문이 남긴다)만 본다 · 넘겨받은 진입(src = 'after') · 표식 없는 옛 행 = 판정 안 함(계속).
+ *   결제된 구매 판정 = netPurchaseSql 한 곳(CT-J3 · 진입 커서가 같은 조각으로 들였다 → 지금 거짓 = 들어온 뒤 취소 · 환불).
+ */
+export const ENTRY_PURCHASE_VOIDED_SQL =
+  `SELECT e.id FROM journey_executions e
+     JOIN cdp_events ev ON ev.company_id = $2::uuid
+      AND ev.id = CASE WHEN e.entry_event_properties->'__entry'->>'key' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                       THEN (e.entry_event_properties->'__entry'->>'key')::uuid END
+    WHERE e.id = ANY($1::uuid[]) AND e.status = 'active'
+      AND e.entry_event_properties->'__entry'->>'src' = 'trigger'
+      AND ev.event_name = 'purchase' AND NOT ${netPurchaseSql('ev')}`;
 
 /** 여정 시작 사건이 가입인가(가입 묶음 신호를 켜는 조건 · 실행기 · 조건 칸 · 지도가 같은 규칙). */
 export const isSignupTrigger = (triggerEvent: string | null | undefined): boolean => String(triggerEvent || '') === 'customer.created';

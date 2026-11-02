@@ -23,6 +23,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { buildDiscoveredSegments, DiscoveredSegment } from './predictive-segments-core';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -141,7 +142,7 @@ export async function computePredictions(
          (SELECT COUNT(*) FROM cdp_events
           WHERE customer_id = c.id AND event_name = 'message_click') AS total_clicks,
          (SELECT COUNT(*) FROM cdp_events
-          WHERE customer_id = c.id AND event_name IN ('order', 'purchase')) AS total_orders,
+          WHERE customer_id = c.id AND ${netPurchaseSql('cdp_events')}) AS total_orders,   -- ★ 2026-11-02 주문 수 = 결제된 구매(CT-J3)
          -- ★ 2026-07-03 Gap5 Layer2: 분모 = 여정 발송 + 고객별 발송 카운터(직접발송·DM·자동마케팅) 합산.
          --   두 소스는 배타적(여정은 카운터 미기록) — 중복 0. ⚠️ 벌크 SQL과 동일 합산 유지 의무.
          (SELECT COUNT(*) FROM journey_step_logs l
@@ -534,7 +535,7 @@ export async function getCompanyPredictionDistribution(
        AVG(CASE WHEN EXISTS (
          SELECT 1 FROM cdp_events
          WHERE customer_id = p.customer_id
-           AND event_name IN ('order', 'purchase')
+           AND ${netPurchaseSql('cdp_events')}   -- ★ 2026-11-02 실제 구매 = 결제된 구매(CT-J3)
            AND occurred_at > p.computed_at
        ) THEN 1 ELSE 0 END) AS purchase_actual_rate
      FROM cdp_customer_predictions p

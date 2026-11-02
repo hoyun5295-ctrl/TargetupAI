@@ -13,6 +13,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 
 export interface CdpActiveCustomer {
   customerId: string;
@@ -66,7 +67,7 @@ export async function buildCdpActiveCustomers(
         c.last_activity_at,
         COUNT(*)::int AS events_30d,
         COALESCE(SUM(
-          CASE WHEN e.event_name IN ('purchase','order')
+          CASE WHEN ${netPurchaseSql('e')}   -- ★ 2026-11-02 매출 = 결제된 구매(CT-J3)
             THEN COALESCE((e.properties->>'total_amount')::numeric, 0)
             ELSE 0 END
         ), 0)::float AS revenue_30d

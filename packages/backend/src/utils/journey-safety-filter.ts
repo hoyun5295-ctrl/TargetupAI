@@ -42,7 +42,9 @@ export function isCustomerSendable(c: {
   sms_opt_in?: boolean | null;
   is_opt_out?: boolean | null;
   is_invalid?: boolean | null;
-}): boolean {
+}, opts: { informational?: boolean } = {}): boolean {
+  // ★ 2026-11-02 설계서 3-11 · §4 ⑦ — 정보성 칸(알림톡 = 광고 판정 CT 가 false) = 활성 · 번호 유효만(광고 동의 · 광고 거부 · 080 거부는 광고 칸만)
+  if (opts.informational) return c.is_active === true && c.is_invalid !== true;
   return c.is_active === true && c.sms_opt_in === true && c.is_opt_out !== true && c.is_invalid !== true;
 }
 

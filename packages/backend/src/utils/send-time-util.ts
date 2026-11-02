@@ -4,7 +4,8 @@
  * 분당 batchIndex 분 증가 + 발송 가능 시간대(SEND_HOURS) 초과 시 다음날 시작 시각으로 이월.
  * direct-send-worker.ts(청크별 globalIndex)와 campaigns.ts가 공유.
  */
-import { SEND_HOURS, BRAND_SEND_WINDOW } from '../config/defaults';
+import { SEND_HOURS, BRAND_SEND_WINDOW, NIGHT_AD_LOAD_LEAD_MS } from '../config/defaults';
+import { normalizeAlimtalkNextType, usesCustomContents } from './alimtalk-fallback';   // 순수(import 0) — 밤 예외 판정
 
 /**
  * 브랜드메시지 발송 가능 시간(KST 08:00~20:50) 안인지 판정 — 매뉴얼 v2.3.1 §3.9.1.
@@ -229,8 +230,78 @@ export function resolveSplitFirstSend(
  * calcSplitSendTime은 endHour 초과만 처리(새벽 미처리)하므로 여정 진입/다음 step용으로 분리.
  * KST(UTC+9) 기준 — journey-executor calculateNextRunAt와 동일 패턴.
  */
-/** ★ 야간(발송 불가 시간) 트리거는 일괄 아침 9시로 발송(Harold 명시) — 화면이 같은 값을 받는다(GET /api/send-policy · ★ 2026-10-25 원장 #40) */
-export const NIGHT_ARRIVE_HOUR = 9;
+/**
+ * ★ 야간(발송 불가 시간) 트리거 · 하루 묶음 첫 발송 = 발송 창 시작 시각(화면이 같은 값을 받는다 · GET /api/send-policy · ★ 2026-10-25 원장 #40).
+ *   ★ 2026-11-02 Harold 「다음날 8시」(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md §4 ⑤) — 옛 9시 상수를 발송 창 시작 한 숫자로(환경 변수로 창이 바뀌어도 창 밖 시각을 내지 않는다).
+ */
+export const NIGHT_ARRIVE_HOUR = SEND_HOURS.start;
+/** ★ 2026-11-02 「다음 평일」 시각(칸 대기 모드 next_business_day · 화면 「다음 평일 09시」) — 밤 도착과 다른 약속이라 따로 둔다(설계서 3-10 SC-15). */
+export const BUSINESS_DAY_HOUR = 9;
+
+/** 시각 계산 선택 — 밤 예외 칸(정보성 알림톡)은 발송 창으로 밀지 않는다(설계서 3-10 · §4 ⑥). */
+export interface SendTimeOpts { nightExempt?: boolean }
+
+/**
+ * ★ 2026-11-02 밤 예외 칸 = 알림톡이고 대체 문자가 템플릿 글 그대로(S · L)이거나 대체 없음(N).
+ *   직접 쓴 대체 문안(A · B)은 검수받지 않은 문자라 문자 시각 규칙을 따른다(설계서 3-10 SC-16).
+ */
+export function isNightExemptStep(step: { step_type?: string | null; channel?: string | null; alimtalk_next_type?: string | null }): boolean {
+  // 보내지 않는 칸(기다리기 · 조건 · 끝) = 밀 까닭이 없다(밀면 뒤 알림톡 칸까지 아침으로 밀린다) · 칸 종류를 안 준 호출 = 메시지 칸
+  if (step.step_type != null && String(step.step_type) !== 'message') return true;
+  if (String(step.channel || '') !== 'kakao') return false;
+  return !usesCustomContents(normalizeAlimtalkNextType(step.alimtalk_next_type ?? null));
+}
+
+/** 밤 예외면 그대로 · 아니면 발송 창 안으로 */
+function sendableFor(date: Date, opts?: SendTimeOpts): Date {
+  return opts?.nightExempt ? date : shiftToSendableHour(date);
+}
+
+/**
+ * KST 시(0~23)가 발송 창 안인가 — 판정 본문 한 곳(★ 2026-11-02 설계서 3-0 CT-J7 · 실행기 밀림 경보 · 자동 캠페인 · autosend-policy isSendableHourKst 가 이것을 부른다).
+ *   창 값을 넘기는 호출(대행 등 회사 창)은 start · end 를 준다 · 안 주면 플랫폼 창(SEND_HOURS).
+ */
+export function isWithinSendHours(now: Date = new Date(), startHour: number = SEND_HOURS.start, endHour: number = SEND_HOURS.end): boolean {
+  const kstHour = new Date(now.getTime() + 9 * 60 * 60 * 1000).getUTCHours();
+  return kstHour >= startHour && kstHour < endHour;
+}
+
+/** ★ 2026-11-02 다음날 발송 창 시작(KST) — 옛 실행기 사본 nextDayWindowStart(I6 이어 붙임이 닫힌 (여정 · 칸)의 남은 실행 자리) */
+export function nextDaySendWindowStart(now: Date = new Date()): Date {
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  kst.setUTCDate(kst.getUTCDate() + 1);
+  kst.setUTCHours(SEND_HOURS.start, 0, 0, 0);
+  return new Date(kst.getTime() - 9 * 60 * 60 * 1000);
+}
+
+/** 다음 발송 창 시작(오늘 창 전 = 오늘 · 창 뒤 = 다음날) */
+function nextSendWindowStart(now: Date): Date {
+  const kstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const kstTarget = new Date(kstNow);
+  if (kstNow.getUTCHours() >= SEND_HOURS.end) kstTarget.setUTCDate(kstTarget.getUTCDate() + 1);
+  kstTarget.setUTCHours(SEND_HOURS.start, 0, 0, 0);
+  return new Date(kstTarget.getTime() - 9 * 60 * 60 * 1000);
+}
+
+/**
+ * ★ 2026-11-02 발송 창 판정 한 곳(옛: 실행기 안 사본 `isWithinSendHours` · `computeNextSendWindow` · 설계서 3-0 CT-J7).
+ *   문자 = 지금과 적재 여유(NIGHT_AD_LOAD_LEAD_MS) 뒤 둘 다 창 안일 때만 열림 · 밤 예외 칸 = 늘 열림.
+ */
+export function sendWindowStateFor(now: Date, nightExempt: boolean): { open: boolean; next: Date } {
+  if (nightExempt) return { open: true, next: now };
+  if (!isWithinSendHours(now)) return { open: false, next: nextSendWindowStart(now) };
+  const t = new Date(now.getTime() + NIGHT_AD_LOAD_LEAD_MS);
+  if (!isWithinSendHours(t)) return { open: false, next: nextSendWindowStart(t) };
+  return { open: true, next: now };
+}
+
+/**
+ * ★ 2026-11-02 「지금 보낼 때」의 시각 = 발송 창 안이면 그대로 · 밖이면 다음 창(밤 예외 칸 = 그대로) — 다시 켤 때 때가 된 실행(설계서 3-12 · §4 ⑧) ·
+ *   날짜 기준 · 한 번 보내기의 지난 예정 시각이 같은 함수를 쓴다(설계서 3-0 CT-J7).
+ */
+export function sendableAt(at: Date, nightExempt: boolean): Date {
+  return nightExempt ? at : shiftToSendableHour(at);
+}
 
 /** 0~23 시 → 「밤 9시」 · 「아침 8시」(화면 utils/send-policy koHour 와 같은 말) */
 function koHourDay(h: number): string {
@@ -241,6 +312,10 @@ function koHourDay(h: number): string {
 /** ★ 2026-10-25 원장 #40 — 서버 고객 문장 · AI 지시문의 발송 창 표기(SEND_HOURS · 옛: 「밤 9시~아침 8시」 · 「08~21시」를 숫자로 박았다) */
 export function nightRangeKo(): string { return `${koHourDay(SEND_HOURS.end)}~${koHourDay(SEND_HOURS.start)}`; }
 export function sendWindowKo(): string { return `${String(SEND_HOURS.start).padStart(2, '0')}~${String(SEND_HOURS.end).padStart(2, '0')}시`; }
+/** ★ 2026-11-02 밤 도착 시각의 고객 말(「아침 8시」 · 고객 문장 · 화면이 같은 상수를 쓴다 · 설계서 3-0 CT-J7) */
+export function nightArriveLabelKo(): string { return koHourDay(NIGHT_ARRIVE_HOUR); }
+/** ★ 2026-11-02 다음 평일 시각의 고객 말(「아침 9시」) */
+export function businessDayLabelKo(): string { return koHourDay(BUSINESS_DAY_HOUR); }
 
 export function shiftToSendableHour(
   date: Date,
@@ -271,10 +346,11 @@ export function calculateNextRunAt(
   delayHours: number,
   targetHourKst: number | null,
   now: Date = new Date(),
+  opts?: SendTimeOpts,
 ): Date {
   // 'relative' (default)
   if (delayMode === 'relative' || !delayMode) {
-    return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
+    return sendableFor(new Date(now.getTime() + delayHours * 60 * 60 * 1000), opts);
   }
 
   // 'specific_hour' = 오늘/내일 target_hour_kst 시 KST
@@ -287,7 +363,7 @@ export function calculateNextRunAt(
     const kstHour = kstNow.getUTCHours();
     const daysToAdd = kstHour >= targetHour ? 1 : 0; // 오늘 시각이 지났으면 내일
     const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, targetHour - 9, 0, 0);
-    return shiftToSendableHour(new Date(utcTargetMs));
+    return sendableFor(new Date(utcTargetMs), opts);
   }
 
   // 'next_business_day' = 다음 평일(월~금) 09시 KST
@@ -301,11 +377,11 @@ export function calculateNextRunAt(
     let daysToAdd: number;
     if (kstDayOfWeek === 0) daysToAdd = 1; // 일 → 월
     else if (kstDayOfWeek === 6) daysToAdd = 2; // 토 → 월
-    else if (kstDayOfWeek === 5 && kstHour >= 9) daysToAdd = 3; // 금 09시 이후 → 월
-    else if (kstHour >= 9) daysToAdd = 1; // 평일 09시 이후 → 내일
-    else daysToAdd = 0; // 평일 09시 이전 → 오늘
-    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, 0, 0, 0); // KST 09시 = UTC 00시
-    return shiftToSendableHour(new Date(utcTargetMs));
+    else if (kstDayOfWeek === 5 && kstHour >= BUSINESS_DAY_HOUR) daysToAdd = 3; // 금 그 시각 이후 → 월
+    else if (kstHour >= BUSINESS_DAY_HOUR) daysToAdd = 1; // 평일 그 시각 이후 → 내일
+    else daysToAdd = 0; // 평일 그 시각 이전 → 오늘
+    const utcTargetMs = Date.UTC(kstYear, kstMonth, kstDate + daysToAdd, BUSINESS_DAY_HOUR - 9, 0, 0); // KST 그 시각 - 9 = UTC
+    return sendableFor(new Date(utcTargetMs), opts);
   }
 
   // 'relative_at_hour' = (now + delayHours)가 속한 KST 날짜의 targetHourKst시. 그 시각이 과거면 +1일.
@@ -319,11 +395,11 @@ export function calculateNextRunAt(
     const d = kstLanded.getUTCDate();
     let utcTargetMs = Date.UTC(y, m, d, targetHour - 9, 0, 0); // KST targetHour = UTC(targetHour-9)
     if (utcTargetMs < now.getTime()) utcTargetMs = Date.UTC(y, m, d + 1, targetHour - 9, 0, 0);
-    return shiftToSendableHour(new Date(utcTargetMs));
+    return sendableFor(new Date(utcTargetMs), opts);
   }
 
   // fallback = relative (미지원 mode)
-  return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
+  return sendableFor(new Date(now.getTime() + delayHours * 60 * 60 * 1000), opts);
 }
 
 /** ★ 2026-11-02 하루 묶음의 「그날」 = 진입 시각의 KST 날짜(YYYY-MM-DD · 00:00:00 ~ 23:59:59 · 첫 칸 시각 · 이상치 관문이 같은 정의를 쓴다) */
@@ -334,14 +410,15 @@ export function dailyBatchDay(enteredAt: Date): string {
 /**
  * ★ 2026-11-02 하루 묶음 첫 칸 시각(설계서 docs/2026-11-02-journey-batch-send-design.md 3-2 ② · Harold 「00:00:00 ~ 23:59:59 가 그날 · 다음날 보낸다」).
  *   그날 D = 진입 행이 생긴 시각(도착)의 KST 날짜 · 하루 안 진입 시각과 무관하게 같은 값(= 한 묶음).
- *   날 = D + max(1, ceil(지연 / 24시간)) · 시각 = 칸 시각(없으면 아침 9시 = NIGHT_ARRIVE_HOUR · 새 상수 0).
- *   모드: specific_hour = D+1 그 시각 · next_business_day = D+1 이후 첫 평일 9시 · relative · relative_at_hour = 위 · 끝에 발송 창 맞춤.
+ *   날 = D + max(1, ceil(지연 / 24시간)) · 시각 = 칸 시각(없으면 밤 도착 시각 = NIGHT_ARRIVE_HOUR = 발송 창 시작).
+ *   모드: specific_hour = D+1 그 시각 · next_business_day = D+1 이후 첫 평일 BUSINESS_DAY_HOUR 시(바로 갈래와 같은 시각) · relative · relative_at_hour = 위 · 끝에 발송 창 맞춤(밤 예외 칸 = 그대로).
  */
 export function dailyFirstRunAt(
   delayMode: string,
   delayHours: number,
   targetHourKst: number | null,
   enteredAt: Date,
+  opts?: SendTimeOpts,
 ): Date {
   const [y, m1, d] = dailyBatchDay(enteredAt).split('-').map(Number);
   const m = m1 - 1;
@@ -352,13 +429,13 @@ export function dailyFirstRunAt(
       if (dow !== 0 && dow !== 6) break;
       day++;
     }
-    return shiftToSendableHour(new Date(Date.UTC(y, m, day, NIGHT_ARRIVE_HOUR - 9, 0, 0)));
+    return sendableFor(new Date(Date.UTC(y, m, day, BUSINESS_DAY_HOUR - 9, 0, 0)), opts);
   }
   const h = targetHourKst != null && Number.isFinite(Number(targetHourKst))
     ? Math.max(0, Math.min(23, Math.floor(Number(targetHourKst))))
     : NIGHT_ARRIVE_HOUR;
   const days = delayMode === 'specific_hour' ? 1 : Math.max(1, Math.ceil(Math.max(0, Number(delayHours) || 0) / 24));
-  return shiftToSendableHour(new Date(Date.UTC(y, m, d + days, h - 9, 0, 0)));
+  return sendableFor(new Date(Date.UTC(y, m, d + days, h - 9, 0, 0)), opts);
 }
 
 /**
@@ -371,10 +448,11 @@ export function firstRunAtFor(
   delayHours: number,
   targetHourKst: number | null,
   enteredAt: Date = new Date(),
+  opts?: SendTimeOpts,
 ): Date {
   return sendTiming === 'daily'
-    ? dailyFirstRunAt(delayMode, delayHours, targetHourKst, enteredAt)
-    : calculateNextRunAt(delayMode, delayHours, targetHourKst, enteredAt);
+    ? dailyFirstRunAt(delayMode, delayHours, targetHourKst, enteredAt, opts)
+    : calculateNextRunAt(delayMode, delayHours, targetHourKst, enteredAt, opts);
 }
 
 /**

@@ -38,6 +38,7 @@ import { stepEditPolicy, type StepEditPolicy } from './journey-step-edit-policy'
 import { purchasedSinceEntrySql } from './journey-goal-purchase';
 // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(붙인 여정 = 앞 여정 열 · 바로 아래 · 선)
 import { readAfterConfig, AFTER_OUTCOME_LABEL, type AfterOutcome } from './journey-after-config';
+import { resolveJourneyAdFlag, journeyStepIsAdSql } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 
 /** 지도 레인(윗띠 생애 흐름 → 아랫띠 순간 → 상시 레일). 계약에 트리거가 있는 레인만 나간다(없는 레인을 지어내지 않는다). */
 const LANE_META: Array<{ key: JourneyLane; label: string; band: 'flow' | 'moment' | 'standing' }> = [
@@ -261,11 +262,11 @@ export interface LifecycleMap {
  */
 export function isInfoAlertJourney(steps: Array<{ step_type: string; channel?: string | null; is_ad?: boolean | null }>): boolean {
   const msgs = steps.filter((s) => s.step_type === 'message');
-  return msgs.length > 0 && msgs.every((s) => s.channel === 'kakao' && s.is_ad === false);
+  return msgs.length > 0 && msgs.every((s) => !resolveJourneyAdFlag(s.channel, s.is_ad));   // ★ 2026-11-02 광고 판정 CT(CT-J8)
 }
 
 /** SQL 조각(별칭 j) — 마케팅 여정(정보 알림이 아닌 여정). isInfoAlertJourney 의 여집합과 같은 규칙. */
-export const MARKETING_JOURNEY_SQL = `EXISTS (SELECT 1 FROM journey_steps ms WHERE ms.journey_id = j.id AND ms.step_type = 'message' AND (ms.channel IS DISTINCT FROM 'kakao' OR ms.is_ad IS DISTINCT FROM false))`;
+export const MARKETING_JOURNEY_SQL = `EXISTS (SELECT 1 FROM journey_steps ms WHERE ms.journey_id = j.id AND ms.step_type = 'message' AND ${journeyStepIsAdSql('ms')})`;   // ★ 2026-11-02 CT-J8 SQL 조각
 
 const GOAL_LABEL: Record<string, string> = { purchase: '구매 확인', points_used: '포인트 줄어듦', click: '링크 클릭', visit: '방문 확인' };
 

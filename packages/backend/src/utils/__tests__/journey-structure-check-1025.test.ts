@@ -155,13 +155,14 @@ describe('Codex 1R — 검사 우회 0', () => {
 });
 
 describe('Codex 1R — 재진입 상한은 회차 자르기 앞', () => {
-  it('상한 판정용 뽑기 = cap + 1(회차 1,000 명으로 먼저 자르지 않는다) · 1,000 명 자르기는 상한 통과 뒤', async () => {
+  // ★ 2026-11-02 설계서 3-7 — 회차 상한 = JOURNEY_COUNT_CAP(진입 감시와 같은 상수 · 옛 1,000 명)
+  it('상한 판정용 뽑기 = cap + 1(회차 상한으로 먼저 자르지 않는다) · 회차 상한 자르기는 상한 통과 뒤', async () => {
     const { readFileSync } = await import('fs');
     const { join } = await import('path');
     const r = readFileSync(join(__dirname, '..', 'journey-reentry-worker.ts'), 'utf8');
-    expect(r).toContain('let pickLimit = cap != null ? cap + 1 : PER_JOURNEY_BATCH_LIMIT;');
+    expect(r).toContain('let pickLimit = cap != null ? cap + 1 : JOURNEY_COUNT_CAP;');
     const check = r.indexOf('if (cap != null && entryCapExceeded(cap, backfill, picked.length)) {');
-    const cut = r.indexOf('const ids = picked.slice(0, PER_JOURNEY_BATCH_LIMIT);');
+    const cut = r.indexOf('const ids = picked.slice(0, JOURNEY_COUNT_CAP);');
     expect(check).toBeGreaterThan(-1);
     expect(cut).toBeGreaterThan(check);
   });

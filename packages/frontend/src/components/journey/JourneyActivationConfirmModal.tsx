@@ -43,7 +43,7 @@ interface Props {
 interface FailedStep {
   stepId: string;
   variantId?: string;
-  reason: 'placeholder_unedited' | 'variable_mapping_invalid' | 'spam_filter_failed' | 'spam_check_unavailable' | 'spam_check_pending' | 'subject_missing';
+  reason: 'placeholder_unedited' | 'variable_mapping_invalid' | 'spam_filter_failed' | 'spam_check_unavailable' | 'spam_check_pending' | 'subject_missing' | 'alimtalk_template_unusable' | 'copy_issue';
   details: string;
   matchedStopWords?: string[];
 }
@@ -76,6 +76,8 @@ const REASON_LABEL: Record<FailedStep['reason'], string> = {
   // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중(문안 문제 아님 · 잠시 뒤 다시 켜면 같은 검사를 이어 봄)
   spam_check_pending: '스팸 검사 결과를 확인하고 있어요',
   subject_missing: 'LMS 제목이 없어요',
+  alimtalk_template_unusable: '알림톡 템플릿을 지금 보낼 수 없어요',
+  copy_issue: '보낼 글에 고칠 곳이 있어요',
 };
 
 const SUB_AGENT_CARDS = [

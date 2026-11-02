@@ -22,7 +22,9 @@ import { useToast } from '../ToastProvider';
 import { findUndefaultedLiquidVars } from '../../utils/highlightVars';
 import { LMS_SUBJECT_MAX_CHARS } from '../../utils/formatDate';
 import PhoneComposer from './PhoneComposer';
+import JourneyAbCopyList, { abCopyLocked, type AbVariantCopy } from './JourneyAbCopyList';   // ★ 2026-11-02 설계서 3-16
 import { stepChannelLabel } from '../../utils/journey-labels';
+import { resolveJourneyAdFlag } from '../../utils/journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 
 interface MessageStep {
   id: string;
@@ -31,6 +33,8 @@ interface MessageStep {
   messageTemplate: string;
   subject: string;
   isAd: boolean;
+  /** ★ 2026-11-02 설계서 3-16 — 이 칸의 A/B 문안(켜진 여정이면 본문 대신 보이고 잠근다 · 서버도 409) */
+  abVariants: AbVariantCopy[];
 }
 
 interface Props {
@@ -82,7 +86,8 @@ export default function JourneyMessageEditModal({
           channel: s.channel || 'sms',
           messageTemplate: s.message_template || '',
           subject: s.subject || '',
-          isAd: s.is_ad !== false,
+          isAd: resolveJourneyAdFlag(s.channel, s.is_ad),   // ★ 2026-11-02 광고 판정 = 서버와 같은 함수(CT-J8)
+          abVariants: Array.isArray(s.ab_variants) ? s.ab_variants : [],
         }));
       setSteps(msgSteps);
       // 080 수신거부 번호 — 휴대폰 무료수신거부 줄 · 바이트 합성(회사 값 · 실패하면 번호 없이 「무료수신거부」만)
@@ -223,7 +228,9 @@ export default function JourneyMessageEditModal({
                         </div>
                       </div>
                     )}
-                    {phone ? (
+                    {abCopyLocked(journeyStatus, s.abVariants) ? (
+                      <JourneyAbCopyList variants={s.abVariants} baseBody={s.messageTemplate} baseSubject={s.subject} />
+                    ) : phone ? (
                       <PhoneComposer
                         channel={s.channel as 'sms' | 'lms' | 'mms'}
                         subject={s.subject}

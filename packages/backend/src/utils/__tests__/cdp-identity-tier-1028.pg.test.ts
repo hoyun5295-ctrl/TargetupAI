@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { pool, query } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
+import { ledgerBlockSql } from './pg/global-setup';
 
 vi.mock('../unified-customer-profile', () => ({ recomputeProfile: vi.fn(async () => undefined) }));
 
@@ -17,6 +18,7 @@ const cust = async (id: string): Promise<any> =>
   (await query(`SELECT name, email, phone, address FROM customers WHERE id = $1::uuid`, [id])).rows[0];
 
 beforeAll(async () => {
+  await pool.query(ledgerBlockSql('C98-DDL-2'));   // ★ 2026-11-02 가입 근거 칸(배포 앞 DDL · 고객 행 쓰기가 joined_at 을 정한다 · 설계서 3-6)
   await insertMinimalRow(pool, 'companies', { id: CO });
 });
 

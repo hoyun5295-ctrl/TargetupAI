@@ -25,7 +25,7 @@ vi.mock('./company-data-profile', () => ({
 vi.mock('./journey-target-extractor', () => ({
   selectJourneyTargetCustomerIds: vi.fn(),
   selectCdpEventRowsForCursor: vi.fn(),
-  selectCartAbandonProperties: vi.fn(),
+  entryPropsFor: vi.fn(async () => undefined),
   JOURNEY_COUNT_CAP: 100000,
 }));
 
@@ -74,7 +74,8 @@ const NO_SIGNALS = {
   hasPoints: false, hasLastPurchaseDate: false, hasPurchaseLedger: false,
   defaultGrade: null, signupDateColumn: null,
 };
-const HAS_SIGNAL = { ...NO_SIGNALS, hasPurchaseCount: true };
+// ★ 2026-11-02 설계서 3-6 — 판정 근거 = 가입 근거 칸(joined_at)만(구매 수는 근거 아님)
+const HAS_SIGNAL = { ...NO_SIGNALS, signupDateColumn: 'joined_at' };
 
 describe('신규 고객 판정 불가 게이트', () => {
   beforeEach(() => {

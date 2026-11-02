@@ -1150,7 +1150,8 @@ describe('R12 넓힘 — 여정 SQL 의 묶음 LIMIT 은 순서가 정해져 있
     const sql = pn.slice(pn.indexOf('SELECT DISTINCT ON (je.journey_id, s.id'), pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
     // ★ 1102 E3-2 — ① 표식 < 100(지금 판 보류 아님) ② 정기 재검사(7일 · 큐 짧을 때) ③ 보류 재검사(7일 · 4번) · 오늘 시도 상한 · 그날 처리를 멈춘 묶음 = LIMIT 앞
     expect(sql).toContain('(b.confidence < 100 AND NOT ${heldNow})');
-    expect(sql).toContain("OR ($2::boolean AND b.confidence >= 100 AND NOT ${heldNow}");
+    // ★ 2026-11-02 설계서 3-9 — ② 통과한 글 7일 정기 재검사 지움(주간 회사 묶음 검사가 맡는다 · 검사 두 벌 0)
+    expect(sql).not.toContain('b.confidence >= 100');
     expect(sql).toContain("OR (${heldNow} AND b.last_at < NOW() - INTERVAL '${PRETEST_RECHECK_DAYS} days'");
     expect(sql).toContain('= ANY($1::text[]))');
     expect(sql).toContain('ORDER BY b.next_run_at ASC');
@@ -2176,7 +2177,6 @@ const R6_CLOSERS: Record<string, { file?: string; has?: RegExp; why: string }> =
   'sns_accounts|pending': { file: 'utils/sns-accounts.ts', has: /SNS_PENDING_STUCK_MINUTES/, why: '계정 고르기 대기 · 오래된 대기 = 연결 화면이 「멈춤」으로 보이고 다시 연결' },
   // ★ 2026-11-01 B1-4 — 재작성 후보 검사 중 = 다음 회차가 이어 봐 닫고 · 7일 넘으면 failed(버려진 옛 판 · 쓰지 못한 재작성 환불)
   'journey_pretest_candidates|testing': { file: 'utils/journey-pretest-candidate.ts', why: '보내기 전 재작성 후보 검사 중 = 다음 회차 이어 보기 · 7일 넘음 = failed' },
-  'journey_pretest_candidates|passed': { why: '후보 끝 상태(그 판에 반영됨 · 판 PK 라 사람이 고친 새 판은 새 흐름)' },
 };
 describe('R6 넓힘(1025) — 12기능 모듈이 쓰는 비종결 상태마다 닫는 자리(파일) 또는 살아 있는 상태 이유', () => {
   const writes = new Set<string>();
@@ -2190,6 +2190,8 @@ describe('R6 넓힘(1025) — 12기능 모듈이 쓰는 비종결 상태마다 �
       const vals = new Set<string>();
       for (const m of head.matchAll(/\bstatus\s*=\s*'(\w+)'/g)) vals.add(m[1]);
       for (const m of head.matchAll(/\b(?:THEN|ELSE)\s+'(\w+)'/g)) vals.add(m[1]);
+      // ★ 2026-11-02 여정 멈춤 쓰기 = CT-J2 조각(journey-pause-reason pausedSetSql · pausedCaseSetSql)이 'paused' 를 쓴다
+      if (/\$\{paused(?:Case)?SetSql\(/.test(head)) vals.add('paused');
       for (const v of vals) if (!R6_TERMINAL.test(v)) writes.add(`${um[1]}|${v}`);
     }
   }
@@ -3286,6 +3288,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     "utils/spam-probe.ts 'spam-verdict-after-decided'": '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관)',
     'utils/watch-alert.ts concurrent ? `watch:${e.loginId}:${e.kind}:${ip}:${otherIp}` : `watch:${e.loginId}:login:${ip}:${day}`': '보안 감시(동시 · 새 위치 로그인) = 늘 보낸다',
     "utils/journey-pretest-notifier.ts 'journey-pretest-snapshot-ddl'": '검사 기록 판 칸(DDL-3) 없음 = 스키마 · 회사 무관(★1102 엔진 재설계)',
+    "utils/journey-pause-notice.ts 'journey-pause-notice-ddl'": '여정 멈춤 안내 원장 칸(DDL-1) 없음 = 스키마 · 회사 무관(★1102 핵심 처방 3-5)',
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-legacy-undispatched'": '배포 전환 사이 옛 코드로 켜진 한 번 보내기 수 = 회사 여럿을 센 원인 하나(★1102 E1-2)',
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-lag'": '30분 넘게 못 넣은 한 번 보내기 수 = 원인 하나(★1102 E9 ④)',
     "utils/journey-executor.ts 'journey-executor-lag'": '실행기 밀림 = 플랫폼 처리량 원인 하나(★1102 E9 ①)',
@@ -3404,7 +3407,7 @@ describe('R14 넓힘(1102 설계 docs/2026-11-01-credit-control-tower-design.md 
     "utils/operator-lag.ts 'operator-send-lag'": '자동마케팅 발송 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
     "utils/operator-lag.ts 'operator-generate-lag'": '자동마케팅 생성 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
     "utils/journey-pretest-notifier.ts 'journey-pretest-snapshot-ddl'": '검사 기록 판 칸 없음 = DDL 전까지 다시',
-    "utils/journey-pretest-notifier.ts 'journey-pretest-recheck-error'": '검사 큐 · 시험 폰 원인 하나의 증상 · 발송은 이어짐(설계 §17-2 질문 2)',
+    "utils/journey-pause-notice.ts 'journey-pause-notice-ddl'": '멈춤 안내 원장 칸 없음 = DDL 전까지 다시',
     "utils/journey-pretest-notifier.ts 'journey-pretest-new-copy-late'": '판마다 담당자 안내 원장이 맡음 · 경보 = 원인 신호(질문 3)',
     "utils/journey-trigger-watcher.ts 'journey-watcher-budget'": '진입 감시 예산 초과 = 이어지는 동안 다시',
     "utils/kakao-template-sync.ts 'kakao-template-list-cap'": '목록 상한 = 넘는 동안 매 동기화 다시',
@@ -3798,16 +3801,20 @@ describe('R30(1031) 여정 칸 관문 · 담당자 안내 = 그 칸 발송 사�
     for (const f of senders) {
       const ins = f.src.search(SENDING_INSERT);
       const body = f.src.slice(f.src.lastIndexOf('\nasync function ', ins), ins);
-      // ★ 1102 E3-1 — 관문 = 보류 판정 조각(stepHeldSql) · 보류면 표식 INSERT 앞에서 미룸(옛 그날 기록 관문 뒤집음)
-      expect(body).toMatch(/stepHeldSql\(/);
-      // ★ 1102 묶음 발송 — 표식 INSERT 를 쓰는 함수 = 적재 단위 함수(sendUnits) · 단위마다 보류를 다시 보고 보류면 남은 실행을 미룬다(묶음 판정 관문은 그 앞 processMessageBatch)
-      expect(body).toMatch(/if \(held\.rows\[0\]\?\.held\) \{\s*await delayExecutions\(rest\.map\(\(r\) => r\.exec\.execution_id\), PRETEST_HELD_RECHECK_MINUTES\);/);
+      // ★ 2026-11-02 3-18 — 보낼 판 결정 = 표식 선점 문장 안 한 곳(stepSendableSql · 최신 판 = 본문을 읽은 판 · 검사 통과 · 보류 아님 · 확인과 선점 사이 틈 0)
+      //   옛 단위마다 보류만 다시 보던 확인은 선점 조건이 덮어 지웠다(같은 판정 두 벌 0 · Codex 설계 2R #1)
+      const claim = f.src.slice(f.src.lastIndexOf('WITH att AS (', ins), ins);
+      expect(claim).toContain("AND ${stepSendableSql('j.id', '$2::uuid', '$5::uuid')}");
+      expect(body).toContain('async function sendUnits(');
+      expect(body).not.toMatch(/stepHeldSql\(/);
     }
   });
   it('journey_pretest_schedules 를 읽는 SELECT · EXISTS = 판정 주인(notifier) 한 파일 · 상태 직접 비교 = 그 파일 밖 0 · 조각을 부르는 파일 = 실행기 · notifier', () => {
     expect(SRC.filter((f) => /(SELECT|EXISTS)[\s\S]{0,300}?FROM\s+journey_pretest_schedules/.test(f.src)).map((f) => f.rel)).toEqual(['utils/journey-pretest-notifier.ts']);
     expect(SRC.filter((f) => f.rel !== 'utils/journey-pretest-notifier.ts' && PS_STATUS_CMP.test(f.src)).map((f) => f.rel)).toEqual([]);
-    expect(SRC.filter((f) => /\bstepHeldSql\(/.test(f.src)).map((f) => f.rel).sort()).toEqual(['utils/journey-executor.ts', 'utils/journey-pretest-notifier.ts']);
+    // ★ 2026-11-02 설계서 3-9 — 보류 칸만 켜진 여정 A/B 고치기(bandit-optimizer · 잠금 안 판정)
+    expect(SRC.filter((f) => /\bstepHeldSql\(/.test(f.src)).map((f) => f.rel).sort()).toEqual(['utils/bandit-optimizer.ts', 'utils/journey-executor.ts', 'utils/journey-pretest-notifier.ts']);
+    expect(SRC.filter((f) => /\bstepSendableSql\(/.test(f.src)).map((f) => f.rel).sort()).toEqual(['utils/journey-executor.ts', 'utils/journey-pretest-notifier.ts']);
   });
   it('칸 결과 안내 후보 = 칸 · 날짜 단계 캠페인(실행 완료로 고르지 않는다) · result_notified_at 쓰기 = 플래너 월간 표만(면제 · 다른 표 · 월간 1회 멱등)', () => {
     const r = stripComments(be('utils/journey-result-notice.ts'));
@@ -4371,6 +4378,7 @@ describe('R38 크레딧 잔액 = 원장 CT 만 · 원장 먼저 · 모든 변동
 const R40_CAP_USERS: Record<string, string> = {
   'utils/journey-target-extractor.ts': '정의(인원 세기 · 켜기 회신 확인 = 대상 SQL 한 벌을 상한 없이 감싸 센다 · ★ 1102 §16 G2)',
   'utils/journey-trigger-watcher.ts': '사건 · 상태 = 회차당 · 남은 분 다음 회차(진입 안티조인)',
+  'utils/journey-reentry-worker.ts': '재진입 = 회차당 · 남은 분 다음 회차(완료 이른 순 · 진입 감시와 같은 상수 · ★ 2026-11-02 설계서 3-7 · 옛 1,000 명)',
 };
 describe('R41 잠금을 쥔 연결이 같은 풀을 다시 기다리지 않는다(키마다 기다리는 잠금 = 잠금 전용 풀)', () => {
   it('pg_advisory_lock( 을 쓰는 파일 = lockPool.connect() 로 잠금 연결 · lockPool 정의 = config/database 한 곳', () => {

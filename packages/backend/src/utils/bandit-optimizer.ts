@@ -28,7 +28,13 @@
 import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 // ★ 2026-08-02 Codex 4R: 검증 무효화는 공용 문 하나를 지난다(부모 여정 잠금 + 마커·판 동시 갱신).
-import { applyVariableDefaults, withJourneyValidationReset, JourneyStepGateError } from './journey-builder';
+import { applyVariableDefaults, withJourneyValidationReset, JourneyStepGateError, createStepSnapshot } from './journey-builder';
+import { stepHeldSql } from './journey-pretest-notifier';   // ★ 2026-11-02 보류 칸 A/B 고치기(설계서 3-9 · CT-J1)
+
+/** 그 칸이 지금 보류인가(잠금 안 연결로 · 판정 = stepHeldSql 한 곳) */
+async function stepHeldNow(run: (sql: string, params?: any[]) => Promise<{ rows: any[] }>, journeyId: string, stepId: string): Promise<boolean> {
+  return (await run(`SELECT ${stepHeldSql('$1::uuid', '$2::uuid')} AS held`, [journeyId, stepId])).rows[0]?.held === true;
+}
 // ★ Phase2 A (2026-06-26): α/β는 실측 count에서 도출(단일 진실) — bandit-arm 순수 모듈.
 import { deriveBanditArm } from './bandit-arm';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
@@ -536,9 +542,9 @@ export async function createJourneyStepVariant(input: {
     // ⛔ 2026-08-02 Codex 5R — 활성 판정은 **잠근 뒤에** 한다. 라우트가 먼저 읽은 status는
     //   그 사이 활성화가 성사되면 옛 값이고, 그러면 운영 중 여정의 변이를 바꾸게 된다.
     // ★ 2026-10-25 #16 — 상태 · 입력 오류는 409 로(옛: 일반 Error = 500 「variant 신규 실패」로 이유가 사라졌다)
-    if (journey.status === 'active') {
-      throw new JourneyStepGateError('운영 중인 여정의 A/B 문안은 바꿀 수 없어요. 먼저 일시정지해 주세요.', 'JOURNEY_ACTIVE');
-    }
+    // ★ 2026-11-02 설계서 3-9 — 켜진 여정 = 그 칸이 지금 보류일 때만(보류 판정 · 새 판 쓰기 = 이 잠금 안 한 트랜잭션 · 보류가 아닌 칸 = 409)
+    const heldEdit = journey.status === 'active' && await stepHeldNow(run, input.journeyId, input.stepId);
+    if (journey.status === 'active' && !heldEdit) throw new JourneyStepGateError('켜진 여정의 A/B 문안은 그 칸이 스팸 검사에 걸려 멈춘 동안만 고칠 수 있어요(나가는 중인 글은 검사 없이 바꾸지 않아요). 바꾸려면 먼저 여정을 멈춰 주세요.', 'JOURNEY_ACTIVE');
     const own = await run(
       `SELECT channel FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
       [input.stepId, input.journeyId],
@@ -550,7 +556,7 @@ export async function createJourneyStepVariant(input: {
     if (stepChannel === 'kakao') throw new JourneyStepGateError('알림톡 칸은 승인된 템플릿이 본문이라 A/B 문안을 만들 수 없어요.', 'VARIANT_KAKAO');
     // 빈 본문 변이는 받지 않는다(빈 변이는 검사 · 발송에서 어느 글로 메울지가 갈린다)
     if (!String(input.messageTemplate ?? '').trim()) throw new JourneyStepGateError('A/B 문안 본문을 넣어 주세요.', 'VARIANT_EMPTY');
-    return run(
+    const saved = await run(
     `INSERT INTO journey_step_variants (
       id, step_id, variant_id, message_template, subject, channel,
       alimtalk_template_code, alimtalk_variable_map,
@@ -581,6 +587,9 @@ export async function createJourneyStepVariant(input: {
       input.trafficWeight != null ? Math.max(0, Math.min(1, input.trafficWeight)) : 0.5,
     ]
     );
+    // 보류 칸 고치기 = 새 판(검사 전 · 신뢰도 0 · 같은 트랜잭션) → 옛 판 보류는 관문에서 빠지고 새 판은 검사 전이라 실행기가 기다린다 → 검사 통과 = 다음 회차
+    if (heldEdit && saved.rows.length > 0) await createStepSnapshot(input.companyId, input.journeyId, input.stepId, run);
+    return saved;
   });
   // ★ Fix #4 (2026-06-05): 변이 본문 추가/수정 시 발송 전 검증 마커 무효화 — 위 트랜잭션이 함께 커밋했다.
   if (!r || r.rows.length === 0) throw new UserFacingError(503, 'VARIANT_SAVE_FAILED', '변형안을 저장하지 못했어요. 잠시 뒤 다시 해 주세요.');
@@ -602,11 +611,17 @@ export async function deleteJourneyStepVariant(variantId: string): Promise<boole
   const ownerJourneyId: string | null = owner.rows[0]?.journey_id ?? null;
   if (!ownerJourneyId) return false;
 
-  const r = await withJourneyValidationReset(null, ownerJourneyId, (run, journey) => {
-    if (journey.status === 'active') {
-      throw new JourneyStepGateError('운영 중인 여정의 A/B 문안은 지울 수 없어요. 먼저 일시정지해 주세요.', 'JOURNEY_ACTIVE');
+  const r = await withJourneyValidationReset(null, ownerJourneyId, async (run, journey) => {
+    const stepRow = (await run(`SELECT step_id FROM journey_step_variants WHERE id = $1::uuid`, [variantId])).rows[0];
+    // ★ 2026-11-02 설계서 3-9 — 켜진 여정 = 그 칸이 지금 보류일 때만 · 지운 뒤 새 판(검사 전 · 같은 트랜잭션)
+    const heldEdit = journey.status === 'active' && !!stepRow && await stepHeldNow(run, ownerJourneyId, String(stepRow.step_id));
+    if (journey.status === 'active' && !heldEdit) throw new JourneyStepGateError('켜진 여정의 A/B 문안은 그 칸이 스팸 검사에 걸려 멈춘 동안만 고칠 수 있어요(나가는 중인 글은 검사 없이 바꾸지 않아요). 바꾸려면 먼저 여정을 멈춰 주세요.', 'JOURNEY_ACTIVE');
+    const del = await run(`DELETE FROM journey_step_variants WHERE id = $1::uuid RETURNING id`, [variantId]);
+    if (heldEdit && del.rows.length > 0) {
+      const co = (await run(`SELECT company_id FROM journeys WHERE id = $1::uuid`, [ownerJourneyId])).rows[0]?.company_id;
+      await createStepSnapshot(String(co), ownerJourneyId, String(stepRow.step_id), run);
     }
-    return run(`DELETE FROM journey_step_variants WHERE id = $1::uuid RETURNING id`, [variantId]);
+    return del;
   });
   return (r?.rows.length ?? 0) > 0;
 }

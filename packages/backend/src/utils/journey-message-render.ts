@@ -11,9 +11,11 @@
  * 다른 것 하나: 링크 줄이기(short-url)는 실제 발송에서만 만든다(미리보기 · 검사가 추적 링크를 만들면 안 된다).
  */
 import { query } from '../config/database';
-import { prepareSendMessage, prepareFieldMappings, getOpt080Number } from './messageUtils';
+import { prepareSendMessage, prepareFieldMappings, getOpt080Number, findVarTokens } from './messageUtils';
 import { sanitizeUnsendableForSms } from './message-sanitizer';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
+import { journeyCopyIssue, type JourneyCopyIssue } from './send-placeholder-gate';   // ★ 2026-11-02 보낼 글 판정 CT(설계서 3-0 CT-J10)
+import { latestSnapshotSql, loadStepVariantRows, stepSendVersions } from './journey-step-versions';
 
 export type JourneySmsType = 'SMS' | 'LMS' | 'MMS';
 
@@ -51,6 +53,33 @@ export async function loadJourneyRenderShared(companyId: string, createdBy: stri
   // Liquid 회사 정보({{ company.name }} · {{ company.brand_name }})
   const companyRes = await query(`SELECT company_name, brand_name FROM companies WHERE id = $1::uuid`, [companyId]);
   return { fieldMappings, opt080Number, company: { name: companyRes.rows[0]?.company_name || '', brand_name: companyRes.rows[0]?.brand_name || '' } };
+}
+
+/**
+ * ★ 2026-11-02 보낼 글 판정(send-placeholder-gate journeyCopyIssue)의 회사 값 — 매핑 이름 = 렌더(loadJourneyRenderShared)와 같은 prepareFieldMappings ·
+ *   장바구니 여정 = 시작 사건이 장바구니(설계서 3-13 · CT-J10).
+ */
+export async function journeyCopyContext(
+  companyId: string, triggerEvent: string | null | undefined,
+  /** 판정할 본문 — %변수% 가 하나도 없으면 매핑을 읽지 않는다(볼 이름이 없다) */
+  bodies: Array<string | null | undefined>,
+): Promise<{ knownVarNames: ReadonlySet<string>; cartJourney: boolean }> {
+  const hasVar = bodies.some((t) => findVarTokens(String(t || '')).length > 0);
+  return {
+    knownVarNames: hasVar ? new Set(Object.keys(await prepareFieldMappings(companyId))) : new Set<string>(),
+    cartJourney: String(triggerEvent || '') === CART_TRIGGER_EVENT,
+  };
+}
+/** 장바구니 시작 사건(대상 추출 journey-target-extractor 의 갈래 이름 · 장바구니 값 {{ cart.* }} 이 그 고객 장바구니) */
+export const CART_TRIGGER_EVENT = 'cdp.cart_abandon';
+
+/** ★ 2026-11-02 그 칸이 지금 보낼 판(최신 판 + 변이 = stepSendVersions)의 보낼 글 판정 — 보내기 전 검사 밖 소비처(담당자 안내 문구 · 상황판)가 부른다 */
+export async function journeyStepCopyIssueNow(companyId: string, journeyId: string, stepId: string, triggerEvent: string | null | undefined): Promise<JourneyCopyIssue | null> {
+  const snap = (await query(`SELECT snap.message_body, snap.message_subject FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`, [stepId, journeyId])).rows[0] ?? null;
+  const st = (await query(`SELECT message_template, subject FROM journey_steps WHERE id = $1::uuid`, [stepId])).rows[0] ?? {};
+  const versions = stepSendVersions({ message_template: st.message_template ?? null, subject: st.subject ?? null }, snap, await loadStepVariantRows(stepId));
+  const bodies = versions.map((v) => v.body);
+  return journeyCopyIssue({ bodies, subjects: versions.map((v) => v.subject) }, await journeyCopyContext(companyId, triggerEvent, bodies));
 }
 
 export interface JourneySmsRendered {

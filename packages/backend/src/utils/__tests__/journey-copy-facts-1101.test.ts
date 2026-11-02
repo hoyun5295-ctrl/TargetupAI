@@ -82,7 +82,8 @@ describe('배선(계약)', () => {
     expect(builder).toMatch(/export async function fillJourneyCopyFacts\(/);
     expect(builder).toMatch(/return withJourneyValidationReset\(companyId, journeyId, async \(run, journey\) => \{\s*await writeJourneyCopyFacts\(run, journeyId/);
     expect(builder).toMatch(/await applyStepPatchInLock\(run, journey, companyId, journeyId, row\.id, \{/);
-    expect(builder).toMatch(/withJourneyValidationReset\(companyId, journeyId, \(run, journey\) => applyStepPatchInLock\(run, journey, companyId, journeyId, stepId, patch\)/);
+    // ★ 2026-11-02 설계서 3-16 · 3-3 ③ — 사람이 칸을 고치는 길 = 잠금 안 콜백(A/B 칸 관문 · 같은 몸통 · 보낼 글 판정) · 채우기 길 = 몸통만(판정 밖)
+    expect(builder).toMatch(/withJourneyValidationReset\(companyId, journeyId, async \(run, journey\) => \{[\s\S]*?const out = await applyStepPatchInLock\(run, journey, companyId, journeyId, stepId, patch\);/);
     expect(read(BE, 'routes/ai.ts')).toMatch(/router\.post\('\/operator\/journeys\/:id\/copy-facts'/);
     const ws = read(FE, 'components/journey/workspace/JourneyWorkspace.tsx');
     expect(ws).toMatch(/onFillBenefit=\{journeyId && !selected\.startsWith\(NEW_STEP_PREFIX\) \? \(b\) => void fillFacts\(\{ benefit: b \}\)/);

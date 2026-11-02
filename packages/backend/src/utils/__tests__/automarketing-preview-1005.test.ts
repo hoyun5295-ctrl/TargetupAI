@@ -372,7 +372,7 @@ describe('2. 시작 = 보관본 그대로 · 서버가 다시 판정(돈 0) · �
     expect(registerMock.mock.calls[0][0]).toMatchObject({ segmentKey: 'birthday', audienceConditions: null, copyMode: 'ai', benefitContent: '30% 쿠폰', adminPhoneNumbers: ['01012345678'] });
     expect(registerMock.mock.calls[0][1]).toEqual({ id: out.previewId, window: { startAt: WIN.startAt, until: WIN.until } });
     expect(approveWindowMock).not.toHaveBeenCalled();
-    expect(generateMock).toHaveBeenCalledWith(out.previewId, { precomputed: RESULT, variantIndex: 2 });
+    expect(generateMock).toHaveBeenCalledWith(out.previewId, { precomputed: RESULT, variantIndex: 2, manual: true });   // ★ 2026-11-02 사람이 고른 회차(3-1 ②)
     expect(started).toMatchObject({ proposal: { id: 'prop-1' }, message: null, approvedUntil: '2026-10-12T14:59:59.999Z' });
     expect(orchestrateMock).toHaveBeenCalledTimes(1);
     expect(takePreview(out.previewId!, CO, US)).toBeNull();   // 커밋 뒤에 지웠다
@@ -384,7 +384,7 @@ describe('2. 시작 = 보관본 그대로 · 서버가 다시 판정(돈 0) · �
     generateMock.mockResolvedValue({ id: 'prop-2' });
     await startOperatorFromPreview(out.previewId!, CO, US, 0);
     expect(registerMock.mock.calls[0][0]).toMatchObject({ copyMode: 'fixed', fixedCopy: { body: '%이름%님 생일 축하드려요' } });
-    expect(generateMock).toHaveBeenCalledWith(out.previewId, undefined);
+    expect(generateMock).toHaveBeenCalledWith(out.previewId, { manual: true });
   });
 
   it('시작할 수 없는 상태(0명) = 400 · 등록 0', async () => {
@@ -571,7 +571,9 @@ describe('3. 원문 계약 — 계약만 · 먼저 세기 · 0명 조용히 · �
   });
 
   it('자율 자격 = 회사 자율 옵션 또는 승인 기간 · 대상 수는 방금 센 값(미리보기 결과도 덮는다)', () => {
-    expect(gen).toContain('const autoExecuteEligible =\n    (companyAuto || approvalActive) &&');
+    // ★ 2026-11-02 설계서 3-2 A — 갈래(회사 자율 · 승인 기간) = 상한 갈래 판정 CT-O2(승인 기간 = 예산만)
+    expect(gen).toContain("const capPath: OperatorCapPath | null = approvalActive ? 'approval_window' : companyAuto ? 'company_auto' : null;");   // Codex 구현 1R = 승인 기간 먼저
+    expect(gen).toContain('const autoExecuteEligible =\n    !!capRule && !capRule.overReason &&');
     expect(gen).toContain('const approvalActive = isWithinApprovalWindow(operator.approvedUntil, operator.approvalMeta?.windowStart, scheduledSendAt);');
     expect(gen).toContain('orchestratorResult = withMeasuredCount(opts.precomputed, measuredCount);');
   });

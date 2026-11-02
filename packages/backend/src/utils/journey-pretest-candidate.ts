@@ -13,6 +13,8 @@ import { randomUUID } from 'crypto';
 import { query, withTransaction } from '../config/database';
 import { chargedAmountByKey, refundCredit } from './ai-credit';
 import { alertPassFailures, type PassFailure } from './system-alert';
+import { latestSnapshotSql } from './journey-step-versions';   // ★ 2026-11-02 판 읽기 CT(설계서 3-0 CT-J1)
+import { withJourneyValidationReset, createStepSnapshot } from './journey-builder';
 
 export const CANDIDATE_GENERATING_TTL_MINUTES = 10;
 export const CANDIDATE_REFUND_WINDOW_DAYS = 7;
@@ -72,7 +74,7 @@ export async function claimCandidate(journeyId: string, stepId: string, snapshot
     const lock = await run(`SELECT id FROM journeys WHERE id = $1::uuid FOR UPDATE`, [journeyId]);
     if (lock.rows.length === 0) return 'stale' as const;
     const latest = await run(
-      `SELECT id FROM journey_step_snapshots WHERE step_id = $1::uuid AND journey_id = $2::uuid ORDER BY created_at DESC LIMIT 1`,
+      `SELECT snap.id FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`,
       [stepId, journeyId],
     );
     if (String(latest.rows[0]?.id || '') !== snapshotId) return 'stale' as const;
@@ -105,16 +107,6 @@ export async function saveCandidate(snapshotId: string, token: string, body: str
     [snapshotId, token, body, subject],
   );
   return (r.rowCount ?? 0) > 0;
-}
-
-/** 후보 통과 반영 — 판 확인 쓰기(recordIfCurrent) 트랜잭션 안에서 부른다 · testing 일 때만 passed(아니면 거짓 = 그 트랜잭션은 아무것도 안 쓴다) */
-export async function markCandidatePassedInTx(run: (sql: string, params?: any[]) => Promise<{ rows: any[] }>, snapshotId: string): Promise<boolean> {
-  const r = await run(
-    `UPDATE journey_pretest_candidates SET status = 'passed', updated_at = NOW()
-      WHERE snapshot_id = $1::uuid AND status = 'testing' RETURNING snapshot_id`,
-    [snapshotId],
-  );
-  return r.rows.length > 0;
 }
 
 /** 상태 전이(조건부 · 쓴 행이 있으면 참) */
@@ -177,4 +169,53 @@ export async function sweepPretestCandidates(): Promise<{ expired: number; refun
   }
   if (out.expired || out.refunded) console.log(`${LOG} 만료 ${out.expired} · 환불 ${out.refunded}`);
   return out;
+}
+
+/**
+ * ★ 2026-11-02 [이 글로 보내기] — 통과한 수정안을 그 칸 글로(설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-9 · 3-0 CT-J12).
+ *   원문은 사람이 누를 때만 바뀐다(보내기 전 검사 · 주간 검사의 자동 반영 갈래 0 · 메모리 「고객 문안 불변」).
+ *   한 트랜잭션(문안 고치기와 같은 여정 행 잠금 · 켜기 표식 유지):
+ *     그 칸 최신 판 = 후보의 판 · 후보 passed → 칸 본문 · 제목 = 후보 글 → 새 판(신뢰도 100 = 후보 검사가 그 글로 통과) → 새 판 결정 기록 notified(안내 마감).
+ *   옛 판으로 늦게 온 검사 결과 = 최신 판 ≠ 검사한 판이라 판 확인 쓰기(recordIfCurrent)가 버린다.
+ */
+export async function applyPassedCandidate(companyId: string, journeyId: string, stepId: string, snapshotId: string): Promise<'applied' | 'stale' | 'not_found'> {
+  const r = await withJourneyValidationReset(companyId, journeyId, async (run) => {
+    const latest = (await run(`SELECT snap.id FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`, [stepId, journeyId])).rows[0]?.id;
+    if (String(latest || '') !== snapshotId) return 'stale' as const;
+    const cand = (await run(
+      `SELECT body, subject FROM journey_pretest_candidates WHERE snapshot_id = $1::uuid AND step_id = $2::uuid AND status = 'passed' FOR UPDATE`,
+      [snapshotId, stepId],
+    )).rows[0];
+    if (!cand?.body) return 'stale' as const;
+    const upd = await run(
+      `UPDATE journey_steps SET message_template = $3, subject = COALESCE($4, subject) WHERE id = $1::uuid AND journey_id = $2::uuid RETURNING id`,
+      [stepId, journeyId, cand.body, cand.subject ?? null],
+    );
+    if (upd.rows.length === 0) return 'stale' as const;
+    await createStepSnapshot(companyId, journeyId, stepId, run);
+    const fresh = (await run(`SELECT snap.id FROM ${latestSnapshotSql('$2::uuid', '$1::uuid')} snap`, [stepId, journeyId])).rows[0]?.id;
+    await run(`UPDATE journey_step_snapshots SET confidence_score = 100 WHERE id = $1::uuid`, [fresh]);
+    await run(
+      `INSERT INTO journey_pretest_schedules (company_id, journey_id, step_id, execution_id, scheduled_send_at, notify_at, status, snapshot_id, notice_sent_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, NULL, NOW(), NOW(), 'notified', $4::uuid, NOW())`,
+      [companyId, journeyId, stepId, fresh],
+    );
+    return 'applied' as const;
+  }, { keepMarker: true });
+  return r ?? 'not_found';
+}
+
+/** ★ 2026-11-02 그 칸 지금 판의 검사 통과 수정안(상황판 · 화면 [이 글로 보내기] · 회사 격리) · 없으면 null */
+export async function readPassedCandidateForStep(companyId: string, journeyId: string, stepId: string): Promise<{ snapshotId: string; body: string; subject: string | null; original: string } | null> {
+  if (!(await candidatesReady().catch(() => false))) return null;
+  const r = await query(
+    `SELECT snap.id AS snapshot_id, snap.message_body AS original, c.body, c.subject
+       FROM journeys j
+       JOIN LATERAL ${latestSnapshotSql('j.id', '$3::uuid')} snap ON TRUE
+       JOIN journey_pretest_candidates c ON c.snapshot_id = snap.id AND c.step_id = $3::uuid AND c.status = 'passed'
+      WHERE j.id = $2::uuid AND j.company_id = $1::uuid`,
+    [companyId, journeyId, stepId],
+  );
+  const x = r.rows[0];
+  return x?.body ? { snapshotId: String(x.snapshot_id), body: String(x.body), subject: x.subject ?? null, original: String(x.original || '') } : null;
 }

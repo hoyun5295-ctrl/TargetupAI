@@ -17,7 +17,10 @@ import { getCompanyCosts } from '../config/defaults';
 import { randomUUID } from 'crypto';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-10 시연 회사 = 검사 발송 0(발송 2시간 전 스캐너 · 활성화 검증 공용)
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
-import { hasUneditedJourneyPlaceholder } from './send-placeholder-gate';   // ★ 2026-11-01 배포 2 C4 — 켜기 관문과 같은 자리 판정
+import { hasUneditedJourneyPlaceholder, journeyCopyIssue } from './send-placeholder-gate';
+import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-02 보낼 글 판정 회사 값(CT-J10)
+import { kakaoStepVerdict } from './journey-kakao-step';
+import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)   // ★ 2026-11-01 배포 2 C4 — 켜기 관문과 같은 자리 판정
 
 export type FailedReason =
   | 'placeholder_unedited'
@@ -27,7 +30,11 @@ export type FailedReason =
   | 'spam_check_unavailable'
   // ★ 2026-11-01 B1-4 — 확인 중(통신사 전달 성공 + 앱 보고 없음) · 검사 중(같은 글 검사가 아직 진행 중) = 통과가 아니라 켜지 않는다(문안 문제 아님 · 잠시 뒤 다시)
   | 'spam_check_pending'
-  | 'subject_missing';
+  | 'subject_missing'
+  // ★ 2026-11-02 알림톡 템플릿 없음 · 미승인 · 카카오 비활성(CT-J5 · 설계서 3-14)
+  | 'alimtalk_template_unusable'
+  // ★ 2026-11-02 보낼 글 판정(CT-J10) — 없는 변수 · 장바구니 변수 · 제목 변수(채울 자리는 placeholder_unedited)
+  | 'copy_issue';
 
 export interface FailedStep {
   stepId: string;
@@ -78,7 +85,7 @@ export async function validateJourneyForActivation(
   const stepsRes = await query(
     `SELECT s.id AS step_id, s.channel, s.message_template, s.subject,
             s.is_ad, j.callback_number, s.alimtalk_template_code,
-            s.alimtalk_variable_map, s.step_order
+            s.alimtalk_variable_map, s.step_order, j.trigger_event
        FROM journey_steps s
        JOIN journeys j ON j.id = s.journey_id
       WHERE s.journey_id = $1 AND j.company_id = $2
@@ -87,6 +94,7 @@ export async function validateJourneyForActivation(
     [journeyId, companyId],
   );
   const steps = stepsRes.rows;
+  const triggerEvent: string | null = steps[0]?.trigger_event ?? null;
 
   if (steps.length === 0) {
     return {
@@ -113,8 +121,15 @@ export async function validateJourneyForActivation(
     );
 
     for (const msg of messagesToValidate) {
-      // a. placeholder 잔존 검증 (옛 D187-fix2 영구 룰 정합)
-      if (hasUneditedJourneyPlaceholder(msg.body)) {
+      // a. placeholder 잔존 검증 (옛 D187-fix2 영구 룰 정합) · ★ 2026-11-02 문자 칸 = 보낼 글 판정 CT-J10(실행기 · 켜기 · 칸 저장과 같은 함수)
+      const copyIssue = ['sms', 'lms', 'mms'].includes(String(step.channel))
+        ? journeyCopyIssue({ bodies: [msg.body], subjects: [msg.subject] }, await journeyCopyContext(companyId, triggerEvent, [msg.body]))
+        : null;
+      if (copyIssue && copyIssue.code !== 'PLACEHOLDER_UNEDITED') {
+        failedSteps.push({ stepId: step.step_id, variantId: msg.variantId, reason: 'copy_issue', details: copyIssue.message });
+        continue;
+      }
+      if (hasUneditedJourneyPlaceholder(msg.body) || copyIssue?.code === 'PLACEHOLDER_UNEDITED') {
         failedSteps.push({
           stepId: step.step_id,
           variantId: msg.variantId,
@@ -137,14 +152,14 @@ export async function validateJourneyForActivation(
 
       // c. 채널별 분기
       if (step.channel === 'kakao') {
-        // 카카오 = 변수 매핑 검증만 (옛 IMC 검수 통과 영역)
-        const varMap = (step.alimtalk_variable_map as Record<string, string>) || {};
-        if (!validateAlimtalkVariableMap(msg.body, varMap)) {
+        // ★ 2026-11-02 알림톡 칸 = CT-J5 판정(실행기 · 켜기와 같은 함수 · 변수 연결 = 실제로 보내는 승인 템플릿 본문 기준 · 설계서 3-14 · D21)
+        const kv = await kakaoStepVerdict(companyId, step);
+        if (kv.block) {
           failedSteps.push({
             stepId: step.step_id,
             variantId: msg.variantId,
-            reason: 'variable_mapping_invalid',
-            details: '알림톡 본문 변수 (#{...}) 매핑 누락',
+            reason: kv.block.reason === 'alimtalk_variable_unmapped' ? 'variable_mapping_invalid' : 'alimtalk_template_unusable',
+            details: kv.block.userText,
           });
           continue;
         }
@@ -153,7 +168,7 @@ export async function validateJourneyForActivation(
         scoredCount += 1;
       } else if (step.channel === 'sms' || step.channel === 'lms' || step.channel === 'mms') {
         // SMS/LMS/MMS = 스팸필터테스트 (공용 runStepSpamTest — 스캐너와 동일 경로)
-        const stIsAd = step.is_ad !== false;
+        const stIsAd = resolveJourneyAdFlag(step.channel, step.is_ad);   // ★ 2026-11-02 광고 판정 CT(CT-J8)
         const r = await spam({
           companyId,
           userId,
@@ -225,15 +240,6 @@ export async function validateJourneyForActivation(
 // ============================================================
 // 헬퍼 함수
 // ============================================================
-
-function validateAlimtalkVariableMap(body: string, varMap: Record<string, string>): boolean {
-  const vars = body.match(/#\{([^}]+)\}/g) || [];
-  for (const v of vars) {
-    const key = v.slice(2, -1);
-    if (!(key in varMap)) return false;
-  }
-  return true;
-}
 
 /**
  * ★ 2026-10-25 여정 구조체크 2차 #14(뿌리 대장 R7) — 결과는 공용 판정 spamVerdictOf 로만 읽는다(통과 · 차단 · 검사 장애).

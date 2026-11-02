@@ -22,6 +22,7 @@
  */
 
 import { getColumnFields } from './standard-field-map';
+import { joinedAtUpsertSql } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 칸(CT-J6)
 
 export type CustomerUpsertSource = 'upload' | 'sync' | 'manual';
 
@@ -109,6 +110,8 @@ export function createCustomerUpsertBuilder(
     'phone', 'store_code',
     // ★ D214+ RFM 영역 = 별도 GREATEST 영역 정합 (옛 COALESCE 덮어쓰기 사고 차단)
     'recent_purchase_date', 'purchase_count', 'last_purchase_date',
+    // ★ 2026-11-02 가입 근거 = 이른 값(CT-J6 · 늦게 들어온 값이 진짜 가입 시각을 덮지 않게)
+    'joined_at',
   ]);
   // [칸, 새 값 식] — SET 절과 「바뀌었나」 판정(skipUnchanged)이 같은 식을 쓴다.
   const updatePairs: Array<[string, string]> = [
@@ -119,6 +122,7 @@ export function createCustomerUpsertBuilder(
     ['recent_purchase_date', `GREATEST(COALESCE(EXCLUDED.recent_purchase_date, customers.recent_purchase_date), COALESCE(customers.recent_purchase_date, EXCLUDED.recent_purchase_date))`],
     ['purchase_count', `GREATEST(COALESCE(EXCLUDED.purchase_count, customers.purchase_count, 0), COALESCE(customers.purchase_count, 0))`],
     ['last_purchase_date', `GREATEST(COALESCE(EXCLUDED.last_purchase_date, customers.last_purchase_date), COALESCE(customers.last_purchase_date, EXCLUDED.last_purchase_date))`],
+    ['joined_at', joinedAtUpsertSql('customers.joined_at', 'EXCLUDED.joined_at')],
     ['birth_year', 'COALESCE(EXCLUDED.birth_year, customers.birth_year)'],
     ['birth_month_day', 'COALESCE(EXCLUDED.birth_month_day, customers.birth_month_day)'],
     ['custom_fields', `CASE WHEN EXCLUDED.custom_fields IS NOT NULL THEN COALESCE(customers.custom_fields, '{}'::jsonb) || EXCLUDED.custom_fields ELSE customers.custom_fields END`],

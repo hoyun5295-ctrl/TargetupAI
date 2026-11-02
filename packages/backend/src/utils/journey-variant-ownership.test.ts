@@ -98,7 +98,7 @@ describe('createJourneyStepVariant — 소유 검증', () => {
     const { texts } = mockClient([
       { match: /SELECT id, status, start_kind FROM journeys/, rows: [{ id: JOURNEY, status: 'active' }] },
     ]);
-    await expect(createJourneyStepVariant(input as any)).rejects.toThrow('운영 중인 여정');
+    await expect(createJourneyStepVariant(input as any)).rejects.toThrow('켜진 여정의 A/B 문안은 그 칸이 스팸 검사에 걸려 멈춘 동안만');
     expect(texts.some((t) => /INSERT INTO journey_step_variants/.test(t))).toBe(false);
   });
 });

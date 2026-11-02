@@ -19,6 +19,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import type { CalendarEntry, CalendarPromptInput } from './marketing-calendar-policy';
 
 export interface SavedMarketingCalendar {
@@ -115,7 +116,7 @@ export async function buildCompanyCalendarContext(companyId: string): Promise<Co
               COALESCE(SUM((properties->>'total_amount')::numeric), 0)::float AS revenue
          FROM cdp_events
         WHERE company_id = $1::uuid
-          AND event_name IN ('purchase', 'order')
+          AND ${netPurchaseSql('cdp_events')}   -- ★ 2026-11-02 월 구매 · 매출 = 결제된 구매(CT-J3)
           AND occurred_at > NOW() - interval '365 days'
         GROUP BY 1 ORDER BY 1`,
       [companyId],

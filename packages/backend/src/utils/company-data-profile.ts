@@ -32,6 +32,7 @@ import { hasUsableGradeOrder } from './customer-grade-rank';
 import { getColumnFields } from './standard-field-map';
 // ★ 2026-08-01 여정 재설계 — 신규/기존 판정 능력(순수 CT). 타입·판정 규칙은 그쪽이 소유한다.
 import { resolveNewCustomerJudgement, type CompanyIdentityCapability } from './journey-identity-signals';
+import { hasJoinedAtEvidence } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6)
 import type { CompanyJourneyFacts } from './journey-trigger-capability';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -250,6 +251,8 @@ export async function getCompanyIdentityCapability(companyId: string): Promise<C
     [companyId],
   );
   const row = r.rows[0] || {};
+  // ★ 2026-11-02 설계서 3-6 — 가입 근거 = customers.joined_at(CT-J6 · 칸이 없으면 = DDL-2 전 = 없음)
+  const joined = await hasJoinedAtEvidence(companyId);
   return {
     hasPurchaseCount: row.has_purchase_count === true,
     hasRecentPurchaseDate: row.has_recent_purchase_date === true,
@@ -257,7 +260,7 @@ export async function getCompanyIdentityCapability(companyId: string): Promise<C
     hasTotalPurchaseAmount: row.has_total_purchase_amount === true,
     hasPoints: row.has_points === true,
     defaultGrade: null,
-    signupDateColumn: null,
+    signupDateColumn: joined ? 'joined_at' : null,
   };
 }
 

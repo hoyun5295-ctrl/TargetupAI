@@ -18,6 +18,8 @@ vi.mock('../config/database', () => { const query = vi.fn(); return { query, poo
 vi.mock('./company-data-profile', () => ({ getCompanyJourneyFacts: vi.fn() }));
 vi.mock('../services/ai', () => ({ callAIWithFallback: vi.fn() }));
 vi.mock('./company-memory', () => ({ buildMemoryPromptContext: vi.fn() }));
+// ★ 2026-11-02 켜기 관문의 보낼 글 판정(CT-J10) 회사 매핑 이름 = 시험 회사 표준 이름(실 매핑 읽기는 실 PG 시험이 덮는다)
+vi.mock('./journey-message-render', async (orig) => ({ ...(await orig<any>()), journeyCopyContext: vi.fn(async () => ({ knownVarNames: new Set(['고객명', '이름', '등급', '포인트']), cartJourney: false })) }));
 
 import { query } from '../config/database';
 import { getCompanyJourneyFacts } from './company-data-profile';

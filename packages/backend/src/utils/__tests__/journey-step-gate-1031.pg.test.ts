@@ -70,7 +70,7 @@ import { insertMinimalRow } from './pg/fixtures';
 import { ledgerBlockSql } from './pg/global-setup';
 import {
   scanAndPretest, stepHeldSql, resetPretestScanMemory,
-  PRETEST_ERROR_DAILY_MAX, PRETEST_RECHECK_ERROR_MAX, PRETEST_HELD_RECHECK_MAX,
+  PRETEST_ERROR_DAILY_MAX, PRETEST_HELD_RECHECK_MAX,
 } from '../journey-pretest-notifier';
 import { notifyJourneyStepResults, resetResultNoticeColumnsCache, RESULT_NOTICE_SCAN_LIMIT } from '../journey-result-notice';
 import { updateJourneyStep } from '../journey-builder';
@@ -151,7 +151,11 @@ describe('E3-1 보류 판정 조각 = 지금 판의 가장 최근 결정(stepHel
 });
 
 describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대로)', () => {
-  it('통과한 글 · 결정 없음 = 정기 재검사 1 · 통과 = notified(판 id) · 담당자 문자 0 · 7일 안 = 다시 검사 0', async () => {
+  // ★ 2026-11-02 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-9 — 통과한 글의 7일 정기 재검사 갈래를 지웠다(주간 회사 묶음 검사가 켜진 문자 칸 판 전부를 본다 · 검사 두 벌 0)
+  it('통과한 글 · 결정 없음 = 보내기 전 스캔 검사 0(주간 묶음 검사 몫) · 고친 글 = 검사 1 · 통과 = notified(판 id) · 담당자 문자 0 · 다시 = 0', async () => {
+    await scanAndPretest();
+    expect(ctl.spamCalls).toBe(0);
+    await setConfidence(0);
     await scanAndPretest();
     expect(ctl.spamCalls).toBe(1);
     expect(ctl.enqueue).toHaveLength(0);
@@ -159,13 +163,10 @@ describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대
     await scanAndPretest();
     expect(ctl.spamCalls).toBe(1);
   });
-  it('마지막 결정 6일 전 = 검사 0 · 8일 전 = 다시 검사', async () => {
-    await put('notified', SNAP, '6 days');
+  it('통과한 글 = 마지막 결정이 8일 전이어도 보내기 전 스캔 검사 0(7일 정기 재검사 없앰 · 3-9)', async () => {
+    await put('notified', SNAP, '8 days');
     await scanAndPretest();
     expect(ctl.spamCalls).toBe(0);
-    await ageRecords('2 days');
-    await scanAndPretest();
-    expect(ctl.spamCalls).toBe(1);
   });
   it('검사 큐 5건 이상 = 통과한 글 정기 재검사 0 · 고친 글(표식 < 100)은 그대로 검사 → 통과 = 표식 100', async () => {
     for (let i = 0; i < 5; i++) {
@@ -221,6 +222,7 @@ describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대
     expect(await confidence(NEWSNAP)).toBe(100);
   });
   it('검사 도중 새 판(수정) = 옛 판 결과 버림(쓰기 0) → 다음 회차 새 판 검사', async () => {
+    await setConfidence(0);   // 고친 글(검사 대상 · 통과한 글은 이 스캔이 고르지 않는다)
     ctl.onSpamTest = async () => {
       ctl.onSpamTest = null;
       await insertMinimalRow(pool, 'journey_step_snapshots', { id: NEWSNAP, journey_id: J, step_id: S1, message_body: '고친 문안', confidence_score: 0 });
@@ -249,16 +251,6 @@ describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대
     expect(ctl.alerts).toContain('journey-pretest-new-copy-late');
     expect(await held()).toBe(false);
     expect(await confidence()).toBe(0);
-  });
-  it(`통과한 글 정기 재검사 장애 ${PRETEST_RECHECK_ERROR_MAX}번 = 확인 못 함(unverified) · 경보 · 보류 0 · 그 뒤 7일 검사 0`, async () => {
-    ctl.verdict = 'error';
-    for (let i = 0; i < PRETEST_RECHECK_ERROR_MAX + 2; i++) await scanAndPretest();
-    expect(ctl.spamCalls).toBe(PRETEST_RECHECK_ERROR_MAX);
-    expect(await statuses()).toEqual(['unverified', ...Array(PRETEST_RECHECK_ERROR_MAX).fill('error')]);
-    expect(ctl.alerts).toContain('journey-pretest-recheck-error');
-    expect(ctl.enqueue).toHaveLength(0);
-    expect(await held()).toBe(false);
-    expect(await confidence()).toBe(100);
   });
   it('옛 「통과 · 안내 전」(pending) = 문자 없이 notified · 7일 안이라 검사 0', async () => {
     await put('pending', null, '1 hour');
@@ -322,12 +314,14 @@ describe('E3-2 스캔 고르기 · E3-3 결과표(실 PG · 운영 문장 그대
     expect(r2).toMatchObject({ notice_attempts: 0, closed: true });
   });
   it('유료 검사 뒤 예외는 그대로 센다 = 검사 3 회차 뒤 그날 멈춤 · 경보', async () => {
+    await setConfidence(0);
     ctl.onSpamTest = async () => { throw new Error('주입: 검사 중 예외'); };
     for (let i = 0; i < 4; i++) await scanAndPretest();
     expect(ctl.spamCalls).toBe(3);
     expect(ctl.alerts.filter((k) => k.startsWith(`journey-pretest-bundle-error:${J}:`)).length).toBeGreaterThan(0);   // 항목 = 그 묶음(옛 단언 toContain 과 같은 세기)
   });
   it('DDL-3 칸 없음 = 스캔을 열지 않음(검사 0) · 운영 경보 · 칸이 생기면 다시 돈다', async () => {
+    await setConfidence(0);
     await pool.query(`ALTER TABLE journey_pretest_schedules DROP COLUMN snapshot_id`);
     try {
       resetPretestScanMemory(true, false);

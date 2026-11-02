@@ -55,7 +55,7 @@ import { autoSpamTestWithRegenerate, spamVerdictOf, SPAM_VERDICT_WORD } from './
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 // ★ D114 P7: personalFields → displayName 변환용
 import { getFieldByKey } from './standard-field-map';
-import { SEND_HOURS } from '../config/defaults';
+import { isWithinSendHours } from './send-time-util';
 // ★ B5/B6: 신규 컨트롤타워
 import { fetchTargetSampleCustomer } from './target-sample';
 import { findUneditedSendPlaceholder } from './send-placeholder-gate';
@@ -129,13 +129,7 @@ export function kstToUtc(kstDate: Date): Date {
 // 발송 시간대 체크
 // ============================================================
 
-function isWithinSendHours(): boolean {
-  const now = new Date();
-  const kstHour = parseInt(
-    now.toLocaleString('en-US', { timeZone: 'Asia/Seoul', hour: '2-digit', hour12: false })
-  );
-  return kstHour >= SEND_HOURS.start && kstHour < SEND_HOURS.end;
-}
+// ★ 2026-11-02 창 판정 = send-time-util 한 곳(옛 이 파일 사본 · 설계서 docs/2026-11-02-journey-automarketing-core-fix-design.md 3-0 CT-J7)
 
 // ============================================================
 // ★ 1단계: D-1 AI 문안 생성 + 스팸테스트

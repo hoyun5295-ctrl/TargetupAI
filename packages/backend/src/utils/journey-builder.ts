@@ -26,7 +26,7 @@ import { buildCopyFactsPatch, writeJourneyCopyFacts, fillBenefitSpots, journeyCo
 import { fillLinkSpots } from './voice-form-slots';
 import { replaceInventedBenefits, dropInventedEfficacy, EFFICACY_PROMPT_RULES, dropSeasonSentences } from './copy-benefit-detector';
 import { ensureSenderName } from './messageUtils';
-import { seedBaselineForJourney, seedGradeStateForJourney } from './journey-entry-ledger';
+import { reseedOnActivate } from './journey-entry-ledger';   // ★ 2026-11-02 기준선 CT(설계서 3-0 CT-J11)
 import { formatStepTiming, formatConditionChip } from './journey-step-format';
 import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
@@ -47,14 +47,18 @@ import { applyResumeAdjustments } from './journey-resume';
 import { normalizeJourneyOptions } from './journey-options-validator';
 import { isUuid } from './normalize';
 import { stepEditPolicy, blockedStepEditGroups, stepEditBlockedMessage, keepsPretestMarkerForStep } from './journey-step-edit-policy';
-import { getCompanyJourneyFacts } from './company-data-profile';
+import { getCompanyJourneyFacts, getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';   // ★ 2026-11-02 AI 지시문 변수 목록 = 회사 실측(3-13)
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부 · 모르는 종류는 거부).
 import { MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType, assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
 import { findCustomerConditionIssues, describeCustomerConditionIssue } from './journey-target-extractor';
 import { journeyOwnerSql, type JourneyViewer } from './journey-access';
 import { anchorSendHourIssue } from './send-time-util';
-import { hasUneditedJourneyPlaceholder } from './send-placeholder-gate';
+import { hasUneditedJourneyPlaceholder, journeyCopyIssue } from './send-placeholder-gate';
+import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-02 보낼 글 판정 회사 값(CT-J10)
+import { kakaoStepVerdict } from './journey-kakao-step';   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
+import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
+import { loadVariantRowsByStep } from './journey-step-versions';   // ★ 2026-11-02 칸마다 A/B 문안(설계서 3-16)
 import { finishMany, copyResponse } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
 
 export { MAX_JOURNEY_STEPS, JourneyInputError };
@@ -332,7 +336,7 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
         channel,
         messageTemplate: (s.messageTemplate || '').slice(0, 2000),
         subject: channel === 'sms' ? '' : (s.subject || '').slice(0, JOURNEY_SUBJECT_MAX_CHARS),
-        isAd: s.isAd !== undefined ? !!s.isAd : true,
+        isAd: resolveJourneyAdFlag(channel, s.isAd),   // ★ 2026-11-02 광고 판정 CT(CT-J8 · 읽는 자리는 모두 CT 로 다시 판정 · 저장값은 판정에 안 쓴다)
         conditionJsonb: s.conditionJsonb,
         // ★ 2026-07-11 분기·이벤트 대기: 필드 보존(0605 교훈 — map 경로 누락=조용한 소실)
         notMetGoto: s.notMetGoto != null && Number.isFinite(Number(s.notMetGoto)) ? Math.floor(Number(s.notMetGoto)) : undefined,
@@ -572,6 +576,9 @@ async function generateCustomStepsUncharged(
   objective: string,
   ctx: CompanyContext
 ): Promise<JourneyStepDefinition[]> {
+  // ★ 2026-11-02 설계서 3-13 — 변수 목록 = 회사 실측(여정 AI 생성 journey-ai-generator 와 같은 함수 · 매핑에 없는 변수를 시키지 않는다)
+  const dataProfile = await getCompanyDataProfile(companyId).catch(() => null);
+  const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
   // ★ D188 Phase 2-B-1 (2026-05-21): wait + condition step 사용 가이드 + JSON 응답 형식 확장.
   const system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
 회사 admin이 자연어로 입력한 여정 목표를 받아, 2~7개의 step (시계열)을 JSON으로 응답합니다.
@@ -585,23 +592,24 @@ step_type 3종:
 규칙:
 - delayHours: 0(즉시) ~ 720h(30일) 범위. 24/48/72/168 등 자연 단위 권장
 - channel (message step만): 'sms'(90자 내), 'lms'(2000자), 'kakao'(알림톡)
-- messageTemplate (message step만): %고객명%, %상품명%, %혜택% 등 변수 활용
+- messageTemplate (message step만): 변수는 아래 [회사 실측 데이터 활용 매트릭스]에 있는 것만(없는 변수는 보낼 때 빈칸이라 켜기에서 막힌다) · 혜택은 [혜택 안내: 직접 수정해주세요] 자리로
 - 메시지에 (광고) 표기 없음 (시스템 자동 처리)
 - 한국 정보통신망법 + 통신사 스팸 정책 정합
 - conditionJsonb (condition step만): 3 type 지원:
   1. customer_field: {"type":"customer_field","field":"<컬럼명>","operator":"==|!=|>=|<=|>|<|in|not_in|is_null|not_null","value":<값>}
      · 지원 컬럼: name / phone / email / birth_date / recent_purchase_date / recent_purchase_amount / total_purchase_amount / purchase_count / grade / points / sms_opt_in / is_active
   2. cdp_event_exists: {"type":"cdp_event_exists","event_name":"<이벤트명>","within_days":<1~365>,"presence":"exists"|"not_exists"}
-     · 이벤트명 예: purchase / order / cart_add / page_view / message_click
+     · 이벤트명 예: purchase / cart_add / page_view (문자 링크 클릭은 3번 조건으로)
      · 사용 예: "지난 7일 안 구매 안 한 고객 영역 리마인드 발송" → presence='not_exists'
-  3. journey_step_clicked: {"type":"journey_step_clicked","step_order":<옛 step N>,"within_days":<1~365>,"clicked":true|false}
-     · step_order = 옛 step만 참조 가능 (현재 step보다 작은 영역 의무)
-     · 사용 예: "Step 1 영역 발송 후 5일 안 클릭 X 영역 다른 채널 재시도" → clicked=false
+  3. step_link_clicked: {"type":"step_link_clicked","step_ref_order":<앞쪽 문자 칸 번호 N>,"clicked":true|false}
+     · step_ref_order = 이 조건 칸보다 앞의 문자(message) 칸 번호만 · 그 칸 링크를 눌렀는가(이 여정 · 그 칸 링크만 센다)
+     · 사용 예: "1번 칸 링크를 안 누른 고객에게 다시 안내" → step_ref_order=1, clicked=false
 
 언제 wait/condition 사용:
 - wait: 메시지 발송 후 충분한 시간 대기가 의미 있는 영역 (예: 후기 요청 전 충분한 사용 시간)
 - condition: 고객 분기가 필요한 영역 (예: VIP 등급만 받을 step / 지난 구매 영역 분기 / 옛 step 클릭 영역 분기)
 
+${dataProfilePrompt}
 회사 컨텍스트:
 - 회사명: ${ctx.companyName}
 - 브랜드명: ${ctx.brandName || '(미설정)'}
@@ -656,7 +664,7 @@ JSON 형식만 응답:
       // ★ 2026-10-24 세 채널 구조체크 ② — 이 생산자만 거름이 없었다(R13 · 다른 여정 생성 경로와 같은 근거 = 회사가 준 목표문).
       //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
       base.messageTemplate = dropInventedEfficacy(replaceInventedBenefits(aiStr(s.messageTemplate).slice(0, 2000), objective), objective).text;
-      base.isAd = s.isAd !== undefined ? !!s.isAd : true;
+      base.isAd = resolveJourneyAdFlag(base.channel, s.isAd);   // ★ 2026-11-02 광고 판정 CT(CT-J8 · 알림톡 = 정보성)
       // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문) · K1-1 문자 광고 단계 = 첫 줄에 전송자 명칭
       const seasonless = dropSeasonSentences(base.messageTemplate || '', objective).text;
       const ch = String(base.channel);
@@ -665,7 +673,10 @@ JSON 형식만 응답:
         : seasonless;
     } else if (stepType === 'condition') {
       if (s.conditionJsonb && typeof s.conditionJsonb === 'object') {
-        base.conditionJsonb = s.conditionJsonb;
+        // ★ 2026-11-02 설계서 3-15(D12) — 옛 「앞 칸 클릭」 꼴 = 그 칸 링크 조건으로(저장 뒤 칸 id 로 바뀐다 · 아무 링크 클릭을 세던 옛 조건을 새로 만들지 않는다)
+        base.conditionJsonb = s.conditionJsonb.type === 'journey_step_clicked'
+          ? { type: 'step_link_clicked', step_ref_order: Number(s.conditionJsonb.step_order), clicked: s.conditionJsonb.clicked !== false }
+          : s.conditionJsonb;
       }
     }
     return base;
@@ -763,7 +774,9 @@ export async function activationBlockReason(companyId: string, journeyId: string
               'anchorOffset', anchor_offset_days,
               'alimtalkNextType', alimtalk_next_type,
               'alimtalkNextContents', alimtalk_next_contents,
-              'alimtalkNextSubject', alimtalk_next_subject
+              'alimtalkNextSubject', alimtalk_next_subject,
+              'alimtalkTemplateCode', alimtalk_template_code,
+              'alimtalkVariableMap', alimtalk_variable_map
             ) ORDER BY step_order) FROM journey_steps WHERE journey_id = j.id) AS steps
      FROM journeys j
      WHERE j.id = $1::uuid AND j.company_id = $2::uuid`,
@@ -988,6 +1001,11 @@ export async function activationBlockReason(companyId: string, journeyId: string
     if (hasUneditedPlaceholder(msg)) {
       return `${s.order}번째 칸 본문에 채울 자리 [...] 가 남아 있어요. 직접 고쳐 주세요.`;
     }
+    // ★ 2026-11-02 보낼 글 판정 = CT-J10(실행기 · 보내기 전 검사 · 칸 저장과 같은 함수 · 없는 변수 · 장바구니 변수 · 제목 변수 · 설계서 3-3 · 3-13)
+    if (['sms', 'lms', 'mms'].includes(String(s.channel || 'lms'))) {
+      const ci = journeyCopyIssue({ bodies: [msg], subjects: [s.subject] }, await journeyCopyContext(companyId, triggerEvent, [msg]));
+      if (ci) return `${s.order}번째 칸 ${ci.message}`;
+    }
 
     // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수
     const channel = String(s.channel || 'lms');
@@ -1010,6 +1028,9 @@ export async function activationBlockReason(companyId: string, journeyId: string
       if (violation) {
         return `${s.order}번째 칸(알림톡) ${violation}`;
       }
+      // ★ 2026-11-02 알림톡 칸 판정 = CT-J5(실행기와 같은 함수 · 템플릿 없음 · 미승인 · 비활성 · 템플릿 변수 연결 빠짐 = 켜기에서 막는다 · 설계서 3-14 · D11 · D21)
+      const kv = await kakaoStepVerdict(companyId, { step_order: s.order, alimtalk_template_code: s.alimtalkTemplateCode ?? null, alimtalk_variable_map: s.alimtalkVariableMap ?? null });
+      if (kv.block) return `${s.order}번째 칸(알림톡) ${kv.block.userText}`;
     }
 
     // ★ D194 (2026-05-22) 강화: Liquid 문법 사전 검증 — 잘못된 문법 발견 시 차단 (발송 시점 매번 실패 영구 방지)
@@ -1046,31 +1067,7 @@ export async function activateJourney(
   if (blocked) return { ok: false, reason: blocked };
 
 
-  // ★ 2026-08-02 §11-5(§9-N2, Codex 정정) — baseline은 활성화 **전에** 심는다.
-  //   active 커밋 후 적재하면 그 사이 워커가 baseline 없는 추정 경로를 보고, 실패를 정지로 되돌리는
-  //   장치가 또 필요했다(fail-open). 순서를 바꾸면 실패 = 안 켜짐이라 그 장치 자체가 사라진다.
-  //   draft 상태 적재는 무해하다 — 활성화가 실패해도 baseline은 다음 활성화가 재사용한다(멱등).
-  try {
-    const base = await query(
-      `SELECT trigger_event, entry_baseline_at FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [journeyId, companyId],
-    );
-    // ⛔ Codex 2R — 기준선은 매 활성화마다 재기준(거부된 시도·정지 기간의 낡은 기준선 고착 차단).
-    //   신규가입 = 명단 보충(DO NOTHING) / 등급 = 값 재기준(DO UPDATE). 둘 다 덜 보내는 방향.
-    if (base.rows[0]?.trigger_event === 'customer.created') {
-      const { seeded } = await seedBaselineForJourney(journeyId, companyId);
-      console.log(`[activateJourney] 진입 원장 baseline 선적재 journey=${journeyId} seeded=${seeded}`);
-    }
-    // ★ §11-5 #7 — 등급 변동은 등급 기준선(kind='state')이 선행. state_value 미마이그레이션(42703)이면
-    //   여기서 던져져 활성화가 거부된다 — 기준 없이 켜면 첫 회차가 전 고객을 "변동"으로 오판한다.
-    if (base.rows[0]?.trigger_event === 'customer.grade_changed') {
-      const { seeded } = await seedGradeStateForJourney(journeyId, companyId);
-      console.log(`[activateJourney] 등급 기준선 선적재 journey=${journeyId} seeded=${seeded}`);
-    }
-  } catch (e: any) {
-    console.warn('[activateJourney] baseline 선적재 실패 — 활성화 중단:', e?.message);
-    return { ok: false, reason: '진입 기준 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
-  }
+  // ★ 2026-11-02 설계서 3-5 ② · 3-0 CT-J11 — 기준선 심기 = 아래 켜기 트랜잭션 안(잠근 행의 옛 상태 · 멈춘 이유로 판정 · active 와 같은 커밋 · 실패 = 안 켜짐).
 
   // ★ 2026-09-30 V2 5차 — 활성화와 옛 판 진입 닫기를 한 트랜잭션으로(켜졌는데 옛 판도 새 고객을 받는 틈 0).
   //   DDL(lineage_id · entry_closed_at) 전이면 닫기 문장을 내지 않는다(옛 동작 그대로).
@@ -1107,10 +1104,22 @@ export async function activateJourney(
     }
     // ★ 2026-10-20 여정 V.3 §6 — 다시 켜기 보정(journey-resume)에 쓰는 옛 상태 · 멈춘 시각(원문)을 잠금 안에서 읽는다(UPDATE 가 paused_at 을 지우기 전).
     const prevRes = await actClient.query(
-      `SELECT status, paused_at::text AS paused_raw, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+      `SELECT status, paused_at::text AS paused_raw, start_kind, pause_reason, trigger_event FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
       [journeyId, companyId],
     );
     const prev = prevRes?.rows?.[0] || null;
+    // 기준선(CT-J11) = 처음 · 초안 켜기 · 사람 멈춤 재개만(시스템 멈춤 재개 = 심지 않음) · active 로 바꾸기 전 · 같은 트랜잭션
+    //   ⛔ 등급 기준선 칸이 없으면(42703) 던진다 = 켜지 않는다(기준 없이 켜면 첫 회차가 전 고객을 변동으로 오판)
+    if (prev && ['draft', 'paused'].includes(String(prev.status))) {
+      try {
+        const rs = await reseedOnActivate((t, p) => actClient.query(t, p), journeyId, companyId, prev.trigger_event, { status: String(prev.status), pauseReason: prev.pause_reason ?? null });
+        if (rs.reseeded) console.log(`[activateJourney] 기준선 심음 journey=${journeyId} seeded=${rs.seeded}`);
+      } catch (e: any) {
+        await actClient.query('ROLLBACK');
+        console.warn('[activateJourney] 기준선 심기 실패 — 활성화 중단:', e?.message);
+        return { ok: false, reason: '진입 기준 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
+      }
+    }
     r = await actClient.query(
     `UPDATE journeys SET
       status = 'active',
@@ -1136,10 +1145,10 @@ export async function activateJourney(
     if (r.rows.length > 0 && prev) {
       const adj = await applyResumeAdjustments(
         actClient, journeyId,
-        { status: String(prev.status || ''), pausedRaw: prev.paused_raw ?? null, startKind: prev.start_kind ?? null },
+        { status: String(prev.status || ''), pausedRaw: prev.paused_raw ?? null, startKind: prev.start_kind ?? null, pauseReason: prev.pause_reason ?? null },
         r.rows[0].approved_at,
       );
-      if (adj.cursorReset) console.log(`[activateJourney] 다시 켜기 보정 journey=${journeyId} 되살림=${adj.revived} 밀림=${adj.shifted} 지난 날 끝냄=${adj.staleEnded}`);
+      if (prev.status === 'paused') console.log(`[activateJourney] 다시 켜기 보정 journey=${journeyId} 되살림=${adj.revived} 지난 날 끝냄=${adj.staleEnded} 커서 옮김=${adj.cursorReset}`);
     }
     if (r.rows.length > 0 && closeOthers) {
       // ★ 0930 Codex 3R · 4R — 닫기 전에 켜진 옛 판 커서 이어받기. 이어받을 판이 둘 이상(비정상)이면 켜지 않는다(누락 · 재처리 0).
@@ -1379,11 +1388,38 @@ export async function updateJourneyStep(
   //   따로 나가면 그 사이에 활성화가 끼어들어, 바뀐 문안을 옛 통과 마커로 켠다.
   // ★ 2026-10-20 V.3 §4-4 — 간격 · 담당자 알림만 고치면 사전검사 표식을 지킨다(판 = updated_at 은 늘 올림). 그 밖 키가 하나라도 있으면 지금처럼 비운다.
   const keepMarker = keepsPretestMarkerForStep(patch as Record<string, unknown>);
-  const r = (await withJourneyValidationReset(companyId, journeyId, (run, journey) => applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch), { keepMarker })) ?? { rows: [] as any[] };
+  const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
+    // ★ 2026-11-02 설계서 3-16 · D14 — 켜진 여정 · A/B 문안이 있는 칸의 본문 · 제목 고치기 = 막는다(나가는 글 = 변이 · 고친 칸 글은 안 나간다 · R5).
+    //   판정 = 잠금 안(그사이 변이가 생기거나 켜지는 것까지 본다) · 채우기 길(fillJourneyCopyFacts)은 모든 칸 자리표시를 같이 고치는 일이라 여기 판정 밖.
+    if (journey.status === 'active' && (patch.messageTemplate !== undefined || patch.subject !== undefined)
+        && ((await loadVariantRowsByStep([stepId], run)).get(stepId)?.length ?? 0) > 0) {
+      throw new JourneyStepGateError(AB_STEP_COPY_LOCKED_MESSAGE, 'AB_STEP_COPY_LOCKED');
+    }
+    const out = await applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch);
+    // ★ 2026-11-02 설계서 3-3 ③ · 3-13 — 켜진 여정에서 사람이 그 칸 글을 고침 = 보낼 글 판정(CT-J10 · 걸리면 409 · 같은 트랜잭션이 저장 · 새 판을 되돌린다).
+    //   채우기 길(fillJourneyCopyFacts)은 자리를 줄이는 일이라 판정 밖(남은 자리가 있는 칸 = 실행기 · 보내기 전 검사가 보류 · 안내).
+    if (journey.status === 'active' && (patch.messageTemplate !== undefined || patch.subject !== undefined) && out.rows.length > 0) {
+      await assertStepCopySendable(run, companyId, stepId);
+    }
+    return out;
+  }, { keepMarker })) ?? { rows: [] as any[] };
   // ★ Fix #4 (2026-06-05): step 편집 시 발송 전 검증 마커 무효화 — 편집 후 재검증해야 활성화 가능.
   //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
   //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
   return r.rows.length > 0;
+}
+
+/**
+ * ★ 2026-11-02 설계서 3-3 ③ · 3-13 — 켜진 여정 칸의 지금 글(저장한 뒤 · 같은 트랜잭션)이 보낼 수 있는 글인가(CT-J10 판정 · 걸리면 409 COPY_ISSUE).
+ *   부르는 곳 = 사람이 칸 글을 고칠 때(updateJourneyStep) 하나 · 알림톡 칸 = 판정 밖(승인 템플릿이 본문).
+ */
+async function assertStepCopySendable(run: SqlRunner, companyId: string, stepId: string): Promise<void> {
+  const cur = (await run(
+    `SELECT s.channel, s.message_template, s.subject, j.trigger_event FROM journey_steps s JOIN journeys j ON j.id = s.journey_id WHERE s.id = $1::uuid`, [stepId],
+  )).rows[0];
+  if (!cur || !['sms', 'lms', 'mms'].includes(String(cur.channel || 'lms'))) return;
+  const ci = journeyCopyIssue({ bodies: [cur.message_template], subjects: [cur.subject] }, await journeyCopyContext(companyId, cur.trigger_event, [cur.message_template]));
+  if (ci) throw new JourneyStepGateError(ci.message, 'COPY_ISSUE');
 }
 
 /**
@@ -1612,6 +1648,9 @@ export async function withJourneyValidationReset<T>(
 /**
  * 추가·삭제 게이트 위반 — 입력·상태 문제라 호출부가 409로 돌린다(500이면 서버 결함으로 오인된다).
  */
+/** ★ 2026-11-02 설계서 3-16 — 켜진 여정 A/B 칸 고치기 거절 문장(서버 · 화면 같은 말) */
+export const AB_STEP_COPY_LOCKED_MESSAGE = 'A/B 문안이 있는 칸은 A/B 창에서 고치거나 모양 바꾸기로 고쳐 주세요.';
+
 export class JourneyStepGateError extends Error {
   code: string;
   constructor(message: string, code: string) {
@@ -1674,7 +1713,7 @@ async function insertJourneyStepRow(
       step.channel || null,
       step.messageTemplate ? applyVariableDefaults(step.messageTemplate) : null,
       step.subject || null,
-      step.isAd !== undefined ? !!step.isAd : true,
+      resolveJourneyAdFlag(step.channel, step.isAd),   // ★ 2026-11-02 저장 값 = 광고 판정 CT(3-11 · 알림톡 칸 = false · 읽는 자리도 CT)
       step.conditionJsonb ? JSON.stringify(step.conditionJsonb) : null,
       step.alimtalkProfileId || null,
       step.alimtalkTemplateCode || null,
@@ -1724,7 +1763,7 @@ async function insertJourneyStepRow(
  * 편집(updateJourneyStep)과 추가(addJourneyStep) 공용.
  */
 /** ★ 2026-10-19 B-1009-6 — 켜진 여정 문안 수정 스냅샷 = confidence_score 0(재검사 전 · 실행기가 문자 발송을 미룬다 · 스캐너 통과 = 100). 활성화 스냅샷은 100(활성화 검증 통과). */
-async function createStepSnapshot(companyId: string, journeyId: string, stepId: string, run: SqlRunner = query): Promise<void> {
+export async function createStepSnapshot(companyId: string, journeyId: string, stepId: string, run: SqlRunner = query): Promise<void> {
   const s = await run(
     `SELECT s.channel, s.is_ad, s.message_template, s.subject,
             s.alimtalk_variable_map, s.alimtalk_template_code, j.callback_number
@@ -2156,8 +2195,11 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
     [journeyId]
   );
   // Phase 9: 타임라인용 사람이 읽는 라벨(시점·조건) 부착. 첫 step(i===0)은 "트리거 후", 이후는 "직전 단계 후".
+  // ★ 2026-11-02 설계서 3-16 — 칸마다 A/B 문안(화면이 켜진 여정에서 본문 대신 보이고 본문 칸을 잠근다)
+  const abByStep = await loadVariantRowsByStep(steps.rows.filter((s: any) => s.step_type === 'message').map((s: any) => String(s.id)));
   const stepsWithLabels = steps.rows.map((s: any, i: number) => ({
     ...s,
+    ab_variants: (abByStep.get(String(s.id)) || []).map((v) => ({ variant_id: v.variant_id, message_template: v.message_template, subject: v.subject })),
     timingLabel: formatStepTiming({ delayMode: s.delay_mode, delayHours: s.delay_hours, targetHourKst: s.target_hour_kst }, i === 0),
     conditionLabel: s.step_type === 'condition' ? formatConditionChip(s.condition_jsonb) : null,
   }));

@@ -16,6 +16,7 @@
  *   JOIN 타입 cdp_events.customer_id(uuid) = customers.id(uuid).
  */
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 
 export interface GradeConversionStat {
   grade: string;
@@ -80,7 +81,7 @@ export async function fetchGradeConversionStats(
      FROM grade_campaigns gc
      JOIN cdp_events e
             ON e.company_id = $1::uuid
-           AND e.event_name IN ('purchase','order')
+           AND ${netPurchaseSql('e')}   -- ★ 2026-11-02 전환 = 결제된 구매(CT-J3)
            AND e.customer_id IS NOT NULL
            AND e.occurred_at >= gc.sent_at
            AND e.occurred_at <= gc.sent_at + ($4 || ' hours')::interval

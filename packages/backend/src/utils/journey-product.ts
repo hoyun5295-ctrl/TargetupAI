@@ -11,6 +11,7 @@
  * ⛔ 문이 바뀌면 키가 달라진다(자사몰 productId ↔ 매장 상품 코드). 저장한 문과 지금 문이 다르면 진입하지 않고 멈춘다(조용한 0건 금지).
  */
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { isMallPurchaseDoorActive } from './journey-purchase-ledger';
 import { JourneyInputError } from './journey-step-limits';
 import type { CdpCursorBatch, CdpEventRow } from './journey-cdp-cursor';
@@ -124,7 +125,7 @@ export async function listObservedProducts(companyId: string, door: PurchaseDoor
          FROM (
            SELECT ${mallItemKeySql('it')} AS key, NULLIF(TRIM(it->>'productName'), '') AS name, e.customer_id, e.occurred_at
              FROM cdp_events e, ${mallItemsSql('e')} it
-            WHERE e.company_id = $1::uuid AND e.event_name = 'purchase'
+            WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')}   -- ★ 2026-11-02 CT-J3
               AND e.occurred_at >= NOW() - ($2 || ' days')::interval
          ) x
         WHERE x.key IS NOT NULL
@@ -137,7 +138,8 @@ export async function listObservedProducts(companyId: string, door: PurchaseDoor
       `SELECT COUNT(*)::int AS n FROM cdp_events
         WHERE company_id = $1::uuid AND event_name = 'purchase'
           AND occurred_at >= NOW() - ($2 || ' days')::interval
-          AND properties->>'items_omitted' = 'true'`,
+          AND properties->>'items_omitted' = 'true'   -- ct-observe: 상품 정보가 빠진 사건 비율(데이터 관측 · CT-J3)
+        `,
       [companyId, String(PRODUCT_OBSERVE_DAYS)],
     );
     return {
@@ -179,7 +181,7 @@ export async function suggestUsagePeriod(companyId: string, door: PurchaseDoor, 
   const buys = door === 'mall'
     ? `SELECT DISTINCT e.customer_id, (e.occurred_at AT TIME ZONE 'Asia/Seoul')::date AS d
          FROM cdp_events e, ${mallItemsSql('e')} it
-        WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+        WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
           AND e.occurred_at >= NOW() - ($3 || ' days')::interval
           AND ${mallItemKeySql('it')} = ANY($2::text[])`
     : `SELECT DISTINCT p.customer_id, p.purchase_date::date AS d
@@ -239,7 +241,7 @@ export const PRODUCT_REPURCHASE_SINCE_ENTRY_SQL = `SELECT 1
   WHERE EXISTS (
     SELECT 1 FROM cdp_events e, ${mallItemsSql('e')} it
      WHERE e.company_id = $1::uuid AND e.customer_id = $2::uuid
-       AND e.event_name = 'purchase' AND e.occurred_at > $3::timestamptz
+       AND ${netPurchaseSql('e')} AND e.occurred_at > $3::timestamptz   -- ★ 2026-11-02 CT-J3
        AND ${mallItemKeySql('it')} = ANY($4::text[])
   )
   OR EXISTS (
@@ -268,7 +270,7 @@ function rhythmBuysSql(door: PurchaseDoor): string {
   return door === 'mall'
     ? `SELECT DISTINCT e.customer_id, (e.occurred_at AT TIME ZONE 'Asia/Seoul')::date AS d
          FROM cdp_events e
-        WHERE e.company_id = $1::uuid AND e.event_name = 'purchase' AND e.customer_id IS NOT NULL
+        WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
           AND e.occurred_at >= NOW() - ($2 || ' days')::interval`
     : `SELECT DISTINCT p.customer_id, p.purchase_date::date AS d
          FROM purchases p

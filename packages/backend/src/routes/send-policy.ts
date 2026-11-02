@@ -5,7 +5,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { SEND_HOURS } from '../config/defaults';
-import { NIGHT_ARRIVE_HOUR } from '../utils/send-time-util';
+import { NIGHT_ARRIVE_HOUR, BUSINESS_DAY_HOUR } from '../utils/send-time-util';
 import { PLANNER_APPROVAL_DEADLINE_HOUR } from '../utils/planner-confirm';
 import { PLANNER_LINK_LEAD_DAYS } from '../utils/planner-review';
 import { PLANNER_COPY_MAX } from '../utils/planner-copy';
@@ -15,6 +15,7 @@ export function sendPolicyValues() {
     startHour: SEND_HOURS.start,
     endHour: SEND_HOURS.end,
     nightArriveHour: NIGHT_ARRIVE_HOUR,
+    businessDayHour: BUSINESS_DAY_HOUR,   // ★ 2026-11-02 「다음 평일」 시각(화면 문구 · 설계서 3-0 CT-J7)
     plannerDeadlineHour: PLANNER_APPROVAL_DEADLINE_HOUR,
     plannerReviewLeadDays: PLANNER_LINK_LEAD_DAYS,
     plannerCopyMax: PLANNER_COPY_MAX,

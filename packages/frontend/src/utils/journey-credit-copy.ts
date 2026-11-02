@@ -15,8 +15,14 @@ export const creditOperation = (operation: number) =>
 
 export const CREDIT_RUN_OUT = '이번 달 크레딧이 모자라면 켜 둔 여정이 멈춰요. 여정을 많이 돌리시면 요금제를 올려 주세요.';
 
-/** 다시 켜기 한 단계 한 줄(§6-7) — 멈춘 동안 생긴 사건은 받지 않는다(서버 다시 켜기 보정과 같은 사실). */
-export const resumeLine = (operation: number) =>
-  `다시 켜면 문자를 보낸 날마다 ${operation.toLocaleString('ko-KR')}크레딧이에요. 멈춘 동안 생긴 가입 · 구매는 받지 않아요.`;
+/**
+ * 다시 켜기 한 단계 한 줄(§6-7) — 서버 다시 켜기 보정과 같은 사실(★ 2026-11-02 설계서 3-5 ② · 멈춘 이유 종류 = 서버 pauseReasonView 가 준 값):
+ *   사람이 멈춤 = 멈춘 동안 생긴 일은 받지 않는다 · 시스템이 멈춤 = 멈춘 동안 들어온 가입 · 구매도 받는다(도착 72시간 안 · 서버 구매 시작 나이 규칙).
+ */
+export const resumeLine = (operation: number, pauseKind?: string | null) =>
+  `다시 켜면 문자를 보낸 날마다 ${operation.toLocaleString('ko-KR')}크레딧이에요. `
+  + (pauseKind && pauseKind !== 'manual'
+    ? '멈춘 동안 들어온 가입 · 구매도 이어서 받아요(들어온 지 3일 안의 것).'
+    : '멈춘 동안 생긴 가입 · 구매는 받지 않아요.');
 
 export const RESUME_CREDIT_SHORT = '크레딧을 채우기 전에 켜면 다시 멈춰요.';
