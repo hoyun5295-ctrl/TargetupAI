@@ -19,6 +19,8 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import sharp from 'sharp';   // ★ 2026-11-02 제품 사진 여러 장 묶기(groupProductCutouts)
+import type { OutputInfo, OverlayOptions } from 'sharp';
 import { getSeasonContext } from './season-context';
 
 // ── env / 설정 ─────────────────────────────────────────────
@@ -105,7 +107,9 @@ export type StudioErrorCode =
   | 'PY_SERVICE_DOWN'
   | 'INGEST_FAILED'
   | 'BUSY'
-  | 'TEMP_FULL';
+  | 'TEMP_FULL'
+  | 'PRODUCTS_INVALID'
+  | 'PRODUCT_TOO_LARGE';
 
 const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   STUDIO_NOT_READY: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.',
@@ -116,6 +120,8 @@ const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   INGEST_FAILED: '상품 이미지를 가져오지 못했어요. 다른 이미지를 사용해주세요.',
   BUSY: '다른 이미지 생성이 진행 중입니다. 완료 후 다시 시도해주세요.',
   TEMP_FULL: '임시 보관 용량이 가득 찼습니다. 저장하거나 정리 후 다시 시도해주세요.',
+  PRODUCTS_INVALID: '제품 사진은 3개까지 넣을 수 있어요. 다시 골라 주세요.',
+  PRODUCT_TOO_LARGE: '제품 사진이 너무 크거나 길쭉해서 함께 넣을 수 없어요. 다른 사진으로 다시 넣어 주세요.',
 };
 
 export class StudioError extends Error {
@@ -216,6 +222,8 @@ export function buildPosterPrompt(input: {
   now?: Date;
   /** ★ 2026-10-09 장면 문장 덮어쓰기(AI 영업이 소품 문장을 지운 판을 넘긴다) · 미지정 = template.scaffold 그대로 */
   scaffold?: string | null;
+  /** ★ 2026-11-02 제품 사진 장수(2~3장 = 서버가 한 장으로 묶어 넘긴다 · 개수 줄 한 줄 더함) · 미지정 · 1 = 지금 출력 그대로 */
+  productCount?: number;
 }): string {
   const { template, preset, texts } = input;
   const lines: string[] = [];
@@ -233,6 +241,11 @@ export function buildPosterPrompt(input: {
   // 3. 제품 보존(누끼 첨부 시) — 픽셀 충실 지시
   if (input.hasProduct) {
     lines.push('A product photo with transparent background is attached. Place it as the hero of the composition on a natural surface. Preserve the attached product EXACTLY as provided, do not redraw, restyle, recolor, or alter its shape, proportions, packaging, or label text in any way. Integrate it with scene-consistent lighting and a realistic soft ground shadow.');
+    // ★ 2026-11-02 묶은 한 장 = 제품 n개(1102 운영 실측 12장에 쓴 문장 그대로 · 바로 위 보존 줄 다음 자리)
+    const n = input.productCount || 1;
+    if (n >= 2) {
+      lines.push(`The attached transparent image contains ${n} different products placed side by side as one group. Show all ${n} products together as the hero group, keep their order and spacing, and preserve every one of them EXACTLY as provided, including each label text.`);
+    }
   }
   // 4. 시즌(시즌 템플릿만)
   if (template.useSeason) {
@@ -278,6 +291,82 @@ export function buildPosterPrompt(input: {
   }
 
   return lines.join('\n');
+}
+
+// ── ★ 2026-11-02 제품 사진 최대 3장 = 서버가 한 장으로 묶어 생성에 넘긴다 ──────────
+//   설계서 docs/2026-11-02-image-studio-multi-product-design.md · 엔진 호출(generatePoster)은 그대로 한 장을 받는다.
+
+/** 제품 사진 상한 — 판정 권한(넘치면 400) · 화면 StudioMake.tsx 의 같은 이름 상수와 같은 값(계약 시험 S5) */
+export const STUDIO_MAX_PRODUCTS = 3;
+
+const hasOwn = (o: unknown, k: string) => !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k);
+
+/**
+ * /generate 시도 키 지문의 제품 자리 = 보낸 값 그대로(Codex 설계 1R ①).
+ *   옛 화면 = cutoutTempId(생략 · null · id)를 지금 키 그대로 · 새 화면 = cutoutTempIds 배열.
+ *   해석(readProductTempIds)과 뗐다 — 생략과 null 을 합치면 배포를 걸친 같은 시도가 새 키가 되어 한 번 더 걷힌다.
+ */
+export function studioProductFingerprint(body: unknown): unknown {
+  if (hasOwn(body, 'cutoutTempIds')) return (body as any).cutoutTempIds;
+  return (body as any)?.cutoutTempId;
+}
+
+/** /generate 제품 사진 목록 — 새 화면 = cutoutTempIds(0~3) · 옛 화면 = cutoutTempId 하나. 꼴이 어긋나면 null(400). */
+export function readProductTempIds(body: unknown): string[] | null {
+  let raw: unknown[] | null;
+  if (hasOwn(body, 'cutoutTempIds')) {
+    const v = (body as any).cutoutTempIds;
+    raw = Array.isArray(v) ? v : null;
+  } else {
+    const one = (body as any)?.cutoutTempId;
+    raw = one === undefined || one === null || one === '' ? [] : [one];
+  }
+  if (!raw || raw.length > STUDIO_MAX_PRODUCTS) return null;
+  if (!raw.every((id) => typeof id === 'string' && isValidTempId(id))) return null;
+  const ids = raw as string[];
+  return new Set(ids).size === ids.length ? ids : null;
+}
+
+const GROUP_HEIGHT = 1200;
+const GROUP_MAX_WIDTH = 3600;
+const GROUP_GAP_RATIO = 0.08;
+/** 입력 한 장 화소 상한 — 헤더로 디코드 전에 거른다(Codex 설계 1R ②) */
+const GROUP_MAX_INPUT_PIXELS = 25_000_000;
+
+/**
+ * 제품 2~3장을 투명 PNG 한 장으로 — 넣은 순서대로 왼쪽부터 · 높이를 같게(1102 운영 실측 12장과 같은 꼴).
+ * 배율을 먼저 정한다: 잘라낸 크기로 공통 높이를 구해 각 장 · 캔버스를 처음부터 폭 3600 안에서 만든다(한 장씩 차례로 · 동시 디코드 0).
+ * ponytail: 실제 크기를 몰라 높이를 같게 맞춘다(작은 단지도 병만큼 커진다) · 크기 비율을 받게 되면 그때 넣는다.
+ */
+export async function groupProductCutouts(absPaths: string[]): Promise<{ base64: string; mime: 'image/png' }> {
+  const parts: Array<{ buf: Buffer; w: number; h: number }> = [];
+  for (const p of absPaths) {
+    const m = await sharp(p).metadata();
+    if (!m.width || !m.height) throw new StudioError('GEN_FAILED', 502);
+    if (m.width * m.height > GROUP_MAX_INPUT_PIXELS) throw new StudioError('PRODUCT_TOO_LARGE', 400);
+    const opts = { limitInputPixels: GROUP_MAX_INPUT_PIXELS };
+    let t: { data: Buffer; info: OutputInfo };
+    try { t = await sharp(p, opts).trim().png().toBuffer({ resolveWithObject: true }); }
+    catch { t = await sharp(p, opts).png().toBuffer({ resolveWithObject: true }); }   // 한 색뿐이라 잘라낼 수 없으면 원본 그대로
+    parts.push({ buf: t.data, w: t.info.width, h: t.info.height });
+  }
+  const n = parts.length;
+  const ratioSum = parts.reduce((s, x) => s + x.w / x.h, 0) + GROUP_GAP_RATIO * (n - 1);
+  // 장마다 폭을 반올림 · 최소 1 로 올려도 3600 을 넘지 않게 n 만큼 덜어 둔다
+  const H = Math.max(1, Math.min(GROUP_HEIGHT, Math.floor((GROUP_MAX_WIDTH - n) / ratioSum)));
+  const gap = Math.floor(GROUP_GAP_RATIO * H);
+  const widths = parts.map((x) => Math.max(1, Math.round((x.w * H) / x.h)));
+  // 높이 · 폭을 1 로 올린 극단 모양(20000×10 둘 · 3599×1 + 1×100 둘)은 3600 을 넘는다 = 만들기 전에 거절(Codex 설계 2R ①)
+  if (widths.reduce((s, w) => s + w, 0) + gap * (n - 1) > GROUP_MAX_WIDTH) throw new StudioError('PRODUCT_TOO_LARGE', 400);
+  const layers: OverlayOptions[] = [];
+  let left = 0;
+  for (const [i, x] of parts.entries()) {
+    layers.push({ input: await sharp(x.buf).resize({ width: widths[i], height: H, fit: 'fill' }).png().toBuffer(), left, top: 0 });
+    left += widths[i] + gap;
+  }
+  const out = await sharp({ create: { width: left - gap, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
+    .composite(layers).png().toBuffer();
+  return { base64: out.toString('base64'), mime: 'image/png' };
 }
 
 // ── Gemini 클라이언트 (generateContent) ────────────────────────

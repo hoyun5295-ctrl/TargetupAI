@@ -59,14 +59,18 @@ describe('Codex 1R(뒤로가기 · 스튜디오) 반례', () => {
   it('처음 상태로 돌리면 진행 중 상품 준비의 늦은 응답을 버린다 · 처리 중 템플릿 고르기 막음', () => {
     const make = read('components/studio/StudioMake.tsx');
     expect(make).toMatch(/const reset = useCallback\(\(next: StudioTexts = EMPTY_STUDIO_TEXTS\) => \{\n\s*prepSeq\.current \+= 1;/);
-    const prep = make.slice(make.indexOf('const prepareProduct = async'), make.indexOf('const onPickMall'));
+    // ★ 1102 제품 사진 최대 3장 — 준비 반복을 lib/studio-products.ts runProductPrep 으로 옮겼다 · 지키는 성질은 그대로
+    //   (설계서 docs/2026-11-02-image-studio-multi-product-design.md §4 S6 · 동작 시험 = image-studio-multi-product-1102.test.ts S6-가)
+    const prep = make.slice(make.indexOf('const prepareProducts = async'), make.indexOf('const addProducts'));
     expect(prep).toContain('const seq = ++prepSeq.current;');
-    expect(prep.match(/if \(!live\(\)\) return;/g)?.length).toBe(2);
-    expect(prep).toContain('if (!live()) { URL.revokeObjectURL(blob); return; }');
-    // Codex 1031 ① 누끼 ID 는 미리보기보다 먼저(미리보기를 못 받아도 상품 없는 유료 생성 0) · 늦은 응답 버림은 그 앞(remove-bg 뒤 live 확인)
-    const iLive = prep.indexOf("const { ok, data } = await studioPost('/api/image-studio/remove-bg'");
-    expect(prep.indexOf('setCutoutTempId(data.cutout.tempId);')).toBeGreaterThan(prep.indexOf('if (!live()) return;', iLive));
-    expect(prep.indexOf('setCutoutTempId(data.cutout.tempId);')).toBeLessThan(prep.indexOf('const blob = await fetchAuthObjectUrl('));
-    expect(prep).toContain("if (live()) setBusyMsg('');");
+    expect(prep).toContain('const live = () => seq === prepSeq.current;');
+    expect(prep).toContain('const r = await runProductPrep(added, {\n      live,');
+    const runner = read('lib/studio-products.ts');
+    // 늦은 응답 버림: 반복 입구 · 원본 저장 뒤 · 누끼 뒤 · 실패 처리 앞 · 반복 끝
+    expect(runner.match(/if \(!d\.live\(\)\) return null;/g)?.length).toBe(5);
+    expect(runner).toContain('if (!d.live()) { d.revoke(url); return null; }');
+    // Codex 1031 ① 누끼 ID 는 미리보기보다 먼저(미리보기를 못 받아도 상품 없는 유료 생성 0)
+    expect(runner.indexOf('d.onCutout(a.key, cutoutTempId);')).toBeLessThan(runner.indexOf('const url = await d.preview(cutoutTempId);'));
+    expect(runner).toContain("if (!d.live()) return null;\n  d.setBusy('');");
   });
 });

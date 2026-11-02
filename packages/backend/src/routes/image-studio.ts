@@ -36,7 +36,7 @@ import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../u
 // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
 import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
-import { isStudioReady, StudioError, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
+import { isStudioReady, StudioError, readProductTempIds, studioProductFingerprint, groupProductCutouts, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
 import { createHash } from 'crypto';
@@ -124,9 +124,10 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
 
   if (await aiZonePlanBlocked(req, res)) return;
-  const { templateId, presetKey, userHint, texts, cutoutTempId, textPosition } = req.body || {};
+  const { templateId, presetKey, userHint, texts, textPosition } = req.body || {};
   // ★ 2026-10-19 B-1016-3② 시도 키(화면이 보낼 때만) — 같은 시도 = 기억한 결과 · 이미 걷혔으면 다시 걷지 않는다
-  const attemptKey = studioAttemptKey('gen', companyId, req.body?.attemptToken, { templateId, presetKey, userHint, texts, cutoutTempId, textPosition });
+  //   ★ 2026-11-02 제품 자리 = 보낸 값 그대로(옛 화면 cutoutTempId 생략 · null · id 는 지금 키 그대로 · 새 화면 = 배열 · Codex 설계 1R ①)
+  const attemptKey = studioAttemptKey('gen', companyId, req.body?.attemptToken, { templateId, presetKey, userHint, texts, cutoutTempId: studioProductFingerprint(req.body), textPosition });
   // 회사당 동시 생성 1건 (fork 단일 = in-memory)
   // ★ Codex E2 — 같은 시도의 결과 돌려주기 · 납부 확인 = 이 잠금 안에서 · 새 작업 검사(입력 · 잔액 · 임시 용량)보다 먼저
   //   (옛: 잠금 밖 · 잔액 확인 앞이라, 원요청이 막 걷은 뒤의 재요청이 402 · 409 를 받고 다시 걷힐 수 있었다)
@@ -146,15 +147,18 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!template) return res.status(400).json({ success: false, error: '템플릿을 선택해주세요.' });
   const preset = resolvePreset(presetKey);
 
-  // 누끼 첨부(선택) — 있으면 제품 포함 완성 포스터, 없으면 문구 포함 배경 포스터
-  let cutout: { base64: string; mime: string } | null = null;
-  if (cutoutTempId) {
-    const cf = findTempFile(companyId, String(cutoutTempId));
-    const cm = readTempMeta(companyId, String(cutoutTempId));
+  // 제품 사진(선택 · ★ 2026-11-02 최대 3장) — 있으면 제품 포함 완성 포스터, 없으면 문구 포함 배경 포스터
+  //   넘침 · 중복 · 꼴 오류 = 400(잠금 · 기억 · 납부 확인 뒤 · AI · 차감 전)
+  const productIds = readProductTempIds(req.body);
+  if (!productIds) return respondStudioError(res, new StudioError('PRODUCTS_INVALID', 400));
+  const productFiles: Array<{ absPath: string; mime: string }> = [];
+  for (const id of productIds) {
+    const cf = findTempFile(companyId, id);
+    const cm = readTempMeta(companyId, id);
     if (!cf || !cm || (cm.kind !== 'cutout' && cm.kind !== 'source')) {
       return res.status(404).json({ success: false, error: '제품 이미지를 찾을 수 없습니다. 다시 준비해주세요.' });
     }
-    cutout = { base64: fs.readFileSync(cf.absPath).toString('base64'), mime: cf.mime };
+    productFiles.push({ absPath: cf.absPath, mime: cf.mime });
   }
 
   // ★ 2026-09-27 한줄로 V2 R242 — 템플릿 예시 문구가 그대로면 만들지 않는다(포스터에 그려진 채 2크레딧이 빠졌다 · 화면은 미리 채워 둔다)
@@ -169,6 +173,11 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     // temp 상한 검사(200MB) — ★ 2026-09-27 R125 CT(모든 임시 쓰기 라우트가 같은 판정)
     if (isStudioTempFull(companyId)) return respondStudioError(res, new StudioError('TEMP_FULL', 409));
 
+    // ★ 2026-11-02 1장 = 지금처럼 그 파일 그대로 · 2~3장 = 서버가 한 장으로 묶는다(AI 호출 · 차감 전 · 실패 = 미차감)
+    let cutout: { base64: string; mime: string } | null = null;
+    if (productFiles.length === 1) cutout = { base64: fs.readFileSync(productFiles[0].absPath).toString('base64'), mime: productFiles[0].mime };
+    else if (productFiles.length > 1) cutout = await groupProductCutouts(productFiles.map((f) => f.absPath));
+
     const benefitInHint = hasBenefitPattern(userHint);
     // ★ 2026-08-09 문구 위치(행사 포스터 위/중앙/아래) — 화이트리스트 밖 값은 무시(템플릿 기본 배치)
     const textPos = textPosition === 'top' || textPosition === 'center' || textPosition === 'bottom' ? textPosition : null;
@@ -177,6 +186,7 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       texts: { label: texts?.label, title: texts?.title, subtitle: texts?.subtitle },
       userHint: benefitInHint ? null : userHint,
       hasProduct: !!cutout,
+      productCount: productIds.length,
       textPosition: textPos,
     });
 

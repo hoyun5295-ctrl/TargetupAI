@@ -26,12 +26,14 @@ interface ProviderTab { provider: string; label: string; }
 
 const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 
-export default function MallProductPickerModal({ open, onClose, onPick, providerFilter }: {
+export default function MallProductPickerModal({ open, onClose, onPick, providerFilter, max }: {
   open: boolean;
   onClose: () => void;
   onPick: (products: PickedMallProduct[]) => void;
   /** ★ 2026-10-10 보일 몰만(결과 화면 [몰에서 상품 바꾸기] = 상품번호로 다시 읽을 수 있는 몰만) · 미지정 = 지금 그대로 */
   providerFilter?: (provider: string) => boolean;
+  /** ★ 2026-11-02 고를 수 있는 최대 개수(이미지 스튜디오 = 남은 제품 칸) · 다 차면 새로 체크되지 않는다 · 미지정 = 지금 그대로(제한 없음) */
+  max?: number;
 }) {
   const [providers, setProviders] = useState<ProviderTab[]>([]);
   const [provider, setProvider] = useState<string>('');
@@ -95,6 +97,7 @@ export default function MallProductPickerModal({ open, onClose, onPick, provider
       const n = { ...s };
       const key = `${p.provider}:${p.code}`;
       if (n[key]) delete n[key];
+      else if (max !== undefined && Object.keys(n).length >= max) return s;   // 다 찼으면 새로 체크하지 않는다
       else n[key] = p;
       return n;
     });
@@ -205,7 +208,11 @@ export default function MallProductPickerModal({ open, onClose, onPick, provider
         </div>
 
         <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
-          <span className="text-[11px] text-slate-400">{picked.length > 0 ? `${picked.length}개 선택됨` : '슬라이드에 넣을 상품을 선택하세요'}</span>
+          <span className="text-[11px] text-slate-400">
+            {max !== undefined
+              ? `최대 ${max}개까지 고를 수 있어요 (${picked.length}/${max})`
+              : picked.length > 0 ? `${picked.length}개 선택됨` : '슬라이드에 넣을 상품을 선택하세요'}
+          </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="text-[12px] text-slate-500 hover:text-slate-700 px-3 py-2">취소</button>
             <button

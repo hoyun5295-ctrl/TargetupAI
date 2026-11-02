@@ -7,14 +7,16 @@
  *   - TemplateExampleCard = 고른 템플릿 예시 크게(예시 위에 아무것도 얹지 않는다 · 2026-08-13)
  * 흰 표면 창 안에서도 그려진다 → 다크 전제 색 금지(backend dm-build-light-surface.test.ts).
  * 상태는 이 훅을 부른 부품에 산다 → DM 창은 닫아도(ModalBase 가 null) 만드는 중 · 입력이 살아 있다(닫기 = 숨김).
+ * ★ 2026-11-02 제품 사진 최대 3장(칸 목록 · 서버가 한 장으로 묶는다) · 칸 수명 = 설계서 docs/2026-11-02-image-studio-multi-product-design.md §2
  */
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
-import { PenLine, ShoppingBag, Upload, Wand2, Check } from 'lucide-react';
+import { PenLine, ShoppingBag, Upload, Wand2, Loader2, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProductPickerModal';
 import { fetchAuthObjectUrl } from '../../lib/auth-download';
 import { studioFetch, studioPost, newStudioAttempt } from '../../lib/studio-api';
 import { applyAutoTexts, autoStudioTexts, EMPTY_STUDIO_TEXTS, type StudioTexts } from '../../lib/studio-texts';
+import { runProductPrep } from '../../lib/studio-products';
 import type { StudioTemplatePublic } from './TemplatePicker';
 
 const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
@@ -22,21 +24,35 @@ const isEvent = (t: StudioTemplatePublic | null) => (t?.kind || 'product') === '
 
 export interface StudioMade { tempId: string; url: string; preview: string | null; title: string }
 
+/** ★ 2026-11-02 제품 사진 상한 — 서버 STUDIO_MAX_PRODUCTS(utils/image-studio.ts)와 같은 값(계약 시험 S5) · 넘침 판정 권한은 서버 */
+export const STUDIO_MAX_PRODUCTS = 3;
+
+/** 제품 사진 한 칸 — 넣은 순서 = 포스터 왼쪽부터. 누끼 id 가 없으면 준비 중, 미리보기가 없으면 「미리보기 없음」 */
+export interface StudioProductItem { key: string; product: PickedMallProduct | null; cutoutTempId: string | null; blob: string | null }
+type ProductSource = { product: PickedMallProduct | null; imageUrl: string | null; file?: File };
+
+let itemSeq = 0;
+
 export function useStudioMake(template: StudioTemplatePublic | null, initialTexts: StudioTexts = EMPTY_STUDIO_TEXTS) {
   const toast = useToast();
   const [texts, setTexts] = useState<StudioTexts>(initialTexts);
   const [hint, setHint] = useState('');
   // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 위(갤러리 예시와 같은 구도로 시작). 제품 포스터는 미전달(템플릿 기본 배치).
   const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('top');
-  const [product, setProduct] = useState<PickedMallProduct | null>(null);
-  const [cutoutTempId, setCutoutTempId] = useState<string | null>(null);
-  const [cutoutBlob, setCutoutBlob] = useState<string | null>(null);
+  const [items, setItems] = useState<StudioProductItem[]>([]);
+  /** 정리(처음으로 · 언마운트)와 담기가 지금 칸을 읽는다 — 렌더마다 따라간다 */
+  const itemsRef = useRef<StudioProductItem[]>([]);
+  itemsRef.current = items;
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busyMsg, setBusyMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   /** ★ 2026-10-31 상품 준비 차례 — 처음 상태로 돌리면 올려 진행 중 준비의 늦은 응답을 버린다(Codex 1R · 새 제작에 지난 상품이 다시 들어오지 않게) */
   const prepSeq = useRef(0);
   const autoRef = useRef<StudioTexts>(EMPTY_STUDIO_TEXTS);
+  /** 자동 문구 기준 = 칸 순서상 첫 몰 상품(사진 올리기 칸은 상품 정보가 없다) */
+  const product = items.find((i) => i.product)?.product ?? null;
+  const remaining = STUDIO_MAX_PRODUCTS - items.length;
+  const full = remaining <= 0;
 
   // 템플릿·상품이 바뀌면 자동 채움 — 비어 있거나 직전 자동값 그대로인 칸만(사람 값 · 호출부 문구 보존 · lib/studio-texts)
   //   직전 자동값은 지역 상수로 잡아 넘긴다 — 갱신 함수는 늦게 돌 수 있어, 그때 autoRef 를 읽으면 이미 새 값이라
@@ -49,8 +65,12 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     setTexts((cur) => applyAutoTexts(cur, prev, next));
   }, [template, product]);
 
-  // 누끼 미리보기 blob 정리
-  useEffect(() => () => { if (cutoutBlob) URL.revokeObjectURL(cutoutBlob); }, [cutoutBlob]);
+  // 훅 언마운트(스튜디오 화면 떠남 · DM 편집기 닫힘) = 준비 세대를 끝내고(남은 단계 중단 · 늦은 미리보기는 받자마자 해제) 미리보기를 모두 해제.
+  //   DM 창 닫기 = 숨김은 언마운트가 아니다(칸 · 준비 그대로 · Codex 설계 1R ④)
+  useEffect(() => () => {
+    prepSeq.current += 1;
+    for (const i of itemsRef.current) if (i.blob) URL.revokeObjectURL(i.blob);
+  }, []);
 
   /** 처음 상태로(DM 창이 넣기 성공 뒤 · 새로 열 때). 다음 템플릿을 고르면 자동 채움이 다시 돈다. */
   const reset = useCallback((next: StudioTexts = EMPTY_STUDIO_TEXTS) => {
@@ -60,9 +80,8 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     setTexts(next);
     setHint('');
     setTextPosition('top');
-    setProduct(null);
-    setCutoutTempId(null);
-    setCutoutBlob(null);
+    for (const i of itemsRef.current) if (i.blob) URL.revokeObjectURL(i.blob);
+    setItems([]);
   }, []);
 
   /**
@@ -75,59 +94,74 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     autoRef.current = auto;
   }, [reset]);
 
-  // ── 상품 준비: 인제스트/업로드 → 누끼 ─────────────────────────
-  const prepareProduct = async (imageUrl: string | null, fromUpload?: File) => {
+  const patchItem = (key: string, patch: Partial<StudioProductItem>) =>
+    setItems((cur) => cur.map((i) => (i.key === key ? { ...i, ...patch } : i)));
+  const dropItem = (key: string) => setItems((cur) => cur.filter((i) => i.key !== key));
+
+  // ── 제품 준비: 담은 칸마다 차례로 인제스트/업로드 → 누끼 · 칸 수명은 runProductPrep(lib/studio-products · 동작 시험) 한 곳 ──
+  const prepareProducts = async (added: Array<ProductSource & { key: string }>) => {
     const seq = ++prepSeq.current;
     const live = () => seq === prepSeq.current;
-    setBusyMsg('상품 이미지 준비 중...');
-    try {
-      let sourceTempId: string | null = null;
-      if (fromUpload) {
+    const r = await runProductPrep(added, {
+      live,
+      setBusy: setBusyMsg,
+      upload: async (file) => {
         const fd = new FormData();
-        fd.append('image', fromUpload);
+        fd.append('image', file);
         const { ok, data } = await studioFetch('/api/image-studio/upload-product', { method: 'POST', body: fd });
         if (!ok) throw new Error(data?.error || '업로드 실패');
-        sourceTempId = data.source.tempId;
-      } else if (imageUrl) {
+        return data.source.tempId;
+      },
+      ingest: async (imageUrl) => {
         const { ok, data } = await studioPost('/api/image-studio/ingest-product', { url: imageUrl });
         if (!ok) throw new Error(data?.error || '상품 이미지를 가져오지 못했어요');
-        sourceTempId = data.source.tempId;
-      }
-      if (!sourceTempId) throw new Error('상품 이미지가 없습니다');
-      if (!live()) return;
+        return data.source.tempId;
+      },
+      removeBg: async (sourceTempId) => {
+        const { ok, data } = await studioPost('/api/image-studio/remove-bg', { sourceTempId });
+        if (!ok) throw new Error(data?.error || '누끼에 실패했어요');
+        return data.cutout.tempId;
+      },
+      preview: (cutoutTempId) => fetchAuthObjectUrl(`/api/image-studio/temp/${cutoutTempId}`),
+      revoke: (url) => URL.revokeObjectURL(url),
+      onCutout: (key, cutoutTempId) => patchItem(key, { cutoutTempId }),
+      onPreview: (key, url) => patchItem(key, { blob: url }),
+      onFail: (key, message) => { dropItem(key); toast.error(message); },
+    });
+    if (!r) return;   // 지난 세대(처음으로 · 언마운트) = 아무것도 건드리지 않는다
+    if (r.ready === 1 && added.length === 1) toast.success('제품 준비 완료. 원본 그대로 포스터에 들어갑니다');
+    else if (r.ready > 0) toast.success(`제품 ${r.ready}개 준비 완료. 넣은 순서대로 포스터에 들어갑니다`);
+  };
 
-      setBusyMsg('제품 누끼 따는 중... (배경 자동 제거)');
-      const { ok, data } = await studioPost('/api/image-studio/remove-bg', { sourceTempId });
-      if (!live()) return;
-      if (!ok) throw new Error(data?.error || '누끼에 실패했어요');
-      // 누끼 ID 는 미리보기보다 먼저 남긴다(미리보기를 못 받아도 상품은 포스터에 들어간다 · Codex 1031 ①)
-      setCutoutTempId(data.cutout.tempId);
-      const blob = await fetchAuthObjectUrl(`/api/image-studio/temp/${data.cutout.tempId}`);
-      if (!live()) { URL.revokeObjectURL(blob); return; }
-      setCutoutBlob(blob);
-      toast.success('제품 준비 완료. 원본 그대로 포스터에 들어갑니다');
-    } catch (e: any) {
-      if (live()) toast.error(e?.message || '상품 준비에 실패했어요');
-    } finally {
-      if (live()) setBusyMsg('');
+  /** 담기 — 남은 칸까지만(넘친 장은 담지 않는다 · 판정 권한은 서버 상한) */
+  const addProducts = (sources: ProductSource[]) => {
+    const room = Math.max(0, STUDIO_MAX_PRODUCTS - itemsRef.current.length);
+    const take = sources.slice(0, room);
+    if (sources.length > take.length) {
+      toast.error(`제품 사진은 최대 ${STUDIO_MAX_PRODUCTS}개까지 넣을 수 있어요.${take.length ? ` 앞의 ${take.length}장만 넣었어요.` : ''}`);
     }
+    if (!take.length) return;
+    const added = take.map((s) => ({ ...s, key: `p${++itemSeq}` }));
+    setItems((cur) => [...cur, ...added.map((a) => ({ key: a.key, product: a.product, cutoutTempId: null, blob: null }))]);
+    void prepareProducts(added);
   };
 
   const onPickMall = (products: PickedMallProduct[]) => {
-    const p = products[0];
-    if (!p) return;
-    setProduct(p);
-    setCutoutTempId(null); setCutoutBlob(null);
-    if (p.imageUrl) prepareProduct(p.imageUrl);
-    else toast.error('이 상품은 이미지가 없어요. 다른 상품을 선택해주세요');
+    const withImage = products.filter((p) => p.imageUrl);
+    if (withImage.length < products.length) toast.error('이미지가 없는 상품은 넣지 않았어요. 다른 상품을 선택해주세요');
+    addProducts(withImage.map((p) => ({ product: p, imageUrl: p.imageUrl })));
   };
   const onUpload = (e: ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    setProduct(null);
-    setCutoutTempId(null); setCutoutBlob(null);
-    prepareProduct(null, f);
+    // 한 번에 여러 장 = 파일 이름 순서대로 담는다(브라우저가 주는 순서는 운영체제마다 달라 사람이 예측할 수 없다 · Codex 설계 3R)
+    const files = Array.from(e.target.files || []).sort((a, b) => a.name.localeCompare(b.name, 'ko', { numeric: true }));
     e.target.value = '';
+    if (files.length) addProducts(files.map((f) => ({ product: null, imageUrl: null, file: f })));
+  };
+  /** 빼기(준비 중이 아닐 때만 눌린다) — 미리보기 해제 */
+  const removeItem = (key: string) => {
+    const it = itemsRef.current.find((i) => i.key === key);
+    if (it?.blob) URL.revokeObjectURL(it.blob);
+    dropItem(key);
   };
 
   // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장 · 차감은 서버가 성공 뒤) ──
@@ -140,7 +174,9 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       if (!attemptRef.current) attemptRef.current = newStudioAttempt();
       const { status, ok, data } = await studioPost('/api/image-studio/generate', {
         templateId: template.id, presetKey: 'poster',
-        texts, userHint: hint || null, cutoutTempId,
+        texts, userHint: hint || null,
+        // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
+        cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
         textPosition: isEvent(template) ? textPosition : null,
         attemptToken: attemptRef.current,
       });
@@ -160,7 +196,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
 
   return {
     template, texts, setTexts, hint, setHint, textPosition, setTextPosition,
-    product, cutoutTempId, cutoutBlob, pickerOpen, setPickerOpen, fileRef,
+    items, remaining, full, removeItem, pickerOpen, setPickerOpen, fileRef,
     busyMsg, reset, restart, onPickMall, onUpload, generate,
   };
 }
@@ -244,31 +280,52 @@ export function StudioMakeFields({ make, disabled = false }: { make: StudioMakeS
 
       {/* ★ 2026-08-13 상품 이미지 — 우측(좌측은 예시 하나로 고정) */}
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <h3 className="text-sm font-bold text-slate-900 mb-1 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-700" /> {event ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-700" /> {event ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
+          <span className="text-[11px] font-semibold text-slate-500 tabular-nums">{make.items.length}/{STUDIO_MAX_PRODUCTS}</span>
+        </div>
         <p className="text-[11px] text-slate-400 mb-3">
           {event
             ? '행사 포스터는 제품 없이 완성됩니다. 포스터에 제품을 함께 넣고 싶을 때만 첨부하세요.'
             : '제품 원본은 그대로 보존하고(누끼) 배경·문구만 새로 그립니다.'}
         </p>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => make.setPickerOpen(true)} disabled={busy} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-xs font-semibold disabled:opacity-40">
+          <button type="button" onClick={() => make.setPickerOpen(true)} disabled={busy || make.full} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-xs font-semibold disabled:opacity-40">
             <ShoppingBag className="w-3.5 h-3.5" /> 연동 몰에서
           </button>
-          <button type="button" onClick={() => make.fileRef.current?.click()} disabled={busy} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40">
+          <button type="button" onClick={() => make.fileRef.current?.click()} disabled={busy || make.full} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40">
             <Upload className="w-3.5 h-3.5" /> 사진 업로드
           </button>
-          <input ref={make.fileRef} type="file" accept="image/*" onChange={make.onUpload} className="hidden" />
+          <input ref={make.fileRef} type="file" accept="image/*" multiple onChange={make.onUpload} className="hidden" />
         </div>
-        {make.cutoutBlob && (
-          <div className="mt-3 flex items-center gap-3">
-            <img src={make.cutoutBlob} alt="누끼" className="w-20 h-20 object-contain rounded-lg border border-emerald-200 bg-slate-100" />
-            <div className="text-[11px] text-emerald-700 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> 배경 제거 완료. 원본 그대로 들어갑니다</div>
-          </div>
+        {make.items.length > 0 && (
+          <ul className="mt-3 flex flex-wrap gap-3">
+            {make.items.map((it, i) => (
+              <li key={it.key} className="relative w-20">
+                <div className="w-20 h-20 rounded-lg border border-emerald-200 bg-slate-100 flex items-center justify-center overflow-hidden">
+                  {it.blob
+                    ? <img src={it.blob} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
+                    : it.cutoutTempId
+                      ? <span className="text-[10px] text-slate-400 text-center px-1 break-keep">미리보기 없음</span>
+                      : <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />}
+                </div>
+                <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
+                <button type="button" onClick={() => make.removeItem(it.key)} disabled={busy} aria-label={`제품 ${i + 1} 빼기`} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-slate-300 text-slate-500 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center disabled:opacity-40">
+                  <X className="w-3 h-3" />
+                </button>
+                {it.product && <div className="mt-1 text-[10px] text-slate-500 truncate">{it.product.name}{it.product.salePrice ? ` · ${won(it.product.salePrice)}` : ''}</div>}
+              </li>
+            ))}
+          </ul>
         )}
-        {make.product && <div className="mt-2 text-[11px] text-slate-500 truncate">{make.product.name}{make.product.salePrice ? ` · ${won(make.product.salePrice)}` : ''}</div>}
+        {make.full && <p className="text-[11px] text-emerald-700 mt-2 break-keep">{STUDIO_MAX_PRODUCTS}개를 다 넣었어요. 바꾸려면 하나를 빼 주세요.</p>}
+        <p className="text-[10px] text-slate-400 italic mt-2 break-keep">제품 사진은 최대 {STUDIO_MAX_PRODUCTS}개까지 넣을 수 있어요. 넣은 순서대로 왼쪽부터 놓여요.</p>
+        {make.items.length > 1 && (
+          <p className="text-[10px] text-amber-700 italic mt-1 break-keep">여러 개를 넣으면 제품이 작아져 라벨의 아주 작은 글씨가 바뀔 수 있어요. 만든 뒤 꼭 확인해 주세요.</p>
+        )}
         {!event && (
           <>
-            <p className="text-[10px] text-slate-400 italic mt-2">상품 없이도 생성할 수 있어요(문구 포스터). 단일 제품 사진에서 가장 잘 작동합니다.</p>
+            <p className="text-[10px] text-slate-400 italic mt-1">상품 없이도 생성할 수 있어요(문구 포스터).</p>
             <p className="text-[10px] text-amber-700 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요. 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
           </>
         )}
@@ -279,7 +336,7 @@ export function StudioMakeFields({ make, disabled = false }: { make: StudioMakeS
         <input value={make.hint} onChange={(e) => make.setHint(e.target.value)} placeholder="예: 대리석 카운터, 은은한 램프 조명" className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300" />
       </div>
 
-      <MallProductPickerModal open={make.pickerOpen} onClose={() => make.setPickerOpen(false)} onPick={make.onPickMall} />
+      <MallProductPickerModal open={make.pickerOpen} onClose={() => make.setPickerOpen(false)} onPick={make.onPickMall} max={make.remaining} />
     </div>
   );
 }
