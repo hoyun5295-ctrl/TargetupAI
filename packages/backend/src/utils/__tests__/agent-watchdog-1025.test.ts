@@ -315,21 +315,29 @@ describe('실행 순서 — 상태 먼저 저장 · 그다음 끊기 · 경보 �
   const os = req('os');
   const NOW = T0 + 30 * MIN;
   type Call = { cmd: string; args: string[] };
-  function fakeExec(units: Record<string, { lines: Array<{ ts: number; text: string }>; nRestarts?: number }>, calls: Call[], opts: { probe?: boolean } = {}) {
+  // ★ 1102 R43 — KILL 의 효과(기동이 끝남)를 흉내도 따라간다: 끊긴 유닛은 그 뒤 show 에서 다시 뜨는 중(activating · 기동 ID 없음).
+  //   killThrows = 명령이 0 아닌 종료(1102 「auxiliary processes … Invalid argument」) · killNoEffect = 신호가 안 먹어 같은 기동이 그대로
+  function fakeExec(units: Record<string, { lines: Array<{ ts: number; text: string }>; nRestarts?: number }>, calls: Call[], opts: { probe?: boolean; killThrows?: boolean; killNoEffect?: boolean } = {}) {
     let nonce = '';
+    const ended = new Set<string>();
     return (cmd: string, args: string[]) => {
       calls.push({ cmd, args });
       if (cmd === 'logger') { nonce = args[args.length - 1]; return ''; }
       if (cmd === 'journalctl' && args[0] === '-t') return opts.probe === false ? '' : `${nonce}\n`;
       if (cmd === 'systemctl' && args[0] === 'show') {
         const u = args[1];
+        if (ended.has(u)) return 'ActiveState=activating\nInvocationID=\n';
         return `LoadState=loaded\nActiveState=active\nSubState=running\nInvocationID=inv-${u}\nActiveEnterTimestamp=@${Math.floor((NOW - 60 * MIN) / 1000)}\nInactiveEnterTimestamp=\nNRestarts=${units[u].nRestarts ?? 0}\n`;
       }
       if (cmd === 'journalctl' && args[0].startsWith('_SYSTEMD_INVOCATION_ID=')) {
         const u = args[0].slice('_SYSTEMD_INVOCATION_ID=inv-'.length);
         return units[u].lines.map((l) => JSON.stringify({ __REALTIME_TIMESTAMP: String(l.ts * 1000), MESSAGE: l.text })).join('\n');
       }
-      if (cmd === 'systemctl' && args[0] === 'kill') return '';
+      if (cmd === 'systemctl' && args[0] === 'kill') {
+        if (!opts.killNoEffect) ended.add(args[args.length - 1]);
+        if (opts.killThrows) throw new Error('Command failed: systemctl kill -s KILL x\nFailed to kill unit x.service: Failed to send signal SIGKILL to auxiliary processes: Invalid argument');
+        return '';
+      }
       if (cmd === 'ops') return 'ok';
       throw new Error(`unexpected ${cmd} ${args.join(' ')}`);
     };
@@ -361,6 +369,77 @@ describe('실행 순서 — 상태 먼저 저장 · 그다음 끊기 · 경보 �
     const calls2: Call[] = [];
     cli.tick({ exec: fakeExec({ a: frozen(), b: healthy(), c: healthy() }, calls2), now: NOW + MIN, cfg: cfgFor('active', dir) });
     expect(calls2.filter((c) => c.cmd === 'ops')).toHaveLength(0);
+  });
+
+  it('★1102 R43 명령이 0 아닌 종료를 돌려줘도 그 기동이 끝났으면 강제 종료 성공(1102 hanjul02 「auxiliary processes」 실측) · 「못 함」 경보 0', () => {
+    const dir = tmp();
+    const calls: Call[] = [];
+    cli.tick({ exec: fakeExec({ a: frozen(), b: healthy(), c: healthy() }, calls, { killThrows: true }), now: NOW, cfg: cfgFor('active', dir), sleep: () => undefined });
+    const alerts = calls.filter((c) => c.cmd === 'ops');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0].args[1]).toContain('감지 a: 로그 3분 0줄(동결) → 강제 종료함');
+    expect(alerts[0].args[1]).not.toContain('강제 종료 명령 실패');
+    expect(alerts[0].args[1]).not.toContain('강제 종료 못 함');
+    expect(JSON.parse(fs.readFileSync(join(dir, 'state.json'), 'utf8')).counters.kills).toEqual({ a: 1 });
+  });
+
+  it('★1102 R43 명령이 성공을 돌려줘도 그 기동이 그대로면 실패(효과로 판정) · 몇 번 다시 보고 경보', () => {
+    for (const killThrows of [false, true]) {
+      const dir = tmp();
+      const calls: Call[] = [];
+      let waits = 0;
+      cli.tick({ exec: fakeExec({ a: frozen(), b: healthy(), c: healthy() }, calls, { killNoEffect: true, killThrows }), now: NOW, cfg: cfgFor('active', dir), sleep: () => { waits++; } });
+      const shows = calls.filter((c) => c.cmd === 'systemctl' && c.args[0] === 'show' && c.args[1] === 'a' && c.args.includes('ActiveState,InvocationID'));
+      expect(shows.length).toBe(11);   // KILL 직전 재확인 1 + KILL 뒤 확인 10
+      expect(waits).toBe(9);
+      const body = calls.filter((c) => c.cmd === 'ops')[0].args[1];
+      expect(body).toContain('강제 종료 명령 실패');
+      expect(body).toContain('강제 종료 못 함');
+      expect(JSON.parse(fs.readFileSync(join(dir, 'state.json'), 'utf8')).counters.kills).toEqual({});
+    }
+  });
+
+  it('★1102 R43 Codex 1R · 2R — 조치 전체(직전 재확인 → 끊기 → 확인) = 10초 상한 하나 · 명령마다 그 순간 남은 시간 · 0(무제한)을 넘기지 않는다', () => {
+    let t = 0;
+    const calls: Array<[string, number]> = [];
+    const exec = (_cmd: string, args: string[], timeout?: number) => {
+      calls.push([args[0], Number(timeout)]);
+      t += 3000;   // 명령 하나 = 3초
+      return args[0] === 'kill' ? '' : 'ActiveState=active\nInvocationID=inv-a\n';   // 끝나지 않음
+    };
+    const r = cli.killUnit(exec, 'a', { invocationId: 'inv-a' }, (ms: number) => { t += ms; }, () => t);
+    expect(r.outcome).toBe('failed');
+    // 0초 재확인(남은 10000) → 3초 끊기(7000) → 6초 확인(4000) → 9.3초 확인(700) → 12.3초 = 남은 시간 없음 · 멈춤
+    expect(calls).toEqual([['show', 10000], ['kill', 7000], ['show', 4000], ['show', 700]]);
+  });
+
+  it('★1102 R43 Codex 2R — 남은 시간이 1ms 아래면 1 을 넘긴다(0 = execFileSync 무제한) · 남은 시간이 없으면 확인하지 않고 실패', () => {
+    let t = 0;
+    const calls: Array<[string, number]> = [];
+    const exec = (_cmd: string, args: string[], timeout?: number) => {
+      calls.push([args[0], Number(timeout)]);
+      t += calls.length === 1 ? 9999.5 : 1;
+      return args[0] === 'kill' ? '' : 'ActiveState=active\nInvocationID=inv-a\n';
+    };
+    const r = cli.killUnit(exec, 'a', { invocationId: 'inv-a' }, () => undefined, () => t);
+    expect(calls).toEqual([['show', 10000], ['kill', 1]]);
+    expect(r.outcome).toBe('failed');
+  });
+
+  it('★1102 R43 Codex 2R — 끊은 뒤 확인 조회가 던지면(시간 초과 등) 강제 종료 실패 경보 · 끊은 수 0', () => {
+    const dir = tmp();
+    const calls: Call[] = [];
+    const base = fakeExec({ a: frozen(), b: healthy(), c: healthy() }, calls);
+    let killedA = false;
+    const exec = (cmd: string, args: string[]) => {
+      if (cmd === 'systemctl' && args[0] === 'kill') killedA = true;
+      if (killedA && cmd === 'systemctl' && args[0] === 'show' && args[1] === 'a') throw new Error('spawnSync systemctl ETIMEDOUT');
+      return base(cmd, args);
+    };
+    cli.tick({ exec, now: NOW, cfg: cfgFor('active', dir), sleep: () => undefined });
+    const body = calls.filter((c) => c.cmd === 'ops')[0].args[1];
+    expect(body).toContain('강제 종료 명령 실패');
+    expect(JSON.parse(fs.readFileSync(join(dir, 'state.json'), 'utf8')).counters.kills).toEqual({});
   });
 
   it('dry-run: 끊지 않는다 · 사건 경보도 보내지 않는다 · 시험 모드 끊기 판정 수를 센다', () => {

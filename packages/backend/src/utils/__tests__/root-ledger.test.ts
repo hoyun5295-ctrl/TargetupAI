@@ -4435,3 +4435,96 @@ describe('R42 공용 발송 줄 = 회사 대표 · 한 회사 한 줄 · 몫마�
     expect(pass).not.toMatch(/for \(const row of due\.rows\)/);
   });
 });
+
+// ── R43 조치 명령의 종료 코드를 효과로 읽는다(★ 2026-11-02 비토 감시 hanjul02 「강제 종료 못 함」 오경보 · 설계서 docs/2026-10-25-agent-watchdog-design.md §12)
+//   운영 스크립트가 서비스를 끊거나 다시 띄우는 조치는 성공을 명령 종료 코드가 아니라 효과로 판정한다.
+//   대상 = scripts/ · packages/backend/scripts 아래 셸 · JS · TS 전수(소스에서 기계로 뽑는다).
+//   ★ Codex 1R · 2R — 줄 · 정규식 주석 지우기는 여러 줄 호출 · 문자열 속 // · # 뒤 실행문을 놓쳤다(같은 뿌리 두 번) →
+//   JS · TS = TypeScript 구문 트리(주석은 마디가 아니다 · 문자열은 문자열이다) · 셸 = 따옴표를 아는 주석 판정 + 줄 이음(\) 허용.
+const R43_ARRAY_VERB = /^(kill|restart|stop|start|reload)$/;
+const R43_STRING_ACTION = /\bsystemctl\s+(?:-{1,2}[\w-]+(?:=\S+)?\s+)*(kill|restart|stop|start|reload)\b/;
+const R43_SH_ACTION = /(^|[\s;&|(`$])(?:sudo(?:[ \t]|\\\n)+)?systemctl(?:[ \t]|\\\n)+(?:-{1,2}[\w-]+(?:=\S+)?(?:[ \t]|\\\n)+)*(kill|restart|stop|start|reload)\b/g;
+/** 셸 주석만 같은 길이 공백으로(따옴표 안 # · $# · \# 은 주석이 아니다 · 줄바꿈 유지) */
+function blankShComments(src: string): string {
+  let out = '';
+  let q: string | null = null;
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (q === "'") { out += c; if (c === "'") q = null; continue; }
+    if (q === '"') { out += c; if (c === '\\' && i + 1 < src.length) out += src[++i]; else if (c === '"') q = null; continue; }
+    if (c === '\\' && i + 1 < src.length) { out += c + src[++i]; continue; }
+    if (c === "'" || c === '"') { q = c; out += c; continue; }
+    if (c === '#' && (i === 0 || /[\s;&|(]/.test(src[i - 1]))) {
+      while (i < src.length && src[i] !== '\n') { out += ' '; i++; }
+      if (i < src.length) out += '\n';
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+function serviceActionSites(file: string, src: string): number[] {
+  const out = new Set<number>();
+  if (/\.sh$/.test(file)) {
+    const text = blankShComments(src);
+    for (const m of text.matchAll(R43_SH_ACTION)) out.add(text.slice(0, (m.index ?? 0) + m[0].indexOf('systemctl')).split('\n').length);
+    return [...out].sort((a, b) => a - b);
+  }
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, /\.ts$/.test(file) ? ts.ScriptKind.TS : ts.ScriptKind.JS);
+  const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+  const strText = (n: ts.Node | undefined): string | null => (n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) ? n.text : null);
+  const visit = (n: ts.Node): void => {
+    if ((ts.isCallExpression(n) || ts.isNewExpression(n)) && n.arguments) {
+      const args = [...n.arguments];
+      args.forEach((a, i) => {
+        const nx = args[i + 1];
+        if (strText(a) === 'systemctl' && nx && ts.isArrayLiteralExpression(nx) && R43_ARRAY_VERB.test(strText(nx.elements[0]) ?? '')) out.add(lineOf(a));
+      });
+    }
+    const text = strText(n) ?? (ts.isTemplateExpression(n) ? n.head.text + n.templateSpans.map((sp) => ` x ${sp.literal.text}`).join('') : null);
+    if (text && R43_STRING_ACTION.test(text)) out.add(lineOf(n));
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return [...out].sort((a, b) => a - b);
+}
+describe('R43 조치 명령의 종료 코드를 효과로 읽는다 — 서비스 조치 = 효과 확인 함수 한 곳', () => {
+  const roots = [[SCRIPTS, 'scripts/'], [join(BE, '..', 'scripts'), 'packages/backend/scripts/']] as const;
+  const sites = roots.flatMap(([root, pre]) => (readdirSync(root, { recursive: true }) as string[])
+    .map((f) => String(f).replace(/\\/g, '/'))
+    .filter((f) => /\.(sh|js|mjs|cjs|ts)$/.test(f) && !/(^|\/)(tests|node_modules|dist)\//.test(f))
+    .flatMap((f) => serviceActionSites(f, read(join(root, f))).map((n) => `${pre}${f}:${n}`)));
+  const WD = read(join(SCRIPTS, 'agent-watchdog', 'agent-watchdog.js'));
+  it('뽑기 사례 — 잡는다: 여러 줄 호출 · 주석 뒤 실행문 · 문자열 속 // 뒤 실행문 · 문자열 명령 · 틀 문자열 · 셸 조건문 · && 뒤 · sudo · 플래그 · 줄 이음 · 따옴표 속 # 뒤 실행문', () => {
+    expect(serviceActionSites('a.js', "exec('systemctl',\n  ['restart', unit]);")).toEqual([1]);
+    expect(serviceActionSites('a.js', "/* 설명 */ exec('systemctl', ['stop', u]);")).toEqual([1]);
+    expect(serviceActionSites('a.js', "const label = 'phase // shutdown'; exec('systemctl', ['stop', unit]);")).toEqual([1]);
+    expect(serviceActionSites('a.js', "x();\nexecSync('systemctl --no-block restart foo')")).toEqual([2]);
+    expect(serviceActionSites('a.ts', 'run(`systemctl --now restart ${u}`);')).toEqual([1]);
+    expect(serviceActionSites('a.sh', 'if systemctl restart x; then\n  :\nfi\nok && sudo systemctl --no-block stop y')).toEqual([1, 4]);
+    expect(serviceActionSites('a.sh', 'echo "phase # cleanup"; systemctl restart foo')).toEqual([1]);
+    expect(serviceActionSites('a.sh', "echo 'a # b'\nsystemctl \\\n  restart x")).toEqual([2]);
+  });
+  it('뽑기 사례 — 안 잡는다: 주석 · 조회(show · is-active) · 문자열 속 단어', () => {
+    expect(serviceActionSites('a.js', "// exec('systemctl', ['kill', u])\n/* exec('systemctl', ['kill', u]) */\nexec('systemctl', ['show', u])")).toEqual([]);
+    expect(serviceActionSites('a.js', "log('서비스를 다시 띄웠다 · systemctl 상태 확인');")).toEqual([]);
+    expect(serviceActionSites('a.sh', '# systemctl restart z\nsystemctl show x -p ActiveState\nsystemctl is-active y\necho "$#" # systemctl stop q')).toEqual([]);
+  });
+  it('서비스 조치 자리 = 감시 killUnit 안 한 곳(새 조치 자리는 효과 확인을 거쳐 이유와 함께 더한다)', () => {
+    const line = WD.slice(0, WD.indexOf("exec('systemctl', ['kill'")).split('\n').length;
+    const fnStart = WD.slice(0, WD.indexOf('function killUnit(')).split('\n').length;
+    expect(line).toBeGreaterThan(fnStart);
+    expect(sites).toEqual([`scripts/agent-watchdog/agent-watchdog.js:${line}`]);
+  });
+  it('killUnit = 직전 재확인 · 끊기 · 효과 확인이 한 예산 · 명령 오류는 삼키고 효과로 판정 · 회차는 killUnit 만 부른다', () => {
+    const src = stripComments(WD);
+    const fn = src.slice(src.indexOf('function killUnit('), src.indexOf('function tick('));
+    expect(fn).toContain("if (!sameInvocation(exec, unit, snap, Math.max(1, left()))) return { outcome: 'restarted', cmdError: null };");
+    expect(fn).toMatch(/try\s*\{\s*exec\('systemctl', \['kill', '-s', 'KILL', unit\], Math\.max\(1, left\(\)\)\);\s*\}\s*catch\s*\(e\)\s*\{\s*cmdError = e;\s*\}/);
+    expect(fn).toContain("if (!sameInvocation(exec, unit, snap, Math.max(1, left()))) return { outcome: 'killed', cmdError };");
+    expect(fn).toContain("return { outcome: 'failed', cmdError };");
+    const tickSrc = src.slice(src.indexOf('function tick('));
+    expect(tickSrc).toContain('const r = killUnit(exec, unit, snapOf[unit], sleep);');
+    expect(tickSrc).not.toContain('sameInvocation(');
+  });
+});

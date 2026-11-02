@@ -157,3 +157,11 @@
 
 - 되돌리기 = `systemctl disable --now bito-agent-watchdog.timer` · 백업 스크립트는 `/home/administrator/backups/*.bak-20261025` 로 복원 · 게이트웨이는 `deploy.sh` 자동 백업(`/opt/bito-gateway/deploy-backups/<시각>`).
 - 운영기록대장 = 6 · 10 · 13(경보 경로 · 방화벽 무관 · 계정 정보 위치만) 한 줄.
+
+## 12. 1102 정정 · 강제 종료 판정 = 효과(뿌리 대장 R43)
+
+- 사건(Harold 실행 출력): 11:01:26 `bito-agent-hanjul02` SIGSEGV 뒤 멈춤 → 11:04:01 감시 KILL = systemd 「Sent signal SIGKILL to main process … (bito-agent-boot)」 · 「Failed to send signal SIGKILL to auxiliary processes … Invalid argument」 → 본 프로세스 끝남 · 11:04:07 재시작(NRestarts 1) · 감시는 명령 종료 코드만 보고 「강제 종료 못 함」 + 「강제 종료 명령 실패」 경보 · 11:08 「복구」 메일도 스스로 풀린 것처럼 읽혔다.
+- 처방: `killUnit` = KILL 명령(오류는 잡아 둠) → 판정한 그 기동이 끝났는지(`sameInvocation` 거짓) 0.3초 간격 최대 10번 다시 본다 → 끝났으면 성공(명령 오류는 로그에 한 줄) · 그대로면 실패(경보 그대로) · 확인 조회가 던지면 실패.
+- 시험: agent-watchdog-1025.test.ts(명령 오류 + 효과 있음 = 강제 종료함 · 명령 성공 + 효과 없음 = 실패 · 변이 2개 빨간불) · root-ledger.test.ts R43(서비스 조치 자리 = killUnit 한 곳 · 변이 빨간불).
+- 배포 = §11 의 3(.62 administrator `git pull`) → 4(.62 root 가 `agent-watchdog.js` 하나만 `/opt/bito-watchdog/` 에 설치) · 유닛 · 설정 변경 0 · 다음 회차(1분)부터 적용.
+- Codex 구현 리뷰: 1R needs-attention 2(확인 고리 전체 시간 상한 없음 · R43 줄 단위 뽑기가 여러 줄 · 주석 뒤 · 셸 조건문 호출을 놓침) → 수용 · 2R needs-attention 2(직전 재확인이 예산 밖 · 정규식 주석 지우기가 문자열 속 // · # 뒤 실행문을 지움) = 1R 과 같은 뿌리 → 구조 수정(조치 전체 = killUnit 한 예산 10초 · 회차 쪽 따로 확인 코드 지움 / 뽑기 = TypeScript 구문 트리 + 따옴표를 아는 셸 주석 판정 + 사례 시험) · 3R approve. 저장소 스크립트 systemctl 자리 = 넷(조회 2 · 끊기 1 · 문구 1 · 변수 · 스프레드 꼴 0).

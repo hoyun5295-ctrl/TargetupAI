@@ -176,13 +176,43 @@ function bump(map, key, n = 1) { map[key] = (map[key] || 0) + n; }
 function freshCounters(mode) { return { mode, ticks: 0, alerts: 0, dryKills: 0, kills: {}, restarts: {}, healthyTicks: {} }; }
 
 /** KILL 직전 재확인: 판정한 그 기동이 아직 떠 있는가(그사이 스스로 재기동했으면 새 정상 프로세스를 끊지 않는다) */
-function sameInvocation(exec, unit, snap) {
-  const show = parseShow(exec('systemctl', ['show', unit, '-p', 'ActiveState,InvocationID']));
+function sameInvocation(exec, unit, snap, timeout) {
+  const show = parseShow(exec('systemctl', ['show', unit, '-p', 'ActiveState,InvocationID'], timeout));
   return show.ActiveState === 'active' && !!snap.invocationId && show.InvocationID === snap.invocationId;
 }
 
-/** 한 회차. 시험은 exec(명령 실행) · now · cfg 를 넣는다. */
-function tick({ exec = run, now = Date.now(), cfg = readConfig() } = {}) {
+/**
+ * ★ 1102 강제 종료 = 효과로 판정(뿌리 대장 R43). 명령 종료 코드로 성공을 정하지 않는다.
+ *   1102 11:04 hanjul02 실측: `systemctl kill` 이 본 프로세스에 KILL 을 보내 끝냈는데(6초 뒤 systemd 가 다시 띄움)
+ *   같은 묶음의 보조 프로세스에 보내다 「Invalid argument」로 0 아닌 종료를 돌려줘 감시가 「강제 종료 못 함」 경보를 보냈다.
+ *   명령 결과와 무관하게 판정한 그 기동이 끝났는가(sameInvocation 이 거짓)를 몇 번 다시 본다 · 끝났으면 성공 · 그대로면 실패.
+ *   확인 조회가 던지면 그대로 던진다(모르면 실패 = 사람에게 경보).
+ *   ★ Codex 1R · 2R — 유닛 하나의 조치 전체(끊기 직전 재확인 → 끊기 → 효과 확인) = 단조 시계 10초 상한 하나(명령마다 남은 시간을 넘긴다 ·
+ *   한 회차 끊기 최대 2개 = 20초 · 회차 상한 110초 안에 경보 45초를 남긴다). 옛: 직전 재확인이 회차 쪽에 따로 있어 상한 밖(20초)이었다.
+ *   돌려줌 outcome = 'restarted'(판정 뒤 스스로 다시 떴다 · 끊지 않음) · 'killed'(그 기동이 끝남 · 명령 오류는 cmdError) · 'failed'(그대로 돈다).
+ */
+const KILL_BUDGET_MS = 10000;
+const KILL_VERIFY_TRIES = 10;
+const KILL_VERIFY_INTERVAL_MS = 300;
+function killUnit(exec, unit, snap, sleep = sleepMs, clock = () => performance.now()) {
+  const deadline = clock() + KILL_BUDGET_MS;
+  const left = () => Math.floor(deadline - clock());
+  if (!sameInvocation(exec, unit, snap, Math.max(1, left()))) return { outcome: 'restarted', cmdError: null };
+  let cmdError = null;
+  try {
+    exec('systemctl', ['kill', '-s', 'KILL', unit], Math.max(1, left()));
+  } catch (e) {
+    cmdError = e;
+  }
+  for (let i = 0; i < KILL_VERIFY_TRIES && left() > 0; i++) {
+    if (!sameInvocation(exec, unit, snap, Math.max(1, left()))) return { outcome: 'killed', cmdError };
+    if (i < KILL_VERIFY_TRIES - 1 && left() > 0) sleep(Math.min(KILL_VERIFY_INTERVAL_MS, left()));
+  }
+  return { outcome: 'failed', cmdError };
+}
+
+/** 한 회차. 시험은 exec(명령 실행) · now · cfg · sleep(확인 사이 기다림)을 넣는다. */
+function tick({ exec = run, now = Date.now(), cfg = readConfig(), sleep = sleepMs } = {}) {
   const dryRun = cfg.mode === 'dry-run';
   const { state: prev, corrupt } = loadState(cfg, { tolerateCorrupt: true });
   const probeOk = probeJournald(now, exec);
@@ -219,15 +249,16 @@ function tick({ exec = run, now = Date.now(), cfg = readConfig() } = {}) {
   for (const unit of kills) {
     if (dryRun) { counters.dryKills += 1; log(`[dry-run] 끊었을 유닛: ${unit}`); continue; }
     try {
-      if (!sameInvocation(exec, unit, snapOf[unit])) {
+      const r = killUnit(exec, unit, snapOf[unit], sleep);
+      if (r.outcome === 'restarted') {
         log(`강제 종료 취소: ${unit} — 판정 뒤 다시 기동했음`);
         judged.units[unit].findings = judged.units[unit].findings.filter((f) => f.action !== 'kill');
         continue;
       }
-      exec('systemctl', ['kill', '-s', 'KILL', unit]);
+      if (r.outcome !== 'killed') throw r.cmdError || new Error('KILL 뒤에도 판정한 기동이 그대로 돈다');
       killed.push(unit);
       bump(counters.kills, unit);
-      log(`강제 종료: ${unit}`);
+      log(`강제 종료: ${unit}${r.cmdError ? ` (명령은 오류를 돌려줬으나 그 기동은 끝남: ${String(r.cmdError.message).split('\n')[0]})` : ''}`);
     } catch (e) {
       log(`강제 종료 실패: ${unit} — ${e.message}`);
       judged.units[unit].findings.push({ kind: 'kill_failed', action: 'alert' });
@@ -355,4 +386,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { parseShow, unixMs, journalMessage, tick };
+module.exports = { parseShow, unixMs, journalMessage, tick, killUnit };
