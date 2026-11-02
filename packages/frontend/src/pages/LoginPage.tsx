@@ -4,8 +4,6 @@ import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import IdentityVerifyModal from '../components/IdentityVerifyModal';
 import LoginPolicyNoticeModal, { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
-import MaintenanceNoticeModal from '../components/MaintenanceNoticeModal';
-import { isMaintenanceNoticeActive, MAINTENANCE_NOTICE_END_AT_MS } from '../constants/maintenanceNotice';
 import { DEFAULT_SESSION_TIMEOUT_MINUTES } from '../hooks/useSessionTimeout';
 import { COMPANY_NAME, CEO_NAME, BIZ_NUMBER, TRADE_NUMBER, COMPANY_ADDRESS, COMPANY_PHONE } from '../constants/company';
 import { takeLoginReturn } from '../utils/login-return';
@@ -81,19 +79,7 @@ export default function LoginPage() {
 
   // ★ 2026-10-02 로그인·발송 인증 의무화 사전 고지 — 고객사 로그인 화면에 들어올 때마다 뜬다(슈퍼관리자 화면 제외).
   //   띄울지 말지는 창이 가진 판정 하나가 정한다(「오늘 하루 보지 않기」만 숨긴다).
-  // ★ 2026-11-02 서버 점검 안내 — 점검이 끝나는 시각 전까지 인증 안내 창 대신 뜬다(끝나면 인증 안내 창이 저절로 돌아온다 · constants/maintenanceNotice.ts).
-  const [showMaintenanceNotice, setShowMaintenanceNotice] = useState(() => !isSuperAdminOnly && isMaintenanceNoticeActive());
-  const [showPolicyNotice, setShowPolicyNotice] = useState(() => !isSuperAdminOnly && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice());
-  // ★ Codex 1R · 2R — 열어 둔 화면도 끝나는 시각에 점검 창을 닫고 인증 안내 창 판정으로 돌아간다(옛: 처음 한 번만 판정해 화면을 다시 열어야 돌아왔다).
-  //   시각을 여기서 다시 묻지 않는다 = 처음에 점검 창을 띄운 화면이면 남은 시간 뒤(이미 지났으면 바로) 돌아간다(2R: 끝나기 직전에 열면 영영 안 돌아왔다).
-  useEffect(() => {
-    if (!showMaintenanceNotice) return;
-    const t = window.setTimeout(() => {
-      setShowMaintenanceNotice(false);
-      setShowPolicyNotice(shouldShowLoginPolicyNotice());
-    }, Math.max(0, MAINTENANCE_NOTICE_END_AT_MS - Date.now()));
-    return () => window.clearTimeout(t);
-  }, []);
+  const [showPolicyNotice, setShowPolicyNotice] = useState(() => !isSuperAdminOnly && shouldShowLoginPolicyNotice());
 
   // 페이지 진입 시 강제 로그아웃 사유 확인
   useEffect(() => {
@@ -1027,7 +1013,6 @@ export default function LoginPage() {
       </div>
 
       {/* 모달들 */}
-      {showMaintenanceNotice && <MaintenanceNoticeModal onClose={() => setShowMaintenanceNotice(false)} />}
       {showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}
       {mfaModal}
       {identity && (

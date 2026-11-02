@@ -78,8 +78,7 @@ describe('로그인 화면 사전 고지 창', () => {
   it('옛 9/1 팝업은 없고, 고객사 로그인 화면에만 새 창이 뜬다', () => {
     expect(login).not.toContain('securityNotice20260901');
     expect(login).not.toContain('2026년 9월 1일 시행');
-    // ★ 2026-11-02 서버 점검 안내 기간에는 인증 안내 창 대신 점검 안내 창(아래 describe)
-    expect(login).toContain('useState(() => !isSuperAdminOnly && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice())');
+    expect(login).toContain('useState(() => !isSuperAdminOnly && shouldShowLoginPolicyNotice())');
     expect(login).toContain('{showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}');
   });
 
@@ -135,50 +134,5 @@ describe('로그인 화면 사전 고지 창', () => {
     const text = visible.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
     expect(text).not.toContain('—');
     expect(text).not.toMatch(/Claude|GPT|Anthropic|Opus|Sonnet|Haiku/i);
-  });
-});
-
-// ★ 2026-11-02 서버 점검 안내 창 — 점검이 끝나는 시각 전까지 인증 안내 창 대신 · 지나면 저절로 인증 안내 창(다시 배포 0)
-describe('로그인 화면 서버 점검 안내 창(1102)', () => {
-  const login = fe('pages', 'LoginPage.tsx');
-  const modal = fe('components', 'MaintenanceNoticeModal.tsx');
-  const consts = fe('constants', 'maintenanceNotice.ts');
-
-  it('판정 = 끝나는 시각(11월 3일 02:00 한국 시각) 전만 · 그 순간부터 인증 안내 창으로 돌아간다', async () => {
-    const m = await import('../../../../frontend/src/constants/maintenanceNotice');
-    const end = new Date('2026-11-03T02:00:00+09:00').getTime();
-    expect(m.MAINTENANCE_NOTICE_END_AT_MS).toBe(end);
-    expect(m.isMaintenanceNoticeActive(new Date('2026-11-02T13:00:00+09:00').getTime())).toBe(true);
-    expect(m.isMaintenanceNoticeActive(end - 1)).toBe(true);
-    expect(m.isMaintenanceNoticeActive(end)).toBe(false);
-    expect(m.isMaintenanceNoticeActive(end + 60_000)).toBe(false);
-    // 문구의 끝 시각 = 판정의 끝 시각(한쪽만 바뀌지 않게)
-    expect(m.MAINTENANCE_NOTICE_PERIOD_TEXT).toContain('11월 3일(화) 02:00');
-    expect(m.MAINTENANCE_NOTICE_LEAD_TEXT).toContain('11월 3일(화) 새벽 2시');
-  });
-
-  it('로그인 화면 = 점검 기간에는 점검 창만(인증 안내 창은 안 뜸) · 슈퍼관리자 화면 제외', () => {
-    expect(login).toContain('useState(() => !isSuperAdminOnly && isMaintenanceNoticeActive())');
-    expect(login).toContain('{showMaintenanceNotice && <MaintenanceNoticeModal onClose={() => setShowMaintenanceNotice(false)} />}');
-    // Codex 1R · 2R — 열어 둔 화면도 끝나는 시각에 점검 창을 닫고 인증 안내 창 판정(오늘 하루 숨김 규칙 그대로)으로 돌아간다.
-    //   판정 자리 = 「처음에 점검 창을 띄웠는가」 하나 · 그 안에서 시각을 다시 묻지 않는다(끝나기 직전에 열면 영영 안 돌아오던 2R 경계)
-    const at = login.indexOf('useEffect(() => {\n    if (!showMaintenanceNotice) return;');
-    expect(at).toBeGreaterThan(0);
-    const effect = login.slice(at, login.indexOf('}, []);', at) + 7);
-    expect(effect).toMatch(/^useEffect\(\(\) => \{\s*if \(!showMaintenanceNotice\) return;\s*const t = window\.setTimeout\(\(\) => \{\s*setShowMaintenanceNotice\(false\);\s*setShowPolicyNotice\(shouldShowLoginPolicyNotice\(\)\);\s*\}, Math\.max\(0, MAINTENANCE_NOTICE_END_AT_MS - Date\.now\(\)\)\);\s*return \(\) => window\.clearTimeout\(t\);\s*\}, \[\]\);$/);
-    expect(effect).not.toContain('isMaintenanceNoticeActive(');
-  });
-
-  it('창 = 바깥 문구 규칙(줄표 0 · 가운뎃점 0 · 모델명 0) · 브라우저 기본 대화상자 0 · 확인 버튼은 닫기만', () => {
-    const visible = (modal + consts).replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    const strings = visible.match(/'[^'\n]*'|>[^<>{}\n]+</g) || [];
-    for (const s of strings) {
-      expect(s).not.toContain('—');
-      expect(s).not.toContain('·');
-    }
-    expect(visible).not.toMatch(/Claude|GPT|Anthropic|Opus|Sonnet|Haiku/i);
-    expect(modal).not.toMatch(/\b(alert|confirm|prompt)\(/);
-    const confirm = modal.slice(modal.indexOf('ref={confirmRef}'), modal.indexOf('확인했습니다'));
-    expect(confirm).toContain('onClick={onClose}');
   });
 });
