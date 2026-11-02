@@ -135,7 +135,7 @@ import { normalizeStartKind } from '../utils/journey-start-kind';
 //   /operator/data-profile endpoint = 마케팅 담당자 검토 UI 안내 카드 data source.
 import { getCompanyDataProfile, getCompanyJourneyFacts } from '../utils/company-data-profile';
 // ★ 2026-08-01 여정 재설계 §2-3 — 회사가 준 데이터로 만들 수 있는 여정만 연다(못 여는 것은 사유와 함께 잠근다).
-import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger } from '../utils/journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, hasAnyAvailableTrigger, sendTimingLine } from '../utils/journey-trigger-capability';
 // ★ D192 (2026-05-22): CT-51 Journey 통계 통합 진입점 — 옛 단순 통계(getJourneyStats/listExecutions)를 완전 진화 — buildJourneyStats (overview + steps + segments + hourly + weekday + variants) + listJourneyEnteredCustomers (회사 격리 + 페이지네이션)
 import { buildJourneyStats, listJourneyEnteredCustomers } from '../utils/journey-stats';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 회사 예측 점수 분포 + Top 위험/구매 가능성 + 모델 정확도
@@ -4409,10 +4409,12 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
     //   검사가 스텝 목록을 읽은 뒤 스텝이 추가되면(추가는 updated_at을 올린다) 마커는 옛 판을 통과시킨 기록이 된다.
     //   ⛔ 시각은 `::text` 원문으로 주고받는다 — JS Date 왕복은 µs를 절사해 같은 판을 다른 판으로 만든다(§11 커서 교훈).
     const beforeRow = await query(
-      `SELECT updated_at::text AS rev FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
+      `SELECT updated_at::text AS rev, trigger_event, start_kind FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`,
       [req.params.id, companyId]
     );
     const revBefore: string | null = beforeRow.rows[0]?.rev ?? null;
+    // ★ 2026-11-02 발송 갈래 한 줄(켜기 확인 창 · 계약 sendTiming · 설계서 3-6 · SC-40)
+    const timingLine = beforeRow.rows[0] ? sendTimingLine(beforeRow.rows[0].trigger_event, beforeRow.rows[0].start_kind) : null;
 
     const validated = await validateJourneyForActivation(companyId, req.params.id, userId);
     // ★ 2026-10-09 시연 회사 = 발송 비용 0(차감이 생기지 않는다) — 화면의 잔액 잠금이 저절로 풀린다(설계서 docs/2026-10-09-demo-company-design.md §6)
@@ -4430,13 +4432,14 @@ router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res:
         return res.json({
           success: true,
           ...result,
+          sendTimingLine: timingLine,
           ok: false,
           staleRevision: true,
           error: '검증하는 사이에 여정이 바뀌었습니다. 한 번 더 검증해 주세요.',
         });
       }
     }
-    return res.json({ success: true, ...result });
+    return res.json({ success: true, ...result, sendTimingLine: timingLine });
   } catch (err: any) {
     // ★ D214+ db_alter_safety_net 정합 — DB 마이그레이션 미실행 시 503 + 사용자 친화 안내
     return journeyError(res, err, 'pretest-validate', '검증 실패');

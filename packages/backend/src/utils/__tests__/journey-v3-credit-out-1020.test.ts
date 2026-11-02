@@ -72,17 +72,21 @@ describe('실행기 크레딧 = 보내기 전 그 자리 차감(★ Codex 적대
   });
   it('자리 = 요금제 잠금 · 라인그룹 확인 뒤 · 멈춤 + 실패 기록 + 보내지 않음 · 옛 확인 함수(잔액만 보고 뒤에 차감) 없음', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'journey-executor.ts'), 'utf-8');
-    const plan = src.indexOf("await pauseJourney(exec.journey_id, '요금제가 잠겨 발송을 멈췄습니다');");
-    const line = src.indexOf('!(await hasCompanyLineGroup(exec.company_id))');
-    const gate = src.indexOf('!(await reserveJourneyOperationCredit(exec, new Date()))');
+    // ★ 1102 묶음 발송 — 전이 표 15 · 16 · 17(고객별 최초 결말 · 멈춤 = 경계 고객 로그 + 여정 멈춤 · 전진 0)
+    const plan = src.indexOf("if (!planOk) return { kind: 'pause', reason: 'plan_locked', pauseText: '요금제가 잠겨 발송을 멈췄습니다' };");
+    const line = src.indexOf("if (!lineOk) return { kind: 'pause', reason: 'line_group_not_set', pauseText: '발송 라인그룹 미설정' };");
+    const gate = src.indexOf('if (opCredit === null) opCredit = await reserveJourneyOperationCredit(head, new Date());');
     expect(plan).toBeGreaterThan(0);
     expect(line).toBeGreaterThan(plan);
     expect(gate).toBeGreaterThan(line);
+    expect(src.indexOf('const planOk = demoCompany || await aiOperatorAllowedForWorker(head.company_id, head.created_by);')).toBeGreaterThan(0);
+    expect(src.indexOf('const lineOk = demoCompany || await hasCompanyLineGroup(head.company_id);')).toBeGreaterThan(0);
     const block = src.slice(gate, gate + 400);
-    expect(block).toContain('await pauseJourney(exec.journey_id, JOURNEY_PAUSE_CREDIT_OUT);');
-    expect(block).toContain("await logFailedStep(exec.execution_id, step.id, 'operation_credit_out');");
-    expect(block).toContain("return 'failed';");
-    expect(block).not.toContain('advanceOrComplete');
+    expect(block).toContain("if (!opCredit) return { kind: 'pause', reason: 'operation_credit_out', pauseText: JOURNEY_PAUSE_CREDIT_OUT };");
+    const pause = src.slice(src.indexOf('async function applyBoundaryPause('), src.indexOf('async function sendUnits('));
+    expect(pause).toContain('await pauseJourney(head.journey_id, out.pauseText);');
+    expect(pause).toContain("await logStepMany([row.exec.execution_id], step.id, 'failed', out.reason);");
+    expect(pause).not.toContain('advanceExecutions');
     expect(src).not.toContain('hasJourneyOperationCredit');
     expect(src).not.toContain('hasCreditForStrict');
   });

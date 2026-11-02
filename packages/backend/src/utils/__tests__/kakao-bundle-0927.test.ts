@@ -25,11 +25,16 @@ const src =(...p: string[]) => readFileSync(join(__dirname, '..', ...p), 'utf8')
 describe('m048 알림톡 적재 폭', () => {
   it('비토 라인은 테이블 실제 폭 · 1024 하드코딩 제거', () => {
     const s = src('sms-queue.ts');
+    // ★ 2026-11-02 발신 키 · 폭 = 한 함수(prepareAlimtalkSenderKey) · 문장 = 한 함수(buildAlimtalkQueueInsert) — 알림톡 적재 둘(insertAlimtalkQueue · loadQueueUnit)이 같이 쓴다
+    const prep = s.slice(s.indexOf('async function prepareAlimtalkSenderKey('), s.indexOf('function buildAlimtalkQueueInsert('));
+    expect(prep).toContain('const etcCap = bitoSenderKey ? await getEtcJsonCapacity(table) : K_ETC_JSON_BASE_MAX;');
+    const build = s.slice(s.indexOf('function buildAlimtalkQueueInsert('), s.indexOf('export type QueueUnitOutcome'));
+    expect(build).toContain('if (mergedEtc.length <= etcCap) {');
+    expect(s).not.toContain('mergedEtc.length <= 1024');
     const at = s.indexOf('export async function insertAlimtalkQueue(');
     const body = s.slice(at, at + 9000);
-    expect(body).toContain('const etcCap = bitoSenderKey ? await getEtcJsonCapacity(table) : K_ETC_JSON_BASE_MAX;');
-    expect(body).toContain('if (mergedEtc.length <= etcCap) {');
-    expect(body).not.toContain('mergedEtc.length <= 1024');
+    expect(body).toContain('const { bitoSenderKey, etcCap } = await prepareAlimtalkSenderKey(table, rows);');
+    expect(body).toContain('const ins = buildAlimtalkQueueInsert(table, batch, appEtc1, bitoSenderKey, etcCap);');
   });
 });
 

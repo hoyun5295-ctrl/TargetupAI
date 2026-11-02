@@ -38,7 +38,8 @@ import { resolvePurchaseLedgerGate, isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_
 // ★ 2026-08-01 여정 재설계 §3-0-2 — 신규/기존을 가릴 근거가 없는 회사는 발송하지 않는다(fail-closed).
 import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
-import { calculateNextRunAt } from './send-time-util';
+import { firstRunAtFor } from './send-time-util';
+import { sendTimingForTrigger } from './journey-trigger-capability';
 import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJourney } from './journey-entry-ledger';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매(상품 자격 · 문 확인) · 진입 교체(새 주기면 옛 실행을 닫고 새로 넣는다).
 import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, currentPurchaseDoor, qualifyProductBatch } from './journey-product';
@@ -607,6 +608,8 @@ async function finishCursorBatch(
       return { matched: ids.length, enqueued: 0, skipped: ids.length };
     }
     j.lineageIds = fresh.lineageIds;
+    // ★ 2026-11-02 Codex 구현 1R — 첫 칸 시각의 진입 시각 = 이 트랜잭션의 NOW()(넣는 entered_at 과 같은 값 · 자정 경계에서 하루 묶음 날짜가 갈리지 않게)
+    const txNow: Date = (await client.query('SELECT NOW() AS now')).rows[0].now;
     for (const customerId of ids) {
       // ★ 2026-10-27 자사몰 대비 K1-2 ② — 잠금 안에서 그 고객의 대표 사건이 이 계보에 이미 진입에 쓰였으면 건너뛴다(교체 닫기 · 쿨다운보다 먼저 ·
       //   승격으로 커서를 다시 지나는 같은 사건이 교체 모드에서 옛 실행을 닫고 다시 들어가는 순서를 막는다).
@@ -624,7 +627,8 @@ async function finishCursorBatch(
         const allowed = await checkCooldown(j, customerId, client);
         if (!allowed) { skipped++; continue; }
       }
-      const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
+      // ★ 2026-11-02 첫 칸 시각 = 갈래(트리거 계약 · 하루 묶음 = 다음날 칸 시각 · 설계서 3-2 ②)
+      const nextRunAt = firstRunAtFor(sendTimingForTrigger(j.trigger_event), firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst, txNow);
       const evProps = batch.propertiesByCustomer[customerId];
       // ★ 2026-09-29 여정 V2 1차 — 진입 표식(__entry): 트리거 사건으로 들어왔다는 것 + 그 사건 id.
       //   생애 지도 "이어받음" 숫자가 ①재진입 워커가 넣은 행(표식 없음)과 ②같은 구매로 두 여정에 동시에 들어온 경우(같은 key)를
@@ -829,7 +833,6 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
     return { matched, enqueued: 0, skipped: matched };
   }
   const firstStep = firstStepRes.rows[0] as FirstStepRow;
-  const nextRunAt = calculateNextRunAt(firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst);
   const isSignup = j.trigger_event === 'customer.created';
 
   // ★ Fix #6 (2026-06-05): 한 명씩 루프 폐기 → 조건 맞는 전원을 한 방 일괄 INSERT(원래 의도 = 전체 진입).
@@ -852,6 +855,9 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
       return { matched, enqueued: 0, skipped: matched };
     }
     j.lineageIds = fresh.lineageIds;
+    // ★ 2026-11-02 첫 칸 시각 = 갈래(트리거 계약 · 설계서 3-2 ②) · 진입 시각 = 이 트랜잭션의 NOW()(넣는 entered_at 과 같은 값 · Codex 구현 1R)
+    const txNow: Date = (await client.query('SELECT NOW() AS now')).rows[0].now;
+    const nextRunAt = firstRunAtFor(sendTimingForTrigger(j.trigger_event), firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst, txNow);
     // ★ 2026-10-25 Codex 1R — 하루 몫은 잠금 안에서 다시 센다(재진입 워커와 같은 계보 잠금 · 추출 앞의 셈은 미리 줄이기일 뿐) · 넘는 분은 다음 회차
     const room = await dailyRoomInLock(client, j);
     if (room != null && room <= 0) {

@@ -20,7 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import JourneyModalShell from './JourneyModalShell';
 import {
   X, Sparkles, CheckCircle2, AlertTriangle, Loader2, Wallet, TrendingUp,
-  ShieldCheck, MessageSquare, FileText, Hash, Calculator, Wand2,
+  ShieldCheck, MessageSquare, FileText, Hash, Calculator, Wand2, Clock,
 } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import CreditConfirmModal from '../credit/CreditConfirmModal';
@@ -54,6 +54,8 @@ interface ValidationResult {
   totalCost: number;
   estimatedWeeklyTriggerCount: number;
   confidenceScore: number;
+  /** ★ 2026-11-02 발송 갈래 한 줄(서버 계약 · 한 번 보내기 · 날짜 기준 = null) */
+  sendTimingLine?: string | null;
   perCarrierScore?: {
     skt: number;
     kt: number;
@@ -388,6 +390,13 @@ export default function JourneyActivationConfirmModal({
                   </div>
                 )}
               </div>
+
+              {result.sendTimingLine && (
+                <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[13px] leading-relaxed text-slate-700">
+                  <Clock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                  <span>{result.sendTimingLine}</span>
+                </div>
+              )}
 
               {/* 비용 카드 */}
               <div className="grid grid-cols-2 gap-3">

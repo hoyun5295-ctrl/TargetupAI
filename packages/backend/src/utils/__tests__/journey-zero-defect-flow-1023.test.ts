@@ -23,12 +23,13 @@ describe('4. 실행 · 수정 경합', () => {
     expect(ex).not.toMatch(/status = 'completed',\s*completed_at = NOW\(\)/);
     expect(ex).not.toContain('markExecutionCompleted');
     expect(ex).not.toContain('completeAtEndStep');
-    expect((ex.match(/await finishExecution\(/g) || []).length).toBeGreaterThanOrEqual(5);
+    expect((ex.match(/await finishExecutions\(/g) || []).length).toBeGreaterThanOrEqual(5);   // ★ 1102 묶음 판
   });
   it('고친 문안이 재검사 전이면 시간이 지나도 보내지 않는다(옛 PRETEST-MISS = 검사 없이 발송) · 운영 경보', () => {
     expect(ex).not.toContain('검사 없이 보낸다');
-    const gate = ex.slice(ex.indexOf("if (pendingSnapshotAt && ['sms', 'lms', 'mms'].includes(String(step.channel))) {"), ex.indexOf('let activeVariantId'));
-    expect(gate).toContain("return 'waited';");
+    const gate = ex.slice(ex.indexOf('if (snap.pendingSnapshotAt && isTextChannel) {'), ex.indexOf('// ── 10 발송 창'));
+    expect(gate).toContain('await delayExecutions(ids0, PRETEST_PENDING_RECHECK_MINUTES);');
+    expect(gate).toContain('return res;');
     expect(gate).toContain('sendSystemAlert({');
     expect(gate).toContain('journey-pretest-late:');
   });

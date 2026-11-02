@@ -401,6 +401,42 @@ export async function enrichCustomerWithPredictions(
   }
 }
 
+/**
+ * ★ 2026-11-02 묶음 발송(설계서 3-3 ④) — enrichCustomerWithPredictions 의 묶음 판(같은 값 · 같은 규칙).
+ *   신선한 캐시(24시간)는 한 문장으로 읽고, 없거나 오래된 고객만 지금처럼 하나씩 계산(getOrComputePredictions · 저장).
+ *   실패한 고객은 원본 그대로(지금 함수와 같다).
+ */
+export async function enrichCustomersWithPredictions(
+  customers: Array<Record<string, any>>,
+  companyId: string,
+): Promise<Array<Record<string, any>>> {
+  const ids = customers.map((c) => c?.id).filter(Boolean).map(String);
+  const fresh = new Map<string, any>();
+  try {
+    const r = await query(
+      `SELECT customer_id, click_score, churn_risk, purchase_likelihood, computed_at
+         FROM cdp_customer_predictions WHERE company_id = $2::uuid AND customer_id = ANY($1::uuid[])`,
+      [ids, companyId],
+    );
+    for (const row of r.rows) {
+      if (Date.now() - new Date(row.computed_at).getTime() < CACHE_TTL_MS) fresh.set(String(row.customer_id), row);
+    }
+  } catch (err: any) {
+    console.warn('[Predictive] 묶음 캐시 조회 실패 — 하나씩:', err?.message);
+  }
+  const out: Array<Record<string, any>> = [];
+  for (const c of customers) {
+    if (!c || !c.id) { out.push(c); continue; }
+    const row = fresh.get(String(c.id));
+    if (row) {
+      out.push({ ...c, click_score: Number(row.click_score), churn_risk: Number(row.churn_risk), purchase_likelihood: Number(row.purchase_likelihood) });
+    } else {
+      out.push(await enrichCustomerWithPredictions(c, companyId));
+    }
+  }
+  return out;
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 4. 회사 분포 통계 (/predictive 대시보드)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

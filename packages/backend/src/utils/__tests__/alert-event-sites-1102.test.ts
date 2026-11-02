@@ -342,14 +342,16 @@ describe('B1 · 미룬 묶음(실행기 · 한 번 보내기 회복)', () => {
   it('실행기 — 실패로 닫은 실행 = 묶음 끝에 원장(항목 = 실행 · 사건 모드) · 다음 묶음 조회가 던져도 사라지지 않는다', async () => {
     const { runJourneyExecutor } = await import('../journey-executor');
     let due = 0;
+    // ★ 1102 묶음 발송 — 묶음 먼저 고르기(WITH due) → 그 (여정 · 칸) 실행 → 묶음 처리 예외 = 실행 집합 전부 기록(상한 = failed)
     m.handler = (sql) => {
-      if (sql.includes('SELECT due.* FROM (')) {
+      if (sql.includes('WITH due AS (')) {
         due += 1;
-        if (due === 1) return { rows: [{ execution_id: 'exe-1', journey_id: 'j-1', company_id: 'co-1' }, { execution_id: 'exe-2', journey_id: 'j-1', company_id: 'co-2' }] };
+        if (due === 1) return { rows: [{ journey_id: 'j-1', current_step_order: 0, company_id: 'co-1' }] };
         throw new Error('db gone');
       }
-      if (sql.includes('SELECT je.status AS estatus')) throw new Error('주입: 처리 실패');
-      if (sql.startsWith('UPDATE journey_executions') && sql.includes('error_count')) return { rows: [{ status: 'failed' }] };
+      if (sql.includes('WHERE e.journey_id = $1::uuid AND e.current_step_order = $2')) return { rows: [{ execution_id: 'exe-1', journey_id: 'j-1', company_id: 'co-1', current_step_order: 0 }, { execution_id: 'exe-2', journey_id: 'j-1', company_id: 'co-1', current_step_order: 0 }] };
+      if (sql.includes('SELECT je.id FROM journey_executions je JOIN journeys j')) throw new Error('주입: 처리 실패');
+      if (sql.startsWith('UPDATE journey_executions') && sql.includes('error_count')) return { rows: [{ id: 'exe-1', status: 'failed' }, { id: 'exe-2', status: 'failed' }] };
       return { rows: [] };
     };
     await expect(runJourneyExecutor()).rejects.toThrow('db gone');

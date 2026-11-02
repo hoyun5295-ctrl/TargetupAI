@@ -385,6 +385,23 @@ export async function readOwnerConsentForCustomer(companyId: string, ownerUserId
 }
 
 /**
+ * ★ 2026-11-02 묶음 발송(설계서 docs/2026-11-02-journey-batch-send-design.md 3-3 ③) — readOwnerConsentForCustomer 의 묶음 판(같은 strict 조각 · 한 문장).
+ *   몰 동의 회사가 아니면 null(호출부는 고객 행 값 그대로) · 그 밖 = 고객 id → 동의.
+ */
+export async function readOwnerConsentForCustomers(companyId: string, ownerUserId: string | null | undefined, customerIds: string[]): Promise<Map<string, boolean> | null> {
+  const scope = await resolveOwnerConsentScope(companyId, ownerUserId);
+  if (scope.mode !== 'mall') return null;
+  const out = new Map<string, boolean>();
+  if (customerIds.length === 0) return out;
+  const r = await query(
+    `SELECT c.id, ${consentSql(scope, 'c', undefined, { strict: true }).isTrue} AS ok FROM customers c WHERE c.id = ANY($1::uuid[]) AND c.company_id = $2::uuid`,
+    [customerIds, companyId],
+  );
+  for (const row of r.rows) out.set(String(row.id), row.ok === true);
+  return out;
+}
+
+/**
  * 범위 없는 발송(관리자 · 분류코드 범위가 없는 사용자)의 자격 조각. 몰 동의 회사가 아니면 null — 호출부는 옛 조각을 그대로 쓴다.
  * 분류코드 사용자 발송은 buildSendConsent(범위 서브쿼리 안에 동의 조건)가 맡는다 — 두 갈래의 판정은 consentSql 과 같다
  * (사용자 = 내 코드 중 하나라도 동의 · 관리자 = 어느 몰에서도 거부 없음 + 한 몰 이상 동의 · 몰 소속 행이 없는 고객은 고객 행 값).

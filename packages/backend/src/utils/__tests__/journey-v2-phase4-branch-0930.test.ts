@@ -172,31 +172,34 @@ describe('실행기 배선(원문)', () => {
   const src = SRC('journey-executor.ts');
   it('끝 칸 = 발송 흐름보다 앞에서 완료(발송 · 차감 코드 없음)', () => {
     const endAt = src.indexOf("if (step.step_type === 'end') {");
-    const waitAt = src.indexOf("if (step.step_type === 'wait') {");
+    const waitAt = src.indexOf("if (step.step_type === 'wait') return processWaitBatch(execs, step, res);");
     expect(endAt).toBeGreaterThan(-1);
     expect(endAt).toBeLessThan(waitAt);
-    // ★ 2026-10-23 완료 = finishExecution 한 함수(마지막 칸 · 끝 칸 · 칸 없음 공용)
-    const helper = src.slice(src.indexOf('async function finishExecution'), src.indexOf('async function hasPurchasedSinceEntry'));
+    // ★ 2026-10-23 완료 = 한 함수(마지막 칸 · 끝 칸 · 칸 없음 공용) · ★ 1102 묶음 판 finishExecutions
+    const helper = src.slice(src.indexOf('async function finishExecutions('), src.indexOf('async function jumpExecutions('));
     // ★ 0930 Codex 1R — 완료 전환은 진행 중일 때만(CASE) · 발송비는 상태와 무관하게(codex-r1 테스트가 소유).
     expect(helper).toContain("THEN 'completed'");
     expect(helper).toContain("prev.status = 'active'");
     expect(helper).not.toMatch(/bulkInsert|deductCredit|prepaidDeduct|insertSmsQueue/);
   });
   it('다음 칸이 끝이면 기다리지 않고 완료한다', () => {
-    const adv = src.slice(src.indexOf('async function advanceOrComplete'), src.indexOf('// calculateNextRunAt'));
+    const adv = src.slice(src.indexOf('async function advanceExecutions('), src.indexOf('async function finishExecutions('));
     expect(adv).toMatch(/String\(nextRes\.rows\[0\]\.step_type\) === 'end'/);
-    expect(adv).toContain('finishExecution(exec.execution_id, exec.journey_id, { stepOrder: Number(nextRes.rows[0].step_order), addedCost, endStepId');
+    expect(adv).toContain('finishExecutions(toFinish, head.journey_id, { stepOrder: Number(nextRes.rows[0].step_order), endStepId: String(nextRes.rows[0].id) });');
     // 마지막 칸도 같은 함수(옛: 상태 확인 없이 completed 로 덮었다)
-    expect(adv).toContain('finishExecution(exec.execution_id, exec.journey_id, { stepOrder: currentStep.step_order, addedCost })');
+    expect(adv).toContain('finishExecutions(toFinish, head.journey_id, { stepOrder: currentStep.step_order });');
     expect(adv).not.toMatch(/status = 'completed',\s*completed_at = NOW\(\)/);
   });
   it('목표 판정 · 들어온 뒤 구매 조건은 같은 판정 함수를 쓴다 · 새 조건 DB 오류 = 보류', () => {
-    const goal = src.slice(src.indexOf('async function isGoalConvertedSinceEntry'), src.indexOf('async function finishExecution'));
-    expect(goal).toContain('hasPurchasedSinceEntry(exec.company_id, exec.customer_id, exec.entered_at, { signupBatch: signupJourney })');
-    const cond = src.slice(src.indexOf('async function evaluateCondition'), src.indexOf('async function evaluateCdpEventExistsCondition'));
+    // ★ 1102 묶음 발송 — 같은 판정 조각(journey-goal-purchase purchasedSinceEntrySql)을 목표 · 조건이 실행 집합으로 쓴다
+    const goal = src.slice(src.indexOf('async function goalConvertedExecutionIds('), src.indexOf('async function evaluateConditionBatch('));
+    expect(goal).toContain("${purchasedSinceEntrySql('e', '$2::uuid', '$3::boolean')}");
+    expect(goal).toContain('[ids, head.company_id, signupJourney]');
+    const cond = src.slice(src.indexOf('async function evaluateConditionBatch('), src.indexOf('export const DAILY_VOLUME_GATE_FACTOR'));
+    expect(cond).toContain("${purchasedSinceEntrySql('e', '$2::uuid', '$3::boolean')}");
     expect(cond).toContain("type === 'purchase_since_entry'");
     expect(cond).toContain("type === 'step_link_clicked'");
-    expect((cond.match(/return 'error';/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect((cond.match(/return all\('error'\);/g) || []).length).toBeGreaterThanOrEqual(4);
     expect(cond).toContain("ce.properties->>'step_id' = $2::text");
   });
 });

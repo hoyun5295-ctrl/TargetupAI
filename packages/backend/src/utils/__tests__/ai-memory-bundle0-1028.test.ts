@@ -214,7 +214,8 @@ describe('K10-2 학습 원장 출처 표식(model_params.authorship)', () => {
 describe('K10-1 학습 원천 = 템플릿 원문(고객 렌더본 금지)', () => {
   it('여정 = 단계 템플릿(알림톡 = 승인 템플릿 · 문자 = Liquid 평문화)', () => {
     const ex = SRC('utils', 'journey-executor.ts');
-    expect(ex).toContain("const trainingText = isKakao && kakaoTemplateRow ? String(kakaoTemplateRow.content || '') : flattenLiquidToPlainText(step.message_template || '');");
+    // ★ 1102 묶음 발송 — 단위 적재 함수(sendUnits)의 칸 원문(c = 칸마다 정한 값)
+    expect(ex).toContain("const trainingText = c.isKakao && c.kakaoTemplateRow ? String(c.kakaoTemplateRow.content || '') : flattenLiquidToPlainText(step.message_template || '');");
     expect(ex).toContain('finalMessage: trainingText,');
     expect(ex).not.toMatch(/logCampaignTraining\(\{[^}]*finalMessage: message,/);
   });

@@ -49,7 +49,10 @@ describe('R171 수신거부 조회(CT getUnsubscribedPhones)', () => {
 describe('R166 처방 철회(Codex medium 2 · 순차 실행기라 경합 없음 · 모아 쓰면 누락·이중 가산)', () => {
   it('실행기는 발송마다 변이 발송 수를 바로 기록한다(모아 쓰기 없음)', () => {
     const src = read('utils/journey-executor.ts');
-    expect(src).toContain('await recordJourneyStepVariantReward(activeVariantId, 1, 0, 0);');
+    // ★ 1102 묶음 발송 — 변이 발송 수 = 단위 확정과 같은 문장(변이별 합 · 재시작 누락 · 이중 가산 0 · 모아 쓰기 아님)
+    expect(src).toContain('confirmed = await confirmLoadUnit(campaignId, claimIds, { variantCounts: [...counts].map(([variantId, sent]) => ({ variantId, sent })), withStats: true });');
+    expect(src).not.toContain('recordJourneyStepVariantReward(');
+    expect(read('utils/journey-send-claim.ts')).toContain('UPDATE journey_step_variants v SET sent_count = v.sent_count + x.n, updated_at = NOW()');
     expect(src).not.toContain('queueVariantSent');
     expect(read('utils/bandit-optimizer.ts')).not.toContain('flushVariantSent');
   });

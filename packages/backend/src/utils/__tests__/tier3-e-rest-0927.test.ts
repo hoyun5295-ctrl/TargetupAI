@@ -81,7 +81,7 @@ describe('JRN', () => {
     expect(body.indexOf('await steps.claim()')).toBeLessThan(body.indexOf('await steps.enqueue()'));
     expect(body.indexOf('await steps.enqueue()')).toBeLessThan(body.indexOf('await steps.finalize()'));
     const r = src('journey-result-notice.ts');
-    expect(r).toContain('AND result_notice_sent IS NOT DISTINCT FROM $4::int AND result_notice_attempts < $5');
+    expect(r).toContain('AND result_notice_sent IS NOT DISTINCT FROM $2::int AND result_notice_attempts < $3');   // ★1102 행 = 캠페인(campaign_id · 이어 붙임 순번 여럿)
     expect(r).toContain('const result = await sendNoticeOnce({');
     expect(src('campaign-sync-worker.ts')).not.toContain('result_notified_at');
   });

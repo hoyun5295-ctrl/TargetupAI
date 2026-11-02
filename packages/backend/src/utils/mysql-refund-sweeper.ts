@@ -394,7 +394,7 @@ async function runOnce(): Promise<void> {
           const pgSent = Number(camp.sent_count || 0);
           // ★ 2026-06-29: 실제 적재수 = 큐에 들어간 전체(성공+실패+대기). sent_count가 이보다 작게
           //   기록된 것(폴라초이스 15271 vs 15400)을 GREATEST로 진실에 맞춤 — 올림만, 이동 찰나에도 안 내려감.
-          // ★ 2026-09-26 (Codex 3R) 여정 단계 캠페인의 발송 수는 실행기가 발송마다 +1 한다(bumpStepCampaignCount) —
+          // ★ 2026-09-26 (Codex 3R) 여정 단계 캠페인의 발송 수는 실행기가 확정마다 올린다(★1102 단위 확정 confirmLoadUnit = 들어간 n) —
           //   여기서 행 수로 올리면 알림톡 대체 행이 적재 수를 부풀려 미적재(차감 − 적재)를 줄인다(적재 실패분 미환불).
           const loaded = camp.send_type === 'journey' ? pgSent : mysqlSuccess + mysqlFail + mysqlPending;
           if (pgSuccess !== mysqlSuccess || pgFail !== mysqlFail || pgSent < loaded) {

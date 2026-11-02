@@ -326,6 +326,57 @@ export function calculateNextRunAt(
   return shiftToSendableHour(new Date(now.getTime() + delayHours * 60 * 60 * 1000));
 }
 
+/** ★ 2026-11-02 하루 묶음의 「그날」 = 진입 시각의 KST 날짜(YYYY-MM-DD · 00:00:00 ~ 23:59:59 · 첫 칸 시각 · 이상치 관문이 같은 정의를 쓴다) */
+export function dailyBatchDay(enteredAt: Date): string {
+  return new Date(enteredAt.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * ★ 2026-11-02 하루 묶음 첫 칸 시각(설계서 docs/2026-11-02-journey-batch-send-design.md 3-2 ② · Harold 「00:00:00 ~ 23:59:59 가 그날 · 다음날 보낸다」).
+ *   그날 D = 진입 행이 생긴 시각(도착)의 KST 날짜 · 하루 안 진입 시각과 무관하게 같은 값(= 한 묶음).
+ *   날 = D + max(1, ceil(지연 / 24시간)) · 시각 = 칸 시각(없으면 아침 9시 = NIGHT_ARRIVE_HOUR · 새 상수 0).
+ *   모드: specific_hour = D+1 그 시각 · next_business_day = D+1 이후 첫 평일 9시 · relative · relative_at_hour = 위 · 끝에 발송 창 맞춤.
+ */
+export function dailyFirstRunAt(
+  delayMode: string,
+  delayHours: number,
+  targetHourKst: number | null,
+  enteredAt: Date,
+): Date {
+  const [y, m1, d] = dailyBatchDay(enteredAt).split('-').map(Number);
+  const m = m1 - 1;
+  if (delayMode === 'next_business_day') {
+    let day = d + 1;
+    for (;;) {
+      const dow = new Date(Date.UTC(y, m, day)).getUTCDay();
+      if (dow !== 0 && dow !== 6) break;
+      day++;
+    }
+    return shiftToSendableHour(new Date(Date.UTC(y, m, day, NIGHT_ARRIVE_HOUR - 9, 0, 0)));
+  }
+  const h = targetHourKst != null && Number.isFinite(Number(targetHourKst))
+    ? Math.max(0, Math.min(23, Math.floor(Number(targetHourKst))))
+    : NIGHT_ARRIVE_HOUR;
+  const days = delayMode === 'specific_hour' ? 1 : Math.max(1, Math.ceil(Math.max(0, Number(delayHours) || 0) / 24));
+  return shiftToSendableHour(new Date(Date.UTC(y, m, d + days, h - 9, 0, 0)));
+}
+
+/**
+ * ★ 2026-11-02 첫 칸 시각 한 곳(설계서 3-2 ② · 진입 행을 만드는 세 자리가 부른다) — 갈래는 트리거 계약(sendTiming)이 정한다.
+ *   immediate = 지금 규칙(calculateNextRunAt) 그대로 · daily = dailyFirstRunAt.
+ */
+export function firstRunAtFor(
+  sendTiming: 'immediate' | 'daily',
+  delayMode: string,
+  delayHours: number,
+  targetHourKst: number | null,
+  enteredAt: Date = new Date(),
+): Date {
+  return sendTiming === 'daily'
+    ? dailyFirstRunAt(delayMode, delayHours, targetHourKst, enteredAt)
+    : calculateNextRunAt(delayMode, delayHours, targetHourKst, enteredAt);
+}
+
 /**
  * ★ Phase3 B (2026-06-26): 자동마케팅 자율 발송 시각 개인화 — 회사 고객의 실제 클릭 반응 시간대.
  *   데이터 출처 = cdp_events 'message_click' occurred_at의 KST 시(hour) 히스토그램(실데이터, 임의 상수 0).

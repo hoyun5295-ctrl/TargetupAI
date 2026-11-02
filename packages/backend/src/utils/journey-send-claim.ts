@@ -11,11 +11,13 @@
  *   그래서 부풀 수만 있는 상한과 모자랄 수만 있는 하한으로 **증명되는 쪽만** 판정하고, 증명되지 않으면 보류한다.
  *   보류가 1시간을 넘으면 다시 보내지 않고 닫는다(★ 0926 Harold 결정 — 두 번 보내는 일은 없게 · 그 1건 요금은 정산이 미적재로 돌려준다).
  *
- * 확정은 표식 'sent'와 단계 캠페인 발송 수 +1을 **한 문장**으로 한다. 발송 수는 정산 스위퍼가 여정의 적재 수로 읽는다 —
- * 확정만 되고 발송 수가 빠지면 보낸 1건을 미적재로 환불하고, 발송 수만 오르면 적재 실패분을 환불하지 않는다.
+ * 확정은 표식 'sent'와 단계 캠페인 발송 수 +n을 **한 문장**으로 한다(★1102 confirmLoadUnit). 발송 수는 정산 스위퍼가 여정의 적재 수로 읽는다 —
+ * 확정만 되고 발송 수가 빠지면 보낸 몫을 미적재로 환불하고, 발송 수만 오르면 적재 실패분을 환불하지 않는다.
+ * ★ 2026-11-02 묶음 발송 — 판정 단위 = 적재 단위(INSERT 한 문장 · judgeLoadUnit · 아래 3-8 절). 옛 한 건 판정(resolveJourneyClaim)은 없앴다(판정 한 벌).
  */
 import { query } from '../config/database';
-import { getCampaignSmsTablesWide, smsCountAll, smsCampaignCountsSafe, smsMsgTypeScopeSql } from './sms-queue';
+import { getCampaignSmsTablesWide, smsCountAll, smsCampaignCountsSafe, smsMsgTypeScopeSql, isMysqlThreadAlive } from './sms-queue';
+import { LOAD_PROTOCOL_UNIT } from './journey-step-campaign';
 /** 증명을 기다리는 상한 — 넘으면 다시 보내지 않고 닫는다(★ 0926 Harold 결정) */
 export const CLAIM_PROOF_LIMIT_SEC = 60 * 60;
 
@@ -71,102 +73,165 @@ export async function attributeClaimLoad(owner: JourneyClaimOwner, campaignId: s
   return 'unprovable';
 }
 
-/**
- * 표식 'sending' → 'sent' 확정 + 단계 캠페인 발송 수 +1(bumpStepCampaignCount와 같은 증가) — 한 문장이라 둘 중 하나만 남지 않는다.
- * 표식이 이미 'sending'이 아니면 아무것도 바꾸지 않고 false. DB 오류는 던진다(★ 2R ⑤ — 삼키지 않는다).
- */
-export async function confirmJourneyClaimSent(claimId: string, opts: { withStats?: boolean } = {}): Promise<boolean> {
-  if (opts.withStats) {
-    // ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 전진 없이 확정하는 자리(활성 아닌 실행의 표식 정리)는 실행·여정 비용 통계도
-    //   **같은 문장**에서 더한다. 따로 더하면 확정 뒤 끊겼을 때 표식은 'sent'라 다시 오지 않고 비용만 빠졌다(재개 뒤 가드는 비용 0으로 전진).
-    const r = await query(
-      `WITH confirmed AS (
-         UPDATE journey_step_logs SET status = 'sent' WHERE id = $1::uuid AND status = 'sending' RETURNING campaign_id, execution_id, COALESCE(cost, 0) AS cost
-       ), camp AS (
-         UPDATE campaigns SET target_count = target_count + 1, sent_count = sent_count + 1, updated_at = NOW()
-          WHERE id = (SELECT campaign_id FROM confirmed) RETURNING id
-       ), ex AS (
-         UPDATE journey_executions SET total_cost = total_cost + (SELECT cost FROM confirmed)
-          WHERE id = (SELECT execution_id FROM confirmed) RETURNING journey_id
-       ), jr AS (
-         UPDATE journeys SET stats_total_cost = stats_total_cost + (SELECT cost FROM confirmed), updated_at = NOW()
-          WHERE id = (SELECT journey_id FROM ex) RETURNING id
-       )
-       SELECT (SELECT COUNT(*) FROM confirmed)::int AS confirmed`,
-      [claimId],
-    );
-    return Number(r.rows[0]?.confirmed || 0) === 1;
-  }
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-11-02 적재 단위(설계서 docs/2026-11-02-journey-batch-send-design.md 3-8 적재 증명 계약 · Codex 설계 7R approve)
+//   단위 = MySQL INSERT 한 문장 · 한 캠페인에 미확정 단위 1 이하(I2) · 단위 기록(연결 번호)을 적재 앞에 PG 에(I4)
+//   · 판정 = 기록 없음이면 안 들어감(새 규약 캠페인만 · I5) / 그 연결이 처리 목록에 없을 때만 장부 상한 · 하한(I4)
+//   / 1시간 증명 못 함 = 다시 안 보내고 닫음(★ 0926 Harold) + 봉인(I3) · 옛 표식(새 규약 표식 없는 캠페인) = 다시 보내는 갈래 없음(I5).
+// ════════════════════════════════════════════════════════════════════
+
+export interface LoadUnitRecord { threadId: number; table: string; count: number }
+
+/** 단위 기록 = 적재 문장을 보내기 **전에** 쓴다(실패 = 던짐 → 적재 CT 가 문장을 보내지 않는다 · rejected). */
+export async function recordLoadUnit(campaignId: string, u: LoadUnitRecord): Promise<void> {
   const r = await query(
-    `WITH confirmed AS (
-       UPDATE journey_step_logs SET status = 'sent' WHERE id = $1::uuid AND status = 'sending' RETURNING campaign_id
-     )
-     UPDATE campaigns SET target_count = target_count + 1, sent_count = sent_count + 1, updated_at = NOW()
-      WHERE id = (SELECT campaign_id FROM confirmed)`,
-    [claimId],
+    `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadUnit}',
+              jsonb_build_object('threadId', $2::bigint, 'table', $3::text, 'count', $4::int, 'at', NOW()))
+      WHERE id = $1::uuid RETURNING id`,
+    [campaignId, u.threadId, u.table, u.count],
   );
-  return r.rowCount === 1;
+  if (r.rows.length === 0) throw new Error('단계 캠페인을 찾지 못해 적재 여부를 확인할 수 없다');
+}
+
+/** 안 들어감이 증명된 단위 = 표식 지움 + 단위 기록 지움(한 문장 · 다시 보내도 두 번이 아니다) */
+export async function clearLoadUnit(campaignId: string, claimIds: string[]): Promise<number> {
+  const r = await query(
+    `WITH gone AS (DELETE FROM journey_step_logs WHERE id = ANY($2::uuid[]) AND status = 'sending' RETURNING id)
+     UPDATE campaigns SET send_config = COALESCE(send_config, '{}'::jsonb) - 'loadUnit'
+      WHERE id = $1::uuid
+      RETURNING (SELECT COUNT(*) FROM gone)::int AS n`,
+    [campaignId, claimIds],
+  );
+  return Number(r.rows[0]?.n || 0);
 }
 
 /**
- * 'sending' 표식 하나를 판정한다.
- *   sent    = 들어갔다 → 확정(+발송 수). cost = 표식의 발송 비용(실행 통계에 더할 몫 · 다른 쪽이 먼저 확정했으면 0) ·
- *             sentAt = 표식 시각(운영 크레딧 멱등키의 날짜 = 원 발송일 · 3R ⑤)
- *   cleared = 안 들어갔다 → 표식을 지운다(다시 보내도 된다 · 차감분은 정산 스위퍼가 미적재로 돌려준다)
- *   held    = 증명 안 됨 · 표식 나이 1시간 전 → 아무것도 바꾸지 않는다(호출부가 나중에 다시 본다)
- *   closed  = 증명 안 됨 · 1시간 넘음(또는 closeNow) → 다시 보내지 않고 닫는다: 실패 · 비용 0 · 발송 수 안 올림
- *             (그 1건 차감은 정산이 미적재로 돌려준다 · 호출부가 경보)
- *   gone    = 표식이 이미 없다(다른 쪽이 판정했다)
- * MySQL 조회 실패도 증명 안 됨으로 다룬다(셀 수 없으면 판정할 수 없다). 표식·캠페인 조회(PG) 실패는 던진다.
+ * 들어간 단위 확정 = 한 문장(표식 'sent' + 단계 캠페인 발송 수 + n + 단위 기록 지움 + 변이 보상 변이별 합 · 설계서 ⑤-3 · SC-6).
+ *   withStats = 전진 없이 확정하는 자리(활성 아닌 실행의 표식 정리)는 실행 · 여정 비용 통계도 같은 문장에서.
+ *   돌려주는 것 = 이번 문장이 확정한 표식(다른 쪽이 먼저 확정한 표식은 빠진다 = 비용 이중 0).
  */
-export async function resolveJourneyClaim(
-  owner: JourneyClaimOwner, claimId: string,
-  opts: {
-    closeNow?: boolean;
-    /**
-     * ★ 2026-09-29 한줄로 V2 차수 5(Codex 1R high) — 들어갔다고 판정되면 **확정 전에** 부른다(운영 크레딧 · 멱등키 = 여정+원 발송일).
-     * 확정 뒤에 받으면 그 사이 끊겼을 때 표식은 'sent'라 다시 판정되지 않아 크레딧이 영영 빠졌다. 앞에서 받으면 끊겨도 표식이
-     * 'sending'으로 남아 다음 판정이 다시 부르고(멱등 = 0원) 확정한다. 던지면 확정하지 않는다(표식이 남아 다시 판정된다).
-     * 차감이 실패로 끝나도(던지지 않고 false) 확정한다 — 운영 크레딧은 발송을 막지 않는 정책이다(journey-executor chargeJourneyOperationCredit).
-     */
-    beforeConfirm?: (sentAt: Date) => Promise<void>;
-    /** 확정과 같은 문장에서 실행·여정 비용 통계를 더한다(전진 없이 확정하는 자리 · confirmJourneyClaimSent withStats) */
-    withStats?: boolean;
-  } = {},
-): Promise<
-  | { result: 'sent'; cost: number; sentAt: Date }
-  | { result: 'cleared' } | { result: 'held' } | { result: 'closed' } | { result: 'gone' }
-> {
-  const c = await query(
-    `SELECT campaign_id, cost, sent_at, EXTRACT(EPOCH FROM (NOW() - sent_at)) AS age_sec
-       FROM journey_step_logs WHERE id = $1::uuid AND status = 'sending'`,
-    [claimId],
+export async function confirmLoadUnit(
+  campaignId: string, claimIds: string[],
+  opts: { variantCounts?: Array<{ variantId: string; sent: number }>; withStats?: boolean } = {},
+): Promise<Array<{ id: string; executionId: string; cost: number }>> {
+  const vIds = (opts.variantCounts || []).filter((v) => v.sent > 0).map((v) => v.variantId);
+  const vNs = (opts.variantCounts || []).filter((v) => v.sent > 0).map((v) => v.sent);
+  const r = await query(
+    `WITH confirmed AS (
+       UPDATE journey_step_logs SET status = 'sent'
+        WHERE id = ANY($2::uuid[]) AND status = 'sending' AND campaign_id = $1::uuid
+        RETURNING id, execution_id, COALESCE(cost, 0) AS cost
+     ), camp AS (
+       UPDATE campaigns SET target_count = target_count + (SELECT COUNT(*) FROM confirmed),
+                            sent_count = sent_count + (SELECT COUNT(*) FROM confirmed),
+                            send_config = COALESCE(send_config, '{}'::jsonb) - 'loadUnit',
+                            updated_at = NOW()
+        WHERE id = $1::uuid RETURNING id
+     ), var AS (
+       UPDATE journey_step_variants v SET sent_count = v.sent_count + x.n, updated_at = NOW()
+         FROM unnest($3::uuid[], $4::int[]) AS x(id, n)
+        WHERE v.id = x.id AND (SELECT COUNT(*) FROM confirmed) > 0
+        RETURNING v.id
+     ), ex AS (
+       UPDATE journey_executions e SET total_cost = e.total_cost + c.cost
+         FROM confirmed c WHERE $5::boolean AND e.id = c.execution_id
+        RETURNING e.journey_id, c.cost
+     ), jr AS (
+       UPDATE journeys j SET stats_total_cost = j.stats_total_cost + s.cost, updated_at = NOW()
+         FROM (SELECT journey_id, SUM(cost) AS cost FROM ex GROUP BY journey_id) s
+        WHERE $5::boolean AND j.id = s.journey_id
+        RETURNING j.id
+     )
+     SELECT id, execution_id, cost FROM confirmed`,
+    [campaignId, claimIds, vIds, vNs, opts.withStats === true],
   );
-  const claim = c.rows[0];
-  if (!claim) return { result: 'gone' };
+  return r.rows.map((x: any) => ({ id: String(x.id), executionId: String(x.execution_id), cost: Number(x.cost) || 0 }));
+}
+
+export interface PendingClaim { id: string; executionId: string; cost: number; sentAt: Date }
+export type UnitJudgment =
+  | { result: 'none' }
+  | { result: 'sent'; claims: PendingClaim[]; confirmed: Array<{ id: string; executionId: string; cost: number }>; sentAt: Date }
+  | { result: 'cleared'; claims: PendingClaim[] }
+  | { result: 'held'; claims: PendingClaim[] }
+  | { result: 'closed'; claims: PendingClaim[] };
+
+/**
+ * 한 단계 캠페인의 미확정 단위 판정(설계서 ⑤-5 · 3-8 · 부르는 곳 = 실행기 묶음 가드 · 활성 아닌 표식 정리 둘).
+ *   새 규약(loadProtocol = unit): 단위 기록 없음 = 안 들어감 → 지움 · 기록 있음 = 그 연결이 처리 목록에 없을 때만 장부 판정
+ *     (살아 있음 · 조회 실패 = 보류 · 1시간 넘음 = 닫음 + 봉인).
+ *   옛 표식(표식 없는 캠페인): 들어감 증명 = 확정 · 그 밖 = 다시 보내지 않고 1시간 뒤 닫음(옛 INSERT 종료를 증명할 수 없다 · Codex 설계 4R).
+ *   판정 = 그 캠페인의 'sending' 표식 전부 = 한 단위(I2 · 봉인 I3 = 한 캠페인에 증명 못 한 단위 0).
+ */
+export async function judgeLoadUnit(
+  owner: JourneyClaimOwner, campaignId: string,
+  opts: { beforeConfirm?: (sentAt: Date) => Promise<void>; withStats?: boolean } = {},
+): Promise<UnitJudgment> {
+  const camp = await query(
+    `SELECT send_config->>'loadProtocol' AS protocol, send_config->'loadUnit' AS unit FROM campaigns WHERE id = $1::uuid`,
+    [campaignId],
+  );
+  if (!camp.rows[0]) throw new Error('단계 캠페인을 찾지 못해 적재 여부를 확인할 수 없다');
+  const unitProtocol = camp.rows[0].protocol === LOAD_PROTOCOL_UNIT;
+  const unit = camp.rows[0].unit && typeof camp.rows[0].unit === 'object' ? camp.rows[0].unit : null;
+  const cl = await query(
+    `SELECT id, execution_id, COALESCE(cost, 0) AS cost, sent_at, EXTRACT(EPOCH FROM (NOW() - sent_at)) AS age_sec
+       FROM journey_step_logs WHERE campaign_id = $1::uuid AND status = 'sending' ORDER BY sent_at ASC`,
+    [campaignId],
+  );
+  const claims: PendingClaim[] = cl.rows.map((x: any) => ({ id: String(x.id), executionId: String(x.execution_id), cost: Number(x.cost) || 0, sentAt: new Date(x.sent_at) }));
+  if (claims.length === 0) {
+    if (unit) await query(`UPDATE campaigns SET send_config = COALESCE(send_config, '{}'::jsonb) - 'loadUnit' WHERE id = $1::uuid`, [campaignId]);
+    return { result: 'none' };
+  }
+  const ids = claims.map((c) => c.id);
+  const oldestAgeSec = Math.max(...cl.rows.map((x: any) => Number(x.age_sec) || 0));
+  // 닫음 + 단위 기록 지움 + 봉인 = 한 문장(I3 · 사이에 끊겨 봉인 안 된 캠페인에 새 단위가 들어가는 길 0 · Codex 구현 1R)
+  const close = async (): Promise<UnitJudgment> => {
+    await query(
+      `WITH closed AS (
+         UPDATE journey_step_logs SET status = 'failed', error_reason = 'load_unprovable', cost = 0
+          WHERE id = ANY($2::uuid[]) AND status = 'sending' RETURNING id
+       )
+       UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadUnit', '{loadSealed}', 'true'::jsonb), updated_at = NOW()
+        WHERE id = $1::uuid`,
+      [campaignId, ids],
+    );
+    return { result: 'closed', claims };
+  };
+  const overLimit = oldestAgeSec >= CLAIM_PROOF_LIMIT_SEC;
+
+  if (unitProtocol && !unit) {
+    await clearLoadUnit(campaignId, ids);
+    return { result: 'cleared', claims };
+  }
+  if (unitProtocol && unit) {
+    let alive = true;
+    try {
+      alive = await isMysqlThreadAlive(Number(unit.threadId));
+    } catch (e: any) {
+      console.error(`[journey-send-claim] 처리 목록 조회 실패 campaign=${campaignId} — 보류:`, e?.message || e);
+    }
+    if (alive) return overLimit ? await close() : { result: 'held', claims };
+  }
 
   let verdict: ClaimLoadVerdict;
   try {
-    verdict = await attributeClaimLoad(owner, claim.campaign_id || null);
+    verdict = await attributeClaimLoad(owner, campaignId);
   } catch (e: any) {
-    console.error(`[journey-send-claim] 적재 판정 조회 실패 표식=${claimId} — 증명 안 됨으로 다룬다:`, e?.message || e);
+    console.error(`[journey-send-claim] 단위 판정 조회 실패 campaign=${campaignId} — 증명 안 됨으로 다룬다:`, e?.message || e);
     verdict = 'unprovable';
   }
-
   if (verdict === 'loaded') {
-    if (opts.beforeConfirm) await opts.beforeConfirm(new Date(claim.sent_at));
-    const confirmed = await confirmJourneyClaimSent(claimId, { withStats: opts.withStats });
-    return { result: 'sent', cost: confirmed ? Number(claim.cost) || 0 : 0, sentAt: new Date(claim.sent_at) };
+    const sentAt = claims[0].sentAt;
+    if (opts.beforeConfirm) await opts.beforeConfirm(sentAt);
+    const confirmed = await confirmLoadUnit(campaignId, ids, { withStats: opts.withStats });
+    return { result: 'sent', claims, confirmed, sentAt };
   }
-  if (verdict === 'not_loaded') {
-    await query(`DELETE FROM journey_step_logs WHERE id = $1::uuid AND status = 'sending'`, [claimId]);
-    return { result: 'cleared' };
+  if (verdict === 'not_loaded' && unitProtocol) {
+    await clearLoadUnit(campaignId, ids);
+    return { result: 'cleared', claims };
   }
-  if (!opts.closeNow && Number(claim.age_sec) < CLAIM_PROOF_LIMIT_SEC) return { result: 'held' };
-  await query(
-    `UPDATE journey_step_logs SET status = 'failed', error_reason = 'load_unprovable', cost = 0
-      WHERE id = $1::uuid AND status = 'sending'`,
-    [claimId],
-  );
-  return { result: 'closed' };
+  // 옛 표식의 안 들어감 · 증명 안 됨 = 다시 보내지 않는다(1시간까지 보류 · 넘으면 닫음)
+  return overLimit ? await close() : { result: 'held', claims };
 }

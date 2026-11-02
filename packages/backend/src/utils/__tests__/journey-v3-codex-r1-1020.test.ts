@@ -94,7 +94,8 @@ describe('A2 · A9 켜기 · 멈춤 = 같은 계보 잠금 · 한 트랜잭션',
     expect(fn).toContain("await actClient.query(inheritConflict ? 'ROLLBACK' : 'COMMIT');");
   });
   it('A1 — 운영 크레딧은 확인이 아니라 그 자리 차감(별도 시험 journey-v3-credit-out)', () => {
-    expect(SRC('journey-executor.ts')).toContain('!(await reserveJourneyOperationCredit(exec, new Date()))');
+    // ★ 1102 묶음 발송 — 묶음에서 그 자리에 처음 닿는 고객이 있을 때 한 번(하루 키 · 그 자리 차감)
+    expect(SRC('journey-executor.ts')).toContain('if (opCredit === null) opCredit = await reserveJourneyOperationCredit(head, new Date());');
   });
 });
 

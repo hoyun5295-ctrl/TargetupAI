@@ -5,6 +5,8 @@
  * 옛 부하 시험(engine-load-1102 ⑤)은 실행 한 건을 「5ms 기다림」으로 바꿔 줄 공정만 쟀다 = 실행 한 건의 실제 비용은 잰 적이 없다.
  * 여기는 실행기(runJourneyExecutor)를 운영 문장 그대로 끝까지 돌린다. 바깥만 시험이 쥔다:
  *   MySQL 적재(bulkInsertSmsQueue) = MYSQL_MS 기다림 뒤 넣은 수 · 운영 경보 = 기록만 · 발송 시간 창 = 하루 전체(시각에 따라 결과가 바뀌지 않게).
+ * ★ 2026-11-02 묶음 발송(설계서 docs/2026-11-02-journey-batch-send-design.md 3-3 · §6) — 적재 = 단위 적재 CT(loadQueueUnit · INSERT 한 문장 = 단위)를 시험이 쥔다
+ *   (단위 기록 → MYSQL_MS + 행 × MYSQL_ROW_MS 기다림 → 들어감) · 한 건 비용 = 회차 시간 ÷ 보낸 수(묶음은 한 단위 표식 시각이 같다 = 첫 · 끝 간격으로 못 잰다).
  * 큰 회사 1곳(실행 N) + 작은 회사 20곳(각 1) · 결과 = 실행 한 건 평균 · 큰 회사 시간당 · 작은 회사 첫 발송 지연(콘솔 한 줄 · §13 에 옮긴다).
  * 평소 test:pg = N 2,000 · 임시 폴더 표식 파일 engine-throughput-1102.on 이 있으면 파일 안 숫자.
  */
@@ -13,8 +15,9 @@ import { randomUUID } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 
-const MYSQL_MS = 3;   // 운영 MySQL 한 행 적재 가정(측정 아님 · 결과 줄에 같이 적는다)
-const ctl = vi.hoisted(() => ({ inserted: 0, alerts: [] as string[] }));
+const MYSQL_MS = 3;   // 운영 MySQL 한 문장 적재 가정(측정 아님 · 결과 줄에 같이 적는다)
+const MYSQL_ROW_MS = 0.05;   // ★1102 묶음 = 한 문장에 행이 여럿 · 행마다 더하는 가정(측정 아님 · 5,000행 = 253ms · 결과 줄에 같이 적는다)
+const ctl = vi.hoisted(() => ({ inserted: 0, units: 0, alerts: [] as string[], windowHours: 13 }));
 
 vi.mock('../../config/database', async (orig) => {
   const real: any = await orig();
@@ -22,6 +25,7 @@ vi.mock('../../config/database', async (orig) => {
 });
 vi.mock('../../config/defaults', async (orig) => {
   const real: any = await orig();
+  ctl.windowHours = real.SEND_HOURS.end - real.SEND_HOURS.start;   // 운영 발송 창 길이(합격선 비교 · 시험은 창을 하루 전체로 돌린다)
   return { ...real, SEND_HOURS: { start: 0, end: 24 } };
 });
 vi.mock('../sms-queue', async (orig) => {
@@ -31,13 +35,16 @@ vi.mock('../sms-queue', async (orig) => {
     getCompanySmsTables: async () => ['SMSQ_TEST'],
     getCompanySmsTablesWithLogs: async () => ['SMSQ_TEST'],
     hasCompanyLineGroup: async () => true,
-    bulkInsertSmsQueue: async (_t: string[], rows: any[][]) => {
-      await new Promise((r) => setTimeout(r, MYSQL_MS));
+    loadQueueUnit: async (p: any) => {
+      const rows = p.kind === 'sms' ? p.smsRows : p.alimRows;
+      await p.record({ threadId: 1, table: 'SMSQ_TEST', count: rows.length });
+      await new Promise((r) => setTimeout(r, MYSQL_MS + rows.length * MYSQL_ROW_MS));
       ctl.inserted += rows.length;
-      return rows.length;
+      ctl.units += 1;
+      return { state: 'loaded', table: 'SMSQ_TEST', threadId: 1, finish: () => undefined };
     },
+    isMysqlThreadAlive: async () => false,
     recordCampaignSentTables: async () => undefined,
-    insertAlimtalkQueue: async () => 1,
   };
 });
 vi.mock('../system-alert', () => ({
@@ -57,6 +64,7 @@ const BIG = randomUUID();
 const SMALL = Array.from({ length: 20 }, () => randomUUID());
 const PLAN = randomUUID();   // 유료 요금제(요금제가 잠기면 실행기가 여정을 멈춘다 = 측정이 아니다)
 const journeyOf = new Map<string, string>();
+
 
 /** 회사 하나 = 담당자 · 켜진 여정 · 문자 칸 1(검사 통과 판) · 고객 n · 지금 낼 실행 n */
 async function seedCompany(companyId: string, n: number, tag: string): Promise<void> {
@@ -94,7 +102,7 @@ async function seedCompany(companyId: string, n: number, tag: string): Promise<v
 describe(`엔진 처리 속도(실 PG · 큰 회사 실행 ${N.toLocaleString()} + 작은 회사 20 · MySQL ${MYSQL_MS}ms 가정)`, () => {
   beforeAll(async () => {
     // C90-DDL-1 = 크레딧 원장 seq(운영엔 있음 · 시험 그릇 덤프엔 없음 = 없으면 차감 재시도 3번이 시간을 부풀린다)
-    for (const id of ['C90-DDL-1', 'C93-DDL-1', 'C93-DDL-2', 'C93-DDL-3']) await pool.query(ledgerBlockSql(id));
+    for (const id of ['C90-DDL-1', 'C93-DDL-1', 'C93-DDL-2', 'C93-DDL-3', 'C96-DDL-1']) await pool.query(ledgerBlockSql(id));
     await insertMinimalRow(pool, 'plans', { id: PLAN, plan_code: 'PRO', plan_name: 'PRO', monthly_price: 1000000, ai_credits_per_month: 2400, is_active: true });
     await seedCompany(BIG, N, 'big');
     for (const [i, co] of SMALL.entries()) await seedCompany(co, 1, `s${i}`);
@@ -113,18 +121,22 @@ describe(`엔진 처리 속도(실 PG · 큰 회사 실행 ${N.toLocaleString()}
     const byCo = new Map(sent.rows.map((r: any) => [String(r.company_id), r]));
     const big = byCo.get(BIG) as any;
     const bigN = Number(big?.n || 0);
-    const bigSpan = big ? new Date(big.last_at).getTime() - new Date(big.first_at).getTime() : 0;
-    const perExec = bigN > 1 ? bigSpan / (bigN - 1) : NaN;
+    const allSent = sent.rows.reduce((a: number, r: any) => a + Number(r.n), 0);
+    const perExec = allSent > 0 ? ms / allSent : NaN;   // 회차 시간 ÷ 보낸 수(묶음 = 단위 표식 시각이 같다)
+    const perHour = Math.floor((3_600_000 / perExec) * 0.8);   // 회차 예산 4분/5분
+    const millionHours = 1_000_000 / perHour;   // 큰 회사 100만 = 합격선(Harold 추천값 · 발송 창 하루 안)
     const smallFirst = SMALL.map((co) => { const r: any = byCo.get(co); return r ? new Date(r.first_at).getTime() - t0 : NaN; });
     const worstSmall = Math.max(...smallFirst);
     console.log(
-      `[처리 속도] 회차 ${ms.toLocaleString()}ms · 처리 ${s.processed} · 보냄 ${s.sent} · 넘김 ${s.skipped} · 기다림 ${s.waited} · 멈춤 ${s.paused} · 실패 ${s.failed}`
-      + ` · 큰 회사 ${bigN.toLocaleString()}건 ${bigSpan.toLocaleString()}ms = 한 건 ${perExec.toFixed(1)}ms · 시간당 ${Math.floor(3_600_000 / perExec).toLocaleString()}건(한 줄 · 회차 예산 4분/5분 = ×0.8)`
-      + ` · 작은 회사 첫 발송 최악 ${worstSmall.toLocaleString()}ms · MySQL 적재 ${ctl.inserted.toLocaleString()}행(가정 ${MYSQL_MS}ms) · 경보 ${ctl.alerts.join(',') || 0}`,
+      `[처리 속도 · 묶음] 회차 ${ms.toLocaleString()}ms · 처리 ${s.processed} · 보냄 ${s.sent} · 넘김 ${s.skipped} · 기다림 ${s.waited} · 멈춤 ${s.paused} · 실패 ${s.failed}`
+      + ` · 큰 회사 ${bigN.toLocaleString()}건 · 한 건 ${perExec.toFixed(2)}ms(회차 ÷ 보낸 수) · 시간당 ${perHour.toLocaleString()}건(×0.8) · 100만 = ${millionHours.toFixed(2)}시간`
+      + ` · 작은 회사 첫 발송 최악 ${worstSmall.toLocaleString()}ms · MySQL 단위 ${ctl.units} · ${ctl.inserted.toLocaleString()}행(가정 ${MYSQL_MS}ms + 행 ${MYSQL_ROW_MS}ms) · 경보 ${ctl.alerts.join(',') || 0}`,
     );
     expect(s.failed).toBe(0);
-    expect(bigN).toBeGreaterThan(0);
+    expect(bigN).toBe(N);   // 묶음 = 큰 회사 전원이 이 회차에(옛 = 회사당 25 · 4분 예산)
     expect(smallFirst.every((x) => Number.isFinite(x))).toBe(true);   // 작은 회사 20곳 모두 이 회차에 나갔다
+    expect(worstSmall).toBeLessThan(ms / 2);   // ★1102 큰 회사 묶음이 한 줄을 쥐는 동안 나머지 줄이 작은 회사를 받는다(차례 끝을 기다리지 않는다)
+    expect(millionHours).toBeLessThan(ctl.windowHours);   // 합격선 = 큰 회사 100만이 발송 창 하루(운영 SEND_HOURS) 안
   }, 600_000);
 
   it('자동마케팅 회차 한 건의 무거운 단계 = 대상 적재 한 문장(운영 SQL buildSendableStagingInsertSql · 큰 회사 전원)', async () => {

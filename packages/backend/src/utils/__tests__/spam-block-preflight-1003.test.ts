@@ -191,15 +191,18 @@ describe('★ 배선 5곳 — 전부 차감 · 캠페인 생성 앞', () => {
   });
 
   it('여정: 단축 URL · 차감 앞 · 그 실행만 실패로 남기고 여정은 멈추지 않는다', () => {
+    // ★ 1102 묶음 발송 — 글자마다 판정(spam-block CT findSpamBlockedTexts · 한 명 때문에 묶음 전체가 막히지 않게 · 설계서 3-3 ④ · SC-24)
     const j = read('utils/journey-executor.ts');
-    const at = j.indexOf('checkSpamBlockBeforeCharge(');
+    const at = j.indexOf('await findSpamBlockedTexts(');
     expect(at).toBeGreaterThan(0);
-    expect(at).toBeLessThan(j.indexOf('shortenUrlsInText(', at));
+    expect(at).toBeLessThan(j.indexOf('shortenUrlsInTexts(', at));
     expect(at).toBeLessThan(j.indexOf('await prepaidDeduct(', at));
-    const branch = j.slice(at, j.indexOf('shortenUrlsInText(', at));
-    expect(branch).toContain("await logFailedStep(exec.execution_id, step.id, 'spam_blocked');");
-    expect(branch).toContain('await advanceOrComplete(exec, step, 0);');
-    expect(branch).not.toContain('pauseJourney(');
+    // 걸린 글자의 고객 = 전이 표 24(failed · spam_blocked · 전진) · 여정은 멈추지 않는다(멈춤 결말 아님)
+    expect(j).toContain("else if (!isKakao && spamBlocked.has(composeSpamCheckText({ message: r.message, subject: r.subject, msgType, isAd: false }))) out = { kind: 'fail', reason: 'spam_blocked' };");
+    const apply = j.slice(j.indexOf('async function applyRowOutcomes('), j.indexOf('async function applyBoundaryPause('));
+    expect(apply).toContain('await logStepMany(ids, step.id, g.status, reason);');
+    expect(apply).toContain('await advanceExecutions(head, step, g.ids.map((exec) => ({ exec, addedCost: 0 })));');
+    expect(apply).not.toContain('pauseJourney(');
   });
 
   it('배선 수 = 5 (라우트 2 · 코어 1 · 자동발송 1 · 여정 1) — 새 경로가 생기면 이 숫자부터 바뀐다', () => {
@@ -207,7 +210,8 @@ describe('★ 배선 5곳 — 전부 차감 · 캠페인 생성 앞', () => {
     expect(count(campaigns)).toBe(2);
     expect(count(read('utils/direct-send-core.ts'))).toBe(1);
     expect(count(read('utils/auto-campaign-worker.ts'))).toBe(1);
-    expect(count(read('utils/journey-executor.ts'))).toBe(1);
+    expect(count(read('utils/journey-executor.ts'))).toBe(0);
+    expect((read('utils/journey-executor.ts').match(/findSpamBlockedTexts\(/g) || []).length).toBe(1);   // ★ 1102 여정 = 묶음 판정 한 자리
   });
 });
 

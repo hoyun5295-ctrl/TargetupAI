@@ -114,6 +114,59 @@ export async function createShortUrl(input: CreateShortUrlInput): Promise<{ hash
 }
 
 /**
+ * ★ 2026-11-02 묶음 발송(설계서 3-3 ④) — 여러 글자의 URL 을 한 문장으로 단축(shortenUrlsInText 의 묶음 판 · 같은 건너뛰기 규칙 · 같은 추적 칸).
+ *   한 문장 INSERT(해시 충돌 = ON CONFLICT DO NOTHING 으로 빠진 것만 한 건 판으로 다시) · 묶음 문장이 던지면 글자마다 한 건 판(원본 보존 규칙 그대로).
+ */
+export async function shortenUrlsInTexts(items: Array<{ text: string; ctx: ShortenUrlsContext }>): Promise<string[]> {
+  const out = items.map((it) => it.text);
+  const dmShortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+  const jobs: Array<{ i: number; url: string; hash: string }> = [];
+  items.forEach((it, i) => {
+    if (!it.text) return;
+    const urls = it.text.match(URL_REGEX);
+    if (!urls) return;
+    for (const url of Array.from(new Set(urls))) {
+      if (url.startsWith(`${SHORT_URL_BASE}/`)) continue;
+      if (dmShortBase && url.startsWith(`${dmShortBase}/`)) continue;
+      jobs.push({ i, url, hash: generateHash() });
+    }
+  });
+  if (jobs.length === 0) return out;
+  let inserted = new Set<string>();
+  try {
+    const r = await query(
+      `INSERT INTO message_short_urls (hash, full_url, company_id, campaign_id, expires_at, journey_id, step_id, variant_id, customer_id, external_id)
+       SELECT x.hash, x.full_url, x.company_id, x.campaign_id, NULL, x.journey_id, x.step_id, x.variant_id, x.customer_id, x.external_id
+         FROM unnest($1::text[], $2::text[], $3::uuid[], $4::uuid[], $5::uuid[], $6::uuid[], $7::uuid[], $8::uuid[], $9::text[])
+              AS x(hash, full_url, company_id, campaign_id, journey_id, step_id, variant_id, customer_id, external_id)
+       ON CONFLICT DO NOTHING
+       RETURNING hash`,
+      [
+        jobs.map((j) => j.hash), jobs.map((j) => j.url), jobs.map((j) => items[j.i].ctx.companyId),
+        jobs.map((j) => items[j.i].ctx.campaignId || null), jobs.map((j) => items[j.i].ctx.journeyId || null),
+        jobs.map((j) => items[j.i].ctx.stepId || null), jobs.map((j) => items[j.i].ctx.variantId || null),
+        jobs.map((j) => items[j.i].ctx.customerId || null), jobs.map((j) => items[j.i].ctx.externalId || null),
+      ],
+    );
+    inserted = new Set(r.rows.map((x: any) => String(x.hash)));
+  } catch (err: any) {
+    console.warn('[short-url] 묶음 단축 실패 — 글자마다 다시:', err?.message);
+    // 차례로(묶음 5천을 한꺼번에 풀에 올리면 다른 요청의 연결이 마른다)
+    for (let i = 0; i < items.length; i++) out[i] = await shortenUrlsInText(items[i].text, items[i].ctx).catch(() => items[i].text);
+    return out;
+  }
+  for (const j of jobs) {
+    let short: string | null = inserted.has(j.hash) ? `${SHORT_URL_BASE}/${j.hash}` : null;
+    if (!short) {
+      try { short = (await createShortUrl({ ...items[j.i].ctx, fullUrl: j.url })).shortUrl; }
+      catch (err: any) { console.warn('[short-url] 단축 실패, 원본 보존:', err?.message); }
+    }
+    if (short) out[j.i] = out[j.i].split(j.url).join(short);
+  }
+  return out;
+}
+
+/**
  * hash로 단축 URL 조회 — 만료 시 null 반환
  */
 export async function resolveShortUrl(hash: string): Promise<ShortUrlResolution | null> {

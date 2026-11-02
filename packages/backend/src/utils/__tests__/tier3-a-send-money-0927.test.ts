@@ -25,9 +25,10 @@ const between = (s: string, a: string, b: string) => {
 describe('m093 여정 문자 유형 칸 = QTmsg 코드', () => {
   it('toQtmsgType · subjectForMsgType', () => {
     const x = src('journey-executor.ts');
-    const b = between(x, '// SMS/LMS/MMS 영역 — bulkInsertSmsQueue 정합.', 'const loaded = await bulkInsertSmsQueue(');
-    expect(b).toContain('toQtmsgType(msgType),');
-    expect(b).toContain('subjectForMsgType(msgType, subject),');
+    // ★ 1102 묶음 발송 — 문자 단위 적재(loadQueueUnit kind 'sms')의 행 꼴
+    const b = between(x, "kind: 'sms', tables: c.tables", 'record: (h) => recordLoadUnit(campaignId, h),');
+    expect(b).toContain('toQtmsgType(c.msgType),');
+    expect(b).toContain('subjectForMsgType(c.msgType, r.subject),');
     expect(x).toContain("import { toQtmsgType, subjectForMsgType } from './qtmsg-type';");
     // MMS 첨부 = 절대경로(직접발송과 같은 CT · Codex 1R)
     expect(b).toContain("normalizeMmsImagePaths(step.mms_image_paths)[i] || ''");

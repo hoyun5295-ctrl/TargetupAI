@@ -15,24 +15,32 @@ import { join } from 'path';
 const src = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
 
 describe('여정 문자 적재 실패 처리', () => {
-  it('문자 적재 반환값을 받아 0건이면 throw한다', () => {
-    const at = src.indexOf("await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });");
-    expect(at).toBeGreaterThan(0);
-    const before = src.slice(at - 40, at);
-    expect(before).toMatch(/const loaded = $/);
-    const after = src.slice(at, at + 600);
-    expect(after).toMatch(/if \(loaded < 1\) \{?\s*throw new Error\(/);
+  // ★ 2026-11-02 묶음 발송(설계서 3-8) — 옛 「삼킨 오류 = 0건 반환 → 던짐」 대신 단위 적재 CT 가 결말 셋을 돌려준다(삼키는 길 0)
+  const sq = readFileSync(join(__dirname, '..', 'sms-queue.ts'), 'utf8');
+  const unit = sq.slice(sq.indexOf('export async function loadQueueUnit('), sq.indexOf('export async function isMysqlThreadAlive('));
+
+  it('들어감(loaded)은 INSERT 문장이 성공 응답을 돌려준 뒤에만 · 보낸 뒤 실패 = 결과 불명(unknown · 연결 파기)', () => {
+    const sendAt = unit.indexOf('await conn.query(ins.sql, ins.params);');
+    expect(sendAt).toBeGreaterThan(0);
+    expect(unit.indexOf("state: 'loaded'")).toBeGreaterThan(sendAt);
+    const fail = unit.slice(sendAt, unit.indexOf("state: 'loaded'"));
+    expect(fail).toContain('conn.destroy();');
+    expect(fail).toContain("return { state: 'unknown', table, threadId,");
+    // 문장 보내기 전 실패만 rejected(시연 막기 · 표 없음 · 연결 받기 · 연결 번호 · 단위 기록)
+    expect(unit.slice(0, sendAt).split("state: 'rejected'").length - 1).toBe(5);
+    expect(unit.slice(sendAt).split("state: 'rejected'").length - 1).toBe(0);
   });
 
-  it('그 throw는 발송 try 안이다 — catch(재시도·정지)보다 앞이고, 실패하면 sent 기록이 남지 않는다', () => {
-    const throwAt = src.indexOf('if (loaded < 1)');
-    const catchAt = src.indexOf('} catch (sendErr: any) {');
-    expect(throwAt).toBeGreaterThan(0);
-    expect(throwAt).toBeLessThan(catchAt);
-    // ★ 2026-09-26 V2 m105 — sent 기록(발송 표식)은 적재 **앞**의 'sending'이 되었다(적재 커밋과 기록 사이 중단 = 재발송 차단).
-    //   "실패하면 sent가 없다"는 이제 'sending'이 발송 수·예산에 안 들어가는 것 + 큐 원행 판정 CT로 지킨다
-    //   (Codex 2R ③ — 적재 오류에 표식을 지우면 응답만 유실된 적재를 다시 보낸다 · 순서 계약 = journey-send-claim-before-load 테스트).
-    expect(src.slice(catchAt, catchAt + 1500)).not.toMatch(/DELETE FROM journey_step_logs/);
-    // ★ 2026-09-26 F05 Codex 2R: 차감은 적재보다 앞이다(적재 실패분은 스위퍼 미적재 환불) — journey-refund-ledger 테스트가 소유
+  it('실행기 = 들어감만 확정 · 안 들어감 = 표식 지우고 재시도 규칙 · 결과 불명 = 표식 보존(sent 기록 0 · 다음 회차 판정)', () => {
+    const u = src.slice(src.indexOf('async function sendUnits('), src.indexOf('async function retryOrPauseAfterLoadFailure('));
+    const loadedAt = u.indexOf("if (outcome.state === 'loaded') {");
+    const rejectedAt = u.indexOf("if (outcome.state === 'rejected') {");
+    const unknownAt = u.indexOf('// unknown = 표식 보존');
+    expect(loadedAt).toBeGreaterThan(0);
+    expect(rejectedAt).toBeGreaterThan(loadedAt);
+    expect(unknownAt).toBeGreaterThan(rejectedAt);
+    expect(u.slice(loadedAt, rejectedAt)).toContain('confirmLoadUnit(');
+    expect(u.slice(rejectedAt, unknownAt)).toContain('await retryOrPauseAfterLoadFailure(head, step, claimed.map((r) => r.exec), outcome.reason, res);');
+    expect(u.slice(unknownAt)).not.toMatch(/DELETE FROM journey_step_logs|clearLoadUnit\(|confirmLoadUnit\(/);
   });
 });

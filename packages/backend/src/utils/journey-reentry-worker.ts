@@ -30,7 +30,8 @@ import { entryOpenClause, lockEntryIfActive } from './journey-lineage';
 import { buildJourneySafetyFilter } from './journey-safety-filter';
 import { journeyOwnerConsent } from './mall-consent';
 import { getJourneyOwnerScopeSql } from './store-scope';
-import { calculateNextRunAt } from './send-time-util';
+import { firstRunAtFor } from './send-time-util';
+import { sendTimingForTrigger } from './journey-trigger-capability';
 import { backfillPerDayOf, entryCapExceeded, dailyRoomInLock } from './journey-step-limits';
 import { interleaveByCompany } from './concurrency';
 
@@ -111,7 +112,6 @@ async function runReentryBatch(): Promise<void> {
           [journeyId],
         );
         if (first.rows.length === 0) continue;
-        const nextRunAt = calculateNextRunAt(String(first.rows[0].delay_mode || 'relative'), Number(first.rows[0].delay_hours || 0), first.rows[0].target_hour_kst ?? null);
         // ★ 2026-10-25 #6 ① — 상한 · 하루 몫 = 진입 감시와 같은 판정(entryCapExceeded · 하루 몫이 있으면 남은 몫만 · 없으면 cap + 1 까지 뽑아 넘으면 멈춤)
         //   ★ Codex 1R — 상한 판정용 뽑기는 cap + 1(회차 1,000 명으로 먼저 자르면 상한 1,000 이상에서 넘침을 못 본다) · 1,000 명은 상한 통과 뒤 넣을 때
         const cap = j.threshold_recipients_per_step != null ? Number(j.threshold_recipients_per_step) : null;
@@ -179,6 +179,9 @@ async function runReentryBatch(): Promise<void> {
             continue;
           }
           const ids = picked.slice(0, PER_JOURNEY_BATCH_LIMIT);   // 회차 상한(남은 분 = 다음 회차 · 완료가 이른 순)
+          // ★ 2026-11-02 첫 칸 시각 = 갈래(트리거 계약 · 진입 감시와 같은 함수 · 설계서 3-2 ②) · 진입 시각 = 이 트랜잭션의 NOW()(넣는 entered_at 과 같은 값 · Codex 구현 1R)
+          const txNow: Date = (await client.query('SELECT NOW() AS now')).rows[0].now;
+          const nextRunAt = firstRunAtFor(sendTimingForTrigger(String(j.trigger_event || '')), String(first.rows[0].delay_mode || 'relative'), Number(first.rows[0].delay_hours || 0), first.rows[0].target_hour_kst ?? null, txNow);
           const r = ids.length === 0 ? { rows: [] as any[] } : await client.query(
             `INSERT INTO journey_executions
                (id, journey_id, customer_id, current_step_order, status, next_run_at, entered_at, created_at)

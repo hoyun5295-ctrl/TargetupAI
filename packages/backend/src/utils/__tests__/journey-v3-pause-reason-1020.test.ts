@@ -57,8 +57,12 @@ describe('pauseReasonView', () => {
   });
   it('실행기의 멈춤 문자열이 모두 표에 있다(새 문자열이 생기면 여기서 깨진다)', () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'journey-executor.ts'), 'utf-8');
-    const raws = [...src.matchAll(/pauseJourney\(exec\.journey_id, (['`])([^'`]+)\1\)/g)].map((m) => m[2].replace(/\$\{[^}]+\}/g, 'X'));
+    // ★ 1102 묶음 발송 — 멈춤 문자열 = 전이 표 결말의 pauseText(경계 고객이 pauseJourney 로 넘긴다) + 직접 pauseJourney 글자
+    const raws = [...src.matchAll(/(?:pauseJourney\(\w+\.journey_id, |pauseText: )(['`])([^'`]+)\1/g)].map((m) => m[2].replace(/\$\{[^}]+\}/g, 'X'));
     expect(raws.length).toBeGreaterThan(10);
     for (const r of raws) expect(pauseReasonView(r).kind, r).not.toBe('unknown');
+    // 이상치 관문(변수 글자) = 다시 켜기로 승인
+    expect(src).toContain('const text = `하루 묶음 인원이 평소보다 크게 많아 발송 전에 멈춤(');
+    expect(pauseReasonView('하루 묶음 인원이 평소보다 크게 많아 발송 전에 멈춤(2026-11-01 진입 9,000명 · 지난 30일 하루 최대 100명)').fix?.action).toBe('resume');
   });
 });

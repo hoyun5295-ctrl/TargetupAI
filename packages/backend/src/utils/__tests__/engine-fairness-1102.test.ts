@@ -99,11 +99,12 @@ describe('E2-4 스팸 검사 큐 = 줄 + 회사 돌아가며(pickNextSpamTest)',
 });
 
 describe('배선(소스 계약)', () => {
-  it('실행기 = 묶음을 회사 줄로(JOURNEY_EXECUTOR_CONCURRENCY) · processExecution 그대로', () => {
+  it('실행기 = 묶음을 회사 줄로(JOURNEY_EXECUTOR_CONCURRENCY) · ★ 1102 한 회사 = 한 줄 = (여정 · 칸) 묶음 하나(processStepBatch)', () => {
     const ex = read('journey-executor.ts');
     expect(ex).toMatch(/export const JOURNEY_EXECUTOR_CONCURRENCY = 4;/);
-    expect(ex).toContain('await runCompanyLanes(dueRes.rows as ExecutionRow[], (r) => String(r.company_id), JOURNEY_EXECUTOR_CONCURRENCY, async (row) => {');
-    expect(ex).not.toMatch(/for \(const row of dueRes\.rows as ExecutionRow\[\]\) \{\n\s+pickedThisTick\.push/);
+    expect(ex).toContain('await runCompanyLanes(g.rows as Array<{ journey_id: string; current_step_order: number; company_id: string }>, (r) => String(r.company_id), JOURNEY_EXECUTOR_CONCURRENCY, async (grp) => {');
+    expect(ex).toContain('const out = await processStepBatch(rows);');
+    expect(ex).not.toContain('processExecution(');
   });
   it('진입 감시 = 회사 섞기 · 이어서 · 4분 예산 · 사건 · 원장 문 = 여정 몫 20초 안 이어 읽기', () => {
     const w = read('journey-trigger-watcher.ts');

@@ -123,7 +123,8 @@ export function resetResultNoticeColumnsCache(value?: boolean): void {
  *   기다리는 행이 아무리 많아도 모든 후보가 ceil(후보 수 / 상한) 회차 안에 한 번은 판정을 받는다(앞자리 독차지 0).
  *   판정은 decideResultNotice 한 곳(SQL 은 거르지 않는다 · 2R ② = 판정을 SQL 에 베끼면 알림 꺼짐 「기록만」이 어긋났다). 재시작 = 처음부터.
  */
-let _cursor: { sendDay: string; journeyId: string; stepId: string } | null = null;
+// ★ 2026-11-02 묶음 발송 I6 — 같은 (여정 · 칸 · 날)에 이어 붙임 캠페인(순번)이 여럿일 수 있다 → 행 = 캠페인 하나(campaign_id) · 커서 끝 = campaign_id(DDL-1 앞뒤 같은 문장)
+let _cursor: { sendDay: string; journeyId: string; stepId: string; campaignId: string } | null = null;
 
 /** 캠페인 동기화 워커(5분)가 동기화 뒤에 부른다. */
 export async function notifyJourneyStepResults(): Promise<void> {
@@ -152,13 +153,13 @@ export async function notifyJourneyStepResults(): Promise<void> {
        JOIN campaigns c ON c.id = jsc.campaign_id
       WHERE jsc.send_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - ${RESULT_NOTICE_WINDOW_DAYS}
         AND COALESCE(c.sent_count, 0) > COALESCE(jsc.result_notice_sent, 0)
-        AND ($1::date IS NULL OR (jsc.send_date, jsc.journey_id, jsc.step_id) > ($1::date, $2::uuid, $3::uuid))
-      ORDER BY jsc.send_date ASC, jsc.journey_id ASC, jsc.step_id ASC
+        AND ($1::date IS NULL OR (jsc.send_date, jsc.journey_id, jsc.step_id, jsc.campaign_id) > ($1::date, $2::uuid, $3::uuid, $4::uuid))
+      ORDER BY jsc.send_date ASC, jsc.journey_id ASC, jsc.step_id ASC, jsc.campaign_id ASC
       LIMIT ${RESULT_NOTICE_SCAN_LIMIT}`,
-    [_cursor?.sendDay ?? null, _cursor?.journeyId ?? null, _cursor?.stepId ?? null],
+    [_cursor?.sendDay ?? null, _cursor?.journeyId ?? null, _cursor?.stepId ?? null, _cursor?.campaignId ?? null],
   );
   const last = res.rows[res.rows.length - 1] as any;
-  _cursor = res.rows.length < RESULT_NOTICE_SCAN_LIMIT ? null : { sendDay: String(last.send_day), journeyId: String(last.journey_id), stepId: String(last.step_id) };
+  _cursor = res.rows.length < RESULT_NOTICE_SCAN_LIMIT ? null : { sendDay: String(last.send_day), journeyId: String(last.journey_id), stepId: String(last.step_id), campaignId: String(last.campaign_id) };
   for (const row of res.rows as any[]) {
     try {
       await handleStepDay(row);
@@ -171,11 +172,11 @@ export async function notifyJourneyStepResults(): Promise<void> {
 async function handleStepDay(row: any): Promise<void> {
   const oldSent: number | null = row.result_notice_sent == null ? null : Number(row.result_notice_sent);
   const sentCount = Number(row.sent_count || 0);
-  const pk = [row.journey_id, row.step_id, row.send_day];
+  const pk = [row.campaign_id];
   const finalize = async (): Promise<boolean> => (await query(
-    `UPDATE journey_step_campaigns SET result_notice_sent = $4, result_notice_at = NOW(), result_notice_attempts = 0
-      WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3::date
-        AND result_notice_sent IS NOT DISTINCT FROM $5::int
+    `UPDATE journey_step_campaigns SET result_notice_sent = $2, result_notice_at = NOW(), result_notice_attempts = 0
+      WHERE campaign_id = $1::uuid
+        AND result_notice_sent IS NOT DISTINCT FROM $3::int
       RETURNING journey_id`,
     [...pk, sentCount, oldSent],
   )).rows.length > 0;
@@ -224,8 +225,8 @@ async function handleStepDay(row: any): Promise<void> {
   const result = await sendNoticeOnce({
     claim: async () => (await query(
       `UPDATE journey_step_campaigns SET result_notice_attempts = result_notice_attempts + 1
-        WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3::date
-          AND result_notice_sent IS NOT DISTINCT FROM $4::int AND result_notice_attempts < $5
+        WHERE campaign_id = $1::uuid
+          AND result_notice_sent IS NOT DISTINCT FROM $2::int AND result_notice_attempts < $3
         RETURNING journey_id`,
       [...pk, oldSent, NOTICE_MAX_ATTEMPTS],
     )).rows.length > 0,
@@ -250,7 +251,7 @@ async function handleStepDay(row: any): Promise<void> {
     // 시도를 다 쓴 단계 = 보내지 않고 기록 + 경보(그 단계 포기 · 다음 단계는 시도 0 부터)
     const r = await query(
       `SELECT result_notice_sent, result_notice_attempts FROM journey_step_campaigns
-        WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3::date`, pk,
+        WHERE campaign_id = $1::uuid`, pk,
     );
     const cur = r.rows[0];
     const sameStage = cur && (cur.result_notice_sent == null ? null : Number(cur.result_notice_sent)) === oldSent;

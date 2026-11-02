@@ -224,19 +224,24 @@ describe('상한 있는 MySQL 연결(§2-8 · withBoundedMysql)', () => {
 describe('소스 계약', () => {
   it('실행기 = 보류 관문 → 재검사 전 관문 → 발송 시간 판정 한 번(창 밖 = 바로 끝) → 변이 고르기 → 발송 표식(★ 1102 그날 기록 관문 0)', () => {
     const ex = read('journey-executor.ts');
-    const held = ex.indexOf("if (gate.rows[0]?.held && ['sms', 'lms', 'mms'].includes(String(step.channel))) {");
-    const pending = ex.indexOf('if (pendingSnapshotAt && [');
-    const hours = ex.indexOf('if (!isWithinSendHours()) {');
+    // ★ 1102 묶음 발송 — 관문 = 칸마다 한 번(processMessageBatch) · 발송 창 = 판정 함수 하나(sendWindowState · I7) · 단위마다 다시(창 · 보류 · R30)
+    const held = ex.indexOf('if (gate.rows[0]?.held && isTextChannel) {');
+    const pending = ex.indexOf('if (snap.pendingSnapshotAt && isTextChannel) {');
+    const hours = ex.indexOf('const win = sendWindowState();');
     expect(held).toBeGreaterThan(-1);
-    expect(held).toBeLessThan(ex.indexOf('if (snapshotReadFailed && ['));
+    expect(held).toBeLessThan(ex.indexOf('if (snap.snapshotReadFailed && isTextChannel) {'));
     expect(pending).toBeGreaterThan(held);
     expect(hours).toBeGreaterThan(pending);
-    // 실행 하나의 처리 경로(processExecution) 안 = 발송 시간 판정 한 번(★ 1102 E9 ① 밀림 경보는 회차 끝 · 그 밖)
-    const pe = ex.slice(ex.indexOf('async function processExecution('), ex.indexOf('async function chargeJourneyOperationCredit('));
-    expect(pe.match(/isWithinSendHours\(\)/g)).toHaveLength(1);
-    expect(hours).toBeLessThan(ex.indexOf('let activeVariantId: string | null = null;'));
-    expect(ex).toContain("${stepHeldSql('$3::uuid', '$4::uuid')} AS held");
-    expect(ex).toContain('[exec.execution_id, pendingSnapshotAt, exec.journey_id, step.id]');
+    // 발송 창 판정 = sendWindowState 한 함수(시작 = 지금 · 끝 = 지금 + 여유 · 다음 창 = 같은 기준 시각)
+    const sw = ex.slice(ex.indexOf('function sendWindowState('), ex.indexOf('async function setNextRunAt('));
+    expect(sw.match(/isWithinSendHours\(/g)).toHaveLength(2);
+    expect(sw).toContain('const t = new Date(now.getTime() + NIGHT_AD_LOAD_LEAD_MS);');
+    expect(sw).toContain('return { open: false, next: computeNextSendWindow(t) };');
+    const mb = ex.slice(ex.indexOf('async function processMessageBatch('), ex.indexOf('async function applyRowOutcomes('));
+    expect(mb.match(/isWithinSendHours\(/g)).toBeNull();
+    expect(hours).toBeLessThan(ex.indexOf('const variants = await listJourneyStepVariants(step.id);'));
+    expect(ex).toContain("${stepHeldSql('$2::uuid', '$3::uuid')} AS held");
+    expect(ex).toContain('[snap.pendingSnapshotAt, head.journey_id, step.id]');
     expect(ex).not.toMatch(/checked_today|pretestHoldUntil|trackGateHold|pretestDoneSql/);
   });
   it('보류 판정 조각을 부르는 곳 = 실행기 관문(옛 「그날 마침」 조각 없음)', () => {

@@ -14,6 +14,8 @@
 // 커서 경로 판정은 단일 출처를 재사용한다(인라인 재정의 금지).
 // (2026-08-02 §11-5) 상한 전면 필수화로 classifyJourneyTrigger 의존이 사라졌다 — 커서 규약은 journey-cdp-cursor가 계속 소유.
 
+import { isSingleStepKind } from './journey-start-kind';
+
 /** 화면 트리거 key — 프론트 카탈로그(journey-trigger-catalog.ts)의 key와 같다. */
 export type TriggerKey =
   | 'purchase' | 'reservation' | 'cart' | 'shipped'
@@ -225,45 +227,51 @@ export interface TriggerContract {
    *   (앞 여정 없이 만들면 영영 0건). 켜기 · 감시 · 지도는 받는다.
    */
   attachOnly?: boolean;
+  /**
+   * ★ 2026-11-02 발송 갈래(설계서 docs/2026-11-02-journey-batch-send-design.md 3-1 · Harold 「중요한 부분은 강제」).
+   *   immediate = 거래 사건(구매 · 배송 · 예약) = 진입 그 회차에 보낸다 · daily = 그날(KST · 진입 행이 생긴 날) 들어온 고객을 모아 다음날 칸 시각에.
+   *   사용자 · AI 가 고르지 않는다(여정 칸 0) · 필수 칸 = 빠지면 tsc 오류.
+   */
+  sendTiming: 'immediate' | 'daily';
 }
 
 export const TRIGGER_CONTRACTS: TriggerContract[] = [
   // §3-1 상태 전이형
   // ★ 2026-08-08 이어달리기 v1 간선 3 — exit 신호와 의미가 일치하는 것만 잇는다(설계서 §3).
   //   신규가입(exit=purchase, 신규 고객의 구매 = 생애 첫 구매) → 첫 구매
-  { event: 'customer.created',              key: 'signup',   label: '신규 가입', desc: '회원이 가입하면', lane: 'signup', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['purchase.first'] },
+  { event: 'customer.created',              key: 'signup',   label: '신규 가입', desc: '회원이 가입하면', lane: 'signup', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['purchase.first'], sendTiming: 'daily' },
   //   첫 구매(exit=second_purchase, 두 번째 구매 = 재구매) → 재구매
   // ★ 2026-09-29 V2 — 첫 구매 1건은 주문 완료(모든 구매)도 함께 발화한다(자격 필터는 첫 구매 · 휴면 복귀 두 종뿐 · journey-trigger-watcher.ts:302).
   //   옛 계약에 이 쌍이 없어 한 번의 첫 구매에 두 여정이 시작되는데 화면이 알리지 않았다. 휴면 복귀와는 자격이 배타다(이전 구매 0건 vs 있음).
-  { event: 'purchase.first',                key: 'first_purchase', label: '첫 구매', desc: '생애 첫 구매가 일어나면', lane: 'first_purchase', cls: 'transition', implemented: true, exit: 'second_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase', 'purchase.product'], purchaseStream: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['customer.dormant_return'] }, // #2 — 구매 스트림 분기(이전 구매 0건)
-  { event: 'cdp.purchase',                  key: 'purchase', label: '주문 완료', desc: '구매가 일어나면', lane: 'repurchase', cls: 'event',      implemented: true,  exit: 'next_purchase', templateCode: 'repeat', nextEvents: ['purchase.product'], purchaseStream: true, reentryRequired: true, overlapEvents: ['customer.dormant_return', 'purchase.first', 'purchase.product'] },     // #3 재구매(현행 구매)
+  { event: 'purchase.first',                key: 'first_purchase', label: '첫 구매', desc: '생애 첫 구매가 일어나면', lane: 'first_purchase', cls: 'transition', implemented: true, exit: 'second_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase', 'purchase.product'], purchaseStream: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['customer.dormant_return'], sendTiming: 'immediate' }, // #2 — 구매 스트림 분기(이전 구매 0건)
+  { event: 'cdp.purchase',                  key: 'purchase', label: '주문 완료', desc: '구매가 일어나면', lane: 'repurchase', cls: 'event',      implemented: true,  exit: 'next_purchase', templateCode: 'repeat', nextEvents: ['purchase.product'], purchaseStream: true, reentryRequired: true, overlapEvents: ['customer.dormant_return', 'purchase.first', 'purchase.product'], sendTiming: 'immediate' },     // #3 재구매(현행 구매)
   // ★ 2026-09-30 여정 V2 3차 — 상품 재구매. 고른 상품을 사면 시작 · 같은 상품을 다시 사면 끝(목표 = product_repurchase).
   //   구매 한 건이 주문 완료 · 첫 구매 · 휴면 복귀와 함께 발화한다(겹침). 받는 쪽이므로 사건마다 다시 받는다(reentryRequired).
-  { event: 'purchase.product',              key: 'product',  label: '상품 구매', desc: '고른 상품을 사면', lane: 'product', cls: 'event',     implemented: true,  exit: 'product_repurchase', templateCode: 'repeat', productPick: true, purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.first', 'customer.dormant_return'] },
+  { event: 'purchase.product',              key: 'product',  label: '상품 구매', desc: '고른 상품을 사면', lane: 'product', cls: 'event',     implemented: true,  exit: 'product_repurchase', templateCode: 'repeat', productPick: true, purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.first', 'customer.dormant_return'], sendTiming: 'immediate' },
   //   휴면(exit=purchase, 휴면 중 구매 = 복귀) → 휴면 복귀
-  { event: 'customer.dormant',              key: 'dormant',  label: '휴면 전환', desc: '한동안 구매가 없으면', lane: 'winback', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['customer.dormant_return'] },
+  { event: 'customer.dormant',              key: 'dormant',  label: '휴면 전환', desc: '한동안 구매가 없으면', lane: 'winback', cls: 'transition', implemented: true,  exit: 'purchase', templateCode: 'custom', nextEvents: ['customer.dormant_return'], sendTiming: 'daily' },
   //   ★ 2026-10-20 V.3 D5 — 휴면 복귀 → 주문 완료(돌아온 고객 → 단골 재구매) 선. 환영 여정에서 다음 구매를 하면(목표 종료) 그 구매로 주문 완료가 받는다.
   //   돌아온 그 구매 한 건은 주문 완료의 「돌아온 고객은 환영만」(exclude_dormant_return)이 빼서 같은 날 두 통이 나가지 않는다.
   //   끝 신호 = 다음 구매(간선 출발은 전환 신호가 있어야 한다 · 옛 steps_done 이면 「전환했어요」 추천이 성립하지 않는다 · catalog-parity).
-  { event: 'customer.dormant_return',       key: 'dormant_return', label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면', lane: 'winback', cls: 'transition', implemented: true, exit: 'next_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase'], purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['purchase.first'] },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
-  { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면', lane: 'winback', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1, templateCode: 'custom' }, // #6
+  { event: 'customer.dormant_return',       key: 'dormant_return', label: '휴면 복귀', desc: '오래 쉬었다가 다시 구매하면', lane: 'winback', cls: 'transition', implemented: true, exit: 'next_purchase', templateCode: 'repeat', nextEvents: ['cdp.purchase'], purchaseStream: true, reentryRequired: true, overlapEvents: ['cdp.purchase', 'purchase.product'], exclusiveEvents: ['purchase.first'], sendTiming: 'immediate' },   // #5 — 구매 스트림 분기(직전 구매가 휴면 기준일 이상 과거)
+  { event: 'customer.cycle_lapsed',         key: 'cycle_lapsed', label: '구매 주기 이탈', desc: '평소 구매 주기를 넘기면', lane: 'winback', cls: 'transition', implemented: true, exit: 'purchase', cooldownMinDays: 1, templateCode: 'custom', sendTiming: 'daily' }, // #6
   // #7 — 원장 state와 **서열 비교**(상승만). 쿨다운은 오르내리락 왕복에서 축하가 연달아 나가는 것을 막는 바닥값이고,
   //   진짜 방어는 "상승만 + 같은 급 제외"다(2026-08-02).
-  { event: 'customer.grade_changed',        key: 'grade',    label: '등급 상승', desc: '회원 등급이 올라가면', lane: 'moment', cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1, templateCode: 'custom' },
-  { event: 'customer.birthday_approaching', key: 'birthday', label: '생일 D-7', desc: '생일이 다가오면', lane: 'moment', cls: 'transition', implemented: true,  exit: 'steps_done', templateCode: 'custom' },
-  { event: 'customer.points_expiring',      key: 'points',   label: '포인트 소멸 임박', desc: '보유 포인트가 사라지기 전에', lane: 'moment', cls: 'transition', implemented: true,  exit: 'points_used', templateCode: 'custom' },
+  { event: 'customer.grade_changed',        key: 'grade',    label: '등급 상승', desc: '회원 등급이 올라가면', lane: 'moment', cls: 'transition', implemented: true,  exit: 'steps_done', cooldownMinDays: 1, templateCode: 'custom', sendTiming: 'daily' },
+  { event: 'customer.birthday_approaching', key: 'birthday', label: '생일 D-7', desc: '생일이 다가오면', lane: 'moment', cls: 'transition', implemented: true,  exit: 'steps_done', templateCode: 'custom', sendTiming: 'daily' },
+  { event: 'customer.points_expiring',      key: 'points',   label: '포인트 소멸 임박', desc: '보유 포인트가 사라지기 전에', lane: 'moment', cls: 'transition', implemented: true,  exit: 'points_used', templateCode: 'custom', sendTiming: 'daily' },
   // §3-2 사건 발생형
-  { event: 'cdp.cart_abandon',              key: 'cart',     label: '장바구니', desc: '장바구니에 담기면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' },  // §9-N1
-  { event: 'custom_order_shipped',          key: 'shipped',  label: '배송 시작', desc: '배송이 시작되면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'steps_done', templateCode: 'cart' },
-  { event: 'cdp.browse_no_purchase',        key: 'browse',   label: '조회 후 미구매', desc: '상품을 보고 구매하지 않으면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart' }, // #12
+  { event: 'cdp.cart_abandon',              key: 'cart',     label: '장바구니', desc: '장바구니에 담기면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart', sendTiming: 'daily' },  // §9-N1
+  { event: 'custom_order_shipped',          key: 'shipped',  label: '배송 시작', desc: '배송이 시작되면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'steps_done', templateCode: 'cart', sendTiming: 'immediate' },
+  { event: 'cdp.browse_no_purchase',        key: 'browse',   label: '조회 후 미구매', desc: '상품을 보고 구매하지 않으면', lane: 'moment', cls: 'event',      implemented: true,  exit: 'purchase', cooldownMinDays: 1, templateCode: 'cart', sendTiming: 'daily' }, // #12
   // §3-3 예약 (원장 §8 선행 — 착수 6번. 커서 경로는 있으나 데이터 문이 없어 capability가 잠근다)
-  { event: 'cdp.reservation_created',       key: 'reservation', label: '예약 확인', desc: '예약이 등록되면', lane: 'moment', cls: 'reservation', implemented: true,  exit: 'reservation_closed', templateCode: 'reservation' },
-  { event: 'reservation.visit_dn',          key: null,       label: '방문 전 안내', desc: '방문 며칠 전에', lane: 'moment', cls: 'reservation', implemented: false, exit: 'reservation_closed' }, // #14 — 착수 6번
-  { event: 'reservation.visit_done',        key: null,       label: '방문 뒤 안내', desc: '방문을 마치면', lane: 'moment', cls: 'reservation', implemented: false, exit: 'steps_done' },         // #15 — 착수 6번
+  { event: 'cdp.reservation_created',       key: 'reservation', label: '예약 확인', desc: '예약이 등록되면', lane: 'moment', cls: 'reservation', implemented: true,  exit: 'reservation_closed', templateCode: 'reservation', sendTiming: 'immediate' },
+  { event: 'reservation.visit_dn',          key: null,       label: '방문 전 안내', desc: '방문 며칠 전에', lane: 'moment', cls: 'reservation', implemented: false, exit: 'reservation_closed', sendTiming: 'immediate' }, // #14 — 착수 6번
+  { event: 'reservation.visit_done',        key: null,       label: '방문 뒤 안내', desc: '방문을 마치면', lane: 'moment', cls: 'reservation', implemented: false, exit: 'steps_done', sendTiming: 'immediate' },         // #15 — 착수 6번
   // 상시(자유 세그먼트) — §3-5: §5-4 게이트 뒤로
-  { event: 'custom',                        key: null,       label: '고른 고객에게', desc: '고른 고객에게 한 번', lane: 'standing', cls: 'standing',   implemented: true,  exit: 'steps_done' },
+  { event: 'custom',                        key: null,       label: '고른 고객에게', desc: '고른 고객에게 한 번', lane: 'standing', cls: 'standing',   implemented: true,  exit: 'steps_done', sendTiming: 'daily' },
   // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기. 레인은 지도가 앞 여정에서 정한다(여기 lane = 앞 여정을 못 찾을 때의 자리).
-  { event: 'journey.after',                 key: null,       label: '앞 여정을 마치면', desc: '앞 여정을 마친 고객에게', lane: 'standing', cls: 'event', implemented: true, exit: 'steps_done', attachOnly: true },
+  { event: 'journey.after',                 key: null,       label: '앞 여정을 마치면', desc: '앞 여정을 마친 고객에게', lane: 'standing', cls: 'event', implemented: true, exit: 'steps_done', attachOnly: true, sendTiming: 'daily' },
 ];
 
 /** ★ V.3 §18 — 기존 여정 뒤에 붙인 여정의 시작 사건. */
@@ -288,6 +296,25 @@ export function isImplementedTriggerEvent(triggerEvent: string): boolean {
 export function isCreatableTriggerEvent(triggerEvent: string): boolean {
   const c = CONTRACT_BY_EVENT.get(triggerEvent);
   return c?.implemented === true && c.attachOnly !== true;
+}
+
+/**
+ * ★ 2026-11-02 발송 갈래(설계서 3-1) — 모르는 시작 사건 = 'immediate'(지금 규칙 그대로 · 시각을 바꾸지 않는 쪽).
+ *   등록된 사건은 계약이 정한다(계약 시험이 18종 전부를 확인).
+ */
+export function sendTimingForTrigger(triggerEvent: string): 'immediate' | 'daily' {
+  return CONTRACT_BY_EVENT.get(triggerEvent)?.sendTiming ?? 'immediate';
+}
+
+/**
+ * ★ 2026-11-02 발송 갈래 한 줄(설계서 docs/2026-11-02-journey-batch-send-design.md 3-6 · SC-40) — 화면(시작 칸 · 켜기 확인 창)은 이 글자만 그린다(화면에 갈래 표 0).
+ *   한 번 보내기 · 날짜 기준 여정 = 지정 시각이 이미 묶음 = 갈래 규정 밖(null · 3-1). 괄호 = 첫 칸에 기다림 · 시각을 정한 여정도 맞는 말(값 문구 = 생산 갈래 전부).
+ */
+export function sendTimingLine(triggerEvent: string | null | undefined, startKind?: string | null): string | null {
+  if (isSingleStepKind(startKind ?? null)) return null;
+  return sendTimingForTrigger(String(triggerEvent || '')) === 'daily'
+    ? '그날 들어온 고객을 모아 다음날 아침 9시에 보내요(칸에 기다림 · 시각을 정하면 그에 맞춰).'
+    : '사건이 생기면 몇 분 안에 보내요(첫 칸에 기다림을 정하면 그만큼 뒤).';
 }
 
 /** 계약 조회 — 없으면 null(fail-closed는 호출부 몫). */

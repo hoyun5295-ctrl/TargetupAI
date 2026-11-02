@@ -242,9 +242,10 @@ describe('실행기 fail-closed (⑩)', () => {
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(process.cwd(), 'src/utils/journey-executor.ts'), 'utf8');
+    // ★ 1102 묶음 발송 — 칸 종류 가름 = processStepBatch 한 곳(문자 흐름 = processMessageBatch)
     const guard = src.indexOf("if (step.step_type !== 'message') {");
-    const msgFlow = src.indexOf('// ──────────── message step (기존 흐름) ────────────');
-    const cond = src.indexOf("if (step.step_type === 'condition') {");
+    const msgFlow = src.indexOf('return processMessageBatch(execs, step, res, { pendingSnapshotAt, snapshotReadFailed });');
+    const cond = src.indexOf("if (step.step_type === 'condition') return processConditionBatch(execs, step, res);");
     expect(guard).toBeGreaterThan(cond);
     expect(msgFlow).toBeGreaterThan(guard);
     const block = src.slice(guard, msgFlow);

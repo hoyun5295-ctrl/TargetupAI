@@ -62,10 +62,11 @@ describe('운영 크레딧 잡아 둔 날 되돌리기', () => {
   });
   it('발송 뒤 확정 차감 날짜 = 표식 시각(자정을 넘겨도 잡아 둔 날과 같은 판정 축 · 한 발송에 두 날 차감 0)', () => {
     const ex = SRC('journey-executor.ts');
-    expect(ex).toContain('RETURNING id, sent_at`');
-    expect(ex).toContain('claimAt = claim.rows[0]?.sent_at ? new Date(claim.rows[0].sent_at) : null;');
-    expect(ex).toContain('await chargeJourneyOperationCredit(exec, claimAt ?? new Date());');
-    expect(ex).not.toContain('await chargeJourneyOperationCredit(exec, new Date());');
+    // ★ 1102 묶음 발송 — 단위 표식 한 문장의 시각(같은 문장 = 같은 NOW())
+    expect(ex).toContain('RETURNING id, execution_id, sent_at`');
+    expect(ex).toContain('const claimAt = claimByExec.get(claimed[0].exec.execution_id)!.sentAt;');
+    expect(ex).toContain('await chargeJourneyOperationCredit(head, claimAt);');
+    expect(ex).not.toMatch(/await chargeJourneyOperationCredit\(\w+, new Date\(\)\);/);
   });
   it('10분 작업자 체인에 붙어 있다', () => {
     expect(SRC('ai-usage-threshold-alert.ts')).toContain('.then(async () => { await releaseUnusedOperationCredits(); })');

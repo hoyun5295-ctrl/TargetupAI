@@ -32,7 +32,7 @@ import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 // ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
-import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT } from './journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT, sendTimingLine } from './journey-trigger-capability';
 import { readAfterConfig } from './journey-after-config';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 필터 검증(상품 · 문) · 키 규칙은 journey-product 한 곳.
 import { normalizeProductFilters } from './journey-product';
@@ -2168,7 +2168,9 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
   return {
     // ★ 2026-11-01 여정 재발 방지 B1-3 — 사람 값 원장 상태(혜택 · 링크 · 정함 여부). 칸이 없으면(DDL-A 전) null = 화면이 채우기 줄을 늘 보이지 않는다.
     journey: { ...row, entry_ends_on: endsReady ? (endsText ?? null) : undefined, entry_ends_ready: endsReady, activation_cost: activationCostOf(row), pause_view: pauseView,
-      copy_facts_view: 'copy_facts' in row ? journeyCopyFacts(parseCopyFacts(row.copy_facts)) : null },
+      copy_facts_view: 'copy_facts' in row ? journeyCopyFacts(parseCopyFacts(row.copy_facts)) : null,
+      // ★ 2026-11-02 발송 갈래 한 줄(시작 칸 · 계약 sendTiming · 설계서 3-6)
+      send_timing_line: sendTimingLine(row.trigger_event, row.start_kind) },
     steps: stepsWithLabels,
   };
 }

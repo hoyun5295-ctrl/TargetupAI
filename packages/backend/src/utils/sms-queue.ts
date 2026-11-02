@@ -3,7 +3,7 @@
 // campaigns.ts, manage-scheduled.ts 등 모든 라우트는 이 모듈을 통해 MySQL 큐에 접근한다.
 // 하드코딩 금지. 환경변수/설정파일 기반.
 
-import { mysqlQuery } from '../config/database';
+import { mysqlQuery, mysqlPool } from '../config/database';
 import { guardDemoLeak } from './demo-company';   // ★ 2026-10-09 시연 회사 최후 방어(적재 = 사고)
 import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry } from './spam-block';
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
@@ -1289,52 +1289,55 @@ export async function insertBrandQueue(
   return inserted;
 }
 
-/**
- * 알림톡 큐 INSERT 실패 — **그 전까지 커밋된 건수**를 함께 전달한다.
- * ★ 2026-07-27 (B-0727-1): 배치가 독립 커밋이라 "실패 = 0건 적재"가 아니다.
- *   호출부는 이 값을 적재 성공분으로 세야 환불이 실제 발송분을 넘지 않는다.
- */
-export class AlimtalkQueueInsertError extends Error {
-  constructor(message: string, public readonly inserted: number) {
-    super(message);
-    this.name = 'AlimtalkQueueInsertError';
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-11-02 적재 문장 만들기 = 한 곳(설계서 docs/2026-11-02-journey-batch-send-design.md 3-8)
+//   bulkInsertSmsQueue · insertAlimtalkQueue · loadQueueUnit 셋이 같은 문장을 쓴다(글자 같음 = 시험).
+// ════════════════════════════════════════════════════════════════════
+
+/** 문자 큐 INSERT 한 문장(표 하나 · 행 = bulkInsertSmsQueue 행 꼴) — useNow = sendreq_time NOW() */
+export function buildSmsQueueInsert(table: string, batch: any[][], useNow: boolean): { sql: string; params: any[] } {
+  if (useNow) {
+    // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 사용
+    const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
+    const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9], row[10]]).flat();
+    return {
+      sql: `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+      params: flatValues,
+    };
   }
+  // 예약/분할: sendTime(row[5]) 파라미터 그대로 사용
+  const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
+  return {
+    sql: `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
+    params: batch.flat(),
+  };
 }
 
+export type AlimtalkQueueRow = {
+  phone: string;
+  callback: string;
+  message: string;
+  templateCode: string;
+  nextType?: string;
+  nextContents?: string;
+  buttonJson?: string;
+  etcJson?: string;
+  titleStr?: string;
+  reservedDate?: string;
+  companyId?: string;
+};
+
 /**
- * CT-04: 알림톡 발송 큐 INSERT (SMSQ_SEND에 msg_type='K')
- * QTmsg Agent가 SMSQ_SEND에서 가져가서 발송
+ * ★ 2026-07-07: 비토 게이트웨이 라인 전용 SENDER_KEY(발신프로필키) 주입.
+ *   비토 Agent v1.0.10+는 kakao_sender_key 필수(미동봉 = 필드매핑 실패 9999·발송 전 차단).
+ *   표준 QTmsg 라인은 중계서버가 템플릿코드로 자동 도출 + 에이전트 select_sql이 k_etc_json을
+ *   SQL 합성(D234+)하므로 절대 주입하지 않는다 — INSERT 대상이 bito 라인일 때만 병합.
+ *   templateCode→profile_key 조인은 발송 gate(campaigns.ts:1390)·resolveTemplateContext(alimtalk.ts)와
+ *   동일 컬럼·동일 조인. 알림톡 4경로 전부 호출당 단일 템플릿(rows 전행 동일 templateCode+companyId)이라 rows[0] 기준 1회 조회.
+ * ★ 2026-09-27 한줄로 V2 m048 — 제어 JSON 폭은 그 테이블의 실제 폭(폭 CT). 옛: 1024 하드코딩이라 비토 라인(8192)에서도
+ *   제어 JSON + SENDER_KEY가 1024를 넘으면 키 없이 적재돼 9999로 실패했다. 조회 실패는 CT가 1024로 본다(fail-closed).
  */
-export async function insertAlimtalkQueue(
-  tables: string[],
-  rows: {
-    phone: string;
-    callback: string;
-    message: string;
-    templateCode: string;
-    nextType?: string;    // 실패 시 폴백: N/S/L/A/B (기본 L)
-    nextContents?: string; // A/B일 때 대체 문구
-    buttonJson?: string;  // k_button_json
-    etcJson?: string;     // k_etc_json (강조표기 title, senderkey 등)
-    titleStr?: string;
-    reservedDate?: string;
-    companyId?: string;
-  }[],
-  appEtc1?: string,   // ★ #4-c (2026-06-01): app_etc1 = 캠페인/추적 식별자 — 결과·정산 매칭(results.ts WHERE app_etc1=?). 누락 시 알림톡 발송 결과 미조회.
-): Promise<number> {
-  if (rows.length === 0) return 0;
-  // ★ 2026-10-09 시연 회사 최후 방어
-  for (const id of new Set(rows.map((r) => r.companyId).filter(Boolean))) await guardDemoLeak('insertAlimtalkQueue', id);
-
-  const table = tables[0]; // 알림톡은 첫 번째 테이블 사용
-  let inserted = 0;
-
-  // ★ 2026-07-07: 비토 게이트웨이 라인 전용 SENDER_KEY(발신프로필키) 주입.
-  //   비토 Agent v1.0.10+는 kakao_sender_key 필수(미동봉 = 필드매핑 실패 9999·발송 전 차단).
-  //   표준 QTmsg 라인은 중계서버가 템플릿코드로 자동 도출 + 에이전트 select_sql이 k_etc_json을
-  //   SQL 합성(D234+)하므로 절대 주입하지 않는다 — INSERT 대상이 bito 라인일 때만 병합.
-  //   templateCode→profile_key 조인은 발송 gate(campaigns.ts:1390)·resolveTemplateContext(alimtalk.ts)와
-  //   동일 컬럼·동일 조인. 알림톡 4경로 전부 호출당 단일 템플릿(rows 전행 동일 templateCode+companyId)이라 rows[0] 기준 1회 조회.
+async function prepareAlimtalkSenderKey(table: string, rows: AlimtalkQueueRow[]): Promise<{ bitoSenderKey: string | null; etcCap: number }> {
   let bitoSenderKey: string | null = null;
   const bitoTables = await getBitoSmsTables();
   if (bitoTables.includes(table)) {
@@ -1361,66 +1364,203 @@ export async function insertAlimtalkQueue(
       );
     }
   }
-
-  // ★ 2026-09-27 한줄로 V2 m048 — 제어 JSON 폭은 그 테이블의 실제 폭(폭 CT). 옛: 1024 하드코딩이라 비토 라인(8192)에서도
-  //   제어 JSON + SENDER_KEY가 1024를 넘으면 키 없이 적재돼 9999로 실패했다. 조회 실패는 CT가 1024로 본다(fail-closed).
   const etcCap = bitoSenderKey ? await getEtcJsonCapacity(table) : K_ETC_JSON_BASE_MAX;
+  return { bitoSenderKey, etcCap };
+}
+
+/** 알림톡 큐 INSERT 한 문장(표 하나) */
+function buildAlimtalkQueueInsert(table: string, batch: AlimtalkQueueRow[], appEtc1: string | undefined, bitoSenderKey: string | null, etcCap: number): { sql: string; params: any[] } {
+  const values: string[] = [];
+  const params: any[] = [];
+  for (const r of batch) {
+    // ★ 2026-07-07: 비토 라인만 SENDER_KEY 병합. 폭 초과 시 원본 유지(INSERT 오류로 배치 전체 실패 차단).
+    let rowEtcJson: string | null = r.etcJson || null;
+    if (bitoSenderKey) {
+      const mergedEtc = withSenderKey(r.etcJson, bitoSenderKey);
+      if (mergedEtc.length <= etcCap) {
+        rowEtcJson = mergedEtc;
+      } else {
+        console.error(`[QTmsg] ⚠️ k_etc_json ${etcCap}자 초과(${mergedEtc.length}) — SENDER_KEY 미주입(원본 유지), template=${r.templateCode}`);
+      }
+    }
+    // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 예약·분할 시각이 있으면 그 시각, 없으면 NOW(). insertBrandQueue와 같은 기준.
+    //   전에는 reservedDate를 받기만 하고 NOW()로 고정해, 예약으로 접수된 알림톡이 즉시 나갔다.
+    //   시각을 넘기는 호출부는 direct-send-processor뿐이고 자동캠페인·여정·옛 직접발송은 넘기지 않는다(NOW() 그대로).
+    const reservedExpr = r.reservedDate ? '?' : 'NOW()';
+    values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, ${reservedExpr}, NOW(), '1', ?, ?, ?)`);
+    params.push(
+      r.phone,                       // dest_no
+      r.callback,                    // call_back
+      r.message,                     // msg_contents
+      r.titleStr || null,            // title_str
+      r.templateCode,                // k_template_code
+      r.nextType || 'L',             // k_next_type
+      r.nextContents || null,        // k_next_contents
+      r.buttonJson || null,          // k_button_json
+    );
+    if (r.reservedDate) params.push(r.reservedDate); // sendreq_time
+    params.push(
+      rowEtcJson,                    // k_etc_json (비토 라인 = SENDER_KEY 병합 / 표준 라인 = 원본)
+      appEtc1 || null,               // app_etc1 (캠페인/추적 식별자 — #4-c 결과 매칭 fix)
+      r.companyId || null,           // app_etc2 (companyId 추적용)
+    );
+  }
+  return {
+    sql: `INSERT INTO ${table} (
+          dest_no, call_back, msg_contents, msg_type, title_str,
+          k_template_code, k_next_type, k_next_contents, k_button_json,
+          sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
+        ) VALUES ${values.join(',')}`,
+    params,
+  };
+}
+
+/** ★ 2026-11-02 적재 단위 결말(설계서 3-8) */
+export type QueueUnitOutcome =
+  | { state: 'loaded'; table: string; threadId: number; finish: (confirmed: boolean) => void }
+  | { state: 'rejected'; table: string | null; reason: string }
+  | { state: 'unknown'; table: string; threadId: number; reason: string };
+
+/** ★ 2026-11-02 단위 크기 상한 = 지금 배치 크기(문자 BATCH_SIZES.smsSend · 알림톡 5,000) */
+export const QUEUE_UNIT_MAX = 5000;
+
+/**
+ * ★ 2026-11-02 적재 단위 = INSERT 한 문장(표 하나 · 설계서 3-8 적재 증명 계약 I1 · I4).
+ *   ① 시연 막기 · 표 고르기(문자 = MMS / 문자 라인 나누기 + 돌려 쓰기 · 알림톡 = 첫 표) · 문장 만들기(위 함수 = 두 적재 함수와 같은 글자)
+ *   ② 연결을 받고 연결 번호(CONNECTION_ID)를 읽는다 → ③ record(호출자가 PG 단위 기록을 쓴다 · 던지면 문장을 보내지 않는다)
+ *   ④ 같은 연결로 INSERT 한 문장 → 결말 셋:
+ *      loaded = 성공 응답 · finish(true) = 「들어감 + PG 확정 끝」 = 풀 반환 · finish(false) = 파기(종료 증명이 되게)
+ *      rejected = 문장을 보내기 전 실패만(시연 막기 · 표 없음 · 연결 받기 · 연결 번호 읽기 · 단위 기록 실패)
+ *      unknown = 문장을 보낸 뒤 모든 실패(서버 오류 응답 포함) = 연결 파기 · 판정 CT 가 처리 목록 · 장부로 가른다
+ *   문자 금칙어 탐지 = 들어간 뒤에만 던진다(bulkInsertSmsQueue 와 같은 규칙).
+ */
+export async function loadQueueUnit(p: {
+  kind: 'sms' | 'alimtalk';
+  tables: string[];
+  smsRows?: any[][];
+  useNow?: boolean;
+  ctx?: SpamBlockContext;
+  alimRows?: AlimtalkQueueRow[];
+  appEtc1?: string;
+  record: (h: { threadId: number; table: string; count: number }) => Promise<void>;
+}): Promise<QueueUnitOutcome> {
+  const count = p.kind === 'sms' ? (p.smsRows || []).length : (p.alimRows || []).length;
+  if (count === 0) return { state: 'rejected', table: null, reason: '빈 단위' };
+  if (count > QUEUE_UNIT_MAX) throw new Error(`적재 단위 ${count}행 > 상한 ${QUEUE_UNIT_MAX}(호출부 오류)`);
+  if (p.tables.length === 0) return { state: 'rejected', table: null, reason: '발송 표 없음' };
+  let table: string;
+  let ins: { sql: string; params: any[] };
+  let spamSnapshot: Map<string, number> | null = null;
+  try {
+    if (p.kind === 'sms') {
+      const rows = p.smsRows!;
+      for (const id of new Set([(p.ctx as any)?.companyId, ...rows.map((r) => r[7])].filter((v) => typeof v === 'string' && v))) await guardDemoLeak('loadQueueUnit', id as string);
+      spamSnapshot = snapshotSendContents(rows);
+      const hasMms = rows.some((r) => r[3] === 'M');
+      const { mmsLines, textLines } = splitLinesByMsgType(p.tables, hasMms, !hasMms);
+      table = getNextSmsTable(hasMms ? mmsLines : textLines);
+      ins = buildSmsQueueInsert(table, rows, p.useNow === true);
+    } else {
+      const rows = p.alimRows!;
+      for (const id of new Set(rows.map((r) => r.companyId).filter(Boolean))) await guardDemoLeak('loadQueueUnit', id as string);
+      table = p.tables[0];   // 알림톡은 첫 번째 테이블 사용(insertAlimtalkQueue 와 같다)
+      const sk = await prepareAlimtalkSenderKey(table, rows);
+      ins = buildAlimtalkQueueInsert(table, rows, p.appEtc1, sk.bitoSenderKey, sk.etcCap);
+    }
+  } catch (e: any) {
+    return { state: 'rejected', table: null, reason: String(e?.message || e).slice(0, 200) };
+  }
+  let conn: any;
+  try {
+    conn = await mysqlPool.getConnection();
+  } catch (e: any) {
+    return { state: 'rejected', table, reason: `연결 받기 실패: ${String(e?.message || e).slice(0, 160)}` };
+  }
+  let threadId: number;
+  try {
+    const [r] = await conn.query('SELECT CONNECTION_ID() AS id');
+    threadId = Number((r as any[])[0]?.id);
+    if (!Number.isFinite(threadId) || threadId <= 0) throw new Error('연결 번호 없음');
+    await p.record({ threadId, table, count });
+  } catch (e: any) {
+    try { conn.destroy(); } catch { /* 이미 끊김 */ }
+    return { state: 'rejected', table, reason: `단위 기록 전 실패: ${String(e?.message || e).slice(0, 160)}` };
+  }
+  try {
+    await conn.query(ins.sql, ins.params);
+  } catch (e: any) {
+    try { conn.destroy(); } catch { /* 이미 끊김 */ }
+    // 오류 객체 통째 출력 금지(err.sql 에 본문 · 승인 링크 토큰이 실릴 수 있다 · 0829 Codex 2R)
+    console.error(`[sms-queue] 적재 단위 결과 불명 (${table}, ${count}건 · 연결 ${threadId}): code=${e?.code || 'unknown'} errno=${e?.errno ?? '-'} sqlState=${e?.sqlState || '-'}`);
+    return { state: 'unknown', table, threadId, reason: `${e?.code || 'unknown'} ${e?.sqlState || ''}`.trim() };
+  }
+  if (spamSnapshot && p.kind === 'sms') dispatchSpamDetection(spamSnapshot, [table], p.ctx);
+  let finished = false;
+  return {
+    state: 'loaded', table, threadId,
+    finish: (confirmed: boolean) => {
+      if (finished) return;
+      finished = true;
+      try { if (confirmed) conn.release(); else conn.destroy(); } catch { /* 이미 끊김 */ }
+    },
+  };
+}
+
+/** ★ 2026-11-02 그 연결 번호의 스레드가 MySQL 처리 목록에 남아 있는가(설계서 3-8 I4 · 같은 계정 스레드 = PROCESS 권한 없이 보인다 · 미검증 전제 = 배포 앞 확인 SQL) */
+export async function isMysqlThreadAlive(threadId: number): Promise<boolean> {
+  const rows: any = await mysqlQuery(`SELECT COUNT(*) AS n FROM information_schema.PROCESSLIST WHERE ID = ?`, [threadId]);
+  return Number(rows?.[0]?.n || 0) > 0;
+}
+
+/**
+ * 알림톡 큐 INSERT 실패 — **그 전까지 커밋된 건수**를 함께 전달한다.
+ * ★ 2026-07-27 (B-0727-1): 배치가 독립 커밋이라 "실패 = 0건 적재"가 아니다.
+ *   호출부는 이 값을 적재 성공분으로 세야 환불이 실제 발송분을 넘지 않는다.
+ */
+export class AlimtalkQueueInsertError extends Error {
+  constructor(message: string, public readonly inserted: number) {
+    super(message);
+    this.name = 'AlimtalkQueueInsertError';
+  }
+}
+
+/**
+ * CT-04: 알림톡 발송 큐 INSERT (SMSQ_SEND에 msg_type='K')
+ * QTmsg Agent가 SMSQ_SEND에서 가져가서 발송
+ */
+export async function insertAlimtalkQueue(
+  tables: string[],
+  // nextType = 실패 시 폴백 N/S/L/A/B(기본 L) · nextContents = A/B 대체 문구 · buttonJson = k_button_json · etcJson = k_etc_json(강조표기 title · senderkey 등)
+  rows: AlimtalkQueueRow[],
+  appEtc1?: string,   // ★ #4-c (2026-06-01): app_etc1 = 캠페인/추적 식별자 — 결과·정산 매칭(results.ts WHERE app_etc1=?). 누락 시 알림톡 발송 결과 미조회.
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  // ★ 2026-10-09 시연 회사 최후 방어
+  for (const id of new Set(rows.map((r) => r.companyId).filter(Boolean))) await guardDemoLeak('insertAlimtalkQueue', id);
+
+  const table = tables[0]; // 알림톡은 첫 번째 테이블 사용
+  let inserted = 0;
+
+  // ★ 2026-07-07: 비토 게이트웨이 라인 전용 SENDER_KEY(발신프로필키) 주입.
+  //   비토 Agent v1.0.10+는 kakao_sender_key 필수(미동봉 = 필드매핑 실패 9999·발송 전 차단).
+  //   표준 QTmsg 라인은 중계서버가 템플릿코드로 자동 도출 + 에이전트 select_sql이 k_etc_json을
+  //   SQL 합성(D234+)하므로 절대 주입하지 않는다 — INSERT 대상이 bito 라인일 때만 병합.
+  //   templateCode→profile_key 조인은 발송 gate(campaigns.ts:1390)·resolveTemplateContext(alimtalk.ts)와
+  //   동일 컬럼·동일 조인. 알림톡 4경로 전부 호출당 단일 템플릿(rows 전행 동일 templateCode+companyId)이라 rows[0] 기준 1회 조회.
+  const { bitoSenderKey, etcCap } = await prepareAlimtalkSenderKey(table, rows);
 
   // 배치 단위 INSERT (5000건씩)
   const BATCH = 5000;
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
-    const values: string[] = [];
-    const params: any[] = [];
-
-    for (const r of batch) {
-      const idx = params.length;
-      // ★ 2026-07-07: 비토 라인만 SENDER_KEY 병합. 폭 초과 시 원본 유지(INSERT 오류로 배치 전체 실패 차단).
-      let rowEtcJson: string | null = r.etcJson || null;
-      if (bitoSenderKey) {
-        const mergedEtc = withSenderKey(r.etcJson, bitoSenderKey);
-        if (mergedEtc.length <= etcCap) {
-          rowEtcJson = mergedEtc;
-        } else {
-          console.error(`[QTmsg] ⚠️ k_etc_json ${etcCap}자 초과(${mergedEtc.length}) — SENDER_KEY 미주입(원본 유지), template=${r.templateCode}`);
-        }
-      }
-      // ★ 2026-09-14 알림톡 예약·분할(박성용 접수): 예약·분할 시각이 있으면 그 시각, 없으면 NOW(). insertBrandQueue와 같은 기준.
-      //   전에는 reservedDate를 받기만 하고 NOW()로 고정해, 예약으로 접수된 알림톡이 즉시 나갔다.
-      //   시각을 넘기는 호출부는 direct-send-processor뿐이고 자동캠페인·여정·옛 직접발송은 넘기지 않는다(NOW() 그대로).
-      const reservedExpr = r.reservedDate ? '?' : 'NOW()';
-      values.push(`(?, ?, ?, 'K', ?, ?, ?, ?, ?, ${reservedExpr}, NOW(), '1', ?, ?, ?)`);
-      params.push(
-        r.phone,                       // dest_no
-        r.callback,                    // call_back
-        r.message,                     // msg_contents
-        r.titleStr || null,            // title_str
-        r.templateCode,                // k_template_code
-        r.nextType || 'L',             // k_next_type
-        r.nextContents || null,        // k_next_contents
-        r.buttonJson || null,          // k_button_json
-      );
-      if (r.reservedDate) params.push(r.reservedDate); // sendreq_time
-      params.push(
-        rowEtcJson,                    // k_etc_json (비토 라인 = SENDER_KEY 병합 / 표준 라인 = 원본)
-        appEtc1 || null,               // app_etc1 (캠페인/추적 식별자 — #4-c 결과 매칭 fix)
-        r.companyId || null,           // app_etc2 (companyId 추적용)
-      );
-    }
+    const ins = buildAlimtalkQueueInsert(table, batch, appEtc1, bitoSenderKey, etcCap);
 
     // ★ 2026-07-27 (B-0727-1): 배치는 각각 독립 커밋이다(풀에서 연결을 빌려 단일 쿼리 실행, 전체를 감싸는
     //   트랜잭션 없음). 뒤 배치가 실패해도 앞 배치는 이미 큐에 남아 발송된다. 그래서 실패를 그냥 던지면
     //   호출부가 "한 건도 안 들어갔다"로 알고 전량 환불하는데 실제로는 앞 배치가 나간다(환불 후 실발송).
     //   실패해도 **커밋된 건수를 실어서** 던진다 — 호출부가 그만큼은 적재된 것으로 세게.
     try {
-      await mysqlQuery(
-        `INSERT INTO ${table} (
-          dest_no, call_back, msg_contents, msg_type, title_str,
-          k_template_code, k_next_type, k_next_contents, k_button_json,
-          sendreq_time, msg_instm, rsv1, k_etc_json, app_etc1, app_etc2
-        ) VALUES ${values.join(',')}`,
-        params
-      );
+      await mysqlQuery(ins.sql, ins.params);
     } catch (batchErr: any) {
       throw new AlimtalkQueueInsertError(
         `알림톡 큐 INSERT 실패 (앞선 ${inserted}건은 커밋됨): ${batchErr?.message || batchErr}`,
@@ -1643,23 +1783,8 @@ export async function bulkInsertSmsQueue(
     for (const batch of batches) {
       if (batch.length === 0) continue;
       try {
-        if (useNow) {
-          // 즉시발송: row[5](sendTime) 제외, NOW() SQL 직접 사용
-          const placeholders = batch.map(() => '(?, ?, ?, ?, ?, NOW(), 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
-          const flatValues = batch.map(row => [row[0], row[1], row[2], row[3], row[4], row[6], row[7], row[8], row[9], row[10]]).flat();
-          await exec(
-            `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-            flatValues
-          );
-        } else {
-          // 예약/분할: sendTime(row[5]) 파라미터 그대로 사용
-          const placeholders = batch.map(() => '(?, ?, ?, ?, ?, ?, 100, \'1\', ?, ?, ?, ?, ?)').join(', ');
-          const flatValues = batch.flat();
-          await exec(
-            `INSERT INTO ${table} (dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, file_name1, file_name2, file_name3) VALUES ${placeholders}`,
-            flatValues
-          );
-        }
+        const ins = buildSmsQueueInsert(table, batch, useNow);
+        await exec(ins.sql, ins.params);
         sentCount += batch.length;
       } catch (batchErr: any) {
         // ★2026-08-29 Codex 2R high — 오류 객체를 통째로 찍으면 mysql2가 보존한 `err.sql`(파라미터가

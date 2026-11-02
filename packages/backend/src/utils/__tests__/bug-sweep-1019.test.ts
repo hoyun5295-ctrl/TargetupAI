@@ -62,7 +62,9 @@ describe('B-1009-6 켜진 여정 문안 수정 = 발송 시점 관문 · 판마�
     expect(pn).toContain('(b.confidence < 100 AND NOT ${heldNow})');
     expect(pn.indexOf("OR NOT ${pretestDoneSql('je.journey_id', 's.id', day)}")).toBeLessThan(pn.indexOf('LIMIT ${PRETEST_SCAN_BUNDLE_LIMIT}'));
     expect(ex).toContain('snapshotReadFailed = true;');
-    expect(ex.indexOf("if (snapshotReadFailed && ['sms', 'lms', 'mms']")).toBeGreaterThan(ex.indexOf('const gate = await query('));
+    // ★ 1102 묶음 발송 — 문자 칸 판정 = isTextChannel 한 값(칸마다 한 번)
+    expect(ex).toContain("const isTextChannel = ['sms', 'lms', 'mms'].includes(String(step.channel));");
+    expect(ex.indexOf('if (snap.snapshotReadFailed && isTextChannel)')).toBeGreaterThan(ex.indexOf('const gate = await query('));
     expect(jb).not.toContain('UPDATE journey_executions je SET next_run_at');
     // ★ 1031 새 스냅숏 · 그 칸 검사 기록 지우기 = 같은 트랜잭션(run · 설계서 2026-10-31 §2-8 · Codex 설계 7R)
     expect(jb).toContain("    if (isActive && upd.rows.length > 0) {\n      await createStepSnapshot(companyId, journeyId, stepId, run);\n      await run(`DELETE FROM journey_pretest_schedules WHERE journey_id = $1::uuid AND step_id = $2::uuid`, [journeyId, stepId]);\n    }");

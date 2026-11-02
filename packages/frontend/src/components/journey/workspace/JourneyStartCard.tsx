@@ -82,6 +82,11 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
       <div className="mt-2">
         <div className="text-[12px] text-slate-500">언제</div>
         <div className="mt-0.5 text-[15px] font-semibold text-slate-900">{triggerLabel}</div>
+        {journey?.send_timing_line && (
+          <p className="mt-1 flex items-start gap-1.5 text-[12.5px] leading-relaxed text-slate-500">
+            <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />{String(journey.send_timing_line)}
+          </p>
+        )}
         {te === 'journey.after' && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-slate-700">
             <span>{attachedAfter?.journeyId ? `넘겨받는 고객: ${attachedAfter.outcomeLabel}` : '앞 여정이 없어져 넘어오는 고객이 없어요.'}</span>

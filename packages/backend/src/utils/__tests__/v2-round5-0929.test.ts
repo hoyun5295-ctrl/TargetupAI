@@ -165,27 +165,30 @@ describe('④ 적재 0 표식이 영구여도 되는 전제 — 닫힌 캠페인
 describe('⑤⑥ 여정 운영 크레딧 = 확정 전에(Codex 1R high) · 활성 아닌 실행 표식 정리', () => {
   const src = read('utils/journey-executor.ts');
   const claim = read('utils/journey-send-claim.ts');
+  // ★ 2026-11-02 묶음 발송 — 확정 = 단위 확정(confirmLoadUnit) · 판정 = 단위 판정(judgeLoadUnit · 설계서 3-8)
   it('정상 발송: 크레딧 → 확정 순서', () => {
-    const at = src.indexOf('await chargeJourneyOperationCredit(exec, claimAt ?? new Date());');   // ★1020 V.3 날짜 = 표식 시각
+    const at = src.indexOf('await chargeJourneyOperationCredit(head, claimAt);');   // ★1020 V.3 날짜 = 표식 시각
     expect(at).toBeGreaterThan(0);
-    expect(at).toBeLessThan(src.indexOf('const confirmed = await confirmJourneyClaimSent(claimLogId);'));
+    expect(at).toBeLessThan(src.indexOf('confirmed = await confirmLoadUnit(campaignId, claimIds,'));
   });
   it('판정으로 확정하는 세 자리는 모두 beforeConfirm 으로 크레딧을 먼저 받는다(확정 뒤 크레딧 호출 0)', () => {
-    const calls = src.match(/resolveJourneyClaim\([^;]*\);/g) || [];
+    const calls = src.match(/judgeLoadUnit\([^;]*\);/g) || [];
     expect(calls.length).toBe(3);
     for (const c of calls) expect(c).toContain('beforeConfirm: (at) => chargeJourneyOperationCredit(');
-    expect(src).not.toContain('await chargeJourneyOperationCredit(exec, resolved.sentAt);');
     expect((src.match(/await chargeJourneyOperationCredit\(/g) || []).length).toBe(1);
   });
   it('CT: 들어갔으면 beforeConfirm → 확정(withStats 면 비용 통계까지 한 문장)', () => {
     const body = claim.slice(claim.indexOf("if (verdict === 'loaded') {"));
-    expect(body.indexOf('await opts.beforeConfirm(new Date(claim.sent_at));')).toBeLessThan(body.indexOf('confirmJourneyClaimSent(claimId, { withStats: opts.withStats })'));
-    const confirm = claim.slice(claim.indexOf('export async function confirmJourneyClaimSent('), claim.indexOf('export async function resolveJourneyClaim('));
-    expect(confirm).toContain('UPDATE journey_executions SET total_cost = total_cost + (SELECT cost FROM confirmed)');
-    expect(confirm).toContain('UPDATE journeys SET stats_total_cost = stats_total_cost + (SELECT cost FROM confirmed), updated_at = NOW()');
+    expect(body.indexOf('if (opts.beforeConfirm) await opts.beforeConfirm(sentAt);')).toBeGreaterThan(-1);
+    expect(body.indexOf('if (opts.beforeConfirm) await opts.beforeConfirm(sentAt);')).toBeLessThan(body.indexOf('const confirmed = await confirmLoadUnit(campaignId, ids, { withStats: opts.withStats });'));
+    const confirm = claim.slice(claim.indexOf('export async function confirmLoadUnit('), claim.indexOf('export interface PendingClaim'));
+    expect(confirm).toContain('UPDATE journey_executions e SET total_cost = e.total_cost + c.cost');
+    expect(confirm).toContain('UPDATE journeys j SET stats_total_cost = j.stats_total_cost + s.cost, updated_at = NOW()');
   });
   it('이미 발송됨 경로는 크레딧을 다시 받지 않는다(모든 확정이 크레딧 뒤)', () => {
-    const block = src.slice(src.indexOf('if (alreadySent.rows.length > 0) {'), src.indexOf("return 'skipped_already_sent';", src.indexOf('if (alreadySent.rows.length > 0) {')));
+    const at = src.indexOf('if (doneIds.size > 0) {');
+    expect(at).toBeGreaterThan(0);
+    const block = src.slice(at, src.indexOf('execs = execs.filter((e) => !doneIds.has(e.execution_id));', at));
     expect(codeOnly(block)).not.toContain('chargeJourneyOperationCredit');
   });
   const fn = src.slice(src.indexOf('async function resolveOrphanJourneyClaims('), src.indexOf('export function startJourneyExecutor('));

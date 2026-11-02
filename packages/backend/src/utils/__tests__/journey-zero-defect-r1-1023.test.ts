@@ -175,7 +175,7 @@ describe('F5 날짜축 계획 = 같은 요청 같은 결과', () => {
 describe('F6 완료 = 한 문장 · 1회 발송 끝남 = 한 곳', () => {
   it('실행 완료 · 끝 칸 기록 · 여정 통계가 한 SQL 문장', () => {
     const ex = read('utils/journey-executor.ts');
-    const fn = ex.slice(ex.indexOf('async function finishExecution('), ex.indexOf('async function hasPurchasedSinceEntry('));
+    const fn = ex.slice(ex.indexOf('async function finishExecutions('), ex.indexOf('async function jumpExecutions('));   // ★ 1102 묶음 판
     expect((fn.match(/await query\(/g) || []).length).toBe(1);
     expect(fn).toContain('end_log AS (');
     expect(fn).toContain('UPDATE journeys j SET');

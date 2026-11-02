@@ -314,7 +314,7 @@ describe('화면 표시 축 — 채널·발송유형 판정이 한 곳이다 (20
 
   it('여정 캠페인 INSERT가 send_type=journey를 남긴다', () => {
     const j = stripComments(read('./journey-step-campaign.ts'));
-    const stmt = j.slice(j.indexOf('INSERT INTO campaigns'), j.indexOf('RETURNING id'));
+    const stmt = j.slice(j.indexOf('INSERT INTO campaigns'), j.indexOf('RETURNING id', j.indexOf('INSERT INTO campaigns')));
     expect(stmt).toContain('send_type');
     expect(stmt).toContain("'journey'");
   });

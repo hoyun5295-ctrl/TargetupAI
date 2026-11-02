@@ -10,6 +10,7 @@
  */
 
 import { query } from '../config/database';
+import { sendSystemAlert } from './system-alert';
 
 export interface StepCampaignSpec {
   companyId: string;
@@ -82,18 +83,109 @@ export function toCampaignMessageType(msgType: string): string {
 /**
  * (journey, step, 오늘 KST)당 campaign find-or-create. 매핑 테이블 ON CONFLICT로 동시 진입에도 1건만.
  */
-export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<string> {
+/**
+ * ★ 2026-11-02 적재 증명 계약(설계서 docs/2026-11-02-journey-batch-send-design.md 3-8 · Codex 설계 7R approve).
+ *   I5 새 규약 표식 = 이 표식이 있는 캠페인의 'sending' 표식만 「단위 기록 없음 = 안 들어감」으로 읽는다(옛 표식은 다시 보내지 않는다).
+ *   I3 봉인 = 증명 못 해 닫은 단위가 생긴 캠페인 · 새 단위 0 · 그날 그 칸 다음 단위는 이어 붙임(순번 + 1).
+ */
+export const LOAD_PROTOCOL_UNIT = 'unit';
+
+// ── 순번 칸(C96-DDL-1) · 4열 기본 키(C96-DDL-2) 확인 — 참은 기억 · 거짓은 5분 뒤 다시(journey-lineage 와 같은 규약) ──
+const SEQ_RECHECK_MS = 5 * 60 * 1000;
+const _seq = { column: false, continuation: false, columnAbsentUntil: 0, continuationAbsentUntil: 0, alertedAt: 0 };
+
+/** 순번 칸이 있는가 · 이어 붙임(순번 > 0)이 열렸는가(기본 키 = 4열 · DDL-2 뒤 · I6). */
+export async function stepCampaignSeqState(): Promise<{ seqColumn: boolean; continuation: boolean }> {
+  const now = Date.now();
+  if (!_seq.column && now >= _seq.columnAbsentUntil) {
+    const r = await query(
+      `SELECT COUNT(*)::int AS n FROM information_schema.columns WHERE table_name = 'journey_step_campaigns' AND column_name = 'seq'`,
+    );
+    if (Number(r.rows[0]?.n || 0) === 1) _seq.column = true;
+    else {
+      _seq.columnAbsentUntil = now + SEQ_RECHECK_MS;
+      // 설계서 I6 — 배포 앞 DDL-1 이 빠졌다(발송은 계속 · 순번 칸 없는 같은 대상 없는 문장 · 이어 붙임 0)
+      void sendSystemAlert({
+        companyId: null, dedupKey: 'journey-step-campaign-seq-missing', cooldownMs: 60 * 60 * 1000,
+        message: '여정 단계 캠페인 순번 칸(C96-DDL-1)이 없습니다. 배포 앞 DDL 이 빠졌습니다(발송은 계속 · 같은 날 이어 붙임 0).',
+      }).catch(() => undefined);
+    }
+  }
+  if (_seq.column && !_seq.continuation && now >= _seq.continuationAbsentUntil) {
+    const r = await query(
+      `SELECT COALESCE(array_length(i.indkey::int2[], 1), 0) AS n
+         FROM pg_index i WHERE i.indrelid = 'journey_step_campaigns'::regclass AND i.indisprimary`,
+    );
+    if (Number(r.rows[0]?.n || 0) === 4) _seq.continuation = true;
+    else _seq.continuationAbsentUntil = now + SEQ_RECHECK_MS;
+  }
+  return { seqColumn: _seq.column, continuation: _seq.continuation };
+}
+/** 시험 전용. */
+export function resetStepCampaignSeqCache(): void {
+  Object.assign(_seq, { column: false, continuation: false, columnAbsentUntil: 0, continuationAbsentUntil: 0, alertedAt: 0 });
+}
+
+export type StepCampaignPick = { campaignId: string } | { blocked: 'continuation_unavailable' };
+
+/**
+ * ★ 2026-11-02 묶음 발송이 쓸 오늘 단계 캠페인(설계서 3-8 · 옛 getOrCreateStepCampaign 자리 · 부르는 곳 = 실행기 묶음 하나).
+ *   1. 오늘 (여정 · 칸)의 가장 큰 순번 행을 읽는다.
+ *   2. 봉인 안 됨 + 새 규약 표식 = 그대로 쓴다.
+ *   3. 봉인 안 됨 + 표식 없음(배포 전에 만든 옛 캠페인) = 미확정 · 증명 못 해 닫은 표식이 0 이면 그 자리에서 표식을 달고 쓴다(I5) · 아니면 이어 붙임.
+ *   4. 봉인됨 · 넘겨 쓸 수 없음 = 이어 붙임(순번 + 1) · 이어 붙임이 아직 닫혀 있으면(DDL-2 전) blocked = 그 (여정 · 칸)은 오늘 새 단위 0(I6).
+ *   5. 행이 없으면 순번 0 으로 만든다.
+ *   만들기 = 캠페인 INSERT → 매핑 INSERT … ON CONFLICT DO NOTHING(대상 없음 = 유일 제약 전부가 중재 · DDL 세 상태 같은 문장 · Codex 설계 5R)
+ *     → 졌으면 방금 만든 캠페인 지우고 다시 읽기 · 매핑 문장이 던지면 방금 만든 캠페인 지우고 던짐(고아 0).
+ */
+export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<StepCampaignPick> {
   const sendDate = kstDateString();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const st = await stepCampaignSeqState();
+    const cur = await query(
+      `SELECT jsc.campaign_id, ${st.seqColumn ? 'jsc.seq' : '0'}::int AS seq,
+              (c.send_config->>'loadProtocol') AS protocol,
+              COALESCE((c.send_config->>'loadSealed')::boolean, false) AS sealed
+         FROM journey_step_campaigns jsc JOIN campaigns c ON c.id = jsc.campaign_id
+        WHERE jsc.journey_id = $1::uuid AND jsc.step_id = $2::uuid AND jsc.send_date = $3
+        ORDER BY ${st.seqColumn ? 'jsc.seq DESC' : 'jsc.created_at DESC'} LIMIT 1`,
+      [spec.journeyId, spec.stepId, sendDate],
+    );
+    const row = cur.rows[0];
+    let nextSeq = 0;
+    if (row) {
+      if (!row.sealed && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id) };
+      if (!row.sealed && row.protocol !== LOAD_PROTOCOL_UNIT) {
+        const conv = await query(
+          `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadProtocol}', to_jsonb($2::text))
+            WHERE id = $1::uuid AND NOT (COALESCE(send_config, '{}'::jsonb) ? 'loadProtocol')
+              AND NOT EXISTS (SELECT 1 FROM journey_step_logs l WHERE l.campaign_id = $1::uuid
+                                AND (l.status = 'sending' OR (l.status = 'failed' AND l.error_reason = 'load_unprovable')))
+            RETURNING id`,
+          [row.campaign_id, LOAD_PROTOCOL_UNIT],
+        );
+        if (conv.rows.length > 0) return { campaignId: String(row.campaign_id) };
+        const again = await query(`SELECT send_config->>'loadProtocol' AS protocol FROM campaigns WHERE id = $1::uuid`, [row.campaign_id]);
+        if (again.rows[0]?.protocol === LOAD_PROTOCOL_UNIT) continue;   // 다른 자리가 먼저 달았다 = 다시 읽기
+      }
+      if (!st.continuation) {
+        if (Date.now() - _seq.alertedAt > 60 * 60 * 1000) {
+          _seq.alertedAt = Date.now();
+          console.warn(`[journey-step-campaign] 이어 붙임 닫힘(C96-DDL-2 전) — journey=${spec.journeyId} step=${spec.stepId} 오늘 새 단위 0(다음날 새 캠페인)`);
+        }
+        return { blocked: 'continuation_unavailable' };
+      }
+      nextSeq = Number(row.seq) + 1;
+    }
+    const created = await createStepCampaignRow(spec, sendDate, nextSeq, st.seqColumn);
+    if (created) return { campaignId: created };
+    // 졌다 = 다시 읽기(이긴 쪽 행)
+  }
+  throw new Error(`단계 캠페인을 정하지 못했다 journey=${spec.journeyId} step=${spec.stepId}`);
+}
 
-  // 1. 이미 있으면 그대로
-  const ex = await query(
-    `SELECT campaign_id FROM journey_step_campaigns
-      WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3`,
-    [spec.journeyId, spec.stepId, sendDate],
-  );
-  if (ex.rows.length > 0) return ex.rows[0].campaign_id as string;
-
-  // 2. 신규 campaign (target/sent 0 — 발송마다 +1 누적). 원본 INSERT 컬럼 매핑 1:1.
+async function createStepCampaignRow(spec: StepCampaignSpec, sendDate: string, seq: number, seqColumn: boolean): Promise<string | null> {
+  // 신규 campaign (target/sent 0 — 발송마다 +n 누적). 원본 INSERT 컬럼 매핑 1:1.
   const camp = await query(
     // ★ 2026-07-31 `send_type='journey'` 명시. 안 넣으면 컬럼 DEFAULT 'ai'가 들어가,
     //   여정이 보낸 캠페인이 발송결과·통계에서 **AI 추천 발송**으로 표시된다(0731 Harold 지적 —
@@ -119,37 +211,36 @@ export async function getOrCreateStepCampaign(spec: StepCampaignSpec): Promise<s
       spec.sendChannel,
       spec.kakaoTemplateId,
       spec.mmsImagePaths,
-      // ★ 2026-09-26 새 원장 표식(위 JOURNEY_LEDGER_CONFIG) — 이후 sentTables 기록은 jsonb_set이라 표식이 보존된다.
-      JSON.stringify(JOURNEY_LEDGER_CONFIG),
+      // ★ 2026-09-26 새 원장 표식(위 JOURNEY_LEDGER_CONFIG) · ★ 2026-11-02 새 규약 표식(I5) — 이후 sentTables 기록은 jsonb_set이라 표식이 보존된다.
+      JSON.stringify({ ...JOURNEY_LEDGER_CONFIG, loadProtocol: LOAD_PROTOCOL_UNIT }),
     ],
   );
   const newId = camp.rows[0].id as string;
-
-  // 3. 매핑 claim — 동시 진입 시 한 쪽만 성공
-  const claim = await query(
-    `INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id)
-     VALUES ($1::uuid, $2::uuid, $3, $4::uuid)
-     ON CONFLICT (journey_id, step_id, send_date) DO NOTHING
-     RETURNING campaign_id`,
-    [spec.journeyId, spec.stepId, sendDate, newId],
-  );
+  let claim: Awaited<ReturnType<typeof query>>;
+  try {
+    // 매핑 claim — 대상 없는 DO NOTHING(옛 3열 기본 키 · 새 4열 기본 키 어느 쪽이든 · Codex 설계 5R · 6R)
+    claim = seqColumn
+      ? await query(
+          `INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id, seq)
+           VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5::smallint)
+           ON CONFLICT DO NOTHING
+           RETURNING campaign_id`,
+          [spec.journeyId, spec.stepId, sendDate, newId, seq],
+        )
+      : await query(
+          `INSERT INTO journey_step_campaigns (journey_id, step_id, send_date, campaign_id)
+           VALUES ($1::uuid, $2::uuid, $3, $4::uuid)
+           ON CONFLICT DO NOTHING
+           RETURNING campaign_id`,
+          [spec.journeyId, spec.stepId, sendDate, newId],
+        );
+  } catch (e) {
+    await query(`DELETE FROM campaigns WHERE id = $1::uuid`, [newId]).catch(() => undefined);
+    throw e;
+  }
   if (claim.rows.length > 0) return newId;
-
-  // 경쟁 패배 — 방금 만든 orphan campaign 삭제 후 승자 사용
+  // 경쟁 패배 — 방금 만든 orphan campaign 삭제 후 호출부가 다시 읽는다
   await query(`DELETE FROM campaigns WHERE id = $1::uuid`, [newId]);
-  const re = await query(
-    `SELECT campaign_id FROM journey_step_campaigns
-      WHERE journey_id = $1::uuid AND step_id = $2::uuid AND send_date = $3`,
-    [spec.journeyId, spec.stepId, sendDate],
-  );
-  return re.rows[0].campaign_id as string;
+  return null;
 }
 
-/** 발송 1건 성공마다 공유 campaign 카운트 +1. */
-export async function bumpStepCampaignCount(campaignId: string): Promise<void> {
-  await query(
-    `UPDATE campaigns SET target_count = target_count + 1, sent_count = sent_count + 1, updated_at = NOW()
-      WHERE id = $1::uuid`,
-    [campaignId],
-  );
-}

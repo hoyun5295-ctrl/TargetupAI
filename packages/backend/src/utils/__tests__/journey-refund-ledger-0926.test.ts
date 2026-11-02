@@ -36,9 +36,9 @@ describe('resolveCampaignLedger', () => {
 
 describe('여정 실행기 차감 참조', () => {
   const src = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
-  it('차감은 단계 캠페인 id를 참조한다(여정 id 아님) · 유형은 journey 유지', () => {
-    expect(src).toContain("const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, campaignId, exec.created_by || undefined, 'journey');");
-    expect(src).not.toContain("prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, exec.journey_id,");
+  it('차감은 단계 캠페인 id를 참조한다(여정 id 아님) · 유형은 journey 유지 · ★ 1102 수 = 이 적재 단위의 표식 수', () => {
+    expect(src).toContain("const deduct = await prepaidDeduct(head.company_id, claimed.length, prepaidMsgType as any, campaignId, head.created_by || undefined, 'journey');");
+    expect(src).not.toMatch(/prepaidDeduct\([^)]*journey_id,/);
   });
 });
 
@@ -48,7 +48,7 @@ describe('여정 단계 캠페인 — 새 원장 표식 · 하루 마감 (Codex 
   it('새로 만드는 단계 캠페인은 send_config에 새 원장 표식을 싣는다(배포 전 캠페인과 경계)', () => {
     expect(JOURNEY_LEDGER_CONFIG).toEqual({ journeyLedger: 'campaign' });
     expect(stepSrc).toMatch(/mms_image_paths, send_type, send_config\s*\)/);
-    expect(stepSrc).toContain('JSON.stringify(JOURNEY_LEDGER_CONFIG)');
+    expect(stepSrc).toContain('JSON.stringify({ ...JOURNEY_LEDGER_CONFIG, loadProtocol: LOAD_PROTOCOL_UNIT })');   // ★ 1102 새 규약 표식(설계서 3-8 I5)도 같은 자리
   });
 
   it('하루 마감 = 발송 기준 시각의 KST 날짜가 지금의 KST 날짜보다 앞', () => {
@@ -70,27 +70,29 @@ describe('여정 단계 캠페인 — 새 원장 표식 · 하루 마감 (Codex 
  */
 describe('여정 실행기 — 차감이 적재보다 앞', () => {
   const src = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
-  const deductAt = src.indexOf('const deduct = await prepaidDeduct(exec.company_id, 1, prepaidMsgType as any, campaignId,');
-  const tryAt = src.indexOf("// ★ D188 Phase 2-B-2 (2026-05-21): 10. queue INSERT");
-  const loadAt = src.indexOf("await bulkInsertSmsQueue(tables, [row], true, { companyId: exec.company_id, source: 'journey' });");
-  const alimAt = src.indexOf('await insertAlimtalkQueue(');
-  // ★ 2026-09-26 V2 m105 — 발송 기록은 적재 앞의 '적재 중' 표식(INSERT 'sending')이 되었다 → 적재 뒤 'sent' 확정(journey-send-claim-before-load 테스트 소유)
-  const sentLogAt = src.indexOf("gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, NOW(), 'sending', $4");
+  // ★ 2026-11-02 묶음 발송(설계서 3-3 ⑤-3) — 단위마다 표식('sending' · 여정 · 실행 active 만) → 차감 n → 적재 → 'sent' 확정
+  const body = src.slice(src.indexOf('async function sendUnits('), src.indexOf('async function retryOrPauseAfterLoadFailure('));
+  const claimAt = body.indexOf("NOW(), 'sending', $4");
+  const deductAt = body.indexOf('const deduct = await prepaidDeduct(head.company_id, claimed.length, prepaidMsgType as any, campaignId,');
+  const loadAt = body.indexOf('await loadQueueUnit({');
+  const confirmAt = body.indexOf('confirmed = await confirmLoadUnit(');
 
-  it('차감 호출은 하나이고 큐 적재(문자·알림톡)와 sent 기록보다 앞이다', () => {
+  it('차감 호출은 하나이고 큐 적재(문자·알림톡 = 단위 적재 CT)와 sent 확정보다 앞이다 · 표식(차감 수의 근거)은 차감 앞', () => {
     expect((src.match(/await prepaidDeduct\(/g) || []).length).toBe(1);
-    expect(deductAt).toBeGreaterThan(0);
-    expect(deductAt).toBeLessThan(tryAt);
+    expect(claimAt).toBeGreaterThan(0);
+    expect(deductAt).toBeGreaterThan(claimAt);
     expect(deductAt).toBeLessThan(loadAt);
-    expect(deductAt).toBeLessThan(alimAt);
-    expect(deductAt).toBeLessThan(sentLogAt);
+    expect(deductAt).toBeLessThan(confirmAt);
+    expect(src).not.toContain('bulkInsertSmsQueue(');
+    expect(src).not.toContain('insertAlimtalkQueue(');
   });
 
-  it('차감 실패면 적재하지 않고 여정을 정지한 뒤 돌아간다', () => {
-    const seg = src.slice(deductAt, tryAt);
+  it('차감 실패면 적재하지 않고 이 단위 표식을 지운 뒤 여정을 정지하고 돌아간다', () => {
+    const seg = body.slice(deductAt, loadAt);
     expect(seg).toContain('if (!deduct.ok) {');
-    expect(seg).toContain('await pauseJourney(exec.journey_id');
-    expect(seg).toContain("await logFailedStep(exec.execution_id, step.id, 'insufficient_balance');");
-    expect(seg).toContain("return 'paused_balance';");
+    expect(seg).toContain("await query(`DELETE FROM journey_step_logs WHERE id = ANY($1::uuid[]) AND status = 'sending'`, [claimIds]);");
+    expect(seg).toContain("await pauseJourney(head.journey_id, deduct.error || '잔액 부족');");
+    expect(seg).toContain("await logStepMany([claimed[0].exec.execution_id], step.id, 'failed', 'insufficient_balance');");
+    expect(seg).toContain('return unit[0].idx;');   // 멈춘 자리 = 이 단위 첫 고객(뒤 고객 결말 0)
   });
 });

@@ -359,6 +359,45 @@ export type SpamPreflightVerdict =
  * - 발송자에게는 `SPAM_BLOCK_NOTICE` 만 보인다. 걸린 규칙 이름 · 요소는 내보내지 않는다
  *   (요소를 알려 주면 그 요소만 피해 가는 문안이 나온다). 규칙은 관리자 화면 차단 이력에서 본다.
  */
+/**
+ * ★ 2026-11-02 묶음 발송(설계서 3-3 ④ · SC-24) — 글자마다 차단 판정(checkSpamBlockBeforeCharge 와 같은 규칙 · 같은 기록 · 같은 fail-open).
+ *   돌려주는 것 = 걸린 글자 집합(그 글자를 받을 고객만 spam_blocked · 다른 고객은 그대로 나간다 · 한 건 판과 같은 결말).
+ */
+export async function findSpamBlockedTexts(params: {
+  items: SpamPreflightItem[];
+  companyId?: string | null;
+  userId?: string | null;
+  source?: string | null;
+}): Promise<Set<string>> {
+  const blocked = new Set<string>();
+  try {
+    const blockRules = (await loadActiveRules()).filter((r) => r.mode === 'block');
+    if (blockRules.length === 0) return blocked;
+    const byText = new Map<string, number>();
+    for (const item of params.items || []) {
+      const text = String(item?.text ?? '');
+      const n = Number.isFinite(item?.recipients) && item.recipients > 0 ? Math.floor(item.recipients) : 0;
+      byText.set(text, (byText.get(text) ?? 0) + n);
+    }
+    const entries: SpamBlockLogEntry[] = [];
+    for (const [text, recipients] of byText) {
+      const verdict = evaluateContent(text, blockRules, params.companyId ?? null);
+      if (verdict.hits.length > 0) {
+        entries.push({ verdict, affectedRows: recipients, contentSample: text });
+        blocked.add(text);
+      }
+    }
+    if (entries.length === 0) return blocked;
+    const ruleIds = [...new Set(entries.flatMap((e) => e.verdict.hits.map((h) => h.ruleId)))];
+    console.warn(`[spam-block] 차단 — 묶음 발송 중 ${blocked.size}글자 (company=${params.companyId || '-'} source=${params.source || '-'} rules=${ruleIds.join(',')})`);
+    await logSpamBlockHits({ entries, companyId: params.companyId, userId: params.userId, source: params.source, action: 'block' });
+    return blocked;
+  } catch (err: any) {
+    console.error('[spam-block] 묶음 차단 판정 실패 — 검사를 건너뛰고 발송을 진행한다:', err?.message || err);
+    return new Set<string>();
+  }
+}
+
 export async function checkSpamBlockBeforeCharge(params: {
   items: SpamPreflightItem[];
   companyId?: string | null;

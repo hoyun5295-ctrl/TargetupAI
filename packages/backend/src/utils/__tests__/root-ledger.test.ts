@@ -998,7 +998,8 @@ describe('R1 여정 — 실행 넣는 곳마다 같은 진입 규칙 · 같은 �
       const src = stripComments(be(f));
       if (!/\bentryCapExceeded\(/.test(src)) bad.push(`${f} 상한 판정 없음`);
       if (!/\bgetJourneyOwnerScopeSql\(/.test(src)) bad.push(`${f} 작성자 범위 없음`);
-      if (!/\b(calculateNextRunAt|computeAnchorStepRunAt)\(/.test(src)) bad.push(`${f} 보낼 시각 없음`);
+      // ★ 2026-11-02 첫 칸 시각 = firstRunAtFor(갈래 · calculateNextRunAt 을 감싼 CT · 설계서 docs/2026-11-02-journey-batch-send-design.md 3-2)
+      if (!/\b(calculateNextRunAt|computeAnchorStepRunAt|firstRunAtFor)\(/.test(src)) bad.push(`${f} 보낼 시각 없음`);
     }
     expect(bad).toEqual([]);
     // ★ Codex 1R — 넣기는 같은 계보 잠금 안에서 「지금도 켜짐」을 다시 본 뒤에만(관문 lockEntryIfActive · 감시 = 잠금 + startStillSame) ·
@@ -1108,7 +1109,8 @@ describe('R8 넓힘 — 여정 실행 · 재검사의 재시도에 상한', () =
         const at = m.index!;
         const stmt = src.slice(src.lastIndexOf('`', at), src.indexOf('`', at));
         const before = src.slice(Math.max(0, at - 900), at);
-        if (!/THEN 'failed'/.test(stmt) && !/if \(errorCount < \d+\)/.test(before)) bad.push(`${f}:${src.slice(0, at).split('\n').length}`);
+        // ★ 1102 묶음 발송 — 같은 문장 WHERE 의 상한(COALESCE(error_count, 0) < N)도 판정 자리다(상한을 넘은 행은 그 문장이 올리지 않는다)
+        if (!/THEN 'failed'/.test(stmt) && !/WHERE[\s\S]*COALESCE\(error_count, 0\) < \d+/.test(stmt) && !/if \(errorCount < \d+\)/.test(before)) bad.push(`${f}:${src.slice(0, at).split('\n').length}`);
       }
     }
     expect(bad).toEqual([]);
@@ -1184,11 +1186,11 @@ describe('R11 넓힘 — 여정 화면 · 서버 거절 문장에 내부 표 · 
 /** 일반 Error 로 두는 이유(사람이 고칠 입력이 아니다) — 키 = 파일 + 문장 앞 · 이 밖의 한국어 일반 Error = 입력 · 상태 오류를 500 으로 묻는다 */
 const JOURNEY_PLAIN_ERROR_OK: Record<string, string> = {
   'utils/journey-ai-generator.ts|추천 칸 수(': 'AI 응답 실패(계획보다 적게 설계)',
-  'utils/journey-executor.ts|SMS 큐 적재 0건': '발송 큐 내부 실패(실행기가 잡아 재시도 · 상한)',
   'utils/journey-identity-signals.ts|안전하지 않은 테이블 alias': '내부 불변식(코드가 넘기는 별칭)',
   'utils/journey-intake-grace.ts|안전하지 않은 테이블 alias': '내부 불변식',
   'utils/journey-pause-handler.ts|JOURNEY_PAUSE_TOKEN_SECRET 미설정': '서버 설정 누락(운영 경보 대상)',
   'utils/journey-send-claim.ts|단계 캠페인을 찾지 못해': '발송 표식 내부 불변식',
+  'utils/journey-step-campaign.ts|단계 캠페인을 정하지 못했다 journey=${spec.journeyId} step=${spec.stepId}': '묶음 발송 내부 불변식(세 번 다시 읽어도 못 정함 · 실행기가 잡아 재시도 · ★1102)',
   'utils/journey-send-claim.ts|발송 테이블을 찾지 못해': '발송 표식 내부 불변식',
 };
 describe('R10 넓힘 — 여정 CT 의 입력 · 상태 오류 = JourneyInputError(400) · JourneyStepGateError(409)', () => {
@@ -1667,7 +1669,6 @@ const PLAIN_ERROR_OK: Record<string, string> = {
   "utils/inicis-client.ts|[inicis-client] INICIS_M": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
   "utils/invoice-confirm.ts|정산 행을 찾지 못했습니다": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/journey-ai-generator.ts|추천 칸 수(…)보다 적게 설계됐습니다(…)": "AI 응답 실패(계획보다 적게 설계 · 다시 시도)",
-  "utils/journey-executor.ts|SMS 큐 적재 0건(배치 INSERT 실패": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/journey-identity-signals.ts|안전하지 않은 테이블 alias: …": "내부 불변식(SQL 조각 안전)",
   "utils/journey-intake-grace.ts|안전하지 않은 테이블 alias: …": "내부 불변식(SQL 조각 안전)",
   "utils/journey-pause-handler.ts|JOURNEY_PAUSE_TOKEN_SECR": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
@@ -1742,6 +1743,9 @@ const PLAIN_ERROR_OK: Record<string, string> = {
   "utils/short-url.ts|companyId는 필수입니다.": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
   "utils/short-url.ts|단축 URL 생성 실패 (hash 충돌 3회": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/sms-queue.ts|MMS는 이미지 첨부가 필수입니다 (inse": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
+  "utils/sms-queue.ts|적재 단위 …행 > 상한 …(호출부 오류)": "내부 불변식(묶음 발송이 단위를 상한 안으로 자른다 · ★1102)",
+  "utils/sms-queue.ts|연결 번호 없음": "적재 단위 내부 실패(문장을 보내기 전 = 안 들어감 확정 · 재시도 · ★1102)",
+  "utils/journey-step-campaign.ts|단계 캠페인을 정하지 못했다 journey=": "묶음 발송 내부 불변식(★1102)",
   "utils/spam-test-queue.ts|환불 미완(… …건)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/spam-test-queue.ts|환불 미완(…)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/staging-sweeper.ts|JWT_SECRET 미설정: 발송 준비 보관": "서버 설정 누락(운영 설정 · 고객에게는 라우트 안내 문장)",
@@ -2225,8 +2229,9 @@ const R8_CATCH_OK: Record<string, string> = {
   "utils/email-send-sweeper.ts:get_spec) : row.target_spec; }": "예약 조건 값 해석 실패 = 빈 조건(아래가 실패 종결 + 통지)",
   "utils/email-send-sweeper.ts:[campaignId], ); }": "실패 종결 기록 실패 = 30분 정체 정리가 다시 닫는다",
   "utils/journey-anchor-scheduler.ts:mary.enqueued += r.enqueued; }": "여정 하나 실패 = 다음 주기 다시(실행 넣기만 · 실행마다 상한 = 실행기 error_count)",
-  "utils/journey-executor.ts:slice(0, 200) }); } }": "실패 기록의 기록 실패(로그) · 실행 상한 = error_count(R8 여정 시험) · ★1102 닫은 실행 경보 = 반복 뒤 한 통(closedFailed)",
-  "utils/journey-executor.ts:).catch(() => undefined); } }": "적재 표식 정리 실패(로그) · 다음 주기 같은 판정",
+  "utils/journey-executor.ts:CH_MAX) doneGroups.add(key); }": "묶음 처리 예외 = recordExecutionErrors(그 칸 실행 error_count +1 · 상한 EXECUTION_ERROR_MAX = failed · R8 여정 시험) · 그 묶음 이번 회차 다시 안 집음(★1102 묶음 발송)",
+  "utils/journey-executor.ts:e(0, 200) }); } }": "실패 기록의 기록 실패(로그) · 실행 상한 = error_count(R8 여정 시험) · ★1102 닫은 실행 경보 = 반복 뒤 한 통(closedFailed)",
+  "utils/journey-executor.ts:), judged.claims.length); } }": "남은 적재 단위 판정 실패(로그) · 다음 주기 같은 판정(단위 판정 = 1시간 넘으면 닫음 · 설계서 3-8)",
   "utils/journey-reentry-worker.ts:wait client.query('COMMIT'); }": "재진입 묶음 되돌림(그 여정 이번 주기 건너뜀 · 다음 주기 같은 기준)",
   "utils/journey-reentry-worker.ts:t; journeysProcessed++; }": "재진입 여정 하나 실패 = 다음 주기(발송 0 · 실행 넣기만)",
   "utils/journey-trigger-watcher.ts:y.skipped += result.skipped; }": "신호 읽기 실패 = 다음 주기(발송 0 · 실행 넣기만)",
@@ -3284,6 +3289,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-legacy-undispatched'": '배포 전환 사이 옛 코드로 켜진 한 번 보내기 수 = 회사 여럿을 센 원인 하나(★1102 E1-2)',
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-lag'": '30분 넘게 못 넣은 한 번 보내기 수 = 원인 하나(★1102 E9 ④)',
     "utils/journey-executor.ts 'journey-executor-lag'": '실행기 밀림 = 플랫폼 처리량 원인 하나(★1102 E9 ①)',
+    "utils/journey-step-campaign.ts 'journey-step-campaign-seq-missing'": '단계 캠페인 순번 칸(C96-DDL-1) 없음 = 스키마 · 회사 무관(★1102 묶음 발송 I6)',
     "utils/journey-trigger-watcher.ts 'journey-watcher-budget'": '진입 감시 회차 예산 초과 = 플랫폼 원인 하나(★1102 E9 ②)',
     "utils/spam-test-queue.ts 'spam-queue-lag'": '스팸 검사 줄 밀림 = 시험 폰 · 큐 원인 하나(★1102 E9 ③)',
     "utils/direct-send-worker.ts 'direct-send-queue-lag'": '대량 직접발송 줄 밀림 = 워커 처리량 원인 하나(★1102 §16 G3)',
@@ -3393,6 +3399,7 @@ describe('R14 넓힘(1102 설계 docs/2026-11-01-credit-control-tower-design.md 
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-lag'": '넣지 못한 한 번 보내기 수 = 남아 있는 동안 다시',
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-legacy-undispatched'": '옛 코드로 켜진 한 번 보내기 수 = 남아 있는 동안 다시',
     "utils/journey-executor.ts 'journey-executor-lag'": '실행기 밀림 = 남아 있는 동안 다시',
+    "utils/journey-step-campaign.ts 'journey-step-campaign-seq-missing'": '순번 칸 없음 = DDL 전까지 다시(★1102 묶음 발송 I6)',
     "utils/direct-send-worker.ts 'direct-send-queue-lag'": '직접발송 줄 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
     "utils/operator-lag.ts 'operator-send-lag'": '자동마케팅 발송 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
     "utils/operator-lag.ts 'operator-generate-lag'": '자동마케팅 생성 밀림 수 = 남아 있는 동안 다시(★1102 §16 G3)',
@@ -3793,7 +3800,8 @@ describe('R30(1031) 여정 칸 관문 · 담당자 안내 = 그 칸 발송 사�
       const body = f.src.slice(f.src.lastIndexOf('\nasync function ', ins), ins);
       // ★ 1102 E3-1 — 관문 = 보류 판정 조각(stepHeldSql) · 보류면 표식 INSERT 앞에서 미룸(옛 그날 기록 관문 뒤집음)
       expect(body).toMatch(/stepHeldSql\(/);
-      expect(body).toMatch(/if \(gate\.rows\[0\]\?\.held && \[/);
+      // ★ 1102 묶음 발송 — 표식 INSERT 를 쓰는 함수 = 적재 단위 함수(sendUnits) · 단위마다 보류를 다시 보고 보류면 남은 실행을 미룬다(묶음 판정 관문은 그 앞 processMessageBatch)
+      expect(body).toMatch(/if \(held\.rows\[0\]\?\.held\) \{\s*await delayExecutions\(rest\.map\(\(r\) => r\.exec\.execution_id\), PRETEST_HELD_RECHECK_MINUTES\);/);
     }
   });
   it('journey_pretest_schedules 를 읽는 SELECT · EXISTS = 판정 주인(notifier) 한 파일 · 상태 직접 비교 = 그 파일 밖 0 · 조각을 부르는 파일 = 실행기 · notifier', () => {
@@ -4433,6 +4441,19 @@ describe('R42 공용 발송 줄 = 회사 대표 · 한 회사 한 줄 · 몫마�
     const pass = op.slice(op.indexOf('export async function runAutoSendPass('), op.indexOf('await reconcileStuckSending()'));
     expect(pass).toContain('dueScheduledProposals(1, [...generatingOperators.keys()], tried, [...inFlight.keys()])');
     expect(pass).not.toMatch(/for \(const row of due\.rows\)/);
+  });
+  it('④ ★1102 여정 실행기 = 묶음 먼저 고르기(회사 대표 · 줄 수보다 많이 · 줄이 돌려 씀) · 한 회사 안 = (여정 · 칸) 묶음 · 적재 = INSERT 한 문장 단위 · 한 건 판 0', () => {
+    const ex = stripComments(be('utils/journey-executor.ts'));
+    const run = ex.slice(ex.indexOf('export async function runJourneyExecutor('), ex.indexOf('function addSummary('));
+    expect(run).toContain('SELECT DISTINCT ON (company_id) * FROM due');
+    expect(run).toContain('[[...doneGroups], keyCos, keyAts, JOURNEY_GROUP_FETCH],');
+    const fetch = Number(/export const JOURNEY_GROUP_FETCH = (\d+);/.exec(ex)?.[1]);
+    const lanes = Number(/export const JOURNEY_EXECUTOR_CONCURRENCY = (\d+);/.exec(ex)?.[1]);
+    expect(fetch).toBeGreaterThan(lanes);
+    expect(run).toContain('const out = await processStepBatch(rows);');
+    expect(ex).not.toMatch(/async function processExecution\(/);
+    const units = ex.slice(ex.indexOf('async function sendUnits('), ex.indexOf('async function retryOrPauseAfterLoadFailure('));
+    expect(units).toContain('for (let off = 0; off < rows.length; off += QUEUE_UNIT_MAX) {');
   });
 });
 

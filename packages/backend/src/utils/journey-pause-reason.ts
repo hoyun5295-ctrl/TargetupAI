@@ -32,6 +32,8 @@ const RULES: Array<{ test: RegExp; view: PauseReasonView }> = [
   { test: /임계값|step 비용/, view: { kind: 'cost', text: '한 번에 나가는 발송비가 정해 둔 한도를 넘어 멈췄어요. 한도를 확인해 주세요.', fix: { action: 'edit_options', label: '한도 바꾸기' } } },
   { test: /통신사 일시 발송 실패/, view: { kind: 'carrier', text: '통신사 쪽 일시 오류로 멈췄어요. 잠시 뒤 다시 켜 주세요.', fix: { action: 'resume', label: '다시 켜기' } } },
   { test: /조건 평가/, view: { kind: 'condition', text: '조건을 확인하다 오류가 나 멈췄어요. 잠시 뒤 다시 켜 주세요.', fix: { action: 'resume', label: '다시 켜기' } } },
+  // ★ 2026-11-02 묶음 발송 이상치 관문(설계서 3-2 ⑤) — 명단이 맞으면 다시 켜면 그대로 나간다(승인 = 다시 켜기)
+  { test: /평소보다 크게 많아/, view: { kind: 'cap', text: '하루 동안 들어온 고객이 평소보다 크게 많아 보내기 전에 멈췄어요. 고객 명단이 맞으면 다시 켜 주세요. 그대로 나갑니다.', fix: { action: 'resume', label: '확인하고 다시 켜기' } } },
   { test: /대량 진입 감지/, view: { kind: 'cap', text: '한 번에 들어온 고객이 최대 인원보다 많아 멈췄어요. 최대 인원을 늘리거나 조건을 좁힌 뒤 다시 켜 주세요.', fix: { action: 'edit_options', label: '최대 인원 바꾸기' } } },
   { test: /신규 고객 판정 불가/, view: { kind: 'identity', text: '새 고객을 가려낼 정보가 없어 멈췄어요. 고객 데이터 연동을 확인해 주세요.', fix: { action: 'contact', label: '문의하기' } } },
   // ★ 2026-10-25 #14 — 검사 장애로 멈춤은 문안 탓이 아니다(스팸필터 줄보다 먼저 · 다시 켜기)

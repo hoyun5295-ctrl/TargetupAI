@@ -33,6 +33,24 @@ export interface JourneySmsRenderInput {
   isAd: boolean | null | undefined;
   /** 고객 행 전체(SELECT * · custom_fields 포함). 없으면 변수 자리는 비운다(발송 치환과 같은 규칙). */
   customer: Record<string, any> | null;
+  /** ★ 2026-11-02 묶음 발송 — 회사 단위 값(묶음마다 한 번 · loadJourneyRenderShared) · 없으면 지금처럼 호출마다 읽는다 */
+  shared?: JourneyRenderShared;
+  /** ★ 2026-11-02 묶음 발송 — 이 고객 예측 값을 미리 읽었으면(enrichCustomersWithPredictions) 그대로 쓴다 */
+  predictionsPreloaded?: boolean;
+}
+
+/** ★ 2026-11-02 렌더 회사 단위 값(필드 매핑 · 080 · 회사 이름) — 같은 값이라 묶음마다 한 번 읽는다(결과 글자 같음) */
+export interface JourneyRenderShared {
+  fieldMappings: Awaited<ReturnType<typeof prepareFieldMappings>>;
+  opt080Number: string;
+  company: { name: string; brand_name: string };
+}
+export async function loadJourneyRenderShared(companyId: string, createdBy: string | null): Promise<JourneyRenderShared> {
+  const fieldMappings = await prepareFieldMappings(companyId);
+  const opt080Number = await getOpt080Number(createdBy, companyId);
+  // Liquid 회사 정보({{ company.name }} · {{ company.brand_name }})
+  const companyRes = await query(`SELECT company_name, brand_name FROM companies WHERE id = $1::uuid`, [companyId]);
+  return { fieldMappings, opt080Number, company: { name: companyRes.rows[0]?.company_name || '', brand_name: companyRes.rows[0]?.brand_name || '' } };
 }
 
 export interface JourneySmsRendered {
@@ -45,19 +63,17 @@ export interface JourneySmsRendered {
 export async function renderJourneySmsMessage(input: JourneySmsRenderInput): Promise<JourneySmsRendered> {
   const msgType = journeySmsType(input.channel);
   const isAd = resolveJourneyAdFlag(input.channel, input.isAd ?? undefined);
-  const fieldMappings = await prepareFieldMappings(input.companyId);
-  const opt080Number = await getOpt080Number(input.createdBy, input.companyId);
-  // Liquid 회사 정보({{ company.name }} · {{ company.brand_name }})
-  const companyRes = await query(`SELECT company_name, brand_name FROM companies WHERE id = $1::uuid`, [input.companyId]);
-  const company = { name: companyRes.rows[0]?.company_name || '', brand_name: companyRes.rows[0]?.brand_name || '' };
+  const { fieldMappings, opt080Number, company } = input.shared ?? await loadJourneyRenderShared(input.companyId, input.createdBy);
 
   const template = String(input.template || '');
   let customer: Record<string, any> | null = input.customer;
   let externalContext: Record<string, any> = {};
   if (customer) {
     // 예측 점수(click_score · churn_risk · purchase_likelihood) — 실패해도 원본 고객 그대로(발송 차단 X)
-    const { enrichCustomerWithPredictions } = await import('./predictive-suite');
-    customer = await enrichCustomerWithPredictions(customer, input.companyId);
+    if (!input.predictionsPreloaded) {
+      const { enrichCustomerWithPredictions } = await import('./predictive-suite');
+      customer = await enrichCustomerWithPredictions(customer, input.companyId);
+    }
     try {
       // 외부 실시간 값(날씨 · 재고 · 가격 · 신상품) — Liquid 변수가 있을 때만 부른다
       const { enrichLiquidContextWithExternal } = await import('./connected-content');
