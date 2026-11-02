@@ -3283,6 +3283,7 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
   - **journeys CHECK `journeys_trigger_event_registered`** — trigger_event 화이트리스트(§5-4 DB측, 레지스트리 `TRIGGER_CONTRACTS`와 1:1 · 16 → 17(0930 purchase.product) → **18(1020 journey.after)**). NOT VALID → VALIDATE 통과 = 기존 전 여정 값이 등록 집합 안임을 실증. **새 트리거 추가 시 레지스트리와 이 CHECK를 함께** — 어긋나면 저장은 되는데 DB가 거부하거나 그 반대가 된다.
 - **journey_entry_ledger**(`journey_id` uuid FK→journeys CASCADE, `company_id` uuid, `store_code` varchar null, `phone` varchar, `kind` varchar 'baseline'|'entered', `created_at`) · **UNIQUE(journey_id, company_id, COALESCE(store_code,'__NONE__'), phone)** + idx(journey_id) — 신규가입 "전에 본 적 없는 식별자"만 진입. 키 = 시스템 upsert 식별자(회사+매장코드+전화번호).
 - **journey_step_campaigns**(`journey_id` uuid FK→journeys CASCADE, `step_id` uuid, `send_date` date, `campaign_id` uuid, `created_at`) · **PK(journey_id, step_id, send_date)** — 묶음 발송: (journey,step,KST날짜)당 campaign 1건 공유(발송결과 1줄 + app_etc1=campaignId 상세 검색).
+  - **★2026-11-02 C96-DDL-1 실행(Harold psql · information_schema = `seq smallint 0 NO`)**: `seq smallint NOT NULL DEFAULT 0` = 같은 날 같은 칸 이어 붙임 순번(증명 못 해 닫은 적재 단위 뒤 새 캠페인 · 설계서 `docs/2026-11-02-journey-batch-send-design.md` I6). **기본 키는 아직 3열** — C96-DDL-2A(유일 색인 `journey_step_campaigns_seq_uidx` 4열 · CONCURRENTLY) · 2B(기본 키 = 그 색인 4열)는 코드 배포 · 옛 프로세스 0 뒤(원장 C96). 코드는 회차마다 pg_index 기본 키 열 수로 순번 1 이상을 연다(3열이면 순번 0만).
 
 ### ★ 2026-07-20 Track C M2 — 게이트웨이 알림톡 매핑 2테이블 (템플릿관리자 흡수)
 

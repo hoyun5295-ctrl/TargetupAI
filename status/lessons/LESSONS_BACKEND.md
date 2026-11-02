@@ -413,7 +413,7 @@ const items: any[] =
 - **여정 SMS 큐 app_etc1/app_etc2 뒤바뀜 발견·정정** — `bulkInsertSmsQueue`는 app_etc1=row[6]·app_etc2=row[7](`sms-queue.ts:942·944`)인데, 여정 SMS가 row[6]=company_id·row[7]=`journey:...`로 뒤바뀌어 여정 SMS 수신자 상세(`results.ts` WHERE app_etc1=campaignId)가 안 잡혔음. Phase 5에서 row[6]=campaignId로 정정.
 - **여정 과금 = prepaidDeduct(발송 시, `executor:587`), campaign_runs 월정산 밖**(여정은 campaign_runs 미생성) → app_etc1 변경이 billing에 영향 0. billing은 `campaign_runs.id`(run_id) GROUP BY app_etc1로 집계.
 - **진입 원장 키 = 시스템 upsert 식별자(회사+매장코드+전화번호)** — created_at 의존 0. 업로드=`customer-upsert` upsert(키 동일)라 created_at·id 보존, 전체삭제(`customers.ts:1533`)·업로더별삭제(`admin.ts:231`)만 리셋(드묾).
-- **묶음 발송 = (journey,step,KST날짜)당 campaign 1건 공유**(journey_step_campaigns find-or-create) — staging/사전렌더 불요(executor 5분 소량 처리 → OOM 위험 0, 톤28 무관). 직접발송 파이프라인 격리.
+- **묶음 발송 = (journey,step,KST날짜)당 campaign 1건 공유**(journey_step_campaigns find-or-create) — staging/사전렌더 불요(executor 5분 소량 처리 → OOM 위험 0, 톤28 무관). 직접발송 파이프라인 격리. ★1102 C96 = 같은 날 같은 칸 이어 붙임 순번 `seq`(증명 못 해 닫은 적재 단위 뒤 새 캠페인 · 기본 키 4열은 DDL-2 뒤) · 실행기는 한 건씩이 아니라 (여정 · 칸) 묶음 = [묶음 발송 설계서](../../docs/2026-11-02-journey-batch-send-design.md).
 
 **★ 2026-06-04 세션3 — Phase 6·7·8 fixed (배포 408f6e9)**:
 - **#4 조건평가 안전분기** = Phase 7: `evaluateCondition` boolean→`met`/`not_met`/`error` 3분기. DB오류=`error`→발송 보류+재시도(`handleConditionEvalError`, 발송실패 재시도 패턴 재사용, 발송 X). null·미지원 type·미지원 operator·빈 field·빈 event_name=`not_met`. customer_field 순수 평가 `journey-condition.ts`(신규 CT) 분리. 활성화 형식검증 유지.
@@ -849,3 +849,23 @@ else concat(concat(concat('{"sendercode":"',sender_code),'",'), replace(k_etc_js
 - **뿌리**: 가드가 행의 `app_etc2` 를 「회사 ID」로 가정했는데 운영자 문자는 그 칸에 꼬리표(`'system-alert'` · `'charge-approve'`)를 싣는다 → `::uuid` 조회가 PG 22P02 → 적재 전 예외. 테스트의 DB 흉내는 UUID 가 아니어도 오류를 내지 않아(DB 보다 너그러움) 못 잡았다. 경보 경로가 죽어도 그 사실을 알릴 길이 경보 경로뿐이었다.
 - **처방**: `isDemoCompany` = UUID 모양(`normalize.ts isUuid`)이 아니면 시연 아님 · 테스트 흉내를 PG 처럼 UUID 아니면 거절로.
 - **규칙**: 발송 · 돈 길목에 새 판정을 넣을 때는 그 칸에 **실제로 들어오는 값의 종류**를 호출처 전수 grep 으로 표로 만든다(회사 ID · null · 꼬리표). 흉내(mock)는 DB 보다 너그럽게 두지 않는다(memory `feedback_mock_must_not_be_more_generous_than_the_db` 같은 축). 운영자 경보 경로를 바꾸는 변경은 배포 뒤 경보 1건이 실제로 적재되는지 로그로 확인한다.
+
+## ★2026-11-02 재시도 상한의 근거는 「사전 · 원자」로 — 사후 기록에 걸면 같은 지적이 네 번 돈다 (C96 · Codex 구현 1R ~ 4R)
+
+- **증상**: 묶음 발송 적재 단위의 「다시 보내기 최대 한 번」을 지키려 했는데 Codex 가 같은 뿌리를 네 라운드 연속 지적했다 — 1R 결과 불명 → 미적재 증명 → 다시 보냄이 상한을 우회 · 2R 상한을 「여정 멈춤 성공」이라는 부수효과에 걸었다 · 3R 판정 자리(가드)를 표식이 다른 길에서 지워지면 지나지 않는다 · 4R 근거를 「실패 뒤 남기는 기록」으로 두면 그 쓰기가 실패할 때 빈다.
+- **뿌리**: 상한의 근거(몇 번 시도했나)를 **시도가 끝난 뒤** 남기는 값에 걸었다. 사후 값은 그 쓰기 · 멈춤 · 표식 정리 중 하나만 실패해도 사라진다.
+- **처방**: 시도 기록을 **새 표식 INSERT 와 같은 문장**에서 미리 남긴다(`WITH att AS (UPDATE journey_executions … 시도 < 2 · active) INSERT … FROM att`) → 표식과 시도는 같이 커밋되거나 같이 안 된다 · 판정 자리 = 새 표식을 만드는 곳 한 곳 · 다음 칸으로 넘어가면 지운다(`journey-executor.ts` `loadAttemptsSql` · `LOAD_ATTEMPT_MAX`).
+- **규칙**: 횟수 · 한도 판정은 「그 행동을 시작하는 문장」이 근거를 함께 쓴다. 같은 부류 지적이 두 번 나오면 개별 수정을 멈추고 근거를 사전 · 원자로 옮길 수 있는지부터 본다(CLAUDE.md `review_findings_fix_root_not_symptom`).
+
+## ★2026-11-02 계획이 플래너 짐작에 달린 문장은 글자를 다듬지 말고 모양으로 못 박는다 — 같은 문장이 세 번째로 원장 통째 읽기 (비토 통계 칸 · BUG_HISTORY 1102)
+- **사례**: 비토 `stats-snapshot.js` 원장 칸 문장 = 구간 배열(unnest)에 원장을 그냥 JOIN. 10-26(경계 부속 질의) · 10-28(봉인 UNION ALL) 두 번 다 글자를 바꿔 색인 계획을 되찾았는데, 원장이 709만 행이 되자 재기동 뒤 첫 채우기(구간 120 · 720)가 Seq Scan + Materialize 로 뒤집혀 120초에 끊겼다. 실패하면 처음부터라 끝없이 반복.
+- **처방**: 구간마다 `CROSS JOIN LATERAL (SELECT 쓰는 칸 FROM 표 WHERE 시각 범위 OFFSET 0)` = 통째 읽기가 구간 수만큼 되풀이돼야 해 플래너가 고를 수 없다(운영 720 구간 475ms). `OFFSET 0` 이 없으면 단순 부속 질의는 위로 끌어올려져 옛 모양과 같아진다. 계약 = 모양 단언 + 구간 펼치기 자리 기계 추출(한 곳).
+- **규칙**: ① 같은 문장의 계획이 두 번 뒤집혔으면 세 번째 글자 수정은 처방이 아니다 → 구조로 고정 ② 작은 시험 DB 는 계획을 증명하지 못한다 → 처방 문장을 운영에서 EXPLAIN(ANALYZE 는 statement_timeout 과 함께) 한 뒤 코드로 ③ 문장 하나의 실패가 전체를 처음부터 되돌리는 채우기는 진행 보장이 없다(기록만 · 착수 = Harold).
+
+## ★2026-11-02 시험의 기대값을 오늘 날짜에 묶지 않는다 — 기준 시각을 시험 데이터와 같은 자리에서 정한다 (비토 retention PG 시험 · 11-01 부터 실패)
+- **사례**: `retention-archive-postgres-test.js` = 「7월 = 달 끝 + 93일 전」(2026-11-01 KST 에 끝남) · K8 `mr_partition_health()`(시험 칸 · 시퀀스는 2026-10 기준인데 now() 로 봄) 두 단언이 날짜가 지나며 깨져 배포 게이트(--pg)를 막았다. 코드 결함이 아니라 시험의 시한폭탄.
+- **규칙**: 날짜 규칙을 시험할 때 ① 기대값을 같은 DB 시계로 계산하거나 ② 함수에 기준 시각 인자가 있으면 시험 데이터의 달로 못 박는다. 「지금」에 기대는 단언은 언젠가 깨진다.
+
+## ★2026-11-02 tu-pgtest 는 512MB 램 그릇 · AI 가 만들 수 있는 DB 는 `t_` 이름뿐
+- **사례**: 계획 확인용으로 `explain_probe`(허가 밖 이름 · 실 PG 시험층 설계 D1 = `t_` DB 만)에 70만 행을 넣다 tmpfs 를 채워 PG PANIC → 컨테이너 재시작 → 템플릿 비워짐(test:pg 가 덤프에서 다시 만듦 · 운영 무관).
+- **규칙**: 큰 자료 시험은 tu-pgtest 에 넣지 않는다(계획 증명은 어차피 운영 EXPLAIN) · 문법 확인은 빈 `t_` DB 로 하고 끝나면 지운다 · 많은 행을 넣는 일은 Harold 「해」 뒤에만.

@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: bec5d5d5 · 2026-11-02 · Harold 보고 「여기까지 완료」(C92 · C93 · push 0b4562da..bec5d5d5 원문 받음 · 그 전 3d5e09ef)
-- deployed_head: bec5d5d5 · 2026-11-02 · Harold 보고 「여기까지 완료」(백엔드 build:safe · reload 07:45:30 · 프론트 build:safe · pm2 status 원문 받음) · 그 전 3d5e09ef(C88) · C77-ENV-1 은 아직
-- 이번 창 확인 출력: push 끝 줄(0b4562da..bec5d5d5) · pm2 status · describe · logs(원문 받음) · build:safe 끝 줄(Harold 보고 · 원문은 안 받음)
+- pulled_head: 8372eb16 · 2026-11-02 · Harold 출력(서버 pull bec5d5d5..8372eb16 · Fast-forward · 156 files · C95 450b5295 · C94 8372eb16 원문 받음 · 그 전 bec5d5d5)
+- deployed_head: 8372eb16 · 2026-11-02 · Harold 출력(백엔드 build:safe 11:46:46 · 적재 중 0건 확인 뒤 pm2 restart --update-env 11:47:50 · online · restarts 33 · unstable 0 · /health ok · 배너 11:48:06 · 에러 로그 0줄 · 프론트 build:safe 원문 받음) · 그 전 bec5d5d5(C93) · C77-ENV-1 은 아직
+- 이번 창 확인 출력: backend-build · restart-env · uptime · frontend-build
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -41,8 +41,9 @@
 | C91 | 0b4562da |
 | C92 | bec5d5d5 |
 | C93 | bec5d5d5 |
-| C94 | 미커밋 |
-| C95 | 미커밋 |
+| C94 | 8372eb16 |
+| C95 | 450b5295 |
+| C96 | 33f049c2 |
 
 ## §1 대기
 
@@ -637,14 +638,80 @@ CREATE TABLE IF NOT EXISTS system_alert_pending (
 - 선행: C94-DDL-1 · 코드 배포
 - 기대: ① 배포 뒤 첫 시간 백엔드 로그에 `경보 원장 넣기 실패` · `system_alert_pending` 오류 0 ② `SELECT pass, COUNT(*) FROM system_alert_pending GROUP BY pass` = 0행이거나 한 시간 안에 비워짐(쌓이지 않음) ③ AI 사용량 화면 · 크레딧 화면 정상(한도 칸 없음 · 크레딧 사용률) ④ 운영 경보 문자 = 같은 원인 여러 곳이 한 통으로
 - 확인: 로그 줄 · SQL 결과 · 화면(Harold)
-- 결과:
+- 결과: 1차 2026-11-02 11시 5x분 Harold 실행(배포 8372eb16 · 재시작 11:47:50 뒤) · system_alert_pending 0행 · 재시작 뒤 로그(out · err)에 경보 원장 표 · 없는 칸/표 오류(42P01 · 42703) 0줄 → ①② 1차 기대값 같음 · 2차 12:48(재시작 뒤 한 시간) 같은 조회 = 0행 · 0줄 → **①② 닫힘**(첫 한 시간 원장 쌓임 0 · 관련 오류 0) · ③ 화면 정상(Harold 확인 12:5x · /ai-usage = 월 호출 한도 칸 없음 · 크레딧 사용률) · 남은 = ④ 경보 한 통(경보가 생길 때)
 
 ### C95-S1 · 엔진 빈칸 묶음 실측(배포 뒤 · 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §16)
 - 카드: C95
 - 단계: 사후
 - 선행: 코드 배포(DDL 0 · ENV 0 · 백엔드만)
-- 기대: ① 재시작 뒤 백엔드 로그에 직접발송 워커 시작 줄 · `처리 실패` 0 ② 배포 뒤 첫 시간 운영 경보에 direct-send-queue-lag · operator-send-lag · operator-generate-lag 0 ③ 테스트계정 직접발송 1건 = 접수 → 적재 → 완료(campaigns.send_phase 끝 · send_config 에 loadParkedAt · loadChunk · loadFinalizing 남지 않음) ④ 테스트계정 여정 켜기 확인 창 = 매장번호 확인 정상 · [타겟 확인] 날짜 기준 수에 「+」 없음
+- 기대: ① 재시작 뒤 백엔드 로그에 직접발송 워커 시작 줄 · `처리 실패` 0 ② 배포 뒤 첫 시간 운영 경보에 direct-send-queue-lag · operator-send-lag · operator-generate-lag 0 ③ 테스트계정 직접발송 1건 = 접수 → 적재 → 완료(campaigns.send_phase 끝 · send_config 에 loadParkedAt · loadChunk 남지 않음 · loadProgress · loadFinalizing 은 종결 기록이라 남는 것이 정상 · `direct-send-worker.ts:936 · 976`) ④ 테스트계정 여정 켜기 확인 창 = 매장번호 확인 정상 · [타겟 확인] 날짜 기준 수에 「+」 없음
 - 확인: 로그 줄 · 경보 수 SQL · 화면(Harold · 테스트계정)
+- 결과: 2026-11-02 Harold 출력 · ① 워커 시작 줄 12:02:29 · 12:15:28(`회사별 줄 2 + 작은 줄 1 · 몫 120초`) · 12:15:12 종료 신호 `적재 중 0개 … 내려놓고 끝냅니다` · 오류 로그 직접발송 워커 줄 0 ② system_alert_state 밀림 키 셋 0 rows ③ 배포 뒤 직접발송 2건(a2ee5428 · 96822b6c) sent · completed · 1/1 · parked f · in_chunk f · finalizing t · loadProgress sent 1 · 대기열 queued · processing 0 ④ 화면 = 남음 · ★ 12:02:14 백엔드 SIGSEGV(pm2.log `exited … via signal [SIGSEGV]` · 자동 재기동) = .62 메모리 고장 계열(같은 날 11:01 hanjul02 SIGSEGV) · 걸린 캠페인 0
+
+### C96-S0 · 묶음 발송 사전 확인(MySQL 큐 표 엔진 · 같은 계정 다른 연결 처리 목록 · 설계서 docs/2026-11-02-journey-batch-send-design.md 3-8 I1 · I4) · ★ 배포 앞
+- 카드: C96
+- 단계: 사전
+- 선행: 없음
+- 기대: 서버 백엔드 폴더에서 ts-node 한 번(지금 도는 백엔드와 같은 MySQL 접속 · smsuser 직접 접속은 1045 거부 = OPS §1) · 출력 `I1 engines [{"engine":"InnoDB",...}]`(InnoDB 한 줄만) · `I4 other-thread visible 1`
+- 확인: 두 줄 그대로 · I1 에 InnoDB 밖 엔진이 있으면 그 표 이름 확인(이중 발송 0 은 그대로 · 일부만 든 단위 = 증명 못 함 → 닫음) · I4 가 0 이면 배포하지 않는다(종료 증명이 안 돼 결과 불명 단위가 1시간 뒤 닫힌다 = 다시 안 보냄 · 정산 환불)
+- 결과: 2026-11-02 15:08 Harold 실행 · I4 other-thread visible 1(기대값 같음) · I1 = InnoDB 137 + ENGINE null 1 = `SMSQ_SEND` · TABLE_TYPE VIEW(뷰라 자기 엔진 없음 · Harold 두 번째 출력) · 이 카드의 확인 규칙대로 I1 밖 표는 배포를 막지 않는다(이중 발송 0 그대로) · 배포 관문 I4 = 맞음 → DDL-1 로
+
+### C96-DDL-1 · journey_step_campaigns.seq(이어 붙임 순번 칸만 · 새 색인 0 · 설계서 §5 · I6) · ★ 배포 앞
+- 카드: C96
+- 단계: DDL
+- 선행: C96-S0
+- 의미 바꿈: 아니오(칸 추가 · 옛 행 = 0 · 3열 기본 키 그대로 = 옛 코드의 `ON CONFLICT (journey_id, step_id, send_date)` 와 그 경합이 지금과 같다 · 새 코드는 칸이 없으면 칸을 뺀 같은 문장 + 운영 경보 journey-step-campaign-seq-missing)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, column_default, is_nullable FROM information_schema.columns WHERE table_name = 'journey_step_campaigns' AND column_name = 'seq';
+- 확인: seq · smallint · 0 · NO 한 줄
+- 결과: 2026-11-02 Harold 실행 · SET · ALTER TABLE · `seq | smallint | 0 | NO` 1 row(기대값 같음)
+
+> C96-DDL-1 · 배포 앞 · 칸 추가 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C96-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE journey_step_campaigns ADD COLUMN IF NOT EXISTS seq smallint NOT NULL DEFAULT 0;
+```
+
+### C96-DDL-2A · journey_step_campaigns 4열 유일 색인(배포 뒤 · 옛 프로세스 0 확인 뒤 · I6)
+- 카드: C96
+- 단계: DDL
+- 선행: C96-DDL-1 · 코드 배포 · pm2 status 로 새 프로세스 하나(옛 코드 프로세스 0)
+- 의미 바꿈: 아니오(색인 추가 · 새 코드의 만들기 = 대상 없는 ON CONFLICT DO NOTHING = 색인이 있든 없든 같은 문장)
+- 기대: 서버 psql 에서 아래 블록(트랜잭션 밖 · 그 문장 하나) · 확인 = SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = 'journey_step_campaigns_seq_uidx'::regclass;
+- 확인: t 한 줄(f 면 DROP INDEX CONCURRENTLY IF EXISTS journey_step_campaigns_seq_uidx; 뒤 다시)
+- 결과:
+
+> C96-DDL-2A · 배포 뒤 · 색인 추가 · 되돌리기 = DROP INDEX CONCURRENTLY IF EXISTS journey_step_campaigns_seq_uidx;
+
+```sql ddl:C96-DDL-2A
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS journey_step_campaigns_seq_uidx ON journey_step_campaigns (journey_id, step_id, send_date, seq);
+```
+
+### C96-DDL-2B · journey_step_campaigns 기본 키 = 4열(이어 붙임 열림 · 배포 뒤 · I6)
+- 카드: C96
+- 단계: DDL
+- 선행: C96-DDL-2A(indisvalid = t)
+- 의미 바꿈: 예(같은 날 같은 칸에 순번 1 이상 캠페인을 만들 수 있다 = 증명 못 해 닫은 단위 뒤 이어 붙임 · 옛 코드가 남아 있으면 그 문장이 42P10 = 그래서 옛 프로세스 0 뒤 · 새 코드는 회차마다 pg_index 기본 키 열 수로 연다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'journey_step_campaigns'::regclass AND contype = 'p';
+- 확인: PRIMARY KEY (journey_id, step_id, send_date, seq) 한 줄
+- 결과:
+
+> C96-DDL-2B · 배포 뒤 · 기본 키 바꿈 · 되돌리기 = 순번 1 이상 행이 0 일 때만 3열 기본 키로(그 SQL 은 그때 따로)
+
+```sql ddl:C96-DDL-2B
+SET lock_timeout = '3s';
+ALTER TABLE journey_step_campaigns
+  DROP CONSTRAINT journey_step_campaigns_pkey,
+  ADD CONSTRAINT journey_step_campaigns_pkey PRIMARY KEY USING INDEX journey_step_campaigns_seq_uidx;
+```
+
+### C96-S1 · 묶음 발송 · 두 갈래 실측(배포 뒤 · 테스트계정)
+- 카드: C96
+- 단계: 사후
+- 선행: C96-DDL-1 · 코드 배포 · C96-DDL-2A · C96-DDL-2B
+- 기대: ① 배포 뒤 첫 회차 백엔드 로그 `[JourneyExecutor] 처리 완료(차례 N)` 줄 · `적재 단위 결과 불명` · `처리 실패` 0 ② 테스트계정 여정 1건 발송 = 그날 단계 캠페인 send_config 에 loadProtocol unit · loadUnit 남지 않음 · journey_step_logs sent 수 = campaigns.sent_count ③ 하루 묶음 여정(회원가입 등)의 새 진입 next_run_at = 다음날 아침 9시(칸 시각을 정했으면 그 시각) · 즉시 여정(구매 · 배송 · 예약)은 지금처럼 ④ 배포 뒤 첫 시간 운영 경보에 journey-step-campaign-seq-missing · journey-unit-unprovable 0
+- 확인: 로그 줄 · 그 시각 SQL 하나씩(docker 한 줄) · 화면(Harold · 테스트계정)
+- 화면 빌드: 1102 밤 배포에 프론트 build:safe 포함 · 23시 점검 취소로 점검 안내 창은 daab49e1(0a780fa3 되돌림 · 같은 날 15:49 push)에서 지워짐 · 서버 8372eb16 → daab49e1 프론트 순변경 = C96 두 파일뿐(JourneyActivationConfirmModal · JourneyStartCard · `git log --name-only 8372eb16..daab49e1 -- packages/frontend` = 0a780fa3 · 33f049c2 · daab49e1 세 커밋 · 점검 안내 세 파일은 `git log -p` 로 0a780fa3 과 daab49e1 패치가 줄 · 덩어리 머리 모두 정확히 뒤집힘 = 순변경 0 실측) · pull 끝 = daab49e1
 - 결과:
 
 ## §2 덤프 뒤 적용분

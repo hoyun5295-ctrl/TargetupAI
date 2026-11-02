@@ -144,7 +144,9 @@ cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
 # git checkout -- packages/backend/package-lock.json && git pull
 
 # 5. 백엔드 재시작 (변경 시) — env를 바꿨으면 `pm2 restart all --update-env`
-pm2 reload targetup-backend
+# ★1102 = 적재 중 대량 발송이 0건일 때만 재시작한다(확인과 재시작을 한 줄 조건으로 · 교훈 = LESSONS_DEPLOY 1102)
+#   원장이 restart-env 를 요구하면 아래 pm2 reload targetup-backend 자리를 pm2 restart targetup-backend --update-env 로 바꾼다
+n=$(docker exec -i targetup-postgres psql -U targetup targetup -tAc "SELECT COUNT(*) FROM campaigns WHERE send_phase IN ('preparing','queued','processing')"); echo "loading=$n"; if [ "$n" = "0" ]; then pm2 reload targetup-backend; else echo "busy - restart skipped"; fi
 
 # 6. 확인
 pm2 status

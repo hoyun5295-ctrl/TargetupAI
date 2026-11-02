@@ -181,3 +181,13 @@ pm2 logs hanjuldm-api --lines 100
 - **대책**: 스테이징의 `vcredist_x64.exe` 를 zip 에 싣고 설치 bat 가 동봉돼 있으면 늘 `/q` 로 실행한다(WinSxS 폴더 이름으로는 .42 와 .762 를 못 가른다). 종료 코드 3010 = 재부팅 안내 뒤 중단 · 0 외 = 중단 · 파일 없으면 manifest blocker. 규칙 소유 = FEATURE-SYNC-AGENT §5.
 - **교훈**: 산출물의 요구 런타임은 dll 매니페스트로 읽는다(검증 PC 통과는 증거가 아니다). bat 분기는 실제 cmd 로 리허설한다(exe 한 줄만 `cmd /c exit N` 으로 바꿔 네 갈래). 내려받은 설치 파일은 실행하지 않고 서명 + cab 을 잘라 `expand.exe` 로 푼 MSI 의 버전 문자열로 확인한다.
 
+
+### 2026-11-02 백엔드 재시작은 적재 중 대량 발송이 0건일 때만 · pull 출력의 gc 경고는 서버 저장소 손상 신호다 (C94 배포)
+- **재시작 게이트**: 백엔드는 fork 1프로세스라 재시작이 적재 중인 직접발송 청크를 끊는다(끊기면 일부만 발송된 채 끝날 수 있음 · ecosystem 주석). 종료 대기(kill_timeout 12초 · C95)는 이름으로 하는 재시작에 적용되는지 미확인. 확인과 재시작 사이(빌드 몇 분)에 새 발송이 시작될 수 있어 **확인과 재시작을 한 줄 조건으로** 묶는다(명령 = [OPS.md](../OPS.md) §2-2 5). 이미 MySQL 에 넣은 메시지는 QTmsg 에이전트가 따로 보낸다. 1102 Harold 「지금 발송량 체크해서 진행할까?」에서 나왔다.
+- **gc 경고**: `git pull` 출력의 「The last gc run reported … corrupt loose object … failed to run repack」 = 지난 자동 정리가 깨진 객체에 걸려 멈춘 기록(`.git/gc.log`)이다. 이번 pull 이 성공해도 저장소는 손상이다. `git fsck --full --no-dangling` 결과를 끝 20줄로만 보면 규모를 놓친다(1102 = 낱개 2 · 묶음 파일 3 체크섬 어긋남).
+- **수리**: 깨진 객체를 하나씩 다시 넣지 않는다 → 옆 폴더에 `git clone --no-checkout` → 로컬 설정(`core.filemode false`)을 옮김 → 새 사본 fsck → 옛 `.git` 은 지우지 않고 옮겨 둔 뒤 새 `.git` 을 넣고 `git reset -q`(색인을 새로 만들어 추적 파일 전부를 다시 읽어 대조 · 서비스 무관). 원인 쪽 기록 = [SERVERS.md](../SERVERS.md) .62 ★1026 메모리 비트 오류 · ★1102.
+
+### 2026-11-02 배포 뒤 확인은 배포의 일부다 — 「배포 끝」은 런북의 마지막 확인 줄을 받은 뒤에만 (비토 관리 API · BUG_HISTORY 1102)
+- **사례**: 비토 `routes/agents.js` 배포(16:59) 뒤 `GW_DEPLOY_OK` · 업로드 정리만 보고 콜비서 묶음 작업으로 넘어갔다. 런북 §4 「2~3분 뒤 새 PID ERROR 세기」를 건너뛰었다. 재기동이 다시 시작한 통계 칸 채우기가 120초 시간 초과를 끝없이 반복했고(관제 「집계 중」) Harold 가 17:30 화면으로 먼저 봤다.
+- **규칙**: ① 배포 명령은 그 저장소 런북 글자 그대로 · 배포 뒤 확인(새 PID 오류 · health · 화면 · 예민한 문장은 pg_stat_statements 최대 시간)까지 런북의 일부(메모리 `feedback_deploy_strictly_by_runbook` · 절대 원칙 맨 위) ② 그 확인을 받기 전에는 다른 일이 급해도 넘어가지 않는다 ③ 관리 API 로그는 JSON 이 아니라 글줄 → 세는 패턴이 다르다(비토 런북 §4 1102 줄).
+- **같은 날 같은 부류**: 긴 SQL(5KB EXPLAIN)을 서버 터미널에 붙여 넣으면 잘려 안 돈다 → 노트북에서 파일로 만들어 scp 로 올린 뒤 `psql < 파일`(비토 런북 §4). Git Bash 진입 = PowerShell `& "C:\Program Files\Git\bin\bash.exe" --login -i` · 런북 65행은 변수를 정한 같은 창에서.
