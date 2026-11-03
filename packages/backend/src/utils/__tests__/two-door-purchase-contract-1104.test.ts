@@ -59,7 +59,7 @@ describe('R54 ② 원장과 몰 결제를 한 문장에서 같이 읽는 SQL = �
     const seen: Record<string, number> = {};
     for (const f of files) {
       for (const sql of templates(f.text)) {
-        const ledger = /\b(FROM|JOIN)\s+purchases\b/.test(sql);
+        const ledger = /\b(FROM|JOIN)\s+(purchases\b|\$\{LEDGER_PURCHASES_SQL\})|companyLedgerExistsSql\(/.test(sql);   // ★ 1104 C102 — 구매 행 부분 질의 · 원장 문 조각도 원장 읽기
         const mall = /netPurchaseSql\(|event_name\s*(=\s*'purchase'|IN\s*\([^)]*'purchase')|FROM cdp_events/.test(sql);
         if (!ledger || !mall) continue;
         if (CT.test(sql) && f.rel !== 'utils/two-door-purchase.ts') continue;
@@ -72,10 +72,10 @@ describe('R54 ② 원장과 몰 결제를 한 문장에서 같이 읽는 SQL = �
     const bad: string[] = [];
     for (const f of files) {
       const ts = templates(f.text);
-      const mallSum = ts.some((s) => /netPurchaseSql\(/.test(s) && /total_amount/.test(s) && !/\b(FROM|JOIN)\s+purchases\b/.test(s));
+      const mallSum = ts.some((s) => /netPurchaseSql\(/.test(s) && /total_amount/.test(s) && !/\b(FROM|JOIN)\s+(purchases\b|\$\{LEDGER_PURCHASES_SQL\})|companyLedgerExistsSql\(/.test(s));
       if (!mallSum) continue;
       for (const s of ts) {
-        if (/\b(FROM|JOIN)\s+purchases\s+p\b/.test(s) && /total_amount/.test(s) && !/FROM cdp_events/.test(s) && !/(ledgerDupOfMallSql|purchaseFactsSql)\(/.test(s)) bad.push(`${f.rel}: ${s.replace(/\s+/g, ' ').slice(0, 90)}`);
+        if (/\b(FROM|JOIN)\s+(purchases|\$\{LEDGER_PURCHASES_SQL\})\s+p\b/.test(s) && /total_amount/.test(s) && !/FROM cdp_events/.test(s) && !/(ledgerDupOfMallSql|purchaseFactsSql)\(/.test(s)) bad.push(`${f.rel}: ${s.replace(/\s+/g, ' ').slice(0, 90)}`);
       }
     }
     expect(bad).toEqual([]);

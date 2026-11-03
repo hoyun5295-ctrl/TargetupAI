@@ -32,7 +32,8 @@ import { hasUsableGradeOrder } from './customer-grade-rank';
 import { getColumnFields } from './standard-field-map';
 // ★ 2026-08-01 여정 재설계 — 신규/기존 판정 능력(순수 CT). 타입·판정 규칙은 그쪽이 소유한다.
 import { resolveNewCustomerJudgement, type CompanyIdentityCapability } from './journey-identity-signals';
-import { joinedAtEvidence } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6) · ★ 2026-11-04 C99 T10 = 쓰는 길
+import { joinedAtEvidence } from './customer-joined-at';
+import { LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C102 G1 원장 구매 행(CT-D6)   // ★ 2026-11-02 가입 근거 CT(CT-J6) · ★ 2026-11-04 C99 T10 = 쓰는 길
 import type { CompanyJourneyFacts } from './journey-trigger-capability';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -282,8 +283,8 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
                  AND ((birth_month_day IS NOT NULL AND birth_month_day <> '') OR birth_date IS NOT NULL)) AS has_birthday,
        -- ★ 2026-08-01 §11-4: 구매는 문이 둘이다 — 자사몰 이벤트 또는 싱크 원장 중 하나만 있으면 열린다.
        (EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'purchase')
-        OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid
-                     AND purchase_date IS NOT NULL AND customer_id IS NOT NULL)) AS has_purchase_events,
+        OR EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} lpg WHERE lpg.company_id = $1::uuid
+                     AND lpg.purchase_date IS NOT NULL AND lpg.customer_id IS NOT NULL)) AS has_purchase_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'cart_add') AS has_cart_events,
        EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'product_view') AS has_browse_events,
        EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND COALESCE(grade, '') <> '') AS has_grade,
@@ -291,8 +292,8 @@ export async function getCompanyJourneyFacts(companyId: string): Promise<Company
        -- ★ 2026-09-30 여정 V2 3차 — 상품 단위 구매(자사몰 주문 상품 목록 · 매장 원장 상품 코드/이름). 상품 재구매 여정의 근거.
        (EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND event_name = 'purchase'
                   AND jsonb_typeof(properties->'items') = 'array' AND jsonb_array_length(properties->'items') > 0)
-        OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid AND purchase_date IS NOT NULL AND customer_id IS NOT NULL
-                     AND (COALESCE(product_code, '') <> '' OR COALESCE(product_name, '') <> ''))) AS has_product_purchases`,
+        OR EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} lpg WHERE lpg.company_id = $1::uuid AND lpg.purchase_date IS NOT NULL AND lpg.customer_id IS NOT NULL
+                     AND (COALESCE(lpg.product_code, '') <> '' OR COALESCE(lpg.product_name, '') <> ''))) AS has_product_purchases`,
     [companyId],
   );
   const row = r.rows[0] || {};

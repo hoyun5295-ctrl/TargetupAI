@@ -13,7 +13,7 @@
 import { query } from '../config/database';
 import { recipientPhonesOfCampaign } from './recipient-conversion';
 import { netPurchaseSql } from './cdp-order-revenue';
-import { ledgerDupOfMallSql } from './two-door-purchase';   // ★ 2026-11-04 C99 T9 같은 구매 = 몰 주문 하나(CT-D1)
+import { ledgerDupOfMallSql, LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C99 T9 같은 구매 = 몰 주문 하나(CT-D1)
 
 /** 매출 귀속에서 훑는 캠페인 수 — 캠페인마다 발송 큐를 읽으므로 최근 것부터 이만큼만(넘으면 source에 표기). */
 const ROI_CAMPAIGN_SCAN_LIMIT = 100;
@@ -26,6 +26,8 @@ export interface AutoMarketingRoi {
   purchases7d: number;        // 발송 후 7일 안 구매 이벤트 수 (cdp 실측)
   revenue7dKrw: number;       // 발송 후 7일 안 귀속 매출 (cdp properties.total_amount 합)
   hasCdpData: boolean;
+  /** ★ 2026-11-04 C102 G4 — 귀속에 쓰는 문(자사몰 사건 · 매장 구매 원장)이 들어와 있나 · 화면 문구가 들어온 문을 그대로 말한다. */
+  purchaseDoors: { mall: boolean; ledger: boolean };
   source: string;
 }
 
@@ -71,7 +73,7 @@ export async function campaignRecipientOrders(companyId: string, campaignId: str
      ledger AS (
        SELECT 'ledger:' || p.id::text AS order_key, COALESCE(p.total_amount, 0)::float AS amount
          FROM campaigns c
-         JOIN purchases p ON p.company_id = $1::uuid
+         JOIN ${LEDGER_PURCHASES_SQL} p ON p.company_id = $1::uuid   -- ★ 2026-11-04 C102 G1 환불 행 = 주문 아님(CT-D6)
           AND p.purchase_date >= (c.sent_at AT TIME ZONE 'Asia/Seoul')::date
           AND p.purchase_date < ((c.sent_at + INTERVAL '7 days') AT TIME ZONE 'Asia/Seoul')::date + 1
           AND ($4::timestamptz IS NULL OR p.purchase_date < ($4::timestamptz AT TIME ZONE 'Asia/Seoul')::date)
@@ -112,15 +114,8 @@ export async function buildAutoMarketingRoi(
   const totalSent = Number(b.total_sent) || 0;
   const spendKrw = Math.round(Number(b.spend) || 0);
 
-  if (campaigns === 0) {
-    return {
-      analysisPeriodDays: days, campaigns: 0, totalSent: 0, spendKrw: 0,
-      purchases7d: 0, revenue7dKrw: 0, hasCdpData: false,
-      source: `${days}일 안 자동마케팅 발송 없음`,
-    };
-  }
-
   // 2) 구매 데이터 보유 여부 (귀속 가능성 — 없으면 매출 귀속 불가를 정직하게 표기)
+  // ★ 2026-11-04 C102 G4 — 발송 0 이어도 먼저 본다(옛: 발송 0 = hasCdpData false 로 돌려 연동한 회사에 「연동 후」가 보였다)
   // ★ 2026-09-27 한줄로 V2 R164 — 있는지만 본다(EXISTS · 옛: 기간 안 전 이벤트 COUNT)
   // ★ 2026-11-04 C99 T9(Codex 설계 1R #6) — 관문 = 자사몰 사건 또는 매장 원장(옛: CDP 사건만 = 매장만 회사는 귀속 SQL 이 아예 안 돌아 0)
   const cdpCheck = await query(
@@ -129,13 +124,23 @@ export async function buildAutoMarketingRoi(
         WHERE company_id = $1::uuid AND occurred_at > NOW() - ($2 || ' days')::interval
      ) AS has_cdp,
      EXISTS (
-       SELECT 1 FROM purchases
-        WHERE company_id = $1::uuid AND purchase_date > (NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval
+       SELECT 1 FROM ${LEDGER_PURCHASES_SQL} lpg   -- ★ 2026-11-04 C102 G1(CT-D6)
+        WHERE lpg.company_id = $1::uuid AND lpg.purchase_date > (NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval
      ) AS has_ledger`,
     [companyId, days + 30],
   );
   const hasLedger = cdpCheck.rows[0]?.has_ledger === true;
-  const hasCdpData = cdpCheck.rows[0]?.has_cdp === true || hasLedger;
+  const hasMall = cdpCheck.rows[0]?.has_cdp === true;
+  const hasCdpData = hasMall || hasLedger;
+  const purchaseDoors = { mall: hasMall, ledger: hasLedger };
+
+  if (campaigns === 0) {
+    return {
+      analysisPeriodDays: days, campaigns: 0, totalSent: 0, spendKrw: 0,
+      purchases7d: 0, revenue7dKrw: 0, hasCdpData, purchaseDoors,
+      source: `${days}일 안 자동마케팅 발송 없음`,
+    };
+  }
 
   // ★ 2026-09-27 한줄로 V2 R165 — 실수신자(발송 성공 번호)의 구매만 자동마케팅 매출로 센다(CT recipient-conversion).
   //   옛: 발송 뒤 7일 창 안의 회사 전체 구매 합계 = '자동마케팅이 만든 매출'(수신자 무관)이라 부풀었다.
@@ -178,6 +183,7 @@ export async function buildAutoMarketingRoi(
     purchases7d,
     revenue7dKrw,
     hasCdpData,
+    purchaseDoors,
     source: hasCdpData
       ? `자동마케팅 캠페인 실수신자(발송 성공 번호)의 발송 후 7일 안 구매 귀속(${hasLedger ? '자사몰 주문 · 매장 구매 · 매장 구매는 날짜로 세어 발송 당일 발송 전 구매가 섞일 수 있어요' : '자사몰 주문'})`
         + (campaigns > scannedCampaigns ? ` · 최근 ${scannedCampaigns}개 캠페인 기준` : '')

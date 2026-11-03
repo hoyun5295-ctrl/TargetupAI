@@ -23,12 +23,13 @@ import { UserFacingError } from './http-error';
 import { query, withTransaction } from '../config/database';
 import { identifyCustomer, IdentifyInput } from './cdp-identity';
 import { trackOrderEvent, validateProperties } from './cdp-events';
-import { decideOrderRevenueAction, isCancelStatus, isRevenueStatus, netPurchaseSql } from './cdp-order-revenue';
+import { clampOccurredAt } from './cdp-occurred-at';   // ★ C102 G9
+import { decideOrderRevenueAction, isCancelStatus, isRevenueApplied, isRevenueStatus, netPurchaseSql } from './cdp-order-revenue';
 import { kstDateKey } from './agency-send-state';
 import type { MemberIdFormat } from './mall-consent';
 // ★ 2026-09-26 한줄로 V2 R1-34 — 같은 주문 웹훅 직렬화(공용 잠금 CT)
 import { withKeyedLock } from './keyed-lock';
-import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래
+import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch, LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래
 import { recomputeCustomerPurchaseSummary } from './customer-purchase-aggregates';   // ★ 2026-11-04 C99 CT-D3
 import { migrationPendingOn503 } from './db-errors';
 
@@ -244,7 +245,8 @@ export async function syncOrder(
     ? { status_known: false, status_raw: String(input.statusRaw ?? input.status).slice(0, 60), status_unknown_at: srcAt }
     : {};
   const UNKNOWN_KEYS = `- 'status_known' - 'status_raw' - 'status_unknown_at'`;
-  const paidAt = orderPaidAt(input);
+  // ★ C102 G9 — 미래 결제 시각 = 지금(사건 기록 경로 clampOccurredAt 와 같은 규칙 · 옛: 승격 · 되살림 · 요약 최근일만 날것 = 미래 시각이 「진입 뒤에 샀다」 · 요약 최근일을 미래로)
+  const paidAt = clampOccurredAt(orderPaidAt(input), new Date()).toISOString();
   // 판정에 쓴 값이 저장 때까지 같은가(다른 프로세스가 그 사이 바꿨으면 0행 = stale · R12)
   const guard = (s: number, c: number) => `COALESCE(properties->>'src_at', '') = $${s} AND COALESCE(properties->>'cancel_seen_at', '') = $${c}`;
 
@@ -376,7 +378,7 @@ export async function syncOrder(
            WHERE e.company_id = $4::uuid AND e.customer_id = $1::uuid AND ${netPurchaseSql('e')}
           UNION ALL
           SELECT p.purchase_date::date AS day, SUM(p.total_amount) AS amount
-            FROM purchases p
+            FROM ${LEDGER_PURCHASES_SQL} p   -- ★ 2026-11-04 C102 G1(CT-D6)
            WHERE p.company_id = $4::uuid AND p.customer_id = $1::uuid AND p.purchase_date IS NOT NULL
            GROUP BY p.purchase_date::date
         ) u
@@ -391,6 +393,9 @@ export async function syncOrder(
 
   // 3-C. 매출 변화 없는 상태 갱신 (pending→shipping 등) — 이벤트 status만 추적 · 취소 · 환불을 처음 본 시각 기록
   if (existing) {
+    // ★ 2026-11-04 C102 G2 — 표식 없는 옛 결제(0610 전 · 기록 당시 결제 = isRevenueApplied)는 status 를 덮기 전에 표식을 굳힌다.
+    //   옛: 결제 → 배송 중으로 덮이면 netPurchaseSql(표식 또는 status 결제)에서 빠져 진입 · 목표 · 성과 · 요약에서 사라지고 뒤 취소도 차감 안 함.
+    const legacyApplied = props.revenue_applied === undefined && isRevenueApplied({ properties: props });
     const upd = await run(
       `UPDATE cdp_events
        SET properties = (COALESCE(properties, '{}'::jsonb) ${UNKNOWN_KEYS}) || jsonb_build_object('status', $2::text, 'src_at', $3::text)
@@ -399,7 +404,7 @@ export async function syncOrder(
        WHERE id = $1::uuid
          AND ${guard(5, 6)}
        RETURNING id`,
-      [existing.id, input.status, srcAt, cancel, lastSrcRaw, lastCancelRaw, JSON.stringify(extra)]
+      [existing.id, input.status, srcAt, cancel, lastSrcRaw, lastCancelRaw, JSON.stringify(legacyApplied ? { ...extra, revenue_applied: true } : extra)]
     );
     return { rfmUpdated: false, stale: upd.rows.length === 0 };
   }

@@ -25,7 +25,7 @@ import { AI_GENERATE_COSTS } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 import {
   ContinuousOperator, OperatorProposal, ProposalVariant, BanditRecommendation,
-  LearningSummary, AutoMarketingView, ProposalApproveSelection, AutoMarketingRoi, won,
+  LearningSummary, AutoMarketingView, ProposalApproveSelection, AutoMarketingRoi, won, roiAttributionNote,
 } from '../components/automarketing/types';
 import ProposalDecisionCard from '../components/automarketing/ProposalDecisionCard';
 import NaturalLanguageStart from '../components/automarketing/NaturalLanguageStart';
@@ -732,8 +732,10 @@ export default function ContinuousOperatorPage() {
                 footnote={(learningSummary?.variantWinner && learningSummary.variantWinner.sent > 0) || roi ? (
                   <span className="flex flex-wrap gap-x-4 gap-y-1">
                     {roi && (roi.hasCdpData
-                      ? (roi.purchases7d > 0 && <span>발송 후 7일 안 구매 {roi.purchases7d.toLocaleString()}건이 귀속된 실측 매출입니다.</span>)
-                      : <span>매출 귀속은 자사몰 연동(구매 데이터 수집) 후 표시됩니다.</span>)}
+                      ? (roi.campaigns === 0
+                        ? <span>자동마케팅 발송이 생기면 발송 후 7일 안 구매({roiAttributionNote(roi).doors})를 귀속해 보여 드려요.</span>
+                        : roi.purchases7d > 0 && <span>발송 후 7일 안 구매 {roi.purchases7d.toLocaleString()}건({roiAttributionNote(roi).doors})이 귀속된 실측 매출입니다.{roiAttributionNote(roi).ledgerCaveat ? ` ${roiAttributionNote(roi).ledgerCaveat}` : ''}</span>)
+                      : <span>{roiAttributionNote(roi).empty}</span>)}
                     {learningSummary?.variantWinner && learningSummary.variantWinner.sent > 0 && (
                       <span>지난 14일 클릭률이 가장 높은 문안 = <b className="font-semibold text-slate-700">{learningSummary.variantWinner.snippet ? `「${learningSummary.variantWinner.snippet}…」` : `변형 ${learningSummary.variantWinner.variantLabel}`}</b> (클릭률 {(learningSummary.variantWinner.ctr * 100).toFixed(1)}% · 발송 {learningSummary.variantWinner.sent}건)</span>
                     )}

@@ -23,6 +23,83 @@ import { netPurchaseSql } from './cdp-order-revenue';
 
 export type PurchaseDoorKind = 'mall' | 'ledger';
 
+// ── CT-D6 원장 구매 행(★ 2026-11-04 C102 G1 · 설계서 docs/2026-11-04-c102-structural-zero-design.md) ──
+
+/**
+ * 원장 행 p 가 구매인가 — 금액이 음수인 행(환불 · 반품)은 구매가 아니다. 금액 없는 행 = 구매 기록 그대로 · 0원 = 구매(몰 0원 결제와 같은 뜻).
+ *   ★ C102 G6 — 구매일이 KST 지금보다 뒤인 행(매장 시스템 날짜 오타 · 예정 행)은 그 날이 올 때까지 구매가 아니다(진입 커서와 같은 경계 ·
+ *   옛: 「이 시각 뒤에 샀나」 · 「지난 N일」이 늘 참 = 구매 목표가 첫 칸 전에 「샀음」). 날짜 없는 행 = 그대로(요약 칸만 쓴다).
+ *   원장을 구매로 읽는 자리는 전부 이 조각(또는 LEDGER_PURCHASES_SQL)을 지난다(계약 시험 c102-structural-contract).
+ */
+export function ledgerPurchaseRowSql(p: string): string {
+  return `((${p}.total_amount IS NULL OR ${p}.total_amount >= 0) AND ${ledgerNotFutureSql(p)})`;
+}
+
+/**
+ * 날짜 식(KST 날짜 · KST naive 시각)이 KST 지금보다 뒤가 아닌가 — 「미래 날짜는 아직 일어난 일이 아니다」 판정 한 곳(★ C102 G6 · Codex 4R).
+ *   원장 행 · 고객 요약 최근일 · 원본 요약 최근일이 같은 조각을 쓴다. NULL = 거짓(호출부가 NULL 을 따로 정한다).
+ */
+export function kstNotFutureSql(expr: string): string {
+  return `(${expr} <= (NOW() AT TIME ZONE 'Asia/Seoul'))`;
+}
+
+/** 원장 행 p 의 구매일이 미래가 아닌가(날짜 없는 행 = 참 · 요약 칸만 쓴다). */
+export function ledgerNotFutureSql(p: string): string {
+  return `(${p}.purchase_date IS NULL OR ${kstNotFutureSql(`${p}.purchase_date`)})`;
+}
+
+/** 구매 원장 행만 — FROM · JOIN 자리에 purchases 대신 쓴다(단순 부분 질의 = 플래너가 펼쳐 색인 그대로). */
+export const LEDGER_PURCHASES_SQL = `(SELECT * FROM purchases lp WHERE ${ledgerPurchaseRowSql('lp')})`;
+
+/** 회사 c(별칭 · companies)의 원장 문에 행이 왔나 — 갈래 · 전환 패스(환불 행도 순액에 쓰여 그 고객을 다시 센다). */
+export function companyLedgerExistsSql(c: string): string {
+  return `EXISTS (SELECT 1 FROM purchases p WHERE p.company_id = ${c}.id)`;
+}
+
+/** 원장 행 p 가 환불 · 반품인가(금액 음수) — 구매 행(ledgerPurchaseRowSql)의 반대쪽 한 곳. */
+export function ledgerRefundRowSql(p: string): string {
+  return `(${p}.total_amount < 0 AND ${ledgerNotFutureSql(p)})`;
+}
+
+/** 고객별 환불 행 금액 합(음수) — 요약 칸 누계 = 순액(구매 합 + 이 값 · 0 아래로 안 내려감 · 몰 취소 차감과 같은 뜻). */
+export function ledgerRefundTotalsSql(companyRef: string, customerIdsRef: string): string {
+  return `SELECT r.customer_id, SUM(r.total_amount) AS refund
+    FROM purchases r
+   WHERE r.company_id = ${companyRef} AND r.customer_id = ANY(${customerIdsRef}) AND ${ledgerRefundRowSql('r')}
+   GROUP BY r.customer_id`;
+}
+
+/**
+ * ★ C102 G7 — 고객보다 먼저 온 원장 행(적재 때 그 번호 고객이 없어 customer_id 없음)을 같은 회사 · 같은 번호 고객에 잇는다.
+ *   도착 시각 = 지금(몰 사건 고객 연결과 같은 규칙 · cdp-events.ts · cdp-identity.ts) — 고객 없는 행은 진입 커서가 본 적이 없어 재발송 0 ·
+ *   커서 창(구매일이 도착 뒤 정한 시간 안)이 오래된 구매의 소급 진입을 막는다. 최근 3일 도착분 · 한 번에 1000행 · 회사 잠금 안(원장 적재 트랜잭션).
+ *   $1 = 회사 id · 돌려주는 칸 = 이은 고객 id.
+ */
+export const LINK_ORPHAN_LEDGER_ROWS_SQL = `WITH cand AS (
+    SELECT o.id, cu.id AS cid
+      FROM purchases o
+      JOIN customers cu ON cu.company_id = o.company_id AND cu.phone = o.customer_phone
+     WHERE o.company_id = $1::uuid AND o.customer_id IS NULL
+       AND o.created_at >= NOW() - INTERVAL '3 days'
+     ORDER BY o.created_at, o.id
+     LIMIT 1000
+  )
+  UPDATE purchases o SET customer_id = cand.cid, created_at = NOW()
+    FROM cand
+   WHERE o.id = cand.id AND o.customer_id IS NULL
+  RETURNING o.customer_id`;
+
+/**
+ * 그 고객의 그날(date 식)에 원장 환불 행이 있나 — CT-D3 옛 값 옮기기가 「옛 계산이 반품을 구매로 세어 남긴 최근일」을
+ *   원본 값으로 굳히지 않게(★ C102 Codex 1R · 사실보다 늦은 칸 날짜가 그날 환불 행으로 설명되면 원본이 본 구매가 아니다).
+ */
+export function ledgerRefundOnDaySql(companyRef: string, customerExpr: string, dayExpr: string): string {
+  return `EXISTS (SELECT 1 FROM purchases rd
+                   WHERE rd.company_id = ${companyRef} AND rd.customer_id = ${customerExpr} AND ${ledgerRefundRowSql('rd')}
+                     AND rd.purchase_date >= ${dayExpr} AND rd.purchase_date < ${dayExpr} + 1)`;
+}
+
+
 // ── CT-D1 같은 구매 ──
 
 /** 몰 결제 사건의 금액(숫자 꼴이 아니면 NULL = 같은 구매 아님). */
@@ -32,7 +109,7 @@ export function mallAmountSql(e: string): string {
 
 /** 원장 행 p 와 같은 날 같은 고객의 원장 합계(날짜 = 범위 비교 · idx_purchases_customer). */
 function ledgerDaySumSql(p: string): string {
-  return `(SELECT SUM(ds.total_amount) FROM purchases ds
+  return `(SELECT SUM(ds.total_amount) FROM ${LEDGER_PURCHASES_SQL} ds
             WHERE ds.company_id = ${p}.company_id AND ds.customer_id = ${p}.customer_id
               AND ds.purchase_date >= ${p}.purchase_date::date AND ds.purchase_date < ${p}.purchase_date::date + 1)`;
 }
@@ -57,7 +134,7 @@ export function ledgerDupOfMallSql(p: string): string {
  */
 export function mallDupOfLedgerSql(e: string): string {
   return `(${e}.customer_id IS NOT NULL AND EXISTS (
-    SELECT 1 FROM purchases dl
+    SELECT 1 FROM ${LEDGER_PURCHASES_SQL} dl
      WHERE dl.customer_id = ${e}.customer_id AND dl.company_id = ${e}.company_id
        AND dl.purchase_date >= (${e}.occurred_at AT TIME ZONE 'Asia/Seoul')::date
        AND dl.purchase_date < (${e}.occurred_at AT TIME ZONE 'Asia/Seoul')::date + 1
@@ -79,7 +156,7 @@ export interface PurchaseFactsOptions {
 
 /**
  * 두 문 구매 사실 한 벌(겹침 뺌) — 칸 = door · customer_id · kst_day(date) · at(timestamptz) · amount(numeric) · store · source_id · properties.
- *   몰 = 결제된 구매(netPurchaseSql) 전부 · 원장 = 고객이 있는 행 중 몰과 같은 구매가 아닌 것(CT-D1).
+ *   몰 = 결제된 구매(netPurchaseSql) 전부 · 원장 = 고객이 있는 구매 행(CT-D6 · 환불 행 뺌) 중 몰과 같은 구매가 아닌 것(CT-D1).
  *   원장 at = 그날 KST 0시(날짜만 있다) · store = 매장 이름(없으면 매장 코드) · 몰 store = NULL.
  *   ⛔ 이 조각 밖에서 원장과 몰 결제를 한 집계로 더하지 않는다(계약 시험 two-door-purchase-contract).
  */
@@ -97,7 +174,7 @@ export function purchaseFactsSql(o: PurchaseFactsOptions): string {
   SELECT 'ledger'::text AS door, p.customer_id, p.purchase_date::date AS kst_day, (p.purchase_date AT TIME ZONE 'Asia/Seoul') AS at,
          p.total_amount AS amount, COALESCE(NULLIF(p.store_name, ''), p.store_code)::text AS store, p.id::text AS source_id,
          jsonb_strip_nulls(jsonb_build_object('total_amount', p.total_amount, 'product_name', p.product_name, 'product_code', p.product_code)) AS properties
-    FROM purchases p
+    FROM ${LEDGER_PURCHASES_SQL} p
    WHERE p.company_id = ${o.companyRef} AND p.customer_id IS NOT NULL${ledgerDated}${ledgerCust}${ledgerSince}
      AND NOT ${ledgerDupOfMallSql('p')}`;
 }
@@ -112,7 +189,7 @@ export function purchaseAfterSql(customerExpr: string, companyRef: string, after
   return `(EXISTS (SELECT 1 FROM cdp_events pa
                     WHERE pa.company_id = ${companyRef} AND pa.customer_id = ${customerExpr}
                       AND ${netPurchaseSql('pa')} AND pa.occurred_at > ${afterExpr})
-        OR EXISTS (SELECT 1 FROM purchases pl
+        OR EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} pl
                     WHERE pl.company_id = ${companyRef} AND pl.customer_id = ${customerExpr}
                       AND pl.purchase_date IS NOT NULL
                       AND pl.purchase_date > (${afterExpr} AT TIME ZONE 'Asia/Seoul')))`;
@@ -125,7 +202,7 @@ export function purchaseWithinDaysSql(customerExpr: string, companyRef: string, 
   return `(EXISTS (SELECT 1 FROM cdp_events pa
                     WHERE pa.company_id = ${companyRef} AND pa.customer_id = ${customerExpr}
                       AND ${netPurchaseSql('pa')} AND pa.occurred_at >= NOW() - ((${daysExpr})::int * INTERVAL '1 day'))
-        OR EXISTS (SELECT 1 FROM purchases pl
+        OR EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} pl
                     WHERE pl.company_id = ${companyRef} AND pl.customer_id = ${customerExpr}
                       AND pl.purchase_date IS NOT NULL
                       AND pl.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul')::date - (${daysExpr})::int)))`;
@@ -184,7 +261,7 @@ export async function resolvePurchaseSummaryBranch(run: Run, companyId: string):
   const r = await run(
     `SELECT c.two_door_since IS NOT NULL AS sticky,
             EXISTS (SELECT 1 FROM cdp_events e WHERE e.company_id = c.id AND ${netPurchaseSql('e')}) AS mall,
-            EXISTS (SELECT 1 FROM purchases p WHERE p.company_id = c.id) AS ledger
+            ${companyLedgerExistsSql('c')} AS ledger
        FROM companies c WHERE c.id = $1::uuid`,
     [companyId],
   );

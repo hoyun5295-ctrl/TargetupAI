@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import { purchaseHistorySourceSql } from '../purchase-history-source';
-import { mallDupOfLedgerSql } from '../two-door-purchase';
+import { LEDGER_PURCHASES_SQL, mallDupOfLedgerSql } from '../two-door-purchase';
 import { REVENUE_STATUSES } from '../cdp-order-revenue';
 
 const SRC = resolve(__dirname, '../..');
@@ -47,7 +47,7 @@ describe('구매이력 원천 SQL', () => {
   it('같은 고객 · 같은 날 · (같은 금액의 원장 행 또는 그날 원장 합계)이면 자사몰 행을 뺀다(ERP 에도 오는 자사몰 주문 이중 표시 방지 · Codex R1 · ★ 2026-11-04 C99 = CT-D1 한 곳)', () => {
     expect(sql).toContain(`AND NOT ${mallDupOfLedgerSql('e')}`);
     expect(mallDupOfLedgerSql('e')).toContain('dl.total_amount = ');
-    expect(mallDupOfLedgerSql('e')).toContain('SELECT SUM(ds.total_amount) FROM purchases ds');
+    expect(mallDupOfLedgerSql('e')).toContain(`SELECT SUM(ds.total_amount) FROM ${LEDGER_PURCHASES_SQL} ds`);   // ★ 1104 C102 그날 합계 = 구매 행만
   });
   it('구매 원장에 자사몰 주문을 쓰지 않는다(여정 중복 발송 방지) — INSERT INTO purchases 는 싱크 적재만', () => {
     const orders = readFileSync(resolve(SRC, 'utils/cdp-orders.ts'), 'utf8');

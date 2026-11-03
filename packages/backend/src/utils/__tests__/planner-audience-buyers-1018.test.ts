@@ -9,6 +9,7 @@
  *   ⑤ 저장 전 재검증 = 스위치 · 지금 문 · 관측 목록 키 · 이름은 서버 목록 이름
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { LEDGER_PURCHASES_SQL } from '../two-door-purchase';
 import { netPurchaseSql } from '../cdp-order-revenue';
 
 const db = { meta: {} as any, found: true };
@@ -72,7 +73,7 @@ describe('① 상품 구매자 술어', () => {
     const params: any[] = ['co-1'];
     const sql = buildBuyerPredicate(params, { ...BUYERS, door: 'ledger', since: null });
     expect(params).toEqual(['co-1', ['P1']]);
-    expect(sql).toContain('FROM purchases pb');
+    expect(sql).toContain(`FROM ${LEDGER_PURCHASES_SQL} pb`);   // ★ 1104 C102 원장 구매 행(CT-D6)
     expect(sql).not.toContain('purchase_date >=');
   });
 });

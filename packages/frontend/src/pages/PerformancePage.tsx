@@ -32,6 +32,7 @@ import {
   Search, Filter, ArrowUpDown, FileDown, X, Check, Crown,
 } from 'lucide-react';
 import { useToast } from '../components/ToastProvider';
+import { type AutoMarketingRoi, roiAttributionNote } from '../components/automarketing/types';   // ★ 2026-11-04 C102 G4
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
 
 type PerformancePeriod = '7d' | '14d' | '30d' | '90d';
@@ -261,10 +262,7 @@ export default function PerformancePage() {
   const [cohort, setCohort] = useState<CohortResult | null>(null);
   const [attribution, setAttribution] = useState<AttributionResult | null>(null);
   // ★ 2026-07-02 3차: 자동마케팅 매출 귀속(ROI) — 지출 대비 귀속 매출 실측
-  const [amRoi, setAmRoi] = useState<{
-    analysisPeriodDays: number; campaigns: number; totalSent: number; spendKrw: number;
-    purchases7d: number; revenue7dKrw: number; hasCdpData: boolean; source: string;
-  } | null>(null);
+  const [amRoi, setAmRoi] = useState<AutoMarketingRoi | null>(null);   // ★ 2026-11-04 C102 G4 응답 타입 한 곳(자동마케팅 화면과 같은 타입)
   const [loading, setLoading] = useState(true);
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
@@ -863,9 +861,12 @@ export default function PerformancePage() {
                 </div>
                 <div className="mt-2 text-[10px] text-slate-400 italic">{amRoi.source}</div>
                 {!amRoi.hasCdpData && (
-                  <button onClick={() => navigate('/cdp-settings')} className="mt-2 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-medium transition-colors">
-                    자사몰 연동하고 매출 귀속 보기 →
-                  </button>
+                  <>
+                    <div className="mt-1 text-[11px] text-slate-500">{roiAttributionNote(amRoi).empty}</div>
+                    <button onClick={() => navigate('/cdp-settings')} className="mt-2 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded text-[11px] text-slate-700 font-medium transition-colors">
+                      자사몰 연동하러 가기 →
+                    </button>
+                  </>
                 )}
               </div>
             )}

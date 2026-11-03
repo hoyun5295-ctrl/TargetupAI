@@ -27,7 +27,7 @@
  *   - 집계 실패/데드락이 적재를 막으면 안 됨 — 호출부 try/catch 격리, 다음 배치가 자기치유.
  */
 
-import { purchaseFactsSql, resolvePurchaseSummaryBranch } from './two-door-purchase';
+import { kstNotFutureSql, ledgerNotFutureSql, ledgerPurchaseRowSql, ledgerRefundOnDaySql, ledgerRefundTotalsSql, LINK_ORPHAN_LEDGER_ROWS_SQL, purchaseFactsSql, resolvePurchaseSummaryBranch } from './two-door-purchase';
 
 type Run = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
 
@@ -79,17 +79,23 @@ async function recomputeStoreOnlySummary(
     return rule === 'greatest' ? [`${col} = GREATEST(c.${col}, ${expr})`] : [];
   });
   if (!sets.length) return 0;
+  const BUY = ledgerPurchaseRowSql('p');
+  const NOT_FUTURE = ledgerNotFutureSql('p');
 
   const result = await run(
     `UPDATE customers c
         SET ${sets.join(',\n            ')}
        FROM (
+         -- ★ 2026-11-04 C102 G1 — 횟수 · 최근(날짜 · 금액 · 매장) = 구매 행(CT-D6 · 환불 · 반품 음수 행 뺌) · 누계 = 순액(환불 행 금액 포함 · 0 아래 안 감)
+         --   환불 행만 있는 고객도 한 줄(순액을 맞춘다 · 횟수 0) · 매장만 갈래 = 몰 사실 없음(두 문 = CT-D3)
          SELECT p.customer_id,
-                SUM(p.total_amount) AS total_amount,
-                COUNT(*)::int AS cnt,
-                MAX(p.purchase_date) AS recent_date,
-                (ARRAY_AGG(p.total_amount ORDER BY p.purchase_date DESC NULLS LAST, p.created_at DESC))[1] AS recent_amount,
-                (ARRAY_AGG(COALESCE(NULLIF(p.store_name, ''), p.store_code) ORDER BY p.purchase_date DESC NULLS LAST, p.created_at DESC))[1] AS recent_store
+                -- 누계 = 순액(구매 + 환불 행) · 미래 날짜 행은 그 날이 올 때까지 뺀다(★ C102 Codex 4R · G6)
+                CASE WHEN SUM(p.total_amount) FILTER (WHERE ${NOT_FUTURE}) IS NULL THEN NULL
+                     ELSE GREATEST(SUM(p.total_amount) FILTER (WHERE ${NOT_FUTURE}), 0) END AS total_amount,
+                (COUNT(*) FILTER (WHERE ${BUY}))::int AS cnt,
+                MAX(p.purchase_date) FILTER (WHERE ${BUY}) AS recent_date,
+                (ARRAY_AGG(p.total_amount ORDER BY p.purchase_date DESC NULLS LAST, p.created_at DESC) FILTER (WHERE ${BUY}))[1] AS recent_amount,
+                (ARRAY_AGG(COALESCE(NULLIF(p.store_name, ''), p.store_code) ORDER BY p.purchase_date DESC NULLS LAST, p.created_at DESC) FILTER (WHERE ${BUY}))[1] AS recent_store
            FROM purchases p
           WHERE p.company_id = $1
             AND p.customer_id = ANY($2::uuid[])
@@ -107,8 +113,9 @@ async function recomputeStoreOnlySummary(
 //   원본(싱크 고객 · 엑셀)이 준 누계 · 횟수는 계산에 쓰지 않는다(summary_source.totals = 화면 「원본 누계」 표시용).
 
 const SRC = `COALESCE(c.summary_source, '{}'::jsonb)`;
-/** 원본(또는 옮긴 옛 값) 최근 구매 묶음의 날짜 · 금액 · 매장 — 꼴이 틀린 값은 없는 것으로. */
-const SRC_RECENT_DATE = `(CASE WHEN (${SRC}->'recent'->>'date') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN (${SRC}->'recent'->>'date')::date END)`;
+/** 원본(또는 옮긴 옛 값) 최근 구매 묶음의 날짜 · 금액 · 매장 — 꼴이 틀린 값 · 미래 날짜(★ C102 Codex 4R · 아직 일어나지 않은 구매)는 없는 것으로. */
+const SRC_RECENT_RAW = `(CASE WHEN (${SRC}->'recent'->>'date') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN (${SRC}->'recent'->>'date')::date END)`;
+const SRC_RECENT_DATE = `(CASE WHEN ${kstNotFutureSql(SRC_RECENT_RAW)} THEN ${SRC_RECENT_RAW} END)`;
 const SRC_RECENT_AMOUNT = `(CASE WHEN (${SRC}->'recent'->>'amount') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (${SRC}->'recent'->>'amount')::numeric END)`;
 const SRC_RECENT_STORE = `NULLIF(${SRC}->'recent'->>'store', '')`;
 
@@ -135,16 +142,20 @@ export async function recomputeCustomerPurchaseSummary(run: Run, companyId: stri
         AND NOT (${SRC} ? 'd2')
         AND c.recent_purchase_date IS NOT NULL
         AND (${SRC_RECENT_DATE} IS NULL OR ${SRC_RECENT_DATE} < c.recent_purchase_date)
-        AND NOT EXISTS (SELECT 1 FROM f WHERE f.customer_id = c.id AND f.kst_day >= c.recent_purchase_date)`,
+        AND NOT EXISTS (SELECT 1 FROM f WHERE f.customer_id = c.id AND f.kst_day >= c.recent_purchase_date)
+        AND NOT ${ledgerRefundOnDaySql('$1::uuid', 'c.id', 'c.recent_purchase_date')}   -- ★ C102 Codex 1R 반품 날 = 옛 계산이 남긴 값(원본 아님)
+        AND ${kstNotFutureSql('c.recent_purchase_date')}   -- ★ C102 Codex 4R 미래 날 = 아직 일어나지 않은 구매(원본 아님)`,
     [companyId, ids],
   );
   const useSrc = `(${SRC_RECENT_DATE} IS NOT NULL AND (agg.fact_day IS NULL OR ${SRC_RECENT_DATE} > agg.fact_day))`;
+  // ★ 2026-11-04 C102 G1 — 누계 = 순액(구매 사실 합 + 매장 환불 행 합 · 0 아래로 안 내려감 · 몰 취소 차감과 같은 뜻) · 횟수 · 최근 = 구매 사실만
+  const NET_TOTAL = 'GREATEST(COALESCE(agg.total, 0) + COALESCE(rf.refund, 0), 0)';
   // [칸, 새 값] — SET 과 「바뀌었나」 판정이 같은 식을 쓴다(값이 같으면 다시 쓰지 않는다 · full 싱크마다 전 행 재작성 금지 · R206 과 같은 규칙).
   const pairs: Array<[string, string]> = [
     ['purchase_count', 'COALESCE(agg.cnt, 0)'],
-    ['total_purchase_amount', 'COALESCE(agg.total, 0)'],
-    ['total_purchase', 'COALESCE(agg.total, 0)'],
-    ['avg_order_value', 'CASE WHEN COALESCE(agg.cnt, 0) > 0 THEN COALESCE(agg.total, 0) / agg.cnt ELSE 0 END'],
+    ['total_purchase_amount', NET_TOTAL],
+    ['total_purchase', NET_TOTAL],
+    ['avg_order_value', `CASE WHEN COALESCE(agg.cnt, 0) > 0 THEN ${NET_TOTAL} / agg.cnt ELSE 0 END`],
     ['recent_purchase_date', `GREATEST(agg.fact_day, ${SRC_RECENT_DATE})`],
     ['recent_purchase_amount', `CASE WHEN ${useSrc} THEN ${SRC_RECENT_AMOUNT} ELSE agg.last_amount END`],
     ['recent_purchase_store', `CASE WHEN ${useSrc} THEN ${SRC_RECENT_STORE} ELSE st.store END`],
@@ -163,6 +174,7 @@ export async function recomputeCustomerPurchaseSummary(run: Run, companyId: stri
                    (ARRAY_AGG(f.store ORDER BY f.at DESC, f.source_id DESC) FILTER (WHERE f.door = 'ledger' AND f.store IS NOT NULL))[1] AS store
               FROM f WHERE f.kst_day IS NOT NULL GROUP BY f.customer_id, f.kst_day
           ),
+          rf AS (${ledgerRefundTotalsSql('$1::uuid', '$2::uuid[]')}),
           ids AS (SELECT unnest($2::uuid[]) AS id)
      UPDATE customers c SET
             ${pairs.map(([col, e]) => `${col} = ${e}`).join(',\n            ')},
@@ -170,6 +182,7 @@ export async function recomputeCustomerPurchaseSummary(run: Run, companyId: stri
        FROM ids
        LEFT JOIN agg ON agg.customer_id = ids.id
        LEFT JOIN st ON st.customer_id = ids.id AND st.kst_day = agg.fact_day
+       LEFT JOIN rf ON rf.customer_id = ids.id
       WHERE c.id = ids.id AND c.company_id = $1::uuid
         AND ROW(${pairs.map(([, e]) => e).join(', ')}) IS DISTINCT FROM ROW(${pairs.map(([col]) => `c.${col}`).join(', ')})`,
     [companyId, ids],
@@ -180,6 +193,8 @@ export async function recomputeCustomerPurchaseSummary(run: Run, companyId: stri
 /**
  * 원장 적재 트랜잭션 안(회사 잠금은 적재 첫 쓰기 전에 잡았다) — 갈래를 다시 판정해 요약 칸을 맞춘다.
  *   두 문 = CT-D3 · 매장만 = 옛 원장 재계산(keep 규칙 그대로) · 실패 = 그 적재 통째로 되돌림(503 재전송 · 재전송 때 다시 돈다).
+ *   ★ C102 G7 — 먼저 고객보다 먼저 왔던 원장 행(최근 3일)을 이제 있는 같은 번호 고객에 잇고 그 고객도 함께 센다
+ *   (이 요청의 원본 소유 칸 규칙 그대로 · 옛: 이을 자리가 없어 그 구매가 요약 · 첫 구매 · 구매 여정에서 영영 빠졌다).
  */
 export async function applyLedgerIngestSummary(
   run: Run,
@@ -187,8 +202,10 @@ export async function applyLedgerIngestSummary(
   customerIds: string[],
   opts: { keepColumns?: string[] } = {},
 ): Promise<number> {
-  const ids = [...new Set(customerIds.filter(Boolean))];
-  if (!companyId || ids.length === 0) return 0;
+  if (!companyId) return 0;
+  const linked = (await run(LINK_ORPHAN_LEDGER_ROWS_SQL, [companyId])).rows.map((x: any) => String(x.customer_id));
+  const ids = [...new Set([...customerIds, ...linked].filter(Boolean))];
+  if (ids.length === 0) return 0;
   const branch = await resolvePurchaseSummaryBranch(run, companyId);
   if (branch === 'two_door') return recomputeCustomerPurchaseSummary(run, companyId, ids);
   if (branch === 'store') return recomputeStoreOnlySummary(run, companyId, ids, opts.keepColumns || []);

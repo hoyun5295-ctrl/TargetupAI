@@ -26,6 +26,7 @@ import { PlannerAudienceMode } from './planner-execution';
 import { readStoredAudience, type PlannerAudience } from './planner-event';
 import { ledgerProductKeySql, listObservedProducts, listObservedProductsByDoor, mallItemKeySql, mallItemsSql } from './journey-product';
 import { netPurchaseSql } from './cdp-order-revenue';
+import { LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C102 G1 원장 구매 행(CT-D6)
 import { companyListAllows } from './sns-constants';
 import { countCustomerRecipientsWhere, resolveCustomerRecipientsWhere, type EmailRecipient } from './email-channel';
 import { PLANNER_REASON } from './planner-reasons';
@@ -204,7 +205,7 @@ export function buildBuyerPredicate(params: any[], a: Extract<PlannerAudience, {
           )`;
   }
   return `AND EXISTS (
-            SELECT 1 FROM purchases pb
+            SELECT 1 FROM ${LEDGER_PURCHASES_SQL} pb
              WHERE pb.company_id = $1
                AND pb.customer_id = c.id
                ${sinceIdx ? `AND pb.purchase_date >= $${sinceIdx}::date` : ''}

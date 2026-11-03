@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
 
+import { LEDGER_PURCHASES_SQL } from '../two-door-purchase';
 import { query } from '../../config/database';
 import { SEND_HOURS } from '../../config/defaults';
 import { anchorSendHourIssue, computeAnchorStepRunAt, computeNextAnchor, isAnchorCycleComplete } from '../send-time-util';
@@ -123,7 +124,7 @@ describe('#9 추천 판정 = 보는 사람 여정 + 관리자가 켠 여정(D1 =
 
 describe('#13 「진입 뒤 구매」 = 한 판정(가입 여정만 가입 묶음 신호)', () => {
   it('한 건 판정 문장 = 가입 여정 표시를 네 번째 자리로 받는다 · 가입 판정 = customer.created', () => {
-    expect(PURCHASED_SINCE_ENTRY_ONE_SQL).toContain('(($4::boolean) AND EXISTS (SELECT 1 FROM purchases pb');
+    expect(PURCHASED_SINCE_ENTRY_ONE_SQL).toContain(`(($4::boolean) AND EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} pb`);   // ★ 1104 C102 원장 구매 행(CT-D6)
     expect(purchasedSinceEntrySql('e', '$1::uuid', 'FALSE')).toContain('((FALSE) AND EXISTS');
     expect(isSignupTrigger('customer.created')).toBe(true);
     expect(isSignupTrigger('purchase.first')).toBe(false);

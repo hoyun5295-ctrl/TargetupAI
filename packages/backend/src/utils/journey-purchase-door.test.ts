@@ -313,7 +313,7 @@ describe('지표 축은 그대로다 — 이 조각이 매출 숫자를 바꾸�
     expect(
       src(file),
       '원장을 지표가 읽기 시작하면 매출·귀속 숫자가 조용히 바뀐다 — 그건 별건 판단이다',
-    ).not.toMatch(/FROM purchases/);
+    ).not.toMatch(/FROM (purchases|\$\{LEDGER_PURCHASES_SQL\})|companyLedgerExistsSql\(/);   // ★ 1104 C102 구매 행 조각도 원장 읽기
   });
 
   it('cdp_events에 새 이벤트를 만들지 않는다 (테이블을 세는 소비처가 여럿이다)', () => {

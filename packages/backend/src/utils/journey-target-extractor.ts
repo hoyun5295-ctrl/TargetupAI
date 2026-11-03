@@ -24,7 +24,7 @@ import type { JourneyConsent } from './mall-consent';
 import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 import { orderAttemptSql } from './journey-purchase-ledger';
-import { purchaseFactsSql, crossDoorEntryOwnedSql, mallEntryDaySql, ledgerEntryDaySql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D2 · CT-D5
+import { purchaseFactsSql, crossDoorEntryOwnedSql, mallEntryDaySql, ledgerEntryDaySql, LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D2 · CT-D5
 // ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
 //   추출은 회사 능력을 조회하지 않는다(Codex 3R). 술어는 데이터로만 평가되고,
 //   "판정 가능한가" 게이트는 발송 진입 경로(journey-trigger-watcher)가 소유한다.
@@ -233,7 +233,7 @@ export async function buildJourneyTargetQuery(
            -- ★ 2026-08-01 §11-4: 매장(싱크)에서 산 사람에게 장바구니 리마인드를 보내지 않는다.
            --   그 구매는 원장에만 있고 cdp_events에는 없다. KST naive 규약이라 변환 명시.
            AND NOT EXISTS (
-             SELECT 1 FROM purchases p2
+             SELECT 1 FROM ${LEDGER_PURCHASES_SQL} p2   -- ★ 2026-11-04 C102 G1 환불 행 = 구매 아님(CT-D6)
              WHERE p2.company_id = $1::uuid
                AND p2.customer_id = a.customer_id
                AND p2.purchase_date IS NOT NULL
@@ -272,7 +272,7 @@ export async function buildJourneyTargetQuery(
              AND ${orderAttemptSql('e2')} AND e2.occurred_at > v.viewed_at   -- ★ 1027 K1-9 결제 전 주문도 주문 시도
          )
            AND NOT EXISTS (
-             SELECT 1 FROM purchases p2
+             SELECT 1 FROM ${LEDGER_PURCHASES_SQL} p2   -- ★ 2026-11-04 C102 G1(CT-D6)
              WHERE p2.company_id = $1::uuid AND p2.customer_id = v.customer_id
                AND p2.purchase_date IS NOT NULL
                AND p2.purchase_date > (v.viewed_at AT TIME ZONE 'Asia/Seoul')
@@ -623,7 +623,7 @@ async function productBuyersTargetQuery(
         WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
           AND e.occurred_at >= NOW() - INTERVAL '7 days'
           AND ${mallItemKeySql('it')} = ANY($2::text[])`
-    : `SELECT DISTINCT p.customer_id FROM purchases p
+    : `SELECT DISTINCT p.customer_id FROM ${LEDGER_PURCHASES_SQL} p   -- ★ 2026-11-04 C102 G1(CT-D6)
         WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
           AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - INTERVAL '7 days')
           AND ${ledgerProductKeySql('p')} = ANY($2::text[])`;
@@ -851,7 +851,7 @@ export async function selectPurchaseLedgerRowsForCursor(
               'product_code', p.product_code,
               'store_name', COALESCE(NULLIF(p.store_name, ''), p.store_code)
             )) AS properties
-       FROM purchases p
+       FROM ${LEDGER_PURCHASES_SQL} p   -- ★ 2026-11-04 C102 G1 환불 · 반품 행은 구매 진입이 아니다(CT-D6 · 커서는 돌려준 행으로만 나아간다)
        INNER JOIN customers c ON c.id = p.customer_id AND c.company_id = $1::uuid
       WHERE p.company_id = $1::uuid
         AND p.customer_id IS NOT NULL

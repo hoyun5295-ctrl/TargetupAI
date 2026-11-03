@@ -13,6 +13,9 @@
  *   - 회사 격리: 모든 실행 행 조회는 그 회사 여정 id 목록으로 묶는다(journey_executions 에는 company_id 가 없다).
  */
 
+import { getPurchaseDoorStatus, LEDGER_RUN_START_HOUR_KST, LEDGER_RUN_END_HOUR_KST } from './journey-purchase-ledger';   // ★ 2026-11-04 C102 G5
+import { usesPurchaseLedger } from './journey-cdp-cursor';
+import { normalizeProductFilters } from './journey-product';
 import { query } from '../config/database';
 import {
   TRIGGER_CONTRACTS, getTriggerContract, laneForTrigger, triggerLabel, triggerKeyForEvent, overlapTriggerEvents,
@@ -276,11 +279,21 @@ const GOAL_LABEL: Record<string, string> = { purchase: '구매 확인', points_u
  *   ★ 2026-10-25 #13 — 1019 B-1009-4 뒤로 두 문 모두 같다: 자사몰 = 구매 사건 시각이 진입 뒤 · 매장 원장 = 가입 묶음 구매(고객 행 뒤 도착)를
  *     목표로 잡아 첫 칸 앞에서 마친다(journey-goal-purchase 한 판정). 옛 문장(매장 문 = 「둘 다 받아요」)은 고치기 전 동작이었다.
  */
-function journeyNotices(triggerEvent: string, goalExitEnabled: boolean): string[] {
+/** 매장 구매가 여정에 들어오는 때(하루 모아 다음 날 오전 · 시각 = 원장 실행 창 상수 · 화면 안내 한 곳). */
+export const LEDGER_ENTRY_NOTICE = `매장 구매는 하루 모아 다음 날 오전 ${LEDGER_RUN_START_HOUR_KST}시 ~ ${LEDGER_RUN_END_HOUR_KST}시에 이 여정에 들어와요.`;
+
+/**
+ * 여정 안내 줄(작업 화면 시작 칸이 그린다).
+ *   ★ 2026-11-04 C102 G5 — 회사 원장 문에 도착 기록이 있고 이 여정이 매장 구매를 읽으면(구매 계열 · 상품은 그 여정 문이 매장일 때)
+ *   「하루 모아 다음 날 오전」을 말한다(옛: 서버 문 상태를 화면이 받아 두기만 해 매장 구매 여정이 「바로」로만 보였다 · C99 §12 T8).
+ */
+export function journeyNotices(triggerEvent: string, goalExitEnabled: boolean, opts: { ledgerDoor?: boolean; productDoor?: string | null } = {}): string[] {
   const out: string[] = [];
   if (triggerEvent === 'customer.created' && goalExitEnabled) {
     out.push('가입 직후 구매한 고객은 환영 문자 대신 첫 구매 여정이 맞이해요.');
   }
+  const readsLedger = usesPurchaseLedger(triggerEvent) && (triggerEvent !== 'purchase.product' || opts.productDoor === 'ledger');
+  if (opts.ledgerDoor && readsLedger) out.push(LEDGER_ENTRY_NOTICE);
   return out;
 }
 
@@ -586,6 +599,8 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
   );
   const rows: any[] = jr.rows;
   const ids = rows.map((r) => String(r.id));
+  // ★ 2026-11-04 C102 G5 — 회사 원장 문 도착 기록(안내 줄용 · 조회 실패 = 안내만 빠짐)
+  const ledgerDoor = !!(await getPurchaseDoorStatus(companyId).catch(() => null))?.ledger;
 
   const stepsByJourney = new Map<string, any[]>();
   const graphById = new Map<string, JourneyGraph>();
@@ -734,7 +749,7 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
       goalExitEnabled,
       goalKind,
       goalLabel: GOAL_LABEL[goalKind] || '목표 달성',
-      notices: journeyNotices(triggerEvent, goalExitEnabled),
+      notices: journeyNotices(triggerEvent, goalExitEnabled, { ledgerDoor, productDoor: triggerEvent === 'purchase.product' ? normalizeProductFilters(tf).door : null }),
       allowReentry: r.allow_reentry === true,
       autoReentry: r.auto_reentry_enabled === true,
       thresholdRecipients: r.threshold_recipients_per_step != null ? Number(r.threshold_recipients_per_step) : null,

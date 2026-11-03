@@ -357,7 +357,20 @@ export interface AutoMarketingRoi {
   purchases7d: number;
   revenue7dKrw: number;
   hasCdpData: boolean;
+  /** ★ 2026-11-04 C102 G4 — 귀속에 쓰는 문이 들어와 있나(자사몰 사건 · 매장 구매 원장) · 문구가 들어온 문을 그대로 말한다 */
+  purchaseDoors?: { mall: boolean; ledger: boolean };
   source: string;
+}
+
+/** ★ 2026-11-04 C102 G4 — 귀속 문구 한 곳(자동마케팅 화면 · 성과 화면) · 들어온 문 그대로 · 매장 문 = 날짜로 세는 한계 한 줄 */
+export function roiAttributionNote(roi: AutoMarketingRoi): { doors: string; ledgerCaveat: string | null; empty: string } {
+  const d = roi.purchaseDoors;
+  const doors = [d?.mall ? '자사몰 주문' : '', d?.ledger ? '매장 구매' : ''].filter(Boolean).join(' · ') || '구매';
+  return {
+    doors,
+    ledgerCaveat: d?.ledger ? '매장 구매는 날짜로 세어 발송 당일 발송 전에 산 것이 섞일 수 있어요.' : null,
+    empty: '매출 귀속은 자사몰 주문이나 매장 구매 기록이 들어온 뒤 표시됩니다.',
+  };
 }
 
 // 통화/퍼센트 표시 헬퍼 — 모든 카드 공용

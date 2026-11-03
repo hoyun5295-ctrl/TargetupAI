@@ -300,7 +300,7 @@ export default function OperatorSetupModal({ editing, setEditing, saving, error,
                 <input type="number" min="10" max="1440" value={editing.autoSendLeadMinutes ?? 120} onChange={(e) => setEditing({ ...editing, autoSendLeadMinutes: Number(e.target.value) })} className={INP} />
               </div>
             </div>
-            <div className="text-[10px] text-slate-400 leading-relaxed">발송 희망 시각의 준비 시간(기본 120분) 전에 문안을 생성해 스팸필터 테스트를 거치고, 담당자에게 실제 문안과 발송 정보(일시·대상·예상 비용)를 문자로 안내합니다. 희망 시각 정각에 자동 발송되며, 그 전까지 [정지]로 취소할 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
+            <div className="text-[10px] text-slate-400 leading-relaxed">발송 희망 시각의 준비 시간(기본 120분) 전에 문안을 생성해 스팸필터 테스트를 거치고, 담당자에게 실제 문안과 발송 정보(일시·대상·예상 비용)를 문자로 안내합니다. 희망 시각 정각에 자동 발송되며, 그 전까지 「승인할 제안」의 회차 카드에서 [자동 발송 정지]로 멈출 수 있습니다. 스팸필터를 통과한 문안만 나갑니다.</div>
           </Section>
 
           <Section icon={<Wallet className="w-4 h-4" />} title="비용 제어" summary={editing.budgetMonthly ? `월 ${won(editing.budgetMonthly)}` : editing.budgetDaily ? `하루 ${won(editing.budgetDaily)}` : '제한 없음'} accent>

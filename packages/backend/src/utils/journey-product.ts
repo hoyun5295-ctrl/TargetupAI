@@ -13,7 +13,7 @@
  */
 import { query } from '../config/database';
 import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
-import { purchaseFactsSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D2 두 문 구매 사실
+import { purchaseFactsSql, LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D2 두 문 구매 사실
 import { JourneyInputError } from './journey-step-limits';
 import type { CdpCursorBatch, CdpEventRow } from './journey-cdp-cursor';
 
@@ -153,7 +153,7 @@ export async function listObservedProducts(companyId: string, door: PurchaseDoor
     `SELECT x.key, MAX(x.name) AS name, COUNT(DISTINCT x.customer_id)::int AS buyers, COUNT(*)::int AS orders, MAX(x.purchase_date)::text AS last_at
        FROM (
          SELECT ${ledgerProductKeySql('p')} AS key, NULLIF(TRIM(p.product_name), '') AS name, p.customer_id, p.purchase_date
-           FROM purchases p
+           FROM ${LEDGER_PURCHASES_SQL} p   -- ★ 2026-11-04 C102 G1(CT-D6)
           WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
             AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval)
        ) x
@@ -197,7 +197,7 @@ export async function suggestUsagePeriod(companyId: string, door: PurchaseDoor, 
           AND e.occurred_at >= NOW() - ($3 || ' days')::interval
           AND ${mallItemKeySql('it')} = ANY($2::text[])`
     : `SELECT DISTINCT p.customer_id, p.purchase_date::date AS d
-         FROM purchases p
+         FROM ${LEDGER_PURCHASES_SQL} p   -- ★ 2026-11-04 C102 G1(CT-D6)
         WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
           AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - ($3 || ' days')::interval)
           AND ${ledgerProductKeySql('p')} = ANY($2::text[])`;
@@ -258,7 +258,7 @@ export const PRODUCT_REPURCHASE_SINCE_ENTRY_SQL = `SELECT 1
        AND ${mallItemKeySql('it')} = ANY($4::text[])
   ))
   OR ($5::text = 'ledger' AND EXISTS (
-    SELECT 1 FROM purchases p
+    SELECT 1 FROM ${LEDGER_PURCHASES_SQL} p   -- ★ 2026-11-04 C102 G1(CT-D6)
      WHERE p.company_id = $1::uuid AND p.customer_id = $2::uuid
        AND p.purchase_date IS NOT NULL
        AND p.purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')

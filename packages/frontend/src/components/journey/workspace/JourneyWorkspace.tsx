@@ -987,6 +987,12 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               {detail && selected === 'start' && (
                 <div className="mx-auto max-w-2xl p-4 md:p-6">
                   {locked && <p className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] text-slate-600">{edit.reason}</p>}
+                  {/* ★ 2026-11-04 C102 G5 — 서버 안내 줄(매장 구매 들어오는 때 · 가입 직후 구매) · 옛: 지도 응답에 실어 놓고 어느 화면도 안 그렸다 */}
+                  {(mj?.notices || []).length > 0 && (
+                    <ul className="mb-3 space-y-1 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+                      {(mj?.notices || []).map((n) => <li key={n}>{n}</li>)}
+                    </ul>
+                  )}
                   <JourneyStartCard
                     journey={detail.journey}
                     triggerLabel={triggerLabel}

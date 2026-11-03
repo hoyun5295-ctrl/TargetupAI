@@ -2213,8 +2213,8 @@ export async function approveProposal(
       timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false,
     });
     return { ok: true, action: 'skipped', reason: atRound
-      ? `승인했어요. 정한 시각(${label})에 보내요. 보내기 전에 안내 문자를 드려요. 그 전까지 [정지]로 취소할 수 있어요.`
-      : `야간에는 광고 발송이 제한되어 지금은 발송하지 않습니다. ${label}에 자동 발송되도록 예약했습니다. 발송 전까지 [정지] 버튼으로 취소할 수 있습니다.` };
+      ? `승인했어요. 정한 시각(${label})에 보내요. 보내기 전에 안내 문자를 드려요. 그 전까지 「승인할 제안」의 회차 카드에서 [자동 발송 정지]로 멈출 수 있어요.`
+      : `야간에는 광고 발송이 제한되어 지금은 발송하지 않습니다. ${label}에 자동 발송되도록 예약했습니다. 발송 전까지 「승인할 제안」의 회차 카드에서 [자동 발송 정지]로 멈출 수 있습니다.` };
   }
 
   // 발송 — dispatchProposalSend 공유. 발송 크레딧은 보내기 직전 1회(키 = 제안 · 적재 묶음).
@@ -2756,7 +2756,7 @@ async function restoreHeldProposal(
           RETURNING id`,
         [row.id, pass.index, pass.fp, sendAt, noticeJson({
           title: '[AI 자동마케팅] 자동 발송 다시 예약',
-          body: `'${name}' 이번 회차 스팸 검사 결과가 늦게 나와 통과했어요. ${label}에 자동으로 보내요. 보내기 전까지 제안 상세에서 [정지]로 취소할 수 있어요.`,
+          body: `'${name}' 이번 회차 스팸 검사 결과가 늦게 나와 통과했어요. ${label}에 자동으로 보내요. 보내기 전까지 「승인할 제안」의 회차 카드에서 [자동 발송 정지]로 멈출 수 있어요.`,
         })],
       );
       if (up.rows.length > 0) return 'restored' as const;

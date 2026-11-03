@@ -19,7 +19,7 @@
  */
 
 import { query } from '../config/database';
-import { purchaseFactsSql } from './two-door-purchase';   // ★ 2026-11-04 C99 T9 두 문 구매 사실(CT-D2)
+import { purchaseFactsSql, LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C99 T9 두 문 구매 사실(CT-D2)
 
 export interface AttributionWindow {
   windowLabel: string;             // '24h' / '7d' / '30d'
@@ -85,7 +85,7 @@ export async function buildCampaignAttribution(
   // ★ 2026-11-04 C99 T9(Codex 설계 1R #6) — 관문 = 자사몰 사건 또는 매장 원장 · 있는지만(EXISTS · 옛: 기간 안 전 이벤트 COUNT)
   const cdpCheckResult = await query(
     `SELECT EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND occurred_at > NOW() - ($2 || ' days')::interval)
-         OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid AND purchase_date > (NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval) AS has_data`,
+         OR EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} lpg WHERE lpg.company_id = $1::uuid AND lpg.purchase_date > (NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval) AS has_data`,   // ★ 2026-11-04 C102 G1(CT-D6)
     [companyId, analysisPeriodDays + 30]
   );
   const hasCdpData = cdpCheckResult.rows[0]?.has_data === true;

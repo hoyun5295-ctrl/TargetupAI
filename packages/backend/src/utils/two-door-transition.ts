@@ -15,7 +15,7 @@
  *   - 완료 = 그 회사 d2 없는 고객 0(확인 SQL = 설계서 §9).
  */
 import { query, withTransaction } from '../config/database';
-import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';
+import { companyLedgerExistsSql, lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';
 import { recomputeCustomerPurchaseSummary } from './customer-purchase-aggregates';
 import { sendSystemAlert } from './system-alert';
 import { netPurchaseSql } from './cdp-order-revenue';
@@ -87,7 +87,7 @@ export async function runTwoDoorTransitionPass(): Promise<{ companies: number; d
         `SELECT c.id FROM companies c
           WHERE c.two_door_since IS NOT NULL
              OR (EXISTS (SELECT 1 FROM cdp_events e WHERE e.company_id = c.id AND ${netPurchaseSql('e')})   -- 회사 갈래(resolvePurchaseSummaryBranch)와 같은 판정
-                 AND EXISTS (SELECT 1 FROM purchases p WHERE p.company_id = c.id))
+                 AND ${companyLedgerExistsSql('c')})
           ORDER BY c.id`,
       );
     } catch (err: any) {

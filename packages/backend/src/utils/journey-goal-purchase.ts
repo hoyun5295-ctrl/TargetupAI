@@ -12,7 +12,7 @@
  *   ④ 가입 여정만: 고객 행이 들어온 뒤(도착 축) 들어온 원장 구매(싱크가 가입 고객과 그 구매를 한 묶음으로 보낸다)
  */
 import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
-import { purchaseAfterSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D4 구매 있었나
+import { kstNotFutureSql, purchaseAfterSql, LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D4 구매 있었나
 
 /**
  * 판정 SQL 조각. e = 실행 행 별칭(customer_id · entered_at 칸) · companyParam = 회사 id 자리($n) · signupExpr = 가입 여정인가(SQL 불리언).
@@ -23,12 +23,15 @@ export function purchasedSinceEntrySql(e: string, companyParam: string, signupEx
     EXISTS (SELECT 1 FROM customers pc
              WHERE pc.id = ${e}.customer_id AND pc.company_id = ${companyParam}
                AND pc.recent_purchase_date IS NOT NULL
-               AND pc.recent_purchase_date > (${e}.entered_at AT TIME ZONE 'Asia/Seoul')::date)
+               AND pc.recent_purchase_date > (${e}.entered_at AT TIME ZONE 'Asia/Seoul')::date
+               AND ${kstNotFutureSql('pc.recent_purchase_date')})   -- ★ C102 Codex 4R 미래 최근일 = 아직 안 산 것
     OR ${purchaseAfterSql(`${e}.customer_id`, companyParam, `${e}.entered_at`)}   -- ★ 2026-11-04 C99 몰 · 원장 갈래 = CT-D4 한 벌(기다리기 · 조건 칸과 같은 규칙)
-    OR ((${signupExpr}) AND EXISTS (SELECT 1 FROM purchases pb
+    OR ((${signupExpr}) AND EXISTS (SELECT 1 FROM ${LEDGER_PURCHASES_SQL} pb   -- ★ 2026-11-04 C102 G1(CT-D6)
                                      JOIN customers cb ON cb.id = pb.customer_id AND cb.company_id = pb.company_id
                                     WHERE pb.company_id = ${companyParam} AND pb.customer_id = ${e}.customer_id
-                                      AND pb.created_at >= cb.created_at))
+                                      AND pb.created_at >= cb.created_at
+                                      -- ★ C102 Codex 4R — 도착 시각만으로 가입 묶음을 정하지 않는다(G7 고객 잇기가 오래된 구매의 도착을 지금으로 바꾼다)
+                                      AND (pb.purchase_date IS NULL OR pb.purchase_date >= ((cb.created_at AT TIME ZONE current_setting('TimeZone')) AT TIME ZONE 'Asia/Seoul')::date)))
   )`;
 }
 

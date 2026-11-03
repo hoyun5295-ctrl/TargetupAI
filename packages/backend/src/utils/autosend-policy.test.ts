@@ -17,7 +17,7 @@ describe('buildAutoSendPrepInfoBody — 자율 발송 예정 안내(통지 2번)
     expect(body).toContain('41,661원');
     expect(body).toContain('LMS 27원 × 1,543건');
     expect(body).toContain('자동마케팅');
-    expect(body).toContain('[정지]');
+    expect(body).toContain('[자동 발송 정지]');   // ★ 2026-11-04 C102 G3 = 화면에 실제로 있는 단추 이름
   });
 
   it('단가가 없으면(0) 산식 없이 총액만 담는다', () => {

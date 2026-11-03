@@ -45,8 +45,8 @@ describe('예고 문장', () => {
     expect(b).not.toContain('[정지]를 눌러주세요');
     expect(b).not.toMatch(/[—–]/);
   });
-  it('링크 없음 = 옛 문장 그대로', () => {
-    expect(buildAutoSendPrepInfoBody(base)).toContain('자동마케팅 [정지]를 눌러주세요');
+  it('링크 없음 = 화면에 실제로 있는 단추 이름으로 안내(★ 1104 C102 G3 · 옛 「[정지]」 단추는 화면에 없다)', () => {
+    expect(buildAutoSendPrepInfoBody(base)).toContain('「승인할 제안」의 회차 카드에서 [자동 발송 정지]를 눌러 주세요');
   });
 });
 
