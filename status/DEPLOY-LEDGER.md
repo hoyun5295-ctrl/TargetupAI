@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: cae2cd7c · 2026-11-04 · Harold 출력(서버 git pull · git log -1 = cae2cd7c · 커밋 1 = C101) · 그 전 ee1166a6
-- deployed_head: cae2cd7c · 2026-11-04 · Harold 출력(새 패키지 0(바뀐 의존성 = sync-agent 만 · 서버 빌드 밖) · 백엔드 build:safe(dist utils/same-phone-consent.js · routes/sync-consent.js 08:09:57) · 프론트 build:safe(dist/index.html 08:11:08) · pm2 reload targetup-backend(원장 restart-env = 앞 카드 ENV 대기 몫 · C101 새 env 0 · .env 는 부팅 때 dotenv) · online · ↺ 46 · created at 08:11:09 KST(dist 뒤) · 에러 로그 0줄 · 출력 로그 SQL 오류 코드 0 · DB_MIGRATION_PENDING 0 · MIXED_AGENT 0 · /health 200 · 화면 = 슈퍼관리자 「Agent 버전 배포」 창 「배포 대상」 칸 · 기본 「이 티어의 모든 고객사」 = 기대 그대로(Harold 1104)) · 그 전 ee1166a6 · (C102 기록) ee1166a6 · 2026-11-04 · Harold 출력(새 패키지 0 · 백엔드 build:safe(dist two-door-purchase.js 07:31:56 · C102 코드 2곳) · 프론트 build:safe(dist/index.html 07:33:07) · pm2 reload targetup-backend(적재 관문 한 줄 없이 · 새 env 이름 0) · 옛 프로세스 종료 줄 07:33:08 = 직접발송 적재 중 0개 · online · ↺ 45 · created at 07:33:08 KST · 에러 로그(07:33:08 뒤) 0줄 · 출력 로그 오류 · SQL 오류 코드 0(Port: 3000 한 줄) · /health 200 · 화면 = 자동마케팅 성과 문구(자사몰 주문 · 매장 구매 · 발송 0 = 귀속 매출(7일) ₩0) · 여정 시작 칸 매장 구매 안내 줄 · 세부설정 창 [자동 발송 정지] 안내 = 기대 그대로(Harold 1104)) · 그 전 14819363
+- pulled_head: d7e3061f · 2026-11-04 · Harold 출력(서버 git pull cae2cd7c..d7e3061f · 커밋 1 = C102 G8) · 그 전 cae2cd7c
+- deployed_head: d7e3061f · 2026-11-04 · Harold 출력(백엔드만 = 새 패키지 0 · 백엔드 build:safe(dist utils/customer-upsert.js 08:32:35 · sanitizeSourceSummary 3곳) · 프론트 빌드 없음 · pm2 reload targetup-backend · 옛 프로세스 종료 줄 08:32:38 = 직접발송 적재 중 0개 · online · ↺ 47 · created at 08:32:38 KST · 에러 로그(08:32:38 뒤) 0줄 · 출력 로그 오류 · SQL 오류 코드 0(Port: 3000 한 줄) · /health 200) · 그 전 cae2cd7c(C101) · ee1166a6(C102 1차)
 - 이번 창 확인 출력: backend-build · restart-env · uptime · frontend-build
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -46,7 +46,7 @@
 | C96 | 33f049c2 |
 | C98 | 3af58654 |
 | C99 | 14819363 |
-| C102 | ee1166a6 |
+| C102 | d7e3061f |
 | C101 | cae2cd7c |
 
 ## §1 대기
@@ -869,7 +869,7 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS two_door_since timestamptz NULL;
 - 선행: C102-S0 · 코드 배포
 - 기대: ① 배포 뒤 새 PID ERROR 0(42703 · 42883 · 42P08 0) ② 직원 시트 20 ~ 23 기대 결과 그대로(23 = 두 문 시험 계정 · 싱크 시험 에이전트)
 - 확인: 로그 줄 · 직원 시트 결과
-- 결과: 1104 Harold 출력 = ① 재시작(07:33:08) 뒤 에러 로그 0줄 · 출력 로그 오류 · SQL 오류 코드 0 → 기대값 같음 · ② 직원 시트 20 ~ 23 = 남음
+- 결과: 1104 Harold 출력 = ① 재시작(07:33:08 · ee1166a6) · (08:32:38 · d7e3061f G8) 뒤 에러 로그 0줄 · 출력 로그 오류 · SQL 오류 코드 0 · health 200 → 기대값 같음 · 화면 셋 기대대로 · ② 직원 시트 20 ~ 23 = 남음
 
 ### C101-S0 · 같은 번호 수신동의 사전 확인(배포 앞 · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §5)
 - 카드: C101
