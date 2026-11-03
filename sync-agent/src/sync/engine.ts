@@ -15,6 +15,7 @@
 import type { IDbConnector, RawRow, ColumnInfo } from '../db/types';
 import { ISO_DATE_CONNECTORS } from '../db/types';
 import type { ApiClient } from '../api/client';
+import type { ConsentVoteRow } from '../types/api';
 import type { AlertManager } from '../alert';
 import type { SyncTarget, SyncMode, SyncResult, SyncError, SyncCursorState } from '../types/sync';
 // ★ 2026-08-03 커서 재설계 — 키셋 커서·원본 행 키 직렬화(순수 모듈, 어댑터 4종 공유)
@@ -36,6 +37,19 @@ const logger = getLogger('sync:engine');
 
 /** ★ 2026-10-28 고객 전량을 시작했지만 아직 완결 못 함 — valueMapsDigest 결과('' 또는 '[' 로 시작)와 절대 같지 않다 */
 const APPLIED_DIGEST_PENDING = '!pending';
+
+/** ★ 1.7.6 원장 패스 한 요청 최대 행(서버 CONSENT_STAGE_MAX 와 같은 값) */
+const CONSENT_STAGE_MAX = 10000;
+
+/** ★ 1.7.6 정규화된 고객 행 하나 → 서버에 싣는 동의 표(번호 · 수신동의 · 못 알아본 표기) · 번호가 없으면 null — 원장 패스 · 적재 근거 공용 */
+function consentVoteOf(c: Record<string, unknown>): ConsentVoteRow | null {
+  if (typeof c.phone !== 'string' || c.phone === '') return null;
+  return {
+    phone: c.phone,
+    sms_opt_in: typeof c.sms_opt_in === 'boolean' ? c.sms_opt_in : null,
+    sms_opt_in_unknown: typeof c.sms_opt_in_unknown === 'string' ? c.sms_opt_in_unknown : null,
+  };
+}
 
 export interface SyncEngineConfig {
   /** 배치 크기 (기본 4000) */
@@ -91,6 +105,11 @@ export class SyncEngine {
    * (옛 실행 · 미리보기의 조회 결과가 이번 실행에 섞이지 않는다 · 미리보기는 이 캐시를 쓰지 않는다 · Codex 2R).
    */
   private runDateCols = new Map<string, ReadonlySet<string>>();
+  /**
+   * ★ 1.7.6 지금 도는 고객 실행의 세대(withConsentPass 만 바꾼다) — processBatch 가 고객 적재 요청에 패스 번호 · 순번을 싣고
+   *   보내지 못한 요청이 있으면 failed(그 패스는 공개하지 않는다 · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §3-2 ② 5).
+   */
+  private consentPass: { agentId: string; passId: string; issued: number; failed: boolean } | null = null;
 
   constructor(
     db: IDbConnector,
@@ -375,7 +394,134 @@ export class SyncEngine {
   // ─── 증분 동기화 ──────────────────────────────────────
 
   async runIncremental(target: SyncTarget): Promise<SyncResult> {
-    return this.inLane(() => this.incremental(target));
+    return this.inLane(() => (target === 'customers'
+      ? this.withConsentPass('incremental', () => this.incremental(target))
+      : this.incremental(target)));
+  }
+
+  // ─── ★ 1.7.6 같은 번호 수신동의 세대 ────────────────────
+  //
+  // 고객 실행 한 번 = start → 원장 패스(원본 전체 · 번호 · 수신동의 · 모름) → stage-done → 고객 적재(지금 그대로) → complete(done 까지).
+  // 원장을 끝까지 못 보내면 적재 · 공개를 하지 않는다 · 적재 요청을 하나라도 보내지 못하면 공개하지 않는다(다음 실행에 새 패스).
+  // 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §3-2 ②.
+
+  private async withConsentPass(mode: 'incremental' | 'full', run: () => Promise<SyncResult>): Promise<SyncResult> {
+    const agentId = this.stateManager.getState().agentId;
+    if (this.config.dryRun || !this.apiClient || !agentId) return run();
+    let passId: string;
+    try {
+      passId = (await this.apiClient.consentPassStart(agentId)).passId;
+      await this.stageConsentLedger(agentId, passId);
+      await this.apiClient.consentPassStageDone(agentId, passId);
+    } catch (e) {
+      return this.lockedResult(
+        'customers',
+        'CONSENT_PASS_FAILED',
+        `수신동의 원장을 서버에 끝까지 보내지 못해 이번 고객 동기화를 건너뜁니다(${safeErrorText(e instanceof Error ? e.message : String(e))}). 다음 주기에 처음부터 다시 합니다.`,
+        'operational',
+        mode,
+      );
+    }
+    const pass = { agentId, passId, issued: 0, failed: false };
+    this.consentPass = pass;
+    let result: SyncResult;
+    try {
+      result = await run();
+    } finally {
+      this.consentPass = null;
+    }
+    if (pass.failed) {
+      logger.warn('보내지 못한 고객 적재 요청이 있어 이번 수신동의 공개를 하지 않습니다(다음 실행에 처음부터)');
+      return result;
+    }
+    try {
+      for (;;) {
+        const state = await this.apiClient.consentPassComplete(agentId, passId, pass.issued);
+        if (state === 'done') return result;
+        if (state === 'abandoned') throw new Error(`서버가 받은 고객 적재 근거 수가 보낸 요청 수(${pass.issued})와 다릅니다`);
+      }
+    } catch (e) {
+      await this.lockedResult(
+        'customers',
+        'CONSENT_PUBLISH_FAILED',
+        `고객은 보냈지만 같은 번호 수신동의 공개를 끝내지 못했습니다(${safeErrorText(e instanceof Error ? e.message : String(e))}). 다음 주기에 처음부터 다시 합니다.`,
+        'operational',
+        mode,
+      );
+      return result;
+    }
+  }
+
+  /**
+   * 원장 패스 — 고객 원본 전체를 지금 고객 전량과 같은 조회(키셋 → 실패면 OFFSET) · 매핑 · 정규화(설치별 분류 · 탈퇴 = 거부 · 모름 표시)로 읽어
+   *   번호 · 수신동의 · 모름 셋만 싣는다(Zod 검증은 거치지 않는다 · 다른 칸이 틀린 행의 거부도 거부다). 끝까지 못 읽으면 던진다
+   *   (빠진 원장으로 공개하면 그 번호의 거부가 다른 에이전트 수신에 덮인다).
+   */
+  private async stageConsentLedger(agentId: string, passId: string): Promise<void> {
+    const table = this.config.customerTable;
+    const total = await this.db.getRowCount(table);
+    let keyCols: string[] = [];
+    if (this.db.fetchIncrementalKeyset && this.db.fetchMaxCursor && this.db.getSourceId) {
+      const pk = await this.resolvePkColumns('customers', table);
+      if (pk.ok && !pk.nonScalarPk) keyCols = pk.columns;
+    }
+    const dateCols = await this.dateSourceColumns(table);
+    let read = 0;
+    let sendFailed = false;
+    const send = async (rows: RawRow[]): Promise<void> => {
+      read += rows.length;
+      const votes: ConsentVoteRow[] = normalizeCustomerBatch(mapBatch(rows, this.config.customerMapping, dateCols), {
+        dbType: this.db.dbType,
+        valueMaps: this.effectiveValueMaps(),
+      }).normalized
+        .map(consentVoteOf)
+        .filter((v): v is ConsentVoteRow => v !== null);
+      try {
+        for (let i = 0; i < votes.length; i += CONSENT_STAGE_MAX) {
+          await this.apiClient!.consentPassStage(agentId, passId, votes.slice(i, i + CONSENT_STAGE_MAX));
+        }
+      } catch (e) {
+        sendFailed = true;
+        throw e;
+      }
+    };
+    let keysetDone = false;
+    if (this.db.fetchAllKeyset) {
+      try {
+        let afterKey: string | null = null;
+        for (;;) {
+          const { rows, lastKey } = await this.db.fetchAllKeyset(table, this.config.batchSize, afterKey, keyCols);
+          if (rows.length === 0) break;
+          await send(rows);
+          if (rows.length < this.config.batchSize || lastKey == null) break;
+          afterKey = lastKey;
+        }
+        keysetDone = true;
+      } catch (e) {
+        if (sendFailed) throw e;
+        logger.warn('원장 패스 키셋 조회 실패 → OFFSET 으로 처음부터(서버는 같은 행을 「또는」으로 합친다)', {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+    if (!keysetDone) {
+      read = 0;
+      let offset = 0;
+      let emptyRetries = 0;
+      while (total === 0 || offset < total) {
+        const rows = await this.db.fetchAll(table, this.config.batchSize, offset, keyCols);
+        if (rows.length === 0) {
+          if (total === 0 || ++emptyRetries > 3) break;
+          continue;
+        }
+        emptyRetries = 0;
+        await send(rows);
+        offset += rows.length;
+      }
+    }
+    if (total > 0 ? read < total : read !== 0) {
+      throw new Error(`원장 패스를 끝까지 읽지 못했습니다(${read}/${total}건)`);
+    }
   }
 
   private async incremental(target: SyncTarget): Promise<SyncResult> {
@@ -822,7 +968,9 @@ export class SyncEngine {
   // ─── 전체 동기화 ──────────────────────────────────────
 
   async runFull(target: SyncTarget): Promise<SyncResult> {
-    return this.inLane(() => this.full(target));
+    return this.inLane(() => (target === 'customers'
+      ? this.withConsentPass('full', () => this.full(target))
+      : this.full(target)));
   }
 
   /**
@@ -1244,9 +1392,16 @@ export class SyncEngine {
 
     logger.info(`파이프라인 결과: 원본 ${rows.length}건 → 정규화 ${normalizeResult.normalized.length}건 → 유효 ${validData.length}건`);
 
+    // ★ 1.7.6 세대 안 고객 적재 = 낮추는 근거(거부 · 모름)를 Zod 검증 결과와 따로 싣는다 — 검증에서 떨어진 행의 거부도 서버 근거에 닿고,
+    //   보낼 고객 행이 0건이어도 근거가 있으면 요청 하나로 센다(Codex 구현 1R #2 · 설계서 불변식 I1)
+    const pass = target === 'customers' ? this.consentPass : null;
+    const consentEvidence = pass
+      ? normalizeResult.normalized.map(consentVoteOf).filter((v): v is ConsentVoteRow => !!v && (v.sms_opt_in === false || v.sms_opt_in_unknown !== null))
+      : [];
+
     // ④ API 전송 (또는 dry run)
     let successCount = 0;
-    if (validData.length > 0) {
+    if (validData.length > 0 || consentEvidence.length > 0) {
       if (this.config.dryRun) {
         logger.info(`🧪 [DRY RUN] API 전송 스킵 — ${validData.length}건`);
         logger.info('📋 정규화 결과 샘플 (최대 3건):');
@@ -1263,6 +1418,8 @@ export class SyncEngine {
               mode,
               batchIndex,
               totalBatches,
+              // ★ 1.7.6 세대 안 적재 — 순번은 요청마다 하나(실행 안 재시도는 같은 요청 = 같은 순번)
+              ...(pass ? { agentId: pass.agentId, consentPassId: pass.passId, consentBatch: pass.issued++, consentEvidence } : {}),
             });
             successCount = response.data?.upsertedCount ?? validData.length;
           } else {
@@ -1279,6 +1436,7 @@ export class SyncEngine {
           }
         } catch (error) {
           logger.error('API 전송 실패', { error });
+          if (target === 'customers' && this.consentPass) this.consentPass.failed = true;
           errors.push({
             code: 'API_SEND_FAILED',
             message: error instanceof Error ? error.message : String(error),

@@ -692,7 +692,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   const [syncMapDryRunning, setSyncMapDryRunning] = useState(false);
   // ★ 2026-07-01: 자동 업데이트 릴리즈 등록 (박스 무선 교체 트리거)
   const [showSyncReleaseModal, setShowSyncReleaseModal] = useState(false);
-  const [syncReleaseForm, setSyncReleaseForm] = useState<{ version: string; checksum: string; force_update: boolean; tier: string }>({ version: '', checksum: '', force_update: true, tier: 'win-legacy' });
+  const [syncReleaseForm, setSyncReleaseForm] = useState<{ version: string; checksum: string; force_update: boolean; tier: string; company_id: string }>({ version: '', checksum: '', force_update: true, tier: 'win-legacy', company_id: '' });
   const [syncReleaseSaving, setSyncReleaseSaving] = useState(false);
 
   // ===== 감사 로그 =====
@@ -4889,7 +4889,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
       {showSyncMappingModal && syncSelectedAgent && <SyncMappingModal {...{ loadSyncAgents, setShowSyncMappingModal, setSyncMapCustomers, setSyncMapDryRunning, setSyncMapPurchases, setSyncMapSaving, showAlert, showConfirm, syncMapAckSupported, syncMapCustomers, syncMapDryRunning, syncMapPurchases, syncMapReportLoading, syncMapReported, syncMapSaving, syncSelectedAgent }} />}
 
       {/* ★ 2026-07-01: 자동 업데이트 릴리즈 등록 모달 */}
-      {showSyncReleaseModal && <SyncReleaseModal {...{ setShowSyncReleaseModal, setSyncReleaseForm, setSyncReleaseSaving, showAlert, syncReleaseForm, syncReleaseSaving }} />}
+      {showSyncReleaseModal && <SyncReleaseModal {...{ setShowSyncReleaseModal, setSyncReleaseForm, setSyncReleaseSaving, showAlert, syncReleaseForm, syncReleaseSaving, syncAgents }} />}
 
       {/* Sync 명령 전송 모달 */}
       {showSyncCommandModal && syncSelectedAgent && <SyncCommandModal {...{ loadSyncAgents, setShowSyncCommandModal, setSyncCommandType, showAlert, syncCommandType, syncSelectedAgent }} />}

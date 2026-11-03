@@ -105,7 +105,8 @@ function mockDb(plan: Plan) {
         const e = plan.customerRows[customerRowIdx++];
         if (e) throw e;
       }
-      return { rows: [], rowCount: 1 };
+      // ★ 2026-11-04 C101 업서트 반환 = 넣은 번호(is_insert) — 수신동의 기본값이 새로 넣은 행만 받는다(applySmsOptInDefaults)
+      return { rows: values.filter((v) => typeof v === 'string' && /^0100000\d{4}$/.test(v)).map((phone) => ({ phone, is_insert: true })), rowCount: 1 };
     }
     if (/INSERT INTO customer_stores/i.test(sql)) {
       if (plan.storeChunk && values.length > 3) throw plan.storeChunk;

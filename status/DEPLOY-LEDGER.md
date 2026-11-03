@@ -46,6 +46,7 @@
 | C96 | 33f049c2 |
 | C98 | 3af58654 |
 | C99 | 미커밋 |
+| C101 | 미커밋 |
 
 ## §1 대기
 
@@ -852,6 +853,73 @@ ALTER TABLE companies ADD COLUMN IF NOT EXISTS two_door_since timestamptz NULL;
 - 기대: ① 배포 뒤 새 PID ERROR 0(42703 · 42P08 0) ② 전환 패스 로그 = 두 문 회사 0(S0 ① = 0 이면) ③ 직원 시트 14 ~ 19 기대 결과 그대로 ④ 납품 고객사 연결 뒤 = 원본 누계(summary_source.totals)와 두 문 합 대조 SQL 결과 · ⑨-1 겹침 비율 Harold 보고
 - 확인: 로그 줄 · 그 시각 SQL 하나씩(docker 한 줄) · 직원 시트 결과
 - 결과:
+
+### C101-S0 · 같은 번호 수신동의 사전 확인(배포 앞 · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §5)
+- 카드: C101
+- 단계: 사전
+- 선행: 없음
+- 기대: 운영 고객 행 수신동의 NULL 수(공용 기본값이 「새로 넣은 행만」으로 바뀌면 이 행들은 업로드 · 화면이 동의 칸 없이 건드려도 동의로 안 채워진다 · 0 이 아니면 회사별 분포를 보고 정한다)
+- 확인: SELECT COUNT(*) FROM customers WHERE sms_opt_in IS NULL;
+- 결과: 1104 Harold 실행 = 0(대기 행 없음 · 공용 기본값 「새로 넣은 행만」 바꿈의 지금 고객 영향 0)
+
+### C101-DDL-1 · 세대 표 셋(sync_consent_passes · sync_consent_stage · sync_consent_marks · 설계서 §5 · 3-2 ①) · ★ 배포 앞
+- 카드: C101
+- 단계: DDL
+- 선행: C101-S0
+- 의미 바꿈: 아니오(새 표 · 옛 코드는 읽지 않는다 · 1.7.6 에이전트가 세대를 시작하기 전까지 비어 있다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name FROM information_schema.tables WHERE table_name IN ('sync_consent_passes','sync_consent_stage','sync_consent_marks') ORDER BY 1;
+- 확인: 세 줄(sync_consent_marks · sync_consent_passes · sync_consent_stage)
+- 결과: 1104 Harold 실행 = SET · CREATE TABLE 3 · CREATE INDEX 2 · 확인 세 줄 기대 그대로
+
+> C101-DDL-1 · 배포 앞 · 새 표 셋(운영 표 다시 쓰기 0 · sync_agents 참조 = 짧은 잠금) · 되돌리기 = DROP TABLE 세 줄(1.7.6 이 쓰기 전)
+
+```sql ddl:C101-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS sync_consent_passes (
+  pass_id        uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id       uuid        NOT NULL REFERENCES sync_agents(id) ON DELETE CASCADE,
+  company_id     uuid        NOT NULL,
+  started_at     timestamptz NOT NULL DEFAULT now(),
+  state          text        NOT NULL DEFAULT 'collecting' CHECK (state IN ('collecting','collected','applying','done','abandoned','retiring')),
+  load_batches   integer[]   NOT NULL DEFAULT '{}',
+  prev_pass_id   uuid,
+  publish_cursor text,
+  finished_at    timestamptz
+);
+CREATE INDEX IF NOT EXISTS sync_consent_passes_agent ON sync_consent_passes (agent_id, state);
+CREATE INDEX IF NOT EXISTS sync_consent_passes_company ON sync_consent_passes (company_id, state, started_at);
+CREATE TABLE IF NOT EXISTS sync_consent_stage (
+  pass_id     uuid    NOT NULL REFERENCES sync_consent_passes(pass_id) ON DELETE CASCADE,
+  phone       text    NOT NULL,
+  any_false   boolean NOT NULL DEFAULT false,
+  any_true    boolean NOT NULL DEFAULT false,
+  any_unknown boolean NOT NULL DEFAULT false,
+  PRIMARY KEY (pass_id, phone)
+);
+CREATE TABLE IF NOT EXISTS sync_consent_marks (
+  company_id      uuid        NOT NULL,
+  phone           text        NOT NULL,
+  refusal_seen_at timestamptz,
+  raise_since     timestamptz,
+  PRIMARY KEY (company_id, phone)
+);
+```
+
+### C101-DDL-2 · sync_releases.company_id(회사 하나에만 거는 원격 릴리스 · 설계서 3-2 ⑩) · ★ 배포 앞
+- 카드: C101
+- 단계: DDL
+- 선행: C101-DDL-1
+- 의미 바꿈: 아니오(빈 칸 추가 · NULL = 지금 릴리스 그대로 · 옛 코드는 읽지 않는다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'sync_releases' AND column_name = 'company_id';
+- 확인: company_id · uuid · YES 한 줄
+- 결과: 1104 Harold 실행 = SET · ALTER TABLE · company_id · uuid · YES 한 줄 · 같은 명령에 DDL-1 세 표 기본 키 확인(passes = pass_id · stage = pass_id, phone · marks = company_id, phone) 기대 그대로
+
+> C101-DDL-2 · 배포 앞 · 빈 칸 추가(표 다시 쓰기 0) · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C101-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS company_id uuid NULL;
+```
 
 ## §2 덤프 뒤 적용분
 

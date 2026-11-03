@@ -6,15 +6,20 @@ import type { Dispatch, SetStateAction } from 'react';
 
 export interface SyncReleaseModalProps {
   setShowSyncReleaseModal: Dispatch<SetStateAction<boolean>>;
-  setSyncReleaseForm: Dispatch<SetStateAction<{ version: string; checksum: string; force_update: boolean; tier: string; }>>;
+  setSyncReleaseForm: Dispatch<SetStateAction<{ version: string; checksum: string; force_update: boolean; tier: string; company_id: string; }>>;
   setSyncReleaseSaving: Dispatch<SetStateAction<boolean>>;
   showAlert: (title: string, message: string, variant?: 'success' | 'error' | 'warning' | 'info') => void;
-  syncReleaseForm: { version: string; checksum: string; force_update: boolean; tier: string; };
+  syncReleaseForm: { version: string; checksum: string; force_update: boolean; tier: string; company_id: string; };
   syncReleaseSaving: boolean;
+  /** ★ 2026-11-04 C101 배포 대상 고객사 목록 = 에이전트가 있는 고객사(에이전트 목록 그대로) */
+  syncAgents: Array<{ company_id?: string; company_name?: string }>;
 }
 
 export default function SyncReleaseModal(props: SyncReleaseModalProps) {
-  const { setShowSyncReleaseModal, setSyncReleaseForm, setSyncReleaseSaving, showAlert, syncReleaseForm, syncReleaseSaving } = props;
+  const { setShowSyncReleaseModal, setSyncReleaseForm, setSyncReleaseSaving, showAlert, syncReleaseForm, syncReleaseSaving, syncAgents } = props;
+  const companies = [...new Map(syncAgents.filter((a) => a.company_id).map((a) => [a.company_id as string, a.company_name || a.company_id as string])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], 'ko'));
+  const targetName = companies.find(([id]) => id === syncReleaseForm.company_id)?.[1];
 
 // ★ 2026-07-01: 자동 업데이트 릴리즈 등록 — 서버 exe 업로드 후 sync_releases 등록 → 박스 매시간 자동 수령
 const handleSyncReleaseSubmit = async () => {
@@ -34,12 +39,13 @@ const handleSyncReleaseSubmit = async () => {
         checksum: syncReleaseForm.checksum.trim() || undefined,
         force_update: syncReleaseForm.force_update,
         tier: syncReleaseForm.tier || undefined,
+        company_id: syncReleaseForm.company_id || undefined,
       }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '릴리즈 등록 실패');
     setShowSyncReleaseModal(false);
-    showAlert('성공', `${version} 릴리즈가 등록됐습니다. 각 Agent가 다음 정각(매시간) 버전 확인 때 자동으로 받아 교체합니다.`, 'success');
+    showAlert('성공', `${version} 릴리즈가 등록됐습니다. ${targetName ? `${targetName} 의 ` : '각 '}Agent가 다음 정각(매시간) 버전 확인 때 자동으로 받아 교체합니다.`, 'success');
   } catch (e: any) {
     showAlert('오류', e.message || '릴리즈 등록 실패', 'error');
   } finally {
@@ -86,6 +92,18 @@ const handleSyncReleaseSubmit = async () => {
                   <option value="linux-modern">linux-modern: Ubuntu 20+ · RHEL 8+</option>
                 </select>
                 <p className="text-[11px] text-gray-400 mt-1">이 티어의 에이전트에게만 배포됩니다(다른 티어 오배포 차단).</p>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 font-medium mb-1.5 block">배포 대상</label>
+                <select
+                  value={syncReleaseForm.company_id}
+                  onChange={(e) => setSyncReleaseForm({ ...syncReleaseForm, company_id: e.target.value })}
+                  className="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-[13px] bg-white focus:ring-2 focus:ring-violet-500 outline-none"
+                >
+                  <option value="">이 티어의 모든 고객사</option>
+                  {companies.map(([id, name]) => <option key={id} value={id}>{name} 만</option>)}
+                </select>
+                <p className="text-[11px] text-gray-400 mt-1">고객사 하나를 고르면 그 고객사 Agent 만 받습니다(같은 티어 다른 고객사는 그대로).</p>
               </div>
               <div>
                 <label className="text-xs text-gray-500 font-medium mb-1.5 block">체크섬 (SHA-256, 선택)</label>

@@ -10,6 +10,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { query, withTransaction } from '../config/database';
 import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, claudeRequestShape, resolveMaxTokens } from '../config/defaults';
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, isUnrecognizedSmsOptIn } from '../utils/normalize';
+import { foldMappedRowsByPhone, keptRowConsent } from '../utils/same-phone-consent';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
 import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError, assertCustomerWriteSchema } from '../utils/customer-upsert';
@@ -541,6 +542,9 @@ async function processUploadInBackground(
 
     // ★ 2026-08-14 (Codex 2R): 매장 소속 매핑 실패 배치 수 — 0이 아니면 완료 메시지에 표면화
     let storeMappingErrorBatches = 0;
+    // ★ 2026-11-04 같은 번호 여러 행 = 거부 우선(층 1 · utils/same-phone-consent.ts · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §3-1)
+    //   2,000행 묶음으로 나누기 전에 파일 전체의 같은 번호 표를 모은다 — 묶음 경계 양쪽에 갈린 미수신이 버려지거나 뒤 행이 덮지 않게.
+    const consentByPhone = foldMappedRowsByPhone(rows, headers, mapping);
 
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
@@ -566,7 +570,7 @@ async function processUploadInBackground(
         });
 
         // ★ 2026-10-04 수신동의 칸 값을 못 알아보면 신규 고객은 미동의(정규화 전 원문으로 판정 · 정규화는 null 로 접는다)
-        const consentUnrecognized = isUnrecognizedSmsOptIn(record.sms_opt_in);
+        let consentUnrecognized = isUnrecognizedSmsOptIn(record.sms_opt_in);
 
         // ── FIELD_MAP 기반 정규화 ──
         // birth_date는 파생 필드 계산에서 특별 처리 (4자리 연도, Excel 시리얼넘버 등)
@@ -595,6 +599,10 @@ async function processUploadInBackground(
         if (record.store_code) {
           storePairs.push({ phone: record.phone, store: String(record.store_code) });
         }
+
+        // ★ 2026-11-04 파일 안 같은 번호가 여럿이면 남긴 행 = 거부 우선 값(묶음 경계 무관) · 한 행뿐이면 그대로(null)
+        const keptConsent = keptRowConsent(consentByPhone.get(record.phone));
+        if (keptConsent) { record.sms_opt_in = keptConsent.value; consentUnrecognized = keptConsent.unknown; }
 
         // 배치 내 중복: phone 기준 dedupe
         // ★ 2026-08-14: store_code 포함 키 → phone 단독. upsert 충돌 축이 (company_id, phone)이므로
@@ -719,7 +727,7 @@ async function processUploadInBackground(
           const result = await withTransaction(async (run) => {
             const r = await uploadUpsertBuilder.runBatch(run, companyId, batchRows, userId || null);
             if (asNewCustomers) await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));   // ★ 2026-11-02 CT-J6
-            await applySmsOptInDefaults(run, companyId, batchRows.map((row) => String(row.phone)), unknownConsentSet);
+            await applySmsOptInDefaults(run, companyId, r.rows, unknownConsentSet);   // ★ 2026-11-04 새로 넣은 행만
             return r;
           });
 
@@ -745,7 +753,7 @@ async function processUploadInBackground(
                 const rowResult = await withTransaction(async (run) => {
                   const r = await uploadUpsertBuilder.runBatch(run, companyId, [row], userId || null);   // ★ 2026-11-04 C99
                   if (asNewCustomers) await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));   // ★ 2026-11-02 CT-J6
-                  await applySmsOptInDefaults(run, companyId, [String(row.phone)], unknownConsentSet);
+                  await applySmsOptInDefaults(run, companyId, r.rows, unknownConsentSet);   // ★ 2026-11-04 새로 넣은 행만
                   return r;
                 });
                 rowResult.rows.forEach((r: any) => {

@@ -22,7 +22,7 @@
  */
 
 import { getColumnFields } from './standard-field-map';
-import { joinedAtUpsertSql } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 칸(CT-J6)
+import { joinedAtUpsertSql, insertedPhonesOf } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 칸(CT-J6) · ★ 2026-11-04 기본값 = 새로 넣은 행만
 import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래
 import { recomputeCustomerPurchaseSummary } from './customer-purchase-aggregates';   // ★ 2026-11-04 C99 CT-D3
 import { query } from '../config/database';
@@ -355,13 +355,17 @@ export function buildSmsOptInUnknownDefault(
  * ★ 2026-10-04 신규 행 수신동의 기본값 — 못 알아본 글자 = 미동의(먼저) → 값 없음 = 기본 동의.
  * ⛔ 업서트와 **같은 트랜잭션** 안에서 부른다(Codex 1004 R1 high). 커밋된 NULL 이 잠깐이라도 보이면
  *   같은 번호를 동의값 없이 보낸 다른 요청의 기본 동의 백필이 먼저 true 로 채우고, 이 요청의 미동의는 NULL 조건에 걸려 건너뛴다.
+ * ★ 2026-11-04 그 업서트가 **새로 넣은 행에만**(반환 행 `is_insert`) — 번호 목록이 아니라 업서트 반환 행을 받는다.
+ *   이미 있는 NULL 행(1.7.6 싱크 대기 · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §3-2 ⑤)을 업로드 · 화면이
+ *   동의 칸 없이 건드려도 동의로 채우지 않는다(옛: 넘긴 번호 중 NULL 인 행 전부 · Codex 설계 2R #3).
  */
 export async function applySmsOptInDefaults(
   run: (sql: string, values: any[]) => Promise<unknown>,
   companyId: string,
-  phones: string[],
+  upsertRows: Array<{ is_insert?: boolean; phone?: string | null }>,
   unknownPhones: ReadonlySet<string>,
 ): Promise<void> {
+  const phones = insertedPhonesOf(upsertRows);
   if (phones.length === 0) return;
   const unknown = phones.filter((p) => unknownPhones.has(p));
   if (unknown.length > 0) {

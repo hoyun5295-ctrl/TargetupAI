@@ -72,7 +72,9 @@ describe('쓰기 자리 배선 — 표를 바꾸는 자리가 기록을 부른�
     ['src/routes/sender-registration.ts', ["via: 'registration'"]],
     ['src/routes/manage-users.ts', ['recordUserAccountDeleted({']],
     ['src/routes/unsubscribes.ts', ['recordUnsubscribeDeleted({']],
-    ['src/routes/sync.ts', ["recordUnsubscribeDeleted({ actorUserId: null, companyId, count: reEnable.rowCount, via: 'sync' })"]],
+    // ★ 2026-11-04 C101 싱크 수신거부 대조 = routes/sync.ts 에서 utils/sync-unsubscribes.ts 로 옮김 · 세대 공개 · 에이전트 폐기 = 같은 번호 CT
+    ['src/utils/sync-unsubscribes.ts', ["recordUnsubscribeDeleted({ actorUserId: null, companyId, count: reEnable.rowCount, via: 'sync' })"]],
+    ['src/utils/same-phone-consent.ts', ["recordUnsubscribeDeleted({ actorUserId: null, companyId, count: r.deleted.length, phones: r.deleted, via: 'sync' })"]],
     ['src/routes/address-books.ts', ['const ownerUserId = resolveTargetOwner(req, req.query.owner);', 'ownerClause(ownerUserId, params)', 'companyId, ownerUserId, groupName']],
     ['scripts/setup-demo-company.ts', ["channel: 'script', script: 'setup-demo-company'", "auditScript: 'setup-demo-company'"]],
     ['scripts/create-noplan-account.ts', ["channel: 'script', script: 'create-noplan-account'", "auditScript: 'create-noplan-account'"]],
@@ -86,6 +88,10 @@ describe('쓰기 자리 배선 — 표를 바꾸는 자리가 기록을 부른�
 
   it('수신거부 격리 갈래 · 회사 갈래 둘 다 기록', () => {
     expect(src('src/routes/unsubscribes.ts').split('recordUnsubscribeDeleted({').length - 1).toBe(2);
+  });
+
+  it('같은 번호 세대 = 공개(complete) · 에이전트 폐기 둘 다 기록', () => {
+    expect(src('src/utils/same-phone-consent.ts').split('recordUnsubscribeDeleted({').length - 1).toBe(2);
   });
 
   it('시험 회사 영구 삭제 = 삭제와 같은 트랜잭션에서 COMMIT 직전에 기록', () => {

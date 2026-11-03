@@ -33,6 +33,7 @@ import type {
   AiMappingRequest,
   AiMappingResponse,
   FieldMapResponse,
+  ConsentVoteRow,
 } from '../types/api';
 
 const logger = getLogger('api:client');
@@ -120,6 +121,35 @@ export class ApiClient {
       getRetryPreset('server'),
       'syncCustomers',
     );
+  }
+
+  // ─── ★ 1.7.6 같은 번호 수신동의 세대 ────────────────────
+
+  private consentPost<T>(url: string, body: Record<string, unknown>, label: string): Promise<T> {
+    return withRetry(
+      async () => (await this.http.post<ApiResponse<T>>(url, body)).data.data as T,
+      getRetryPreset('server'),
+      label,
+    );
+  }
+
+  consentPassStart(agentId: string): Promise<{ passId: string }> {
+    return this.consentPost(ENDPOINTS.CONSENT_PASS_START, { agentId }, 'consentPassStart');
+  }
+
+  async consentPassStage(agentId: string, passId: string, rows: ConsentVoteRow[]): Promise<void> {
+    await this.consentPost(ENDPOINTS.CONSENT_PASS_STAGE, { agentId, passId, rows }, 'consentPassStage');
+  }
+
+  async consentPassStageDone(agentId: string, passId: string): Promise<void> {
+    await this.consentPost(ENDPOINTS.CONSENT_PASS_STAGE_DONE, { agentId, passId }, 'consentPassStageDone');
+  }
+
+  /** 반환 = 'applying'(묶음 남음 · 다시 부른다) · 'done' · 'abandoned'(서버가 받은 근거 수 ≠ 보낸 요청 수) */
+  async consentPassComplete(agentId: string, passId: string, sentBatches: number): Promise<'applying' | 'done' | 'abandoned'> {
+    const r = await this.consentPost<{ state: 'applying' | 'done' | 'abandoned' }>(
+      ENDPOINTS.CONSENT_PASS_COMPLETE, { agentId, passId, sentBatches }, 'consentPassComplete');
+    return r.state;
   }
 
   // ─── 구매내역 동기화 ─────────────────────────────────

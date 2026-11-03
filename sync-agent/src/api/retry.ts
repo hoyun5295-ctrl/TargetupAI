@@ -96,6 +96,12 @@ export function isRetryableError(error: unknown): boolean {
     return false;
   }
 
+  // ★ 1.7.6 409 = 세대 상태 어긋남(버린 패스 · 폐기 중 · 섞인 회사) — 같은 요청을 다시 보내도 같다 · 다음 실행이 처음부터
+  if (status === 409) {
+    logger.warn('상태 어긋남 (409) — 재시도하지 않습니다', { status });
+    return false;
+  }
+
   return true;
 }
 

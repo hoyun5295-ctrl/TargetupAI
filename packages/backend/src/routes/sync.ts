@@ -8,9 +8,17 @@ import fs from 'fs';
 import path from 'path';
 import { query, withTransaction } from '../config/database';
 import { guardMachineOrigin } from '../utils/geo-access';
-import { ensureSystemSyncUser } from '../utils/system-sync-user';
+import { reconcileSyncUnsubscribes } from '../utils/sync-unsubscribes';   // ★ 2026-11-04 원문 그대로 옮김(세대 공개 · 에이전트 폐기와 같은 대조)
 import { TIMEOUTS, RATE_LIMITS, BATCH_SIZES } from '../config/defaults';
 import { normalizePhone, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, normalizeAmount, normalizeSmsOptIn } from '../utils/normalize';
+import {
+  foldByPhone, consentVote, keptRowConsent,
+  // ★ 2026-11-04 C101 1.7.6 세대 적재(설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md 3-2 ⑤ · ⑦ · ⑧)
+  generationalLoadOf, generationalRowConsent, loadEvidenceFold, recordLoadEvidence, guardSyncLoadChunk, oldLoadBlockedByConsentPass,
+  consentFailureResponse, alertMixedSyncAgents, ConsentPassError, type ConsentFold,
+} from '../utils/same-phone-consent';
+import syncConsentRoutes from './sync-consent';   // ★ 2026-11-04 C101 세대 주소 4(인증 뒤에 붙인다)
+import { pickSyncRelease } from '../utils/sync-releases';   // ★ 2026-11-04 C101 회사 지정 릴리스
 import {
   FIELD_MAP,
   CATEGORY_LABELS,
@@ -23,7 +31,6 @@ import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError }
 import { stampFirstSeenJoinedAt, insertedPhonesOf } from '../utils/customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
 // ★2026-09-12 시크릿 해시 비교(원문 저장 폐지 · 전환기 폴백은 42703로만 판정)
 import { hashSecret, verifySecret } from '../utils/secret-hash';
-import { registerBulkCompanyUserUnsubscribes } from '../utils/unsubscribe-helper';
 import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommandsDelivered, isReportedWorthWriting } from '../utils/agent-protocol';
@@ -32,7 +39,6 @@ import { applyLedgerIngestSummary, parseCustomerSummaryFields } from '../utils/c
 import { lockCompanyPurchaseSummary } from '../utils/two-door-purchase';   // ★ 2026-11-04 C99 회사 구매 요약 잠금
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
-import { recordUnsubscribeDeleted } from '../utils/change-audit';
 // ★ 2026-08-03: 원본 행 키 기반 구매 멱등 적재 CT — 재싱크·재전송이 중복 행을 만들지 않게 한다.
 import {
   normalizeSourceRowKey,
@@ -252,6 +258,8 @@ async function syncAuth(req: SyncAuthRequest, res: Response, next: Function) {
 
 // 모든 sync 라우트에 인증 + rate limit 적용
 router.use(ipRateLimit, syncAuth, companyRateLimit);
+// ★ 2026-11-04 C101 같은 번호 수신동의 세대(에이전트 1.7.6) — 인증 · 회사 한도 뒤
+router.use('/consent-pass', syncConsentRoutes);
 
 // ============================================
 // 공통 헬퍼 — 설정 응답 + 수신거부 3단 배정
@@ -291,99 +299,7 @@ async function getSyncConfigForAgent(companyId: string): Promise<{
   };
 }
 
-/**
- * sms_opt_in 양방향 동기화 — unsubscribes 자동 등록/해제 (싱크 경로 유일 진입점).
- * ★ 2026-06-15 버그2 fix: 기존엔 false→등록만 하고 동의 전환(false→true) 해제가 없어
- *   재동의 고객이 계속 거부로 노출됐다(인비토02 실측 = sms_opt_in=true인데 unsubscribes sync 4건 잔존).
- *   발송/표시 자격 = `sms_opt_in=true AND NOT EXISTS unsubscribes`라 한 방향만 처리하면 비대칭 사고.
- *   이제 한 사이클에서 등록(false)과 해제(true)를 모두 처리한다.
- *
- * [등록] sms_opt_in=false 고객 → unsubscribes 3단 배정 (upload.ts admin 경로 :829-889 패턴):
- *   1. 시스템 가상 user (is_system=true)에게 INSERT
- *   2. 회사의 admin user들에게 INSERT (관리 가시성)
- *   3. store_code 담당 company_user들에게 INSERT (브랜드별 필터링)
- * [해제] sms_opt_in=true 고객 → source='sync' unsubscribes 제거 (등록의 짝).
- *   ★ source='sync'(sms_opt_in 파생)만 삭제 — 능동 수신거부(manual/upload/legacy_migration)는 보존.
- *   명시 opt-out 우선(정보통신망법): 고객이 직접 거부했거나 옛 이관 거부분은 동의 동기화로 덮지 않는다.
- *   ★ 2026-10-04 해제는 **이 배치에서 원본(ERP)이 동의라고 보낸 번호**만(optInPhones). 옛: 고객 행 sms_opt_in=true 전원이었다 —
- *     그 칸은 싱크만 쓰는 칸이 아니라(자사몰 식별 · 화면 수정 · 업로드) 다른 문이 true 로 올리면 원본이 아직 거부인데도
- *     싱크 수신거부가 지워졌다(싱크·자사몰 전수점검 S16 · 결정 ④ 철회 우선). 등록 쪽은 회사 전체 그대로(빠짐 0).
- *
- * ⚠️ 이 로직은 sync.ts 외부에서 복제 금지. 싱크 경로의 유일한 수신거부 진입점.
- */
-async function reconcileSyncUnsubscribes(companyId: string, companyName: string | undefined, optInPhones: string[]): Promise<void> {
-  try {
-    // 1. 시스템 user 조회/생성 — CT (42P08 타입 고정: $1::uuid + $2::text)
-    let systemUserId: string | null = null;
-    try {
-      systemUserId = await ensureSystemSyncUser(companyId);
-    } catch (sysErr) {
-      console.error('[Sync] 시스템 user 조회/생성 실패:', sysErr);
-    }
-
-    // 2. 시스템 user에게 INSERT (source='sync')
-    if (systemUserId) {
-      const r1 = await query(
-        `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-         SELECT $1, $2, phone, 'sync'
-         FROM customers
-         WHERE company_id = $1 AND sms_opt_in = false AND is_active = true
-           AND NOT EXISTS (SELECT 1 FROM unsubscribes u WHERE u.user_id = $2 AND u.phone = customers.phone)
-         ON CONFLICT (user_id, phone) DO NOTHING`,
-        [companyId, systemUserId]
-      );
-      if (r1.rowCount && r1.rowCount > 0) {
-        console.log(`[Sync] 수신거부 자동등록(system): ${r1.rowCount}건 (company: ${companyName})`);
-      }
-    }
-
-    // 3. 회사 admin user들에게 INSERT (관리 가시성)
-    const r2 = await query(
-      `INSERT INTO unsubscribes (company_id, user_id, phone, source)
-       SELECT c.company_id, u.id, c.phone, 'sync'
-       FROM customers c
-       JOIN users u ON u.company_id = c.company_id AND u.user_type = 'admin' AND COALESCE(u.is_system, false) = false
-       WHERE c.company_id = $1 AND c.sms_opt_in = false AND c.is_active = true
-       ON CONFLICT (user_id, phone) DO NOTHING`,
-      [companyId]
-    );
-    if (r2.rowCount && r2.rowCount > 0) {
-      console.log(`[Sync] 수신거부 자동등록(admin): ${r2.rowCount}건 (company: ${companyName})`);
-    }
-
-    // 4. company_user들에게 INSERT — CT-03 registerBulkCompanyUserUnsubscribes
-    // ★ D136 (2026-04-22): sync.ts + upload.ts + unsubscribe-helper.ts 3곳에 분산된
-    //   동일 SQL 패턴을 CT-03 컨트롤타워 함수로 통합. getStoreScope 4단계 판정 이식.
-    const r3Count = await registerBulkCompanyUserUnsubscribes(companyId, 'sync');
-    if (r3Count > 0) {
-      console.log(`[Sync] 수신거부 자동등록(company_user, CT-03): ${r3Count}건 (company: ${companyName})`);
-    }
-
-    // ===== [해제] sms_opt_in=true 전환분 → source='sync' unsubscribes 제거 (등록의 짝) =====
-    // ★ 2026-06-15 버그2 fix: 거부→동의 재동의 고객이 옛 sync 수신거부 잔존으로 계속 거부로 노출되던 비대칭 차단.
-    //   source='sync'(sms_opt_in 파생)만 삭제 — manual/upload/legacy_migration(능동 opt-out)은 보존(정보통신망법).
-    //   EXISTS로 unsubscribes(작은 집합) 기준 스캔 → 동의 전환분만 정확히 해제. 변경 없으면 0건.
-    if (optInPhones.length === 0) return;
-    const reEnable = await query(
-      `DELETE FROM unsubscribes u
-       WHERE u.company_id = $1 AND u.source = 'sync'
-         AND u.phone = ANY($2::text[])
-         AND EXISTS (
-           SELECT 1 FROM customers c
-           WHERE c.company_id = $1 AND c.phone = u.phone
-             AND c.sms_opt_in = true AND c.is_active = true
-         )`,
-      [companyId, optInPhones]
-    );
-    if (reEnable.rowCount && reEnable.rowCount > 0) {
-      console.log(`[Sync] 수신거부 자동해제(동의 전환): ${reEnable.rowCount}건 (company: ${companyName})`);
-      // ★2026-10-21 실사 준비 S1(D-24) — 동기화가 지운 수신거부도 감사 기록에(건수 · 경로만 · 0건이면 안 남김)
-      await recordUnsubscribeDeleted({ actorUserId: null, companyId, count: reEnable.rowCount, via: 'sync' });
-    }
-  } catch (unsubError) {
-    console.error('[Sync] 수신거부 동기화 실패:', unsubError);
-  }
-}
+// ★ 2026-11-04 reconcileSyncUnsubscribes = utils/sync-unsubscribes.ts 로 옮김(원문 그대로 · 세대 공개 · 에이전트 폐기도 같은 대조를 쓴다)
 
 // ============================================
 // POST /api/sync/register - Agent 최초 등록
@@ -624,8 +540,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
 
   try {
     const { customers, batchIndex, totalBatches } = req.body;
+    // ★ 2026-11-04 C101 1.7.6 = 고객 행 0건이어도 낮추는 근거(consentEvidence)만 실은 세대 요청은 받는다(에이전트 검증에서 떨어진 행의 거부 · Codex 구현 1R #2)
+    const evidenceOnly = Array.isArray(customers) && customers.length === 0 && req.body?.consentPassId !== undefined
+      && Array.isArray(req.body?.consentEvidence) && req.body.consentEvidence.length > 0;
 
-    if (!customers || !Array.isArray(customers) || customers.length === 0) {
+    if (!customers || !Array.isArray(customers) || (customers.length === 0 && !evidenceOnly)) {
       return res.status(400).json({
         success: false,
         error: 'customers array is required and must not be empty'
@@ -638,6 +557,17 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         success: false,
         error: 'Maximum 5000 customers per batch'
       });
+    }
+
+    // ★ 2026-11-04 C101 1.7.6 세대 적재 = 패스 번호 · 순번이 실린 요청(동의는 거부만 바로 · 올리기는 세대 공개 · 기본값 0 · 끝 대조 해제 0)
+    const gen = generationalLoadOf(req.body);
+    if (gen === 'invalid') {
+      return res.status(400).json({ success: false, error: 'agentId · consentPassId · consentBatch 형식이 맞지 않습니다' });
+    }
+    // 근거 접기 = 고객 행 + 따로 실은 낮추는 근거(1.7.6 만)
+    const evidenceFold = gen ? loadEvidenceFold(customers, req.body.consentEvidence) : null;
+    if (evidenceFold === 'invalid') {
+      return res.status(400).json({ success: false, error: 'consentEvidence 형식이 맞지 않습니다' });
     }
 
     // ★ 2026-08-14: 요금제 고객 수 제한(max_customers) 차단 제거.
@@ -682,6 +612,9 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     const unknownConsentWords = new Set<string>();
     /** 폰 → 그 폰이 이 배치에서 들고 온 매장 전량(중복 행 것 포함). Set이라 같은 매장이 겹쳐도 1개다. */
     const storesByPhone = new Map<string, Set<string>>();
+    // ★ 2026-11-04 같은 번호 여러 원본 행 = 거부 우선(층 1 · utils/same-phone-consent.ts · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §3-1)
+    //   첫 행만 남기는 접기(아래 seenPhones) 전에 이 요청의 같은 번호 표를 모두 모은다 — 둘째 행부터의 미수신 · 탈퇴가 버려지지 않게.
+    const consentByPhone = foldByPhone(customers, (c: any) => (c?.phone ? normalizePhone(c.phone) : null), (c: any) => consentVote(normalizeSmsOptIn(c?.sms_opt_in), !!c?.sms_opt_in_unknown));
 
     for (const c of customers) {
       if (!c.phone) {
@@ -772,9 +705,17 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           //   true로 되돌린다. 신규 행 기본 true는 업서트와 같은 트랜잭션의 applySmsOptInDefaults가 채운다.
           const val = c[field.fieldKey];
           row.sms_opt_in = val !== null && val !== undefined ? val : null;
-          if (row.sms_opt_in === null && c.sms_opt_in_unknown) {
+          if (gen) {
+            // ★ 2026-11-04 C101 1.7.6 = 이 요청 같은 번호 표에 거부가 있으면 거부 · 그 밖 = null(있는 고객 그대로 · 신규 = 대기 · 세대 공개가 정한다)
+            row.sms_opt_in = generationalRowConsent((evidenceFold as Map<string, ConsentFold>).get(phone));
+            continue;
+          }
+          // ★ 2026-11-04 이 요청에 같은 번호가 여럿이면 남긴 행 = 거부 우선 값 · 한 행뿐이면 위 값 그대로(kept = null)
+          const kept = keptRowConsent(consentByPhone.get(phone));
+          if (kept) row.sms_opt_in = kept.value;
+          if (row.sms_opt_in === null && (kept ? kept.unknown : c.sms_opt_in_unknown)) {
             unknownConsentPhones.add(phone);
-            unknownConsentWords.add(String(c.sms_opt_in_unknown).slice(0, 20));
+            if (c.sms_opt_in_unknown) unknownConsentWords.add(String(c.sms_opt_in_unknown).slice(0, 20));
           }
         } else if (field.dataType === 'date') {
           // ★ 2026-08-14: date 컬럼(recent_purchase_date)이 정규화를 못 거치고 원본 그대로 PG로 가던 자리.
@@ -840,11 +781,29 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     validRows.sort((a, b) => (a.phone < b.phone ? -1 : a.phone > b.phone ? 1 : 0));
     // ★ 2026-10-04 계통 오류가 나면 남은 청크를 멈추고 503 — 행 실패로 접어 200 을 주면 에이전트가 커서를 넘긴다(sync-ingest.ts).
     let systemError: any = null;
+    // ★ 2026-11-04 C101 1.7.6 = 근거 먼저 · 따로 커밋(설계서 3-2 ⑤ · Codex 설계 4R #1) — 고객 행을 쓰기 전 · 실패면 고객 행 0 · 에이전트 재전송
+    if (gen) {
+      try {
+        await withTransaction((run) => recordLoadEvidence(run, companyId, gen.agentId, gen.passId, gen.batch, evidenceFold!));
+      } catch (e: any) {
+        const f = consentFailureResponse(e);
+        if (f) return res.status(f.status).json(f.body);
+        console.warn(`[Sync] Customers 1.7.6 근거 커밋 실패 — 503 재전송 요청 (company: ${req.companyName}): ${e?.code || ''} ${e?.message || e}`);
+        return res.status(SYNC_RETRY_HTTP_STATUS).json(syncRetryResponseBody());
+      }
+      // 근거만 실은 요청 = 근거 커밋이 전부(고객 행 0)
+      if (customers.length === 0) {
+        return res.json({ success: true, data: { upsertedCount: 0, failedCount: 0, duplicateInRequest: 0, consentUnknown: 0, failures: [] } });
+      }
+    }
+    // ★ 2026-11-04 C101 청크 첫 문장이 던진 세대 판정(섞인 회사 · 폐기 중) — 남은 청크를 멈추고 그 코드로 답한다
+    let consentError: ConsentPassError | null = null;
     // ★ 2026-10-04 청크(폴백이면 한 행)마다 업서트 · 매장 기록 · 수신동의 기본값을 한 트랜잭션으로(applySmsOptInDefaults 주석).
     for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
       const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
         await withTransaction(async (run) => {
+          await guardSyncLoadChunk(run, companyId, !!gen);   // ★ 2026-11-04 C101 첫 문장 = 회사 잠금 · 옛 요청인데 그 회사에 세대가 있으면 409
           const up = await upsertBuilder.runBatch(run, companyId, chunk);   // ★ 2026-11-04 C99 회사 잠금 · 갈래 · 원본 요약 값 · 두 문 CT-D3
           // ★ 2026-11-02 설계서 3-6 — incremental 에서 그 회사에 없던 번호 = 가입(원천 가입일이 없으면 받은 시각) · full = 기존 고객(CT-J6)
           if (mode === 'incremental') await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(up.rows));
@@ -872,7 +831,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
               storeValues
             );
           }
-          await applySmsOptInDefaults(run, companyId, chunk.map((r) => String(r.phone)), unknownConsentPhones);
+          if (!gen) await applySmsOptInDefaults(run, companyId, up.rows, unknownConsentPhones);   // ★ 2026-11-04 새로 넣은 행만 · 1.7.6 = 기본값 0(세대 공개가 정한다)
         });
         // 처리한 행 수(바뀌지 않아 다시 쓰지 않은 행 포함 · 종전과 같은 뜻 — R206 뒤 rowCount 는 바뀐 행만 센다)
         // ★ 2026-10-04 매장 기록까지 끝난 뒤에 센다 — 매장 기록이 실패해 단건 폴백으로 가면 같은 청크가 두 번 세어졌다.
@@ -885,6 +844,10 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
         //   느리지만(최대 500회 SQL) 정확. chunk 일괄 실패는 흔한 케이스 아니라 성능 영향 미미.
         // ★ 2026-08-14 (Codex 2R): 단 계통 오류(연결·구문·자원)는 폴백 금지 — 부하 증폭(customer-upsert.ts 참조).
         // ★ 2026-10-04 그리고 실패로 세지도 않는다 — 배치를 멈추고 503(위 systemError).
+        if (chunkError instanceof ConsentPassError) {
+          consentError = chunkError;
+          break;
+        }
         if (!isRowLevelDbError(chunkError)) {
           systemError = chunkError;
           break;
@@ -894,6 +857,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           try {
             let rowCount = 0;
             await withTransaction(async (run) => {
+              await guardSyncLoadChunk(run, companyId, !!gen);   // ★ 2026-11-04 C101 한 행 길도 같은 첫 문장
               const rowResult = await upsertBuilder.runBatch(run, companyId, [row]);   // ★ 2026-11-04 C99
               rowCount = rowResult.rowCount || 1;
               if (mode === 'incremental') await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(rowResult.rows));   // ★ 2026-11-02 CT-J6
@@ -912,10 +876,14 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
                   );
                 }
               }
-              await applySmsOptInDefaults(run, companyId, [String(row.phone)], unknownConsentPhones);
+              if (!gen) await applySmsOptInDefaults(run, companyId, rowResult.rows, unknownConsentPhones);   // ★ 2026-11-04 새로 넣은 행만 · 1.7.6 = 기본값 0
             });
             upsertedCount += rowCount;
           } catch (rowError: any) {
+            if (rowError instanceof ConsentPassError) {
+              consentError = rowError;
+              break;
+            }
             // 단건 폴백 중에도 계통 오류면 행 실패가 아니다(그 뒤 행 전부가 같은 이유로 "실패"로 세어진다)
             if (!isRowLevelDbError(rowError)) {
               systemError = rowError;
@@ -928,8 +896,16 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
             });
           }
         }
-        if (systemError) break;
+        if (systemError || consentError) break;
       }
+    }
+
+    if (consentError) {
+      // ★ 2026-11-04 C101 섞인 회사 = 운영 경보(회사당 하루 한 통) · 그 밖(폐기 중 등) = 그 코드만
+      if (consentError.code === 'MIXED_AGENT') void alertMixedSyncAgents(companyId, req.companyName);
+      const f = consentFailureResponse(consentError)!;
+      console.warn(`[Sync] Customers 세대 판정 ${consentError.code} — 남은 청크 중단 (company: ${req.companyName})`);
+      return res.status(f.status).json(f.body);
     }
 
     if (systemError) {
@@ -1025,11 +1001,11 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
     }
 
     // ===== sms_opt_in 양방향 동기화 — false→unsubscribes 등록 / true→source='sync' 해제 =====
-    await reconcileSyncUnsubscribes(
-      companyId,
-      req.companyName,
-      validRows.filter((r) => normalizeSmsOptIn(r.sms_opt_in) === true).map((r) => String(r.phone)),
-    );
+    // ★ 2026-11-04 C101 해제 번호 = 1.7.6 요청 · 세대가 생긴 회사의 옛 요청이면 비움(동의로 올리는 곳은 세대 공개 하나 · 설계서 3-2 ⑤ · ⑧) · 등록 쪽은 그대로
+    const optInPhones = gen || await oldLoadBlockedByConsentPass(query, companyId)
+      ? []
+      : validRows.filter((r) => normalizeSmsOptIn(r.sms_opt_in) === true).map((r) => String(r.phone));
+    await reconcileSyncUnsubscribes(companyId, req.companyName, optInPhones);
 
     // ===== Agent 설정 응답 (설정 폴링 제거 대체) =====
     const agentConfig = await getSyncConfigForAgent(companyId);
@@ -1520,19 +1496,13 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
     // ★ 2026-07-01: 티어 매칭 릴리스만 조회 — 에이전트 티어(agentTier)와 일치하거나 tier=NULL(전역)만.
     //   다른 OS 티어 에이전트가 남의 티어 exe를 받아 실행 실패하는 오배포 차단(fail-closed).
     //   정확 티어 매칭을 전역(NULL)보다 우선.
-    const result = await query(
-      `SELECT version, download_url, checksum, release_notes, force_update, released_at, tier
-       FROM sync_releases
-       WHERE is_active = true AND (tier = $1 OR tier IS NULL)
-       ORDER BY (CASE WHEN tier = $1 THEN 0 ELSE 1 END), released_at DESC
-       LIMIT 1`,
-      [agentTier]
-    );
+    // ★ 2026-11-04 C101 회사 지정 릴리스가 그보다 앞(고르는 SQL = utils/sync-releases.ts 한 곳 · 회사 칸 없으면 아래 catch = 업데이트 없음)
+    const latest = await pickSyncRelease(query, agentTier, companyId);
 
     // 릴리스가 없으면 업데이트 없음 응답
     // ★ 2026-07-01: 에이전트 checkVersion은 응답의 data.data(camelCase)를 파싱한다.
     //   (기존 최상위 snake_case → 에이전트가 항상 null 판정 → 자동 업데이트가 한 번도 동작 안 하던 버그)
-    if (result.rows.length === 0) {
+    if (!latest) {
       return res.json({
         success: true,
         data: {
@@ -1543,7 +1513,6 @@ router.get('/version', async (req: SyncAuthRequest, res: Response) => {
       });
     }
 
-    const latest = result.rows[0];
     const updateAvailable = compareSemver(latest.version, currentVersion) > 0;
 
     // ★ 2026-07-01: data.data(camelCase) 정합 — 에이전트 VersionResponse/updater가 참조하는 필드명.

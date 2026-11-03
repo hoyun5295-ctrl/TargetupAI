@@ -1396,7 +1396,7 @@ const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
   ...OUT_OF_AXIS('결제 · 정산 · 요금제', ['payments.ts', 'balance.ts', 'charge-approve.ts', 'agent-charge-orders.ts', 'plans.ts', 'plan-term.ts', 'invoice-public.ts', 'popbill-webhook.ts']),
   ...OUT_OF_AXIS('문자 · 알림톡 직접 발송 축', ['campaigns.ts', 'results.ts', 'alimtalk.ts', 'sms-templates.ts', 'spam-filter.ts', 'send-checks.ts', 'mms-images.ts', 'unsubscribes.ts', 'test-contacts.ts', 'manage-scheduled.ts', 'auto-campaigns.ts', 'sender-registration.ts', 'manage-callbacks.ts', 'short-url.ts']),
   ...OUT_OF_AXIS('대행(계약 기능)', ['agency-send.ts', 'agency-approve.ts', 'campaign-agency.ts']),
-  ...OUT_OF_AXIS('고객 DB · 쇼핑몰 연동', ['customers.ts', 'upload.ts', 'address-books.ts', 'sync.ts', 'cafe24.ts', 'imweb.ts', 'woocommerce.ts', 'naver-commerce.ts', 'makeshop.ts', 'godo.ts', 'analysis.ts', 'insight.ts']),
+  ...OUT_OF_AXIS('고객 DB · 쇼핑몰 연동', ['customers.ts', 'upload.ts', 'address-books.ts', 'sync.ts', 'sync-consent.ts', 'cafe24.ts', 'imweb.ts', 'woocommerce.ts', 'naver-commerce.ts', 'makeshop.ts', 'godo.ts', 'analysis.ts', 'insight.ts']),
   ...OUT_OF_AXIS('계정 · 회사 · 관리 · 도움말', ['auth.ts', 'companies.ts', 'manage-users.ts', 'manage-stats.ts', 'identity-return.ts', 'onboarding.ts', 'help.ts', 'internal-alert.ts', 'design-templates.ts', 'ai-memory.ts', 'ai-usage.ts']),
   ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts']),
 };

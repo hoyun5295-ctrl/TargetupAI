@@ -7,7 +7,7 @@
  * 또한 opt-in 동기화 로직(단건/벌크)도 여기서 제공하여 재사용 가능하게 함.
  */
 
-import { query } from '../config/database';
+import { query, type TxRun } from '../config/database';
 import { normalizePhone } from './normalize-phone';
 import { mallConsentCodeAmong } from './mall-consent';
 
@@ -133,8 +133,29 @@ export async function registerBulkCompanyUserUnsubscribes(
   companyId: string,
   source: string,
 ): Promise<number> {
-  const result = await query(
-    `INSERT INTO unsubscribes (company_id, user_id, phone, source)
+  const result = await query(companyUserRefusalCopySql(false), [companyId, source]);
+  return result.rowCount || 0;
+}
+
+/**
+ * ★ 2026-11-04 같은 판정 · 주어진 번호만 · 부르는 쪽 트랜잭션 연결(run)에서 — 싱크 세대 공개 · 에이전트 폐기의 묶음 대조
+ *   (utils/sync-unsubscribes.ts reconcileSyncUnsubscribesFor · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §3-2 ④).
+ *   SQL 은 위 함수와 같은 생성기(번호 조건 한 줄만 더해진다 · 판정 두 벌 0).
+ */
+export async function registerCompanyUserUnsubscribesFor(
+  run: TxRun,
+  companyId: string,
+  source: string,
+  phones: string[],
+): Promise<number> {
+  if (phones.length === 0) return 0;
+  const result = await run(companyUserRefusalCopySql(true), [companyId, source, phones]);
+  return result.rowCount || 0;
+}
+
+/** CT-03 회사 계정 배정 SQL 생성기 · byPhones = 주어진 번호만($3) · false = 옛 SQL 글자 그대로 */
+function companyUserRefusalCopySql(byPhones: boolean): string {
+  return `INSERT INTO unsubscribes (company_id, user_id, phone, source)
      SELECT c.company_id, u.id, c.phone, $2
      FROM customers c
      JOIN users u ON u.company_id = c.company_id
@@ -142,7 +163,7 @@ export async function registerBulkCompanyUserUnsubscribes(
        AND COALESCE(u.is_active, true) = true
      WHERE c.company_id = $1
        AND c.sms_opt_in = false
-       AND c.is_active = true
+       AND c.is_active = true${byPhones ? '\n       AND c.phone = ANY($3::text[])' : ''}
        AND (
          NOT EXISTS (SELECT 1 FROM customer_stores cs WHERE cs.company_id = $1)
          OR
@@ -158,10 +179,7 @@ export async function registerBulkCompanyUserUnsubscribes(
                        WHERE cs.company_id = $1
                          AND cs.store_code = ANY(u.store_codes)))
        )
-     ON CONFLICT (user_id, phone) DO NOTHING`,
-    [companyId, source],
-  );
-  return result.rowCount || 0;
+     ON CONFLICT (user_id, phone) DO NOTHING`;
 }
 
 /**

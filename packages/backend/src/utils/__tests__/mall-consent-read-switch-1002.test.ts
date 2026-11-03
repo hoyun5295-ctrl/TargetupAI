@@ -483,6 +483,7 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
     'utils/unsubscribe-helper.ts': '쓰기·동기화',
     'routes/unsubscribes.ts': '쓰기·동기화',
     'routes/sync.ts': '쓰기·동기화',
+    'utils/sync-unsubscribes.ts': '쓰기·동기화(★1104 routes/sync.ts 에서 옮긴 싱크 수신거부 대조)',
     'routes/upload.ts': '쓰기·동기화',
     'utils/cdp-identity.ts': '쓰기·동기화',
     'utils/customer-upsert.ts': '쓰기·동기화',

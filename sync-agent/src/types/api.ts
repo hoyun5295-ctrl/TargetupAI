@@ -30,6 +30,19 @@ export interface SyncCustomersRequest {
   mode: SyncMode;
   batchIndex?: number;
   totalBatches?: number;
+  /** ★ 1.7.6 세대 안 고객 적재 — 서버가 이 요청의 낮추는 근거를 그 패스에 먼저 커밋한다 · consentBatch = 이 패스 안 요청 순번(0 부터) */
+  agentId?: string;
+  consentPassId?: string;
+  consentBatch?: number;
+  /** ★ 1.7.6 이 묶음의 낮추는 근거(거부 · 모름) — Zod 검증에서 떨어진 행 것까지(서버가 고객 행 근거와 합쳐 먼저 커밋한다) */
+  consentEvidence?: ConsentVoteRow[];
+}
+
+/** ★ 1.7.6 원장 패스 한 행(정규화 뒤 · 번호 · 수신동의 · 못 알아본 표기) */
+export interface ConsentVoteRow {
+  phone: string;
+  sms_opt_in: boolean | null;
+  sms_opt_in_unknown: string | null;
 }
 
 export interface SyncCustomersResponse {

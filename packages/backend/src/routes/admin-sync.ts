@@ -21,6 +21,10 @@ import { isAgentVersionGte, ACK_MIN_AGENT_VERSION } from '../utils/agent-protoco
 import { validateSyncMapping, syncFieldsNeedingNewerAgent } from '../utils/sync-mapping-fields';
 // ★ 2026-09-02(2) 주기 해석 CT — 온라인 판정을 고객사별 실제 설정으로 자른다(상수 금지)
 import { resolveAgentIntervals, AGENT_INTERVAL_DEFAULTS, SCHEDULABLE_INTERVALS_MIN } from '../utils/sync-intervals';
+import { retireSyncAgent, ConsentPassError } from '../utils/same-phone-consent';
+import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
+import { isUuid } from '../utils/normalize';
+import { registerSyncRelease } from '../utils/sync-releases';
 import path from 'path';
 import fs from 'fs';
 
@@ -571,6 +575,13 @@ router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, r
     if (!version || typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
       return res.status(400).json({ success: false, error: 'version은 x.y.z 형식이어야 합니다.' });
     }
+    // ★ 2026-11-04 C101 회사 하나에만 거는 릴리스(설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md 3-2 ⑩) · 비우면 지금처럼 그 티어 전체
+    const companyId: string | null = req.body.company_id || null;
+    if (companyId) {
+      if (!isUuid(companyId)) return res.status(400).json({ success: false, error: 'company_id 형식이 맞지 않습니다.' });
+      const co = await query(`SELECT 1 FROM companies WHERE id = $1`, [companyId]);
+      if (co.rows.length === 0) return res.status(400).json({ success: false, error: '그 고객사를 찾을 수 없습니다.' });
+    }
     // tier 검증 — buildTier 5종만 허용(비우면 전역, 하위호환). 잘못된 티어 = 오배포 위험이라 차단.
     const VALID_TIERS = ['win-legacy', 'win-mid', 'win-modern', 'linux-legacy', 'linux-modern'];
     if (tier && !VALID_TIERS.includes(tier)) {
@@ -587,22 +598,14 @@ router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, r
     try {
       await client.query('BEGIN');
       // ★ 2026-07-01: 같은 티어의 기존 활성만 해제 (다른 티어 릴리스는 유지 — 티어별 독립).
-      //   GET /version이 티어 매칭으로 조회하므로, 티어마다 활성 릴리스가 따로 존재해야 한다.
-      if (tier) {
-        await client.query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier = $1`, [tier]);
-      } else {
-        await client.query(`UPDATE sync_releases SET is_active = false WHERE is_active = true AND tier IS NULL`);
-      }
+      // ★ 2026-11-04 C101 범위 = (티어 · 회사) 짝 · 고르기 · 등록 SQL = utils/sync-releases.ts 한 곳
       // download_url = 서버 서빙 라우트(에이전트 baseURL 기준 상대경로). released_at/created_at은 default now().
       //   ★ 2026-07-03: 티어별 릴리즈는 티어를 인코딩(/download/<version>-<tier>) → 티어마다 다른 exe 무선 서빙.
       //   서버 파일 = agent-releases/sync-agent-<version>-<tier>.exe (전역이면 sync-agent-<version>.exe).
-      const ins = await client.query(
-        `INSERT INTO sync_releases (version, download_url, checksum, release_notes, force_update, is_active, tier)
-         VALUES ($1, $2, $3, $4, $5, true, $6)
-         RETURNING id, version, tier, download_url, force_update, is_active, released_at`,
-        [version, buildReleaseDownloadUrl(version, tier || null), checksum || null, release_notes || null, force_update ?? true, tier || null]
-      );
-      rows = ins.rows;
+      rows = [await registerSyncRelease((text, params) => client.query(text, params), {
+        version, downloadUrl: buildReleaseDownloadUrl(version, tier || null), checksum: checksum || null,
+        releaseNotes: release_notes || null, forceUpdate: force_update ?? true, tier: tier || null, companyId,
+      })];
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK').catch(() => {});
@@ -612,6 +615,7 @@ router.post('/releases', authenticate, requireSuperAdmin, async (req: Request, r
     }
     res.json({ success: true, release: rows[0] });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('C101-DDL-2(sync_releases.company_id)'));
     console.error('Sync 릴리즈 등록 실패:', error);
     res.status(500).json({ success: false, error: 'Sync 릴리즈 등록 실패' });
   }
@@ -658,19 +662,19 @@ router.delete('/agents/:agentId', authenticate, requireSuperAdmin, async (req: R
     }
 
     // 삭제 (sync_logs는 FK CASCADE)
-    const deleteResult = await query(
-      `DELETE FROM sync_agents WHERE id = $1 RETURNING id, agent_name`,
-      [agentId]
-    );
+    // ★ 2026-11-04 C101 — 그 에이전트가 낸 같은 번호 수신동의 표를 빼고 회사 값을 다시 접은 뒤 지운다(설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md 3-2 ⑥)
+    const deleted = await retireSyncAgent(agent.company_id, agentId);
 
     console.log(`[Admin Sync] Agent 삭제: ${agent.agent_name} (id=${agentId}, company=${agent.company_id}, force=${force})`);
 
     return res.json({
       success: true,
-      deleted: deleteResult.rows[0],
+      deleted,
       forced: force,
     });
   } catch (error) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('C101-DDL-1(sync_consent_passes 등 세대 표 셋)'));
+    if (error instanceof ConsentPassError) return res.status(error.http).json({ success: false, error: 'Agent 삭제 실패', code: error.code });
     console.error('[Admin Sync] Agent 삭제 실패:', error);
     const msg = error instanceof Error ? error.message : String(error);
     return res.status(500).json({ success: false, error: 'Agent 삭제 실패', detail: msg });

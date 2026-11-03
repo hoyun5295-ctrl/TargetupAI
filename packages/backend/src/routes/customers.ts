@@ -25,12 +25,13 @@ import {
   EXTRACTION_SEARCH_MIN_DIGITS, EXTRACTION_REMOVE_MAX, EXTRACTION_EXPIRED_ERROR,
 } from '../utils/extraction-keep';
 import { normalizePhone } from '../utils/normalize-phone';
-import { isUuid } from '../utils/normalize';
+import { isUuid, normalizeSmsOptIn } from '../utils/normalize';
+import { foldByPhone, consentVote, keptRowConsent } from '../utils/same-phone-consent';
 import { buildDynamicFilterCompat } from '../utils/customer-filter';
 import { getTestSmsTables } from '../utils/sms-queue';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
 import { blockIfSyncActive } from '../middlewares/sync-active-check';
-import { createCustomerUpsertBuilder, buildSmsOptInBackfill, isRowLevelDbError } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError } from '../utils/customer-upsert';
 import { stampFirstSeenJoinedAt, insertedPhonesOf } from '../utils/customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';   // ★ 2026-11-02 db_alter_safety_net(고객 쓰기 = customers.joined_at · C98-DDL-2)
 import { detectEnabledFields, buildDynamicSelectExpr, buildEnabledFieldsPayload, clearEnabledFieldsCache, enabledFieldsGenKey, ENABLED_FIELDS_HARD_TTL_SEC } from '../utils/enabled-fields';
@@ -575,14 +576,12 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
     const result = await withTransaction(async (run) => {
       const r = await manualUpsertBuilder.runBatch(run, companyId, [manualRow]);   // ★ 2026-11-04 C99 회사 잠금 · 갈래 · 두 문 CT-D3
       await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));
+      // ★ 2026-11-04 신규 행 기본값 = 업서트와 같은 트랜잭션 · 새로 넣은 행만(옛: 커밋 뒤 따로 = 실패하면 다시 해도 is_insert 거짓이라 영영 NULL · Codex 설계 3R #3)
+      await applySmsOptInDefaults(run, companyId, r.rows, new Set());
       return r;
     });
-    // 신규 행 기본 true 백필 (기존 행은 COALESCE 보존이라 null이 될 수 없음)
-    if (smsOptIn == null) {
-      const backfill = buildSmsOptInBackfill(companyId, [phone]);
-      await query(backfill.sql, backfill.values);
-      if (result.rows[0] && result.rows[0].sms_opt_in == null) result.rows[0].sms_opt_in = true;
-    }
+    // 응답 표시 — 위 기본값이 새로 넣은 행을 동의로 채웠다(RETURNING 은 그 앞 값)
+    if (result.rows[0]?.is_insert && result.rows[0].sms_opt_in == null) result.rows[0].sms_opt_in = true;
 
     // customer_stores N:N 매핑 (store_code가 있을 때)
     const customerId = result.rows[0]?.id;
@@ -648,6 +647,8 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
     // ★ 2026-08-14 (Codex 1R): 요청 내 같은 폰 dedupe — 충돌 축 (company_id, phone)에서 같은 폰 2행은
     //   "cannot affect row a second time"으로 배치를 통째 죽인다. 첫 행만 남긴다(upload와 동일 규칙).
     const seenPhones = new Set<string>();
+    // ★ 2026-11-04 같은 번호 여러 행 = 거부 우선(층 1 · utils/same-phone-consent.ts) — 첫 행만 남기기 전에 같은 번호(위와 같은 키)의 동의를 모은다
+    const consentByPhone = foldByPhone(customers, (c: any) => c?.phone || null, (c: any) => consentVote(normalizeSmsOptIn(c?.smsOptIn), false));
     for (const customer of customers) {
       if (!customer.phone) {
         failCount++;
@@ -668,7 +669,8 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         grade: customer.grade,
         points: customer.points,
         // ★ 2026-08-14 (Codex 1R): 미제공 = null — 신규 기본 true는 청크 처리 후 백필
-        sms_opt_in: customer.smsOptIn ?? null,
+        // ★ 2026-11-04 요청 안 같은 번호가 여럿이면 거부 우선 값 · 한 행뿐이면 그 값 그대로
+        sms_opt_in: keptRowConsent(consentByPhone.get(customer.phone))?.value ?? customer.smsOptIn ?? null,
         custom_fields: customer.customFields ? JSON.stringify(customer.customFields) : null,
       });
     }
@@ -681,6 +683,7 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         await withTransaction(async (run) => {   // ★ 2026-11-02 CT-J6 · 업서트 + 가입 시각 한 트랜잭션(Codex 구현 1R)
           const bulkRes = await bulkUpsertBuilder.runBatch(run, companyId, chunk);   // ★ 2026-11-04 C99
           await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(bulkRes.rows));
+          await applySmsOptInDefaults(run, companyId, bulkRes.rows, new Set());   // ★ 2026-11-04 같은 트랜잭션 · 새로 넣은 행만
         });
         successCount += chunk.length;
       } catch (chunkErr: any) {
@@ -698,6 +701,7 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
             await withTransaction(async (run) => {   // ★ 2026-11-02 CT-J6 · 한 트랜잭션(Codex 구현 1R)
               const rowRes = await bulkUpsertBuilder.runBatch(run, companyId, [row]);   // ★ 2026-11-04 C99
               await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(rowRes.rows));
+              await applySmsOptInDefaults(run, companyId, rowRes.rows, new Set());   // ★ 2026-11-04 같은 트랜잭션 · 새로 넣은 행만
             });
             successCount++;
           } catch (rowErr: any) {
@@ -707,11 +711,7 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         }
       }
     }
-    // ★ 2026-08-14 (Codex 1R): 신규 행 수신동의 기본 true 백필 — sync.ts와 동일 구조
-    if (successCount > 0 && bulkRows.length > 0) {
-      const backfill = buildSmsOptInBackfill(companyId, bulkRows.map((r) => r.phone));
-      await query(backfill.sql, backfill.values);
-    }
+    // ★ 2026-11-04 신규 행 수신동의 기본값은 위 청크 · 한 행 트랜잭션 안에서 적용했다(applySmsOptInDefaults · 새로 넣은 행만)
 
     // ★ 2026-09-28 한줄로 V2 R350 — customer_schema 자동 갱신 제거. 이 UPDATE 는 고객 표 전체를 4번 훑어
     //   genders·grades·custom_field_keys·store_codes 로 customer_schema 를 통째로 덮었는데, 그 네 키를 읽는 곳이 없다

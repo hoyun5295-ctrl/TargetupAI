@@ -24,7 +24,7 @@ export interface SyncAgentsTabProps {
   setSyncMapPurchases: Dispatch<SetStateAction<{ src: string; target: string; label: string; }[]>>;
   setSyncMapReportLoading: Dispatch<SetStateAction<boolean>>;
   setSyncMapReported: Dispatch<any>;
-  setSyncReleaseForm: Dispatch<SetStateAction<{ version: string; checksum: string; force_update: boolean; tier: string; }>>;
+  setSyncReleaseForm: Dispatch<SetStateAction<{ version: string; checksum: string; force_update: boolean; tier: string; company_id: string; }>>;
   setSyncSelectedAgent: Dispatch<any>;
   showAlert: (title: string, message: string, variant?: 'success' | 'error' | 'warning' | 'info') => void;
   syncAgents: any[];
@@ -103,7 +103,7 @@ const openSyncMappingModal = async (agent: any) => {
             <h2 className="text-base font-semibold">Sync Agent 모니터링</h2>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => { setSyncReleaseForm({ version: '', checksum: '', force_update: true, tier: 'win-legacy' }); setShowSyncReleaseModal(true); }}
+                onClick={() => { setSyncReleaseForm({ version: '', checksum: '', force_update: true, tier: 'win-legacy', company_id: '' }); setShowSyncReleaseModal(true); }}
                 className="text-[13px] text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1"
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
