@@ -504,6 +504,11 @@ docker exec -i targetup-postgres psql -U targetup targetup -c "
 | `/heartbeat` 401/403 | API key 불일치 | sync_agents.api_key 확인 |
 | heartbeat 시간 어긋남 | "지연" 잦음 | `getOnlineStatus()` 기준 vs Agent 주기 재확인 (§ 2-1) |
 | ON CONFLICT 매칭 실패 | `no unique constraint matching ON CONFLICT` | customers UNIQUE 인덱스 확인 (`idx_customers_company_store_phone`) |
+| ★1104 옛 에이전트 고객 적재 409 `MIXED_AGENT`(C101) | 운영 경보 「같은 회사에 옛 싱크 에이전트(1.7.5 이하)와 1.7.6 이 함께 있어…」 회사당 하루 한 통 · 그 옛 에이전트 고객 적재 0 | 의도된 막음(섞이면 요청 사이 동의가 어긋난다). 옛 에이전트를 1.7.6 으로 올리거나 슈퍼관리자 싱크 에이전트 화면에서 삭제(삭제 = 그 에이전트를 뺀 재접기 뒤 행 삭제). 설계서 `docs/2026-11-03-sync-duplicate-phone-consent-design.md` 3-2 ⑧ |
+| ★1104 1.7.6 세대 409(`BAD_STATE` · `SUPERSEDED` · `RETIRING`) | 에이전트 로그 「상태 어긋남 (409) — 재시도하지 않습니다」 | 재시도 안 하는 것이 정상 · 다음 고객 실행은 처음부터(start 가 모으던 옛 패스 = `collecting` · `collected` 를 abandoned 로 닫는다). 매 실행 반복이면 `SELECT pass_id, agent_id, state, started_at, finished_at FROM sync_consent_passes WHERE company_id = '<회사>' ORDER BY started_at DESC LIMIT 10;` 로 패스 상태 · `retiring` 여부 |
+| ★1104 1.7.6 complete 응답 `abandoned` | 그 실행의 동의 올리기 0 · 거부만 반영 | 서버가 받은 적재 묶음 수가 에이전트가 보낸 수와 다름(적재 묶음 일부 실패). 다음 실행이 처음부터 · 반복이면 같은 시각 `sync_logs` 고객 실패 상세 |
+| ★1104 1.7.6 회사에서 동의가 바로 안 올라감 | 원본을 수신으로 바꿨는데 고객DB 는 미동의 그대로 | 정상 = 미동의 → 동의 올리기는 세대 공개(complete)에서만 · 같은 회사의 다른 에이전트가 아직 확정 패스가 없으면 장벽이 막는다(R\*). 위 패스 상태 SQL 로 에이전트마다 `done` 이 있는지 |
+| ★1104 세대 주소 · 1.7.6 적재 503 `DB_MIGRATION_PENDING` | 에이전트가 다음 주기에 처음부터 | 세대 표 셋 없음 = 배포 원장 C101-DDL-1 · 릴리스 등록 503 = C101-DDL-2(`sync_releases.company_id`) |
 
 ---
 

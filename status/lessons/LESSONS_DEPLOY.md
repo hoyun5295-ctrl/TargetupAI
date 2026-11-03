@@ -191,3 +191,7 @@ pm2 logs hanjuldm-api --lines 100
 - **사례**: 비토 `routes/agents.js` 배포(16:59) 뒤 `GW_DEPLOY_OK` · 업로드 정리만 보고 콜비서 묶음 작업으로 넘어갔다. 런북 §4 「2~3분 뒤 새 PID ERROR 세기」를 건너뛰었다. 재기동이 다시 시작한 통계 칸 채우기가 120초 시간 초과를 끝없이 반복했고(관제 「집계 중」) Harold 가 17:30 화면으로 먼저 봤다.
 - **규칙**: ① 배포 명령은 그 저장소 런북 글자 그대로 · 배포 뒤 확인(새 PID 오류 · health · 화면 · 예민한 문장은 pg_stat_statements 최대 시간)까지 런북의 일부(메모리 `feedback_deploy_strictly_by_runbook` · 절대 원칙 맨 위) ② 그 확인을 받기 전에는 다른 일이 급해도 넘어가지 않는다 ③ 관리 API 로그는 JSON 이 아니라 글줄 → 세는 패턴이 다르다(비토 런북 §4 1102 줄).
 - **같은 날 같은 부류**: 긴 SQL(5KB EXPLAIN)을 서버 터미널에 붙여 넣으면 잘려 안 돈다 → 노트북에서 파일로 만들어 scp 로 올린 뒤 `psql < 파일`(비토 런북 §4). Git Bash 진입 = PowerShell `& "C:\Program Files\Git\bin\bash.exe" --login -i` · 런북 65행은 변수를 정한 같은 창에서.
+
+### 2026-11-04 빌드 출력을 `| tail` 로 잘라 보면 실패 종료 코드가 가려진다 — 성공 보고는 그 명령의 종료 코드로 (C101 에이전트 1.7.6)
+- **사례**: `node scripts/build-tiers.js --tiers win-modern 2>&1 | tail -5` 의 종료 코드는 tail 의 0 이었다. 실제 빌드는 빌드 PC Node 20 이라 modern 티어 시작 전에 멈췄는데(Node 22 이상 필요 · pkg 6.24) 「빌드 끝」이라 잘못 보고했다가 정정했다.
+- **규칙**: ① 성공 판정 = 그 명령 자신의 종료 코드(`; echo "exit=$?"` 를 파이프 없이 붙이거나 `set -o pipefail`) + 산출물 실물(파일 크기 · 해시 · `--version`) ② 출력이 길면 파일로 받은 뒤 끝을 읽는다 ③ 에이전트 modern 빌드 = 그 명령에만 nvm v24.13.0 경로를 앞에 둔다(`PATH="/c/Users/ceo/AppData/Local/nvm/v24.13.0:$PATH"` · `nvm use` 로 기본 판을 바꾸지 않는다) · 빌드는 Codex approve 뒤.

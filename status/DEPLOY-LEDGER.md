@@ -938,6 +938,14 @@ SET lock_timeout = '3s';
 ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS company_id uuid NULL;
 ```
 
+### C101-S1 · 같은 번호 수신동의 거부 우선 실측(배포 뒤 · 설계서 docs/2026-11-03-sync-duplicate-phone-consent-design.md §8-1)
+- 카드: C101
+- 단계: 사후
+- 선행: C101-DDL-1 · C101-DDL-2 · 코드 배포
+- 기대: ① 배포 뒤 새 PID ERROR 0(SQL 오류 코드 · `DB_MIGRATION_PENDING` · `MIXED_AGENT` 0) · health 200 · 슈퍼관리자 「Agent 버전 배포」 창에 「배포 대상」 칸 ② 엠티 1.7.6 설치 뒤 첫 고객 실행 = 그 에이전트 세대 패스 `done` · 409 `MIXED_AGENT` 0 · 판매 뷰 휴대폰 칸 ③ 직원 시트(설계서 §7 · 시트 1 업로드 · 시트 2 싱크) 기대 결과 그대로
+- 확인: 로그 줄 · 화면 · ② = 엠티 설치 뒤 패스 상태 SQL(TROUBLESHOOTING §4 C101 줄) · 직원 시트 결과
+- 결과: 1104 Harold 출력 = ① 서버 HEAD cae2cd7c · 새 프로세스 08:11:09 KST(dist 시각 뒤) · 에러 로그 0줄 · 출력 로그 SQL 오류 코드 · `DB_MIGRATION_PENDING` · `MIXED_AGENT` 0 · health 200 · 화면 「배포 대상」 칸 보임 → 기대값 같음 · 엠티 1.7.6 묶음 + 안내서 PDF = 1104 오전 발송(설계서 §8-1) · ② 엠티 설치 뒤 = 남음 · ③ 직원 시트 = 남음(엑셀 아직)
+
 ## §2 덤프 뒤 적용분
 
 > 다음 재덤프 때 각 설계서(2026-10-27-mall-integration-hardening-design.md §3 · §11)로 옮기고 비운다.

@@ -98,6 +98,10 @@
 | 76 | sender_auth_challenges **(2026-09-12 운영 CREATE 완료 — 13컬럼 `information_schema` 실측)** | 발신 인증(추가 인증 · 전송자격인증 3.5) 인증번호 원장. `id uuid PK DEFAULT gen_random_uuid(), user_id uuid NOT NULL FK users CASCADE, company_id uuid(FK 없음), callback_number varchar(20) NOT NULL(**숫자만 남긴 비교 키** — 표기가 달라도 같은 번호로 본다), code_hash varchar(255) NOT NULL(bcrypt · **평문 저장 금지**), phone varchar(20)(담당자 수신 번호), attempts int NOT NULL DEFAULT 0, consumed_at timestamp(**썼거나 폐기됨**), verified_at timestamp(**인증 성공** — 24시간 세션 판정의 유일한 축), expires_at timestamp NOT NULL, ip_address varchar(50), user_agent text, created_at timestamp NOT NULL DEFAULT NOW()`. INDEX `(user_id, callback_number, verified_at DESC) WHERE verified_at IS NOT NULL` · `(user_id, callback_number, created_at DESC) WHERE consumed_at IS NULL`. ⛔ **`consumed_at`으로 세션을 판정하지 마라** — 미사용 코드를 폐기한 행이 인증 성공으로 읽혀 인증 없이 24시간이 열린다(두 축을 나눈 이유). 코드 42P01 폴백 = 발신 인증만 쉬고 **발송은 그대로 나간다**. 소유 = `utils/sender-auth.ts` · 계약 = [전송자격인증 §4-K](../docs/2026-08-18-transmission-qualification-cert.md). **★2026-10-02 유지 시간 24 → 8시간**(`SENDER_AUTH_TRUST_HOURS` · DDL 0 · 위 「24시간」 표기는 종전 값) |
 | 77 | spell_check_uses **(★2026-09-25 신설 · CREATE 실행 완료 0925 Harold)** | 직접발송 맞춤법 검사 사용 원장(미가입 회사 월 5회 한도의 근거 · 한 번 = 한 행). `id bigserial PK, company_id uuid NOT NULL FK companies CASCADE, user_id uuid NULL(FK 없음), source varchar(40) NOT NULL('direct-send-spell'), period_month char(7) NOT NULL(KST 'YYYY-MM' · SQL이 계산), status varchar(10) NOT NULL DEFAULT 'reserved' CHECK IN (reserved·done·failed), issue_count int NOT NULL DEFAULT 0, created_at timestamptz NOT NULL DEFAULT now()`. INDEX (company_id, source, period_month). 검사 **전에** reserved 로 넣고(회사 advisory 잠금 안에서 세고 넣음) 끝나면 done/failed · 세는 행 = done + 70분 안의 reserved(예약 수명 · 수명 지난 예약은 done 이 되지 않고 failed · ★Codex 4R·5R) · failed 는 한도에서 빠진다. 코드 42P01 폴백 = 요금제 회사는 기록 없이 검사 · 미가입은 503 `DB_MIGRATION_PENDING`. 소유 = `utils/spell-check-quota.ts` · 설계 = [직접발송 점검](../docs/2026-09-25-direct-send-precheck-design.md) §4 · **★2026-09-28 ADD 실행 완료(Harold · information_schema 확인 = text·jsonb · 둘 다 NULL 허용)** `checked_text text NULL` · `issues jsonb NULL` = 검사한 문안·고칠 곳(슈퍼관리자 사용 기록 상세 전용 · 쓰기 = `recordSpellDetail`(끝난 검사만 · 실패해도 결과 무관) · 한도 판정은 안 읽는다 · 칸 없으면 저장 건너뜀 · 상세 조회는 503 `DB_MIGRATION_PENDING`) |
 | 78 | identity_verifications **(★2026-10-02 운영 CREATE 완료 — Harold 실행 출력 `CREATE TABLE` · `CREATE INDEX` 2)** | 계정 담당자 본인인증 이력(전송자격인증 2.1 · 3.4). `id uuid PK DEFAULT gen_random_uuid(), user_id uuid NOT NULL(**FK 없음** — 계정 행이 삭제돼도 이력은 남고, 걸면 계정 삭제가 막힌다), purpose varchar(20) NOT NULL(first_login·change), status varchar(12) NOT NULL DEFAULT 'pending'(pending·verified·superseded), provider varchar(20) NOT NULL(인증기관 이름), provider_tx_id varchar(120), verified_name varchar(100), verified_phone varchar(20)(숫자만), dup_key_hash varchar(64)(인증기관 중복 식별값의 해시 · 연동 전이라 비어 있다), ip_address varchar(64), user_agent text, created_at timestamptz NOT NULL DEFAULT now(), expires_at timestamptz NOT NULL, verified_at timestamptz`. INDEX `(user_id, status)` · **UNIQUE `(user_id) WHERE status = 'pending'`**(대기 행은 계정당 하나 · 새로 시작하면 종전 대기 행은 superseded). 확정 = 계정 행 `FOR UPDATE` 뒤 조건부 `UPDATE … WHERE status='pending' AND provider AND purpose AND expires_at > NOW() RETURNING` 한 문장 · 같은 트랜잭션에서 `users.phone`·`mfa_phone`을 인증 번호로 덮고 통과권 삭제(**계정 이름 `users.name`은 덮지 않는다** · ★1006 Harold · 인증 이름은 이 표에만). 코드 42P01 폴백 = 본인인증만 쉰다(로그인은 그대로 · 본인인증 endpoint 는 503 `DB_MIGRATION_PENDING`). 소유 = `utils/identity-verify.ts` · 열람 = 슈퍼관리자 「본인인증 현황」(`utils/identity-status.ts` · ceo 전용 · 이름 · 번호 가림 · ★1007) · DDL = `migrations/identity-verifications.sql` · 계약 = [전송자격인증 §4-M](../docs/2026-08-18-transmission-qualification-cert.md) |
+| 79 | sync_consent_passes **(★2026-11-04 운영 CREATE 완료 · C101-DDL-1 · Harold 확인 출력 = 표 이름 · 기본 키)** | 같은 번호 수신동의 **세대 패스**(에이전트 1.7.6 고객 실행 한 번 = 한 행 · 상태 collecting → collected → applying → done · abandoned · retiring). 상세 = 아래 「sync_consent_* (세대 표 셋)」 |
+| 80 | sync_consent_stage **(★2026-11-04 운영 CREATE 완료 · C101-DDL-1)** | 세대 패스가 모은 번호별 요약(거부 · 수신 · 모름 있었나) |
+| 81 | sync_consent_marks **(★2026-11-04 운영 CREATE 완료 · C101-DDL-1)** | 회사 × 번호 올리기 기준(마지막 거부 관측 · 처음 미룬 시각) |
+| - | sync_releases **(★2026-11-04 `company_id` ADD 완료 · C101-DDL-2 · Harold 확인 출력 = uuid · NULL 허용)** | 싱크 에이전트 원격 업데이트 릴리스. 회사 칸 NULL = 그 티어 전체 · 값 = 그 회사 에이전트만. 상세 = 아래 「sync_releases」 |
 | - | ai_training_logs | 문안 학습 로그 (회사별 tenant_ref HMAC 격리). ★ 2026-07-03 실측: `ck_training_message_type` CHECK = message_type IN ('SMS','LMS','MMS','KAKAO','EMAIL','DM') — DM 추가(전 채널 학습 통합 Phase 1). 적재=fire-and-forget 격리(발송 무영향), source_ref 멱등 |
 | - | ai_training_logs (클릭·전환 컬럼) | `click_count int` · `conversion_count int` — Tier1 반응 신호(DM·이메일 클릭 환류, 랭커/검색기 클릭 우선 정렬). **★2026-08-11 information_schema 실측 = 둘 다 실존**(0704 "ADD 대기" 표기는 낡은 기록 — `operator_proposals.conversion_attributed_at`·`operator_proposal_variants.sent/click/conversion_count`도 같은 실측으로 실존 확인). ⚠값 유입은 DM·이메일 클릭뿐 — SMS/LMS 클릭(short-url→변이 테이블)은 이 원장에 미배선(자기 개선 루프 설계의 Phase 0) |
 | - | best_copy_seed_usage **★2026-09-03 `information_schema` 실측 존재(5컬럼)** | 시드 사용 기록(성과 환류). 실측 = `id bigint, seed_id uuid, tenant_ref varchar, channel varchar, used_at timestamptz`. INDEX(seed_id),(tenant_ref,used_at)은 미실측. 코드 42P01 폴백 유지 |
@@ -1590,6 +1594,58 @@ companies 5칸: `plan_term_expires_on date`(만료일 KST · NULL = 관리 대�
 | config | jsonb — DEFAULT '{}' |
 | sync_interval_customers | integer — DEFAULT 60 |
 | sync_interval_purchases | integer — DEFAULT 30 |
+
+### sync_consent_* (세대 표 셋 · ★2026-11-04 C101)
+> 근거 = 배포 원장 `C101-DDL-1` 원문(SQL 원문은 원장 한 곳) · Harold 실행 1104 = `CREATE TABLE` 3 · `CREATE INDEX` 2 · 확인 = 표 이름 세 줄 · 기본 키(passes = pass_id · stage = pass_id, phone · marks = company_id, phone). 칸 정의는 원문 기준(information_schema 칸 목록 대조는 다음 덤프 대조 때).
+> 읽고 쓰는 SQL = `utils/same-phone-consent.ts` 에만(계약 `same-phone-consent-contract-1104` C2) · 설계서 `docs/2026-11-03-sync-duplicate-phone-consent-design.md` §5.
+
+**sync_consent_passes**
+| 컬럼 | 타입 |
+|------|------|
+| pass_id | uuid PK — DEFAULT gen_random_uuid() |
+| agent_id | uuid NOT NULL — FK sync_agents(id) ON DELETE CASCADE |
+| company_id | uuid NOT NULL |
+| started_at | timestamptz NOT NULL — DEFAULT now() |
+| state | text NOT NULL — DEFAULT 'collecting' · CHECK IN (collecting, collected, applying, done, abandoned, retiring) |
+| load_batches | integer[] NOT NULL — DEFAULT '{}' · 근거를 먼저 커밋한 고객 적재 묶음 번호 |
+| prev_pass_id | uuid |
+| publish_cursor | text — 공개 2단계 진행 위치 |
+| finished_at | timestamptz |
+색인 = `sync_consent_passes_agent (agent_id, state)` · `sync_consent_passes_company (company_id, state, started_at)`
+
+**sync_consent_stage** — PK (pass_id, phone)
+| 컬럼 | 타입 |
+|------|------|
+| pass_id | uuid NOT NULL — FK sync_consent_passes(pass_id) ON DELETE CASCADE |
+| phone | text NOT NULL |
+| any_false | boolean NOT NULL — DEFAULT false |
+| any_true | boolean NOT NULL — DEFAULT false |
+| any_unknown | boolean NOT NULL — DEFAULT false |
+
+**sync_consent_marks** — PK (company_id, phone)
+| 컬럼 | 타입 |
+|------|------|
+| company_id | uuid NOT NULL |
+| phone | text NOT NULL |
+| refusal_seen_at | timestamptz — 마지막 거부 관측 |
+| raise_since | timestamptz — 처음 미룬 시각(올리기 장벽 R\*) |
+
+### sync_releases (싱크 에이전트 원격 업데이트 릴리스)
+> ★2026-11-04 C101 등재. 칸 목록 = 코드(`utils/sync-releases.ts` SELECT · INSERT) 기준 · **실측 = `company_id` 한 칸만**(C101-DDL-2 확인 출력 uuid · YES) · `checksum` = TROUBLESHOOTING §2-3 ALTER(varchar(255)) · 나머지 타입 미실측.
+> 고르기 = 회사 지정 > 티어 일치 > 전역(`is_active` · `released_at DESC`) · 등록 = 같은 (tier, company_id) 활성만 끈다 · SQL = `utils/sync-releases.ts` 에만.
+
+| 컬럼 | 타입 |
+|------|------|
+| id | (미실측) |
+| version | (미실측) |
+| download_url | (미실측) — 상대경로 · 에이전트 baseURL 에 붙임 |
+| checksum | varchar(255) — 없으면 에이전트가 교체 거부 |
+| release_notes | (미실측) |
+| force_update | (미실측) — 코드가 참 · 거짓으로 씀 |
+| is_active | (미실측) — 코드가 참 · 거짓으로 씀 |
+| tier | (미실측) — NULL = 전역 |
+| company_id | uuid NULL — ★1104 실측 · NULL = 그 티어 전체 · 값 = 그 회사 에이전트만 |
+| released_at | timestamp 계열(코드 정렬 · 미실측) |
 
 ### system_alert_state (시스템 알림 쿨다운 영속 — 2026-06-25 실측 생성)
 | 컬럼 | 타입 |
