@@ -397,7 +397,7 @@ describe('Codex 1R 정정', () => {
     expect(d).toContain('const d = await res.json();');
     expect(d).toContain("if (!d || typeof d.success !== 'boolean') return { ok: false, d: null, lost: true };");
     // Codex 3R — 요청 키는 화면 수명이 아니라 내용에서 결정적(상품 = 화면 해시 · 추천 흐름 = 서버 계산)
-    expect(d).toContain('requestId: await productRequestId(pr.key, pr.medianDays)');
+    expect(d).toContain('requestId: await productRequestId(`${pr.door}:${pr.key}`, pr.medianDays)');   // ★ 2026-11-04 C99 상품 = (문, 키)
     expect(d).not.toMatch(/randomUUID|recoId/);
   });
   it('시드: 빈 회사 판정에서 회사 생성이 함께 만드는 시스템 싱크 계정 하나만 뺀다(Codex 2R)', () => {

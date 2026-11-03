@@ -12,9 +12,9 @@
  * 자사몰 쪽 행 = 매출 반영된 주문(CT-86 isRevenueApplied 와 같은 규칙) · 취소·환불 차감 안 됨 · 고객 연결된 주문 이벤트만(고객 요약 칸과 같은 셈).
  *   구매일 = 주문 시각(KST 벽시계 · 원장 purchase_date 와 같은 축).
  *
- * ⛔ 같은 구매를 두 번 보이지 않는다(Codex 1001 R1) — 자사몰 주문을 ERP 로도 동기화해 원장에도 주는 회사가 있다(journey-purchase-ledger 머리).
- *   두 원천에 공통 주문번호가 없어 **같은 고객 · 같은 날(KST) · 같은 금액**의 원장 행이 있으면 자사몰 행을 뺀다(원장 우선).
- *   금액이나 날짜가 다른 오프라인 구매는 그대로 남는다.
+ * ⛔ 같은 구매를 두 번 보이지 않는다(Codex 1001 R1) — 자사몰 주문을 ERP 로도 동기화해 원장에도 주는 회사가 있다.
+ *   두 원천에 공통 주문번호가 없어 **같은 고객 · 같은 날(KST) · (같은 금액의 원장 행 또는 그날 원장 합계 = 몰 금액)**이면 자사몰 행을 뺀다(원장 우선 표시).
+ *   ★ 2026-11-04 C99 — 판정 = two-door-purchase CT-D1 한 곳(옛: 같은 금액 한 줄만 · 상품 줄로 나뉜 원장은 두 번 보였다). 금액 · 날짜가 다른 오프라인 구매는 그대로 남는다.
  * ⛔ 매장(분류코드) = 그 주문의 연동 행 하나(이벤트당 최대 1행 · LATERAL LIMIT 1):
  *   우커머스 = 주문번호 `{몰 주소}:{번호}` 의 몰 주소와 같은 연동 행(다몰 접두 · woocommerce-core 불변 3).
  *   그 밖(카페24·고도몰 등 접두 없음) = 그 회사에 그 provider 연동이 **하나뿐일 때만** 그 행. 둘 이상이면 어느 몰인지 몰라 비운다.
@@ -23,6 +23,7 @@
 
 // 매출 반영된 주문 = CT-86 판정 조각 netPurchaseSql 한 곳(★ 2026-10-27 자사몰 대비 K1-8 · 옛 이 파일 사본 삭제 · 같은 규칙)
 import { netPurchaseSql } from './cdp-order-revenue';
+import { mallDupOfLedgerSql } from './two-door-purchase';   // ★ 2026-11-04 C99 같은 구매 판정 CT-D1
 
 /** 문자열 숫자만 숫자로 — 다른 값이면 0(한 행의 이상한 값이 화면 전체를 500 으로 만들지 않게) */
 const num = (expr: string) => `CASE WHEN (${expr}) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (${expr})::numeric ELSE 0 END`;
@@ -69,10 +70,6 @@ export function purchaseHistorySourceSql(companyRef: string): string {
      WHERE e.company_id = ${companyRef}
        AND e.customer_id IS NOT NULL
        AND ${netPurchaseSql('e')}
-       AND NOT EXISTS (
-         SELECT 1 FROM purchases px
-          WHERE px.company_id = e.company_id AND px.customer_id = e.customer_id
-            AND px.purchase_date::date = ${KST_AT}::date
-            AND px.total_amount = ${AMOUNT})
+       AND NOT ${mallDupOfLedgerSql('e')}
   ) p`;
 }

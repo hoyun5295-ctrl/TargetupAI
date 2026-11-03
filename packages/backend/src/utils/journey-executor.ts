@@ -75,6 +75,7 @@ import { readOwnerConsentForCustomers } from './mall-consent';
 import { getTriggerContract, sendTimingForTrigger } from './journey-trigger-capability';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 목표(같은 상품을 다시 샀는가) · 키 규칙은 journey-product 한 곳.
 import { PRODUCT_REPURCHASE_SINCE_ENTRY_SQL } from './journey-product';
+import { purchaseAfterSql, purchaseWithinDaysSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D4
 import { isSingleStepKind } from './journey-start-kind';
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 엔진 앞 절단(설계서 docs/2026-10-09-demo-company-design.md §2)
 import { aiOperatorAllowedForWorker } from './plan-guard';
@@ -1352,14 +1353,23 @@ async function processWaitBatch(execs: ExecutionRow[], step: StepRow, res: Batch
     for (const id of fresh) anchorAt.set(id, now);
   }
   // 사건 발생(cdp_events · 회사 격리 · 고객마다 그 앵커 뒤)
-  const ev = await query(
-    `SELECT e.id FROM journey_executions e
-       JOIN unnest($1::uuid[], $2::timestamptz[]) AS a(id, at) ON a.id = e.id
-      WHERE EXISTS (SELECT 1 FROM cdp_events c
-                     WHERE c.company_id = $3::uuid AND c.customer_id = e.customer_id
-                       AND ${cdpEventNameMatchSql('c', '$4')} AND c.occurred_at >= a.at)`,   // ★ 2026-11-02 기다리기 사건이 구매면 결제된 구매(3-4 ④)
-    [ids, ids.map((id) => anchorAt.get(id)!.toISOString()), head.company_id, waitEventName],
-  );
+  // ★ 2026-11-04 C99 T5 — 사건이 구매면 두 문(CT-D4 · 몰 결제 = 앵커 뒤 · 매장 원장 = 앵커 날 다음 날부터) · 그 밖 사건 = 지금 그대로
+  const anchors = ids.map((id) => anchorAt.get(id)!.toISOString());
+  const ev = waitEventName === 'purchase'
+    ? await query(
+      `SELECT e.id FROM journey_executions e
+         JOIN unnest($1::uuid[], $2::timestamptz[]) AS a(id, at) ON a.id = e.id
+        WHERE ${purchaseAfterSql('e.customer_id', '$3::uuid', 'a.at')}`,
+      [ids, anchors, head.company_id],
+    )
+    : await query(
+      `SELECT e.id FROM journey_executions e
+         JOIN unnest($1::uuid[], $2::timestamptz[]) AS a(id, at) ON a.id = e.id
+        WHERE EXISTS (SELECT 1 FROM cdp_events c
+                       WHERE c.company_id = $3::uuid AND c.customer_id = e.customer_id
+                         AND ${cdpEventNameMatchSql('c', '$4')} AND c.occurred_at >= a.at)`,   // ★ 2026-11-02 기다리기 사건이 구매면 결제된 구매(3-4 ④)
+      [ids, anchors, head.company_id, waitEventName],
+    );
   const arrived = new Set(ev.rows.map((x: any) => String(x.id)));
   const nowMs = Date.now();
   const timedOut = ids.filter((id) => !arrived.has(id) && nowMs >= anchorAt.get(id)!.getTime() + waitTimeoutHours * 3600 * 1000);
@@ -1612,6 +1622,7 @@ async function goalConvertedExecutionIds(execs: ExecutionRow[]): Promise<Set<str
   const head = execs[0];
   let goalKind = 'purchase';
   let productKeys: string[] = [];
+  let productDoor: 'mall' | 'ledger' | null = null;
   let signupJourney = false;
   try {
     const gk = await query(`SELECT goal_kind, trigger_event, trigger_filters FROM journeys WHERE id = $1::uuid`, [head.journey_id]);
@@ -1621,6 +1632,7 @@ async function goalConvertedExecutionIds(execs: ExecutionRow[]): Promise<Set<str
     if (v === 'product') {
       const tf = gk.rows[0]?.trigger_filters || {};
       productKeys = Array.isArray(tf.product_keys) ? tf.product_keys.map((k: unknown) => String(k).trim()).filter(Boolean) : [];
+      productDoor = tf.door === 'mall' || tf.door === 'ledger' ? tf.door : null;   // ★ 2026-11-04 C99 상품 식별 = (문, 키)
       goalKind = 'product';
     }
     // ★ 2026-09-29 여정 V2 0차 ⑫ — 저장된 'points_used'도 읽는다.
@@ -1675,10 +1687,10 @@ async function goalConvertedExecutionIds(execs: ExecutionRow[]): Promise<Set<str
     // ★ 2026-09-30 V2 3차 — 같은 상품 재구매(상품을 모르면 판정 불가 = 계속).
     if (goalKind === 'product') {
       const out = new Set<string>();
-      if (productKeys.length === 0) return out;
+      if (productKeys.length === 0 || !productDoor) return out;   // 문 없는 상품 여정 = 진입 감시가 설정 오류로 멈춘다(normalizeProductFilters)
       // ponytail: 상품 목표는 실행마다 한 문장(드문 목표 · 판정 SQL = journey-product 한 곳 그대로) · 큰 상품 여정이 생기면 묶음 SQL 로
       for (const e of execs) {
-        const r = await query(PRODUCT_REPURCHASE_SINCE_ENTRY_SQL, [head.company_id, e.customer_id, e.entered_at, productKeys]);
+        const r = await query(PRODUCT_REPURCHASE_SINCE_ENTRY_SQL, [head.company_id, e.customer_id, e.entered_at, productKeys, productDoor]);
         if (r.rows.length > 0) out.add(e.execution_id);
       }
       return out;
@@ -1724,12 +1736,19 @@ async function evaluateConditionBatch(
     if (!eventName) return all('not_met');   // Phase 7: 빈 event_name = 확인 불가 = 미충족
     const withinDays = Math.max(1, Math.min(365, Number(condJsonb.within_days) || 7));
     try {
-      const r = await query(
-        `SELECT DISTINCT customer_id FROM cdp_events
-          WHERE customer_id = ANY($1::uuid[]) AND company_id = $2::uuid AND ${cdpEventNameMatchSql('cdp_events', '$3')}
-            AND occurred_at >= NOW() - ($4 * INTERVAL '1 day')`,
-        [execs.map((e) => e.customer_id), companyId, eventName, withinDays]
-      );
+      // ★ 2026-11-04 C99 T5 — 「지난 N일 구매」 = 두 문(CT-D4 · 몰 = 지금 − N일 · 매장 원장 = KST 오늘 − N일) · 그 밖 사건 = 지금 그대로
+      const r = eventName === 'purchase'
+        ? await query(
+          `SELECT c.id AS customer_id FROM unnest($1::uuid[]) AS c(id)
+            WHERE ${purchaseWithinDaysSql('c.id', '$2::uuid', '$3')}`,
+          [execs.map((e) => e.customer_id), companyId, withinDays],
+        )
+        : await query(
+          `SELECT DISTINCT customer_id FROM cdp_events
+            WHERE customer_id = ANY($1::uuid[]) AND company_id = $2::uuid AND ${cdpEventNameMatchSql('cdp_events', '$3')}
+              AND occurred_at >= NOW() - ($4 * INTERVAL '1 day')`,
+          [execs.map((e) => e.customer_id), companyId, eventName, withinDays]
+        );
       const exists = new Set<string>(r.rows.map((x: any) => String(x.customer_id)));
       return byHit(exists, (e) => e.customer_id, String(condJsonb.presence || 'exists') !== 'not_exists');
     } catch (err: any) {

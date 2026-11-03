@@ -19,7 +19,7 @@
  */
 
 import { query } from '../config/database';
-import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
+import { purchaseFactsSql } from './two-door-purchase';   // ★ 2026-11-04 C99 T9 두 문 구매 사실(CT-D2)
 
 export interface AttributionWindow {
   windowLabel: string;             // '24h' / '7d' / '30d'
@@ -81,15 +81,14 @@ export async function buildCampaignAttribution(
     };
   }
 
-  // 2) CDP 데이터 영역 확인 (analysisPeriod + 30일 lookahead)
+  // 2) 구매 데이터 확인 (analysisPeriod + 30일 lookahead)
+  // ★ 2026-11-04 C99 T9(Codex 설계 1R #6) — 관문 = 자사몰 사건 또는 매장 원장 · 있는지만(EXISTS · 옛: 기간 안 전 이벤트 COUNT)
   const cdpCheckResult = await query(
-    `SELECT COUNT(*)::int AS cnt
-       FROM cdp_events
-      WHERE company_id = $1::uuid
-        AND occurred_at > NOW() - ($2 || ' days')::interval`,
+    `SELECT EXISTS (SELECT 1 FROM cdp_events WHERE company_id = $1::uuid AND occurred_at > NOW() - ($2 || ' days')::interval)
+         OR EXISTS (SELECT 1 FROM purchases WHERE company_id = $1::uuid AND purchase_date > (NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval) AS has_data`,
     [companyId, analysisPeriodDays + 30]
   );
-  const hasCdpData = Number(cdpCheckResult.rows[0]?.cnt) > 0;
+  const hasCdpData = cdpCheckResult.rows[0]?.has_data === true;
 
   // 3) 윈도우별 매트릭스 계산
   const windows: AttributionWindow[] = [];
@@ -104,22 +103,22 @@ export async function buildCampaignAttribution(
     let cdpRevenue = 0;
 
     if (hasCdpData) {
-      // 캠페인 발송 후 N시간 안 cdp_events purchase/order 합집합 영역
+      // 캠페인 발송 후 N시간 안 구매 합집합 영역
+      // ★ 2026-11-04 C99 T9 — 두 문 사실(CT-D2 · 같은 구매 한 번) · 몰 = 결제 시각 · 매장 원장 = 발송한 KST 날짜 ~ 창 끝 날짜(날짜만)
       const cdpResult = await query(
         `SELECT
             COUNT(*)::int AS purchase_count,
-            COALESCE(SUM((properties->>'total_amount')::numeric), 0)::float AS revenue
-          FROM cdp_events e
-          WHERE e.company_id = $1::uuid
-            AND ${netPurchaseSql('e')}   -- ★ 2026-11-02 결제된 구매 = CT(취소 · 환불 0 · 설계서 3-0 CT-J3)
-            AND EXISTS (
+            COALESCE(SUM(f.amount), 0)::float AS revenue
+          FROM (${purchaseFactsSql({ companyRef: '$1::uuid', sinceAt: `NOW() - ($2 || ' days')::interval - INTERVAL '1 day'` })}) f
+          WHERE EXISTS (
               SELECT 1
                 FROM campaigns c
                WHERE c.company_id = $1::uuid
                  AND c.status = 'completed'
                  AND c.sent_at > NOW() - ($2 || ' days')::interval
-                 AND e.occurred_at >= c.sent_at
-                 AND e.occurred_at <= c.sent_at + ($3 || ' hours')::interval
+                 AND ((f.door = 'mall' AND f.at >= c.sent_at AND f.at <= c.sent_at + ($3 || ' hours')::interval)
+                   OR (f.door = 'ledger' AND f.kst_day >= (c.sent_at AT TIME ZONE 'Asia/Seoul')::date
+                       AND f.kst_day <= ((c.sent_at + ($3 || ' hours')::interval) AT TIME ZONE 'Asia/Seoul')::date))
             )`,
         [companyId, analysisPeriodDays, w.hours]
       );

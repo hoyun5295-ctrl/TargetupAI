@@ -91,7 +91,7 @@ describe('데이터로 만들 수 없는 여정은 활성화되지 않는다', (
 
     const r = await activate();
     expect(r.ok).toBe(false);
-    expect(r.reason).toContain('구분할 정보가 없어요');
+    expect(r.reason).toContain('가입한 때를 알 수 있는 정보가 아직 없어요');   // ★ 2026-11-04 C99 T10 잠금 문구 = NO_JOINED_AT_REASON 한 곳
     expect(didActivate()).toBe(false);
   });
 

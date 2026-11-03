@@ -146,7 +146,7 @@ describe('B 2R 받는 사람 문형(허용 목록)', () => {
     inOrder(route, ["router.post('/line-read', async", 'readLineForCompany(req, companyId, line, Date.now())', 'plannerLineAsk(read, ctx)']);
     // ★ B 4R — 상품 목록 = 대상 CT 한 곳 · 시간 상한 안 · 실패 · 초과 = null(사람이 고름)
     const ct = fnBody(read('../planner-audience.ts'), 'export async function loadPlannerLineAskContext(');
-    inOrder(ct, ['Promise.race([', 'listObservedProducts(companyId, door)', 'setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS)', '.catch(', 'clearTimeout(timer)']);
+    inOrder(ct, ['Promise.race([', 'listObservedProductsByDoor(companyId)', 'setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS)', '.catch(', 'clearTimeout(timer)']);   // ★ 2026-11-04 C99 두 문 상품
   });
 });
 

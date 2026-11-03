@@ -5,11 +5,11 @@
  * 원장(purchases)을 이벤트로 복사하지 않고 그대로 읽는다 — 진실이 하나여야 중복 진입이 구조로 막힌다.
  *
  * 못 박는 것:
- *   1. 자사몰 문이 현역이면 원장 문을 닫는다(같은 구매 두 번 진입 = 중복 발송·과금).
+ *   1. ★ 2026-11-04 C99 — 두 문을 늘 다 연다(옛 「자사몰 문이 현역이면 원장 문을 닫는다」 삭제) · 같은 날 다른 문 진입은 CT-D5 가 후보에서 뺀다.
  *   2. 창 길이는 회사 적재 주기가 정한다(정답표 금지).
  *   3. 원장 조회는 발생 시각으로 자른다 — 도착 시각으로는 이관 전량을 못 막는다.
  *   4. 커서는 (도착시각, 행 id)로 돌고 실제로 본 마지막 행까지만 전진한다.
- *   5. 지표·인앱은 원장을 읽지 않는다(이 조각이 매출 숫자를 바꾸지 않는다).
+ *   5. 지표·인앱은 원장을 읽지 않는다(이 조각이 매출 숫자를 바꾸지 않는다) · ★ C99 자동마케팅 성과 · 반응 귀속은 예외(Harold §5 ① (가) · 두 문 사실 CT-D2).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
@@ -22,12 +22,8 @@ vi.mock('../config/database', () => ({
 
 import { query } from '../config/database';
 import {
-  resolvePurchaseLedgerGate,
-  isMallPurchaseDoorActive,
   isLedgerRunWindowHour,
-  resetPurchaseLedgerCaches,
   PURCHASE_TRIGGER_MAX_AGE_HOURS,
-  MALL_DOOR_ACTIVE_DAYS,
   LEDGER_RUN_START_HOUR_KST,
   LEDGER_RUN_END_HOUR_KST,
 } from './journey-purchase-ledger';
@@ -41,7 +37,6 @@ const src = (rel: string) => readFileSync(resolve(process.cwd(), rel), 'utf8');
 beforeEach(() => {
   q.mockReset();
   q.mockResolvedValue({ rows: [], rowCount: 0 });
-  resetPurchaseLedgerCaches();
 });
 
 describe('원장 문을 쓰는 트리거', () => {
@@ -82,39 +77,34 @@ describe('실행 시간대 — 하루 모아 다음 날 오전', () => {
   });
 });
 
-describe('문 판정 — 두 문을 동시에 열지 않는다', () => {
-  it('자사몰 구매 이벤트가 최근에 있으면 원장 문을 닫는다', async () => {
-    q.mockResolvedValueOnce({ rows: [{ '?column?': 1 }] });
-    const gate = await resolvePurchaseLedgerGate(COMPANY_ID);
-    expect(gate.enabled, '두 문을 다 열면 같은 구매가 두 번 진입한다(쿨다운 0)').toBe(false);
+describe('★ 2026-11-04 C99 — 두 문을 늘 연다 · 같은 날 다른 문 진입은 후보가 아니다(CT-D5)', () => {
+  it('문 판정 함수 · 캐시 · 관문이 소스에 없다(삭제가 처방 · 뿌리 R54)', () => {
+    const ledger = src('src/utils/journey-purchase-ledger.ts');
+    const watcher = src('src/utils/journey-trigger-watcher.ts');
+    for (const gone of ['isMallPurchaseDoorActive', 'resolvePurchaseLedgerGate', 'isMallPurchaseDoorForJourneyStats', 'MALL_DOOR_ACTIVE_DAYS', 'doorCache']) {
+      expect(ledger, gone).not.toContain(gone);
+      expect(watcher, gone).not.toContain(gone);
+    }
+    expect(src('src/utils/journey-product.ts')).not.toContain('currentPurchaseDoor');
   });
 
-  it('자사몰 이벤트가 없으면 원장 문을 연다', async () => {
-    q.mockResolvedValueOnce({ rows: [] });
-    const gate = await resolvePurchaseLedgerGate(COMPANY_ID);
-    expect(gate.enabled).toBe(true);
-    expect(q, '문 판정 말고 다른 조회를 하지 않는다').toHaveBeenCalledTimes(1);
-  });
-
-  it('자사몰 없음은 캐시하지 않는다 (캐시된 false가 두 문을 동시에 연다)', async () => {
-    q.mockResolvedValue({ rows: [] });
-    await resolvePurchaseLedgerGate(COMPANY_ID);
-    await resolvePurchaseLedgerGate(COMPANY_ID);
-    expect(q, '두 번째 호출도 실제로 조회해야 한다').toHaveBeenCalledTimes(2);
-  });
-
-  it('원장 잠금(자사몰 현역)은 캐시한다 — 안전한 방향이다', async () => {
-    q.mockResolvedValue({ rows: [{ '?column?': 1 }] });
-    await resolvePurchaseLedgerGate(COMPANY_ID);
-    await resolvePurchaseLedgerGate(COMPANY_ID);
-    expect(q).toHaveBeenCalledTimes(1);
-  });
-
-  it('현역 판정은 존재가 아니라 최근이다 (옛 테스트 이벤트 한 건이 문을 영영 닫지 않게)', async () => {
-    await isMallPurchaseDoorActive(COMPANY_ID);
+  it('원장 커서 행 = 같은 날 자사몰 진입이 있는 행을 거른다(계보 · 고객 · 원장 문 · 그 행의 구매일)', async () => {
+    const WINDOW_END = new Date('2026-08-01T01:00:00Z');
+    await selectPurchaseLedgerRowsForCursor(COMPANY_ID, {}, { at: new Date('2026-08-01T00:00:00Z'), rowId: null }, WINDOW_END, 72, 10, '', undefined, ['11111111-1111-1111-1111-111111111111']);
     const sql = String(q.mock.calls[0][0]);
-    expect(sql).toMatch(/occurred_at >= NOW\(\) - \(\$2 \|\| ' days'\)::interval/);
-    expect((q.mock.calls[0][1] as any[])[1]).toBe(String(MALL_DOOR_ACTIVE_DAYS));
+    expect(sql).toMatch(/AND NOT EXISTS \(SELECT 1 FROM journey_executions xo/);
+    expect(sql).toContain("->>'door' <> 'ledger'");
+    expect(sql).toContain("->>'day' = to_char(p.purchase_date::date, 'YYYY-MM-DD')");
+  });
+
+  it('사건 커서 행 = 구매 계열일 때만 같은 날 매장 진입이 있는 행을 거른다', async () => {
+    const WINDOW_END = new Date('2026-08-01T01:00:00Z');
+    const cur = { at: new Date('2026-08-01T00:00:00Z'), eventId: null, axis: 'created_at' as const };
+    await selectCdpEventRowsForCursor(COMPANY_ID, 'purchase', {}, cur, WINDOW_END, 72, 10, '', undefined, ['11111111-1111-1111-1111-111111111111'], true);
+    expect(String(q.mock.calls[0][0])).toContain("->>'door' <> 'mall'");
+    q.mockClear();
+    await selectCdpEventRowsForCursor(COMPANY_ID, 'reservation_created', {}, cur, WINDOW_END, 72, 10, '', undefined, ['11111111-1111-1111-1111-111111111111'], false);
+    expect(String(q.mock.calls[0][0])).not.toContain('journey_executions xo');
   });
 });
 
@@ -309,9 +299,9 @@ describe('커서 전진 — 이벤트 문과 같은 규약', () => {
 });
 
 describe('지표 축은 그대로다 — 이 조각이 매출 숫자를 바꾸지 않는다', () => {
+  // ★ 2026-11-04 C99 — 자동마케팅 성과(automarketing-roi) · 반응 귀속(campaign-response-attribution)은 뺐다:
+  //   Harold §5 ① (가) = 매장 구매도 귀속(두 문 사실 CT-D2 · 같은 구매 한 번 · 계약 = two-door-purchase-contract).
   const METRIC_CONSUMERS = [
-    'src/utils/automarketing-roi.ts',
-    'src/utils/campaign-response-attribution.ts',
     'src/utils/cdp-active-customers.ts',
     'src/utils/cdp-diagnostics.ts',
     'src/utils/marketing-calendar-store.ts',

@@ -6,9 +6,15 @@
  *   · 나머지는 원장으로 다시 계산 · 새 칸 없는 요청 = 지금처럼 5칸 전부.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { pool, query } from '../../config/database';
+import { pool, query, withTransaction } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
-import { updateCustomerPurchaseAggregates, parseCustomerSummaryFields } from '../customer-purchase-aggregates';
+import { ledgerBlockSql } from './pg/global-setup';
+import { applyLedgerIngestSummary, parseCustomerSummaryFields } from '../customer-purchase-aggregates';
+import { lockCompanyPurchaseSummary } from '../two-door-purchase';
+
+/** ★ 2026-11-04 C99 — 원장 적재 트랜잭션과 같은 길(회사 잠금 → 갈래 = 매장만 → 원장 재계산 · keep 규칙 그대로) */
+const updateCustomerPurchaseAggregates = (co: string, ids: string[], opts: { keepColumns?: string[] } = {}) =>
+  withTransaction(async (run) => { await lockCompanyPurchaseSummary(run, co); return applyLedgerIngestSummary(run, co, ids, opts); });
 
 const CO = '00000000-0000-0000-0000-0000000010f3';
 const C_KEEP = '00000000-0000-0000-0000-0000000010a1';
@@ -24,6 +30,8 @@ const summary = async (id: string) =>
   )).rows[0];
 
 beforeAll(async () => {
+  await pool.query(ledgerBlockSql('C99-DDL-1'));
+  await pool.query(ledgerBlockSql('C99-DDL-2'));
   await insertMinimalRow(pool, 'companies', { id: CO });
   let n = 0;
   for (const id of [C_KEEP, C_ALL, C_FULL_KEEP]) {

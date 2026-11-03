@@ -210,11 +210,14 @@ describe('워커 · 실행기 배선(원문)', () => {
     expect(fn).toContain('qualifyProductBatch(');
     expect((watcher.match(/await qualifyPurchaseTransition\(/g) || []).length).toBe(2);
   });
-  it('문이 바뀌거나 상품이 없으면 커서 경로 전에 멈춘다', () => {
+  it('상품이 없으면 커서 경로 전에 멈춘다 · 저장한 문 하나만 돈다(★ 2026-11-04 C99 T7 · 「문 바뀜 = 멈춤」 삭제)', () => {
     const fn = watcher.slice(watcher.indexOf('async function processJourneyTrigger'), watcher.indexOf('async function resolveCursorWindow'));
-    expect(fn.indexOf('currentPurchaseDoor(')).toBeGreaterThan(-1);
-    expect(fn.indexOf('currentPurchaseDoor(')).toBeLessThan(fn.indexOf('processCdpCursorJourney('));
+    expect(fn).not.toContain('currentPurchaseDoor(');
+    expect(fn.indexOf('normalizeProductFilters(j.trigger_filters).door')).toBeGreaterThan(-1);
+    expect(fn.indexOf('normalizeProductFilters(j.trigger_filters).door')).toBeLessThan(fn.indexOf('processCdpCursorJourney('));
     expect(fn).toContain('pauseJourneyForCompany(');
+    expect(fn).toContain("if (productDoor === 'ledger') return drainCursorDoor(() => processPurchaseLedgerJourney(j));");
+    expect(fn).toContain("productDoor === 'mall' || fromEvents.paused");
   });
   it('진입 교체 = 같은 트랜잭션에서 옛 실행을 닫은 뒤 넣는다', () => {
     const fn = watcher.slice(watcher.indexOf('async function finishCursorBatch'), watcher.indexOf('async function processPurchaseLedgerJourney'));
@@ -228,7 +231,8 @@ describe('워커 · 실행기 배선(원문)', () => {
     const fn = executor.slice(executor.indexOf('async function goalConvertedExecutionIds('), executor.indexOf('async function evaluateConditionBatch('));
     expect(fn).toContain("if (v === 'product')");
     expect(fn).toContain('PRODUCT_REPURCHASE_SINCE_ENTRY_SQL');
-    expect(fn).toMatch(/if \(productKeys\.length === 0\) return out;/);
+    expect(fn).toMatch(/if \(productKeys\.length === 0 \|\| !productDoor\) return out;/);   // ★ C99 상품 = (문, 키)
+    expect(fn).toContain('[head.company_id, e.customer_id, e.entered_at, productKeys, productDoor]');
   });
 });
 

@@ -1,7 +1,7 @@
 /**
  * ProductJourneyModal — 상품 재구매 여정 만들기 (★ 2026-09-30 여정 V2 3차 · 설계서 §6)
  *
- * 상품 고르기(이 회사 현역 문에서 최근 팔린 목록뿐 · 직접 입력 없음) → 사용 기간 확인(같은 상품을 다시 산 간격의 중앙값 + 표본 수 ·
+ * 상품 고르기(자사몰 상품 · 매장 상품 두 묶음 · 최근 팔린 목록뿐 · 직접 입력 없음 · 한 여정 = 한 묶음 · ★ 2026-11-04 C99) → 사용 기간 확인(같은 상품을 다시 산 간격의 중앙값 + 표본 수 ·
  * 담당자가 확정) → 혜택(선택) → [초안 만들기] = AI 설계 1회(서버 단가) + 서버 초안 저장. 첫 문자는 확정한 사용 기간 뒤에 나간다.
  * 목록 · 간격 계산은 DB 실측이다(AI 0 · 차감 0). 같은 상품을 다시 사면 여정이 끝나고, 다시 사면 새 주기로 처음부터 시작한다.
  */
@@ -16,7 +16,10 @@ interface Props {
 }
 
 interface Product { key: string; name: string; buyers: number; orders: number; lastAt: string | null }
-interface Catalog { door: 'mall' | 'ledger'; products: Product[]; omittedOrders: number; truncated: boolean; ready: boolean; lockedReason: string | null; costPerJourney: number }
+type Door = 'mall' | 'ledger';
+interface DoorList { products: Product[]; omittedOrders: number; truncated: boolean }
+interface Catalog { doors: { mall: DoorList | null; ledger: DoorList | null }; ready: boolean; lockedReason: string | null; costPerJourney: number }
+const DOOR_LABEL: Record<Door, string> = { mall: '자사몰 상품', ledger: '매장 상품' };
 interface Period { medianDays: number | null; sample: number; customers: number }
 
 const MAX_PICK = 30;
@@ -34,6 +37,7 @@ function newId(): string {
 
 export default function ProductJourneyModal({ open, onClose, onCreated }: Props) {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [door, setDoor] = useState<Door>('mall');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<string[]>([]);
@@ -60,7 +64,10 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
           fetch('/api/ai/operator/journeys-callback-numbers', { headers: headers() }).catch(() => null),
         ]);
         const cd = await cr.json().catch(() => ({}));
-        if (cr.ok && cd?.success) setCatalog(cd as Catalog); else setLoadError(cd?.error || '상품 목록을 불러오지 못했어요.');
+        if (cr.ok && cd?.success) {
+          setCatalog(cd as Catalog);
+          setDoor(cd?.doors?.mall ? 'mall' : 'ledger');   // 있는 묶음 먼저(둘 다면 자사몰)
+        } else setLoadError(cd?.error || '상품 목록을 불러오지 못했어요.');
         const nd = nr ? await nr.json().catch(() => null) : null;
         const nums = nd?.success && Array.isArray(nd.numbers) ? nd.numbers : [];
         setCallbacks(nums);
@@ -78,7 +85,7 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
     setPeriodLoading(true);
     const t = window.setTimeout(async () => {
       try {
-        const res = await fetch('/api/ai/operator/journeys-product/period', { method: 'POST', headers: headers(), body: JSON.stringify({ keys: picked }) });
+        const res = await fetch('/api/ai/operator/journeys-product/period', { method: 'POST', headers: headers(), body: JSON.stringify({ keys: picked, door }) });
         const d = await res.json().catch(() => ({}));
         if (res.ok && d?.success) {
           setPeriod({ medianDays: d.medianDays ?? null, sample: Number(d.sample || 0), customers: Number(d.customers || 0) });
@@ -91,14 +98,18 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
       }
     }, 400);
     return () => window.clearTimeout(t);
-  }, [open, picked]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, picked, door]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const doorList: DoorList | null = catalog?.doors?.[door] ?? null;
+  const bothDoors = !!catalog?.doors?.mall && !!catalog?.doors?.ledger;
   const shown = useMemo(() => {
-    const list = catalog?.products || [];
+    const list = doorList?.products || [];
     const s = q.trim().toLowerCase();
     return s ? list.filter((p) => p.name.toLowerCase().includes(s) || p.key.toLowerCase().includes(s)) : list;
-  }, [catalog, q]);
-  const nameOf = (k: string) => catalog?.products.find((p) => p.key === k)?.name || k;
+  }, [doorList, q]);
+  const nameOf = (k: string) => doorList?.products.find((p) => p.key === k)?.name || k;
+  // 한 여정 = 한 묶음(상품 키가 묶음마다 다르다) · 묶음을 바꾸면 고른 상품을 비운다
+  const switchDoor = (d: Door) => { if (d === door) return; setDoor(d); setPicked([]); setQ(''); setDaysTouched(false); setDays(''); };
 
   const toggle = (k: string) => setPicked((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : prev.length >= MAX_PICK ? prev : [...prev, k]));
 
@@ -114,7 +125,7 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
     try {
       const res = await fetch('/api/ai/operator/journeys-product/create', {
         method: 'POST', headers: headers(),
-        body: JSON.stringify({ requestId: requestId.current, keys: picked, periodDays: daysNum, benefitText: benefit.trim() || undefined, callbackNumber: callback || undefined }),
+        body: JSON.stringify({ requestId: requestId.current, keys: picked, door, periodDays: daysNum, benefitText: benefit.trim() || undefined, callbackNumber: callback || undefined }),
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok && d?.success) {
@@ -130,7 +141,7 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
     }
   };
 
-  const doorLabel = catalog?.door === 'mall' ? '자사몰 주문' : '매장 · ERP 구매';
+  const doorLabel = door === 'mall' ? '자사몰 주문' : '매장 · ERP 구매';
 
   return (
     <JourneyModalShell open={open} onClose={onClose} labelledBy="jmap-product-title" panelClassName="w-full max-w-2xl" disableDismiss={creating}>
@@ -165,6 +176,19 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
                 <h3 className="text-xs font-semibold text-slate-900">1. 상품 고르기</h3>
                 <span className="text-[11px] text-slate-400">{doorLabel} · 최근 180일 · {picked.length}/{MAX_PICK}</span>
               </div>
+              {bothDoors && (
+                <div className="mt-2">
+                  <div role="tablist" aria-label="상품 묶음" className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                    {(['mall', 'ledger'] as const).map((d) => (
+                      <button key={d} type="button" role="tab" aria-selected={door === d} onClick={() => switchDoor(d)}
+                        className={door === d ? 'h-7 px-3 rounded-md text-[11px] font-semibold bg-white text-slate-900 shadow-sm' : 'h-7 px-3 rounded-md text-[11px] text-slate-600 hover:text-slate-900'}>
+                        {DOOR_LABEL[d]} {(catalog.doors[d]?.products.length ?? 0).toLocaleString('ko-KR')}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-400">한 여정은 한 묶음의 상품으로 만들어요. 자사몰 상품 번호와 매장 상품 코드는 서로 다른 상품이에요.</p>
+                </div>
+              )}
               {picked.length > 0 && (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {picked.map((k) => (
@@ -179,7 +203,7 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="상품 이름 · 코드 찾기" aria-label="상품 찾기" className="w-full h-9 pl-8 pr-3 rounded-lg bg-slate-100 border border-slate-200 text-xs placeholder-slate-400 focus:outline-none focus:border-violet-400" />
               </label>
               <div className="mt-2 max-h-56 overflow-y-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
-                {shown.length === 0 && <div className="px-3 py-4 text-[11px] text-slate-400">{catalog.products.length === 0 ? `최근 180일 ${doorLabel}에 상품 정보가 없어요.` : '찾는 상품이 없어요.'}</div>}
+                {shown.length === 0 && <div className="px-3 py-4 text-[11px] text-slate-400">{(doorList?.products.length ?? 0) === 0 ? `최근 180일 ${doorLabel}에 상품 정보가 없어요.` : '찾는 상품이 없어요.'}</div>}
                 {shown.map((p) => {
                   const on = picked.includes(p.key);
                   return (
@@ -191,10 +215,10 @@ export default function ProductJourneyModal({ open, onClose, onCreated }: Props)
                   );
                 })}
               </div>
-              {(catalog.truncated || catalog.omittedOrders > 0) && (
+              {doorList && (doorList.truncated || doorList.omittedOrders > 0) && (
                 <p className="mt-1.5 text-[11px] text-slate-400">
-                  {catalog.truncated ? '많이 팔린 상품부터 300개까지 보여요. ' : ''}
-                  {catalog.omittedOrders > 0 ? `상품 목록 없이 들어온 주문 ${catalog.omittedOrders.toLocaleString('ko-KR')}건은 판정에서 빠져요.` : ''}
+                  {doorList.truncated ? '많이 팔린 상품부터 300개까지 보여요. ' : ''}
+                  {doorList.omittedOrders > 0 ? `상품 목록 없이 들어온 주문 ${doorList.omittedOrders.toLocaleString('ko-KR')}건은 판정에서 빠져요.` : ''}
                 </p>
               )}
             </section>

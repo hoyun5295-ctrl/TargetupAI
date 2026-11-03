@@ -172,7 +172,7 @@ import { startGenOf } from '../utils/journey-after-config';
 import { attachCandidates, attachJourney, detachJourney, AFTER_OUTCOMES, type AfterOutcome } from '../utils/journey-attach';
 import { prepareInterview, designJourneyFromInterview, MAX_INTERVIEW_SENTENCE } from '../utils/journey-interview-ai';
 import { listJourneyCallbackNumbers } from '../utils/journey-draft-save';
-import { currentPurchaseDoor, listObservedProducts, suggestUsagePeriod, PRODUCT_TRIGGER_EVENT } from '../utils/journey-product';
+import { isPurchaseDoor, listObservedProductsByDoor, suggestUsagePeriod, PRODUCT_TRIGGER_EVENT } from '../utils/journey-product';
 import { createProductJourneyDraft, dbAcceptsProductTrigger, productJourneyLockReason } from '../utils/journey-product-create';
 import { normalizeJourneyOptions } from '../utils/journey-options-validator';
 import { journeyOptionEditVerdict, JOURNEY_ENTRY_KEYS, STANDING_COUNT_TRIGGERS } from '../utils/journey-step-edit-policy';
@@ -3092,9 +3092,9 @@ router.get('/operator/journeys-product/catalog', async (req: Request, res: Respo
     const gate = await journeyGate(req, res);
     if (!gate) return;
     const { companyId } = gate;
-    const door = await currentPurchaseDoor(companyId);
-    const [list, ready, lockedReason] = await Promise.all([listObservedProducts(companyId, door), dbAcceptsProductTrigger(), productJourneyLockReason(companyId)]);
-    return res.json({ success: true, door, ...list, ready, lockedReason, costPerJourney: getCreditCost('journey-ai-generate') });
+    // ★ 2026-11-04 C99 ⑨-3 — 두 묶음(자사몰 상품 · 매장 상품 · 관측 있는 문만) · 고른 상품의 문을 저장한다(옛: 현역 문 하나)
+    const [doors, ready, lockedReason] = await Promise.all([listObservedProductsByDoor(companyId), dbAcceptsProductTrigger(), productJourneyLockReason(companyId)]);
+    return res.json({ success: true, doors, ready, lockedReason, costPerJourney: getCreditCost('journey-ai-generate') });
   } catch (err: any) {
     return journeyError(res, err, 'product catalog', '상품 목록을 불러오지 못했어요.');
   }
@@ -3107,7 +3107,8 @@ router.post('/operator/journeys-product/period', async (req: Request, res: Respo
     const { companyId } = gate;
     const keys: string[] = Array.isArray((req.body || {}).keys) ? req.body.keys.map(String) : [];
     if (keys.length === 0) return res.status(400).json({ success: false, error: '상품을 골라 주세요.' });
-    const door = await currentPurchaseDoor(companyId);
+    const door = (req.body || {}).door;   // ★ 2026-11-04 C99 — 고른 상품의 문(자사몰 · 매장)
+    if (!isPurchaseDoor(door)) return res.status(400).json({ success: false, error: '상품 목록을 다시 열어 골라 주세요.' });
     const out = await suggestUsagePeriod(companyId, door, keys);
     return res.json({ success: true, ...out });
   } catch (err: any) {
@@ -3122,7 +3123,7 @@ router.post('/operator/journeys-product/create', async (req: Request, res: Respo
     const { companyId } = gate;
     const userId = gate.userId;
     if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const { requestId, keys, periodDays, benefitText, callbackNumber } = req.body || {};
+    const { requestId, keys, door, periodDays, benefitText, callbackNumber } = req.body || {};
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRe.test(String(requestId || ''))) return res.status(400).json({ success: false, error: '상품 고르기 창을 다시 열어 주세요.' });
     const out = await createProductJourneyDraft({
@@ -3130,6 +3131,7 @@ router.post('/operator/journeys-product/create', async (req: Request, res: Respo
       userId,
       requestId: String(requestId),
       keys: Array.isArray(keys) ? keys.map(String) : [],
+      door: isPurchaseDoor(door) ? door : null,   // ★ 2026-11-04 C99 고른 상품의 문
       periodDays: Number(periodDays),
       benefitText: benefitText ? String(benefitText) : null,
       callbackNumber: callbackNumber ? String(callbackNumber) : null,

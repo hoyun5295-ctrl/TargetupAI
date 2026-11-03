@@ -28,7 +28,8 @@ import { resolveBuildTierFromOsInfo } from '../utils/agent-build-tiers';
 // ★ 2026-07-10 원격 관리 P1: 명령 큐 정책 CT — ACK 반영·At-Least-Once 전달·버전 분기(구버전=기존 동작 불변)
 import { isAgentVersionGte, ACK_MIN_AGENT_VERSION, applyCommandAcks, markCommandsDelivered, isReportedWorthWriting } from '../utils/agent-protocol';
 // ★ 2026-07-03: 구매 배치 적재 직후 고객 구매요약 컬럼 재계산 (총구매액/최근구매 '-' 문제 근본)
-import { updateCustomerPurchaseAggregates, parseCustomerSummaryFields } from '../utils/customer-purchase-aggregates';
+import { applyLedgerIngestSummary, parseCustomerSummaryFields } from '../utils/customer-purchase-aggregates';
+import { lockCompanyPurchaseSummary } from '../utils/two-door-purchase';   // ★ 2026-11-04 C99 회사 구매 요약 잠금
 // ★ 2026-07-03: 필드정의 변경 시 활성 필드 캐시 무효화 (고객DB 현황 성능 캐시)
 import { clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { recordUnsubscribeDeleted } from '../utils/change-audit';
@@ -844,8 +845,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
       const chunk = validRows.slice(i, i + CHUNK_SIZE);
       try {
         await withTransaction(async (run) => {
-          const { sql, values } = upsertBuilder.buildBatch(companyId, chunk);
-          const up = await run(sql, values);
+          const up = await upsertBuilder.runBatch(run, companyId, chunk);   // ★ 2026-11-04 C99 회사 잠금 · 갈래 · 원본 요약 값 · 두 문 CT-D3
           // ★ 2026-11-02 설계서 3-6 — incremental 에서 그 회사에 없던 번호 = 가입(원천 가입일이 없으면 받은 시각) · full = 기존 고객(CT-J6)
           if (mode === 'incremental') await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(up.rows));
 
@@ -894,8 +894,7 @@ router.post('/customers', async (req: SyncAuthRequest, res: Response) => {
           try {
             let rowCount = 0;
             await withTransaction(async (run) => {
-              const { sql: rowSql, values: rowValues } = upsertBuilder.buildBatch(companyId, [row]);
-              const rowResult = await run(rowSql, rowValues);
+              const rowResult = await upsertBuilder.runBatch(run, companyId, [row]);   // ★ 2026-11-04 C99
               rowCount = rowResult.rowCount || 1;
               if (mode === 'incremental') await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(rowResult.rows));   // ★ 2026-11-02 CT-J6
 
@@ -1188,6 +1187,8 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
     //   created_at(도착 축)이 트랜잭션 시작 시각이 되지만 구매 원장 여정 창 끝은 오늘 00:00 KST 라 커밋 지연에 걸리지 않는다(journey-trigger-watcher).
     try {
       await withTransaction(async (pRun) => {
+        // ★ 2026-11-04 C99 — 회사 구매 요약 잠금을 첫 쓰기 전에(고객 업서트 · 몰 주문과 줄을 선다 · 갈래 판정은 적재 끝 = 아래)
+        await lockCompanyPurchaseSummary(pRun, companyId);
         const undoTo = (savepoint: string) => pRun(`ROLLBACK TO SAVEPOINT ${savepoint}`);
         for (let i = 0; i < validPurchases.length; i += P_CHUNK) {
           const chunk = validPurchases.slice(i, i + P_CHUNK);
@@ -1237,6 +1238,14 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
         }
         // 계통 오류면 던져서 요청 전체를 되돌린다(withTransaction 이 ROLLBACK)
         if (systemError) throw systemError;
+        // ★ 2026-11-04 C99 — 이 배치 고객들의 구매 요약 칸 = 적재와 같은 트랜잭션(두 문 = CT-D3 · 매장만 = 원장 재계산 · 실패 = 통째 되돌림 · 503 재전송)
+        //   옛: 커밋 뒤 따로 돌려 실패를 삼켰다(두 문 회사에서 요약 칸이 적재와 어긋난 채 남는다).
+        //   ★ 2026-10-28 P3 — 고객 매핑이 주는 요약 칸은 원장 재계산이 덮지 않는다(1.7.3+ 만 싣는다 · 없으면 지금 동작 · 매장만 회사).
+        if (insertedCount > 0) {
+          await applyLedgerIngestSummary(pRun, companyId, Object.values(phoneToCustomerId).filter((v): v is string => !!v), {
+            keepColumns: parseCustomerSummaryFields(req.body?.customerSummaryFields),
+          });
+        }
       });
     } catch (txError: any) {
       // 위 계통 오류 · 연결·SAVEPOINT·COMMIT 자체 실패 = 계통 오류 · 되돌렸으므로 남는 것이 없다
@@ -1249,20 +1258,6 @@ router.post('/purchases', async (req: SyncAuthRequest, res: Response) => {
       // 이 요청의 적재는 모두 되돌렸다 — 같은 배치를 다시 보내도 중복이 없다(키 없는 행 포함). 구매 요약 재계산도 재전송 때 돈다.
       console.warn(`[Sync] Purchases 계통 오류 — 배치 되돌림 · 503 재전송 요청 (company: ${req.companyName}): ${systemError?.code || ''} ${systemError?.message || systemError}`);
       return res.status(SYNC_RETRY_HTTP_STATUS).json(syncRetryResponseBody());
-    }
-
-    // ★ 2026-07-03: 이 배치에 등장한 고객들의 구매요약 컬럼 재계산 (멱등 — 원장 기준 전체 재계산)
-    //   집계 실패가 적재 응답을 막지 않도록 격리. idx_purchases_customer 인덱스 기반 소량(≤배치 고객 수).
-    if (insertedCount > 0) {
-      try {
-        const aggIds = Object.values(phoneToCustomerId).filter((v): v is string => !!v);
-        // ★ 2026-10-28 P3 — 고객 매핑이 주는 요약 칸은 원장 재계산이 덮지 않는다(1.7.3+ 만 싣는다 · 없으면 지금 동작)
-        await updateCustomerPurchaseAggregates(companyId, aggIds, {
-          keepColumns: parseCustomerSummaryFields(req.body?.customerSummaryFields),
-        });
-      } catch (aggError: any) {
-        console.warn(`[Sync] 구매요약 집계 실패(적재는 정상, 다음 배치에서 재계산됨): ${aggError?.message || aggError}`);
-      }
     }
 
     // sync_logs 기록

@@ -66,13 +66,30 @@ export function journeySignupSinceSql(alias: string, baselineExpr: string): stri
   return `GREATEST(CASE WHEN ${joinedAtDateOnlySql(alias)} THEN ${dayStart} ELSE (${baselineExpr}) END, NOW() - INTERVAL '${SIGNUP_MAX_AGE_HOURS} hours')`;
 }
 
-/** 그 회사에 가입 근거가 있는 고객이 한 명이라도 있는가(신규 가입 여정 켜기 · 자동마케팅 새로 가입 축 · 칸이 없으면 = DDL 전 = 없음) */
-export async function hasJoinedAtEvidence(companyId: string): Promise<boolean> {
+export type JoinedAtVia = 'rows' | 'cafe24' | 'sync_incremental';
+
+/**
+ * 그 회사에 가입 근거가 있는가 = 가입 시각을 **쓰는 길**이 있는가(★ 2026-11-04 C99 T10 · Harold §5 ② (가) · 설계 3-6 원문 · 읽는 곳 = 이 함수 하나).
+ *   ① 그 회사 joined_at 행이 있다 ② 회원 가입 시각을 주는 자사몰 연동이 켜져 있다(카페24 = 몰 회원 사건이 joinedAt 을 주는 곳 · cafe24-client)
+ *   ③ 싱크가 고객을 incremental 로 정상 완료한 기록이 있다(처음 보는 번호 = 받은 시각 · 연결 실패 · 미완료 · 전 행 실패 = 아님 · 정상 빈 회차 = 길이 열려 있다)
+ *   화면에서 고객 추가는 모든 회사에 있어 「길」로 세지 않는다(세면 늘 열려 「켜 뒀는데 0건」).
+ *   옛: ① 만 봐서 첫 full 싱크만 한 납품 고객사는 길이 있어도 신규 가입을 켤 수 없었다(1103 배포 뒤 발견 · 시연 회사 멈춤).
+ *   칸이 없으면(joined_at · C98-DDL-2 전 · 42703) = 없음.
+ */
+export async function joinedAtEvidence(companyId: string): Promise<{ ok: boolean; via: JoinedAtVia | null }> {
   try {
-    const r = await query(`SELECT EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND joined_at IS NOT NULL) AS ok`, [companyId]);
-    return r.rows[0]?.ok === true;
+    const r = await query(
+      `SELECT EXISTS (SELECT 1 FROM customers WHERE company_id = $1::uuid AND joined_at IS NOT NULL) AS rows,
+              EXISTS (SELECT 1 FROM company_integrations WHERE company_id = $1::uuid AND provider = 'cafe24' AND status = 'active') AS cafe24,
+              EXISTS (SELECT 1 FROM sync_logs WHERE company_id = $1::uuid AND sync_type = 'customers' AND mode = 'incremental'
+                         AND completed_at IS NOT NULL AND error_message IS NULL AND (success_count > 0 OR total_count = 0)) AS sync_incremental`,
+      [companyId],
+    );
+    const x = r.rows[0] || {};
+    const via: JoinedAtVia | null = x.rows ? 'rows' : x.cafe24 ? 'cafe24' : x.sync_incremental ? 'sync_incremental' : null;
+    return { ok: via !== null, via };
   } catch (e: any) {
-    if (e?.code === '42703') return false;
+    if (e?.code === '42703') return { ok: false, via: null };
     throw e;
   }
 }

@@ -27,38 +27,13 @@
  *   - 집계 실패/데드락이 적재를 막으면 안 됨 — 호출부 try/catch 격리, 다음 배치가 자기치유.
  */
 
-import { query } from '../config/database';
+import { purchaseFactsSql, resolvePurchaseSummaryBranch } from './two-door-purchase';
 
-// ─── 웹훅 매출 회사 가드 캐시 ───
-//   true(웹훅 매출 이력 있음 → skip) = 사실상 영구라 60분 캐시 / false = 5분(웹훅 도입 감지)
-const WEBHOOK_TRUE_TTL_MS = 60 * 60 * 1000;
-const WEBHOOK_FALSE_TTL_MS = 5 * 60 * 1000;
-const webhookRevenueCache = new Map<string, { at: number; has: boolean }>();
+type Run = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
 
-async function hasWebhookRevenueHistory(companyId: string): Promise<boolean> {
-  const cached = webhookRevenueCache.get(companyId);
-  if (cached) {
-    const ttl = cached.has ? WEBHOOK_TRUE_TTL_MS : WEBHOOK_FALSE_TTL_MS;
-    if (Date.now() - cached.at < ttl) return cached.has;
-  }
-  // CT-22(cdp-orders.ts)가 customers 요약 컬럼을 실제로 증분/차감한 증거 마커만 매칭 —
-  //   revenue_applied/revenue_reversed는 CT-22 전용 기록. event_name='purchase'만으로 걸면
-  //   웹 SDK/이벤트 API 행동 추적의 purchase 이벤트(요약 컬럼 미증분)까지 걸려
-  //   싱크 회사의 집계가 무음으로 꺼지는 오탐이 생긴다 (2026-07-03 재검증 반영).
-  const res = await query(
-    `SELECT 1 FROM cdp_events
-      WHERE company_id = $1::uuid AND event_name = 'purchase'
-        AND (properties ? 'revenue_applied' OR properties ? 'revenue_reversed')
-      LIMIT 1`,
-    [companyId],
-  );
-  const has = res.rows.length > 0;
-  if (has && !cached?.has) {
-    console.log(`[구매요약집계] 웹훅 매출 회사 감지 — 싱크 재계산 skip (company: ${companyId})`);
-  }
-  webhookRevenueCache.set(companyId, { at: Date.now(), has });
-  return has;
-}
+// ★ 2026-11-04 C99 — 옛 「웹훅 매출 회사면 원장 재계산 skip」(60분 캐시)은 회사 갈래(two-door-purchase.resolvePurchaseSummaryBranch ·
+//   회사 잠금 뒤 같은 연결의 새 문장)로 바뀌었다: 몰 매출 표식 + 원장 = 두 문 = CT-D3 · 원장만 = 아래 매장 재계산 · 몰만 = 주문 CT 증분.
+//   캐시는 지웠다(캐시된 「몰 없음」이 첫 몰 매출 순간에 원장 재계산을 열어 CT-D3 결과를 덮는다 · Codex 설계 3R #3).
 
 /**
  * ★ 2026-10-28 고객 누계 보호(P3 · 설계서 docs/2026-10-28-sync-value-check-summary-guard-design.md §4).
@@ -87,31 +62,25 @@ export function parseCustomerSummaryFields(raw: unknown): string[] {
 }
 
 /**
- * 주어진 고객들의 구매 요약 컬럼을 purchases 원장 기준으로 재계산한다.
- * 웹훅 매출 이력이 있는 회사는 skip(0 반환) — cdp-orders 증분 집계가 그 회사의 진실.
+ * 매장만 회사(원장만 · 몰 매출 표식 없음) — 주어진 고객들의 구매 요약 컬럼을 purchases 원장 기준으로 재계산한다(옛 규칙 그대로).
  * keepColumns = 고객 원본이 주는 요약 칸(parseCustomerSummaryFields 결과) — 그 칸은 고객 적재와 같은 규칙(위 표)으로만 쓴다.
- * @returns 갱신된 고객 행 수 (skip 시 0)
+ * ⛔ 직접 부르지 않는다 — applyLedgerIngestSummary 가 회사 잠금 뒤 갈래로 고른다(두 문 회사에 이 재계산이 돌면 몰 구매가 지워진다).
+ * @returns 갱신된 고객 행 수
  */
-export async function updateCustomerPurchaseAggregates(
+async function recomputeStoreOnlySummary(
+  run: Run,
   companyId: string,
-  customerIds: string[],
-  opts: { keepColumns?: string[] } = {},
+  ids: string[],
+  keepColumns: string[],
 ): Promise<number> {
-  if (!companyId || !customerIds?.length) return 0;
-  const ids = [...new Set(customerIds.filter(Boolean))];
-  if (!ids.length) return 0;
-
-  const keep = new Set(opts.keepColumns || []);
+  const keep = new Set(keepColumns);
   const sets = SUMMARY_SET_FRAGMENTS.flatMap(([col, expr, rule]) => {
     if (!keep.has(col)) return [`${col} = ${expr}`];
     return rule === 'greatest' ? [`${col} = GREATEST(c.${col}, ${expr})`] : [];
   });
   if (!sets.length) return 0;
 
-  // ★ 이중 진실 가드 — 웹훅 매출 회사는 원장-only 재계산이 웹훅 반영분을 덮어쓰므로 skip
-  if (await hasWebhookRevenueHistory(companyId)) return 0;
-
-  const result = await query(
+  const result = await run(
     `UPDATE customers c
         SET ${sets.join(',\n            ')}
        FROM (
@@ -131,4 +100,97 @@ export async function updateCustomerPurchaseAggregates(
     [companyId, ids],
   );
   return result.rowCount || 0;
+}
+
+// ─── CT-D3 두 문 회사 요약 칸(★ 2026-11-04 C99 · 설계서 §4 T1 · Harold 1103 §5 ④ (나)) ───
+//   진실 = 두 문 사실(CT-D2 · 같은 구매 한 번) · 최근 구매일만 큰 값(사실, 원본) · 두 문 회사 요약 칸의 유일한 작성자.
+//   원본(싱크 고객 · 엑셀)이 준 누계 · 횟수는 계산에 쓰지 않는다(summary_source.totals = 화면 「원본 누계」 표시용).
+
+const SRC = `COALESCE(c.summary_source, '{}'::jsonb)`;
+/** 원본(또는 옮긴 옛 값) 최근 구매 묶음의 날짜 · 금액 · 매장 — 꼴이 틀린 값은 없는 것으로. */
+const SRC_RECENT_DATE = `(CASE WHEN (${SRC}->'recent'->>'date') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN (${SRC}->'recent'->>'date')::date END)`;
+const SRC_RECENT_AMOUNT = `(CASE WHEN (${SRC}->'recent'->>'amount') ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN (${SRC}->'recent'->>'amount')::numeric END)`;
+const SRC_RECENT_STORE = `NULLIF(${SRC}->'recent'->>'store', '')`;
+
+/**
+ * CT-D3 — 두 문 회사 고객 구매 요약 칸 재계산. 호출부가 회사 잠금(lockCompanyPurchaseSummary)을 잡고 갈래가 두 문일 때만 부른다.
+ *   ① 고객 행 잠금(번호 · id 순 = 업서트와 같은 순서) ② 처음 세는 고객(d2 없음) = 지금 칸의 최근 구매일 · 금액 · 매장을 recent(legacy)로 옮김
+ *      (recent 묶음이 없거나 그 날짜가 지금 칸보다 이를 때만 · 두 문 회사는 업서트가 요약 칸을 직접 쓰지 않으므로 그 순간 칸 값 = 옛 값)
+ *   ③ 사실로 계산해 쓰기 + d2 표식. 같은 함수가 업서트 · 원장 · 몰 · 전환 패스 어디서든 첫 단계부터 같다.
+ *   칸이 없으면(C99-DDL-1 전 · 42703) 던진다 = 그 요청 되돌림(호출부가 503).
+ */
+export async function recomputeCustomerPurchaseSummary(run: Run, companyId: string, customerIds: string[]): Promise<number> {
+  const ids = [...new Set(customerIds.filter(Boolean))];
+  if (ids.length === 0) return 0;
+  await run(`SELECT 1 FROM customers WHERE company_id = $1::uuid AND id = ANY($2::uuid[]) ORDER BY phone, id FOR UPDATE`, [companyId, ids]);
+  // 옮기는 것은 사실보다 늦은 옛 날짜뿐(사실에 그날 이후 구매가 있으면 옮길 것이 없다 · 옮긴 날짜가 뒤에 취소된 몰 주문의 날이 되어
+  //   최근일이 굳는 한계를 막는다 · 옛 날짜가 사실보다 늦다 = 원본이 우리가 못 본 구매를 봤다)
+  await run(
+    `WITH f AS (${purchaseFactsSql({ companyRef: '$1::uuid', customerIdsRef: '$2::uuid[]' })})
+     UPDATE customers c
+        SET summary_source = jsonb_set(${SRC}, '{recent}', jsonb_strip_nulls(jsonb_build_object(
+              'date', to_char(c.recent_purchase_date, 'YYYY-MM-DD'), 'amount', c.recent_purchase_amount,
+              'store', NULLIF(c.recent_purchase_store, ''), 'at', NOW(), 'legacy', true)))
+      WHERE c.company_id = $1::uuid AND c.id = ANY($2::uuid[])
+        AND NOT (${SRC} ? 'd2')
+        AND c.recent_purchase_date IS NOT NULL
+        AND (${SRC_RECENT_DATE} IS NULL OR ${SRC_RECENT_DATE} < c.recent_purchase_date)
+        AND NOT EXISTS (SELECT 1 FROM f WHERE f.customer_id = c.id AND f.kst_day >= c.recent_purchase_date)`,
+    [companyId, ids],
+  );
+  const useSrc = `(${SRC_RECENT_DATE} IS NOT NULL AND (agg.fact_day IS NULL OR ${SRC_RECENT_DATE} > agg.fact_day))`;
+  // [칸, 새 값] — SET 과 「바뀌었나」 판정이 같은 식을 쓴다(값이 같으면 다시 쓰지 않는다 · full 싱크마다 전 행 재작성 금지 · R206 과 같은 규칙).
+  const pairs: Array<[string, string]> = [
+    ['purchase_count', 'COALESCE(agg.cnt, 0)'],
+    ['total_purchase_amount', 'COALESCE(agg.total, 0)'],
+    ['total_purchase', 'COALESCE(agg.total, 0)'],
+    ['avg_order_value', 'CASE WHEN COALESCE(agg.cnt, 0) > 0 THEN COALESCE(agg.total, 0) / agg.cnt ELSE 0 END'],
+    ['recent_purchase_date', `GREATEST(agg.fact_day, ${SRC_RECENT_DATE})`],
+    ['recent_purchase_amount', `CASE WHEN ${useSrc} THEN ${SRC_RECENT_AMOUNT} ELSE agg.last_amount END`],
+    ['recent_purchase_store', `CASE WHEN ${useSrc} THEN ${SRC_RECENT_STORE} ELSE st.store END`],
+    ['last_purchase_date', `to_char(GREATEST(agg.fact_day, ${SRC_RECENT_DATE}), 'YYYY-MM-DD')`],
+    ['summary_source', `CASE WHEN ${SRC} ? 'd2' THEN c.summary_source ELSE ${SRC} || jsonb_build_object('d2', jsonb_build_object('at', NOW())) END`],
+  ];
+  const r = await run(
+    `WITH f AS (${purchaseFactsSql({ companyRef: '$1::uuid', customerIdsRef: '$2::uuid[]', undated: true })}),
+          agg AS (
+            SELECT f.customer_id, COUNT(*)::int AS cnt, COALESCE(SUM(f.amount), 0) AS total, MAX(f.kst_day) AS fact_day,
+                   (ARRAY_AGG(f.amount ORDER BY f.kst_day DESC NULLS LAST, f.at DESC NULLS LAST, f.door DESC, f.source_id DESC))[1] AS last_amount
+              FROM f GROUP BY f.customer_id
+          ),
+          st AS (
+            SELECT f.customer_id, f.kst_day,
+                   (ARRAY_AGG(f.store ORDER BY f.at DESC, f.source_id DESC) FILTER (WHERE f.door = 'ledger' AND f.store IS NOT NULL))[1] AS store
+              FROM f WHERE f.kst_day IS NOT NULL GROUP BY f.customer_id, f.kst_day
+          ),
+          ids AS (SELECT unnest($2::uuid[]) AS id)
+     UPDATE customers c SET
+            ${pairs.map(([col, e]) => `${col} = ${e}`).join(',\n            ')},
+            updated_at = NOW()
+       FROM ids
+       LEFT JOIN agg ON agg.customer_id = ids.id
+       LEFT JOIN st ON st.customer_id = ids.id AND st.kst_day = agg.fact_day
+      WHERE c.id = ids.id AND c.company_id = $1::uuid
+        AND ROW(${pairs.map(([, e]) => e).join(', ')}) IS DISTINCT FROM ROW(${pairs.map(([col]) => `c.${col}`).join(', ')})`,
+    [companyId, ids],
+  );
+  return r.rowCount || 0;
+}
+
+/**
+ * 원장 적재 트랜잭션 안(회사 잠금은 적재 첫 쓰기 전에 잡았다) — 갈래를 다시 판정해 요약 칸을 맞춘다.
+ *   두 문 = CT-D3 · 매장만 = 옛 원장 재계산(keep 규칙 그대로) · 실패 = 그 적재 통째로 되돌림(503 재전송 · 재전송 때 다시 돈다).
+ */
+export async function applyLedgerIngestSummary(
+  run: Run,
+  companyId: string,
+  customerIds: string[],
+  opts: { keepColumns?: string[] } = {},
+): Promise<number> {
+  const ids = [...new Set(customerIds.filter(Boolean))];
+  if (!companyId || ids.length === 0) return 0;
+  const branch = await resolvePurchaseSummaryBranch(run, companyId);
+  if (branch === 'two_door') return recomputeCustomerPurchaseSummary(run, companyId, ids);
+  if (branch === 'store') return recomputeStoreOnlySummary(run, companyId, ids, opts.keepColumns || []);
+  return 0;
 }

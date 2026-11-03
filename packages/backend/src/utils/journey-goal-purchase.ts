@@ -12,6 +12,7 @@
  *   ④ 가입 여정만: 고객 행이 들어온 뒤(도착 축) 들어온 원장 구매(싱크가 가입 고객과 그 구매를 한 묶음으로 보낸다)
  */
 import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
+import { purchaseAfterSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D4 구매 있었나
 
 /**
  * 판정 SQL 조각. e = 실행 행 별칭(customer_id · entered_at 칸) · companyParam = 회사 id 자리($n) · signupExpr = 가입 여정인가(SQL 불리언).
@@ -23,13 +24,7 @@ export function purchasedSinceEntrySql(e: string, companyParam: string, signupEx
              WHERE pc.id = ${e}.customer_id AND pc.company_id = ${companyParam}
                AND pc.recent_purchase_date IS NOT NULL
                AND pc.recent_purchase_date > (${e}.entered_at AT TIME ZONE 'Asia/Seoul')::date)
-    OR EXISTS (SELECT 1 FROM cdp_events pe
-                WHERE pe.company_id = ${companyParam} AND pe.customer_id = ${e}.customer_id
-                  AND ${netPurchaseSql('pe')} AND pe.occurred_at > ${e}.entered_at)   -- ★ 2026-11-02 목표 = 결제된 구매(3-4 ③ · CT-J3)
-    OR EXISTS (SELECT 1 FROM purchases pp
-                WHERE pp.company_id = ${companyParam} AND pp.customer_id = ${e}.customer_id
-                  AND pp.purchase_date IS NOT NULL
-                  AND pp.purchase_date > (${e}.entered_at AT TIME ZONE 'Asia/Seoul'))
+    OR ${purchaseAfterSql(`${e}.customer_id`, companyParam, `${e}.entered_at`)}   -- ★ 2026-11-04 C99 몰 · 원장 갈래 = CT-D4 한 벌(기다리기 · 조건 칸과 같은 규칙)
     OR ((${signupExpr}) AND EXISTS (SELECT 1 FROM purchases pb
                                      JOIN customers cb ON cb.id = pb.customer_id AND cb.company_id = pb.company_id
                                     WHERE pb.company_id = ${companyParam} AND pb.customer_id = ${e}.customer_id

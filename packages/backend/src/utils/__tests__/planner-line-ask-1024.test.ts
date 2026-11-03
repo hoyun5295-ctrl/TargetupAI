@@ -16,7 +16,8 @@ const ctx: PlannerLineAskContext = {
     { channel: 'dm', label: '모바일 DM', available: false, reason: '모바일 DM 설정을 먼저 마쳐 주세요.' },
     { channel: 'email', label: '이메일 브로마이드', available: true, reason: null },
   ],
-  products: { door: 'mall', list: [{ key: 'k1', name: '기초 3종 세트', buyers: 40 }, { key: 'k2', name: '수분 크림', buyers: 12 }, { key: 'k3', name: '기초 토너', buyers: 5 }] },
+  // ★ 2026-11-04 C99 — 상품마다 문(자사몰 · 매장 · 대상 = 한 문의 상품)
+  products: { list: [{ door: 'mall', key: 'k1', name: '기초 3종 세트', buyers: 40 }, { door: 'mall', key: 'k2', name: '수분 크림', buyers: 12 }, { door: 'mall', key: 'k3', name: '기초 토너', buyers: 5 }] },
 };
 const ids = (r: PlannerLineRead, c = ctx) => plannerLineQuestions(r, c).map((q) => q.id);
 
@@ -50,13 +51,14 @@ describe('플래너 한 줄 질문표 — 못 읽은 칸만', () => {
   it('받는 사람 못 읽음 = 전체 · 관측 상품 보기 · 상품을 고르면 언제 산 고객인지까지 답해야 한다', () => {
     const r: PlannerLineRead = { ...base, audience: { kind: 'unread', raw: '기초 안 산 고객' } };
     expect(ids(r)).toEqual(['audience', 'since']);
-    expect(plannerLineQuestions(r, ctx)[0].options?.map((o) => o.value)).toEqual(['all', 'p:k1', 'p:k2', 'p:k3']);
-    expect(plannerLineEventBody(r, { audience: 'p:k2' }, ctx, NOW)).toEqual({ ok: false, error: '「언제 산 고객인가요?」에 답해 주세요.' });
-    const b = plannerLineEventBody(r, { audience: 'p:k2', since: '90' }, ctx, NOW);
+    expect(plannerLineQuestions(r, ctx)[0].options?.map((o) => o.value)).toEqual(['all', 'p:mall:k1', 'p:mall:k2', 'p:mall:k3']);
+    expect(plannerLineEventBody(r, { audience: 'p:mall:k2' }, ctx, NOW)).toEqual({ ok: false, error: '「언제 산 고객인가요?」에 답해 주세요.' });
+    const b = plannerLineEventBody(r, { audience: 'p:mall:k2', since: '90' }, ctx, NOW);
     expect(b.ok && b.body.audience).toEqual({ kind: 'product_buyers', door: 'mall', keys: ['k2'], names: ['수분 크림'], since: '2026-07-26' });
-    // 화면이 지어낸 상품 · 보기 밖 기간 = 거절
-    expect(plannerLineEventBody(r, { audience: 'p:k9', since: '90' }, ctx, NOW).ok).toBe(false);
-    expect(plannerLineEventBody(r, { audience: 'p:k2', since: '7' }, ctx, NOW).ok).toBe(false);
+    // 화면이 지어낸 상품 · 보기 밖 기간 · 다른 문 키 = 거절
+    expect(plannerLineEventBody(r, { audience: 'p:mall:k9', since: '90' }, ctx, NOW).ok).toBe(false);
+    expect(plannerLineEventBody(r, { audience: 'p:ledger:k2', since: '90' }, ctx, NOW).ok).toBe(false);
+    expect(plannerLineEventBody(r, { audience: 'p:mall:k2', since: '7' }, ctx, NOW).ok).toBe(false);
     // 전체를 고르면 기간은 묻지 않아도 된다
     expect(plannerLineEventBody(r, { audience: 'all' }, ctx, NOW).ok).toBe(true);
   });
@@ -87,12 +89,30 @@ describe('플래너 한 줄 질문표 — 못 읽은 칸만', () => {
     const k1 = plannerLineAsk(r, ctx).askKey;
     expect(plannerLineAsk(r, { ...ctx }).askKey).toBe(k1);
     // 읽을 때는 맞는 상품이 없어 사람이 골랐는데 담기 전에 「세럼」 상품이 생겼다 → 질문표가 달라지고 지문도 달라진다
-    const grown = { ...ctx, products: { door: 'mall' as const, list: [...ctx.products!.list, { key: 'k4', name: '비타 세럼', buyers: 3 }] } };
+    const grown = { ...ctx, products: { list: [...ctx.products!.list, { door: 'mall' as const, key: 'k4', name: '비타 세럼', buyers: 3 }] } };
     expect(plannerLineQuestions(r, ctx).map((q) => q.id)).toContain('audience');
     expect(plannerLineQuestions(r, grown).map((q) => q.id)).not.toContain('audience');
     expect(plannerLineAsk(r, grown).askKey).not.toBe(k1);
     const locked = { ...ctx, channels: ctx.channels.map((c) => (c.channel === 'sms' ? { ...c, available: false, reason: '발신번호를 먼저 등록해 주세요.' } : c)) };
     expect(plannerLineAsk(base, locked).askKey).not.toBe(plannerLineAsk(base, ctx).askKey);
+  });
+
+  it('★ 2026-11-04 C99 두 문 — 맞은 상품이 두 문에 걸치면 대상을 묻는다(보기에 문 표시) · 한 문만 맞으면 그 문으로 · 매장 상품을 고르면 매장 문', () => {
+    const two: PlannerLineAskContext = { ...ctx, products: { list: [
+      { door: 'mall', key: '123', name: '기초 크림', buyers: 30 }, { door: 'ledger', key: '123', name: '기초 샴푸', buyers: 20 }, { door: 'ledger', key: 'L9', name: '수분 토너', buyers: 8 },
+    ] } };
+    const r: PlannerLineRead = { ...base, audience: { kind: 'product_buyers', terms: ['기초'], allTime: false } };
+    expect(ids(r, two)).toEqual(['audience', 'since']);
+    const opts = plannerLineQuestions(r, two)[0].options || [];
+    expect(opts.map((o) => o.value)).toEqual(['all', 'p:mall:123', 'p:ledger:123', 'p:ledger:L9']);
+    expect(opts.map((o) => o.label)).toEqual(['전체 고객', '「기초 크림」 산 고객 · 자사몰', '「기초 샴푸」 산 고객 · 매장', '「수분 토너」 산 고객 · 매장']);   // ★ Codex 구현 1R #4 라벨에 문
+    expect(opts.map((o) => o.desc)).toEqual([undefined, '구매자 30명', '구매자 20명', '구매자 8명']);
+    const b = plannerLineEventBody(r, { audience: 'p:ledger:123', since: '90' }, two, NOW);
+    expect(b.ok && b.body.audience).toEqual({ kind: 'product_buyers', door: 'ledger', keys: ['123'], names: ['기초 샴푸'], since: '2026-07-26' });
+    const oneDoor: PlannerLineRead = { ...base, audience: { kind: 'product_buyers', terms: ['토너'], allTime: true } };
+    expect(ids(oneDoor, two)).toEqual(['since']);
+    const c = plannerLineEventBody(oneDoor, { since: '0' }, two, NOW);
+    expect(c.ok && c.body.audience).toEqual({ kind: 'product_buyers', door: 'ledger', keys: ['L9'], names: ['수분 토너'], since: null });
   });
 
   it('읽은 채널 일부만 닫혔으면 묻지 않고 열린 것만 담는다 · 화면에 보이는 담을 채널 = 저장 본문 채널', () => {

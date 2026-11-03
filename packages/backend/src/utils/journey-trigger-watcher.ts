@@ -35,7 +35,8 @@ import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, us
 import { isFirstImportRunning } from './mall-import';
 import { clampInt } from './journey-points-trigger';
 // ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
-import { resolvePurchaseLedgerGate, isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_AGE_HOURS } from './journey-purchase-ledger';
+import { isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_AGE_HOURS } from './journey-purchase-ledger';
+import { crossDoorEntryOwnedSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D5 같은 날 다른 문 진입 소유
 // ★ 2026-08-01 여정 재설계 §3-0-2 — 신규/기존을 가릴 근거가 없는 회사는 발송하지 않는다(fail-closed).
 import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
@@ -43,7 +44,7 @@ import { firstRunAtFor, isNightExemptStep } from './send-time-util';
 import { sendTimingForTrigger } from './journey-trigger-capability';
 import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJourney } from './journey-entry-ledger';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매(상품 자격 · 문 확인) · 진입 교체(새 주기면 옛 실행을 닫고 새로 넣는다).
-import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, currentPurchaseDoor, qualifyProductBatch } from './journey-product';
+import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, qualifyProductBatch } from './journey-product';
 import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL } from './journey-entry-replace';
 // ★ 2026-09-30 여정 V2 5차 — 새 판 · 계보: 진입이 닫힌 옛 판은 받지 않고, 재진입 판정은 계보 단위(DDL 전 = 옛 동작).
 import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
@@ -268,6 +269,14 @@ export function startJourneyTriggerWatcher(): void {
 // 여정별 trigger 처리
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * ★ 2026-11-04 C99 CT-D5 — 날짜 단위 진입 소유를 거는 여정인가 = 구매 계열(주문 완료 · 첫 구매 · 휴면 복귀).
+ *   상품 재구매는 빼다 — 상품 키가 문마다 달라 저장한 문 하나만 진입한다(걸면 몰에서 산 고객의 매장 줄이 빠지는데 몰 문은 못 들어와 진입 0 · 구조체크 SC-3).
+ */
+function ownsPurchaseDay(j: ActiveJourney): boolean {
+  return usesPurchaseLedger(j.trigger_event) && j.trigger_event !== PRODUCT_TRIGGER_EVENT;
+}
+
 /** 이전 구매 이력으로 진입을 가르는 여정인가(첫 구매 보호 대상) */
 function judgesPriorPurchase(j: ActiveJourney): boolean {
   const f = j.trigger_filters || {};
@@ -279,20 +288,16 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   j.lineageIds = await lineageJourneyIds(j.id);
   // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
   const cursorEvent = resolveCdpCursorEventName(j.trigger_event);
-  // ★ 2026-09-30 V2 3차 — 상품 재구매: 상품이 없거나 저장한 문(자사몰 ↔ 매장)이 지금 문과 다르면 상품 키가 맞지 않아 영영 0건이다.
-  //   조용히 0건으로 두지 않고 사유를 남겨 멈춘다(판정 불가 = 멈춤 · 신규 판정 불가와 같은 규약).
+  // ★ 2026-09-30 V2 3차 — 상품 재구매: 상품이 없으면 영영 0건이다 — 조용히 0건으로 두지 않고 사유를 남겨 멈춘다(판정 불가 = 멈춤).
+  // ★ 2026-11-04 C99 T7 — 상품 키는 문마다 다르다(자사몰 상품 id ↔ 매장 상품 코드) → 저장한 문 하나만 돌린다(다른 문 커서는 건너뜀).
+  //   옛 「저장한 문 ≠ 지금 문 = 멈춤」은 지웠다(두 문 회사에서 몰 주문이 한 달 없으면 매장 상품 여정이 멈췄다 · 문 판정 자체를 없앰).
+  let productDoor: 'mall' | 'ledger' | null = null;
   if (j.trigger_event === PRODUCT_TRIGGER_EVENT) {
-    let door: 'mall' | 'ledger';
     try {
-      door = normalizeProductFilters(j.trigger_filters).door;
+      productDoor = normalizeProductFilters(j.trigger_filters).door;
     } catch (e: any) {
       const why = e instanceof JourneyInputError ? e.message : '상품 설정을 읽지 못했어요.';
       await pauseJourneyForCompany(j.id, j.company_id, `상품 재구매 설정 오류: ${why}`, startExpectOf(j));
-      return { matched: 0, enqueued: 0, skipped: 0, paused: true };
-    }
-    if (door !== await currentPurchaseDoor(j.company_id)) {
-      await pauseJourneyForCompany(j.id, j.company_id, '구매가 들어오는 곳이 바뀌어(자사몰 · 매장) 고른 상품을 알아볼 수 없어요. 상품을 다시 골라 새로 만들어 주세요.', startExpectOf(j));
-      console.log(`[JourneyTrigger] 상품 재구매 문 변경 → 정지 journey=${j.id}`);
       return { matched: 0, enqueued: 0, skipped: 0, paused: true };
     }
   }
@@ -301,11 +306,13 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   //   옛 구매가 다 들어오기 전에 「이전 구매 없음」으로 읽으면 단골에게 첫 구매 문자가 나간다.
   if (cursorEvent && judgesPriorPurchase(j) && await isFirstImportRunning(j.company_id)) return { matched: 0, enqueued: 0, skipped: 0 };
   if (cursorEvent) {
+    if (productDoor === 'ledger') return drainCursorDoor(() => processPurchaseLedgerJourney(j));   // ★ C99 T7 매장 상품 = 원장 문만
     const fromEvents = await drainCursorDoor(() => processCdpCursorJourney(j, cursorEvent));
     // ★ 2026-08-01 §11-4: 구매는 문이 둘이다(자사몰 cdp_events / 싱크 purchases 원장).
     //   원장을 이벤트로 복사하지 않고 그대로 읽는다 — 진실이 하나여야 중복 진입이 구조로 막힌다.
     //   앞 문에서 대량 차단으로 정지했으면 뒤 문은 돌리지 않는다(정지한 여정에 진입을 더 넣지 않는다).
-    if (!usesPurchaseLedger(j.trigger_event) || fromEvents.paused) return fromEvents;
+    // ★ 2026-11-04 C99 T2 — 두 문을 늘 다 돈다(옛 「자사몰 문이 살아 있으면 원장 문을 닫는다」 삭제) · 같은 날 다른 문 진입은 CT-D5 가 거른다.
+    if (!usesPurchaseLedger(j.trigger_event) || productDoor === 'mall' || fromEvents.paused) return fromEvents;
     const fromLedger = await drainCursorDoor(() => processPurchaseLedgerJourney(j));
     return {
       matched: fromEvents.matched + fromLedger.matched,
@@ -550,6 +557,8 @@ async function finishCursorBatch(
   sourceLabel: string,
 ): Promise<CursorRunResult> {
   const ids = batch.ids;
+  // ★ 2026-11-04 C99 CT-D5 — 구매 계열 진입의 문(사건 문 = 자사몰 · 원장 문 = 매장) · 날짜 단위 소유(넣기 전 잠금 안에서 다시 본다 · 표식에 문 · 날짜)
+  const ownDoor: 'mall' | 'ledger' | null = ownsPurchaseDay(j) ? (sourceLabel === 'ledger' ? 'ledger' : 'mall') : null;
   // ★ V.3 §18(Codex 적대 A 3R) — 이 회차가 읽은 시작 설정(세대 포함). 커서 전진도 같은 조건을 붙여, 그사이 붙이기 · 떼기가 있었으면 0행(커서 보존).
   const expect = startExpectOf(j);
   const guardedParams = [...cursorParams];
@@ -609,6 +618,12 @@ async function finishCursorBatch(
         const used = await client.query(`SELECT ${triggerEntryUsedSql('$1', '$2::uuid', '$3')} AS used`, [j.lineageIds || [j.id], customerId, String(entryKey)]);
         if (used.rows[0]?.used) { skipped++; continue; }
       }
+      // ★ 2026-11-04 C99 CT-D5 — 커서 행 SQL 과 이 잠금 사이에 같은 날 다른 문 진입이 커밋될 수 있다 → 잠금 안에서 한 번 더(그날 먼저 진입한 문이 갖는다)
+      const entryDay = ownDoor ? (batch.dayByCustomer?.[customerId] ?? null) : null;
+      if (ownDoor && entryDay) {
+        const owned = await client.query(`SELECT ${crossDoorEntryOwnedSql('$1', '$2::uuid', '$3::text', '$4::text')} AS owned`, [j.lineageIds || [j.id], customerId, ownDoor, entryDay]);
+        if (owned.rows[0]?.owned) { skipped++; continue; }
+      }
       // ★ 0930 V2 5차 · Codex 1R — 진입 교체: 시간 쿨다운이 지났을 때만 계보 전체의 진행 중 실행을 닫고 새 주기로 넣는다
       //   (옛 판에서 돌던 주기도 교체 · 닫기와 넣기가 늘 함께 · 닫기만 하고 못 넣는 경우 0). 교체가 아니면 옛 판정 그대로.
       if (replaceEntry) {
@@ -624,7 +639,8 @@ async function finishCursorBatch(
       // ★ 2026-09-29 여정 V2 1차 — 진입 표식(__entry): 트리거 사건으로 들어왔다는 것 + 그 사건 id.
       //   생애 지도 "이어받음" 숫자가 ①재진입 워커가 넣은 행(표식 없음)과 ②같은 구매로 두 여정에 동시에 들어온 경우(같은 key)를
       //   가려내는 유일한 근거다(설계서 §3 · 회의론자 최종 검증 1). 발송 · 변수 치환에는 쓰이지 않는다(키 이름이 변수와 겹치지 않음).
-      const entryProps = { ...(evProps || {}), __entry: { src: 'trigger', key: batch.eventIdByCustomer?.[customerId] ?? null } };
+      // ★ 2026-11-04 C99 CT-D5 — 구매 계열 = 표식에 문 · 날짜(KST)도 싣는다(같은 날 다른 문 후보를 거르는 근거)
+      const entryProps = { ...(evProps || {}), __entry: { src: 'trigger', key: batch.eventIdByCustomer?.[customerId] ?? null, ...(ownDoor && entryDay ? { door: ownDoor, day: entryDay } : {}) } };
       await client.query(INSERT_EXECUTION_SQL, [j.id, customerId, nextRunAt, JSON.stringify(entryProps), holdoutPct]);
       enqueued++;
     }
@@ -673,9 +689,8 @@ async function processPurchaseLedgerJourney(j: ActiveJourney): Promise<CursorRun
   );
   const cutoff: Date = clk.rows[0].cutoff;
   if (!isLedgerRunWindowHour(Number(clk.rows[0].kst_hour))) return IDLE;
-
-  const gate = await resolvePurchaseLedgerGate(j.company_id);
-  if (!gate.enabled) return IDLE;
+  // ★ 2026-11-04 C99 T2 — 「자사몰 문이 현역이면 원장 문을 닫는다」 관문을 지웠다(두 문 회사의 매장 구매가 진입에서 빠졌다 · 뿌리 R54).
+  //   같은 구매가 두 문으로 와도 같은 날 다른 문 진입이 있으면 후보가 아니다(CT-D5 · 아래 커서 행 SQL · 넣기 반복문 두 겹).
 
   let cursorAt: Date | null = null;
   // SQL 비교용 원문 — Date는 밀리초 절사라 마지막 밀리초 묶음이 다시 잡힌다(이벤트 문과 같은 이유, 2026-08-02).
@@ -714,6 +729,7 @@ async function processPurchaseLedgerJourney(j: ActiveJourney): Promise<CursorRun
     PURCHASE_TRIGGER_MAX_AGE_HOURS,
     CDP_EVENT_CHUNK + 1,
     await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id),
+    ownsPurchaseDay(j) ? (j.lineageIds || [j.id]) : undefined,   // ★ C99 CT-D5 같은 날 자사몰 진입 = 후보 아님
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, 'created_at');
   // 절단은 "오늘 아침에 다 못 냈다"는 뜻이다. 밀린 분이 발생 시각 창(3일)을 넘기면 그대로 못 나가므로
@@ -785,6 +801,7 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
     CDP_EVENT_CHUNK + 1,
     await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id),
     j.lineageIds || [j.id],   // ★ 1027 K1-2 ① 이미 그 사건으로 진입한 행은 사건 행 단계에서 뺀다
+    ownsPurchaseDay(j) && eventName === 'purchase',   // ★ C99 CT-D5 같은 날 매장 진입 = 후보 아님
   );
   const batch = planCdpCursorBatch(rows, CDP_EVENT_CHUNK, windowEnd, axis);
   await qualifyPurchaseTransition(j, batch, rows);

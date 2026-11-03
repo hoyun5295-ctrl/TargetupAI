@@ -571,10 +571,9 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       sms_opt_in: smsOptIn ?? null,
       custom_fields: customFields ? JSON.stringify(customFields) : null,
     };
-    const { sql: manualSql, values: manualValues } = manualUpsertBuilder.buildBatch(companyId, [manualRow]);
     // ★ 2026-11-02 설계서 3-6 — 화면에서 고객 추가 = 처음 만든 행이면 가입(CT-J6) · 업서트와 한 트랜잭션(Codex 구현 1R · 따로면 다시 시도 때 is_insert 거짓 = 가입 기록 영영 0)
     const result = await withTransaction(async (run) => {
-      const r = await run(manualSql, manualValues);
+      const r = await manualUpsertBuilder.runBatch(run, companyId, [manualRow]);   // ★ 2026-11-04 C99 회사 잠금 · 갈래 · 두 문 CT-D3
       await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));
       return r;
     });
@@ -606,7 +605,7 @@ router.post('/', blockIfSyncActive, async (req: Request, res: Response) => {
       customer: result.rows[0],
     });
   } catch (error) {
-    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.joined_at 칸(ALTER · 원장 C98-DDL-2)'));
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.joined_at · customers.summary_source · companies.two_door_since 칸(ALTER · 원장 C98-DDL-2 · C99-DDL-1 · C99-DDL-2)'));
     console.error('고객 추가 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -679,9 +678,8 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
     for (let ci = 0; ci < bulkRows.length; ci += BULK_CHUNK) {
       const chunk = bulkRows.slice(ci, ci + BULK_CHUNK);
       try {
-        const { sql: bulkSql, values: bulkValues } = bulkUpsertBuilder.buildBatch(companyId, chunk);
         await withTransaction(async (run) => {   // ★ 2026-11-02 CT-J6 · 업서트 + 가입 시각 한 트랜잭션(Codex 구현 1R)
-          const bulkRes = await run(bulkSql, bulkValues);
+          const bulkRes = await bulkUpsertBuilder.runBatch(run, companyId, chunk);   // ★ 2026-11-04 C99
           await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(bulkRes.rows));
         });
         successCount += chunk.length;
@@ -697,9 +695,8 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
         }
         for (const row of chunk) {
           try {
-            const { sql: rowSql, values: rowValues } = bulkUpsertBuilder.buildBatch(companyId, [row]);
             await withTransaction(async (run) => {   // ★ 2026-11-02 CT-J6 · 한 트랜잭션(Codex 구현 1R)
-              const rowRes = await run(rowSql, rowValues);
+              const rowRes = await bulkUpsertBuilder.runBatch(run, companyId, [row]);   // ★ 2026-11-04 C99
               await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(rowRes.rows));
             });
             successCount++;
@@ -733,7 +730,7 @@ router.post('/bulk', blockIfSyncActive, async (req: Request, res: Response) => {
       errors: errors.slice(0, 10),
     });
   } catch (error) {
-    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.joined_at 칸(ALTER · 원장 C98-DDL-2)'));
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.joined_at · customers.summary_source · companies.two_door_since 칸(ALTER · 원장 C98-DDL-2 · C99-DDL-1 · C99-DDL-2)'));
     console.error('고객 일괄 추가 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }

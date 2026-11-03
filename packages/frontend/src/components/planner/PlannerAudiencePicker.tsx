@@ -1,7 +1,8 @@
 /**
  * PlannerAudiencePicker — 판2 「대상 상품 · 언제 산 고객」(★ 2026-10-18 v2 입력 축 · 설계서 docs/2026-10-18-planner-v2-design.md §3-6)
  *
- * 목록 = 그 회사 지금 들어오는 곳(자사몰 결제 주문 / 매장 원장)의 최근 180일 관측 상품(서버 · 여정과 같은 함수) · 직접 입력 없음.
+ * 목록 = 자사몰 상품 · 매장 상품 두 묶음(각 문의 최근 180일 관측 상품 · 서버 · 여정과 같은 함수 · ★ 2026-11-04 C99) · 직접 입력 없음.
+ * 한 행사 대상 = 한 묶음의 상품(상품 키가 묶음마다 다르다) · 묶음을 바꾸면 고른 상품을 비운다.
  * **미리 체크 0** · 최대 30개(넘으면 거절 · 잘라내지 않음) · ★ 1024 한 줄 = 질문 창(PlannerLineAsk)이 따로 묻는다(여기는 직접 고르기만).
  * 「언제 산」 = [최근 90일][6개월][1년][기록 전체] 필수 · 기본값 없음.
  * 인원 = 실행과 같은 문(서버 /audience/count · 문자 · 메일 · 받을 수 있는 분만).
@@ -41,7 +42,8 @@ export default function PlannerAudiencePicker({ value, onChange, eventId, disabl
   eventId: string | null;
   disabled?: boolean;
 }) {
-  const [list, setList] = useState<{ door: 'mall' | 'ledger'; products: ObservedProduct[]; omittedOrders: number; truncated: boolean } | null>(null);
+  type DoorList = { products: ObservedProduct[]; omittedOrders: number; truncated: boolean };
+  const [doors, setDoors] = useState<{ mall: DoorList | null; ledger: DoorList | null } | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [count, setCount] = useState<{ sms: AudienceCountState; email: AudienceCountState } | 'loading' | null>(null);
@@ -49,23 +51,25 @@ export default function PlannerAudiencePicker({ value, onChange, eventId, disabl
 
   useEffect(() => {
     let alive = true;
-    void plannerApi<{ door: 'mall' | 'ledger'; products: ObservedProduct[]; omittedOrders: number; truncated: boolean }>('/api/marketing-planner/audience/products').then((r) => {
+    void plannerApi<{ doors: { mall: DoorList | null; ledger: DoorList | null } }>('/api/marketing-planner/audience/products').then((r) => {
       if (!alive) return;
       if (!r.ok) { setLoadError(r.data?.error || '상품 목록을 불러오지 못했어요.'); return; }
-      setList(r.data);
-      // 들어오는 곳이 바뀌었으면(저장한 키 = 옛 문의 키) 고른 상품을 비운다 · 처음이면 문을 정한다
-      if (value.door && value.door !== r.data.door && value.keys.length > 0) onChange({ ...value, door: r.data.door, keys: [], names: [] });
-      else if (value.door !== r.data.door) onChange({ ...value, door: r.data.door });
+      setDoors(r.data.doors);
+      // 처음이면 있는 묶음을 정한다(둘 다면 자사몰) · 저장한 묶음은 그대로(그 묶음의 키로 센다)
+      if (!value.door) onChange({ ...value, door: r.data.doors.mall ? 'mall' : 'ledger' });
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const list: DoorList | null = doors && value.door ? (doors[value.door] ?? { products: [], omittedOrders: 0, truncated: false }) : null;
+  const bothDoors = !!doors?.mall && !!doors?.ledger;
+  const switchDoor = (d: 'mall' | 'ledger') => { if (disabled || d === value.door) return; setQ(''); setLimitNote(false); onChange({ ...value, door: d, keys: [], names: [] }); };
   const shown = useMemo(() => {
     if (!list) return [];
     const needle = q.trim().toLowerCase();
     return list.products.filter((p) => !needle || p.name.toLowerCase().includes(needle));
-  }, [list, q]);
+  }, [list, q]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // 인원 — 다 고르면 서버가 센다(실행과 같은 문)
   const audience = buyerAudienceOf(value);
@@ -98,6 +102,16 @@ export default function PlannerAudiencePicker({ value, onChange, eventId, disabl
     <div className={`space-y-3 ${disabled ? 'opacity-60 pointer-events-none' : ''}`}>
       <div>
         <p className="text-[12.5px] font-semibold text-slate-700">대상 상품<span className="ml-1.5 font-normal text-slate-500">이 상품을 산 고객에게 보내요 · 최대 {PLANNER_AUDIENCE_KEYS_MAX}개</span></p>
+        {bothDoors && doors && (
+          <div className="mt-1.5 inline-flex rounded-xl border border-slate-200 bg-slate-100 p-0.5" role="tablist" aria-label="상품 묶음">
+            {(['mall', 'ledger'] as const).map((d) => (
+              <button key={d} type="button" role="tab" aria-selected={value.door === d} onClick={() => switchDoor(d)}
+                className={`h-8 px-3 rounded-[10px] text-[12.5px] font-semibold ${value.door === d ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                {d === 'mall' ? '자사몰 상품' : '매장 상품'} {won(doors[d]?.products.length ?? 0)}
+              </button>
+            ))}
+          </div>
+        )}
         {loadError ? <p className="mt-1.5 text-[12.5px] text-rose-700">{loadError}</p> : !list ? (
           <div className="mt-1.5 h-24 rounded-xl bg-slate-100 animate-pulse" aria-hidden="true" />
         ) : list.products.length === 0 ? (
@@ -146,7 +160,7 @@ export default function PlannerAudiencePicker({ value, onChange, eventId, disabl
         {value.sinceDays === null && value.kept && <p className="mt-1 text-[12px] text-slate-500 tabular-nums">저장한 기간 그대로 · {value.kept.since ? `${value.kept.since} 이후 산 고객` : '기록 전체'}</p>}
       </div>
       {list && (
-        <p className="text-[12px] text-slate-600">{list.door === 'mall' ? '자사몰 결제 주문 기준이에요 · 매장 구매는 들어가지 않아요' : '매장 구매 기록 기준이에요 · 자사몰 주문은 들어가지 않아요'}</p>
+        <p className="text-[12px] text-slate-600">{value.door === 'mall' ? '자사몰 결제 주문 기준이에요 · 매장 구매는 들어가지 않아요' : '매장 구매 기록 기준이에요 · 자사몰 주문은 들어가지 않아요'}</p>
       )}
       {count && (
         <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-[13px] tabular-nums" role="status" aria-live="polite">

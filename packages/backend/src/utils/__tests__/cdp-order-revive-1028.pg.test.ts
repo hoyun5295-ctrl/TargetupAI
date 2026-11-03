@@ -33,6 +33,8 @@ const ev = async (orderId: string): Promise<any> =>
 
 beforeAll(async () => {
   await pool.query(ledgerBlockSql('C98-DDL-2'));   // ★ 2026-11-02 가입 근거 칸(배포 앞 DDL · 고객 행 쓰기가 joined_at 을 정한다 · 설계서 3-6)
+  await pool.query(ledgerBlockSql('C99-DDL-1'));   // ★ 2026-11-04 C99 주문 CT = 회사 잠금 뒤 갈래(배포 앞 DDL · summary_source · two_door_since)
+  await pool.query(ledgerBlockSql('C99-DDL-2'));
   await insertMinimalRow(pool, 'companies', { id: CO });
 });
 

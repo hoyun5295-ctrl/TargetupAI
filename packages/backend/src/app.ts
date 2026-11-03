@@ -138,6 +138,7 @@ import { startContinuousOperatorScheduler } from './utils/continuous-operator';
 // ★ D187 (2026-05-20): Journey Builder Lite — 5분 주기 due execution 처리 + 5분 주기 trigger 매칭
 import { startJourneyExecutor } from './utils/journey-executor';
 import { startJourneyTriggerWatcher } from './utils/journey-trigger-watcher';
+import { startTwoDoorTransitionWorker } from './utils/two-door-transition';   // ★ 2026-11-04 C99
 import { startJourneyAnchorScheduler } from './utils/journey-anchor-scheduler';
 // ★ D197 (2026-05-22) Phase B-2: Predictive Suite — 1시간 주기 cron + 회사 customer 예측 점수 자동 갱신
 import { startPredictiveWorker } from './utils/predictive-worker';
@@ -700,6 +701,8 @@ app.listen(PORT, () => {
   //   AI_OPERATOR_ALLOWED_USERS=hoyun 게이팅 (routes/ai.ts 영역)
   startJourneyExecutor();
   startJourneyTriggerWatcher();
+  // ★ 2026-11-04 C99 — 두 문(자사몰 + 매장) 회사 고객 구매 요약 전환 패스(5분 · d2 없는 고객을 CT-D3 로 한 번씩)
+  startTwoDoorTransitionWorker();
   // ★ 2026-06-30 여정 일반화 — 날짜축 여정(date_anchor) 스케줄러: 지정일 D-N 묶음 발송 + D-0 후 정지/반복.
   startJourneyAnchorScheduler();
   startWeeklyDigestWorker();

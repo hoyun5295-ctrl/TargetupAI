@@ -16,6 +16,7 @@
 
 import { isSingleStepKind } from './journey-start-kind';
 import { nightArriveLabelKo } from './send-time-util';
+import { NO_JOINED_AT_REASON } from './customer-joined-at';   // ★ 2026-11-04 C99 T10 신규 가입 잠금 문구 한 곳
 
 /** 화면 트리거 key — 프론트 카탈로그(journey-trigger-catalog.ts)의 key와 같다. */
 export type TriggerKey =
@@ -101,7 +102,7 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
 
     f.canJudgeNewCustomer
       ? yes('signup', '처음 오신 분에게 발송합니다.')
-      : no('signup', '기존 고객과 새 고객을 구분할 정보가 없어요. 구매이력을 연동하면 열립니다.'),
+      : no('signup', NO_JOINED_AT_REASON),   // ★ 2026-11-04 C99 T10 잠금 문구 = 한 곳(CT-J6)
 
     f.hasRecentPurchaseDate
       ? yes('dormant', '한동안 구매가 없으면 발송합니다.')

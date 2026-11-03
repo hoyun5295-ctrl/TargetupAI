@@ -41,6 +41,8 @@ export interface CdpEventRow {
   /** 발생 시각의 DB 원문 — 구축(occurred_at) 커서 환경용. 같은 이유. */
   occurredAtRaw?: string | null;
   properties?: Record<string, any> | null;
+  /** ★ 2026-11-04 C99 — 구매의 KST 날짜('YYYY-MM-DD' · 몰 = 결제 시각의 KST 날짜 · 원장 = 구매일). 진입 표식 __entry.day(CT-D5 날짜 단위 소유). */
+  entryDay?: string | null;
 }
 
 /**
@@ -63,6 +65,8 @@ export interface CdpCursorBatch {
    *   생애 지도 선 숫자가 "같은 구매로 두 여정에 동시에 들어온 경우"를 가려낸다(설계서 §3 숫자). 선택 필드 — 없으면 표식 key = null.
    */
   eventIdByCustomer?: Record<string, string | null>;
+  /** ★ 2026-11-04 C99 — customerId → 진입 사건(첫 등장 행)의 KST 날짜(구매만 · 진입 표식 __entry.day). */
+  dayByCustomer?: Record<string, string | null>;
   newCursor: CdpCursorPosition;
   truncated: boolean;
 }
@@ -80,11 +84,13 @@ export function planCdpCursorBatch(
   const ids: string[] = [];
   const propertiesByCustomer: Record<string, Record<string, any>> = {};
   const eventIdByCustomer: Record<string, string | null> = {};
+  const dayByCustomer: Record<string, string | null> = {};
   for (const r of usable) {
     if (!seen.has(r.customerId)) {
       seen.add(r.customerId);
       ids.push(r.customerId);
       eventIdByCustomer[r.customerId] = r.eventId ?? null;
+      dayByCustomer[r.customerId] = r.entryDay ?? null;
       if (r.properties && typeof r.properties === 'object') {
         propertiesByCustomer[r.customerId] = r.properties;
       }
@@ -105,7 +111,7 @@ export function planCdpCursorBatch(
       }
     : { at: windowEnd, eventId: null };
 
-  return { ids, propertiesByCustomer, eventIdByCustomer, newCursor, truncated };
+  return { ids, propertiesByCustomer, eventIdByCustomer, dayByCustomer, newCursor, truncated };
 }
 
 /**

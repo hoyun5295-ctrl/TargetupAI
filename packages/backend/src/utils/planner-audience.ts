@@ -24,7 +24,7 @@ import {
 import { buildParticipantPredicate } from './planner-participation';
 import { PlannerAudienceMode } from './planner-execution';
 import { readStoredAudience, type PlannerAudience } from './planner-event';
-import { currentPurchaseDoor, ledgerProductKeySql, listObservedProducts, mallItemKeySql, mallItemsSql } from './journey-product';
+import { ledgerProductKeySql, listObservedProducts, listObservedProductsByDoor, mallItemKeySql, mallItemsSql } from './journey-product';
 import { netPurchaseSql } from './cdp-order-revenue';
 import { companyListAllows } from './sns-constants';
 import { countCustomerRecipientsWhere, resolveCustomerRecipientsWhere, type EmailRecipient } from './email-channel';
@@ -212,7 +212,7 @@ export function buildBuyerPredicate(params: any[], a: Extract<PlannerAudience, {
           )`;
 }
 
-/** 대상 확정 — 미리보기 값 또는 저장값 · 깨진 저장값 · 스위치 밖 · 문 바뀜 = 막음(전체로 넓히지 않는다) */
+/** 대상 확정 — 미리보기 값 또는 저장값 · 깨진 저장값 · 스위치 밖 = 막음(전체로 넓히지 않는다) · ★ 2026-11-04 C99 「문 바뀜 = 막음」 삭제(저장한 문의 키로 센다) */
 async function plannerTargetOf(companyId: string, plannerEventId: string, preview?: PlannerAudience): Promise<{ ok: true; audience: PlannerAudience } | { ok: false; reason: string }> {
   let audience: PlannerAudience | null = preview ?? null;
   if (!audience) {
@@ -224,20 +224,17 @@ async function plannerTargetOf(companyId: string, plannerEventId: string, previe
   if (!audience) return { ok: false, reason: PLANNER_REASON.audienceInvalid };
   if (audience.kind === 'all') return { ok: true, audience };
   if (!plannerLineEnabled(companyId)) return { ok: false, reason: PLANNER_REASON.audienceInvalid };
-  if ((await currentPurchaseDoor(companyId)) !== audience.door) return { ok: false, reason: PLANNER_REASON.purchaseDoorChanged };
   return { ok: true, audience };
 }
 
 /**
- * 저장 전 서버 재검증(라우트) — 스위치 · 지금 문 · 고른 키가 관측 목록 안인가(화면이 연 목록과 같은 기간 · 같은 함수).
+ * 저장 전 서버 재검증(라우트) — 스위치 · 고른 키가 **그 문의** 관측 목록 안인가(화면이 연 목록과 같은 기간 · 같은 함수 · ★ 2026-11-04 C99 두 문).
  * 통과하면 이름을 서버 목록 이름으로 바꿔 돌려준다(화면이 보낸 이름을 믿지 않는다).
  */
 export async function verifyPlannerAudience(companyId: string, a: PlannerAudience): Promise<{ ok: true; value: PlannerAudience } | { ok: false; status: number; code: string; error: string }> {
   if (a.kind === 'all') return { ok: true, value: a };
   if (!plannerLineEnabled(companyId)) return { ok: false, status: 400, code: 'AUDIENCE_DISABLED', error: '상품을 산 고객 대상은 아직 이 회사에 열리지 않았어요. 전체 고객으로 담아 주세요.' };
-  const door = await currentPurchaseDoor(companyId);
-  if (door !== a.door) return { ok: false, status: 409, code: 'PURCHASE_DOOR_CHANGED', error: '구매 기록이 들어오는 곳이 바뀌었어요. 대상 상품을 다시 골라 주세요.' };
-  const list = await listObservedProducts(companyId, door);
+  const list = await listObservedProducts(companyId, a.door);
   const byKey = new Map(list.products.map((p) => [p.key, p.name]));
   const missing = a.keys.filter((k) => !byKey.has(k));
   if (missing.length > 0) return { ok: false, status: 400, code: 'AUDIENCE_KEYS_INVALID', error: '목록에 없는 상품이 있어요. 대상 상품을 다시 골라 주세요.' };
@@ -289,9 +286,11 @@ export async function loadPlannerLineAskContext(companyId: string, userId: strin
   const [channels, products] = await Promise.all([
     getPlannerChannelAvailability(companyId, userId),
     Promise.race([
-      currentPurchaseDoor(companyId).then(async (door) => ({
-        door,
-        list: (await listObservedProducts(companyId, door)).products.map((p) => ({ key: p.key, name: p.name, buyers: p.buyers })),
+      // ★ 2026-11-04 C99 — 두 문 상품(구매자 많은 순 · 상품마다 문 · 대상은 한 문의 상품만)
+      listObservedProductsByDoor(companyId).then((byDoor) => ({
+        list: (['mall', 'ledger'] as const)
+          .flatMap((door) => (byDoor[door]?.products || []).map((p) => ({ door, key: p.key, name: p.name, buyers: p.buyers })))
+          .sort((a, b) => b.buyers - a.buyers),
       })),
       new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), LINE_AUDIENCE_CONFIRM_MS); }),
     ]).catch((e: any) => { console.warn('[planner-audience] 한 줄 읽기 상품 목록 실패(사람이 고름):', e?.message || e); return null; })

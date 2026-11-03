@@ -626,7 +626,8 @@ export default function JourneysPage() {
   // ★ 2026-09-30 V2 4차 — 끝 칸 쓰기 스위치(서버 JOURNEY_END_CHIP_ENABLED). 꺼져 있으면 끝 칸을 고를 수 없다.
   const [endChipEnabled, setEndChipEnabled] = useState(false);
   // ★ 2026-08-02 §13-5 — 구매가 어느 문으로 들어오는지 + 마지막 도착 시각. 매장 문이면 하루 모아 다음 날 오전에 나간다.
-  const [purchaseDoor, setPurchaseDoor] = useState<{ door: 'mall' | 'ledger'; lastArrivalAt: string | null } | null>(null);
+  // ★ 2026-11-04 C99 T8 — 두 문을 따로(들어온 적 있는 문만 · 서버 getPurchaseDoorStatus)
+  const [purchaseDoor, setPurchaseDoor] = useState<{ mall: { lastArrivalAt: string } | null; ledger: { lastArrivalAt: string } | null } | null>(null);
   // ★ D210+ Phase 2-fix6 (Harold 명시 2026-05-23): 6 sub-agent 진행 + 샘플 고객 머지 토글
   const [sampleCustomer, setSampleCustomer] = useState<Record<string, string | number | null> | null>(null);
   // ★ D210+ Phase 2-fix9 (Harold 명시 2026-05-23): Liquid 렌더링 영역 (field 키 매트릭스).

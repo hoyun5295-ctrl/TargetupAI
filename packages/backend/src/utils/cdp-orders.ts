@@ -28,6 +28,9 @@ import { kstDateKey } from './agency-send-state';
 import type { MemberIdFormat } from './mall-consent';
 // ★ 2026-09-26 한줄로 V2 R1-34 — 같은 주문 웹훅 직렬화(공용 잠금 CT)
 import { withKeyedLock } from './keyed-lock';
+import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래
+import { recomputeCustomerPurchaseSummary } from './customer-purchase-aggregates';   // ★ 2026-11-04 C99 CT-D3
+import { migrationPendingOn503 } from './db-errors';
 
 // ═══════════════════════════════════════════════════════════
 // 타입
@@ -204,7 +207,10 @@ export async function syncOrder(
   //   옛: 둘이 동시에 오면 둘 다 기존 이벤트를 못 보고 둘 다 매출을 더할 수 있었다. PM2 fork 단일 프로세스 전제(공용 잠금 CT).
   //   프로세스를 넘는 경합은 아래 조건부 UPDATE(표식 · src_at · cancel_seen_at 이 판정 때와 같을 때만)가 막는다.
   // ★ 2026-10-27 자사몰 대비 K1-2 — 주문 사건 · 표식 · 고객 요약 = 한 트랜잭션(중간 종료 = 전부 롤백 · 재처리가 한 번 더함 · 옛 표식 되돌림 함수 삭제).
-  const outcome = await withKeyedLock('cdp-order', `${companyId}:${input.source}:${input.orderId}`, () => withTransaction(async (run): Promise<{ rfmUpdated: boolean; stale: boolean }> => {
+  // ★ 2026-11-04 C99 — 칸이 없으면(C99-DDL-1 · DDL-2 전 · 42703) 그 주문 통째 되돌림 + 503 DB_MIGRATION_PENDING(db_alter_safety_net · 몰은 다시 보낸다)
+  const outcome = await migrationPendingOn503('customers.summary_source · companies.two_door_since 칸(ALTER · 원장 C99-DDL-1 · C99-DDL-2)', () => withKeyedLock('cdp-order', `${companyId}:${input.source}:${input.orderId}`, () => withTransaction(async (run): Promise<{ rfmUpdated: boolean; stale: boolean }> => {
+  // ★ 2026-11-04 C99 — 회사 구매 요약 잠금을 첫 쓰기 전에(고객 업서트 · 원장 적재와 줄을 선다 · 갈래 = 사건을 쓴 뒤 같은 연결의 새 문장)
+  await lockCompanyPurchaseSummary(run, companyId);
   // 2. 같은 order_id의 기존 주문 사건 조회 — 결제 전(order_placed)이든 결제(purchase)든 한 주문 한 행
   const existingRes = await run(
     `SELECT id, event_name, properties, occurred_at FROM cdp_events
@@ -291,6 +297,11 @@ export async function syncOrder(
     // ★ 2026-10-04 최근 구매 금액·마지막 구매일은 이 주문이 기존 최근 구매보다 늦거나 같을 때만 바꾼다(최근 구매일은 원래 GREATEST).
     //   옛: 무조건 이번 주문 값이라, 옛 주문이 나중에 처리되면(백필 · 지연 웹훅) 날짜는 새 값인데 금액·마지막 구매일은 옛 값이 됐다.
     //   SET 의 오른쪽은 모두 갱신 전 값을 본다(recent_purchase_date 비교가 이 문장의 GREATEST 결과에 영향받지 않는다).
+    // ★ 2026-11-04 C99 — 두 문 회사 = 요약 칸 = 두 문 사실(CT-D3 · 같은 구매 한 번) · 몰만 = 아래 증분 그대로
+    if (await resolvePurchaseSummaryBranch(run, companyId) === 'two_door') {
+      await recomputeCustomerPurchaseSummary(run, companyId, [idResult.customerId!]);
+      return { rfmUpdated: true, stale: false };
+    }
     // ★ 1027 K1-4 — 날짜 = 결제 시각의 KST 날짜(글자 · R16)
     const paidDay = kstDateKey(new Date(paidAt));
     await run(
@@ -313,6 +324,10 @@ export async function syncOrder(
   // 3-B. 취소/환불 — 반영된 주문만 1회 차감 (차감액 = 반영 시점 기록 금액) · 취소를 본 시각을 남긴다(지우지 않음 · K1-6 종결 규칙)
   if (decision.action === 'reverse') {
     if (!existing) return { rfmUpdated: false, stale: false };
+    // ★ 2026-11-04 C99 Codex 구현 1R #1 — 두 문 회사 = 사실을 빼는 쓰기(차감 표식) **전에** 한 번 센다. 아직 안 센 고객(d2 없음)의 첫 계산이
+    //   표식 뒤라면 지금 칸 최근일(이 주문의 날)이 사실보다 늦어 「옛 값」으로 옮겨져 취소된 날짜가 굳는다 · 표식 전엔 그 주문이 사실에 있어 옮기지 않는다.
+    const twoDoor = await resolvePurchaseSummaryBranch(run, companyId) === 'two_door';
+    if (twoDoor) await recomputeCustomerPurchaseSummary(run, companyId, [idResult.customerId!]);
     const claim = await run(
       `UPDATE cdp_events
        SET properties = (COALESCE(properties, '{}'::jsonb) ${UNKNOWN_KEYS})
@@ -326,6 +341,11 @@ export async function syncOrder(
       [existing.id, input.status, srcAt, lastSrcRaw, lastCancelRaw, JSON.stringify(extra)]
     );
     if (claim.rows.length === 0) return { rfmUpdated: false, stale: true };
+    // ★ 2026-11-04 C99 — 두 문 회사 = 차감 표식을 건 뒤 사실로 다시 센다(같은 날 매장 줄이 이제 따로 세어진다 · CT-D3) · 몰만 = 아래 차감 그대로
+    if (twoDoor) {
+      await recomputeCustomerPurchaseSummary(run, companyId, [idResult.customerId!]);
+      return { rfmUpdated: true, stale: false };
+    }
     const reverseAmount = decision.reverseAmount ?? input.totalAmount;
     // ★ 1028 M21(K1-5) — 최근 구매일 · 금액 · 마지막 구매일이 이 주문의 날(사건 시각의 KST 날짜)이면, 남은 결제 구매(자사몰 순매출 + 싱크 원장)의
     //   가장 늦은 날로 되돌린다(두 문 합산 = 여정의 이전 구매 판정과 같은 규칙 · 남은 것이 없으면 비움). 그 날이 아니면 그대로.
@@ -394,7 +414,7 @@ export async function syncOrder(
     occurredAt: input.orderedAt,
   });
   return { rfmUpdated: false, stale: false };
-  }));
+  })));
 
   return {
     customerId: idResult.customerId,

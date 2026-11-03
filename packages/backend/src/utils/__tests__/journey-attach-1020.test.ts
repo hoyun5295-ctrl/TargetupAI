@@ -382,8 +382,9 @@ describe('5. 만들기 길 차단 · 켜기 검사 · 감시 배선', () => {
     expect(w).not.toContain('await query(cursorSql, cursorParams);');
     expect(w).not.toContain('await client.query(cursorSql, cursorParams);');
     expect((w.match(/WHERE id = \$1::uuid AND company_id = \$2::uuid AND status = 'active'\$\{startSameSql\(params, expect\)\}/g) || []).length).toBe(2);   // 멈춤 UPDATE · 잠금 안 확인 SELECT 가 같은 조각
-    expect((w.match(/await pauseJourneyForCompany\(/g) || []).length).toBe(5);
-    expect((w.match(/pauseJourneyForCompany\([\s\S]{0,260}?(startExpectOf\(j\)|\n\s+expect,\n)/g) || []).length).toBe(5);   // 멈춤 다섯 자리 모두 같은 시작 설정(세대 포함)
+    // ★ 2026-11-04 C99 T7 — 상품 재구매 「저장한 문 ≠ 지금 문 = 멈춤」 자리를 지웠다(문 판정 삭제) = 멈춤 네 자리
+    expect((w.match(/await pauseJourneyForCompany\(/g) || []).length).toBe(4);
+    expect((w.match(/pauseJourneyForCompany\([\s\S]{0,260}?(startExpectOf\(j\)|\n\s+expect,\n)/g) || []).length).toBe(4);   // 멈춤 네 자리 모두 같은 시작 설정(세대 포함)
     expect(w).toContain('if (!paused) return { matched: ids.length, enqueued: 0, skipped: ids.length };');
     expect(w).toContain("AND jm.entry_event_properties->'__entry'->>'key' = t.props->'__entry'->>'key')");
     expect(w).toContain(')${afterGuard}');

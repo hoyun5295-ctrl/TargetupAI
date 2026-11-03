@@ -2,20 +2,14 @@
  * journey-purchase-ledger.ts — 구매 원장을 여정 커서로 읽기 위한 판정 (2026-08-01, 설계서 §11-4)
  *
  * 정하는 것 둘뿐이다.
- *   1. 이 회사의 구매는 어느 문으로 들어오는가 (원장인가 자사몰 이벤트인가)
- *   2. 얼마나 오래된 구매까지 트리거로 인정하는가
+ *   1. 얼마나 오래된 구매까지 트리거로 인정하는가 · 원장 문을 언제 도는가
+ *   2. 화면 문 안내(어느 문으로 · 마지막으로 언제 들어왔나)
  * 조회 SQL은 journey-target-extractor(추출 단일 출처)가 소유한다.
  *
- * ⛔ 문은 회사마다 하나다
- *   자사몰 주문(`cdp-orders`)은 `cdp_events`에만 쌓고 원장에는 쓰지 않는다(`INSERT INTO purchases`는
- *   싱크 라우트 두 곳뿐 — grep 확인). 그래서 보통은 두 문이 겹치지 않는다.
- *   문제는 **자사몰 주문을 ERP에도 동기화해 우리에게 두 번 주는 회사**다. 그 회사에서 두 문을 다 읽으면
- *   같은 구매가 두 번 진입한다 — 구매 템플릿은 재진입 허용에 쿨다운 0이라 그대로 중복 발송·중복 과금이다.
- *   그러니 **자사몰 문이 살아 있으면 원장 문을 열지 않는다.** 이 판정 구조는 새로 만든 게 아니다 —
- *   `customer-purchase-aggregates`가 구매요약을 두 채널이 덮어쓰지 않게 하려고 이미 같은 방식을 쓴다.
- *
- *   "살아 있다"는 존재가 아니라 **최근**으로 본다. 옛날 테스트 이벤트 한 건이 원장 문을 영영 닫으면
- *   "켜 뒀는데 0건"이 되고, 그게 이 재설계가 없애려는 바로 그 상태다(설계서 §2-3).
+ * ★ 2026-11-04 C99 — 「문은 회사마다 하나」(자사몰 문이 최근 30일 살아 있으면 원장 문을 닫는다)를 지웠다.
+ *   그 규칙은 자사몰 주문을 ERP 로도 받는 회사의 중복 진입을 막으려던 것인데, 자사몰과 매장 싱크를 둘 다 쓰는 회사에서
+ *   매장 구매를 여정 · 요약 칸 · 조건 · 상품 · 성과에서 통째로 뺐다(뿌리 R54). 이제 두 문을 늘 다 읽고,
+ *   같은 구매 판정은 two-door-purchase(CT-D1 · CT-D2) · 진입 중복은 같은 날 다른 문 진입 소유(CT-D5)가 막는다.
  *
  * ⛔ 과거분 소급 차단은 발생 시각 하나에 걸린다
  *   커서는 도착 축이라(§11-3) 이관·전량 재적재로 3년 치가 오늘 들어오면 전부 커서 앞에 선다.
@@ -75,27 +69,6 @@ export function isLedgerRunWindowHour(kstHour: number): boolean {
   return kstHour >= LEDGER_RUN_START_HOUR_KST && kstHour < LEDGER_RUN_END_HOUR_KST;
 }
 
-/** 자사몰 문이 "살아 있다"고 볼 기간. 한 달 안에 그 문으로 구매가 들어왔으면 그 문이 현역이다. */
-export const MALL_DOOR_ACTIVE_DAYS = 30;
-
-// ── 문 판정 캐시 ──
-//   ⛔ **"자사몰 문 없음"은 캐시하지 않는다**(Codex 지적 수용).
-//     캐시된 false는 그 시간 동안 원장 문을 열어 둔다 — 그 사이 자사몰 첫 구매가 들어오면
-//     두 문이 동시에 열려 같은 구매가 두 번 진입한다(중복 발송·중복 과금). 기본값이 열림인 장치다.
-//     반대로 true(=원장 잠금)는 안전한 방향이라 캐시해도 된다.
-//   조회는 EXISTS 한 줄이고, 원장 문은 하루 3시간만 도니 부하는 그 시간대의 여정 수뿐이다.
-const DOOR_CLOSED_TTL_MS = 30 * 60 * 1000;
-const doorCache = new Map<string, { at: number; mallActive: boolean }>();
-
-/** 테스트 전용 — 판정 캐시 비우기. */
-export function resetPurchaseLedgerCaches(): void {
-  doorCache.clear();
-}
-
-/**
- * 자사몰 문이 현역인가 — 최근 구매 이벤트가 있으면 참.
- * 참이면 원장 문을 닫는다(같은 구매를 두 번 읽지 않는다).
- */
 /**
  * ★ 2026-10-27 자사몰 대비 K1-9 — 「주문 시도」 조각(별칭 alias 의 cdp_events 행) = 결제됐든 결제 전이든 주문을 넣었다.
  *   장바구니 포기 · 둘러보고 안 삼의 **제외 판정**만 쓴다(결제 전 주문이 있는 고객에게 「안 샀어요」 문자를 보내지 않는다).
@@ -105,86 +78,26 @@ export function orderAttemptSql(alias: string): string {
   return `${alias}.event_name IN ('purchase', 'order_placed')`;
 }
 
-export async function isMallPurchaseDoorActive(companyId: string): Promise<boolean> {
-  const cached = doorCache.get(companyId);
-  // true(원장 잠금)만 캐시를 신뢰한다 — false를 캐시하면 그 사이 자사몰 구매가 들어와도 원장 문이 열려 있다.
-  if (cached?.mallActive && Date.now() - cached.at < DOOR_CLOSED_TTL_MS) return true;
-  // ★ 2026-10-27 자사몰 대비 K1-9 — 결제 전 주문(order_placed)도 문을 닫는다(결제 전 주문만 오는 동안 원장 문이 열려 같은 구매가 두 문으로 들어가지 않게).
-  const r = await query(
-    `SELECT 1 FROM cdp_events
-      WHERE company_id = $1::uuid
-        AND event_name IN ('purchase', 'order_placed')
-        AND occurred_at >= NOW() - ($2 || ' days')::interval
-      LIMIT 1`,
-    [companyId, String(MALL_DOOR_ACTIVE_DAYS)],
-  );
-  const mallActive = r.rows.length > 0;
-  doorCache.set(companyId, { at: Date.now(), mallActive });
-  return mallActive;
-}
-
 /**
- * ★ 2026-10-19 B-1009-3 — 여정 통계(지난 전환)의 출처 문. 지금 문(isMallPurchaseDoorActive · 최근 30일 · 진입 트리거용)과 다르다:
- *   그 여정의 첫 진입 뒤로 자사몰 구매 이벤트가 한 건이라도 있었으면 자사몰(그 기간의 진실) · 없으면 원장.
- *   옛(F1b): 지금 문으로 골라, 자사몰만 쓰는 회사가 한 달 주문이 없으면 지난 전환이 원장(빈 표)으로 바뀌어 0 이 됐다.
- *   두 문을 더하지 않는다 — 자사몰 주문을 원장으로도 받는 회사에서 같은 구매가 두 번 셈해진다.
- */
-export async function isMallPurchaseDoorForJourneyStats(companyId: string, journeyId: string): Promise<boolean> {
-  const r = await query(
-    `SELECT 1 FROM cdp_events ce
-      WHERE ce.company_id = $1::uuid AND ce.event_name = 'purchase'
-        AND ce.occurred_at >= COALESCE((SELECT MIN(e.entered_at) FROM journey_executions e WHERE e.journey_id = $2::uuid), NOW())
-      LIMIT 1`,
-    [companyId, journeyId],
-  );
-  return r.rows.length > 0;
-}
-
-/**
- * ★ 2026-08-02 §13-5 — 화면이 "매장 구매는 하루 모아 다음 날 오전에 나갑니다"를 말하려면
- *   **어느 문이 진실인지**와 **마지막으로 언제 도착했는지**를 알아야 한다. 그 판정은 이 CT가 소유한다.
+ * ★ 2026-08-02 §13-5 — 화면이 "매장 구매는 하루 모아 다음 날 오전에 나갑니다"를 말하려면 **마지막으로 언제 도착했는지**를 알아야 한다.
+ * ★ 2026-11-04 C99 T8 — 두 문을 따로 알린다(들어온 적 있는 문만 · 옛: 문 하나만 골라 두 문 회사에 매장 안내가 없었다).
  *   ⛔ 시각은 도착 축(created_at)이다 — 발생 축(occurred_at)으로 보여주면 "언제 동기화됐나"가 아니라
  *     "언제 샀나"가 되어 사용자가 동기화 상태를 오판한다.
  */
 export interface PurchaseDoorStatus {
-  /** 'mall' = 자사몰 이벤트가 진실 · 'ledger' = 매장·ERP 원장이 진실. */
-  door: 'mall' | 'ledger';
-  /** 그 문으로 구매가 마지막으로 도착한 시각(ISO). 한 건도 없으면 null. */
-  lastArrivalAt: string | null;
+  /** 자사몰 주문(결제 전 주문 포함) — 들어온 적이 없으면 null. */
+  mall: { lastArrivalAt: string } | null;
+  /** 매장 · ERP 원장 — 들어온 적이 없으면 null. */
+  ledger: { lastArrivalAt: string } | null;
 }
 
 export async function getPurchaseDoorStatus(companyId: string): Promise<PurchaseDoorStatus> {
-  const mallActive = await isMallPurchaseDoorActive(companyId);
-  if (mallActive) {
-    // ★ 1027 K1-9 — 마지막 도착 = 결제 전 주문 도착도 포함(동기화 상태를 말하는 시각)
-    const r = await query(
-      `SELECT MAX(created_at)::text AS last FROM cdp_events
-        WHERE company_id = $1::uuid AND event_name IN ('purchase', 'order_placed')`,
-      [companyId],
-    );
-    return { door: 'mall', lastArrivalAt: r.rows[0]?.last || null };
-  }
+  // ★ 1027 K1-9 — 자사몰 마지막 도착 = 결제 전 주문 도착도 포함(동기화 상태를 말하는 시각)
   const r = await query(
-    `SELECT MAX(created_at)::text AS last FROM purchases WHERE company_id = $1::uuid`,
+    `SELECT (SELECT MAX(created_at)::text FROM cdp_events WHERE company_id = $1::uuid AND event_name IN ('purchase', 'order_placed')) AS mall,
+            (SELECT MAX(created_at)::text FROM purchases WHERE company_id = $1::uuid) AS ledger`,
     [companyId],
   );
-  return { door: 'ledger', lastArrivalAt: r.rows[0]?.last || null };
-}
-
-export interface PurchaseLedgerGate {
-  /** 원장 커서를 돌릴 것인가. */
-  enabled: boolean;
-  /** 닫혔다면 사유(로그용 — 화면 문구가 아니다). */
-  reason?: string;
-}
-
-/**
- * 이 회사에서 원장 문을 열지 판정한다 — **어느 문인가**만 본다.
- * **언제 도는가**(실행 시간대)는 호출부가 DB 시계로 판정한다(isLedgerRunWindowHour).
- */
-export async function resolvePurchaseLedgerGate(companyId: string): Promise<PurchaseLedgerGate> {
-  if (await isMallPurchaseDoorActive(companyId)) {
-    return { enabled: false, reason: '자사몰 구매 이벤트가 현역: 원장 문은 닫는다(중복 진입 차단)' };
-  }
-  return { enabled: true };
+  const x = r.rows[0] || {};
+  return { mall: x.mall ? { lastArrivalAt: x.mall } : null, ledger: x.ledger ? { lastArrivalAt: x.ledger } : null };
 }

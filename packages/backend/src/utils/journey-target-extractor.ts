@@ -24,6 +24,7 @@ import type { JourneyConsent } from './mall-consent';
 import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
 import { buildLedgerAntiJoin, hasBaseline } from './journey-entry-ledger';
 import { orderAttemptSql } from './journey-purchase-ledger';
+import { purchaseFactsSql, crossDoorEntryOwnedSql, mallEntryDaySql, ledgerEntryDaySql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D2 · CT-D5
 // ★ 2026-08-01 여정 재설계 §3-0-2 — "우리가 처음 본 사람" ≠ "신규 고객".
 //   추출은 회사 능력을 조회하지 않는다(Codex 3R). 술어는 데이터로만 평가되고,
 //   "판정 가능한가" 게이트는 발송 진입 경로(journey-trigger-watcher)가 소유한다.
@@ -297,13 +298,10 @@ export async function buildJourneyTargetQuery(
                   EXTRACT(EPOCH FROM MAX(u.d)) AS last_e,
                   COUNT(*)::int AS cnt
              FROM (
-               -- 같은 구매가 양 문에 다 있으면(혼합 회사) cnt가 부풀어 간격이 준다(Codex 지적) —
-               -- 발생 시각 분 단위로 합쳐 한 건으로 센다. 같은 분의 실제 별건 구매는 마케팅상 한 건이다.
-               SELECT DISTINCT e.customer_id, date_trunc('minute', e.occurred_at) AS d FROM cdp_events e
-                WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
-               UNION
-               SELECT DISTINCT p.customer_id, date_trunc('minute', p.purchase_date AT TIME ZONE 'Asia/Seoul') FROM purchases p
-                WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
+               -- ★ 2026-11-04 C99 — 이력 = 두 문 사실(CT-D2 · 같은 구매 한 번 · 몰 = 분 단위 · 원장 = 그날 0시).
+               --   옛: 두 문을 분 단위로 합쳐 겹침을 뺐다(원장은 날짜 0시라 몰 주문과 같은 분이 아니어서 같은 구매가 두 번 셈해졌다).
+               SELECT DISTINCT f.customer_id, date_trunc('minute', f.at) AS d
+                 FROM (${purchaseFactsSql({ companyRef: '$1::uuid' })}) f
              ) u
             GROUP BY u.customer_id
            HAVING COUNT(*) >= 3
@@ -663,6 +661,18 @@ export async function cdpEventTargetQuery(
   scopeSql = '',   // ★ 2026-09-27 S5-04
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
 ): Promise<TargetQuery> {
+  // ★ 2026-11-04 C99 T4 — 구매 미리보기(커서 없음 = 최근 7일) = 두 문 사실의 최근 7일 고객(CT-D2 · 같은 구매 한 번).
+  //   옛: 자사몰 사건만 셌다(매장만 회사 = 미리보기 0명 · 두 문 회사 = 매장 구매 고객 빠짐). 라이브 진입은 커서 경로(T3) 그대로.
+  if (eventName === 'purchase' && !(cursorStart && windowEnd)) {
+    const params: any[] = [companyId];
+    const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
+    params.push(limitParam(limit));
+    return { sql: `SELECT DISTINCT f.customer_id FROM (${purchaseFactsSql({ companyRef: '$1::uuid', sinceAt: `NOW() - INTERVAL '7 days'` })}) f
+       INNER JOIN customers c ON c.id = f.customer_id AND c.company_id = $1::uuid
+       WHERE ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
+         ${cond ? ` AND ${cond}` : ''}
+       LIMIT $${params.length}::int`, params };
+  }
   const params: any[] = [companyId, eventName];
   let timeClause: string;
   if (cursorStart && windowEnd) {
@@ -735,6 +745,11 @@ export async function selectCdpEventRowsForCursor(
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
   /** ★ 1027 K1-2 — 이 여정 계보(있으면 그 계보에서 이미 진입에 쓰인 사건 행을 뺀다 · 승격으로 커서를 다시 지나는 사건) */
   entryLineage?: string[],
+  /**
+   * ★ 2026-11-04 C99 CT-D5 — 구매 계열(상품 재구매 제외) = 이 계보에 같은 고객 · 같은 날 · 매장 문으로 이미 진입한 행은 후보가 아니다
+   *   (후보가 태어나는 자리에서 거른다 = 대량 차단 · 진입 · 커서가 같은 후보를 본다 · 거른 행도 커서는 지나간다 · 설계서 §4 T3).
+   */
+  crossDoorOwned = false,
 ): Promise<CdpEventRow[]> {
   // 축은 화이트리스트 두 값뿐 — 문자열이 그대로 SQL에 들어가므로 여기서 닫는다(주입 표면 0).
   const axis = cursor.axis === 'created_at' ? 'created_at' : 'occurred_at';
@@ -751,11 +766,13 @@ export async function selectCdpEventRowsForCursor(
   if (entryLineage && entryLineage.length > 0) {
     params.push(entryLineage);
     usedClause = `AND NOT ${triggerEntryUsedSql(`$${params.length}`, 'e.customer_id', 'e.id::text')}`;
+    if (crossDoorOwned) usedClause += ` AND NOT ${crossDoorEntryOwnedSql(`$${params.length}`, 'e.customer_id', `'mall'`, mallEntryDaySql('e'))}`;
   }
   params.push(String(chunkLimit));
   const r = await query(
     `SELECT e.id, e.customer_id, e.created_at, e.occurred_at,
             e.created_at::text AS created_at_raw, e.occurred_at::text AS occurred_at_raw,
+            ${mallEntryDaySql('e')} AS entry_day,
             e.properties FROM cdp_events e
      INNER JOIN customers c ON c.id = e.customer_id AND c.company_id = $1::uuid
      WHERE e.company_id = $1::uuid
@@ -780,6 +797,7 @@ export async function selectCdpEventRowsForCursor(
     createdAtRaw: x.created_at_raw ?? null,
     occurredAtRaw: x.occurred_at_raw ?? null,
     properties: x.properties ?? null,
+    entryDay: x.entry_day ?? null,
   }));
 }
 
@@ -802,6 +820,8 @@ export async function selectPurchaseLedgerRowsForCursor(
   chunkLimit: number,
   scopeSql = '',   // ★ 2026-09-27 S5-04
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
+  /** ★ 2026-11-04 C99 CT-D5 — 구매 계열(상품 재구매 제외) = 이 계보에 같은 고객 · 같은 날 · 자사몰 문으로 이미 진입한 행은 후보가 아니다. */
+  crossDoorLineage?: string[],
 ): Promise<CdpEventRow[]> {
   const params: any[] = [companyId, cursor.at, windowEnd, String(maxAgeHours)];
   let cursorClause: string;
@@ -812,6 +832,11 @@ export async function selectPurchaseLedgerRowsForCursor(
     cursorClause = `p.created_at > ($2::timestamptz AT TIME ZONE current_setting('TimeZone'))`;
   }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
+  let ownedClause = '';
+  if (crossDoorLineage && crossDoorLineage.length > 0) {
+    params.push(crossDoorLineage);
+    ownedClause = `AND NOT ${crossDoorEntryOwnedSql(`$${params.length}`, 'p.customer_id', `'ledger'`, ledgerEntryDaySql('p'))}`;
+  }
   params.push(String(chunkLimit));
   const r = await query(
     `SELECT p.id,
@@ -819,6 +844,7 @@ export async function selectPurchaseLedgerRowsForCursor(
             (p.created_at AT TIME ZONE current_setting('TimeZone')) AS arrived_at,
             (p.created_at AT TIME ZONE current_setting('TimeZone'))::text AS arrived_at_raw,
             (p.purchase_date AT TIME ZONE 'Asia/Seoul') AS occurred_at,
+            ${ledgerEntryDaySql('p')} AS entry_day,
             jsonb_strip_nulls(jsonb_build_object(
               'total_amount', ROUND(COALESCE(p.total_amount, 0))::bigint,
               'product_name', p.product_name,
@@ -836,6 +862,7 @@ export async function selectPurchaseLedgerRowsForCursor(
         AND p.purchase_date <= (NOW() AT TIME ZONE 'Asia/Seoul')
         AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
         ${cond ? ` AND ${cond}` : ''}
+        ${ownedClause}
       ORDER BY p.created_at ASC, p.id ASC
       LIMIT $${params.length}::int`,
     params,
@@ -848,6 +875,7 @@ export async function selectPurchaseLedgerRowsForCursor(
     // 커서 전진용 DB 원문 — JS Date 왕복은 마이크로초를 절사해 마지막 밀리초 묶음이 재진입한다(2026-08-02).
     createdAtRaw: x.arrived_at_raw ?? null,
     properties: x.properties ?? null,
+    entryDay: x.entry_day ?? null,
   }));
 }
 
@@ -867,20 +895,16 @@ export async function selectLastPriorPurchase(
   if (candidates.length === 0) return new Map();
   const ids = candidates.map((c) => c.customerId);
   const ats = candidates.map((c) => c.enteredAt);
+  // ★ 2026-11-04 C99 — 이전 구매 = 두 문 사실(CT-D2 · 같은 구매 한 번). 옛: 두 문을 따로 MAX 해 몰 주문과 같은 구매인 매장 줄이
+  //   「이전 구매」로 잡혔다 → 휴면 복귀 · 첫 구매가 아닌 것으로 판정 → 몰 진입 0 · 매장 줄은 몰이 있어 빠짐 = 진입 0(구조체크 SC-4).
+  //   원장 at = 그날 KST 0시(옛 purchase_date < 진입 KST 벽시계 와 같은 비교) · 몰 = 결제 시각.
   const r = await query(
     `WITH cand AS (
        SELECT unnest($2::uuid[]) AS customer_id, unnest($3::timestamptz[]) AS entered_at
-     )
+     ),
+     f AS (${purchaseFactsSql({ companyRef: '$1::uuid', customerIdsRef: '$2::uuid[]' })})
      SELECT c.customer_id,
-            GREATEST(
-              (SELECT MAX(e.occurred_at) FROM cdp_events e
-                WHERE e.company_id = $1::uuid AND e.customer_id = c.customer_id
-                  AND ${netPurchaseSql('e')} AND e.occurred_at < c.entered_at),   -- ★ 2026-11-02 이전 구매 = 결제된 구매(CT-J3)
-              (SELECT MAX(p.purchase_date AT TIME ZONE 'Asia/Seoul') FROM purchases p
-                WHERE p.company_id = $1::uuid AND p.customer_id = c.customer_id
-                  AND p.purchase_date IS NOT NULL
-                  AND p.purchase_date < (c.entered_at AT TIME ZONE 'Asia/Seoul'))
-            ) AS last_prior
+            (SELECT MAX(f.at) FROM f WHERE f.customer_id = c.customer_id AND f.at < c.entered_at) AS last_prior
        FROM cand c`,
     [companyId, ids, ats],
   );

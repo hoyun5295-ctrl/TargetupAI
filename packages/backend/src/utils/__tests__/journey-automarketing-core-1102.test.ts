@@ -208,8 +208,8 @@ describe('CT-J3 결제된 구매 — 구매 사건 판정은 CT 밖 0(설계서 
   const OBSERVE: Record<string, string> = {
     'utils/cdp-order-revenue.ts': 'CT 자신',
     'utils/cdp-orders.ts': '적재 · 표식을 쓰는 원천',
-    'utils/customer-purchase-aggregates.ts': '웹훅이 고객 누계를 쓴 표식 보호(결제 판정을 씌우면 환불 뒤 보호가 풀린다)',
-    'utils/journey-purchase-ledger.ts': '자사몰 문이 살아 있는가 = 사건이 들어오는가',
+    'utils/customer-purchase-aggregates.ts': '웹훅이 고객 누계를 쓴 표식 보호(★ C99 = 그 판정은 지웠고 회사 갈래 = two-door-purchase netPurchaseSql)',
+    'utils/journey-purchase-ledger.ts': '문 안내 = 자사몰 주문이 마지막으로 들어온 때(관측 · ★ C99 문 판정 삭제)',
     'utils/cdp-diagnostics.ts': '수집 감시',
     'utils/mall-integration-monitor.ts': '수집 감시',
     'utils/company-data-profile.ts': '구매 데이터가 있는 회사인가',

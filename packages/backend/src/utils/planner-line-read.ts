@@ -219,8 +219,8 @@ export function readPlannerLine(line: string, nowMs: number): PlannerLineRead {
 export interface PlannerLineAskContext {
   /** 채널 준비 판정(문자 · DM · 메일) — 잠김 사유 = 고객 문장 */
   channels: Array<{ channel: 'sms' | 'dm' | 'email'; label: string; available: boolean; reason: string | null }>;
-  /** 관측 상품(구매자 많은 순) · 못 읽음 = null(상품 보기 없이 묻는다) */
-  products: { door: 'mall' | 'ledger'; list: Array<{ key: string; name: string; buyers: number }> } | null;
+  /** 관측 상품(구매자 많은 순 · 상품마다 문 = 자사몰 · 매장 · ★ 2026-11-04 C99) · 못 읽음 = null(상품 보기 없이 묻는다) */
+  products: { list: Array<{ door: 'mall' | 'ledger'; key: string; name: string; buyers: number }> } | null;
 }
 
 /** 상품 보기 수(구매자 많은 순) · 한 줄 낱말에 맞은 상품 상한(= 저장 상한) */
@@ -229,12 +229,18 @@ const READ_PRODUCT_MAX = 30;
 const SINCE_OPTIONS = [{ value: '90', label: '최근 90일' }, { value: '180', label: '6개월' }, { value: '365', label: '1년' }, { value: '0', label: '기록 전체' }];
 
 /** 한 줄 낱말에 맞은 관측 상품(맞춤 규칙 = confirmLineAudience 와 같다 · 화면 「「기초」가 든 상품 N개」 줄도 이것) */
-export function plannerLineBuyerProducts(read: PlannerLineRead, ctx: PlannerLineAskContext): Array<{ key: string; name: string }> {
+export function plannerLineBuyerProducts(read: PlannerLineRead, ctx: PlannerLineAskContext): Array<{ door: 'mall' | 'ledger'; key: string; name: string }> {
   const aud = read.audience;
   if (!aud || aud.kind !== 'product_buyers' || !ctx.products) return [];
   const terms = aud.terms.map((t) => t.toLowerCase());
-  return ctx.products.list.filter((p) => terms.every((t) => String(p.name || '').toLowerCase().includes(t))).map((p) => ({ key: p.key, name: p.name }));
+  return ctx.products.list.filter((p) => terms.every((t) => String(p.name || '').toLowerCase().includes(t))).map((p) => ({ door: p.door, key: p.key, name: p.name }));
 }
+
+/** ★ 2026-11-04 C99 — 맞은 상품이 한 문(자사몰 또는 매장)에만 있나(대상 = 한 문의 상품 키 · 두 문에 걸치면 사람이 고른다) */
+const oneDoorOf = (ps: Array<{ door: 'mall' | 'ledger' }>): 'mall' | 'ledger' | null =>
+  ps.length > 0 && ps.every((p) => p.door === ps[0].door) ? ps[0].door : null;
+/** 상품 보기 값 = 문 + 키(같은 글자 키가 두 문에 있어도 다른 상품) */
+const productOptionValue = (p: { door: 'mall' | 'ledger'; key: string }): string => `p:${p.door}:${p.key}`;
 
 /** 읽은 채널 중 지금 열린 것 = 담을 채널(닫힌 것은 빼고 담는다 · 화면 「이렇게 담을게요」도 이 값을 그린다) */
 export function plannerLineSendChannels(read: PlannerLineRead, ctx: PlannerLineAskContext): Array<'sms' | 'dm' | 'email'> {
@@ -255,13 +261,15 @@ export function plannerLineQuestions(read: PlannerLineRead, ctx: PlannerLineAskC
   }
   const aud = read.audience;
   const readBuyers = plannerLineBuyerProducts(read, ctx);
-  const audResolved = aud?.kind === 'all' || (aud?.kind === 'product_buyers' && readBuyers.length > 0 && readBuyers.length <= READ_PRODUCT_MAX);
+  const audResolved = aud?.kind === 'all' || (aud?.kind === 'product_buyers' && readBuyers.length > 0 && readBuyers.length <= READ_PRODUCT_MAX && oneDoorOf(readBuyers) !== null);
   if (!audResolved) {
     const products = (ctx.products?.list || []).slice(0, PRODUCT_OPTIONS);
+    const bothDoors = new Set((ctx.products?.list || []).map((p) => p.door)).size > 1;
     qs.push({
       id: 'audience', kind: 'choice', label: '누구에게 보낼까요?', required: true,
       help: aud?.kind === 'unread' ? `「${aud.raw}」은 아직 바로 고르지 못해요. 가까운 쪽을 골라 주세요` : '여러 상품을 묶은 조건은 담은 뒤 행사 화면에서 고칠 수 있어요',
-      options: [{ value: 'all', label: '전체 고객' }, ...products.map((p) => ({ value: `p:${p.key}`, label: `「${p.name}」 산 고객`, desc: `구매자 ${p.buyers}명` }))],
+      // ★ Codex 구현 1R #4 — 두 문 회사 = 라벨에 문(설명은 화면에서 툴팁뿐 · 같은 이름 두 문 상품이 같은 버튼으로 보였다)
+      options: [{ value: 'all', label: '전체 고객' }, ...products.map((p) => ({ value: productOptionValue(p), label: `「${p.name}」 산 고객${bothDoors ? (p.door === 'mall' ? ' · 자사몰' : ' · 매장') : ''}`, desc: `구매자 ${p.buyers}명` }))],
     });
   }
   if (!audResolved || aud?.kind === 'product_buyers') {
@@ -293,7 +301,7 @@ export function plannerLineAsk(read: PlannerLineRead, ctx: PlannerLineAskContext
   const questions = plannerLineQuestions(read, ctx);
   const buyers = plannerLineBuyerProducts(read, ctx);
   const sendChannels = plannerLineSendChannels(read, ctx);
-  const askKey = createHash('sha256').update(JSON.stringify({ read, questions, buyers, sendChannels, door: ctx.products?.door ?? null })).digest('hex').slice(0, 32);
+  const askKey = createHash('sha256').update(JSON.stringify({ read, questions, buyers, sendChannels })).digest('hex').slice(0, 32);
   return { questions, buyerNames: buyers.map((p) => p.name), sendChannels, askKey };
 }
 
@@ -330,13 +338,13 @@ export function plannerLineEventBody(read: PlannerLineRead, answers: LineAnswers
   if (pick === undefined) {
     audience = read.audience?.kind === 'all'
       ? { kind: 'all' }
-      : { kind: 'product_buyers', door: ctx.products!.door, ...keysOf(plannerLineBuyerProducts(read, ctx)), since: sinceOf(got.since, nowMs) };
+      : { kind: 'product_buyers', door: oneDoorOf(plannerLineBuyerProducts(read, ctx)), ...keysOf(plannerLineBuyerProducts(read, ctx)), since: sinceOf(got.since, nowMs) };
   } else if (pick === 'all') {
     audience = { kind: 'all' };
   } else {
-    const p = ctx.products?.list.find((x) => `p:${x.key}` === pick);
+    const p = ctx.products?.list.find((x) => productOptionValue(x) === pick);
     if (!p || !ctx.products) return { ok: false, error: '받는 사람을 다시 골라 주세요.' };
-    audience = { kind: 'product_buyers', door: ctx.products.door, ...keysOf([p]), since: sinceOf(got.since, nowMs) };
+    audience = { kind: 'product_buyers', door: p.door, ...keysOf([p]), since: sinceOf(got.since, nowMs) };
   }
   if (audience.kind === 'product_buyers' && audience.since === undefined) return { ok: false, error: '「언제 산 고객인가요?」에 답해 주세요.' };
   const channels = got.channel ? [got.channel as 'sms' | 'dm' | 'email'] : plannerLineSendChannels(read, ctx);

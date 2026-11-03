@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 8372eb16 · 2026-11-02 · Harold 출력(서버 pull bec5d5d5..8372eb16 · Fast-forward · 156 files · C95 450b5295 · C94 8372eb16 원문 받음 · 그 전 bec5d5d5)
-- deployed_head: 8372eb16 · 2026-11-02 · Harold 출력(백엔드 build:safe 11:46:46 · 적재 중 0건 확인 뒤 pm2 restart --update-env 11:47:50 · online · restarts 33 · unstable 0 · /health ok · 배너 11:48:06 · 에러 로그 0줄 · 프론트 build:safe 원문 받음) · 그 전 bec5d5d5(C93) · C77-ENV-1 은 아직
+- pulled_head: 3af58654 · 2026-11-03 · Harold 출력(서버 pull 943fd803..3af58654 · Fast-forward · 212 files · 이미지 스튜디오 e904cb87 · C98 3af58654 · 서버 pull 앞 = 943fd803 · 원장 8372eb16 과 그 사이 pull 기록 없음) · 그 전 8372eb16
+- deployed_head: 3af58654 · 2026-11-03 · Harold 출력(새 패키지 0 = npm install 건너뜀 · 백엔드 build:safe 08:42:53 성공 · 프론트 build:safe 성공 · 적재 중 0건(loading=0) 확인 뒤 pm2 restart targetup-backend --update-env · online · restarts 41 · 새 PID 2674452 · 켜진 시각 08:47:20 · /health 200 · 에러 로그 0줄(00:00 회전 뒤 0바이트 · pm2 가 쓰는 경로 확인) · 출력 로그 = 여정 · 자동마케팅 워커 시작 줄 · tick · SQL 오류 0 · 멈춤 1 = 한줄 뷰티(시연) 신규 가입 환영(C99 §11)) · 그 전 8372eb16(C94 · C95) · C77-ENV-1 은 아직
 - 이번 창 확인 출력: backend-build · restart-env · uptime · frontend-build
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -44,7 +44,8 @@
 | C94 | 8372eb16 |
 | C95 | 450b5295 |
 | C96 | 33f049c2 |
-| C98 | 미커밋 |
+| C98 | 3af58654 |
+| C99 | 미커밋 |
 
 ## §1 대기
 
@@ -680,7 +681,7 @@ ALTER TABLE journey_step_campaigns ADD COLUMN IF NOT EXISTS seq smallint NOT NUL
 - 의미 바꿈: 아니오(색인 추가 · 새 코드의 만들기 = 대상 없는 ON CONFLICT DO NOTHING = 색인이 있든 없든 같은 문장)
 - 기대: 서버 psql 에서 아래 블록(트랜잭션 밖 · 그 문장 하나) · 확인 = SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = 'journey_step_campaigns_seq_uidx'::regclass;
 - 확인: t 한 줄(f 면 DROP INDEX CONCURRENTLY IF EXISTS journey_step_campaigns_seq_uidx; 뒤 다시)
-- 결과:
+- 결과: 1103 Harold 실행(C96 · C98 · 이미지 스튜디오 한 배포 3af58654 · 새 PID 2674452 08:47:20 · 옛 프로세스 0) = CREATE INDEX · indisvalid t
 
 > C96-DDL-2A · 배포 뒤 · 색인 추가 · 되돌리기 = DROP INDEX CONCURRENTLY IF EXISTS journey_step_campaigns_seq_uidx;
 
@@ -695,7 +696,7 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS journey_step_campaigns_seq_uidx O
 - 의미 바꿈: 예(같은 날 같은 칸에 순번 1 이상 캠페인을 만들 수 있다 = 증명 못 해 닫은 단위 뒤 이어 붙임 · 옛 코드가 남아 있으면 그 문장이 42P10 = 그래서 옛 프로세스 0 뒤 · 새 코드는 회차마다 pg_index 기본 키 열 수로 연다)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'journey_step_campaigns'::regclass AND contype = 'p';
 - 확인: PRIMARY KEY (journey_id, step_id, send_date, seq) 한 줄
-- 결과:
+- 결과: 1103 Harold 실행 = NOTICE(색인 이름 → journey_step_campaigns_pkey) · SET · ALTER TABLE · 확인 = PRIMARY KEY (journey_id, step_id, send_date, seq)
 
 > C96-DDL-2B · 배포 뒤 · 기본 키 바꿈 · 되돌리기 = 순번 1 이상 행이 0 일 때만 3열 기본 키로(그 SQL 은 그때 따로)
 
@@ -783,7 +784,7 @@ ON CONFLICT (field_key) DO NOTHING;
 - 의미 바꿈: 예(그 회사에 가입 근거가 생겨 신규 가입 여정 켜기 · 새로 가입 축이 열린다 · 옛 가입 시각은 기준선 · 72시간 규칙으로 진입 0)
 - 기대: UPDATE n(S0 ④ 의 수 이하) · 확인 = SELECT COUNT(*) FROM customers WHERE joined_at IS NOT NULL;
 - 확인: UPDATE 수와 같다(배포 뒤 새 가입이 있으면 그만큼 더)
-- 결과:
+- 결과: 1103 Harold 실행 = SET · UPDATE 0(S0 ④ 0행과 같음 · 옮길 카페24 가입일 없음)
 
 > C98-DML-2 · 배포 뒤 · 빈 칸 채우기(이른 값만) · 되돌리기 = 채운 행만 되돌리는 블록은 그때 따로(배포 뒤 새 가입 행과 가른다)
 
@@ -801,6 +802,54 @@ UPDATE customers
 - 단계: 사후
 - 선행: C98-DDL-1 · C98-DDL-2 · C98-DML-1 · 코드 배포 · C96-DDL-2A · C96-DDL-2B
 - 기대: ① 배포 뒤 첫 회차 새 PID ERROR 0 · 운영 경보 journey-pause-notice-ddl 0 ② 직원 지시문(설계서 §6 · 엑셀) 전 시트 기대 결과 그대로 ③ 첫 5분 = C98-S0 ③ 수만큼 멈춤 안내 · journeys.pause_notice_for 찍힘
+- 확인: 로그 줄 · 그 시각 SQL 하나씩(docker 한 줄) · 직원 시트 결과
+- 결과:
+
+### C99-S0 · 두 문 회사 구매 처방 사전 실측(배포 앞 · 설계서 docs/2026-11-03-two-door-purchase-design.md §9)
+- 카드: C99
+- 단계: 사전
+- 선행: 없음
+- 기대: ① 두 문 회사 수(몰 결제 사실(netPurchaseSql · 표식 없는 옛 결제 포함)과 원장 행이 둘 다 있는 회사 · Harold 「지금 없어」 = 0 · 0 이 아니면 그 회사는 배포 직후 전환 패스가 센다) ② §6 새 칸 두 개 information_schema 0행(customers.summary_source · companies.two_door_since) ③ 가입 근거 길에 쓰는 기존 칸(sync_logs.sync_type · mode · completed_at · error_message · success_count · total_count · company_integrations.provider · status) 이름 · 형
+- 확인: 결과 그대로(SQL = 그 창에서 docker 한 줄씩)
+- 결과: 1104 Harold 실행 = ① 0(두 문 회사 없음 = 배포 직후 전환 패스 대상 0) · ② 0행(두 칸 모두 새 칸) · ③ 8줄 기대 그대로(company_integrations.provider · status = character varying · sync_logs.completed_at = timestamp with time zone · error_message = text · mode · sync_type = character varying · success_count · total_count = integer)
+
+### C99-DDL-1 · customers.summary_source(두 문 회사 원본 요약 값 · 설계서 §4 T1 · §6) · ★ 배포 앞
+- 카드: C99
+- 단계: DDL
+- 선행: C99-S0
+- 의미 바꿈: 아니오(빈 칸 추가 · 표 다시 쓰기 0 · 옛 코드는 읽지 않는다 · 새 코드는 칸이 없으면 고객 쓰기 = 503 DB_MIGRATION_PENDING · 반드시 배포 앞 · 확인 출력 뒤 push)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'customers' AND column_name = 'summary_source';
+- 확인: summary_source · jsonb · YES 한 줄
+- 결과: 1104 Harold 실행 = SET · ALTER TABLE · 확인 한 줄 기대 그대로(summary_source · jsonb · YES)
+
+> C99-DDL-1 · 배포 앞 · 빈 칸 추가(표 다시 쓰기 0) · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C99-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS summary_source jsonb NULL;
+```
+
+### C99-DDL-2 · companies.two_door_since(한 번 두 문이면 계속 · 설계서 §4 T1 · §6) · ★ 배포 앞
+- 카드: C99
+- 단계: DDL
+- 선행: C99-S0
+- 의미 바꿈: 아니오(빈 칸 추가 · 옛 코드는 읽지 않는다 · 새 코드는 칸이 없으면 고객 · 구매 쓰기 = 503 DB_MIGRATION_PENDING · 반드시 배포 앞)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'two_door_since';
+- 확인: two_door_since · timestamp with time zone · YES 한 줄
+- 결과: 1104 Harold 실행 = SET · ALTER TABLE · 확인 한 줄 기대 그대로(two_door_since · timestamp with time zone · YES)
+
+> C99-DDL-2 · 배포 앞 · 빈 칸 추가 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C99-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS two_door_since timestamptz NULL;
+```
+
+### C99-S1 · 두 문 회사 구매 처방 실측(배포 뒤 · 두 문 시험 계정 · 직원 시트 14 ~ 19)
+- 카드: C99
+- 단계: 사후
+- 선행: C99-DDL-1 · C99-DDL-2 · 코드 배포
+- 기대: ① 배포 뒤 새 PID ERROR 0(42703 · 42P08 0) ② 전환 패스 로그 = 두 문 회사 0(S0 ① = 0 이면) ③ 직원 시트 14 ~ 19 기대 결과 그대로 ④ 납품 고객사 연결 뒤 = 원본 누계(summary_source.totals)와 두 문 합 대조 SQL 결과 · ⑨-1 겹침 비율 Harold 보고
 - 확인: 로그 줄 · 그 시각 SQL 하나씩(docker 한 줄) · 직원 시트 결과
 - 결과:
 

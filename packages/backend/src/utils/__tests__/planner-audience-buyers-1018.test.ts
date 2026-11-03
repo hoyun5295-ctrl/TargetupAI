@@ -25,13 +25,13 @@ vi.mock('../operator-audience', async (orig) => {
     resolveOperatorAudienceGates: vi.fn(async () => ({})),
   };
 });
-const door = { now: 'mall' as 'mall' | 'ledger' };
+// ★ 2026-11-04 C99 — 「지금 문」 판정이 없어졌다(저장한 문의 키로 센다 · listObservedProducts 는 그 문으로 부른다)
+const listCalls: Array<[string, string]> = [];
 vi.mock('../journey-product', async (orig) => {
   const real: any = await orig();
   return {
     ...real,
-    currentPurchaseDoor: vi.fn(async () => door.now),
-    listObservedProducts: vi.fn(async () => ({ products: [{ key: 'P1', name: '수분 크림', buyers: 3, orders: 4, lastAt: null }, { key: 'P2', name: '토너', buyers: 1, orders: 1, lastAt: null }], omittedOrders: 0, truncated: false })),
+    listObservedProducts: vi.fn(async (co: string, d: string) => (listCalls.push([co, d]), { products: [{ key: 'P1', name: '수분 크림', buyers: 3, orders: 4, lastAt: null }, { key: 'P2', name: '토너', buyers: 1, orders: 1, lastAt: null }], omittedOrders: 0, truncated: false })),
   };
 });
 const emailCount = vi.fn(async (_p: any[], _s: string, _w: string) => 7);
@@ -50,7 +50,7 @@ const BUYERS = { kind: 'product_buyers' as const, door: 'mall' as const, keys: [
 beforeEach(() => {
   db.meta = {};
   db.found = true;
-  door.now = 'mall';
+  listCalls.length = 0;
   emailCount.mockClear();
   process.env.PLANNER_LINE_COMPANY_IDS = 'co-1';
 });
@@ -90,7 +90,7 @@ describe('② 대상 = 행사 meta 한 곳', () => {
     expect(a.filterWhere).toContain('FROM cdp_events pb');
     expect([...a.baseParams, ...a.filterParams]).toEqual(['co-1', ['P1'], '2026-07-20']);
   });
-  it('깨진 값 · 행사 없음 · 스위치 밖 · 문 바뀜 = 막음', async () => {
+  it('깨진 값 · 행사 없음 · 스위치 밖 = 막음 · ★ C99 문 바뀜 막음 삭제(저장한 문의 키로 센다)', async () => {
     db.meta = { audience: { kind: 'product_buyers', door: 'mall', keys: [] } };
     expect((await resolvePlannerAudience({ companyId: 'co-1', createdBy: 'u-1', mode: 'all', plannerEventId: 'ev-1' })).blockedReason).toBe(PLANNER_REASON.audienceInvalid);
     db.meta = { audience: BUYERS };
@@ -100,8 +100,8 @@ describe('② 대상 = 행사 meta 한 곳', () => {
     process.env.PLANNER_LINE_COMPANY_IDS = '';
     expect((await resolvePlannerAudience({ companyId: 'co-1', createdBy: 'u-1', mode: 'all', plannerEventId: 'ev-1' })).blockedReason).toBe(PLANNER_REASON.audienceInvalid);
     process.env.PLANNER_LINE_COMPANY_IDS = 'co-1';
-    door.now = 'ledger';
-    expect((await resolvePlannerAudience({ companyId: 'co-1', createdBy: 'u-1', mode: 'all', plannerEventId: 'ev-1' })).blockedReason).toBe(PLANNER_REASON.purchaseDoorChanged);
+    expect((await resolvePlannerAudience({ companyId: 'co-1', createdBy: 'u-1', mode: 'all', plannerEventId: 'ev-1' })).blocked).toBe(false);
+    expect(Object.keys(PLANNER_REASON)).not.toContain('purchaseDoorChanged');
   });
   it('미리보기 값이 저장값보다 앞선다(담기 창)', async () => {
     const a = await resolvePlannerAudience({ companyId: 'co-1', createdBy: 'u-1', mode: 'all', plannerEventId: '', audience: BUYERS });
@@ -150,11 +150,11 @@ describe('⑤ 저장 전 재검증', () => {
     expect(await verifyPlannerAudience('co-1', { ...BUYERS, keys: ['ZZ'], names: ['가짜'] })).toMatchObject({ ok: false, code: 'AUDIENCE_KEYS_INVALID' });
     expect(await verifyPlannerAudience('co-1', { ...BUYERS, names: ['아무 이름'] })).toEqual({ ok: true, value: { ...BUYERS, names: ['수분 크림'] } });
   });
-  it('스위치 밖 = 400 · 문 바뀜 = 409', async () => {
+  it('스위치 밖 = 400 · 키는 저장한 문의 목록으로 본다(★ C99 · 문 바뀜 409 삭제)', async () => {
     process.env.PLANNER_LINE_COMPANY_IDS = '';
     expect(await verifyPlannerAudience('co-1', BUYERS)).toMatchObject({ ok: false, status: 400, code: 'AUDIENCE_DISABLED' });
     process.env.PLANNER_LINE_COMPANY_IDS = 'co-1';
-    door.now = 'ledger';
-    expect(await verifyPlannerAudience('co-1', BUYERS)).toMatchObject({ ok: false, status: 409, code: 'PURCHASE_DOOR_CHANGED' });
+    expect(await verifyPlannerAudience('co-1', { ...BUYERS, door: 'ledger' })).toMatchObject({ ok: true });
+    expect(listCalls.at(-1)).toEqual(['co-1', 'ledger']);
   });
 });

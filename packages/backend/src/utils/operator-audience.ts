@@ -21,7 +21,7 @@ import { buildFilterWhereClauseCompat } from './customer-filter';
 import { buildAudienceCountSql, AudienceGates } from './operator-recipients';
 import { ownerConsentSql, ownerBrandConsent } from './mall-consent';
 import { hasUsableGradeOrder } from './customer-grade-rank';
-import { hasJoinedAtEvidence } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6 · D20)
+import { joinedAtEvidence } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6 · D20) · ★ 2026-11-04 C99 T10 = 쓰는 길
 import {
   CompanySegmentFacts, SegmentAvailability, SegmentKey, RoundPeriod,
   buildSegmentPredicate, normalizeSegmentKey, resolveSegmentAvailability, getSegmentContract,
@@ -130,7 +130,7 @@ export async function loadCompanySegmentFacts(companyId: string): Promise<Compan
       [companyId],
     ),
     hasUsableGradeOrder(companyId),
-    hasJoinedAtEvidence(companyId),
+    joinedAtEvidence(companyId).then((x) => x.ok),
   ]);
   const r = fill.rows[0] || {};
   return {

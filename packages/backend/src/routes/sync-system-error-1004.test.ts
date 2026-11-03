@@ -41,7 +41,8 @@ vi.mock('../utils/secret-hash', () => ({
 }));
 vi.mock('../utils/system-sync-user', () => ({ ensureSystemSyncUser: vi.fn(async () => 'sys-user') }));
 vi.mock('../utils/unsubscribe-helper', () => ({ registerBulkCompanyUserUnsubscribes: vi.fn(async () => 0) }));
-vi.mock('../utils/customer-purchase-aggregates', () => ({ updateCustomerPurchaseAggregates: vi.fn(async () => undefined), parseCustomerSummaryFields: vi.fn(() => []) }));
+// ★ 2026-11-04 C99 — 구매 요약 = 적재 트랜잭션 안(applyLedgerIngestSummary) · 고객 업서트 두 문 = CT-D3(recomputeCustomerPurchaseSummary)
+vi.mock('../utils/customer-purchase-aggregates', () => ({ applyLedgerIngestSummary: vi.fn(async () => 0), recomputeCustomerPurchaseSummary: vi.fn(async () => 0), parseCustomerSummaryFields: vi.fn(() => []) }));
 vi.mock('../utils/enabled-fields', () => ({ clearEnabledFieldsCache: vi.fn() }));
 vi.mock('../utils/ai-mapping', () => ({
   callAiMapping: vi.fn(),

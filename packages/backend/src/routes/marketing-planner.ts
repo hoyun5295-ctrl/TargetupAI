@@ -27,7 +27,7 @@ import { loadTouchpointById, requirePlannerMeta } from '../utils/planner-touchpo
 import { deletePlannerEvent, loadPlannerEvent, normalizePlannerAudience, normalizePlannerMaterials, savePlannerEvent, PlannerEventWriteError, PlannerMaterials } from '../utils/planner-event';
 import { countPlannerAudience, countPlannerEmailRecipients, loadPlannerLineAskContext, plannerLineEnabled, verifyPlannerAudience } from '../utils/planner-audience';
 import { confirmLineAudience, plannerLineAsk, plannerLineEventBody, readPlannerLine, type PlannerLineRead } from '../utils/planner-line-read';
-import { currentPurchaseDoor, listObservedProducts } from '../utils/journey-product';
+import { listObservedProductsByDoor } from '../utils/journey-product';
 import { quotePlannerBuild, quotePlannerDraft, runPlannerBuild, PlannerBuildError } from '../utils/planner-build';
 import { editPlannerCopy, runPlannerCopyPass, PlannerCopyEditError } from '../utils/planner-copy';
 import { buildConfirmView, resolvePlannerPreviewToken } from '../utils/planner-confirm';
@@ -264,15 +264,13 @@ router.post('/line-start', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/marketing-planner/audience/products — 대상 상품 목록(그 회사 지금 문 · 최근 180일 관측 · 여정과 같은 함수)
+// GET /api/marketing-planner/audience/products — 대상 상품 목록(두 문 = 자사몰 상품 · 매장 상품 · 최근 180일 관측 · 여정과 같은 함수 · ★ 2026-11-04 C99)
 router.get('/audience/products', async (req: Request, res: Response) => {
   const companyId = requireCompany(req, res);
   if (!companyId) return;
   if (!plannerLineEnabled(companyId)) return res.status(404).json(LINE_CLOSED);
   try {
-    const door = await currentPurchaseDoor(companyId);
-    const list = await listObservedProducts(companyId, door);
-    return res.json({ door, ...list });
+    return res.json({ doors: await listObservedProductsByDoor(companyId) });
   } catch (error: any) {
     return sendPlannerError(error, res, 'planner_events', '상품 목록을 불러오지 못했습니다');
   }

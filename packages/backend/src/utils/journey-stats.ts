@@ -16,7 +16,7 @@ import { UserFacingError } from './http-error';
 import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { query } from '../config/database';
 import { purchasedSinceEntrySql } from './journey-goal-purchase';
-import { isMallPurchaseDoorForJourneyStats } from './journey-purchase-ledger';
+import { purchaseAfterSql, purchaseFactsSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D4 · CT-D2
 // ★ Phase2 A (2026-06-26): 사후확률 α/β는 실측 count(sent/click)에서 도출 — bandit-arm 단일 진실.
 import { deriveBanditArm } from './bandit-arm';
 import { journeyClickSql } from './journey-click';   // ★ 2026-11-02 여정 링크 클릭 판정 CT(설계서 3-0 CT-J9)
@@ -209,11 +209,11 @@ async function getJourneyOverview(journeyId: string): Promise<JourneyOverview> {
 // 2. Journey step 통계 (step별 발송/클릭/전환)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-// ★ 2026-10-19 B-1009-3 — 전환(구매) 신호 = 그 회사의 구매 문 하나(자사몰 이벤트 또는 매장 · ERP 원장 · journey-purchase-ledger CT).
-//   옛: cdp_events 만 세어 싱크 고객사는 단계 전환 · 세그먼트 전환이 늘 0 이었다(목표 판정 · 홀드아웃은 원장도 봐서 정상).
-//   두 문을 다 세지 않는다 — 자사몰 주문을 ERP 로도 받는 회사에서 같은 구매가 두 번 셈해진다(문은 회사마다 하나).
-//   원장 = 주문 줄 단위 · purchase_date = KST 벽시계(실측 전량 0시 · 시각이 실려도) → 구매한 날(::date) 수로 센다(목표 판정과 같은 비교 · 진입 시각 KST 보다 뒤).
-async function getJourneyStepStats(journeyId: string, mallDoor: boolean): Promise<JourneyStepStat[]> {
+// ★ 2026-10-19 B-1009-3 — 전환(구매) 신호에 매장 · ERP 원장을 넣었다(옛: cdp_events 만 세어 싱크 고객사는 단계 · 세그먼트 전환이 늘 0).
+// ★ 2026-11-04 C99 T8 — 두 문을 다 센다(옛: 회사 문 하나만 골라 두 문 회사의 매장 구매가 빠졌다 · 뿌리 R54).
+//   단계 전환(고객 수) = CT-D4 「그 칸 첫 발송 뒤 샀나」(몰 = 시각 · 원장 = 그날 다음 날부터 · 있나만 보는 OR = 겹쳐도 한 명) ·
+//   세그먼트 전환(건수) = CT-D2 두 문 사실(같은 구매 한 번 · 몰 = 주문마다 · 원장 = 구매한 날 수 · 옛 원장 규칙 그대로).
+async function getJourneyStepStats(journeyId: string): Promise<JourneyStepStat[]> {
   // ★ D210+ Phase 3 (2026-05-23 Harold 명시): skipped 영역 분류 4건 + waited 영역 추가 (이탈 사유 영역 funnel 매트릭스)
   //   journey-executor 영역 logSkippedStep 호출 영역 안 error_reason 영역 매트릭스:
   //   - 'wait_step_passed' = waited 영역
@@ -244,34 +244,16 @@ async function getJourneyStepStats(journeyId: string, mallDoor: boolean): Promis
          -- ★ 2026-09-26 한줄로 V2 R1-43 — 그 여정 회사의 이벤트만 · ★ 2026-11-02 클릭 = CT-J9(그 여정 · 그 칸 링크)
          WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid', stepExpr: 's.id' })}
        ) AS click_count,
-       ${mallDoor ? `(
-         SELECT COUNT(DISTINCT ce.customer_id)
-         FROM cdp_events ce
-         WHERE ${netPurchaseSql('ce')}   -- ★ 2026-11-02 전환 = 결제된 구매(CT-J3 · 옛 R1-43 이름 판정)
-           AND ce.customer_id IN (
-             SELECT e2.customer_id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid
-           )
-           AND ce.occurred_at > (
+       (
+         SELECT COUNT(DISTINCT cv.customer_id)
+         FROM (SELECT DISTINCT e2.customer_id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid) cv
+         WHERE ${purchaseAfterSql('cv.customer_id', '(SELECT company_id FROM journeys WHERE id = $1::uuid)', `(
              SELECT MIN(l2.sent_at) FROM journey_step_logs l2
              WHERE l2.step_id = s.id AND l2.execution_id IN (
                SELECT e2.id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid
              )
-           )
-       )` : `(
-         SELECT COUNT(DISTINCT p.customer_id)
-         FROM purchases p
-         WHERE p.company_id = (SELECT company_id FROM journeys WHERE id = $1::uuid)
-           AND p.customer_id IN (
-             SELECT e2.customer_id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid
-           )
-           AND p.purchase_date IS NOT NULL
-           AND p.purchase_date > ((
-             SELECT MIN(l2.sent_at) FROM journey_step_logs l2
-             WHERE l2.step_id = s.id AND l2.execution_id IN (
-               SELECT e2.id FROM journey_executions e2 WHERE e2.journey_id = $1::uuid
-             )
-           ) AT TIME ZONE 'Asia/Seoul')
-       )`} AS conversion_count
+           )`)}
+       ) AS conversion_count
      FROM journey_steps s
      LEFT JOIN journey_step_logs l ON l.step_id = s.id
      LEFT JOIN journey_executions e ON e.id = l.execution_id AND e.journey_id = $1::uuid
@@ -319,7 +301,7 @@ async function getJourneyStepStats(journeyId: string, mallDoor: boolean): Promis
 // 3. Segment 통계 (등급별 효과)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async function getJourneySegmentStats(journeyId: string, mallDoor: boolean): Promise<JourneySegmentStat[]> {
+async function getJourneySegmentStats(journeyId: string): Promise<JourneySegmentStat[]> {
   // ★ 2026-09-28 한줄로 V2 R263 — 고객 단위로 한 번에 모아 등급별로 더한다.
   //   옛: 실행 1건당 한 행을 받아 행마다 cdp_events 하위 쿼리 2개를 돌렸고, 같은 고객의 실행이 여러 건이면
   //   (날짜축 반복 진입) 그 고객의 클릭·구매가 실행 수만큼 중복 합산됐다.
@@ -344,20 +326,14 @@ async function getJourneySegmentStats(journeyId: string, mallDoor: boolean): Pro
        WHERE ${journeyClickSql('ce', { companyExpr: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', journeyExpr: '$1::uuid' })}   -- ★ 2026-11-02 CT-J9
        GROUP BY ex.customer_id
      ),
-     conv AS (${mallDoor ? `
-       SELECT ex.customer_id, COUNT(*) AS conversion_count
+     conv AS (
+       SELECT ex.customer_id,
+              COUNT(*) FILTER (WHERE f.door = 'mall' AND f.at > ex.first_entered_at)
+              + COUNT(DISTINCT f.kst_day) FILTER (WHERE f.door = 'ledger' AND f.kst_day > (ex.first_entered_at AT TIME ZONE 'Asia/Seoul')::date) AS conversion_count
        FROM ex
-       INNER JOIN cdp_events ce ON ce.customer_id = ex.customer_id
-       WHERE ${netPurchaseSql('ce')}   -- ★ 2026-11-02 CT-J3
-         AND ce.occurred_at > ex.first_entered_at
-       GROUP BY ex.customer_id` : `
-       SELECT ex.customer_id, COUNT(DISTINCT p.purchase_date::date) AS conversion_count
-       FROM ex
-       INNER JOIN purchases p ON p.customer_id = ex.customer_id
-       WHERE p.company_id = (SELECT company_id FROM journeys WHERE id = $1::uuid)
-         AND p.purchase_date IS NOT NULL
-         AND p.purchase_date > (ex.first_entered_at AT TIME ZONE 'Asia/Seoul')
-       GROUP BY ex.customer_id`}
+       INNER JOIN (${purchaseFactsSql({ companyRef: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', customerIdsRef: 'ARRAY(SELECT customer_id FROM ex)' })}) f   -- ⛔ ANY((SELECT …)) = 부분질의 ANY 로 읽혀 uuid = uuid[] · ARRAY(…) = 배열 ANY
+               ON f.customer_id = ex.customer_id
+       GROUP BY ex.customer_id
      )
      SELECT ex.segment,
             SUM(ex.entered_count) AS entered_count,
@@ -653,11 +629,10 @@ export async function listJourneyEnteredCustomers(
 export async function buildJourneyStats(journeyId: string, companyId: string): Promise<JourneyFullStats> {
   await verifyJourneyOwnership(journeyId, companyId);
 
-  const mallDoor = await isMallPurchaseDoorForJourneyStats(companyId, journeyId);   // ★ 1019 B-1009-3 구매 문 하나(그 여정 기간의 진실)
   const [overview, steps, segments, hourly, weekday, variants] = await Promise.all([
     getJourneyOverview(journeyId),
-    getJourneyStepStats(journeyId, mallDoor),
-    getJourneySegmentStats(journeyId, mallDoor),
+    getJourneyStepStats(journeyId),   // ★ 2026-11-04 C99 T8 두 문 전환
+    getJourneySegmentStats(journeyId),
     getJourneyHourlyStats(journeyId),
     getJourneyWeekdayStats(journeyId),
     getJourneyVariantStats(journeyId),

@@ -23,8 +23,28 @@
 
 import { getColumnFields } from './standard-field-map';
 import { joinedAtUpsertSql } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 칸(CT-J6)
+import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래
+import { recomputeCustomerPurchaseSummary } from './customer-purchase-aggregates';   // ★ 2026-11-04 C99 CT-D3
+import { query } from '../config/database';
+
+/**
+ * ★ 2026-11-04 C99 Codex 구현 1R #3 — 업서트(runBatch)가 쓰는 칸이 있는가(C99-DDL-1 · DDL-2). 없으면 42703 을 던진다 = 부르는 자리가 503 DB_MIGRATION_PENDING.
+ *   백그라운드로 넘기는 적재(엑셀 업로드)가 받기 전에 부른다 — 받은 뒤 칸이 없으면 모든 묶음이 「행 실패」로 세어지고 파일까지 지워졌다.
+ */
+export async function assertCustomerWriteSchema(): Promise<void> {
+  await query(`SELECT summary_source FROM customers WHERE false`);
+  await query(`SELECT two_door_since FROM companies WHERE false`);
+}
 
 export type CustomerUpsertSource = 'upload' | 'sync' | 'manual';
+
+type Run = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
+
+/**
+ * ★ 2026-11-04 C99 — 원본이 주는 고객 구매 요약 칸(FIELD_MAP 직접 칸). 두 문 회사에서는 업서트가 이 칸을 직접 쓰지 않는다
+ *   (진실 = 두 문 사실 · 작성자 = CT-D3 하나) · 원본 값은 summary_source(totals · recent)에 남는다(설계서 §4 T1).
+ */
+const SOURCE_SUMMARY_COLUMNS = new Set(['purchase_count', 'total_purchase_amount', 'recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store', 'last_purchase_date']);
 
 export interface CustomerUpsertBuilderOptions {
   source: CustomerUpsertSource;
@@ -54,7 +74,18 @@ export interface CustomerUpsertBuilder {
     companyId: string,
     rows: Record<string, any>[],
     uploadedBy?: string | null,
+    opts?: { twoDoor?: boolean },
   ): { sql: string; values: any[] };
+  /**
+   * ★ 2026-11-04 C99 — 라우트가 부르는 유일한 입구(트랜잭션 run 안): 회사 잠금 → 갈래 판정 → 업서트(두 문 = 요약 칸 직접 쓰기 0)
+   *   → 원본 요약 값(summary_source) → 두 문이면 CT-D3. 반환 = 업서트 문장 결과(RETURNING 그대로).
+   */
+  runBatch(
+    run: Run,
+    companyId: string,
+    rows: Record<string, any>[],
+    uploadedBy?: string | null,
+  ): Promise<{ rows: any[]; rowCount?: number | null }>;
 }
 
 /**
@@ -144,14 +175,19 @@ export function createCustomerUpsertBuilder(
       ? `'sync'`
       : `CASE WHEN customers.source IN ('sync','upload') THEN customers.source ELSE 'manual' END`],
   ];
-  const updateClauses = [
-    ...updatePairs.map(([c, e]) => `${c} = ${e}`),
-    'updated_at = NOW()',
-  ].join(',\n              ');
-  // 바뀐 행만 쓰기(R206) — 새 값 묶음이 옛 값 묶음과 다를 때만 UPDATE 한다(NULL 도 값으로 비교).
-  const unchangedGuard = options.skipUnchanged
-    ? `\n      WHERE ROW(${updatePairs.map(([, e]) => e).join(', ')}) IS DISTINCT FROM ROW(${updatePairs.map(([c]) => `customers.${c}`).join(', ')})`
-    : '';
+  // ★ 2026-11-04 C99 — 두 문 회사 = 원본 요약 칸을 SET · 「바뀌었나」 판정에서 뺀다(CT-D3 가 같은 트랜잭션에서 사실로 쓴다).
+  const conflictSql = (twoDoor: boolean): string => {
+    const pairs = twoDoor ? updatePairs.filter(([c]) => !SOURCE_SUMMARY_COLUMNS.has(c)) : updatePairs;
+    const updateClauses = [
+      ...pairs.map(([c, e]) => `${c} = ${e}`),
+      'updated_at = NOW()',
+    ].join(',\n              ');
+    // 바뀐 행만 쓰기(R206) — 새 값 묶음이 옛 값 묶음과 다를 때만 UPDATE 한다(NULL 도 값으로 비교).
+    const unchangedGuard = options.skipUnchanged
+      ? `\n      WHERE ROW(${pairs.map(([, e]) => e).join(', ')}) IS DISTINCT FROM ROW(${pairs.map(([c]) => `customers.${c}`).join(', ')})`
+      : '';
+    return `${updateClauses}${unchangedGuard}`;
+  };
 
   const buildRowValues = (
     companyId: string,
@@ -175,6 +211,7 @@ export function createCustomerUpsertBuilder(
     companyId: string,
     rows: Record<string, any>[],
     uploadedBy?: string | null,
+    opts: { twoDoor?: boolean } = {},
   ): { sql: string; values: any[] } => {
     const values: any[] = [];
     const placeholders: string[] = [];
@@ -208,17 +245,70 @@ export function createCustomerUpsertBuilder(
       INSERT INTO customers (${insertCols.join(', ')})
       VALUES ${placeholders.join(', ')}
       ON CONFLICT (company_id, phone) DO UPDATE SET
-              ${updateClauses}${unchangedGuard}
+              ${conflictSql(opts.twoDoor === true)}
       ${returningClause}
     `;
     return { sql, values };
+  };
+
+  const runBatch = async (
+    run: Run,
+    companyId: string,
+    rows: Record<string, any>[],
+    uploadedBy?: string | null,
+  ): Promise<{ rows: any[]; rowCount?: number | null }> => {
+    await lockCompanyPurchaseSummary(run, companyId);
+    const twoDoor = (await resolvePurchaseSummaryBranch(run, companyId)) === 'two_door';
+    const { sql, values } = buildBatch(companyId, rows, uploadedBy, { twoDoor });
+    const result = await run(sql, values);
+    await writeSourceSummary(run, companyId, rows);
+    if (twoDoor && rows.length > 0) {
+      const ids = await run(`SELECT id FROM customers WHERE company_id = $1::uuid AND phone = ANY($2::text[])`, [companyId, rows.map((r) => String(r.phone))]);
+      await recomputeCustomerPurchaseSummary(run, companyId, ids.rows.map((x: any) => String(x.id)));
+    }
+    return result;
   };
 
   return {
     insertCols,
     paramsPerRow,
     buildBatch,
+    runBatch,
   };
+}
+
+/**
+ * ★ 2026-11-04 C99 원본 요약 값 칸(customers.summary_source · C99-DDL-1 · 쓰는 곳 = 이 함수 하나 · 설계서 §4 T1).
+ *   totals = { purchase_count?, total_purchase_amount?, at } — 원본이 준 키만 · 값이 같으면 그대로(at 도 그대로).
+ *   recent = { date, amount?, store?, at } — 원본이 최근 구매일을 줄 때만 묶음 통째로 바꾼다(같은 행에 없는 키는 없이 · 날짜 없이 금액 · 매장만
+ *            오면 건드리지 않는다 = 날짜와 떨어진 값이 새 날짜에 붙지 않는다 · Codex 설계 4R #3).
+ *   d2(CT-D3 표식)는 건드리지 않는다. 요약 키가 하나도 없는 행(화면 정보 수정 · 요약 없는 원본)은 칸을 건드리지 않는다(3R #1).
+ *   모든 회사에서 쓴다 — 두 문이 되는 순간 원본 최근일이 이미 남아 있다(계산에는 두 문 회사만 쓴다).
+ */
+async function writeSourceSummary(run: Run, companyId: string, rows: Record<string, any>[]): Promise<void> {
+  const has = (v: unknown) => v !== null && v !== undefined && v !== '';
+  const given = rows.filter((r) => has(r.phone) && (has(r.purchase_count) || has(r.total_purchase_amount) || has(r.recent_purchase_date)));
+  if (given.length === 0) return;
+  const col = (k: string) => given.map((r) => (has(r[k]) ? r[k] : null));
+  // ⛔ 괄호 필수 — PG 에서 이항 「-」 가 「->」 보다 먼저 묶인다(c.summary_source->'recent' - 'at' = c.summary_source->('recent' - 'at'))
+  const oldTotals = `(c.summary_source->'totals')`;
+  const oldRecent = `(c.summary_source->'recent')`;
+  const newTotals = `jsonb_strip_nulls(jsonb_build_object('purchase_count', v.cnt, 'total_purchase_amount', v.total))`;
+  const newRecent = `jsonb_strip_nulls(jsonb_build_object('date', to_char(v.rdate, 'YYYY-MM-DD'), 'amount', v.ramt, 'store', NULLIF(v.rstore, '')))`;
+  const totalsOut = `CASE WHEN ${newTotals} = '{}'::jsonb THEN ${oldTotals}
+                          WHEN ${oldTotals} IS NOT NULL AND (${oldTotals} - 'at') = ${newTotals} THEN ${oldTotals}
+                          ELSE ${newTotals} || jsonb_build_object('at', NOW()) END`;
+  const recentOut = `CASE WHEN v.rdate IS NULL THEN ${oldRecent}
+                          WHEN ${oldRecent} IS NOT NULL AND (${oldRecent} - 'at' - 'legacy') = ${newRecent} THEN ${oldRecent}
+                          ELSE ${newRecent} || jsonb_build_object('at', NOW()) END`;
+  const next = `jsonb_strip_nulls((COALESCE(c.summary_source, '{}'::jsonb) - 'totals' - 'recent') || jsonb_build_object('totals', ${totalsOut}, 'recent', ${recentOut}))`;
+  await run(
+    `UPDATE customers c SET summary_source = ${next}
+       FROM unnest($2::text[], $3::int[], $4::numeric[], $5::date[], $6::numeric[], $7::text[]) AS v(phone, cnt, total, rdate, ramt, rstore)
+      WHERE c.company_id = $1::uuid AND c.phone = v.phone
+        AND ${next} IS DISTINCT FROM c.summary_source`,
+    [companyId, given.map((r) => String(r.phone)), col('purchase_count'), col('total_purchase_amount'), col('recent_purchase_date'), col('recent_purchase_amount'), col('recent_purchase_store')],
+  );
 }
 
 /**

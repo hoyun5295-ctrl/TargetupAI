@@ -4,15 +4,16 @@
  * 한 곳에서 정하는 것
  *   ①상품 키 규칙 — 자사몰 주문 상품 = productId(없으면 productName) · 매장 원장 = product_code(없으면 product_name).
  *     진입(워커) · 목표(실행기) · 상품 목록(화면) · 사용 기간 제안이 **같은 규칙**을 쓴다(SQL 조각 + JS 판정 한 벌 · parity 테스트).
- *   ②고를 수 있는 상품 = 그 회사 **현역 문**에서 최근 관측된 목록뿐(직접 입력 없음 · 정답표 없음).
+ *   ②고를 수 있는 상품 = 그 회사 **각 문**(자사몰 · 매장)에서 최근 관측된 목록(두 묶음 · 직접 입력 없음 · 정답표 없음 · ★ 2026-11-04 C99 ⑨-3).
  *   ③사용 기간 제안 = 같은 고객이 같은 상품을 다시 산 간격의 중앙값 + 표본 수(담당자가 확정 · 지어내지 않는다).
  *   ④진입 자격 = 배치 행 중 고른 상품이 든 구매만(첫 구매 · 휴면 복귀 자격 필터와 같은 자리 · 커서 전진 규약 불변).
  *
- * ⛔ 문이 바뀌면 키가 달라진다(자사몰 productId ↔ 매장 상품 코드). 저장한 문과 지금 문이 다르면 진입하지 않고 멈춘다(조용한 0건 금지).
+ * ⛔ 상품 식별 = (문, 키) — 자사몰 상품 id 와 매장 상품 코드는 같은 글자여도 다른 상품이다(매장 코드 123 = 샴푸 · 몰 상품 123 = 수건).
+ *   목표 · 진입 · 미리보기 · 「이미 있음」 판정 모두 저장한 문의 키로만 비교한다. 옛 「지금 문 하나 · 문이 바뀌면 멈춤」은 지웠다(C99 T2 · T7).
  */
 import { query } from '../config/database';
 import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
-import { isMallPurchaseDoorActive } from './journey-purchase-ledger';
+import { purchaseFactsSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D2 두 문 구매 사실
 import { JourneyInputError } from './journey-step-limits';
 import type { CdpCursorBatch, CdpEventRow } from './journey-cdp-cursor';
 
@@ -99,10 +100,10 @@ export function normalizeProductFilters(raw: Record<string, any> | null | undefi
   return { product_keys: keys, product_names: names, door };
 }
 
-// ── ② 현역 문 · 관측 상품 ──
+// ── ② 관측 상품(문마다) ──
 
-export async function currentPurchaseDoor(companyId: string): Promise<PurchaseDoor> {
-  return (await isMallPurchaseDoorActive(companyId)) ? 'mall' : 'ledger';
+export function isPurchaseDoor(v: unknown): v is PurchaseDoor {
+  return v === 'mall' || v === 'ledger';
 }
 
 export interface ObservedProduct {
@@ -167,6 +168,17 @@ export async function listObservedProducts(companyId: string, door: PurchaseDoor
     omittedOrders: 0,
     truncated: r.rows.length >= PRODUCT_LIST_LIMIT,
   };
+}
+
+export type ObservedProductList = Awaited<ReturnType<typeof listObservedProducts>>;
+
+/**
+ * ★ 2026-11-04 C99 ⑨-3 — 두 문 상품 목록 = { mall, ledger } · 관측(상품 · 상품 빠진 주문)이 없는 문 = null(화면은 있는 문만 한 묶음씩).
+ */
+export async function listObservedProductsByDoor(companyId: string): Promise<{ mall: ObservedProductList | null; ledger: ObservedProductList | null }> {
+  const [mall, ledger] = await Promise.all([listObservedProducts(companyId, 'mall'), listObservedProducts(companyId, 'ledger')]);
+  const seen = (l: ObservedProductList) => l.products.length > 0 || l.omittedOrders > 0;
+  return { mall: seen(mall) ? mall : null, ledger: seen(ledger) ? ledger : null };
 }
 
 // ── ③ 사용 기간 제안 ──
@@ -234,30 +246,33 @@ export function qualifyProductBatch(batch: CdpCursorBatch, rows: CdpEventRow[], 
 // ── 목표(실행기) ──
 
 /**
- * 진입 뒤 같은 상품을 다시 샀는가 — 두 문 OR(문을 옮긴 고객도 놓치지 않는다 · 키 규칙은 위 한 벌).
- * 파라미터: $1 회사 · $2 고객 · $3 진입 시각(timestamptz) · $4 상품 키 text[]. 원장 시각은 KST naive 규약.
+ * 진입 뒤 같은 상품을 다시 샀는가 — **저장한 문의 키로만**(★ 2026-11-04 C99 · Codex 설계 1R #5 · 옛: 두 문 OR 라 매장 코드 123 여정이
+ *   몰 상품 id 123 구매로 목표 달성 종료됐다). 파라미터: $1 회사 · $2 고객 · $3 진입 시각(timestamptz) · $4 상품 키 text[] · $5 문('mall' · 'ledger').
+ *   원장 시각은 KST naive 규약(날짜만 = 진입 날 다음 날부터).
  */
 export const PRODUCT_REPURCHASE_SINCE_ENTRY_SQL = `SELECT 1
-  WHERE EXISTS (
+  WHERE ($5::text = 'mall' AND EXISTS (
     SELECT 1 FROM cdp_events e, ${mallItemsSql('e')} it
      WHERE e.company_id = $1::uuid AND e.customer_id = $2::uuid
        AND ${netPurchaseSql('e')} AND e.occurred_at > $3::timestamptz   -- ★ 2026-11-02 CT-J3
        AND ${mallItemKeySql('it')} = ANY($4::text[])
-  )
-  OR EXISTS (
+  ))
+  OR ($5::text = 'ledger' AND EXISTS (
     SELECT 1 FROM purchases p
      WHERE p.company_id = $1::uuid AND p.customer_id = $2::uuid
        AND p.purchase_date IS NOT NULL
        AND p.purchase_date > ($3::timestamptz AT TIME ZONE 'Asia/Seoul')
        AND ${ledgerProductKeySql('p')} = ANY($4::text[])
-  )`;
+  ))`;
 
 // ── ⑤ 구매 리듬(★ 2026-10-09 고객 관계 지도 · AI 진단 · 설계서 docs/2026-10-09-journey-crm-map-design.md §5) ──
-//   회사 **현역 문 하나**에서만 센다(두 문을 합치면 같은 구매가 두 번 잡혀 간격이 0 으로 무너진다 · 회의론자 D6).
+//   ★ 2026-11-04 C99 — 두 문 사실(CT-D2 · 같은 구매 한 번)로 센다. 옛: 현역 문 하나만(두 문을 그냥 합치면 같은 구매가 두 번 잡혀
+//   간격이 0 으로 무너진다 · 회의론자 D6) — 그 걱정은 같은 구매 판정(CT-D1)이 닫는다 · 두 문 회사는 매장 구매가 리듬에서 빠졌다.
 //   하루 단위(같은 날 여러 건 = 1) · 730일 · 고객별 차례(n) · 직전 구매와의 간격(일).
 
 export interface PurchaseRhythm {
-  door: PurchaseDoor;
+  /** 사실이 들어온 문(자사몰 · 매장 · 둘 다) — 화면 문구용 */
+  doors: PurchaseDoor[];
   buyers: number;
   repeaters: number;
   /** 첫 구매 → 두 번째 구매 간격(일). 표본 미달이면 값 null(표본 수는 그대로). */
@@ -266,23 +281,12 @@ export interface PurchaseRhythm {
   gap: { p50: number | null; p75: number | null; p90: number | null; sample: number };
 }
 
-function rhythmBuysSql(door: PurchaseDoor): string {
-  return door === 'mall'
-    ? `SELECT DISTINCT e.customer_id, (e.occurred_at AT TIME ZONE 'Asia/Seoul')::date AS d
-         FROM cdp_events e
-        WHERE e.company_id = $1::uuid AND ${netPurchaseSql('e')} AND e.customer_id IS NOT NULL   -- ★ 2026-11-02 CT-J3
-          AND e.occurred_at >= NOW() - ($2 || ' days')::interval`
-    : `SELECT DISTINCT p.customer_id, p.purchase_date::date AS d
-         FROM purchases p
-        WHERE p.company_id = $1::uuid AND p.customer_id IS NOT NULL AND p.purchase_date IS NOT NULL
-          AND p.purchase_date >= ((NOW() AT TIME ZONE 'Asia/Seoul') - ($2 || ' days')::interval)`;
-}
-
 const roundOrNull = (v: unknown, ok: boolean): number | null => (ok && v != null && Number.isFinite(Number(v)) ? Math.max(1, Math.round(Number(v))) : null);
 
-export async function loadPurchaseRhythm(companyId: string, door: PurchaseDoor): Promise<PurchaseRhythm> {
+export async function loadPurchaseRhythm(companyId: string): Promise<PurchaseRhythm> {
   const r = await query(
-    `WITH buys AS (${rhythmBuysSql(door)}),
+    `WITH f AS (${purchaseFactsSql({ companyRef: '$1::uuid', sinceAt: `NOW() - ($2 || ' days')::interval` })}),
+          buys AS (SELECT DISTINCT f.customer_id, f.kst_day AS d FROM f),
           seq AS (
             SELECT customer_id, ROW_NUMBER() OVER w AS n, d - LAG(d) OVER w AS gap
               FROM buys WINDOW w AS (PARTITION BY customer_id ORDER BY d)
@@ -296,7 +300,8 @@ export async function loadPurchaseRhythm(companyId: string, door: PurchaseDoor):
             percentile_cont(0.9)  WITHIN GROUP (ORDER BY gap) FILTER (WHERE n >= 2) AS gap_p90,
             COUNT(*) FILTER (WHERE n >= 2)::int AS gap_n,
             COUNT(DISTINCT customer_id)::int AS buyers,
-            COUNT(DISTINCT customer_id) FILTER (WHERE n >= 2)::int AS repeaters
+            COUNT(DISTINCT customer_id) FILTER (WHERE n >= 2)::int AS repeaters,
+            (SELECT ARRAY_AGG(DISTINCT f.door ORDER BY f.door) FROM f) AS doors
        FROM seq`,
     [companyId, String(PRODUCT_PERIOD_LOOKBACK_DAYS)],
   );
@@ -306,7 +311,7 @@ export async function loadPurchaseRhythm(companyId: string, door: PurchaseDoor):
   const f2sOk = f2sN >= MIN_PERIOD_SAMPLE;
   const gapOk = gapN >= MIN_PERIOD_SAMPLE;
   return {
-    door,
+    doors: (Array.isArray(x.doors) ? x.doors : []).filter(isPurchaseDoor),
     buyers: Number(x.buyers || 0),
     repeaters: Number(x.repeaters || 0),
     firstToSecond: { p25: roundOrNull(x.f2s_p25, f2sOk), p50: roundOrNull(x.f2s_p50, f2sOk), p75: roundOrNull(x.f2s_p75, f2sOk), sample: f2sN },
@@ -314,15 +319,20 @@ export async function loadPurchaseRhythm(companyId: string, door: PurchaseDoor):
   };
 }
 
-export interface ProductCycle { key: string; name: string; buyers: number; medianDays: number; sample: number }
+export interface ProductCycle { door: PurchaseDoor; key: string; name: string; buyers: number; medianDays: number; sample: number }
 
-/** 다시 많이 사는 상품 — 관측 목록 상위에서 사용 기간 중앙값이 잡히는 것만(같은 CT · 같은 키 규칙 · 새 SQL 0 · 회의론자 D4). */
-export async function loadProductCycles(companyId: string, door: PurchaseDoor, limit = 3, scan = 8): Promise<ProductCycle[]> {
-  const { products } = await listObservedProducts(companyId, door);
+/**
+ * 다시 많이 사는 상품 — 두 문 관측 목록을 구매자 많은 순으로 합친 상위에서 사용 기간 중앙값이 잡히는 것만
+ *   (같은 CT · 같은 키 규칙 · 새 SQL 0 · 회의론자 D4 · ★ 2026-11-04 C99 = 상품마다 문을 싣는다).
+ */
+export async function loadProductCycles(companyId: string, limit = 3, scan = 8): Promise<ProductCycle[]> {
+  const byDoor = await listObservedProductsByDoor(companyId);
+  const merged = (['mall', 'ledger'] as const).flatMap((door) => (byDoor[door]?.products || []).map((p) => ({ door, ...p })))
+    .sort((a, b) => b.buyers - a.buyers || b.orders - a.orders || (a.door + a.key).localeCompare(b.door + b.key));
   const out: ProductCycle[] = [];
-  for (const p of products.slice(0, scan)) {
-    const s = await suggestUsagePeriod(companyId, door, [p.key]);
-    if (s.medianDays != null) out.push({ key: p.key, name: p.name, buyers: p.buyers, medianDays: s.medianDays, sample: s.sample });
+  for (const p of merged.slice(0, scan)) {
+    const s = await suggestUsagePeriod(companyId, p.door, [p.key]);
+    if (s.medianDays != null) out.push({ door: p.door, key: p.key, name: p.name, buyers: p.buyers, medianDays: s.medianDays, sample: s.sample });
   }
   return out.sort((a, b) => b.sample - a.sample).slice(0, limit);
 }

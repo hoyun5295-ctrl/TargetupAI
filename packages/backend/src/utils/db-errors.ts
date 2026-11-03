@@ -9,12 +9,27 @@
  *   **새로 쓰는 자리는 여기를 쓴다** — 판정을 또 한 벌 인라인으로 적지 않는다.
  */
 
+import { UserFacingError } from './http-error';
+
 /** PG가 없는 컬럼·테이블을 만났을 때(42703 / 42P01)인가 */
 export function isMissingSchemaError(err: any): boolean {
   const code = String(err?.code || '');
   if (code === '42703' || code === '42P01') return true;
   const msg = String(err?.message || '').toLowerCase();
   return (msg.includes('column') || msg.includes('relation')) && msg.includes('does not exist');
+}
+
+/**
+ * ★ 2026-11-04 C99 — 라우트 밖(공용 쓰기 CT)에서 칸 부재를 503 DB_MIGRATION_PENDING 사용자 오류로 바꿔 던진다(그 밖 오류는 그대로).
+ *   라우트의 UserFacingError 처리(status · code)가 그대로 응답한다.
+ */
+export async function migrationPendingOn503<T>(alterHint: string, work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    if (isMissingSchemaError(err)) throw new UserFacingError(503, 'DB_MIGRATION_PENDING', migrationPendingBody(alterHint).error);
+    throw err;
+  }
 }
 
 /** 마이그레이션 대기 응답 본문. 라우트가 503과 함께 그대로 돌려준다 */

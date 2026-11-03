@@ -46,10 +46,12 @@ async function journey(co: string, owner: string, o: { status: string; reason?: 
   if (o.status === 'paused') await pool.query(`UPDATE journeys SET paused_at = NOW() - INTERVAL '1 hour', pause_reason = $2 WHERE id = $1`, [j, o.reason ?? null]);
   return j;
 }
-const customer = async (co: string, joinedAt: Date | null) => {
+/** joinedAt = 'now' = DB 시계(기준선 entry_baseline_at 과 같은 시계 · ★ 2026-11-04 PC 시계로 넣으면 PC · DB 시계 차만큼 기준선 앞뒤가 흔들렸다) */
+const customer = async (co: string, joinedAt: Date | 'now' | null) => {
   const id = randomUUID();
   await insertMinimalRow(pool, 'customers', { id, company_id: co, phone: phone(), is_active: true, sms_opt_in: true });
-  if (joinedAt) await pool.query(`UPDATE customers SET joined_at = $2 WHERE id = $1`, [id, joinedAt.toISOString()]);
+  if (joinedAt === 'now') await pool.query(`UPDATE customers SET joined_at = NOW() WHERE id = $1`, [id]);
+  else if (joinedAt) await pool.query(`UPDATE customers SET joined_at = $2 WHERE id = $1`, [id, joinedAt.toISOString()]);
   return id;
 };
 /** 켜기 트랜잭션이 하는 순서 그대로(잠근 옛 상태 → 기준선 → active · 다시 켜기 보정) */
@@ -125,7 +127,7 @@ describe('3-5 ② 다시 켜기 · 3-6 신규 가입 기준(실 PG · 켜기 트
     const j = await journey(co, owner, { status: 'draft' });
     await activate(j, co);
     await pauseNow(j, SYSTEM_REASON);
-    const newbie = await customer(co, new Date());
+    const newbie = await customer(co, 'now');
     await activate(j, co);
     expect(await targets(co, j)).toEqual([newbie]);
   });
@@ -135,7 +137,7 @@ describe('3-5 ② 다시 켜기 · 3-6 신규 가입 기준(실 PG · 켜기 트
     const j = await journey(co, owner, { status: 'draft' });
     await activate(j, co);
     await pauseNow(j, MANUAL_PAUSE_REASON);
-    const joinedDuringPause = new Date();
+    const joinedDuringPause: Date = (await pool.query(`SELECT NOW() AS n`)).rows[0].n;   // DB 시계(멈춘 뒤 · 다시 켜기 전 · PC 시계면 시계 차만큼 흔들린다)
     await customer(co, joinedDuringPause);
     await new Promise((r) => setTimeout(r, 30));
     await activate(j, co);
@@ -143,7 +145,7 @@ describe('3-5 ② 다시 켜기 · 3-6 신규 가입 기준(실 PG · 켜기 트
     await customer(co, joinedDuringPause);   // 같은 날 · 다시 켠 뒤 들어온 행(가입은 멈춘 동안)
     expect(await targets(co, j)).toEqual([]);
     await new Promise((r) => setTimeout(r, 30));
-    const after = await customer(co, new Date());
+    const after = await customer(co, 'now');
     expect(await targets(co, j)).toEqual([after]);
   });
 

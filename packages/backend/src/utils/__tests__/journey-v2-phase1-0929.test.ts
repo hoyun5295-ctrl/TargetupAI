@@ -188,6 +188,7 @@ describe('진입 표식 재료 — 커서 배치가 사건 id 를 싣는다', ()
     const { readFileSync } = await import('node:fs');
     const { resolve } = await import('node:path');
     const src = readFileSync(resolve(process.cwd(), 'src/utils/journey-trigger-watcher.ts'), 'utf8');
-    expect(src).toContain("__entry: { src: 'trigger', key: batch.eventIdByCustomer?.[customerId] ?? null }");
+    // ★ 2026-11-04 C99 CT-D5 — 구매 계열은 문 · 날짜도 싣는다(같은 표식 · 키 그대로)
+    expect(src).toContain("__entry: { src: 'trigger', key: batch.eventIdByCustomer?.[customerId] ?? null, ...(ownDoor && entryDay ? { door: ownDoor, day: entryDay } : {}) }");
   });
 });

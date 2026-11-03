@@ -14,7 +14,7 @@ import { getCreditCost } from './ai-credit-calc';
 import { generateJourneyPackage } from './journey-ai-generator';
 import { JourneyInputError } from './journey-step-limits';
 import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft } from './journey-draft-save';
-import { PRODUCT_TRIGGER_EVENT, currentPurchaseDoor, listObservedProducts, MAX_PRODUCT_KEYS } from './journey-product';
+import { PRODUCT_TRIGGER_EVENT, listObservedProducts, MAX_PRODUCT_KEYS, type PurchaseDoor } from './journey-product';
 import { isMallConsentEnforced } from './mall-consent';
 
 /**
@@ -48,6 +48,8 @@ export async function createProductJourneyDraft(input: {
   userId: string;
   requestId: string;
   keys: string[];
+  /** ★ 2026-11-04 C99 ⑨-3 — 고른 상품의 문(자사몰 · 매장 · 화면이 고른 묶음) · 없으면 거부(문 없이 만들면 키가 맞는 상품을 알 수 없다) */
+  door: PurchaseDoor | null;
   periodDays: number;
   benefitText?: string | null;
   callbackNumber?: string | null;
@@ -70,7 +72,8 @@ export async function createProductJourneyDraft(input: {
 
     const locked = await productJourneyLockReason(input.companyId);
     if (locked) throw new JourneyInputError(locked);
-    const door = await currentPurchaseDoor(input.companyId);
+    const door = input.door;
+    if (door !== 'mall' && door !== 'ledger') throw new JourneyInputError('상품 목록을 다시 열어 골라 주세요.');
     const observed = await listObservedProducts(input.companyId, door);
     const byKey = new Map(observed.products.map((p) => [p.key, p]));
     const picked = wanted.filter((k) => byKey.has(k));

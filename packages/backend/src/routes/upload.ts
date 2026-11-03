@@ -12,7 +12,8 @@ import { redis, AI_MODELS, AI_MAX_TOKENS, CACHE_TTL, TIMEOUTS, BATCH_SIZES, clau
 import { normalizeByFieldKey, normalizeRegion, normalizeDate, normalizeCustomFieldValue, salvageBirthParts, isUnrecognizedSmsOptIn } from '../utils/normalize';
 import { CATEGORY_LABELS, FIELD_MAP, getColumnFields, getCustomFields, getFieldByKey, upsertCustomFieldDefinitions } from '../utils/standard-field-map';
 import { validateUploadMapping } from '../utils/upload-mapping-validator';
-import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError } from '../utils/customer-upsert';
+import { createCustomerUpsertBuilder, applySmsOptInDefaults, isRowLevelDbError, assertCustomerWriteSchema } from '../utils/customer-upsert';
+import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';   // ★ 2026-11-04 C99 db_alter_safety_net
 import { stampFirstSeenJoinedAt, insertedPhonesOf, uploadSignupQuestion } from '../utils/customer-joined-at';   // ★ 2026-11-02 가입 근거(CT-J6)
 // ★ 2026-06-25: 고객 업로드 완료 시 회사 데이터 프로필 캐시 무효화(게이트 "고객 없음" 오표시 차단)
 import { clearCompanyDataProfileCache } from '../utils/company-data-profile';
@@ -446,6 +447,9 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
       totalRows = Math.max(0, data.length - 1);
     }
 
+    // ★ 2026-11-04 C99 Codex 구현 1R #3 — 칸이 없으면(DDL 전) 받기 전에 503(받은 뒤엔 모든 묶음이 행 실패로 세어지고 파일이 지워진다)
+    await assertCustomerWriteSchema();
+
     // ★ 2026-08-14: 플랜 초과 사전 체크(max_customers) 제거 — 2026-06-30 크레딧 모델 v2
     //   "DB 저장 상한 폐지" 확정분의 적재 경로 반영. 저장 건수로 막지 않는다(규모 통제 = 일일 분석 크레딧).
     //   sync.ts·customers.ts 동일 패턴과 같은 세션에 일괄 제거했다.
@@ -479,6 +483,7 @@ router.post('/save', authenticate, blockIfSyncActive, async (req: Request, res: 
 
   } catch (error: any) {
     console.error('저장 요청 에러:', error);
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers.summary_source · companies.two_door_since 칸(ALTER · 원장 C99-DDL-1 · C99-DDL-2)'));
     return res.status(500).json({ error: publicErrorText(error, '저장 중 오류가 발생했습니다.') });
   }
 });
@@ -710,14 +715,9 @@ async function processUploadInBackground(
         // ★ 2026-10-04 못 알아본 수신동의 값 = 신규 미동의(먼저) → 값 없는 신규 = 기본 동의 — 업서트와 같은 트랜잭션(applySmsOptInDefaults 주석)
         const unknownConsentSet = new Set(unknownConsentPhones);
         try {
-          // ── 컨트롤타워 buildBatch 호출 — insertCols/updateClauses/values 구성 전부 위임 ──
-          const { sql, values: queryValues } = uploadUpsertBuilder.buildBatch(
-            companyId,
-            batchRows,
-            userId || null,
-          );
+          // ── 컨트롤타워 runBatch 호출 — insertCols/updateClauses/values 구성 · 회사 잠금 · 두 문 요약(★ 2026-11-04 C99) 전부 위임 ──
           const result = await withTransaction(async (run) => {
-            const r = await run(sql, queryValues);
+            const r = await uploadUpsertBuilder.runBatch(run, companyId, batchRows, userId || null);
             if (asNewCustomers) await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));   // ★ 2026-11-02 CT-J6
             await applySmsOptInDefaults(run, companyId, batchRows.map((row) => String(row.phone)), unknownConsentSet);
             return r;
@@ -728,6 +728,8 @@ async function processUploadInBackground(
             else duplicateCount++;
           });
         } catch (err: any) {
+          // ★ 2026-11-04 C99 Codex 구현 1R #3 — 칸 없음 = 행 실패가 아니다 · 작업을 멈추고 실패 상태로(바깥 catch)
+          if (isMissingSchemaError(err)) throw err;
           // ★ 2026-08-14 (Codex 1R): 배치 통사 → 단건 폴백 — sync.ts와 동일 구조.
           //   한 행의 충돌(customer_code 유니크 등)이 정상 499행까지 실패로 만들던 자리.
           // ★ 2026-08-14 (Codex 2R): 계통 오류는 폴백 금지(부하 증폭 — customer-upsert.ts 참조) +
@@ -740,11 +742,8 @@ async function processUploadInBackground(
             console.warn(`[업로드 백그라운드] 배치 UPSERT 실패 → 단건 재시도: ${err?.message || err}`);
             for (const row of batchRows) {
               try {
-                const { sql: rowSql, values: rowValues } = uploadUpsertBuilder.buildBatch(
-                  companyId, [row], userId || null,
-                );
                 const rowResult = await withTransaction(async (run) => {
-                  const r = await run(rowSql, rowValues);
+                  const r = await uploadUpsertBuilder.runBatch(run, companyId, [row], userId || null);   // ★ 2026-11-04 C99
                   if (asNewCustomers) await stampFirstSeenJoinedAt(run, companyId, insertedPhonesOf(r.rows));   // ★ 2026-11-02 CT-J6
                   await applySmsOptInDefaults(run, companyId, [String(row.phone)], unknownConsentSet);
                   return r;

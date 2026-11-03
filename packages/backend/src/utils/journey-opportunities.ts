@@ -37,7 +37,7 @@ import { newSignupSql } from './customer-joined-at';   // ★ 2026-11-02 신규 
 import { MARKETING_JOURNEY_SQL } from './journey-lifecycle-map';
 import { triggerLabel, isProductPickTrigger } from './journey-trigger-capability';
 // ★ 2026-10-09 AI 진단 — 구매 리듬 · 상품 주기 = journey-product CT(같은 문 · 같은 키 규칙) · 휴면 기본값 = 생애 지도와 같은 상수
-import { currentPurchaseDoor, loadPurchaseRhythm, loadProductCycles, type PurchaseRhythm, type ProductCycle } from './journey-product';
+import { loadPurchaseRhythm, loadProductCycles, type PurchaseRhythm, type ProductCycle } from './journey-product';
 import { DEFAULT_DORMANT_DAYS } from './journey-lifecycle-map';
 import { getCreditCost } from './ai-credit-calc';
 // ★ 2026-10-10 한 줄 묻기 0단계 — 담당자 범위(관리자 · 분류 없는 회사 = 빈 조각 = 종전 SQL 그대로)
@@ -533,9 +533,9 @@ const diagCache = new Map<string, { at: number; rhythm: PurchaseRhythm | null; p
 async function loadDiagnosisFacts(companyId: string): Promise<{ at: number; rhythm: PurchaseRhythm | null; products: ProductCycle[] }> {
   const hit = diagCache.get(companyId);
   if (hit && Date.now() - hit.at < DIAG_TTL_MS) return hit;
-  const door = await currentPurchaseDoor(companyId);
-  const rhythm = await loadPurchaseRhythm(companyId, door);
-  const products = rhythm.buyers > 0 ? await loadProductCycles(companyId, door) : [];
+  // ★ 2026-11-04 C99 — 리듬 = 두 문 사실(같은 구매 한 번) · 상품 = 두 문 목록(상품마다 문) · 옛 「현역 문 하나」 삭제
+  const rhythm = await loadPurchaseRhythm(companyId);
+  const products = rhythm.buyers > 0 ? await loadProductCycles(companyId) : [];
   const entry = { at: Date.now(), rhythm: rhythm.buyers > 0 ? rhythm : null, products };
   // ★ 2026-10-10 한 줄 묻기 0단계 — 구매 데이터가 없는 결과(null)는 기억하지 않는다(연동 직후 하루 동안 「연동하세요」가 남지 않게).
   if (entry.rhythm) diagCache.set(companyId, entry);
@@ -577,8 +577,12 @@ export async function buildJourneyDiagnosis(companyId: string, viewerUserId?: st
       WHERE j.company_id = $1 AND j.trigger_event = 'purchase.product' AND j.status IN ('active', 'paused', 'draft') AND j.archived_at IS NULL${productCover.where}`,
     productParams,
   );
+  // ★ 2026-11-04 C99 — 「이미 있음」 = 같은 문의 같은 키(상품 식별 = (문, 키) · 매장 코드 123 ≠ 몰 상품 123)
   const coveredKeys = new Set<string>();
-  for (const r of productRes.rows) for (const k of ((r.trigger_filters || {}).product_keys || [])) coveredKeys.add(String(k));
+  for (const r of productRes.rows) {
+    const tf = r.trigger_filters || {};
+    for (const k of (tf.product_keys || [])) coveredKeys.add(`${String(tf.door || '')}:${String(k)}`);
+  }
   const availability = toAvailabilityMap(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
   const rhythm = facts0.rhythm;
   const dormant = dormantDaysFromRhythm(rhythm);
@@ -602,10 +606,10 @@ export async function buildJourneyDiagnosis(companyId: string, viewerUserId?: st
     rhythm,
     facts,
     flowPlan: buildFlowPlan(rhythm, activeTriggers, availability, draftedTriggers, othersTriggers),
-    products: facts0.products.map((p) => ({ ...p, status: coveredKeys.has(p.key) ? 'exists' as const : 'ready' as const })),
+    products: facts0.products.map((p) => ({ ...p, status: coveredKeys.has(`${p.door}:${p.key}`) ? 'exists' as const : 'ready' as const })),
     quote: { draftEach: getCreditCost('journey-ai-generate'), activateEach: getCreditCost('journey-activate') },
     source: rhythm
-      ? `숫자는 구매 원장 실측(${rhythm.door === 'mall' ? '자사몰 주문' : '매장 구매 내역'} · 최근 730일 · 하루 한 번으로 셈)`
+      ? `숫자는 구매 원장 실측(${rhythm.doors.map((d) => (d === 'mall' ? '자사몰 주문' : '매장 구매 내역')).join(' · ') || '구매 내역'} · 최근 730일 · 하루 한 번으로 셈)`
       : '구매 데이터가 아직 없어 실측할 수 없어요. 구매 내역을 연동하면 간격을 실측으로 정합니다.',
   };
 }

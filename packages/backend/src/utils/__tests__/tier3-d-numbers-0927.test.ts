@@ -62,7 +62,9 @@ describe('R093 · R165 실수신자 구매 귀속', () => {
     expect(m).toContain('const orders = await campaignRecipientOrders(companyId, String(row.id));');
     expect(m).toContain('const seenEvents = new Map<string, number>();');
     expect(m).not.toContain('AND EXISTS (');
-    expect(m).not.toMatch(/FROM purchases/);
+    // ★ 2026-11-04 C99 T9(Harold §5 ① (가)) — 매장 구매도 실수신자 · 원장 행 단위 · 몰 주문과 같은 구매는 뺀다(CT-D1)
+    expect(m).toContain("SELECT 'ledger:' || p.id::text AS order_key");
+    expect(m).toContain("AND NOT ${ledgerDupOfMallSql('p')}");
   });
 });
 
