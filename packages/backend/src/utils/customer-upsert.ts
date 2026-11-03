@@ -23,7 +23,7 @@
 
 import { getColumnFields } from './standard-field-map';
 import { joinedAtUpsertSql, insertedPhonesOf } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 칸(CT-J6) · ★ 2026-11-04 기본값 = 새로 넣은 행만
-import { lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래
+import { isKstFutureDay, lockCompanyPurchaseSummary, resolvePurchaseSummaryBranch } from './two-door-purchase';   // ★ 2026-11-04 C99 회사 잠금 · 갈래 · C102 G8 미래 판정
 import { recomputeCustomerPurchaseSummary } from './customer-purchase-aggregates';   // ★ 2026-11-04 C99 CT-D3
 import { query } from '../config/database';
 
@@ -254,9 +254,10 @@ export function createCustomerUpsertBuilder(
   const runBatch = async (
     run: Run,
     companyId: string,
-    rows: Record<string, any>[],
+    rawRows: Record<string, any>[],
     uploadedBy?: string | null,
   ): Promise<{ rows: any[]; rowCount?: number | null }> => {
+    const rows = rawRows.map((r) => sanitizeSourceSummary(r));   // ★ C102 G8 — 원본 요약 값의 범위(미래 날짜 · 음수) = 칸 · 원본 값 둘 다 그 전에 거른다
     await lockCompanyPurchaseSummary(run, companyId);
     const twoDoor = (await resolvePurchaseSummaryBranch(run, companyId)) === 'two_door';
     const { sql, values } = buildBatch(companyId, rows, uploadedBy, { twoDoor });
@@ -275,6 +276,37 @@ export function createCustomerUpsertBuilder(
     buildBatch,
     runBatch,
   };
+}
+
+/**
+ * ★ 2026-11-04 C102 G8 원본 요약 값 범위 — 싱크 · 엑셀 · 화면이 준 요약 값 가운데 일어날 수 없는 값은 「값 없음」으로 받는다.
+ *   일어날 수 없는 값 = 날짜가 KST 오늘보다 뒤(isKstFutureDay = 원장 · 요약 판정 kstNotFutureSql 과 같은 뜻) · 횟수 · 금액이 음수.
+ *   **묶음째 거른다**(Codex G8 1R) — 원본 값 칸(summary_source)과 두 문 계산은 최근 구매(날짜 · 금액 · 매장) · 누계(횟수 · 금액)를 묶음으로 바꾸므로
+ *   한 칸만 비우면 남은 칸으로 묶음이 통째로 바뀌어 멀쩡한 지금 값이 지워진다(최근일은 그대로 · 금액만 음수 → 금액 없는 묶음 → 요약 금액 NULL).
+ *     최근 구매 묶음 = 날짜 미래 또는 금액 음수 → 날짜 · 금액 · 매장 셋 다 값 없음 · 누계 묶음 = 횟수 또는 누계 음수 → 둘 다 값 없음 · 마지막 구매일 = 미래면 그 칸만.
+ *   값 없음 = 업서트 규칙대로 지금 칸 그대로(GREATEST · COALESCE) · 원본 값 칸도 그대로(그 묶음을 안 바꿈).
+ *   옛: 그대로 저장 → 최근 구매일 GREATEST 라 한 번 들어간 미래 날짜가 내려가지 않아 휴면 · 재구매 창 · 「최근 N일 구매」 조건이 그 고객을 늘 최근 구매자로 봤다.
+ *   그 밖의 칸 · 값은 건드리지 않는다(고칠 것 없으면 같은 객체 · 있으면 새 객체 · 입력 행 그대로 둠).
+ */
+const SOURCE_SUMMARY_BUNDLES: ReadonlyArray<{ cols: readonly string[]; days: readonly string[]; nonNegative: readonly string[] }> = [
+  { cols: ['recent_purchase_date', 'recent_purchase_amount', 'recent_purchase_store'], days: ['recent_purchase_date'], nonNegative: ['recent_purchase_amount'] },
+  { cols: ['purchase_count', 'total_purchase_amount'], days: [], nonNegative: ['purchase_count', 'total_purchase_amount'] },
+  { cols: ['last_purchase_date'], days: ['last_purchase_date'], nonNegative: [] },
+];
+const isNegative = (v: unknown): boolean => {
+  if (v === null || v === undefined || v === '') return false;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(/[,\s원₩]/g, ''));
+  return Number.isFinite(n) && n < 0;
+};
+export function sanitizeSourceSummary<T extends Record<string, any>>(row: T, now: Date = new Date()): T {
+  let out: Record<string, any> | null = null;
+  for (const b of SOURCE_SUMMARY_BUNDLES) {
+    const bad = b.days.some((c) => isKstFutureDay(row[c], now)) || b.nonNegative.some((c) => isNegative(row[c]));
+    if (!bad) continue;
+    out = out || { ...row };
+    for (const c of b.cols) if (c in row) out[c] = null;
+  }
+  return (out || row) as T;
 }
 
 /**

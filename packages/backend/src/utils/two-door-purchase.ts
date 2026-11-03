@@ -43,6 +43,18 @@ export function kstNotFutureSql(expr: string): string {
   return `(${expr} <= (NOW() AT TIME ZONE 'Asia/Seoul'))`;
 }
 
+/**
+ * kstNotFutureSql 의 JS 쌍둥이(★ C102 G8) — 날짜 값('YYYY-MM-DD' 로 시작하는 글 · Date)이 KST 오늘보다 뒤인가.
+ *   꼴이 틀린 값 = 거짓(날짜 정규화가 따로 맡는다 · 여기서는 미래만 가른다).
+ */
+export function isKstFutureDay(v: unknown, now: Date = new Date()): boolean {
+  const today = new Date(now.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+  const day = v instanceof Date
+    ? (isNaN(v.getTime()) ? '' : new Date(v.getTime() + 9 * 3600 * 1000).toISOString().slice(0, 10))
+    : /^\d{4}-\d{2}-\d{2}/.test(String(v ?? '')) ? String(v).slice(0, 10) : '';
+  return day !== '' && day > today;
+}
+
 /** 원장 행 p 의 구매일이 미래가 아닌가(날짜 없는 행 = 참 · 요약 칸만 쓴다). */
 export function ledgerNotFutureSql(p: string): string {
   return `(${p}.purchase_date IS NULL OR ${kstNotFutureSql(`${p}.purchase_date`)})`;

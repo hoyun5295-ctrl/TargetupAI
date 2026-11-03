@@ -234,3 +234,41 @@ describe('K7 고객보다 먼저 온 원장 행 잇기 = 원장 적재 트랜잭
     expect(upd).toMatch(/RETURNING o\.customer_id$/);   // 이은 고객 id 를 돌려줘야 요약 셈에 든다(Codex 9R · 지우면 이은 고객이 빠지고 다음 잇기에서도 IS NULL 로 안 잡힌다)
   });
 });
+
+describe('K8 원본 요약 값 범위 = 업서트 한 곳(G8)', () => {
+  const NOW = new Date('2026-11-04T05:00:00Z');   // KST 11-04 14:00
+  it('미래 최근 · 마지막 구매일 · 음수 횟수 · 누계 · 최근 금액 = 값 없음 · 오늘 · 0 · 그 밖 칸 = 그대로', async () => {
+    const { sanitizeSourceSummary } = await import('../customer-upsert');
+    const row = { phone: '01000000000', name: 'a', recent_purchase_date: '2026-11-05', last_purchase_date: '2026-12-01', purchase_count: -1, total_purchase_amount: '-5,000', recent_purchase_amount: -10, grade: 'VIP' };
+    expect(sanitizeSourceSummary(row, NOW)).toEqual({ ...row, recent_purchase_date: null, last_purchase_date: null, purchase_count: null, total_purchase_amount: null, recent_purchase_amount: null });
+    const ok = { phone: '01000000000', recent_purchase_date: '2026-11-04', last_purchase_date: '2026-11-04', purchase_count: 0, total_purchase_amount: 0, recent_purchase_amount: '12,000' };
+    expect(sanitizeSourceSummary(ok, NOW)).toBe(ok);   // 고칠 것 없으면 같은 객체
+    expect(row.purchase_count).toBe(-1);   // 입력 행은 그대로(새 객체)
+  });
+  it('묶음째 거름(Codex G8 1R): 최근 금액만 음수 = 최근 날짜 · 금액 · 매장 셋 다 · 누계 하나만 음수 = 횟수 · 누계 둘 다', async () => {
+    const { sanitizeSourceSummary } = await import('../customer-upsert');
+    const r1 = { phone: '01000000000', recent_purchase_date: '2026-11-03', recent_purchase_amount: -10, recent_purchase_store: '강남점', purchase_count: 3, total_purchase_amount: 9000 };
+    expect(sanitizeSourceSummary(r1, NOW)).toEqual({ ...r1, recent_purchase_date: null, recent_purchase_amount: null, recent_purchase_store: null });
+    const r2 = { phone: '01000000000', purchase_count: 3, total_purchase_amount: -1, recent_purchase_date: '2026-11-03' };
+    expect(sanitizeSourceSummary(r2, NOW)).toEqual({ ...r2, purchase_count: null, total_purchase_amount: null });
+    const r3 = { phone: '01000000000', recent_purchase_date: '2026-11-09', recent_purchase_store: '홍대점' };
+    expect(sanitizeSourceSummary(r3, NOW)).toEqual({ ...r3, recent_purchase_date: null, recent_purchase_store: null });
+    expect('recent_purchase_amount' in sanitizeSourceSummary(r3, NOW)).toBe(false);   // 행에 없던 칸은 만들지 않는다
+  });
+  it('KST 경계: UTC 11-04 15:30(= KST 11-05 00:30) 에는 11-05 가 오늘 · Date 값도 같은 판정', async () => {
+    const { isKstFutureDay } = await import('../two-door-purchase');
+    expect(isKstFutureDay('2026-11-05', new Date('2026-11-04T14:59:00Z'))).toBe(true);
+    expect(isKstFutureDay('2026-11-05', new Date('2026-11-04T15:30:00Z'))).toBe(false);
+    expect(isKstFutureDay(new Date('2026-11-06T00:00:00+09:00'), NOW)).toBe(true);
+    expect(isKstFutureDay('날짜 아님', NOW)).toBe(false);
+  });
+  it('runBatch = 첫 줄에서 거른 행으로 업서트 · 원본 값 칸 · 두 문 셈을 모두 한다(입력 행을 다시 쓰지 않음)', () => {
+    const up = read('backend/src/utils/customer-upsert.ts');
+    const body = squash(declBody(up, 'const runBatch = async ('));
+    expect(body).toContain(squash('const rows = rawRows.map((r) => sanitizeSourceSummary(r));'));
+    expect(body.indexOf(squash('const rows = rawRows.map('))).toBeLessThan(body.indexOf('lockCompanyPurchaseSummary('));
+    expect(body).toContain(squash('buildBatch(companyId, rows, uploadedBy, { twoDoor })'));
+    expect(body).toContain(squash('writeSourceSummary(run, companyId, rows)'));
+    expect((body.match(/rawRows/g) || []).length).toBe(2);   // 매개변수 이름 + 거르기 한 번
+  });
+});

@@ -292,3 +292,38 @@ describe('구조체크 3회차 — G9 몰 결제 시각이 미래', () => {
     expect((await sum(co, q)).d <= kstDay(0)).toBe(true);
   });
 });
+
+describe('G8 원본 요약 값 범위 — 미래 최근 구매일 · 음수 요약 = 값 없음(지금 칸 그대로 · 원본 값 칸에도 안 남음)', () => {
+  it('새 고객: 미래 최근일 · 음수 횟수 · 누계 = 비어 들어감 → 오늘 값 = 들어감 → 다시 미래 · 음수 = 오늘 값 그대로', async () => {
+    const co = await newCompany();
+    const p = phoneOf();
+    await upsert(co, [{ phone: p, name: '고객', recent_purchase_date: kstDay(10), purchase_count: -3, total_purchase_amount: -5000 }]);
+    const a = (await query(`SELECT recent_purchase_date::text AS d, purchase_count AS cnt, total_purchase_amount::int AS total, summary_source AS src FROM customers WHERE company_id = $1::uuid AND phone = $2`, [co, p])).rows[0];
+    expect(a.d).toBeNull();
+    expect(a.cnt ?? 0).toBe(0);
+    expect(a.total ?? 0).toBe(0);
+    expect(a.src?.recent).toBeUndefined();
+    await upsert(co, [{ phone: p, name: '고객', recent_purchase_date: kstDay(0), purchase_count: 2, total_purchase_amount: 8000 }]);
+    expect(await sum(co, p)).toMatchObject({ cnt: 2, total: 8000, d: kstDay(0) });
+    await upsert(co, [{ phone: p, name: '고객', recent_purchase_date: kstDay(30), purchase_count: -1, total_purchase_amount: -100 }]);
+    expect(await sum(co, p)).toMatchObject({ cnt: 2, total: 8000, d: kstDay(0) });
+    const src = (await query(`SELECT summary_source FROM customers WHERE company_id = $1::uuid AND phone = $2`, [co, p])).rows[0].summary_source;
+    expect(src?.recent?.date).toBe(kstDay(0));
+  });
+});
+
+describe('Codex G8 1R — 두 문 고객 · 같은 최근일에 음수 금액 = 최근 묶음째 거름(지금 금액 그대로)', () => {
+  it('원본 최근(어제 · 5,000 · 홍대점) → 같은 날 · −10 = 요약 최근 금액 · 매장 · 원본 값 칸 그대로', async () => {
+    const co = await newCompany();
+    const p = phoneOf();
+    await mall(co, p, 'G8-1', 'paid', 9000, `${kstDay(-3)}T03:00:00+09:00`, `${kstDay(-3)}T03:00:00+09:00`);
+    await ledger(co, p, [{ day: kstDay(-3), amount: 1000 }]);   // 회사 = 두 문 · 사실 = 사흘 전까지
+    await upsert(co, [{ phone: p, name: '고객', recent_purchase_date: kstDay(-1), recent_purchase_amount: 5000, recent_purchase_store: '홍대점' }]);
+    const before = (await query(`SELECT recent_purchase_date::text AS d, recent_purchase_amount::int AS ramt, recent_purchase_store AS store, summary_source->'recent' AS rc FROM customers WHERE company_id = $1::uuid AND phone = $2`, [co, p])).rows[0];
+    expect(before).toMatchObject({ d: kstDay(-1), ramt: 5000, store: '홍대점' });
+    await upsert(co, [{ phone: p, name: '고객', recent_purchase_date: kstDay(-1), recent_purchase_amount: -10, recent_purchase_store: '강남점' }]);
+    const after = (await query(`SELECT recent_purchase_date::text AS d, recent_purchase_amount::int AS ramt, recent_purchase_store AS store, summary_source->'recent' AS rc FROM customers WHERE company_id = $1::uuid AND phone = $2`, [co, p])).rows[0];
+    expect(after).toMatchObject({ d: kstDay(-1), ramt: 5000, store: '홍대점' });
+    expect(after.rc).toEqual(before.rc);
+  });
+});
