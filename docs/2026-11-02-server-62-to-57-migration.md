@@ -90,6 +90,7 @@
 - 방식 = 콜비서 QTmsg 에이전트를 비토 에이전트로 바꾼다(Harold 「우리 비토엔진 에이전트 저기에 맞춤형으로」). 고객이 이미 준 Agent 양식 · qtmsg.xml 로 맞추고 다시 묻지 않는다(1102 Harold 「니가 만들어준 거에 정보 다 입력해서 준 건데 뭘 또 달래」).
 - 비토 쪽 발급 · 맞춤 묶음 · 설치 순서 · 전환 순간 잔액 = `bito-gateway/status/STATUS.md` 1102 · `bito-gateway/status/CUSTOMER_MIGRATION_RUNBOOK.md` §8(소유). 요지 = 표마다 Agent 하나(callbiseo-1 · 2 · 3 = SMSQ_SEND · _2 · _J) · 발송계정 CALLBISEO-MAIN(과금잔액 0 → 전환 순간의 .57 잔액 입금) · 메시지별 식별코드 `sender_code` · 허용 IP 211.233.58.117 · 맞춤 묶음 3개 = Harold 다운로드 폴더 `callbiseo-custom`(SHA 앞 12자리 3ac8cdd63bc2 · f36c03db62d2 · e7ad75a24f4b).
 - 순서: 라인그룹 지정 · 원본 묶음 삭제(Harold) → 메일(김근형 · 초안 1102 대화) → 11-05 설치 동행(QTmsg 먼저 멈춤 · 설치 스크립트는 끝나면 바로 발송 · test-poll 로 sender_code 9자리 · 시험 1건 뒤 다음 표) → 잔액 입금 → .57 중계는 나간 건 결과가 다 돌아온 뒤 비움 → 하나로호스팅 §3 2~4.
+- ★1105 설치 1차(callbiseo-3) 실패 = 콜비서 서버가 EUC-KR(`LANG=ko_KR.euckr`)이라 고쳐 저장한 agent-config.yaml 의 한글 주석이 CP949 → Agent 가 YAML 전체 거부 · 설치 스크립트가 /opt 에 먼저 들어간 그 파일을 계속 씀 · [3/7] 에서 멈춤(서비스 등록 전 = 비토 발송 0). 처방 · 배포 = 비토 290ab30(1105 16:26 · 그 뒤 받는 묶음은 자동 변환). 이미 나간 콜비서 묶음 손 절차 = `bito-gateway/status/CUSTOMER_MIGRATION_RUNBOOK.md` §8-9(소유) · 경위 = 비토 `status/BUG_HISTORY.md` 2026-11-05. 남은 = 담당자 재설치 결과 → test-poll · 시험 1건 → 다음 표.
 
 ## §9 .62 메모리 · 새 서버 기준(1102 Harold 결정)
 
