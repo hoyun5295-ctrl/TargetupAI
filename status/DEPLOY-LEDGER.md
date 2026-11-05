@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: c5ebdd86 · 2026-11-05 · Harold 실행 보고(서버 git pull d7e3061f..c5ebdd86 · 커밋 3 = C101 · C102 문서 마무리 2 + C103 · B-1105-1 1 · pull 출력 미첨부) · 그 전 d7e3061f
-- deployed_head: c5ebdd86 · 2026-11-05 · Harold 실행(백엔드 build:safe · 프론트 build:safe · pm2 reload targetup-backend) · 출력 = pm2 describe created at 2026-11-05T07:06:53Z(16:06:53 KST) · uptime 5m · unstable restarts 0 · online · ↺ 54 · 에러 로그(16:06 뒤) 0줄(마지막 줄 13:59:08 = 옛 프로세스) · joined_at 칸 없음 마지막 13:52:19(C103-DDL-1 앞) · 화면 고객 DB 엑셀 다운로드 받아짐(Harold) · 그 전 d7e3061f
-- 이번 창 확인 출력: backend-build · frontend-build · reload · uptime(restart-env 아님 · 이번 pull 새 env 이름 0 = 원장 계산 출력 · 계산의 restart-env 요구 = 다른 카드의 ENV 대기 항목)
+- pulled_head: 11893902 · 2026-11-05 · Harold 실행 보고(서버 git pull c5ebdd86..11893902 · C104 67d7b5d3 + 한 배포 커밋 11893902 = C105 · C106 · C107 + 상시 로드 감축) · 그 전 c5ebdd86
+- deployed_head: 11893902 · 2026-11-05 · Harold 실행(백엔드 build:safe · 프론트 build:safe · pm2 reload targetup-backend · C105-S0 = store 모드 켜진 · 멈춘 여정 0개(build 뒤 실행 · 영향 0)) · 출력 = git HEAD 11893902 · pm2 describe created at 2026-11-05T14:46:30Z(23:46:30 KST) · uptime 2m · unstable restarts 0 · online · 에러 로그(23:46 뒤) 0줄(마지막 줄 21:13:05 CDP Identity 경고 = 옛 프로세스) · 그 전 c5ebdd86
+- 이번 창 확인 출력: frontend-build · reload · uptime(백엔드 build 출력은 붙여넣기 밖 · restart-env 아님 · DDL 0)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -50,9 +50,9 @@
 | C101 | cae2cd7c |
 | C103 | c5ebdd86 |
 | C104 | 67d7b5d3 |
-| C105 | 미커밋 |
-| C106 | 미커밋 |
-| C107 | 미커밋 |
+| C105 | 11893902 |
+| C106 | 11893902 |
+| C107 | 11893902 |
 
 ## §1 대기
 
@@ -1181,7 +1181,7 @@ UNION ALL
 - 선행: 없음
 - 기대: ① 한줄로 SMSQ 결과 칸 형식 = SMSQ_SEND_13 ~ 16 의 status_code 가 정수(int · 5자리 20000 ~ 59999 가 들어간다 · smallint 면 멈춤) ② 한줄로 에이전트(hanjul02 · hanjul03 · 그 밖 = 게이트웨이 agent_account 조회로 확정) 설정 = state_policy.mode final_result_only · result_policy.failure_code_source status_values.failed(설치 폴더 설정 파일 · 비밀값 줄 제외) ③ 게이트웨이 운영 표준 코드 표의 실패 · 숫자 있는 코드 수(시험 DB 244 와 비교 · 다르면 한줄로 라벨 생성 파일을 운영 표 기준으로 다시 만들지 판단)
 - 확인: 세 출력
-- 결과:
+- 결과: 1106 Harold 출력 = ① SMSQ_SEND 표 138개 status_code 전부 int → 통과 ② hanjul01(/opt/bito-agent) · hanjul02 · hanjul03 · hanjul-04(/opt/bito-agent-hanjul-04) 전부 state_policy final_result_only · failure_code_source status_values.failed → 통과(켜기 = 그 줄을 gateway_report 로) ③ 운영 대역 코드 244 · 계열 4(시험 DB 와 같음 · 라벨 생성 파일 그대로) · 에이전트 넷 등록 · 활성 · **hanjul01 에 0708 「Agent별 결과코드 매핑」 71행(고객사 3 = 한줄로AI · sms 28 · lms_mms 43 · 표준 코드 숫자 그대로 · 성공 2 = 6 · 1000 · 실패 69)** — 실패 코드 다수가 한줄로 결과 표와 뜻이 다르다(LMSMMS_3004 단말 꺼짐 → 한줄로 3004 「스팸 차단」 · LMSMMS_3000 → 「메시지 형식 오류」 등) · 유형이 딱 맞아 대역 행보다 앞서 뽑힌다 → G4 검사를 「대역 아닌 실패 매핑이 켜져 있으면 멈춤」으로 바꿈 · hanjul01 = C107-G3 먼저
 
 ### C107-G1 · 게이트웨이 마이그레이션 100(DDL · 새 판보다 먼저 · 게이트웨이 런북 §3-3 「DDL 선적용 → 바이너리」)
 - 카드: C107
@@ -1189,7 +1189,7 @@ UNION ALL
 - 선행: C107-G0 ①(status_code 정수)
 - 기대: bito-gateway migrations/100_customer_failure_code.sql 을 .65 게이트웨이 DB 에 적용 · `agent_account.failure_code_policy`(기본 raw) · `report_queue.customer_code` · 함수 `customer_failure_code(text,bigint,text,text)` 생김 · 정책 기본 raw = 동작 변화 0 · lock_timeout 250ms 로 멈추면 그대로 다시
 - 확인: `to_regprocedure('customer_failure_code(text,bigint,text,text)')` · 두 칸 information_schema 출력
-- 결과:
+- 결과: 1106 Harold .65 실행 = SET · ALTER TABLE · DO · ALTER TABLE · CREATE FUNCTION · COMMENT · 확인 출력 fn t · 칸 2 · 에이전트 21 중 raw 21 → 통과
 
 ### C107-G2 · 게이트웨이 새 판 배포(게이트웨이 런북 §2 check · build · §3-3 gateway · §4 새 PID ERROR 세기)
 - 카드: C107
@@ -1197,15 +1197,23 @@ UNION ALL
 - 선행: C107-G1 · 게이트웨이 커밋(Harold)
 - 기대: GW_CHECK_OK(로컬) · GW_BUILD_OK · GW_DEPLOY_OK · 새 PID ERROR 종류별 0(기동 직후 젬텍 reconnect 1 ~ 3 제외) · 기동 로그에 「고객 실패 코드 번역(100)이 없다」 없음 · 정책이 전부 raw 라 결과 코드 변화 0
 - 확인: 마커 · journalctl 세기 출력
-- 결과:
+- 결과: 1106 = GW_CHECK_OK · GW_PG_CHECK_OK(1926) · 커밋 bff79a9 push(00b7a7e..bff79a9) · GW_BUILD_OK out/bito-gateway-bff79a9(sha256 7d8946da…8e9ede) · 00:37:28 GW_DEPLOY_OK gateway(재기동 전 SENDING 0 · 백업 deploy-backups/20261106-003728-gateway.heSzvw) · 150초 뒤 새 PID 2362541 = ERROR 0줄 · 9444 같은 PID · 규격연동 입구 시작 1 · 기동 검사 실패 줄 0 → 통과
+
+### C107-G3 · hanjul01 기존 실패 매핑 69행 끄기(hanjul01 을 켤 때만 · 대표 판단 · 지우지 않음)
+- 카드: C107
+- 단계: 게이트웨이 배포 뒤
+- 선행: C107-G2
+- 기대: hanjul01 의 0708 「Agent별 결과코드 매핑」 중 실패 계열 표준 69행 is_active = FALSE(UPDATE 69 · 성공 2행 = 6 · 1000 은 그대로) · 콘솔 고객 코드 칸이 hanjul01 실패에서 그 코드 대신 대역(또는 전역 기본) 코드로 보인다 · 되돌리기 = 같은 조건으로 is_active = TRUE
+- 확인: UPDATE 69
+- 결과: 1106 Harold 승인(「그렇게해」) · .65 실행 = `NOTICE: C107-G3 UPDATE 69` · DO(조건 = hanjul01 · 활성 · 실패 계열 표준 · note 두 개 · 69 아니면 되돌리는 DO 블록)
 
 ### C107-G4 · 한줄로 에이전트 실패 코드 대역 행(에이전트 하나씩 · bito-gateway scripts/gw/customer-failure-codes-hanjul.sql)
 - 카드: C107
 - 단계: 게이트웨이 배포 뒤
 - 선행: C107-G2
-- 기대: 에이전트마다 출력 한 줄 = band_codes · rows_band 같은 수(시험 DB 244) · rows_other 0 · 예약 코드 충돌 · 겹침 · 없는 에이전트면 멈춤(넣은 것 없음)
+- 기대: 에이전트마다 출력 한 줄 = band_codes · rows_band 244 · rows_other = 대역 밖 행 수(hanjul01 = 71 · 그 밖 0) · 대역 아닌 실패 매핑이 켜져 있으면 · 겹침 · 없는 에이전트면 멈춤(넣은 것 없음)
 - 확인: 출력 줄
-- 결과:
+- 결과: 1106 hanjul02 = INSERT 0 244 · `hanjul02 | 244 | 244 | 0` · COMMIT / hanjul01(G3 뒤) = INSERT 0 244 · `hanjul01 | 244 | 244 | 71`(꺼 둔 69 + 성공 2) · COMMIT / hanjul03 = INSERT 0 244 · `hanjul03 | 244 | 244 | 0` · COMMIT / hanjul-04 = INSERT 0 244 · `hanjul-04 | 244 | 244 | 0` · COMMIT → 넷 전부 통과
 
 ### C107-G6 · 번역 켜기 · 에이전트 설정 바꿈(에이전트 하나씩 · 설계서 §4 G6)
 - 카드: C107
@@ -1213,7 +1221,7 @@ UNION ALL
 - 선행: C107-G4(그 에이전트) · C107-G0 ②
 - 기대: ① `UPDATE agent_account SET failure_code_policy = 'mapped', updated_at = NOW() WHERE agent_id = '<에이전트>';` (UPDATE 1) ② 전환 조건 = `SELECT count(*) FROM report_queue rq WHERE rq.agent_id = '<에이전트>' AND rq.delivered = FALSE AND rq.customer_code IS NULL AND BTRIM(rq.result_code) <> '' AND BTRIM(rq.result_code) NOT IN ('0', '6', '0000', '1000', '1800', '7830', '7831', 'MS03');` 가 0(정책 전에 실린 실패 결과가 원 코드로 재전달되면 한줄로가 100 · 104 를 대기로 적는다) · 0 이 아니면 기다렸다 다시(설정을 바꾸지 않는다) ③ 그 에이전트 설정 `result_policy.failure_code_source: gateway_report` · 재시작(적재 0건일 때 · 한 대씩) ④ 실패 1건 실측 = C107-S2
 - 확인: 각 출력
-- 결과:
+- 결과: 1106 hanjul02 ① UPDATE 1 ② raw_failures_pending 0 ③ .62 loading=0 · 82행 gateway_report · 00:49:15 재시작 · ACTIVE=active · Agent 1.0.32 · GW 연결 완료 · SMSQ_SEND_14 폴링 시작 · WARN journal active claim 복원(재시작 정상 복구 줄) / 나머지 셋 = Harold 「다 하면 되지」 → 한 명령에 묶음 · ① UPDATE 3 ② 네 대 전부 mapped · raw_failures_pending 0 ③ .62 loading=0 · bito-agent(hanjul01) 82행 · bito-agent-hanjul03 82행 · bito-agent-hanjul-04 81행 gateway_report · 00:51:48 · 00:51:59 · 00:52:09 재시작 · 셋 다 ACTIVE=active · GW 연결 완료 · SMSQ_SEND_13 · 15 · 16 폴링 시작(WARN = 내려가는 옛 프로세스의 연결 종료 · journal claim 복원) → 네 대 전부 통과 · 남은 = C107-S2
 
 ### C107-S2 · 실패 사유 실측(번역 켠 뒤 · 직원 시트 49)
 - 카드: C107
@@ -1221,7 +1229,7 @@ UNION ALL
 - 선행: C107-G6(그 에이전트)
 - 기대: 시트 49 = 발송 상세 결과 「카카오: 메시지를 발송할 수 없음」(「기타 오류」 아님) · 한줄로 SMSQ 그 행 status_code = 23018 · 게이트웨이 report_queue 그 행 result_code 3018 · customer_code 23018
 - 확인: 시트 결과 · 두 조회 출력
-- 결과:
+- 결과: 1106 00:5x 사전 조회(.65 report_queue · 00:45 뒤 한줄로 네 대) = 성공 4행(hanjul02 · hanjul03 result_code 0 · customer_code 비어 있음 = 성공은 번역 안 함 · delivered t) · 실패 0행 → 번역 실측 전 · 시트 49(발송 시간대 실패 1건) 대기
 
 ## §2 덤프 뒤 적용분
 

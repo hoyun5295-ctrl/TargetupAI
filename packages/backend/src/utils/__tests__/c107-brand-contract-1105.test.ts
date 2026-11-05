@@ -15,7 +15,7 @@ import {
   fallbackOf, tallyKakaoFallback, getSendTypeLabel, getCampaignChannelLabel, KAKAO_FALLBACK_PARENT_TYPES,
 } from '../sms-result-map';
 import { BILLING_MSG_TYPE_SQL } from '../send-usage-aggregation';
-import { SUCCESS_CODES, PENDING_CODES } from '../sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, HANJUL_BAND_BASE as HANJUL_BAND_BASE_ALL } from '../sms-result-map';
 const SUCCESS_CODES_ALL = [...SUCCESS_CODES, ...PENDING_CODES];
 import { isKakaoSplitChannel, billingTypeLabelOf } from '../billing-types';
 import { resolveBrandFallback } from '../brand-message';
@@ -448,12 +448,14 @@ describe('K5 · R62 신설 — 비토 실패 코드 대역(한줄로 라벨 = �
     let sql = '';
     try { sql = readFileSync(gwSql, 'utf8'); } catch { /* 형제 저장소 없음(서버 · 다른 PC) = 이 대조만 건너뛴다 */ }
     if (sql) for (const s of [regex, bases, filter, "status_class NOT IN ('pending', 'accepted')"]) expect(sql, s).toContain(s);
-    // 게이트웨이 Codex 1R #1 — G4 가 멈추는 예약 코드 = 한줄로 성공 · 대기 코드 전부(한쪽만 바뀌면 실패가 「대기」로 새어 들어온다)
+    // ★1106 G0 실측(hanjul01 0708 매핑 69 실패 행) — G4 는 대역이 아닌 실패 매핑이 켜져 있으면 멈춘다(그 행이 대역보다 앞서 뽑힌다).
+    //   대역 행만 남으면 한줄로 성공 · 대기 코드와 겹칠 수 없다 = 대역 하한이 그 코드들보다 크다(게이트웨이 Codex 1R #1 을 이 검사가 덮는다).
     if (sql) {
-      const m = sql.match(/::int = ANY\(ARRAY\[([0-9,\s]+)\]\)/);
-      expect(m, 'G4 예약 코드 목록').toBeTruthy();
-      const reserved = m![1].split(',').map((x) => Number(x.trim())).sort((a, b) => a - b);
-      expect(reserved).toEqual([...SUCCESS_CODES_ALL].sort((a, b) => a - b));
+      // 면제 = 값(그 표준 코드의 대역 코드 · 유형 all · 범위 없음) · note 글자로 가르지 않는다(게이트웨이 Codex 4R)
+      for (const s of ['src.is_success = FALSE', 'AND crm.customer_code = b.band::text', "AND crm.msg_type = 'all'", 'IF v_n > 0 THEN']) expect(sql, s).toContain(s);
+      expect(sql).not.toContain("AND crm.note IS DISTINCT FROM 'C107");
+      expect(sql).not.toContain('BTRIM(crm.customer_code) = b.band');   // 함수와 같이 원문 그대로 비교(Codex 5R)
     }
+    expect(Math.min(...Object.values(HANJUL_BAND_BASE_ALL))).toBeGreaterThan(Math.max(...SUCCESS_CODES_ALL));
   });
 });
