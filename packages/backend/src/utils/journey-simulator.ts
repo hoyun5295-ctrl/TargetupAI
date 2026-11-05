@@ -16,9 +16,9 @@
 import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
-import { getJourneyOwnerScopeSql } from './store-scope';
-import { journeyOwnerConsent } from './mall-consent';
-import { countJourneyTargets, averageTargetScores } from './journey-target-extractor';
+import { countJourneyTargetsWithGrace, averageTargetScores, journeyEntryInputs } from './journey-target-extractor';
+import { STANDING_COUNT_TRIGGERS } from './journey-step-edit-policy';   // ★ C104 G5 실제 모드 · 추정 모드(옵션 주소와 같은 집합)
+import { intakeGraceHeldText } from './journey-intake-grace';
 import { buildProjection, SegmentBreakdown, ProjectionStep } from './journey-simulator-core';
 import { backfillPerDayOf, entryCapExceeded } from './journey-step-limits';
 import { resolveCdpCursorEventName } from './journey-cdp-cursor';
@@ -28,6 +28,8 @@ export interface JourneySimulationResult {
   simulatedAt: Date;
   triggerEvent: string;
   matchedCustomers: number;
+  /** ★ C104 G5 — 사건형 · 이어받기 = 최근 사건 기준 근사(화면 「최근 사건 기준 약」) */
+  approximate: boolean;
   capped: boolean;
   customerSegments: SegmentBreakdown[];
   steps: ProjectionStep[];
@@ -78,14 +80,16 @@ export async function simulateJourney(
   // 발송과 같은 대상 SQL(한 벌)을 전원으로 감싸 센다 → 등급 분포 + 실데이터 평균(객단가·전환·클릭).
   // ★ 2026-11-02 §16 G2 — 옛: 10만 목록을 받아 세어 넘으면 「그만큼까지만 셌어요」(capped = 늘 거짓 · 응답 칸은 남긴다).
   const capped = false;
-  const { total: matched, segments } = await countJourneyTargets(
-    companyId, journey.trigger_event, journey.trigger_filters || {}, journeyId,
-    await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),   // ★ 2026-09-27 S5-04 — 발송과 같은 범위
+  // ★ 2026-11-05 C104 G5 · G6 — 입력 = 진입 입력 CT(실제 진입과 같은 범위 · 동의 · 재진입 · 계보) · 유예로 빠진 수를 같은 SQL 에서
+  const entry = await journeyEntryInputs(companyId, journeyId);
+  const { total: matched, segments, graceHeld, graceDays } = await countJourneyTargetsWithGrace(
+    companyId, journey.trigger_event, journey.trigger_filters || {}, journeyId, entry,
   );
   const { avgOrderValue, avgConversion, avgClick } = await averageTargetScores(
-    companyId, journey.trigger_event, journey.trigger_filters || {}, journeyId,
-    await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+    companyId, journey.trigger_event, journey.trigger_filters || {}, journeyId, entry.scopeSql, entry.consent, entry.reentry,
   );
+  // 사건형 · 이어받기 = 실제 진입은 사건마다라 미리 셀 수 없다 → 최근 사건 기준 근사(시작 카드 approximate 와 같은 판정)
+  const approximate = !STANDING_COUNT_TRIGGERS.has(String(journey.trigger_event || ''));
 
   const projection = buildProjection({
     matched,
@@ -109,6 +113,7 @@ export async function simulateJourney(
   if (firstRoundIsMatched && backfill != null && matched > backfill) {
     warnings.push(`하루에 ${backfill.toLocaleString()}명씩 나눠 들어와요. 예상 발송 · 비용은 모두 들어왔을 때 기준이에요.`);
   }
+  if (!approximate && graceHeld > 0) warnings.push(intakeGraceHeldText(graceDays, graceHeld));
   if (projection.dataNote) warnings.push(projection.dataNote);
 
   return {
@@ -116,6 +121,7 @@ export async function simulateJourney(
     simulatedAt: new Date(),
     triggerEvent: journey.trigger_event,
     matchedCustomers: matched,
+    approximate,
     capped,
     customerSegments: segments,
     steps: projection.steps,

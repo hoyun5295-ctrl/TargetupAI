@@ -267,7 +267,8 @@ export default function JourneyStepStudio({
           )}
 
           {/* ★ 2026-08-08 — 혜택·링크는 값으로 받는다(입력 한 번이 전 칸을 채운다 · B1-2 원장 + 전 칸 한 트랜잭션). */}
-          {!copyLock && factsRow && (
+          {/* ★ 2026-11-05 C104 G3 · SC-13 — A/B 잠금 칸에서도 보인다(채우기는 모든 칸 · 초안 · 멈춘 여정 A/B 판까지 채운다) */}
+          {factsRow && (
             <Row name="혜택 · 링크">
               <div className="space-y-2.5">
                 {(benefitSlots || factsUnset) && onFillBenefit && (

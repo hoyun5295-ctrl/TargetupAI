@@ -30,7 +30,7 @@ import { pausedSetSql } from './journey-pause-reason';   // ★ 2026-11-02 여�
 // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { journeyOwnerConsent } from './mall-consent';
-import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectLastPriorPurchase, triggerEntryUsedSql, JOURNEY_COUNT_CAP, entryPropsFor } from './journey-target-extractor';
+import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectLastPriorPurchase, triggerEntryUsedSql, JOURNEY_COUNT_CAP, entryPropsFor, journeyEntryInputs } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
 import { isFirstImportRunning } from './mall-import';
 import { clampInt } from './journey-points-trigger';
@@ -340,7 +340,9 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
 
   // 추출 = journey-target-extractor 공유 컨트롤타워. journeyId + 재진입 정보 전달.
   //   휴면·생일·포인트는 진입 안티조인으로 회차마다 다음 분이 들어와 501번째+ 누락이 없다.
-  const reentry = { allowReentry: j.allow_reentry, cooldownDays: Number(j.reentry_cooldown_days || 0), lineageIds: j.lineageIds };
+  // ★ 2026-11-05 C104 G5 — 추출 입력 = 진입 입력 CT(세는 자리들과 같은 값 · 잠금 뒤 계보 다시 읽기는 그대로)
+  const entry = await journeyEntryInputs(j.company_id, j.id);
+  const reentry = entry.reentry;
   // ★ Fix #2 (2026-06-05): 대량 차단기를 LIMIT 500이 무력화하던 문제 정정.
   //   상한 설정 시 cap+1까지 추출 → 진짜 급증(후보 > 상한)만 정지. 미설정이면 한 회차 최대 JOURNEY_COUNT_CAP(10만) · 남은 분은 다음 회차(위 진입 안티조인 · 버리지 않는다 · 뿌리 R40).
   //   ★ 2026-11-01 정정 — 옛 주석 「500 스로틀로 회차 분산」은 상수 값(100000)과 달랐다(값을 읽고 쓴다).
@@ -380,11 +382,11 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     const cfg = tf ? readAfterConfig(tf) : null;
     if (!cfg || !cursor) return { matched: 0, enqueued: 0, skipped: 0 };
     expect = startExpectOf(j, { root: cfg.root, outcome: cfg.outcome, cursor }, tf);
-    const rows = await selectAfterJourneyCandidates(j.company_id, tf, extractLimit, j.id, reentry, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id), cursor);
+    const rows = await selectAfterJourneyCandidates(j.company_id, tf, extractLimit, j.id, reentry, entry.scopeSql, entry.consent, cursor);
     ids = rows.map((x) => x.customerId);
     afterProps = Object.fromEntries(rows.map((x) => [x.customerId, { __entry: { src: 'after', key: x.afterExecId } }]));
   } else {
-    ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, await getJourneyOwnerScopeSql(j.company_id, j.id), await journeyOwnerConsent(j.company_id, j.id));
+    ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, entry.scopeSql, entry.consent);
   }
   if (ids.length === 0) {
     return { matched: 0, enqueued: 0, skipped: 0 };

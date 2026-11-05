@@ -230,8 +230,8 @@ export default function JourneyMessageEditModal({
                         </div>
                       </div>
                     )}
-                    {abCopyLocked(journeyStatus, s.abVariants) ? (
-                      <JourneyAbCopyList variants={s.abVariants} baseBody={s.messageTemplate} baseSubject={s.subject} />
+                    {abCopyLocked(s.abVariants) ? (
+                      <JourneyAbCopyList journeyStatus={journeyStatus} variants={s.abVariants} baseBody={s.messageTemplate} baseSubject={s.subject} />
                     ) : phone ? (
                       <PhoneComposer
                         channel={s.channel as 'sms' | 'lms' | 'mms'}

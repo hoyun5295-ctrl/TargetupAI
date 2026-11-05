@@ -10,11 +10,11 @@ import { useState } from 'react';
 import { CalendarClock, ChevronDown, ChevronUp, Loader2, Plus, Unlink, Users } from 'lucide-react';
 import { ConditionRow, COND_FIELDS, condLabel, condValueText, useConditionValueOptions, type AudienceCondition } from '../JourneyBuilderUi';
 import { TIMING, STANDING_TRIGGERS, numOrNull, type OptionForm } from '../../../utils/journey-start-form';
-import { journeyCapHelp } from '../../../utils/journey-cap-copy';
+import { journeyCapHelp, journeyGraceHeldText } from '../../../utils/journey-cap-copy';
 import { formatPhoneNumber } from '../../../utils/formatDate';
 
 export type { OptionForm } from '../../../utils/journey-start-form';
-export interface EntryCount { loading: boolean; matched: number | null; cap: number | null; approximate: boolean; message: string | null }
+export interface EntryCount { loading: boolean; matched: number | null; cap: number | null; approximate: boolean; message: string | null; graceHeld?: number; graceDays?: number }
 /** 회사 회신번호 한 줄(서버 /journeys-callback-numbers · 숫자만) */
 export interface CallbackOption { phone: string; description: string | null; is_default?: boolean }
 
@@ -182,6 +182,10 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
           ) : null}
           {!count.loading && <button type="button" onClick={onCount} className="text-[12px] text-indigo-700 hover:underline">{count.matched == null ? '지금 몇 명인지 보기' : '다시 세기'}</button>}
         </div>
+        {/* ★ 2026-11-05 C104 G6 — 이관 유예로 지금 빠진 수(같은 SQL 에서 셈 · 다른 화면 수와 다른 이유를 말한다) */}
+        {!count.loading && count.matched != null && (count.graceHeld ?? 0) > 0 && (
+          <p className="mt-1 text-[12px] leading-relaxed text-slate-600">{journeyGraceHeldText(count.graceDays ?? 0, count.graceHeld ?? 0)}</p>
+        )}
         <p className="mt-1.5 text-[12px] leading-relaxed text-slate-500">조건에 맞으면 한 번 들어와요. 다시 들어오게 하려면 재진입을 켜요.{isActive && inProgress > 0 ? ` 지금 진행 중인 ${inProgress.toLocaleString('ko-KR')}명은 원래 조건으로 끝까지 받아요.` : ''}</p>
       </div>
 

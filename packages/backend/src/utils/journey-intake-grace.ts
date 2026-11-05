@@ -72,6 +72,14 @@ export function isBulkStateTrigger(triggerEvent: string): boolean {
   }
 }
 
+/**
+ * ★ 2026-11-05 C104 G6 — 이관 유예로 지금 빠진 수 문구(화면 frontend/src/utils/journey-cap-copy.ts journeyGraceHeldText 와 같은 글 · 짝 시험).
+ *   약속하지 않는다(유예가 지난 뒤에도 조건에 맞아야 들어온다).
+ */
+export function intakeGraceHeldText(graceDays: number, graceHeld: number): string {
+  return `등록한 지 ${graceDays}일이 안 된 ${graceHeld.toLocaleString('ko-KR')}명은 지금 빠져 있어요. ${graceDays}일이 지난 뒤에도 조건에 맞으면 들어와요.`;
+}
+
 /** 회사 설정(trigger_filters.intake_grace_days) → 유예 일수. 미설정 기본 7, 0은 끔, 상한 90. */
 export function resolveIntakeGraceDays(filters: Record<string, any> | null | undefined): number {
   return clampInt((filters || {}).intake_grace_days, DEFAULT_INTAKE_GRACE_DAYS, 0, MAX_INTAKE_GRACE_DAYS);

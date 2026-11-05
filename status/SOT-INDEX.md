@@ -121,6 +121,7 @@
 
 | 주제 | SoT 문서 | 읽는 범위 |
 |---|---|---|
+| **한국형 Braze 빈 기능 대조(내부용 · 1105)** — 롯데멤버스 DSC 소개서(GA · Braze · Airbridge · DeepAD) + Braze 2026 자료 대비 한줄로에 있는 것 · 없는 것 · 우선순위(추천 = 대조군 · lift) · 고객 제안서 원본 = `marketing/proposals/2026-11-hanjul-proposal/` | [2026-11-05-braze-gap-check.md](../docs/2026-11-05-braze-gap-check.md) | §2 없는 것 → §3 우선순위 |
 | AI Operator·CDP·Provider | [AI_OPERATOR_기능정의서.md](../docs/AI_OPERATOR_기능정의서.md) + [ai_operator_progress.md](ai_operator_progress.md) | 해당 절 |
 | **AI 모델 최신화 · 프롬프트 품질 점검**(0930~ · 문안 Sonnet 5.5 · 정밀 Opus 5.5 · 프롬프트 전수 점검 장부) | [2026-09-30-ai-model-prompt-upgrade.md](../docs/2026-09-30-ai-model-prompt-upgrade.md) | §2 모델 전환(실측 · 되돌리기) → §3-4 진행표 · 호출어 **AI 모델 최신화 / 프롬프트 점검** |
 | AI 영업 아웃리치(슈퍼관리자·ceo 전용) | [2026-07-31-ai-sales-outreach-design.md](../docs/2026-07-31-ai-sales-outreach-design.md) | 전체 — 착수 전 확정 = §13, 재사용 맵 = §6-1 |

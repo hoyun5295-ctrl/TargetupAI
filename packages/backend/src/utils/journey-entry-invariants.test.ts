@@ -91,8 +91,10 @@ describe('이관 유예 배선 (journey-target-extractor)', () => {
 
   it('상태형 4분기(휴면·포인트·상시·주기이탈)에 전부 걸린다', () => {
     // ★ §11-5 #6 — customer.cycle_lapsed도 이관 배치가 통째로 걸리는 상태형이라 유예 대상.
-    const hits = src.match(/buildIntakeGraceClause\('c', params, graceDays\)/g) || [];
+    // ★ 2026-11-05 C104 G6 — 갈래 4곳 = `const grace =` · 유예 갈라 세기(countJourneyTargetsWithGrace)는 같은 함수를 `const ready =` 로 한 번 더 부른다
+    const hits = src.match(/const grace = buildIntakeGraceClause\('c', params, graceDays\)/g) || [];
     expect(hits).toHaveLength(4);
+    expect(src.match(/const ready = buildIntakeGraceClause\('c', params, graceDays\) \?\? 'TRUE';/g) || []).toHaveLength(1);
   });
 
   it('유예 절은 대상 조건(cond)보다 먼저 params에 들어간다 — $N 어긋남 방지', () => {

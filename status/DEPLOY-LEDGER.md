@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: d7e3061f · 2026-11-04 · Harold 출력(서버 git pull cae2cd7c..d7e3061f · 커밋 1 = C102 G8) · 그 전 cae2cd7c
-- deployed_head: d7e3061f · 2026-11-04 · Harold 출력(백엔드만 = 새 패키지 0 · 백엔드 build:safe(dist utils/customer-upsert.js 08:32:35 · sanitizeSourceSummary 3곳) · 프론트 빌드 없음 · pm2 reload targetup-backend · 옛 프로세스 종료 줄 08:32:38 = 직접발송 적재 중 0개 · online · ↺ 47 · created at 08:32:38 KST · 에러 로그(08:32:38 뒤) 0줄 · 출력 로그 오류 · SQL 오류 코드 0(Port: 3000 한 줄) · /health 200) · 그 전 cae2cd7c(C101) · ee1166a6(C102 1차)
-- 이번 창 확인 출력: backend-build · restart-env · uptime · frontend-build
+- pulled_head: c5ebdd86 · 2026-11-05 · Harold 실행 보고(서버 git pull d7e3061f..c5ebdd86 · 커밋 3 = C101 · C102 문서 마무리 2 + C103 · B-1105-1 1 · pull 출력 미첨부) · 그 전 d7e3061f
+- deployed_head: c5ebdd86 · 2026-11-05 · Harold 실행(백엔드 build:safe · 프론트 build:safe · pm2 reload targetup-backend) · 출력 = pm2 describe created at 2026-11-05T07:06:53Z(16:06:53 KST) · uptime 5m · unstable restarts 0 · online · ↺ 54 · 에러 로그(16:06 뒤) 0줄(마지막 줄 13:59:08 = 옛 프로세스) · joined_at 칸 없음 마지막 13:52:19(C103-DDL-1 앞) · 화면 고객 DB 엑셀 다운로드 받아짐(Harold) · 그 전 d7e3061f
+- 이번 창 확인 출력: backend-build · frontend-build · reload · uptime(restart-env 아님 · 이번 pull 새 env 이름 0 = 원장 계산 출력 · 계산의 restart-env 요구 = 다른 카드의 ENV 대기 항목)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -48,7 +48,8 @@
 | C99 | 14819363 |
 | C102 | d7e3061f |
 | C101 | cae2cd7c |
-| C103 | 미커밋 |
+| C103 | c5ebdd86 |
+| C104 | 미커밋 |
 
 ## §1 대기
 
@@ -1113,7 +1114,15 @@ UNION ALL
 - 선행: 코드 배포 · C103-DDL-1
 - 기대: 직원 시트 24 ~ 29 전 항목 「맞음」 · 배포 뒤 에러 로그에 joined_at 칸 없음 오류 0
 - 확인: 시트 결과(날짜 · 계정 · 사람)
-- 결과: (대기)
+- 결과: 1105 부분 · 배포 뒤 에러 로그 joined_at 칸 없음 0(마지막 13:52:19 = DDL-1 앞 · Harold 출력) · 시트 28 ① 맞음(Harold 화면 엑셀 다운로드 받아짐) · 시트 24 ~ 27 · 28 ② · 29 대기
+
+### C104-S1 · 같은 사실 = 같은 입력 실측(배포 뒤 · 직원 시트 30 ~ 32 · docs/2026-11-05-c104-staff-sheet.xlsx)
+- 카드: C104
+- 단계: 배포 뒤
+- 선행: 코드 배포(DDL 0)
+- 기대: 직원 시트 30 ~ 32 전 항목 「맞음」(A/B 칸 여정 켜기 · 혜택 넣기 안내 · 시작 카드 인원 + 등록 7일 안 빠진 수 · 미리 보기 「들어올 고객」) · 배포 뒤 에러 로그에 journeyEntryInputs · countJourneyTargetsWithGrace 오류 0
+- 확인: 시트 결과(날짜 · 계정 · 사람) · 배포 뒤 에러 로그 grep
+- 결과:
 
 ## §2 덤프 뒤 적용분
 

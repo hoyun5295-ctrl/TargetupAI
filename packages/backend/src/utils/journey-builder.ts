@@ -59,7 +59,7 @@ import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-
 import { kakaoStepVerdict, kakaoTemplateContent } from './journey-kakao-step';
 import { assertJourneyCallbackRegistered } from './journey-callback';   // ★ 2026-11-05 C103 F3 회신번호 등록 판정 한 곳   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
-import { loadVariantRowsByStep } from './journey-step-versions';   // ★ 2026-11-02 칸마다 A/B 문안(설계서 3-16)
+import { loadVariantRowsByStep, stepSendVersions } from './journey-step-versions';   // ★ 2026-11-02 칸마다 A/B 문안(설계서 3-16) · ★ C104 G1 나갈 판
 import { finishMany, copyResponse } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
 
 export { MAX_JOURNEY_STEPS, JourneyInputError };
@@ -754,7 +754,31 @@ export function validateJourneyEntryConfig(row: {
  * 막는 이유 문장(첫 하나) 또는 null. ★ 2026-11-01 배포 2 C5 — activateJourney 에서 원문 그대로 옮겼다(점검 응답과 켜기가 같은 함수 · 판정 두 벌 0).
  * forCheck = 상태(초안 · 정지) 검사만 건너뛴다(켜진 여정도 점검 판을 그린다).
  */
+/**
+ * ★ 2026-11-05 C104 G1 · G7 — 켜기 관문 결과(구조). 칸 글 판정 = 나갈 판(stepSendVersions · 켜기 검증과 같은 입력)마다 ·
+ *   cause = 켜기 검증 실패 reason 과 같은 이름 공간(placeholder_unedited · copy_issue · subject_missing) + 관문에만 있는 원인(too_short · liquid · definition).
+ *   점검 판은 같은 칸 · 같은 판 · 같은 원인만 합친다(journey-check).
+ */
+export interface ActivationBlockIssue {
+  message: string;
+  stepOrder: number | null;
+  variantId: string | null;
+  cause: string;
+}
+
+export async function activationBlockIssue(companyId: string, journeyId: string, opts: { forCheck?: boolean } = {}): Promise<ActivationBlockIssue | null> {
+  const r = await activationBlockCore(companyId, journeyId, opts);
+  if (r == null) return null;
+  if (typeof r !== 'string') return r;
+  const m = /^(\d+)번째 칸/.exec(r);
+  return { message: r, stepOrder: m ? Number(m[1]) : null, variantId: null, cause: 'definition' };
+}
+
 export async function activationBlockReason(companyId: string, journeyId: string, opts: { forCheck?: boolean } = {}): Promise<string | null> {
+  return (await activationBlockIssue(companyId, journeyId, opts))?.message ?? null;
+}
+
+async function activationBlockCore(companyId: string, journeyId: string, opts: { forCheck?: boolean } = {}): Promise<string | ActivationBlockIssue | null> {
   // 활성화 전 검증 — placeholder 미편집 차단 + 회신번호 필수 + 본문 최소 길이
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기 — message/wait/condition.
   // ★ D194 (2026-05-22): Liquid 문법 사전 검증 + subject 빈 영역 검증 추가 (직원 테스트 발송 사고 0건 영구 안전망)
@@ -872,6 +896,8 @@ export async function activationBlockReason(companyId: string, journeyId: string
   }
   const stepIdOrder = new Map<string, { order: number; type: string }>(steps.map((x: any) => [String(x.id || ''), { order: Number(x.order), type: String(x.type || 'message') }]));
 
+  // ★ 2026-11-05 C104 G1 — 문자 칸 A/B 판(켜기 검증 · 실행기와 같은 집합 = journey_step_variants 그 칸 전부)
+  const abByStep = await loadVariantRowsByStep(steps.filter((x: any) => x.type === 'message' || !x.type).map((x: any) => String(x.id)));
   for (const s of steps) {
     const stepType = String(s.type || 'message');
 
@@ -997,25 +1023,46 @@ export async function activationBlockReason(companyId: string, journeyId: string
     }
 
     // message step = 본문 길이 + placeholder 검증 (기존 매트릭스)
-    const msg = String(s.message || '').trim();
-    if (!msg || msg.length < 10) {
-      return `${s.order}번째 칸 본문이 너무 짧아요(10자 이상).`;
-    }
-    if (hasUneditedPlaceholder(msg)) {
-      return `${s.order}번째 칸 본문에 채울 자리 [...] 가 남아 있어요. 직접 고쳐 주세요.`;
-    }
-    // ★ 2026-11-02 보낼 글 판정 = CT-J10(실행기 · 보내기 전 검사 · 칸 저장과 같은 함수 · 없는 변수 · 장바구니 변수 · 제목 변수 · 설계서 3-3 · 3-13)
-    if (['sms', 'lms', 'mms'].includes(String(s.channel || 'lms'))) {
-      const ci = journeyCopyIssue({ bodies: [msg], subjects: [s.subject] }, await journeyCopyContext(companyId, triggerEvent, [msg]));
-      if (ci) return `${s.order}번째 칸 ${ci.message}`;
-    }
-
-    // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수
+    // ★ 2026-11-05 C104 G1 — 판정 = 나갈 판마다(A/B 판이 있으면 그 판들 · 없으면 칸 글 · 켜기 검증 · 실행기와 같은 stepSendVersions 입력).
+    //   옛: 칸 글만 판정해 A/B 판이 나가는데 나가지 않는 칸 글의 채울 자리로 막았다(1105 접수 · 같은 함수 다른 입력 = R58).
     const channel = String(s.channel || 'lms');
-    if (channel === 'lms' || channel === 'mms') {
-      const subj = String(s.subject || '').trim();
-      if (!subj) {
-        return `${s.order}번째 칸(${channel.toUpperCase()}) 제목이 비어 있어요. 본문을 한 줄로 줄인 제목을 넣어 주세요.`;
+    const isTextStep = ['sms', 'lms', 'mms'].includes(channel);
+    const abRows = channel === 'kakao' ? [] : (abByStep.get(String(s.id)) ?? []);   // 켜기 검증(journey-pretest-validator)과 같은 판 목록 규칙
+    const abLabel = new Map(abRows.map((v) => [v.id, v.variant_id]));
+    for (const ver of stepSendVersions({ message_template: s.message ?? null, subject: s.subject ?? null }, null, abRows)) {
+      const tag = ver.variantId ? `${s.order}번째 칸 ${abLabel.get(ver.variantId) || ''}안` : `${s.order}번째 칸`;
+      const at = { stepOrder: Number(s.order), variantId: ver.variantId };
+      const body = String(ver.body || '').trim();
+      if (!body || body.length < 10) {
+        return { ...at, cause: 'too_short', message: `${tag} 본문이 너무 짧아요(10자 이상).` };
+      }
+      if (hasUneditedPlaceholder(body)) {
+        return { ...at, cause: 'placeholder_unedited', message: ver.variantId ? `${tag}에 채울 자리 [...] 가 남아 있어요. A/B 창에서 고쳐 주세요.` : `${tag} 본문에 채울 자리 [...] 가 남아 있어요. 직접 고쳐 주세요.` };
+      }
+      // ★ 2026-11-02 보낼 글 판정 = CT-J10(실행기 · 보내기 전 검사 · 칸 저장과 같은 함수 · 없는 변수 · 장바구니 변수 · 제목 변수 · 설계서 3-3 · 3-13)
+      if (isTextStep) {
+        const ci = journeyCopyIssue({ bodies: [body], subjects: [ver.subject] }, await journeyCopyContext(companyId, triggerEvent, [body]));
+        if (ci) return { ...at, cause: ci.code === 'PLACEHOLDER_UNEDITED' ? 'placeholder_unedited' : 'copy_issue', message: `${tag} ${ci.message}` };
+      }
+      // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수 · ★ C104 판 제목(판 제목 또는 칸 제목)
+      if (channel === 'lms' || channel === 'mms') {
+        if (!String(ver.subject || '').trim()) {
+          return { ...at, cause: 'subject_missing', message: `${tag}(${channel.toUpperCase()}) 제목이 비어 있어요. 본문을 한 줄로 줄인 제목을 넣어 주세요.` };
+        }
+      }
+      // ★ D194 (2026-05-22) 강화: Liquid 문법 사전 검증 — 잘못된 문법 발견 시 차단 · ★ C104 판마다
+      try {
+        const { detectLiquidSyntax, validateLiquidTemplate } = await import('./liquid-templating');
+        if (detectLiquidSyntax(body)) {
+          const valid = validateLiquidTemplate(body);
+          if (!valid.valid) {
+            // ★ 2026-10-25 원장 #119 — 템플릿 엔진 원문(「Tag 미종결 (position N)」 등)은 로그로만 · 고객에게는 칸 번호 문장
+            console.warn(`[activateJourney] ${s.order}번째 칸 Liquid 오류:`, valid.errors.map((e) => e.message).join(' / '));
+            return { ...at, cause: 'liquid', message: `${tag}의 개인화 문법이 맞지 않아요. 미리보기에서 확인해 주세요.` };
+          }
+        }
+      } catch (err: any) {
+        console.warn('[activateJourney] Liquid 문법 검증 오류 (skip):', err?.message);
       }
     }
 
@@ -1036,20 +1083,6 @@ export async function activationBlockReason(companyId: string, journeyId: string
       if (kv.block) return `${s.order}번째 칸(알림톡) ${kv.block.userText}`;
     }
 
-    // ★ D194 (2026-05-22) 강화: Liquid 문법 사전 검증 — 잘못된 문법 발견 시 차단 (발송 시점 매번 실패 영구 방지)
-    try {
-      const { detectLiquidSyntax, validateLiquidTemplate } = await import('./liquid-templating');
-      if (detectLiquidSyntax(msg)) {
-        const valid = validateLiquidTemplate(msg);
-        if (!valid.valid) {
-          // ★ 2026-10-25 원장 #119 — 템플릿 엔진 원문(「Tag 미종결 (position N)」 등)은 로그로만 · 고객에게는 칸 번호 문장
-          console.warn(`[activateJourney] ${s.order}번째 칸 Liquid 오류:`, valid.errors.map((e) => e.message).join(' / '));
-          return `${s.order}번째 칸의 개인화 문법이 맞지 않아요. 미리보기에서 확인해 주세요.`;
-        }
-      }
-    } catch (err: any) {
-      console.warn('[activateJourney] Liquid 문법 검증 오류 (skip):', err?.message);
-    }
   }
   return null;
 }
@@ -1394,9 +1427,10 @@ export async function updateJourneyStep(
   const r = (await withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
     // ★ 2026-11-02 설계서 3-16 · D14 — 켜진 여정 · A/B 문안이 있는 칸의 본문 · 제목 고치기 = 막는다(나가는 글 = 변이 · 고친 칸 글은 안 나간다 · R5).
     //   판정 = 잠금 안(그사이 변이가 생기거나 켜지는 것까지 본다) · 채우기 길(fillJourneyCopyFacts)은 모든 칸 자리표시를 같이 고치는 일이라 여기 판정 밖.
-    if (journey.status === 'active' && (patch.messageTemplate !== undefined || patch.subject !== undefined)
+    // ★ 2026-11-05 C104 G3 — 상태 무관(초안 · 멈춘 여정도 A/B 판이 나가고 칸 글은 안 나간다 · 화면 abCopyLocked 와 같은 판정 · 문구 = 상태별 한 쌍)
+    if ((patch.messageTemplate !== undefined || patch.subject !== undefined)
         && ((await loadVariantRowsByStep([stepId], run)).get(stepId)?.length ?? 0) > 0) {
-      throw new JourneyStepGateError(AB_STEP_COPY_LOCKED_MESSAGE, 'AB_STEP_COPY_LOCKED');
+      throw new JourneyStepGateError(abStepCopyLockedMessage(journey.status), 'AB_STEP_COPY_LOCKED');
     }
     // ★ 2026-11-05 C103 F11 — 알림톡 칸 글 = 고른 템플릿 본문 한 곳(사람이 고치는 길 · 채우기 길은 판정 밖)
     //   (알림톡 칸 = 글 키를 뺀 패치로 칸 갱신 몸통을 지난다 · 칸 글은 아래에서 템플릿 본문으로 맞춘다)
@@ -1554,7 +1588,7 @@ export async function fillJourneyCopyFacts(
   companyId: string,
   journeyId: string,
   input: { benefit?: string; url?: string },
-): Promise<{ steps: Array<{ id: string; messageTemplate: string; subject: string | null }> } | null> {
+): Promise<{ steps: Array<{ id: string; messageTemplate: string; subject: string | null }>; variantsLeft: number } | null> {
   const patch = buildCopyFactsPatch({
     ...(input.benefit !== undefined ? { benefits: [input.benefit] } : {}),
     ...(input.url !== undefined ? { link: input.url } : {}),
@@ -1566,10 +1600,19 @@ export async function fillJourneyCopyFacts(
   return withJourneyValidationReset(companyId, journeyId, async (run, journey) => {
     await writeJourneyCopyFacts(run, journeyId, { ...(benefit ? { benefits: patch.benefits } : {}), ...(url ? { link: patch.link } : {}) });
     const rows = (await run(
-      `SELECT id, message_template, subject FROM journey_steps WHERE journey_id = $1::uuid AND step_type = 'message' ORDER BY step_order`,
+      `SELECT id, message_template, subject, channel FROM journey_steps WHERE journey_id = $1::uuid AND step_type = 'message' ORDER BY step_order`,
       [journeyId],
-    )).rows as Array<{ id: string; message_template: string | null; subject: string | null }>;
+    )).rows as Array<{ id: string; message_template: string | null; subject: string | null; channel: string | null }>;
     const out: Array<{ id: string; messageTemplate: string; subject: string | null }> = [];
+    // ★ 2026-11-05 C104 G2 — A/B 판 = 초안 · 멈춘 여정은 같은 채우기 · 켜진 여정은 건드리지 않고 남은 판 수만(설계서 G2 · Codex 설계 2R 구조 정정)
+    const abByStep = await loadVariantRowsByStep(rows.map((r) => String(r.id)), run);
+    const fillText = (text: string, isSubject: boolean): string => {
+      let t = text;
+      if (benefit) t = fillBenefitSpots(t, benefit);
+      if (url && !isSubject) t = fillLinkSpots(t, url).text;
+      return t;
+    };
+    let variantsLeft = 0;
     for (const row of rows) {
       let msg = String(row.message_template || '');
       let subj = row.subject;
@@ -1582,9 +1625,24 @@ export async function fillJourneyCopyFacts(
           allowActiveMessageEdit: true,
         });
       }
+      const abRows = row.channel === 'kakao' ? [] : (abByStep.get(String(row.id)) ?? []);   // 켜기 검증과 같은 판 목록 규칙
+      if (journey.status === 'active') {
+        // 켜진 여정 = 판을 건드리지 않고 채울 자리가 남은 판 수만 · 나갈 판 = stepSendVersions(판 글이 비면 칸 글) · 본문 · 제목 중 하나라도(Codex 설계 3R)
+        for (const ver of stepSendVersions({ message_template: msg, subject: subj }, null, abRows)) {
+          if (ver.variantId && (hasUneditedJourneyPlaceholder(ver.body) || hasUneditedJourneyPlaceholder(ver.subject || ''))) variantsLeft += 1;
+        }
+      } else {
+        for (const v of abRows) {
+          const nb = v.message_template != null ? fillText(v.message_template, false) : null;
+          const ns = v.subject ? fillText(v.subject, true) : v.subject;
+          if (nb !== v.message_template || ns !== v.subject) {
+            await run(`UPDATE journey_step_variants SET message_template = $3, subject = $4 WHERE id = $1::uuid AND step_id = $2::uuid`, [v.id, row.id, nb, ns]);
+          }
+        }
+      }
       out.push({ id: row.id, messageTemplate: msg, subject: subj });
     }
-    return { steps: out };
+    return { steps: out, variantsLeft };
   });
 }
 
@@ -1684,6 +1742,11 @@ export async function withJourneyValidationReset<T>(
  */
 /** ★ 2026-11-02 설계서 3-16 — 켜진 여정 A/B 칸 고치기 거절 문장(서버 · 화면 같은 말) */
 export const AB_STEP_COPY_LOCKED_MESSAGE = 'A/B 문안이 있는 칸은 A/B 창에서 고치거나 모양 바꾸기로 고쳐 주세요.';
+/** ★ 2026-11-05 C104 G3 — 초안 · 멈춘 여정 A/B 칸 문구(화면 JourneyAbCopyList 와 같은 글 · 짝 시험) */
+export const AB_STEP_COPY_LOCKED_DRAFT_MESSAGE = 'A/B 문안이 있는 칸은 A/B 창에서 고쳐 주세요. A/B 문안을 모두 지우면 이 칸 문안으로 나가요.';
+export function abStepCopyLockedMessage(status: string | null | undefined): string {
+  return status === 'active' ? AB_STEP_COPY_LOCKED_MESSAGE : AB_STEP_COPY_LOCKED_DRAFT_MESSAGE;
+}
 
 export class JourneyStepGateError extends Error {
   code: string;

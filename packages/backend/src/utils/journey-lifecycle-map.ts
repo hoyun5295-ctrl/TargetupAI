@@ -42,6 +42,7 @@ import { purchasedSinceEntrySql } from './journey-goal-purchase';
 // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(붙인 여정 = 앞 여정 열 · 바로 아래 · 선)
 import { readAfterConfig, AFTER_OUTCOME_LABEL, type AfterOutcome } from './journey-after-config';
 import { resolveJourneyAdFlag, journeyStepIsAdSql } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
+import { loadVariantRowsByStep, stepSendVersions } from './journey-step-versions';   // ★ 2026-11-05 C104 G4 칸 미리보기 = 나갈 판
 
 /** 지도 레인(윗띠 생애 흐름 → 아랫띠 순간 → 상시 레일). 계약에 트리거가 있는 레인만 나간다(없는 레인을 지어내지 않는다). */
 const LANE_META: Array<{ key: JourneyLane; label: string; band: 'flow' | 'moment' | 'standing' }> = [
@@ -622,7 +623,14 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
         ORDER BY journey_id, step_order`,
       [ids],
     );
+    // ★ 2026-11-05 C104 G4 — A/B 판이 있는 칸 = 칸 글은 안 나간다 → 미리보기 = 「A/B N개 · 」 + 첫 판 글(판 글이 비면 칸 글 · stepSendVersions 규칙)
+    const abByStep = await loadVariantRowsByStep(sr.rows.filter((s: any) => s.step_type === 'message').map((s: any) => String(s.id)));
     for (const s of sr.rows) {
+      const ab = s.channel === 'kakao' ? [] : (abByStep.get(String(s.id)) ?? []);   // 켜기 검증과 같은 판 목록 규칙
+      if (ab.length > 0) {
+        const first = stepSendVersions({ message_template: s.preview, subject: null }, null, ab)[0];
+        s.preview = `A/B ${ab.length}개 · ${first.body.slice(0, 60)}`;
+      }
       const k = String(s.journey_id);
       if (!stepsByJourney.has(k)) stepsByJourney.set(k, []);
       stepsByJourney.get(k)!.push(s);

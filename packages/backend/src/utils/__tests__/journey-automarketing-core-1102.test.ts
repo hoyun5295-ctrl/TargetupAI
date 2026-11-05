@@ -501,8 +501,8 @@ describe('CT-J10 보낼 글 — 채울 자리 · 없는 변수 · 장바구니 �
   it('판정 호출 자리 = 켜기 · 켜기 검증 · 켜진 칸 저장(409) · 보내기 전 검사(유료 검사 앞) · 실행기(효과 자리) · 안내 문구', () => {
     const rd = (f: string) => codeLines(readFileSync(join(SRC_ROOT, 'utils', f), 'utf8')).map((l) => l.line).join('\n');
     const b = rd('journey-builder.ts');
-    const gate = b.slice(b.indexOf('export async function activationBlockReason('), b.indexOf('\n}\n', b.indexOf('export async function activationBlockReason(')));
-    expect(gate).toContain('journeyCopyIssue({ bodies: [msg], subjects: [s.subject] }');
+    const gate = b.slice(b.indexOf('async function activationBlockCore('), b.indexOf('\n}\n', b.indexOf('async function activationBlockCore(')));   // ★ C104 G1 관문 본체 · 판정 = 나갈 판마다
+    expect(gate).toContain('journeyCopyIssue({ bodies: [body], subjects: [ver.subject] }');
     // 켜진 칸 저장(사람이 고침) = 저장 뒤 같은 트랜잭션에서 판정 · 채우기 길 = 판정 밖(자리를 줄이는 일 · 남은 칸 = 실행기 보류)
     const chk = b.slice(b.indexOf('async function assertStepCopySendable('), b.indexOf('\n}\n', b.indexOf('async function assertStepCopySendable(')));
     expect(chk).toContain("if (ci) throw new JourneyStepGateError(ci.message, 'COPY_ISSUE');");
@@ -749,8 +749,9 @@ describe('3-16 · D14 켜진 여정 A/B 칸 고치기 = 막음 · 화면 = A/B �
     const fn = b.slice(b.indexOf('export async function updateJourneyStep('), b.indexOf('\n}\n', b.indexOf('export async function updateJourneyStep(')));
     const gate = fn.indexOf('&& ((await loadVariantRowsByStep([stepId], run)).get(stepId)?.length ?? 0) > 0) {');
     expect(gate).toBeGreaterThan(-1);
-    expect(fn).toContain("if (journey.status === 'active' && (patch.messageTemplate !== undefined || patch.subject !== undefined)");
-    expect(fn).toContain("throw new JourneyStepGateError(AB_STEP_COPY_LOCKED_MESSAGE, 'AB_STEP_COPY_LOCKED');");
+    // ★ C104 G3 — 상태 무관(초안 · 멈춘 여정도 A/B 판이 나간다) · 문구 = 상태별 한 쌍
+    expect(fn).toContain('if ((patch.messageTemplate !== undefined || patch.subject !== undefined)');
+    expect(fn).toContain("throw new JourneyStepGateError(abStepCopyLockedMessage(journey.status), 'AB_STEP_COPY_LOCKED');");
     expect(gate).toBeLessThan(fn.indexOf('const out = await applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch);'));
     const fill = b.slice(b.indexOf('export async function fillJourneyCopyFacts('), b.indexOf('\n}\n', b.indexOf('export async function fillJourneyCopyFacts(')));
     expect(fill).not.toContain('AB_STEP_COPY_LOCKED');
@@ -758,15 +759,16 @@ describe('3-16 · D14 켜진 여정 A/B 칸 고치기 = 막음 · 화면 = A/B �
     expect(det).toContain('ab_variants: (abByStep.get(String(s.id)) || []).map(');
   });
   it('화면 = 같은 문장 · 같은 판정(작업 화면 · 문안 수정 창) · 잠그면 휴대폰 편집기 · AI · 넣을 데이터 줄 없음', async () => {
-    const { AB_STEP_COPY_LOCKED_MESSAGE } = await import('../journey-builder');
+    const { AB_STEP_COPY_LOCKED_MESSAGE, AB_STEP_COPY_LOCKED_DRAFT_MESSAGE } = await import('../journey-builder');
     const list = readFileSync(join(FE, 'components', 'journey', 'JourneyAbCopyList.tsx'), 'utf8');
     expect(list).toContain(`export const AB_STEP_COPY_LOCKED_MESSAGE = '${AB_STEP_COPY_LOCKED_MESSAGE}';`);
-    expect(list).toContain("return journeyStatus === 'active' && (variants?.length ?? 0) > 0;");
+    expect(list).toContain(`export const AB_STEP_COPY_LOCKED_DRAFT_MESSAGE = '${AB_STEP_COPY_LOCKED_DRAFT_MESSAGE}';`);
+    expect(list).toContain('return (variants?.length ?? 0) > 0;');   // ★ C104 G3 상태 무관
     const ws = readFileSync(join(FE, 'components', 'journey', 'workspace', 'JourneyWorkspace.tsx'), 'utf8');
-    expect(ws).toContain('const selAbLocked = !!selRaw && abCopyLocked(status, selRaw.ab_variants);');
+    expect(ws).toContain('const selAbLocked = !!selRaw && abCopyLocked(selRaw.ab_variants);');
     expect(ws).toContain('copyLock={selRaw && selAbLocked ? (');
     const modal = readFileSync(join(FE, 'components', 'journey', 'JourneyMessageEditModal.tsx'), 'utf8');
-    expect(modal).toContain('{abCopyLocked(journeyStatus, s.abVariants) ? (');
+    expect(modal).toContain('{abCopyLocked(s.abVariants) ? (');
     const studio = readFileSync(join(FE, 'components', 'journey', 'JourneyStepStudio.tsx'), 'utf8');
     expect(studio).toContain('{copyLock ?? (');
     expect(studio).toContain('{!copyLock && (onAi || onDecorate || onUndoAi) && (');

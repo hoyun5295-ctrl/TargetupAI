@@ -10,6 +10,14 @@ export const JOURNEY_CAP_SET_TEXT = '한 회차에 이 수를 넘으면 그 회�
 export const JOURNEY_CAP_SPLIT_TEXT = '나눠 보내려면 「하루에 N명씩 나눠 받기」를 써요.';
 export const JOURNEY_CAP_EMPTY_TEXT = '비우면 제한 없이 보내요. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요.';
 
+/**
+ * ★ 2026-11-05 C104 G6 — 이관 유예로 지금 빠진 수(서버 journey-intake-grace.ts intakeGraceHeldText 와 같은 글 · 짝 시험).
+ *   약속하지 않는다(유예가 지난 뒤에도 조건에 맞아야 들어온다 · 1105 접수 「929명 · 1,084명」).
+ */
+export function journeyGraceHeldText(graceDays: number, graceHeld: number): string {
+  return `등록한 지 ${graceDays}일이 안 된 ${graceHeld.toLocaleString('ko-KR')}명은 지금 빠져 있어요. ${graceDays}일이 지난 뒤에도 조건에 맞으면 들어와요.`;
+}
+
 /** cap = 지금 칸 값(비면 null) · standing = 하루 몫을 쓸 수 있는 여정(「고른 고객에게」 · 휴면) */
 export function journeyCapHelp(cap: number | null, standing: boolean): string {
   if (cap == null) return JOURNEY_CAP_EMPTY_TEXT;

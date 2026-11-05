@@ -26,7 +26,7 @@ import {
 import JourneyModalShell from '../JourneyModalShell';
 import JourneyStepStudio, { type StudioStep, type StudioDelayMode } from '../JourneyStepStudio';
 import JourneyVariantsEditor from '../JourneyVariantsEditor';
-import JourneyAbCopyList, { abCopyLocked, type AbVariantCopy } from '../JourneyAbCopyList';
+import JourneyAbCopyList, { abCopyLocked, abSendCopies, type AbVariantCopy } from '../JourneyAbCopyList';
 import JourneyStepNotifyToggle from '../JourneyStepNotifyToggle';
 import JourneyPauseLogsModal from '../JourneyPauseLogsModal';
 import JourneyActionConfirmModal, { type JourneyActionMode } from '../JourneyActionConfirmModal';
@@ -327,6 +327,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   }, []);
 
   // ★ Codex 구현 1R #5 — A/B 창을 닫으면(만들기 · 고치기 · 빼기 뒤) 점검을 다시 읽는다(빠진 판의 결과가 남지 않게)
+  // ★ 2026-11-05 C104 Codex 구현 1R — A/B 문안을 만들거나 고치거나 지우면 칸 잠금 · 나갈 글이 바뀐다 → 그때마다 상세를 다시 읽는다(sync = 고친 값 보존)
+  const onVariantsCopyChanged = () => { if (journeyId) void load(journeyId, false, 'sync'); };
   const closeVariants = () => { setVariantsOpen(null); if (journeyId) { checkRounds.current = 0; void loadCheck(journeyId); } };
 
   // 검사 중 · 확인 중이 남아 있으면 20초마다 다시 본다(한 여정에 최대 60번 = 20분)
@@ -383,6 +385,12 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     return drafts[id] || originalOf(id);
   };
   const patchOf = (id: string) => { const o = originalOf(id); const d = drafts[id]; return o && d ? diffPatch(o, d) : {}; };
+  // ★ 2026-11-05 C104 Codex 구현 2R 구조 — A/B 창을 여는 길 = 이 함수 하나(단추마다 따로 막지 않는다).
+  //   칸 글을 고친 채 저장 안 했으면 열지 않는다(A/B 문안이 생기면 칸 글이 잠겨 저장 안 된 글이 보이지 않게 숨는다 · 이유 = 안내 한 줄).
+  const openVariants = (id: string) => {
+    if (Object.keys(patchOf(id)).some((k) => k === 'messageTemplate' || k === 'subject')) { toast.warning('이 칸에서 고친 글을 먼저 저장한 뒤 A/B 문안을 열어 주세요.'); return; }
+    setVariantsOpen(id);
+  };
   const dirtyIds = Object.keys(drafts).filter((id) => Object.keys(patchOf(id)).length > 0);
   const optDiff = useMemo(() => optionsDiff(initialForm, form), [initialForm, form]);
   const optDirty = Object.keys(optDiff).length > 0;
@@ -408,7 +416,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     setCount((c) => ({ ...c, loading: true, message: null }));
     const r = await sendJson(`/api/ai/operator/journeys/${journeyId}/options`, 'PATCH', entryCountBody(form)).catch(() => null);
     if (seq !== countSeq.current) return;
-    if (r?.ok) setCount({ loading: false, matched: r.data.matched ?? null, cap: r.data.cap ?? null, approximate: r.data.approximate === true, message: null });
+    if (r?.ok) setCount({ loading: false, matched: r.data.matched ?? null, cap: r.data.cap ?? null, approximate: r.data.approximate === true, message: null, graceHeld: Number(r.data.graceHeld) || 0, graceDays: Number(r.data.graceDays) || 0 });
     else setCount({ loading: false, matched: null, cap: null, approximate: false, message: r?.data?.error || '인원을 세지 못했어요.' });
   }, [journeyId, form, locked]);
   // 시작 조건을 바꾸면 잠시 뒤 다시 센다(고른 즉시 「지금 맞는 N명」 · 상시 · 휴면은 처음 열 때도).
@@ -537,7 +545,11 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       const r = await sendJson(`/api/ai/operator/journeys/${jid}/copy-facts`, 'POST', body);
       if (jid !== journeyIdRef.current) return;   // 그사이 다른 여정을 열었다(이 화면에 그 결과를 쓰지 않는다)
       if (!r.ok) { toast.error(journeyApiErrorText(r.data, '넣지 못했어요.')); return; }
-      toast.success(body.benefit !== undefined ? '모든 문자 칸에 혜택을 넣었어요.' : '모든 문자 칸에 링크를 넣었어요.');
+      // ★ 2026-11-05 C104 G2 — 켜진 여정 A/B 판은 채우지 않는다(서버가 남은 판 수를 준다 · 거짓 「모두 넣었어요」 0)
+      const done = body.benefit !== undefined ? '모든 문자 칸에 혜택을 넣었어요.' : '모든 문자 칸에 링크를 넣었어요.';
+      const left = Number(r.data?.variantsLeft) || 0;
+      if (left > 0) toast.warning(`${done} A/B 문안 ${left}개는 A/B 창에서 넣어 주세요.`);
+      else toast.success(done);
       await load(jid, false, 'sync');
     } finally {
       setFilling(false);
@@ -817,9 +829,16 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const diagById = useMemo(() => new Map(((diag?.steps || []) as any[]).map((s) => [String(s.stepId), s] as const)), [diag]);
   const olderActive = (mj?.olderVersions || []).reduce((s, v) => s + Number(v.activeNow || 0), 0);
   // 혜택 · 링크 자리가 이 여정 어느 칸에든 남았는가(고친 값 포함 · 혜택 · 링크 줄을 보일지 · 입력 한 번이 전 칸을 채운다)
+  // ★ 2026-11-05 C104 Codex 구현 1R — 나갈 글만 본다(A/B 판이 있으면 그 판들 · 판 글이 비면 칸 글 = abSendCopies · 서버 stepSendVersions 와 같은 규칙)
   const slotsLeft = useMemo(() => {
-    const all = [...(detail?.steps || []).map((r) => (drafts[r.id] || toStudio(r))), ...newSteps.map((n) => n.step)];
-    const has = (fn: (t: string) => boolean) => all.some((x) => fn(x.messageTemplate || '') || fn(x.subject || ''));
+    const copies = [
+      ...(detail?.steps || []).flatMap((r) => {
+        const s = drafts[r.id] || toStudio(r);
+        return abSendCopies(String(r.channel || '').toLowerCase() === 'kakao' ? [] : r.ab_variants, s.messageTemplate, s.subject);
+      }),
+      ...newSteps.map((n) => ({ body: n.step.messageTemplate || '', subject: n.step.subject || '' })),
+    ];
+    const has = (fn: (t: string) => boolean) => copies.some((c) => fn(c.body) || fn(c.subject));
     return { benefit: has(hasBenefitPlaceholder), url: has(hasUrlPlaceholder) };
   }, [detail, drafts, newSteps]);
   const selRaw = selected !== 'start' && !selected.startsWith(NEW_STEP_PREFIX) ? rawById.get(selected) || null : null;
@@ -836,7 +855,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     return () => { live = false; };
   }, [selKakaoEditable]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ★ 2026-11-02 설계서 3-16 — 켜진 여정 A/B 칸 = 본문 잠금(서버도 409 · 같은 판정)
-  const selAbLocked = !!selRaw && abCopyLocked(status, selRaw.ab_variants);
+  const selAbLocked = !!selRaw && abCopyLocked(selRaw.ab_variants);
   const canShapeSteps = !locked && (edit.structure || reshapeAllowed);
   const statusMeta = STATUS_META[status] || STATUS_META.draft;
 
@@ -1093,7 +1112,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         headerActions={(
                           <>
                             {selRaw && selRaw.step_type === 'message' && selRaw.channel !== 'kakao' && (
-                              <button type="button" onClick={() => setVariantsOpen(selRaw.id)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-slate-300">
+                              <button type="button" onClick={() => openVariants(selRaw.id)} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3 text-[13px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-slate-300">
                                 <Beaker className="h-4 w-4" aria-hidden />A/B
                               </button>
                             )}
@@ -1110,7 +1129,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                           </>
                         )}
                         copyLock={selRaw && selAbLocked ? (
-                          <JourneyAbCopyList variants={selRaw.ab_variants || []} baseBody={selRaw.message_template} baseSubject={selRaw.subject} onOpenAb={() => setVariantsOpen(selRaw.id)} />
+                          <JourneyAbCopyList journeyStatus={status} variants={selRaw.ab_variants || []} baseBody={selRaw.message_template} baseSubject={selRaw.subject} onOpenAb={() => openVariants(selRaw.id)} />
                         ) : undefined}
                         notifyControl={selRaw && selRaw.step_type === 'message' && !locked ? (
                           <JourneyStepNotifyToggle
@@ -1167,7 +1186,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                       <div className="flex flex-wrap items-center gap-2">
                         {/* ★ 2026-10-25 #1 — 알림톡 칸은 승인 템플릿이 본문이라 A/B 문안이 없다(서버도 막는다) */}
                         {selRaw.step_type === 'message' && selRaw.channel !== 'kakao' && (
-                          <button type="button" onClick={() => setVariantsOpen((v) => (v === selRaw.id ? null : selRaw.id))} aria-expanded={variantsOpen === selRaw.id}
+                          <button type="button" onClick={() => (variantsOpen === selRaw.id ? closeVariants() : openVariants(selRaw.id))} aria-expanded={variantsOpen === selRaw.id}
                             className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium ${variantsOpen === selRaw.id ? 'border-indigo-300 bg-indigo-50 text-indigo-800' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'}`}>
                             <Beaker className="h-4 w-4" aria-hidden />A/B 문안 시험
                           </button>
@@ -1194,6 +1213,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                           defaultSubject={selRaw.subject || ''}
                           opt080Number={opt080}
                           onClose={closeVariants}
+                          onCopyChanged={onVariantsCopyChanged}
                         />
                       )}
                       {selRaw.step_type === 'message' && !locked && (
@@ -1297,6 +1317,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                 defaultSubject={selRaw.subject || ''}
                 opt080Number={opt080}
                 onClose={closeVariants}
+                onCopyChanged={onVariantsCopyChanged}
               />
             )}
           </div>
@@ -1317,7 +1338,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
               <>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    ['들어올 고객', `${Number(sim.data.matchedCustomers || 0).toLocaleString('ko-KR')}명${sim.data.capped ? ' 넘음' : ''}`],
+                    // ★ 2026-11-05 C104 G5 — 사건형 · 이어받기 = 최근 사건 기준 근사(시작 카드와 같은 표시)
+                    [sim.data.approximate ? '들어올 고객(최근 사건 기준)' : '들어올 고객', `${sim.data.approximate ? '약 ' : ''}${Number(sim.data.matchedCustomers || 0).toLocaleString('ko-KR')}명${sim.data.capped ? ' 넘음' : ''}`],
                     ['보낼 문자', `${Number(sim.data.totalEstimatedSends || 0).toLocaleString('ko-KR')}통`],
                     ['예상 발송비', `${Number(sim.data.totalEstimatedCost || 0).toLocaleString('ko-KR')}원`],
                     ['예상 매출', sim.data.estimatedRevenue != null ? `${Number(sim.data.estimatedRevenue).toLocaleString('ko-KR')}원` : '자료가 모자라요'],

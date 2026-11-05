@@ -1,0 +1,1035 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한줄로 서비스 제안서</title>
+<!--
+  한국형 Braze 「한줄로」 서비스 제안서 (2026-11 · 16:9 · 29쪽 · 16 = 스팸 차단 비용 · 25 ~ 27 = 대행 운영 · 여정 세팅 컨설팅)
+  배치 규칙 = 머리(.k .t .s) 아래 몸통(.body)이 아래 띠까지 채운다 · 두 단(.cols)은 왼쪽 설명 줄을 높이에 고르게 나누고 오른쪽 화면을 같은 높이까지 늘린다.
+  화면에서 열면 쪽마다 움직임이 돈다. PDF = 같은 파일 인쇄(움직임 끝 장면).
+  ⛔ 보이는 글자에 가운뎃점 · 줄표 금지 · 가격(예외 = 25 ~ 27쪽 대행 운영 비즈니스 요금제 월 300만원부터 · 컨설팅 300만원 · Harold 1105) · 3사 스팸 검사 방식(어떻게 검사하는지) 노출 금지 = 결과만 보여 준다(Harold 1105) · 크레딧 · 모델명 · 내부 식별자 금지 · 기능은 기능 카탈로그 ready + 메뉴 진입만(실험실 제외)
+  ⛔ 포스터 = 이미지 스튜디오 실제 프롬프트 함수 · 템플릿으로 만든 가상 브랜드 예시(marketing/promo/2026-10-hanjul-ai/posters/포스터-목록.md)
+  색 = 흰 바탕 + 검정 글자 + 주황 하나(#FF5A1F) + 연한 면 · 보라 금지 · 글자 = 제목 34 · 부제 17 · 항목 18 · 설명 15.5 · 작은 글자 13.5
+-->
+<style>
+  @font-face { font-family: 'Pretendard'; font-weight: 100 900; font-display: block;
+    src: url('../../../packages/frontend/public/diagnosis-examples/assets/fonts/PretendardVariable.woff2') format('woff2'); }
+  :root { --ink:#1A1A1A; --ink2:#44403C; --ink3:#66605B; --line:#ECEAE7; --soft:#F7F6F4; --ac:#FF5A1F; --act:#C8410C; --ac2:#FFF3EC; --ac3:#FFE3D4; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  @page { size: 1280px 720px; margin: 0; }
+  html { background: #E7E5E4; }
+  body { font-family: 'Pretendard', 'Malgun Gothic', sans-serif; color: var(--ink); letter-spacing: -0.02em; -webkit-font-smoothing: antialiased; word-break: keep-all; }
+  .deck { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 28px 0; }
+  .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; background: #fff; padding: 50px 72px 0; }
+  .slide::before { content: ''; position: absolute; right: -140px; top: -160px; width: 460px; height: 460px; border-radius: 50%; background: radial-gradient(circle, rgba(255,90,31,.10), rgba(255,90,31,0) 70%); pointer-events: none; }
+  .k { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--act); letter-spacing: 0; }
+  .k::before { content: ''; width: 20px; height: 3px; border-radius: 2px; background: var(--ac); }
+  .t { margin-top: 8px; font-size: 34px; font-weight: 800; letter-spacing: -0.035em; line-height: 1.3; }
+  .s { margin-top: 8px; font-size: 17px; color: var(--ink2); line-height: 1.6; font-weight: 500; }
+  .foot { position: absolute; left: 72px; right: 72px; bottom: 22px; display: flex; align-items: center; font-size: 12.5px; color: var(--ink3); font-weight: 600; }
+  .foot img { height: 14px; margin-right: 10px; }
+  .foot .pg { margin-left: auto; }
+  .hl { background: linear-gradient(rgba(255,90,31,.22), rgba(255,90,31,.22)) no-repeat 0 88% / 100% 32%; padding: 0 3px; }
+
+  /* 몸통 = 머리 아래부터 아래 띠까지 */
+  .body { position: absolute; left: 72px; right: 72px; top: 150px; bottom: 58px; display: flex; flex-direction: column; gap: 16px; }
+  .body.sub { top: 186px; }
+  .fill { flex: 1; min-height: 0; min-width: 0; }
+  .cols > *, .rcol > *, .win, .col { min-width: 0; }
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 440px 1fr; gap: 44px; }
+  .lcol { display: flex; flex-direction: column; min-height: 0; gap: 14px; }
+  .rcol { position: relative; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+  .pts { flex: 1; display: flex; flex-direction: column; }
+  .pt { flex: 1; display: flex; gap: 14px; align-items: center; border-bottom: 1px solid var(--line); }
+  .pt:last-child { border-bottom: 0; }
+  .pt b { display: block; font-size: 18px; font-weight: 800; }
+  .pt span.d { display: block; margin-top: 4px; font-size: 15.5px; color: var(--ink2); line-height: 1.55; font-weight: 500; }
+  .take { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: 14px; background: var(--ac2); font-size: 15.5px; font-weight: 700; color: var(--ink); }
+  .take .tg { flex: none; padding: 4px 11px; border-radius: 999px; background: var(--ac); color: #1A1A1A; font-size: 13.5px; font-weight: 800; }
+
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 18px; box-shadow: 0 10px 30px rgba(28,25,23,.06); }
+  .tint { background: var(--ac2); border-radius: 18px; }
+  .gray { background: var(--soft); border-radius: 18px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-size: 14px; font-weight: 700; color: var(--ink2); white-space: nowrap; }
+  .chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .chip.hot { background: var(--ac); color: #1A1A1A; border-color: var(--ac); }
+  .chip.soft { background: var(--ac2); color: var(--act); border-color: var(--ac3); }
+  .num { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: var(--ac2); color: var(--act); font-size: 14.5px; font-weight: 800; flex: none; }
+  .num.d { background: var(--ink); color: #fff; }
+  svg.i { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  .row { display: flex; } .col { display: flex; flex-direction: column; }
+  .note { font-size: 13.5px; color: var(--ink3); font-weight: 500; line-height: 1.5; }
+  .lb { font-size: 13.5px; font-weight: 800; color: var(--act); }
+  .lb.g { color: var(--ink3); }
+  .h3 { font-size: 19px; font-weight: 800; }
+  .p { font-size: 15.5px; line-height: 1.65; color: var(--ink2); font-weight: 500; }
+
+  .tri { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  .tri .card, .tri .gray, .tri .tint { padding: 22px 24px; display: flex; flex-direction: column; }
+  .tri .hd { display: flex; align-items: center; gap: 12px; font-size: 19px; font-weight: 800; }
+  .tri .hd + .p { margin-top: 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .bottom { margin-top: auto; }
+
+  table.map { width: 100%; height: 100%; border-collapse: separate; border-spacing: 0; font-size: 16px; }
+  table.map th { text-align: left; font-size: 13.5px; color: var(--ink3); font-weight: 700; padding: 0 18px 8px; height: 26px; }
+  table.map td { padding: 0 18px; background: #fff; border-top: 1px solid var(--line); vertical-align: middle; line-height: 1.45; font-weight: 600; }
+  table.map tr td:first-child { border-left: 1px solid var(--line); font-weight: 800; }
+  table.map tr td:last-child { border-right: 1px solid var(--line); }
+  table.map tbody tr:first-child td:first-child { border-top-left-radius: 16px; }
+  table.map tbody tr:first-child td:last-child { border-top-right-radius: 16px; }
+  table.map tbody tr:last-child td { border-bottom: 1px solid var(--line); }
+  table.map tbody tr:last-child td:first-child { border-bottom-left-radius: 16px; }
+  table.map tbody tr:last-child td:last-child { border-bottom-right-radius: 16px; }
+  table.map td .d { display: block; margin-top: 3px; font-size: 14px; font-weight: 500; color: var(--ink3); }
+
+  .phone { position: relative; border: 9px solid #1A1A1A; border-radius: 40px; background: #fff; overflow: hidden; box-shadow: 0 26px 50px rgba(28,25,23,.16); display: flex; flex-direction: column; }
+  .phone .bar { height: 34px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700; color: var(--ink3); }
+  .win { position: relative; border: 1px solid var(--line); border-radius: 16px; background: #fff; overflow: hidden; box-shadow: 0 22px 44px rgba(28,25,23,.12); display: flex; flex-direction: column; }
+  .win .wh { height: 34px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px; background: var(--soft); border-bottom: 1px solid var(--line); }
+  .win .wh i { width: 10px; height: 10px; border-radius: 50%; background: #E7E5E4; display: block; }
+  .win .wh span { margin-left: 8px; font-size: 12.5px; color: var(--ink3); font-weight: 600; }
+  .bub { margin: 10px 12px 0; padding: 12px 13px; border-radius: 16px; background: var(--soft); font-size: 13px; line-height: 1.6; color: var(--ink); font-weight: 500; }
+  .bub.k { background: #FEE500; }
+  .bub .v { background: var(--ac2); color: var(--act); font-weight: 800; border-radius: 5px; padding: 2px 5px; }
+  .bub .lk { color: #1D4ED8; text-decoration: underline; }
+  .post { display: block; object-fit: cover; border-radius: 14px; box-shadow: 0 14px 30px rgba(28,25,23,.14); }
+  .cap { margin-top: 10px; font-size: 14px; color: var(--ink); font-weight: 800; line-height: 1.45; }
+  .cap em { display: block; font-style: normal; font-weight: 500; color: var(--ink3); font-size: 13.5px; }
+  .bar2 { height: 12px; border-radius: 6px; background: var(--soft); overflow: hidden; }
+  .bar2 > div { height: 100%; border-radius: 6px; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes pop { 0% { opacity: 0; transform: scale(.7); } 70% { transform: scale(1.04); } 100% { opacity: 1; transform: none; } }
+  @keyframes draw { from { stroke-dashoffset: var(--len, 600); } to { stroke-dashoffset: 0; } }
+  @keyframes grow { from { transform: scaleY(0); } to { transform: none; } }
+  @keyframes growx { from { transform: scaleX(0); } to { transform: none; } }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,90,31,.4); } 60% { box-shadow: 0 0 0 12px rgba(255,90,31,0); } }
+  @keyframes travel { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+  @keyframes floaty { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+  @media screen {
+    .slide:not(.play) .m { opacity: 0; }
+    .slide.play .rise { animation: rise .7s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d, 0s); }
+    .slide.play .pop  { animation: pop .6s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d, 0s); }
+    .slide.play .grow { transform-origin: bottom center; animation: grow .9s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d, 0s); }
+    .slide.play .growx { transform-origin: left center; animation: growx .9s cubic-bezier(.2,.8,.2,1) both; animation-delay: var(--d, 0s); }
+    .slide.play .draw { stroke-dasharray: var(--len, 600); animation: draw 1.2s ease-out both; animation-delay: var(--d, 0s); }
+    .slide.play .pulse { animation: pulse 2.2s ease-out infinite; animation-delay: var(--d, 1s); }
+    .slide.play .dot { animation: travel 3.4s linear infinite; animation-delay: var(--d, 0s); }
+    .slide.play .floaty { animation: floaty 4s ease-in-out infinite; animation-delay: var(--d, 0s); }
+  }
+  @media print {
+    html { background: none; }
+    .deck { padding: 0; gap: 0; display: block; }
+    .slide { page-break-after: always; break-after: page; }
+    .slide:last-child { page-break-after: auto; }
+    .m, .floaty, .pulse { animation: none !important; opacity: 1 !important; }
+    .dot { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="deck">
+
+<!-- 01 표지 -->
+<section class="slide" id="s1" style="background: linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 52%, #FFF3EC 100%)">
+  <div class="k m rise">한국형 Braze</div>
+  <div class="m rise" style="--d:.15s; position:absolute; left:72px; top:176px; width:460px">
+    <img src="../../../packages/frontend/public/logo.png" alt="한줄로" style="width:460px; display:block">
+    <div style="position:absolute; left:310px; top:-24px; width:150px; text-align:center; font-size:96px; font-weight:900; color:#FF5A1F; letter-spacing:-0.03em">AI</div>
+  </div>
+  <div class="m rise" style="--d:.35s; position:absolute; left:72px; top:322px; font-size:40px; font-weight:800; letter-spacing:-0.035em; line-height:1.35">목표 한 줄이면,<br>대상과 문안과 시간을<br><span class="hl">AI가 정해 보냅니다</span></div>
+  <div class="m rise" style="--d:.55s; position:absolute; left:72px; top:498px; width:560px; font-size:17px; line-height:1.7; color:#44403C; font-weight:500">문자, 카카오 알림톡, 이메일, 모바일 DM, 자사몰 팝업까지. 한국 고객이 실제로 받는 채널로 고객 데이터 연결부터 자동화와 발송 규칙까지 한 번에 합니다.</div>
+  <div style="position:absolute; left:72px; bottom:44px; font-size:14px; color:#66605B; font-weight:600">2026년 11월 &nbsp;|&nbsp; INVITO(인비토) &nbsp;|&nbsp; hanjul.ai</div>
+  <div style="position:absolute; right:64px; top:64px; width:520px; height:600px">
+    <img class="post m pop floaty" style="--d:.5s; position:absolute; left:160px; top:0; width:236px; height:315px" src="../../promo/2026-10-hanjul-ai/posters/p4-ohudam-product.jpg" alt="">
+    <img class="post m pop floaty" style="--d:.65s; position:absolute; left:0; top:170px; width:206px; height:275px" src="../../promo/2026-10-hanjul-ai/posters/p1-kyeolon-product.jpg" alt="">
+    <img class="post m pop floaty" style="--d:.8s; position:absolute; left:314px; top:236px; width:206px; height:275px" src="../../promo/2026-10-hanjul-ai/posters/p6-soyo-product.jpg" alt="">
+    <div class="card m rise" style="--d:1s; position:absolute; left:40px; top:500px; width:380px; padding:14px 16px; display:flex; align-items:center; gap:12px">
+      <span class="num" style="width:auto; padding:0 10px; border-radius:999px">AI</span><div style="font-size:15px; font-weight:700">지난달 처음 산 고객이 한 번 더 사게 해 줘</div>
+    </div>
+  </div>
+  <div class="note" style="position:absolute; right:72px; bottom:44px">포스터는 이미지 스튜디오로 만든 가상 브랜드 예시입니다</div>
+</section>
+
+<!-- 02 기능 지도 -->
+<section class="slide" id="s2">
+  <div class="k">한눈에 보기</div>
+  <div class="t">한줄로 기능 지도</div>
+  <div class="s">고객 데이터를 모으고, 만들고, 보내고, 자동으로 돌리고, 결과로 배웁니다.</div>
+  <div class="body sub">
+    <div class="fill" style="display:grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr 1fr; gap:16px">
+      <div class="card m rise col" style="--d:.05s; padding:20px 22px"><div class="lb">고객 데이터</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>엑셀 명단과 AI 컬럼 맞춤</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>자사몰 연동</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>매장 DB 동기화</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>고객 한 명 이력</span></div></div></div>
+      <div class="card m rise col" style="--d:.1s; padding:20px 22px"><div class="lb">만들기</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>AI 문안</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>이미지 스튜디오</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>모바일 DM, 이메일</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>인앱 메시지, SNS 게시</span></div></div></div>
+      <div class="card m rise col" style="--d:.15s; padding:20px 22px"><div class="lb">보내기</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>AI 한줄로</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>문자와 알림톡</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>조건으로 대상 고르기</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>통신 3사 스팸 검사</span></div></div></div>
+      <div class="card m rise col" style="--d:.2s; padding:20px 22px"><div class="lb">자동으로 돌리기</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>여정 자동화</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>자동 마케팅</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>마케팅 플래너</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>마케팅 캘린더</span></div></div></div>
+      <div class="card m rise col" style="--d:.25s; padding:20px 22px"><div class="lb">결과와 AI</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>성과 리포트</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>AI 자율 예측</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>AI 메모리</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>발송 결과와 달력</span></div></div></div>
+      <div class="card m rise col" style="--d:.3s; padding:20px 22px"><div class="lb">맡기기</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>대행발송</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>마케터 1명 대행 운영</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>여정 세팅 컨설팅</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>마케팅 진단</span></div></div></div>
+      <div class="card m rise col" style="--d:.35s; padding:20px 22px"><div class="lb">관리</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:600; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>직원 계정과 권한</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>매장별 고객 나누기</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>수신거부 관리</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>발신번호, 정산</span></div></div></div>
+      <div class="tint m rise col" style="--d:.4s; padding:20px 22px"><div class="lb">한국형</div><div class="p" style="margin-top:10px; line-height:1.95; font-weight:700; color:#1A1A1A; flex:1; display:flex; flex-direction:column; justify-content:space-evenly"><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>문자와 알림톡 직결</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>(광고) 표기 자동</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>수신거부 자동 제외</span></div><div class="row" style="align-items:center; gap:10px"><span style="width:6px; height:6px; border-radius:50%; background:#FF5A1F; flex:none"></span><span>3사 스팸 사전 확인</span></div></div></div>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">02</span></div>
+</section>
+
+<!-- 03 서비스 소개 -->
+<section class="slide" id="s3">
+  <div class="k">서비스 소개</div>
+  <div class="t">기업과 고객 사이에서, <span class="hl">데이터를 모아 실행까지</span></div>
+  <div class="body">
+    <svg viewBox="0 0 1136 240" style="width:1136px; height:240px; flex:none">
+      <defs><marker id="ah3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1A1A1A"/></marker>
+        <marker id="ah3o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#FF5A1F"/></marker></defs>
+      <g class="m pop" style="--d:.1s"><circle cx="80" cy="120" r="62" fill="#F7F6F4" stroke="#ECEAE7"/><text x="80" y="128" text-anchor="middle" font-size="22" font-weight="800" fill="#1A1A1A">기업</text></g>
+      <g class="m pop" style="--d:.2s"><circle cx="1056" cy="120" r="62" fill="#FFF3EC" stroke="#FFE3D4"/><text x="1056" y="128" text-anchor="middle" font-size="22" font-weight="800" fill="#C8410C">고객</text></g>
+      <path class="m draw" style="--len:300; --d:.4s" d="M148 92 L408 92" stroke="#1A1A1A" stroke-width="2" fill="none" marker-end="url(#ah3)"/>
+      <path class="m draw" style="--len:300; --d:.6s" d="M728 92 L988 92" stroke="#FF5A1F" stroke-width="2" fill="none" marker-end="url(#ah3o)"/>
+      <path class="m draw" style="--len:300; --d:.8s" d="M988 150 L728 150" stroke="#A8A29E" stroke-width="2" fill="none" stroke-dasharray="5 6" marker-end="url(#ah3)"/>
+      <path class="m draw" style="--len:300; --d:1s" d="M408 150 L148 150" stroke="#A8A29E" stroke-width="2" fill="none" stroke-dasharray="5 6" marker-end="url(#ah3)"/>
+      <g font-size="15" font-weight="700" text-anchor="middle" fill="#44403C">
+        <text x="278" y="76">목표 한 줄, 고객 명단</text><text x="858" y="76" fill="#C8410C">맞는 고객에게 맞는 때</text>
+        <text x="858" y="178">열람, 클릭, 구매</text><text x="278" y="178">성과와 다음 할 일</text>
+      </g>
+      <g class="m pop" style="--d:.3s">
+        <rect x="418" y="14" width="300" height="212" rx="24" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/>
+        <image href="../../../packages/frontend/public/logo.png" x="488" y="42" width="160" height="36"/>
+        <text x="568" y="120" text-anchor="middle" font-size="16" font-weight="700" fill="#44403C">고객 데이터 연결</text>
+        <text x="568" y="152" text-anchor="middle" font-size="16" font-weight="700" fill="#44403C">AI 캠페인 실행</text>
+        <text x="568" y="184" text-anchor="middle" font-size="16" font-weight="800" fill="#C8410C">국내 채널 발송</text>
+      </g>
+    </svg>
+    <div class="tri fill">
+      <div class="card m rise" style="--d:.5s"><div class="hd"><span class="num">1</span>고객 데이터 연결</div><div class="p">엑셀, 자사몰, 매장 시스템을 연결하면 번호 하나가 고객 한 명으로 정리됩니다.</div><div class="chips bottom"><span class="chip">엑셀 명단</span><span class="chip">자사몰</span><span class="chip">매장 DB</span></div></div>
+      <div class="card m rise" style="--d:.65s"><div class="hd"><span class="num">2</span>AI 캠페인 실행</div><div class="p">목표를 한 줄로 적으면 AI가 대상, 문안, 시간을 정하고 매일 다음 캠페인을 제안합니다.</div><div class="chips bottom"><span class="chip">AI 한줄로</span><span class="chip">자동 마케팅</span><span class="chip">여정</span></div></div>
+      <div class="card m rise" style="--d:.8s"><div class="hd"><span class="num">3</span>국내 채널 발송</div><div class="p">문자와 알림톡 중심으로 보내고 광고 표기, 수신거부, 스팸 확인을 자동으로 지킵니다.</div><div class="chips bottom"><span class="chip soft">문자</span><span class="chip soft">알림톡</span><span class="chip">이메일</span></div></div>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">03</span></div>
+</section>
+
+<!-- 04 고객 여정 -->
+<section class="slide" id="s4">
+  <div class="k">서비스 특징</div>
+  <div class="t">고객 여정 다섯 단계, 단계마다 한줄로가 일합니다</div>
+  <div class="body">
+    <div class="cols" style="grid-template-columns: 512px 1fr">
+      <svg viewBox="0 0 520 512" style="width:512px; height:100%" preserveAspectRatio="xMidYMid meet">
+        <circle cx="260" cy="256" r="182" fill="none" stroke="#ECEAE7" stroke-width="2"/>
+        <path class="m draw" style="--len:1200; --d:.2s" d="M260 74 A182 182 0 1 1 259.9 74" fill="none" stroke="#FF5A1F" stroke-width="2.5"/>
+        <circle r="6" fill="#FF5A1F" class="dot" style="offset-path: path('M260 74 A182 182 0 1 1 259.9 74');"/>
+        <text x="260" y="250" text-anchor="middle" font-size="20" font-weight="800" fill="#1A1A1A">고객 여정</text>
+        <text x="260" y="278" text-anchor="middle" font-size="14" font-weight="600" fill="#66605B">한 고객 원장 위에서</text>
+        <g text-anchor="middle" font-weight="800">
+          <g class="m pop" style="--d:.4s"><circle cx="260" cy="74" r="56" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="260" y="70" font-size="17" fill="#1A1A1A">캠페인</text><text x="260" y="92" font-size="14" font-weight="600" fill="#66605B">문안, 이미지</text></g>
+          <g class="m pop" style="--d:.55s"><circle cx="433" cy="200" r="56" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="433" y="196" font-size="17" fill="#1A1A1A">유입</text><text x="433" y="218" font-size="14" font-weight="600" fill="#66605B">링크 클릭</text></g>
+          <g class="m pop" style="--d:.7s"><circle cx="367" cy="403" r="56" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="367" y="399" font-size="17" fill="#1A1A1A">탐색, 행동</text><text x="367" y="421" font-size="14" font-weight="600" fill="#66605B">조회, 장바구니</text></g>
+          <g class="m pop" style="--d:.85s"><circle cx="153" cy="403" r="56" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="153" y="399" font-size="17" fill="#1A1A1A">전환</text><text x="153" y="421" font-size="14" font-weight="600" fill="#66605B">구매, 가입</text></g>
+          <g class="m pop" style="--d:1s"><circle cx="87" cy="200" r="56" fill="#FFF3EC" stroke="#FF5A1F" stroke-width="1.5"/><text x="87" y="196" font-size="17" fill="#C8410C">리텐션</text><text x="87" y="218" font-size="14" font-weight="600" fill="#C8410C">재구매, 충성</text></g>
+        </g>
+      </svg>
+      <table class="map"><tbody>
+        <tr class="m rise" style="--d:.4s"><td style="width:150px">캠페인</td><td>AI 문안, 이미지 스튜디오<span class="d">모바일 DM과 이메일 완성본까지</span></td></tr>
+        <tr class="m rise" style="--d:.5s"><td>유입</td><td>짧은 링크와 클릭 집계<span class="d">자사몰 방문 고객에게 팝업</span></td></tr>
+        <tr class="m rise" style="--d:.6s"><td>탐색, 행동</td><td>자사몰 방문과 장바구니 수집<span class="d">고객 한 명의 전체 이력에 쌓임</span></td></tr>
+        <tr class="m rise" style="--d:.7s"><td>전환</td><td>장바구니 이탈, 조회 후 미구매<span class="d">사건이 생기면 여정이 자동으로</span></td></tr>
+        <tr class="m rise" style="--d:.8s"><td>리텐션</td><td>재구매 주기, 휴면 복귀, 등급 상승<span class="d">생일, 포인트 소멸 안내까지</span></td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">04</span></div>
+</section>
+
+<!-- 05 한국형 -->
+<section class="slide" id="s5">
+  <div class="k">왜 한국형인가</div>
+  <div class="t">글로벌 CRM이 하는 일 그대로, <span class="hl">한국에서 바로</span></div>
+  <div class="s">Braze 같은 글로벌 CRM 자동화가 해 주는 일을 한국 채널과 한국 규칙 위에서 합니다.</div>
+  <div class="body sub">
+    <div class="fill" style="display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(4, 1fr); gap:14px 18px">
+      <div class="card m rise" style="--d:.05s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb g">글로벌 CRM</div><div style="font-size:16px; font-weight:800; margin-top:3px">시나리오 자동화</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">여정 자동화, 마케팅 사건 12종</div></div>
+      <div class="card m rise" style="--d:.1s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb g">글로벌 CRM</div><div style="font-size:16px; font-weight:800; margin-top:3px">세그먼트</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">조건으로 대상 고르기, 묶음 저장</div></div>
+      <div class="card m rise" style="--d:.15s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb g">글로벌 CRM</div><div style="font-size:16px; font-weight:800; margin-top:3px">개인화 메시지</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">이름, 등급, 구매 상품 자동 채움</div></div>
+      <div class="card m rise" style="--d:.2s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb g">글로벌 CRM</div><div style="font-size:16px; font-weight:800; margin-top:3px">인앱 메시지</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">자사몰 팝업과 모바일 앱 인앱</div></div>
+      <div class="card m rise" style="--d:.25s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb g">글로벌 CRM</div><div style="font-size:16px; font-weight:800; margin-top:3px">예측</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">이탈 위험, 구매 가능성, 선호 채널</div></div>
+      <div class="card m rise" style="--d:.3s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb g">글로벌 CRM</div><div style="font-size:16px; font-weight:800; margin-top:3px">AI 제작</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">AI 문안, 이미지, DM과 이메일</div></div>
+      <div class="tint m rise" style="--d:.35s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb">한국형</div><div style="font-size:16px; font-weight:800; margin-top:3px">국내 문자와 알림톡</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">문자, 알림톡, 브랜드메시지 직접 발송</div></div>
+      <div class="tint m rise" style="--d:.4s; padding:14px 22px; display:flex; align-items:center; gap:16px"><div style="width:150px"><div class="lb">한국형</div><div style="font-size:16px; font-weight:800; margin-top:3px">국내 발송 규칙</div></div><span style="color:#FF5A1F; font-weight:800; font-size:18px">→</span><div style="font-size:16px; font-weight:700">광고 표기, 수신거부, 스팸 확인 자동</div></div>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">05</span></div>
+</section>
+
+<!-- 06 AI 한줄로 -->
+<section class="slide" id="s6">
+  <div class="k">AI 한줄로</div>
+  <div class="t">목표를 한 줄로 적으면, 캠페인 제안서가 나옵니다</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>대상</b><span class="d">조건에 맞는 고객을 실제 고객 원장에서 조회합니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>문안</b><span class="d">문안마다 스팸 검사 결과가 붙고, 고객 정보 칸을 골라 넣습니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>발송 시점</b><span class="d">AI 추천 시점, 지금 바로, 직접 선택 중에서 고릅니다</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num">4</span><div><b>승인 후 발송</b><span class="d">마음에 안 들면 다시 만들거나 한 줄로 고쳐 달라고 합니다</span></div></div>
+      </div>
+      <div class="take m rise" style="--d:.6s"><span class="tg">한 줄 정리</span><span>AI가 정하고, 사람은 확인하고 승인합니다</span></div>
+    </div>
+    <div class="rcol">
+      <div class="card m rise" style="--d:.2s; padding:16px 20px; display:flex; align-items:center; gap:12px; border-color:#1A1A1A">
+        <svg class="i" viewBox="0 0 24 24" style="font-size:22px; color:#FF5A1F"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>
+        <div style="font-size:17px; font-weight:700">최근 30일 미구매 VIP에게 재구매 안내 보내줘</div><span class="chip on" style="margin-left:auto">만들기</span>
+      </div>
+      <div class="fill" style="display:grid; grid-template-columns: repeat(3, 1fr); gap:14px">
+        <div class="card m pop" style="--d:.45s; padding:20px; display:flex; flex-direction:column"><div class="lb g">받는 사람</div><div style="margin-top:8px; font-size:22px; font-weight:800">VIP 미구매</div><div class="p" style="margin-top:8px">최근 30일 구매가 없는 VIP 등급 고객</div><div class="chips" style="margin-top:14px"><span class="chip soft">등급 VIP</span><span class="chip soft">최근 구매 30일 넘음</span><span class="chip">수신 동의</span></div><div class="bottom gray" style="padding:12px 14px; border-radius:12px"><div class="note">실제 조회 인원을 보여 줍니다</div></div></div>
+        <div class="card m pop" style="--d:.6s; padding:20px; display:flex; flex-direction:column"><div class="row" style="align-items:center; gap:6px"><span class="lb g">문안</span><span class="chip on" style="padding:5px 12px; font-size:13.5px">1안</span><span class="chip" style="padding:5px 12px; font-size:13.5px">2안</span><span class="chip" style="padding:5px 12px; font-size:13.5px">3안</span></div><div style="margin-top:10px; font-size:15px; line-height:1.65; font-weight:600">(광고) <span style="color:#C8410C">김한줄</span>님, 지난번 고르신 상품의 새 색상이 들어왔어요.</div><div class="chips bottom"><span class="chip soft">스팸 검사 통과</span><span class="chip">이름 칸</span></div></div>
+        <div class="card m pop" style="--d:.75s; padding:20px; display:flex; flex-direction:column"><div class="lb g">보낼 때</div><div style="margin-top:8px; font-size:22px; font-weight:800">AI 추천</div><div class="p" style="margin-top:8px">고객이 반응을 잘 하던 시간대로</div><div class="col" style="gap:8px; margin-top:14px"><span class="chip on" style="justify-content:center">AI 추천 시점 사용</span><span class="chip" style="justify-content:center">지금 바로</span><span class="chip" style="justify-content:center">직접 선택</span></div><div class="bottom gray" style="padding:12px 14px; border-radius:12px"><div class="note">발송 허용 08:00부터 21:00까지</div></div></div>
+      </div>
+      <div class="tint m rise" style="--d:1s; padding:14px 18px; display:flex; align-items:center; gap:12px"><span class="chip hot">승인 후 발송 시작</span><div style="font-size:15.5px; font-weight:600; color:#44403C">사람이 확인하고 누를 때만 나갑니다</div></div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면은 이해를 돕기 위한 예시입니다<span class="pg">06</span></div>
+</section>
+
+<!-- 07 AI 문안 + 개인화 -->
+<section class="slide" id="s7">
+  <div class="k">AI 문안과 개인화</div>
+  <div class="t">한 번 쓰면, 고객마다 다르게 나갑니다</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>행사 한 줄이면 문안</b><span class="d">문안 종류를 골라 만들고, 직접 쓴 글은 AI가 다듬습니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>고객 정보 자동 채움</b><span class="d">이름, 등급, 포인트, 최근 구매 상품을 문장에 넣습니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>혜택은 지어내지 않음</b><span class="d">혜택과 수치는 AI가 지어내지 않고 적은 그대로 씁니다</span></div></div>
+      </div>
+      <div class="take m rise" style="--d:.5s"><span class="tg">한 줄 정리</span><span>등급별 문안을 여러 벌 만들 필요가 없습니다</span></div>
+    </div>
+    <div class="rcol" style="flex-direction:row; gap:18px">
+      <div class="col" style="width:210px; gap:14px">
+        <div class="gray m rise fill" style="--d:.2s; padding:20px"><div class="lb g">지금까지</div><div class="p" style="margin-top:10px; line-height:2; font-weight:600">엑셀로 대상 나누기<br>등급별 문안 따로<br>보내고 나서 차단 확인</div></div>
+        <div class="tint m rise fill" style="--d:.5s; padding:20px"><div class="lb">한줄로</div><div class="p" style="margin-top:10px; line-height:2; font-weight:700; color:#1A1A1A">문안 하나에<br>칸만 넣으면<br>고객마다 자동</div></div>
+      </div>
+      <div class="phone m pop" style="--d:.4s; flex:1">
+        <div class="bar">문자</div>
+        <div class="bub">(광고) <span class="v">김한줄</span>님, <span class="v">골드</span> 등급 고객님께 먼저 알려 드려요. 지난번 고르신 <span class="v">니트 가디건</span> 새 색상이 들어왔어요.<br><span class="lk">hlj.kr/a1b2</span><br>무료수신거부 080</div>
+        <div class="bub">(광고) <span class="v">이오후</span>님, <span class="v">실버</span> 등급 고객님께 먼저 알려 드려요. 지난번 고르신 <span class="v">울 머플러</span> 새 색상이 들어왔어요.</div>
+        <div class="bub">(광고) <span class="v">박소요</span>님, <span class="v">일반</span> 등급 고객님께 먼저 알려 드려요. 지난번 고르신 <span class="v">코듀로이 셔츠</span> 새 색상이 들어왔어요.</div>
+      </div>
+      <div class="card m rise" style="--d:.7s; width:150px; padding:16px; align-self:center"><div class="lb g">채운 칸</div><div style="margin-top:10px; display:flex; flex-direction:column; gap:8px"><span class="chip soft">이름</span><span class="chip soft">등급</span><span class="chip soft">구매 상품</span></div></div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면과 문안은 이해를 돕기 위한 예시입니다<span class="pg">07</span></div>
+</section>
+
+<!-- 08 이미지 스튜디오 갤러리 -->
+<section class="slide" id="s8" style="background: linear-gradient(180deg, #FFFFFF 0%, #FFFFFF 55%, #FFF7F2 100%)">
+  <div class="k">이미지 스튜디오</div>
+  <div class="t">상품 사진 한 장이 행사 포스터가 됩니다</div>
+  <div class="s">템플릿 621종, 13개 분류. 라벨, 헤드라인, 부제는 적은 그대로 새겨집니다.</div>
+  <div class="body sub">
+    <div class="fill" style="display:grid; grid-template-columns: repeat(5, 1fr); gap:20px; min-height:0">
+      <div class="m pop col" style="--d:.1s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p1-kyeolon-product.jpg" style="width:100%; object-position:top" alt=""><div class="cap">제품 포스터<em>뷰티, 어텀 앰버</em></div></div>
+      <div class="m pop col" style="--d:.2s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p4-ohudam-product.jpg" style="width:100%; object-position:top" alt=""><div class="cap">제품 포스터<em>카페, 단풍 어텀 카페</em></div></div>
+      <div class="m pop col" style="--d:.3s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p6-soyo-product.jpg" style="width:100%; object-position:top" alt=""><div class="cap">제품 포스터<em>패션, 니트 텍스처</em></div></div>
+      <div class="m pop col" style="--d:.4s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p3-kyeolon-event.jpg" style="width:100%; object-position:center" alt=""><div class="cap">행사 포스터<em>멤버십, VIP 벨벳 라운지</em></div></div>
+      <div class="m pop col" style="--d:.5s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p5-ohudam-birthday.jpg" style="width:100%; object-position:top" alt=""><div class="cap">행사 포스터<em>멤버십, 버스데이 클럽</em></div></div>
+    </div>
+    <div class="m rise chips" style="--d:.7s; align-items:center"><span class="lb g" style="margin-right:4px">분류</span><span class="chip">패션</span><span class="chip">뷰티</span><span class="chip">카페 음료</span><span class="chip">세일 이벤트</span><span class="chip">멤버십 고객감사</span><span class="chip">시즌 명절</span><span class="chip">팝업 페스티벌</span><span class="chip">신메뉴</span><span class="chip">오픈 기념</span><span class="chip">클래스 체험</span><span class="chip">미니멀</span></div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 포스터는 이미지 스튜디오로 만든 가상 브랜드 예시입니다<span class="pg">08</span></div>
+</section>
+
+<!-- 09 이미지 스튜디오 과정 -->
+<section class="slide" id="s9">
+  <div class="k">이미지 스튜디오</div>
+  <div class="t">사진 올리기부터 고치기까지, 네 번이면 끝</div>
+  <div class="body">
+    <div class="fill" style="display:grid; grid-template-columns: repeat(4, 1fr); gap:22px; min-height:0">
+      <div class="m rise col" style="--d:.1s; min-height:0"><div class="gray fill" style="overflow:hidden"><img src="../../promo/2026-10-hanjul-ai/posters/src-kyeolon.jpg" style="display:block; width:100%; height:100%; object-fit:cover" alt=""></div><div class="row" style="gap:10px; margin-top:14px; align-items:center"><span class="num d">1</span><b style="font-size:17px">상품 사진 올리기</b></div><div class="note" style="margin-top:4px">최대 3장까지 한 포스터에</div></div>
+      <div class="m rise col" style="--d:.3s; min-height:0"><div class="fill" style="border-radius:18px; overflow:hidden; background-color:#fff; background-image: linear-gradient(45deg,#F5F5F4 25%,transparent 25%),linear-gradient(-45deg,#F5F5F4 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#F5F5F4 75%),linear-gradient(-45deg,transparent 75%,#F5F5F4 75%); background-size:20px 20px; background-position:0 0,0 10px,10px -10px,-10px 0; border:1px solid #ECEAE7"><img src="../../promo/2026-10-hanjul-ai/posters/cut-kyeolon.png" style="display:block; width:100%; height:100%; object-fit:contain" alt=""></div><div class="row" style="gap:10px; margin-top:14px; align-items:center"><span class="num d">2</span><b style="font-size:17px">배경 자동 지움</b></div><div class="note" style="margin-top:4px">상품만 남깁니다</div></div>
+      <div class="m rise col" style="--d:.5s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p1-kyeolon-product.jpg" style="width:100%; object-position:top" alt=""><div class="row" style="gap:10px; margin-top:14px; align-items:center"><span class="num d">3</span><b style="font-size:17px">템플릿 고르고 생성</b></div><div class="note" style="margin-top:4px">라벨, 헤드라인, 부제를 그대로</div></div>
+      <div class="m rise col" style="--d:.7s; min-height:0"><img class="post fill" src="../../promo/2026-10-hanjul-ai/posters/p2-kyeolon-product-edit.jpg" style="width:100%; object-position:top; outline:3px solid #FF5A1F; outline-offset:3px" alt=""><div class="row" style="gap:10px; margin-top:14px; align-items:center"><span class="num">4</span><b style="font-size:17px">AI로 고치기</b></div><div class="note" style="margin-top:4px">"배경을 단풍잎이 비치는 창가로"</div></div>
+    </div>
+    <div class="tint m rise" style="--d:.9s; padding:14px 18px; display:flex; align-items:center; gap:12px; font-size:15.5px; font-weight:700"><span class="chip hot">이어서 만들기</span>만든 포스터로 모바일 DM, 이메일, 인앱 팝업을 바로 만들고, 문자 이미지는 규격에 맞게 자동 변환합니다</div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 가상 브랜드 예시입니다<span class="pg">09</span></div>
+</section>
+
+<!-- 10 모바일 DM -->
+<section class="slide" id="s10">
+  <div class="k">모바일 DM</div>
+  <div class="t">사진과 버튼이 있는 페이지를, 링크 하나로</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>가진 재료만 넣기</b><span class="d">사진, 글, 홈페이지 주소 중 있는 것만 넣으면 완성본이 나옵니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>블록으로 고치기</b><span class="d">휴대폰과 PC 미리보기를 보며 구도, 배경, 색, 글자 크기를 고칩니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>카탈로그 DM</b><span class="d">PC에서는 책처럼 두 쪽 펼침, 휴대폰에서는 슬라이드</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num">4</span><div><b>받은 사람별 반응</b><span class="d">누가 열고 눌렀는지 보고 다시 보냅니다</span></div></div>
+      </div>
+    </div>
+    <div class="rcol" style="flex-direction:row; gap:18px">
+      <div class="phone m pop" style="--d:.3s; width:250px; flex:none">
+        <div class="bar">hlj.kr/ohudam</div>
+        <img src="../../promo/2026-10-hanjul-ai/posters/p4-ohudam-product.jpg" style="display:block; width:100%; flex:1; min-height:0; object-fit:cover; object-position:top" alt="">
+        <div style="padding:14px 16px; flex:none"><div style="font-size:16px; font-weight:800">가을 시즌 메뉴 출시</div><div class="note" style="margin-top:4px">메이플 크림 라떼를 가장 먼저 만나 보세요</div>
+          <div style="margin-top:12px; padding:11px; border-radius:12px; background:#FF5A1F; color:#1A1A1A; text-align:center; font-size:14px; font-weight:800">매장 위치 보기</div></div>
+      </div>
+      <div class="col fill" style="gap:14px">
+        <div class="win m pop fill" style="--d:.6s">
+          <div class="wh"><i></i><i></i><i></i><span>카탈로그 DM, PC 펼침</span></div>
+          <div class="row fill" style="gap:10px; padding:16px; min-height:0"><img src="../../promo/2026-10-hanjul-ai/posters/p6-soyo-product.jpg" style="flex:1; min-width:0; height:100%; object-fit:cover; border-radius:8px" alt=""><img src="../../promo/2026-10-hanjul-ai/posters/p7-soyo-event.jpg" style="flex:1; min-width:0; height:100%; object-fit:cover; border-radius:8px" alt=""></div>
+        </div>
+        <div class="card m rise" style="--d:.9s; padding:16px 18px">
+          <div class="lb g">받은 사람별 반응</div>
+          <div class="chips" style="margin-top:10px"><span class="chip">열람</span><span class="chip">버튼 클릭</span><span class="chip soft">안 본 사람에게 다시</span></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면은 가상 브랜드 예시입니다<span class="pg">10</span></div>
+</section>
+
+<!-- 11 이메일 -->
+<section class="slide" id="s11">
+  <div class="k">이메일</div>
+  <div class="t">DM 재료 그대로, 이메일도 한 번에</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>같은 재료로 만들기</b><span class="d">모바일 DM 결과 화면에서 바로 이메일로 만듭니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>받은편지함 글까지</b><span class="d">제목과 미리보기 글을 적고, 휴대폰과 PC 모습을 함께 봅니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>회사 메일로 발송</b><span class="d">쓰는 회사 메일을 연결하고, 광고 메일이면 표기와 수신거부가 자동</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num">4</span><div><b>열람과 클릭</b><span class="d">많이 누른 링크를 보고, 안 연 사람에게 한 번 더 보냅니다</span></div></div>
+      </div>
+    </div>
+    <div class="rcol">
+      <div class="win m pop fill" style="--d:.3s">
+        <div class="wh"><i></i><i></i><i></i><span>받은편지함</span></div>
+        <div class="row fill" style="min-height:0">
+          <div style="width:220px; border-right:1px solid #ECEAE7; padding:12px; flex:none">
+            <div style="padding:12px; border-radius:12px; background:#FFF3EC"><div style="font-size:13.5px; font-weight:800">소요웨어</div><div style="font-size:13.5px; font-weight:700; margin-top:3px">(광고) 첫 추위엔 울 니트</div><div class="note" style="margin-top:3px">이번 주말까지 어텀 위크</div></div>
+            <div style="padding:12px"><div style="font-size:13.5px; font-weight:700; color:#66605B">주문 안내</div><div style="margin-top:8px; height:8px; width:70%; border-radius:4px; background:#F1F0EE"></div></div>
+            <div style="padding:12px"><div style="font-size:13.5px; font-weight:700; color:#66605B">뉴스레터</div><div style="margin-top:8px; height:8px; width:60%; border-radius:4px; background:#F1F0EE"></div></div>
+          </div>
+          <div class="col fill" style="padding:16px 18px; min-height:0">
+            <div style="font-size:16px; font-weight:800">(광고) 첫 추위엔 울 니트</div>
+            <div class="note" style="margin-top:4px">소요웨어</div>
+            <img src="../../promo/2026-10-hanjul-ai/posters/p7-soyo-event.jpg" class="fill" style="display:block; margin-top:12px; width:100%; object-fit:cover; border-radius:10px" alt="">
+            <div class="row" style="margin-top:12px; align-items:center; gap:12px"><div style="padding:10px 18px; border-radius:10px; background:#1A1A1A; color:#fff; font-size:14px; font-weight:700">신상 니트 보기</div><div class="note">수신을 원하지 않으시면 수신거부</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="row" style="gap:14px">
+        <div class="gray m rise" style="--d:.7s; flex:1; padding:14px 16px"><div class="note">열람</div><div class="bar2" style="margin-top:8px; background:#fff"><div class="m growx" style="--d:.9s; width:64%; background:#FF5A1F"></div></div></div>
+        <div class="gray m rise" style="--d:.8s; flex:1; padding:14px 16px"><div class="note">클릭</div><div class="bar2" style="margin-top:8px; background:#fff"><div class="m growx" style="--d:1s; width:28%; background:#1A1A1A"></div></div></div>
+        <div class="tint m rise" style="--d:.9s; flex:1; padding:14px 16px; display:flex; align-items:center; justify-content:center"><span style="font-size:14.5px; font-weight:800; color:#C8410C">안 연 사람에게 다시</span></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면은 가상 브랜드 예시이고 막대 길이는 예시입니다<span class="pg">11</span></div>
+</section>
+
+<!-- 12 인앱 메시지 -->
+<section class="slide" id="s12">
+  <div class="k">인앱 메시지</div>
+  <div class="t">자사몰에 들어온 그 순간, 맞는 팝업을</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>빠른 시작</b><span class="d">시나리오를 고르면 AI가 제목, 본문, 띄울 시점까지 만듭니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>네 가지 형태</b><span class="d">모달, 슬라이드, 토스트, 플로팅 중 고르고 강조색을 정합니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>띄울 때와 볼 사람</b><span class="d">장바구니 담음, 결제 시작, 이탈 직전 같은 순간과 등급, 지역</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num">4</span><div><b>웹과 앱</b><span class="d">웹 자사몰 팝업, 모바일 앱 인앱 모두. 표시, 클릭, 닫힘을 봅니다</span></div></div>
+      </div>
+    </div>
+    <div class="rcol">
+      <div class="win m pop fill" style="--d:.2s">
+        <div class="wh"><i></i><i></i><i></i><span>자사몰 장바구니</span></div>
+        <div class="fill" style="position:relative; padding:20px; background:#FAFAF9">
+          <div class="row" style="gap:12px"><div style="width:140px; height:16px; border-radius:6px; background:#ECEAE7"></div><div style="margin-left:auto; width:70px; height:16px; border-radius:6px; background:#ECEAE7"></div></div>
+          <div class="row" style="gap:14px; margin-top:22px"><div style="flex:1; height:140px; border-radius:12px; background:#F1F0EE"></div><div style="flex:1; height:140px; border-radius:12px; background:#F1F0EE"></div><div style="flex:1; height:140px; border-radius:12px; background:#F1F0EE"></div></div>
+          <div style="margin-top:16px; width:60%; height:14px; border-radius:6px; background:#ECEAE7"></div>
+          <div style="position:absolute; inset:0; background:rgba(28,25,23,.28)"></div>
+          <div class="m pop" style="--d:.7s; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:320px; border-radius:18px; overflow:hidden; background:#fff; box-shadow:0 20px 40px rgba(0,0,0,.25)">
+            <img src="../../promo/2026-10-hanjul-ai/posters/p4-ohudam-product.jpg" style="display:block; width:100%; height:160px; object-fit:cover; object-position:center 70%" alt="">
+            <div style="padding:16px"><div style="font-size:16px; font-weight:800">담아 두신 라떼, 잊지 않으셨죠</div><div class="note" style="margin-top:4px">지금 주문하면 바로 준비해 드려요</div>
+              <div style="margin-top:12px; padding:11px; border-radius:12px; background:#FF5A1F; text-align:center; font-size:14px; font-weight:800">주문 이어 하기</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="m rise chips" style="--d:1s"><span class="chip on">모달</span><span class="chip">슬라이드</span><span class="chip">토스트</span><span class="chip">플로팅</span><span class="chip soft">장바구니 담음</span><span class="chip soft">이탈 직전</span><span class="chip soft">세션당 1회</span></div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면은 가상 브랜드 예시입니다<span class="pg">12</span></div>
+</section>
+
+<!-- 13 SNS -->
+<section class="slide" id="s13">
+  <div class="k">SNS 채널</div>
+  <div class="t">한 번 쓰면, 인스타그램과 스레드에 맞춰 올립니다</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>계정 연결</b><span class="d">채널 카드에서 로그인하고 권한을 승인하면 연결됩니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>채널마다 규격</b><span class="d">같은 글과 이미지를 채널 규격에 맞춰 바꿉니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>예약 게시</b><span class="d">올릴 시각을 정해 두면 그때 올라갑니다</span></div></div>
+      </div>
+      <div class="take m rise" style="--d:.5s"><span class="tg">한 줄 정리</span><span>문자, 메일과 같은 화면에서 SNS까지</span></div>
+    </div>
+    <div class="rcol" style="flex-direction:row; gap:18px">
+      <div class="card m pop col" style="--d:.3s; flex:1; overflow:hidden">
+        <div class="row" style="align-items:center; gap:10px; padding:12px 14px"><div style="width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,#FFB38A,#FF5A1F)"></div><b style="font-size:14px">soyowear</b><span class="note" style="margin-left:auto">인스타그램</span></div>
+        <img src="../../promo/2026-10-hanjul-ai/posters/p6-soyo-product.jpg" class="fill" style="display:block; width:100%; object-fit:cover; object-position:top" alt="">
+        <div style="padding:12px 14px; font-size:13.5px; line-height:1.55"><b>soyowear</b> 첫 추위엔 울 니트, F/W 컬렉션 입고</div>
+      </div>
+      <div class="col" style="flex:1; gap:14px">
+        <div class="card m pop col fill" style="--d:.6s; padding:16px">
+          <div class="row" style="align-items:center; gap:10px"><div style="width:30px; height:30px; border-radius:50%; background:#1A1A1A"></div><b style="font-size:14px">soyowear</b><span class="note" style="margin-left:auto">스레드</span></div>
+          <div style="margin-top:12px; font-size:14.5px; line-height:1.65">아침 공기가 달라졌어요. 이번 주말까지 어텀 위크, 신상 니트 먼저 보러 오세요.</div>
+          <img src="../../promo/2026-10-hanjul-ai/posters/p7-soyo-event.jpg" class="fill" style="display:block; margin-top:12px; width:100%; object-fit:cover; border-radius:12px" alt="">
+        </div>
+        <div class="tint m rise" style="--d:.9s; padding:14px 16px; font-size:15px; font-weight:700; display:flex; align-items:center; gap:10px"><span class="chip hot">예약</span>토요일 오전 10시에 올림</div>
+      </div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면은 가상 브랜드 예시입니다<span class="pg">13</span></div>
+</section>
+
+<!-- 14 채널 -->
+<section class="slide" id="s14">
+  <div class="k">보내기</div>
+  <div class="t">한국 고객이 실제로 여는 채널을, 한 화면에서</div>
+  <div class="s">고객마다 받을 수 있는 채널로 나눠 보냅니다. 알림톡을 못 받는 번호는 문자로 대신 나갑니다.</div>
+  <div class="body sub">
+    <div class="fill" style="display:grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr 1fr; gap:16px">
+      <div class="tint m pop col" style="justify-content:center; --d:.1s; padding:20px 22px"><div class="lb">문자</div><div style="margin-top:8px; font-size:20px; font-weight:800">SMS, LMS, MMS</div><div class="p" style="margin-top:6px">단문, 장문, 이미지 문자</div></div>
+      <div class="tint m pop col" style="justify-content:center; --d:.2s; padding:20px 22px"><div class="lb">카카오</div><div style="margin-top:8px; font-size:20px; font-weight:800">알림톡</div><div class="p" style="margin-top:6px">템플릿 검수와 발신프로필 관리</div></div>
+      <div class="tint m pop col" style="justify-content:center; --d:.3s; padding:20px 22px"><div class="lb">카카오</div><div style="margin-top:8px; font-size:20px; font-weight:800">브랜드메시지</div><div class="p" style="margin-top:6px">이미지와 캐러셀 메시지</div></div>
+      <div class="card m pop col" style="justify-content:center; --d:.4s; padding:20px 22px"><div class="lb g">메일</div><div style="margin-top:8px; font-size:20px; font-weight:800">이메일</div><div class="p" style="margin-top:6px">열람과 클릭까지</div></div>
+      <div class="card m pop col" style="justify-content:center; --d:.5s; padding:20px 22px"><div class="lb g">페이지</div><div style="margin-top:8px; font-size:20px; font-weight:800">모바일 DM</div><div class="p" style="margin-top:6px">사진과 버튼이 있는 링크</div></div>
+      <div class="card m pop col" style="justify-content:center; --d:.6s; padding:20px 22px"><div class="lb g">자사몰과 앱</div><div style="margin-top:8px; font-size:20px; font-weight:800">인앱 메시지</div><div class="p" style="margin-top:6px">방문 중인 고객에게</div></div>
+      <div class="card m pop col" style="justify-content:center; --d:.7s; padding:20px 22px"><div class="lb g">SNS</div><div style="margin-top:8px; font-size:20px; font-weight:800">인스타그램, 스레드</div><div class="p" style="margin-top:6px">채널 규격 맞춤 게시</div></div>
+      <div class="card m pop col" style="justify-content:center; --d:.8s; padding:20px 22px"><div class="lb g">결과</div><div style="margin-top:8px; font-size:20px; font-weight:800">한 화면 집계</div><div class="p" style="margin-top:6px">성공, 실패, 실패 사유까지</div></div>
+    </div>
+    <div class="card m rise" style="--d:1s; padding:14px 20px; display:flex; align-items:center; gap:12px">
+      <span class="lb g">채널 자동 고르기</span>
+      <span class="chip hot">카카오</span><span style="color:#66605B; font-weight:700">→</span><span class="chip">장문 문자</span><span style="color:#66605B; font-weight:700">→</span><span class="chip">문자</span><span style="color:#66605B; font-weight:700">→</span><span class="chip">이메일</span>
+      <span class="note" style="margin-left:auto">받을 수 있는 채널 중 앞 순서로</span>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">14</span></div>
+</section>
+
+<!-- 15 발송 안전 -->
+<section class="slide" id="s15">
+  <div class="k">발송 안전</div>
+  <div class="t">보내기 전에, 한국 발송 규칙을 기계가 지킵니다</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><div><b>(광고) 표기와 무료수신거부</b><span class="d">광고 문자, 광고 메일에 자동으로 붙습니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><div><b>수신거부와 수신동의</b><span class="d">거부하거나 동의하지 않은 고객에게는 광고가 나가지 않습니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><div><b>같은 번호 여러 명</b><span class="d">한 명이라도 거부했으면 거부를 따릅니다</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num"><svg class="i" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg></span><div><b>깨지는 글자</b><span class="d">깨져서 나갈 글자를 보내기 전에 알려 드립니다</span></div></div>
+      </div>
+    </div>
+    <div class="rcol">
+      <div class="card m pop fill" style="--d:.4s; padding:22px 24px; display:grid; grid-template-columns: 250px 1fr; gap:22px">
+        <div class="col" style="min-height:0">
+          <div class="lb">고객이 받는 문자</div>
+          <div class="phone fill" style="margin-top:10px; border-width:7px; border-radius:30px">
+            <div class="bar">문자</div>
+            <div class="bub" style="margin:4px 10px 0"><span class="v">(광고)</span> 결온<br>깊어지는 계절의 보습, 결온 앰버 세럼이 새로 나왔어요. 이번 주 일요일까지 VIP 고객님께 재구매 15% 쿠폰을 드려요.<br><span class="v">무료수신거부 080-000-0000</span></div>
+          </div>
+        </div>
+        <div class="col" style="min-height:0">
+          <div class="lb">보낼 고객 자동 정리 (예시)</div>
+          <div style="flex:1; margin-top:10px; display:flex; flex-direction:column; gap:8px">
+            <div class="row" style="flex:1; justify-content:space-between; align-items:center; padding:10px 16px; border-radius:12px; background:#F7F6F4; font-size:15px; font-weight:700"><span>고른 고객</span><span>12,000명</span></div>
+            <div class="row" style="flex:1; justify-content:space-between; align-items:center; padding:10px 16px; border-radius:12px; background:#F7F6F4; font-size:15px; font-weight:700; color:#44403C"><span>수신거부 빼기</span><span>−320명</span></div>
+            <div class="row" style="flex:1; justify-content:space-between; align-items:center; padding:10px 16px; border-radius:12px; background:#F7F6F4; font-size:15px; font-weight:700; color:#44403C"><span>광고 미동의 빼기</span><span>−2,100명</span></div>
+            <div class="row" style="flex:1; justify-content:space-between; align-items:center; padding:10px 16px; border-radius:12px; background:#F7F6F4; font-size:15px; font-weight:700; color:#44403C"><span>같은 번호 중 거부 따르기</span><span>−40명</span></div>
+            <div class="row" style="flex:1; justify-content:space-between; align-items:center; padding:10px 16px; border-radius:12px; background:#1A1A1A; color:#fff; font-size:15.5px; font-weight:800"><span>실제로 보낼 고객</span><span>9,540명</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">15</span></div>
+</section>
+
+<!-- 16 스팸 차단 = 비용 -->
+<section class="slide" id="s15s">
+  <div class="k">스팸 차단</div>
+  <div class="t">정상 문자도 스팸으로 빠지면, <span class="hl">비용은 그대로 나갑니다</span></div>
+  <div class="s">통신사 스팸 필터에 걸린 문자는 고객이 보지 못합니다. 그래도 보낸 비용은 돌아오지 않습니다.</div>
+  <div class="body sub">
+    <div class="fill" style="display:grid; grid-template-columns: 290px 1fr 1fr; gap:18px">
+      <div class="col m pop" style="--d:.1s; min-height:0">
+        <div class="phone fill" style="background:#111">
+          <div class="bar" style="color:#A8A29E">메시지</div>
+          <div style="flex:1; padding:4px 16px 14px; color:#E7E5E4; font-size:13px; line-height:1.6; font-weight:500; display:flex; flex-direction:column; gap:9px">
+            <b style="font-size:14px; color:#fff">[LG U+] 스팸차단 알림</b>
+            <div>[Web발신]<br>스팸차단서비스 / 차단문자 1건</div>
+            <div>■ 차단된 문자메시지</div>
+            <div style="padding:10px 12px; border-radius:12px; background:#292524; color:#fff">(광고) 소요웨어<br>첫 추위엔 울 니트! F/W 신상 입고 기념으로 이번 주말까지 15% 할인해 드려요.</div>
+            <div style="color:#A8A29E">※ 차단하거나 허용할 문구와 번호는 앱에서 관리할 수 있어요.</div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:8px; text-align:center">정상 광고 문자가 스팸으로 빠진 화면 (예시)</div>
+      </div>
+
+      <div class="card m rise col" style="--d:.3s; padding:20px 22px">
+        <div class="lb">10만 건을 보냈다면</div>
+        <div style="margin-top:4px; font-size:19px; font-weight:800; line-height:1.45">LG U+ 한 곳에서만 막혀도<br><span style="color:#C8410C">1만 9,500건</span>이 비용만 나갑니다</div>
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:space-evenly; margin-top:6px">
+          <div><div class="row" style="justify-content:space-between; font-size:14.5px; font-weight:700"><span>SKT 39.0%</span><span>3만 9,000건</span></div><div class="bar2" style="margin-top:6px"><div class="growx m" style="--d:.5s; width:100%; background:#1A1A1A"></div></div></div>
+          <div><div class="row" style="justify-content:space-between; font-size:14.5px; font-weight:700"><span>KT 23.3%</span><span>2만 3,300건</span></div><div class="bar2" style="margin-top:6px"><div class="growx m" style="--d:.6s; width:60%; background:#1A1A1A"></div></div></div>
+          <div><div class="row" style="justify-content:space-between; font-size:14.5px; font-weight:800; color:#C8410C"><span>LG U+ 19.5% 막힘</span><span>1만 9,500건</span></div><div class="bar2" style="margin-top:6px"><div class="growx m" style="--d:.7s; width:50%; background:#FF5A1F"></div></div></div>
+          <div><div class="row" style="justify-content:space-between; font-size:14.5px; font-weight:700; color:#66605B"><span>알뜰폰 18.2%</span><span>1만 8,200건</span></div><div class="bar2" style="margin-top:6px"><div class="growx m" style="--d:.8s; width:47%; background:#D6D3D1"></div></div></div>
+        </div>
+        <div class="tint" style="margin-top:10px; padding:10px 14px; font-size:15px; font-weight:700">KT와 LG U+ 두 곳에서 막히면 4만 2,800건</div>
+        <div class="note" style="margin-top:8px">휴대폰 가입자 비율, 과학기술정보통신부 2026년 4월 집계</div>
+      </div>
+
+      <div class="card m rise col" style="--d:.5s; padding:20px 22px; background:#1A1A1A; border-color:#1A1A1A; color:#fff">
+        <div class="lb" style="color:#FF8A5C">한줄로는</div>
+        <div style="margin-top:4px; font-size:19px; font-weight:800; line-height:1.45">보내기 전에 걸리는지,<br>안 걸리는지 보여 드립니다</div>
+        <div style="flex:1; display:flex; flex-direction:column; justify-content:space-evenly; margin-top:6px">
+          <div class="row" style="justify-content:space-between; align-items:center; padding:12px 16px; border-radius:12px; background:#292524"><b style="font-size:16px">SKT</b><span class="chip" style="background:#fff; color:#1A1A1A; border-color:#fff">통과</span></div>
+          <div class="row" style="justify-content:space-between; align-items:center; padding:12px 16px; border-radius:12px; background:#292524"><b style="font-size:16px">KT</b><span class="chip" style="background:#fff; color:#1A1A1A; border-color:#fff">통과</span></div>
+          <div class="row pulse" style="justify-content:space-between; align-items:center; padding:12px 16px; border-radius:12px; background:#292524; border:1.5px solid #FF5A1F"><b style="font-size:16px">LG U+</b><span class="chip hot">막힘</span></div>
+        </div>
+        <div style="margin-top:10px; font-size:15px; line-height:1.6; font-weight:600; color:#E7E5E4">막히면 문구를 고쳐 다시 확인하고, 세 곳 모두 통과한 문안만 보냅니다.</div>
+      </div>
+    </div>
+    <div class="take m rise" style="--d:.8s"><span class="tg">한 줄 정리</span><span>막힐 문자를 미리 알면, 고객에게 닿지 않을 문자에 돈을 쓰지 않습니다</span></div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">16</span></div>
+</section>
+
+<!-- 17 여정 -->
+<section class="slide" id="s16">
+  <div class="k">여정 자동화</div>
+  <div class="t">사건이 생기면, 정해 둔 순서로 알아서 나갑니다</div>
+  <div class="body"><div class="cols" style="grid-template-columns: 430px 1fr">
+    <div class="lcol">
+      <div class="card m rise" style="--d:.05s; padding:18px 20px">
+        <div class="lb g">마케팅 사건 12종</div>
+        <div class="chips" style="margin-top:12px">
+          <span class="chip">신규 가입</span><span class="chip">첫 구매</span><span class="chip">재구매</span><span class="chip">휴면</span><span class="chip">휴면 복귀</span><span class="chip">구매 주기 이탈</span>
+          <span class="chip">등급 상승</span><span class="chip">생일</span><span class="chip">포인트 소멸</span><span class="chip hot">장바구니 이탈</span><span class="chip">배송</span><span class="chip">조회 후 미구매</span>
+        </div>
+      </div>
+      <div class="gray m rise fill" style="--d:.8s; padding:18px 20px; display:flex; flex-direction:column; justify-content:center"><div class="h3" style="font-size:17px">온라인도 매장도 같은 여정</div><div class="p" style="margin-top:6px">자사몰 주문과 매장 구매가 같은 사건으로 잡혀, 어디서 사든 같은 여정이 이어집니다.</div></div>
+      <div class="gray m rise fill" style="--d:.95s; padding:18px 20px; display:flex; flex-direction:column; justify-content:center"><div class="h3" style="font-size:17px">여정 이어 붙이기</div><div class="p" style="margin-top:6px">앞 여정을 마친 고객을 다음 여정으로 넘깁니다.</div></div>
+    </div>
+    <svg viewBox="0 0 640 512" style="width:100%; height:100%" preserveAspectRatio="xMidYMid meet">
+      <defs><marker id="a16" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1A1A1A"/></marker></defs>
+      <g font-size="15" font-weight="700">
+        <g class="m pop" style="--d:.2s"><rect x="20" y="6" width="250" height="54" rx="14" fill="#1A1A1A"/><text x="145" y="40" text-anchor="middle" fill="#fff">장바구니에 담음</text></g>
+        <path class="m draw" style="--len:60; --d:.35s" d="M145 60 L145 96" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a16)"/>
+        <g class="m pop" style="--d:.4s"><rect x="20" y="100" width="250" height="50" rx="14" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="145" y="131" text-anchor="middle" fill="#44403C">하루 기다림</text></g>
+        <path class="m draw" style="--len:60; --d:.5s" d="M145 150 L145 184" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a16)"/>
+        <g class="m pop" style="--d:.55s"><path d="M145 188 L228 224 L145 260 L62 224 Z" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="145" y="230" text-anchor="middle" fill="#1A1A1A">구매했나요</text></g>
+        <path class="m draw" style="--len:200; --d:.7s" d="M228 224 L388 224" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a16)"/>
+        <text x="308" y="212" text-anchor="middle" fill="#66605B" font-size="14">예</text>
+        <g class="m pop" style="--d:.75s"><rect x="392" y="198" width="230" height="52" rx="14" fill="#F7F6F4"/><text x="507" y="230" text-anchor="middle" fill="#44403C">목표 달성, 여정 끝</text></g>
+        <path class="m draw" style="--len:60; --d:.85s" d="M145 260 L145 300" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a16)"/>
+        <text x="160" y="286" fill="#66605B" font-size="14">아니오</text>
+        <g class="m pop" style="--d:.9s"><rect x="20" y="304" width="250" height="54" rx="14" fill="#FFF3EC" stroke="#FF5A1F" stroke-width="1.5"/><text x="145" y="338" text-anchor="middle" fill="#C8410C">알림톡, 담아 둔 상품 안내</text></g>
+        <path class="m draw" style="--len:60; --d:1s" d="M145 358 L145 394" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a16)"/>
+        <g class="m pop" style="--d:1.05s"><rect x="20" y="398" width="250" height="50" rx="14" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="145" y="429" text-anchor="middle" fill="#44403C">이틀 기다림, 아직 미구매면</text></g>
+        <path class="m draw" style="--len:200; --d:1.15s" d="M270 423 L388 423" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a16)"/>
+        <g class="m pop" style="--d:1.2s"><rect x="392" y="398" width="230" height="50" rx="14" fill="#1A1A1A"/><text x="507" y="429" text-anchor="middle" fill="#fff">문자, 마지막 안내</text></g>
+      </g>
+      <g font-size="14" font-weight="700">
+        <g class="m rise" style="--d:1.3s"><circle cx="300" cy="33" r="13" fill="#FFF3EC" stroke="#FF5A1F"/><text x="300" y="38" text-anchor="middle" fill="#C8410C">1</text><text x="322" y="38" fill="#1A1A1A">시작할 사건</text></g>
+        <g class="m rise" style="--d:1.4s"><circle cx="300" cy="125" r="13" fill="#FFF3EC" stroke="#FF5A1F"/><text x="300" y="130" text-anchor="middle" fill="#C8410C">2</text><text x="322" y="130" fill="#1A1A1A">기다릴 시간</text></g>
+        <g class="m rise" style="--d:1.5s"><circle cx="300" cy="331" r="13" fill="#FFF3EC" stroke="#FF5A1F"/><text x="300" y="336" text-anchor="middle" fill="#C8410C">3</text><text x="322" y="336" fill="#1A1A1A">단계마다 채널과 문안</text></g>
+      </g>
+      <g class="m rise" style="--d:1.6s"><rect x="20" y="470" width="602" height="40" rx="12" fill="#FFF3EC"/><text x="321" y="496" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1A1A1A">사건이 다시 생기면 같은 고객도 다시 들어옵니다</text></g>
+    </svg>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">17</span></div>
+</section>
+
+<!-- 18 자동 마케팅 -->
+<section class="slide" id="s17">
+  <div class="k">자동 마케팅</div>
+  <div class="t">AI가 매일 고객을 보고, 오늘 할 캠페인을 제안합니다</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>시작은 둘 중 하나</b><span class="d">준비된 시나리오를 고르거나, 목표를 한 줄로 적습니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>매일 제안</b><span class="d">AI가 그날의 대상과 문안을 만들어 올립니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>승인해야 발송</b><span class="d">승인 없이는 나가지 않습니다</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num">4</span><div><b>잘 된 목표는 여정으로</b><span class="d">성과가 검증되면 상시 여정으로 옮깁니다</span></div></div>
+      </div>
+      <div class="take m rise" style="--d:.6s"><span class="tg">한 줄 정리</span><span>담당자는 하루 한 번 승인만 하면 됩니다</span></div>
+    </div>
+    <svg viewBox="0 0 660 512" style="width:100%; height:100%" preserveAspectRatio="xMidYMid meet">
+      <circle cx="330" cy="256" r="190" fill="none" stroke="#ECEAE7" stroke-width="2" stroke-dasharray="4 7"/>
+      <path class="m draw" style="--len:1200; --d:.3s" d="M330 66 A190 190 0 1 1 329.9 66" fill="none" stroke="#FF5A1F" stroke-width="2.5"/>
+      <circle r="7" fill="#FF5A1F" class="dot" style="offset-path: path('M330 66 A190 190 0 1 1 329.9 66');"/>
+      <g text-anchor="middle" font-weight="800">
+        <text x="330" y="250" font-size="20" fill="#1A1A1A">매일 한 바퀴</text><text x="330" y="278" font-size="14" font-weight="600" fill="#66605B">AI 학습 현황에 쌓입니다</text>
+        <g class="m pop" style="--d:.4s"><rect x="250" y="40" width="160" height="52" rx="26" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="330" y="72" font-size="15.5" fill="#1A1A1A">고객 상태 보기</text></g>
+        <g class="m pop" style="--d:.6s"><rect x="440" y="230" width="170" height="52" rx="26" fill="#FFF3EC" stroke="#FF5A1F" stroke-width="1.5"/><text x="525" y="262" font-size="15.5" fill="#C8410C">대상, 문안 제안</text></g>
+        <g class="m pop" style="--d:.8s"><rect x="250" y="420" width="160" height="52" rx="26" fill="#1A1A1A"/><text x="330" y="452" font-size="15.5" fill="#fff">담당자 승인</text></g>
+        <g class="m pop" style="--d:1s"><rect x="50" y="230" width="170" height="52" rx="26" fill="#fff" stroke="#1A1A1A" stroke-width="1.5"/><text x="135" y="262" font-size="15.5" fill="#1A1A1A">발송, 성과 확인</text></g>
+      </g>
+    </svg>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">18</span></div>
+</section>
+
+<!-- 19 마케팅 플래너와 캘린더 -->
+<section class="slide" id="s18">
+  <div class="k">마케팅 플래너</div>
+  <div class="t">한 달 행사는 플래너에, 1년 계획은 캘린더에</div>
+  <div class="body">
+    <div class="fill row" style="gap:20px">
+      <div class="card m rise col" style="--d:.1s; flex:1; padding:24px">
+        <div class="row" style="align-items:center; gap:10px"><span class="chip soft">마케팅 플래너</span><b style="font-size:18px">이번 달 행사 맡기기</b></div>
+        <div class="col fill" style="justify-content:space-around; margin-top:10px">
+          <div class="row" style="gap:12px; align-items:center"><span class="num">1</span><span class="p">행사명과 기간, 혜택 문구를 넣습니다. 혜택은 적은 그대로 실립니다</span></div>
+          <div class="row" style="gap:12px; align-items:center"><span class="num">2</span><span class="p">문자, 모바일 DM, 메일과 보낼 날을 고르면 완성본까지 만듭니다</span></div>
+          <div class="row" style="gap:12px; align-items:center"><span class="num">3</span><span class="p">첫 발송 전, 담당자 휴대폰으로 실제 나갈 화면 확인 링크</span></div>
+          <div class="row" style="gap:12px; align-items:center"><span class="num">4</span><span class="p">승인한 행사만 정한 날에 나갑니다</span></div>
+        </div>
+      </div>
+      <div class="card m rise col" style="--d:.3s; flex:1; padding:24px">
+        <div class="row" style="align-items:center; gap:10px"><span class="chip soft">마케팅 캘린더</span><b style="font-size:18px">1년치 계획 설계</b></div>
+        <div style="display:grid; grid-template-columns: repeat(6, 1fr); gap:8px; margin-top:16px">
+          <div class="gray" style="padding:10px 8px; text-align:center; font-size:14px; font-weight:800; border-radius:10px">1월<div class="note">새해</div></div>
+          <div class="gray" style="padding:10px 8px; text-align:center; font-size:14px; font-weight:800; border-radius:10px">3월<div class="note">봄 신상</div></div>
+          <div class="tint" style="padding:10px 8px; text-align:center; font-size:14px; font-weight:800; border-radius:10px; color:#C8410C">5월<div class="note" style="color:#C8410C">가정의 달</div></div>
+          <div class="gray" style="padding:10px 8px; text-align:center; font-size:14px; font-weight:800; border-radius:10px">7월<div class="note">여름 세일</div></div>
+          <div class="gray" style="padding:10px 8px; text-align:center; font-size:14px; font-weight:800; border-radius:10px">9월<div class="note">추석</div></div>
+          <div class="gray" style="padding:10px 8px; text-align:center; font-size:14px; font-weight:800; border-radius:10px">11월<div class="note">연말 준비</div></div>
+        </div>
+        <div class="col fill" style="justify-content:space-around; margin-top:8px">
+          <div class="row" style="gap:12px; align-items:center"><span class="num">1</span><span class="p">업종, 시즌, 회사 데이터로 AI가 1년치 캠페인을 설계합니다</span></div>
+          <div class="row" style="gap:12px; align-items:center"><span class="num">2</span><span class="p">혜택을 비워 두면 미리 입력 안내가 가고, 안 채우면 나가지 않습니다</span></div>
+          <div class="row" style="gap:12px; align-items:center"><span class="num">3</span><span class="p">발송 전 담당자 번호로 문안과 대상 안내, 승인 요청</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="take m rise" style="--d:.6s"><span class="tg">한 줄 정리</span><span>혜택 문구는 사람이 적고 AI는 바꾸지 않습니다. 승인한 것만 나갑니다</span></div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 달력의 행사는 예시입니다<span class="pg">19</span></div>
+</section>
+
+<!-- 20 AI 메모리 -->
+<section class="slide" id="s19">
+  <div class="k">AI 메모리</div>
+  <div class="t">쓸수록 우리 회사를 더 잘 아는 AI</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>저절로 쌓이는 학습</b><span class="d">캠페인 성과, 채널 반응, 고객 구매에서 AI가 배운 것을 모읍니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>말로 물어보기</b><span class="d">"지난 30일 VIP에서 가장 강한 패턴은?"처럼 묻습니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>직접 가르치기</b><span class="d">AI가 꼭 알아야 할 사실을 직접 알려 줄 수도 있습니다</span></div></div>
+      </div>
+      <div class="take m rise" style="--d:.5s"><span class="tg">한 줄 정리</span><span>다음 문안과 제안에 회사의 기억이 쓰입니다</span></div>
+    </div>
+    <div class="rcol">
+      <div class="card m rise col fill" style="--d:.2s; padding:22px 24px">
+        <div class="row" style="align-items:center"><b style="font-size:18px">학습 5종</b><span class="note" style="margin-left:auto">AI 메모리 화면</span></div>
+        <div class="col fill" style="justify-content:space-around; margin-top:8px">
+          <div class="row" style="align-items:center; gap:14px"><span style="width:130px; font-size:15.5px; font-weight:800">성공 패턴</span><div class="bar2" style="flex:1"><div class="m growx" style="--d:.4s; width:78%; background:#FF5A1F"></div></div><span class="note" style="width:170px">잘 된 캠페인의 공통점</span></div>
+          <div class="row" style="align-items:center; gap:14px"><span style="width:130px; font-size:15.5px; font-weight:800">채널 성과</span><div class="bar2" style="flex:1"><div class="m growx" style="--d:.5s; width:62%; background:#FF8A5C"></div></div><span class="note" style="width:170px">어느 채널이 잘 먹히는지</span></div>
+          <div class="row" style="align-items:center; gap:14px"><span style="width:130px; font-size:15.5px; font-weight:800">고객 인사이트</span><div class="bar2" style="flex:1"><div class="m growx" style="--d:.6s; width:54%; background:#FFB08F"></div></div><span class="note" style="width:170px">누가 무엇을 사는지</span></div>
+          <div class="row" style="align-items:center; gap:14px"><span style="width:130px; font-size:15.5px; font-weight:800">브랜드 톤</span><div class="bar2" style="flex:1"><div class="m growx" style="--d:.7s; width:40%; background:#1A1A1A"></div></div><span class="note" style="width:170px">우리 회사 말투</span></div>
+          <div class="row" style="align-items:center; gap:14px"><span style="width:130px; font-size:15.5px; font-weight:800">발송 규칙 학습</span><div class="bar2" style="flex:1"><div class="m growx" style="--d:.8s; width:30%; background:#66605B"></div></div><span class="note" style="width:170px">지켜야 할 발송 규칙</span></div>
+        </div>
+      </div>
+      <div class="tint m rise" style="--d:1s; padding:16px 18px">
+        <div class="lb">물어보기</div>
+        <div style="margin-top:6px; font-size:16px; font-weight:700">지난 30일 VIP에서 AI가 발견한 가장 강한 패턴은?</div>
+      </div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 막대 길이는 예시입니다<span class="pg">20</span></div>
+</section>
+
+<!-- 21 AI 자율 예측 -->
+<section class="slide" id="s20">
+  <div class="k">AI 자율 예측</div>
+  <div class="t">누가 떠날지, 누가 살지, 매일 점수로</div>
+  <div class="body"><div class="cols">
+    <div class="lcol">
+      <div class="pts">
+        <div class="pt m rise" style="--d:.1s"><span class="num">1</span><div><b>매일 자동 분석</b><span class="d">따로 돌릴 것 없이 하루 한 번 계산합니다</span></div></div>
+        <div class="pt m rise" style="--d:.2s"><span class="num">2</span><div><b>위험 그룹, 기회 그룹</b><span class="d">AI가 찾은 그룹에서 바로 캠페인을 시작합니다</span></div></div>
+        <div class="pt m rise" style="--d:.3s"><span class="num">3</span><div><b>고객마다 여섯 점수</b><span class="d">클릭, 이탈 위험, 구매 가능성, 생애 가치, 다음 구매, 선호 채널</span></div></div>
+        <div class="pt m rise" style="--d:.4s"><span class="num">4</span><div><b>왜 그렇게 봤는지</b><span class="d">영향 요인과 AI의 1순위 권장을 함께 봅니다</span></div></div>
+      </div>
+    </div>
+    <div class="rcol">
+      <div class="card m rise col fill" style="--d:.2s; overflow:hidden">
+        <div class="row" style="padding:14px 20px; background:#F7F6F4; font-size:13.5px; font-weight:800; color:#66605B"><span style="width:110px">고객</span><span style="flex:1">이탈 위험</span><span style="flex:1">구매 가능성</span><span style="width:110px">선호 채널</span></div>
+        <div class="col fill" style="justify-content:space-around">
+          <div class="row m rise" style="--d:.4s; padding:0 20px; align-items:center; font-size:15px"><b style="width:110px">김한줄</b><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:82%; background:#FF5A1F"></div></div></div><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:30%; background:#1A1A1A"></div></div></div><span style="width:110px"><span class="chip">알림톡</span></span></div>
+          <div class="row m rise" style="--d:.5s; padding:0 20px; align-items:center; font-size:15px"><b style="width:110px">이오후</b><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:24%; background:#FF5A1F"></div></div></div><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:76%; background:#1A1A1A"></div></div></div><span style="width:110px"><span class="chip">문자</span></span></div>
+          <div class="row m rise" style="--d:.6s; padding:0 20px; align-items:center; font-size:15px"><b style="width:110px">박소요</b><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:55%; background:#FF5A1F"></div></div></div><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:58%; background:#1A1A1A"></div></div></div><span style="width:110px"><span class="chip">이메일</span></span></div>
+          <div class="row m rise" style="--d:.7s; padding:0 20px; align-items:center; font-size:15px"><b style="width:110px">최결온</b><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:68%; background:#FF5A1F"></div></div></div><div style="flex:1; padding-right:18px"><div class="bar2"><div style="width:40%; background:#1A1A1A"></div></div></div><span style="width:110px"><span class="chip">알림톡</span></span></div>
+        </div>
+      </div>
+      <div class="row" style="gap:14px">
+        <div class="tint m pop" style="--d:.8s; flex:1; padding:16px 18px"><div class="lb">위험 그룹</div><div style="margin-top:6px; font-size:16.5px; font-weight:800">떠나기 직전 단골</div><div style="margin-top:10px"><span class="chip hot">캠페인 만들기</span></div></div>
+        <div class="gray m pop" style="--d:.95s; flex:1; padding:16px 18px"><div class="lb g">기회 그룹</div><div style="margin-top:6px; font-size:16.5px; font-weight:800">곧 살 것 같은 고객</div><div style="margin-top:10px"><span class="chip on">캠페인 만들기</span></div></div>
+      </div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면과 이름은 이해를 돕기 위한 예시입니다<span class="pg">21</span></div>
+</section>
+
+<!-- 22 성과 리포트와 고객 이력 -->
+<section class="slide" id="s21">
+  <div class="k">성과와 고객 이력</div>
+  <div class="t">보낸 뒤까지 숫자로 보고, 다음 수를 받습니다</div>
+  <div class="body">
+    <div class="fill row" style="gap:20px">
+      <div class="card m rise col" style="--d:.1s; width:640px; padding:22px">
+        <div class="row" style="align-items:center"><b style="font-size:18px">성과 리포트</b><span class="chip" style="margin-left:auto">최근 30일</span></div>
+        <div class="row" style="gap:10px; margin-top:14px">
+          <div class="gray" style="flex:1; padding:12px 14px; border-radius:12px"><div class="note">발송 캠페인</div><div style="font-size:16px; font-weight:800; margin-top:2px">한눈에</div></div>
+          <div class="gray" style="flex:1; padding:12px 14px; border-radius:12px"><div class="note">보낸 뒤 들어온 구매</div><div style="font-size:16px; font-weight:800; margin-top:2px">자동 연결</div></div>
+          <div class="tint" style="flex:1; padding:12px 14px; border-radius:12px"><div class="note">귀속 매출</div><div style="font-size:16px; font-weight:800; margin-top:2px; color:#C8410C">캠페인별</div></div>
+        </div>
+        <svg viewBox="0 0 600 150" class="fill" style="width:100%; margin-top:12px" preserveAspectRatio="none">
+          <g fill="#ECEAE7"><rect x="10" y="80" width="56" height="66" rx="8"/><rect x="92" y="64" width="56" height="82" rx="8"/><rect x="174" y="72" width="56" height="74" rx="8"/><rect x="256" y="50" width="56" height="96" rx="8"/><rect x="338" y="58" width="56" height="88" rx="8"/></g>
+          <rect class="m grow" style="--d:.4s" x="420" y="34" width="56" height="112" rx="8" fill="#1A1A1A"/>
+          <rect class="m grow" style="--d:.6s" x="502" y="12" width="56" height="134" rx="8" fill="#FF5A1F"/>
+          <polyline class="m draw" style="--len:700; --d:.5s" points="38,76 120,60 202,68 284,46 366,54 448,30 530,8" fill="none" stroke="#FF5A1F" stroke-width="2.5"/>
+        </svg>
+        <div class="chips" style="margin-top:12px"><span class="chip soft">AI 자율 진단</span><span class="chip">채널 ROI 회복</span><span class="chip">시간대 최적화</span><span class="chip">최고 성과 복제</span><span class="chip">풀분석 보고서</span></div>
+      </div>
+      <div class="card m rise col fill" style="--d:.3s; padding:22px">
+        <b style="font-size:18px">고객 한 명 이력</b>
+        <div class="col fill" style="margin-top:12px; margin-left:6px; border-left:2px solid #ECEAE7; padding-left:18px; justify-content:space-around">
+          <div style="position:relative"><span style="position:absolute; left:-26px; top:4px; width:14px; height:14px; border-radius:50%; background:#FF5A1F"></span><div class="note">11월 3일</div><div style="font-size:15.5px; font-weight:700">매장 구매, 니트 가디건</div></div>
+          <div style="position:relative"><span style="position:absolute; left:-26px; top:4px; width:14px; height:14px; border-radius:50%; background:#1A1A1A"></span><div class="note">11월 1일</div><div style="font-size:15.5px; font-weight:700">알림톡 받음, 링크 클릭</div></div>
+          <div style="position:relative"><span style="position:absolute; left:-26px; top:4px; width:14px; height:14px; border-radius:50%; background:#D6D3D1"></span><div class="note">10월 28일</div><div style="font-size:15.5px; font-weight:700">자사몰 장바구니 담음</div></div>
+          <div style="position:relative"><span style="position:absolute; left:-26px; top:4px; width:14px; height:14px; border-radius:50%; background:#D6D3D1"></span><div class="note">9월 12일</div><div style="font-size:15.5px; font-weight:700">광고 수신 동의</div></div>
+        </div>
+      </div>
+    </div>
+    <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:14px">
+      <div class="gray m rise" style="--d:.6s; padding:14px 18px"><b style="font-size:15.5px">발송 결과</b><div class="note" style="margin-top:4px">성공, 실패, 실패 사유까지</div></div>
+      <div class="gray m rise" style="--d:.7s; padding:14px 18px"><b style="font-size:15.5px">날짜별 발송 달력</b><div class="note" style="margin-top:4px">어느 날 무엇을 보냈는지</div></div>
+      <div class="gray m rise" style="--d:.8s; padding:14px 18px"><b style="font-size:15.5px">계정과 권한</b><div class="note" style="margin-top:4px">매장별로 자기 고객만</div></div>
+      <div class="gray m rise" style="--d:.9s; padding:14px 18px"><b style="font-size:15.5px">정산</b><div class="note" style="margin-top:4px">청구서와 거래내역서</div></div>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 화면은 이해를 돕기 위한 예시입니다<span class="pg">22</span></div>
+</section>
+
+<!-- 23 데이터 연결 -->
+<section class="slide" id="s22">
+  <div class="k">고객 데이터</div>
+  <div class="t">온라인과 매장, 흩어진 고객을 한 사람으로</div>
+  <div class="body">
+    <svg viewBox="0 0 1136 500" class="fill" style="width:100%" preserveAspectRatio="xMidYMid meet">
+      <defs><marker id="a22" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1A1A1A"/></marker>
+        <marker id="a22o" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#FF5A1F"/></marker></defs>
+      <g font-weight="700">
+        <g class="m rise" style="--d:.1s"><rect x="0" y="4" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="22" y="46" font-size="18" font-weight="800" fill="#1A1A1A">자사몰 연동</text><text x="22" y="78" font-size="15" fill="#57534E">카페24, 고도몰, 우커머스, 그 밖의 몰</text></g>
+        <g class="m rise" style="--d:.2s"><rect x="0" y="134" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="22" y="176" font-size="18" font-weight="800" fill="#1A1A1A">매장 시스템 DB</text><text x="22" y="208" font-size="15" fill="#57534E">POS와 ERP, Oracle, MSSQL, MySQL 등</text></g>
+        <g class="m rise" style="--d:.3s"><rect x="0" y="264" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="22" y="306" font-size="18" font-weight="800" fill="#1A1A1A">엑셀 명단</text><text x="22" y="338" font-size="15" fill="#57534E">어떤 양식이든 그대로 올리면 됩니다</text></g>
+        <g class="m rise" style="--d:.4s"><rect x="0" y="394" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="22" y="436" font-size="18" font-weight="800" fill="#1A1A1A">자사몰 행동</text><text x="22" y="468" font-size="15" fill="#57534E">방문과 장바구니까지</text></g>
+        <path class="m draw" style="--len:160; --d:.5s" d="M330 56 C390 56 390 232 430 240" stroke="#1A1A1A" stroke-width="2" fill="none" marker-end="url(#a22)"/>
+        <path class="m draw" style="--len:160; --d:.55s" d="M330 186 C380 186 390 240 430 246" stroke="#1A1A1A" stroke-width="2" fill="none" marker-end="url(#a22)"/>
+        <path class="m draw" style="--len:160; --d:.6s" d="M330 316 C380 316 390 262 430 256" stroke="#1A1A1A" stroke-width="2" fill="none" marker-end="url(#a22)"/>
+        <path class="m draw" style="--len:160; --d:.65s" d="M330 446 C390 446 390 270 430 262" stroke="#1A1A1A" stroke-width="2" fill="none" marker-end="url(#a22)"/>
+        <g class="m pop" style="--d:.7s">
+          <rect x="436" y="120" width="300" height="260" rx="26" fill="#FFF3EC" stroke="#FFE3D4" stroke-width="1.5"/>
+          <text x="586" y="170" text-anchor="middle" font-size="15" fill="#C8410C">한줄로 고객 원장</text>
+          <text x="586" y="214" text-anchor="middle" font-size="22" font-weight="800" fill="#1A1A1A">번호 하나 = 고객 한 명</text>
+          <text x="586" y="258" text-anchor="middle" font-size="15" fill="#57534E">온라인과 매장 구매를 한 이력으로</text>
+          <text x="586" y="288" text-anchor="middle" font-size="15" fill="#57534E">받은 메시지와 클릭도 함께</text>
+          <text x="586" y="318" text-anchor="middle" font-size="15" fill="#57534E">수신동의와 수신거부도 함께</text>
+        </g>
+        <path class="m draw" style="--len:140; --d:.9s" d="M736 200 L800 112" stroke="#FF5A1F" stroke-width="2" fill="none" marker-end="url(#a22o)"/>
+        <path class="m draw" style="--len:140; --d:.95s" d="M736 250 L800 250" stroke="#FF5A1F" stroke-width="2" fill="none" marker-end="url(#a22o)"/>
+        <path class="m draw" style="--len:140; --d:1s" d="M736 300 L800 388" stroke="#FF5A1F" stroke-width="2" fill="none" marker-end="url(#a22o)"/>
+        <g class="m rise" style="--d:1.05s"><rect x="806" y="60" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="828" y="102" font-size="18" font-weight="800" fill="#1A1A1A">여정과 자동 마케팅</text><text x="828" y="134" font-size="15" fill="#57534E">사건과 고객 상태로 자동 발송</text></g>
+        <g class="m rise" style="--d:1.15s"><rect x="806" y="198" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="828" y="240" font-size="18" font-weight="800" fill="#1A1A1A">대상 고르기와 예측</text><text x="828" y="272" font-size="15" fill="#57534E">조건 조회, 이탈과 구매 점수</text></g>
+        <g class="m rise" style="--d:1.25s"><rect x="806" y="336" width="330" height="104" rx="18" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="828" y="378" font-size="18" font-weight="800" fill="#1A1A1A">성과 연결</text><text x="828" y="410" font-size="15" fill="#57534E">보낸 뒤 들어온 구매를 캠페인에</text></g>
+      </g>
+    </svg>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">23</span></div>
+</section>
+
+<!-- 24 맡기기 -->
+<section class="slide" id="s23">
+  <div class="k">맡기기</div>
+  <div class="t">바쁠 때는 메일 한 통, 담당자는 휴대폰으로 승인만</div>
+  <div class="body">
+    <svg viewBox="0 0 1136 150" style="width:1136px; height:150px; flex:none">
+      <defs><marker id="a23" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1A1A1A"/></marker></defs>
+      <g font-weight="700" text-anchor="middle">
+        <g class="m pop" style="--d:.1s"><rect x="0" y="10" width="200" height="130" rx="20" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="100" y="66" font-size="17" font-weight="800" fill="#1A1A1A">메일로 접수</text><text x="100" y="96" font-size="14" fill="#57534E">요청서와 명단 파일</text></g>
+        <path class="m draw" style="--len:80; --d:.25s" d="M204 75 L238 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a23)"/>
+        <g class="m pop" style="--d:.3s"><rect x="242" y="10" width="200" height="130" rx="20" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="342" y="66" font-size="17" font-weight="800" fill="#1A1A1A">검사와 다듬기</text><text x="342" y="96" font-size="14" fill="#57534E">스팸 검사, 문안 다듬기</text></g>
+        <path class="m draw" style="--len:80; --d:.45s" d="M446 75 L480 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a23)"/>
+        <g class="m pop" style="--d:.5s"><rect x="484" y="10" width="200" height="130" rx="20" fill="#FFF3EC" stroke="#FF5A1F" stroke-width="1.5"/><text x="584" y="66" font-size="17" font-weight="800" fill="#C8410C">테스트 문자</text><text x="584" y="96" font-size="14" fill="#57534E">담당자 번호로, 승인 링크도</text></g>
+        <path class="m draw" style="--len:80; --d:.65s" d="M688 75 L722 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a23)"/>
+        <g class="m pop" style="--d:.7s"><rect x="726" y="10" width="200" height="130" rx="20" fill="#1A1A1A"/><text x="826" y="66" font-size="17" font-weight="800" fill="#fff">링크로 승인</text><text x="826" y="96" font-size="14" fill="#D6D3D1">취소, 시각 변경도 휴대폰에서</text></g>
+        <path class="m draw" style="--len:80; --d:.85s" d="M930 75 L964 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#a23)"/>
+        <g class="m pop" style="--d:.9s"><rect x="968" y="10" width="168" height="130" rx="20" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="1052" y="66" font-size="17" font-weight="800" fill="#1A1A1A">예약과 발송</text><text x="1052" y="96" font-size="14" fill="#57534E">보내는 날 한 번 더 검사</text></g>
+      </g>
+    </svg>
+    <div class="tri fill">
+      <div class="card m rise" style="--d:1s"><div class="hd">대행발송</div><div class="p">명단과 문안을 맡기면 검사와 예약까지 대신 합니다. 승인 없는 발송은 없습니다.</div><div class="chips bottom"><span class="chip">화면 접수</span><span class="chip">요청서 한 번에</span><span class="chip soft">메일 접수</span></div></div>
+      <div class="card m rise" style="--d:1.1s"><div class="hd">캠페인 대행</div><div class="p">행사 내용과 이미지를 올리면 회사 데이터로 분석한 제안서를 받습니다.</div><div class="chips bottom"><span class="chip">행사 이미지로 자동 채움</span><span class="chip">접수 이력</span></div></div>
+      <div class="card m rise" style="--d:1.2s"><div class="hd">마케팅 진단</div><div class="p">3분 질문에 답하면 잘하는 것과 아쉬운 것, 첫 과제가 진단서로 나옵니다.</div><div class="chips bottom"><span class="chip">진단서</span><span class="chip">첫 발송 바로 해 보기</span></div></div>
+    </div>
+    <div class="take m rise" style="--d:1.4s"><span class="tg">한 줄 정리</span><span>담당자가 할 일은 테스트 문자를 보고 승인하는 것뿐입니다</span></div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">24</span></div>
+</section>
+
+<!-- 25 대행 운영 1 -->
+<section class="slide" id="sA1" style="background: linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 60%, #FFF3EC 100%)">
+  <div class="k">캠페인 대행 운영</div>
+  <div class="t">마케터 1명의 인건비로, <span class="hl">마케팅팀 하나를 씁니다</span></div>
+  <div class="s">비즈니스 요금제 이상(월 300만원부터) 고객사는 한줄로 전담 담당자가 캠페인을 대신 기획하고, 만들고, 보냅니다.</div>
+  <div class="body sub">
+    <div class="fill" style="display:grid; grid-template-columns: 200px 1fr 1fr; grid-template-rows: auto repeat(5, 1fr); gap:10px 14px">
+      <div></div>
+      <div class="gray m rise" style="--d:.1s; padding:12px 18px; border-radius:14px"><b style="font-size:16px">마케터를 직접 뽑으면</b></div>
+      <div class="m rise" style="--d:.15s; padding:12px 18px; border-radius:14px; background:#1A1A1A; color:#fff"><b style="font-size:16px">한줄로 대행 운영</b></div>
+
+      <div class="m rise" style="--d:.2s; display:flex; align-items:center; font-size:16px; font-weight:800">채용과 교육</div>
+      <div class="card m rise" style="--d:.2s; padding:12px 18px; display:flex; align-items:center"><span class="p">공고, 면접, 적응 기간이 필요합니다</span></div>
+      <div class="tint m rise" style="--d:.25s; padding:12px 18px; display:flex; align-items:center"><span class="p" style="color:#1A1A1A; font-weight:700">계약한 달부터 바로 운영합니다</span></div>
+
+      <div class="m rise" style="--d:.3s; display:flex; align-items:center; font-size:16px; font-weight:800">도구 익히기와 설정</div>
+      <div class="card m rise" style="--d:.3s; padding:12px 18px; display:flex; align-items:center"><span class="p">문자, 메일, 디자인 도구를 따로 배웁니다</span></div>
+      <div class="tint m rise" style="--d:.35s; padding:12px 18px; display:flex; align-items:center"><span class="p" style="color:#1A1A1A; font-weight:700">귀찮은 설정은 전담 담당자가 대신 합니다</span></div>
+
+      <div class="m rise" style="--d:.4s; display:flex; align-items:center; font-size:16px; font-weight:800">문안과 디자인 제작</div>
+      <div class="card m rise" style="--d:.4s; padding:12px 18px; display:flex; align-items:center"><span class="p">사람 손으로 하나씩 만듭니다</span></div>
+      <div class="tint m rise" style="--d:.45s; padding:12px 18px; display:flex; align-items:center"><span class="p" style="color:#1A1A1A; font-weight:700">AI로 만들고 전담 담당자가 다듬어 검수합니다</span></div>
+
+      <div class="m rise" style="--d:.5s; display:flex; align-items:center; font-size:16px; font-weight:800">발송 규칙 확인</div>
+      <div class="card m rise" style="--d:.5s; padding:12px 18px; display:flex; align-items:center"><span class="p">광고 표기, 수신거부를 매번 챙깁니다</span></div>
+      <div class="tint m rise" style="--d:.55s; padding:12px 18px; display:flex; align-items:center"><span class="p" style="color:#1A1A1A; font-weight:700">기계가 확인하고 3사 스팸 검사를 거칩니다</span></div>
+
+      <div class="m rise" style="--d:.6s; display:flex; align-items:center; font-size:16px; font-weight:800">성과 정리</div>
+      <div class="card m rise" style="--d:.6s; padding:12px 18px; display:flex; align-items:center"><span class="p">엑셀로 모아 보고서를 만듭니다</span></div>
+      <div class="tint m rise" style="--d:.65s; padding:12px 18px; display:flex; align-items:center"><span class="p" style="color:#1A1A1A; font-weight:700">매달 리포트와 다음 달 계획을 드립니다</span></div>
+    </div>
+    <div class="take m rise" style="--d:.8s"><span class="tg">한 줄 정리</span><span>고객사가 할 일은 휴대폰으로 온 테스트 문자를 보고 승인하는 것뿐입니다</span></div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">25</span></div>
+</section>
+
+<!-- 26 대행 운영 2 -->
+<section class="slide" id="sA2">
+  <div class="k">캠페인 대행 운영</div>
+  <div class="t">전담 담당자가 매달 이렇게 운영합니다</div>
+  <div class="body">
+    <svg viewBox="0 0 1136 150" style="width:1136px; height:150px; flex:none">
+      <defs><marker id="aA2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#1A1A1A"/></marker></defs>
+      <g font-weight="700" text-anchor="middle">
+        <g class="m pop" style="--d:.1s"><rect x="0" y="10" width="262" height="130" rx="20" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="131" y="52" font-size="14" fill="#C8410C">1주</text><text x="131" y="82" font-size="18" font-weight="800" fill="#1A1A1A">계획 맞추기</text><text x="131" y="110" font-size="14.5" fill="#57534E">행사, 대상, 채널을 함께 정함</text></g>
+        <path class="m draw" style="--len:60; --d:.25s" d="M266 75 L290 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#aA2)"/>
+        <g class="m pop" style="--d:.3s"><rect x="294" y="10" width="262" height="130" rx="20" fill="#fff" stroke="#ECEAE7" stroke-width="1.5"/><text x="425" y="52" font-size="14" fill="#C8410C">2주</text><text x="425" y="82" font-size="18" font-weight="800" fill="#1A1A1A">만들기</text><text x="425" y="110" font-size="14.5" fill="#57534E">문안, 포스터, DM, 이메일</text></g>
+        <path class="m draw" style="--len:60; --d:.45s" d="M560 75 L584 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#aA2)"/>
+        <g class="m pop" style="--d:.5s"><rect x="588" y="10" width="262" height="130" rx="20" fill="#FFF3EC" stroke="#FF5A1F" stroke-width="1.5"/><text x="719" y="52" font-size="14" fill="#C8410C">3주</text><text x="719" y="82" font-size="18" font-weight="800" fill="#1A1A1A">승인받고 발송</text><text x="719" y="110" font-size="14.5" fill="#57534E">테스트 문자, 승인 링크, 예약</text></g>
+        <path class="m draw" style="--len:60; --d:.65s" d="M854 75 L878 75" stroke="#1A1A1A" stroke-width="2" marker-end="url(#aA2)"/>
+        <g class="m pop" style="--d:.7s"><rect x="882" y="10" width="254" height="130" rx="20" fill="#1A1A1A"/><text x="1009" y="52" font-size="14" fill="#FF8A5C">4주</text><text x="1009" y="82" font-size="18" font-weight="800" fill="#fff">리포트와 다음 달</text><text x="1009" y="110" font-size="14.5" fill="#D6D3D1">성과 정리, 다음 달 제안</text></g>
+      </g>
+    </svg>
+    <div class="fill" style="display:grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: 1fr 1fr; gap:14px">
+      <div class="card m rise col" style="--d:.8s; padding:18px 22px; justify-content:center"><div class="h3" style="font-size:17px">캠페인 기획</div><div class="p" style="margin-top:6px">목표, 대상, 시기를 정하고 AI 한줄로로 제안서를 만듭니다</div></div>
+      <div class="card m rise col" style="--d:.85s; padding:18px 22px; justify-content:center"><div class="h3" style="font-size:17px">문안과 이미지</div><div class="p" style="margin-top:6px">AI 문안과 이미지 스튜디오 포스터를 전담 담당자가 다듬습니다</div></div>
+      <div class="card m rise col" style="--d:.9s; padding:18px 22px; justify-content:center"><div class="h3" style="font-size:17px">모바일 DM과 이메일</div><div class="p" style="margin-top:6px">행사 페이지와 메일을 같은 재료로 함께 만듭니다</div></div>
+      <div class="card m rise col" style="--d:.95s; padding:18px 22px; justify-content:center"><div class="h3" style="font-size:17px">여정 세팅과 운영</div><div class="p" style="margin-top:6px">가입, 장바구니, 휴면 같은 여정을 켜고 결과를 봅니다</div></div>
+      <div class="card m rise col" style="--d:1s; padding:18px 22px; justify-content:center"><div class="h3" style="font-size:17px">발송과 확인</div><div class="p" style="margin-top:6px">3사 스팸 검사, 예약, 발송 결과 확인까지 맡습니다</div></div>
+      <div class="tint m rise col" style="--d:1.05s; padding:18px 22px; justify-content:center"><div class="h3" style="font-size:17px">월간 리포트</div><div class="p" style="margin-top:6px; color:#1A1A1A">무엇을 보냈고 무엇이 팔렸는지, 다음 달에 할 일까지</div></div>
+    </div>
+    <div class="card m rise" style="--d:1.2s; padding:14px 20px; display:flex; align-items:center; gap:12px">
+      <span class="chip soft">운영 범위</span><span style="font-size:15.5px; font-weight:600; color:#44403C">한 달에 운영할 캠페인 수와 채널은 계약 때 함께 정합니다. 승인 없는 발송은 없습니다.</span>
+    </div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">26</span></div>
+</section>
+
+<!-- 27 여정 세팅 컨설팅 -->
+<section class="slide" id="sA3">
+  <div class="k">여정 세팅 컨설팅</div>
+  <div class="t">300만원으로, 원하는 여정 세팅부터 운영 계획까지</div>
+  <div class="s">처음 도입하는 회사가 무엇부터 켜야 할지 고민하지 않도록, 진단부터 세팅까지 한 번에 잡아 드립니다.</div>
+  <div class="body sub"><div class="cols" style="grid-template-columns: 1fr 380px">
+    <div class="fill" style="display:grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(3, 1fr); gap:14px">
+      <div class="card m rise col" style="--d:.1s; padding:16px 20px; justify-content:center"><div class="row" style="gap:10px; align-items:center"><span class="num">1</span><b style="font-size:16.5px">고객 데이터 진단</b></div><div class="p" style="margin-top:6px">명단, 수신동의, 구매 연결 상태를 점검합니다</div></div>
+      <div class="card m rise col" style="--d:.15s; padding:16px 20px; justify-content:center"><div class="row" style="gap:10px; align-items:center"><span class="num">2</span><b style="font-size:16.5px">고객 분류 설계</b></div><div class="p" style="margin-top:6px">VIP, 신규, 휴면 위험처럼 운영할 묶음을 정합니다</div></div>
+      <div class="card m rise col" style="--d:.2s; padding:16px 20px; justify-content:center"><div class="row" style="gap:10px; align-items:center"><span class="num">3</span><b style="font-size:16.5px">여정 설계와 세팅</b></div><div class="p" style="margin-top:6px">회사에 맞는 여정을 고르고 문안까지 넣어 켭니다</div></div>
+      <div class="card m rise col" style="--d:.25s; padding:16px 20px; justify-content:center"><div class="row" style="gap:10px; align-items:center"><span class="num">4</span><b style="font-size:16.5px">캠페인 달력</b></div><div class="p" style="margin-top:6px">첫 석 달의 행사와 발송 계획을 짭니다</div></div>
+      <div class="card m rise col" style="--d:.3s; padding:16px 20px; justify-content:center"><div class="row" style="gap:10px; align-items:center"><span class="num">5</span><b style="font-size:16.5px">성과 지표</b></div><div class="p" style="margin-top:6px">재구매, 휴면 복귀, 캠페인 매출을 볼 기준을 정합니다</div></div>
+      <div class="card m rise col" style="--d:.35s; padding:16px 20px; justify-content:center"><div class="row" style="gap:10px; align-items:center"><span class="num">6</span><b style="font-size:16.5px">담당자 안내</b></div><div class="p" style="margin-top:6px">승인하는 법, 결과 보는 법을 고객사 담당자에게 안내합니다</div></div>
+    </div>
+    <div class="rcol">
+      <div class="m pop fill" style="--d:.5s; position:relative; border-radius:18px; background:#F7F6F4; overflow:hidden; display:flex; align-items:center; justify-content:center">
+        <div class="card" style="position:absolute; width:230px; height:300px; transform:rotate(-6deg) translate(-40px, 10px); padding:20px; background:#fff"><div style="height:10px; width:55%; border-radius:5px; background:#FFE3D4"></div><div style="margin-top:16px; display:flex; flex-direction:column; gap:10px"><div style="height:8px; border-radius:4px; background:#F1F0EE"></div><div style="height:8px; border-radius:4px; background:#F1F0EE"></div><div style="height:8px; border-radius:4px; background:#F1F0EE"></div><div style="height:8px; border-radius:4px; background:#F1F0EE"></div><div style="height:8px; border-radius:4px; background:#F1F0EE"></div></div></div>
+        <div class="card" style="position:relative; width:240px; height:320px; transform:rotate(4deg) translate(36px, 0); padding:22px; background:#fff; border-color:#FFE3D4">
+          <div class="lb">예시</div>
+          <div style="margin-top:8px; font-size:19px; font-weight:800; line-height:1.35">소요웨어<br>도입 컨설팅<br>보고서</div>
+          <div style="margin-top:14px; height:6px; width:60%; border-radius:3px; background:#FF5A1F"></div>
+          <div style="margin-top:18px; display:flex; flex-direction:column; gap:8px"><div style="height:8px; border-radius:4px; background:#F1F0EE"></div><div style="height:8px; width:80%; border-radius:4px; background:#F1F0EE"></div><div style="height:8px; width:65%; border-radius:4px; background:#F1F0EE"></div></div>
+          <div class="note" style="position:absolute; left:22px; bottom:18px">가상 브랜드 예시 자료</div>
+        </div>
+      </div>
+      <div class="tint m rise" style="--d:.8s; padding:14px 18px"><div class="lb">진행 기간</div><div style="margin-top:4px; font-size:16px; font-weight:800">4주, 진단부터 첫 캠페인까지</div></div>
+    </div>
+  </div></div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서 &nbsp; 보고서 예시는 별도 자료로 드립니다<span class="pg">27</span></div>
+</section>
+
+<!-- 28 도입 -->
+<section class="slide" id="s24">
+  <div class="k">도입 방법</div>
+  <div class="t">작게 시작해서, 회사 전체로 넓힙니다</div>
+  <div class="body">
+    <div class="tri fill">
+      <div class="card m rise" style="--d:.1s; padding:0; overflow:hidden"><div style="padding:16px 24px; background:#F7F6F4; font-size:18px; font-weight:800">1 진단과 연결</div>
+        <div class="col fill" style="padding:20px 24px; justify-content:space-around"><div><b style="font-size:16.5px">지금 데이터 확인</b><div class="p" style="margin-top:6px">명단, 자사몰, 매장 시스템 중 무엇이 있는지 질의서로 확인합니다</div></div>
+        <div><b style="font-size:16.5px">연결 세팅</b><div class="p" style="margin-top:6px">엑셀, 자사몰 연동, 매장 DB 동기화 중 맞는 방식으로 연결합니다</div></div></div></div>
+      <div class="card m rise" style="--d:.25s; padding:0; overflow:hidden"><div style="padding:16px 24px; background:#F7F6F4; font-size:18px; font-weight:800">2 첫 캠페인</div>
+        <div class="col fill" style="padding:20px 24px; justify-content:space-around"><div><b style="font-size:16.5px">여정 하나부터</b><div class="p" style="margin-top:6px">장바구니 이탈이나 생일처럼 바로 효과를 보는 여정을 켭니다</div></div>
+        <div><b style="font-size:16.5px">발신 준비</b><div class="p" style="margin-top:6px">발신번호, 알림톡 발신프로필과 템플릿 검수를 함께 마칩니다</div></div></div></div>
+      <div class="card m rise" style="--d:.4s; padding:0; overflow:hidden; border-color:#FFE3D4"><div style="padding:16px 24px; background:#FFF3EC; color:#C8410C; font-size:18px; font-weight:800">3 넓혀서 운영</div>
+        <div class="col fill" style="padding:20px 24px; justify-content:space-around"><div><b style="font-size:16.5px">자동 마케팅과 계획</b><div class="p" style="margin-top:6px">AI의 매일 제안과 한 달 계획으로 운영을 넓힙니다</div></div>
+        <div><b style="font-size:16.5px">팀과 매장으로</b><div class="p" style="margin-top:6px">직원 계정과 매장별 권한을 나눠 각자 자기 고객을 맡습니다</div></div></div></div>
+    </div>
+    <div class="take m rise" style="--d:.7s"><span class="tg">권하는 순서</span><span>첫 달은 여정 하나로 효과를 확인하고, 그다음 자동 마케팅으로 넓힙니다</span></div>
+  </div>
+  <div class="foot"><img src="../../../packages/frontend/public/logo.png" alt="">서비스 제안서<span class="pg">28</span></div>
+</section>
+
+<!-- 29 마무리 -->
+<section class="slide" id="s25" style="background: linear-gradient(135deg, #FFFFFF 0%, #FFFFFF 50%, #FFF3EC 100%)">
+  <div class="m rise" style="position:absolute; left:0; right:0; top:170px; text-align:center; font-size:22px; font-weight:600; color:#66605B">마케팅의 완성</div>
+  <div class="m rise" style="--d:.2s; position:absolute; left:410px; top:226px; width:460px">
+    <img src="../../../packages/frontend/public/logo.png" alt="한줄로" style="width:460px; display:block">
+    <div style="position:absolute; left:310px; top:-24px; width:150px; text-align:center; font-size:96px; font-weight:900; color:#FF5A1F; letter-spacing:-0.03em">AI</div>
+  </div>
+  <div class="m rise" style="--d:.45s; position:absolute; left:0; right:0; top:380px; text-align:center; font-size:26px; font-weight:800; letter-spacing:-0.03em; line-height:1.5">한국 고객에게 닿는 CRM,<br>목표 한 줄로 시작합니다</div>
+  <div class="m rise" style="--d:.65s; position:absolute; left:0; right:0; top:496px; display:flex; justify-content:center; gap:12px">
+    <span class="chip on" style="font-size:16px; padding:9px 20px">hanjul.ai</span><span class="chip" style="font-size:16px; padding:9px 20px">INVITO(인비토)</span>
+  </div>
+</section>
+
+</div>
+<script>
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) e.target.classList.add('play'); }), { threshold: 0.35 });
+  document.querySelectorAll('.slide').forEach((s) => io.observe(s));
+</script>
+</body>
+</html>

@@ -526,9 +526,14 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
     for (const f of ['utils/journey-activation.ts', 'utils/journey-anchor-scheduler.ts', 'utils/journey-simulator.ts', 'utils/journey-trigger-watcher.ts', 'routes/ai.ts']) {
       const s = readFileSync(join(SRC, f), 'utf8');
       const inline = s.match(/(?<!= )await getJourneyOwnerScopeSql\([^()]+\)(, await journeyOwnerConsent\([^()]+\))?/g) || [];
-      expect(inline.length, f).toBeGreaterThan(0);
+      // ★ 2026-11-05 C104 G5 — 진입 입력 CT(journeyEntryInputs)를 쓰는 파일은 CT 가 범위 · 동의 한 쌍을 든다(아래)
+      expect(inline.length > 0 || s.includes('journeyEntryInputs('), f).toBe(true);
       for (const m of inline) expect(m, f).toMatch(/, await journeyOwnerConsent\(/);
     }
+    const ext = readFileSync(join(SRC, 'utils', 'journey-target-extractor.ts'), 'utf8');
+    const ct = ext.slice(ext.indexOf('export async function journeyEntryInputs('), ext.indexOf('\n}\n', ext.indexOf('export async function journeyEntryInputs(')));
+    expect(ct).toContain('scopeSql: await getJourneyOwnerScopeSql(companyId, journeyId),');
+    expect(ct).toContain('consent: await journeyOwnerConsent(companyId, journeyId),');
   });
   it('자동마케팅 게이트 단일 문은 호출부마다 주인을 받는다(3번째 인자)', () => {
     const calls = walk(SRC).flatMap((p) => codeLines(p)

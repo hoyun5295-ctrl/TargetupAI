@@ -18,7 +18,7 @@
  *   - 학습 단계 안내 (cold start / active)
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 // ★ 2026-10-20 V.3 §9-4 — 변형마다 같은 큰 휴대폰(실제 나가는 형태 · (광고) · 무료수신거부 합성 바이트 · 받는 모습 = 서버 미리보기).
 import PhoneComposer from './PhoneComposer';
 import { aiCopyEntriesAll } from '../../utils/ai-copy-entry';
@@ -76,6 +76,8 @@ interface Props {
   defaultMessageTemplate: string;
   defaultSubject?: string;
   onClose?: () => void;
+  /** ★ 2026-11-05 C104 Codex 구현 1R — A/B 글이 생기거나 바뀌거나 지워진 뒤(칸 잠금 · 나갈 글이 바뀐다 · 부모가 상세를 다시 읽는다) */
+  onCopyChanged?: () => void;
   /** ★ V.3 — 회사 080 수신거부 번호(바이트 · 보이는 모습 합성). 비카카오 여정 칸은 늘 광고다(resolveJourneyAdFlag). */
   opt080Number?: string;
 }
@@ -106,6 +108,7 @@ export default function JourneyVariantsEditor({
   opt080Number = '',
   defaultSubject,
   onClose,
+  onCopyChanged,
 }: Props) {
   const [variants, setVariants] = useState<JourneyStepVariant[]>([]);
   const [winnerDeclaration, setWinnerDeclaration] = useState<VariantWinnerDeclaration | null>(null);
@@ -125,6 +128,14 @@ export default function JourneyVariantsEditor({
 
   const isReadOnly = journeyStatus === 'active';
 
+  // ★ 2026-11-05 C104 Codex 구현 3R 구조 — 판 글이 바뀌는 자리 = 쓰기 요청. 이 창의 쓰기(만들기 · 저장 · AI 판 넣기 · 지우기 · 비율 적용)는 모두 writeFetch 하나로 ·
+  //   요청이 끝나면(성공 · 실패 · 부분 성공 · 응답 유실 모두) 부모에 알린다 → 부모가 서버 상세를 다시 읽는다(칸 잠금 · 나갈 글 · 혜택 줄).
+  //   옛(1R · 2R): 알림을 갈래마다 · 읽기(loadVariants)에 붙여 실패 갈래가 읽기를 건너뛰면 빠졌다.
+  const onCopyChangedRef = useRef(onCopyChanged);
+  onCopyChangedRef.current = onCopyChanged;
+  const writeFetch = async (url: string, init: RequestInit): Promise<Response> => {
+    try { return await fetch(url, init); } finally { onCopyChangedRef.current?.(); }
+  };
   const loadVariants = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -163,7 +174,7 @@ export default function JourneyVariantsEditor({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
         {
           method: 'POST',
@@ -200,7 +211,7 @@ export default function JourneyVariantsEditor({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
         {
           method: 'POST',
@@ -271,7 +282,7 @@ export default function JourneyVariantsEditor({
     const newId = nextVariantId(variants);
     setSaving(true);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
         {
           method: 'POST',
@@ -311,7 +322,7 @@ export default function JourneyVariantsEditor({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(
+      const res = await writeFetch(
         `/api/ai/operator/journeys/variants/${variant.id}`,
         { method: 'DELETE', headers: fetchHeaders() },
       );
@@ -511,7 +522,7 @@ export default function JourneyVariantsEditor({
                         try {
                           for (const v of variants) {
                             const recommended = winnerDeclaration.recommendedTrafficWeights[v.variantId] ?? v.trafficWeight;
-                            await fetch(
+                            await writeFetch(
                               `/api/ai/operator/journeys/${journeyId}/steps/${stepId}/variants`,
                               {
                                 method: 'POST',

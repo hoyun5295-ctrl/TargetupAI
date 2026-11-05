@@ -130,7 +130,7 @@ import { suggestJourneyTrigger } from '../utils/journey-trigger-suggest';
 import { editJourneyPackage } from '../utils/journey-ai-editor';
 // ★ 2026-06-29: AI 꾸미기 — 추천 메시지에 선택 컬럼(%변수%) 자연스럽게 녹임
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
-import { countJourneyTargetCustomers, selectAnchorAudienceIds, countAnchorAudience, countJourneyTargets } from '../utils/journey-target-extractor';
+import { countJourneyTargetCustomers, selectAnchorAudienceIds, countAnchorAudience, countJourneyTargetsWithGrace, journeyEntryInputs } from '../utils/journey-target-extractor';
 import { describeJourneyTrigger } from '../utils/journey-step-format';
 import { normalizeStartKind } from '../utils/journey-start-kind';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 조회.
@@ -3699,7 +3699,7 @@ router.post('/operator/journeys/:id/copy-facts', async (req: Request, res: Respo
     });
     if (!out) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
     // ★ 2026-11-05 C103 F2 — 혜택 · 링크 넣기 뒤 자동 유료 스팸 검사 0(검사 = 「지금 스팸 검사」 · 켤 때 · 보내기 전)
-    return res.json({ success: true, steps: out.steps });
+    return res.json({ success: true, steps: out.steps, variantsLeft: out.variantsLeft });   // ★ C104 G2 켜진 여정 = 채우지 않은 A/B 판 수
   } catch (err: any) {
     return journeyError(res, err, 'copy-facts', '넣지 못했어요. 잠시 뒤 다시 시도해 주세요.');
   }
@@ -3865,8 +3865,10 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
     const triggerFilters = journeyRow.trigger_filters || {};
     const startKind = normalizeStartKind(journeyRow.start_kind);
     // ★ 2026-09-27 한줄로 V2 S5-04 — [타겟확인]도 발송과 같은 범위(여정 작성자)
-    const targetScopeSql = await getJourneyOwnerScopeSql(companyId, req.params.id);
-    const targetConsent = await journeyOwnerConsent(companyId, req.params.id);   // ★ 2026-10-02 수신동의 읽기 = CT(발송과 같은 조각)
+    // ★ 2026-11-05 C104 G5 — 입력 = 진입 입력 CT(실제 진입과 같은 범위 · 동의 · 재진입 · 계보)
+    const entry = await journeyEntryInputs(companyId, req.params.id);
+    const targetScopeSql = entry.scopeSql;
+    const targetConsent = entry.consent;   // ★ 2026-10-02 수신동의 읽기 = CT(발송과 같은 조각)
 
     // 추출 — 발송과 동일 함수(자동완화 X). date_anchor는 앵커 대상 함수, 그 외는 트리거 추출.
     let ids: string[] = [];
@@ -3878,8 +3880,8 @@ router.post('/operator/journeys/:id/target-recipients', async (req: Request, res
       displayTotal = await countAnchorAudience(companyId, triggerFilters, targetScopeSql, targetConsent);
       capped = false;
     } else {
-      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, undefined, targetScopeSql, targetConsent);
-      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql, targetConsent);
+      ids = await selectJourneyTargetCustomerIds(companyId, triggerEvent, triggerFilters, 100, req.params.id, entry.reentry, targetScopeSql, targetConsent);
+      const cnt = await countJourneyTargetCustomers(companyId, triggerEvent, triggerFilters, req.params.id, targetScopeSql, targetConsent, entry.reentry);
       displayTotal = cnt.total;
       capped = cnt.capped;
     }
@@ -4005,19 +4007,18 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     // 지금 맞는 인원 — 실발송과 같은 추출 함수(selectJourneyTargetCustomerIds). 시작 조건을 건드렸거나 dryRun 일 때.
     const touchesEntry = Object.keys(body).some((k) => JOURNEY_ENTRY_KEYS.has(k));
     let matched: number | null = null;
+    let grace: { total: number; graceHeld: number; graceDays: number } | null = null;
     const cap = merged.threshold_recipients_per_step;
     if (dryRun || (status === 'active' && touchesEntry)) {
       // ★ 2026-11-02 §16 G2 — 상한이 있으면 상한 + 1 까지(넘음 판정) · 없으면 전원 수(옛: 10만에서 잘린 수를 보였다) · 같은 대상 SQL 한 벌
-      const reentry = { allowReentry: merged.allow_reentry, cooldownDays: Number(merged.reentry_cooldown_days || 0) };
+      // ★ 2026-11-05 C104 G5 — 입력 = 진입 입력 CT + 저장 전 재진입 값(옛: 계보 없이 세서 실제 진입과 달랐다) · G6 유예로 빠진 수 = 같은 SQL
+      const entry = await journeyEntryInputs(companyId, journeyId, { allowReentry: merged.allow_reentry === true, cooldownDays: Number(merged.reentry_cooldown_days || 0) });
+      grace = (dryRun || cap == null) ? await countJourneyTargetsWithGrace(companyId, merged.trigger_event, mergedFilters, journeyId, entry) : null;
       matched = cap != null
         ? (await selectJourneyTargetCustomerIds(
-          companyId, merged.trigger_event, mergedFilters, Number(cap) + 1, journeyId, reentry,
-          await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+          companyId, merged.trigger_event, mergedFilters, Number(cap) + 1, journeyId, entry.reentry, entry.scopeSql, entry.consent,
         )).length
-        : (await countJourneyTargets(
-          companyId, merged.trigger_event, mergedFilters, journeyId,
-          await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId), reentry,
-        )).total;
+        : grace!.total;
       // 켜진 상시 · 휴면 여정에서 넓힌 결과가 상한을 넘으면 저장하지 않는다(다음 회차에 여정 전체가 자동 멈춘다 · 진입 감시 대량 차단).
       //   하루 몫(backfill_per_day)이 있으면 나눠 받으므로 막지 않는다.
       if (!dryRun && status === 'active' && STANDING_COUNT_TRIGGERS.has(merged.trigger_event) && cap != null && matched > Number(cap)
@@ -4034,7 +4035,8 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     }
     if (dryRun) {
       await rollback();
-      return res.json({ success: true, dryRun: true, matched, cap: cap != null ? Number(cap) : null, approximate: !STANDING_COUNT_TRIGGERS.has(merged.trigger_event) });
+      return res.json({ success: true, dryRun: true, matched, cap: cap != null ? Number(cap) : null, approximate: !STANDING_COUNT_TRIGGERS.has(merged.trigger_event),
+        graceHeld: grace?.graceHeld ?? 0, graceDays: grace?.graceDays ?? 0 });
     }
 
     // 켜진 여정에서 겹침 해소 옵션을 끄면 같은 구매에 두 통이 다시 생길 수 있다 → 켜기와 같은 겹침 판정 · 고른 쌍만 통과(고른 쌍은 저장).

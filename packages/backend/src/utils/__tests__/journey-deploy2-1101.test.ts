@@ -78,7 +78,9 @@ describe('C5 점검 응답 = 켜기와 같은 판정 · 5어', () => {
     expect(builder).toMatch(/export async function activationBlockReason\(/);
     expect(builder).toMatch(/const blocked = await activationBlockReason\(companyId, journeyId\);/);
     const check = read('utils/journey-check.ts');
-    expect(check).toMatch(/activationBlockReason\(companyId, journeyId, \{ forCheck: true \}\)/);
+    // ★ C104 G7 — 점검 = 같은 관문의 구조 결과(activationBlockReason = 그 message)
+    expect(builder).toContain('return (await activationBlockIssue(companyId, journeyId, opts))?.message ?? null;');
+    expect(check).toMatch(/activationBlockIssue\(companyId, journeyId, \{ forCheck: true \}\)/);
     expect(check).toMatch(/validateJourneyForActivation\(companyId, journeyId, userId, \{ spam: peekStepSpam, spamStates: states \}\)/);
     // 점검 응답은 검사를 등록하지 않는다(엿보기만) · 등록 함수 이름이 점검 함수 몸통에 없다
     const body = check.slice(check.indexOf('export async function checkJourney'));   // ★ C103 F2 칸 저장 뒤 자동 검사 함수 삭제 = 점검 함수가 끝까지

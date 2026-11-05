@@ -299,7 +299,10 @@ describe('S5-04 소비처 배선', () => {
   });
   it('여정 발송 입구(트리거 4 · 기념일 2)가 작성자 범위를 넘긴다(★1020 V.3 §18 앞 여정을 마치면 +1)', () => {
     const w = src('journey-trigger-watcher.ts');
-    expect((w.match(/await getJourneyOwnerScopeSql\(j\.company_id, j\.id\)/g) || []).length).toBe(4);
+    // ★ 2026-11-05 C104 G5 — 공유 추출 · 이어받기 두 입구 = 진입 입력 CT(journeyEntryInputs · 범위 · 동의 · 재진입 · 계보) · 커서 두 입구 = 직접
+    expect((w.match(/await getJourneyOwnerScopeSql\(j\.company_id, j\.id\)/g) || []).length).toBe(2);
+    expect(w).toContain('const entry = await journeyEntryInputs(j.company_id, j.id);');
+    expect((w.match(/entry\.scopeSql, entry\.consent/g) || []).length).toBe(2);
     const a = src('journey-anchor-scheduler.ts');
     // ★ 2026-11-01 B-1101-7(C92) — 한 문장 넣기(audienceSource)도 같은 작성자 범위를 넘긴다(입구 +1)
     expect((a.match(/await getJourneyOwnerScopeSql\(/g) || []).length).toBe(3);

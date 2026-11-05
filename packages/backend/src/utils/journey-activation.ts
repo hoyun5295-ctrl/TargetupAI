@@ -15,9 +15,7 @@ import { query } from '../config/database';
 import { pausedSetSql } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { checkCredit, deductCreditOutcome, InsufficientCreditError, type DeductOutcome } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
-import { storeCallbackExposure } from './journey-target-extractor';
-import { getJourneyOwnerScopeSql } from './store-scope';
-import { journeyOwnerConsent } from './mall-consent';
+import { storeCallbackExposure, journeyEntryInputs } from './journey-target-extractor';
 import { activateJourney } from './journey-builder';
 import { dispatchOneShotJourney, settleAndDispatchOneShot } from './journey-anchor-scheduler';
 import { nextTriggerEvents } from './journey-trigger-capability';
@@ -71,9 +69,11 @@ export async function activateJourneyGuarded(
     try {
       // ★ 2026-11-02 §16 G2 — 대상 전원 · 실행기와 같은 판정(매장번호마다 isCallbackRegistered(회사, 번호, 여정 만든 계정))
       //   옛: 대상 10만 목록만 보고(넘는 대상의 미등록 수가 빠지거나 창이 안 떴다) · 켠 사람 기준 다른 판정이었다.
+      // ★ 2026-11-05 C104 G5 — 입력 = 진입 입력 CT(여정 id · 재진입 · 계보 · 범위 · 동의 = 실제 진입과 같은 값)
+      const entry = await journeyEntryInputs(companyId, journeyId);
       const cbResult = await storeCallbackExposure(
         companyId, row.trigger_event, row.trigger_filters || {}, row.created_by ? String(row.created_by) : null,
-        undefined, await getJourneyOwnerScopeSql(companyId, journeyId), await journeyOwnerConsent(companyId, journeyId),
+        journeyId, entry.scopeSql, entry.consent, entry.reentry,
       );
       if (cbResult.callbackUnregisteredCount > 0) {
         return {

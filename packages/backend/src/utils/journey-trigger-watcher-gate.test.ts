@@ -27,6 +27,8 @@ vi.mock('./journey-target-extractor', () => ({
   selectCdpEventRowsForCursor: vi.fn(),
   entryPropsFor: vi.fn(async () => undefined),
   JOURNEY_COUNT_CAP: 100000,
+  // ★ 2026-11-05 C104 G5 — 추출 입력 = 진입 입력 CT(몰 동의 회사 아님 = 동의 조각 없음 · 범위 = 관리자 빈 조각)
+  journeyEntryInputs: vi.fn(async () => ({ reentry: { allowReentry: false, cooldownDays: 0, lineageIds: [] }, scopeSql: '', consent: undefined })),
 }));
 
 import { query } from '../config/database';

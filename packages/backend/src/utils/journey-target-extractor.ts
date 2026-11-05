@@ -38,7 +38,9 @@ import type { CdpEventRow } from './journey-cdp-cursor';
 import { normalizeProductFilters, mallItemKeySql, mallItemsSql, ledgerProductKeySql } from './journey-product';
 // ★ 2026-10-20 여정 V.3 §18 — 기존 여정 뒤에 붙이기(앞 여정을 마치면).
 import { readAfterConfig, outcomeStatuses, AFTER_JOURNEY_WINDOW_DAYS } from './journey-after-config';
-import { lineageColumnsReady } from './journey-lineage';
+import { lineageColumnsReady, lineageJourneyIds } from './journey-lineage';
+import { getJourneyOwnerScopeSql } from './store-scope';   // ★ C104 G5 진입 입력 CT
+import { journeyOwnerConsent } from './mall-consent';
 // ★ 2026-10-23 여정 결함 0 — 대상 조건 칸 표 한 곳(추출 · 검증 · 사람 말 · AI 메뉴 공용)
 import { CUSTOMER_CONDITION_FIELDS, BIRTH_MONTH_SQL, normalizeGenderCode, conditionFieldLabelList } from './journey-condition-fields';
 import { getGenderVariants } from './normalize';
@@ -973,6 +975,63 @@ export async function entryPropsFor(
 
 export const JOURNEY_COUNT_CAP = 100000;
 
+/**
+ * ★ 2026-11-05 C104 G5 — 여정 진입 입력 CT(R58 · 같은 함수를 불러도 입력이 다르면 두 벌).
+ *   실제 진입(진입 감시) · 옵션 dryRun · 켜진 여정 옵션 저장 상한 판정 · 시뮬레이터 · 대상 목록 · 대상 수 · 미등록 매장번호가 이 값을 그대로 넘긴다.
+ *   옛: 진입 감시만 계보(lineageIds) · 재진입을 넘기고 세는 자리들은 빼거나 일부만 넘겨 「지금 맞는 N명」이 실제 진입과 달랐다(1105 접수).
+ *   override = 저장 전 재진입 값(옵션 주소) · 둘 다 오면 여정 행을 읽지 않는다.
+ */
+export interface JourneyEntryInputs {
+  reentry: { allowReentry: boolean; cooldownDays: number; lineageIds: string[] };
+  scopeSql: string;
+  consent: JourneyConsent | undefined;
+}
+
+export async function journeyEntryInputs(
+  companyId: string,
+  journeyId: string,
+  override?: { allowReentry: boolean; cooldownDays: number },
+): Promise<JourneyEntryInputs> {
+  let reentry = override;
+  if (!reentry) {
+    const r = await query(`SELECT allow_reentry, reentry_cooldown_days FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [journeyId, companyId]);
+    const row = r.rows[0] || {};
+    reentry = { allowReentry: row.allow_reentry === true, cooldownDays: Number(row.reentry_cooldown_days || 0) };
+  }
+  return {
+    reentry: { allowReentry: reentry.allowReentry, cooldownDays: Number(reentry.cooldownDays || 0), lineageIds: await lineageJourneyIds(journeyId) },
+    scopeSql: await getJourneyOwnerScopeSql(companyId, journeyId),
+    consent: await journeyOwnerConsent(companyId, journeyId),
+  };
+}
+
+/**
+ * ★ 2026-11-05 C104 G6 — 대상 수 · 등급 분포 + 이관 유예로 지금 빠진 수(한 SQL 한 번 훑기 = 같은 스냅숏 · Codex 설계 1R).
+ *   유예를 끈 대상 SQL 위에서 가입 시각(created_at)으로 가른다 = 이관 유예 조각 buildIntakeGraceClause 와 같은 식(정수 일수).
+ *   유예 대상 트리거가 아니거나 유예 0 = 그대로 센다(빠짐 0) · total = countJourneyTargets 와 같은 수.
+ */
+export async function countJourneyTargetsWithGrace(
+  companyId: string,
+  triggerEvent: string,
+  triggerFilters: Record<string, any>,
+  journeyId: string,
+  inputs: JourneyEntryInputs,
+): Promise<{ total: number; segments: SegmentBreakdown[]; graceHeld: number; graceDays: number }> {
+  const filters = triggerFilters || {};
+  const graceDays = isBulkStateTrigger(triggerEvent) ? resolveIntakeGraceDays(filters) : 0;
+  const rows = await aggregateTargets(companyId, triggerEvent, graceDays > 0 ? { ...filters, intake_grace_days: 0 } : filters, journeyId, inputs.scopeSql, inputs.consent,
+    (from, params) => {
+      // 지금 대상 = 이관 유예 조각 그대로(같은 함수 · 같은 값) · 빠짐 = 그 조각이 거르는 행(가입 시각 있는 행)
+      const ready = buildIntakeGraceClause('c', params, graceDays) ?? 'TRUE';
+      return `SELECT COALESCE(c.grade, '일반') AS segment, COUNT(*) FILTER (WHERE ${ready})::int AS cnt, COUNT(*) FILTER (WHERE NOT (${ready}))::int AS held
+                FROM ${from} GROUP BY COALESCE(c.grade, '일반')`;
+    }, inputs.reentry);
+  const list = rows || [];
+  const readyRows = list.filter((r: any) => Number(r.cnt) > 0);
+  const { total, segments } = readyRows.length > 0 ? buildSegmentBreakdown(readyRows) : { total: 0, segments: [] };
+  return { total, segments, graceHeld: list.reduce((n: number, r: any) => n + (Number(r.held) || 0), 0), graceDays };
+}
+
 export interface JourneyTargetCount {
   total: number;
   segments: SegmentBreakdown[];
@@ -987,23 +1046,25 @@ export async function countJourneyTargetCustomers(
   journeyId?: string,
   scopeSql = '',   // ★ 2026-09-27 S5-04
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // ★ C104 G5 실제 진입과 같은 재진입(journeyEntryInputs)
 ): Promise<JourneyTargetCount> {
   // ★ 2026-11-02 §16 G2 — 발송과 같은 대상 SQL 을 전원으로 센다(옛: 10만 목록을 받아 세어 넘으면 capped · 응답 칸은 남긴다 = 늘 거짓)
-  const { total, segments } = await countJourneyTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent);
+  const { total, segments } = await countJourneyTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent, reentry);
   return { total, segments, capped: false };
 }
 
 /** 대상 SQL 을 상한 없이 감싸 돌린다(고객 한 사람 한 번 · 회사 범위 · 근거 표 없음 = 0명) */
 async function aggregateTargets(
   companyId: string, triggerEvent: string, triggerFilters: Record<string, any>, journeyId: string | undefined, scopeSql: string, consent: JourneyConsent | undefined,
-  select: (from: string) => string,
+  select: (from: string, params: any[]) => string,   // params = 안쪽 문장 값의 복사본 · 바깥 조각이 값을 더할 수 있다(★ C104 G6)
   reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },
 ): Promise<any[] | null> {
   const q = await buildJourneyTargetQuery(companyId, triggerEvent, triggerFilters, null, journeyId, reentry, scopeSql, consent);
   if (!q) return null;
   // $1 = 회사(모든 갈래 공통 첫 값) · 안쪽 문장의 LIMIT 값 = null = 전원
   const from = `(SELECT DISTINCT t.customer_id FROM (${q.sql}) t) tc JOIN customers c ON c.id = tc.customer_id AND c.company_id = $1::uuid`;
-  return runTargetSql(q, select(from), q.params);
+  const params = [...q.params];
+  return runTargetSql(q, select(from, params), params);
 }
 
 /** ★ 2026-11-02 §16 G2 — 대상 전원 수 · 등급 분포(옛 id 목록 집계와 같은 식 · 상한 0) */
@@ -1030,10 +1091,11 @@ export async function averageTargetScores(
   journeyId?: string,
   scopeSql = '',
   consent?: JourneyConsent,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // ★ C104 G5
 ): Promise<{ avgOrderValue: number | null; avgConversion: number | null; avgClick: number | null }> {
   const rows = await aggregateTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent,
     (from) => `SELECT AVG(c.avg_order_value) AS aov, AVG(p.purchase_likelihood) AS conv, AVG(p.click_score) AS clk
-                 FROM ${from} LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id`);
+                 FROM ${from} LEFT JOIN cdp_customer_predictions p ON p.customer_id = c.id`, reentry);
   const row = rows?.[0] || {};
   const num = (v: any) => (v != null ? Number(v) : null);
   return { avgOrderValue: num(row.aov), avgConversion: num(row.conv), avgClick: num(row.clk) };
@@ -1052,10 +1114,11 @@ export async function storeCallbackExposure(
   journeyId?: string,
   scopeSql = '',
   consent?: JourneyConsent,
+  reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // ★ C104 G5
 ): Promise<{ callbackUnregisteredCount: number; unregisteredDetails: Array<{ phone: string; excludedCount: number }> }> {
   const rows = await aggregateTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent,
     (from) => `SELECT btrim(c.store_phone) AS store_phone, COUNT(*)::int AS cnt FROM ${from}
-                WHERE COALESCE(btrim(c.store_phone), '') <> '' GROUP BY btrim(c.store_phone)`);
+                WHERE COALESCE(btrim(c.store_phone), '') <> '' GROUP BY btrim(c.store_phone)`, reentry);
   const unregisteredDetails: Array<{ phone: string; excludedCount: number }> = [];
   for (const r of rows || []) {
     if (!(await isCallbackRegistered(companyId, String(r.store_phone), createdBy || undefined))) {

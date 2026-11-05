@@ -16,7 +16,7 @@ vi.mock('../ai-credit', () => {
 });
 vi.mock('../journey-builder', () => ({ activateJourney: vi.fn() }));
 vi.mock('../journey-anchor-scheduler', () => ({ dispatchOneShotJourney: vi.fn(), settleAndDispatchOneShot: vi.fn() }));
-vi.mock('../journey-target-extractor', () => ({ storeCallbackExposure: vi.fn() }));   // ★ 2026-11-02 §16 G2 — 켜기 매장번호 확인 = 대상 전원 집계
+vi.mock('../journey-target-extractor', () => ({ storeCallbackExposure: vi.fn(), journeyEntryInputs: vi.fn(async () => ({ reentry: { allowReentry: false, cooldownDays: 0, lineageIds: [] }, scopeSql: '', consent: undefined })) }));   // ★ C104 G5 진입 입력 CT   // ★ 2026-11-02 §16 G2 — 켜기 매장번호 확인 = 대상 전원 집계
 vi.mock('../store-scope', () => ({ getJourneyOwnerScopeSql: vi.fn() }));
 // ★ 2026-10-19 B-1009-5 — 모두 켜기의 겹침 판정 = 지도(buildLifecycleMap) · 이 시험은 겹침 0 으로 둔다(겹침 거절은 아래 한 건)
 vi.mock('../journey-lifecycle-map', () => ({ buildLifecycleMap: vi.fn(async () => ({ overlaps: [] })) }));

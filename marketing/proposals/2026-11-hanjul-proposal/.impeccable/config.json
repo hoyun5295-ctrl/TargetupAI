@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "marketing/proposals/2026-11-hanjul-proposal/index.html"
+        ],
+        "createdAt": "2026-11-05T07:50:06.566Z",
+        "reason": "Claude 판단: 7쪽 휴대폰 문자 화면 예시가 설명 카드 안에 든 기기 그림(의도된 삽화)"
+      }
+    ]
+  }
+}

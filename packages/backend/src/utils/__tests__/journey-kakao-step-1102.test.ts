@@ -76,7 +76,7 @@ describe('CT-J5 배선 — 알림톡 칸 판정은 journey-kakao-step 밖 0(켜�
   it('켜기(activationBlockReason) · 켜기 검증 · 실행기 = kakaoStepVerdict 를 부른다', () => {
     const get = (rel: string) => files.find((f) => f.rel === rel)!.text;
     const b = get('utils/journey-builder.ts');
-    const gate = b.slice(b.indexOf('export async function activationBlockReason('), b.indexOf('\n}\n', b.indexOf('export async function activationBlockReason(')));
+    const gate = b.slice(b.indexOf('async function activationBlockCore('), b.indexOf('\n}\n', b.indexOf('async function activationBlockCore(')));   // ★ C104 G1 관문 본체
     expect(gate).toContain('await kakaoStepVerdict(companyId,');
     expect(get('utils/journey-pretest-validator.ts')).toContain('await kakaoStepVerdict(companyId, step)');
     expect(get('utils/journey-executor.ts')).toContain('await kakaoStepVerdict(head.company_id, step)');

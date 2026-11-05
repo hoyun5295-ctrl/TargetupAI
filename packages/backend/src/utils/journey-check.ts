@@ -10,7 +10,7 @@
  *   검사 = 작업 화면 「지금 스팸 검사」(여정 칸 검사 주소) · 켜기 검증 · 보내기 전 검사 · 주간 검사.
  */
 import { query } from '../config/database';
-import { activationBlockReason } from './journey-builder';
+import { activationBlockIssue } from './journey-builder';
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 import { validateJourneyForActivation, peekStepSpam, type FailedStep, type StepSpamState } from './journey-pretest-validator';
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
@@ -96,15 +96,18 @@ export async function checkJourney(companyId: string, journeyId: string, userId:
       : { key: `spam:${s.variantId ?? 'main'}`, level: 'before', title: `스팸 검사 전${ab}`, detail: '「지금 스팸 검사」를 누르거나 켤 때 검사해요.', fixTarget: null, variantId: s.variantId });
   }
 
-  // 정의 검사(켜기와 같은 함수) — 막는 이유가 칸 번호로 시작하면 그 칸 · 칸 판 검사가 이미 같은 고칠 것을 들고 있으면 겹쳐 적지 않는다
-  const reason = await activationBlockReason(companyId, journeyId, { forCheck: true });
-  if (reason) {
-    const m = /^(\d+)번째 칸/.exec(reason);
-    const stepId = m ? idByOrder.get(Number(m[1])) : undefined;
-    const target: JourneyCheckTarget = /채울 자리/.test(reason) ? 'body' : /제목이 비어/.test(reason) ? 'subject' : stepId ? 'body' : 'journey';
-    const item: JourneyCheckItem = { key: 'definition', level: 'fix', title: reason, detail: '', fixTarget: target, variantId: null };
+  // 정의 검사(켜기와 같은 함수) — 막는 이유가 칸 번호를 들고 있으면 그 칸
+  // ★ 2026-11-05 C104 G7 — 겹침 = 같은 칸 · 같은 판 · 같은 원인(켜기 검증 실패 key = 원인:판)일 때만 뺀다 · 다른 판 · 다른 원인은 둘 다 남는다
+  const issue = await activationBlockIssue(companyId, journeyId, { forCheck: true });
+  if (issue) {
+    const stepId = issue.stepOrder != null ? idByOrder.get(issue.stepOrder) : undefined;
+    const target: JourneyCheckTarget = issue.cause === 'subject_missing' ? 'subject'
+      : ['placeholder_unedited', 'copy_issue', 'too_short', 'liquid'].includes(issue.cause) ? 'body'
+      : stepId ? 'body' : 'journey';
+    const item: JourneyCheckItem = { key: 'definition', level: 'fix', title: issue.message, detail: '', fixTarget: target, variantId: issue.variantId };
     if (stepId) {
-      const dup = (steps[stepId] ?? []).some((i) => i.level === 'fix' && i.fixTarget === target && !i.variantId);
+      const dupKey = `${issue.cause}:${issue.variantId ?? 'main'}`;
+      const dup = (steps[stepId] ?? []).some((i) => i.level === 'fix' && i.key === dupKey);
       if (!dup) (steps[stepId] ??= []).push(item);
     } else {
       journey.push(item);
