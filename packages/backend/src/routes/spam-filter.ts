@@ -12,8 +12,7 @@ import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from '../utils/sms-
 import { normalizeContent, computeMessageHash, cleanupStaleActiveTests, fetchSpamQtmsgRows, refundSpamSendFailures, resolveSpamReportTest, parseReportAgeMs, spamReportReceivedAt, spamBlockedDue, decideSpamResult, spamStampReady } from '../utils/spam-test-queue';
 import { matchProbeReport, spamProbeSchemaReady, spamTestFinalBy } from '../utils/spam-probe';
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
-import { getRegisteredCallbackSet } from '../utils/callback-filter';
-import { normalizePhone } from '../utils/normalize-phone';
+import { isManualSpamCallbackAllowed, manualSpamInProgressInTx, MANUAL_SPAM_IN_PROGRESS_SQL, spamTestRunElapsedMs } from '../utils/spam-test-queue';   // ★ C103 F1 수동 검사 수락 규칙 CT
 import { getSampleCustomerScope } from '../utils/store-scope';
 import { resolveOwnerScope } from '../utils/owner-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
@@ -33,7 +32,7 @@ const router = Router();
 const TEST_TIMEOUT_MS = TIMEOUTS.spamFilterTest;
 
 // ★ 2026-09-26 한줄로 V2 m038 — 사용자별 검사 등록 직렬화(트랜잭션 잠금 · 커밋/롤백에 풀린다)
-const SPAM_TEST_USER_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('spam-test-user:' || $1::text))`;
+// ★ 2026-11-05 C103 F1 — 사용자 잠금 · 진행 중 1건 · 배정 발신번호 = spam-test-queue 수동 검사 수락 규칙 CT(여정 칸 검사와 같은 규칙)
 
 // 앱 인증 토큰 — ★ 2026-09-26 한줄로 V2 S1-H09 판정 CT(spam-app-auth)로. 옛: 설정이 비면 소스의 기본 토큰이 열쇠였다.
 let spamAppTokenUnconfiguredWarned = false;
@@ -70,8 +69,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
     }
     // ★ 2026-09-26 한줄로 V2 m040 — 등록되지 않은 발신번호는 통신사가 막아(발신번호 사전등록제) 유료 검사가 헛돈다.
     //   발송 경로와 같은 CT로 거른다(사용자 배정 범위 포함).
-    const registeredCallbacks = await getRegisteredCallbackSet(companyId, userId);
-    if (!registeredCallbacks.has(normalizePhone(String(callbackNumber || '')))) {   // ★ 1019 B-1005-5② 집합과 같은 표기(숫자만)
+    if (!(await isManualSpamCallbackAllowed(companyId, userId, String(callbackNumber || '')))) {   // ★ 1019 B-1005-5② 집합과 같은 표기(숫자만) · ★ C103 F1 CT
       return res.status(400).json({ error: '등록된 발신번호로만 스팸 검사를 할 수 있습니다. 발신번호 관리에서 확인해 주세요.', code: 'UNREGISTERED_CALLBACK' });
     }
 
@@ -102,11 +100,8 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
     await cleanupStaleActiveTests(TEST_TIMEOUT_MS);
 
     // 2) 사용자별 active/pending 테스트 1건 제한
-    const activeCheck = await query(
-      `SELECT id FROM spam_filter_tests
-       WHERE user_id = $1 AND status IN ('pending', 'active') AND ${notAutoSpamSourceSql()}`,   // ★ 1018 AI 한줄로 자동 검사는 수동 검사를 막지 않는다
-      [userId]
-    );
+    // ★ 1018 AI 한줄로 자동 검사는 수동 검사를 막지 않는다 · ★ C103 F1 줄에 선(queued) 여정 칸 수동 검사도 진행 중으로 센다(CT 문장 하나)
+    const activeCheck = await query(MANUAL_SPAM_IN_PROGRESS_SQL, [userId]);
     if (activeCheck.rows.length > 0) {
       return res.status(409).json({
         error: '이미 진행 중인 테스트가 있습니다.',
@@ -212,15 +207,11 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
       try {
         await client.query('BEGIN');
         await client.query(SPAM_TRIAL_LOCK_SQL, [companyId]);
-        // ★ 2026-09-26 한줄로 V2 m038 — 사용자 잠금 뒤 진행 중 검사를 다시 본다(위 확인은 잠금 없는 빠른 거절일 뿐)
-        await client.query(SPAM_TEST_USER_LOCK_SQL, [userId]);
-        const dupInTx = await client.query(
-          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') AND ${notAutoSpamSourceSql()} LIMIT 1`,
-          [userId]
-        );
-        if (dupInTx.rows.length > 0) {
+        // ★ 2026-09-26 한줄로 V2 m038 — 사용자 잠금 뒤 진행 중 검사를 다시 본다(위 확인은 잠금 없는 빠른 거절일 뿐) · ★ C103 F1 CT
+        const dupInTx = await manualSpamInProgressInTx((sql, p) => client.query(sql, p), userId);
+        if (dupInTx) {
           await client.query('ROLLBACK');
-          return res.status(409).json({ error: '이미 진행 중인 테스트가 있습니다.', testId: dupInTx.rows[0].id });
+          return res.status(409).json({ error: '이미 진행 중인 테스트가 있습니다.', testId: dupInTx });
         }
         const used = await countSpamTrialsInTx(client, companyId);
         if (used >= SPAM_TRIAL_LIMIT) {
@@ -251,14 +242,10 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        await client.query(SPAM_TEST_USER_LOCK_SQL, [userId]);
-        const dupInTx = await client.query(
-          `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active') AND ${notAutoSpamSourceSql()} LIMIT 1`,
-          [userId]
-        );
-        if (dupInTx.rows.length > 0) {
+        const dupInTx = await manualSpamInProgressInTx((sql, p) => client.query(sql, p), userId);   // ★ C103 F1 CT
+        if (dupInTx) {
           await client.query('ROLLBACK');
-          return res.status(409).json({ error: '이미 진행 중인 테스트가 있습니다.', testId: dupInTx.rows[0].id });
+          return res.status(409).json({ error: '이미 진행 중인 테스트가 있습니다.', testId: dupInTx });
         }
         const testResult = await client.query(
           `INSERT INTO spam_filter_tests
@@ -464,7 +451,7 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
         }
 
         // 최종 안전장치 타임아웃 (TEST_TIMEOUT_MS 초과) — 비정상 상황 대비
-        const elapsed2 = Date.now() - new Date(activeCheck2.rows[0].created_at).getTime();
+        const elapsed2 = spamTestRunElapsedMs(testId, activeCheck2.rows[0].created_at);   // ★ C103 공용 CT(즉시 실행 = 등록 시각 그대로)
         if (elapsed2 > TEST_TIMEOUT_MS) {
           clearInterval(pollInterval);
           // 아직 미판정 건 일괄 처리
@@ -656,8 +643,8 @@ router.get('/active-test', authenticate, async (req: Request, res: Response) => 
 
     const test = activeTest.rows[0];
 
-    // 타임아웃 체크
-    const elapsed = Date.now() - new Date(test.created_at).getTime();
+    // 타임아웃 체크 · ★ C103 F1(Codex 구현 1R) 검사가 돈 시간 = 공용 CT(줄에서 기다린 시간 제외)
+    const elapsed = spamTestRunElapsedMs(test.id, test.created_at);
     if (elapsed > TEST_TIMEOUT_MS) {
       // 이미 만료 → 완료 처리 (미판정 건 timeout 처리)
       const stillUnresolved = await query(
@@ -741,7 +728,7 @@ router.post('/recent-check', authenticate, async (req: Request, res: Response) =
     const devices = await query(`SELECT carrier, phone FROM spam_filter_devices WHERE is_active = true`);
     const rows = withExpectedSpamDevices(results.rows, devices.rows);
     // 진행 중인데 시간을 넘긴 건은 끝난 것으로 본다(판정만 · 행은 기존 정리 경로가 닫는다)
-    const expired = test.status === 'active' && Date.now() - new Date(test.created_at).getTime() > TEST_TIMEOUT_MS;
+    const expired = test.status === 'active' && spamTestRunElapsedMs(test.id, test.created_at) > TEST_TIMEOUT_MS;   // ★ C103 공용 CT(줄에서 기다린 시간 제외)
     const verdict = judgeSpamVerdict(expired ? 'completed' : String(test.status), rows);
     return res.json({
       checked: true,
@@ -870,7 +857,7 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
     // 타임아웃 체크 (active인데 3분 초과 시 자동 완료 처리)
     const testData = test.rows[0];
     if (testData.status === 'active') {
-      const elapsed = Date.now() - new Date(testData.created_at).getTime();
+      const elapsed = spamTestRunElapsedMs(testId, testData.created_at);   // ★ C103 F1(Codex 구현 1R) 공용 CT
       if (elapsed > TEST_TIMEOUT_MS) {
         // 미판정 건 timeout 처리
         const stillUnresolved = await query(

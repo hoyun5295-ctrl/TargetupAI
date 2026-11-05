@@ -11,7 +11,8 @@
 //   - journey_executions 7일 트리거 패턴 (예상 비용)
 
 import { query } from '../config/database';
-import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, type SpamVerdict } from './spam-test-queue';
+import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, type SpamVerdict, type SpamTestEnqueueResult } from './spam-test-queue';
+import { spamCheckView, type SpamCheckView } from './spam-test-view';   // ★ 2026-11-05 C103 F1 검사 한 건 보기 CT
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from './journey-message-render';
 import { getCompanyCosts } from '../config/defaults';
 import { randomUUID } from 'crypto';
@@ -20,6 +21,7 @@ import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
 import { hasUneditedJourneyPlaceholder, journeyCopyIssue } from './send-placeholder-gate';
 import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-02 보낼 글 판정 회사 값(CT-J10)
 import { kakaoStepVerdict } from './journey-kakao-step';
+import { UserFacingError } from './http-error';   // ★ 2026-11-05 C103 F1 여정 칸 검사 입력 막힘
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)   // ★ 2026-11-01 배포 2 C4 — 켜기 관문과 같은 자리 판정
 
 export type FailedReason =
@@ -364,17 +366,77 @@ export async function peekStepSpam(params: StepSpamParams): Promise<StepSpamTest
 }
 
 /**
- * 칸 저장 뒤 통신사 검사를 건다(기다리지 않는다 · ★ 2026-11-01 배포 2 C5 · D1 · D2).
- *   같은 날 같은 글 = 이어 보기(차감 0) · 새 글 = 단가표대로 차감(켜기 · 보내기 전 검사와 같은 등록 길) · 실패는 로그만(저장을 막지 않는다).
+ * 여정 칸 검사 입력(★ 2026-11-05 C103 F1) = 그 칸 판의 **저장된** 글 · 제목 · 채널 · 광고 판정 · 여정 회신번호.
+ *   판 목록 = 켜기 검증과 같은 stepSendVersions(변이가 있으면 변이 판 · variantId 없으면 첫 판) · 광고 = CT-J8.
+ *   막힘 = UserFacingError(문자 칸 아님 · 글 없음 · 번호 없음 = 400 · 끝 · 보관 여정 = 409 · 칸 없음 = 404).
  */
-export async function startStepSpamCheck(params: StepSpamParams): Promise<void> {
-  try {
-    if (await isDemoCompany(params.companyId)) return;
-    const r = await enqueueSpamTest({ ...(await stepSpamInput(params)), source: 'auto_ai', variantId: params.variantId || undefined, batchId: randomUUID(), skipPrepaid: false, reuseSameDay: true });
-    if (!r.ok) console.warn(`[journey-auto-spam] 칸 저장 뒤 검사 못 걸음 journey=${params.journeyId} — ${r.errorCode || r.error}`);
-  } catch (err: any) {
-    console.warn(`[journey-auto-spam] 칸 저장 뒤 검사 오류 journey=${params.journeyId} — ${err?.message || err}`);
-  }
+export async function journeyStepSpamParams(companyId: string, userId: string, journeyId: string, stepId: string, variantId?: string | null): Promise<StepSpamParams> {
+  const r = await query(
+    `SELECT s.id, s.channel, s.message_template, s.subject, s.is_ad, j.callback_number, j.status, j.archived_at
+       FROM journey_steps s JOIN journeys j ON j.id = s.journey_id
+      WHERE s.id = $1::uuid AND s.journey_id = $2::uuid AND j.company_id = $3::uuid AND COALESCE(s.step_type, 'message') = 'message'`,
+    [stepId, journeyId, companyId],
+  );
+  const step = r.rows[0];
+  if (!step) throw new UserFacingError(404, 'STEP_NOT_FOUND', '칸을 찾을 수 없어요. 새로고침해 주세요.');
+  if (step.archived_at || step.status === 'ended') throw new UserFacingError(409, 'JOURNEY_CLOSED', '끝났거나 보관한 여정은 검사하지 않아요.');
+  const channel = String(step.channel || '');
+  if (channel !== 'sms' && channel !== 'lms' && channel !== 'mms') throw new UserFacingError(400, 'NOT_TEXT_STEP', '문자 칸만 스팸 검사를 해요.');
+  const callbackNumber = String(step.callback_number || '');
+  if (!callbackNumber) throw new UserFacingError(400, 'NO_CALLBACK', '보내는 번호를 먼저 정해 주세요.');
+  const versions = stepSendVersions({ message_template: step.message_template ?? null, subject: step.subject ?? null }, null, await loadStepVariantRows(step.id));
+  const v = variantId ? versions.find((x) => x.variantId === variantId) : versions[0];
+  if (!v) throw new UserFacingError(404, 'VARIANT_NOT_FOUND', '고른 문안을 찾을 수 없어요. 새로고침해 주세요.');
+  if (!v.body.trim()) throw new UserFacingError(400, 'EMPTY_COPY', '검사할 문안을 먼저 써 주세요.');
+  return {
+    companyId, userId, journeyId, callbackNumber,
+    body: v.body, subject: v.subject, channel, isAd: resolveJourneyAdFlag(channel, step.is_ad),
+    variantId: v.variantId || undefined,
+  };
+}
+
+/** 여정 칸 검사 창 보기(★ 2026-11-05 C103 F1 · 검사 글 = 켜기 검사와 같은 stepSpamInput · 미리보기 = 그 글) */
+export interface StepSpamCheckRead {
+  view: SpamCheckView | null;
+  message: string;
+  subject: string | null;
+}
+
+const DEMO_SPAM_VIEW: SpamCheckView = { state: 'pass', carriers: [], aheadCount: 0, elapsedSec: 0 };
+
+async function stepSpamReadOf(input: Awaited<ReturnType<typeof stepSpamInput>>, demo: boolean): Promise<StepSpamCheckRead> {
+  const message = input.messageType === 'SMS' ? input.messageContentSms : input.messageContentLms;
+  const subject = input.messageType === 'SMS' ? null : (input.subject ?? null);
+  if (demo) return { view: DEMO_SPAM_VIEW, message, subject };
+  const seen = await peekSpamCheck(input);
+  // 장애 = 검사 전(다시 누르면 새로 건다 · 등록 함수의 재사용 규칙 · peekStepSpam 과 같다)
+  if (!seen || seen.outcome === 'error') return { view: null, message, subject };
+  return { view: await spamCheckView(seen.testId, seen.status, seen.createdAt, input.messageType === 'SMS' ? 'SMS' : 'LMS'), message, subject };
+}
+
+/** 여정 칸 검사 창 읽기 = 지금 저장된 글의 오늘 검사 엿보기(등록 · 차감 0) · null 보기 = 검사 전 */
+export async function readStepSpamCheck(params: StepSpamParams): Promise<StepSpamCheckRead> {
+  return stepSpamReadOf(await stepSpamInput(params), await isDemoCompany(params.companyId));
+}
+
+/**
+ * 여정 칸 「지금 스팸 검사」 등록(★ 2026-11-05 C103 F1 · 옛 startStepSpamCheck = 칸 저장 뒤 자동 · 결과 버림).
+ *   같은 날 같은 글 = 이어 보기(차감 0 · 수락 규칙 거치지 않음) · 새 글 = 수동 검사 수락 규칙(배정 발신번호 · 한 사람 한 검사) + 단가표 차감.
+ *   시연 회사 = 검사 발송 0 · 통과로 본다(runStepSpamTest 와 같은 규칙).
+ */
+export async function enqueueStepSpamCheck(params: StepSpamParams): Promise<StepSpamCheckRead & { result: SpamTestEnqueueResult }> {
+  const input = await stepSpamInput(params);
+  if (await isDemoCompany(params.companyId)) return { ...(await stepSpamReadOf(input, true)), result: { ok: true, reused: false } };
+  const result = await enqueueSpamTest({
+    ...input,
+    source: 'manual',
+    variantId: params.variantId || undefined,
+    batchId: randomUUID(),
+    skipPrepaid: false,
+    reuseSameDay: true,
+    manualAdmission: { userId: params.userId },
+  });
+  return { ...(await stepSpamReadOf(input, false)), result };
 }
 
 export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamTestResult> {

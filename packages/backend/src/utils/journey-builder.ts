@@ -56,7 +56,8 @@ import { journeyOwnerSql, type JourneyViewer } from './journey-access';
 import { anchorSendHourIssue } from './send-time-util';
 import { hasUneditedJourneyPlaceholder, journeyCopyIssue } from './send-placeholder-gate';
 import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-02 보낼 글 판정 회사 값(CT-J10)
-import { kakaoStepVerdict } from './journey-kakao-step';   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
+import { kakaoStepVerdict, kakaoTemplateContent } from './journey-kakao-step';
+import { assertJourneyCallbackRegistered } from './journey-callback';   // ★ 2026-11-05 C103 F3 회신번호 등록 판정 한 곳   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 import { loadVariantRowsByStep } from './journey-step-versions';   // ★ 2026-11-02 칸마다 A/B 문안(설계서 3-16)
 import { finishMany, copyResponse } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
@@ -315,6 +316,8 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
   if (!input.callbackNumber || !input.callbackNumber.trim()) {
     throw new JourneyInputError('보낼 회신번호를 골라 주세요.');
   }
+  // ★ 2026-11-05 C103 F3 · SC-1 — 여정 행을 만드는 함수 안에서 등록 번호 판정(만들기 길 전부 · 옛 검토 화면 저장은 있는지만 봤다) · 숫자만으로 저장
+  input = { ...input, callbackNumber: (await assertJourneyCallbackRegistered(input.companyId, input.callbackNumber))! };
 
   const ctx = await loadCompanyContext(input.companyId);
 
@@ -788,7 +791,7 @@ export async function activationBlockReason(companyId: string, journeyId: string
     return '초안 또는 일시정지 상태인 여정만 활성화 가능합니다.';
   }
   if (!row.callback_number || !String(row.callback_number).trim()) {
-    return '회신번호가 비어있습니다. 여정 편집 후 다시 시도해주세요.';
+    return '보내는 번호가 비어 있어요. [시작] 카드 「보내는 번호」에서 골라 주세요.';   // ★ 2026-11-05 C103 F3 고치는 자리 이름 그대로
   }
   const steps = Array.isArray(row.steps) ? row.steps : [];
   if (steps.length === 0) {
@@ -1395,7 +1398,15 @@ export async function updateJourneyStep(
         && ((await loadVariantRowsByStep([stepId], run)).get(stepId)?.length ?? 0) > 0) {
       throw new JourneyStepGateError(AB_STEP_COPY_LOCKED_MESSAGE, 'AB_STEP_COPY_LOCKED');
     }
+    // ★ 2026-11-05 C103 F11 — 알림톡 칸 글 = 고른 템플릿 본문 한 곳(사람이 고치는 길 · 채우기 길은 판정 밖)
+    //   (알림톡 칸 = 글 키를 뺀 패치로 칸 갱신 몸통을 지난다 · 칸 글은 아래에서 템플릿 본문으로 맞춘다)
+    const kakao = await kakaoStepCopyIn(run, companyId, journeyId, stepId, patch);
+    if (kakao) patch = kakao.patch;
     const out = await applyStepPatchInLock(run, journey, companyId, journeyId, stepId, patch);
+    if (kakao && kakao.content != null && out.rows.length > 0) {
+      // 확정본 · 검사 기록은 건드리지 않는다(알림톡 발송 = 칸 행의 템플릿을 그 자리에서 읽는다 · 확정본은 문자 글만)
+      await run(`UPDATE journey_steps SET message_template = $3 WHERE id = $1::uuid AND journey_id = $2::uuid AND channel = 'kakao'`, [stepId, journeyId, kakao.content]);
+    }
     // ★ 2026-11-02 설계서 3-3 ③ · 3-13 — 켜진 여정에서 사람이 그 칸 글을 고침 = 보낼 글 판정(CT-J10 · 걸리면 409 · 같은 트랜잭션이 저장 · 새 판을 되돌린다).
     //   채우기 길(fillJourneyCopyFacts)은 자리를 줄이는 일이라 판정 밖(남은 자리가 있는 칸 = 실행기 · 보내기 전 검사가 보류 · 안내).
     if (journey.status === 'active' && (patch.messageTemplate !== undefined || patch.subject !== undefined) && out.rows.length > 0) {
@@ -1407,6 +1418,29 @@ export async function updateJourneyStep(
   //   무효화는 위 트랜잭션이 함께 커밋했다. 스텝을 못 찾은 요청도 무효화되지만 그건 안전한 방향이다
   //   (한 번 더 검증하게 할 뿐이고, 반대로 놓치면 미검증 문안이 켜진다).
   return r.rows.length > 0;
+}
+
+/**
+ * ★ 2026-11-05 C103 F11 — 최종 채널이 알림톡인 칸의 사람 고침(잠금 안).
+ *   글 직접 고침 = 지금 템플릿 본문 · 지금 칸 글과 같을 때만(옛 화면 호환) · 다르면 400 · 글 키는 패치에서 뺀다(확정본 0).
+ *   템플릿 코드가 오거나 칸이 알림톡으로 바뀌면 칸 글 = 그 회사의 그 템플릿 본문(content · 저장 뒤 맞춤).
+ *   null = 알림톡 칸이 아니거나 글 · 템플릿 · 채널을 건드리지 않음(패치 그대로).
+ */
+async function kakaoStepCopyIn(
+  run: SqlRunner, companyId: string, journeyId: string, stepId: string, patch: JourneyStepPatch,
+): Promise<{ patch: JourneyStepPatch; content: string | null } | null> {
+  if (patch.messageTemplate === undefined && patch.alimtalkTemplateCode === undefined && patch.channel === undefined) return null;
+  const cur = (await run(
+    `SELECT channel, message_template, alimtalk_template_code FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`, [stepId, journeyId],
+  )).rows[0];
+  if (!cur || String(patch.channel ?? cur.channel ?? '').toLowerCase() !== 'kakao') return null;
+  const code = String((patch.alimtalkTemplateCode ?? cur.alimtalk_template_code) || '').trim();
+  const content = code ? await kakaoTemplateContent(companyId, code, run) : null;
+  const { messageTemplate, ...rest } = patch;
+  if (messageTemplate !== undefined && messageTemplate !== content && messageTemplate !== String(cur.message_template ?? '')) {
+    throw new JourneyInputError('알림톡 칸 글은 고른 템플릿 글 그대로 나가요. 템플릿을 바꿔 주세요.');
+  }
+  return { patch: rest, content };
 }
 
 /**
@@ -2071,12 +2105,14 @@ export async function deleteJourneyStep(
  *   옵션 PATCH와 같은 규약을 쓰도록 공용 문을 지난다.
  */
 export async function updateJourneyCallback(companyId: string, journeyId: string, callbackNumber: string): Promise<boolean> {
-  if (!callbackNumber || !callbackNumber.trim()) return false;
+  // ★ 2026-11-05 C103 F3 · SC-1 — 쓰는 함수 안에서 등록 번호 판정(새 모양 · 그 밖 부르는 곳 모두 · 등록 아님 = JourneyInputError 400)
+  const registered = await assertJourneyCallbackRegistered(companyId, callbackNumber);
+  if (!registered) return false;
   const r = await withJourneyValidationReset(companyId, journeyId, (run) => run(
     `UPDATE journeys SET callback_number = $3
      WHERE id = $1::uuid AND company_id = $2::uuid AND status != 'active'
      RETURNING id`,
-    [journeyId, companyId, callbackNumber.trim().slice(0, 20)]
+    [journeyId, companyId, registered.slice(0, 20)]
   ));
   return (r?.rows.length ?? 0) > 0;
 }

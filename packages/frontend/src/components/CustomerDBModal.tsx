@@ -342,8 +342,9 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const errMsg = await res.text().catch(() => '');
-        throw new Error(errMsg || '다운로드 실패');
+        // ★ 2026-11-05 C103 F7 — 응답 원문(JSON 글자)을 토스트에 싣지 않는다 · 서버가 준 error 글만(1104 접수 「{"error":…}」 원문 노출)
+        const data = await res.json().catch(() => null);
+        throw new Error(typeof data?.error === 'string' && data.error.trim() ? data.error : '다운로드하지 못했어요. 잠시 뒤 다시 눌러 주세요.');
       }
 
       const blob = await res.blob();
@@ -357,7 +358,7 @@ export default function CustomerDBModal({ onClose, token, userType, initialCusto
       window.URL.revokeObjectURL(url);
     } catch (err: any) {
       console.error('고객 DB 다운로드 실패:', err);
-      toast.error(`다운로드 실패: ${err?.message || '알 수 없는 오류'}`);
+      toast.error(err?.message || '다운로드하지 못했어요. 잠시 뒤 다시 눌러 주세요.');
     } finally {
       setDownloading(false);
     }

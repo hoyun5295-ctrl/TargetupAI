@@ -12,6 +12,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
+// ★ 2026-11-05 C103 F3 — 회신번호 등록 판정(journey-callback) = 바깥 경계(이 시험은 저장 경로의 다른 값을 본다 · 판정 자체 = c103-intake-contract)
+vi.mock('../journey-callback', async (orig) => ({
+  ...(await orig<any>()),
+  assertJourneyCallbackRegistered: vi.fn(async (_co: string, phone: unknown) => String(phone ?? '').replace(/\D/g, '') || null),
+}));
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { connect: vi.fn() } }));
 vi.mock('../company-data-profile', () => ({ getCompanyJourneyFacts: vi.fn(), getCompanyDataProfile: vi.fn().mockResolvedValue(null), formatProfileForAiPrompt: vi.fn(() => '') }));
 vi.mock('../../services/ai', () => ({ callAIWithFallback: vi.fn(), getKoreanCalendar: vi.fn(() => '') }));

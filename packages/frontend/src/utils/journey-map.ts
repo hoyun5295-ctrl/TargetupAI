@@ -88,7 +88,7 @@ export interface MapJourney {
 export type AfterOutcome = 'goal_met' | 'completed' | 'any';
 
 export type PauseFixAction = 'plan_upgrade' | 'charge' | 'edit_callback' | 'edit_step' | 'edit_options' | 'resume' | 'contact';
-export interface PauseReasonView { kind: string; text: string; fix: { action: PauseFixAction; label: string } | null }
+export interface PauseReasonView { kind: string; text: string; fix: { action: PauseFixAction; label: string; stepOrder?: number } | null }   // ★ C103 R56 stepOrder = 고칠 칸(서버 pauseReasonView)
 export interface JourneyHealth { tone: 'blocked' | 'fix' | 'quiet' | 'good' | 'paused' | 'draft' | 'ended'; text: string; fix: AttachFix | null }
 export interface MapOverlap { a: string; b: string; concurrentActive: number; text: string; fix: AttachFix | null }
 export interface MapSummary { activeJourneys: number; inProgressCustomers: number; fixCount: number; operationCredits30d: number | null }

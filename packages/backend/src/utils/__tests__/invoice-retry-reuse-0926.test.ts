@@ -58,7 +58,8 @@ describe('적재 단계의 추적행 재사용', () => {
   });
 
   it('발송 소유권 UPDATE(한 건만 통과)는 그대로다', () => {
-    expect(src).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL RETURNING emailed_at::text AS claimed_at/);
+    // ★ 2026-11-05 C103 F8 — 선점 조건에 「1단계 토큰이 살아 있다(EXISTS)」가 더해졌다(한 건만 통과 · 0행 = 보내지 않음은 그대로)
+    expect(src).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL[\s\S]{0,240}RETURNING emailed_at::text AS claimed_at/);
   });
 });
 

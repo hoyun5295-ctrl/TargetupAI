@@ -56,7 +56,7 @@ describe('1. 붙기 전 점검(judgeAttach)', () => {
     expect(judgeAttach(a, row(B, { entryClosed: true }), 'any', []).blocks[0]).toContain('옛 모양으로 마무리 중');
     expect(judgeAttach(a, row(B, { startKind: 'date_anchor' }), 'any', []).blocks[0]).toContain('날짜에 맞춰 보내는 여정');
     expect(judgeAttach(a, row(B, { startKind: 'one_shot' }), 'any', []).blocks[0]).toContain('날짜에 맞춰 보내는 여정');
-    expect(judgeAttach(row(A, { goalExitEnabled: false }), row(B), 'goal_met', []).blocks[0]).toContain('목표 달성하면 끝내기');
+    expect(judgeAttach(row(A, { goalExitEnabled: false }), row(B), 'goal_met', []).blocks[0]).toContain('「…하면 남은 문자 안 보냄」');   // ★ 2026-11-05 C103 F9 화면 단추 이름
     expect(judgeAttach(row(A, { goalExitEnabled: false }), row(B), 'completed', []).blocks).toEqual([]);
     expect(judgeAttach(a, row(B, after(A, 'any')), 'any', [a]).blocks).toContain('이미 이 여정 뒤에 같은 고객으로 붙어 있어요.');
     expect(judgeAttach(a, row(B, after(A, 'any')), 'goal_met', [a]).blocks).toEqual([]);

@@ -236,20 +236,6 @@ export async function createAgencyRequest(input: CreateAgencyRequestInput): Prom
   return data.request;
 }
 
-/**
- * ★2026-10-16 링크 승인 화면의 발신 인증 확인(로그인 없음 · 토큰은 헤더로만 · no-referrer).
- * 응답 몸통을 그대로 돌려준다(`useSenderAuth` 의 `verifyRequest` 계약).
- */
-export async function verifyAgencyLinkSenderAuth(token: string, challengeId: string, code: string): Promise<any> {
-  const res = await fetch('/api/agency-approve/sender-auth/verify', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Agency-Approve-Token': token },
-    referrerPolicy: 'no-referrer',
-    body: JSON.stringify({ challengeId, code }),
-  });
-  return res.json().catch(() => ({ success: false, error: '인증 처리 중 오류가 발생했습니다.' }));
-}
-
 export async function approveAgencyRequest(id: string, revision: number): Promise<AgencySendRequest> {
   const res = await fetch(`/api/agency-send/${id}/approve`, {
     method: 'POST', headers: json(), body: JSON.stringify({ revision }),

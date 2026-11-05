@@ -10,11 +10,13 @@ import { pool, query } from '../config/database';
 import { isDemoCompany } from '../utils/demo-company';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { buildAdMessage, buildAdSubject, getOpt080Number, prepareFieldMappings, replaceVariables } from '../utils/messageUtils';
-import { enqueueSpamTest, computeMessageHash, spamTestStartedAtMs, loadDefaultSpamFirstRecipient, spamCheckFor } from '../utils/spam-test-queue';
-import { judgeSpamVerdict, withExpectedSpamDevices, isAutoSpamSource } from '../utils/spam-trial';
+import { enqueueSpamTest, computeMessageHash, loadDefaultSpamFirstRecipient, spamCheckFor } from '../utils/spam-test-queue';
+import { isAutoSpamSource } from '../utils/spam-trial';
 import { resolveHubStoreScope } from '../utils/store-scope';
 import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 import type { AiLineViewer } from './ai-line';
+// ★ 2026-11-05 C103 F1 — 검사 한 건 보기 = 공용 CT(여정 칸 검사 창과 같은 함수 · 원본을 옮김)
+import { spamCheckView as verdictOf } from '../utils/spam-test-view';
 
 /** 칩 상태 — 화면은 이 값만 그린다 */
 export type LineSpamState =
@@ -49,46 +51,6 @@ async function loadFirstRecipient(v: AiLineViewer, customerId: string | null, ma
     params,
   );
   return r.rows[0] || null;
-}
-
-/** 검사 한 건 → 칩 상태(기대 테스트폰을 채운 판정 · 수동 검사 창과 같은 함수) */
-async function verdictOf(testId: string, status: string, createdAt: Date, msgType: string | null): Promise<LineSpamRead> {
-  const results = await query(
-    `SELECT carrier, phone, received, result FROM spam_filter_test_results WHERE test_id = $1${msgType ? ' AND message_type = $2' : ''} ORDER BY carrier`,
-    msgType ? [testId, msgType] : [testId],
-  );
-  const devices = await query(`SELECT carrier, phone FROM spam_filter_devices WHERE is_active = true`);
-  const rows = withExpectedSpamDevices(results.rows, devices.rows);
-  const verdict = judgeSpamVerdict(status, rows);
-  const startedAt = spamTestStartedAtMs(testId) ?? new Date(createdAt).getTime();
-  let aheadCount = 0;
-  if (status === 'queued') {
-    const ahead = await query(
-      `SELECT COUNT(*)::int AS n FROM spam_filter_tests WHERE status IN ('queued', 'active') AND created_at < $1`,
-      [createdAt],
-    );
-    aheadCount = Number(ahead.rows[0]?.n) || 0;
-  }
-  const state: LineSpamState = status === 'queued' ? 'queued'
-    : verdict === 'running' ? 'running'
-    : verdict === 'pass' ? 'pass'
-    : verdict === 'blocked' ? 'blocked'
-    : verdict === 'checking' ? 'checking'
-    : 'warn';
-  const byCarrier = new Map<string, 'pass' | 'blocked' | 'checking' | 'none'>();
-  for (const r of rows) {
-    const cur = byCarrier.get(r.carrier);
-    const val: 'pass' | 'blocked' | 'checking' | 'none' = r.result === 'blocked' ? 'blocked' : (r.received || r.result === 'pass') ? 'pass'
-      : r.result === 'unconfirmed' ? 'checking' : 'none';
-    if (cur === 'blocked' || (cur === 'checking' && val !== 'blocked') || (cur === 'pass' && val === 'none')) continue;
-    byCarrier.set(r.carrier, val);
-  }
-  return {
-    state,
-    carriers: [...byCarrier.entries()].map(([carrier, result]) => ({ carrier, result })),
-    aheadCount,
-    elapsedSec: status === 'active' ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0,
-  };
 }
 
 export async function startLineSpamTest(v: AiLineViewer, input: {

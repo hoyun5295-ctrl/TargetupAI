@@ -55,7 +55,7 @@ import { journeyGate, journeyError, canAccessJourney, journeyOptionsOffOnly } fr
 import { applyPassedCandidate, readPassedCandidateForStep } from '../utils/journey-pretest-candidate';   // ★ 2026-11-02 수정안 반영 CT(CT-J12)
 import { readJourneyCopyFacts } from '../utils/journey-copy-facts';
 import { finishMany, copyResponse } from '../utils/copy-finish';
-import { checkJourney, startJourneyStepSpamChecks } from '../utils/journey-check';
+import { checkJourney } from '../utils/journey-check';
 import { accessibleJourneyIds } from '../utils/journey-access';
 import type { LineCompositionId } from '../utils/line-compositions';
 import { getBrandBasicInfo } from '../utils/brand-basic-info';
@@ -118,7 +118,7 @@ import { getPurchaseDoorStatus } from '../utils/journey-purchase-ledger';
 // ★ 2026-08-02: 등급 서열 — 값 목록·저장·확인 판정은 CT 단일 출처.
 import { listCompanyGradeValues, saveGradeRanks, hasUsableGradeOrder, hasGradeOrderConfig } from '../utils/customer-grade-rank';
 // ★ D218+ (2026-05-26): 활성화 검증 + 정지 이력 조회
-import { validateJourneyForActivation } from '../utils/journey-pretest-validator';
+import { validateJourneyForActivation, journeyStepSpamParams, enqueueStepSpamCheck, readStepSpamCheck } from '../utils/journey-pretest-validator';
 import { getPauseLogs } from '../utils/journey-pause-handler';
 import { MANUAL_PAUSE_REASON } from '../utils/journey-pause-reason';   // ★ 2026-11-02 CT-J2
 // ★ 2026-06-30 여정 일반화 — one_shot 활성 시점 단발 dispatch.
@@ -171,7 +171,7 @@ import { prepareInterviewPreset } from '../utils/journey-interview-ai';
 import { startGenOf } from '../utils/journey-after-config';
 import { attachCandidates, attachJourney, detachJourney, AFTER_OUTCOMES, type AfterOutcome } from '../utils/journey-attach';
 import { prepareInterview, designJourneyFromInterview, MAX_INTERVIEW_SENTENCE } from '../utils/journey-interview-ai';
-import { listJourneyCallbackNumbers } from '../utils/journey-draft-save';
+import { listJourneyCallbackNumbers, assertJourneyCallbackRegistered } from '../utils/journey-draft-save';
 import { isPurchaseDoor, listObservedProductsByDoor, suggestUsagePeriod, PRODUCT_TRIGGER_EVENT } from '../utils/journey-product';
 import { createProductJourneyDraft, dbAcceptsProductTrigger, productJourneyLockReason } from '../utils/journey-product-create';
 import { normalizeJourneyOptions } from '../utils/journey-options-validator';
@@ -3575,10 +3575,7 @@ router.patch('/operator/journeys/:id/steps/:stepId', async (req: Request, res: R
       targetHourKst: targetHourKst !== undefined && targetHourKst !== null && Number.isFinite(Number(targetHourKst)) ? Number(targetHourKst) : undefined,
     });
     if (!ok) return res.status(404).json({ success: false, error: '단계를 찾을 수 없거나 고칠 권한이 없어요.' });
-    // ★ 2026-11-01 배포 2 C5 · D1 — 글 · 제목 · 채널 · 광고 여부가 바뀌면 그 칸 판으로 통신사 검사를 건다(기다리지 않는다 · 같은 글 = 이어 보기)
-    if (messageTemplate !== undefined || subject !== undefined || channel !== undefined || isAd !== undefined) {
-      void startJourneyStepSpamChecks(companyId, req.params.id, req.params.stepId, gate.userId);
-    }
+    // ★ 2026-11-05 C103 F2 — 칸 저장 뒤 자동 유료 스팸 검사 0(1104 접수 2 · 검사 = 「지금 스팸 검사」 누를 때 · 켤 때 · 보내기 전)
     return res.json({ success: true });
   } catch (err: any) {
     // ★ 2026-07-27: 전환재발송 규칙 위반은 입력 오류라 400으로 돌린다(500 = 서버 결함으로 오인).
@@ -3632,7 +3629,6 @@ router.post('/operator/journeys/:id/steps', async (req: Request, res: Response) 
       waitTimeoutHours: waitTimeoutHours != null ? Number(waitTimeoutHours) : undefined,
     }, { clientStepId: clientStepId != null ? String(clientStepId) : undefined });
     if (!result) return res.status(404).json({ success: false, error: '여정을 찾을 수 없거나 수정 권한이 없습니다.' });
-    if (!result.existed) void startJourneyStepSpamChecks(companyId, req.params.id, result.stepId, gate.userId);   // ★ 배포 2 C5 · D1
     return res.json({ success: true, stepId: result.stepId, stepOrder: result.stepOrder, existed: result.existed === true });
   } catch (err: any) {
     return journeyError(res, err, 'add step', 'step 추가 실패');
@@ -3702,8 +3698,7 @@ router.post('/operator/journeys/:id/copy-facts', async (req: Request, res: Respo
       ...(typeof url === 'string' && url.trim() ? { url } : {}),
     });
     if (!out) return res.status(404).json({ success: false, error: '여정을 찾을 수 없습니다.' });
-    // ★ 배포 2 C5 · D1 — 채운 칸마다 새 글로 통신사 검사(기다리지 않는다 · 하나씩 · 같은 글 = 이어 보기)
-    void (async () => { for (const s of out.steps) await startJourneyStepSpamChecks(companyId, String(req.params.id), s.id, gate.userId); })();
+    // ★ 2026-11-05 C103 F2 — 혜택 · 링크 넣기 뒤 자동 유료 스팸 검사 0(검사 = 「지금 스팸 검사」 · 켤 때 · 보내기 전)
     return res.json({ success: true, steps: out.steps });
   } catch (err: any) {
     return journeyError(res, err, 'copy-facts', '넣지 못했어요. 잠시 뒤 다시 시도해 주세요.');
@@ -4091,7 +4086,8 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if ('allowReentry' in body) add('allow_reentry', norm.options.allowReentry);
     if ('reentryCooldownDays' in body) add('reentry_cooldown_days', norm.options.reentryCooldownDays);
     if ('autoReentryEnabled' in body) add('auto_reentry_enabled', norm.options.autoReentryEnabled);
-    if ('callbackNumber' in body && norm.options.callbackNumber) add('callback_number', norm.options.callbackNumber);
+    // ★ 2026-11-05 C103 F3 · SC-1 — 회신번호 = 회사 등록 번호만(판정 = journey-callback 한 곳 · 옛: 아무 번호나 받았다) · 빈 값 = 지우지 않음(옛 규칙)
+    if ('callbackNumber' in body && norm.options.callbackNumber) add('callback_number', await assertJourneyCallbackRegistered(companyId, norm.options.callbackNumber));
     if ('callbackMode' in body) add('callback_mode', norm.options.callbackMode);
     if ('goalExitEnabled' in body) add('goal_exit_enabled', norm.options.goalExitEnabled);  // 실측 컬럼(2026-07-10 DDL 실행 확인)
     // ★ 2026-07-11 신규 컬럼(goal_kind·holdout_pct·personal_send_time) — DDL 실행 전이면 UPDATE가 42703 → catch의 DB_MIGRATION_PENDING 503 (기존 가드)
@@ -4424,6 +4420,44 @@ router.post('/operator/journeys/:id/pause', async (req: Request, res: Response) 
 // ════════════════════════════════════════════════════════════════════
 
 // POST /api/ai/operator/journeys/:id/pretest-validate — 활성화 직전 자동 검증
+// ============================================================
+// ★ 2026-11-05 C103 F1 — 여정 칸 「지금 스팸 검사」(1104 접수 2 · 검사 글 = 켜기 검사와 같은 stepSpamInput · 저장된 글만)
+//   POST = 오늘 같은 글 검사가 있으면 이어 보기(차감 0) · 없으면 수동 검사 수락 규칙 + 단가표 차감 · GET = 엿보기(등록 0)
+//   응답 = 공용 안전 보기(spamCheckView)와 검사 글만 · 검사 행 원본 · 검사 번호 · 받는 사람 0(Codex 설계 1R H2)
+// ============================================================
+router.post('/operator/journeys/:id/steps/:stepId/spam-check', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    if (!gate.userId) return res.status(403).json({ success: false, error: '회사/사용자 권한이 필요합니다.' });
+    const variantId = typeof req.body?.variantId === 'string' && req.body.variantId ? req.body.variantId : null;
+    const params = await journeyStepSpamParams(gate.companyId, gate.userId, req.params.id, req.params.stepId, variantId);
+    const out = await enqueueStepSpamCheck(params);
+    const r = out.result;
+    if (!r.ok) {
+      if (r.insufficientBalance) return res.status(402).json({ success: false, error: r.error || '잔액이 부족해 검사하지 못했어요. 충전한 뒤 다시 눌러 주세요.', code: 'INSUFFICIENT_BALANCE' });
+      return res.status(r.errorCode === 'MANUAL_IN_PROGRESS' ? 409 : 400).json({ success: false, error: r.error || '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요.', code: r.errorCode || 'SPAM_CHECK_FAILED' });
+    }
+    return res.json({ success: true, reused: !!r.reused, view: out.view, message: out.message, subject: out.subject });
+  } catch (err: any) {
+    return journeyError(res, err, 'step-spam-check', '스팸 검사를 시작하지 못했어요.');
+  }
+});
+
+router.get('/operator/journeys/:id/steps/:stepId/spam-check', async (req: Request, res: Response) => {
+  try {
+    const gate = await journeyGate(req, res);
+    if (!gate) return;
+    if (!gate.userId) return res.status(403).json({ success: false, error: '회사/사용자 권한이 필요합니다.' });
+    const variantId = typeof req.query.variantId === 'string' && req.query.variantId ? req.query.variantId : null;
+    const params = await journeyStepSpamParams(gate.companyId, gate.userId, req.params.id, req.params.stepId, variantId);
+    const out = await readStepSpamCheck(params);
+    return res.json({ success: true, view: out.view, message: out.message, subject: out.subject });
+  } catch (err: any) {
+    return journeyError(res, err, 'step-spam-check-read', '스팸 검사 결과를 읽지 못했어요.');
+  }
+});
+
 router.post('/operator/journeys/:id/pretest-validate', async (req: Request, res: Response) => {
   try {
     const gate = await journeyGate(req, res);

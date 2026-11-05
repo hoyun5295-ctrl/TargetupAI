@@ -229,6 +229,8 @@ if (smsOptIn === 'true') {
       },
     });
   } catch (error) {
+    // ★ 2026-11-05 C103 F7 — 뷰 칸 없음(필터 칸 · 원장 C103-DDL-1 전) = 503(db_alter_safety_net · 500 원문 0)
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers_unified 칸(뷰 다시 만들기 · 원장 C103-DDL-1)'));
     console.error('고객 목록 조회 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }
@@ -430,6 +432,8 @@ router.get('/download', async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
   } catch (error) {
+    // ★ 2026-11-05 C103 F7 — 1104 접수 = 뷰에 없는 칸(가입일)을 고르면 500 · 칸 없음 = 503 + 실행할 DDL
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers_unified 칸(뷰 다시 만들기 · 원장 C103-DDL-1)'));
     console.error('고객 다운로드 오류:', error);
     return res.status(500).json({ error: '다운로드 중 오류가 발생했습니다.' });
   }
@@ -485,6 +489,8 @@ router.post('/filter', async (req: Request, res: Response) => {
       filters,
     });
   } catch (error) {
+    // ★ 2026-11-05 C103 F7 — 필터 칸이 뷰에 없으면(원장 C103-DDL-1 전) 503
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers_unified 칸(뷰 다시 만들기 · 원장 C103-DDL-1)'));
     console.error('필터 미리보기 오류:', error);
     return res.status(500).json({ error: '서버 오류가 발생했습니다.' });
   }

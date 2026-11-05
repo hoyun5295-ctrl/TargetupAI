@@ -128,6 +128,22 @@ export function getFieldByKey(fieldKey: string): StandardFieldMapping | undefine
   return FIELD_MAP.find(f => f.fieldKey === fieldKey);
 }
 
+/**
+ * ★ 2026-11-05 C103 F6(뿌리 대장 R57) — standard_fields 키 → 고객 칸 이름(없으면 null = custom_fields 키).
+ *   옛 표준 필드 키(age_group · last_purchase_date · opt_in_sms)는 FIELD_MAP 키와 이름이 달라 별칭으로 둔다(옛 admin 손 매핑 원문).
+ *   그 밖 = FIELD_MAP 의 직접 칸(storageType 'column'). 옛 손 매핑만 보던 슈퍼관리자 칸 데이터 유무가 가입일(joined_at)을 늘 0 으로 셌다.
+ */
+const STANDARD_FIELD_LEGACY_COLUMNS: Record<string, string> = {
+  age_group: 'age',
+  last_purchase_date: 'recent_purchase_date',
+  opt_in_sms: 'sms_opt_in',
+};
+export function standardFieldColumn(fieldKey: string): string | null {
+  if (STANDARD_FIELD_LEGACY_COLUMNS[fieldKey]) return STANDARD_FIELD_LEGACY_COLUMNS[fieldKey];
+  const f = getFieldByKey(fieldKey);
+  return f && f.storageType === 'column' && f.columnName ? f.columnName : null;
+}
+
 /** 카테고리별 필드 목록 */
 export function getFieldsByCategory(category: FieldCategory): StandardFieldMapping[] {
   return FIELD_MAP.filter(f => f.category === category).sort((a, b) => a.sortOrder - b.sortOrder);

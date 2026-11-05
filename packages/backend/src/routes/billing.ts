@@ -33,7 +33,7 @@ import { drawPartyBlock, drawThanksNote, THANKS_NOTE_HEIGHT } from '../utils/pdf
 import { renderBillingStatementPdf, renderInvoicePdf, loadBillingStatementData, loadInvoicePdfData } from '../utils/billing-pdf';
 // ★ 2026-08-04 컨펌 토큰·안내 문구는 일괄발급과 **같은 CT**를 쓴다 — 개별 발송 메일에만 컨펌 버튼이
 //   없어서 업체가 이의를 낼 창구가 없었다(서수란 0803·0804 접수).
-import { retryUnsentConfirmations, ensureConfirmationToken, renderConfirmBlockHtml, markConfirmationDelivered, renderBillingMailHtml } from '../utils/invoice-confirm';
+import { retryUnsentConfirmations, resendConfirmationForSheet, ensureConfirmationToken, renderConfirmBlockHtml, markConfirmationDelivered, renderBillingMailHtml } from '../utils/invoice-confirm';
 // ★ 2026-08-05 회사 단위 정산 잠금 CT — 발행·반영·취소·수동완료가 **같은 두 겹**을 잡아야 서로를 막는다.
 import { lockCompanyForBilling, lockCompaniesForBilling } from '../utils/billing-lock';
 import { normalizeUnitPriceBasis } from '../utils/unit-price';
@@ -648,7 +648,7 @@ router.get('/confirmations', async (req: Request, res: Response) => {
               (to_jsonb(ic) ->> 'taxbill_remark')     AS taxbill_remark,
               (to_jsonb(cbs) ->> 'require_taxbill_remark')::boolean AS require_taxbill_remark,
               ic.taxbill_status, to_char(ic.taxbill_issue_date, 'YYYY-MM-DD') AS taxbill_issue_date,
-              ic.taxbill_due_at, ic.issued_at, ic.superseded_at,
+              ic.taxbill_due_at, ic.issued_at, ic.superseded_at, ic.objection_resolved_at,
               to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
               to_char(b.billing_end, 'YYYY-MM-DD')   AS billing_end,
               b.total_amount, b.scope AS billing_scope,
@@ -660,7 +660,8 @@ router.get('/confirmations', async (req: Request, res: Response) => {
          LEFT JOIN company_billing_settings cbs ON cbs.company_id = ic.company_id
         WHERE ($1::date IS NULL OR b.billing_end >= $1::date)
           AND ($2::date IS NULL OR b.billing_start <= $2::date)
-          AND ($3::text IS NULL OR ic.taxbill_status = $3::text)
+          -- ★ 2026-11-05 C103 F8 — 상태 탭 = 살아 있는 행만(이의를 해소한 옛 행이 이의신청 탭에 남지 않게) · 전체 = 이력 그대로
+          AND ($3::text IS NULL OR (ic.taxbill_status = $3::text AND ic.superseded_at IS NULL))
         ORDER BY ic.sent_at DESC
         LIMIT 501`,
       [start, end, status],
@@ -1364,6 +1365,79 @@ router.put('/confirmations/:id/admin-confirm', async (req: Request, res: Respons
     }
     console.error('업체 확인 기록 오류:', emsg || error);
     return res.status(500).json({ error: '업체 확인 기록에 실패했습니다.' });
+  }
+});
+
+// PUT /confirmations/:id/objection-resolve — 이의신청 「변경 없음」 → 같은 장 새 확인 메일(★ 2026-11-05 C103 F8 · 1104 접수 1 서수란)
+//   옛: 내부 확인 결과 변경이 없으면 다음으로 갈 길이 없었다(업체 화면 = 이의 접수 뒤 단추 0 · 수량 수정 재발행 = 조정 0 이면 잠김).
+//   ① 한 트랜잭션(잠금 순서 = 일괄발급 1단계와 같다 · 장 → 확인 행): 그 확인 행 = 해소 · 무효 · 장 발송 표시 해제
+//   ② 커밋 뒤 그 장 하나로 일괄발급 · [메일 재시도]와 같은 길(새 토큰 행 → PDF → 토큰에 묶인 발송 선점 → 메일 → 토큰 전달 확정)
+//   ③ 응답 = 효과 검증 뒤(보낸 장 1 · 확실한 미발송 · 표시가 남은 실패를 가른다 · 6원칙 ②)
+router.put('/confirmations/:id/objection-resolve', async (req: Request, res: Response) => {
+  const id = String(req.params.id || '');
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: '확인 행을 찾을 수 없습니다.' });
+  let billingId = '';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(`SET LOCAL lock_timeout = '10s'`);
+    const head = await client.query(`SELECT billing_id FROM invoice_confirmations WHERE id = $1::uuid`, [id]);
+    if (head.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: '확인 행을 찾을 수 없습니다. 새로고침해 주세요.' }); }
+    billingId = String(head.rows[0].billing_id);
+    await client.query(`SELECT id FROM billings WHERE id = $1::uuid FOR UPDATE`, [billingId]);
+    // 계산서가 발급 대기 이상이거나 발행 실패(failed)면 막는다 — 새 확인 행은 새 원본 발행으로 이어지므로 운영 재발행 중복 검사와 같은 조건
+    //   (★ Codex 구현 1R high · failed = 팝빌 305 로 외부에 실존할 수 있다 · 그 행의 올바른 처치는 [재시도]).
+    const issued = await client.query(
+      `SELECT 1 FROM taxbill_issues
+        WHERE billing_id = $1::uuid
+          AND (status IN ('ready', 'submitted', 'issued', 'failed')
+               OR (status = 'cancelled' AND nts_confirm_num IS NOT NULL))
+        LIMIT 1`,
+      [billingId],
+    );
+    if (issued.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: '이 정산은 세금계산서가 발급 대기 이상 단계(발행 실패 포함)에 있어 확인 메일을 다시 보낼 수 없습니다. 계산서 장부에서 그 건을 먼저 처리해 주세요.', code: 'BILLING_TAXBILL_ALREADY_ISSUED' });
+    }
+    const resolved = await client.query(
+      `UPDATE invoice_confirmations SET objection_resolved_at = NOW(), superseded_at = NOW()
+        WHERE id = $1::uuid AND billing_id = $2::uuid AND taxbill_status = 'objected'
+          AND superseded_at IS NULL AND issued_at IS NULL AND objection_resolved_at IS NULL
+        RETURNING id`,
+      [id, billingId],
+    );
+    if (resolved.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: '이미 처리됐거나 이의신청 상태가 아니에요. 새로고침해 주세요.' });
+    }
+    await client.query(`UPDATE billings SET emailed_at = NULL, emailed_to = NULL WHERE id = $1::uuid`, [billingId]);
+    await client.query('COMMIT');
+  } catch (error: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 아래 응답이 사실을 전한다 */ }
+    const emsg = error?.message || '';
+    if (emsg.includes('does not exist') && (emsg.includes('relation') || emsg.includes('column'))) {
+      return res.status(503).json({ error: 'DB 마이그레이션 필요: invoice_confirmations.objection_resolved_at 컬럼 확인 요청', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('이의 해소 오류:', emsg || error);
+    return res.status(500).json({ error: '이의신청을 처리하지 못했습니다.' });
+  } finally {
+    client.release();
+  }
+
+  // 커밋 뒤 = 그 장 하나로 옛 발송 길(해소는 이미 커밋됨 · 발송 실패는 「미발송만 보기」의 [메일 재시도] · 단건 [메일 재발송]이 잇는다)
+  try {
+    const sum = await resendConfirmationForSheet(billingId);
+    if (sum.sent === 1) return res.json({ success: true, message: '확인 메일을 다시 보냈어요.' });
+    if (sum.skippedNoEmail > 0) {
+      return res.json({ success: false, code: 'NO_RECIPIENT', error: '정산 담당자 이메일이 없어 보내지 못했어요. 담당자 이메일을 등록한 뒤 「미발송만 보기」에서 [메일 재시도]로 보내 주세요.' });
+    }
+    if (sum.mailUncertain > 0) {
+      return res.json({ success: false, code: 'MAIL_UNCERTAIN', error: '보냈는지 확인하지 못했어요. 업체에 받았는지 확인하고, 못 받았으면 그 거래내역서의 [메일 재발송]으로 다시 보내 주세요.' });
+    }
+    return res.json({ success: false, code: 'MAIL_NOT_SENT', error: '확인 메일을 보내지 못했어요. 「미발송만 보기」에서 [메일 재시도]로 다시 보낼 수 있어요.' });
+  } catch (error: any) {
+    console.error(`[이의해소][발송오류] billing=${billingId}:`, error?.message || error);
+    return res.json({ success: false, code: 'MAIL_NOT_SENT', error: '확인 메일을 보내지 못했어요. 「미발송만 보기」에서 [메일 재시도]로 다시 보낼 수 있어요.' });
   }
 });
 
@@ -3514,6 +3588,7 @@ router.post('/:id/send-email', async (req: Request, res: Response) => {
         companyId: String(bil.company_id),
         billingEnd: bEnd,
         email: sendTo,
+        token,   // ★ C103 F8 메일에 실린 그 토큰 행만
       });
 
       await mailClient.query('COMMIT');

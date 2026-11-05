@@ -6,6 +6,9 @@
  *   - 무료 체험(미가입 3회 · 차감 0) / 유료(테스트 문자 발송 요금 청구) 한 줄 · 진행 중 중복·잔액 부족을 같은 카드 안에서 안내
  *   - 판정 규칙·API·폴링·타이머·이력 조회는 원본 그대로(화면만 바꿨다). 창을 여는 곳 4곳(대시보드·자동발송·모바일 DM·여정)의
  *     넘기는 값은 그대로이고, `onEdit`만 선택으로 더했다(없으면 [글 고치러 가기] = 닫기).
+ * ★ 2026-11-05 C103 F1 — `journeyStep` 이 오면 「여정 칸 모드」: 검사 글 = 서버가 켜기 검사와 같은 함수로 만든 저장된 칸 글 ·
+ *   시작 · 읽기 = 여정 칸 검사 주소 · 화면 상태 = 서버 보기(상태 · 통신사별 · 앞 대기 수 · 진행 초)를 이 창의 상태에 옮겨 그린다 ·
+ *   화면 60초 타이머로 읽기를 끊지 않는다(끝 = 서버 통과 · 막힘 · 결과 없음) · 진행 중 검사 되살리기 · 지난 검사 탭 0. 없으면 지금 동작 그대로.
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AlertTriangle, Ban, Check, ChevronDown, Loader2, Play, RotateCcw, ShieldCheck, X } from 'lucide-react';
@@ -24,7 +27,18 @@ interface SpamFilterTestModalProps {
   firstRecipient?: Record<string, any>;
   /** ★ 2026-09-25 막혔을 때 [글 고치러 가기] — 없으면 창만 닫는다 */
   onEdit?: () => void;
+  /** ★ 2026-11-05 C103 F1 — 여정 칸 모드(검사 글 · 결과 = 여정 칸 검사 주소) */
+  journeyStep?: { journeyId: string; stepId: string; variantId?: string | null };
 }
+
+/** 여정 칸 검사 주소의 안전 보기(서버 utils/spam-test-view.ts SpamCheckView 와 같은 꼴) */
+interface JourneySpamView {
+  state: 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn';
+  carriers: Array<{ carrier: string; result: 'pass' | 'blocked' | 'checking' | 'none' }>;
+  aheadCount: number;
+  elapsedSec: number;
+}
+const JOURNEY_SPAM_LIVE = ['queued', 'running', 'checking'];
 
 interface TestResult {
   carrier: string;
@@ -67,8 +81,16 @@ export default function SpamFilterTestModal({
   isAd,
   firstRecipient,
   onEdit,
+  journeyStep,
 }: SpamFilterTestModalProps) {
   const token = useAuthStore((s) => s.token);
+  // ★ C103 F1 여정 칸 모드 — 주소 · 서버 보기 · 서버 검사 글
+  const jKey = journeyStep ? `${journeyStep.journeyId}/${journeyStep.stepId}/${journeyStep.variantId || ''}` : '';
+  const jUrl = journeyStep ? `/api/ai/operator/journeys/${encodeURIComponent(journeyStep.journeyId)}/steps/${encodeURIComponent(journeyStep.stepId)}/spam-check` : '';
+  const [jv, setJv] = useState<JourneySpamView | null>(null);
+  const [jMsg, setJMsg] = useState('');
+  const [jSub, setJSub] = useState<string | null>(null);
+  const [jTick, setJTick] = useState(0);
   const [status, setStatus] = useState<'ready' | 'testing' | 'completed'>('ready');
   const [testId, setTestId] = useState<string | null>(null);
   const [results, setResults] = useState<TestResult[]>([]);
@@ -134,8 +156,48 @@ export default function SpamFilterTestModal({
     pollRef.current = setInterval(() => pollResults(id), 2000);
   }, []);
 
-  // 모달 열릴 때 active 테스트 확인 + ★2026-09-25 체험/청구 안내용 현황
+  // ★ C103 F1 — 서버 보기 → 이 창의 상태(판정 · 통신사 줄 · 남은 초는 원래 그리는 길 그대로)
+  const applyJourneyView = useCallback((v: JourneySpamView | null) => {
+    setJv(v);
+    if (!v) { setStatus('ready'); setResults([]); setFinalBy(null); return; }
+    const live = v.state === 'queued' || v.state === 'running';
+    setStatus(live ? 'testing' : 'completed');
+    setResults(v.carriers.map((c) => ({
+      carrier: c.carrier, message_type: '', received: c.result === 'pass', received_at: null,
+      result: c.result === 'pass' ? 'received' : c.result === 'blocked' ? 'blocked' : c.result === 'checking' ? 'unconfirmed' : live ? null : 'timeout',
+    })));
+    setTotalCount(v.carriers.length);
+    setCountdown(v.state === 'running' ? Math.max(0, 60 - v.elapsedSec) : 60);
+    // 확인 중 = 서버가 확정할 때까지(화면 시계로 끊지 않는다 · 다음 읽기마다 늘린다)
+    setFinalBy(v.state === 'checking' ? Date.now() + 60000 : null);
+  }, []);
+
+  const readJourney = useCallback(async () => {
+    try {
+      const res = await fetch(`${jUrl}${journeyStep?.variantId ? `?variantId=${encodeURIComponent(journeyStep.variantId)}` : ''}`, { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) { setErrorKind('generic'); setError(data?.error || '검사 결과를 읽지 못했어요. 잠시 뒤 다시 열어 주세요.'); return; }
+      setError('');   // 읽기가 되살아나면 앞 읽기 실패 안내를 지운다
+      setJMsg(String(data.message || ''));
+      setJSub(data.subject ?? null);
+      applyJourneyView(data.view ?? null);
+    } catch {
+      // 읽기 실패 = 다음 차례에 다시(진행 중일 때만 · 아래 effect)
+    } finally {
+      setJTick((t) => t + 1);
+    }
+  }, [jKey, token, applyJourneyView]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 여정 칸 모드 읽기 = 진행 중 · 확인 중일 때만(3초 · 확인 중 15초) · 끝 상태 = 멈춤
   useEffect(() => {
+    if (!journeyStep || !jv || !JOURNEY_SPAM_LIVE.includes(jv.state)) return;
+    const t = setTimeout(() => { void readJourney(); }, jv.state === 'checking' ? 15000 : 3000);
+    return () => clearTimeout(t);
+  }, [jKey, jv, jTick, readJourney]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 모달 열릴 때 active 테스트 확인 + ★2026-09-25 체험/청구 안내용 현황 · ★ C103 F1 여정 칸 모드 = 그 칸 검사 읽기만
+  useEffect(() => {
+    if (journeyStep) { void readJourney().finally(() => setLoading(false)); return () => clearTimers(); }
     checkActiveTest();
     fetchSendCheckStatus().then((st) => { if (st) setCheckStatus(st); });
     return () => clearTimers();
@@ -241,7 +303,31 @@ export default function SpamFilterTestModal({
     if (activeTab === 'history') fetchHistory(1);
   }, [activeTab]);
 
+  // ★ C103 F1 — 여정 칸 모드 시작 = 여정 칸 검사 주소(서버가 저장된 칸 글로 만든다 · 같은 날 같은 글 = 이어 보기)
+  const startJourneyTest = async () => {
+    setStatus('testing'); setError('');
+    try {
+      const res = await fetch(jUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ variantId: journeyStep?.variantId || null }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        if (res.status === 409 && data?.code === 'MANUAL_IN_PROGRESS') { setErrorKind('dup'); setError(data?.error || '이미 진행 중인 스팸 검사가 있어요.'); }
+        else if (res.status === 402) { setErrorKind('money'); setError(data?.error || '잔액이 부족해요.'); }
+        else { setErrorKind('generic'); setError(data?.error || '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 눌러 주세요.'); }
+        setStatus('ready'); return;
+      }
+      setJMsg(String(data.message || ''));
+      setJSub(data.subject ?? null);
+      // 등록 직후 보기가 아직 없으면 = 줄에 선 것으로 보고 읽기를 잇는다
+      applyJourneyView(data.view ?? { state: 'queued', carriers: [], aheadCount: 0, elapsedSec: 0 });
+    } catch { setErrorKind('generic'); setError('네트워크 오류가 발생했습니다.'); setStatus('ready'); }
+  };
+
   const startTest = async () => {
+    if (journeyStep) { await startJourneyTest(); return; }
     if (!callbackNumber) { setErrorKind('generic'); setError('발신번호가 선택되지 않았습니다.'); return; }
     if (!messageContentSms && !messageContentLms) { setErrorKind('generic'); setError('메시지를 입력해주세요.'); return; }
     setStatus('testing'); setError('');
@@ -318,8 +404,8 @@ export default function SpamFilterTestModal({
   const namesOf = (rows: TestResult[]) => [...new Set(rows.map((r) => carrierLabel(r.carrier)))].join(' · ');
 
   // ★ D97: 미리보기 변수 치환 — replaceDirectVars 컨트롤타워 사용 (인라인 금지)
-  const rawPreview = messageContentSms || messageContentLms || '';
-  const previewMessage = firstRecipient
+  const rawPreview = journeyStep ? jMsg : (messageContentSms || messageContentLms || '');
+  const previewMessage = !journeyStep && firstRecipient
     ? replaceDirectVars(rawPreview, firstRecipient, callbackNumber)
     : rawPreview;
   const typeLabel = messageType === 'SMS' ? 'SMS' : messageType === 'LMS' ? 'LMS' : 'MMS';
@@ -377,7 +463,7 @@ export default function SpamFilterTestModal({
             <h3 id="sft-title" className="text-base font-extrabold text-stone-900">스팸 검사</h3>
             <p className="text-xs text-stone-500 mt-0.5 break-keep">통신사 3사에서 이 글이 스팸으로 막히는지 확인해요</p>
           </div>
-          <div className="ml-auto inline-flex bg-stone-100 rounded-[10px] p-[3px] gap-0.5 ring-1 ring-inset ring-stone-200 shrink-0">
+          {journeyStep ? <span className="ml-auto" /> : <div className="ml-auto inline-flex bg-stone-100 rounded-[10px] p-[3px] gap-0.5 ring-1 ring-inset ring-stone-200 shrink-0">
             {(['test', 'history'] as const).map((t) => (
               <button
                 key={t}
@@ -388,7 +474,7 @@ export default function SpamFilterTestModal({
                 {t === 'test' ? '검사' : '지난 검사'}
               </button>
             ))}
-          </div>
+          </div>}
           <button type="button" onClick={onClose} aria-label="닫기" className="w-9 h-9 rounded-lg grid place-items-center text-stone-400 hover:bg-stone-100 hover:text-stone-700 shrink-0">
             <X className="w-4 h-4" />
           </button>
@@ -406,14 +492,14 @@ export default function SpamFilterTestModal({
                   </div>
                   <div className="flex-1 p-3 bg-stone-50 overflow-y-auto">
                     <div className="bg-white border border-stone-200 rounded-[16px_16px_16px_4px] px-3 py-2.5 text-[12.5px] leading-[1.65] whitespace-pre-wrap break-keep [overflow-wrap:anywhere] text-stone-700">
-                      {subject && (messageType === 'LMS' || messageType === 'MMS') && (
-                        <b className="block text-stone-900 pb-1.5 mb-1.5 border-b border-stone-200">{buildAdSubjectFront(subject, messageType, isAd ?? false)}</b>
+                      {(journeyStep ? jSub : subject) && (messageType === 'LMS' || messageType === 'MMS') && (
+                        <b className="block text-stone-900 pb-1.5 mb-1.5 border-b border-stone-200">{journeyStep ? jSub : buildAdSubjectFront(subject || '', messageType, isAd ?? false)}</b>
                       )}
                       {previewMessage || '메시지 없음'}
                     </div>
                   </div>
                   <div className="px-2 py-2 text-center text-[10.5px] text-stone-400 border-t border-stone-100">
-                    {firstRecipient ? '첫 번째 받는 사람 기준으로 변수를 채웠어요' : messageType}
+                    {journeyStep ? '이 여정 고객 한 분 기준으로 채운 글이에요' : firstRecipient ? '첫 번째 받는 사람 기준으로 변수를 채웠어요' : messageType}
                   </div>
                 </div>
               </div>
@@ -449,12 +535,21 @@ export default function SpamFilterTestModal({
                     </svg>
                     <span className="text-[15px] font-extrabold tabular-nums">{countdown}</span>
                   </span>
+                  {journeyStep && jv?.state === 'queued' ? (
+                    <div className="min-w-0">
+                      <h4 className="text-[16px] font-extrabold leading-snug break-keep">검사 줄에서 차례를 기다리고 있어요</h4>
+                      <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">
+                        {jv.aheadCount > 0 ? <>앞에 <b className="tabular-nums">{jv.aheadCount}</b>건이 있어요. </> : ''}창을 닫아도 검사는 계속되고, 다시 열면 이어서 보여요.
+                      </p>
+                    </div>
+                  ) : (
                   <div className="min-w-0">
                     <h4 className="text-[16px] font-extrabold leading-snug break-keep">통신사 3사 결과를 확인하고 있어요</h4>
                     <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">
                       <b className="tabular-nums">{totalCount || results.length || 3}</b>곳 중 <b className="tabular-nums">{receivedCount}</b>곳이 통과했어요. 창을 닫아도 검사는 계속되고, 다시 열면 이어서 보여요.
                     </p>
                   </div>
+                  )}
                 </div>
               ) : verdict === 'pass' ? (
                 <div className="rounded-2xl p-4 flex items-center gap-3.5 border border-emerald-200 bg-emerald-50">
@@ -530,7 +625,9 @@ export default function SpamFilterTestModal({
               {/* 보내는 양 · 요금 */}
               <div className="flex flex-wrap gap-1.5">
                 <span className="text-[11.5px] text-stone-600 bg-stone-100 rounded-[7px] px-2 py-1">{messageType === 'SMS' ? 'SMS' : 'LMS'} <b className="text-stone-900">1통씩</b> · 통신사 3사</span>
-                {checkStatus && (isTrial ? (
+                {journeyStep ? (
+                  <span className="text-[11.5px] text-stone-600 bg-stone-100 rounded-[7px] px-2 py-1">테스트 문자는 발송 요금으로 청구돼요 · 오늘 같은 글은 다시 청구하지 않아요</span>
+                ) : checkStatus && (isTrial ? (
                   <span className="text-[11.5px] text-violet-700 bg-violet-50 ring-1 ring-inset ring-violet-200 rounded-[7px] px-2 py-1">
                     무료 체험 <b className="tabular-nums">{Math.max(0, trial?.remaining ?? 0)}</b>회 남음 · 차감 없음
                   </span>
@@ -655,7 +752,7 @@ export default function SpamFilterTestModal({
             <button type="button" onClick={onClose} className="ml-auto h-[42px] px-5 rounded-[11px] bg-stone-900 hover:bg-black text-white text-sm font-bold">닫기</button>
           ) : (<>
             <span className="mr-auto text-[11.5px] text-stone-500">
-              {status === 'testing' ? <>남은 시간 <b className="tabular-nums">{countdown}</b>초 · 최대 60초</> : ''}
+              {status === 'testing' ? (journeyStep && jv?.state === 'queued' ? '검사 줄에서 기다리는 중' : <>남은 시간 <b className="tabular-nums">{countdown}</b>초 · 최대 60초</>) : ''}
             </span>
             {status === 'ready' && (<>
               <button type="button" onClick={onClose} className="h-[42px] px-3 rounded-[11px] text-stone-600 hover:bg-stone-200 text-[13.5px]">취소</button>
@@ -669,9 +766,10 @@ export default function SpamFilterTestModal({
               <button type="button" onClick={onClose} className="h-[42px] px-4 rounded-[11px] border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-[13.5px] font-semibold">창 닫고 계속 쓰기</button>
             )}
             {status === 'completed' && (<>
-              <button type="button" onClick={resetForRetest} className="h-[42px] px-4 rounded-[11px] border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-[13.5px] font-semibold inline-flex items-center gap-1.5">
+              {/* ★ C103 F1 여정 칸 모드 = 같은 날 같은 글은 같은 결과(다시 검사 = 글을 고쳐 저장한 뒤 다시 연다) */}
+              {!journeyStep && <button type="button" onClick={resetForRetest} className="h-[42px] px-4 rounded-[11px] border border-stone-200 bg-white hover:bg-stone-100 text-stone-700 text-[13.5px] font-semibold inline-flex items-center gap-1.5">
                 <RotateCcw className="w-[15px] h-[15px]" strokeWidth={2.2} />다시 검사
-              </button>
+              </button>}
               {verdict === 'block' ? (
                 <button type="button" onClick={() => { if (onEdit) onEdit(); else onClose(); }} className="h-[42px] px-5 rounded-[11px] bg-stone-900 hover:bg-black text-white text-sm font-bold">글 고치러 가기</button>
               ) : (

@@ -157,16 +157,18 @@ export async function ensureConfirmationToken(
  */
 export async function markConfirmationDelivered(
   client: { query: (text: string, params?: any[]) => Promise<any> },
-  opts: { billingId: string; companyId: string; billingEnd: string; email?: string },
+  opts: { billingId: string; companyId: string; billingEnd: string; email?: string; token: string },
 ): Promise<void> {
   const settings = await getCompanyBillingSettings(opts.companyId);
   if (settings.taxbillDayPolicy === 'manual') return;
+  // ★ 2026-11-05 C103 F8(Codex 설계 1R H1) — 메일에 실린 그 토큰 행만 승격한다(장 단위 갱신 0).
+  //   옛: 장의 살아 있는 행을 모두 승격해, 발송 사이에 이의 해소 · 재발급으로 행이 바뀌면 메일에 없는 새 행이 승격됐다.
   await client.query(
     `UPDATE invoice_confirmations
         SET taxbill_status = 'pending', sent_at = NOW(), taxbill_due_at = $2,
             recipient_email = COALESCE($3, recipient_email)
-      WHERE billing_id = $1::uuid AND superseded_at IS NULL AND taxbill_status = 'manual_wait'`,
-    [opts.billingId, computeTaxbillDueAt(Date.now(), opts.billingEnd), opts.email || null],
+      WHERE billing_id = $1::uuid AND token = $4 AND superseded_at IS NULL AND taxbill_status = 'manual_wait'`,
+    [opts.billingId, computeTaxbillDueAt(Date.now(), opts.billingEnd), opts.email || null, opts.token],
   );
 }
 
@@ -174,6 +176,8 @@ export interface ConfirmSendSummary {
   sent: number;            // 메일 발송 + 추적 행 생성
   skippedNoEmail: number;  // 담당자 이메일 미등록 — 자동화 제외
   mailFailed: number;      // SMTP 실패 — 추적행은 남는다([메일 재시도]가 그 행으로 다시 보낸다 · R1-46)
+  /** ★ 2026-11-05 C103 F8 — mailFailed 중 발송 표시가 남은 수(불확정 · 표시 해제 실패) = 「미발송만 보기」에 안 잡힌다 · 복구 = 단건 [메일 재발송] */
+  mailUncertain: number;
   manualWait: number;      // 직접선택 정책 — 자동 발급 제외로 생성된 행 수
   // ★ 2026-07-28 두 축을 나눈다 — 하나로 세면 일시적 디스크 장애에도 운영자가 멀쩡한 묶음을 지우고 재발행한다.
   mismatchBlocked: number; // 항목합 ≠ 공급가액. 금액이 틀린 문서라 **재발송으로 안 풀린다** — 삭제 후 재발행
@@ -198,9 +202,14 @@ export interface RetryResult extends ConfirmSendSummary {
   companyName: string | null;
 }
 
-export async function retryUnsentConfirmations(billingId: string): Promise<RetryResult> {
+/** ★ 2026-11-05 C103 F8 — 장 하나만 다시 태운다(이의 해소 「변경 없음」 · 형제 장은 건드리지 않는다 · 같은 적재 · 발송 길) */
+export function resendConfirmationForSheet(billingId: string): Promise<RetryResult> {
+  return retryUnsentConfirmations(billingId, { sheetOnly: true });
+}
+
+export async function retryUnsentConfirmations(billingId: string, opts: { sheetOnly?: boolean } = {}): Promise<RetryResult> {
   const empty: RetryResult = {
-    sent: 0, skippedNoEmail: 0, mailFailed: 0, manualWait: 0,
+    sent: 0, skippedNoEmail: 0, mailFailed: 0, mailUncertain: 0, manualWait: 0,
     mismatchBlocked: 0, renderFailed: 0, targeted: 0, companyName: null,
   };
 
@@ -218,14 +227,14 @@ export async function retryUnsentConfirmations(billingId: string): Promise<Retry
        FROM billings b
        JOIN companies c ON c.id = b.company_id
        JOIN target t ON (
-              (t.batch_id IS NOT NULL
+              (t.batch_id IS NOT NULL AND NOT $2::boolean
                 AND b.batch_id = t.batch_id AND b.company_id = t.company_id
                 AND b.billing_start = t.billing_start AND b.billing_end = t.billing_end)
-           OR (t.batch_id IS NULL AND b.id = $1::uuid)
+           OR ((t.batch_id IS NULL OR $2::boolean) AND b.id = $1::uuid)
             )
       WHERE b.emailed_at IS NULL
       ORDER BY b.id`,
-    [billingId],
+    [billingId, opts.sheetOnly === true],
   );
   if (r.rows.length === 0) return empty;
 
@@ -252,7 +261,7 @@ export async function createAndSendConfirmations(opts: {
 }): Promise<ConfirmSendSummary> {
   const { companyId, companyName, billingStart, billingEnd, sheets } = opts;
   const summary: ConfirmSendSummary = {
-    sent: 0, skippedNoEmail: 0, mailFailed: 0, manualWait: 0,
+    sent: 0, skippedNoEmail: 0, mailFailed: 0, mailUncertain: 0, manualWait: 0,
     mismatchBlocked: 0, renderFailed: 0,
   };
 
@@ -404,10 +413,13 @@ export async function createAndSendConfirmations(opts: {
     try {
       // 발송 소유권을 조건부 UPDATE 하나로 잡는다 — 0행이면 다른 요청이 이미 가져갔다는 뜻이다.
       //   되돌릴 때 **우리가 찍은 값**만 지우도록 시각을 문자열(마이크로초 보존)로 받는다.
+      // ★ 2026-11-05 C103 F8(Codex 설계 1R H1) — 1단계에서 잡은 토큰 행이 그사이 무효(이의 해소 · 재발급)가 됐으면 0행 = 보내지 않는다.
       const claimRes = await pool.query(
         `UPDATE billings SET emailed_at = NOW(), emailed_to = $2
-          WHERE id = $1::uuid AND emailed_at IS NULL RETURNING emailed_at::text AS claimed_at`,
-        [sheet.id, email],
+          WHERE id = $1::uuid AND emailed_at IS NULL
+            AND EXISTS (SELECT 1 FROM invoice_confirmations ic WHERE ic.billing_id = $1::uuid AND ic.token = $3 AND ic.superseded_at IS NULL)
+          RETURNING emailed_at::text AS claimed_at`,
+        [sheet.id, email, token],
       );
       if (claimRes.rowCount === 0) {
         try { unlinkSync(attachment.path); } catch { /* 안 나간 렌더본은 남기지 않는다 */ }
@@ -465,12 +477,14 @@ export async function createAndSendConfirmations(opts: {
           );
         } catch (releaseErr: any) {
           console.error(`[일괄발급][표시해제실패] billing=${sheet.id} — 미발송인데 발송 표시가 남았다(재시도 대상에서 빠짐 · 수동 확인):`, releaseErr?.message || releaseErr);
+          summary.mailUncertain += 1;   // ★ C103 F8 표시가 남은 실패(Codex 설계 2R M1)
         }
         // 안 나간 첨부는 위 전송 끝(finally)에서 지운다. 추적행은 살아 있으니 재시도하면 새로 렌더된다.
       } else {
         // 발송 불확정 — 표시를 **그대로 둔다**(전달됐을 수 있으므로 중복 발송을 막는 쪽을 택한다).
         //   추적행은 1단계에서 만들어졌고 전달 확정은 못 했으므로 적재 시점 값(manual_wait)이 남는다.
         console.error(`[일괄발급][발송불확정] billing=${sheet.id} to=${email} — ${mailTimedOut ? `${MAIL_TOTAL_TIMEOUT_MS / 1000}초 초과` : `SMTP 응답 불명(${err?.code || err?.message || err})`}. 발송 여부 불명, 표식만 남김. 수동 확인 필요.`);
+        summary.mailUncertain += 1;   // ★ C103 F8 표시가 남은 실패
       }
       summary.mailFailed += 1;
       continue;
@@ -482,7 +496,7 @@ export async function createAndSendConfirmations(opts: {
     //   실패하면 추적행이 manual_wait로 남는다(자동 발행 타이머가 돌지 않을 뿐 · 발송 표시는 이미 남았다) — 수동 확인.
     try {
       await markConfirmationDelivered(pool, {
-        billingId: sheet.id, companyId, billingEnd, email,
+        billingId: sheet.id, companyId, billingEnd, email, token,
       });
     } catch (confirmErr: any) {
       console.error(`[일괄발급][확정실패] billing=${sheet.id} to=${email} — 메일은 발송됨 · 발송 표시 커밋됨 · 전달 확정만 실패(자동 발행 멈춤). 수동 확인 필요:`, confirmErr?.message || confirmErr);

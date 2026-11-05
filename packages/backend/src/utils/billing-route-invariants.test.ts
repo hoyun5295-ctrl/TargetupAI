@@ -199,9 +199,10 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
 
   it('발송 소유권은 조건부 UPDATE 하나로 잡는다 — 0행이면 남이 가져간 것이다', () => {
     // ★ 2026-09-26 R1-46(Codex 6차 2R): 소유권은 메일보다 먼저 **커밋**한다(보낸 뒤 어떤 실패도 소유권을 다시 열지 않게)
-    expect(confirmSrc).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL RETURNING emailed_at::text AS claimed_at/);
+    // ★ 2026-11-05 C103 F8 — 선점 조건에 「1단계 토큰이 살아 있다(EXISTS)」가 더해졌다(조건부 UPDATE 하나 · 0행 = 보내지 않음은 그대로)
+    expect(confirmSrc).toMatch(/UPDATE billings SET emailed_at = NOW\(\)[\s\S]{0,120}emailed_at IS NULL[\s\S]{0,240}RETURNING emailed_at::text AS claimed_at/);
     expect(confirmSrc, '표시는 SMTP 앞에 남겨야 한다')
-      .toSatisfy(() => confirmSrc.indexOf('emailed_at IS NULL RETURNING emailed_at::text AS claimed_at') < confirmSrc.indexOf('transporter.sendMail'));
+      .toSatisfy(() => confirmSrc.indexOf('RETURNING emailed_at::text AS claimed_at') < confirmSrc.indexOf('transporter.sendMail'));
   });
 
   it('PDF는 보내기 직전에 만든다 — 미리 렌더하면 막힌 회차마다 렌더본이 쌓인다', () => {
@@ -475,7 +476,8 @@ describe('정산 라우트 계약 불변식 (2026-07-26)', () => {
   });
 
   it('발행된 세금계산서가 붙은 정산은 재발행만이 아니라 **일반 삭제도** 막는다 — 지우면 고아 계산서가 남고 원본이 한 장 더 나간다', () => {
-    const at = billingSrc.indexOf('BILLING_TAXBILL_ALREADY_ISSUED');
+    // ★ 2026-11-05 C103 F8 — 같은 코드를 이의 해소 주소도 쓴다 → 삭제 · 재발행 주소의 가드(대상 확정 뒤 첫 자리)를 본다
+    const at = billingSrc.indexOf('BILLING_TAXBILL_ALREADY_ISSUED', billingSrc.indexOf('const targetIds ='));
     expect(at, '세금계산서 가드를 찾지 못했다').toBeGreaterThan(-1);
     // 가드가 `if (reissue) {` 안에 있으면 사유를 적은 일반 삭제가 그대로 통과한다(B-0805-2 기원).
     const before = billingSrc.slice(0, at);

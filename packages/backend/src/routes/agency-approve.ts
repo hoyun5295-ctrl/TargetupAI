@@ -19,19 +19,15 @@
  *   허용 · 사유 = `agencyActions('link', row)` 한 벌(info 의 actions{} 와 각 POST 가드가 같은 함수) · 효과 = 로그인 화면과 같은 CT.
  *   취소 · 시각 변경 · 고치기는 인증번호 없이 + 담당자 전원 통보 + 이력(via · 번호 · ip · ua) + 감사 원장(취소는 멈추는 쪽 · 시각 · 고치기는 다시 승인을 지난다).
  * ⛔ 자유 문안 수정은 로그인 화면 소유 — 이 경로에 만들지 않는다.
- * ★2026-10-16 링크는 **승인 계정이 있는 번호**에서만 산다(토큰 번호 = 접수 계정 또는 관리자 한 명의 MFA 번호 · `resolveLinkApprovers`).
- *   승인은 그 계정으로 발신 인증(3.5) 인증번호를 받는다 — 확인은 `POST /sender-auth/verify`(토큰 헤더 · 로그인 경로와 같은 응답 CT).
- *   설계서 = docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0.
+ * ★2026-11-05 Harold 「양식의 담당자(테스트 받을) 번호로 다 나가서 승인」 = 1016 의 「승인 계정(계정 MFA 번호)이 있는 번호에서만 · 링크 승인 인증번호」를
+ *   되돌렸다. 링크 권한 = 토큰 번호가 지금도 요청서 담당자 목록에 있음 + 문안 버전(1016 전 그대로) · 계정 로그인 인증번호와 묶지 않는다.
  */
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import {
-  AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, resolveLinkApprovers, linkCancelReason,
+  AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, linkCancelReason,
 } from '../utils/agency-send-link';
-import {
-  verifySenderAuthChallenge, senderAuthVerifyResponse, senderAuthRejection, isSenderAuthSchemaMissing,
-} from '../utils/sender-auth';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { notifyManager, sendAgencyApprovalRequest } from '../utils/agency-send-worker';
 import { buildLinkActionNotify, buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
@@ -51,9 +47,8 @@ const isMissingRelation = (err: any) => {
 
 /**
  * 헤더 토큰을 검증하고 접수 행까지 찾아 돌려준다. 무효는 전부 null(같은 404).
- * ★2026-10-16 그 번호의 **승인 계정**도 지금 판정한다(없으면 무효 · 강등·비활성·번호 변경 뒤 옛 링크가 죽는다).
  */
-async function resolveToken(req: Request): Promise<{ row: any; phone: string; contentVersion: number; approverUserId: string } | null> {
+async function resolveToken(req: Request): Promise<{ row: any; phone: string; contentVersion: number } | null> {
   const token = String(req.headers[AGENCY_APPROVE_TOKEN_HEADER] || '');
   const payload = verifyAgencyApproveToken(token);
   if (!payload) return null;
@@ -62,9 +57,7 @@ async function resolveToken(req: Request): Promise<{ row: any; phone: string; co
   const row = r.rows[0];
   if (!agencyManagerPhones(row).includes(payload.phone)) return null;
   if (Number(row.content_version) !== Number(payload.contentVersion)) return null;
-  const approverUserId = (await resolveLinkApprovers(row)).get(payload.phone);
-  if (!approverUserId) return null;
-  return { row, phone: payload.phone, contentVersion: payload.contentVersion, approverUserId };
+  return { row, phone: payload.phone, contentVersion: payload.contentVersion };
 }
 
 /** 승인 화면이 그릴 것만 내보낸다. toPublic(로그인 화면용)보다 좁다 */
@@ -126,7 +119,6 @@ router.post('/approve', async (req: Request, res: Response) => {
 
     // 감사 재료(Harold 2026-08-25 "승인한 핸드폰번호로 감사로그"): 어느 번호의 링크가, 어디서 눌렀나.
     // 기록은 승인 CT가 승인과 **한 트랜잭션**으로 남긴다(이력이 못 적히면 승인도 없던 일).
-    // ★2026-10-16 승인 계정은 승인 CT 가 토큰 번호로 다시 판정해 approved_by 에 남기고, 그 계정으로 발신 인증(3.5)을 건다
     const outcome = await approveAgencyRequestTx({
       requestId: resolved.row.id,
       revision: Number(req.body?.revision),
@@ -141,7 +133,6 @@ router.post('/approve', async (req: Request, res: Response) => {
       },
     });
     if (!outcome.ok) {
-      if (outcome.senderAuth) return res.status(403).json(senderAuthRejection(outcome.senderAuth));
       return res.status(outcome.status).json({ success: false, error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) });
     }
     console.log(`[agency-approve] 링크 승인 request=${resolved.row.id} phone=${resolved.phone}`);
@@ -282,32 +273,6 @@ router.post('/spell-fix', async (req: Request, res: Response) => {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 링크 맞춤법 적용 실패:', err?.message || err);
     return res.status(500).json({ success: false, error: '고치지 못했습니다. 잠시 후 다시 시도해 주세요.' });
-  }
-});
-
-/**
- * ★2026-10-16 링크 승인의 발신 인증(3.5) 인증번호 확인 — 로그인 경로(`/api/auth/sender-auth/verify`)의 토큰판.
- * 판정·기록·응답 문구는 전부 CT(`verifySenderAuthChallenge` · `senderAuthVerifyResponse`) — 여기서 조건을 다시 조립하지 않는다.
- * 확인 계정 = 토큰 번호의 승인 계정(인증번호를 받은 그 계정). 통과하면 화면이 눌렀던 승인을 다시 보낸다.
- */
-router.post('/sender-auth/verify', async (req: Request, res: Response) => {
-  try {
-    const resolved = await resolveToken(req);
-    if (!resolved) return res.status(404).json({ success: false, error: '유효하지 않거나 만료된 주소입니다.' });
-    const { challengeId, code } = req.body || {};
-    if (!challengeId || !code) return res.status(400).json({ success: false, error: '인증번호를 입력해주세요.' });
-    const verdict = await verifySenderAuthChallenge({
-      challengeId: String(challengeId), userId: resolved.approverUserId, code: String(code), req,
-    });
-    const out = senderAuthVerifyResponse(verdict);
-    return res.status(out.status).json(out.body);
-  } catch (err: any) {
-    if (isSenderAuthSchemaMissing(err)) {
-      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: sender_auth_challenges 생성 요청' });
-    }
-    if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
-    console.error('[agency-approve] 인증번호 확인 실패:', err?.code || err?.name || 'unknown');
-    return res.status(500).json({ success: false, error: '인증 처리 중 오류가 발생했습니다.' });
   }
 });
 

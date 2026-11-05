@@ -22,6 +22,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { isApprovedAlimtalkSender } from '../../lib/alimtalk-catalog';
 import AlimtalkPreview from './AlimtalkPreview';
 
 export interface AlimtalkSenderProfile {
@@ -125,7 +126,8 @@ export function validateAlimtalkChannelState(v: AlimtalkChannelState): string | 
 }
 
 export const APPROVED_TEMPLATE_STATUSES = new Set(['APPROVED', 'APR', 'A', 'approved']);
-export const APPROVED_SENDER_STATUSES = new Set(['APPROVED']);
+// ★ 2026-11-05 C103 — 승인 발신프로필 판정 = lib/alimtalk-catalog 한 곳(칸 값 매핑과 같은 함수) · 상수는 그대로 내보낸다
+export { APPROVED_SENDER_STATUSES } from '../../lib/alimtalk-catalog';
 
 /** 템플릿 내용에서 #{...} 변수 추출 */
 export function extractVariables(content: string): string[] {
@@ -155,9 +157,7 @@ export function useAlimtalkChannel({
   // 승인된 발신프로필만
   const approvedSenders = useMemo(
     () =>
-      senders.filter((s) =>
-        APPROVED_SENDER_STATUSES.has((s.approval_status || '').toUpperCase()),
-      ),
+      senders.filter((s) => isApprovedAlimtalkSender(s)),
     [senders],
   );
 

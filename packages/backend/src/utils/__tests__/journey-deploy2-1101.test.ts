@@ -81,23 +81,23 @@ describe('C5 점검 응답 = 켜기와 같은 판정 · 5어', () => {
     expect(check).toMatch(/activationBlockReason\(companyId, journeyId, \{ forCheck: true \}\)/);
     expect(check).toMatch(/validateJourneyForActivation\(companyId, journeyId, userId, \{ spam: peekStepSpam, spamStates: states \}\)/);
     // 점검 응답은 검사를 등록하지 않는다(엿보기만) · 등록 함수 이름이 점검 함수 몸통에 없다
-    const body = check.slice(check.indexOf('export async function checkJourney'), check.indexOf('export async function startJourneyStepSpamChecks'));
+    const body = check.slice(check.indexOf('export async function checkJourney'));   // ★ C103 F2 칸 저장 뒤 자동 검사 함수 삭제 = 점검 함수가 끝까지
     expect(body).not.toMatch(/enqueueSpamTest|startStepSpamCheck|runStepSpamTest/);
   });
 
-  it('엿보기 · 칸 저장 뒤 검사 = 등록과 같은 글 · 같은 키(같은 날 같은 글 = 이어 보기)', () => {
+  it('엿보기 · 여정 칸 「지금 스팸 검사」 = 등록과 같은 글 · 같은 키(같은 날 같은 글 = 이어 보기 · ★ C103 F1 수동 수락 규칙)', () => {
     const v = read('utils/journey-pretest-validator.ts');
     expect(v).toMatch(/peekSpamCheck\(await stepSpamInput\(params\)\)/);
-    expect(v).toMatch(/enqueueSpamTest\(\{ \.\.\.\(await stepSpamInput\(params\)\), source: 'auto_ai', [^}]*reuseSameDay: true \}\)/);
+    expect(v).toMatch(/const input = await stepSpamInput\(params\);[\s\S]*?enqueueSpamTest\(\{\s*\.\.\.input,\s*source: 'manual',[\s\S]*?reuseSameDay: true,\s*manualAdmission: \{ userId: params\.userId \}/);
     const q = read('utils/spam-test-queue.ts');
     expect(q).toMatch(/const \{ key \} = await spamHashInputsOf\(params\);/);
     expect(q).toMatch(/const hashed = await spamHashInputsOf\(params\);/);
   });
 
-  it('주소 = 칸 저장 · 칸 더하기 · 혜택 넣기 뒤 자동 검사 · 점검 응답', () => {
+  it('주소 = 점검 응답 · 칸 저장 · 칸 더하기 · 혜택 넣기 뒤 자동 검사 0(★ C103 F2 1104 접수 2)', () => {
     const r = read('routes/ai.ts');
     expect(r).toMatch(/router\.get\('\/operator\/journeys\/:id\/check'/);
-    expect((r.match(/startJourneyStepSpamChecks\(/g) || []).length).toBe(3);
+    expect((r.match(/startJourneyStepSpamChecks\(/g) || []).length).toBe(0);
   });
 });
 
@@ -204,10 +204,12 @@ describe('C91 후속(Harold 1101 화면) — 작업 화면 전체 화면 · 최�
   it('켜기 확인 창 · 일괄 켜기 · 시작 카드 = 비워도 된다(비우면 「한꺼번에 나간다」 한 줄)', () => {
     const confirm = fe('components/journey/JourneyActivationConfirmModal.tsx');
     expect(confirm).toMatch(/const capNum: number \| null = capEmpty \? null/);
-    expect(confirm).toMatch(/정하지 않으면 제한 없이 보내요\. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요\./);
+    // ★ 2026-11-05 C103 F5 — 최대 인원 뜻 = 화면 문구 CT 한 곳(journey-cap-copy · 세 화면이 부른다)
+    expect(fe('utils/journey-cap-copy.ts')).toContain('비우면 제한 없이 보내요. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요.');
+    expect(confirm).toMatch(/journeyCapHelp\(capInput\.trim\(\) \? Number\(capInput\) : null/);
     expect(confirm).not.toMatch(/회차마다 나눠/);   // 실제 값(JOURNEY_COUNT_CAP 100000)과 다른 말 금지
     expect(fe('components/journey/map/BatchActivateModal.tsx')).toMatch(/const capOk = \(id: string\) => \{ const n = capOf\(id\); return n == null \|\|/);
-    expect(fe('components/journey/map/BatchActivateModal.tsx')).toMatch(/capOf\(c\.id\) == null && \([\s\S]{0,120}정하지 않으면 제한 없이 보내요\. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요\./);   // Codex C92 1R
+    expect(fe('components/journey/map/BatchActivateModal.tsx')).toMatch(/journeyCapHelp\(capOf\(c\.id\)/);
     expect(fe('components/journey/workspace/JourneyStartCard.tsx')).toMatch(/placeholder="비우면 제한 없음"/);
   });
 

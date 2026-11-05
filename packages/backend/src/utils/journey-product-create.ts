@@ -13,7 +13,7 @@ import { checkCredit } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
 import { generateJourneyPackage } from './journey-ai-generator';
 import { JourneyInputError } from './journey-step-limits';
-import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft } from './journey-draft-save';
+import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft, isRegisteredJourneyCallback, JOURNEY_CALLBACK_UNREGISTERED_MESSAGE } from './journey-draft-save';
 import { PRODUCT_TRIGGER_EVENT, listObservedProducts, MAX_PRODUCT_KEYS, type PurchaseDoor } from './journey-product';
 import { isMallConsentEnforced } from './mall-consent';
 
@@ -85,8 +85,10 @@ export async function createProductJourneyDraft(input: {
     }
 
     const numbers = await listJourneyCallbackNumbers(input.companyId);
-    const want = String(input.callbackNumber || '').replace(/-/g, '').trim();
-    const callbackNumber = want && numbers.some((n) => n.phone === want) ? want : defaultCallbackOf(numbers);
+    const want = String(input.callbackNumber || '').replace(/\D/g, '');
+    // ★ 2026-11-05 C103 F3 · SC-1 — 등록 번호가 아니면 400(말없는 기본 번호 바꿈 0 · 판정 = journey-callback 한 곳)
+    if (want && !isRegisteredJourneyCallback(numbers, want)) throw new JourneyInputError(JOURNEY_CALLBACK_UNREGISTERED_MESSAGE);
+    const callbackNumber = want || defaultCallbackOf(numbers);
     if (!callbackNumber) throw new JourneyInputError(numbers.length === 0 ? '회신번호를 먼저 등록해 주세요.' : '보낼 회신번호를 골라 주세요.');
 
     const cost = getCreditCost('journey-ai-generate');

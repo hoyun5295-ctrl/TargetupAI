@@ -9,6 +9,7 @@
  * 낱말 = 칸 · 바로 · 스팸 검사 · 사진(설계서 §3 C6).
  */
 import { useSendPolicy, isSendableHour, nightRangeText, koHour } from '../../utils/send-policy';
+import type { AlimtalkStepFields } from '../../lib/alimtalk-catalog';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Sparkles, Wand2, Clock, AlertTriangle, Loader2, Gift, Undo2 } from 'lucide-react';
 // ★ 2026-08-08 — 미리보기·바이트는 **실제 나가는 형태**로 잰다(백엔드 buildAdMessage 의 프론트 미러).
@@ -24,7 +25,8 @@ import { resolveJourneyAdFlag } from '../../utils/journey-ad-policy';   // ★ 2
 export type StudioChannel = 'sms' | 'lms' | 'mms';
 export type StudioDelayMode = 'relative' | 'relative_at_hour' | 'specific_hour' | 'next_business_day';
 
-export interface StudioStep {
+/** ★ 2026-11-05 C103 F10 — 알림톡 칸 값(작업 화면 알림톡 칸 편집기 · 칸 PATCH 키 이름 그대로) */
+export interface StudioStep extends AlimtalkStepFields {
   stepOrder: number;
   channel: string;
   messageTemplate: string;

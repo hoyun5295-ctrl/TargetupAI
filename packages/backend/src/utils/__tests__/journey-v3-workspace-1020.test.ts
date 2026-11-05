@@ -97,7 +97,8 @@ describe('작업 화면 — 옛 창 기능 이사 · 저장 규칙', () => {
     expect(ws).toContain('const [drafts, setDrafts] = useState<Record<string, StudioStep>>({});');
   });
   it('켜진 여정: 그 자리 묶음은 PATCH(문안은 명시 허용) · 칸 모양 · 칸 넣고 빼기 · 목표 끄기는 새 모양 한 흐름 · 확인 한 단계 · 화면 막고 기다림', () => {
-    expect(ws).toContain("isActive && ('messageTemplate' in p || 'subject' in p) ? { ...p, allowActiveMessageEdit: true } : p");
+    // ★ 2026-11-05 C103 F10 — 문안 묶음 = 본문 · 제목 · 알림톡 6(서버 STEP_EDIT_KEYS.copy 와 같은 집합 · 짝 = c103-intake-contract)
+    expect(ws).toContain("isActive && Object.keys(p).some((k) => COPY_KEYS.includes(k)) ? { ...p, allowActiveMessageEdit: true } : p");
     expect(ws).toContain("/reshape`, 'POST'");
     expect(ws).toContain('if (needsShape && !confirmShape) { setConfirmShape(true); return; }');
     expect(ws).toContain('바뀐 모양으로 옮기는 중');

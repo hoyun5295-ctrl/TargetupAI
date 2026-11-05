@@ -6,12 +6,13 @@
  *   - 칸 판 검사(자리 · 제목 · 알림톡 변수 · 스팸) = journey-pretest-validator `validateJourneyForActivation`(켜기 검증과 같은 함수 · 스팸만 엿보기)
  * 5어 = 검사 전(before) · 검사 중(running) · 확인 중(confirming) · 통과(pass) · 고칠 것(fix).
  *
- * 칸 저장 뒤 통신사 검사 자동(D1 · D2) = startJourneyStepSpamChecks(같은 날 같은 글 = 이어 보기 · 새 글 = 단가표 차감 · 기다리지 않는다).
+ * ★ 2026-11-05 C103 F2 — 칸 저장 뒤 자동 검사(옛 D1 · D2 startJourneyStepSpamChecks)는 없앴다(1104 접수 2 · 확정 전 유료 검사 0).
+ *   검사 = 작업 화면 「지금 스팸 검사」(여정 칸 검사 주소) · 켜기 검증 · 보내기 전 검사 · 주간 검사.
  */
 import { query } from '../config/database';
 import { activationBlockReason } from './journey-builder';
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
-import { validateJourneyForActivation, peekStepSpam, startStepSpamCheck, type FailedStep, type StepSpamState } from './journey-pretest-validator';
+import { validateJourneyForActivation, peekStepSpam, type FailedStep, type StepSpamState } from './journey-pretest-validator';
 import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
 
 export type JourneyCheckLevel = 'before' | 'running' | 'confirming' | 'pass' | 'fix';
@@ -92,7 +93,7 @@ export async function checkJourney(companyId: string, journeyId: string, userId:
     const ab = s.variantId ? ' (A/B 판)' : '';
     (steps[s.stepId] ??= []).push(s.state === 'pass'
       ? { key: `spam:${s.variantId ?? 'main'}`, level: 'pass', title: `스팸 검사 통과${ab}`, detail: '오늘 같은 글 검사를 통과했어요.', fixTarget: null, variantId: s.variantId }
-      : { key: `spam:${s.variantId ?? 'main'}`, level: 'before', title: `스팸 검사 전${ab}`, detail: '칸을 저장하면 스팸 검사를 자동으로 해요(켤 때도 해요).', fixTarget: null, variantId: s.variantId });
+      : { key: `spam:${s.variantId ?? 'main'}`, level: 'before', title: `스팸 검사 전${ab}`, detail: '「지금 스팸 검사」를 누르거나 켤 때 검사해요.', fixTarget: null, variantId: s.variantId });
   }
 
   // 정의 검사(켜기와 같은 함수) — 막는 이유가 칸 번호로 시작하면 그 칸 · 칸 판 검사가 이미 같은 고칠 것을 들고 있으면 겹쳐 적지 않는다
@@ -114,39 +115,3 @@ export async function checkJourney(companyId: string, journeyId: string, userId:
   return { verdict: checkVerdictOf(all), steps, journey };
 }
 
-/**
- * 칸 저장 뒤 그 칸 판마다 통신사 검사를 건다(기다리지 않는다 · 실패 = 로그 · ★ 2026-11-01 배포 2 C5 · D1).
- *   문자 칸(SMS · LMS · MMS)만 · 회신번호가 없으면 걸지 않는다(켜기 관문이 먼저 막는다) · 보관 · 끝난 여정 = 0.
- *   판마다 등록 직전에 여정 상태를 다시 읽는다 — 남는 틈 = 그 읽기와 등록 사이 끝내기(판 하나 · 남은 위험 기록).
- */
-export async function startJourneyStepSpamChecks(companyId: string, journeyId: string, stepId: string, userId: string | null): Promise<void> {
-  if (!userId) return;
-  try {
-    const r = await query(
-      `SELECT s.id, s.channel, s.message_template, s.subject, s.is_ad, j.callback_number
-         FROM journey_steps s JOIN journeys j ON j.id = s.journey_id
-        WHERE s.id = $1::uuid AND s.journey_id = $2::uuid AND j.company_id = $3::uuid
-          AND COALESCE(s.step_type, 'message') = 'message' AND j.archived_at IS NULL
-          AND j.status IN ('draft', 'paused', 'active')`,   // ★ Codex 구현 1R #2 — 끝난 여정 = 보낼 일이 없다 = 유료 검사 0
-      [stepId, journeyId, companyId],
-    );
-    const step = r.rows[0];
-    if (!step || !['sms', 'lms', 'mms'].includes(String(step.channel)) || !String(step.callback_number || '').trim()) return;
-    const versions = stepSendVersions({ message_template: step.message_template ?? null, subject: step.subject ?? null }, null, await loadStepVariantRows(stepId));
-    for (const msg of versions) {
-      if (!String(msg.body || '').trim()) continue;
-      // 판마다 등록 직전 여정 상태를 다시 본다(앞 판 검사 중에 끝내기 · 보관했으면 그 뒤 판은 걸지 않는다 · Codex 구현 1R #2)
-      const alive = await query(
-        `SELECT 1 FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid AND archived_at IS NULL AND status IN ('draft', 'paused', 'active')`,
-        [journeyId, companyId],
-      );
-      if (alive.rows.length === 0) return;
-      await startStepSpamCheck({
-        companyId, userId, body: msg.body, subject: msg.subject, channel: step.channel, isAd: resolveJourneyAdFlag(step.channel, step.is_ad),
-        callbackNumber: String(step.callback_number), journeyId, variantId: msg.variantId || undefined,
-      });
-    }
-  } catch (err: any) {
-    console.warn(`[journey-auto-spam] 칸 저장 뒤 검사 준비 실패 journey=${journeyId} step=${stepId} — ${err?.message || err}`);
-  }
-}

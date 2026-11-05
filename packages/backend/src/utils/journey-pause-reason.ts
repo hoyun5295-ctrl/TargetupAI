@@ -17,7 +17,8 @@ export interface PauseReasonView {
   kind: PauseKind;
   /** 화면 한 줄(고객 언어 · 원문 노출 0) */
   text: string;
-  fix: { action: PauseFixAction; label: string } | null;
+  /** stepOrder = 고칠 칸(★ 2026-11-05 C103 R56 · 원문이 「step N」을 남긴 칸 고치기 = 그 칸 · 없으면 화면이 첫 문자 칸) */
+  fix: { action: PauseFixAction; label: string; stepOrder?: number } | null;
 }
 
 const RULES: Array<{ test: RegExp; view: PauseReasonView }> = [
@@ -83,6 +84,11 @@ export function pauseReasonView(raw: string | null | undefined): PauseReasonView
   if (!s) return MANUAL;
   if (s === MANUAL_PAUSE_REASON) return MANUAL;              // ★ 2026-11-02 상수 비교가 먼저(아래 글자 규칙 = 옛 행)
   if (s === ANCHOR_COMPLETED_PAUSE_REASON) return COMPLETED;
-  for (const r of RULES) if (r.test.test(s)) return r.view;
+  for (const r of RULES) {
+    if (!r.test.test(s)) continue;
+    // ★ 2026-11-05 C103 R56 — 칸 고치기는 원문이 가리킨 칸으로(옛: 알림톡 템플릿 멈춤도 첫 문자 칸으로 갔다)
+    const m = r.view.fix?.action === 'edit_step' ? /\bstep (\d+)\b/.exec(s) : null;
+    return m && r.view.fix ? { ...r.view, fix: { ...r.view.fix, stepOrder: Number(m[1]) } } : r.view;
+  }
   return UNKNOWN;
 }

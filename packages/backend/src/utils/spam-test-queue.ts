@@ -26,7 +26,9 @@ import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
 import { KST_TODAY_START_SQL } from './stats-aggregation';
 // ★ 2026-09-26 한줄로 V2 F49 — 무료 자동 검사 표시값·자동 판정(청구 제외 판정 CT와 한 벌)
-import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource } from './spam-trial';
+import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource, notAutoSpamSourceSql } from './spam-trial';
+import { getRegisteredCallbackSet } from './callback-filter';   // ★ 2026-11-05 C103 F1 수동 검사 수락 규칙(배정 발신번호)
+import { normalizePhone } from './normalize-phone';
 
 // ============================================================
 // 상수
@@ -82,6 +84,11 @@ export interface SpamTestEnqueueParams {
   reuseSameDay?: boolean;
   /** ★ 2026-11-02 엔진 재설계 E3-2 — 재사용 창(일 · 기본 = 그날 · 여정 정기 재검사만 7 · reuseSameDay 와 함께 쓴다) */
   reuseDays?: number;
+  /**
+   * ★ 2026-11-05 C103 F1(Codex 설계 1R H3) — 사람이 누른 검사 수락 규칙을 등록 트랜잭션 안에서 지난다(사용자 잠금 · 그 사용자 진행 중 사람 검사 1건).
+   *   여정 칸 「지금 스팸 검사」가 쓴다(수동 검사 주소와 같은 규칙 · manualSpamInProgressInTx). 진행 중이 있으면 errorCode MANUAL_IN_PROGRESS.
+   */
+  manualAdmission?: { userId: string };
 }
 
 export interface SpamTestEnqueueResult {
@@ -413,6 +420,24 @@ export function spamTestOutcomeOf(status: string, results: ReadonlyArray<{ resul
 /** SQL 실행자(기본 = 풀 · 트랜잭션 안에서는 그 연결을 넘긴다 — 잠금을 쥔 채 풀 연결을 하나 더 기다리지 않게 · Codex 구현 2R #1) */
 type SqlRun = (sql: string, params?: any[]) => Promise<{ rows: any[] }>;
 
+// ============================================================
+// ★ 2026-11-05 C103 F1 — 사람이 누른 검사(수동) 수락 규칙 한 곳(Codex 설계 1R H3)
+//   입구 = 수동 검사 주소(routes/spam-filter.ts) · 여정 칸 「지금 스팸 검사」(enqueueSpamTest manualAdmission). 옛: 수동 주소 안 인라인.
+// ============================================================
+export const SPAM_TEST_USER_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('spam-test-user:' || $1::text))`;
+/** 그 사용자의 진행 중 사람 검사(자동 출처 제외 · 줄에 선 queued 포함) — 잠금 없는 빠른 확인도 이 문장 */
+export const MANUAL_SPAM_IN_PROGRESS_SQL = `SELECT id FROM spam_filter_tests WHERE user_id = $1 AND status IN ('pending', 'active', 'queued') AND ${notAutoSpamSourceSql()} LIMIT 1`;
+/** 트랜잭션 안: 사용자 잠금 → 진행 중 사람 검사 id(없으면 null). 잠금은 트랜잭션이 끝날 때 풀린다. */
+export async function manualSpamInProgressInTx(run: SqlRun, userId: string): Promise<string | null> {
+  await run(SPAM_TEST_USER_LOCK_SQL, [userId]);
+  const r = await run(MANUAL_SPAM_IN_PROGRESS_SQL, [userId]);
+  return r.rows[0]?.id ? String(r.rows[0].id) : null;
+}
+/** 검사 직전 발신번호 = 그 사용자가 쓸 수 있는 등록 번호(배정 범위 포함 · 발송 길과 같은 집합) */
+export async function isManualSpamCallbackAllowed(companyId: string, userId: string, callback: string): Promise<boolean> {
+  return (await getRegisteredCallbackSet(companyId, userId)).has(normalizePhone(String(callback || '')));
+}
+
 /** 검사 한 건을 읽어 지금 결과 + 통신사별 행(spamTestOutcomeOf) */
 export async function readSpamTestOutcome(testId: string, run: SqlRun = query): Promise<{ outcome: SpamVerdict; carrierResults: Array<{ carrier: string; messageType: string; result: string | null }> }> {
   const t = await run(`SELECT status FROM spam_filter_tests WHERE id = $1`, [testId]);
@@ -509,17 +534,18 @@ async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' 
  * 같은 글의 오늘 검사를 **엿본다**(등록 · 차감 0 · ★ 2026-11-01 배포 2 C5 점검 응답).
  *   null = 오늘 같은 키 검사 없음(검사 전) · 그 밖 = 그 검사의 지금 결과(장애도 그대로 — 부르는 쪽이 「다시 검사」로 읽는다).
  */
-export async function peekSpamCheck(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient'>): Promise<{ testId: string; outcome: SpamVerdict } | null> {
+export async function peekSpamCheck(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient'>): Promise<{ testId: string; outcome: SpamVerdict; status: string; createdAt: Date } | null> {
   const { key } = await spamHashInputsOf(params);
   const same = key ? await spamCheckFor(key) : null;
-  return same ? { testId: same.testId, outcome: same.outcome } : null;
+  // ★ 2026-11-05 C103 F1 — 상태 · 만든 시각 = 공용 보기(spamCheckView) 입력(여정 칸 검사 창)
+  return same ? { testId: same.testId, outcome: same.outcome, status: same.status, createdAt: same.createdAt } : null;
 }
 
 export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<SpamTestEnqueueResult> {
   const {
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
-    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays,
+    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission,
   } = params;
 
   try {
@@ -537,6 +563,10 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     if (early) {
       console.log(`[SpamTestQueue] 같은 검사 이어 보기 — testId=${early.testId}, outcome=${early.outcome}, source=${source}`);
       return { ok: true, testId: early.testId, reused: true };
+    }
+    // ★ 2026-11-05 C103 F1 — 사람이 누른 새 검사 = 그 사용자가 쓸 수 있는 등록 발신번호만(수동 검사 주소와 같은 CT · 이어 보기는 결과 보기라 거치지 않는다)
+    if (manualAdmission && !(await isManualSpamCallbackAllowed(companyId, manualAdmission.userId, callbackNumber))) {
+      return { ok: false, errorCode: 'UNREGISTERED_CALLBACK', error: '등록된 발신번호로만 스팸 검사를 할 수 있어요. 발신번호 관리에서 확인해 주세요.' };
     }
 
     // 2) 디바이스 조회 + 발송 건수 계산
@@ -594,6 +624,14 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     let testId = '';
     try {
       await client.query('BEGIN');
+      // ★ 2026-11-05 C103 F1 — 사람이 누른 검사 = 사용자 잠금 → 진행 중 1건 확인(키 잠금 · 회사 잠금보다 먼저 · 이 길만 사용자 잠금을 잡는다)
+      if (manualAdmission) {
+        const busy = await manualSpamInProgressInTx((sql, p) => client.query(sql, p), manualAdmission.userId);
+        if (busy) {
+          await client.query('ROLLBACK');
+          return { ok: false, testId: busy, errorCode: 'MANUAL_IN_PROGRESS', error: '이미 진행 중인 스팸 검사가 있어요. 끝난 뒤 다시 눌러 주세요.' };
+        }
+      }
       if (checkKey) {
         // 같은 키 = 트랜잭션 잠금 하나(회사 잠금보다 먼저 · 같은 키를 잡는 길은 이 순서 하나) → 앞 요청이 커밋한 검사를 다시 찾는다
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [spamCheckLockKey(checkKey)]);
@@ -753,6 +791,14 @@ export function spamTestStartedAtMs(testId: string): number | null {
 }
 
 /**
+ * ★ 2026-11-05 C103 F1(Codex 구현 1R) — 검사가 돈 시간 = 실행 시작(줄에서 나온 때) 기준 · 기록 없으면 등록 시각(즉시 실행 검사 · 재기동 뒤).
+ *   만료 판정은 모두 이 값으로(멈춘 검사 정리 · 진행 중 검사 복원 · 검사 상세). 옛: 두 주소가 등록 시각으로 따로 재서 줄에서 기다린 검사를 실행 직후 끝냈다.
+ */
+export function spamTestRunElapsedMs(testId: string, createdAt: string | Date, now: number = Date.now()): number {
+  return now - (_activatedAt.get(String(testId)) ?? new Date(createdAt).getTime());
+}
+
+/**
  * ★ 2026-09-26 F45·F46 — 멈춘 active 검사를 닫는다(결과 NULL → timeout · 검사 completed). 큐 워커·수동 검사 라우트 공용 CT.
  * 옛 큐 워커는 "active가 있으면 반환"을 먼저 해 이 정리에 영영 닿지 못했다 → 재기동으로 폴러가 사라진 행 하나가 큐 전체를 멈췄다.
  * active는 보통 0~1건이라 행을 읽어 실행 시작 시각(없으면 등록 시각)으로 판정한다. 실행 시작 기록은 지금 active인 것만 남긴다.
@@ -765,8 +811,7 @@ export async function cleanupStaleActiveTests(thresholdMs: number): Promise<numb
   for (const r of active.rows as any[]) {
     const id = String(r.id);
     activeIds.add(id);
-    const startedAt = _activatedAt.get(id) ?? new Date(r.created_at).getTime();
-    if (now - startedAt > thresholdMs) staleIds.push(id);
+    if (spamTestRunElapsedMs(id, r.created_at, now) > thresholdMs) staleIds.push(id);
   }
   for (const id of Array.from(_activatedAt.keys())) if (!activeIds.has(id)) _activatedAt.delete(id);
   if (staleIds.length === 0) return 0;

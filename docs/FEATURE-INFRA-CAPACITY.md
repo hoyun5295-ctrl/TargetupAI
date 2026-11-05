@@ -165,7 +165,7 @@ A(멀티노드)는 §2-5의 앱 계층이 동시 접속·발송으로 막힐 때
 |---|---|
 | 기종 | **HPE ProLiant DL20 Gen11** · `systemd-detect-virt` = none(**실물**) · iLO 원격 관리가 있는 1U 엔트리 서버 |
 | CPU | Intel Xeon **6325P** 4코어/8스레드 · 소켓 1 · Raptor Lake 계열(SATA 컨트롤러 = Raptor Lake AHCI) |
-| 메모리 | 62G. DIMM 구성은 EDAC 노출 0건이라 미확인(**iLO → System Information → Memory** 에서 슬롯별 확인 가능) |
+| 메모리 | 62G. DIMM 구성은 EDAC 노출 0건이라 미확인(**iLO → System Information → Memory** 에서 슬롯별 확인 가능) · ★1102 dmidecode = 16GB × 4 · 비 ECC · 고장 확정(1026) = [INFRA-62-MEMORY-CRASH.md](INFRA-62-MEMORY-CRASH.md) |
 | 저장 컨트롤러 | 온보드 SATA AHCI만(`lspci` · NVMe·Smart Array 0건) · 위에 소비자용 TAMMUZ SATA SSD 1장 |
 
 - 서버로 산 것은 맞다. HPE ProLiant = ECC 메모리 · iLO · 핫플러그 베이 · 이중 전원 옵션이 있는 진짜 서버 섀시다. 낮았던 것은 **안에 고른 부품**이다: 계열 최저 CPU(4코어) · 소비자용 SATA SSD 1장 · 메모리 62G.

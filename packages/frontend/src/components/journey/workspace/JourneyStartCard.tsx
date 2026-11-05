@@ -10,9 +10,13 @@ import { useState } from 'react';
 import { CalendarClock, ChevronDown, ChevronUp, Loader2, Plus, Unlink, Users } from 'lucide-react';
 import { ConditionRow, COND_FIELDS, condLabel, condValueText, useConditionValueOptions, type AudienceCondition } from '../JourneyBuilderUi';
 import { TIMING, STANDING_TRIGGERS, numOrNull, type OptionForm } from '../../../utils/journey-start-form';
+import { journeyCapHelp } from '../../../utils/journey-cap-copy';
+import { formatPhoneNumber } from '../../../utils/formatDate';
 
 export type { OptionForm } from '../../../utils/journey-start-form';
 export interface EntryCount { loading: boolean; matched: number | null; cap: number | null; approximate: boolean; message: string | null }
+/** 회사 회신번호 한 줄(서버 /journeys-callback-numbers · 숫자만) */
+export interface CallbackOption { phone: string; description: string | null; is_default?: boolean }
 
 interface Props {
   journey: any;
@@ -28,6 +32,8 @@ interface Props {
   /** ★ V.3 §18 — 다른 여정 뒤에 붙은 여정이면 넘기는 고객(지도 서버 값) · 떼기. */
   attachedAfter?: { journeyId: string | null; name: string; outcomeLabel: string } | null;
   onDetach?: () => void;
+  /** ★ 2026-11-05 C103 F3 — 고를 수 있는 보내는 번호(회사 등록 번호 · null = 아직 못 받음) */
+  callbackOptions?: CallbackOption[] | null;
 }
 
 function Toggle({ on, onChange, label, desc, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; desc?: string; disabled?: boolean }) {
@@ -63,7 +69,7 @@ const GOAL_KINDS: Array<{ key: string; label: string; only?: string }> = [
   { key: 'points_used', label: '포인트 사용', only: 'customer.points_expiring' }, { key: 'product', label: '같은 상품 재구매', only: 'purchase.product' },
 ];
 
-export default function JourneyStartCard({ journey, triggerLabel, form, setField, count, onCount, locked, isActive, inProgress, attachedAfter, onDetach }: Props) {
+export default function JourneyStartCard({ journey, triggerLabel, form, setField, count, onCount, locked, isActive, inProgress, attachedAfter, onDetach, callbackOptions }: Props) {
   const valueOptions = useConditionValueOptions();
   const [more, setMore] = useState(false);
   const te = String(journey?.trigger_event || '');
@@ -179,11 +185,39 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
         <p className="mt-1.5 text-[12px] leading-relaxed text-slate-500">조건에 맞으면 한 번 들어와요. 다시 들어오게 하려면 재진입을 켜요.{isActive && inProgress > 0 ? ` 지금 진행 중인 ${inProgress.toLocaleString('ko-KR')}명은 원래 조건으로 끝까지 받아요.` : ''}</p>
       </div>
 
+      {/* 보내는 번호(★ 2026-11-05 C103 F3 · 만든 뒤 바꾸는 자리 · 멈춤 안내 「회신번호를 정해 주세요」의 고치기가 여기로 온다) */}
+      <div className={sec} data-fix-target="callback" id="jws-start-callback">
+        <div className="text-[12px] text-slate-500">보내는 번호</div>
+        {callbackOptions == null ? (
+          <p className="mt-1 inline-flex items-center gap-1.5 text-[13px] text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />번호를 읽는 중</p>
+        ) : callbackOptions.length === 0 ? (
+          <p className="mt-1 text-[13px] text-amber-800">등록된 발신번호가 없어요. 발신번호 관리에서 먼저 등록해 주세요.</p>
+        ) : (
+          <>
+            <select aria-label="보내는 번호" disabled={locked} value={form.callbackNumber || ''} onChange={(e) => setField('callbackNumber', e.target.value)}
+              className="mt-1 h-9 w-full max-w-xs rounded-lg border border-slate-300 bg-white px-2 text-[13px] text-slate-900 disabled:bg-slate-100">
+              {!form.callbackNumber && <option value="">번호를 골라 주세요</option>}
+              {form.callbackNumber && !callbackOptions.some((o) => o.phone === form.callbackNumber) && (
+                <option value={form.callbackNumber}>{formatPhoneNumber(form.callbackNumber)} · 지금 등록 목록에 없음</option>
+              )}
+              {callbackOptions.map((o) => (
+                <option key={o.phone} value={o.phone}>{formatPhoneNumber(o.phone)}{o.description ? ` · ${o.description}` : ''}{o.is_default ? ' · 기본' : ''}</option>
+              ))}
+            </select>
+            {!form.callbackNumber && <p className="mt-1 text-[12px] text-amber-800">보내는 번호가 없으면 켤 수 없어요.</p>}
+          </>
+        )}
+        <Toggle on={form.callbackMode === 'store'} onChange={(v) => setField('callbackMode', v ? 'store' : 'fixed')} disabled={locked}
+          label="고객 매장번호로 보내기" desc="고객마다 등록된 매장번호로 보내요. 매장번호가 없는 고객은 위 번호로 보내요." />
+      </div>
+
       {/* 받는 양 */}
       <div className={`${sec} space-y-2.5`}>
         <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-slate-700">
           한 번에 최대 <NumField label="한 번에 보낼 최대 인원" value={form.thresholdRecipients} onChange={(v) => setField('thresholdRecipients', v)} unit="명" placeholder="비우면 제한 없음" disabled={locked} min={1} />
         </div>
+        {/* ★ 2026-11-05 C103 F5 — 최대 인원 뜻 = 공용 문구 한 곳(켜기 창 · 켜기 전 점검 창과 같은 글 · 1104 접수 3) */}
+        <p className={`text-[12px] leading-relaxed ${form.thresholdRecipients == null ? 'text-amber-800' : 'text-slate-500'}`}>{journeyCapHelp(form.thresholdRecipients ?? null, STANDING_TRIGGERS.includes(te))}</p>
         {STANDING_TRIGGERS.includes(te) && (
           <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-slate-700">
             하루에 <NumField label="하루 몫" value={form.backfill_per_day} onChange={(v) => setField('backfill_per_day', v)} unit="명씩 나눠 받기" placeholder="안 나눔" disabled={locked} min={1} max={100000} />

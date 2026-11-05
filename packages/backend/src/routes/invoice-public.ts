@@ -31,7 +31,7 @@ async function loadByToken(token: string): Promise<any | null> {
   const r = await pool.query(
     // ★ Codex 1R LOW 수용 — date 컬럼은 pg 파서가 Date 객체로 주므로 to_char로 고정한다('Wed Jul 01' 표시 차단).
     `SELECT ic.id, ic.billing_id, ic.token, ic.recipient_email, ic.sent_at, ic.confirmed_at, ic.objection_at,
-            ic.taxbill_status, ic.taxbill_due_at, ic.issued_at, ic.superseded_at,
+            ic.taxbill_status, ic.taxbill_due_at, ic.issued_at, ic.superseded_at, ic.objection_resolved_at,
             to_char(b.billing_start, 'YYYY-MM-DD') AS billing_start,
             to_char(b.billing_end, 'YYYY-MM-DD')   AS billing_end,
             b.total_amount, b.ai_credit_count, b.ai_credit_supply, b.scope AS billing_scope,
@@ -61,7 +61,9 @@ function renderPage(row: any): string {
   // ★ 재발급 무효분은 금액을 숨긴다(Codex 1R 부분 수용) — 낡은 금액이 최신처럼 읽히는 것 차단.
   const hideDetail = state === 'superseded';
   const statusBanner =
-    state === 'superseded' ? '<div class="banner warn">이 거래내역서는 재발급되어 더 이상 유효하지 않습니다. 새로 받으신 메일을 확인해 주세요.</div>'
+    // ★ 2026-11-05 C103 F8 — 이의를 확인해 같은 내역으로 다시 보낸 옛 링크 = 재발급 문구와 가른다
+    state === 'superseded' && row.objection_resolved_at ? '<div class="banner warn">이의신청을 확인했어요. 새로 보내 드린 확인 메일에서 다시 확인해 주세요.</div>'
+    : state === 'superseded' ? '<div class="banner warn">이 거래내역서는 재발급되어 더 이상 유효하지 않습니다. 새로 받으신 메일을 확인해 주세요.</div>'
     : state === 'issued' ? '<div class="banner ok">세금계산서 발행이 완료된 건입니다.</div>'
     : state === 'objected' ? '<div class="banner warn">이의신청이 접수되었습니다. 담당자가 확인 후 연락드리겠습니다.</div>'
     : state === 'confirmed' ? `<div class="banner ok">컨펌이 완료되었습니다 (${new Date(row.confirmed_at).toLocaleString('ko-KR')}). 세금계산서 발행이 진행됩니다.</div>`

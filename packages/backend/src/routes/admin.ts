@@ -106,6 +106,7 @@ import { sendTypeLabel } from '../utils/send-type-axis';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
 import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
 import { swrCache } from '../utils/swr-cache';
+import { standardFieldColumn } from '../utils/standard-field-map';   // ★ 2026-11-05 C103 F6 칸 데이터 유무 = 표준 필드 칸 CT
 import { journeyCreditForecast } from '../utils/journey-credit-forecast';   // ★ 2026-10-20 여정 V.3 §5-5 요금제 신청 목록 숫자
 
 const router = Router();
@@ -3767,25 +3768,14 @@ router.get('/companies/:id/field-data-check', authenticate, requireSuperAdmin, a
   const { id } = req.params;
   
   try {
-    // field_key → 실제 DB 컬럼 매핑
-    const FIELD_COLUMN_MAP: Record<string, string> = {
-      name: 'name', phone: 'phone', gender: 'gender',
-      birth_date: 'birth_date', age_group: 'age', region: 'region',
-      address: 'address', email: 'email', grade: 'grade',
-      total_purchase_amount: 'total_purchase_amount',
-      purchase_count: 'purchase_count',
-      last_purchase_date: 'recent_purchase_date',
-      points: 'points', store_code: 'store_code', store_name: 'store_name',
-      opt_in_sms: 'sms_opt_in',
-    };
-
     // 활성 필드 목록
     const fieldsResult = await query('SELECT field_key FROM standard_fields WHERE is_active = true');
     const fieldKeys: string[] = fieldsResult.rows.map((r: any) => r.field_key);
 
     // 한 번의 쿼리로 모든 필드 데이터 유무 체크
+    // ★ 2026-11-05 C103 F6 — field_key → 칸 = CT standardFieldColumn(옛 손 매핑 + FIELD_MAP 직접 칸 · 옛 손 매핑은 가입일을 custom_fields 로 셌다)
     const selectParts = fieldKeys.map(key => {
-      const col = FIELD_COLUMN_MAP[key];
+      const col = standardFieldColumn(key);
       if (col) {
         return `COUNT(CASE WHEN ${col} IS NOT NULL AND ${col}::text != '' THEN 1 END) as "${key}"`;
       } else {

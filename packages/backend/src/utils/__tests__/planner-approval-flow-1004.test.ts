@@ -379,8 +379,9 @@ describe('⑦ 화면 계약(상태 사전 · 로그인 복귀 · 공개 고지)'
       expect(front(f), f).not.toContain('로그인·비밀번호·결제정보를 묻는 비슷한 화면은 가짜');
     }
     for (const f of ['pages/ChargeApprovePage.tsx', 'pages/PlannerConfirmPage.tsx']) expect(front(f), f).toContain(notice);
-    // ★2026-10-16 대행 승인 화면은 발신 인증(3.5) 인증번호를 받는다 — 「입력을 받지 않습니다」는 거짓이 되므로 인증번호 고지로 바꾼다
-    expect(front('pages/AgencyApprovePage.tsx')).toContain('인증번호는 이 화면에만 입력합니다.');
+    // ★2026-11-05 대행 승인 링크는 인증번호를 받지 않는다(Harold 「양식 담당자 번호로 다 나가서 승인」) — 인증번호 입력 고지를 걷고 로그인 · 인증번호를 묻지 않는다는 고지만 둔다
+    expect(front('pages/AgencyApprovePage.tsx')).not.toContain('인증번호는 이 화면에만 입력합니다');
+    expect(front('pages/AgencyApprovePage.tsx')).toContain('전화나 메시지로 인증번호를 묻지 않습니다');
     const page = front('pages/PlannerConfirmPage.tsx');
     expect(page).toContain('useApproveToken()');
     expect(page).toContain("'/api/marketing-planner/confirm-view', { body: { token }, auth: false }");

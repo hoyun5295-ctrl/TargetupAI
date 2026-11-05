@@ -66,7 +66,7 @@ export function judgeAttach(a: AttachJourneyRow, b: AttachJourneyRow, outcome: A
     blocks.push('이 여정 알림톡이 주문번호 · 상품명 같은 사건 값을 써서 앞 여정을 마친 고객에게는 빈 값으로 나가요. 그 값을 빼고 붙여 주세요.');
   }
   if (outcome === 'goal_met' && !a.goalExitEnabled) {
-    blocks.push('앞 여정이 「목표 달성하면 끝내기」를 꺼 둬서 목표를 이뤄 마치는 고객이 없어요. 앞 여정에서 켜거나 다른 결과를 고르세요.');
+    blocks.push('앞 여정의 [시작] 카드에서 「…하면 남은 문자 안 보냄」이 꺼져 있어 목표를 이뤄 마치는 고객이 없어요. 앞 여정에서 켜거나 다른 결과를 고르세요.');   // ★ 2026-11-05 C103 F9 화면 단추 이름 그대로
   }
   // 고리 — 계보 단위 연결(앞 여정 계보 → 붙은 계보)에서 뒤 여정 계보로부터 앞 여정 계보에 닿으면 붙이는 순간 고리가 된다.
   //   ★ Codex 적대 A 2R — 대표 판 하나만 따라가면 같은 계보의 다른 판(복제 초안 · 멈춘 판)에 걸린 연결을 못 봐, 그 판이 켜지며 고리가 됐다.
@@ -186,7 +186,7 @@ export async function attachCandidates(companyId: string, afterId: string, outco
       key,
       label: AFTER_OUTCOME_LABEL[key],
       available: !blocked,
-      reason: blocked ? '앞 여정이 「목표 달성하면 끝내기」를 꺼 둬서 이 결과로 마치는 고객이 없어요.' : null,
+      reason: blocked ? '앞 여정의 [시작] 카드에서 「…하면 남은 문자 안 보냄」이 꺼져 있어 이 결과로 마치는 고객이 없어요.' : null,   // ★ C103 F9
       finished30d: key === 'any' ? count('goal_met') + count('completed') : count(key),
     };
   });

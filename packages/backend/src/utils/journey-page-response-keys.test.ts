@@ -42,14 +42,15 @@ describe('data-profile — 꾸미기 컬럼의 출처', () => {
 });
 
 describe('나머지 초기 조회 — 화면이 읽는 키가 서버에 있다', () => {
-  const CASES: Array<{ name: string; frontKey: RegExp; backendFile: string; backendKey: RegExp }> = [
-    { name: '알림톡 발신프로필', frontKey: /data\.profiles \|\| \[\]/, backendFile: 'routes/alimtalk.ts', backendKey: /profiles: rows/ },
-    { name: '고객 활성 필드', frontKey: /data\.fields \|\| \[\]/, backendFile: 'routes/customers.ts', backendKey: /fields: \[\]|fields:/ },
+  const CASES: Array<{ name: string; frontKey: RegExp; frontFile?: string; backendFile: string; backendKey: RegExp }> = [
+    // ★ 2026-11-05 C103 F10 — 알림톡 재료(발신프로필 · 템플릿 · 고객 칸) = 공용 CT lib/alimtalk-catalog(목록 화면 · 작업 화면이 같이 부른다)
+    { name: '알림톡 발신프로필', frontKey: /snd\?\.profiles \|\| \[\]/, frontFile: 'lib/alimtalk-catalog.ts', backendFile: 'routes/alimtalk.ts', backendKey: /profiles: rows/ },
+    { name: '고객 활성 필드', frontKey: /fld\?\.fields \|\| \[\]/, frontFile: 'lib/alimtalk-catalog.ts', backendFile: 'routes/customers.ts', backendKey: /fields: \[\]|fields:/ },
     { name: '자사몰 설치 상태', frontKey: /data\.keyIssuedAt/, backendFile: 'routes/cdp.ts', backendKey: /keyIssuedAt,/ },
   ];
 
-  it.each(CASES)('$name', ({ frontKey, backendFile, backendKey }) => {
-    expect(page(), '화면이 이 키를 읽는다').toMatch(frontKey);
+  it.each(CASES)('$name', ({ frontKey, frontFile, backendFile, backendKey }) => {
+    expect(frontFile ? front(frontFile) : page(), '화면이 이 키를 읽는다').toMatch(frontKey);
     expect(backend(backendFile), '서버가 그 키를 준다').toMatch(backendKey);
   });
 

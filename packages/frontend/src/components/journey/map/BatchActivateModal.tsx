@@ -6,11 +6,16 @@
  *   → [모두 켜기] = 서버 activate-batch(받는 여정 먼저 · 여정마다 단건과 같은 게이트) → 카드별 결과.
  *
  * ⛔ 자동으로 켜지 않는다 · 게이트를 우회하지 않는다. 최대 인원을 바꾸면 서버가 검증 통과를 지우므로 그 여정은 다시 검증한다.
+ * ★ 2026-11-05 C103 F2(설계서 docs/2026-11-05-intake-1104-fix-design.md) — 창을 열거나 고를 때 자동 검증(= 유료 스팸 검사) 0.
+ *   [모두 켜기] = 누른 순간의 고른 여정 · 최대 인원 · 겹침 해소 · 매장번호 확인을 잡고 → 바뀐 최대 인원 저장 → 통과 아닌 여정 검증
+ *   → 모두 통과면 같은 누름으로 켜기(잡아 둔 값만 · Codex 설계 1R H5). 그동안 고르기 · 칸 · 겹침 단추 · 줄 [점검]을 잠근다.
  * ⛔ 피로도는 겹침 해소 선택지가 아니다(회사 전체 설정 · 설계서 §5).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Power, Users, X, XCircle } from 'lucide-react';
 import JourneyModalShell from '../JourneyModalShell';
+import { journeyCapHelp } from '../../../utils/journey-cap-copy';
+import { STANDING_TRIGGERS } from '../../../utils/journey-start-form';
 import type { BatchActivationItem, LifecycleMapData, MapJourney } from '../../../utils/journey-map';
 
 interface Props {
@@ -71,44 +76,35 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
     setError(null);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const validateOne = async (id: string, rid: number) => {
+  /** 한 여정 검증(서버 사전 검증 = 스팸 검사 포함 · 같은 날 같은 글은 이어 보기) · 결과 상태를 돌려준다(stale = 그사이 다른 실행) */
+  const validateOne = async (id: string, rid: number): Promise<'pass' | 'fail' | 'stale'> => {
     setChecks((prev) => ({ ...prev, [id]: { state: 'checking', issues: [] } }));
     try {
       const res = await fetch(`/api/ai/operator/journeys/${id}/pretest-validate`, { method: 'POST', headers: headers() });
       const d = await res.json().catch(() => ({}));
-      if (rid !== runId.current) return;
+      if (rid !== runId.current) return 'stale';
       const j = candidates.find((c) => c.id === id);
       const orderOf = (stepId: string) => j?.steps.find((s) => s.stepId === stepId)?.order;
       if (res.ok && d?.ok) {
         setChecks((prev) => ({ ...prev, [id]: { state: 'pass', issues: [], weeklyCount: d.estimatedWeeklyTriggerCount, weeklyCost: d.totalCost } }));
+        return 'pass';
       } else {
         const issues: string[] = Array.isArray(d?.failedSteps) && d.failedSteps.length > 0
           ? d.failedSteps.slice(0, 3).map((f: any) => `${orderOf(f.stepId) ? `${orderOf(f.stepId)}번째 칸: ` : ''}${REASON_TEXT[f.reason] || '문안을 확인해 주세요'}`)
           : [d?.error || (res.status === 503 ? '검증을 준비 중이에요. 잠시 뒤 다시 시도해 주세요.' : '문안이 없거나 검증하지 못했어요.')];
         setChecks((prev) => ({ ...prev, [id]: { state: 'fail', issues } }));
+        return 'fail';
       }
     } catch {
-      if (rid !== runId.current) return;
+      if (rid !== runId.current) return 'stale';
       setChecks((prev) => ({ ...prev, [id]: { state: 'fail', issues: ['네트워크 오류로 검증하지 못했어요.'] } }));
+      return 'fail';
     }
   };
+  /** 줄 [점검] = 사람이 누른 그 여정 하나만(★ C103 F2 · 열기 · 고르기 자동 검증 0) */
+  const checkRow = (id: string) => { if (running) return; const rid = ++runId.current; void validateOne(id, rid); };
 
-  const validateAll = async (ids: string[]) => {
-    const rid = ++runId.current;
-    for (const id of ids) {
-      if (rid !== runId.current) return;
-      await validateOne(id, rid);
-    }
-  };
-
-  // 고른 여정은 차례로 검증(기존 사전 검증 · 여정마다 스팸 검사가 돌아 한꺼번에 돌리지 않는다).
-  useEffect(() => {
-    if (!open || results) return;
-    const todo = [...selected].filter((id) => !checks[id]);
-    if (todo.length > 0) void validateAll(todo);
-  }, [open, selected]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const toggle = (id: string) => { if (running) return; setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; }); };
 
   const pairs = useMemo(() => data.overlaps.filter((o) => selected.has(o.a) || selected.has(o.b)), [data.overlaps, selected]);
   const nameOf = (id: string) => data.journeys.find((j) => j.id === id)?.name || '여정';
@@ -120,36 +116,50 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
   // ★ 2026-11-01 Harold — 최대 인원 = 선택(비움 = 제한 없음 · 넣으면 1 이상)
   const capOf = (id: string): number | null => (caps[id]?.trim() ? Math.floor(Number(caps[id])) : null);
   const capOk = (id: string) => { const n = capOf(id); return n == null || (Number.isFinite(n) && n >= 1); };
-  const allPass = selectedList.every((c) => checks[c.id]?.state === 'pass');
   const allCaps = selectedList.every((c) => capOk(c.id));
   const allAck = pairs.every((o) => acks.has(pairKey(o)));
-  const ready = selectedList.length > 0 && allPass && allCaps && allAck && !running;
+  // ★ C103 F2 — 검증 통과는 누른 뒤 같은 누름 안에서(켤 때 검사 · 접수 2)
+  const ready = selectedList.length > 0 && allCaps && allAck && !running;
 
   const run = async () => {
     if (!ready) return;
+    // 누른 순간 값을 잡는다(Codex 설계 1R H5 · 이 뒤 화면 조작은 running 잠금 · 켜기 요청은 잡아 둔 값만)
+    const at = {
+      list: selectedList.map((c) => ({ id: c.id, name: c.name, cap: capOf(c.id) })),
+      acks: [...acks],
+      confirmCb: [...confirmCb],
+      checks: { ...checks },
+    };
+    const rid = ++runId.current;
     setRunning(true);
     setError(null);
     try {
-      // 바뀐 최대 인원 먼저 저장 → 서버가 검증 통과를 지우므로 그 여정은 다시 검증한 뒤 켠다.
-      const changed = selectedList.filter((c) => capOf(c.id) !== (savedCaps[c.id] ?? null));
-      for (const c of changed) {
+      // 1) 바뀐 최대 인원 저장 → 서버가 검증 통과를 지우므로 그 여정은 아래에서 다시 검증한다.
+      const recheck = new Set<string>();
+      for (const c of at.list) {
+        if (c.cap === (savedCaps[c.id] ?? null)) continue;
         const res = await fetch(`/api/ai/operator/journeys/${c.id}/options`, {
-          method: 'PATCH', headers: headers(), body: JSON.stringify({ thresholdRecipients: capOf(c.id) }),
+          method: 'PATCH', headers: headers(), body: JSON.stringify({ thresholdRecipients: c.cap }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok || !d?.success) { setError(`${c.name}: ${d?.error || '최대 인원을 저장하지 못했어요.'}`); return; }
-        setSavedCaps((prev) => ({ ...prev, [c.id]: capOf(c.id) }));
+        setSavedCaps((prev) => ({ ...prev, [c.id]: c.cap }));
+        recheck.add(c.id);
       }
-      if (changed.length > 0) {
-        const rid = ++runId.current;
-        for (const c of changed) await validateOne(c.id, rid);
-        setError('최대 인원을 저장해 다시 검증했어요. 결과를 확인하고 한 번 더 눌러 주세요.');
-        return;
+      // 2) 검증 = 통과가 아닌 여정 + 방금 최대 인원을 바꾼 여정(스팸 검사는 이때만 · 같은 날 같은 글은 이어 보기 · 차례로)
+      let allOk = true;
+      for (const c of at.list) {
+        if (at.checks[c.id]?.state === 'pass' && !recheck.has(c.id)) continue;
+        const v = await validateOne(c.id, rid);
+        if (v === 'stale') return;
+        if (v !== 'pass') allOk = false;
       }
+      if (!allOk) { setError('점검에서 고칠 곳이 나온 여정이 있어요. 줄마다 안내를 확인해 주세요.'); return; }
+      // 3) 켜기 = 잡아 둔 값만
       const res = await fetch('/api/ai/operator/journeys-activate-batch', {
         method: 'POST', headers: headers(),
         // ★ 2026-10-19 B-1009-5 — 고른 겹침 해소(쌍 키)를 함께 보낸다(서버가 다시 확인한다)
-        body: JSON.stringify({ journeyIds: selectedList.map((c) => c.id), confirmCallbackExclusionIds: [...confirmCb], acknowledgedOverlaps: [...acks] }),
+        body: JSON.stringify({ journeyIds: at.list.map((c) => c.id), confirmCallbackExclusionIds: at.confirmCb, acknowledgedOverlaps: at.acks }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.success) { setError(d?.error || '켜지 못했어요.'); return; }
@@ -167,13 +177,15 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
    *   옵션을 바꾸면 서버가 검증 통과를 지우므로 그 여정을 다시 검증한다.
    */
   const excludeFirstPurchase = async (pairKeyValue: string, journeyId: string) => {
+    if (running) return;
     setError(null);
     try {
       const res = await fetch(`/api/ai/operator/journeys/${journeyId}/options`, { method: 'PATCH', headers: headers(), body: JSON.stringify({ exclude_first_purchase: true }) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.success) { setError(d?.error || '첫 구매 고객을 빼지 못했어요.'); return; }
       setAcks((prev) => new Set(prev).add(pairKeyValue));
-      if (selected.has(journeyId)) { const rid = ++runId.current; void validateOne(journeyId, rid); }
+      // ★ C103 F2 — 자동 재검증 0 · 옵션이 바뀌어 서버 통과가 지워졌으므로 「검사 전」으로(켤 때 · 줄 [점검]에서 검사)
+      setChecks((prev) => { const n = { ...prev }; delete n[journeyId]; return n; });
     } catch {
       setError('네트워크 오류로 바꾸지 못했어요.');
     }
@@ -237,7 +249,8 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                       </div>
                       {on && (
                         <span className="shrink-0 text-[11px] inline-flex items-center gap-1">
-                          {!ck || ck.state === 'checking' ? <><Loader2 className="w-3.5 h-3.5 animate-spin text-violet-700" /><span className="text-slate-500">검증 중</span></>
+                          {!ck || ck.state === 'idle' ? <span className="text-slate-500">검사 전</span>
+                            : ck.state === 'checking' ? <><Loader2 className="w-3.5 h-3.5 animate-spin text-violet-700" /><span className="text-slate-500">검증 중</span></>
                             : ck.state === 'pass' ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" /><span className="text-emerald-800">통과</span></>
                               : <><AlertCircle className="w-3.5 h-3.5 text-amber-700" /><span className="text-amber-800">고칠 곳</span></>}
                         </span>
@@ -257,9 +270,10 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                           />
                           <span className="text-slate-400">명</span>
                         </label>
-                        {/* ★ 2026-11-01 Codex C92 1R — 단건 확인 창과 같은 위험 안내(비운 여정마다) */}
-                        {capOf(c.id) == null && (
-                          <p className="text-[11px] text-amber-800">정하지 않으면 제한 없이 보내요. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요.</p>
+                        {/* ★ 2026-11-05 C103 F5 — 최대 인원 뜻 = 공용 문구 한 곳([시작] 카드 · 켜기 창과 같은 글) */}
+                        <p className={`text-[11px] ${capOf(c.id) == null ? 'text-amber-800' : 'text-slate-500'}`}>{journeyCapHelp(capOf(c.id), STANDING_TRIGGERS.includes(c.triggerEvent))}</p>
+                        {(!ck || ck.state === 'idle') && (
+                          <button type="button" onClick={() => checkRow(c.id)} disabled={running} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100 disabled:opacity-40">점검</button>
                         )}
                         {ck?.state === 'pass' && (ck.weeklyCount != null) && (
                           <p className="text-[11px] text-slate-400 tabular-nums">7일 예상 {Number(ck.weeklyCount).toLocaleString('ko-KR')}건 · 발송비 약 {Number(ck.weeklyCost || 0).toLocaleString('ko-KR')}원</p>
@@ -268,8 +282,8 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                           <div className="space-y-1">
                             {ck.issues.map((m) => <p key={m} className="text-[11px] text-amber-800">{m}</p>)}
                             <div className="flex gap-1.5">
-                              <button type="button" onClick={() => onEditMessages(c)} className="h-7 px-2.5 rounded-lg text-[11px] font-medium text-violet-900 border border-violet-200 hover:bg-violet-100">문안 고치기</button>
-                              <button type="button" onClick={() => { const rid = ++runId.current; void validateOne(c.id, rid); }} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100">다시 검증</button>
+                              <button type="button" onClick={() => onEditMessages(c)} disabled={running} className="h-7 px-2.5 rounded-lg text-[11px] font-medium text-violet-900 border border-violet-200 hover:bg-violet-100 disabled:opacity-40">문안 고치기</button>
+                              <button type="button" onClick={() => checkRow(c.id)} disabled={running} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100 disabled:opacity-40">다시 점검</button>
                             </div>
                           </div>
                         )}
@@ -293,7 +307,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                       </div>
                       <p className="mt-0.5 text-[11px] text-rose-900">같은 구매 한 번에 두 여정이 함께 시작돼 한 고객이 두 여정의 문자를 모두 받을 수 있어요.</p>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        <button type="button" onClick={() => setAcks((prev) => new Set(prev).add(k))} className={acks.has(k) ? 'h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-rose-200 text-slate-900' : 'h-7 px-2.5 rounded-lg text-[11px] text-rose-900 border border-rose-200 hover:bg-rose-100'}>
+                        <button type="button" onClick={() => setAcks((prev) => new Set(prev).add(k))} disabled={running} className={acks.has(k) ? 'h-7 px-2.5 rounded-lg text-[11px] font-semibold bg-rose-200 text-slate-900' : 'h-7 px-2.5 rounded-lg text-[11px] text-rose-900 border border-rose-200 hover:bg-rose-100'}>
                           알고 둘 다 보냄
                         </button>
                         {(() => {
@@ -303,13 +317,13 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
                           const first = [ja, jb].find((j) => j?.triggerEvent === 'purchase.first');
                           if (!order || !first || (order.status !== 'draft' && order.status !== 'paused')) return null;
                           return (
-                            <button type="button" onClick={() => void excludeFirstPurchase(k, order.id)} className="h-7 px-2.5 rounded-lg text-[11px] text-violet-900 border border-violet-200 hover:bg-violet-100">
+                            <button type="button" onClick={() => void excludeFirstPurchase(k, order.id)} disabled={running} className="h-7 px-2.5 rounded-lg text-[11px] text-violet-900 border border-violet-200 hover:bg-violet-100 disabled:opacity-40">
                               {order.name}에서 첫 구매 고객 빼기
                             </button>
                           );
                         })()}
                         {[o.a, o.b].filter((id) => selected.has(id)).map((id) => (
-                          <button key={id} type="button" onClick={() => { toggle(id); setAcks((prev) => { const n = new Set(prev); n.delete(k); return n; }); }} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100">
+                          <button key={id} type="button" onClick={() => { if (running) return; toggle(id); setAcks((prev) => { const n = new Set(prev); n.delete(k); return n; }); }} disabled={running} className="h-7 px-2.5 rounded-lg text-[11px] text-slate-600 border border-slate-300 hover:bg-slate-100 disabled:opacity-40">
                             {nameOf(id)} 이번엔 켜지 않기
                           </button>
                         ))}
@@ -334,7 +348,7 @@ export default function BatchActivateModal({ open, onClose, data, preselect, onE
           <>
             <span className="flex-1 text-[11px] text-slate-500 tabular-nums">
               {selectedList.length}개 켜기 · {credit > 0 ? `처음 켜기 ${credit} 크레딧` : '크레딧 0'}
-              {!allCaps && selectedList.length > 0 ? ' · 최대 인원은 1 이상으로 넣거나 비워 주세요' : !allPass && selectedList.length > 0 ? ' · 검증을 통과해야 켤 수 있어요' : !allAck ? ' · 함께 시작되는 여정을 골라 주세요' : ''}
+              {!allCaps && selectedList.length > 0 ? ' · 최대 인원은 1 이상으로 넣거나 비워 주세요' : !allAck ? ' · 함께 시작되는 여정을 골라 주세요' : ' · 켤 때 스팸 검사를 해요. 오늘 같은 글은 다시 검사하지 않아요.'}
             </span>
             <button type="button" onClick={() => void run()} disabled={!ready} className="h-9 px-4 rounded-lg text-xs font-semibold text-white bg-violet-600 hover:bg-violet-500 disabled:opacity-50 inline-flex items-center gap-1.5">
               {running && <Loader2 className="w-4 h-4 animate-spin" />}

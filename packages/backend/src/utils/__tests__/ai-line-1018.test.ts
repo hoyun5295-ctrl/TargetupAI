@@ -541,9 +541,12 @@ describe('③ 소스 계약', () => {
     expect(ai).toContain('extraContext?.companyDataProfile && !exactVars');
     expect(ai).toContain('...lineIntakeOut,');
   });
-  it('수동 검사 진행 중 판정 · 창 복원 = 자동 검사 제외(4곳)', () => {
+  it('수동 검사 진행 중 판정 · 창 복원 = 자동 검사 제외(진행 중 3곳 = 수락 규칙 CT 문장 · 창 복원 1곳)', () => {
+    // ★ 2026-11-05 C103 F1 — 진행 중 판정 3곳(빠른 확인 · 체험 · 유료)은 spam-test-queue 의 MANUAL_SPAM_IN_PROGRESS_SQL 한 문장
     const s = read('routes/spam-filter.ts');
-    expect((s.match(/notAutoSpamSourceSql\(/g) || []).length).toBe(4);
+    expect((s.match(/notAutoSpamSourceSql\(/g) || []).length).toBe(1);
+    expect((s.match(/MANUAL_SPAM_IN_PROGRESS_SQL, \[userId\]|manualSpamInProgressInTx\(/g) || []).length).toBe(3);
+    expect(read('utils/spam-test-queue.ts')).toMatch(/export const MANUAL_SPAM_IN_PROGRESS_SQL = `[^`]*\$\{notAutoSpamSourceSql\(\)\}/);
   });
   it('★ Codex 1R — 브랜드 조건 동의 = 그 브랜드 소속 행(해석기 옵션 · 실행 소비처 9곳)', () => {
     const cf = read('utils/customer-filter.ts');

@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import CreditConfirmModal from '../credit/CreditConfirmModal';
+import { journeyCapHelp } from '../../utils/journey-cap-copy';
 
 interface Props {
   journeyId: string;
@@ -368,9 +369,8 @@ export default function JourneyActivationConfirmModal({
                   className="w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-violet-300 focus:outline-none"
                 />
                 <p className={`text-[11px] mt-1.5 ${capInput.trim() ? 'text-slate-400' : 'text-amber-800'}`}>
-                  {capInput.trim()
-                    ? '한 회차에 이 인원을 넘으면 자동으로 멈추고 알려 드려요.'
-                    : '정하지 않으면 제한 없이 보내요. 고객 정보를 한꺼번에 옮겨 오면 들어온 분 모두에게 한꺼번에 나가요.'}
+                  {/* ★ 2026-11-05 C103 F5 — 최대 인원 뜻 = 공용 문구 한 곳([시작] 카드 · 켜기 전 점검 창과 같은 글) */}
+                  {journeyCapHelp(capInput.trim() ? Number(capInput) : null, false)}
                 </p>
               </div>
 

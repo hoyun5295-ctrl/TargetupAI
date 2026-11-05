@@ -46,6 +46,7 @@ import JourneyMessageEditModal from '../components/journey/JourneyMessageEditMod
 // 고객 데이터 없으면 AI 문안 생성 전 안내 (공용 게이트)
 import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredModal } from '../components/CustomerDataGate';
 import AlimtalkChannelPanel, { validateAlimtalkChannelState, type AlimtalkSenderProfile, type AlimtalkTemplate, type AlimtalkChannelState } from '../components/alimtalk/AlimtalkChannelPanel';
+import { loadAlimtalkCatalog, alimtalkStateOfStep, alimtalkStepPatchOf } from '../lib/alimtalk-catalog';
 // ★ 2026-08-02 §13 화면 흐름 — 자연어 → 추천 모달 → 스텝별 전환 → 브리핑 모달
 import JourneyDataScopeNote from '../components/journey/JourneyDataScopeNote';
 import InterviewModal, { type InterviewPreset, type InterviewQuickStart } from '../components/journey/map/InterviewModal';
@@ -811,12 +812,10 @@ export default function JourneysPage() {
     const t = token();
     if (!t) return;
     Promise.all([
-      fetch('/api/alimtalk/senders', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
-      fetch('/api/companies/kakao-templates?status=APPROVED', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
-      fetch('/api/customers/enabled-fields', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
+      loadAlimtalkCatalog(t),   // ★ 2026-11-05 C103 F10 알림톡 재료 = 공용 CT(작업 화면 알림톡 칸과 같은 함수)
       fetch('/api/cdp/install-status', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
       fetch('/api/ai/operator/data-profile', { headers: { Authorization: `Bearer ${t}` } }).catch(() => null),
-    ]).then(async ([sndRes, tplRes, fldRes, cdpRes, dpRes]) => {
+    ]).then(async ([catalog, cdpRes, dpRes]) => {
       if (dpRes?.ok) {
         const data = await dpRes.json();
         // ★ 2026-08-08 (Harold 접수) — 서버는 `safeFields`·`conditionalFields`·`blockedFields`로 나눠 준다.
@@ -830,22 +829,9 @@ export default function JourneysPage() {
         })).filter((v: { token: string }) => v.token);
         setDataProfileVars(vars);
       }
-      if (sndRes?.ok) {
-        const data = await sndRes.json();
-        setAlimtalkSenders(data.profiles || []);
-      }
-      if (tplRes?.ok) {
-        const data = await tplRes.json();
-        setAlimtalkTemplates(data.templates || []);
-      }
-      if (fldRes?.ok) {
-        const data = await fldRes.json();
-        const fields = (data.fields || []).map((f: any) => ({
-          key: f.field_key,
-          label: f.display_name || f.field_label || f.field_key,
-        }));
-        setCustomerFields(fields);
-      }
+      setAlimtalkSenders(catalog.senders);
+      setAlimtalkTemplates(catalog.templates);
+      setCustomerFields(catalog.fields);
       if (cdpRes?.ok) {
         const data = await cdpRes.json();
         // 키 발급됐거나 이벤트가 들어온 적 있으면 자사몰 연동 활성 → 배송 트리거 잠금 해제
@@ -905,28 +891,9 @@ export default function JourneysPage() {
     }
   };
 
-  // ★ D189 #2 (2026-05-22): step.alimtalk* ↔ AlimtalkChannelState 매핑 헬퍼
-  const stepToAlimtalkState = (step: AIGeneratedStep): AlimtalkChannelState => {
-    const tpl = alimtalkTemplates.find((t) => t.template_code === step.alimtalkTemplateCode);
-    return {
-      profileId: step.alimtalkProfileId || '',
-      templateCode: step.alimtalkTemplateCode || '',
-      templateId: tpl?.id || '',
-      variableMap: step.alimtalkVariableMap || {},
-      nextType: (step.alimtalkNextType || 'L') as 'N' | 'S' | 'L' | 'A' | 'B',
-      nextContents: step.alimtalkNextContents || '',
-      nextSubject: step.alimtalkNextSubject || '',
-    };
-  };
-
-  const alimtalkStateToStepPatch = (state: AlimtalkChannelState): Partial<AIGeneratedStep> => ({
-    alimtalkProfileId: state.profileId || undefined,
-    alimtalkTemplateCode: state.templateCode || undefined,
-    alimtalkVariableMap: state.variableMap,
-    alimtalkNextType: state.nextType,
-    alimtalkNextContents: state.nextContents,
-    alimtalkNextSubject: state.nextSubject,
-  });
+  // ★ D189 #2 (2026-05-22): step.alimtalk* ↔ AlimtalkChannelState 매핑 · ★ 2026-11-05 C103 F10 = 공용 CT(lib/alimtalk-catalog · 작업 화면 알림톡 칸과 같은 함수)
+  const stepToAlimtalkState = (step: AIGeneratedStep): AlimtalkChannelState => alimtalkStateOfStep(step, alimtalkTemplates, alimtalkSenders);
+  const alimtalkStateToStepPatch = (state: AlimtalkChannelState): Partial<AIGeneratedStep> => alimtalkStepPatchOf(state);
 
   // ════════ 한 줄 여정 = 한 길 ════════
   // ★ 2026-10-23 여정 결함 0 — 여정을 만드는 모든 입구(한 줄 · 빠른 시작 · 기회 카드 · 다음 수 · 한 줄 답 카드 · 지도 ?preset · ?objective)가

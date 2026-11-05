@@ -162,20 +162,23 @@ describe('배선 (m003·m038·m040·m041)', () => {
     expect(route).not.toMatch(/const logTable = `\$\{testTable\}_\$\{yyyymm\}`/);
     expect(queue).not.toMatch(/const logTable = `\$\{testTable\}_\$\{yyyymm\}`/);
   });
-  it('수동 검사는 사용자 잠금 안에서 진행 중 검사를 다시 확인하고 넣는다', () => {
+  // ★ 2026-11-05 C103 F1 — 수락 규칙 = spam-test-queue CT 한 곳(수동 주소 · 여정 칸 검사가 같이 부른다)
+  it('수동 검사는 사용자 잠금 안에서 진행 중 검사를 다시 확인하고 넣는다(CT · 줄에 선 검사 포함)', () => {
     const at = route.indexOf("router.post('/test'");
     const body = route.slice(at, route.indexOf('router.', at + 10));
-    expect(route).toMatch(/const SPAM_TEST_USER_LOCK_SQL = `SELECT pg_advisory_xact_lock\(/);
-    expect(body.split('SPAM_TEST_USER_LOCK_SQL').length - 1).toBe(2); // 체험 경로 + 유료 경로
-    const lockAt = body.lastIndexOf('SPAM_TEST_USER_LOCK_SQL');
-    const recheckAt = body.indexOf("status IN ('pending', 'active')", lockAt);
-    expect(recheckAt).toBeGreaterThan(lockAt);
+    expect(body.split('manualSpamInProgressInTx(').length - 1).toBe(2); // 체험 경로 + 유료 경로
+    expect(route).not.toMatch(/SPAM_TEST_USER_LOCK_SQL/);
+    const fn = queue.slice(queue.indexOf('export async function manualSpamInProgressInTx'), queue.indexOf('export async function isManualSpamCallbackAllowed'));
+    expect(fn.indexOf('SPAM_TEST_USER_LOCK_SQL')).toBeGreaterThan(0);
+    expect(fn.indexOf('MANUAL_SPAM_IN_PROGRESS_SQL')).toBeGreaterThan(fn.indexOf('SPAM_TEST_USER_LOCK_SQL'));
+    expect(queue).toMatch(/export const MANUAL_SPAM_IN_PROGRESS_SQL = `[^`]*status IN \('pending', 'active', 'queued'\)/);
   });
-  it('수동 검사는 등록 발신번호만 받는다', () => {
+  it('수동 검사는 등록 발신번호만 받는다(CT = 배정 범위 집합)', () => {
     const at = route.indexOf("router.post('/test'");
     const body = route.slice(at, route.indexOf('router.', at + 10));
-    expect(body).toContain('getRegisteredCallbackSet(');
-    expect(body.indexOf('getRegisteredCallbackSet(')).toBeLessThan(body.indexOf('prepaidDeduct('));
+    expect(body).toContain('isManualSpamCallbackAllowed(');
+    expect(body.indexOf('isManualSpamCallbackAllowed(')).toBeLessThan(body.indexOf('prepaidDeduct('));
+    expect(queue).toMatch(/export async function isManualSpamCallbackAllowed[\s\S]{0,200}getRegisteredCallbackSet\(companyId, userId\)/);
   });
   it('앱 수신 보고는 단말 번호까지 맞춰 갱신한다', () => {
     const at = route.indexOf("router.post('/report'");

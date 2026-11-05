@@ -18,15 +18,18 @@
  *
  * ★2026-10-16 승인 = 발송 결정이라 **발신 인증(전송자격인증 3.5)** 을 이 함수가 건다(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0).
  *   입구가 둘(로그인 화면 · 담당자 링크)이어도 게이트는 여기 하나다. 순서가 곧 안전이다:
- *   ① 사전 읽기 → ② 링크면 승인 계정 판정(토큰 번호 = 계정 MFA 번호) → ③ **승인 가능 판정**(안 되면 인증번호 문자를 보내지 않는다)
+ *   ① 사전 읽기 → ② 링크면 토큰 번호 · 문안 버전 확인 → ③ **승인 가능 판정**(안 되면 인증번호 문자를 보내지 않는다)
  *   → ④ `checkSenderAuthGate`(BEGIN **앞** · 인증번호 문자는 외부 호출이라 잠금을 쥔 채 부르지 않는다) → ⑤ BEGIN · 잠금 · 재판정.
  *   인증 키는 발송과 같은 판정(수신자 회신번호가 하나라도 있으면 계정 축 `*`).
- *   링크 승인은 승인 계정을 approved_by 에 남긴다(종전 NULL · 이력 `by`).
+ * ★2026-11-05 Harold 「대행은 그냥 URL 이 나가서 승인하게 · 로그인 인증번호는 사용자 ID 하나당 하나」 = 1016 의 「링크 = 계정 MFA 번호와
+ *   같은 담당자 번호에만」을 되돌렸다. 링크 승인 권한 = 요청서의 담당자 번호(토큰 번호가 지금도 담당자 목록에 있음)뿐 · 계정 로그인
+ *   인증번호와 묶지 않는다 · 링크 승인은 계정이 아니라 폰 소지가 근거라 approved_by = NULL · 행위자 = 이력의 phone(1016 전 그대로).
+ *   ④ 게이트는 로그인 화면 승인(approvedBy = 그 계정)에만 걸린다.
  */
 import { pool, query } from '../config/database';
 import { checkApproval } from './agency-send-state';
 import { triggerAgencySendDispatch } from './agency-send-worker';
-import { agencyManagerPhones, resolveLinkApprovers } from './agency-send-link';
+import { agencyManagerPhones } from './agency-send-link';
 import { loadRequestRowCallbacks } from './agency-send-intake';
 import { checkSenderAuthGate, isSenderAuthEnforced, SENDER_AUTH_NOTICE, type SenderAuthGate } from './sender-auth';
 
@@ -76,7 +79,7 @@ export async function approveAgencyRequestTx(opts: {
   revision: number;
   /** 화면 경로의 회사 범위. 링크 경로는 토큰이 접수를 지목한다 */
   companyId?: string | null;
-  /** 로그인 승인 = 사용자 id. 링크 승인 = null(승인 계정은 이 함수가 토큰 번호로 판정해 채운다) */
+  /** 로그인 승인 = 사용자 id. 링크 승인 = null(폰 소지가 근거 · 행위자는 이력의 phone) */
   approvedBy: string | null;
   via: ApproveVia;
   /** ★2026-10-16 발신 인증 세션 판정 재료(IP 대역 · 브라우저) — 라우트가 넘긴다 */
@@ -100,13 +103,11 @@ export async function approveAgencyRequestTx(opts: {
   if (pre.rows.length === 0) return { ok: false, status: 404, error: '접수를 찾을 수 없습니다.' };
   const preRow = pre.rows[0];
 
-  // ② 링크 = 토큰 번호가 지금도 담당자이고 · 문안 버전이 지금 것이고 · 그 번호의 승인 계정이 있어야 한다
-  let approverUserId: string | null = opts.approvedBy;
+  // ② 링크 = 토큰 번호가 지금도 담당자이고 · 문안 버전이 지금 것이어야 한다(★1105 계정 MFA 번호 대조 없음)
+  const approverUserId: string | null = opts.link ? null : opts.approvedBy;
   if (opts.link) {
     if (!agencyManagerPhones(preRow).includes(opts.link.phone)
       || Number(preRow.content_version) !== Number(opts.link.contentVersion)) return LINK_INVALID;
-    approverUserId = (await resolveLinkApprovers(preRow)).get(opts.link.phone) || null;
-    if (!approverUserId) return LINK_INVALID;
   }
 
   // ③ 승인할 수 없는 건에는 인증번호를 보내지 않는다(문자 비용 · 의미 없는 인증)
@@ -141,11 +142,9 @@ export async function approveAgencyRequestTx(opts: {
     const row = r.rows[0];
 
     // 링크 권한 재검증(잠금 아래) — 담당자에서 빠진 번호·다듬어진 문안의 옛 링크는 여기서 끝난다
-    // ★2026-10-16 승인 계정도 같은 트랜잭션에서 다시 본다(그 사이 강등·비활성·번호 변경 = 인증한 계정과 다르면 무효)
     if (opts.link) {
       if (!agencyManagerPhones(row).includes(opts.link.phone)
-        || Number(row.content_version) !== Number(opts.link.contentVersion)
-        || (await resolveLinkApprovers(row, client)).get(opts.link.phone) !== approverUserId) {
+        || Number(row.content_version) !== Number(opts.link.contentVersion)) {
         await client.query('ROLLBACK');
         return LINK_INVALID;
       }

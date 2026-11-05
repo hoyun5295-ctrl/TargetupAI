@@ -27,7 +27,7 @@ import { JourneyMigrationPendingError } from './journey-trigger-db';
 import { getCompanyJourneyFacts } from './company-data-profile';
 import { generateJourneyPackage } from './journey-ai-generator';
 import { JourneyInputError } from './journey-step-limits';
-import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft } from './journey-draft-save';
+import { listJourneyCallbackNumbers, defaultCallbackOf, saveJourneyPackageAsDraft, nextDraftChargeKey, chargeThenSaveDraft, isRegisteredJourneyCallback, JOURNEY_CALLBACK_UNREGISTERED_MESSAGE } from './journey-draft-save';
 import {
   buildInterviewQuestions, decideJourneySpec, sanitizeInterviewPlans, MAX_INTERVIEW_PLANS, kstTodayYmd, voiceInterviewQuestions, decideJourneyVoiceForm,
   type InterviewAnswers, type InterviewPlan, type InterviewQuestion, type TriggerAvailability,
@@ -206,8 +206,10 @@ export async function designJourneyFromInterview(input: {
     if (!voiceDecided.ok) throw new JourneyInputError(`${plan.title}: ${voiceDecided.error}`);
 
     const numbers = await listJourneyCallbackNumbers(input.companyId);
-    const wanted = String(input.callbackNumber || '').replace(/-/g, '').trim();
-    const callbackNumber = wanted && numbers.some((n) => n.phone === wanted) ? wanted : defaultCallbackOf(numbers);
+    const wanted = String(input.callbackNumber || '').replace(/\D/g, '');
+    // ★ 2026-11-05 C103 F3 · SC-1 — 고른 번호가 등록 번호가 아니면 말없이 기본 번호로 바꾸지 않고 400(판정 = journey-callback 한 곳)
+    if (wanted && !isRegisteredJourneyCallback(numbers, wanted)) throw new JourneyInputError(JOURNEY_CALLBACK_UNREGISTERED_MESSAGE);
+    const callbackNumber = wanted || defaultCallbackOf(numbers);
     if (!callbackNumber) throw new JourneyInputError(numbers.length === 0 ? '회신번호를 먼저 등록해 주세요.' : '보낼 회신번호를 골라 주세요.');
 
     if (spec.entryEndsOn && !(await entryEndsColumnReady())) {

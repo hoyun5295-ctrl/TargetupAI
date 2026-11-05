@@ -37,6 +37,18 @@ export interface KakaoStepVerdict {
   block: KakaoStepBlock | null;
 }
 
+/** ★ 2026-11-05 C103 F11 — 그 회사의 그 템플릿 본문(판정 · 실행기와 같은 행 · 회사 격리 · 없으면 null) · run = 잠금 쥔 트랜잭션 연결 */
+export async function kakaoTemplateContent(
+  companyId: string,
+  code: string,
+  run: (sql: string, params?: any[]) => Promise<{ rows: any[] }> = query,
+): Promise<string | null> {
+  const c = String(code || '').trim();
+  if (!c) return null;
+  const r = await run(`SELECT content FROM kakao_templates WHERE template_code = $1 AND company_id = $2::uuid LIMIT 1`, [c, companyId]);
+  return r.rows[0] ? String(r.rows[0].content ?? '') : null;
+}
+
 /** 알림톡 칸 판정 — 템플릿 코드 · 존재(회사 격리) · 승인 · 카카오 활성 · 템플릿 본문 변수 연결 */
 export async function kakaoStepVerdict(
   companyId: string,

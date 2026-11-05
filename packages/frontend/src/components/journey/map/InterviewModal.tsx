@@ -174,10 +174,10 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
   const valueOf = (q: InterviewQuestion): string => answers[q.id] ?? recommendedOf(q) ?? '';
   const visible = (q: InterviewQuestion) => !(q.hideForTriggers || []).includes(triggerOf(q.planKey));
 
-  const needsCallbackChoice = !!prepared && !prepared.callback.defaultPhone;
+  // ★ 2026-11-05 C103 F3 — 등록 번호가 하나라도 있으면 늘 묻는다(기본 번호 = 미리 고름 · 옛: 기본이 있거나 번호가 하나면 묻지 않아 고를 자리가 없었다 · 1104 접수 5)
   const noCallback = !!prepared && prepared.callback.options.length === 0;
   const totalCost = (prepared?.costPerJourney || 0) * plans.length;
-  const canBuild = plans.length > 0 && !noCallback && (!needsCallbackChoice || !!callbackPhone);
+  const canBuild = plans.length > 0 && !noCallback && !!callbackPhone;
 
   /** only = 다시 시도할 계획(못 만든 것만 · 같은 요청 키). 없으면 처음부터 전부. */
   const build = async (only?: string[]) => {
@@ -337,9 +337,9 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
                 <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{n}
               </p>
             ))}
-            {needsCallbackChoice && (
-              <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <div className="text-xs font-semibold text-amber-900">어느 번호로 보낼까요?</div>
+            {prepared && (
+              <section className={`rounded-xl border p-3 ${noCallback || !callbackPhone ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+                <div className={`text-xs font-semibold ${noCallback || !callbackPhone ? 'text-amber-900' : 'text-slate-900'}`}>어느 번호로 보낼까요?</div>
                 {noCallback ? (
                   <p className="mt-1 text-[11px] text-amber-900">등록된 회신번호가 없어요. 회신번호를 먼저 등록해 주세요.</p>
                 ) : (

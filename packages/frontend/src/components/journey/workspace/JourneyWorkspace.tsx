@@ -31,11 +31,14 @@ import JourneyStepNotifyToggle from '../JourneyStepNotifyToggle';
 import JourneyPauseLogsModal from '../JourneyPauseLogsModal';
 import JourneyActionConfirmModal, { type JourneyActionMode } from '../JourneyActionConfirmModal';
 import SpamFilterTestModal from '../../SpamFilterTestModal';
+import JourneyKakaoStepEditor from './JourneyKakaoStepEditor';   // ★ C103 F10
+import { validateAlimtalkChannelState } from '../../alimtalk/AlimtalkChannelPanel';
+import { loadAlimtalkCatalog, alimtalkStateOfStep, alimtalkStepSelectionIssue, type AlimtalkCatalog } from '../../../lib/alimtalk-catalog';
 import ConfirmModal, { type ConfirmState } from '../../ConfirmModal';
 import { ZoneMoreMenu } from '../../zone/ZoneHeader';
 import { zoneBand } from '../../zone/zone-color';
 import { useToast } from '../../ToastProvider';
-import JourneyStartCard, { type EntryCount } from './JourneyStartCard';
+import JourneyStartCard, { type EntryCount, type CallbackOption } from './JourneyStartCard';
 import JourneyCheckPanel, { stepDotOf, type JourneyCheckData } from './JourneyCheckPanel';
 import { hasBenefitPlaceholder, hasUrlPlaceholder } from '../../../utils/message-placeholders';
 import { aiCopyEntry } from '../../../utils/ai-copy-entry';
@@ -49,6 +52,7 @@ import { isSendableUrl } from '../../../utils/message-placeholders';
 import { JOURNEY_STATUS_LABEL } from '../../../utils/journey-row-actions';
 import { TRIGGER_EVENTS } from '../../../utils/journey-trigger-catalog';
 import { resolveJourneyAdFlag } from '../../../utils/journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
+import { openHelp } from '../../../lib/help-open';   // ★ 2026-11-05 C103 R56 멈춤 안내 「문의하기」 = 도움말 창
 
 interface Props {
   journeyId: string | null;
@@ -80,6 +84,13 @@ interface RawStep {
   conditionLabel?: string | null;
   /** ★ 2026-11-02 설계서 3-16 — 이 칸의 A/B 문안(서버 상세가 싣는다) */
   ab_variants?: AbVariantCopy[];
+  // ★ 2026-11-05 C103 F10 — 알림톡 칸 값(상세 = journey_steps 행 그대로)
+  alimtalk_profile_id?: string | null;
+  alimtalk_template_code?: string | null;
+  alimtalk_variable_map?: Record<string, string> | null;
+  alimtalk_next_type?: string | null;
+  alimtalk_next_contents?: string | null;
+  alimtalk_next_subject?: string | null;
 }
 
 /** 새 칸(아직 서버에 없음). sent = 결과를 못 받은 넣기(넣기 전 서버 칸 id · 보낸 내용 지문) — 다음 저장 때 먼저 서버에서 찾는다(Codex 적대 B 2R). */
@@ -93,6 +104,9 @@ const STUDIO_CHANNELS = ['sms', 'lms', 'mms'];
 // 칸 묶음(서버 STEP_EDIT_KEYS 중 이 화면이 만지는 키) — 정책은 서버 응답(edit)이 정하고 화면은 묶음만 가른다.
 const TIMING_KEYS = ['delayHours', 'delayMode', 'targetHourKst'];
 const STRUCTURE_KEYS = ['channel', 'isAd', 'mmsImagePaths'];
+// ★ 2026-11-05 C103 F10 — 알림톡 키 · 문안 묶음(서버 STEP_EDIT_KEYS.copy 와 같은 집합 · 짝 시험 = c103-intake-contract)
+const ALIMTALK_KEYS = ['alimtalkProfileId', 'alimtalkTemplateCode', 'alimtalkVariableMap', 'alimtalkNextType', 'alimtalkNextContents', 'alimtalkNextSubject'] as const;
+const COPY_KEYS: readonly string[] = ['messageTemplate', 'subject', ...ALIMTALK_KEYS];
 const NEW_STEP_PREFIX = 'new:';
 
 function toStudio(r: RawStep): StudioStep {
@@ -106,6 +120,12 @@ function toStudio(r: RawStep): StudioStep {
     delayMode: (r.delay_mode || 'relative') as StudioDelayMode,
     targetHourKst: r.target_hour_kst ?? undefined,
     mmsImagePaths: r.mms_image_paths || [],
+    alimtalkProfileId: r.alimtalk_profile_id || undefined,
+    alimtalkTemplateCode: r.alimtalk_template_code || undefined,
+    alimtalkVariableMap: r.alimtalk_variable_map || undefined,
+    alimtalkNextType: (r.alimtalk_next_type || undefined) as StudioStep['alimtalkNextType'],
+    alimtalkNextContents: r.alimtalk_next_contents ?? undefined,
+    alimtalkNextSubject: r.alimtalk_next_subject ?? undefined,
   };
 }
 
@@ -120,6 +140,7 @@ function diffPatch(a: StudioStep, b: StudioStep): Record<string, unknown> {
   if (a.delayHours !== b.delayHours) out.delayHours = b.delayHours;
   if ((a.delayMode || 'relative') !== (b.delayMode || 'relative')) out.delayMode = b.delayMode || 'relative';
   if ((a.targetHourKst ?? null) !== (b.targetHourKst ?? null) && b.targetHourKst != null) out.targetHourKst = b.targetHourKst;
+  for (const k of ALIMTALK_KEYS) if (JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null) && b[k] !== undefined) out[k] = b[k];
   return out;
 }
 
@@ -157,6 +178,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [ownMap, setOwnMap] = useState<LifecycleMapData | null>(null);
   const [opt080, setOpt080] = useState('');
+  /** ★ 2026-11-05 C103 F3 — [시작] 카드 「보내는 번호」 고를 목록(회사 등록 번호 · 080 과 같은 응답) */
+  const [callbackOptions, setCallbackOptions] = useState<CallbackOption[] | null>(null);
   const [decorateVars, setDecorateVars] = useState<Array<{ token: string; label: string }>>([]);
   const [live, setLive] = useState<any | null>(null);
   const [diag, setDiag] = useState<any | null>(null);
@@ -197,7 +220,9 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const [sim, setSim] = useState<{ loading: boolean; data: any | null; error: string | null }>({ loading: false, data: null, error: null });
   const [pauseLogsOpen, setPauseLogsOpen] = useState(false);
   const [actionMode, setActionMode] = useState<JourneyActionMode | null>(null);
-  const [spamFor, setSpamFor] = useState<StudioStep | null>(null);
+  // ★ 2026-11-05 C103 F1 — 「지금 스팸 검사」 = 저장된 칸 하나(검사 글은 서버가 켜기 검사와 같은 함수로 만든다)
+  const [spamFor, setSpamFor] = useState<{ stepId: string; channel: string } | null>(null);
+  const [alimtalkCatalog, setAlimtalkCatalog] = useState<AlimtalkCatalog | null>(null);   // ★ C103 F10 알림톡 칸 재료
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   // ★ 2026-11-01 배포 2 C5 · C6 — 서버 점검 응답(오른쪽 점검 판 · 레일 점 · 켜기 칩이 같은 값을 쓴다)
   const [check, setCheck] = useState<{ data: JourneyCheckData | null; loading: boolean; error: string | null }>({ data: null, loading: false, error: null });
@@ -304,11 +329,12 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   // ★ Codex 구현 1R #5 — A/B 창을 닫으면(만들기 · 고치기 · 빼기 뒤) 점검을 다시 읽는다(빠진 판의 결과가 남지 않게)
   const closeVariants = () => { setVariantsOpen(null); if (journeyId) { checkRounds.current = 0; void loadCheck(journeyId); } };
 
-  // 검사 전 · 검사 중 · 확인 중이 남아 있으면 20초마다 다시 본다(칸 저장 뒤 자동 검사가 끝나 바뀐다 · 한 여정에 최대 60번 = 20분)
+  // 검사 중 · 확인 중이 남아 있으면 20초마다 다시 본다(한 여정에 최대 60번 = 20분)
+  //   ★ 2026-11-05 C103 F2 · SC-7 — 「검사 전」은 저절로 바뀌지 않는다(칸 저장 뒤 자동 검사 0) → 다시 읽기 조건 = 검사 중 · 확인 중(hold)만
   //   ★ Codex 구현 1R #3 — 한 차례가 끝날 때마다(성공 · 실패 둘 다 = check 가 새 값) 다음을 잡는다 · 실패해도 멈추지 않는다
   useEffect(() => {
     const v = check.data?.verdict;
-    if (!journeyId || check.loading || !v || (v.hold === 0 && v.before === 0) || checkRounds.current >= 60) return;
+    if (!journeyId || check.loading || !v || v.hold === 0 || checkRounds.current >= 60) return;
     const jid = journeyId;
     const t = window.setTimeout(() => { checkRounds.current += 1; void loadCheck(jid); }, 20_000);
     return () => window.clearTimeout(t);
@@ -327,7 +353,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   // 회사 단위 값(080 · 꾸미기 칸)은 한 번만.
   useEffect(() => {
     if (!open) return;
-    getJson('/api/ai/operator/journeys-callback-numbers').then((cd) => setOpt080(cd.opt080Number || '')).catch(() => undefined);
+    getJson('/api/ai/operator/journeys-callback-numbers').then((cd) => { setOpt080(cd.opt080Number || ''); setCallbackOptions(Array.isArray(cd.numbers) ? cd.numbers : []); }).catch(() => setCallbackOptions([]));
     getJson('/api/ai/operator/data-profile').then((dp) => {
       setDecorateVars((dp.safeFields || []).map((f: any) => ({ token: String(f.percentVar || f.label || '').trim(), label: String(f.label || f.percentVar || '').trim() })).filter((v: any) => v.token));
     }).catch(() => undefined);
@@ -560,7 +586,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
     for (const id of ids) {
       const p = omit(patchOf(id), isActive ? [...shapeOnlyKeys(id)] : []);
       if (Object.keys(p).length === 0) continue;
-      const body = isActive && ('messageTemplate' in p || 'subject' in p) ? { ...p, allowActiveMessageEdit: true } : p;
+      // ★ C103 F10 — 켜진 여정 허가 표식 = 문안 묶음 키(본문 · 제목 · 알림톡 6)가 하나라도 있으면(서버 규칙과 같은 집합)
+      const body = isActive && Object.keys(p).some((k) => COPY_KEYS.includes(k)) ? { ...p, allowActiveMessageEdit: true } : p;
       const r = await sendJson(`/api/ai/operator/journeys/${journeyId}/steps/${id}`, 'PATCH', body);
       if (!r.ok) { allOk = false; setFailed((f) => ({ ...f, [id]: r.data?.error || '저장하지 못했어요.' })); }
     }
@@ -574,6 +601,14 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
 
   const validateCopy = (): string | null => {
     const check = (s: StudioStep, label: string) => {
+      // ★ C103 F10 — 알림톡 칸 = 템플릿 · 변수 연결 · 대체 발송(공용 검증) · 제목 요구 0
+      if (s.channel === 'kakao') {
+        // ★ Codex 구현 2R — 고름 판정 = lib 한 곳(패널 값과 같은 한 쌍 판정 · 변수 연결)
+        const pick = alimtalkStepSelectionIssue(s, alimtalkCatalog);
+        if (pick) return `${label} ${pick}`;
+        const fb = validateAlimtalkChannelState(alimtalkStateOfStep(s, alimtalkCatalog?.templates || [], alimtalkCatalog?.senders || []));
+        return fb ? `${label} ${fb}` : null;
+      }
       if (!s.messageTemplate.trim()) return `${label} 문안이 비어 있어요.`;
       if (s.channel !== 'sms' && !(s.subject || '').trim()) return `${label} 제목을 써 주세요.`;
       if (s.channel !== 'sms' && (s.subject || '').length > LMS_SUBJECT_MAX_CHARS) return `${label} 제목이 ${LMS_SUBJECT_MAX_CHARS}자를 넘어요.`;
@@ -724,11 +759,22 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const actionJourney = mj ? { id: mj.id, name: mj.name, status: mj.status, goalExitEnabled: mj.goalExitEnabled, thresholdRecipients: mj.thresholdRecipients, activationCost: mj.activationCost, pause: mj.pause }
     : journey ? { id: String(journey.id), name: String(journey.name), status: String(journey.status), activationCost: Number(journey.activation_cost || 0), pause: journey.pause_view || null } : null;
 
-  const runFix = (action: string) => {
+  /** 멈춤 안내 고치기(★ 2026-11-05 C103 R56 — 서버 고치기 동작마다 도착 자리가 있다 · 계약 = c103-intake-contract) */
+  const runFix = (fix: { action: string; stepOrder?: number }) => {
+    const action = fix.action;
     if (action === 'plan_upgrade' || action === 'charge') { navigate('/pricing'); return; }
     if (action === 'resume' && actionJourney) { actions.activate(actionJourney); return; }
-    if (action === 'edit_options' || action === 'edit_callback') { pickStep('start'); return; }
-    if (action === 'edit_step') { const first = detail?.steps.find((s) => s.step_type === 'message'); if (first) pickStep(first.id); return; }
+    // 문의 = 도움말 창(옛: 처리 0 = 눌러도 아무 일 없음)
+    if (action === 'contact') { openHelp(); return; }
+    if (action === 'edit_options') { pickStep('start'); return; }
+    // ★ 2026-11-05 C103 F3 — 회신번호 고치기 = [시작] 카드 「보내는 번호」 칸까지(옛: 칸 없는 시작 카드로만 갔다)
+    if (action === 'edit_callback') { pickStep('start'); window.setTimeout(() => document.querySelector('[data-fix-target="callback"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 120); return; }
+    // 칸 고치기 = 원문이 가리킨 칸(서버 stepOrder) · 없으면 첫 문자 칸(옛: 알림톡 템플릿 멈춤도 첫 문자 칸으로 갔다)
+    if (action === 'edit_step') {
+      const target = (fix.stepOrder != null ? detail?.steps.find((s) => Number(s.step_order) === fix.stepOrder) : null) || detail?.steps.find((s) => s.step_type === 'message');
+      if (target) pickStep(target.id);
+      return;
+    }
   };
 
   const openSim = async () => {
@@ -781,6 +827,14 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const selNew = selected.startsWith(NEW_STEP_PREFIX) ? newSteps.find((n) => n.tempId === selected) || null : null;
   const selEditable = !locked && !!selStudio && (selNew ? !selNew.sent : (selRaw?.step_type === 'message' && STUDIO_CHANNELS.includes(String(selRaw?.channel || '').toLowerCase())));
   const selDeleting = !!selRaw && deleteIds.has(selRaw.id);
+  // ★ 2026-11-05 C103 F10 — 알림톡 칸 = 공용 알림톡 패널로 고친다(문안 묶음 정책 · 재료는 처음 열 때 한 번)
+  const selKakaoEditable = !locked && !!selRaw && !!selStudio && selRaw.step_type === 'message' && String(selRaw.channel || '').toLowerCase() === 'kakao' && !selDeleting && edit.copy;
+  useEffect(() => {
+    if (!selKakaoEditable || alimtalkCatalog) return;
+    let live = true;
+    void loadAlimtalkCatalog(localStorage.getItem('token') || '').then((c) => { if (live) setAlimtalkCatalog(c); });
+    return () => { live = false; };
+  }, [selKakaoEditable]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ★ 2026-11-02 설계서 3-16 — 켜진 여정 A/B 칸 = 본문 잠금(서버도 409 · 같은 판정)
   const selAbLocked = !!selRaw && abCopyLocked(status, selRaw.ab_variants);
   const canShapeSteps = !locked && (edit.structure || reshapeAllowed);
@@ -864,7 +918,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                   {mj.pause && (
                     <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-700">
                       <Pause className="h-3.5 w-3.5 text-slate-400" aria-hidden /><span className="min-w-0 flex-1">{mj.pause.text}</span>
-                      {mj.pause.fix && <button type="button" onClick={() => runFix(mj.pause!.fix!.action)} className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] font-semibold text-slate-800 hover:border-indigo-200 hover:text-indigo-700">{mj.pause.fix.label}</button>}
+                      {mj.pause.fix && <button type="button" onClick={() => runFix(mj.pause!.fix!)} className="h-8 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-[12.5px] font-semibold text-slate-800 hover:border-indigo-200 hover:text-indigo-700">{mj.pause.fix.label}</button>}
                     </div>
                   )}
                   {!mj.pause && (mj.health.tone === 'fix' || mj.health.tone === 'blocked' || mj.health.tone === 'quiet') && (
@@ -1005,6 +1059,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     inProgress={mj?.counts.inProgress || 0}
                     attachedAfter={mj?.attachedAfter || null}
                     onDetach={detachAfter}
+                    callbackOptions={callbackOptions}
                   />
                 </div>
               )}
@@ -1077,6 +1132,10 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     <div className="mx-auto max-w-xl rounded-2xl border border-amber-200 bg-amber-50 p-4 text-[14px] leading-relaxed text-amber-900">
                       이 칸은 보냈지만 들어갔는지 아직 확인하지 못했어요. 저장을 누르면 같은 칸으로 확인해요(두 번 들어가지 않아요). 확인된 뒤 그 칸에서 고칠 수 있어요.
                     </div>
+                  ) : selKakaoEditable && selStudio ? (
+                    <fieldset disabled={filling || saving} className="mx-auto min-w-0 max-w-[760px] disabled:opacity-60" data-fix-target="alimtalk">
+                      <JourneyKakaoStepEditor step={selStudio} catalog={alimtalkCatalog} onPatch={(p) => patchSelected(p)} />
+                    </fieldset>
                   ) : selRaw ? (
                     <div className="mx-auto max-w-xl rounded-2xl border border-slate-200 bg-white p-4">
                       {selDeleting ? (
@@ -1085,7 +1144,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                         <>
                           {selRaw.subject && <div className="mb-1.5 text-[14px] font-semibold">{buildAdSubjectFront(selRaw.subject, String(selRaw.channel || 'lms').toUpperCase(), resolveJourneyAdFlag(selRaw.channel, selRaw.is_ad))}</div>}
                           <pre className="whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed text-slate-700">{selRaw.channel === 'kakao' ? (selRaw.message_template || '문안이 비어 있어요.') : buildAdMessageFront(selRaw.message_template || '', String(selRaw.channel || 'lms').toUpperCase(), resolveJourneyAdFlag(selRaw.channel, selRaw.is_ad), opt080)}</pre>
-                          <p className="mt-2 text-[12.5px] text-slate-500">{stepChannelLabel(selRaw.channel)} 칸은 등록한 템플릿으로 나가요. 문안 수정 창에서 고쳐요.</p>
+                          <p className="mt-2 text-[12.5px] text-slate-500">{stepChannelLabel(selRaw.channel)} 칸은 등록한 템플릿으로 나가요.</p>
                         </>
                       ) : selRaw.step_type === 'wait' ? (
                         <p className="text-[14px] leading-relaxed text-slate-700">{selRaw.wait_event_name ? '정한 행동이 일어나면 바로 다음 칸으로, 늦어도 정한 시간이 지나면 다음 칸으로 넘어가요.' : '정한 시간만큼 기다린 뒤 다음 칸으로 넘어가요.'}</p>
@@ -1171,7 +1230,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     stepId={selRaw ? selRaw.id : null}
                     stepLabel={(id) => { const r = rawById.get(id); return r ? `${r.step_order}번째 칸 · ${stepTitle(r)}` : '칸'; }}
                     onPickStep={(id) => pickStep(id)}
-                    onSpamTest={selEditable && !selDeleting ? () => { if (!selStudio.messageTemplate.trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; } if (!journey?.callback_number) { toast.warning('회신번호가 없어 검사할 수 없어요.'); return; } setSpamFor(selStudio); } : undefined}
+                    onSpamTest={selEditable && !selDeleting ? () => { if (!selRaw) { toast.warning('새 칸은 저장한 뒤 검사해요.'); return; } if (dirtyIds.includes(selRaw.id)) { toast.warning('고친 곳을 저장한 뒤 검사해요.'); return; } if (!selStudio.messageTemplate.trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; } if (!journey?.callback_number) { toast.warning('보내는 번호를 먼저 정해 주세요.'); return; } setSpamFor({ stepId: selRaw.id, channel: String(selRaw.channel || 'lms') }); } : undefined}
                     unsaved={dirtyCount > 0}
                     dropNote={selEditable && !selDeleting && selRaw && diagById.get(selRaw.id) && diagById.get(selRaw.id).severity !== 'good' ? `이 칸에서 ${Math.round(Number(diagById.get(selRaw.id).dropoutRate || 0) * 100)}%가 빠져요. ${diagById.get(selRaw.id).recommendation || ''}` : null}
                     onRetry={() => { if (journeyId) void loadCheck(journeyId); }}
@@ -1288,22 +1347,14 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       {actionMode && (
         <JourneyActionConfirmModal mode={actionMode} journeyName={journey?.name || mj?.name || '여정'} onConfirm={() => void runAction()} onClose={() => setActionMode(null)} />
       )}
-      {spamFor && journey?.callback_number && (() => {
-        const ch = String(spamFor.channel || 'lms').toUpperCase() as 'SMS' | 'LMS' | 'MMS';
-        const spamIsAd = resolveJourneyAdFlag(spamFor.channel, spamFor.isAd);   // ★ 2026-11-02 광고 판정 = 서버와 같은 함수(CT-J8)
-        const sentBody = buildAdMessageFront(spamFor.messageTemplate, ch, spamIsAd, opt080);
-        return (
-          <SpamFilterTestModal
-            onClose={() => setSpamFor(null)}
-            messageContentSms={spamFor.channel === 'sms' ? sentBody : undefined}
-            messageContentLms={spamFor.channel !== 'sms' ? sentBody : undefined}
-            callbackNumber={String(journey.callback_number)}
-            messageType={ch}
-            subject={buildAdSubjectFront(spamFor.subject || '', ch, spamIsAd)}
-            isAd={spamIsAd}
-          />
-        );
-      })()}
+      {spamFor && journeyId && journey?.callback_number && (
+        <SpamFilterTestModal
+          onClose={() => { setSpamFor(null); void loadCheck(journeyId); }}
+          callbackNumber={String(journey.callback_number)}
+          messageType={spamFor.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS'}
+          journeyStep={{ journeyId, stepId: spamFor.stepId }}
+        />
+      )}
       {actions.node}
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
     </>

@@ -5,9 +5,9 @@
  * 담당자 안내 문자의 주소(#t=토큰)가 여는 화면이다. 폰에서 열리는 것이 기본이므로 모바일 우선 한 컬럼으로 그린다.
  *
  * 할 수 있는 일 = 서버 `actions{}`(utils/agency-send-actions.ts 한 벌)만 그린다:
- *   승인(확인 창 → 필요하면 인증번호 → 실행 · Harold ①) · 취소(확인 창 · 담당자 전원 통보) · 보낼 시각 바꾸기 · 같은 시각으로 다시 진행 ·
+ *   승인(확인 창 → 실행 · Harold ①) · 취소(확인 창 · 담당자 전원 통보) · 보낼 시각 바꾸기 · 같은 시각으로 다시 진행 ·
  *   맞춤법 제안 골라 고치기(고르면 주 버튼 = [고른 N곳 고치고 다시 검사] · 승인 숨김 · 고치면 이 주소는 닫히고 새 문자가 간다).
- * ★2026-10-16 승인은 발신 인증(3.5) 인증번호를 받을 수 있다(서버가 요구할 때만) · 흐름 = `useSenderAuth` · 확인만 토큰 헤더 경로.
+ * ★2026-11-05 링크 승인에 인증번호 없음(Harold 「양식의 담당자 번호로 다 나가서 승인」 · 1016 의 링크 인증번호 창을 걷음 · 로그인 인증번호는 계정 로그인에만).
  * ⛔ 서버가 주는 것만 그린다(수신자 명단 없음) · 판정(actions · 409)은 전부 서버 · 문구 줄표 0 · native dialog 0(시각 칸만 native 입력).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -20,10 +20,7 @@ import { useClockTick } from '../hooks/useClockTick';
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
 import { buildAdSubjectFront } from '../utils/formatDate';
 import { useApproveToken } from '../hooks/useApproveToken';
-import { useSenderAuth } from '../hooks/useSenderAuth';
-import SenderAuthModal from '../components/SenderAuthModal';
 import LinkConfirmSheet from '../components/link/LinkConfirmSheet';
-import { verifyAgencyLinkSenderAuth } from '../components/agency/agency-send-api';
 
 interface SpellIssueView { id: string; before: string; after: string; kind: 'typo' | 'spacing'; reason: string; blocked?: 'sms_bytes' }
 
@@ -80,7 +77,7 @@ function Shell({ children }: { children: ReactNode }) {
       <main className="flex-1 w-full max-w-[560px] mx-auto px-5 py-6">{children}</main>
       <footer className="w-full max-w-[560px] mx-auto px-5 pb-6 space-y-1">
         <p className="text-[11px] text-neutral-400">한줄로 대행발송 · 이 화면은 안내 문자를 받은 담당자용입니다</p>
-        <p className="text-[11px] text-neutral-400">인증번호는 이 화면에만 입력합니다. 로그인은 hanjul.ai 로그인 화면에서만 하며, 전화나 메시지로 인증번호를 묻지 않습니다.</p>
+        <p className="text-[11px] text-neutral-400">로그인은 hanjul.ai 로그인 화면에서만 하며, 전화나 메시지로 인증번호를 묻지 않습니다.</p>
       </footer>
     </div>
   );
@@ -110,8 +107,6 @@ export default function AgencyApprovePage() {
   const [sheet, setSheet] = useState<Sheet>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [when, setWhen] = useState('');
-  // ★2026-10-16 발신 인증 — 확인은 이 화면의 토큰으로(로그인 없음)
-  const senderAuth = useSenderAuth({ verifyRequest: (challengeId, code) => verifyAgencyLinkSenderAuth(token, challengeId, code) });
   // ★ 2026-10-20 열어 둔 화면이 보낼 시각 15분 전을 넘는 그 순간 버튼을 다시 판정한다(서수란 접수 cmvgfv8r51 · 훅 = 조건부 return 앞)
   const nowMs = useClockTick(undefined, 'request' in state ? sendChangeLockStartsAt(state.request.requestedAt) : null);
 
@@ -163,8 +158,6 @@ export default function AgencyApprovePage() {
       const out = await post('approve', { revision: state.request.revision });
       if (!out) return;
       if (!out.failed) { setSheet(null); setState({ kind: 'done', request: out.request }); return; }
-      // ★2026-10-16 인증번호 요구 — 창을 띄우고, 통과하면 같은 토큰일 때만 이 승인을 다시 보낸다
-      if (senderAuth.handleResponse(out.data, () => { if (tokenRef.current === token) void approve(); })) { setSheet(null); return; }
       setSheet(null);
       await load(out.data?.error || '내용이 바뀌어 다시 불러왔습니다. 확인 후 승인해 주세요.');
     } catch {
@@ -353,7 +346,6 @@ export default function AgencyApprovePage() {
       <LinkConfirmSheet open={sheet === 'approve'} title="이 문안 그대로 승인할까요?" rows={summaryRows} tone="primary" busy={working}
         notes={[
           { tone: 'info', text: '승인하면 정해진 시각에 그대로 나갑니다. 보내기 전까지 이 화면에서 취소할 수 있어요.' },
-          { tone: 'info', text: '인증번호 창이 뜨면 이 휴대폰으로 온 번호를 넣어 주세요.' },
         ]}
         confirmLabel={`승인하기 · ${r.recipientCount.toLocaleString()}명`} onConfirm={() => { void approve(); }} onCancel={() => setSheet(null)} />
       <LinkConfirmSheet open={sheet === 'cancel'} title="이 발송을 취소할까요?" rows={summaryRows} tone="danger" busy={working}
@@ -390,20 +382,6 @@ export default function AgencyApprovePage() {
         ]}
         confirmLabel={`${picked.length}곳 고치기`} onConfirm={() => { void runAction('spell-fix', { issueIds: picked }); }} onCancel={() => setSheet(null)} />
 
-      {/* ★2026-10-16 승인의 발신 인증(3.5) — 끝자리 표시 · 같은 폰 문자 자동 채움 · 통과하면 승인이 이어진다 */}
-      {senderAuth.state && (
-        <SenderAuthModal
-          state={senderAuth.state}
-          code={senderAuth.code}
-          onCodeChange={senderAuth.setCode}
-          error={senderAuth.error}
-          busy={senderAuth.busy}
-          onVerify={senderAuth.verify}
-          onResend={senderAuth.resend}
-          onProceed={senderAuth.cancel}
-          onCancel={senderAuth.cancel}
-        />
-      )}
     </>
   );
 }

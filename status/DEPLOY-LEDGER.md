@@ -48,6 +48,7 @@
 | C99 | 14819363 |
 | C102 | d7e3061f |
 | C101 | cae2cd7c |
+| C103 | 미커밋 |
 
 ## §1 대기
 
@@ -945,6 +946,174 @@ ALTER TABLE sync_releases ADD COLUMN IF NOT EXISTS company_id uuid NULL;
 - 기대: ① 배포 뒤 새 PID ERROR 0(SQL 오류 코드 · `DB_MIGRATION_PENDING` · `MIXED_AGENT` 0) · health 200 · 슈퍼관리자 「Agent 버전 배포」 창에 「배포 대상」 칸 ② 엠티 1.7.6 설치 뒤 첫 고객 실행 = 그 에이전트 세대 패스 `done` · 409 `MIXED_AGENT` 0 · 판매 뷰 휴대폰 칸 ③ 직원 시트(설계서 §7 · 시트 1 업로드 · 시트 2 싱크) 기대 결과 그대로
 - 확인: 로그 줄 · 화면 · ② = 엠티 설치 뒤 패스 상태 SQL(TROUBLESHOOTING §4 C101 줄) · 직원 시트 결과
 - 결과: 1104 Harold 출력 = ① 서버 HEAD cae2cd7c · 새 프로세스 08:11:09 KST(dist 시각 뒤) · 에러 로그 0줄 · 출력 로그 SQL 오류 코드 · `DB_MIGRATION_PENDING` · `MIXED_AGENT` 0 · health 200 · 화면 「배포 대상」 칸 보임 → 기대값 같음 · 엠티 1.7.6 묶음 + 안내서 PDF = 1104 오전 발송(설계서 §8-1) · ② 엠티 설치 뒤 = 남음 · ③ 직원 시트 = 남음(엑셀 아직)
+
+### C103-S0 · 1104 오류접수 처방 사전 확인(배포 앞 · 읽기만 · 설계서 docs/2026-11-05-intake-1104-fix-design.md §4)
+- 카드: C103
+- 단계: 사전
+- 선행: 없음
+- 기대: ① 뷰 customers_unified 에 기대는 다른 객체 0 ② 컨펌 행 중 superseded_at · objection_resolved_at 이 찍힌 행 0 · 0(쓰는 코드가 없던 칸)
+- 확인: 아래 두 SQL 출력 그대로
+- 결과: 2026-11-05 Harold 출력 · ① 0 · ② 0|0(기대와 같음)
+
+> C103-S0 ① = SELECT count(*) FROM pg_depend d JOIN pg_rewrite r ON r.oid = d.objid JOIN pg_class v ON v.oid = r.ev_class WHERE d.refobjid = 'public.customers_unified'::regclass AND v.relname <> 'customers_unified';
+> C103-S0 ② = SELECT count(*) FILTER (WHERE superseded_at IS NOT NULL) AS superseded, count(*) FILTER (WHERE objection_resolved_at IS NOT NULL) AS resolved FROM invoice_confirmations;
+
+### C103-DDL-1 · customers_unified 뷰에 joined_at(가입일 · FIELD_MAP 칸 = 뷰 칸 · 설계서 F6) · ★ 배포 앞
+- 카드: C103
+- 단계: DDL
+- 선행: C103-S0 ① = 0 · C98-DDL-2(customers.joined_at · 1103 실행 끝)
+- 의미 바꿈: 아니오(뷰 끝에 칸 하나 · 옛 코드는 이 칸을 읽지 않는다 · 지금 운영 고객 DB 엑셀 = 이 칸이 없어 실패 중 = 이 DDL 뒤 바로 낫는다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name FROM information_schema.columns WHERE table_name = 'customers_unified' AND column_name = 'joined_at';
+- 확인: joined_at 한 줄
+- 결과: 2026-11-05 Harold 실행 = SET · CREATE VIEW · 확인 joined_at 한 줄 기대 그대로(이 시각부터 고객 DB 엑셀 · 목록 · 필터의 「joined_at 칸 없음」 원인 해소 · 코드 배포 전)
+
+> C103-DDL-1 · 배포 앞(배포 뒤여도 무해 · 앞이면 엑셀이 코드 배포 전에 낫는다) · 원문 = 운영 덤프(2026-10-27 · 해시 대조 같음) 정의 그대로 + 바깥 SELECT 끝 t.joined_at · 안쪽 SELECT customers.joined_at · 아래 UNION 끝 customers.joined_at · 되돌리기 = 남겨도 무해
+
+```sql ddl:C103-DDL-1
+SET lock_timeout = '3s';
+CREATE OR REPLACE VIEW public.customers_unified AS
+ SELECT t.id,
+    t.company_id,
+    t.phone,
+    t.name,
+    t.gender,
+    t.birth_date,
+    t.age,
+    t.email,
+    t.address,
+    t.grade,
+    t.points,
+    t.store_code,
+    t.registered_store,
+    t.registered_store_number,
+    t.registration_type,
+    t.recent_purchase_amount,
+    t.recent_purchase_store,
+    t.total_purchase_amount,
+    t.wedding_anniversary,
+    t.is_married,
+    t.sms_opt_in,
+    t.custom_fields,
+    t.is_opt_out,
+    t.is_invalid,
+    t.created_at,
+    t.updated_at,
+    t.source,
+    t.birth_year,
+    t.birth_month_day,
+    t.region,
+    t.total_purchase,
+    t.last_purchase_date,
+    t.purchase_count,
+    t.is_active,
+    t.recent_purchase_date,
+    t.store_name,
+    t.callback,
+    t.store_phone,
+    t.uploaded_by,
+    t.rn,
+    t.joined_at
+   FROM ( SELECT customers.id,
+            customers.company_id,
+            customers.phone,
+            customers.name,
+            customers.gender,
+            customers.birth_date,
+            customers.age,
+            customers.email,
+            customers.address,
+            customers.grade,
+            customers.points,
+            customers.store_code,
+            customers.registered_store,
+            customers.registered_store_number,
+            customers.registration_type,
+            customers.recent_purchase_amount,
+            customers.recent_purchase_store,
+            customers.total_purchase_amount,
+            customers.wedding_anniversary,
+            customers.is_married,
+            customers.sms_opt_in,
+            customers.custom_fields,
+            customers.is_opt_out,
+            customers.is_invalid,
+            customers.created_at,
+            customers.updated_at,
+            customers.source,
+            customers.birth_year,
+            customers.birth_month_day,
+            customers.region,
+            customers.total_purchase,
+            customers.last_purchase_date,
+            customers.purchase_count,
+            customers.is_active,
+            customers.recent_purchase_date,
+            customers.store_name,
+            customers.callback,
+            customers.store_phone,
+            customers.uploaded_by,
+            customers.joined_at,
+            row_number() OVER (PARTITION BY customers.company_id, customers.phone, customers.name ORDER BY
+                CASE
+                    WHEN ((customers.source)::text = 'sync'::text) THEN 0
+                    ELSE 1
+                END) AS rn
+           FROM public.customers
+          WHERE ((customers.name IS NOT NULL) AND ((customers.name)::text <> ''::text))) t
+  WHERE (t.rn = 1)
+UNION ALL
+ SELECT customers.id,
+    customers.company_id,
+    customers.phone,
+    customers.name,
+    customers.gender,
+    customers.birth_date,
+    customers.age,
+    customers.email,
+    customers.address,
+    customers.grade,
+    customers.points,
+    customers.store_code,
+    customers.registered_store,
+    customers.registered_store_number,
+    customers.registration_type,
+    customers.recent_purchase_amount,
+    customers.recent_purchase_store,
+    customers.total_purchase_amount,
+    customers.wedding_anniversary,
+    customers.is_married,
+    customers.sms_opt_in,
+    customers.custom_fields,
+    customers.is_opt_out,
+    customers.is_invalid,
+    customers.created_at,
+    customers.updated_at,
+    customers.source,
+    customers.birth_year,
+    customers.birth_month_day,
+    customers.region,
+    customers.total_purchase,
+    customers.last_purchase_date,
+    customers.purchase_count,
+    customers.is_active,
+    customers.recent_purchase_date,
+    customers.store_name,
+    customers.callback,
+    customers.store_phone,
+    customers.uploaded_by,
+    1 AS rn,
+    customers.joined_at
+   FROM public.customers
+  WHERE ((customers.name IS NULL) OR ((customers.name)::text = ''::text));
+```
+
+### C103-S1 · 1104 오류접수 처방 실측(배포 뒤 · 직원 시트 24 ~ 29 · docs/2026-11-05-c103-staff-sheet.xlsx)
+- 카드: C103
+- 단계: 배포 뒤
+- 선행: 코드 배포 · C103-DDL-1
+- 기대: 직원 시트 24 ~ 29 전 항목 「맞음」 · 배포 뒤 에러 로그에 joined_at 칸 없음 오류 0
+- 확인: 시트 결과(날짜 · 계정 · 사람)
+- 결과: (대기)
 
 ## §2 덤프 뒤 적용분
 

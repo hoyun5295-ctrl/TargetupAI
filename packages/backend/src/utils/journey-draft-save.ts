@@ -16,31 +16,9 @@ import { deductCreditOutcome, refundCredit, CreditSettleError } from './ai-credi
 import { ledgerRowsByKeyPrefix } from './ai-credit-ledger';
 import { JourneyInputError } from './journey-step-limits';
 
-export interface CallbackNumberRow {
-  phone: string;
-  source: string;
-  description: string | null;
-  is_default: boolean;
-}
-
-/** 회사 회신번호 목록(인증된 발신번호 + 회신번호 · 기본 먼저). GET journeys-callback-numbers 와 같은 SQL(한 곳). */
-export async function listJourneyCallbackNumbers(companyId: string): Promise<CallbackNumberRow[]> {
-  const r = await query(
-    `SELECT DISTINCT phone, source, description, is_default FROM (
-       SELECT regexp_replace(phone_number, '[^0-9]', '', 'g') AS phone, 'sender' AS source, description, false AS is_default
-       FROM sender_numbers
-       WHERE company_id = $1::uuid AND is_active = true AND is_verified = true
-       UNION
-       SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone, 'callback' AS source, label AS description, is_default
-       FROM callback_numbers
-       WHERE company_id = $1::uuid
-     ) src
-     WHERE phone IS NOT NULL AND LENGTH(phone) >= 8
-     ORDER BY is_default DESC NULLS LAST, phone ASC`,
-    [companyId]
-  );
-  return r.rows;
-}
+// ★ 2026-11-05 C103 F3 — 회신번호 목록 · 등록 판정은 journey-callback.ts 한 곳(journey-builder 가 순환 없이 부르게 옮김 · 옛 import 는 그대로 쓰도록 다시 내보낸다)
+import type { CallbackNumberRow } from './journey-callback';
+export { listJourneyCallbackNumbers, isRegisteredJourneyCallback, assertJourneyCallbackRegistered, JOURNEY_CALLBACK_UNREGISTERED_MESSAGE, type CallbackNumberRow } from './journey-callback';
 
 /**
  * 묻지 않고 쓸 회신번호 — 기본 번호가 있으면 그것 · 번호가 하나뿐이면 그것 · 아니면 null(그때만 묻는다 · 설계서 §13-1).

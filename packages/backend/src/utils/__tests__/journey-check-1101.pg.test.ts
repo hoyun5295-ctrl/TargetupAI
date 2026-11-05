@@ -26,7 +26,8 @@ vi.mock('../journey-message-render', async (orig) => ({
   pickJourneySampleCustomer: async () => ({}),
 }));
 
-import { checkJourney, startJourneyStepSpamChecks } from '../journey-check';
+import { checkJourney } from '../journey-check';
+import { journeyStepSpamParams, enqueueStepSpamCheck } from '../journey-pretest-validator';
 
 const CO = randomUUID();
 const OWNER = randomUUID();
@@ -76,16 +77,22 @@ describe('C5 점검 응답(실 PG)', () => {
   });
 });
 
-describe('C5 칸 저장 뒤 자동 검사(실 PG)', () => {
-  it('문자 칸 = 같은 날 같은 글 이어 보기로 등록 · 보관 여정 · 사용자 없음 = 0', async () => {
+// ★ 2026-11-05 C103 F1 · F2 — 칸 저장 뒤 자동 검사 삭제 · 여정 칸 「지금 스팸 검사」 = 저장된 글 · 수동 수락 규칙
+describe('C103 F1 여정 칸 검사(실 PG)', () => {
+  it('문자 칸 = 저장된 글 · 여정 회신번호 · 수동 수락 규칙으로 등록(같은 날 같은 글 = 이어 보기)', async () => {
     ctl.enqueued.length = 0;
-    await startJourneyStepSpamChecks(CO, J, S2, OWNER);
+    ctl.peek = null;
+    const out = await enqueueStepSpamCheck(await journeyStepSpamParams(CO, OWNER, J, S2));
     expect(ctl.enqueued).toHaveLength(1);
-    expect(ctl.enqueued[0]).toMatchObject({ companyId: CO, callbackNumber: '0212345678', messageType: 'SMS', reuseSameDay: true, skipPrepaid: false, source: 'auto_ai' });
-    await startJourneyStepSpamChecks(CO, JA, SA, OWNER);
-    await startJourneyStepSpamChecks(CO, JE, SE, OWNER);   // 끝난 여정 = 0(Codex 구현 1R #2)
-    await startJourneyStepSpamChecks(CO, J, S2, null);
-    await startJourneyStepSpamChecks(randomUUID(), J, S2, OWNER);
-    expect(ctl.enqueued).toHaveLength(1);
+    expect(ctl.enqueued[0]).toMatchObject({ companyId: CO, callbackNumber: '0212345678', messageType: 'SMS', reuseSameDay: true, skipPrepaid: false, source: 'manual', manualAdmission: { userId: OWNER } });
+    expect(out.message).toBe('다시 찾아 주셔서 고마워요');
+    expect(out.view).toBeNull();
+  });
+  it('보관 · 끝난 여정 = 409 · 다른 회사 = 404 · 등록 0', async () => {
+    ctl.enqueued.length = 0;
+    await expect(journeyStepSpamParams(CO, OWNER, JA, SA)).rejects.toMatchObject({ status: 409, code: 'JOURNEY_CLOSED' });
+    await expect(journeyStepSpamParams(CO, OWNER, JE, SE)).rejects.toMatchObject({ status: 409, code: 'JOURNEY_CLOSED' });
+    await expect(journeyStepSpamParams(randomUUID(), OWNER, J, S2)).rejects.toMatchObject({ status: 404 });
+    expect(ctl.enqueued).toHaveLength(0);
   });
 });

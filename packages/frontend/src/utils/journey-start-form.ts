@@ -52,6 +52,9 @@ export function formFromJourney(j: any): OptionForm {
     personalSendTime: j?.personal_send_time === true,
     goalExitEnabled: j?.goal_exit_enabled === true,
     goalKind: j?.goal_kind || 'purchase',
+    // ★ 2026-11-05 C103 F3 — 보내는 번호(숫자만 · 서버 목록과 같은 꼴) · 매장번호로 보내기(store) — [시작] 카드 「보내는 번호」 칸
+    callbackNumber: String(j?.callback_number || '').replace(/\D/g, ''),
+    callbackMode: j?.callback_mode === 'store' ? 'store' : 'fixed',
   };
   if (t) f[t.key] = numOrNull(tf[t.key]) ?? t.def;
   // 옛 상시 여정(조건 0개 · 신호 키 없음)은 추출기가 전원으로 본다 → 화면도 「전체 고객」으로(사실과 다른 「조건 없음」을 보이지 않는다 · Codex 적대 A4 짝).

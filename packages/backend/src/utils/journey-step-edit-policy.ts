@@ -8,7 +8,8 @@
  *   문안   = 본문 · 제목                       — 끝남 외 전부(켜짐은 allowActiveMessageEdit 로만)
  *   간격   = 대기 시간 · 대기 방식 · 보낼 시각   — 초안 · 멈춤 · ★V.3 켜짐(이미 잡힌 다음 발송 시각은 그대로 · 실행기가 앞 칸을 보낼 때 다음 칸 시각을 정한다)
  *                                                켜진 날짜 기준 · 한 번 보내기 여정은 새 모양(실행이 칸 하나짜리 단발)
- *   구조   = 채널 · 광고 · 칸 종류 · 조건 · 알림톡 · 이미지 — 초안 · 진행 중 없는 멈춤만(진행 중 고객이 기다리는 칸의 모양을 바꾸지 않는다)
+ *   ★ 2026-11-05 C103 F10 — 알림톡(발신프로필 · 템플릿 · 변수 · 대체 발송)은 그 칸이 무엇을 말하는가 = 문안 묶음(옛: 구조 → 멈춘 · 켜진 여정에서 템플릿을 바꿀 길이 없었다)
+ *   구조   = 채널 · 광고 · 칸 종류 · 조건 · 이미지 — 초안 · 진행 중 없는 멈춤만(진행 중 고객이 기다리는 칸의 모양을 바꾸지 않는다)
  *                                                켜진 여정은 새 모양(새로 들어오는 고객부터 · journey-reshape)
  *   운영   = 담당자 알림                        — 끝남 외 전부(발송 내용이 아니다)
  * ⛔ 켜진 여정의 이미지는 구조다 — 스냅숏에 이미지가 없어 바꾸면 사전 검사 없이 다음 발송부터 나간다(journey-builder updateJourneyStep).
@@ -18,14 +19,13 @@
 export type StepEditGroup = 'copy' | 'timing' | 'structure' | 'ops';
 
 export const STEP_EDIT_KEYS: Record<StepEditGroup, readonly string[]> = {
-  copy: ['messageTemplate', 'subject'],
-  timing: ['delayHours', 'delayMode', 'targetHourKst'],
-  structure: [
-    'channel', 'isAd', 'stepType', 'conditionJsonb',
+  copy: [
+    'messageTemplate', 'subject',
     'alimtalkProfileId', 'alimtalkTemplateCode', 'alimtalkVariableMap',
     'alimtalkNextType', 'alimtalkNextContents', 'alimtalkNextSubject',
-    'mmsImagePaths',
   ],
+  timing: ['delayHours', 'delayMode', 'targetHourKst'],
+  structure: ['channel', 'isAd', 'stepType', 'conditionJsonb', 'mmsImagePaths'],
   ops: ['notifyManagerOnPretest'],
 };
 

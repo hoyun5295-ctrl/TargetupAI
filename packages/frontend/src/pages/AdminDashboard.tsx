@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';   // ★ C103 F8
 import { companiesApi, plansApi, billingApi, unitPriceApi } from '../api/client';
 import { previewUnitPrice, fmtPrice, toSupplyInputs } from '../utils/unitPrice'; // ★ 2026-07-26 단가 = VAT 별도 공급가
 import { useAuthStore } from '../stores/authStore';
@@ -1222,6 +1223,8 @@ const [manualRemarkDraft, setManualRemarkDraft] = useState<Record<string, string
 const [adminConfirmTarget, setAdminConfirmTarget] = useState<any | null>(null);
 const [adminConfirmNote, setAdminConfirmNote] = useState('');
 const [adminConfirmBusy, setAdminConfirmBusy] = useState(false);
+// ★ 2026-11-05 C103 F8(1104 접수 1 서수란) — 이의신청 「변경 없음」 = 같은 장 확인 메일 다시 보내기(공용 확인 창)
+const [objectionAsk, setObjectionAsk] = useState<ConfirmState | null>(null);
 // ★ 2026-07-30 세금계산서 장부(taxbill_issues — 원본+수정 축) + 수정발행 모달
 const [taxbillRows, setTaxbillRows] = useState<any[]>([]);
 const [taxbillLoading, setTaxbillLoading] = useState(false);
@@ -1543,6 +1546,30 @@ const handleManualIssueDate = async (confirmationId: string, requireRemark?: boo
     setBillingToast({ msg: e?.message || '작성일자 지정 실패', type: 'error' });
   }
 };
+
+// ★ C103 F8 — 이의신청 「변경 없음」: 옛 확인 행 해소 · 무효 → 같은 장 새 확인 메일(서버가 효과를 확인하고 답한다)
+const askObjectionResolve = (r: any) => setObjectionAsk({
+  mode: 'warning',
+  title: '변경 없음 · 확인 메일 다시 보내기',
+  description: `${r.company_name}${r.account_name ? ` (${r.account_name})` : ''} · ${(Number(r.total_amount) || 0).toLocaleString()}원\n업체에 이 거래내역서 확인 메일을 다시 보냅니다. 업체가 새 메일에서 컨펌하면 계산서 흐름이 이어집니다.`,
+  confirmLabel: '확인 메일 다시 보내기',
+  onConfirm: async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/admin/billing/confirmations/${r.id}/objection-resolve`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || '이의신청을 처리하지 못했습니다');
+      setBillingToast({ msg: data?.success ? (data.message || '확인 메일을 다시 보냈어요.') : (data?.error || '확인 메일을 보내지 못했어요.'), type: data?.success ? 'success' : 'error' });
+    } catch (e: any) {
+      setBillingToast({ msg: e?.message || '이의신청을 처리하지 못했습니다', type: 'error' });
+    } finally {
+      loadConfirmBoard();
+    }
+  },
+});
 
 // 업체 확인 대리 기록 — 성공하면 컨펌 시각이 남아 작성일자 지정이 열린다.
 const handleAdminConfirm = async () => {
@@ -3641,7 +3668,13 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                           {r.taxbill_issue_date && <span>작성일자 {String(r.taxbill_issue_date).slice(0, 10)}</span>}
                           {/* ★ 2026-08-21 계산서 비고(PO) — 발행 패스가 이 값을 팝빌 비고로 싣는다. */}
                           {r.taxbill_remark && <span className="text-indigo-600" title="계산서 비고에 그대로 인쇄됩니다">비고 {r.taxbill_remark}</span>}
-                          {r.superseded_at && <span className="text-gray-400">재발급으로 무효</span>}
+                          {r.superseded_at && <span className="text-gray-400">{r.objection_resolved_at ? '이의 확인 뒤 다시 보냄' : '재발급으로 무효'}</span>}
+                          {/* ★ C103 F8 — 살아 있는 이의신청 줄 = 내부 확인 결과 변경이 없으면 같은 장 확인 메일을 다시 보낸다 */}
+                          {r.taxbill_status === 'objected' && !r.superseded_at && !r.issued_at && (
+                            <button onClick={() => askObjectionResolve(r)}
+                              title="내부 확인 결과 바뀐 것이 없으면 같은 내역으로 업체에 확인 메일을 다시 보냅니다."
+                              className="ml-auto whitespace-nowrap px-2 py-0.5 border border-rose-300 bg-rose-50 text-rose-700 rounded text-[10px] font-semibold hover:bg-rose-100">변경 없음 · 확인 메일 다시 보내기</button>
+                          )}
                           {/* ★ 2026-08-05 (서수란 접수) 작성일자 지정은 **컨펌 뒤에만** 연다.
                               지정하는 순간 발급 큐(ready)로 올라가 워커가 국세청 문서를 만든다 —
                               그전에는 컨펌 여부와 무관하게 열려 있어 업체 확인 없이 계산서가 나갔다.
@@ -3948,6 +3981,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                 </div>
               </div>
             )}
+
+            <ConfirmModal state={objectionAsk} onClose={() => setObjectionAsk(null)} />
 
             {/* ── 업체 확인 대리 기록 모달 (★2026-08-05 서수란 접수) ── */}
             {adminConfirmTarget && (

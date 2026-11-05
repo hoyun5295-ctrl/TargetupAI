@@ -13,7 +13,9 @@
  *
  * 영구 룰 준수: 다크 톤 + violet 액센트 + Source caption / useToast(native dialog 0) / 수정 1클릭 진입.
  * ★ 2026-10-20 여정 V.3 §9-4 — 칸마다 큰 휴대폰(PhoneComposer) 한 벌. (광고) · 무료수신거부를 합성한 바이트로 세고(옛: 글자 수만 세서 단문 90바이트를
- *   넘겨도 몰랐다) · [받는 모습]은 칸마다 서버 미리보기. 알림톡 칸은 템플릿 문안이라 글 칸 그대로.
+ *   넘겨도 몰랐다) · [받는 모습]은 칸마다 서버 미리보기.
+ * ★ 2026-11-05 C103 F11 — 알림톡 칸 = 읽기만(나가는 글 = 고른 템플릿 본문 · 서버도 직접 고침 400) · 저장 대상에서 뺀다.
+ *   템플릿 바꾸기 = 작업 화면 알림톡 칸(공용 알림톡 패널).
  */
 
 import { useEffect, useState } from 'react';
@@ -106,7 +108,7 @@ export default function JourneyMessageEditModal({
     setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
 
   const changed = steps.filter(
-    (s) => initial[s.id] && (initial[s.id].messageTemplate !== s.messageTemplate || initial[s.id].subject !== s.subject)
+    (s) => s.channel !== 'kakao' && initial[s.id] && (initial[s.id].messageTemplate !== s.messageTemplate || initial[s.id].subject !== s.subject)
   );
 
   const handleSave = async () => {
@@ -242,6 +244,11 @@ export default function JourneyMessageEditModal({
                         journeyId={journeyId}
                         resetKey={s.id}
                       />
+                    ) : s.channel === 'kakao' ? (
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        <pre className="min-h-[200px] whitespace-pre-wrap break-words font-sans text-[14px] leading-relaxed text-slate-700">{s.messageTemplate || '템플릿을 아직 고르지 않았어요.'}</pre>
+                        <p className="mt-2 border-t border-slate-100 pt-2 text-[12.5px] text-slate-500">알림톡 칸은 고른 템플릿 글 그대로 나가요. 템플릿은 작업 화면 알림톡 칸에서 바꿔요.</p>
+                      </div>
                     ) : (
                       <textarea
                         value={s.messageTemplate}
