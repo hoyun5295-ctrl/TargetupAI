@@ -30,6 +30,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { describeJsonShape } from '../utils/json-shape';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { parseQueryInt } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 const router = Router();
 
@@ -137,7 +138,7 @@ router.get('/orders/preview', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '네이버 스마트스토어 연동이 없습니다. 먼저 연동해주세요.' });
     }
 
-    const hours = Number(req.query.hours) || 24;
+    const hours = parseQueryInt(req.query.hours, { fallback: 24, min: 1, max: 8760, clamp: true });
     const preview = await fetchRecentNaverOrdersPreview(integration, hours);
     console.log(`[NaverCommerce preview] company=${companyId} store=${integration.storeId} from=${preview.from} ids=${preview.idCount}`);
     // ★ 2026-08-10 — 스키마 실측용 출력을 raw에서 **구조**로 바꿨다.

@@ -120,6 +120,7 @@ import { getServePath, parseFitOption } from '../utils/image-serve';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
 import { uploadGuard } from '../utils/http-error';
+import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 // ────────────── D216+ 503 안전망 helper (db_alter_safety_net 영구 룰) ──────────────
 function isDbMigrationPendingError(err: any): boolean {
   const msg = err?.message || '';
@@ -1001,7 +1002,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
     const typedLine = prompt;
     if (steps && prompt && !eventText && !scenario) {
       // ★ 2026-10-17 단계 답 = [혜택] · [기간](날짜를 친 것과 같게) · [상품](글로만 소개할 직접 상품) 줄
-      eventText = normalizeEventText(buildLineStepsEventText(prompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, textProducts: steps.textProducts }));
+      eventText = normalizeEventText(buildLineStepsEventText(prompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, periodStart: steps.body.facts.periodStart ?? null, textProducts: steps.textProducts }));
       prompt = '';
     }
     if (!prompt && !scenario && !eventText) {
@@ -1051,7 +1052,7 @@ dmRouter.post('/ai/one-shot-generate', singleFlight('dm-generate', async (req: a
               composition: compDef, channel: 'dm', companyId, line: typedLine, ...tplBrand!, brandName: tplBrand!.brandName || brandName || '',
               pinnedPrimary: pinPrimary, cards: [...cards, ...compManual!.cards], cardCategories: [...cards.map(() => null), ...compManual!.categories],
               heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page,
-              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, periodStart: steps.body.facts.periodStart ?? null,
               link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
             }, { userId: req.user?.userId, source: 'dm-ai-generate' });
             const dmC = buildLineCookDm(cook);
@@ -2752,8 +2753,7 @@ dmRouter.get('/:id/responses', requireDmAccess, async (req: any, res: any) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '회사 권한이 필요합니다.' });
     if (!(await assertDmOwner(req.params.id, companyId))) return res.status(404).json({ error: 'DM 미발견' });
-    const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 50;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     return res.json(await getResponses(companyId, req.params.id, page, limit));
   } catch (err: any) {
     return handleInteractionError(res, err);

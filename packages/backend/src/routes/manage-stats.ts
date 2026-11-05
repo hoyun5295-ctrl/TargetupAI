@@ -9,7 +9,7 @@ import { getTablesForBillingPeriod } from '../utils/send-usage-aggregation';
 import { kstDateString } from '../utils/planner-execution';
 /** 기간 지정이 없을 때 이력 테이블을 모으는 시작일(서비스 이전 · 있는 LOG만 붙는다) */
 const TEST_STATS_EPOCH = '2025-01-01';
-import { getSendTypeLabel, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus } from '../utils/sms-result-map';
+import { getSendTypeLabel, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus, isSuccess, isPending } from '../utils/sms-result-map';
 // ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
 //   슈퍼관리자 통계(admin.ts)는 계정·캠페인 단위 운영 뷰라 그 축을 계속 쓴다.
 import { buildDateRangeFilter, querySendStatsDetail } from '../utils/stats-aggregation';
@@ -25,6 +25,7 @@ import { buildManageStatsXlsx, type StatsExportWebRow } from '../utils/manage-st
 import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
 import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
+import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -44,8 +45,7 @@ router.get('/send', async (req: Request, res: Response) => {
     const startDate = (req.query.startDate as string) || '';
     const endDate = (req.query.endDate as string) || '';
     const companyScope = getCompanyScope(req);
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 10, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const filterUserId = req.query.filterUserId as string;
 
     // ★ 2026-07-25 웹 탭을 **청구 축으로 통일**한다(Harold 지시: 정산은 정합성 최우선).
@@ -273,7 +273,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
 
       const testRows = await mysqlQuery(
         `SELECT
-          dest_no as phone, msg_type, status_code,
+          dest_no as phone, msg_type, status_code, k_oriseq,
           msg_instm as sent_at, bill_id as sender_id
         FROM ${(await getTestSmsTables())[0]}
         WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}
@@ -283,8 +283,9 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       testDetail = (testRows as any[]).map(r => ({
         phone: r.phone,
         // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
-        msgType: getSendTypeLabel(r.msg_type),
-        status: [6, 1000, 1800].includes(r.status_code) ? 'success' : r.status_code === 100 ? 'pending' : 'fail',
+        msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),   // ★ C107 결과 코드까지
+        // ★ C107 — 성공 · 대기 판정 = 결과 CT 한 곳(옛 인라인 [6, 1000, 1800] 은 대체 성공 7830 · 7831 · 대기 104 를 실패로 셌다)
+        status: isSuccess(Number(r.status_code)) ? 'success' : isPending(Number(r.status_code)) ? 'pending' : 'fail',
         sentAt: r.sent_at,
         testType: 'manager',
       }));

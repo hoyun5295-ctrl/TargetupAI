@@ -78,6 +78,17 @@ const LEGACY_VARIABLE_MAP: Record<string, (c: any) => string> = (() => {
   return map;
 })();
 
+/**
+ * ★ 2026-11-05 인앱 포스터 재구성 §3-3 — 「바꿔 넣기 글」(고객마다 다른 값)이 든 글인가. 치환(renderTextForCustomer)과 같은 근거 한 곳:
+ *   Liquid 문법 또는 옛 %변수% 표의 키. 「30%할인」처럼 % 뒤에 글이 붙은 혜택 글은 변수가 아니다(아래 공백 정리 정규식은 판정에 쓰지 않는다).
+ */
+export function textHasPersonalizationVar(t: any): boolean {
+  const s = String(t ?? '');
+  if (!s) return false;
+  if (detectLiquidSyntax(s)) return true;
+  return Object.keys(LEGACY_VARIABLE_MAP).some((k) => s.includes(k));
+}
+
 function replaceLegacyVariables(text: string, customer: Record<string, any>): string {
   let out = text;
   for (const [pattern, getter] of Object.entries(LEGACY_VARIABLE_MAP)) {

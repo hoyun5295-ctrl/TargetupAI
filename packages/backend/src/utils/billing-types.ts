@@ -26,6 +26,8 @@
  * 리터럴로 흩어져 있던 탓에 전용 발송(`kakao_brand`)이 집계 두 곳 모두에서 빠져 0건이 됐고,
  * 일자축만 유형을 바꾸고 상세축을 안 바꿔 축 불일치로 발행이 422로 막혔다(2026-07-29 적대검증).
  */
+import { resolveBrandAudience } from './unit-price';
+
 export const BRAND_CAMPAIGN_CHANNELS = ['kakao', 'kakao_brand', 'both'] as const;
 
 /** 위 목록의 SQL IN 절. 집계 두 축이 **같은 문자열**을 써야 수량이 갈라지지 않는다. */
@@ -45,6 +47,21 @@ export const KAKAO_RESULT_CHANNEL_SQL_IN = KAKAO_RESULT_CHANNELS.map((c) => `'${
 export function isBrandOnlyChannel(sendChannel: any): boolean {
   const v = String(sendChannel || '').trim();
   return v === 'kakao' || v === 'kakao_brand';
+}
+
+/**
+ * ★ 2026-11-05 C107 — 「카카오 시도 · 문자 대체」를 나눠 보여 줄 캠페인 채널(알림톡 + 브랜드 전용).
+ * `both` 는 빠진다 — 문자가 섞여 있어 부모(K · F) 행 판정만으로 나눌 수 없고, 그 캠페인은 브랜드 대체를 늘 끈다(campaigns.ts).
+ * 목록 · 관리자 목록 · 슈퍼 통계 엑셀 · 목록 CSV 가 분리 대상을 이 판정 하나로 고른다(뿌리 R1).
+ */
+export function isKakaoSplitChannel(sendChannel: any): boolean {
+  const v = String(sendChannel || '').trim();
+  return v === 'alimtalk' || isBrandOnlyChannel(v);
+}
+
+/** ★ 2026-11-05 C107 — 브랜드 대상값 → 청구 유형키. 청구 식(BILLING_MSG_TYPE_SQL) · 통계 집계 키 · 화면 이름이 같은 판정을 쓴다(D-11). */
+export function brandBillingKey(targeting: string | null | undefined): 'BRAND' | 'BRAND_NF' {
+  return resolveBrandAudience(targeting) === 'friend' ? 'BRAND' : 'BRAND_NF';
 }
 
 /**
@@ -299,7 +316,8 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   // ★ 2026-07-29 브랜드메시지(구 친구톡).
   //   ★ 2026-07-30 재구축: 웹도 SMSQ 큐에 `msg_type='F'`로 적재된다 — smsqCode 'F' 등재로
   //   일자·상세 정산 두 축의 유형키 맵(MSG_TYPE_TO_USAGE_KEY)이 자동 확장된다(전용 IMC arm 폐기).
-  { key: 'BRAND',    label: '브랜드메시지',    companyPriceColumn: 'cost_per_brand',    agentPriceColumn: 'cost_per_brand', smsqCode: 'F',  agentCode: 'G' },
+  // ★ 2026-11-05 C107 D-11 이름 「브랜드메시지」 → 「브랜드메시지(친구)」 — 비친구 줄과 짝 · 정산서 · 통계 · 발송결과가 이 이름 하나를 쓴다
+  { key: 'BRAND',    label: '브랜드메시지(친구)', companyPriceColumn: 'cost_per_brand',    agentPriceColumn: 'cost_per_brand', smsqCode: 'F',  agentCode: 'G' },
   // ★ 2026-09-13 브랜드메시지 비친구(M·N·미지정). 매입이 친구·비친구로 갈려 단가가 다르다.
   //   비친구 칸이 비면 친구 단가로 청구된다(resolveBillingUnitPricesDetailed). 발송ID(에이전트) 축은 두지 않는다 —
   //   에이전트로는 브랜드를 보낼 수 없고 게이트웨이 통계에 대상 구분이 없어 읽을 곳이 없다.
@@ -317,6 +335,11 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   { key: 'SPAM_SMS', label: '스팸테스트 SMS', shortLabel: '스팸SMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'SPAM_LMS', label: '스팸테스트 LMS', shortLabel: '스팸LMS', companyPriceColumn: null,                agentPriceColumn: null,             smsqCode: null, agentCode: null },
 ];
+
+/** ★ 2026-11-05 C107 — 발송 유형키 → 이름(이 표 그대로 · DB 없는 순수 조회). 정산서 이름표(billing-invoice-lines TYPE_LABEL)도 이 표에서 펼친다. */
+export function billingTypeLabelOf(key: string): string {
+  return BILLING_TYPES.find((t) => t.key === key)?.label || String(key || '');
+}
 
 const INHERIT_FROM: Record<string, string> = Object.fromEntries(
   BILLING_TYPES.flatMap((t) => (t.inheritFrom ? [[t.key, t.inheritFrom] as const] : [])),

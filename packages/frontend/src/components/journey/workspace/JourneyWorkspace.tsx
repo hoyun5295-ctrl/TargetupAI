@@ -221,7 +221,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   const [pauseLogsOpen, setPauseLogsOpen] = useState(false);
   const [actionMode, setActionMode] = useState<JourneyActionMode | null>(null);
   // ★ 2026-11-05 C103 F1 — 「지금 스팸 검사」 = 저장된 칸 하나(검사 글은 서버가 켜기 검사와 같은 함수로 만든다)
-  const [spamFor, setSpamFor] = useState<{ stepId: string; channel: string } | null>(null);
+  const [spamFor, setSpamFor] = useState<{ stepId: string; channel: string; variantId: string | null } | null>(null);   // ★ C105 H5 판 id
   const [alimtalkCatalog, setAlimtalkCatalog] = useState<AlimtalkCatalog | null>(null);   // ★ C103 F10 알림톡 칸 재료
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   // ★ 2026-11-01 배포 2 C5 · C6 — 서버 점검 응답(오른쪽 점검 판 · 레일 점 · 켜기 칩이 같은 값을 쓴다)
@@ -715,8 +715,8 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
       if (r.data?.callbackConfirmRequired) {
         setConfirm({
           mode: 'warning',
-          title: '매장번호가 등록되지 않은 고객이 있어요',
-          description: `${Number(r.data.callbackUnregisteredCount || 0).toLocaleString('ko-KR')}명은 매장번호가 발신번호로 등록되지 않아 발송이 실패해요. 그대로 바꿀까요?`,
+          title: '개별회신번호가 등록되지 않은 고객이 있어요',
+          description: `${Number(r.data.callbackUnregisteredCount || 0).toLocaleString('ko-KR')}명은 개별회신번호가 발신번호로 등록되지 않아 발송이 실패해요. 그대로 바꿀까요?`,
           confirmLabel: '그대로 바꾸기',
           onConfirm: () => runReshape(change, true),
         });
@@ -856,6 +856,10 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   }, [selKakaoEditable]);   // eslint-disable-line react-hooks/exhaustive-deps
   // ★ 2026-11-02 설계서 3-16 — 켜진 여정 A/B 칸 = 본문 잠금(서버도 409 · 같은 판정)
   const selAbLocked = !!selRaw && abCopyLocked(selRaw.ab_variants);
+  // ★ 2026-11-05 C105 H5 — A/B 칸 = 판마다 검사 단추(서버 journeyStepSpamParams 판 id 와 같은 id) · 아니면 하나
+  const selSpamTargets = selRaw && String(selRaw.channel || '').toLowerCase() !== 'kakao' && (selRaw.ab_variants || []).some((v) => v.id)
+    ? (selRaw.ab_variants || []).filter((v) => v.id).map((v) => ({ variantId: v.id as string, label: `${v.variant_id}안 검사` }))
+    : undefined;
   const canShapeSteps = !locked && (edit.structure || reshapeAllowed);
   const statusMeta = STATUS_META[status] || STATUS_META.draft;
 
@@ -1250,7 +1254,18 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     stepId={selRaw ? selRaw.id : null}
                     stepLabel={(id) => { const r = rawById.get(id); return r ? `${r.step_order}번째 칸 · ${stepTitle(r)}` : '칸'; }}
                     onPickStep={(id) => pickStep(id)}
-                    onSpamTest={selEditable && !selDeleting ? () => { if (!selRaw) { toast.warning('새 칸은 저장한 뒤 검사해요.'); return; } if (dirtyIds.includes(selRaw.id)) { toast.warning('고친 곳을 저장한 뒤 검사해요.'); return; } if (!selStudio.messageTemplate.trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; } if (!journey?.callback_number) { toast.warning('보내는 번호를 먼저 정해 주세요.'); return; } setSpamFor({ stepId: selRaw.id, channel: String(selRaw.channel || 'lms') }); } : undefined}
+                    spamTargets={selSpamTargets}
+                    onSpamTest={selEditable && !selDeleting ? (variantId: string | null) => {
+                      if (!selRaw) { toast.warning('새 칸은 저장한 뒤 검사해요.'); return; }
+                      if (dirtyIds.includes(selRaw.id)) { toast.warning('고친 곳을 저장한 뒤 검사해요.'); return; }
+                      // ★ C105 H5 — 검사할 글 = 그 판이 나갈 글(abSendCopies · 판 글이 비면 칸 글)
+                      const vs = String(selRaw.channel || '').toLowerCase() === 'kakao' ? [] : (selRaw.ab_variants || []);
+                      const copies = abSendCopies(vs, selStudio?.messageTemplate ?? '', selStudio?.subject ?? '');
+                      const idx = variantId ? vs.findIndex((v) => v.id === variantId) : 0;
+                      if (!(copies[idx < 0 ? 0 : idx]?.body || '').trim()) { toast.warning('검사할 문안을 먼저 써 주세요.'); return; }
+                      if (!journey?.callback_number) { toast.warning('보내는 번호를 먼저 정해 주세요.'); return; }
+                      setSpamFor({ stepId: selRaw.id, channel: String(selRaw.channel || 'lms'), variantId });
+                    } : undefined}
                     unsaved={dirtyCount > 0}
                     dropNote={selEditable && !selDeleting && selRaw && diagById.get(selRaw.id) && diagById.get(selRaw.id).severity !== 'good' ? `이 칸에서 ${Math.round(Number(diagById.get(selRaw.id).dropoutRate || 0) * 100)}%가 빠져요. ${diagById.get(selRaw.id).recommendation || ''}` : null}
                     onRetry={() => { if (journeyId) void loadCheck(journeyId); }}
@@ -1374,7 +1389,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
           onClose={() => { setSpamFor(null); void loadCheck(journeyId); }}
           callbackNumber={String(journey.callback_number)}
           messageType={spamFor.channel.toUpperCase() as 'SMS' | 'LMS' | 'MMS'}
-          journeyStep={{ journeyId, stepId: spamFor.stepId }}
+          journeyStep={{ journeyId, stepId: spamFor.stepId, variantId: spamFor.variantId }}
         />
       )}
       {actions.node}

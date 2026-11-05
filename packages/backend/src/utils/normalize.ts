@@ -9,6 +9,7 @@
 
 import { getFieldByKey } from './standard-field-map';
 import { KNOWN_TLDS } from './tld-list';
+import { UserFacingError } from './http-error';   // ★ C105 H4 숫자 입력 거절 = 사용자 조건 오류(400)
 
 // ============================================================
 // 성별 정규화
@@ -971,13 +972,66 @@ export function parseWonAmount(value: unknown, opts: { min: number; max: number;
  * offset = (page − 1) × limit.
  */
 export function parsePageParams(
-  pageRaw: unknown, limitRaw: unknown, opts: { defaultLimit: number; maxLimit: number },
+  pageRaw: unknown, limitRaw: unknown, opts: { defaultLimit: number; maxLimit: number; pageBase?: 0 | 1 },
 ): { page: number; limit: number; offset: number } {
   const lim = Math.floor(Number(limitRaw));
   const limit = Number.isFinite(lim) && lim >= 1 ? Math.min(lim, opts.maxLimit) : opts.defaultLimit;
+  // ★ 2026-11-05 C105 H4(R59) — 시작 기준(0 기반 주소 = page ≥ 0 · offset = page × limit · Codex 설계 1R) · page 상한(offset 이 PG bigint 를 넘지 않게)
+  const base = opts.pageBase ?? 1;
   const pg = Math.floor(Number(pageRaw));
-  const page = Number.isFinite(pg) && pg >= 1 ? pg : 1;
-  return { page, limit, offset: (page - 1) * limit };
+  const page = Number.isFinite(pg) && pg >= base ? Math.min(pg, QUERY_PAGE_MAX) : base;
+  return { page, limit, offset: (page - base) * limit };
+}
+
+/** ★ 2026-11-05 C105 H4(R59) — page 상한(정상 화면은 닿지 않는다 · 터무니없는 값의 OFFSET bigint 초과만 막는다) */
+export const QUERY_PAGE_MAX = 1_000_000;
+/** ★ 2026-11-05 C105 H4(R59) — 옛 상한이 없던 목록 주소의 limit 자리(옛 동작 그대로 · 화면이 보내는 가장 큰 값 2000 보다 크게 · 터무니없는 값만 막는다) */
+export const QUERY_LIMIT_NO_CAP = 100_000;
+
+/**
+ * ★ 2026-11-05 C105 H4(R59) — 주소(쿼리) 숫자 값 하나(일수 · 개월 · 연도 · 나이 · 개수 등 · 설계서 docs/2026-11-05-c105-out-of-scope-five-design.md §4 H4).
+ *   숫자 아님 · 0 · 빈 값 = fallback(옛 「parseInt(x) || 기본」 과 같은 뜻) · 범위 밖 = clamp 면 경계로(옛 Math.min/max) 아니면 fallback · 소수 = 내림 · fallback 에 null = 「없으면 안 넘김」 자리.
+ */
+export function parseQueryInt<F extends number | null>(v: unknown, opts: { fallback: F; min: number; max: number; clamp?: boolean }): number | F {
+  if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) return opts.fallback;
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n === 0) return opts.fallback;   // 옛 「parseInt(x) || 기본」 과 같은 뜻(숫자 아님 · 0 = 기본)
+  if (n < opts.min || n > opts.max) return opts.clamp ? Math.min(Math.max(n, opts.min), opts.max) : opts.fallback;
+  return n;
+}
+
+/**
+ * ★ 2026-11-05 C105 H4(R59) — SQL 매개변수 숫자(옛 `Number(v)` 자리) · 원칙 = 넘기는 값은 옛 값 그대로 · 거절만 더한다(설계서 §4 H4 (B)).
+ *   옛 `Number(v)` 가 유한수가 아니면(NaN · Infinity) = 정수 칸은 PG 오류 · numeric 칸은 대상이 넓어졌다 → 400 으로 멈춘다(조건을 빼지 않는다).
+ *   넘기는 값 = `Number(v)`(옛 값 · '' = 0 · null = 0 · '30.0' = 30 그대로).
+ */
+export function sqlNumberParam(v: unknown, label = '숫자 값'): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new UserFacingError(400, 'INVALID_NUMBER_INPUT', `숫자로 넣어야 하는 값이 숫자가 아니에요(${label}).`);
+  return n;
+}
+
+/**
+ * ★ 2026-11-05 C105 H4(R59) — SQL 숫자(옛 `parseInt(v)` 자리) · 넘기는 값 = 옛 `parseInt(v)` 그대로(진수 인자 없음 = 옛과 같다) · 거절만 더한다(NaN = 400).
+ */
+export function sqlParseIntParam(v: unknown, label = '숫자 값'): number {
+  const n = parseInt(v as any);
+  if (!Number.isFinite(n)) throw new UserFacingError(400, 'INVALID_NUMBER_INPUT', `숫자로 넣어야 하는 값이 숫자가 아니에요(${label}).`);
+  return n;
+}
+
+/** PG numeric 이 유한수가 아닌 값으로 읽는 글자(NaN · Infinity · inf · 부호 · 앞뒤 공백 · 대소문자 무관) */
+const PG_NON_FINITE_NUMERIC = /^\s*[+-]?(nan|inf|infinity)\s*$/i;
+
+/**
+ * ★ 2026-11-05 C105 H4(R59) — SQL 매개변수 숫자(옛 원값 자리 = customer-filter mixed 사용자 칸 numeric 비교).
+ *   넘기는 값 = v 그대로(PG 가 읽던 그대로 · 정밀도 · 지수 표기 · '1e 3' 옛 결과 보존) · 거절 = PG 가 비유한으로 읽어 대상을 넓히는 특수 글자만(Codex 설계 8R · 9R approve).
+ */
+export function sqlNumericRawParam<T>(v: T, label = '숫자 값'): T {
+  if (typeof v === 'string' && PG_NON_FINITE_NUMERIC.test(v)) {
+    throw new UserFacingError(400, 'INVALID_NUMBER_INPUT', `숫자로 넣어야 하는 값이 숫자가 아니에요(${label}).`);
+  }
+  return v;
 }
 
 /** offset을 직접 받는 목록용 — 숫자 아님·음수 = 0(음수 OFFSET은 SQL 오류다). */

@@ -31,6 +31,7 @@ import {
 import { createCompanyCore, createCompanyAdminUser } from '../utils/company-create';
 import * as imc from '../utils/alimtalk-api';
 import { normalizeImcTemplateStatus } from '../utils/alimtalk-jobs';
+import { parsePageParams, parseOffsetParam } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import {
   buildCompanyTargets,
   indexImcTemplates,
@@ -901,8 +902,8 @@ router.get('/mappings', async (req: Request, res: Response) => {
   try {
     const billId = String(req.query.billId || '').trim();
     const status = String(req.query.status || '').trim();
-    const limit = Math.min(500, Math.max(1, parseInt(String(req.query.limit ?? '100'), 10) || 100));
-    const offset = Math.max(0, parseInt(String(req.query.offset ?? '0'), 10) || 0);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 100, maxLimit: 500 }).limit;
+    const offset = parseOffsetParam(req.query.offset);
 
     const conds: string[] = [];
     const params: any[] = [];

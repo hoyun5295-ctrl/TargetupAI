@@ -79,7 +79,7 @@ export function previewMaterialsOf(input: CompositionPreviewInput): { comp: Line
     cards: input.channel === 'inapp' ? cards.slice(0, 1) : cards, cardCategories: input.channel === 'inapp' ? [] : categories,
     heroUpload: previewUrl(b.heroImage), heroAsIs: b.heroPoster, proof: b.proof,
     page: banner ? ({ url: '', banner, licensedText: null } satisfies LinePageMaterial) : null,
-    benefitAnswer: b.facts.benefit, periodEnd: b.facts.periodEnd ?? null, link: b.facts.link ?? 'https://example.com',
+    benefitAnswer: b.facts.benefit, periodEnd: b.facts.periodEnd ?? null, periodStart: b.facts.periodStart ?? null, link: b.facts.link ?? 'https://example.com',
     rich: { ...b.rich, points: b.rich.points.map(pt), usage: b.rich.usage.map(pt), mood: b.rich.mood.map((u) => previewUrl(u)).filter((u): u is string => !!u) },
   });
 }

@@ -19,17 +19,17 @@ vi.mock('../../config/database', () => ({
   mysqlQuery: (...a: any[]) => (mysqlQuery as any)(...a),
 }));
 
-import { smsAlimtalkResultAgg, smsCampaignSubRowCounts } from '../sms-queue';
+import { smsKakaoResultAgg, smsCampaignSubRowCounts } from '../sms-queue';
 
 beforeEach(() => mysqlQuery.mockReset());
 
-describe('smsAlimtalkResultAgg', () => {
+describe('smsKakaoResultAgg', () => {
   it('이력 테이블과 이력 짝 없는 라이브만 읽고, 캠페인별로 합산한다', async () => {
     mysqlQuery.mockResolvedValue([
       { _grp: 'camp-1', kakao: 3, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 1, sub: 1 },
       { _grp: 'camp-1', kakao: 1, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 1, sub: 1 },
     ]);
-    const out = await smsAlimtalkResultAgg(['SMSQ_SEND_1', 'SMSQ_SEND_1_202609', 'SMSQ_SEND_13'], ['camp-1']);
+    const out = await smsKakaoResultAgg(['SMSQ_SEND_1', 'SMSQ_SEND_1_202609', 'SMSQ_SEND_13'], ['camp-1']);
     const sql = String(mysqlQuery.mock.calls[0][0]);
     expect(sql).toContain('FROM SMSQ_SEND_1_202609 WHERE');
     expect(sql).toContain('FROM SMSQ_SEND_13 WHERE');
@@ -37,21 +37,21 @@ describe('smsAlimtalkResultAgg', () => {
     expect(out.get('camp-1')).toEqual({ kakao: 4, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 2, sub: 2 });
   });
 
-  it('결과별 식 — 알림톡 1800 · K행 7830/7831 · 대체 행(통계와 같은 판정식) 성공', async () => {
+  it('결과별 식 — 카카오(알림톡 K · ★1105 C107 브랜드 F) 1800 · 7830/7831 · 대체 행(통계와 같은 판정식) 성공', async () => {
     mysqlQuery.mockResolvedValue([]);
-    await smsAlimtalkResultAgg(['SMSQ_SEND_1_202609'], ['camp-1']);
+    await smsKakaoResultAgg(['SMSQ_SEND_1_202609'], ['camp-1']);
     const sql = String(mysqlQuery.mock.calls[0][0]).replace(/\s+/g, ' ');
-    expect(sql).toContain("msg_type = 'K' AND status_code = 1800");
-    expect(sql).toContain("msg_type = 'K' AND status_code = 7830");
-    expect(sql).toContain("msg_type = 'K' AND status_code = 7831");
+    expect(sql).toContain("msg_type IN ('K', 'F') AND status_code = 1800");
+    expect(sql).toContain("msg_type IN ('K', 'F') AND status_code = 7830");
+    expect(sql).toContain("msg_type IN ('K', 'F') AND status_code = 7831");
     expect(sql).toContain("msg_type = 'S' AND k_oriseq IS NOT NULL AND k_oriseq > 0 AND status_code IN (6,1000,1800,7830,7831)");
     expect(sql).toContain("msg_type = 'L' AND k_oriseq IS NOT NULL AND k_oriseq > 0 AND status_code IN (6,1000,1800,7830,7831)");
     expect(sql).toContain('WHEN k_oriseq IS NOT NULL AND k_oriseq > 0 THEN 1 ELSE 0 END) AS sub');
   });
 
   it('테이블이나 캠페인이 없으면 조회하지 않는다', async () => {
-    expect((await smsAlimtalkResultAgg([], ['camp-1'])).size).toBe(0);
-    expect((await smsAlimtalkResultAgg(['SMSQ_SEND_1_202609'], [])).size).toBe(0);
+    expect((await smsKakaoResultAgg([], ['camp-1'])).size).toBe(0);
+    expect((await smsKakaoResultAgg(['SMSQ_SEND_1_202609'], [])).size).toBe(0);
     expect(mysqlQuery).not.toHaveBeenCalled();
   });
 });

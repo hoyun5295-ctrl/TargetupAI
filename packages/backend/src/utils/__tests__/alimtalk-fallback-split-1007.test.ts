@@ -3,11 +3,11 @@
  *   접수 실례 = 3건 「알림톡 3 성공」 → 실제 알림톡 2 성공 + 1 실패 → LMS 대체 1 성공(거래내역서 = 알림톡 41 + LMS 4 와 같은 기준).
  */
 import { describe, it, expect } from 'vitest';
-import { tallyAlimtalkFallback, getSendTypeLabel, getStatusLabel } from '../sms-result-map';
+import { tallyKakaoFallback, getSendTypeLabel, getStatusLabel } from '../sms-result-map';
 
-describe('tallyAlimtalkFallback', () => {
+describe('tallyKakaoFallback', () => {
   it('비토 라인(K행 결과 7831) — 알림톡 3 = 성공 2 · 실패 1 / 대체 LMS 1 성공', () => {
-    const r = tallyAlimtalkFallback([
+    const r = tallyKakaoFallback([
       { msg_type: 'K', k_oriseq: null, status_code: 1000, cnt: 2 },
       { msg_type: 'K', k_oriseq: null, status_code: 7831, cnt: 1 },
     ]);
@@ -17,7 +17,7 @@ describe('tallyAlimtalkFallback', () => {
   });
 
   it('옛 라인(실패 K행 + k_oriseq 있는 L행) — 같은 결과', () => {
-    const r = tallyAlimtalkFallback([
+    const r = tallyKakaoFallback([
       { msg_type: 'K', k_oriseq: null, status_code: 1000, cnt: 2 },
       { msg_type: 'K', k_oriseq: null, status_code: 7300, cnt: 1 },
       { msg_type: 'L', k_oriseq: 1, status_code: 6, cnt: 1 },
@@ -27,7 +27,7 @@ describe('tallyAlimtalkFallback', () => {
   });
 
   it('대체 문자도 실패 · 대기는 그대로 센다 · 대체 아닌 일반 문자는 세지 않는다', () => {
-    const r = tallyAlimtalkFallback([
+    const r = tallyKakaoFallback([
       { msg_type: 'K', k_oriseq: null, status_code: 7300, cnt: 2 },
       { msg_type: 'S', k_oriseq: 9, status_code: 2000, cnt: 1 },
       { msg_type: 'S', k_oriseq: 9, status_code: 100, cnt: 1 },

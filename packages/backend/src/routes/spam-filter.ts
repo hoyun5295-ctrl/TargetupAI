@@ -25,6 +25,7 @@ import { spamAppTokenVerdict } from '../utils/spam-app-auth';
 import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 // ★ 2026-09-28 검사 입구 글자 검사 — 발송 버튼과 같은 판정(게이트웨이 CP949 표)
 import { unsupportedSmsCharCodes } from '../utils/sms-charset';
+import { parseQueryInt, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -755,7 +756,7 @@ router.post('/recent-check', authenticate, async (req: Request, res: Response) =
 router.get('/tests', authenticate, async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user.companyId;
-    const page = parseInt(req.query.page as string) || 1;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const limit = 10;
     const offset = (page - 1) * limit;
 

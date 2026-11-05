@@ -22,7 +22,8 @@ import type { StudioTemplatePublic } from './TemplatePicker';
 const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 const isEvent = (t: StudioTemplatePublic | null) => (t?.kind || 'product') === 'event';
 
-export interface StudioMade { tempId: string; url: string; preview: string | null; title: string }
+/** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — texts = 생성에 쓴 글 전체(인앱 통짜 장 글 · 글 없는 판이면 빈 글) */
+export interface StudioMade { tempId: string; url: string; preview: string | null; title: string; texts: StudioTexts; textless: boolean }
 
 /** ★ 2026-11-02 제품 사진 상한 — 서버 STUDIO_MAX_PRODUCTS(utils/image-studio.ts)와 같은 값(계약 시험 S5) · 넘침 판정 권한은 서버 */
 export const STUDIO_MAX_PRODUCTS = 3;
@@ -167,17 +168,20 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장 · 차감은 서버가 성공 뒤) ──
   // ★ 2026-10-19 B-1016-3② 결과를 못 받은 시도는 같은 표로 다시(서버가 이미 만든 결과를 주고 다시 걷지 않는다)
   const attemptRef = useRef<string | null>(null);
-  const generate = async (): Promise<StudioMade | null> => {
+  // ★ 2026-11-05 §3-8 textless = 글 없는 판(인앱 글 얹기 장 · 렌더러가 글을 얹을 아래 자리를 비운다)
+  const generate = async (opts?: { textless?: boolean }): Promise<StudioMade | null> => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return null; }
+    const textless = !!opts?.textless;
+    const sendTexts = textless ? EMPTY_STUDIO_TEXTS : texts;
     setBusyMsg('완성 포스터를 만드는 중... (약 20~30초)');
     try {
       if (!attemptRef.current) attemptRef.current = newStudioAttempt();
       const { status, ok, data } = await studioPost('/api/image-studio/generate', {
         templateId: template.id, presetKey: 'poster',
-        texts, userHint: hint || null,
+        texts: sendTexts, userHint: hint || null,
         // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
         cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
-        textPosition: isEvent(template) ? textPosition : null,
+        textPosition: textless ? 'bottom' : (isEvent(template) ? textPosition : null),
         attemptToken: attemptRef.current,
       });
       if (status === 402) { toast.error('크레딧이 부족합니다. 충전 후 다시 시도해주세요'); return null; }
@@ -188,7 +192,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       let preview: string | null = null;
       try { preview = await fetchAuthObjectUrl(im.url); } catch { /* 미리보기만 못 띄운다 · 저장·넣기는 tempId 로 된다 */ }
       // 헤드라인 = 저장 파일명(헤드라인_채널) 스냅샷(생성 시점 문구 고정)
-      return { tempId: im.tempId, url: im.url, preview, title: texts.title };
+      return { tempId: im.tempId, url: im.url, preview, title: texts.title, texts: { ...sendTexts }, textless };
     } finally {
       setBusyMsg('');
     }
@@ -238,9 +242,18 @@ export function TemplateExampleCard({ template }: { template: StudioTemplatePubl
 }
 
 /** 만들기 입력 칸 — 문구 · 문구 위치(행사) · 상품(선택) · 장면 힌트(선택). 만들기 버튼은 부르는 쪽(스튜디오 = 페이지 버튼 · 창 = ModalButton). */
-export function StudioMakeFields({ make, disabled = false }: { make: StudioMakeState; disabled?: boolean }) {
+export function StudioMakeFields({ make, disabled = false, textless = false }: { make: StudioMakeState; disabled?: boolean; textless?: boolean }) {
   const { template, texts, setTexts } = make;
   if (!template) return null;
+  // ★ 2026-11-05 인앱 글 얹기 장 = 글 없는 판(글은 메시지 위에 얹는다 · 문구 칸 대신 한 줄 안내)
+  if (textless) {
+    return (
+      <div className="rounded-2xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 to-indigo-50 p-4">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-700" /> 글 없는 그림으로 만들어요</h3>
+        <p className="text-[12px] leading-relaxed text-slate-600 mt-2 break-keep">이 장의 글은 그림 위에 따로 얹어요. 그림 아래쪽은 글이 잘 보이게 비워 둡니다.</p>
+      </div>
+    );
+  }
   const event = isEvent(template);
   const busy = disabled || !!make.busyMsg;
   return (

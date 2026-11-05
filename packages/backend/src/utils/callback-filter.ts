@@ -53,6 +53,26 @@ export interface CallbackFilterResult {
  * @param callbackColumn - 회신번호로 사용할 컬럼명 (선택, 미지정 시 callback→store_phone 폴백)
  * @returns CallbackFilterResult
  */
+/**
+ * ★ 2026-11-05 C105 H2 — 고객 한 명의 개별회신번호(1단계 · 순수 · 옛 filterByIndividualCallback 1단계를 글자 그대로 옮김).
+ *   고른 칸(custom_ 칸 = custom_fields 안) → 비면 매장 전화번호 · 고른 칸 없음 → 고객 회신번호 → 비면(공백뿐 포함) 매장 전화번호.
+ *   숫자 없는 값 판정은 부르는 쪽(직접발송 = 2단계 제외 · 여정 = 여정 번호로)이 normalizePhone 으로 한다(옛 순서 그대로).
+ *   부르는 곳 = filterByIndividualCallback(직접발송 · 자동발송) · journey-executor(여정 store 모드) · storeCallbackExposure(여정 켜기 확인).
+ */
+export function individualCallbackOf(c: Record<string, any>, callbackColumn?: string): string {
+  if (callbackColumn) {
+    // ★ D99: 지정된 컬럼의 값을 callback으로 · custom_fields JSONB 내부 키(custom_1~15)도 지원 · ★ D100: 비면 store_phone 폴백
+    let val = c[callbackColumn];
+    if (!val && c.custom_fields && callbackColumn.startsWith('custom_')) val = c.custom_fields[callbackColumn];
+    const v = val ? String(val).trim() : '';
+    if (!v && c.store_phone && String(c.store_phone).trim()) return c.store_phone;
+    return v;
+  }
+  // 기존 동작: callback → 비면 store_phone 폴백
+  if ((!c.callback || !String(c.callback).trim()) && c.store_phone && String(c.store_phone).trim()) return c.store_phone;
+  return c.callback ?? '';
+}
+
 export async function filterByIndividualCallback(
   customers: any[],
   companyId: string,
@@ -63,31 +83,8 @@ export async function filterByIndividualCallback(
   let callbackMissingCount = 0;
   let callbackUnregisteredCount = 0;
 
-  // 1단계: 회신번호 컬럼 결정
-  if (callbackColumn) {
-    // ★ D99: 지정된 컬럼의 값을 callback으로 복사
-    // custom_fields JSONB 내부 키(custom_1~15)도 지원
-    // ★ D100: 지정 컬럼 값이 비어있으면 store_phone → callback 폴백 추가
-    for (const c of filtered) {
-      let val = c[callbackColumn];
-      // custom_fields JSONB 내부 키 처리
-      if (!val && c.custom_fields && callbackColumn.startsWith('custom_')) {
-        val = c.custom_fields[callbackColumn];
-      }
-      c.callback = val ? String(val).trim() : '';
-      // 지정 컬럼 비어있으면 store_phone 폴백
-      if (!c.callback && c.store_phone && c.store_phone.trim()) {
-        c.callback = c.store_phone;
-      }
-    }
-  } else {
-    // 기존 동작: store_phone → callback 폴백
-    for (const c of filtered) {
-      if ((!c.callback || !c.callback.trim()) && c.store_phone && c.store_phone.trim()) {
-        c.callback = c.store_phone;
-      }
-    }
-  }
+  // 1단계: 회신번호 컬럼 결정 = individualCallbackOf(직접발송 · 자동발송 · 여정이 같은 함수 · ★ 2026-11-05 C105 H2)
+  for (const c of filtered) c.callback = individualCallbackOf(c, callbackColumn);
 
   // 2단계: callback 미보유 고객 제외
   // ★ 2026-10-19 B-1005-5⑤ — 숫자가 하나도 없는 값(예: '없음')도 미보유다. 옛: 남은 값이 전부 그런 값이면 3단계(등록 검사)를 통째로 건너뛰어 그대로 적재됐다.

@@ -287,10 +287,36 @@
 
 ---
 
-## 디자인 최소 기준 — 신규 화면 착수 직전 정독 (CLAUDE.md `design_quality_minimum_ceiling_free` 상세)
+## 디자인 최소 기준 — 신규 화면 착수 직전 정독 (CLAUDE.md `design_quality_minimum_ceiling_free` · `marketing_user_ux_priority` 전문 + 체크리스트)
 
-> 룰(의무·절대금지·라벨 정책)의 원천은 CLAUDE.md다. 여기는 **그 화면을 만들 때 펼쳐 보는 체크리스트**만 담는다.
+> 룰 전문(의무 · 절대 금지 · 라벨 정책 · 마케팅 사용자 UX) = 바로 아래 「룰 전문」(★2026-11-05 CLAUDE.md 에서 글자 그대로 옮김 · CLAUDE.md 에는 핵심 줄과 여는 시점만). 그 아래 표는 **그 화면을 만들 때 펼쳐 보는 체크리스트**다.
 > **이 목록은 하한(통과 기준)이지 상한이 아니다** — Journey Builder(`/ai-journeys`)는 참고 구현일 뿐 베낄 대상이 아니다. 더 나은 형태가 보이면 그것을 만들고, 그때부터 그것이 새 하한이다(CLAUDE.md `design_quality_minimum_ceiling_free`).
+
+### 룰 전문 — CLAUDE.md `design_quality_minimum_ceiling_free` · `marketing_user_ux_priority`
+
+```text
+    <RULE id="design_quality_minimum_ceiling_free" priority="HIGH">
+      신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성 = **그 시점에 낼 수 있는 최선**. 기존 화면은 **하한이지 상한이 아니다** —
+      "Journey Builder 동급"에서 멈추지 않는다. 더 나은 형태가 보이면 그것을 만들고, 그때부터 그것이 새 하한이다.
+      [하한 요건 — 이건 못 내려간다] AI 존 틀(`components/zone/` · 남색 머리 띠 + 명령 카드 + 밝은 작업대) 정합 / 모바일 반응형 / 커스텀 모달(native dialog 0) /
+      출처(Data source) 줄 0(★1020 Harold 「한줄로 DB 안에서 뽑은 것 · 출처 전부 없애」) / 1클릭 UX / 모델명 0 / 5초+ 작업 로딩 차단.
+      [절대 금지] 옛 단순 form(input+select+button) / 날것 표(정렬·빈 상태 없음) / native dialog(alert·confirm·prompt). 목록·대장·정산처럼 표가 맞는 화면은 표로 만든다.
+      [라벨 3단] 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 뒤 제거) / 품질 미보증만 "실험실".
+      [착수 직전 정독] `status/lessons/LESSONS_FRONTEND.md` "디자인 최소 기준" 절 = 하한 체크리스트(모방 대상이 아니라 통과 기준).
+    </RULE>
+```
+
+```text
+    <RULE id="marketing_user_ux_priority" priority="HIGH">
+      사용자 = 마케팅 담당자. 직관 + 압도적 쉬움 + 퀄리티를 동시에 만족해야 한다.
+      [절대 금지] "다시 입력" 요구 / 이유 없는 중간 단계 / 옛 단순 form·native dialog.
+      [허용] 돈이 나가는 일·되돌릴 수 없는 일·결과가 크게 갈리는 갈림길에서만 한 단계. 이유를 화면에 한 줄로 적는다.
+      [기준] 자동 생성 버튼·빠른 시작 카드 = **1 단계** — 클릭 즉시 AI 호출 → 완성된 결과 + 편집 모드 진입. 자유 입력은 별도 버튼으로 분리.
+      [자가 검증] 신규 frontend 흐름 작성 직전 — "클릭 1회인가? 추가 입력이 없는가? AI 자동 흐름인가?" (상세 = memory `feedback_marketing_user_ux_priority`)
+    </RULE>
+```
+
+### 체크리스트
 
 | 요소 | 적용 범위 |
 |------|-----------|

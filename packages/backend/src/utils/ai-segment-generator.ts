@@ -308,12 +308,19 @@ async function convertNaturalLanguageToFilterWithAi(
   const unapplied: string[] = [];
   try {
     for (const [key, condition] of Object.entries(filter)) {
-      const one = buildCustomerFilter({ [key]: condition }, {
-        tableAlias: 'c',
-        startParamIndex: 2,
-        storeCodeMode: 'skip',
-        inputFormat: 'structured',
-      });
+      let one: ReturnType<typeof buildCustomerFilter>;
+      try {
+        one = buildCustomerFilter({ [key]: condition }, {
+          tableAlias: 'c',
+          startParamIndex: 2,
+          storeCodeMode: 'skip',
+          inputFormat: 'structured',
+        });
+      } catch (e: any) {
+        // ★ 2026-11-05 C105 H4(R59) — 숫자 아닌 값은 이제 필터 CT 가 SQL 앞에서 멈춘다(INVALID_NUMBER_INPUT) = 옛 NaN 판정과 같은 「적용 못 한 조건」
+        if (e?.code === 'INVALID_NUMBER_INPUT') { unapplied.push(custom.labels[key] || getFieldByKey(key)?.displayName || key); continue; }
+        throw e;
+      }
       // 값이 null(달력에 없는 날짜) · NaN(숫자 아닌 값)인 조건도 적용 못 한 것이다 — 그대로 두면 0건으로만 보여 이유를 모른다
       const badValue = one.params.some((p) => p === null || (typeof p === 'number' && Number.isNaN(p)));
       if (!one.sql.trim() || one.params.length === 0 || badValue) unapplied.push(custom.labels[key] || getFieldByKey(key)?.displayName || key);

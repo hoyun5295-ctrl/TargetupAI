@@ -9,6 +9,11 @@
  */
 import { X, Smartphone, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useEffect } from 'react';
+// ★ 2026-11-05 계약 v4 — 판 낱말 · 깔끔 규칙 값 = 그리는 부품 상수(SDK 원본의 글자 같은 사본 · 계약 시험 CT-IA1 · CT-IA4)
+import { POSTER_FRAME_RULES as RULES } from './generated/poster-frame';
+
+/** 앱이 /inapp/active?caps= 로 알리는 낱말(서버 INAPP_CLIENT_CAPS · SDK INAPP_SDK_CAPS 와 같은 값) */
+export const APP_CONTRACT_CAPS = ['poster_baked', 'frame_card', 'strip_coupon', 'strip_countdown'] as const;
 
 export interface ContractItem {
   title: string;
@@ -33,6 +38,12 @@ export const APP_INAPP_CONTRACT_SECTIONS: ContractSection[] = [
         code: `GET https://app.hanjul.ai/api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID
 Header: X-Hanjullo-Key: hjl_...
 (로그인 회원은 &external_id=회원ID 동봉, 개인화 변수 치환용 customer 동봉됨)`,
+      },
+      {
+        // ★ 2026-11-05 계약 v4 — 서빙 관문(설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §3-2)
+        title: '그릴 수 있는 것 알리기 (caps · 계약 v4)',
+        desc: `아래 v4 모양을 구현한 앱은 조회 주소에 caps 를 붙입니다. 서버는 caps 가 없는 앱(구버전)에 통짜 포스터 · 기능 띠 · 여러 장 떠 있는 카드 메시지를 보내지 않고(잘린 그림 · 빠진 쿠폰 코드를 보이지 않게), 한 장 떠 있는 카드는 틀을 지워(바닥 시트로) 보냅니다. 구현한 낱말만 넣으세요(${APP_CONTRACT_CAPS.join(' · ')}). 응답의 serverNow(서버 시각 · ISO)는 남은 시간 띠의 기준 시각입니다.`,
+        code: `GET .../api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID&caps=${APP_CONTRACT_CAPS.join(',')}`,
       },
     ],
   },
@@ -63,6 +74,23 @@ Header: X-Hanjullo-Key: hjl_...
         // ★ 2026-09-29 계약 v3 — 인앱 만들기 개편(설계서 docs/2026-09-29-inapp-editor-redesign-design.md §1)
         title: '포스터 새 레이아웃 (design.poster_layout = "event_card" | "banner_sheet")',
         desc: 'full_image 메시지의 design.poster_layout 이 오면 레이아웃대로 그립니다. 새 레이아웃은 posterSlides 가 1장이어도 레이아웃으로 그립니다(좌우 넘기기는 2장부터). event_card = 위 글 칸(바탕 = slide.bg_color · eyebrow 작은 라벨 · title · body) + 아래 사진 4:3(image_fit, 기본 cover) + 여러 장이면 오른쪽 아래 "N / M" 쪽 번호. banner_sheet = 면 색(bg_color) · 좌상단 탭 칩(eyebrow) · 우상단 X · 왼쪽 글(subtitle 윗줄 · title 큰 제목 · body 아랫줄 · cta 알약 버튼) · 오른쪽 사진(image_fit, 기본 contain · 아래 정렬). 바닥은 두 레이아웃 모두 글자 버튼 둘(왼쪽 = 닫기 방식 라벨 · 오른쪽 "닫기"). 장 전체(글 + 사진)가 좌우로 넘어갑니다. 슬라이드 새 키: eyebrow · subtitle · bg_color(hex) · image_fit("cover"|"contain"). 값이 빠지면 기본값: event_card 바탕 #f7f1e3 · 제목 #8a3b1f(26) · 본문 #57534e(14) / banner_sheet 면 #db2777 · 제목 #fde047(26) · 본문 #ffffff(19). 사진 누름 = link_url(event_card 는 없으면 cta.action_url), 트래킹 button_id = "slide_{index}_image". poster_layout 이 없거나 모르는 값이면 지금 포스터(overlay)로 그리세요. 이 값을 모르는 구버전 앱은 같은 내용을 지금 포스터 모양으로 안전하게 보여 줍니다(flat 필드 = 첫 장).',
+      },
+      {
+        // ★ 2026-11-05 계약 v4
+        title: '통짜 포스터 (design.poster_text = "baked" · caps poster_baked)',
+        desc: `글이 그림에 구워진 포스터입니다. 서버가 글 칸을 비워 보냅니다(title · body = 빈 값 · badgeText = null · 장마다 title · body · eyebrow · subtitle 없음). 글을 그리지 말고 그림만 원본 비율 그대로(자름 0 · contain) 그리세요. 그림 대체 글(접근성) = slide.alt. 여러 장이면 ${RULES.multiAspect === 0.75 ? '3:4' : RULES.multiAspect} 상자에 contain(남는 자리 = slide.bg_color 또는 ${RULES.multiFill}). 장 버튼(cta)은 그림 아래 흰 칸에 가로 꽉 찬 ${RULES.ctaHeight}px 버튼으로(그림 위에 얹지 않음).`,
+      },
+      {
+        title: '떠 있는 카드 (design.poster_frame = "card" · caps frame_card)',
+        desc: `화면 가운데 카드입니다. 좌우 여백 ${RULES.card.sideMargin}px · 태블릿 · 큰 화면 최대 ${RULES.card.maxWidth}px · 네 모서리 ${RULES.card.radius}. 닫기 줄은 카드 위 어둠 위 한 줄(높이 ${RULES.card.closeRowHeight}px · 왼쪽 「오늘 하루 보지 않기」(dismiss_mode 라벨 규칙 그대로) 흰 글 · 오른쪽 X · 누름 자리 ${RULES.closeHit}px). 바닥 시트(지금 틀)는 최대 ${RULES.sheet.maxWidth}px · 위 모서리 ${RULES.sheet.radius.split(' ')[0]} · 바닥 줄 ${RULES.sheet.footHeight}px. 두 틀 모두 그림 + 띠 + 버튼 + 닫기 줄 전체 높이가 화면의 ${Math.round(RULES.maxHeightRatio * 100)}% 를 넘으면 폭을 줄여 비율을 지킵니다. 쪽 번호(N / M)는 그림 안 오른쪽 아래 ${RULES.pagerInset}px 알약 하나만(그림 위 다른 요소 0).`,
+      },
+      {
+        title: '기능 띠 · 쿠폰 코드 복사 (design.poster_strip.type = "coupon" · caps strip_coupon)',
+        desc: `그림과 버튼 사이 ${RULES.stripHeight}px 한 줄: 왼쪽 poster_strip.label(없으면 「쿠폰 코드」) · 코드(poster_strip.code · 강조색) · 오른쪽 [복사]. 누르면 클립보드에 코드를 넣고 버튼 글을 2초 동안 「복사했어요」로 바꿉니다. 메시지는 닫지 않습니다. 트래킹 = event_type 'click' + button_id 'copy_code'. 강조색 = accentColor 하나(없으면 ${RULES.defaultAccent} · 띠 · 버튼 공통).`,
+      },
+      {
+        title: '기능 띠 · 남은 시간 (design.poster_strip.type = "countdown" · caps strip_countdown)',
+        desc: `같은 자리 한 줄: 왼쪽 label(없으면 「마감까지」) · 오른쪽 남은 시간 「N일 HH:MM:SS」 또는 「HH:MM:SS」. 마감 = 메시지 endAt. 1초마다 (endAt − 서버 시각)으로 다시 셉니다(서버 시각 = 응답 serverNow 를 받은 순간의 차이로 기기 시계를 보정). 0 이하 = 「마감됐어요」. 화면에서 사라지면 시계를 멈춥니다. 트래킹 없음.`,
       },
       {
         title: '장마다 라벨 (poster slides eyebrow · overlay 포스터)',

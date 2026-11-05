@@ -3251,8 +3251,11 @@ const campaignData = {
         initialRecipients={brandInitialRecipients}
         entry={brandEntry}
         optOutNumber={optOutNumber}
-        isAiTargetLocked={isAiMessagingLocked}
-        onLockedFeature={openPlanFeature}
+        // ★ 2026-11-05 C107 D-05 — 타겟추출 칸 = 문자 직접발송과 같은 잠금 축 · 같은 잠금 창 · 같은 말로 고르기 숨김
+        targetExtractLocked={isCustomerDbLocked}
+        onTargetExtractLocked={showTargetExtractLock}
+        hideAi={hideAi}
+        callbackNumbers={callbackNumbers}
         sending={brandSending}
         onSend={async function sendBrand(payload: any) {
           if (!payload?.senderKey) { setToast({ show: true, type: 'error', message: '발신 프로필을 선택해주세요' }); return; }
@@ -3291,6 +3294,10 @@ const campaignData = {
         }}
         initialRecipients={alimtalkInitialRecipients}
         initialTemplateId={alimtalkInitialTemplateId}
+        // ★ 2026-11-05 C107 D-05 — 타겟추출 칸(문자 직접발송과 같은 잠금 · 잠금 창 · 말로 고르기 숨김)
+        targetExtractLocked={isCustomerDbLocked}
+        onTargetExtractLocked={showTargetExtractLock}
+        hideAi={hideAi}
         onInitialTemplateConsumed={() => setAlimtalkInitialTemplateId(null)}
         resetSignal={alimtalkResetSignal}
         alimtalkSenders={alimtalkSenders}

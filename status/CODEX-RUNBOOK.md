@@ -1,7 +1,7 @@
 # Codex 리뷰 런북 — 실행·멈춤 판정·복구
 
 > **이 문서가 소유하는 것** = 리뷰를 어떻게 띄우고, 멈췄는지 어떻게 판정하고, 멈추면 무엇을 하는가.
-> 호출 의무·면제 범위 = CLAUDE.md `codex_review_after_code_change` · 라운드 범위 규율 = CLAUDE.md `codex_review_scope_incremental` ·
+> 호출 의무·면제 범위 · 라운드 범위 규율 = 이 문서 §0-0(CLAUDE.md `codex_review_after_code_change` · `codex_review_scope_incremental` 전문) ·
 > 지적 처리 원칙 = CLAUDE.md `review_findings_fix_root_not_symptom` · 라운드 운영·수용 판단 = [COLLAB.md §3](COLLAB.md).
 > **여기 적힌 것을 다른 문서에 복사하지 않는다.**
 >
@@ -13,7 +13,35 @@
 
 ---
 
-## §0 언제 거는가 (★2026-10-19 Harold 개정 — 범위 원천은 CLAUDE.md)
+## §0 언제 거는가 (★2026-10-19 Harold 개정 · 범위 원천 = §0-0 룰 전문)
+
+### §0-0 룰 전문 — CLAUDE.md `codex_review_after_code_change` · `codex_review_scope_incremental` (★2026-11-05 CLAUDE.md 에서 글자 그대로 옮김 · CLAUDE.md 에는 핵심 줄과 여는 시점만)
+
+```text
+    <RULE id="codex_review_after_code_change" priority="HIGH">
+      작업 종결 직전 Codex 이중 검증 의무.
+      `/codex:review` = 코드 신설·정정 후(5분+ 작업) / `/codex:adversarial-review` = DB 마이그레이션·돈·환불·balance·큰 영구 룰 / `/codex:rescue` = 디버깅 막힘·3회+ fix 실패·사이트 다운.
+      [흐름] 작성 → tsc 0 + 자가 grep → **내 적대 검토** → Codex → 정정 → 표준 종료 멘트.
+      [범위 — ★1019 Harold 개정] **모든 코드 변경 = Codex 적대 리뷰 필수.** 백엔드 · 프론트 · UI · React 상태 · DDL · 스크립트 구분 없음. 「화면만 바뀜 · 돈 경로 아님」은 면제 근거가 아니다(1019 계정 전환 수정에서 이 근거로 뺐다가 지적 · 경위 = memory `feedback_codex_every_code_change`).
+      [종료 조건 — ★1014 Harold 개정] **Codex가 지적 0(approve)으로 닫을 때까지 돌린다. 라운드 상한 없음.** 등급 무관하게 지적마다 수용·불수용을 판정하고(불수용은 근거를 다음 요청문 ⑤에 적는다) 수용분을 고친 뒤 **바로 다음 라운드**를 띄운다. 상한을 이유로 멈춰 보고하지 않는다(0926 · 1014 두 번 지적). 멈추는 경우는 둘뿐 — Codex가 멈췄을 때(런북 §3) · 같은 지적이 근거 불수용에도 세 번째 반복될 때(그때 Harold님 판단).
+      [면제] 코드가 아닌 것만 = 주석만 바꾼 것 · 메모리 · 문서(SCHEMA.md · STATUS.md · 설계서) · Harold 명시 면제. [실행 절차] `status/CODEX-RUNBOOK.md`
+    </RULE>
+```
+
+```text
+    <RULE id="codex_review_scope_incremental" priority="HIGH">
+      **1라운드만 변경분 전체 스캔.** 2라운드부터 리뷰 대상 = 직전 라운드에 내가 고친 줄 + 그 줄이 영향을 주는 직접 호출부. 그 밖은 대상이 아니다.
+      [2라운드 이후 4단계] ①취사 판단(수용·불수용을 내가 먼저 정하고 불수용은 근거를 남긴다 — 무조건 수용 금지)
+      ②수용분만 수정 ③그 수정이 결함을 닫았는가 확인 ④영향 지점 확인 — 단 **범위는 내가 먼저 파일·줄로 명시**하고 그 판단이 맞는지를 묻는다.
+      [금지 질문] "기존 소비처에 부작용이 있는가" / "그 값을 읽는 다른 경로에 영향이 있는가" / "앞서 지적한 N가지가 어떻게 달라졌는지 판정해달라" / "~가 완결되었는가" — 범위를 안 짚고 통째로 떠넘기는 형태.
+      [범위 밖 발견] `[범위 밖] 파일:라인 — 한 줄 요약`만 받는다. 분석·처방·즉시 착수 금지(착수 판단은 Harold님).
+      CLOSED 항목·이전 세션 종결 영역 재검증 금지.
+      **범위를 좁히는 것은 요청문의 선언이 아니라 질문 자체다.** (상세 = memory `feedback_codex_review_scope_incremental`)
+    </RULE>
+```
+
+### §0-1 경위 · 이력
+
 
 **모든 코드 변경에 건다(백엔드 · 프론트 · UI · React 상태 · DDL · 스크립트).** 옛 「돈 · 국세청 · DB 마이그레이션만 · UI 제외」(0804)는 폐지.
 경위 = 1019 계정 전환 잔존 수정을 「화면만 바뀜」으로 뺐다가 Harold 「코덱스는 전부 다 닫힐 때까지 · 전부 다 필수로」.

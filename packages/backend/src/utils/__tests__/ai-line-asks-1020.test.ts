@@ -478,7 +478,7 @@ describe('④ 소스 계약', () => {
     expect(modal).not.toContain('read?.gaps');
     expect((modal.match(/aiLineApi\.compose\(/g) || []).length).toBe(1);
     expect(modal).toContain("step === 'vars'");
-    expect(modal).toContain("setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setTextAns({});");
+    expect(modal).toContain("setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setPeriodStart(null); setTextAns({});");   // ★ C105 시작일도 진행에 묶는다
     // ★ 1021 실측 — 「지금 대상」 주인 하나: 칩 끄기/켜기 · 전체 고객 체크도 수 · 칩 · 1위 고객 · 칼럼을 한 응답으로 받는 길(retarget)
     expect(modal).toContain('void retarget({ ...run, offKeys: off, allChecked: false });');
     expect(modal).toContain('void retarget({ ...run, allChecked: !run.allChecked });');

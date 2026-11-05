@@ -5,6 +5,7 @@ import { handleDbMigrationError } from '../utils/db-migration-error';
 import { queryPayAgentBalances, getAgentCustNameMap, listAgentCharges, countAgentCharges, isPayStatsConfigured } from '../utils/pay-stats';
 import { parseAgentChargeOrder } from '../utils/agent-charge-orders';
 import { notifyChargeApprovers } from '../utils/charge-approve-link';
+import { parsePageParams, parseQueryInt, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 /**
  * ★ 2026-07-27 §5-4 — 에이전트 충전 요청 (고객사 창구)
@@ -119,8 +120,8 @@ router.get('/ledger', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
 
-    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-    const limit = Math.min(PAGE_SIZE_MAX, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: PAGE_SIZE_MAX }).limit;
 
     const ownedIds = await loadOwnedSendIds(companyId);
     const filter = { agentSendIds: ownedIds };
@@ -172,8 +173,8 @@ router.get('/', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
 
-    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-    const limit = Math.min(PAGE_SIZE_MAX, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: PAGE_SIZE_MAX }).limit;
     const offset = (page - 1) * limit;
 
     const cnt = await query(`SELECT COUNT(*)::int AS n FROM agent_charge_orders WHERE company_id = $1`, [companyId]);

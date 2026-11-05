@@ -21,17 +21,24 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Megaphone, PencilLine, Upload, Sparkles, Lock, Loader2, Trash2, Users, UserPlus, X, Search } from 'lucide-react';
+import { Megaphone, PencilLine, Upload, Lock, Trash2, Users, X, Search, Contact, Target } from 'lucide-react';
 import BrandMessageEditor from './BrandMessageEditor';
 import { WorkspaceNotice } from './shared/SendWorkspaceShell';
 import KakaoSendHeader from './kakao-send/KakaoSendHeader';
 import '../styles/direct-send.css';
 import RecipientDirectInputModal, { type PastePreview } from './direct-send/RecipientDirectInputModal';
-import { checkBrandPaste, normalizeBrandPhones } from '../utils/recipient-paste';
+import { checkAlimtalkPaste, planAppend, pickPhoneColumn, phonesFromColumn } from '../utils/recipient-paste';
+import AddressBookModal from './AddressBookModal';
+import DirectTargetFilterModal from './DirectTargetFilterModal';
+import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/target-extraction';
 import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
 import { BRAND_SPEC } from '../constants/brand-message-spec';
 
-type RecipientMode = 'manual' | 'file' | 'ai';
+// ★ 2026-11-05 C107 D-05 · D-08 · D-09 — 받는 사람 4칸(문자 직접발송과 같은 칸 · 옛 「AI 타겟추출」 탭은 타겟추출 창 안 말로 고르기로 합침)
+type RecipientMode = 'manual' | 'file' | 'address' | 'target';
+type AddrRow = { phone: string; name: string; extra1: string; extra2: string; extra3: string };
+const toAddrRow = (phone: string): AddrRow => ({ phone, name: '', extra1: '', extra2: '', extra3: '' });
+const digitsOnly = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 
 export interface BrandSendModalProps {
   show: boolean;
@@ -40,10 +47,14 @@ export interface BrandSendModalProps {
   profiles: any[];
   /** 직접발송에서 넘어올 때 이미 입력해 둔 수신자 */
   initialRecipients?: string[];
-  /** AI 타겟추출 잠금 — 스팸필터·AI 다듬기와 같은 기준을 부모가 그대로 넘긴다 */
-  isAiTargetLocked: boolean;
-  /** 잠금 시 부모가 공통 안내 창(PlanFeatureModal)을 띄운다 — 기능 id(constants/plan-feature-intros.ts) */
-  onLockedFeature: (featureId: string) => void;
+  /** ★ 2026-11-05 C107 D-05 — 「타겟추출」 칸 잠김 = 문자 직접발송과 같은 축(고객 DB 잠금 · 대시보드 isCustomerDbLocked) */
+  targetExtractLocked: boolean;
+  /** 잠긴 「타겟추출」 칸을 눌렀다 — 대시보드가 잠금 창을 고른다(문자 직접발송과 같은 함수) */
+  onTargetExtractLocked: () => void;
+  /** 타겟추출 창의 말로 고르기 줄 숨김(대시보드 hideAi · 문자 직접발송과 같은 값) */
+  hideAi?: boolean;
+  /** ★ 2026-11-05 C107 D-18 — 대체 문자 보내는 번호 목록(등록 회신번호 · 대시보드가 받아 둔 값) */
+  callbackNumbers?: Array<{ phone: string; label?: string; is_default?: boolean }>;
   /** 실제 발송 — BrandMessageEditor가 만든 payload에 수신자를 얹어 부모가 보낸다 */
   onSend: (payload: any) => Promise<void> | void;
   sending?: boolean;
@@ -72,12 +83,12 @@ export interface BrandSendModalProps {
  */
 const RECIPIENT_EDIT_LIMIT = 1000;
 
-// 번호 읽기 규칙(공백·쉼표·세미콜론 · 숫자만 9~11자리)은 utils/recipient-paste.ts normalizeBrandPhones 로 옮겼다
+// 번호 읽기 규칙 = utils/recipient-paste.ts checkAlimtalkPaste(★1105 C107 D-16 · 알림톡과 같은 읽기)
 //   — 직접입력 창의 검수와 더하기가 같은 함수를 써야 "보인 수 = 더해진 수"(★ 2026-09-25).
 
 export default function BrandSendModal({
-  show, onClose, profiles, initialRecipients, isAiTargetLocked, onLockedFeature, onSend, sending,
-  entry = 'direct', optOutNumber, onSwitchChannel,
+  show, onClose, profiles, initialRecipients, targetExtractLocked, onTargetExtractLocked, hideAi = false, onSend, sending,
+  entry = 'direct', optOutNumber, onSwitchChannel, callbackNumbers,
 }: BrandSendModalProps) {
   const isTarget = entry === 'target';
   const accent = isTarget ? 'indigo' : 'violet';
@@ -107,19 +118,23 @@ export default function BrandSendModal({
    */
   const [pendingPhones, setPendingPhones] = useState<string[]>([]);
 
-  // AI 타겟추출
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
-  const [aiResult, setAiResult] = useState<{ matchCount: number; explanation: string; filter: any } | null>(null);
-  const [aiApplying, setAiApplying] = useState(false);
+  // ★ 2026-11-05 C107 — 중복제거(켜고 끔 · 기본 켬 · 알림톡 창과 같은 규칙 R31) · 주소록 · 타겟추출 · 파일 번호 칸 고르기 · 확인 창 수신거부 점검
+  const [dedupEnabled, setDedupEnabled] = useState(true);
+  const [showAddressBook, setShowAddressBook] = useState(false);
+  const [showTargetExtract, setShowTargetExtract] = useState(false);
+  const [targetLoading, setTargetLoading] = useState(false);
+  /** 파일 번호 칸 고르기 — 표(머리 · 행)와 후보 · 마지막으로 쓴 칸(「다른 칸 고르기」) */
+  /**
+   * 파일 번호 칸 고르기 상태. used = 이미 담은 칸 · base = 그 칸을 담기 전 명단 · seq = 담은 직후 명단 세대.
+   * ★ Codex 구현 2R(범위 밖 → 이번 축 D-08) — [다른 칸 고르기] = 앞서 담은 칸 번호를 **바꾼다**(base 에 새 칸을 더함 · 옛: 앞 칸 번호 위에 새 칸을 또 더했다).
+   *   담은 뒤 명단이 바뀌었으면(seq 다름) 바꿀 근거가 없어 [다른 칸 고르기]를 감춘다.
+   */
+  const [colPick, setColPick] = useState<{ headers: string[]; rows: Record<string, unknown>[]; candidates: string[]; open: boolean; used?: string; base?: string[]; seq?: number } | null>(null);
+  /** 확인 창 수신거부 점검(떠 둔 명단 기준 · null = 점검 전/실패) */
+  const [unsubCheck, setUnsubCheck] = useState<{ excluded: number; dup: number } | null>(null);
+  const checkSeqRef = useRef(0);
   /** 명단 세대 — 늦게 도착한 담기·파일 읽기 응답이 그 사이 바뀐 리스트를 덮어쓰는 것을 막는다(일괄발급 bulkReqSeqRef와 같은 방식) */
   const reqSeqRef = useRef(0);
-  /**
-   * ★ 2026-09-25 추출 세대 — 타겟 추출은 명단을 바꾸지 않으므로(조건·대상 수만) 명단 세대와 따로 센다.
-   *   한 세대를 같이 쓰면 명단을 고칠 때 진행 중인 추출이 버려지고 [추출 중]이 멈춘 채 남았다(finally 가 세대가 달라 안 내림).
-   */
-  const aiSeqRef = useRef(0);
 
   /**
    * ★ 2026-07-29 열릴 때 **전 상태를 되돌린다**(적대검증 high 수용).
@@ -130,7 +145,7 @@ export default function BrandSendModal({
   useEffect(() => {
     if (!show) return;
     reqSeqRef.current++;
-    aiSeqRef.current++;
+    checkSeqRef.current++;
     const seeded = Array.from(new Set(
       (initialRecipients || []).map((p) => String(p).replace(/[^0-9]/g, '')).filter(Boolean),
     ));
@@ -140,8 +155,8 @@ export default function BrandSendModal({
     setDirectInputOpen(false); setAddNotice('');
     setMode('manual');
     setPending(null); setPendingPhones([]);
-    setAiPrompt(''); setAiError(''); setAiResult(null);
-    setAiLoading(false); setAiApplying(false);
+    setDedupEnabled(true); setShowAddressBook(false); setShowTargetExtract(false); setTargetLoading(false);
+    setColPick(null); setUnsubCheck(null);
   }, [show]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasProfile = (profiles || []).length > 0;
@@ -155,9 +170,15 @@ export default function BrandSendModal({
    * 그건 오발송이다. 그래서 변경 경로를 하나로 좁힌다.
    */
   const setRecipients = (list: string[]) => {
-    reqSeqRef.current++;          // 진행 중인 담기·파일 읽기 응답을 무효화한다(타겟 추출은 명단을 안 바꿔 따로 센다 · aiSeqRef)
-    setAiApplying(false);
+    reqSeqRef.current++;          // 진행 중인 파일 읽기 · 타겟추출 담기 응답을 무효화한다
+    setTargetLoading(false);
     setPhones(list);
+  };
+  /** 그 순간의 명단(prev)으로 정하는 갱신(주소록 불러오기 = appendUpdater · R31 「판정 = 갱신 함수 하나」) — 같은 세대 규칙 */
+  const updateRecipients = (fn: (prev: string[]) => string[]) => {
+    reqSeqRef.current++;
+    setTargetLoading(false);
+    setPhones((prev) => fn(prev));
   };
 
   /**
@@ -166,122 +187,151 @@ export default function BrandSendModal({
    * 몇 건이 중복이었는지 알린다 — 넣었는데 수가 안 늘면 사용자는 버튼이 고장난 줄로 읽는다.
    */
   //   ★ 2026-09-25 직접입력 창이 입력하는 동안 같은 식으로 검수를 보여 준다(planDraft 한 벌).
+  // ★ 2026-11-05 C107 D-16 · R31 — 붙여넣기 = 알림톡과 같은 읽기(checkAlimtalkPaste · 10자리 이상) · 더하기 = planAppend(중복제거 켜고 끔)
   const planDraft = (text: string) => {
-    const check = checkBrandPaste(text);
-    const existing = new Set(phones);
-    const added = Array.from(new Set(check.phones)).filter((p) => !existing.has(p));
-    return { check, added, dupes: check.phones.length - added.length };
+    const check = checkAlimtalkPaste(text);
+    const plan = planAppend(check.phones, phones, dedupEnabled);
+    return { check, added: plan.add, dupes: plan.dup };
   };
   const previewDraft = (text: string): PastePreview => {
     const { check, added, dupes } = planDraft(text);
     return {
       add: added.length,
-      notes: dupes > 0 ? [{ text: `중복 ${dupes.toLocaleString()} 제외`, tone: 'neutral' }] : [],
+      notes: dupes > 0
+        ? [dedupEnabled
+          ? { text: `중복 ${dupes.toLocaleString()} 제외`, tone: 'neutral' as const }
+          : { text: `같은 번호 ${dupes.toLocaleString()} · 중복제거가 꺼져 있어 여러 번 나가요`, tone: 'warn' as const }]
+        : [],
       invalid: check.invalid,
     };
   };
   const addFromDraft = (text: string) => {
     const { check, added, dupes } = planDraft(text);
     if (check.phones.length === 0) {
-      setAddNotice(text.trim() ? '유효한 번호를 찾지 못했습니다 (9~11자리 숫자).' : '번호를 입력해 주세요.');
+      setAddNotice(text.trim() ? '유효한 번호를 찾지 못했습니다 (10자리 이상 숫자).' : '번호를 입력해 주세요.');
       return;
     }
     setRecipients([...phones, ...added]);
     setAddNotice(
       added.length === 0
         ? `이미 담긴 번호입니다 (중복 ${dupes.toLocaleString()}건).`
-        : `${added.length.toLocaleString()}명 추가${dupes > 0 ? ` · 중복 ${dupes.toLocaleString()}건 제외` : ''}`,
+        : `${added.length.toLocaleString()}명 추가${dedupEnabled && dupes > 0 ? ` · 중복 ${dupes.toLocaleString()}건 제외` : ''}`,
     );
   };
 
-  const removeAt = (idx: number) => setRecipients(phones.filter((_, i) => i !== idx));
+  /**
+   * 고른 번호 칸에서 명단에 더한다(파일 = base 명단에 더하기 · 붙여넣기와 같은 중복 규칙) · 돌려줌 = 담은 뒤 상태(base · seq).
+   *   base = 처음 담기면 지금 명단 · [다른 칸 고르기]면 앞 칸을 담기 전 명단(앞 칸 번호를 새 칸으로 바꾼다).
+   */
+  const addFromColumn = (column: string, rows: Record<string, unknown>[], base: string[]): { base: string[]; seq: number } => {
+    const list = phonesFromColumn(column, rows);
+    const plan = planAppend(list, base, dedupEnabled);
+    setRecipients([...base, ...plan.add]);
+    setAddNotice(list.length === 0
+      ? `'${column}' 칸에서 휴대폰 번호를 찾지 못했어요. 다른 칸을 골라 주세요.`
+      : `'${column}' 칸에서 ${plan.add.length.toLocaleString()}명 추가${dedupEnabled && plan.dup > 0 ? ` · 중복 ${plan.dup.toLocaleString()}건 제외` : ''}`);
+    setMode('manual');
+    return { base, seq: reqSeqRef.current };   // setRecipients 가 세대를 올린 뒤 값
+  };
+  /** 칸 고르기 창에서 칸 하나를 골랐다 — 이미 담은 칸이 있고 그 뒤 명단이 그대로면 그 칸을 바꾸고, 아니면 지금 명단에 더한다 */
+  const pickColumn = (h: string) => {
+    if (!colPick) return;
+    const replace = !!colPick.used && colPick.seq === reqSeqRef.current && !!colPick.base;
+    const done = addFromColumn(h, colPick.rows, replace ? colPick.base! : phones);
+    setColPick({ ...colPick, open: false, used: h, ...done });
+  };
 
   const handleFile = async (file: File | null) => {
     if (!file) return;
-    // ★ 2026-09-25 읽는 동안 명단이 바뀌면(삭제·추가·AI 담기·창 닫힘) 이 읽기 결과는 버린다 — AI 추출과 같은 세대 규칙.
-    //   읽기 전 명단(phones)에 합치면 그 사이 지운 번호가 되살아나 발송된다(Codex 4R 범위 밖 지적 · Harold "같은 문제면 같이").
+    // 읽는 동안 명단이 바뀌면(삭제 · 추가 · 다른 불러오기 · 창 닫힘) 이 읽기 결과는 버린다(명단 세대 · 지운 번호가 되살아나지 않게).
     const seq = reqSeqRef.current;
-    const text = await file.text();
-    if (seq !== reqSeqRef.current) {
-      setAddNotice('파일을 읽는 동안 명단이 바뀌어 이번 파일은 넣지 않았어요. 다시 올려 주세요.');
+    if (/\.txt$/i.test(file.name)) {
+      const text = await file.text();
+      if (seq !== reqSeqRef.current) { setAddNotice('파일을 읽는 동안 명단이 바뀌어 이번 파일은 넣지 않았어요. 다시 올려 주세요.'); return; }
+      addFromDraft(text);
+      setMode('manual');
       return;
     }
-    const parsed = normalizeBrandPhones(text);
-    const existing = new Set(phones);
-    const added = Array.from(new Set(parsed)).filter((p) => !existing.has(p));
-    setRecipients([...phones, ...added]);
-    setAddNotice(`파일에서 ${added.length.toLocaleString()}명 추가${parsed.length - added.length > 0 ? ` · 중복 ${(parsed.length - added.length).toLocaleString()}건 제외` : ''}`);
-    setMode('manual');   // 결과를 눈으로 확인하고 고칠 수 있게 직접입력으로 되돌린다
-  };
-
-  const runAiTarget = async () => {
-    if (isAiTargetLocked) { onLockedFeature('ai-target'); return; }
-    if (!aiPrompt.trim()) { setAiError('찾을 대상을 한 줄로 입력해 주세요.'); return; }
-    const seq = ++aiSeqRef.current;
-    // 새 추출은 앞 조건으로 진행 중이던 담기를 무효로 한다(명단 세대) — 버린 담기의 진행 표시도 여기서 내린다
-    reqSeqRef.current++;
-    setAiApplying(false);
-    setAiLoading(true); setAiError(''); setAiResult(null);
+    // ★ 2026-11-05 C107 D-08 — 엑셀 · CSV = 문자 · 알림톡과 같은 입구(업로드 분석) → 번호 칸 하나만(D-16 · 매장 전화 · 회원번호 칸 제외)
+    const form = new FormData();
+    form.append('file', file);
     try {
-      const res = await fetch('/api/customers/generate-from-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-        body: JSON.stringify({ naturalLanguage: aiPrompt.trim() }),
-      });
+      const res = await fetch('/api/upload/parse?includeData=true', { method: 'POST', headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` }, body: form });
       const data = await res.json();
-      if (seq !== aiSeqRef.current) return;   // 그 사이 창이 닫혔거나 새 추출을 시작했다 — 이 응답은 버린다
-      if (!res.ok) throw new Error(data?.error || '타겟 추출에 실패했습니다.');
-      // 1단계는 **조건과 대상 수만** 확정한다. 수신자는 아래 [리스트에 담기]가 전량을 받아온다 —
-      // samples는 5건짜리 미리보기라 그걸 수신자로 쓰면 3,000명 대상이 5명에게만 나간다.
-      setAiResult({
-        matchCount: Number(data?.matchCount) || 0,
-        explanation: String(data?.explanation || ''),
-        filter: data?.filter ?? null,
-      });
-    } catch (e: any) {
-      if (seq === aiSeqRef.current) setAiError(e?.message || '타겟 추출에 실패했습니다.');
-    } finally {
-      if (seq === aiSeqRef.current) setAiLoading(false);
+      if (seq !== reqSeqRef.current) { setAddNotice('파일을 읽는 동안 명단이 바뀌어 이번 파일은 넣지 않았어요. 다시 올려 주세요.'); return; }
+      if (!res.ok || !data?.success) { setAddNotice(data?.error || '파일을 읽지 못했어요.'); return; }
+      const headers: string[] = data.headers || [];
+      const rows: Record<string, unknown>[] = data.allData || data.preview || [];
+      if (headers.length === 0) { setAddNotice('파일에서 칸을 찾지 못했어요.'); return; }
+      const pick = pickPhoneColumn(headers, rows);
+      if (pick.column) {
+        const done = addFromColumn(pick.column, rows, phones);
+        setColPick({ headers, rows, candidates: pick.candidates, open: false, used: pick.column, ...done });
+      } else {
+        setColPick({ headers, rows, candidates: pick.candidates, open: true });
+      }
+    } catch {
+      if (seq === reqSeqRef.current) setAddNotice('파일을 올리지 못했어요. 잠시 뒤 다시 시도해 주세요.');
     }
   };
 
-  /** 추출된 조건으로 **대상 전량**을 받아 수신자 리스트에 그대로 싣는다(눈으로 확인·수정 가능). */
-  const applyAiTarget = async () => {
-    if (!aiResult || !aiResult.filter || aiResult.matchCount === 0) return;
+  /** 주소록 창이 쓰는 줄 모양 ↔ 이 창의 번호 명단(번호만 쓴다 · 불러오기 = 그 순간 명단에 더하기) */
+  const addrRows = useMemo(() => phones.map(toAddrRow), [phones]);
+  const setAddrRows: React.Dispatch<React.SetStateAction<AddrRow[]>> = (action) => {
+    updateRecipients((prev) => {
+      const next = typeof action === 'function' ? action(prev.map(toAddrRow)) : action;
+      return next.map((r) => digitsOnly(r.phone)).filter(Boolean);
+    });
+  };
+
+  /** ★ 2026-11-05 C107 D-05 — 타겟추출(문자 직접발송과 같은 창) 담기 = 조건으로 뽑은 대상 = 명단을 그것으로 바꾼다(옛 AI 타겟추출과 같은 규칙) */
+  const handleTargetExtracted = async (ext: TargetExtraction) => {
+    setShowTargetExtract(false);
     const seq = ++reqSeqRef.current;
-    setAiApplying(true); setAiError('');
+    setTargetLoading(true);
     try {
-      const res = await fetch('/api/customers/extract', {
+      const r = await fetchTargetExtractionRows(ext);
+      if (seq !== reqSeqRef.current) return;
+      if (!r.ok) { setAddNotice(r.expired ? '담은 명단의 보관 시간이 지났습니다. 다시 추출해 주세요.' : (r.error || '명단을 불러오지 못했습니다.')); return; }
+      const list = (r.data.recipients || []).map((row: any) => digitsOnly(row?.[ext.phoneField] ?? row?.phone)).filter((p: string) => p.length >= 10);
+      const finalList = dedupEnabled ? Array.from(new Set(list)) as string[] : list;
+      setRecipients(finalList);
+      setAddNotice(`조건에 맞는 ${finalList.length.toLocaleString()}명을 담았습니다.${ext.skippedNoPhone > 0 ? ` (휴대폰 번호가 없는 ${ext.skippedNoPhone.toLocaleString()}명 제외)` : ''}`);
+      setMode('manual');
+    } finally {
+      if (seq === reqSeqRef.current) setTargetLoading(false);
+    }
+  };
+
+  /**
+   * ★ 2026-11-05 C107 D-06 — 확인 창 수신거부 점검. 서버 거름(brand-message filterUnsubscribed)이 **출현마다** 빼므로
+   *   돌려받은 번호 집합으로 떠 둔 명단의 출현을 센다(중복 허용 명단 [A, A, B] 에서 A 거부 = 실제 1건 · Codex 설계 1R #7).
+   *   판정 CT = 서버 /api/unsubscribes/check(getUnsubscribedPhones · 발송과 같은 비교). 실패 = 안내 없이 진행(서버가 늘 거른다).
+   */
+  const runUnsubCheck = async (snap: string[]) => {
+    const seq = ++checkSeqRef.current;
+    setUnsubCheck(null);
+    try {
+      const res = await fetch('/api/unsubscribes/check', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
-        body: JSON.stringify({ dynamicFilters: aiResult.filter, smsOptIn: true, phoneField: 'phone' }),
+        body: JSON.stringify({ phones: snap }),
       });
       const data = await res.json();
-      // 늦게 도착한 응답이 그 사이 사람이 고친 리스트를 덮으면, 지운 고객이 되살아나 발송된다.
-      if (seq !== reqSeqRef.current) return;
-      if (!res.ok || !data?.success) throw new Error(data?.error || '대상을 불러오지 못했습니다.');
-      const list: string[] = (data.recipients || [])
-        .map((r: any) => String(r?.phone || '').replace(/[^0-9]/g, ''))
-        .filter(Boolean);
-      if (list.length === 0) throw new Error('조건에 맞는 수신자가 없습니다.');
-      // 검증을 통과한 응답도 **같은 통로**로 넣는다 — 여기만 예외로 두면 다음 사람이 직접 set을 또 만든다.
-      //   (세대가 함께 올라가 그 뒤 남아 있던 다른 요청도 무효가 된다)
-      //   추출은 조건으로 뽑은 **대상 집합**이라 기존 목록에 더하지 않고 그것으로 바꾼다(조건 = 대상).
-      setRecipients(Array.from(new Set(list)));
-      setAddNotice(`조건에 맞는 ${list.length.toLocaleString()}명을 담았습니다.`);
-      setMode('manual');   // 리스트를 눈으로 보고 지우거나 더할 수 있게 직접입력으로 넘긴다
-    } catch (e: any) {
-      if (seq === reqSeqRef.current) setAiError(e?.message || '대상을 불러오지 못했습니다.');
-    } finally {
-      if (seq === reqSeqRef.current) setAiApplying(false);
-    }
+      if (seq !== checkSeqRef.current || !res.ok) return;
+      const blocked = new Set((data?.unsubscribePhones || []).map((x: any) => digitsOnly(x)));
+      const excluded = snap.filter((x) => blocked.has(digitsOnly(x))).length;
+      const dup = snap.length - new Set(snap.map((x) => digitsOnly(x))).size;
+      setUnsubCheck({ excluded, dup });
+    } catch { /* 안내 없이 진행 */ }
   };
 
   const modeTabs = useMemo(() => ([
     { key: 'manual' as RecipientMode, label: '직접입력', icon: PencilLine, locked: false },
     { key: 'file' as RecipientMode, label: '파일등록', icon: Upload, locked: false },
-    { key: 'ai' as RecipientMode, label: 'AI 타겟추출', icon: Sparkles, locked: isAiTargetLocked },
-  ]), [isAiTargetLocked]);
+    { key: 'address' as RecipientMode, label: '주소록', icon: Contact, locked: false },
+    { key: 'target' as RecipientMode, label: targetLoading ? '불러오는 중' : '타겟추출', icon: Target, locked: targetExtractLocked },
+  ]), [targetExtractLocked, targetLoading]);
   // ★ 2026-09-25 카카오 발송 창 틀(Harold 목업 v2) — 수신자 열을 직접발송과 같은 모양으로(탭 · 합계 · 검색 · 10줄 목록 · 선택삭제).
   //   수신자를 바꾸는 길은 위 setRecipients 하나 그대로다(늦게 온 AI 응답 무효화 포함). 여기는 보여 주는 방식만 다르다.
   const [listPage, setListPage] = useState(0);
@@ -329,13 +379,19 @@ export default function BrandSendModal({
             <label key={t.key} className={`ds-rtab ds-rtab--label ${mode === 'file' ? 'ds-rtab--on' : ''}`}>
               <t.icon size={17} strokeWidth={1.75} />
               <span>{t.label}</span>
-              <input type="file" accept=".csv,.txt,text/plain" className="hidden"
-                onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
+              <input type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden"
+                onChange={(e) => { setMode('file'); handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
             </label>
           ) : (
             <button key={t.key} type="button"
               className={`ds-rtab ${mode === t.key ? 'ds-rtab--on' : ''}`}
-              onClick={() => { if (t.locked) { onLockedFeature('ai-target'); return; } setMode(t.key); if (t.key === 'manual') setDirectInputOpen(true); }}>
+              onClick={() => {
+                if (t.key === 'target' && t.locked) { onTargetExtractLocked(); return; }
+                setMode(t.key);
+                if (t.key === 'manual') setDirectInputOpen(true);
+                if (t.key === 'address') setShowAddressBook(true);
+                if (t.key === 'target') setShowTargetExtract(true);
+              }}>
               <t.icon size={17} strokeWidth={1.75} />
               <span>{t.label}</span>
               {t.locked && <Lock size={12} strokeWidth={2.2} className="text-slate-300" />}
@@ -347,39 +403,28 @@ export default function BrandSendModal({
       {/* ★ 2026-09-25 직접입력은 창으로(수신자 열에 입력칸 없음). 더한 결과 안내는 방식과 무관하게 보인다 —
           예전엔 직접입력 방식일 때만 보여 파일 읽기 중단 안내가 파일 방식에서 가려졌다. */}
       {!isTarget && addNotice && <p className="text-[11.5px] text-violet-600 px-0.5 m-0">{addNotice}</p>}
-      {!isTarget && mode === 'manual' && aiResult?.explanation && phones.length > 0 && (
-        <p className="text-[11px] text-slate-500 bg-slate-50/80 ring-1 ring-slate-900/5 rounded-lg px-2.5 py-1.5 leading-relaxed m-0">
-          {aiResult.explanation}
-        </p>
+      {!isTarget && colPick && !colPick.open && colPick.used && colPick.seq === reqSeqRef.current && (
+        <button type="button" onClick={() => setColPick({ ...colPick, open: true })}
+          className="self-start text-[11.5px] font-semibold text-violet-600 underline underline-offset-2 m-0 p-0 bg-transparent">
+          다른 칸 고르기
+        </button>
       )}
 
       {!isTarget && mode === 'file' && (
-        <p className="ks-note">CSV · TXT 파일에서 번호만 골라 목록에 더해요. 위 [파일등록]을 누르거나 아래 칸에 끌어다 놓으세요.</p>
+        <p className="ks-note">엑셀 · CSV · TXT 파일에서 휴대폰 번호 칸을 골라 목록에 더해요. 위 [파일등록]을 누르거나 아래 칸에 끌어다 놓으세요.</p>
       )}
 
-      {!isTarget && mode === 'ai' && (
-        <div className="rounded-2xl ring-1 ring-violet-200/70 bg-violet-50/30 p-3 space-y-2">
-          <p className="text-[11.5px] text-slate-500 m-0">찾을 대상을 한 줄로 쓰세요. 연동된 고객DB에서 조건을 만들어 대상을 뽑습니다.</p>
-          <div className="ks-direct">
-            <textarea value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} placeholder="예) 최근 3개월 구매 없는 VIP 고객" aria-label="찾을 대상" />
-            <button type="button" onClick={runAiTarget} disabled={aiLoading} style={{ background: '#7C3AED' }}>
-              {aiLoading ? <><Loader2 size={13} className="animate-spin inline-block mr-1 -mt-0.5" />추출 중</> : '타겟 추출'}
-            </button>
-          </div>
-          {aiError && <p className="text-xs text-rose-600 m-0">{aiError}</p>}
-          {aiResult && (
-              <div className="px-3.5 py-3 rounded-2xl bg-white ring-1 ring-violet-200/70 shadow-sm text-xs space-y-2">
-                <p className="font-semibold text-slate-800">대상 {aiResult.matchCount.toLocaleString()}명</p>
-                {/* 어떤 조건으로 뽑았는지 보여준다 — 근거 없이 담으면 사람이 검증할 수 없다 */}
-                {aiResult.explanation && <p className="text-slate-500 leading-relaxed">{aiResult.explanation}</p>}
-                <button type="button" onClick={applyAiTarget} disabled={aiApplying || aiResult.matchCount === 0}
-                  className="w-full py-2 rounded-lg text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 disabled:opacity-40 inline-flex items-center justify-center gap-1.5 transition">
-                  {aiApplying
-                    ? <><Loader2 size={12} className="animate-spin" /> 불러오는 중...</>
-                    : <>리스트에 담기 ({aiResult.matchCount.toLocaleString()}명)</>}
-                </button>
-              </div>
-          )}
+      {/* ★ 2026-11-05 C107 D-04 · D-06(접수 T4) — 중복제거(켜고 끔) · 수신거부제거(브랜드는 서버가 늘 뺀다 = 잠긴 켬) */}
+      {!isTarget && (
+        <div className="ds-filter-row">
+          <label>
+            <input type="checkbox" className="ds-chk ds-chk--purple" checked={dedupEnabled} onChange={(e) => setDedupEnabled(e.target.checked)} />
+            <span>중복제거</span>
+          </label>
+          <label title="브랜드메시지는 수신거부한 번호를 늘 빼고 보냅니다">
+            <input type="checkbox" className="ds-chk ds-chk--purple" checked disabled readOnly />
+            <span>수신거부제거 · 브랜드는 항상</span>
+          </label>
         </div>
       )}
 
@@ -430,7 +475,7 @@ export default function BrandSendModal({
                 >
                   <div>
                     <div className="text-[14px] font-semibold text-stone-800">번호를 넣거나 파일을 올려 주세요</div>
-                    <div className="text-[12.5px] text-stone-500 mt-1">CSV · TXT에서 번호만 골라 읽어요{isAiTargetLocked ? '' : ' · AI 타겟추출로 바로 뽑을 수도 있어요'}</div>
+                    <div className="text-[12.5px] text-stone-500 mt-1">엑셀 · CSV · TXT에서 휴대폰 번호 칸을 골라 읽어요 · 주소록 · 타겟추출로 불러올 수도 있어요</div>
                   </div>
                   <div className="flex items-center justify-center flex-wrap gap-x-2 gap-y-1 mt-1">
                     <span className="ds-btn-sec px-4 pointer-events-none whitespace-nowrap border border-violet-200 bg-violet-50 text-violet-700">
@@ -440,7 +485,7 @@ export default function BrandSendModal({
                     <span className="text-[12px] text-stone-400 whitespace-nowrap">또는 여기로 드래그</span>
                   </div>
                 </div>
-                <input ref={dropInputRef} type="file" accept=".csv,.txt,text/plain" className="hidden"
+                <input ref={dropInputRef} type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden"
                   onChange={(e) => { handleFile(e.target.files?.[0] || null); e.target.value = ''; }} />
               </>
             )}
@@ -537,6 +582,7 @@ export default function BrandSendModal({
         accent={accent}
         recipientCount={phones.length}
         defaultUnsubPhone={optOutNumber}
+        callbackNumbers={callbackNumbers}
         onSend={(payload: any) => {
           if (!canSend) return;
           // ★ 2026-09-25 확인을 기다리는 동안은 새 보내기를 받지 않는다(Codex 12R) — 확인 창은 포커스를 옮기지 않아
@@ -544,8 +590,10 @@ export default function BrandSendModal({
           if (pending) return;
           // 바로 보내지 않는다 — 건수를 보여주고 확인을 받는다(문자·알림톡과 같은 계약)
           // ★ 2026-09-25 확인 창을 연 순간의 명단을 떠 둔다 — 건수 표시와 발송은 이 명단만 쓴다(Codex 10R·11R)
-          setPendingPhones(phones.slice());
+          const snap = phones.slice();
+          setPendingPhones(snap);
           setPending(payload);
+          void runUnsubCheck(snap);
         }}
           recipientsPanel={recipientsPanel}
         />
@@ -563,6 +611,49 @@ export default function BrandSendModal({
         onSubmitPaste={addFromDraft}
       />
 
+      {/* ★ 2026-11-05 C107 D-09 — 주소록(번호만 · 불러오기 = 지금 명단에 더하기 · 중복 규칙 = 이 창 [중복제거] · R31) */}
+      <AddressBookModal
+        show={showAddressBook && !isTarget}
+        onClose={() => setShowAddressBook(false)}
+        directRecipients={addrRows}
+        setDirectRecipients={setAddrRows}
+        setToast={(t) => setAddNotice(t.message)}
+        dedupOnAdd={dedupEnabled}
+      />
+
+      {/* ★ 2026-11-05 C107 D-05 — 타겟추출(문자 직접발송과 같은 창 · 말로 고르기 줄 포함) */}
+      {showTargetExtract && !isTarget && (
+        <DirectTargetFilterModal
+          show
+          onClose={() => setShowTargetExtract(false)}
+          onExtracted={(ext) => { void handleTargetExtracted(ext); }}
+          hideAi={hideAi}
+        />
+      )}
+
+      {/* ★ 2026-11-05 C107 D-08 — 파일 번호 칸 고르기(휴대폰 꼴 칸이 하나가 아니거나 [다른 칸 고르기]) */}
+      {colPick?.open && !isTarget && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/45 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setColPick({ ...colPick, open: false }); }}>
+          <div role="dialog" aria-modal="true" aria-label="휴대폰 번호 칸 고르기" className="w-full max-w-[460px] rounded-2xl bg-white p-5 shadow-2xl">
+            <p className="m-0 text-[15px] font-bold text-slate-900">어느 칸이 휴대폰 번호인가요?</p>
+            <p className="m-0 mt-1 text-[12px] text-slate-500">{colPick.used ? `지금 '${colPick.used}' 칸 번호가 담겨 있어요. 고른 칸 번호로 바꿉니다.` : colPick.candidates.length === 0 ? '휴대폰 번호로 보이는 칸을 찾지 못했어요. 번호 칸을 골라 주세요.' : '보낼 번호 칸 하나를 골라 주세요. 휴대폰 번호로 보이는 칸을 표시했어요.'}</p>
+            <div className="mt-3 flex max-h-[50vh] flex-col gap-1.5 overflow-y-auto">
+              {colPick.headers.map((h) => (
+                <button key={h} type="button"
+                  onClick={() => pickColumn(h)}
+                  className={`rounded-xl border px-3 py-2 text-left transition hover:border-violet-300 ${colPick.candidates.includes(h) ? 'border-violet-200 bg-violet-50/50' : 'border-slate-200 bg-white'}`}>
+                  <span className="block text-[13px] font-semibold text-slate-800">{h}</span>
+                  <span className="block truncate text-[11.5px] text-slate-500">{colPick.rows.slice(0, 3).map((r) => String(r?.[h] ?? '')).filter(Boolean).join(' · ') || '(값 없음)'}</span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-4 flex justify-end">
+              <button type="button" onClick={() => setColPick({ ...colPick, open: false })} className="h-9 rounded-xl px-4 text-[13px] font-semibold text-slate-600 hover:bg-slate-100">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <ConfirmDialogShell
         show={!!pending}
         tone={accent}
@@ -570,13 +661,14 @@ export default function BrandSendModal({
         title="지금 바로 발송합니다"
         subtitle="광고성 메시지입니다. 누르는 즉시 나가며 회수할 수 없습니다."
         cancelLabel="취소"
-        onCancel={() => { setPending(null); setPendingPhones([]); }}
+        onCancel={() => { checkSeqRef.current++; setPending(null); setPendingPhones([]); setUnsubCheck(null); }}
         confirmLabel="즉시 발송"
         onConfirm={async () => {
           const payload = pending;
           const sendPhones = pendingPhones;
           if (!payload) return;
-          setPending(null); setPendingPhones([]);
+          checkSeqRef.current++;
+          setPending(null); setPendingPhones([]); setUnsubCheck(null);
           await onSend({ ...payload, phones: sendPhones });
         }}
         busy={!!sending}
@@ -585,6 +677,15 @@ export default function BrandSendModal({
       >
         <DialogHeadline label="발송 대상" value={pendingPhones.length} unit="명" tone={accent} />
         <div className="mt-3">
+          {unsubCheck && unsubCheck.excluded > 0 && (
+            <>
+              <DialogRow label="수신거부로 빠짐" value={`${unsubCheck.excluded.toLocaleString()}건`} accent="amber" />
+              <DialogRow label="실제 발송" value={`${Math.max(0, pendingPhones.length - unsubCheck.excluded).toLocaleString()}건`} />
+            </>
+          )}
+          {unsubCheck && unsubCheck.dup > 0 && (
+            <DialogRow label="같은 번호" value={`${unsubCheck.dup.toLocaleString()}건 · 여러 번 나갑니다`} accent="amber" />
+          )}
           <DialogRow label="메시지 유형" value={pendingTypeLabel} />
           <DialogRow
             label="광고 표기"

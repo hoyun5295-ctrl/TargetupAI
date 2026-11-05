@@ -115,8 +115,13 @@ import { resyncCafe24ScriptTagsForCompany } from '../utils/cafe24-scripttag';
 import { issueCdpMemberToken, isCdpMemberConfirmed } from '../utils/cdp-member-token';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { getServePath, parseFitOption } from '../utils/image-serve';
+// ★ 2026-11-05 인앱 포스터 재구성 §3-9 예시 갤러리 · §3-2 서빙 관문
+import { findInAppExample, findInAppExampleImage, listInAppExamplesForGallery } from '../utils/inapp-examples';
+import { parseInAppClientCaps } from '../utils/inapp-message';
+import { resolveCompanyIndustry } from '../utils/copy-prompt-composer';
 
 import { publicErrorText, respondUserError, UserFacingError, uploadErrorText } from '../utils/http-error';
+import { parsePageParams, parseQueryInt } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 
 const router = Router();
@@ -631,6 +636,21 @@ router.get('/inapp/image/:companyId/:filename', async (req: any, res: any) => {
   res.sendFile(path.resolve(await getServePath(filePath, parseFitOption(req.query))));
 });
 
+// ★ 2026-11-05 §3-9 GET /api/cdp/inapp/example-image/:id/:slide — 예시 갤러리 그림 공개 서빙(인증 앞 · <img> 직접 GET).
+//   id · 장 번호는 예시 표로만 검증(경로 조작 0) · 1400px 서빙본 · 주소 꼬리 ?v=수정 시각이라 긴 캐시.
+router.get('/inapp/example-image/:id/:slide', async (req: any, res: any) => {
+  const id = String(req.params.id || '');
+  const slide = Number(req.params.slide);
+  const ex = findInAppExample(id);
+  if (!ex || !Number.isInteger(slide)) return res.status(404).json({ success: false, error: '예시 그림을 찾을 수 없습니다.' });
+  const file = findInAppExampleImage(ex.id, slide);
+  if (!file) return res.status(404).json({ success: false, error: '예시 그림을 찾을 수 없습니다.' });
+  res.setHeader('Content-Type', file.mime);
+  res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  res.sendFile(path.resolve(await getServePath(file.absPath)));
+});
+
 router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {
   const cdpAuth = req.cdpAuth!;
   try {
@@ -641,6 +661,8 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     const seenMessageIds = seenRaw ? seenRaw.split(',').filter(Boolean) : [];
 
     const reqChannel = req.query.channel === 'app' ? 'app' : 'web';
+    // ★ 2026-11-05 §3-2 서빙 관문 — 클라이언트가 그릴 수 있는 것(없음 = 옛 SDK · 지금 앱 = 통짜 · 띠 메시지를 주지 않는다)
+    const clientCaps = parseInAppClientCaps(req.query.caps);
     const messages = await getActiveMessagesForCustomerV2({
       companyId: cdpAuth.companyId,
       triggerEvent: trigger,
@@ -650,6 +672,7 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
       source: cdpAuth.source,
       seenMessageIds,
       channel: reqChannel,
+      clientCaps,
     });
 
     // ★ 2026-07-17 CTA URL 서빙 정규화(전 채널) — 프로토콜 없는 도메인(www.xxx)을 https://로 보정.
@@ -732,7 +755,8 @@ router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, r
     }
 
     await recordCdpApiCall(cdpAuth.companyId, 'event', 200);
-    return res.json({ success: true, messages, ...(customer ? { customer } : {}) });
+    // ★ 2026-11-05 §3-5 serverNow = 남은 시간 띠의 기준 시각(기기 시계 어긋남 보정 · 옛 SDK 는 모르는 칸이라 무시)
+    return res.json({ success: true, messages, serverNow: new Date().toISOString(), ...(customer ? { customer } : {}) });
   } catch (err: any) {
     console.error('[CDP /inapp/active] 오류:', err);
     const msg = err?.message || '';
@@ -1276,6 +1300,36 @@ router.get('/inapp', async (req: Request, res: Response) => {
   }
 });
 
+// ★ 2026-11-05 §3-9 GET /api/cdp/inapp/examples — 예시 갤러리 목록(그림이 준비된 예시만 · 회사 업종 · 편집기 시작 상태 · 스튜디오 재료)
+router.get('/inapp/examples', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
+    const out = listInAppExamplesForGallery(await resolveCompanyIndustry(companyId));
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    console.error('[CDP /inapp/examples] 오류:', err);
+    if (respondUserError(res, err)) return;
+    return res.status(500).json({ success: false, error: publicErrorText(err, '예시를 불러오지 못했어요') });
+  }
+});
+
+// ★ 2026-11-05 §3-6 GET /api/cdp/inapp/dm-links — [내 DM 참여 페이지 연결] 고르기 창(게시된 참여 DM · 경품 · 재고 DM = blocked)
+router.get('/inapp/dm-links', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    if (resolveOwnerScope(req)) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
+    const { listInAppDmLinkCandidates } = await import('../utils/inapp-dm-link-policy');
+    return res.json({ success: true, dms: await listInAppDmLinkCandidates(companyId) });
+  } catch (err: any) {
+    console.error('[CDP /inapp/dm-links] 오류:', err);
+    if (respondUserError(res, err)) return;
+    return res.status(500).json({ success: false, error: publicErrorText(err, 'DM 목록을 불러오지 못했어요') });
+  }
+});
+
 // ★ 2026-07-06 인앱 표시 가능성 조회 — 상태 패널 + 프론트 생성 가드 (연동 플랫폼별 지원 + SDK 신호)
 router.get('/inapp/display-eligibility', async (req: Request, res: Response) => {
   try {
@@ -1405,7 +1459,8 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
       const publishing = wantsActive && prevStatus !== null && prevStatus !== 'active' && message.status === 'active';
       // ★ 2026-10-25 게시비 한 규칙(#92) — POST 와 같은 함수(걷지 못하면 이전 상태로 되돌리고 402 · 503)
       if (publishing) await settleInAppPublish(companyId, message.id, req.user?.userId, prevStatus as any);
-      return res.json({ success: true, message });
+      // ★ 2026-11-05 §3-3 통짜 [반영]이 멈춘 문구 변형 수(편집기가 그대로 알린다)
+      return res.json({ success: true, message, variants_paused: message.variantsPaused });
     });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) {
@@ -1624,7 +1679,7 @@ router.post('/inapp/ai-generate', singleFlight('inapp-generate', async (req: Req
               composition: compDef, channel: 'inapp', companyId: auth.companyId, line: groundLine, ...brand!,
               pinnedPrimary: linePinnedPrimary(kitRaw), cards: [...cards, ...cm.cards].slice(0, 1), cardCategories: [],
               heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: [], page,
-              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, periodStart: steps.body.facts.periodStart ?? null, link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
             }, { userId: auth.userId, source: 'inapp-ai-generator' });
             const msg = buildLineCookInapp(cook);
             return {
@@ -1870,13 +1925,14 @@ router.post('/inapp/variant', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
     }
     if (action === 'create') {
-      if (!parent_message_id || !variantData.title || !variantData.body) {
+      // ★ 2026-11-05 §3-3 — 라우트는 부모 모양을 모른다 → 원본 · 제목만 본다(본문 · 그림 필수 = createVariant 한 곳)
+      if (!parent_message_id || !variantData.title) {
         return res.status(400).json({ success: false, error: '원본 메시지 · 제목 · 내용을 모두 넣어 주세요.' });
       }
       const newId = await createVariant(auth.companyId, auth.userId, {
         parentMessageId: String(parent_message_id),
         title: String(variantData.title),
-        body: String(variantData.body),
+        body: String(variantData.body ?? ''),
         template: variantData.template,
         image_url: variantData.image_url,
         buttons: variantData.buttons,
@@ -2034,7 +2090,7 @@ router.get('/inapp/top-messages', async (req: Request, res: Response) => {
   // 회사 전체 상위 메시지 집계 = 관리자 조회 영역
   if (auth.ownerId) return res.status(403).json({ success: false, error: '회사 전체 순위는 관리자만 조회할 수 있습니다.' });
   try {
-    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '10'), 10) || 10, 1), 50);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 50 }).limit;
     const ch = req.query.channel === 'web' || req.query.channel === 'app' ? req.query.channel : undefined;
     const top = await buildTopMessages(auth.companyId, limit, ch);
     return res.json({ success: true, messages: top });
@@ -2133,7 +2189,7 @@ router.get('/custom/deliveries', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit || '20'), 10) || 20));
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 20, maxLimit: 50 }).limit;
     const r = await query(
       `SELECT webhook_event, status, error_message, created_at, processed_at
        FROM cdp_webhook_deliveries
@@ -2229,7 +2285,7 @@ router.get('/funnel', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const days = parseQueryInt(req.query.days, { fallback: 30, min: 7, max: 90, clamp: true });
     const result = await buildCdpFunnel(companyId, days);
     return res.json({ success: true, funnel: result });
   } catch (err: any) {
@@ -2275,7 +2331,7 @@ router.get('/active-customers', async (req: Request, res: Response) => {
     if (userType !== 'company_admin' && userType !== 'super_admin') {
       return res.status(403).json({ success: false, error: '자사몰 활성 고객 목록은 회사 관리자만 조회할 수 있습니다.' });
     }
-    const limit = Math.max(1, Math.min(50, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 50 }).limit;
     const result = await buildCdpActiveCustomers(companyId, limit);
     return res.json({ success: true, activeCustomers: result });
   } catch (err: any) {

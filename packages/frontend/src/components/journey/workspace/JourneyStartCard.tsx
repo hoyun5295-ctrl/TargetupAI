@@ -212,7 +212,7 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
           </>
         )}
         <Toggle on={form.callbackMode === 'store'} onChange={(v) => setField('callbackMode', v ? 'store' : 'fixed')} disabled={locked}
-          label="고객 매장번호로 보내기" desc="고객마다 등록된 매장번호로 보내요. 매장번호가 없는 고객은 위 번호로 보내요." />
+          label="개별회신번호로 보내기" desc="고객마다 고객 DB의 회신번호로 보내요. 회신번호가 없으면 매장 전화번호, 둘 다 없으면 위 번호로 보내요. 발신번호로 등록되지 않은 번호의 고객은 보내지 않아요." />
       </div>
 
       {/* 받는 양 */}

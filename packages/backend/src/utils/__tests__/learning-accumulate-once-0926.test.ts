@@ -36,7 +36,7 @@ vi.mock('../../config/database', () => ({
 vi.mock('../sms-queue', () => ({
   getCompanySmsTablesWithLogs: async () => [],
   smsCampaignCountsSafe: async () => new Map(),
-  smsAlimtalkResultAgg: async () => new Map(),
+  smsKakaoResultAgg: async () => new Map(),
   smsCampaignSubRowCounts: async () => new Map(),
 }));
 vi.mock('../prepaid', () => ({

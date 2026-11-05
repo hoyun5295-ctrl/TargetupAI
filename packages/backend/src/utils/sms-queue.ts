@@ -9,7 +9,7 @@ import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry }
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
-import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_FALLBACK_SMS_CODE, KAKAO_FALLBACK_LMS_CODE, SPAM_BLOCK_STATUS_CODES } from './sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_DELIVERED_SQL, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, SPAM_BLOCK_STATUS_CODES } from './sms-result-map';
 import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import type { AlimtalkResultAgg } from './refund-calc';
 import { splitLinesByMsgType } from './sms-line-split';
@@ -512,7 +512,7 @@ export async function smsBatchAggByGroup(
   return result;
 }
 
-/** 알림톡 실패 대체 행(자식 행) 판정 — smsCampaignSubRowCounts · smsAlimtalkResultAgg · 원 행 범위('primary')가 같은 조건을 쓴다.
+/** 알림톡 실패 대체 행(자식 행) 판정 — smsCampaignSubRowCounts · smsKakaoResultAgg · 원 행 범위('primary')가 같은 조건을 쓴다.
  *  ★ 2026-10-16 정의는 sms-result-map(대체 판정 소유)으로 옮겼다 · 기존 import 경로를 위해 다시 내보낸다(B-1016-1) */
 export { SMS_SUB_ROW_SQL };
 
@@ -599,12 +599,13 @@ export async function smsCampaignCountsSafe(
 
 /**
  * ★ 2026-09-26 한줄로 V2 F01·F04 — 알림톡 캠페인의 **성공을 결과별로** 센다(선불 결과별 정산 전용).
+ * ★ 2026-11-05 C107 D-12 — 카카오 부모 = 알림톡(K) · 브랜드(F) 공통(조각 = sms-result-map KAKAO_*_SQL · 브랜드 전용 캠페인의 결과별 차액).
  * 알림톡 성공(K 1800) · K행 대체 성공 코드(7830 SMS · 7831 LMS) · 대체 행(S/L + k_oriseq) 성공 · 대체 행 전체.
  * 결과는 이력에서만 센다 — smsCampaignCountsSafe와 같은 테이블 분류라 이동 중인 행이 두 번 잡히지 않는다.
  * 대체 행 판정식은 통계 엑셀(aggregateSmsChannelSplitByCampaign)과 같다.
  * 소비처: mysql-refund-sweeper(결과별 단가를 실은 선불 알림톡 캠페인만 — 다른 캠페인엔 이 조회가 돌지 않는다).
  */
-export async function smsAlimtalkResultAgg(
+export async function smsKakaoResultAgg(
   tables: string[],
   ids: (string | number)[],
 ): Promise<Map<string, AlimtalkResultAgg>> {
@@ -615,9 +616,9 @@ export async function smsAlimtalkResultAgg(
   const SUC = SUCCESS_CODES.join(',');
   const SUB = SMS_SUB_ROW_SQL;
   const agg = await smsBatchAggByGroup(resultTables, 'app_etc1', `
-        SUM(CASE WHEN msg_type = 'K' AND status_code = 1800 THEN 1 ELSE 0 END) AS kakao,
-        SUM(CASE WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN 1 ELSE 0 END) AS inRowSms,
-        SUM(CASE WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN 1 ELSE 0 END) AS inRowLms,
+        SUM(CASE WHEN ${KAKAO_DELIVERED_SQL} THEN 1 ELSE 0 END) AS kakao,
+        SUM(CASE WHEN ${KAKAO_INROW_FALLBACK_SMS_SQL} THEN 1 ELSE 0 END) AS inRowSms,
+        SUM(CASE WHEN ${KAKAO_INROW_FALLBACK_LMS_SQL} THEN 1 ELSE 0 END) AS inRowLms,
         SUM(CASE WHEN msg_type = 'S' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subSms,
         SUM(CASE WHEN msg_type = 'L' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subLms,
         SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub`, ids);

@@ -71,7 +71,8 @@ describe('1. 알림톡 창 — 보내는 값·검증·적재는 그대로', () =
   it('채널 로직 = 공용 훅 한 벌(기존 패널과 같은 입력) · 템플릿 고르기 = 공용 handleSelectTemplate', () => {
     expect(m).toMatch(/const ch = useAlimtalkChannel\(\{\s*senders: show \? alimtalkSenders : \[\],\s*templates: alimtalkTemplates,\s*customerFieldOptions: dynamicFieldOptions,\s*value: channelState,\s*onChange: handleChannelChange,\s*sampleRecipient: recipients\[0\] \|\| null,\s*\}\);/);
     expect(m).toContain('onPick={(t) => ch.handleSelectTemplate(t)}');
-    expect(m).toContain('<AlimtalkFallbackEditor');
+    // ★1105 C107 H2 — 대체문안 = 휴대폰 꼴 창(브랜드와 같은 FallbackPhoneModal)
+    expect(m).toContain('<FallbackPhoneModal');
   });
 
   it('칸에 보이는 대체발송 안내는 보내기 검증과 같은 순서(대체문안 → 제목)', () => {
@@ -114,7 +115,8 @@ describe('2. 브랜드 창 — 보내는 값·보내기 조건·확인 창 경�
   });
 
   it('대체발송 입력칸 · 타겟팅 · 광고 표기 — 같은 상태를 쓴다(발송 바로 자리만 옮김)', () => {
-    expect(e).toContain('<select value={resendType} onChange={(e) => setResendType(e.target.value)} className={FIELD}>');
+    // ★1105 C107 H1 — 대체발송 = 휴대폰 꼴 창 [저장] 한 곳에서 같은 상태로
+    expect(e).toContain("onSave={(v) => { setResendType(v.type); setResendMessage(v.contents); setResendTitle(v.title); setResendFrom(v.from || ''); }}");
     expect(e).toContain('onClick={() => { setTargeting(t.code); setFootPop(\'\'); }}');
     expect(e).toContain('onClick={() => setIsAd(!isAd)}');
   });
@@ -151,10 +153,14 @@ describe('2. 브랜드 창 — 보내는 값·보내기 조건·확인 창 경�
 
   it('Codex 10R·11R — 확인 창을 연 순간의 명단을 떠 두고 건수·발송 모두 그 명단(화면 명단이 바뀌어도 확인한 명단으로)', () => {
     const editorUse = between(bm, '<BrandMessageEditor', 'recipientsPanel={recipientsPanel}');
-    expect(editorUse.indexOf('setPendingPhones(phones.slice());')).toBeLessThan(editorUse.indexOf('setPending(payload);'));
+    expect(editorUse).toContain('const snap = phones.slice();');
+    expect(editorUse.indexOf('setPendingPhones(snap);')).toBeGreaterThan(editorUse.indexOf('const snap = phones.slice();'));
+    expect(editorUse.indexOf('setPendingPhones(snap);')).toBeLessThan(editorUse.indexOf('setPending(payload);'));
+    // ★1105 C107 D-06 — 수신거부 점검도 같은 떠 둔 명단으로
+    expect(editorUse).toContain('void runUnsubCheck(snap);');
     // Codex 12R — 확인을 기다리는 동안 새 보내기(Enter 재진입)는 떠 둔 명단을 바꾸지 못한다
     expect(editorUse.indexOf('if (pending) return;')).toBeGreaterThan(-1);
-    expect(editorUse.indexOf('if (pending) return;')).toBeLessThan(editorUse.indexOf('setPendingPhones(phones.slice());'));
+    expect(editorUse.indexOf('if (pending) return;')).toBeLessThan(editorUse.indexOf('const snap = phones.slice();'));
     // 10R 덧댐(확인 창 열 때 세대 올리기)은 떠 두기로 대체되어 사라졌다
     expect(editorUse).not.toContain('reqSeqRef.current++');
     const dlg = between(bm, '<ConfirmDialogShell', '</ConfirmDialogShell>');
@@ -167,17 +173,17 @@ describe('2. 브랜드 창 — 보내는 값·보내기 조건·확인 창 경�
     expect(dlg).not.toContain('...payload, phones }');
   });
 
-  it('브랜드 — 타겟 추출은 명단 세대와 따로 센다(명단을 고쳐도 추출이 안 버려짐 · 새 추출은 앞 담기 무효 + 그 표시 내림)', () => {
-    const run = between(bm, 'const runAiTarget = async () => {', 'const applyAiTarget = async () => {');
-    expect(run).toContain('const seq = ++aiSeqRef.current;');
-    expect(run).toContain('reqSeqRef.current++;');
-    expect(run).toContain('setAiApplying(false);');
-    expect(run).not.toMatch(/seq [!=]== reqSeqRef\.current/);
-    expect((run.match(/seq [!=]== aiSeqRef\.current/g) || []).length).toBe(3);
+  it('★1105 C107 D-05 — 타겟추출 담기 = 명단 세대(새 담기 = 앞 응답 무효 · 담는 동안 명단을 고치면 버림 · 창을 다시 열면 무효)', () => {
+    const run = between(bm, 'const handleTargetExtracted = async (ext: TargetExtraction) => {', '\n  };\n');
+    expect(run).toContain('const seq = ++reqSeqRef.current;');
+    expect(run.indexOf('if (seq !== reqSeqRef.current) return;')).toBeGreaterThan(run.indexOf('await fetchTargetExtractionRows(ext);'));
+    expect(run.indexOf('setRecipients(finalList);')).toBeGreaterThan(run.indexOf('if (seq !== reqSeqRef.current) return;'));
     const setR = between(bm, 'const setRecipients = (list: string[]) => {', '};');
-    expect(setR).not.toContain('aiSeqRef.current');
+    expect(setR).toContain('reqSeqRef.current++;');
+    expect(setR).toContain('setTargetLoading(false);');
     const open = between(bm, 'if (!show) return;\n    reqSeqRef.current++;', 'setPhones(seeded);');
-    expect(open).toContain('aiSeqRef.current++;');
+    expect(open).toContain('checkSeqRef.current++;');
+    expect(bm).not.toMatch(/aiSeqRef|runAiTarget|applyAiTarget/);
   });
 
   it('수신자를 바꾸는 길은 setRecipients 하나(늦은 AI 응답 무효화) — 새 목록의 삭제도 그 길로', () => {
@@ -199,15 +205,22 @@ describe('2. 브랜드 창 — 보내는 값·보내기 조건·확인 창 경�
 describe('2-2. 브랜드 파일 읽기 — 읽는 동안 명단이 바뀌면 버린다(지운 번호 되살림 금지)', () => {
   it('세대를 읽기 전에 잡고, 달라졌으면 합치지 않는다', () => {
     const bm = read('components/BrandSendModal.tsx');
-    const hf = between(bm, 'const handleFile = async (file: File | null) => {', 'const runAiTarget = async () => {');
+    const hf = between(bm, 'const handleFile = async (file: File | null) => {', '/** 주소록 창이 쓰는 줄 모양');
     const iSeq = hf.indexOf('const seq = reqSeqRef.current;');
     const iRead = hf.indexOf('await file.text();');
     const iGuard = hf.indexOf('if (seq !== reqSeqRef.current) {');
-    const iMerge = hf.indexOf('setRecipients([...phones, ...added]);');
+    const iMerge = hf.indexOf('addFromDraft(text);');
     expect(iSeq).toBeGreaterThanOrEqual(0);
     expect(iRead).toBeGreaterThan(iSeq);
     expect(iGuard).toBeGreaterThan(iRead);
     expect(iMerge).toBeGreaterThan(iGuard);
+    // ★1105 C107 D-08 — 엑셀 · CSV(업로드 분석)도 같은 세대 검사 뒤에만 더한다
+    const iJson = hf.indexOf('await res.json();');
+    const iGuard2 = hf.indexOf('if (seq !== reqSeqRef.current) {', iJson);
+    const iAdd = hf.indexOf('addFromColumn(pick.column, rows, phones);');
+    expect(iJson).toBeGreaterThan(iMerge);
+    expect(iGuard2).toBeGreaterThan(iJson);
+    expect(iAdd).toBeGreaterThan(iGuard2);
   });
 });
 

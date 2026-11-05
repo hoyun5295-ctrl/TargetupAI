@@ -118,7 +118,7 @@ export interface AiLineRun {
    * 1장(빠진 것) 답 — benefit: null = 혜택 없이 · period_end: null = 기간 없이
    * ★ 2026-10-20 answers = AI 가 물은 그 밖 질문의 답(답한 것만)
    */
-  facts: { benefit: string | null; period_end: string | null; answers?: Array<{ q: string; a: string }> } | null;
+  facts: { benefit: string | null; period_end: string | null; period_start?: string | null; answers?: Array<{ q: string; a: string }> } | null;   // ★ C105 H1
   /** ★ 2026-10-20 문자 성격을 사람이 바꿨으면(true = 마케팅 · 광고 / false = 안부 · 알림) · null = 대상 찾기 판정 */
   isAd: boolean | null;
   /** ★ 2026-10-28 K13-7 문자 종류를 사람이 바꿨으면 그 값 · 없으면 대상 찾기 판정(광고 칩과 독립) */

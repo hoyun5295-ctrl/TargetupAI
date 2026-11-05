@@ -40,7 +40,7 @@ const resultAgg = vi.fn(async () => new Map(state.agg ? [[CAMP, state.agg]] : []
 vi.mock('../sms-queue', () => ({
   getCompanySmsTablesWithLogs: async () => ['SMSQ_SEND_1', 'SMSQ_SEND_1_202609'],
   smsCampaignCountsSafe: async () => new Map([[CAMP, state.counts]]),
-  smsAlimtalkResultAgg: (...a: any[]) => (resultAgg as any)(...a),
+  smsKakaoResultAgg: (...a: any[]) => (resultAgg as any)(...a),
 }));
 
 const refundMock = vi.fn(async (..._a: any[]) => ({ refunded: 0, ok: true }));
@@ -81,7 +81,7 @@ describe('정산 스위퍼 — 선불 알림톡 결과별 정산', () => {
     await runMysqlRefundSweepOnce();
     expect(resultAgg).toHaveBeenCalledTimes(1);
     expect(diffCalls()).toHaveLength(1);
-    expect(diffCalls()[0].slice(0, 6)).toEqual(['c1', 0, 'LMS', CAMP, '알림톡 결과별 단가 차액 환불', 'campaign']);
+    expect(diffCalls()[0].slice(0, 6)).toEqual(['c1', 0, 'LMS', CAMP, '결과별 단가 차액 환불', 'campaign']);   // ★ C107 알림톡 · 브랜드 공통 문구
     expect(diffCalls()[0][6]).toEqual({ refundKey: 'kakao_diff', targetAmount: 88 });
     // 실패 환불은 종전(행 기준) 그대로
     expect(failCalls()[0][1]).toBe(2);
@@ -114,6 +114,20 @@ describe('정산 스위퍼 — 선불 알림톡 결과별 정산', () => {
     expect(diffCalls()).toHaveLength(0);
     expect(reverseMock).toHaveBeenCalledWith('c1', 0, 'LMS', CAMP, 0, 'campaign');
     expect(alertMock.mock.calls.some((c) => String(c[0]?.dedupKey || '').startsWith('alimtalk-settle-ambiguous:'))).toBe(true);
+  });
+
+  it('★1105 C107 브랜드 전용 + LMS 대체: 브랜드 축(BRAND)으로 차액 = 브랜드 성공 4 × (23.6 − 21) = 10.4 · F 행 7831 대체 2 = 0', async () => {
+    state.camp = { ...state.camp, message_type: 'LMS', send_channel: 'kakao' };
+    state.dedRows = [{ amount: 141.6, description: buildDeductDescription('campaign', 'BRAND', 6, 23.6, 0, { KAKAO: 21, SMS: 23.6, LMS: 23.6 }, '브랜드메시지') }];
+    state.agg = { kakao: 4, inRowSms: 0, inRowLms: 2, subSms: 0, subLms: 0, sub: 0 };   // F 1800×4 · F 7831×2(같은 행 대체)
+    state.reverseNet = 10.4;
+    await runMysqlRefundSweepOnce();
+    expect(resultAgg).toHaveBeenCalledTimes(1);
+    expect(diffCalls()).toHaveLength(1);
+    expect(diffCalls()[0].slice(0, 6)).toEqual(['c1', 0, 'BRAND', CAMP, '결과별 단가 차액 환불', 'campaign']);
+    expect(diffCalls()[0][6]).toEqual({ refundKey: 'kakao_diff', targetAmount: 10.4 });
+    expect(reverseMock).toHaveBeenCalledWith('c1', 0, 'BRAND', CAMP, 10.4, 'campaign');
+    expect(invariantAlerts()).toHaveLength(0);
   });
 
   it('적재 중(send_phase=processing)이면 결과별 집계도 조회하지 않는다', async () => {

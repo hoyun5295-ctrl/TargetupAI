@@ -48,7 +48,8 @@ describe('R110 고객 목록 총 개수', () => {
     expect(route).toContain('COUNT(*) OVER() AS total_count_all');
   });
   it('따로 세는 것은 행이 0이고 첫 페이지가 아닐 때뿐이다 · 응답에서 보조 칸을 뺀다', () => {
-    expect(route).toMatch(/if \(result\.rows\.length === 0 && Number\(page\) > 1\) \{\s*const countResult = await query\(/);
+    // ★ C105 H4(R59) — page = CT 값(숫자) · Number( 감쌈 없음
+    expect(route).toMatch(/if \(result\.rows\.length === 0 && page > 1\) \{\s*const countResult = await query\(/);
     expect(route).toContain('params.slice(0, whereParamCount)');
     expect(route).toContain('result.rows.map(({ total_count_all: _t, ...row }: any) => row)');
   });

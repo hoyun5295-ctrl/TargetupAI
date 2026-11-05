@@ -205,11 +205,15 @@ describe('★ 배선 5곳 — 전부 차감 · 캠페인 생성 앞', () => {
     expect(apply).not.toContain('pauseJourney(');
   });
 
-  it('배선 수 = 5 (라우트 2 · 코어 1 · 자동발송 1 · 여정 1) — 새 경로가 생기면 이 숫자부터 바뀐다', () => {
+  it('배선 수 = 본문 5 (라우트 2 · 코어 1 · 자동발송 1 · 여정 1) + ★1105 C107 R63 카카오 대체 문구 5 (라우트 2 · 코어 1 · 자동발송 1 · 브랜드 1) — 새 경로가 생기면 이 숫자부터 바뀐다', () => {
     const count = (s: string) => (s.match(/checkSpamBlockBeforeCharge\(/g) || []).length;
-    expect(count(campaigns)).toBe(2);
-    expect(count(read('utils/direct-send-core.ts'))).toBe(1);
-    expect(count(read('utils/auto-campaign-worker.ts'))).toBe(1);
+    const fbCount = (s: string) => (s.match(/kakaoFallbackSpamItems\(/g) || []).length;
+    expect(count(campaigns)).toBe(4);
+    expect(fbCount(campaigns)).toBe(3);   // 브랜드 AI 1 · 직접발송 브랜드 · 알림톡 2(한 판정 호출)
+    expect(count(read('utils/direct-send-core.ts'))).toBe(2);
+    expect(count(read('utils/auto-campaign-worker.ts'))).toBe(2);
+    expect(count(read('utils/brand-message.ts'))).toBe(1);
+    expect(fbCount(read('utils/brand-message.ts'))).toBe(1);
     expect(count(read('utils/journey-executor.ts'))).toBe(0);
     expect((read('utils/journey-executor.ts').match(/findSpamBlockedTexts\(/g) || []).length).toBe(1);   // ★ 1102 여정 = 묶음 판정 한 자리
   });

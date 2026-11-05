@@ -2090,6 +2090,16 @@ p.ds-warn-good { margin: 0; display: flex; gap: 7px; align-items: center; paddin
 .ks-body > section.ks-compose { overflow-y: auto; gap: 16px; }
 .ks-body > section.ks-preview { background: var(--ds-stone-50); padding: 18px 16px; overflow-y: auto; }
 .ds-modal__foot.ks-foot { grid-template-columns: 901px 1px minmax(0, 1fr); }
+/* ★ 2026-11-05 C107 접수 T1 — 브랜드 창만 작성 열을 넓히고 수신자 열을 좁힌다(대체 문안은 휴대폰 창으로 · 알림톡 창 .ks-body 는 그대로).
+   좁은 폭(1099 이하)은 위 공용 반응형 규칙을 그대로 쓴다 — 넓은 폭에서만 덮는다(특이도가 높아 미디어 밖에 두면 좁은 폭 규칙을 이긴다). */
+@media (min-width: 1280px) {
+  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: minmax(560px, 1fr) 380px 380px; }
+  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: minmax(0, 1fr) 1px 380px; }
+}
+@media (min-width: 1100px) and (max-width: 1279px) {
+  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: minmax(440px, 1fr) 320px 320px; }
+  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: minmax(0, 1fr) 1px 320px; }
+}
 
 .ds-head-icon.ks-head-icon--amber { background: var(--ds-amber-500); border-color: var(--ds-amber-500); color: #FFFFFF; }
 .ds-head-icon.ks-head-icon--violet { background: #7C3AED; border-color: #7C3AED; color: #FFFFFF; }

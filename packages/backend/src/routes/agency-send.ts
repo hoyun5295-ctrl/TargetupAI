@@ -31,6 +31,7 @@ import { sendAgencyApprovalRequest } from '../utils/agency-send-worker';
 // ★2026-09-25 맞춤법 검사(설계 docs/2026-09-25-agency-spell-check-design.md · 자동 교정 0 · 결과는 문안 버전에 묶인다)
 import { checkAgencySpelling, readAgencySpell } from '../utils/agency-send-spell';
 import { takeSpellMinuteSlot } from '../utils/spell-check-quota';
+import { parsePageParams, parseOffsetParam } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
@@ -192,8 +193,8 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     // 관리자 = 회사 전체(접수 계정 이름 동봉) · 일반 사용자 = 본인 접수만(★2026-08-26(2) 격리)
     // ★ 2026-09-27 한줄로 V2 R286 — 100건 고정 대신 건너뛰기(offset)·한 번에 최대 100건 + 전체 건수(total). 화면이 이전 접수를 더 불러온다.
-    const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit)) || 100));
-    const offset = Math.max(0, Math.floor(Number(req.query.offset)) || 0);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 100, maxLimit: 100 }).limit;
+    const offset = parseOffsetParam(req.query.offset);
     const [r, cnt] = auth.seesAll
       ? await Promise.all([
           query(

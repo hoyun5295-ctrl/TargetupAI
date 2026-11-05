@@ -7,6 +7,7 @@ import { queryPayAgentBalances, getAgentCustNameMap } from '../utils/pay-stats';
 import { resolveChargeUnitPrice } from '../utils/unit-price';
 import { judgePayerName } from '../utils/fraud-review';
 import { notifyChargeApprovers } from '../utils/charge-approve-link';
+import { parseQueryInt } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -159,7 +160,7 @@ router.get('/summary', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const months = parseInt(req.query.months as string) || 6;
+    const months = parseQueryInt(req.query.months, { fallback: 6, min: 1, max: 1200, clamp: true });
 
     const result = await query(
       `SELECT

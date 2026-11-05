@@ -14,7 +14,7 @@
  * - 커스텀 필드: 8개 연산자 전부 지원 (customers.ts 기준)
  */
 
-import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, normalizeDate } from './normalize';
+import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, normalizeDate, sqlNumberParam, sqlNumericRawParam } from './normalize';
 import { isValidCustomFieldKey } from './safe-field-name';
 import { getColumnFields } from './standard-field-map';
 import { kstDateMinusDays } from './automarketing-segment';
@@ -23,6 +23,15 @@ import { storeMembershipCond } from './store-scope';
 // ============================================================
 // 타입 정의
 // ============================================================
+
+
+/**
+ * ★ 2026-11-05 C105 H4(R59) — 숫자식(ageExpr · ageExprMixed · customNumberExpr · numberRef) 비교 값 넣기 두 길(설계서 docs/2026-11-05-c105-out-of-scope-five-design.md §4 H4 (B')).
+ *   원칙 = 넘기는 값은 자리마다 옛 값 그대로 · 거절만 더한다. 옛 Number( 자리 = bindNumber · 옛 원값 자리(mixed 사용자 칸 numeric 비교 두 자리) = bindNumericRaw.
+ *   숫자가 아니면 조건을 빼지 않고 400 으로 멈춘다(대상이 넓어지지 않게 · 옛: numeric 칸은 NaN 이 가장 큰 값이라 대상이 넓어진 채 성공했다).
+ */
+const bindNumber = (params: any[], v: unknown, label: string): void => { params.push(sqlNumberParam(v, label)); };
+const bindNumericRaw = (params: any[], v: unknown, label: string): void => { params.push(sqlNumericRawParam(v, label)); };
 
 export interface FilterResult {
   sql: string;
@@ -286,16 +295,16 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         if (operator === 'eq') {
           // ★ D83: 나이 일치 연산자 추가 (직원 리포트 — eq 시 전체 리스트 반환 버그)
           sql += ` AND ${ageExpr} = $${paramIndex++}`;
-          params.push(Number(value));
+          bindNumber(params, value, '조건 값');
         } else if (operator === 'gte') {
           sql += ` AND ${ageExpr} >= $${paramIndex++}`;
-          params.push(Number(value));
+          bindNumber(params, value, '조건 값');
         } else if (operator === 'lte') {
           sql += ` AND ${ageExpr} <= $${paramIndex++}`;
-          params.push(Number(value));
+          bindNumber(params, value, '조건 값');
         } else if (operator === 'between' && Array.isArray(value)) {
           sql += ` AND ${ageExpr} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-          params.push(Number(value[0]), Number(value[1]));
+          bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
         }
 
       // ── FIELD_MAP 동적 처리 — 위 핸들러에 없는 직접 컬럼 필드를 dataType 기반으로 자동 처리 ──
@@ -305,12 +314,13 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         if (fieldDef) {
           const columnRef = col(alias, fieldDef.columnName);
           if (fieldDef.dataType === 'number') {
-            if (operator === 'eq') { sql += ` AND ${columnRef} = $${paramIndex++}`; params.push(Number(value)); }
-            else if (operator === 'gte') { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(Number(value)); }
-            else if (operator === 'lte') { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(Number(value)); }
+            const numberRef = columnRef;   // ★ C105 H4 숫자식 이름(비교 값 = bindNumber · 계약 K5c)
+            if (operator === 'eq') { sql += ` AND ${numberRef} = $${paramIndex++}`; bindNumber(params, value, '조건 값'); }
+            else if (operator === 'gte') { sql += ` AND ${numberRef} >= $${paramIndex++}`; bindNumber(params, value, '조건 값'); }
+            else if (operator === 'lte') { sql += ` AND ${numberRef} <= $${paramIndex++}`; bindNumber(params, value, '조건 값'); }
             else if (operator === 'between' && Array.isArray(value)) {
-              sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-              params.push(Number(value[0]), Number(value[1]));
+              sql += ` AND ${numberRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+              bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
             }
           } else if (fieldDef.dataType === 'date') {
             // ★ D83: safeDateValue 방어 — 비정상 날짜 입력 시 쿼리 에러 방지
@@ -383,7 +393,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(customDateKeyParam(value));
           } else {
             sql += ` AND ${customNumberExpr(cfCol)} >= $${paramIndex++}`;
-            params.push(Number(value));
+            bindNumber(params, value, '조건 값');
           }
         } else if (operator === 'lte') {
           // ★ D77: 날짜형 값 자동 감지
@@ -392,7 +402,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(customDateKeyParam(value));
           } else {
             sql += ` AND ${customNumberExpr(cfCol)} <= $${paramIndex++}`;
-            params.push(Number(value));
+            bindNumber(params, value, '조건 값');
           }
         } else if (operator === 'between' && Array.isArray(value)) {
           // ★ D77: 날짜형 값 자동 감지
@@ -401,7 +411,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(customDateKeyParam(value[0]), customDateKeyParam(value[1]));
           } else {
             sql += ` AND ${customNumberExpr(cfCol)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-            params.push(Number(value[0]), Number(value[1]));
+            bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
           }
         } else if (operator === 'in' && Array.isArray(value)) {
           const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
@@ -443,19 +453,19 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
   const age = getValue(filters.age);
   if (age && Array.isArray(age) && age.length === 2) {
     sql += ` AND ${ageExprMixed} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-    params.push(Number(age[0]), Number(age[1]));
+    bindNumber(params, age[0], '나이'); bindNumber(params, age[1], '나이');
   }
 
   // minAge/maxAge (기존 호환) — ★ D79: birth_date 폴백 동일 적용
   const minAge = getValue(filters.minAge) || getValue(filters.min_age);
   if (minAge) {
     sql += ` AND ${ageExprMixed} >= $${paramIndex++}`;
-    params.push(Number(minAge));
+    bindNumber(params, minAge, '나이');
   }
   const maxAge = getValue(filters.maxAge) || getValue(filters.max_age);
   if (maxAge) {
     sql += ` AND ${ageExprMixed} <= $${paramIndex++}`;
-    params.push(Number(maxAge));
+    bindNumber(params, maxAge, '나이');
   }
 
   // ★ D131 후속(2026-04-21): grade는 원본 보존 — variant 확장(buildGradeFilter/getGradeVariants) 제거.
@@ -517,18 +527,19 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
 
     if (field.dataType === 'number') {
       // 숫자 필드: gte / lte / between
+      const numberRef = columnRef;   // ★ C105 H4 숫자식 이름(비교 값 = bindNumber · 계약 K5c)
       if (operator === 'gte') {
-        sql += ` AND ${columnRef} >= $${paramIndex++}`;
-        params.push(Number(value));
+        sql += ` AND ${numberRef} >= $${paramIndex++}`;
+        bindNumber(params, value, '조건 값');
       } else if (operator === 'lte') {
-        sql += ` AND ${columnRef} <= $${paramIndex++}`;
-        params.push(Number(value));
+        sql += ` AND ${numberRef} <= $${paramIndex++}`;
+        bindNumber(params, value, '조건 값');
       } else if (operator === 'between' && Array.isArray(value)) {
-        sql += ` AND ${columnRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-        params.push(Number(value[0]), Number(value[1]));
+        sql += ` AND ${numberRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+        bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
       } else if (operator === 'eq') {
-        sql += ` AND ${columnRef} = $${paramIndex++}`;
-        params.push(Number(value));
+        sql += ` AND ${numberRef} = $${paramIndex++}`;
+        bindNumber(params, value, '조건 값');
       }
     } else if (field.dataType === 'date') {
       // ★ D83: 날짜 필드 — safeDateValue로 비정상 입력 방어
@@ -628,7 +639,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(customDateKeyParam(value));
           } else {
             sql += ` AND ${customNumberExpr(cfCol)} >= $${paramIndex++}`;
-            params.push(value);
+            bindNumericRaw(params, value, '조건 값');
           }
         } else if (operator === 'lte') {
           // ★ D77: 날짜형 값 자동 감지
@@ -637,7 +648,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(customDateKeyParam(value));
           } else {
             sql += ` AND ${customNumberExpr(cfCol)} <= $${paramIndex++}`;
-            params.push(value);
+            bindNumericRaw(params, value, '조건 값');
           }
         } else if (operator === 'between' && Array.isArray(value)) {
           // ★ D77: 날짜형 값 자동 감지
@@ -646,7 +657,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             params.push(customDateKeyParam(value[0]), customDateKeyParam(value[1]));
           } else {
             sql += ` AND ${customNumberExpr(cfCol)} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-            params.push(Number(value[0]), Number(value[1]));
+            bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
           }
         } else if (operator === 'in' && Array.isArray(value)) {
           sql += ` AND ${cfCol} = ANY($${paramIndex++})`;

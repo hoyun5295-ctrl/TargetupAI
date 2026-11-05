@@ -33,6 +33,7 @@ import { runChargedAi, checkCredit, settleCreditInTx, InsufficientCreditError } 
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { brandVoicePrices } from '../utils/ai-credit-price';
 import { randomUUID } from 'crypto';
+import { parsePageParams } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 const router = Router();
 router.use(authenticate);
 
@@ -276,7 +277,7 @@ router.get('/top-impact', async (req: Request, res: Response) => {
     if (!companyId) {
       return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     }
-    const limit = Math.min(parseInt(String(req.query.limit || '10')) || 10, 50);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 50 }).limit;
 
     // ★ 2026-07-12 — 제외 목록 → 학습 5종 화이트리스트 (옛 NOT IN은 brand_link 누락)
     const r = await query(

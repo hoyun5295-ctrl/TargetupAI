@@ -6,7 +6,8 @@
 // 참조: campaigns.ts, results.ts, spam-filter.ts, ResultsModal.tsx (백엔드→프론트 전달)
 // ============================================================
 
-import { isBrandOnlyChannel, FALLBACK_BILLING_CODE } from './billing-types';
+import { HANJUL_BAND_CODES } from './result-code-hanjul-band.generated';
+import { isBrandOnlyChannel, FALLBACK_BILLING_CODE, brandBillingKey, billingTypeLabelOf } from './billing-types';
 
 // ========================
 // Part 1: QTmsg status_code 매핑
@@ -184,9 +185,25 @@ export function isPending(statusCode: number): boolean {
   return PENDING_CODES.includes(statusCode);
 }
 
-/** status_code → 라벨 문자열 (매핑에 없으면 '코드 NNN') */
+/**
+ * ★ 2026-11-05 C107 G5 · 뿌리 R62 — 비토 게이트웨이 실패 코드 대역(한줄로 에이전트 정책 failure_code_policy = mapped).
+ *   게이트웨이가 실패 원 코드를 표준 코드로 바꿔 대역 코드로 돌려준다(카카오 20000+n · LMS 30000+n · SMS 40000+n · 공통 50000+n ·
+ *   규칙 = 게이트웨이 scripts/gw/customer-failure-codes-hanjul.sql · 라벨 = 생성 파일 result-code-hanjul-band.generated.ts).
+ *   위 결과 표(키 9999 이하)와 겹치지 않아 표에 섞지 않는다 — 섞으면 「스팸」 글자로 뽑는 SPAM_BLOCK_STATUS_CODES 가 함께 바뀐다(추가 과제).
+ *   생성 뒤 게이트웨이 표에 새 코드가 생기면 계열 기본 라벨(「카카오: 실패(코드 n)」)이 덮는다. 유형 = 언제나 실패.
+ */
+export const HANJUL_BAND_BASE = { KAKAO: 20000, LMSMMS: 30000, SMS: 40000, V: 50000 } as const;
+const BAND_FAMILY_LABEL: Readonly<Record<number, string>> = { 2: '카카오', 3: 'LMS', 4: 'SMS', 5: '발송' };
+export function bandStatusInfo(statusCode: number): StatusCodeInfo | null {
+  if (!Number.isInteger(statusCode) || statusCode < 20000 || statusCode > 59999) return null;
+  const family = BAND_FAMILY_LABEL[Math.floor(statusCode / 10000)];
+  const known = HANJUL_BAND_CODES[statusCode];
+  return { label: `${family}: ${known ? known.title : `실패(코드 ${statusCode % 10000})`}`, type: 'fail' };
+}
+
+/** status_code → 라벨 문자열 (매핑에 없으면 비토 실패 대역 라벨 · 그것도 아니면 '코드 NNN') */
 export function getStatusLabel(statusCode: number): string {
-  return STATUS_CODE_MAP[statusCode]?.label || `코드 ${statusCode}`;
+  return STATUS_CODE_MAP[statusCode]?.label || bandStatusInfo(statusCode)?.label || `코드 ${statusCode}`;
 }
 
 /** ★ 2026-09-29 한줄로 V2 차수 5 — 비토 게이트웨이 접수 단계 영구 거부(위 9401~9409 묶음 · 통신사에 가지도 않았다) */
@@ -204,9 +221,9 @@ export function spamFailDetail(statusCode: number): { failKind: 'rejected' | 'ca
   };
 }
 
-/** status_code → 타입 (매핑에 없으면 'unknown') */
+/** status_code → 타입 (매핑에 없으면 비토 실패 대역 = 'fail' · 그것도 아니면 'unknown') */
 export function getStatusType(statusCode: number): StatusType {
-  return STATUS_CODE_MAP[statusCode]?.type || 'unknown';
+  return STATUS_CODE_MAP[statusCode]?.type || bandStatusInfo(statusCode)?.type || 'unknown';
 }
 
 /**
@@ -251,14 +268,22 @@ export const ABNORMAL_STATUS_MIN = 100000;
  *      (bito-gateway engine/report.go parentFallbackReport · agent/poller isGatewayManagedFallbackReport 가 L행 적재를 건너뜀)
  *   ②를 알림톡 성공으로 세면 통계는 대체분을 놓치고 정산은 알림톡 단가로 청구한다.
  *   판정은 여기 하나가 소유한다(JS 판정 · SQL 조각이 같은 상수에서 나온다).
- *   ⛔ 브랜드(F) 행은 이 판정에 넣지 않았다 — 같은 코드가 F행에도 실리는지 운영 실측 전이다(BUGS B-1003-1 추가 과제).
  *
  * ★ 2026-10-16 판정을 `fallbackOf` 하나로 모았다(B-1016-1 · 같은 부류 세 번째 접수).
- *   옛: 통계 엑셀(classifyMsgChannel · 행 1 = 채널 1)과 캠페인 목록(tallyAlimtalkFallback · 시도 + 대체)이 같은 행을 다르게 셌고,
+ *   옛: 통계 엑셀(classifyMsgChannel · 행 1 = 채널 1)과 캠페인 목록(tallyKakaoFallback · 시도 + 대체)이 같은 행을 다르게 셌고,
  *   청구 식은 대체를 L·S 로 접어 정산서에서 대체 여부가 사라졌다. 이제 집계·라벨·관리자 상세·청구 식이 이 판정 하나를 쓴다.
+ *
+ * ★ 2026-11-05 C107(브랜드메시지 접수 T2 · T3 · 뿌리 R1) 부모에 브랜드(F)를 넣었다. 1105 실측(SMSQ_SEND_14 · 15 · 27행) =
+ *   F 행에도 대체 성공 7830(next A) · 7831(next B)이 같은 행에 찍히고 문자 행은 따로 없다(게이트웨이 report.go parentFallbackReport 가
+ *   알림톡 · 브랜드 공통). 옛 판정이 K 만 봐서 브랜드 대체가 통계에선 브랜드 성공 · 정산에선 브랜드 단가였다.
  */
 export const KAKAO_FALLBACK_SMS_CODE = 7830;
 export const KAKAO_FALLBACK_LMS_CODE = 7831;
+
+/** ★ 2026-11-05 C107 — 카카오 실패 → 문자 대체가 결과코드로 남는 부모 행 유형(알림톡 K · 브랜드 F). 판정 · SQL 조각이 이 목록 하나에서 나온다. */
+export const KAKAO_FALLBACK_PARENT_TYPES: readonly string[] = ['K', 'F'];
+/** SQL IN 조각 — `('K', 'F')` */
+export const KAKAO_FALLBACK_PARENT_SQL = `(${KAKAO_FALLBACK_PARENT_TYPES.map((t) => `'${t}'`).join(', ')})`;
 
 /** 옛 모양의 대체 행(자식 행) 조건 — k_oriseq = 원본 K행 seqno. ★2026-10-16 sms-queue 에서 옮겼다(판정 소유 = 이 파일) */
 export const SMS_SUB_ROW_SQL = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
@@ -269,7 +294,7 @@ export const SMS_SUB_ROW_SQL = 'k_oriseq IS NOT NULL AND k_oriseq > 0';
  *   - 옛 모양 = S/L 행 + k_oriseq > 0 — 결과(성공·실패·대기)는 그 행의 결과코드대로
  */
 export function fallbackOf(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): 'S' | 'L' | null {
-  if (msgType === 'K') {
+  if (KAKAO_FALLBACK_PARENT_TYPES.includes(msgType)) {
     if (statusCode == null || statusCode === '') return null;
     const code = Number(statusCode);
     if (code === KAKAO_FALLBACK_SMS_CODE) return 'S';
@@ -286,15 +311,21 @@ export function fallbackOf(msgType: string, kOriseq?: number | string | null, st
  * ★ 2026-10-16 옛: 'S'·'L'(문자와 한 줄) → 정산서 「LMS」 · 이제 = 「LMS(대체발송)」 줄(billing-types SMS_FB·LMS_FB · 단가는 문자 상속).
  */
 export const FALLBACK_BILLING_CODE_WHEN_SQL =
-  `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN '${FALLBACK_BILLING_CODE.S}' `
-  + `WHEN msg_type = 'K' AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN '${FALLBACK_BILLING_CODE.L}' `
+  `WHEN msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = ${KAKAO_FALLBACK_SMS_CODE} THEN '${FALLBACK_BILLING_CODE.S}' `
+  + `WHEN msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = ${KAKAO_FALLBACK_LMS_CODE} THEN '${FALLBACK_BILLING_CODE.L}' `
   + `WHEN msg_type = 'S' AND ${SMS_SUB_ROW_SQL} THEN '${FALLBACK_BILLING_CODE.S}' `
   + `WHEN msg_type = 'L' AND ${SMS_SUB_ROW_SQL} THEN '${FALLBACK_BILLING_CODE.L}'`;
 
-/** SQL용: 카카오 실패 대체발송 행 — ① 별도 문자 행 + ② K행 대체 성공 (발송결과·엑셀의 「대체발송」 필터) */
+/** SQL용: 카카오 실패 대체발송 행 — ① 별도 문자 행 + ② 카카오(K · F) 행 대체 성공 (발송결과·엑셀의 「대체발송」 필터) */
 export const SUBSTITUTE_ROW_SQL =
   `((k_oriseq > 0 AND msg_type IN ('L', 'S')) `
-  + `OR (msg_type = 'K' AND status_code IN (${KAKAO_FALLBACK_SMS_CODE}, ${KAKAO_FALLBACK_LMS_CODE})))`;
+  + `OR (msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code IN (${KAKAO_FALLBACK_SMS_CODE}, ${KAKAO_FALLBACK_LMS_CODE})))`;
+
+/** SQL용(선불 결과별 정산 · smsKakaoResultAgg) — 카카오 시도 성공(알림톡 · 브랜드 공통 1800) */
+export const KAKAO_DELIVERED_SQL = `msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = 1800`;
+/** SQL용 — 카카오 행 자체의 대체 성공(SMS · LMS) */
+export const KAKAO_INROW_FALLBACK_SMS_SQL = `msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = ${KAKAO_FALLBACK_SMS_CODE}`;
+export const KAKAO_INROW_FALLBACK_LMS_SQL = `msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = ${KAKAO_FALLBACK_LMS_CODE}`;
 
 /**
  * 발송내역 행별 유형 라벨 (QTmsg SMSQ_SEND의 msg_type + k_oriseq 기반).
@@ -342,20 +373,27 @@ export function getSendTypeLabel(msgType: string, kOriseq?: number | string | nu
  * - send_channel='alimtalk' → 알림톡
  * - 그 외 → message_type (SMS/LMS/MMS)
  */
-export function getCampaignChannelLabel(sendChannel: string | null | undefined, messageType: string): string {
+export function getCampaignChannelLabel(sendChannel: string | null | undefined, messageType: string, kakaoTargeting?: string | null): string {
   if (sendChannel === 'alimtalk') return '알림톡';
   // ★ 2026-07-30: 브랜드 전용 채널은 message_type(LMS)이 아니라 브랜드메시지로 표기 (both는 문자 혼합이라 제외)
-  if (isBrandOnlyChannel(sendChannel)) return '브랜드메시지';
+  // ★ 2026-11-05 C107 D-11 — 이름 = 청구 유형 이름(친구 · 비친구 · 정산서와 같은 글자 · 판정 = brandBillingKey)
+  if (isBrandOnlyChannel(sendChannel)) return kakaoTargeting === undefined ? '브랜드메시지' : brandAudienceLabel(kakaoTargeting);   // 넘기지 않으면 채널 단위(campaign-list-csv 와 같은 규칙)
   // ★ 2026-07-25 message_type이 비어 있으면 엑셀 '문자타입' 셀이 통째로 빈칸이 됐다.
   //   빈 셀은 담당자에게 "데이터 누락"으로 읽힌다(고객사 발송통계에서 접수된 그 증상과 같다).
   //   값이 없는 것과 유형을 모르는 것을 구분해 표기한다.
   return String(messageType || '').trim() || '(유형 미상)';
 }
 
+/** ★ 2026-11-05 C107 D-11 — 브랜드 대상값 → 화면 · 통계 이름(청구 유형 이름 그대로 · 「브랜드메시지(친구)」 · 「브랜드메시지(비친구)」) */
+export function brandAudienceLabel(kakaoTargeting: string | null | undefined): string {
+  return billingTypeLabelOf(brandBillingKey(kakaoTargeting));
+}
+
 export interface ChannelCount { total: number; success: number; fail: number; pending: number; }
 
 /**
  * ★ 2026-10-07 (박성용 접수 cmuxvwasa0pvajnn462s5ubyr) 알림톡 캠페인 = 「알림톡 시도」와 「대체 문자」를 따로 센다.
+ * ★ 2026-11-05 C107 — 브랜드(F) 부모도 같은 규칙(알림톡 · 브랜드 전용 캠페인 = 「카카오 시도」 + 「대체 문자」).
  *   옛 목록은 대체로 나간 문자까지 알림톡 성공으로 셌다(3건 성공 · 실제 = 알림톡 2 성공 + 1 실패 → LMS 대체 1 성공).
  *   - 알림톡 시도 = K행 전부. K+7830/7831(비토 라인 = 같은 행에 대체 결과) = 알림톡 실패 + 대체 성공 1건씩.
  *   - 옛 라인 = 실패한 K행(알림톡 실패) + 별도 L/S행(k_oriseq>0 = 대체 · 그 행의 결과대로).
@@ -363,15 +401,15 @@ export interface ChannelCount { total: number; success: number; fail: number; pe
  * ★ 2026-10-16 통계 엑셀도 이 집계 하나를 쓴다(옛 엑셀 전용 classifyMsgChannel·tallySmsChannelCounts 삭제 · B-1016-1).
  *   대체 판정 = fallbackOf · 청구 식 = 같은 규칙의 SQL 조각(FALLBACK_BILLING_CODE_WHEN_SQL).
  */
-export interface AlimtalkFallbackCount extends ChannelCount {
+export interface KakaoFallbackCount extends ChannelCount {
   fallback: { LMS: ChannelCount; SMS: ChannelCount };
 }
 
-export function tallyAlimtalkFallback(
+export function tallyKakaoFallback(
   rows: Array<{ msg_type: string; k_oriseq?: number | string | null; status_code: number | string; cnt: number | string }>,
-): AlimtalkFallbackCount {
+): KakaoFallbackCount {
   const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
-  const out: AlimtalkFallbackCount = { ...init(), fallback: { LMS: init(), SMS: init() } };
+  const out: KakaoFallbackCount = { ...init(), fallback: { LMS: init(), SMS: init() } };
   const add = (b: ChannelCount, code: number, cnt: number) => {
     b.total += cnt;
     if (isSuccess(code)) b.success += cnt;
@@ -382,9 +420,9 @@ export function tallyAlimtalkFallback(
     const cnt = Number(r.cnt || 0);
     const code = Number(r.status_code);
     const fb = fallbackOf(r.msg_type, r.k_oriseq, code);
-    if (r.msg_type === 'K') {
+    if (KAKAO_FALLBACK_PARENT_TYPES.includes(r.msg_type)) {
       if (fb) {
-        out.total += cnt; out.fail += cnt;                                          // 알림톡은 실패했고
+        out.total += cnt; out.fail += cnt;                                          // 카카오(알림톡 · 브랜드)는 실패했고
         const f = out.fallback[fb === 'L' ? 'LMS' : 'SMS'];
         f.total += cnt; f.success += cnt;                                            // 같은 행에서 문자로 대체 성공
       } else {

@@ -132,7 +132,9 @@ describe('MSG_TYPE_TO_USAGE_KEY — SMSQ 유형코드 → 청구 유형키 (2026
 
 describe('BILLING_MSG_TYPE_SQL — 브랜드 F 행을 친구·비친구로 가르는 집계 식 (2026-09-13)', () => {
   it('F 행만 TARGETING으로 가르고 나머지는 msg_type 그대로다', () => {
-    expect(BILLING_MSG_TYPE_SQL).toMatch(/^CASE WHEN msg_type = 'F' THEN/);
+    // ★ 2026-11-05 C107 — 대체 WHEN(K · F + 7830 · 7831)이 F 갈래보다 먼저(첫 참 WHEN 에서 멈춘다)
+    expect(BILLING_MSG_TYPE_SQL).toMatch(/^CASE WHEN msg_type IN \('K', 'F'\) AND status_code = 7830 THEN 'KS'/);
+    expect(BILLING_MSG_TYPE_SQL).toContain("WHEN msg_type = 'F' THEN");
     expect(BILLING_MSG_TYPE_SQL).toMatch(/ELSE msg_type END$/);
   });
 

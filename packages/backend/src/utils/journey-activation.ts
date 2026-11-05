@@ -81,7 +81,7 @@ export async function activateJourneyGuarded(
           code: 'CALLBACK_CONFIRM_REQUIRED',
           callbackUnregisteredCount: cbResult.callbackUnregisteredCount,
           unregisteredDetails: cbResult.unregisteredDetails,
-          message: `매장번호가 등록 발신번호가 아닌 고객 ${cbResult.callbackUnregisteredCount}명은 발송이 자동 실패 처리됩니다. 계속 활성화할까요?`,
+          message: `개별회신번호가 등록 발신번호가 아닌 고객 ${cbResult.callbackUnregisteredCount}명은 발송이 자동 실패 처리됩니다. 계속 활성화할까요?`,
         };
       }
     } catch (cbErr: any) {

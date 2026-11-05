@@ -28,7 +28,8 @@ describe('① AI 한줄로 확인 창 뒤로가기', () => {
     const body = m.slice(m.indexOf('const goBack = () => {'), m.indexOf("    setStep('asks');\n  };") + 20);
     expect(body).toContain("if (backTo === 'kakao') { setStep('kakao'); return; }");
     expect(body).toContain('if (askBenefit && !benefitDraft.trim() && !benefitNone) { if (f.benefit) setBenefitDraft(f.benefit); else setBenefitNone(true); }');
-    expect(body).toContain('if (askPeriod && !periodPick && !periodNone) { if (f.period_end) setPeriodPick(f.period_end); else setPeriodNone(true); }');
+    // ★ C105 H1 — 시작일도 되살린다
+    expect(body).toContain('if (askPeriod && !periodPick && !periodNone) { if (f.period_end) { setPeriodPick(f.period_end); setPeriodStart(f.period_start ?? null); } else setPeriodNone(true); }');
     expect(body).toContain('if (next[a.id] !== undefined) continue;');
     expect(body).toContain('const hit = f.answers?.find((x) => x.q === a.text);');
   });

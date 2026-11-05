@@ -435,6 +435,8 @@ export interface LineStepsAnswers {
   link?: string | null;
   /** 'YYYY-MM-DD' */
   period?: string | null;
+  /** ★ C105 H1 시작일 'YYYY-MM-DD'(선택 · 기간으로 고른 때) */
+  periodStart?: string | null;
   /** 만들기 단계에서 [넣기]를 누른 낱말(단계가 하나 생긴다) */
   offersAdded: string[];
   /** 사진에서 읽은 숫자도 그대로 쓰기(H3 · 기본 꺼짐) */
@@ -534,7 +536,7 @@ export function buildLineStepsBody(plan: LineStepsPlan, a: LineStepsAnswers, sho
   const has = (key: LineStepKey) => shown.some((s) => s.key === key);
   const facts: Record<string, unknown> = {};
   if (plan.steps.some((s) => s.key === 'benefit')) facts.benefit = typeof a.benefit === 'string' && a.benefit.trim() ? a.benefit.trim() : null;
-  if (has('period') && a.period) facts.period_end = a.period;
+  if (has('period') && a.period) { facts.period_end = a.period; if (a.periodStart) facts.period_start = a.periodStart; }   // ★ C105 H1 시작일 = 값이 있을 때만
   if (a.link) facts.link = a.link;
   const manual = lineStepsManual(a, termOrder).map((m) => {
     const price = lineManualPrice(m.price);
@@ -799,7 +801,7 @@ export function buildLineTemplateBody(plan: LineStepsPlan, a: LineStepsAnswers, 
   const max = plan.steps.find((s) => s.key === 'products')?.max ?? 0;
   const facts: Record<string, unknown> = {};
   if (plan.steps.some((s) => s.key === 'benefit')) facts.benefit = typeof a.benefit === 'string' && a.benefit.trim() ? a.benefit.trim() : null;
-  if (has('period') && a.period) facts.period_end = a.period;
+  if (has('period') && a.period) { facts.period_end = a.period; if (a.periodStart) facts.period_start = a.periodStart; }   // ★ C105 H1 시작일 = 값이 있을 때만
   if (a.link) facts.link = a.link;
   const comp = isLineCompositionId(tpl.id);
   // ★ 2026-10-22 구성 = 조립되는 상품만(사진 있는 직접 상품 · 몰 상품) 먼저 걸러 상한 · 재료 판 판정과 같은 목록(lineCompositionGoods · Codex CT R2)

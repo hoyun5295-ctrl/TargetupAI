@@ -55,7 +55,7 @@ vi.mock('../sms-queue', () => ({
   getCompanySmsTablesWithLogs: async () => ['SMSQ_SEND_15'],
   smsCampaignCountsSafe: async (_t: string[], _ids: any[], _g?: string, scope?: string) =>
     new Map([[CAMP, scope && scope !== 'all' ? state.scoped[scope] : state.counts]]),
-  smsAlimtalkResultAgg: (...a: any[]) => (resultAgg as any)(...a),
+  smsKakaoResultAgg: (...a: any[]) => (resultAgg as any)(...a),
   smsCampaignSubRowCounts: async () => new Map<string, number>(state.sub ? [[CAMP, state.sub]] : []),
 }));
 

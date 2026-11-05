@@ -595,7 +595,7 @@ export function prepareSendMessage(
     // ★ D201 (2026-05-22) Phase B-3: Connected Content 외부 데이터
     externalContext?: Record<string, any>;
   }
-): { message: string; subject: string } {
+): { message: string; subject: string; body: string } {
   // 1. 변수 치환 (Liquid 렌더링 + %변수% 치환 통합)
   let msg = replaceVariables(template, customer, fieldMappings, options.addressBookFields, {
     skipNumberFormatting: options.skipNumberFormatting,
@@ -603,12 +603,42 @@ export function prepareSendMessage(
     skipLiquid: options.skipLiquid,
     externalContext: options.externalContext,
   });
+  // ★ 2026-11-05 C107 — 변수 치환 뒤 · 광고 표기 전 글. 카카오 대체 문자는 고른 유형(SMS · LMS)으로 표기를 다시 한 번만 붙여야 해서
+  //   표기가 붙은 글을 넘기면 안 된다(Codex 설계 1R #4 · 브랜드 resolveBrandFallback 의 입력). 기존 소비처는 이 칸을 안 읽는다.
+  const body = msg;
   // 2. (광고)+080 본문 (중복 방지 안전장치 내장)
   msg = buildAdMessage(msg, options.msgType, options.isAd, options.opt080Number);
   // 3. ★ KISA 2026-05: 제목 (광고) 부착 (isAd + LMS/MMS만)
   //    ★ D191-fix1 (2026-05-22) Harold 명시: 제목은 변수/Liquid 사용 X — 단순 본문 요약 텍스트만 정합 (가독성 + 통신사 표시 영역 좁음)
   const subj = buildAdSubject(options.subject || '', options.msgType, options.isAd);
-  return { message: msg, subject: subj };
+  return { message: msg, subject: subj, body };
+}
+
+/**
+ * ★ 2026-11-05 C107 D-17 · 뿌리 R63 — 카카오(알림톡 · 브랜드)가 실패해 **문자로 나가는 대체 문구**의 금칙어 판정 입력.
+ *   금칙어 차단(spam-block checkSpamBlockBeforeCharge · 전송자격인증 5.2)은 「문자로 나가는 문안」을 보는데,
+ *   대체 문구는 지금까지 어느 길에서도 입력에 없었다(sms · both 만 판정).
+ *   nextType = 큐 대체 유형(브랜드 A · B / 알림톡 S · L · A · B) · nextContents = 큐에 실을 대체 글(브랜드는 resolveBrandFallback 이 광고 표기를 붙인 뒤 글).
+ *   originalText = 알림톡 S · L(「원문 그대로」 = 본문이 그대로 문자로 나간다)의 판정 글.
+ *   판정 입력 꼴 = composeSpamCheckText(제목 + 개행 + 본문) — 문자 경로와 같은 함수(광고 표기는 멱등이라 다시 붙지 않는다).
+ *   대체가 없으면 빈 배열(판정 0).
+ */
+export function kakaoFallbackSpamItems(p: {
+  nextType: string | null | undefined;
+  nextContents?: string | null;
+  titleStr?: string | null;
+  originalText?: string | null;
+  isAd: boolean;
+  recipients: number;
+}): Array<{ text: string; recipients: number }> {
+  const t = String(p.nextType || '').trim().toUpperCase();
+  const contents = String((t === 'S' || t === 'L' ? p.originalText : p.nextContents) || '');
+  if (!['A', 'B', 'S', 'L'].includes(t) || !contents.trim()) return [];
+  const msgType = t === 'B' || t === 'L' ? 'LMS' : 'SMS';
+  return [{
+    text: composeSpamCheckText({ message: contents, subject: msgType === 'LMS' ? String(p.titleStr || '') : '', msgType, isAd: p.isAd }),
+    recipients: Math.max(0, Math.floor(Number(p.recipients) || 0)),
+  }];
 }
 
 /**

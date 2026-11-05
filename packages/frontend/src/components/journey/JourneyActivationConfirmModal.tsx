@@ -517,7 +517,7 @@ export default function JourneyActivationConfirmModal({
               </div>
             </div>
           )}
-          {/* 매장번호 발송 — 미등록 회신번호 실패 예정 고지 */}
+          {/* 개별회신번호 발송 — 미등록 회신번호 실패 예정 고지(★ C105 H2 직접발송과 같은 이름 · 같은 규칙) */}
           {phase === 'callback_confirm' && callbackConfirm && (
             <div className="space-y-3">
               <div className="p-4 rounded-xl bg-amber-50 border border-amber-200">
@@ -525,18 +525,18 @@ export default function JourneyActivationConfirmModal({
                   <AlertTriangle className="w-5 h-5 text-amber-700 flex-shrink-0 mt-0.5" />
                   <div>
                     <div className="text-[14px] font-semibold text-amber-900">
-                      미등록 매장번호: 발송 실패 예정 {callbackConfirm.count.toLocaleString()}명
+                      미등록 개별회신번호: 발송 실패 예정 {callbackConfirm.count.toLocaleString()}명
                     </div>
                     <div className="text-[12px] text-amber-900 mt-1 leading-relaxed">
-                      {callbackConfirm.message || '매장번호가 등록 발신번호가 아닌 고객은 발송이 자동 실패 처리됩니다.'}
-                      {' '}발신번호 관리에서 매장번호를 등록하면 정상 발송됩니다. 매장번호가 없는 고객은 기본 회신번호로 발송됩니다.
+                      {callbackConfirm.message || '개별회신번호가 등록 발신번호가 아닌 고객은 발송이 자동 실패 처리됩니다.'}
+                      {' '}발신번호 관리에서 그 번호를 등록하면 정상 발송됩니다. 회신번호 · 매장 전화번호가 모두 없는 고객은 여정의 보내는 번호로 발송됩니다.
                     </div>
                   </div>
                 </div>
               </div>
               {callbackConfirm.details.length > 0 && (
                 <div className="p-3 rounded-xl bg-white border border-slate-200">
-                  <div className="text-[11px] text-slate-500 mb-2">미등록 매장번호별 실패 예정 인원</div>
+                  <div className="text-[11px] text-slate-500 mb-2">미등록 개별회신번호별 실패 예정 인원</div>
                   <div className="space-y-1 max-h-40 overflow-y-auto">
                     {callbackConfirm.details.slice(0, 20).map((d) => (
                       <div key={d.phone} className="flex items-center justify-between text-[12px]">

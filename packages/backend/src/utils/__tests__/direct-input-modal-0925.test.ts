@@ -23,18 +23,12 @@ const load = async () => import('../../../../frontend/src/utils/recipient-paste'
 const loadFmt = async () => import('../../../../frontend/src/utils/formatDate');
 
 describe('1. 번호 읽기 — 원래 식과 같은 결과', () => {
-  it('브랜드 — 옛 normalizePhones(공백·쉼표·세미콜론 · 숫자만 9~11자리)와 같다 · 못 읽은 토막은 따로 센다', async () => {
-    const { normalizeBrandPhones, checkBrandPaste } = await load();
-    const oldNormalize = (raw: string) => raw.split(/[\s,;\n\r\t]+/).map((v) => v.replace(/[^0-9]/g, '')).filter((v) => v.length >= 9 && v.length <= 11);
-    const samples = [
-      '01012345678\n010-9876-5432, 01011112222;01033334444',
-      '  010 1234 5678  ',
-      '홍길동 01055556666 12345 010123456789',
-      '',
-      '\t021234567\r\n0311234567',
-    ];
-    for (const s of samples) expect(normalizeBrandPhones(s)).toEqual(oldNormalize(s));
-    expect(checkBrandPaste('홍길동 01055556666 12345').invalid).toEqual(['홍길동', '12345']);
+  it('브랜드 — ★1105 C107 D-16 브랜드 전용 읽기(9~11자리 · 공백 구분) 폐기 = 알림톡과 같은 읽기 하나', async () => {
+    const mod = await load();
+    expect((mod as any).checkBrandPaste).toBeUndefined();
+    expect((mod as any).normalizeBrandPhones).toBeUndefined();
+    const b = read('components/BrandSendModal.tsx');
+    expect(between(b, 'const planDraft = (text: string) => {', '};')).toContain('const check = checkAlimtalkPaste(text);');
   });
 
   it('알림톡 — 옛 parseDirectInput 구분 규칙 그대로 + 10자리 미만은 형식 오류(옛 규칙은 0101234 도 번호로 셌다)', async () => {
@@ -104,7 +98,8 @@ describe('3. 알림톡 창', () => {
     expect(preview).toContain('const { check, plan } = planPaste(text);');
     // 통째 교체는 파일 매핑 적용(applyMapping) 한 곳만 남는다
     expect((a.match(/setRecipients\(dedup\);/g) || []).length).toBe(1);
-    expect(between(a, 'const applyMapping = () => {', 'setShowMapping(false);')).toContain('setRecipients(dedup);');
+    // ★1105 C107 Codex 2R — 적용 함수 머리에 세대 검사(setShowMapping 이 먼저 나온다) · 함수 끝까지 본다
+    expect(between(a, 'const applyMapping = () => {', '\n  };\n')).toContain('setRecipients(dedup);');
   });
   it('한 건씩 — 칸 = 템플릿 변수 · 값은 변수 이름 칸 · 빈 칸·잘못된 번호·(중복제거 켜짐) 이미 있는 번호는 막는다', () => {
     const add = between(a, 'const addDirectRow = (values: Record<string, string>): RowAddResult => {', '  };\n');
@@ -156,13 +151,13 @@ describe('4. 브랜드 창', () => {
     expect(use).toContain('tone="violet"');
     expect(use).not.toContain('rows=');
   });
-  it('더하기·중복 식은 원래 그대로(Set + 이미 담긴 번호 빼기) · 검수와 더하기가 같은 planDraft', () => {
+  it('★1105 C107 D-04 — 더하기 = planAppend(중복제거 켜고 끔 · 문자 · 알림톡과 같은 식) · 검수와 더하기가 같은 planDraft', () => {
     const plan = between(b, 'const planDraft = (text: string) => {', '};');
-    expect(plan).toContain('const added = Array.from(new Set(check.phones)).filter((p) => !existing.has(p));');
+    expect(plan).toContain('const plan = planAppend(check.phones, phones, dedupEnabled);');
     expect(between(b, 'const addFromDraft = (text: string) => {', 'setAddNotice(\n')).toContain('setRecipients([...phones, ...added]);');
     expect(between(b, 'const previewDraft = (text: string): PastePreview => {', '};\n')).toContain('planDraft(text)');
     expect(b).not.toMatch(/const normalizePhones = /);
-    expect(b).toContain('const parsed = normalizeBrandPhones(text);');
+    expect(b).not.toMatch(/new Set\(check\.phones\)/);
   });
   it('더한 결과 안내는 방식과 무관하게 보인다(파일 읽기 중단 안내가 가려지지 않게)', () => {
     expect(b).toContain('{!isTarget && addNotice && <p className="text-[11.5px] text-violet-600 px-0.5 m-0">{addNotice}</p>}');

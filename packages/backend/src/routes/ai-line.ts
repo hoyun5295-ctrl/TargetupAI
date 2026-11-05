@@ -12,7 +12,7 @@ import { authenticate } from '../middlewares/auth';
 import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { InsufficientCreditError } from '../utils/ai-credit';
 import { isValidAttemptToken, isValidLineBenefit } from '../utils/one-line-facts';
-import { isValidLinePeriodEnd } from '../utils/one-line-steps';
+import { readLinePeriod } from '../utils/one-line-steps';   // ★ C105 H1
 import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
 import { readAiLine, sanitizeLineTypes, readLineAnswers, type AiLineAnswer } from '../utils/ai-line';
 import {
@@ -56,18 +56,20 @@ const isPlainObject = (v: unknown): v is Record<string, any> => v !== null && ty
  * facts = { benefit: string|null|undefined, period_end: 'YYYY-MM-DD'|null|undefined, answers?: [{q, a}] } · 틀리면 'invalid'
  * ★ 2026-10-20 answers = AI 가 물은 그 밖 질문의 답(설계서 §17) · 답이 있을 때만 싣는다(없으면 옛 모양 그대로 = 원장 키 지문 무변)
  */
-function readFacts(raw: unknown): { benefit: string | null; periodEnd: string | null; answers?: AiLineAnswer[] } | 'invalid' {
+function readFacts(raw: unknown): { benefit: string | null; periodEnd: string | null; periodStart?: string; answers?: AiLineAnswer[] } | 'invalid' {
   if (raw === undefined || raw === null) return { benefit: null, periodEnd: null };
   if (!isPlainObject(raw)) return 'invalid';
   const b = raw.benefit;
   if (b !== undefined && b !== null && !isValidLineBenefit(b)) return 'invalid';
-  const pe = raw.period_end;
-  if (pe !== undefined && pe !== null && !isValidLinePeriodEnd(pe, Date.now())) return 'invalid';
+  // ★ C105 H1 — 기간 = readLinePeriod CT(한줄 단계 몸통 읽기와 같은 함수 · 시작일은 값이 있을 때만 = 옛 원장 키 불변)
+  const period = readLinePeriod(raw.period_start, raw.period_end, Date.now());
+  if (period === 'invalid') return 'invalid';
   const answers = readLineAnswers(raw.answers);
   if (answers === 'invalid') return 'invalid';
   return {
     benefit: typeof b === 'string' && b.trim() ? b.trim() : null,
-    periodEnd: typeof pe === 'string' ? pe : null,
+    periodEnd: period.end,
+    ...(period.start ? { periodStart: period.start } : {}),
     ...(answers.length > 0 ? { answers } : {}),
   };
 }

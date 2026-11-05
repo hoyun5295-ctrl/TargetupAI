@@ -14,6 +14,20 @@ export interface StudioDraft {
   imageUrl: string;
   /** 소재 파일명(제목 시드용 — 선택). */
   name?: string | null;
+  /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — 그림에 그린 글(새 결과 카드 = 생성에 쓴 글 · 라이브러리 소재 = 파일 이름 헤드라인 · 없으면 모름) */
+  texts?: { label?: string; title?: string; subtitle?: string } | null;
+  /** 그림에 글이 들어갔는가(인앱 = 통짜로 연다) */
+  textInImage?: boolean;
+}
+
+/**
+ * ★ 2026-11-05 §3-8 — 라이브러리 소재 → 넘김 초안. 포스터(channel_spec poster · inapp-poster) = 글이 든 그림 ·
+ *   글 = 파일 이름(「헤드라인_채널.확장자」 · 백엔드 buildAssetDisplayName)에서 「_채널.확장자」를 뺀 헤드라인(밑줄 = 띄어쓰기 · 비면 빈 글).
+ */
+export function studioDraftFromAsset(asset: { url: string; filename?: string | null; channelSpec?: string | null }): StudioDraft {
+  const textInImage = asset.channelSpec === 'poster' || asset.channelSpec === 'inapp-poster';
+  const head = String(asset.filename || '').replace(/\.[A-Za-z0-9]+$/, '').replace(/_[^_]*$/, '').replace(/_/g, ' ').trim();
+  return { imageUrl: asset.url, name: asset.filename || null, textInImage, texts: textInImage ? { title: head === '이미지' ? '' : head } : null };
 }
 
 /** 초안 넣기 — 소비는 takeEventDraft(key)로 (ts 기반 30분 TTL 공유). */

@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 import { renderDmViewerHtml } from '../dm/dm-viewer';
 import { renderEmailSections } from '../email/email-section-renderer';
 import type { DmBrandKit } from '../dm/dm-tokens';
-import { formatLinePeriodEnd } from '../one-line-steps';
+import { linePeriodLabel } from '../one-line-steps';
 import { kstDatePlus } from '../line-template-example';
 import {
   LINE_COMPOSITIONS, composeRichDm, composeRichEmail, composeRichInapp, compositionFallbackCopy, compositionChannelSlots,
@@ -52,7 +52,7 @@ interface Example { company: string; industry: string; line: string; m: (nowMs: 
 const base = (company: string): Omit<LineRichMaterials, 'products'> => ({
   brandName: company, poster: null, points: [], steps: [], mood: [], proof: [], benefit: null, periodEnd: null, periodLabel: null, link: 'https://example.com/event',
 });
-const until = (nowMs: number, days: number) => { const d = kstDatePlus(nowMs, days); return { periodEnd: d, periodLabel: `${formatLinePeriodEnd(d)}까지` }; };
+const until = (nowMs: number, days: number) => { const d = kstDatePlus(nowMs, days); return { periodEnd: d, periodLabel: linePeriodLabel(null, d) }; };
 
 // 예시 사진 = 저장소 정적 파일(frontend/public/diagnosis-examples/assets) · ★ 상품 이름과 사진이 맞는 것만(1022 시연 지적 · 이어폰을 크림으로 쓰지 않는다)
 const EXAMPLES: Record<string, Example> = {

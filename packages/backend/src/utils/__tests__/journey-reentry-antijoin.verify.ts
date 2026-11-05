@@ -25,12 +25,12 @@ console.log('[buildReentryAntiJoin] 재진입 불가 — 모든 execution 제외
   ok('AND 로 시작(호출부에 직접 이어붙임)', () => assert.ok(/^AND\s+NOT\s+EXISTS/.test(frag)));
 }
 
-console.log('[buildReentryAntiJoin] 재진입 가능 + cooldown<=0 — 제외 없음');
+console.log('[buildReentryAntiJoin] 재진입 가능 + cooldown<=0 — 지금 진행 중만 제외(★ C105 H3 · 넣기 가드와 같은 집합)');
 {
   const params: any[] = ['cid'];
   const frag = buildReentryAntiJoin('c', params, 'jid', true, 0);
-  ok('빈 문자열', () => assert.strictEqual(frag, ''));
-  ok('params push 없음', () => assert.strictEqual(params.length, 1));
+  ok('status=active 만', () => assert.ok(/je\.status = 'active'/.test(frag) && !/entered_at/.test(frag)));
+  ok('지금 여정 = $2', () => assert.strictEqual(params[1], 'jid'));
 }
 
 console.log('[buildReentryAntiJoin] 재진입 가능 + cooldown>0 — active 또는 cooldown 안 제외');

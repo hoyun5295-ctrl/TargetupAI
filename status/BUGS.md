@@ -55,6 +55,24 @@
 
 ## 2) 활성 버그
 
+### 🔴 B-1105-4 브랜드메시지 오류접수 다섯(대체 화면 비좁음 · 대체 문자 통계 · 대체 문자를 브랜드 단가로 정산 · 중복제거 단추 없음 · 알림톡 · 브랜드 타겟추출 없음) + 구조체크 결함 (🟡 코드 수정 · 시험 통과 · Codex 구현 approve · 배포 전 · 카드 C107) · 2026-11-05 그룹웨어 오류접수 5(무주덕유산리조트 11/02 정산 포함)
+> **실측(Harold 실행 1105)**: 브랜드(F) 행의 문자 대체 결과 = 같은 행 7830 · 7831(대체 행 따로 없음) · 브랜드 성공 1800 · 실패 원 코드(3018 · 509)가 에이전트 설정으로 9999 · 광고 브랜드의 대체 문자에 (광고) · 080 없음(게이트웨이 9건).
+> **뿌리**: R1 넓힘(대체 판정을 알림톡 K 만 봄) · R61 새로(광고 표기 출구 둘) · R63 새로(대체 글 금칙어 판정 밖) · R31 넓힘(브랜드 받는 사람 규칙) · R62 새로(외부 결과 코드 번역 · 게이트웨이).
+> **처방**: 설계서 docs/2026-11-05-brand-message-design.md(흐름 표 2026-11-05-brand-message-flow-ledger.md · §11 구현 기록) · 계약 c107-brand-contract-1105 · 실 PG c107-brand-prepaid-1105 · 게이트웨이 migrations/100 + scripts/gw/customer-failure-codes-hanjul.sql(별도 배포 · 정책 켜기 = 원장 C107-G6) · 직원 시트 38 ~ 49 = docs/2026-11-05-c107-staff-sheet.xlsx.
+> **추가 과제(이번 축 밖 · 기록만)**: ① 비토 라인 스팸 차단 대역 코드를 스팸 몰림 경보(SPAM_BLOCK_STATUS_CODES)에 넣을지 ② 게이트웨이 수신자별 친구 여부(friend_yn)가 한줄로에 오지 않는다(지금 친구 · 비친구 = 발송 대상 설정 값) ③ 게이트웨이 internal/agent/client TestCursorFlushRecoversAfterTransientSyncFailureAndReplay 가 병렬 전체 실행에서 가끔 실패(단독 5회 중 5 통과 · 다른 5회 묶음에서 실패 · 이번 변경 패키지 의존 0) · Windows 권한 시험 5건은 check.sh 가 원래 빼는 환경 항목.
+
+### 🔴 B-1105-3 인앱 A/B 변형 만들기 · AI 문구 다듬기가 없는 칸(cdp_inapp_messages.is_ad)을 읽어 첫 SELECT 에서 실패 (🟡 코드 수정 · 시험 통과 · 배포 전) · 2026-11-05 C106 구현 중 실 PG 발견
+> **실측**: 실 PG(운영과 정의 해시가 같다고 대조된 덤프 · t_tpl_closed) `column "is_ad" does not exist`(42703) · SCHEMA.md cdp_inapp_messages 41칸에 is_ad 없음. 운영 실행 출력은 받지 않았다(같은 정의라 같은 오류로 판정 · 확인 = 서버 pm2 로그에서 `is_ad` 를 찾는다).
+> **자리(grep 전수)**: `inapp-variant-optimizer.ts` createVariant(부모 SELECT · INSERT 칸) · `inapp-quick-action.ts` quickActionAIRefine(부모 SELECT). 그 밖 SQL 에서 이 표의 is_ad 를 읽는 곳 0(`routes/cdp.ts` · `inapp-ai-generator.ts` 의 is_ad = 입력 객체 · 프롬프트 글 · SQL 아님).
+> **처방**: 두 SQL 에서 칸을 뺐다(DDL 0 · 광고 여부는 지금처럼 false 로 본다 · INSERT 자리표 번호 당김) · 계약 = `inapp-poster-redesign-1105.test.ts` CT-IA8(AI 다듬기 SELECT 에 is_ad 0) · 실 PG `inapp-poster-1105.pg` 가 createVariant 를 실제로 돌린다. 설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §13 D4.
+
+### 🔴 B-1105-2 고객 목록 주소가 숫자 아닌 page · limit 에 500(LIMIT NaN) · 같은 꼴 routes 30 파일 (🟡 코드 수정 · 시험 통과 · 배포 전) · 2026-11-05 운영 로그 13:58 · 13:59
+> **실측**: 운영 로그 1105 13:58 · 13:59 두 번 = 고객 목록(`routes/customers.ts` 목록 처리기 · 옛 193행 `params.push(Number(limit), offset)`)에 정수 자리 `NaN` → PG 오류 500. 보낸 화면(생산자) = 미검증(`CustomerDBModal.tsx` · `AdminDashboard.tsx` page · limit 조립).
+> **원인**: 페이지 값 CT(`parsePageParams`)가 있었으나 다섯 주소만 썼다(손 등재) · 나머지는 `Number(x)` · `parseInt(x) || 기본` 을 그대로 SQL 에 넣어 숫자 아님 = NaN · 음수 = 음수 OFFSET(둘 다 500) · 고객 필터는 숫자 아닌 상한을 numeric NaN 으로 넘겨 대상을 넓힌 채 성공했다.
+> **처방(C105 H4 · 대장 R59)**: 받는 경계 CT(routes 30 파일 · 키 이름 무관 추출 133 줄) + SQL 직전 CT(`sqlNumberParam` · `sqlParseIntParam` · `sqlNumericRawParam` · 고객 필터 `bindNumber` · `bindNumericRaw`) · 넘기는 값은 옛 값 그대로 · 숫자 아님 = 400 INVALID_NUMBER_INPUT(고객 라우트 다섯 catch) · 설계서 docs/2026-11-05-c105-out-of-scope-five-design.md §4 H4.
+> **검증**: 계약 c105-contract-1105 K5 · K5b · K5c · K5d · K5e · 실 PG c105-out-of-scope-1105(2^53 · 지수 · '1e 3' 대상 집합 · NaN 멈춤) · Codex 설계 9R · 구현 2R approve.
+> **배포 뒤 확인**: 직원 시트 36 · 에러 로그에 INVALID_NUMBER_INPUT 이 나오면 그 주소 · 화면(생산자)을 적는다.
+
 ### 🔴 B-1105-1 이메일 대행: 담당자에게 승인 URL 이 안 간다(테스트 문자는 가고 승인 요청 문자에 URL 없이 「로그인해서 승인」 안내만) (🟡 코드 수정 · 시험 통과 · 배포 전) · 2026-11-05 고객사 클레임(Harold 전달)
 > **실측(Harold 1105 출력)**: 오늘 이메일 접수 2건(8710402b cancelled · 0eaad8c0 approved) 담당자 번호 끝 5257 · 6861 · 9658 = 접수 계정 로그인 인증번호와 다름(접수 계정 로그인 인증번호 없음) · 같은 번호를 로그인 인증번호로 쓰는 계정 0(전 회사) · 진행기록에 `notify_failed` 0(문자는 나감).
 > **원인**: 1016 개편(설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0)이 승인 링크를 「담당자 번호 = 계정 로그인 인증번호(users.mfa_phone)」인 번호에만 싣게 바꿨다(`resolveLinkApprovers`) · 그 밖 번호는 URL 없는 로그인 안내. 요청서 양식의 담당자(테스트 받을) 번호가 계정 로그인 인증번호와 묶여 있었다.

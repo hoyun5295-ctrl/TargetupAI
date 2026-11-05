@@ -189,7 +189,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         // 조립·대체발송 결함은 throw — 청크 전체 미적재로 처리되어 worker 환불이 되돌린다(fail-closed).
         const brandFallback = resolveBrandFallback({
           resendType: p.sendChannel === 'both' ? 'NO' : (p.kakaoResendType || 'SM'),
-          originalMessage: finalMessage,
+          originalMessage: finalMessage,   // replaceVariables 결과 = 광고 표기 전(★ C107 D-14 · 고른 유형으로 표기 한 번)
+          isAd: p.finalIsAd === true,
+          opt080Number: p.opt080 || '',
         });
         // ★2026-09-02 AI 생성 이미지 안내 — 판정은 워커가 캠페인당 한 번 했고(p.kakaoImageAiGenerated),
         //   부착만 개인화 본문에 한다.

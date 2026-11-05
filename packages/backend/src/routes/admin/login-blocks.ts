@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { authenticate, requireAdminArea } from '../../middlewares/auth';
+import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import {
   getActiveBlocks,
   getBlockHistory,
@@ -41,8 +42,7 @@ router.get('/active', async (req: Request, res: Response) => {
 // GET /api/admin/login-blocks/history — 차단 이력 (페이지네이션)
 router.get('/history', async (req: Request, res: Response) => {
   try {
-    const page = Number(req.query.page || 1);
-    const limit = Number(req.query.limit || 50);
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const ipLike = req.query.ip ? String(req.query.ip) : undefined;
     const loginIdLike = req.query.loginId ? String(req.query.loginId) : undefined;
     const reason = req.query.reason ? String(req.query.reason) : undefined;

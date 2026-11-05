@@ -13,7 +13,6 @@ import SearchableSelect from '../components/SearchableSelect'; // ★ D144 P11+P
 // ★ 2026-07-31 정산 메일 수신자 — 담당자 이메일 칸 하나를 유형별·복수 행 편집으로 대체
 import BillingRecipientsEditor, { type BillingRecipient } from '../components/BillingRecipientsEditor';
 import ListPager, { pageSlice } from '../components/shared/ListPager'; // ★ 2026-10-07 목록 쪽 넘김(20건)
-import { readAlimtalkSplit, alimtalkFallbackRows } from '../utils/alimtalk-split'; // ★ 2026-10-07 알림톡 시도 · 대체 문자 분리
 import LoginBlocksManagement from '../components/admin/LoginBlocksManagement'; // ★ D145 P0 (2026-05-07): 로그인 차단 관리 (B안: IP+loginId 쌍)
 import AgentChargePanel from '../components/AgentChargePanel'; // ★ 2026-07-24 §5-3 에이전트 충전 실행 (게이트웨이 지갑)
 import AgentDeployWizard from '../components/admin/AgentDeployWizard'; // 싱크에이전트 OS별 배포 위저드

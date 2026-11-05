@@ -3,11 +3,11 @@
  * 실행: npx ts-node packages/backend/src/utils/__tests__/sms-channel-split.verify.ts
  * (DB import 0 — msg_type/k_oriseq/status_code 대체 판정 + 알림톡 시도·대체 집계 순수 함수.)
  * 2026-06-07: 대체발송 SMS/LMS 세분화 — 정산 단가 구분.
- * ★ 2026-10-16 B-1016-1: 옛 classifyMsgChannel·tallySmsChannelCounts 삭제 → fallbackOf·tallyAlimtalkFallback(통계 엑셀·목록 공용).
+ * ★ 2026-10-16 B-1016-1: 옛 classifyMsgChannel·tallySmsChannelCounts 삭제 → fallbackOf·tallyKakaoFallback(통계 엑셀·목록 공용).
  *   고정본(6/7 옛 모양 행)은 그대로 두고 기대값을 새 집계로 옮겼다.
  */
 import assert from 'node:assert';
-import { fallbackOf, tallyAlimtalkFallback } from '../sms-result-map';
+import { fallbackOf, tallyKakaoFallback } from '../sms-result-map';
 
 let passed = 0;
 const ok = (n: string, f: () => void) => { f(); passed++; console.log(`  ok - ${n}`); };
@@ -23,9 +23,9 @@ ok('S + k_oriseq NULL → 대체 아님', () => assert.strictEqual(fallbackOf('S
 ok('M → 대체 아님', () => assert.strictEqual(fallbackOf('M', 361669), null));
 ok('K + 7831 → L (비토 라인 K행 대체)', () => assert.strictEqual(fallbackOf('K', null, 7831), 'L'));
 
-console.log('[sms-channel-split] tallyAlimtalkFallback');
+console.log('[sms-channel-split] tallyKakaoFallback');
 ok('K 6(성공4·실패2) + LMS대체 2(성공2)', () => {
-  const r = tallyAlimtalkFallback([
+  const r = tallyKakaoFallback([
     { msg_type: 'K', k_oriseq: null, status_code: 1800, cnt: 4 },
     { msg_type: 'K', k_oriseq: null, status_code: 7300, cnt: 2 },
     { msg_type: 'L', k_oriseq: 361669, status_code: 1000, cnt: 1 },
@@ -36,7 +36,7 @@ ok('K 6(성공4·실패2) + LMS대체 2(성공2)', () => {
   assert.strictEqual(r.fallback.SMS.total, 0);
 });
 ok('일반 LMS(k_oriseq 없음)는 세지 않는다(알림톡 캠페인 행만 넘어온다)', () => {
-  const r = tallyAlimtalkFallback([{ msg_type: 'L', k_oriseq: null, status_code: 1000, cnt: 3 }]);
+  const r = tallyKakaoFallback([{ msg_type: 'L', k_oriseq: null, status_code: 1000, cnt: 3 }]);
   assert.strictEqual(r.total, 0);
   assert.strictEqual(r.fallback.LMS.total, 0);
 });

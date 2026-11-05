@@ -32,7 +32,7 @@ import { storeMembershipClause } from './store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { query } from '../config/database';
 import { buildFilterQueryCompat } from './customer-filter';
-import { getOpt080Number, prepareFieldMappings, prepareSendMessage, composeSpamCheckText } from './messageUtils';
+import { getOpt080Number, prepareFieldMappings, prepareSendMessage, composeSpamCheckText, kakaoFallbackSpamItems } from './messageUtils';
 import { checkSpamBlockBeforeCharge } from './spam-block';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
@@ -882,6 +882,21 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         console.warn(`${logPrefix} 금칙어 차단 — 본 발송 중단`);
         await markFailed(ac, autoSpam.notice);
         return;
+      }
+    }
+    // ★ 2026-11-05 C107 D-17 · 뿌리 R63 — 알림톡이 실패해 문자로 나가는 대체 문구(L · S = 본문 그대로 · A · B = 대체문안)도 같은 판정(원문 · 차감 앞).
+    if (ac.channel === 'alimtalk') {
+      const autoFbItems = kakaoFallbackSpamItems({
+        nextType: ac.alimtalk_next_type, nextContents: ac.alimtalk_next_contents, titleStr: ac.alimtalk_next_subject,
+        originalText: messageContent, isAd: false, recipients: customers.length,
+      });
+      if (autoFbItems.length > 0) {
+        const autoFbSpam = await checkSpamBlockBeforeCharge({ items: autoFbItems, companyId: ac.company_id, userId: ac.user_id, source: 'automarketing' });
+        if (autoFbSpam.blocked) {
+          console.warn(`${logPrefix} 금칙어 차단(알림톡 대체 문구) — 본 발송 중단`);
+          await markFailed(ac, autoFbSpam.notice);
+          return;
+        }
       }
     }
 

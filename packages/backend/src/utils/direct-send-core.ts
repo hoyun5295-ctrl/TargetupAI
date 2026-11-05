@@ -9,14 +9,15 @@ import { assertNotDemoCompany } from './demo-company';   // ★ 2026-10-09 시�
 import { query } from '../config/database';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-07-30 차감 축 판정 — 환불 축과 같은 CT를 쓴다(갈리면 회계가 어긋난다)
-import { resolveRefundAxes } from './billing-types';
+import { resolveRefundAxes, isBrandOnlyChannel } from './billing-types';
 import { buildRefundPending } from './refund-pending';
 import { sendSystemAlert } from './system-alert';
 import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining, type TrainingAuthorship } from './training-logger';
 import { findUneditedSendPlaceholder } from './send-placeholder-gate';
-import { composeSpamCheckText } from './messageUtils';
+import { composeSpamCheckText, kakaoFallbackSpamItems } from './messageUtils';
+import { brandFallbackQueueType } from './brand-message';
 import { checkSpamBlockBeforeCharge } from './spam-block';
 // ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
 import { nightAdRestrictionMessage } from './autosend-policy';
@@ -282,6 +283,17 @@ export async function createDirectSendCampaign(
     });
     if (spamVerdict.blocked) throw new DirectSendError(spamVerdict.code, spamVerdict.notice, 400);
   }
+  // ★ 2026-11-05 C107 D-17 · 뿌리 R63 — 카카오(브랜드 · 알림톡)가 실패해 문자로 나가는 대체 문구도 같은 판정(원문 한 번 · 차감 앞).
+  //   브랜드 = 본문을 대체 문구로 쓴다(processor 와 같은 기본 'SM') · 알림톡 = 대체 유형(L · S = 본문 그대로 · A · B = 대체문안).
+  const fbSpamItems = isBrandOnlyChannel(spamChannel)
+    ? kakaoFallbackSpamItems({ nextType: brandFallbackQueueType(spec.kakaoResendType || 'SM'), nextContents: spec.message || '', isAd: spec.adEnabled === true, recipients: spec.total })
+    : spamChannel === 'alimtalk'
+      ? kakaoFallbackSpamItems({ nextType: spec.alimtalkNextType, nextContents: spec.alimtalkNextContents, titleStr: spec.alimtalkNextSubject, originalText: spec.message, isAd: false, recipients: spec.total })
+      : [];
+  if (fbSpamItems.length > 0) {
+    const fbSpam = await checkSpamBlockBeforeCharge({ items: fbSpamItems, companyId: ctx.companyId, userId: ctx.userId, source: spec.sendType || 'direct_core' });
+    if (fbSpam.blocked) throw new DirectSendError(fbSpam.code, fbSpam.notice, 400);
+  }
 
   // ★ 2026-09-28 분할 값 검사 + 끝나는 날 한도(CT send-time-util) — 직접발송 commit·자율 발송 공통 길목. 캠페인 생성·차감 전에 막는다.
   //   저장 설정(send_config)에는 검사를 통과한 값(정수 건수·간격)을 싣는다 — 워커는 readStoredSplit로 읽는다.
@@ -316,7 +328,9 @@ export async function createDirectSendCampaign(
   for (const axis of deductAxes) {
     // ★ 2026-09-13 브랜드 축 단가는 대상(친구·비친구)으로 갈린다 — 적재(direct-send-processor)와 같은 기본값 'I'.
     // ★ 2026-09-26 한줄로 V2 F01·F04 알림톡(알림톡 창·마케팅 플래너)이면 차감 행에 결과별 정산 단가를 싣는다.
-    const deduct = await prepaidDeduct(ctx.companyId, spec.total, axis.type, campaignId, ctx.userId, 'campaign', { targeting: spec.kakaoTargeting || 'I', form: 'FREE' }, { alimtalk: directChannel === 'alimtalk' });
+    // ★ 2026-11-05 C107 D-12 — 브랜드 전용 + 문자 대체 = 결과별 단가(processor 와 같은 기본 'SM' · both = 대체 끔)
+    const coreBrandFb = isBrandOnlyChannel(directChannel) ? brandFallbackQueueType(spec.kakaoResendType || 'SM') : 'N';
+    const deduct = await prepaidDeduct(ctx.companyId, spec.total, axis.type, campaignId, ctx.userId, 'campaign', { targeting: spec.kakaoTargeting || 'I', form: 'FREE' }, { alimtalk: directChannel === 'alimtalk', brandFallback: axis.type === 'BRAND' && coreBrandFb !== 'N' ? coreBrandFb : null });
     if (!deduct.ok) {
       // ★ 2026-07-30 (2R): 보상은 ok까지 확인한다 — prepaidRefund는 실패해도 throw 없이 ok=false로 돌아온다.
       //   회수가 하나라도 미완이면 캠페인을 지우지 않는다(지우면 durable 의무를 붙일 곳이 사라져 영구 미환불).

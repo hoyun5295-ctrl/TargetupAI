@@ -51,7 +51,7 @@ const subRows = vi.fn(async () => new Map<string, number>(state.sub ? [[CAMP, st
 vi.mock('../sms-queue', () => ({
   getCompanySmsTablesWithLogs: async () => ['SMSQ_SEND_1', 'SMSQ_SEND_1_202609'],
   smsCampaignCountsSafe: async () => new Map([[CAMP, state.counts]]),
-  smsAlimtalkResultAgg: (...a: any[]) => (resultAgg as any)(...a),
+  smsKakaoResultAgg: (...a: any[]) => (resultAgg as any)(...a),
   smsCampaignSubRowCounts: (...a: any[]) => (subRows as any)(...a),
 }));
 

@@ -35,6 +35,11 @@ import { normalize080Number, format080Number, isHttpLinkOrVariable, webLinkReaso
 import { isWithinBrandSendWindow, brandSendWindowError } from './send-time-util';
 import { BRAND_SEND_WINDOW } from '../config/defaults';
 import { query } from '../config/database';
+// ★ 2026-11-05 C107 — 대체 문자 = 문자 직접발송과 같은 광고 표기 · 바이트 · 회신번호 판정 CT
+import { buildAdMessage, buildAdSubject, stripAdParts, getOpt080Number, kakaoFallbackSpamItems } from './messageUtils';
+import { checkSpamBlockBeforeCharge } from './spam-block';
+import { eucKrByteLength, SMS_MAX_BYTES, LMS_MAX_BYTES } from './message-byte';
+import { fixedCallbackRejectReason } from './callback-filter';
 // ★ 2026-07-03 KAKAO(브랜드메시지) 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
 import { logCampaignTraining } from './training-logger';
 // ★ 2026-09-01 AI 생성 이미지 표시 — cdp_assets.kind 판정 (설계서 docs/2026-09-01-ai-image-notice-design.md)
@@ -616,39 +621,61 @@ export interface ResolvedBrandFallback {
 }
 
 /**
- * 화면 축(NO/SM/LM/MM) → 큐 축(N/A/B) 변환.
+ * ★ 2026-11-05 C107 — 화면 축(NO/SM/LM/MM) → 큐 축(N/A/B) 판정 **하나**(설계 S1-4 · 차감 자리 · 조립 자리가 같은 함수).
+ *   옛: resolveBrandFallback 안에만 있어 선불 차감(결과별 단가)이 같은 판정을 또 만들어야 했다.
+ */
+export function brandFallbackQueueType(resendType?: string | null): BrandNextType {
+  const raw = String(resendType || 'NO').trim().toUpperCase();
+  if (raw === 'NO' || raw === 'N' || raw === '') return 'N';
+  if (raw === 'SM' || raw === 'A') return 'A';
+  if (raw === 'LM' || raw === 'B') return 'B';
+  if (raw === 'MM') throw new BrandMessageBuildError('브랜드메시지는 MMS 대체발송을 지원하지 않습니다 (SMS·LMS만 가능)');
+  throw new BrandMessageBuildError(`브랜드메시지 대체발송 유형이 올바르지 않습니다: ${resendType}`);
+}
+
+/**
+ * 대체발송 확정 — 큐에 실을 유형 · 문구 · 제목.
  * 브랜드는 원문 그대로 전환(S/L)이 불가하므로 A/B는 대체 문구가 필수다 —
  * 사용자가 대체문안을 안 썼으면 순수 본문(originalMessage)을 그대로 쓴다(알림톡 0727 계약과 동일 방향).
+ *
+ * ★ 2026-11-05 C107 D-14 · D-07 · 뿌리 R61 — 대체 문구는 **문자로 나가는 글**이다.
+ *   ① 입력 = 광고 표기 전 글(부르는 쪽이 넘긴다 · 혹시 붙어 있으면 stripAdParts 가 정확한 표기 꼴만 걷는다 · 본문 낱말 무손상)
+ *   ② 고른 유형(A = SMS · B = LMS)으로 광고 표기를 **한 번** 붙인다 = 문자 직접발송과 같은 CT(buildAdMessage · buildAdSubject)
+ *   ③ 그 결과 하나로 바이트 판정(SMS 90 · LMS 2,000) — 금칙어 판정(kakaoFallbackSpamItems) · 화면 바이트도 같은 글을 본다.
+ *   옛: 표기 없이 본문 그대로 실려 광고 브랜드의 대체 문자가 (광고) · 무료거부 080 없이 나갔고(1105 게이트웨이 실측 9건),
+ *   SMS 대체에 1,300자 본문이 길이 판정 없이 실렸다.
  */
 export function resolveBrandFallback(input: {
   resendType?: string | null;
   resendMessage?: string | null;
   resendTitle?: string | null;
   originalMessage?: string | null;
+  /** 광고 여부(브랜드 AD_FLAG 와 같은 값) — 필수(넘기지 않는 자리 = 컴파일 실패 · 계약 시험 K3) */
+  isAd: boolean;
+  /** 080 수신거부 번호(getOpt080Number · 문자 직접발송과 같은 값 · 비면 「무료거부」 글자만) */
+  opt080Number: string;
 }): ResolvedBrandFallback {
-  const raw = String(input.resendType || 'NO').trim().toUpperCase();
-  const mapped: BrandNextType | 'MM' | null =
-    raw === 'NO' || raw === 'N' || raw === '' ? 'N'
-    : raw === 'SM' || raw === 'A' ? 'A'
-    : raw === 'LM' || raw === 'B' ? 'B'
-    : raw === 'MM' ? 'MM'
-    : null;
-  if (mapped === 'MM') {
-    throw new BrandMessageBuildError('브랜드메시지는 MMS 대체발송을 지원하지 않습니다 (SMS·LMS만 가능)');
-  }
-  if (!mapped) {
-    throw new BrandMessageBuildError(`브랜드메시지 대체발송 유형이 올바르지 않습니다: ${input.resendType}`);
-  }
-  if (mapped === 'N') return { nextType: 'N' };
+  const nextType = brandFallbackQueueType(input.resendType);
+  if (nextType === 'N') return { nextType: 'N' };
 
-  const contents = String(input.resendMessage || '').trim() || String(input.originalMessage || '').trim();
-  if (!contents) {
+  const raw = String(input.resendMessage || '').trim() || String(input.originalMessage || '').trim();
+  const body = stripAdParts(raw).trim();
+  if (!body) {
     throw new BrandMessageBuildError('대체발송 문구가 없습니다. 대체문안을 입력하거나 대체발송을 끄세요');
   }
-  if (mapped === 'B') {
+  const msgType = nextType === 'A' ? 'SMS' : 'LMS';
+  const contents = buildAdMessage(body, msgType, input.isAd === true, String(input.opt080Number || ''));
+  const bytes = eucKrByteLength(contents);
+  if (nextType === 'A' && bytes > SMS_MAX_BYTES) {
+    throw new BrandMessageBuildError(`SMS 대체 문구가 ${SMS_MAX_BYTES}바이트를 넘습니다(${bytes}바이트${input.isAd ? ' · 광고 표기 포함' : ''}). LMS로 바꾸거나 줄여 주세요`);
+  }
+  if (nextType === 'B' && bytes > LMS_MAX_BYTES) {
+    throw new BrandMessageBuildError(`LMS 대체 문구가 ${LMS_MAX_BYTES}바이트를 넘습니다(${bytes}바이트). 줄여 주세요`);
+  }
+  if (nextType === 'B') {
     const title = String(input.resendTitle || '').trim();
     if (!title) throw new BrandMessageBuildError('LMS 대체발송은 제목이 필요합니다');
-    return { nextType: 'B', nextContents: contents, titleStr: title };
+    return { nextType: 'B', nextContents: contents, titleStr: buildAdSubject(title, 'LMS', input.isAd === true) };
   }
   return { nextType: 'A', nextContents: contents };
 }
@@ -1597,6 +1624,37 @@ async function filterUnsubscribed(userId: string, phones: string[]): Promise<str
 }
 
 /**
+ * ★ 2026-11-05 C107 D-18 · D-17 — 브랜드 대체 문자의 사전 판정(자유형 · 기본형 공용 · 회신번호 확정 뒤 · 차감 앞).
+ *   ① 대체가 켜졌을 때만(A · B) 회신번호 = 규격 + 회사 등록(`fixedCallbackRejectReason` · 다른 발송 길과 같은 CT · 대체 끔이면 판정 0 · Codex 설계 1R #3)
+ *   ② 대체 문구 = 문자로 나가는 글 → 금칙어 차단 판정(spam-block · 문자 경로와 같은 CT · 입력 = kakaoFallbackSpamItems)
+ *   거절 사유 문장(고객에게 그대로) 또는 null.
+ */
+/**
+ * ★ 2026-11-05 C107 Codex 구현 1R #1 — 대체 문자 080 = **이 브랜드 발송이 싣는 수신거부 번호**(편집기 확정값 · 화면 휴대폰 창이 쓰는 값과 같다).
+ *   그 번호가 없을 때만 설정 080(getOpt080Number · 문자 직접발송과 같은 값). 광고가 아니면 표기 없음.
+ *   옛: 서버가 설정 080 만 읽어, 설정이 없어 편집기에 직접 넣은 번호가 화면에는 보이고 실제 대체 문자에는 빠졌다.
+ */
+async function brandFallbackOpt080(params: { isAd?: boolean; unsubscribePhone?: string | null; userId?: string | null; companyId: string }): Promise<string> {
+  if (params.isAd !== true) return '';
+  return String(params.unsubscribePhone || '').trim() || await getOpt080Number(params.userId || null, params.companyId);
+}
+
+async function brandFallbackPreflight(
+  params: { companyId: string; userId?: string; isAd?: boolean },
+  fallback: ResolvedBrandFallback,
+  callback: string,
+  recipients: number,
+): Promise<string | null> {
+  if (fallback.nextType === 'N') return null;
+  const cbReject = await fixedCallbackRejectReason(params.companyId, callback);
+  if (cbReject) return `대체발송 ${cbReject}`;
+  const items = kakaoFallbackSpamItems({ nextType: fallback.nextType, nextContents: fallback.nextContents, titleStr: fallback.titleStr, isAd: params.isAd === true, recipients });
+  if (items.length === 0) return null;
+  const verdict = await checkSpamBlockBeforeCharge({ items, companyId: params.companyId, userId: params.userId || null, source: 'brand' });
+  return verdict.blocked ? verdict.notice : null;
+}
+
+/**
  * 대체발송 회신번호 — resendFrom 미지정이면 회사 기본 회신번호로 폴백.
  * SMSQ `call_back`은 전환재발송(SMS/LMS)의 발신번호가 된다.
  *
@@ -1897,7 +1955,9 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
       resendType: params.resendType,
       resendMessage: params.resendMessage,
       resendTitle: params.resendTitle,
-      originalMessage: params.message,
+      originalMessage: params.message,   // 사람이 쓴 본문(광고 표기 전 · AI 이미지 안내 전 · §4-7-①)
+      isAd: params.isAd === true,
+      opt080Number: await brandFallbackOpt080(params),
     });
   } catch (buildErr: any) {
     return { success: false, sentCount: 0, failCount: 0, error: buildErr?.message || '브랜드메시지 구성 오류' };
@@ -1914,11 +1974,15 @@ export async function sendBrandMessage(params: BrandMessageParams): Promise<Bran
   if (!callback && fallback.nextType !== 'N') {
     return { success: false, sentCount: 0, failCount: 0, error: '대체발송 회신번호가 없습니다. 기본 회신번호를 등록해주세요.' };
   }
+  // ★ 2026-11-05 C107 D-18 · D-17 — 대체 문자 사전 판정(회신번호 등록 · 금칙어) · 차감 앞
+  const fbReject = await brandFallbackPreflight(params, fallback, callback, filteredPhones.length);
+  if (fbReject) return { success: false, sentCount: 0, failCount: 0, error: fbReject };
 
   // 5. 선불 차감 — 원장 키는 정규형 'BRAND' 하나만 쓴다(취소·sweeper·환불 축과 동일 문자열이어야
   //    같은 원장으로 수렴한다. 소문자 'brand'로 쓰면 후속 환불이 원장을 못 찾는다 — 0730 적대검증 수용).
   //    ★ 2026-09-13 단가는 대상(친구·비친구)으로 갈린다 — 위 적재 조립과 같은 params.targeting.
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId, 'campaign', { targeting: params.targeting, form: 'FREE' });
+  //    ★ 2026-11-05 C107 D-12 — 문자 대체가 켜졌으면 결과별 단가(브랜드 · 고른 대체 문자)를 차감 행에 싣는다(정산이 결과로 차액 환불).
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId, 'campaign', { targeting: params.targeting, form: 'FREE' }, { brandFallback: fallback.nextType === 'N' ? null : fallback.nextType });
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }
@@ -2037,7 +2101,9 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
       resendType: params.resendType,
       resendMessage: params.resendMessage,
       resendTitle: params.resendTitle,
-      originalMessage: params.message,
+      originalMessage: params.message,   // 사람이 쓴 본문(광고 표기 전 · AI 이미지 안내 전 · §4-7-①)
+      isAd: params.isAd === true,
+      opt080Number: await brandFallbackOpt080(params),
     });
   } catch (buildErr: any) {
     return { success: false, sentCount: 0, failCount: 0, error: buildErr?.message || '브랜드메시지 구성 오류' };
@@ -2054,9 +2120,12 @@ export async function sendBrandMessageTemplate(params: BrandTemplateParams): Pro
   if (!callback && fallback.nextType !== 'N') {
     return { success: false, sentCount: 0, failCount: 0, error: '대체발송 회신번호가 없습니다. 기본 회신번호를 등록해주세요.' };
   }
+  // ★ 2026-11-05 C107 D-18 · D-17 — 대체 문자 사전 판정(회신번호 등록 · 금칙어) · 차감 앞
+  const fbReject = await brandFallbackPreflight(params, fallback, callback, filteredPhones.length);
+  if (fbReject) return { success: false, sentCount: 0, failCount: 0, error: fbReject };
 
   // 선불 차감 — 원장 키는 정규형 'BRAND' (자유형과 동일 근거) · 단가는 대상·기본형으로 고른다(2026-09-13)
-  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId, 'campaign', { targeting: params.targeting, form: 'BASIC' });
+  const deduct = await prepaidDeduct(params.companyId, filteredPhones.length, 'BRAND', params.campaignId || '', params.userId, 'campaign', { targeting: params.targeting, form: 'BASIC' }, { brandFallback: fallback.nextType === 'N' ? null : fallback.nextType });   // ★ C107 D-12
   if (!deduct.ok) {
     return { success: false, sentCount: 0, failCount: 0, error: deduct.error || '잔액 부족' };
   }

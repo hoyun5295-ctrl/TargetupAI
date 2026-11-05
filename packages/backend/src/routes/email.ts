@@ -85,6 +85,7 @@ import { tryAcquireInflight, releaseInflight, singleFlight } from '../utils/infl
 import { handleDmImageUpload } from '../utils/dm/dm-image-upload';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { parsePageParams, parseOffsetParam } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 const router = Router();
 
 // ════════════════════════════════════════════════════════════════════
@@ -465,7 +466,7 @@ router.get('/campaigns', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const limit = Math.min(parseInt(String(req.query.limit || '50')) || 50, 200);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 200 }).limit;
     // ★ 2026-10-25 원장 #86 — 다음 쪽(before = 만든 시각 원문 · before_id) · 첫 쪽에는 전체 지표를 함께 준다
     const before = typeof req.query.before === 'string' ? req.query.before : '';
     const beforeId = typeof req.query.before_id === 'string' ? req.query.before_id : '';
@@ -967,8 +968,8 @@ router.get('/campaigns/:id/events', async (req: Request, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
 
     const campaignId = req.params.id;
-    const limit = Math.min(parseInt(String(req.query.limit || '100')) || 100, 500);
-    const offset = Math.max(parseInt(String(req.query.offset || '0')) || 0, 0);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 100, maxLimit: 500 }).limit;
+    const offset = parseOffsetParam(req.query.offset);
     const eventType = req.query.event_type ? String(req.query.event_type) : null;
 
     // 캠페인 권한 검증 (회사 격리 + 담당자 소유 격리)
@@ -1190,7 +1191,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
     const linePrompt = lineOn ? applyLineReads(prompt, lineReads, req.body?.read_licensed === true) : prompt;
     // ★ 2026-10-17 단계 답 = [혜택] · [기간](날짜를 친 것과 같게) · [상품](글로만 소개할 직접 상품) 줄
     const genPrompt = steps
-      ? buildLineStepsEventText(linePrompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, textProducts: steps.textProducts })
+      ? buildLineStepsEventText(linePrompt, { benefit: lineFacts ? lineFacts.benefit : null, periodEnd: steps.body.facts.periodEnd ?? null, periodStart: steps.body.facts.periodStart ?? null, textProducts: steps.textProducts })
       : linePrompt;
     const attemptToken = lineOn && isValidAttemptToken(req.body?.attempt_token) ? String(req.body.attempt_token) : null;
     // ★ 2026-10-17 단계 요청 = 한 줄 완성 원장 키 · 생성 입력 전부를 지문에(직접 상품 전부 · 대표 사진 · 주소 답)
@@ -1222,7 +1223,7 @@ router.post('/ai/generate-sections', singleFlight('email-generate', async (req: 
               composition: compDef, channel: 'email', companyId: auth.companyId, line: linePrompt, ...brand!,
               pinnedPrimary: linePinnedPrimary(kitRaw), cards: tplCards, cardCategories: [...cards.map(() => null), ...compManual!.categories],
               heroUpload: steps.hero, heroAsIs: steps.heroAsIs, proof: steps.body.proof, page,
-              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
+              benefitAnswer: steps.body.facts.benefit, periodEnd: steps.body.facts.periodEnd ?? null, periodStart: steps.body.facts.periodStart ?? null, link: steps.body.facts.link ?? page?.url ?? delivery.link ?? null, rich: steps.body.rich,
             }, { userId: auth.userId, source: 'email-ai-generate' });
             const r = buildLineCookEmail(cook);
             // 제목 앞에 사람이 확인한 혜택 원문(40자 안일 때만 · 템플릿과 같은 규칙)

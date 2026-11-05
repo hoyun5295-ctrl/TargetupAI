@@ -25,7 +25,7 @@ import { getCreditCost } from '../utils/ai-credit-calc';
 import { aiLineBasePrice, aiLineComposePrice } from '../utils/ai-credit-price';
 import { buildMessageObjective } from '../utils/season-context';
 import { buildLineEventText } from '../utils/one-line-facts';
-import { formatLinePeriodEnd, lineFpLockKey } from '../utils/one-line-steps';
+import { linePeriodLabel, lineFpLockKey } from '../utils/one-line-steps';
 import { acquireInflightWait, releaseInflight } from '../utils/inflight-lock';
 import { lineJudgeCovered } from '../utils/line-steps-context';
 import { decorateOperatorMessages } from '../utils/operator-message-decorator';
@@ -520,7 +520,7 @@ export async function runLineAlimtalkMatch<T>(
 export interface LineComposeInput {
   line: string;
   /** ★ 2026-10-20 answers = AI 가 물은 그 밖 질문의 답(있을 때만 · 없으면 옛 모양 = 원장 키 지문 무변) */
-  facts: { benefit: string | null; periodEnd: string | null; answers?: AiLineAnswer[] };
+  facts: { benefit: string | null; periodEnd: string | null; periodStart?: string; answers?: AiLineAnswer[] };
   filters: Record<string, any>;
   allCustomers: boolean;
   types: AiLineCopyType[];
@@ -575,7 +575,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   if (paidCopies === null) await assertCreditFor(v.companyId, quote.total, AI_LINE_SOURCE.compose);
   const { conditions } = describeLineFilters(input.line, input.filters, undefined);
   const audienceText = input.allCustomers && conditions.length === 0 ? '전체 고객' : conditions.map((c) => c.text).join(' · ');
-  const periodLine = input.facts.periodEnd ? `\n[기간] ${formatLinePeriodEnd(input.facts.periodEnd)}까지` : '';
+  const periodLine = input.facts.periodEnd ? `\n[기간] ${linePeriodLabel(input.facts.periodStart, input.facts.periodEnd)}` : '';   // ★ C105 H1
   // ★ 2026-10-20 AI 가 물은 그 밖 질문의 답 = 근거 글의 「확인한 사실」(사람이 적은 답만 · 묻고 답하지 않은 것은 쓰지 않는다)
   //   ★ Codex R1 high — 질문 글(AI 가 씀)은 근거 글에 넣지 않고 참고 글로만(질문 속 혜택이 근거가 되지 않게)
   // ★ 2026-10-29 꼴 칸 답 = 결정(값 · 비움 = 명시 생략 · 서버가 다시 계산한 질문만) · 그 밖 답만 근거 · 참고 글(주소를 AI 가 옮겨 쓰지 않게)

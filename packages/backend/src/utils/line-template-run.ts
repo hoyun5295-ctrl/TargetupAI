@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'crypto';
 import { voiceLearned } from './brand-voice-prompt';
-import { formatLinePeriodEnd } from './one-line-steps';
+import { linePeriodLabel } from './one-line-steps';
 import { getBrandBasicInfo } from './brand-basic-info';
 import { sanitizeLineUrl } from './one-line-steps';
 import type { LineMallCard } from './line-mall-cards';
@@ -53,6 +53,8 @@ export interface LineTemplateRunInput {
   /** 혜택 단계 답(undefined = 묻지 않음 · null = 건너뜀) */
   benefitAnswer: string | null | undefined;
   periodEnd: string | null;
+  /** ★ C105 H1 시작일(선택) */
+  periodStart?: string | null;
   link: string | null;
 }
 
@@ -61,7 +63,7 @@ export function lineTemplateMaterials(input: LineTemplateRunInput): { t: LineTem
   const t = input.pinnedPrimary ? { ...input.template, design: { ...input.template.design, primary: input.pinnedPrimary } } : input.template;
   const benefit = typeof input.benefitAnswer === 'string' ? input.benefitAnswer.trim() : '';
   const hero = input.heroUpload || input.page?.banner || null;
-  const periodLabel = input.periodEnd ? `${formatLinePeriodEnd(input.periodEnd)}까지` : null;
+  const periodLabel = input.periodEnd ? linePeriodLabel(input.periodStart, input.periodEnd) : null;   // ★ C105 H1
   const materials: LineMaterials = {
     brandName: input.brandName,
     ...(input.logoUrl ? { logoUrl: input.logoUrl } : {}),

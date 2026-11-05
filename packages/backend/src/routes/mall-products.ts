@@ -23,6 +23,7 @@ import { normalizeWooMallId } from '../utils/woocommerce-core';
 import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } from '../utils/integration-scope';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { parsePageParams } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 const WOO_PREFIX = 'woocommerce:';
 
 /**
@@ -71,7 +72,7 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const provider = String(req.query.provider || '').trim();
     const q = req.query.q ? String(req.query.q).trim() : undefined;
-    const limit = Math.min(Math.max(parseInt(String(req.query.limit || '50'), 10) || 50, 1), 100);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 100 }).limit;
 
     if (provider === 'cafe24') {
       const integ = await getCafe24Integration(companyId);

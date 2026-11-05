@@ -17,7 +17,7 @@ import { join } from 'path';
 import {
   KAKAO_FALLBACK_SMS_CODE, KAKAO_FALLBACK_LMS_CODE, fallbackOf,
   FALLBACK_BILLING_CODE_WHEN_SQL, SUBSTITUTE_ROW_SQL,
-  getSendTypeLabel, tallyAlimtalkFallback, isSuccess,
+  getSendTypeLabel, tallyKakaoFallback, isSuccess,
 } from '../sms-result-map';
 import { FALLBACK_BILLING_CODE } from '../billing-types';
 import { BILLING_MSG_TYPE_SQL, MSG_TYPE_TO_USAGE_KEY } from '../send-usage-aggregation';
@@ -59,7 +59,7 @@ describe('통계 분리 (슈퍼관리자 발송통계 엑셀 · 캠페인 목록
 
   it('크로커다일 9/29 모양(K 1800 2건 + K 7831 1건) = 알림톡 시도 3(성공 2 · 실패 1) · LMS 대체 1', () => {
     // ★ 2026-10-16 옛 엑셀 분류는 「알림톡 2 · 대체 1」(시도 1건이 사라짐 = 이번 접수 ①). 이제 알림톡 행 = 시도 전체.
-    const r = tallyAlimtalkFallback([
+    const r = tallyKakaoFallback([
       { msg_type: 'K', k_oriseq: null, status_code: 1800, cnt: 2 },
       { msg_type: 'K', k_oriseq: null, status_code: 7831, cnt: 1 },
     ]);
@@ -84,10 +84,11 @@ describe('유형 라벨 (발송결과 상세·엑셀·관리자 상세·고객 �
 });
 
 describe('청구 유형 식 BILLING_MSG_TYPE_SQL', () => {
-  it('대체 분기가 F 분기 뒤 · ELSE 앞에 있다', () => {
+  it('대체 분기가 F 분기 앞에 있다(★2026-11-05 C107 · F + 7830 · 7831 이 브랜드 단가로 굳지 않게)', () => {
     const at = BILLING_MSG_TYPE_SQL.indexOf(FALLBACK_BILLING_CODE_WHEN_SQL);
-    expect(at).toBeGreaterThan(BILLING_MSG_TYPE_SQL.indexOf("ELSE 'FN' END)"));
-    expect(BILLING_MSG_TYPE_SQL.endsWith(`${FALLBACK_BILLING_CODE_WHEN_SQL} ELSE msg_type END`)).toBe(true);
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(at).toBeLessThan(BILLING_MSG_TYPE_SQL.indexOf("WHEN msg_type = 'F' THEN"));
+    expect(BILLING_MSG_TYPE_SQL.endsWith("ELSE msg_type END")).toBe(true);
   });
 
   it('K행 대체 성공 = 대체 유형(★1016 · 단가는 문자 상속 · 에이전트 대체분 KS/KL 과 같은 유형)', () => {
@@ -99,7 +100,7 @@ describe('청구 유형 식 BILLING_MSG_TYPE_SQL', () => {
 describe('발송결과 「대체발송」 필터 = 두 모양 모두', () => {
   it('공용 조각이 옛 모양과 K행 대체 성공을 함께 고른다', () => {
     expect(SUBSTITUTE_ROW_SQL).toBe(
-      "((k_oriseq > 0 AND msg_type IN ('L', 'S')) OR (msg_type = 'K' AND status_code IN (7830, 7831)))",
+      "((k_oriseq > 0 AND msg_type IN ('L', 'S')) OR (msg_type IN ('K', 'F') AND status_code IN (7830, 7831)))",
     );
   });
 

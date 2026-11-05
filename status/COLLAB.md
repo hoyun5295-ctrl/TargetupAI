@@ -106,6 +106,17 @@ superpowers 를 지웠으므로 brainstorming 스킬은 호출하지 않는다. 
 
 CLAUDE.md `skill_workflow_default`의 자가 질의("어떤 skill 호출 의무?")에 답할 때 참조한다. 스킬 파일 = `~/.claude/skills/<이름>/SKILL.md`(맨 위 「한줄로 적용 규칙」이 원문보다 우선).
 
+룰 전문 — CLAUDE.md `skill_workflow_default` (★2026-11-05 CLAUDE.md 에서 글자 그대로 옮김 · CLAUDE.md 에는 핵심 줄과 여는 시점만):
+
+```text
+    <RULE id="skill_workflow_default">
+      큰 작업 진입 직전 "어떤 skill이 의무인가" 자가 질의. ★2026-10-17 superpowers 제거(Harold) → mattpocock 한줄로 적용판으로 교체.
+      버그·「안 된다」·성능 저하 = `diagnosing-bugs`(피드백 루프 먼저 · 운영 진단은 실측 먼저) / 신규 기능·버그 수정 구현 = `tdd`(설계안 동의 뒤 · seam = 설계서 「시험」 절).
+      완료 보고 직전 = 실제 검증 명령 실행 + 증거 출력(tsc · 테스트 전체 · 실측 · Codex — 별도 스킬 없이 이 규칙이 의무다).
+      [상황↔스킬 매핑] `status/COLLAB.md` §2
+    </RULE>
+```
+
 | 상황 | 스킬 |
 |------|------|
 | 버그·「안 된다」·성능 저하 | `diagnosing-bugs`(자동) — 피드백 루프 먼저 · 운영 진단은 SQL·화면 실측 먼저 · 가설은 검증 명령과 짝지은 미검증 후보로만 |
@@ -121,7 +132,7 @@ CLAUDE.md `skill_workflow_default`의 자가 질의("어떤 skill 호출 의무?
 
 ## 3) Codex 이중 검증 운영
 
-호출 의무 단계와 면제 범위는 CLAUDE.md `codex_review_after_code_change`가 소유한다. 여기는 운영 방법만 담는다.
+호출 의무 단계와 면제 범위는 [CODEX-RUNBOOK.md §0-0](CODEX-RUNBOOK.md)(CLAUDE.md `codex_review_after_code_change` 전문)이 소유한다. 여기는 운영 방법만 담는다.
 
 - **라운드 운영**: 본 AI 작성 → tsc 0 + 자가 grep → **본 AI 적대 검토** → Codex 호출 → 정정 → 재검증. **지적 0(approve)까지 · 라운드 상한 없음 · 등급 무관 수용분 정정**(★1014 · ★1019 모든 코드 변경). 범위·종료 조건의 원천 = CLAUDE.md `codex_review_after_code_change`.
 - **지적 수용 원칙**: 무조건 수용하지 않는다. 실무 위험 기준으로 취사한다(옛 superpowers receiving-code-review 원칙 · CLAUDE.md `review_findings_fix_root_not_symptom`). 과한 처방(예: 연결 강제 종료)은 거부하고 단순한 대안으로 대체한 전례가 있다.
@@ -132,3 +143,15 @@ CLAUDE.md `skill_workflow_default`의 자가 질의("어떤 skill 호출 의무?
 
 **[CODEX-RUNBOOK.md](CODEX-RUNBOOK.md)가 소유한다** — 실행 순서(§1) · 요청문 규격 4항(§2) · 살아 있는지 판정(§3) · 멈췄을 때(§4) · 실패 이력(§5).
 리뷰를 띄우기 **전에** §1·§2를 읽는다. 여기에 복사해 두면 둘이 갈라지고, 갈라진 쪽을 읽은 세션이 같은 멈춤을 다시 겪는다.
+
+---
+
+## 4) 외부 코드 접목 관문 — CLAUDE.md `external_code_adoption_gate` 전문 (★2026-11-05 CLAUDE.md 에서 글자 그대로 옮김 · CLAUDE.md 에는 핵심 줄과 여는 시점만)
+
+```text
+    <RULE id="external_code_adoption_gate" priority="HIGHEST">
+      외부 스킬 · 플러그인 · MCP 서버 · 훅 · 저장소 코드를 접목(설치 · 복사 · 이식)하기 **전에** 「이 저장소 코드에 외부 전송이나 비밀값 접근이 있는가」를 코드로 확인하고 결과를 보고한다(★2026-10-18 Harold 지시 · 브레인스토밍 뒤 접목도 예외 없음).
+      1. 확인 = 네트워크 호출(fetch · http · curl · WebSocket · 원격 주소) · 비밀값 접근(.env · 토큰 · 키 · 자격 파일 · 환경변수 읽기) · 자동 실행(설치 스크립트 · postinstall · 훅) grep 결과를 증거로 첨부한다.
+      2. 있으면 = 어디로 무엇을 보내는지 · 어떤 비밀을 읽는지 표로 보고하고, Harold님 동의 전에는 접목하지 않는다. 없으면 = 「0건」과 grep 명령 · 결과.
+    </RULE>
+```

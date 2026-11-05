@@ -11,6 +11,8 @@
  * ⛔ 바깥 눌러 닫힘 없음 · 모델명 0 · native dialog 0 · 줄표 0.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import LinePeriodPick from '../ai-line/LinePeriodPick';   // ★ C105 H1 공용 기간 입력
+import { periodChips, periodLabel, isLinePeriodPickValid } from '../../utils/line-period';
 import { creditCost, creditText } from '../../constants/credit';
 import { X, ChevronLeft, Camera, Check, Loader2, Gift, Link2, CalendarDays, ImageIcon, PencilLine, Plus, Coins, ShoppingBag, Search, Globe, LayoutTemplate, Eye } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
@@ -64,21 +66,6 @@ const INPUT_BAD = 'border-rose-400 focus:ring-rose-100';
 
 /** 'YYYY-MM-DD'(지역 날짜) */
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-function periodChips(): Array<{ label: string; value: string }> {
-  const now = new Date();
-  const sunday = new Date(now); sunday.setDate(now.getDate() + ((7 - now.getDay()) % 7));
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const week = new Date(now); week.setDate(now.getDate() + 6);
-  const out = [{ label: '이번 주 일요일까지', value: ymd(sunday) }, { label: '일주일 동안', value: ymd(week) }, { label: '이달 말까지', value: ymd(monthEnd) }];
-  return out.filter((c, i) => out.findIndex((x) => x.value === c.value) === i);
-}
-const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
-function periodLabel(v: string): string {
-  const [y, m, d] = v.split('-').map(Number);
-  if (!y || !m || !d) return v;
-  // 올해가 아니면 연도까지(제안 칩이 내년 날짜일 때 알아보게)
-  return `${y !== new Date().getFullYear() ? `${y}년 ` : ''}${m}월 ${d}일(${WEEK[new Date(y, m - 1, d).getDay()]})까지`;
-}
 
 function stepName(s: LineStep | typeof MAKE): string {
   if (s === MAKE) return '만들기';
@@ -231,6 +218,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
   const [restored, setRestored] = useState('');
   // 지금 단계의 입력 초안(다음을 누를 때 답이 된다)
   const [draft, setDraft] = useState<{ text: string; manual: LineManualAnswer | null; err: string | null }>({ text: '', manual: null, err: null });
+  const [periodStartDraft, setPeriodStartDraft] = useState<string | null>(null);   // ★ C105 H1 기간 단계 시작일(선택)
   // ★ 구성 — 판(고르기 / 재료) · 재료 판 미리보기 접기(휴대폰)
   const [pane, setPane] = useState<'pick' | 'steps'>('pick');
   // ★ 2026-10-23 서버 칸 판정(미리보기 응답 · 그 구성의 것만 · 모르면 null)
@@ -393,6 +381,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
       const v = current.key === 'benefit' ? answers.benefit : current.key === 'link' ? answers.link : current.key === 'period' ? answers.period : null;
       // ★ 템플릿 — 한 줄에서 찾은 값은 칸에 넣지 않는다(제안 칩을 눌러야 채워진다 · Codex 5R)
       setDraft({ text: typeof v === 'string' ? v : '', manual: null, err: null });
+      if (current.key === 'period') setPeriodStartDraft(answers.periodStart ?? null);   // ★ C105 H1
     }
     if (firstFocus.current) { firstFocus.current = false; return; }   // 처음 = 껍데기가 첫 입력칸을 잡는다
     requestAnimationFrame(() => (inputRef.current ?? titleRef.current)?.focus());
@@ -995,32 +984,23 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     nextLabel = draft.text.trim() ? '다음' : dflt ? '그대로 두고 다음' : '비워 두고 다음';
   } else if (current !== MAKE && current.key === 'period') {
     const required = current.required === true;
-    const today = ymd(new Date());
-    const maxDay = ymd(new Date(Date.now() + 399 * 86_400_000));
     eyebrow = <Why tone="customer">{required ? '이 템플릿은 마감일로 마무리해요' : '한 줄에 기간이 없어요'}</Why>;
     question = '행사는 언제까지인가요?';
     reason = required ? '날짜를 주시면 마지막 장에 남은 시간이 함께 실려요' : '날짜를 주시면 마감 안내가 함께 실려요. 비우면 기간 없이 만들어요';
+    const periodChipList = [...(current.suggest && /^\d{4}-\d{2}-\d{2}$/.test(current.suggest) ? [{ label: `${periodLabel(current.suggest)} · 한 줄`, value: current.suggest }] : []), ...periodChips()].filter((c, i, all) => all.findIndex((x) => x.value === c.value) === i);
     body = (
       <div>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {/* 한 줄에서 찾은 날짜 = 칩 하나(눌러야 채워짐 · 기본값 0) */}
-          {[...(current.suggest && /^\d{4}-\d{2}-\d{2}$/.test(current.suggest) ? [{ label: `${periodLabel(current.suggest)} · 한 줄`, value: current.suggest }] : []), ...periodChips()].filter((c, i, all) => all.findIndex((x) => x.value === c.value) === i).map((c) => (
-            <button key={c.value} type="button" aria-pressed={draft.text === c.value} onClick={() => setDraft({ ...draft, text: c.value })}
-              className={`h-9 px-3 rounded-xl border text-[13px] font-semibold transition-colors whitespace-nowrap ${draft.text === c.value ? 'border-violet-500 bg-violet-50 text-violet-800' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}`}>{c.label}</button>
-          ))}
-        </div>
-        <div className="relative">
-          <CalendarDays className="w-[18px] h-[18px] text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input ref={inputRef} type="date" min={today} max={maxDay} className={`${INPUT} ${INPUT_OK} pl-10 pr-4`}
-            aria-labelledby="line-steps-q" aria-describedby="line-steps-why" value={draft.text} onChange={(e) => setDraft({ ...draft, text: e.target.value })} />
-        </div>
-        {draft.text && <p className="mt-2 text-[13px] font-semibold text-violet-800">{periodLabel(draft.text)}</p>}
+        {/* ★ 2026-11-05 C105 H1 — 공용 기간 입력(한 줄에서 찾은 날짜 = 칩 하나 · 눌러야 채워짐 · 기본값 0) */}
+        <LinePeriodPick end={draft.text || null} start={periodStartDraft} chips={periodChipList}
+          onChange={(e, st) => { setDraft({ ...draft, text: e || '' }); setPeriodStartDraft(st); }}
+          chipClassName="h-9 px-3 rounded-xl border border-slate-200 bg-white text-[13px] font-semibold text-slate-700 hover:bg-slate-50 whitespace-nowrap"
+          activeChipClassName="h-9 px-3 rounded-xl border border-violet-500 bg-violet-50 text-[13px] font-semibold text-violet-800 whitespace-nowrap" />
       </div>
     );
-    const valid = !draft.text || (draft.text >= today && draft.text <= maxDay);
+    const valid = isLinePeriodPickValid(draft.text || null, draft.text ? periodStartDraft : null);
     nextDisabled = !valid || (required && !draft.text);
-    onNext = () => { setA({ period: draft.text || null }); next(); };
-    onSkip = required ? null : () => { setA({ period: null }); next(); };
+    onNext = () => { setA({ period: draft.text || null, periodStart: draft.text ? periodStartDraft : null }); next(); };
+    onSkip = required ? null : () => { setA({ period: null, periodStart: null }); next(); };
     nextLabel = draft.text || required ? '다음' : '기간 없이 다음';
   } else if (current !== MAKE && (current.key === 'points' || current.key === 'usage')) {
     // ★ 2026-10-22 특징 · 코디 · 꼬리표 · 참여 방법 · 사용 단계 — 두뇌 초안을 고치거나 새로 적는다(사진은 있으면 카드로)
@@ -1174,7 +1154,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
     if (s.key === 'hero_photo') return answers.hero ? <span className="inline-flex items-center gap-2"><img src={answers.hero} alt="" className="w-10 h-7 rounded object-cover border border-slate-200" />{answers.heroPoster ? '첫 화면 그림' : '올린 사진'}</span> : answers.page?.banner ? '페이지 사진을 써요' : '비어 있어요 · 눌러서 그림을 고르세요';
     if (s.key === 'event_page') return answers.page ? `${answers.page.host || answers.page.url}${answers.page.banner ? ' · 사진 읽음' : ''}` : '주소 하나면 사진과 문구를 읽어요';
     if (s.key === 'benefit') return answers.benefit ? `${answers.benefit}${answers.benefitNote ? ` · ${answers.benefitNote}` : ''}` : s.suggest ? `한 줄에서 찾았어요: ${s.suggest}` : '비어 있어요';
-    if (s.key === 'period') return answers.period ? periodLabel(answers.period) : s.suggest ? `한 줄에서 찾았어요: ${periodLabel(s.suggest)}` : '비어 있어요';
+    if (s.key === 'period') return answers.period ? periodLabel(answers.period, answers.periodStart) : s.suggest ? `한 줄에서 찾았어요: ${periodLabel(s.suggest)}` : '비어 있어요';
     if (s.key === 'products') {
       // ★ 2026-10-28 B-1028-2 — 실리는 상품(사진 있는 것 · 서버 진단과 같은 목록)만 세고 사진 없는 것은 따로 알린다
       //   칩 · 만들기 막기는 그대로 서버 진단(slotFilled) · 여기는 글만
@@ -1246,7 +1226,7 @@ export default function LineStepsModal({ open, channel, state, onClose, onMake }
             {linkRow}
             {(stepOf('period') || later('period')) && (
               <Row label="기간" tone={answers.period && stepOf('period') ? 'customer' : 'empty'} onClick={stepOf('period') ? () => go(lineStepId(stepOf('period')!)) : undefined}>
-                {answers.period && stepOf('period') ? periodLabel(answers.period) : later('period') ? '만든 뒤 편집 화면에서 넣어요' : '기간 없이 만들어요'}
+                {answers.period && stepOf('period') ? periodLabel(answers.period, answers.periodStart) : later('period') ? '만든 뒤 편집 화면에서 넣어요' : '기간 없이 만들어요'}
               </Row>
             )}
             {pendingOffers.map((o) => (

@@ -34,6 +34,7 @@ import { directStageEnv, outreachHashSecret, CONTACT_BASIS_PRESETS } from '../ut
 import { getOutreachContext } from '../utils/sales-outreach-produce';
 import { buildOutreachTemplateXlsx, parseOutreachBulkXlsx } from '../utils/sales-outreach-bulk';
 import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
+import { parseQueryInt, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 router.use(authenticate, requireSuperAdmin);
@@ -216,7 +217,7 @@ router.get('/jobs', async (req: Request, res: Response) => {
         q: typeof req.query.q === 'string' ? req.query.q : null,
         group: typeof req.query.group === 'string' ? req.query.group : null,
         view: typeof req.query.view === 'string' ? req.query.view : null,
-        limit: req.query.limit ? Number(req.query.limit) : null,
+        limit: parseQueryInt(req.query.limit, { fallback: null, min: 1, max: QUERY_LIMIT_NO_CAP, clamp: true }),
         before: typeof req.query.before === 'string' ? req.query.before : null,
       }),
     });

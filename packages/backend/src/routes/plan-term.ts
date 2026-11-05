@@ -9,6 +9,7 @@
 import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { authenticate, requireCompanyAdmin, requireSuperAdmin } from '../middlewares/auth';
+import { parsePageParams, parseOffsetParam, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import {
   PlanTermError, migrationPendingError, type TermActor,
   getPlanTermQuote, extendPlanTerm, setPlanTermAutoRenew, listPlanTermEvents,
@@ -63,7 +64,7 @@ function companyIdOf(req: Request, res: Response): string | null {
 customerRouter.get('/events', async (req: Request, res: Response) => {
   const companyId = companyIdOf(req, res); if (!companyId) return;
   try {
-    const r = await listPlanTermEvents(companyId, { offset: Number(req.query.offset) || 0, limit: Number(req.query.limit) || 5, audience: 'customer' });
+    const r = await listPlanTermEvents(companyId, { offset: parseOffsetParam(req.query.offset), limit: parsePageParams(undefined, req.query.limit, { defaultLimit: 5, maxLimit: QUERY_LIMIT_NO_CAP }).limit, audience: 'customer' });
     if (!r) return res.status(503).json({ success: false, ...migrationPendingError().body });
     return res.json({ success: true, ...r });
   } catch (err) { return sendError(res, err, 'events'); }

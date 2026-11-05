@@ -3,7 +3,7 @@
  * 옮긴 방법 = 스크립트(원문 그대로 · 글자 대조). 상태(use*)는 본체에 남고 props 로 받는다 — 탭을 옮겨 다녀도 값이 그대로다(동작 변경 0).
  */
 import type { Dispatch, SetStateAction } from 'react';
-import { readAlimtalkSplit, alimtalkFallbackRows } from '../../../utils/alimtalk-split';
+import { readKakaoSplit, kakaoFallbackRows, kakaoFailLabel } from '../../../utils/kakao-split';
 import { Fragment } from 'react';
 import { formatDateTimeShort } from '../../../utils/formatDate';
 import { resolveSendTypeChipClass, resolveSendTypeLabel, resolveChannelLabel } from '../../../utils/campaign-axis';
@@ -89,7 +89,7 @@ export default function AllCampaignsTab(props: AllCampaignsTabProps) {
                     <tr><td colSpan={12} className="px-4 py-12 text-center text-gray-400">캠페인이 없습니다.</td></tr>
                   ) : allCampaigns.map((c: any) => {
                     // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도로 세고, 대체로 나간 문자는 아래 줄로(거래내역서와 같은 기준)
-                    const split = readAlimtalkSplit(c);
+                    const split = readKakaoSplit(c);
                     const sent = split ? split.total : (parseInt(c.total_sent) || 0);
                     const success = split ? split.success : (parseInt(c.total_success) || 0);
                     const fail = split ? split.fail : (parseInt(c.total_fail) || 0);
@@ -137,10 +137,10 @@ export default function AllCampaignsTab(props: AllCampaignsTabProps) {
                         )}
                       </td>
                     </tr>
-                    {split && alimtalkFallbackRows(split).map((f) => (
+                    {split && kakaoFallbackRows(split).map((f) => (
                       <tr key={`${c.id}-${f.type}`} className="bg-gray-50/70">
                         <td className="px-3 py-1.5" />
-                        <td className="px-3 py-1.5 text-xs text-gray-500" colSpan={4}>↳ 알림톡 실패분</td>
+                        <td className="px-3 py-1.5 text-xs text-gray-500" colSpan={4}>↳ {kakaoFailLabel(c)}</td>
                         <td className="px-3 py-1.5 text-center text-xs text-gray-600 whitespace-nowrap">대체 {f.type}</td>
                         <td className="px-3 py-1.5 text-center text-xs text-gray-700">{f.total.toLocaleString()}</td>
                         <td className="px-3 py-1.5 text-center text-xs text-green-600 font-medium">{f.success.toLocaleString()}</td>

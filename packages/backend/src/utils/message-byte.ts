@@ -3,6 +3,8 @@
 
 /** SMS(단문) 통신 규격 상한(EUC-KR 바이트). ★ 2026-09-26 한줄로 V2 R1-08 — 대행 접수 판정이 이 값을 쓴다. */
 export const SMS_MAX_BYTES = 90;
+/** ★ 2026-11-05 C107 — LMS 통신 규격 상한(message-analysis 안에 숨어 있던 값을 이 CT 로 · 브랜드 대체 LMS 판정이 같이 쓴다) */
+export const LMS_MAX_BYTES = 2000;
 
 /** 문자열의 EUC-KR 근사 byte 길이. ASCII(<128) 1byte, 그 외(한글/특수) 2byte. */
 export function eucKrByteLength(text: string): number {

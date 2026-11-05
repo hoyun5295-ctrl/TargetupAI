@@ -9,32 +9,39 @@ cd "$(dirname "$0")/.." || exit 0
 FAIL=0
 say() { echo "[harness-check] $1"; }
 
-# 1) STATUS.md 30KB 상한 (doc_ownership: 초과 = 회전 미이행 — 즉시 아카이브 회전)
+# 1) STATUS.md 8KB 상한 (doc_ownership · ★2026-11-05 30KB → 8KB: 트랙 목록 · TODO 를 STATUS-FEED §0 으로 옮긴 뒤 5KB)
 S=$(wc -c < status/STATUS.md 2>/dev/null || echo 0)
-if [ "$S" -gt 30720 ]; then
-  say "위반: STATUS.md ${S}B > 30KB — 회전 룰 미이행. 완료 엔트리를 archive/TASKS_YYYY-MM.md로 원문 이동 + INDEX 등재 + 최근 완료 인덱스 1줄화."
+if [ "$S" -gt 8192 ]; then
+  say "위반: STATUS.md ${S}B > 8KB — 목록 · 경위가 다시 붙었다. 트랙 목록 · 카드 = status/STATUS-FEED.md(§0 목록 · 카드), STATUS 에는 라우팅 표와 피더로 가는 줄만."
   FAIL=1
 fi
 
-# 2) 상시 로드 합계 60KB 상한 (CLAUDE.md + STATUS.md)
+# 1-1) STATUS 목록 줄 재등장 금지 (★2026-11-05 신설 — 크기 상한보다 먼저, 첫 줄에서 막는다)
+#      `- C숫자 ·` · `- N숫자 ·` 는 FEED §0 목록 줄의 꼴이다. STATUS 에 다시 생기면 목록이 되돌아오는 첫걸음.
+LST=$(grep -cE '^- [CN][0-9]+ ' status/STATUS.md 2>/dev/null)
+if [ "${LST:-0}" -gt 0 ]; then
+  say "위반: STATUS.md 에 트랙 목록 줄 ${LST}개 — 새 트랙 = status/STATUS-FEED.md §0 목록 한 줄 + 카드. STATUS 에는 더하지 않는다."
+  FAIL=1
+fi
+
+# 2) 상시 로드 합계 36KB 상한 (CLAUDE.md + STATUS.md · ★2026-11-05 60KB → 36KB: 피더 분리 직후 약 31KB)
 C=$(wc -c < CLAUDE.md 2>/dev/null || echo 0)
 T=$((S + C))
-if [ "$T" -gt 61440 ]; then
-  say "위반: 상시 로드 합계 ${T}B > 60KB (CLAUDE ${C} + STATUS ${S}) — 룰은 늘리지 말고 다듬어라. 중복 룰 통폐합 우선."
+if [ "$T" -gt 36864 ]; then
+  say "위반: 상시 로드 합계 ${T}B > 36KB (CLAUDE ${C} + STATUS ${S}) — 룰은 늘리지 말고 다듬어라. 특정 작업 때만 쓰는 룰 전문은 피더 문서로(doc_ownership)."
   FAIL=1
 fi
 
-# 2-1) 조기 경고 50KB (★2026-07-25 신설 — 벽에 부딪혀 급히 깎는 일 방지)
-#      상한(60KB)에 닿아서야 회전하면 매 세션 압축에 시간을 쓴다. 여유 10KB 남았을 때 미리 알린다.
-#      ★2026-07-28 재조정(50KB → 52KB): 카드 스키마 전환 직후가 51KB다. 경고선을 현재값 아래에 두면
-#      매 실행마다 울려 경고가 무의미해지고, 너무 위에 두면 늦는다. 현재값 +1KB 지점에 둔다.
-if [ "$T" -le 61440 ] && [ "$T" -gt 53248 ]; then
-  say "경고: 상시 로드 합계 ${T}B > 52KB — 상한(60KB)까지 여유가 줄었다. 급해지기 전에 회전·통폐합 검토."
+# 2-1) 조기 경고 (★2026-07-25 신설 — 벽에 부딪혀 급히 깎는 일 방지)
+#      ★2026-07-28 원칙: 경고선을 현재값 아래에 두면 매 실행마다 울려 무의미해지고, 너무 위에 두면 늦는다. 현재값 +1KB 지점.
+#      ★2026-11-05 재조정(52KB → 32KB): 피더 분리 직후 합계 약 31KB.
+if [ "$T" -le 36864 ] && [ "$T" -gt 32768 ]; then
+  say "경고: 상시 로드 합계 ${T}B > 32KB — 상한(36KB)까지 여유가 줄었다. 급해지기 전에 회전 · 피더 분리 검토."
 fi
 
-# 3) CLAUDE.md 단독 35KB 경고선 (팽창 감시 — 위반은 아님, 경고)
-if [ "$C" -gt 35840 ]; then
-  say "경고: CLAUDE.md ${C}B > 35KB — 팽창 추세. 다음 정비 때 중복 룰 통폐합 검토."
+# 3) CLAUDE.md 단독 경고선 (팽창 감시 — 위반은 아님, 경고 · ★2026-11-05 35KB → 27KB: 피더 분리 직후 약 26KB)
+if [ "$C" -gt 27648 ]; then
+  say "경고: CLAUDE.md ${C}B > 27KB — 팽창 추세. 특정 작업 때만 쓰는 룰은 전문을 피더 문서로 옮길 후보."
 fi
 
 # 3-1) STATUS "완료분 잔여" 항목 수 상한 (★2026-07-25 신설 — 이 표가 재팽창의 진원지였다)
@@ -128,7 +135,29 @@ if [ -f status/archive/INDEX.md ]; then
   done <<< "$LINKS"
 fi
 
+# 8) 피더 룰 포인터 무결성 (★2026-11-05 신설 — 룰 전문을 피더 문서로 옮겼다 · doc_ownership)
+#    CLAUDE.md RULE 의 「전문 ... = `status|docs/....md`」가 가리키는 파일이 없거나 그 파일에 룰 전문 블록(<RULE id="그 id")이 없으면
+#    = 끊긴 포인터 = 그 룰은 읽히지 않는다(분리 = 미적용). 추출이 8건 아래면 검사 자체가 죽은 것으로 본다.
+PTR=$(awk '
+  match($0, /<RULE id="[a-z0-9_]+"/) { id = substr($0, RSTART + 10, RLENGTH - 11) }
+  id != "" { s = $0; while (match(s, /전문[^=`]*= `(status|docs)\/[^`]*\.md`/)) { m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH); match(m, /`[^`]*`$/); print id " " substr(m, RSTART + 1, RLENGTH - 2) } }
+  /<\/RULE>/ { id = "" }
+' CLAUDE.md 2>/dev/null)
+NPTR=0
+while read -r rid rel; do
+  [ -z "$rid" ] && continue
+  NPTR=$((NPTR + 1))
+  if [ ! -f "$rel" ] || ! grep -qF "<RULE id=\"$rid\"" "$rel"; then
+    say "위반: 피더 룰 포인터 끊김 — CLAUDE.md \`$rid\` → $rel (파일 없음 또는 그 파일에 룰 전문 블록 <RULE id=\"$rid\"> 없음)."
+    FAIL=1
+  fi
+done <<< "$PTR"
+if [ "$NPTR" -lt 8 ]; then
+  say "위반: 피더 룰 포인터 추출 ${NPTR}건 < 8 — 검사 자체가 실패한 상태(패턴 · RULE 꼴 점검)."
+  FAIL=1
+fi
+
 if [ "$FAIL" = "0" ]; then
-  say "통과: STATUS ${S}B / CLAUDE ${C}B / 합계 ${T}B / META ${M}B / 라우팅 ${R}행 / 완료잔여 ${D}행 / INDEX 링크 정상"
+  say "통과: STATUS ${S}B / CLAUDE ${C}B / 합계 ${T}B / META ${M}B / 라우팅 ${R}행 / 완료잔여 ${D}행 / INDEX 링크 정상 / 피더 포인터 ${NPTR}건"
 fi
 exit $FAIL

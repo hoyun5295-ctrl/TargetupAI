@@ -17,7 +17,7 @@
 import { getLineTemplate, type LineTemplate, type LineTemplateId, type LineCopyKey } from './design-core/line-templates';
 import { composeLineDm, composeLineEmail, lineTemplateGate, type LineMaterials, type LineCopy, type NewId } from './line-template-compose';
 import { OUTREACH_COPY_BANK, OUTREACH_TONE_LABEL, outreachBankUsable, outreachBankText, outreachToneOf, type OutreachTone, type OutreachFills } from './line-template-outreach-bank';
-import { formatLinePeriodEnd, isValidLinePeriodEnd } from './one-line-steps';
+import { linePeriodLabel, isValidLinePeriodEnd } from './one-line-steps';
 import { extractJsonFromAiText } from './ai-json';
 import type { Section } from './dm/dm-section-registry';
 
@@ -101,7 +101,7 @@ export function outreachLineMaterials(input: OutreachLineInput, std: OutreachStd
     // 조건 글은 혜택이 실릴 때만(혜택 없는 조건 글 = 뜻이 없다)
     benefitNote: benefit ? note : null,
     periodEnd,
-    periodLabel: periodEnd ? `${formatLinePeriodEnd(periodEnd)}까지` : null,
+    periodLabel: periodEnd ? linePeriodLabel(null, periodEnd) : null,
     link: std.ctaUrl || null,
     events: std.events.map((e) => ({
       title: e.title,

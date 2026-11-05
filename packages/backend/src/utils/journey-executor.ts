@@ -52,7 +52,7 @@ import {
 import { composeSpamCheckText } from './messageUtils';
 import { findSpamBlockedTexts } from './spam-block';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
-import { isCallbackRegistered } from './callback-filter';
+import { isCallbackRegistered, individualCallbackOf } from './callback-filter';   // ★ C105 H2 개별회신번호 = 직접발송과 같은 CT
 // ★ 2026-07-05: 발송 피로도 보호 — 광고 step 단건 게이트(차감 전 skip) + 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { prepaidDeduct } from './prepaid';
@@ -765,10 +765,14 @@ async function processMessageBatch(
   const planOk = demoCompany || await aiOperatorAllowedForWorker(head.company_id, head.created_by);
   const lineOk = demoCompany || await hasCompanyLineGroup(head.company_id);
   let opCredit: boolean | null = null;   // 처음 그 자리에 닿는 고객이 있을 때 한 번(★ V.3 D1 · 그 자리 차감)
+  // ★ 2026-11-05 C105 H2 — 「개별회신번호로 보내기」(DB 값 callback_mode='store' 그대로) = 직접발송 개별회신번호와 같은 CT(individualCallbackOf · 회신번호 → 비면 매장 전화번호).
+  //   숫자 있는 값만 개별 번호(직접발송 2단계와 같은 normalizePhone 판정) · 없으면 여정 보내는 번호 · 등록 판정 = 여정 만든 계정(옛 그대로).
+  //   옛: 매장 전화번호 → 여정 번호 → 고객 회신번호(직접발송과 순서가 달랐다 · 1105 접수 임은지 · 설계서 docs/2026-11-05-c105-out-of-scope-five-design.md §4 H2).
   const useStoreCallback = head.callback_mode === 'store';
-  const storePhones = useStoreCallback ? [...new Set([...custById.values()].map((c: any) => String(c.store_phone || '').trim()).filter(Boolean))] : [];
-  const storeRegistered = new Map<string, boolean>();
-  for (const sp of storePhones) storeRegistered.set(sp, await isCallbackRegistered(head.company_id, sp, head.created_by || undefined));
+  const individualOf = (c: any): string => { const v = String(individualCallbackOf(c) || '').trim(); return normalizePhone(v) ? v : ''; };
+  const individualPhones = useStoreCallback ? [...new Set([...custById.values()].map(individualOf).filter(Boolean))] : [];
+  const individualRegistered = new Map<string, boolean>();
+  for (const sp of individualPhones) individualRegistered.set(sp, await isCallbackRegistered(head.company_id, sp, head.created_by || undefined));
   const isAd = resolveJourneyAdFlag(step.channel, step.is_ad);
   const fatigueCap = isAd ? await getFatigueCap(head.company_id) : null;
   const fatigueBlocked = fatigueCap ? await getFatigueBlockedSet(head.company_id, fatigueCap, phones) : new Set<string>();
@@ -807,10 +811,10 @@ async function processMessageBatch(
       if (opCredit === null) opCredit = await reserveJourneyOperationCredit(head, new Date());
       if (!opCredit) return { kind: 'pause', reason: 'operation_credit_out', pauseText: JOURNEY_PAUSE_CREDIT_OUT };
     }
-    // 매장번호 발송(store 모드) — 등록 안 된 매장번호면 이 고객만 실패 · 회신번호 = 매장번호 → 고정번호 → 주소록
-    const storePhoneCallback = useStoreCallback ? String(customer.store_phone || '').trim() : '';
-    if (storePhoneCallback && storeRegistered.get(storePhoneCallback) === false) return { kind: 'fail', reason: 'callback_not_registered' };
-    const callbackNumber = String(storePhoneCallback || head.journey_callback_number || customer.callback || '').trim();
+    // 개별회신번호 발송(store 모드) — 등록 안 된 개별 번호면 이 고객만 실패 · 회신번호 = 개별 번호 → 여정 번호(store 모드) · 여정 번호 → 고객 회신번호(고정 모드 · 옛 그대로)
+    const individual = useStoreCallback ? individualOf(customer) : '';
+    if (individual && individualRegistered.get(individual) === false) return { kind: 'fail', reason: 'callback_not_registered' };
+    const callbackNumber = String(individual || head.journey_callback_number || (useStoreCallback ? '' : customer.callback) || '').trim();
     if (!callbackNumber) return { kind: 'pause', reason: 'callback_number_empty', pauseText: '회신번호가 비어있어 발송 차단됨' };
     // ★ 2026-07-05 발송 피로도 — 광고성 칸만 · 이 칸만 건너뜀(비용 0 · 여정 계속)
     if (fatigueCap && fatigueBlocked.has(normalizePhone(String(customer.phone || '')))) return { kind: 'skip', reason: 'fatigue_capped' };

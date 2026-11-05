@@ -19,13 +19,13 @@ describe('선불 알림톡 차감 경로가 결과별 정산 단가를 싣는다
   it('알림톡 창·마케팅 플래너(direct-send-core)', () => {
     const calls = deductCalls(read('direct-send-core.ts'));
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("{ alimtalk: directChannel === 'alimtalk' }");
+    expect(calls[0]).toContain("{ alimtalk: directChannel === 'alimtalk',");
   });
 
   it('직접 타겟(campaigns.ts /direct-send)', () => {
     const calls = deductCalls(read('../routes/campaigns.ts')).filter((c) => c.includes('directDeductType'));
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toContain("{ alimtalk: directChannel === 'alimtalk' }");
+    expect(calls[0]).toContain("{ alimtalk: directChannel === 'alimtalk',");
   });
 
   it('자동발송 알림톡(auto-campaign-worker)', () => {

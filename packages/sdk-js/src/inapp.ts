@@ -20,6 +20,11 @@
  */
 
 import { resolveTheme, withAlpha, inappGoogleFontsUrl, safeFontFamily, type InAppTheme } from './inapp-theme';
+// ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 새 틀(통짜 · 떠 있는 카드 · 기능 띠) 그리는 부품 · 스크림 규격 한 곳
+import {
+  buildPosterFrame, buildPosterScrimEl, fillPosterFrameCta, setPosterFramePager, usesPosterFrame,
+  countdownEndMs, formatCountdown,
+} from './poster-frame';
 import {
   renderBlocks, planCardLayout, renderPosterHero, renderTicketPerforation, renderBubbleSender, normalizeCardStyle,
   resolveInAppTreatment,
@@ -184,6 +189,8 @@ export interface PosterSlideSdk {
   bg_color?: string | null;
   /** 사진 맞춤 — 미지정 = 레이아웃 기본 */
   image_fit?: 'cover' | 'contain' | null;
+  /** ★ 2026-11-05 통짜 서빙 사본 — 그림 대체 글(그 장 원래 제목) */
+  alt?: string | null;
 }
 
 /** ★ 2026-07-14 디자인 3.0 — design jsonb 스키마 (전 키 옵셔널. 서버 sanitize 통과값이지만 SDK도 fail-closed 소비) */
@@ -202,6 +209,10 @@ export interface InAppDesignSdk {
   poster_layout?: string | null;
   /** ★ 2026-09-29 닫기 방식 — 'snooze_day' = 「오늘 하루 보지 않기」(24시간 · 서버 억제와 같은 축) · 그 외 = 「다시 보지 않기」 */
   dismiss_mode?: string | null;
+  /** ★ 2026-11-05 통짜(글이 구워진 그림) · 떠 있는 카드 · 기능 띠(poster-frame.ts) */
+  poster_text?: string | null;
+  poster_frame?: string | null;
+  poster_strip?: { type?: string | null; code?: string | null; label?: string | null } | null;
 }
 
 export interface InAppInitInput {
@@ -263,6 +274,11 @@ const MAX_RETRIES = 3;
  *   모르는 값·없음 = overlay(지금 포스터) — 옛 메시지 회귀 0.
  */
 export const POSTER_LAYOUTS = ['overlay', 'event_card', 'banner_sheet'] as const;
+/**
+ * ★ 2026-11-05 인앱 포스터 재구성 §3-2 — 이 SDK 가 그릴 수 있는 것(/inapp/active?caps=). 서버 INAPP_CLIENT_CAPS · 앱 계약서와 같은 낱말
+ *   (계약 시험 CT-IA4). 서버는 이 낱말이 없는 클라이언트에 통짜 · 띠 메시지를 주지 않는다.
+ */
+export const INAPP_SDK_CAPS = ['poster_baked', 'frame_card', 'strip_coupon', 'strip_countdown'] as const;
 export type PosterLayout = typeof POSTER_LAYOUTS[number];
 export function resolvePosterLayout(design: any): PosterLayout {
   const v = design && typeof design === 'object' ? String(design.poster_layout || '') : '';
@@ -344,6 +360,8 @@ export class HanjulloInAppModule {
   private lastInput: InAppInitInput = {};
   /** 메시지별 렌더 시각 (ms) — click/dismiss 시 dwell_seconds 계산 */
   private renderTimes = new Map<string, number>();
+  /** ★ 2026-11-05 §3-5 남은 시간 띠 = 서버 시각 기준(서버 − 기기 · 응답 serverNow · 캐시 항목에 함께 적는다) */
+  private clockOffsetMs = 0;
 
   constructor(
     private readonly apiKey: string,
@@ -414,12 +432,16 @@ export class HanjulloInAppModule {
     if (seenIds) params.set('seen', seenIds);
     // ★ 2026-06-17 2단계 — 앱(웹뷰)이면 채널=app 요청 (미전송 시 서버 기본 web)
     if (input.platform === 'app') params.set('channel', 'app');
+    // ★ 2026-11-05 §3-2 — 그릴 수 있는 것을 알린다(서버 관문이 이 낱말로 통짜 · 띠 메시지를 준다)
+    const caps = INAPP_SDK_CAPS.join(',');
+    params.set('caps', caps);
 
-    // 캐시 확인 (5분 TTL) — 채널별 분리 (web/app 다른 메시지)
-    const cacheKey = `${input.platform || 'web'}|${trigger}|${input.externalId || ''}|${input.anonymousId || ''}`;
+    // 캐시 확인 (5분 TTL) — 채널별 분리 (web/app 다른 메시지) · ★ 2026-11-05 판(caps)도 키에(판이 바뀐 SDK 가 옛 응답을 쓰지 않게)
+    const cacheKey = `${input.platform || 'web'}|${trigger}|${input.externalId || ''}|${input.anonymousId || ''}|${caps}`;
     const cached = this.getCachedMessages(cacheKey);
     if (cached) {
       this.debugLog(input, `캐시 hit (${cacheKey})`);
+      this.clockOffsetMs = cached.clockOffsetMs;
       const cachedInput = this.withServerCustomer(input, cached.customer);
       const seenSession = this.getSeenSession();
       cached.messages.forEach((msg) => {
@@ -447,8 +469,12 @@ export class HanjulloInAppModule {
     // 서버 동봉 customer (T3 — 자동 기동 개인화: input.customer가 없을 때만 사용)
     const serverCustomer = data.customer && typeof data.customer === 'object' ? data.customer : null;
 
+    // ★ 2026-11-05 §3-5 서버 시각 차이(받은 순간) — 캐시 항목에도 같은 값을 적어 캐시 경로도 같은 차이를 쓴다
+    const serverNowMs = typeof data.serverNow === 'string' ? Date.parse(data.serverNow) : NaN;
+    this.clockOffsetMs = Number.isFinite(serverNowMs) ? serverNowMs - Date.now() : 0;
+
     // 캐시 저장
-    this.setCachedMessages(cacheKey, data.messages, serverCustomer);
+    this.setCachedMessages(cacheKey, data.messages, serverCustomer, this.clockOffsetMs);
 
     // 각 메시지 렌더링 (max_displays_per_user + 트리거 조건 클라이언트 추가 검증)
     const renderInput = this.withServerCustomer(input, serverCustomer);
@@ -502,7 +528,7 @@ export class HanjulloInAppModule {
   // 캐시 (5분 TTL)
   // ════════════════════════════════════════════════════════════════
 
-  private getCachedMessages(cacheKey: string): { messages: InAppMessageSdk[]; customer: Record<string, any> | null } | null {
+  private getCachedMessages(cacheKey: string): { messages: InAppMessageSdk[]; customer: Record<string, any> | null; clockOffsetMs: number } | null {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_CACHE);
       if (!raw) return null;
@@ -511,17 +537,21 @@ export class HanjulloInAppModule {
       if (!entry || typeof entry.timestamp !== 'number') return null;
       if (Date.now() - entry.timestamp > CACHE_TTL_MS) return null;
       if (!Array.isArray(entry.messages)) return null;
-      return { messages: entry.messages, customer: entry.customer && typeof entry.customer === 'object' ? entry.customer : null };
+      return {
+        messages: entry.messages,
+        customer: entry.customer && typeof entry.customer === 'object' ? entry.customer : null,
+        clockOffsetMs: typeof entry.clockOffsetMs === 'number' && Number.isFinite(entry.clockOffsetMs) ? entry.clockOffsetMs : 0,
+      };
     } catch {
       return null;
     }
   }
 
-  private setCachedMessages(cacheKey: string, messages: InAppMessageSdk[], customer?: Record<string, any> | null): void {
+  private setCachedMessages(cacheKey: string, messages: InAppMessageSdk[], customer?: Record<string, any> | null, clockOffsetMs = 0): void {
     try {
       const raw = localStorage.getItem(STORAGE_KEY_CACHE);
       const cache = raw ? JSON.parse(raw) : {};
-      cache[cacheKey] = { timestamp: Date.now(), messages, ...(customer ? { customer } : {}) };
+      cache[cacheKey] = { timestamp: Date.now(), messages, clockOffsetMs, ...(customer ? { customer } : {}) };
       // 캐시 크기 제한 (10건 초과 시 오래된 것 제거)
       const keys = Object.keys(cache);
       if (keys.length > 10) {
@@ -1011,6 +1041,24 @@ export class HanjulloInAppModule {
     input: InAppInitInput,
   ): void {
     const slides = this.parsePosterSlides(msg);
+    // ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 통짜 · 떠 있는 카드 · 띠 중 하나라도 있으면 새 틀(그리는 부품 + 손잡이).
+    //   장이 없는 메시지(flat 만)는 지금 시트 경로와 같은 규칙으로 flat 에서 첫 장을 만든다. 그 밖 = 아래 지금 경로 그대로.
+    if (usesPosterFrame((msg as any).design)) {
+      const frameSlides: PosterSlideSdk[] = slides.length > 0
+        ? slides
+        : (imageUrl
+          ? [{
+              image_url: imageUrl, title, body,
+              eyebrow: badge || null,
+              cta: buttons[0] ? { label: buttons[0].label, action_url: buttons[0].action_url ?? null, background_color: buttons[0].background_color || undefined, text_color: buttons[0].text_color || undefined } : null,
+              link_url: this.resolveImageLink(msg),
+            }]
+          : []);
+      if (frameSlides.length > 0) {
+        this.renderPosterFrame(msg, frameSlides, badge, animation, autoDismissSec, input);
+        return;
+      }
+    }
     // ★ 2026-09-29 인앱 만들기 개편 — 새 레이아웃은 1장이어도 레이아웃 경로(설계서 §1-1 · 옛 >=2 조건은 overlay 전용).
     //   장이 없는 메시지(다른 입구로 만든 flat)는 flat 으로 첫 장을 만들어 같은 모양으로 그린다.
     const layout = resolvePosterLayout((msg as any).design);
@@ -1178,32 +1226,8 @@ export class HanjulloInAppModule {
     overlayColor: string; titleColor: string; bodyColor: string;
     titleSize: number; bodySize: number; displayFont: string;
   }): HTMLDivElement | null {
-    if (!o.title && !o.body && !o.badge) return null;
-    const scrim = document.createElement('div');
-    Object.assign(scrim.style, {
-      position: 'absolute', left: '0', right: '0', bottom: '0',
-      padding: '52px 22px 18px',
-      background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)',
-      color: o.overlayColor, boxSizing: 'border-box',
-      // 본문이 이미지 높이를 넘는 극단 케이스 — 잘라내지 않고 이미지 안에서 스크롤 (Codex 지적)
-      maxHeight: '100%', overflowY: 'auto',
-    });
-    if (o.badge) this.appendBadge(scrim, o.badge, o.titleColor);
-    if (o.title) {
-      const t = document.createElement('div');
-      Object.assign(t.style, { fontWeight: '800', fontSize: `${o.titleSize}px`, letterSpacing: '-0.01em', lineHeight: '1.3', marginBottom: o.body ? '5px' : '0', color: o.titleColor });
-      if (o.displayFont) t.style.fontFamily = `${o.displayFont}, ${INAPP_FONT_STACK}`;
-      t.textContent = o.title;
-      scrim.appendChild(t);
-    }
-    if (o.body) {
-      // ★ 2026-07-18 v2 — 본문 잘림 없음 (작성한 전 줄 표시. 길이는 미리보기로 확인)
-      const b = document.createElement('div');
-      Object.assign(b.style, { fontSize: `${o.bodySize}px`, opacity: '0.94', lineHeight: '1.55', whiteSpace: 'pre-wrap', color: o.bodyColor });
-      b.textContent = o.body;
-      scrim.appendChild(b);
-    }
-    return scrim;
+    // ★ 2026-11-05 §3-7 — 스크림 규격 = 그리는 부품 한 곳(새 틀 · 지금 포스터 · 캐러셀이 같은 함수 · DOM 잠금 CT-IA7)
+    return buildPosterScrimEl(o);
   }
 
   /** 포스터형 캐러셀 — 가로 꽉 찬 하단 시트 안 좌우 스와이프(CSS scroll-snap, 외부 의존성 0).
@@ -1359,6 +1383,197 @@ export class HanjulloInAppModule {
     backdrop.appendChild(root);
     document.body.appendChild(backdrop);
     if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // ★ 2026-11-05 인앱 포스터 재구성 — 새 틀(그리는 부품 poster-frame.ts + 손잡이)
+  // ────────────────────────────────────────────────────────────────
+
+  /** 새 틀 렌더(설계서 §3-4 · §3-5 · §3-7). 부품이 DOM 을 만들고 여기서 손잡이를 붙인다:
+   *  장 넘김(넘기기 · 쪽 번호 화살표 · ←/→) · 장 버튼(slide_N) · 그림 누름(slide_N_image) · 쿠폰 복사(copy_code · 닫지 않음) ·
+   *  남은 시간(1초마다 · 서버 시각 기준 · 닫히면 멈춤) · 하루 보지 않기 · 닫기 · Esc. */
+  private renderPosterFrame(
+    msg: InAppMessageSdk,
+    slides: PosterSlideSdk[],
+    badge: string,
+    animation: string,
+    autoDismissSec: number | null | undefined,
+    input: InAppInitInput,
+  ): void {
+    this.ensureCarouselStyle();
+    const customer = input.customer || {};
+    const design: any = (msg as any).design || {};
+    const baked = design.poster_text === 'baked';
+    const displayFont = baked ? '' : safeFontFamily(design.font_display, '');
+    if (displayFont) ensureFontLink(displayFont);
+    const now = () => Date.now() + this.clockOffsetMs;
+    const text = (t: string) => this.replaceVariables(t, customer);
+    const endAt = (msg as any).endAt ?? (msg as any).end_at ?? null;
+    const built = buildPosterFrame({
+      slides, design, accentColor: msg.accentColor ?? msg.accent_color ?? null, badge,
+      endAt, now: now(), active: 0, mount: 'page', viewportHeight: window.innerHeight || 800,
+      text, imageSrc: (u) => this.toAbsoluteImageUrl(u), displayFont,
+    });
+    const { backdrop, root, parts } = built;
+    root.setAttribute('data-hanjullo-msg', msg.id);
+    this.applyAnimation(root, animation, 'modal');
+    // (Codex 구현 1R) 정리 한 곳 — 메시지가 어느 길로 사라지든(닫기 · 하루 보지 않기 · 버튼 · 그림 이동 · Esc · 자동 닫힘)
+    //   전역 키 · 창 크기 리스너와 1초 시계를 떼어 낸다. 사라짐 판정 = 바깥 틀이 문서에서 빠짐(body 직속 자식 관찰).
+    let disposed = false;
+    let onKey: ((e: KeyboardEvent) => void) | null = null;
+    let onResize: (() => void) | null = null;
+    let tick: ReturnType<typeof setInterval> | null = null;
+    let watcher: MutationObserver | null = null;
+    const dispose = () => {
+      if (disposed) return;
+      disposed = true;
+      if (onKey) document.removeEventListener('keydown', onKey);
+      if (onResize) window.removeEventListener('resize', onResize);
+      if (tick) clearInterval(tick);
+      if (watcher) watcher.disconnect();
+    };
+    const close = () => { try { document.body.removeChild(backdrop); } catch {} dispose(); };
+    const count = slides.length;
+
+    // 그림 누름 = 장 링크(장 버튼 링크로 대신하지 않는다 · 없으면 무동작)
+    parts.images.forEach((img, i) => this.makeImageClickable(img, msg, input, slides[i] ? slides[i].link_url : null, `slide_${i}_image`));
+
+    // 장 버튼 — 지금 장의 버튼(장을 넘기면 갈아 끼운다)
+    let activeIdx = 0;
+    const wireCta = () => {
+      const b = fillPosterFrameCta(parts.ctaHost, slides[activeIdx] as any, built.accent, text);
+      if (!b) return;
+      const idx = activeIdx;
+      b.addEventListener('click', () => {
+        this.track(msg.id, 'click', input, `slide_${idx}`);
+        this.dismissForSession(msg);
+        this.removeMessageDom(msg);
+        this.safeNavigate(slides[idx] && slides[idx].cta ? slides[idx].cta!.action_url : null);
+      });
+    };
+    wireCta();
+    const setActive = (idx: number) => {
+      if (idx === activeIdx) return;
+      activeIdx = idx;
+      setPosterFramePager(parts.pager, idx, count);
+      wireCta();
+    };
+    const goTo = (idx: number) => {
+      const next = ((idx % count) + count) % count;
+      setActive(next);
+      const w = parts.rail.clientWidth || 0;
+      try {
+        if (typeof (parts.rail as any).scrollTo === 'function') (parts.rail as any).scrollTo({ left: next * w, behavior: this.prefersReducedMotion() ? 'auto' : 'smooth' });
+        else parts.rail.scrollLeft = next * w;
+      } catch { parts.rail.scrollLeft = next * w; }
+    };
+    if (count > 1) {
+      let ticking = false;
+      parts.rail.addEventListener('scroll', () => {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(() => {
+          ticking = false;
+          const w = parts.rail.clientWidth || 1;
+          setActive(Math.max(0, Math.min(count - 1, Math.round(parts.rail.scrollLeft / w))));
+        });
+      });
+      if (parts.prev) parts.prev.addEventListener('click', (e) => { e.stopPropagation(); goTo(activeIdx - 1); });
+      if (parts.next) parts.next.addEventListener('click', (e) => { e.stopPropagation(); goTo(activeIdx + 1); });
+    }
+
+    // 쿠폰 코드 복사(메시지는 닫지 않는다 · 기록 = click · copy_code)
+    if (parts.stripCopy && parts.stripCode) {
+      const btn = parts.stripCopy;
+      const codeEl = parts.stripCode;
+      btn.addEventListener('click', () => this.copyCouponCode(btn, codeEl, String(codeEl.textContent || ''), msg, input));
+    }
+
+    // 남은 시간 — 1초마다 서버 시각 기준으로 다시 센다 · 0 이하 = 「마감됐어요」 · 메시지가 사라지면 멈춘다
+    const endMs = countdownEndMs(endAt);
+    if (parts.stripTimer && endMs !== null) {
+      const timer = parts.stripTimer;
+      tick = setInterval(() => {
+        if (!document.body.contains(root)) { dispose(); return; }
+        const left = endMs - now();
+        timer.textContent = formatCountdown(left);
+        if (left <= 0 && tick) { clearInterval(tick); tick = null; }
+      }, 1000);
+    }
+
+    // 하루 보지 않기(또는 다시 보지 않기) · 닫기
+    const snooze = String(design.dismiss_mode || '') === 'snooze_day';
+    parts.dismissDay.addEventListener('click', () => this.onOptOutOrSnooze(parts.dismissDay, msg, input, close, snooze));
+    parts.close.addEventListener('click', () => {
+      this.track(msg.id, 'dismiss', input);
+      this.dismissForSession(msg);
+      this.gracefulClose(parts.close, close);
+    });
+
+    // ←/→ = 장 넘기기 · Esc = 닫기 · 메시지가 사라지면 스스로 떼어 낸다
+    onKey = (e: KeyboardEvent) => {
+      if (!document.body.contains(root)) { dispose(); return; }
+      if (count > 1 && e.key === 'ArrowRight') goTo(activeIdx + 1);
+      else if (count > 1 && e.key === 'ArrowLeft') goTo(activeIdx - 1);
+      else if (e.key === 'Escape') {
+        this.track(msg.id, 'dismiss', input);
+        this.dismissForSession(msg);
+        close();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    // 보이는 높이가 바뀌면(회전 · 창 크기) 높이 상한을 다시 맞춘다
+    onResize = () => {
+      if (!document.body.contains(root)) { dispose(); return; }
+      built.fit(window.innerHeight || 800);
+    };
+    window.addEventListener('resize', onResize);
+
+    backdrop.setAttribute('data-hanjullo-wrap', '1');
+    document.body.appendChild(backdrop);
+    if (typeof MutationObserver !== 'undefined') {
+      watcher = new MutationObserver(() => { if (!backdrop.isConnected) dispose(); });
+      watcher.observe(document.body, { childList: true });
+    }
+    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
+  }
+
+  /** 쿠폰 코드 복사 — clipboard → 막히면 숨은 글 칸 선택 + execCommand → 그것도 안 되면 코드 글자를 선택해 둔다(손으로 복사) */
+  private copyCouponCode(btn: HTMLElement, codeEl: HTMLElement, code: string, msg: InAppMessageSdk, input: InAppInitInput): void {
+    this.track(msg.id, 'click', input, 'copy_code');
+    const done = () => {
+      btn.textContent = '복사했어요';
+      setTimeout(() => { btn.textContent = '복사'; }, 2000);
+    };
+    const selectCode = () => {
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(codeEl);
+        const sel = window.getSelection();
+        if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+      } catch { /* 선택도 못 하면 그대로 둔다 */ }
+    };
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        ta.setAttribute('readonly', '');
+        Object.assign(ta.style, { position: 'fixed', top: '0', left: '0', opacity: '0', pointerEvents: 'none' });
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = typeof document.execCommand === 'function' && document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (ok) { done(); return; }
+      } catch { /* 아래 선택으로 */ }
+      selectCode();
+    };
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        navigator.clipboard.writeText(code).then(done, fallback);
+        return;
+      }
+    } catch { /* 아래 대체 경로 */ }
+    fallback();
   }
 
   // ────────────────────────────────────────────────────────────────

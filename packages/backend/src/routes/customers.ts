@@ -45,6 +45,7 @@ import { requirePlanFeature } from '../utils/plan-guard';
 import { generateSegmentFromNaturalLanguage, SegmentGenerationError } from '../utils/ai-segment-generator';
 // ★ 2026-08-22 고객 360 타임라인 — 조립·판정은 CT가 소유(라우트 인라인 금지 규약)
 import { buildCustomerTimeline, TIMELINE_KINDS, type TimelineKind } from '../utils/customer-timeline';
+import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP, sqlNumberParam, sqlParseIntParam } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -68,8 +69,8 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '회사 권한이 필요합니다' });
     }
 
-    const { filters, search, page = 1, limit = 50, gender, minAge, maxAge, grade, smsOptIn } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    const { filters, search, gender, minAge, maxAge, grade, smsOptIn } = req.query;
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59) 주소 숫자 값 = CT(옛: 숫자 아니면 LIMIT NaN · 음수 OFFSET = 500 · 1105 13:58 운영 로그)
 
     let whereClause = 'WHERE company_id = $1 AND is_active = true';
     const params: any[] = [companyId];
@@ -84,7 +85,7 @@ router.get('/', async (req: Request, res: Response) => {
       } else if (scope.type === 'blocked') {
         return res.json({
           customers: [],
-          pagination: { total: 0, page: Number(req.query.page || 1), limit: Number(req.query.limit || 50), totalPages: 0 },
+          pagination: { total: 0, page, limit, totalPages: 0 },
         });
       }
       // scope.type === 'no_filter' → 필터 없이 company_id 전체 (기존대로)
@@ -139,11 +140,11 @@ router.get('/', async (req: Request, res: Response) => {
     }
 if (minAge) {
   whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) >= $${paramIndex++}`;
-  params.push(Number(minAge));
+  params.push(sqlNumberParam(minAge, '최소 나이'));
 }
 if (maxAge) {
   whereClause += ` AND EXTRACT(YEAR FROM AGE(birth_date)) <= $${paramIndex++}`;
-  params.push(Number(maxAge));
+  params.push(sqlNumberParam(maxAge, '최대 나이'));
 }
 if (grade) {
   // ★ D131 후속(2026-04-21): 원본 보존 — variant 확장 제거, DB 저장값과 정확히 일치하는 것만 매칭
@@ -189,7 +190,7 @@ if (smsOptIn === 'true') {
     const whereParamCount = params.length;
     const unsubCaseIdx = paramIndex++;
     params.push(userId);
-    params.push(Number(limit), offset);
+    params.push(limit, offset);
     const result = await query(
       `SELECT id, name, phone, gender, TO_CHAR(birth_date, 'YYYY-MM-DD') as birth_date, age, email, address, grade, region, points,
               ${storeCodeDisplayExpr('customers_unified')} AS store_code, store_name, registered_store, recent_purchase_store,
@@ -208,7 +209,7 @@ if (smsOptIn === 'true') {
     );
 
     let total = result.rows.length > 0 ? parseInt(result.rows[0].total_count_all) : 0;
-    if (result.rows.length === 0 && Number(page) > 1) {
+    if (result.rows.length === 0 && page > 1) {
       const countResult = await query(
         `SELECT COUNT(*) FROM customers_unified ${whereClause}`,
         params.slice(0, whereParamCount)
@@ -223,12 +224,13 @@ if (smsOptIn === 'true') {
       customers,
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ C105 H4(R59) 숫자 아닌 입력 = 400 INVALID_NUMBER_INPUT(사용자 조건 · 500 아님)
     // ★ 2026-11-05 C103 F7 — 뷰 칸 없음(필터 칸 · 원장 C103-DDL-1 전) = 503(db_alter_safety_net · 500 원문 0)
     if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers_unified 칸(뷰 다시 만들기 · 원장 C103-DDL-1)'));
     console.error('고객 목록 조회 오류:', error);
@@ -432,6 +434,7 @@ router.get('/download', async (req: Request, res: Response) => {
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(buffer);
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ C105 H4(R59) 숫자 아닌 입력 = 400
     // ★ 2026-11-05 C103 F7 — 1104 접수 = 뷰에 없는 칸(가입일)을 고르면 500 · 칸 없음 = 503 + 실행할 DDL
     if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers_unified 칸(뷰 다시 만들기 · 원장 C103-DDL-1)'));
     console.error('고객 다운로드 오류:', error);
@@ -489,6 +492,7 @@ router.post('/filter', async (req: Request, res: Response) => {
       filters,
     });
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ C105 H4(R59) 숫자 아닌 입력 = 400
     // ★ 2026-11-05 C103 F7 — 필터 칸이 뷰에 없으면(원장 C103-DDL-1 전) 503
     if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('customers_unified 칸(뷰 다시 만들기 · 원장 C103-DDL-1)'));
     console.error('필터 미리보기 오류:', error);
@@ -968,7 +972,7 @@ router.post('/filter-count', async (req: Request, res: Response) => {
       if (ageRange) {
         // ★ D79: age 컬럼 NULL이어도 birth_date에서 나이 동적 계산
         const ageExpr = `COALESCE(age, DATE_PART('year', AGE(birth_date))::int)`;
-        const ageVal = parseInt(ageRange);
+        const ageVal = sqlParseIntParam(ageRange, '나이대');   // ★ C105 H4 옛 parseInt 값 그대로 · 숫자 아니면 400
         if (ageVal === 60) {
           whereClause += ` AND ${ageExpr} >= 60`;
         } else {
@@ -989,10 +993,10 @@ router.post('/filter-count', async (req: Request, res: Response) => {
       }
       if (minPurchase) {
         whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
-        params.push(parseInt(minPurchase));
+        params.push(sqlParseIntParam(minPurchase, '최소 구매 금액'));
       }
       if (recentDays) {
-        whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+        whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${sqlParseIntParam(recentDays, '최근 구매 일수')} days'`;
       }
     }
 
@@ -1004,6 +1008,7 @@ router.post('/filter-count', async (req: Request, res: Response) => {
     const count = parseInt(result.rows[0].count);
     res.json({ count });
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ C105 H4(R59) 숫자 아닌 입력 = 400
     console.error('필터 카운트 에러:', error);
     res.status(500).json({ error: '카운트 조회 실패' });
   }
@@ -1059,7 +1064,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       if (ageRange) {
         // ★ D79: age 컬럼 NULL이어도 birth_date에서 나이 동적 계산
         const ageExpr = `COALESCE(age, DATE_PART('year', AGE(birth_date))::int)`;
-        const ageVal = parseInt(ageRange);
+        const ageVal = sqlParseIntParam(ageRange, '나이대');   // ★ C105 H4 옛 parseInt 값 그대로 · 숫자 아니면 400
         if (ageVal === 60) {
           whereClause += ` AND ${ageExpr} >= 60`;
         } else {
@@ -1080,10 +1085,10 @@ router.post('/extract', async (req: Request, res: Response) => {
       }
       if (minPurchase) {
         whereClause += ` AND total_purchase_amount >= $${paramIndex++}`;
-        params.push(parseInt(minPurchase));
+        params.push(sqlParseIntParam(minPurchase, '최소 구매 금액'));
       }
       if (recentDays) {
-        whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${parseInt(recentDays)} days'`;
+        whereClause += ` AND recent_purchase_date >= NOW() - INTERVAL '${sqlParseIntParam(recentDays, '최근 구매 일수')} days'`;
       }
     }
 
@@ -1120,6 +1125,7 @@ router.post('/extract', async (req: Request, res: Response) => {
       recipients: flatRecipients
     });
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ C105 H4(R59) 숫자 아닌 입력 = 400
     console.error('타겟 추출 에러:', error);
     res.status(500).json({ error: '타겟 추출 실패' });
   }
@@ -1630,10 +1636,7 @@ router.get('/purchases/overview', async (req: Request, res: Response) => {
     const from = typeof req.query.from === 'string' && dateRe.test(req.query.from) ? req.query.from : null;
     const to = typeof req.query.to === 'string' && dateRe.test(req.query.to) ? req.query.to : null;
 
-    const pageRaw = Number(req.query.page);
-    const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.min(Math.floor(pageRaw), 100000) : 1;
-    const limitRaw = Number(req.query.limit);
-    const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 100) : 25;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 25, maxLimit: 100 });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
@@ -1805,10 +1808,7 @@ router.get('/:id/purchases', async (req: Request, res: Response) => {
       return res.status(404).json({ error: '고객을 찾을 수 없습니다.' });
     }
 
-    const pageRaw = Number(req.query.page);
-    const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.min(Math.floor(pageRaw), 100000) : 1;
-    const limitRaw = Number(req.query.limit);
-    const limit = Number.isFinite(limitRaw) && limitRaw >= 1 ? Math.min(Math.floor(limitRaw), 100) : 20;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: 100 });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
 
     // ★ B16-01: company_user 브랜드(store_code) 격리 — 목록 라우트와 동일 패턴
@@ -1910,8 +1910,8 @@ router.get('/:id/timeline', requirePlanFeature('customer_db_view'), async (req: 
       customerId: String(id),
       before: req.query.before ? String(req.query.before) : null,
       kinds,
-      limit: req.query.limit ? Number(req.query.limit) : 50,
-      months: req.query.months ? Number(req.query.months) : undefined,
+      limit: parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP }).limit,
+      months: parseQueryInt(req.query.months, { fallback: null, min: 1, max: 1200, clamp: true }) ?? undefined,
       q: q || null,
       from,
       to,

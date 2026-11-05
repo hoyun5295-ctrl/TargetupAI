@@ -45,8 +45,9 @@ import { journeyOwnerConsent } from './mall-consent';
 import { CUSTOMER_CONDITION_FIELDS, BIRTH_MONTH_SQL, normalizeGenderCode, conditionFieldLabelList } from './journey-condition-fields';
 import { getGenderVariants } from './normalize';
 // ★ 2026-11-02 §16 G2 — 매장번호 회신 미등록 판정 = 실행기와 같은 함수
-import { isCallbackRegistered } from './callback-filter';
+import { isCallbackRegistered, individualCallbackOf } from './callback-filter';   // ★ C105 H2
 import { normalizePhone } from './normalize-phone';
+import { sqlNumberParam } from './normalize';   // ★ C105 H4(R59)
 
 /**
  * ★ 2026-11-02 설계서 §16 G2 — 대상 SQL 한 벌(트리거 갈래마다 고객 id 를 고르는 문장 + 값 · 글자는 옛 갈래 그대로).
@@ -123,7 +124,7 @@ export async function buildJourneyTargetQuery(
         const since = journeySignupSinceSql('c', `(SELECT entry_baseline_at FROM journeys WHERE id = ${jRef})`);
         entryClause = `${buildLedgerAntiJoin('c', params.length)} AND ${newSignupSql('c', since)}`;
       } else {
-        params.push(String(Number(filters.recent_hours || 24)));    // $2 = hours (추정 · 미리보기)
+        params.push(String(sqlNumberParam(filters.recent_hours || 24, '최근 시간')));    // $2 = hours (추정 · 미리보기) · ★ C105 H4(R59) 옛 값 그대로 · 숫자 아니면 400
         entryClause = newSignupSql('c', `NOW() - ($${params.length} || ' hours')::interval`);
       }
       // ★ 2026-08-01 §3-0-2: 원장에 없다고 신규가 아니다.
@@ -1102,8 +1103,8 @@ export async function averageTargetScores(
 }
 
 /**
- * ★ 2026-11-02 §16 G2 — 매장번호 회신 여정의 미등록 매장번호(대상 전원 · 실행기와 같은 판정).
- *   실행기(journey-executor 5-2) = 고객 매장번호가 있고 그 번호가 isCallbackRegistered(회사, 번호, 여정 만든 계정)가 아니면 그 고객만 실패.
+ * ★ 2026-11-02 §16 G2 — 개별회신번호 여정의 미등록 번호(대상 전원 · 실행기와 같은 판정 · ★ C105 H2 개별 번호 = individualCallbackOf).
+ *   실행기(journey-executor 5-2) = 고객 개별 번호(회신번호 → 비면 매장 전화번호 · 숫자 있는 값)가 isCallbackRegistered(회사, 번호, 여정 만든 계정)가 아니면 그 고객만 실패.
  *   여기서 같은 판정을 매장번호마다 한 번 한다(옛: 켜기 확인이 10만 목록 + 켠 사람 기준 다른 판정).
  */
 export async function storeCallbackExposure(
@@ -1116,13 +1117,21 @@ export async function storeCallbackExposure(
   consent?: JourneyConsent,
   reentry?: { allowReentry: boolean; cooldownDays: number; lineageIds?: string[] },   // ★ C104 G5
 ): Promise<{ callbackUnregisteredCount: number; unregisteredDetails: Array<{ phone: string; excludedCount: number }> }> {
+  // ★ 2026-11-05 C105 H2 — 개별 번호 = 실행기와 같은 CT(individualCallbackOf · 숫자 있는 값만 · SQL 식 복제 0) · (회신번호 · 매장 전화번호) 묶음째 세고 JS 에서 정한다
   const rows = await aggregateTargets(companyId, triggerEvent, triggerFilters, journeyId, scopeSql, consent,
-    (from) => `SELECT btrim(c.store_phone) AS store_phone, COUNT(*)::int AS cnt FROM ${from}
-                WHERE COALESCE(btrim(c.store_phone), '') <> '' GROUP BY btrim(c.store_phone)`, reentry);
-  const unregisteredDetails: Array<{ phone: string; excludedCount: number }> = [];
+    (from) => `SELECT c.callback, c.store_phone, COUNT(*)::int AS cnt FROM ${from}
+                WHERE COALESCE(btrim(c.callback), '') <> '' OR COALESCE(btrim(c.store_phone), '') <> ''
+                GROUP BY c.callback, c.store_phone`, reentry);
+  const byPhone = new Map<string, number>();
   for (const r of rows || []) {
-    if (!(await isCallbackRegistered(companyId, String(r.store_phone), createdBy || undefined))) {
-      unregisteredDetails.push({ phone: normalizePhone(String(r.store_phone)) || String(r.store_phone), excludedCount: Number(r.cnt) || 0 });
+    const v = String(individualCallbackOf({ callback: r.callback, store_phone: r.store_phone }) || '').trim();
+    if (!normalizePhone(v)) continue;   // 숫자 없는 값 = 개별 번호 없음 → 여정 번호로(실행기와 같음)
+    byPhone.set(v, (byPhone.get(v) || 0) + (Number(r.cnt) || 0));
+  }
+  const unregisteredDetails: Array<{ phone: string; excludedCount: number }> = [];
+  for (const [phone, cnt] of byPhone) {
+    if (!(await isCallbackRegistered(companyId, phone, createdBy || undefined))) {
+      unregisteredDetails.push({ phone: normalizePhone(phone) || phone, excludedCount: cnt });
     }
   }
   unregisteredDetails.sort((a, b) => b.excludedCount - a.excludedCount);

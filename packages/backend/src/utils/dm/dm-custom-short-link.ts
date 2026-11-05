@@ -10,7 +10,7 @@
  */
 
 import { UserFacingError } from '../http-error';
-import { query } from '../../config/database';
+import { query, type TxRun } from '../../config/database';
 import { generateDmShortCode } from './dm-recipient-token';
 import { CUSTOM_LINK_DAILY_LIMIT } from './dm-custom-short-link-core';
 
@@ -109,10 +109,11 @@ export async function createCustomShortLink(input: {
 
 /** 공개 리다이렉트 조회 — 활성 링크만. 미존재/비활성 = null(라우트가 홈 폴백).
  *  ★ 2026-07-15 NFC 정규화 — 한글 slug(iOS 자소 분리 NFD 유입 대비). 쓰기(validateCustomSlug)와 동일 규칙. */
-export async function lookupCustomShortLink(code: string): Promise<{ targetUrl: string; id: string } | null> {
+export async function lookupCustomShortLink(code: string, run: TxRun = query): Promise<{ targetUrl: string; id: string } | null> {
   const c = String(code || '').trim().normalize('NFC');
   if (!c) return null;
-  const r = await query(
+  // ★ 2026-11-05 인앱 DM 연결 판정 — run = 부르는 쪽 트랜잭션 연결(없으면 지금처럼 풀 · 뿌리 R41)
+  const r = await run(
     `SELECT id, target_url FROM dm_custom_short_links
       WHERE code = $1 AND is_active = true
       LIMIT 1`,

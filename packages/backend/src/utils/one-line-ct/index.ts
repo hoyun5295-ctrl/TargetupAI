@@ -18,7 +18,7 @@ import { aiLineBaseKeyOfFp } from '../ai-line';
 import { takeDailyQuota, tryAcquireInflight, releaseInflight } from '../inflight-lock';
 import { lineFpLockKey } from '../one-line-steps';
 import {
-  lineTermFacts, formatLinePeriodEnd, LINE_JUDGE_SOURCE, LINE_PRICE,
+  lineTermFacts, linePeriodLabel, LINE_JUDGE_SOURCE, LINE_PRICE,
   type LineStep, type LineStepsPlan, type LineStepsPlanInput, type LineRichBody,
 } from '../one-line-steps';
 import { lineJudgeCovered } from '../line-steps-context';
@@ -202,6 +202,8 @@ export interface LineCookInput {
   page: LinePageMaterial | null;
   benefitAnswer: string | null | undefined;
   periodEnd: string | null;
+  /** ★ C105 H1 시작일(선택) */
+  periodStart?: string | null;
   link: string | null;
   rich: LineRichBody;
 }
@@ -253,7 +255,7 @@ export function lineCookMaterials(input: LineCookInput): { comp: LineComposition
     benefitNote: input.rich.benefitNote,
     couponCode: input.rich.couponCode,
     periodEnd: input.periodEnd,
-    periodLabel: input.periodEnd ? `${formatLinePeriodEnd(input.periodEnd)}까지` : null,
+    periodLabel: input.periodEnd ? linePeriodLabel(input.periodStart, input.periodEnd) : null,   // ★ C105 H1
     link: input.link,
     store: input.rich.store,
   };

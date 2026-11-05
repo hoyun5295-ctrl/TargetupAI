@@ -11,9 +11,9 @@ import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVarian
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
-import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts, composeSpamCheckText } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts, composeSpamCheckText, kakaoFallbackSpamItems } from '../utils/messageUtils';
 import { checkSpamBlockBeforeCharge } from '../utils/spam-block';
-import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, getDisplayContents, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, getDisplayContents, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -47,7 +47,7 @@ import {
 } from '../utils/sms-queue';
 import { subjectForMsgType } from '../utils/qtmsg-type';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
-import { buildBrandQueuePayload, resolveBrandFallback, resolveBrandCallback,
+import { buildBrandQueuePayload, resolveBrandFallback, brandFallbackQueueType, resolveBrandCallback,
          prepareBrandAttachmentForSend, appendAiImageNotice, BUBBLE_TYPES, listBrandTrialTypes } from '../utils/brand-message';
 // ★ 2026-09-02 브랜드 이미지의 카카오 콘텐츠 서버 확정 — img_url에는 업로드본만 실을 수 있다(IMC 회신).
 //   조립기가 우리 서빙 URL을 거절하므로, 조립기를 부르는 경로는 그 앞에서 이 치환을 거쳐야 한다.
@@ -81,6 +81,7 @@ import { isDirectPipelineSendType } from '../utils/send-type-axis';
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
 // ★2026-09-25 무료 체험 스팸 검사 표시(비용 0)
 import { SPAM_TRIAL_SOURCE, spamBillableTestSql } from '../utils/spam-trial';
+import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
 
@@ -121,8 +122,10 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const companyTables = await getCompanySmsTables(companyId, userId);
-    const { status, page = 1, limit = 20, year, month } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    const { status } = req.query;
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59) 주소 숫자 값 = CT
+    const year = parseQueryInt(req.query.year, { fallback: null, min: 1970, max: 2100 });
+    const month = parseQueryInt(req.query.month, { fallback: null, min: 1, max: 12 });
 
     let whereClause = 'WHERE company_id = $1';
     const params: any[] = [companyId];
@@ -154,9 +157,9 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     // 월별 필터링 (캘린더용) - 이벤트 기간도 포함
-    if (year && month) {
-      const monthStart = `${year}-${month}-01`;
-      const monthEnd = `${year}-${month}-${new Date(Number(year), Number(month), 0).getDate()}`;
+    if (year != null && month != null) {
+      const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;   // ★ C105 H4 CT 값으로만 조립
+      const monthEnd = `${year}-${String(month).padStart(2, '0')}-${new Date(year, month, 0).getDate()}`;
 
       whereClause += ` AND (
         DATE_TRUNC('month', scheduled_at) = $${paramIndex}::date
@@ -177,7 +180,7 @@ router.get('/', async (req: Request, res: Response) => {
     );
     const total = parseInt(countResult.rows[0].count);
 
-    params.push(Number(limit), offset);
+    params.push(limit, offset);
     // ★ B2: opt_out_080_number 포함을 위해 alias 'c' + LEFT JOIN
     const aliasedWhereClause = whereClause
       .replace(/\bcompany_id\b/g, 'c.company_id')
@@ -273,9 +276,9 @@ router.get('/', async (req: Request, res: Response) => {
       campaigns,
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -1136,7 +1139,7 @@ const aiEtcJsonMax = (sendChannel === 'kakao' || sendChannel === 'both') ? await
 
 for (const customer of filteredCustomers) {
   // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
-  const { message: personalizedMessage, subject: personalizedSubject } = prepareSendMessage(campaign.message_content || '', customer, fieldMappings, {
+  const { message: personalizedMessage, subject: personalizedSubject, body: personalizedBody } = prepareSendMessage(campaign.message_content || '', customer, fieldMappings, {
     msgType: campaign.message_type, isAd: campaign.is_ad || false, opt080Number,
     subject: campaign.subject || '',
   });
@@ -1158,9 +1161,12 @@ for (const customer of filteredCustomers) {
   // ★ 브랜드메시지 — SMSQ 배치 행 축적 (★2026-08-15 규약 정정: 본문=msg_contents / 제어·부가=k_etc_json)
   //   조립·대체발송 결함은 여기서 throw → 아래 전체 catch가 미적재 기준으로 환불한다(fail-closed).
   if (sendChannel === 'kakao' || sendChannel === 'both') {
+    // ★ 2026-11-05 C107 — 대체 원문 = 광고 표기 전 개인화 글(personalizedBody) · 고른 유형으로 표기 한 번(D-14 · Codex 설계 1R #4)
     const brandFallback = resolveBrandFallback({
       resendType: sendChannel === 'both' ? 'NO' : kakaoResendType,
-      originalMessage: personalizedMessage,
+      originalMessage: personalizedBody,
+      isAd: campaign.is_ad === true,
+      opt080Number,
     });
     // ★2026-09-02 AI 생성 이미지 안내 — 판정은 위 preflight가 했고 부착은 개인화 본문에 한다.
     //   부착 실패(길이·줄바꿈 초과)는 throw = 미적재 환불 경로. 문구를 빼고 보내지 않는다.
@@ -1213,6 +1219,20 @@ if (sendChannel === 'sms' || sendChannel === 'both') {
     return res.status(400).json({ error: spamVerdict.notice, code: spamVerdict.code });
   }
 }
+// ★ 2026-11-05 C107 D-17 · 뿌리 R63 — 브랜드 전용 발송의 문자 대체 문구도 문자로 나가는 글이다(원문 한 번 · 차감 앞).
+if (isBrandOnlyChannel(sendChannel)) {
+  const fbItems = kakaoFallbackSpamItems({
+    nextType: brandFallbackQueueType(kakaoResendType), nextContents: campaign.message_content || '',
+    isAd: campaign.is_ad === true, recipients: filteredCustomers.length,
+  });
+  if (fbItems.length > 0) {
+    const fbSpam = await checkSpamBlockBeforeCharge({ items: fbItems, companyId, userId, source: 'campaign' });
+    if (fbSpam.blocked) {
+      await failCampaignRun(campaignRun.id, '금칙어 차단으로 발송 중단(문자 대체 문구)');
+      return res.status(400).json({ error: fbSpam.notice, code: fbSpam.code });
+    }
+  }
+}
 
 // ── 여기서부터 되돌릴 수 없는 것들(차감·적재) ─────────────────────────
 //   ★ 2026-08-18 preflight — 위 1단계에서 **모든 수신자의 행을 만들어 본 뒤**에 차감한다.
@@ -1221,7 +1241,9 @@ if (sendChannel === 'sms' || sendChannel === 'both') {
 // 채널·유형·카카오 활성 여부는 전부 run INSERT **앞**에서 확정됐다(2026-08-17) —
 // 여기서 실패할 수 있는 것은 차감 하나뿐이고, 그 실패는 실행 행을 종결시켜 캠페인을 풀어 준다.
 // ★ 2026-09-13 브랜드 단가는 대상(친구·비친구)으로 갈린다 — 적재 조립(위 buildBrandQueuePayload)과 같은 값.
-const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId, 'campaign', { targeting: kakaoTargeting, form: 'FREE' });
+// ★ 2026-11-05 C107 D-12 — 브랜드 전용 + 문자 대체 켬 = 결과별 단가(브랜드 · 고른 대체 문자)를 차감 행에(both 는 대체를 늘 끈다)
+const aiBrandFb = isBrandOnlyChannel(sendChannel) ? brandFallbackQueueType(kakaoResendType) : 'N';
+const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, deductType, id, userId, 'campaign', { targeting: kakaoTargeting, form: 'FREE' }, { brandFallback: aiBrandFb === 'N' ? null : aiBrandFb });
 if (sendDeduct.ok) aiDeductedAxes.add(deductType);
 if (!sendDeduct.ok) {
   // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
@@ -1562,12 +1584,12 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         `COUNT(*) AS total,
          SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) AS success,
          SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) AS pending,
-         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'S' THEN 1 ELSE 0 END) AS ok_sms,
+         SUM(CASE WHEN (status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'S') OR (${KAKAO_INROW_FALLBACK_SMS_SQL}) THEN 1 ELSE 0 END) AS ok_sms,
          SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'M' THEN 1 ELSE 0 END) AS ok_mms,
-         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'F' THEN 1 ELSE 0 END) AS ok_brand`,
+         SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'F' AND NOT (${KAKAO_INROW_FALLBACK_SMS_SQL}) AND NOT (${KAKAO_INROW_FALLBACK_LMS_SQL}) THEN 1 ELSE 0 END) AS ok_brand`,
         testWhere, queryParams),
       smsSelectPagedAll(allTables,
-        'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id',
+        'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id, k_oriseq',
         testWhere, queryParams, 'sendreq_time DESC, seqno DESC', TEST_LIST_LIMIT, 0),
     ]);
 
@@ -1615,7 +1637,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       phone: r.dest_no,
       // ★ 2026-09-26 S1-H06 브랜드 테스트가 이 목록에 들어온다 — 유형·본문은 표시 CT(브랜드 본문은 JSON이라 문구만 꺼낸다)
       content: getDisplayContents(r.msg_type, r.msg_contents),
-      type: getSendTypeLabel(r.msg_type),
+      type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),   // ★ C107 — 결과 코드까지(브랜드 대체 = 「대체 SMS」 · 청구 = 테스트 SMS)
       sentAt: r.sendreq_time,
       status: isSuccess(r.status_code) ? 'success' : PENDING_CODES.includes(r.status_code) ? 'pending' : 'fail',
 
@@ -2370,6 +2392,18 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
         return res.status(400).json({ success: false, error: directSpam.notice, code: directSpam.code });
       }
     }
+    // ★ 2026-11-05 C107 D-17 · 뿌리 R63 — 카카오 대체 문구(브랜드 = 본문 · 알림톡 = 대체 유형별)도 같은 판정(원문 한 번 · 차감 앞 · 커밋 코어와 같은 입력)
+    const directFbItems = isBrandOnlyChannel(directChannel)
+      ? kakaoFallbackSpamItems({ nextType: brandFallbackQueueType(kakaoResendType || 'SM'), nextContents: sanitizedMessage, isAd: finalIsAd, recipients: recipients.length })
+      : directChannel === 'alimtalk'
+        ? kakaoFallbackSpamItems({ nextType: alimtalkNextType, nextContents: alimtalkNextContents, titleStr: alimtalkNextSubject, originalText: message, isAd: false, recipients: recipients.length })
+        : [];
+    if (directFbItems.length > 0) {
+      const directFbSpam = await checkSpamBlockBeforeCharge({ items: directFbItems, companyId, userId, source: 'direct' });
+      if (directFbSpam.blocked) {
+        return res.status(400).json({ success: false, error: directFbSpam.notice, code: directFbSpam.code });
+      }
+    }
 
     // ★ D102: 중복제거 — 사용자 선택에 따라 적용 (기본 true)
     let finalRecipients = recipients;
@@ -2836,9 +2870,12 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
         const recipientCallback = resolveCustomerCallback(recipient, useIndividualCallback, callback);
 
         // 조립·대체발송 결함은 throw → 바깥 try의 미적재 환불이 되돌린다(fail-closed).
+        // ★ 2026-11-05 C107 — 대체 원문 = 광고 표기 전 개인화 글(이 블록의 finalMessage = replaceVariables 결과 · 표기 전) · 고른 유형으로 표기 한 번(D-14)
         const brandFallback = resolveBrandFallback({
           resendType: directChannel === 'both' ? 'NO' : (kakaoResendType || 'SM'),
           originalMessage: finalMessage,
+          isAd: finalIsAd,
+          opt080Number: directOpt080,
         });
         // ★2026-09-02 AI 생성 이미지 안내 — 판정은 preflight, 부착은 개인화 본문에.
         const directBrandMessage = directBrandPreflight.aiGenerated && BUBBLE_TYPES[String(kakaoBubbleType || 'TEXT').toUpperCase()]
@@ -2877,7 +2914,9 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
     // 유형은 위 게이트가 확정한 값을 쓴다 — 원본을 다시 읽으면 게이트를 우회한 값이 과금 축이 된다.
     // ★ 2026-09-13 브랜드 단가는 대상(친구·비친구)으로 갈린다 — 적재 조립(위 directBrandPayload)과 같은 값.
     // ★ 2026-09-26 한줄로 V2 F01·F04 알림톡이면 차감 행에 결과별 정산 단가를 싣는다(정산 스위퍼가 결과별 차액을 돌려준다).
-    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId, 'campaign', { targeting: kakaoTargeting || 'I', form: 'FREE' }, { alimtalk: directChannel === 'alimtalk' });
+    // ★ 2026-11-05 C107 D-12 — 브랜드 전용 + 문자 대체 = 결과별 단가(차감 단가 = max(브랜드, 대체 문자))
+    const directBrandFb = isBrandOnlyChannel(directChannel) ? brandFallbackQueueType(kakaoResendType || 'SM') : 'N';
+    const directDeduct = await prepaidDeduct(companyId, filteredRecipients.length, directDeductType, campaignId, userId, 'campaign', { targeting: kakaoTargeting || 'I', form: 'FREE' }, { alimtalk: directChannel === 'alimtalk', brandFallback: directBrandFb === 'N' ? null : directBrandFb });
     if (directDeduct.ok) directDeductedAxes.add(directDeductType);
     if (!directDeduct.ok) {
       // 캠페인 레코드 롤백
@@ -3331,7 +3370,7 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
     const userType = (req as any).user?.userType;
     const campaignId = req.params.id;
     const { search } = req.query;
-    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 200 }).limit;
     // ★ 2026-09-27 한줄로 V2 m140 — 음수 offset은 0(옛 parseInt 그대로 → 음수면 SQL 오류)
     const offset = parseOffsetParam(req.query.offset);
 

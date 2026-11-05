@@ -16,6 +16,7 @@ import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { recordAuditLog, isDiagnosisViewer } from '../utils/audit-log';
 import { judgeGrantEligibility, executeGrant, GrantConflictError } from '../utils/marketing-diagnosis-grant';
+import { parsePageParams, parseOffsetParam } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -61,8 +62,8 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const funnel = req.query.funnel === 'A' || req.query.funnel === 'B' ? String(req.query.funnel) : null;
     const status = typeof req.query.status === 'string' && req.query.status.trim() ? req.query.status.trim() : null;
-    const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
-    const offset = Math.max(0, Number(req.query.offset) || 0);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 200 }).limit;
+    const offset = parseOffsetParam(req.query.offset);
 
     const conds: string[] = [];
     const params: any[] = [];

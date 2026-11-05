@@ -1866,7 +1866,7 @@ export default function JourneysPage() {
                   </select>
                   <label className="flex items-center gap-1.5 mt-2 text-xs text-slate-600 cursor-pointer">
                     <input type="checkbox" checked={reviewUseStorePhone} onChange={(e) => setReviewUseStorePhone(e.target.checked)} className="rounded" />
-                    <span>고객 매장번호로 발송 (매장번호 없는 고객은 위 번호로)</span>
+                    <span>개별회신번호로 발송 (회신번호 · 매장 전화번호가 없는 고객은 위 번호로)</span>
                   </label>
                 </div>
                 <div>

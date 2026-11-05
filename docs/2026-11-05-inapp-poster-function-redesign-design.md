@@ -4,7 +4,7 @@
 > 이 문서가 이번 재구성의 SoT 다(접수 대조 · 흐름 표 · 데이터 계약 · 단계 · 시험 · 직원 시트).
 > 상위 = [인앱메세지전용.md](인앱메세지전용.md) · 직전 개편 = [2026-09-29 인앱 만들기 개편](2026-09-29-inapp-editor-redesign-design.md)(데이터 계약 `poster_layout` · `poster_slides` · 앱 잠금의 출처).
 > 회의 = 2026-11-04 브레인스토밍(COLLAB §1 · 다섯 역할 Explore · 1차 의견 → 교차 토론 1라운드 → 회의론자 최종 검증 8건 전부 수용).
-> 상태 = **설계 · 구조체크 · Codex 설계 리뷰 단계 · 코드 0 · DDL 0**.
+> 상태 = **구현 · 계약 시험 · 실 PG 통과 · Codex 구현 리뷰 approve · 배포 대기 · DDL 0** · 카드 = **C106**(배포 원장 · C105 = 다른 세션) · 새 뿌리 = **R60**(R57 · R58 = C103 · C104 · R59 = C105 가 먼저 씀).
 
 ## 진행 표
 
@@ -14,9 +14,10 @@
 | 설계서 | 이 문서 |
 | 설계 구조체크 | §11 · 9회차 · 결함 25 정정 · 마지막 회차 결함 0(1105) |
 | Codex 설계 리뷰 | §12 · 3라운드 approve(1R 5 · 2R 2 · 3R 0 · 1105) |
-| Harold 흐름 표 확인 · 승인 | 대기 |
-| 구현 · 계약 시험 · Codex 구현 | 대기 |
-| 배포(백엔드 · 프론트 · SDK) → 예시 그림 생성 → 팝폰 OTA | 대기 |
+| Harold 흐름 표 확인 · 승인 | 끝(1105 「끝까지 구현 끝내고 코덱스리뷰 닫힐때까지」 · 배너 시트 운영 사용 0건 = §10-1 Harold SQL) |
+| 구현 · 계약 시험 | 끝(1105 · §13) · backend tsc 0 · frontend tsc 0 · sdk-js tsc 0 · 새 계약 51 · SDK 새 시험 17 · 실 PG 새 9(전체 57파일 407) |
+| Codex 구현 리뷰 | §14 · 2라운드 approve(1R 4 · 2R 0 · 1105) |
+| 배포(백엔드 · 프론트 · SDK 한 배포 · DDL 0) → 예시 그림 생성(서버 스크립트) → 팝폰 커밋 · OTA → APP_CONFIRMED_CAPS | 대기 |
 
 ---
 
@@ -300,7 +301,7 @@
 | `frontend/src/components/inapp/*` | 미리보기(부품 · shadow root) · 모양 키 · 입구 · 예시 갤러리 · 상세 창 · 틀 고르기 판 · 앱 표시 상수 · 계약서 v4 | 편집기 |
 | `frontend/src/pages/InAppMessagesPage.tsx` | 스튜디오 받기 · 서버 결함 데려가기 · 오른쪽 칸 | 편집기 |
 | `frontend/src/pages/ImageStudioPage.tsx` · `components/studio/StudioMake.tsx` · `lib/studio-draft.ts` · `components/dm/build/StudioInsertModal.tsx` | 넘김 글 · `onInserted(url, texts)` · `textless` · `initialTemplateId` | 스튜디오 · DM(새 인자 안 씀 · 둘째 인자 안 씀 = 영향 0) |
-| `backend/src/utils/__tests__/root-ledger.test.ts` | R11 모델명 낱말 · 범위 확대 · R57 새 describe | 시험 |
+| `backend/src/utils/__tests__/inapp-poster-redesign-1105.test.ts`(새 · R60 · R11 확대 = CT-IA10) | R11 모델명 낱말 · 범위 확대 · R60 계약 | 시험 |
 | 팝폰 `src/lib/hanjul/*` | §3-11 | 앱 |
 
 DB = 0(새 칸 · 새 표 0 · design jsonb 안). SCHEMA.md 갱신 = cdp_inapp_messages.design 키 표에 세 키(문서만).
@@ -315,7 +316,7 @@ DB = 0(새 칸 · 새 표 0 · design jsonb 안). SCHEMA.md 갱신 = cdp_inapp_m
 | R11 화면 하한 | 모델명 낱말에 Gemini · GPT · OpenAI · 제미나이 · 범위 = 프론트 `.ts` · `.tsx` + 예시 표 · native dialog 0 |
 | R15 죽은 주소 | 새 주소 둘 = 갤러리가 부른다(계약 시험) |
 | R47 판정이 효과 자리 | 서빙 관문 = 내보내는 자리 · 자리표 = 생성(돈 · 굽기) 자리 · 예시 그림 = 게시 자리 |
-| **R57(새)** 클라이언트가 그릴 수 없는 메시지를 준다 | 판정 = `evaluateInAppCandidates` 안 관문 한 곳 · 필요 판 = 메시지 design 에서 기계로 뽑음 · 시험 = CT-IA4 |
+| **R60(새 · 설계 때 R57 로 적었으나 C103 · C104 · C105 가 R57 ~ R59 를 먼저 씀)** 클라이언트가 그릴 수 없는 메시지를 준다 | 판정 = `evaluateInAppCandidates` 안 관문 한 곳 · 필요 판 = 메시지 design 에서 기계로 뽑음 · 시험 = CT-IA4 |
 
 점검표(기계로 못 잡는 것): R1(화면 사본 publishDefectOf 에 새 판정이 들어가지 않았나) · R6(새 상태 0 · 전파가 멈춘 문구 변형은 기존 상태 paused) · R8(예시 스크립트 = 실패 3번 멈춤) · R12(변형을 쓰는 모든 자리 = 부모 먼저 FOR UPDATE · 판정과 쓰기 = 같은 트랜잭션) · R18(남은 시간 = 서버 시각 · 끝 시각 = 사건 시각) · R41(트랜잭션 안 읽기 = 그 연결).
 
@@ -387,7 +388,7 @@ DB = 0(새 칸 · 새 표 0 · design jsonb 안). SCHEMA.md 갱신 = cdp_inapp_m
 
 | # | 항목 | 형태 |
 |---|---|---|
-| 10-1 | 배너 시트 운영 사용 건수(읽기만 · 서버 운영 PostgreSQL psql) | `SELECT status, channel, COUNT(*) FROM cdp_inapp_messages WHERE template = 'full_image' AND design->>'poster_layout' = 'banner_sheet' GROUP BY status, channel;` (칸 = template · design · status · channel · `inapp-message.ts:1452-1458` 서빙 칸 목록과 INSERT 에 있음) |
+| 10-1 | **닫힘(1105 Harold 실행 = 0 rows)** 배너 시트 운영 사용 건수(읽기만 · 서버 운영 PostgreSQL psql) · 렌더 코드 삭제는 별건(§3-12) | `SELECT status, channel, COUNT(*) FROM cdp_inapp_messages WHERE template = 'full_image' AND design->>'poster_layout' = 'banner_sheet' GROUP BY status, channel;` (칸 = template · design · status · channel · `inapp-message.ts:1452-1458` 서빙 칸 목록과 INSERT 에 있음) |
 | 10-2 | 커머스 가상 업체 이름 · 누끼 상품 1 | 이름 후보는 상표 검색 뒤(미검증) |
 | 10-3 | 예시 그림 19장 엔진 원가 | 미검증 · 생성 전 확인 |
 | 10-4 | 인앱 게시 100 + 참여 DM 발행 100 이 겹친다 | 그대로 둘지 |
@@ -498,3 +499,64 @@ Codex 확인 = 400 응답 · 게시비 정산 · 켜기 잠금 순서 반례 없
 ### 3라운드 (1105 · **approve** · 지적 0)
 
 Codex 확인 = 선택 인자 `run` 기본값 = 지금 풀 `query` → 지금 호출처 호환 · 짧은 주소 폴백 포함 네 조회 모두 `run` 적용 가능 · 세 경로(createVariant · 변형 켜기 · 전파) 잠금 순서 = 부모 → 변형 일치 · AI 다듬기 반복 생성 = 앞 트랜잭션이 끝난 뒤 다음을 시작해 새 교착 0 · 부분 성공은 지금 동작.
+
+## §13 구현 기록 (1105 · 카드 C106)
+
+### 13-1 바뀐 파일
+
+| 층 | 파일 |
+|---|---|
+| 백엔드 | `utils/inapp-message.ts`(새 키 정규화 · `isPosterFamily` · `isBakedPoster` · `inAppRequiredCaps` · `parseInAppClientCaps` · `gateInAppForClient` · `toServedMessage` · 게시 판정 추가 · `judgeSavedInAppRow` · `inAppVariantDefect` · create 트랜잭션 · 켜기 · 전파 통짜 갈래) · `inapp-variant-optimizer.ts`(createVariant 트랜잭션 · 부모 선잠금 · 통짜 규칙) · `inapp-quick-action.ts`(통짜 거절) · `inapp-personalization.ts`(`textHasPersonalizationVar`) · (새) `inapp-dm-link-policy.ts` · (새) `inapp-examples.ts` · `dm/dm-builder.ts` · `dm/dm-recipient-token.ts` · `dm/dm-custom-short-link.ts`(선택 인자 `run`) · `routes/cdp.ts`(예시 그림 공개 주소 · `caps` · `serverNow` · 예시 목록 · DM 연결 목록 · `variants_paused` · 변형 필수 칸) · (새) `scripts/inapp-examples.ts` · (새) `assets/inapp-examples/cut-*.png`(선례 누끼 3) |
+| SDK | (새) `poster-frame.ts` · `inapp.ts`(`INAPP_SDK_CAPS` · 캐시 키 · 서버 시각 차이 · `renderPosterFrame` · `copyCouponCode` · 스크림 = 부품 함수) |
+| 프론트 | (새) `components/inapp/PosterFramePreview.tsx` · `InAppExampleGallery.tsx` · `InAppDmLinkPicker.tsx` · `InAppFramePicker.tsx` · `generated/poster-frame.ts`(사본) · `scripts/sync-poster-frame.mjs` · `inappSlides.ts` · `inappStarters.ts` · `PosterEditor.tsx` · `InAppEntryGallery.tsx` · `AppIntegrationContract.tsx`(계약 v4) · `InAppMessagePreview.tsx` · `dm/build/StudioInsertModal.tsx` · `studio/StudioMake.tsx` · `lib/studio-draft.ts` · `pages/ImageStudioPage.tsx` · `pages/InAppMessagesPage.tsx` |
+
+### 13-2 설계와 달라진 점 (근거)
+
+| # | 설계 | 구현 | 근거 |
+|---|---|---|---|
+| D1 | 띠 라벨 채울 자리 = 「쿠폰 코드를 넣어 주세요」(§3-5) | 「띠 문구에 직접 채울 자리가 남아 있어요…」 | 라벨 결함에 쿠폰 코드 문구를 쓰면 남은 시간 띠에서도 거짓 안내가 된다 |
+| D2 | 마감 = 게시 끝 시각(새 칸 0) | 같음 + 남은 시간 띠를 고르면 발행 전 확인 칸에 「게시 끝 시각」 입력(`endAt` 으로 보냄) | 편집기에 끝 시각을 넣는 칸이 없었다(목록 응답 = 원본 행 `end_at` · 편집기 입력 0) · 이 칸 없이는 남은 시간 띠를 게시할 수 없다 |
+| D3 | 예시 12 · 그림 19장 | 9 · 14장(결온 3 · 소요웨어 3 · 오후담 3) | 커머스 3 = §10-2 업체 이름 · 누끼 미정(지어낸 이름 금지) · 정해지면 표에 3줄 더함 |
+| D4 | — | `cdp_inapp_messages.is_ad` 를 읽던 createVariant(SELECT · INSERT) · AI 다듬기(SELECT)에서 칸을 뺐다 | 실 PG 42703 · 운영과 정의 해시가 같다고 대조된 덤프에 칸 없음 · SCHEMA.md 41칸에도 없음 = 운영에서도 변형 만들기 · AI 다듬기가 첫 SELECT 에서 실패하던 것(이번 변경 전부터) · 이 함수가 통짜 변형 규칙 · 부모 선잠금의 자리라 빼지 않으면 요구가 닫히지 않는다 · 같은 칸을 SQL 로 읽는 곳 = grep 전수 2파일 · BUGS 등재 |
+| D5 | 모양 이름 「통짜 포스터 · 바닥 시트」 등 | 「통짜 포스터」 · 「통짜 포스터 카드」 · 「사진 위 글」 · 「사진 위 글 카드」 | 고객이 읽는 글의 가운뎃점을 줄인다(memory `feedback_no_middle_dot_in_outward_copy`) |
+| D6 | 그리는 부품 = 편집기 · 갤러리 · 고객으로 보기 | + 공용 미리보기(`InAppMessagePreview` · `AppInAppPreview`)의 포스터 갈래도 새 틀이면 부품 | 목록 · 테스트저장 · 기본 미리보기가 통짜 글을 그림 위에 한 번 더 그리지 않게(소비처 전부 한 갈래) |
+| D7 | 쪽 번호 알약 하나 | 알약 안에 ‹ 1 / 3 › | 마우스만 쓰는 PC 에서 장 넘김 수단(그림 위 HTML = 쪽 번호 하나 규칙 그대로) |
+| D8 | 「앱 새 판」 표시 판정 = APP_CONFIRMED_CAPS | 필요 판 = SDK 부품 `posterFrameRequiredCaps`(사본) | 화면이 서버 함수를 부를 수 없다 → 서버 `inAppRequiredCaps` 와 표본 표로 묶음(CT-IA4 · R1) |
+| D9 | 팝폰 앱 코드(§3-11) | 미착수 | §10-5 미커밋 5파일 선행 · OTA 전까지 앱은 `caps` 를 안 보내 서빙 관문이 막는다(잘린 화면 0) |
+
+### 13-3 시험
+
+- 계약 `backend/src/utils/__tests__/inapp-poster-redesign-1105.test.ts` 51건 = CT-IA1 · 2 · 3 · 4 · 5 · 8 · 9 · 10 · 12 + 게시 판정 · 변형 판정 · DM 판정 · 화면 배선.
+- SDK `sdk-js/src/__tests__/inapp-poster-frame-1105.test.ts` 14건(CT-IA6 · 손잡이) · `inapp-poster-dom-lock-1105.test.ts` 3건(CT-IA7 · 부품 옮기기 **전** 스냅샷을 먼저 쓰고 옮긴 뒤 같음).
+- 실 PG `inapp-poster-1105.pg.test.ts` 9건(CT-IA11 · 결과 행 판정 · 경품 DM · 끝 시각 · 문구 변형 멈춤 · 다시 켜기 · 통짜 변형 그림 · 관문 20개 채우기 · 변형 끝 시각).
+- 옛 구조를 글자로 확인하던 시험 고침 = `inapp-editor-redesign-0929.test.ts`(인라인 판정 행 → 결과 행 · 켜기 순서 · 전파 반환값) · `image-studio-picker-channel-1016.test.ts`(`onInserted` 둘째 인자) · 생성 스크립트 = 성공해도 스스로 끝남(R26).
+- 변이 확인(파일 복사) = 관문 줄 삭제 · DM 판정 빼기 · 끝 시각 부모만 조건 빼기 → 셋 다 빨간불 · 원본 복구 `cmp` 같음.
+- 전체 = backend vitest 760파일 · sdk-js 24파일 235건 · 실 PG 57파일 407건(도장 기록).
+
+### 13-4 브라우저 실측 (SDK 소스를 esbuild 로 묶은 시험 페이지 · 1105)
+
+| 장면 | 375×812 | 1280×800 |
+|---|---|---|
+| 통짜 · 떠 있는 카드 · 쿠폰 띠 | 카드 위 닫기 줄(하루 보지 않기 · X 44px) · 그림 contain · 띠(라벨 · 코드 · 복사) · 강조색 버튼 | — |
+| 통짜 · 바닥 시트 · 남은 시간 | 「2일 02:59:50」이 1초마다 줄어듦 · 높이 상한에 맞춰 시트 폭 축소 | — |
+| 통짜 · 카드 2장 | 장 3:4 · 전체 높이 67.7% · 쪽 번호 1 / 2 | 가운데 · 폭 325 · 높이 69.1% |
+| 글 얹기 · 카드 | 스크림 라벨 · 제목 · 본문 | — |
+
+## §14 Codex 구현 리뷰 기록
+
+방법 = `status/CODEX-RUNBOOK.md` · adversarial-review · `--model gpt-6-astra` · 1라운드 = 변경분 전체 · 2라운드부터 = 고친 줄 + 직접 영향만.
+
+### 1라운드 (1105 · needs-attention · high 1 · medium 3 · 전부 수용)
+
+| # | 등급 | 지적 | 판정 | 처방 |
+|---|---|---|---|---|
+| I1 | high | 일반 수정(PUT)이 변형 행을 고칠 때 부모를 잠그지 않고 변형 판정을 건너뛴다 = 통짜 전환으로 멈춘 문구 변형을 PUT 으로 다시 켤 수 있다 | 수용 · **설계 C7 · 구조체크 S23 과 같은 부류**(「변형을 쓰는 자리 = 부모 먼저 잠금 + 변형 판정」에서 수정 길을 빠뜨림) → 개별 땜질 금지 | 잠금 한 규칙을 함수 하나 `lockParentFirst` 로(일반 수정 · 켜기가 같은 함수 · 초안 행 잠금보다 앞) · 켜기의 부모 잠금 사본 삭제 · 실 PG = PUT 으로 켜기 거절 |
+| I2 | medium | 장 · 버튼 없이 action_url 만 있는 통짜 = 서빙 첫 장 합성에서 버튼을 잃는다 | 수용 | 같은 합성 CT `synthesizeButtonsFromActionUrl`(SDK renderLegacy 와 같은 규칙) |
+| I3 | medium | 40자 쿠폰 코드가 [복사]를 카드 밖으로 밀어 잘린다 | 수용 | 코드 칸 = 줄어들며 말줄임(min-width 0) · [복사] 고정 · 복사 원문 = 글자 전체 |
+| I4 | medium | 메시지가 버튼 · 그림 이동 · 자동 닫힘으로 사라져도 전역 키 · 창 크기 리스너가 남는다 | 수용 | 정리 한 곳 `dispose`(바깥 틀이 문서에서 빠지면 body 직속 자식 관찰로 부름 · 닫기도 부름) |
+
+범위 밖(기록만) = 지금 이벤트 카드 · 배너 시트(`renderPosterSheet`)의 keydown 리스너도 다음 키 입력 때만 떨어진다(이번 변경 전부터 · 같은 처방을 옮겨 쓸 수 있다).
+
+### 2라운드 (1105 · **approve** · 지적 0)
+
+Codex 확인 = 부모 → 변형 잠금 순서(일반 수정 · 켜기 · 전파 · createVariant 같음 · 부모를 고치는 수정은 추가 잠금 0) · 켜기 반환 계약(부모 id 를 아는 변형 · 모르는 변형 · 부모) · 모든 사라짐 길의 dispose · 쿠폰 [복사] 자리 · 첫 장 버튼 합성.

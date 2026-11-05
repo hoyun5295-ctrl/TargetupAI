@@ -39,8 +39,10 @@ interface Props {
   /** 칸 번호 · 이름(다른 칸 줄) */
   stepLabel: (id: string) => string;
   onPickStep: (id: string) => void;
-  /** 지금 스팸 검사(이 칸 · 수동) — 없으면 버튼을 숨긴다 */
-  onSpamTest?: () => void;
+  /** 지금 스팸 검사(이 칸 · 수동) — 없으면 버튼을 숨긴다 · ★ C105 H5 판 id(A/B 칸이면 판마다 · 아니면 null) */
+  onSpamTest?: (variantId: string | null) => void;
+  /** ★ C105 H5 검사 단추 목록(A/B 칸 = 판마다 「A안 검사」 · 아니면 하나) */
+  spamTargets?: ReadonlyArray<{ variantId: string | null; label: string }>;
   /** 고친 곳이 저장 전이면 점검은 저장된 판 기준이라고 알린다 */
   unsaved: boolean;
   /** 이 칸 이탈 진단(있을 때만 · 점검 판정과 별개 글자) */
@@ -48,7 +50,7 @@ interface Props {
   onRetry: () => void;
 }
 
-export default function JourneyCheckPanel({ check, loading, error, stepId, stepLabel, onPickStep, onSpamTest, unsaved, dropNote, onRetry }: Props) {
+export default function JourneyCheckPanel({ check, loading, error, stepId, stepLabel, onPickStep, onSpamTest, spamTargets, unsaved, dropNote, onRetry }: Props) {
   const mine = stepId && check ? check.steps[stepId] || [] : [];
   const others = check ? Object.entries(check.steps).filter(([id, its]) => id !== stepId && its.some((i) => i.level !== 'pass')) : [];
   const v = check?.verdict;
@@ -63,9 +65,13 @@ export default function JourneyCheckPanel({ check, loading, error, stepId, stepL
           <div className="flex items-center gap-2 px-3.5 pt-3 text-[12px] font-semibold text-slate-500">
             이 칸
             {onSpamTest && (
-              <button type="button" onClick={onSpamTest} className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[12.5px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-slate-300">
-                <Beaker className="h-3.5 w-3.5" aria-hidden />지금 스팸 검사
-              </button>
+              <span className="ml-auto flex flex-wrap justify-end gap-1.5">
+                {(spamTargets && spamTargets.length > 0 ? spamTargets : [{ variantId: null, label: '지금 스팸 검사' }]).map((t) => (
+                  <button key={t.variantId ?? 'main'} type="button" onClick={() => onSpamTest(t.variantId)} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-white px-2.5 text-[12.5px] font-medium text-slate-700 ring-1 ring-slate-200 hover:ring-slate-300">
+                    <Beaker className="h-3.5 w-3.5" aria-hidden />{t.label}
+                  </button>
+                ))}
+              </span>
             )}
           </div>
           {mine.length > 0 ? <ul className="divide-y divide-slate-100">{mine.map((it) => <ItemRow key={it.key} it={it} />)}</ul>

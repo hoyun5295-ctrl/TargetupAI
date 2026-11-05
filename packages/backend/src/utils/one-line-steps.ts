@@ -376,7 +376,7 @@ export interface LineStepsManualProduct { name: string; price?: number; image?: 
 export interface LineProofReview { body: string; author: string; rating: number }
 export const LINE_PROOF_MAX = 3;
 export interface LineStepsBody {
-  facts: { benefit?: string | null; periodEnd?: string | null; link?: string | null };
+  facts: { benefit?: string | null; periodEnd?: string | null; periodStart?: string | null; link?: string | null };   // ★ C105 H1 시작일(선택 · 값이 있을 때만)
   manual: LineStepsManualProduct[];
   heroImage: string | null;
   /** ★ 2026-10-21 대표 사진이 이미지 스튜디오 헤드라인(글자 박힌 포스터)인가 — 표지가 덮어 쓰지 않는다(asIs · 설계서 docs/2026-10-21-oneline-content-design.md §3-4) */
@@ -445,6 +445,37 @@ export function isValidLinePeriodEnd(raw: unknown, nowMs: number): boolean {
   return t >= kstToday - day && t <= kstToday + 400 * day;
 }
 
+/**
+ * ★ 2026-11-05 C105 H1 — 혜택 기간 시작일(선택) 검사: 날짜 꼴 · 오늘(KST) −365일부터 · 마감일 이하(이미 시작한 행사 = 시작일이 오늘 앞이어도 된다).
+ */
+export function isValidLinePeriodStart(raw: unknown, endYmd: string, nowMs: number): boolean {
+  if (typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const [y, m, d] = raw.split('-').map(Number);
+  const t = Date.UTC(y, m - 1, d);
+  const back = new Date(t);
+  if (back.getUTCFullYear() !== y || back.getUTCMonth() !== m - 1 || back.getUTCDate() !== d) return false;
+  const kstToday = Date.parse(`${kstDayOf(nowMs).replace(/(\d{4})(\d{2})(\d{2})/, '$1-$2-$3')}T00:00:00Z`);
+  return t >= kstToday - 365 * 86_400_000 && raw <= endYmd;
+}
+
+/**
+ * ★ 2026-11-05 C105 H1 — 혜택 기간 읽기 CT(AI한줄로 문자 readFacts · 한줄 단계 몸통 읽기가 같은 함수).
+ *   마감 = 옛 검사 그대로(isValidLinePeriodEnd) · 시작 = 마감이 있을 때만 · isValidLinePeriodStart · 틀리면 'invalid'.
+ */
+export function readLinePeriod(startRaw: unknown, endRaw: unknown, nowMs: number): { start: string | null; end: string | null } | 'invalid' {
+  let end: string | null = null;
+  if (endRaw !== undefined && endRaw !== null) {
+    if (!isValidLinePeriodEnd(endRaw, nowMs)) return 'invalid';
+    end = String(endRaw);
+  }
+  let start: string | null = null;
+  if (startRaw !== undefined && startRaw !== null) {
+    if (!end || !isValidLinePeriodStart(startRaw, end, nowMs)) return 'invalid';
+    start = String(startRaw);
+  }
+  return { start, end };
+}
+
 const strList = (raw: unknown): string[] => (Array.isArray(raw) ? raw.filter((x) => typeof x === 'string').slice(0, 20).map((x) => String(x).slice(0, 40)) : []);
 
 /**
@@ -465,10 +496,11 @@ export function sanitizeLineStepsBody(body: Record<string, unknown> | null | und
     if (!isValidLineBenefit(f.benefit)) return 'invalid';
     facts.benefit = f.benefit === null ? null : String(f.benefit).trim();
   }
-  if (f.period_end !== undefined && f.period_end !== null) {
-    if (!isValidLinePeriodEnd(f.period_end, nowMs)) return 'invalid';
-    facts.periodEnd = String(f.period_end);
-  } else if (f.period_end === null) facts.periodEnd = null;
+  // ★ C105 H1 — 기간 = readLinePeriod CT(시작일은 값이 있을 때만 싣는다 = 옛 몸통 지문 불변)
+  const period = readLinePeriod(f.period_start, f.period_end, nowMs);
+  if (period === 'invalid') return 'invalid';
+  if (f.period_end !== undefined) facts.periodEnd = period.end;
+  if (period.start) facts.periodStart = period.start;
   if (f.link !== undefined && f.link !== null) {
     const u = sanitizeLineUrl(f.link);
     if (!u) return 'invalid';
@@ -647,6 +679,16 @@ export function formatLinePeriodEnd(ymd: string): string {
   return `${y}년 ${m}월 ${d}일(${WEEKDAYS[w]})`;
 }
 
+/**
+ * ★ 2026-11-05 C105 H1 — 혜택 기간 글 CT(문안 원문 · 재료 글 · 예시가 이 함수만 · 계약 K1).
+ *   시작일 없음 = 「2026년 11월 30일(월)까지」(옛 글 그대로) · 있음 = 「2026년 11월 1일(일) ~ 11월 30일(월)」(같은 해면 둘째 해 생략 · 다른 해면 둘 다).
+ */
+export function linePeriodLabel(start: string | null | undefined, end: string): string {
+  if (!start) return `${formatLinePeriodEnd(end)}까지`;
+  const sameYear = start.slice(0, 4) === end.slice(0, 4);
+  return `${formatLinePeriodEnd(start)} ~ ${sameYear ? formatLinePeriodEnd(end).replace(/^\d{4}년 /, '') : formatLinePeriodEnd(end)}`;
+}
+
 const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 
 /**
@@ -657,12 +699,13 @@ const won = (n: number) => `${n.toLocaleString('ko-KR')}원`;
 export function buildLineStepsEventText(line: string, a: {
   benefit?: string | null;
   periodEnd?: string | null;
+  periodStart?: string | null;   // ★ C105 H1
   textProducts?: ReadonlyArray<{ name: string; price?: number }>;
 }): string {
   const parts = [String(line || '').trim()].filter(Boolean);
   const benefit = typeof a.benefit === 'string' ? a.benefit.trim() : '';
   if (benefit) parts.push(`[혜택] ${benefit}`);
-  if (a.periodEnd) parts.push(`[기간] ${formatLinePeriodEnd(a.periodEnd)}까지`);
+  if (a.periodEnd) parts.push(`[기간] ${linePeriodLabel(a.periodStart, a.periodEnd)}`);
   const products = (a.textProducts || []).map((p) => (p.price ? `${p.name} ${won(p.price)}` : p.name)).filter(Boolean);
   if (products.length > 0) parts.push(`[상품] ${products.join(', ')}`);
   return parts.join('\n');

@@ -51,6 +51,7 @@ import {
 } from '../utils/alimtalk-jobs';
 
 import { publicErrorText, uploadGuard } from '../utils/http-error';
+import { parsePageParams, parseQueryInt, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 const router = Router();
 
 // 메모리 스토리지 multer — 파일은 IMC로 즉시 스트림
@@ -409,13 +410,13 @@ router.get('/senders', async (req: Request, res: Response) => {
 //    `/senders/:id`보다 앞에 배치 — 뒤에 두면 id='imc'로 가로채인다 (D162-4 교훈).
 router.get('/senders/imc', requireSuperAdmin as any, async (req: Request, res: Response) => {
   const nameRaw = typeof req.query.name === 'string' ? req.query.name.trim() : '';
-  const pageNum = Number(req.query.page);
-  const sizeNum = Number(req.query.size);
+  const pageNum = parseQueryInt(req.query.page, { fallback: null, min: 1, max: QUERY_PAGE_MAX });
+  const sizeNum = parseQueryInt(req.query.size, { fallback: null, min: 1, max: 100, clamp: true });
   const params: { name?: string; page?: number; size?: number } = {};
   if (nameRaw) params.name = nameRaw;
-  if (Number.isFinite(pageNum) && pageNum > 0) params.page = Math.floor(pageNum);
+  if (pageNum != null) params.page = pageNum;
   // 목록이 커도 터미널에서 잘라 보므로 상한을 둔다(운영 조회용 디버그 endpoint).
-  if (Number.isFinite(sizeNum) && sizeNum > 0) params.size = Math.min(Math.floor(sizeNum), 100);
+  if (sizeNum != null) params.size = sizeNum;
   try {
     const r = await imc.listSenders(params);
     console.log(
@@ -615,8 +616,8 @@ router.get(
   requireSuperAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const page = Math.max(0, parseInt(String(req.query.page ?? '0'), 10) || 0);
-      const count = Math.min(100, Math.max(1, parseInt(String(req.query.count ?? '5'), 10) || 5));
+      const { page } = parsePageParams(req.query.page, undefined, { defaultLimit: 1, maxLimit: 1, pageBase: 0 });   // ★ C105 H4 외부 API 0 기반
+      const count = parseQueryInt(req.query.count, { fallback: 5, min: 1, max: 100, clamp: true });
       const r = await imc.listAlimtalkTemplates({ page, count });
       const data: any = r.data || {};
       const items: any[] = data.templateList || data.list || [];
@@ -2982,7 +2983,7 @@ router.get(
   requireSuperAdmin as any,
   async (req: Request, res: Response) => {
     try {
-      const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50));
+      const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 200 }).limit;
       const rows = await getRecentWebhookEvents(limit);
       res.json({ success: true, events: rows });
     } catch (err) { return handleImcError(res, err); }

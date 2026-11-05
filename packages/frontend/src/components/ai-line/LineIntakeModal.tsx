@@ -14,6 +14,8 @@
  * ⛔ 바깥 눌러 닫힘 없음 · 모델명 0 · native dialog 0 · 줄표 0.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import LinePeriodPick from './LinePeriodPick';   // ★ C105 H1
+import { periodChips, periodLabel, isLinePeriodPickValid } from '../../utils/line-period';
 import { Link } from 'react-router-dom';
 import { X, Check, Lock, Loader2, Sparkles, Users, AlertTriangle, MessageSquare, CalendarDays, Gift, Send, Filter, Undo2, HelpCircle, ChevronLeft } from 'lucide-react';
 import JourneyModalShell from '../journey/JourneyModalShell';
@@ -28,22 +30,6 @@ import {
 const MAX_AUDIENCE = 10000;
 /** 답 칸 상한(긴 링크 주소가 잘리지 않게 · 서버 readLineAnswers 와 같은 500) */
 const ANSWER_MAX = 500;
-const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-function periodChips(): Array<{ label: string; value: string }> {
-  const now = new Date();
-  const sunday = new Date(now); sunday.setDate(now.getDate() + ((7 - now.getDay()) % 7));
-  const week = new Date(now); week.setDate(now.getDate() + 6);
-  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-  const out = [{ label: '이번 주 일요일까지', value: ymd(sunday) }, { label: '일주일 동안', value: ymd(week) }, { label: '이달 말까지', value: ymd(monthEnd) }];
-  return out.filter((c, i) => out.findIndex((x) => x.value === c.value) === i);
-}
-const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
-function periodLabel(v: string): string {
-  const [y, m, d] = v.split('-').map(Number);
-  if (!y || !m || !d) return v;
-  return `${m}월 ${d}일(${WEEK[new Date(y, m - 1, d).getDay()]})까지`;
-}
-
 type Step = 'kakao' | 'asks' | 'board' | 'vars';
 /** 칼럼 단계에서 미리 체크하는 추천 칼럼 수 */
 const PRECHECK_MAX = 2;
@@ -96,11 +82,12 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   const [benefitNone, setBenefitNone] = useState(false);
   const [periodPick, setPeriodPick] = useState<string | null>(null);
   const [periodNone, setPeriodNone] = useState(false);
+  const [periodStart, setPeriodStart] = useState<string | null>(null);   // ★ C105 H1 시작일(선택)
   /** 그 밖 질문 답(질문 id → 글) · 비우면 빼고 쓴다 */
   const [textAns, setTextAns] = useState<Record<string, string>>({});
   const chips = useMemo(periodChips, []);
   const asksOk = (!askBenefit || benefitNone || benefitDraft.trim().length > 0)
-    && (!askPeriod || periodNone || !!periodPick);
+    && (!askPeriod || periodNone || (!!periodPick && isLinePeriodPickValid(periodPick, periodStart)));
   const submitAsks = () => {
     // ★ 2026-10-29 목소리 꼴 칸(id voice_*) = 빈 답도 보낸다(「이 줄 없이」 = 명시 생략 · 서버가 결정)
     const answers = askTexts
@@ -112,6 +99,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
       facts: {
         benefit: askBenefit && !benefitNone ? benefitDraft.trim().slice(0, 300) : null,
         period_end: askPeriod && !periodNone ? periodPick : null,
+        ...(askPeriod && !periodNone && periodPick && periodStart ? { period_start: periodStart } : {}),   // ★ C105 H1 값이 있을 때만(옛 원장 키 불변)
         ...(answers.length > 0 ? { answers } : {}),
       },
     });
@@ -181,7 +169,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
   // ★ Codex 1020 R1 — 빠진 정보 칸도 진행에 묶는다(질문 id 가 매 진행 q1 부터라 앞 한 줄의 답이 새 질문의 답으로 남았다 · 혜택 · 기간 칸도 같은 뿌리)
   useEffect(() => {
     setTemplates(null); setTplPick(null); setTplError(false); setWhoDraft(''); setBoardError(null);
-    setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setTextAns({});
+    setBenefitDraft(''); setBenefitNone(false); setPeriodPick(null); setPeriodNone(false); setPeriodStart(null); setTextAns({});   // ★ C105 Codex 구현 1R 시작일도 진행에 묶는다
   }, [run.runId]);
   // ★ 2026-10-31 서버가 미리 채운 답(링크 질문 = 한 줄 속 주소) = 비어 있는 칸만 채운다(다시 입력 0 · 사람이 고친 · 지운 글은 덮지 않는다)
   const prefillKey = askTexts.map((a) => `${a.id}=${a.prefill ?? ''}`).join('|');
@@ -327,7 +315,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
     const f = run.facts;
     if (f) {
       if (askBenefit && !benefitDraft.trim() && !benefitNone) { if (f.benefit) setBenefitDraft(f.benefit); else setBenefitNone(true); }
-      if (askPeriod && !periodPick && !periodNone) { if (f.period_end) setPeriodPick(f.period_end); else setPeriodNone(true); }
+      if (askPeriod && !periodPick && !periodNone) { if (f.period_end) { setPeriodPick(f.period_end); setPeriodStart(f.period_start ?? null); } else setPeriodNone(true); }
       setTextAns((cur) => {
         const next = { ...cur };
         for (const a of askTexts) {
@@ -505,25 +493,15 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                   <div className="space-y-2">
                     <p className="text-[13px] font-semibold text-slate-700 inline-flex items-center gap-1.5"><CalendarDays className="w-4 h-4 text-violet-600" />{askPeriod.text}</p>
                     {askPeriod.why && <p className="text-[12.5px] text-slate-500">{askPeriod.why}</p>}
-                    <div className="flex flex-wrap gap-2 text-[13px]">
-                      {chips.map((c) => (
-                        <button key={c.value} type="button" onClick={() => { setPeriodPick(c.value); setPeriodNone(false); }}
-                          className={`h-9 px-3 rounded-lg border ${periodPick === c.value && !periodNone ? 'border-2 border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-slate-200 text-slate-700 hover:border-slate-300'}`}>
-                          {c.label}
-                        </button>
-                      ))}
-                      <label className="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 inline-flex items-center gap-1.5 cursor-pointer">
-                        달력에서 고르기
-                        <input type="date" min={ymd(new Date())} className="text-[13px] outline-none bg-transparent"
-                          value={periodPick && !chips.some((c) => c.value === periodPick) ? periodPick : ''}
-                          onChange={(e) => { if (e.target.value) { setPeriodPick(e.target.value); setPeriodNone(false); } }} />
-                      </label>
-                      <button type="button" onClick={() => { setPeriodNone((v) => !v); setPeriodPick(null); }}
-                        className={`h-9 px-3 rounded-lg border text-[13px] ${periodNone ? 'border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-dashed border-slate-300 text-slate-500'}`}>
-                        기간 없이 보내기
-                      </button>
-                    </div>
-                    {periodPick && !periodNone && <p className="text-[12px] text-violet-700">{periodLabel(periodPick)}</p>}
+                    {/* ★ 2026-11-05 C105 H1 — 공용 기간 입력(칩 = 마감 · 「기간으로 고르기」 = 시작 · 마감) · 「기간 없이」 = 이 창 */}
+                    <LinePeriodPick end={periodNone ? null : periodPick} start={periodNone ? null : periodStart} chips={chips}
+                      onChange={(e, st) => { setPeriodPick(e); setPeriodStart(st); if (e) setPeriodNone(false); }}
+                      chipClassName="h-9 px-3 rounded-lg border border-slate-200 text-slate-700 hover:border-slate-300"
+                      activeChipClassName="h-9 px-3 rounded-lg border-2 border-violet-600 bg-violet-50 text-violet-800 font-semibold" />
+                    <button type="button" onClick={() => { setPeriodNone((v) => !v); setPeriodPick(null); setPeriodStart(null); }}
+                      className={`h-9 px-3 rounded-lg border text-[13px] ${periodNone ? 'border-violet-600 bg-violet-50 text-violet-800 font-semibold' : 'border-dashed border-slate-300 text-slate-500'}`}>
+                      기간 없이 보내기
+                    </button>
                   </div>
                 )}
                 {askTexts.map((a) => {
@@ -752,7 +730,7 @@ export default function LineIntakeModal({ open, run, creditTotal, loadError, onR
                     )}
                     <div className="flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-slate-600">
                       <span>혜택 <b className="text-slate-900">{run.facts?.benefit || (askBenefit ? '없음' : '한 줄 그대로')}</b></span>
-                      {(run.facts?.period_end || askPeriod) && <span>기간 <b className="text-slate-900">{run.facts?.period_end ? periodLabel(run.facts.period_end) : '없음'}</b></span>}
+                      {(run.facts?.period_end || askPeriod) && <span>기간 <b className="text-slate-900">{run.facts?.period_end ? periodLabel(run.facts.period_end, run.facts.period_start) : '없음'}</b></span>}
                       {(run.facts?.answers?.length ?? 0) > 0 && <span>확인한 사실 <b className="text-slate-900">{run.facts?.answers?.length}개</b></span>}
                       {!alimtalk && (
                         <span className="inline-flex items-center gap-1.5">채널

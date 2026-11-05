@@ -15,12 +15,15 @@
  */
 
 import { UserFacingError } from './http-error';
-import { query, pool } from '../config/database';
+import { query, pool, withTransaction } from '../config/database';
 // ★ D215+ (2026-05-25) 통합 영역 — CT-78 (segment) + CT-80 (variant) + CT-82 (trigger window)
 import { customerMatchesSegment, customerMatchesFilter, isEmptySegment, normalizeSegmentConditions } from './inapp-segment-matcher';
 import { selectVariantForCustomer } from './inapp-variant-optimizer';
 import { isTimeWindowValid } from './inapp-trigger-engine';
 import { findAiFillPlaceholder } from './copy-benefit-detector';   // ★ 2026-10-24 ⑮ 게시 = 공용 채울 자리 판정도 함께
+import { textHasPersonalizationVar } from './inapp-personalization';   // ★ 2026-11-05 통짜 장 글 = 바꿔 넣기 글 금지(치환과 같은 근거)
+import { inAppDmLinkPolicyDefect } from './inapp-dm-link-policy';   // ★ 2026-11-05 §3-6 DM 참여 연결 판정(트랜잭션 연결로만 읽음)
+import type { TxRun } from '../config/database';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -126,6 +129,23 @@ export const INAPP_DESIGN_DIMS = ['soft', 'standard', 'deep'] as const;
 //   SDK inapp.ts POSTER_LAYOUTS · 프론트 InAppMessagePreview · 앱 계약서와 같은 값.
 export const INAPP_POSTER_LAYOUTS = ['overlay', 'event_card', 'banner_sheet'] as const;
 export const INAPP_DISMISS_MODES = ['snooze_day'] as const;
+// ★ 2026-11-05 인앱 포스터 재구성(설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §3-1) — design 새 키 셋.
+//   poster_text 'baked' = 통짜(글이 구워진 그림 · 서빙 때 글 칸을 비운다) · poster_frame 'card' = 떠 있는 카드 · poster_strip = 기능 띠.
+//   SDK poster-frame.ts · 프론트 inappSlides · 앱 계약서와 같은 값(계약 시험 CT-IA1).
+export const INAPP_POSTER_TEXTS = ['baked'] as const;
+export const INAPP_POSTER_FRAMES = ['card'] as const;
+export const INAPP_POSTER_STRIPS = ['coupon', 'countdown'] as const;
+export const INAPP_STRIP_CODE_MAX = 40;
+export const INAPP_STRIP_LABEL_MAX = 30;
+/** 쿠폰 코드에 쓸 수 있는 글자(게시 판정 · 저장은 자르기만 — 초안의 자리표 코드가 띠째 사라지지 않게 · §3-1) */
+export const INAPP_STRIP_CODE_RE = /^[0-9A-Za-z가-힣_-]+$/;
+
+/**
+ * ★ 2026-11-05 §3-2 서빙 관문 — 클라이언트가 /inapp/active?caps= 로 알리는 「그릴 수 있는 것」 낱말 표(한 곳).
+ *   SDK · 앱은 같은 낱말을 상수로 든다(계약 시험 CT-IA4). 표 밖 낱말은 버린다.
+ */
+export const INAPP_CLIENT_CAPS = ['poster_baked', 'frame_card', 'strip_coupon', 'strip_countdown'] as const;
+export type InAppClientCap = typeof INAPP_CLIENT_CAPS[number];
 
 // ★ 2026-07-19 포스터 색 hex = 3/4/6/8자리만 (5·7자리는 RN 색 파서가 거부 — Codex 지적. CSS·RN 공통 유효 길이).
 //   design(제목/본문 색) + poster_slides(슬라이드별 색·CTA 색) 공용 단일 기준.
@@ -168,6 +188,24 @@ export function sanitizeInAppDesign(raw: any): Record<string, any> | null {
   }
   if ((INAPP_POSTER_LAYOUTS as readonly string[]).includes(String(raw.poster_layout))) out.poster_layout = String(raw.poster_layout);
   if ((INAPP_DISMISS_MODES as readonly string[]).includes(String(raw.dismiss_mode))) out.dismiss_mode = String(raw.dismiss_mode);
+  // ★ 2026-11-05 §3-1 정규화 순서 = 통짜 → 틀 → 띠(뒤 둘이 정리된 poster_layout 을 본다).
+  //   통짜 = 지금 포스터 갈래만(이벤트 카드 · 배너 시트와 섞지 않는다) · 틀 · 띠 = 이벤트 카드 · 배너 시트에서는 버린다(1차 = 포스터 갈래만).
+  if ((INAPP_POSTER_TEXTS as readonly string[]).includes(String(raw.poster_text))) {
+    out.poster_text = String(raw.poster_text);
+    delete out.poster_layout;
+  }
+  const sheetLayout = out.poster_layout === 'event_card' || out.poster_layout === 'banner_sheet';
+  if (!sheetLayout && (INAPP_POSTER_FRAMES as readonly string[]).includes(String(raw.poster_frame))) out.poster_frame = String(raw.poster_frame);
+  const strip = raw.poster_strip;
+  if (!sheetLayout && strip && typeof strip === 'object' && !Array.isArray(strip)
+    && (INAPP_POSTER_STRIPS as readonly string[]).includes(String(strip.type))) {
+    const oneLine = (v: any, max: number) => String(v ?? '').replace(/[\r\n]+/g, '').trim().slice(0, max);
+    const st: Record<string, any> = { type: String(strip.type) };
+    if (st.type === 'coupon') st.code = oneLine(strip.code, INAPP_STRIP_CODE_MAX);
+    const label = oneLine(strip.label, INAPP_STRIP_LABEL_MAX);
+    if (label) st.label = label;
+    out.poster_strip = st;
+  }
   if (raw.backdrop && typeof raw.backdrop === 'object' && !Array.isArray(raw.backdrop)) {
     const bd: Record<string, any> = {};
     if ((INAPP_DESIGN_DIMS as readonly string[]).includes(String(raw.backdrop.dim))) bd.dim = String(raw.backdrop.dim);
@@ -361,6 +399,8 @@ export interface PosterSlide {
   bg_color?: string;
   /** 사진 맞춤 — 미지정 = 레이아웃 기본(event_card cover · banner_sheet contain) */
   image_fit?: 'cover' | 'contain';
+  /** ★ 2026-11-05 §3-3 통짜 서빙 사본 전용 — 그 장의 원래 제목(그림 대체 글). 저장하지 않는다(toServedMessage 가 만든다). */
+  alt?: string;
 }
 
 function posterHexOrUndef(v: any): string | undefined {
@@ -576,10 +616,54 @@ export function isInAppDraftSave(input: { draft?: any; status?: any }): boolean 
 export interface InAppPublishDefect {
   /** 사용자 노출 문구 */
   message: string;
-  /** 편집기가 데려갈 자리 */
-  field: 'title' | 'body' | 'placeholder' | 'image' | 'slide_image';
-  /** 0부터 · slide_image 일 때 */
+  /** 편집기가 데려갈 자리 — ★ 2026-11-05 strip(기능 띠) · end_at(게시 끝 시각) · link(장 버튼 · 사진 링크) 더함 */
+  field: 'title' | 'body' | 'placeholder' | 'image' | 'slide_image' | 'strip' | 'end_at' | 'link';
+  /** 0부터 · 장이 정해지는 결함일 때 */
   slide?: number;
+}
+
+/** ★ 2026-11-05 §3-1 — 새 design 키 셋을 읽는 조건 한 곳(서빙 · 렌더 · 관문 · 판정 모두). snake 행 · camel 서빙 사본 둘 다 받는다. */
+export function isPosterFamily(m: any): boolean {
+  return !!m && typeof m === 'object' && String(m.template || m.position || '') === 'full_image';
+}
+
+/** ★ 2026-11-05 §3-3 — 통짜(글이 구워진 그림) 메시지인가 */
+export function isBakedPoster(m: any): boolean {
+  return isPosterFamily(m) && !!m.design && typeof m.design === 'object' && m.design.poster_text === 'baked';
+}
+
+/** ★ 2026-11-05 §3-9 — 예시 갤러리 그림 주소 머리(공개 주소 · 게시 판정이 막는다) */
+export const INAPP_EXAMPLE_IMAGE_PREFIX = '/api/cdp/inapp/example-image/';
+
+/**
+ * ★ 2026-11-05 §3-2 필요 판 한 곳 — hard 가 빠진 클라이언트에는 주지 않는다 · soft 만 빠지면 틀을 지워 준다.
+ *   hard = 통짜 · 띠 두 종 · 장 2장 이상 떠 있는 카드(옛 클라이언트는 틀을 지우면 여러 장을 4:5 cover 캐러셀로 잘라 그린다)
+ *   soft = 장 1장 이하 떠 있는 카드(옛 한 장 포스터 = 원본 비율 · 자름 0)
+ */
+export function inAppRequiredCaps(m: any): { hard: InAppClientCap[]; soft: InAppClientCap[] } {
+  const hard: InAppClientCap[] = [];
+  const soft: InAppClientCap[] = [];
+  if (!isPosterFamily(m)) return { hard, soft };
+  const d = m.design && typeof m.design === 'object' ? m.design : {};
+  const slidesRaw = m.poster_slides ?? m.posterSlides;
+  const slideCount = Array.isArray(slidesRaw) ? slidesRaw.length : 0;
+  if (d.poster_text === 'baked') hard.push('poster_baked');
+  const strip = d.poster_strip && typeof d.poster_strip === 'object' ? String(d.poster_strip.type || '') : '';
+  if (strip === 'coupon') hard.push('strip_coupon');
+  if (strip === 'countdown') hard.push('strip_countdown');
+  if (d.poster_frame === 'card') (slideCount >= 2 ? hard : soft).push('frame_card');
+  return { hard, soft };
+}
+
+/** ★ 2026-11-05 §3-2 요청 낱말 → 판 집합(표 밖 버림 · 200자 · 20낱말에서 자름). 없음 = 빈 집합(옛 SDK · 지금 앱). */
+export function parseInAppClientCaps(raw: any): Set<InAppClientCap> {
+  const out = new Set<InAppClientCap>();
+  const s = typeof raw === 'string' ? raw.slice(0, 200) : '';
+  for (const w of s.split(',').slice(0, 20)) {
+    const t = w.trim();
+    if ((INAPP_CLIENT_CAPS as readonly string[]).includes(t)) out.add(t as InAppClientCap);
+  }
+  return out;
 }
 
 /**
@@ -619,6 +703,38 @@ export function inAppPublishDefect(row: Record<string, any>): InAppPublishDefect
     const idx = slides.findIndex((sl: any) => !sl || typeof sl !== 'object' || !String(sl.image_url ?? '').trim());
     if (idx >= 0) return { message: `${idx + 1}번째 장에 사진을 넣어 주세요.`, field: 'slide_image', slide: idx };
     if (!String(row.image_url ?? '').trim()) return { message: '포스터 사진을 넣어 주세요.', field: 'image' };
+  }
+  // ★ 2026-11-05 §3-9 예시 갤러리 그림은 게시하지 않는다(장 그림 먼저 · 다음 메시지 그림)
+  const exIdx = slides.findIndex((sl: any) => sl && typeof sl === 'object' && String(sl.image_url ?? '').includes(INAPP_EXAMPLE_IMAGE_PREFIX));
+  if (exIdx >= 0) return { message: `${exIdx + 1}번째 장은 예시 그림이에요. 내 그림으로 바꿔 주세요.`, field: 'slide_image', slide: exIdx };
+  if (String(row.image_url ?? '').includes(INAPP_EXAMPLE_IMAGE_PREFIX)) return { message: '포스터 그림이 예시 그림이에요. 내 그림으로 바꿔 주세요.', field: 'image' };
+  if (isPosterFamily(row)) {
+    const d = row.design && typeof row.design === 'object' ? row.design : {};
+    const strip = d.poster_strip && typeof d.poster_strip === 'object' ? d.poster_strip : null;
+    // ★ §3-5 기능 띠 — 쿠폰 코드는 사람이 넣은 값만(빈 값 · 채울 자리 = 게시 불가 · 글자 종류는 여기서만 본다)
+    if (strip) {
+      const unfilled = (v: any) => textHasPlaceholder(v) || !!findAiFillPlaceholder(String(v ?? ''));
+      if (unfilled(strip.label)) return { message: '띠 문구에 직접 채울 자리가 남아 있어요. 그 자리를 채운 뒤 게시해 주세요.', field: 'strip' };
+      if (strip.type === 'coupon') {
+        const code = String(strip.code ?? '').trim();
+        if (!code || unfilled(code)) return { message: '쿠폰 코드를 넣어 주세요.', field: 'strip' };
+        if (!INAPP_STRIP_CODE_RE.test(code)) return { message: '쿠폰 코드는 영문, 숫자, 한글, -, _ 만 쓸 수 있어요.', field: 'strip' };
+      }
+      // 끝 시각 판정 = 부모 행만(변형 행에는 기간이 없고 부모 기간으로만 서빙된다 · INAPP_CANDIDATE_WHERE)
+      if (strip.type === 'countdown' && !row.parent_message_id) {
+        if (!row.end_at) return { message: '남은 시간을 보여 주려면 게시 끝 시각을 정해 주세요.', field: 'end_at' };
+        const endMs = new Date(row.end_at).getTime();
+        if (!Number.isFinite(endMs) || endMs <= Date.now()) return { message: '게시 끝 시각이 지났어요. 끝 시각을 다시 정해 주세요.', field: 'end_at' };
+      }
+    }
+    // ★ §3-3 통짜 = 그림 속 글이 메시지 · 바꿔 넣기 글은 그림에 구울 수 없다(판정 = 치환 함수와 같은 근거)
+    if (d.poster_text === 'baked') {
+      const varIdx = slides.findIndex((sl: any) => sl && typeof sl === 'object'
+        && [sl.title, sl.body, sl.eyebrow, sl.subtitle].some((t) => textHasPersonalizationVar(t)));
+      const bakedVar = '그림 속 글에는 고객 이름 같은 바꿔 넣기 글을 쓸 수 없어요.';
+      if (varIdx >= 0) return { message: `${varIdx + 1}번째 장: ${bakedVar}`, field: 'title', slide: varIdx };
+      if (slides.length === 0 && [row.title, row.body].some((t) => textHasPersonalizationVar(t))) return { message: bakedVar, field: 'title', slide: 0 };
+    }
   }
   return null;
 }
@@ -771,15 +887,10 @@ export async function createInAppMessage(
   const finalBadge = input.badge_text ?? composed?.badgeText ?? null;
   const finalImage = composed ? composed.imageUrl : (input.image_url || null);
   // ★ 2026-09-29 게시로 만드는 생성은 게시 조건 CT 를 거친다(초안 경로가 생겨 옛 편집기 검사만으로는 닫히지 않는다).
-  if (finalStatus === 'active') {
-    const defect = inAppPublishDefect({
-      title: finalTitle, body: finalBody, template, image_url: finalImage, buttons: finalButtons,
-      badge_text: finalBadge, content_blocks: contentBlocks, poster_slides: posterSlides,
-    });
-    if (defect) throw inAppNotPublishableError(defect);
-  }
-
-  const result = await query(
+  // ★ 2026-11-05 §3-13 판정 행 = 저장 결과 행 — 한 트랜잭션에서 INSERT … RETURNING * 한 행으로 판정하고 미달이면 되돌린다
+  //   (옛: INSERT 전 칸을 골라 만든 인라인 행 = image_link_url · action_url · end_at · design 이 빠져 새 판정이 그 칸을 못 봤다).
+  const row = await withTransaction(async (run) => {
+  const result = await run(
     `INSERT INTO cdp_inapp_messages (
       id, company_id, created_by, title, body, action_url, action_label,
       position, background_color, text_color,
@@ -820,7 +931,74 @@ export async function createInAppMessage(
       ...(design ? [JSON.stringify(design)] : []),
     ]
   );
-  return mapRowToMessage(result.rows[0]);
+  const saved = result.rows[0];
+  const defect = await judgeSavedInAppRow(run, companyId, saved);
+  if (defect) throw inAppNotPublishableError(defect);   // withTransaction 이 되돌린다(행 0 · 게시비 정산 전)
+  return saved;
+  });
+  return mapRowToMessage(row);
+}
+
+/**
+ * ★ 2026-11-05 §3-13 저장 결과 행 판정 한 곳 — create · update · createVariant · 켜기 · 전파가 쓰기 뒤 같은 트랜잭션 안에서 부른다.
+ *   active 행만 · 게시 판정 → (변형이면 잠근 부모로) 변형 판정 → DM 연결 판정(그 트랜잭션 연결로만 읽음 · R41). null = 통과.
+ */
+export async function judgeSavedInAppRow(
+  run: TxRun,
+  companyId: string,
+  row: Record<string, any> | null | undefined,
+  lockedParent?: Record<string, any> | null,
+): Promise<InAppPublishDefect | null> {
+  if (!row || row.status !== 'active') return null;
+  const publish = inAppPublishDefect(row);
+  if (publish) return publish;
+  if (lockedParent) {
+    const variant = inAppVariantDefect(row, lockedParent);
+    if (variant) return variant;
+  }
+  return inAppDmLinkPolicyDefect(run, companyId, row);
+}
+
+/**
+ * ★ 2026-11-05 §3-13 잠금 한 규칙(Codex 구현 1R) — 변형 행을 쓰기 전에 부모를 먼저 잠근다(순서 = 부모 → 변형).
+ *   켜기(activateInAppMessage) · 일반 수정(updateInAppMessage)이 같은 함수를 부른다 · createVariant 는 새 행이라 부모를 직접 잠근다.
+ *   knownParentId = 부르는 쪽이 아는 부모 id(변형 켜기) · 없으면 대상 행의 원본 id 를 읽는다
+ *   (parent_message_id 는 변형을 만든 뒤 바뀌지 않는다 = 잠금 없이 읽어도 같은 값 · 대상 행 잠금은 그 뒤 쓰기가 잡는다).
+ *   부모가 아니면 { parentId: null, parent: null } · 부모 id 는 있는데 행이 없으면 parent = null.
+ */
+export async function lockParentFirst(
+  client: { query: (text: string, params?: any[]) => Promise<any> },
+  companyId: string,
+  messageId: string,
+  knownParentId?: string | null,
+): Promise<{ parentId: string | null; parent: Record<string, any> | null }> {
+  let parentId = knownParentId ? String(knownParentId) : null;
+  if (!parentId) {
+    const pre = await client.query(
+      `SELECT parent_message_id FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid`,
+      [messageId, companyId],
+    );
+    parentId = pre.rows[0]?.parent_message_id ? String(pre.rows[0].parent_message_id) : null;
+  }
+  if (!parentId) return { parentId: null, parent: null };
+  const pr = await client.query(
+    `SELECT * FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
+    [parentId, companyId],
+  );
+  return { parentId, parent: pr.rows[0] || null };
+}
+
+/**
+ * ★ 2026-11-05 §3-3 변형 판정 CT — 통짜 원본(글이 구워진 그림)의 변형은 통짜 변형(그림을 바꾼 변형)만 켤 수 있다.
+ *   글 얹기 시절의 문구 변형을 통짜 원본 아래에서 켜면 부모 모양을 따라 서빙 때 문구가 지워지고 배경만 나간다(Codex 1R C2).
+ *   원본을 글 얹기로 되돌리면 통과(그 변형을 다시 켤 수 있다). 순수.
+ */
+export function inAppVariantDefect(kid: Record<string, any>, parent: Record<string, any>): InAppPublishDefect | null {
+  if (!kid || !parent) return null;
+  if (isBakedPoster(parent) && !isBakedPoster(kid)) {
+    return { message: '그림에 글이 들어간 원본의 A/B 변형은 그림을 바꾼 변형만 켤 수 있어요. 원본을 사진 위 글로 되돌리면 이 변형을 다시 켤 수 있어요.', field: 'title' };
+  }
+  return null;
 }
 
 export async function listInAppMessages(companyId: string, channel?: 'web' | 'app', ownerId?: string | null): Promise<Record<string, any>[]> {
@@ -870,7 +1048,7 @@ export async function updateInAppMessage(
   messageId: string,
   input: Partial<CreateInAppMessageInput>,
   ownerId?: string | null
-): Promise<InAppMessage | null> {
+): Promise<(InAppMessage & { variantsPaused: number }) | null> {
   // 데이터 격리 — 담당자(ownerId 지정)는 본인 생성분만 수정. 아니면 null(라우트 404).
   if (ownerId) {
     const own = await query(
@@ -938,8 +1116,12 @@ export async function updateInAppMessage(
   //   게시 중 메시지의 내용 수정(상태 생략)도 같은 판정을 거친다 — 게시 중인 메시지가 조건 미달로 바뀌는 길이 없다.
   const client = await pool.connect();
   let result: any;
+  let variantsPaused = 0;
   try {
     await client.query('BEGIN');
+    // ★ 2026-11-05 §3-13 잠금 한 규칙(Codex 구현 1R high) — 고치는 행이 변형이면 부모를 먼저 잠그고 그 부모로 변형 판정까지 한다
+    //   (옛: 일반 수정은 부모를 모른 채 판정해, 통짜 전환으로 멈춘 문구 변형을 이 길로 다시 켤 수 있었다 · 초안 행 잠금보다 앞 = 부모 → 변형).
+    const { parent: lockedParent } = await lockParentFirst(client, companyId, messageId);
     // ★ 2026-09-29 초안 저장은 게시 중이 아닌 행에만 — 행을 잠그고 확인한다(게시 PUT 과 순서가 바뀌어 도착해도 게시가 이긴다).
     if (draft) {
       const cur = await client.query(
@@ -1039,11 +1221,12 @@ export async function updateInAppMessage(
     ]
     );
     const row = result.rows[0];
-    const defect = row && row.status === 'active' ? inAppPublishDefect(row) : null;
+    // ★ 2026-11-05 §3-13 — 결과 행 판정 한 곳(게시 판정 + DM 연결 판정 · 이 트랜잭션 연결로만 읽는다)
+    const defect = row && row.status === 'active' ? await judgeSavedInAppRow((t, p) => client.query(t, p), companyId, row, lockedParent) : null;
     if (defect) throw inAppNotPublishableError(defect);
     // ★ 2026-09-29 [반영] = A/B 변형에 모양 전파(설계서 §1-4 · 회의론자 8). 같은 트랜잭션 — 부모만 바뀌고 변형이 옛 모양으로 남는 틈이 없다.
     if (row && !draft && !row.parent_message_id && (posterSlidesProvided || designProvided || input.template !== undefined)) {
-      await propagatePosterToVariants(client, row);
+      variantsPaused = (await propagatePosterToVariants(client, row)).paused;
     }
     await client.query('COMMIT');
   } catch (err) {
@@ -1052,7 +1235,8 @@ export async function updateInAppMessage(
   } finally {
     client.release();
   }
-  return result.rows.length > 0 ? mapRowToMessage(result.rows[0]) : null;
+  // ★ 2026-11-05 §3-3 — 통짜 [반영]이 멈춘 문구 변형 수(편집기가 그대로 알린다 · 화면이 따로 세지 않는다)
+  return result.rows.length > 0 ? { ...mapRowToMessage(result.rows[0]), variantsPaused } : null;
 }
 
 /**
@@ -1064,20 +1248,43 @@ export async function updateInAppMessage(
 export async function propagatePosterToVariants(
   client: { query: (text: string, params?: any[]) => Promise<any> },
   parent: Record<string, any>,
-): Promise<number> {
-  if (!parent || parent.template !== 'full_image') return 0;
+): Promise<{ applied: number; paused: number }> {
+  if (!parent || parent.template !== 'full_image') return { applied: 0, paused: 0 };
   const kids = await client.query(
     // (Codex 2R 범위 밖 지적) 변형 문안을 잠그고 읽는다 — 동시에 변형을 고친 PUT 의 문안을 옛 값으로 덮지 않게
-    `SELECT id, title, body FROM cdp_inapp_messages
+    // ★ 2026-11-05 §3-3 통짜 갈래 — 변형의 지금 그림 · 장 · 모양 · 상태를 함께 읽는다(잠금 순서 = 부모 UPDATE → 변형 FOR UPDATE · §3-13)
+    `SELECT id, title, body, image_url, poster_slides, design, status FROM cdp_inapp_messages
       WHERE company_id = $1::uuid AND parent_message_id = $2::uuid AND status <> 'archived'
       FOR UPDATE`,
     [parent.company_id, parent.id],
   );
   const parentSlides: PosterSlide[] = Array.isArray(parent.poster_slides) ? parent.poster_slides : [];
+  const parentBaked = isBakedPoster(parent);
+  const run: TxRun = (t, p) => client.query(t, p);
   let n = 0;
+  let paused = 0;
   for (const k of kids.rows) {
+    // ★ 2026-11-05 §3-3 통짜 원본 — 글 얹기 시절의 문구 변형은 모양 · 장을 바꾸지 않고 멈춘다(그대로 두면 부모 모양이 옮겨 가
+    //   서빙 때 문구가 지워지고 배경만 남는다 · Codex 1R C2). 다시 켜기 = inAppVariantDefect 가 막는다(원본을 되돌리면 통과).
+    const kidBaked = !!k.design && typeof k.design === 'object' && k.design.poster_text === 'baked';
+    if (parentBaked && !kidBaked) {
+      if (k.status === 'active') {
+        await client.query(
+          `UPDATE cdp_inapp_messages SET status = 'paused', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
+          [k.id, parent.company_id],
+        );
+        paused++;
+      }
+      continue;
+    }
+    // 통짜 변형 = 그림을 바꾼 변형 → 첫 장 그림은 변형의 지금 그림(첫 장 그림 · 없으면 변형 image_url) · 글 = 변형 제목 · 본문
+    const kidFirstImage = (Array.isArray(k.poster_slides) && k.poster_slides[0] && String(k.poster_slides[0].image_url || '').trim())
+      || String(k.image_url || '').trim();
+    const firstSlide = parentBaked && kidFirstImage
+      ? { ...parentSlides[0], image_url: kidFirstImage, title: k.title, body: k.body }
+      : { ...parentSlides[0], title: k.title, body: k.body };
     const slides = parentSlides.length > 0
-      ? [{ ...parentSlides[0], title: k.title, body: k.body }, ...parentSlides.slice(1)]
+      ? [firstSlide, ...parentSlides.slice(1)]
       : null;
     const flat = slides
       ? composeFlatFromPosterSlides(slides, { title: k.title, body: k.body, imageUrl: parent.image_url, buttons: [] })
@@ -1108,12 +1315,13 @@ export async function propagatePosterToVariants(
       ],
     );
     // ★ (Codex 1R) 켜진 변형도 게시 조건 CT — 미달이면 throw(부모 수정까지 같은 트랜잭션에서 되돌린다)
+    // ★ 2026-11-05 §3-13 — 결과 행 판정 한 곳(게시 · 변형(부모 = 이미 잠긴 결과 행) · DM 연결)
     const kidRow = upd.rows[0];
-    const kidDefect = kidRow && kidRow.status === 'active' ? inAppPublishDefect(kidRow) : null;
+    const kidDefect = await judgeSavedInAppRow(run, String(parent.company_id), kidRow, parent);
     if (kidDefect) throw inAppNotPublishableError({ ...kidDefect, message: `A/B 변형에 적용할 수 없어요: ${kidDefect.message}` });
     n++;
   }
-  return n;
+  return { applied: n, paused };
 }
 
 /**
@@ -1131,37 +1339,42 @@ export async function activateInAppMessage(opts: {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const run: TxRun = (t, p) => client.query(t, p);
+    // ★ 2026-11-05 §3-13 잠금 한 규칙 — 변형 켜기는 부모 행을 먼저 잠그고 그 잠근 부모로 판정한다(순서 = 부모 → 변형 ·
+    //   [반영] 전파 = 부모 UPDATE → 변형 FOR UPDATE 와 같은 순서 · 거꾸로면 서로 기다린다).
+    //   부모 id 를 모르는 켜기도 대상 행이 변형이면 같은 함수가 부모를 먼저 잠근다.
+    const { parentId, parent: lockedParent } = await lockParentFirst(client, opts.companyId, opts.messageId, opts.parentMessageId);
+    if (parentId && !lockedParent) {
+      await client.query('ROLLBACK');
+      return { ok: false, reason: 'not_found' };
+    }
     const params: any[] = [opts.messageId, opts.companyId];
     let parentClause = '';
     if (opts.parentMessageId) {
       params.push(opts.parentMessageId);
       parentClause = ` AND parent_message_id = $${params.length}::uuid`;
     }
-    const cur = await client.query(
-      `SELECT * FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid${parentClause} FOR UPDATE`,
+    // ★ 2026-11-05 §3-13 판정 행 = 결과 행 — 켜기(상태 + 기간)를 먼저 쓰고 RETURNING 한 행으로 판정 · 미달 = 되돌림(Codex 1R C4:
+    //   옛 = 기간을 쓰기 전 옛 행으로 판정해 옛 끝 시각 · 새 끝 시각이 반대면 거꾸로 판정했다).
+    let windowSet = '';
+    if (opts.window) {
+      params.push(opts.window.endAt);
+      windowSet = `, start_at = NOW(), end_at = $${params.length}::timestamptz`;
+    }
+    const upd = await client.query(
+      `UPDATE cdp_inapp_messages SET status = 'active'${windowSet}, updated_at = NOW()
+        WHERE id = $1::uuid AND company_id = $2::uuid${parentClause}
+        RETURNING *`,
       params,
     );
-    if (cur.rows.length === 0) {
+    if (upd.rows.length === 0) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'not_found' };
     }
-    const defect = inAppPublishDefect(cur.rows[0]);
+    const defect = await judgeSavedInAppRow(run, opts.companyId, upd.rows[0], lockedParent);
     if (defect) {
       await client.query('ROLLBACK');
       return { ok: false, reason: 'defect', defect };
-    }
-    if (opts.window) {
-      await client.query(
-        `UPDATE cdp_inapp_messages
-            SET status = 'active', start_at = NOW(), end_at = $3::timestamptz, updated_at = NOW()
-          WHERE id = $1::uuid AND company_id = $2::uuid`,
-        [opts.messageId, opts.companyId, opts.window.endAt],
-      );
-    } else {
-      await client.query(
-        `UPDATE cdp_inapp_messages SET status = 'active', updated_at = NOW() WHERE id = $1::uuid AND company_id = $2::uuid`,
-        [opts.messageId, opts.companyId],
-      );
     }
     await client.query('COMMIT');
     return { ok: true };
@@ -1214,6 +1427,53 @@ export interface ActiveMessagesInput {
   seenMessageIds?: string[];
   /** ★ 2026-06-17 2단계 — 'web'(자사몰 팝업, 기본) / 'app'(웹뷰 앱 인앱). 미지정 시 web 하위호환 */
   channel?: 'web' | 'app';
+  /** ★ 2026-11-05 §3-2 서빙 관문 — 클라이언트가 그릴 수 있는 것(parseInAppClientCaps). 없음 = 빈 집합 = 옛 SDK · 지금 앱 */
+  clientCaps?: ReadonlySet<string>;
+}
+
+/**
+ * ★ 2026-11-05 §3-2 서빙 관문 한 곳 — hard 판이 빠진 클라이언트 = null(내보내지 않는다 · 잘린 그림 · 빠진 쿠폰 코드 0) ·
+ *   soft 만 빠짐 = 응답 사본에서 틀을 지운다(바닥 시트로 그린다 · 내용 손실 0). 저장 행 무변경(사본만). 순수.
+ */
+export function gateInAppForClient(m: InAppMessageDetail, caps: ReadonlySet<string>): InAppMessageDetail | null {
+  const need = inAppRequiredCaps(m);
+  if (need.hard.some((c) => !caps.has(c))) return null;
+  if (need.soft.some((c) => !caps.has(c)) && m.design && typeof m.design === 'object') {
+    const { poster_frame: _drop, ...rest } = m.design;
+    return { ...m, design: rest };
+  }
+  return m;
+}
+
+/**
+ * ★ 2026-11-05 §3-3 통짜 서빙 사본 — 글이 그림에 구워졌으므로 글 칸을 비우고 장마다 대체 글(alt = 그 장 원래 제목)만 남긴다.
+ *   ① 장이 없으면(flat 만) flat 에서 첫 장을 먼저 만든다(SDK 시트 폴백 inapp.ts renderPoster 와 같은 규칙 · 대체 글 보존 · Codex 1R C5)
+ *   ② 메시지 제목 · 본문 = 빈 글 · 배지 = null · 장 제목 · 본문 · 라벨 · 윗줄 = 지움. 장 버튼 · 링크 · 그림은 그대로. 저장 행 무변경. 순수.
+ */
+export function toServedMessage(m: InAppMessageDetail): InAppMessageDetail {
+  if (!isBakedPoster(m)) return m;
+  const msgTitle = String(m.title || '').trim();
+  let slides: PosterSlide[] = Array.isArray(m.posterSlides) ? m.posterSlides : [];
+  if (slides.length === 0 && m.imageUrl) {
+    // (Codex 구현 1R) 버튼이 없고 옛 단일 CTA(action_url)만 있으면 같은 합성 CT 로 버튼을 만든다(SDK renderLegacy 와 같은 규칙 · 장이 생기면 SDK 는 flat 버튼을 안 본다)
+    const b0 = (Array.isArray(m.buttons) && m.buttons.length > 0 ? m.buttons[0] : null) || synthesizeButtonsFromActionUrl(m.actionUrl, m.actionLabel)[0] || null;
+    slides = [{
+      image_url: m.imageUrl,
+      title: msgTitle,
+      ...(b0 && (b0.label || b0.action_url) ? { cta: { label: b0.label, action_url: b0.action_url ?? null, ...(b0.background_color ? { background_color: b0.background_color } : {}), ...(b0.text_color ? { text_color: b0.text_color } : {}) } } : {}),
+      ...(m.imageLinkUrl ? { link_url: m.imageLinkUrl } : {}),
+    }];
+  }
+  return {
+    ...m,
+    title: '',
+    body: '',
+    badgeText: null,
+    posterSlides: slides.map((s) => {
+      const { title, body: _b, eyebrow: _e, subtitle: _s, ...rest } = s || ({} as PosterSlide);
+      return { ...rest, alt: String(title || '').trim() || msgTitle };
+    }),
+  };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -1590,14 +1850,21 @@ async function evaluateInAppCandidates(
         [selection.messageId, input.companyId]
       );
       if (variantR.rows.length > 0) {
-        selected.push(variantR.rows[0]);
+        // ★ 2026-11-05 §3-5 — 변형 행에는 기간이 없다(부모 기간으로만 서빙) → 서빙 사본에 부모 시작 · 끝 시각(남은 시간 띠의 마감)
+        selected.push({ ...variantR.rows[0], start_at: cand.start_at, end_at: cand.end_at });
         continue;
       }
     }
     selected.push(cand);
   }
 
-  let messages = selected.map(mapRowToMessageDetail);
+  // ★ 2026-11-05 §3-2 · §3-3 서빙 관문 + 통짜 비우기 = 변형 고르기 뒤 · 매핑 직후 한 곳(쪽 반복이 이 뒤 수를 세 20개 채우기가 맞다)
+  const clientCaps = input.clientCaps ?? new Set<string>();
+  let messages = selected
+    .map(mapRowToMessageDetail)
+    .map((m) => gateInAppForClient(m, clientCaps))
+    .filter((m): m is InAppMessageDetail => m !== null)
+    .map(toServedMessage);
 
   // ★ 2026-07-16 Step 4.5 — "다시 보지 않기"(opt_out) 영구 억제. 명시 거부가 빈도 규칙보다 최우선(시간 무제한).
   //   variant에서 눌러도 부모 축(family)으로 억제해 형제 variant 재노출까지 차단.

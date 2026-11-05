@@ -45,12 +45,14 @@ export function buildDeductDescription(
   refType: string, messageType: string, count: number, unitPrice: number, freeCount: number = 0,
   // ★ 2026-09-26 선불 알림톡 결과별 정산 단가(아래 buildAlimtalkUnitsNote). 없으면 문구는 종전 그대로다.
   alimtalkUnits?: AlimtalkSettleUnits | null,
+  // ★ 2026-11-05 C107 D-12 — 결과별 단가의 카카오 이름(알림톡 · 브랜드메시지). 기본 = 알림톡(종전 문구 그대로).
+  unitsLabel: KakaoSettleLabel = '알림톡',
 ): string {
   const prefix = refType && refType !== 'campaign' ? `[${deductReferenceLabel(refType)}] ` : '';
   const free = Math.max(0, Math.floor(Number(freeCount) || 0));
   // 전량 무료 행은 돈이 나가지 않아 돌려줄 차액도 없다 — 단가를 싣지 않는다.
   if (free > 0 && count <= 0) return `${prefix}${messageType} 무료 제공 ${free}건 발송 (과금 없음)`;
-  const note = alimtalkUnits ? buildAlimtalkUnitsNote(alimtalkUnits) : '';
+  const note = alimtalkUnits ? buildAlimtalkUnitsNote(alimtalkUnits, unitsLabel) : '';
   if (free <= 0) return `${prefix}${messageType} ${count}건 발송 차감 (건당 ${unitPrice}원)${note}`;
   return `${prefix}${messageType} ${count + free}건 중 무료 ${free}건 · 과금 ${count}건 발송 차감 (건당 ${unitPrice}원)${note}`;
 }
@@ -70,13 +72,20 @@ export function buildDeductDescription(
  */
 export interface AlimtalkSettleUnits { KAKAO: number; SMS: number; LMS: number }
 
-export function buildAlimtalkUnitsNote(u: AlimtalkSettleUnits): string {
-  return ` · 결과별 정산: 알림톡 ${u.KAKAO}원 · SMS 대체 ${u.SMS}원 · LMS 대체 ${u.LMS}원`;
+/**
+ * ★ 2026-11-05 C107 D-12 — 브랜드메시지 전용 발송도 같은 결과별 정산을 쓴다(카카오 실패 → 문자 대체가 브랜드 행에도 7830 · 7831 로 남는다).
+ *   키 KAKAO = 「카카오 시도 성공 단가」(알림톡이면 알림톡 단가 · 브랜드면 그 발송의 브랜드(친구 · 비친구 · 형태) 단가).
+ *   되읽기(parseAlimtalkUnits)는 두 이름을 모두 받는다 — 문구 형식 하나 · 이름만 다르다.
+ */
+export type KakaoSettleLabel = '알림톡' | '브랜드메시지';
+
+export function buildAlimtalkUnitsNote(u: AlimtalkSettleUnits, label: KakaoSettleLabel = '알림톡'): string {
+  return ` · 결과별 정산: ${label} ${u.KAKAO}원 · SMS 대체 ${u.SMS}원 · LMS 대체 ${u.LMS}원`;
 }
 
 /** (순수) 차감 설명에서 결과별 정산 단가를 되읽는다. 싣지 않은 행은 `null`. 0원 계약도 그대로 읽는다. */
 export function parseAlimtalkUnits(description: string | null | undefined): AlimtalkSettleUnits | null {
-  const m = String(description || '').match(/결과별 정산:\s*알림톡\s*([\d.]+)원\s*·\s*SMS 대체\s*([\d.]+)원\s*·\s*LMS 대체\s*([\d.]+)원/);
+  const m = String(description || '').match(/결과별 정산:\s*(?:알림톡|브랜드메시지)\s*([\d.]+)원\s*·\s*SMS 대체\s*([\d.]+)원\s*·\s*LMS 대체\s*([\d.]+)원/);
   if (!m) return null;
   const [KAKAO, SMS, LMS] = [m[1], m[2], m[3]].map(Number);
   if (![KAKAO, SMS, LMS].every((v) => Number.isFinite(v) && v >= 0)) return null;

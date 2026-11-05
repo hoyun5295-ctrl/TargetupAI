@@ -52,9 +52,9 @@ describe('3-16 A/B 칸 고치기', () => {
   it('상세 = 칸마다 A/B 문안(변이 순)', async () => {
     const d = await getJourneyDetail(CO, J);
     const s = d!.steps.find((x: any) => x.id === STEP);
-    expect(s.ab_variants).toEqual([
-      { variant_id: 'A', message_template: 'A 글', subject: null },
-      { variant_id: 'B', message_template: 'B 글', subject: 'B 제목' },
+    expect(s.ab_variants).toEqual([   // ★ C105 H5 행 id 를 함께 싣는다(판마다 스팸 검사)
+      { id: expect.any(String), variant_id: 'A', message_template: 'A 글', subject: null },
+      { id: expect.any(String), variant_id: 'B', message_template: 'B 글', subject: 'B 제목' },
     ]);
   });
 });

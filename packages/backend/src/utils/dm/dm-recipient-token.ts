@@ -10,7 +10,7 @@
  */
 
 import { randomBytes } from 'crypto';
-import { query } from '../../config/database';
+import { query, type TxRun } from '../../config/database';
 
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
@@ -136,10 +136,11 @@ export async function discardDmRecipientTokens(dmId: string, companyId: string, 
  * ★ 2026-07-06 단축 코드 조회 (공개 리다이렉트 전용) — hlj.kr/<code> → 원 뷰어 URL 재료.
  * 만료 토큰도 dmCode는 반환(?r 없이 공용 렌더로 리다이렉트 — 링크가 죽지 않게).
  */
-export async function lookupDmShortLink(code: string): Promise<{ token: string; dmCode: string; expired: boolean } | null> {
+export async function lookupDmShortLink(code: string, run: TxRun = query): Promise<{ token: string; dmCode: string; expired: boolean } | null> {
   const c = String(code || '').trim();
   if (!/^[0-9A-Za-z]{6,12}$/.test(c)) return null;
-  const r = await query(
+  // ★ 2026-11-05 인앱 DM 연결 판정 — run = 부르는 쪽 트랜잭션 연결(없으면 지금처럼 풀 · 뿌리 R41)
+  const r = await run(
     `SELECT t.token, t.expires_at, d.short_code AS dm_code
        FROM dm_recipient_tokens t
        JOIN dm_pages d ON d.id = t.dm_id
@@ -150,7 +151,7 @@ export async function lookupDmShortLink(code: string): Promise<{ token: string; 
   if (r.rows.length === 0 || !r.rows[0].dm_code) {
     // ★ 2026-07-08 발행(공용) 단축링크 폴백 — hlj.kr/<dm_pages.short_code> 진입 시 토큰 없이 공용 렌더로.
     //   (발행 모달 복사 URL용. 수신자 개인화 코드가 항상 우선 매치 — 기존 발송 링크 동작 무변경)
-    const d = await query(
+    const d = await run(
       `SELECT short_code FROM dm_pages WHERE short_code = $1 LIMIT 1`,
       [c],
     );

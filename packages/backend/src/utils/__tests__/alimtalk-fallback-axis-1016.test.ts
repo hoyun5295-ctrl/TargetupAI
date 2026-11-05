@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import {
-  fallbackOf, tallyAlimtalkFallback, getSendTypeLabel,
+  fallbackOf, tallyKakaoFallback, getSendTypeLabel,
   FALLBACK_BILLING_CODE_WHEN_SQL, SMS_SUB_ROW_SQL, SUBSTITUTE_ROW_SQL,
 } from '../sms-result-map';
 import {
@@ -52,7 +52,10 @@ describe('① 판정 한 곳 · 같은 행 = 같은 분류', () => {
     ['L', null, 1000, null, '일반 LMS'],
     ['L', 0, 1000, null, 'k_oriseq 0'],
     ['L', null, 7831, null, 'K가 아닌 행의 7831'],
-    ['F', null, 7831, null, '브랜드 F 행(범위 밖 · B-1003-1 추가 과제)'],
+    // ★ 2026-11-05 C107 — 브랜드 F 행도 같은 모양(1105 실측 27행 · 게이트웨이 공통 parentFallbackReport)
+    ['F', null, 7831, 'L', '브랜드 F 행 LMS 대체 성공(C107)'],
+    ['F', null, 7830, 'S', '브랜드 F 행 SMS 대체 성공(C107)'],
+    ['F', null, 1800, null, '브랜드 성공'],
   ];
 
   it.each(FIXTURES)('%s + %s + %s → %s (%s)', (mt, ori, code, want) => {
@@ -62,8 +65,8 @@ describe('① 판정 한 곳 · 같은 행 = 같은 분류', () => {
   });
 
   it('비토 모양과 옛 모양이 같은 숫자를 낸다 = 알림톡 시도 1 실패 1 + 대체 LMS 1 성공(접수 ① 기대값)', () => {
-    const bito = tallyAlimtalkFallback([{ msg_type: 'K', k_oriseq: null, status_code: 7831, cnt: 1 }]);
-    const old = tallyAlimtalkFallback([
+    const bito = tallyKakaoFallback([{ msg_type: 'K', k_oriseq: null, status_code: 7831, cnt: 1 }]);
+    const old = tallyKakaoFallback([
       { msg_type: 'K', k_oriseq: null, status_code: 7300, cnt: 1 },
       { msg_type: 'L', k_oriseq: 1, status_code: 1000, cnt: 1 },
     ]);
@@ -74,21 +77,21 @@ describe('① 판정 한 곳 · 같은 행 = 같은 분류', () => {
     }
   });
 
-  it('청구 식의 대체 분기 = 두 모양 → KS·KL (브랜드 F 분기 뒤 · ELSE 앞)', () => {
+  it('청구 식의 대체 분기 = 두 모양 → KS·KL (★C107 브랜드 F 분기 앞 · 부모 = K · F)', () => {
     expect(FALLBACK_BILLING_CODE).toEqual({ S: 'KS', L: 'KL' });
     expect(FALLBACK_BILLING_CODE_WHEN_SQL).toBe(
-      "WHEN msg_type = 'K' AND status_code = 7830 THEN 'KS' "
-      + "WHEN msg_type = 'K' AND status_code = 7831 THEN 'KL' "
+      "WHEN msg_type IN ('K', 'F') AND status_code = 7830 THEN 'KS' "
+      + "WHEN msg_type IN ('K', 'F') AND status_code = 7831 THEN 'KL' "
       + `WHEN msg_type = 'S' AND ${SMS_SUB_ROW_SQL} THEN 'KS' `
       + `WHEN msg_type = 'L' AND ${SMS_SUB_ROW_SQL} THEN 'KL'`,
     );
-    expect(BILLING_MSG_TYPE_SQL.endsWith(`${FALLBACK_BILLING_CODE_WHEN_SQL} ELSE msg_type END`)).toBe(true);
-    expect(BILLING_MSG_TYPE_SQL.indexOf(FALLBACK_BILLING_CODE_WHEN_SQL)).toBeGreaterThan(BILLING_MSG_TYPE_SQL.indexOf("ELSE 'FN' END)"));
+    expect(BILLING_MSG_TYPE_SQL.startsWith(`CASE ${FALLBACK_BILLING_CODE_WHEN_SQL} WHEN msg_type = 'F' THEN`)).toBe(true);
+    expect(BILLING_MSG_TYPE_SQL.indexOf(FALLBACK_BILLING_CODE_WHEN_SQL)).toBeLessThan(BILLING_MSG_TYPE_SQL.indexOf("WHEN msg_type = 'F' THEN"));
   });
 
   it('발송결과 「대체발송」 필터 조각은 문자열 그대로다', () => {
     expect(SUBSTITUTE_ROW_SQL).toBe(
-      "((k_oriseq > 0 AND msg_type IN ('L', 'S')) OR (msg_type = 'K' AND status_code IN (7830, 7831)))",
+      "((k_oriseq > 0 AND msg_type IN ('L', 'S')) OR (msg_type IN ('K', 'F') AND status_code IN (7830, 7831)))",
     );
   });
 });
@@ -175,7 +178,7 @@ describe('③ 표시명 = 축 하나', () => {
     expect(billingDetailTypeLabel({ channel: 'web', message_type: 'LMS_FB' })).toBe('LMS(대체)');
     expect(billingDetailTypeLabel({ channel: 'agent', message_type: 'SMS_FB' })).toBe('SMS(대체)');
     expect(billingDetailTypeLabel({ channel: 'web', message_type: 'KAKAO' })).toBe('카카오');
-    expect(billingDetailTypeLabel({ channel: 'web', message_type: 'BRAND' })).toBe('브랜드메시지');
+    expect(billingDetailTypeLabel({ channel: 'web', message_type: 'BRAND' })).toBe('브랜드메시지(친구)');   // ★ C107 D-11 이름 한 벌
     expect(billingDetailTypeLabel({ channel: 'plan', message_type: 'PLAN_BASIC' })).toBe('BASIC');
     expect(billingDetailTypeLabel({ channel: 'extra', message_type: 'EXTRA_MANUAL', item_label: '단축 URL 제작' })).toBe('단축 URL 제작');
     expect(billingDetailTypeLabel({ channel: 'extra', message_type: 'EXTRA_080_FEE' })).toBe('080 이용료');
@@ -286,8 +289,8 @@ describe('④ 소스 고정핀', () => {
     const admin = src('routes/admin.ts');
     const at = admin.indexOf("router.get('/stats/export'");
     const block = codeOnly(admin.slice(at, admin.indexOf('router.', at + 30)));
-    expect(block).toContain('aggregateAlimtalkFallbackByCampaign(');
-    expect(block).not.toContain('loadAlimtalkFallbackForList');
+    expect(block).toContain('aggregateKakaoFallbackByCampaign(');
+    expect(block).not.toContain('loadKakaoFallbackForList');
     expect(block).not.toContain("'알림톡대체발송(");
     const map = src('utils/sms-result-map.ts');
     for (const gone of ['export function classifyMsgChannel', 'export function tallySmsChannelCounts', 'export function alimtalkFallbackMsgType', 'ALIMTALK_FALLBACK_TYPE_WHEN_SQL']) {

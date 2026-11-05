@@ -29,6 +29,7 @@ import { UserFacingError } from './http-error';
 import { randomUUID } from 'crypto';
 import { query } from '../config/database';
 import { createVariant, VariantOfVariantError } from './inapp-variant-optimizer';
+import { isBakedPoster } from './inapp-message';
 // ★ 2026-09-26 한줄로 V2 R1-45 — AI가 지어낸 혜택 차단 CT(원본에 있던 혜택만 통과)
 import { rewriteAddsFacts, findInventedBenefits, efficacyNote, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { buildHourlyDistribution } from './inapp-funnel-stats';
@@ -67,7 +68,8 @@ export async function quickActionAIRefine(
 
   // 부모 메시지 조회
   const msgR = await query(
-    `SELECT id, parent_message_id, title, body, template, image_url, buttons, background_color, text_color, is_ad
+    // ★ 2026-11-05 — is_ad 칸은 cdp_inapp_messages 에 없다(실 PG 42703 · 운영 정의 해시 대조 덤프) → 읽지 않는다(광고 여부 = 아래 판정이 false 로 본다 · 지금과 같다)
+    `SELECT id, parent_message_id, title, body, template, image_url, buttons, background_color, text_color, design
      FROM cdp_inapp_messages
      WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
     [messageId, companyId]
@@ -76,6 +78,8 @@ export async function quickActionAIRefine(
   const parent = msgR.rows[0];
   // ★ 2026-09-27 한줄로 V2 R257 — 변형에는 다듬기를 만들지 않는다(노출될 수 없는 손자 변형에 3크레딧이 빠졌다). AI 호출 전이라 과금 없음.
   if (parent.parent_message_id) throw new VariantOfVariantError();
+  // ★ 2026-11-05 인앱 포스터 재구성 §3-3 — 통짜(글이 구워진 그림)는 글만 바꾼 변형을 만들 수 없다(그림을 바꿔 비교) · AI 호출 · 차감 전 거절
+  if (isBakedPoster(parent)) throw new UserFacingError(400, 'INAPP_BAKED_REFINE', '그림에 글이 들어간 메시지는 문구 다듬기 대신 그림을 바꿔 시험해 주세요.');
 
   // AI 호출 — 3 tone 자동 생성
   const system = `당신은 한국 마케팅 자동화 인앱 메시지 카피라이터입니다.

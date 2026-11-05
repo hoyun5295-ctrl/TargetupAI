@@ -11,6 +11,7 @@
  */
 import { query } from '../config/database';
 import { recordAuditLog } from './audit-log';
+import { parseQueryInt } from './normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 export const INTRO_ACTIONS = { view: 'intro_view', request: 'intro_demo_request' } as const;
 export const INTRO_TARGET = 'intro';
@@ -68,7 +69,7 @@ export type IntroLeadKind = 'all' | 'request' | 'view';
 
 export function parseIntroLeadsQuery(q: any): { kind: IntroLeadKind; page: number } {
   const kind = (['all', 'request', 'view'] as const).find((k) => k === q?.kind) ?? 'all';
-  const page = Math.max(1, Math.min(10000, Math.floor(Number(q?.page)) || 1));
+  const page = parseQueryInt(q?.page, { fallback: 1, min: 1, max: 10000, clamp: true });   // ★ C105 H4(R59)
   return { kind, page };
 }
 

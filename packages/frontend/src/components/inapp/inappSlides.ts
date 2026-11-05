@@ -7,6 +7,7 @@
  * 서버(inapp-message.ts sanitizePosterSlides · composeFlatFromPosterSlides · commonPosterEyebrow · inAppPublishDefect)와 같은 규칙.
  */
 import { POSTER_OVERLAY_DEFAULTS, POSTER_SHEET_DEFAULTS, resolvePosterLayout, type PosterLayout, type SheetSlide } from './PosterSheetPreview';
+import { posterFrameRequiredCaps } from './generated/poster-frame';
 
 export const MAX_SLIDES = 5;
 
@@ -184,12 +185,21 @@ export function publishDefectOf(m: Record<string, any>): PublishDefect | null {
   return null;
 }
 
-/** 편집기 모양 분류(입구 갤러리 · 모양 바꾸기 공용) */
-export type LayoutKey = PosterLayout | 'center_modal' | 'bottom_banner' | 'slide_in' | 'toast' | 'floating_button';
+/**
+ * 편집기 모양 분류(입구 갤러리 · 모양 바꾸기 공용).
+ * ★ 2026-11-05 인앱 포스터 재구성 §3-10 — 포스터 갈래에 새 키 셋: 통짜 · 바닥 시트(baked_sheet) · 통짜 · 떠 있는 카드(baked_card) ·
+ *   사진 위 글 · 떠 있는 카드(live_card). 키 ↔ design 은 designForKey 하나 · 반대 = layoutKeyOf 하나(세 키 poster_layout · poster_text · poster_frame 을 함께).
+ *   새 키의 그리는 갈래(PosterLayout)는 overlay(지금 포스터 갈래)다 = posterLayoutOfKey.
+ */
+export type PosterKey = PosterLayout | 'baked_sheet' | 'baked_card' | 'live_card';
+export type LayoutKey = PosterKey | 'center_modal' | 'bottom_banner' | 'slide_in' | 'toast' | 'floating_button';
 export const LAYOUT_INFO: Record<LayoutKey, { name: string; kind: 'big' | 'basic' | 'small'; desc: string; isNew?: boolean }> = {
+  baked_sheet: { name: '통짜 포스터', kind: 'big', desc: '글이 들어간 그림 그대로, 아래에서 올라와요', isNew: true },
+  baked_card: { name: '통짜 포스터 카드', kind: 'big', desc: '글이 들어간 그림을 화면 가운데 카드로', isNew: true },
+  overlay: { name: '사진 위 글', kind: 'big', desc: '사진 위에 글을 얹어요, 여러 장 넘기기' },
+  live_card: { name: '사진 위 글 카드', kind: 'big', desc: '사진 위에 글을 얹고 화면 가운데 카드로', isNew: true },
   event_card: { name: '이벤트 카드', kind: 'big', desc: '위에 라벨 · 제목 · 본문, 아래 큰 사진 · 쪽 번호', isNew: true },
   banner_sheet: { name: '배너 시트', kind: 'big', desc: '색 면 위 큰 글 3줄 + 오른쪽 상품 사진', isNew: true },
-  overlay: { name: '포스터', kind: 'big', desc: '사진이 전부 · 글은 사진 위에 얹기' },
   center_modal: { name: '가운데 팝업', kind: 'basic', desc: '사진 · 제목 · 본문 · 버튼' },
   bottom_banner: { name: '하단 시트', kind: 'basic', desc: '아래에서 올라오는 알림' },
   slide_in: { name: '오른쪽 아래 카드', kind: 'small', desc: '쇼핑을 가리지 않게 구석에' },
@@ -197,26 +207,71 @@ export const LAYOUT_INFO: Record<LayoutKey, { name: string; kind: 'big' | 'basic
   floating_button: { name: '떠 있는 버튼', kind: 'small', desc: '장바구니 · 쿠폰 입구' },
 };
 
-/** 채널별 고를 수 있는 모양(웹 = 기존 4형 + 포스터 계열 3 · 앱 = 기본형 2 + 포스터 계열 3) */
-export function layoutsFor(channel: 'web' | 'app'): LayoutKey[] {
+/**
+ * 채널별 고를 수 있는 모양. ★ 2026-11-05 §3-12 배너 시트는 입구 · 모양 바꾸기에서 내린다 — 이미 배너 시트인 메시지(current)에만 보인다
+ *   (저장된 배너 시트는 그대로 그린다).
+ */
+export function layoutsFor(channel: 'web' | 'app', current?: LayoutKey | null): LayoutKey[] {
+  const poster: LayoutKey[] = ['baked_sheet', 'baked_card', 'overlay', 'live_card', 'event_card', ...(current === 'banner_sheet' ? ['banner_sheet' as LayoutKey] : [])];
   return channel === 'app'
-    ? ['event_card', 'banner_sheet', 'overlay', 'center_modal', 'bottom_banner']
-    : ['event_card', 'banner_sheet', 'overlay', 'center_modal', 'slide_in', 'toast', 'floating_button'];
+    ? [...poster, 'center_modal', 'bottom_banner']
+    : [...poster, 'center_modal', 'slide_in', 'toast', 'floating_button'];
 }
 
-/** 지금 메시지의 모양 키 */
+/** 지금 메시지의 모양 키 — design 세 키(poster_layout · poster_text · poster_frame)를 함께 읽는다 */
 export function layoutKeyOf(m: Record<string, any>): LayoutKey {
   const t = String(m.template || m.position || 'center_modal');
-  if (t === 'full_image') return resolvePosterLayout(m.design);
+  if (t === 'full_image') {
+    const d = m.design && typeof m.design === 'object' ? m.design : {};
+    if (d.poster_text === 'baked') return d.poster_frame === 'card' ? 'baked_card' : 'baked_sheet';
+    const L = resolvePosterLayout(d);
+    if (L === 'overlay' && d.poster_frame === 'card') return 'live_card';
+    return L;
+  }
   return (['center_modal', 'bottom_banner', 'slide_in', 'toast', 'floating_button'] as string[]).includes(t) ? (t as LayoutKey) : 'center_modal';
 }
 
-export const isPosterLayout = (k: LayoutKey): k is PosterLayout => k === 'overlay' || k === 'event_card' || k === 'banner_sheet';
+export const isPosterLayout = (k: LayoutKey): k is PosterKey =>
+  k === 'overlay' || k === 'event_card' || k === 'banner_sheet' || k === 'baked_sheet' || k === 'baked_card' || k === 'live_card';
+
+/** 모양 키 → 그리는 갈래(장 색 · 크기 기본 · 장 편집 칸) — 새 키 셋은 지금 포스터 갈래(overlay) */
+export function posterLayoutOfKey(k: LayoutKey): PosterLayout {
+  return k === 'event_card' || k === 'banner_sheet' ? k : 'overlay';
+}
+
+/** 모양 키 → design(세 키를 함께 쓰고 지운다 · 그 밖 키는 그대로) — 서버 sanitizeInAppDesign 정규화 순서와 같은 조합만 만든다 */
+export function designForKey(key: LayoutKey, design?: Record<string, any> | null): Record<string, any> {
+  const d: Record<string, any> = { ...(design || {}) };
+  delete d.poster_layout;
+  delete d.poster_text;
+  delete d.poster_frame;
+  if (key === 'event_card' || key === 'banner_sheet') {
+    d.poster_layout = key;
+    delete d.poster_strip;   // 이벤트 카드 · 배너 시트 = 띠 없음(서버가 버린다 · 죽은 칸 0)
+  }
+  if (key === 'baked_sheet' || key === 'baked_card') d.poster_text = 'baked';
+  if (key === 'baked_card' || key === 'live_card') d.poster_frame = 'card';
+  return d;
+}
+
+/** 이 모양에서 기능 띠를 고를 수 있는가(정규화가 버리는 조합은 칸을 그리지 않는다) */
+export function stripAllowedFor(k: LayoutKey): boolean {
+  return k === 'overlay' || k === 'baked_sheet' || k === 'baked_card' || k === 'live_card';
+}
 
 /**
- * ★ 앱 채널 새 레이아웃 잠금(설계서 §3 · 1차 = 잠금 · 2차 = 앱 계약 구현 + OTA · 실기기 확인 뒤 해제).
- *   2차 코드(첫 고객 앱 렌더 + 계약서)는 들어갔다. 해제는 실기기에서 새 모양·하루 보지 않기를 확인한 뒤 이 값을 true 로.
- *   잠금 중에도 고를 수는 있다 — 「앱 업데이트 필요」 표시 · 안내가 붙는다. 「구버전 앱 모습」은 잠금과 무관하게 버튼으로 본다.
- *   ★ 2026-09-29 해제 — 팝폰 OTA 뒤 실기기에서 이벤트 카드(새 시트 사진 누름 기록 slide_0_image) · 오늘 하루 보지 않기 확인(Harold).
+ * ★ 2026-11-05 §3-2 앱에서 확인된 판 — 팝폰 OTA 뒤 실기기(안드로이드 · iOS)에서 확인한 낱말만 넣는다(처음 = 빈 집합).
+ *   옛 전역 APP_SHEET_LAYOUTS_UNLOCKED 를 대신한다. 0929 세 모양(사진 위 글 · 이벤트 카드 · 배너 시트)은 판이 필요 없어 늘 보인다.
  */
-export const APP_SHEET_LAYOUTS_UNLOCKED = true;
+export const APP_CONFIRMED_CAPS: ReadonlySet<string> = new Set<string>([]);
+
+/** 앱 채널에서 지금 앱이 이 메시지를 어떻게 보이나(필요 판 = 서버 관문과 같은 규칙 posterFrameRequiredCaps) · null = 그대로 보임 */
+export function appCapsNote(design: Record<string, any> | null | undefined, slideCount: number): { hidden: boolean; text: string } | null {
+  const need = posterFrameRequiredCaps(design, slideCount);
+  if (need.hard.some((c) => !APP_CONFIRMED_CAPS.has(c))) return { hidden: true, text: '앱 새 판이 깔린 뒤 보여요' };
+  if (need.soft.some((c) => !APP_CONFIRMED_CAPS.has(c))) return { hidden: false, text: '앱 새 판 전에는 바닥 시트로 보여요' };
+  return null;
+}
+export function appCapsNoteForKey(k: LayoutKey): { hidden: boolean; text: string } | null {
+  return isPosterLayout(k) ? appCapsNote(designForKey(k, null), 1) : null;
+}

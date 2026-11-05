@@ -16,10 +16,9 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Bell, CalendarClock, ChevronDown, ChevronRight, CircleX, Contact, FolderOpen, MessageSquareReply,
-  PencilLine, Search, Send, Timer, Trash2, Upload, X,
+  PencilLine, Search, Send, Timer, Trash2, Upload, X, Target, Lock as LockIcon
 } from 'lucide-react';
 import {
-  AlimtalkFallbackEditor,
   NEXT_TYPE_OPTIONS,
   buildAlimtalkPreviewProps,
   extractVariables,
@@ -39,6 +38,10 @@ import AlimtalkVariableMappingPanel from './alimtalk/AlimtalkVariableMappingPane
 import AddressBookModal from './AddressBookModal';
 import ScheduleTimeModal from './ScheduleTimeModal';
 import { normalizePhoneKr } from '../utils/formatDate';
+import FallbackPhoneModal, { type FallbackOption } from './kakao-send/FallbackPhoneModal';
+import DirectTargetFilterModal, { type FieldMeta } from './DirectTargetFilterModal';
+import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/target-extraction';
+import { extractionRowsToTable } from '../utils/customerFilterBuild';
 import { validateAlimtalkVariables, extractAlimtalkVariables } from '../utils/alimtalkVars';
 import RecipientDirectInputModal, { type PastePreview, type RowAddResult } from './direct-send/RecipientDirectInputModal';
 import { checkAlimtalkPaste, planAppend } from '../utils/recipient-paste';
@@ -120,6 +123,10 @@ export interface AlimtalkSendModalProps {
    *   phones = 지금 명단의 번호 · rows = 지금 명단의 줄 그대로(문자 쪽은 줄의 정체로 되돌린다 · Codex 9R).
    */
   onSwitchChannel?: (to: 'sms' | 'brand', phones: string[], rows: any[]) => void;
+  /** ★ 2026-11-05 C107 D-05 — 「타겟추출」 칸(문자 직접발송과 같은 잠금 축 · 같은 창) */
+  targetExtractLocked?: boolean;
+  onTargetExtractLocked?: () => void;
+  hideAi?: boolean;
 }
 
 export default function AlimtalkSendModal({
@@ -147,13 +154,36 @@ export default function AlimtalkSendModal({
   initialTemplateId,
   onInitialTemplateConsumed,
   onSwitchChannel,
+  targetExtractLocked = false,
+  onTargetExtractLocked,
+  hideAi = false,
 }: AlimtalkSendModalProps) {
   // 수신자 영역 — 알림톡 전용 state (직접발송 directRecipients와 격리)
-  const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address'>('direct');
+  const [inputMode, setInputMode] = useState<'direct' | 'file' | 'address' | 'target'>('direct');
+  // ★ 2026-11-05 C107 D-05 — 타겟추출 창 · 담는 중 · 늦은 응답 세대
+  const [showTargetExtract, setShowTargetExtract] = useState(false);
+  const [targetLoading, setTargetLoading] = useState(false);
+  /**
+   * ★ Codex 구현 1R #2 — 표 불러오기(파일등록 · 타겟추출 → 칸 맞추기 창) 세대 하나.
+   *   오르는 때 = 창 열기 · 닫기 · 명단 바뀜 · 새 불러오기 시작. 늦게 온 응답은 세대가 다르면 칸 맞추기 창을 열지 않는다
+   *   (옛: 타겟추출 시작에서만 올라, 닫고 다시 연 창 · 바뀐 명단에 앞 세션의 추출이 칸 맞추기 창으로 들어왔다).
+   */
+  const importSeqRef = useRef(0);
+  // ★ Codex 구현 2R — 칸 맞추기 창(불러온 표 = 대기 중인 불러오기)도 세대를 갖는다 · 열 때 세대 = 적용할 때 세대여야 적용
+  const mappingSeqRef = useRef(-1);
+  const showRef = useRef(show);   // 늦은 응답의 안내 = 창이 열려 있을 때만(setToast 는 대시보드 것이라 닫힌 뒤 띄우면 대시보드에 뜬다)
+  showRef.current = show;
   // ★ 2026-09-25 직접입력 = 공용 창(입력칸은 수신자 열에서 걷었다 · Harold 목업 v2)
   const [directInputOpen, setDirectInputOpen] = useState(false);
   const [recipients, setRecipients] = useState<any[]>([]);
   const [fileLoading, setFileLoading] = useState(false);
+  // 열기 · 닫기 · 명단 바뀜 = 진행 중인 불러오기 · 열린 칸 맞추기 창 무효(그 표시도 내린다)
+  useEffect(() => {
+    importSeqRef.current++;
+    setTargetLoading(false);
+    setFileLoading(false);
+    setShowMapping(false);
+  }, [show, recipients]);
   const [dedupEnabled, setDedupEnabled] = useState(true);
   const [unsubFilterEnabled, setUnsubFilterEnabled] = useState(true);
   const [sending, setSending] = useState(false);
@@ -389,6 +419,8 @@ export default function AlimtalkSendModal({
   // ★ D162-4 (2026-05-15) 3차: 파일 업로드 — Harold님 명시 정합 "직접발송과 똑같이 필드선택 가능".
   //   파싱 후 자동 인식만 하지 X. 컬럼 매핑 모달 진입 → 핸드폰 + 템플릿 변수별 컬럼 사용자 선택 → 적용.
   const handleFileUpload = async (file: File) => {
+    const seq = ++importSeqRef.current;
+    setTargetLoading(false);
     setFileLoading(true);
     const formData = new FormData();
     formData.append('file', file);
@@ -400,6 +432,10 @@ export default function AlimtalkSendModal({
         body: formData,
       });
       const data = await res.json();
+      if (seq !== importSeqRef.current) {   // 그사이 창이 닫혔거나 명단 · 불러오기가 바뀌었다
+        if (showRef.current) setToast({ show: true, type: 'warning', message: '파일을 읽는 동안 명단이 바뀌어 이번 파일은 넣지 않았어요. 다시 올려 주세요.' });
+        return;
+      }
       if (!data.success) {
         setToast({ show: true, type: 'error', message: data.error || '파일 파싱 실패' });
         return;
@@ -410,10 +446,24 @@ export default function AlimtalkSendModal({
         setToast({ show: true, type: 'error', message: '파일에서 데이터를 읽을 수 없습니다.' });
         return;
       }
+      openMappingWith(headers, allData);
+    } catch {
+      if (seq === importSeqRef.current) setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
+    } finally {
+      if (seq === importSeqRef.current) setFileLoading(false);
+    }
+  };
+
+  /**
+   * ★ 2026-11-05 C107 D-05 — 표(머리 · 행) → 칸 맞추기 창(번호 칸 + 템플릿 변수). 파일등록 · 타겟추출이 같은 함수를 쓴다.
+   *   phoneHint = 미리 맞춘 번호 칸(타겟추출 = 고객 DB 번호 칸).
+   */
+  const openMappingWith = (headers: string[], allData: any[], phoneHint?: string) => {
+      mappingSeqRef.current = importSeqRef.current;
       setFileHeaders(headers);
       setFileAllData(allData);
       // 핸드폰 컬럼 자동 인식 (사용자 변경 가능)
-      const autoPhone =
+      const autoPhone = phoneHint ||
         headers.find((h) => /휴대폰|전화|핸드폰|연락처|phone|mobile|hp/i.test(h)) || headers[0] || '';
       setPhoneColumn(autoPhone);
       // 템플릿 변수 자동 매칭 — 변수명이 컬럼명과 일치하면 `@@컬럼@@` placeholder 적용
@@ -433,16 +483,44 @@ export default function AlimtalkSendModal({
         }
       }
       setShowMapping(true);
-    } catch {
-      setToast({ show: true, type: 'error', message: '파일 업로드 중 오류가 발생했습니다.' });
+  };
+
+  /** ★ 2026-11-05 C107 D-05 — 타겟추출 담기 → 보관본 전체 행 → 같은 칸 맞추기 창(문자 직접발송 handleTargetExtracted 와 같은 흐름) */
+  const handleTargetExtracted = async (ext: TargetExtraction, meta: FieldMeta[]) => {
+    setShowTargetExtract(false);
+    const seq = ++importSeqRef.current;
+    setFileLoading(false);
+    setTargetLoading(true);
+    try {
+      const r = await fetchTargetExtractionRows(ext);
+      if (seq !== importSeqRef.current) return;
+      if (!r.ok) {
+        setToast({ show: true, type: 'error', message: r.expired ? '담은 명단의 보관 시간이 지났습니다. 다시 추출해 주세요.' : (r.error || '명단을 불러오지 못했습니다.') });
+        return;
+      }
+      const t = extractionRowsToTable(r.data.recipients, meta);
+      if (t.headers.length === 0 || t.data.length === 0) {
+        setToast({ show: true, type: 'error', message: '조건에 맞는 고객이 없습니다.' });
+        return;
+      }
+      setInputMode('target');
+      openMappingWith(t.headers, t.data, t.mapping.phone);
+      if (ext.skippedNoPhone > 0) {
+        setToast({ show: true, type: 'warning', message: `휴대폰 번호가 없는 ${ext.skippedNoPhone.toLocaleString()}명은 뺐습니다` });
+      }
     } finally {
-      setFileLoading(false);
+      if (seq === importSeqRef.current) setTargetLoading(false);
     }
   };
 
   // ★ D162-4 (2026-05-15) 3차: 매핑 적용 — 핸드폰 컬럼 + (변수 매칭은 variableMap에 적용) → recipients 적용.
   //   각 row는 파일 헤더 그대로 보존하여 발송 시 row[헤더명]으로 자동 치환 (AlimtalkVariableMappingPanel의 sampleRecipient 자동 치환과 정합).
   const applyMapping = () => {
+    if (mappingSeqRef.current !== importSeqRef.current) {   // 창을 연 뒤 명단이 바뀌었다(발송 뒤 비움 · 넘겨받은 명단) = 옛 표로 덮지 않는다
+      setShowMapping(false);
+      setToast({ show: true, type: 'warning', message: '명단이 바뀌어 이 표는 적용하지 않았어요. 다시 불러와 주세요.' });
+      return;
+    }
     if (!phoneColumn) {
       setToast({ show: true, type: 'error', message: '핸드폰 번호 컬럼을 선택해주세요.' });
       return;
@@ -684,7 +762,6 @@ export default function AlimtalkSendModal({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [splitOpen, setSplitOpen] = useState(false);
   const [fallbackOpen, setFallbackOpen] = useState(false);
-  const fallbackAnchorRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [listQuery, setListQuery] = useState('');
@@ -702,15 +779,15 @@ export default function AlimtalkSendModal({
     setListSelected(new Set());
     setListPage(0);
   }, [recipients]);
-  // 실패 시 문자 풍선 — 칸 바깥을 누르면 닫는다
-  useEffect(() => {
-    if (!fallbackOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (fallbackAnchorRef.current && !fallbackAnchorRef.current.contains(e.target as Node)) setFallbackOpen(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, [fallbackOpen]);
+  // ★ 2026-11-05 C107 D-01(Harold H2) — 실패 시 문자 = 브랜드와 같은 휴대폰 모양 창(옛 풍선 · 바깥 클릭 닫기 폐기)
+  //   종류 · 필수 판정은 알림톡 CT 그대로(NEXT_TYPE_OPTIONS · requiresNextSubject · requiresNextContents · validateAlimtalkChannelState).
+  const alimFallbackOptions: FallbackOption[] = NEXT_TYPE_OPTIONS.map((o) => ({
+    code: o.value, label: o.label, desc: o.desc,
+    kind: o.value === 'N' ? 'none' : 'LMS',
+    editable: o.value === 'A' || o.value === 'B',
+    needsTitle: o.value === 'L' || o.value === 'B',
+    reuseBodyWhenEmpty: false,
+  }));
   const selectedVarCount = ch.selectedTemplate ? extractVariables(ch.selectedTemplate.content).length : 0;
   const currentSender = ch.approvedSenders.find((s) => s.id === alimtalkProfileId) || null;
   const fallbackLabel = NEXT_TYPE_OPTIONS.find((o) => o.value === alimtalkFallback)?.label || '대체 문자';
@@ -888,6 +965,21 @@ export default function AlimtalkSendModal({
                 >
                   <Contact size={17} strokeWidth={1.75} />
                   <span>주소록</span>
+                </button>
+                {/* ★ 2026-11-05 C107 D-05(접수 T5) — 타겟추출(고객 DB 조건 · 문자 직접발송과 같은 창 · 같은 잠금) */}
+                <button
+                  type="button"
+                  className={`ds-rtab ${inputMode === 'target' ? 'ds-rtab--on' : ''}`}
+                  onClick={() => {
+                    if (targetExtractLocked) { onTargetExtractLocked?.(); return; }
+                    importSeqRef.current++;
+                    setTargetLoading(false);
+                    setShowTargetExtract(true);
+                  }}
+                >
+                  <Target size={17} strokeWidth={1.75} />
+                  <span>{targetLoading ? '불러오는 중' : '타겟추출'}</span>
+                  {targetExtractLocked && <LockIcon size={12} strokeWidth={2.2} className="text-slate-300" />}
                 </button>
               </div>
               <div className="ds-filter-row">
@@ -1116,11 +1208,11 @@ export default function AlimtalkSendModal({
                 onClose={() => setSplitOpen(false)}
               />
             </div>
-            <div className="ds-opt-anchor" ref={fallbackAnchorRef}>
+            <div className="ds-opt-anchor">
               <button
                 type="button"
                 className={`ds-tile ds-tile--opt ${fallbackIssue ? 'ds-tile--opt-amber' : ''}`}
-                onClick={() => setFallbackOpen((o) => !o)}
+                onClick={() => setFallbackOpen(true)}
                 aria-haspopup="dialog"
                 aria-expanded={fallbackOpen}
               >
@@ -1131,28 +1223,6 @@ export default function AlimtalkSendModal({
                 </span>
                 <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
               </button>
-              {fallbackOpen && (
-                <div className="ks-pop" role="dialog" aria-label="알림톡이 실패하면">
-                  <div className="ks-pop__head">
-                    <b>알림톡이 실패하면</b>
-                    <button type="button" className="ks-pop__x" onClick={() => setFallbackOpen(false)} aria-label="닫기"><X size={15} strokeWidth={2} /></button>
-                  </div>
-                  {ch.selectedTemplate ? (
-                    <AlimtalkFallbackEditor
-                      value={channelState}
-                      selectedTemplate={ch.selectedTemplate}
-                      setNextType={ch.setNextType}
-                      setNextSubject={ch.setNextSubject}
-                      setNextContents={ch.setNextContents}
-                      requiresNextSubject={ch.requiresNextSubject}
-                      requiresNextContents={ch.requiresNextContents}
-                      renderPreview={ch.renderPreview}
-                    />
-                  ) : (
-                    <p className="ks-note">템플릿을 먼저 고르면 실패했을 때 보낼 문자를 정할 수 있어요.</p>
-                  )}
-                </div>
-              )}
             </div>
           </div>
           <div className="ds-modal__vdiv" />
@@ -1225,6 +1295,19 @@ export default function AlimtalkSendModal({
           onAdd: addDirectRow,
         }}
       />
+      {/* ★ 2026-11-05 C107 D-01(Harold H2) — 실패 시 문자 = 휴대폰 모양 창 */}
+      <FallbackPhoneModal
+        open={fallbackOpen}
+        heading="알림톡이 실패하면"
+        options={alimFallbackOptions}
+        value={{ type: channelState.nextType, contents: channelState.nextContents, title: channelState.nextSubject || '' }}
+        bodyText={ch.selectedTemplate?.content || ''}
+        isAd={false}
+        accent="amber"
+        onSave={(v) => { ch.setNextType(v.type as any); ch.setNextContents(v.contents); ch.setNextSubject(v.title); }}
+        onClose={() => setFallbackOpen(false)}
+      />
+
       <AddressBookModal
         show={showAddressBook}
         onClose={() => setShowAddressBook(false)}
@@ -1234,6 +1317,15 @@ export default function AlimtalkSendModal({
         // ★ 2026-10-31 주소록 불러오기 = 더하기 · 중복 규칙 = 이 창 붙여넣기와 같은 [중복제거](R31)
         dedupOnAdd={dedupEnabled}
       />
+
+      {showTargetExtract && (
+        <DirectTargetFilterModal
+          show
+          onClose={() => setShowTargetExtract(false)}
+          onExtracted={(ext, meta) => { void handleTargetExtracted(ext, meta); }}
+          hideAi={hideAi}
+        />
+      )}
 
       {/* ★ 2026-09-14 알림톡 예약 시각 선택: 직접발송과 같은 창(z-[2150]이라 이 창 위에 뜬다). 값은 이 창의 상태에만 쓴다. */}
       <ScheduleTimeModal

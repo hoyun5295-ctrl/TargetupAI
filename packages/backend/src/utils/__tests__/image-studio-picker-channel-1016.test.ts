@@ -161,8 +161,9 @@ describe('4. 고르기 부품 · 첫 장 자동 선택', () => {
     expect(modal).toContain('if (!open || !freshRef.current) return;');
     const insert = modal.slice(modal.indexOf('const insert = async'), modal.indexOf('const remake'));
     // 넣기 성공(onInserted) 뒤에만 다음 열기를 처음 상태로 표시한다 · 실패 분기에서는 표시하지 않는다
-    expect(insert.indexOf('freshRef.current = true;')).toBeGreaterThan(insert.indexOf('onInserted(r.asset.url);'));
-    expect(insert.slice(0, insert.indexOf('onInserted(r.asset.url);'))).not.toContain('freshRef.current = true');
+    // ★ 2026-11-05 인앱 포스터 재구성 §3-8 — 넣기 = 그림 주소 + 그림에 그린 글(DM 호출부는 둘째 인자를 쓰지 않는다)
+    expect(insert.indexOf('freshRef.current = true;')).toBeGreaterThan(insert.indexOf('onInserted(r.asset.url, made.texts);'));
+    expect(insert.slice(0, insert.indexOf('onInserted(r.asset.url, made.texts);'))).not.toContain('freshRef.current = true');
     expect(modal.match(/freshRef\.current = true/g)?.length).toBe(1);
   });
   it('업종 자동 진입은 창 전용 · 업종 카테고리가 하나일 때만', () => {

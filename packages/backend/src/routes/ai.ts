@@ -184,6 +184,7 @@ import { singleFlight } from '../utils/inflight-lock';
 
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 // ★ D79: 인라인 래퍼 제거 → CT-01 buildFilterWhereClauseCompat 직접 사용
 
 const router = Router();
@@ -1593,8 +1594,8 @@ router.get('/operator/performance/campaigns', async (req: Request, res: Response
       ? (periodParam as PerformancePeriod)
       : '30d';
     const days = { '7d': 7, '14d': 14, '30d': 30, '90d': 90 }[periodValid];
-    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-    const limit = Math.max(1, Math.min(50, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 50 }).limit;
     const search = String(req.query.search || '').trim();
     const filterChannel = String(req.query.filterChannel || 'all').toLowerCase();
     const filterAd = String(req.query.filterAd || 'all').toLowerCase();
@@ -1698,7 +1699,7 @@ router.get('/operator/performance/cohort', async (req: Request, res: Response) =
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (await aiZonePlanBlocked(req, res, planCtx)) return;
-    const months = Math.max(1, Math.min(24, parseInt(String(req.query.months || '12'), 10) || 12));
+    const months = parseQueryInt(req.query.months, { fallback: 12, min: 1, max: 24, clamp: true });
     const result = await buildCohortRetention(companyId, months);
     return res.json({ success: true, cohort: result });
   } catch (err: any) {
@@ -1717,7 +1718,7 @@ router.get('/operator/performance/attribution', async (req: Request, res: Respon
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (await aiZonePlanBlocked(req, res, planCtx)) return;
-    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const days = parseQueryInt(req.query.days, { fallback: 30, min: 7, max: 90, clamp: true });
     const result = await buildCampaignAttribution(companyId, days);
     return res.json({ success: true, attribution: result });
   } catch (err: any) {
@@ -1737,7 +1738,7 @@ router.get('/operator/performance/customer-axis', async (req: Request, res: Resp
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (await aiZonePlanBlocked(req, res, planCtx)) return;
-    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const days = parseQueryInt(req.query.days, { fallback: 30, min: 7, max: 90, clamp: true });
     const [gradePerformance, recipientAttribution] = await Promise.all([
       buildGradePerformance(companyId, days),
       buildRecipientAttribution(companyId, days),
@@ -1758,7 +1759,7 @@ router.get('/operator/performance/automarketing-roi', async (req: Request, res: 
     const planCtx = await loadPlanContext(companyId);
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (await aiZonePlanBlocked(req, res, planCtx)) return;
-    const days = Math.max(7, Math.min(90, parseInt(String(req.query.days || '30'), 10) || 30));
+    const days = parseQueryInt(req.query.days, { fallback: 30, min: 7, max: 90, clamp: true });
     const { buildAutoMarketingRoi } = await import('../utils/automarketing-roi');
     const roi = await buildAutoMarketingRoi(companyId, days);
     return res.json({ success: true, roi });
@@ -2414,7 +2415,7 @@ router.get('/operator/proposals', async (req: Request, res: Response) => {
     const proposals = await listProposals(
       gate.companyId,
       validStatuses.includes(status) ? (status as any) : 'pending',
-      parseInt(String(req.query.limit || '50')) || 50,
+      parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP }).limit,
       // ★ 2026-07-09 노출 범위: 담당자 = 본인이 만든 operator의 제안만 · 관리자 = 회사 전체
       gate.ownOnly ? gate.userId : null,
     );
@@ -2765,7 +2766,7 @@ router.get('/operator/memory', async (req: Request, res: Response) => {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
     const memoryType = req.query.type ? (String(req.query.type) as MemoryType) : undefined;
-    const limit = Math.min(parseInt(String(req.query.limit || '100')) || 100, 500);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 100, maxLimit: 500 }).limit;
     // ★ 2026-07-12 — type 미지정 시 학습 5종 한정 (비학습 타입 혼입으로 화면 "자세히 분석" 집계가 오염되던 결함).
     //   소비처 = AiMemoryPage 1곳 실측(학습 화면 전용). 특정 타입 조회는 기존 type 파라미터 그대로.
     const memories = await listCompanyMemories(
@@ -2872,7 +2873,7 @@ router.get('/operator/batches', async (req: Request, res: Response) => {
   try {
     const companyId = req.user?.companyId;
     if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const limit = Math.min(parseInt(String(req.query.limit || '50')) || 50, 200);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 200 }).limit;
     const batches = await listBatchJobs(companyId, limit);
     return res.json({ success: true, batches });
   } catch (err: any) {
@@ -4516,7 +4517,7 @@ router.get('/operator/journeys/:id/pause-logs', async (req: Request, res: Respon
     if (!gate) return;
     const { companyId } = gate;
 
-    const limit = Number(req.query?.limit) || 50;
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP }).limit;
     const logs = await getPauseLogs(companyId, req.params.id, limit);
     return res.json({ success: true, logs });
   } catch (err: any) {
@@ -4597,8 +4598,8 @@ router.get('/operator/journeys/:id/executions', async (req: Request, res: Respon
     const { companyId } = gate;
 
     // ★ D210+ Phase 3 (2026-05-23 Harold 명시): page + search + filter + sort 영역 강화
-    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-    const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 200 }).limit;
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
     const validStatuses = ['all', 'active', 'completed', 'paused', 'ended', 'failed', 'goal_met'];  // ★ 2026-07-10 목표 달성 종료
@@ -4760,8 +4761,8 @@ router.get('/operator/predictive/customers', async (req: Request, res: Response)
     if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
     if (await aiZonePlanBlocked(req, res, planCtx)) return;
 
-    const page = Math.max(1, parseInt(String(req.query.page || '1'), 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || '10'), 10) || 10));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 100 }).limit;
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
 
     const validFilters: PredictionFilterType[] = ['all', 'high_risk', 'high_potential', 'high_click', 'high_ltv', 'first_purchase', 'repurchase', 'cold_start'];

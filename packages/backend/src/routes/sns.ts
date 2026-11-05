@@ -54,6 +54,7 @@ import { readSnsTagSet, patchSnsTagSet, snsTagSeeds, SnsTagSetError } from '../u
 import { checkSnsSpelling } from '../utils/sns-spell-check';
 import { composeSnsPost, rescheduleSnsPost } from '../utils/sns-compose';
 import { restoreUploadFileName } from '../utils/mms-image-fit';
+import { parseQueryInt, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 export const snsPublicRouter = Router();
@@ -826,10 +827,10 @@ router.post('/targets/:id/retry', async (req: Request, res: Response) => {
  */
 router.get('/posts', async (req: Request, res: Response) => {
   const companyId = (req as any).user?.companyId as string;
-  const page = Number.parseInt(String(req.query.page ?? '1'), 10);
+  const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
   try {
     const ownerId = resolveOwnerScope(req);   // ★ 2026-10-26 S3
-    const view = await listSnsPostsView(companyId, Date.now(), Number.isFinite(page) ? page : 1, ownerId);
+    const view = await listSnsPostsView(companyId, Date.now(), page, ownerId);
     const accounts = await listSnsAccounts(companyId, ownerId);
     const attention = await listSnsAttention(companyId, accounts, Date.now(), ownerId);
     return res.json({

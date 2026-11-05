@@ -11,6 +11,7 @@ import { insertAddressBookContacts, type AddressBookRow } from '../utils/address
 // ★ 2026-09-14 박성용 접수(주소록 번호 앞 0 생략): 업로드 파서가 CSV·엑셀의 앞 0을 숫자로 떨어뜨린다.
 //   저장·추가·조회·다운로드 네 곳이 같은 복원 규칙(휴대폰 10자리만 0 붙임)을 쓴다. 옛 저장분은 DB를 고치지 않고 읽을 때 붙인다.
 import { normalizeAgencyPhone as normalizeBookPhone } from '../utils/normalize-phone';
+import { parsePageParams } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -69,7 +70,7 @@ router.get('/:groupName', async (req: Request, res: Response) => {
 
     // ★ 2026-09-28 한줄로 V2 R060 — 미리보기(조회) = 서버 검색 + 상위 N건 + 전체 건수(limit 이 있을 때).
     //   옛: 조회도 그룹 전체(최대 10만)를 받아 화면이 10건만 보여 줬다. 불러오기(발송 목록 채우기)는 전부 필요해 limit 없이 그대로다.
-    const previewLimit = req.query.limit !== undefined ? Math.min(Math.max(parseInt(String(req.query.limit), 10) || 10, 1), 100) : null;
+    const previewLimit = req.query.limit !== undefined ? parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 100 }).limit : null;
     if (previewLimit !== null) {
       const q = String(req.query.q || '').trim().slice(0, 50);
       let searchSql = '';

@@ -67,12 +67,15 @@ const BRAND_SMSQ_CODE = BILLING_TYPES.find((t) => t.key === 'BRAND')?.smsqCode |
  *   두 모양 모두(비토 K행 7830·7831 · 옛 S/L + k_oriseq) → 유형 SMS_FB·LMS_FB(단가·무료는 문자 상속 · 에이전트 KS·KL 과 같은 유형).
  *   판정·조각 소유 = sms-result-map(fallbackOf · FALLBACK_BILLING_CODE_WHEN_SQL). 테스트 라인 상세축도 이 식을 쓴다(아래 testSmsAggByUserDateType).
  */
+// ★ 2026-11-05 C107(접수 T3 · 뿌리 R1) 대체 갈래를 브랜드 갈래보다 **먼저** 둔다. 옛 순서(F 먼저)는 F 행의 대체 성공(7830 · 7831)을
+//   브랜드 단가(BRAND · BRAND_NF)로 굳혀 「브랜드 실패 → 문자 대체」가 정산서에 브랜드메시지로 청구됐다(무주덕유산리조트 11/02 실측).
+//   CASE 는 첫 참 WHEN 에서 멈추므로 순서가 곧 판정이다(계약 시험 c107 K1 ③).
 export const BILLING_MSG_TYPE_SQL =
-  `CASE WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
+  `CASE ${FALLBACK_BILLING_CODE_WHEN_SQL} WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
   + `(CASE WHEN JSON_VALID(k_etc_json) = 1 THEN `
   + `(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(k_etc_json, '$.TARGETING')) IN (${BRAND_FRIEND_TARGETINGS.map((t) => `'${t}'`).join(', ')}) `
   + `THEN '${BRAND_SMSQ_CODE}' ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) `
-  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ${FALLBACK_BILLING_CODE_WHEN_SQL} ELSE msg_type END`;
+  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ELSE msg_type END`;
 
 export interface UsageDayCounts { total: number; success: number; fail: number; pending: number }
 /** 일자(YYYY-MM-DD) → 유형키 → 카운트 */

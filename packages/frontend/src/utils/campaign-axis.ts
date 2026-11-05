@@ -68,6 +68,8 @@ export interface CampaignAxisRow {
   send_channel?: string | null;
   message_type?: string | null;
   send_type?: string | null;
+  /** ★ 2026-11-05 C107 브랜드 대상값(I · M · N) — 이름의 친구 · 비친구 판정 */
+  kakao_targeting?: string | null;
 }
 
 const channelOf = (c: CampaignAxisRow | null | undefined): string =>
@@ -93,6 +95,12 @@ export function isBrandOnlyChannel(c: CampaignAxisRow | null | undefined): boole
  */
 export const BRAND_FRIEND_TARGETINGS = ['I', 'F'] as const;
 
+/**
+ * ★ 2026-11-05 C107 D-11 — 브랜드 대상 이름 = 청구 유형 이름(백엔드 billing-types BRAND · BRAND_NF 의 label 미러 · 일치 = brand-axis-invariants.test.ts).
+ *   발송결과 채널 칩 · 목록이 정산서와 같은 글자를 쓴다.
+ */
+export const BRAND_AUDIENCE_LABELS = { friend: '브랜드메시지(친구)', nonfriend: '브랜드메시지(비친구)' } as const;
+
 export function isBrandFriendTargeting(targeting: string | null | undefined): boolean {
   const t = String(targeting ?? '').trim().toUpperCase();
   return (BRAND_FRIEND_TARGETINGS as readonly string[]).includes(t);
@@ -114,7 +122,8 @@ export function isKakaoFamilyChannel(c: CampaignAxisRow | null | undefined): boo
  */
 export function resolveChannelLabel(c: CampaignAxisRow | null | undefined): string {
   if (isAlimtalkChannel(c)) return '알림톡';
-  if (isBrandOnlyChannel(c)) return '브랜드메시지';
+  // ★ 2026-11-05 C107 D-11 — 캠페인 한 건 = 대상값으로 친구 · 비친구(빈 값 = 비친구 · 청구와 같은 판정)
+  if (isBrandOnlyChannel(c)) return isBrandFriendTargeting(c?.kakao_targeting) ? BRAND_AUDIENCE_LABELS.friend : BRAND_AUDIENCE_LABELS.nonfriend;
   if (isBothChannel(c)) return '문자+브랜드메시지';
   const t = String(c?.message_type || '').trim();
   return MSG_TYPE_LABEL[t] || t || 'SMS';

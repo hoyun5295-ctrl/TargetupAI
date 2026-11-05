@@ -5,7 +5,7 @@
  * CRUD + 단축URL 발행 + 열람 추적 + 통계 집계.
  */
 import crypto from 'crypto';
-import { query, withTransaction } from '../../config/database';
+import { query, withTransaction, type TxRun } from '../../config/database';
 import { normalizeDmShortCode } from './dm-code';
 // ★ 2026-09-15 카탈로그 DM 판정(settings.catalog) — 목록 카드 뱃지 · 판정 한 곳(뷰어와 같은 함수)
 import { isCatalogEnabled } from './dm-viewer-catalog';
@@ -675,9 +675,10 @@ export async function getDmDetail(id: string, companyId: string) {
   return result.rows[0] || null;
 }
 
-export async function getDmByCode(code: string) {
+export async function getDmByCode(code: string, run: TxRun = query) {
   // ★ 2026-06-22: 공개 URL이 dm-{short_code} 형식이라 선두 "dm-" 제거 후 조회 (저장 short_code는 접두사 없음).
-  const result = await query(
+  // ★ 2026-11-05 인앱 DM 연결 판정 — run = 부르는 쪽 트랜잭션 연결(없으면 지금처럼 풀 · 뿌리 R41)
+  const result = await run(
     `SELECT * FROM dm_pages WHERE short_code = $1 AND status = 'published'`,
     [normalizeDmShortCode(code)]
   );

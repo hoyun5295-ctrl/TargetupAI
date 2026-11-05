@@ -2298,7 +2298,7 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
   const abByStep = await loadVariantRowsByStep(steps.rows.filter((s: any) => s.step_type === 'message').map((s: any) => String(s.id)));
   const stepsWithLabels = steps.rows.map((s: any, i: number) => ({
     ...s,
-    ab_variants: (abByStep.get(String(s.id)) || []).map((v) => ({ variant_id: v.variant_id, message_template: v.message_template, subject: v.subject })),
+    ab_variants: (abByStep.get(String(s.id)) || []).map((v) => ({ id: v.id, variant_id: v.variant_id, message_template: v.message_template, subject: v.subject })),   // ★ C105 H5 행 id = 판마다 스팸 검사
     timingLabel: formatStepTiming({ delayMode: s.delay_mode, delayHours: s.delay_hours, targetHourKst: s.target_hour_kst }, i === 0),
     conditionLabel: s.step_type === 'condition' ? formatConditionChip(s.condition_jsonb) : null,
   }));

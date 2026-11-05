@@ -135,6 +135,16 @@ describe('calcAlimtalkUnitDiff — 결과별 단가 차액 (2026-09-26)', () => 
     expect(calcAlimtalkUnitDiff({ deductUnit: 27.5, units, mix: mix({}) })).toBe(0);
   });
 
+  it('★1105 C107 브랜드 LMS 대체 — 차감 = max(브랜드 21 · LMS 23.6) · 브랜드 성공 5 = 5 × 2.6 · LMS 대체 2 = 0', () => {
+    const brand = { KAKAO: 21, SMS: 23.6, LMS: 23.6 };   // 고르지 않은 SMS 칸 = 차감 단가(그 결과 차액 0)
+    expect(calcAlimtalkUnitDiff({ deductUnit: 23.6, units: brand, mix: mix({ kakao: 5, lms: 2 }) })).toBe(13);
+  });
+
+  it('★1105 C107 브랜드 SMS 대체 — 차감 = 브랜드 21(SMS 8.18 보다 비쌈) · SMS 대체 성공 3 = 3 × 12.82 · 브랜드 성공 = 0', () => {
+    const brand = { KAKAO: 21, SMS: 8.18, LMS: 21 };
+    expect(calcAlimtalkUnitDiff({ deductUnit: 21, units: brand, mix: mix({ kakao: 4, sms: 3 }) })).toBe(38.46);
+  });
+
   it('소수 단가는 원 단위 둘째 자리로 맞춘다', () => {
     expect(calcAlimtalkUnitDiff({ deductUnit: 25.08, units: { KAKAO: 7.92, SMS: 9.9, LMS: 25.08 }, mix: mix({ kakao: 3 }) })).toBe(51.48);
   });

@@ -7,6 +7,7 @@
 import { Request, Response, Router } from 'express';
 import { authenticate, requireSuperAdmin } from '../middlewares/auth';
 import { fetchAdminRole, canRead, canWrite } from '../utils/admin-role';
+import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import {
   OpsRecordError, validateOpsRecord, loadOpsActor, createOpsRecord, confirmOpsRecord, listOpsRecords,
   buildHanjulLogReviewSummary, currentKstMonth, voidOpsRecords,
@@ -47,7 +48,7 @@ router.get('/', async (req: Request, res: Response) => {
     const records = await listOpsRecords({
       kind: typeof req.query.kind === 'string' ? req.query.kind : null,
       system: typeof req.query.system === 'string' ? req.query.system : null,
-      limit: Number(req.query.limit) || 100,
+      limit: parsePageParams(undefined, req.query.limit, { defaultLimit: 100, maxLimit: QUERY_LIMIT_NO_CAP }).limit,
       includeVoided: req.query.includeVoided === '1',
     });
     return res.json({ records });

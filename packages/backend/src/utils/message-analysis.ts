@@ -34,7 +34,7 @@ function msgLabel(rawType: string): string {
 }
 
 const SMS_MAX_BYTES = 90; // SMS 단문 통신 규격
-const LMS_MAX_BYTES = 2000; // LMS 통신 규격
+import { LMS_MAX_BYTES } from './message-byte';   // ★ 2026-11-05 C107 LMS 상한 = message-byte CT 한 곳
 
 /** message_type 유형별 발송/성공률 + 주입 단가 기반 추정 비용. 발송량 내림차순 정렬. */
 export function computeMessageTypePerformance(

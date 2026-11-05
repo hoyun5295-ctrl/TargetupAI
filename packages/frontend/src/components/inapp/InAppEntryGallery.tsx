@@ -9,7 +9,9 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { ArrowLeft, Globe, Smartphone, Sparkles, Layers, Lock } from 'lucide-react';
 import { InAppMessagePreview, AppInAppPreview } from '../InAppMessagePreview';
 import { PosterSheetPreview, type PosterLayout } from './PosterSheetPreview';
-import { LAYOUT_INFO, layoutsFor, layoutStyle, APP_SHEET_LAYOUTS_UNLOCKED, type LayoutKey } from './inappSlides';
+import { LAYOUT_INFO, layoutsFor, layoutStyle, appCapsNoteForKey, designForKey, type LayoutKey } from './inappSlides';
+import { PosterFramePreview } from './PosterFramePreview';
+import InAppExampleGallery, { type InAppExampleItem } from './InAppExampleGallery';
 import { INAPP_STARTERS, blankSeedFor, type InAppStarter } from './inappStarters';
 import type { GoldenInAppTemplate } from './goldenTemplates';
 import { MK_HEADER, MK_BACK, MK_HEAD_SEG, MK_HEAD_SEG_OFF, MK_HEAD_SEG_ON } from '../../utils/make-ui';
@@ -19,6 +21,8 @@ const SAMPLE_IMG = {
   coffee: svg(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 300'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#efe6d6'/><stop offset='1' stop-color='#d9ccb6'/></linearGradient></defs><rect width='400' height='300' fill='url(#g)'/><ellipse cx='150' cy='250' rx='120' ry='18' fill='#c9b99c'/><path d='M60 150 Q150 110 240 150 L230 185 Q150 210 70 185Z' fill='#c98d44'/><rect x='70' y='176' width='160' height='20' rx='10' fill='#e9d3a8'/><path d='M60 196 Q150 170 240 196 L232 226 Q150 246 68 226Z' fill='#d59a4f'/><rect x='262' y='70' width='92' height='180' rx='10' fill='#4a2614'/></svg>`),
   cake: svg(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 500'><rect width='400' height='500' fill='#f3e8ff'/><circle cx='330' cy='90' r='60' fill='#ddd6fe'/><rect x='90' y='250' width='220' height='130' rx='14' fill='#fbcfe8'/><rect x='90' y='250' width='220' height='34' rx='14' fill='#fff'/><rect x='118' y='190' width='164' height='70' rx='12' fill='#f9a8d4'/><circle cx='200' cy='170' r='18' fill='#e11d48'/></svg>`),
   bundle: svg(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 300'><rect x='40' y='60' width='70' height='210' rx='26' fill='#b91c1c'/><rect x='52' y='40' width='46' height='30' rx='8' fill='#7f1d1d'/><rect x='120' y='110' width='90' height='160' rx='10' fill='#65a30d'/><rect x='200' y='90' width='80' height='180' rx='10' fill='#facc15'/></svg>`),
+  // ★ 2026-11-05 통짜 표본 = 글이 그림 안에 든 3:4 포스터(화면 안 그림 · 저장되지 않는다)
+  baked: svg(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 400'><rect width='300' height='400' fill='#f3e8ff'/><circle cx='240' cy='80' r='54' fill='#ddd6fe'/><rect x='70' y='220' width='160' height='96' rx='12' fill='#fbcfe8'/><rect x='70' y='220' width='160' height='26' rx='12' fill='#fff'/><rect x='92' y='176' width='116' height='54' rx='10' fill='#f9a8d4'/><circle cx='150' cy='160' r='14' fill='#e11d48'/><text x='150' y='58' font-size='14' font-weight='700' text-anchor='middle' fill='#6d28d9' font-family='sans-serif' letter-spacing='3'>NEW</text><text x='150' y='96' font-size='28' font-weight='900' text-anchor='middle' fill='#3b0764' font-family='sans-serif'>새로 나온 케이크</text><text x='150' y='356' font-size='15' text-anchor='middle' fill='#6b21a8' font-family='sans-serif'>매일 아침 구워요</text></svg>`),
 };
 
 /** 썸네일 표본(가상 브랜드 문안 · 화면 안 그림 사진) */
@@ -30,6 +34,21 @@ function sampleFor(k: PosterLayout) {
 
 function Thumb({ k, channel }: { k: LayoutKey; channel: 'web' | 'app' }) {
   const box: CSSProperties = { position: 'relative', height: 270, borderRadius: 14, overflow: 'hidden', background: '#e2e8f0' };
+  // ★ 2026-11-05 새 틀(통짜 · 떠 있는 카드) = 실제 그리는 부품으로 그린다(2배 크기로 그려 반으로 줄인다)
+  if (k === 'baked_sheet' || k === 'baked_card' || k === 'live_card') {
+    const baked = k !== 'live_card';
+    const slides = baked
+      ? [{ image_url: SAMPLE_IMG.baked, title: '새로 나온 케이크', cta: { label: '케이크 보러 가기' } }]
+      : [{ ...layoutStyle('overlay'), eyebrow: 'NEW', title: '새로 나온 케이크', body: '부드러운 크림과 제철 과일', image_url: SAMPLE_IMG.cake, cta: { label: '케이크 보러 가기' } }];
+    return (
+      <div style={box} aria-hidden>
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,#f1f5f9,#e2e8f0)' }} />
+        <div style={{ position: 'absolute', left: 0, top: 0, width: '200%', height: 540, transform: 'scale(.5)', transformOrigin: 'top left' }}>
+          <PosterFramePreview slides={slides as any} design={designForKey(k, { dismiss_mode: 'snooze_day' })} accentColor="#6d28d9" height={540} />
+        </div>
+      </div>
+    );
+  }
   if (k === 'event_card' || k === 'banner_sheet' || k === 'overlay') {
     return (
       <div style={box} aria-hidden>
@@ -60,11 +79,13 @@ function Thumb({ k, channel }: { k: LayoutKey; channel: 'web' | 'app' }) {
   );
 }
 
-export default function InAppEntryGallery({ channel, onChannel, onPick, onClose, goldens }: {
+export default function InAppEntryGallery({ channel, onChannel, onPick, onClose, goldens, onExampleStart }: {
   channel: 'web' | 'app';
   onChannel: (c: 'web' | 'app') => void;
   /** 편집기 시작 상태 */
   onPick: (seed: Record<string, any>) => void;
+  /** ★ 2026-11-05 §3-9 예시에서 시작(seed + 장마다 스튜디오 재료) */
+  onExampleStart: (seed: Record<string, any>, studio: InAppExampleItem['studio']) => void;
   onClose: () => void;
   /** 정예 템플릿(서버 컴파일 · 웹 블록 전용) — 기본 알림의 문구 스타일로 보인다 */
   goldens: Array<GoldenInAppTemplate & { difference?: string }>;
@@ -80,18 +101,19 @@ export default function InAppEntryGallery({ channel, onChannel, onPick, onClose,
   const pickStarter = (s: InAppStarter) => onPick({ ...s.seed() });
   const card = (k: LayoutKey) => {
     const L = LAYOUT_INFO[k];
-    const lock = channel === 'app' && !!L.isNew && !APP_SHEET_LAYOUTS_UNLOCKED;
+    const note = channel === 'app' ? appCapsNoteForKey(k) : null;
+    const lock = !!note;
     return (
       <button key={k} type="button" onClick={() => onPick(blankSeedFor(k))} onMouseEnter={() => setHover(k)} onMouseLeave={() => setHover(null)}
         className={`text-left rounded-2xl border p-3 transition-colors ${hover === k ? 'border-violet-300 bg-slate-100' : 'border-slate-200 bg-white'}`}>
         <div className="flex gap-1.5 mb-2 min-h-[22px]">
           {L.kind === 'big' && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-900">좌우 슬라이드</span>}
           {L.isNew && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-900">NEW</span>}
-          {lock && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 inline-flex items-center gap-1"><Lock className="w-2.5 h-2.5" />앱 업데이트 필요</span>}
+          {lock && note && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 inline-flex items-center gap-1"><Lock className="w-2.5 h-2.5" />{note.text}</span>}
         </div>
         <Thumb k={k} channel={channel} />
         <b className="block text-[14px] text-slate-900 mt-2.5">{L.name}</b>
-        <span className="block text-[12px] text-slate-500 mt-0.5 leading-snug">{L.desc}{lock ? ' · 앱 업데이트 전에는 포스터 모양으로 보입니다' : ''}</span>
+        <span className="block text-[12px] text-slate-500 mt-0.5 leading-snug">{L.desc}</span>
       </button>
     );
   };
@@ -121,6 +143,7 @@ export default function InAppEntryGallery({ channel, onChannel, onPick, onClose,
       </header>
 
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-6 space-y-8">
+        <InAppExampleGallery onStart={onExampleStart} />
         <section>
           <div className="flex items-baseline gap-2 mb-3 flex-wrap">
             <h2 className="text-[15px] font-bold inline-flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-fuchsia-700" />용도로 바로 시작</h2>
@@ -128,12 +151,12 @@ export default function InAppEntryGallery({ channel, onChannel, onPick, onClose,
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
             {starters.map((s) => {
-              const lock = channel === 'app' && !!LAYOUT_INFO[s.layout].isNew && !APP_SHEET_LAYOUTS_UNLOCKED;
+              const sNote = channel === 'app' ? appCapsNoteForKey(s.layout) : null;
               return (
                 <button key={s.id} type="button" onClick={() => pickStarter(s)}
                   className="text-left rounded-2xl border border-slate-200 bg-gradient-to-br from-violet-50 to-fuchsia-50 hover:border-violet-300 p-3.5 transition-colors">
                   <b className="block text-[13.5px] text-slate-900">{s.title}</b>
-                  <span className="block text-[11.5px] text-slate-500 mt-1">{s.desc}{lock ? ' · 앱 업데이트 필요' : ''}</span>
+                  <span className="block text-[11.5px] text-slate-500 mt-1">{s.desc}{sNote ? ` · ${sNote.text}` : ''}</span>
                   <i className="not-italic block text-[11.5px] text-violet-800 mt-2.5">누르면 완성본 →</i>
                 </button>
               );

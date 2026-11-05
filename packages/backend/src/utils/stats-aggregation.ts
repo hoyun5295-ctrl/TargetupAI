@@ -13,7 +13,8 @@ import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubs
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
 import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, SMS_SUB_ROW_SQL, tallyAlimtalkFallback, type AlimtalkFallbackCount } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, SMS_SUB_ROW_SQL, tallyKakaoFallback, type KakaoFallbackCount } from './sms-result-map';
+import { isKakaoSplitChannel } from './billing-types';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
 import { expandMonthlyRange } from './stats-period';
 import { resolveChargeUnitPrice } from './unit-price';
@@ -380,35 +381,35 @@ export async function aggregateSmsCountsByCampaign(
 }
 
 /**
- * ★ 2026-10-07 알림톡 캠페인 = 알림톡 시도와 대체 문자를 따로(tallyAlimtalkFallback).
+ * ★ 2026-10-07 알림톡 캠페인 = 알림톡 시도와 대체 문자를 따로(tallyKakaoFallback).
  * ★ 2026-10-16 슈퍼관리자 통계 엑셀도 이 함수 하나를 쓴다(옛 엑셀 전용 aggregateSmsChannelSplitByCampaign 삭제 · B-1016-1).
  *   같은 조회에 세는 규칙이 두 벌이라 엑셀은 비토 라인 대체 행을 「알림톡 0」으로 셌다(서수란 접수 · 같은 부류 세 번째).
- *   ⛔ 엑셀은 이 함수를 직접 부른다 — 목록용 loadAlimtalkFallbackForList(4초 상한 · 넘으면 빈 결과)를 쓰면 알림톡 행이 조용히 0이 된다.
+ *   ⛔ 엑셀은 이 함수를 직접 부른다 — 목록용 loadKakaoFallbackForList(4초 상한 · 넘으면 빈 결과)를 쓰면 알림톡 행이 조용히 0이 된다.
  */
-export async function aggregateAlimtalkFallbackByCampaign(
+export async function aggregateKakaoFallbackByCampaign(
   campaigns: CampaignTableMeta[]
-): Promise<Map<string, AlimtalkFallbackCount>> {
-  const result = new Map<string, AlimtalkFallbackCount>();
-  for (const [cid, rows] of await fetchSmsChannelRawByCampaign(campaigns)) result.set(cid, tallyAlimtalkFallback(rows));
+): Promise<Map<string, KakaoFallbackCount>> {
+  const result = new Map<string, KakaoFallbackCount>();
+  for (const [cid, rows] of await fetchSmsChannelRawByCampaign(campaigns)) result.set(cid, tallyKakaoFallback(rows));
   return result;
 }
 
 const ALIMTALK_SPLIT_LIST_TIMEOUT_MS = 4000;
 
 /**
- * 목록 라우트용 — 알림톡 캠페인(send_channel='alimtalk')만 골라 집계한다. 조회가 실패해도 목록은 그대로(빈 Map · 화면은 옛 표시).
+ * 목록 라우트용 — 알림톡 · 브랜드 전용 캠페인(isKakaoSplitChannel · ★2026-11-05 C107)만 골라 집계한다. 조회가 실패해도 목록은 그대로(빈 Map · 화면은 옛 표시).
  */
-export async function loadAlimtalkFallbackForList(rows: Array<CampaignTableMeta & { send_channel?: string | null }>): Promise<Map<string, AlimtalkFallbackCount>> {
-  const targets = rows.filter((c) => c.send_channel === 'alimtalk');
+export async function loadKakaoFallbackForList(rows: Array<CampaignTableMeta & { send_channel?: string | null }>): Promise<Map<string, KakaoFallbackCount>> {
+  const targets = rows.filter((c) => isKakaoSplitChannel(c.send_channel));
   if (targets.length === 0) return new Map();
   // ★ 2026-10-07 Codex 1R medium — 목록 응답을 붙잡지 않는다: 상한(4초) 넘으면 이번 응답은 분리 없이(화면 = 옛 표시)
   try {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const capped = new Promise<Map<string, AlimtalkFallbackCount>>((resolve) => {
+    const capped = new Promise<Map<string, KakaoFallbackCount>>((resolve) => {
       timer = setTimeout(() => { console.warn('[stats] 알림톡 대체 집계 시간 상한 초과 — 이번 목록은 합계만'); resolve(new Map()); }, ALIMTALK_SPLIT_LIST_TIMEOUT_MS);
     });
     try {
-      return await Promise.race([aggregateAlimtalkFallbackByCampaign(targets), capped]);
+      return await Promise.race([aggregateKakaoFallbackByCampaign(targets), capped]);
     } finally {
       if (timer) clearTimeout(timer);
     }

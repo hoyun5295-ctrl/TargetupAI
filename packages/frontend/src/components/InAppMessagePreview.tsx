@@ -13,6 +13,9 @@ import {
 } from './inapp/blockTheme';
 import { BlockPreview } from './inapp/BlockPreview';
 import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPreview';
+// ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 새 틀(통짜 · 떠 있는 카드 · 띠) = 그리는 부품(몰 화면과 같은 DOM) · 공용 미리보기 소비처 전부가 같은 갈래
+import { PosterFramePreview } from './inapp/PosterFramePreview';
+import { usesPosterFrame } from './inapp/generated/poster-frame';
 
 // ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
 //   SDK ZONE_PADS 미러 (미리보기 축소 스케일에 맞춰 비례 축소).
@@ -53,6 +56,8 @@ export interface InAppMessagePreviewProps {
   /** ★ 2026-07-22 테스트저장(영업용 이미지 캡처) — true면 토글/캡션 등 UI 크롬을 숨기고 배경 웹을 블러 처리.
    *  팝업 렌더 자체는 미변경(실렌더 미러 유지). 미지정=undefined면 기존 편집기 미리보기와 완전 동일. */
   captureMode?: boolean;
+  /** ★ 2026-11-05 남은 시간 띠의 마감(게시 끝 시각) */
+  endAt?: string | null;
 }
 
 /** 미리보기는 관리자 화면 = 백엔드와 같은 도메인. 상대경로(/api/..., /uploads/...)를 그대로 둬 현재 origin으로 로드한다.
@@ -267,6 +272,18 @@ function Overlay({ variant, themeTokens, treatment, device, ...rest }: { variant
   // ★ 2026-07-18 포스터형 v2 (SDK renderPoster 1:1 미러): 가로 꽉 찬 하단 시트(상단 모서리만 라운드) +
   //   본문 무클램프 + 서체(design.font_display)·오버레이 글자색(design.poster_text_color) 소비
   if (variant === 'poster') {
+    // ★ 2026-11-05 새 틀 = 그리는 부품(장이 없으면 flat 에서 첫 장 · SDK 와 같은 규칙)
+    if (usesPosterFrame(rest.design)) {
+      const b0 = (rest.buttons || [])[0];
+      const frameSlides = Array.isArray(rest.posterSlides) && rest.posterSlides.length > 0
+        ? rest.posterSlides
+        : [{ image_url: rest.imageUrl || '', title: rest.title, body: rest.body, eyebrow: rest.badge, cta: b0 ? { label: b0.label, background_color: b0.background_color, text_color: b0.text_color } : null }];
+      return (
+        <div style={{ position: 'absolute', inset: 0 }}>
+          <PosterFramePreview slides={frameSlides} design={rest.design} accentColor={rest.accentColor} badge={rest.badge} endAt={rest.endAt} replaceVars={rest.replaceVars} />
+        </div>
+      );
+    }
     // ★ 2026-09-29 인앱 만들기 개편 — 새 레이아웃은 1장이어도 레이아웃 미리보기(SDK renderPosterSheet 미러 · 장이 없으면 flat 으로 첫 장)
     const sheetLayout = resolvePosterLayout(rest.design);
     if (sheetLayout !== 'overlay') {
@@ -518,6 +535,9 @@ export interface AppInAppPreviewProps {
   captureMode?: boolean;
   /** ★ 2026-09-29 「구버전 앱 모습」 — 새 레이아웃 · 하루 보지 않기를 모르는 앱 빌드가 그리는 모양(지금 포스터 · 다시 보지 않기) */
   legacyApp?: boolean;
+  /** ★ 2026-11-05 새 틀 — 띠 · 버튼 강조색 · 남은 시간 마감 */
+  accentColor?: string | null;
+  endAt?: string | null;
 }
 
 /** 더미 앱 화면 — 인앱이 뜨는 맥락 (라이트 앱 리스트) */
@@ -544,7 +564,7 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars, captureMode, legacyApp }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars, captureMode, legacyApp, accentColor, endAt }: AppInAppPreviewProps) {
   // ★ 2026-07-18 포스터형 v2 — 선택 서체 실로딩 (웹 미리보기 useEffect와 동일 가드)
   const appFontsUrl = inappGoogleFontsUrl(design?.font_display, undefined);
   useEffect(() => {
@@ -561,6 +581,8 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
   const isPoster = template === 'full_image';
   // ★ 2026-09-29 새 레이아웃 · 닫기 방식 — 계약을 구현한 앱 빌드 기준. 구버전 앱 모습이면 지금 포스터 · 다시 보지 않기.
   const sheetLayout = legacyApp ? 'overlay' : resolvePosterLayout(design);
+  // ★ 2026-11-05 새 틀(통짜 · 떠 있는 카드 · 띠) = 그리는 부품 · 구버전 앱 모습은 지금 포스터 갈래
+  const frameApp = isPoster && !legacyApp && usesPosterFrame(design);
   const appOptOut = !legacyApp && String(design?.dismiss_mode || '') === 'snooze_day' ? '오늘 하루 보지 않기' : '다시 보지 않기';
   const img = imageUrl || undefined;
   // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
@@ -662,8 +684,15 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
           {/* 앱 화면 + 백드롭 + 시트/모달/포스터 */}
           <div style={{ position: 'relative', height: 580, overflow: 'hidden' }}>
             <DummyAppScreen />
-            <div style={{ position: 'absolute', inset: 0, background: 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
-              {isPoster && sheetLayout !== 'overlay'
+            {frameApp && (
+              <div style={{ position: 'absolute', inset: 0, zIndex: 2 }}>
+                <PosterFramePreview
+                  slides={Array.isArray(posterSlides) && posterSlides.length > 0 ? posterSlides : [{ image_url: imageUrl || '', title, body, eyebrow: badge, cta: (buttons || [])[0] ? { label: (buttons || [])[0].label, background_color: (buttons || [])[0].background_color, text_color: (buttons || [])[0].text_color } : null }]}
+                  design={design} accentColor={accentColor} badge={badge} endAt={endAt} replaceVars={replaceVars} height={580} />
+              </div>
+            )}
+            <div style={{ position: 'absolute', inset: 0, background: frameApp ? 'transparent' : 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
+              {frameApp ? null : isPoster && sheetLayout !== 'overlay'
                 ? (
                   <PosterSheetPreview
                     layout={sheetLayout}

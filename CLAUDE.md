@@ -111,10 +111,8 @@
     </RULE>
 
     <RULE id="root_ledger" priority="HIGH">
-      결함 하나를 고치면 **그 뿌리를 전 기능에서 닫는다.** 뿌리 · 판정 기준 · 시험 범위 = `docs/ROOT-LEDGER.md` · 계약 시험 = `root-ledger.test.ts`(★2026-10-24 Harold 「두 번 구조체크했는데도 결함이 남아 있는 게 문제」).
-      1. 수정 전 = 이 결함이 대장의 어느 뿌리(R1~)인가 한 줄로 적는다. 새 뿌리면 대장에 줄을 올리고 계약 시험에 describe 를 더한다(대상은 소스에서 기계로 뽑는다 · 손 등재 표 금지).
-      2. 같은 뿌리를 다른 기능에서 전수 grep 하고 같은 배포에 닫는다. 면제 목록을 늘려 시험을 통과시키는 것은 수정이 아니다(늘리면 그 줄에 이유).
-      3. 구조체크 · Codex 요청문 ④에 대장 점검표(기계로 못 잡는 R1 · R6 · R8 · R12)를 넣는다.
+      **결함 하나를 고치면 그 뿌리를 전 기능에서 닫는다.** 면제 목록을 늘려 시험을 통과시키는 것은 수정이 아니다.
+      전문(뿌리 한 줄 · 새 뿌리 등재 · 같은 배포 전수 grep · 구조체크 점검표) = `docs/ROOT-LEDGER.md` 「룰 전문」 절 — 결함 수정에 들어가기 전에 연다(`defect_playbook` ③).
     </RULE>
 
     <RULE id="defect_playbook" priority="HIGHEST">
@@ -147,13 +145,8 @@
     </RULE>
 
     <RULE id="db_column_verify_before_code" priority="HIGHEST">
-      **tsc 통과 ≠ SQL 유효.** tsc는 SQL 문자열 안 컬럼명을 검증하지 못해, 없는 컬럼도 통과한 뒤 런타임에 터진다(운영 다운 사고 기원).
-      [강제 순서] ①SQL에 신규 컬럼·테이블을 추가·수정하기 **직전**, 검증 SQL을 Harold님께 먼저 제공한다 —
-      `SELECT column_name FROM information_schema.columns WHERE table_name='[테이블]' AND column_name='[컬럼]';`
-      (테이블 신규는 `information_schema.tables`) ②실제 존재를 확인받은 뒤에만 코드를 쓴다.
-      SCHEMA.md는 참조용일 뿐 — 존재 확정은 `information_schema`로만. JOIN이면 대상 테이블·컬럼·FK 컬럼 3개 모두.
-      [절대 금지] 미검증 상태로 SQL을 쓰고 "tsc 통과했으니 OK" 보고.
-      [덤프 확인 · ★1027 Harold 승인] 운영과 정의 해시가 같다고 마지막으로 대조된 덤프에 그 뒤 닫힌 DDL(배포 원장 §2)을 모두 얹은 시험 DB(`t_tpl_closed`)가 있으면 그 information_schema 조회를 ①의 확인으로 친다(조회 출력과 test:pg 보고 줄을 보고에 붙인다). 대조 기록이 없거나 다르면 원래대로. 분포 · 행 수는 언제나 Harold님 실행.
+      **tsc 통과 ≠ SQL 유효.** SQL 에 새 컬럼 · 테이블 · JOIN 을 넣기 직전 `information_schema` 검증 SQL 을 Harold님께 먼저 드리고, 존재를 확인받은 뒤에만 코드를 쓴다. 미검증으로 「tsc 통과했으니 OK」 보고 금지.
+      전문(강제 순서 · JOIN 3개 · 덤프 확인 예외) = `status/lessons/LESSONS_DB.md` 「CLAUDE.md 룰 전문」 절 — **backend SQL 을 고치기 전에 그 절을 연다**(routes · utils 수정 때 훅이 알린다).
     </RULE>
 
     <RULE id="scope_discipline_one_ticket_axis" priority="HIGH">
@@ -167,22 +160,13 @@
     </RULE>
 
     <RULE id="codex_review_after_code_change" priority="HIGH">
-      작업 종결 직전 Codex 이중 검증 의무.
-      `/codex:review` = 코드 신설·정정 후(5분+ 작업) / `/codex:adversarial-review` = DB 마이그레이션·돈·환불·balance·큰 영구 룰 / `/codex:rescue` = 디버깅 막힘·3회+ fix 실패·사이트 다운.
-      [흐름] 작성 → tsc 0 + 자가 grep → **내 적대 검토** → Codex → 정정 → 표준 종료 멘트.
-      [범위 — ★1019 Harold 개정] **모든 코드 변경 = Codex 적대 리뷰 필수.** 백엔드 · 프론트 · UI · React 상태 · DDL · 스크립트 구분 없음. 「화면만 바뀜 · 돈 경로 아님」은 면제 근거가 아니다(1019 계정 전환 수정에서 이 근거로 뺐다가 지적 · 경위 = memory `feedback_codex_every_code_change`).
-      [종료 조건 — ★1014 Harold 개정] **Codex가 지적 0(approve)으로 닫을 때까지 돌린다. 라운드 상한 없음.** 등급 무관하게 지적마다 수용·불수용을 판정하고(불수용은 근거를 다음 요청문 ⑤에 적는다) 수용분을 고친 뒤 **바로 다음 라운드**를 띄운다. 상한을 이유로 멈춰 보고하지 않는다(0926 · 1014 두 번 지적). 멈추는 경우는 둘뿐 — Codex가 멈췄을 때(런북 §3) · 같은 지적이 근거 불수용에도 세 번째 반복될 때(그때 Harold님 판단).
-      [면제] 코드가 아닌 것만 = 주석만 바꾼 것 · 메모리 · 문서(SCHEMA.md · STATUS.md · 설계서) · Harold 명시 면제. [실행 절차] `status/CODEX-RUNBOOK.md`
+      **모든 코드 변경 = 작업 종결 직전 Codex 적대 리뷰 · 지적 0(approve)까지 · 라운드 상한 없음.** 백엔드 · 프론트 · UI · DDL · 스크립트 구분 없음 · 「화면만 바뀜 · 돈 경로 아님」은 면제 근거가 아니다.
+      전문(흐름 · 리뷰 종류 · 종료 조건 · 멈추는 경우 · 면제) = `status/CODEX-RUNBOOK.md` §0-0 — **첫 Codex 요청문을 쓰기 전에 그 절을 연다**(코드 첫 수정 때 훅이 알린다).
     </RULE>
 
     <RULE id="codex_review_scope_incremental" priority="HIGH">
-      **1라운드만 변경분 전체 스캔.** 2라운드부터 리뷰 대상 = 직전 라운드에 내가 고친 줄 + 그 줄이 영향을 주는 직접 호출부. 그 밖은 대상이 아니다.
-      [2라운드 이후 4단계] ①취사 판단(수용·불수용을 내가 먼저 정하고 불수용은 근거를 남긴다 — 무조건 수용 금지)
-      ②수용분만 수정 ③그 수정이 결함을 닫았는가 확인 ④영향 지점 확인 — 단 **범위는 내가 먼저 파일·줄로 명시**하고 그 판단이 맞는지를 묻는다.
-      [금지 질문] "기존 소비처에 부작용이 있는가" / "그 값을 읽는 다른 경로에 영향이 있는가" / "앞서 지적한 N가지가 어떻게 달라졌는지 판정해달라" / "~가 완결되었는가" — 범위를 안 짚고 통째로 떠넘기는 형태.
-      [범위 밖 발견] `[범위 밖] 파일:라인 — 한 줄 요약`만 받는다. 분석·처방·즉시 착수 금지(착수 판단은 Harold님).
-      CLOSED 항목·이전 세션 종결 영역 재검증 금지.
-      **범위를 좁히는 것은 요청문의 선언이 아니라 질문 자체다.** (상세 = memory `feedback_codex_review_scope_incremental`)
+      **1라운드만 변경분 전체 · 2라운드부터 = 직전에 고친 줄 + 직접 호출부만 · 범위는 내가 파일 · 줄로 짚는다**(통째로 떠넘기는 질문 금지 · 범위 밖은 한 줄 기록만).
+      전문(4단계 · 금지 질문 · CLOSED 재검증 금지) = `status/CODEX-RUNBOOK.md` §0-0.
     </RULE>
 
     <RULE id="review_findings_fix_root_not_symptom" priority="HIGH">
@@ -194,45 +178,36 @@
     </RULE>
 
     <RULE id="design_quality_minimum_ceiling_free" priority="HIGH">
-      신규 메뉴·페이지·UI 신설·옛 페이지 전면 재작성 = **그 시점에 낼 수 있는 최선**. 기존 화면은 **하한이지 상한이 아니다** —
-      "Journey Builder 동급"에서 멈추지 않는다. 더 나은 형태가 보이면 그것을 만들고, 그때부터 그것이 새 하한이다.
-      [하한 요건 — 이건 못 내려간다] AI 존 틀(`components/zone/` · 남색 머리 띠 + 명령 카드 + 밝은 작업대) 정합 / 모바일 반응형 / 커스텀 모달(native dialog 0) /
-      출처(Data source) 줄 0(★1020 Harold 「한줄로 DB 안에서 뽑은 것 · 출처 전부 없애」) / 1클릭 UX / 모델명 0 / 5초+ 작업 로딩 차단.
-      [절대 금지] 옛 단순 form(input+select+button) / 날것 표(정렬·빈 상태 없음) / native dialog(alert·confirm·prompt). 목록·대장·정산처럼 표가 맞는 화면은 표로 만든다.
-      [라벨 3단] 정가 과금 코어=무라벨 / 갓 출시=NEW(4~6주 뒤 제거) / 품질 미보증만 "실험실".
-      [착수 직전 정독] `status/lessons/LESSONS_FRONTEND.md` "디자인 최소 기준" 절 = 하한 체크리스트(모방 대상이 아니라 통과 기준).
+      **신규 메뉴 · 페이지 · UI 신설 · 전면 재작성 = 그 시점에 낼 수 있는 최선 · 기존 화면은 하한이지 상한이 아니다.** 옛 단순 form · 날것 표 · native dialog 금지.
+      전문(하한 요건 · 절대 금지 · 라벨 3단) = `status/lessons/LESSONS_FRONTEND.md` 「디자인 최소 기준」 절 — **frontend 파일을 고치기 전에 그 절을 연다**(frontend 첫 수정 때 훅이 알린다).
     </RULE>
 
     <RULE id="marketing_user_ux_priority" priority="HIGH">
-      사용자 = 마케팅 담당자. 직관 + 압도적 쉬움 + 퀄리티를 동시에 만족해야 한다.
-      [절대 금지] "다시 입력" 요구 / 이유 없는 중간 단계 / 옛 단순 form·native dialog.
-      [허용] 돈이 나가는 일·되돌릴 수 없는 일·결과가 크게 갈리는 갈림길에서만 한 단계. 이유를 화면에 한 줄로 적는다.
-      [기준] 자동 생성 버튼·빠른 시작 카드 = **1 단계** — 클릭 즉시 AI 호출 → 완성된 결과 + 편집 모드 진입. 자유 입력은 별도 버튼으로 분리.
-      [자가 검증] 신규 frontend 흐름 작성 직전 — "클릭 1회인가? 추가 입력이 없는가? AI 자동 흐름인가?" (상세 = memory `feedback_marketing_user_ux_priority`)
+      **사용자 = 마케팅 담당자 · 「다시 입력」 · 이유 없는 중간 단계 금지 · 자동 생성 버튼 · 빠른 시작 카드 = 1 단계.**
+      전문(허용 · 기준 · 자가 검증) = `status/lessons/LESSONS_FRONTEND.md` 「디자인 최소 기준」 절.
     </RULE>
 
     <RULE id="skill_workflow_default">
-      큰 작업 진입 직전 "어떤 skill이 의무인가" 자가 질의. ★2026-10-17 superpowers 제거(Harold) → mattpocock 한줄로 적용판으로 교체.
-      버그·「안 된다」·성능 저하 = `diagnosing-bugs`(피드백 루프 먼저 · 운영 진단은 실측 먼저) / 신규 기능·버그 수정 구현 = `tdd`(설계안 동의 뒤 · seam = 설계서 「시험」 절).
-      완료 보고 직전 = 실제 검증 명령 실행 + 증거 출력(tsc · 테스트 전체 · 실측 · Codex — 별도 스킬 없이 이 규칙이 의무다).
-      [상황↔스킬 매핑] `status/COLLAB.md` §2
+      큰 작업 진입 직전 「어떤 skill 이 의무인가」 자가 질의(버그 = `diagnosing-bugs` · 구현 = `tdd`). **완료 보고 직전 = 실제 검증 명령 실행 + 증거 출력**(tsc · 테스트 전체 · 실측 · Codex).
+      전문 · 상황↔스킬 매핑 = `status/COLLAB.md` §2.
     </RULE>
 
     <RULE id="external_code_adoption_gate" priority="HIGHEST">
-      외부 스킬 · 플러그인 · MCP 서버 · 훅 · 저장소 코드를 접목(설치 · 복사 · 이식)하기 **전에** 「이 저장소 코드에 외부 전송이나 비밀값 접근이 있는가」를 코드로 확인하고 결과를 보고한다(★2026-10-18 Harold 지시 · 브레인스토밍 뒤 접목도 예외 없음).
-      1. 확인 = 네트워크 호출(fetch · http · curl · WebSocket · 원격 주소) · 비밀값 접근(.env · 토큰 · 키 · 자격 파일 · 환경변수 읽기) · 자동 실행(설치 스크립트 · postinstall · 훅) grep 결과를 증거로 첨부한다.
-      2. 있으면 = 어디로 무엇을 보내는지 · 어떤 비밀을 읽는지 표로 보고하고, Harold님 동의 전에는 접목하지 않는다. 없으면 = 「0건」과 grep 명령 · 결과.
+      **외부 스킬 · 플러그인 · MCP 서버 · 훅 · 저장소 코드를 접목하기 전에 네트워크 호출 · 비밀값 접근 · 자동 실행 grep 증거를 보고한다. 있으면 Harold님 동의 전 접목 0.**
+      전문 = `status/COLLAB.md` §4(설치 명령 때 훅이 알린다).
     </RULE>
 
     <RULE id="doc_routing" priority="HIGH">
       세션 상시 로드는 **CLAUDE.md + status/STATUS.md 둘뿐**이다. 그 외 문서는 STATUS.md 라우팅 표가 지시하는 상황에서 지시된 범위만 읽는다.
+      **호출어 · C번호 · 작업 이름이 나오면 첫 명령 = `status/STATUS-FEED.md` grep → 그 카드만 읽는다**(트랙 목록 = FEED §0 · ★1105). RULE 에 「전문 = `경로`」가 있으면 그 RULE 이 적은 시점에 그 절을 연다.
       문서 전체 로드 금지. 아카이브는 `status/archive/INDEX.md` grep 경유로만. 과거 문서와 현재 코드가 다르면 **현재 코드가 진실**이다.
     </RULE>
 
     <RULE id="doc_ownership" priority="HIGH">
-      정보 하나 = 소유 문서 하나. 타 문서에 복사 금지, 링크만. **행동 룰은 CLAUDE.md 밖으로 이동 금지(분리 = 미적용).**
+      정보 하나 = 소유 문서 하나. 타 문서에 복사 금지, 링크만. **행동 룰은 CLAUDE.md 에 RULE 로 둔다 — RULE 을 통째로 밖으로 옮기는 것 = 미적용(금지).**
+      특정 작업 때만 쓰는 룰은 RULE 에 금지 핵심 · 여는 시점 · 「전문 = `경로`」를 남기고 전문을 피더 문서에 둘 수 있다(★1105 Harold) — 그 경로에 RULE id 가 있어야 하고(harness-check) · 시점을 파일 · 명령으로 가를 수 있으면 훅(`scripts/hooks/feeder-reminder.mjs`)이 알린다.
       신규 문서 등재 — 도메인 문서는 STATUS.md 라우팅 표(15행 상한), 프로젝트·트랙 SoT는 `status/SOT-INDEX.md`. 상한 초과 시 통폐합 먼저.
-      STATUS.md 30KB 초과 = 회전 미이행 → 즉시 아카이브 회전.
+      STATUS.md 8KB 초과 · 목록 줄(`- C숫자` · `- N숫자`) 재등장 = 목록이 다시 붙은 것 → STATUS-FEED §0 으로 옮긴다.
       memory/는 세션 간 개인 기억·포인터 전용 — repo 문서 내용을 복사하지 않는다(포인터·교훈만).
       단어 검증 패턴(박-단어·모델명·떠넘기기 등) 소유 = `status/lessons/LESSONS_META.md`.
       기계 검증 = `bash scripts/harness-check.sh` (CLAUDE.md·status 문서 수정 후 실행 의무).

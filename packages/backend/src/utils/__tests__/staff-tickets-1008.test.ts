@@ -75,7 +75,12 @@ describe('직원 접수 1008', () => {
     const map = await import('../sms-result-map');
     expect(map.ABNORMAL_STATUS_MIN).toBeGreaterThan(Math.max(...map.PENDING_CODES, ...map.SUCCESS_CODES));
     const mapSrc = read('backend/src/utils/sms-result-map.ts').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').replace(/ABNORMAL_STATUS_MIN = \d+/, '');
-    expect(mapSrc.match(/(?<![\w.])\d{5,}(?![\w.])/g)).toBeNull();   // 결과 코드 표에 5자리 이상 코드가 생기면 하한을 다시 정해야 한다
+    // 결과 코드 표에 5자리 이상 코드가 생기면 하한을 다시 정해야 한다 — ★1105 C107 비토 실패 대역(20000 ~ 59999)을 들이며 다시 정함:
+    //   이 파일의 모든 5자리 이상 숫자 · 생성 대역 코드 전부 = 하한 아래(이상 상태 정리가 대역 실패 행을 건드리지 않는다)
+    const big = (mapSrc.match(/(?<![\w.])\d{5,}(?![\w.])/g) || []).map(Number);
+    expect(big.every((n) => n < map.ABNORMAL_STATUS_MIN), String(big)).toBe(true);
+    const { HANJUL_BAND_CODES } = await import('../result-code-hanjul-band.generated');
+    expect(Math.max(...Object.keys(HANJUL_BAND_CODES).map(Number))).toBeLessThan(map.ABNORMAL_STATUS_MIN);
     expect(map.ABNORMAL_STATUS_MIN).toBeLessThanOrEqual(67108964);   // 게스 사례는 잡힌다
   });
 

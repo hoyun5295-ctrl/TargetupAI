@@ -13,7 +13,7 @@ import { query } from '../config/database';
 import { activationBlockIssue } from './journey-builder';
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
 import { validateJourneyForActivation, peekStepSpam, type FailedStep, type StepSpamState } from './journey-pretest-validator';
-import { stepSendVersions, loadStepVariantRows } from './journey-step-versions';
+import { stepSendVersions, loadStepVariantRows, loadVariantRowsByStep } from './journey-step-versions';
 
 export type JourneyCheckLevel = 'before' | 'running' | 'confirming' | 'pass' | 'fix';
 export type JourneyCheckTarget = 'body' | 'subject' | 'alimtalk' | 'spam' | 'journey';
@@ -34,9 +34,10 @@ export interface JourneyCheck {
 }
 
 /** 켜기 검증의 실패 한 줄 → 점검 항목(사람 말 · 고칠 곳) */
-export function itemOfFailure(f: FailedStep, states: readonly StepSpamState[]): JourneyCheckItem {
+export function itemOfFailure(f: FailedStep, states: readonly StepSpamState[], abLabelOf?: (variantId: string) => string | null): JourneyCheckItem {
   const base = { key: `${f.reason}:${f.variantId ?? 'main'}`, variantId: f.variantId };
-  const ab = f.variantId ? ' (A/B 판)' : '';
+  // ★ 2026-11-05 C105 H5 — 어느 판인지(「(B안)」 · 행 id → variant_id) · 이름을 모르면 옛 글
+  const ab = f.variantId ? ` (${abLabelOf?.(f.variantId) ?? 'A/B 판'})` : '';
   switch (f.reason) {
     case 'placeholder_unedited':
       return { ...base, level: 'fix', title: `채울 자리가 남았어요${ab}`, detail: '[...] 자리를 직접 채우거나 그 줄을 지워 주세요.', fixTarget: 'body' };
@@ -87,10 +88,15 @@ export async function checkJourney(companyId: string, journeyId: string, userId:
 
   const states: StepSpamState[] = [];
   const v = await validateJourneyForActivation(companyId, journeyId, userId, { spam: peekStepSpam, spamStates: states });
-  for (const f of v.failedSteps) (steps[f.stepId] ??= []).push(itemOfFailure(f, states));
+  // ★ 2026-11-05 C105 H5 — 판 이름(행 id → 「A안」) = 상세 · 켜기 관문과 같은 판 행
+  const abRows = await loadVariantRowsByStep(Object.keys(steps));
+  const abName = new Map<string, string>();
+  for (const rows of abRows.values()) for (const r of rows) abName.set(r.id, `${r.variant_id}안`);
+  const abLabelOf = (id: string) => abName.get(id) ?? null;
+  for (const f of v.failedSteps) (steps[f.stepId] ??= []).push(itemOfFailure(f, states, abLabelOf));
   for (const s of states) {
     if (s.state !== 'pass' && s.state !== 'before') continue;   // 검사 중 · 확인 중 = 위 실패 줄이 이미 항목으로 만들었다
-    const ab = s.variantId ? ' (A/B 판)' : '';
+    const ab = s.variantId ? ` (${abLabelOf(s.variantId) ?? 'A/B 판'})` : '';
     (steps[s.stepId] ??= []).push(s.state === 'pass'
       ? { key: `spam:${s.variantId ?? 'main'}`, level: 'pass', title: `스팸 검사 통과${ab}`, detail: '오늘 같은 글 검사를 통과했어요.', fixTarget: null, variantId: s.variantId }
       : { key: `spam:${s.variantId ?? 'main'}`, level: 'before', title: `스팸 검사 전${ab}`, detail: '「지금 스팸 검사」를 누르거나 켤 때 검사해요.', fixTarget: null, variantId: s.variantId });

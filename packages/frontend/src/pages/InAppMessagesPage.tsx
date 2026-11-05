@@ -66,8 +66,15 @@ import { PosterStage, SlideRail, SlidePanel, LayoutSwitcher, ImageSourceMenu, us
 import { resolvePosterLayout, type PosterLayout, type SheetEditKey } from '../components/inapp/PosterSheetPreview';
 import {
   slidesFromMessage, messagePatchFromSlides, restyleSlides, duplicateSlide, publishDefectOf, layoutKeyOf, isPosterLayout,
-  MAX_SLIDES, APP_SHEET_LAYOUTS_UNLOCKED, type WsSlide, type LayoutKey,
+  MAX_SLIDES, appCapsNote, designForKey, posterLayoutOfKey, type WsSlide, type LayoutKey,
 } from '../components/inapp/inappSlides';
+// ★ 2026-11-05 인앱 포스터 재구성 — 예시에서 시작 · 스튜디오 그림 틀 고르기 · 장 AI 그리기 · DM 참여 페이지 연결
+import type { InAppExampleItem } from '../components/inapp/InAppExampleGallery';
+import InAppFramePicker from '../components/inapp/InAppFramePicker';
+import InAppDmLinkPicker from '../components/inapp/InAppDmLinkPicker';
+import StudioInsertModal from '../components/dm/build/StudioInsertModal';
+import { isExampleImage } from '../components/inapp/PosterEditor';
+import { BENEFIT_SLOT } from '../components/inapp/inappStarters';
 
 // ════════════════════════════════════════════════════════════════════
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 — Journey Builder급 12 화면 영역
@@ -144,6 +151,8 @@ interface MessageRow {
   channel?: 'web' | 'app';
   startAt?: string | null;
   endAt?: string | null;
+  /** ★ 2026-11-05 목록 응답(원본 행)의 게시 끝 시각 — 남은 시간 띠의 마감 · 편집기는 endAt 으로 보낸다 */
+  end_at?: string | null;
   stats?: { impressions: number; clicks: number; dismisses: number; ctr: number };
 }
 
@@ -425,14 +434,34 @@ export default function InAppMessagesPage() {
   }, []);
 
   // ★ 2026-07-19 P4: 이미지 스튜디오 소재 → 포스터형(full_image) 새 초안 (라이브러리 클릭 → 인앱 만들기)
+  // ★ 2026-11-05 인앱 포스터 재구성 §3-8 — 채널 웹 고정을 없애고 「틀 고르기」 판 한 장(내 그림 × 모양 · 채널) → 한 번 누르면 편집기.
+  //   글이 든 그림 = 통짜(첫 장 글 = 넘어온 글) · 제목이 비면 편집기가 제목 칸을 먼저 연다(목록 이름 · 대체 글).
+  const [studioHandoff, setStudioHandoff] = useState<{ imageUrl: string; textInImage: boolean; texts: { label?: string; title?: string; subtitle?: string } } | null>(null);
   useEffect(() => {
-    const d = takeEventDraft<{ imageUrl?: string }>(STUDIO_INAPP_DRAFT_KEY);
+    const d = takeEventDraft<{ imageUrl?: string; texts?: { label?: string; title?: string; subtitle?: string } | null; textInImage?: boolean }>(STUDIO_INAPP_DRAFT_KEY);
     if (!d?.imageUrl) return;
-    setChannel('web');
-    setEditing({ ...EMPTY_FORM, template: 'full_image', image_url: d.imageUrl, channel: 'web' });
-    toast.success('스튜디오 소재로 포스터형 인앱을 시작했어요. 문구·타겟만 다듬어주세요.');
+    setStudioHandoff({ imageUrl: d.imageUrl, textInImage: !!d.textInImage, texts: d.texts || {} });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  const startFromStudio = (k: LayoutKey, ch: 'web' | 'app') => {
+    const h = studioHandoff;
+    if (!h) return;
+    setStudioHandoff(null);
+    setChannel(ch);
+    const slide = {
+      image_url: h.imageUrl,
+      ...(h.texts.label ? { eyebrow: h.texts.label } : {}),
+      title: h.texts.title || '',
+      ...(h.texts.subtitle ? { body: h.texts.subtitle } : {}),
+    };
+    setEditing({
+      ...EMPTY_FORM, template: 'full_image', channel: ch, status: 'paused',
+      design: designForKey(k, { dismiss_mode: 'snooze_day' }),
+      poster_slides: [slide], title: slide.title, image_url: h.imageUrl,
+      open_title_first: !String(slide.title || '').trim(),
+    } as any);
+    toast.success('스튜디오 그림으로 인앱을 시작했어요. 버튼 · 타겟만 다듬어 주세요.');
+  };
 
   // 자율 진단 상태
   const [diagnosing, setDiagnosing] = useState(false);
@@ -714,6 +743,9 @@ export default function InAppMessagesPage() {
   // 1-click 액션 (AI 다듬기 / 시간대 / 세그먼트)
   // ────────────────────────────────────────────────────────────────
 
+  // ★ 2026-11-05 §3-3 — 다듬기 대상(노출이 가장 많은 메시지)이 통짜면 단추 대신 이유를 그린다(서버도 AI · 차감 전에 거절)
+  const refineTarget = messages.length > 0 ? [...messages].sort((a, b) => (b.stats?.impressions || 0) - (a.stats?.impressions || 0))[0] : null;
+  const refineBaked = !!refineTarget && refineTarget.template === 'full_image' && (refineTarget.design as any)?.poster_text === 'baked';
   const handleQuickAction = async (actionType: 'ai_refine' | 'time_optimize' | 'segment_refine') => {
     if (messages.length === 0) {
       showToast('적용할 메시지가 없습니다.', { type: 'info' });
@@ -1143,6 +1175,8 @@ export default function InAppMessagesPage() {
                       backgroundColor={previewMsg.background_color || '#4f46e5'}
                       textColor={previewMsg.text_color || '#ffffff'}
                       design={previewMsg.design}
+                      accentColor={previewMsg.accent_color}
+                      endAt={previewMsg.endAt || (previewMsg as any).end_at || null}
                       posterSlides={previewMsg.poster_slides || undefined}
                     />
                   );
@@ -1161,6 +1195,7 @@ export default function InAppMessagesPage() {
                   accentColor={previewMsg.accent_color}
                   cardStyle={previewMsg.card_style}
                   design={previewMsg.design}
+                  endAt={previewMsg.endAt || (previewMsg as any).end_at || null}
                   posterSlides={previewMsg.poster_slides || undefined}
                 />
                 )}
@@ -1365,10 +1400,23 @@ export default function InAppMessagesPage() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-4">
             {[
-              { type: 'ai_refine' as const, icon: Wand2, title: '본문 다듬기', desc: '감성·실용·캐주얼 3안', iconBg: 'from-violet-50 to-purple-50', iconColor: 'text-violet-800' },
+              { type: 'ai_refine' as const, icon: Wand2, title: '본문 다듬기', desc: refineBaked ? '그림에 글이 들어간 메시지는 그림을 바꿔 시험해요' : '감성·실용·캐주얼 3안', iconBg: 'from-violet-50 to-purple-50', iconColor: 'text-violet-800' },
               { type: 'time_optimize' as const, icon: Clock, title: '시간대 최적화', desc: 'best CTR 시간 적용', iconBg: 'from-emerald-50 to-teal-50', iconColor: 'text-emerald-800' },
               { type: 'segment_refine' as const, icon: Target, title: '대상 정밀화', desc: '구매액 상위 · 활동 고객', iconBg: 'from-amber-50 to-orange-50', iconColor: 'text-amber-800' },
-            ].map((action) => (
+            ].map((action) => (action.type === 'ai_refine' && refineBaked ? (
+              // ★ 2026-11-05 §3-3 — 통짜(글이 구워진 그림) 메시지는 문구 다듬기 변형을 만들 수 없다 = 단추 대신 같은 이유 한 줄(죽은 단추 0)
+              <div key={action.type} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${action.iconBg} flex items-center justify-center flex-shrink-0`}>
+                    <action.icon className={`w-4 h-4 ${action.iconColor}`} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-700">{action.title}</div>
+                    <div className="text-[10px] text-slate-500 leading-snug">{action.desc}</div>
+                  </div>
+                </div>
+              </div>
+            ) : (
               <button
                 key={action.type}
                 onClick={() => handleQuickAction(action.type)}
@@ -1385,7 +1433,7 @@ export default function InAppMessagesPage() {
                   </div>
                 </div>
               </button>
-            ))}
+            )))}
           </div>
         </div>
 
@@ -1506,6 +1554,21 @@ export default function InAppMessagesPage() {
             setEntryOpen(false);
             setEditing({ ...EMPTY_FORM, ...seed, channel: channel || 'web', status: 'paused' });
           }}
+          onExampleStart={(seed: Record<string, any>, studio: InAppExampleItem['studio']) => {
+            setEntryOpen(false);
+            // ★ 2026-11-05 §3-9 — 같은 시작 상태로 편집기(예시 그림 그대로 · 게시 판정이 막는다) · 장마다 같은 템플릿으로 「AI로 내 그림 만들기」
+            setEditing({ ...EMPTY_FORM, ...seed, channel: channel || 'web', status: 'paused', example_studio: studio } as any);
+          }}
+        />
+      )}
+      {studioHandoff && (
+        <InAppFramePicker
+          open
+          imageUrl={studioHandoff.imageUrl}
+          textInImage={studioHandoff.textInImage}
+          title={studioHandoff.texts.title || ''}
+          onClose={() => setStudioHandoff(null)}
+          onPick={startFromStudio}
         />
       )}
       {editing && (
@@ -1934,7 +1997,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   // ════════════════════════════════════════════════════════════════════
   const layoutKey: LayoutKey = layoutKeyOf(editing);
   const posterMode = isPosterLayout(layoutKey);
-  const posterLayout: PosterLayout = posterMode ? (layoutKey as PosterLayout) : 'overlay';
+  const posterLayout: PosterLayout = posterLayoutOfKey(layoutKey);
   const slides: WsSlide[] = Array.isArray(editing.slides_ws) ? editing.slides_ws : [];
   const [active, setActive] = useState(0);
   const safeActive = Math.max(0, Math.min(active, Math.max(0, slides.length - 1)));
@@ -1943,7 +2006,17 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   const [selField, setSelField] = useState<SheetEditKey | null>(null);
   const [pcView, setPcView] = useState(false);
   const [customerView, setCustomerView] = useState(false);
-  const appLocked = isApp && posterMode && posterLayout !== 'overlay' && !APP_SHEET_LAYOUTS_UNLOCKED;
+  // ★ 2026-11-05 §3-2 — 앱 채널에서 지금 앱이 이 메시지를 어떻게 보이나(필요 판 = 서버 관문과 같은 규칙 · 확인된 판 = APP_CONFIRMED_CAPS)
+  const appNote = isApp && posterMode ? appCapsNote(editing.design, slides.length) : null;
+  // ★ 2026-11-05 §3-8 · §3-6 — 장 AI 그리기(공용 스튜디오 창) · DM 참여 페이지 연결 · 띠 칸 데려가기
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [dmPick, setDmPick] = useState<'cta' | 'link' | null>(null);
+  const [stripFocus, setStripFocus] = useState(0);
+  // ★ 2026-11-05 §3-8 스튜디오 그림으로 시작했는데 제목이 비었다 = 제목 칸을 먼저 연다(목록 이름 · 그림 대체 글이라 필수)
+  useEffect(() => {
+    if ((editing as any).open_title_first) { setSelField('title'); pickToast.info('제목을 먼저 넣어 주세요. 목록 이름과 그림 설명으로 쓰여요.'); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // ★ 2026-09-29 (Harold 「이벤트 카드로 바꾸니 글자를 눌러도 편집 칸이 안 뜬다」) — 구버전 앱 모습은 버튼을 눌렀을 때만 켠다.
   //   옛: 앱 잠금(appLocked)이 켜지면 저절로 켜져, 새 모양을 고르자마자 휴대폰이 옛 포스터로 바뀌고 글자 편집이 막혔다. 모양을 바꾸면 다시 끈다.
   const [legacyApp, setLegacyApp] = useState(false);
@@ -1986,7 +2059,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       }
       delete base.poster_slides;
     }
-    for (const k of ['slides_ws', 'stats', 'publish_charged', 'created_at', 'updated_at', 'draft', 'status', 'id', 'company_id', 'created_by']) delete base[k];
+    for (const k of ['slides_ws', 'stats', 'publish_charged', 'created_at', 'updated_at', 'draft', 'status', 'id', 'company_id', 'created_by', 'example_studio', 'open_title_first']) delete base[k];
     return {
       ...base,
       position: m.template || m.position,
@@ -2179,12 +2252,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       if (!prev) return prev;
       const fromKey = layoutKeyOf(prev);
       if (isPosterLayout(k)) {
-        const d0: Record<string, any> = { ...(prev.design || {}) };
-        if (k === 'overlay') delete d0.poster_layout; else d0.poster_layout = k;
+        // ★ 2026-11-05 §3-10 — 키 ↔ design 은 designForKey 한 곳(poster_layout · poster_text · poster_frame 을 함께) ·
+        //   같은 그리는 갈래 안(통짜 ↔ 사진 위 글 ↔ 카드)은 장 · 글 · 그림 · 띠 · 색을 그대로 둔다
+        const d0: Record<string, any> = designForKey(k, prev.design);
         if (!d0.dismiss_mode) d0.dismiss_mode = 'snooze_day';
+        const toLayout = posterLayoutOfKey(k);
         let ss: WsSlide[];
         if (isPosterLayout(fromKey) && Array.isArray(prev.slides_ws)) {
-          ss = restyleSlides(prev.slides_ws, k, d0);
+          ss = posterLayoutOfKey(fromKey) === toLayout ? prev.slides_ws : restyleSlides(prev.slides_ws, toLayout, d0);
         } else {
           // 기본 알림 → 크게 보여 주기: 글 · 사진 · 첫 버튼을 첫 장으로(블록이면 블록에서 꺼낸다)
           const bl = Array.isArray(prev.content_blocks) ? prev.content_blocks : [];
@@ -2195,16 +2270,19 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
             poster_slides: [],
             design: d0,
           };
-          ss = restyleSlides(slidesFromMessage(src), k, d0);
+          ss = restyleSlides(slidesFromMessage(src), toLayout, d0);
         }
-        if (opts?.addSlide && ss.length < MAX_SLIDES) ss = [...ss, duplicateSlide(ss[ss.length - 1], k, d0)];
+        if (opts?.addSlide && ss.length < MAX_SLIDES) ss = [...ss, duplicateSlide(ss[ss.length - 1], toLayout, d0)];
         return { ...prev, template: 'full_image', design: d0, slides_ws: ss, content_blocks: [] };
       }
       if (isPosterLayout(fromKey) && Array.isArray(prev.slides_ws)) {
         // 크게 보여 주기 → 기본 알림 · 작게 알리기: 첫 장이 글 · 사진 · 버튼으로(나머지 장은 되돌리기로 복구)
-        const pt = messagePatchFromSlides(prev.slides_ws, fromKey as PosterLayout, prev.design);
+        const pt = messagePatchFromSlides(prev.slides_ws, posterLayoutOfKey(fromKey), prev.design);
         const d1: Record<string, any> = { ...(pt.design || {}) };
         delete d1.poster_layout;
+        delete d1.poster_text;
+        delete d1.poster_frame;
+        delete d1.poster_strip;
         return {
           ...prev,
           template: k as Template,
@@ -2288,7 +2366,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
   const handleServerError = (data: any) => {
     if (data?.code === 'INAPP_NOT_PUBLISHABLE' && data.defect) {
       pickToast.warning(String(data.defect.message || '발행 조건을 확인해 주세요'));
+      const f = String(data.defect.field || '');
       if (posterMode && typeof data.defect.slide === 'number') setActive(data.defect.slide);
+      // ★ 2026-11-05 §3-10 서버 결함 데려가기 — 띠 → 띠 칸 · 끝 시각 → 타겟 · 시점 칸 · 링크 → 그 장 버튼 칸 · 사진(예시 그림 포함) → 그 장 사진 칸
+      if (f === 'end_at') { setDrawerOpen(true); return; }
+      if (f === 'strip') { setSelField(null); setStripFocus((n) => n + 1); }
+      else if (f === 'link') setSelField('cta');
+      else if (f === 'slide_image' || f === 'image') setSelField(null);
+      else if (f === 'title' && posterMode) setSelField('title');
       setDrawerOpen(false);
       return;
     }
@@ -2340,6 +2425,9 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
         savedKeyRef.current = keyOf(snap);
         setSaveInfo({ tone: 'saved', text: '게시 중 · 반영됨' });
         pickToast.success('게시 중인 메시지에 반영했어요');
+        // ★ 2026-11-05 §3-3 — 통짜로 바꾼 [반영]이 멈춘 글만 다른 변형 수(서버가 센 값 그대로)
+        const paused = Number(data?.variants_paused) || 0;
+        if (paused > 0) pickToast.info(`글만 다른 A/B 변형 ${paused}개는 그림에 글이 들어간 메시지에서 비교할 수 없어 멈췄어요`);
         return;
       }
       handleServerError(data);
@@ -2439,7 +2527,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       {posterMode && (
         <button type="button" onClick={() => setCustomerView((v) => !v)} className={toggleBtn(customerView)} title="이름 같은 값을 실제 고객 값으로 바꿔 봅니다">고객으로 보기</button>
       )}
-      {posterMode && isApp && posterLayout !== 'overlay' && (
+      {posterMode && isApp && (posterLayout !== 'overlay' || !!appNote) && (
         <button type="button" onClick={() => setLegacyApp((v) => !v)} className={toggleBtn(legacyApp)} title="새 모양을 모르는 이전 앱이 그리는 모습">구버전 앱 모습</button>
       )}
       {posterMode && !isApp && (
@@ -2459,7 +2547,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
 
   // ★ 2026-09-29 (Harold 「화면이 너무 작다」) — 위 알림 두 줄을 치우고 짧은 알림으로 왼쪽 칸 아래에 둔다(가운데 휴대폰이 높이를 다 쓴다).
   //   게시 중은 제목 옆 표시가 이미 있고, 혜택 자리 알림은 기본 알림 오른쪽 칸 맨 위로 옮긴다.
-  const railNotes = (isLive || isApp || appLocked || (posterMode && legacyApp)) ? (
+  const railNotes = (isLive || isApp || appNote || (posterMode && legacyApp)) ? (
     <div className="mt-4 space-y-2">
       {posterMode && legacyApp && (
         <div className="rounded-xl border border-amber-300 bg-amber-100 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900">
@@ -2477,9 +2565,9 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
           <button type="button" onClick={() => setShowAppContract(true)} className="underline underline-offset-2 font-semibold text-cyan-800 hover:text-slate-900">계약 보기</button>
         </div>
       )}
-      {appLocked && (
+      {appNote && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11.5px] leading-relaxed text-amber-900">
-          <b>앱 업데이트 뒤에 보이는 모양</b> · 이전 앱은 같은 내용을 포스터 모양 · 「다시 보지 않기」로 보여요. 위 「구버전 앱 모습」으로 확인하세요.
+          <b>{appNote.text}</b> · {appNote.hidden ? '이전 앱에는 이 메시지를 보내지 않아요(잘린 그림 · 빠진 기능을 보이지 않게).' : '이전 앱은 같은 내용을 아래에서 올라오는 모양으로 보여요.'} 위 「구버전 앱 모습」으로 확인하세요.
         </div>
       )}
     </div>
@@ -2549,6 +2637,9 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
         onImageDrop={(f) => { void images.uploadFiles(f); }}
         variables={variableChips}
         busyImage={images.busy}
+        accentColor={editing.accent_color}
+        endAt={editing.endAt || editing.end_at || null}
+        onStripPick={() => { setSelField(null); setStripFocus((n) => n + 1); }}
       />
     ) : (
       <div className="flex-1 flex items-center justify-center text-slate-500"><Loader2 className="w-5 h-5 animate-spin" /></div>
@@ -2642,6 +2733,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       images={images}
       variables={variableChips}
       onInsertVar={(key, token) => changeField(key, (readField(slides[safeActive], key) + token).slice(0, FIELD_MAX[key]))}
+      layoutKey={layoutKey}
+      accentColor={editing.accent_color}
+      onAccent={(hex) => setEditing((prev) => (prev ? { ...prev, accent_color: hex } : prev))}
+      endAt={editing.endAt || editing.end_at || null}
+      onGoSchedule={() => setDrawerOpen(true)}
+      onDraw={() => setStudioOpen(true)}
+      onPickDm={(t) => setDmPick(t)}
+      stripFocus={stripFocus}
     />
   ) : (
     <div className="space-y-5">
@@ -3256,8 +3355,24 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
               : '다시 보지 않기 · 닫기: 다시 보지 않기를 누른 고객에게는 더 뜨지 않습니다.'}
             {isApp && editing.design?.dismiss_mode === 'snooze_day' && ' 앱은 업데이트된 앱에서만 「오늘 하루 보지 않기」가 보이고, 이전 앱은 「다시 보지 않기 · 닫기」로 나옵니다.'}
           </div>
-          {appLocked && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[12.5px] text-amber-900">이 모양은 앱 업데이트 뒤에 보입니다. 이전 앱에서는 같은 내용이 포스터 모양으로 보입니다.</div>
+          {editing.design?.poster_strip?.type === 'countdown' && (() => {
+            // ★ 2026-11-05 §3-5 남은 시간 띠의 마감 = 게시 끝 시각(새 칸 0 · 게시 판정이 끝 시각 없음 · 지남을 막는다)
+            const cur = editing.endAt || editing.end_at || null;
+            const local = cur ? (() => { const d = new Date(cur); if (!Number.isFinite(d.getTime())) return ''; const p2 = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; })() : '';
+            return (
+              <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-[12.5px] text-slate-600 space-y-2">
+                <b className="block text-slate-900">게시 끝 시각 <span className="font-normal text-slate-400">남은 시간 띠의 마감</span></b>
+                <input type="datetime-local" value={local}
+                  onChange={(e) => { const v = e.target.value; const iso = v ? new Date(v).toISOString() : null; setEditing((prev) => (prev ? { ...prev, endAt: iso, end_at: iso } : prev)); }}
+                  className="w-full h-10 px-3 rounded-xl bg-slate-100 border border-slate-300 text-[13px] text-slate-900" />
+                <span className="block text-[11.5px] text-slate-400">이 시각이 지나면 메시지가 내려가고, 띠에는 그때까지 남은 시간이 1초마다 줄어들며 보여요.</span>
+              </div>
+            );
+          })()}
+          {appNote && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3 text-[12.5px] text-amber-900">
+              <b>{appNote.text}</b>{appNote.hidden ? ' · 게시해도 이전 앱에는 보이지 않아요(게시비는 게시할 때 나가요).' : ' · 이전 앱에서는 아래에서 올라오는 모양으로 보여요.'}
+            </div>
           )}
             {/* 탭 타겟·시점: 세그먼트 */}
             <div className="">
@@ -3647,6 +3762,46 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       />
       <ImageSourceMenu open={imgMenu} onClose={() => setImgMenu(false)} images={images} />
       {images.node}
+      {posterMode && (() => {
+        // ★ 2026-11-05 §3-8 장 AI 그리기 — 통짜 장 = 장 글로 그림을 그리고 넣은 글이 그 장 글 · 글 얹기 장 = 글 없는 판 ·
+        //   예시에서 시작한 장 = 같은 템플릿(고르기 건너뜀) · 예시 글의 브랜드 라벨 = 회사 이름 · 혜택 자리 = 자리표(채우기 전 생성 막힘)
+        const cur = slides[safeActive];
+        const bakedNow = editing.design?.poster_text === 'baked';
+        const ex = Array.isArray((editing as any).example_studio) ? (editing as any).example_studio[safeActive] : null;
+        const fromExample = !!ex && isExampleImage(cur?.image_url);
+        const companyName = String((testSaveUser as any)?.company?.name || '').trim();
+        const label = fromExample ? (companyName || String(ex.texts?.label || '')) : String(cur?.eyebrow || '');
+        const title = fromExample ? String(ex.texts?.title || '') : String(cur?.title || '');
+        const subtitle = fromExample ? BENEFIT_SLOT : String(cur?.body || '');
+        return (
+          <StudioInsertModal
+            open={studioOpen}
+            onClose={() => setStudioOpen(false)}
+            textless={!bakedNow}
+            initialTemplateId={ex?.studioTemplateId || null}
+            defaultLabel={bakedNow ? label : ''}
+            defaultTitle={bakedNow ? title : ''}
+            defaultSubtitle={bakedNow ? subtitle : ''}
+            onInserted={(url, texts) => {
+              setStudioOpen(false);
+              if (!curKey) return;
+              patchSlideKey(curKey, bakedNow && texts
+                ? { image_url: url, eyebrow: texts.label || '', title: texts.title || '', body: texts.subtitle || '' }
+                : { image_url: url });
+            }}
+          />
+        );
+      })()}
+      <InAppDmLinkPicker
+        open={!!dmPick}
+        onClose={() => setDmPick(null)}
+        onPick={(url) => {
+          if (!curKey) return;
+          const cur = slides[safeActive];
+          if (dmPick === 'cta') patchSlideKey(curKey, { cta: { ...(cur?.cta || {}), label: String(cur?.cta?.label || '') || '참여하기', action_url: url } });
+          else patchSlideKey(curKey, { link_url: url });
+        }}
+      />
       <ConfirmModal state={editorConfirm} onClose={() => setEditorConfirm(null)} />
       {lineAssist && (
         <LineFactsSheet
@@ -3694,6 +3849,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     accentColor={editing.accent_color}
                     cardStyle={editing.card_style}
                     design={viewMsg.design}
+                    endAt={editing.endAt || editing.end_at || null}
                     posterSlides={assemblePosterSlides(viewMsg)}
                     replaceVars={(t) => replaceVars(t, sampleCustomer)}
                     captureMode
@@ -3718,6 +3874,8 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                     backgroundColor={editing.background_color || '#4f46e5'}
                     textColor={editing.text_color || '#ffffff'}
                     design={viewMsg.design}
+                    accentColor={editing.accent_color}
+                    endAt={editing.endAt || editing.end_at || null}
                     posterSlides={assemblePosterSlides(viewMsg)}
                     replaceVars={(t) => replaceVars(t, sampleCustomer)}
                     captureMode

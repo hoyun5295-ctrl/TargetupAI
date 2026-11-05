@@ -42,6 +42,7 @@ import { swrCacheWithAt, dashboardCardsGenKey } from '../utils/swr-cache';
 import { CACHE_TTL } from '../config/defaults';
 import { computeMonthlyUsage } from '../utils/monthly-usage';
 import { publicErrorText } from '../utils/http-error';
+import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import { journeyCreditForecast, journeyCreditOverPlan } from '../utils/journey-credit-forecast';   // ★ 2026-10-20 여정 V.3 §5-5 요금제 내림 경고   // ★ 2026-10-18 이번달 사용금액 카드 = 발송 현황과 같은 CT
 
 const router = Router();
@@ -376,7 +377,7 @@ router.get('/my-credit/transactions', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
-    const page = parseInt(req.query.page as string) || 1;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const { getCreditTransactions } = await import('../utils/ai-credit');
     const r = await getCreditTransactions(companyId, page, 20);
     return res.json({ success: true, transactions: r.rows, total: r.total, page, totalPages: Math.ceil(r.total / 20) });
@@ -448,7 +449,7 @@ router.get('/my-credit/recharge-requests', async (req: Request, res: Response) =
   try {
     const companyId = (req as any).user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
-    const page = parseInt(req.query.page as string) || 1;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const { getRechargeRequests } = await import('../utils/ai-credit-recharge');
     const r = await getRechargeRequests({ companyId, page });
     return res.json({ success: true, ...r });
@@ -1484,8 +1485,8 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
     if (!def) return res.status(404).json({ error: '존재하지 않는 카드입니다.' });
 
     const q = (req.query.q as string) || '';
-    const page = Math.max(0, parseInt((req.query.page as string) || '0'));
-    const limit = Math.min(100, parseInt((req.query.limit as string) || '20'));
+    // ★ C105 H4(R59) 0 기반 주소(옛 page × limit · 기본 0 · limit 기본 20 · 상한 100) = CT pageBase 0
+    const { page, limit, offset: cardOffset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: 100, pageBase: 0 });
 
     // 브랜드 격리 (CT-02)
     let customerStoreFilter = '';
@@ -1648,7 +1649,7 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
       const countRes = await query(`SELECT COUNT(*)::int as total FROM customers ${topWhere}`, topParams);
       const total = parseInt(countRes.rows[0]?.total || 0);
 
-      topParams.push(limit, page * limit);
+      topParams.push(limit, cardOffset);
       const listRes = await query(`
         SELECT id, name, phone, gender, grade, birth_month_day,
                TO_CHAR(recent_purchase_date, 'YYYY-MM-DD') as recent_purchase_date,
@@ -1722,8 +1723,8 @@ router.get('/dashboard-cards/:cardId/detail', async (req: Request, res: Response
 // GET /api/companies - 고객사 목록
 router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const { status, search, page = 1, limit = 20 } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    const { status, search } = req.query;
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59) 주소 숫자 값 = CT
 
     let whereClause = 'WHERE 1=1';
     const params: any[] = [];
@@ -1746,7 +1747,7 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
     );
     const total = parseInt(countResult.rows[0].count);
 
-    params.push(Number(limit), offset);
+    params.push(limit, offset);
     // ★ D114 P9: total_customers — 슈퍼관리자 고객사 목록에 고객 수 표시
     // ★ 2026-06-13 첫 로딩 속도: 행당 상관 서브쿼리(회사 76개 × 24만 행 customers 탐침)
     //   → 집계 1회 GROUP BY JOIN. 값 동일(상관 COUNT 0 ↔ 그룹 부재 COALESCE 0).
@@ -1769,9 +1770,9 @@ router.get('/', requireSuperAdmin, async (req: Request, res: Response) => {
       companies: result.rows.map(omitCompanySecrets),
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {

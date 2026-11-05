@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto';
 import { renderDmViewerHtml } from './dm/dm-viewer';
 import { renderEmailSections } from './email/email-section-renderer';
 import type { DmBrandKit } from './dm/dm-tokens';
-import { formatLinePeriodEnd, kstDayOf } from './one-line-steps';
+import { linePeriodLabel, kstDayOf } from './one-line-steps';
 import type { LineTemplate, LineLayout, LineChannel } from './design-core/line-templates';
 import { composeLineDm, composeLineEmail, composeLineInapp, type LineMaterials, type LineInAppMessage } from './line-template-compose';
 import { lineExampleCopy } from './line-template-copy';
@@ -30,7 +30,7 @@ export function lineExampleMaterials(t: LineTemplate, nowMs: number): LineMateri
     textProducts: [],
     benefit: ex.benefit,
     periodEnd,
-    periodLabel: periodEnd ? `${formatLinePeriodEnd(periodEnd)}까지` : null,
+    periodLabel: periodEnd ? linePeriodLabel(null, periodEnd) : null,
     link: 'https://example.com/event',
   };
 }

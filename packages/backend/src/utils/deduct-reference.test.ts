@@ -153,3 +153,20 @@ describe('resolveAlimtalkLedgerUnits — 차감 원장 행들에서 결과별 �
     expect(resolveAlimtalkLedgerUnits([{ amount: 0, description: buildDeductDescription('campaign', 'LMS', 0, 27.5, 3) }])).toBeNull();
   });
 });
+
+describe('★2026-11-05 C107 D-12 브랜드메시지 결과별 정산 — 같은 문구 형식 · 이름만 브랜드메시지', () => {
+  const units = { KAKAO: 21, SMS: 8.18, LMS: 23.6 };   // 비친구 브랜드 21 · SMS 8.18 · LMS 23.6(실례)
+
+  test('브랜드 이름으로 싣고 같은 해석기로 되읽는다 · 차감 건수 · 단가 되읽기 그대로', () => {
+    const desc = buildDeductDescription('campaign', 'BRAND', 10, 23.6, 0, units, '브랜드메시지');
+    expect(desc).toBe('BRAND 10건 발송 차감 (건당 23.6원) · 결과별 정산: 브랜드메시지 21원 · SMS 대체 8.18원 · LMS 대체 23.6원');
+    expect(parseAlimtalkUnits(desc)).toEqual(units);
+    expect(parseDeductDescription(desc)).toEqual({ count: 10, unitPrice: 23.6 });
+    expect(resolveAlimtalkLedgerUnits([{ amount: 236, description: desc }])).toEqual(units);
+  });
+
+  test('이름을 넘기지 않으면 종전 알림톡 문구 그대로', () => {
+    expect(buildDeductDescription('campaign', 'LMS', 1, 27.5, 0, { KAKAO: 5.5, SMS: 11, LMS: 27.5 }))
+      .toBe('LMS 1건 발송 차감 (건당 27.5원) · 결과별 정산: 알림톡 5.5원 · SMS 대체 11원 · LMS 대체 27.5원');
+  });
+});

@@ -6,14 +6,18 @@
  * DB import 0 — 순수 함수(ts-node verify로 TDD). billing-types도 순수 파일이라 이 성질이 유지된다.
  */
 
-import { isBrandOnlyChannel } from './billing-types';
+import { isBrandOnlyChannel, billingTypeLabelOf } from './billing-types';
+import { brandAudienceLabel, type KakaoFallbackCount } from './sms-result-map';
 
 /** 캠페인 채널 라벨 (이모지 제거 순수 텍스트). 화면 channelChip과 같은 판정. */
-export function channelPlainLabel(sendChannel: string | null | undefined, messageType: string | null | undefined): string {
+export function channelPlainLabel(sendChannel: string | null | undefined, messageType: string | null | undefined, kakaoTargeting?: string | null): string {
   // ★ 2026-07-31 판정을 CT로. 전에는 채널값 'kakao' 하나만 비교해서 전용 발송이 쓰는 'kakao_brand'가
   //   안 걸리고 message_type('LMS')으로 흘러내렸다 — 브랜드메시지가 엑셀에 LMS로 찍히던 원인이다.
   //   라벨 '카카오'도 폐지된 이름이라 '브랜드메시지'로 바로잡는다(친구톡 폐지 후 실체가 그것이다).
-  if (isBrandOnlyChannel(sendChannel)) return '브랜드메시지';
+  // ★ 2026-11-05 C107 D-11 — 캠페인 한 건의 이름 = 청구 유형 이름(친구 · 비친구 · sms-result-map brandAudienceLabel 한 곳).
+  //   대상값 인자를 넘기지 않으면(undefined) 채널 단위 묶음 = 「브랜드메시지」(next-action-advisor mergeByChannelLabel · 대상 축 없음).
+  //   DB 의 빈 대상값(null)은 넘긴 값이다 = 비친구(청구와 같은 판정).
+  if (isBrandOnlyChannel(sendChannel)) return kakaoTargeting === undefined ? '브랜드메시지' : brandAudienceLabel(kakaoTargeting);
   if (sendChannel === 'alimtalk') return '알림톡';
   if (sendChannel === 'both') return 'SMS+브랜드메시지';
   const mt = String(messageType || '').toUpperCase();
@@ -54,4 +58,21 @@ export function buildCampaignListCsv(rows: CampaignCsvRow[]): string {
       .map(csvEscape).join(',')
   );
   return BOM + CSV_HEADERS.join(',') + (lines.length ? '\n' + lines.join('\n') : '');
+}
+
+/**
+ * ★ 2026-11-05 C107 D-10 — 알림톡 · 브랜드 전용 캠페인의 CSV 줄 = 머리 줄(카카오 시도 수) + 대체 줄(LMS(대체발송) · SMS(대체발송) · 0 이면 없음).
+ *   화면 목록(ResultsModal 아랫줄)과 같은 줄 구성 · 대체 줄 이름 = 청구 유형 이름(정산서와 같은 글자).
+ *   split 이 없으면(조회 실패 · 분리 대상 아님) 머리 줄 하나 = 종전.
+ */
+export function kakaoSplitCsvRows(head: CampaignCsvRow, split: KakaoFallbackCount | null | undefined): CampaignCsvRow[] {
+  if (!split) return [head];
+  const rate = (s: number, t: number) => (t > 0 ? Math.round((s / t) * 1000) / 10 : 0);
+  const rows: CampaignCsvRow[] = [{ ...head, sent: split.total, success: split.success, fail: split.fail, pending: split.pending, rate: rate(split.success, split.total) }];
+  for (const [type, key] of [['LMS', 'LMS_FB'], ['SMS', 'SMS_FB']] as const) {
+    const f = split.fallback[type];
+    if (!f || f.total <= 0) continue;
+    rows.push({ ...head, message: '', channel: `↳ ${billingTypeLabelOf(key)}`, sent: f.total, success: f.success, fail: f.fail, pending: f.pending, rate: rate(f.success, f.total) });
+  }
+  return rows;
 }

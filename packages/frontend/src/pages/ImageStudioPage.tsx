@@ -21,7 +21,8 @@ import {
   Loader2, Wand2, Check, Save, ChevronLeft, Sparkles, FolderOpen,
   Layers, Smartphone, Mail, X, type LucideIcon,
 } from 'lucide-react';
-import { putStudioDraft, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY } from '../lib/studio-draft';
+import { putStudioDraft, studioDraftFromAsset, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY, type StudioDraft } from '../lib/studio-draft';
+import type { StudioTexts } from '../lib/studio-texts';
 import { useToast } from '../components/ToastProvider';
 import { useAuthStore } from '../stores/authStore';
 import AssetLibraryPickerModal from '../components/assets/AssetLibraryPickerModal';
@@ -37,6 +38,8 @@ const authFetch = (url: string, opts: RequestInit = {}) =>
 
 interface Candidate {
   tempId: string; url: string; blob: string | null; presetKey: string; title?: string;
+  /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — 생성에 쓴 글(인앱 통짜 장 글로 넘긴다) */
+  texts?: StudioTexts;
   /** ★ 2026-10-16 저장되면 카드에 남는다 · 채널 버튼은 이 주소로 바로 간다(다시 저장하지 않는다 · 두 번째 저장 = 409) */
   saved?: SavedStudioAsset;
   /** 저장 실패 표시 — storage_full = 정리 뒤 다시 저장 가능 · expired = 임시 그림 기간 만료 */
@@ -141,7 +144,7 @@ export default function ImageStudioPage() {
     if (!r) return;
     if (r.preview) objectUrls.current.push(r.preview);
     madeRef.current = true;
-    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title }, ...prev]);
+    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title, texts: r.texts }, ...prev]);
     setStage('result');
   };
 
@@ -158,7 +161,7 @@ export default function ImageStudioPage() {
       if (status === 402) { toast.error('크레딧이 부족합니다'); return; }
       if (!ok || !data.image?.tempId) throw new Error(data?.error || '수정에 실패했어요');
       const blob = await loadBlob(data.image.url);
-      setCandidates((prev) => [{ tempId: data.image.tempId, url: data.image.url, blob, presetKey: c.presetKey, title: c.title }, ...prev]);
+      setCandidates((prev) => [{ tempId: data.image.tempId, url: data.image.url, blob, presetKey: c.presetKey, title: c.title, texts: c.texts }, ...prev]);
       // 결과를 화면에 놓은 뒤에만 표를 버린다(Codex E3 — 미리보기를 못 받으면 표를 남겨 같은 지시 재시도가 기억 결과를 받는다 · 다시 걷지 않는다)
       editAttemptRef.current = null;
       toast.success('수정 완료');
@@ -199,8 +202,9 @@ export default function ImageStudioPage() {
   };
 
   // ── 채널로 보내기 — 편집기가 초안을 1회 꺼내 쓴다(studio-draft · 맨 주소 = 딥링크면 받는 쪽이 초안을 건너뛴다) ──
-  const launch = (ch: StudioChannel, asset: { url: string; filename?: string | null }) => {
-    putStudioDraft(ch.draftKey, { imageUrl: asset.url, name: asset.filename || null });
+  // ★ 2026-11-05 §3-8 — 새 결과 카드 = 생성에 쓴 글 · 그림에 글이 든 판(인앱 = 통짜) · 라이브러리 소재 = 소재 용도로 판정
+  const launch = (ch: StudioChannel, draft: StudioDraft) => {
+    putStudioDraft(ch.draftKey, draft);
     navigate(ch.path);
   };
   // 누른 카드를 먼저 저장 → 나머지를 차례로(병렬 금지 · 서버 용량 판정에 잠금이 없다) → 첫 실패에서 멈추고 이동하지 않는다.
@@ -212,7 +216,7 @@ export default function ImageStudioPage() {
       for (const o of others) {
         if (!(await saveCandidate(o))) return;
       }
-      launch(ch, { url: asset.url, filename: c.title || null });
+      launch(ch, { imageUrl: asset.url, name: c.title || null, texts: c.texts || null, textInImage: true });
     } finally {
       setBusyMsg('');
     }
@@ -409,7 +413,7 @@ export default function ImageStudioPage() {
                   {assetAction.filename && <div className="text-slate-600 font-medium break-all leading-snug">{assetAction.filename.replace(/\.[^.]+$/, '')}</div>}
                   <div className="mt-2 text-slate-400 leading-relaxed">이 포스터는 문구·상품이 이미 들어가 있어, 어느 채널이든 <b className="text-slate-500 font-semibold">전체가 그대로</b> 쓰여요. 잘림·추가 비용 없음.</div>
                 </div>
-                <ChannelButtons isAdmin={isCompanyAdmin} onPick={(ch) => launch(ch, assetAction)} />
+                <ChannelButtons isAdmin={isCompanyAdmin} onPick={(ch) => launch(ch, studioDraftFromAsset(assetAction))} />
                 <div className="mt-1 text-[10px] text-slate-400 leading-relaxed">MMS로 보낼 때는 발송 화면의 ‘라이브러리에서 가져오기’로 첨부하면 자동으로 규격(≤300KB)에 맞춰져요. 특정 채널 전용 비율이 필요하면 스튜디오에서 그 비율로 새로 만들면 돼요.</div>
               </div>
             </div>

@@ -45,7 +45,8 @@ import { initialRich, linkReason, normalizeLinkInput, richBlockReason, richPaylo
 import { brandImageHint } from './brand-send/brandImageSpec';
 import { useBrandImageGuard } from './brand-send/useBrandImageGuard';
 import type { PreviewRich } from './BrandMessagePreview';
-import { format080Input, isValid080Number } from '../utils/formatDate';
+import { format080Input, isValid080Number, buildAdMessageFront, calculateSmsBytes } from '../utils/formatDate';
+import FallbackPhoneModal, { type FallbackOption } from './kakao-send/FallbackPhoneModal';
 
 /**
  * ★ AI 생성 이미지 안내 문구 — 값의 원천은 백엔드 CT-12(`BRAND_AI_IMAGE_NOTICE`)다.
@@ -186,6 +187,8 @@ interface BrandMessageEditorProps {
    *   수신자 열 내용(입력 방식 · 목록)은 호출부(BrandSendModal)가 소유한다.
    */
   recipientsPanel?: ReactNode;
+  /** ★ 2026-11-05 C107 D-18 — 대체 문자 보내는 번호 = 등록 회신번호 고르기(대시보드가 받아 둔 목록 · 서버도 등록 여부를 판정한다) */
+  callbackNumbers?: Array<{ phone: string; label?: string; is_default?: boolean }>;
 }
 
 /**
@@ -217,7 +220,7 @@ function Collapsible({ icon, title, stateText, stateSet, children, defaultOpen }
   );
 }
 
-export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet', recipientCount, defaultUnsubPhone, recipientsPanel }: BrandMessageEditorProps) {
+export default function BrandMessageEditor({ profiles, onSend, sending, accent = 'violet', recipientCount, defaultUnsubPhone, recipientsPanel, callbackNumbers }: BrandMessageEditorProps) {
   const a = ACCENT[accent];
   const FIELD = a.field;
   const [mode, setMode] = useState<'free' | 'template'>('free');
@@ -602,13 +605,14 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
     && ((!!pickedForPreview.profile_key && pickedForPreview.profile_key !== senderKey)
       || pickedForPreview.chat_bubble_type !== bubbleType
       || !!imageUrl);
-  const [footPop, setFootPop] = useState<'' | 'target' | 'resend'>('');
+  const [footPop, setFootPop] = useState<'' | 'target'>('');
+  // ★ 2026-11-05 C107 D-01(접수 T1 · Harold H1) — 대체 문안 = 휴대폰 모양 창(옛 발송 바 풍선 2줄 입력칸 폐기)
+  const [fallbackOpen, setFallbackOpen] = useState(false);
   const targetAnchorRef = useRef<HTMLDivElement | null>(null);
-  const resendAnchorRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!footPop) return;
     const onDown = (e: MouseEvent) => {
-      const anchor = footPop === 'target' ? targetAnchorRef.current : resendAnchorRef.current;
+      const anchor = targetAnchorRef.current;
       if (anchor && !anchor.contains(e.target as Node)) setFootPop('');
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.isComposing) { e.stopPropagation(); setFootPop(''); } };
@@ -618,12 +622,22 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
   }, [footPop]);
   const accentHex = accent === 'indigo' ? '#4F46E5' : '#7C3AED';
   const targetingLabel = TARGETING_OPTIONS.find((t) => t.code === targeting)?.label || targeting;
-  const resendLabel = resendType === 'SM' ? 'SMS로 대체' : resendType === 'LM' ? 'LMS로 대체' : '대체발송 없음';
+  // 대체 문자 요약 — 휴대폰 창과 같은 글(비면 본문 재사용 · 광고 표기 포함)로 바이트를 센다(서버 resolveBrandFallback 과 같은 셈)
+  const fallbackKind = resendType === 'SM' ? 'SMS' : resendType === 'LM' ? 'LMS' : null;
+  const fallbackBytes = fallbackKind
+    ? calculateSmsBytes(buildAdMessageFront((resendMessage.trim() || (mode === 'free' ? message : '')) || '', fallbackKind, isAd, lockedUnsub || unsubPhone || ''))
+    : 0;
+  const resendLabel = fallbackKind ? `${fallbackKind}로 대체 · ${fallbackBytes.toLocaleString()}바이트` : '대체발송 없음';
+  const fallbackOptions: FallbackOption[] = [
+    { code: 'NO', label: '대체 안 함', desc: '카카오가 실패하면 그대로 끝나요', kind: 'none', editable: false, needsTitle: false },
+    { code: 'SM', label: 'SMS로 대체', desc: '90바이트까지', kind: 'SMS', editable: true, needsTitle: false, reuseBodyWhenEmpty: mode === 'free' },
+    { code: 'LM', label: 'LMS로 대체', desc: '제목 + 2,000바이트까지', kind: 'LMS', editable: true, needsTitle: true, reuseBodyWhenEmpty: mode === 'free' },
+  ];
   const noRecipients = typeof recipientCount === 'number' && recipientCount === 0;
 
   return (
     <>
-      <div className="ds-modal__body ks-body">
+      <div className="ds-modal__body ks-body ks-body--brand">
         {/* ====== 작성 ====== */}
         <section className="ks-compose">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
@@ -1052,7 +1066,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       )}
 
       {/* ====== 발송 바 — 타겟팅 · 실패 시 문자 · 광고 표기 / 발신 프로필 · 보내기 ====== */}
-      <footer className="ds-modal__foot ks-foot">
+      <footer className="ds-modal__foot ks-foot ks-foot--brand">
         <div className="ds-foot-opts">
           <div className="ds-opt-anchor" ref={targetAnchorRef}>
             <button type="button" className="ds-tile ds-tile--opt" onClick={() => setFootPop((p) => (p === 'target' ? '' : 'target'))} aria-haspopup="dialog" aria-expanded={footPop === 'target'}>
@@ -1076,15 +1090,15 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                         targeting === t.code ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-200/60' : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}>
                       <span className="block text-[13px] font-bold text-slate-800">{t.label}</span>
-                      <span className="block text-[11.5px] text-slate-500 mt-0.5">{t.code === 'I' ? t.desc : `${t.desc} · 수신거부 080 번호가 필요합니다`}</span>
+                      <span className="block text-[11.5px] text-slate-500 mt-0.5">{t.code === 'I' ? `${t.desc} · 친구 단가` : `${t.desc} · 비친구 단가 · 수신거부 080 번호가 필요합니다`}</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
           </div>
-          <div className="ds-opt-anchor" ref={resendAnchorRef}>
-            <button type="button" className={`ds-tile ds-tile--opt ${resendType !== 'NO' ? 'ds-tile--opt-blue' : ''}`} onClick={() => setFootPop((p) => (p === 'resend' ? '' : 'resend'))} aria-haspopup="dialog" aria-expanded={footPop === 'resend'}>
+          <div className="ds-opt-anchor">
+            <button type="button" className={`ds-tile ds-tile--opt ${resendType !== 'NO' ? 'ds-tile--opt-blue' : ''}`} onClick={() => { setFootPop(''); setFallbackOpen(true); }} aria-haspopup="dialog" aria-expanded={fallbackOpen}>
               <span className="ds-tile__ic"><MessageSquareReply size={17} strokeWidth={2} /></span>
               <span className="ds-tile__tx">
                 <span className="ds-tile__t1">실패 시 문자</span>
@@ -1092,38 +1106,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
               </span>
               <ChevronDown size={14} strokeWidth={2} className="ds-tile__caret" />
             </button>
-            {footPop === 'resend' && (
-              <div className="ks-pop" role="dialog" aria-label="브랜드메시지가 실패하면">
-                <div className="ks-pop__head">
-                  <b>브랜드메시지가 실패하면</b>
-                  <button type="button" className="ks-pop__x" onClick={() => setFootPop('')} aria-label="닫기"><X size={15} strokeWidth={2} /></button>
-                </div>
-                <div className="space-y-2">
-              <select value={resendType} onChange={(e) => setResendType(e.target.value)} className={FIELD}>
-                <option value="NO">대체발송 없음</option>
-                <option value="SM">SMS로 대체</option>
-                <option value="LM">LMS로 대체</option>
-              </select>
-              {resendType !== 'NO' && (
-                <>
-                  <input type="text" value={resendFrom} onChange={(e) => setResendFrom(e.target.value)}
-                    className={FIELD} placeholder="대체발송 발신번호 (비우면 기본 회신번호)" />
-                  {resendType === 'LM' && (
-                    <input type="text" value={resendTitle} onChange={(e) => setResendTitle(e.target.value)}
-                      className={FIELD} placeholder="LMS 제목 (필수)" />
-                  )}
-                  <textarea value={resendMessage} onChange={(e) => setResendMessage(e.target.value)} rows={2}
-                    className={`${FIELD} resize-none`} placeholder="대체발송 메시지 (빈칸이면 본문 재사용)" />
-                  {noticeActive && (
-                    <p className="text-[11px] text-slate-400 px-1">
-                      AI 생성 이미지 안내 문구는 문자 대체발송에는 들어가지 않습니다.
-                    </p>
-                  )}
-                </>
-              )}
-                </div>
-              </div>
-            )}
           </div>
           <div className="ds-opt-anchor">
             <button type="button" role="switch" aria-checked={isAd} className={`ds-tile ds-tile--opt ${isAd ? 'ds-tile--opt-violet' : ''}`} onClick={() => setIsAd(!isAd)}>
@@ -1151,6 +1133,22 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
           </button>
         </div>
       </footer>
+
+      {/* ★ 2026-11-05 C107 D-01 — 실패 시 문자 = 휴대폰 모양 창(쓰고 [저장] · 창 높이 고정) */}
+      <FallbackPhoneModal
+        open={fallbackOpen}
+        heading="브랜드메시지가 실패하면"
+        options={fallbackOptions}
+        value={{ type: resendType, contents: resendMessage, title: resendTitle, from: resendFrom }}
+        bodyText={mode === 'free' ? message : ''}
+        isAd={isAd}
+        optOutNumber={showUnsub ? effUnsub : ''}   // ★ C107 Codex 구현 1R #1 — 서버 대체 080 과 같은 값(보내는 수신거부 번호 · brandFallbackOpt080)
+        callbackNumbers={callbackNumbers}
+        accent={accent === 'indigo' ? 'indigo' : 'violet'}
+        onSave={(v) => { setResendType(v.type); setResendMessage(v.contents); setResendTitle(v.title); setResendFrom(v.from || ''); }}
+        onClose={() => setFallbackOpen(false)}
+        footnote={noticeActive ? 'AI 생성 이미지 안내 문구는 문자 대체발송에는 들어가지 않습니다.' : undefined}
+      />
 
       {/* 유형 선택 창 — 발송이 열린 유형만 넘긴다 */}
       <BrandTypePickerModal

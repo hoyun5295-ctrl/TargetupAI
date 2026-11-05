@@ -54,7 +54,7 @@ export function isCustomerSendable(c: {
  *   판정 기준 = checkCooldown(trigger-watcher)과 동일:
  *     - 재진입 불가 → execution이 하나라도 있으면 제외
  *     - 재진입 가능 + cooldown>0 → active이거나 마지막 진입이 cooldown 안이면 제외
- *     - 재진입 가능 + cooldown<=0 → 제외 없음(무제한 재진입, LIMIT 스로틀만)
+ *     - 재진입 가능 + cooldown<=0 → 지금 진행 중(active)만 제외(★ 2026-11-05 C105 H3 · 진입 넣기 가드 `reentryGuard` 와 같은 집합 · 계보면 계보 전체)
  *   params에 push(applyCustomerConditions와 동일 패턴) — 호출부는 cond 앞에 둔다. 반환은 'AND ...' 또는 ''.
  *   검증 컬럼: journey_executions.journey_id·customer_id·status·entered_at(executor·watcher 사용 중).
  */
@@ -76,10 +76,13 @@ export function buildReentryAntiJoin(
   }
   const cd = Math.floor(Number(cooldownDays) || 0);
   if (cd <= 0) {
-    if (!lineage) return '';
-    // 쿨다운 0이어도 다른 판에서 진행 중이면 그 판에서 마무리한다(이중 진입 0).
-    params.push(lineage.filter((x) => x !== journeyId));
-    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = ANY($${params.length}::uuid[]) AND je.customer_id = ${a}.id AND je.status = 'active')`;
+    // ★ 2026-11-05 C105 H3 — 진행 중이면 그 실행에서 마무리한다(지금 여정 · 계보 다른 판 모두 · 이중 진입 0).
+    //   = 진입 넣기 가드(journey-trigger-watcher `reentryGuard` = 허용이면 계보 · 지금 여정의 active 제외)와 같은 집합.
+    //   옛: 계보 없으면 조건 0 · 있으면 다른 판만 → 뽑기 · 세기가 지금 여정 진행 중 고객까지 세어 넣기 수와 달랐고
+    //   「한 번에 최대」를 넘었다며 여정이 멈출 수 있었다(Codex C104 구현 1R [범위 밖]).
+    params.push(lineage || journeyId);
+    const match = lineage ? `je.journey_id = ANY($${params.length}::uuid[])` : `je.journey_id = $${params.length}::uuid`;
+    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND je.status = 'active')`;
   }
   params.push(lineage || journeyId);
   const jIdx = params.length;

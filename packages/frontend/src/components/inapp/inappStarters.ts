@@ -6,7 +6,7 @@
  * ⛔ 사진은 넣지 않는다 — 가짜 사진이 발행되지 않게 빈 사진 칸으로 연다(발행 전 점검이 장마다 사진을 요구).
  * 문안 = 줄표(—) 없이 · 고객 이름은 %이름% (고객으로 보기에서 치환 확인).
  */
-import { layoutStyle, newSlideKey, type LayoutKey, type WsSlide } from './inappSlides';
+import { layoutStyle, newSlideKey, designForKey, isPosterLayout, posterLayoutOfKey, type LayoutKey, type WsSlide } from './inappSlides';
 
 export const BENEFIT_SLOT = '[혜택 안내: 직접 작성해주세요]';
 
@@ -46,16 +46,18 @@ export const INAPP_STARTERS: InAppStarter[] = [
     }),
   },
   {
+    // ★ 2026-11-05 인앱 포스터 재구성 §3-10 · §3-12 — 배너 시트 시작본을 내리고 통짜 포스터 시작본으로(장 글 채워짐 · 사진 비어 있음 ·
+    //   사진 칸 첫 버튼 = 「이 글로 AI 그림 만들기」 · 혜택 자리가 남았으면 생성이 막힌다)
     id: 'sale_banner',
     title: '기획전 · 할인',
-    desc: '큰 글 배너 시트',
-    layout: 'banner_sheet',
+    desc: '글이 들어간 포스터 한 장',
+    layout: 'baked_sheet',
     seed: () => ({
       template: 'full_image',
-      design: { poster_layout: 'banner_sheet', dismiss_mode: 'snooze_day' },
+      design: { poster_text: 'baked', dismiss_mode: 'snooze_day' },
       display_frequency: 'once_per_day',
       slides_ws: [
-        slide('banner_sheet', { eyebrow: '기획전', subtitle: '이번 주만 열리는', title: '특가 기획전', body: BENEFIT_SLOT, cta: { label: '기획전 보기', action_url: '' } }),
+        slide('overlay', { eyebrow: '기획전', title: '이번 주 특가 기획전', body: BENEFIT_SLOT, cta: { label: '기획전 보기', action_url: '' } }),
       ],
     }),
   },
@@ -106,11 +108,11 @@ export const INAPP_STARTERS: InAppStarter[] = [
 
 /** 모양만 고른 빈 시작 상태(입구 갤러리) — 포스터 계열은 빈 장 1개 · 새 모양은 하루 보지 않기 기본(설계서 §1-3). */
 export function blankSeedFor(layout: LayoutKey): Record<string, any> {
-  if (layout === 'event_card' || layout === 'banner_sheet' || layout === 'overlay') {
+  if (isPosterLayout(layout)) {
     return {
       template: 'full_image',
-      design: layout === 'overlay' ? { dismiss_mode: 'snooze_day' } : { poster_layout: layout, dismiss_mode: 'snooze_day' },
-      slides_ws: [slide(layout, {})],
+      design: designForKey(layout, { dismiss_mode: 'snooze_day' }),
+      slides_ws: [slide(posterLayoutOfKey(layout), {})],
     };
   }
   return { template: layout, title: '', body: '' };

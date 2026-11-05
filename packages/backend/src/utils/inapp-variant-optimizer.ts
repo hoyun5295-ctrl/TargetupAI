@@ -20,10 +20,10 @@
  */
 
 import { UserFacingError } from './http-error';
-import { query } from '../config/database';
+import { query, withTransaction } from '../config/database';
 import { sampleBeta, computeBetaCredibleInterval } from './bandit-optimizer';
 // ★ P1-4/P0-2 (2026-07-12) — 블록 정규화·스킴 무해화는 CT-27 단일 정의 재사용 (인라인 중복 금지)
-import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides, inAppPublishDefect, inAppNotPublishableError, activateInAppMessage } from './inapp-message';
+import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides, inAppNotPublishableError, activateInAppMessage, judgeSavedInAppRow, isBakedPoster } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -125,19 +125,36 @@ export async function createVariant(
 ): Promise<string> {
   if (!companyId || !input.parentMessageId) throw new Error('companyId + parentMessageId 필수');
 
-  const parentR = await query(
+  // ★ 2026-11-05 §3-13 — 한 트랜잭션: 부모 FOR UPDATE 먼저(잠금 한 규칙 = 부모 → 변형) → 잠근 부모로 입력 검사 · 상속 ·
+  //   통짜 규칙 → INSERT … RETURNING * → 결과 행 판정(게시 · 변형 · DM 연결) → 미달이면 되돌림.
+  //   (옛: 잠금 없이 부모를 읽어 그 사이 [반영]이 통짜로 바꾸면 옛 모양 변형이 켜진 채 들어왔다 · Codex 2R C7)
+  return withTransaction(async (run) => {
+  const parentR = await run(
     `SELECT id, parent_message_id, title, body, template, segment_conditions, trigger_conditions, personalization_vars,
             display_frequency, auto_dismiss_seconds, max_displays_per_user,
-            send_start_hour, send_end_hour, allowed_weekdays, locale_variants, is_ad, status,
+            send_start_hour, send_end_hour, allowed_weekdays, locale_variants, status,
             content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides, image_link_url
      FROM cdp_inapp_messages
-     WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1`,
+     WHERE id = $1::uuid AND company_id = $2::uuid LIMIT 1
+     FOR UPDATE`,
+    // ★ 2026-11-05 — is_ad 칸은 cdp_inapp_messages 에 없다(운영 정의 해시 대조 덤프 · SCHEMA.md 41칸 · 실 PG 42703) → 읽지도 쓰지도 않는다
     [input.parentMessageId, companyId]
   );
   if (parentR.rows.length === 0) throw new UserFacingError(404, 'MESSAGE_NOT_FOUND', '원본 메시지를 찾을 수 없어요.');
   const parent = parentR.rows[0];
   // ★ 2026-09-27 한줄로 V2 R257 — 변형의 변형은 만들지 않는다(서빙 후보 = 부모 직속 변형뿐이라 손자는 절대 노출되지 않는다)
   if (parent.parent_message_id) throw new VariantOfVariantError();
+
+  // ★ 2026-11-05 §3-3 — 변형 필수 칸은 여기 한 곳(라우트는 부모 모양을 모른다 · 원본 · 제목만 본다).
+  //   통짜 부모 = 그림을 바꿔 비교한다(그림 필수 · 글만 다른 변형 = 거절) · 그 밖 = 지금처럼 본문 필수.
+  const parentBaked = isBakedPoster(parent);
+  const variantImage = String(input.image_url ?? '').trim();
+  if (parentBaked && !variantImage) {
+    throw new UserFacingError(400, 'INAPP_VARIANT_NEEDS_IMAGE', '그림에 글이 들어간 메시지는 그림을 바꿔서 비교해요. 변형에 쓸 그림을 넣어 주세요.');
+  }
+  if (!parentBaked && !String(input.body ?? '').trim()) {
+    throw new UserFacingError(400, 'INAPP_INPUT', '원본 메시지 · 제목 · 내용을 모두 넣어 주세요.');
+  }
 
   // ★ P1-4 — 블록·테마·형태·뱃지·채널 상속. content_blocks는 부모 블록 사본에 variant 문안(title/body)만 교체
   //   (미상속 시 블록 부모의 variant가 레거시 단색 렌더로 표시돼 A/B가 "디자인 세대 차이" 테스트로 오염).
@@ -147,8 +164,14 @@ export async function createVariant(
     : replaceBlockTexts(parent.content_blocks, input.title, input.body);
   // ★ 2026-07-21 포스터 캐러셀 상속 — 부모 슬라이드 복사 + slide[0] 문안만 variant 문안으로 교체(블록 replaceBlockTexts 미러).
   //   빠지면 A/B variant가 캐러셀을 잃고 단일 포스터로 노출(Codex HIGH). design(포스터 색·서체)도 함께 상속.
+  // ★ 2026-11-05 §3-3 통짜 부모 = 첫 장 = 부모 첫 장 사본 + 변형 그림 · 변형 제목(= 그림 속 글)
   const variantSlides = Array.isArray(parent.poster_slides) && parent.poster_slides.length > 0
-    ? [{ ...parent.poster_slides[0], title: input.title, body: input.body }, ...parent.poster_slides.slice(1)]
+    ? [
+        parentBaked
+          ? { ...parent.poster_slides[0], image_url: variantImage, title: input.title, body: input.body }
+          : { ...parent.poster_slides[0], title: input.title, body: input.body },
+        ...parent.poster_slides.slice(1),
+      ]
     : null;
   // ★ 2026-07-21 캐러셀 variant의 flat(image_url·buttons)은 slide0에서 합성 — 구 SDK가 첫 장을 단일 포스터로 표시(Codex 2R ⑥ 잔여).
   //   직접 /inapp/variant API가 image_url/buttons 생략해도 flat이 slide0과 일치(create/update와 동일 CT 재사용).
@@ -158,27 +181,14 @@ export async function createVariant(
     ? composeFlatFromPosterSlides(variantSlides, { title: input.title, body: input.body, imageUrl: input.image_url, buttons: [] })
     : null;
 
-  // ★ 2026-09-29 게시 조건 CT(인앱 만들기 개편 §1-4) — 켜진 채로 만드는 변형도 같은 판정을 거친다.
-  //   부모가 편집기 초안(사진 없는 장 · placeholder 보관)이면 그 내용을 이어받은 변형이 바로 노출되는 길을 막는다.
-  if (input.status !== 'paused') {
-    const defect = inAppPublishDefect({
-      title: input.title, body: input.body, template: input.template || parent.template,
-      image_url: variantFlat ? variantFlat.imageUrl : (input.image_url ?? null),
-      buttons: variantFlat ? variantFlat.buttons : (input.buttons || []),
-      badge_text: input.badge_text !== undefined ? input.badge_text : (parent.badge_text ?? null),
-      content_blocks: variantBlocks, poster_slides: variantSlides,
-    });
-    if (defect) throw inAppNotPublishableError(defect);
-  }
-
-  const r = await query(
+  const r = await run(
     `INSERT INTO cdp_inapp_messages (
        id, company_id, created_by, title, body, template, image_url, buttons,
        background_color, text_color,
        segment_conditions, trigger_conditions, personalization_vars,
        display_frequency, auto_dismiss_seconds, max_displays_per_user,
        send_start_hour, send_end_hour, allowed_weekdays, locale_variants,
-       animation, is_ad, status,
+       animation, status,
        parent_message_id, variant_weight,
        content_blocks, theme, accent_color, card_style, badge_text, channel, design, poster_slides, image_link_url,
        created_at, updated_at
@@ -188,14 +198,14 @@ export async function createVariant(
        $10::jsonb, $11::jsonb, $12::jsonb,
        $13, $14, $15,
        $16, $17, $18::integer[], $19::jsonb,
-       $20, $21, $33,
-       $22::uuid, $23,
-       $24::jsonb, $25, $26, $27, $28, $29, $30::jsonb, $31::jsonb, $32,
+       $20, $32,
+       $21::uuid, $22,
+       $23::jsonb, $24, $25, $26, $27, $28, $29::jsonb, $30::jsonb, $31,
        NOW(), NOW()
-     ) RETURNING id`,
+     ) RETURNING *`,
     [
       companyId, createdBy,
-      input.title, input.body,
+      input.title, String(input.body ?? ''),
       input.template || parent.template,
       variantFlat ? variantFlat.imageUrl : (input.image_url ?? null),
       JSON.stringify(sanitizeButtonsActionUrls(variantFlat ? variantFlat.buttons : (input.buttons || []))),
@@ -212,7 +222,6 @@ export async function createVariant(
       parent.allowed_weekdays || [0, 1, 2, 3, 4, 5, 6],
       JSON.stringify(parent.locale_variants || {}),
       input.animation || 'fade',
-      parent.is_ad || false,
       input.parentMessageId,
       input.variant_weight ?? 100,
       JSON.stringify(variantBlocks),
@@ -226,12 +235,19 @@ export async function createVariant(
       // ★ 2026-07-31 이미지 클릭 링크 상속 — 미상속 시 variant만 이미지 클릭이 죽는다(0721 poster_slides 유실과 같은 부류).
       // ★ (Codex 2R) 블록이 진실인 variant는 flat 전용 링크를 저장하지 않는다(create/update 계약 미러).
       variantBlocks.length > 0 ? null : (parent.image_link_url ?? null),
-      // ★ 2026-09-26 R1-45 — 상태($33)
+      // ★ 2026-09-26 R1-45 — 상태($32)
       input.status === 'paused' ? 'paused' : 'active',
     ]
   );
 
-  return String(r.rows[0].id);
+  // ★ 2026-09-29 게시 조건 CT(인앱 만들기 개편 §1-4) — 켜진 채로 만드는 변형도 같은 판정을 거친다.
+  //   부모가 편집기 초안(사진 없는 장 · placeholder 보관)이면 그 내용을 이어받은 변형이 바로 노출되는 길을 막는다.
+  // ★ 2026-11-05 §3-13 — 판정 행 = 저장 결과 행(옛 인라인 행 = 링크 · 모양 · 원본 id 가 빠졌다 · C1 · S20) · 잠근 부모로 변형 판정
+  const saved = r.rows[0];
+  const defect = await judgeSavedInAppRow(run, companyId, saved, parent);
+  if (defect) throw inAppNotPublishableError(defect);   // withTransaction 이 되돌린다(변형 0)
+  return String(saved.id);
+  });
 }
 
 /**

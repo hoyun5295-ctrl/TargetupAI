@@ -20,29 +20,37 @@ import TemplatePicker, { type StudioTemplatePublic } from '../../studio/Template
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../../studio/StudioMake';
 import StudioWatermark from '../../studio/StudioWatermark';
 import AssetLibraryPickerModal from '../../assets/AssetLibraryPickerModal';
-import { saveStudioTemp } from '../../../lib/studio-api';
+import { saveStudioTemp, studioFetch } from '../../../lib/studio-api';
+import type { StudioTexts } from '../../../lib/studio-texts';
 
 type Step = 'pick' | 'make' | 'result';
 
 export default function StudioInsertModal({
-  open, onClose, onInserted, defaultTitle, defaultSubtitle,
+  open, onClose, onInserted, defaultTitle, defaultSubtitle, defaultLabel, textless = false, initialTemplateId,
 }: {
   open: boolean;
   onClose: () => void;
-  onInserted: (url: string) => void;
+  /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — texts = 그림에 그린 글(인앱 통짜 장 글 · DM 호출부는 둘째 인자를 쓰지 않는다) */
+  onInserted: (url: string, texts?: StudioTexts) => void;
   defaultTitle?: string;
   defaultSubtitle?: string;
+  /** ★ 2026-11-05 작은 라벨 문구(인앱 통짜 장 · 예시에서 시작) */
+  defaultLabel?: string;
+  /** ★ 2026-11-05 글 없는 판(인앱 글 얹기 장 · 글은 렌더러가 얹는다) */
+  textless?: boolean;
+  /** ★ 2026-11-05 시작본 · 예시가 정한 템플릿 — 고르기를 건너뛰고 만들기 단계로 연다(누름 한 번 + 2크레딧 확인 · 없으면 고르기부터) */
+  initialTemplateId?: string | null;
 }) {
   const toast = useToast();
   const [step, setStep] = useState<Step>('pick');
   const [template, setTemplate] = useState<StudioTemplatePublic | null>(null);
   // 호출부가 넘긴 블록 문구가 먼저다 · 빈 칸만 템플릿 기본 문구로 채운다(lib/studio-texts)
-  const initialTexts = useMemo(() => ({ label: '', title: defaultTitle || '', subtitle: defaultSubtitle || '' }), [defaultTitle, defaultSubtitle]);
+  const initialTexts = useMemo(() => ({ label: defaultLabel || '', title: defaultTitle || '', subtitle: defaultSubtitle || '' }), [defaultLabel, defaultTitle, defaultSubtitle]);
   const make = useStudioMake(template, initialTexts);
   // ★ 2026-09-23 미리보기는 blob 주소로 띄운다. 만든 그림의 주소(`/api/image-studio/temp/:id`)는 로그인 토큰이
   //   있어야 열리는데 `<img src>` 는 토큰을 못 붙여 결과 화면이 빈칸이었다(0922 남지현 접수 · 「이 그림 넣기」는 tempId 로 저장해 정상).
   //   preview = null 은 미리보기를 못 받은 경우다 — 넣기는 그대로 된다.
-  const [made, setMade] = useState<{ tempId: string; preview: string | null } | null>(null);
+  const [made, setMade] = useState<{ tempId: string; preview: string | null; texts: StudioTexts } | null>(null);
   const [saving, setSaving] = useState(false);
   const [storageFull, setStorageFull] = useState(false);
   const [libOpen, setLibOpen] = useState(false);
@@ -65,16 +73,27 @@ export default function StudioInsertModal({
     setTemplate(null);
     setStorageFull(false);
     make.reset(initialTexts);
+    // ★ 2026-11-05 §3-8 정해 둔 템플릿 = 고르기를 건너뛴다(목록에서 못 찾으면 고르기 그대로)
+    if (initialTemplateId) {
+      let alive = true;
+      studioFetch('/api/image-studio/templates').then(({ data }) => {
+        if (!alive) return;
+        const list: StudioTemplatePublic[] = Array.isArray(data?.templates) ? data.templates : [];
+        const hit = list.find((t) => t.id === initialTemplateId);
+        if (hit) { setTemplate(hit); setStep('make'); }
+      }).catch(() => { /* 고르기부터 */ });
+      return () => { alive = false; };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const generate = async () => {
     if (generating) return;
-    const r = await make.generate();
+    const r = await make.generate({ textless });
     if (!r) return;
     dropPreview();
     previewUrl.current = r.preview;
-    setMade({ tempId: r.tempId, preview: r.preview });
+    setMade({ tempId: r.tempId, preview: r.preview, texts: r.texts });
     setStorageFull(false);
     setStep('result');
   };
@@ -90,7 +109,7 @@ export default function StudioInsertModal({
         if (r.code === 'EXPIRED') { dropPreview(); setMade(null); setStep('make'); }
         return;
       }
-      onInserted(r.asset.url);
+      onInserted(r.asset.url, made.texts);
       toast.success('만든 그림을 블록에 넣었어요. 라이브러리에도 보관했어요.');
       // 처음 상태로 돌리는 것은 넣기 성공 뒤뿐 — 다음에 열 때 그 블록의 문구로 새로 시작한다
       dropPreview();
@@ -140,7 +159,7 @@ export default function StudioInsertModal({
         {step === 'make' && template && (
           <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
             <div className="sm:col-span-2"><TemplateExampleCard template={template} /></div>
-            <div className="sm:col-span-3"><StudioMakeFields make={make} /></div>
+            <div className="sm:col-span-3"><StudioMakeFields make={make} textless={textless} /></div>
           </div>
         )}
         {step === 'result' && made && (

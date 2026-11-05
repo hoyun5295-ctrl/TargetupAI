@@ -36,6 +36,7 @@ import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../util
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents, fallbackOf } from '../utils/sms-result-map';
+import { isKakaoSplitChannel, brandBillingKey } from '../utils/billing-types';   // ★ C107 카카오 분리 대상 · 브랜드 청구 구분
 // ★ 2026-10-16 통계 엑셀 대체 행 이름 = 청구서와 같은 유형 표시명(B-1016-1)
 import { billingTypeLabel } from '../utils/billing-invoice-lines';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
@@ -44,7 +45,7 @@ import { validateSmsTables } from '../utils/sms-table-validator';
 // ★ D145 P0: 예약 캠페인 자동 정리 (모든 발송 관련 라우트 정합성)
 import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateAlimtalkFallbackByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, loadAlimtalkFallbackForList, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateKakaoFallbackByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, loadKakaoFallbackForList, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
@@ -106,6 +107,7 @@ import { sendTypeLabel } from '../utils/send-type-axis';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
 import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
 import { swrCache } from '../utils/swr-cache';
+import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import { standardFieldColumn } from '../utils/standard-field-map';   // ★ 2026-11-05 C103 F6 칸 데이터 유무 = 표준 필드 칸 CT
 import { journeyCreditForecast } from '../utils/journey-credit-forecast';   // ★ 2026-10-20 여정 V.3 §5-5 요금제 신청 목록 숫자
 
@@ -369,8 +371,7 @@ router.put('/users/:id/mfa-phone', authenticate, requireSuperAdmin, async (req: 
 router.get('/users/:id/unsubscribes', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const search = req.query.search as string || '';
 
     const result = await getUserUnsubscribes(id, { page, limit, search });
@@ -1051,7 +1052,7 @@ router.get('/spam-block/hits', authenticate, requireSuperAdmin, requireAdminArea
   try {
     // ★ 2026-10-07 쪽 넘김(Harold: 20건씩) — 옛: 최근 100건을 한 번에 내려 목록이 길고 100건 밖은 볼 수 없었다
     const pageSize = 20;
-    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const [result, cnt] = await Promise.all([
       query(
         `SELECT h.id, h.rule_id, r.name AS rule_name, h.company_id, c.company_name,
@@ -1451,7 +1452,7 @@ router.get('/admin-accounts/history', authenticate, requireSuperAdmin, async (re
     if (!canRead(myRole, 'adminAccounts')) {
       return res.status(403).json({ error: '직원 계정은 대표 · 지원팀장 등급에서만 볼 수 있습니다.' });
     }
-    const limit = Math.min(Number(req.query.limit) || 100, 300);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 100, maxLimit: 300 }).limit;
     const result = await query(
       `SELECT l.id, l.action, l.details, l.created_at, host(l.ip_address) AS ip_address,
               a.login_id AS actor_login_id, a.name AS actor_name
@@ -1479,7 +1480,7 @@ router.get('/geo/hits', authenticate, requireSuperAdmin, requireAdminArea('geoHi
     }
     // ★ 2026-10-07 쪽 넘김(Harold: 20건씩) — 옛: 최근 200건을 한 번에 내려 목록이 끝없이 길고 200건 밖은 볼 수 없었다
     const pageSize = 20;
-    const page = Math.max(1, Math.floor(Number(req.query.page) || 1));
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     // ★ 2026-10-08 본인 전용 계정(PRIVATE_ACCESS_LOGIN_IDS · 기본 ceo)의 해외 접속 행은 본인에게만 — 이미 남은 행도 같이 걸러진다
     const hidden = await hiddenAccessOwnerIds(req.user?.userId);
     const [result, cnt] = await Promise.all([
@@ -2395,8 +2396,7 @@ router.put('/companies/:id/dashboard-cards', authenticate, requireSuperAdmin, as
 // 예약된 캠페인 목록 조회 (전체 고객사)
 router.get('/campaigns/scheduled', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
     const search = (req.query.search as string) || '';
     const companyId = (req.query.companyId as string) || '';
@@ -3100,8 +3100,7 @@ router.get('/stats/send', authenticate, requireSuperAdmin, async (req: Request, 
     }
 
     const companyId = (req.query.companyId as string) || '';
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 10, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
 
     // ★ D104: 날짜 필터 컨트롤타워 사용
@@ -3366,7 +3365,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
 
       const testRows2All = await smsSelectAll(
         testTables2,
-        `dest_no as phone, msg_type, status_code, msg_instm as sent_at, bill_id as sender_id`,
+        `dest_no as phone, msg_type, status_code, k_oriseq, msg_instm as sent_at, bill_id as sender_id`,
         `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere2}`,
         mysqlParams2,
         `ORDER BY msg_instm DESC LIMIT 50`
@@ -3376,7 +3375,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       testDetail = (testRows2 as any[]).map(r => ({
         phone: r.phone,
         // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
-        msgType: getSendTypeLabel(r.msg_type),
+        msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),   // ★ C107 결과 코드까지
         status: isSuccess(r.status_code) ? 'success' : isPending(r.status_code) ? 'pending' : 'fail',
         sentAt: r.sent_at,
         testType: 'manager',
@@ -3432,8 +3431,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
 // 전체 캠페인 목록 (모든 회사 통합)
 router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 10, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const search = (req.query.search as string) || '';
     const status = (req.query.status as string) || '';
     const companyId = (req.query.companyId as string) || '';
@@ -3478,7 +3476,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const result = await query(`
       SELECT
         c.id, c.campaign_name as name, c.status, c.send_type, c.send_channel, c.created_at,
-        c.company_id, c.created_by, c.message_type, c.send_channel, c.scheduled_at, c.sent_at,
+        c.company_id, c.created_by, c.message_type, c.send_channel, c.kakao_targeting, c.scheduled_at, c.sent_at,   -- ★ C107 D-11 브랜드 친구/비친구 이름
         c.result_final, c.sent_count, c.success_count, c.fail_count,
         jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         co.company_name, co.company_code,
@@ -3499,7 +3497,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const adminNonFinal = result.rows.filter((c: any) => !c.result_final);
     const adminCampSentTimeMap = await aggregateSmsSendTimesByCampaign(adminNonFinal);
     // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도 · 대체 문자 분리(거래내역서와 같은 판정)
-    const adminAlimtalkMap = await loadAlimtalkFallbackForList(result.rows);
+    const adminAlimtalkMap = await loadKakaoFallbackForList(result.rows);
 
     // ★ D144 P4/P7 후속 (2026-05-07): status='sending' 자동 정리 — 결과 모두 도착(대기 0 + 성공/실패 > 0)이면 completed.
     const autoCompleteIds: string[] = [];
@@ -3517,7 +3515,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
         total_success: cnt.success,
         total_fail: cnt.fail,
         total_pending: cnt.pending,
-        alimtalk_split: adminAlimtalkMap.get(c.id) ?? null,
+        kakao_split: adminAlimtalkMap.get(c.id) ?? null,
         sent_at: c.result_final ? c.sent_at : (adminCampSentTimeMap.get(c.id) ?? c.sent_at),
       };
     });
@@ -3554,8 +3552,7 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
 router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 50;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 50, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
     const statusFilter = (req.query.status as string) || '';   // success / fail / pending / ''
     const searchType = (req.query.searchType as string) || ''; // dest_no / call_back
@@ -3973,8 +3970,7 @@ router.post('/companies/:id/balance-adjust', authenticate, requireSuperAdmin, as
 // 회사별 잔액 이력 조회 (슈퍼관리자용)
 router.get('/companies/:id/balance-transactions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 20;
+  const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
   const offset = (page - 1) * limit;
 
   try {
@@ -4077,7 +4073,7 @@ router.post('/companies/:id/credit-adjust', authenticate, requireSuperAdmin, asy
 // 회사별 크레딧 이력 (페이지네이션)
 router.get('/companies/:id/credit-transactions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const page = parseInt(req.query.page as string) || 1;
+  const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
   try {
     const { getCreditTransactions } = await import('../utils/ai-credit');
     const r = await getCreditTransactions(id, page, 20);
@@ -4115,7 +4111,7 @@ router.put('/companies/:id/postpaid-overage-limit', authenticate, requireSuperAd
 // 크레딧 충전 요청 목록 (status 필터)
 router.get('/credit-requests', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const status = (req.query.status as string) || undefined;
     const { getRechargeRequests } = await import('../utils/ai-credit-recharge');
     const r = await getRechargeRequests({ status, page, pageSize: 20 });
@@ -4164,7 +4160,7 @@ router.put('/credit-requests/:id/reject', authenticate, requireSuperAdmin, async
 // GET /credit-transactions-all — 전체 회사 AI 크레딧 사용 이력 (슈퍼관리자 · 회사/타입 필터 + 페이지네이션)
 router.get('/credit-transactions-all', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const page = Number(req.query.page) || 1;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const companyId = req.query.company ? String(req.query.company) : undefined;
     const type = req.query.type ? String(req.query.type) : undefined;
     const { getAllCreditTransactions } = await import('../utils/ai-credit');
@@ -4206,8 +4202,7 @@ router.post('/predictive/run-now', authenticate, requireSuperAdmin, async (_req:
 // 충전 요청 목록 조회 (필터 + 페이지네이션)
 router.get('/deposit-requests', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 10;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 10, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
     const status = req.query.status as string; // pending, confirmed, rejected
     const paymentMethod = req.query.paymentMethod as string; // deposit, card, virtual_account
@@ -4760,8 +4755,8 @@ router.get('/agent-charges', authenticate, requireSuperAdmin, async (req: Reques
       startDate: typeof req.query.startDate === 'string' ? req.query.startDate : undefined,
       endDate: typeof req.query.endDate === 'string' ? req.query.endDate : undefined,
     };
-    const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 200);
-    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 10, maxLimit: 200 }).limit;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
     const [rows, total, latestFilledAt] = await Promise.all([
       listAgentCharges({ ...filter, limit, offset: (page - 1) * limit }),
       countAgentCharges(filter),
@@ -4807,8 +4802,8 @@ router.get('/agent-charge-orders', authenticate, requireSuperAdmin, async (req: 
     if (!allowed.includes(status)) {
       return res.status(400).json({ error: '조회할 수 없는 상태입니다.' });
     }
-    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 200);
-    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 20, maxLimit: 200 }).limit;
+    const page = parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true });
 
     const where = status === 'all' ? '' : 'WHERE o.status = $1';
     const params: any[] = status === 'all' ? [] : [status];
@@ -4905,8 +4900,7 @@ router.get('/pending-badges', authenticate, requireSuperAdmin, async (_req: Requ
 
 router.get('/charge-management', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 15;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 15, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
     const companyId = req.query.companyId as string;
     const type = req.query.type as string;
@@ -5040,7 +5034,7 @@ router.get('/watch-log/access', authenticate, requireSuperAdmin, async (req: Req
 router.get('/watch-log', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     if (!(await isWatchLogViewer(req.user?.userId))) return res.status(403).json({ success: false, error: '감시 기록 열람 권한이 없습니다.' });
-    const data = await loadWatchIps(Number(req.query.page) || 1);
+    const data = await loadWatchIps(parseQueryInt(req.query.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX, clamp: true }));
     return res.json({ success: true, ...data });
   } catch (err: any) {
     console.error('[admin/watch-log] 조회 실패:', err);
@@ -5191,8 +5185,8 @@ router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Reque
     if (!(await isHelpQuestionViewer(req.user?.userId))) {
       return res.status(403).json({ error: '질문 이력 열람 권한이 없습니다.' });
     }
-    const { page = 1, limit = 25, answered = 'all', companyId, q } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    const { answered = 'all', companyId, q } = req.query;
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 25, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59) 주소 숫자 값 = CT
 
     let whereClause = 'WHERE 1=1';
     const params: any[] = [];
@@ -5227,15 +5221,15 @@ router.get('/help-questions', authenticate, requireSuperAdmin, async (req: Reque
         ${whereClause}
         ORDER BY h.created_at DESC
         LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
-      [...params, Number(limit), offset],
+      [...params, limit, offset],
     );
 
     const total = Number(countRes.rows[0]?.total || 0);
     return res.json({
       success: true,
       total,
-      totalPages: Math.max(1, Math.ceil(total / Number(limit))),
-      page: Number(page),
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+      page,
       // kind = 화면이 "기능 요청"과 "못 답함"을 다르게 그리는 근거. 판정은 서버 레지스트리 하나다.
       // reason_label(★0825) = 못 답함 사유의 한글 라벨 — 변환 소유는 helpReasonLabel CT 하나다
       questions: listRes.rows.map((r: any) => ({
@@ -5552,7 +5546,7 @@ router.get('/best-layout/skeleton/candidates', authenticate, requireSuperAdmin, 
     if (!isSkeletonChannel(channel)) return res.status(400).json({ error: '채널(DM·이메일)을 선택해주세요.' });
     const companyId = resolveSkeletonCompanyId(req.query.companyId);
     if (!companyId) return res.status(400).json({ error: '내부 전용 회사(OUTREACH_COMPANY_ID)가 설정되지 않았습니다.' });
-    const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 50));
+    const limit = parsePageParams(undefined, req.query.limit, { defaultLimit: 50, maxLimit: 50 }).limit;
     const r = await listPromotionCandidates({ companyId, channel, limit });
     res.json({ success: true, company: r.company, candidates: r.candidates });
   } catch (err: any) {
@@ -5815,8 +5809,8 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
     if (!(await isAuditLogViewer(req.user?.userId))) {
       return res.status(403).json({ error: '감사 로그 열람 권한이 없습니다.' });
     }
-    const { page = 1, limit = 25, action, companyId, fromDate, toDate, userId } = req.query;
-    const offset = (Number(page) - 1) * Number(limit);
+    const { action, companyId, fromDate, toDate, userId } = req.query;
+    const { page, limit, offset } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 25, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59) 주소 숫자 값 = CT
 
     let whereClause = 'WHERE 1=1';
     const params: any[] = [];
@@ -5862,7 +5856,7 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
     const total = parseInt(countResult.rows[0].count);
 
     // 데이터 조회
-    params.push(Number(limit), offset);
+    params.push(limit, offset);
     const result = await query(
       `SELECT 
         al.id, al.user_id, al.action, al.target_type, al.target_id,
@@ -5893,8 +5887,8 @@ router.get('/audit-logs', authenticate, requireSuperAdmin, async (req: Request, 
     res.json({
       logs: result.rows,
       total,
-      page: Number(page),
-      totalPages: Math.ceil(total / Number(limit)),
+      page,
+      totalPages: Math.ceil(total / limit),
       actions: actionsResult.rows.map((r: any) => r.action),
     });
   } catch (error) {
@@ -6482,7 +6476,7 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     //   PG는 캠페인 메타 + 회사+사용자만 SELECT → MySQL 큐 + 카카오 직접 카운트 → JS에서 6-key 그룹핑.
     const exportMetaResult = await query(
       `SELECT
-        c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_channel, c.send_type,
+        c.id, c.company_id, c.created_by, c.target_count, c.message_type, c.send_channel, c.send_type, c.kakao_targeting,
         c.result_final, c.sent_count, c.success_count, c.fail_count,
         jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         TO_CHAR(${STAT_DATE_EXPR} AT TIME ZONE 'Asia/Seoul', 'YYYY-MM-DD') as send_date,
@@ -6504,9 +6498,10 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     const exportResultMap = await getCampaignResultCounts(exportMetaResult.rows);
     // 알림톡 캠페인 = 알림톡 시도 행 + 대체 문자 행. ★ 2026-10-16 캠페인 목록과 같은 집계 하나(B-1016-1 · 서수란 접수).
     //   옛 엑셀 전용 분류(행 1 = 채널 1)는 비토 라인 K행 대체(7830·7831)를 대체로만 세어 「알림톡 0」을 찍었다.
-    //   ⛔ 목록용 loadAlimtalkFallbackForList(4초 상한 · 넘으면 빈 결과)를 쓰지 않는다 — 엑셀 알림톡 행이 조용히 0이 된다.
-    const alimtalkCampaigns = exportMetaResult.rows.filter((c: any) => c.send_channel === 'alimtalk');
-    const exportSplitMap = await aggregateAlimtalkFallbackByCampaign(alimtalkCampaigns);
+    //   ⛔ 목록용 loadKakaoFallbackForList(4초 상한 · 넘으면 빈 결과)를 쓰지 않는다 — 엑셀 알림톡 행이 조용히 0이 된다.
+    // ★ 2026-11-05 C107 — 브랜드 전용 캠페인도 「카카오 시도 + 대체 문자」(분리 대상 판정 = isKakaoSplitChannel 한 곳)
+    const splitCampaigns = exportMetaResult.rows.filter((c: any) => isKakaoSplitChannel(c.send_channel));
+    const exportSplitMap = await aggregateKakaoFallbackByCampaign(splitCampaigns);
 
     type ExportBucket = {
       send_date: string; company_name: any; company_code: any; login_id: any; user_name: any;
@@ -6536,13 +6531,16 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
     };
 
     for (const c of exportMetaResult.rows) {
-      if (c.send_channel === 'alimtalk') {
+      if (isKakaoSplitChannel(c.send_channel)) {
         const zero = { total: 0, success: 0, fail: 0, pending: 0 };
         const split = exportSplitMap.get(c.id);
         const sLms = split?.fallback.LMS ?? zero;
         const sSms = split?.fallback.SMS ?? zero;
-        // 알림톡 행 — 알림톡 시도 전체(대체로 넘어간 건은 알림톡 실패로 · 접수 기대 = 전송 1 · 실패 1). 대상건수는 여기에 귀속.
-        addExportBucket(c, 'alimtalk', '알림톡', Number(c.target_count || 0),
+        // 카카오 행 — 시도 전체(대체로 넘어간 건은 카카오 실패로 · 접수 기대 = 전송 1 · 실패 1). 대상건수는 여기에 귀속.
+        // ★ 2026-11-05 C107 D-11 — 브랜드 집계 키 = 청구 구분(BRAND · BRAND_NF) · 이름 = 그 청구 유형 이름(이름만 바꾸면 친구 · 비친구가 한 칸에 합쳐진다)
+        const kakaoKey = c.send_channel === 'alimtalk' ? 'alimtalk' : brandBillingKey(c.kakao_targeting);
+        const kakaoLabel = getCampaignChannelLabel(c.send_channel, c.message_type, c.kakao_targeting ?? null);
+        addExportBucket(c, kakaoKey, kakaoLabel, Number(c.target_count || 0),
           split?.total ?? 0, split?.success ?? 0, split?.fail ?? 0, split?.pending ?? 0);
         // 대체 문자 행 — LMS/SMS 각각(0이면 행 생략, 대상건수 중복 방지 0). 이름 = 청구서와 같은 유형 표시명(LMS(대체발송)).
         if (sLms.total > 0) {

@@ -2,7 +2,7 @@
 
 > 상시 로드 아님. **「배포 시작하자」 때 이 파일부터 연다.** 칸의 뜻 · 규칙 = [설계서](../docs/2026-10-27-real-pg-test-deploy-ledger-design.md) §3 · 코드 배포 순서 = [OPS.md](OPS.md) §2-2(여기는 가리키기만).
 > 계산 = `packages/backend` 에서 `node scripts/deploy-ledger.mjs`(읽기 전용 git · 이번 pull 에 딸려 가는 것 · 받았지만 아직 안 도는 것 · 카드 상태).
-> **이 파일을 쓸 때마다** 카드 상태를 다시 계산해 STATUS 줄을 맞춘다(STATUS 줄은 계산 결과의 사본). SQL 원문은 여기 한 곳(설계서에는 id 만).
+> **이 파일을 쓸 때마다** 카드 상태를 다시 계산해 STATUS-FEED 카드 · §0 목록 줄을 맞춘다(그 줄은 계산 결과의 사본 · ★1105 목록이 STATUS 에서 FEED §0 으로 옮김). SQL 원문은 여기 한 곳(설계서에는 id 만).
 > 명령은 응답 하나에 하나 · 되돌리기 블록은 답에 붙이지 않는다 · 발송을 멈추는 명령은 「그때 단독」.
 
 ## 머리
@@ -49,7 +49,10 @@
 | C102 | d7e3061f |
 | C101 | cae2cd7c |
 | C103 | c5ebdd86 |
-| C104 | 미커밋 |
+| C104 | 67d7b5d3 |
+| C105 | 미커밋 |
+| C106 | 미커밋 |
+| C107 | 미커밋 |
 
 ## §1 대기
 
@@ -1122,6 +1125,102 @@ UNION ALL
 - 선행: 코드 배포(DDL 0)
 - 기대: 직원 시트 30 ~ 32 전 항목 「맞음」(A/B 칸 여정 켜기 · 혜택 넣기 안내 · 시작 카드 인원 + 등록 7일 안 빠진 수 · 미리 보기 「들어올 고객」) · 배포 뒤 에러 로그에 journeyEntryInputs · countJourneyTargetsWithGrace 오류 0
 - 확인: 시트 결과(날짜 · 계정 · 사람) · 배포 뒤 에러 로그 grep
+- 결과:
+
+### C105-S0 · 여정 개별회신번호 규칙 바뀜 배포 전 실측(pull 뒤 · build 전 · 읽기만)
+- 카드: C105
+- 단계: 배포 전
+- 선행: git pull
+- 기대: packages/backend 에서 npx ts-node scripts/c105-s0-individual-callback-diff.ts · store 모드 켜진 · 멈춘 여정마다 「바뀜 없음 · 번호만 바뀜 · 발송 → 실패 · 실패 → 발송 · 멈춤 바뀜」 수(회사 고객 전원 상한 · 진행 중 부분 수) · 「발송 → 실패」 가 있으면 Harold 판단 뒤 build
+- 확인: 출력 줄(번호 · 개인정보 0)
+- 결과:
+
+### C105-S1 · 범위 밖 다섯 실측(배포 뒤 · 직원 시트 33 ~ 37 · docs/2026-11-05-c105-staff-sheet.xlsx)
+- 카드: C105
+- 단계: 배포 뒤
+- 선행: 코드 배포(DDL 0) · C105-S0
+- 기대: 직원 시트 33 ~ 37 전 항목 「맞음」(혜택 기간 · 개별회신번호 · 재진입 인원 · 고객 목록 주소 숫자 · A/B 판마다 검사) · 배포 뒤 에러 로그에 INVALID_NUMBER_INPUT 이 나오면 주소 · 화면(생산자) 기록
+- 확인: 시트 결과(날짜 · 계정 · 사람) · 배포 뒤 에러 로그 grep
+- 결과:
+
+### C106-S1 · 인앱 예시 갤러리 그림 만들기(배포 뒤 · 서버 스크립트 · AI 생성 원가)
+- 카드: C106
+- 단계: 배포 뒤
+- 선행: 코드 배포(DDL 0 · **C105 와 한 배포 · Harold 1105 「다른세션 작업 끝나면 한번에 배포」** · routes/cdp.ts 에 C105 · C106 덩어리가 함께 있다) · 생성 원가 확인(설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §10-3)
+- 기대: 그림 없는 장 14 → 0 · 실패 3번이면 멈춤 · 서빙본 미리 만들기(warm) · 새 인앱 메시지 입구 맨 위 「예시로 보고 시작」 카드 9개
+- 확인: 스크립트 끝 줄(만듦 · 실패 · 남은 장) · 입구 화면
+- 결과:
+
+### C106-S2 · 인앱 포스터 재구성 실측(배포 뒤 · 직원 시트 S1 1 ~ 15 · 설계서 §7)
+- 카드: C106
+- 단계: 배포 뒤
+- 선행: 코드 배포 · C106-S1
+- 기대: 시트 1 ~ 15 전 항목 「맞음」(16 = 팝폰 OTA 뒤) · 배포 뒤 에러 로그에 is_ad 칸 없음 오류 0(B-1105-3)
+- 확인: 시트 결과(날짜 · 계정 · 사람) · 배포 뒤 에러 로그 grep
+- 결과:
+
+### C106-S3 · 팝폰 앱 계약 v4(선행 = 팝폰 미커밋 5파일 커밋 · 설계서 §3-11 · §10-5)
+- 카드: C106
+- 단계: 배포 뒤
+- 선행: C106-S2 · 팝폰 커밋(Harold)
+- 기대: 앱 코드(caps · 통짜 · 떠 있는 카드 · 띠 2종) → OTA → 실기기(안드로이드 · iOS) 확인 → 프론트 APP_CONFIRMED_CAPS 에 낱말을 넣는 배포
+- 확인: 실기기 화면 · 시트 16
+- 결과:
+
+### C107-S1 · 브랜드메시지 · 알림톡 창 · 발송결과 · 통계 · 정산 실측(배포 뒤 · 직원 시트 38 ~ 48 · docs/2026-11-05-c107-staff-sheet.xlsx)
+- 카드: C107
+- 단계: 배포 뒤
+- 선행: 코드 배포(DDL 0 · **C104 · C105 · C106 과 한 배포 · Harold 1105 「다른세션 작업 끝나면 한번에 배포」** · 배포 전 C105-S0 는 그 카드대로) · 설계서 docs/2026-11-05-brand-message-design.md §9 · §11
+- 기대: 시트 38 ~ 48 전 항목 「맞음」(받는 사람 4칸 · 중복제거 · 휴대폰 꼴 대체 창 · SMS 90바이트 · 브랜드 + 문자 대체 발송 · 발송결과 아랫줄 · 대체 거르기 · 목록 엑셀 · 통계 엑셀 · 충전금 결과별 정산 줄 · 알림톡 같은 창 · 타겟추출 · 파일 칸 고르기 · 주소록) · 배포 뒤 에러 로그에 brandFallbackOpt080 · resolveBrandFallback · kakaoFallbackSpamItems · smsKakaoResultAgg 오류 0
+- 확인: 시트 결과(날짜 · 계정 · 사람) · 배포 뒤 에러 로그 grep
+- 결과:
+
+### C107-G0 · 게이트웨이 번역 켜기 전 사전 실측(읽기만 · 설계서 §4 G5')
+- 카드: C107
+- 단계: 게이트웨이 배포 전
+- 선행: 없음
+- 기대: ① 한줄로 SMSQ 결과 칸 형식 = SMSQ_SEND_13 ~ 16 의 status_code 가 정수(int · 5자리 20000 ~ 59999 가 들어간다 · smallint 면 멈춤) ② 한줄로 에이전트(hanjul02 · hanjul03 · 그 밖 = 게이트웨이 agent_account 조회로 확정) 설정 = state_policy.mode final_result_only · result_policy.failure_code_source status_values.failed(설치 폴더 설정 파일 · 비밀값 줄 제외) ③ 게이트웨이 운영 표준 코드 표의 실패 · 숫자 있는 코드 수(시험 DB 244 와 비교 · 다르면 한줄로 라벨 생성 파일을 운영 표 기준으로 다시 만들지 판단)
+- 확인: 세 출력
+- 결과:
+
+### C107-G1 · 게이트웨이 마이그레이션 100(DDL · 새 판보다 먼저 · 게이트웨이 런북 §3-3 「DDL 선적용 → 바이너리」)
+- 카드: C107
+- 단계: 게이트웨이 배포 전
+- 선행: C107-G0 ①(status_code 정수)
+- 기대: bito-gateway migrations/100_customer_failure_code.sql 을 .65 게이트웨이 DB 에 적용 · `agent_account.failure_code_policy`(기본 raw) · `report_queue.customer_code` · 함수 `customer_failure_code(text,bigint,text,text)` 생김 · 정책 기본 raw = 동작 변화 0 · lock_timeout 250ms 로 멈추면 그대로 다시
+- 확인: `to_regprocedure('customer_failure_code(text,bigint,text,text)')` · 두 칸 information_schema 출력
+- 결과:
+
+### C107-G2 · 게이트웨이 새 판 배포(게이트웨이 런북 §2 check · build · §3-3 gateway · §4 새 PID ERROR 세기)
+- 카드: C107
+- 단계: 게이트웨이 배포
+- 선행: C107-G1 · 게이트웨이 커밋(Harold)
+- 기대: GW_CHECK_OK(로컬) · GW_BUILD_OK · GW_DEPLOY_OK · 새 PID ERROR 종류별 0(기동 직후 젬텍 reconnect 1 ~ 3 제외) · 기동 로그에 「고객 실패 코드 번역(100)이 없다」 없음 · 정책이 전부 raw 라 결과 코드 변화 0
+- 확인: 마커 · journalctl 세기 출력
+- 결과:
+
+### C107-G4 · 한줄로 에이전트 실패 코드 대역 행(에이전트 하나씩 · bito-gateway scripts/gw/customer-failure-codes-hanjul.sql)
+- 카드: C107
+- 단계: 게이트웨이 배포 뒤
+- 선행: C107-G2
+- 기대: 에이전트마다 출력 한 줄 = band_codes · rows_band 같은 수(시험 DB 244) · rows_other 0 · 예약 코드 충돌 · 겹침 · 없는 에이전트면 멈춤(넣은 것 없음)
+- 확인: 출력 줄
+- 결과:
+
+### C107-G6 · 번역 켜기 · 에이전트 설정 바꿈(에이전트 하나씩 · 설계서 §4 G6)
+- 카드: C107
+- 단계: 게이트웨이 배포 뒤
+- 선행: C107-G4(그 에이전트) · C107-G0 ②
+- 기대: ① `UPDATE agent_account SET failure_code_policy = 'mapped', updated_at = NOW() WHERE agent_id = '<에이전트>';` (UPDATE 1) ② 전환 조건 = `SELECT count(*) FROM report_queue rq WHERE rq.agent_id = '<에이전트>' AND rq.delivered = FALSE AND rq.customer_code IS NULL AND BTRIM(rq.result_code) <> '' AND BTRIM(rq.result_code) NOT IN ('0', '6', '0000', '1000', '1800', '7830', '7831', 'MS03');` 가 0(정책 전에 실린 실패 결과가 원 코드로 재전달되면 한줄로가 100 · 104 를 대기로 적는다) · 0 이 아니면 기다렸다 다시(설정을 바꾸지 않는다) ③ 그 에이전트 설정 `result_policy.failure_code_source: gateway_report` · 재시작(적재 0건일 때 · 한 대씩) ④ 실패 1건 실측 = C107-S2
+- 확인: 각 출력
+- 결과:
+
+### C107-S2 · 실패 사유 실측(번역 켠 뒤 · 직원 시트 49)
+- 카드: C107
+- 단계: 게이트웨이 배포 뒤
+- 선행: C107-G6(그 에이전트)
+- 기대: 시트 49 = 발송 상세 결과 「카카오: 메시지를 발송할 수 없음」(「기타 오류」 아님) · 한줄로 SMSQ 그 행 status_code = 23018 · 게이트웨이 report_queue 그 행 result_code 3018 · customer_code 23018
+- 확인: 시트 결과 · 두 조회 출력
 - 결과:
 
 ## §2 덤프 뒤 적용분

@@ -44,22 +44,9 @@ export function checkAlimtalkPaste(text: string): PasteCheck {
   return { phones, invalid };
 }
 
-/** 브랜드메시지 — 공백·쉼표·세미콜론·탭 · 숫자만 9~11자리(원래 BrandSendModal normalizePhones 규칙 그대로) */
-export function checkBrandPaste(text: string): PasteCheck {
-  const phones: string[] = [];
-  const invalid: string[] = [];
-  for (const token of String(text ?? '').split(/[\s,;\n\r\t]+/)) {
-    if (!token) continue;
-    const v = token.replace(/[^0-9]/g, '');
-    if (v.length >= 9 && v.length <= 11) phones.push(v); else invalid.push(token);
-  }
-  return { phones, invalid };
-}
-
-/** 브랜드메시지 파일·직접입력 공용 — 유효한 번호만(원래 normalizePhones 와 같은 결과) */
-export function normalizeBrandPhones(raw: string): string[] {
-  return checkBrandPaste(raw).phones;
-}
+// ★ 2026-11-05 C107 D-16 — 옛 브랜드 규칙(checkBrandPaste · normalizeBrandPhones = 공백·쉼표 토막 중 숫자 9~11자리면 무엇이든 번호)을 지웠다.
+//   파일의 매장 전화 · 회원번호 칸까지 번호로 읽혀 그 번호로도 발송됐다. 브랜드 붙여넣기 = 알림톡과 같은 checkAlimtalkPaste(10자리 이상)
+//   · 파일 = 번호 칸 하나만(pickPhoneColumn).
 
 const digitsOf = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 
@@ -112,4 +99,54 @@ export function appendUpdater<T>(
     onPlan(plan);
     return plan.add.length === 0 ? prev : [...prev, ...plan.add];
   };
+}
+
+/**
+ * ★ 2026-11-05 C107 Codex 구현 2R — 「이 칸이 휴대폰 번호 칸인가」 판정 = 백엔드 CT 의 **미러 하나**
+ *   (backend utils/agency-send-form.ts looksMobile · scorePhoneColumns · pickPhoneColumnStrict · 0 유실 복원 = normalize-phone.ts restoreMobileLeadingZero).
+ *   같은 사실을 화면이 따로 판정하면 갈린다(1R · 2R 에서 두 번 = 숫자만 판정이 엑셀 숫자형 번호의 앞 0 을 못 살려 다른 칸을 골랐다).
+ *   두 판정이 같은 결과를 내는지 = 계약 시험 c107-brand-contract-1105 K4(표 대조).
+ */
+function restoreMobileLeadingZeroMirror(digits: string): string {
+  return /^1[016789]\d{8}$/.test(digits) ? `0${digits}` : digits;
+}
+export function looksMobile(v: unknown): boolean {
+  const d = restoreMobileLeadingZeroMirror(digitsOf(v));
+  return (d.length === 10 || d.length === 11) && d.startsWith('01');
+}
+/** 칸마다 휴대폰 번호 비율(표본 최대 200행 · 분모 = 표본 행 수 · 빈 칸 · 글자 = 실패) · 비율 내림차순 */
+export function scorePhoneColumns(headers: readonly string[], rows: readonly Record<string, unknown>[]): Array<{ column: string; ratio: number }> {
+  if (headers.length === 0 || rows.length === 0) return [];
+  const sample = rows.slice(0, 200);
+  return headers
+    .map((h) => ({ column: h, ratio: sample.filter((r) => looksMobile(r?.[h])).length / sample.length }))
+    .sort((a, b) => b.ratio - a.ratio);
+}
+
+/**
+ * ★ 2026-11-05 C107 D-08 · D-16 — 파일 표에서 받는 번호 칸을 고른다(순수).
+ *   바로 담기(사람 확인 없이 명단에 더함) = 백엔드 엄격 규칙(pickPhoneColumnStrict): 1등 비율 0.9 이상 **이고** 2등과 0.3 이상 격차.
+ *   아니면 null = 고르기 창(후보 = 비율 0.5 이상 칸 · 화면 규칙과 같은 임계). 머리 줄 이름은 보지 않는다(「전화」 칸이 매장 전화일 수 있다).
+ *   지수 표기(1.01E+09)는 엑셀이 12자리 이상 숫자에만 쓰는 꼴이라 11자리 이하 휴대폰 번호에는 생기지 않는다.
+ */
+export function pickPhoneColumn(headers: readonly string[], rows: readonly Record<string, unknown>[]): { column: string | null; candidates: string[] } {
+  const scores = scorePhoneColumns(headers, rows);
+  const candidates = scores.filter((s) => s.ratio >= 0.5).map((s) => s.column);
+  const strong = scores.length > 0 && scores[0].ratio >= 0.9 && (scores.length === 1 || scores[0].ratio - scores[1].ratio >= 0.3);
+  return { column: strong ? scores[0].column : null, candidates };
+}
+
+/**
+ * ★ 2026-11-05 C107 — 고른 칸의 번호(붙여넣기와 같은 읽기 = normalizePhoneKr · 10자리 이상 · 순서 · 중복 포함).
+ *   머리가 없는 파일(첫 줄이 곧 번호 = 머리 이름이 휴대폰 꼴)이면 그 머리도 명단 첫 줄로 넣는다(업로드 분석이 첫 줄을 머리로 읽는다 · 판정 = looksMobile).
+ */
+export function phonesFromColumn(column: string, rows: readonly Record<string, unknown>[]): string[] {
+  const out: string[] = [];
+  const read = (v: unknown) => digitsOf(normalizePhoneKr(v));
+  if (looksMobile(column)) out.push(read(column));
+  for (const r of rows) {
+    const p = read(r?.[column]);
+    if (p.length >= 10) out.push(p);
+  }
+  return out;
 }

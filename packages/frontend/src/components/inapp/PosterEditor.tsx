@@ -8,13 +8,22 @@
  * 편집 상태는 편집기(InAppMessagesPage EditModal)가 쥔다 — 여기 부품은 값과 콜백만 받는다(강조만 · 동시 포커스 없음 · 회의론자 12).
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { AlertCircle, FolderOpen, ImagePlus, Loader2, Plus, ShoppingBag, Trash2, Upload, X, Layers, Check } from 'lucide-react';
+import { AlertCircle, FolderOpen, ImagePlus, Loader2, Plus, ShoppingBag, Trash2, Upload, X, Layers, Check, Wand2, Link2, Ticket, Timer } from 'lucide-react';
 import { BlockList } from '../make/EditShell';
 import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProductPickerModal';
 import AssetLibraryPickerModal, { type PickedAsset } from '../assets/AssetLibraryPickerModal';
 import { INAPP_FONT_CATALOG } from './blockTheme';
 import { PosterSheetPreview, POSTER_SHEET_DEFAULTS, hexOr, type PosterLayout, type SheetEditKey } from './PosterSheetPreview';
-import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, APP_SHEET_LAYOUTS_UNLOCKED, type LayoutKey, type WsSlide } from './inappSlides';
+import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNote, appCapsNoteForKey, stripAllowedFor, type LayoutKey, type WsSlide } from './inappSlides';
+import { PosterFramePreview } from './PosterFramePreview';
+import { usesPosterFrame } from './generated/poster-frame';
+import { creditText } from '../../constants/credit';
+
+/** ★ 2026-11-05 §3-9 예시 갤러리 그림 주소 머리(서버 INAPP_EXAMPLE_IMAGE_PREFIX 와 같은 값 · 게시 판정은 서버) */
+export const EXAMPLE_IMAGE_PREFIX = '/api/cdp/inapp/example-image/';
+export const isExampleImage = (u: any) => String(u || '').includes(EXAMPLE_IMAGE_PREFIX);
+/** 새 틀 무대에서 사진이 빈 장 = 누르면 사진을 넣는 자리 그림(저장하지 않는다) */
+const PHOTO_SLOT = `data:image/svg+xml;utf8,${encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 300 400'><rect width='300' height='400' fill='#e2e8f0'/><rect x='110' y='150' width='80' height='64' rx='10' fill='none' stroke='#94a3b8' stroke-width='6'/><circle cx='150' cy='182' r='14' fill='#94a3b8'/><text x='150' y='262' font-size='20' text-anchor='middle' fill='#64748b' font-family='sans-serif'>사진을 넣어 주세요</text></svg>")}`;
 
 // ─────────────────────────────── 공용 ───────────────────────────────
 
@@ -194,11 +203,15 @@ function FakeScreen({ app }: { app: boolean }) {
 
 export function PosterStage({
   layout, slides, design, badge, active, onActive, channel, pc, legacyApp, renderText, selected, onSelect, onChangeField,
-  onImagePick, onImageDrop, variables, busyImage,
+  onImagePick, onImageDrop, variables, busyImage, accentColor, endAt, onStripPick,
 }: {
   layout: PosterLayout;
   slides: WsSlide[];
   design: Record<string, any> | null | undefined;
+  /** ★ 2026-11-05 새 틀 — 띠 · 버튼 강조색 · 남은 시간 마감(게시 끝 시각) · 띠 누름 = 띠 칸 열기 */
+  accentColor?: string | null;
+  endAt?: string | number | null;
+  onStripPick?: () => void;
   badge?: string | null;
   active: number;
   onActive: (i: number) => void;
@@ -231,7 +244,12 @@ export function PosterStage({
   const isPc = pc && channel === 'web';
   // 구버전 앱 = 새 모양을 모르는 빌드 → 지금 포스터 · 다시 보지 않기로 그린다(설계서 §1-1 · §1-3)
   const drawLayout: PosterLayout = legacyApp ? 'overlay' : layout;
-  const drawDesign = legacyApp ? { ...(design || {}), dismiss_mode: undefined } : design;
+  // ★ 2026-11-05 §3-10 구버전 앱 = 새 판을 모른다 → 통짜 · 띠 · 여러 장 카드 = 받지 않는다(흉내 화면 대신 안내) · 한 장 카드 = 바닥 시트(지금 포스터)
+  const legacyHidden = legacyApp && !!appCapsNote(design, slides.length)?.hidden;
+  const drawDesign = legacyApp
+    ? (() => { const { poster_frame: _f, dismiss_mode: _d, ...rest } = design || {}; return rest; })()
+    : design;
+  const useFrame = !legacyApp && usesPosterFrame(design);
 
   // ★ 2026-09-29 무대 맞춤(Harold 0929 「화면에서 잘려 밑에 글 쓰기가 힘들다」 · 1455×740 에서 휴대폰 43px 잘림 실측) —
   //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞춘다(DM·이메일 PreviewPair 와 같은 방식 · 큰 화면은 FIT_MAX 까지 키운다).
@@ -349,6 +367,33 @@ export function PosterStage({
           {isPc && <div className="h-6 bg-slate-100 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
           <div className="relative w-full" style={{ height: isPc ? PC_H - 24 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
+            {legacyHidden ? (
+              <div className="absolute inset-0 flex items-center justify-center p-8" style={{ background: 'rgba(15,23,42,.08)' }}>
+                <div className="rounded-2xl bg-white border border-amber-200 px-5 py-4 text-center shadow-lg">
+                  <b className="block text-[14px] text-slate-900">옛 앱에는 이 메시지가 보이지 않아요</b>
+                  <span className="block text-[12px] text-slate-500 mt-1">앱 새 판에서 보여요. 잘린 그림이나 빠진 기능을 보여 주지 않으려고 옛 앱에는 보내지 않아요.</span>
+                </div>
+              </div>
+            ) : useFrame ? (
+              <div className="absolute inset-0">
+                <PosterFramePreview
+                  slides={slides.map((s) => ({ ...s, image_url: String(s.image_url || '').trim() || PHOTO_SLOT })) as any}
+                  design={design}
+                  accentColor={accentColor}
+                  badge={badge}
+                  endAt={endAt}
+                  height={isPc ? PC_H - 24 : PHONE_H}
+                  active={active}
+                  onActive={onActive}
+                  replaceVars={renderText}
+                  onPart={(part) => {
+                    if (part === 'image') onImagePick();
+                    else if (part === 'cta') onSelect('cta');
+                    else if (part === 'strip') onStripPick?.();
+                  }}
+                />
+              </div>
+            ) : (<>
             <div className="absolute inset-0" style={{ background: 'rgba(15,23,42,.45)' }} />
             <div className="absolute inset-x-0 bottom-0 flex justify-center" style={{ top: 0, alignItems: 'flex-end' }}>
               <div style={{ width: '100%', maxWidth: isPc ? 520 : undefined, maxHeight: '100%', display: 'flex' }}>
@@ -373,6 +418,7 @@ export function PosterStage({
                 />
               </div>
             </div>
+            </>)}
             {busyImage && (
               <div className="absolute inset-0 bg-slate-100 flex items-center justify-center text-slate-900 text-[13px] font-semibold gap-2"><Loader2 className="w-4 h-4 animate-spin" />사진 올리는 중</div>
             )}
@@ -426,8 +472,19 @@ export function PosterStage({
 
 export function SlidePanel({
   layout, slides, active, design, selected, onSelect, onPatchSlide, onRemoveSlide, onDesign, images, variables, onInsertVar,
+  layoutKey, accentColor, onAccent, endAt, onGoSchedule, onDraw, onPickDm, stripFocus,
 }: {
   layout: PosterLayout;
+  /** ★ 2026-11-05 인앱 포스터 재구성 — 모양 키(통짜 · 카드 판정 · 띠 칸) · 강조색 · 남은 시간 마감 · AI 그리기 · DM 연결 */
+  layoutKey: LayoutKey;
+  accentColor?: string | null;
+  onAccent: (hex: string | null) => void;
+  endAt?: string | null;
+  onGoSchedule: () => void;
+  onDraw: () => void;
+  onPickDm: (target: 'cta' | 'link') => void;
+  /** 무대에서 띠를 누르면 띠 칸으로 데려간다(값이 바뀔 때마다 띠 칸을 연다) */
+  stripFocus?: number;
   slides: WsSlide[];
   active: number;
   design: Record<string, any> | null | undefined;
@@ -441,16 +498,24 @@ export function SlidePanel({
   onInsertVar: (key: SheetEditKey, token: string) => void;
 }) {
   const s = slides[active];
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!stripFocus) return;
+    stripRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [stripFocus]);
   if (!s) return null;
   const names = fieldNamesFor(layout);
+  const baked = design?.poster_text === 'baked';
+  const frameMode = usesPosterFrame(design);
   const sizes = SIZE_PRESETS[layout];
   const colors = COLOR_SUGGEST[layout];
   const D = layout === 'overlay' ? null : POSTER_SHEET_DEFAULTS[layout];
 
   if (selected) {
-    const isText = selected !== 'cta';
-    const sizeKey = selected === 'title' ? 'title_size' : selected === 'body' ? 'body_size' : null;
-    const colorKey = selected === 'title' || selected === 'eyebrow' ? 'title_color' : selected === 'body' || selected === 'subtitle' ? 'body_color' : null;
+    // ★ 2026-11-05 통짜 장 = 글이 그림에 들어가 있다 → 글자 크기 · 색 · 바꿔 넣기 값은 고칠 데가 없다(죽은 칸 0 · 게시 판정이 변수를 막는다)
+    const isText = selected !== 'cta' && !baked;
+    const sizeKey = baked ? null : selected === 'title' ? 'title_size' : selected === 'body' ? 'body_size' : null;
+    const colorKey = baked ? null : selected === 'title' || selected === 'eyebrow' ? 'title_color' : selected === 'body' || selected === 'subtitle' ? 'body_color' : null;
     const preset = selected === 'title' ? sizes.title : sizes.body;
     const curSize = sizeKey ? Number((s as any)[sizeKey]) || preset[1] : 0;
     const palette = colorKey === 'title_color' ? colors.title : colors.body;
@@ -511,6 +576,7 @@ export function SlidePanel({
               <label className={LBL}>누르면 이동</label>
               <input value={String(s.cta?.action_url || '')} onChange={(e) => onPatchSlide({ cta: { ...(s.cta || {}), action_url: e.target.value } })}
                 placeholder="https://… 또는 /event/…" className={INPUT} />
+              <button type="button" onClick={() => onPickDm('cta')} className="mt-1.5 text-[12px] font-semibold text-violet-800 hover:text-violet-900 inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />내 DM 참여 페이지 연결</button>
             </div>
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-[12px] text-slate-500">버튼 바탕
@@ -543,6 +609,38 @@ export function SlidePanel({
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />이 장에 사진이 없어요. 사진 없는 장은 발행할 수 없어요.
         </div>
       )}
+      {isExampleImage(s.image_url) && (
+        <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2.5 text-[12px] text-violet-900 space-y-2">
+          <div className="flex items-start gap-2"><AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />예시 그림이에요. 내 그림으로 바꾸면 게시할 수 있어요.</div>
+          <button type="button" onClick={onDraw} className="w-full h-10 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[12.5px] font-bold inline-flex items-center justify-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />AI로 내 그림 만들기 ({creditText('image-studio-generate')})</button>
+        </div>
+      )}
+      {baked && (
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-2.5">
+          <div>
+            <p className="text-[12px] font-bold text-slate-700">그림 속 글</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">글이 그림에 들어가 있어요. 글을 바꾸려면 그림을 다시 그립니다.</p>
+          </div>
+          <div className="rounded-lg bg-slate-100 px-3 py-2 text-[12.5px] text-slate-800 leading-relaxed whitespace-pre-wrap">
+            {[s.eyebrow, s.title, s.body].map((v) => String(v || '').trim()).filter(Boolean).join('\n') || '그림에 든 글을 아직 몰라요'}
+          </div>
+          <button type="button" onClick={onDraw} className="w-full h-10 rounded-xl border border-violet-300 text-[12.5px] font-bold text-violet-800 hover:bg-violet-50 inline-flex items-center justify-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />{noImg ? '이 글로 AI 그림 만들기' : '그림 다시 그리기'} ({creditText('image-studio-generate')})</button>
+          <div>
+            <label className={LBL}>제목 <span className="font-normal text-slate-400">목록 이름 · 그림 설명(꼭 넣어 주세요)</span></label>
+            <input value={String(s.title || '')} maxLength={FIELD_MAX.title} onChange={(e) => onPatchSlide({ title: e.target.value })} placeholder="그림 속 큰 글을 적어 주세요" className={INPUT} />
+          </div>
+        </div>
+      )}
+      {!baked && frameMode && (
+        <div>
+          <label className={LBL}>글 고치기 <span className="font-normal text-slate-400">사진 위에 얹는 글</span></label>
+          <div className="flex gap-1.5 flex-wrap">
+            {(['eyebrow', 'title', 'body', 'cta'] as const).map((k) => (
+              <button key={k} type="button" onClick={() => onSelect(k)} className={BTN_SEG(false)}>{names[k]}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <div>
         <label className={LBL}>사진</label>
         <div className="grid grid-cols-3 gap-1.5">
@@ -550,6 +648,9 @@ export function SlidePanel({
           <button type="button" onClick={images.pickLibrary} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-[12px] text-slate-700 flex flex-col items-center justify-center gap-1"><FolderOpen className="w-4 h-4 text-violet-800" />라이브러리</button>
           <button type="button" onClick={images.pickMall} className="h-16 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-[12px] text-slate-700 flex flex-col items-center justify-center gap-1"><ShoppingBag className="w-4 h-4 text-violet-800" />몰 상품</button>
         </div>
+        {!baked && !isExampleImage(s.image_url) && (
+          <button type="button" onClick={onDraw} className="mt-1.5 w-full h-9 rounded-xl border border-dashed border-violet-300 text-[12px] font-semibold text-violet-800 hover:bg-violet-50 inline-flex items-center justify-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />AI로 그리기 ({creditText('image-studio-generate')})</button>
+        )}
         {layout === 'banner_sheet' && <p className="text-[11px] text-slate-400 mt-1.5">상품 사진은 배경을 지운 사진(누끼)이 이 모양에 가장 잘 삽니다.</p>}
         {!noImg && (
           <button type="button" onClick={() => onPatchSlide({ image_url: '' })} className="mt-1.5 text-[11.5px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Trash2 className="w-3 h-3" />이 장 사진 빼기</button>
@@ -567,7 +668,11 @@ export function SlidePanel({
       <div>
         <label className={LBL}>사진을 누르면 이동 <span className="font-normal text-slate-400">선택</span></label>
         <input value={String(s.link_url || '')} onChange={(e) => onPatchSlide({ link_url: e.target.value })} placeholder="/event/… 또는 https://…" className={INPUT} />
+        <button type="button" onClick={() => onPickDm('link')} className="mt-1.5 text-[12px] font-semibold text-violet-800 hover:text-violet-900 inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />내 DM 참여 페이지 연결</button>
       </div>
+      {stripAllowedFor(layoutKey) && (
+        <StripPanel refEl={stripRef} design={design} onDesign={onDesign} accentColor={accentColor} onAccent={onAccent} endAt={endAt} onGoSchedule={onGoSchedule} frameMode={frameMode} />
+      )}
       {layout !== 'overlay' && D && (
         <div>
           <label className={LBL}>{layout === 'event_card' ? '글 칸 바탕색' : '면 색'}</label>
@@ -611,6 +716,80 @@ export function SlidePanel({
   );
 }
 
+// ─────────────────────────────── 기능 띠(쿠폰 코드 · 남은 시간 · ★ 2026-11-05 §3-5) ───────────────────────────────
+
+const ACCENT_SUGGEST = ['#111827', '#7c2d12', '#9a3412', '#be123c', '#6d28d9', '#0f766e'];
+
+function StripPanel({ refEl, design, onDesign, accentColor, onAccent, endAt, onGoSchedule, frameMode }: {
+  refEl: { current: HTMLDivElement | null };
+  design: Record<string, any> | null | undefined;
+  onDesign: (patch: Record<string, any>) => void;
+  accentColor?: string | null;
+  onAccent: (hex: string | null) => void;
+  endAt?: string | null;
+  onGoSchedule: () => void;
+  frameMode: boolean;
+}) {
+  const strip = design?.poster_strip && typeof design.poster_strip === 'object' ? design.poster_strip : null;
+  const type: 'none' | 'coupon' | 'countdown' = strip?.type === 'coupon' || strip?.type === 'countdown' ? strip.type : 'none';
+  const setStrip = (next: Record<string, any> | null) => onDesign({ poster_strip: next });
+  const endTxt = endAt ? new Date(endAt).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+  const accent = hexOr(accentColor, '#111827');
+  return (
+    <div ref={refEl} className="rounded-xl border border-slate-200 bg-white px-3 py-3 space-y-3">
+      <div>
+        <p className="text-[12px] font-bold text-slate-700">기능 띠 <span className="font-normal text-slate-400">그림 아래 한 줄</span></p>
+        <div className="flex gap-1.5 flex-wrap mt-1.5">
+          <button type="button" onClick={() => setStrip(null)} className={BTN_SEG(type === 'none')}>없음</button>
+          <button type="button" onClick={() => setStrip({ type: 'coupon', code: strip?.type === 'coupon' ? strip.code || '' : '', label: strip?.label || '' })} className={BTN_SEG(type === 'coupon')}><Ticket className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />쿠폰 코드</button>
+          <button type="button" onClick={() => setStrip({ type: 'countdown', label: strip?.label || '' })} className={BTN_SEG(type === 'countdown')}><Timer className="w-3.5 h-3.5 inline -mt-0.5 mr-1" />남은 시간</button>
+        </div>
+      </div>
+      {type === 'coupon' && (
+        <>
+          <div>
+            <label className={LBL}>쿠폰 코드 <span className="font-normal text-slate-400">고객이 [복사]로 가져가요</span></label>
+            <input value={String(strip?.code || '')} maxLength={40} onChange={(e) => setStrip({ ...strip, type: 'coupon', code: e.target.value.replace(/[\r\n]/g, '') })}
+              placeholder="예: WELCOME2026" className={`${INPUT} font-mono`} />
+            <p className="text-[11px] text-slate-400 mt-1">영문, 숫자, 한글, -, _ 만 쓸 수 있어요. 쿠폰은 몰에서 미리 만들어 둔 코드를 넣어 주세요.</p>
+          </div>
+          <div>
+            <label className={LBL}>띠 문구 <span className="font-normal text-slate-400">선택 · 30자</span></label>
+            <input value={String(strip?.label || '')} maxLength={30} onChange={(e) => setStrip({ ...strip, type: 'coupon', label: e.target.value })} placeholder="쿠폰 코드" className={INPUT} />
+          </div>
+        </>
+      )}
+      {type === 'countdown' && (
+        <>
+          <div>
+            <label className={LBL}>띠 문구 <span className="font-normal text-slate-400">선택 · 30자</span></label>
+            <input value={String(strip?.label || '')} maxLength={30} onChange={(e) => setStrip({ ...strip, type: 'countdown', label: e.target.value })} placeholder="마감까지" className={INPUT} />
+          </div>
+          <div className={`rounded-lg px-3 py-2 text-[12px] ${endTxt ? 'bg-slate-100 text-slate-700' : 'bg-amber-50 border border-amber-200 text-amber-900'}`}>
+            {endTxt ? <>마감 = 게시 끝 시각 <b>{endTxt}</b></> : '마감 = 게시 끝 시각이에요. 아직 정하지 않았어요.'}
+            <button type="button" onClick={onGoSchedule} className="ml-2 underline underline-offset-2 font-semibold">기간 정하기</button>
+          </div>
+        </>
+      )}
+      {frameMode && (
+        <div>
+          <label className={LBL}>띠 · 버튼 색 <span className="font-normal text-slate-400">강조색 하나</span></label>
+          <div className="flex items-center gap-2 flex-wrap">
+            {ACCENT_SUGGEST.map((c) => (
+              <button key={c} type="button" onClick={() => onAccent(c)}
+                className={`w-8 h-8 rounded-full border-2 ${accent.toLowerCase() === c ? 'border-violet-300 ring-2 ring-violet-300' : 'border-slate-300'}`} style={{ background: c }} aria-label={`강조색 ${c}`} />
+            ))}
+            <label className="relative w-8 h-8 rounded-full border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-500 cursor-pointer overflow-hidden" title="직접 고르기">
+              <Plus className="w-3.5 h-3.5" />
+              <input type="color" value={accent} onChange={(e) => onAccent(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" />
+            </label>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─────────────────────────────── 모양 바꾸기 ───────────────────────────────
 
 export function LayoutSwitcher({ channel, current, onPick }: {
@@ -619,7 +798,7 @@ export function LayoutSwitcher({ channel, current, onPick }: {
   onPick: (k: LayoutKey) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const keys = layoutsFor(channel);
+  const keys = layoutsFor(channel, current);
   const groups: Array<{ t: string; ks: LayoutKey[] }> = [
     { t: '크게 보여 주기 · 좌우 슬라이드', ks: keys.filter((k) => LAYOUT_INFO[k].kind === 'big') },
     { t: '기본 알림', ks: keys.filter((k) => LAYOUT_INFO[k].kind === 'basic') },
@@ -643,12 +822,13 @@ export function LayoutSwitcher({ channel, current, onPick }: {
               <div className="grid grid-cols-2 gap-1.5">
                 {g.ks.map((k) => {
                   const on = k === current;
-                  const lock = channel === 'app' && !!LAYOUT_INFO[k].isNew && !APP_SHEET_LAYOUTS_UNLOCKED;
+                  const note = channel === 'app' ? appCapsNoteForKey(k) : null;
+                  const lock = !!note;
                   return (
                     <button key={k} type="button" onClick={() => { setOpen(false); if (!on) onPick(k); }}
                       className={`text-left rounded-xl border px-2.5 py-2 ${on ? 'border-violet-300 bg-violet-100' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
                       <span className="flex items-center gap-1 text-[12.5px] font-bold text-slate-900">{on && <Check className="w-3 h-3 text-violet-800" />}{LAYOUT_INFO[k].name}</span>
-                      <span className="block text-[10.5px] text-slate-400 mt-0.5 leading-snug">{lock ? '앱 업데이트 필요' : LAYOUT_INFO[k].desc}</span>
+                      <span className="block text-[10.5px] text-slate-400 mt-0.5 leading-snug">{lock && note ? note.text : LAYOUT_INFO[k].desc}</span>
                     </button>
                   );
                 })}

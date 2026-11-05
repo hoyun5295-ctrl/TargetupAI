@@ -60,7 +60,7 @@ vi.mock('../sms-queue', async () => ({
   getCompanySmsTablesWithLogs: async () => ['SMSQ_SEND_1', 'SMSQ_SEND_1_202609'],
   getCampaignSmsTablesWide: (...a: any[]) => (campaignTablesMock as any)(...a),
   smsCampaignCountsSafe: async () => new Map([[state.camp.id, state.counts]]),
-  smsAlimtalkResultAgg: async () => new Map(),
+  smsKakaoResultAgg: async () => new Map(),
   smsCampaignSubRowCounts: async () => new Map(),
   smsCountAll: (...a: any[]) => (countAllMock as any)(...a),
 }));

@@ -26,7 +26,7 @@ import { query } from '../config/database';
 import { resolveChargeUnitPrice } from './unit-price';
 import { parseDeductDescription, parseFreeCount, resolveAlimtalkLedgerUnits, ledgerMessageTypeSql } from './deduct-reference';
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getCompanySmsTablesWithLogs, getCompanySmsTablesWithLogsRange, mergeLineTables, smsCampaignCountsSafe, smsAlimtalkResultAgg, smsCampaignSubRowCounts, type CampaignAggCounts } from './sms-queue';
+import { getCompanySmsTablesWithLogs, getCompanySmsTablesWithLogsRange, mergeLineTables, smsCampaignCountsSafe, smsKakaoResultAgg, smsCampaignSubRowCounts, type CampaignAggCounts } from './sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류 — 환불 원장 축(BRAND vs message_type) 판정 CT
 import { resolveCampaignLedger, KAKAO_RESULT_CHANNEL_SQL_IN } from './billing-types';
 import { isStepCampaignDayClosed } from './journey-step-campaign';
@@ -515,7 +515,7 @@ async function runOnce(): Promise<void> {
               const alimUnits = axis.scope === 'all' ? resolveAlimtalkLedgerUnits(dedRes.rows as any[]) : null;
               if (alimUnits) {
                 const tables = tablesByKey.get(`${camp.company_id}::${camp.created_by || ''}`) || [];
-                const agg = (await smsAlimtalkResultAgg(tables, [camp.id])).get(camp.id);
+                const agg = (await smsKakaoResultAgg(tables, [camp.id])).get(camp.id);
                 const { mix, ambiguous } = resolveAlimtalkMix(agg, axisSuccess);
                 if (ambiguous) {
                   // 한 캠페인에 대체 모양 두 가지(K행 7830/7831 · 대체 행)가 같이 있으면 한 수신자를 두 번 셀 수 있다.
@@ -545,7 +545,7 @@ async function runOnce(): Promise<void> {
               unitDiffLegit = Math.max(unitDiffLegit, unitDiffAmt);
               if (unitDiffAmt > 0) {
                 const r = await prepaidRefund(
-                  camp.company_id, 0, axis.type, camp.id, '알림톡 결과별 단가 차액 환불',
+                  camp.company_id, 0, axis.type, camp.id, '결과별 단가 차액 환불',   // ★ C107 — 알림톡 · 브랜드메시지 공통(D-12)
                   ledger.referenceType, { refundKey: REFUND_KEYS.KAKAO_DIFF, targetAmount: unitDiffAmt },
                 );
                 if (r.refunded > 0) {

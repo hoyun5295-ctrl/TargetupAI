@@ -32,6 +32,7 @@ import {
 } from '../utils/payment-processor';
 // ★ 2026-09-26 한줄로 V2 F03·F25 — 같은 주문의 리턴 콜백 직렬화(프로세스 안 키별 잠금 CT)
 import { withKeyedLock } from '../utils/keyed-lock';
+import { parsePageParams } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
 
@@ -461,8 +462,7 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '고객사 권한이 필요합니다.' });
     }
 
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: 100 });   // ★ C105 H4(R59)
     const offset = (page - 1) * limit;
     const status = (req.query.status as string) || '';
     const method = (req.query.method as string) || '';

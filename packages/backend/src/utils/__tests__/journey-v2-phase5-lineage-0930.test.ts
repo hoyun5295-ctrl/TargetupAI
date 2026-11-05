@@ -45,15 +45,18 @@ describe('DDL 전 = 옛 동작', () => {
     expect(await entryOpenClause('j')).toBe(' AND j.entry_closed_at IS NULL');
     expect(await lineageJourneyIds('J')).toEqual(['J', 'OLD']);
   });
-  it('안티조인: 계보가 자기뿐이면 문장이 옛것과 같다 · 계보면 ANY + 쿨다운 0 도 다른 판 진행 중 제외', () => {
+  it('안티조인: 계보가 자기뿐이면 문장이 옛것과 같다 · 계보면 ANY + 쿨다운 0 = 계보 전체(지금 판 포함) 진행 중 제외(★ C105 H3 · 넣기 가드와 같은 집합)', () => {
     const p1: any[] = []; const p2: any[] = [];
     expect(buildReentryAntiJoin('c', p1, 'J', false, 0)).toBe(buildReentryAntiJoin('c', p2, 'J', false, 0, ['J']));
-    expect(buildReentryAntiJoin('c', [], 'J', true, 0, ['J'])).toBe('');
+    const p0: any[] = [];
+    const s0 = buildReentryAntiJoin('c', p0, 'J', true, 0, ['J']);
+    expect(s0).toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status = 'active')");
+    expect(p0).toEqual(['J']);
     const p3: any[] = [];
     const s3 = buildReentryAntiJoin('c', p3, 'J', true, 0, ['J', 'OLD']);
     expect(s3).toContain('ANY(');
     expect(s3).toContain("je.status = 'active'");
-    expect(p3).toEqual([['OLD']]);
+    expect(p3).toEqual([['J', 'OLD']]);
     const p4: any[] = [];
     expect(buildReentryAntiJoin('c', p4, 'J', false, 0, ['J', 'OLD'])).toContain('ANY(');
     expect(p4).toEqual([['J', 'OLD']]);

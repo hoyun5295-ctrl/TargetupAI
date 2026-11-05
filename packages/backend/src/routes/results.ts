@@ -12,13 +12,13 @@ import {
   smsGroupByAll as smsUnionGroupBy,
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F') — 채널 분기 판정은 CT 목록 하나만 쓴다
-import { BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
+import { BRAND_CAMPAIGN_CHANNELS, isKakaoSplitChannel } from '../utils/billing-types';
 import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, getSendTypeLabel, getQueueRowStatus, getDisplayContents, SUBSTITUTE_ROW_SQL } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL } from '../config/defaults';
-import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, loadAlimtalkFallbackForList } from '../utils/stats-aggregation';
+import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, loadKakaoFallbackForList, aggregateKakaoFallbackByCampaign } from '../utils/stats-aggregation';
 import { computeDisplayCounts } from '../utils/sms-table-split';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
-import { buildCampaignListCsv, channelPlainLabel, CampaignCsvRow } from '../utils/campaign-list-csv';
+import { buildCampaignListCsv, channelPlainLabel, kakaoSplitCsvRows, CampaignCsvRow } from '../utils/campaign-list-csv';
 // ★ 2026-07-23: 에이전트(agent·both) 회사 발송결과에 엔진 통계 유형별 병행 표시
 import { queryPayAgentByType, isPayStatsConfigured } from '../utils/pay-stats';
 import { isSendTypeFilter } from '../utils/send-type-axis';
@@ -348,11 +348,11 @@ router.get('/campaigns', async (req: Request, res: Response) => {
     const campListSmsMap = await aggregateSmsCountsByCampaign(campListNonFinal);
     const campListSentTimeMap = await aggregateSmsSendTimesByCampaign(campListNonFinal);
     // ★ 2026-10-07 (박성용 접수) 알림톡 캠페인 = 알림톡 시도 · 대체 문자 분리(완료 캠페인도 · 청구와 같은 판정) — 화면 목록 · 예상 비용
-    const campListAlimtalkMap = await loadAlimtalkFallbackForList(result.rows);
+    const campListAlimtalkMap = await loadKakaoFallbackForList(result.rows);
     const campaigns = result.rows.map((row: any) => {
       // ★ 2026-09-14: send_config(sentTables)는 집계 테이블 해석용으로만 싣는다 — 응답에는 내지 않는다(내부 테이블명).
       const { send_config: _sentTables, ...rest } = row;
-      const c = { ...rest, alimtalk_split: campListAlimtalkMap.get(row.id) ?? null };
+      const c = { ...rest, kakao_split: campListAlimtalkMap.get(row.id) ?? null };
       if (c.result_final) {
         // PG 캐시 — 6h 경과 완료 캠페인 (워커 확정값). 대기는 정의상 0.
         const dc = computeDisplayCounts(true, c.sent_count, Number(c.success_count || 0), Number(c.fail_count || 0), 0);
@@ -478,7 +478,7 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
         c.id, c.company_id, c.created_by, c.message_type, c.message_content, c.status,
         c.target_count, c.sent_count, c.success_count, c.fail_count, c.result_final,
         jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
-        c.scheduled_at, c.sent_at, c.created_at, c.send_channel,
+        c.scheduled_at, c.sent_at, c.created_at, c.send_channel, c.kakao_targeting,
         u.login_id as created_by_name
        FROM campaigns c
        LEFT JOIN users u ON c.created_by = u.id
@@ -491,12 +491,14 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
     // ★ 2026-07-30: 브랜드 행이 SMSQ(msg_type='F')로 합류 — SMS 집계가 전 채널을 담는다.
     const nonFinal = result.rows.filter((c: any) => !c.result_final);
     const smsMap = await aggregateSmsCountsByCampaign(nonFinal);
+    // ★ 2026-11-05 C107 D-10 — 알림톡 · 브랜드 전용 = 카카오 시도 + 대체 줄(화면 목록과 같은 줄 · 엑셀이라 4초 상한 없는 집계)
+    const csvSplitMap = await aggregateKakaoFallbackByCampaign(result.rows.filter((c: any) => isKakaoSplitChannel(c.send_channel)));
 
     const fmtKst = (d: any) => d
       ? new Date(d).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
       : '';
 
-    const csvRows: CampaignCsvRow[] = result.rows.map((c: any) => {
+    const csvRows: CampaignCsvRow[] = result.rows.flatMap((c: any) => {
       let dc;
       if (c.result_final) {
         dc = computeDisplayCounts(true, c.sent_count, Number(c.success_count || 0), Number(c.fail_count || 0), 0);
@@ -509,14 +511,14 @@ router.get('/campaigns/export', async (req: Request, res: Response) => {
       }
       const { sent, success, fail, pending } = dc;
       const rate = sent > 0 ? Math.round((success / sent) * 1000) / 10 : 0;
-      return {
+      return kakaoSplitCsvRows({
         message: String(c.message_content || ''),
         createdAt: fmtKst(c.created_at),
         sentAt: fmtKst(c.sent_at || c.scheduled_at),
-        channel: channelPlainLabel(c.send_channel, c.message_type),
+        channel: channelPlainLabel(c.send_channel, c.message_type, c.kakao_targeting),
         sent, success, fail, pending, rate,
         sender: c.created_by_name || '',
-      };
+      }, csvSplitMap.get(String(c.id)));
     });
 
     // ★ 2026-08-18 전송자격인증 4.2 — 개인정보 반출 이력

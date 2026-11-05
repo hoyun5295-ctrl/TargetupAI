@@ -100,12 +100,16 @@ describe('타겟 창은 명단 전체를 들지 않는다(보관본)', () => {
     expect(dash).toContain('targetRecipients={longestRowOf(targetExtraction)}'); // 단문 전환 창
   });
 
-  it('추출 창 두 곳 = 보관본 CT(keep) · 브랜드메시지 창 AI 타겟추출 = 옛 추출 그대로', () => {
+  it('추출 창 두 곳 = 보관본 CT(keep) · ★1105 C107 D-05 브랜드메시지 · 알림톡 창 타겟추출 = 같은 추출 창 + 보관본 전체 행', () => {
     expect(filter).not.toContain("fetch('/api/customers/extract'");
     expect((filter.match(/requestKeptExtraction\(/g) || []).length).toBe(2);
     expect(ct).toContain("post<any>('/api/customers/extract', { ...filterBody, keep: true })");
-    expect(brand).toContain("fetch('/api/customers/extract', {");
-    expect(brand).not.toContain('keep: true');
+    const alim = front('components/AlimtalkSendModal.tsx');
+    for (const w of [brand, alim]) {
+      expect(w).not.toContain("fetch('/api/customers/extract'");
+      expect(w).toContain('<DirectTargetFilterModal');
+      expect(w).toContain('await fetchTargetExtractionRows(ext);');
+    }
   });
 
   it('알림톡·브랜드메시지 카드 = 넘길 때만 보관본 전체 행', () => {

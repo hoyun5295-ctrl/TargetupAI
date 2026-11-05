@@ -8,13 +8,14 @@ import * as XLSX from 'xlsx';
 import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { recordUnsubscribeDeleted } from '../utils/change-audit';
-import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes, UNSUB_UPLOAD_CONCURRENCY } from '../utils/unsubscribe-helper';
+import { process080Callback, getUserUnsubscribes, registerUnsubscribe, IsolationBlockedError, isUserIsolationEnabled, deleteIsolatedUnsubscribes, UNSUB_UPLOAD_CONCURRENCY, getUnsubscribedPhones } from '../utils/unsubscribe-helper';
 // ★ 2026-09-26 한줄로 V2 R1-17 — 파일 등록 동시 상한(입력 순서 보존 CT)
 import { mapWithConcurrency } from '../utils/concurrency';
 import { isOpt080CallbackIp } from '../utils/ip-allowlist';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
 import { isFirstRowHeaderRow } from '../utils/excel-columns';
+import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 // ★ D162-3 (2026-05-15) 격리 ON 회사 + company_admin = 등록/삭제 차단 가드
 //   안내 메시지: "수신거부 사용자격리기능이 적용되어있습니다. 한줄로 운영실에 문의하세요"
@@ -200,12 +201,13 @@ router.get('/', async (req: Request, res: Response) => {
       return res.status(403).json({ error: '권한이 필요합니다.' });
     }
 
-    const { page = 1, limit = 20, search } = req.query;
+    const { search } = req.query;
+    const { page, limit } = parsePageParams(req.query.page, req.query.limit, { defaultLimit: 20, maxLimit: QUERY_LIMIT_NO_CAP });   // ★ C105 H4(R59) 주소 숫자 값 = CT
 
     // CT-03 컨트롤타워 사용: company_admin은 회사 전체, 사용자는 본인 user_id만
     const { data: paged, total } = await getUserUnsubscribes(userId, {
-      page: Number(page),
-      limit: Number(limit),
+      page,
+      limit,
       search: search as string | undefined,
       companyId,
       userType,
@@ -244,9 +246,9 @@ router.get('/', async (req: Request, res: Response) => {
       unsubscribes: paged,
       pagination: {
         total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
       opt080Number,
       optOutAutoSync,
@@ -637,14 +639,14 @@ router.post('/check', async (req: Request, res: Response) => {
       .map((r: any) => String(r.phone || '').replace(/\D/g, ''))
       .filter(Boolean);
 
-    const result = await query(
-      `SELECT DISTINCT phone FROM unsubscribes WHERE user_id = $1 AND phone = ANY($2)`,
-      [userId, cleanPhones]
-    );
+    // ★ 2026-11-05 C107 D-15 · 뿌리 R1 — 발송이 실제로 쓰는 판정 CT 하나(숫자만 비교 · getUnsubscribedPhones).
+    //   옛: phone = ANY 원문 비교라 하이픈이 섞여 저장된 수신거부 번호를 못 셌다(확인 창 수 < 실제로 빠지는 수).
+    //   돌려주는 번호 = 숫자만 · 화면은 이 집합으로 명단의 출현마다 센다(중복 허용 명단 · Codex 설계 1R #7).
+    const unsubPhones = await getUnsubscribedPhones(userId, cleanPhones);
 
     return res.json({
-      unsubscribeCount: result.rows.length,
-      unsubscribePhones: result.rows.map((r: any) => r.phone),
+      unsubscribeCount: unsubPhones.length,
+      unsubscribePhones: unsubPhones,
       duplicateCount,
     });
   } catch (error) {

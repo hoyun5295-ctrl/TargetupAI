@@ -6,7 +6,7 @@
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 차감 0(설계서 docs/2026-10-09-demo-company-design.md §4)
 import type { PoolClient } from 'pg';
 import pool, { query } from '../config/database';
-import { buildDeductDescription, type AlimtalkSettleUnits } from './deduct-reference';
+import { buildDeductDescription, type AlimtalkSettleUnits, type KakaoSettleLabel } from './deduct-reference';
 // ★ 2026-07-26 단가의 부가세 기준(`companies.unit_price_basis`)을 해석하는 유일한 경로.
 //   선불 잔액은 고객이 입금한 현금이라 **부가세 포함가**로 깎아야 한다.
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
@@ -150,7 +150,9 @@ export async function prepaidDeduct(
   // ★ 2026-09-26 한줄로 V2 SQ(Codex 2R ①) — client를 넘기면 **호출자 트랜잭션 안에서** 차감한다.
   //   차감과 호출자의 행(스팸 검사 행 등)이 한 번에 커밋되어, 둘 사이에 멈춰도 차감만 남지 않는다.
   //   세이브포인트로 감싸 실패는 차감분만 되돌리고, 호출자 트랜잭션의 커밋·롤백·연결 반납은 호출자가 한다.
-  opts?: { alimtalk?: boolean; client?: PoolClient },
+  // ★ 2026-11-05 C107 D-12 — brandFallback = 브랜드 전용 발송의 문자 대체 큐 유형(A = SMS · B = LMS · 대체 끔이면 넘기지 않는다).
+  //   차감 단가 = max(브랜드, 고른 대체 문자) · 차감 행에 결과별 단가(브랜드메시지 · SMS 대체 · LMS 대체)를 실어 정산이 결과로 차액을 돌려준다.
+  opts?: { alimtalk?: boolean; client?: PoolClient; brandFallback?: 'A' | 'B' | null },
 ): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
   // ★ 2026-10-09 시연 회사 최후 방어 — 경로 층이 차감 앞에서 끊으므로 여기 도달 = 누락 사고. 원장 0 · 실패로 돌려 발송을 멈춘다.
   if (await isDemoCompany(companyId)) {
@@ -215,8 +217,32 @@ export async function prepaidDeduct(
     if (resolved.unknownType) {
       console.warn(`[선불차감] company=${companyId} 알 수 없는 발송 유형 '${messageType}' — 단가 축이 없어 0원 처리한다`);
     }
-    const unitPrice = resolved.price;
-    const alimtalkUnits = opts?.alimtalk ? resolveAlimtalkSettleUnits(c, companyId) : null;
+    let unitPrice = resolved.price;
+    let settleUnits: AlimtalkSettleUnits | null = opts?.alimtalk ? resolveAlimtalkSettleUnits(c, companyId) : null;
+    let settleLabel: KakaoSettleLabel = '알림톡';
+    // ★ 2026-11-05 C107 D-12 — 브랜드 전용 + 문자 대체 켬: 필수 단가 = 브랜드 + 고른 대체 유형 두 개(Codex 설계 1R #1).
+    //   고른 대체 단가가 미설정이면 막는다(공짜 대체 0 · 브랜드 미설정 차단과 같은 계약). 고르지 않은 유형 칸 = 차감 단가(그 결과는 차액 0).
+    const brandFb = messageType === 'BRAND' && (opts?.brandFallback === 'A' || opts?.brandFallback === 'B') ? opts.brandFallback : null;
+    if (brandFb) {
+      const fbType = brandFb === 'A' ? 'SMS' : 'LMS';
+      const fb = resolveChargeUnitPriceDetailed(c, fbType);
+      if (fb.unset || fb.unknownType) {
+        await client.query(tx.rollback);
+        console.error(`[선불차감차단] company=${companyId} 브랜드 ${fbType} 대체 단가 미설정 — 대체 문자가 차감 없이 나가는 것을 막았다`);
+        return {
+          ok: false,
+          error: `${fbType} 단가가 설정되지 않아 문자 대체발송을 할 수 없습니다. 슈퍼관리자 단가설정에서 ${fbType} 단가를 입력하거나 대체발송을 끄세요.`,
+          amount: 0,
+        };
+      }
+      unitPrice = Math.max(resolved.price, fb.price);
+      settleUnits = {
+        KAKAO: resolved.price,
+        SMS: fbType === 'SMS' ? fb.price : unitPrice,
+        LMS: fbType === 'LMS' ? fb.price : unitPrice,
+      };
+      settleLabel = '브랜드메시지';
+    }
 
     // ★ 2026-08-05 요금제 무료 메시징 — 과금 **전에** 덮는다(설계 §5-1).
     //   단가 미설정 차단(위)을 지난 뒤에 둔다: 무료 초과분은 결국 과금해야 하므로
@@ -281,7 +307,7 @@ export async function prepaidDeduct(
     await client.query(
       `INSERT INTO balance_transactions (company_id, type, amount, balance_after, description, reference_type, reference_id, payment_method, created_by, message_type)
        VALUES ($1, 'deduct', $2, $3, $4, $5, $6, 'system', $7, $8)`,
-      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, chargeCount, unitPrice, freeUsed, alimtalkUnits), referenceType, referenceId, createdBy || null, messageType]
+      [companyId, totalAmount, result.rows[0].balance, buildDeductDescription(referenceType, messageType, chargeCount, unitPrice, freeUsed, settleUnits, settleLabel), referenceType, referenceId, createdBy || null, messageType]
     );
     await client.query(tx.commit);
 

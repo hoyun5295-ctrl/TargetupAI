@@ -4,6 +4,8 @@
  *   변이 본문 · 제목이 비면 칸 글로 나간다(서버 applyVariantToStep 와 같은 규칙).
  */
 export interface AbVariantCopy {
+  /** ★ C105 H5 판 행 id(판마다 스팸 검사 · 서버 점검 항목 variantId 와 같은 id) */
+  id?: string;
   variant_id: string;
   message_template: string | null;
   subject: string | null;

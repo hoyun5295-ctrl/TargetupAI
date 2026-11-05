@@ -24,6 +24,7 @@ import { isCdpEnabledForPlan } from '../utils/cdp-auth';
 import { describeJsonShape } from '../utils/json-shape';
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
+import { parseQueryInt } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import { storeCodeForConnect } from '../utils/integration-scope';   // ★1028 N6 연결 분류코드
 const router = Router();
 
@@ -101,7 +102,7 @@ router.get('/preview', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, error: '메이크샵 연동이 없습니다. 먼저 연동해주세요.' });
     }
 
-    const days = Number(req.query.days) || 30;
+    const days = parseQueryInt(req.query.days, { fallback: 30, min: 1, max: 3650, clamp: true });
     const preview = await fetchMakeshopPreview(integration, days);
     // 스키마 실측용 raw 샘플 — PM2 로그로 구조 확인 후 CDP 매핑 확정 (F12 진단 금지 룰 정합)
     console.log(`[Makeshop preview] company=${companyId} shop=${integration.shopUid} from=${preview.from}`);

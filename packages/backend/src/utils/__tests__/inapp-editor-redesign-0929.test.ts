@@ -138,13 +138,15 @@ describe('⑤ 초안 판정', () => {
     expect(c).toContain('sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true })');
     expect(between(utilSrc('inapp-message.ts'), 'export async function updateInAppMessage(', '\nexport async function propagatePosterToVariants(')).toContain('sanitizePosterSlides(input.poster_slides, { allowEmptyImage: true })');
     expect(c).toContain("const finalStatus = draft ? 'paused' : (input.status || 'active');");
-    expect(c).toMatch(/if \(finalStatus === 'active'\) \{\s*const defect = inAppPublishDefect\(/);
+    // ★ 2026-11-05 인앱 포스터 재구성 §3-13 — 판정 행 = 저장 결과 행(INSERT … RETURNING * 뒤 같은 트랜잭션 · 미달 = 되돌림)
+    expect(c).toContain('const row = await withTransaction(async (run) => {');
+    expect(c.indexOf('const defect = await judgeSavedInAppRow(run, companyId, saved);')).toBeGreaterThan(c.indexOf(') RETURNING *`'));
   });
   it('수정 CT — 결과 행이 active 면 한 트랜잭션 안에서 판정 · 미달 = 되돌리고 throw', () => {
     const u = between(utilSrc('inapp-message.ts'), 'export async function updateInAppMessage(', '\nexport async function deleteInAppMessage(');
     expect(u).toContain("await client.query('BEGIN');");
     const iUpd = u.indexOf('result = await client.query(');
-    const iDefect = u.indexOf("const defect = row && row.status === 'active' ? inAppPublishDefect(row) : null;");
+    const iDefect = u.indexOf("const defect = row && row.status === 'active' ? await judgeSavedInAppRow((t, p) => client.query(t, p), companyId, row, lockedParent) : null;");
     const iCommit = u.indexOf("await client.query('COMMIT');");
     expect(iUpd).toBeGreaterThan(-1);
     expect(iDefect).toBeGreaterThan(iUpd);
@@ -163,7 +165,8 @@ describe('⑤ 초안 판정', () => {
   });
   it('변형 생성 · 변형 켜기 · 플래너 실행도 같은 CT', () => {
     const v = utilSrc('inapp-variant-optimizer.ts');
-    expect(between(v, 'export async function createVariant(', '\nexport async function setVariantStatus(')).toMatch(/if \(input\.status !== 'paused'\) \{\s*const defect = inAppPublishDefect\(/);
+    // ★ 2026-11-05 §3-13 — 변형 생성 = 부모 FOR UPDATE → INSERT RETURNING * → 결과 행 판정(잠근 부모로 변형 판정까지)
+    expect(between(v, 'export async function createVariant(', '\nexport async function setVariantStatus(')).toContain('const defect = await judgeSavedInAppRow(run, companyId, saved, parent);');
     // (Codex 1R high) 상태만 바꾸는 켜기 = 단일 길목(한 트랜잭션 · 행 잠금 → 판정 → 켜기)
     expect(between(v, 'export async function setVariantStatus(', '\n}\n')).toContain('await activateInAppMessage({ companyId, messageId: variantId, parentMessageId });');
     // ★ 2026-10-04 플래너 1차 채널 = 문자·DM·메일 — 실행부에 인앱 켜기 분기가 없다(켜는 길목은 activateInAppMessage 하나로 남는다).
@@ -171,18 +174,19 @@ describe('⑤ 초안 판정', () => {
     expect(p).not.toContain('async function executeInapp(');
     expect(p).not.toContain("SET status = 'active'");
   });
-  it('켜기 단일 길목 — 한 트랜잭션에서 FOR UPDATE → 판정 → 켜기 · 미달 = 되돌리고 결함 반환', () => {
+  it('켜기 단일 길목 — 한 트랜잭션에서 (부모 FOR UPDATE →) 켜기 RETURNING * → 결과 행 판정 · 미달 = 되돌리고 결함 반환', () => {
+    // ★ 2026-11-05 §3-13 — 판정 행 = 켜기를 쓴 결과 행(옛 = 기간을 쓰기 전 행 · Codex 1R C4) · 잠금 순서 = 부모 → 변형
     const a = between(utilSrc('inapp-message.ts'), 'export async function activateInAppMessage(', '\nexport async function deleteInAppMessage(');
     const iBegin = a.indexOf("await client.query('BEGIN');");
     const iLock = a.indexOf('FOR UPDATE');
-    const iDefect = a.indexOf('const defect = inAppPublishDefect(cur.rows[0]);');
     const iUpd = a.indexOf("SET status = 'active'");
+    const iDefect = a.indexOf('const defect = await judgeSavedInAppRow(run, opts.companyId, upd.rows[0], lockedParent);');
     const iCommit = a.indexOf("await client.query('COMMIT');");
     expect(iBegin).toBeGreaterThan(-1);
     expect(iBegin).toBeLessThan(iLock);
-    expect(iLock).toBeLessThan(iDefect);
-    expect(iDefect).toBeLessThan(iUpd);
-    expect(iUpd).toBeLessThan(iCommit);
+    expect(iLock).toBeLessThan(iUpd);
+    expect(iUpd).toBeLessThan(iDefect);
+    expect(iDefect).toBeLessThan(iCommit);
     expect(a).toContain("return { ok: false, reason: 'defect', defect };");
     expect(a).toContain('client.release();');
   });
@@ -202,15 +206,17 @@ describe('[반영] = A/B 변형에 모양 전파', () => {
   const m = utilSrc('inapp-message.ts');
   it('부모 · 초안 아님 · 모양 칸이 왔을 때만 · 같은 트랜잭션(COMMIT 앞)', () => {
     const u = between(m, 'export async function updateInAppMessage(', '\nexport async function propagatePosterToVariants(');
-    const iProp = u.indexOf('await propagatePosterToVariants(client, row);');
+    const iProp = u.indexOf('variantsPaused = (await propagatePosterToVariants(client, row)).paused;');
     expect(iProp).toBeGreaterThan(-1);
     expect(iProp).toBeLessThan(u.indexOf("await client.query('COMMIT');"));
     expect(u).toContain("if (row && !draft && !row.parent_message_id && (posterSlidesProvided || designProvided || input.template !== undefined)) {");
   });
   it('변형 생성과 같은 규칙: 부모 장 사본 + 첫 장 제목·본문만 변형 값 · 장 없는 부모는 변형 사진 유지', () => {
     const f = between(m, 'export async function propagatePosterToVariants(', '\nexport async function deleteInAppMessage(');
-    expect(f).toContain("if (!parent || parent.template !== 'full_image') return 0;");
-    expect(f).toContain('? [{ ...parentSlides[0], title: k.title, body: k.body }, ...parentSlides.slice(1)]');
+    expect(f).toContain("if (!parent || parent.template !== 'full_image') return { applied: 0, paused: 0 };");
+    // ★ 2026-11-05 §3-3 — 글 얹기 부모 = 지금 규칙(부모 첫 장 사본 + 변형 문안) · 통짜 부모 = 통짜 변형 그림 유지 · 문구 변형 멈춤
+    expect(f).toContain(': { ...parentSlides[0], title: k.title, body: k.body };');
+    expect(f).toContain('? [firstSlide, ...parentSlides.slice(1)]');
     expect(f).toContain("composeFlatFromPosterSlides(slides, { title: k.title, body: k.body, imageUrl: parent.image_url, buttons: [] })");
     expect(f).toContain("image_url = CASE WHEN $9::boolean OR COALESCE(image_url, '') = '' THEN $5 ELSE image_url END,");
     expect(f).toMatch(/AND parent_message_id = \$2::uuid AND status <> 'archived'\s*FOR UPDATE/);
@@ -230,7 +236,7 @@ describe('[반영] = A/B 변형에 모양 전파', () => {
       poster_slides: [{ image_url: '/a.png', title: '부모', eyebrow: 'EVENT' }, { image_url: '/b.png' }],
       image_url: '/a.png', badge_text: 'EVENT',
     });
-    expect(n).toBe(1);
+    expect(n).toEqual({ applied: 1, paused: 0 });
     const upd = calls[1];
     expect(JSON.parse(upd.params[3])).toEqual([
       { image_url: '/a.png', title: '변형 제목', body: '변형 본문', eyebrow: 'EVENT' },

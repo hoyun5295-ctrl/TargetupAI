@@ -16,6 +16,7 @@ export const SPAM_HIT_SOURCE_LABEL: Record<string, string> = {
   operator: 'AI 오퍼레이터',
   automarketing: '자동발송',
   journey: '여정',
+  brand: '브랜드메시지(문자 대체)',   // ★1105 C107 R63 — 브랜드 전용 발송의 문자 대체 문구 판정
 };
 
 export const SPAM_RULE_SOURCE_LABEL: Record<string, string> = {

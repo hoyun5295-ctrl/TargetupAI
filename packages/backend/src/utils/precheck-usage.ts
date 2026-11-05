@@ -20,6 +20,7 @@ import { AGENCY_SPELL_EVENT, readAgencySpell } from './agency-send-spell';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
 import { getSpamResultLabel, getSpamResultType } from './sms-result-map';
 import type { SpellIssue } from './spell-check';
+import { parseQueryInt, QUERY_PAGE_MAX } from './normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 export type PrecheckPeriod = 'today' | '7d' | 'month';
 export type PrecheckKind = 'all' | 'spam' | 'spell';
@@ -39,8 +40,8 @@ export function parsePrecheckUsageQuery(q: any): PrecheckUsageQuery {
   const period = (['today', '7d', 'month'] as const).find((p) => p === q?.period) ?? 'today';
   const kind = (['all', 'spam', 'spell'] as const).find((k) => k === q?.kind) ?? 'all';
   const companyId = isUuid(q?.companyId) ? String(q.companyId) : null;
-  const n = Math.floor(Number(q?.page));
-  return { period, kind, companyId, page: Number.isFinite(n) && n >= 1 ? n : 1 };
+  const n = parseQueryInt(q?.page, { fallback: 1, min: 1, max: QUERY_PAGE_MAX });   // ★ C105 H4(R59) page 상한(옛: 1e20 = OFFSET bigint 초과)
+  return { period, kind, companyId, page: n };
 }
 
 /** 기간 시작(한국 시각 자정 기준 · SQL 조각) — 최근 7일 = 오늘 포함 7일 */
