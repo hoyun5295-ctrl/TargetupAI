@@ -84,9 +84,9 @@ describe('대행 ② 회신번호 종류 표시', { timeout: 30_000 }, () => {
   });
 
   it('접수 코어가 종류를 돌려주고 received 이력에 싣는다(세 입구 모두)', () => {
-    expect(intake).toMatch(/\| \{ ok: true; request: any; callbackKinds: AgencyCallbackKinds \}/);
+    expect(intake).toMatch(/\| \{ ok: true; request: any; callbackKinds: AgencyCallbackKinds; notice: string\[\] \}/);   // ★ 1106 C109 글자 정리 알림 칸
     expect(intake).toMatch(/const callbackKinds = countCallbackKinds\(rows\.map\(\(r\) => r\.callback\), callback\);/);
-    expect(intake).toMatch(/return \{ ok: true, request, callbackKinds \};/);
+    expect(intake).toMatch(/return \{ ok: true, request, callbackKinds, notice: agencyCharNotice\(charNotes\) \};/);
     expect(between(intake, "await logEvent(request.id, 'received', {", '});')).toContain('...callbackKinds');
     expect(route).toMatch(/via: 'one-step', \.\.\.createdKinds\[i\]/);
     expect(between(mailWorker, "await logEvent(requestRows[i].id, 'received', {", '});')).toContain('...requestKinds[i]');

@@ -43,7 +43,7 @@ import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason } from './continuous-operator-policy';
 import { buildAutosendStopUrl } from './autosend-stop-link';
 import { operatorCapPolicy, operatorCapPathOf, autoSendLeadMinutesSql, type OperatorCapPath } from './autosend-policy';
 import { NOTICE_MAX_ATTEMPTS } from './journey-notice-once';   // ★ 2026-11-02 안내 시도 상한(한 정책 · 회차 안내도 같은 값)   // ★ 2026-11-02 상한 갈래 CT(설계서 3-0 CT-O2)
@@ -54,7 +54,8 @@ import { objectiveForRounds } from './automarketing-interview';
 import { buildLineEventText } from './one-line-facts';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts, readSpamTestOutcome } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts, readSpamTestOutcome, spamRejectionOf, spamRejectionPlaces, toSpamCheckRecord, type SpamCheckRecord } from './spam-test-queue';
+import { assertSmsTextSendable, smsTextBlockReason } from './message-sanitizer';   // ★ 2026-11-06 C109 D6 사람 글 저장 관문(위치)
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
 import { InsufficientCreditError, deductCreditSafe, deductCreditOutcome, hasCreditForStrict } from './ai-credit';
@@ -64,7 +65,8 @@ import { markCalendarRegistrationWith, isMissingTable as isMissingTableError } f
 import { getCreditCost, resultSettled } from './ai-credit-calc';
 import { runInCreditBundle } from './ai-credit-context';
 // ★ 2026-08-04 변화 축 settle — 캠페인 종결 후 실수신 번호를 발송 큐에서 되읽는다(보호 영역은 읽기만).
-import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback, getCampaignSmsTables, smsSelectAll } from './sms-queue';
+import { getPlatformNoticeCallback, getCampaignSmsTables, smsSelectAll } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 // ★ 2026-08-04 리마인드 코호트 — 성공 코드 판정은 결과값 CT 하나만 소유한다.
 import { SUCCESS_CODES } from './sms-result-map';
 import { randomUUID } from 'crypto';
@@ -286,7 +288,9 @@ export interface OperatorProposal {
   /** ★ 2026-10-24 안마다 나가는 문안 · 보낼 안 번호 · 검사 상태(listProposals 만 채움 · 화면은 이것만 보여 준다) */
   finalCopies?: Array<OperatorFinalCopy | null>;
   finalIndex?: number;
-  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'unchecked' | 'stale' | 'none';
+  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'rejected' | 'unchecked' | 'stale' | 'none';
+  /** ★ 2026-11-06 C109 E6 — copyCheck = rejected 일 때 위치 문장 */
+  copyCheckReason?: string | null;
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -442,6 +446,8 @@ export async function registerOperator(
   const sequenceEnabled = input.sequenceEnabled === true;
   const sequenceDelayDays = typeof input.sequenceDelayDays === 'number' && input.sequenceDelayDays > 0 ? Math.min(30, Math.floor(input.sequenceDelayDays)) : null;
   // 2R(#13): EUC-KR 안전화는 저장 문에서 — 예약 시점에만 걸면 저장·수정 경로가 우회 문이 된다.
+  // ★ 2026-11-06 C109 D6(구조체크 S9) — 사람이 쓴 리마인드 · 혜택 = 저장 전에 막고 위치 안내(옛: 정리가 조용히 지웠다 · 혜택은 발송 때 9401)
+  assertSmsTextSendable([{ label: '리마인드 문안', text: input.sequenceReminderContent }, { label: '혜택', text: benefitContent }]);
   const sequenceReminderContent = typeof input.sequenceReminderContent === 'string' && input.sequenceReminderContent.trim()
     ? stripIncompatibleEmojis(input.sequenceReminderContent).trim().slice(0, 2000) || null : null;
   // ★ 2026-07-07: 타겟 축 — 화이트리스트 정규화(이상값·미지정 = null → 기존 자유 해석).
@@ -699,6 +705,11 @@ export async function updateOperator(
     allowReactivate?: boolean;
   }
 ): Promise<ContinuousOperator | null> {
+  // ★ 2026-11-06 C109 D6(구조체크 S9 · Codex 1R #2) — 사람이 쓴 리마인드 · 혜택 = 저장 전에 막고 위치 안내
+  assertSmsTextSendable([
+    { label: '리마인드 문안', text: typeof patch.sequenceReminderContent === 'string' ? patch.sequenceReminderContent : null },
+    { label: '혜택', text: typeof patch.benefitContent === 'string' ? patch.benefitContent : null },
+  ]);
   // ★ 2026-07-12 C-1: 야간 광고 발송 제한 — 발송 희망 시각 변경도 발송 가능 창 안만 허용.
   if (patch.scheduleTime) {
     const timeGate = validateScheduleTimeSendable(patch.scheduleTime, SEND_HOURS.start, SEND_HOURS.end);
@@ -1760,12 +1771,15 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       // 최종 판정 = 통과 안이 있으면 통과 · 없으면 대안 합산(차례 검사와 같은 뜻 · ★ 1101 Codex 구현 1R #3: 확인 중 · 검사 중인 안이 있으면 그 판정 = 보류 · 차단 안보다 먼저)
       //   그 밖(장애)은 1안의 원값(판정이 통과가 아닌데 원값이 pass 면 통과로 접지 않는다)
       const altVerdict = mergeAlternativeVerdicts(tested.map((v) => spamVerdictOf(v as any, Number(spamResult.totalTestCount ?? 1))));
+      // ★ 2026-11-06 C109 E5 — 보낼 수 없는 글자(rejected) = 차단 다음 · 장애 앞 · 사유 = 반려 안의 위치(다시 검사 0)
       const finalResult = (passedIndex != null ? 'pass'
-        : isSpamHold(altVerdict) || altVerdict === 'blocked' ? altVerdict
-          : (firstTested?.spamResult && firstTested.spamResult !== 'pass' ? firstTested.spamResult : 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending';
+        : isSpamHold(altVerdict) || altVerdict === 'blocked' || altVerdict === 'rejected' ? altVerdict
+          : (firstTested?.spamResult && firstTested.spamResult !== 'pass' ? firstTested.spamResult : 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending' | 'rejected';
+      const rejectedTested = finalResult === 'rejected' ? tested.find((v) => v.spamResult === 'rejected') : undefined;
+      const rejection = rejectedTested ? spamRejectionOf(rejectedTested as any) : null;
       const regenCount = firstTested?.regenerateCount || 0;
       if (isFixedCopy && !cachedPass) {
-        await recordFixedCopySpam(operator.id, fixedHash, finalResult)
+        await recordFixedCopySpam(operator.id, fixedHash, toSpamCheckRecord(rejectedTested ?? finalResult))
           .catch((e: any) => console.warn('[ContinuousOperator] 직접 쓴 문안 검사 기록 경고:', e?.message));
       }
 
@@ -1791,7 +1805,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
           const idx = letterIndex(v.variantId);
           const f = operatorFinalCopyAt(testedPj, idx, copyCtx);
           return {
-            index: idx, result: v.spamResult, regenerated: !!v.regenerated,
+            index: idx, ...toSpamCheckRecord(v as any), regenerated: !!v.regenerated,   // ★ 2026-11-06 C109 — 판정 + 반려 사유 = 한 값
             testId: spamResult.testIds?.[v.variantId] ?? null,
             fp: copyFingerprint({ callback: copyCtx.callback, opt080: copyCtx.opt080, msgType: testType, subject: String(v.subject ?? f?.subject ?? ''), body: String(v.messageText ?? f?.body ?? '') }),
           };
@@ -1820,7 +1834,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       finalNoticeCopy = operatorFinalCopy(saved.rows[0].proposal_json, copyCtx)?.sent || finalNoticeCopy;
 
       // 스팸 결과 저장 + 상태 결정 (decideSpamOutcome 순수 정책)
-      const outcome = decideSpamOutcome(finalResult, regenCount);
+      const outcome = decideSpamOutcome(finalResult, regenCount, spamRejectionPlaces(rejection));
       await query(
         `UPDATE operator_proposals SET
            spam_test_status = $2, spam_test_retry_count = $3, spam_test_reasoning = $4
@@ -1847,7 +1861,13 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
            RETURNING id`,
           [proposalRes.rows[0].id, outcome.reason],
         );
-        if (downgraded.rows.length > 0 && chosenFirst != null) {
+        if (downgraded.rows.length > 0 && finalResult === 'rejected') {
+          // ★ 2026-11-06 C109 E5 — 보낼 수 없는 글자 = 그 회차만 멈추고 위치를 알린다(「스팸에 걸림」 아님 · 다시 검사로 안 풀린다)
+          console.warn(`[ContinuousOperator] ${operator.name} 보낼 수 없는 글자 → 그 회차만 담당자 검토(운영자 멈춤 0)`);
+          await notifyOperatorAdmins(operator, '[AI 자동마케팅] 이번 회차 검토 필요',
+            `'${operator.name}' 자동마케팅 이번 회차를 보내지 않고 담당자 검토로 두었어요. ${outcome.reason}. 고친 뒤 제안 상세에서 승인해 주세요.`)
+            .catch((e: any) => console.warn('[ContinuousOperator] 회차 검토 알림 경고:', e?.message));
+        } else if (downgraded.rows.length > 0 && chosenFirst != null) {
           // ★ 1024 사람이 고른 첫 회차 안이 막혔다 — 그 회차만 멈추고 알린다(운영자는 그대로 · 다음 회차는 새 문안 3안을 검사한다)
           console.warn(`[ContinuousOperator] ${operator.name} 고른 첫 회차 안 스팸 미통과 → 그 회차만 담당자 검토`);
           await notifyOperatorAdmins(operator, '[AI 자동마케팅] 첫 회차 멈춤',
@@ -2064,11 +2084,15 @@ export async function listProposals(
     const finalIndex = proposalSendIndex(pj);
     const send = operatorFinalCopy(pj, ctx);
     const recheck = pj?.systemRecheck;
-    const copyCheck: 'passed' | 'rechecking' | 'blocked' | 'unchecked' | 'stale' | 'none' = !send ? 'none'
-      : (pj?.spamCheck?.fp === send.fingerprint || pj?.approvedFp === send.fingerprint) ? 'passed'
-        : recheck && recheck.fp === send.fingerprint ? (recheck.result === 'blocked' ? 'blocked' : recheck.result === 'unchecked' ? 'unchecked' : 'rechecking')
-          : pj?.spamCheck?.fp ? 'stale' : 'none';
-    return { ...mapRowToProposal(row), adOptOut: ctx.opt080, finalCopies, finalIndex, copyCheck };
+    // ★ 2026-11-06 C109 E6(Codex 설계 2R #2) — 나가는 글에 보낼 수 없는 글자 = 지문(통과 · 승인)보다 먼저 'rejected' + 위치(옛 승인 예약이 「통과」로 보이지 않게)
+    const copyCheck: 'passed' | 'rechecking' | 'blocked' | 'rejected' | 'unchecked' | 'stale' | 'none' = !send ? 'none'
+      : send.charIssue ? 'rejected'
+        : (pj?.spamCheck?.fp === send.fingerprint || pj?.approvedFp === send.fingerprint) ? 'passed'
+          : recheck && recheck.fp === send.fingerprint ? (recheck.result === 'blocked' ? 'blocked' : recheck.result === 'rejected' ? 'rejected' : recheck.result === 'unchecked' ? 'unchecked' : 'rechecking')
+            : pj?.spamCheck?.fp ? 'stale' : 'none';
+    const copyCheckReason = copyCheck !== 'rejected' ? null
+      : operatorCharsReason(send?.charIssue || spamRejectionPlaces(typeof recheck?.rejection === 'string' ? recheck.rejection : null));
+    return { ...mapRowToProposal(row), adOptOut: ctx.opt080, finalCopies, finalIndex, copyCheck, copyCheckReason };
   }));
 }
 
@@ -2138,10 +2162,15 @@ export async function approveProposal(
     ...(typeof selection.subject === 'string' ? { subject: selection.subject } : {}),
   };
   // 사람이 승인한 글의 지문 — 발송 관문이 「검사 통과 지문」 대신 이것을 본다(사람 판단 · 새 상태 0 · approveProposal 만 쓰는 칸)
+  // ★ 2026-11-06 C109 D6(구조체크 S9) — 사람이 고친 본문 · 제목 = 막고 위치 안내(옛: 나가는 글 안전화가 조용히 지웠다)
+  const editBlock = smsTextBlockReason([{ label: '본문', text: (sel as any).body ?? null }, { label: '제목', text: (sel as any).subject ?? null }]);
+  if (editBlock) return { ok: false, code: 'UNSUPPORTED_CHARS', reason: editBlock };
   const approvedFinal = operatorFinalCopyAt({ ...pj, userSelection: sel }, sel.variantIndex, ctx);
   if (!approvedFinal || approvedFinal.placeholderLeft) {
     return { ok: false, reason: '문안에 혜택 자리가 남아 있어요. 혜택을 넣은 뒤 승인해 주세요.' };
   }
+  // ★ 2026-11-06 C109 E5(P6) — 혜택 · 조립 뒤 글자 = 승인 지문을 남기기 전에 막는다(발송 관문 finalCopyCleared 와 같은 말)
+  if (approvedFinal.charIssue) return { ok: false, code: 'UNSUPPORTED_CHARS', reason: operatorCharsReason(approvedFinal.charIssue) };
   // claim: pending/admin_review → sending. 백엔드에서 바로 발송(자동 경로와 동일)해 크레딧↔발송 원자성 확보.
   //   ★ 1024 결함 8 — 보관된 운영자의 제안은 선점하지 않는다(닫기와 승인이 엇갈려도 · 같은 문장)
   const claim = await query(
@@ -2239,7 +2268,8 @@ export async function recheckOpenProposals(operatorId: string, companyId: string
     const ctx = await proposalCopyContext(companyId, row);
     const final = operatorFinalCopy(pj, ctx);
     // 관문을 이미 지나는 글(통과 지문 · 사람 승인 지문 · 혜택 자리 없는 옛 행)은 다시 검사하지 않는다 — 고친 값이 그 글을 바꾸지 않았다
-    if (!final || !final.body.trim() || final.placeholderLeft || finalCopyCleared(pj, final).ok) continue;
+    // ★ 2026-11-06 C109 E6 — 보낼 수 없는 글자가 있는 글 = 다시 검사해도 같은 반려(검사 0 · 목록 응답이 charIssue 로 rejected 를 보인다)
+    if (!final || !final.body.trim() || final.placeholderLeft || final.charIssue || finalCopyCleared(pj, final).ok) continue;
     const token = randomUUID();
     const claimed = await query(
       `UPDATE operator_proposals
@@ -2275,10 +2305,14 @@ export async function recheckOpenProposals(operatorId: string, companyId: string
                       COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || jsonb_build_object('fp', $3::text, 'passedIndex', $4::int), true) #- '{systemRecheck}'
               WHERE id = $1::uuid AND proposal_json->'systemRecheck'->>'token' = $2`
           : `UPDATE operator_proposals
-                SET proposal_json = jsonb_set(proposal_json, '{systemRecheck,result}', to_jsonb($3::text), true)
+                SET proposal_json = jsonb_set(proposal_json, '{systemRecheck}', (proposal_json->'systemRecheck') || $3::jsonb, true)
               WHERE id = $1::uuid AND proposal_json->'systemRecheck'->>'token' = $2`,
         // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 'checking'(화면 = 다시 검사 중 · 10분 뒤 다시 잡을 수 있다) · 장애만 'unchecked'
-        passed ? [row.id, token, final.fingerprint, final.variantIndex] : [row.id, token, check.verdict === 'blocked' ? 'blocked' : isSpamHold(check.verdict) ? 'checking' : 'unchecked'],
+        // ★ 2026-11-06 C109 — 보낼 수 없는 글자 = 'rejected' + 사유(한 값 · 다시 검사 0)
+        passed ? [row.id, token, final.fingerprint, final.variantIndex]
+          : [row.id, token, JSON.stringify(check.verdict === 'rejected'
+            ? { result: 'rejected', rejection: spamRejectionOf(check.variant) }
+            : { result: check.verdict === 'blocked' ? 'blocked' : isSpamHold(check.verdict) ? 'checking' : 'unchecked' })],
       ).catch((e: any) => console.warn(`[ContinuousOperator Recheck] ${row.id} 결과 기록 경고:`, e?.message));
     })();
   }
@@ -2354,6 +2388,10 @@ export async function startProposalSpamRetest(
     sel.variantIndex, { benefit: row.benefit_content ?? null, opt080, callback },
   );
   if (!final || !final.body.trim()) return { ok: false, reason: '문안이 비어 있어 검사할 수 없습니다.' };
+  // ★ 2026-11-06 C109 D6(구조체크 S11) · E7 — 사람이 고친 글 = 막고 위치 안내 · 혜택 · 조립 뒤 글자 = 검사해도 같은 반려(검사 0 · 횟수 0)
+  const editBlock = smsTextBlockReason([{ label: '본문', text: typeof sel.body === 'string' ? sel.body : null }, { label: '제목', text: typeof sel.subject === 'string' ? sel.subject : null }]);
+  if (editBlock) return { ok: false, code: 'UNSUPPORTED_CHARS', reason: editBlock };
+  if (final.charIssue) return { ok: false, code: 'UNSUPPORTED_CHARS', reason: operatorCharsReason(final.charIssue) };
   const copy = { body: final.body, subject: final.subject, msgType: final.msgType, srcBody: rawBody, srcSubject: rawSubject };
 
   // 횟수 · 동시 하나를 한 문장으로 잡는다(두 번 눌러도 하나만 선다)
@@ -2397,6 +2435,7 @@ async function runProposalSpamRetest(a: {
   variantIndex: number; copy: { body: string; subject: string; msgType: 'SMS' | 'LMS' | 'MMS'; srcBody: string; srcSubject: string };
 }): Promise<void> {
   let result = 'failed';
+  let rejection: string | null = null;   // ★ 2026-11-06 C109 E7 — 반려 사유(판정과 한 값으로 쌓는다)
   let carriers: Array<{ carrier: string; result: string }> = [];
   try {
     // ★ 2026-10-25 원장 #19 — 결과 = 공용 판정(통과는 판정이 통과일 때만 · 검사 장애는 통과로 접지 않는다) · 사람이 누른 검사라 다시 검사는 하지 않는다
@@ -2414,7 +2453,8 @@ async function runProposalSpamRetest(a: {
     });
     const v = r.variants?.[0];
     const verdict = spamVerdictOf(v as any, Number(r.totalTestCount ?? 1));
-    result = verdict === 'pass' ? 'pass' : verdict === 'blocked' ? 'blocked' : (v?.spamResult && v.spamResult !== 'pass' ? v.spamResult : 'failed');
+    result = verdict === 'pass' ? 'pass' : verdict === 'blocked' ? 'blocked' : verdict === 'rejected' ? 'rejected' : (v?.spamResult && v.spamResult !== 'pass' ? v.spamResult : 'failed');
+    if (verdict === 'rejected') rejection = spamRejectionOf(v);
     carriers = (v?.carrierResults || []).map((c) => ({ carrier: c.carrier, result: c.result }));
   } catch (e: any) {
     console.warn('[ContinuousOperator] 화면 스팸 검사 오류:', e?.message);
@@ -2422,7 +2462,7 @@ async function runProposalSpamRetest(a: {
   // 검사한 글(나가는 글) + 화면이 보낸 입력 글(화면이 입력 글자로도 결과를 붙인다 · 이모지 안전화로 글자가 달라져도)
   const entry = {
     variantIndex: a.variantIndex, body: a.copy.body, subject: a.copy.subject, srcBody: a.copy.srcBody, srcSubject: a.copy.srcSubject,
-    result, carriers, at: new Date().toISOString(),
+    ...toSpamCheckRecord(result === 'rejected' ? { spamResult: 'rejected', rejection } : result), carriers, at: new Date().toISOString(),
   };
   await query(
     `UPDATE operator_proposals
@@ -4037,18 +4077,21 @@ async function appendRoundLog(operatorId: string, entry: Omit<RoundLogEntry, 'at
 }
 
 /** 직접 쓴 문안의 스팸 검사 결과를 지문과 함께 저장 — 같은 문안이면 다음 회차는 검사하지 않는다(Q17) */
-async function recordFixedCopySpam(operatorId: string, hash: string, status: string): Promise<void> {
+async function recordFixedCopySpam(operatorId: string, hash: string, record: SpamCheckRecord): Promise<void> {
   if (!(await hasOperatorV2Columns())) return;
   await query(
     `UPDATE continuous_operators
         SET fixed_copy = jsonb_set(fixed_copy, '{spam}', $2::jsonb, true)
       WHERE id = $1::uuid AND copy_mode = 'fixed' AND jsonb_typeof(fixed_copy) = 'object'`,
-    [operatorId, JSON.stringify({ hash, status, checkedAt: new Date().toISOString() })],
+    // ★ 2026-11-06 C109 — 판정 + 반려 사유 = 한 값(SpamCheckRecord · 칸 이름 status 는 옛 그대로)
+    [operatorId, JSON.stringify({ hash, status: record.result, rejection: record.rejection ?? null, checkedAt: new Date().toISOString() })],
   );
 }
 
 /** 직접 쓴 문안 입력 정규화(EUC-KR 안전화 · 길이) — 비면 null */
 export function normalizeFixedCopyInput(raw: { subject?: string; body?: string } | null | undefined): FixedCopy | null {
+  // ★ 2026-11-06 C109 D6(구조체크 S11) — 사람이 쓴 글 = 막고 위치 안내(400 UNSUPPORTED_CHARS · 옛: 안전화가 조용히 지웠다)
+  assertSmsTextSendable([{ label: '본문', text: typeof raw?.body === 'string' ? raw.body : null }, { label: '제목', text: typeof raw?.subject === 'string' ? raw.subject : null }]);
   const body = typeof raw?.body === 'string' ? stripIncompatibleEmojis(raw.body).trim().slice(0, 2000) : '';
   if (!body) return null;
   const subject = typeof raw?.subject === 'string' ? stripIncompatibleEmojis(raw.subject).trim().slice(0, 40) : '';
@@ -4489,6 +4532,7 @@ async function scheduleSequenceReminder(
     let spamPassed = false;
     let spamNote = 'error';
     let spamUnchecked = true;
+    let spamRejection: string | null = null;   // ★ 2026-11-06 C109 E8 — 보낼 수 없는 글자 반려 문장(장애 갈래와 다른 안내)
     let reminderFp: string | null = null;
     try {
       const opt080 = await getOpt080Number(op.created_by || null, companyId);
@@ -4513,6 +4557,7 @@ async function scheduleSequenceReminder(
       spamPassed = check.verdict === 'pass';
       // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 「검사를 마치지 못함」 갈래(미통과로 적지 않는다 · 사람이 검사 · 승인)
       spamUnchecked = check.verdict === 'error' || isSpamHold(check.verdict);
+      if (check.verdict === 'rejected') spamRejection = spamRejectionOf(check.variant);
       spamNote = check.raw;
     } catch (e: any) {
       console.warn('[ContinuousOperator Sequence] 리마인드 스팸 검증 예외:', e?.message);
@@ -4534,10 +4579,14 @@ async function scheduleSequenceReminder(
         `UPDATE operator_proposals SET auto_execute_reason = $2
           WHERE id = $1::uuid AND status = 'admin_review' AND auto_execute_reason = $3
           RETURNING id`,
-        [reminderId, spamUnchecked ? '리마인드 문안 스팸 검사를 하지 못했어요(검사 장비 문제). 검사하거나 그대로 승인해 주세요' : `리마인드 문안 스팸 검증 미통과(${spamNote}). 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
+        [reminderId, spamRejection != null
+          ? `리마인드 문안에 문자로 보낼 수 없는 글자가 있어 자동 예약을 보류했어요: ${spamRejectionPlaces(spamRejection) || '위치를 확인해 주세요'}. 문안을 고친 뒤 승인해 주세요`
+          : spamUnchecked ? '리마인드 문안 스팸 검사를 하지 못했어요(검사 장비 문제). 검사하거나 그대로 승인해 주세요' : `리마인드 문안 스팸 검증 미통과(${spamNote}). 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
       ).catch((e: any) => { console.warn('[ContinuousOperator Sequence] 리마인드 사유 갱신 경고:', e?.message); return { rows: [] as any[] }; });
       if (marked.rows.length > 0) {
-        await tell('[AI 자동마케팅] 리마인드 검토 필요', spamUnchecked
+        await tell('[AI 자동마케팅] 리마인드 검토 필요', spamRejection != null
+          ? `'${op.name || ''}' 리마인드 문안에 문자로 보낼 수 없는 글자가 있어 자동 예약을 보류했습니다: ${spamRejectionPlaces(spamRejection) || '위치를 확인해 주세요'}. 문안을 고친 뒤 승인해 주세요.`
+          : spamUnchecked
           ? `'${op.name || ''}' 리마인드 문안을 검사 장비 문제로 스팸 검사하지 못해 자동 예약을 보류했습니다. 제안 상세에서 검사하거나 그대로 승인해 주세요.`
           : `'${op.name || ''}' 리마인드 문안이 스팸 검증을 통과하지 못해 자동 예약을 보류했습니다. 문안 수정 후 승인해 주세요.`);
       }
@@ -4609,7 +4658,6 @@ export async function notifyOperatorAdmins(
   // TODO(알림톡 템플릿 등록 후): 1순위 알림톡(insertAlimtalkQueue) → 실패 시 아래 문자(2순위)로 fallback.
   // ★ Harold 2026-07-02: 모든 담당자 안내 문자 첫 줄 = [한줄로 AI 자동마케팅 안내문자] (중앙 1곳 부착)
   const wrappedBody = wrapOperatorNoticeBody(body, opts?.noticeHeader);
-  const authTable = await getAuthSmsTable();
   // ★ 2026-07-09 발신번호 = 한줄로 대표번호. 옛: call_back에 수신자 본인 번호 → 발신=수신 → 번호도용차단 가입 담당자 미수신.
   const noticeCallback = getPlatformNoticeCallback();
   const rows = unique.map((phone) => [
@@ -4625,7 +4673,7 @@ export async function notifyOperatorAdmins(
   ]);
   // ⛔ 2R 정정: bulkInsertSmsQueue는 적재 건수를 돌려주고 내부 오류를 삼켜 0을 낼 수 있다.
   //   반환값을 버리고 true를 주면 "한 통도 안 나갔는데 보냈다"가 된다. 실제 적재 건수로만 판정한다.
-  const inserted = await bulkInsertSmsQueue([authTable], rows as any, true);
+  const inserted = await insertNoticeSms(rows as any, true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
   return Number(inserted) > 0;
 }
 

@@ -151,12 +151,14 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
 
   const doSaveContent = async () => {
     if (!req || busy) return;
-    if (hasUnsupportedSmsChars(draft)) { toast.error(SMS_CHARSET_BLOCK_MESSAGE); return; }
+    // ★ 2026-11-06 C109 D1 — 고친 글도 서버가 판정한다(뺌 · 바꿈 = 정리해 저장 + 위치 알림 · 막음 = 위치 반려 · 옛: 화면에서 먼저 막음)
     setBusy(true);
     try {
-      apply(await updateAgencyContent(req.id, draft, req.revision));
+      const { request: saved, notice } = await updateAgencyContent(req.id, draft, req.revision);
+      apply(saved);
       setEditing(false);
       toast.success('문안을 고쳤습니다. 검사를 다시 시작합니다.');
+      for (const n of notice) toast.info(n);
     } catch (e: any) {
       toast.error(e?.message || '문안을 고치지 못했습니다.');
       await refresh();

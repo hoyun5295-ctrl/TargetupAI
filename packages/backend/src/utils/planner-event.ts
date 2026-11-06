@@ -17,6 +17,7 @@ import { LINE_TEMPLATE_IDS, type LineTemplateId, type LineLayout } from './desig
 import { isLineCompositionId, type LineCompositionId } from './line-compositions';
 import { sanitizeLineUrl } from './one-line-steps';
 import { MAX_PRODUCT_KEYS, type PurchaseDoor } from './journey-product';
+import { smsTextBlockReason } from './message-sanitizer';   // ★ 2026-11-06 C109 혜택 문구 관문
 
 // ── 재료 ─────────────────────────────────────────────────────────────
 export interface PlannerMaterialImage { url: string; width: number | null; height: number | null }
@@ -459,6 +460,12 @@ export async function savePlannerEvent(input: {
   audience?: PlannerAudience;
   eventId?: string;
 }): Promise<{ id: string; changed: boolean }> {
+  // ★ 2026-11-06 C109 D6(Codex 설계 3R #2) — 혜택 문구 = 문자 · DM 접점이 있는 행사에서만 문자 글자 관문(이메일만 = 제약 없음)
+  //   이메일 행사에 문자 · DM 을 더하는 저장도 여기서 그때의 혜택을 본다(접점 채널 = 이 저장의 입력 값 · 다른 쓰는 자리 0 · grep 1106)
+  if (input.value.touchpoints.some((t) => t.channel === 'sms' || t.channel === 'dm')) {
+    const charBlock = smsTextBlockReason([{ label: '혜택', text: input.value.benefitText }]);
+    if (charBlock) throw new PlannerEventWriteError(400, 'UNSUPPORTED_CHARS', charBlock);
+  }
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

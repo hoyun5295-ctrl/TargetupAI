@@ -34,6 +34,8 @@ export interface AgencyNotifyContext {
    * 값이 있으면 승인 문자가 **다른 문안**으로 나간다 — 담당자가 못 본 시각으로 승인하면 안 되기 때문이다.
    */
   originalWhenText?: string;
+  /** ★ 2026-11-06 C109 D1 — 승인 요청에 싣는 「보낼 수 없는 글자를 빼고 보냅니다」 줄(agencyCharPassedLines · 없으면 []) */
+  charLines?: string[];
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -62,6 +64,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
       `건: ${shortLabel(ctx.label)}`,
       ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
       `요청하신 ${ctx.originalWhenText}은 준비 시간이 촉박해 ${ctx.whenText}로 잡았습니다.`,
+      ...(ctx.charLines || []),
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
       ctx.approveUrl
         ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
@@ -75,6 +78,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     `건: ${shortLabel(ctx.label)}`,
     ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
+    ...(ctx.charLines || []),
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
@@ -131,6 +135,20 @@ export function buildTestErrorNotify(ctx: AgencyNotifyContext): string {
     `${HEAD} 스팸 검사 장비 문제로 문안 검사를 마치지 못해 진행을 멈췄습니다.`,
     `건: ${shortLabel(ctx.label)}`,
     '문안 문제는 아닙니다. 운영팀이 확인하고 있으며, 로그인하여 다시 진행하시면 검사를 다시 시작합니다.',
+  ]);
+}
+
+/**
+ * ★ 2026-11-06 C109 D4 E1 · E2 — 검사 입구가 보낼 수 없는 글자로 반려(장애 아님 · 다시 검사 0 · 사람이 그 글자를 뺀다).
+ *   옛: 장애 갈래 = 「장비 문제 · 문안 문제는 아닙니다」 안내(거꾸로 된 말) · 같은 글을 세 번 다시 검사했다.
+ *   places = 위치 문장(그 글자는 넣지 않는다 · P4)
+ */
+export function buildUnsupportedCharsNotify(ctx: AgencyNotifyContext & { places: string }): string {
+  return compose([
+    `${HEAD} 문안 또는 명단에 문자로 보낼 수 없는 글자가 있어 검사하지 못하고 멈췄습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    ctx.places ? `위치: ${ctx.places}` : '',
+    '그 글자를 빼고 다시 진행해 주세요.',
   ]);
 }
 

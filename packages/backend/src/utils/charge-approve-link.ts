@@ -20,7 +20,8 @@
  * ⛔ 토큰 소지 = 그 번호의 폰 소지로 간주(대행발송과 같은 수용 위험 · 감사는 승인 기록의 via·번호가 진다).
  */
 import jwt from 'jsonwebtoken';
-import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
+import { getPlatformNoticeCallback } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { createShortUrl } from './short-url';
 import { sanitizeSmsText } from './auto-notify-message';
 
@@ -158,7 +159,6 @@ export async function notifyChargeApproved(input: {
   try {
     const phones = getChargeApprovalPhones();
     if (phones.length === 0) return;
-    const authTable = await getAuthSmsTable();
     const callback = getPlatformNoticeCallback();
     const body = sanitizeSmsText([
       '[한줄로] 충전 승인 완료',
@@ -172,7 +172,7 @@ export async function notifyChargeApproved(input: {
     const rows = phones.map((phone) => ([
       phone, callback, body, 'L', '[한줄로] 충전 승인 완료', null, '', 'charge-approve', '', '', '',
     ]));
-    const inserted = await bulkInsertSmsQueue([authTable], rows as any[][], true);
+    const inserted = await insertNoticeSms(rows as any[][], true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
     if (inserted < rows.length) {
       console.error(`[charge-approve-link] 승인 통보 일부 미적재: ${inserted}/${rows.length}`);
     }
@@ -197,7 +197,6 @@ export async function notifyChargeApprovers(input: {
       console.log('[charge-approve-link] 수신자 미설정(CHARGE_APPROVAL_NOTIFY_PHONES) — 안내 문자 생략');
       return 0;
     }
-    const authTable = await getAuthSmsTable();
     // ★Codex 1R high 수용 — phones[0] 발신은 발신자=수신자가 되어 번호도용 차단에 걸린다(미수신).
     //   플랫폼 대표번호 CT를 쓴다(campaign-sync-worker·continuous-operator와 같은 규약).
     //   같은 결함이 system-alert.ts에도 있다 = 범위 밖 기록(BUGS).
@@ -231,7 +230,7 @@ export async function notifyChargeApprovers(input: {
       ]);
     }
     // ★Codex 1R high 수용 — 적재 실패를 삼키면 아무도 문자를 못 받았는데 로그는 정상이 된다
-    const inserted = await bulkInsertSmsQueue([authTable], rows, true);
+    const inserted = await insertNoticeSms(rows, true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
     if (inserted < rows.length) {
       console.error(`[charge-approve-link] 승인 안내 일부 미적재: ${inserted}/${rows.length} — 대기 건은 관리 화면에서 처리 필요`);
     }

@@ -155,7 +155,11 @@ describe('작성 화면 배선 (P2)', () => {
   });
 
   // 결정 D2 = 작성 화면에서 막는다. 문안 편집기(MessageEditorModal)는 문안을 돌려줄 뿐 보내지 않으므로 받는 화면(AiOperatorPage)이 막는다.
-  it.each(SCREENS.filter((rel) => rel !== 'components/MessageEditorModal.tsx'))('%s 가 발송·저장 진입을 막는다', (rel) => {
+  // ★ 2026-11-06 C109 D1(Harold 추천안 ① · 설계서 docs/2026-11-06-b1106-1-unsupported-char-design.md) — 대행 접수 화면은 막지 않는다:
+  //   접수 코어가 뺌 · 바꿈 글자를 정리해 접수하고 위치를 알린다 · 막음 글자는 위치를 적어 반려(화면이 먼저 막으면 그 갈래가 닫히지 않는다).
+  //   문안 아래 안내(SmsCharsetNotice)는 위 시험이 그대로 지킨다 · 대행 상세(AgencySendDetail)는 승인 버튼 쪽 확인이 남아 이 시험 그대로.
+  const NOT_BLOCKING = new Set(['components/MessageEditorModal.tsx', 'components/agency/AgencySendComposer.tsx']);
+  it.each(SCREENS.filter((rel) => !NOT_BLOCKING.has(rel)))('%s 가 발송·저장 진입을 막는다', (rel) => {
     const src = readFileSync(join(FRONT_SRC, rel), 'utf8');
     expect(src).toMatch(/hasUnsupportedSmsChars\(/);
     expect(src).toMatch(/SMS_CHARSET_BLOCK_MESSAGE/);

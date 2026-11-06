@@ -32,6 +32,7 @@ import { loadPlanContext, canUseFeature, resolveMaxAutoCampaigns, type PlanConte
 import { normalizePhone } from '../utils/normalize-phone';
 // ★ D150-3 (2026-05-10) LOW#7: 광고성 자동발송 등록 시 080 무료거부 번호 검증
 import { getOpt080Number } from '../utils/messageUtils';
+import { smsTextBlockReason } from '../utils/message-sanitizer';   // ★ 2026-11-06 C109 D6 사람 글 저장 관문(위치)
 
 const router = Router();
 
@@ -605,6 +606,18 @@ router.put('/:id', async (req: Request, res: Response) => {
       alimtalk_variable_map, alimtalk_next_type, alimtalk_next_contents,
     } = req.body;
 
+    // ★ 2026-11-06 C109 D6(뿌리 R68) — 사람이 쓴 문자 글(본문 · 제목 · 폴백 · 알림톡 대체 문자) = 저장 전에 막고 위치 안내
+    //   (옛: 받아 두고 D-1 검사 입구에서 「검사 실패」 · 발송 때 9401) · 알림톡 본문은 승인 템플릿이라 보지 않는다
+    const finalChannel = channel !== undefined ? channel : ownership.campaign.channel;
+    const charBlock = smsTextBlockReason(finalChannel === 'alimtalk'
+      ? [{ label: '대체 문자', text: typeof alimtalk_next_contents === 'string' ? alimtalk_next_contents : null }]
+      : [
+        { label: '본문', text: typeof message_content === 'string' ? message_content : null },
+        { label: '제목', text: typeof message_subject === 'string' ? message_subject : null },
+        { label: 'AI 실패 때 보낼 문안', text: typeof fallback_message_content === 'string' ? fallback_message_content : null },
+      ]);
+    if (charBlock) return res.status(400).json({ error: charBlock, code: 'UNSUPPORTED_CHARS' });
+
     // 스케줄 변경 시 유효성 검증
     const finalScheduleType = schedule_type || ownership.campaign.schedule_type;
     const finalScheduleDay = schedule_day !== undefined ? schedule_day : ownership.campaign.schedule_day;
@@ -779,6 +792,14 @@ router.put('/:id/generated-message', async (req: Request, res: Response) => {
     const { generated_message_content, generated_message_subject } = req.body;
     if (!generated_message_content?.trim()) {
       return res.status(400).json({ error: '문안 내용을 입력해주세요.' });
+    }
+    // ★ 2026-11-06 C109 D6 — 사람이 고친 생성 문안 = 저장 전에 막고 위치 안내(알림톡 채널은 생성 문안을 쓰지 않는다)
+    if (ownership.campaign.channel !== 'alimtalk') {
+      const charBlock = smsTextBlockReason([
+        { label: '본문', text: String(generated_message_content) },
+        { label: '제목', text: typeof generated_message_subject === 'string' ? generated_message_subject : null },
+      ]);
+      if (charBlock) return res.status(400).json({ error: charBlock, code: 'UNSUPPORTED_CHARS' });
     }
 
     await query(

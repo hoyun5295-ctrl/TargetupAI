@@ -52,6 +52,8 @@ const SPAM_RESULT_CHIP: Record<string, { text: string; cls: string }> = {
   // ★ 2026-11-01 B1-4 — 통신사는 보냈는데 검사폰 확인이 늦음 · 같은 글 검사가 아직 진행 중
   unconfirmed: { text: '스팸 검사 확인 중', cls: 'bg-amber-50 text-amber-700' },
   pending: { text: '스팸 검사 중', cls: 'bg-slate-100 text-slate-600' },
+  // ★ 2026-11-06 C109 — 검사 입구가 보낼 수 없는 글자로 반려(장애 아님 · 다시 검사로 안 풀린다 · 사유 줄은 아래)
+  rejected: { text: '보낼 수 없는 글자', cls: 'bg-amber-50 text-amber-800' },
 };
 /** ★ 2026-10-06 화면 스팸 검사 횟수(서버 PROPOSAL_SPAM_RETEST_LIMIT 와 같은 값 · 서버가 막는다) */
 const SPAM_RETEST_LIMIT = 5;
@@ -63,6 +65,8 @@ const COPY_CHECK_CHIP: Record<string, { text: string; cls: string }> = {
   // ★ 2026-10-25 원장 #18 — 검사 장비 문제로 끝내 검사를 못 함(차단이 아니다)
   unchecked: { text: '검사 장비 문제로 다시 검사하지 못했어요 · 스팸 검사를 눌러 주세요', cls: 'bg-amber-50 text-amber-800' },
   stale: { text: '검사한 뒤 혜택이 바뀌어 다시 검사가 필요해요', cls: 'bg-amber-50 text-amber-800' },
+  // ★ 2026-11-06 C109 E6 — 나가는 글(혜택 포함)에 보낼 수 없는 글자(통과 지문보다 먼저 · 위치는 copyCheckReason)
+  rejected: { text: '보낼 수 없는 글자가 있어요. 문안에서 빼 주세요', cls: 'bg-amber-50 text-amber-800' },
 };
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
@@ -294,6 +298,9 @@ export default function ProposalDecisionCard({
           <ShieldCheck className="w-3 h-3" />{COPY_CHECK_CHIP[proposal.copyCheck].text}
         </span>
       )}
+      {proposal.copyCheck === 'rejected' && proposal.copyCheckReason && (
+        <span className="basis-full text-[11px] text-amber-800">{proposal.copyCheckReason}</span>
+      )}
     </div>
   );
 
@@ -399,6 +406,13 @@ export default function ProposalDecisionCard({
                     {isSel && <span className="text-[10px] bg-indigo-100 text-indigo-900 px-1.5 py-0.5 rounded-full">발송 선택됨</span>}
                     {v && <span className="text-[10px] text-slate-400">발송 {v.sentCount} · 클릭 {v.clickCount} · 전환 {v.conversionCount}</span>}
                   </div>
+                  {/* ★ 2026-11-06 C109 E7 — 보낼 수 없는 글자 반려 = 위치 사유 줄(서버 문장 그대로 · 그 글자는 들어 있지 않다) */}
+                  {!testingThis && (() => {
+                    const hit = reHit && SPAM_RESULT_CHIP[reHit.result] ? reHit : autoHit;
+                    return hit?.result === 'rejected' && hit.rejection
+                      ? <div className="text-[11px] text-amber-800 mb-1">{hit.rejection}</div>
+                      : null;
+                  })()}
                   {/* ★ 2026-07-10: LMS/MMS 제목 — 변형별 표시 + 선택 변형 편집(비우면 승인 차단). "(광고)"는 발송 시점 자동 부착 */}
                   {isLongType && (
                     isSel && editing ? (

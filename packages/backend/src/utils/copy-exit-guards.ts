@@ -8,6 +8,8 @@
  * 도우미 셋(바이트 셈 · 이모지 빼기 · 변수 검증)은 services/ai.ts 에서 글자 그대로 옮겼다(순환 import 없이 출구 CT 가 쓰게).
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT
+import { mapOutsideLinkMasks } from './brand-link-core';   // ★ 2026-11-06 C109 감춘 링크 자리는 정리하지 않는다
 import { detectLiquidSyntax, flattenLiquidToPlainText } from './liquid-templating';
 import { findBannedWords } from './copy-similarity-guard';
 import { findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, findInventedDates, replaceInventedDates, hasAiFillPlaceholder } from './copy-benefit-detector';
@@ -47,62 +49,10 @@ export function calculateKoreanBytes(text: string): number {
  * - 제거: 유니코드 이모지 (Emoticons, Pictographs, Transport, Flags 등)
  * - 카카오 채널은 이모지 허용이므로 호출하지 않음
  */
-export function stripEmojis(text: string): string {
-  return text
-    // Surrogate pair 이모지 (U+1F000 이상) — 대부분의 컬러 이모지
-    .replace(/[\u{1F600}-\u{1F64F}]/gu, '')   // Emoticons
-    .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')   // Misc Symbols & Pictographs
-    .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')   // Transport & Map
-    .replace(/[\u{1F700}-\u{1F77F}]/gu, '')   // Alchemical
-    .replace(/[\u{1F780}-\u{1F7FF}]/gu, '')   // Geometric Extended
-    .replace(/[\u{1F800}-\u{1F8FF}]/gu, '')   // Supplemental Arrows
-    .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')   // Supplemental Symbols
-    .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')   // Chess Symbols
-    .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')   // Symbols Extended-A
-    .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')   // Regional Indicators (Flags)
-    .replace(/[\u{231A}-\u{231B}]/gu, '')     // ⌚⌛
-    .replace(/[\u{23E9}-\u{23F3}]/gu, '')     // ⏩~⏳
-    .replace(/[\u{23F8}-\u{23FA}]/gu, '')     // ⏸~⏺
-    .replace(/[\u{25FB}-\u{25FE}]/gu, '')     // ◻◼◽◾
-    .replace(/[\u{2614}-\u{2615}]/gu, '')     // ☔☕
-    .replace(/[\u{2648}-\u{2653}]/gu, '')     // ♈~♓ (별자리)
-    .replace(/[\u{267F}]/gu, '')              // ♿
-    .replace(/[\u{2693}]/gu, '')              // ⚓
-    .replace(/[\u{26A1}]/gu, '')              // ⚡
-    .replace(/[\u{26AA}-\u{26AB}]/gu, '')     // ⚪⚫
-    .replace(/[\u{26BD}-\u{26BE}]/gu, '')     // ⚽⚾
-    .replace(/[\u{26C4}-\u{26C5}]/gu, '')     // ⛄⛅
-    .replace(/[\u{26D4}]/gu, '')              // ⛔
-    .replace(/[\u{26EA}]/gu, '')              // ⛪
-    .replace(/[\u{26F2}-\u{26F3}]/gu, '')     // ⛲⛳
-    .replace(/[\u{26F5}]/gu, '')              // ⛵
-    .replace(/[\u{26FA}]/gu, '')              // ⛺
-    .replace(/[\u{26FD}]/gu, '')              // ⛽
-    .replace(/[\u{2702}]/gu, '')              // ✂
-    .replace(/[\u{2705}]/gu, '')              // ✅
-    .replace(/[\u{2708}-\u{270D}]/gu, '')     // ✈~✍
-    .replace(/[\u{270F}]/gu, '')              // ✏
-    .replace(/[\u{2712}]/gu, '')              // ✒
-    .replace(/[\u{2714}]/gu, '')              // ✔
-    .replace(/[\u{2716}]/gu, '')              // ✖
-    .replace(/[\u{271D}]/gu, '')              // ✝
-    .replace(/[\u{2721}]/gu, '')              // ✡
-    .replace(/[\u{2728}]/gu, '')              // ✨
-    .replace(/[\u{2733}-\u{2734}]/gu, '')     // ✳✴
-    .replace(/[\u{2744}]/gu, '')              // ❄
-    .replace(/[\u{2747}]/gu, '')              // ❇
-    .replace(/[\u{274C}]/gu, '')              // ❌
-    .replace(/[\u{274E}]/gu, '')              // ❎
-    .replace(/[\u{2753}-\u{2755}]/gu, '')     // ❓❔❕
-    .replace(/[\u{2757}]/gu, '')              // ❗
-    .replace(/[\u{2763}-\u{2764}]/gu, '')     // ❣❤
-    .replace(/[\u{2795}-\u{2797}]/gu, '')     // ➕➖➗
-    .replace(/[\u{27A1}]/gu, '')              // ➡
-    .replace(/[\u{27B0}]/gu, '')              // ➰
-    .replace(/[\u{27BF}]/gu, '')              // ➿
-    .replace(/[\u{FE0F}]/gu, '')              // Variation Selector-16
-    .replace(/[\u{200D}]/gu, '')              // Zero Width Joiner
-    .replace(/[\u{20E3}]/gu, '')              // Combining Enclosing Keycap
+export function stripEmojis(text: string, opts: { keepLinkMasks?: boolean } = {}): string {
+  // ★ 2026-11-06 C109 S1 — 글자 판단 = 분류 CT 하나(message-sanitizer.cleanSmsTextAll · 뿌리 R1) · 옛 정규식 범위 목록은 지웠다(범위 밖 보낼 수 없는 글자가 남아 검사 반려 · 9401)
+  //   keepLinkMasks = 감춘 링크 자리(출구 CT 안 본문)는 두고 정리한다(감춤 글자 = 사용자 영역 글자 · 정리 CT 가 지우면 링크가 사라진다)
+  return (opts.keepLinkMasks ? mapOutsideLinkMasks(text, cleanSmsTextAll) : cleanSmsTextAll(text))
     // 연속 공백 정리
     .replace(/  +/g, ' ')
     .replace(/ *\n/g, '\n')    // 줄 끝 공백 제거
@@ -175,7 +125,7 @@ export function applyCopyExitGuards(
   msgField = msgField.replace(new RegExp(`\\n{${maxBlank + 2},}`, 'g'), '\n'.repeat(maxBlank + 1));
   // ★ 안전장치: SMS/LMS/MMS 이모지 강제 제거 (카카오만 허용)
   if (channel !== '카카오' && channel !== 'KAKAO') {
-    msgField = stripEmojis(msgField);
+    msgField = stripEmojis(msgField, { keepLinkMasks: true });
   }
   // ★ 2026-07-06 Liquid 출구 가드 — 이 생성물은 %변수% 세계. 프롬프트 지시와 무관하게(모델은 확률적으로
   //   지시를 어긴다 — psy5868 실측) 템플릿 문법({{ }}·{% %}) 검출 시 결정적 평문화(중립 렌더 → 잔존 제거).
@@ -239,6 +189,8 @@ export function applyCopyExitGuards(
       subj = replaceInventedDates(subj, ctx.benefitGround, ctx.baseDate);
     }
     subject = cleanLeftoverVars(subj).replace(/  +/g, ' ').trim();
+    // ★ 2026-11-06 C109 S1 — 제목도 본문과 같은 글자 정리(카카오 제외 · 옛: 본문만)
+    if (channel !== '카카오' && channel !== 'KAKAO') subject = stripEmojis(subject);
   }
 
   // ★ #11 수정: 개인화 모드일 때 선택된 변수만 허용, 비선택 변수 제거

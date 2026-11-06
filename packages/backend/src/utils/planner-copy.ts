@@ -20,8 +20,8 @@ import { getCompanyCosts } from '../config/defaults';
 import { orchestrate } from '../services/ai-orchestrator';
 import { generateMessages } from '../services/ai';
 import { buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, type SpamVerdict } from './spam-test-queue';
-import { unsupportedSmsCharCodes } from './sms-charset';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, type SpamVerdict } from './spam-test-queue';
+import { smsTextBlockReason } from './message-sanitizer';   // ★ 2026-11-06 C109 사람 글 저장 관문(위치 문장)
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
 import { runInCreditBundle } from './ai-credit-context';
@@ -32,7 +32,7 @@ import {
 } from './planner-execution';
 import { PlannerTouchpointRow, loadEventTouchpoints, setTouchpointMetaIfCopyIs, guardPlannerMetaOrSkip } from './planner-touchpoint';
 import { loadPlannerEvent, staleBuildChannels, PlannerEventRow } from './planner-event';
-import { PLANNER_REASON } from './planner-reasons';
+import { PLANNER_REASON, plannerCharsReason } from './planner-reasons';
 
 // ── 회사 축(실행부와 공용 — 같은 값으로 검사하고 같은 값으로 보낸다) ─────────
 export interface PlannerCompanyContext { companyInfo: any; customerStats: any; rejectNumber: string }
@@ -260,11 +260,20 @@ async function runPlannerSpamTest(input: PlannerSpamInput) {
  * 예외(큐 · DB)도 error 로 접는다(검사 장애 ≠ 차단).
  * ★ 2026-10-25 원장 #46 — 막힘 · 장애를 둘 다 null 로 내던 옛 함수(spamCheckPlannerCopy)는 지웠다 · 모든 호출처가 이 판정 셋을 쓴다.
  */
-export async function spamCheckPlannerVerdict(input: PlannerSpamInput): Promise<{ verdict: SpamVerdict; body: string; subject: string }> {
+/** ★ 2026-11-06 C109(Codex 설계 1R #6) — 반려면 사유가 필수인 갈래(rejection = 위치 문장) */
+export type PlannerSpamVerdict =
+  | { verdict: Exclude<SpamVerdict, 'rejected'>; body: string; subject: string; rejection?: undefined }
+  | { verdict: 'rejected'; body: string; subject: string; rejection: string };
+
+export async function spamCheckPlannerVerdict(input: PlannerSpamInput): Promise<PlannerSpamVerdict> {
   try {
     const res = await runPlannerSpamTest(input);
     const v = res.variants[0];
-    return { verdict: spamVerdictOf(v, res.totalTestCount), body: v?.messageText || input.body, subject: v?.subject || input.subject };
+    const verdict = spamVerdictOf(v, res.totalTestCount);
+    const body = v?.messageText || input.body;
+    const subject = v?.subject || input.subject;
+    if (verdict === 'rejected') return { verdict, body, subject, rejection: spamRejectionOf(v) as string };
+    return { verdict, body, subject };
   } catch (e: any) {
     console.warn('[planner-copy] 스팸 검사 오류(검사 장애로 본다):', e?.message || e);
     return { verdict: 'error', body: input.body, subject: input.subject };
@@ -337,6 +346,15 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
             { eventRevision: { eventId, revision } }).catch(() => false);   // ★ 1026 Codex 3R — 읽은 실패 수의 리비전일 때만
           continue;
         }
+        if (check.verdict === 'rejected') {
+          // ★ 2026-11-06 C109 E9 — 보낼 수 없는 글자 = 실패 수에 센다(상한에서 멈춘다 · 다시 만들어도 사람 글인 혜택은 안 바뀐다) · 사유 = 위치
+          //   글은 그대로(사람 글은 사람이 고친다 · 확인 중 AI 글도 비우지 않는다 = 같은 혜택으로 다시 만들면 같은 반려)
+          generationFailed = true;
+          const at = new Date().toISOString();
+          await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur,
+            { copy: { ...cur, spam: 'fail', checkedAt: at }, copy_error: { reason: plannerCharsReason(spamRejectionPlaces(check.rejection), 'prepare'), at } }).catch(() => false);
+          continue;
+        }
         void (check.verdict satisfies 'pass' | 'blocked');
         const verdict = check.verdict === 'pass';
         const checkedAt = new Date().toISOString();
@@ -390,8 +408,11 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
       }
       if (check.verdict !== 'pass') {
         generationFailed = true;
+        // ★ 2026-11-06 C109 E9 — 글자 반려 = 위치 사유(AI 글은 출구 CT 가 이미 정리 → 출처 = 다시 넣은 혜택 문구) · 옛: 만들기 실패 일반 문장
+        const reason = check.verdict === 'rejected' ? plannerCharsReason(spamRejectionPlaces(check.rejection), 'prepare')
+          : check.verdict === 'blocked' ? PLANNER_REASON.spamFailed : PLANNER_REASON.copyFailed;
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, before,
-          { copy_error: { reason: check.verdict === 'blocked' ? PLANNER_REASON.spamFailed : PLANNER_REASON.copyFailed, at: new Date().toISOString() } }).catch(() => false);
+          { copy_error: { reason, at: new Date().toISOString() } }).catch(() => false);
         continue;
       }
       const passed = { body: check.body, subject: check.subject };
@@ -472,9 +493,9 @@ export async function editPlannerCopy(input: {
   if (text.length > PLANNER_COPY_MAX) throw new PlannerCopyEditError(400, 'TOO_LONG', `문안은 ${PLANNER_COPY_MAX}자까지 쓸 수 있습니다.`);
   if (hasUneditedBenefitPlaceholder(text)) throw new PlannerCopyEditError(400, 'PLACEHOLDER', '채워지지 않은 자리가 남아 있습니다. 혜택 문구를 직접 써 주세요.');
   // ★ 1026 Codex 1R — 문자로 못 보내는 글자는 저장에서 막는다(검사 큐가 매번 거절해 검사가 영영 끝나지 않았다 · 검사 · 발송과 같은 판정)
-  if (unsupportedSmsCharCodes(text, input.subject ?? '').length > 0) {
-    throw new PlannerCopyEditError(400, 'UNSUPPORTED_CHARS', '문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있어요. 그 글자를 빼고 다시 저장해 주세요.');
-  }
+  // ★ 2026-11-06 C109 D6 — 반려 문장에 위치(P4 · 같은 판정 isSmsEncodableChar · 관문 CT smsTextBlockReason)
+  const charBlock = smsTextBlockReason([{ label: '본문', text }, { label: '제목', text: String(input.subject ?? '') }]);
+  if (charBlock) throw new PlannerCopyEditError(400, 'UNSUPPORTED_CHARS', charBlock);
   const planned = (await loadEventTouchpoints(input.companyId, ev.id)).filter((t) => t.status === 'planned');
   const g = carrierGroups(planned).find((x) => x.carrier.id === input.touchpointId);
   if (!g) throw new PlannerCopyEditError(404, 'NOT_FOUND', '고칠 문자를 찾을 수 없습니다.');

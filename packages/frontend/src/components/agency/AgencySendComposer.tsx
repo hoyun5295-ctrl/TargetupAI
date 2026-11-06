@@ -25,7 +25,6 @@ import { useToast } from '../ToastProvider';
 import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
-import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
 import { buildAdSubjectFront, startsWithAdMark, pickAgencySmsCandidates, estimateAgencySmsBytesFromCandidates, normalizeAgencyPhoneFront, findVarTokens } from '../../utils/formatDate';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
@@ -421,8 +420,8 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       toast.error(`제목에는 항목을 넣을 수 없습니다: ${subjectVars.map((v) => `%${v}%`).join(' ')}`);
       return;
     }
-    // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 다음 단계로 가지 않는다(설계 D2 · 문안 아래 안내에서 바꾼다)
-    if (hasUnsupportedSmsChars(content, subject)) { toast.error(SMS_CHARSET_BLOCK_MESSAGE); return; }
+    // ★ 2026-11-06 C109 D1 — 화면에서 먼저 막지 않는다(옛 2026-09-10 설계 D2 사전 차단). 접수 코어가 판정한다:
+    //   뺌 · 바꿈 글자 = 정리해 접수하고 위치를 알린다 · 막음 글자 = 위치를 적어 반려(문안 아래 안내는 그대로 = 미리 고칠 수 있다)
     // 자동 매핑: 문안 변수와 같은 이름의 열이 있으면 맞춰 둔다
     const next = { ...varMapping };
     for (const v of usedVars) {
@@ -449,7 +448,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
 
     setSaving(true);
     try {
-      const created = await createAgencyRequest({
+      const { request: created, notice } = await createAgencyRequest({
         // ★ 2026-09-26 R1-08 — 유형은 접수 코어가 정한다(이미지만 화면이 확정)
         messageType: mms.mmsUploadedImages.length > 0 ? 'MMS' : 'AUTO',
         subject: subject.trim() || undefined,
@@ -467,6 +466,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
         recipients,
       });
       toast.success('접수했습니다. 스팸 검사를 마치면 담당자 번호로 문자를 보내 드립니다.');
+      for (const n of notice) toast.info(n);   // ★ 2026-11-06 C109 보낼 수 없는 글자를 빼고 접수한 위치
       onCreated(created);
       close();
     } catch (e: any) {

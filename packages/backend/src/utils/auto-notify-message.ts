@@ -27,6 +27,7 @@
  */
 
 import { buildAdMessage } from './messageUtils';
+import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT
 
 export interface AutoCampaignNotifyContext {
   campaignName: string;
@@ -142,7 +143,8 @@ function applyAd(ctx: AutoCampaignNotifyContext): string {
  */
 export function sanitizeSmsText(text: string): string {
   if (!text) return '';
-  return text
+  // ★ 2026-11-06 C109 S3 — 꾸밈 기호 제거(아래 그대로) 뒤 보낼 수 없는 글자 판단 = 분류 CT(cleanSmsTextAll · 범위 밖 글자가 남아 알림 문자 9401 이던 것)
+  return cleanSmsTextAll(text
     // dingbats 사각/원형 도형
     .replace(/[▼▲▶◀◇◆◈▣▤▥▦▧▨▩□■◯●○◎◉]/g, '')
     // 별표류
@@ -154,8 +156,8 @@ export function sanitizeSmsText(text: string): string {
     // 이모지 (Unicode 범위)
     .replace(/[\u{1F300}-\u{1FAFF}]/gu, '')
     .replace(/[\u{2600}-\u{27BF}]/gu, '')
-    .replace(/[\u{1F000}-\u{1F02F}]/gu, '')
-    // 연속된 공백 정리
+    .replace(/[\u{1F000}-\u{1F02F}]/gu, ''))
+    // 연속된 공백 정리(★ 2026-11-06 C109 — 글자 CT 가 지운 자리까지 · CT 뒤에)
     .replace(/[ \t]+/g, ' ')
     .trim();
 }

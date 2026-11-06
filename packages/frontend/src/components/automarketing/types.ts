@@ -254,7 +254,8 @@ export interface ProposalJson {
    */
   spamCheck?: {
     passedIndex?: number | null;
-    results?: Array<{ index: number; result: string; regenerated?: boolean }>;
+    // ★ 2026-11-06 C109 — result = 'rejected' 이면 rejection = 위치 문장(서버 SpamCheckRecord)
+    results?: Array<{ index: number; result: string; rejection?: string | null; regenerated?: boolean }>;
   };
   /** ★ 2026-10-06 화면 스팸 검사(고른 안 · 고친 문안) — 결과는 검사한 문안 글자와 함께 쌓인다(같은 글자일 때만 표시) */
   spamRetest?: ProposalSpamRetest | null;
@@ -264,7 +265,7 @@ export interface ProposalSpamRetest {
   count?: number;
   running?: { token?: string; variantIndex: number; startedAt: string };
   /** body · subject = 검사한 글(나가는 글) · srcBody · srcSubject = 화면이 보낸 입력 글(★ 2026-10-25 원장 #29) */
-  results?: Array<{ variantIndex: number; body: string; subject: string; srcBody?: string; srcSubject?: string; result: string; carriers?: Array<{ carrier: string; result: string }>; at: string }>;
+  results?: Array<{ variantIndex: number; body: string; subject: string; srcBody?: string; srcSubject?: string; result: string; rejection?: string | null; carriers?: Array<{ carrier: string; result: string }>; at: string }>;
 }
 
 export interface OperatorProposal {
@@ -291,7 +292,9 @@ export interface OperatorProposal {
    */
   finalCopies?: Array<OperatorFinalCopyView | null>;
   finalIndex?: number;
-  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'unchecked' | 'stale' | 'none';
+  copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'rejected' | 'unchecked' | 'stale' | 'none';
+  /** ★ 2026-11-06 C109 — copyCheck = rejected 일 때 위치 문장(서버가 만든다 · 그 글자는 들어 있지 않다) */
+  copyCheckReason?: string | null;
 }
 
 export interface OperatorFinalCopyView {

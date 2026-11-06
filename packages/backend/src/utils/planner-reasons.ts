@@ -85,4 +85,16 @@ export const PLANNER_REASON = {
   recheckPastDeadline: `마감(${PLANNER_APPROVAL_DEADLINE_HOUR}시) 뒤 검사에 막혀 이 날 발송을 건너뛰었습니다.`,   // ★ 1025 #62 서버 마감 값
   recheckSkipped: '담당자가 이 날 발송을 건너뛰기로 했습니다.',
   spamCheckDown: '스팸 검사 장비 문제로 오늘 발송을 보류했습니다. [다시 시작]을 누르면 다시 검사합니다.',
+  // ★ 2026-11-06 C109 E9 — 검사 입구 글자 반려(장애 아님 · 다시 검사로 안 풀린다 · 위치는 plannerCharsReason)
+  unsupportedChars: '문자로 보낼 수 없는 글자가 있어 오늘 발송을 보류했습니다. 문안에서 그 글자를 빼 주세요.',
 } as const;
+
+/**
+ * ★ 2026-11-06 C109 E9 — 글자 반려 사유(위치 포함 · P4 · places = spamRejectionPlaces 결과 · 그 글자는 넣지 않는다).
+ *   send = 발송 당일 · 승인 뒤 검사(칸 잠금) · prepare = 사전 준비 · 고친 글 검사(문안 칸 사유)
+ */
+export function plannerCharsReason(places: string, when: 'send' | 'prepare'): string {
+  const head = when === 'send' ? '문자로 보낼 수 없는 글자가 있어 오늘 발송을 보류했습니다' : '문자로 보낼 수 없는 글자가 있어 문안을 준비하지 못했습니다';
+  const tail = when === 'send' ? '문안에서 그 글자를 빼 주세요.' : '혜택 문구나 문안에서 그 글자를 빼 주세요.';
+  return places ? `${head}: ${places}. ${tail}` : `${head}. ${tail}`;
+}

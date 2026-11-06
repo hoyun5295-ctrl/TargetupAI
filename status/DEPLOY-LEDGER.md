@@ -53,7 +53,8 @@
 | C105 | 11893902 |
 | C106 | 11893902 |
 | C107 | 11893902 |
-| C108 | 미커밋 |
+| C108 | dd446c5d |
+| C109 | 미커밋 |
 
 ## §1 대기
 
@@ -1238,7 +1239,7 @@ UNION ALL
 - 선행: C107(11893902) · 커밋(Harold)
 - 기대: 친구 칸(k_friend_yn)이 아직 없으니 청구 · 집계 = 종전 식(getFriendColumnTables = 빈 집합) · 이때부터 비친구 대상 브랜드 차감 문구에 「· 친구 W원」 조각(비친구 단가가 따로 있는 회사만) · 스팸 몰림 목록 = 결과 표 7 + 대역 5 · 관리 통계 시험 요약 = CT · 배포 뒤 에러 로그 0
 - 확인: pm2 기동 · 에러 로그 · (선불 비친구 브랜드 차감이 생기면) 차감 설명 문구
-- 결과:
+- 결과: 1106 Harold tp-push(다른 세션 문서와 함께 · Harold 「함께 올리기」) · 서버 배포 Harold 「배포완료」
 
 ### C108-M1 · .62 MySQL SMSQ 친구 칸(비토 라인 12 ~ 16만 · root)
 - 카드: C108
@@ -1246,7 +1247,7 @@ UNION ALL
 - 선행: C108-H1
 - 기대: 실행 전 실측 ① 네 대 설정 이력 옮기기 꺼짐(archive) ② `SMSQ_SEND_1[2-6]_%` 이력 표 0 ③ MySQL 판(INSTANT 지원) → `ALTER TABLE SMSQ_SEND_N ADD COLUMN k_friend_yn varchar(1) NULL DEFAULT NULL, ALGORITHM=INSTANT`(N = 12 ~ 16 · lock_wait_timeout 2) · information_schema 확인 5행 · 되돌리기 = **칸은 남긴다**(에이전트 설정 `field_map.friend_yn` 만 되돌리면 칸에 새 값이 안 쓰인다) · 칸을 꼭 지워야 하면 에이전트 설정 되돌림 → 한줄로 재시작(친구 칸 표 목록 5분 캐시를 비움 · 남은 캐시가 없는 칸을 부르면 청구 · 정산 쿼리가 죽는다) → `ALTER TABLE … DROP COLUMN k_friend_yn`
 - 확인: 실측 셋 · DDL 출력 · information_schema 5행
-- 결과:
+- 결과: 1106 사전 실측(Harold) ① 네 대 설정 history 절 없음 = 기본 꺼짐(config.go:474 기본값은 주기 · 묶음만 · archiver.go:78 꺼지면 바로 돌아옴) ② `SMSQ_SEND_1[2-6]` 표 = 12 · 13 · 14 · 15 · 16 다섯 개뿐(이력 표 0) ③ MySQL 8.4.8 · 친구 칸 0 → DDL(1106 11:3x Harold · root · -it 없이 비밀번호 read -s → --defaults-extra-file=/dev/stdin · 컨테이너 MYSQL_ROOT_PASSWORD 는 지금 비밀번호와 달라 거부) = 다섯 표 k_friend_yn varchar(1) YES → 통과
 
 ### C108-A1 · 에이전트 1.0.33 출고 · .62 네 대 교체 + field_map.friend_yn
 - 카드: C108
@@ -1254,7 +1255,7 @@ UNION ALL
 - 선행: C108-M1 · 게이트웨이 커밋 push(에이전트 빌드 = .65 deploy/build-agent.sh · 엔진 감사 설계서 §14-8 절차)
 - 기대: 네 대 heartbeat 1.0.33 · 설정 `field_map.friend_yn: "k_friend_yn"` · 재시작(적재 0건 한 줄 조건) · 옛 게이트웨이 = 친구 값 빈 값이라 칸을 쓰지 않음(UPDATE 에 k_friend_yn 없음)
 - 확인: 네 대 시작 로그(판 · GW 연결 · 폴링) · 설정 grep
-- 결과:
+- 결과: 선행 게이트 1106 Harold = check.sh GW_CHECK_OK · check.sh --pg GW_PG_CHECK_OK(관리 API 25 + 중간 모양 24 · Go 6패키지 · 통과 1940 · 건너뜀 0) · 게이트웨이 커밋 8e47013 push(파일 22 · 다른 세션 status/OPS.md · tools/generate_agent_environment_checklist_pdf.py 뺌) · ⚠ 1.0.32(2288d93) 뒤 Agent 변경이 함께 실린다 = 0929 속도 · 읽은 시각(58b5055) · 1031 발신프로필(c8ac27f) · 1105 설정 인코딩(290ab30) · C108 → 출고 = 엔진 감사 설계서 §14-8 전 절차(안내서 · 게시 · 승인 · canary) · **Harold 「오늘 밤 출고 준비」(1106)** · 준비 = 안내서 생성기 1.0.33 문장(카카오 발신프로필 키 선택 · 성능 표 poll_interval_min/max · 1.0.32 글 그대로 대조) · 카카오 문장은 템플릿 필수 유형(알림톡 · 브랜드 기본형)으로 좁힘 · Codex 1R · 2R approve(지적 0) · 안내서 v1.0.33 PDF sha256 07157371…93da · 7쪽 · CUSTOMER_DELIVERY_BOUNDARY_OK · DELIVERY_CONSISTENCY_CONTRACT_TEST_OK · AGENT_MANUAL 1.0.33 절 · 오늘 밤 순서 = ⓪ 사전 확인(.65 GW_SEND_CREDIT · agent_dispatch_profile 상한 · heartbeat 판 · 릴리스 목록 · 게시 폴더 / .62 네 대 field_map 자리) → ① 커밋 · push → ② .65 pull → ③ build 1.0.33 1.0.27 1.0.32 → ④ 레인 반입 → ⑤ 대시보드 검증 2 · 등록(승인 전) → ⑥ 안내서 scp → ⑦ 게시 · sha256sum -c → ⑧ 승인 → ⑨ .62 네 대 field_map.friend_yn 넣기(재시작 없음 · 1.0.32 는 모르는 키 = 경고만 · UnknownFieldMapKeys) → ⑩ rollout hanjul01 canary · 600초 · 나머지 셋 → ⑪ heartbeat 1.0.33 · 로그 → G0 · G1 · G2 · ⓪ .65 결과(1106 12:4x Harold) = GW_SEND_CREDIT 없음(off) · agent_dispatch_profile 상한 0행 → 1.0.33 동시 발송 = 설정 그대로 · heartbeat hanjul01 · 02 · 03 · hanjul-04 = 1.0.32 running(시험 bito-test-97 · 98 · 99 = 10월 멈춤 · 대상 밖) · 릴리스 최신 = 47 linux · 48 windows 1.0.32(09-27 11:50 승인) · 게시 폴더 1.0.32 = 안내서 짝 · 아카이브 2 · checksums 514B = 다섯 줄(agent-config.example.yaml 7661e296… = 저장소 deploy/agent/scripts 판 · 1.0.32 뒤 안 바뀜 · 안내서 PDF · PDF.sha256 · 아카이브 2) → 1.0.33 목록도 같은 다섯 줄 · Harold 「지금 해버려도」(1106 13시) → ①~⑨(빌드 nice · 등록 · 게시 · 승인 · 설정 넣기 = 재시작 0)는 지금 · ⑩ rollout(네 대 재시작) · G0~G2(게이트웨이 재시작 · DDL)는 밤
 
 ### C108-G0 · 켜기 전 문(읽기 · .62 한줄로 DB)
 - 카드: C108
@@ -1286,6 +1287,22 @@ UNION ALL
 - 선행: C108-G2
 - 기대: 시트 50 ~ 53(마수동 전체 브랜드 1건 · 직원 본인 = 채널 친구) = 발송결과 예상 비용 = 친구 단가 · 차감이력 「결과별 단가 차액 환불」 = 비친구 − 친구 · 정산 미리보기 「브랜드메시지(친구)」 +1 · 게이트웨이 원장 `friend_adjust:` 1줄 · SMSQ 그 행 k_friend_yn = 'Y' · 시트 54 시험 발송 요약 대체 성공 = 성공 · ① 운영 대조 = 비토 라인 대역 스팸 코드 행이 생긴 캠페인의 스팸 수 0 아님
 - 확인: 시트 결과 · 조회 출력
+- 결과:
+
+### C109-H1 · 한줄로 배포(보낼 수 없는 글자 판정 자리 전체 · 백엔드 + 프론트 · DDL 0)
+- 카드: C109
+- 단계: 한줄로 배포(DDL 0 · 새 칸 0 · 설계서 docs/2026-11-06-b1106-1-unsupported-char-design.md §8)
+- 선행: C108(dd446c5d) · 커밋(Harold)
+- 기대: 대행 검사 입구 반려 = 「검사 장비 문제」 3회 대신 test_failed 한 번 + 위치 안내(spam_rejected_chars · test_failed reason unsupported_chars) · 대행 접수 · 원스텝 · 메일 = 이모지 · 보이지 않는 글자 정리 + 알림(content_cleaned · recipients_cleaned 이력) · 막음 글자 = 위치 반려 · 안내 문자 = 정리 뒤 인증 라인 · 배포 뒤 에러 로그 0
+- 확인: pm2 기동 · 에러 로그 · 운영 로그 `[SpamTestQueue] variant … 큐 등록 반려(보낼 수 없는 글자)` 줄이 나오면 그 건 진행 기록이 「보낼 수 없는 글자」 반려인지
+- 결과:
+
+### C109-S1 · 실측(직원 시트 55 ~ 64 · docs/2026-11-06-c109-staff-sheet.xlsx)
+- 카드: C109
+- 단계: 배포 뒤
+- 선행: C109-H1
+- 기대: 시트 55 ~ 64 전부 맞음(문장 원문 = 엑셀 · 진짜 함수로 뽑은 값)
+- 확인: 시트 결과 · 다름이면 캡처
 - 결과:
 
 ## §2 덤프 뒤 적용분

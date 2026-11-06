@@ -21,11 +21,12 @@
 
 import { isDemoCompany } from './demo-company';
 import { readJourneyCopyFacts } from './journey-copy-facts';
-import { query, withTransaction, withBoundedMysql } from '../config/database';
+import { query, withTransaction } from '../config/database';
 import { buildJourneyPauseShortUrl, generatePauseToken } from './journey-pause-handler';
 import { KST_TODAY_START_SQL } from './stats-aggregation';
 import { pickOwnerContact } from './owner-contact';
-import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
+import { getPlatformNoticeCallback } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { runStepSpamTest, mergeSpamVerdicts } from './journey-pretest-validator';
 import { isSpamHold } from './spam-test-queue';
 import { candidatesReady, readCandidate, claimCandidate, candidateStillMine, saveCandidate, moveCandidate, regenChargeKey, sweepPretestCandidates, CANDIDATE_GENERATING_TTL_MINUTES } from './journey-pretest-candidate';
@@ -358,8 +359,10 @@ async function processBundle(b: PretestBundle, summary: ScanSummary): Promise<vo
     return;
   }
 
-  if (verdict === 'error') {
-    await onCheckError(b, snapId, unchecked, body, tests.map((t) => t.error).filter(Boolean).join(' · '));
+  if (verdict === 'error' || verdict === 'rejected') {
+    const why = tests.map((t) => t.error).filter(Boolean).join(' · ');
+    if (verdict === 'rejected') alertPretestRejected(b, why);   // ★ 2026-11-06 C109 E11 — 도달 불가 갈래 · 장애 기록 + 경보 · held 0
+    await onCheckError(b, snapId, unchecked, body, why);
     return;
   }
   void (verdict satisfies 'blocked');
@@ -437,6 +440,21 @@ async function processBundle(b: PretestBundle, summary: ScanSummary): Promise<vo
  *   이 스캔이 고르는 판 = 새 글 · 고친 글 · 보류 재검사뿐(★ 2026-11-02 통과한 글 정기 재검사 · 그 「확인 못 함」 갈래 지움 = 주간 묶음 검사 몫 · 설계서 3-9)
  *   = 기다림(검사 없이 안 보냄) · 2시간 넘게 못 끝난 새 글 안내 = detectLateNewCopy(검사 상한과 무관 · Codex 구현 1R).
  */
+/**
+ * ★ 2026-11-06 C109 E11(Codex 설계 3R #1) — 사전 검사의 글자 반려 = 구조로 도달 불가(검사 입력 = 렌더 뒤 정리 · 렌더 표식 · 계약 시험 K8).
+ *   그래도 오면 코드 회귀다 → 장애 기록(onCheckError · 하루 상한) + 운영 경보 한 통 · 결정 기록 held 는 쓰지 않는다
+ *   (held = 주간 묶음이 원문 검사를 건너뛰고 유료 재작성을 돌리는 결정 · 같은 글은 고쳐도 같은 반려라 비용만 나간다).
+ */
+function alertPretestRejected(b: PretestBundle, rejection: string | undefined): void {
+  void sendSystemAlert({
+    companyId: b.companyId,
+    dedupKey: `journey-pretest-rejected:${b.journeyId}:${b.stepId}`,
+    title: '여정 발송 전 검사가 보낼 수 없는 글자로 반려되었습니다(정리된 검사 글이라 오면 안 되는 갈래 · 코드 확인 필요).',
+    details: [`사유: ${rejection || '보낼 수 없는 글자'}`, `journey=${b.journeyId} step=${b.stepId}`],
+    action: '검사 입력 정리(stepSpamInput) · 렌더 표식을 확인해 주세요. 그 판은 검사 장애로 세어 하루 상한 뒤 멈춥니다.',
+  }).catch(() => undefined);
+}
+
 async function onCheckError(b: PretestBundle, snapId: string | null, _unchecked: boolean, _preview: string, why: string): Promise<void> {
   const w = await recordIfCurrent(b, snapId, { status: 'error' });
   if (!w.current) return;
@@ -578,8 +596,9 @@ async function testCandidate(
     console.log(`[journey-pretest-scan] 고친 문안 스팸 검사 ${r2.verdict === 'pending' ? '진행 중' : '확인 중'}(다음 회차에 이어 봄) journey=${b.journeyId} step=${b.stepId}`);
     return;
   }
-  if (r2.verdict === 'error') {
+  if (r2.verdict === 'error' || r2.verdict === 'rejected') {
     // 고친 문안의 검사가 장애 = 고친 문안을 쓰지 않는다(검사 못 한 글) · 원 문안은 차단이라 보낼 수 없다 → 시도 기록 · 하루 상한 뒤 그 판 보류
+    if (r2.verdict === 'rejected') alertPretestRejected(b, r2.error);   // ★ 2026-11-06 C109 E11 — 도달 불가 갈래(장애와 같은 길 + 경보)
     await onCheckError(b, snapId, unchecked, origBody, r2.error || 'error');
     if (b.errorsToday + 1 >= PRETEST_ERROR_DAILY_MAX) await holdCurrent(b, summary, snapId, origBody);
     return;
@@ -743,9 +762,7 @@ async function buildManagerNotice(b: PretestBundle, messagePreview: string, mode
 
 /** 안내 한 통 적재 = 상한 있는 연결(★ 1031 §2-8 · 스캐너가 MySQL 에 묶여 멈추지 않게). 반환 = 큐에 한 건 들어갔는가. */
 export async function enqueueManagerNotice(notice: ManagerNotice, companyId: string): Promise<boolean> {
-  const authTable = await getAuthSmsTable();
-  const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(
-    [authTable],
+  const inserted = await insertNoticeSms(   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인 · 상한 연결 = CT 안 · 표 조회 뒤)
     [[
       notice.phone,                // dest_no
       getPlatformNoticeCallback(), // call_back — ★ 2026-07-09 한줄로 대표번호(옛: 수신자 본인 번호=번호도용차단 미수신)
@@ -759,8 +776,8 @@ export async function enqueueManagerNotice(notice: ManagerNotice, companyId: str
     ]],
     true,
     undefined,
-    { run },
-  ));
+    { boundedMs: NOTICE_ENQUEUE_TIMEOUT_MS },
+  );
   return inserted === 1;
 }
 
@@ -901,7 +918,9 @@ export async function weeklyCheckStep(b: PretestBundle, held: boolean): Promise<
     const verdict = mergeSpamVerdicts(tests.map((t) => t.verdict));
     if (verdict === 'pass') { await recordIfCurrent(b, snapId, { status: 'notified', markChecked: true }); return; }
     if (isSpamHold(verdict)) return;   // 확인 중 · 검사 중 = 다음 분에 같은 검사를 이어 본다(차감 0)
-    if (verdict === 'error') { await recordIfCurrent(b, snapId, { status: 'error', noticeDone: true }); return; }   // 시도 기록 · 하루 상한 = 고르는 쪽
+    // ★ 2026-11-06 C109 E11 — 글자 반려 = 도달 불가 갈래 · 장애와 같은 기록 + 경보 · 보류(held) · 수정안 0(같은 글은 같은 반려)
+    if (verdict === 'rejected') alertPretestRejected(b, tests.map((t) => t.error).filter(Boolean).join(' · '));
+    if (verdict === 'error' || verdict === 'rejected') { await recordIfCurrent(b, snapId, { status: 'error', noticeDone: true }); return; }   // 시도 기록 · 하루 상한 = 고르는 쪽
     await holdCurrent(b, summary, snapId, body);
     stopWords = tests[0]?.matchedStopWords || [];
   }

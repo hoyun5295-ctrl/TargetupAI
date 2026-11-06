@@ -39,6 +39,7 @@ import {
   loadAgencyCallbackKinds, type AgencyCallbackKinds,
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
+import { agencyCharNotice } from '../utils/agency-send-chars';   // ★ 2026-11-06 C109 글자 정리 알림 줄
 
 const router = Router();
 router.use(authenticate);
@@ -242,7 +243,8 @@ router.post('/', async (req: Request, res: Response) => {
     if (!result.ok) {
       return res.status(result.status).json({ success: false, error: result.error, ...(result.code ? { code: result.code } : {}) });
     }
-    return res.status(201).json({ success: true, request: toPublic(withCallbackKinds(result.request, result.callbackKinds)) });
+    // ★ 2026-11-06 C109 D1 — notice = 보낼 수 없는 글자를 빼거나 바꾼 알림 줄(접수 성공 자리가 보인다)
+    return res.status(201).json({ success: true, request: toPublic(withCallbackKinds(result.request, result.callbackKinds)), notice: result.notice });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 접수 실패:', err);
@@ -323,6 +325,8 @@ function toAnalysisView(a: OneStepAnalysis) {
     varsMatched: a.varsMatched, counts: a.counts,
     groups: a.groups.map((g) => ({ callback: g.callback, count: g.count, registered: g.registered })),
     sample: a.sample, sampleRows: a.sampleRows, messageType: a.messageType, fileName: a.fileName, errors: a.errors,
+    // ★ 2026-11-06 C109 D1 — 보낼 수 없는 글자를 빼거나 바꾼 알림(확인 화면 · 문안 · 명단은 이미 정리된 값)
+    charNotice: agencyCharNotice(a.charNotes),
   };
 }
 
@@ -380,6 +384,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
     //   재클릭과 같은 부류다(§17에 수용 위험으로 기록).
     const created: any[] = [];
     const createdKinds: AgencyCallbackKinds[] = [];
+    const createdNotice: string[] = [];   // ★ 2026-11-06 C109
     // 트랜잭션을 열기 **전에** 검증 재료를 같은 함수로 조회해 둔다(★2R — 연결을 쥔 채 풀을 다시 기다리지 않는다)
     const pre = {
       registeredSet: await getRegisteredCallbackSet(auth.companyId, auth.userId),
@@ -409,7 +414,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
         varMapping: Object.fromEntries(analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
         recipients: analysis.allRecipients,
         source: 'one_step',
-      }, client, pre);
+      }, client, { ...pre, charNotes: analysis.charNotes });   // ★ 2026-11-06 C109 — 분석 단계 정리 알림(서버 값 · 코어가 같은 트랜잭션에서 이력으로)
       if (!result.ok) {
         await client.query('ROLLBACK');
         return res.status(result.status).json({
@@ -420,6 +425,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
       }
       created.push(result.request);
       createdKinds.push(result.callbackKinds);
+      createdNotice.push(...result.notice);
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK').catch(() => {});
@@ -435,7 +441,7 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
       kickFirstTest(r.id);
     }
     console.log(`[agency-send] 원스텝 접수 company=${auth.companyId} ${created.length}건(회신번호 ${analysis.groups.length}종 · 인원 ${analysis.counts.valid})`);
-    return res.status(201).json({ success: true, requests: created.map((r, i) => toPublic(withCallbackKinds(r, createdKinds[i]))) });
+    return res.status(201).json({ success: true, requests: created.map((r, i) => toPublic(withCallbackKinds(r, createdKinds[i]))), notice: createdNotice });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 원스텝 접수 실패:', err);
@@ -685,7 +691,7 @@ router.post('/:id/content', async (req: Request, res: Response) => {
       via: 'screen',
     });
     if (!out.ok) return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });
-    return res.json({ success: true, request: await toPublicWithKinds(out.row) });
+    return res.json({ success: true, request: await toPublicWithKinds(out.row), notice: out.notice || [] });   // ★ 2026-11-06 C109 글자 정리 알림
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 문안 수정 실패:', err);

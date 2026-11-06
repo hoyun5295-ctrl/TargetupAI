@@ -171,7 +171,7 @@ describe('4. 워커 A 순서 · 자동 교정 0 · 문안 수정이 결과를 �
   it('테스트 문자 → 맞춤법 → 승인 안내', () => {
     const a = first.indexOf('await sendManagerTest({');
     const b = first.indexOf('await runAgencySpellAfterTest({');
-    const c = first.indexOf('buildPassedNotify({ label, whenText, count, originalWhenText, spellCount })');
+    const c = first.indexOf('buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines })');   // ★ 1106 C109 정리 줄
     expect(a).toBeGreaterThan(0);
     expect(b).toBeGreaterThan(a);
     expect(c).toBeGreaterThan(b);
@@ -185,7 +185,7 @@ describe('4. 워커 A 순서 · 자동 교정 0 · 문안 수정이 결과를 �
   it('Codex 1R — 안내 건수는 안내 직전 최신 저장값에서 센다(훅 반환값을 믿지 않는다)', () => {
     const iFresh = first.indexOf('const linkRow = (await freshLinkFields(row.id)) || row;');
     const iCount = first.indexOf('const spellCount = await readAgencySpellCount(row.id);');
-    const iNotify = first.indexOf('buildPassedNotify({ label, whenText, count, originalWhenText, spellCount })');
+    const iNotify = first.indexOf('buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines })');
     expect(iFresh).toBeGreaterThan(0);
     expect(iCount).toBeGreaterThan(iFresh);
     expect(iNotify).toBeGreaterThan(iCount);

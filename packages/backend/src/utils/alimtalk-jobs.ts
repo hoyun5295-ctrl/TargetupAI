@@ -15,7 +15,7 @@
 
 import { query } from '../config/database';
 import * as imc from './alimtalk-api';
-import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 // ★ 2026-06-13: 검수 진입 시 발급되는 IMC 템플릿코드를 상태 동기화 때 함께 반영 (반려 템플릿 코드 미반영 구멍 fix)
 import { syncSingleTemplateCode } from './kakao-template-sync';
 import { isImcStatusColumnKnownMissing, isImcStatusColumnMissingError, markImcStatusColumnMissing } from './kakao-template-guard';
@@ -663,8 +663,7 @@ async function notifyTemplateInspectionResult(params: {
   });
   const titleStr = `[알림톡 ${params.status === 'APPROVED' ? '승인' : '반려'}] ${params.templateName}`.slice(0, 40);
 
-  // 4) 인증 라인 bulk INSERT (LMS, useNow=true)
-  const authTable = await getAuthSmsTable();
+  // 4) 인증 라인 bulk INSERT (LMS, useNow=true) ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
   const rows: any[][] = [];
   for (const u of users) {
     const cleanPhone = String(u.phone_number || '').replace(/\D/g, '');
@@ -685,7 +684,7 @@ async function notifyTemplateInspectionResult(params: {
   }
   if (rows.length === 0) return 0;
 
-  await bulkInsertSmsQueue([authTable], rows, true);
+  await insertNoticeSms(rows, true);
   return rows.length;
 }
 

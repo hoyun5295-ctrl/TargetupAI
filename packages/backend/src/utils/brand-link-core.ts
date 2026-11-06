@@ -55,6 +55,15 @@ export function protectLinkTokens(text: string): { text: string; restore: (t: st
   };
 }
 
+/**
+ * ★ 2026-11-06 C109 — 감춘 링크 자리(사용자 영역 글자 U+E100~)는 그대로 두고 그 밖의 글만 fn 으로 바꾼다.
+ *   왜: 글자 정리 CT(cleanSmsTextAll)는 사용자 영역 글자를 「보낼 수 없는 글자」로 지운다 → 감춘 채 정리하면 링크가 사라졌다(bug-1031-link 계약).
+ *   감춤 글자의 주인 = 이 파일(만들기 · 되돌리기 · 건너뛰기 한 곳).
+ */
+export function mapOutsideLinkMasks(text: string, fn: (s: string) => string): string {
+  return String(text ?? '').split(new RegExp(`(${LINK_MASK_RE.source})`)).map((seg, i) => (i % 2 === 1 ? seg : fn(seg))).join('');
+}
+
 /** 문안 안 URL 스캔용 (habit 판별) */
 const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;
 

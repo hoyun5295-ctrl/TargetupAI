@@ -71,11 +71,11 @@ import { inspectDmForCarry, isDmCarryable } from './planner-dm-check';
 import { checkChannelReadiness } from './planner-channel-gate';
 import { computeTouchpointFingerprints, plannerNumbersMatch, plannerNumbersOf, plannerSendNumberTexts } from './planner-confirm';
 import { spamCheckPlannerVerdict } from './planner-copy';
-import { isSpamHold } from './spam-test-queue';
+import { isSpamHold, spamRejectionPlaces } from './spam-test-queue';
 import { enterPairRecheck, kickPlannerReview, recheckPastDeadlineNotice, revertEventToReview, settleEventIfFinished } from './planner-review';
 import { kickPlannerRecheck, runPlannerRecheckPass } from './planner-recheck';
 import { firstSendDate } from './planner-event';
-import { PLANNER_REASON, sendRejectReason } from './planner-reasons';
+import { PLANNER_REASON, sendRejectReason, plannerCharsReason } from './planner-reasons';
 
 export type ExecOutcome = 'sent' | 'skipped' | 'held' | 'locked' | 'review' | 'not_due';
 
@@ -431,6 +431,11 @@ async function executeMessagingCore(
   await touchClaim(tp.companyId, claimIds);
   if (check.verdict === 'error') return spamCheckDown(tp, link, claim, today);
   if (check.verdict === 'blocked') return recheckPair(tp, link, claim);
+  // ★ 2026-11-06 C109 E9 — 보낼 수 없는 글자 = 장애 아님(다시 검사 · 장애 셈 0) · 쌍 잠금 + 위치 안내(사람이 문안 · 혜택을 고친다)
+  if (check.verdict === 'rejected') {
+    const why = plannerCharsReason(spamRejectionPlaces(check.rejection), 'send');
+    return end('locked', why, `'${tp.title}' ${label} ${why}`);
+  }
   // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 선점만 놓는다(장애 횟수 0 · 다음 주기에 같은 글 = 같은 검사를 이어 본다)
   if (isSpamHold(check.verdict)) return spamCheckHold(tp, link, claim);
   void (check.verdict satisfies 'pass');

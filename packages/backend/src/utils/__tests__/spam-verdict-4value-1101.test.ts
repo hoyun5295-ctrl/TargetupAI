@@ -22,7 +22,7 @@ describe('판정 값', () => {
   it('통신사 전달 성공 + 앱 보고 없음 = 확인 중(차단 아님) · 이름표', () => {
     expect(deliveredUnreportedResult()).toBe('unconfirmed');
     expect(getSpamResultLabel(SPAM_RESULT.UNCONFIRMED)).toBe('확인 중');
-    expect(Object.keys(SPAM_VERDICT_WORD).sort()).toEqual(['blocked', 'error', 'pass', 'pending', 'unconfirmed']);
+    expect(Object.keys(SPAM_VERDICT_WORD).sort()).toEqual(['blocked', 'error', 'pass', 'pending', 'rejected', 'unconfirmed']);   // ★ 1106 C109 여섯째 = 보낼 수 없는 글자
   });
   it('spamVerdictOf — 통과 = 결과 전부 pass · 확인 중 행 = 확인 중 · 기다림 · 새 값(error) · 빈 값 = 장애', () => {
     expect(spamVerdictOf(v('pass', ['pass', 'pass']), 1)).toBe('pass');
@@ -113,7 +113,7 @@ describe('보류 = 실패 · 정지 · 다시 쓰기 0(구현 2라운드)', () =
     expect(mergeAlternativeVerdicts(['blocked', 'error'])).toBe('blocked');
     expect(mergeAlternativeVerdicts([])).toBe('error');
     expect(src('continuous-operator.ts')).toMatch(/const altVerdict = mergeAlternativeVerdicts\(tested\.map\(/);
-    expect(src('continuous-operator.ts')).toMatch(/: isSpamHold\(altVerdict\) \|\| altVerdict === 'blocked' \? altVerdict/);
+    expect(src('continuous-operator.ts')).toMatch(/: isSpamHold\(altVerdict\) \|\| altVerdict === 'blocked' \|\| altVerdict === 'rejected' \? altVerdict/);   // ★ 1106 C109 보낼 수 없는 글자도 그 판정 그대로
   });
   it('플래너 사전 준비 = 가짜 링크가 접점마다 고정(같은 글 = 같은 검사) · 확인 중은 실패 수에 안 셈 · 만든 글을 검사 대기로 남김', () => {
     expect(plannerFakeDmLink('tp-1')).toBe(plannerFakeDmLink('tp-1'));

@@ -19,6 +19,7 @@ import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core'
 import { findAiFillPlaceholder } from './copy-benefit-detector';
 import { findVarTokens, unknownVarNames } from './var-tokens';
 import { hasCartLiquidVars, detectLiquidSyntax } from './liquid-templating';
+import { scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 D6 막음 글자 판정(글자 CT)
 
 export type SendPlaceholderCode = 'LINK_PLACEHOLDER_UNEDITED' | 'BENEFIT_PLACEHOLDER_UNEDITED';
 
@@ -49,7 +50,7 @@ export function hasUneditedJourneyPlaceholder(text: string | null | undefined): 
   return !!text && JOURNEY_PLACEHOLDER_PATTERN.test(text);
 }
 
-export type JourneyCopyIssueCode = 'PLACEHOLDER_UNEDITED' | 'UNKNOWN_VARIABLE' | 'CART_VARIABLE' | 'SUBJECT_VARIABLE';
+export type JourneyCopyIssueCode = 'PLACEHOLDER_UNEDITED' | 'UNSUPPORTED_CHARS' | 'UNKNOWN_VARIABLE' | 'CART_VARIABLE' | 'SUBJECT_VARIABLE';
 export interface JourneyCopyIssue { code: JourneyCopyIssueCode; message: string }
 
 /**
@@ -59,6 +60,8 @@ export interface JourneyCopyIssue { code: JourneyCopyIssueCode; message: string 
  *   - 없는 변수 = 그 회사 매핑에 없는 %이름% = 치환이 지워 빈칸으로 나간다(knownVarNames = prepareFieldMappings 의 키)
  *   - 장바구니 변수({{ cart.* }}) = 시작이 장바구니가 아닌 여정에서는 값이 그 여정과 무관한 최근 장바구니거나 빈 값
  *   - 제목의 변수 · 개인화 문법 = 제목은 치환하지 않아(messageUtils prepareSendMessage) 글자 그대로 나간다
+ *   - ★ 2026-11-06 C109 D6 — 막음 글자(문자로 보낼 수 없고 바꿀 글자도 없는 글자 · smsCharAction block) = 그대로 나가면 통신사가 반려한다(9401).
+ *     뺌 · 바꿈 글자(이모지 · 보이지 않는 글자)는 판정하지 않는다(발송 정리가 지금처럼 고친다 · P2).
  */
 export function journeyCopyIssue(
   copy: { bodies: Array<string | null | undefined>; subjects: Array<string | null | undefined> },
@@ -69,6 +72,18 @@ export function journeyCopyIssue(
   for (const t of [...bodies, ...subjects]) {
     const m = JOURNEY_PLACEHOLDER_PATTERN.exec(t);
     if (m) return { code: 'PLACEHOLDER_UNEDITED', message: `채울 자리(${m[0]})가 남아 있어요. 내용을 직접 적거나 그 줄을 지워 주세요.` };
+  }
+  const blocked: string[] = [];
+  for (const [label, list] of [['본문', bodies], ['제목', subjects]] as const) {
+    for (const t of list) {
+      if (!t) continue;
+      const sc = scanSmsText(t);
+      const found = sc.findings.filter((f) => f.action === 'block');
+      if (found.length > 0) blocked.push(...describeSmsCharFindings(found, { where: label, multiline: sc.multiline, max: 3 }));
+    }
+  }
+  if (blocked.length > 0) {
+    return { code: 'UNSUPPORTED_CHARS', message: `문자로 보낼 수 없는 글자가 있어요: ${[...new Set(blocked)].join(', ')}. 그 글자를 빼거나 바꿔 주세요.` };
   }
   const subjVar = subjects.find((t) => findVarTokens(t).length > 0 || detectLiquidSyntax(t));
   if (subjVar) return { code: 'SUBJECT_VARIABLE', message: '제목에는 고객 정보 변수를 넣을 수 없어요(제목은 글자 그대로 나가요). 변수를 빼고 적어 주세요.' };

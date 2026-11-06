@@ -201,6 +201,8 @@ function buildAcceptedReply(input: {
   billingLabel?: string;
   /** ★2026-09-05 §21-4 다건일 때의 순번·파일명. 있으면 머리말이 블록 제목이 되고 꼬리 안내는 빠진다(바깥에서 한 번만 말한다) */
   seq?: { index: number; total: number; fileName: string };
+  /** ★ 2026-11-06 C109 D1 — 보낼 수 없는 글자를 빼거나 바꾼 알림 줄(확인 화면이 없는 경로라 이 회신이 유일한 고지다) */
+  charNotes?: string[];
 }): string {
   const when = new Date(input.requestedAtIso);
   const p = (n: number) => String(n).padStart(2, '0');
@@ -228,6 +230,7 @@ function buildAcceptedReply(input: {
     ...(input.imageFitNotes && input.imageFitNotes.length > 0
       ? [`규격에 맞게 바꿔 붙인 이미지: ${input.imageFitNotes.join(', ')} (실제 모습은 담당자 테스트 문자에서 확인해 주세요)`]
       : []),
+    ...(input.charNotes || []),
     `보낼 인원: ${input.valid.toLocaleString()}명 (명단 ${input.total.toLocaleString()}행, 중복 ${input.dup}건, 형식 오류 ${input.invalid}건${(input.callbackMissing ?? 0) > 0 ? `, 회신번호 빈 행 ${input.callbackMissing}건` : ''} 제외)`,
     '',
     '문안:',
@@ -1141,6 +1144,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   const txClient = await pool.connect();
   const requestRows: any[] = [];
   const requestKinds: AgencyCallbackKinds[] = [];
+  const requestNotices: string[][] = [];   // ★ 2026-11-06 C109 — 건마다 글자 정리 알림
   // COMMIT 을 보낸 뒤의 오류는 결과를 모른다(커밋됐을 수 있다) — 그때는 접수가 이미지를 가리킬 수 있어 지우지 않는다.
   let commitSent = false;
   try {
@@ -1166,7 +1170,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
         varMapping: Object.fromEntries(p.analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
         recipients: p.analysis.allRecipients,
         source: 'email',
-      }, txClient, pres[i]);
+      }, txClient, { ...pres[i], charNotes: p.analysis.charNotes });   // ★ 2026-11-06 C109 — 분석 단계 정리 알림(서버 값 · 코어가 같은 트랜잭션에서 이력으로)
       if (!result.ok) {
         await txClient.query('ROLLBACK');
         const prefix = multi ? `${units.indexOf(p.unit) + 1}. ${p.unit.fileName}: ` : '';
@@ -1175,6 +1179,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
       }
       requestRows.push(result.request);
       requestKinds.push(result.callbackKinds);
+      requestNotices.push(result.notice);
     }
     // accepted는 접수와 한 트랜잭션 — 성공 분기에서만(통과 스탬프 원칙 · §18-6)
     //   ⛔ 부분 커밋이 구조적으로 없다: 3번째에서 죽으면 1·2번도 롤백되어 재개 판정이 필요 없다.
@@ -1225,6 +1230,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     imageFitNotes: multi ? [] : savedImageFitNotes,
     billingLabel: describeAccountLabel(candidates, p.acct.userId),
     seq: multi ? { index: i + 1, total: plans.length, fileName: p.unit.fileName } : undefined,
+    charNotes: requestNotices[i] || [],
   }));
   await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr,
     multi ? `[한줄로] 대행발송 ${plans.length}건 접수 완료` : '[한줄로] 대행발송 접수 완료',

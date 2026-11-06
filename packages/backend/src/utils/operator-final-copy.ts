@@ -13,7 +13,8 @@ import { stripIncompatibleEmojis } from '../services/ai';
 import { buildAdMessage, buildAdSubject } from './messageUtils';
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { eucKrByteLength } from './message-byte';
-import { spamCheckPassedIndex } from './continuous-operator-policy';
+import { spamCheckPassedIndex, operatorCharsReason } from './continuous-operator-policy';
+import { smsTextPlaces } from './message-sanitizer';   // ★ 2026-11-06 C109 P6 나가는 글 글자 판정
 
 export interface OperatorFinalCopy {
   variantIndex: number;
@@ -27,6 +28,11 @@ export interface OperatorFinalCopy {
   sentSubject: string;
   /** 혜택 자리 · 직접 입력 안내가 남았다(보내지 않는다) */
   placeholderLeft: boolean;
+  /**
+   * ★ 2026-11-06 C109 P6 — 조립이 끝난 본문 · 제목(혜택 치환 뒤)의 보낼 수 없는 글자 위치(없으면 null).
+   *   안 글은 이모지 안전화(글자 CT)를 지나지만 혜택 문구는 그 뒤에 들어온다 → 검사 입구가 반려할 글자는 여기서 미리 안다(승인 · 발송 관문 · 목록).
+   */
+  charIssue: string | null;
   fingerprint: string;
 }
 
@@ -79,6 +85,7 @@ export function operatorFinalCopyAt(pj: any, index: number, ctx: OperatorCopyCon
     variantIndex: index, msgType, subject: msgType === 'SMS' ? '' : subject, body, sent,
     sentSubject: msgType === 'SMS' || !subject ? '' : buildAdSubject(subject, msgType, true),
     placeholderLeft: hasUneditedBenefitPlaceholder(body) || hasUneditedBenefitPlaceholder(subject),
+    charIssue: smsTextPlaces([{ label: '본문', text: body }, { label: '제목', text: msgType === 'SMS' ? '' : subject }]),
     fingerprint,
   };
 }
@@ -90,6 +97,8 @@ export function operatorFinalCopy(pj: any, ctx: OperatorCopyContext): OperatorFi
 
 /** 발송 관문(JS) — 검사 통과 지문 · 사람 승인 지문 중 하나가 지금 지문과 같아야 나간다(Q6 · 새 상태 0) */
 export function finalCopyCleared(pj: any, final: OperatorFinalCopy): { ok: true } | { ok: false; reason: string } {
+  // ★ 2026-11-06 C109 E5(Codex 설계 1R #2) — 나가는 글에 보낼 수 없는 글자 = 지문과 관계없이 멈춘다(옛 승인 지문 · 옛 행도)
+  if (final.charIssue) return { ok: false, reason: operatorCharsReason(final.charIssue) };
   const passFp = typeof pj?.spamCheck?.fp === 'string' ? pj.spamCheck.fp : null;
   const humanFp = typeof pj?.approvedFp === 'string' ? pj.approvedFp : null;
   if (passFp === final.fingerprint || humanFp === final.fingerprint) return { ok: true };

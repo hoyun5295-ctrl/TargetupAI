@@ -78,7 +78,23 @@ const EVENT_LABEL: Record<string, string> = {
   link_cancel: '문자 속 주소에서 취소했습니다',
   link_reschedule: '문자 속 주소에서 시각을 바꿨습니다',
   link_spell: '문자 속 주소에서 맞춤법을 고쳤습니다',
+  // ★ 2026-11-06 C109 보낼 수 없는 글자(서버 agency-send-chars · 워커 settleSpamRejected 와 같은 커밋 · 줄은 아래 문장이 붙인다)
+  content_cleaned: '문안에서 문자로 보낼 수 없는 글자를 뺐습니다',
+  recipients_cleaned: '명단에서 문자로 보낼 수 없는 글자를 뺐습니다',
+  spam_rejected_chars: '문자로 보낼 수 없는 글자가 있어 검사하지 못했습니다',
 };
+
+/** 줄 목록(서버가 남긴 위치 문장 · 글자 자체는 들어 있지 않다) */
+function placeLines(v: unknown, max = 3): string {
+  const list = Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && !!x) : [];
+  if (list.length === 0) return '';
+  return list.slice(0, max).join(', ') + (list.length > max ? `, 외 ${list.length - max}곳` : '');
+}
+
+/** 정리 줄이 없는 문안 정리 이력(사람이 고친 글에 남기는 빈 줄 = 옛 줄을 덮는 표식)은 화면에 적지 않는다 */
+function isSilentEvent(e: AgencySendEvent): boolean {
+  return e.kind === 'content_cleaned' && placeLines(e.payload?.lines) === '';
+}
 
 /** 이벤트 한 줄을 사람 문장으로. 링크 승인·메일 접수는 "누가·어디서"까지 남긴다(부인 방지 기록) */
 export function describeAgencyEvent(e: AgencySendEvent): string {
@@ -96,6 +112,19 @@ export function describeAgencyEvent(e: AgencySendEvent): string {
   }
   // ★2026-10-18 축 4 승인 요청 뒤 24시간이 닫은 만료는 사유를 다르게 적는다(보낼 시각이 지난 것이 아니다)
   if (e.kind === 'expired' && e.payload?.reason === 'approval_timeout') return '승인 요청 뒤 24시간이 지나 발송을 닫았습니다';
+  // ★ 2026-11-06 C109 — 정리 · 반려는 위치까지(그 글자는 서버가 넣지 않는다)
+  if (e.kind === 'content_cleaned') return `${EVENT_LABEL[e.kind]}: ${placeLines(e.payload?.lines)}`;
+  if (e.kind === 'recipients_cleaned') {
+    const n = Number(e.payload?.count) || 0;
+    const ex = placeLines(e.payload?.lines);
+    return `${EVENT_LABEL[e.kind]}${n > 0 ? ` (${n}곳${ex ? `, 예: ${ex}` : ''})` : ''}`;
+  }
+  if (e.kind === 'spam_rejected_chars') {
+    const msg = typeof e.payload?.message === 'string' ? e.payload.message : '';
+    const at = msg.includes(': ') ? msg.slice(msg.indexOf(': ') + 2) : '';
+    return `${EVENT_LABEL[e.kind]}${at ? `: ${at}` : ''}. 그 글자를 빼고 다시 진행해 주세요`;
+  }
+  if (e.kind === 'test_failed' && e.payload?.reason === 'unsupported_chars') return '문자로 보낼 수 없는 글자가 있어 문안 확인이 필요합니다';
   return EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다';
 }
 
@@ -115,7 +144,7 @@ export default function AgencyEventLog({ events, variant = 'section' }: Props) {
         <History className="w-4 h-4 text-neutral-400" strokeWidth={2} />진행 기록
       </h4>
       <ul className="mt-2 space-y-1.5">
-        {events.map((e, i) => (
+        {events.filter((e) => !isSilentEvent(e)).map((e, i) => (
           <li key={i} className="flex items-start gap-2.5 text-[12.5px]">
             <Clock className="w-3.5 h-3.5 text-neutral-300 mt-0.5 shrink-0" strokeWidth={2} />
             <span className="text-neutral-500 tabular-nums shrink-0">{formatWhen(e.created_at)}</span>

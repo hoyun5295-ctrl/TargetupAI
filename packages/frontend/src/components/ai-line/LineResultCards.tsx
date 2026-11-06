@@ -57,7 +57,12 @@ function chipView(chip: AiLineSpamChip | undefined, stale: boolean): { tone: str
     case 'unavailable': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '요금제에 스팸 검사가 없어요' };
     case 'unregistered': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '등록된 발신번호로만 검사해요' };
     case 'no_balance': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '잔액이 부족해 검사하지 못했어요' };
-    case 'charset': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '보낼 수 없는 글자가 있어요' };
+    // ★ 2026-11-06 C109 E13 — 서버 반려 문장의 위치(그 글자는 들어 있지 않다) · 없으면 지금 글
+    case 'charset': {
+      const m = String(chip.message || '');
+      const at = m.includes(': ') ? m.slice(m.indexOf(': ') + 2) : '';
+      return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: at ? `보낼 수 없는 글자가 있어요: ${at}` : '보낼 수 없는 글자가 있어요' };
+    }
     // ★ 2026-10-25 원장 #114 — 검사 장비(시험폰)가 없을 때(옛: 500 「처리 중 문제」)
     case 'no_device': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '지금은 스팸 검사를 할 수 없어요' };
     default: return { tone: 'bg-slate-100 text-slate-600', icon: 'wait', text: '검사 전' };

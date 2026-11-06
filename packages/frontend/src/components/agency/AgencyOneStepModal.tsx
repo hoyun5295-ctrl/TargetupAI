@@ -201,9 +201,10 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
     const seq = analyzeSeq.current; // 제출은 지금 보고 있는 분석 세대에 묶인다
     setSaving(true);
     try {
-      const created = await submitOneStep(formFile, null, currentOverrides(analysis));
+      const { requests: created, notice } = await submitOneStep(formFile, null, currentOverrides(analysis));
       if (seq !== analyzeSeq.current) return; // 그 사이 파일이 바뀌었다 — 이 응답으로 화면을 건드리지 않는다
       toast.success(`${created.length}건 접수했습니다. 스팸 검사를 마치면 담당자 번호로 문자를 보내 드립니다.`);
+      for (const n of notice) toast.info(n);   // ★ 2026-11-06 C109
       onCreated(created);
       close();
     } catch (e: any) {
@@ -285,6 +286,12 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                       <p className="font-bold mb-1">접수 전에 해결할 것이 {a.errors.length}건 있습니다</p>
                       {a.errors.map((e, i) => <p key={i}>{e.field}: {e.error}</p>)}
                     </div>
+                  </div>
+                )}
+                {/* ★ 2026-11-06 C109 D1 — 보낼 수 없는 글자를 빼거나 바꾼 위치(아래 문안 · 명단은 정리된 값 · 접수하면 이대로 나간다) */}
+                {(a.charNotice || []).length > 0 && (
+                  <div className="text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5">
+                    {(a.charNotice || []).map((n, i) => <p key={i}>{n}</p>)}
                   </div>
                 )}
 

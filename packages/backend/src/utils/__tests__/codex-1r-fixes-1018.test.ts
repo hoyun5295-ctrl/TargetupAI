@@ -156,7 +156,7 @@ describe('C 알림 · 정지 결과', () => {
     // ★ 1031 안내 = 만들기(buildManagerNotice · null = 보낼 것 없음) + 적재(enqueueManagerNotice · 상한 있는 연결)
     const fn = src.slice(src.indexOf('async function enqueueManagerNotice('));
     expect(fn).toMatch(/Promise<boolean>/);
-    expect(fn).toContain('const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(');
+    expect(fn).toContain('const inserted = await insertNoticeSms(');   // ★ 1106 C109 안내 적재 CT(상한 연결 = CT 안 · Codex 구현 1R #4)
     expect(fn).toContain('return inserted === 1;');
     expect((fn.slice(0, fn.indexOf('const inserted')).match(/return;/g) || []).length).toBe(0);
     // ★ 2026-11-02 설계서 3-9 — 자동 보정 안내(safeNotify) 지움 · 안내 = 안내 원장(deliverPendingNotices · sendNoticeOnce) 한 길

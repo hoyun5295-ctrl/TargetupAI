@@ -16,13 +16,13 @@ import { SEND_HOURS } from '../config/defaults';
 import { getOpt080Number } from './messageUtils';
 import { appendDmLink, kstDateString } from './planner-execution';
 import {
-  PlannerTouchpointRow, clearExecMetaKeys, guardPlannerMetaOrSkip, loadEventTouchpoints, loadLiveTouchpoints, notifyPlanner,
+  PlannerTouchpointRow, clearExecMetaKeys, guardPlannerMetaOrSkip, loadEventTouchpoints, loadLiveTouchpoints, notifyPlanner, setTouchpointStates,
 } from './planner-touchpoint';
 import { PlannerEventRow, firstSendDate, mapEventRow, patchEventMeta, staleBuildChannels } from './planner-event';
 import { PLANNER_APPROVAL_DEADLINE_HOUR, buildPlannerConfirmLink, hashPreviewToken, issuePlannerPreviewToken, isPreviewValid } from './planner-confirm';
 import { carrierGroups, loadPlannerDefaultCallback, runPlannerCopyPass, spamCheckPlannerVerdict } from './planner-copy';
-import { isSpamHold } from './spam-test-queue';
-import { PLANNER_REASON } from './planner-reasons';
+import { isSpamHold, spamRejectionPlaces } from './spam-test-queue';
+import { PLANNER_REASON, plannerCharsReason } from './planner-reasons';
 import { tryAcquireInflight, releaseInflight } from './inflight-lock';
 import { computeTouchpointDate, TimingRule } from './marketing-planner';
 import { isPastApprovalDeadline } from './planner-approve';
@@ -423,6 +423,16 @@ async function checkCarrierAfterApproval(carrier: PlannerTouchpointRow): Promise
     return 'pass';
   }
   if (check.verdict === 'error' || isSpamHold(check.verdict)) return 'skip';   // ★ 1101 B1-4 — 확인 중 · 검사 중 = 표식을 두고 다음 주기에
+  if (check.verdict === 'rejected') {
+    // ★ 2026-11-06 C109 E9 — 보낼 수 없는 글자 = 실행부와 같은 쌍 잠금(재검사로 안 풀린다 · skip 이면 발송 당일까지 담당자가 모른다) + 위치 안내
+    const why = plannerCharsReason(spamRejectionPlaces(check.rejection), 'send');
+    const pairOf = carrierGroups(await loadEventTouchpoints(carrier.companyId, carrier.eventId)).find((g) => g.carrier.id === carrier.id);
+    const ids = [carrier.id, ...(pairOf?.dm ? [pairOf.dm.id] : [])];
+    const moved = await setTouchpointStates(carrier.companyId, ids.map((id) => ({ id, status: 'locked', lockReason: why })), ['ready']);
+    await clearExecMetaKeys(carrier.companyId, carrier.id, ['post_approval_spam']);
+    if (moved.includes(carrier.id)) await notifyPlanner(carrier.companyId, carrier.createdBy, '[마케팅 플래너] 발송 보류', `'${carrier.title}' ${why}`);
+    return 'fail';
+  }
   void (check.verdict satisfies 'blocked');
   // ★ 2026-10-18 차단 = 그 쌍만 재확인(행사 승인 · 다른 날 발송은 그대로 · 옛: 행사 전체를 재료 단계로 되돌렸다)
   //   통지 · 새 문안 · 링크는 재확인 패스(planner-recheck · 실행 워커 10분 주기)가 한다.

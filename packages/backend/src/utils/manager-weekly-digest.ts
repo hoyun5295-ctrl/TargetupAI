@@ -7,8 +7,9 @@
  *   - 무과금 인증 라인 · 시연 회사 = 0 · 표가 없으면(DDL 전) 건너뛰고 로그
  * ⛔ 모델명 0 · 줄표 0.
  */
-import { query, withBoundedMysql } from '../config/database';
-import { getAuthSmsTable, bulkInsertSmsQueue, getPlatformNoticeCallback } from './sms-queue';
+import { query } from '../config/database';
+import { getPlatformNoticeCallback } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { pickOwnerContact } from './owner-contact';
 import { isDemoCompany } from './demo-company';
 import { NOTICE_ENQUEUE_TIMEOUT_MS, NOTICE_MAX_ATTEMPTS, sendNoticeOnce } from './journey-notice-once';
@@ -123,14 +124,12 @@ async function sendDigestTo(companyId: string, contact: { userId: string; phone:
         todos: board.todos.filter((t) => t.action).length, boardUrl: await buildManagerBoardShortUrl(companyId, token),
         heldSteps: board.todos.filter((t) => t.kind === 'held_step').length,
       });
-      const authTable = await getAuthSmsTable();
-      const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(
-        [authTable],
+      const inserted = await insertNoticeSms(   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인 · 상한 연결 = CT 안 · 표 조회 뒤)
         [[contact.phone, getPlatformNoticeCallback(), body, 'L', '[한줄로 주간 요약]', null, '', companyId, '', '', '']],
         true,
         undefined,
-        { run },
-      ));
+        { boundedMs: NOTICE_ENQUEUE_TIMEOUT_MS },
+      );
       return inserted === 1;
     },
     finalize: async () => (await query(

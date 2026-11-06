@@ -30,6 +30,7 @@ import { detectBenefits, buildBenefitEmphasis, findInventedBenefits, replaceInve
 import { findBannedWords } from '../utils/copy-similarity-guard';
 // ★ D227+ AI 응답 JSON 안전 추출 (코드펜스 없이 설명문 혼입 방어 — 본문 0 bytes 사고 정정)
 import { extractJsonFromAiText } from '../utils/ai-json';
+import { cleanSmsTextAll } from '../utils/message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT
 // ★ 2026-07-06 Liquid 출구 가드 — %변수% 세계(캠페인·오퍼레이터) 생성물에 템플릿 문법 잔존 0 기계 보장
 import { detectLiquidSyntax, flattenLiquidToPlainText } from '../utils/liquid-templating';
 // ★ D227+ 종량제: 작업당 크레딧 단가 맵 (순수 함수, DB 의존 0)
@@ -2444,35 +2445,14 @@ export function getSeasonContext(): { monthLabel: string; seasonHint: string } {
 // ★ D152+ SMS/LMS는 EUC-KR 인코딩 기반 — 이모지(😊⚡✨🤝 등 유니코드 픽토그램)는 발송 시 깨지거나 `?`로 변환됨.
 //   Dashboard.tsx:3410 특수문자 모달에 박힌 SMS 호환 특수문자만 안전. AI가 그래도 이모지 박으면 후처리에서 자동 제거.
 //   화이트리스트 방식 — 비-ASCII 비-한글이면 SMS 호환 특수문자 리스트에 있을 때만 통과.
-const SMS_SAFE_SPECIAL_CHARS = new Set([
-  '★','☆','♥','♡','◆','◇','■','□','▲','△','▶','◀','●','○','◎',
-  '♤','♠','♧','♣','♪','♬','♩','☎','♨','※','☞','↑','↓','←','→',
-  '▷','◁','▽','①','②','③','④','⑤','⑥','⑦','⑧','㈜','㈔','℡','㉿',
-  '㎝','㎏','㎡','㎎',
-]);
+// ★ 2026-11-06 C109 — 옛 SMS_SAFE_SPECIAL_CHARS(안전 목록 49자)는 지웠다: 글자 판단 = message-sanitizer.smsCharAction(보낼 수 있는 글자 표 · 49자 전부 포함).
 
 // ★ 2026-08-04 export — 관리자 작성 리마인드 문안(continuous-operator)도 같은 EUC-KR 안전화를 지난다.
 //   AI 생성물만 걸러지고 수기 입력이 그대로 큐에 들어가면 같은 깨짐이 경로만 바꿔 재발한다.
 export function stripIncompatibleEmojis(text: string): string {
-  // ★ D152+ Harold님 PM2 진단: 한글 다 제거 사고 fix.
-  //   기존: `code < 0x2600` 통과 → 한글 U+AC00(44032) > 0x2600(9728)이라 한글 모두 제거됨.
-  //   수정: 블랙리스트 방식 — 이모지 픽토그램 범위만 명시 제거, 그 외(ASCII/한글/한자/일반부호) 모두 통과.
-  let out = '';
-  for (const ch of text) {
-    const code = ch.codePointAt(0) || 0;
-    // 픽토그램/이모지 supplementary plane (U+1F000~U+1FFFF) 제거
-    if (code >= 0x1F000 && code <= 0x1FFFF) continue;
-    // variation selector (U+FE00~U+FE0F) 제거
-    if (code >= 0xFE00 && code <= 0xFE0F) continue;
-    // ZWJ (U+200D) 제거 — 이모지 결합용
-    if (code === 0x200D) continue;
-    // BOM (U+FEFF) 제거
-    if (code === 0xFEFF) continue;
-    // 기타 픽토그램 범위 (U+2600~U+27BF) 중 화이트리스트 외 제거 (☀/⚡/✨ 같은 이모지 차단, ★/♥/▶/♨/※/☎/☞ 같은 SMS 호환만 통과)
-    if (code >= 0x2600 && code <= 0x27BF && !SMS_SAFE_SPECIAL_CHARS.has(ch)) continue;
-    // 그 외 모든 문자(ASCII/한글/한자/일반부호/숫자/특수기호 등) 통과
-    out += ch;
-  }
+  // ★ 2026-11-06 C109 §2-2 — 글자 판단 = 분류 CT 하나(message-sanitizer.cleanSmsTextAll · 뿌리 R1 · 보낼 수 있는 글자 = 그대로 · 옛 안전 목록 49자 = 전부 보낼 수 있는 글자).
+  //   옛: 범위 목록 블랙리스트(U+1F000~ · U+2600~27BF 등) — 범위 밖 보낼 수 없는 글자(U+200B · U+2B50 · U+00A0)가 남아 검사 반려 · 9401.
+  const out = cleanSmsTextAll(text);
   // ★ D152+ Harold님 지시 (2026-05-12): 줄바꿈 보존 fix.
   //   기존 `\s+\n` 매칭 시 `\s+`가 `\n` 흡수 → "안녕\n\n반갑" → "안녕\n반갑" (단락 빈 줄 손실).
   //   `[ \t]+\n`로 변경 — 줄 끝 trailing 탭/공백만 정리, `\n` 보존.

@@ -51,10 +51,26 @@ export interface SpamOutcome {
  * - 그 외(blocked/failed/timeout) → admin_review (담당자 검토 대기, 자동 발송 차단)
  *   ★ Harold 2026-05-31: 끝내 통과 못한 문안은 자동 폐기 X, 담당자가 직접 판단.
  */
+/**
+ * ★ 2026-11-06 C109 E5 — 보낼 수 없는 글자 사유 한 문장(위치 = smsTextPlaces · spamRejectionPlaces · 그 글자는 넣지 않는다 · P4).
+ *   제안 사유 · 발송 관문(finalCopyCleared) · 승인 400 · 목록 응답이 같은 말을 쓴다.
+ */
+export function operatorCharsReason(places: string | null | undefined): string {
+  return places
+    ? `문자로 보낼 수 없는 글자가 있어 검사하지 못했어요: ${places}. 문안에서 그 글자를 빼 주세요`
+    : '문자로 보낼 수 없는 글자가 있어 검사하지 못했어요. 문안에서 그 글자를 빼 주세요';
+}
+
 export function decideSpamOutcome(
-  finalResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending',
+  finalResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending' | 'rejected',
   regenerateCount: number,
+  /** ★ 2026-11-06 C109 — rejected 일 때 위치 문장 */
+  rejectionPlaces?: string | null,
 ): SpamOutcome {
+  // ★ 2026-11-06 C109 E5 — 보낼 수 없는 글자 = 장애도 차단도 아니다(다시 검사로 안 풀린다) · 자동 발송 막고 담당자 검토 · 사유 = 위치
+  if (finalResult === 'rejected') {
+    return { status: 'admin_review', autoExecuteBlocked: true, reason: operatorCharsReason(rejectionPlaces) };
+  }
   if (finalResult === 'unconfirmed' || finalResult === 'pending') {
     return {
       status: 'admin_review',
@@ -89,6 +105,8 @@ export const SPAM_VERDICT_LABEL: Record<string, string> = {
   // ★ 2026-11-01 B1-4 — 통신사 전달 성공 + 앱 보고 없음(확인 문자가 가른다) · 같은 글 검사가 아직 진행 중
   unconfirmed: '확인 중',
   pending: '검사 중',
+  // ★ 2026-11-06 C109 — 검사 입구 글자 반려
+  rejected: '보낼 수 없는 글자',
 };
 
 /**

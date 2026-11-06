@@ -21,7 +21,7 @@
 
 import { execFile } from 'child_process';
 import fs from 'fs';
-import { getAuthSmsTable, bulkInsertSmsQueue } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { sanitizeSmsText } from './auto-notify-message';
 import { query } from '../config/database';
 import { isAlertOnCooldown } from './system-alert-cooldown';
@@ -472,7 +472,6 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
       if (phones.length === 0) return 0;
     }
 
-    const authTable = await getAuthSmsTable();
     const callback = phones[0]; // 운영자 본인 번호 — 회신 안전
     const rows: any[][] = phones.map((p) => [
       p,                        // dest_no
@@ -488,7 +487,7 @@ export async function sendSystemAlert(params: SystemAlertParams): Promise<number
 
     // ★ 2026-09-28 한줄로 V2 m132 — 적재 함수는 MySQL 오류를 던지지 않고 적재 건수를 돌려준다. 0건인데 쿨다운을 찍으면
     //   장애 중 경보(돈 불변식 포함)가 한 통도 안 나간 채 쿨다운 동안 억제됐다 → 적재가 된 때만 보냄으로 기록한다.
-    const loaded = await bulkInsertSmsQueue([authTable], rows, true);
+    const loaded = await insertNoticeSms(rows, true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
     if (loaded === 0) {
       console.error(`[system-alert] 적재 0건, 쿨다운을 찍지 않는다(다음 호출에 다시 시도): ${params.dedupKey}`);
       return 0;

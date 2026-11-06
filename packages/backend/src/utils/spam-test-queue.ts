@@ -20,6 +20,7 @@ import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { unsupportedSmsCharCodes } from './sms-charset';
+import { cleanSmsTextAll, scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT · 위치 문장
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql, deliveredUnreportedResult } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from './system-alert';
@@ -89,6 +90,11 @@ export interface SpamTestEnqueueParams {
    *   여정 칸 「지금 스팸 검사」가 쓴다(수동 검사 주소와 같은 규칙 · manualSpamInProgressInTx). 진행 중이 있으면 errorCode MANUAL_IN_PROGRESS.
    */
   manualAdmission?: { userId: string };
+  /**
+   * ★ 2026-11-06 C109(Codex 설계 4R) — 렌더가 끝난 글(여정 · 대행 표본). 참이면 지문 · 글자 판정 · 워커 발송이 받은 글을 그대로 쓴다(치환 0).
+   *   옛: 렌더된 글을 큐가 다시 치환해 고객 값 속 템플릿 글(`{{ 'Å' | downcase }}`)이 두 번째 치환에서 풀렸다.
+   */
+  rendered?: boolean;
 }
 
 export interface SpamTestEnqueueResult {
@@ -101,6 +107,8 @@ export interface SpamTestEnqueueResult {
   insufficientBalance?: boolean;
   balance?: number;
   requiredAmount?: number;
+  /** ★ 2026-11-06 C109 — 글자 반려(SMS_UNSUPPORTED_CHARS)일 때 그 글자 코드('U+XXXX') */
+  unsupportedChars?: string[];
 }
 
 export interface SpamTestBatchResult {
@@ -125,21 +133,26 @@ export interface AutoSpamTestVariant {
   subject?: string;
 }
 
+/** ★ 2026-11-06 C109(Codex 설계 1R #6 · 2R #5) — 반려면 사유가 필수인 갈래(선택 칸이면 중간 변환이 사유를 버린다) */
+interface AutoSpamVariantBase {
+  variantId: string;
+  messageText: string;
+  subject?: string;
+  carrierResults: Array<{
+    carrier: string;
+    messageType: string;
+    result: string;
+  }>;
+  regenerated: boolean;
+  regenerateCount: number;
+}
+export type AutoSpamVariantResult =
+  | (AutoSpamVariantBase & { spamResult: Exclude<AutoSpamVerdict, 'rejected'>; rejection?: undefined })
+  | (AutoSpamVariantBase & { spamResult: 'rejected'; rejection: string });
+
 export interface AutoSpamTestResult {
   batchId: string;
-  variants: Array<{
-    variantId: string;
-    messageText: string;
-    subject?: string;
-    spamResult: AutoSpamVerdict;
-    carrierResults: Array<{
-      carrier: string;
-      messageType: string;
-      result: string;
-    }>;
-    regenerated: boolean;
-    regenerateCount: number;
-  }>;
+  variants: AutoSpamVariantResult[];
   /** ★ 2026-10-03 stopOnFirstPass 모드에서 통과한 안(없으면 null · 기본 모드는 넣지 않는다) */
   passedVariantId?: string | null;
   totalTestCount: number;
@@ -503,9 +516,44 @@ export async function loadDefaultSpamFirstRecipient(companyId: string, userId: s
   return firstResult.rows[0] || {};
 }
 
+/** ★ 2026-11-06 C109 P5 — 표본 값 사본의 문자열 값을 cleanSmsTextAll(객체 · 배열 값은 그대로 · 원본 객체는 바꾸지 않는다) */
+export function cleanSpamSampleValues<T extends Record<string, any>>(sample: T): T {
+  // ★ Codex 구현 1R #3 — 안쪽까지(custom_fields JSONB 처럼 치환이 안쪽 값을 읽는 칸) · 배열 · 일반 객체만 내려간다(날짜 등 다른 객체는 그대로) · 원본 불변(사본)
+  const deep = (v: unknown): unknown => {
+    if (typeof v === 'string') return cleanSmsTextAll(v);
+    if (Array.isArray(v)) return v.map(deep);
+    if (v && typeof v === 'object' && Object.getPrototypeOf(v) === Object.prototype) {
+      const o: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) o[k] = deep(x);
+      return o;
+    }
+    return v;
+  };
+  return deep(sample || {}) as T;
+}
+
+/** ★ 2026-11-06 C109(Codex 설계 4R) — 렌더가 끝난 검사의 표식(spam_filter_tests.first_recipient 한 키 · 쓰기 · 읽기 = 이 파일만) */
+export const RENDERED_SAMPLE_MARK = '__c109_rendered';
+export function isRenderedSample(firstRecipient: unknown): boolean {
+  return !!firstRecipient && typeof firstRecipient === 'object' && (firstRecipient as any)[RENDERED_SAMPLE_MARK] === true;
+}
+
+/** ★ 2026-11-06 C109 — 큐 등록 실패의 판정(순수 · 글자 반려 = rejected · 그 밖 = failed = 검사 장애) */
+export function enqueueFailureVerdict(errorCode: string | undefined): 'rejected' | 'failed' {
+  return errorCode === 'SMS_UNSUPPORTED_CHARS' ? 'rejected' : 'failed';
+}
+
+/** ★ 2026-11-06 C109 — 글자 반려 문장 머리 · 기본 문장(사유가 비면) · 위치 읽기(쓰기 = enqueueSpamTest · 읽기 = 이 함수 · 한 파일) */
+export const SPAM_REJECTED_PREFIX = '문자로 보낼 수 없는 글자가 있어 검사하지 않았어요';
+export const SPAM_REJECTED_DEFAULT_TEXT = `${SPAM_REJECTED_PREFIX}.`;
+export function spamRejectionPlaces(rejection: string | null | undefined): string {
+  const r = String(rejection || '');
+  return r.startsWith(`${SPAM_REJECTED_PREFIX}: `) ? r.slice(SPAM_REJECTED_PREFIX.length + 2).trim() : '';
+}
+
 /** 검사 등록과 같은 치환 · 해시 · 같은 검사 키(★ 2026-11-01 배포 2 C5 — 등록 함수에서 원문 그대로 옮김 · 점검 응답의 엿보기도 이것을 쓴다) */
-async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient'>) {
-  const { companyId, userId, callbackNumber, messageContentSms, messageContentLms, messageType, subject, firstRecipient: clientFirstRecipient } = params;
+async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient' | 'rendered'>) {
+  const { companyId, userId, callbackNumber, messageContentSms, messageContentLms, messageType, subject, firstRecipient: clientFirstRecipient, rendered } = params;
   // 1) 메시지 해시 계산 (변수 치환 후)
   const isLmsType = messageType === 'LMS' || messageType === 'MMS';
   const rawContent = isLmsType ? (messageContentLms || '') : (messageContentSms || '');
@@ -519,10 +567,13 @@ async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' 
   } else {
     firstCustomer = await loadDefaultSpamFirstRecipient(companyId, userId, fieldMappings);
   }
+  // ★ 2026-11-06 C109 P5 — 검사 입력에 치환해 넣는 값(표본 고객 · 주소록 칸)의 보낼 수 없는 글자는 검사 전에 정리한 사본(문안 글자는 그대로 = 문안 문제는 반려로 보인다)
+  firstCustomer = cleanSpamSampleValues(firstCustomer);
 
   // ★ D92: %회신번호% 치환 — callbackNumber를 addressBookFields로 전달하여 스팸테스트에서도 맵핑
-  const spamAddressBookFields = callbackNumber ? { callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
-  const personalizedForHash = replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
+  const spamAddressBookFields = callbackNumber ? cleanSpamSampleValues({ callback: callbackNumber, extra1: '', extra2: '', extra3: '', name: '' }) as { callback: string; extra1: string; extra2: string; extra3: string; name: string } : undefined;
+  // ★ 2026-11-06 C109(Codex 설계 4R) — 렌더가 끝난 글은 다시 치환하지 않는다(지문 = 받은 글 그대로)
+  const personalizedForHash = rendered ? rawContent : replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
   const messageHash = computeMessageHash(personalizedForHash);
   const key: SpamCheckKey | null = messageHash
     ? { companyId, callback: callbackNumber, hash: messageHash, msgType: isLmsType ? 'LMS' : 'SMS', subject: (isLmsType ? subject : '') || null }
@@ -534,7 +585,7 @@ async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' 
  * 같은 글의 오늘 검사를 **엿본다**(등록 · 차감 0 · ★ 2026-11-01 배포 2 C5 점검 응답).
  *   null = 오늘 같은 키 검사 없음(검사 전) · 그 밖 = 그 검사의 지금 결과(장애도 그대로 — 부르는 쪽이 「다시 검사」로 읽는다).
  */
-export async function peekSpamCheck(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient'>): Promise<{ testId: string; outcome: SpamVerdict; status: string; createdAt: Date } | null> {
+export async function peekSpamCheck(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient' | 'rendered'>): Promise<{ testId: string; outcome: SpamVerdict; status: string; createdAt: Date } | null> {
   const { key } = await spamHashInputsOf(params);
   const same = key ? await spamCheckFor(key) : null;
   // ★ 2026-11-05 C103 F1 — 상태 · 만든 시각 = 공용 보기(spamCheckView) 입력(여정 칸 검사 창)
@@ -545,7 +596,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
   const {
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
-    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission,
+    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission, rendered = false,
   } = params;
 
   try {
@@ -589,15 +640,24 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     // ★ 2026-09-29 한줄로 V2 차수 5(B-0928-1 범위 밖 ③) — 실제로 나갈 본문·제목(워커 executeSpamTest 와 같은 치환 · 제목 = 저장값)을
     //   검사 행·차감 전에 글자 판정한다(수동 입구와 같은 CT). 옛: 판정 0 → 게이트웨이 9401 반려로 3사 모두 실패 · 유료 검사면 차감 뒤 환불.
     const outgoingTexts = messageTypes.flatMap((t) => [
-      replaceVariables((t === 'SMS' ? messageContentSms : messageContentLms) || '', firstCustomer, fieldMappings, spamAddressBookFields),
+      // ★ 2026-11-06 C109 — 렌더가 끝난 글 = 그대로(워커 발송과 같은 글)
+      rendered ? ((t === 'SMS' ? messageContentSms : messageContentLms) || '') : replaceVariables((t === 'SMS' ? messageContentSms : messageContentLms) || '', firstCustomer, fieldMappings, spamAddressBookFields),
       t === 'LMS' || t === 'MMS' ? (subject || '') : '',
     ]);
     const unsupportedChars = unsupportedSmsCharCodes(...outgoingTexts);
     if (unsupportedChars.length > 0) {
+      // ★ 2026-11-06 C109 D2 — 글자 목록 · 위치를 문장에 싣는다(P4 · 옛: 목록을 세고도 버렸다)
+      const where: string[] = [];
+      outgoingTexts.forEach((txt, i) => {
+        if (!txt) return;
+        const sc = scanSmsText(txt);
+        where.push(...describeSmsCharFindings(sc.findings, { multiline: sc.multiline, where: i % 2 === 1 ? '제목' : undefined, max: 5 }));
+      });
       return {
         ok: false,
-        error: '문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있어 검사하지 않았어요.',
+        error: `${SPAM_REJECTED_PREFIX}: ${[...new Set(where)].join(', ')}`,
         errorCode: 'SMS_UNSUPPORTED_CHARS',
+        unsupportedChars,
       };
     }
 
@@ -654,7 +714,8 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
          messageContentSms || null, messageContentLms || null,
          messageHash || null, spamCheckNumber,
          storedSource, variantId || null, batchId || null, subject || null,
-         firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null]
+         // ★ 2026-11-06 C109 — 렌더가 끝난 글 = 표식(워커가 다시 치환하지 않는다) · 그 밖 = 표본 고객(정리된 사본)
+         rendered ? JSON.stringify({ [RENDERED_SAMPLE_MARK]: true }) : (firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null)]
       );
       testId = testResult.rows[0].id;
 
@@ -990,7 +1051,8 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
       const rawContent = row.message_type === 'SMS' ? test.message_content_sms : test.message_content_lms;
       // ★ D92: %회신번호% 치환 — 실제 스팸테스트 발송 시에도 callbackNumber 전달
       const testAddressBookFields = test.callback_number ? { callback: test.callback_number, extra1: '', extra2: '', extra3: '', name: '' } : undefined;
-      const content = replaceVariables(rawContent || '', firstCustomer, fieldMappings, testAddressBookFields);
+      // ★ 2026-11-06 C109 — 렌더가 끝난 검사 = 받은 글 그대로(재치환 0 · 지문 · 입구 판정과 같은 글)
+      const content = isRenderedSample(test.first_recipient) ? (rawContent || '') : replaceVariables(rawContent || '', firstCustomer, fieldMappings, testAddressBookFields);
       const titleStr = (row.message_type === 'LMS' || row.message_type === 'MMS') ? (test.subject || '') : '';
       await insertTestSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
       sentCount += 1;
@@ -1271,7 +1333,7 @@ async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUT
 // [6] 자동 스팸테스트 + 재생성 통합 (AI route에서 호출)
 // ============================================================
 
-type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending';
+type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending' | 'rejected';   // ★ 2026-11-06 C109 rejected = 검사 입구 글자 반려(장애 아님)
 
 /**
  * 검사 판정(★ 2026-11-01 여정 재발 방지 B1-4 · 옛 3분할에 둘을 더함) — 통과 · 확인 중 · 기다림 · 차단 · 검사 장애.
@@ -1279,7 +1341,7 @@ type AutoSpamVerdict = 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed'
  *   ⛔ 두 값 모두 자동 행동 0(재작성 · 정지 · 차감 · 발송 없음) · 장애 횟수에 세지 않는다 · 다음 회차에 같은 글로 다시 묻는다.
  *   부르는 쪽은 switch + never 로 다섯 값을 모두 받는다(새 값이 생기면 tsc 가 빠진 자리를 잡는다).
  */
-export type SpamVerdict = 'pass' | 'unconfirmed' | 'pending' | 'blocked' | 'error';
+export type SpamVerdict = 'pass' | 'unconfirmed' | 'pending' | 'blocked' | 'rejected' | 'error';   // ★ 2026-11-06 C109 rejected(뿌리 R7 넓힘)
 
 /** 기다림 판정(확인 중 · 검사 중) — 자동 행동 0 갈래. 부르는 쪽은 이 갈래를 따로 받고, 통과 갈래 앞에 `satisfies` 로 남김없이 받았는지 tsc 에 맡긴다. */
 export function isSpamHold(v: SpamVerdict): v is 'pending' | 'unconfirmed' {
@@ -1288,8 +1350,41 @@ export function isSpamHold(v: SpamVerdict): v is 'pending' | 'unconfirmed' {
 
 /** 판정 값의 사람 말(서버 문장 · 기록) — Record 라 새 값이 생기면 tsc 가 빈 칸을 잡는다 */
 export const SPAM_VERDICT_WORD: Record<SpamVerdict, string> = {
-  pass: '통과', unconfirmed: '확인 중', pending: '검사 중', blocked: '차단', error: '검사 못 함',
+  pass: '통과', unconfirmed: '확인 중', pending: '검사 중', blocked: '차단', rejected: '보낼 수 없는 글자', error: '검사 못 함',
 };
+
+/** ★ 2026-11-06 C109 — 반려 문장 읽기 CT(호출부가 같은 말을 쓴다 · P4 · 반려가 아니면 null) */
+export function spamRejectionOf(v: { spamResult?: string | null; rejection?: string | null } | null | undefined): string | null {
+  if (!v || v.spamResult !== 'rejected') return null;
+  return (typeof v.rejection === 'string' && v.rejection.trim()) ? v.rejection : SPAM_REJECTED_DEFAULT_TEXT;
+}
+
+/**
+ * ★ 2026-11-06 C109(Codex 설계 2R #5 · 1R #6 같은 부류 둘째) — 판정 결과를 JSON 에 저장 · 복원하는 한 값.
+ *   왜: 사유를 판정 옆 옵션 칸으로 덧붙이면 저장 자리마다 손으로 옮겨야 하고 한 자리만 빠져도 사라진다 → 판정 + 사유를 한 값으로.
+ */
+export type SpamCheckRecord =
+  | { result: Exclude<AutoSpamVerdict, 'rejected'>; rejection?: undefined }
+  | { result: 'rejected'; rejection: string };
+/** 쓰기 CT — 결과 안(variant) · 판정 문자열에서 */
+export function toSpamCheckRecord(v: { spamResult?: string | null; rejection?: string | null } | string | null | undefined): SpamCheckRecord {
+  const raw = typeof v === 'string' ? v : String(v?.spamResult || 'failed');
+  if (raw === 'rejected') return { result: 'rejected', rejection: spamRejectionOf(typeof v === 'string' ? { spamResult: 'rejected' } : (v as any)) as string };
+  const known: ReadonlyArray<string> = ['pass', 'blocked', 'failed', 'timeout', 'unconfirmed', 'pending'];
+  return { result: (known.includes(raw) ? raw : 'failed') as Exclude<AutoSpamVerdict, 'rejected'> };
+}
+/** 읽기 CT — 옛 문자열 값 · 옛 객체 · 새 값 모두(반려인데 사유 없음 = 기본 문장) */
+export function readSpamCheckRecord(json: unknown): SpamCheckRecord | null {
+  if (json == null || json === '') return null;
+  if (typeof json === 'string') return toSpamCheckRecord(json);
+  if (typeof json === 'object') {
+    const o = json as any;
+    const raw = typeof o.result === 'string' ? o.result : typeof o.spamResult === 'string' ? o.spamResult : null;
+    if (!raw) return null;
+    return toSpamCheckRecord({ spamResult: raw, rejection: o.rejection ?? null });
+  }
+  return null;
+}
 
 /**
  * ★ 2026-10-24 검사 판정 한 곳(뿌리 대장 R7 · 1018 플래너 B6 판정을 공용으로 · docs/ROOT-LEDGER.md) — 순수.
@@ -1303,6 +1398,8 @@ export function spamVerdictOf(
   totalTestCount: number,
 ): SpamVerdict {
   if (!v) return 'error';
+  // ★ 2026-11-06 C109 — 검사 입구 글자 반려 = 장애가 아니다(다시 검사 0 · 사람이 그 글자를 고친다 · 뿌리 R7 넓힘)
+  if (v.spamResult === 'rejected') return 'rejected';
   if (v.spamResult === 'blocked') return 'blocked';
   if (v.spamResult === 'unconfirmed') return 'unconfirmed';   // ★ 2026-11-01 B1-4
   if (v.spamResult === 'pending') return 'pending';
@@ -1354,7 +1451,7 @@ export async function spamVerdictWithRetry(
  *   판 여럿을 모두 보내는 쪽(켜기 검증 · 보내기 전 검사)은 mergeSpamVerdicts(전부 통과일 때만 통과)를 쓴다.
  */
 export function mergeAlternativeVerdicts(vs: readonly SpamVerdict[]): SpamVerdict {
-  for (const v of ['pass', 'unconfirmed', 'pending', 'blocked'] as const) if (vs.includes(v)) return v;
+  for (const v of ['pass', 'unconfirmed', 'pending', 'blocked', 'rejected'] as const) if (vs.includes(v)) return v;   // ★ C109 보낼 수 없는 글자 = 차단 다음 · 장애 앞
   return 'error';
 }
 
@@ -1366,11 +1463,19 @@ export function mergeAlternativeVerdicts(vs: readonly SpamVerdict[]): SpamVerdic
  *      결과 없음·검사 실패는 재생성하지 않는다(종전 규칙과 같다 · 재생성은 차단에만).
  *   3) 시간 예산(budgetMs)을 넘기면 새 검사를 시작하지 않는다 — 결과는 미통과 = 안 보내는 쪽.
  */
+/** ★ 2026-11-06 C109 — 안 결과 하나 만들기(반려면 사유 필수 · 갈래 타입 한 곳) */
+export function autoVariantResult(base: Omit<AutoSpamVariantResult, 'spamResult' | 'rejection'>, spamResult: AutoSpamVerdict, rejection?: string | null): AutoSpamVariantResult {
+  if (spamResult === 'rejected') return { ...base, spamResult, rejection: spamRejectionOf({ spamResult, rejection }) as string };
+  return { ...base, spamResult };
+}
+
 export async function sequenceSpamVariants(p: {
   variants: AutoSpamTestVariant[];
   maxRetries: number;
   runTest: (v: AutoSpamTestVariant, message: string, subject?: string) => Promise<{
     spamResult: AutoSpamVerdict; carrierResults: Array<{ carrier: string; messageType: string; result: string }>;
+    /** ★ 2026-11-06 C109 — 반려(rejected) 문장(갈래 타입에 실어 돌려준다) */
+    rejection?: string;
   }>;
   regenerate?: (variantId: string) => Promise<{ messageText: string; subject?: string } | null>;
   budgetMs?: number;
@@ -1383,10 +1488,10 @@ export async function sequenceSpamVariants(p: {
   for (const v of p.variants) {
     if (out.length > 0 && overBudget()) break;
     const r = await p.runTest(v, v.messageText, v.subject);
-    out.push({
+    out.push(autoVariantResult({
       variantId: v.variantId, messageText: v.messageText, subject: v.subject,
-      spamResult: r.spamResult, carrierResults: r.carrierResults, regenerated: false, regenerateCount: 0,
-    });
+      carrierResults: r.carrierResults, regenerated: false, regenerateCount: 0,
+    }, r.spamResult, r.rejection));
     if (r.spamResult === 'pass') return { variants: out, passedVariantId: v.variantId, regenerateCount: 0 };
     // ★ 2026-11-01 B1-4 — 기다림 · 확인 중 = 자동 행동 0(다음 안 검사 · 재생성 없음 · 다음 회차에 같은 글로 다시 묻는다)
     if (r.spamResult === 'pending' || r.spamResult === 'unconfirmed') return { variants: out, passedVariantId: null, regenerateCount: 0 };
@@ -1407,8 +1512,9 @@ export async function sequenceSpamVariants(p: {
       first.regenerateCount++;
       regenerateCount++;
       const r = await p.runTest(firstSrc, first.messageText, first.subject);
-      first.spamResult = r.spamResult;
-      first.carrierResults = r.carrierResults;
+      // ★ 2026-11-06 C109 — 판정 · 사유를 한 번에 바꾼다(갈래 타입)
+      out[0] = autoVariantResult({ ...first, carrierResults: r.carrierResults }, r.spamResult, r.rejection);
+      Object.assign(first, out[0]);
       if (r.spamResult === 'pass') return { variants: out, passedVariantId: first.variantId, regenerateCount };
       if (r.spamResult !== 'blocked') break;
     }
@@ -1434,6 +1540,8 @@ export async function autoSpamTestWithRegenerate(params: {
   stopOnFirstPass?: boolean;
   /** stopOnFirstPass 모드의 시간 예산(넘기면 새 검사를 시작하지 않는다 · 결과는 미통과 = 안 보내는 쪽) */
   budgetMs?: number;
+  /** ★ 2026-11-06 C109 — 렌더가 끝난 글(대행 표본) · 큐가 다시 치환하지 않는다 */
+  rendered?: boolean;
 }): Promise<AutoSpamTestResult> {
   const {
     companyId, userId, callbackNumber, messageType, subject,
@@ -1448,7 +1556,7 @@ export async function autoSpamTestWithRegenerate(params: {
   if (await isDemoCompany(companyId)) {
     return {
       batchId,
-      variants: variants.map((v) => ({ variantId: v.variantId, messageText: v.messageText, subject: v.subject, spamResult: 'pass' as const, carrierResults: [], regenerated: false, regenerateCount: 0 })),
+      variants: variants.map((v) => autoVariantResult({ variantId: v.variantId, messageText: v.messageText, subject: v.subject, carrierResults: [], regenerated: false, regenerateCount: 0 }, 'pass')),
       ...(params.stopOnFirstPass ? { passedVariantId: variants[0]?.variantId ?? null } : {}),
       totalTestCount: 0,
       totalRegenerateCount: 0,
@@ -1463,6 +1571,8 @@ export async function autoSpamTestWithRegenerate(params: {
   // 한 문안을 한 번 검사한다(광고 표기 · 큐 등록 · 완료 대기 · 통신사별 결과). 큐 등록 실패 = enqueued false.
   const runOneTest = async (variantId: string, message: string, subj?: string): Promise<{
     enqueued: boolean; spamResult: string; carrierResults: Array<{ carrier: string; messageType: string; result: string }>;
+    /** ★ 2026-11-06 C109 — 글자 반려 문장(위치 포함) */
+    rejection?: string;
   }> => {
     // ★ D102: (광고)+080 — CT-AD 컨트롤타워 사용
     const msgTypeForAd = isLmsType ? 'LMS' : 'SMS';
@@ -1489,11 +1599,14 @@ export async function autoSpamTestWithRegenerate(params: {
       batchId,
       skipPrepaid: true, // 자동 검사 = 요금제 무관 무료(자동마케팅 진입 = 유료 요금제 전부 · 사용량은 크레딧)
       reuseSameDay: true, // ★ 2026-11-01 B1-4 — 같은 날 같은 글 = 이어 보기(대행 · 자동발송 · 상시 운영 · 플래너 공통)
+      rendered: params.rendered === true,
     });
 
     if (!enqueueResult.ok) {
-      console.error(`[SpamTestQueue] variant ${variantId} 큐 등록 실패:`, enqueueResult.error);
-      return { enqueued: false, spamResult: 'failed', carrierResults: [] };
+      // ★ 2026-11-06 C109 D3 — 글자 반려 = rejected(사유 그대로) · 그 밖 = failed(검사 장애) · 옛: 전부 failed = 「장비 문제」로 읽혔다
+      const failVerdict = enqueueFailureVerdict(enqueueResult.errorCode);
+      console.error(`[SpamTestQueue] variant ${variantId} 큐 등록 ${failVerdict === 'rejected' ? '반려(보낼 수 없는 글자)' : '실패'}:`, enqueueResult.error);
+      return { enqueued: false, spamResult: failVerdict, carrierResults: [], ...(failVerdict === 'rejected' ? { rejection: enqueueResult.error } : {}) };
     }
 
     totalTestCount++;
@@ -1530,7 +1643,7 @@ export async function autoSpamTestWithRegenerate(params: {
       budgetMs: params.budgetMs,
       runTest: async (v, message, subj) => {
         const r = await runOneTest(v.variantId, message, subj);
-        return { spamResult: r.spamResult as AutoSpamVerdict, carrierResults: r.carrierResults };
+        return { spamResult: r.spamResult as AutoSpamVerdict, carrierResults: r.carrierResults, rejection: r.rejection };
       },
       regenerate: regenerateCallback,
     });
@@ -1549,13 +1662,16 @@ export async function autoSpamTestWithRegenerate(params: {
     let currentSubject = variant.subject || subject;
     let regenerateCount = 0;
     let spamResult: string = 'pending';
+    let rejection: string | undefined;   // ★ 2026-11-06 C109 — 글자 반려 문장
     let carrierResults: Array<{ carrier: string; messageType: string; result: string }> = [];
 
     // 최대 재시도 횟수까지 반복
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const one = await runOneTest(variant.variantId, currentMessage, currentSubject);
       if (!one.enqueued) {
-        spamResult = 'failed';
+        // ★ 2026-11-06 C109 — 반려(rejected) · 장애(failed)를 가른다(옛: 전부 failed)
+        spamResult = one.spamResult;
+        rejection = one.rejection;
         break;
       }
       spamResult = one.spamResult;
@@ -1583,15 +1699,14 @@ export async function autoSpamTestWithRegenerate(params: {
       }
     }
 
-    resultVariants.push({
+    resultVariants.push(autoVariantResult({
       variantId: variant.variantId,
       messageText: currentMessage,
       subject: currentSubject,
-      spamResult: spamResult as any,
       carrierResults,
       regenerated: regenerateCount > 0,
       regenerateCount,
-    });
+    }, spamResult as AutoSpamVerdict, rejection));
   }
 
   return {

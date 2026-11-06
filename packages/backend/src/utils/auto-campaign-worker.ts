@@ -38,11 +38,8 @@ import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
-import {
-  toKoreaTimeStr, toQtmsgType,
-  getCompanySmsTables, getAuthSmsTable, hasCompanyLineGroup, getNextSmsTable,
-  bulkInsertSmsQueue, AlimtalkQueueInsertError,
-} from './sms-queue';
+import { toKoreaTimeStr, toQtmsgType, getCompanySmsTables, hasCompanyLineGroup, bulkInsertSmsQueue, AlimtalkQueueInsertError } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 import { markRefundPending, settleZeroLoadAsObligation } from './refund-pending';
 import { normalizePhone } from './normalize-phone';
@@ -51,7 +48,7 @@ import { autoCampaignLockReason } from './plan-guard';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
-import { autoSpamTestWithRegenerate, spamVerdictOf, SPAM_VERDICT_WORD } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, SPAM_VERDICT_WORD, toSpamCheckRecord, readSpamCheckRecord, SPAM_REJECTED_DEFAULT_TEXT } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
 // ★ D114 P7: personalFields → displayName 변환용
 import { getFieldByKey } from './standard-field-map';
@@ -420,7 +417,6 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
     const phones: string[] = ac.notify_phones || [];
     if (phones.length > 0) {
       try {
-        const companyTables = [await getAuthSmsTable()];
         const sendTime = toKoreaTimeStr(new Date());
 
         const scheduledDate = new Date(ac.next_run_at);
@@ -489,7 +485,7 @@ async function generateMessageForAutoCampaign(ac: any): Promise<void> {
         }
 
         if (genNotifyRows.length > 0) {
-          await bulkInsertSmsQueue(companyTables, genNotifyRows, true);
+          await insertNoticeSms(genNotifyRows, true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
           console.log(`${logPrefix} AI 문안 생성 알림 → ${genNotifyRows.length}명`);
 
           // ★ D123 P8: AI 문안 생성 알림도 이력에 기록 (이전에는 INSERT 누락 → 이력 탭에 안 나옴)
@@ -572,7 +568,6 @@ async function sendPreNotification(ac: any): Promise<void> {
 
   try {
     // ★ D106: 담당자 알림은 테스트 라인으로 발송 (대량발송 Agent 차단 시에도 발송 가능)
-    const companyTables = [await getAuthSmsTable()];
     const sendTime = toKoreaTimeStr(new Date());
 
     // ★ D105: 발송 예정 시각 — "내일 XX시 XX분" 형식
@@ -647,7 +642,7 @@ async function sendPreNotification(ac: any): Promise<void> {
     }
 
     if (notifyRows.length > 0) {
-      await bulkInsertSmsQueue(companyTables, notifyRows, true);
+      await insertNoticeSms(notifyRows, true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
     }
 
     // auto_campaign_runs에 notified 기록
@@ -729,6 +724,13 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       if (recordedVerdict === 'blocked') {
         console.warn(`${logPrefix} 스팸필터 차단된 문안 — 본 발송 중단 (담당자 확인 필요)`);
         await markFailed(ac, '스팸필터 차단으로 발송 중단. 문안 수정 후 재시도');
+        return;
+      }
+      if (recordedVerdict === 'rejected') {
+        // ★ 2026-11-06 C109 E4 — 보낼 수 없는 글자 = 장애가 아니다(「다음 회차에 다시 검사」 = 장애에만) · 사람이 문안을 고친다
+        const rec = readSpamCheckRecord(recorded.spamCheck);
+        console.warn(`${logPrefix} 보낼 수 없는 글자가 있는 문안 — 본 발송 중단 (담당자 확인 필요)`);
+        await markFailed(ac, `${rec?.result === 'rejected' ? rec.rejection : SPAM_REJECTED_DEFAULT_TEXT} 문안을 고친 뒤 다시 켜 주세요.`);
         return;
       }
       if (recordedVerdict === 'error') {
@@ -1532,7 +1534,8 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       ) VALUES ($1, $2, 'spam_tested', $3, NOW(), $4, $5, 3, 3, 3)`,
       [
         ac.id, runNumberResult.rows[0].next_run, ac.next_run_at,
-        JSON.stringify({ batchId: spamResult.batchId, isBlocked, verdict, result: resultLabel, variants: spamResult.variants }),
+        // ★ 2026-11-06 C109 — 판정 + 반려 사유 = 한 값(spamCheck · 저장 CT toSpamCheckRecord · 읽기 = 발송 직전 관문 readSpamCheckRecord)
+        JSON.stringify({ batchId: spamResult.batchId, isBlocked, verdict, result: resultLabel, variants: spamResult.variants, spamCheck: toSpamCheckRecord(finalVariant) }),
         ac.ai_generate_enabled ? (ac.generated_message_content ? 'ai_generated' : 'ai_fallback') : 'fixed',
       ]
     );
@@ -1541,7 +1544,6 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
     // ★ D106: 담당자 알림은 테스트 라인으로 발송
     const phones: string[] = ac.notify_phones || [];
     if (phones.length > 0) {
-      const companyTables = [await getAuthSmsTable()];
       const sendTime = toKoreaTimeStr(new Date());
 
       const scheduledTimeStr = new Date(ac.next_run_at).toLocaleString('ko-KR', {
@@ -1574,7 +1576,7 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       }
 
       if (notifyRows.length > 0) {
-        await bulkInsertSmsQueue(companyTables, notifyRows, true);
+        await insertNoticeSms(notifyRows, true);   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
         console.log(`${logPrefix} 스팸테스트 결과 알림 → ${notifyRows.length}명`);
       }
     }

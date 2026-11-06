@@ -15,7 +15,7 @@
  *   - 승인 직후 즉시 실행은 이 파일이 하지 않는다(실행부 순환 import 금지) — 라우트가 `kickPlannerTouchpointNow`(실행부 · 발송 시간대 안에서만 · B1)를 부른다.
  *   - 고객 문장은 사유 사전(planner-reasons) · 원문 오류는 로그에만 · 줄표 0.
  */
-import { SPAM_ERROR_RETRY_MAX, isSpamHold } from './spam-test-queue';
+import { SPAM_ERROR_RETRY_MAX, isSpamHold, spamRejectionPlaces } from './spam-test-queue';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { pool, query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
@@ -41,7 +41,7 @@ import { isPastApprovalDeadline } from './planner-approve';
 import { countPlannerAudience, PlannerAudienceCount } from './planner-audience';
 import { firstBlockedChannel } from './planner-channel-gate';
 import { formatPlannerDay, recheckPastDeadlineNotice, settleEventIfFinished } from './planner-review';
-import { PLANNER_REASON } from './planner-reasons';
+import { PLANNER_REASON, plannerCharsReason } from './planner-reasons';
 import { tryAcquireInflight, releaseInflight } from './inflight-lock';
 
 // ── 모양 ─────────────────────────────────────────────────────────────
@@ -681,8 +681,14 @@ async function checkEditedCopy(p: RecheckPair): Promise<void> {
     tp: p.carrier, body: appendDmLink(c.text, url), subject: c.subject, callback, rejectNumber: opt080, link: url, withDmLink: withDmLinkOf(p), regenerate: false,
   });
   if (check.verdict === 'error' || isSpamHold(check.verdict)) return;   // ★ 1101 B1-4 — 확인 중 · 검사 중 = 다음 주기에 이어 본다
-  void (check.verdict satisfies 'pass' | 'blocked');
   const checkedAt = new Date().toISOString();
+  if (check.verdict === 'rejected') {
+    // ★ 2026-11-06 C109 E9 — 고친 글에 보낼 수 없는 글자 = 통과 못 함 + 위치 사유(다시 검사로 안 풀린다 · 사람이 다시 고친다)
+    await setTouchpointMetaIfCopyIs(p.ev.companyId, p.carrier.id, c,
+      { copy: { ...c, spam: 'fail', checkedAt }, copy_error: { reason: plannerCharsReason(spamRejectionPlaces(check.rejection), 'prepare'), at: checkedAt } });
+    return;
+  }
+  void (check.verdict satisfies 'pass' | 'blocked');
   await setTouchpointMetaIfCopyIs(p.ev.companyId, p.carrier.id, c, check.verdict === 'pass'
     ? { copy: { ...c, spam: 'pass', checkedAt }, copy_error: null }
     : { copy: { ...c, spam: 'fail', checkedAt }, copy_error: { reason: EDITED_COPY_SPAM_FAILED, at: checkedAt } });

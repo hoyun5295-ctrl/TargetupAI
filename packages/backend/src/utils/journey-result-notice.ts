@@ -11,9 +11,10 @@
  * 기록 칸 = DDL C84-DDL-1(배포 뒤 · 기준선 = 있던 행은 이미 알림) · 칸이 없으면 이 회차를 건너뛴다(옛 경로로 돌아가지 않음 · 소급 · 중복 0).
  */
 
-import { query, withBoundedMysql } from '../config/database';
+import { query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
-import { getAuthSmsTable, bulkInsertSmsQueue, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsCampaignSpamCountsSafe, getPlatformNoticeCallback } from './sms-queue';
+import { getCompanySmsTablesWithLogs, smsCampaignCountsSafe, smsCampaignSpamCountsSafe, getPlatformNoticeCallback } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { isSpamBlockSurge } from './sms-result-map';
 import { pickOwnerContact } from './owner-contact';
 import { isStepNotifyOn, messageStepBoundsSql } from './journey-step-notify';
@@ -231,14 +232,12 @@ async function handleStepDay(row: any): Promise<void> {
       [...pk, oldSent, NOTICE_MAX_ATTEMPTS],
     )).rows.length > 0,
     enqueue: async () => {
-      const authTable = await getAuthSmsTable();
-      const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(
-        [authTable],
+      const inserted = await insertNoticeSms(   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인 · 상한 연결 = CT 안 · 표 조회 뒤)
         [[to.phone, getPlatformNoticeCallback(), body, 'L', surge ? SPAM_SURGE_NOTICE_TITLE : '[여정 발송 결과]', null, '', row.company_id, '', '', '']],
         true,
         undefined,
-        { run },
-      ));
+        { boundedMs: NOTICE_ENQUEUE_TIMEOUT_MS },
+      );
       return inserted === 1;
     },
     finalize,

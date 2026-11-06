@@ -16,12 +16,13 @@ import { hasAgencySpellColumn, readAgencySpell } from './agency-send-spell';
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from './agency-send-worker';
 import { SEND_CHANGE_LOCK_MINUTES, sendChangeLockFreeSql } from './campaign-validation';
 import {
-  findUnregisteredRequestCallbacks, hasApprovalRequestedColumn, loadSendWindow, logEvent, unregisteredCallbackError, MAX_CONTENT,
+  findUnregisteredRequestCallbacks, hasApprovalRequestedColumn, loadSendWindow, logEvent, logCharCleanedTx, unregisteredCallbackError, MAX_CONTENT,
 } from './agency-send-intake';
+import { prepareAgencyCopy, agencyCharNotice } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
 import type { SpellIssue } from './spell-check';
 
 export type AgencyChangeResult =
-  | { ok: true; row: any; backTo?: AgencySendStatus; timeShifted?: boolean }
+  | { ok: true; row: any; backTo?: AgencySendStatus; timeShifted?: boolean; notice?: string[] }
   | { ok: false; status: number; error: string; code?: string; current?: any };
 
 const fail = (status: number, error: string, code?: string, current?: any): AgencyChangeResult => ({ ok: false, status, error, ...(code ? { code } : {}), ...(current ? { current } : {}) });
@@ -123,6 +124,11 @@ export async function editAgencyContentTx(input: {
     body = applied.content;
     if (body.length > MAX_CONTENT) return fail(400, `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.`);
   }
+  // ★ 2026-11-06 C109 D1(뿌리 R68) — 고친 글도 접수와 같은 글 준비(뺌 · 바꿈 = 적용 + 알림 · 막음 = 반려) · 저장 글 = 정리된 글
+  const copy = prepareAgencyCopy({ content: body, subject }, 'save');
+  if (!copy.ok) return fail(copy.status, copy.error, copy.code);
+  body = copy.content.trim();
+  if (subject !== null) subject = copy.subject;
 
   const plan = buildSlotPlan(body);
   if (!plan.ok) return fail(400, plan.error || '문안의 항목이 너무 많습니다.', 'TOO_MANY_VARS');
@@ -166,7 +172,11 @@ export async function editAgencyContentTx(input: {
     [body, subject, input.requestId, input.companyId, observedRevision, ATTEMPT_LOCK_PREFIX, SEND_CHANGE_LOCK_MINUTES],
     );
     if (updated.rows.length === 0) stale = true;
-    else saved = updated.rows[0];
+    else {
+      saved = updated.rows[0];
+      // ★ 2026-11-06 C109 D1(구조체크 S10 · Codex 설계 2R #3) — 고친 글 = 줄이 없어도 content_cleaned 를 남긴다(옛 접수 이력이 고친 글에 붙지 않게) · 같은 트랜잭션(실패 = 수정째 롤백) · 명단 이력은 그대로
+      await logCharCleanedTx(client, input.requestId, { content: copy.lines, recipients: { count: 0, examples: [] } }, { forceContent: true, contentOnly: true });
+    }
     await client.query('COMMIT'); committed = true;
   } finally {
     // 커밋 못 한 갈래(차단 · 오류) = 여기서 한 번 되돌린다(열린 트랜잭션을 풀에 돌려주지 않는다)
@@ -180,7 +190,7 @@ export async function editAgencyContentTx(input: {
     ...(input.change.kind === 'spell' ? { spellFixed: input.change.issueIds.length } : {}),
     ...(input.actor || {}),
   });
-  return { ok: true, row: saved };
+  return { ok: true, row: saved, notice: agencyCharNotice({ content: copy.lines, recipients: { count: 0, examples: [] } }, '저장했습니다') };
 }
 
 /**

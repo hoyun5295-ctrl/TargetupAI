@@ -84,7 +84,7 @@ describe('m132 적재 0건 = 보낸 것이 아니다', () => {
   });
   it('여정 결과 안내: 적재 0건 = 보낸 것이 아니다(기록 안 함) · ★1031 칸 · 날짜 단위(창 = 오늘 · 어제 · 그제 · 대기는 다음 날 아침 밝힘 = m115 의 「영영 안 감」 0)', () => {
     const s = src('utils/journey-result-notice.ts');
-    expect(s).toContain('const inserted = await withBoundedMysql(NOTICE_ENQUEUE_TIMEOUT_MS, (run) => bulkInsertSmsQueue(');
+    expect(s).toContain('const inserted = await insertNoticeSms(');   // ★ 1106 C109 안내 적재 CT(상한 연결 = CT 안 · Codex 구현 1R #4)
     expect(s).toContain('return inserted === 1;');
     expect(s).toContain("WHERE jsc.send_date >= (NOW() AT TIME ZONE 'Asia/Seoul')::date - ${RESULT_NOTICE_WINDOW_DAYS}");
     expect(src('utils/campaign-sync-worker.ts')).toContain('await notifyJourneyStepResults();');

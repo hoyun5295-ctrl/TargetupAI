@@ -12,6 +12,7 @@
  * ⛔ 확정 경로에서 AI를 부르지 마라(§17-6 계약) — `analyzeOneStep(aiSuggest=false)`가 그 게이트다.
  */
 import pool, { query } from '../config/database';
+import { prepareAgencyText, prepareAgencyCopy, createAgencyRecipientCleaner, mergeAgencyCharNotes, agencyCharNotice, EMPTY_AGENCY_CHAR_NOTES, type AgencyCharNotes } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
 import { getRegisteredCallbackSet, isCallbackRegistered } from './callback-filter';
 import { validateMmsPayload } from './mms-validator';
 import { alignMmsImageNames } from './mms-image-util';
@@ -227,6 +228,23 @@ export async function hasAgencyColumn(
   return r.rows.length > 0;
 }
 
+/**
+ * ★ 2026-11-06 C109 D1(Codex 설계 2R #3) — 트랜잭션 안 이력 쓰기(실패를 삼키지 않는다 = 접수 · 문안 수정째 롤백).
+ *   쓰는 곳 = 글자 정리 이력(content_cleaned · recipients_cleaned)만 · 그 밖 이력은 logEvent(실패해도 본 흐름 계속) 그대로.
+ */
+export async function logEventTx(run: { query: (sql: string, params?: any[]) => Promise<any> }, requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
+  await run.query(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, $2, $3::jsonb)`,
+    [requestId, kind, JSON.stringify(payload)]);
+}
+
+/** 글자 정리 이력 두 종류(접수 · 문안 수정이 같은 트랜잭션에서 부른다 · 줄이 없으면 쓰지 않는다 · 수정은 force 로 빈 줄도 남긴다) */
+export async function logCharCleanedTx(
+  run: { query: (sql: string, params?: any[]) => Promise<any> }, requestId: string, notes: AgencyCharNotes, opts: { forceContent?: boolean; contentOnly?: boolean } = {},
+): Promise<void> {
+  if (opts.forceContent || notes.content.length > 0) await logEventTx(run, requestId, 'content_cleaned', { lines: notes.content });
+  if (!opts.contentOnly && notes.recipients.count > 0) await logEventTx(run, requestId, 'recipients_cleaned', { count: notes.recipients.count, lines: notes.recipients.examples });
+}
+
 export async function logEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
   try {
     await query(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, $2, $3::jsonb)`,
@@ -243,7 +261,8 @@ export async function logEvent(requestId: string, kind: string, payload: Record<
 // ════════════════════════════════════════════════════════════
 export type CreateCoreResult =
   // ★2026-09-13(3) callbackKinds = 이 접수가 실제로 나갈 회신번호 종류(외부 트랜잭션 입구는 received 이력에 싣는다)
-  | { ok: true; request: any; callbackKinds: AgencyCallbackKinds }
+  // ★ 2026-11-06 C109 D1 — notice = 보낼 수 없는 글자를 빼거나 바꾼 알림 줄(없으면 [] · 화면 · 원스텝 · 메일 회신이 보인다)
+  | { ok: true; request: any; callbackKinds: AgencyCallbackKinds; notice: string[] }
   | { ok: false; status: number; error: string; code?: string };
 
 export async function createRequestCore(
@@ -261,8 +280,27 @@ export async function createRequestCore(
     registeredSet?: Set<string>; window?: { startHour: number | null; endHour: number | null }; minLeadMinutes?: number;
     /** ★ 2026-09-26 R1-08 — 트랜잭션 밖에서 미리 잰 SMS 최장 바이트(원스텝·메일). 없으면 코어가 잰다(자체 트랜잭션 전이라 풀 대기 안전) */
     maxSmsBytes?: number | null;
+    /**
+     * ★ 2026-11-06 C109 — 분석 단계(원스텝 · 메일)가 이미 정리한 글자 알림(서버가 만든 값만 · 화면 요청 본문의 값은 받지 않는다 =
+     *   담당자 승인 요청 문자 줄에 실리는 이력이라 바깥 글이 들어오면 안 된다)
+     */
+    charNotes?: AgencyCharNotes;
   },
 ): Promise<CreateCoreResult> {
+  // ★ 2026-11-06 C109 D1 · D5(뿌리 R68) — 쓰는 자리 판정(모든 검사 앞): 뺌 · 바꿈 = 적용 + 알림 · 막음 · 토큰 안 글자 · 정리 후 빈 값 = 반려 · 명단 값 같은 규칙.
+  //   분석 단계(원스텝 · 메일)가 이미 정리했으면 여기서는 찾는 것 0(알림은 input.charNotes 로 와서 합친다 · 덮지 않는다) · 빈 문안 = 아래 빈 값 판정 그대로.
+  const prep = prepareAgencyText({
+    content: input?.content == null ? '' : String(input.content),
+    subject: input?.subject == null ? null : String(input.subject),
+    recipients: Array.isArray(input?.recipients) ? input.recipients : [],
+  });
+  if (!prep.ok) return { ok: false, status: prep.status, error: prep.error, code: prep.code };
+  const charNotes = mergeAgencyCharNotes(pre?.charNotes, prep.notes);
+  input = {
+    ...(input || {}), content: prep.content,
+    ...(input?.subject == null ? {} : { subject: prep.subject }),
+    ...(Array.isArray(input?.recipients) ? { recipients: prep.recipients } : {}),
+  };
   const {
     messageType = 'SMS', subject, content, isAd = false, callbackNumber,
     managerPhone, managerPhones, requestedAt, mmsImagePaths, fileName, phoneColumn, varMapping,
@@ -501,6 +539,8 @@ export async function createRequestCore(
     if ((counted.rows[0]?.c || 0) !== rows.length) {
       throw new Error(`수신자 적재 불일치: 기대 ${rows.length} 실제 ${counted.rows[0]?.c}`);
     }
+    // ★ 2026-11-06 C109 D1(Codex 설계 2R #3) — 글자 정리 이력 = 접수와 같은 트랜잭션(외부 트랜잭션이면 그 연결 · 실패 = 접수째 롤백)
+    await logCharCleanedTx(client, request.id, charNotes);
     if (own) await client.query('COMMIT');
   } catch (txErr) {
     if (own) await client.query('ROLLBACK').catch(() => {});
@@ -523,7 +563,7 @@ export async function createRequestCore(
     //   ⛔ 커밋 전에 부르면 워커가 아직 없는 행을 찾는다. 외부 트랜잭션(원스텝 다건)은 호출부가 커밋 뒤에 부른다.
     kickFirstTest(request.id);
   }
-  return { ok: true, request, callbackKinds };
+  return { ok: true, request, callbackKinds, notice: agencyCharNotice(charNotes) };
 }
 
 /**
@@ -587,6 +627,8 @@ export interface OneStepAnalysis {
   maxSmsBytes: number | null;
   fileName: string | null;
   errors: AgencyFormError[];
+  /** ★ 2026-11-06 C109 D1 — 보낼 수 없는 글자 정리 알림(접수 코어가 이력으로 남긴다 · 확인 화면 · 회신 메일이 보인다) */
+  charNotes: AgencyCharNotes;
 }
 
 /** 확인 화면에서 바꿀 수 있는 것: 시각 · 회신번호 선택 · 담당자 · 이미지 · 문안 항목의 열. 문안·제목은 요청서가 진실이다 */
@@ -636,7 +678,7 @@ export async function analyzeOneStep(
     callback: { mode: 'none' }, headers: [], phoneColumn: null, varsMatched: [],
     counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
     groups: [], allRecipients: [], primaryCallback: '',
-    sample: [], sampleRows: [], messageType: 'SMS', maxSmsBytes: null, fileName: listName, errors,
+    sample: [], sampleRows: [], messageType: 'SMS', maxSmsBytes: null, fileName: listName, errors, charNotes: EMPTY_AGENCY_CHAR_NOTES,
   };
   if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); return empty; }
   // ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 명단 파일이 따로 없으면
@@ -657,6 +699,12 @@ export async function analyzeOneStep(
     : null;
   const form = pre?.form ?? parsed?.form ?? unreadableAgencyForm();
   errors.push(...form.errors);
+  // ★ 2026-11-06 C109 D1(Codex 설계 1R #1 · #3 · #5) — 읽은 직후 · 모든 분석 앞: 문안 · 제목 정리(뒤의 변수 이름 · 유형 · 바이트 · 메일 중복 판단 = 정리된 글)
+  const copyPrep = prepareAgencyCopy({ content: form.content, subject: form.subject });
+  if (!copyPrep.ok) errors.push({ field: '문안', error: copyPrep.error });
+  const formContent = copyPrep.ok ? copyPrep.content : form.content;
+  const formSubject = copyPrep.ok ? copyPrep.subject : form.subject;
+  const recipientCleaner = createAgencyRecipientCleaner();
 
   let headers: string[] = [];
   let rows: Record<string, any>[] = [];
@@ -731,7 +779,7 @@ export async function analyzeOneStep(
   }
 
   // 문안 항목 ↔ 명단 열: 확인 화면 조정값 > 같은 이름(화면 접수와 같은 규칙 · CT 소유)
-  const usedVars = extractAgencyVars(form.content);
+  const usedVars = extractAgencyVars(formContent);
   const varResolution = resolveVarColumns(usedVars, headers, overrides.varMapping);
   let varsMatched: OneStepAnalysis['varsMatched'] = varResolution.resolved;
   // 이름이 다른 항목은 **미리보기 초회 분석에서만** AI가 열을 추천해 미리 골라 둔다(★2026-08-25 §17-6).
@@ -780,7 +828,7 @@ export async function analyzeOneStep(
   const sample: Array<{ phone: string; callback?: string }> = [];
   const ONLY_DIGITS = (s: any) => String(s ?? '').replace(/[^0-9]/g, '');
   if (phoneColumn) {
-    for (const r of rows) {
+    for (const [rowIdx, r] of rows.entries()) {
       // 0 유실 복원 포함(★0826 §18-4)
       const phone = normalizeAgencyPhone(r[phoneColumn]);
       if (!phone || phone.length < 10) { invalid++; continue; }
@@ -801,11 +849,14 @@ export async function analyzeOneStep(
       }
       groupMap.set(groupKey, (groupMap.get(groupKey) || 0) + 1);
       // 열 방식일 때만 고객별 번호를 싣는다. 고정 번호면 접수 대표 번호로 나가므로 비워 둔다(종전 동작).
-      allRecipients.push({ phone, vars, callback: callback.mode === 'column' ? groupKey : null });
+      // ★ 2026-11-06 C109 D5 — 명단 값(문안 항목에 쓰는 열만) 같은 규칙 · 행 = 명단 순서(1부터)
+      allRecipients.push({ phone, vars: recipientCleaner.clean(vars, rowIdx + 1), callback: callback.mode === 'column' ? groupKey : null });
       if (!firstCallback) firstCallback = groupKey;
       if (sample.length < 50) sample.push({ phone, ...(callback.mode === 'column' ? { callback: groupKey } : {}) });
     }
   }
+  const recipientPrep = recipientCleaner.done();
+  if (!recipientPrep.ok) errors.push({ field: '명단', error: recipientPrep.error });
   const valid = [...groupMap.values()].reduce((a, n) => a + n, 0);
   if (rows.length > 0 && valid === 0 && errors.length === 0) {
     errors.push({ field: '명단', error: '보낼 수 있는 번호가 없습니다.' });
@@ -854,14 +905,14 @@ export async function analyzeOneStep(
   const images = Array.isArray(overrides.mmsImagePaths) ? overrides.mmsImagePaths : [];
   // ★ 2026-09-26 한줄로 V2 R1-08 — 글자 45가 아니라 **실제 문장의 바이트**(광고 표기·무료거부 줄·가장 긴 변수 값 포함)로 가른다.
   //   이미지 = MMS · 제목이 있으면 LMS(종전 그대로) · 그 밖은 SMS로 조립해 90바이트를 넘으면 LMS.
-  const maxSmsBytes = images.length > 0 || form.subject.trim()
+  const maxSmsBytes = images.length > 0 || formSubject.trim()
     ? null
-    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: form.content.trim(), isAd: form.isAd, recipients: allRecipients });
+    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: formContent.trim(), isAd: form.isAd, recipients: allRecipients });
   const messageType: 'SMS' | 'LMS' | 'MMS' = images.length > 0
-    ? 'MMS' : (form.subject.trim() || (maxSmsBytes !== null && maxSmsBytes > SMS_MAX_BYTES) ? 'LMS' : 'SMS');
+    ? 'MMS' : (formSubject.trim() || (maxSmsBytes !== null && maxSmsBytes > SMS_MAX_BYTES) ? 'LMS' : 'SMS');
 
   return {
-    subject: form.subject, content: form.content, isAd: form.isAd, requestedAtIso,
+    subject: formSubject, content: formContent, isAd: form.isAd, requestedAtIso,
     timeShifted, shiftedAtIso,
     managerPhones, callback, headers, phoneColumn, varsMatched,
     counts: { total: rows.length, valid, dup, invalid, callbackMissing },
@@ -872,6 +923,7 @@ export async function analyzeOneStep(
     sample,
     sampleRows: rows.slice(0, 50).map((r) => headers.map((h) => r[h] ?? null)),
     messageType, maxSmsBytes, fileName: listName, errors,
+    charNotes: { content: copyPrep.ok ? copyPrep.lines : [], recipients: recipientPrep.ok ? recipientPrep.recipients : { count: 0, examples: [] } },
   };
 }
 

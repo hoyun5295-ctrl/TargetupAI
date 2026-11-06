@@ -11,7 +11,8 @@
 //   - journey_executions 7일 트리거 패턴 (예상 비용)
 
 import { query } from '../config/database';
-import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, type SpamVerdict, type SpamTestEnqueueResult } from './spam-test-queue';
+import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, enqueueFailureVerdict, SPAM_REJECTED_DEFAULT_TEXT, type SpamVerdict, type SpamTestEnqueueResult } from './spam-test-queue';
+import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 P5 검사 입력(렌더 뒤) 글자 정리
 import { spamCheckView, type SpamCheckView } from './spam-test-view';   // ★ 2026-11-05 C103 F1 검사 한 건 보기 CT
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from './journey-message-render';
 import { getCompanyCosts } from '../config/defaults';
@@ -219,6 +220,11 @@ export async function validateJourneyForActivation(
           });
           continue;
         }
+        // ★ 2026-11-06 C109 E11 — 검사 입력은 렌더 뒤 정리된 글이라 글자 반려는 구조로 오지 않는다(K8) · 와도 장애가 아니라 고칠 글(위치 문장)
+        if (r.verdict === 'rejected') {
+          failedSteps.push({ stepId: step.step_id, variantId: msg.variantId, reason: 'copy_issue', details: r.error || SPAM_REJECTED_DEFAULT_TEXT });
+          continue;
+        }
         void (r.verdict satisfies 'pass');
         opts.spamStates?.push({ stepId: step.step_id, variantId: msg.variantId, state: 'pass' });
         confidenceSum += r.score;
@@ -257,10 +263,11 @@ export function batchVerdictOf(variants: Array<{ overallResult?: string | null; 
 /**
  * ★ 2026-11-01 B1-4(Codex 설계 2R #2) — 판 여럿의 판정 하나(켜기 검증 · 보내기 전 검사 공용) · 전부 pass 일 때만 통과.
  *   차단 > 장애 > 확인 중 > 검사 중 > 통과 순으로 하나를 고른다(차단 = 고칠 문안 · 장애 = 재시도 상한 · 기다림 = 자동 행동 0).
+ *   ★ 2026-11-06 C109 — 보낼 수 없는 글자(rejected) = 차단 다음 · 장애 앞(고칠 글이다 · 다시 검사로 안 풀린다).
  */
 export function mergeSpamVerdicts(vs: readonly SpamVerdict[]): SpamVerdict {
   if (vs.length === 0) return 'error';
-  for (const v of ['blocked', 'error', 'unconfirmed', 'pending'] as const) if (vs.includes(v)) return v;
+  for (const v of ['blocked', 'rejected', 'error', 'unconfirmed', 'pending'] as const) if (vs.includes(v)) return v;
   return 'pass';
 }
 
@@ -338,14 +345,19 @@ async function stepSpamInput(params: StepSpamParams) {
     isAd: params.isAd,
     customer: await pickJourneySampleCustomer(params.companyId, params.journeyId),
   });
+  // ★ 2026-11-06 C109 E11 · P5(Codex 설계 1R #7 · 4R #1) — 검사 글 = 렌더가 끝난 글(고객 · 회사 · 외부 값 치환 뒤)을 글자 정리 ·
+  //   rendered = 큐가 다시 치환하지 않는다(고객 값 속 템플릿 글이 두 번째 치환에서 풀려 새 글자를 만들지 않게) · 칸 글 막음 글자 = CT-J10 이 먼저 막는다
+  const message = cleanSmsTextAll(rendered.message);
+  const subject = rendered.subject ? cleanSmsTextAll(rendered.subject) : '';
   return {
     companyId: params.companyId,
     userId: params.userId,
     callbackNumber: params.callbackNumber || '',
-    messageContentSms: params.channel === 'sms' ? rendered.message : '',
-    messageContentLms: params.channel !== 'sms' ? rendered.message : '',
+    messageContentSms: params.channel === 'sms' ? message : '',
+    messageContentLms: params.channel !== 'sms' ? message : '',
     messageType: rendered.msgType,
-    subject: rendered.subject || undefined,
+    subject: subject || undefined,
+    rendered: true,
   };
 }
 
@@ -459,7 +471,8 @@ export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamT
       reuseDays: params.reuseDays,
     });
     if (!enqueueResult.ok) {
-      return { verdict: 'error', ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: enqueueResult.error || enqueueResult.errorCode || 'enqueue_failed' };
+      // ★ 2026-11-06 C109 D3 — 글자 반려 = rejected(error 칸 = 위치 문장) · 그 밖 = 검사 장애
+      return { verdict: enqueueFailureVerdict(enqueueResult.errorCode) === 'rejected' ? 'rejected' : 'error', ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: enqueueResult.error || enqueueResult.errorCode || 'enqueue_failed' };
     }
     const spamScore = await pollSpamResult(enqueueResult.testId!, 30000);
     return {

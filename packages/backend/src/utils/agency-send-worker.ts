@@ -23,12 +23,13 @@
 import pool, { query } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, type SpamVerdict } from './spam-test-queue';
+import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
-  buildLinkActionNotify,
+  buildLinkActionNotify, buildUnsupportedCharsNotify,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl, linkCancelTailOf } from './agency-send-link';
 import {
@@ -41,7 +42,8 @@ import {
 import { buildSlotPlan, toSlotValues } from './agency-send-vars';
 import { buildRenderedSample as buildSample } from './agency-send-preview';
 import { campaignMayHaveSent, classifyAttemptCampaign, inspectAttemptCampaign, neutralizeCampaign } from './agency-send-campaign';
-import { bulkInsertSmsQueue, getAuthSmsTable, insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
+import { insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
+import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { countStagingFiltered, createDirectSendCampaign } from './direct-send-core';
 import { DirectSendError } from './direct-send-spec';
 import { SPAM_BLOCKED_CODE } from './spam-block';
@@ -52,6 +54,7 @@ import { isMissingSchemaError } from './db-errors';
 import { createStageGuard } from './stage-guard';
 // ★2026-09-25 맞춤법 검사(테스트 문자 뒤·승인 안내 앞 · 흐름을 막지 않는다 · docs/2026-09-25-agency-spell-check-design.md §3-4)
 import { readAgencySpellCount, runAgencySpellAfterTest } from './agency-send-spell';
+import { agencyCharPassedLines } from './agency-send-chars';   // ★ 2026-11-06 C109 승인 요청 문자 정리 줄
 import { withMmsImageNames } from './mms-image-util';
 
 const LOG = '[agency-send][worker]';
@@ -232,10 +235,8 @@ export async function notifyManager(opts: {
   try {
     // ★2026-09-13(3) 적재 대기에 상한을 둔다(withNotifyTimeout 주석). 넘기면 기록만 남기고 돌아간다
     const inserted = await withNotifyTimeout((async () => {
-      const table = await getAuthSmsTable();
       const images = opts.mmsImages || [];
-      return bulkInsertSmsQueue(
-        [table],
+      return insertNoticeSms(   // ★ 2026-11-06 C109 D6 — 안내 적재 CT(본문 · 제목 글자 정리 · 인증 라인)
         entries.map(({ phone, text }) => ([
           phone, opts.callback, text, opts.msgType || 'L', opts.title,
           toKoreaTimeStr(new Date()), null, opts.companyId,
@@ -369,6 +370,8 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   detail: any;
   /** ★ 2026-11-01 B1-4 — 확인 중 · 검사 중으로 멈춘 다듬은 문장(원문과 다를 때만 · 다음 주기에 이 글부터 같은 검사를 이어 본다) */
   heldContent?: string | null;
+  /** ★ 2026-11-06 C109 — 검사 입구 글자 반려 문장(verdict = rejected 일 때) */
+  rejection?: string | null;
 }> {
   const original = String(row.current_content || '');
   let content = original;
@@ -401,6 +404,7 @@ async function runSpamRound(row: any, startRound: number): Promise<{
         isAd: !!row.is_ad,
         rejectNumber,
         maxRetries: 0,
+        rendered: true,   // ★ 2026-11-06 C109(Codex 설계 4R) — 표본 = 렌더가 끝난 글(buildRenderedSample) · 큐가 다시 치환하지 않는다
       });
       detail = { batchId: result.batchId, round: rounds, variants: result.variants };
 
@@ -408,6 +412,8 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
       const verdict = spamVerdictOf(v, result.totalTestCount);
       if (verdict === 'error') return { verdict, passed: false, finalContent: original, rounds, detail };
+      // ★ 2026-11-06 C109 D4 — 보낼 수 없는 글자 반려 = 장애 아님 · 다듬기 · 다시 검사 0(같은 글은 같은 반려) · 사람이 고친다
+      if (verdict === 'rejected') return { verdict, passed: false, finalContent: original, rounds, detail, rejection: spamRejectionOf(v) };
       // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 원문 그대로 잡기 전 상태로(장애 횟수에 안 셈) · 다듬은 문장이면 그 글을 남겨 다음 주기에 이어 본다
       if (isSpamHold(verdict)) return { verdict, passed: false, finalContent: original, rounds, detail, heldContent: content !== original ? content : null };
       if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };
@@ -430,8 +436,10 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       //   문자는 안 나가 "다듬었다면서 왜 안내가 없나"가 된다(0831 Harold 지적).
       // ⛔ 비교는 통보 분기와 **같은 기준**(글자 그대로)이어야 한다. 여기서 공백을 정규화하면 그 순간
       //   기록과 통보가 다시 갈린다.
-      const refineChanged = refined.content !== content;
-      content = refined.content;
+      // ★ 2026-11-06 C109 D1 — 다듬은 문안(AI 글) = 만든 즉시 글자 정리(P2 · 알림 0) · 바뀜 판정도 정리된 글로
+      const refinedText = cleanSmsTextAll(refined.content);
+      const refineChanged = refinedText !== content;
+      content = refinedText;
       await logEvent(row.id, refineChanged ? 'refined' : 'refine_nochange', { round: rounds });
     }
   } catch (err: any) {
@@ -469,6 +477,42 @@ async function settleSpamCheckError(row: any, token: string, backTo: 'received' 
   // 상태 변경 결과를 본 뒤에만 기록한다(소유권을 잃었으면 가져간 쪽이 자기 기록을 남긴다 · ⓕ)
   const back = await setStatus(row.id, backTo, { ...RELEASE }, token).catch(() => false);
   if (back) console.warn(`${LOG} 스팸 검사 장애(${n}/${SPAM_CHECK_ERROR_LIMIT}) request=${row.id} phase=${phase} — ${SPAM_CHECK_ERROR_BACKOFF_MINUTES}분 뒤 다시 검사`);
+}
+
+/**
+ * ★ 2026-11-06 C109 D1(구조체크 S7) — 승인 요청 문자의 정리 줄 = 종류마다 가장 최근 이력 한 줄(접수 · 문안 수정이 같은 트랜잭션에서 남긴다).
+ *   ⛔ 던지지 않는다(안내 줄 = 부가 · 조회 실패 = 줄 없음 · 승인 요청 자체는 나간다).
+ */
+export async function readAgencyCharLines(requestId: string): Promise<string[]> {
+  try {
+    const r = await query(
+      `SELECT DISTINCT ON (kind) kind, payload FROM agency_send_events
+        WHERE request_id = $1::uuid AND kind IN ('content_cleaned', 'recipients_cleaned')
+        ORDER BY kind, created_at DESC`,
+      [requestId],
+    );
+    const by = new Map<string, any>(r.rows.map((x: any) => [String(x.kind), x.payload]));
+    return agencyCharPassedLines(by.get('content_cleaned'), by.get('recipients_cleaned'));
+  } catch (err: any) {
+    console.warn(`${LOG} 정리 줄 조회 건너뜀 request=${requestId}:`, err?.message);
+    return [];
+  }
+}
+
+/**
+ * ★ 2026-11-06 C109 D4 E1 · E2 — 검사 입구 글자 반려 마감(장애 아님 · 뿌리 R7 넓힘).
+ *   장애 셈(spam_check_error) 0 · 다시 검사 0 · 사람 판단(test_failed + 반려 위치 안내). 문안 · 명단을 고치면 접수 수정 배관이 다시 검사를 연다.
+ */
+async function settleSpamRejected(row: any, token: string, phase: 'first' | 'final', rejection: string | null | undefined): Promise<void> {
+  const message = String(rejection || '').trim() || null;
+  if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+  await logEvent(row.id, 'spam_rejected_chars', { phase, version: Number(row.content_version || 0), message });
+  await logEvent(row.id, 'test_failed', { reason: 'unsupported_chars', phase });
+  await notifyManager({
+    companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+    callback: row.callback_number, title: phase === 'final' ? '[대행발송] 예약 취소 안내' : '[대행발송] 문안 확인 필요',
+    text: buildUnsupportedCharsNotify({ label: shortLabel(row.file_name || row.original_content), places: spamRejectionPlaces(message) }),
+  });
 }
 
 /**
@@ -566,9 +610,11 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     try {
       // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
       if (!(await touchTestingLock(row.id, token))) continue;
-      const { verdict, passed, finalContent, rounds, detail, heldContent } = await runSpamRound(row, 0);
+      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection } = await runSpamRound(row, 0);
       // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 접수 상태로 돌리고 대기 뒤 다시(같은 버전 3번째 = 사람 판단)
       if (verdict === 'error') { await settleSpamCheckError(row, token, 'received', 'first', detail); continue; }
+      // ★ 2026-11-06 C109 — 보낼 수 없는 글자 반려 = 사람 판단(다시 검사 0)
+      if (verdict === 'rejected') { await settleSpamRejected(row, token, 'first', rejection); continue; }
       if (isSpamHold(verdict)) { await settleSpamHold(row, token, 'received', 'first', verdict, detail, heldContent ?? null, rounds); continue; }
       // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
       //   담당자가 이미 문안을 고쳤는데 옛 문안으로 "승인해 주세요"를 보내면 그 문자가 거짓이 된다.
@@ -653,12 +699,13 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       const originalWhenText = row.requested_at_original
         ? formatWhen(new Date(row.requested_at_original))
         : undefined;
+      const charLines = await readAgencyCharLines(row.id);
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines }),
           row.company_id, row.id, linkRow, row.created_by ?? null),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
@@ -756,9 +803,11 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
   const label = shortLabel(target.file_name || target.original_content);
 
   try {
-    const { verdict, passed, finalContent, rounds, detail, heldContent } = await runSpamRound(target, 0);
+    const { verdict, passed, finalContent, rounds, detail, heldContent, rejection } = await runSpamRound(target, 0);
     // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 승인 상태로 돌리고 대기 뒤 다시(시각이 지나면 만료 단계가 맡는다 · 같은 버전 3번째 = 사람 판단)
     if (verdict === 'error') { await settleSpamCheckError(target, token, 'approved', 'final', detail); return; }
+    // ★ 2026-11-06 C109 — 보낼 수 없는 글자 반려 = 예약하지 않는다 · 사람 판단(다시 검사 0)
+    if (verdict === 'rejected') { await settleSpamRejected(target, token, 'final', rejection); return; }
     if (isSpamHold(verdict)) { await settleSpamHold(target, token, 'approved', 'final', verdict, detail, heldContent ?? null, rounds); return; }
     const version = await saveTestResult(target, finalContent, rounds, detail, token);
     if (version === null) return; // 소유권을 잃었다. 알림도 보내지 않는다
@@ -2036,12 +2085,13 @@ export async function sendAgencyApprovalRequest(requestId: string): Promise<void
     const linkRow = (await freshLinkFields(row.id)) || row;
     const spellCount = await readAgencySpellCount(row.id);
     const count = Number(row.recipient_count || 0);
+    const charLines = await readAgencyCharLines(row.id);
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
       callback: row.callback_number, title: '[대행발송] 승인 요청',
-      text: buildPassedNotify({ label, whenText, count, spellCount }),
+      text: buildPassedNotify({ label, whenText, count, spellCount, charLines }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-        buildPassedNotify({ label, whenText, count, approveUrl, spellCount }),
+        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines }),
         row.company_id, row.id, linkRow, row.created_by ?? null),
     });
   } catch (err: any) {

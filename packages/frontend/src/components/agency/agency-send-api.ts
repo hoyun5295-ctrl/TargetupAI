@@ -230,10 +230,11 @@ export interface CreateAgencyRequestInput {
   recipients: Array<{ phone: string; vars: Record<string, any>; callback?: string | null }>;
 }
 
-export async function createAgencyRequest(input: CreateAgencyRequestInput): Promise<AgencySendRequest> {
+/** ★ 2026-11-06 C109 — notice = 서버가 보낼 수 없는 글자를 빼거나 바꾼 알림 줄(없으면 [] · 위치 문장 · 그 글자는 들어 있지 않다) */
+export async function createAgencyRequest(input: CreateAgencyRequestInput): Promise<{ request: AgencySendRequest; notice: string[] }> {
   const res = await fetch('/api/agency-send', { method: 'POST', headers: json(), body: JSON.stringify(input) });
   const data = await unwrap(res);
-  return data.request;
+  return { request: data.request, notice: Array.isArray(data.notice) ? data.notice : [] };
 }
 
 export async function approveAgencyRequest(id: string, revision: number): Promise<AgencySendRequest> {
@@ -245,11 +246,12 @@ export async function approveAgencyRequest(id: string, revision: number): Promis
 
 export async function updateAgencyContent(
   id: string, content: string, revision: number, subject?: string,
-): Promise<AgencySendRequest> {
+): Promise<{ request: AgencySendRequest; notice: string[] }> {
   const res = await fetch(`/api/agency-send/${id}/content`, {
     method: 'POST', headers: json(), body: JSON.stringify({ content, subject, revision }),
   });
-  return (await unwrap(res)).request;
+  const data = await unwrap(res);
+  return { request: data.request, notice: Array.isArray(data.notice) ? data.notice : [] };   // ★ 2026-11-06 C109 글자 정리 알림
 }
 
 /**
@@ -309,6 +311,8 @@ export interface OneStepAnalysisView {
   messageType: 'SMS' | 'LMS' | 'MMS';
   fileName: string | null;
   errors: Array<{ field: string; error: string }>;
+  /** ★ 2026-11-06 C109 — 요청서 문안 · 명단에서 보낼 수 없는 글자를 빼거나 바꾼 알림(위 문안 · 명단은 이미 정리된 값) */
+  charNotice?: string[];
 }
 
 export interface OneStepOverrides {
@@ -348,7 +352,7 @@ export async function previewOneStep(formFile: File, listFile: File | null, over
   return data.analysis;
 }
 
-export async function submitOneStep(formFile: File, listFile: File | null, overrides: OneStepOverrides): Promise<AgencySendRequest[]> {
+export async function submitOneStep(formFile: File, listFile: File | null, overrides: OneStepOverrides): Promise<{ requests: AgencySendRequest[]; notice: string[] }> {
   const res = await fetch('/api/agency-send/one-step', { method: 'POST', headers: auth(), body: oneStepBody(formFile, listFile, overrides) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data?.success) {
@@ -359,7 +363,7 @@ export async function submitOneStep(formFile: File, listFile: File | null, overr
     err.requests = data?.requests;
     throw err;
   }
-  return data.requests || [];
+  return { requests: data.requests || [], notice: Array.isArray(data.notice) ? data.notice : [] };   // ★ 2026-11-06 C109 글자 정리 알림
 }
 
 // ────────────── 문안 변수 (서버 CT `utils/agency-send-vars.ts` 미러) ──────────────

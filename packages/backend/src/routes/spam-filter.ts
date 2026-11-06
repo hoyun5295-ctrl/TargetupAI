@@ -25,6 +25,7 @@ import { spamAppTokenVerdict } from '../utils/spam-app-auth';
 import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 // ★ 2026-09-28 검사 입구 글자 검사 — 발송 버튼과 같은 판정(게이트웨이 CP949 표)
 import { unsupportedSmsCharCodes } from '../utils/sms-charset';
+import { smsTextPlaces } from '../utils/message-sanitizer';   // ★ 2026-11-06 C109 반려 위치 문장
 import { parseQueryInt, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
@@ -190,8 +191,11 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
     });
     const unsupportedChars = unsupportedSmsCharCodes(...outgoing.flatMap((o) => [o.content, o.titleStr]));
     if (unsupportedChars.length > 0) {
+      // ★ 2026-11-06 C109 D7 — 반려 문장에 위치(P4 · 그 글자는 넣지 않는다 · 옛: 목록을 세고도 문장에 0)
+      const places = [...new Set(outgoing.flatMap((o) => [smsTextPlaces([{ label: '본문', text: o.content }]), smsTextPlaces([{ label: '제목', text: o.titleStr }])]).filter((x): x is string => !!x))].join(', ');
+      const error = `문자로 보낼 수 없는 글자가 있어 검사하지 않았어요${places ? `: ${places}` : ''}. 작성 화면 안내에서 바꾸거나 지운 뒤 다시 검사해 주세요(안내가 없으면 받는 사람 정보의 글자를 확인해 주세요). 검사 횟수와 요금은 그대로예요.`;
       return res.status(400).json({
-        error: '문자로 보낼 수 없는 글자(보이지 않는 글자 포함)가 있어 검사하지 않았어요. 작성 화면 안내에서 바꾸거나 지운 뒤 다시 검사해 주세요(안내가 없으면 받는 사람 정보의 글자를 확인해 주세요). 검사 횟수와 요금은 그대로예요.',
+        error,
         code: 'SMS_UNSUPPORTED_CHARS',
         chars: unsupportedChars,
       });
