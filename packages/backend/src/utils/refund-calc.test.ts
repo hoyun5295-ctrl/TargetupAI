@@ -85,11 +85,11 @@ describe('resolveAlimtalkMix — 성공을 결과별로 나눈다 (2026-09-26)',
     ({ kakao: 0, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 0, sub: 0, ...p });
 
   it('알림톡 성공 · 대체 행(S/L) 성공 · 나머지 성공은 기타 (c617 운영 실측 모양: K 1800×4 · 7300×2 + 대체 L 1000×2)', () => {
-    expect(resolveAlimtalkMix(agg({ kakao: 4, subLms: 2, sub: 2 }), 6)).toEqual({ mix: { kakao: 4, sms: 0, lms: 2, other: 0 }, ambiguous: false });
+    expect(resolveAlimtalkMix(agg({ kakao: 4, subLms: 2, sub: 2 }), 6)).toEqual({ mix: { kakao: 4, sms: 0, lms: 2, other: 0, friend: 0 }, ambiguous: false });
   });
 
   it('K행에 찍힌 대체 성공 코드(7830 SMS · 7831 LMS)도 대체로 센다', () => {
-    expect(resolveAlimtalkMix(agg({ kakao: 1, inRowSms: 2, inRowLms: 3 }), 6)).toEqual({ mix: { kakao: 1, sms: 2, lms: 3, other: 0 }, ambiguous: false });
+    expect(resolveAlimtalkMix(agg({ kakao: 1, inRowSms: 2, inRowLms: 3 }), 6)).toEqual({ mix: { kakao: 1, sms: 2, lms: 3, other: 0, friend: 0 }, ambiguous: false });
   });
 
   it('K행 대체 코드와 대체 행이 한 캠페인에 함께 있으면 판정 보류 — 한 수신자를 두 번 셀 수 있다', () => {
@@ -97,7 +97,7 @@ describe('resolveAlimtalkMix — 성공을 결과별로 나눈다 (2026-09-26)',
   });
 
   it('집계가 없으면 전부 기타', () => {
-    expect(resolveAlimtalkMix(undefined, 5)).toEqual({ mix: { kakao: 0, sms: 0, lms: 0, other: 5 }, ambiguous: false });
+    expect(resolveAlimtalkMix(undefined, 5)).toEqual({ mix: { kakao: 0, sms: 0, lms: 0, other: 5, friend: 0 }, ambiguous: false });
   });
 
   it('기타는 음수가 되지 않는다(두 집계 사이 시점 차)', () => {

@@ -1,15 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
-import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
+import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
-import { getTestSmsTables } from '../utils/sms-queue';
+import { getTestSmsTables, getFriendColumnTables } from '../utils/sms-queue';
+import { testSummaryCost, testSummaryUnitPrices } from '../utils/test-summary-cost';   // ★ C108 시험 발송 요약 비용 CT
 // ★ 2026-09-27 한줄로 V2 R131 — 테스트 통계도 이력(LOG) 테이블까지(정산과 같은 기간 테이블 CT)
-import { getTablesForBillingPeriod } from '../utils/send-usage-aggregation';
+import { getTablesForBillingPeriod, billingMsgTypeSql } from '../utils/send-usage-aggregation';
 import { kstDateString } from '../utils/planner-execution';
 /** 기간 지정이 없을 때 이력 테이블을 모으는 시작일(서비스 이전 · 있는 LOG만 붙는다) */
 const TEST_STATS_EPOCH = '2025-01-01';
-import { getSendTypeLabel, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus, isSuccess, isPending } from '../utils/sms-result-map';
+import { getSendTypeLabel, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus, isSuccess, isPending, SUCCESS_CODES_SQL, PENDING_CODES_SQL } from '../utils/sms-result-map';
 // ★ 2026-07-25 `querySendStats`(campaigns 축) 미사용 — 화면·엑셀 모두 청구 축(send-usage-aggregation)으로 통일.
 //   슈퍼관리자 통계(admin.ts)는 계정·캠페인 단위 운영 뷰라 그 축을 계속 쓴다.
 import { buildDateRangeFilter, querySendStatsDetail } from '../utils/stats-aggregation';
@@ -149,13 +150,28 @@ router.get('/send', async (req: Request, res: Response) => {
 
         // ★ 2026-09-27 한줄로 V2 R131 — LIVE만 보면 LOG로 옮겨진 완료 테스트가 빠졌다 → 기간 LOG 합류(실존하는 것만)
         const testTables = await getTablesForBillingPeriod(await getTestSmsTables(), testStartDate || TEST_STATS_EPOCH, testEndDate || kstDateString(new Date()));
+        // ★ 2026-11-06 C108(C107F ④ · Codex 구현 1R) 비용 = 청구 유형별 청구 수량(성공) — 유형 판정 = 정산서와 같은 청구 식(표마다 · 친구 칸)
+        const friendTables = await getFriendColumnTables();
+        const testBilledRows: Array<{ msgType: string; billed: number }> = [];
         for (const tbl of testTables) {
+          const billingType = billingMsgTypeSql(friendTables.has(tbl));
+          const billedRows = await mysqlQuery(
+            `SELECT ${billingType} AS msg_type, COUNT(*) AS billed
+             FROM ${tbl}
+             WHERE app_etc1 = 'test' AND app_etc2 = ? AND status_code IN (${SUCCESS_CODES_SQL}) ${mysqlDateWhere}
+             GROUP BY ${billingType}`,
+            mysqlParams
+          ) as any[];
+          for (const r of billedRows || []) testBilledRows.push({ msgType: String(r.msg_type), billed: Number(r.billed) || 0 });
+        }
+        for (const tbl of testTables) {
+          // ★ 2026-11-06 C107F 뿌리 R67 — 성공 · 대기 = 결과 CT. 옛 손 목록(6 · 1000 · 1800 · 대기 100)은 대체 성공 7830 · 7831 과 대기 104 를 실패로 셌다
           const testRows = await mysqlQuery(
             `SELECT
               COUNT(*) as total,
-              SUM(CASE WHEN status_code IN (6, 1000, 1800) THEN 1 ELSE 0 END) as success,
-              SUM(CASE WHEN status_code NOT IN (6, 1000, 1800, 100) THEN 1 ELSE 0 END) as fail,
-              SUM(CASE WHEN status_code = 100 THEN 1 ELSE 0 END) as pending,
+              SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success,
+              SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL}, ${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail,
+              SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending,
               SUM(CASE WHEN msg_type = 'S' THEN 1 ELSE 0 END) as sms,
               SUM(CASE WHEN msg_type = 'L' THEN 1 ELSE 0 END) as lms
             FROM ${tbl}
@@ -186,8 +202,8 @@ router.get('/send', async (req: Request, res: Response) => {
             -- ★ 2026-09-29 한줄로 V2 차수 5 — 성공 = 청구 판정 CT · 발송 실패는 실패로(옛: 결과가 있으면 전부 성공 · 비용에도 들어갔다)
             SUM(CASE WHEN ${spamBilledResultSql('r')} THEN 1 ELSE 0 END) as completed,
             SUM(CASE WHEN ${spamFailedResultSql('r')} THEN 1 ELSE 0 END) as failed,
-            SUM(CASE WHEN ${spamFailedResultSql('r')} AND r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms_failed,
-            SUM(CASE WHEN ${spamFailedResultSql('r')} AND r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms_failed,
+            SUM(CASE WHEN ${spamBilledResultSql('r')} AND r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms_billed,
+            SUM(CASE WHEN ${spamBilledResultSql('r')} AND r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms_billed,
             SUM(CASE WHEN r.result IS NULL AND t.status IN ('active','pending') THEN 1 ELSE 0 END) as pending
           FROM spam_filter_test_results r
           JOIN spam_filter_tests t ON r.test_id = t.id
@@ -200,14 +216,13 @@ router.get('/send', async (req: Request, res: Response) => {
         testSummary.pending += Number(sf.pending) || 0;
         testSummary.sms += Number(sf.sms) || 0;
         testSummary.lms += Number(sf.lms) || 0;
-        // 스팸 검사 발송 실패 행 = 청구하지 않는다(m042) → 비용에서 뺀다(건수 표시는 그대로)
-        const sfSmsFailed = Number(sf.sms_failed) || 0;
-        const sfLmsFailed = Number(sf.lms_failed) || 0;
-
-        // 비용 계산 (회사 단가 기준)
-        const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [companyScope]);
-        const { sms: cSms, lms: cLms } = getCompanyCosts(costRes.rows[0] || {});
-        testSummary.cost = Math.round(((testSummary.sms - testSummary.pending - sfSmsFailed) * cSms + (testSummary.lms - sfLmsFailed) * cLms) * 10) / 10;
+        // ★ 2026-11-06 C108(C107F ④ · Codex 구현 1R) — 비용 = 청구 수량 × 그 청구 유형 단가(test-summary-cost CT).
+        //   옛 식 = (시험 SMS 전 행 − 전 채널 · 스팸 대기 합) × SMS + 시험 LMS 전 행 × LMS → 대기 104 를 바로 세자 MMS 시험만 있는 기간이 음수 ·
+        //   시험 MMS · 브랜드 = 0 · 대체 문자 = LMS. 스팸 검사 = 청구 판정 행(m042 · 발송 실패 · 대기 제외)을 일반 단가로(D16).
+        const costRes = await pool.query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_brand, cost_per_test_sms, cost_per_test_lms, unit_price_basis FROM companies WHERE id = $1', [companyScope]);
+        testSummary.cost = testSummaryCost(testBilledRows,
+          { sms: Number(sf.sms_billed) || 0, lms: Number(sf.lms_billed) || 0 },
+          testSummaryUnitPrices(costRes.rows[0] || {}));
       } catch (mysqlErr) {
         console.error('테스트 통계 조회 실패:', mysqlErr);
       }

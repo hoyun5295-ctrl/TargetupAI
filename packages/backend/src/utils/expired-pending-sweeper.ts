@@ -16,7 +16,7 @@
  * 패턴: cancelled-queue-sweeper.ts 미러(1분 주기 + 효과 검증). 캠페인별 로그로 발송 누락 추적.
  */
 import { getQueueTableSets, smsCountAll, smsExecAll, smsGroupByAll } from './sms-queue';
-import { ABNORMAL_STATUS_MIN } from './sms-result-map';
+import { ABNORMAL_STATUS_MIN, PENDING_CODES_SQL } from './sms-result-map';
 import { persistPassFailures, flushPassAlerts } from './system-alert';
 
 const INTERVAL_MS = 60 * 1000; // 1분 — cancelled-queue-sweeper와 동일 주기
@@ -27,7 +27,8 @@ let _running = false;
 const EXPIRE_HOURS = 48;
 
 /** 만료 발송요청 행 조건 — rsv1='3'(서버전송요청완료) 한정 + 결과 미수신 + 발송 2일 초과 */
-const EXPIRE_WHERE = `rsv1 = '3' AND status_code IN (100, 104) AND mobsend_time IS NULL AND sendreq_time < NOW() - INTERVAL ${EXPIRE_HOURS} HOUR`;
+// ★ 2026-11-06 C107F 뿌리 R67 — 대기 = 결과 CT(옛 손 목록 100 · 104 는 목록이 바뀌면 이 자리만 어긋난다)
+const EXPIRE_WHERE = `rsv1 = '3' AND status_code IN (${PENDING_CODES_SQL}) AND mobsend_time IS NULL AND sendreq_time < NOW() - INTERVAL ${EXPIRE_HOURS} HOUR`;
 
 /**
  * ★ 2026-10-08 이상 상태값 행 — 결과 코드로 있을 수 없는 값(ABNORMAL_STATUS_MIN 이상) + 한 번도 안 나감 + 2일 초과.

@@ -53,6 +53,7 @@
 | C105 | 11893902 |
 | C106 | 11893902 |
 | C107 | 11893902 |
+| C108 | 미커밋 |
 
 ## §1 대기
 
@@ -1230,6 +1231,62 @@ UNION ALL
 - 기대: 시트 49 = 발송 상세 결과 「카카오: 메시지를 발송할 수 없음」(「기타 오류」 아님) · 한줄로 SMSQ 그 행 status_code = 23018 · 게이트웨이 report_queue 그 행 result_code 3018 · customer_code 23018
 - 확인: 시트 결과 · 두 조회 출력
 - 결과: 1106 00:5x 사전 조회(.65 report_queue · 00:45 뒤 한줄로 네 대) = 성공 4행(hanjul02 · hanjul03 result_code 0 · customer_code 비어 있음 = 성공은 번역 안 함 · delivered t) · 실패 0행 → 번역 실측 전 · 시트 49(발송 시간대 실패 1건) 대기
+
+### C108-H1 · 한줄로 배포(① 스팸 목록 · ② 청구 식 · 선불 친구 조각 · 화면 · ④ 손 목록 · 받는 쪽 먼저)
+- 카드: C108
+- 단계: 한줄로 배포(DDL 0 · 설계서 docs/2026-11-06-c107-followups-design.md §4 의 1)
+- 선행: C107(11893902) · 커밋(Harold)
+- 기대: 친구 칸(k_friend_yn)이 아직 없으니 청구 · 집계 = 종전 식(getFriendColumnTables = 빈 집합) · 이때부터 비친구 대상 브랜드 차감 문구에 「· 친구 W원」 조각(비친구 단가가 따로 있는 회사만) · 스팸 몰림 목록 = 결과 표 7 + 대역 5 · 관리 통계 시험 요약 = CT · 배포 뒤 에러 로그 0
+- 확인: pm2 기동 · 에러 로그 · (선불 비친구 브랜드 차감이 생기면) 차감 설명 문구
+- 결과:
+
+### C108-M1 · .62 MySQL SMSQ 친구 칸(비토 라인 12 ~ 16만 · root)
+- 카드: C108
+- 단계: 한줄로 배포 뒤 · 에이전트 설정 전
+- 선행: C108-H1
+- 기대: 실행 전 실측 ① 네 대 설정 이력 옮기기 꺼짐(archive) ② `SMSQ_SEND_1[2-6]_%` 이력 표 0 ③ MySQL 판(INSTANT 지원) → `ALTER TABLE SMSQ_SEND_N ADD COLUMN k_friend_yn varchar(1) NULL DEFAULT NULL, ALGORITHM=INSTANT`(N = 12 ~ 16 · lock_wait_timeout 2) · information_schema 확인 5행 · 되돌리기 = **칸은 남긴다**(에이전트 설정 `field_map.friend_yn` 만 되돌리면 칸에 새 값이 안 쓰인다) · 칸을 꼭 지워야 하면 에이전트 설정 되돌림 → 한줄로 재시작(친구 칸 표 목록 5분 캐시를 비움 · 남은 캐시가 없는 칸을 부르면 청구 · 정산 쿼리가 죽는다) → `ALTER TABLE … DROP COLUMN k_friend_yn`
+- 확인: 실측 셋 · DDL 출력 · information_schema 5행
+- 결과:
+
+### C108-A1 · 에이전트 1.0.33 출고 · .62 네 대 교체 + field_map.friend_yn
+- 카드: C108
+- 단계: SMSQ 칸 뒤 · 게이트웨이 켜기 전
+- 선행: C108-M1 · 게이트웨이 커밋 push(에이전트 빌드 = .65 deploy/build-agent.sh · 엔진 감사 설계서 §14-8 절차)
+- 기대: 네 대 heartbeat 1.0.33 · 설정 `field_map.friend_yn: "k_friend_yn"` · 재시작(적재 0건 한 줄 조건) · 옛 게이트웨이 = 친구 값 빈 값이라 칸을 쓰지 않음(UPDATE 에 k_friend_yn 없음)
+- 확인: 네 대 시작 로그(판 · GW 연결 · 폴링) · 설정 grep
+- 결과:
+
+### C108-G0 · 켜기 전 문(읽기 · .62 한줄로 DB)
+- 카드: C108
+- 단계: 게이트웨이 켜기 직전
+- 선행: C108-A1
+- 기대: C108-H1 배포 전에 차감한 예약 브랜드 캠페인 중 대상값이 친구가 아니고 아직 안 나간 것 = 0(있으면 그 발송이 끝난 뒤 켠다 · 선불 차감 문구에 친구 조각이 없어 한줄로는 차액이 없는데 게이트웨이만 친구로 정산하는 경계)
+- 확인: 조회 출력
+- 결과:
+
+### C108-G1 · 게이트웨이 마이그레이션 101(DDL · 새 판보다 먼저)
+- 카드: C108
+- 단계: 게이트웨이 배포 전
+- 선행: C108-G0
+- 기대: message_billing.friend_unit_price · friend_settled_at · settle_brand_friend_price(bigint,text) · prepare_dispatch_billing 스냅숏(prosrc 에 v_friend_unit_price) · lock_timeout 250ms(멈추면 그대로 다시) · 옛 판이 도는 동안 = 스냅숏만 쌓이고 정산 표식 없음 = 친구 값 빈 값(종전)
+- 확인: 칸 둘 · 함수 · prosrc 확인 출력
+- 결과:
+
+### C108-G2 · 게이트웨이 새 판 배포(켜기 · 런북 §2 check · build · §3-3 · §4 새 PID ERROR 세기)
+- 카드: C108
+- 단계: 게이트웨이 배포
+- 선행: C108-G1 · 게이트웨이 커밋(Harold)
+- 기대: GW_CHECK_OK · GW_PG_CHECK_OK · GW_BUILD_OK · GW_DEPLOY_OK · 기동 로그에 「브랜드 친구 단가 정산(101)이 없다」 없음 · 새 PID ERROR 종류별 0 · 이 판이 처리한 브랜드 성공부터 친구 정산
+- 확인: 마커 · journalctl 세기
+- 결과:
+
+### C108-S1 · 실측(직원 시트 50 ~ 54 · 운영 대조)
+- 카드: C108
+- 단계: 켠 뒤
+- 선행: C108-G2
+- 기대: 시트 50 ~ 53(마수동 전체 브랜드 1건 · 직원 본인 = 채널 친구) = 발송결과 예상 비용 = 친구 단가 · 차감이력 「결과별 단가 차액 환불」 = 비친구 − 친구 · 정산 미리보기 「브랜드메시지(친구)」 +1 · 게이트웨이 원장 `friend_adjust:` 1줄 · SMSQ 그 행 k_friend_yn = 'Y' · 시트 54 시험 발송 요약 대체 성공 = 성공 · ① 운영 대조 = 비토 라인 대역 스팸 코드 행이 생긴 캠페인의 스팸 수 0 아님
+- 확인: 시트 결과 · 조회 출력
+- 결과:
 
 ## §2 덤프 뒤 적용분
 

@@ -434,8 +434,8 @@ describe('K5 · R62 신설 — 비토 실패 코드 대역(한줄로 라벨 = �
     // 대역 밖 = 종전 그대로
     expect(map.getStatusLabel(60000)).toBe('코드 60000');
     expect(map.getStatusType(60000)).toBe('unknown');
-    // 스팸 몰림 코드 목록은 결과 표에서만 뽑는다(대역을 섞지 않는다 · 추가 과제)
-    expect(map.SPAM_BLOCK_STATUS_CODES.every((c: number) => c < 20000)).toBe(true);
+    // ★ 1106 C107F R64 — 스팸 몰림 코드 목록 = 결과 표 ∪ 대역 표(규칙 = c107f-contract-1106 F1). 결과 표 자체에는 대역을 섞지 않는다(위 최대 키 단언)
+    expect(map.SPAM_BLOCK_STATUS_CODES).toEqual(expect.arrayContaining([40016, 49004, 49010, 39004, 39010]));
   });
 
   it('규칙 글자 = 게이트웨이 SQL 과 같다(형제 저장소가 있을 때) · 생성 스크립트도 같은 글자', () => {

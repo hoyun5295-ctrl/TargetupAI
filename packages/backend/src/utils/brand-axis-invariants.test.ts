@@ -399,8 +399,10 @@ describe('브랜드 친구·비친구 단가 배선 (2026-09-13 · 소스 스캔
       const rest = agg.slice(start);
       const body = rest.slice(0, rest.search(/\r?\n\}\r?\n/));   // 함수 끝(CRLF 저장소)
       // MySQL GROUP BY는 같은 이름의 원 컬럼을 별칭보다 먼저 찾는다 — 식 자체로 묶어야 F·FN이 합쳐지지 않는다.
-      expect(body, `${fn} SELECT`).toContain('${BILLING_MSG_TYPE_SQL} AS msg_type');
-      expect(body, `${fn} GROUP BY`).toMatch(/GROUP BY [^`]*\$\{BILLING_MSG_TYPE_SQL\}/);
+      // ★ 2026-11-06 C107F ② 식은 표마다(친구 칸 유무) — billingMsgTypeSql(friendTables.has(t)) 하나를 SELECT · GROUP BY 가 함께 쓴다.
+      expect(body, `${fn} 표마다 식`).toContain('const billingType = billingMsgTypeSql(friendTables.has(t));');
+      expect(body, `${fn} SELECT`).toContain('${billingType} AS msg_type');
+      expect(body, `${fn} GROUP BY`).toMatch(/GROUP BY [^`]*\$\{billingType\}/);
       expect(body, `${fn}가 원 msg_type으로 묶고 있다`).not.toMatch(/GROUP BY [^`]*\bmsg_type\b/);
     }
   });

@@ -71,7 +71,7 @@ describe('직원 접수 1008', () => {
     const src = read('backend/src/utils/expired-pending-sweeper.ts');
     expect(src).toContain('markFailed(bulk, EXPIRE_WHERE');
     expect(src).toContain('markFailed(all, ABNORMAL_WHERE');
-    expect(src).toContain("rsv1 = '3' AND status_code IN (100, 104)");
+    expect(src).toContain("rsv1 = '3' AND status_code IN (${PENDING_CODES_SQL})");   // ★1106 C107F R67 대기 = 결과 CT(값 = 100 · 104)
     const map = await import('../sms-result-map');
     expect(map.ABNORMAL_STATUS_MIN).toBeGreaterThan(Math.max(...map.PENDING_CODES, ...map.SUCCESS_CODES));
     const mapSrc = read('backend/src/utils/sms-result-map.ts').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '').replace(/ABNORMAL_STATUS_MIN = \d+/, '');

@@ -167,17 +167,21 @@ export interface AlimtalkResultAgg {
   /** 대체 S행 성공 */ subSms: number;
   /** 대체 L행 성공 */ subLms: number;
   /** 대체 행 전체(상태 무관) — 모양 판정용 */ sub: number;
+  /** ★ 2026-11-06 C107F ② 브랜드 실제 친구 성공(kakao 의 부분집합 · 친구 칸 있는 표만 · 없으면 0) */ friendKakao?: number;
 }
-export interface AlimtalkSuccessMix { kakao: number; sms: number; lms: number; other: number }
+/** friend = 카카오 성공 중 브랜드 실제 친구(친구 단가 갈래) · kakao 는 그 수를 뺀 나머지 */
+export interface AlimtalkSuccessMix { kakao: number; sms: number; lms: number; other: number; friend?: number }
 
 export function resolveAlimtalkMix(agg: AlimtalkResultAgg | undefined, totalSuccess: number): { mix: AlimtalkSuccessMix; ambiguous: boolean } {
   const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
-  const kakao = n(agg?.kakao);
+  const kakaoAll = n(agg?.kakao);
+  const friend = Math.min(kakaoAll, n(agg?.friendKakao));
+  const kakao = kakaoAll - friend;
   const inRow = n(agg?.inRowSms) + n(agg?.inRowLms);
   const sms = n(agg?.inRowSms) + n(agg?.subSms);
   const lms = n(agg?.inRowLms) + n(agg?.subLms);
-  const other = Math.max(0, n(totalSuccess) - kakao - sms - lms);
-  return { mix: { kakao, sms, lms, other }, ambiguous: inRow > 0 && n(agg?.sub) > 0 };
+  const other = Math.max(0, n(totalSuccess) - kakaoAll - sms - lms);
+  return { mix: { kakao, sms, lms, other, friend }, ambiguous: inRow > 0 && n(agg?.sub) > 0 };
 }
 
 /**
@@ -189,17 +193,20 @@ export function resolveAlimtalkMix(agg: AlimtalkResultAgg | undefined, totalSucc
  */
 export function calcAlimtalkUnitDiff(p: {
   deductUnit: number;
-  units: { KAKAO: number; SMS: number; LMS: number };
+  // ★ 2026-11-06 C107F ② FRIEND = 차감 순간의 브랜드 친구 단가(대상값이 친구가 아닌 브랜드 차감만 · 없으면 친구 성공도 KAKAO 단가)
+  units: { KAKAO: number; SMS: number; LMS: number; FRIEND?: number };
   mix: AlimtalkSuccessMix;
   freeCount?: number;
 }): number {
   const U = Number(p.deductUnit) || 0;
   const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+  const friendUnit = p.units.FRIEND != null && Number.isFinite(p.units.FRIEND) ? p.units.FRIEND : p.units.KAKAO;
   const classes = [
     { count: n(p.mix.other), diff: 0 },
     { count: n(p.mix.lms), diff: Math.max(0, U - p.units.LMS) },
     { count: n(p.mix.sms), diff: Math.max(0, U - p.units.SMS) },
     { count: n(p.mix.kakao), diff: Math.max(0, U - p.units.KAKAO) },
+    { count: n(p.mix.friend), diff: Math.max(0, U - friendUnit) },
   ].sort((a, b) => a.diff - b.diff);
   let free = n(p.freeCount);
   let total = 0;
@@ -230,8 +237,10 @@ export interface ReadHigh {
   brandSuccess: number;
   nonBrandLoaded: number;
   nonBrandSuccess: number;
+  /** ★ 2026-11-06 C107F ② 문자 + 브랜드(both)의 BRAND 축(scope brand) 결과별 차액(원 · 브랜드 실제 친구 차액) · scope all 의 unitDiff 와 섞지 않는다 */
+  brandUnitDiff: number;
 }
-export const READ_HIGH_KEYS = ['success', 'sub', 'unitDiff', 'brandLoaded', 'brandSuccess', 'nonBrandLoaded', 'nonBrandSuccess'] as const;
+export const READ_HIGH_KEYS = ['success', 'sub', 'unitDiff', 'brandLoaded', 'brandSuccess', 'nonBrandLoaded', 'nonBrandSuccess', 'brandUnitDiff'] as const;
 
 /** send_config.readHigh(jsonb · 없음 · 옛 값) → 기준. 못 읽는 값은 0(= 기준 없음 = 종전 동작). */
 export function parseReadHigh(raw: unknown): ReadHigh {
@@ -244,6 +253,7 @@ export function parseReadHigh(raw: unknown): ReadHigh {
     success: num(o.success), sub: num(o.sub), unitDiff: num(o.unitDiff),
     brandLoaded: num(o.brandLoaded), brandSuccess: num(o.brandSuccess),
     nonBrandLoaded: num(o.nonBrandLoaded), nonBrandSuccess: num(o.nonBrandSuccess),
+    brandUnitDiff: num(o.brandUnitDiff),
   };
 }
 
@@ -252,7 +262,7 @@ export function mergeReadHigh(prev: ReadHigh, seen: Partial<ReadHigh>): ReadHigh
   const next = { ...prev };
   for (const k of READ_HIGH_KEYS) {
     const v = Number(seen[k]);
-    if (Number.isFinite(v) && v > next[k]) next[k] = k === 'unitDiff' ? Math.round(v * 100) / 100 : Math.floor(v);
+    if (Number.isFinite(v) && v > next[k]) next[k] = (k === 'unitDiff' || k === 'brandUnitDiff') ? Math.round(v * 100) / 100 : Math.floor(v);
   }
   return next;
 }

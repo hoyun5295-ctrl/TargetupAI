@@ -152,10 +152,14 @@ export const STATUS_CODE_MAP: Record<number, StatusCodeInfo> = {
   68:   { label: '친구톡파일 총한도 초과', type: 'fail' },
 };
 
-/** ★ 2026-11-02 엔진 재설계 E3-5 — 실발송 결과 중 스팸 차단 코드(이름에 「스팸」이 든 코드 · 위 표에서 기계로 뽑는다 · 손 목록 0) */
-export const SPAM_BLOCK_STATUS_CODES: readonly number[] = Object.entries(STATUS_CODE_MAP)
-  .filter(([, v]) => v.label.includes('스팸'))
-  .map(([k]) => Number(k));
+/** ★ 2026-11-02 엔진 재설계 E3-5 — 실발송 결과 중 스팸 차단 코드(이름에 「스팸」이 든 코드 · 위 표에서 기계로 뽑는다 · 손 목록 0)
+ *  ★ 2026-11-06 C107F 뿌리 R64 — 원천 둘: 위 결과 표 라벨 + 비토 대역 표(HANJUL_BAND_CODES) 제목. 결과 표에서만 뽑으면
+ *    비토 라인 스팸 차단(40016 · 49004 · 49010 · 39004 · 39010)을 세지 못해 그 라인 여정의 스팸 몰림 안내가 나가지 않았다.
+ *    카카오 채널 제재(21025 · 21027)는 제목에 「스팸」이 없어 들어가지 않는다(통신사가 문자를 막은 일이 아니다). */
+export const SPAM_BLOCK_STATUS_CODES: readonly number[] = [
+  ...Object.entries(STATUS_CODE_MAP).filter(([, v]) => v.label.includes('스팸')).map(([k]) => Number(k)),
+  ...Object.entries(HANJUL_BAND_CODES).filter(([, v]) => v.title.includes('스팸')).map(([k]) => Number(k)),
+];
 /** 스팸 차단 몰림 경계 — 그 칸 · 그날 20건 이상이고 결과(성공 + 실패)의 30% 이상 */
 export const SPAM_SURGE_MIN = 20;
 export const SPAM_SURGE_RATIO = 0.3;
@@ -323,6 +327,16 @@ export const SUBSTITUTE_ROW_SQL =
 
 /** SQL용(선불 결과별 정산 · smsKakaoResultAgg) — 카카오 시도 성공(알림톡 · 브랜드 공통 1800) */
 export const KAKAO_DELIVERED_SQL = `msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = 1800`;
+
+/**
+ * ★ 2026-11-06 C107F ② 뿌리 R65 — 브랜드메시지 받는 사람의 **실제 채널 친구 여부**(에이전트가 쓰는 SMSQ 칸 · 비토 라인 12 ~ 16 만).
+ *   게이트웨이가 친구 단가 정산을 마친 브랜드메시지만 Y / N 을 준다(게이트웨이 migrations/101 · engine.AgentFriendYNSQL) · 그 밖 NULL.
+ *   단가 규칙 하나 = 대상값이 친구(I · F) 이거나 이 칸이 Y → 친구 단가 · 그 밖 비친구(올려 받지 않는다).
+ *   ⛔ 칸이 없는 표(QTmsg 라인 · 이력 표)에서 이 이름을 부르면 쿼리 전체가 죽는다 — 표마다 sms-queue getFriendColumnTables 로 고른다.
+ */
+export const SMSQ_FRIEND_COLUMN = 'k_friend_yn';
+/** SQL용 — 그 행이 브랜드로 실제 친구에게 전달됐다(카카오 시도 성공 · 브랜드 F · 친구 칸 Y) · 친구 칸이 있는 표에서만 쓴다 */
+export const BRAND_FRIEND_DELIVERED_SQL = `${KAKAO_DELIVERED_SQL} AND msg_type = 'F' AND ${SMSQ_FRIEND_COLUMN} = 'Y'`;
 /** SQL용 — 카카오 행 자체의 대체 성공(SMS · LMS) */
 export const KAKAO_INROW_FALLBACK_SMS_SQL = `msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = ${KAKAO_FALLBACK_SMS_CODE}`;
 export const KAKAO_INROW_FALLBACK_LMS_SQL = `msg_type IN ${KAKAO_FALLBACK_PARENT_SQL} AND status_code = ${KAKAO_FALLBACK_LMS_CODE}`;
@@ -403,13 +417,15 @@ export interface ChannelCount { total: number; success: number; fail: number; pe
  */
 export interface KakaoFallbackCount extends ChannelCount {
   fallback: { LMS: ChannelCount; SMS: ChannelCount };
+  /** ★ 2026-11-06 C107F ② 카카오 성공 중 브랜드로 실제 친구에게 간 수(success 의 부분집합 · 친구 단가 · 친구 칸 있는 표만) */
+  friendSuccess: number;
 }
 
 export function tallyKakaoFallback(
-  rows: Array<{ msg_type: string; k_oriseq?: number | string | null; status_code: number | string; cnt: number | string }>,
+  rows: Array<{ msg_type: string; k_oriseq?: number | string | null; status_code: number | string; cnt: number | string; friend?: boolean }>,
 ): KakaoFallbackCount {
   const init = (): ChannelCount => ({ total: 0, success: 0, fail: 0, pending: 0 });
-  const out: KakaoFallbackCount = { ...init(), fallback: { LMS: init(), SMS: init() } };
+  const out: KakaoFallbackCount = { ...init(), fallback: { LMS: init(), SMS: init() }, friendSuccess: 0 };
   const add = (b: ChannelCount, code: number, cnt: number) => {
     b.total += cnt;
     if (isSuccess(code)) b.success += cnt;
@@ -427,6 +443,7 @@ export function tallyKakaoFallback(
         f.total += cnt; f.success += cnt;                                            // 같은 행에서 문자로 대체 성공
       } else {
         add(out, code, cnt);
+        if (r.friend === true && r.msg_type === 'F' && isSuccess(code)) out.friendSuccess += cnt;   // ★ C107F ② 브랜드 실제 친구 성공
       }
       continue;
     }

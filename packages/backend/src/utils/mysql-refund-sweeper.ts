@@ -102,17 +102,18 @@ const readHighCell = (k: string, i: number) => `'${k}', GREATEST(COALESCE(NULLIF
 /** 기준 세대 조각 — 취소 정산이 readHigh 를 지울 때 1 올린다(cancel-settle) · 쓰기는 읽을 때의 세대와 같을 때만 */
 export const READ_HIGH_GEN_SQL = `COALESCE(NULLIF(send_config->>'readHighGen', ''), '0')::int`;
 /**
- * 정산 기준 기록 문장($1 = 캠페인 id · $2~$8 = READ_HIGH_KEYS 순서 · $9 = 집계 전에 읽은 세대) — 실 PG 시험(result-read-floor-1101.pg)이 같은 문장을 돌린다.
+ * 정산 기준 기록 문장($1 = 캠페인 id · $2~$9 = READ_HIGH_KEYS 순서 · $10 = 집계 전에 읽은 세대 · ★1106 C107F $9 = brandUnitDiff) — 실 PG 시험(result-read-floor-1101.pg)이 같은 문장을 돌린다.
  *   ★ Codex 구현 1R #1 — 집계와 쓰기 사이에 취소 정산이 대기 행을 지우고 기준을 지웠으면(세대가 바뀜) 취소 전 읽기를 다시 쓰지 않는다.
  */
 export const READ_HIGH_UPDATE_SQL = `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{readHigh}', jsonb_build_object(
        ${readHighCell('success', 2)}, ${readHighCell('sub', 3)}, ${readHighCell('unitDiff', 4)},
-       ${readHighCell('brandLoaded', 5)}, ${readHighCell('brandSuccess', 6)}, ${readHighCell('nonBrandLoaded', 7)}, ${readHighCell('nonBrandSuccess', 8)}))
-      WHERE id = $1 AND ${READ_HIGH_GEN_SQL} = $9::int`;
+       ${readHighCell('brandLoaded', 5)}, ${readHighCell('brandSuccess', 6)}, ${readHighCell('nonBrandLoaded', 7)}, ${readHighCell('nonBrandSuccess', 8)},
+       ${readHighCell('brandUnitDiff', 9)}))
+      WHERE id = $1 AND ${READ_HIGH_GEN_SQL} = $10::int`;
 /** @returns 반영했는가 — 0행 = 세대가 바뀌었다(취소 정산이 끼었다) → 부르는 쪽은 이 캠페인의 이번 주기 돈 계산을 멈춘다(Codex 구현 2R) */
 async function persistReadHigh(campaignId: string, next: ReadHigh, gen: number): Promise<boolean> {
   const r = await query(READ_HIGH_UPDATE_SQL,
-    [campaignId, next.success, next.sub, next.unitDiff, next.brandLoaded, next.brandSuccess, next.nonBrandLoaded, next.nonBrandSuccess, gen]);
+    [campaignId, next.success, next.sub, next.unitDiff, next.brandLoaded, next.brandSuccess, next.nonBrandLoaded, next.nonBrandSuccess, next.brandUnitDiff, gen]);
   return (r.rowCount ?? 0) > 0;
 }
 
@@ -511,8 +512,11 @@ async function runOnce(): Promise<void> {
               //   차액을 먼저 돌려준다 — 실패 환불이 한도를 먼저 채우면 차액 항아리가 비어 기록이 흐려진다(금액은 4-3이 맞춘다).
               let unitDiffAmt = 0;
               // ★ 2026-11-01 R37 — 회수 한도 · 불변식에 넣는 차액 = max(차액 기준, 이번 차액) · 지급은 모호가 아닌 회차만(Codex 설계 4R #1)
-              let unitDiffLegit = axis.scope === 'all' ? readHighPrev.unitDiff : 0;
-              const alimUnits = axis.scope === 'all' ? resolveAlimtalkLedgerUnits(dedRes.rows as any[]) : null;
+              // ★ 2026-11-06 C107F ② 뿌리 R65 — 문자 + 브랜드(both)의 BRAND 축(scope brand)도 결과별 차액을 잰다(브랜드 실제 친구 차액 · Codex 설계 1R #1).
+              //   기준 칸은 축마다 따로(scope all = unitDiff · scope brand = brandUnitDiff) · 차감 행에 결과별 단가가 없는 축은 조회 0(종전).
+              const diffKey = axis.scope === 'all' ? 'unitDiff' as const : axis.scope === 'brand' ? 'brandUnitDiff' as const : null;
+              let unitDiffLegit = diffKey ? readHighPrev[diffKey] : 0;
+              const alimUnits = diffKey ? resolveAlimtalkLedgerUnits(dedRes.rows as any[]) : null;
               if (alimUnits) {
                 const tables = tablesByKey.get(`${camp.company_id}::${camp.created_by || ''}`) || [];
                 const agg = (await smsKakaoResultAgg(tables, [camp.id])).get(camp.id);
@@ -529,7 +533,7 @@ async function runOnce(): Promise<void> {
                 } else {
                   unitDiffAmt = calcAlimtalkUnitDiff({ deductUnit: unit, units: alimUnits, mix, freeCount });
                   // 기준은 모호가 아닌 회차의 차액으로만 올린다 · 지급 목표 = 기준(덜 읽힌 회차가 목표를 줄이지 않는다)
-                  readHighNext = mergeReadHigh(readHighNext, { unitDiff: unitDiffAmt });
+                  readHighNext = mergeReadHigh(readHighNext, { [diffKey as 'unitDiff' | 'brandUnitDiff']: unitDiffAmt });
                   // ★ Codex 구현 1R #2 — 차액 기준도 지급 전에 남긴다
                   if (readHighGrew(readHighSaved, readHighNext)) {
                     // 저장이 거절되면(세대 바뀜) 지급 · 회수 · 불변식을 이번 주기에 하지 않는다 — 기준 없이 준 차액을 다음 주기가 회수하지 않게(Codex 구현 2R)
@@ -539,7 +543,7 @@ async function runOnce(): Promise<void> {
                     }
                     readHighSaved = readHighNext;
                   }
-                  unitDiffAmt = Math.max(unitDiffAmt, readHighPrev.unitDiff);
+                  unitDiffAmt = Math.max(unitDiffAmt, readHighPrev[diffKey as 'unitDiff' | 'brandUnitDiff']);
                 }
               }
               unitDiffLegit = Math.max(unitDiffLegit, unitDiffAmt);

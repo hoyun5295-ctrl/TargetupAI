@@ -10,7 +10,7 @@ import { buildDeductDescription, type AlimtalkSettleUnits, type KakaoSettleLabel
 // ★ 2026-07-26 단가의 부가세 기준(`companies.unit_price_basis`)을 해석하는 유일한 경로.
 //   선불 잔액은 고객이 입금한 현금이라 **부가세 포함가**로 깎아야 한다.
 //   전환 전 회사는 저장값이 곧 포함가라 이 배선으로 차감액이 바뀌지 않는다.
-import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed, type BrandPricingInput } from './unit-price';
+import { resolveChargeUnitPrice, resolveChargeUnitPriceDetailed, resolveBrandAudience, type BrandPricingInput } from './unit-price';
 import { sendSystemAlert, queuePassFailures, flushPassAlerts } from './system-alert';
 import { parseDeductDescription, parseFreeCount, ledgerMessageTypeSql } from './deduct-reference';
 // ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
@@ -242,6 +242,18 @@ export async function prepaidDeduct(
         LMS: fbType === 'LMS' ? fb.price : unitPrice,
       };
       settleLabel = '브랜드메시지';
+    }
+    // ★ 2026-11-06 C107F ② 뿌리 R65 — 대상값이 친구가 아닌 브랜드 차감 = 같은 잠금 행에서 읽은 **친구 단가**를 결과별 정산에 싣는다.
+    //   카카오가 실제 친구로 보고한 성공(SMSQ k_friend_yn = 'Y')은 스위퍼가 이 단가로 차액을 돌려준다(올려 받지 않는다).
+    //   친구 단가가 더 쌀 때만 싣는다(비친구 칸이 비어 친구 단가를 따르는 회사 = 문구 종전). 대체 끔 = 문자 칸은 차감 단가(차액 0).
+    if (messageType === 'BRAND' && resolveBrandAudience(brand?.targeting) === 'nonfriend') {
+      const friend = resolveChargeUnitPriceDetailed(c, 'BRAND', { ...(brand || {}), targeting: 'I' });
+      if (!friend.unset && !friend.unknownType && friend.price < resolved.price) {
+        settleUnits = settleUnits
+          ? { ...settleUnits, FRIEND: friend.price }
+          : { KAKAO: unitPrice, SMS: unitPrice, LMS: unitPrice, FRIEND: friend.price };
+        settleLabel = '브랜드메시지';
+      }
     }
 
     // ★ 2026-08-05 요금제 무료 메시징 — 과금 **전에** 덮는다(설계 §5-1).

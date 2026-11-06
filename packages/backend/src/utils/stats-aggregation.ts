@@ -11,9 +11,9 @@ import { query, mysqlQuery, mysqlBillingQuery } from '../config/database';
 import { CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from './unsubscribe-helper';
 // ★ D144: PG sent_count 캐시 의존 제거 — MySQL 직접 카운트로 전환
 // ★ 2026-06-11: 카운트는 smsCampaignCountsSafe(이력=결과/라이브=대기 분리) — 이동 중 이중 카운트 차단
-import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe } from './sms-queue';
+import { getAllSmsTablesWithLogs, getCompanySmsTablesWithLogs, smsCampaignCountsSafe, getFriendColumnTables } from './sms-queue';
 import { classifyResultTables, computeDisplayCounts, DisplayCounts } from './sms-table-split';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, SMS_SUB_ROW_SQL, tallyKakaoFallback, type KakaoFallbackCount } from './sms-result-map';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, SMS_SUB_ROW_SQL, SMSQ_FRIEND_COLUMN, tallyKakaoFallback, type KakaoFallbackCount } from './sms-result-map';
 import { isKakaoSplitChannel } from './billing-types';
 import { CampaignTableMeta, recordedLiveTables, logTablesForLive } from './stats-table-scope';
 import { expandMonthlyRange } from './stats-period';
@@ -422,12 +422,14 @@ export async function loadKakaoFallbackForList(rows: Array<CampaignTableMeta & {
 /** 캠페인별 (msg_type · 대체 여부 · 결과 코드) 행 수 — 알림톡 시도·대체 집계의 조회(대체 판정 = sms-result-map) */
 async function fetchSmsChannelRawByCampaign(
   campaigns: CampaignTableMeta[]
-): Promise<Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>> {
-  const rawByCampaign = new Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number }>>();
+): Promise<Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number; friend?: boolean }>>> {
+  const rawByCampaign = new Map<string, Array<{ msg_type: string; k_oriseq: number | null; status_code: number; cnt: number; friend?: boolean }>>();
   if (campaigns.length === 0) return rawByCampaign;
 
   // 테이블셋 그룹핑 — ★ 2026-07-17 resolveCampaignTableGroups 공용 (sentTables 기록 축소 + 현행 fallback)
   const byTableSet = await resolveCampaignTableGroups(campaigns);
+  // ★ 2026-11-06 C107F ② 브랜드 실제 친구 여부(is_friend) = 친구 칸이 있는 표만 · 없는 표 = 0(별칭 · 순서 같음)
+  const friendTables = await getFriendColumnTables();
 
   // 라인그룹 테이블셋별 raw 집계: app_etc1 + msg_type + (대체 여부) + status_code
   // ★ 2026-06-11: 라이브 큐는 대기 코드만 — 큐→이력 이동 중 같은 행이 양쪽에서 잡히는 이중 카운트 차단
@@ -444,13 +446,14 @@ async function fetchSmsChannelRawByCampaign(
     const unions = group.tables
       .map(t => `SELECT app_etc1 AS _grp, msg_type,
                    CASE WHEN ${SMS_SUB_ROW_SQL} THEN 1 ELSE 0 END AS is_sub,
+                   ${friendTables.has(t) ? `CASE WHEN ${SMSQ_FRIEND_COLUMN} = 'Y' THEN 1 ELSE 0 END` : '0'} AS is_friend,
                    status_code, COUNT(*) AS cnt
                  FROM ${t} WHERE app_etc1 IN (${placeholders})${pendingOnly.has(t) ? ` AND (status_code IN (${PENDING_CODES_SQL}) OR (status_code NOT IN (${SUCCESS_CODES_SQL}, ${PENDING_CODES_SQL}) AND mobsend_time IS NULL))` : ''}
-                 GROUP BY app_etc1, msg_type, is_sub, status_code`)
+                 GROUP BY app_etc1, msg_type, is_sub, is_friend, status_code`)
       .join(' UNION ALL ');
     // 같은 캠페인이 LIVE+LOG 여러 테이블로 쪼개질 수 있어 outer 재합산
-    const sql = `SELECT _grp, msg_type, is_sub, status_code, SUM(cnt) AS cnt
-                 FROM (${unions}) u GROUP BY _grp, msg_type, is_sub, status_code`;
+    const sql = `SELECT _grp, msg_type, is_sub, is_friend, status_code, SUM(cnt) AS cnt
+                 FROM (${unions}) u GROUP BY _grp, msg_type, is_sub, is_friend, status_code`;
     const params: any[] = [];
     for (let i = 0; i < group.tables.length; i++) params.push(...group.ids);
     // ★ 2026-10-07 Codex 1R medium — 발송 풀이 아니라 정산 전용 풀(실행 시간 상한 포함) · 목록 조회가 발송 연결을 붙잡지 않게
@@ -463,6 +466,7 @@ async function fetchSmsChannelRawByCampaign(
         k_oriseq: Number(r.is_sub) === 1 ? 1 : null,  // 옛 대체 행 = SMS_SUB_ROW_SQL 여부 · 비토 대체 = K행 결과코드(fallbackOf 가 판정 · ★2026-10-03)
         status_code: Number(r.status_code),
         cnt: Number(r.cnt || 0),
+        friend: Number(r.is_friend) === 1,
       });
     }
   }

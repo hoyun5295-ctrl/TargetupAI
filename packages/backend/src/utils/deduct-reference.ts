@@ -70,7 +70,12 @@ export function buildDeductDescription(
  * `parseDeductDescription`(괄호로 끝나는 조각)·`parseFreeCount`가 종전과 똑같이 읽힌다.
  * 고객 차감이력에도 이 문구가 보인다: 차감은 최대 단가로 하고 결과별로 정산한다는 뜻이다.
  */
-export interface AlimtalkSettleUnits { KAKAO: number; SMS: number; LMS: number }
+/**
+ * ★ 2026-11-06 C107F ② 뿌리 R65 — FRIEND = 차감 순간의 **브랜드 친구 단가**(대상값이 친구가 아닌 브랜드 차감 · 친구 단가가 더 쌀 때만).
+ *   카카오가 실제 친구라고 보고한 성공(SMSQ k_friend_yn = 'Y')은 이 단가로 정산한다(스위퍼가 차액을 돌려준다).
+ *   문구 = `· 결과별 정산: 브랜드메시지 X원 · 친구 W원 · SMS 대체 Y원 · LMS 대체 Z원` · 친구 조각 없는 옛 행 = 종전.
+ */
+export interface AlimtalkSettleUnits { KAKAO: number; SMS: number; LMS: number; FRIEND?: number }
 
 /**
  * ★ 2026-11-05 C107 D-12 — 브랜드메시지 전용 발송도 같은 결과별 정산을 쓴다(카카오 실패 → 문자 대체가 브랜드 행에도 7830 · 7831 로 남는다).
@@ -80,16 +85,20 @@ export interface AlimtalkSettleUnits { KAKAO: number; SMS: number; LMS: number }
 export type KakaoSettleLabel = '알림톡' | '브랜드메시지';
 
 export function buildAlimtalkUnitsNote(u: AlimtalkSettleUnits, label: KakaoSettleLabel = '알림톡'): string {
-  return ` · 결과별 정산: ${label} ${u.KAKAO}원 · SMS 대체 ${u.SMS}원 · LMS 대체 ${u.LMS}원`;
+  const friend = u.FRIEND != null ? ` · 친구 ${u.FRIEND}원` : '';
+  return ` · 결과별 정산: ${label} ${u.KAKAO}원${friend} · SMS 대체 ${u.SMS}원 · LMS 대체 ${u.LMS}원`;
 }
 
-/** (순수) 차감 설명에서 결과별 정산 단가를 되읽는다. 싣지 않은 행은 `null`. 0원 계약도 그대로 읽는다. */
+/** (순수) 차감 설명에서 결과별 정산 단가를 되읽는다. 싣지 않은 행은 `null`. 0원 계약도 그대로 읽는다. 친구 조각(C107F)은 있을 때만. */
 export function parseAlimtalkUnits(description: string | null | undefined): AlimtalkSettleUnits | null {
-  const m = String(description || '').match(/결과별 정산:\s*(?:알림톡|브랜드메시지)\s*([\d.]+)원\s*·\s*SMS 대체\s*([\d.]+)원\s*·\s*LMS 대체\s*([\d.]+)원/);
+  const m = String(description || '').match(/결과별 정산:\s*(?:알림톡|브랜드메시지)\s*([\d.]+)원\s*(?:·\s*친구\s*([\d.]+)원\s*)?·\s*SMS 대체\s*([\d.]+)원\s*·\s*LMS 대체\s*([\d.]+)원/);
   if (!m) return null;
-  const [KAKAO, SMS, LMS] = [m[1], m[2], m[3]].map(Number);
+  const [KAKAO, SMS, LMS] = [m[1], m[3], m[4]].map(Number);
   if (![KAKAO, SMS, LMS].every((v) => Number.isFinite(v) && v >= 0)) return null;
-  return { KAKAO, SMS, LMS };
+  if (m[2] == null) return { KAKAO, SMS, LMS };
+  const FRIEND = Number(m[2]);
+  if (!Number.isFinite(FRIEND) || FRIEND < 0) return null;
+  return { KAKAO, SMS, LMS, FRIEND };
 }
 
 /**
@@ -106,7 +115,7 @@ export function resolveAlimtalkLedgerUnits(rows: Array<{ amount: number | string
     paidRows++;
     const u = parseAlimtalkUnits(r.description);
     if (!u) return null;
-    if (found && (found.KAKAO !== u.KAKAO || found.SMS !== u.SMS || found.LMS !== u.LMS)) return null;
+    if (found && (found.KAKAO !== u.KAKAO || found.SMS !== u.SMS || found.LMS !== u.LMS || found.FRIEND !== u.FRIEND)) return null;
     found = u;
   }
   return paidRows > 0 ? found : null;

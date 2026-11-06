@@ -84,6 +84,15 @@
         ],
         "createdAt": "2026-11-05T08:43:57.922Z",
         "reason": "Claude 판단: 1280x720 쪽 틀 = 아래 패딩 0 + 몸통 · 아래 띠 절대 위치(bottom 58 · 22) · 설명 줄(.pt) = flex 높이 나눔 + 가운데 정렬 구분선 · 창 머리 띠(.wh) · 포스터 겹침 판(.gray) = 절대 위치 자식 · 인쇄본 실측(measure_slides.js) 여백 정상 · 실제 0 여백 칸(24쪽 비교표)은 12px 로 고침"
+      },
+      {
+        "rule": "clipped-overflow-container",
+        "value": "*",
+        "files": [
+          "marketing/proposals/2026-11-hanjul-proposal/pricing-plans.html"
+        ],
+        "createdAt": "2026-11-06T01:29:20.414Z",
+        "reason": "Claude 판단: 이미지 틀(.sheet)이 모서리 장식 원(::before)을 일부러 잘라 캡처 밖으로 안 나가게 함 · 띠(ribbon)는 틀 안쪽이라 잘리지 않음(캡처 확인)"
       }
     ]
   }

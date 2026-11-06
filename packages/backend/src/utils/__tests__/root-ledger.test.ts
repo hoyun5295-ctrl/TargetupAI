@@ -4219,7 +4219,7 @@ describe('R37 적재 기준은 읽기로 내리지 않는다 · 정산은 늘기
     expect(s).toMatch(/prepaidReverseOverRefund\([^)]*unitDiffLegit/);
     // 차액 기준은 모호 판정 갈래 밖(else)에서만 올린다
     const amb = s.indexOf('if (ambiguous) {');
-    const bump = s.indexOf('readHighNext = mergeReadHigh(readHighNext, { unitDiff: unitDiffAmt });');
+    const bump = s.indexOf("readHighNext = mergeReadHigh(readHighNext, { [diffKey as 'unitDiff' | 'brandUnitDiff']: unitDiffAmt });");   // ★1106 C107F 축마다 기준 칸
     const elseAt = s.indexOf('} else {', amb);
     expect(amb).toBeGreaterThan(0);
     expect(bump).toBeGreaterThan(elseAt);
@@ -4230,7 +4230,7 @@ describe('R37 적재 기준은 읽기로 내리지 않는다 · 정산은 늘기
     expect(s).toMatch(/return \(r\.rowCount \?\? 0\) > 0;/);
     expect(firstPersist).toBeGreaterThan(0);
     expect(firstPersist).toBeLessThan(s.indexOf('await prepaidRefund('));
-    expect(s).toMatch(/WHERE id = \$1 AND \$\{READ_HIGH_GEN_SQL\} = \$9::int/);
+    expect(s).toMatch(/WHERE id = \$1 AND \$\{READ_HIGH_GEN_SQL\} = \$10::int/);   // ★1106 C107F 세대 = $10
     expect(s).toMatch(/AND \$\{READ_HIGH_GEN_SQL\} = \$5::int/);
     expect(stripComments(be('utils/cancel-settle.ts'))).toMatch(/- 'readHigh', '\{readHighGen\}',\s*to_jsonb\(COALESCE\(NULLIF\(send_config->>'readHighGen', ''\), '0'\)::int \+ 1\)\)/);
   });

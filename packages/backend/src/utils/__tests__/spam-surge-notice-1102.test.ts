@@ -10,13 +10,17 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { STATUS_CODE_MAP, SPAM_BLOCK_STATUS_CODES, isSpamBlockSurge, SPAM_SURGE_MIN, SPAM_SURGE_RATIO } from '../sms-result-map';
+import { HANJUL_BAND_CODES } from '../result-code-hanjul-band.generated';
 import { buildResultNoticeBody, SPAM_SURGE_NOTICE_TITLE } from '../journey-result-notice';
 
 const read = (f: string) => readFileSync(join(__dirname, '..', f), 'utf8');
 
 describe('E3-5 스팸 차단 코드 · 몰림 판정', () => {
-  it('코드 목록 = 표에서 이름에 「스팸」이 든 코드 전부(손 목록 0)', () => {
-    const want = Object.entries(STATUS_CODE_MAP).filter(([, v]) => v.label.includes('스팸')).map(([k]) => Number(k)).sort((a, b) => a - b);
+  it('코드 목록 = 표에서 이름에 「스팸」이 든 코드 전부(손 목록 0 · ★1106 C107F R64 결과 표 + 비토 대역 표)', () => {
+    const want = [
+      ...Object.entries(STATUS_CODE_MAP).filter(([, v]) => v.label.includes('스팸')).map(([k]) => Number(k)),
+      ...Object.entries(HANJUL_BAND_CODES).filter(([, v]) => v.title.includes('스팸')).map(([k]) => Number(k)),
+    ].sort((a, b) => a - b);
     expect([...SPAM_BLOCK_STATUS_CODES].sort((a, b) => a - b)).toEqual(want);
     expect(SPAM_BLOCK_STATUS_CODES).toEqual(expect.arrayContaining([3004, 16, 52, 53, 54, 9003, 9010]));
   });

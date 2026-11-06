@@ -6540,8 +6540,13 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
         // ★ 2026-11-05 C107 D-11 — 브랜드 집계 키 = 청구 구분(BRAND · BRAND_NF) · 이름 = 그 청구 유형 이름(이름만 바꾸면 친구 · 비친구가 한 칸에 합쳐진다)
         const kakaoKey = c.send_channel === 'alimtalk' ? 'alimtalk' : brandBillingKey(c.kakao_targeting);
         const kakaoLabel = getCampaignChannelLabel(c.send_channel, c.message_type, c.kakao_targeting ?? null);
+        // ★ 2026-11-06 C107F ② 뿌리 R65 — 비친구 대상 브랜드에서 카카오가 실제 친구로 보고한 성공은 친구 칸(정산서와 같은 줄 · 청구 식과 같은 규칙)
+        const friendOk = kakaoKey === 'BRAND_NF' ? Math.min(split?.friendSuccess ?? 0, split?.success ?? 0) : 0;
         addExportBucket(c, kakaoKey, kakaoLabel, Number(c.target_count || 0),
-          split?.total ?? 0, split?.success ?? 0, split?.fail ?? 0, split?.pending ?? 0);
+          (split?.total ?? 0) - friendOk, (split?.success ?? 0) - friendOk, split?.fail ?? 0, split?.pending ?? 0);
+        if (friendOk > 0) {
+          addExportBucket(c, 'BRAND', getCampaignChannelLabel(c.send_channel, c.message_type, 'I'), 0, friendOk, friendOk, 0, 0);
+        }
         // 대체 문자 행 — LMS/SMS 각각(0이면 행 생략, 대상건수 중복 방지 0). 이름 = 청구서와 같은 유형 표시명(LMS(대체발송)).
         if (sLms.total > 0) {
           addExportBucket(c, 'fallback_lms', billingTypeLabel('LMS_FB'), 0, sLms.total, sLms.success, sLms.fail, sLms.pending);

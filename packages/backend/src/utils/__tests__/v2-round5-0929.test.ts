@@ -139,7 +139,11 @@ describe('③ 통계 화면 — 발송 실패 행은 성공·비용에서 빠진
     expect(campaigns).toContain("SUM(CASE WHEN ${spamBilledResultSql('r')} AND ${spamBillableTestSql('t')} AND COALESCE(r.message_type, 'SMS') = 'SMS' THEN 1 ELSE 0 END) as billed_sms");
     expect(campaigns).not.toContain('sfCostCalc +=');
     expect(campaigns).toContain('fail: sfFailed,');
-    expect(stats).toContain('(testSummary.sms - testSummary.pending - sfSmsFailed) * cSms + (testSummary.lms - sfLmsFailed) * cLms');
+    // ★ 2026-11-06 C108(C107F ④ · Codex 구현 1R) 비용 = 청구 수량 × 청구 유형 단가(test-summary-cost CT) · 스팸 = 청구 판정 행만(발송 실패 · 대기 제외 = 이 시험의 뜻 그대로)
+    expect(stats).toContain("SUM(CASE WHEN ${spamBilledResultSql('r')} AND r.message_type = 'SMS' THEN 1 ELSE 0 END) as sms_billed");
+    expect(stats).toContain("SUM(CASE WHEN ${spamBilledResultSql('r')} AND r.message_type = 'LMS' THEN 1 ELSE 0 END) as lms_billed");
+    expect(stats).toContain('testSummary.cost = testSummaryCost(testBilledRows,');
+    expect(stats).not.toContain('testSummary.sms - testSummary.pending');
   });
 
   it('상세 목록 3곳의 상태 = 같은 함수', () => {

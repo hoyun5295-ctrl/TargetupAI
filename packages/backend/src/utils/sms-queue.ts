@@ -9,7 +9,7 @@ import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry }
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
 import { isValidSmsTable } from './sms-table-validator';
 import { query } from '../config/database';
-import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_DELIVERED_SQL, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, SPAM_BLOCK_STATUS_CODES } from './sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SMS_SUB_ROW_SQL, KAKAO_DELIVERED_SQL, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, SPAM_BLOCK_STATUS_CODES, SMSQ_FRIEND_COLUMN, BRAND_FRIEND_DELIVERED_SQL } from './sms-result-map';
 import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } from './sms-table-split';
 import type { AlimtalkResultAgg } from './refund-calc';
 import { splitLinesByMsgType } from './sms-line-split';
@@ -482,7 +482,8 @@ export async function smsMinAll(tables: string[], field: string, whereClause: st
 export async function smsBatchAggByGroup(
   tables: string[],
   groupField: string,
-  aggFields: string,
+  // ★ 2026-11-06 C107F ② 표마다 다른 집계 글자(친구 칸 유무) = 함수 · 별칭 순서는 표마다 같아야 한다(UNION ALL)
+  aggFields: string | ((table: string) => string),
   ids: (string | number)[],
   // ★ 2026-07-30: 파라미터 없는 정적 조건만(예 msg_type = 'F') — smsCampaignCountsSafe 축 분리용.
   extraWhere?: string,
@@ -495,7 +496,7 @@ export async function smsBatchAggByGroup(
 
   // 각 테이블에서 group + 집계 값을 UNION ALL 한 뒤, outer에서 다시 GROUP BY로 합산
   const unions = tables
-    .map(t => `SELECT ${groupField} AS _grp, ${aggFields} FROM ${t} WHERE ${where} GROUP BY ${groupField}`)
+    .map(t => `SELECT ${groupField} AS _grp, ${typeof aggFields === 'function' ? aggFields(t) : aggFields} FROM ${t} WHERE ${where} GROUP BY ${groupField}`)
     .join(' UNION ALL ');
 
   // outer sum: 각 agg field를 이름으로 재합산 (aggFields 파싱 없이 JS에서 합산)
@@ -615,17 +616,21 @@ export async function smsKakaoResultAgg(
   if (resultTables.length === 0) return out;
   const SUC = SUCCESS_CODES.join(',');
   const SUB = SMS_SUB_ROW_SQL;
-  const agg = await smsBatchAggByGroup(resultTables, 'app_etc1', `
+  // ★ 2026-11-06 C107F ② 브랜드 실제 친구 성공(friendKakao ⊂ kakao) = 친구 칸이 있는 표만 · 없는 표 = 0(별칭 순서 같음)
+  const friendTables = await getFriendColumnTables();
+  const agg = await smsBatchAggByGroup(resultTables, 'app_etc1', (t) => `
         SUM(CASE WHEN ${KAKAO_DELIVERED_SQL} THEN 1 ELSE 0 END) AS kakao,
         SUM(CASE WHEN ${KAKAO_INROW_FALLBACK_SMS_SQL} THEN 1 ELSE 0 END) AS inRowSms,
         SUM(CASE WHEN ${KAKAO_INROW_FALLBACK_LMS_SQL} THEN 1 ELSE 0 END) AS inRowLms,
         SUM(CASE WHEN msg_type = 'S' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subSms,
         SUM(CASE WHEN msg_type = 'L' AND ${SUB} AND status_code IN (${SUC}) THEN 1 ELSE 0 END) AS subLms,
-        SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub`, ids);
+        SUM(CASE WHEN ${SUB} THEN 1 ELSE 0 END) AS sub,
+        ${friendTables.has(t) ? `SUM(CASE WHEN ${BRAND_FRIEND_DELIVERED_SQL} THEN 1 ELSE 0 END)` : '0'} AS friendKakao`, ids);
   for (const [id, v] of agg) {
     out.set(id, {
       kakao: Number(v.kakao || 0), inRowSms: Number(v.inRowSms || 0), inRowLms: Number(v.inRowLms || 0),
       subSms: Number(v.subSms || 0), subLms: Number(v.subLms || 0), sub: Number(v.sub || 0),
+      friendKakao: Number(v.friendKakao || 0),
     });
   }
   return out;
@@ -732,6 +737,25 @@ async function loadSmsTableSets(): Promise<{ live: Set<string>; logs: Set<string
 /** 실존 LOG 테이블 집합. 반환 계약은 종전과 동일(LOG만) — 소비처 5곳 무접촉. */
 async function getExistingLogTables(): Promise<Set<string>> {
   return (await loadSmsTableSets()).logs;
+}
+
+/**
+ * ★ 2026-11-06 C107F ② 뿌리 R65 — 브랜드 실제 친구 칸(SMSQ_FRIEND_COLUMN)이 있는 SMSQ 표 집합(배포 원장 C108-M1 DDL = 비토 라인 12 ~ 16).
+ *   칸이 없는 표에 그 이름을 쓰면 쿼리 전체가 죽는다 → 청구 식 · 결과 집계가 표마다 이 집합으로 식을 고른다(표 목록 CT 와 같은 5분 캐시).
+ *   읽기 실패는 던진다(빈 집합으로 삼키면 친구에게 비친구 단가를 조용히 받는다 · 정산은 다음 주기에 다시 돈다).
+ */
+let _friendColumnCache: Set<string> | null = null;
+let _friendColumnCacheTs = 0;
+export async function getFriendColumnTables(): Promise<Set<string>> {
+  const now = Date.now();
+  if (_friendColumnCache && (now - _friendColumnCacheTs) < 5 * 60 * 1000) return _friendColumnCache;
+  const rows = await mysqlQuery(
+    `SELECT TABLE_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'SMSQ_SEND_%' AND COLUMN_NAME = ?`,
+    [SMSQ_FRIEND_COLUMN],
+  ) as any[];
+  _friendColumnCache = new Set(rows.map((r: any) => String(r.TABLE_NAME)));
+  _friendColumnCacheTs = now;
+  return _friendColumnCache;
 }
 
 /**

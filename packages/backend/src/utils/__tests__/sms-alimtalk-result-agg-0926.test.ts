@@ -22,25 +22,34 @@ vi.mock('../../config/database', () => ({
 import { smsKakaoResultAgg, smsCampaignSubRowCounts } from '../sms-queue';
 
 beforeEach(() => mysqlQuery.mockReset());
+// ★ 2026-11-06 C107F ② 집계 앞에 친구 칸 표 목록(information_schema · 5분 캐시)을 읽는다 — 집계 문장은 내용으로 찾는다
+const aggSql = () => String(mysqlQuery.mock.calls.map((c: any[]) => String(c[0])).find((s: string) => s.includes('_grp')) || '');
 
 describe('smsKakaoResultAgg', () => {
   it('이력 테이블과 이력 짝 없는 라이브만 읽고, 캠페인별로 합산한다', async () => {
-    mysqlQuery.mockResolvedValue([
-      { _grp: 'camp-1', kakao: 3, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 1, sub: 1 },
-      { _grp: 'camp-1', kakao: 1, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 1, sub: 1 },
-    ]);
+    mysqlQuery.mockImplementation(async (sql: string) => (/information_schema/.test(sql) ? [{ TABLE_NAME: 'SMSQ_SEND_13' }] : [
+      { _grp: 'camp-1', kakao: 3, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 1, sub: 1, friendKakao: 2 },
+      { _grp: 'camp-1', kakao: 1, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 1, sub: 1, friendKakao: 0 },
+    ]));
     const out = await smsKakaoResultAgg(['SMSQ_SEND_1', 'SMSQ_SEND_1_202609', 'SMSQ_SEND_13'], ['camp-1']);
-    const sql = String(mysqlQuery.mock.calls[0][0]);
+    const sql = aggSql();
     expect(sql).toContain('FROM SMSQ_SEND_1_202609 WHERE');
     expect(sql).toContain('FROM SMSQ_SEND_13 WHERE');
     expect(sql).not.toContain('FROM SMSQ_SEND_1 WHERE');
-    expect(out.get('camp-1')).toEqual({ kakao: 4, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 2, sub: 2 });
+    expect(out.get('camp-1')).toEqual({ kakao: 4, inRowSms: 0, inRowLms: 0, subSms: 0, subLms: 2, sub: 2, friendKakao: 2 });
+    // ★ 2026-11-06 C107F ② 친구 칸이 있는 표(13)만 친구 성공 식 · 없는 표(이력) = 0(칸 없는 표에 쓰면 쿼리 전체가 죽는다)
+    const parts = sql.split(' UNION ALL ');
+    const p13 = parts.find((s: string) => s.includes('FROM SMSQ_SEND_13 WHERE')) || '';
+    const pLog = parts.find((s: string) => s.includes('FROM SMSQ_SEND_1_202609 WHERE')) || '';
+    expect(p13).toContain("k_friend_yn = 'Y'");
+    expect(pLog).not.toContain('k_friend_yn');
+    expect(pLog.replace(/\s+/g, ' ')).toContain('0 AS friendKakao');
   });
 
   it('결과별 식 — 카카오(알림톡 K · ★1105 C107 브랜드 F) 1800 · 7830/7831 · 대체 행(통계와 같은 판정식) 성공', async () => {
     mysqlQuery.mockResolvedValue([]);
     await smsKakaoResultAgg(['SMSQ_SEND_1_202609'], ['camp-1']);
-    const sql = String(mysqlQuery.mock.calls[0][0]).replace(/\s+/g, ' ');
+    const sql = aggSql().replace(/\s+/g, ' ');
     expect(sql).toContain("msg_type IN ('K', 'F') AND status_code = 1800");
     expect(sql).toContain("msg_type IN ('K', 'F') AND status_code = 7830");
     expect(sql).toContain("msg_type IN ('K', 'F') AND status_code = 7831");

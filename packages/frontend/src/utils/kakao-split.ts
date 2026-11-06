@@ -6,7 +6,8 @@
 import { isAlimtalkChannel } from './campaign-axis';
 
 export interface ChannelCount { total: number; success: number; fail: number; pending: number }
-export interface KakaoSplit extends ChannelCount { fallback: { LMS: ChannelCount; SMS: ChannelCount } }
+/** ★ 2026-11-06 C107F ② friendSuccess = 카카오 성공 중 브랜드로 실제 친구에게 간 수(친구 단가 · 옛 응답엔 없다 = 0) */
+export interface KakaoSplit extends ChannelCount { fallback: { LMS: ChannelCount; SMS: ChannelCount }; friendSuccess?: number }
 
 export function readKakaoSplit(c: any): KakaoSplit | null {
   const s = c?.kakao_split;

@@ -548,7 +548,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                     // ★ 2026-11-05 C107 D-02 — 브랜드 실패 → 문자 대체는 그 문자 단가(알림톡과 같은 기준 · 청구와 같은 셈). 분리값이 없으면 옛 계산
                     const bsp = readKakaoSplit(c);
                     if (!bsp) return sum + success * brandUnit;
-                    return sum + bsp.success * brandUnit + bsp.fallback.LMS.success * perLms + bsp.fallback.SMS.success * perSms;
+                    // ★ 2026-11-06 C107F ② 카카오가 실제 친구로 보고한 성공 = 친구 단가(청구 · 선불 차액과 같은 규칙 · 대상값이 친구면 원래 친구 단가)
+                    const friendOk = Math.min(Math.max(0, Number(bsp.friendSuccess) || 0), bsp.success);
+                    return sum + friendOk * perBrand + (bsp.success - friendOk) * brandUnit
+                      + bsp.fallback.LMS.success * perLms + bsp.fallback.SMS.success * perSms;
                   }
                   if (isAlimtalkChannel(c)) {
                     // ★ 2026-10-07 (박성용 접수) 대체로 나간 문자는 그 문자 단가 — 청구(거래내역서)와 같은 기준. 분리값이 없으면 옛 계산

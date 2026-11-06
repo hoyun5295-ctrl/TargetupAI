@@ -92,7 +92,7 @@ beforeEach(() => {
 describe('R37 기준 CT(순수)', () => {
   it('못 읽는 값은 0 · 얹기 = 칸마다 큰 값 · 커졌을 때만 기록', () => {
     const prev = parseReadHigh({ success: '733', sub: 'x', unitDiff: -3, brandLoaded: null });
-    expect(prev).toEqual({ success: 733, sub: 0, unitDiff: 0, brandLoaded: 0, brandSuccess: 0, nonBrandLoaded: 0, nonBrandSuccess: 0 });
+    expect(prev).toEqual({ success: 733, sub: 0, unitDiff: 0, brandLoaded: 0, brandSuccess: 0, nonBrandLoaded: 0, nonBrandSuccess: 0, brandUnitDiff: 0 });
     const next = mergeReadHigh(prev, { success: 274, unitDiff: 88.456, sub: 3 });
     expect(next.success).toBe(733);
     expect(next.unitDiff).toBe(88.46);
@@ -177,8 +177,8 @@ describe('정산 스위퍼 — 분리 축(both) 축 적재 기준(Codex 설계 1
     state.counts = { total: 200, success: 200, fail: 0, pending: 0 };
     await runMysqlRefundSweepOnce();
     expect(readHighWrites()).toHaveLength(1);
-    // [id, success, sub, unitDiff, brandLoaded, brandSuccess, nonBrandLoaded, nonBrandSuccess, 세대]
-    expect(readHighWrites()[0].params).toEqual([CAMP, 200, 0, 0, 100, 100, 100, 100, 0]);
+    // [id, success, sub, unitDiff, brandLoaded, brandSuccess, nonBrandLoaded, nonBrandSuccess, brandUnitDiff(★1106 C107F), 세대]
+    expect(readHighWrites()[0].params).toEqual([CAMP, 200, 0, 0, 100, 100, 100, 100, 0, 0]);
   });
 
   it('Codex 구현 1R #2 — 뒤 원장 조회가 실패해도 이번에 본 기준 증가(브랜드 100)는 먼저 남는다', async () => {
@@ -197,8 +197,8 @@ describe('정산 스위퍼 — 분리 축(both) 축 적재 기준(Codex 설계 1
     state.counts = { total: 200, success: 200, fail: 0, pending: 0 };
     state.scoped.brand = { total: 100, success: 100, fail: 0, pending: 0 };
     await runMysqlRefundSweepOnce();
-    expect(readHighWrites()[0].sql).toMatch(/readHighGen[\s\S]*= \$9::int/);
-    expect(readHighWrites()[0].params[8]).toBe(3);
+    expect(readHighWrites()[0].sql).toMatch(/readHighGen[\s\S]*= \$10::int/);   // ★1106 C107F brandUnitDiff = $9 · 세대 = $10
+    expect(readHighWrites()[0].params[9]).toBe(3);   // 세대 = 마지막(★1106 C107F brandUnitDiff 가 9번째)
     const countWrite = updates.find((u) => u.sql.includes('SET success_count = $1'));
     expect(countWrite?.sql).toMatch(/readHighGen[\s\S]*= \$5::int/);
     expect(countWrite?.params[4]).toBe(3);

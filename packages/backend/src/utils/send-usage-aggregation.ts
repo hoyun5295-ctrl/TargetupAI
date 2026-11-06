@@ -15,8 +15,8 @@
  */
 
 import pool, { mysqlBillingQuery, MYSQL_BILLING_POOL_LIMIT } from '../config/database';
-import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql, FALLBACK_BILLING_CODE_WHEN_SQL } from './sms-result-map';
-import { getQueueTableSets, getTestSmsTables } from './sms-queue';
+import { SUCCESS_CODES_SQL, PENDING_CODES_SQL, spamBilledResultSql, spamFailedResultSql, FALLBACK_BILLING_CODE_WHEN_SQL, SMSQ_FRIEND_COLUMN } from './sms-result-map';
+import { getQueueTableSets, getTestSmsTables, getFriendColumnTables } from './sms-queue';
 import { queryPayAgentStoreBreakdown, type PayAgentStoreRow } from './pay-stats';
 import { loadBillingLedger, hasAgentMapping, type BillingLedger } from './billing-ledger';
 import { floorWon } from './money';
@@ -70,12 +70,19 @@ const BRAND_SMSQ_CODE = BILLING_TYPES.find((t) => t.key === 'BRAND')?.smsqCode |
 // ★ 2026-11-05 C107(접수 T3 · 뿌리 R1) 대체 갈래를 브랜드 갈래보다 **먼저** 둔다. 옛 순서(F 먼저)는 F 행의 대체 성공(7830 · 7831)을
 //   브랜드 단가(BRAND · BRAND_NF)로 굳혀 「브랜드 실패 → 문자 대체」가 정산서에 브랜드메시지로 청구됐다(무주덕유산리조트 11/02 실측).
 //   CASE 는 첫 참 WHEN 에서 멈추므로 순서가 곧 판정이다(계약 시험 c107 K1 ③).
-export const BILLING_MSG_TYPE_SQL =
-  `CASE ${FALLBACK_BILLING_CODE_WHEN_SQL} WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
-  + `(CASE WHEN JSON_VALID(k_etc_json) = 1 THEN `
-  + `(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(k_etc_json, '$.TARGETING')) IN (${BRAND_FRIEND_TARGETINGS.map((t) => `'${t}'`).join(', ')}) `
-  + `THEN '${BRAND_SMSQ_CODE}' ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) `
-  + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ELSE msg_type END`;
+// ★ 2026-11-06 C107F ② 뿌리 R65 — 브랜드 갈래 첫 판정 = 받는 사람의 **실제 친구 여부**(SMSQ k_friend_yn = 'Y' → 친구 단가).
+//   그 칸은 비토 라인 표에만 있다(배포 원장 C107F-M1) → 표마다 billingMsgTypeSql(그 표에 칸이 있는가)로 고른다(getFriendColumnTables).
+//   칸이 없는 표 = 종전 글자 그대로(BILLING_MSG_TYPE_SQL) · 실제 N · 빈 값 = 대상값 규칙(올려 받지 않는다 · 대상값 친구는 그대로 친구).
+export function billingMsgTypeSql(hasFriendColumn: boolean): string {
+  const friend = hasFriendColumn ? `WHEN ${SMSQ_FRIEND_COLUMN} = 'Y' THEN '${BRAND_SMSQ_CODE}' ` : '';
+  return `CASE ${FALLBACK_BILLING_CODE_WHEN_SQL} WHEN msg_type = '${BRAND_SMSQ_CODE}' THEN `
+    + `(CASE ${friend}WHEN JSON_VALID(k_etc_json) = 1 THEN `
+    + `(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(k_etc_json, '$.TARGETING')) IN (${BRAND_FRIEND_TARGETINGS.map((t) => `'${t}'`).join(', ')}) `
+    + `THEN '${BRAND_SMSQ_CODE}' ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) `
+    + `ELSE '${BRAND_NONFRIEND_SMSQ_CODE}' END) ELSE msg_type END`;
+}
+/** 친구 칸이 없는 표의 식(종전 글자 그대로 · 계약 시험 c107 K1 이 순서를 본다) */
+export const BILLING_MSG_TYPE_SQL = billingMsgTypeSql(false);
 
 export interface UsageDayCounts { total: number; success: number; fail: number; pending: number }
 /** 일자(YYYY-MM-DD) → 유형키 → 카운트 */
@@ -308,16 +315,18 @@ export async function smsAggByRunDateType(
   // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
   //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
   //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
+  const friendTables = await getFriendColumnTables();   // ★ C107F ② 표마다 청구 식
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
+    const billingType = billingMsgTypeSql(friendTables.has(t));
     return await queryWithIndexHint(
       (hint) =>
-        `SELECT app_etc1 as run_id, ${BILLING_MSG_TYPE_SQL} AS msg_type, DATE(sendreq_time) as send_date,
+        `SELECT app_etc1 as run_id, ${billingType} AS msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t}${hint} WHERE ${whereClause}
-       GROUP BY app_etc1, ${BILLING_MSG_TYPE_SQL}, DATE(sendreq_time)`,
+       GROUP BY app_etc1, ${billingType}, DATE(sendreq_time)`,
       params,
       indexHint,
     );
@@ -336,15 +345,17 @@ export async function testSmsAggByUserDateType(tables: string[], whereClause: st
   // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
   //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
   //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
+  const friendTables = await getFriendColumnTables();   // ★ C107F ② 표마다 청구 식
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
+    const billingType = billingMsgTypeSql(friendTables.has(t));
     return await mysqlBillingQuery(
-      `SELECT bill_id, ${BILLING_MSG_TYPE_SQL} AS msg_type, DATE(sendreq_time) as send_date,
+      `SELECT bill_id, ${billingType} AS msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t} WHERE ${whereClause}
-       GROUP BY bill_id, ${BILLING_MSG_TYPE_SQL}, DATE(sendreq_time)`,
+       GROUP BY bill_id, ${billingType}, DATE(sendreq_time)`,
       params
     ) as any[];
   });
@@ -361,16 +372,18 @@ export async function smsAggByDateType(
   // ★ 2026-07-26 직렬 `for await`를 동시성 상한 병렬로 바꿨다. 테이블 수만큼 왕복이 순차라
   //   회사당 40~48개 × 두 집계 = 90~100회가 한 줄로 섰다(금강제화 발행 2분의 지배 요인).
   //   풀(10)을 독점하지 않도록 상한을 둔다 — 발송·환불 워커가 같은 풀을 쓴다.
+  const friendTables = await getFriendColumnTables();   // ★ C107F ② 표마다 청구 식
   const perTable = await mapWithConcurrency(tables, MYSQL_BILLING_POOL_LIMIT, async (t) => {
+    const billingType = billingMsgTypeSql(friendTables.has(t));
     return await queryWithIndexHint(
       (hint) =>
-        `SELECT ${BILLING_MSG_TYPE_SQL} AS msg_type, DATE(sendreq_time) as send_date,
+        `SELECT ${billingType} AS msg_type, DATE(sendreq_time) as send_date,
               COUNT(*) as total_count,
               SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) THEN 1 ELSE 0 END) as success_count,
               SUM(CASE WHEN status_code NOT IN (${SUCCESS_CODES_SQL},${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as fail_count,
               SUM(CASE WHEN status_code IN (${PENDING_CODES_SQL}) THEN 1 ELSE 0 END) as pending_count
        FROM ${t}${hint} WHERE ${whereClause}
-       GROUP BY ${BILLING_MSG_TYPE_SQL}, DATE(sendreq_time)`,
+       GROUP BY ${billingType}, DATE(sendreq_time)`,
       params,
       indexHint,
     );
