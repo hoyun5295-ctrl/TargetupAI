@@ -198,10 +198,21 @@ export function isPending(statusCode: number): boolean {
  */
 export const HANJUL_BAND_BASE = { KAKAO: 20000, LMSMMS: 30000, SMS: 40000, V: 50000 } as const;
 const BAND_FAMILY_LABEL: Readonly<Record<number, string>> = { 2: '카카오', 3: 'LMS', 4: 'SMS', 5: '발송' };
+// ★ 2026-11-06 비토엔진 오류접수(결과코드 매핑 · 설계서 docs/2026-11-06-bito-console-tickets-design.md A-4 · D-A6 뿌리)
+//   라벨 파일은 생성 파일이라 게이트웨이 표준 코드가 늘면 모른다 → 판정 자리에서 만난 라벨 없는 대역 코드를 모아 두고
+//   감시 워커(system-monitor-worker checkUnknownBandCodes)가 꺼내 코드별 하루 한 번 알린다. 크기 상한 = 대역 범위(4만).
+const unknownBandSeen = new Set<number>();
+/** 지난번 뒤로 판정 자리에서 만난 라벨 없는 대역 코드(꺼내면 비운다). */
+export function takeUnknownBandCodes(): number[] {
+  const out = [...unknownBandSeen].sort((a, b) => a - b);
+  unknownBandSeen.clear();
+  return out;
+}
 export function bandStatusInfo(statusCode: number): StatusCodeInfo | null {
   if (!Number.isInteger(statusCode) || statusCode < 20000 || statusCode > 59999) return null;
   const family = BAND_FAMILY_LABEL[Math.floor(statusCode / 10000)];
   const known = HANJUL_BAND_CODES[statusCode];
+  if (!known) unknownBandSeen.add(statusCode);
   return { label: `${family}: ${known ? known.title : `실패(코드 ${statusCode % 10000})`}`, type: 'fail' };
 }
 

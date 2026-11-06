@@ -33,7 +33,7 @@
 import { query, mysqlQuery } from '../config/database';
 import { getQueueTableSets } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
-import { ABNORMAL_STATUS_MIN } from './sms-result-map';
+import { ABNORMAL_STATUS_MIN, takeUnknownBandCodes } from './sms-result-map';
 
 const PASS_INTERVAL_MS = 5 * 60 * 1000;        // 5분 주기
 const FIRST_DELAY_MS = 60 * 1000;              // 기동 60초 후 첫 실행
@@ -87,6 +87,43 @@ async function checkAbnormalStatusRows(all: string[]): Promise<void> {
     action: '서버 상태(메모리 · 커널 기록)를 점검해 주세요.',
   });
   log(`이상 상태값 통지 — ${total}행 (${lines.join(', ')})`);
+}
+
+/**
+ * 1-C) ★ 2026-11-06 비토엔진 오류접수(결과코드 매핑 · 설계서 docs/2026-11-06-bito-console-tickets-design.md A-4 · D-A6 뿌리)
+ *   비토 게이트웨이가 돌려준 실패 대역 코드(20000 ~ 59999) 중 한줄로 라벨 파일(HANJUL_BAND_CODES)에 없는 것 = 결과 판정 자리
+ *   (sms-result-map bandStatusInfo · 결과 화면 · 내보내기 · 고객 이력 · 스팸 사유)에서 만난 순간 모인다 → 패스마다 꺼내 코드별 하루 한 번 알린다.
+ *   라벨 파일은 생성 파일이라 게이트웨이에서 표준 코드 · 대역 행이 늘면(1106 젬텍 재매핑 = 18) 한줄로는 모른 채 「실패(코드 n)」로만
+ *   보이고, 「스팸」 제목으로 뽑는 스팸 몰림 목록(SPAM_BLOCK_STATUS_CODES)에서도 빠진다. 감지 · 통지만(라벨 다시 만들기는 사람).
+ *   질의 0(발송 표를 훑지 않는다) · 늦게 온 결과도 판정 자리를 지나면 잡힌다 · 이 프로세스 하나(PM2 fork 1)가 판정 · 감시를 같이 한다.
+ *   한 통에 알릴 코드 묶음 · 경보 키 = 그 묶음(같은 묶음은 재기동 뒤에도 경보 원장 쿨다운).
+ *   보냄이 확인될 때(sendSystemAlert > 0)까지 코드는 대기 묶음에 남아 다음 패스에 다시 간다 · 보낸 뒤에만 코드별 하루 쿨다운(Codex 구현 2R).
+ *   (0 = 쿨다운 · 수신자 없음 · 적재 실패 — 어느 쪽이든 다음 패스에 다시 묻는다 · 쿨다운이면 원장 읽기 한 번으로 끝난다)
+ */
+const BAND_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const bandAlertedAt = new Map<number, number>();
+const bandPending = new Set<number>();
+export async function checkUnknownBandCodes(): Promise<void> {
+  const now = Date.now();
+  for (const c of takeUnknownBandCodes()) {
+    if (now - (bandAlertedAt.get(c) ?? -Infinity) >= BAND_ALERT_COOLDOWN_MS) bandPending.add(c);
+  }
+  if (bandPending.size === 0) return;
+  const codes = [...bandPending].sort((a, b) => a - b);
+  const sent = await sendSystemAlert({
+    companyId: null,
+    dedupKey: `band-label-missing:${codes.join(',')}`,
+    cooldownMs: BAND_ALERT_COOLDOWN_MS,
+    title: '비토 실패 대역 코드 중 한줄로 라벨이 없는 코드가 들어왔습니다.',
+    details: [`${codes.length}종 · ${codes.slice(0, 8).join(', ')}`, '화면에는 「실패(코드 n)」로만 보이고 스팸 몰림 경보에서도 빠집니다.'],
+    action: '게이트웨이 표준 코드 표에서 라벨 파일(result-code-hanjul-band.generated.ts)을 다시 만들어 배포해 주세요.',
+  });
+  if (sent <= 0) return;
+  for (const c of codes) {
+    bandAlertedAt.set(c, now);
+    bandPending.delete(c);
+  }
+  log(`대역 라벨 없음 통지 — ${codes.join(', ')}`);
 }
 
 /** 1) 발송 큐 지연 잔존 행 감지 — QTmsg 표만(비토 100 = 결과 대기라 이 규칙을 쓰면 하루 종일 울린다) */
@@ -333,6 +370,7 @@ async function checkSyncFailures(): Promise<void> {
 let running = false;
 
 async function runPass(): Promise<void> {
+  await checkUnknownBandCodes();
   await checkDelayedQueueRows();
   await checkSyncAgents();
   await checkSyncFailures();
