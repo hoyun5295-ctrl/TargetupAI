@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: 6d04f394 · 2026-11-07 · Harold 실행 보고(C111-H1 결과 = .62 pull Fast-forward c7b4ff35..6d04f394 · 1107 오후 배포 1 창 상태 확인 출력 = HEAD 6d04f394 2026-11-07 08:59:32 +0900) · 그 전 c7b4ff35 · 2026-11-06 · Harold 실행 보고(서버 git pull dd446c5d..c7b4ff35 · C109 + C108 세션 문서 · 그 전 dd446c5d = 1106 C108 배포 · 서버 HEAD 확인 출력 dd446c5d · pm2 created at 2026-11-06T02:26:34Z) · 그 전 11893902
-- deployed_head: c7b4ff35 · 2026-11-06 · Harold 「배포까지 완료」(재시작 종류 = 출력 밖 · 미확인) · 출력 = git HEAD c7b4ff35 · pm2 describe created at 2026-11-06T06:51:46Z(15:51:46 KST) · uptime 4m · restarts 58 · unstable restarts 0 · online · 에러 로그(15:51 뒤) 0줄(마지막 줄 14:04:05 ai-json 맞춤법 읽기 실패 = 옛 프로세스 · 11:08 ~ 12:31 = B-1106-1 접수 건 옛 갈래) · 그 전 dd446c5d(C108 · 1106 11:26 KST) · 그 전 11893902 · ★1107 6d04f394 = C111-H1 백엔드 build:safe · reload · online(계산 규칙 = 원장에 ENV 항목이 있어 restart-env 요구 · reload 불인정 → 그대로 · 다음 배포의 restart-env 가 c7b4ff35..새 머리 전체를 덮는다)
-- 이번 창 확인 출력: 1107 배포 1(C110 + C112) · 상태 확인 = HEAD 6d04f394 · pm2 targetup-backend online ↺ 59 · 서버 작업 트리 = packages/sdk-js/package-lock.json 바뀜 · 추적 밖 ALTER · ^C · backup_uploadedby.dump · packages/backend/agent-builds/(앞 5줄 · 이번 커밋과 겹치는 경로 0)
+- pulled_head: 4ffe7988 · 2026-11-07 · Harold 실행 보고(배포 1 = C110 · C112 · C113 · 서버 git pull 6d04f394..4ffe7988 · 확인 출력 = HEAD 4ffe7988 2026-11-07 23:01:08 +0900) · 그 전 6d04f394 · 2026-11-07 · Harold 실행 보고(C111-H1 결과 = .62 pull Fast-forward c7b4ff35..6d04f394 · 1107 오후 배포 1 창 상태 확인 출력 = HEAD 6d04f394 2026-11-07 08:59:32 +0900) · 그 전 c7b4ff35 · 2026-11-06 · Harold 실행 보고(서버 git pull dd446c5d..c7b4ff35 · C109 + C108 세션 문서 · 그 전 dd446c5d = 1106 C108 배포 · 서버 HEAD 확인 출력 dd446c5d · pm2 created at 2026-11-06T02:26:34Z) · 그 전 11893902
+- deployed_head: 4ffe7988 · 2026-11-07 · Harold 실행 보고(배포 1 = C111 6d04f394 + C110 · C112 · C113 4ffe7988 · 백엔드 · 프론트 build:safe · reload 23:16 · 원장 restart-env 요구 → 적재 0 확인 줄 · pm2 restart targetup-backend --update-env 23:27 · online ↺61 · unstable 0 · created at 2026-11-07T14:27:42Z · 에러 로그 재시작 뒤 0줄 · ad-send-gate 줄 0 · 적재 중 캠페인 0) · 그 전 c7b4ff35 · 2026-11-06 · Harold 「배포까지 완료」(재시작 종류 = 출력 밖 · 미확인) · 출력 = git HEAD c7b4ff35 · pm2 describe created at 2026-11-06T06:51:46Z(15:51:46 KST) · uptime 4m · restarts 58 · unstable restarts 0 · online · 에러 로그(15:51 뒤) 0줄(마지막 줄 14:04:05 ai-json 맞춤법 읽기 실패 = 옛 프로세스 · 11:08 ~ 12:31 = B-1106-1 접수 건 옛 갈래) · 그 전 dd446c5d(C108 · 1106 11:26 KST) · 그 전 11893902 · ★1107 6d04f394 = C111-H1 백엔드 build:safe · reload · online(계산 규칙 = 원장에 ENV 항목이 있어 restart-env 요구 · reload 불인정 → 그대로 · 다음 배포의 restart-env 가 c7b4ff35..새 머리 전체를 덮는다) · ★1107 4ffe7988 = 배포 1 · 백엔드 · 프론트 build:safe · pm2 reload(적재 확인 줄 없이 · 확인 시점 적재 중 캠페인 0) · online ↺60 · unstable 0 · created at 2026-11-07T14:16:23Z(23:16:23 KST) · 에러 로그 reload 뒤 0줄 · ad-send-gate 줄 0(계산 규칙 = restart-env 요구 · reload 불인정 → 그대로 · 이 범위 새 env 이름 = STUDIO_LOGO_PATH 하나 · 기본값 있음 · 설정 변경 0 = 기능상 reload 로 충분 · 다음 배포의 restart-env 가 c7b4ff35..새 머리 전체를 덮는다)
+- 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -55,10 +55,10 @@
 | C107 | 11893902 |
 | C108 | dd446c5d |
 | C109 | c7b4ff35 |
-| C110 | 미커밋 |
+| C110 | 4ffe7988 |
 | C111 | 6d04f394 |
-| C112 | 미커밋 |
-| C113 | 미커밋 |
+| C112 | 4ffe7988 |
+| C113 | 4ffe7988 |
 
 ## §1 대기
 
@@ -1378,7 +1378,7 @@ COMMIT;
 - 선행: C110-DDL-1 · 커밋(Harold) · ★1107 Harold 「배포 너무 자주 하지 말고」 = 로드맵 3순위가 닫히면 그 묶음과 한 배포
 - 기대: 설계서 docs/2026-11-06-c110-effect-proof-priority-design.md · ★1107 C113 D23 정정 = 미가입 · 새 기능을 안 켠 회사의 발송 = HEAD 그대로(피로도 = 그 입구의 HEAD 블록 그대로 · 서버 적재 확정 · 플래너 · 대행 · DM 에 피로도 새로 0) · 새 기능 = 요금제를 쓰고 켠 회사만
 - 확인: pm2 기동 · 에러 로그 · 기동 뒤 첫 광고 발송 로그에 「C110-DDL-1 전」 경고가 없어야 함(있으면 DDL 이 안 들어간 것)
-- 결과:
+- 결과: 1107 Harold = 배포 1(4ffe7988 · C112 · C113 과 한 창) · 서버 pull · 백엔드 · 프론트 build:safe · pm2 reload · online ↺60 · unstable 0 · 에러 로그 reload 뒤 0줄 · ad-send-gate 줄 0(「C110-DDL-1 전」 경고 0) · 적재 중 캠페인 0 → 서버 단계 통과 · 남은 = 첫 광고 발송 뒤 같은 줄 세기 · 직원 시트 C110-S3 · 23:27 restart --update-env(원장 restart-env) · online ↺61 · 에러 로그 0줄
 
 ### C110-S3 · 실측(직원 시트 · 설계서 §11 · 실측 1건 = 시험 회사 200명 · 20%)
 - 카드: C110
@@ -1402,7 +1402,7 @@ COMMIT;
 - 선행: C112-S0 · 커밋(Harold)
 - 기대: 설계서 docs/2026-11-07-c112-studio-brand-logo-design.md · 새 주소 POST /api/image-studio/layers · /logo/read · /save 에 layers(없으면 지금 그대로) · 새 폴더 uploads/studio-logos(처음 쓸 때 생긴다 · 설정 변경 0)
 - 확인: pm2 기동 · 에러 로그 · 스튜디오 포스터 하나 만들어 결과 카드에 로고 줄이 보이는지(키트 로고 없는 회사 = 「브랜드 키트에 로고가 없어요」)
-- 결과:
+- 결과: 1107 Harold = 배포 1(4ffe7988 · 위와 같은 창) · online · 에러 로그 reload 뒤 0줄 → 서버 단계 통과 · 남은 = 스튜디오 포스터 결과 카드 로고 줄 = 직원 시트 C112-S1 · 23:27 restart --update-env(원장 restart-env) · online ↺61 · 에러 로그 0줄
 
 ### C112-S1 · 직원 시트(설계서 §7 1 ~ 8)
 - 카드: C112
@@ -1426,7 +1426,7 @@ COMMIT;
 - 선행: C113-S0 · 커밋(Harold · C110 + C112 + C113 경로 지정)
 - 기대: 설계서 docs/2026-11-07-c113-structure-fix-design.md · 미가입 · 직접발송만 쓰는 회사 = HEAD 와 글자 그대로(직접 동기 · 건수 미리보기 · 서버 적재 확정 · 예약 변경 · 수신자 삭제 · 취소 · 응답 · 큐 · 차감) · 새 주소 POST /api/image-studio/logo/use · /logo/read 응답 = 후보(키트 쓰기 0)
 - 확인: pm2 기동 · 에러 로그 · 미가입 시험 계정 직접발송 10명 응답 문장에 「대조군」 · 「우선순위」 0 · 설정에 「효과 측정 대조군」 칸 없음
-- 결과:
+- 결과: 1107 Harold = 배포 1(4ffe7988 · 위와 같은 창) · online · 에러 로그 reload 뒤 0줄 · ad-send-gate 줄 0 → 서버 단계 통과 · 남은 = 미가입 시험 계정 직접발송 응답 문장 · 설정 화면 = 직원 시트 C113-S1 · 23:27 restart --update-env(원장 restart-env) · online ↺61 · 에러 로그 0줄
 
 ### C113-S1 · 직원 시트(설계서 §7 1 ~ 14)
 - 카드: C113
