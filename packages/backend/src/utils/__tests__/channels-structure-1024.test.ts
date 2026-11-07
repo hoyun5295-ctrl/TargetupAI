@@ -3,6 +3,7 @@
  *
  * 소스 계약(고친 자리가 그대로 있는가) + 순수 판정의 동작. 같은 뿌리의 기능 넘는 계약(R2 머리 문 · R10 4xx)은 root-ledger.test.ts 가 소유한다.
  */
+import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -15,7 +16,6 @@ const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
 const read = (p: string) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
 const be = (rel: string) => read(join(BE, rel));
 const fe = (rel: string) => read(join(FE, rel));
-const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 const fnBody = (src: string, decl: string) => {
   const at = src.indexOf(decl);
   expect(at, decl).toBeGreaterThan(-1);

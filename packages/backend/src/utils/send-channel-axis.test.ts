@@ -152,7 +152,7 @@ describe('게이트가 차감·실행 행보다 앞에 있다', () => {
       // ★ 2026-09-26 한줄로 V2 F09 — 적재가 끝난 뒤 예외면 실행 행을 실패가 아니라 **성공 경로와 같은 상태**(예약 = scheduled ·
       //   즉시 = completed)로 닫는다(적재된 예약분이 취소 게이트·결과 동기화에 남게). 이것도 'sending' 잔존을 막는 종결이다.
       expect(
-        between.includes('failCampaignRun(') || between.includes('UPDATE campaign_runs SET status = $1'),
+        between.includes('failCampaignRun(') || between.includes('failRunReleasingAd(') || between.includes('UPDATE campaign_runs SET status = $1'),
         `run INSERT 뒤 거절(offset ${at})이 실행 행을 종결하지 않는다 — ` +
           '그 행이 남으면 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).',
       ).toBe(true);
@@ -165,7 +165,7 @@ describe('게이트가 차감·실행 행보다 앞에 있다', () => {
     const catchAt = CAMPAIGN_SEND.indexOf('catch (sendError)');
     expect(catchAt, '발송 catch를 못 찾았다 — 마커가 낡았다').toBeGreaterThan(runInsert);
     expect(
-      CAMPAIGN_SEND.slice(catchAt).includes('failCampaignRun('),
+      CAMPAIGN_SEND.slice(catchAt).includes('failCampaignRun(') || CAMPAIGN_SEND.slice(catchAt).includes('failRunReleasingAd('),
       '예외로 빠지면 실행 행이 sending으로 남아 그 캠페인이 영구히 잠긴다.',
     ).toBe(true);
   });

@@ -28,6 +28,7 @@ import pool, { query } from '../config/database';
 import { recordPlanChange, todayKst } from './plan-change-log';
 import { alertPassFailures, type PassFailure } from './system-alert';
 import { expireTrialLeftover } from './ai-credit-tx';
+import { endAdGateIfUnpaid } from './ad-send-gate';   // ★ C113 D2
 
 function log(tag: string, ...args: any[]) {
   console.log(`[trial-downgrade][${tag}]`, ...args);
@@ -166,6 +167,7 @@ export async function runTrialDowngradeJob(): Promise<{ downgraded: number }> {
             now: creditNow,
           });
         }
+        await endAdGateIfUnpaid(client, t.id);   // ★ C113 D2 — FREE 강등 = 네 칸 비움
         await client.query('COMMIT');
         rows.push(t);
       } else {

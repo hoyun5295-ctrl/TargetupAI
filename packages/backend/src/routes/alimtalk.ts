@@ -150,9 +150,10 @@ router.post(
       return res.json({ code: '0000', message: 'OK', ...result });
     } catch (err: any) {
       console.error('[alimtalk-webhook] 예외', err);
+      // ★ C113 K25 · 뿌리 R10 — 오류 원문은 위 로그에만 · 응답은 고정 글(상태 코드 400 그대로)
       return res.status(400).json({
         code: '400',
-        message: err?.message || 'BAD_REQUEST',
+        message: 'BAD_REQUEST',
       });
     }
   },

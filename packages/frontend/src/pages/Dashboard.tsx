@@ -3271,7 +3271,7 @@ const campaignData = {
             // ★1005 발신 인증(3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다(창은 열린 채 · 내용 보존)
             if (senderAuth.handleResponse(data, () => { void sendBrand(payload); })) return;
             if (!res.ok || data?.success === false) throw new Error(data?.error || '브랜드메시지 발송 실패');
-            setToast({ show: true, type: 'success', message: `브랜드메시지 ${Number(data?.sentCount || 0).toLocaleString()}건 발송했습니다` });
+            setToast({ show: true, type: 'success', message: `브랜드메시지 ${Number(data?.sentCount || 0).toLocaleString()}건 발송했습니다${data?.adGateNotice ? `. ${data.adGateNotice}` : ''}` });   // ★ C113 D6 관문 길 한 줄
             setShowBrandSend(false);
             setBrandInitialRecipients([]);
           } catch (e: any) {

@@ -7,6 +7,7 @@
  * 이 시험은 대상을 소스에서 기계로 뽑는다(손 등재 표 0) · 면제 = 이유 필수 · 낡은 면제 = 실패.
  * (root-ledger.test.ts 와 같은 방식 · 그 파일은 다른 작업이 고치는 중이라 이 뿌리는 이 파일에 둔다)
  */
+import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -24,9 +25,6 @@ function sourceFiles(root: string, ext: RegExp): string[] {
     .filter((f) => ext.test(f) && !/(^|\/)__tests__\//.test(f) && !/\.(test|spec|verify)\.tsx?$/.test(f) && !/(^|\/)(dist|dist-old|node_modules)\//.test(f));
 }
 /** 주석을 걷는다(줄 · 블록 · JSX 주석) */
-function stripComments(src: string): string {
-  return src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
-}
 /**
  * 글 전부 = TypeScript 구문 나무로 모은다(Codex 설계 2R-2 · 3R-3 · 4R-2 · 4R-3).
  *   조각 = 작은 · 큰따옴표 글 · 백틱(템플릿 머리 · 사이 · 꼬리 · 템플릿 안 템플릿까지) / 식 = 글 · 템플릿 · `+` 사슬의 가장 바깥.

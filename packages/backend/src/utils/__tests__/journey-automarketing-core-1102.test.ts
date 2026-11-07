@@ -339,7 +339,7 @@ describe('CT-J1 보낼 판 — 최신 판 읽기 · 신뢰도 칸 · 보낼 수 
     const ex = readFileSync(join(SRC_ROOT, 'utils', 'journey-executor.ts'), 'utf8');
     expect(ex).toContain('snapshotId = snap.id ? String(snap.id) : null;');
     expect(ex).toContain('return processMessageBatch(execs, step, res, { pendingSnapshotAt, snapshotReadFailed, snapshotId });');
-    expect(ex).toContain('variantByExec, snapshotId: snap.snapshotId }, res)');
+    expect(ex).toContain('variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep }, res)');   // ★ C113 D10 — 실린 · 결과 불명 번호를 끝 해제에서 남김   // ★ 2026-11-06 C110 광고 관문 묶음(원장을 쓴 판정일 때만)을 함께 넘김
     expect(ex).toContain('textStep ? [unit.map((r) => r.exec.execution_id), step.id, campaignId, c.sendCost, c.snapshotId]');
   });
 });

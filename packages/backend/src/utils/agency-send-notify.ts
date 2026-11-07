@@ -193,6 +193,27 @@ export function buildQueueFailedNotify(ctx: AgencyNotifyContext): string {
 }
 
 /**
+ * ⑦-2 광고 관문(대조군 · 우선순위)이 받는 사람을 일부 뺐다(★ 2026-11-07 C113 D12 · 관문 길만 · 예약은 들어감)
+ *   line = adGateNotice(예: 「대조군 10명을 뺐습니다.」)
+ */
+export function buildAdGateExcludedNotify(ctx: AgencyNotifyContext & { total: number; line: string }): string {
+  return compose([
+    `${HEAD} 요청 ${ctx.total}건 중 ${ctx.line}`,
+    `건: ${shortLabel(ctx.label)}`,
+    '나머지는 요청한 시각에 발송됩니다.',
+  ]);
+}
+
+/** ⑦-3 광고 관문이 받는 사람을 모두 뺐다(★ 2026-11-07 C113 D12 · 관문 길만 · 예약 0) */
+export function buildAdGateAllExcludedNotify(ctx: AgencyNotifyContext): string {
+  return compose([
+    `${HEAD} 대조군, 우선순위 설정으로 받는 사람이 모두 빠져 발송하지 않았습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    '로그인하여 상세를 확인해 주세요.',
+  ]);
+}
+
+/**
  * ⑧ 운영(슈퍼관리자)이 고객 요청으로 취소를 대신 처리했다 (★2026-08-26(3) 신설)
  *
  * 전화로 취소를 요청한 사람이 담당자 여러 명 중 하나여도, 전원이 같은 문자를 받아야

@@ -22,6 +22,7 @@ import ZoneSegmented from '../components/zone/ZoneSegmented';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
+import EffectProofCard from '../components/performance/EffectProofCard';   // ★ 2026-11-06 C110
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -870,6 +871,9 @@ export default function PerformancePage() {
                 )}
               </div>
             )}
+
+            {/* ★ 2026-11-06 C110 효과 증명(대조군 비교 · 늘어난 매출) */}
+            <EffectProofCard days={periodToDays(period)} />
 
             {/* ════ AI 자율 진단(좌) + 요약 아이콘 카드(우) 동일 높이 2단 ════ */}
             <div className="flex flex-col lg:flex-row gap-3 lg:items-stretch">

@@ -83,6 +83,8 @@ import { isUuid } from './normalize';
 //   기준선 보충(DO NOTHING)과 발송분 갱신(DO UPDATE) 두 문뿐 — 전체 교체는 폐기(Codex R3).
 import { hasCycleBaseline, ensureCycleBaselineRows, advanceCycleSnapshotForPhones } from './operator-cycle-snapshot';
 import { createDirectSendCampaign, planIndividualCallbackExclusion } from './direct-send-core';
+import { resolveAdGateMode, gateStaging, sendSpanOf, AdHold } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
+import { adGateNotice, totalExcluded } from './ad-send-gate-core';
 import { getRegisteredCallbackSet, callbackAssignmentUserId } from './callback-filter';   // ★ 2026-10-07 자동 마케팅 회신번호
 import { DirectSendError } from './direct-send-spec';
 // ★ 2026-07-30 (Codex 2R): MMS 이미지 필수 가드 CT(D131) — 자율발송 경로 배선
@@ -3418,6 +3420,20 @@ async function dispatchProposalSend(
   // ⛔ 7R: 예약 발송 경로에서만 발송 직전 재검사(★ 2026-11-02 무엇을 보나 = 갈래 판정 CT-O2 · null = 지금 승인 발송 = 사람이 검토했다)
   capPath: OperatorCapPath | null = null,
 ): Promise<{ action: 'sent' | 'skipped'; campaignId?: string; sentCount?: number; reason?: string }> {
+  // ★ C113 D10 · 구현 1R 구조 — 관문 길 예약 소유 = 본문의 모든 출구(던짐 포함)를 이 finally 가 끝정리 · 공용 입구에 넘긴 뒤 = 해제 0
+  const coHold = new AdHold(String(p.company_id));
+  try {
+    return await dispatchProposalSendBody(p, capPath, coHold);
+  } finally {
+    if (coHold.holding) await coHold.settle();
+  }
+}
+
+async function dispatchProposalSendBody(
+  p: any,
+  capPath: OperatorCapPath | null,
+  coHold: AdHold,
+): Promise<{ action: 'sent' | 'skipped'; campaignId?: string; sentCount?: number; reason?: string }> {
   const proposalId: string = p.id;
   const companyId: string = p.company_id;
   const pj: any = p.proposal_json || {};
@@ -3470,6 +3486,12 @@ async function dispatchProposalSend(
   //   (종전엔 try 안 지역 변수라 분모 적재만 피로도를 못 보고 실제 발송보다 많은 고객을 세었다).
   let sendGates: AudienceGates = {};
   let sendFatigueCap: FatigueCap | null = null;
+  let adGateMarked = false;   // ★ 1106 — 원장을 쓴 판정일 때만 잇는다(광고 관문 · 미가입 회사 = 잇기 0)
+  // ★ 2026-11-07 C113 D10 — 관문 길이 원장을 쓰고 아직 공용 입구에 넘기지 않은 동안 = 이 시도가 예약을 쥔다(버리는 출구 = 해제 · 소유 CT = 싸개가 만들어 넘김 · 끝정리 = 싸개 finally)
+  const abandonStaging = async () => {
+    if (coHold.holding) await coHold.settle();
+    await cleanupOrphanStaging(stagingId);
+  };
   // ⛔ 5R: 매장 범위도 발송 후 분모 적재가 같은 것을 쓰도록 함수 스코프.
   let sendBaseParams: any[] = [companyId];
   let sendStoreFilter = '';
@@ -3703,6 +3725,31 @@ async function dispatchProposalSend(
       }
     }
 
+    // ★ 2026-11-06 C110 광고 관문(설계서 §4 automarketing 연속 운영자 · 1차 · 리마인드 둘 다) — 적재 SQL 안 피로도는 그대로 두고
+    //   개별 회신 제외 뒤 · 상한 · 예산 검사 앞에 전체 대조군 · 우선순위 · 발송별 대조군을 건다 · 묶음 = stagingId ·
+    //   뺀 수만큼 recipientTotal 을 줄인다 · 전원 빠지면 「발송 보류」 갈래(개별 회신 전원 제외와 같은 꼴).
+    // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 그대로(관문 0 · 적재 SQL 피로도 그대로) · 관문 길(요금제 씀 + 새 기능)만 적재 표 관문(새 기능 셋)
+    const coGateMode = isAd && recipientTotal > 0 ? await resolveAdGateMode(companyId) : { mode: 'legacy' as const };
+    if (coGateMode.mode === 'gate') {
+      const adGate = await gateStaging(coGateMode.policy, {
+        branch: 'automarketing', stagingId, unsubUserId: userId, mode: 'commit', span: sendSpanOf(null),
+      });
+      adGateMarked = adGate.marked;
+      coHold.take(adGate.marked, stagingId);
+      if (totalExcluded(adGate.counts) > 0) {
+        const left = await query(`SELECT COUNT(*)::int AS n FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid`, [stagingId, companyId]);
+        recipientTotal = Number(left.rows[0]?.n || 0);
+        console.log(`[ContinuousOperator AutoSend] 광고 관문 ${adGateNotice(adGate.counts)} — proposal=${proposalId} 남은 ${recipientTotal}`);
+      }
+      if (recipientTotal === 0) {
+        await abandonStaging();
+        await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = $2 WHERE id = $1::uuid`,
+          [proposalId, `대조군과 우선순위 설정으로 받는 사람이 모두 빠져 발송을 보류했습니다. ${adGateNotice(adGate.counts)}`]);
+        await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 대상 고객이 모두 대조군과 우선순위 설정으로 빠져 발송을 보류했습니다.`);
+        return { action: 'skipped', reason: '광고 관문 전원 제외. 발송 보류' };
+      }
+    }
+
     // ⛔ 7R 정정: 재추출된 **실제 건수**로 상한·예산을 다시 본다. 종전엔 제안 시점 수로 통과한 뒤
     //   발송 직전 추출에서 대상이 늘어도 검사가 없어, 설정한 자율 발송 상한과 예산을 넘겨 실발송·실차감했다.
     //   (자율 경로 전용 — 수동 승인은 사람이 이미 검토했다는 기존 계약을 유지한다.)
@@ -3785,7 +3832,7 @@ async function dispatchProposalSend(
 
       if (overReason) {
         // 커밋 후 정리 — 적재분을 치우고 담당자에게 사유를 알린다.
-        await cleanupOrphanStaging(stagingId);
+        await abandonStaging();
         await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' ${overReason}. 담당자 검토가 필요합니다.`);
         return { action: 'skipped', reason: overReason };
       }
@@ -3823,7 +3870,7 @@ async function dispatchProposalSend(
     // 발송 커밋 전 예외 → 'sending' 정지 방지: 담당자 검토로 내리고(자동 재발송 X) 통지 후 재던짐.
     // ⛔ 8R 정정: 적재해 둔 수신자 행도 함께 치운다. 캠페인이 소유권을 가져가기 전에 빠져나가면
     //   전화번호·이름이 담긴 staging이 주인 없이 남고 정리 워커도 없다.
-    await cleanupOrphanStaging(stagingId);
+    await abandonStaging();
     await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 준비 오류. 담당자 검토' WHERE id = $1::uuid AND status = 'sending'`, [proposalId]).catch(() => {});
     await notify('[AI 자동마케팅] 발송 보류', `'${op.name || ''}' 발송 준비 중 오류로 보류했습니다. 담당자 검토가 필요합니다.`);
     throw preErr;
@@ -3839,7 +3886,7 @@ async function dispatchProposalSend(
   // ★ 2026-10-09 시연 회사 절단점(설계서 docs/2026-10-09-demo-company-design.md §2) — 적재 표식·캠페인 생성·크레딧 앞.
   //   대상 계산·문안·단축 URL 까지는 진짜로 돌고, 캠페인·큐·크레딧·통지·밴딧에는 닿지 않는다. 제안은 'sent' 로 마감(meta.demo).
   if (demo) {
-    await cleanupOrphanStaging(stagingId);
+    await abandonStaging();
     await query(
       `UPDATE operator_proposals
           SET status = 'sent', auto_sent_at = NOW(),
@@ -3878,12 +3925,14 @@ async function dispatchProposalSend(
       createdBy: userId, idempotencyKey: `continuous-operator-send:${proposalId}:${stagingId}`, throwOnInsufficient: true,
     });
     if (sendCharge === 'failed') throw new Error('발송 크레딧 차감을 확인하지 못함');
+    coHold.pass();   // ★ C113 D10 — 넘김(공용 입구가 활성화 문장 직전까지 쥐고 그 전 실패면 스스로 해제)
     const res = await createDirectSendCampaign(
       {
         stagingId,
         campaignName: `AI 자동마케팅 ${op.name || ''} ${new Date().toLocaleDateString('ko-KR')}`,
         msgType, message: trackedBody, subject: resolvedSubject || null, callback, sendChannel: 'sms',
         adEnabled: isAd, total: recipientTotal, dedupEnabled: true, unsubFilterEnabled: true,
+        adGateBatchId: adGateMarked ? stagingId : null,   // ★ 2026-11-06 C110 광고 관문 원장 잇기(차감 앞)
         mmsImagePaths,
         // ★ 2026-10-07 개별 회신 — 워커가 staging callback 을 행마다 싣는다 · 배정 판정은 위 제외와 같은 사용자
         ...(useIndividualCb ? { useIndividualCallback: true, callbackFilterUserId: cbFilterUserId } : {}),
@@ -3895,7 +3944,8 @@ async function dispatchProposalSend(
     primarySentAt = new Date();
   } catch (e: any) {
     // ⛔ 8R 정정: 캠페인이 만들어지지 못했으면 staging의 주인이 없다 — 잔액 부족·발송 오류 모두에서 치운다.
-    await cleanupOrphanStaging(stagingId);
+    //   ★ C113 D10 — 공용 입구에 넘기기 전 실패(표식 · 크레딧)면 쥔 예약도 해제(넘긴 뒤 = 공용 입구가 판정 · 여기 해제 0)
+    await abandonStaging();
     if (e instanceof InsufficientCreditError) {
       // ★ 2026-10-24 X2 — 발송 크레딧이 모자란다 = 보내지 않는다(마이너스 0). 운영자는 크레딧 정지 · 제안은 검토(충전 뒤 [승인]하면 보낸다)
       await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_executed = false, auto_execute_reason = '크레딧 부족으로 이번 회차를 보내지 않음' WHERE id = $1::uuid`, [proposalId]);

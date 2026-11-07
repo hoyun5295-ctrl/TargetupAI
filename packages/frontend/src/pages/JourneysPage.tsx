@@ -1747,7 +1747,7 @@ export default function JourneysPage() {
                             <span className="text-emerald-700" title="목표 달성 종료: 진입 후 목표 달성이 확인되어 잔여 발송 없이 종료된 고객">목표 달성 {Number(j.goal_met_count).toLocaleString()}</span>
                           )}
                           {Number(j.holdout_count) > 0 && (
-                            <span className="text-sky-700" title="홀드아웃 대조군: 증분 성과 비교를 위해 의도적으로 발송하지 않는 진입 고객 (통계 분석에서 전환 비교)">홀드아웃 {Number(j.holdout_count).toLocaleString()}</span>
+                            <span className="text-sky-700" title="대조군: 효과를 비교하려고 일부러 보내지 않는 고객(여정 통계의 대조군 비교에서 봅니다)">대조군 {Number(j.holdout_count).toLocaleString()}명</span>
                           )}
                         </div>
                       )}

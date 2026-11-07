@@ -1,25 +1,30 @@
 /**
- * DM 브랜드 추출 — 보호된 요청으로만 외부 페이지를 가져온다 (★2026-09-26 한줄로 V2 R1-28 · B-0824-2 같은 부류)
- *
- * extractBrandFromUrl만 같은 파일의 fetchHtmlGuarded(사설·내부 주소 차단 · 리다이렉트 홉마다 DNS 해석·공인 검증·연결 고정 · 크기 상한)를
- * 쓰지 않고 일반 fetch로 리다이렉트를 따라가, 사용자가 넣은 주소로 서버가 내부 주소를 두드릴 수 있었다(SSRF).
+ * DM 브랜드 추출 — ★ 2026-11-07 C113 K18 · R15 · R80: 브랜드 키트 URL 추출 사슬(화면 모달 → POST /dm/brand-kit/extract →
+ * previewBrandExtract · suggestBrandKitFromUrl → extractBrandFromUrl · toBrandKitPatch)은 화면 모달이 2026-07-21 제거된 뒤
+ * 쓰는 곳 0 이라 지웠다. 옛 시험(★2026-09-26 R1-28 · 보호된 요청만 쓰는가)은 지운 함수를 가리켜, 그 함수가 없음을 고정한다.
+ * 같은 모듈의 살아 있는 외부 요청(fetchHtmlGuarded · fetchProductOgImages)은 그 모듈 시험들이 계속 본다.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
-const src = readFileSync(join(__dirname, '..', 'dm', 'dm-brand-extractor.ts'), 'utf8');
-const fn = src.slice(src.indexOf('export async function extractBrandFromUrl('), src.indexOf('// ────────────── 상품 URL → og:image'));
+const be = (rel: string) => readFileSync(join(__dirname, '..', '..', rel), 'utf8');
 
-describe('브랜드 추출 외부 요청', () => {
-  it('보호된 요청 함수를 쓴다', () => {
-    expect(fn).toContain('await fetchHtmlGuarded(normalizedUrl)');
+describe('브랜드 키트 URL 추출 사슬 — 쓰는 곳 0 이라 없다', () => {
+  it('추출기에 메인 추출 · 패치 변환이 없다', () => {
+    const src = be('utils/dm/dm-brand-extractor.ts');
+    expect(src).not.toContain('export async function extractBrandFromUrl(');
+    expect(src).not.toContain('export function toBrandKitPatch(');
   });
-  it('일반 fetch·리다이렉트 추종이 남아 있지 않다', () => {
-    expect(fn).not.toMatch(/await fetch\(/);
-    expect(fn).not.toContain("redirect: 'follow'");
+  it('키트 CT 에 미리보기 · 제안이 없다', () => {
+    const src = be('utils/dm/dm-brand-kit.ts');
+    expect(src).not.toContain('previewBrandExtract');
+    expect(src).not.toContain('suggestBrandKitFromUrl');
   });
-  it('상대 주소는 최종 도착 페이지 기준으로 푼다', () => {
-    expect(fn).toContain('baseUrl = page.baseUrl;');
+  it('DM 라우터에 추출 주소가 없다', () => {
+    expect(be('routes/dm.ts')).not.toContain("'/brand-kit/extract'");
+  });
+  it('화면 모달 파일이 없다', () => {
+    expect(existsSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'components', 'dm', 'modals', 'BrandKitModal.tsx'))).toBe(false);
   });
 });

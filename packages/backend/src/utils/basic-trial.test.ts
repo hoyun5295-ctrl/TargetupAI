@@ -21,7 +21,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../config/database', () => {
   const connect = vi.fn();
-  return { default: { connect }, pool: { connect }, query: vi.fn() };
+  // ★ C113 D2 — 요금제 끝 비우기의 스키마 확인(관문 CT · 5분 기억)은 풀 조회 · C110-DDL-1 뒤 운영 상태(칸 · 표 있음)
+  const query = vi.fn(async (sql: string) => (String(sql).includes('information_schema') ? { rows: [{ cols: 4, tabs: 2 }] } : { rows: [] }));
+  return { default: { connect }, pool: { connect }, query };
 });
 vi.mock('./plan-change-log', () => ({
   recordPlanChange: vi.fn(),
@@ -84,6 +86,9 @@ function makeClient(opts: ClientOpts = {}) {
 
 function kinds(calls: Array<{ sql: string }>): string[] {
   return calls.map(({ sql }) => {
+    if (/^SAVEPOINT end_ad_gate/.test(sql)) return 'SP';
+    if (/^RELEASE SAVEPOINT end_ad_gate/.test(sql)) return 'SP_RELEASE';
+    if (/^UPDATE companies c\s+SET global_holdout_pct = NULL/.test(sql)) return 'END_AD_GATE';   // ★ C113 D2 요금제 끝 비우기(체험 = 요금제 씀 = 0 행)
     if (/^BEGIN/.test(sql)) return 'BEGIN';
     if (/^COMMIT/.test(sql)) return 'COMMIT';
     if (/^ROLLBACK/.test(sql)) return 'ROLLBACK';
@@ -109,7 +114,7 @@ describe('grantFreeTrial — 무주입(기존 호출부 2곳) 회귀', () => {
 
     const r = await grantFreeTrial(COMPANY_ID, 7);
 
-    expect(kinds(calls)).toEqual(['BEGIN', 'PLAN', 'CREDITS', 'LOCK', 'UPDATE', 'COMMIT']);
+    expect(kinds(calls)).toEqual(['BEGIN', 'PLAN', 'CREDITS', 'LOCK', 'UPDATE', 'SP', 'END_AD_GATE', 'SP_RELEASE', 'COMMIT']);
     expect(record).toHaveBeenCalledWith(expect.objectContaining({
       client, companyId: COMPANY_ID, toPlanId: TRIAL_PLAN_ID, changeType: 'trial_start',
       reason: '무료체험 7일 부여',
@@ -185,7 +190,7 @@ describe('grantFreeTrial — client 주입(마케팅 진단 submit 전용 경로
     const r = await grantFreeTrial(COMPANY_ID, 7, { client: client as any });
 
     expect(connect).not.toHaveBeenCalled();                       // 풀에서 새 커넥션을 얻지 않는다
-    expect(kinds(calls)).toEqual(['PLAN', 'CREDITS', 'LOCK', 'UPDATE']);     // BEGIN/COMMIT/ROLLBACK 없음
+    expect(kinds(calls)).toEqual(['PLAN', 'CREDITS', 'LOCK', 'UPDATE', 'SP', 'END_AD_GATE', 'SP_RELEASE']);     // BEGIN/COMMIT/ROLLBACK 없음 · 비우기 = 같은 client 저장점(★ C113 D2)
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ client, changeType: 'trial_start' }));
     expect(trialStart).toHaveBeenCalledWith(client, COMPANY_ID, 750, TRIAL_KEY, expect.any(Date));
     expect(alertFail).not.toHaveBeenCalled();

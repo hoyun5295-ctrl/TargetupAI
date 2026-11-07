@@ -312,12 +312,12 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 
 .dm-section {
   position: relative;
-  /* ★ 2026-07-02(2) 한국어 단어 단위 줄바꿈 + 넘침 방지 — 긴 문구 잘림 근본 차단 */
+  /* ★ 2026-07-02(2) 한국어 단어 단위 줄바꿈 + 넘침 방지: 긴 문구 잘림 근본 차단 */
   word-break: keep-all;
   overflow-wrap: anywhere;
 }
 
-/* ★ 2026-07-02(2) 타이포 유틸 — 에디터(dm-builder.css)와 동일 정의. 그동안 발행물에 이 클래스 정의가
+/* ★ 2026-07-02(2) 타이포 유틸: 에디터(dm-builder.css)와 동일 정의. 그동안 발행물에 이 클래스 정의가
    빠져 있어 .dm-text-hero(쿠폰 라벨·히어로 기본 구도 헤드라인 등)가 본문 크기로 렌더되던 결함 수정. */
 .dm-text-hero  { font-size: var(--dm-fs-hero);  line-height: var(--dm-lh-hero);  font-weight: 800; letter-spacing: -0.02em; }
 .dm-text-h1    { font-size: var(--dm-fs-h1);    line-height: var(--dm-lh-h1);    font-weight: 700; letter-spacing: -0.01em; }
@@ -326,16 +326,16 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 .dm-text-body  { font-size: var(--dm-fs-body);  line-height: var(--dm-lh-body);  font-weight: 400; }
 .dm-text-small { font-size: var(--dm-fs-small); line-height: var(--dm-lh-small); font-weight: 400; }
 .dm-text-tiny  { font-size: var(--dm-fs-tiny);  line-height: var(--dm-lh-tiny);  font-weight: 400; }
-/* ★ 2026-07-02 v2 — 오버라인 라벨(자간 넓은 소형 라벨 → 큰 헤드라인 3단 위계의 1단) */
+/* ★ 2026-07-02 v2: 오버라인 라벨(자간 넓은 소형 라벨 → 큰 헤드라인 3단 위계의 1단) */
 .dm-overline   { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; }
 
-/* ★ 2026-07-02 v2 — 소형 화면 타입 축소 (디스플레이급 스케일의 375px 이하 보정) */
+/* ★ 2026-07-02 v2: 소형 화면 타입 축소 (디스플레이급 스케일의 375px 이하 보정) */
 @media (max-width: 375px) {
   :root { --dm-fs-hero: 34px; --dm-fs-h1: 25px; }
 }
 
-/* ★ 2026-07-02(5) 발행물 디자인 격상 — 버튼 여백/자간/그림자 정돈 (이메일 톤)
-   ★ 2026-07-07(5) 디자인 2.0 — 그라데이션 면 + 강조색 그림자 + 프레스 마이크로 인터랙션 (인앱 2.0 톤).
+/* ★ 2026-07-02(5) 발행물 디자인 격상: 버튼 여백/자간/그림자 정돈 (이메일 톤)
+   ★ 2026-07-07(5) 디자인 2.0: 그라데이션 면 + 강조색 그림자 + 프레스 마이크로 인터랙션 (인앱 2.0 톤).
      값 변경 시 frontend/src/styles/dm-builder.css .dm-cta 동시 수정 필수 (에디터·발행물 시각 일치). */
 .dm-cta {
   display: inline-block;
@@ -357,7 +357,7 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
 .dm-cta-secondary { background: var(--dm-neutral-100); color: var(--dm-neutral-900); box-shadow: inset 0 0 0 1px var(--dm-neutral-200); }
 .dm-cta-outline { background: transparent; border: 2px solid var(--dm-primary); color: var(--dm-primary); box-shadow: none; }
 
-/* ★ 2026-07-07(5) 섹션 스크롤 리빌 — 뷰어 JS가 화면 밖 섹션에만 .dm-reveal 부여(no-JS = 전부 즉시 표시).
+/* ★ 2026-07-07(5) 섹션 스크롤 리빌: 뷰어 JS가 화면 밖 섹션에만 .dm-reveal 부여(no-JS = 전부 즉시 표시).
    reduced-motion은 JS에서 부여 자체를 건너뛴다. */
 .dm-reveal { opacity: 0; transform: translateY(16px); }
 .dm-reveal.dm-in {
@@ -366,7 +366,7 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
   transition: opacity 550ms cubic-bezier(0.22, 1, 0.36, 1), transform 550ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ★ 2026-07-07(5) 데스크탑 열람 — 슬레이트 틴트 배경 + 페이지 프레임 앰비언트 그림자 (모바일 무영향) */
+/* ★ 2026-07-07(5) 데스크탑 열람: 슬레이트 틴트 배경 + 페이지 프레임 앰비언트 그림자 (모바일 무영향) */
 @media (min-width: 480px) {
   body { background: linear-gradient(180deg, #eef0f5 0%, #e7eaf1 100%); }
   .dm-viewer { box-shadow: 0 24px 80px -24px rgba(15, 23, 42, 0.22), 0 2px 8px rgba(15, 23, 42, 0.06); }
@@ -383,7 +383,7 @@ button { font-family: inherit; cursor: pointer; border: 0; background: transpare
   :root { --dm-fs-hero: 24px; --dm-fs-h1: 20px; }
 }
 
-/* 빈 이미지/콘텐츠 자리 — 휑한 빈칸 대신 옅은 점선 박스로 정제 */
+/* 빈 이미지/콘텐츠 자리: 휑한 빈칸 대신 옅은 점선 박스로 정제 */
 .dm-mood-slot {
   background: var(--dm-neutral-50);
   border: 1px dashed var(--dm-neutral-300);
@@ -419,7 +419,7 @@ export function renderDmDesign3Css(): string {
 .dm-countdown .cd-num[data-unit="s"] { display:inline-block; animation: dmSecPop 1s ease-out infinite; }
 .dm-reveal .dm-lq-bar { transform: scaleX(0); transform-origin: left center; }
 .dm-reveal.dm-in .dm-lq-bar { transform: scaleX(1); transition: transform 1.1s cubic-bezier(0.22,1,0.36,1) 0.25s; }
-/* 리빌 아이템 스태거 — 상품/갤러리 카드가 차례로 떠오름 */
+/* 리빌 아이템 스태거: 상품/갤러리 카드가 차례로 떠오름 */
 .dm-reveal :is(.dm-pc-items, .dm-gal-grid) > * { opacity:0; transform:translateY(12px); }
 .dm-reveal.dm-in :is(.dm-pc-items, .dm-gal-grid) > * { opacity:1; transform:none;
   transition:opacity 500ms cubic-bezier(0.22,1,0.36,1), transform 500ms cubic-bezier(0.22,1,0.36,1); }
@@ -448,9 +448,9 @@ export function renderDmDesign3Css(): string {
 .dm-pullup { position:relative; z-index:2; margin-top:-26px; border-radius:24px 24px 0 0; overflow:hidden;
   box-shadow:0 -12px 32px -14px rgba(15,23,42,0.25); }
 .dm-divider-svg { display:block; line-height:0; margin-bottom:-1px; color: var(--dm-bg); }
-/* ★ 2026-07-15 그라데이션 연결부(임은지 신고) — 연결부는 섹션 하단이라 그라데이션 끝색(--dm-grad-to)으로 착색해야 이어짐(기존 시작색 var(--dm-primary)=배경 윗부분 색만 반영). 배경면 gradient 정의와 동일 폴백. */
+/* ★ 2026-07-15 그라데이션 연결부: 연결부는 섹션 하단이라 그라데이션 끝색(--dm-grad-to)으로 착색해야 이어짐(기존 시작색 var(--dm-primary)=배경 윗부분 색만 반영). 배경면 gradient 정의와 동일 폴백. */
 .dm-bgx-gradient + .dm-divider-svg, .dm-bgx-gradient .dm-divider-svg { color: var(--dm-grad-to, color-mix(in srgb, var(--dm-primary) 35%, var(--dm-accent))); }
-/* ★ 2026-07-14 하단 연결부 미반영(남지현 신고) — divider가 배경면 div 바깥이라 color:var(--dm-bg)가 페이지 기본 흰색으로 풀림. 배경면 변형별 실제 색 지정. */
+/* ★ 2026-07-14 하단 연결부 미반영: divider가 배경면 div 바깥이라 color:var(--dm-bg)가 페이지 기본 흰색으로 풀림. 배경면 변형별 실제 색 지정. */
 .dm-bgx-soft + .dm-divider-svg, .dm-bgx-soft .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 6%, #ffffff); }
 .dm-bgx-tint + .dm-divider-svg, .dm-bgx-tint .dm-divider-svg { color: color-mix(in srgb, var(--dm-primary) 14%, #ffffff); }
 .dm-bgx-dark + .dm-divider-svg, .dm-bgx-dark .dm-divider-svg { color: #12151f; }

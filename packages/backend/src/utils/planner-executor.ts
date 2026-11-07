@@ -33,6 +33,8 @@ import { releaseUnsentSendCharges, releaseOneSendCharge } from './ai-credit-rele
 import { lineStepsCollected } from './line-steps-context';
 import { getCreditCost } from './ai-credit-calc';
 import { createDirectSendCampaign } from './direct-send-core';
+import { resolveAdGateMode, gateStaging, sendSpanOf, AdHold } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
+import { adGateNotice } from './ad-send-gate-core';
 import { DirectSendError } from './direct-send-spec';
 import { SPAM_BLOCKED_CODE } from './spam-block';
 import { sendEmailCampaign, getEmailCampaign } from './email-channel';
@@ -351,14 +353,18 @@ async function dmStillOpen(tp: PlannerTouchpointRow, link: CarryLink): Promise<b
 // ── 채널 실행 ────────────────────────────────────────────────────────
 async function executeMessaging(tp: PlannerTouchpointRow, link: CarryLink, today: string, claim: ClaimCtx): Promise<ExecOutcome> {
   let stampRemains = false;
+  // ★ C113 D10 · 구현 1R #5 — 관문 길 예약 소유 = 본문의 모든 출구(던짐 포함)를 이 finally 가 끝정리 · 공용 입구에 넘긴 뒤 = 해제 0
+  const adHold = new AdHold(tp.companyId);
   try {
     return await executeMessagingCore(tp, link, today, claim, {
       onStamp: () => { stampRemains = true; },
       onAbort: () => { stampRemains = false; },
-    });
+    }, adHold);
   } catch (e) {
     if (link.dm) await settleCompanionAfterError(link.dm, stampRemains, claim.token);
     throw e;
+  } finally {
+    if (adHold.holding) await adHold.settle();
   }
 }
 
@@ -368,6 +374,7 @@ async function executeMessagingCore(
   today: string,
   claim: ClaimCtx,
   hooks: { onStamp: () => void; onAbort: () => void },
+  adHold: AdHold,
 ): Promise<ExecOutcome> {
   const end = (kind: PairEnd['kind'], reason: string, notice: string) => endPair(tp, link, claim.token, { kind, reason, notice });
   const review = (reason: string, dropCopy: boolean, notice: string) => backToReview(tp, link, claim, reason, dropCopy, notice);
@@ -460,9 +467,33 @@ async function executeMessagingCore(
     return end('skipped', PLANNER_REASON.audienceZero, `'${tp.title}' ${label} 발송 대상이 0명이라 이번 발송을 생략했습니다.`);
   }
 
+  // ★ 2026-11-06 C110 광고 관문(설계서 §4 planner) — 적재 뒤 · 커밋(차감) 앞 · 묶음 = stagingId · 플래너 발송은 늘 광고(adEnabled true)
+  //   뺀 수는 완료 알림 한 줄(승인한 사람에게 · §4 알림) · 전원 빠지면 「대상 0」 갈래.
+  // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 흐름 · 알림 그대로(관문 0) · 관문 길(요금제 씀 + 새 기능)만 ·
+  //   D10 = 공용 입구에 넘기기 전 출구(대상 0 · 지문 · 선점 · 크레딧)는 쥔 예약을 지운다
+  const plannerGateMode = await resolveAdGateMode(tp.companyId);
+  const dropStaging = async () => {
+    if (adHold.holding) await adHold.settle();
+    await cleanupPlannerStaging(stagingId);
+  };
+  const adGate = plannerGateMode.mode === 'gate'
+    ? await gateStaging(plannerGateMode.policy, {
+      branch: 'planner', stagingId, unsubUserId: tp.createdBy || tp.companyId, mode: 'commit', span: sendSpanOf(null),
+    })
+    : null;
+  if (adGate) adHold.take(adGate.marked, stagingId);
+  const adGateLine = adGate ? adGateNotice(adGate.counts) : '';
+  if (adGateLine) {
+    total = Number((await query(`SELECT COUNT(*)::int AS n FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId])).rows[0]?.n || 0);
+    if (total === 0) {
+      await dropStaging();
+      return end('skipped', PLANNER_REASON.audienceZero, `'${tp.title}' ${label} 발송 대상이 모두 빠져 이번 발송을 생략했습니다. ${adGateLine}`);
+    }
+  }
+
   // ⑥ 지문 대조 ② — 커밋 직전(스팸 검사 수 분 동안 고쳤을 수 있다)
   if (!(await fingerprintsMatch(tp, link, claim)) || !(await dmStillOpen(tp, link))) {
-    await cleanupPlannerStaging(stagingId);
+    await dropStaging();
     return review(PLANNER_REASON.changedAfterApproval, false,
       `'${tp.title}' 발송 직전에 문자·모바일 DM 내용이 바뀌어 오늘 발송을 멈췄습니다. 바뀐 내용을 확인한 뒤 다시 승인해 주세요.`);
   }
@@ -474,7 +505,7 @@ async function executeMessagingCore(
   try {
     if (!(await stampSendAttempt(tp, claim, { staging_id: stagingId }, link.dm))) {
       // 이 실행이 더는 주인이 아니다(회수·다시 시작) — 보내지 않고 손대지 않는다(새 주인이 판정한다)
-      await cleanupPlannerStaging(stagingId);
+      await dropStaging();
       console.warn(`[planner-executor] 선점을 잃어 발송하지 않음 tp=${tp.id}`);
       return 'not_due';
     }
@@ -488,20 +519,21 @@ async function executeMessagingCore(
         });
       } catch (err) {
         if (!(err instanceof InsufficientCreditError)) throw err;
-        await cleanupPlannerStaging(stagingId);
+        await dropStaging();
         await clearSendAttempt(tp, link.dm, 'INSUFFICIENT_CREDIT');
         hooks.onAbort();
         return end('held', PLANNER_REASON.creditShort, `'${tp.title}' ${label} 발송이 크레딧 부족으로 보류됐습니다. 충전 후 [다시 시작]을 눌러 주세요.`);
       }
       if (!lineStepsCollected(out)) {
         // 원장이 차감을 확정하지 못했다 — 보내지 않는다(표식을 걷어 다음 주기가 다시 본다 · 무과금 발송 0)
-        await cleanupPlannerStaging(stagingId);
+        await dropStaging();
         await clearSendAttempt(tp, link.dm, 'CHARGE_UNCONFIRMED');
         hooks.onAbort();
         throw new Error(`문안비 차감을 확인하지 못해 보내지 않았습니다(${out})`);
       }
       chargedNow = out === 'deducted';
     }
+    adHold.pass();   // ★ C113 D10 — 넘김(공용 입구가 활성화 문장 직전까지 쥐고 그 전 실패면 스스로 해제)
     const res = await createDirectSendCampaign(
       {
         stagingId,
@@ -512,6 +544,7 @@ async function executeMessagingCore(
         callback,
         sendChannel: 'sms',
         adEnabled: true,
+        adGateBatchId: adGate?.marked ? stagingId : null,   // ★ 1106 — 원장을 쓴 판정일 때만 잇는다   // ★ 2026-11-06 C110 광고 관문 원장 잇기(차감 앞)
         total,
         dedupEnabled: true,
         unsubFilterEnabled: true,
@@ -556,7 +589,7 @@ async function executeMessagingCore(
     { campaign_id: campaignId, ...(link.url ? { dm_url: link.url } : {}), ...(link.dm ? { dm_touchpoint_id: link.dm.id } : {}) },
     link.dm ? { row: link.dm, extra: { campaign_id: campaignId, carried_by: tp.id, dm_url: link.url, copy_charged_by: tp.id } } : null,
   );
-  await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 완료', `'${tp.title}' ${label} ${total.toLocaleString()}명 발송을 접수했습니다.`);
+  await notifyPlanner(tp.companyId, tp.createdBy, '[마케팅 플래너] 발송 완료', `'${tp.title}' ${label} ${total.toLocaleString()}명 발송을 접수했습니다.${adGateLine ? ` ${adGateLine}` : ''}`);
   console.log(`[planner-executor] ${tp.channel} 발송 tp=${tp.id}${link.dm ? ` +dm=${link.dm.id}` : ''} campaign=${campaignId} ${total}명 (${today})`);
   return 'sent';
 }

@@ -16,6 +16,7 @@
  *
  * 대체 규칙(치환할 때): 나열은 "·", 부연은 ":" 또는 괄호, 문장이 둘이면 마침표로 나눈다. 코드 주석은 대상이 아니다.
  */
+import { stripComments as stripJsComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19
 import { describe, it, expect } from 'vitest';
 import { resolve } from 'path';
 import { scanSources, SCAN_TIMEOUT_MS } from './source-scan';
@@ -27,19 +28,13 @@ const EM_DASH = '—';
 /** 내부 로그·알림 호출. 인자 안의 문구는 운영자 로그/관리자 문자라 사용자 노출이 아니다. */
 const INTERNAL_CALL = /\b(?:console\.\w+|log(?:Warn|Error|Err|Info)?|sendSystemAlert)\(/g;
 
-/** 코드 뒤 줄 주석의 시작. 문자열 안 URL의 "//"는 ":" 뒤라 걸리지 않는다. */
-const TRAILING_COMMENT = /(?:^|[\s;,)}])\/\//;
-
-/** 블록 주석 · 줄 주석 · SQL 주석 줄을 지운다. */
+/** JS 주석(공용 글자 단위 도우미) 뒤에 이 시험의 면제 = SQL 주석 줄(--) · 문서 주석 줄(*)을 지운다(★ C113 K19 · 옛 판정 그대로). */
 function stripComments(src: string): string {
-  const noBlock = src.replace(/\/\*[\s\S]*?\*\//g, '');
-  return noBlock
+  return stripJsComments(src)
     .split('\n')
     .map((line) => {
       const t = line.trimStart();
-      if (t.startsWith('//') || t.startsWith('--') || t.startsWith('* ') || t === '*') return '';
-      const m = TRAILING_COMMENT.exec(line);
-      return m ? line.slice(0, m.index) : line;
+      return t.startsWith('--') || t.startsWith('* ') || t === '*' ? '' : line;
     })
     .join('\n');
 }

@@ -29,7 +29,7 @@ import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
-  buildLinkActionNotify, buildUnsupportedCharsNotify,
+  buildLinkActionNotify, buildUnsupportedCharsNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl, linkCancelTailOf } from './agency-send-link';
 import {
@@ -45,6 +45,8 @@ import { campaignMayHaveSent, classifyAttemptCampaign, inspectAttemptCampaign, n
 import { insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
 import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { countStagingFiltered, createDirectSendCampaign } from './direct-send-core';
+import { resolveAdGateMode, gateStaging, sendSpanOf, AdHold } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
+import { adGateNotice, totalExcluded } from './ad-send-gate-core';
 import { DirectSendError } from './direct-send-spec';
 import { SPAM_BLOCKED_CODE } from './spam-block';
 import { getOpt080Number } from './messageUtils';
@@ -1002,7 +1004,13 @@ async function dispatchToPipeline(row: any, content: string, token: string): Pro
         }
         return;
       }
-      await dispatchAttempt(row, content, token, stagingId, label, notifyFailed);
+      // ★ C113 D10 · 구현 1R #5 — 관문 길 예약 소유 = 시도 본문의 모든 출구(던짐 포함)를 이 finally 가 끝정리 · 소유를 잃은 출구 · 넘긴 뒤 = 해제 0
+      const adHold = new AdHold(row.company_id);
+      try {
+        await dispatchAttempt(row, content, token, stagingId, label, notifyFailed, adHold);
+      } finally {
+        if (adHold.holding) await adHold.settle();
+      }
     } finally {
       if (held) {
         await lockClient.query(`SELECT pg_advisory_unlock(hashtext($1::text))`, [lockKey]).catch(() => { unlockFailed = true; });
@@ -1132,6 +1140,7 @@ function releaseDispatchSlot(): void {
 async function dispatchAttempt(
   row: any, content: string, token: string, stagingId: string, label: string,
   notifyFailed: (kind: string, payload: Record<string, any>) => Promise<void>,
+  adHold: AdHold,
 ): Promise<void> {
   // ⛔ 멱등 — 앞선 시도가 예약을 만들어 두고 원장에 적기 전에 죽었을 수 있다.
   //   그때 그냥 다시 만들면 같은 발송이 두 벌 나간다. **캠페인을 만들기 전에** 이번 시도 키로 먼저 찾는다.
@@ -1262,10 +1271,42 @@ async function dispatchAttempt(
     return;
   }
 
+  // ★ 2026-11-06 C110 광고 관문(설계서 §4 agency) — 광고 접수만 · 건수 확정 · 차감 앞 · 묶음 = stagingId · 나가는 날 = 고객이 정한 시각
+  // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 흐름 · 안내 그대로(관문 0) · 관문 길(요금제 씀 + 새 기능 · 이 시도 묶음 앞 배정)만
+  let adGateMarked = false;   // ★ 1106 — 원장을 쓴 판정일 때만 잇는다
+  // ★ C113 D10 — 예약 소유 = adHold(접수 소유 표식을 쥔 동안 · 소유를 잃은 출구 = pass · 새 시도가 같은 묶음을 씀 · 끝정리 = 부르는 자리 finally)
+  let adGateExcluded = 0;
+  let adGateLine = '';
+  const agencyGateMode = row.is_ad ? await resolveAdGateMode(row.company_id, { batchId: stagingId, priorArmsPossible: true }) : { mode: 'legacy' as const };
+  if (agencyGateMode.mode === 'gate') {
+    const adGate = await gateStaging(agencyGateMode.policy, {
+      branch: 'agency', stagingId, unsubUserId: row.created_by, mode: 'commit', span: sendSpanOf(row.requested_at),
+    });
+    adGateMarked = adGate.marked;
+    adHold.take(adGate.marked, stagingId);
+    adGateExcluded = totalExcluded(adGate.counts);
+    adGateLine = adGateNotice(adGate.counts);
+    if (adGateLine) console.log(`${LOG} 광고 관문 ${adGateLine} request=${row.id}`);
+  }
+
   // 정제 후 실제 발송 수(수신거부·중복 제외). 차감·청구가 이 수를 쓴다.
   const { sendCount } = await countStagingFiltered(stagingId, row.company_id, row.created_by, true, true, !!row.is_ad);
+  if (sendCount === 0 && adGateExcluded > 0) {
+    // ★ C113 D12 — 관문 길에서 관문이 모두 뺀 경우 = 그 사유로 안내(옛 「예약을 넣지 못해」 안내는 사실과 다르다)
+    await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
+    if (adHold.holding) await adHold.settle();
+    if (!await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token)) return;
+    await logEvent(row.id, 'dispatch_zero_after_gate', { staged: stagedCount, adGateExcluded });
+    await notifyManager({
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+      callback: row.callback_number, title: '[대행발송] 확인 요청',
+      text: buildAdGateAllExcludedNotify({ label }),
+    });
+    return;
+  }
   if (sendCount === 0) {
     await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
+    if (adHold.holding) await adHold.settle();
     if (!await setStatus(row.id, 'expired', { ...RELEASE, expired_at: new Date() }, token)) return;
     await notifyFailed('dispatch_zero_after_filter', { staged: stagedCount });
     return;
@@ -1287,12 +1328,14 @@ async function dispatchAttempt(
   );
   if (due.rows.length === 0) {
     console.warn(`${LOG} 캠페인을 만들기 직전 소유권을 잃어 중단한다 request=${row.id}`);
+    adHold.pass();   // ★ C113 D10 — 소유를 잃은 것이 확인된 출구 = 해제 0(새 시도가 같은 묶음을 씀)
     await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
     return;
   }
   if (due.rows[0].passed === true) {
     console.warn(`${LOG} 예약 시각이 지나 캠페인을 만들지 않는다 request=${row.id}`);
     await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid`, [stagingId]);
+    if (adHold.holding) await adHold.settle();   // ★ C113 D10 — 소유한 채 버리는 출구
     if (await setStatus(row.id, 'approved', { ...RELEASE }, token)) {
       await logEvent(row.id, 'dispatch_deadline_passed', {});
     }
@@ -1300,6 +1343,7 @@ async function dispatchAttempt(
   }
 
   const images = Array.isArray(row.mms_image_paths) ? row.mms_image_paths : [];
+  adHold.pass();   // ★ C113 D10 — 넘김(공용 입구가 활성화 문장 직전까지 쥐고 그 전 실패면 스스로 해제)
   try {
     const { campaignId } = await createDirectSendCampaign(
       {
@@ -1316,6 +1360,7 @@ async function dispatchAttempt(
         useIndividualCallback: individualCallback,
         sendChannel: 'sms',
         adEnabled: !!row.is_ad,
+        adGateBatchId: adGateMarked ? stagingId : null,   // ★ 2026-11-06 C110 광고 관문 원장 잇기(차감 앞)
         scheduled: true,
         scheduledAt: new Date(row.requested_at).toISOString(),
         // ★2026-10-03 원장의 원본 파일명을 묶어 넘긴다 — 결과·예약대기·캘린더 창이 캠페인 칸을 읽는다(임은지 접수 · 발송 배관은 경로만 읽어 무변경)
@@ -1341,6 +1386,14 @@ async function dispatchAttempt(
     if (await setStatus(row.id, 'queued', { ...RELEASE, campaign_id: campaignId, queued_at: new Date() }, token)) {
       await logEvent(row.id, 'queued', { campaignId, count: sendCount, staged: stagedCount, individualCallback });
       console.log(`${LOG} 예약 생성 완료 request=${row.id} campaign=${campaignId} ${sendCount}건`);
+      // ★ C113 D12 — 관문 길에서 관문이 일부를 뺐으면 담당자에게 뺀 수를 알린다(옛 길 = 안내 0 · 관문 뺀 수 0 = 안내 0)
+      if (adGateExcluded > 0) {
+        await notifyManager({
+          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+          callback: row.callback_number, title: '[대행발송] 발송 안내',
+          text: buildAdGateExcludedNotify({ label, total: stagedCount, line: adGateLine }),
+        });
+      }
     }
   } catch (err: any) {
     // 배관이 거절했다(잔액 부족·야간 광고 제한·미완성 링크 등). 캠페인 정리는 그쪽이 소유한다.

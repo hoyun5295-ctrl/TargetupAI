@@ -7,6 +7,7 @@
  *
  * 범위 = 뒤로가기 뿌리가 `/ai-operator`인 루트 페이지 25 → 상대 import 전이 폐포(pages·components · ★1016 lib 포함).
  */
+import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, resolve, dirname, normalize, relative } from 'path';
 
@@ -87,10 +88,6 @@ export function zoneFiles(): string[] {
   return [...seen].sort();
 }
 
-/** 주석 제거(블록·줄). 문자열 안 `//`(URL)는 건드리지 않도록 줄 주석은 줄 맨 앞 공백 뒤만 */
-function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, '');
-}
 
 /** 문자열 안의 `${…}`를 `:p`로, 쿼리스트링을 떼어 경로 모양만 남긴다 */
 function shape(raw: string): string {

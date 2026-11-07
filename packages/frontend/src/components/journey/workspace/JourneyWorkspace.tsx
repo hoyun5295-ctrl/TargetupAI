@@ -1083,6 +1083,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     attachedAfter={mj?.attachedAfter || null}
                     onDetach={detachAfter}
                     callbackOptions={callbackOptions}
+                    hasAdStep={(detail.steps || []).some((st) => st.step_type === 'message' && resolveJourneyAdFlag(st.channel, (st as any).is_ad))}
                   />
                 </div>
               )}

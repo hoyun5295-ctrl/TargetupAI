@@ -14,6 +14,7 @@
  *   7. ★0915(2) 기능 화면 주소로 직접 들어와도 같은 안내가 된다 — 허브 카드 경로마다 입구(PlanGate)가 그 기능 id로 걸려 있다.
  *   8. ★0915(2) 허브 첫 진입 안내에 옛 "PRO 요금제 특별 혜택" 문구가 없다 · 도움말 카탈로그가 AI 자동제작을 옛 화면으로 설명하지 않는다.
  */
+import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { describe, it, expect } from 'vitest';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,13 +26,6 @@ const read = (p: string) => readFileSync(join(FRONT, p), 'utf8');
 // ★ 2026-10-07 원장 · 영상은 화면 코드 · 공개 폴더 밖(서버)으로 옮겼다(Harold 「구멍 자체를 만들지 마」)
 const readLedger = () => readFileSync(join(__dirname, '../../content/plan-feature-intros.ts'), 'utf8');
 const MEDIA = join(__dirname, '../../../assets/plan-feature');
-function stripComments(src: string): string {
-  return src
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .map((line) => (line.trimStart().startsWith('//') ? '' : line))
-    .join('\n');
-}
 
 const INTROS = stripComments(readLedger());
 const MODULES = read('constants/ai-operator-modules.ts');

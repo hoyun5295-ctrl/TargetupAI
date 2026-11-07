@@ -55,6 +55,8 @@ import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { isCallbackRegistered, individualCallbackOf } from './callback-filter';   // ★ C105 H2 개별회신번호 = 직접발송과 같은 CT
 // ★ 2026-07-05: 발송 피로도 보호 — 광고 step 단건 게이트(차감 전 skip) + 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
+import { randomUUID } from 'crypto';
+import { resolveAdGateMode, AdGateMode, gatePhones, linkAdMarksSafe, AdHold } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
 import { prepaidDeduct } from './prepaid';
 import { deductCreditSafe, deductCreditOutcome, isChargedByKey, InsufficientCreditError } from './ai-credit';
 import { getCreditCost, kstDateTag } from './ai-credit-calc';
@@ -623,9 +625,29 @@ async function delayExecutions(ids: string[], minutes: number): Promise<void> {
   await query(`UPDATE journey_executions SET next_run_at = NOW() + ($2 || ' minutes')::interval WHERE id = ANY($1::uuid[]) AND status = 'active'`, [ids, String(minutes)]);
 }
 
+/** ★ 2026-11-07 C113 D10 — 관문 길 회차의 예약 주인(싸개가 끝에서 해제) */
+type AdGateRelease = { hold: AdHold | null; keep: Set<string> };   // ★ C113 D10 — 소유 CT(쥠 = 몸 · 끝정리 = 싸개 finally · keep = 큐에 실린 · 결과 불명 번호)
+
+/**
+ * ★ 2026-11-07 C113 D10 — 문자 칸 묶음(몸 = 아래 processMessageBatchBody 그대로) · 관문 길이 이 회차에 예약을 쓰면
+ *   끝에서 이어지지 않은 예약을 지운다(큐에 실린 · 결과 불명 번호 = 남김 · 옛 길 = 쓴 예약이 없어 무동작).
+ */
 async function processMessageBatch(
   input: ExecutionRow[], step: StepRow, res: BatchResult,
   snap: { pendingSnapshotAt: string | Date | null; snapshotReadFailed: boolean; snapshotId: string | null },
+): Promise<BatchResult> {
+  const adRelease: AdGateRelease = { hold: null, keep: new Set<string>() };
+  try {
+    return await processMessageBatchBody(input, step, res, snap, adRelease);
+  } finally {
+    if (adRelease.hold?.holding) await adRelease.hold.settle([...adRelease.keep]);
+  }
+}
+
+async function processMessageBatchBody(
+  input: ExecutionRow[], step: StepRow, res: BatchResult,
+  snap: { pendingSnapshotAt: string | Date | null; snapshotReadFailed: boolean; snapshotId: string | null },
+  adRelease: AdGateRelease,
 ): Promise<BatchResult> {
   const head = input[0];
   let execs = input;
@@ -776,6 +798,15 @@ async function processMessageBatch(
   const isAd = resolveJourneyAdFlag(step.channel, step.is_ad);
   const fatigueCap = isAd ? await getFatigueCap(head.company_id) : null;
   const fatigueBlocked = fatigueCap ? await getFatigueBlockedSet(head.company_id, fatigueCap, phones) : new Set<string>();
+  // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = 위 HEAD 피로도 · 건너뜀 자리 그대로(관문 · 원장 0) ·
+  //   관문 길(요금제 씀 + 새 기능)만 관문(전체 대조군 · 우선순위 · 원장 = 예약만 D13) · 묶음 = 이 칸 · 회차의 새 uuid ·
+  //   확정(잇기) = 단위가 큐에 실린 뒤 그 단위 번호만(sendUnits) · 끝 = 이어지지 않은 예약 해제(D10) · 장애 줄도 못 쓰면 던짐(이 회차 멈춤 · 돈 0)
+  const adGateMode: AdGateMode = isAd ? await resolveAdGateMode(head.company_id) : { mode: 'legacy' };
+  const adGateBatch = adGateMode.mode === 'gate' ? randomUUID() : null;
+  const adGate = adGateMode.mode === 'gate' && adGateBatch
+    ? await gatePhones(adGateMode.policy, { branch: 'journey', batchId: adGateBatch, reserve: true, recordExclusions: false }, phones)
+    : null;
+  if (adGate?.marked && adGateBatch) { adRelease.hold = new AdHold(head.company_id); adRelease.hold.take(true, adGateBatch); }
 
   // 채널 · 문안 꼴(칸마다 한 번)
   const channelLower = (step.channel || 'lms').toLowerCase();
@@ -800,6 +831,11 @@ async function processMessageBatch(
     // ★ 2026-11-02 설계서 3-11 · §4 ⑦ — 알림톡 칸(광고 판정 CT = false) = 활성 · 번호 유효만 · 080 거부는 광고 칸만
     if (!isCustomerSendable(consent === null ? customer : { ...customer, sms_opt_in: consent }, { informational: !isAd })) return { kind: 'skip', reason: 'opt_out_or_inactive' };
     if (isAd && unsubPhones.has(String(customer.phone))) return { kind: 'skip', reason: 'unsubscribed' };
+    // ★ 2026-11-06 C110 — 광고 관문 건너뜀 = 수신거부 바로 뒤 · 요금제 · 라인 · 운영 크레딧 예약 앞(설계서 §4 · R47) · ★ C113 = 관문 길만(피로도 = 아래 HEAD 자리)
+    {
+      const adReason = adGate?.excluded.get(normalizePhone(String(customer.phone || '')));
+      if (adReason) return { kind: 'skip', reason: adReason === 'priority' ? 'priority_lower' : 'global_holdout' };
+    }
     if (dailyLane) {
       if (seenCustomers.has(String(customer.id))) return { kind: 'skip', reason: 'duplicate_in_batch' };
       seenCustomers.add(String(customer.id));   // 먼저 생긴 실행(next_run_at 순 첫째) = 이 고객의 한 통
@@ -923,7 +959,7 @@ async function processMessageBatch(
 
     // ── 31 적재(⑤ 적재 단위 계약) — 비발송 결말보다 먼저. 적재가 중간에 멈추면(돈 · 창 · 보류 · 바깥 멈춤 · 안 들어감 · 결과 불명) 그 자리 뒤 고객은
     //    이번 회차 결말 0(경계 계약 = 한 건 판의 「멈춘 뒤 진입 시점 정지」 · 다음 회차가 그 자리부터 다시 본다 · Codex 구현 1R) ──
-    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId }, res) : null;
+    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep }, res) : null;
     const end = boundary < 0 ? outcomes.length : boundary;
     await applyRowOutcomes(head, step, outcomes, stopIdx == null ? end : Math.min(stopIdx, end), res);
 
@@ -1004,7 +1040,7 @@ async function applyBoundaryPause(head: ExecutionRow, step: StepRow, row: { exec
  */
 async function sendUnits(
   head: ExecutionRow, step: StepRow, rows: Array<SendRow & { idx: number }>,
-  c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null>; snapshotId: string | null },
+  c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null>; snapshotId: string | null; adGateBatch?: string | null; adKeep?: Set<string> },
   res: BatchResult,
 ): Promise<number | null> {
   const prepaidMsgType = c.msgType === 'KAKAO' ? 'KAKAO' : c.msgType;
@@ -1170,6 +1206,11 @@ async function sendUnits(
         });
 
     if (outcome.state === 'loaded') {
+      if (c.adKeep) for (const r of claimed) c.adKeep.add(normalizePhone(String(r.phone || '')));   // ★ C113 D10 — 실린 번호 = 끝 해제에서 남김
+      // ★ 2026-11-06 C110 — 이 단위가 큐에 실렸다 = 그 번호들의 우선순위 예약 확정(캠페인 연결 · 실패해도 발송은 이미 나감 = 경고만 · 예약은 2시간 산다)
+      if (c.adGateBatch) {
+        await linkAdMarksSafe(head.company_id, c.adGateBatch, campaignId, claimed.map((r) => String(r.phone || '')));   // ★ 1107 — 실패 = 장애 줄 · 발송은 이미 나감
+      }
       let confirmed: Array<{ id: string; executionId: string; cost: number }>;
       try {
         // ★ 0929 차수 5 — 운영 크레딧은 확정 **전에**(멱등 · 날짜 = 표식 시각)
@@ -1218,6 +1259,7 @@ async function sendUnits(
       return unit[0].idx;
     }
     // unknown = 표식 보존 · 이 묶음 멈춤(뒤 단위 0) · 다음 회차 단위 판정(I2 · I4) · 시도 횟수는 지금 남긴다(R8 · 판정이 미적재를 증명해 다시 보내도 상한 안)
+    if (c.adKeep) for (const r of claimed) c.adKeep.add(normalizePhone(String(r.phone || '')));   // ★ C113 D10 — 결과 불명 = 끝 해제에서 남김
     console.error(`[JourneyExecutor] journey=${head.journey_id} 적재 단위 결과 불명(${outcome.reason}) — ${claimed.length}명 표식 보존 · 다음 회차 판정`);
     await holdUnknownLoad(head, step, claimed.map((r) => r.exec), outcome.reason, res);
     return unit[0].idx;

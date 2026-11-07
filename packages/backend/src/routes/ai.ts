@@ -76,6 +76,9 @@ import { explainPerformance } from '../utils/performance-explainer';
 import { generateQuickAction, type QuickActionType } from '../utils/performance-quick-action';
 import { buildCohortRetention } from '../utils/performance-cohort';
 import { buildCampaignAttribution } from '../utils/campaign-response-attribution';
+import { resolveAdGateMode, AdGateMode, loadAdGatePolicy, gateStaging, sendSpanOf, adGateSchemaReady } from '../utils/ad-send-gate';
+import { globalHoldoutEffect, campaignEffects } from '../utils/effect-measure';   // ★ 2026-11-06 C110 효과 증명   // ★ 2026-11-06 C110 광고 관문
+import { branchOfDirect, adGateNotice, AdGateCounts } from '../utils/ad-send-gate-core';
 import { buildGradePerformance, buildRecipientAttribution } from '../utils/performance-customer-axis';
 import { createJob, getJob } from '../utils/full-analysis-job';
 import { stepProgress } from '../utils/full-analysis-steps';
@@ -1184,6 +1187,15 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
         }
         callbackExcluded = plan.removed;
       }
+      // ★ 2026-11-06 C110 광고 관문(설계서 §4 ai 한줄로 적재) — 서명 전에 지운다(load · 예약 0 · 확정 = commit 이 같은 묶음 · 같은 갈래 'ai' 로 다시 판정)
+      // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 응답 그대로(관문 0) · 관문 길(요금제 씀 + 새 기능)만
+      const stageMode: AdGateMode = req.body?.adEnabled === true ? await resolveAdGateMode(companyId) : { mode: 'legacy' };
+      let adGate: AdGateCounts | null = null;
+      if (stageMode.mode === 'gate') {
+        adGate = (await gateStaging(stageMode.policy, {
+          branch: branchOfDirect('operator'), stagingId, unsubUserId: String(userId || ''), mode: 'load', span: sendSpanOf(req.body?.scheduled ? req.body?.scheduledAt : null),
+        })).counts;   // 관문 장애 = AdGateUnavailableError(공용 사용자 오류 503) → 바깥 catch 의 respondUserError
+      }
       const signature = await stagingSendSignature(stagingId, companyId, String(userId || ''), true, effectiveUnsubFilter(req.body?.adEnabled === true, true));
       const sample = await query(
         `SELECT phone, name FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid ORDER BY id LIMIT 100`,
@@ -1196,7 +1208,8 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       return res.json({
         success: true, staged: true, stagingId, signature,
         total: Number(signature.split(':')[0]) || 0,
-        excluded: { duplicates, callback: callbackExcluded },
+        excluded: adGate ? { duplicates, callback: callbackExcluded, adGate } : { duplicates, callback: callbackExcluded },
+        ...(adGate ? { adGateNotice: adGateNotice(adGate) } : {}),   // ★ C113 관문 길만
         sample: sample.rows, defaultCallback: dcb.rows[0]?.phone || null,
       });
     }
@@ -1767,6 +1780,27 @@ router.get('/operator/performance/automarketing-roi', async (req: Request, res: 
     console.error('[Performance] automarketing-roi 오류:', err);
     if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, 'ROI 조회 실패') });
+  }
+});
+
+// ★ 2026-11-06 C110 효과 증명(설계서 §5 · §6-2) — 전체 대조군 + 발송별(최근 days · 원장 ITT) · 같은 문 · 같은 오류 처리 · DDL 전 = 빈 결과(ready 거짓)
+router.get('/operator/performance/effect-proof', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (await aiZonePlanBlocked(req, res, planCtx)) return;
+    const days = parseQueryInt(req.query.days, { fallback: 30, min: 7, max: 90, clamp: true });
+    // ★ 2026-11-07 C113 D4 — 요금제를 안 쓰면(미가입 · FREE · 만료 · 정지) 카드 없음(정책 읽기 한 곳 = 스키마 준비 + 요금제)
+    const ready = (await loadAdGatePolicy(companyId)).ready;
+    if (!ready) return res.json({ success: true, ready: false, global: null, campaigns: [], measuring: 0 });
+    const [global, list] = await Promise.all([globalHoldoutEffect(companyId), campaignEffects(companyId, days)]);
+    return res.json({ success: true, ready: true, global, campaigns: list.items, measuring: list.measuring });
+  } catch (err: any) {
+    console.error('[Performance] effect-proof 오류:', err);
+    if (respondUserError(res, err)) return;
+    return res.status(500).json({ success: false, error: publicErrorText(err, '효과 증명 조회 실패') });
   }
 });
 

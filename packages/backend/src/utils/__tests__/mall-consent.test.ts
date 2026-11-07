@@ -292,7 +292,7 @@ describe('몰 동의 컬럼 미존재 → 503 DB_MIGRATION_PENDING', () => {
     const src = readFileSync(resolve(__dirname, '..', '..', 'routes', 'campaigns.ts'), 'utf-8');
     expect((src.match(/isMallConsentMigrationPending\(error\)/g) || []).length).toBe(3);
     expect((src.match(/json\(MALL_CONSENT_MIGRATION_PENDING\)/g) || []).length).toBe(3);
-    for (const marker of ["console.error('캠페인 생성 에러:', error);", "await failCampaignRun(campaignRunId, '발송 처리 중 예기치 못한 오류');", "console.error('수신자 조회 실패:', error);"]) {
+    for (const marker of ["console.error('캠페인 생성 에러:', error);", "(campaignRunId, '발송 처리 중 예기치 못한 오류');", "console.error('수신자 조회 실패:', error);"]) {
       const at = src.indexOf(marker);
       const tail = src.slice(at, at + 400);
       const pendingAt = tail.indexOf('MALL_CONSENT_MIGRATION_PENDING');

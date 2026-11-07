@@ -7,9 +7,9 @@
 
 ## 머리
 
-- pulled_head: 11893902 · 2026-11-05 · Harold 실행 보고(서버 git pull c5ebdd86..11893902 · C104 67d7b5d3 + 한 배포 커밋 11893902 = C105 · C106 · C107 + 상시 로드 감축) · 그 전 c5ebdd86
-- deployed_head: 11893902 · 2026-11-05 · Harold 실행(백엔드 build:safe · 프론트 build:safe · pm2 reload targetup-backend · C105-S0 = store 모드 켜진 · 멈춘 여정 0개(build 뒤 실행 · 영향 0)) · 출력 = git HEAD 11893902 · pm2 describe created at 2026-11-05T14:46:30Z(23:46:30 KST) · uptime 2m · unstable restarts 0 · online · 에러 로그(23:46 뒤) 0줄(마지막 줄 21:13:05 CDP Identity 경고 = 옛 프로세스) · 그 전 c5ebdd86
-- 이번 창 확인 출력: frontend-build · reload · uptime(백엔드 build 출력은 붙여넣기 밖 · restart-env 아님 · DDL 0)
+- pulled_head: 6d04f394 · 2026-11-07 · Harold 실행 보고(C111-H1 결과 = .62 pull Fast-forward c7b4ff35..6d04f394 · 1107 오후 배포 1 창 상태 확인 출력 = HEAD 6d04f394 2026-11-07 08:59:32 +0900) · 그 전 c7b4ff35 · 2026-11-06 · Harold 실행 보고(서버 git pull dd446c5d..c7b4ff35 · C109 + C108 세션 문서 · 그 전 dd446c5d = 1106 C108 배포 · 서버 HEAD 확인 출력 dd446c5d · pm2 created at 2026-11-06T02:26:34Z) · 그 전 11893902
+- deployed_head: c7b4ff35 · 2026-11-06 · Harold 「배포까지 완료」(재시작 종류 = 출력 밖 · 미확인) · 출력 = git HEAD c7b4ff35 · pm2 describe created at 2026-11-06T06:51:46Z(15:51:46 KST) · uptime 4m · restarts 58 · unstable restarts 0 · online · 에러 로그(15:51 뒤) 0줄(마지막 줄 14:04:05 ai-json 맞춤법 읽기 실패 = 옛 프로세스 · 11:08 ~ 12:31 = B-1106-1 접수 건 옛 갈래) · 그 전 dd446c5d(C108 · 1106 11:26 KST) · 그 전 11893902 · ★1107 6d04f394 = C111-H1 백엔드 build:safe · reload · online(계산 규칙 = 원장에 ENV 항목이 있어 restart-env 요구 · reload 불인정 → 그대로 · 다음 배포의 restart-env 가 c7b4ff35..새 머리 전체를 덮는다)
+- 이번 창 확인 출력: 1107 배포 1(C110 + C112) · 상태 확인 = HEAD 6d04f394 · pm2 targetup-backend online ↺ 59 · 서버 작업 트리 = packages/sdk-js/package-lock.json 바뀜 · 추적 밖 ALTER · ^C · backup_uploadedby.dump · packages/backend/agent-builds/(앞 5줄 · 이번 커밋과 겹치는 경로 0)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
 
@@ -54,7 +54,11 @@
 | C106 | 11893902 |
 | C107 | 11893902 |
 | C108 | dd446c5d |
-| C109 | 미커밋 |
+| C109 | c7b4ff35 |
+| C110 | 미커밋 |
+| C111 | 6d04f394 |
+| C112 | 미커밋 |
+| C113 | 미커밋 |
 
 ## §1 대기
 
@@ -1255,7 +1259,7 @@ UNION ALL
 - 선행: C108-M1 · 게이트웨이 커밋 push(에이전트 빌드 = .65 deploy/build-agent.sh · 엔진 감사 설계서 §14-8 절차)
 - 기대: 네 대 heartbeat 1.0.33 · 설정 `field_map.friend_yn: "k_friend_yn"` · 재시작(적재 0건 한 줄 조건) · 옛 게이트웨이 = 친구 값 빈 값이라 칸을 쓰지 않음(UPDATE 에 k_friend_yn 없음)
 - 확인: 네 대 시작 로그(판 · GW 연결 · 폴링) · 설정 grep
-- 결과: 선행 게이트 1106 Harold = check.sh GW_CHECK_OK · check.sh --pg GW_PG_CHECK_OK(관리 API 25 + 중간 모양 24 · Go 6패키지 · 통과 1940 · 건너뜀 0) · 게이트웨이 커밋 8e47013 push(파일 22 · 다른 세션 status/OPS.md · tools/generate_agent_environment_checklist_pdf.py 뺌) · ⚠ 1.0.32(2288d93) 뒤 Agent 변경이 함께 실린다 = 0929 속도 · 읽은 시각(58b5055) · 1031 발신프로필(c8ac27f) · 1105 설정 인코딩(290ab30) · C108 → 출고 = 엔진 감사 설계서 §14-8 전 절차(안내서 · 게시 · 승인 · canary) · **Harold 「오늘 밤 출고 준비」(1106)** · 준비 = 안내서 생성기 1.0.33 문장(카카오 발신프로필 키 선택 · 성능 표 poll_interval_min/max · 1.0.32 글 그대로 대조) · 카카오 문장은 템플릿 필수 유형(알림톡 · 브랜드 기본형)으로 좁힘 · Codex 1R · 2R approve(지적 0) · 안내서 v1.0.33 PDF sha256 07157371…93da · 7쪽 · CUSTOMER_DELIVERY_BOUNDARY_OK · DELIVERY_CONSISTENCY_CONTRACT_TEST_OK · AGENT_MANUAL 1.0.33 절 · 오늘 밤 순서 = ⓪ 사전 확인(.65 GW_SEND_CREDIT · agent_dispatch_profile 상한 · heartbeat 판 · 릴리스 목록 · 게시 폴더 / .62 네 대 field_map 자리) → ① 커밋 · push → ② .65 pull → ③ build 1.0.33 1.0.27 1.0.32 → ④ 레인 반입 → ⑤ 대시보드 검증 2 · 등록(승인 전) → ⑥ 안내서 scp → ⑦ 게시 · sha256sum -c → ⑧ 승인 → ⑨ .62 네 대 field_map.friend_yn 넣기(재시작 없음 · 1.0.32 는 모르는 키 = 경고만 · UnknownFieldMapKeys) → ⑩ rollout hanjul01 canary · 600초 · 나머지 셋 → ⑪ heartbeat 1.0.33 · 로그 → G0 · G1 · G2 · ⓪ .65 결과(1106 12:4x Harold) = GW_SEND_CREDIT 없음(off) · agent_dispatch_profile 상한 0행 → 1.0.33 동시 발송 = 설정 그대로 · heartbeat hanjul01 · 02 · 03 · hanjul-04 = 1.0.32 running(시험 bito-test-97 · 98 · 99 = 10월 멈춤 · 대상 밖) · 릴리스 최신 = 47 linux · 48 windows 1.0.32(09-27 11:50 승인) · 게시 폴더 1.0.32 = 안내서 짝 · 아카이브 2 · checksums 514B = 다섯 줄(agent-config.example.yaml 7661e296… = 저장소 deploy/agent/scripts 판 · 1.0.32 뒤 안 바뀜 · 안내서 PDF · PDF.sha256 · 아카이브 2) → 1.0.33 목록도 같은 다섯 줄 · Harold 「지금 해버려도」(1106 13시) → ①~⑨(빌드 nice · 등록 · 게시 · 승인 · 설정 넣기 = 재시작 0)는 지금 · ⑩ rollout(네 대 재시작) · G0~G2(게이트웨이 재시작 · DDL)는 밤
+- 결과: 선행 게이트 1106 Harold = check.sh GW_CHECK_OK · check.sh --pg GW_PG_CHECK_OK(관리 API 25 + 중간 모양 24 · Go 6패키지 · 통과 1940 · 건너뜀 0) · 게이트웨이 커밋 8e47013 push(파일 22 · 다른 세션 status/OPS.md · tools/generate_agent_environment_checklist_pdf.py 뺌) · ⚠ 1.0.32(2288d93) 뒤 Agent 변경이 함께 실린다 = 0929 속도 · 읽은 시각(58b5055) · 1031 발신프로필(c8ac27f) · 1105 설정 인코딩(290ab30) · C108 → 출고 = 엔진 감사 설계서 §14-8 전 절차(안내서 · 게시 · 승인 · canary) · **Harold 「오늘 밤 출고 준비」(1106)** · 준비 = 안내서 생성기 1.0.33 문장(카카오 발신프로필 키 선택 · 성능 표 poll_interval_min/max · 1.0.32 글 그대로 대조) · 카카오 문장은 템플릿 필수 유형(알림톡 · 브랜드 기본형)으로 좁힘 · Codex 1R · 2R approve(지적 0) · 안내서 v1.0.33 PDF sha256 07157371…93da · 7쪽 · CUSTOMER_DELIVERY_BOUNDARY_OK · DELIVERY_CONSISTENCY_CONTRACT_TEST_OK · AGENT_MANUAL 1.0.33 절 · 오늘 밤 순서 = ⓪ 사전 확인(.65 GW_SEND_CREDIT · agent_dispatch_profile 상한 · heartbeat 판 · 릴리스 목록 · 게시 폴더 / .62 네 대 field_map 자리) → ① 커밋 · push → ② .65 pull → ③ build 1.0.33 1.0.27 1.0.32 → ④ 레인 반입 → ⑤ 대시보드 검증 2 · 등록(승인 전) → ⑥ 안내서 scp → ⑦ 게시 · sha256sum -c → ⑧ 승인 → ⑨ .62 네 대 field_map.friend_yn 넣기(재시작 없음 · 1.0.32 는 모르는 키 = 경고만 · UnknownFieldMapKeys) → ⑩ rollout hanjul01 canary · 600초 · 나머지 셋 → ⑪ heartbeat 1.0.33 · 로그 → G0 · G1 · G2 · ⓪ .65 결과(1106 12:4x Harold) = GW_SEND_CREDIT 없음(off) · agent_dispatch_profile 상한 0행 → 1.0.33 동시 발송 = 설정 그대로 · heartbeat hanjul01 · 02 · 03 · hanjul-04 = 1.0.32 running(시험 bito-test-97 · 98 · 99 = 10월 멈춤 · 대상 밖) · 릴리스 최신 = 47 linux · 48 windows 1.0.32(09-27 11:50 승인) · 게시 폴더 1.0.32 = 안내서 짝 · 아카이브 2 · checksums 514B = 다섯 줄(agent-config.example.yaml 7661e296… = 저장소 deploy/agent/scripts 판 · 1.0.32 뒤 안 바뀜 · 안내서 PDF · PDF.sha256 · 아카이브 2) → 1.0.33 목록도 같은 다섯 줄 · Harold 「지금 해버려도」(1106 13시) → ①~⑨(빌드 nice · 등록 · 게시 · 승인 · 설정 넣기 = 재시작 0)는 지금 · ⑩ rollout(네 대 재시작) · G0~G2(게이트웨이 재시작 · DDL)는 밤 · ②③ 결과 = .65 HEAD 8e47013 · BUILD_AGENT_SERVER_OK 1.0.33 bootstrap 1.0.27 rollback_exact_from 1.0.32 source_digest 4fc1b43c…6d8c(nice 19) · ④ 레인 반입 18:48 = v133-linux · v133-windows 각 3파일(child 아카이브 · release-descriptor.json · .sig · ubuntu 600) · ⑤ 대시보드 아티팩트 검증 2 · 릴리즈 등록(Harold · 승인 전) · ⑥ 안내서 PDF 짝 scp → .65 /home/invito · ⑦ 게시 18:50 = PDF OK · 빌드 아카이브 2 OK · EXAMPLE_SAME · 다섯 줄 목록 514B sha256sum -c 5 OK · 관리 API 계정 ubuntu READ_OK 6 · root 644 · ⑧ 대시보드 릴리즈 승인(Harold · 게시 뒤) · ⑨ 앞 확인 = 네 대 표 하나씩(hanjul01 SMSQ_SEND_13 · 02 = 14 · 03 = 15 · hanjul-04 = 16 · 넷 다 M1 친구 칸 있음) · field_map 23행 · report_recv_time 36행(들여쓰기 4) · Agent 에 설정 다시 읽기 없음(fsnotify · SIGHUP 0) = 넣어도 rollout 재시작 때 처음 읽음 · ⑨ 결과(1106 19시 전 Harold) = 네 대 37행 friend_yn: "k_friend_yn" · 백업 agent-config.yaml.bak-c108-* · 재시작 0 · Harold 「발송량 체크해보고 아예 해버리자」 → ⑩ 지금(적재 0 조건) · ⑩ 앞 loading=0 · 네 대 active · 지난 15분 재시작 줄 0(rollout 전) · ⑩ 카나리 = hanjul-04 18:57:11 「비토 Agent 시작」 version 1.0.33 commit source:4fc1b43c · GW 연결 완료 edge.hanjulgw.com:9443 · 폴링 시작 SMSQ_SEND_16 · ERROR 0 · WARN = 옛 프로세스 끊김 두 줄뿐(friend_yn 모르는 키 경고 0) · 관찰 10분 뒤 General · ⑪ General 끝 = .65 heartbeat hanjul01 · 02 · 03 · hanjul-04 네 대 1.0.33(G2 명령 첫 줄 agents_1033=4 · 19:20) → 통과
 
 ### C108-G0 · 켜기 전 문(읽기 · .62 한줄로 DB)
 - 카드: C108
@@ -1263,15 +1267,15 @@ UNION ALL
 - 선행: C108-A1
 - 기대: C108-H1 배포 전에 차감한 예약 브랜드 캠페인 중 대상값이 친구가 아니고 아직 안 나간 것 = 0(있으면 그 발송이 끝난 뒤 켠다 · 선불 차감 문구에 친구 조각이 없어 한줄로는 차액이 없는데 게이트웨이만 친구로 정산하는 경계)
 - 확인: 조회 출력
-- 결과:
+- 결과: 1106 19시 Harold .62 = campaigns send_channel kakao_brand · kakao_targeting I · F 아님 · sent_at 없음 · 종결 아님 = 0행 → 통과
 
 ### C108-G1 · 게이트웨이 마이그레이션 101(DDL · 새 판보다 먼저)
 - 카드: C108
 - 단계: 게이트웨이 배포 전
 - 선행: C108-G0
-- 기대: message_billing.friend_unit_price · friend_settled_at · settle_brand_friend_price(bigint,text) · prepare_dispatch_billing 스냅숏(prosrc 에 v_friend_unit_price) · lock_timeout 250ms(멈추면 그대로 다시) · 옛 판이 도는 동안 = 스냅숏만 쌓이고 정산 표식 없음 = 친구 값 빈 값(종전)
+- 기대: message_billing.friend_unit_price · friend_settled_at · settle_brand_friend_price(bigint,text) · prepare_dispatch_billing 스냅숏(prosrc 에 v_friend_unit_price) · lock_timeout 250ms(멈추면 그대로 다시) · 옛 판이 도는 동안 = 스냅숏만 쌓이고 정산 표식 없음 = 친구 값 빈 값(종전) · 적용 전 문 = 운영 prepare_dispatch_billing 본문이 070 판과 같다(md5(replace(prosrc, CR 빼고)) = 404e38ed5fdee23b2dc2bceea6e5a8a1 · 070 뒤 이 함수를 바꾼 마이그레이션 0 = 101 이 070 을 이어받음) · 적용 뒤 같은 식 = 915dfd0621a874fa43704cb592a63c30(101 판) · 시점 = rollout General 관찰 중에 함께(옛 게이트웨이 · 옛 Agent 와 섞여도 스냅숏만 쌓임 · 순서가 걸리는 것은 G2 = 네 대 1.0.33 뒤)
 - 확인: 칸 둘 · 함수 · prosrc 확인 출력
-- 결과:
+- 결과: 1106 19시 Harold .65 = prod_pdb 404e38ed…(070 판과 같음) → BEGIN · SET · ALTER TABLE 2 · COMMIT · COMMENT 2 · CREATE FUNCTION 2 · COMMENT → 칸 friend_settled_at(timestamptz) · friend_unit_price(numeric) · settle_fn t · pdb_md5 915dfd06…(101 판) · snapshot t → 통과(잠금 시간 초과 0)
 
 ### C108-G2 · 게이트웨이 새 판 배포(켜기 · 런북 §2 check · build · §3-3 · §4 새 PID ERROR 세기)
 - 카드: C108
@@ -1279,7 +1283,8 @@ UNION ALL
 - 선행: C108-G1 · 게이트웨이 커밋(Harold)
 - 기대: GW_CHECK_OK · GW_PG_CHECK_OK · GW_BUILD_OK · GW_DEPLOY_OK · 기동 로그에 「브랜드 친구 단가 정산(101)이 없다」 없음 · 새 PID ERROR 종류별 0 · 이 판이 처리한 브랜드 성공부터 친구 정산
 - 확인: 마커 · journalctl 세기
-- 결과:
+- 함께 실릴 것(1106 콜비서 진단 세션 요청 · **Harold 「함께 싣기」 1106 19시**): 비토 ac35d0a(부모 8e47013 · 로컬 · push 전) = migrations/102 customer_success_code(운영 1106 18:29 적용 · 101 과 겹치는 함수 0 = 101 은 prepare_dispatch_billing · settle_brand_friend_price · 102 는 customer_success_code) · 성공 코드 번역(정책 mapped + 성공 매핑 행 있을 때만 · 한줄로 네 대 행 없음) · 에이전트 코드 0 = 1.0.33 빌드와 무관 · 그 세션 18:29 ac35d0a 단독 배포는 C108 기동 점검(101 없음)에서 멈추고 deploy.sh 자동 복원(PID 2405466) · 배포 뒤 확인 = callbiseo-1 ~ 3 성공 결과 report_queue.customer_code 6(SMS) · 1000(LMS) · ⚠ 같은 날 젬텍 재매핑 DML 로 한줄로 네 대 대역 244 → 262(새 18) = 한줄로 대역 라벨(result-code-hanjul-band.generated.ts)에 없음 → 스팸 몰림 목록(R64 · 대역 제목 「스팸」)도 새 대역을 모름 = 별도 과제
+- 결과: 1106 19시 로컬 = 커밋 16a7173(안내서 · 매뉴얼) push · 위로 ac35d0a · 8e47013 · check.sh bff79a9 = GW_CHECK_OK · --pg 1차 = GW_PG_CHECK_FAIL 1건 TestDispatcherStopCancelsNotifyBackoff(queue · 가짜 DB 단위 시험 · 멈춤 기한 200ms · 같은 실행의 최종 모양 판에서는 PASS 0.06s · 중간 모양 판에서 FAIL 0.20s · 파일 마지막 변경 09-29 = C108 · ac35d0a 무관 · 단독 300회 300 통과) · 통과 1943 · 빌드 1차 = 복제본이 /tmp 라 go.mod replace ../linkguard 없음으로 실패(산출물 0) · --pg 2차(19:12) = 같은 시험이 최종 모양 판에서 FAIL(통과 970 뒤 멈춤 · pipefail 로 빌드 안 감) · 패키지 단독(PG 없음) 5회 5 통과 · 실패 자리 = Go PG 시험이 패키지 여럿을 동시에 돌릴 때만 → 3차 = GOFLAGS=-p=1(패키지 차례로) = **GW_PG_CHECK_OK 통과 1944 · 건너뜀 0** · 깨끗한 복제본(~/projects 아래 · ../linkguard 옆) **GW_BUILD_OK out/bito-gateway-16a7173 · sha256 2df63bc8…2aa0** · deploy.sh sha256 62195b30…ff96(LF) · **배포 1106 19:20:50 Harold .65** = agents_1033=4(rollout General 끝) · 해시 둘 OK · 재기동 전 SENDING 0 · GW_DEPLOY_OK(백업 deploy-backups/20261106-192050-gateway.SrMtmt) · DEPLOY_RC 0 · 150초 뒤 PID 2417457 · 9444_SAME_PID 1 · SPEC_START 1 · SCHEMA_GATE_FAIL 0(101 · 102 기동 점검 통과) · ERROR 0줄 → 통과 · 남은 = 콜비서 성공 customer_code 6 · 1000 실측 · 첫 브랜드 친구 정산 · SMSQ k_friend_yn 실측(발송 쌓인 뒤) · S1 직원 시트 50 · 54 · 배포 직후 조회(1106 19:3x Harold) = 콜비서 결과 0행 · 친구 스냅숏 0행 = 표본 없음(검증 아님) → 1107 오전 같은 조회 다시 · 이 시험이 게이트 부하에서 떨어지는 것 = 별도 기록(BUGS 아님 · 게이트웨이 시험 결함)
 
 ### C108-S1 · 실측(직원 시트 50 ~ 54 · 운영 대조)
 - 카드: C108
@@ -1295,7 +1300,7 @@ UNION ALL
 - 선행: C108(dd446c5d) · 커밋(Harold)
 - 기대: 대행 검사 입구 반려 = 「검사 장비 문제」 3회 대신 test_failed 한 번 + 위치 안내(spam_rejected_chars · test_failed reason unsupported_chars) · 대행 접수 · 원스텝 · 메일 = 이모지 · 보이지 않는 글자 정리 + 알림(content_cleaned · recipients_cleaned 이력) · 막음 글자 = 위치 반려 · 안내 문자 = 정리 뒤 인증 라인 · 배포 뒤 에러 로그 0
 - 확인: pm2 기동 · 에러 로그 · 운영 로그 `[SpamTestQueue] variant … 큐 등록 반려(보낼 수 없는 글자)` 줄이 나오면 그 건 진행 기록이 「보낼 수 없는 글자」 반려인지
-- 결과:
+- 결과: 1106 Harold tp-push c7b4ff35 · 서버 배포 Harold 「배포까지 완료」 · 확인 출력 = HEAD c7b4ff35 · pm2 online · created at 06:51:46Z · unstable 0 · 새 프로세스 뒤 에러 로그 0줄
 
 ### C109-S1 · 실측(직원 시트 55 ~ 64 · docs/2026-11-06-c109-staff-sheet.xlsx)
 - 카드: C109
@@ -1303,6 +1308,205 @@ UNION ALL
 - 선행: C109-H1
 - 기대: 시트 55 ~ 64 전부 맞음(문장 원문 = 엑셀 · 진짜 함수로 뽑은 값)
 - 확인: 시트 결과 · 다름이면 캡처
+- 결과:
+
+### C110-S1 · 피로도 켠 회사 수(사전 실측 · 설계서 D13)
+- 카드: C110
+- 단계: 사전 실측
+- 선행: 없음
+- 기대: 서버 셸 = docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT COUNT(*) FILTER (WHERE fatigue_cap_days IS NOT NULL AND fatigue_cap_max IS NOT NULL) AS fatigue_on, COUNT(*) AS companies FROM companies;"
+- 확인: fatigue_on 수 = 서버 적재 확정 · 플래너 · 대행 · DM 에 피로도가 새로 먹는 회사 수
+- 결과: 1107 Harold = fatigue_on 0 · companies 148 → 배포 뒤 서버 적재 확정 · 플래너 · 대행 · DM 에 피로도 상한이 새로 먹는 회사 0(D13 바뀜 대상 0)
+
+### C110-S2 · 시험 회사 합성 번호 고객 수(실측 1건 · 직원 시트 준비)
+- 카드: C110
+- 단계: 사전 실측
+- 선행: 없음
+- 기대: 서버 셸 = docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT COUNT(DISTINCT regexp_replace(phone, '[^0-9]', '', 'g')) AS phones FROM customers WHERE company_id = 'c7c97996-19b3-4e4f-9c45-ce10deab257f' AND is_active = true AND COALESCE(phone, '') <> '';"
+- 확인: phones ≥ 200 이면 시트 그대로 · 모자라면 시험 고객을 먼저 더한다(합성 번호)
+- 결과: 1107 Harold = phones 3,668(≥ 200) → 직원 시트 S3 그대로
+
+### C110-DDL-1 · 광고 관문(대조군 · 우선순위) 칸 · 제외 원장 · ★ 배포 앞
+- 카드: C110
+- 단계: DDL
+- 선행: C110-S1
+- 의미 바꿈: 아니오(칸 · 표 · 색인 추가만 · 한 트랜잭션 · 옛 코드는 새 칸 · 표를 읽지도 쓰지도 않는다 · 새 칸 기본 NULL = 회사 기능 꺼짐)
+- 기대: 서버 셸에서 아래 블록(docker exec -i targetup-postgres psql -U targetup targetup -P pager=off 에 블록을 넘긴다) · 확인 = SELECT table_name, column_name FROM information_schema.columns WHERE (table_name = 'companies' AND column_name IN ('global_holdout_pct','global_holdout_since','campaign_holdout_pct','send_priority_order')) OR table_name IN ('ad_send_marks', 'ad_gate_failures') ORDER BY 1, 2;
+- 확인: companies 4줄 · ad_send_marks 9줄 · ad_gate_failures 5줄
+- 결과: 1107 Harold = BEGIN · SET · ALTER TABLE · CREATE TABLE · CREATE INDEX 5 · CREATE TABLE · CREATE INDEX · COMMIT · 확인 18줄(ad_gate_failures 5 · ad_send_marks 9 · companies 4) → 통과(터미널 에코가 겹쳐 보인 것은 붙여넣기 표시 · psql 출력 기준)
+
+> C110-DDL-1 · 배포 앞 · 추가만 · 되돌리기 = 설계서 docs/2026-11-06-c110-effect-proof-priority-design.md §9 되돌리기 줄(새 코드를 내린 뒤에만)
+
+```sql ddl:C110-DDL-1
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+ALTER TABLE companies
+  ADD COLUMN IF NOT EXISTS global_holdout_pct smallint CHECK (global_holdout_pct BETWEEN 1 AND 10),
+  ADD COLUMN IF NOT EXISTS global_holdout_since timestamptz,
+  ADD COLUMN IF NOT EXISTS campaign_holdout_pct smallint CHECK (campaign_holdout_pct BETWEEN 1 AND 30),
+  ADD COLUMN IF NOT EXISTS send_priority_order text[];
+CREATE TABLE IF NOT EXISTS ad_send_marks (
+  id          bigserial PRIMARY KEY,
+  company_id  uuid        NOT NULL,
+  batch_id    uuid        NOT NULL,
+  campaign_id uuid,
+  branch      varchar(20) NOT NULL,
+  kind        varchar(20) NOT NULL CHECK (kind IN ('global_holdout', 'priority', 'fatigue', 'campaign_holdout', 'campaign_treated', 'reserved')),
+  phone       varchar(20) NOT NULL,
+  send_day    date        NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ad_send_marks_batch_phone_kind_day ON ad_send_marks (batch_id, phone, kind, send_day);
+CREATE UNIQUE INDEX IF NOT EXISTS ad_send_marks_arm ON ad_send_marks (batch_id, phone) WHERE kind IN ('campaign_holdout', 'campaign_treated');
+CREATE INDEX IF NOT EXISTS ad_send_marks_campaign ON ad_send_marks (campaign_id, kind) WHERE campaign_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ad_send_marks_reserved ON ad_send_marks (company_id, phone, send_day) WHERE kind = 'reserved';
+CREATE INDEX IF NOT EXISTS ad_send_marks_phone ON ad_send_marks (company_id, phone, created_at);
+CREATE TABLE IF NOT EXISTS ad_gate_failures (
+  id         bigserial PRIMARY KEY,
+  company_id uuid        NOT NULL,
+  branch     varchar(20) NOT NULL,
+  error      varchar(200),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ad_gate_failures_company ON ad_gate_failures (company_id, created_at);
+COMMIT;
+```
+
+### C110-H1 · 한줄로 배포(광고 관문 · 효과 증명 · 여정 대조군 결함 A ~ F · 백엔드 + 프론트)
+- 카드: C110
+- 단계: 한줄로 배포
+- 선행: C110-DDL-1 · 커밋(Harold) · ★1107 Harold 「배포 너무 자주 하지 말고」 = 로드맵 3순위가 닫히면 그 묶음과 한 배포
+- 기대: 설계서 docs/2026-11-06-c110-effect-proof-priority-design.md · ★1107 C113 D23 정정 = 미가입 · 새 기능을 안 켠 회사의 발송 = HEAD 그대로(피로도 = 그 입구의 HEAD 블록 그대로 · 서버 적재 확정 · 플래너 · 대행 · DM 에 피로도 새로 0) · 새 기능 = 요금제를 쓰고 켠 회사만
+- 확인: pm2 기동 · 에러 로그 · 기동 뒤 첫 광고 발송 로그에 「C110-DDL-1 전」 경고가 없어야 함(있으면 DDL 이 안 들어간 것)
+- 결과:
+
+### C110-S3 · 실측(직원 시트 · 설계서 §11 · 실측 1건 = 시험 회사 200명 · 20%)
+- 카드: C110
+- 단계: 배포 뒤
+- 선행: C110-H1 · C110-S2
+- 기대: 설계서 §11 1 ~ 10 전부 맞음 · 실측 = 원장 campaign_holdout N · campaign_treated 200 − N · 큐 적재 = 200 − N · 차감 = 적재 수 × 단가
+- 확인: 시트 결과 · 다름이면 캡처
+- 결과:
+
+### C112-S0 · 키트 로고가 있는 회사 수(사전 실측 · 설계서 D13 기존 동작 바뀜 대상)
+- 카드: C112
+- 단계: 사전 실측(읽기만)
+- 선행: 없음
+- 기대: 서버 셸 = docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT COUNT(*) FILTER (WHERE jsonb_typeof(brand_kit) = 'object' AND NULLIF(btrim(brand_kit->>'logo_url'), '') IS NOT NULL) AS kit_logo, COUNT(*) FILTER (WHERE jsonb_typeof(brand_kit) = 'string') AS string_kits, COUNT(*) AS companies FROM companies;"
+- 확인: kit_logo = 배포 뒤 다음 생성부터 포스터에 로고가 얹혀 나오는 회사 수 · string_kits 가 0 이 아니면 그 회사 키트도 로고를 읽는다(읽기 CT 가 문자열을 풀어 읽는다 · 설계서 D4)
+- 결과: 1107 Harold = kit_logo 1 · string_kits 0 · companies 148 → 다음 생성부터 포스터에 로고가 기본으로 얹히는 회사 1
+
+### C112-H1 · 한줄로 배포(이미지 스튜디오 브랜드 로고 층 · 백엔드 + 프론트 · DB 변경 0)
+- 카드: C112
+- 단계: 한줄로 배포 = **C110-H1 과 한 배포**(★1107 Harold 「배포 너무 자주 하지 말고」 · 로드맵 합의 배포 1 = C110 + 3순위)
+- 선행: C112-S0 · 커밋(Harold)
+- 기대: 설계서 docs/2026-11-07-c112-studio-brand-logo-design.md · 새 주소 POST /api/image-studio/layers · /logo/read · /save 에 layers(없으면 지금 그대로) · 새 폴더 uploads/studio-logos(처음 쓸 때 생긴다 · 설정 변경 0)
+- 확인: pm2 기동 · 에러 로그 · 스튜디오 포스터 하나 만들어 결과 카드에 로고 줄이 보이는지(키트 로고 없는 회사 = 「브랜드 키트에 로고가 없어요」)
+- 결과:
+
+### C112-S1 · 직원 시트(설계서 §7 1 ~ 8)
+- 카드: C112
+- 단계: 배포 뒤
+- 선행: C112-H1
+- 기대: 설계서 §7 1 ~ 8 전부 맞음(크레딧 = 생성 2 만 · 로고 바꾸기 0 · 저장본 = 카드에 보이던 그대로)
+- 확인: 시트 결과 · 다름이면 캡처
+- 결과:
+
+### C113-S0 · 대조군 · 우선순위를 저장한 회사 수(사전 실측 · 읽기만)
+- 카드: C113
+- 단계: 사전 실측(읽기만)
+- 선행: 없음
+- 기대: 서버 셸 = docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT count(*) FILTER (WHERE global_holdout_pct IS NOT NULL OR global_holdout_since IS NOT NULL OR campaign_holdout_pct IS NOT NULL OR send_priority_order IS NOT NULL) AS set_rows, count(*) AS companies FROM companies;" → set_rows 0
+- 확인: set_rows 0 = 배포 뒤 모든 회사가 옛 길(HEAD 발송 그대로)로 시작 · 0 이 아니면 그 회사의 요금제부터 본다(미가입이면 D1 이 관문을 끈다)
+- 결과: 1107 Harold = set_rows 0 · companies 148 → 배포 뒤 모든 회사가 옛 길(HEAD 발송 그대로)로 시작 · 대조군 · 우선순위 칸을 저장한 회사 0
+
+### C113-H1 · 한줄로 배포(C110 · C112 구조체크 처방 25건 · 두 길 · 백엔드 + 프론트 · DB 변경 0 · ENV 0)
+- 카드: C113
+- 단계: 한줄로 배포 = **C110-H1 · C112-H1 과 한 배포**(배포 1)
+- 선행: C113-S0 · 커밋(Harold · C110 + C112 + C113 경로 지정)
+- 기대: 설계서 docs/2026-11-07-c113-structure-fix-design.md · 미가입 · 직접발송만 쓰는 회사 = HEAD 와 글자 그대로(직접 동기 · 건수 미리보기 · 서버 적재 확정 · 예약 변경 · 수신자 삭제 · 취소 · 응답 · 큐 · 차감) · 새 주소 POST /api/image-studio/logo/use · /logo/read 응답 = 후보(키트 쓰기 0)
+- 확인: pm2 기동 · 에러 로그 · 미가입 시험 계정 직접발송 10명 응답 문장에 「대조군」 · 「우선순위」 0 · 설정에 「효과 측정 대조군」 칸 없음
+- 결과:
+
+### C113-S1 · 직원 시트(설계서 §7 1 ~ 14)
+- 카드: C113
+- 단계: 배포 뒤
+- 선행: C113-H1
+- 기대: 설계서 §7 1 ~ 14 전부 맞음
+- 확인: 시트 결과 · 다름이면 캡처
+- 결과:
+
+### C111-S0 · 배포 전 운영 확인(읽기 · .65 게이트웨이 DB)
+- 카드: C111
+- 단계: 배포 전(읽기만)
+- 선행: 커밋(Harold) · check.sh · --pg
+- 기대: ① provider_result_code_map 리포트 유형 = 'any' 뿐(104 전 · 'any' · 'ack' 밖 행이 있으면 접수 실패에서 그 행이 빠지는지 설계로 되돌아간다) ② 실패를 번역하는 mapped 에이전트(정책 mapped + 실패 고객 행 1 이상) = 한줄로 네 대뿐(콜비서 = 실패 고객 행 0) ③ 그 네 대의 숫자 아닌 활성 실패 행 = 0(104 문 ②)
+- 확인: 조회 출력(명령 = 배포 시작 때 하나씩)
+- 선행 결과(1106 Harold 노트북): 게이트웨이 커밋 50f666b(39 파일 · 콜비서 세션 status 5 · tools 1 제외) · check.sh 1차 = API 3건 실패(agent-install-bundle · reconcile-verify-script · zip-writer · 셋 다 `AssignProcessToJobObject: (87)` · EXIT 3) → 같은 창에서 진짜 python3(`/c/Users/ceo/AppData/Local/Python/bin`)를 PATH 앞에 두면 셋 다 통과(스토어 별칭 python3 를 띄우는 연속 호출에서 남 · 이번 코드 무관) → `PATH=… PYTHON_BIN=python check.sh` = GW_CHECK_OK · `GOFLAGS=-p=1 … --pg` = GW_PG_CHECK_OK 1952 · 건너뜀 0 · push 16a7173..50f666b
+- 결과: 1106 Harold .65 = ① 리포트 유형 any 593 한 줄 → 통과 ② 한줄로 네 대 = 실패 262 · 숫자 아님 0 · 대역 262 → 통과 · **콜비서 세 대 = 실패 고객 행 80 씩(숫자 아님 0 · 대역 0) = 설계 전제(성공만)와 다름** → 5-a 실측 = 80 행 전부 에이전트 전체(all) · 코드 = QTmsg 번호(SMS_0011 → 11 · LMSMMS_3006 → 3006 …) · V9000 · V2000 · V2500 · V2600 · V2700 · V2800 행 없음 · 세 대 같은 82 행(성공 6 · 1000 포함) → 104 문 ① · 감사 CODE 가 한줄로 대역 규칙을 모든 번역 에이전트에 요구해 콜비서에서 멈춤 · 경보 → 처방(Harold 「제대로」) = 문 ① = 옛 표준(미분류 V9000 + 같은 원시 코드의 리포트 행 표준 전부)을 번역하던 에이전트만 대상 표준 행 요구 · 감사 CODE = 미분류 V9000 을 번역하는 에이전트만 · 실 PG 사례 둘 · 감사 PG 사례 둘 · 게이트웨이 새 커밋 필요(push 전 check · --pg)
+
+### C111-G1 · 게이트웨이 마이그레이션 103(표준 코드만 · 동작 변화 0)
+- 카드: C111
+- 단계: 게이트웨이 DB
+- 선행: C111-S0
+- 기대: standard_result_code 18 행 추가(V2850 · V9150 · KAKAO 16) · 매핑 행 0 · 함수 그대로 · 적용 안 DO 확인 통과
+- 확인: 적용 출력 · SELECT count(*) FROM standard_result_code WHERE standard_code IN (18) = 18
+- 결과: 1107 Harold .65 = 서버 소스 사본 pull 1차 실패(`.git/objects` 안 root 소유 35 = 예전 root git 흔적) → `.git` 안 root 소유만 invito 로 · 작업 트리 root 소유 = C108 에이전트 산출물(`deploy/agent`) + 소스 4 파일 → 소스 4 만 invito 로(산출물 손대지 않음) · 가드(`deploy/agent` 밖 root 소유 0) 뒤 pull 8e47013..a1c7f6f Fast-forward · 103 `--single-transaction` = INSERT 0 18 · DO · added_18 = 18 · mapping_rows_104 = 0 → 통과
+
+### C111-G2 · 한줄로 네 대 대역 DML 다시(scripts/gw/customer-failure-codes-hanjul.sql · 에이전트 하나씩)
+- 카드: C111
+- 단계: 게이트웨이 DB
+- 선행: C111-G1
+- 기대: 대마다 새 표준 18 의 대역 행 추가(있는 행 그대로 · ON CONFLICT DO NOTHING) · 「대역이 아닌 실패 매핑」 멈춤 0 · 104 문 ①이 볼 에이전트 전체 숫자 행 = 104 대상 실패 표준 전부
+- 확인: 대마다 적용 출력 · 대역 행 수(262 → 280)
+- 결과: 1107 Harold .65 = 네 대 각각 SELECT 280 · INSERT 0 18 · DO · COMMIT · band_rows 280 × 4(hanjul01 rows_other 71 = C107 때 끈 0708 행 · 성공 행) → 통과
+
+### C111-G3-0 · 104 미리 돌리기(운영 · 끝을 ROLLBACK 으로 · 바뀌는 것 0)
+- 카드: C111
+- 단계: 게이트웨이 DB(읽기와 같음 · 한 트랜잭션 · ROLLBACK)
+- 선행: C111-G2
+- 기대: 서버 소스의 104 파일 끝 `COMMIT;` 을 `ROLLBACK;` 으로 바꿔 흘린다 → 첫 줄 문 통과(콜비서 · 한줄로 네 대 · 출력에 RAISE 없음) · 마지막 ROLLBACK · 뒤 확인 = result_code_report_key 없음 · 매핑 행 note '104 결과코드 매핑(1106)' 0. 문이 멈추면 출력의 에이전트:표준 목록으로 정한다(콜비서 = 카카오 실측 · 행 추가 여부)
+- 확인: 출력 · 뒤 확인 조회
+- 결과: 1107 Harold .65 = 1차 미리 돌리기 = 문 ① 멈춤 · 콜비서 세 대 × KAKAO_3000_UNEXPECTED · V2000 · V2800 · V2850(옛 표준 = 같은 숫자의 젬텍 lms_mms 2000 · 2001 · 2002 · 3000 · 4000 · 9001 행 표준을 콜비서가 번역) · 운영 변화 0(fn_absent t · rows_104 0) → 콜비서 요청 실측 = callbiseo-3 sms 6건(1106)뿐 · 카카오 0 · Harold 「장문 · 단문만 · 카카오 아예 안 씀」 → 콜비서 세 대 × 네 표준 에이전트 전체 행 '9999' 명시(note 'C111 콜비서 SMS · LMS 전용(카카오 0 · 1106 실측) = 9999 명시 · 104 전후 같은 결과' · INSERT 0 12 · 행 없음 = 9999 와 같은 값) → 2차 미리 돌리기 = DO · INSERT 0 60 · DO · CREATE FUNCTION · COMMENT · CREATE FUNCTION · DROP TABLE · ROLLBACK · fn_absent t · rows_104 0 → 통과
+
+### C111-L1 · 운영 대역 표 → 한줄로 라벨 파일 대조
+- 카드: C111
+- 단계: 게이트웨이 DB 읽기 → 로컬
+- 선행: C111-G2
+- 기대: 운영 게이트웨이 DB 에서 gen-result-code-hanjul-band.mjs 의 BAND_SQL 을 COPY TO STDOUT 으로 뽑아 --tsv 로 다시 만든 파일 = 커밋된 생성 파일(280 · 줄 같음 · diff 0). 다르면 그 파일로 바꿔 H1 에 싣는다
+- 확인: 줄 수 · diff 출력
+- 결과: 1107 Harold .65 = 운영 BAND_SQL(btrim 제목) COPY 280 줄 · md5 a90cb2f2bd10e277fae140c92d2e619e = 커밋할 라벨 파일의 표(band_1106.tsv)와 같음 → 통과
+
+### C111-H1 · 한줄로 배포(대역 라벨 280 · 라벨 없는 대역 경보 · DDL 0)
+- 카드: C111
+- 단계: 한줄로 배포(적재 0 조건 재시작)
+- 선행: C111-L1 · 커밋(Harold)
+- 기대: 새 대역 코드(52850 · 59150 · 2xxxx 16 · 운영에서 빠졌던 18)가 화면에 글로 보인다 · 스팸 몰림 목록에 40052 · 40053 · 기동 뒤 에러 로그 0 · 감시 로그에 「대역 라벨 없음 통지」가 나오면 그 코드로 L1 다시
+- 확인: pm2 기동 · 에러 로그
+- 결과: 1107 Harold = 한줄로 경로 지정 커밋 6d04f394(8 파일 · C110 섞인 넷 뺌 · pre-push 시험 통과) push c7b4ff35..6d04f394 · .62 pull Fast-forward · 백엔드 build:safe · loading=0 → pm2 reload targetup-backend · online · created at 2026-11-07T00:04:56Z · unstable 0 · 에러 로그 0줄 → 통과
+
+### C111-G3 · 게이트웨이 마이그레이션 104(매핑 · 열쇠 함수 · customer_failure_code 다시 · 첫 줄 문)
+- 카드: C111
+- 단계: 게이트웨이 DB
+- 선행: C111-H1 · C111-G3-0 통과
+- 기대: 첫 줄 문 통과(멈추면 출력의 에이전트:표준 목록을 G2 로 채우고 다시 · 적용 0) · 매핑 행 = m104_rows 전부 활성 · 사후 대조 통과 · result_code_report_key(4 인자) · customer_failure_code 본문 = 100 + 열쇠 두 줄 · 엔진 재시작 0(같은 이름 · 같은 인자)
+- 확인: 적용 출력 · 함수 · 행 수 확인
+- 결과: 1107 09:07:04 Harold .65 = INSERT 0 50 · INSERT 0 10 · DO(문) · INSERT 0 60 · DO(사후 대조) · CREATE FUNCTION · COMMENT · CREATE FUNCTION · DROP TABLE · COMMIT · key_fn t · rows_104 60 · 함수 100 안 열쇠 호출 2 · 2분 뒤 게이트웨이 ERROR 0 · 적용 뒤 결과 hanjul02 12 건 전부 고객 코드 번역(9999 0 · 원 코드 0) → 통과
+
+### C111-G4 · 관리 API + 대시보드(런북 §3-1 · §3-2)
+- 카드: C111
+- 단계: 게이트웨이 관리 API · 대시보드 배포
+- 선행: C111-G3(API 가 result_code_report_key 를 부른다 · 104 전이면 조회가 깨진다)
+- 기대: 메시지 이력 · 공개 API · 웹훅 · 통계 실패 표 정상(새 PID 에러 0) · 정합성 감사 CODE 항목 경보 0 · 대시보드 13 화면 쪽 번호 · 결과코드 엑셀 받기
+- 확인: 런북 확인 줄 · 에러 로그
+- 결과: 1107 Harold = 관리 API 14 파일(§3-1-b · 폴더 하나 업로드 · ALL_HASH_OK · GW_DEPLOY_OK 14 = 신규 pagination.js 1 · 교체 13 · 롤백 0 · 09:15:41 ~ 09:16:11 · API_UPLOAD_CLEAN · 150 초 뒤 새 PID 2503159 ERROR 0) · 대시보드(§3-2 · build 52 files · manifest ac4ea6e8a4f9 · 서버 검증 52 · 52 · manifest · deploy.sh 일치 · GW_DEPLOY_OK dashboard · exit 0 · 백업 deploy-backups/20261107-092249) → 통과(업로드 정리 = 다음)
+
+### C111-S1 · 실측(직원 시트 65 ~ 67 · 운영 대조)
+- 카드: C111
+- 단계: 배포 뒤
+- 선행: C111-G4
+- 기대: 시트 65 ~ 67 전부 맞음 · 운영 대조 = G3 뒤 휴머스온 접수 실패(원장 접수 코드 = 리포트 코드 = 4000 류) 건의 report_queue.customer_code = 대역(52000 등 · 9999 아님) · 한줄로 화면 라벨 = 「발송: 요청 형식 오류」 류
+- 확인: 시트 결과 · 조회 출력
 - 결과:
 
 ## §2 덤프 뒤 적용분

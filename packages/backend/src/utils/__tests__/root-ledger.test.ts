@@ -5,6 +5,7 @@
  * 막은 것을 지키는 기계 장치가 없었다. 그래서 이 시험은 **대상을 소스에서 기계로 뽑는다**(주소 · 호출 · 화면 파일).
  * 표에 적은 예외만 통과하고, 새 주소 · 새 호출 · 새 화면은 분류 없이 들어오면 실패한다(손으로 등재한 표 = 등재한 것만 지킨다 · LESSONS_BACKEND 1014).
  */
+import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -26,9 +27,6 @@ function sourceFiles(root: string, ext: RegExp): string[] {
 }
 
 /** 주석을 걷는다(줄 주석 · 블록 주석 · JSX 주석). 문자열 속 '//'(주소)도 걷히지만 찾는 쪽이 줄기만 한다(놓치는 쪽 아님). */
-function stripComments(src: string): string {
-  return src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
-}
 
 /** 라우터 파일 → 주소 블록(방법 · 경로 · 본문 = 다음 주소 또는 맨 앞 칸 선언 직전까지 · 주소 사이 도우미 함수가 앞 주소 본문에 섞이지 않게 · 1024) */
 interface RouteBlock { method: string; path: string; body: string; at: number }
@@ -2919,7 +2917,8 @@ describe('R22 신설(1027) 구매 사건 = 결제 확정 — 주문 사건 이�
   });
   it('매출 반영 판정 조각(표식 jsonb 비교) = cdp-order-revenue.ts 하나 · 구매이력 · 자동마케팅 성과 · 플래너 대상이 부른다', () => {
     expect(filesWith("'revenue_applied' = 'true'::jsonb")).toEqual(['utils/cdp-order-revenue.ts']);
-    for (const f of ['utils/purchase-history-source.ts', 'utils/automarketing-roi.ts', 'utils/planner-audience.ts']) {
+    // ★ 2026-11-06 C110 — 자동마케팅 성과 귀속 문장이 효과 측정 한 산식(effect-measure)으로 옮겨 갔다(automarketing-roi 는 그 CT 를 부른다)
+    for (const f of ['utils/purchase-history-source.ts', 'utils/effect-measure.ts', 'utils/planner-audience.ts']) {
       expect(stripComments(be(f)), f).toMatch(/netPurchaseSql\('(e|pb)'\)/);
     }
   });
@@ -3283,6 +3282,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/retention-sweeper.ts \'retention-pdf-delete-fail\'': '보관 파일 삭제 실패 = 저장소 · 여러 회사 작업',
     'utils/system-alert.ts \'system-alert-pending-ddl\'': '경보 원장 표 없음 = 스키마(배포 앞 DDL 빠짐) · 회사 무관(★1102 설계 §17-3)',
     'utils/system-monitor-worker.ts \'queue-abnormal-status\'': '발송 대기열 상태값 이상 = 서버 · 회사 무관',
+    'utils/system-monitor-worker.ts `band-label-missing:${codes.join(\',\')}`': '대역 라벨 파일 = 한줄로 코드 · 원천 = 게이트웨이 표준 코드 표 · 회사 무관(★1106 비토엔진 오류접수)',
     'utils/system-monitor-worker.ts dedupKey': '발송 큐 지연 = 게이트웨이 · 에이전트 처리 속도 · 여러 캠페인 집계',
     'utils/spam-probe.ts `spam-probe-device:${carrier}:${phone}`': '스팸 검사 단말 = 우리 장비(여러 회사 검사가 같은 단말 · 회사 무관)',
     "utils/spam-probe.ts 'spam-verdict-after-decided'": '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관)',

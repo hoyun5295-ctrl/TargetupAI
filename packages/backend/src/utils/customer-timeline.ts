@@ -21,6 +21,8 @@
  */
 
 import { query, mysqlQuery } from '../config/database';
+import { adGateSchemaReady } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 빠짐 사건
+import { AD_EXCLUDE_LABEL, AdExcludeReason } from './ad-send-gate-core';
 import { getCompanySmsTablesWithLogsRange } from './sms-queue';
 import { getQueueRowStatus, getSendTypeLabel, getDisplayContents, getCarrierLabel } from './sms-result-map';
 import { normalizePhone } from './normalize';
@@ -681,6 +683,38 @@ async function fetchUnsubscribes(companyId: string, scope: CustomerScope, f: Sou
   }));
 }
 
+/**
+ * ★ 2026-11-06 C110 광고 관문으로 빠진 일(설계서 §6-6) — 「왜 안 받았나」 · 발송 원천(send)에 함께 싣는다(상태 칸 null = 발송 아님).
+ *   캠페인에 이어진 줄만(이어지지 않은 묶음 = 발송이 안 된 시도) · 받는 쪽 · 예약 줄은 그리지 않는다 · DDL 전 = 0줄.
+ */
+async function fetchAdExclusions(companyId: string, scope: CustomerScope, f: SourceFilter, limit: number): Promise<TimelineEvent[]> {
+  const phone = String(scope.phone || '').replace(/\D/g, '');   // ★ 2026-11-07 C113 K10 — 옛 /D/g = 대문자 D 만 지우는 오타(뜻 = 숫자만)
+  if (!phone || !(await adGateSchemaReady())) return [];
+  const r = await query(
+    `SELECT m.id, m.kind, m.created_at, c.campaign_name, c.id AS campaign_id
+       FROM ad_send_marks m
+       JOIN campaigns c ON c.id = m.campaign_id
+      WHERE m.company_id = $1::uuid AND m.phone = $2
+        AND m.kind IN ('global_holdout', 'campaign_holdout', 'priority')   -- ★ C113 D23 관문은 피로도를 보지 않는다(피로도 = HEAD 블록 · 원장 줄 0)
+        AND ($3::timestamptz IS NULL OR m.created_at <= $3::timestamptz)
+        AND ($4::timestamptz IS NULL OR m.created_at >= $4::timestamptz)
+        AND ($5::text IS NULL OR c.campaign_name ILIKE $5)
+      ORDER BY m.created_at DESC
+      LIMIT $6`,
+    [companyId, phone, f.before, f.after, f.like, limit + 1],
+  );
+  return r.rows.map((row: any): TimelineEvent => ({
+    id: `adx:${row.id}`,
+    kind: 'send',
+    at: toIso(row.created_at) || new Date(0).toISOString(),
+    title: `${AD_EXCLUDE_LABEL[row.kind as AdExcludeReason] || '광고 제외'}${row.campaign_name ? ` (${clip(row.campaign_name, 24)})` : ''}`,   // ★ C113 D17 이름 = 괄호
+    subtitle: '이 광고는 보내지 않았습니다',
+    status: null,
+    detail: { adExcluded: row.kind },
+    ref: { type: 'campaign', id: String(row.campaign_id) },
+  }));
+}
+
 async function fetchJourneys(companyId: string, scope: CustomerScope, f: SourceFilter, limit: number) {
   // 검색 대상 = 여정명. 스텝 로그는 맞은 여정의 실행 건에만 달리므로 같은 술어를 물려받는다
   const entered = await query(
@@ -697,7 +731,7 @@ async function fetchJourneys(companyId: string, scope: CustomerScope, f: SourceF
   );
 
   const STATUS_LABEL: Record<string, string> = {
-    active: '진행 중', completed: '완료', exited: '중단', holdout: '비교군', failed: '실패',
+    active: '진행 중', completed: '완료', exited: '중단', holdout: '대조군', failed: '실패',
   };
   const out: TimelineEvent[] = entered.rows.map((row: any): TimelineEvent => ({
     id: `exec:${row.id}`,
@@ -735,7 +769,8 @@ async function fetchJourneys(companyId: string, scope: CustomerScope, f: SourceF
         kind: 'journey',
         at: toIso(row.sent_at) || new Date(0).toISOString(),
         title: `여정 ${order} ${isSkip ? '건너뜀' : '실행'}${row.name ? ` · ${clip(row.name, 22)}` : ''}`,
-        subtitle: isSkip ? (row.error_reason ? clip(row.error_reason, 40) : '조건 미충족') : (ch || undefined),
+        // ★ 2026-11-06 C110 — 광고 관문 건너뜀 사유는 발송 쪽과 같은 말(R56)
+        subtitle: isSkip ? (JOURNEY_AD_SKIP_LABEL[String(row.error_reason || '')] || (row.error_reason ? clip(row.error_reason, 40) : '조건 미충족')) : (ch || undefined),
         status: isSkip ? null : (String(row.status) === 'sent' ? 'success' : null),
         detail: { stepOrder: row.step_order, channel: row.channel || null, logStatus: row.status, reason: row.error_reason || null },
       });
@@ -745,6 +780,13 @@ async function fetchJourneys(companyId: string, scope: CustomerScope, f: SourceF
   out.sort(compareEvents);
   return out.slice(0, limit + 1);
 }
+
+/** ★ 2026-11-06 C110 여정 칸 건너뜀 사유(광고 관문) = 발송 쪽 빠짐 말과 같은 글자 · 피로도 = 여정 HEAD 건너뜀 사유(★ C113 D17 문장) */
+const JOURNEY_AD_SKIP_LABEL: Record<string, string> = {
+  global_holdout: AD_EXCLUDE_LABEL.global_holdout,
+  priority_lower: AD_EXCLUDE_LABEL.priority,
+  fatigue_capped: '광고 제외(피로도 상한)',
+};
 
 const EMAIL_EVENT_LABEL: Record<string, string> = {
   open: '이메일 열람', click: '이메일 링크 클릭', bounce: '이메일 반송',
@@ -941,7 +983,14 @@ export async function buildCustomerTimeline(opts: TimelineOptions): Promise<Time
 
   if (on('send')) sources.send = { rangeCapped };
   const batches = await Promise.all([
-    on('send') ? runSource('send', sources, limit, () => fetchSends(opts.companyId, scope, months, filter, limit, sources)) : [],
+    on('send') ? runSource('send', sources, limit, async () => {
+      // ★ 2026-11-06 C110 — 발송 줄 + 광고 관문으로 빠진 줄(같은 원천 · 시각 순으로 합쳐 한 쪽)
+      const [sent, excluded] = await Promise.all([
+        fetchSends(opts.companyId, scope, months, filter, limit, sources),
+        fetchAdExclusions(opts.companyId, scope, filter, limit).catch(() => [] as TimelineEvent[]),
+      ]);
+      return excluded.length === 0 ? sent : [...sent, ...excluded].sort(compareEvents).slice(0, limit + 1);
+    }) : [],
     on('purchase') ? runSource('purchase', sources, limit, () => fetchPurchases(opts.companyId, scope, filter, limit)) : [],
     on('behavior') ? runSource('behavior', sources, limit, () => fetchBehaviors(opts.companyId, scope, filter, limit)) : [],
     on('inapp') ? runSource('inapp', sources, limit, () => fetchInapp(opts.companyId, scope, filter, limit)) : [],

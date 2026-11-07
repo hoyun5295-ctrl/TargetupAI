@@ -4,6 +4,7 @@
  *   ② constants/credit.ts 에 단가 숫자 0 · 함수 사본 0(생성 파일을 다시 내보낸다)
  *   ③ 화면 표 셋(작은 생성 · 확인 창 · 요금 요약)의 키 = 서버 단가표 키(없으면 화면에 0크레딧)
  */
+import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -12,7 +13,6 @@ import { CREDIT_COST_MAP } from '../ai-credit-calc';
 
 const FE_CREDIT = join(__dirname, '..', '..', '..', '..', 'frontend', 'src', 'constants', 'credit.ts');
 const read = (p: string) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
-const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 
 describe('프론트 크레딧 상수 = 크레딧 CT 생성 파일', () => {
   it('① 생성 파일 = 지금 CT 로 다시 만든 글자(다르면 npx ts-node scripts/gen-credit-constants.ts)', () => {

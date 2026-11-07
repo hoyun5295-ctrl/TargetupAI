@@ -15,11 +15,12 @@
 import { UserFacingError } from './http-error';
 import { netPurchaseSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { query } from '../config/database';
-import { purchasedSinceEntrySql } from './journey-goal-purchase';
 import { purchaseAfterSql, purchaseFactsSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D4 · CT-D2
 // ★ Phase2 A (2026-06-26): 사후확률 α/β는 실측 count(sent/click)에서 도출 — bandit-arm 단일 진실.
 import { deriveBanditArm } from './bandit-arm';
-import { journeyClickSql } from './journey-click';   // ★ 2026-11-02 여정 링크 클릭 판정 CT(설계서 3-0 CT-J9)
+import { journeyClickSql } from './journey-click';
+import { journeyHoldoutEffect, EFFECT_WINDOW_DAYS } from './effect-measure';   // ★ 2026-11-06 C110 효과 측정 한 산식
+import { LIFT_VERDICT_LABEL, LiftVerdictKind } from './effect-measure-core';   // ★ 2026-11-02 여정 링크 클릭 판정 CT(설계서 3-0 CT-J9)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -638,47 +639,40 @@ export async function buildJourneyStats(journeyId: string, companyId: string): P
     getJourneyVariantStats(journeyId),
   ]);
 
-  // ★ 2026-07-11 홀드아웃 증분 비교 — 대조군이 있을 때만. 발송군 = holdout 제외 전체.
-  // ★ 2026-10-25 여정 구조체크 2차 #13(R1) — 전환 판정 = 목표 판정 한 곳(journey-goal-purchase · 가입 묶음 포함).
-  //   옛: 「goal purchase 판정과 동일 신호」라 적고 세 신호를 따로 적어 1019 가입 묶음이 빠졌다.
+  // ★ 2026-11-06 C110 결함 A ~ C · F — 대조군 비교 = 효과 측정 한 산식(effect-measure journeyHoldoutEffect) ·
+  //   고객 단위(처음 실행이 무리를 정함 · 재진입 = 한 명) · 첫 진입 뒤 7일 · 창 닫힌 고객만(측정 중은 따로) ·
+  //   보내기로 한 고객 전부 vs 대조군(받았는지로 거르지 않음 = ITT) · 늘어난 매출 · 판정 · 문장 = effect-measure-core 하나.
+  //   옛 산식(진입 뒤 지금까지 · 실행 행 · purchasedSinceEntrySql)은 목표 판정 · 기다리기 칸 · 지도에 그대로(효과 측정이 아니다).
   let holdoutCompare: JourneyHoldoutCompare | null = null;
   if (overview.holdout > 0) {
     try {
-      const hc = await query(
-        `SELECT
-           COUNT(*) FILTER (WHERE e.status = 'holdout') AS h_total,
-           COUNT(*) FILTER (WHERE e.status = 'holdout' AND e.conv) AS h_conv,
-           COUNT(*) FILTER (WHERE e.status <> 'holdout') AS s_total,
-           COUNT(*) FILTER (WHERE e.status <> 'holdout' AND e.conv) AS s_conv
-         FROM (
-           SELECT e.id, e.status,
-                  ${purchasedSinceEntrySql('e', 'j.company_id', `j.trigger_event = 'customer.created'`)} AS conv
-             FROM journey_executions e
-             JOIN journeys j ON j.id = e.journey_id
-            WHERE e.journey_id = $1::uuid
-         ) e`,
-        [journeyId]
-      );
-      const row = hc.rows[0] || {};
-      const hTotal = Number(row.h_total) || 0;
-      const sTotal = Number(row.s_total) || 0;
-      holdoutCompare = {
-        holdoutTotal: hTotal,
-        holdoutConverted: Number(row.h_conv) || 0,
-        sentTotal: sTotal,
-        sentConverted: Number(row.s_conv) || 0,
-        holdoutRate: hTotal > 0 ? (Number(row.h_conv) || 0) / hTotal : 0,
-        sentRate: sTotal > 0 ? (Number(row.s_conv) || 0) / sTotal : 0,
-      };
+      const eff = await journeyHoldoutEffect(journeyId);
+      if (eff) {
+        const L = eff.lift;
+        holdoutCompare = {
+          holdoutTotal: L.control.n,
+          holdoutConverted: L.control.buyers,
+          sentTotal: L.treated.n,
+          sentConverted: L.treated.buyers,
+          holdoutRate: L.rateC,
+          sentRate: L.rateT,
+          incRevenue: L.incRevenue,
+          verdict: L.verdict,
+          verdictLabel: LIFT_VERDICT_LABEL[L.verdict],
+          sentence: L.sentence,
+          measuring: eff.measuring,
+          windowDays: EFFECT_WINDOW_DAYS,
+        };
+      }
     } catch (e: any) {
-      console.log('[JourneyStats] 홀드아웃 비교 실패(통계만 생략):', e?.message || e);
+      console.log('[JourneyStats] 대조군 비교 실패(통계만 생략):', e?.message || e);
     }
   }
 
   return { overview, steps, segments, hourly, weekday, variants, holdoutCompare };
 }
 
-/** ★ 2026-07-11 홀드아웃 증분 비교 — 발송군 vs 미발송 대조군 전환율 */
+/** ★ 2026-11-06 C110 대조군 비교 — 보내기로 한 고객 vs 대조군(고객 수 · 첫 진입 7일 · 창 닫힌 고객) */
 export interface JourneyHoldoutCompare {
   holdoutTotal: number;
   holdoutConverted: number;
@@ -686,6 +680,13 @@ export interface JourneyHoldoutCompare {
   sentConverted: number;
   holdoutRate: number;
   sentRate: number;
+  incRevenue: number;
+  verdict: LiftVerdictKind;
+  verdictLabel: string;
+  sentence: string;
+  /** 첫 진입 7일이 아직 안 지난 고객(세지 않음) */
+  measuring: number;
+  windowDays: number;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

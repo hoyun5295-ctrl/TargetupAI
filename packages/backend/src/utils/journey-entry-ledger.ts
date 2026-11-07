@@ -210,7 +210,9 @@ export async function getJourneyHoldoutPct(journeyId: string): Promise<number> {
     const pct = Number(r.rows[0]?.holdout_pct);
     if (!Number.isFinite(pct) || pct <= 0) return 0;
     return Math.min(30, Math.floor(pct));
-  } catch {
+  } catch (e: any) {
+    // ★ 2026-11-06 C110 결함 E — 읽기 실패 = 0(대조군 없이 보냄 · 덜 재는 쪽)은 그대로 · 꺼짐도 로그(R7)
+    console.warn(`[journey-entry-ledger] 대조군 비율 읽기 실패 journey=${journeyId} — 이번 진입은 대조군 없이:`, e?.message || e);
     return 0;
   }
 }

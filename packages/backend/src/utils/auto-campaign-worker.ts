@@ -47,6 +47,9 @@ import { resolveCustomerCallback, filterByIndividualCallback, fixedCallbackRejec
 import { autoCampaignLockReason } from './plan-guard';
 // ★ 2026-07-05: 발송 피로도 보호 — 차감 전 게이트 + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
+import { resolveAdGateMode, gatePhones, AdHold } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
+import { adGateNotice } from './ad-send-gate-core';
+import { randomUUID } from 'crypto';
 import { extractVarCatalog, filterVarCatalogByData, generateMessages } from '../services/ai';
 import { autoSpamTestWithRegenerate, spamVerdictOf, SPAM_VERDICT_WORD, toSpamCheckRecord, readSpamCheckRecord, SPAM_REJECTED_DEFAULT_TEXT } from './spam-test-queue';
 import { buildUnsubscribeFilter } from './unsubscribe-helper';
@@ -688,6 +691,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
   const logPrefix = `[auto-worker][${ac.id}][${ac.campaign_name}]`;
   // ★ 2026-09-27 한줄로 V2 m088 — 차감이 끝났는가(바깥 catch가 환불 의무를 남길 근거). 적재·정산 경로가 끝나면 비운다.
   let deductedFor: { campaignId: string; count: number; messageType: string } | null = null;
+  // ★ 2026-11-07 C113 D10 — 관문 길이 원장을 쓴 회차 = 적재 바로 앞(handoff)까지 이 회차가 예약을 쥔다(그 전 출구 = finally 해제 · 소유 CT)
+  const adHold = new AdHold(ac.company_id);
 
   try {
     console.log(`${logPrefix} 실행 시작`);
@@ -826,6 +831,26 @@ async function executeAutoCampaign(ac: any): Promise<void> {
           await markFailed(ac, '피로도 보호로 발송 대상 전원 제외');
           return;
         }
+      }
+    }
+    // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = 위 HEAD 피로도까지 그대로(관문 · 원장 0) · 관문 길(요금제 씀 + 새 기능)만 관문(새 기능 셋 · 묶음 = 이 회차 새 uuid) ·
+    //   잇기 = 차감 뒤 · 적재 앞(D10)
+    const autoGateMode = ac.is_ad ? await resolveAdGateMode(ac.company_id) : { mode: 'legacy' as const };
+    const adGateBatch = autoGateMode.mode === 'gate' ? randomUUID() : null;
+    if (autoGateMode.mode === 'gate' && adGateBatch) {
+      const gate = await gatePhones(autoGateMode.policy,
+        { branch: 'automarketing', holdoutKey: adGateBatch, batchId: adGateBatch, reserve: true },
+        customers.map((c: any) => String(c.phone || '')));
+      adHold.take(gate.marked, adGateBatch);
+      if (gate.excluded.size > 0) {
+        const beforeGate = customers.length;
+        customers = customers.filter((c: any) => !gate.excluded.has(normalizePhone(String(c.phone || ''))));
+        console.log(`${logPrefix} 광고 관문 — ${beforeGate - customers.length}명 제외(${adGateNotice(gate.counts)}) (${customers.length}명 남음)`);
+      }
+      if (customers.length === 0) {
+        console.log(`${logPrefix} 광고 관문으로 전원 제외 — 스킵`);
+        await markFailed(ac, `발송 대상 전원 제외(${adGateNotice(gate.counts)})`);
+        return;
       }
     }
 
@@ -1004,6 +1029,7 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       return;
     }
 
+
     // ★ MySQL 큐 INSERT
     const sendTime = toKoreaTimeStr(new Date());
     const msgTypeCode = toQtmsgType(ac.message_type);
@@ -1126,6 +1152,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       // ★ 2026-07-27 (B-0727-2): 배치 독립 커밋이라 실패해도 앞 배치는 큐에 남아 발송된다.
       //   여기서 그냥 던지면 아래 공통 종결·환불 블록을 건너뛰어, 적재된 건은 나가는데 전량이 미적재로 처리된다.
       //   커밋된 건수를 살려 정상 흐름(부분 실패 환불 + 상태 기록)을 그대로 타게 한다.
+      // ★ 2026-11-07 C113 D10 · 구현 1R #4 — 광고 관문 원장 잇기 · 예약 넘김 = 적재 바로 앞(준비 단계 실패 = finally 해제 · 이 뒤 실패 = 해제 0)
+      if (adHold.holding) await adHold.handoff(campaignId);
       try {
         sentCount = await insertAlimtalkQueue(companyTables, alimRows, campaignId);
       } catch (alimErr) {
@@ -1155,6 +1183,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
         ]);
       }
 
+      // ★ 2026-11-07 C113 D10 · 구현 1R #4 — 광고 관문 원장 잇기 · 예약 넘김 = 적재 바로 앞(080 조회 · 행 준비 실패 = finally 해제 · 이 뒤 실패 = 해제 0)
+      if (adHold.holding) await adHold.handoff(campaignId);
       sentCount = await bulkInsertSmsQueue(companyTables, autoSmsRows, true, { companyId: ac.company_id, userId: ac.user_id, source: 'automarketing' });
     }
 
@@ -1234,6 +1264,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
       }
     }
     await markFailed(ac, `실행 에러: ${err.message || '알 수 없는 오류'}`);
+  } finally {
+    if (adHold.holding) await adHold.settle();
   }
 }
 

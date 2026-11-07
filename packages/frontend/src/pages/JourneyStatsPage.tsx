@@ -45,7 +45,7 @@ interface JourneyStatsData {
     /** ★ 2026-07-11 홀드아웃 대조군(미발송) */
     holdout?: number;
   };
-  /** ★ 2026-07-11 홀드아웃 증분 비교 — 대조군 없으면 null */
+  /** ★ 2026-11-06 C110 대조군 비교 — 보내기로 한 고객 vs 대조군(고객 수 · 첫 진입 7일 · 창 닫힌 고객) · 대조군 없으면 null */
   holdoutCompare?: {
     holdoutTotal: number;
     holdoutConverted: number;
@@ -53,6 +53,12 @@ interface JourneyStatsData {
     sentConverted: number;
     holdoutRate: number;
     sentRate: number;
+    incRevenue: number;
+    verdict: 'insufficient' | 'positive' | 'negative' | 'unclear';
+    verdictLabel: string;
+    sentence: string;
+    measuring: number;
+    windowDays: number;
   } | null;
   steps: Array<{
     stepId: string;
@@ -181,32 +187,39 @@ export default function JourneyStatsPage() {
           <div className="text-[11px] text-emerald-700 -mt-4 mb-6">목표 달성 = 여정 진입 후 목표 달성이 확인되어 남은 발송 없이 종료된 고객. 이 여정이 만든 성과입니다.</div>
         )}
 
-        {/* ★ 2026-07-11 홀드아웃 증분 비교 — 발송군 vs 미발송 대조군 전환율 */}
-        {stats.holdoutCompare && stats.holdoutCompare.holdoutTotal > 0 && (
+        {/* ★ 2026-11-06 C110 대조군 비교 — 문장 · 판정 = 서버 한 산식(같은 말 · R56) */}
+        {stats.holdoutCompare && (
           <div className="mb-6 p-4 bg-sky-50 border border-sky-200 rounded-xl">
-            <div className="flex items-center gap-2 mb-3">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
               <Beaker className="w-4 h-4 text-sky-700" />
-              <span className="text-sm font-semibold text-sky-900">홀드아웃 증분 비교</span>
-              <span className="text-[10px] text-slate-400">이 여정이 실제로 전환을 만드는지: 발송군 vs 미발송 대조군</span>
+              <span className="text-sm font-semibold text-sky-900">대조군 비교</span>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                stats.holdoutCompare.verdict === 'positive' ? 'bg-emerald-100 text-emerald-800'
+                  : stats.holdoutCompare.verdict === 'negative' ? 'bg-rose-100 text-rose-800'
+                    : 'bg-slate-100 text-slate-600'}`}>{stats.holdoutCompare.verdictLabel}</span>
             </div>
+            <p className="text-[13px] text-slate-800 mb-3 break-keep">{stats.holdoutCompare.sentence}</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <div className="text-[10px] text-slate-400 mb-1">발송군 전환율</div>
+                <div className="text-[11px] text-slate-500 mb-1">보내기로 한 고객 구매율</div>
                 <div className="text-xl font-bold text-emerald-700 tabular-nums">{(stats.holdoutCompare.sentRate * 100).toFixed(1)}%</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{stats.holdoutCompare.sentConverted.toLocaleString()} / {stats.holdoutCompare.sentTotal.toLocaleString()}명</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">{stats.holdoutCompare.sentConverted.toLocaleString()} / {stats.holdoutCompare.sentTotal.toLocaleString()}명</div>
               </div>
               <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <div className="text-[10px] text-slate-400 mb-1">대조군 전환율 (미발송)</div>
+                <div className="text-[11px] text-slate-500 mb-1">대조군 구매율(보내지 않음)</div>
                 <div className="text-xl font-bold text-slate-600 tabular-nums">{(stats.holdoutCompare.holdoutRate * 100).toFixed(1)}%</div>
-                <div className="text-[10px] text-slate-400 mt-0.5">{stats.holdoutCompare.holdoutConverted.toLocaleString()} / {stats.holdoutCompare.holdoutTotal.toLocaleString()}명</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">{stats.holdoutCompare.holdoutConverted.toLocaleString()} / {stats.holdoutCompare.holdoutTotal.toLocaleString()}명</div>
               </div>
               <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                <div className="text-[10px] text-slate-400 mb-1">증분 효과 (발송군 − 대조군)</div>
-                <div className={`text-xl font-bold tabular-nums ${stats.holdoutCompare.sentRate >= stats.holdoutCompare.holdoutRate ? 'text-sky-700' : 'text-rose-700'}`}>
-                  {((stats.holdoutCompare.sentRate - stats.holdoutCompare.holdoutRate) * 100).toFixed(1)}%p
+                <div className="text-[11px] text-slate-500 mb-1">늘어난 매출(추정)</div>
+                <div className={`text-xl font-bold tabular-nums ${stats.holdoutCompare.incRevenue >= 0 ? 'text-sky-700' : 'text-rose-700'}`}>
+                  {stats.holdoutCompare.incRevenue >= 0 ? '' : '−'}{Math.abs(stats.holdoutCompare.incRevenue).toLocaleString()}원
                 </div>
-                <div className="text-[10px] text-slate-400 mt-0.5">전환 판정 = 진입 이후 구매(이벤트·프로필)</div>
+                <div className="text-[11px] text-slate-500 mt-0.5">구매율 차 {((stats.holdoutCompare.sentRate - stats.holdoutCompare.holdoutRate) * 100).toFixed(1)}%p</div>
               </div>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-2 break-keep">
+              처음 들어온 날부터 {stats.holdoutCompare.windowDays}일 동안의 구매(자사몰 결제 · 매장 구매)를 셉니다. {stats.holdoutCompare.windowDays}일이 지난 고객만 셉니다{stats.holdoutCompare.measuring > 0 ? ` · 측정 중 ${stats.holdoutCompare.measuring.toLocaleString()}명` : ''}. 받았는지와 관계없이 보내기로 한 고객 전부와 비교합니다.
             </div>
           </div>
         )}

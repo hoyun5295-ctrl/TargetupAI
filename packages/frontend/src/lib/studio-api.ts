@@ -8,6 +8,8 @@
  * 검증 = backend/src/utils/__tests__/image-studio-picker-channel-1016.test.ts
  */
 
+import type { SaveLayers } from './studio-layers';
+
 const authHeader = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 
 /**
@@ -42,7 +44,7 @@ export interface SavedStudioAsset { id: string; url: string; filename: string | 
 
 export type StudioSaveResult =
   | { ok: true; asset: SavedStudioAsset }
-  | { ok: false; code: 'STORAGE_FULL' | 'EXPIRED' | 'FAILED'; error: string };
+  | { ok: false; code: 'STORAGE_FULL' | 'EXPIRED' | 'FAILED' | 'LOGO_CHANGED'; error: string };
 
 /**
  * 라이브러리(최신 200건)에서 그 임시 그림으로 저장된 소재를 찾는다. 저장 파일명 = `${tempId}.${ext}`(backend moveTempToPermanent).
@@ -56,9 +58,12 @@ export async function findSavedStudioAsset(tempId: string): Promise<SavedStudioL
   return a ? { status: 'found', asset: { id: String(a.id), url: a.url, filename: a.filename ?? null } } : { status: 'missing' };
 }
 
-/** 임시 그림 → 라이브러리 저장. 두 화면의 /save 는 전부 이 함수를 지난다. */
-export async function saveStudioTemp(tempId: string, title?: string | null): Promise<StudioSaveResult> {
-  const { status, ok, data } = await studioPost('/api/image-studio/save', { tempId, title: title || undefined });
+/**
+ * 임시 그림 → 라이브러리 저장. 두 화면의 /save 는 전부 이 함수를 지난다.
+ * ★ 2026-11-07 layers = 로고 확정 설정(lib/studio-layers layersForSave · 없음 = 바탕 그대로 · 서버 영구 이름 = 바탕 id 그대로라 아래 409 뒤 찾기도 그대로)
+ */
+export async function saveStudioTemp(tempId: string, title?: string | null, layers?: SaveLayers | null): Promise<StudioSaveResult> {
+  const { status, ok, data } = await studioPost('/api/image-studio/save', { tempId, title: title || undefined, layers: layers || undefined });
   if (ok && data.asset?.url) return { ok: true, asset: { id: String(data.asset.id), url: data.asset.url, filename: null } };
   if (status === 409 && data.code === 'ALREADY_SAVED') {
     const found = await findSavedStudioAsset(tempId);
@@ -69,6 +74,10 @@ export async function saveStudioTemp(tempId: string, title?: string | null): Pro
   }
   if (status === 409 && data.code === 'STORAGE_FULL') {
     return { ok: false, code: 'STORAGE_FULL', error: data.error || '저장 공간이 가득 찼어요. 라이브러리에서 정리한 뒤 다시 저장해주세요.' };
+  }
+  // ★ 2026-11-07 키트 로고가 바뀜 · 못 쓰게 됨 = 화면이 미리보기를 다시 받아 보이는 그대로 다시 저장하게 한다
+  if (status === 409 && (data.code === 'LOGO_CHANGED' || data.code === 'LOGO_UNAVAILABLE')) {
+    return { ok: false, code: 'LOGO_CHANGED', error: data.error || '브랜드 키트 로고가 바뀌었어요. 다시 확인해 주세요.' };
   }
   if (status === 503 && data.code === 'DB_MIGRATION_PENDING') {
     return { ok: false, code: 'FAILED', error: '라이브러리를 준비 중이에요. 잠시 뒤 다시 시도해주세요.' };

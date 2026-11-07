@@ -219,6 +219,17 @@ export async function parkStagingRows(stagingId: string, companyId: string, ids:
   return Number(r.rowCount) || 0;
 }
 
+/** 원본 준비분에서 고른 번호(숫자만 맞춤)의 행을 보관 칸으로 옮긴다(같은 회사 · 광고 관문이 뺀 번호 · ★ C113 D10) → 옮긴 행 수 */
+export async function parkStagingPhones(stagingId: string, companyId: string, phones: string[], q: QueryFn = defaultQuery): Promise<number> {
+  if (phones.length === 0) return 0;
+  const r = await q(
+    `UPDATE campaign_send_staging SET staging_id = $3::uuid
+      WHERE staging_id = $1::uuid AND company_id = $2::uuid AND regexp_replace(phone, '[^0-9]', '', 'g') = ANY($4::text[])`,
+    [stagingId, companyId, parkedStagingId(stagingId), phones],
+  );
+  return Number(r.rowCount) || 0;
+}
+
 /**
  * 보관 칸의 행을 원본으로 되돌린다(끊긴 지난 시도 · 접수 실패) → 되돌린 행 수.
  * ⛔ 살아 있는(발송 단계 failed 가 아닌) 캠페인이 원본을 가리키면 되돌리지 않는다 — 차감 건수보다 준비분 행이 많아지면

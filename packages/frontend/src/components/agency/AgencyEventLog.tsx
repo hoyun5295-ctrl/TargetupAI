@@ -59,6 +59,8 @@ const EVENT_LABEL: Record<string, string> = {
   dispatch_rejected: '예약을 넣지 못했습니다',
   dispatch_no_recipient: '보낼 번호가 남지 않았습니다',
   dispatch_zero_after_filter: '수신거부를 빼고 나니 보낼 번호가 없습니다',
+  // ★2026-11-07 C113 D12 — 광고 대조군 · 우선순위가 받는 사람을 모두 뺐다(요금제를 쓰고 그 설정을 켠 회사만)
+  dispatch_zero_after_gate: '대조군, 우선순위 설정으로 보낼 번호가 없습니다',
   dispatch_var_overflow: '문안에 넣을 항목이 너무 많습니다',
   // ★2026-10-03 금칙어 차단 규칙에 걸려 예약하지 않았다(문안 확인 상태로 돌아간다)
   dispatch_spam_blocked: '등록된 차단정보에 걸려 예약하지 않았습니다. 문안을 고쳐 주세요',

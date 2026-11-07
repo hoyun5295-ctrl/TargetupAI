@@ -37,6 +37,11 @@ export const RETENTION_RULES: RetentionRule[] = [
   { table: 'email_events', key: 'id', column: 'created_at', days: LOG_RETENTION_DAYS },
   { table: 'kakao_webhook_events', key: 'event_id', column: 'received_at', days: LOG_RETENTION_DAYS },
   { table: 'best_copy_seed_usage', key: 'id', column: 'used_at', days: LOG_RETENTION_DAYS },
+  // ★ 2026-11-07 C113 K15 · D16 — 광고 관문 원장(C110 · C110-DDL-1 · 외래키 0). 연결 안 된 줄 = 3일(확정 전 수명 2시간을 넉넉히 넘김) ∪
+  //   모든 줄 = 400일(효과 측정 창보다 길게) · 표마다 규칙 하나(지운 수 보고 열쇠 = 표 이름). 옛 따로 돌던 pruneAdSendMarks 는
+  //   부르는 곳이 없어(정의만) 지웠다.
+  { table: 'ad_send_marks', key: 'id', column: 'created_at', days: 3, extraWhere: "(campaign_id IS NULL OR created_at < NOW() - INTERVAL '400 days')" },
+  { table: 'ad_gate_failures', key: 'id', column: 'created_at', days: 400 },
 ];
 
 export const RETENTION_BATCH = 5000;

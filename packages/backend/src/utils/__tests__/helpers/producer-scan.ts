@@ -21,9 +21,85 @@ export function sourceFiles(root: string, ext: RegExp): string[] {
     .filter((f) => ext.test(f) && !/(^|\/)__tests__\//.test(f) && !/\.(test|spec|verify)\.tsx?$/.test(f) && !/(^|\/)(dist|dist-old|node_modules)\//.test(f));
 }
 
-/** 주석을 걷는다(줄 주석 · 블록 주석 · JSX 주석). 문자열 속 '//'(주소)도 걷히지만 찾는 쪽이 줄기만 한다(놓치는 쪽 아님). */
+/**
+ * 주석을 걷는다(줄 주석 · 블록 주석 · JSX 주석 `{/* … *\/}` 중괄호째) — ★ 2026-11-07 C113 K19 · D19 · R82 글자 단위.
+ *   옛 정규식 판(블록 먼저)은 줄 주석 안의 `/*`(예: `image/*`)를 블록 시작으로 읽어 다음 `*\/` 까지 진짜 코드를 지웠다(그 구간 계약이 죽음).
+ *   문자열(' " · 줄을 넘지 못함 · 줄 안에서 닫히지 않으면 글자 하나로 본다 = JSX 글의 홑따옴표) · 템플릿(`${}` 중첩) · 정규식 글자 안은
+ *   그대로 두고, 지운 자리는 줄바꿈만 남겨 줄 번호를 지킨다. 소비처가 덧붙이던 규칙(줄표 시험의 SQL `--` 줄 등)은 각자 그대로 덧붙인다.
+ */
+// '<' 는 뺀다 — `</p>` 같은 JSX 닫는 태그의 '/' 를 정규식 시작으로 읽지 않게(`a < /re/` 꼴은 소스에 없다)
+const REGEX_PREV = new Set(['', '(', ',', '=', ':', '[', '!', '&', '|', '?', '{', '}', ';', '+', '-', '*', '%', '>', '~', '^']);
+const REGEX_KEYWORD_TAIL = /(?:^|[^\w$])(?:return|typeof|case|do|else|in|of|new|delete|void|throw|yield|await)$/;
+// JSX 주석 = `{/*` · `*/}` 가 붙은 꼴만(옛 판과 같음 · `catch { /* noop */ }` 같은 빈 블록의 중괄호는 남긴다) ·
+//   주석 몸통에 `*/` 가 끼지 못한다(여러 주석을 건너 코드를 지우지 않게)
+const JSX_COMMENT = /\{\/\*(?:(?!\*\/)[\s\S])*\*\/\}/y;
 export function stripComments(src: string): string {
-  return src.replace(/\{\/\*[\s\S]*?\*\/\}/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+  let out = '';
+  let i = 0;
+  let lastSig = '';
+  const stack: Array<{ kind: 'tpl' } | { kind: 'expr'; depth: number }> = [];
+  const newlinesOf = (s: string) => s.replace(/[^\n]/g, '');
+  // 키워드 판정 = 끝 공백을 뗀 뒤(`return /re/` 의 공백 · 줄바꿈)
+  const regexAllowed = () => REGEX_PREV.has(lastSig) || (/[\w$]/.test(lastSig) && REGEX_KEYWORD_TAIL.test(out.slice(-32).trimEnd()));
+  while (i < src.length) {
+    const top = stack[stack.length - 1];
+    const c = src[i];
+    const d = src[i + 1];
+    if (top && top.kind === 'tpl') {
+      if (c === '\\') { out += c + (d ?? ''); i += 2; continue; }
+      if (c === '`') { out += c; stack.pop(); lastSig = '`'; i += 1; continue; }
+      if (c === '$' && d === '{') { out += '${'; stack.push({ kind: 'expr', depth: 0 }); lastSig = '{'; i += 2; continue; }
+      out += c; i += 1; continue;
+    }
+    if (c === '"' || c === "'") {
+      let j = i + 1;
+      while (j < src.length && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1;
+      if (j < src.length && src[j] === c) { out += src.slice(i, j + 1); lastSig = c; i = j + 1; continue; }
+      out += c; lastSig = c; i += 1; continue;   // 줄 안에서 닫히지 않음 = 글자(JSX 글의 홑따옴표 등)
+    }
+    if (c === '`') { out += c; stack.push({ kind: 'tpl' }); i += 1; continue; }
+    if (c === '/' && d === '/') { while (i < src.length && src[i] !== '\n') i += 1; continue; }
+    if (c === '/' && d === '*') {
+      const end = src.indexOf('*/', i + 2);
+      const stop = end < 0 ? src.length : end + 2;
+      out += newlinesOf(src.slice(i, stop));
+      i = stop;
+      continue;
+    }
+    if (c === '{') {
+      JSX_COMMENT.lastIndex = i;
+      const m = JSX_COMMENT.exec(src);
+      if (m) { out += newlinesOf(m[0]); i += m[0].length; continue; }
+      if (top && top.kind === 'expr') top.depth += 1;
+      out += c; lastSig = c; i += 1; continue;
+    }
+    if (c === '}') {
+      if (top && top.kind === 'expr') {
+        if (top.depth === 0) { stack.pop(); out += c; lastSig = '`'; i += 1; continue; }
+        top.depth -= 1;
+      }
+      out += c; lastSig = c; i += 1; continue;
+    }
+    if (c === '/' && regexAllowed()) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < src.length && src[j] !== '\n') {
+        const ch = src[j];
+        if (ch === '\\') { j += 2; continue; }
+        if (inClass) { if (ch === ']') inClass = false; } else if (ch === '[') inClass = true; else if (ch === '/') break;
+        j += 1;
+      }
+      if (j < src.length && src[j] === '/') {
+        j += 1;
+        while (j < src.length && /[a-z]/i.test(src[j])) j += 1;
+        out += src.slice(i, j); lastSig = '/'; i = j; continue;
+      }
+    }
+    out += c;
+    if (!/\s/.test(c)) lastSig = c;
+    i += 1;
+  }
+  return out;
 }
 
 export const EFFICACY_CT = ['claimsEfficacy', 'claimsInventedEfficacy', 'dropInventedEfficacy\\w*', 'pairClaimsInventedEfficacy', 'rewriteAddsFacts', 'headlineClaimsEfficacy', 'guardReadingSequence'];

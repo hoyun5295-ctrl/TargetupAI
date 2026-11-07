@@ -63,11 +63,16 @@ describe('자동마케팅 추출 절(buildFatigueGuardClause)', () => {
 describe('발송 경로가 나가는 날을 창으로 넘긴다', () => {
   const camp = readFileSync(join(__dirname, '..', '..', 'routes', 'campaigns.ts'), 'utf8');
   it('AI 발송 = 예약일(없으면 오늘) 하루', () => {
-    expect(camp).toMatch(/getFatigueBlockedSet\(companyId, fatigueCap, filteredCustomers\.map\(\(c: any\) => c\.phone\), \{ from: aiSendDay, to: aiSendDay \}\)/);
+    // ★ 2026-11-06 C110 — 피로도 자리 = 광고 관문 CT(gatePhones · 같은 나가는 날 하루)
+    expect(camp).toContain("{ branch: 'ai', span: { from: aiSendDay, to: aiSendDay }, holdoutKey: id, batchId: id, reserve: true }");
   });
   it('직접발송 = 첫날 ~ 마지막 날(분할이면 마지막 차수의 날)', () => {
-    expect(camp).toMatch(/getFatigueBlockedSet\(companyId, directFatigueCap, dbRows\.map\(\(r: any\) => String\(r\.phone \|\| ''\)\), directFatigueSpan\)/);
-    expect(camp).toContain('splitSendTime(directSendBase, finalRecipients.length - 1, split)');
+    // ★ 2026-11-06 C110 — 피로도 자리 = 광고 관문 CT(gatePhones · span = 첫날 ~ 분할 마지막 차수의 날)
+    expect(camp).toContain('from: toKoreaTimeStr(split ? splitSendTime(directSendBase, 0, split) : directSendBase).slice(0, 10),');
+    // ★ C110 구현 1R #4 — 관문 = 적격 거름 뒤 목록(filteredRecipients) · 구현 2R #5 — 예약 날 = 실제 적재 수(n)
+    expect(camp).toContain('to: toKoreaTimeStr(split ? splitSendTime(directSendBase, filteredRecipients.length - 1, split) : directSendBase).slice(0, 10),');
+    expect(camp).toContain('to: toKoreaTimeStr(split ? splitSendTime(directSendBase, Math.max(0, n - 1), split) : directSendBase).slice(0, 10),');
+    expect(camp).toContain('branch: branchOfDirect(resolvedSendType), span: directSpan, holdoutKey: directAdGateBatch, batchId: directAdGateBatch, reserve: true,');
   });
   it('기준 시각은 한 번만 만들어 판정·분할 적재·기록이 같은 값을 쓴다(Codex 1R medium)', () => {
     expect(camp).toContain('const directSendBase = scheduled && scheduledAt ? new Date(scheduledAt) : new Date();');

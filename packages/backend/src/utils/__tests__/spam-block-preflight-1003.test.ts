@@ -150,7 +150,8 @@ describe('★ 배선 5곳 — 전부 차감 · 캠페인 생성 앞', () => {
     expect(at).toBeLessThan(deduct);
     const block = campaigns.slice(campaigns.lastIndexOf("if (sendChannel === 'sms' || sendChannel === 'both') {\n  const spamVerdict", at), deduct);
     expect(block).toContain('checkSpamBlockBeforeCharge(');
-    expect(block).toContain("await failCampaignRun(campaignRun.id, '금칙어 차단으로 발송 중단');");
+    // ★ C113 D10 — failRunReleasingAd = 옛 길 failCampaignRun 그 자체 · 관문 길 = 쥔 예약 해제 뒤 failCampaignRun(c113-free-head 가 둘 다 고정)
+    expect(block).toMatch(/await (failCampaignRun|failRunReleasingAd)\(campaignRun\.id, '금칙어 차단으로 발송 중단'\);/);
     expect(block).toMatch(/return res\.status\(400\)\.json\(\{ error: spamVerdict\.notice, code: spamVerdict\.code \}\)/);
   });
 
@@ -248,7 +249,7 @@ describe('★ 관리자 모드 전환 — 전환 길은 하나 · 차단 승격�
 describe('★ 소비처 — 차단을 재시도로 돌리지 않는다', () => {
   it('플래너: SPAM_BLOCKED 는 커밋 전 거절(표식을 걷는다)', () => {
     const p = read('utils/planner-executor.ts');
-    expect(p).toMatch(/const DEFINITE_NO_COMMIT = new Set\(\[[^\]]*SPAM_BLOCKED_CODE\]\)/);
+    expect(p).toMatch(/const DEFINITE_NO_COMMIT = new Set\(\[[^\]]*SPAM_BLOCKED_CODE[^\]]*\]\)/);   // ★ 2026-11-06 C110 — 뒤에 AD_GATE_LINK_FAILED(확정적 미발송)가 붙었다
   });
 
   it('대행발송: SPAM_BLOCKED 는 문안 확인(test_failed)으로 닫고 담당자에게 알린다 · 재시도 갈래보다 앞', () => {

@@ -9,6 +9,8 @@ import type { SegmentAnalysis } from './segment-analysis';
 import type { MultiDimComparison, MessageAnalysis, ForecastResult } from './full-analysis-collect';
 import type { ActionItem } from './action-plan';
 import type { GradePerformanceRow, RecipientAttributionResult } from './performance-customer-axis';
+import type { GlobalEffect, CampaignEffect } from './effect-measure';
+import { LIFT_VERDICT_LABEL } from './effect-measure-core';
 
 export interface PerformancePdfData {
   snapshot: Awaited<ReturnType<typeof buildPerformanceSnapshotV2>>;
@@ -26,10 +28,12 @@ export interface PerformancePdfData {
   // ★ 2026-07-03 고객 축 — 없으면 섹션 생략 (기존 호출부 무변)
   gradePerformance?: GradePerformanceRow[] | null;
   recipientAttribution?: RecipientAttributionResult | null;
+  /** ★ 2026-11-06 C110 효과 증명(대조군 비교 · 문장 = effect-measure-core 한 곳) — 없으면 절 생략 */
+  effectProof?: { global: GlobalEffect | null; campaigns: CampaignEffect[] } | null;
 }
 
 export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): void {
-  const { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan, gradePerformance, recipientAttribution } = data;
+  const { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan, gradePerformance, recipientAttribution, effectProof } = data;
   const path = require('path');
   const fs = require('fs');
   const fontPath = path.join(__dirname, '../../fonts/malgun.ttf');
@@ -96,7 +100,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
   // 채널별 ROI
   setFont(true); doc.fontSize(13).fillColor(primary).text('채널별 ROI', 50, y); y += 20;
   setFont(true); doc.fontSize(9).fillColor(gray);
-  doc.text('채널', 50, y); doc.text('발송', 170, y); doc.text('성공률', 250, y); doc.text('추정 매출', 340, y); doc.text('ROAS', 470, y);
+  doc.text('채널', 50, y); doc.text('발송', 170, y); doc.text('성공률', 250, y); doc.text('추정 매출(기간 전체)', 340, y); doc.text('ROAS', 470, y);
   y += 13; doc.moveTo(50, y).lineTo(545, y).strokeColor('#e5e7eb').stroke(); y += 6;
   setFont(false); doc.fontSize(9);
   if (snapshot.byChannelROI.length === 0) {
@@ -195,10 +199,28 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
     doc.text(`장바구니 전환율 ${pctStr(f.cartConversionRate)} · 구매 전환율 ${pctStr(f.purchaseConversionRate)} · 장바구니→구매 ${pctStr(f.cartToPurchaseRate)}`, 50, y); y += 18;
   }
 
+  // ★ 2026-11-06 C110 효과 증명 — 대조군과 비교한 늘어난 매출(전체 대조군 + 발송별 상위 5 · 문장은 화면과 같은 함수)
+  if (effectProof && (effectProof.global || effectProof.campaigns.length > 0)) {
+    if (y > 680) { doc.addPage(); y = 50; }
+    setFont(true); doc.fontSize(13).fillColor(primary).text('효과 증명(대조군 비교)', 50, y); y += 20;
+    setFont(false); doc.fontSize(9).fillColor(dark);
+    if (effectProof.global) {
+      const g = effectProof.global;
+      doc.text(`전체 대조군(${g.pct}%, ${String(g.since).slice(0, 10)}부터 누적): ${LIFT_VERDICT_LABEL[g.lift.verdict]}`, 50, y); y += 13;   // ★ C113 D17
+      doc.text(g.lift.sentence, 60, y, { width: 480 }); y = doc.y + 8;
+    }
+    for (const c of effectProof.campaigns.slice(0, 5)) {
+      if (y > 740) { doc.addPage(); y = 50; }
+      doc.text(`- ${c.campaignName} (${c.sentAt.slice(0, 10)}): ${LIFT_VERDICT_LABEL[c.lift.verdict]}`, 50, y); y += 13;   // ★ C113 D17
+      doc.text(c.lift.sentence, 60, y, { width: 480 }); y = doc.y + 6;
+    }
+    y += 8;
+  }
+
   // 캠페인 발송 후 기여
   if (attribution && attribution.totalCampaigns > 0 && attribution.windows.length > 0) {
     if (y > 700) { doc.addPage(); y = 50; }
-    setFont(true); doc.fontSize(13).fillColor(primary).text('캠페인 발송 후 기여', 50, y); y += 20;
+    setFont(true); doc.fontSize(13).fillColor(primary).text('캠페인 발송 후 기여(회사 전체 구매)', 50, y); y += 20;
     setFont(false); doc.fontSize(9).fillColor(dark);
     for (const w of attribution.windows) {
       const line = attribution.hasCdpData
@@ -212,7 +234,7 @@ export function renderPerformanceReportPdf(doc: any, data: PerformancePdfData): 
   // 수신 고객 기준 기여 (★ 2026-07-03 고객 축 — 여정·DM customer_id 정확 매칭)
   if (recipientAttribution && recipientAttribution.totalRecipients > 0) {
     if (y > 700) { doc.addPage(); y = 50; }
-    setFont(true); doc.fontSize(13).fillColor(primary).text('수신 고객 기준 기여 (여정·DM 정확 매칭)', 50, y); y += 20;
+    setFont(true); doc.fontSize(13).fillColor(primary).text('수신 고객 기준 기여 (여정·DM · 자사몰 구매)', 50, y); y += 20;
     setFont(false); doc.fontSize(9).fillColor(dark);
     doc.text(`기간 내 수신 고객 ${recipientAttribution.totalRecipients.toLocaleString()}명`, 50, y); y += 15;
     for (const w of recipientAttribution.windows) {

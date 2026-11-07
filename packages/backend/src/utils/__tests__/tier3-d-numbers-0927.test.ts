@@ -62,9 +62,12 @@ describe('R093 · R165 실수신자 구매 귀속', () => {
     expect(m).toContain('const orders = await campaignRecipientOrders(companyId, String(row.id));');
     expect(m).toContain('const seenEvents = new Map<string, number>();');
     expect(m).not.toContain('AND EXISTS (');
+    // ★ 2026-11-06 C110 — 귀속 문장 = 효과 측정 한 산식(effect-measure ANCHORED_ORDERS_SQL) · ROI 는 그 CT 를 부른다
+    expect(m).toContain('const orders = await ordersAfterAnchors(companyId, phones.map((phone) => ({ phone, at: sentAt })), EFFECT_WINDOW_DAYS, until);');
+    const em = src('effect-measure.ts');
     // ★ 2026-11-04 C99 T9(Harold §5 ① (가)) — 매장 구매도 실수신자 · 원장 행 단위 · 몰 주문과 같은 구매는 뺀다(CT-D1)
-    expect(m).toContain("SELECT 'ledger:' || p.id::text AS order_key");
-    expect(m).toContain("AND NOT ${ledgerDupOfMallSql('p')}");
+    expect(em).toContain("SELECT a.phone, 'ledger:' || p.id::text AS order_key");
+    expect(em).toContain("WHERE NOT ${ledgerDupOfMallSql('p')}");
   });
 });
 
@@ -215,11 +218,13 @@ describe('Codex 차수3 D 1R — 성공 뒤 차감 확정 · 순매출 · KST �
   });
   it('자동마케팅 매출 = 결제 확정·미환불 주문만 · 같은 주문은 한 번', () => {
     const m = src('automarketing-roi.ts');
+    // ★ 2026-11-06 C110 — 주문 판정 문장 = 효과 측정 한 산식(effect-measure) · 아래 글자는 그 문장에서 본다
+    const em = src('effect-measure.ts');
     // 주문 단위 판정 — 같은 주문의 행 하나라도 환불이면 주문 전체 제외(Codex 차수3 D 2R)
-    expect(m).toContain("COALESCE(e.properties->>'revenue_reversed', '') = 'true' AS reversed,");
-    expect(m).toContain("HAVING NOT bool_or(x.reversed) AND bool_or(x.paid)");
-    expect(m).toContain("MAX(x.amount) FILTER (WHERE x.paid) AS amount");
-    expect(m).toContain("e.source || ':' || COALESCE(NULLIF(e.properties->>'order_id', ''), e.id::text) AS order_key");
+    expect(em).toContain("COALESCE(e.properties->>'revenue_reversed', '') = 'true' AS reversed,");
+    expect(em).toContain("HAVING NOT bool_or(x.reversed) AND bool_or(x.paid)");
+    expect(em).toContain("MAX(x.amount) FILTER (WHERE x.paid) AS amount");
+    expect(em).toContain("e.source || ':' || COALESCE(NULLIF(e.properties->>'order_id', ''), e.id::text) AS order_key");
     expect(m).toContain('for (const [k, v] of orders) seenEvents.set(k, v);');
   });
   it('campaign_runs 기간 경계 = KST 자정(UTC 벽시계로 바꿔 비교)', async () => {

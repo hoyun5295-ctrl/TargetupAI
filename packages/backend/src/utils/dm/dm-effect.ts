@@ -55,7 +55,7 @@ export function renderEffectScript(fx: DmActiveEffect | null): string {
   if (!fx) return '';
   const ms = fx === 'flip' ? 620 : 360;
   return [
-    '  // ★ 2026-09-16 장 넘김 효과(' + fx + ') — 기본 가로 스크롤 대신 겹친 장을 직접 넘긴다',
+    '  // ★ 2026-09-16 장 넘김 효과(' + fx + '): 기본 가로 스크롤 대신 겹친 장을 직접 넘긴다',
     '  var FX_KIND = "' + fx + '";',
     '  var FX_MS = ' + ms + ';',
     '  var fxBusy = false;',

@@ -35,13 +35,15 @@ import { getServePath } from '../utils/image-serve';
 import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../utils/image-studio-attempt';
 // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
 import { aiZonePlanBlocked } from '../utils/plan-guard';
-import { registerAsset, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
+import { registerAsset, registerAssetConfirmed, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
 import { isStudioReady, StudioError, readProductTempIds, studioProductFingerprint, groupProductCutouts, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
 import { createHash } from 'crypto';
 import { userErrorResponse, uploadErrorText } from '../utils/http-error';
 import { headlineTextSafe, LINE_HEADLINE_TITLE_MAX, LINE_HEADLINE_LABEL_MAX } from '../utils/line-headline';
+// ★ 2026-11-07 C112 브랜드 로고 층(설계서 docs/2026-11-07-c112-studio-brand-logo-design.md)
+import { previewLogoStage, readLayerPreviewRequest, readHomepageLogo, useHomepageLogo, logoSaveStage, readLogoSaveLayers } from '../utils/studio-logo';
 import { makeLineHeadlineImage, lineHeadlineImageSource, LineHeadlineInputError, resolveLineHeadlineLast, lineHeadlineCreditKey, readLineHeadlineByFp, markLineHeadlineRunning, markLineHeadlineDone, unmarkLineHeadlineDone, clearLineHeadlineRunning } from '../utils/line-headline-make';
 
 export const imageStudioRouter = Router();
@@ -321,10 +323,53 @@ imageStudioRouter.post('/edit', async (req: any, res: Response) => {
   }
 });
 
+// ── POST /layers (★ 2026-11-07 C112 로고 미리보기 · 0크레딧 · 임시 쓰기 0 · 잠금 0 · 설계서 D1 · D2 · D8) ──
+//   바탕(이 회사 임시 · kind poster)을 읽기만 하고 서버가 실제로 합성한 그림을 응답에 담는다. 확정 설정(키 · 자리 · 크기)을 화면이 저장 때 그대로 보낸다.
+imageStudioRouter.post('/layers', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  const baseTempId = String(req.body?.baseTempId || '');
+  const logo = readLayerPreviewRequest(req.body?.logo);
+  if (!isValidTempId(baseTempId) || logo === 'invalid') return res.status(400).json({ success: false, error: '로고 자리와 크기를 다시 골라 주세요.', code: 'LAYER_INVALID' });
+  try {
+    const r = await previewLogoStage(companyId, baseTempId, logo, req.body?.textless === true);
+    return res.status(r.status).json(r.body);
+  } catch (err: any) {
+    console.error('[image-studio] 로고 미리보기 실패:', err?.message || err);
+    return respondStudioError(res, new StudioError('LAYER_FAILED', 502));
+  }
+});
+
+// ── POST /logo/read (★ 2026-11-07 C112 키트 로고가 비면 홈페이지에서 읽기 · ★ C113 D9 = 찾기만: 후보를 임시에 두고 보여 줌 · 키트 · 영구 쓰기 0) ──
+imageStudioRouter.post('/logo/read', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  try {
+    const r = await readHomepageLogo(companyId, req.body?.url);
+    return res.status(r.status).json(r.body);
+  } catch (err: any) {
+    console.error('[image-studio] 홈페이지 로고 읽기 실패:', err?.message || err);
+    return res.status(422).json({ success: false, error: '홈페이지를 읽지 못했어요. 잠시 뒤 다시 시도해 주세요.', code: 'READ_FAILED' });
+  }
+});
+
+// ── POST /logo/use (★ 2026-11-07 C113 D9 「이 로고로 저장」 = 찾은 임시 로고 → 영구 → 키트 빈 칸에만 · 덮어쓰기 0) ──
+imageStudioRouter.post('/logo/use', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  try {
+    const r = await useHomepageLogo(companyId, req.body?.tempId);
+    return res.status(r.status).json(r.body);
+  } catch (err: any) {
+    console.error('[image-studio] 홈페이지 로고 저장 실패:', err?.message || err);
+    return respondStudioError(res, new StudioError('LOGO_SAVE_FAILED', 500));
+  }
+});
+
 // ── POST /ingest-product (SSRF 가드 fetch) ──────────────────────
 // ★ 2026-09-27 한줄로 V2 R126 — 가드 이미지 CT(sales-outreach-produce fetchImageGuarded)로 통일:
 //   https만 · 계정 정보 URL 거부 · 사설·예약 주소 차단 · **검증한 DNS 주소로 연결 고정**(재바인딩 창 제거) ·
-//   리다이렉트 거부 · image/* · 10MB · 시간 상한. 옛: 조회 뒤 fetch가 호스트를 다시 해석했고(재바인딩 창)
+//   리다이렉트 거부 · 이미지 형식만 · 10MB · 시간 상한. 옛: 조회 뒤 fetch가 호스트를 다시 해석했고(재바인딩 창)
 //   라우트 안의 사설 판정이 CT보다 약했다(::ffff:169.254 등 누락).
 // ── POST /line-headline (★ 2026-10-21 한 줄 창 「첫 화면」 = 스튜디오 템플릿 헤드라인 한 번에) ─────────
 // 설계서 docs/2026-10-21-oneline-content-design.md §3-4 · Codex P2 R1 · R2 같은 뿌리(화면이 여러 단계 유료 작업을 이어 붙여 새로고침 · 창 전환마다 다시 걷혔다)
@@ -532,11 +577,29 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
 
   const { tempId, channelSpec, title } = req.body || {};
   if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '저장할 이미지를 찾을 수 없습니다.' });
+  // ★ 2026-11-07 C112 로고 확정 설정(없음 · 끔 = null · 꼴 오류 = 400 · 잠금 · 파일 전)
+  const logoLayers = readLogoSaveLayers(req.body?.layers);
+  if (logoLayers === 'invalid') return res.status(400).json({ success: false, error: '로고 자리와 크기를 다시 골라 주세요.', code: 'LAYER_INVALID' });
   // ★ 2026-10-19 Codex E8 — 같은 임시 id 의 저장 전체를 줄 세운다(첫 저장이 옮긴 뒤 · 등재 커밋 전의 재저장이 0행을 보고 만료로 끝나던 경합).
   //   줄 선 뒤 파일 · 사이드카를 읽으므로 뒤 차례는 앞 저장이 끝난 상태(소재 있음 · 마무리 대기 · 되돌림)를 본다. 프로세스 1개 전제 = 다른 잠금과 같다.
   await runSerial(`studio-save:${companyId}:${tempId}`, async () => {
+  // ★ 2026-11-07 C112 로고 층 = 1단계(남은 바탕의 영구 파일) · 2단계(로고 켜짐) — 지금 갈래보다 앞 · null = 지금 갈래 그대로(설계서 D3)
+  //   영구 이름 = 바탕 id(지금 저장의 이름 규칙 그대로) → 바탕이 지워진 뒤의 재요청은 아래 「임시 파일 없음」 판정이 같은 이름으로 찾는다.
+  let layered: Awaited<ReturnType<typeof logoSaveStage>>;
+  try {
+    layered = await logoSaveStage({ companyId, userId, tempId, title, channelSpec, layers: logoLayers });
+  } catch (err: any) {
+    if (isAssetsTableMissing(err)) {
+      return res.status(503).json({ success: false, error: '이미지 보관함을 준비 중입니다. 잠시 후 다시 시도해 주세요.', code: 'DB_MIGRATION_PENDING' });
+    }
+    console.error('[image-studio] 로고 저장 실패:', err?.message || err);
+    return respondStudioError(res, err instanceof StudioError ? err : new StudioError('LAYER_FAILED', 502));
+  }
+  if (layered) return res.status(layered.status).json(layered.body);
   let meta = readTempMeta(companyId, tempId);
   let found = findTempFile(companyId, tempId);
+  // ★ 2026-11-07 C113 D9 — 홈페이지에서 찾은 로고 후보는 라이브러리 그림이 아니다(「이 로고로 저장」만 소비)
+  if (meta?.kind === 'logo') return res.status(400).json({ success: false, error: '찾은 로고는 「이 로고로 저장」으로 저장해 주세요.', code: 'LOGO_TEMP' });
   // ★ Codex E3 — 지난 저장이 등재 여부를 확인하지 못하고 남긴 그림 = 다시 확인해 마무리(있으면 그 소재 · 없으면 등재 · 또 모르면 503 그대로)
   //   ★ Codex E4 · E8 — 겹친 재저장은 바깥 줄(같은 임시 id)이 막는다 · 여기서 사이드카를 다시 읽는다
   if (meta && !found && meta.pendingAsset) {
@@ -634,7 +697,10 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
     // ★ 2026-07-21 표시명 = "헤드라인_채널.ext" (랜덤 UUID 대신 — 용도 체킹 동시). 실제 파일(moved.url)은 tempId 유지.
     const displayName = buildAssetDisplayName(title, effectiveSpec, moved.ext);
     // registerAsset 은 던지지 않는다(실패 = null · Codex E1) — null 도 등재 실패로 본다.
-    const assetId = await registerAsset({
+    // ★ Codex E2 — null 은 「커밋됐는데 응답만 끊김」일 수 있다(storeAssetFile 과 같은 재확인). 있으면 성공 · 없음이 확인될 때만 되돌린다 ·
+    //   재확인마저 실패하면 영구 파일을 그대로 둔다(행이 있을 수 있는데 파일을 옮기면 깨진 소재가 된다).
+    // ★ 2026-11-07 C112 이 판정 = utils/assets.ts registerAssetConfirmed 로 잘라 옮김(로고 저장 갈래와 같은 함수 · 동작 불변)
+    const { id: savedId, registered } = await registerAssetConfirmed({
       companyId, createdBy: userId, kind: 'generated', origin: 'studio',
       url: moved.url, filename: displayName, bytes: moved.bytes, format,
       // ★ 2026-09-27 한줄로 V2 R241 — 최종 프롬프트는 숨긴 템플릿 골격을 담고 있어 소재 기록에 싣지 않는다(목록 API로 나갔다)
@@ -642,16 +708,6 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
       channelSpec: effectiveSpec,
       width: metaForRestore.width ?? null, height: metaForRestore.height ?? null,
     });
-    // ★ Codex E2 — null 은 「커밋됐는데 응답만 끊김」일 수 있다(storeAssetFile 과 같은 재확인). 있으면 성공 · 없음이 확인될 때만 되돌린다 ·
-    //   재확인마저 실패하면 영구 파일을 그대로 둔다(행이 있을 수 있는데 파일을 옮기면 깨진 소재가 된다).
-    let savedId: string | null = assetId;
-    let registered: 'yes' | 'no' | 'unknown' = assetId ? 'yes' : 'no';
-    if (!assetId) {
-      try {
-        const committed = await getAssetByUrl(companyId, moved.url);
-        if (committed) { savedId = committed.id; registered = 'yes'; }
-      } catch { registered = 'unknown'; }
-    }
     if (registered === 'unknown') {
       // ★ Codex E3 — 영구 파일은 그대로(행이 있을 수 있다) · 같은 임시 id 사이드카에 마무리 대기를 남겨 다음 저장이 확인 · 등재로 끝낸다(MMS 변환 경로 = 원본이 남아 다시 변환된다)
       if (!consumeOriginal) {

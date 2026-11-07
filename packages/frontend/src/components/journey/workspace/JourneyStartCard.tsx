@@ -34,6 +34,8 @@ interface Props {
   onDetach?: () => void;
   /** ★ 2026-11-05 C103 F3 — 고를 수 있는 보내는 번호(회사 등록 번호 · null = 아직 못 받음) */
   callbackOptions?: CallbackOption[] | null;
+  /** ★ 2026-11-06 C110 D10 — 광고 칸(알림톡 밖 문자 칸)이 하나라도 있나 · 없으면 대조군 칸 잠금 */
+  hasAdStep?: boolean;
 }
 
 function Toggle({ on, onChange, label, desc, disabled }: { on: boolean; onChange: (v: boolean) => void; label: string; desc?: string; disabled?: boolean }) {
@@ -69,7 +71,7 @@ const GOAL_KINDS: Array<{ key: string; label: string; only?: string }> = [
   { key: 'points_used', label: '포인트 사용', only: 'customer.points_expiring' }, { key: 'product', label: '같은 상품 재구매', only: 'purchase.product' },
 ];
 
-export default function JourneyStartCard({ journey, triggerLabel, form, setField, count, onCount, locked, isActive, inProgress, attachedAfter, onDetach, callbackOptions }: Props) {
+export default function JourneyStartCard({ journey, triggerLabel, form, setField, count, onCount, locked, isActive, inProgress, attachedAfter, onDetach, callbackOptions, hasAdStep = true }: Props) {
   const valueOptions = useConditionValueOptions();
   const [more, setMore] = useState(false);
   const te = String(journey?.trigger_event || '');
@@ -293,7 +295,7 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
                 <option value="low">낮음까지만</option><option value="medium">보통까지</option><option value="high">높음까지</option>
               </select>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">들어온 고객의 <NumField label="대조군 비율" value={form.holdoutPct} onChange={(v) => setField('holdoutPct', Math.max(0, Math.min(30, v ?? 0)))} unit="%는 보내지 않고 비교해요" disabled={locked} min={0} max={30} /></div>
+            <div className="flex flex-wrap items-center gap-1.5">들어온 고객의 <NumField label="대조군 비율" value={form.holdoutPct} onChange={(v) => setField('holdoutPct', Math.max(0, Math.min(30, v ?? 0)))} unit="%는 보내지 않고 비교해요" disabled={locked || !hasAdStep} min={0} max={30} />{!hasAdStep && <span className="text-[12px] text-slate-500">알림톡만 있는 여정은 대조군을 두지 않습니다</span>}</div>
             <Toggle on={form.personalSendTime === true} onChange={(v) => setField('personalSendTime', v)} disabled={locked} label="고객이 잘 보는 시간에 보내기" desc="보낼 시각을 정한 칸은 고객이 최근 90일 동안 반응한 시간대로 맞춰요." />
           </div>
         )}

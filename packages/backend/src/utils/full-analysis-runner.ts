@@ -13,6 +13,7 @@ import { buildSegmentAnalysis } from './segment-analysis';
 import { buildMultiDimComparison, buildMessageAnalysis, buildForecast } from './full-analysis-collect';
 import { buildActionPlan } from './action-plan';
 import { renderPerformanceReportPdf } from './performance-pdf-render';
+import { globalHoldoutEffect, campaignEffects, GlobalEffect, CampaignEffect } from './effect-measure';   // ★ 2026-11-06 C110 효과 증명
 import { settleOrUndo } from './ai-credit';
 // ★ 2026-09-27 한줄로 V2 R079 — 풀분석 차감(orchestrate 300) 하나가 전체를 덮는다
 import { runInCreditBundle } from './ai-credit-context';
@@ -87,7 +88,13 @@ export async function runFullAnalysis(jobId: string, companyId: string, period: 
     const pdfPath = path.join(PDF_DIR, `${jobId}.pdf`);
     const stream = fs.createWriteStream(pdfPath);
     doc.pipe(stream);
-    renderPerformanceReportPdf(doc, { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan });
+    // ★ 2026-11-06 C110 효과 증명 절(DDL 전 · 대조군 없음 = 절 생략 · 실패해도 보고서는 나간다)
+    let effectProof: { global: GlobalEffect | null; campaigns: CampaignEffect[] } | null = null;
+    try {
+      const [global, list] = await Promise.all([globalHoldoutEffect(companyId), campaignEffects(companyId, days)]);
+      effectProof = { global, campaigns: list.items };
+    } catch (e: any) { console.log('[full-analysis] effect-proof skip:', e?.message); }
+    renderPerformanceReportPdf(doc, { snapshot, explanation, cohort, attribution, companyName, period, segment, multidim, message, forecast, actionPlan, effectProof });
     doc.end();
     await new Promise<void>((resolve, reject) => { stream.on('finish', () => resolve()); stream.on('error', reject); });
 

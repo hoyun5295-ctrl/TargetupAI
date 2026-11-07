@@ -157,6 +157,24 @@ export async function getAssetByUrl(companyId: string, url: string): Promise<Ass
   return (result.rows[0] as AssetRow) || null;
 }
 
+export type RegisterAssetInput = Parameters<typeof registerAsset>[0];
+
+/**
+ * ★ 2026-11-07 C112 등재 + 재확인 판정(routes/image-studio.ts /save 에서 잘라 옮김 · 동작 불변 · Codex E2).
+ *   registerAsset 은 던지지 않는다(실패 = null) · null 은 「커밋됐는데 응답만 끊김」일 수 있어 주소로 다시 확인한다.
+ *   있음 = yes · 없음 확인 = no · 다시 확인마저 실패 = unknown(호출부가 파일을 그대로 두고 503).
+ */
+export async function registerAssetConfirmed(input: RegisterAssetInput): Promise<{ id: string | null; registered: 'yes' | 'no' | 'unknown' }> {
+  const assetId = await registerAsset(input);
+  if (assetId) return { id: assetId, registered: 'yes' };
+  try {
+    const committed = await getAssetByUrl(input.companyId, input.url);
+    return committed ? { id: committed.id, registered: 'yes' } : { id: null, registered: 'no' };
+  } catch {
+    return { id: null, registered: 'unknown' };
+  }
+}
+
 /**
  * 이미지 실물 저장 + 라이브러리 자동 등재 — 업로드 라우트 공용 (2026-09-01 브랜드 편집기 업로드).
  * 저장 경로·URL 규약은 인앱 업로드(routes/cdp.ts /inapp/upload-image)와 동일하다 —

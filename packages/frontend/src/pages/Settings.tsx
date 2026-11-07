@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { AD_BRANCHES, AD_BRANCH_LABEL, AdBranch } from '../utils/ad-branch';   // ★ 2026-11-06 C110 광고 갈래(서버 사본)
 import { useAuthStore } from '../stores/authStore';
 import { formatPhoneNumber, formatDate } from '../utils/formatDate';
 import IdentityVerifyModal from '../components/IdentityVerifyModal';
@@ -57,6 +58,14 @@ export default function Settings() {
     fatigue_cap_max: null as number | null,
     // ★ 2026-08-04 여정 진행 중 고객 제외(자동마케팅) — 기본 꺼짐(겹침 허용)
     automarketing_exclude_journey: false,
+    // ★ 2026-11-06 C110 광고 관문 — null = 꺼짐 · ad_gate_ready 거짓(서버 DDL 전) = 이 묶음은 저장하지 않는다
+    ad_gate_ready: false,
+    // ★ 2026-11-07 C113 D1 — 요금제를 쓰는 회사만 참(서버 판정 한 곳) · 거짓이면 대조군 · 우선순위 칸을 그리지도 보내지도 않는다
+    ad_gate_allowed: false,
+    global_holdout_pct: null as number | null,
+    global_holdout_since: null as string | null,
+    campaign_holdout_pct: null as number | null,
+    send_priority_order: null as AdBranch[] | null,
   });
 
   useEffect(() => {
@@ -128,10 +137,18 @@ export default function Settings() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(settings),
+        // ★ 2026-11-06 C110 — 서버 칸이 준비 전이면 광고 관문 묶음을 보내지 않는다(보내면 503) · 읽기 전용 칸은 빼고 보낸다
+        body: JSON.stringify((() => {
+          const { ad_gate_ready, ad_gate_allowed, global_holdout_since, global_holdout_pct, campaign_holdout_pct, send_priority_order, ...rest } = settings;
+          void global_holdout_since;
+          return ad_gate_ready && ad_gate_allowed ? { ...rest, global_holdout_pct, campaign_holdout_pct, send_priority_order } : rest;
+        })()),
       });
       const data = await res.json();
+      // ★ 2026-11-06 C110 — 실패 응답(400 순서 오류 · 503 준비 전)을 성공으로 그리지 않는다
+      if (!res.ok) { showToast('error', data.error || '저장 실패'); return; }
       showToast('success', data.message || '저장 완료');
+      if (settings.ad_gate_ready && settings.ad_gate_allowed) void loadSettings();   // 새 비교 기간 시작 시각을 다시 읽는다
     } catch (error) {
       showToast('error', '저장 실패');
     } finally {
@@ -512,6 +529,75 @@ export default function Settings() {
                   </div>
                 )}
               </div>
+
+              {/* ★ 2026-11-06 C110 효과 측정 대조군 · 겹치는 광고 우선순위 — 회사가 켤 때만(기본 꺼짐) · ★ C113 D1 요금제를 쓰는 회사만 */}
+              {settings.ad_gate_ready && settings.ad_gate_allowed && (
+                <>
+                  <div className="mt-3 rounded-xl border border-neutral-100 bg-neutral-50 p-3">
+                    <div className="text-sm font-medium text-neutral-800">효과 측정 대조군</div>
+                    <p className="mt-1 text-[12px] text-neutral-500 break-keep">일부 고객에게 일부러 광고를 보내지 않고, 받은 고객과 구매를 비교해 「늘어난 매출」을 성과 리포트에 보여 드립니다. 정보성 메시지에는 걸지 않습니다.</p>
+                    <label className="mt-2 flex w-fit cursor-pointer items-center gap-2">
+                      <input type="checkbox" checked={settings.global_holdout_pct != null}
+                        onChange={(e) => setSettings({ ...settings, global_holdout_pct: e.target.checked ? 5 : null })}
+                        className="h-4 w-4 rounded accent-indigo-600" />
+                      <span className="text-sm text-neutral-700">전체 대조군</span>
+                    </label>
+                    {settings.global_holdout_pct != null && (
+                      <div className="mt-1.5 ml-6 flex flex-wrap items-center gap-2">
+                        {[1, 3, 5, 10].map((v) => (
+                          <button key={v} type="button" onClick={() => setSettings({ ...settings, global_holdout_pct: v })}
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${settings.global_holdout_pct === v ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100'}`}>{v}%</button>
+                        ))}
+                        <span className="text-[12px] text-neutral-500 break-keep">고객의 {settings.global_holdout_pct}%는 문자와 카카오 광고를 받지 않습니다(이메일과 앱 푸시는 해당 없음). 비율을 바꾸면 새 비교 기간이 시작됩니다.{settings.global_holdout_since ? ` 지금 기간 시작일은 ${String(settings.global_holdout_since).slice(0, 10)}입니다.` : ''}</span>
+                      </div>
+                    )}
+                    <label className="mt-2 flex w-fit cursor-pointer items-center gap-2">
+                      <input type="checkbox" checked={settings.campaign_holdout_pct != null}
+                        onChange={(e) => setSettings({ ...settings, campaign_holdout_pct: e.target.checked ? 10 : null })}
+                        className="h-4 w-4 rounded accent-indigo-600" />
+                      <span className="text-sm text-neutral-700">발송별 대조군</span>
+                    </label>
+                    {settings.campaign_holdout_pct != null && (
+                      <div className="mt-1.5 ml-6 flex flex-wrap items-center gap-2">
+                        {[5, 10, 20].map((v) => (
+                          <button key={v} type="button" onClick={() => setSettings({ ...settings, campaign_holdout_pct: v })}
+                            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${settings.campaign_holdout_pct === v ? 'border-indigo-300 bg-indigo-50 text-indigo-700' : 'border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100'}`}>{v}%</button>
+                        ))}
+                        <input type="number" min={1} max={30} value={settings.campaign_holdout_pct}
+                          onChange={(e) => setSettings({ ...settings, campaign_holdout_pct: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })}
+                          className="w-16 rounded-lg border border-neutral-200 px-2 py-1.5 text-center text-xs" aria-label="발송별 대조군 비율" />
+                        <span className="text-[12px] text-neutral-500 break-keep">문자와 카카오 광고 발송마다 대상의 {settings.campaign_holdout_pct}%는 보내지 않고 비교해요. 대조군이 30명 넘게 나오는 발송에만 겁니다.</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-neutral-100 bg-neutral-50 p-3">
+                    <label className="flex w-fit cursor-pointer items-center gap-2">
+                      <input type="checkbox" checked={settings.send_priority_order != null}
+                        onChange={(e) => setSettings({ ...settings, send_priority_order: e.target.checked ? [...AD_BRANCHES] : null })}
+                        className="h-4 w-4 rounded accent-indigo-600" />
+                      <span className="text-sm text-neutral-700">겹치는 광고 우선순위</span>
+                    </label>
+                    <p className="mt-1.5 text-[12px] text-neutral-500 break-keep">같은 날 더 높은 갈래 광고가 먼저 잡힌 고객은 낮은 갈래 광고에서 뺍니다. 낮은 갈래가 먼저 잡혔거나 앞 발송의 확정이 크게 늦어지면 둘 다 나갈 수 있어요(하루 횟수는 피로도 상한으로).</p>
+                    {settings.send_priority_order && (
+                      <ol className="mt-2 grid gap-1.5 sm:max-w-sm">
+                        {settings.send_priority_order.map((b, i, arr) => (
+                          <li key={b} className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-sm">
+                            <span className="w-5 text-xs font-semibold text-indigo-600 tabular-nums">{i + 1}</span>
+                            <span className="flex-1 text-neutral-700">{AD_BRANCH_LABEL[b]}</span>
+                            <button type="button" aria-label={`${AD_BRANCH_LABEL[b]} 위로`} disabled={i === 0}
+                              onClick={() => { const n = [...arr]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; setSettings({ ...settings, send_priority_order: n }); }}
+                              className="rounded-md border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-100 disabled:opacity-30">위</button>
+                            <button type="button" aria-label={`${AD_BRANCH_LABEL[b]} 아래로`} disabled={i === arr.length - 1}
+                              onClick={() => { const n = [...arr]; [n[i + 1], n[i]] = [n[i], n[i + 1]]; setSettings({ ...settings, send_priority_order: n }); }}
+                              className="rounded-md border border-neutral-200 px-2 py-0.5 text-xs text-neutral-600 hover:bg-neutral-100 disabled:opacity-30">아래</button>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </div>
+                </>
+              )}
 
               {/* ★ 2026-08-04 여정 진행 중 고객 제외(자동마케팅) — opt-in. 끄면(기본) 현행 그대로 겹침 허용 */}
               <div className="mt-3 rounded-xl border border-neutral-100 bg-neutral-50 p-3">

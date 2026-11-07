@@ -3,6 +3,10 @@ import { demoBlock } from '../utils/demo-company';   // ★ 2026-10-09 시연 �
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import pool, { query } from '../config/database';
+import { adGateSchemaReady, loadAdGatePolicy, endAdGateIfUnpaid, saveAdGateSettings } from '../utils/ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 설정 · ★ C113 D1 요금제
+import { omitAdminOnlySettings } from '../utils/company-settings-fields';   // ★ C113 D3 관리자 전용 칸
+import { resolveOwnerScope } from '../utils/owner-scope';
+import { normalizePriorityOrder } from '../utils/ad-send-gate-core';
 // ★ 2026-07-20: 회사 생성 코어 CT(시스템 user·시퀀스 부속 포함) — POST /와 게이트웨이 bill 일괄 생성 공유
 import { createCompanyCore } from '../utils/company-create';
 import { omitCompanySecrets } from '../utils/secret-hash';
@@ -201,6 +205,23 @@ router.get('/settings', async (req: Request, res: Response) => {
       row.fatigue_cap_max = null;
     }
 
+    // ★ 2026-11-06 C110 광고 관문 설정(대조군 · 우선순위) — 새 칸이 없으면(DDL 전) ready 거짓 · 화면은 그 묶음을 저장하지 않는다
+    row.ad_gate_ready = await adGateSchemaReady();
+    // ★ 2026-11-07 C113 D1 — 새 기능 셋은 요금제를 쓰는 회사만(정책 읽기 한 곳 · 스키마 준비 + 요금제) · 화면 = 참일 때만 그 칸
+    row.ad_gate_allowed = row.ad_gate_ready ? (await loadAdGatePolicy(companyId)).ready : false;
+    row.global_holdout_pct = null; row.global_holdout_since = null; row.campaign_holdout_pct = null; row.send_priority_order = null;
+    if (row.ad_gate_ready) {
+      try {
+        const ag = await query(`SELECT global_holdout_pct, global_holdout_since, campaign_holdout_pct, send_priority_order FROM companies WHERE id = $1`, [companyId]);
+        row.global_holdout_pct = ag.rows[0]?.global_holdout_pct ?? null;
+        row.global_holdout_since = ag.rows[0]?.global_holdout_since ?? null;
+        row.campaign_holdout_pct = ag.rows[0]?.campaign_holdout_pct ?? null;
+        row.send_priority_order = normalizePriorityOrder(ag.rows[0]?.send_priority_order);
+      } catch (agErr: any) {
+        console.warn('[settings] 광고 관문 설정 조회 실패:', agErr?.message);
+      }
+    }
+
     // ★ 2026-08-04 (Harold 확정) 여정 진행 중 고객 제외(자동마케팅) — 피로도와 같은 42703 격리 패턴
     try {
       const ej = await query(`SELECT automarketing_exclude_journey FROM companies WHERE id = $1`, [companyId]);
@@ -221,6 +242,8 @@ router.put('/settings', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
+    // ★ 2026-11-07 C113 D3 · R2 — 회사 관리자 전용 칸은 서버가 역할을 본다(일반 사용자 = 그 칸을 걸러냄 · 목록 = CT · 화면 블록과 계약)
+    if (resolveOwnerScope(req) !== null) req.body = omitAdminOnlySettings(req.body || {});
     const {
       brand_name, business_type, reject_number, manager_phones,
       monthly_budget,
@@ -231,8 +254,36 @@ router.put('/settings', async (req: Request, res: Response) => {
       // ★ 2026-07-05 발송 피로도 보호 — null 명시 = 해제(비활성). COALESCE 미사용 별도 UPDATE.
       fatigue_cap_days, fatigue_cap_max,
       // ★ 2026-08-04 (Harold 확정) 여정 진행 중 고객 제외(자동마케팅) — opt-in boolean
-      automarketing_exclude_journey
+      automarketing_exclude_journey,
+      // ★ 2026-11-06 C110 광고 관문 — null = 끔 · 보낸 칸만 바꾼다
+      global_holdout_pct, campaign_holdout_pct, send_priority_order,
     } = req.body;
+    // ★ 2026-11-06 C110 — 새 칸 묶음이 왔는데 DDL 전이면 아무것도 저장하지 않고 503(켜 놓고 판정은 꺼진 상태 0 · 설계서 §3-1)
+    const adGateTouched = global_holdout_pct !== undefined || campaign_holdout_pct !== undefined || send_priority_order !== undefined;
+    if (adGateTouched && !(await adGateSchemaReady())) {
+      return res.status(503).json({ code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: companies 광고 관문 칸(C110-DDL-1) ALTER 실행 요청' });
+    }
+    if (send_priority_order !== undefined && send_priority_order !== null && !normalizePriorityOrder(send_priority_order)) {
+      return res.status(400).json({ error: '우선순위 순서는 일곱 갈래를 한 번씩 모두 담아야 합니다.' });
+    }
+    // ★ 2026-11-06 C110 광고 관문 저장 — 보낸 칸만 · 전체 대조군 비율이 바뀌면 새 비교 기간(since = 지금 · 끄면 NULL · 설계서 D3)
+    // ★ 2026-11-07 C113 D1 · 구현 1R #7 — 요금제 판정 = 쓰는 문장 안(강등과 같은 회사 행 잠금 뒤 다시 판정 · 늦은 저장이 비운 칸을 되살리는 길 0) ·
+    //   요금제 아님 = 0 행 → 403(나머지 칸도 저장 0 = 다른 칸보다 먼저 저장 · 화면은 그 칸을 그리지 않는다)
+    if (adGateTouched) {
+      let saved: Awaited<ReturnType<typeof saveAdGateSettings>>;
+      try {
+        saved = await saveAdGateSettings(companyId, { global_holdout_pct, campaign_holdout_pct, send_priority_order });
+      } catch (agErr: any) {
+        const m = String(agErr?.message || '');
+        if (m.includes('column') && m.includes('does not exist')) {
+          return res.status(503).json({ code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: companies 광고 관문 칸(C110-DDL-1) ALTER 실행 요청' });
+        }
+        throw agErr;
+      }
+      if (saved === 'unpaid') {
+        return res.status(403).json({ code: 'AD_GATE_PLAN_REQUIRED', error: '대조군과 우선순위는 요금제를 이용하는 회사에서 쓸 수 있습니다.' });
+      }
+    }
     // ★ D97: manager_contacts는 test_contacts 테이블로 완전 이관
     // PUT /settings에서 manager_contacts 저장 로직 완전 제거
     // 담당자 추가/삭제는 /api/test-contacts API에서만 처리
@@ -2066,6 +2117,7 @@ router.post('/:id/revoke-basic-trial', requireUuidId, requireSuperAdmin, async (
         prevPlanIdHint: before.rows[0]?.plan_id ? String(before.rows[0].plan_id) : null,
         now: creditNow,
       });
+      await endAdGateIfUnpaid(client, id);   // ★ C113 D2 — FREE 전환 = 네 칸 비움
       await client.query('COMMIT');
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }

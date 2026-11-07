@@ -14,6 +14,8 @@ import { creditText } from '../constants/credit';
  *   - 고르기 = 공용 TemplatePicker(DM 삽입 창과 같은 부품) · hidden 감싸개로 숨겨 보던 쪽을 지킨다(언마운트 금지).
  *   - 만들기 = 공용 StudioMake(DM 삽입 창과 같은 부품).
  *   - 결과 카드에서 채널로 바로: 저장(이미 저장됐으면 생략) → 성공했을 때만 편집기로. 저장해도 카드를 지우지 않는다.
+ * ★ 2026-11-07 브랜드 로고 층(설계서 docs/2026-11-07-c112-studio-brand-logo-design.md) — 카드 = 바탕 id · 로고 줄 = 공용 StudioLogoControls ·
+ *   저장 = 보이는 그대로(확정 설정 layers) · 저장한 카드 그림 = 저장된 소재 주소(실물).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -30,13 +32,15 @@ import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import TemplatePicker, { type StudioTemplatePublic } from '../components/studio/TemplatePicker';
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../components/studio/StudioMake';
 import StudioWatermark from '../components/studio/StudioWatermark';
+import StudioLogoControls from '../components/studio/StudioLogoControls';
+import { layersForSave, logoSettingsOf, LOGO_LIMIT_TEXT, type LogoCandidate, type LogoCardState, type LogoSettings } from '../lib/studio-layers';
 import { saveStudioTemp, studioPost, newStudioAttempt, type SavedStudioAsset } from '../lib/studio-api';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
   fetch(url, { ...opts, headers: { ...(opts.headers || {}), Authorization: `Bearer ${token()}` } });
 
-interface Candidate {
+interface Candidate extends LogoCardState {
   tempId: string; url: string; blob: string | null; presetKey: string; title?: string;
   /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — 생성에 쓴 글(인앱 통짜 장 글로 넘긴다) */
   texts?: StudioTexts;
@@ -144,7 +148,7 @@ export default function ImageStudioPage() {
     if (!r) return;
     if (r.preview) objectUrls.current.push(r.preview);
     madeRef.current = true;
-    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title, texts: r.texts }, ...prev]);
+    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title, texts: r.texts, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed }, ...prev]);
     setStage('result');
   };
 
@@ -161,7 +165,10 @@ export default function ImageStudioPage() {
       if (status === 402) { toast.error('크레딧이 부족합니다'); return; }
       if (!ok || !data.image?.tempId) throw new Error(data?.error || '수정에 실패했어요');
       const blob = await loadBlob(data.image.url);
-      setCandidates((prev) => [{ tempId: data.image.tempId, url: data.image.url, blob, presetKey: c.presetKey, title: c.title, texts: c.texts }, ...prev]);
+      // ★ 2026-11-07 새 바탕에 그 카드의 확정 설정 그대로 로고(D10 · 실패 = 바탕 + 다시 얹기)
+      const lay = await make.relayer(data.image.tempId, logoSettingsOf(c.logo), false);
+      const logoState: LogoCardState = lay || { logo: null, layered: null, logoFailed: true };
+      setCandidates((prev) => [{ tempId: data.image.tempId, url: data.image.url, blob, presetKey: c.presetKey, title: c.title, texts: c.texts, ...logoState }, ...prev]);
       // 결과를 화면에 놓은 뒤에만 표를 버린다(Codex E3 — 미리보기를 못 받으면 표를 남겨 같은 지시 재시도가 기억 결과를 받는다 · 다시 걷지 않는다)
       editAttemptRef.current = null;
       toast.success('수정 완료');
@@ -177,7 +184,7 @@ export default function ImageStudioPage() {
   //   ★ 2026-10-16 저장해도 카드를 지우지 않는다(옛: 지워서 채널로 갈 재료가 사라졌다). 저장된 카드는 AI 수정을 숨긴다(저장이 임시 그림을 소비해 /edit 404).
   const saveCandidate = async (c: Candidate): Promise<SavedStudioAsset | null> => {
     if (c.saved) return c.saved;
-    const r = await saveStudioTemp(c.tempId, c.title);
+    const r = await saveStudioTemp(c.tempId, c.title, layersForSave(c.logo, c.logoFailed, false));
     if (r.ok) {
       setCandidates((prev) => prev.map((x) => (x.tempId === c.tempId ? { ...x, saved: r.asset, note: undefined } : x)));
       setEditFor((cur) => (cur === c.tempId ? null : cur));
@@ -186,7 +193,20 @@ export default function ImageStudioPage() {
     const note = r.code === 'STORAGE_FULL' ? 'storage_full' : r.code === 'EXPIRED' ? 'expired' : undefined;
     if (note) setCandidates((prev) => prev.map((x) => (x.tempId === c.tempId ? { ...x, note } : x)));
     toast.error(r.error);
+    // 키트 로고가 바뀜 · 못 쓰게 됨 = 미리보기를 다시 받는다(자리 그대로 · 크기는 새 로고 기준 자동) · 보이는 그대로 다시 저장
+    if (r.code === 'LOGO_CHANGED') await applyLogo(c, { ...logoSettingsOf(c.logo), size: null });
     return null;
+  };
+
+  // ── 로고 줄(★ 2026-11-07 · 0크레딧 · 응답의 확정 설정이 카드 표시값) ──
+  const patchLogo = (tempId: string, st: LogoCardState) => setCandidates((prev) => prev.map((x) => (x.tempId === tempId ? { ...x, ...st } : x)));
+  const applyLogo = async (c: Candidate, s: LogoSettings) => {
+    const st = await make.relayer(c.tempId, s, false);
+    if (st) patchLogo(c.tempId, st);
+  };
+  const saveLogoFor = async (c: Candidate, lc: LogoCandidate) => {
+    const st = await make.saveFoundLogo(lc, c.tempId, false);
+    if (st) patchLogo(c.tempId, st);
   };
 
   const saveOnly = async (c: Candidate) => {
@@ -332,13 +352,16 @@ export default function ImageStudioPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {candidates.map((c) => (
+              {candidates.map((c) => {
+                // 저장한 카드 = 저장된 소재(실물) · 그 전 = 로고 미리보기 · 없으면 바탕
+                const shown = c.saved?.url || c.layered || c.blob;
+                return (
                 <div key={c.tempId} className="rounded-2xl border border-slate-200 overflow-hidden bg-slate-100">
                   <div className="relative">
-                    {c.blob
-                      ? <img src={c.blob} alt="완성 포스터" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full object-contain max-h-[480px] bg-slate-100" />
+                    {shown
+                      ? <img src={shown} alt="완성 포스터" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full object-contain max-h-[480px] bg-slate-100" />
                       : <div className="h-64 flex items-center justify-center px-6 text-center text-[12px] text-slate-500">미리보기를 불러오지 못했어요. 저장하면 라이브러리에서 볼 수 있어요.</div>}
-                    {c.blob && <StudioWatermark />}
+                    {shown && <StudioWatermark />}
                     <span className="absolute top-2 left-2 z-20 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white/70 border border-slate-300">{presetLabel(c.presetKey)}</span>
                   </div>
                   <div className="p-3 space-y-2 bg-white">
@@ -354,6 +377,9 @@ export default function ImageStudioPage() {
                         <span className="flex-1 min-w-[10rem]">저장 공간이 가득 찼어요. 안 쓰는 소재를 정리한 뒤 다시 눌러 주세요.</span>
                         <button type="button" onClick={() => setLibManageOpen(true)} className="px-3 py-1.5 rounded-lg border border-rose-300 bg-white text-rose-800 font-semibold hover:bg-rose-100">저장 소재 정리</button>
                       </div>
+                    )}
+                    {c.note !== 'expired' && (
+                      <StudioLogoControls logo={c.logo} failed={c.logoFailed} saved={!!c.saved} disabled={busy} onChange={(s) => void applyLogo(c, s)} onFind={make.findLogo} onUse={(lc) => void saveLogoFor(c, lc)} />
                     )}
                     {c.note !== 'expired' && (
                       <div className="flex flex-wrap gap-2">
@@ -382,8 +408,10 @@ export default function ImageStudioPage() {
                     )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
+            <p className="text-[12px] text-slate-500">{LOGO_LIMIT_TEXT}</p>
             <p className="text-[10px] text-slate-400 italic">생성 약 30초 · 저장하지 않은 결과는 이 화면을 떠나면 볼 수 없어요(7일 뒤 자동 삭제) · MMS는 발송 시 첨부 창에서 자동 변환</p>
           </section>
         )}

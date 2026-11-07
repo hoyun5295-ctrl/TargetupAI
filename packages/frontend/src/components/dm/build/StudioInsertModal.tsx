@@ -11,6 +11,8 @@
  *   - 닫기 = 숨김(취소 아님): 단계 · 만드는 중 · 결과는 이 부품에 산다(ModalBase 는 닫히면 null 만 돌려준다).
  *     다시 열면 이어서 보인다 → 2크레딧 낸 그림을 잃지 않는다. 처음 상태로 돌리는 것은 「넣기 성공」 뒤뿐.
  *   - 저장은 공용 saveStudioTemp(저장 공간 가득 · 이미 저장됨을 스튜디오와 같은 방식으로 가른다).
+ * ★ 2026-11-07 브랜드 로고 층(설계서 docs/2026-11-07-c112-studio-brand-logo-design.md) — 결과 단계 = 스튜디오와 같은 StudioLogoControls ·
+ *   넣기 = 보이는 그대로(확정 설정 layers) · 글 없는 판이면 서버가 위 두 모서리만 준다.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { creditText } from '../../../constants/credit';
@@ -19,6 +21,8 @@ import { useToast } from '../../ToastProvider';
 import TemplatePicker, { type StudioTemplatePublic } from '../../studio/TemplatePicker';
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../../studio/StudioMake';
 import StudioWatermark from '../../studio/StudioWatermark';
+import StudioLogoControls from '../../studio/StudioLogoControls';
+import { layersForSave, logoSettingsOf, type LogoCandidate, type LogoCardState, type LogoSettings } from '../../../lib/studio-layers';
 import AssetLibraryPickerModal from '../../assets/AssetLibraryPickerModal';
 import { saveStudioTemp, studioFetch } from '../../../lib/studio-api';
 import type { StudioTexts } from '../../../lib/studio-texts';
@@ -50,7 +54,7 @@ export default function StudioInsertModal({
   // ★ 2026-09-23 미리보기는 blob 주소로 띄운다. 만든 그림의 주소(`/api/image-studio/temp/:id`)는 로그인 토큰이
   //   있어야 열리는데 `<img src>` 는 토큰을 못 붙여 결과 화면이 빈칸이었다(0922 남지현 접수 · 「이 그림 넣기」는 tempId 로 저장해 정상).
   //   preview = null 은 미리보기를 못 받은 경우다 — 넣기는 그대로 된다.
-  const [made, setMade] = useState<{ tempId: string; preview: string | null; texts: StudioTexts } | null>(null);
+  const [made, setMade] = useState<({ tempId: string; preview: string | null; texts: StudioTexts; textless: boolean } & LogoCardState) | null>(null);
   const [saving, setSaving] = useState(false);
   const [storageFull, setStorageFull] = useState(false);
   const [libOpen, setLibOpen] = useState(false);
@@ -93,7 +97,7 @@ export default function StudioInsertModal({
     if (!r) return;
     dropPreview();
     previewUrl.current = r.preview;
-    setMade({ tempId: r.tempId, preview: r.preview, texts: r.texts });
+    setMade({ tempId: r.tempId, preview: r.preview, texts: r.texts, textless: r.textless, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed });
     setStorageFull(false);
     setStep('result');
   };
@@ -102,11 +106,13 @@ export default function StudioInsertModal({
     if (!made || saving) return;
     setSaving(true);
     try {
-      const r = await saveStudioTemp(made.tempId, make.texts.title || '블록 사진');
+      const r = await saveStudioTemp(made.tempId, make.texts.title || '블록 사진', layersForSave(made.logo, made.logoFailed, made.textless));
       if (!r.ok) {
         toast.error(r.error);
         if (r.code === 'STORAGE_FULL') setStorageFull(true);
         if (r.code === 'EXPIRED') { dropPreview(); setMade(null); setStep('make'); }
+        // 키트 로고가 바뀜 · 못 쓰게 됨 = 미리보기를 다시 받는다(자리 그대로 · 크기는 새 로고 기준 자동)
+        if (r.code === 'LOGO_CHANGED') await applyLogo({ ...logoSettingsOf(made.logo), size: null });
         return;
       }
       onInserted(r.asset.url, made.texts);
@@ -125,6 +131,19 @@ export default function StudioInsertModal({
 
   const remake = () => { dropPreview(); setMade(null); setStorageFull(false); setStep('make'); };
 
+  // ── 로고 줄(★ 2026-11-07 · 0크레딧 · 응답의 확정 설정이 표시값 · 늦은 응답은 그 그림이 아직 결과일 때만 · 글 없는 판 = 결과의 값) ──
+  const patchLogo = (tempId: string, st: LogoCardState) => setMade((cur) => (cur && cur.tempId === tempId ? { ...cur, ...st } : cur));
+  const applyLogo = async (s: LogoSettings) => {
+    if (!made) return;
+    const st = await make.relayer(made.tempId, s, made.textless);
+    if (st) patchLogo(made.tempId, st);
+  };
+  const saveLogoFor = async (lc: LogoCandidate) => {
+    if (!made) return;
+    const st = await make.saveFoundLogo(lc, made.tempId, made.textless);
+    if (st) patchLogo(made.tempId, st);
+  };
+
   const footer = step === 'make' ? (
     <div className="flex items-center gap-2 flex-wrap justify-end w-full">
       {generating && <span className="flex-1 min-w-[12rem] text-[11.5px] text-slate-500">만드는 중이에요(약 20~30초). 창을 닫아도 다시 열면 이어서 볼 수 있어요.</span>}
@@ -132,9 +151,10 @@ export default function StudioInsertModal({
       <ModalButton variant="primary" onClick={generate} disabled={generating}>{generating ? '만드는 중...' : `만들기 (${creditText('image-studio-generate')})`}</ModalButton>
     </div>
   ) : step === 'result' ? (
-    <div className="flex items-center gap-2 justify-end w-full">
-      <ModalButton onClick={remake} disabled={saving}>다시 만들기</ModalButton>
-      <ModalButton variant="primary" onClick={insert} disabled={saving}>{saving ? '넣는 중...' : '이 그림 넣기'}</ModalButton>
+    <div className="flex items-center gap-2 flex-wrap justify-end w-full">
+      {generating && <span className="flex-1 min-w-[10rem] text-[12px] text-slate-500">{make.busyMsg}</span>}
+      <ModalButton onClick={remake} disabled={saving || generating}>다시 만들기</ModalButton>
+      <ModalButton variant="primary" onClick={insert} disabled={saving || generating}>{saving ? '넣는 중...' : '이 그림 넣기'}</ModalButton>
     </div>
   ) : undefined;
 
@@ -164,9 +184,9 @@ export default function StudioInsertModal({
         )}
         {step === 'result' && made && (
           <div className="space-y-3">
-            {made.preview ? (
+            {(made.layered || made.preview) ? (
               <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-100">
-                <img src={made.preview} alt="만든 그림 미리보기" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full max-h-[52vh] object-contain" />
+                <img src={made.layered || made.preview || ''} alt="만든 그림 미리보기" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full max-h-[52vh] object-contain" />
                 <StudioWatermark />
               </div>
             ) : (
@@ -174,6 +194,7 @@ export default function StudioInsertModal({
                 미리보기를 불러오지 못했어요. 「이 그림 넣기」를 누르면 만든 그림이 그대로 들어갑니다.
               </div>
             )}
+            <StudioLogoControls logo={made.logo} failed={made.logoFailed} saved={false} disabled={saving || generating} onChange={(s) => void applyLogo(s)} onFind={make.findLogo} onUse={(lc) => void saveLogoFor(lc)} />
             {storageFull && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-800 flex items-center gap-2 flex-wrap">
                 <span className="flex-1 min-w-[12rem]">저장 공간이 가득 찼어요. 안 쓰는 소재를 정리한 뒤 「이 그림 넣기」를 다시 눌러 주세요.</span>

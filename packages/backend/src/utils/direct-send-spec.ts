@@ -22,6 +22,8 @@ export class DirectSendError extends Error {
 
 export interface DirectSendSpec {
   stagingId: string;
+  /** ★ 2026-11-06 C110 — 광고 관문 원장 묶음(= stagingId · 관문을 지난 광고만) · 캠페인 INSERT 뒤 · 차감 앞에 잇는다(확정 표식) */
+  adGateBatchId?: string | null;
   campaignName: string;
   msgType: string;
   total: number;                 // countStagingFiltered.sendCount (정제 후 발송 예정)
@@ -85,6 +87,20 @@ export interface DirectSendSpec {
 export const CAMPAIGN_INSERT_SQL =
   `INSERT INTO campaigns (company_id, campaign_name, message_type, message_content, subject, callback_number, target_count, send_type, status, scheduled_at, message_template, message_subject, created_by, is_ad, send_channel, staging_id, send_phase, processed_count, send_config, kakao_template_id, mms_image_paths, created_at)
    VALUES ($1, $2, $3, $4, $5, $6, $7, $19, $8, $9, $10, $11, $12, $13, $14, $15, 'preparing', 0, $16, $17, $18, NOW()) RETURNING id`;
+
+/**
+ * ★ 2026-11-07 C113 8R — 광고 관문 길은 캠페인 id 를 INSERT 전에 만들어 큐 편집 잠금을 먼저 잡고 그 id 로 넣는다
+ *   (INSERT 응답 직후 잠금은 다른 연결이 커밋된 행을 먼저 볼 수 있어 늦다). 그 자리의 옛 INSERT 문장에 id 칸만 덧붙인다
+ *   = 맨 앞 칸 · 값 = 맨 뒤 번호 하나 더. 옛 길은 이 함수를 부르지 않는다(옛 문장 그대로).
+ */
+export function withCampaignId(sql: string, params: any[], id: string): { sql: string; params: any[] } {
+  const head = 'INSERT INTO campaigns (';
+  const values = 'VALUES (';
+  if (sql.split(head).length !== 2 || sql.split(values).length !== 2) {
+    throw new Error('withCampaignId: expects exactly one "INSERT INTO campaigns (" and one "VALUES ("');
+  }
+  return { sql: sql.replace(head, `${head}id, `).replace(values, `${values}$${params.length + 1}::uuid, `), params: [...params, id] };
+}
 
 /** campaigns INSERT 파라미터($1~$18)를 합성. /direct-send/commit 원본 매핑과 동일. */
 export function buildDirectSendCampaignParams(

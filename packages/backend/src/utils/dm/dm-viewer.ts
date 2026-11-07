@@ -163,7 +163,7 @@ function renderLegacySlidesHtml(dm: any, trackApiBase: string): string {
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;800&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-/* ★ 2026-07-14 제작 폰트≠출력 폰트(박성용 신고) — 편집기는 Pretendard로 그리는데 뷰어는 Pretendard 미로드+body에 Noto Sans KR 하드코딩이라 폴백으로 떨어져 서체가 달랐다. 위 CDN으로 Pretendard 실로딩 + 편집기(dm-builder.css --dm-font-primary)와 동일 스택으로 통일. */
+/* ★ 2026-07-14 제작 폰트≠출력 폰트: 편집기는 Pretendard로 그리는데 뷰어는 Pretendard 미로드+body에 Noto Sans KR 하드코딩이라 폴백으로 떨어져 서체가 달랐다. 위 CDN으로 Pretendard 실로딩 + 편집기(dm-builder.css --dm-font-primary)와 동일 스택으로 통일. */
 body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,system-ui,Roboto,"Helvetica Neue","Segoe UI","Apple SD Gothic Neo","Noto Sans KR",sans-serif;background:#fff;overflow-x:hidden;-webkit-text-size-adjust:100%}
 #dm-wrap{max-width:480px;margin:0 auto;min-height:100vh;background:#fff;position:relative}
 #dm-slider-wrap{overflow:hidden;position:relative;touch-action:pan-y}
@@ -235,7 +235,7 @@ body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFo
     track(current + 1);
   }
 
-  // 비콘 = 체류 증가분 전송(전송 성공 시 리셋 — 서버 합산). 토큰(r) 동봉 = 수신자 매칭.
+  // 비콘 = 체류 증가분 전송(전송 성공 시 리셋: 서버 합산). 토큰(r) 동봉 = 수신자 매칭.
   function track(pageNum, isInit) {
     if (!CODE) return;
     if (pageNum > pageReachedMax) pageReachedMax = pageNum;
@@ -285,12 +285,12 @@ body{font-family:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFo
   if (prevBtn) prevBtn.addEventListener('click', function() { goTo(current - 1); });
   if (nextBtn) nextBtn.addEventListener('click', function() { goTo(current + 1); });
 
-  // 체류 1초 tick — 화면이 보이는 동안만, 세션 30분 상한
+  // 체류 1초 tick: 화면이 보이는 동안만, 세션 30분 상한
   setInterval(function(){
     if (document.visibilityState === 'visible' && durTotal < 1800) { pendingDur++; durTotal++; }
   }, 1000);
 
-  // 이탈 내구성 — 모바일 beforeunload 미발화 대비 3중 안전망 + 15초 하트비트
+  // 이탈 내구성: 모바일 beforeunload 미발화 대비 3중 안전망 + 15초 하트비트
   document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') track(current + 1, false); });
   window.addEventListener('pagehide', function(){ track(current + 1, false); });
   window.addEventListener('beforeunload', function() { track(current + 1, false); });
@@ -401,11 +401,11 @@ function renderPagesHtml(
     if (mode === 'slides') {
       return `
 html,body{height:100%;margin:0;overflow:hidden;touch-action:pan-y}
-/* ★ 2026-09-14 재오픈 정정(박성용 16:15 "이미지가 하단으로 고정되고 확대되어 상하가 잘렸습니다") — 높이 기준을 100vh 에서 실제 보이는 높이(--dm-vh · 스크립트가 innerHeight 로 갱신)로.
+/* ★ 2026-09-14 재오픈 정정: 높이 기준을 100vh 에서 실제 보이는 높이(--dm-vh · 스크립트가 innerHeight 로 갱신)로.
    100vh 는 모바일 브라우저 툴바를 포함한 큰 뷰포트라, 뷰어(height:100%)보다 장이 커져 아래가 잘렸다. 스크립트 전이면 100vh/100% 폴백. */
 .dm-viewer{height:var(--dm-vh,100%);display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .dm-viewer::-webkit-scrollbar{display:none}
-/* ★ 2026-09-14 (박성용 접수 · 슬라이드 기능 개선) 장 폭 = 열 폭(100%). 옛 100vw 는 PC에서 430px 열 밖으로 넘쳐 스냅이 어긋났다. */
+/* ★ 2026-09-14 (슬라이드 기능 개선) 장 폭 = 열 폭(100%). 옛 100vw 는 PC에서 430px 열 밖으로 넘쳐 스냅이 어긋났다. */
 .dm-page{flex:0 0 100%;width:100%;height:var(--dm-vh,100vh);scroll-snap-align:start;scroll-snap-stop:always;overflow-y:auto;position:relative;-webkit-overflow-scrolling:touch}
 .dm-page::-webkit-scrollbar{display:none}
 /* 이미지 1장 장 = 무대: 상하 중앙·화면 맞춤(크롭 0)·장 안 스크롤 0. 갤러리 inline 스타일(폭 100%·grid)을 이겨야 해서 !important. 위 12px 여백 · 아래 56px = 띠(진행 막대·점·카운터) 자리. */
@@ -509,7 +509,7 @@ ${navHtml}${catalog ? '\n' + renderCatalogHtml(totalPages) : ''}
   var SRC = QS.get('src') || '';
   var MODE = document.body.getAttribute('data-layout-mode') || 'scroll';
   var TOTAL_PAGES = ${totalPages};
-  // 익명 ID — 토큰·phone 없는 열람(발행 주소 복사/전달 링크)의 행 중복 방지 키
+  // 익명 ID: 토큰·phone 없는 열람(발행 주소 복사/전달 링크)의 행 중복 방지 키
   var ANON_KEY = 'dm_anon_' + CODE;
   var anonId = '';
   try {
@@ -530,7 +530,7 @@ ${navHtml}${catalog ? '\n' + renderCatalogHtml(totalPages) : ''}
   var navNext = document.querySelector('[data-dm-page-nav="next"]');
   var barIn = null;
 ${mode === 'slides' ? `
-  // ★ 2026-09-14 재오픈 정정 — 장·이미지 높이 기준 = 실제 보이는 높이. 100vh 는 브라우저 툴바를 포함해 아래가 잘렸다(삼성 인터넷·크롬 모바일).
+  // ★ 2026-09-14 재오픈 정정: 장·이미지 높이 기준 = 실제 보이는 높이. 100vh 는 브라우저 툴바를 포함해 아래가 잘렸다(삼성 인터넷·크롬 모바일).
   //   innerHeight 는 툴바를 뺀 값이고 툴바가 접히면 resize 가 온다. 폭이 바뀌면(회전) 현재 장 위치도 다시 맞춘다.
   barIn = document.querySelector('.dm-page-bar-in');
   function setViewportHeight() {
@@ -551,7 +551,7 @@ ${mode === 'slides' ? `
     pendingSections[sid][field]++;
   }
 
-  // ★ 2026-07-02(5) 요소 단위 클릭 — 어떤 버튼/링크를 눌렀는지 라벨별 카운트 (섹션당 20개 상한)
+  // ★ 2026-07-02(5) 요소 단위 클릭: 어떤 버튼/링크를 눌렀는지 라벨별 카운트 (섹션당 20개 상한)
   function bumpElement(sid, label) {
     if (!sid || !label) return;
     pendingSections[sid] = pendingSections[sid] || { views: 0, clicks: 0 };
@@ -579,7 +579,7 @@ ${mode === 'slides' ? `
     if (p2 > maxScrollPct) maxScrollPct = p2;
   }
 
-  // 비콘 = 증가분 전송(체류·섹션). 전송 성공 시 증가분 리셋 — 서버가 합산 병합.
+  // 비콘 = 증가분 전송(체류·섹션). 전송 성공 시 증가분 리셋: 서버가 합산 병합.
   function sendTrack(isInit) {
     if (!CODE) return;
     updateScrollPct();
@@ -615,7 +615,7 @@ ${mode === 'slides' ? `
     if (navNext) navNext.disabled = idx >= pageEls.length - 1;
   }
 
-  // 장 이동 한 곳 — 점 클릭·화살표·키보드가 같이 쓴다
+  // 장 이동 한 곳: 점 클릭·화살표·키보드가 같이 쓴다
   function goToPage(i) {
     if (!pageEls[i]) return;
 ${fx ? '    fxGo(i); return;\n' : ''}    if (MODE === 'slides') {
@@ -655,7 +655,7 @@ ${fx
     sectionEls.forEach(function(el){ sectionObserver.observe(el); });
   }
 
-  // ★ 2026-07-07(5) 섹션 스크롤 리빌 — 화면 밖 섹션만 .dm-reveal 부여 후 진입 시 순차 등장 (인앱 2.0 톤).
+  // ★ 2026-07-07(5) 섹션 스크롤 리빌: 화면 밖 섹션만 .dm-reveal 부여 후 진입 시 순차 등장 (인앱 2.0 톤).
   //   reduced-motion·IntersectionObserver 미지원·오류 = 부여 자체를 건너뛰어 전부 즉시 표시 (추적 로직 무접촉).
   try {
     var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -696,7 +696,7 @@ ${catalog ? '      if (dmCatalogOn) return;\n' : ''}      if (e.key === 'ArrowRi
   }
 ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
   // 섹션 클릭 → 클릭 카운트 + 요소(버튼/링크/옵션/탭) 라벨 카운트.
-  // 외부 링크/CTA는 클릭 즉시 이탈 — 떠나기 전에 비콘으로 클릭 보존.
+  // 외부 링크/CTA는 클릭 즉시 이탈: 떠나기 전에 비콘으로 클릭 보존.
   document.addEventListener('click', function(e){
     var wrap = e.target.closest && e.target.closest('.dm-section-wrap');
     if (wrap) {
@@ -712,7 +712,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     if (link) sendTrack(false);
   }, true);
 
-  // 체류 1초 tick — 화면이 보이는 동안만, 세션 30분 상한
+  // 체류 1초 tick: 화면이 보이는 동안만, 세션 30분 상한
   setInterval(function(){
     if (document.visibilityState === 'visible' && durTotal < 1800) { pendingDur++; durTotal++; }
   }, 1000);
@@ -723,7 +723,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     scrollTick = true;
     setTimeout(function(){ scrollTick = false; updateScrollPct(); }, 250);
   }, {passive:true});
-  // 이탈 내구성 — 모바일은 beforeunload 미발화가 잦아 3중 안전망 + 15초 하트비트
+  // 이탈 내구성: 모바일은 beforeunload 미발화가 잦아 3중 안전망 + 15초 하트비트
   document.addEventListener('visibilitychange', function(){ if (document.visibilityState === 'hidden') sendTrack(false); });
   window.addEventListener('pagehide', function(){ sendTrack(false); });
   window.addEventListener('beforeunload', function(){ sendTrack(false); });
@@ -734,7 +734,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
   sendTrack(true);
 
   // ── 인터랙션 제출 (B 2026-06-14) — 룰렛 즉시추첨 / 폼 응모 / 투표. native dialog 0 (섹션 내 안내). ──
-  // ⛔ 표식(dm-participation:begin~end) 사이는 dm-participation-viewer.test.ts가 떼어 가짜 DOM으로 실제 클릭 실행한다 — 지우지 마라.
+  // ⛔ 표식(dm-participation:begin~end) 사이는 dm-participation-viewer.test.ts가 떼어 가짜 DOM으로 실제 클릭 실행한다. 지우지 마라.
   /* dm-participation:begin */
   function submitInteraction(sectionId, sectionType, data) {
     return fetch(TRACK_URL + '/' + CODE + '/event-response', {
@@ -748,8 +748,8 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     // ★ 2026-10-14 done = 회사가 적은 완료 문구(래퍼 data-success-text · 참여 8종 공통 · 미지정 = '')
     return w ? { id: w.getAttribute('data-section-id'), type: w.getAttribute('data-section-type'), done: w.getAttribute('data-success-text') || '' } : null;
   }
-  // 완료 분기 전용 — 회사 문구가 있으면 그 문구(append = 당첨·이미 참여처럼 기본 문구 뒤 둘째 줄), 없으면 기본 문구 그대로(바이트 불변).
-  //   줄바꿈 보존(pre-line)은 회사 문구를 실제로 쓴 때만 — 미지정 캠페인의 합성 문구·서버 오류 글자는 옛 모양 그대로(Codex 1R). 꽝·검증·오류·마감 분기는 부르지 않는다.
+  // 완료 분기 전용: 회사 문구가 있으면 그 문구(append = 당첨·이미 참여처럼 기본 문구 뒤 둘째 줄), 없으면 기본 문구 그대로(바이트 불변).
+  //   줄바꿈 보존(pre-line)은 회사 문구를 실제로 쓴 때만: 미지정 캠페인의 합성 문구·서버 오류 글자는 옛 모양 그대로. 꽝·검증·오류·마감 분기는 부르지 않는다.
   function showDone(box, info, text, ok, append) {
     var has = !!(info && info.done);
     showMsg(box, has ? (append ? text + '\\n' + info.done : info.done) : text, ok, has);
@@ -767,7 +767,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     r.textContent = text;
   }
 
-  // 룰렛 — 회전 → 서버 당첨 세그먼트로 정지 → 결과
+  // 룰렛: 회전 → 서버 당첨 세그먼트로 정지 → 결과
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-roulette]'), function (box) {
     var info = wrapInfo(box);
     var btn = box.querySelector('[data-dm-spin]');
@@ -783,7 +783,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       submitInteraction(info.id, info.type, {}).then(function (res) {
         spinning = false; clearInterval(iv);
         var spin = res && res.result ? res.result : null;
-        // ★ 2026-09-26 R1-27 — 경품 칸뿐인 룰렛에 발송 링크로 확인되지 않은 참여자 = 돌리지 않고 안내만(경품 칸에 멈춘 뒤 꽝으로 보이는 혼란 없음)
+        // ★ 2026-09-26 경품 칸뿐인 룰렛에 발송 링크로 확인되지 않은 참여자 = 돌리지 않고 안내만(경품 칸에 멈춘 뒤 꽝으로 보이는 혼란 없음)
         if (spin && spin.recipients_only) { showMsg(box, '문자로 받은 링크로 참여하신 분만 경품에 응모할 수 있어요.', false); return; }
         var idx = 0;
         if (spin && spin.segment_id) { for (var i = 0; i < segs.length; i++) { if (String(segs[i].id) === String(spin.segment_id)) { idx = i; break; } } }
@@ -800,7 +800,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     });
   });
 
-  // 폼 — 추첨 응모 / 이메일 수집 (동의·필수 검증 후 제출)
+  // 폼: 추첨 응모 / 이메일 수집 (동의·필수 검증 후 제출)
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-form]'), function (box) {
     var info = wrapInfo(box);
     var btn = box.querySelector('[data-dm-submit]');
@@ -826,7 +826,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     });
   });
 
-  // 투표 — 옵션 클릭 → 제출. ★ 2026-07-21 allow_multiple(data-dm-poll-multi)이면 복수 선택 토글 후 [투표하기]로 일괄 제출.
+  // 투표: 옵션 클릭 → 제출. ★ 2026-07-21 allow_multiple(data-dm-poll-multi)이면 복수 선택 토글 후 [투표하기]로 일괄 제출.
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-poll]'), function (box) {
     var info = wrapInfo(box);
     if (!info) return;
@@ -834,7 +834,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     if (box.hasAttribute('data-dm-poll-multi')) {
       var selected = {};
       Array.prototype.forEach.call(opts, function (opt) {
-        // ★ 2026-09-27 한줄로 V2 R399 — 선택 전 인라인 색을 보관했다가 해제 때 되돌린다(옛: ''로 지워 원래 카드 배경·테두리까지 사라졌다)
+        // ★ 2026-09-27 선택 전 인라인 색을 보관했다가 해제 때 되돌린다(옛: ''로 지워 원래 카드 배경·테두리까지 사라졌다)
         var origBg = opt.style.background, origBorder = opt.style.borderColor;
         opt.addEventListener('click', function () {
           if (box.getAttribute('data-voted') === '1') return;
@@ -850,7 +850,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
         if (!ids.length) { showMsg(box, '항목을 선택해주세요.', false); return; }
         box.setAttribute('data-voted', '1');
         submitInteraction(info.id, info.type, { option_ids: ids }).then(function (res) {
-          // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정 — 거부 시 재시도 가능하게 data-voted 해제.
+          // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정: 거부 시 재시도 가능하게 data-voted 해제.
           if (!res || res.success === false) { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); return; }
           showDone(box, info, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true, !!res.already);
         }).catch(function () { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); });
@@ -861,7 +861,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
           if (box.getAttribute('data-voted') === '1') { showDone(box, info, '이미 투표하셨습니다.', true, true); return; }
           box.setAttribute('data-voted', '1');
           submitInteraction(info.id, info.type, { option_ids: [opt.getAttribute('data-option-id')] }).then(function (res) {
-            // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정 — 거부 시 재시도 가능하게 data-voted 해제.
+            // ★ 2026-07-21 실패 응답(success:false)도 성공 처리하던 결함 정정: 거부 시 재시도 가능하게 data-voted 해제.
             if (!res || res.success === false) { box.removeAttribute('data-voted'); showMsg(box, '잠시 후 다시 시도해주세요.', false); return; }
             showDone(box, info, res.already ? '이미 투표하셨습니다.' : '투표해주셔서 감사합니다!', true, !!res.already);
             opt.style.background = '#ede9fe'; opt.style.borderColor = '#7c3aed';
@@ -871,7 +871,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     }
   });
 
-  // ★ 2026-07-21 (설문 진행률 show_progress) — 답변한 문항 수를 실시간 반영(입력·클릭마다 갱신).
+  // ★ 2026-07-21 (설문 진행률 show_progress): 답변한 문항 수를 실시간 반영(입력·클릭마다 갱신).
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-survey-progress]'), function (prog) {
     var sbox = prog.closest ? prog.closest('[data-dm-survey]') : null;
     if (!sbox) return;
@@ -897,11 +897,11 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
 
   // ── ★ 2026-07-02(3) 발행물에서 죽어있던 섹션 동작 일괄 배선 ──
 
-  // 탭 카드 — 클릭 전환
-  // ★2026-09-10 (임은지 접수 cmtth8w0x0c7pjnotfj7ho1pp) 발행 렌더와 같은 알약 규칙으로 옮긴다.
+  // 탭 카드: 클릭 전환
+  // ★2026-09-10 발행 렌더와 같은 알약 규칙으로 옮긴다.
   //   옛 코드는 07-02 이전 밑줄 탭 방식(밑줄 + 브랜드 기본색 글씨)이라 배경을 안 바꿔, 누른 탭은 회색 바탕에
   //   흰 글씨가 되고 검정 배경은 처음 탭에 남았다. 활성 색 = 발행 렌더가 탭 묶음에 실은 값 · 비활성 = DM_TAB_PILL.
-  //   ⛔ 이 블록은 dm-tab-viewer-parity.test.ts가 표식 사이를 떼어 실제로 클릭 실행한다 — 표식을 지우지 마라.
+  //   ⛔ 이 블록은 dm-tab-viewer-parity.test.ts가 표식 사이를 떼어 실제로 클릭 실행한다. 표식을 지우지 마라.
   /* dm-tab-switch:begin */
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-tabs]'), function (box) {
     var btns = box.querySelectorAll('[data-dm-tab]');
@@ -924,7 +924,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
   });
   /* dm-tab-switch:end */
 
-  // 슬라이드쇼 — 자동 전환 + 인디케이터 클릭
+  // 슬라이드쇼: 자동 전환 + 인디케이터 클릭
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-slideshow]'), function (box) {
     var slides = box.querySelectorAll('[data-dm-slide]');
     if (slides.length < 2) return;
@@ -938,7 +938,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     Array.prototype.forEach.call(dotEls, function (d, di) { d.addEventListener('click', function () { show(di); }); });
     var iv = parseInt(box.getAttribute('data-interval') || '4000', 10);
     if (!(iv >= 1500 && iv <= 60000)) iv = 4000;
-    // ★ 2026-07-21 (#2 임은지) 일시정지 버튼 — 수신자가 탭하면 자동 전환 멈춤/재개. show_pause 설정이 종전엔 어디서도 소비 안 됨(고아).
+    // ★ 2026-07-21 일시정지 버튼: 수신자가 탭하면 자동 전환 멈춤/재개. show_pause 설정이 종전엔 어디서도 소비 안 됨(고아).
     var paused = false;
     setInterval(function () { if (!paused && document.visibilityState === 'visible') show(cur + 1); }, iv);
     var pauseBtn = box.querySelector('[data-dm-slide-pause]');
@@ -951,7 +951,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     }
   });
 
-  // ★ 2026-07-21 (#4a 임은지) 상품 슬라이드 가로 스와이프 인디케이터 — 스크롤 위치를 점에 반영 + 점 클릭 스크롤(자동 전환 없음).
+  // ★ 2026-07-21 상품 슬라이드 가로 스와이프 인디케이터: 스크롤 위치를 점에 반영 + 점 클릭 스크롤(자동 전환 없음).
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-pcarousel]'), function (row) {
     var wrap = row.parentElement;
     var dotBox = wrap ? wrap.querySelector('[data-dm-pc-dots]') : null;
@@ -975,7 +975,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
       });
     }
     var raf = null;
-    // ★ 2026-07-21 구형 임베디드 WebView 대비 — requestAnimationFrame 미지원 시 setTimeout 폴백.
+    // ★ 2026-07-21 구형 임베디드 WebView 대비: requestAnimationFrame 미지원 시 setTimeout 폴백.
     var rafFn = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : function (cb) { return setTimeout(cb, 16); };
     row.addEventListener('scroll', function () {
       if (raf) return;
@@ -986,7 +986,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
         if (!cards[di]) return;
         var delta = cards[di].getBoundingClientRect().left - row.getBoundingClientRect().left;
         var target = row.scrollLeft + delta;
-        // scrollTo({options}) 미지원 WebView 대비 — scrollLeft 직접 대입 폴백.
+        // scrollTo({options}) 미지원 WebView 대비: scrollLeft 직접 대입 폴백.
         if (row.scrollTo) { try { row.scrollTo({ left: target, behavior: 'smooth' }); } catch (e) { row.scrollLeft = target; } }
         else { row.scrollLeft = target; }
       });
@@ -994,7 +994,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     paint();
   });
 
-  // ★ 2026-07-21 (갤러리 확대 보기 enable_zoom) — [data-dm-zoom] 이미지 탭 시 전체화면 오버레이(탭하면 닫힘). 링크 있는 이미지엔 미부여(링크 우선).
+  // ★ 2026-07-21 (갤러리 확대 보기 enable_zoom): [data-dm-zoom] 이미지 탭 시 전체화면 오버레이(탭하면 닫힘). 링크 있는 이미지엔 미부여(링크 우선).
   var zoomImgs = document.querySelectorAll('[data-dm-zoom]');
   if (zoomImgs.length) {
     var zoomOverlay = document.createElement('div');
@@ -1012,7 +1012,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     });
   }
 
-  // 설문 별점 — 클릭 선택
+  // 설문 별점: 클릭 선택
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-rating]'), function (r) {
     var stars = r.querySelectorAll('[data-dm-rate]');
     Array.prototype.forEach.call(stars, function (st) {
@@ -1024,7 +1024,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     });
   });
 
-  // 설문 — 답변 수집(라디오/체크박스/텍스트/별점) → 제출
+  // 설문: 답변 수집(라디오/체크박스/텍스트/별점) → 제출
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-survey]'), function (box) {
     var info = wrapInfo(box);
     var btn = box.querySelector('[data-dm-submit]');
@@ -1065,7 +1065,7 @@ ${catalog ? renderCatalogScript() : ''}${renderEffectScript(fx)}
     });
   });
 
-  // 원클릭 참여 — 즉시쿠폰 받기 / 선착순 참여 / 클릭 리워드 (1인 1회는 서버 dedup)
+  // 원클릭 참여: 즉시쿠폰 받기 / 선착순 참여 / 클릭 리워드 (1인 1회는 서버 dedup)
   Array.prototype.forEach.call(document.querySelectorAll('[data-dm-claim]'), function (btn) {
     var info = wrapInfo(btn);
     if (!info) return;

@@ -70,6 +70,8 @@ import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackCo
 import { buildCustomerFilter } from '../utils/customer-filter';
 import { buildChannelEligibilityWhere } from '../utils/channel-eligibility';
 import { createDirectSendCampaign, preFilterRecipientsLikeStaging, countStagingFiltered } from '../utils/direct-send-core';
+import { resolveAdGateMode, AdGateMode, gateStaging, sendSpanOf, AdHold } from '../utils/ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
+import { adGateNotice, AdGateCounts } from '../utils/ad-send-gate-core';
 import { DirectSendError } from '../utils/direct-send-spec';
 import { getOpt080Number, stripAdPartsDeep } from '../utils/messageUtils';
 import { isUuid } from '../utils/normalize';
@@ -103,7 +105,6 @@ import { insertTestSmsQueue } from '../utils/sms-queue';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { sanitizeSmsText } from '../utils/auto-notify-message';
 import { convertLegacyToSections } from '../utils/dm/dm-legacy-converter';
-import { previewBrandExtract } from '../utils/dm/dm-brand-kit';
 import { createAbTest, getAbTestByShortCode, listAbTests, updateAbTest, deleteAbTest, startAbTest, pauseAbTest, completeAbTest, aggregateResults, pickVariant, variantToPageId, trackAbTestView, type AbVariantKey } from '../utils/dm/dm-ab-test';
 // ★ CT-17: 모바일 DM 빌더는 PRO 이상만 사용 가능
 import { requirePlanFeature } from '../utils/plan-guard';
@@ -1455,6 +1456,9 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
     //   (대상 0명 · 문안 검사 · 잔액 · 적재 실패)의 토큰은 여기서 지운다 — 남으면 캠페인 없는 토큰이 추적에서 「발송」으로 잡혔다(DM_TOKEN_SEND_STATE_SQL).
     let campaignId: string;
     let sendCount = 0;
+    let dmAdGate: AdGateCounts | null = null;   // ★ 2026-11-06 C110 광고 관문 뺀 수 · ★ C113 관문 길만
+    let dmAdGateMarked = false;   // ★ 1106 — 원장을 쓴 판정일 때만 잇는다
+    const dmHold = new AdHold(companyId);   // ★ C113 D10 — 공용 입구에 넘기기 전 출구 = 쥔 예약 해제(finally · 소유 CT)
     let accepted = false;
     let msgType: 'SMS' | 'LMS' = 'LMS';
     try {
@@ -1485,10 +1489,23 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
         [stagingId, companyId, phones, names, links, cbs],
       );
 
+      // ★ 2026-11-06 C110 광고 관문(설계서 §4 dm) — 광고만 · 건수 확정 · 차감 앞 · 묶음 = stagingId
+      // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 흐름 · 문장 · 응답 그대로(관문 0) · 관문 길(요금제 씀 + 새 기능)만
+      const dmGateMode: AdGateMode = isAd === true ? await resolveAdGateMode(companyId) : { mode: 'legacy' };
+      if (dmGateMode.mode === 'gate') {
+        const dmGate = await gateStaging(dmGateMode.policy, {
+          branch: 'dm', stagingId, unsubUserId: userId, mode: 'commit', span: sendSpanOf(scheduled ? scheduledAt : null),
+        });
+        dmAdGate = dmGate.counts;
+        dmAdGateMarked = dmGate.marked;   // 관문 장애 = AdGateUnavailableError(공용 사용자 오류 503) → 바깥 catch 의 respondUserError · 남은 적재 = 정리 워커
+        dmHold.take(dmGate.marked, stagingId);
+      }
       // 정제 후 실제 발송 수(중복·수신거부 제외) — 커밋과 동일 기준으로 과금 정확
       ({ sendCount } = await countStagingFiltered(stagingId, companyId, userId, true, true, isAd === true));
       if (sendCount === 0) {
         await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
+        const dmGateLine = dmAdGate ? adGateNotice(dmAdGate) : '';
+        if (dmGateLine) return res.status(400).json({ error: `수신 가능한 대상이 0명입니다. ${dmGateLine}`, code: 'ZERO_MATCH' });   // ★ C113 관문 길만
         return res.status(400).json({ error: '수신 가능한 대상이 0명입니다(수신거부 제외 후).', code: 'ZERO_MATCH' });
       }
 
@@ -1517,6 +1534,7 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
       });
 
       try {
+        dmHold.pass();   // ★ C113 D10 — 넘김(공용 입구가 활성화 문장 직전까지 쥐고 그 전 실패면 스스로 해제)
         const result = await createDirectSendCampaign(
           {
             stagingId,
@@ -1528,6 +1546,7 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
             useIndividualCallback: !!useIndividualCallback,
             sendChannel: 'sms',
             adEnabled: isAd === true,
+            adGateBatchId: dmAdGateMarked ? stagingId : null,   // ★ 2026-11-06 C110 광고 관문 원장 잇기(차감 앞)
             total: sendCount,
             scheduled,
             scheduledAt: scheduled ? (scheduledAt as string) : null,
@@ -1555,6 +1574,7 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
         await discardDmRecipientTokens(dm.id, companyId, tokenPairs.map((p) => p.token))
           .catch((e: any) => console.error('[DM 타겟 발송] 접수 안 된 토큰 정리 실패:', e?.message));
       }
+      if (dmHold.holding) await dmHold.settle();   // ★ C113 D10 — 공용 입구에 넘기기 전 출구 = 쥔 예약 해제(옛 길 = 실행 0)
     }
 
     // ★ 2026-10-03 이번 토큰을 발송 캠페인에 잇는다 — DM 상세·목록이 예약·취소·실제 발송 시각을 안다(남지현 접수).
@@ -1584,7 +1604,8 @@ dmRouter.post('/:id/send-to-target', requireDmAccess, demoBlock, singleFlight('d
       }).catch(() => { /* 학습 적재 실패는 발송에 영향 없음 */ });
     }
 
-    return res.json({ success: true, campaignId, sent: sendCount, msgType });
+    if (!dmAdGate) return res.json({ success: true, campaignId, sent: sendCount, msgType });
+    return res.json({ success: true, campaignId, sent: sendCount, msgType, adGate: dmAdGate, adGateNotice: adGateNotice(dmAdGate) });   // ★ C113 관문 길만
   } catch (err: any) {
     // ★ 2026-10-25 발행비 성공 뒤 차감(동시 소진 402 · 원장 쓰기 실패 503 · 첫 발행은 되돌림)
     if (err instanceof InsufficientCreditError) return res.status(402).json({ error: '발행 크레딧이 부족합니다. 충전 후 다시 시도해주세요.', code: 'INSUFFICIENT_CREDIT' });
@@ -2268,24 +2289,6 @@ dmRouter.post('/ai/improve', async (req: any, res: any) => {
     console.error('[DM AI improve] 오류:', err.message);
     if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ error: publicErrorText(err, 'AI 개선 제안 실패') });
-  }
-});
-
-// ============================================================
-//  브랜드킷 URL 자동추출 (D126 V2)
-// ============================================================
-
-// POST /api/dm/brand-kit/extract — URL에서 og:image/favicon/theme-color 추출
-dmRouter.post('/brand-kit/extract', async (req: any, res: any) => {
-  try {
-    const url = (req.body?.url || '').toString().trim();
-    if (!url) return res.status(400).json({ error: '주소를 넣어 주세요.' });
-    const result = await previewBrandExtract(url);
-    return res.json(result);
-  } catch (err: any) {
-    console.error('[DM 브랜드추출] 오류:', err.message);
-    if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
-    return res.status(500).json({ error: publicErrorText(err, '브랜드 추출 실패') });
   }
 });
 

@@ -7,13 +7,16 @@
  */
 import { assertNotDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = 발송 0
 import { query } from '../config/database';
+import { randomUUID } from 'crypto';
+import { AdHold, queueEditKey } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 원장 잇기 · ★ C113 D10 주인 해제
+import { tryAcquireInflight, releaseInflight } from './inflight-lock';   // ★ C113 8R 큐 편집 잠금
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from './prepaid';
 // ★ 2026-07-30 차감 축 판정 — 환불 축과 같은 CT를 쓴다(갈리면 회계가 어긋난다)
 import { resolveRefundAxes, isBrandOnlyChannel } from './billing-types';
 import { buildRefundPending } from './refund-pending';
 import { sendSystemAlert } from './system-alert';
 import { triggerDirectSendWorker } from './direct-send-worker';
-import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, DirectSendError, type DirectSendSpec } from './direct-send-spec';
+import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, withCampaignId, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining, type TrainingAuthorship } from './training-logger';
 import { findUneditedSendPlaceholder } from './send-placeholder-gate';
 import { composeSpamCheckText, kakaoFallbackSpamItems } from './messageUtils';
@@ -233,9 +236,45 @@ export async function preFilterRecipientsLikeStaging<T extends { phone?: any }>(
   return deduped.filter((r) => !blocked.has(String(r.phone || '').replace(/\D/g, '')));
 }
 
+/** ★ 2026-11-07 C113 8R — 캠페인 INSERT(관문 길 = 미리 만든 id 칸만 덧붙임 · 옛 길 presetId 없음 = 그 자리 문장 그대로) */
+export function queryCampaignInsert(sql: string, params: any[], presetId: string | null) {
+  if (!presetId) return query(sql, params);
+  const ins = withCampaignId(sql, params, presetId);
+  return query(ins.sql, ins.params);
+}
+
+type DirectSendCtx = Parameters<typeof createDirectSendCampaign>[1];
+type DirectSendTraining = Parameters<typeof createDirectSendCampaign>[2];
+/** ★ C113 D10 · 8R — 관문 길이 쥔 것(미리 만든 캠페인 id · 예약 주인 표식) · undefined = 입구가 부름(길 판정 전) · null = 옛 길 */
+type GateHold = { presetId: string; hold: AdHold };
+
+/**
+ * ★ 2026-11-07 C113 D10 · 8R — 관문 길 싸개(입구가 광고 관문 원장 묶음 spec.adGateBatchId 를 넘긴 때만 · 원장을 쓴 판정):
+ *   ① 캠페인 id 를 INSERT 전에 만들어 큐 편집 잠금 `queue-edit:<id>` 를 먼저 잡고 그 id 로 넣는다(행이 보이는 첫 순간에 이미 잠김 ·
+ *      예약 변경 · 수신자 삭제가 맨 앞에서 본다) ② 활성화 문장 직전까지 예약을 쥐고 그 전 출구 = 이어지지 않은 예약 해제(활성화 뒤 실패 = 해제 0)
+ *   ③ 잇기 = 활성화 성공 뒤 ④ 잠금 = 잇기가 끝난 뒤 놓는다.
+ */
+async function createDirectSendCampaignGated(spec: DirectSendSpec, ctx: DirectSendCtx, training: DirectSendTraining): Promise<{ campaignId: string; accepted: number }> {
+  const gateBatch = String(spec.adGateBatchId);
+  const presetId = randomUUID();
+  const editLock = queueEditKey(presetId);
+  tryAcquireInflight(editLock);   // 새 id = 늘 잡힘
+  const hold = new AdHold(ctx.companyId);
+  hold.take(true, gateBatch);   // 입구가 넘긴 소유를 이어받음(입구는 pass 로 내려놓았다)
+  try {
+    const out = await createDirectSendCampaign(spec, ctx, training, { presetId, hold });
+    await hold.handoff(out.campaignId);   // 잇기 = 활성화 성공 뒤(소유는 활성화 문장 앞에서 이미 내려놓음 · 실패 = 장애 줄 · 발송 계속 1107 Harold)
+    return out;
+  } finally {
+    await hold.settle();   // 활성화 문장 앞에서 끝난 출구 = 쥔 예약 해제(그 뒤 = 해제 0)
+    releaseInflight(editLock);
+  }
+}
+
 /**
  * campaign 1건 생성(send_phase='queued') + 잔액 차감 + worker 트리거.
  * 검증·정제 건수(total)는 호출부가 선행. 잔액 부족이면 campaign 롤백 후 DirectSendError(402) throw.
+ * ★ C113 D23 — 몸 = HEAD 그대로(옛 길) · 입구가 원장 묶음을 넘기면 맨 앞에서 관문 길 싸개로 돌아 들어온다(gate = 쥔 것).
  */
 export async function createDirectSendCampaign(
   spec: DirectSendSpec,
@@ -250,7 +289,9 @@ export async function createDirectSendCampaign(
     activationGuard?: { sql: string; params: any[] };
   },
   training?: { finalSource?: 'manual' | 'selected_as_is' | 'edited'; userPrompt?: string; aiMessages?: string[]; authorship?: TrainingAuthorship },
+  gate?: GateHold | null,
 ): Promise<{ campaignId: string; accepted: number }> {
+  if (gate === undefined && spec.adGateBatchId) return createDirectSendCampaignGated(spec, ctx, training);   // ★ C113 관문 길(원장 묶음을 넘긴 입구만)
   // ★ 2026-10-09 시연 회사 = 발송 0 — 사람 직접 발송 · DM 대상 발송 · 플래너 · 대행의 공통 길목(자동마케팅은 이보다 앞에서 끊는다)
   await assertNotDemoCompany(ctx.companyId);
   // ★ 2026-07-02 링크 placeholder 발송 가드 — [링크를 입력해주세요]/{{LINK: 잔존 시 실발송 차단.
@@ -314,7 +355,10 @@ export async function createDirectSendCampaign(
     };
   }
 
-  const campaignResult = await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));
+  // ★ C113 8R — 관문 길 = 미리 만든 id 로 넣는다(잠금이 행 공개보다 먼저) · 옛 길 = HEAD 문장 그대로
+  const campaignResult = gate
+    ? await queryCampaignInsert(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx), gate.presetId)
+    : await query(CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams(spec, ctx));
   const campaignId = campaignResult.rows[0].id;
 
   // 잔액 차감 (정제 후 total) — 실패 시 campaign 롤백 (원본 commit과 동일).
@@ -392,6 +436,7 @@ export async function createDirectSendCampaign(
   //   - queued/processing/sent = 전환이 실제로 됐다 → 정상 흐름 계속(환불·throw 없음)
   //   - preparing = 진짜 실패 → preparing 가드 원자 중화+의무 기록 후 COMMIT_FAILED
   //   - 재확인 불능/그 외 = 미확정 → 경보로 사람 호출 후 COMMIT_FAILED(자동 환불 기록 금지)
+  if (gate) gate.hold.pass();   // ★ C113 D10 — 활성화 문장부터는 나갈 수 있다 = 그 뒤 실패에 예약 해제 0
   try {
     const guard = ctx.activationGuard;
     const activated = await query(

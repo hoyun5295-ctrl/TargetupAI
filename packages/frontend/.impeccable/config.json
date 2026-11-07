@@ -74,6 +74,15 @@
         ],
         "createdAt": "2026-10-20T13:16:10.865Z",
         "reason": "Claude: text-slate-950(거의 검정) on bg-amber-500 = 대비 높음 · 앱 전체 amber 버튼과 같은 기존 디자인 · 회색 글자가 아님"
+      },
+      {
+        "rule": "gray-on-color",
+        "value": "*",
+        "files": [
+          "src/components/performance/EffectProofCard.tsx"
+        ],
+        "createdAt": "2026-11-06T10:24:15.082Z",
+        "reason": "Claude 판단: L25 = 판정 띠 '뚜렷하지 않음' 중립 칩(bg-slate-100 위 text-slate-600 · 회색 바탕 위 회색 = 유색 바탕 아님 · 대비 충분)"
       }
     ]
   }

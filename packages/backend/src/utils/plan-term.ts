@@ -21,6 +21,7 @@ import pool, { query } from '../config/database';
 import { recordPlanChange, todayKst } from './plan-change-log';
 import { sendSystemAlert } from './system-alert';
 import { shiftDayKey, daySpan } from './plan-proration';
+import { endAdGateIfUnpaid } from './ad-send-gate';   // ★ C113 D2
 import {
   periodEnd, monthlyCharge, planOfDay, upgradeCharge, upgradeRuns, currentTermEvents, lastPlanSetterPlanId, daysLeft,
   decideSettle, decidePlanRequest, isYmd, PURCHASE_EVENT_TYPES, firstTermEnd, proratedCharge, type TermEvent,
@@ -226,6 +227,7 @@ async function writeTerm(client: PoolClient, s: TermState, ch: TermChanges): Pro
   if (ch.plan) {
     s.prevPlanIdForHint = s.row.plan_id;
     s.row.plan_id = ch.plan.id;
+    await endAdGateIfUnpaid(client, s.row.id);   // ★ C113 D2 — 요금제 쓰기 바로 뒤 같은 연결
   }
   return v;
 }

@@ -109,7 +109,9 @@ export type StudioErrorCode =
   | 'BUSY'
   | 'TEMP_FULL'
   | 'PRODUCTS_INVALID'
-  | 'PRODUCT_TOO_LARGE';
+  | 'PRODUCT_TOO_LARGE'
+  | 'LAYER_FAILED'
+  | 'LOGO_SAVE_FAILED';
 
 const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   STUDIO_NOT_READY: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.',
@@ -122,6 +124,8 @@ const STUDIO_ERROR_MESSAGES: Record<StudioErrorCode, string> = {
   TEMP_FULL: '임시 보관 용량이 가득 찼습니다. 저장하거나 정리 후 다시 시도해주세요.',
   PRODUCTS_INVALID: '제품 사진은 3개까지 넣을 수 있어요. 다시 골라 주세요.',
   PRODUCT_TOO_LARGE: '제품 사진이 너무 크거나 길쭉해서 함께 넣을 수 없어요. 다른 사진으로 다시 넣어 주세요.',
+  LAYER_FAILED: '로고를 얹지 못했어요. 다시 눌러 주세요.',
+  LOGO_SAVE_FAILED: '로고를 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.',
 };
 
 export class StudioError extends Error {
@@ -331,7 +335,7 @@ const GROUP_HEIGHT = 1200;
 const GROUP_MAX_WIDTH = 3600;
 const GROUP_GAP_RATIO = 0.08;
 /** 입력 한 장 화소 상한 — 헤더로 디코드 전에 거른다(Codex 설계 1R ②) */
-const GROUP_MAX_INPUT_PIXELS = 25_000_000;
+export const GROUP_MAX_INPUT_PIXELS = 25_000_000;   // ★ 2026-11-07 C112 로고 안전 변환도 같은 상한(studio-logo.ts)
 
 /**
  * 제품 2~3장을 투명 PNG 한 장으로 — 넣은 순서대로 왼쪽부터 · 높이를 같게(1102 운영 실측 12장과 같은 꼴).
@@ -754,7 +758,7 @@ export async function composeImage(input: ComposeInput): Promise<{ bytes: number
 // ── temp 저장소 (per-company, sidecar 메타) ────────────────────
 export interface TempMeta {
   companyId: string;
-  kind: 'source' | 'background' | 'poster' | 'cutout' | 'composite';
+  kind: 'source' | 'background' | 'poster' | 'cutout' | 'composite' | 'logo';   // ★ C113 D9 logo = 홈페이지에서 찾은 로고 후보(「이 로고로 저장」만 소비)
   ext: string;
   mime: string;
   prompt?: string | null;
@@ -878,11 +882,27 @@ export function moveTempToPermanent(companyId: string, tempId: string): { url: s
   fs.mkdirSync(destDir, { recursive: true });
   const filename = `${tempId}.${found.ext}`;
   const destPath = path.join(destDir, filename);
+  // ★ 2026-11-07 C113 K21 — 크기를 옮기기 전에 읽는다(옛: 옮긴 뒤 읽다 실패하면 옮긴 파일이 기록 없이 남았다 · 되돌릴 수 없는 단계 = 마지막)
+  const bytes = fs.statSync(found.absPath).size;
   fs.renameSync(found.absPath, destPath);
   // 사이드카 삭제 = 1회성 소비(재-save 시 findTempFile null → 409/404).
   try { fs.unlinkSync(path.join(companyTempDir(companyId), `${tempId}.json`)); } catch { /* noop */ }
-  const bytes = fs.statSync(destPath).size;
   return { url: `/api/cdp/inapp/image/${companyId}/${filename}`, filename, bytes, ext: found.ext };
+}
+
+/**
+ * ★ 2026-11-07 C112 영구 자리에 바로 쓴다 — 이름 = 저장한 임시 id(moveTempToPermanent · findPermanentByTempId 와 같은 이름 · 주소 규칙) ·
+ *   그 폴더 안 임시 이름에 쓰고 이름 바꾸기(반쪽 파일이 서빙되지 않게). 같은 이름이 있으면 덮어쓴다(로고 저장의 0행 확정 뒤 다시 쓰기).
+ */
+export function writeStudioPermanent(companyId: string, tempId: string, ext: string, buffer: Buffer): { url: string; filename: string; bytes: number; ext: string } {
+  if (!isValidTempId(tempId) || !/^[a-z]{3,4}$/.test(ext)) throw new Error('invalid permanent name');
+  const destDir = path.join(INAPP_IMAGE_BASE, companyId);
+  fs.mkdirSync(destDir, { recursive: true });
+  const filename = `${tempId}.${ext}`;
+  const tmp = path.join(destDir, `.tmp-${crypto.randomUUID()}`);
+  fs.writeFileSync(tmp, buffer);
+  fs.renameSync(tmp, path.join(destDir, filename));
+  return { url: `/api/cdp/inapp/image/${companyId}/${filename}`, filename, bytes: buffer.length, ext };
 }
 
 /**

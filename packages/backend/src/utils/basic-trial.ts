@@ -15,6 +15,7 @@ import type { PoolClient } from 'pg';
 import pool from '../config/database';
 import { recordPlanChange, alertPlanChangeFailure } from './plan-change-log';
 import { applyTrialStart } from './ai-credit-tx';
+import { endAdGateIfUnpaid } from './ad-send-gate';   // ★ C113 D2
 import { planMonthCreditsOf } from './ai-credit-admin';
 import { planTermManagedSql, planTermManagedError, PlanTermError } from './plan-term';
 
@@ -160,6 +161,7 @@ async function grantFreeTrialWithClient(
     });
     // ★ 2026-11-01 C1 · D-A — 체험 크레딧은 체험 한 번에 한 번(연장 = 0). 일할 회수(유료 → 체험)가 끝난 뒤라 순서가 맞다.
     if (!extended) await applyTrialStart(client, companyId, trialCredits, String(updated.rows[0].trial_key), creditNow);
+    await endAdGateIfUnpaid(client, companyId);   // ★ C113 D2 — 요금제 쓰기 짝(체험 = 씀 = 보통 무동작)
   }
 
   const { trial_key: _trialKey, ...out } = updated.rows[0] || {};

@@ -8,6 +8,7 @@
  * 흰 표면 창 안에서도 그려진다 → 다크 전제 색 금지(backend dm-build-light-surface.test.ts).
  * 상태는 이 훅을 부른 부품에 산다 → DM 창은 닫아도(ModalBase 가 null) 만드는 중 · 입력이 살아 있다(닫기 = 숨김).
  * ★ 2026-11-02 제품 사진 최대 3장(칸 목록 · 서버가 한 장으로 묶는다) · 칸 수명 = 설계서 docs/2026-11-02-image-studio-multi-product-design.md §2
+ * ★ 2026-11-07 브랜드 로고 층 = 생성 뒤 곧바로 미리보기(켜짐 · 0크레딧) · relayer · readLogo 를 두 결과 화면이 같이 쓴다(설계서 docs/2026-11-07-c112-studio-brand-logo-design.md D8 · D10 · D11)
  */
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { PenLine, ShoppingBag, Upload, Wand2, Loader2, X } from 'lucide-react';
@@ -17,13 +18,14 @@ import { fetchAuthObjectUrl } from '../../lib/auth-download';
 import { studioFetch, studioPost, newStudioAttempt } from '../../lib/studio-api';
 import { applyAutoTexts, autoStudioTexts, EMPTY_STUDIO_TEXTS, type StudioTexts } from '../../lib/studio-texts';
 import { runProductPrep } from '../../lib/studio-products';
+import { layerRequest, LOGO_FAILED_TEXT, type LogoCandidate, type LogoCardState, type LogoSettings } from '../../lib/studio-layers';
 import type { StudioTemplatePublic } from './TemplatePicker';
 
 const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
 const isEvent = (t: StudioTemplatePublic | null) => (t?.kind || 'product') === 'event';
 
 /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — texts = 생성에 쓴 글 전체(인앱 통짜 장 글 · 글 없는 판이면 빈 글) */
-export interface StudioMade { tempId: string; url: string; preview: string | null; title: string; texts: StudioTexts; textless: boolean }
+export interface StudioMade extends LogoCardState { tempId: string; url: string; preview: string | null; title: string; texts: StudioTexts; textless: boolean }
 
 /** ★ 2026-11-02 제품 사진 상한 — 서버 STUDIO_MAX_PRODUCTS(utils/image-studio.ts)와 같은 값(계약 시험 S5) · 넘침 판정 권한은 서버 */
 export const STUDIO_MAX_PRODUCTS = 3;
@@ -165,6 +167,47 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     dropItem(key);
   };
 
+  // ── 로고 미리보기(★ 2026-11-07 · 서버가 합성한 그림 + 확정 설정 · 0크레딧 · 파일 0) ──
+  //   표시값 = 응답의 확정 설정 · 실패하면 지금 카드를 그대로 둔다(보이는 그림 = 저장되는 그림)
+  const postLayers = async (baseTempId: string, s: LogoSettings, textless: boolean): Promise<LogoCardState | string> => {
+    const { ok, data } = await studioPost('/api/image-studio/layers', layerRequest(baseTempId, s, textless));
+    if (!ok || !data.logo) return data?.error || `${LOGO_FAILED_TEXT}. 다시 눌러 주세요.`;
+    return { logo: data.logo, layered: typeof data.preview === 'string' ? data.preview : null, logoFailed: false };
+  };
+  /** 끄고 켜기 · 자리 · 크기 · 다시 얹기 · AI 수정 뒤(같은 확정 설정) — 실패 = 알림 + null(부른 쪽은 카드를 그대로) */
+  const relayer = async (baseTempId: string, s: LogoSettings, textless: boolean): Promise<LogoCardState | null> => {
+    setBusyMsg('로고를 얹는 중...');
+    try {
+      const r = await postLayers(baseTempId, s, textless);
+      if (typeof r === 'string') { toast.error(r); return null; }
+      return r;
+    } finally {
+      setBusyMsg('');
+    }
+  };
+  /** ★ C113 D9 1단계 — 키트 로고가 없을 때 홈페이지에서 로고 후보를 찾는다(서버 임시 · 키트 쓰기 0) */
+  const findLogo = async (url: string): Promise<LogoCandidate | null> => {
+    setBusyMsg('홈페이지에서 로고를 찾는 중...');
+    try {
+      const { ok, data } = await studioPost('/api/image-studio/logo/read', { url });
+      if (!ok || !data?.candidate) { toast.error(data?.error || '홈페이지를 읽지 못했어요. 잠시 뒤 다시 시도해 주세요.'); return null; }
+      return data.candidate as LogoCandidate;
+    } finally {
+      setBusyMsg('');
+    }
+  };
+  /** ★ C113 D9 2단계 — 본 후보를 키트 빈 칸에만 저장(서버) → 곧바로 미리보기(켜짐 · 자동) */
+  const saveFoundLogo = async (c: LogoCandidate, baseTempId: string, textless: boolean): Promise<LogoCardState | null> => {
+    setBusyMsg('로고를 저장하는 중...');
+    try {
+      const { ok, data } = await studioPost('/api/image-studio/logo/use', { tempId: c.tempId });
+      if (!ok) { toast.error(data?.error || '로고를 저장하지 못했어요. 잠시 뒤 다시 시도해 주세요.'); return null; }
+    } finally {
+      setBusyMsg('');
+    }
+    return relayer(baseTempId, { on: true, corner: null, size: null }, textless);
+  };
+
   // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장 · 차감은 서버가 성공 뒤) ──
   // ★ 2026-10-19 B-1016-3② 결과를 못 받은 시도는 같은 표로 다시(서버가 이미 만든 결과를 주고 다시 걷지 않는다)
   const attemptRef = useRef<string | null>(null);
@@ -191,8 +234,12 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       const im = data.images[0];
       let preview: string | null = null;
       try { preview = await fetchAuthObjectUrl(im.url); } catch { /* 미리보기만 못 띄운다 · 저장·넣기는 tempId 로 된다 */ }
+      // ★ 2026-11-07 로고 기본 켜짐(D8) — 실패 = 바탕 + 「로고를 얹지 못했어요 · 다시 얹기」(확정 설정 없음 = 보이는 그대로 바탕 저장)
+      setBusyMsg('로고를 얹는 중...');
+      const lay = await postLayers(im.tempId, { on: true, corner: null, size: null }, textless);
+      const logoState: LogoCardState = typeof lay === 'string' ? { logo: null, layered: null, logoFailed: true } : lay;
       // 헤드라인 = 저장 파일명(헤드라인_채널) 스냅샷(생성 시점 문구 고정)
-      return { tempId: im.tempId, url: im.url, preview, title: texts.title, texts: { ...sendTexts }, textless };
+      return { tempId: im.tempId, url: im.url, preview, title: texts.title, texts: { ...sendTexts }, textless, ...logoState };
     } finally {
       setBusyMsg('');
     }
@@ -201,7 +248,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   return {
     template, texts, setTexts, hint, setHint, textPosition, setTextPosition,
     items, remaining, full, removeItem, pickerOpen, setPickerOpen, fileRef,
-    busyMsg, reset, restart, onPickMall, onUpload, generate,
+    busyMsg, reset, restart, onPickMall, onUpload, generate, relayer, findLogo, saveFoundLogo,
   };
 }
 

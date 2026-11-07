@@ -20,7 +20,7 @@ import { normalizePhone } from '../utils/normalize-phone';
 import { checkCallbackSpec } from '../utils/callback-spec';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { fieldKeyToColumn, getFieldByKey } from '../utils/standard-field-map';
-import { tryAcquireInflight, releaseInflight, singleFlight, SEND_IN_FLIGHT_MESSAGE } from '../utils/inflight-lock';
+import { tryAcquireInflight, releaseInflight, isInflight, isInflightUuid, singleFlight, SEND_IN_FLIGHT_MESSAGE } from '../utils/inflight-lock';
 import { nightAdRestrictionMessage } from '../utils/autosend-policy';
 import { resolveStagingCommitState, withStagingLock, parkStagingRows, restoreParkedStagingRows, dropParkedStagingRows } from '../utils/staging-sweeper';
 import { isLoadingSendPhase } from '../utils/load-cancel';
@@ -58,7 +58,7 @@ import { prepaidDeduct, prepaidRefund, REFUND_KEYS, deductFailureHttp, reportTes
 import { isBrandOnlyChannel, resolveRefundAxes, resolveSendChannel, resolveChargeMessageType, BRAND_CAMPAIGN_CHANNELS } from '../utils/billing-types';
 import { markRefundPending, markRefundPendingAxes } from '../utils/refund-pending';
 // ★ 2026-07-30 (2R): 테스트 경로 환불 미완 경보 — 캠페인 레코드가 없어 durable 의무 대신 사람 호출
-import { sendSystemAlert } from '../utils/system-alert';
+import { sendSystemAlert, queuePassFailures } from '../utils/system-alert';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, getCampaignResultCounts, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
@@ -69,11 +69,13 @@ import { resolveAlimtalkFallback, validateAlimtalkFallback } from '../utils/alim
 import { filterByIndividualCallback, buildCallbackErrorResponse, buildCallbackConfirmResponse, resolveCustomerCallback, callbackAssignmentUserId, isCallbackRegistered } from '../utils/callback-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 회사 opt-in "최근 N일 광고 M건" 게이트(차감 전 제외) + 광고 발송 카운터
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from '../utils/fatigue-guard';
+import { resolveAdGateMode, AdGateMode, loadAdGatePolicy, gatePhones, gateStaging, releaseCampaignPhoneReservationSafe, campaignAdGateLinked, queueEditKey, AdHold, campaignHasReservations, rescheduleQueuedReservations, expandCampaignReservations, contractCampaignReservations, sendSpanOf, directSendSpanOf, directSendSpanFor, AdGateUnavailableError, AD_GATE_UNAVAILABLE_TEXT } from '../utils/ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
+import { branchOfDirect, adGateNotice, totalExcluded, AdGateCounts, kstDaysInSpan } from '../utils/ad-send-gate-core';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, brandSendWindowError, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
-import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, effectiveUnsubFilter, stagingSendSignature } from '../utils/direct-send-core';
+import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, queryCampaignInsert, effectiveUnsubFilter, stagingSendSignature } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
@@ -720,6 +722,8 @@ router.post('/:id/send', async (req: Request, res: Response) => {
   //   최상위 catch로 가는데 거기서 실행 행을 손대지 않으면 `status='sending'`이 남아
   //   그 캠페인의 이후 발송이 영구히 막힌다. 조기 return·안쪽 catch만 막으면 이 경로가 남는다.
   let campaignRunId: string | null = null;
+  // ★ 2026-11-07 C113 D10 — 관문 길이 원장을 쓴 시도의 실행 행 실패 = 시작 잠금 한 구획에서 「쥔 예약 해제 → 실행 행 실패」(옛 길 = failCampaignRun 그대로)
+  let failRunReleasingAd: (runId: string, reason: string) => Promise<void> = failCampaignRun;
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -1005,6 +1009,12 @@ if (campaign.is_ad) {
     }
   }
 }
+// ★ 2026-11-07 C113 D23 두 길 — 판정 = 첫 부작용(실행 행) 전 한 번 · 옛 길 = 위 HEAD 피로도까지 그대로(관문 · 원장 · 잇기 · 해제 0) ·
+//   관문 길(요금제 씀 + 새 기능 · 이 캠페인 묶음 앞 배정) = 아래 시작 잠금 안에서 관문(새 기능 셋 · 묶음 = 캠페인 id · D10)
+const aiGateMode: AdGateMode = campaign.is_ad ? await resolveAdGateMode(companyId, { batchId: id, priorArmsPossible: true }) : { mode: 'legacy' };
+let aiAdGateLine = '';
+const aiHold = new AdHold(companyId);   // ★ C113 D10 — 원장을 쓴 판정 = 큐 앞(handoff)까지 이 시도가 예약을 쥔다(소유 CT)
+let aiAdGateCounts: AdGateCounts | null = null;
 
     // 예약 발송인지 확인
     console.log('scheduled_at:', campaign.scheduled_at);
@@ -1031,6 +1041,30 @@ if (campaign.is_ad) {
         return { run: null, blocked: ['sending', 'scheduled'].includes(String(existingRun.rows[0].status)) ? 'duplicate' as const : 'sent' as const };
       }
 
+      // ★ 2026-11-07 C113 D10 · D23 — 관문 길만: 살아 있음 · 중복 확인 뒤 · 실행 행 앞(같은 캠페인의 다음 시도와 이 잠금으로 줄 섬)
+      if (aiGateMode.mode === 'gate') {
+        const gate = await gatePhones(aiGateMode.policy,
+          { branch: 'ai', span: { from: aiSendDay, to: aiSendDay }, holdoutKey: id, batchId: id, reserve: true },
+          filteredCustomers.map((c: any) => String(c.phone || '')));
+        if (gate.excluded.size > 0) {
+          filteredCustomers = filteredCustomers.filter((c: any) => !gate.excluded.has(normalizePhone(c.phone)));
+        }
+        aiHold.take(gate.marked, id);
+        aiAdGateLine = adGateNotice(gate.counts);
+        aiAdGateCounts = gate.counts;
+        if (filteredCustomers.length === 0) return { run: null, blocked: 'gated' as const };
+        if (gate.marked) {
+          // 쥔 동안만 시작 잠금 한 구획에서 「쥔 예약 해제 → 실행 행 실패」 · 넘긴 뒤(큐 앞 handoff) = failCampaignRun 그대로(해제 0 · 구현 1R #3)
+          failRunReleasingAd = (runId: string, reason: string) => (aiHold.holding
+            ? withCampaignStartLock(id, async () => {
+              await aiHold.settle();
+              await failCampaignRun(runId, reason);
+            })
+            : failCampaignRun(runId, reason));
+        }
+      }
+
+      try {
       // campaign_runs에 발송 이력 생성 (CT-08 확인 모달 통과 후에만 INSERT)
       const runNumberResult = await query(
         `SELECT COALESCE(MAX(run_number), 0) + 1 as next_run
@@ -1055,7 +1089,20 @@ if (campaign.is_ad) {
         ]
       );
       return { run: runResult.rows[0], blocked: null };
+      } catch (runErr) {
+        if (aiHold.holding) await aiHold.settle();   // ★ C113 D10 — 실행 행을 못 만들었으면 잠금을 놓기 전에 쥔 예약 해제(옛 길 = 실행 0)
+        throw runErr;
+      }
+    }).catch((gateErr: any) => {
+      if (gateErr instanceof AdGateUnavailableError) return { run: null, blocked: 'unavailable' as const };
+      throw gateErr;
     });
+    if (startGate.blocked === 'unavailable') {
+      return res.status(503).json({ error: AD_GATE_UNAVAILABLE_TEXT, code: 'AD_GATE_UNAVAILABLE' });
+    }
+    if (startGate.blocked === 'gated') {
+      return res.status(400).json({ error: `발송 대상이 없습니다. ${aiAdGateLine}`, fatigueSkippedCount, adGate: aiAdGateCounts });
+    }
     if (startGate.blocked === 'gone') {
       return res.status(404).json({ error: '캠페인을 찾을 수 없습니다.' });
     }
@@ -1215,7 +1262,7 @@ if (sendChannel === 'sms' || sendChannel === 'both') {
     companyId, userId, source: 'campaign',
   });
   if (spamVerdict.blocked) {
-    await failCampaignRun(campaignRun.id, '금칙어 차단으로 발송 중단');
+    await failRunReleasingAd(campaignRun.id, '금칙어 차단으로 발송 중단');
     return res.status(400).json({ error: spamVerdict.notice, code: spamVerdict.code });
   }
 }
@@ -1228,7 +1275,7 @@ if (isBrandOnlyChannel(sendChannel)) {
   if (fbItems.length > 0) {
     const fbSpam = await checkSpamBlockBeforeCharge({ items: fbItems, companyId, userId, source: 'campaign' });
     if (fbSpam.blocked) {
-      await failCampaignRun(campaignRun.id, '금칙어 차단으로 발송 중단(문자 대체 문구)');
+      await failRunReleasingAd(campaignRun.id, '금칙어 차단으로 발송 중단(문자 대체 문구)');
       return res.status(400).json({ error: fbSpam.notice, code: fbSpam.code });
     }
   }
@@ -1247,7 +1294,7 @@ const sendDeduct = await prepaidDeduct(companyId, filteredCustomers.length, dedu
 if (sendDeduct.ok) aiDeductedAxes.add(deductType);
 if (!sendDeduct.ok) {
   // 실행 행을 남겨 두면 위쪽 중복 발송 방지 검사가 이후 발송을 영구히 막는다(충전해도 못 보낸다).
-  await failCampaignRun(campaignRun.id, '선불 잔액 부족으로 발송 중단');
+  await failRunReleasingAd(campaignRun.id, '선불 잔액 부족으로 발송 중단');
   // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500)
   const sendDeductFail = deductFailureHttp(sendDeduct);
   return res.status(sendDeductFail.status).json({ ...sendDeductFail.body });
@@ -1282,15 +1329,17 @@ if (sendChannel === 'both') {
       await markRefundPending(id, filteredCustomers.length, deductType, aiKeyCancel);
     }
     // 차감은 되돌렸지만 실행 행은 그대로 남아 캠페인을 잠그던 자리다(2026-08-17).
-    await failCampaignRun(campaignRun.id, '브랜드메시지 차감 실패로 발송 중단');
+    await failRunReleasingAd(campaignRun.id, '브랜드메시지 차감 실패로 발송 중단');
     // ★ 2026-09-27 한줄로 V2 m075 — 잔액 부족만 402(차감 처리 오류는 500)
     const brandDeductFail = deductFailureHttp(brandDeduct);
     return res.status(brandDeductFail.status).json({ ...brandDeductFail.body });
   }
 }
 
+// ★ 2026-11-07 C113 D10 · 구현 1R #3 · 2R #2 — 광고 관문 원장 잇기 · 예약 넘김 = 차감 둘 뒤 · 갈래마다 그 큐 바로 앞(이 뒤 실패 = 해제 0 · 실패 = 장애 줄 · 발송 계속 · 옛 길 = 실행 0)
 // 2단계: SMS bulk INSERT — sms-queue.ts 컨트롤타워 사용
 if (sendChannel === 'sms' || sendChannel === 'both') {
+  if (aiHold.holding) await aiHold.handoff(id);
   aiSmsInserted = await bulkInsertSmsQueue(companyTables, aiSmsRows, !isScheduled, { companyId, userId, source: 'campaign' });
   aiSentCount += aiSmsInserted;
 }
@@ -1299,6 +1348,7 @@ if (sendChannel === 'sms' || sendChannel === 'both') {
 if (aiBrandRows.length > 0) {
   let aiBrandInserted = 0;
   try {
+    if (aiHold.holding) await aiHold.handoff(id);   // ★ C113 구현 2R #2 — 브랜드 큐 바로 앞(문자 갈래가 먼저 넘겼으면 실행 0)
     aiBrandInserted = await insertBrandQueue(companyTables, aiBrandRows, id);
   } catch (brandErr) {
     if (brandErr instanceof BrandQueueInsertError) {
@@ -1348,6 +1398,10 @@ if (aiFailCount > 0) {
   }
 }
 
+// ★ 2026-11-07 C113 D22 · K23 — 상태 = 모든 축 적재 수(both = 문자 + 브랜드 · 둘 다 0 일 때만 failed) · 보낸 수 칸(sent_count = 문자 줄 수) 뜻은 그대로
+//   옛: aiSentCount(both 에선 문자만)로 판정해 문자 0 · 브랜드 > 0 이면 브랜드가 나갔는데 캠페인 · 실행 행이 실패로 보였다(돈 = 무적재 스위퍼가 큐 실측 = 영향 0)
+const aiLoadedAll = aiSentCount + (sendChannel === 'both' ? aiBrandInsertedTotal : 0);
+
 // campaign_runs 상태 업데이트
 // ★ #6: 예약 캠페인은 sent_at 설정하지 않음
 // ★ C1: aiSentCount 기반으로 실제 성공 건수 반영
@@ -1359,7 +1413,7 @@ await query(
     status = $2
     ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $3`,
-  [aiSentCount, aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'completed'), campaignRun.id]
+  [aiSentCount, aiLoadedAll === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'completed'), campaignRun.id]
 );
 
 // 캠페인 상태 업데이트
@@ -1373,7 +1427,7 @@ await query(
     target_count = $3
     ${isScheduled ? '' : ', sent_at = CURRENT_TIMESTAMP'}
    WHERE id = $4`,
-   [aiSentCount === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'completed'), aiSentCount, filteredCustomers.length, id]
+   [aiLoadedAll === 0 ? 'failed' : (isScheduled ? 'scheduled' : 'completed'), aiSentCount, filteredCustomers.length, id]
   );
 
       // ★ AI 학습 데이터 적재 (비동기, 실패해도 발송에 영향 없음)
@@ -1396,7 +1450,7 @@ await query(
       });
 
       return res.json({
-      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${fatigueSkippedCount > 0 ? ` (피로도 보호 ${fatigueSkippedCount}명 제외)` : ''}`,
+      message: `${aiSentCount}건 발송이 시작되었습니다.${aiFailCount > 0 ? ` (${aiFailCount}건 실패, 자동 환불)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${fatigueSkippedCount > 0 ? ` (피로도 보호 ${fatigueSkippedCount}명 제외)` : ''}${aiAdGateLine ? ` ${aiAdGateLine}` : ''}`,
       sentCount: aiSentCount,
       failCount: aiFailCount,
       callbackSkippedCount,
@@ -1461,14 +1515,14 @@ await query(
         console.error('[AI발송] 캠페인 상태 갱신 실패:', statusErr);
       }
       // 실행 행 종결이 빠지면 위 환불이 다 성공해도 그 캠페인은 다시 못 보낸다.
-      await failCampaignRun(campaignRun.id, '발송 처리 중 오류로 중단');
+      await failRunReleasingAd(campaignRun.id, '발송 처리 중 오류로 중단');
       return res.status(500).json({ error: '발송 처리 중 오류가 발생했습니다. 차감된 금액은 자동 환불됩니다.' });
     }
 
   } catch (error) {
     console.error('캠페인 발송 에러:', error);
     // 실행 행이 이미 만들어진 뒤라면 종결한다 — 안 하면 그 캠페인이 영구히 잠긴다(2026-08-17).
-    if (campaignRunId) await failCampaignRun(campaignRunId, '발송 처리 중 예기치 못한 오류');
+    if (campaignRunId) await failRunReleasingAd(campaignRunId, '발송 처리 중 예기치 못한 오류');
     // ★ 2026-09-22 db_alter_safety_net: 몰 동의 컬럼 미존재는 503(위에서 실행 행은 이미 종결했다 — 두 응답 모두 같은 종결 뒤에 있다)
     const sendErrorStatus = isMallConsentMigrationPending(error) ? 503 : 500;
     if (sendErrorStatus === 503) { res.status(sendErrorStatus).json(MALL_CONSENT_MIGRATION_PENDING); return; }
@@ -1908,7 +1962,20 @@ router.post('/direct-send/count', async (req: Request, res: Response) => {
         applyUnsub: effectiveUnsubFilter(adEnabled === true, unsubFilterEnabled), unsubUserId: userId,
       })
       : {};
-    return res.json({ success: true, ...r, ...checks });
+    // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 응답 그대로 · 관문 길(요금제 씀 + 새 기능 · 이 준비분 앞 배정)만 관문을 미리 센다
+    //   (dry = 지우지 · 적지 · 예약하지 않음 · 정책 조회 실패에 장애 줄 0 · 5R #2) · 미리보기 숫자 = 확정 때 뺄 수(그 사이 다른 발송이 끼면 확정이 다시 판정)
+    const countMode: AdGateMode = adEnabled === true
+      ? await resolveAdGateMode(companyId, { batchId: stagingId, priorArmsPossible: true, dry: true })
+      : { mode: 'legacy' };
+    if (countMode.mode === 'legacy') return res.json({ success: true, ...r, ...checks });
+    const dry = await gateStaging(countMode.policy, {
+      branch: branchOfDirect(req.body?.sendType), stagingId, unsubUserId: userId, mode: 'dry',
+      span: directSendSpanOf({ scheduled: req.body?.scheduled, scheduledAt: req.body?.scheduledAt, splitEnabled: req.body?.splitEnabled, splitCount: req.body?.splitCount, splitIntervalMinutes: req.body?.splitIntervalMinutes }, r.sendCount),
+    });
+    const adGate = dry.counts;
+    // ★ 구현 1R #7 — 중복 제거 켬 = 번호 수 · 끔 = 그 번호들의 행 수(countStagingFiltered 와 같은 기준)
+    const adGateExcluded = dedupEnabled !== false ? totalExcluded(adGate) : (dry.excludedRows ?? 0);
+    return res.json({ success: true, ...r, sendCount: Math.max(0, r.sendCount - adGateExcluded), adGate, adGateNotice: adGateNotice(adGate), ...checks });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
@@ -2072,6 +2139,11 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
       if (liveCommitted.rows.length > 0) {
         return res.status(409).json({ success: false, code: 'STAGING_COMMITTED', error: '이미 발송을 누른 명단입니다. 발송결과에서 확인해 주세요.' });
       }
+      // ★ 2026-11-07 C113 D23 두 길 — 판정 = 준비분 잠금 안 · 첫 부작용 전 한 번(같은 준비분의 앞 시도 · 한줄로 적재 배정과 줄 섬) ·
+      //   옛 길 = HEAD 흐름 · 문장 · 응답 그대로(관문 · 보관 · 원장 · 해제 0)
+      const commitMode: AdGateMode = adEnabled === true
+        ? await resolveAdGateMode(companyId, { batchId: stagingId, priorArmsPossible: true })
+        : { mode: 'legacy' };
       // ★ 2026-09-29 한줄로 V2 R112 (Codex 3R high) — 끊긴 지난 시도가 보관 칸에 옮겨 둔 행을 먼저 원본으로 되돌린다(판정은 매번 새로 · 만료 판정보다 먼저 = 행이 전부 칸에 있어도 만료로 오판하지 않는다)
       await restoreParkedStagingRows(stagingId, companyId);
       if ((await resolveStagingCommitState(stagingId, companyId)) === 'expired') {
@@ -2097,8 +2169,36 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
           console.log(`[직접발송 commit] 수신자별 회신번호 제외 ${plan.removed}명(${moved}행 · 차감 전 · 보관 칸) — staging=${stagingId}`);
         }
       }
+      // ★ 2026-11-07 C113 D10 — 관문 길이 원장을 쓴 시도 = 공용 입구에 넘기기 전까지 이 시도가 예약을 쥔다(그 전 출구 = finally 해제 · 소유 CT)
+      const commitHold = new AdHold(companyId);
+      let adGateParked = false;   // 관문이 뺀 행을 보관 칸으로 옮겼나(finally 가 되돌림 → 지움)
       try {
+        // ★ 2026-11-06 C110 광고 관문(설계서 §4) — 건수 확정 · 서명 대조 · 차감 앞 · 광고만 · 묶음 = stagingId(재시도 = 같은 묶음) · ★ C113 = 관문 길만
+        let adGateCounts: AdGateCounts | null = null;
+        let adGateMarked = false;   // 원장을 쓴 판정일 때만 잇는다
+        if (commitMode.mode === 'gate') {
+          try {
+            const preGate = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, true);
+            const g = await gateStaging(commitMode.policy, {
+              branch: branchOfDirect(sendType), stagingId, unsubUserId: userId, mode: 'commit',
+              span: directSendSpanOf({ scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes }, preGate.sendCount),   // ★ 구현 1R #5 판정 = 관문 전 인원(넓거나 같다)
+              spanForCount: directSendSpanFor({ scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes }),   // ★ 구현 2R #5 예약 = 통과 인원
+              countRows: dedupEnabled === false,   // ★ 구현 3R 중복 제거 끔 = 통과 번호의 적재 행 수(실제 적재 · 차감 수)
+              parkExcluded: true,   // ★ C113 D10 — 뺀 행 = 보관 칸(접수 실패 = 되돌려 다시 판정 · 접수 = 지움)
+            });
+            adGateCounts = g.counts;
+            adGateMarked = g.marked;
+            commitHold.take(g.marked, stagingId);
+            if (g.allExcluded) return res.status(400).json({ success: false, error: `발송 대상이 없습니다. ${adGateNotice(g.counts)}` });   // ★ 구현 1R #6 — 행을 옮기지 않음(원본 0 행 0)
+            adGateParked = (g.excludedRows ?? 0) > 0;
+          } catch (gateErr: any) {
+            if (gateErr instanceof AdGateUnavailableError) return res.status(503).json({ success: false, code: 'AD_GATE_UNAVAILABLE', error: AD_GATE_UNAVAILABLE_TEXT });
+            throw gateErr;
+          }
+        }
+        const adGateLine = adGateCounts ? adGateNotice(adGateCounts) : '';
         const { sendCount: total } = await countStagingFiltered(stagingId, companyId, userId, dedupEnabled, unsubFilterEnabled, adEnabled === true);
+        if (total === 0 && adGateLine) return res.status(400).json({ success: false, error: `발송 대상이 없습니다. ${adGateLine}` });   // ★ C113 관문 길만
         if (total === 0) return res.status(400).json({ success: false, error: '정제 후 발송 대상이 없습니다 (전부 수신거부 또는 중복).' });
         // ★ 2026-11-02 E1-4 — 서명이 왔으면(AI 한줄로 서버 적재) 자기 제외를 마친 실제 발송 집합으로 다시 내 차감 전에 대조(다르면 409 · 다시 확인)
         if (typeof signature === 'string' && signature) {
@@ -2110,8 +2210,9 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
 
         // 캠페인 생성 + 차감 + worker 트리거 — createDirectSendCampaign 공유(자율 발송과 동일 경로, MMS 이미지 컬럼 저장 포함).
         try {
+          commitHold.pass();   // ★ C113 D10 — 넘김: 공용 입구가 활성화 문장 직전까지 쥐고 그 전 실패면 스스로 해제
           const { campaignId, accepted } = await createDirectSendCampaign({
-            stagingId, campaignName: (typeof campaignName === 'string' && campaignName.trim() ? campaignName.trim().slice(0, 200) : `직접발송 ${new Date().toLocaleString('ko-KR')}`),
+            stagingId, adGateBatchId: adGateMarked ? stagingId : null, campaignName: (typeof campaignName === 'string' && campaignName.trim() ? campaignName.trim().slice(0, 200) : `직접발송 ${new Date().toLocaleString('ko-KR')}`),
             sendType: typeof sendType === 'string' ? sendType : null,   // ★ 1102 E1-4 — 값 판정 = direct-send-spec(isDirectPipelineSendType · 밖이면 'direct')
             msgType: commitMsgResolved.messageType, message, subject, callback, sendChannel: commitChannel.channel, adEnabled, total,
             scheduled, scheduledAt, splitEnabled, splitCount, splitIntervalMinutes, useIndividualCallback, individualCallbackColumn, mmsImagePaths,
@@ -2122,9 +2223,16 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
             alimtalkEtcJson, alimtalkTemplateUuid,
           }, { companyId, userId }, { finalSource: 'manual' });
 
+          if (commitMode.mode === 'legacy') {
+            return res.status(202).json({
+              success: true, campaignId, accepted,
+              message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
+            });
+          }
           return res.status(202).json({
             success: true, campaignId, accepted,
-            message: `${accepted}건 발송이 접수됐습니다. 진행 상황은 발송결과에서 확인하세요.`,
+            message: `${accepted}건 발송이 접수됐습니다.${adGateLine ? ` ${adGateLine}` : ''} 진행 상황은 발송결과에서 확인하세요.`,
+            adGate: adGateCounts,
           });
         } catch (e: any) {
           if (e instanceof DirectSendError && e.code === 'INSUFFICIENT_BALANCE') {
@@ -2137,10 +2245,12 @@ router.post('/direct-send/commit', singleFlight('direct-send-commit', async (req
           throw e;
         }
       } finally {
+        if (commitHold.holding) await commitHold.settle();   // ★ C113 D10 — 넘기기 전 출구 = 쥔 예약 해제(옛 길 = 실행 0)
         // 보관 칸 마무리 = 되돌리기 → 남은 칸 지우기(한 가지). 접수가 안 됐으면 되돌려져 설정을 바꿔 다시 보낼 수 있고,
         //   접수됐으면(살아 있는 캠페인) 되돌리기가 조건으로 막혀 남은 칸 = 보내지 않을 사람 → 지운다.
         //   실패해도 남은 행은 다음 확정·빼기·회신번호 채우기가 먼저 되돌리고, 끝내 남으면 24시간 정리 대상이다.
-        if (parked) {
+        //   ★ C113 D10 — 관문이 뺀 행도 같은 칸(조건 = 회신번호 보관 또는 관문 보관)
+        if (parked || adGateParked) {
           try {
             await restoreParkedStagingRows(stagingId, companyId);
             await dropParkedStagingRows(stagingId, companyId);
@@ -2197,6 +2307,10 @@ router.get('/:id/send-progress', async (req: Request, res: Response) => {
 // ★ 2026-10-24 세 채널 구조체크 ⑬ — 같은 사람이 같은 발송을 겹쳐 누르면(더블클릭 · 응답 전 재클릭) 둘째는 409(잠금 CT singleFlight · 핸들러가 끝날 때 놓는다).
 //   옛: 요청마다 새 적재분 · 새 캠페인이라 겹친 두 요청이 같은 대상에게 두 번 나갔다.
 router.post('/direct-send', singleFlight('direct-send', async (req: Request, res: Response) => {
+  // ★ 2026-11-07 C113 D10 · 8R — 관문 길만: 이 시도가 쥔 예약(적재 앞에서 넘김 · 그 전 출구 = finally 해제) ·
+  //   큐 편집 잠금(캠페인 id 를 먼저 만들어 INSERT 전에 잡음 · 잇기 · 적재 끝 = finally 에서 놓음) · 옛 길 = 둘 다 0
+  let directHold: AdHold | null = null;   // ★ C113 D10 — 관문 길이 원장을 쓴 시도 = 적재 앞까지 이 시도가 예약을 쥔다(소유 CT · finally 가 끝정리)
+  let directEditLock: string | null = null;
   try {
     const companyId = (req as any).user?.companyId;
     const userId = (req as any).user?.userId;
@@ -2454,6 +2568,13 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
         }
       }
     }
+    // ★ 2026-11-07 C113 D23 두 길 — 판정 = 첫 부작용(캠페인 행) 전 한 번 · 옛 길 = 위 HEAD 피로도 · 아래 HEAD 흐름 그대로(관문 · 잠금 · 원장 0) ·
+    //   관문 길(요금제 씀 + 새 기능) = 적격 거름 뒤 관문(새 기능 셋 · 고객 DB id 없는 행 = 우선순위 면제 · 대조군 = 전 행 · 묶음 = 이 요청의 새 uuid)
+    const directGateMode: AdGateMode = adEnabled === true ? await resolveAdGateMode(companyId) : { mode: 'legacy' };
+    const directAdGateBatch = directGateMode.mode === 'gate' ? randomUUID() : null;
+    let directAdGateLine = '';
+    let directAdGateMarked = false;   // 원장을 쓴 판정일 때만 잇는다 · 잠근다 · 해제한다
+    let directAdGateCounts: AdGateCounts | null = null;
 
     // ★ D91: LMS/MMS 제목 필수 검증
     // ★ D218+ (2026-05-26) PDF 신고 #4 사고 정정: alimtalk 발송 path (frontend msgType='LMS' 강제 설정 — D162-4 정합)
@@ -2619,6 +2740,48 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       return res.status(400).json({ success: false, error: '모든 수신자가 수신거부 상태이거나 필터 조건에 해당하지 않습니다' });
     }
 
+    // ★ 2026-11-06 C110 광고 관문(설계서 §4 direct 동기 · 구현 1R #4) — 적격 거름(중복 · 금액 조건 · 개별 회신 · 수신거부)을 다 마친 집합에 ·
+    //   고객 DB id 없는 행 = 우선순위 면제(D12) · 대조군은 전 행 · ★ C113 = 관문 길만 · 잇기 = 차감 뒤 · 적재 앞
+    if (directGateMode.mode === 'gate' && directAdGateBatch) {
+      const directSpan = {
+        from: toKoreaTimeStr(split ? splitSendTime(directSendBase, 0, split) : directSendBase).slice(0, 10),
+        to: toKoreaTimeStr(split ? splitSendTime(directSendBase, filteredRecipients.length - 1, split) : directSendBase).slice(0, 10),
+      };
+      let gate;
+      try {
+        gate = await gatePhones(directGateMode.policy,
+          {
+            branch: branchOfDirect(resolvedSendType), span: directSpan, holdoutKey: directAdGateBatch, batchId: directAdGateBatch, reserve: true,
+            // ★ 구현 2R #5 — 예약 날 = 통과 인원으로(같은 기준 시각 · 같은 분할 계산 · 아래 분할 끝 한도 · 차감과 같은 수)
+            sendCountOf: (passed: string[]) => {   // ★ 구현 3R — 실제 적재 · 차감 수 = 통과 번호의 원본 행(중복 제거를 껐으면 같은 번호 여러 행)
+              const ok = new Set(passed);
+              // ★ 구현 4R — 관문 뒤 목록 = 「빠진 번호가 아닌 행」(번호가 빈 행은 관문이 빼지 않는다) · 같은 기준 = 아래 분할 끝 한도 · 차감 수
+              return filteredRecipients.filter((r: any) => { const k = normalizePhone(String(r.phone || '')); return !k || ok.has(k); }).length;
+            },
+            spanForCount: (n: number) => ({
+              from: toKoreaTimeStr(split ? splitSendTime(directSendBase, 0, split) : directSendBase).slice(0, 10),
+              to: toKoreaTimeStr(split ? splitSendTime(directSendBase, Math.max(0, n - 1), split) : directSendBase).slice(0, 10),
+            }),
+          },
+          filteredRecipients.map((r: any) => String(r.phone || '')),
+          filteredRecipients.filter((r: any) => !r.id).map((r: any) => String(r.phone || '')));
+      } catch (gateErr: any) {
+        if (gateErr instanceof AdGateUnavailableError) return res.status(503).json({ success: false, code: 'AD_GATE_UNAVAILABLE', error: AD_GATE_UNAVAILABLE_TEXT });
+        throw gateErr;
+      }
+      if (gate.excluded.size > 0) {
+        filteredRecipients = filteredRecipients.filter((r: any) => !gate.excluded.has(normalizePhone(String(r.phone || ''))));
+      }
+      directAdGateMarked = gate.marked;
+      directAdGateLine = adGateNotice(gate.counts);
+      directAdGateCounts = gate.counts;
+      directHold = new AdHold(companyId);
+      directHold.take(gate.marked, directAdGateBatch);   // ★ C113 D10 — 적재 앞까지 이 시도가 쥔다
+      if (filteredRecipients.length === 0) {
+        return res.status(400).json({ success: false, error: `발송 대상이 없습니다. ${directAdGateLine}`, fatigueSkippedCount: directFatigueSkipped, adGate: gate.counts });
+      }
+    }
+
     // ★ 2026-09-28 분할 기준 시각은 요청에 한 번(예약이면 예약 시각) · 끝나는 날 한도(CT) — 캠페인 생성·차감 전에 막는다.
     const splitBase = directSendBase;
     if (split) {
@@ -2682,9 +2845,15 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       }
     }
 
+    // ★ 2026-11-07 C113 8R — 관문 길(원장을 쓴 판정)만: 캠페인 id 를 먼저 만들어 큐 편집 잠금을 잡고 그 id 로 넣는다(행이 보이는 첫 순간에 이미 잠김)
+    const directPresetId = directAdGateMarked ? randomUUID() : null;
+    if (directPresetId) {
+      directEditLock = queueEditKey(directPresetId);
+      tryAcquireInflight(directEditLock);   // 새 id = 늘 잡힘
+    }
     // ★ B+0407 후속: is_ad 컬럼 INSERT 추가
     //   기존: 컬럼 자체가 누락되어 항상 DEFAULT(false)로 저장 → 광고 ON 발송이 발송결과에서 (광고) 미표시 + 캘린더 잘못 표시 등 연쇄 버그 발생
-    const campaignResult = await query(
+    const campaignResult = await queryCampaignInsert(
       // ★ 2026-08-18 `send_type`이 리터럴 'direct'였다 — 이 라우트를 부르는 곳이 직접발송 화면만이
       //   아닌데도(AI 오퍼레이터 승인 발송이 같은 배관을 쓴다) 전부 '직접발송'으로 적재됐고,
       //   캠페인명까지 서버가 `직접발송 {일시}`로 덮어써서 행에 출처 흔적이 하나도 남지 않았다.
@@ -2717,7 +2886,8 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
         kakaoResendType || 'SM',
         finalIsAd,  // ★ D142+ B1: 본문에 (광고) 마커 있으면 사용자 의도가 광고라 보고 자동 승격
         resolvedSendType,  // $22 — 위 주석 참조(호출부가 안 밝히면 'direct')
-      ]
+      ],
+      directPresetId,
     );
     const campaignId = campaignResult.rows[0].id;
 
@@ -2960,12 +3130,15 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       }
     }
 
+    // ★ 2026-11-07 C113 D10 · 구현 2R #2 — 광고 관문 원장 잇기 · 예약 넘김 = 갈래마다 그 큐 바로 앞(차감 뒤 · 알림톡 = 템플릿 다시 확인 · 행 준비 뒤 · 실패 = 장애 줄 · 발송 계속 · 그 뒤 실패 = 해제 0)
     if (directChannel === 'sms' || directChannel === 'both') {
+      if (directHold) await directHold.handoff(campaignId);
       directSmsSentCount = await bulkInsertSmsQueue(companyTables, directSmsRows, useNow, { companyId, userId, source: 'direct' });
     }
 
     if (directChannel === 'kakao' || directChannel === 'both') {
       try {
+        if (directHold) await directHold.handoff(campaignId);
         directKakaoSentCount = await insertBrandQueue(companyTables, directBrandRows, campaignId);
       } catch (brandErr) {
         if (brandErr instanceof BrandQueueInsertError) {
@@ -3162,6 +3335,7 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       }
 
       try {
+        if (directHold) await directHold.handoff(campaignId);   // ★ C113 구현 2R #2 — 알림톡 큐 바로 앞
         directAlimtalkSentCount = await insertAlimtalkQueue(companyTables, alimtalkRows, campaignId);
         console.log(`[직접발송] 알림톡 INSERT 완료: ${directAlimtalkSentCount}건`);
       } catch (alimtalkErr) {
@@ -3263,7 +3437,8 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       callbackSkippedCount,
       callbackMissingCount,
       callbackUnregisteredCount,
-      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${duplicateCount > 0 ? ` (중복 ${duplicateCount}건 제거)` : ''}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${directFatigueSkipped > 0 ? ` (피로도 보호 ${directFatigueSkipped}명 제외)` : ''}`
+      message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${duplicateCount > 0 ? ` (중복 ${duplicateCount}건 제거)` : ''}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${directFatigueSkipped > 0 ? ` (피로도 보호 ${directFatigueSkipped}명 제외)` : ''}${directAdGateLine ? ` ${directAdGateLine}` : ''}`,
+      ...(directAdGateCounts ? { adGate: directAdGateCounts } : {}),   // ★ C113 관문 길만
     });
 
     } catch (sendError) {
@@ -3328,6 +3503,9 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
   } catch (error) {
     console.error('직접발송 실패:', error);
     res.status(500).json({ success: false, error: '발송 실패' });
+  } finally {
+    if (directHold) await directHold.settle();
+    if (directEditLock) releaseInflight(directEditLock);
   }
 }, SEND_IN_FLIGHT_MESSAGE));
 
@@ -3538,6 +3716,8 @@ router.get('/:id/recipients', async (req: Request, res: Response) => {
 
 // 예약 캠페인 개별 수신자 삭제
 router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
+  // ★ 2026-11-07 C113 D11 ③ · 6R — 관문 길 발송이 쥔 큐 편집 잠금 = 첫 await 전 동기 확인(큐 0건 갈래 포함 · 미가입 길은 그 열쇠를 쥐지 않아 늘 거짓 = HEAD 그대로)
+  if (isInflight(queueEditKey(req.params.id))) return res.status(409).json({ success: false, error: '다른 변경을 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
   try {
     const companyId = (req as any).user?.companyId;
     const campaignId = req.params.id;
@@ -3592,6 +3772,11 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       if (!tryAcquireInflight(deleteLockKey)) {
         return res.status(409).json({ success: false, error: '다른 수신자 삭제를 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
       }
+      // ★ C113 D11 ③ — 잡은 직후 같은 동기 구획 = 그 사이 유료 예약 변경이 큐 편집 잠금을 잡았으면 놓고 409(미가입 = 늘 거짓)
+      if (isInflight(queueEditKey(campaignId))) {
+        releaseInflight(deleteLockKey);
+        return res.status(409).json({ success: false, error: '다른 변경을 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
+      }
       try {
 
         const waitingNow = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
@@ -3641,6 +3826,7 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
           return res.status(500).json({ success: false, error: '삭제 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' });
         }
 
+        if (campaignAdGateLinked(campaign.rows[0])) await releaseCampaignPhoneReservationSafe(companyId, campaignId, phone);   // ★ C113 D11 ③ · 구현 1R #1 — 관문 길로 이어진 캠페인만(표시 없음 = 원장 접근 0) · 큐에서 지운 번호의 예약 해제(실패 = 경고 + 장애 줄 · 응답 그대로)
         const remainingCount = await smsCountAll(delTables, 'app_etc1 = ? AND status_code = 100', [campaignId]);
         await query(
           `UPDATE campaigns
@@ -3662,6 +3848,7 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
       [phone, campaignId]
     );
 
+    if (campaignAdGateLinked(campaign.rows[0])) await releaseCampaignPhoneReservationSafe(companyId, campaignId, phone);   // ★ C113 D11 ③ · 구현 1R #1 — 관문 길로 이어진 캠페인만 · 제외 목록에 넣은 번호의 예약 해제(실패 = 경고 + 장애 줄 · 응답 그대로)
     const updated = await query(`SELECT target_count FROM campaigns WHERE id = $1`, [campaignId]);
 
     res.json({ success: true, message: '삭제되었습니다', remainingCount: updated.rows[0]?.target_count || 0 });
@@ -3673,6 +3860,9 @@ router.delete('/:id/recipients/:idx', async (req: Request, res: Response) => {
 
 // 예약 시간 수정
 router.put('/:id/reschedule', async (req: Request, res: Response) => {
+  // ★ 2026-11-07 C113 D11 ② · 6R · 7R — 관문 길 발송이 쥔 큐 편집 잠금 = 첫 await 전 동기 확인(요금제를 묻기 전 · 미가입 길은 그 열쇠를 쥐지 않아 늘 거짓 = HEAD 그대로)
+  if (isInflight(queueEditKey(req.params.id))) return res.status(409).json({ success: false, error: '다른 변경을 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
+  let rsLock: string | null = null;   // 요금제 쓰는 회사만 잡는다(핸들러 끝에서 놓음)
   try {
     const companyId = (req as any).user?.companyId;
     const campaignId = req.params.id;
@@ -3725,6 +3915,84 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 시간을 변경할 수 없습니다', tooLate: true });
     }
 
+    // ★ 2026-11-07 C113 D11 ② · 구현 1R #1 — 가름 = 발송 당시 관문 길로 이어진 캠페인인가(캠페인 표시 · 지금 요금제 아님 · 조회 0):
+    //   표시 없음 = 아래 HEAD 흐름 그대로(잠금 · 확인 · 원장 0) ·
+    //   표시 있음 = 큐 편집 잠금 → 잠금 안에서 예약 확인(관문 발송은 잇기 끝까지 같은 열쇠를 쥐므로 잠금 안 「없음」 = 확정) ·
+    //   있음 = 예약 날을 큐와 같이(적재 전 = 한 트랜잭션 · 적재 뒤 = 넓히기 → 큐 밀기 → 좁히기 · 실패 = 넓힌 채 + 경보) · 없음 = HEAD 흐름(잠금 안)
+    if (campaignAdGateLinked(rsCamp)) {
+      const key = queueEditKey(campaignId);
+      if (!tryAcquireInflight(key)) return res.status(409).json({ success: false, error: '다른 변경을 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
+      if (isInflightUuid('recipient-delete:', campaignId)) {
+        releaseInflight(key);
+        return res.status(409).json({ success: false, error: '다른 변경을 처리하고 있습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      rsLock = key;
+      const rsBatches = [campaignId, rsCamp.staging_id].filter((x: any) => typeof x === 'string' && x);
+      let rsHasReservations: boolean;
+      try {
+        rsHasReservations = await campaignHasReservations(companyId, campaignId, rsBatches);
+      } catch (chkErr: any) {
+        console.error(`[예약 변경] 예약 확인 실패 — 바꾼 것 0 campaign=${campaignId}:`, chkErr?.message || chkErr);
+        return res.status(500).json({ success: false, error: '예약 시간을 바꾸지 못했습니다. 잠시 후 다시 시도해주세요.' });
+      }
+      if (rsHasReservations) {
+        const sc = rsCamp.send_config || {};
+        const configDays = () => {
+          const sp = directSendSpanOf({ scheduled: true, scheduledAt: newScheduledAt, splitEnabled: sc.splitEnabled, splitCount: sc.splitCount, splitIntervalMinutes: sc.splitIntervalMinutes }, Number(rsCamp.target_count) || 0);
+          return kstDaysInSpan(sp.from, sp.to);
+        };
+        if (rsCamp.send_phase === 'queued') {
+          const ok = await rescheduleQueuedReservations(companyId, campaignId, rsBatches, configDays(), async (run) => (await run(
+            `UPDATE campaigns
+                SET scheduled_at = $1,
+                    send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{scheduledAt}', to_jsonb($2::text)),
+                    updated_at = NOW()
+              WHERE id = $3 AND send_phase = 'queued'`,
+            [newScheduledAt, newScheduledAt.toISOString(), campaignId],
+          )).rowCount || 0);
+          if (!ok) {
+            return res.status(409).json({ success: false, code: 'LOADING_IN_PROGRESS', error: '발송 준비(적재)가 시작돼 지금은 수정할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' });
+          }
+          return res.json({ success: true, message: '예약 시간이 변경되었습니다' });
+        }
+        const rsTables = await getCampaignQueueTables(companyId, rsCamp.created_by || undefined, rsCamp.send_config);
+        const rsMin = await smsMinAll(rsTables, 'sendreq_time', 'app_etc1 = ? AND status_code = 100', [campaignId]);
+        const rsDiff = rsMin ? Math.round((new Date(scheduledAt).getTime() - new Date(rsMin).getTime()) / 1000) : 0;
+        let newDays = configDays();
+        if (rsMin) {
+          // 새 날 = 밀기 전 대기 행 [MIN + 시간차, MAX + 시간차] 의 KST 날(큐 시각 = KST 벽시계 · 날짜 계산도 MySQL 이 한다)
+          const spans = await smsSelectAll(rsTables,
+            `DATE_FORMAT(DATE_ADD(MIN(sendreq_time), INTERVAL ? SECOND), '%Y-%m-%d') AS d1, DATE_FORMAT(DATE_ADD(MAX(sendreq_time), INTERVAL ? SECOND), '%Y-%m-%d') AS d2`,
+            'app_etc1 = ? AND status_code = 100', [rsDiff, rsDiff, campaignId]);
+          const d1s = spans.map((x: any) => x.d1).filter(Boolean).sort();
+          const d2s = spans.map((x: any) => x.d2).filter(Boolean).sort();
+          if (d1s.length > 0 && d2s.length > 0) newDays = kstDaysInSpan(String(d1s[0]), String(d2s[d2s.length - 1]));
+        }
+        await expandCampaignReservations(companyId, campaignId, rsBatches, newDays);
+        try {
+          if (rsMin) {
+            await smsExecAll(rsTables,
+              `UPDATE SMSQ_SEND SET sendreq_time = DATE_ADD(sendreq_time, INTERVAL ? SECOND) WHERE app_etc1 = ? AND status_code = 100`,
+              [rsDiff, campaignId]
+            );
+          }
+          await contractCampaignReservations(companyId, campaignId, rsBatches, newDays, (run) => run(
+            `UPDATE campaigns SET scheduled_at = $1, updated_at = NOW() WHERE id = $2`,
+            [new Date(scheduledAt), campaignId],
+          ));
+        } catch (shiftErr: any) {
+          // 넓힌 채 둔다(옛 · 새 날 다 지킴 = 덜 보내는 쪽) · 큐를 되밀지 않는다 · 경보 원장
+          await queuePassFailures({
+            pass: 'ad-reschedule', title: '광고 예약 시각 옮기기 미완(예약 날은 옛 날과 새 날을 함께 지킵니다)',
+            failures: [{ companyId, key: campaignId, error: `campaign=${campaignId} 시간차=${rsDiff}초 ${String(shiftErr?.message || shiftErr).slice(0, 120)}` }],
+            action: '그 캠페인의 큐 시각과 캠페인 예약 시각을 확인해 주세요.',
+          }).catch(() => undefined);
+          throw shiftErr;
+        }
+        return res.json({ success: true, message: '예약 시간이 변경되었습니다' });
+      }
+    }
+
     // ★ 2026-09-26 F24 — 적재 전(queued) 직접발송은 워커가 읽을 send_config.scheduledAt까지 함께 바꾼다(PG 컬럼만 바꾸면 옛 시각으로 적재).
     //   send_phase='queued' 조건 = 워커 선점과 원자적 — 그 사이 선점됐으면 0행 → 적재 중과 같이 409.
     if (campaign.rows[0].send_phase === 'queued') {
@@ -3767,6 +4035,8 @@ router.put('/:id/reschedule', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('예약 시간 수정 실패:', error);
     res.status(500).json({ success: false, error: '수정 실패' });
+  } finally {
+    if (rsLock) releaseInflight(rsLock);
   }
 });
 // 예약 캠페인 문안 수정
@@ -4141,6 +4411,8 @@ router.get('/brand-send/capabilities', async (req: Request, res: Response) => {
 // POST /brand-send — 브랜드메시지 발송 (CT-12 컨트롤타워)
 // ============================================================
 router.post('/brand-send', async (req: Request, res: Response) => {
+  // ★ 2026-11-07 C113 D6 · D10 — 관문 길이 원장을 쓴 요청 = 발송 CT 바로 앞(잇기)까지 이 요청이 예약을 쥔다(그 전 출구 = finally 해제)
+  let brandHold: AdHold | null = null;   // ★ C113 D10 — 관문 길이 원장을 쓴 시도 = 발송 CT 앞까지 이 시도가 예약을 쥔다(소유 CT · finally 가 끝정리)
   try {
     const companyId = req.user?.companyId;
     const userId = req.user?.userId;
@@ -4210,6 +4482,32 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     });
     if (!brandSenderGate.ok) return res.status(403).json(senderAuthRejection(brandSenderGate));
 
+    // ★ 2026-11-07 C113 D6 · D23 — 브랜드 메시지도 광고 관문(문자 · 카카오 = 관문 채널) · 옛 길 = HEAD 그대로(관문 0) ·
+    //   관문 길(요금제 씀 + 새 기능)만: 묶음 = 요청마다 새 uuid · 번호 = 고객 DB id 없음 = 우선순위 면제(D12 · 대조군만 걸림) ·
+    //   빠진 번호 = 캠페인 · 발송에서 뺌 · 전원 = 400 · 잇기 = 발송 CT 바로 앞
+    const brandGateMode = (isAd ?? true) === true ? await resolveAdGateMode(companyId) : { mode: 'legacy' as const };
+    let brandPhones: string[] = phones;
+    let brandGateCounts: AdGateCounts | null = null;
+    if (brandGateMode.mode === 'gate') {
+      const batch = randomUUID();
+      let gate;
+      try {
+        gate = await gatePhones(brandGateMode.policy,
+          { branch: branchOfDirect('brand'), span: sendSpanOf(reservedDate || null), holdoutKey: batch, batchId: batch, reserve: true },
+          phones.map((x: any) => String(x || '')), phones.map((x: any) => String(x || '')));
+      } catch (gateErr: any) {
+        if (gateErr instanceof AdGateUnavailableError) return res.status(503).json({ error: AD_GATE_UNAVAILABLE_TEXT, code: 'AD_GATE_UNAVAILABLE' });
+        throw gateErr;
+      }
+      brandGateCounts = gate.counts;
+      brandHold = new AdHold(companyId);
+      brandHold.take(gate.marked, batch);
+      if (gate.excluded.size > 0) brandPhones = phones.filter((x: any) => !gate.excluded.has(normalizePhone(String(x || ''))));
+      if (brandPhones.length === 0) {
+        return res.status(400).json({ error: `발송 대상이 없습니다. ${adGateNotice(gate.counts)}`, adGate: gate.counts });
+      }
+    }
+
     // 캠페인 레코드 생성
     const campaignResult = await query(
       // ★ 2026-07-29 `name` → `campaign_name`. 실제 컬럼명이 다른데 이 INSERT만 틀려서
@@ -4245,7 +4543,7 @@ router.post('/brand-send', async (req: Request, res: Response) => {
         //   발송 결과 화면에 내부 코드(CAROUSEL_FEED 등) 대신 유형의 한글 이름이 보이게 한다.
         message || `[${BUBBLE_TYPES[String(bubbleType || 'TEXT').trim().toUpperCase()]?.label || '브랜드메시지'}] 브랜드메시지`,
         resolvedCallback || null,
-        Array.isArray(phones) ? phones.length : 0,
+        Array.isArray(brandPhones) ? brandPhones.length : 0,
         isAd ?? true,
         // 길이 가드 — 값 검증은 CT(buildBrandQueuePayload·resolveBrandFallback)가 바로 뒤에서 하고
         // 실패 시 이 캠페인은 status='failed'로 남는다. 여기서 22001로 깨지면 그 안내가 안 나간다.
@@ -4261,7 +4559,7 @@ router.post('/brand-send', async (req: Request, res: Response) => {
     const baseParams = {
       bubbleType: bubbleType || 'TEXT',
       senderKey,
-      phones,
+      phones: brandPhones,
       targeting: targeting || 'I',
       isAd: isAd ?? true,
       companyId,
@@ -4288,6 +4586,9 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       reservedDate,
       campaignId,
     };
+
+    // ★ C113 D6 · D10 — 광고 관문 원장 잇기 = 발송 CT 바로 앞(실패 = 장애 줄 · 발송 계속) · 예약 넘김(그 뒤 실패 = 해제 0)
+    if (brandHold) await brandHold.handoff(campaignId);
 
     let result;
     try {
@@ -4349,10 +4650,13 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       campaignId,
       sentCount: result.sentCount,
       failCount: result.failCount,
+      ...(brandGateCounts ? { adGate: brandGateCounts, adGateNotice: adGateNotice(brandGateCounts) } : {}),   // ★ C113 관문 길만
     });
   } catch (error) {
     console.error('[brand-send] 에러:', error);
     return res.status(500).json({ error: '브랜드메시지 발송 중 오류가 발생했습니다.' });
+  } finally {
+    if (brandHold) await brandHold.settle();
   }
 });
 

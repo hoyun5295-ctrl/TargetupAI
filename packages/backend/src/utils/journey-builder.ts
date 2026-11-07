@@ -2271,7 +2271,7 @@ export async function listJourneys(companyId: string, status?: JourneyStatus | '
   const r = await query(
     `SELECT j.*,
             (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'goal_met') AS goal_met_count,
-            (SELECT COUNT(*)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'holdout') AS holdout_count
+            (SELECT COUNT(DISTINCT e.customer_id)::int FROM journey_executions e WHERE e.journey_id = j.id AND e.status = 'holdout') AS holdout_count   -- ★ 2026-11-06 C110 결함 B = 고객 수(재진입 = 한 명)
      FROM journeys j
      WHERE j.company_id = $1::uuid ${where}${owner}
      ORDER BY j.status ASC, j.created_at DESC`,

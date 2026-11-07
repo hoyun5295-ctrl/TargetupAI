@@ -79,6 +79,7 @@ import { normalizeCdpAutoExecuteGate } from '../utils/autosend-policy';
 import { grantFreeTrial } from '../utils/basic-trial';
 // ★ 2026-07-25 요금제 변경 이력 CT — 청구서 일할계산의 진실의 원천(빠지면 그 구간이 증발)
 import { recordPlanChange, alertPlanChangeFailure } from '../utils/plan-change-log';
+import { endAdGateIfUnpaid } from '../utils/ad-send-gate';   // ★ C113 D2 요금제 끝 = 대조군 · 우선순위 비움
 import { setPlanMonthCredits, setPostpaidOverageLimit, listLowCreditCompanies, isCreditSchemaPending } from '../utils/ai-credit-admin';
 // ★ 2026-10-04 선불 요금제 이용 기간 — 승인 판정·차감 CT · 관리 중 게이트(docs/2026-10-04-prepaid-plan-term-design.md §5)
 import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
@@ -1770,6 +1771,7 @@ router.put('/companies/:id', authenticate, requireSuperAdmin, async (req: Reques
         const granted = await grantFreeTrial(id, planTrialDays > 0 ? planTrialDays : 30, { client: planClient });
         result.rows[0] = { ...result.rows[0], plan_id: granted.plan_id, subscription_status: granted.subscription_status, trial_expires_at: granted.trial_expires_at };
       }
+      if (result.rows.length > 0) await endAdGateIfUnpaid(planClient, id);   // ★ C113 D2 — 요금제 · 구독 상태 쓰기 바로 뒤 같은 트랜잭션
       await planClient.query('COMMIT');
     } catch (err) {
       try { await planClient.query('ROLLBACK'); } catch { /* 아래 알림에 포함 */ }
@@ -2999,6 +3001,7 @@ router.put('/plan-requests/:id/approve', authenticate, requireSuperAdmin, async 
           reason: '요금제 신청 승인(슈퍼관리자)',
           prevPlanIdHint: priorPlan.rows[0]?.plan_id ? String(priorPlan.rows[0].plan_id) : null,
         });
+        await endAdGateIfUnpaid(client, request.company_id);   // ★ C113 D2 — FREE 로 내리는 승인이면 네 칸을 비움
       }
     }
 

@@ -23,7 +23,9 @@ describe('여정 통계 이벤트', () => {
     expect(src).toContain("INNER JOIN (${purchaseFactsSql({ companyRef: '(SELECT company_id FROM journeys WHERE id = $1::uuid)', customerIdsRef: 'ARRAY(SELECT customer_id FROM ex)' })}) f");
     expect(src).not.toContain('isMallPurchaseDoorForJourneyStats');
     expect(src).not.toMatch(/ce\.event_name = 'purchase'/);
-    expect(src).toContain("${purchasedSinceEntrySql('e', 'j.company_id', `j.trigger_event = 'customer.created'`)} AS conv");
+    // ★ 2026-11-06 C110 — 대조군 비교 = 효과 측정 한 산식(effect-measure · 몰 결제 확정 netPurchaseSql · 매장 원장 · 같은 주문 한 번)
+    expect(src).toContain('const eff = await journeyHoldoutEffect(journeyId);');
+    expect(src).not.toContain("${purchasedSinceEntrySql(");   // 주석의 이름은 허용 · 부르는 꼴 0
   });
 
   it('단계 클릭 수는 그 여정 회사의 이벤트만', () => {

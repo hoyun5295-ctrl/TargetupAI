@@ -5,6 +5,8 @@
  * 잡은 쪽이 finally 에서 반드시 놓는다(라우트 계약 테스트가 `finally { releaseInflight(lockKey); }` 를 고정한다).
  * 빈 키는 잡지 않는다(fail-closed · 회사 없는 요청이 잠금을 공유하지 않게).
  */
+import { uuidLockKey } from './keyed-lock';
+
 const held = new Set<string>();
 
 export function tryAcquireInflight(key: string): boolean {
@@ -19,6 +21,17 @@ export function releaseInflight(key: string): void {
 
 export function isInflight(key: string): boolean {
   return !!key && held.has(key);
+}
+
+/**
+ * ★ 2026-11-07 C113 구현 1R #2 — 같은 uuid 의 잠금이 표기(대소문자 · 하이픈 · 중괄호)와 무관하게 잡혀 있나.
+ *   잡는 쪽이 요청 원문으로 열쇠를 만든 잠금(수신자 삭제 `recipient-delete:` = HEAD 그대로)을 다른 쪽이 볼 때 쓴다(잡는 쪽 열쇠는 그대로).
+ */
+export function isInflightUuid(prefix: string, id: string): boolean {
+  const want = uuidLockKey(id);
+  if (!want) return false;
+  for (const k of held) if (k.startsWith(prefix) && uuidLockKey(k.slice(prefix.length)) === want) return true;
+  return false;
 }
 
 /**

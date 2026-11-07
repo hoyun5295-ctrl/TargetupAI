@@ -108,29 +108,40 @@ export async function updateCompanyBrandKit(companyId: string, patch: Partial<Dm
   const merged = { ...current, ...cleanPatch };
   // ★ 2026-10-19 B-0924-3 — 바꾼 키만 DB 에서 병합(통째 덮기 금지). 읽기 실패로 current 가 기본값이어도 저장된 다른 키
   //   (SNS 자주 쓰는 태그 sns_tag_set 등)를 지우지 않고, 같은 순간 다른 경로의 키 저장도 덮지 않는다.
-  //   저장값이 객체가 아니면(비어 있음 · 옛 문자열 저장) 종전처럼 합친 전체를 쓴다.
+  //   저장값이 비어 있으면 종전처럼 합친 전체를 쓴다.
+  // ★ 2026-11-07 C113 K20 · D20 — 옛 문자열 저장본은 DB 안에서 풀어 키 병합(옛: 앱 쪽 읽기 결과로 통째 덮어 · 읽기가 기본값을 돌려주면
+  //   저장된 다른 키를 잃었다) · 풀 수 없는 글이면 캐스트 오류 = 쓰기 0 · 객체 · 빈 키트 문장은 그대로(미가입 변화 0).
   await query(
     `UPDATE companies
-        SET brand_kit = CASE WHEN jsonb_typeof(brand_kit) = 'object' THEN brand_kit || $1::jsonb ELSE $2::jsonb END
+        SET brand_kit = CASE jsonb_typeof(brand_kit)
+                          WHEN 'object' THEN brand_kit || $1::jsonb
+                          WHEN 'string' THEN (brand_kit #>> '{}')::jsonb || $1::jsonb
+                          ELSE $2::jsonb END
       WHERE id = $3`,
     [JSON.stringify(cleanPatch), JSON.stringify(merged), companyId],
   );
   return merged;
 }
 
-/** URL에서 메타 태그/로고/테마컬러 추출 → DmBrandKit 부분값 반환 (D126 V2) */
-export async function suggestBrandKitFromUrl(url: string): Promise<Partial<DmBrandKit>> {
-  const { extractBrandFromUrl, toBrandKitPatch } = await import('./dm-brand-extractor');
-  const result = await extractBrandFromUrl(url);
-  return toBrandKitPatch(result);
+/**
+ * ★ 2026-11-07 C112 키트 로고가 비어 있을 때만 채운다(이미지 스튜디오 홈페이지 읽기 · 덮어쓰기 0 · 설계서 D11).
+ *   빈 칸 판정과 쓰기 = 대상 행만 읽는 한 문장(같은 순간 다른 경로가 로고를 넣었으면 쓰지 않는다 · 앱 쪽 읽기 0) ·
+ *   옛 문자열 저장 = DB 안에서 풀어 그 키들과 합친 객체로(풀 수 없는 글이면 오류 · 쓰기 0 · Codex 구현 1R).
+ *   채웠으면 true · 이미 차 있었거나 칸이 없으면 false.
+ */
+const KIT_OBJECT_SQL = `(CASE jsonb_typeof(brand_kit) WHEN 'object' THEN brand_kit WHEN 'string' THEN (brand_kit #>> '{}')::jsonb ELSE '{}'::jsonb END)`;
+export async function setBrandKitLogoIfEmpty(companyId: string, logoUrl: string): Promise<boolean> {
+  const exists = await ensureColumn();
+  if (!exists) return false;
+  const res = await query(
+    `UPDATE companies
+        SET brand_kit = ${KIT_OBJECT_SQL} || $1::jsonb
+      WHERE id = $2
+        AND jsonb_typeof(${KIT_OBJECT_SQL}) = 'object'
+        AND NULLIF(btrim(${KIT_OBJECT_SQL}->>'logo_url'), '') IS NULL
+      RETURNING id`,
+    [JSON.stringify({ logo_url: logoUrl }), companyId],
+  );
+  return res.rows.length > 0;
 }
 
-/** 추출 결과 원본(프리뷰 포함)도 함께 반환 — 프론트에서 확인 UI에 사용 */
-export async function previewBrandExtract(url: string) {
-  const { extractBrandFromUrl, toBrandKitPatch } = await import('./dm-brand-extractor');
-  const result = await extractBrandFromUrl(url);
-  return {
-    raw: result,
-    patch: toBrandKitPatch(result),
-  };
-}
