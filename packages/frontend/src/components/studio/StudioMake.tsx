@@ -10,7 +10,7 @@
  * ★ 2026-11-02 제품 사진 최대 3장(칸 목록 · 서버가 한 장으로 묶는다) · 칸 수명 = 설계서 docs/2026-11-02-image-studio-multi-product-design.md §2
  * ★ 2026-11-07 브랜드 로고 층 = 생성 뒤 곧바로 미리보기(켜짐 · 0크레딧) · relayer · readLogo 를 두 결과 화면이 같이 쓴다(설계서 docs/2026-11-07-c112-studio-brand-logo-design.md D8 · D10 · D11)
  */
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { PenLine, ShoppingBag, Upload, Wand2, Loader2, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
 import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProductPickerModal';
@@ -19,13 +19,18 @@ import { studioFetch, studioPost, newStudioAttempt } from '../../lib/studio-api'
 import { applyAutoTexts, autoStudioTexts, EMPTY_STUDIO_TEXTS, type StudioTexts } from '../../lib/studio-texts';
 import { runProductPrep } from '../../lib/studio-products';
 import { layerRequest, LOGO_FAILED_TEXT, type LogoCandidate, type LogoCardState, type LogoSettings } from '../../lib/studio-layers';
-import type { StudioTemplatePublic } from './TemplatePicker';
+import { studioTrackOf, type StudioTemplatePublic } from './TemplatePicker';
+// ★ 2026-11-08 C114 B 할인 숫자 칸(판정 권한 = 서버 · 이 lib = 같은 규칙으로 미리 보기 · 계약 시험 c114-discount-parity)
+import { buildDiscountOffer, autoFillDiscount, EMPTY_DISCOUNT_FIELDS, type DiscountFields, type DiscountOfferKind } from '../../lib/studio-discount';
 
-const won = (n: number) => `${Math.round(Number(n) || 0).toLocaleString()}원`;
-const isEvent = (t: StudioTemplatePublic | null) => (t?.kind || 'product') === 'event';
+const isEvent = (t: StudioTemplatePublic | null) => studioTrackOf(t) === 'event';
 
 /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — texts = 생성에 쓴 글 전체(인앱 통짜 장 글 · 글 없는 판이면 빈 글) */
-export interface StudioMade extends LogoCardState { tempId: string; url: string; preview: string | null; title: string; texts: StudioTexts; textless: boolean }
+export interface StudioMade extends LogoCardState {
+  tempId: string; url: string; preview: string | null; title: string; texts: StudioTexts; textless: boolean;
+  /** ★ C114 D8 할인 포스터 = 서버가 돌려준 「포스터에 들어간 숫자」 한 줄(결과 카드가 그린다) */
+  discountCheck?: string | null;
+}
 
 /** ★ 2026-11-02 제품 사진 상한 — 서버 STUDIO_MAX_PRODUCTS(utils/image-studio.ts)와 같은 값(계약 시험 S5) · 넘침 판정 권한은 서버 */
 export const STUDIO_MAX_PRODUCTS = 3;
@@ -43,6 +48,10 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   // ★ 2026-08-09 행사 포스터 문구 위치(위/중앙/아래) — 기본 위(갤러리 예시와 같은 구도로 시작). 제품 포스터는 미전달(템플릿 기본 배치).
   const [textPosition, setTextPosition] = useState<'top' | 'center' | 'bottom'>('top');
   const [items, setItems] = useState<StudioProductItem[]>([]);
+  // ★ 2026-11-08 C114 B 할인 혜택 칸(글 그대로 · 보낼 값 = buildDiscountOffer)
+  const [discount, setDiscount] = useState<DiscountFields>(EMPTY_DISCOUNT_FIELDS);
+  const discountKind: DiscountOfferKind | null = studioTrackOf(template) === 'discount' ? ((template?.offer || 'price') as DiscountOfferKind) : null;
+  const discountBuild = useMemo(() => (discountKind ? buildDiscountOffer(discountKind, discount) : null), [discountKind, discount]);
   /** 정리(처음으로 · 언마운트)와 담기가 지금 칸을 읽는다 — 렌더마다 따라간다 */
   const itemsRef = useRef<StudioProductItem[]>([]);
   itemsRef.current = items;
@@ -68,6 +77,16 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     setTexts((cur) => applyAutoTexts(cur, prev, next));
   }, [template, product]);
 
+  // ★ C114 B 몰 상품 = 비어 있는 혜택 칸만 채운다(사람 값 보존 · 할인 중이 아니면 판매가 칸 비움)
+  const productKey = items.map((i) => (i.product ? `${i.product.provider}:${i.product.code}` : i.key)).join('|');
+  useEffect(() => {
+    if (!discountKind) return;
+    const products = items.map((i) => (i.product ? { name: i.product.name, price: Number(i.product.price) || 0, salePrice: Number(i.product.salePrice) || 0 } : null));
+    if (!products.some(Boolean)) return;
+    setDiscount((cur) => autoFillDiscount(discountKind, cur, products));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [discountKind, productKey]);
+
   // 훅 언마운트(스튜디오 화면 떠남 · DM 편집기 닫힘) = 준비 세대를 끝내고(남은 단계 중단 · 늦은 미리보기는 받자마자 해제) 미리보기를 모두 해제.
   //   DM 창 닫기 = 숨김은 언마운트가 아니다(칸 · 준비 그대로 · Codex 설계 1R ④)
   useEffect(() => () => {
@@ -83,6 +102,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     setTexts(next);
     setHint('');
     setTextPosition('top');
+    setDiscount(EMPTY_DISCOUNT_FIELDS);
     for (const i of itemsRef.current) if (i.blob) URL.revokeObjectURL(i.blob);
     setItems([]);
   }, []);
@@ -215,7 +235,15 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   const generate = async (opts?: { textless?: boolean }): Promise<StudioMade | null> => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return null; }
     const textless = !!opts?.textless;
-    const sendTexts = textless ? EMPTY_STUDIO_TEXTS : texts;
+    // ★ C114 Codex 구현 1R ③ 할인형 = 화면에 보이는 칸(제품명)과 템플릿 기본 라벨만 보낸다(숨긴 라벨 · 부제의 옛 값이 그림에 들어가지 않게)
+    const sendTexts = textless ? EMPTY_STUDIO_TEXTS
+      : discountKind ? { label: template.defaultTexts?.label || '', title: texts.title, subtitle: '' }
+      : texts;
+    // ★ C114 B 할인 포스터 = 제품명 · 혜택 숫자를 미리 본다(판정 권한 = 서버 · 같은 규칙)
+    if (discountKind && !textless) {
+      if (!String(texts.title || '').trim()) { toast.error('제품명을 넣어 주세요. 포스터 맨 위에 들어가요.'); return null; }
+      if (!discountBuild || !discountBuild.ok) { toast.error(discountBuild && !discountBuild.ok ? discountBuild.error : '혜택 숫자를 넣어 주세요.'); return null; }
+    }
     setBusyMsg('완성 포스터를 만드는 중... (약 20~30초)');
     try {
       if (!attemptRef.current) attemptRef.current = newStudioAttempt();
@@ -225,6 +253,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
         // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
         cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
         textPosition: textless ? 'bottom' : (isEvent(template) ? textPosition : null),
+        ...(discountKind && !textless && discountBuild?.ok ? { offer: discountBuild.offer } : {}),
         attemptToken: attemptRef.current,
       });
       if (status === 402) { toast.error('크레딧이 부족합니다. 충전 후 다시 시도해주세요'); return null; }
@@ -239,7 +268,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       const lay = await postLayers(im.tempId, { on: true, corner: null, size: null }, textless);
       const logoState: LogoCardState = typeof lay === 'string' ? { logo: null, layered: null, logoFailed: true } : lay;
       // 헤드라인 = 저장 파일명(헤드라인_채널) 스냅샷(생성 시점 문구 고정)
-      return { tempId: im.tempId, url: im.url, preview, title: texts.title, texts: { ...sendTexts }, textless, ...logoState };
+      return { tempId: im.tempId, url: im.url, preview, title: texts.title, texts: { ...sendTexts }, textless, ...logoState, discountCheck: typeof data.discountCheck === 'string' ? data.discountCheck : null };
     } finally {
       setBusyMsg('');
     }
@@ -247,6 +276,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
 
   return {
     template, texts, setTexts, hint, setHint, textPosition, setTextPosition,
+    discount, setDiscount, discountBuild,
     items, remaining, full, removeItem, pickerOpen, setPickerOpen, fileRef,
     busyMsg, reset, restart, onPickMall, onUpload, generate, relayer, findLogo, saveFoundLogo,
   };
@@ -254,8 +284,9 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
 
 export type StudioMakeState = ReturnType<typeof useStudioMake>;
 
-/** 고른 템플릿 예시 — 깨끗한 큰 이미지 하나(★2026-08-13 예시 위 오버레이·슬롯은 실제 타이포를 가려서 접었다). */
+/** 고른 템플릿 예시 — 깨끗한 큰 이미지 하나(★2026-08-13 예시 위 오버레이·슬롯은 실제 타이포를 가려서 접었다) · ★ C114 C 9 · 10px 글자 0 */
 export function TemplateExampleCard({ template }: { template: StudioTemplatePublic }) {
+  const discount = studioTrackOf(template) === 'discount';
   return (
     <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
       {template.exampleUrl ? (
@@ -270,132 +301,237 @@ export function TemplateExampleCard({ template }: { template: StudioTemplatePubl
         </div>
       )}
       <div className="p-3">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <div className="text-sm font-bold text-slate-900 truncate">{template.name}</div>
-          <div className="text-[11px] text-slate-400 truncate">{template.desc}</div>
-        </div>
-        {template.useCase && (
-          <div className="mt-2 rounded-lg bg-violet-50 border border-violet-200 px-2.5 py-1.5">
-            <span className="text-[9px] tracking-wider text-violet-700 mr-1.5">이럴 때 좋아요</span>
-            <span className="text-[11px] leading-snug text-violet-900">{template.useCase}</span>
-          </div>
-        )}
-        <p className="mt-2 text-[10px] text-slate-400 italic">
-          {template.exampleUrl ? '갤러리에서 보신 예시 그대로입니다. 문구와 상품만 바뀝니다.' : '예시 이미지 준비 중. 카드 스타일로 표시됩니다.'}
-        </p>
+        <div className="text-sm font-bold text-slate-900 break-keep">{template.name}</div>
+        {template.useCase && <p className="mt-1 text-[12px] leading-snug text-slate-500 break-keep">{template.useCase}</p>}
+        {discount && template.exampleUrl && <p className="mt-1.5 text-[11px] text-slate-400 break-keep">예시 가격이에요. 넣은 숫자로 바뀌어요.</p>}
+        {!template.exampleUrl && <p className="mt-1.5 text-[11px] text-slate-400 break-keep">예시 그림을 준비하고 있어요.</p>}
       </div>
     </div>
   );
 }
 
-/** 만들기 입력 칸 — 문구 · 문구 위치(행사) · 상품(선택) · 장면 힌트(선택). 만들기 버튼은 부르는 쪽(스튜디오 = 페이지 버튼 · 창 = ModalButton). */
+const FIELD = 'w-full h-10 px-3 rounded-lg border border-slate-200 bg-white text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-400 disabled:opacity-50';
+const LABEL = 'block text-[11px] font-semibold text-slate-500 mb-1';
+const NOTE = 'text-[12px] leading-relaxed text-slate-500 break-keep';
+
+function Section({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="px-4 py-4">
+      <div className="flex items-center gap-2 mb-3">
+        <h3 className="text-[13px] font-bold text-slate-900">{title}</h3>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** ★ C114 B 할인 혜택 칸(템플릿 혜택 꼴 = 가격 할인 · 하나 더 · 세트) — 판정 = 서버 · 미리 보기 = lib/studio-discount */
+function DiscountFieldsBlock({ make, busy }: { make: StudioMakeState; busy: boolean }) {
+  const kind = (make.template?.offer || 'price') as DiscountOfferKind;
+  const f = make.discount;
+  const set = (patch: Partial<DiscountFields>) => make.setDiscount({ ...f, ...patch });
+  const built = make.discountBuild;
+  const NPLUS: Array<[number, number]> = [[1, 1], [2, 1], [3, 1]];
+  return (
+    <Section title="혜택" right={<span className="text-[12px] text-slate-400">숫자는 넣은 값 그대로 찍혀요</span>}>
+      {kind === 'price' && (
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className={LABEL}>할인 전 가격</label>
+            <input inputMode="numeric" value={f.before} onChange={(e) => set({ before: e.target.value })} disabled={busy} placeholder="38,000" className={FIELD} />
+          </div>
+          <div>
+            <label className={LABEL}>판매가</label>
+            <input inputMode="numeric" value={f.sale} onChange={(e) => set({ sale: e.target.value })} disabled={busy} placeholder="29,900" className={FIELD} />
+          </div>
+          <p className={`${NOTE} col-span-2`}>할인율은 두 가격에서 자동으로 계산해요. 할인 전 가격은 실제로 팔던 가격이어야 해요.</p>
+        </div>
+      )}
+      {kind === 'nplus' && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {NPLUS.map(([n, m]) => (
+              <button key={`${n}+${m}`} type="button" disabled={busy} onClick={() => set({ n, m })}
+                className={`h-9 px-4 rounded-lg border text-sm font-bold ${f.n === n && f.m === m ? 'border-rose-300 bg-rose-50 text-rose-700' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'}`}>
+                {n}+{m}
+              </button>
+            ))}
+            <div className="flex items-center gap-1 text-sm text-slate-600">
+              <select aria-label="사는 개수" value={f.n} disabled={busy} onChange={(e) => set({ n: Number(e.target.value) })} className="h-9 px-2 rounded-lg border border-slate-200 bg-white">
+                {Array.from({ length: 9 }, (_, i) => i + 1).map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+              <span>+</span>
+              <select aria-label="더 주는 개수" value={f.m} disabled={busy} onChange={(e) => set({ m: Number(e.target.value) })} className="h-9 px-2 rounded-lg border border-slate-200 bg-white">
+                {Array.from({ length: 9 }, (_, i) => i + 1).map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className={LABEL}>1개 가격</label>
+            <input inputMode="numeric" value={f.unit} onChange={(e) => set({ unit: e.target.value })} disabled={busy} placeholder="6,500" className={FIELD} />
+          </div>
+        </div>
+      )}
+      {kind === 'set' && (
+        <div className="space-y-2">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="grid grid-cols-[1fr_8rem] gap-2">
+              <div>
+                {i === 0 && <label className={LABEL}>구성 이름</label>}
+                <input value={f.items[i]} onChange={(e) => { const items = [...f.items]; items[i] = e.target.value; set({ items }); }} disabled={busy} placeholder={i < 2 ? `구성 ${i + 1}` : '구성 3 (선택)'} className={FIELD} />
+              </div>
+              <div>
+                {i === 0 && <label className={LABEL}>판매가</label>}
+                <input inputMode="numeric" value={f.prices[i]} onChange={(e) => { const prices = [...f.prices]; prices[i] = e.target.value; set({ prices }); }} disabled={busy} placeholder="0" className={FIELD} />
+              </div>
+            </div>
+          ))}
+          <div>
+            <label className={LABEL}>세트가</label>
+            <input inputMode="numeric" value={f.setSale} onChange={(e) => set({ setSale: e.target.value })} disabled={busy} placeholder="59,000" className={FIELD} />
+          </div>
+          <p className={NOTE}>따로 사면 합계와 할인율은 자동으로 계산해요.</p>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-2 mt-3">
+        <div>
+          <label className={LABEL}>기간 (선택)</label>
+          <input value={f.period} onChange={(e) => set({ period: e.target.value })} disabled={busy} maxLength={20} placeholder="11.10 ~ 11.16" className={FIELD} />
+        </div>
+        <div>
+          <label className={LABEL}>증정 (선택)</label>
+          <input value={f.gift} onChange={(e) => set({ gift: e.target.value })} disabled={busy} maxLength={20} placeholder="미니 앰플" className={FIELD} />
+        </div>
+      </div>
+      <div className={`mt-3 rounded-lg px-3 py-2 text-[12px] break-keep ${built?.ok ? 'bg-rose-50 text-rose-800' : 'bg-slate-50 text-slate-500'}`}>
+        {built?.ok ? <>포스터에 들어갈 숫자: <b className="font-bold">{built.line}</b></> : built ? built.error : '숫자를 넣으면 포스터에 들어갈 글이 여기에 보여요.'}
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * 만들기 입력 칸 — ★ 2026-11-08 C114 C(회의 합의 §C) 흰 카드 한 장 · 머리 안내 한 줄 · 칸 위 이름 · 9 · 10px 글자 0.
+ *   구역 순서 = 제품 · 할인: 상품 → 혜택(할인) → 문구 → 장면 힌트(접힘) / 행사: 문구(+ 위치) → 제품(접힘) → 장면 힌트(접힘).
+ *   만들기 버튼은 부르는 쪽(스튜디오 = 아래 고정 바 · 창 = ModalButton).
+ */
 export function StudioMakeFields({ make, disabled = false, textless = false }: { make: StudioMakeState; disabled?: boolean; textless?: boolean }) {
   const { template, texts, setTexts } = make;
   if (!template) return null;
   // ★ 2026-11-05 인앱 글 얹기 장 = 글 없는 판(글은 메시지 위에 얹는다 · 문구 칸 대신 한 줄 안내)
   if (textless) {
     return (
-      <div className="rounded-2xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 to-indigo-50 p-4">
-        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-700" /> 글 없는 그림으로 만들어요</h3>
-        <p className="text-[12px] leading-relaxed text-slate-600 mt-2 break-keep">이 장의 글은 그림 위에 따로 얹어요. 그림 아래쪽은 글이 잘 보이게 비워 둡니다.</p>
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <h3 className="text-[13px] font-bold text-slate-900 flex items-center gap-2"><PenLine className="w-4 h-4 text-violet-700" /> 글 없는 그림으로 만들어요</h3>
+        <p className={`${NOTE} mt-2`}>이 장의 글은 그림 위에 따로 얹어요. 그림 아래쪽은 글이 잘 보이게 비워 둡니다.</p>
       </div>
     );
   }
-  const event = isEvent(template);
+  const track = studioTrackOf(template);
+  const event = track === 'event';
+  const discount = track === 'discount';
   const busy = disabled || !!make.busyMsg;
-  return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 to-indigo-50 p-4 space-y-2.5">
-        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><PenLine className="w-4 h-4 text-fuchsia-700" /> 포스터에 들어갈 문구</h3>
-        {/* ★ 2026-08-13 Tip — 문구·상품 두 줄로 갈라 키워드만 강조. break-keep = 한국어 어절 단위 줄바꿈. */}
-        <div className="rounded-xl bg-fuchsia-50 border border-fuchsia-200 px-3.5 py-3 space-y-2">
-          <div className="flex items-start gap-2.5">
-            <PenLine className="w-3.5 h-3.5 text-fuchsia-700 shrink-0 mt-0.5" />
-            <p className="text-[12px] leading-relaxed text-slate-600 break-keep">
-              예시 속 글자 자리에 <b className="text-fuchsia-800 font-semibold">아래 입력값이 그대로</b> 새겨져요. 배경·분위기는 예시 그대로.
-            </p>
+
+  const textSection = (
+    <Section title={discount ? '제품명' : '문구'}>
+      <div className="space-y-2.5">
+        {!discount && (
+          <div>
+            <label className={LABEL}>작은 라벨</label>
+            <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} disabled={busy} placeholder={event ? 'MEMBERSHIP DAY' : 'ONLINE EXCLUSIVE'} className={FIELD} />
           </div>
-          {!event && (
-            <div className="flex items-start gap-2.5">
-              <ShoppingBag className="w-3.5 h-3.5 text-emerald-700 shrink-0 mt-0.5" />
-              <p className="text-[12px] leading-relaxed text-slate-600 break-keep">
-                상품 사진은 <b className="text-emerald-800 font-semibold">배경이 자동으로 제거</b>되어 장면에 자연스럽게 들어가요.
-              </p>
-            </div>
-          )}
+        )}
+        <div>
+          <label className={LABEL}>{discount ? '제품명 (포스터 맨 위)' : event ? '행사명' : '헤드라인'}</label>
+          <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} disabled={busy} placeholder={discount ? '결온 앰버 세럼' : event ? '멤버십 데이' : '제품명, 시즌 한정'} className={`${FIELD} font-semibold`} />
         </div>
-        <input value={texts.label} onChange={(e) => setTexts({ ...texts, label: e.target.value })} placeholder={event ? '작은 라벨 (예: MEMBERSHIP DAY)' : '작은 라벨 (예: ONLINE EXCLUSIVE)'} className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300" />
-        <input value={texts.title} onChange={(e) => setTexts({ ...texts, title: e.target.value })} placeholder={event ? '행사명 (예: 멤버십 데이)' : '헤드라인 (예: 제품명 30% 할인 · 2+1 이벤트)'} className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-sm font-semibold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300" />
-        <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} placeholder={event ? '안내 문구 (예: 행사 기간·안내를 적어주세요)' : '부제 (예: 한정 수량 특별 혜택)'} className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-fuchsia-300" />
+        {!discount && (
+          <div>
+            <label className={LABEL}>{event ? '안내 문구' : '부제'}</label>
+            <input value={texts.subtitle} onChange={(e) => setTexts({ ...texts, subtitle: e.target.value })} disabled={busy} placeholder={event ? '행사 기간과 안내' : '한정 수량'} className={FIELD} />
+          </div>
+        )}
         {event && (
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <span className="text-[11px] text-slate-400">문구 위치</span>
-            {([['top', '위'], ['center', '중앙'], ['bottom', '아래']] as const).map(([k, lbl]) => (
-              <button type="button" key={k} onClick={() => make.setTextPosition(k)} className={`px-3 py-1.5 rounded-full border text-[11px] transition ${make.textPosition === k ? 'border-fuchsia-300 bg-fuchsia-100 text-fuchsia-800 font-semibold' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300'}`}>{lbl}</button>
-            ))}
+            <span className="text-[12px] text-slate-500">문구 위치</span>
+            <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+              {([['top', '위'], ['center', '중앙'], ['bottom', '아래']] as const).map(([k, lbl]) => (
+                <button type="button" key={k} disabled={busy} onClick={() => make.setTextPosition(k)} className={`h-9 px-4 text-[13px] ${make.textPosition === k ? 'bg-violet-100 text-violet-800 font-semibold' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>{lbl}</button>
+              ))}
+            </div>
+            <span className="text-[12px] text-slate-400 break-keep">위치를 바꾸면 장면도 함께 바뀌어요</span>
           </div>
         )}
-        <p className="text-[10px] text-slate-400 italic">혜택·수치는 AI가 만들지 않아요. 직접 입력해주세요.</p>
+        {!event && !discount && <p className={NOTE}>가격과 할인은 할인 포스터에서 정확히 넣어요.</p>}
       </div>
+    </Section>
+  );
 
-      {/* ★ 2026-08-13 상품 이미지 — 우측(좌측은 예시 하나로 고정) */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2"><ShoppingBag className="w-4 h-4 text-violet-700" /> {event ? '제품 이미지 (선택)' : '상품 이미지'}</h3>
-          <span className="text-[11px] font-semibold text-slate-500 tabular-nums">{make.items.length}/{STUDIO_MAX_PRODUCTS}</span>
-        </div>
-        <p className="text-[11px] text-slate-400 mb-3">
-          {event
-            ? '행사 포스터는 제품 없이 완성됩니다. 포스터에 제품을 함께 넣고 싶을 때만 첨부하세요.'
-            : '제품 원본은 그대로 보존하고(누끼) 배경·문구만 새로 그립니다.'}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => make.setPickerOpen(true)} disabled={busy || make.full} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 text-xs font-semibold disabled:opacity-40">
-            <ShoppingBag className="w-3.5 h-3.5" /> 연동 몰에서
-          </button>
-          <button type="button" onClick={() => make.fileRef.current?.click()} disabled={busy || make.full} className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-slate-300 text-xs text-slate-700 hover:bg-slate-100 disabled:opacity-40">
-            <Upload className="w-3.5 h-3.5" /> 사진 업로드
-          </button>
-          <input ref={make.fileRef} type="file" accept="image/*" multiple onChange={make.onUpload} className="hidden" />
-        </div>
-        {make.items.length > 0 && (
-          <ul className="mt-3 flex flex-wrap gap-3">
-            {make.items.map((it, i) => (
-              <li key={it.key} className="relative w-20">
-                <div className="w-20 h-20 rounded-lg border border-emerald-200 bg-slate-100 flex items-center justify-center overflow-hidden">
-                  {it.blob
-                    ? <img src={it.blob} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
-                    : it.cutoutTempId
-                      ? <span className="text-[10px] text-slate-400 text-center px-1 break-keep">미리보기 없음</span>
-                      : <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />}
-                </div>
-                <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-emerald-100 border border-emerald-300 text-emerald-800 text-[10px] font-bold flex items-center justify-center">{i + 1}</span>
-                <button type="button" onClick={() => make.removeItem(it.key)} disabled={busy} aria-label={`제품 ${i + 1} 빼기`} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-slate-300 text-slate-500 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center disabled:opacity-40">
-                  <X className="w-3 h-3" />
-                </button>
-                {it.product && <div className="mt-1 text-[10px] text-slate-500 truncate">{it.product.name}{it.product.salePrice ? ` · ${won(it.product.salePrice)}` : ''}</div>}
-              </li>
-            ))}
-          </ul>
+  const productBody = (
+    <>
+      <p className={`${NOTE} mb-3`}>배경을 지우고 원본 그대로 넣어요.</p>
+      <div className="flex flex-wrap items-start gap-3">
+        {make.items.map((it, i) => (
+          <div key={it.key} className="relative w-20">
+            <div className="w-20 h-20 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+              {it.blob
+                ? <img src={it.blob} alt={`제품 ${i + 1}`} className="w-full h-full object-contain" />
+                : it.cutoutTempId
+                  ? <span className="text-[11px] text-slate-400 text-center px-1 break-keep">미리보기 없음</span>
+                  : <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />}
+            </div>
+            <span className="absolute -top-1.5 -left-1.5 w-5 h-5 rounded-full bg-violet-100 border border-violet-300 text-violet-800 text-[11px] font-bold flex items-center justify-center">{i + 1}</span>
+            <button type="button" onClick={() => make.removeItem(it.key)} disabled={busy} aria-label={`제품 ${i + 1} 빼기`} className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-white border border-slate-300 text-slate-500 hover:text-rose-600 hover:border-rose-300 flex items-center justify-center disabled:opacity-40">
+              <X className="w-3 h-3" />
+            </button>
+            {it.product && <div className="mt-1 text-[11px] text-slate-500 truncate">{it.product.name}</div>}
+          </div>
+        ))}
+        {(
+          <div className="flex flex-col gap-2">
+            <button type="button" onClick={() => make.setPickerOpen(true)} disabled={busy || make.full} className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-violet-50 text-violet-800 hover:bg-violet-100 text-[13px] font-semibold disabled:opacity-40">
+              <ShoppingBag className="w-3.5 h-3.5" /> 몰에서
+            </button>
+            <button type="button" onClick={() => make.fileRef.current?.click()} disabled={busy || make.full} className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 text-[13px] text-slate-700 hover:bg-slate-50 disabled:opacity-40">
+              <Upload className="w-3.5 h-3.5" /> 사진
+            </button>
+          </div>
         )}
-        {make.full && <p className="text-[11px] text-emerald-700 mt-2 break-keep">{STUDIO_MAX_PRODUCTS}개를 다 넣었어요. 바꾸려면 하나를 빼 주세요.</p>}
-        <p className="text-[10px] text-slate-400 italic mt-2 break-keep">제품 사진은 최대 {STUDIO_MAX_PRODUCTS}개까지 넣을 수 있어요. 넣은 순서대로 왼쪽부터 놓여요.</p>
-        {make.items.length > 1 && (
-          <p className="text-[10px] text-amber-700 italic mt-1 break-keep">여러 개를 넣으면 제품이 작아져 라벨의 아주 작은 글씨가 바뀔 수 있어요. 만든 뒤 꼭 확인해 주세요.</p>
-        )}
-        {!event && (
-          <>
-            <p className="text-[10px] text-slate-400 italic mt-1">상품 없이도 생성할 수 있어요(문구 포스터).</p>
-            <p className="text-[10px] text-amber-700 italic mt-1">의류는 모델 착용컷 대신 옷 단독컷을 권장해요. 착용컷은 배경과 합성한 티가 나기 쉬워요.</p>
-          </>
-        )}
+        <input ref={make.fileRef} type="file" accept="image/*" multiple onChange={make.onUpload} className="hidden" />
       </div>
+      {make.full && <p className={`${NOTE} mt-2`}>{STUDIO_MAX_PRODUCTS}개를 다 넣었어요. 바꾸려면 하나를 빼 주세요.</p>}
+      {make.items.length === 0 && !event && <p className={`${NOTE} mt-2`}>상품 없이도 만들 수 있어요. 의류는 착용컷보다 옷 단독컷이 잘 나와요.</p>}
+      {make.items.length > 1 && <p className="text-[12px] leading-relaxed text-amber-700 mt-2 break-keep">여러 개를 넣으면 제품이 작아져 라벨의 아주 작은 글씨가 바뀔 수 있어요. 만든 뒤 꼭 확인해 주세요.</p>}
+    </>
+  );
+  const count = <span className="text-[12px] font-semibold text-slate-400 tabular-nums">{make.items.length}/{STUDIO_MAX_PRODUCTS}</span>;
+  const productSection = event ? (
+    <details className="px-4 py-4 group" open={make.items.length > 0}>
+      <summary className="list-none cursor-pointer flex items-center gap-2 text-[13px] font-bold text-slate-900">
+        제품 함께 넣기 (선택) {count}
+      </summary>
+      <div className="mt-3">{productBody}</div>
+    </details>
+  ) : (
+    <Section title="상품" right={count}>{productBody}</Section>
+  );
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <label className="text-xs font-semibold text-slate-600 flex items-center gap-1.5 mb-2"><Wand2 className="w-3.5 h-3.5 text-fuchsia-700" /> 장면 힌트 (선택)</label>
-        <input value={make.hint} onChange={(e) => make.setHint(e.target.value)} placeholder="예: 대리석 카운터, 은은한 램프 조명" className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-lg text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-violet-300" />
-      </div>
+  const hintSection = (
+    <details className="px-4 py-4" open={!!make.hint}>
+      <summary className="list-none cursor-pointer flex items-center gap-1.5 text-[13px] font-bold text-slate-900"><Wand2 className="w-3.5 h-3.5 text-violet-700" /> 장면 힌트 (선택)</summary>
+      <input value={make.hint} onChange={(e) => make.setHint(e.target.value)} disabled={busy} placeholder="대리석 카운터, 은은한 램프 조명" className={`${FIELD} mt-3`} />
+    </details>
+  );
 
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100">
+      <p className="px-4 py-3 text-[12px] text-slate-600 break-keep">입력한 글자가 그대로 새겨져요. 혜택과 숫자는 직접 넣어요.</p>
+      {event ? (
+        <>{textSection}{productSection}{hintSection}</>
+      ) : (
+        <>{productSection}{discount && <DiscountFieldsBlock make={make} busy={busy} />}{textSection}{hintSection}</>
+      )}
       <MallProductPickerModal open={make.pickerOpen} onClose={() => make.setPickerOpen(false)} onPick={make.onPickMall} max={make.remaining} />
     </div>
   );

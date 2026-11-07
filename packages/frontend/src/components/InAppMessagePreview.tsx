@@ -15,7 +15,8 @@ import { BlockPreview } from './inapp/BlockPreview';
 import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPreview';
 // ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 새 틀(통짜 · 떠 있는 카드 · 띠) = 그리는 부품(몰 화면과 같은 DOM) · 공용 미리보기 소비처 전부가 같은 갈래
 import { PosterFramePreview } from './inapp/PosterFramePreview';
-import { usesPosterFrame } from './inapp/generated/poster-frame';
+import { drawsWithPosterFrame, frameSlidesWithFlat } from './inapp/generated/poster-frame';
+import { legacyAppPreviewOf } from './inapp/inappSlides';
 
 // ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
 //   SDK ZONE_PADS 미러 (미리보기 축소 스케일에 맞춰 비례 축소).
@@ -98,8 +99,9 @@ function PosterCarouselPreview({
           const title = rv(s.title); const body = rv(s.body);
           return (
             <div key={i} style={{ position: 'relative', flex: '0 0 100%', width: '100%', scrollSnapAlign: 'start', aspectRatio: '4 / 5', maxHeight: imgMax, overflow: 'hidden', background: '#23252c' } as CSSProperties}>
+              {/* ★ C114 K2 옛 앱 미리보기 전용 · 서버가 4:5 로 미리 맞춘 그림 = 맞추기와 같은 결과(잘림 0) */}
               {s.image_url
-                ? <img src={s.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                ? <img src={s.image_url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
                 : <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, color: '#8a8a94', background: 'linear-gradient(135deg,#e8e8ee,#d4d4dd)' }}>이미지 필요</div>}
               {/* ★ 2026-07-31 이미지 클릭 링크 표시 — 설정된 슬라이드만 칩(실렌더는 이미지 전체가 클릭 대상) */}
               {s.link_url && String(s.link_url).trim() && (
@@ -273,11 +275,15 @@ function Overlay({ variant, themeTokens, treatment, device, ...rest }: { variant
   //   본문 무클램프 + 서체(design.font_display)·오버레이 글자색(design.poster_text_color) 소비
   if (variant === 'poster') {
     // ★ 2026-11-05 새 틀 = 그리는 부품(장이 없으면 flat 에서 첫 장 · SDK 와 같은 규칙)
-    if (usesPosterFrame(rest.design)) {
+    // ★ C114 I-3 그리는 자리 판정 하나(사진 위 글도 새 틀 · SDK renderPoster 와 같음 · 장도 그림도 없으면 아래 폴백)
+    if (drawsWithPosterFrame(rest.design) && ((Array.isArray(rest.posterSlides) && rest.posterSlides.length > 0) || !!rest.imageUrl)) {
       const b0 = (rest.buttons || [])[0];
-      const frameSlides = Array.isArray(rest.posterSlides) && rest.posterSlides.length > 0
-        ? rest.posterSlides
-        : [{ image_url: rest.imageUrl || '', title: rest.title, body: rest.body, eyebrow: rest.badge, cta: b0 ? { label: b0.label, background_color: b0.background_color, text_color: b0.text_color } : null }];
+      // ★ C114 Codex 구현 1R ① 장 + 바깥 칸 폴백 = SDK 와 같은 공용 함수
+      const frameSlides = frameSlidesWithFlat(Array.isArray(rest.posterSlides) ? rest.posterSlides : [], {
+        image_url: rest.imageUrl || null, title: rest.title || '', body: rest.body || '', eyebrow: rest.badge || null,
+        cta: b0 ? { label: b0.label, background_color: b0.background_color, text_color: b0.text_color } : null,
+        link_url: (rest as any).imageLinkUrl || null,
+      }, rest.design);
       return (
         <div style={{ position: 'absolute', inset: 0 }}>
           <PosterFramePreview slides={frameSlides} design={rest.design} accentColor={rest.accentColor} badge={rest.badge} endAt={rest.endAt} replaceVars={rest.replaceVars} />
@@ -297,14 +303,7 @@ function Overlay({ variant, themeTokens, treatment, device, ...rest }: { variant
         </div>
       );
     }
-    // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 미리보기 (SDK renderPosterCarousel 미러)
-    if (Array.isArray(rest.posterSlides) && rest.posterSlides.length >= 2) {
-      return (
-        <div style={{ position: 'absolute', inset: 0, background: backdropDim, ...(backdropBlurOn ? { backdropFilter: 'blur(10px) saturate(1.35)', WebkitBackdropFilter: 'blur(10px) saturate(1.35)' } : {}), display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: 0 } as CSSProperties}>
-          <PosterCarouselPreview slides={rest.posterSlides} design={rest.design} replaceVars={rest.replaceVars} badge={rest.badge} optOut={optOutHint} scale={0.82} imgMax={360} radius="18px 18px 0 0" shadow="0 -18px 50px rgba(0,0,0,0.4)" fontFamily={cardBase.fontFamily as string} />
-        </div>
-      );
-    }
+    // ★ 2026-11-08 C114 I-3 사진 위 글 여러 장 = 위 새 틀(웹 · 웹뷰) · 옛 4:5 캐러셀 미러는 옛 앱 미리보기(AppInAppPreview)에만 남는다
     const posterImg = toAbsoluteImage(rest.imageUrl);
     const pBtn = (rest.buttons || [])[0];
     const pHex = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
@@ -564,7 +563,15 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title, body, imageUrl, badge, buttons, backgroundColor, textColor, design, posterSlides, replaceVars, captureMode, legacyApp, accentColor, endAt }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageUrl, badge, buttons, backgroundColor, textColor, design: designIn, posterSlides: slidesIn, replaceVars, captureMode, legacyApp, accentColor, endAt }: AppInAppPreviewProps) {
+  // ★ 2026-11-08 C114 K2 구버전 앱 모습 = 서버가 옛 앱에 실제로 보내는 꼴(legacyAppPreviewOf = 서버 legacyServeTransform 거울 · 내보내지 않음 0)
+  const legacyPoster = !!legacyApp && template === 'full_image';
+  const bakedIn = !!designIn && (designIn as any).poster_text === 'baked';
+  const legacyView = legacyPoster ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt) : null;
+  const design = legacyView ? legacyView.design : designIn;
+  const posterSlides = legacyView ? legacyView.slides : slidesIn;
+  const title = legacyPoster && bakedIn ? '' : titleIn;
+  const body = legacyPoster && bakedIn ? '' : bodyIn;
   // ★ 2026-07-18 포스터형 v2 — 선택 서체 실로딩 (웹 미리보기 useEffect와 동일 가드)
   const appFontsUrl = inappGoogleFontsUrl(design?.font_display, undefined);
   useEffect(() => {
@@ -582,7 +589,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
   // ★ 2026-09-29 새 레이아웃 · 닫기 방식 — 계약을 구현한 앱 빌드 기준. 구버전 앱 모습이면 지금 포스터 · 다시 보지 않기.
   const sheetLayout = legacyApp ? 'overlay' : resolvePosterLayout(design);
   // ★ 2026-11-05 새 틀(통짜 · 떠 있는 카드 · 띠) = 그리는 부품 · 구버전 앱 모습은 지금 포스터 갈래
-  const frameApp = isPoster && !legacyApp && usesPosterFrame(design);
+  const frameApp = isPoster && !legacyApp && drawsWithPosterFrame(design);
   const appOptOut = !legacyApp && String(design?.dismiss_mode || '') === 'snooze_day' ? '오늘 하루 보지 않기' : '다시 보지 않기';
   const img = imageUrl || undefined;
   // ★ 2026-07-17 텍스트 정렬 (design.text_align) — SDK 렌더 미러. 미지정=왼쪽
@@ -687,7 +694,7 @@ export function AppInAppPreview({ template, title, body, imageUrl, badge, button
             {frameApp && (
               <div style={{ position: 'absolute', inset: 0, zIndex: 2 }}>
                 <PosterFramePreview
-                  slides={Array.isArray(posterSlides) && posterSlides.length > 0 ? posterSlides : [{ image_url: imageUrl || '', title, body, eyebrow: badge, cta: (buttons || [])[0] ? { label: (buttons || [])[0].label, background_color: (buttons || [])[0].background_color, text_color: (buttons || [])[0].text_color } : null }]}
+                  slides={frameSlidesWithFlat(Array.isArray(posterSlides) ? posterSlides : [], { image_url: imageUrl || null, title: title || '', body: body || '', eyebrow: badge || null, cta: (buttons || [])[0] ? { label: (buttons || [])[0].label, background_color: (buttons || [])[0].background_color, text_color: (buttons || [])[0].text_color } : null, link_url: null }, design)}
                   design={design} accentColor={accentColor} badge={badge} endAt={endAt} replaceVars={replaceVars} height={580} />
               </div>
             )}

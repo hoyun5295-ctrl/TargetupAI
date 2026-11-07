@@ -38,6 +38,9 @@ import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { registerAsset, registerAssetConfirmed, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
 import { isStudioReady, StudioError, readProductTempIds, studioProductFingerprint, groupProductCutouts, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
+// ★ 2026-11-08 C114 B 할인 포스터 = 혜택 검사 · 확인 줄 · 브랜드 강조색(CT 한 곳)
+import { readDiscountOffer, discountCheckLine, discountBrandColor, type DiscountOffer } from '../utils/studio-discount';
+import { getCompanyBrandKitRaw } from '../utils/dm/dm-brand-kit';
 import { SUB_ORDER } from '../utils/image-studio-template-subs';
 import { createHash } from 'crypto';
 import { userErrorResponse, uploadErrorText } from '../utils/http-error';
@@ -126,10 +129,11 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
 
   if (await aiZonePlanBlocked(req, res)) return;
-  const { templateId, presetKey, userHint, texts, textPosition } = req.body || {};
+  const { templateId, presetKey, userHint, texts, textPosition, offer: offerRaw } = req.body || {};
   // ★ 2026-10-19 B-1016-3② 시도 키(화면이 보낼 때만) — 같은 시도 = 기억한 결과 · 이미 걷혔으면 다시 걷지 않는다
   //   ★ 2026-11-02 제품 자리 = 보낸 값 그대로(옛 화면 cutoutTempId 생략 · null · id 는 지금 키 그대로 · 새 화면 = 배열 · Codex 설계 1R ①)
-  const attemptKey = studioAttemptKey('gen', companyId, req.body?.attemptToken, { templateId, presetKey, userHint, texts, cutoutTempId: studioProductFingerprint(req.body), textPosition });
+  // ★ 2026-11-08 C114 B 할인 혜택 = 지문에(숫자가 다르면 다른 포스터) · 보내지 않은 요청 = undefined 라 JSON 에서 빠져 지금 키 그대로
+  const attemptKey = studioAttemptKey('gen', companyId, req.body?.attemptToken, { templateId, presetKey, userHint, texts, cutoutTempId: studioProductFingerprint(req.body), textPosition, offer: offerRaw });
   // 회사당 동시 생성 1건 (fork 단일 = in-memory)
   // ★ Codex E2 — 같은 시도의 결과 돌려주기 · 납부 확인 = 이 잠금 안에서 · 새 작업 검사(입력 · 잔액 · 임시 용량)보다 먼저
   //   (옛: 잠금 밖 · 잔액 확인 앞이라, 원요청이 막 걷은 뒤의 재요청이 402 · 409 를 받고 다시 걷힐 수 있었다)
@@ -148,6 +152,15 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   const template = getTemplate(String(templateId || ''));
   if (!template) return res.status(400).json({ success: false, error: '템플릿을 선택해주세요.' });
   const preset = resolvePreset(presetKey);
+
+  // ★ 2026-11-08 C114 B 할인 포스터 = 제품명 필수 · 혜택 숫자 검사(잠금 · 기억 확인 뒤 · 크레딧 확인 · 생성 · 차감 전 400 + 칸 이름)
+  let discountOffer: DiscountOffer | null = null;
+  if (template.kind === 'discount') {
+    if (!String(texts?.title ?? '').trim()) return res.status(400).json({ success: false, error: '제품명을 넣어 주세요. 포스터 맨 위에 들어가요.', code: 'OFFER_INVALID', field: 'title' });
+    const read = readDiscountOffer(offerRaw, template.offer);
+    if (!read.ok) return res.status(400).json({ success: false, error: read.error, code: 'OFFER_INVALID', field: read.field });
+    discountOffer = read.offer;
+  }
 
   // 제품 사진(선택 · ★ 2026-11-02 최대 3장) — 있으면 제품 포함 완성 포스터, 없으면 문구 포함 배경 포스터
   //   넘침 · 중복 · 꼴 오류 = 400(잠금 · 기억 · 납부 확인 뒤 · AI · 차감 전)
@@ -185,11 +198,16 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     const textPos = textPosition === 'top' || textPosition === 'center' || textPosition === 'bottom' ? textPosition : null;
     const prompt = buildPosterPrompt({
       template, preset,
-      texts: { label: texts?.label, title: texts?.title, subtitle: texts?.subtitle },
+      // ★ C114 Codex 구현 1R ③ 할인형 = 제품명 + 템플릿 기본 라벨만(보낸 라벨 · 부제는 쓰지 않는다)
+      texts: discountOffer
+        ? { label: template.defaultTexts?.label || '', title: texts?.title, subtitle: '' }
+        : { label: texts?.label, title: texts?.title, subtitle: texts?.subtitle },
       userHint: benefitInHint ? null : userHint,
       hasProduct: !!cutout,
       productCount: productIds.length,
       textPosition: textPos,
+      offer: discountOffer,
+      brandColor: discountOffer ? discountBrandColor(await getCompanyBrandKitRaw(companyId).catch(() => null)) : null,
     });
 
     // ★ 2026-07-30 1장 생성 (Harold 확정) — 옛 후보 2장은 같은 prompt·preset 무작위 2회 호출이라 레시피 차이가 없었다.
@@ -231,6 +249,8 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       success: true,
       images,
       benefitNotice: benefitInHint ? '혜택 문구는 문구 칸(라벨·헤드라인·부제)에 입력해주세요. 장면 힌트에는 장면 묘사만 들어가요.' : null,
+      // ★ C114 D8 결과 카드 「포스터에 들어간 숫자」(보낸 값 그대로 · 숫자 판독 호출 0)
+      discountCheck: discountOffer ? discountCheckLine(discountOffer) : null,
     };
     if (attemptKey) rememberStudioResult(attemptKey, body);
     return res.json(body);
@@ -399,6 +419,8 @@ imageStudioRouter.post('/line-headline', async (req: any, res: Response) => {
   }
   const texts = { title, ...(label ? { label } : {}) };
   if (findUnfilledTemplateText(texts)) return res.status(400).json({ success: false, error: '예시 문구 그대로는 만들 수 없어요. 글을 바꿔 주세요.', code: 'PLACEHOLDER_TEXT' });
+  // ★ 2026-11-08 C114 K6 할인 포스터는 이미지 스튜디오에서 숫자 칸으로 만든다(이 길은 숫자 칸이 없다)
+  if (template.kind === 'discount') return res.status(400).json({ success: false, error: '할인 포스터는 이미지 스튜디오의 「할인 포스터」에서 혜택 숫자를 넣어 만들어 주세요.', code: 'HEADLINE_DISCOUNT_TEMPLATE' });
   const isProduct = (template.kind ?? 'product') === 'product';
   const rawImg = isProduct && typeof req.body?.productImage === 'string' ? req.body.productImage.trim() : '';
   // 제품 템플릿 = 실사진 필수(사진 없는 제품 포스터 = 지어낸 상품 · 설계서 §3-4 · Codex R3) · 주소 판정 = 공용 함수

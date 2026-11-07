@@ -22,7 +22,7 @@
 import { resolveTheme, withAlpha, inappGoogleFontsUrl, safeFontFamily, type InAppTheme } from './inapp-theme';
 // ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 새 틀(통짜 · 떠 있는 카드 · 기능 띠) 그리는 부품 · 스크림 규격 한 곳
 import {
-  buildPosterFrame, buildPosterScrimEl, fillPosterFrameCta, setPosterFramePager, usesPosterFrame,
+  buildPosterFrame, fillPosterFrameCta, setPosterFramePager, drawsWithPosterFrame, frameSlidesWithFlat,
   countdownEndMs, formatCountdown,
 } from './poster-frame';
 import {
@@ -292,7 +292,8 @@ export function resolvePosterLayout(design: any): PosterLayout {
 export const POSTER_SHEET_DEFAULTS: Record<'event_card' | 'banner_sheet', {
   bg: string; titleColor: string; bodyColor: string; titleSize: number; bodySize: number; fit: 'cover' | 'contain';
 }> = {
-  event_card: { bg: '#f7f1e3', titleColor: '#8a3b1f', bodyColor: '#57534e', titleSize: 26, bodySize: 14, fit: 'cover' },
+  // ★ 2026-11-08 C114 I-3 이벤트 카드 사진 기본 = 맞추기(contain) — 사진 상자가 그림 비율을 따르고 높이 상한에 걸려도 잘리지 않는다
+  event_card: { bg: '#f7f1e3', titleColor: '#8a3b1f', bodyColor: '#57534e', titleSize: 26, bodySize: 14, fit: 'contain' },
   banner_sheet: { bg: '#db2777', titleColor: '#fde047', bodyColor: '#ffffff', titleSize: 26, bodySize: 19, fit: 'contain' },
 };
 
@@ -352,6 +353,36 @@ export function passesTriggerThresholds(
 // 메인 클래스
 // ════════════════════════════════════════════════════════════════════
 
+/**
+ * ★ 2026-11-08 C114 I-1 웹뷰 호스트 다리 사건(계약 v5 · 앱이 받는다).
+ *   ready = 보여도 된다(첫 장 그림 들어옴) · failed = 보이지 말고 닫는다(기록 0) · close = 메시지가 닫혔다(한 번)
+ *   track = click · dismiss · opt_out 기록을 앱이 /inapp/track 으로 · navigate = 이동 · optout · snooze = 앱 저장소 억제 · copy = 앱이 복사.
+ */
+export type InAppHostEvent =
+  | { type: 'ready' | 'failed' | 'close'; messageId: string }
+  | { type: 'track'; messageId: string; event: 'click' | 'dismiss' | 'opt_out'; buttonId: string | null; dwellSeconds: number | null }
+  | { type: 'navigate'; url: string }
+  | { type: 'optout' | 'snooze'; messageId: string; parentMessageId: string | null }
+  | { type: 'copy'; messageId: string; text: string };
+
+/** 다리 찾기 = RN(ReactNativeWebView) → iOS(webkit.messageHandlers.hanjulInApp) → 안드로이드(HanjulInAppAndroid) · 다 없으면 이동만 페이지가 직접 */
+export function defaultHostBridge(): (e: InAppHostEvent) => void {
+  return (e) => {
+    try {
+      const w: any = window;
+      const s = JSON.stringify(e);
+      if (w.ReactNativeWebView && typeof w.ReactNativeWebView.postMessage === 'function') { w.ReactNativeWebView.postMessage(s); return; }
+      const ios = w.webkit && w.webkit.messageHandlers && w.webkit.messageHandlers.hanjulInApp;
+      if (ios && typeof ios.postMessage === 'function') { ios.postMessage(e); return; }
+      if (w.HanjulInAppAndroid && typeof w.HanjulInAppAndroid.postMessage === 'function') { w.HanjulInAppAndroid.postMessage(s); return; }
+      if (e.type === 'navigate') {
+        const t = resolveSafeNavUrl(e.url, window.location.href);
+        if (t) window.location.href = t;
+      }
+    } catch { /* 다리 실패 = 조용히 */ }
+  };
+}
+
 export class HanjulloInAppModule {
   private autoTriggerSetup = false;
   /** ★ P0-1 (Codex 1R) — 모듈 부팅(≈페이지 로드) 시각. time_on_page 직접 trigger 호출 시 실측 체류 초 보강용 */
@@ -362,12 +393,80 @@ export class HanjulloInAppModule {
   private renderTimes = new Map<string, number>();
   /** ★ 2026-11-05 §3-5 남은 시간 띠 = 서버 시각 기준(서버 − 기기 · 응답 serverNow · 캐시 항목에 함께 적는다) */
   private clockOffsetMs = 0;
+  /**
+   * ★ 2026-11-08 C114 I-1 웹뷰 호스트 모드(계약 v5) — null = 몰 화면(지금 그대로).
+   *   있으면 API 호출 0: 기록(click · dismiss · opt_out) · 이동 · 닫기 · 다시 보지 않기 · 하루 보지 않기 · 복사 = 다리 사건 · impression = 앱이 ready 뒤 한 번.
+   */
+  private host: { post: (e: InAppHostEvent) => void; closed: Set<string>; messageId: string } | null = null;
 
   constructor(
     private readonly apiKey: string,
     _secret: string, // 2026-06-10: 브라우저 모듈은 secret 미사용 (인자 자리만 유지 — 호출부 호환)
     private readonly endpoint: string,
   ) {}
+
+  /**
+   * ★ 2026-11-08 C114 I-1 웹뷰 호스트 — 앱이 넣은 메시지 하나를 그린다(몰 화면 렌더러 그대로 · 설계서 §3 I-1).
+   *   보임 신호 = 첫 장 그림 load + decode 뒤 `ready` 한 번(그림 없음 = 다음 그리기 틀 · error · 8초 = `failed`) · 숨긴 동안에도 받게 그림 = eager.
+   *   메시지 DOM 이 어느 길로 사라지든 `close` 한 번. 반환 = 그렸는가.
+   */
+  public renderForHost(
+    payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null },
+    post: (e: InAppHostEvent) => void = defaultHostBridge(),
+  ): boolean {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+    const msg = payload && payload.message;
+    if (!msg || !msg.id) return false;
+    const host = { post, closed: new Set<string>(), messageId: String(msg.id) };
+    this.host = host;
+    const serverMs = payload.serverNow ? Date.parse(String(payload.serverNow)) : NaN;
+    if (Number.isFinite(serverMs)) this.clockOffsetMs = serverMs - Date.now();
+    const id = String(msg.id);
+    let settled = false;
+    const settle = (type: 'ready' | 'failed') => {
+      if (settled) return;
+      settled = true;
+      post({ type, messageId: id });
+    };
+    try {
+      this.renderMessage(msg, { customer: payload.customer || {} });
+    } catch {
+      settle('failed');
+      return false;
+    }
+    const root = document.querySelector(`[data-hanjullo-msg="${id}"]`) as HTMLElement | null;
+    if (!root) { settle('failed'); return false; }
+    // 닫힘 = 메시지 루트가 문서에서 빠지는 순간 한 곳(닫기 · 버튼 · 그림 이동 · Esc · 자동 닫힘 · 다시 보지 않기 전부)
+    const watch = new MutationObserver(() => {
+      if (document.querySelector(`[data-hanjullo-msg="${id}"]`)) return;
+      watch.disconnect();
+      if (host.closed.has(id)) return;
+      host.closed.add(id);
+      settle('failed');   // 보이기 전에 닫혔으면 ready 를 보내지 않는다(이미 보냈으면 아무것도 안 함)
+      post({ type: 'close', messageId: id });
+    });
+    watch.observe(document.body, { childList: true, subtree: true });
+    const imgs = Array.from(root.querySelectorAll('img')) as HTMLImageElement[];
+    for (const im of imgs) im.loading = 'eager';
+    const first = imgs[0];
+    if (!first) {
+      requestAnimationFrame(() => settle('ready'));
+      return true;
+    }
+    const timer = setTimeout(() => settle('failed'), 8000);
+    const ok = () => {
+      clearTimeout(timer);
+      const dec = typeof first.decode === 'function' ? first.decode() : Promise.resolve();
+      dec.then(() => settle('ready'), () => settle('ready'));
+    };
+    if (first.complete && first.naturalWidth > 0) ok();
+    else if (first.complete && first.currentSrc) { clearTimeout(timer); settle('failed'); }   // 이미 실패한 그림
+    else {
+      first.addEventListener('load', ok, { once: true });
+      first.addEventListener('error', () => { clearTimeout(timer); settle('failed'); }, { once: true });
+    }
+    return true;
+  }
 
   /**
    * 페이지 로드 시 호출 — 사용자에게 표시할 메시지 자동 fetch + 렌더링.
@@ -837,10 +936,12 @@ export class HanjulloInAppModule {
       if (rootEl) rootEl.style.textAlign = textAlign;
     }
 
-    // impression 트래킹 + 표시 이력 + 카운트 증가
+    // impression 트래킹 + 표시 이력 + 카운트 증가(★ C114 호스트 모드 = 빈도 · 기록은 앱 몫 · track 은 위 규칙대로 impression 을 버린다)
     this.track(msg.id, 'impression', input);
-    this.markSeen(msg);
-    this.incrementDisplayCount(msg.id);
+    if (!this.host) {
+      this.markSeen(msg);
+      this.incrementDisplayCount(msg.id);
+    }
 
     // Sticky bucketing 저장
     const parentId = msg.parentMessageId ?? msg.parent_message_id;
@@ -1043,17 +1144,14 @@ export class HanjulloInAppModule {
     const slides = this.parsePosterSlides(msg);
     // ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 통짜 · 떠 있는 카드 · 띠 중 하나라도 있으면 새 틀(그리는 부품 + 손잡이).
     //   장이 없는 메시지(flat 만)는 지금 시트 경로와 같은 규칙으로 flat 에서 첫 장을 만든다. 그 밖 = 아래 지금 경로 그대로.
-    if (usesPosterFrame((msg as any).design)) {
-      const frameSlides: PosterSlideSdk[] = slides.length > 0
-        ? slides
-        : (imageUrl
-          ? [{
-              image_url: imageUrl, title, body,
-              eyebrow: badge || null,
-              cta: buttons[0] ? { label: buttons[0].label, action_url: buttons[0].action_url ?? null, background_color: buttons[0].background_color || undefined, text_color: buttons[0].text_color || undefined } : null,
-              link_url: this.resolveImageLink(msg),
-            }]
-          : []);
+    // ★ 2026-11-08 C114 I-3 사진 위 글(overlay)도 이 틀로(잘림 0) — 판정 = drawsWithPosterFrame 하나(이벤트 카드 · 배너 시트만 아래 시트 경로)
+    if (drawsWithPosterFrame((msg as any).design)) {
+      // ★ C114 Codex 구현 1R ① 장 + 바깥 칸 폴백 = 공용 함수 하나(옛 한 장 포스터의 flat 버튼 · 그림 링크 보존)
+      const frameSlides = frameSlidesWithFlat(slides as any, {
+        image_url: imageUrl || null, title, body, eyebrow: badge || null,
+        cta: buttons[0] ? { label: buttons[0].label, action_url: buttons[0].action_url ?? null, background_color: buttons[0].background_color || undefined, text_color: buttons[0].text_color || undefined } : null,
+        link_url: this.resolveImageLink(msg),
+      }, (msg as any).design) as PosterSlideSdk[];
       if (frameSlides.length > 0) {
         this.renderPosterFrame(msg, frameSlides, badge, animation, autoDismissSec, input);
         return;
@@ -1078,124 +1176,13 @@ export class HanjulloInAppModule {
         return;
       }
     }
-    // ★ 2026-07-21 캐러셀 — 슬라이드 2장 이상이면 좌우 스와이프 렌더. 1장·미보유 = 아래 단일 포스터(회귀 0).
-    if (slides.length >= 2) {
-      this.renderPosterCarousel(msg, slides, badge, animation, autoDismissSec, input);
-      return;
-    }
-    if (!imageUrl) {
-      this.renderCenterModal(msg, title, body, imageUrl, badge, buttons, animation, autoDismissSec, input);
-      return;
-    }
-    const design: any = (msg as any).design || {};
-    // hex 3/4/6/8자리만 (5·7자리 = CSS·RN 무효 — 백엔드 sanitize와 동일 기준)
-    const hexOr = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
-    const sizeOr = (v: any, min: number, max: number, fb: number) => {
-      const n = Number(v);
-      return Number.isFinite(n) && n >= min && n <= max ? n : fb;
-    };
-    // ★ 2026-07-19 제목/본문 분리 색·크기 (poster_text_color = 하위 호환 폴백)
-    const overlayColor = hexOr(design.poster_text_color, '#ffffff');
-    const titleColor = hexOr(design.poster_title_color, overlayColor);
-    const bodyColor = hexOr(design.poster_body_color, overlayColor);
-    const titleSize = sizeOr(design.poster_title_size, 14, 32, 20);
-    const bodySize = sizeOr(design.poster_body_size, 10, 22, 14); // 기본 14 = 편집기 '보통'과 1:1
-    const displayFont = safeFontFamily(design.font_display, '');
-    if (displayFont) ensureFontLink(displayFont);
-
-    const backdrop = document.createElement('div');
-    Object.assign(backdrop.style, {
-      position: 'fixed',
-      inset: '0',
-      background: 'rgba(8,10,18,0.55)',
-      backdropFilter: 'blur(14px) saturate(1.35)',
-      zIndex: '2147483646',
-      display: 'flex',
-      alignItems: 'flex-end',
-      justifyContent: 'center',
-      padding: '0',
-    });
-    (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
-
-    const root = document.createElement('div');
-    root.setAttribute('data-hanjullo-msg', msg.id);
-    Object.assign(root.style, {
-      width: '100%',
-      maxWidth: '520px',
-      background: '#ffffff',
-      color: '#1b1d23',
-      borderRadius: '22px 22px 0 0',
-      overflow: 'hidden',
-      boxShadow: '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
-      position: 'relative',
-      zIndex: '2147483647',
-      fontFamily: INAPP_FONT_STACK,
-      boxSizing: 'border-box',
-    });
-    this.applyAnimation(root, animation, 'modal'); // fade=rise(살짝 떠오름) — 하단 시트에 자연스러운 기존 컨텍스트 재사용
-
-    // 이미지 = 카드 전체. 원본 비율 유지(이미지 안 문구가 잘리지 않게 크롭 없음).
-    // ★ 2026-07-30 자동맞춤(Harold): 옛 maxHeight 62vh + cover는 세로가 캡에 걸리면 하단을 잘랐다(원본 훼손).
-    //   정답 = 시트 폭을 이미지 비율에 맞춰 축소해 62vh 안에 통째 표시 — 크롭 0·좌우 빈공간 0·왜곡 0 (onload에서 실측 비율로 계산).
-    const imgWrap = document.createElement('div');
-    Object.assign(imgWrap.style, { position: 'relative', width: '100%' });
-    const hero = document.createElement('img');
-    hero.src = this.toAbsoluteImageUrl(imageUrl);
-    hero.alt = '';
-    hero.loading = 'lazy';
-    hero.referrerPolicy = 'no-referrer';
-    Object.assign(hero.style, { width: '100%', height: 'auto', maxHeight: '62vh', objectFit: 'cover', display: 'block' });
-    // 62vh 안에 원본 비율로 통째 들어가는 폭으로 시트 상한을 좁힌다(가로형·짧은 이미지는 무변화).
-    //   하한 클램프 없음(Codex 1R 지적 — 하한을 두면 그만큼 다시 크롭된다) + 리사이즈/회전 시 재계산.
-    const fitSheet = () => {
-      const nw = hero.naturalWidth; const nh = hero.naturalHeight;
-      if (!(nw > 0 && nh > 0)) return;
-      const capPx = Math.round((window.innerHeight || 0) * 0.62);
-      if (capPx <= 0) return;
-      const fitWidth = Math.round(capPx * (nw / nh));
-      root.style.maxWidth = Math.min(520, fitWidth) + 'px';
-    };
-    const onResize = () => {
-      if (!document.body.contains(root)) { window.removeEventListener('resize', onResize); return; }
-      fitSheet();
-    };
-    hero.onload = () => { fitSheet(); window.addEventListener('resize', onResize); };
-    // 이미지 로드 실패 시 — 숨기기만 하면 imgWrap이 0높이로 접혀 스크림 텍스트까지 사라진다(Codex 지적).
-    // 회색 판을 유지해 제목/본문 오버레이는 계속 보이게 한다.
-    hero.onerror = () => {
-      hero.style.display = 'none';
-      Object.assign(imgWrap.style, { minHeight: '220px', background: 'linear-gradient(135deg,#3a3d46,#23252c)' });
-    };
-    // ★ 2026-07-31 이미지 클릭 랜딩 — 단일 포스터 이미지 클릭 시 이동(스크림 텍스트 영역 제외 — 본문 스크롤과 충돌 방지)
-    this.makeImageClickable(hero, msg, input, this.resolveImageLink(msg), 'image');
-    imgWrap.appendChild(hero);
-
-    // ★ 2026-07-21 스크림(제목/본문/배지 오버레이) — 단일 포스터·캐러셀 슬라이드 공용 buildPosterScrim(동일 규격).
-    const scrim = this.buildPosterScrim({ title, body, badge, overlayColor, titleColor, bodyColor, titleSize, bodySize, displayFont });
-    if (scrim) imgWrap.appendChild(scrim);
-    root.appendChild(imgWrap);
-
-    // 흰 바닥 — CTA 1개 + 다시 보지 않기 (버튼이 없으면 다시 보지 않기만)
-    const bottom = document.createElement('div');
-    Object.assign(bottom.style, { padding: '16px 20px 12px', boxSizing: 'border-box' });
-    this.appendButtons(bottom, msg, buttons.slice(0, 1), input, 'stack');
-    this.appendOptOutLink(bottom, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} });
-    root.appendChild(bottom);
-
-    // 닫기 = 이미지 우상단 — imgWrap에 흰색 상속을 줘 어두운 포스터에서도 X가 보인다 (root의 진한 글씨색 상속 방지, Codex 지적)
-    imgWrap.style.color = '#ffffff';
-    this.appendCloseButton(imgWrap, msg, input, () => document.body.removeChild(backdrop), 'absolute-top-right');
-
-    // ★ 2026-07-31 (Codex 1R ①) — SDK가 만든 래퍼임을 명시 마킹. 제거·페이드 판정은 이 마커로만 한다
-    //   (parentElement 추론 금지 — inline_card의 부모는 고객사 호스트 컨테이너라 지우면 몰 DOM이 파손된다).
-    backdrop.setAttribute('data-hanjullo-wrap', '1');
-    backdrop.appendChild(root);
-    document.body.appendChild(backdrop);
-    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
+    // ★ 2026-11-08 C114 I-3 — 장도 그림도 없음 = 포스터 성립 X → 가운데 팝업 안전 폴백.
+    //   사진 위 글 = 위 새 틀(drawsWithPosterFrame) · 옛 4:5 cover 캐러셀 · 옛 단일 포스터 경로는 지웠다(잘림 · 그리는 규칙 둘).
+    this.renderCenterModal(msg, title, body, imageUrl, badge, buttons, animation, autoDismissSec, input);
   }
 
   // ────────────────────────────────────────────────────────────────
-  // 포스터형 캐러셀 (2026-07-21) — 좌우 스와이프 N장 + 점(1/N) + 슬라이드별 CTA
+  // 포스터 장 파싱 · 넘기기 트랙 스타일(새 틀 · 시트가 함께 쓴다)
   // ────────────────────────────────────────────────────────────────
 
   /** posterSlides 파싱 — 배열·JSON 문자열 수용, image_url 있는 슬라이드만. 실패 시 [] (단일 포스터 폴백) */
@@ -1217,172 +1204,6 @@ export class HanjulloInAppModule {
       s.textContent = '[data-hjl-carousel]{scrollbar-width:none;-ms-overflow-style:none}[data-hjl-carousel]::-webkit-scrollbar{display:none;width:0;height:0}';
       document.head.appendChild(s);
     } catch { /* 조용히 실패 */ }
-  }
-
-  /** 포스터 스크림(이미지 하단 그라데이션 위 제목/본문/배지 오버레이) — 단일 포스터·캐러셀 슬라이드 공용.
-   *  텍스트는 픽셀에 굽지 않는 레이어. 제목·본문·배지 모두 없으면 null. */
-  private buildPosterScrim(o: {
-    title: string; body: string; badge: string;
-    overlayColor: string; titleColor: string; bodyColor: string;
-    titleSize: number; bodySize: number; displayFont: string;
-  }): HTMLDivElement | null {
-    // ★ 2026-11-05 §3-7 — 스크림 규격 = 그리는 부품 한 곳(새 틀 · 지금 포스터 · 캐러셀이 같은 함수 · DOM 잠금 CT-IA7)
-    return buildPosterScrimEl(o);
-  }
-
-  /** 포스터형 캐러셀 — 가로 꽉 찬 하단 시트 안 좌우 스와이프(CSS scroll-snap, 외부 의존성 0).
-   *  각 슬라이드 = 이미지(cover·통일 높이) + 슬라이드별 오버레이 문구. 하단 = 점(1/N) + 활성 슬라이드 CTA(스와이프 시 교체) + 다시 보지 않기.
-   *  색·크기 폴백: 슬라이드 값 → 메시지 design(poster_*) → 기본. click 트래킹 button_id = slide_{index}(슬라이드별 성과). */
-  private renderPosterCarousel(
-    msg: InAppMessageSdk,
-    slides: PosterSlideSdk[],
-    badge: string,
-    animation: string,
-    autoDismissSec: number | null | undefined,
-    input: InAppInitInput,
-  ): void {
-    this.ensureCarouselStyle();
-    const customer = input.customer || {};
-    const design: any = (msg as any).design || {};
-    const hexOr = (v: any, fb: string) => (typeof v === 'string' && /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(v) ? v : fb);
-    const sizeOr = (v: any, min: number, max: number, fb: number) => { const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? n : fb; };
-    const msgOverlay = hexOr(design.poster_text_color, '#ffffff');
-    const displayFont = safeFontFamily(design.font_display, '');
-    if (displayFont) ensureFontLink(displayFont);
-
-    const backdrop = document.createElement('div');
-    Object.assign(backdrop.style, {
-      position: 'fixed', inset: '0', background: 'rgba(8,10,18,0.55)',
-      backdropFilter: 'blur(14px) saturate(1.35)', zIndex: '2147483646',
-      display: 'flex', alignItems: 'flex-end', justifyContent: 'center', padding: '0',
-    });
-    (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
-
-    const root = document.createElement('div');
-    root.setAttribute('data-hanjullo-msg', msg.id);
-    Object.assign(root.style, {
-      width: '100%', maxWidth: '520px', background: '#ffffff', color: '#1b1d23',
-      borderRadius: '22px 22px 0 0', overflow: 'hidden',
-      boxShadow: '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
-      position: 'relative', zIndex: '2147483647', fontFamily: INAPP_FONT_STACK, boxSizing: 'border-box',
-    });
-    this.applyAnimation(root, animation, 'modal');
-
-    // 가로 트랙 — 슬라이드마다 100% 폭, scroll-snap
-    const track = document.createElement('div');
-    track.setAttribute('data-hjl-carousel', '1');
-    Object.assign(track.style, {
-      display: 'flex', overflowX: 'auto', overflowY: 'hidden',
-      scrollSnapType: 'x mandatory', scrollBehavior: 'smooth', width: '100%',
-    });
-    (track.style as any).webkitOverflowScrolling = 'touch';
-
-    slides.forEach((slide, slideIdx) => {
-      const cell = document.createElement('div');
-      Object.assign(cell.style, { position: 'relative', flex: '0 0 100%', width: '100%', scrollSnapAlign: 'start', scrollSnapStop: 'always', boxSizing: 'border-box' });
-      // 미디어 박스 — 캐러셀은 슬라이드 높이 통일 필수 → 4:5 박스 cover(62vh 상한). 단일 포스터(원본 비율)와 의도적 차이.
-      const media = document.createElement('div');
-      Object.assign(media.style, { position: 'relative', width: '100%', aspectRatio: '4 / 5', maxHeight: '62vh', overflow: 'hidden', background: '#23252c', color: '#ffffff' });
-      const img = document.createElement('img');
-      img.src = this.toAbsoluteImageUrl(slide.image_url);
-      img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
-      Object.assign(img.style, { width: '100%', height: '100%', objectFit: 'cover', display: 'block' });
-      img.onerror = () => { img.style.display = 'none'; media.style.background = 'linear-gradient(135deg,#3a3d46,#23252c)'; };
-      // ★ 2026-07-31 이미지 클릭 랜딩 — 슬라이드별 link_url. 트래킹 button_id = slide_{i}_image(슬라이드별 성과).
-      //   터치 스와이프는 스크롤 제스처라 click 미발화(브라우저 기본) — 넘기기와 충돌 없음.
-      this.makeImageClickable(img, msg, input, slide.link_url, `slide_${slideIdx}_image`);
-      media.appendChild(img);
-
-      const scrim = this.buildPosterScrim({
-        title: this.replaceVariables(String(slide.title || ''), customer),
-        body: this.replaceVariables(String(slide.body || ''), customer),
-        // ★ 2026-09-29 장마다 라벨(eyebrow) — 없으면 메시지 배지(모든 장 라벨이 같을 때만 값이 있다 · 설계서 §1-2)
-        badge: this.replaceVariables(String(slide.eyebrow || ''), customer) || badge,
-        overlayColor: msgOverlay,
-        titleColor: hexOr(slide.title_color, hexOr(design.poster_title_color, msgOverlay)),
-        bodyColor: hexOr(slide.body_color, hexOr(design.poster_body_color, msgOverlay)),
-        titleSize: sizeOr(slide.title_size, 14, 32, sizeOr(design.poster_title_size, 14, 32, 20)),
-        bodySize: sizeOr(slide.body_size, 10, 22, sizeOr(design.poster_body_size, 10, 22, 14)),
-        displayFont,
-      });
-      if (scrim) media.appendChild(scrim);
-      cell.appendChild(media);
-      track.appendChild(cell);
-    });
-    root.appendChild(track);
-
-    // 닫기 — 미디어 위 우상단 (흰 X + 블러 배경. closeHost 색 흰색 상속)
-    const closeHost = document.createElement('div');
-    Object.assign(closeHost.style, { position: 'absolute', top: '12px', right: '12px', zIndex: '3', color: '#ffffff' });
-    this.appendCloseButton(closeHost, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} }, 'inline');
-    root.appendChild(closeHost);
-
-    // 흰 바닥 — 점(1/N) + 활성 슬라이드 CTA + 다시 보지 않기
-    const bottom = document.createElement('div');
-    Object.assign(bottom.style, { padding: '12px 20px', boxSizing: 'border-box' });
-
-    const dotsRow = document.createElement('div');
-    Object.assign(dotsRow.style, { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginBottom: '12px' });
-    const dotAccent = hexOr(design.poster_title_color, '#1b1d23');
-    const dots = slides.map((_, i) => {
-      const d = document.createElement('div');
-      d.setAttribute('data-hjl-dot', String(i));
-      Object.assign(d.style, { width: '7px', height: '7px', borderRadius: '999px', background: 'rgba(27,29,35,0.22)', transition: 'width 0.25s ease, background 0.25s ease' });
-      dotsRow.appendChild(d);
-      return d;
-    });
-    bottom.appendChild(dotsRow);
-
-    const ctaHost = document.createElement('div');
-    bottom.appendChild(ctaHost);
-
-    const renderActiveCta = (idx: number) => {
-      ctaHost.textContent = '';
-      const cta = slides[idx] && slides[idx].cta;
-      if (cta && (cta.label || cta.action_url)) {
-        const btn: InAppButton = {
-          id: `slide_${idx}`,
-          label: cta.label || '자세히 보기',
-          action_url: cta.action_url ?? null,
-          style: 'primary',
-          background_color: cta.background_color || '',
-          text_color: cta.text_color || '',
-        };
-        this.appendButtons(ctaHost, msg, [btn], input, 'stack');
-      }
-    };
-    const setActive = (idx: number) => {
-      dots.forEach((d, i) => {
-        const on = i === idx;
-        d.style.width = on ? '18px' : '7px';
-        d.style.background = on ? dotAccent : 'rgba(27,29,35,0.22)';
-      });
-      renderActiveCta(idx);
-    };
-    setActive(0);
-
-    // 스와이프 시 활성 슬라이드 갱신 (rAF throttle — 점 + 하단 CTA 교체)
-    let activeIdx = 0, ticking = false;
-    track.addEventListener('scroll', () => {
-      if (ticking) return;
-      ticking = true;
-      requestAnimationFrame(() => {
-        ticking = false;
-        const w = track.clientWidth || 1;
-        const idx = Math.max(0, Math.min(slides.length - 1, Math.round(track.scrollLeft / w)));
-        if (idx !== activeIdx) { activeIdx = idx; setActive(idx); }
-      });
-    });
-
-    this.appendOptOutLink(bottom, msg, input, () => { try { document.body.removeChild(backdrop); } catch {} });
-    root.appendChild(bottom);
-
-    // ★ 2026-07-31 (Codex 1R ①) — SDK가 만든 래퍼임을 명시 마킹. 제거·페이드 판정은 이 마커로만 한다
-    //   (parentElement 추론 금지 — inline_card의 부모는 고객사 호스트 컨테이너라 지우면 몰 DOM이 파손된다).
-    backdrop.setAttribute('data-hanjullo-wrap', '1');
-    backdrop.appendChild(root);
-    document.body.appendChild(backdrop);
-    if (autoDismissSec && autoDismissSec > 0) this.setupAutoDismiss(backdrop, autoDismissSec);
   }
 
   // ────────────────────────────────────────────────────────────────
@@ -1541,6 +1362,8 @@ export class HanjulloInAppModule {
   /** 쿠폰 코드 복사 — clipboard → 막히면 숨은 글 칸 선택 + execCommand → 그것도 안 되면 코드 글자를 선택해 둔다(손으로 복사) */
   private copyCouponCode(btn: HTMLElement, codeEl: HTMLElement, code: string, msg: InAppMessageSdk, input: InAppInitInput): void {
     this.track(msg.id, 'click', input, 'copy_code');
+    // ★ C114 I-1 호스트 모드 = 웹뷰 클립보드가 막혀도 앱이 복사한다(페이지 복사 시도는 아래 그대로)
+    if (this.host) this.host.post({ type: 'copy', messageId: String(msg.id), text: code });
     const done = () => {
       btn.textContent = '복사했어요';
       setTimeout(() => { btn.textContent = '복사'; }, 2000);
@@ -1680,6 +1503,10 @@ export class HanjulloInAppModule {
           background: fit === 'contain' ? bg : '#e7e0d2',
         });
         Object.assign(img.style, { width: '100%', height: '100%', objectFit: fit, display: 'block' });
+        // ★ 2026-11-08 C114 I-3 사진 상자 = 그림 원본 비율(4:3 은 들어오기 전 자리만) · 높이 상한(46vh)에 걸리면 맞추기로 통째(잘림 0)
+        img.addEventListener('load', () => {
+          if (img.naturalWidth > 0 && img.naturalHeight > 0) media.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+        });
         img.onerror = () => { img.style.display = 'none'; media.style.background = 'linear-gradient(135deg,#d6cdbb,#b9ae98)'; };
         this.makeImageClickable(img, msg, input, slide.link_url || (slide.cta && slide.cta.action_url) || null, `slide_${i}_image`);
         media.appendChild(img);
@@ -2439,6 +2266,19 @@ export class HanjulloInAppModule {
 
   /** ★ P0-2 — 버튼 이동 단일 길목: 스킴 화이트리스트 통과 시에만 이동 (javascript:/data: 등 실행 차단) */
   private safeNavigate(url: string | null | undefined): void {
+    // ★ C114 I-1 호스트 모드 = 이동은 앱이 한다(앱 경로 · 딥링크 · 외부 브라우저 규칙은 앱 몫)
+    if (this.host) {
+      const u = String(url ?? '').trim();
+      if (u) this.host.post({ type: 'navigate', url: u });
+      // ★ C114 Codex 구현 1R ② 이동 = 메시지를 닫는다(몰 화면은 페이지가 바뀌어 사라지지만 웹뷰는 남는다 · 닫힘 감시가 close 를 한 번 보낸다)
+      const rootEl = document.querySelector(`[data-hanjullo-msg="${this.host.messageId}"]`) as HTMLElement | null;
+      if (rootEl) {
+        const wrap = rootEl.parentElement;
+        if (wrap && wrap.getAttribute('data-hanjullo-wrap') === '1') wrap.remove();
+        else rootEl.remove();
+      }
+      return;
+    }
     const target = resolveSafeNavUrl(url, window.location.href);
     if (target) window.location.href = target;
   }
@@ -2782,6 +2622,8 @@ export class HanjulloInAppModule {
   /** 다시 보지 않기(영구) · 오늘 하루 보지 않기(24시간) 공통 처리 — 부모 축까지 억제(서버와 같은 기준). */
   private onOptOutOrSnooze(btn: HTMLElement, msg: InAppMessageSdk, input: InAppInitInput, removeFn: () => void, snooze: boolean): void {
     const parentId = msg.parentMessageId ?? msg.parent_message_id;
+    // ★ C114 I-1 호스트 모드 = 억제는 앱 저장소가 한다(다리 사건 · 기록은 아래 track 이 다리로)
+    if (this.host) this.host.post({ type: snooze ? 'snooze' : 'optout', messageId: String(msg.id), parentMessageId: parentId ? String(parentId) : null });
     if (snooze) {
       this.markSnoozed(msg.id);
       if (parentId) this.markSnoozed(String(parentId));
@@ -2906,6 +2748,11 @@ export class HanjulloInAppModule {
           dwellSeconds = Math.max(0, Math.floor((Date.now() - renderedAt) / 1000));
         }
       }
+      // ★ C114 I-1 호스트 모드 = API 호출 0 · impression 은 앱이 ready 뒤 한 번(여기서 다리로도 안 보낸다 · 이중 0)
+      if (this.host) {
+        if (eventType !== 'impression') this.host.post({ type: 'track', messageId, event: eventType, buttonId: buttonId || null, dwellSeconds: dwellSeconds ?? null });
+        return;
+      }
       await fetch(`${this.endpoint}/inapp/track`, {
         method: 'POST',
         headers: {
@@ -2981,4 +2828,15 @@ export class HanjulloInAppModule {
       console.log('[Hanjullo InApp]', ...args);
     }
   }
+}
+
+/**
+ * ★ 2026-11-08 C114 I-1 웹뷰 호스트(계약 v5) 진입 — 웹뷰 페이지(/api/cdp/inapp/webview)가 window.Hanjullo.renderInAppForHost 로 부른다.
+ *   키 · 시크릿 · 주소 없음 = API 호출 0(기록 · 이동 · 닫기는 다리 사건). 그림 주소는 페이지 출처 기준(상대 주소 그대로).
+ */
+export function renderInAppForHost(
+  payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null },
+  post?: (e: InAppHostEvent) => void,
+): boolean {
+  return new HanjulloInAppModule('', '', '').renderForHost(payload, post);
 }

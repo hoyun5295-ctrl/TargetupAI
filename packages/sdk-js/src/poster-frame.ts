@@ -115,7 +115,55 @@ export interface PosterFrameResult {
   fit: (viewportHeight: number) => void;
 }
 
-/** 이 메시지를 새 틀로 그리는가(통짜 · 떠 있는 카드 · 띠 중 하나라도) — 그 밖 = 지금 경로 그대로 */
+/**
+ * ★ 2026-11-08 C114 I-3 그리는 자리 한 곳 — 포스터(full_image)를 이 틀로 그리는가.
+ *   = 이벤트 카드 · 배너 시트가 아니면 전부(사진 위 글 1장 · 여러 장 포함 · 한 장 = 원본 비율 · 여러 장 = 3:4 상자 맞추기 · 잘림 0).
+ *   SDK 렌더러 · 편집 미리보기 · 갤러리 썸네일이 이 판정 하나를 쓴다(옛 4:5 cover 캐러셀 = 위아래가 잘렸다 · Harold 1107 「NATURE 잘림」).
+ */
+export function drawsWithPosterFrame(design: any): boolean {
+  const d = design && typeof design === 'object' ? design : {};
+  const v = String(d.poster_layout ?? d.posterLayout ?? '');
+  return v !== 'event_card' && v !== 'banner_sheet';
+}
+
+/** 메시지 바깥 칸(flat) — 장이 없거나 한 장뿐인 옛 포스터가 쓰던 값 */
+export interface PosterFlatFallback {
+  image_url: string | null;
+  title: string;
+  body: string;
+  cta: PosterFrameSlide['cta'] | null;
+  link_url: string | null;
+  /** 배지 문구(badge_text) — 장이 없을 때 첫 장 eyebrow(옛 시트 경로와 같음 · Codex 구현 3R) */
+  eyebrow: string | null;
+}
+
+/**
+ * ★ 2026-11-08 C114 Codex 구현 1R — 새 틀에 넣을 장 = 저장된 장 + 메시지 바깥 칸 폴백(SDK · 편집 미리보기 · 예시 갤러리가 이 함수 하나).
+ *   장 없음 = 바깥 칸으로 첫 장 · 새 판이 없는 사진 위 글 한 장 = 옛 한 장 포스터처럼 바깥 칸 제목 · 본문 · 버튼 · 그림 링크가
+ *   빈 장 값을 채운다(장 값이 있으면 장 값) · 여러 장 · 새 판(통짜 · 카드 · 띠) = 장 그대로(옛 캐러셀 · C106 틀과 같은 규칙).
+ */
+export function frameSlidesWithFlat(slides: PosterFrameSlide[], flat: PosterFlatFallback, design: any): PosterFrameSlide[] {
+  const has = (v: any) => typeof v === 'string' && v.trim().length > 0;
+  const list = (Array.isArray(slides) ? slides : []).filter((s) => s && has(s.image_url));
+  if (list.length === 0) {
+    return has(flat.image_url) ? [{ image_url: String(flat.image_url), title: flat.title, body: flat.body, eyebrow: flat.eyebrow, cta: flat.cta, link_url: flat.link_url }] : [];
+  }
+  // (Codex 구현 2R) 이벤트 카드 · 배너 시트 = 시트 렌더러가 장 그대로 그린다 → 바깥 칸을 섞지 않는다(미리보기 = 실제)
+  if (list.length === 1 && drawsWithPosterFrame(design) && !usesPosterFrame(design)) {
+    const s = list[0];
+    const ctaOk = !!s.cta && (has(s.cta.label) || has(s.cta.action_url));
+    return [{
+      ...s,
+      title: has(s.title) ? s.title : flat.title,
+      body: has(s.body) ? s.body : flat.body,
+      cta: ctaOk ? s.cta : flat.cta,
+      link_url: has(s.link_url) ? s.link_url : flat.link_url,
+    }];
+  }
+  return list;
+}
+
+/** 이 메시지가 새 판(통짜 · 떠 있는 카드 · 띠 중 하나라도)을 쓰는가 — 편집 칸 · 필요 판 판정용(그리는 자리 판정 = drawsWithPosterFrame) */
 export function usesPosterFrame(design: any): boolean {
   if (!design || typeof design !== 'object') return false;
   const strip = design.poster_strip && typeof design.poster_strip === 'object' ? String(design.poster_strip.type || '') : '';

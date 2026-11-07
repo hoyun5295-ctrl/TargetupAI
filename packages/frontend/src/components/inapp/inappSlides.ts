@@ -265,13 +265,23 @@ export function stripAllowedFor(k: LayoutKey): boolean {
  */
 export const APP_CONFIRMED_CAPS: ReadonlySet<string> = new Set<string>([]);
 
-/** 앱 채널에서 지금 앱이 이 메시지를 어떻게 보이나(필요 판 = 서버 관문과 같은 규칙 posterFrameRequiredCaps) · null = 그대로 보임 */
+/**
+ * 앱 채널에서 옛 앱(웹뷰를 붙이지 않은 앱)이 이 메시지를 어떻게 보이나 · null = 그대로 보임.
+ * ★ 2026-11-08 C114 I-4 = 내보내지 않음 0(서버가 옛 앱이 그릴 수 있는 꼴로 바꿔 보낸다) → hidden 은 늘 거짓 · 다르게 보이는 것만 말한다.
+ *   판정 = 서버 관문과 같은 규칙(posterFrameRequiredCaps) · 웹뷰 앱 · 웹 = 그대로.
+ */
 export function appCapsNote(design: Record<string, any> | null | undefined, slideCount: number): { hidden: boolean; text: string } | null {
   const need = posterFrameRequiredCaps(design, slideCount);
-  if (need.hard.some((c) => !APP_CONFIRMED_CAPS.has(c))) return { hidden: true, text: '앱 새 판이 깔린 뒤 보여요' };
-  if (need.soft.some((c) => !APP_CONFIRMED_CAPS.has(c))) return { hidden: false, text: '앱 새 판 전에는 바닥 시트로 보여요' };
+  const missing = new Set([...need.hard, ...need.soft].filter((c) => !APP_CONFIRMED_CAPS.has(c)));
+  const strip = missing.has('strip_coupon') || missing.has('strip_countdown');
+  if (missing.has('frame_card') && strip) return { hidden: false, text: '옛 앱에서는 바닥 시트로, 쿠폰 코드와 남은 시간은 글로 보여요' };
+  if (missing.has('frame_card')) return { hidden: false, text: '옛 앱에서는 바닥 시트로 보여요' };
+  if (strip) return { hidden: false, text: '옛 앱에서는 쿠폰 코드와 남은 시간이 글로 보여요' };
   return null;
 }
+
+// ★ C114 옛 앱 미리보기 꼴 · 게시 끝 시각 글 = legacy-app-view.ts(React 없는 순수 · 백엔드 계약 시험이 서버 함수와 직접 대조)
+export { inAppDeadlineText, legacyAppPreviewOf } from './legacy-app-view';
 export function appCapsNoteForKey(k: LayoutKey): { hidden: boolean; text: string } | null {
   return isPosterLayout(k) ? appCapsNote(designForKey(k, null), 1) : null;
 }

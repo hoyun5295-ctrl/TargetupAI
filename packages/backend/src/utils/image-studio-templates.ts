@@ -21,6 +21,9 @@
 //   kind='event' 카테고리 4종 신설. 기존 7종 = 제품 트랙(kind 생략 = 'product').
 import { TEMPLATES_2610 } from './image-studio-templates-2610';
 import { TEMPLATES_2611 } from './image-studio-templates-2611';
+// ★ 2026-11-08 C114 B 할인 포스터 트랙(kind 'discount') — 숫자 · 틀 줄 = studio-discount.ts
+import { TEMPLATES_DISCOUNT } from './image-studio-templates-discount';
+import type { DiscountOfferKind } from './studio-discount';
 import { SUB_BY_ID } from './image-studio-template-subs';
 
 export type TemplateCategory =
@@ -31,14 +34,18 @@ export type TemplateCategory =
   // ★ 2026-10-04 신설 3종(템플릿 = image-studio-templates-2610.ts) · 제품 1(외식·메뉴) + 행사 2(계약 테스트 EVENT_CATEGORIES에도)
   | '외식·메뉴' | '안내·예약' | '모집·참여'
   // ★ 2026-10-31 신설 2종(템플릿 = image-studio-templates-2611.ts) · 제품 1(쇼핑몰·상품컷) + 행사 1(신상·기획전 · 계약 테스트 EVENT_CATEGORIES 에도)
-  | '쇼핑몰·상품컷' | '신상·기획전';
+  | '쇼핑몰·상품컷' | '신상·기획전'
+  // ★ 2026-11-08 C114 B 할인 포스터 트랙 카테고리(kind 'discount' · 템플릿 = image-studio-templates-discount.ts)
+  | '할인·혜택';
 
 export interface StudioTemplate {
   id: string;
   name: string;
   category: TemplateCategory;
   /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터·누끼 전제) / 'event'(행사 포스터·제품 없이 성립, 첨부는 선택). 생략 = product */
-  kind?: 'product' | 'event';
+  kind?: 'product' | 'event' | 'discount';
+  /** ★ 2026-11-08 C114 B 할인 트랙만 — 혜택 꼴(가격 할인 · N+M · 세트) · 화면 칸과 서버 검사가 이 값을 따른다 */
+  offer?: DiscountOfferKind;
   /** 갤러리 카드 한 줄 설명(고객 노출). */
   desc: string;
   /**
@@ -5803,6 +5810,7 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   // ══ 2026-10-04 신설 카테고리 3종 (56 · 별도 파일) ══
   ...TEMPLATES_2610,
   ...TEMPLATES_2611,
+  ...TEMPLATES_DISCOUNT,
 ];
 
 export function getTemplate(id: string): StudioTemplate | undefined {
@@ -5812,7 +5820,7 @@ export function getTemplate(id: string): StudioTemplate | undefined {
 /** 갤러리용 공개 목록 — ★scaffold·textStyle(은닉 프롬프트) 절대 미포함. */
 export function listTemplatesPublic() {
   return STUDIO_TEMPLATES.map((t) => ({
-    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', desc: t.desc, useCase: t.useCase, accent: t.accent,
+    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', offer: t.offer || null, desc: t.desc, useCase: t.useCase, accent: t.accent,
     exampleUrl: t.exampleUrl || null, defaultTexts: t.defaultTexts, sample: t.sample,
     // ★ 2026-10-06 세부 카테고리(갤러리 걸러보기 · 20종 이상 카테고리만 · 없으면 null) = image-studio-template-subs.ts
     sub: SUB_BY_ID[t.id] || null,

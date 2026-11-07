@@ -8,7 +8,7 @@
  *   편집 클릭 = data-hjl-part 위임 → onPart(그림 · 버튼 · 띠) · 장 넘김(쪽 번호 화살표 · 넘기기) = onActive.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { buildPosterFrame, countdownEndMs, formatCountdown, type PosterFrameSlide } from './generated/poster-frame';
+import { buildPosterFrame, countdownEndMs, formatCountdown, frameSlidesWithFlat, type PosterFrameSlide } from './generated/poster-frame';
 import { safeFontFamily } from './blockTheme';
 
 export type PosterFramePart = 'image' | 'cta' | 'strip';
@@ -117,11 +117,11 @@ export function PosterFramePreview({
 /** 편집 작업본 · 저장 칸 장 → 그리는 부품 장(장이 없으면 flat 에서 첫 장 · SDK 와 같은 규칙) */
 export function frameSlidesOf(m: Record<string, any>): PosterFrameSlide[] {
   const raw: any[] = Array.isArray(m.poster_slides) ? m.poster_slides : [];
-  if (raw.length > 0) return raw.filter((s) => s && typeof s === 'object').map((s) => ({ ...s, image_url: String(s.image_url || '') }));
   const b0 = Array.isArray(m.buttons) ? m.buttons[0] : null;
-  return [{
-    image_url: String(m.image_url || ''), title: m.title || '', body: m.body || '', eyebrow: m.badge_text || null,
+  // ★ C114 Codex 구현 1R ① 장 + 바깥 칸 폴백 = SDK 와 같은 공용 함수(generated/poster-frame.ts 사본)
+  return frameSlidesWithFlat(raw.filter((s) => s && typeof s === 'object').map((s) => ({ ...s, image_url: String(s.image_url || '') })), {
+    image_url: m.image_url ? String(m.image_url) : null, title: m.title || '', body: m.body || '', eyebrow: m.badge_text || null,
     cta: b0 && (b0.label || b0.action_url) ? { label: b0.label, action_url: b0.action_url ?? null } : null,
     link_url: m.image_link_url || null,
-  }];
+  }, m.design);
 }

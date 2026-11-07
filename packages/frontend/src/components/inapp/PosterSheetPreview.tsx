@@ -22,11 +22,11 @@ export function resolvePosterLayout(design: any): PosterLayout {
   return (POSTER_LAYOUTS as string[]).includes(v) ? (v as PosterLayout) : 'overlay';
 }
 
-/** SDK POSTER_SHEET_DEFAULTS 미러(값이 빠진 장의 폴백 · 편집기는 장마다 명시 기록). */
+/** SDK POSTER_SHEET_DEFAULTS 미러(값이 빠진 장의 폴백 · 편집기는 장마다 명시 기록). ★ 2026-11-08 C114 I-3 이벤트 카드 fit = contain(잘림 0) · 리터럴 안에 주석을 두지 않는다(대조 시험이 글자로 읽는다). */
 export const POSTER_SHEET_DEFAULTS: Record<'event_card' | 'banner_sheet', {
   bg: string; titleColor: string; bodyColor: string; titleSize: number; bodySize: number; fit: 'cover' | 'contain';
 }> = {
-  event_card: { bg: '#f7f1e3', titleColor: '#8a3b1f', bodyColor: '#57534e', titleSize: 26, bodySize: 14, fit: 'cover' },
+  event_card: { bg: '#f7f1e3', titleColor: '#8a3b1f', bodyColor: '#57534e', titleSize: 26, bodySize: 14, fit: 'contain' },
   banner_sheet: { bg: '#db2777', titleColor: '#fde047', bodyColor: '#ffffff', titleSize: 26, bodySize: 19, fit: 'contain' },
 };
 /** overlay(지금 포스터) 기본 — SDK renderPoster 폴백과 같은 값 */
@@ -88,6 +88,8 @@ export function PosterSheetPreview({
   editable?: SheetEditable;
 }) {
   const [own, setOwn] = useState(0);
+  // ★ C114 I-3 그림 원본 비율(주소 → 'w / h') — 이벤트 카드 사진 상자가 이 비율을 따른다(SDK 와 같은 규칙)
+  const [natRatio, setNatRatio] = useState<Record<string, string>>({});
   const list: SheetSlide[] = Array.isArray(slides) && slides.length > 0 ? slides : [{}];
   const count = list.length;
   const idx = Math.max(0, Math.min(count - 1, activeProp ?? own));
@@ -115,7 +117,7 @@ export function PosterSheetPreview({
   };
 
   const fitOf = (d: 'cover' | 'contain') => (s.image_fit === 'cover' || s.image_fit === 'contain' ? s.image_fit : d);
-  const imgSlot = (style: CSSProperties, imgStyle: CSSProperties, fit: 'cover' | 'contain', emptyColor: string, children?: ReactNode) => {
+  const imgSlot = (style: CSSProperties, imgStyle: CSSProperties, fit: 'cover' | 'contain', emptyColor: string, children?: ReactNode, trackRatio = false) => {
     const url = s.image_url ? String(s.image_url) : '';
     const drop = editable ? {
       onClick: (e: MouseEvent) => { if ((e.target as HTMLElement).closest('[data-edit],[data-hjl-part="prev"],[data-hjl-part="next"]')) return; editable.onImagePick(); },
@@ -125,7 +127,9 @@ export function PosterSheetPreview({
     return (
       <div data-hjl-part="media" data-img-slot={editable ? '1' : undefined} {...drop} style={{ ...style, ...(editable ? { cursor: 'pointer' } : {}) }}>
         {url
-          ? <img src={url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} style={{ width: '100%', height: '100%', display: 'block', objectFit: fit, ...imgStyle }} />
+          ? <img src={url} alt="" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+              onLoad={trackRatio ? (e) => { const im = e.currentTarget; if (im.naturalWidth > 0 && im.naturalHeight > 0) { const r = `${im.naturalWidth} / ${im.naturalHeight}`; setNatRatio((m) => (m[url] === r ? m : { ...m, [url]: r })); } } : undefined}
+              style={{ width: '100%', height: '100%', display: 'block', objectFit: fit, ...imgStyle }} />
           : (
             <div style={{ width: '100%', height: '100%', minHeight: 'inherit', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, fontSize: px(12.5), fontWeight: 700, color: emptyColor, border: editable ? '2px dashed rgba(127,127,127,0.35)' : 'none', boxSizing: 'border-box', textAlign: 'center', padding: 10 }}>
               {editable ? '사진을 끌어 놓거나 눌러서 넣기' : '사진 필요'}
@@ -180,7 +184,8 @@ export function PosterSheetPreview({
               ? { position: 'relative', width: '100%', aspectRatio: '4 / 5', maxHeight: px(440), overflow: 'hidden', background: hasImg ? '#23252c' : 'linear-gradient(135deg,#e8e8ee,#d4d4dd)' }
               : { position: 'relative', width: '100%', overflow: 'hidden' },
             multi || !hasImg ? {} : { height: 'auto', maxHeight: px(440) },
-            'cover', '#6b6b75',
+            // ★ C114 K2 이 갈래 = 옛 앱 미리보기 전용(웹 · 웹뷰 = 새 틀) · 여러 장 = 서버가 4:5 로 미리 맞춘 그림 = 맞추기와 같은 결과(잘림 0)
+            multi ? 'contain' : 'cover', '#6b6b75',
             (eyebrowText || s.title || s.body || editable) ? (
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${px(52)}px ${px(22)}px ${px(18)}px`, background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: msgOverlay, maxHeight: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
                 {(eyebrowText || editable) && (
@@ -240,7 +245,8 @@ export function PosterSheetPreview({
           {field('body', { fontSize: bodySize, color: bodyColor, marginTop: px(10), lineHeight: 1.55, whiteSpace: 'pre-wrap' }, s.body)}
         </div>
         <div style={{ position: 'relative' }}>
-          {imgSlot({ position: 'relative', width: '100%', aspectRatio: '4 / 3', overflow: 'hidden', background: fit === 'contain' ? bg : '#e7e0d2' }, {}, fit, '#8a7f6a')}
+          {/* ★ C114 I-3 사진 상자 = 그림 원본 비율(들어오기 전 4:3 자리 · 높이 상한 46vh 는 맞추기로 통째 · SDK renderPosterSheet 와 같은 규칙) */}
+          {imgSlot({ position: 'relative', width: '100%', aspectRatio: natRatio[String(s.image_url || '')] || '4 / 3', maxHeight: px(46 * 8), overflow: 'hidden', background: fit === 'contain' ? bg : '#e7e0d2' }, {}, fit, '#8a7f6a', undefined, true)}
           {pager}
         </div>
       </div>

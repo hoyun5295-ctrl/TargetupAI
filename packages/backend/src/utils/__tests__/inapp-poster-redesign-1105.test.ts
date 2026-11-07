@@ -111,16 +111,17 @@ describe('CT-IA4 서빙 관문', () => {
     expect(parseInAppClientCaps(['poster_baked']).size).toBe(0);
     expect(parseInAppClientCaps(`${'x,'.repeat(25)}poster_baked`).size).toBe(0);
   });
-  it('hard 빠짐 = 내보내지 않음 · soft 만 빠짐 = 사본에서 틀만 지움(저장 행 무변경)', () => {
+  it('★ C114 I-2 내보내지 않음 0 — 판이 빠져도 보낸다 · 카드 판 없음 = 사본에서 틀만 지움(장 수 무관 · 저장 행 무변경) · 나머지 변환 = c114-inapp-serve-1108', () => {
     const baked: any = { id: 'a', template: 'full_image', design: { poster_text: 'baked' }, posterSlides: [{ image_url: '/a.jpg' }] };
-    expect(gateInAppForClient(baked, new Set())).toBeNull();
+    expect(gateInAppForClient(baked, new Set())).toBe(baked);
     expect(gateInAppForClient(baked, new Set(['poster_baked']))).toBe(baked);
     const card: any = { id: 'b', template: 'full_image', design: { poster_frame: 'card', dismiss_mode: 'snooze_day' }, posterSlides: [{ image_url: '/a.jpg' }] };
-    const out = gateInAppForClient(card, new Set())!;
+    const out = gateInAppForClient(card, new Set());
     expect(out.design).toEqual({ dismiss_mode: 'snooze_day' });
     expect(card.design).toEqual({ poster_frame: 'card', dismiss_mode: 'snooze_day' });
     const multi: any = { ...card, posterSlides: [{ image_url: '/a.jpg' }, { image_url: '/b.jpg' }] };
-    expect(gateInAppForClient(multi, new Set())).toBeNull();
+    expect(gateInAppForClient(multi, new Set()).design).toEqual({ dismiss_mode: 'snooze_day' });
+    expect(gateInAppForClient(multi, new Set(['frame_card']))).toBe(multi);
   });
   it('판 낱말 = 서버 = SDK = 앱 계약서', () => {
     expect(quotedList(sdk('inapp.ts'), /export const INAPP_SDK_CAPS = \[([^\]]+)\]/)).toEqual([...INAPP_CLIENT_CAPS]);
@@ -131,6 +132,10 @@ describe('CT-IA4 서빙 관문', () => {
     const iSel = ev.indexOf('selectVariantForCustomer(');
     const iGate = ev.indexOf('.map((m) => gateInAppForClient(m, clientCaps))');
     const iServe = ev.indexOf('.map(toServedMessage)');
+    // ★ C114 K1 순서 = 관문 → 통짜 비우기 → 옛 앱 변환(null 거르기 0)
+    const iLegacy = ev.indexOf('.map((m) => legacyServeTransform(m, clientCaps))');
+    expect(iLegacy).toBeGreaterThan(iServe);
+    expect(ev).not.toContain('m !== null');
     const iOpt = ev.indexOf("i.event_type = 'opt_out'");
     expect(iSel).toBeGreaterThan(-1);
     expect(iGate).toBeGreaterThan(iSel);

@@ -13,7 +13,7 @@ import ModalBase, { ModalButton } from '../dm/modals/ModalBase';
 import { studioFetch } from '../../lib/studio-api';
 import { PosterFramePreview, frameSlidesOf } from './PosterFramePreview';
 import { PosterSheetPreview, resolvePosterLayout } from './PosterSheetPreview';
-import { usesPosterFrame } from './generated/poster-frame';
+import { drawsWithPosterFrame } from './generated/poster-frame';
 
 export interface InAppExampleItem {
   id: string;
@@ -39,7 +39,8 @@ export function MessageShapePreview({ m, height, active, onActive, endAt, copyab
   copyable?: boolean;
 }) {
   const design = m.design && typeof m.design === 'object' ? m.design : null;
-  if (usesPosterFrame(design)) {
+  // ★ C114 I-3 그리는 자리 판정 하나(사진 위 글도 새 틀 · SDK 와 같음)
+  if (drawsWithPosterFrame(design) && frameSlidesOf(m).length > 0) {
     return (
       <PosterFramePreview slides={frameSlidesOf(m)} design={design} accentColor={m.accent_color} badge={m.badge_text}
         endAt={endAt ?? null} height={height} active={active} onActive={onActive} copyable={copyable} />

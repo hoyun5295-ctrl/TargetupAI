@@ -227,3 +227,5 @@ if (typeof window !== 'undefined') {
 }
 
 export { createHjlGlobal, VERSION };
+// ★ 2026-11-08 C114 I-1 웹뷰 호스트 페이지가 window.Hanjullo.renderInAppForHost 로 부른다(IIFE 이름 = Hanjullo)
+export { renderInAppForHost } from '../inapp';

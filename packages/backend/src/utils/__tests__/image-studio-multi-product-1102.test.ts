@@ -350,10 +350,11 @@ describe('S6 화면 계약 — 배선(소스 읽기 · 동작은 S6-가 + 직원
     expect(make).toContain('onClick={() => make.removeItem(it.key)} disabled={busy}');
     const page = read('packages/frontend/src/pages/ImageStudioPage.tsx');
     expect(page).toContain('const busy = !!busyMsg || !!make.busyMsg;');
-    expect(page).toContain('<button onClick={() => generate()} disabled={busy || !ready}');
+    // ★ C114 C 만들기 = 아래 고정 바(commitBar) · 할인 숫자가 틀리면 함께 막힌다
+    expect(page).toContain('<button onClick={() => generate()} disabled={busy || !ready || (!!make.discountBuild && !make.discountBuild.ok)}');
     const dm = read('packages/frontend/src/components/dm/build/StudioInsertModal.tsx');
     expect(dm).toContain('const generating = !!make.busyMsg;');
-    expect(dm).toContain('onClick={generate} disabled={generating}');
+    expect(dm).toContain('onClick={generate} disabled={generating || (!!make.discountBuild && !make.discountBuild.ok)}');
   });
   it('생성 몸 = 칸 순서의 누끼 id 목록 · 옛 단일 칸은 보내지 않는다', () => {
     const gen = make.slice(make.indexOf('const generate = async'), make.indexOf('return {\n    template,'));

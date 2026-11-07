@@ -42,10 +42,12 @@ describe('parsePosterSlides — 파싱/필터', () => {
   });
 });
 
-describe('renderPoster — 캐러셀 분기 (jsdom)', () => {
+// ★ 2026-11-08 C114 I-3 — 사진 위 글(overlay) = 새 틀(poster-frame.ts) · 옛 4:5 cover 캐러셀 · 옛 단일 포스터 경로는 지웠다(잘림 0)
+describe('renderPoster — 사진 위 글 = 새 틀 (jsdom)', () => {
   beforeEach(() => { stubMatchMedia(); document.body.innerHTML = ''; document.head.innerHTML = ''; });
+  const part = (name: string) => Array.from(document.querySelectorAll(`[data-hjl-part="${name}"]`)) as HTMLElement[];
 
-  it('슬라이드 3장 = 캐러셀(트랙 + 이미지 3 + 점 3 + 활성 CTA + 닫기)', () => {
+  it('슬라이드 3장 = 바닥 시트 틀 · 글 얹기 · 그림 3 · 쪽 번호 · 활성 장 버튼 · 닫기 · 다시 보지 않기', () => {
     const mod = makeModule();
     const slides = [
       { image_url: '/s1.jpg', title: '첫 장', body: '본문1', cta: { label: '구매하기', action_url: 'https://m/e1' } },
@@ -53,54 +55,79 @@ describe('renderPoster — 캐러셀 분기 (jsdom)', () => {
       { image_url: '/s3.jpg' },
     ];
     mod.renderPoster(baseMsg({ posterSlides: slides }), '첫 장', '본문1', '/s1.jpg', '', [], 'fade', null, { customer: {} });
-
-    const root = document.querySelector('[data-hanjullo-msg]');
-    expect(root).toBeTruthy();
-    const track = root!.querySelector('[data-hjl-carousel]');
-    expect(track).toBeTruthy();
-    expect(track!.querySelectorAll('img')).toHaveLength(3);
-    expect(root!.querySelectorAll('[data-hjl-dot]')).toHaveLength(3);
-    // 활성(0) CTA = 첫 슬라이드 라벨
-    expect(root!.textContent).toContain('구매하기');
-    expect(root!.textContent).not.toContain('보기'); // 활성 아닌 슬라이드 CTA는 아직 미노출
-    // 닫기 + 다시 보지 않기
-    expect(root!.querySelector('button[aria-label="닫기"]')).toBeTruthy();
-    expect(root!.textContent).toContain('다시 보지 않기');
-    // 슬라이드 오버레이 제목은 전부 렌더
-    expect(root!.textContent).toContain('첫 장');
-    expect(root!.textContent).toContain('둘째 장');
+    const root = document.querySelector('[data-hanjullo-msg]') as HTMLElement;
+    expect(root.getAttribute('data-hjl-frame')).toBe('sheet');
+    expect(root.getAttribute('data-hjl-text')).toBe('live');
+    expect(part('image')).toHaveLength(3);
+    expect(part('pager-text')[0].textContent).toBe('1 / 3');
+    expect(part('cta')[0].textContent).toBe('구매하기');
+    expect(root.textContent).toContain('첫 장');
+    expect(root.textContent).toContain('둘째 장');
+    expect(root.textContent).toContain('다시 보지 않기');
   });
 
-  it('CTA 없는 슬라이드가 활성이어도 안전(빈 CTA 영역) — slide[2] cta 없음', () => {
+  it('그림 = 잘라 채우기(cover) 0 · 4:5 상자 0', () => {
     const mod = makeModule();
-    const slides = [
-      { image_url: '/s1.jpg', cta: { label: 'A', action_url: 'https://m/a' } },
-      { image_url: '/s2.jpg' },
-    ];
-    mod.renderPoster(baseMsg({ posterSlides: slides }), 'x', 'y', '/s1.jpg', '', [], 'fade', null, { customer: {} });
-    // renderActiveCta(1) 직접 호출 시에도 throw 없이 CTA 비움 — 여기선 초기(0)만 확인
-    expect(document.querySelector('[data-hjl-carousel]')).toBeTruthy();
-    expect(document.body.textContent).toContain('A');
+    mod.renderPoster(baseMsg({ posterSlides: [{ image_url: '/s1.jpg' }, { image_url: '/s2.jpg' }] }), 'x', 'y', '/s1.jpg', '', [], 'fade', null, { customer: {} });
+    for (const im of part('image')) {
+      expect(im.style.objectFit).not.toBe('cover');
+    }
+    const all = Array.from(document.querySelectorAll('[data-hanjullo-msg] *')) as HTMLElement[];
+    expect(all.some((e) => (e.style as any).aspectRatio === '4 / 5')).toBe(false);
   });
-});
 
-describe('renderPoster — 단일 포스터(회귀 0)', () => {
-  beforeEach(() => { stubMatchMedia(); document.body.innerHTML = ''; document.head.innerHTML = ''; });
-
-  it('슬라이드 1장 = 단일 포스터(캐러셀 트랙 없음)', () => {
+  it('슬라이드 1장 · 미보유(flat) = 같은 틀 · 원본 비율 · 스크림 제목 · 배지', () => {
     const mod = makeModule();
     mod.renderPoster(baseMsg({ posterSlides: [{ image_url: '/only.jpg' }] }), '제목만', '본문만', '/only.jpg', '', [], 'fade', null, { customer: {} });
-    expect(document.querySelector('[data-hjl-carousel]')).toBeNull();
-    expect(document.querySelector('[data-hanjullo-msg]')).toBeTruthy();
-    expect(document.body.textContent).toContain('제목만');
+    expect((document.querySelector('[data-hanjullo-msg]') as HTMLElement).getAttribute('data-hjl-frame')).toBe('sheet');
+    document.body.innerHTML = '';
+    mod.renderPoster(baseMsg({}), '플랫제목', '플랫본문', '/flat.jpg', 'NEW', [], 'fade', null, { customer: {} });
+    expect(document.body.textContent).toContain('플랫제목');
+    expect(document.body.textContent).toContain('NEW');
+    expect(part('image')).toHaveLength(1);
   });
 
-  it('슬라이드 미보유 = 기존 단일 포스터(imageUrl 사용, 스크림 제목)', () => {
+  it('(C114 Codex 구현 1R ①) 한 장 + 버튼 · 그림 링크가 바깥 칸에만 = 옛 한 장 포스터처럼 그대로', () => {
     const mod = makeModule();
-    mod.renderPoster(baseMsg({}), '플랫제목', '플랫본문', '/flat.jpg', 'NEW', [], 'fade', null, { customer: {} });
-    expect(document.querySelector('[data-hjl-carousel]')).toBeNull();
-    expect(document.body.textContent).toContain('플랫제목');
-    expect(document.body.textContent).toContain('NEW'); // 배지
+    mod.renderPoster(baseMsg({ posterSlides: [{ image_url: '/only.jpg' }], imageLinkUrl: 'https://mall.example/land' }), '바깥 제목', '바깥 본문', '/only.jpg', '',
+      [{ id: 'b1', label: '바깥 버튼', action_url: 'https://mall.example/x', style: 'primary', background_color: '#111827', text_color: '#ffffff' }], 'fade', null, { customer: {} });
+    expect(part('cta')[0].textContent).toBe('바깥 버튼');
+    expect(document.body.textContent).toContain('바깥 제목');
+    expect((part('image')[0] as HTMLElement).getAttribute('role')).toBe('link');
+  });
+
+  it('여러 장 = 장 값 그대로(바깥 버튼으로 채우지 않는다 · 옛 캐러셀 규칙)', () => {
+    const mod = makeModule();
+    mod.renderPoster(baseMsg({ posterSlides: [{ image_url: '/a.jpg' }, { image_url: '/b.jpg' }] }), 'x', 'y', '/a.jpg', '',
+      [{ id: 'b1', label: '바깥 버튼', action_url: 'https://mall.example/x', style: 'primary' }], 'fade', null, { customer: {} });
+    expect(document.body.textContent).not.toContain('바깥 버튼');
+  });
+
+  it('(Codex 구현 2R) 바깥 칸 폴백 = 새 틀 모양만 · 이벤트 카드 · 배너 시트 · 통짜 한 장 = 장 그대로', async () => {
+    const { frameSlidesWithFlat } = await import('../poster-frame');
+    const flat = { image_url: '/f.jpg', title: '바깥', body: '바깥 본문', eyebrow: null, cta: { label: '바깥 버튼', action_url: '/x' }, link_url: '/l' };
+    const one = [{ image_url: '/a.jpg' }];
+    expect(frameSlidesWithFlat(one as any, flat, {})[0]).toMatchObject({ title: '바깥', cta: { label: '바깥 버튼' }, link_url: '/l' });
+    for (const d of [{ poster_layout: 'event_card' }, { poster_layout: 'banner_sheet' }, { poster_text: 'baked' }, { poster_frame: 'card' }]) {
+      expect(frameSlidesWithFlat(one as any, flat, d), JSON.stringify(d)).toEqual(one);
+    }
+    expect(frameSlidesWithFlat([], flat, { poster_layout: 'event_card' })[0]).toMatchObject({ image_url: '/f.jpg', title: '바깥' });
+  });
+
+  it('(Codex 구현 3R) 장 없는 시트 첫 장 = 배지(badge_text) eyebrow 보존 · 기존 장에는 바깥 배지를 섞지 않음', async () => {
+    const { frameSlidesWithFlat } = await import('../poster-frame');
+    const flat = { image_url: '/f.jpg', title: '바깥', body: '', eyebrow: '오늘만', cta: null, link_url: null };
+    for (const d of [{ poster_layout: 'event_card' }, { poster_layout: 'banner_sheet' }, {}]) {
+      expect(frameSlidesWithFlat([], flat, d)[0].eyebrow, JSON.stringify(d)).toBe('오늘만');
+    }
+    expect(frameSlidesWithFlat([{ image_url: '/a.jpg' }] as any, flat, { poster_layout: 'event_card' })[0].eyebrow).toBeUndefined();
+  });
+
+  it('그림도 장도 없음 = 가운데 팝업 폴백', () => {
+    const mod = makeModule();
+    mod.renderPoster(baseMsg({}), '제목', '본문', null, '', [], 'fade', null, { customer: {} });
+    expect(document.querySelector('[data-hjl-frame]')).toBeNull();
+    expect(document.body.textContent).toContain('제목');
   });
 });
 
@@ -108,14 +135,14 @@ describe('renderPoster — 단일 포스터(회귀 0)', () => {
 describe('이미지 클릭 랜딩 (imageLinkUrl · slide link_url)', () => {
   beforeEach(() => { stubMatchMedia(); document.body.innerHTML = ''; document.head.innerHTML = ''; });
 
-  it('캐러셀 — link_url 있는 슬라이드 이미지만 role=link + pointer', () => {
+  it('여러 장 — link_url 있는 슬라이드 이미지만 role=link + pointer', () => {
     const mod = makeModule();
     const slides = [
       { image_url: '/s1.jpg', link_url: 'https://mall.example/event' },
       { image_url: '/s2.jpg' },
     ];
     mod.renderPoster(baseMsg({ posterSlides: slides }), 'x', 'y', '/s1.jpg', '', [], 'fade', null, { customer: {} });
-    const imgs = document.querySelectorAll('[data-hjl-carousel] img');
+    const imgs = document.querySelectorAll('[data-hjl-part="image"]');
     expect(imgs).toHaveLength(2);
     expect((imgs[0] as HTMLElement).getAttribute('role')).toBe('link');
     expect((imgs[0] as HTMLElement).style.cursor).toBe('pointer');

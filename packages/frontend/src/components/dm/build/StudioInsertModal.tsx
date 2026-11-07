@@ -18,7 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { creditText } from '../../../constants/credit';
 import ModalBase, { ModalButton } from '../modals/ModalBase';
 import { useToast } from '../../ToastProvider';
-import TemplatePicker, { type StudioTemplatePublic } from '../../studio/TemplatePicker';
+import TemplatePicker, { ALL_STUDIO_TRACKS, studioTrackOf, type StudioTemplatePublic, type StudioTrackKind } from '../../studio/TemplatePicker';
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../../studio/StudioMake';
 import StudioWatermark from '../../studio/StudioWatermark';
 import StudioLogoControls from '../../studio/StudioLogoControls';
@@ -54,7 +54,9 @@ export default function StudioInsertModal({
   // ★ 2026-09-23 미리보기는 blob 주소로 띄운다. 만든 그림의 주소(`/api/image-studio/temp/:id`)는 로그인 토큰이
   //   있어야 열리는데 `<img src>` 는 토큰을 못 붙여 결과 화면이 빈칸이었다(0922 남지현 접수 · 「이 그림 넣기」는 tempId 로 저장해 정상).
   //   preview = null 은 미리보기를 못 받은 경우다 — 넣기는 그대로 된다.
-  const [made, setMade] = useState<({ tempId: string; preview: string | null; texts: StudioTexts; textless: boolean } & LogoCardState) | null>(null);
+  const [made, setMade] = useState<({ tempId: string; preview: string | null; texts: StudioTexts; textless: boolean; discountCheck?: string | null } & LogoCardState) | null>(null);
+  // ★ 2026-11-08 C114 K6 글 없는 장(인앱 글 얹기) = 제품 · 행사만(할인 포스터는 숫자가 그림에 들어간다) · 그 밖 = 셋 다
+  const allowedKinds: readonly StudioTrackKind[] = textless ? ['product', 'event'] : ALL_STUDIO_TRACKS;
   const [saving, setSaving] = useState(false);
   const [storageFull, setStorageFull] = useState(false);
   const [libOpen, setLibOpen] = useState(false);
@@ -83,7 +85,7 @@ export default function StudioInsertModal({
       studioFetch('/api/image-studio/templates').then(({ data }) => {
         if (!alive) return;
         const list: StudioTemplatePublic[] = Array.isArray(data?.templates) ? data.templates : [];
-        const hit = list.find((t) => t.id === initialTemplateId);
+        const hit = list.find((t) => t.id === initialTemplateId && allowedKinds.includes(studioTrackOf(t)));
         if (hit) { setTemplate(hit); setStep('make'); }
       }).catch(() => { /* 고르기부터 */ });
       return () => { alive = false; };
@@ -97,7 +99,7 @@ export default function StudioInsertModal({
     if (!r) return;
     dropPreview();
     previewUrl.current = r.preview;
-    setMade({ tempId: r.tempId, preview: r.preview, texts: r.texts, textless: r.textless, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed });
+    setMade({ tempId: r.tempId, preview: r.preview, texts: r.texts, textless: r.textless, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed, discountCheck: r.discountCheck ?? null });
     setStorageFull(false);
     setStep('result');
   };
@@ -146,9 +148,12 @@ export default function StudioInsertModal({
 
   const footer = step === 'make' ? (
     <div className="flex items-center gap-2 flex-wrap justify-end w-full">
-      {generating && <span className="flex-1 min-w-[12rem] text-[11.5px] text-slate-500">만드는 중이에요(약 20~30초). 창을 닫아도 다시 열면 이어서 볼 수 있어요.</span>}
+      {generating && <span className="flex-1 min-w-[12rem] text-[12px] text-slate-500">만드는 중이에요(약 20~30초). 창을 닫아도 다시 열면 이어서 볼 수 있어요.</span>}
+      {!generating && make.discountBuild && (
+        <span className={`flex-1 min-w-[12rem] text-[12px] break-keep ${make.discountBuild.ok ? 'text-rose-700 font-semibold' : 'text-slate-400'}`}>{make.discountBuild.ok ? make.discountBuild.line : make.discountBuild.error}</span>
+      )}
       <ModalButton onClick={() => setStep('pick')} disabled={generating}>다른 템플릿</ModalButton>
-      <ModalButton variant="primary" onClick={generate} disabled={generating}>{generating ? '만드는 중...' : `만들기 (${creditText('image-studio-generate')})`}</ModalButton>
+      <ModalButton variant="primary" onClick={generate} disabled={generating || (!!make.discountBuild && !make.discountBuild.ok)}>{generating ? '만드는 중...' : `만들기 (${creditText('image-studio-generate')})`}</ModalButton>
     </div>
   ) : step === 'result' ? (
     <div className="flex items-center gap-2 flex-wrap justify-end w-full">
@@ -174,6 +179,7 @@ export default function StudioInsertModal({
             onPick={(t) => { setTemplate(t); setStep('make'); }}
             autoOpenIndustry
             gridClassName="grid grid-cols-2 sm:grid-cols-3 gap-3"
+            allowedKinds={allowedKinds}
           />
         )}
         {step === 'make' && template && (
@@ -193,6 +199,9 @@ export default function StudioInsertModal({
               <div className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-10 text-center text-[12.5px] text-slate-500">
                 미리보기를 불러오지 못했어요. 「이 그림 넣기」를 누르면 만든 그림이 그대로 들어갑니다.
               </div>
+            )}
+            {made.discountCheck && (
+              <p className="rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-800 break-keep">포스터에 들어간 숫자: <b className="font-bold">{made.discountCheck}</b>. 그림 속 숫자가 같은지 꼭 확인해 주세요.</p>
             )}
             <StudioLogoControls logo={made.logo} failed={made.logoFailed} saved={false} disabled={saving || generating} onChange={(s) => void applyLogo(s)} onFind={make.findLogo} onUse={(lc) => void saveLogoFor(lc)} />
             {storageFull && (

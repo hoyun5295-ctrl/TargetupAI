@@ -203,6 +203,13 @@ export function hasBenefitPattern(text: string | undefined | null): boolean {
 
 // ── buildPosterPrompt (★v2 재정의 — 템플릿 스캐폴드 + 지정 문구까지 AI가 완성 포스터로 렌더) ──
 import type { StudioTemplate } from './image-studio-templates';
+import { discountPromptLines, discountFixedLayoutLine, type DiscountOffer } from './studio-discount';
+
+/**
+ * ★ 2026-11-08 C114 D 글자 바닥 — 글 있는 모든 포스터(템플릿 textStyle 의 small · light · thin 을 이긴다 · 마지막 금지 줄 바로 앞).
+ *   Harold 1108 「지금 우리 기존 템플릿들도 텍스트가 너무 보기에 작고」 · 템플릿 782종 데이터는 고치지 않고 이 한 줄.
+ */
+export const POSTER_LEGIBILITY_FLOOR = 'Legibility floor for phone screens (overrides any small, thin or light wording in the typography direction): the headline must be large and bold, at least about 5% of the poster height, any secondary line at least about 2.5% of the poster height, no hairline-thin weights for the headline, and no tiny fine print anywhere.';
 
 export interface PosterTexts {
   label?: string | null;    // 작은 상단 라벨 (예: ONLINE EXCLUSIVE)
@@ -228,6 +235,10 @@ export function buildPosterPrompt(input: {
   scaffold?: string | null;
   /** ★ 2026-11-02 제품 사진 장수(2~3장 = 서버가 한 장으로 묶어 넘긴다 · 개수 줄 한 줄 더함) · 미지정 · 1 = 지금 출력 그대로 */
   productCount?: number;
+  /** ★ 2026-11-08 C114 B 할인 템플릿 혜택(검사 끝난 값 · readDiscountOffer) · 할인 트랙만 */
+  offer?: DiscountOffer | null;
+  /** ★ C114 E 브랜드 키트 강조색(할인 트랙만 · 6자리 hex 만 줄이 된다) */
+  brandColor?: string | null;
 }): string {
   const { template, preset, texts } = input;
   const lines: string[] = [];
@@ -278,6 +289,10 @@ export function buildPosterPrompt(input: {
     } else {
       lines.push(`Typography direction: ${template.textStyle}`);
     }
+    // ★ 2026-11-08 C114 B 할인 혜택 줄 = 지정 문구 뒤 · 마지막 금지 줄 앞(그릴 숫자 = 지정 문구 · 금지 줄이 막지 않는다)
+    if (input.offer) lines.push(...discountPromptLines(input.offer, input.brandColor));
+    // ★ 2026-11-08 C114 D 글자 바닥(모든 글 있는 포스터 · Harold 1108 「텍스트가 너무 보기에 작고」)
+    lines.push(POSTER_LEGIBILITY_FLOOR);
   } else {
     lines.push('This poster has no text, pure visual composition with space that could hold a headline.');
   }
@@ -293,6 +308,9 @@ export function buildPosterPrompt(input: {
         : 'in the lower third of the poster. Do NOT place it in the upper or middle part';
     lines.push(`FINAL LAYOUT RULE: this single rule overrides every placement direction mentioned anywhere above, including the typography direction: place the entire text block (label, headline and sub-headline together as one group) ${pos}.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''} Compose the scene so the area behind the text block stays visually calm and uncluttered for readability.`);
   }
+
+  // ★ C114 B 할인 = 최후미 고정 틀(맨 위 제품명 → 혜택 → 정해진 제품 자리 · 숫자 그대로)
+  if (given.length && input.offer) lines.push(discountFixedLayoutLine(input.offer));
 
   return lines.join('\n');
 }

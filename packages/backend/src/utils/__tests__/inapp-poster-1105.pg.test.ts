@@ -110,12 +110,16 @@ describe('[반영] 통짜 전환 · 변형 규칙(부모 선잠금)', () => {
 });
 
 describe('서빙 관문 · 통짜 비우기 · 변형 끝 시각', () => {
-  it('caps 없음 = 통짜 0 · 한 장 카드 = 틀만 지움 · caps 있음 = 통짜 비워서', async () => {
+  // ★ 2026-11-08 C114 I-2 = 내보내지 않음 0(Harold 「업체 앱에 판을 올리라고 할 수 없다」) — caps 없음도 통짜를 보낸다(글 비움 · 대체 글)
+  it('caps 없음 = 통짜도 보낸다(글 비움 · 대체 글) · 카드 = 틀만 지움 · caps 있음 = 통짜 비워서 · 틀 그대로', async () => {
     const baked = await createInAppMessage(CO, OWNER, poster({ title: '서빙 통짜', design: { poster_text: 'baked' }, poster_slides: [slide({ title: '서빙 통짜' })] }) as any);
     const card = await createInAppMessage(CO, OWNER, poster({ title: '서빙 카드', design: { poster_frame: 'card' }, poster_slides: [slide({ title: '서빙 카드' })] }) as any);
     const anon = randomUUID();
     const none = await getActiveMessagesForCustomerV2({ companyId: CO, anonymousId: anon, channel: 'web' });
-    expect(none.find((m) => m.id === baked.id)).toBeUndefined();
+    const b0 = none.find((m) => m.id === baked.id)!;
+    expect(b0).toBeTruthy();
+    expect(b0.title).toBe('');
+    expect(b0.posterSlides[0].alt).toBe('서빙 통짜');
     const c0 = none.find((m) => m.id === card.id)!;
     expect(c0.design?.poster_frame).toBeUndefined();
     const all = await getActiveMessagesForCustomerV2({ companyId: CO, anonymousId: randomUUID(), channel: 'web', clientCaps: ALL_CAPS });
@@ -125,11 +129,12 @@ describe('서빙 관문 · 통짜 비우기 · 변형 끝 시각', () => {
     expect(b.posterSlides[0].alt).toBe('서빙 통짜');
     expect(all.find((m) => m.id === card.id)!.design?.poster_frame).toBe('card');
   });
-  it('20개 채우기 = 걸러진 뒤 수(통짜 25개가 앞에 있어도 뒤의 보통 메시지 3개를 준다)', async () => {
+  // ★ C114 I-2 거르기 0 → caps 와 무관하게 쪽 상한(20)까지 채운다(통짜도 옛 앱 꼴로 나간다)
+  it('20개 채우기 = caps 없음 · 있음 모두 20(통짜 25 + 보통 3 · 거르는 것 0)', async () => {
     for (let i = 0; i < 3; i++) await createInAppMessage(CO_PAGE, OWNER2, poster({ title: `보통 ${i}`, poster_slides: [slide({ title: `보통 ${i}` })] }) as any);
     for (let i = 0; i < 25; i++) await createInAppMessage(CO_PAGE, OWNER2, poster({ title: `통짜 ${i}`, design: { poster_text: 'baked' }, poster_slides: [slide({ title: `통짜 ${i}` })] }) as any);
     const out = await getActiveMessagesForCustomerV2({ companyId: CO_PAGE, anonymousId: randomUUID(), channel: 'web' });
-    expect(out.map((m) => m.title).sort()).toEqual(['보통 0', '보통 1', '보통 2']);
+    expect(out.length).toBe(20);
     const withCaps = await getActiveMessagesForCustomerV2({ companyId: CO_PAGE, anonymousId: randomUUID(), channel: 'web', clientCaps: ALL_CAPS });
     expect(withCaps.length).toBe(20);
   });

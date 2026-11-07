@@ -32,7 +32,7 @@ import { HanjulloJourneyVariantsModule } from './journey-variants';
 
 export * from './types';
 export { HanjulloPushModule } from './push';
-export { HanjulloInAppModule } from './inapp';
+export { HanjulloInAppModule, defaultHostBridge, renderInAppForHost, type InAppHostEvent } from './inapp';
 export { HanjulloJourneyVariantsModule } from './journey-variants';
 // ★ D230+ 2026-06-27 — In-app 블록 조립 + 테마 (content_blocks 렌더)
 export { resolveTheme, type InAppTheme, type ThemeKey } from './inapp-theme';

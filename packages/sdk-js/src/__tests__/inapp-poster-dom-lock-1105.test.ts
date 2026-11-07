@@ -5,6 +5,8 @@ import { HanjulloInAppModule } from '../inapp';
  * ★ 2026-11-05 인앱 포스터 재구성 CT-IA7 — 지금 3모양(overlay 한 장 · overlay 캐러셀 · 이벤트 카드 · 배너 시트) DOM 잠금.
  *   설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §3-7: 스크림을 그리는 부품(poster-frame.ts)으로 옮기기 **전에**
  *   이 스냅샷을 먼저 쓰고, 옮긴 뒤 같은지 본다(바뀌면 빨간불). 새 키(통짜 · 카드 · 띠)가 없는 메시지는 지금 경로 그대로여야 한다.
+ * ★ 2026-11-08 C114 I-3 = 의도한 바꿈으로 스냅샷을 다시 찍었다(설계서 docs/2026-11-08-c114-roadmap-v2-design.md · Codex 설계 3R approve):
+ *   사진 위 글 한 장 · 여러 장 = 새 틀(잘림 0 · 옛 4:5 cover 캐러셀 삭제) · 이벤트 카드 사진 기본 = 맞추기(contain). 그 밖 바뀜 = 빨간불.
  */
 function stubMatchMedia() {
   (window as any).matchMedia = (q: string) => ({

@@ -12,7 +12,7 @@
  */
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { creditText } from '../../constants/credit';
-import { ShoppingBag, Sparkles, ChevronLeft, Search, X } from 'lucide-react';
+import { ShoppingBag, Sparkles, ChevronLeft, Search, X, Tag } from 'lucide-react';
 import ZoneSegmented from '../zone/ZoneSegmented';
 import { studioFetch } from '../../lib/studio-api';
 
@@ -20,8 +20,10 @@ export interface StudioTemplatePublic {
   id: string; name: string; category: string; desc: string; accent: string;
   /** ★ 2026-08-11 추천 용도 — "어떤 제품라인·행사에 쓰면 좋은가". desc가 그림이면 이쪽은 고르는 기준이다. */
   useCase?: string;
-  /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터) / 'event'(행사 포스터·제품 없이 성립). 서버 미제공 시 product */
-  kind?: 'product' | 'event';
+  /** ★ 2026-07-31 트랙 축 — 'product'(제품 포스터) / 'event'(행사 포스터·제품 없이 성립) / ★ 2026-11-08 C114 'discount'(할인 포스터). 서버 미제공 시 product */
+  kind?: 'product' | 'event' | 'discount';
+  /** ★ C114 할인 트랙만 — 혜택 꼴(가격 할인 · 하나 더 · 세트) · 제작 칸이 이 값을 따른다 */
+  offer?: 'price' | 'nplus' | 'set' | null;
   exampleUrl: string | null;
   defaultTexts: { label?: string; title?: string; subtitle?: string };
   /** 카드 목업 예시 카피(템플릿 무드별 실카피). */
@@ -31,10 +33,22 @@ export interface StudioTemplatePublic {
 }
 
 const TPL_PAGE_SIZE = 10;
+
+/** ★ 2026-11-08 C114 트랙 카드(가운뎃점 없는 고객 문장) */
+const TRACK_CARDS: Array<{ kind: StudioTrackKind; name: string; desc: string; icon: typeof ShoppingBag; on: string; iconOn: string }> = [
+  { kind: 'product', name: '제품 포스터', desc: '내 상품이 주인공이에요. 제품 사진을 넣으면 원본 그대로 두고 배경과 문구를 새로 그려요.', icon: ShoppingBag, on: 'border-violet-300 bg-violet-50', iconOn: 'text-violet-700' },
+  { kind: 'event', name: '행사 포스터', desc: '멤버십 데이, 오픈, 시즌 행사 안내예요. 제품 없이 행사명과 문구만으로 완성돼요.', icon: Sparkles, on: 'border-fuchsia-300 bg-fuchsia-50', iconOn: 'text-fuchsia-700' },
+  { kind: 'discount', name: '할인 포스터', desc: '원래 가격과 판매가, 2+1, 세트가를 정해진 자리에 크게 넣어요. 숫자만 넣으면 돼요.', icon: Tag, on: 'border-rose-300 bg-rose-50', iconOn: 'text-rose-600' },
+];
 const DEFAULT_GRID = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4';
 
+export type StudioTrackKind = 'product' | 'event' | 'discount';
+export const ALL_STUDIO_TRACKS: readonly StudioTrackKind[] = ['product', 'event', 'discount'];
+/** 템플릿 트랙(서버 미제공 = product) — 트랙을 읽는 자리는 이 함수 하나 */
+export const studioTrackOf = (t: { kind?: string | null } | null | undefined): StudioTrackKind => (t?.kind === 'event' || t?.kind === 'discount' ? t.kind : 'product');
+
 export default function TemplatePicker({
-  onPick, rootExtra, autoOpenIndustry = false, gridClassName = DEFAULT_GRID,
+  onPick, rootExtra, autoOpenIndustry = false, gridClassName = DEFAULT_GRID, allowedKinds = ALL_STUDIO_TRACKS,
 }: {
   onPick: (t: StudioTemplatePublic) => void;
   /** 첫 화면(카테고리 미선택 · 검색어 없음)에만 위에 붙는 것 — 스튜디오의 「내 라이브러리」 띠 */
@@ -43,6 +57,8 @@ export default function TemplatePicker({
   autoOpenIndustry?: boolean;
   /** 격자 열 수는 화면 폭 기준이라, 좁은 창은 열을 줄여 카드를 키운다 */
   gridClassName?: string;
+  /** ★ 2026-11-08 C114 K6 이 창이 고를 수 있는 트랙(한 줄 헤드라인 · 인앱 글 없는 장 = 제품 · 행사만 · 할인 = 숫자 칸이 있는 스튜디오 · DM 창) */
+  allowedKinds?: readonly StudioTrackKind[];
 }) {
   // 템플릿 — 카테고리 우선 탐색(카테고리 목록 → 템플릿 목록 2단)
   const [templates, setTemplates] = useState<StudioTemplatePublic[]>([]);
@@ -50,7 +66,7 @@ export default function TemplatePicker({
   const [industryCategories, setIndustryCategories] = useState<string[] | null>(null);
   const [category, setCategory] = useState<string | null>(null);
   // ★ 2026-07-31 트랙 축 — 제품 포스터(누끼) / 행사 포스터(멤버십데이·오픈·시즌 행사, 제품 없이 성립)
-  const [trackKind, setTrackKind] = useState<'product' | 'event'>('product');
+  const [trackKind, setTrackKind] = useState<StudioTrackKind>('product');
   // ★ 2026-10-06 (Harold) 세부 카테고리 칩 · 템플릿 검색 — 502종을 카테고리 한 겹으로는 못 고른다.
   //   sub = '' 이면 카테고리 전체. 검색어가 있으면 트랙 · 카테고리와 무관하게 전부에서 찾는다.
   const [subOrder, setSubOrder] = useState<Record<string, string[]>>({});
@@ -61,12 +77,12 @@ export default function TemplatePicker({
     let alive = true;
     studioFetch('/api/image-studio/templates').then(({ data }) => {
       if (!alive) return;
-      const list: StudioTemplatePublic[] = Array.isArray(data?.templates) ? data.templates : [];
+      const list: StudioTemplatePublic[] = (Array.isArray(data?.templates) ? data.templates : []).filter((t: StudioTemplatePublic) => allowedKinds.includes(studioTrackOf(t)));
       const ic: string[] | null = Array.isArray(data?.industryCategories) && data.industryCategories.length ? data.industryCategories : null;
       setTemplates(list);
       setSubOrder(data?.subOrder && typeof data.subOrder === 'object' ? data.subOrder : {});
       setIndustryCategories(ic);
-      if (autoOpenIndustry && ic && ic.length === 1 && list.some((t) => (t.kind || 'product') === 'product' && t.category === ic[0])) {
+      if (autoOpenIndustry && ic && ic.length === 1 && list.some((t) => studioTrackOf(t) === 'product' && t.category === ic[0])) {
         setTrackKind('product');
         setCategory(ic[0]);
       }
@@ -81,7 +97,7 @@ export default function TemplatePicker({
   const categories = useMemo(() => {
     const map = new Map<string, { count: number; accents: string[] }>();
     for (const t of templates) {
-      if ((t.kind || 'product') !== trackKind) continue;
+      if (studioTrackOf(t) !== trackKind) continue;
       const e = map.get(t.category) || { count: 0, accents: [] };
       e.count++;
       if (e.accents.length < 3) e.accents.push(t.accent);
@@ -111,7 +127,7 @@ export default function TemplatePicker({
       .map((x) => x.t);
   }, [templates, searchKey]);
   const inCategory = useMemo(
-    () => (category ? templates.filter((t) => (t.kind || 'product') === trackKind && t.category === category) : []),
+    () => (category ? templates.filter((t) => studioTrackOf(t) === trackKind && t.category === category) : []),
     [templates, category, trackKind],
   );
   // 세부 칩 = 서버가 준 순서 · 그 카테고리에 실제 있는 것만 · 맨 앞 「전체」.
@@ -174,32 +190,28 @@ export default function TemplatePicker({
       {/* 1단계-a — 카테고리 선택 */}
       {loaded && isRoot && (
         <section>
-          {/* ★ 2026-07-31 트랙 축 — 제품 포스터 / 행사 포스터 명확 분리 (Harold) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
-            <button
-              type="button"
-              onClick={() => { setTrackKind('product'); setCategory(null); }}
-              className={`rounded-2xl border p-4 text-left transition ${trackKind === 'product' ? 'border-violet-300 bg-violet-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <ShoppingBag className={`w-4 h-4 ${trackKind === 'product' ? 'text-violet-700' : 'text-slate-400'}`} />
-                <span className="text-sm font-bold text-slate-900">제품 포스터</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">내 상품이 주인공: 제품 사진을 넣으면 원본 그대로 보존하고 배경·문구를 새로 그립니다.</p>
-            </button>
-            <button
-              type="button"
-              onClick={() => { setTrackKind('event'); setCategory(null); }}
-              className={`rounded-2xl border p-4 text-left transition ${trackKind === 'event' ? 'border-fuchsia-300 bg-fuchsia-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Sparkles className={`w-4 h-4 ${trackKind === 'event' ? 'text-fuchsia-700' : 'text-slate-400'}`} />
-                <span className="text-sm font-bold text-slate-900">행사 포스터</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">멤버십데이·오픈·시즌 행사 안내: 제품 없이 행사명과 문구만으로 완성됩니다.</p>
-            </button>
+          {/* ★ 2026-07-31 트랙 축 — 제품 포스터 / 행사 포스터 명확 분리 (Harold) · ★ 2026-11-08 C114 셋째 = 할인 포스터(이 창이 허용한 트랙만) */}
+          <div className={`grid grid-cols-1 ${allowedKinds.length >= 3 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'} gap-3 mb-5`}>
+            {TRACK_CARDS.filter((c) => allowedKinds.includes(c.kind)).map((c) => {
+              const on = trackKind === c.kind;
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.kind}
+                  type="button"
+                  onClick={() => { setTrackKind(c.kind); setCategory(null); }}
+                  className={`rounded-2xl border p-4 text-left transition ${on ? c.on : 'border-slate-200 bg-white hover:border-slate-300'}`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon className={`w-4 h-4 ${on ? c.iconOn : 'text-slate-400'}`} />
+                    <span className="text-sm font-bold text-slate-900">{c.name}</span>
+                  </div>
+                  <p className="text-[12px] text-slate-500 leading-relaxed break-keep">{c.desc}</p>
+                </button>
+              );
+            })}
           </div>
-          <h2 className="text-sm font-bold text-slate-800 mb-3">{trackKind === 'event' ? '어떤 행사인가요?' : '어떤 종류의 포스터인가요?'}</h2>
+          <h2 className="text-sm font-bold text-slate-800 mb-3">{trackKind === 'event' ? '어떤 행사인가요?' : trackKind === 'discount' ? '어떤 혜택인가요?' : '어떤 종류의 포스터인가요?'}</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             {categories.map((c) => (
               <button type="button" key={c.name} onClick={() => setCategory(c.name)} className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-violet-300 hover:bg-slate-100 transition">

@@ -69,7 +69,7 @@ describe('event_card', () => {
     expect(part('foot-close')[0].textContent).toBe('닫기');
   });
 
-  it('값이 빠진 장 = 기본값(글 칸 바탕 · 제목색 · 크기 · cover)', () => {
+  it('값이 빠진 장 = 기본값(글 칸 바탕 · 제목색 · 크기 · ★C114 맞추기 contain = 잘림 0)', () => {
     const mod = makeModule();
     mod.renderPoster(msg({ design: { poster_layout: 'event_card' }, posterSlides: [{ image_url: '/a.jpg', title: 't', body: 'b' }] }), 'T', 'B', '/a.jpg', '', [], 'fade', null, { customer: {} });
     const D = POSTER_SHEET_DEFAULTS.event_card;
@@ -77,7 +77,18 @@ describe('event_card', () => {
     expect((part('title')[0] as HTMLElement).style.color).toBe(rgb(D.titleColor));
     expect((part('title')[0] as HTMLElement).style.fontSize).toBe(`${D.titleSize}px`);
     expect((part('body')[0] as HTMLElement).style.fontSize).toBe(`${D.bodySize}px`);
-    expect((part('media')[0].querySelector('img') as HTMLImageElement).style.objectFit).toBe('cover');
+    expect((part('media')[0].querySelector('img') as HTMLImageElement).style.objectFit).toBe('contain');
+  });
+
+  it('★C114 I-3 사진 상자 = 그림이 들어오면 원본 비율(4:3 고정 0)', () => {
+    const mod = makeModule();
+    mod.renderPoster(msg({ design: { poster_layout: 'event_card' }, posterSlides: [{ image_url: '/a.jpg', title: 't' }] }), 'T', 'B', '/a.jpg', '', [], 'fade', null, { customer: {} });
+    const media = part('media')[0] as HTMLElement;
+    const img = media.querySelector('img') as HTMLImageElement;
+    Object.defineProperty(img, 'naturalWidth', { configurable: true, get: () => 1536 });
+    Object.defineProperty(img, 'naturalHeight', { configurable: true, get: () => 2048 });
+    img.dispatchEvent(new Event('load'));
+    expect((media.style as any).aspectRatio).toBe('1536 / 2048');
   });
 
   it('dismiss_mode 없음 = 「다시 보지 않기」(지금 동작)', () => {
@@ -167,11 +178,11 @@ describe('banner_sheet', () => {
 describe('overlay(지금 포스터) 회귀 0', () => {
   beforeEach(() => { finePointer = false; stubMatchMedia(); document.body.innerHTML = ''; document.head.innerHTML = ''; localStorage.clear(); sessionStorage.clear(); });
 
-  it('design 없음 · 1장 = 단일 포스터(레이아웃 표시 없음)', () => {
+  it('design 없음 · 1장 = 새 틀 바닥 시트(★C114 I-3 · 시트 레이아웃 표시 없음)', () => {
     const mod = makeModule();
     mod.renderPoster(msg({ posterSlides: [{ image_url: '/a.jpg' }] }), 'T', 'B', '/a.jpg', '', [], 'fade', null, { customer: {} });
     expect(document.querySelector('[data-hjl-layout]')).toBeNull();
-    expect(document.querySelector('[data-hjl-carousel]')).toBeNull();
+    expect((document.querySelector('[data-hanjullo-msg]') as HTMLElement).getAttribute('data-hjl-frame')).toBe('sheet');
   });
 
   it('overlay 캐러셀 = 장마다 라벨(없으면 메시지 배지)', () => {

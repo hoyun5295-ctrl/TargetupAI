@@ -146,6 +146,11 @@ export const INAPP_STRIP_CODE_RE = /^[0-9A-Za-z가-힣_-]+$/;
  */
 export const INAPP_CLIENT_CAPS = ['poster_baked', 'frame_card', 'strip_coupon', 'strip_countdown'] as const;
 export type InAppClientCap = typeof INAPP_CLIENT_CAPS[number];
+/**
+ * ★ 2026-11-08 C114 I-1 웹뷰 호스트(계약 v5) 낱말 — 웹뷰 앱은 우리 웹 SDK 가 그린다 = 판 넷을 다 가진 것과 같다.
+ *   앱은 이 낱말 하나만 보내면 된다(모양이 늘어도 앱을 다시 고치지 않는다 · 설계서 docs/2026-11-08-c114-roadmap-v2-design.md §3 I-1).
+ */
+export const INAPP_WEBVIEW_CAP = 'webview';
 
 // ★ 2026-07-19 포스터 색 hex = 3/4/6/8자리만 (5·7자리는 RN 색 파서가 거부 — Codex 지적. CSS·RN 공통 유효 길이).
 //   design(제목/본문 색) + poster_slides(슬라이드별 색·CTA 색) 공용 단일 기준.
@@ -661,6 +666,7 @@ export function parseInAppClientCaps(raw: any): Set<InAppClientCap> {
   const s = typeof raw === 'string' ? raw.slice(0, 200) : '';
   for (const w of s.split(',').slice(0, 20)) {
     const t = w.trim();
+    if (t === INAPP_WEBVIEW_CAP) { for (const c of INAPP_CLIENT_CAPS) out.add(c); continue; }
     if ((INAPP_CLIENT_CAPS as readonly string[]).includes(t)) out.add(t as InAppClientCap);
   }
   return out;
@@ -1432,17 +1438,91 @@ export interface ActiveMessagesInput {
 }
 
 /**
- * ★ 2026-11-05 §3-2 서빙 관문 한 곳 — hard 판이 빠진 클라이언트 = null(내보내지 않는다 · 잘린 그림 · 빠진 쿠폰 코드 0) ·
- *   soft 만 빠짐 = 응답 사본에서 틀을 지운다(바닥 시트로 그린다 · 내용 손실 0). 저장 행 무변경(사본만). 순수.
+ * ★ 2026-11-05 §3-2 서빙 관문 한 곳 · ★ 2026-11-08 C114 I-2 = **내보내지 않음 0**(Harold 「업체 앱에 판을 올리라고 할 수 없다」).
+ *   떠 있는 카드 판(frame_card)이 없는 클라이언트 = 장 수와 무관하게 응답 사본에서 틀을 지운다(바닥 시트로 그린다).
+ *   통짜 · 띠 판이 없는 클라이언트는 여기서 거르지 않고 toServedMessage → legacyServeTransform 이 그 앱이 그릴 수 있는 꼴로 바꾼다.
+ *   저장 행 무변경(사본만). 순수.
  */
-export function gateInAppForClient(m: InAppMessageDetail, caps: ReadonlySet<string>): InAppMessageDetail | null {
+export function gateInAppForClient(m: InAppMessageDetail, caps: ReadonlySet<string>): InAppMessageDetail {
   const need = inAppRequiredCaps(m);
-  if (need.hard.some((c) => !caps.has(c))) return null;
-  if (need.soft.some((c) => !caps.has(c)) && m.design && typeof m.design === 'object') {
+  const needsFrame = need.hard.includes('frame_card') || need.soft.includes('frame_card');
+  if (needsFrame && !caps.has('frame_card') && m.design && typeof m.design === 'object') {
     const { poster_frame: _drop, ...rest } = m.design;
     return { ...m, design: rest };
   }
   return m;
+}
+
+/** ★ C114 I-2 옛 앱 그림 미리 맞춤 — 우리가 서빙하는 인앱 그림 주소 두 꼴(올린 그림 · 예시 그림)만 · 남의 주소 = 그대로 */
+const OWN_INAPP_IMAGE_RE = /^(?:https?:\/\/[^/?#]+)?\/api\/cdp\/inapp\/(?:image\/[0-9a-f-]{36}\/[^/?#]+|example-image\/[^/?#]+\/\d+)(?:\?[^#]*)?$/i;
+export function withInAppImageFit(url: string, aspect: '4x5'): string {
+  const u = String(url || '').trim();
+  if (!OWN_INAPP_IMAGE_RE.test(u)) return u;
+  if (/[?&]fit=/.test(u)) return u;
+  return `${u}${u.includes('?') ? '&' : '?'}fit=${aspect}`;
+}
+
+/** 게시 끝 시각 → 「11월 30일 23:59」(한국 시각 · 순수) · 없음 · 잘못된 값 = null */
+export function inAppDeadlineText(endAt: Date | string | number | null | undefined): string | null {
+  if (endAt === null || endAt === undefined || endAt === '') return null;
+  const ms = endAt instanceof Date ? endAt.getTime() : new Date(endAt).getTime();
+  if (!Number.isFinite(ms)) return null;
+  const k = new Date(ms + 9 * 3600 * 1000);
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${k.getUTCMonth() + 1}월 ${k.getUTCDate()}일 ${p2(k.getUTCHours())}:${p2(k.getUTCMinutes())}`;
+}
+
+/**
+ * ★ 2026-11-08 C114 I-2 옛 앱 서버 변환 — caps 에 없는 판을 그 앱이 그릴 수 있는 꼴로(서빙 사본만 · 순수 · toServedMessage 뒤 · K1).
+ *   ① 띠 판이 없음 = 띠를 지우고 글 한 줄(쿠폰 = 「쿠폰 코드 X」 · 남은 시간 = 「11월 30일 23:59까지」)을 메시지 본문 · 첫 장 본문 끝에.
+ *      대체 줄을 넣은 통짜 = poster_text 를 지워 글 얹기로 내린다(Codex 설계 1R ① · 통짜 틀은 본문을 그리지 않는다 · 글은 이미 비었다).
+ *   ② v4 판이 하나도 없는 옛 렌더러(v2 · v3) = 여러 장 그림 주소에 ?fit=4x5(옛 캐러셀 = 4:5 cover · 미리 맞추면 잘림 0) ·
+ *      이벤트 카드 = 장 image_fit contain(옛 v3 = 4:3 cover · 잘림 0).
+ *   웹 SDK · 웹뷰(판 넷) = 변환 0.
+ */
+export function legacyServeTransform(m: InAppMessageDetail, caps: ReadonlySet<string>): InAppMessageDetail {
+  if (!isPosterFamily(m)) return m;
+  let out: InAppMessageDetail = m;
+  const d: Record<string, any> | null = out.design && typeof out.design === 'object' ? out.design : null;
+  const strip = d && d.poster_strip && typeof d.poster_strip === 'object' ? d.poster_strip : null;
+  const stripType = strip ? String(strip.type || '') : '';
+  const stripMissing = (stripType === 'coupon' && !caps.has('strip_coupon')) || (stripType === 'countdown' && !caps.has('strip_countdown'));
+  if (d && stripMissing) {
+    const lines: string[] = [];
+    if (stripType === 'coupon') {
+      const code = String(strip!.code || '').trim();
+      if (code) lines.push(`쿠폰 코드 ${code}`);
+    } else {
+      const t = inAppDeadlineText(out.endAt as any);
+      if (t) lines.push(`${t}까지`);
+    }
+    const { poster_strip: _s, ...rest } = d;
+    let design: Record<string, any> = rest;
+    if (lines.length && design.poster_text === 'baked') {
+      const { poster_text: _t, ...r2 } = design;
+      design = r2;
+    }
+    const add = lines.join('\n');
+    const withLine = (b: any) => { const s = String(b ?? '').trim(); return s ? `${s}\n${add}` : add; };
+    const slides = Array.isArray(out.posterSlides) ? out.posterSlides : [];
+    out = {
+      ...out,
+      design,
+      ...(add ? { body: withLine(out.body) } : {}),
+      ...(add && slides.length ? { posterSlides: slides.map((s, i) => (i === 0 ? { ...s, body: withLine((s as any)?.body) } : s)) } : {}),
+    };
+  }
+  const noV4 = !INAPP_CLIENT_CAPS.some((c) => caps.has(c));
+  const slides = Array.isArray(out.posterSlides) ? out.posterSlides : [];
+  if (noV4 && slides.length > 0) {
+    const layout = out.design && typeof out.design === 'object' ? String(out.design.poster_layout || '') : '';
+    if (layout === 'event_card') {
+      out = { ...out, posterSlides: slides.map((s) => ({ ...s, image_fit: 'contain' as const })) };
+    } else if (layout !== 'banner_sheet' && slides.length >= 2) {
+      out = { ...out, posterSlides: slides.map((s) => (s && typeof s.image_url === 'string' ? { ...s, image_url: withInAppImageFit(s.image_url, '4x5') } : s)) };
+    }
+  }
+  return out;
 }
 
 /**
@@ -1860,11 +1940,12 @@ async function evaluateInAppCandidates(
 
   // ★ 2026-11-05 §3-2 · §3-3 서빙 관문 + 통짜 비우기 = 변형 고르기 뒤 · 매핑 직후 한 곳(쪽 반복이 이 뒤 수를 세 20개 채우기가 맞다)
   const clientCaps = input.clientCaps ?? new Set<string>();
+  //   ★ 2026-11-08 C114 I-2 = 내보내지 않음 0 · 관문(틀) → 통짜 비우기 → 옛 앱 변환(K1 순서)
   let messages = selected
     .map(mapRowToMessageDetail)
     .map((m) => gateInAppForClient(m, clientCaps))
-    .filter((m): m is InAppMessageDetail => m !== null)
-    .map(toServedMessage);
+    .map(toServedMessage)
+    .map((m) => legacyServeTransform(m, clientCaps));
 
   // ★ 2026-07-16 Step 4.5 — "다시 보지 않기"(opt_out) 영구 억제. 명시 거부가 빈도 규칙보다 최우선(시간 무제한).
   //   variant에서 눌러도 부모 축(family)으로 억제해 형제 variant 재노출까지 차단.

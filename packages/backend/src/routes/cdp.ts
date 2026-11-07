@@ -118,6 +118,8 @@ import { getServePath, parseFitOption } from '../utils/image-serve';
 // ★ 2026-11-05 인앱 포스터 재구성 §3-9 예시 갤러리 · §3-2 서빙 관문
 import { findInAppExample, findInAppExampleImage, listInAppExamplesForGallery } from '../utils/inapp-examples';
 import { parseInAppClientCaps } from '../utils/inapp-message';
+import { buildInAppWebviewPage } from '../utils/inapp-webview-page';
+import { randomUUID } from 'crypto';
 import { resolveCompanyIndustry } from '../utils/copy-prompt-composer';
 
 import { publicErrorText, respondUserError, UserFacingError, uploadErrorText } from '../utils/http-error';
@@ -648,7 +650,18 @@ router.get('/inapp/example-image/:id/:slide', async (req: any, res: any) => {
   res.setHeader('Content-Type', file.mime);
   res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.sendFile(path.resolve(await getServePath(file.absPath)));
+  // ★ 2026-11-08 C114 I-2 옛 앱 캐러셀 미리 맞춤(?fit=4x5) — 올린 그림 주소와 같은 CT 규칙(형식 위반 · 미지원 값 = 무시)
+  res.sendFile(path.resolve(await getServePath(file.absPath, parseFitOption(req.query))));
+});
+
+// ★ 2026-11-08 C114 I-1 GET /api/cdp/inapp/webview — 앱 웹뷰 호스트(계약 v5) 정적 페이지(인증 앞 · 공개 · 데이터 0).
+//   앱이 메시지 JSON 을 넣으면 웹 SDK 가 그린다 · 페이지의 API 호출 0(CSP connect-src 'none') · 기록 · 이동 · 닫기 = 다리.
+router.get('/inapp/webview', (_req: any, res: any) => {
+  const page = buildInAppWebviewPage(randomUUID().replace(/-/g, ''));
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Content-Security-Policy', page.csp);
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(page.html);
 });
 
 router.get('/inapp/active', requireCdpKeyOrBrowserOrigin, async (req: Request, res: Response) => {

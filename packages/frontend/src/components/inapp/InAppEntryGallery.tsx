@@ -6,7 +6,7 @@
  * 썸네일 표본 사진은 화면 안 그림(SVG)이다 — 저장되지 않는다.
  */
 import { useEffect, useState, type CSSProperties } from 'react';
-import { ArrowLeft, Globe, Smartphone, Sparkles, Layers, Lock } from 'lucide-react';
+import { ArrowLeft, Globe, Smartphone, Sparkles, Layers } from 'lucide-react';
 import { InAppMessagePreview, AppInAppPreview } from '../InAppMessagePreview';
 import { PosterSheetPreview, type PosterLayout } from './PosterSheetPreview';
 import { LAYOUT_INFO, layoutsFor, layoutStyle, appCapsNoteForKey, designForKey, type LayoutKey } from './inappSlides';
@@ -35,8 +35,9 @@ function sampleFor(k: PosterLayout) {
 function Thumb({ k, channel }: { k: LayoutKey; channel: 'web' | 'app' }) {
   const box: CSSProperties = { position: 'relative', height: 270, borderRadius: 14, overflow: 'hidden', background: '#e2e8f0' };
   // ★ 2026-11-05 새 틀(통짜 · 떠 있는 카드) = 실제 그리는 부품으로 그린다(2배 크기로 그려 반으로 줄인다)
-  if (k === 'baked_sheet' || k === 'baked_card' || k === 'live_card') {
-    const baked = k !== 'live_card';
+  // ★ C114 I-3 사진 위 글(overlay)도 실제 그리는 부품(새 틀)으로 그린다
+  if (k === 'baked_sheet' || k === 'baked_card' || k === 'live_card' || k === 'overlay') {
+    const baked = k === 'baked_sheet' || k === 'baked_card';
     const slides = baked
       ? [{ image_url: SAMPLE_IMG.baked, title: '새로 나온 케이크', cta: { label: '케이크 보러 가기' } }]
       : [{ ...layoutStyle('overlay'), eyebrow: 'NEW', title: '새로 나온 케이크', body: '부드러운 크림과 제철 과일', image_url: SAMPLE_IMG.cake, cta: { label: '케이크 보러 가기' } }];
@@ -49,13 +50,13 @@ function Thumb({ k, channel }: { k: LayoutKey; channel: 'web' | 'app' }) {
       </div>
     );
   }
-  if (k === 'event_card' || k === 'banner_sheet' || k === 'overlay') {
+  if (k === 'event_card' || k === 'banner_sheet') {
     return (
       <div style={box} aria-hidden>
         <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,#f1f5f9,#e2e8f0)' }} />
         <div style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,.42)' }} />
         <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, display: 'flex', maxHeight: '100%' }}>
-          <PosterSheetPreview layout={k} slides={sampleFor(k) as any} design={{ dismiss_mode: 'snooze_day', ...(k === 'overlay' ? {} : { poster_layout: k }) }} scale={0.5} radius="12px 12px 0 0" shadow="none" />
+          <PosterSheetPreview layout={k} slides={sampleFor(k) as any} design={{ dismiss_mode: 'snooze_day', poster_layout: k }} scale={0.5} radius="12px 12px 0 0" shadow="none" />
         </div>
       </div>
     );
@@ -109,10 +110,12 @@ export default function InAppEntryGallery({ channel, onChannel, onPick, onClose,
         <div className="flex gap-1.5 mb-2 min-h-[22px]">
           {L.kind === 'big' && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-violet-100 text-violet-900">좌우 슬라이드</span>}
           {L.isNew && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-fuchsia-100 text-fuchsia-900">NEW</span>}
-          {lock && note && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 inline-flex items-center gap-1"><Lock className="w-2.5 h-2.5" />{note.text}</span>}
+          {/* ★ C114 I-4 = 잠금이 아니라 옛 앱에서 다르게 보이는 것만 알린다(내보내지 않음 0) */}
+          {lock && note && <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 break-keep">{note.text}</span>}
         </div>
         <Thumb k={k} channel={channel} />
-        <b className="block text-[14px] text-slate-900 mt-2.5">{L.name}</b>
+        {/* ★ C114 I-5 낱말 중간 끊김 0(「통짜 포스터 카 / 드」 Harold 1107) */}
+        <b className="block text-[14px] text-slate-900 mt-2.5 break-keep">{L.name}</b>
         <span className="block text-[12px] text-slate-500 mt-0.5 leading-snug">{L.desc}</span>
       </button>
     );

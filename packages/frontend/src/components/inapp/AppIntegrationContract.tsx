@@ -29,6 +29,38 @@ export interface ContractSection {
 
 export const APP_INAPP_CONTRACT_SECTIONS: ContractSection[] = [
   {
+    // ★ 2026-11-08 C114 계약 v5 — 웹뷰 호스트(설계서 docs/2026-11-08-c114-roadmap-v2-design.md §3 I-1 · Harold 「업체 앱에 판을 올리라고 할 수 없다」)
+    key: 'webview',
+    heading: '0. 웹뷰로 붙이기 (권장, 계약 v5, 한 번 붙이면 모양이 늘어도 앱을 다시 고치지 않습니다)',
+    items: [
+      {
+        title: '조회 = caps=webview 하나',
+        desc: '아래 1번 조회 주소에 caps=webview 를 붙입니다. 서버는 이 앱을 웹 SDK 와 같은 판으로 보고 모든 모양(통짜, 카드, 쿠폰 띠, 남은 시간, 여러 장)을 그대로 보냅니다. 빈도(얼마나 자주 보일지) 판단은 지금처럼 앱이 합니다.',
+        code: `GET https://app.hanjul.ai/api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID&caps=webview`,
+      },
+      {
+        title: '그리기 = 투명 전체 화면 웹뷰 한 장',
+        desc: '보일 메시지를 고르면 투명한 전체 화면 웹뷰로 아래 페이지를 열고 그 메시지를 넣습니다. 웹뷰는 준비하는 동안에도 실제 크기 그대로 두고 투명(opacity 0)으로만 가립니다(크기 0, 숨김, 화면 밖 배치 금지 = 그림이 안 들어옵니다). ready 사건이 오면 보이고 그때 impression 을 한 번 기록합니다. failed 가 오면 보이지 않고 닫습니다(기록 0).',
+        code: `페이지: https://app.hanjul.ai/api/cdp/inapp/webview
+넣는 값: { "message": <조회 응답 messages 의 한 개>, "serverNow": <조회 응답 serverNow>, "customer": <있으면> }
+React Native: injectedJavaScriptBeforeContentLoaded = "window.__HJL_INAPP__ = " + JSON.stringify(값) + "; true;"
+iOS, 안드로이드: 페이지 로드 뒤 evaluateJavaScript("HanjulInApp.render(" + JSON 문자열 + ")")`,
+      },
+      {
+        title: '다리 사건 = 앱이 받아 처리',
+        desc: '페이지는 API 를 부르지 않습니다. 기록, 이동, 닫기, 복사는 모두 아래 사건으로 앱에 넘어옵니다. track 사건은 그대로 /inapp/track 에 보냅니다(event = event_type, buttonId = button_id). navigate 는 앱의 지금 이동 규칙(앱 안 경로, 딥링크, 외부 브라우저)으로 엽니다.',
+        code: `ready { messageId }                 → 웹뷰를 보이고 impression 기록
+failed { messageId }                → 보이지 않고 닫기
+track { messageId, event, buttonId } → /inapp/track (click, dismiss, opt_out)
+navigate { url }                    → 앱 이동 규칙으로 열기
+optout, snooze { messageId }        → 앱 저장소에 다시 보지 않기, 오늘 하루 보지 않기
+copy { messageId, text }            → 클립보드에 복사
+close { messageId }                 → 웹뷰 닫기
+받는 이름: React Native = onMessage(JSON 문자열), iOS = webkit.messageHandlers.hanjulInApp, 안드로이드 = addJavascriptInterface(…, "HanjulInAppAndroid")`,
+      },
+    ],
+  },
+  {
     key: 'fetch',
     heading: '1. 메시지 조회',
     items: [
@@ -42,7 +74,7 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-11-05 계약 v4 — 서빙 관문(설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §3-2)
         title: '그릴 수 있는 것 알리기 (caps · 계약 v4)',
-        desc: `아래 v4 모양을 구현한 앱은 조회 주소에 caps 를 붙입니다. 서버는 caps 가 없는 앱(구버전)에 통짜 포스터 · 기능 띠 · 여러 장 떠 있는 카드 메시지를 보내지 않고(잘린 그림 · 빠진 쿠폰 코드를 보이지 않게), 한 장 떠 있는 카드는 틀을 지워(바닥 시트로) 보냅니다. 구현한 낱말만 넣으세요(${APP_CONTRACT_CAPS.join(' · ')}). 응답의 serverNow(서버 시각 · ISO)는 남은 시간 띠의 기준 시각입니다.`,
+        desc: `아래 v4 모양을 네이티브로 직접 구현한 앱은 조회 주소에 caps 를 붙입니다(웹뷰로 붙인 앱은 0번 caps=webview 하나면 됩니다). caps 가 없는 앱(구버전)에도 서버는 메시지를 내보냅니다. 그 앱이 그릴 수 있는 꼴로 바꿔서 보냅니다: 떠 있는 카드는 틀을 지워 바닥 시트로, 통짜 포스터는 글 없이 그림만, 쿠폰 코드와 남은 시간 띠는 본문 한 줄 글로, 여러 장 그림은 4:5 로 미리 맞춰(잘림 0), 이벤트 카드 사진은 맞추기(contain)로. 구현한 낱말만 넣으세요(${APP_CONTRACT_CAPS.join(' · ')}). 응답의 serverNow(서버 시각 · ISO)는 남은 시간 띠의 기준 시각입니다.`,
         code: `GET .../api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID&caps=${APP_CONTRACT_CAPS.join(',')}`,
       },
     ],
@@ -73,7 +105,7 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-09-29 계약 v3 — 인앱 만들기 개편(설계서 docs/2026-09-29-inapp-editor-redesign-design.md §1)
         title: '포스터 새 레이아웃 (design.poster_layout = "event_card" | "banner_sheet")',
-        desc: 'full_image 메시지의 design.poster_layout 이 오면 레이아웃대로 그립니다. 새 레이아웃은 posterSlides 가 1장이어도 레이아웃으로 그립니다(좌우 넘기기는 2장부터). event_card = 위 글 칸(바탕 = slide.bg_color · eyebrow 작은 라벨 · title · body) + 아래 사진 4:3(image_fit, 기본 cover) + 여러 장이면 오른쪽 아래 "N / M" 쪽 번호. banner_sheet = 면 색(bg_color) · 좌상단 탭 칩(eyebrow) · 우상단 X · 왼쪽 글(subtitle 윗줄 · title 큰 제목 · body 아랫줄 · cta 알약 버튼) · 오른쪽 사진(image_fit, 기본 contain · 아래 정렬). 바닥은 두 레이아웃 모두 글자 버튼 둘(왼쪽 = 닫기 방식 라벨 · 오른쪽 "닫기"). 장 전체(글 + 사진)가 좌우로 넘어갑니다. 슬라이드 새 키: eyebrow · subtitle · bg_color(hex) · image_fit("cover"|"contain"). 값이 빠지면 기본값: event_card 바탕 #f7f1e3 · 제목 #8a3b1f(26) · 본문 #57534e(14) / banner_sheet 면 #db2777 · 제목 #fde047(26) · 본문 #ffffff(19). 사진 누름 = link_url(event_card 는 없으면 cta.action_url), 트래킹 button_id = "slide_{index}_image". poster_layout 이 없거나 모르는 값이면 지금 포스터(overlay)로 그리세요. 이 값을 모르는 구버전 앱은 같은 내용을 지금 포스터 모양으로 안전하게 보여 줍니다(flat 필드 = 첫 장).',
+        desc: 'full_image 메시지의 design.poster_layout 이 오면 레이아웃대로 그립니다. 새 레이아웃은 posterSlides 가 1장이어도 레이아웃으로 그립니다(좌우 넘기기는 2장부터). event_card = 위 글 칸(바탕 = slide.bg_color · eyebrow 작은 라벨 · title · body) + 아래 사진(그림 원본 비율 · 들어오기 전 4:3 자리 · image_fit, 기본 contain = 잘림 0 · ★1108) + 여러 장이면 오른쪽 아래 "N / M" 쪽 번호. banner_sheet = 면 색(bg_color) · 좌상단 탭 칩(eyebrow) · 우상단 X · 왼쪽 글(subtitle 윗줄 · title 큰 제목 · body 아랫줄 · cta 알약 버튼) · 오른쪽 사진(image_fit, 기본 contain · 아래 정렬). 바닥은 두 레이아웃 모두 글자 버튼 둘(왼쪽 = 닫기 방식 라벨 · 오른쪽 "닫기"). 장 전체(글 + 사진)가 좌우로 넘어갑니다. 슬라이드 새 키: eyebrow · subtitle · bg_color(hex) · image_fit("cover"|"contain"). 값이 빠지면 기본값: event_card 바탕 #f7f1e3 · 제목 #8a3b1f(26) · 본문 #57534e(14) / banner_sheet 면 #db2777 · 제목 #fde047(26) · 본문 #ffffff(19). 사진 누름 = link_url(event_card 는 없으면 cta.action_url), 트래킹 button_id = "slide_{index}_image". poster_layout 이 없거나 모르는 값이면 지금 포스터(overlay)로 그리세요. 이 값을 모르는 구버전 앱은 같은 내용을 지금 포스터 모양으로 안전하게 보여 줍니다(flat 필드 = 첫 장).',
       },
       {
         // ★ 2026-11-05 계약 v4

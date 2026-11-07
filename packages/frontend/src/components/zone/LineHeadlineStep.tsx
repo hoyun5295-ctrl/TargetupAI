@@ -177,7 +177,8 @@ export default function LineHeadlineStep({ storeKey, lineFp, line, productImage,
           </button>
           {gallery && !busy && (
             <div className="rounded-2xl border border-slate-200 p-3 max-h-[420px] overflow-y-auto">
-              <TemplatePicker onPick={fromGallery} autoOpenIndustry gridClassName="grid grid-cols-2 sm:grid-cols-3 gap-3" />
+              {/* ★ C114 K6 한 줄 헤드라인 = 숫자 칸이 없는 길 → 제품 · 행사만(할인 = 이미지 스튜디오) */}
+              <TemplatePicker onPick={fromGallery} autoOpenIndustry gridClassName="grid grid-cols-2 sm:grid-cols-3 gap-3" allowedKinds={['product', 'event']} />
             </div>
           )}
           {chosen && (

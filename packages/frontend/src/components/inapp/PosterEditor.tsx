@@ -14,9 +14,9 @@ import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProduc
 import AssetLibraryPickerModal, { type PickedAsset } from '../assets/AssetLibraryPickerModal';
 import { INAPP_FONT_CATALOG } from './blockTheme';
 import { PosterSheetPreview, POSTER_SHEET_DEFAULTS, hexOr, type PosterLayout, type SheetEditKey } from './PosterSheetPreview';
-import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNote, appCapsNoteForKey, stripAllowedFor, type LayoutKey, type WsSlide } from './inappSlides';
+import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNoteForKey, stripAllowedFor, legacyAppPreviewOf, type LayoutKey, type WsSlide } from './inappSlides';
 import { PosterFramePreview } from './PosterFramePreview';
-import { usesPosterFrame } from './generated/poster-frame';
+import { usesPosterFrame, drawsWithPosterFrame } from './generated/poster-frame';
 import { creditText } from '../../constants/credit';
 
 /** ★ 2026-11-05 §3-9 예시 갤러리 그림 주소 머리(서버 INAPP_EXAMPLE_IMAGE_PREFIX 와 같은 값 · 게시 판정은 서버) */
@@ -244,12 +244,12 @@ export function PosterStage({
   const isPc = pc && channel === 'web';
   // 구버전 앱 = 새 모양을 모르는 빌드 → 지금 포스터 · 다시 보지 않기로 그린다(설계서 §1-1 · §1-3)
   const drawLayout: PosterLayout = legacyApp ? 'overlay' : layout;
-  // ★ 2026-11-05 §3-10 구버전 앱 = 새 판을 모른다 → 통짜 · 띠 · 여러 장 카드 = 받지 않는다(흉내 화면 대신 안내) · 한 장 카드 = 바닥 시트(지금 포스터)
-  const legacyHidden = legacyApp && !!appCapsNote(design, slides.length)?.hidden;
-  const drawDesign = legacyApp
-    ? (() => { const { poster_frame: _f, dismiss_mode: _d, ...rest } = design || {}; return rest; })()
-    : design;
-  const useFrame = !legacyApp && usesPosterFrame(design);
+  // ★ 2026-11-08 C114 K2 구버전 앱 = 서버가 그 앱이 그릴 수 있는 꼴로 바꿔 보낸다(내보내지 않음 0) → 그 꼴 그대로 그린다
+  const legacy = legacyApp ? legacyAppPreviewOf(design, slides, endAt) : null;
+  const drawDesign = legacy ? legacy.design : design;
+  const drawSlides = legacy ? legacy.slides : slides;
+  // ★ C114 I-3 그리는 자리 판정 = drawsWithPosterFrame 하나(사진 위 글도 새 틀 · SDK 와 같음)
+  const useFrame = !legacyApp && drawsWithPosterFrame(design);
 
   // ★ 2026-09-29 무대 맞춤(Harold 0929 「화면에서 잘려 밑에 글 쓰기가 힘들다」 · 1455×740 에서 휴대폰 43px 잘림 실측) —
   //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞춘다(DM·이메일 PreviewPair 와 같은 방식 · 큰 화면은 FIT_MAX 까지 키운다).
@@ -367,14 +367,7 @@ export function PosterStage({
           {isPc && <div className="h-6 bg-slate-100 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
           <div className="relative w-full" style={{ height: isPc ? PC_H - 24 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
-            {legacyHidden ? (
-              <div className="absolute inset-0 flex items-center justify-center p-8" style={{ background: 'rgba(15,23,42,.08)' }}>
-                <div className="rounded-2xl bg-white border border-amber-200 px-5 py-4 text-center shadow-lg">
-                  <b className="block text-[14px] text-slate-900">옛 앱에는 이 메시지가 보이지 않아요</b>
-                  <span className="block text-[12px] text-slate-500 mt-1">앱 새 판에서 보여요. 잘린 그림이나 빠진 기능을 보여 주지 않으려고 옛 앱에는 보내지 않아요.</span>
-                </div>
-              </div>
-            ) : useFrame ? (
+            {useFrame ? (
               <div className="absolute inset-0">
                 <PosterFramePreview
                   slides={slides.map((s) => ({ ...s, image_url: String(s.image_url || '').trim() || PHOTO_SLOT })) as any}
@@ -399,7 +392,7 @@ export function PosterStage({
               <div style={{ width: '100%', maxWidth: isPc ? 520 : undefined, maxHeight: '100%', display: 'flex' }}>
                 <PosterSheetPreview
                   layout={drawLayout}
-                  slides={slides}
+                  slides={drawSlides}
                   design={drawDesign}
                   badge={badge}
                   replaceVars={renderText}
@@ -507,6 +500,8 @@ export function SlidePanel({
   const names = fieldNamesFor(layout);
   const baked = design?.poster_text === 'baked';
   const frameMode = usesPosterFrame(design);
+  // ★ C114 I-3 사진 위 글도 새 틀로 그린다 → 글 칸 고르기 단추(틀 미리보기는 글을 바로 누를 수 없다) = 그리는 자리 판정으로
+  const framePreview = drawsWithPosterFrame(design);
   const sizes = SIZE_PRESETS[layout];
   const colors = COLOR_SUGGEST[layout];
   const D = layout === 'overlay' ? null : POSTER_SHEET_DEFAULTS[layout];
@@ -631,7 +626,7 @@ export function SlidePanel({
           </div>
         </div>
       )}
-      {!baked && frameMode && (
+      {!baked && framePreview && (
         <div>
           <label className={LBL}>글 고치기 <span className="font-normal text-slate-400">사진 위에 얹는 글</span></label>
           <div className="flex gap-1.5 flex-wrap">
@@ -809,7 +804,7 @@ export function LayoutSwitcher({ channel, current, onPick }: {
       <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
         <Layers className="w-4 h-4 text-violet-800 shrink-0" />
         <div className="min-w-0 flex-1">
-          <b className="block text-[13px] text-slate-900 truncate">{LAYOUT_INFO[current].name}</b>
+          <b className="block text-[13px] text-slate-900 truncate break-keep">{LAYOUT_INFO[current].name}</b>
           <span className="block text-[11px] text-slate-400 truncate">{LAYOUT_INFO[current].desc}</span>
         </div>
         <button type="button" onClick={() => setOpen((v) => !v)} className="h-8 px-2.5 rounded-lg border border-slate-300 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 shrink-0">모양 바꾸기</button>
@@ -827,8 +822,8 @@ export function LayoutSwitcher({ channel, current, onPick }: {
                   return (
                     <button key={k} type="button" onClick={() => { setOpen(false); if (!on) onPick(k); }}
                       className={`text-left rounded-xl border px-2.5 py-2 ${on ? 'border-violet-300 bg-violet-100' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
-                      <span className="flex items-center gap-1 text-[12.5px] font-bold text-slate-900">{on && <Check className="w-3 h-3 text-violet-800" />}{LAYOUT_INFO[k].name}</span>
-                      <span className="block text-[10.5px] text-slate-400 mt-0.5 leading-snug">{lock && note ? note.text : LAYOUT_INFO[k].desc}</span>
+                      <span className="flex items-center gap-1 text-[12.5px] font-bold text-slate-900 break-keep">{on && <Check className="w-3 h-3 text-violet-800 shrink-0" />}{LAYOUT_INFO[k].name}</span>
+                      <span className="block text-[11px] text-slate-500 mt-0.5 leading-snug break-keep">{lock && note ? note.text : LAYOUT_INFO[k].desc}</span>
                     </button>
                   );
                 })}

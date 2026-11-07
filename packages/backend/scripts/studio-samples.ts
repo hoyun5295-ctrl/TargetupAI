@@ -38,7 +38,8 @@ async function make(count: number, ids: string[] | null): Promise<void> {
   if (!isStudioReady()) { console.log('생성 키가 없어 멈춤(GEMINI_API_KEY)'); process.exitCode = 1; return; }
   const engine = studioImageEngine();
   const preset = resolvePreset('poster');
-  const missing = templatesMissingSample(STUDIO_TEMPLATES, ids);
+  // ★ 2026-11-08 C114 B 할인 템플릿 예시 = 제품 사진 + 혜택 숫자가 있어야 해서 scripts/discount-template-samples.ts --save 가 만든다(여기서 빼야 숫자 없는 예시 0)
+  const missing = templatesMissingSample(STUDIO_TEMPLATES.filter((t) => t.kind !== 'discount'), ids);
   console.log(`엔진 ${engine} · 예시 없는 템플릿 ${missing.length}개 · 이번 ${Math.min(count, missing.length)}장`);
   const { made, failed } = await runSampleBatch(missing, count, async (t) => {
     const prompt = buildPosterPrompt({
@@ -48,7 +49,7 @@ async function make(count: number, ids: string[] | null): Promise<void> {
     const img = await generatePoster(prompt, preset, null, { engine });
     await getServePath(saveTemplateSample(t.id, img));
   });
-  console.log(`끝 · 만듦 ${made.length} · 실패 ${failed.length}${failed.length ? ` (${failed.join(', ')})` : ''} · 남은 예시 없는 템플릿 ${templatesMissingSample(STUDIO_TEMPLATES, ids).length}개`);
+  console.log(`끝 · 만듦 ${made.length} · 실패 ${failed.length}${failed.length ? ` (${failed.join(', ')})` : ''} · 남은 예시 없는 템플릿 ${templatesMissingSample(STUDIO_TEMPLATES.filter((t) => t.kind !== 'discount'), ids).length}개`);
 }
 
 async function main(): Promise<void> {

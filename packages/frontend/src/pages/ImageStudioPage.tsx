@@ -42,6 +42,8 @@ const authFetch = (url: string, opts: RequestInit = {}) =>
 
 interface Candidate extends LogoCardState {
   tempId: string; url: string; blob: string | null; presetKey: string; title?: string;
+  /** ★ C114 D8 할인 포스터 = 「포스터에 들어간 숫자」(서버가 보낸 값 그대로) */
+  discountCheck?: string | null;
   /** ★ 2026-11-05 인앱 포스터 재구성 §3-8 — 생성에 쓴 글(인앱 통짜 장 글로 넘긴다) */
   texts?: StudioTexts;
   /** ★ 2026-10-16 저장되면 카드에 남는다 · 채널 버튼은 이 주소로 바로 간다(다시 저장하지 않는다 · 두 번째 저장 = 409) */
@@ -148,7 +150,7 @@ export default function ImageStudioPage() {
     if (!r) return;
     if (r.preview) objectUrls.current.push(r.preview);
     madeRef.current = true;
-    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title, texts: r.texts, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed }, ...prev]);
+    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title, texts: r.texts, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed, discountCheck: r.discountCheck ?? null }, ...prev]);
     setStage('result');
   };
 
@@ -319,6 +321,21 @@ export default function ImageStudioPage() {
           : [{ label: '저장 소재 관리', icon: FolderOpen, onClick: () => setLibManageOpen(true) }],
       }}
       blocks={!ready ? [{ text: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.' }] : []}
+      commitBar={stage === 'setup' && template ? (
+        <>
+          <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600">
+            <b className="text-[13px] text-slate-900 truncate max-w-[16rem]">{template.name}</b>
+            <span className="tabular-nums">상품 {make.items.length}/3</span>
+            {make.discountBuild && (make.discountBuild.ok
+              ? <span className="text-rose-700 font-semibold break-keep">{make.discountBuild.line}</span>
+              : <span className="text-slate-400 break-keep">{make.discountBuild.error}</span>)}
+            <span className="text-slate-400">{creditText('image-studio-generate')}, 성공했을 때만 차감</span>
+          </div>
+          <button onClick={() => generate()} disabled={busy || !ready || (!!make.discountBuild && !make.discountBuild.ok)} className="shrink-0 text-white inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-amber-500 hover:bg-amber-600 text-sm font-bold disabled:opacity-40">
+            <Sparkles className="w-4 h-4" /> 완성 포스터 만들기
+          </button>
+        </>
+      ) : undefined}
     >
       <div className="space-y-6">
         {/* 1단계 — 템플릿 고르기. ⛔ 언마운트하지 않고 숨긴다(보던 쪽 유지 · 감싸개에 display 클래스 금지). */}
@@ -335,9 +352,6 @@ export default function ImageStudioPage() {
             </div>
             <div className="lg:col-span-6 space-y-4">
               <StudioMakeFields make={make} disabled={busy} />
-              <button onClick={() => generate()} disabled={busy || !ready} className="text-white w-full flex items-center justify-center gap-2 px-4 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-sm font-bold disabled:opacity-40">
-                <Sparkles className="w-4 h-4" /> 완성 포스터 만들기 · {creditText('image-studio-generate')}
-              </button>
             </div>
           </section>
         )}
@@ -365,6 +379,9 @@ export default function ImageStudioPage() {
                     <span className="absolute top-2 left-2 z-20 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white/70 border border-slate-300">{presetLabel(c.presetKey)}</span>
                   </div>
                   <div className="p-3 space-y-2 bg-white">
+                    {c.discountCheck && (
+                      <p className="rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-800 break-keep">포스터에 들어간 숫자: <b className="font-bold">{c.discountCheck}</b>. 그림 속 숫자가 같은지 꼭 확인해 주세요.</p>
+                    )}
                     {c.note === 'expired' ? (
                       <p className="text-[12px] text-rose-700">기간이 지나 저장할 수 없어요. 다시 만들어 주세요.</p>
                     ) : (
