@@ -164,6 +164,7 @@ export default function CatalogPageModal({
       <StudioInsertModal
         open={studioAt !== null}
         onClose={() => setStudioAt(null)}
+        use="catalog"
         defaultTitle={texts.title || ''}
         defaultSubtitle={texts.desc || ''}
         onInserted={(url) => {

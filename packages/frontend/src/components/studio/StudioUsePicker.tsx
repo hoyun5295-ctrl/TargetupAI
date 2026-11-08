@@ -10,10 +10,10 @@ import { creditCost } from '../../constants/credit';
 
 export type StudioUseKey = 'inapp' | 'dm' | 'email' | 'free';
 export interface StudioUse { key: StudioUseKey; presetKey: string; label: string; size: string; desc: string; icon: LucideIcon; adminOnly?: boolean; ratio: string; /** ★ C118 E1 만드는 것 = 그 용도의 포스터(안내 · 실패 칸 문구) */ poster: string }
-/** 용도 넷 = 서버 CHANNEL_PRESETS(use-inapp 1:1 · use-dm 3:4 · use-email 4:3 · poster 3:4) */
+/** 용도 넷 = 서버 CHANNEL_PRESETS(use-inapp 1:1 · use-dm 2:3 · use-email 4:3 · poster 3:4) */
 export const STUDIO_USES: readonly StudioUse[] = [
   { key: 'inapp', presetKey: 'use-inapp', label: '인앱 메시지', size: '정사각 1:1', ratio: '1 / 1', desc: '앱 팝업 칸에 꽉 차게 · 글 자리를 비워 둔 그림', icon: Layers, adminOnly: true, poster: '인앱 메시지용 포스터' },
-  { key: 'dm', presetKey: 'use-dm', label: '모바일 DM', size: '세로 3:4', ratio: '3 / 4', desc: '휴대폰 화면 폭에 꽉 차는 세로 그림', icon: Smartphone, poster: '모바일 DM용 포스터' },
+  { key: 'dm', presetKey: 'use-dm', label: '모바일 DM', size: '세로 2:3', ratio: '2 / 3', desc: '휴대폰 화면을 길게 채우는 세로 그림', icon: Smartphone, poster: '모바일 DM용 포스터' },
   { key: 'email', presetKey: 'use-email', label: '이메일 마케팅', size: '가로 4:3', ratio: '4 / 3', desc: '메일 첫 화면에 제목과 함께 보이는 그림', icon: Mail, poster: '이메일 마케팅용 포스터' },
   { key: 'free', presetKey: 'poster', label: '자유 형태', size: '세로 3:4 · 기본', ratio: '3 / 4', desc: '어디에나 쓰는 기본 포스터', icon: ImageIcon, poster: '자유 형태 포스터' },
 ];

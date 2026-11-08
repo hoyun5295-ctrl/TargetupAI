@@ -46,6 +46,7 @@ import {
   writeTempMeta, moveTempToPermanent, findPermanentByTempId, restorePermanentToTemp, writeStudioPermanent, findTempFile,
 } from '../image-studio';
 import { getTemplate } from '../image-studio-templates';
+import { CATALOG_PAGE } from '../dm/dm-catalog-templates';
 import { ASPECT_RATIOS, INAPP_STAGE_FILL, INAPP_CONTENT_SAFE } from '../image-fit-spec';
 import { logoPlacement, LOGO_MARGIN_RATIO } from '../studio-zones';
 import { readDiscountOffer, discountPromptLines, discountFixedLayoutLine } from '../studio-discount';
@@ -89,9 +90,17 @@ describe('T1 용도 프리셋 넷 · 옛 키 그대로 · 화면 표 = 서버 �
   it('용도 넷 = 비율 · 채널 규격(설계서 A1 표)', () => {
     const pick = (k: string) => ({ ar: CHANNEL_PRESETS[k].aspectRatio, spec: CHANNEL_PRESETS[k].channelSpec });
     expect(pick('use-inapp')).toEqual({ ar: '1:1', spec: 'inapp-poster' });
-    expect(pick('use-dm')).toEqual({ ar: '3:4', spec: 'dm' });
+    expect(pick('use-dm')).toEqual({ ar: '2:3', spec: 'dm' });   // ★ 1108 E7 DM = 2:3(자유 3:4 와 다른 그림)
+    expect(pick('use-dm').ar).not.toBe(pick('poster').ar);
     expect(pick('use-email')).toEqual({ ar: '4:3', spec: 'email' });
     expect(pick('poster')).toEqual({ ar: '3:4', spec: 'poster' });
+  });
+  it('(E7 · Codex 1R ①) DM 카탈로그 쪽 = 3:4 판 → 스튜디오 = 3:4 프리셋(판 비율 = 프리셋 비율) · 그 밖 DM = 2:3', () => {
+    const [w, h] = CHANNEL_PRESETS['poster'].aspectRatio.split(':').map(Number);
+    expect(CATALOG_PAGE.width * h).toBe(CATALOG_PAGE.height * w);
+    const m = fe('components/dm/build/StudioInsertModal.tsx');
+    expect(m).toContain("const usePreset = use === 'inapp' ? 'use-inapp' : use === 'catalog' ? 'poster' : 'use-dm';");
+    expect(fe('components/dm/build/CatalogPageModal.tsx')).toMatch(/<StudioInsertModal\s+open=\{studioAt !== null\}\s+onClose=\{\(\) => setStudioAt\(null\)\}\s+use="catalog"/);
   });
   it('옛 키 다섯 = 값 무변경(옛 임시 · 자산 해석)', () => {
     expect(['inapp-poster', 'dm-card', 'email-hero', 'free', 'mms'].map((k) => [k, CHANNEL_PRESETS[k].aspectRatio, CHANNEL_PRESETS[k].channelSpec])).toEqual([
@@ -148,7 +157,7 @@ describe('T3 글 자리 = 인앱 용도면 모든 템플릿 · 그 밖 지금 �
   });
   it('편집기 안 스튜디오 = 용도 고정(DM = use-dm · 인앱 = use-inapp + 글 자리 · 글 없는 판 = 고르기 없음)', () => {
     const m = fe('components/dm/build/StudioInsertModal.tsx');
-    expect(m).toContain("const usePreset = use === 'inapp' ? 'use-inapp' : 'use-dm';");
+    expect(m).toContain("const usePreset = use === 'inapp' ? 'use-inapp' : use === 'catalog' ? 'poster' : 'use-dm';");   // ★ E7 카탈로그 쪽 = 3:4
     expect(m).toContain("make.generate({ textless, presetKey: usePreset, textPosition: use === 'inapp' && !textless ? zone : null })");
     expect(m).toContain("{use === 'inapp' && !textless && (");
     expect(fe('pages/InAppMessagesPage.tsx')).toMatch(/<StudioInsertModal\s+open=\{studioOpen\}\s+onClose=\{\(\) => setStudioOpen\(false\)\}\s+use="inapp"/);

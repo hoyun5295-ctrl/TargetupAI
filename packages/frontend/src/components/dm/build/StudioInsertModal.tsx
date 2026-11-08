@@ -45,8 +45,8 @@ export default function StudioInsertModal({
   textless?: boolean;
   /** ★ 2026-11-05 시작본 · 예시가 정한 템플릿 — 고르기를 건너뛰고 만들기 단계로 연다(누름 한 번 + 2크레딧 확인 · 없으면 고르기부터) */
   initialTemplateId?: string | null;
-  /** ★ 2026-11-08 C118 A4 용도 고정(묻지 않음) — DM 창 = use-dm(세로 3:4) · 인앱 창 = use-inapp(정사각 · 글 자리 위 / 아래 · 글 없는 판 = 아래 비움) */
-  use?: 'dm' | 'inapp';
+  /** ★ 2026-11-08 C118 A4 용도 고정(묻지 않음) — DM 창 = use-dm(세로 2:3) · 인앱 창 = use-inapp(정사각 · 글 자리 위 / 아래 · 글 없는 판 = 아래 비움) */
+  use?: 'dm' | 'inapp' | 'catalog';
 }) {
   const toast = useToast();
   const [step, setStep] = useState<Step>('pick');
@@ -72,7 +72,8 @@ export default function StudioInsertModal({
 
   const generating = !!make.busyMsg;
   const [zone, setZone] = useState<'top' | 'bottom'>('top');
-  const usePreset = use === 'inapp' ? 'use-inapp' : 'use-dm';
+  // ★ 1108 E7 · Codex 1R ① DM 카탈로그 쪽 = 3:4 판(서버 CATALOG_PAGE 1200 × 1600 · cover 합성) → 3:4 자유 프리셋(2:3 이면 위아래 잘림) · 그 밖 DM 자리 = 2:3
+  const usePreset = use === 'inapp' ? 'use-inapp' : use === 'catalog' ? 'poster' : 'use-dm';
   // 처음 상태로 여는 것은 「처음 열 때」와 「넣기 성공 뒤 다음에 열 때」뿐이다. 그 밖의 다시 열기는 쓰던 그대로 이어서(닫기 = 숨김) —
   //   작성 중 · 만드는 중 · 생성 실패 뒤 · 결과 대기 모두 지우지 않는다(Codex 1016 1R · 설계서 §2-4).
   const freshRef = useRef(true);

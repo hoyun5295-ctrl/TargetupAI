@@ -233,7 +233,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   const attemptRef = useRef<string | null>(null);
   // ★ 2026-11-05 §3-8 textless = 글 없는 판(인앱 글 얹기 장 · 렌더러가 글을 얹을 아래 자리를 비운다)
   // ★ 2026-11-08 C118 A1 · A2 용도별 제작 — 요청 본문 = 그때 입력을 얼린 사본(용도 칸 · 다시 만들기 = 같은 표 + 같은 본문)
-  //   presetKey = 서버 CHANNEL_PRESETS(use-inapp 1:1 · use-dm 3:4 · use-email 4:3 · poster 자유 3:4) · textPosition = 인앱 용도면 모든 템플릿
+  //   presetKey = 서버 CHANNEL_PRESETS(use-inapp 1:1 · use-dm 2:3 · use-email 4:3 · poster 자유 3:4) · textPosition = 인앱 용도면 모든 템플릿
   const buildGenerateBody = (opts?: { textless?: boolean; presetKey?: string; textPosition?: 'top' | 'bottom' | null }): Record<string, unknown> | null => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return null; }
     const textless = !!opts?.textless;

@@ -164,7 +164,8 @@ export const CHANNEL_PRESETS: Record<string, ChannelPreset> = {
   //   설계서 docs/2026-11-08-c118-studio-per-use-inapp-app-design.md A1 · 옛 키 넷(아래) = 옛 임시 · 자산 해석용 그대로(값 무변경)
   'poster':       { key: 'poster',       label: '자유 형태',      aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'poster',       textZone: 'top' },
   'use-inapp':    { key: 'use-inapp',    label: '인앱 메시지',    aspectRatio: '1:1', imageSize: '2K', track: 'quality', channelSpec: 'inapp-poster', textZone: 'top' },
-  'use-dm':       { key: 'use-dm',       label: '모바일 DM',      aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'dm',           textZone: 'top' },
+  // ★ 1108 C118 E7 모바일 DM = 2:3(Harold 「DM 이랑 자유 형태 둘 다 3:4 인데 뭔 차이냐」 → 「2:3 세로로」 · DM 전단 기본 쪽 640:920 에 가장 가까움 · 자유 3:4 와 다른 그림)
+  'use-dm':       { key: 'use-dm',       label: '모바일 DM',      aspectRatio: '2:3', imageSize: '2K', track: 'quality', channelSpec: 'dm',           textZone: 'top' },
   'use-email':    { key: 'use-email',    label: '이메일 마케팅',  aspectRatio: '4:3', imageSize: '2K', track: 'quality', channelSpec: 'email',        textZone: 'top' },
   // 아래 4종 = 레거시 호환(옛 temp meta·기존 자산 channel_spec 해석용). 신규 생성 UI는 'poster'만 보낸다.
   'inapp-poster': { key: 'inapp-poster', label: '인앱 포스터형', aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'inapp-poster', textZone: 'top' },
