@@ -7,7 +7,7 @@
  */
 
 import { isBrandOnlyChannel, billingTypeLabelOf } from './billing-types';
-import { brandAudienceLabel, type KakaoFallbackCount } from './sms-result-map';
+import { brandTargetingLabel, type KakaoFallbackCount } from './sms-result-map';
 
 /** 캠페인 채널 라벨 (이모지 제거 순수 텍스트). 화면 channelChip과 같은 판정. */
 export function channelPlainLabel(sendChannel: string | null | undefined, messageType: string | null | undefined, kakaoTargeting?: string | null): string {
@@ -17,7 +17,8 @@ export function channelPlainLabel(sendChannel: string | null | undefined, messag
   // ★ 2026-11-05 C107 D-11 — 캠페인 한 건의 이름 = 청구 유형 이름(친구 · 비친구 · sms-result-map brandAudienceLabel 한 곳).
   //   대상값 인자를 넘기지 않으면(undefined) 채널 단위 묶음 = 「브랜드메시지」(next-action-advisor mergeByChannelLabel · 대상 축 없음).
   //   DB 의 빈 대상값(null)은 넘긴 값이다 = 비친구(청구와 같은 판정).
-  if (isBrandOnlyChannel(sendChannel)) return kakaoTargeting === undefined ? '브랜드메시지' : brandAudienceLabel(kakaoTargeting);
+  // ★ 2026-11-08 C117 D9(Harold H1) — 이름 = 고른 대상(sms-result-map brandTargetingLabel 한 곳 · 옛 청구 이름 폐기 · 위 C107 줄은 경위)
+  if (isBrandOnlyChannel(sendChannel)) return kakaoTargeting === undefined ? '브랜드메시지' : brandTargetingLabel(kakaoTargeting);
   if (sendChannel === 'alimtalk') return '알림톡';
   if (sendChannel === 'both') return 'SMS+브랜드메시지';
   const mt = String(messageType || '').toUpperCase();

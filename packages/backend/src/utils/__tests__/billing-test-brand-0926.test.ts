@@ -95,15 +95,15 @@ describe('배선', () => {
   });
   it('테스트 결과 화면은 표시 CT로 유형·본문을 내고 브랜드는 브랜드 단가로 센다', () => {
     const c = src('routes/campaigns.ts');
-    expect(c).toContain('type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),');   // ★ C107 결과 코드까지
+    expect(c).toContain('type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),');   // ★ C107 결과 코드까지
     expect(c).toContain('content: getDisplayContents(r.msg_type, r.msg_contents),');
     // ★ 2026-09-28 한줄로 V2 m046 — 비용은 SQL 집계(성공 건수 유형별)로 센다 · 브랜드(F) = 브랜드 단가(의도 유지)
     // ★ 2026-11-05 C107 — 브랜드 대체 성공(F + 7830 · 7831)은 브랜드가 아니다: SMS 대체 = ok_sms · LMS 대체 = 나머지(LMS 단가) · 청구(테스트 SMS · LMS)와 같은 셈
     expect(c).toContain("AND msg_type = 'F' AND NOT (${KAKAO_INROW_FALLBACK_SMS_SQL}) AND NOT (${KAKAO_INROW_FALLBACK_LMS_SQL}) THEN 1 ELSE 0 END) AS ok_brand");
     expect(c).toContain("OR (${KAKAO_INROW_FALLBACK_SMS_SQL}) THEN 1 ELSE 0 END) AS ok_sms");
     expect(c).toContain('stats.cost = okBrand * costRow.brand + okSms * costSms + okMms * costMms + okOther * costLms;');
-    expect(src('routes/admin.ts')).toContain('msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),');
-    expect(src('routes/manage-stats.ts')).toContain('msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),');
+    expect(src('routes/admin.ts')).toContain('msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),');
+    expect(src('routes/manage-stats.ts')).toContain('msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),');
   });
   it('라벨: PDF·관리자 화면', () => {
     // ★ 2026-10-16 이름 = 축의 짧은 이름 하나(PDF 2쪽·서버 type_label 이 같은 함수 · 화면 사본 삭제 · B-1016-1)

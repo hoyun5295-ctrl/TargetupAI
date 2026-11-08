@@ -2089,17 +2089,28 @@ p.ds-warn-good { margin: 0; display: flex; gap: 7px; align-items: center; paddin
 .ks-body > section + section { border-left: 1px solid var(--ds-stone-150); }
 .ks-body > section.ks-compose { overflow-y: auto; gap: 16px; }
 .ks-body > section.ks-preview { background: var(--ds-stone-50); padding: 18px 16px; overflow-y: auto; }
+/* ★ 2026-11-08 C117 D6 뿌리 R85 — 스크롤 열의 자식은 줄지 않는다(열이 스크롤). 옛: flex 열 자식이 줄어 overflow hidden 칸(버튼 · 쿠폰 · 캐러셀)이 아래에서 잘리고 스크롤이 생기지 않았다(박성용 접수 11-06) */
+.ks-body > section.ks-compose > *,
+.ks-body > section.ks-preview > * { flex-shrink: 0; }
 .ds-modal__foot.ks-foot { grid-template-columns: 901px 1px minmax(0, 1fr); }
-/* ★ 2026-11-05 C107 접수 T1 — 브랜드 창만 작성 열을 넓히고 수신자 열을 좁힌다(대체 문안은 휴대폰 창으로 · 알림톡 창 .ks-body 는 그대로).
-   좁은 폭(1099 이하)은 위 공용 반응형 규칙을 그대로 쓴다 — 넓은 폭에서만 덮는다(특이도가 높아 미디어 밖에 두면 좁은 폭 규칙을 이긴다). */
-@media (min-width: 1280px) {
-  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: minmax(560px, 1fr) 380px 380px; }
-  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: minmax(0, 1fr) 1px 380px; }
+/* ★ 2026-11-08 C117 D5 — 브랜드 창 작성 열 = 고정 폭(옛 C107 minmax(560px, 1fr) = 넓은 화면에서 작성 칸이 화면 절반 넘게 · 접수 「너무 커짐」).
+   바 왼쪽 = 작성 + 받는 화면 + 경계 1 → 본문 경계와 바 세로줄이 맞는다. 좁은 폭(1099 이하)은 위 공용 반응형 그대로(특이도가 높아 미디어 밖에 두면 이긴다). */
+@media (min-width: 1440px) {
+  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: 600px 380px minmax(0, 1fr); }
+  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: 981px 1px minmax(0, 1fr); }
+}
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: 520px 380px minmax(0, 1fr); }
+  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: 901px 1px minmax(0, 1fr); }
 }
 @media (min-width: 1100px) and (max-width: 1279px) {
-  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: minmax(440px, 1fr) 320px 320px; }
-  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: minmax(0, 1fr) 1px 320px; }
+  .ds-modal__body.ks-body.ks-body--brand { grid-template-columns: 460px 320px minmax(0, 1fr); }
+  .ds-modal__foot.ks-foot.ks-foot--brand { grid-template-columns: 781px 1px minmax(0, 1fr); }
 }
+/* ★ 2026-11-08 C117 D7 뿌리 R85 — 바 오른쪽(발신 프로필 + 보내기)이 칸보다 넓으면 넘쳐 왼쪽 칸(광고 표기)을 덮었다 → 모자라면 발신 프로필이 윗줄 · 단추가 아랫줄(알림톡 바 공용) */
+.ks-foot .ds-foot-send { flex-wrap: wrap; row-gap: 8px; }
+.ks-foot .ks-sender { min-width: 120px; flex: 1 1 140px; }   /* 기본 폭 140 = 1366 이상에서 한 줄 · 남으면 280(max-width)까지 */
+.ks-foot .ds-send-btn { flex: none; }
 
 .ds-head-icon.ks-head-icon--amber { background: var(--ds-amber-500); border-color: var(--ds-amber-500); color: #FFFFFF; }
 .ds-head-icon.ks-head-icon--violet { background: #7C3AED; border-color: #7C3AED; color: #FFFFFF; }

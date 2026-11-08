@@ -27,7 +27,7 @@ import { WorkspaceNotice } from './shared/SendWorkspaceShell';
 import KakaoSendHeader from './kakao-send/KakaoSendHeader';
 import '../styles/direct-send.css';
 import RecipientDirectInputModal, { type PastePreview } from './direct-send/RecipientDirectInputModal';
-import { checkAlimtalkPaste, planAppend, pickPhoneColumn, phonesFromColumn } from '../utils/recipient-paste';
+import { checkAlimtalkPaste, planAppend, pickPhoneColumn, phonesFromColumn, pickNameColumn, namesByPhone } from '../utils/recipient-paste';
 import AddressBookModal from './AddressBookModal';
 import DirectTargetFilterModal from './DirectTargetFilterModal';
 import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/target-extraction';
@@ -40,13 +40,19 @@ type AddrRow = { phone: string; name: string; extra1: string; extra2: string; ex
 const toAddrRow = (phone: string): AddrRow => ({ phone, name: '', extra1: '', extra2: '', extra3: '' });
 const digitsOnly = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 
+/** ★ 2026-11-08 C117 D8 — 인계 명단 한 행(이름 = 보기용 · 발송 글에 쓰지 않는다) */
+export interface BrandRecipientSeed { phone: string; name?: string }
+
 export interface BrandSendModalProps {
   show: boolean;
   onClose: () => void;
   /** 발신프로필 목록. 비어 있으면 채널 연동 안내를 띄운다(요금제가 아니라 기술적 전제다) */
   profiles: any[];
-  /** 직접발송에서 넘어올 때 이미 입력해 둔 수신자 */
-  initialRecipients?: string[];
+  /**
+   * 창 밖에서 들고 오는 명단(직접발송 · 직접 타겟 발송 · 알림톡 전환).
+   * ★ 2026-11-08 C117 D8 — 번호와 보기용 이름을 한 행으로(Codex 설계 2R · 짝이 따로 어긋날 길 0 · 비우기 = 빈 배열 하나)
+   */
+  initialRecipients?: BrandRecipientSeed[];
   /** ★ 2026-11-05 C107 D-05 — 「타겟추출」 칸 잠김 = 문자 직접발송과 같은 축(고객 DB 잠금 · 대시보드 isCustomerDbLocked) */
   targetExtractLocked: boolean;
   /** 잠긴 「타겟추출」 칸을 눌렀다 — 대시보드가 잠금 창을 고른다(문자 직접발송과 같은 함수) */
@@ -105,6 +111,20 @@ export default function BrandSendModal({
   const [directInputOpen, setDirectInputOpen] = useState(false);
   const [addNotice, setAddNotice] = useState('');
   const [phones, setPhones] = useState<string[]>([]);
+  /** ★ 2026-11-08 C117 D8(Harold H2) — 보기용 이름(번호 숫자 → 이름) · 발송 · 중복 · 세대 규칙은 phones 하나 그대로 · 열 때 다시 만든다 */
+  const [names, setNames] = useState<Record<string, string>>({});
+  // ★ Codex 구현 1R #2 — 이미 있는 이름은 덮지 않는다(칸 바꾸기 · 겹친 번호가 다른 원천 이름으로 바뀌지 않게) · 명단에서 빠진 번호의 이름은 아래 effect 가 걷는다(지운 뒤 다시 넣어도 옛 이름 0)
+  const mergeNames = (add: Record<string, string>) => { if (Object.keys(add).length > 0) setNames((prev) => ({ ...add, ...prev })); };
+  useEffect(() => {
+    setNames((prev) => {
+      const keep = new Set(phones);
+      const keys = Object.keys(prev);
+      if (keys.every((k) => keep.has(k))) return prev;
+      const next: Record<string, string> = {};
+      for (const k of keys) if (keep.has(k)) next[k] = prev[k];
+      return next;
+    });
+  }, [phones]);
   /**
    * ★ 2026-08-15 발송 확인 — 이 화면만 확인 없이 바로 나갔다(Harold 지적).
    *   문자·알림톡은 건수를 보여주는 확인 단계를 거치는데 브랜드만 버튼 한 번에 발송돼,
@@ -147,9 +167,16 @@ export default function BrandSendModal({
     reqSeqRef.current++;
     checkSeqRef.current++;
     const seeded = Array.from(new Set(
-      (initialRecipients || []).map((p) => String(p).replace(/[^0-9]/g, '')).filter(Boolean),
+      (initialRecipients || []).map((r) => String(r?.phone ?? '').replace(/[^0-9]/g, '')).filter(Boolean),
     ));
     setPhones(seeded);
+    const seededNames: Record<string, string> = {};
+    for (const r of initialRecipients || []) {
+      const p = String(r?.phone ?? '').replace(/[^0-9]/g, '');
+      const n = String(r?.name ?? '').trim();
+      if (p && n) seededNames[p] = n;
+    }
+    setNames(seededNames);
     setSeededCount(seeded.length);
     setListQuery('');
     setDirectInputOpen(false); setAddNotice('');
@@ -223,8 +250,9 @@ export default function BrandSendModal({
    * 고른 번호 칸에서 명단에 더한다(파일 = base 명단에 더하기 · 붙여넣기와 같은 중복 규칙) · 돌려줌 = 담은 뒤 상태(base · seq).
    *   base = 처음 담기면 지금 명단 · [다른 칸 고르기]면 앞 칸을 담기 전 명단(앞 칸 번호를 새 칸으로 바꾼다).
    */
-  const addFromColumn = (column: string, rows: Record<string, unknown>[], base: string[]): { base: string[]; seq: number } => {
+  const addFromColumn = (column: string, rows: Record<string, unknown>[], base: string[], headers: readonly string[]): { base: string[]; seq: number } => {
     const list = phonesFromColumn(column, rows);
+    mergeNames(namesByPhone(column, pickNameColumn(headers), rows));   // ★ C117 D8 — 파일 이름 칸(보기용)
     const plan = planAppend(list, base, dedupEnabled);
     setRecipients([...base, ...plan.add]);
     setAddNotice(list.length === 0
@@ -237,7 +265,7 @@ export default function BrandSendModal({
   const pickColumn = (h: string) => {
     if (!colPick) return;
     const replace = !!colPick.used && colPick.seq === reqSeqRef.current && !!colPick.base;
-    const done = addFromColumn(h, colPick.rows, replace ? colPick.base! : phones);
+    const done = addFromColumn(h, colPick.rows, replace ? colPick.base! : phones, colPick.headers);
     setColPick({ ...colPick, open: false, used: h, ...done });
   };
 
@@ -265,7 +293,7 @@ export default function BrandSendModal({
       if (headers.length === 0) { setAddNotice('파일에서 칸을 찾지 못했어요.'); return; }
       const pick = pickPhoneColumn(headers, rows);
       if (pick.column) {
-        const done = addFromColumn(pick.column, rows, phones);
+        const done = addFromColumn(pick.column, rows, phones, headers);
         setColPick({ headers, rows, candidates: pick.candidates, open: false, used: pick.column, ...done });
       } else {
         setColPick({ headers, rows, candidates: pick.candidates, open: true });
@@ -275,11 +303,14 @@ export default function BrandSendModal({
     }
   };
 
-  /** 주소록 창이 쓰는 줄 모양 ↔ 이 창의 번호 명단(번호만 쓴다 · 불러오기 = 그 순간 명단에 더하기) */
-  const addrRows = useMemo(() => phones.map(toAddrRow), [phones]);
+  /** 주소록 창이 쓰는 줄 모양 ↔ 이 창의 번호 명단(불러오기 = 그 순간 명단에 더하기 · ★ C117 D8 이름은 보기용으로 함께 둔다) */
+  const addrRows = useMemo(() => phones.map((p) => ({ ...toAddrRow(p), name: names[p] || '' })), [phones, names]);
   const setAddrRows: React.Dispatch<React.SetStateAction<AddrRow[]>> = (action) => {
     updateRecipients((prev) => {
       const next = typeof action === 'function' ? action(prev.map(toAddrRow)) : action;
+      const add: Record<string, string> = {};
+      for (const r of next) { const p = digitsOnly(r.phone); const n = String(r.name ?? '').trim(); if (p && n) add[p] = n; }
+      mergeNames(add);
       return next.map((r) => digitsOnly(r.phone)).filter(Boolean);
     });
   };
@@ -294,6 +325,10 @@ export default function BrandSendModal({
       if (seq !== reqSeqRef.current) return;
       if (!r.ok) { setAddNotice(r.expired ? '담은 명단의 보관 시간이 지났습니다. 다시 추출해 주세요.' : (r.error || '명단을 불러오지 못했습니다.')); return; }
       const list = (r.data.recipients || []).map((row: any) => digitsOnly(row?.[ext.phoneField] ?? row?.phone)).filter((p: string) => p.length >= 10);
+      // ★ C117 D8 — 타겟추출 고객명(표준 필드 name · 보기용)
+      const add: Record<string, string> = {};
+      for (const row of r.data.recipients || []) { const p = digitsOnly(row?.[ext.phoneField] ?? row?.phone); const n = String(row?.name ?? '').trim(); if (p.length >= 10 && n) add[p] = n; }
+      mergeNames(add);
       const finalList = dedupEnabled ? Array.from(new Set(list)) as string[] : list;
       setRecipients(finalList);
       setAddNotice(`조건에 맞는 ${finalList.length.toLocaleString()}명을 담았습니다.${ext.skippedNoPhone > 0 ? ` (휴대폰 번호가 없는 ${ext.skippedNoPhone.toLocaleString()}명 제외)` : ''}`);
@@ -350,7 +385,9 @@ export default function BrandSendModal({
   const removedCount = Math.max(0, seededCount - phones.length);
   const LIST_PAGE_SIZE = 10;
   const listDigits = listQuery.replace(/[^0-9]/g, '');
-  const listFiltered = phones.map((p, idx) => ({ p, idx })).filter((r) => !listDigits || r.p.includes(listDigits));
+  // ★ C117 D8 — 검색 = 번호 또는 이름
+  const listText = listQuery.trim();
+  const listFiltered = phones.map((p, idx) => ({ p, idx })).filter((r) => !listText || (listDigits && r.p.includes(listDigits)) || (names[r.p] || '').includes(listText));
   const listTotalPages = Math.max(1, Math.ceil(listFiltered.length / LIST_PAGE_SIZE));
   const listCurrentPage = Math.min(listPage, listTotalPages - 1);
   const listPageItems = listFiltered.slice(listCurrentPage * LIST_PAGE_SIZE, (listCurrentPage + 1) * LIST_PAGE_SIZE);
@@ -436,7 +473,7 @@ export default function BrandSendModal({
         </div>
         <div className="ds-search-wrap">
           <Search size={15} strokeWidth={1.75} />
-          <input type="text" className="ds-search-in" placeholder="수신번호 검색" value={listQuery}
+          <input type="text" className="ds-search-in" placeholder="번호 · 이름 검색" value={listQuery}
             onChange={(e) => { setListQuery(e.target.value); setListPage(0); setListSelected(new Set()); }} />
         </div>
       </div>
@@ -453,7 +490,7 @@ export default function BrandSendModal({
               aria-label="전체 선택" />
           </label>
           <span>수신번호</span>
-          <span />
+          <span>이름</span>
         </div>
         {phones.length === 0 ? (
           <div className="ds-list-empty">
@@ -508,7 +545,7 @@ export default function BrandSendModal({
                         aria-label={`${p} 선택`} />
                     </label>
                     <span className="ds-num text-stone-800 font-medium">{p}</span>
-                    <span />
+                    <span className="min-w-0 truncate text-[13px] text-stone-600">{names[p] || '-'}</span>
                   </div>
                 ))
               )}

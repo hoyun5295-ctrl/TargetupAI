@@ -217,7 +217,7 @@ describe('2-2. 브랜드 파일 읽기 — 읽는 동안 명단이 바뀌면 버
     // ★1105 C107 D-08 — 엑셀 · CSV(업로드 분석)도 같은 세대 검사 뒤에만 더한다
     const iJson = hf.indexOf('await res.json();');
     const iGuard2 = hf.indexOf('if (seq !== reqSeqRef.current) {', iJson);
-    const iAdd = hf.indexOf('addFromColumn(pick.column, rows, phones);');
+    const iAdd = hf.indexOf('addFromColumn(pick.column, rows, phones, headers);');
     expect(iJson).toBeGreaterThan(iMerge);
     expect(iGuard2).toBeGreaterThan(iJson);
     expect(iAdd).toBeGreaterThan(iGuard2);

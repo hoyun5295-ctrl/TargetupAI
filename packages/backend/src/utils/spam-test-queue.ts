@@ -765,7 +765,8 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
       return { ok: false, error: 'DB 마이그레이션 필요: 운영자에게 spam_filter_tests 컬럼 추가를 요청하세요', errorCode: 'DB_MIGRATION_PENDING' };
     }
     console.log('[SpamTestQueue] 큐 등록 오류(상세):', err?.message || err);
-    return { ok: false, error: `스팸 테스트 큐 등록 오류: ${err?.message || '알 수 없는 오류'}` };
+    // ★ 2026-11-08 C117 D2 — 화면 문장에 DB 원문을 싣지 않는다(옛: 「value too long for type…」이 고객 검사 창에 그대로) · 원문 = 위 로그
+    return { ok: false, errorCode: 'ENQUEUE_FAILED', error: '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 시도해 주세요.' };
   }
 }
 

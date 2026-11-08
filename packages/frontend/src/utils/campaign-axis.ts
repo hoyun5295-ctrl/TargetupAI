@@ -96,10 +96,14 @@ export function isBrandOnlyChannel(c: CampaignAxisRow | null | undefined): boole
 export const BRAND_FRIEND_TARGETINGS = ['I', 'F'] as const;
 
 /**
- * ★ 2026-11-05 C107 D-11 — 브랜드 대상 이름 = 청구 유형 이름(백엔드 billing-types BRAND · BRAND_NF 의 label 미러 · 일치 = brand-axis-invariants.test.ts).
- *   발송결과 채널 칩 · 목록이 정산서와 같은 글자를 쓴다.
+ * ★ 2026-11-08 C117 D9(Harold H1) — 브랜드 캠페인 이름 = 고른 대상(백엔드 sms-result-map BRAND_TARGETING_NAMES 미러 · 일치 = 계약 c117 B3-a).
+ *   옛 C107 D-11(이름 = 청구 이름 친구 · 비친구)은 폐기 — 청구는 받는 사람마다 실제 친구라 줄(발송 내역 유형)에서 보인다.
  */
-export const BRAND_AUDIENCE_LABELS = { friend: '브랜드메시지(친구)', nonfriend: '브랜드메시지(비친구)' } as const;
+export const BRAND_TARGETING_NAMES: Readonly<Record<string, string>> = { I: '채널 친구', F: '채널 친구', N: '비친구만', M: '마수동 전체' };
+export function brandTargetingLabel(targeting: string | null | undefined): string {
+  const name = BRAND_TARGETING_NAMES[String(targeting ?? '').trim().toUpperCase()];
+  return name ? `브랜드메시지(${name})` : '브랜드메시지';
+}
 
 export function isBrandFriendTargeting(targeting: string | null | undefined): boolean {
   const t = String(targeting ?? '').trim().toUpperCase();
@@ -122,8 +126,8 @@ export function isKakaoFamilyChannel(c: CampaignAxisRow | null | undefined): boo
  */
 export function resolveChannelLabel(c: CampaignAxisRow | null | undefined): string {
   if (isAlimtalkChannel(c)) return '알림톡';
-  // ★ 2026-11-05 C107 D-11 — 캠페인 한 건 = 대상값으로 친구 · 비친구(빈 값 = 비친구 · 청구와 같은 판정)
-  if (isBrandOnlyChannel(c)) return isBrandFriendTargeting(c?.kakao_targeting) ? BRAND_AUDIENCE_LABELS.friend : BRAND_AUDIENCE_LABELS.nonfriend;
+  // ★ 2026-11-08 C117 D9 — 캠페인 한 건 = 고른 대상 이름(빈 값 · 옛 행 = 「브랜드메시지」)
+  if (isBrandOnlyChannel(c)) return brandTargetingLabel(c?.kakao_targeting);
   if (isBothChannel(c)) return '문자+브랜드메시지';
   const t = String(c?.message_type || '').trim();
   return MSG_TYPE_LABEL[t] || t || 'SMS';
@@ -136,7 +140,11 @@ export function resolveChannelLabel(c: CampaignAxisRow | null | undefined): stri
  *   violet은 이 앱에서 AI 기능 화면이 쓰는 색이다(LESSONS_FRONTEND 톤앤매너).
  *   알림톡·브랜드는 채널을 구분하는 의미색이라 그대로 둔다.
  */
+// ★ 2026-11-08 C117 D11 뿌리 R85 — 칩 글자는 꺾지 않는다(관리자 보기 = 발송자 열이 더해져 칸이 좁아 「브랜드메시지(비친구)」가 두 줄로 깨졌다 · 서수란 댓글) · 모든 반환에
 export function resolveChannelChipClass(c: CampaignAxisRow | null | undefined): string {
+  return `whitespace-nowrap ${channelChipTone(c)}`;
+}
+function channelChipTone(c: CampaignAxisRow | null | undefined): string {
   if (isAlimtalkChannel(c)) return 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/15';
   if (isBrandOnlyChannel(c)) return 'bg-amber-50 text-amber-800 ring-1 ring-inset ring-amber-600/15';
   const t = String(c?.message_type || '').trim();

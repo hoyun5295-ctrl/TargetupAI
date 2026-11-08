@@ -117,13 +117,13 @@ describe('발송결과 「대체발송」 필터 = 두 모양 모두', () => {
 describe('행 단위 라벨 호출이 상태코드를 넘긴다', () => {
   it('발송결과 상세·엑셀 · 캠페인 엑셀 · 관리자 상세 · 고객 타임라인 · 통계 분리', () => {
     const results = src('routes/results.ts');
-    expect(results).toContain('send_type: getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code),');
-    expect(results).toContain('const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code);');
-    expect(src('utils/campaign-sms-export.ts')).toContain('const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code);');
+    expect(results).toContain('send_type: getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code, m.friend_yn),');
+    expect(results).toContain('const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code, m.friend_yn);');
+    expect(src('utils/campaign-sms-export.ts')).toContain('const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code, m.friend_yn);');
     const admin = src('routes/admin.ts');
-    expect(admin).toContain('sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),');
-    expect(admin).toContain("getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),\n          sendType");
-    expect(src('utils/customer-timeline.ts')).toContain('const typeLabel = getSendTypeLabel(msgType, r.k_oriseq, r.status_code);');
+    expect(admin).toContain('sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),');
+    expect(admin).toContain("getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),\n          sendType");
+    expect(src('utils/customer-timeline.ts')).toContain('const typeLabel = getSendTypeLabel(msgType, r.k_oriseq, r.status_code, r.friend_yn);');
     expect(src('utils/sms-result-map.ts')).toContain('const fb = fallbackOf(r.msg_type, r.k_oriseq, code);');
   });
 });

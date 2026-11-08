@@ -40,7 +40,7 @@ import {
   toKoreaTimeStr,
   getCompanySmsTables, hasCompanyLineGroup, getTestSmsTables, getTestSendTable, getAuthSmsTable,
   invalidateLineGroupCache, getNextSmsTable,
-  smsCountAll, smsAggAll, smsSelectAll, smsSelectPagedAll, smsMinAll, smsExecAll,
+  smsCountAll, smsAggAll, smsSelectAll, smsSelectPagedAll, withFriendYnField, smsMinAll, smsExecAll,
   getCompanySmsTablesWithLogs, getCampaignQueueTables,
   insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, getEtcJsonCapacity,
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
@@ -1643,7 +1643,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
          SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'F' AND NOT (${KAKAO_INROW_FALLBACK_SMS_SQL}) AND NOT (${KAKAO_INROW_FALLBACK_LMS_SQL}) THEN 1 ELSE 0 END) AS ok_brand`,
         testWhere, queryParams),
       smsSelectPagedAll(allTables,
-        'seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id, k_oriseq',
+        await withFriendYnField('seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id, k_oriseq'),   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
         testWhere, queryParams, 'sendreq_time DESC, seqno DESC', TEST_LIST_LIMIT, 0),
     ]);
 
@@ -1691,7 +1691,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       phone: r.dest_no,
       // ★ 2026-09-26 S1-H06 브랜드 테스트가 이 목록에 들어온다 — 유형·본문은 표시 CT(브랜드 본문은 JSON이라 문구만 꺼낸다)
       content: getDisplayContents(r.msg_type, r.msg_contents),
-      type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),   // ★ C107 — 결과 코드까지(브랜드 대체 = 「대체 SMS」 · 청구 = 테스트 SMS)
+      type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),   // ★ C107 — 결과 코드까지(브랜드 대체 = 「대체 SMS」 · 청구 = 테스트 SMS)
       sentAt: r.sendreq_time,
       status: isSuccess(r.status_code) ? 'success' : PENDING_CODES.includes(r.status_code) ? 'pending' : 'fail',
 

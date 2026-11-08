@@ -15,7 +15,7 @@ import { parseWonAmount } from '../utils/normalize';
 import type { PoolClient } from 'pg';
 import { authenticate, requireSuperAdmin, requireUuidId, requireBestLayoutViewer, requireAdminArea } from '../middlewares/auth';
 import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, readMapFor, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
-import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables } from '../utils/sms-queue';
+import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables, withFriendYnField } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
 import { startMiningJob, getMiningJob } from '../utils/best-copy-miner';
@@ -36,7 +36,7 @@ import { restrictAccount, isRestrictedStatus, RestrictionOutcome } from '../util
 import { DASHBOARD_CARD_POOL, validateCardIds, getRequiredFields, filterPoolByAvailableData, generateDynamicCards } from '../utils/dashboard-card-pool';
 import { detectEnabledFields, clearEnabledFieldsCache } from '../utils/enabled-fields';
 import { spamResultRowStatus, SUCCESS_CODES_SQL, PENDING_CODES_SQL, getStatusLabel, getStatusType, getCarrierLabel, isSuccess, isPending, getSendTypeLabel, getCampaignChannelLabel, getQueueRowStatus, getDisplayContents, fallbackOf } from '../utils/sms-result-map';
-import { isKakaoSplitChannel, brandBillingKey } from '../utils/billing-types';   // ★ C107 카카오 분리 대상 · 브랜드 청구 구분
+import { isKakaoSplitChannel, brandBillingKey, billingTypeLabelOf } from '../utils/billing-types';   // ★ C107 카카오 분리 대상 · 브랜드 청구 구분
 // ★ 2026-10-16 통계 엑셀 대체 행 이름 = 청구서와 같은 유형 표시명(B-1016-1)
 import { billingTypeLabel } from '../utils/billing-invoice-lines';
 import { DEFAULT_COSTS, getCompanyCosts } from '../config/defaults';
@@ -3368,7 +3368,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
 
       const testRows2All = await smsSelectAll(
         testTables2,
-        `dest_no as phone, msg_type, status_code, k_oriseq, msg_instm as sent_at, bill_id as sender_id`,
+        await withFriendYnField(`dest_no as phone, msg_type, status_code, k_oriseq, msg_instm as sent_at, bill_id as sender_id`),   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
         `app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere2}`,
         mysqlParams2,
         `ORDER BY msg_instm DESC LIMIT 50`
@@ -3378,7 +3378,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
       testDetail = (testRows2 as any[]).map(r => ({
         phone: r.phone,
         // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
-        msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),   // ★ C107 결과 코드까지
+        msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),   // ★ C107 결과 코드까지 · C117 친구
         status: isSuccess(r.status_code) ? 'success' : isPending(r.status_code) ? 'pending' : 'fail',
         sentAt: r.sent_at,
         testType: 'manager',
@@ -3659,10 +3659,10 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
       //   실체화한 뒤 정렬해 페이지당 수 초가 걸렸다 (에이치피오 87,049 예약 상세 10초+ 잔여 병목).
       const rows = await smsSelectPagedAll(
         smsTables,
-        `seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
+        await withFriendYnField(`seqno, dest_no, call_back, msg_contents, msg_type, status_code, mob_company,
          sendreq_time, k_oriseq,
          DATE_ADD(mobsend_time, INTERVAL 9 HOUR) AS mobsend_time,
-         (sendreq_time > NOW()) AS is_future`,
+         (sendreq_time > NOW()) AS is_future`),   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
         mysqlWhere,
         mysqlParams,
         `seqno DESC, dest_no ASC`,
@@ -3679,8 +3679,8 @@ router.get('/campaigns/:id/sms-detail', authenticate, requireSuperAdmin, async (
           callBack: r.call_back,
           // ★ 2026-07-30: 브랜드 행(msg_type='F')은 msg_contents가 JSON — 본문(MESSAGE)만 풀어 표시.
           msgContents: getDisplayContents(r.msg_type, r.msg_contents),
-          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
-          sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),
+          msgType: r.msg_type === 'S' ? 'SMS' : r.msg_type === 'L' ? 'LMS' : r.msg_type === 'M' ? 'MMS' : getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),
+          sendType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),
           // ★ 2026-10-07 알림톡 실패 후 문자 대체 행 — 화면이 결과 아래 「알림톡 실패」를 붙인다(글자 말고 판정으로)
           isFallback: fallbackOf(r.msg_type, r.k_oriseq, r.status_code) !== null,   // ★ 2026-10-16 대체 판정 하나(B-1016-1)
           statusCode: r.status_code,
@@ -6542,13 +6542,14 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
         // 카카오 행 — 시도 전체(대체로 넘어간 건은 카카오 실패로 · 접수 기대 = 전송 1 · 실패 1). 대상건수는 여기에 귀속.
         // ★ 2026-11-05 C107 D-11 — 브랜드 집계 키 = 청구 구분(BRAND · BRAND_NF) · 이름 = 그 청구 유형 이름(이름만 바꾸면 친구 · 비친구가 한 칸에 합쳐진다)
         const kakaoKey = c.send_channel === 'alimtalk' ? 'alimtalk' : brandBillingKey(c.kakao_targeting);
-        const kakaoLabel = getCampaignChannelLabel(c.send_channel, c.message_type, c.kakao_targeting ?? null);
+        // ★ 2026-11-08 C117 D9 — 이 칸은 청구 줄 = 이름도 청구 유형 이름(캠페인 이름 getCampaignChannelLabel 은 고른 대상으로 바뀌었다)
+        const kakaoLabel = kakaoKey === 'alimtalk' ? '알림톡' : billingTypeLabelOf(kakaoKey);
         // ★ 2026-11-06 C107F ② 뿌리 R65 — 비친구 대상 브랜드에서 카카오가 실제 친구로 보고한 성공은 친구 칸(정산서와 같은 줄 · 청구 식과 같은 규칙)
         const friendOk = kakaoKey === 'BRAND_NF' ? Math.min(split?.friendSuccess ?? 0, split?.success ?? 0) : 0;
         addExportBucket(c, kakaoKey, kakaoLabel, Number(c.target_count || 0),
           (split?.total ?? 0) - friendOk, (split?.success ?? 0) - friendOk, split?.fail ?? 0, split?.pending ?? 0);
         if (friendOk > 0) {
-          addExportBucket(c, 'BRAND', getCampaignChannelLabel(c.send_channel, c.message_type, 'I'), 0, friendOk, friendOk, 0, 0);
+          addExportBucket(c, 'BRAND', billingTypeLabelOf('BRAND'), 0, friendOk, friendOk, 0, 0);
         }
         // 대체 문자 행 — LMS/SMS 각각(0이면 행 생략, 대상건수 중복 방지 0). 이름 = 청구서와 같은 유형 표시명(LMS(대체발송)).
         if (sLms.total > 0) {

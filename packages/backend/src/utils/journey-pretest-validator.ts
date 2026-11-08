@@ -442,7 +442,7 @@ export async function enqueueStepSpamCheck(params: StepSpamParams): Promise<Step
   const result = await enqueueSpamTest({
     ...input,
     source: 'manual',
-    variantId: params.variantId || undefined,
+    // ★ 2026-11-08 C117 D1 뿌리 R84 — 검사 행 variant_id = 자동마케팅 묶음 안 문안 이름표(varchar 10). 여정 변이 행 id(uuid)는 싣지 않는다(옛: 칸 길이 초과로 A/B 칸 검사 · 켜기 검증이 늘 실패)
     batchId: randomUUID(),
     skipPrepaid: false,
     reuseSameDay: true,
@@ -463,7 +463,7 @@ export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamT
     const enqueueResult = await enqueueSpamTest({
       ...(await stepSpamInput(params)),
       source: 'auto_ai',
-      variantId: params.variantId || undefined,
+      // ★ 2026-11-08 C117 D1 뿌리 R84 — 검사 행 variant_id = 자동마케팅 묶음 안 문안 이름표(varchar 10). 여정 변이 행 id(uuid)는 싣지 않는다(옛: 칸 길이 초과로 A/B 칸 검사 · 켜기 검증이 늘 실패)
       batchId,
       skipPrepaid: false,
       // ★ 2026-11-01 B1-4(J15) — 같은 날 같은 글 = 같은 검사 이어 보기(차감 0 · 옛: 회차마다 새 검사 · 새 차감)

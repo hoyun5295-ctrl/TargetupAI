@@ -73,7 +73,7 @@ import { getMmsImagePath, getMmsImageDisplayName, toMmsImagePaths, type MmsImage
 import DirectSendPanel from '../components/DirectSendPanel';
 import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
-import BrandSendModal from '../components/BrandSendModal';
+import BrandSendModal, { type BrandRecipientSeed } from '../components/BrandSendModal';
 import { carryPhonesToDirectRecipients } from '../utils/send-checks';
 // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본(서버) 요청 CT
 import {
@@ -498,7 +498,8 @@ export default function Dashboard() {
   const [alimtalkInitialRecipients, setAlimtalkInitialRecipients] = useState<any[]>([]);
   // ★ 2026-07-29 브랜드메시지 발송 모달
   const [showBrandSend, setShowBrandSend] = useState(false);
-  const [brandInitialRecipients, setBrandInitialRecipients] = useState<string[]>([]);
+  // ★ 2026-11-08 C117 D8 — 인계 명단 = 번호 · 보기용 이름 한 행(이름 전용 상태 없음)
+  const [brandInitialRecipients, setBrandInitialRecipients] = useState<BrandRecipientSeed[]>([]);
   // ★ 2026-08-21 브랜드 모달 진입 출처 — 'target'이면 인디고 + 가져온 목록만(BrandSendModal entry prop)
   const [brandEntry, setBrandEntry] = useState<'direct' | 'target'>('direct');
   const [brandSending, setBrandSending] = useState(false);
@@ -3010,7 +3011,7 @@ const campaignData = {
             else setToast({ show: true, type: 'error', message: r.error || '명단을 불러오지 못했습니다.' });
             return;
           }
-          setBrandInitialRecipients(r.data.recipients.map((row: any) => String(row?.phone ?? '')).filter(Boolean));
+          setBrandInitialRecipients(r.data.recipients.map((row: any) => ({ phone: String(row?.phone ?? ''), name: typeof row?.name === 'string' ? row.name : undefined })).filter((x: BrandRecipientSeed) => !!x.phone));
           setBrandEntry('target');
           setShowBrandSend(true);
           setShowTargetSend(false);
@@ -3214,7 +3215,7 @@ const campaignData = {
           }}
           onBrandOpen={() => {
             // ★ 2026-07-29 브랜드메시지 진입. 알림톡과 같이 입력해 둔 수신자를 그대로 인계한다.
-            setBrandInitialRecipients(directRecipients.map((r: any) => String(r?.phone ?? r)).filter(Boolean));
+            setBrandInitialRecipients(directRecipients.map((r: any) => ({ phone: String(r?.phone ?? r), name: typeof r?.name === 'string' ? r.name : undefined })).filter((x: BrandRecipientSeed) => !!x.phone));
             setBrandEntry('direct');
             setShowBrandSend(true);
           }}
@@ -3355,7 +3356,7 @@ const campaignData = {
           setAlimtalkInitialRecipients([]);
           setDirectSendChannel('sms');
           if (to === 'brand') {
-            setBrandInitialRecipients(phones);
+            setBrandInitialRecipients(phones.map((p, i) => ({ phone: p, name: typeof rows?.[i]?.name === 'string' ? rows[i].name : undefined })));
             setBrandEntry('direct');
             setShowBrandSend(true);
           } else {

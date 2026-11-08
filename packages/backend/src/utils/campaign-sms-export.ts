@@ -11,7 +11,7 @@
  */
 import { Response } from 'express';
 import { mysqlQuery } from '../config/database';
-import { getCampaignSmsTablesFor } from './sms-queue';
+import { getCampaignSmsTablesFor, withFriendYnField } from './sms-queue';
 import { SUCCESS_CODES, PENDING_CODES, getQueueRowStatus, getSendTypeLabel, getCarrierLabel, getDisplayContents, SUBSTITUTE_ROW_SQL } from './sms-result-map';
 import { BRAND_CAMPAIGN_CHANNELS } from './billing-types';
 
@@ -72,8 +72,9 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
   if (sendChannel === 'sms' || sendChannel === 'both' || sendChannel === 'alimtalk'
       || (BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(sendChannel)) {
     const exportTables = await getCampaignSmsTablesFor(companyId, params.campaign);
+    const smsFields = await withFriendYnField(SMS_EXPORT_FIELDS);   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
     for (const t of exportTables) {
-      subqueries.push(`(SELECT ${SMS_EXPORT_FIELDS} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
+      subqueries.push(`(SELECT ${smsFields(t)} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
       baseParams.push(id);
     }
   }
@@ -105,7 +106,7 @@ export async function streamCampaignSmsCsv(res: Response, params: CampaignSmsCsv
       // ★ 2026-07-30: 브랜드 행도 SMSQ 합류 — 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
       // 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
       const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
-      const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code);
+      const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code, m.friend_yn);
       const statusDisplay = rowStatus.label;
       const carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
 

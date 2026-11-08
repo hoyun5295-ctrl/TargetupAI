@@ -203,7 +203,8 @@ describe('C107F HC4 화면 · 통계 칸 = 실제 친구 성공을 친구 단가
     expect(modal).toContain('friendOk * perBrand + (bsp.success - friendOk) * brandUnit');
     const admin = readSrc('routes/admin.ts');
     expect(admin).toContain("const friendOk = kakaoKey === 'BRAND_NF' ? Math.min(split?.friendSuccess ?? 0, split?.success ?? 0) : 0;");
-    expect(admin).toContain("addExportBucket(c, 'BRAND', getCampaignChannelLabel(c.send_channel, c.message_type, 'I'), 0, friendOk, friendOk, 0, 0);");
+    // ★ 2026-11-08 C117 D9 — 친구 몫 칸 이름 = 청구 유형 이름 원천(캠페인 이름 함수는 고른 대상으로 바뀌었다)
+    expect(admin).toContain("addExportBucket(c, 'BRAND', billingTypeLabelOf('BRAND'), 0, friendOk, friendOk, 0, 0);");
     const stats = readSrc('utils/stats-aggregation.ts');
     expect(stats).toContain('GROUP BY app_etc1, msg_type, is_sub, is_friend, status_code');
   });

@@ -322,7 +322,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
 
   // 수신거부 — 설정값이 유효하면 그것으로 고정, 아니면 직접 입력(하이픈 자동 · props 주석)
   const [unsubPhone, setUnsubPhone] = useState('');
-  const [unsubAuth, setUnsubAuth] = useState('');
   const lockedUnsub = isValid080Number(defaultUnsubPhone || '') ? format080Input(defaultUnsubPhone || '') : '';
   const effUnsub = lockedUnsub || unsubPhone.trim();
   // 080 줄은 광고이거나 마수동·비친구 대상일 때 보인다 — M·N은 광고 여부와 무관하게 번호가 필수다(매뉴얼 §2.2.2)
@@ -507,7 +506,7 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
       resendTitle: resendTitle || undefined,
       // 080 줄이 화면에 보일 때만 싣는다 — 안 보이는 값이 따라 나가지 않게(이미지와 같은 원칙)
       unsubscribePhone: showUnsub ? (effUnsub || undefined) : undefined,
-      unsubscribeAuth: showUnsub ? (unsubAuth.trim() || undefined) : undefined,
+      // ★ 2026-11-08 C117 D4 — 인증번호 손 입력 칸 삭제(접수 · 080 은 설정값으로 잠김 · 서버는 빈 값이면 싣지 않는다 = 지금 대부분 발송과 같은 전문)
     };
 
     if (mode === 'free') {
@@ -737,8 +736,6 @@ export default function BrandMessageEditor({ profiles, onSend, sending, accent =
                         onChange={(e) => setUnsubPhone(format080Input(e.target.value))}
                         className={`${FIELD} !w-[148px] !py-0 h-8 !text-[13px] tabular-nums`} placeholder="080-000-0000" />
                     )}
-                    <input type="text" value={unsubAuth} onChange={(e) => setUnsubAuth(e.target.value)}
-                      className={`${FIELD} !w-[120px] !py-0 h-8 !text-[13px] tabular-nums`} placeholder="인증번호 (선택)" />
               </div>
             {showUnsub && (
               <p className="text-[11px] text-slate-500 mt-1.5 px-1">

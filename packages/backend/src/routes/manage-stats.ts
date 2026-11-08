@@ -3,7 +3,7 @@ import { authenticate, requireCompanyAdmin } from '../middlewares/auth';
 import pool, { mysqlQuery } from '../config/database';
 import { DEFAULT_COSTS } from '../config/defaults';
 import { getCompanyScope } from '../utils/permission-helper';
-import { getTestSmsTables, getFriendColumnTables } from '../utils/sms-queue';
+import { getTestSmsTables, getFriendColumnTables, withFriendYnField } from '../utils/sms-queue';
 import { testSummaryCost, testSummaryUnitPrices } from '../utils/test-summary-cost';   // ★ C108 시험 발송 요약 비용 CT
 // ★ 2026-09-27 한줄로 V2 R131 — 테스트 통계도 이력(LOG) 테이블까지(정산과 같은 기간 테이블 CT)
 import { getTablesForBillingPeriod, billingMsgTypeSql } from '../utils/send-usage-aggregation';
@@ -286,11 +286,12 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       }
       mysqlParams.push(dateVal);
 
+      const testTable = (await getTestSmsTables())[0];
+      const testFields = await withFriendYnField(`dest_no as phone, msg_type, status_code, k_oriseq,
+          msg_instm as sent_at, bill_id as sender_id`);   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
       const testRows = await mysqlQuery(
-        `SELECT
-          dest_no as phone, msg_type, status_code, k_oriseq,
-          msg_instm as sent_at, bill_id as sender_id
-        FROM ${(await getTestSmsTables())[0]}
+        `SELECT ${testFields(testTable)}
+        FROM ${testTable}
         WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}
         ORDER BY msg_instm DESC LIMIT 50`,
         mysqlParams
@@ -298,7 +299,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
       testDetail = (testRows as any[]).map(r => ({
         phone: r.phone,
         // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
-        msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code),   // ★ C107 결과 코드까지
+        msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),   // ★ C107 결과 코드까지 · C117 친구
         // ★ C107 — 성공 · 대기 판정 = 결과 CT 한 곳(옛 인라인 [6, 1000, 1800] 은 대체 성공 7830 · 7831 · 대기 104 를 실패로 셌다)
         status: isSuccess(Number(r.status_code)) ? 'success' : isPending(Number(r.status_code)) ? 'pending' : 'fail',
         sentAt: r.sent_at,

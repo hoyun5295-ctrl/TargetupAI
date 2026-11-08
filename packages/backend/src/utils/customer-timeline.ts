@@ -23,7 +23,7 @@
 import { query, mysqlQuery } from '../config/database';
 import { adGateSchemaReady } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 빠짐 사건
 import { AD_EXCLUDE_LABEL, AdExcludeReason } from './ad-send-gate-core';
-import { getCompanySmsTablesWithLogsRange } from './sms-queue';
+import { getCompanySmsTablesWithLogsRange, withFriendYnField } from './sms-queue';
 import { getQueueRowStatus, getSendTypeLabel, getDisplayContents, getCarrierLabel } from './sms-result-map';
 import { normalizePhone } from './normalize';
 
@@ -338,6 +338,7 @@ async function fetchSends(
   // 커서는 UTC ISO, SMSQ는 KST naive — 여기서 축을 맞춘다(안 맞추면 9시간 어긋난 페이지가 나온다)
   const beforeKst = f.before ? isoToKstSql(f.before) : '';
   const afterKst = f.after ? isoToKstSql(f.after) : '';
+  const sendFields = await withFriendYnField(SEND_FIELDS);   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
   const subs: string[] = [];
   const params: any[] = [];
   for (const t of tables) {
@@ -361,7 +362,7 @@ async function fetchSends(
       params.push(f.like, f.like);
     }
     subs.push(
-      `(SELECT ${SEND_FIELDS}, '${t}' AS _t, (sendreq_time > NOW()) AS _future
+      `(SELECT ${sendFields(t)}, '${t}' AS _t, (sendreq_time > NOW()) AS _future
           FROM ${t} ${where} ORDER BY sendreq_time DESC LIMIT ${per})`,
     );
   }
@@ -399,7 +400,7 @@ async function fetchSends(
     const isFuture = r._future === true || num(r._future) === 1;
     const st = getQueueRowStatus(num(r.status_code), isFuture);
     const camp = campaignMap.get(String(r.app_etc1 || ''));
-    const typeLabel = getSendTypeLabel(msgType, r.k_oriseq, r.status_code);
+    const typeLabel = getSendTypeLabel(msgType, r.k_oriseq, r.status_code, r.friend_yn);
     const carrier = getCarrierLabel(String(r.mob_company || ''));
     const sentAt = kstSqlToIso(r.mobsend_s);
 

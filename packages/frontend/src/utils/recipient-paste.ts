@@ -150,3 +150,24 @@ export function phonesFromColumn(column: string, rows: readonly Record<string, u
   }
   return out;
 }
+
+/**
+ * ★ 2026-11-08 C117 D8 — 받는 사람 명단의 보기용 이름(브랜드메시지 · 발송 글에 쓰지 않는다 · Harold H2).
+ *   이름 칸 = 머리 이름이 표준 필드 name 의 이름 목록과 같은 칸(백엔드 standard-field-map FIELD_MAP name 의 displayName · aliases · fieldKey 미러 · 일치 = 계약 c117 B2-c).
+ */
+export const RECIPIENT_NAME_HEADERS: readonly string[] = ['고객명', '이름', '성함', 'name'];
+export function pickNameColumn(headers: readonly string[]): string | null {
+  const want = new Set(RECIPIENT_NAME_HEADERS.map((h) => h.toLowerCase()));
+  return headers.find((h) => want.has(String(h ?? '').trim().toLowerCase())) ?? null;
+}
+/** 고른 번호 칸 · 이름 칸에서 번호(phonesFromColumn 과 같은 읽기) → 이름. 이름이 빈 줄은 넣지 않는다 */
+export function namesByPhone(phoneColumn: string, nameColumn: string | null, rows: readonly Record<string, unknown>[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!nameColumn) return out;
+  for (const r of rows) {
+    const p = digitsOf(normalizePhoneKr(r?.[phoneColumn]));
+    const n = String(r?.[nameColumn] ?? '').trim();
+    if (p.length >= 10 && n) out[p] = n;
+  }
+  return out;
+}

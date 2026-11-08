@@ -8,6 +8,7 @@ import { authenticate } from '../middlewares/auth';
 import {
   getCompanySmsTablesWithLogs,
   getCampaignSmsTablesFor,
+  withFriendYnField,
   smsCountAll as smsUnionCount,
   smsGroupByAll as smsUnionGroupBy,
 } from '../utils/sms-queue';
@@ -795,13 +796,13 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       else if (status === 'fail') smsWhere += ` AND status_code NOT IN (${[...SUCCESS_CODES, ...PENDING_CODES].join(',')})`;
       else if (status === 'substitute') smsWhere += ` AND ${SUBSTITUTE_ROW_SQL}`;
 
-      const smsFields = SMS_DETAIL_FIELDS;
+      const smsFields = await withFriendYnField(SMS_DETAIL_FIELDS);   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
 
       // ★ 2026-06-13 속도: 테이블별 top-(offset+limit) 선잘라내기 — 일치 행 전체(본문 포함)를
       //   임시 테이블로 모은 뒤 정렬하던 구조가 대형 캠페인 상세 10초+의 잔여 병목 (admin 상세와 동일 fix).
       const innerLimit = limitNum + offset;
       for (const t of msgTables) {
-        dataSubqueries.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${innerLimit})`);
+        dataSubqueries.push(`(SELECT ${smsFields(t)} FROM ${t} ${smsWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${innerLimit})`);
         countSubqueries.push(`SELECT COUNT(*) AS cnt FROM ${t} ${smsWhere}`);
         dataParams.push(...smsBaseParams);
         countParams.push(...smsBaseParams);
@@ -870,7 +871,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         if (['phone', 'callback', 'content'].includes(String(searchType))) smsBaseParams.push(sv);
       }
 
-      const smsFields = SMS_DETAIL_FIELDS;
+      const smsFields = await withFriendYnField(SMS_DETAIL_FIELDS);   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다) · LIVE 재시도 갈래도 같다
       let smsWhere = 'WHERE app_etc1 = ?';
       if (searchType && searchValue) {
         // ★ D89: 전화번호/회신번호 검색 시 하이픈 제거 + REPLACE
@@ -889,7 +890,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
       for (const t of msgTables) {
         if (logPattern.test(t)) continue; // LOG 테이블 스킵
         // ★ 2026-06-13 속도: 본 경로와 동일한 테이블 내부 선잘라내기
-        liveOnlyDataSubs.push(`(SELECT ${smsFields} FROM ${t} ${smsWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${limitNum + offset})`);
+        liveOnlyDataSubs.push(`(SELECT ${smsFields(t)} FROM ${t} ${smsWhere} ORDER BY _sort_time DESC, dest_no ASC LIMIT ${limitNum + offset})`);
         liveOnlyParams.push(...smsBaseParams);
       }
 
@@ -915,7 +916,7 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
         status_type: rowStatus.type,
         // 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
         carrier_label: rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company),
-        send_type: getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code),
+        send_type: getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code, m.friend_yn),
       };
     });
 
@@ -1012,9 +1013,9 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
         || (BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(sendChannel)) {
       // ★ 2026-09-26 F26 — 그 캠페인의 테이블
       const exportTables = await getCampaignSmsTablesFor(companyId, campaignResult.rows[0]);
-      const smsFields = SMS_EXPORT_FIELDS;
+      const smsFields = await withFriendYnField(SMS_EXPORT_FIELDS);   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
       for (const t of exportTables) {
-        subqueries.push(`(SELECT ${smsFields} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
+        subqueries.push(`(SELECT ${smsFields(t)} FROM ${t} WHERE app_etc1 = ?${smsStatusWhere})`);
         baseParams.push(id);
       }
     }
@@ -1057,7 +1058,7 @@ router.get('/campaigns/:id/export', async (req: Request, res: Response) => {
         // ★ 2026-07-30: 브랜드 행도 SMSQ 합류 — 라벨은 msg_type 축(getSendTypeLabel 'F'=브랜드메시지) 단일.
         // ★ 2026-06-13: 발송 요청 시각이 미래인 대기 행 = "발송 예약" (화면 상세와 동일 산출)
         const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
-        const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code);
+        const msgTypeDisplay = getSendTypeLabel(m.msg_type, m.k_oriseq, m.status_code, m.friend_yn);
         const statusDisplay = rowStatus.label;
         const carrierDisplay = rowStatus.type === 'scheduled' ? '-' : getCarrierLabel(m.mob_company);
 

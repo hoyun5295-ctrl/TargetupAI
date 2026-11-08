@@ -19,7 +19,7 @@ import { SUCCESS_CODES, PENDING_CODES, HANJUL_BAND_BASE as HANJUL_BAND_BASE_ALL 
 const SUCCESS_CODES_ALL = [...SUCCESS_CODES, ...PENDING_CODES];
 import { isKakaoSplitChannel, billingTypeLabelOf } from '../billing-types';
 import { resolveBrandFallback } from '../brand-message';
-import { BRAND_AUDIENCE_LABELS } from '../../../../frontend/src/utils/campaign-axis';
+import { brandTargetingLabel as brandTargetingLabelFront } from '../../../../frontend/src/utils/campaign-axis';
 import { pickPhoneColumn, scorePhoneColumns as scoreFront, phonesFromColumn } from '../../../../frontend/src/utils/recipient-paste';
 import { scorePhoneColumns as scoreBack, pickPhoneColumnStrict } from '../agency-send-form';
 
@@ -138,20 +138,23 @@ describe('K1 · R1 넓힘 — 카카오 대체 판정 = K · F 한 곳', () => {
     expect(t.fallback.LMS).toEqual({ total: 1, success: 1, fail: 0, pending: 0 });
   });
 
-  it('④ 행 유형 라벨 = 결과 코드까지 넘긴다(부르는 자리 전부 인자 3개)', () => {
+  // ★ 2026-11-08 C117 D10 — 넷째 인자(받는 사람 실제 친구)가 더해졌다 = 인자 4개(결과 코드 · 친구 값 · 계약 c117 B3-b)
+  it('④ 행 유형 라벨 = 결과 코드 · 친구 값까지 넘긴다(부르는 자리 전부 인자 4개)', () => {
     const sites = callSites(backend, 'getSendTypeLabel');
     expect(sites.length).toBeGreaterThanOrEqual(8);
     for (const s of sites) {
       const n = s.args.split(',').length;
-      expect(n, `${s.rel} ${s.fn} (${s.args})`).toBe(3);
+      expect(n, `${s.rel} ${s.fn} (${s.args})`).toBe(4);
     }
   });
 
-  it('④ 브랜드 친구 · 비친구 이름 = 청구 유형 이름 하나(서버 라벨 = 화면 라벨)', () => {
-    expect(BRAND_AUDIENCE_LABELS.friend).toBe(billingTypeLabelOf('BRAND'));
-    expect(BRAND_AUDIENCE_LABELS.nonfriend).toBe(billingTypeLabelOf('BRAND_NF'));
-    expect(getCampaignChannelLabel('kakao', 'LMS', 'I')).toBe(billingTypeLabelOf('BRAND'));
-    for (const t of ['M', 'N', '', null]) expect(getCampaignChannelLabel('kakao', 'LMS', t)).toBe(billingTypeLabelOf('BRAND_NF'));
+  // ★ 2026-11-08 C117 D9(Harold H1) — 옛 결정 D-11(캠페인 이름 = 청구 이름)을 바꿨다: 캠페인 이름 = 고른 대상 · 청구 이름 = 줄(발송 내역 유형)과 정산서
+  it('④ 브랜드 캠페인 이름 = 고른 대상(서버 라벨 = 화면 라벨)', () => {
+    expect(getCampaignChannelLabel('kakao', 'LMS', 'I')).toBe('브랜드메시지(채널 친구)');
+    expect(getCampaignChannelLabel('kakao', 'LMS', 'M')).toBe('브랜드메시지(마수동 전체)');
+    expect(getCampaignChannelLabel('kakao', 'LMS', 'N')).toBe('브랜드메시지(비친구만)');
+    for (const t of ['', null]) expect(getCampaignChannelLabel('kakao', 'LMS', t)).toBe('브랜드메시지');
+    for (const t of ['I', 'M', 'N', 'F', '', null]) expect(brandTargetingLabelFront(t)).toBe(getCampaignChannelLabel('kakao', 'LMS', t));
     expect(getCampaignChannelLabel('kakao', 'LMS')).toBe('브랜드메시지');
   });
 });
@@ -278,7 +281,7 @@ describe('K4 · R31 넓힘 — 받는 사람 직접입력 창을 여는 화면 =
     const m = read('frontend/src/components/BrandSendModal.tsx');
     const pick = m.slice(m.indexOf('const pickColumn = (h: string) => {'), m.indexOf('const handleFile = async'));
     expect(pick).toContain('const replace = !!colPick.used && colPick.seq === reqSeqRef.current && !!colPick.base;');
-    expect(pick).toContain('addFromColumn(h, colPick.rows, replace ? colPick.base! : phones);');
+    expect(pick).toContain('addFromColumn(h, colPick.rows, replace ? colPick.base! : phones, colPick.headers);');
     const add = m.slice(m.indexOf('const addFromColumn = ('), m.indexOf('const pickColumn = ('));
     expect(add).toContain('const plan = planAppend(list, base, dedupEnabled);');
     expect(add).toContain('setRecipients([...base, ...plan.add]);');

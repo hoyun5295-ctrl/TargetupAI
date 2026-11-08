@@ -403,7 +403,8 @@ export async function smsAggAll(tables: string[], selectFields: string, whereCla
  */
 export async function smsSelectAll(
   tables: string[],
-  selectFields: string,
+  // ★ 2026-11-08 C117 D10 — 표마다 다른 필드(친구 칸 유무 = withFriendYnField) = 함수 · 별칭 · 순서는 표마다 같다(UNION ALL)
+  selectFields: string | ((table: string) => string),
   whereClause: string,
   params: any[],
   suffix?: string
@@ -411,11 +412,11 @@ export async function smsSelectAll(
   if (tables.length === 0) return [];
   const w = normalizeWhere(whereClause);
   const unions = tables
-    .map(t => `SELECT '${t}' AS _sms_table, ${selectFields} FROM ${t} WHERE ${w}`)
+    .map(t => `SELECT '${t}' AS _sms_table, ${fieldsFor(selectFields, t)} FROM ${t} WHERE ${w}`)
     .join(' UNION ALL ');
   // ★ D111 P4: outer suffix(ORDER BY/GROUP BY)가 inner alias가 아닌 raw 컬럼명을 참조해도 자동 재작성.
   //   호출부가 'seqno as idx' + 'ORDER BY seqno' 써도 'ORDER BY idx'로 자동 치환 → "column not found" 재발 차단
-  const aliasMap = extractAliasMap(selectFields);
+  const aliasMap = extractAliasMap(fieldsFor(selectFields, tables[0]));
   const safeSuffix = suffix ? rewriteSuffixWithAliases(suffix, aliasMap) : '';
   const sql = safeSuffix ? `SELECT * FROM (${unions}) AS _u ${safeSuffix}` : unions;
   return await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
@@ -436,7 +437,7 @@ export async function smsSelectAll(
  */
 export async function smsSelectPagedAll(
   tables: string[],
-  selectFields: string,
+  selectFields: string | ((table: string) => string),   // ★ C117 D10 = smsSelectAll 과 같은 꼴
   whereClause: string,
   params: any[],
   orderBy: string,
@@ -449,10 +450,10 @@ export async function smsSelectPagedAll(
   const off = Math.max(0, Math.floor(Number(offset) || 0));
   const innerLimit = lim + off;
   // 호출부가 raw 컬럼명으로 정렬을 줘도 alias로 자동 재작성 (smsSelectAll과 동일 안전망)
-  const aliasMap = extractAliasMap(selectFields);
+  const aliasMap = extractAliasMap(fieldsFor(selectFields, tables[0]));
   const safeOrder = rewriteSuffixWithAliases(`ORDER BY ${orderBy}`, aliasMap).replace(/^\s*ORDER BY\s+/i, '');
   const unions = tables
-    .map(t => `(SELECT '${t}' AS _sms_table, ${selectFields} FROM ${t} WHERE ${w} ORDER BY ${safeOrder} LIMIT ${innerLimit})`)
+    .map(t => `(SELECT '${t}' AS _sms_table, ${fieldsFor(selectFields, t)} FROM ${t} WHERE ${w} ORDER BY ${safeOrder} LIMIT ${innerLimit})`)
     .join(' UNION ALL ');
   const sql = `SELECT * FROM (${unions}) AS _u ORDER BY ${safeOrder} LIMIT ${lim} OFFSET ${off}`;
   return await mysqlQuery(sql, repeatParams(params, tables.length)) as any[];
@@ -744,6 +745,23 @@ async function getExistingLogTables(): Promise<Set<string>> {
  *   칸이 없는 표에 그 이름을 쓰면 쿼리 전체가 죽는다 → 청구 식 · 결과 집계가 표마다 이 집합으로 식을 고른다(표 목록 CT 와 같은 5분 캐시).
  *   읽기 실패는 던진다(빈 집합으로 삼키면 친구에게 비친구 단가를 조용히 받는다 · 정산은 다음 주기에 다시 돈다).
  */
+/** 필드 인자(글자 · 표마다 함수)를 그 표의 글자로 */
+function fieldsFor(f: string | ((table: string) => string), table: string): string {
+  return typeof f === 'function' ? f(table) : f;
+}
+
+/**
+ * ★ 2026-11-08 C117 D10 뿌리 R65(화면 쪽) — 줄 조회 필드 + 받는 사람 실제 친구 칸(별칭 friend_yn · 칸 있는 표 = 그 값 · 없는 표 = 빈 값).
+ *   줄을 그리는 자리(getSendTypeLabel 넷째 인자)는 SMSQ 줄 필드를 이 CT 로만 만든다(계약 c117 B3-b · 칸 없는 표에 칸 이름을 쓰면 쿼리 전체가 죽는다).
+ */
+export async function withFriendYnField(fields: string): Promise<(table: string) => string> {
+  // ★ Codex 구현 1R #1 — 보기용 값이라 칸 목록 읽기 실패가 줄 조회 전체를 막지 않는다(모든 표 = 빈 값 · 공용 캐시에 쓰지 않음 · 청구 쪽 getFriendColumnTables 는 그대로 던진다)
+  let friendTables: Set<string>;
+  try { friendTables = await getFriendColumnTables(); }
+  catch (e: any) { console.warn('[sms-queue] 친구 칸 목록 읽기 실패 — 이번 줄 조회는 친구 값 없이:', e?.message || e); friendTables = new Set(); }
+  return (t: string) => `${fields}, ${friendTables.has(t) ? `IFNULL(${SMSQ_FRIEND_COLUMN}, '')` : "''"} AS friend_yn`;
+}
+
 let _friendColumnCache: Set<string> | null = null;
 let _friendColumnCacheTs = 0;
 export async function getFriendColumnTables(): Promise<Set<string>> {

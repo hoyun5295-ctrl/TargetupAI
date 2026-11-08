@@ -7,7 +7,7 @@
 // ============================================================
 
 import { HANJUL_BAND_CODES } from './result-code-hanjul-band.generated';
-import { isBrandOnlyChannel, FALLBACK_BILLING_CODE, brandBillingKey, billingTypeLabelOf } from './billing-types';
+import { isBrandOnlyChannel, FALLBACK_BILLING_CODE, billingTypeLabelOf } from './billing-types';
 
 // ========================
 // Part 1: QTmsg status_code 매핑
@@ -379,12 +379,17 @@ export function getDisplayContents(msgType: string, msgContents: any): string {
   return raw;
 }
 
-export function getSendTypeLabel(msgType: string, kOriseq?: number | string | null, statusCode?: number | string | null): string {
+// ★ 2026-11-08 C117 D10 뿌리 R65(화면 쪽) — 넷째 인자 = 그 줄의 받는 사람 실제 친구 값(SMSQ k_friend_yn · 조회 = sms-queue withFriendYnField)
+//   **필수** = 줄을 그리는 자리가 친구 칸을 조회하지 않으면 tsc 가 막는다. Y = 친구 · N = 비친구(청구 유형 이름) · 빈 값(대기 · 실패 · 칸 없는 표 · 옛 행) = 「브랜드메시지」
+export function getSendTypeLabel(msgType: string, kOriseq: number | string | null | undefined, statusCode: number | string | null | undefined, friendYn: string | null | undefined): string {
   // ★ 2026-10-16 대체 판정 = fallbackOf 하나(두 모양) · ★ 2026-10-07 짧게(옛 「카카오실패 대체발송(LMS)」가 칸에서 4줄로 깨졌다 · 박성용 접수)
   const fb = fallbackOf(msgType, kOriseq, statusCode);
   if (fb) return fb === 'L' ? '대체 LMS' : '대체 SMS';
   if (msgType === 'K') return '알림톡';
-  if (msgType === 'F') return '브랜드메시지';   // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F')
+  if (msgType === 'F') {   // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F')
+    const f = String(friendYn ?? '').trim().toUpperCase();
+    return f === 'Y' ? billingTypeLabelOf('BRAND') : f === 'N' ? billingTypeLabelOf('BRAND_NF') : '브랜드메시지';
+  }
   if (msgType === 'L') return 'LMS';
   if (msgType === 'S') return 'SMS';
   if (msgType === 'M') return 'MMS';
@@ -401,17 +406,22 @@ export function getSendTypeLabel(msgType: string, kOriseq?: number | string | nu
 export function getCampaignChannelLabel(sendChannel: string | null | undefined, messageType: string, kakaoTargeting?: string | null): string {
   if (sendChannel === 'alimtalk') return '알림톡';
   // ★ 2026-07-30: 브랜드 전용 채널은 message_type(LMS)이 아니라 브랜드메시지로 표기 (both는 문자 혼합이라 제외)
-  // ★ 2026-11-05 C107 D-11 — 이름 = 청구 유형 이름(친구 · 비친구 · 정산서와 같은 글자 · 판정 = brandBillingKey)
-  if (isBrandOnlyChannel(sendChannel)) return kakaoTargeting === undefined ? '브랜드메시지' : brandAudienceLabel(kakaoTargeting);   // 넘기지 않으면 채널 단위(campaign-list-csv 와 같은 규칙)
+  // ★ 2026-11-08 C117 D9(Harold H1) — 이름 = 고른 대상(채널 친구 · 비친구만 · 마수동 전체 · 옛 C107 D-11 청구 이름 폐기 = 청구는 받는 사람마다 실제 친구 · 줄 이름 getSendTypeLabel)
+  if (isBrandOnlyChannel(sendChannel)) return kakaoTargeting === undefined ? '브랜드메시지' : brandTargetingLabel(kakaoTargeting);   // 넘기지 않으면 채널 단위(campaign-list-csv 와 같은 규칙)
   // ★ 2026-07-25 message_type이 비어 있으면 엑셀 '문자타입' 셀이 통째로 빈칸이 됐다.
   //   빈 셀은 담당자에게 "데이터 누락"으로 읽힌다(고객사 발송통계에서 접수된 그 증상과 같다).
   //   값이 없는 것과 유형을 모르는 것을 구분해 표기한다.
   return String(messageType || '').trim() || '(유형 미상)';
 }
 
-/** ★ 2026-11-05 C107 D-11 — 브랜드 대상값 → 화면 · 통계 이름(청구 유형 이름 그대로 · 「브랜드메시지(친구)」 · 「브랜드메시지(비친구)」) */
-export function brandAudienceLabel(kakaoTargeting: string | null | undefined): string {
-  return billingTypeLabelOf(brandBillingKey(kakaoTargeting));
+/**
+ * ★ 2026-11-08 C117 D9(Harold H1) — 브랜드 캠페인 이름 = 고른 대상(이름 원천 = brand-message TARGETING_OPTIONS label · 일치 = 계약 c117 B3-a · 프론트 미러 campaign-axis BRAND_TARGETING_LABELS).
+ *   F(전체 채널 친구) = 채널 친구 · 빈 값 · 모르는 값(옛 행) = 「브랜드메시지」(모르는 대상을 단정하지 않는다).
+ */
+export const BRAND_TARGETING_NAMES: Readonly<Record<string, string>> = { I: '채널 친구', F: '채널 친구', N: '비친구만', M: '마수동 전체' };
+export function brandTargetingLabel(kakaoTargeting: string | null | undefined): string {
+  const name = BRAND_TARGETING_NAMES[String(kakaoTargeting ?? '').trim().toUpperCase()];
+  return name ? `브랜드메시지(${name})` : '브랜드메시지';
 }
 
 export interface ChannelCount { total: number; success: number; fail: number; pending: number; }
