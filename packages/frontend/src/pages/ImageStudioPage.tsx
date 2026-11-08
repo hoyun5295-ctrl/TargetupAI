@@ -146,7 +146,7 @@ export default function ImageStudioPage() {
 
   // ── 완성 포스터 생성 — ★ 2026-11-08 C118 A1 · A2 「만들기」 = 용도 고르기 → 고른 용도마다 칸(얼린 본문 + 표) → 차례로 ──
   const [usePickerOpen, setUsePickerOpen] = useState(false);
-  type UseSlot = { use: StudioUseKey; presetKey: string; label: string; body: Record<string, unknown>; token: string };
+  type UseSlot = { use: StudioUseKey; presetKey: string; label: string; poster: string; body: Record<string, unknown>; token: string };
   const [failedSlots, setFailedSlots] = useState<UseSlot[]>([]);
   const generate = async () => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return; }
@@ -154,7 +154,8 @@ export default function ImageStudioPage() {
     setUsePickerOpen(true);
   };
   const runSlot = async (slot: UseSlot, i: number, n: number): Promise<boolean> => {
-    const r = await make.runGenerateBody(slot.body, slot.token, false, `${n > 1 ? `${i + 1} / ${n} · ` : ''}${slot.label} 만드는 중 (약 20~30초)`);
+    // ★ C118 E1 안내 = 줄 나눔(여러 장 = 「N장 중 i번째」 · 굵은 줄 = 포스터 이름 · 작은 줄 = 걸리는 시간) · 만드는 중 카드가 줄마다 그린다
+    const r = await make.runGenerateBody(slot.body, slot.token, false, `${n > 1 ? `${n}장 중 ${i + 1}번째` : ''}\n${slot.poster}를 만들고 있어요\n약 20~30초 걸려요`);
     if (!r) return false;
     if (r.preview) objectUrls.current.push(r.preview);
     madeRef.current = true;
@@ -169,7 +170,7 @@ export default function ImageStudioPage() {
       if (!u) continue;
       const body = make.buildGenerateBody({ presetKey: u.presetKey, textPosition: u.key === 'inapp' ? pick.zone : null });
       if (!body) return;
-      slots.push({ use: u.key, presetKey: u.presetKey, label: u.label, body, token: newStudioAttempt() });
+      slots.push({ use: u.key, presetKey: u.presetKey, label: u.label, poster: u.poster, body, token: newStudioAttempt() });
     }
     const failed: UseSlot[] = [];
     for (let i = 0; i < slots.length; i++) {
@@ -294,6 +295,11 @@ export default function ImageStudioPage() {
 
   const busy = !!busyMsg || !!make.busyMsg;
   const overlayMsg = busyMsg || make.busyMsg;
+  const overlayLines = (() => {
+    const ls = String(overlayMsg || '').split('\n');
+    if (ls.length === 1) return { step: '', title: ls[0], notes: [] as string[] };
+    return { step: ls[0], title: ls[1] || '', notes: ls.slice(2).filter(Boolean) };
+  })();
 
   // 0단계 — 내 라이브러리 폴더(저장 소재 띠) · 고르기 첫 화면에만(TemplatePicker rootExtra)
   const libraryStrip = libFailed && libAssets.length === 0 ? (
@@ -399,7 +405,7 @@ export default function ImageStudioPage() {
               {/* ★ C118 A2 만들지 못한 용도 = 그 칸만 다시(같은 표 · 같은 본문) */}
               {failedSlots.map((slot) => (
                 <div key={slot.token} className="rounded-2xl border border-rose-200 bg-rose-50 p-4 flex flex-col gap-2">
-                  <b className="text-[13px] text-rose-900">{slot.label} · 만들지 못했어요</b>
+                  <b className="text-[13px] text-rose-900 break-keep">{slot.poster}를 만들지 못했어요</b>
                   <p className="text-[12px] text-rose-800 break-keep">크레딧은 만든 그림에만 차감돼요. 같은 내용으로 다시 만들 수 있어요.</p>
                   <button type="button" onClick={() => void retrySlot(slot)} disabled={busy} className="self-start h-9 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-bold disabled:opacity-40">다시 만들기</button>
                 </div>
@@ -511,14 +517,17 @@ export default function ImageStudioPage() {
           {/* ★ C118 A5 = 흰 카드 위 진한 글씨(옛 = 어두운 흐림 위 회색 글씨 · 안 보였다) */}
           <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl px-6 py-6 text-center">
             <Loader2 className="w-9 h-9 animate-spin text-violet-700 mx-auto mb-3" />
-            <p className="text-[15px] font-bold text-slate-900 break-keep">{overlayMsg}</p>
+            {/* ★ C118 E1 줄 = [위 작은 줄(여러 장)] · 굵은 줄 · 작은 줄들 · 한 줄 메시지 = 굵은 줄 하나(지금 그대로) */}
+            {overlayLines.step && <p className="text-[12.5px] font-semibold text-violet-700 mb-1">{overlayLines.step}</p>}
+            <p className="text-[15px] font-bold text-slate-900 break-keep">{overlayLines.title}</p>
+            {overlayLines.notes.map((t) => <p key={t} className="text-[13px] text-slate-600 mt-1.5 break-keep">{t}</p>)}
             <p className="text-[13px] text-slate-600 mt-1.5">창을 닫지 마세요</p>
           </div>
         </div>
       )}
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-      <StudioUsePicker open={usePickerOpen} isAdmin={isCompanyAdmin} onClose={() => setUsePickerOpen(false)} onConfirm={(p) => void runUses(p)} />
+      <StudioUsePicker open={usePickerOpen} isAdmin={isCompanyAdmin} zoneLocked={!!make.discountKind} onClose={() => setUsePickerOpen(false)} onConfirm={(p) => void runUses(p)} />
 
       {/* 라이브러리 전체 보기·관리 — 검색·삭제(픽커 재사용), 소재 클릭 = 발사대 모달 */}
       <AssetLibraryPickerModal

@@ -74,7 +74,7 @@ describe('K1 두 결과 화면 = 같은 로고 줄 · 같은 저장 layers(한�
   it('생성 결과 = 바탕 받은 뒤 곧바로 /layers(켜짐 · 자동) · 결과에 로고 상태', () => {
     const make = read('frontend/src/components/studio/StudioMake.tsx');
     const gen = make.slice(make.indexOf('const buildGenerateBody = ('), make.indexOf('return {\n    template,'));   // ★ C118 생성 = 본문 짜기 + 보내기 + generate
-    expect(gen).toMatch(/postLayers\(im\.tempId, \{ on: true, corner: null, size: null \}, textless\)/);
+    expect(gen).toMatch(/postLayers\(im\.tempId, \{ on: false, corner: null, size: null \}, textless\)/);   // ★ C118 E2 로고 기본 꺼짐(1108 Harold)
     expect(make).toMatch(/studioPost\('\/api\/image-studio\/layers', layerRequest\(/);
     expect(make).toMatch(/export interface StudioMade extends LogoCardState/);
   });

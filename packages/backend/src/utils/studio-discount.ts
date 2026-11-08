@@ -149,10 +149,23 @@ export function discountCheckLine(offer: DiscountOffer): string {
   return extra ? `${main} (${extra})` : main;
 }
 
+/**
+ * ★ 2026-11-08 C118 E6 인앱용(안전 칸 = 가운데 비율 · 앱이 가장자리를 잘라도 내용 0 잘림) = 「맨 위 · 맨 아래 가장자리」 대신 「바깥 띠 안쪽」 ·
+ *   safe 없음(인앱 아닌 용도) = 지금 문장 글자 그대로.
+ */
+function edgeBandOf(safe: number | null | undefined): number | null {
+  return typeof safe === 'number' && safe > 0 && safe < 1 ? Math.round((1 - safe) * 50) : null;
+}
+
 /** 프롬프트 혜택 줄 — 지정 문구(제목 = 제품명) 바로 뒤 · 마지막 금지 줄 앞에 들어간다(샘플 스크립트로 확인한 문장 꼴 · 1108) */
-export function discountPromptLines(offer: DiscountOffer, brandColor?: string | null): string[] {
+export function discountPromptLines(offer: DiscountOffer, brandColor?: string | null, safe?: number | null): string[] {
   const lines: string[] = [];
-  if (offer.period) lines.push(`- Date pill at the very top of the poster, above the headline: "${offer.period}" in a bright rounded pill.`);
+  const edge = edgeBandOf(safe);
+  if (offer.period) {
+    lines.push(edge === null
+      ? `- Date pill at the very top of the poster, above the headline: "${offer.period}" in a bright rounded pill.`
+      : `- Date pill at the top of the poster, above the headline, just inside the outer ${edge}% band (never in it): "${offer.period}" in a bright rounded pill.`);
+  }
   if (offer.kind === 'price') {
     const r = discountRate(offer.before!, offer.sale!);
     lines.push(`- Price row directly below the headline, centered, ONE single row, the most prominent element of the poster: the original price "${wonText(offer.before!)}" in smaller muted gray with one diagonal strike line through it, then a right-pointing chevron "›", then ${r ? `the discount rate "${r}%" in bold accent color, then ` : ''}the sale price "${wonText(offer.sale!)}" as the largest and boldest text on the whole poster.`);
@@ -166,14 +179,23 @@ export function discountPromptLines(offer: DiscountOffer, brandColor?: string | 
     lines.push(`- Set composition line directly below the headline, centered, medium weight: "${offer.items!.join(' + ')}".`);
     lines.push(`- Price row below it, centered, ONE single row, the most prominent element of the poster: the small label "따로 사면", the total "${wonText(sum)}" in muted gray with one diagonal strike line through it, a right-pointing chevron "›", ${r ? `the discount rate "${r}%" in bold accent color, ` : ''}the small label "세트가", then the set price "${wonText(offer.sale!)}" as the largest and boldest text on the whole poster.`);
   }
-  if (offer.gift) lines.push(`- Gift tag at the very bottom of the poster, below the product: a small red tag reading "증정" followed by "${offer.gift}" inside one white rounded pill.`);
+  if (offer.gift) {
+    lines.push(edge === null
+      ? `- Gift tag at the very bottom of the poster, below the product: a small red tag reading "증정" followed by "${offer.gift}" inside one white rounded pill.`
+      : `- Gift tag at the bottom of the poster, below the product, just inside the outer ${edge}% band (never in it): a small red tag reading "증정" followed by "${offer.gift}" inside one white rounded pill.`);
+  }
   if (brandColor && HEX6_RE.test(brandColor)) lines.push(`- Use the brand color ${brandColor} as the accent color for the badge, the discount rate and the sale price.`);
   return lines;
 }
 
 /** 프롬프트 맨 끝 고정 틀 줄(모든 자리 지시보다 뒤 · 모델이 마지막 지시에 가장 강하게 반응한다) */
-export function discountFixedLayoutLine(offer: DiscountOffer): string {
-  return `FIXED TEMPLATE LAYOUT (this rule overrides every placement direction above): ${offer.period ? 'the date pill at the very top, then ' : ''}the headline, then the offer elements in the order listed, all inside the upper 40% of the poster on a calm, plain area of the backdrop.${offer.gift ? ' The gift tag alone sits at the very bottom edge, below the product.' : ''} The product occupies only the lower 55% of the poster, centered, and must never overlap, touch, or sit behind any text. Typography must be LARGE and bold for phone screens: the headline about 5% of the poster height, the sale price about 8% of the poster height, no tiny fine print anywhere. Render every number exactly as given, digit by digit, including the commas and the "원" unit.`;
+export function discountFixedLayoutLine(offer: DiscountOffer, safe?: number | null): string {
+  const edge = edgeBandOf(safe);
+  const top = edge === null ? 'the date pill at the very top, then ' : 'the date pill at the top, then ';
+  const gift = edge === null ? ' The gift tag alone sits at the very bottom edge, below the product.' : ' The gift tag alone sits at the bottom, below the product.';
+  // (C118 E6) 인앱용 = 고정 틀이 안전 칸까지 품는다(이 줄이 다른 지시를 모두 이기므로 안전 칸도 이 줄 안에)
+  const band = edge === null ? '' : ` This poster is shown in an app popup that may crop the outer ${edge}% on every side: that outer ${edge}% band on every side is background only, and the date pill, the headline, every offer element, the gift tag and the product all stay inside the central ${100 - edge * 2}% of the width and of the height.`;
+  return `FIXED TEMPLATE LAYOUT (this rule overrides every placement direction above): ${offer.period ? top : ''}the headline, then the offer elements in the order listed, all inside the upper 40% of the poster on a calm, plain area of the backdrop.${offer.gift ? gift : ''} The product occupies only the lower 55% of the poster, centered, and must never overlap, touch, or sit behind any text.${band} Typography must be LARGE and bold for phone screens: the headline about 5% of the poster height, the sale price about 8% of the poster height, no tiny fine print anywhere. Render every number exactly as given, digit by digit, including the commas and the "원" unit.`;
 }
 
 /** 브랜드 키트 강조색 고르기 — primary_color → accent_color · 6자리 hex 만 */

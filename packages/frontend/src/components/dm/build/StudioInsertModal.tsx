@@ -194,6 +194,9 @@ export default function StudioInsertModal({
               {use === 'inapp' && !textless && (
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="text-[12.5px] font-bold text-slate-800 mb-1.5">글 자리</div>
+                  {make.discountKind ? (
+                    <p className="text-[12px] text-slate-700 leading-snug break-keep">위쪽에 글 · 할인 템플릿은 글이 위, 제품이 아래로 정해져 있어요.</p>
+                  ) : (<>
                   <div className="grid grid-cols-2 gap-1.5">
                     {(['top', 'bottom'] as const).map((z) => (
                       <button key={z} type="button" onClick={() => setZone(z)} aria-pressed={zone === z} disabled={generating}
@@ -203,6 +206,7 @@ export default function StudioInsertModal({
                     ))}
                   </div>
                   <p className="text-[11.5px] text-slate-500 mt-1.5 leading-snug break-keep">앱 팝업 칸에 꽉 차는 정사각 그림으로 만들어요. 고른 쪽을 그림과 같은 색감으로 비워 두고 그 자리에 글을 넣어요.</p>
+                  </>)}
                 </div>
               )}
               <StudioMakeFields make={make} textless={textless} />

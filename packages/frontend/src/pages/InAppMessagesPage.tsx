@@ -32,7 +32,7 @@ import { InAppMessagePreview, AppInAppPreview } from '../components/InAppMessage
 import { toPng } from 'html-to-image';
 import { useAuthStore } from '../stores/authStore';
 import CreditConfirmModal from '../components/credit/CreditConfirmModal';
-import { AI_GENERATE_COSTS } from '../constants/credit';
+import { AI_GENERATE_COSTS, creditText } from '../constants/credit';
 import { useToast } from '../components/ToastProvider';
 import TargetExtractModal from '../components/TargetExtractModal';
 import { THEME_OPTIONS, CARD_STYLE_OPTIONS, SIGNATURE_THEME_OPTIONS, INAPP_TREATMENTS, INAPP_TREATMENT_OPTIONS, INAPP_FONT_CATALOG, type CardStyle, INAPP_TEMPLATE_LABELS } from '../components/inapp/blockTheme';
@@ -67,7 +67,9 @@ import { resolvePosterLayout, type PosterLayout, type SheetEditKey } from '../co
 import {
   slidesFromMessage, messagePatchFromSlides, restyleSlides, duplicateSlide, publishDefectOf, layoutKeyOf, isPosterLayout,
   MAX_SLIDES, appCapsNote, designForKey, posterLayoutOfKey, appSafeLayoutKey, type WsSlide, type LayoutKey,
+  defaultMediaAspect, withMessageImage, activeAfterRemove, appBasicImageVisible, APP_BASIC_IMAGE,
 } from '../components/inapp/inappSlides';
+import { useImageRatio } from '../components/inapp/useImageRatio';   // ★ C118 E5 ⑥ 그림 크기 = 주소별 세 상태
 // ★ 2026-11-05 인앱 포스터 재구성 — 예시에서 시작 · 스튜디오 그림 틀 고르기 · 장 AI 그리기 · DM 참여 페이지 연결
 import type { InAppExampleItem } from '../components/inapp/InAppExampleGallery';
 import InAppFramePicker from '../components/inapp/InAppFramePicker';
@@ -908,24 +910,8 @@ export default function InAppMessagesPage() {
       });
       const data = await res.json();
       if (data.success) {
-        // 블록 메시지면 media 이미지 블록을 자동 생성/갱신 (미리보기에 바로 반영)
-        setEditing((prev) => {
-          if (!prev) return prev;
-          const blocks = Array.isArray(prev.content_blocks) ? prev.content_blocks : [];
-          if (blocks.length > 0) {
-            const idx = blocks.findIndex((b: any) => b?.type === 'media');
-            let nb: any[];
-            if (idx >= 0) {
-              nb = [...blocks];
-              // 기존 미디어 블록의 명시 aspect는 보존, 없으면(아이콘/일러스트였던 블록) 전체보기 기본 — 크롭 방지
-              nb[idx] = { ...nb[idx], variant: 'image', url: data.url, aspect: nb[idx].aspect || defaultMediaAspect(prev.template || prev.position) };
-            } else {
-              nb = [{ type: 'media', variant: 'image', url: data.url, aspect: defaultMediaAspect(prev.template || prev.position) }, ...blocks];
-            }
-            return { ...prev, image_url: data.url, content_blocks: nb };
-          }
-          return { ...prev, image_url: data.url };
-        });
+        // 블록 메시지면 media 이미지 블록을 자동 생성/갱신 (미리보기에 바로 반영) · ★ C118 E5 ⑤ 규칙 하나(withMessageImage)
+        setEditing((prev) => (prev ? withMessageImage(prev, data.url) : prev));
         showToast('이미지 업로드 완료', { type: 'success' });
       } else {
         showToast(data.error || '이미지 업로드 실패', { type: 'error' });
@@ -2210,13 +2196,15 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     setActive(safeActive + 1);
     setSelField(null);
   };
-  const removeSlide = () => {
-    if (slides.length <= 1) return;
-    setSlides(slides.filter((_, i) => i !== safeActive));
-    setActive(Math.max(0, safeActive - 1));
+  // ★ C118 E4 장 빼기 = 번호 하나(오른쪽 버튼 = 지금 장 · 왼쪽 목록 = 그 줄) · 뺀 뒤 선택 = activeAfterRemove(지금 장이 남으면 그 장)
+  const removeSlideAt = (i: number) => {
+    if (slides.length <= 1 || i < 0 || i >= slides.length) return;
+    setSlides(slides.filter((_, j) => j !== i));
+    setActive(activeAfterRemove(slides.map((s) => s._k), safeActive, i));
     setSelField(null);
     pickToast.info('장을 뺐어요. 되돌리려면 Ctrl+Z');
   };
+  const removeSlide = () => removeSlideAt(safeActive);
   // 사진이 들어오면: 첫 장 = 지금 장 · 나머지 = 지금 장 모양을 따라 뒤에 새 장(최대 5장 · 설계서 §2)
   const takeImages = (urls: string[], meta?: { linkUrl?: string | null }) => {
     let dropped = 0;
@@ -2319,6 +2307,43 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isApp, editing.id, appShapeKey, appShapeStrip]);
+  // ★ 2026-11-08 C118 E5 앱 기본형(가운데 팝업 · 하단 시트) 그림 잘림 — 판정 = appBasicImageVisible 하나(깔린 앱 규칙 APP_BASIC_IMAGE) ·
+  //   크기 = 주소별 세 상태(useImageRatio · 지금 주소 결과만) · 기본형으로 바꾼 순간 = 그 그림으로 확인 대기 → 크기가 오면 판정 ·
+  //   잘림 = 안내 창(우리 확인 창) · 실패 = 안전으로 치지 않고 디자인 탭 안내 줄(창은 잘림이 확인될 때만 · Codex 설계 1R ②)
+  const basicKey: 'center_modal' | 'bottom_banner' | null = isApp && (layoutKey === 'center_modal' || layoutKey === 'bottom_banner') ? layoutKey : null;
+  const basicImg = basicKey && typeof editing.image_url === 'string' && editing.image_url.trim() ? editing.image_url : null;
+  const basicRatio = useImageRatio(basicImg);
+  const basicKnown = !!basicImg && basicRatio.url === basicImg && (basicRatio.status === 'ready' || basicRatio.status === 'error');
+  const basicVisible = basicKey && basicKnown && basicRatio.status === 'ready' ? appBasicImageVisible(basicKey, basicRatio.ratio) : null;
+  const basicCutPct = basicVisible !== null ? Math.round((1 - basicVisible) * 100) : 0;
+  const basicWarn = !!basicKey && basicKnown && (basicVisible === null || basicVisible < APP_BASIC_IMAGE.warnBelow);
+  const cropCheckRef = useRef<{ key: string; url: string | null } | null>(null);
+  const prevBasicKeyRef = useRef<string | null>(basicKey);
+  useEffect(() => {
+    if (basicKey && prevBasicKeyRef.current !== basicKey) cropCheckRef.current = { key: basicKey, url: basicImg };
+    prevBasicKeyRef.current = basicKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basicKey]);
+  useEffect(() => {
+    const p = cropCheckRef.current;
+    if (!p) return;
+    // 모양 · 그림이 바뀜 = 대기 끝(새 그림은 안내 줄이 본다) · 그림 없음 = 볼 것 없음
+    if (!basicKey || p.key !== basicKey || p.url !== basicImg || !basicImg) { cropCheckRef.current = null; return; }
+    if (!basicKnown) return;   // 크기 오기 전 = 기다림
+    cropCheckRef.current = null;
+    if (basicVisible === null || basicVisible >= APP_BASIC_IMAGE.warnBelow) return;   // 실패 = 안내 줄만 · 통째 = 안내 0
+    setEditorConfirm({
+      mode: 'warning',
+      title: '이 사진은 앱에서 위아래가 잘려 보여요',
+      description: `${basicKey === 'center_modal' ? '가운데 팝업은' : '하단 시트는'} 사진을 화면 높이의 ${Math.round(APP_BASIC_IMAGE.maxHeightRatio * 100)}%까지만 보여 줘요. 지금 사진은 위아래 약 ${basicCutPct}%가 잘려요. 권장 = 정사각(1:1) ~ 가로(4:3) 사진 · 글과 주제는 가운데.`,
+      confirmLabel: `인앱용으로 다시 만들기 (${creditText('image-studio-generate')})`,
+      onConfirm: () => setStudioOpen(true),
+      altLabel: '다른 사진 고르기',
+      onAlt: () => setActiveTab('design'),
+      cancelLabel: '그대로 두기',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [basicKey, basicImg, basicKnown, basicVisible]);
   const askConvertToSlides = () => setEditorConfirm({
     mode: 'info',
     title: '크게 보여 주기로 바꿀까요?',
@@ -2516,6 +2541,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       const t = e.target as HTMLElement | null;
       const typing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) {
+        if (studioOpen) return;   // ★ C118 Codex 구현 1R ① 스튜디오 창이 열린 동안 = 편집기 되돌리기 · 다시 0
         e.preventDefault();
         if (e.shiftKey) redo(); else undo();
         return;
@@ -2626,6 +2652,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       onActive={(i) => { setActive(i); setSelField(null); }}
       onReorder={(from, to) => { setSlides(arrayMove(slides, from, to)); setActive(to); }}
       onAdd={addSlide}
+      onRemove={removeSlideAt}
       onDropFiles={(f) => { void images.uploadFiles(f); }}
       busy={images.busy}
       top={<div className="mb-4"><LayoutSwitcher channel={isApp ? 'app' : 'web'} current={layoutKey} onPick={(k) => switchLayout(k)} /></div>}
@@ -3193,6 +3220,13 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) onImageUpload(f); }}
                 />
               </div>
+              )}
+              {/* ★ C118 E5 앱 기본형 그림 = 잘림 · 크기 확인 실패 안내(같은 판정 · 창을 닫은 뒤에도) */}
+              {basicWarn && (
+                <div className="mt-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11.5px] text-amber-900 leading-relaxed break-keep">
+                  {basicVisible !== null ? `앱에서 위아래가 약 ${basicCutPct}% 잘려 보여요.` : '사진 크기를 확인하지 못했어요.'} 권장 = 정사각(1:1) ~ 가로(4:3) · 글과 주제는 가운데.
+                  <button type="button" onClick={() => setStudioOpen(true)} className="mt-1.5 h-8 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[12px] font-bold inline-flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />인앱용으로 다시 만들기 ({creditText('image-studio-generate')})</button>
+                </div>
               )}
               {/* ★ 2026-07-31 이미지 클릭 랜딩 — 이미지 자체 클릭 시 이동 링크(선택). 비우면 지금처럼 무동작.
                   ★ (Codex 1R ②) 블록 메시지는 이미지가 블록 소유(SDK 블록 렌더가 이 링크를 소비하지 않음) — 죽은 컨트롤 방지 위해 숨김 */}
@@ -3803,12 +3837,14 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       />
       <ImageSourceMenu open={imgMenu} onClose={() => setImgMenu(false)} images={images} />
       {images.node}
-      {posterMode && (() => {
+      {(() => {
         // ★ 2026-11-05 §3-8 장 AI 그리기 — 통짜 장 = 장 글로 그림을 그리고 넣은 글이 그 장 글 · 글 얹기 장 = 글 없는 판 ·
         //   예시에서 시작한 장 = 같은 템플릿(고르기 건너뜀) · 예시 글의 브랜드 라벨 = 회사 이름 · 혜택 자리 = 자리표(채우기 전 생성 막힘)
-        const cur = slides[safeActive];
-        const bakedNow = editing.design?.poster_text === 'baked';
-        const ex = Array.isArray((editing as any).example_studio) ? (editing as any).example_studio[safeActive] : null;
+        // ★ C118 E5 · Codex 구현 1R ① 창 = 늘 붙은 하나(포스터 · 기본형 공용) — 모양이 바뀌어도 낸 그림(2크레딧)이 남는다(닫기 = 숨김 계약) ·
+        //   넣기 = 넣는 순간의 모양 기준(포스터 = 지금 장 · 기본형 = 그림 넣기 규칙 하나 · 글 없는 판 = 글은 앱이 그림 아래에)
+        const cur = posterMode ? slides[safeActive] : undefined;
+        const bakedNow = posterMode && editing.design?.poster_text === 'baked';
+        const ex = posterMode && Array.isArray((editing as any).example_studio) ? (editing as any).example_studio[safeActive] : null;
         const fromExample = !!ex && isExampleImage(cur?.image_url);
         const companyName = String((testSaveUser as any)?.company?.name || '').trim();
         const label = fromExample ? (companyName || String(ex.texts?.label || '')) : String(cur?.eyebrow || '');
@@ -3826,6 +3862,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
             defaultSubtitle={bakedNow ? subtitle : ''}
             onInserted={(url, texts) => {
               setStudioOpen(false);
+              if (!posterMode) { setEditing((prev) => (prev ? withMessageImage(prev, url) : prev)); return; }
               if (!curKey) return;
               patchSlideKey(curKey, bakedNow && texts
                 ? { image_url: url, eyebrow: texts.label || '', title: texts.title || '', body: texts.subtitle || '' }
@@ -3989,7 +4026,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
         open={assetPickOpen}
         onClose={() => setAssetPickOpen(false)}
         onPick={(a: PickedAsset) => {
-          setEditing({ ...editing, image_url: a.url });
+          setEditing((prev) => (prev ? withMessageImage(prev, a.url) : prev));   // ★ C118 E5 ⑤ 블록 메시지도 반영
           pickToast.success('라이브러리 소재를 이미지로 넣었습니다.');
         }}
       />
@@ -4375,11 +4412,6 @@ function newBlock(type: string): any {
   }
 }
 
-/** 사용자가 올린 이미지 블록 기본 표시 — 카드형은 전체보기(크롭 0), 배너(top/bottom)만 얇은 띠(16:9) 유지 */
-const BANNER_INAPP_TEMPLATES = new Set(['top_banner', 'bottom_banner']);
-function defaultMediaAspect(template?: string | null): 'natural' | '16:9' {
-  return BANNER_INAPP_TEMPLATES.has(String(template || '')) ? '16:9' : 'natural';
-}
 
 /** 레거시(제목/본문/이미지/버튼/배경) → 블록 + 테마 1:1 변환 */
 export function convertToBlocks(m: Partial<MessageRow>): { content_blocks: any[]; theme: string; accent_color: string } {

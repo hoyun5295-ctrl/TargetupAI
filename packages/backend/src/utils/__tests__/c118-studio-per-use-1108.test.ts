@@ -48,6 +48,10 @@ import {
 import { getTemplate } from '../image-studio-templates';
 import { ASPECT_RATIOS, INAPP_STAGE_FILL, INAPP_CONTENT_SAFE } from '../image-fit-spec';
 import { logoPlacement, LOGO_MARGIN_RATIO } from '../studio-zones';
+import { readDiscountOffer, discountPromptLines, discountFixedLayoutLine } from '../studio-discount';
+import {
+  APP_BASIC_IMAGE, appBasicImageVisible, activeAfterRemove, withMessageImage,
+} from '../../../../frontend/src/components/inapp/inappSlides';
 import { logoSafeEdgeOf } from '../studio-logo';
 import { POSTER_FRAME_RULES } from '../../../../sdk-js/src/poster-frame';
 import { getServePath } from '../image-serve';
@@ -139,7 +143,7 @@ describe('T3 글 자리 = 인앱 용도면 모든 템플릿 · 그 밖 지금 �
   it('화면 요청 본문 = 인앱 용도 → 고른 자리(모든 템플릿) · 글 없는 판 = 아래 · 그 밖 = 행사만', () => {
     const s = fe('components/studio/StudioMake.tsx');
     expect(s).toContain("const inappUse = opts?.presetKey === 'use-inapp';");
-    expect(s).toContain("textPosition: textless ? 'bottom' : (inappUse ? (opts?.textPosition || 'top') : (isEvent(template) ? textPosition : null)),");
+    expect(s).toContain("textPosition: textless ? 'bottom' : (inappUse ? (discountKind ? 'top' : (opts?.textPosition || 'top')) : (isEvent(template) ? textPosition : null)),");
     expect(s).toContain("templateId: template.id, presetKey: opts?.presetKey || 'poster',");
   });
   it('편집기 안 스튜디오 = 용도 고정(DM = use-dm · 인앱 = use-inapp + 글 자리 · 글 없는 판 = 고르기 없음)', () => {
@@ -162,7 +166,7 @@ describe('T4 용도 고르기 → 칸 · 얼린 본문 · 다시 만들기 · �
   });
   it('고른 용도마다 칸 = 얼린 본문 + 새 표 · 차례로', () => {
     expect(page).toContain("const body = make.buildGenerateBody({ presetKey: u.presetKey, textPosition: u.key === 'inapp' ? pick.zone : null });");
-    expect(page).toContain('slots.push({ use: u.key, presetKey: u.presetKey, label: u.label, body, token: newStudioAttempt() });');
+    expect(page).toContain('slots.push({ use: u.key, presetKey: u.presetKey, label: u.label, poster: u.poster, body, token: newStudioAttempt() });');
     expect(page).toContain('if (!(await runSlot(slots[i], i, slots.length))) failed.push(slots[i]);');
   });
   it('다시 만들기 = 같은 표 + 같은 본문(지금 입력으로 다시 짜지 않음) · 성공 때만 칸 걷힘', () => {
@@ -565,11 +569,182 @@ describe('T11 만드는 중 안내 = 흰 카드 · 진한 글씨', () => {
   it('흐림 0 · 흰 카드 · 글씨 slate-900 / 600 · 옛 회색 글씨 0', () => {
     const page = fe('pages/ImageStudioPage.tsx');
     const at = page.indexOf('C118 A5');
-    const block = page.slice(at - 200, at + 700);
+    const block = page.slice(at - 200, at + 1600);
     expect(block).toContain('rounded-2xl bg-white shadow-2xl');
     expect(block).toContain('text-[15px] font-bold text-slate-900');
     expect(block).toContain('text-[13px] text-slate-600 mt-1.5">창을 닫지 마세요');
     expect(block).not.toContain('backdrop-blur');
     expect(page).not.toContain('<p className="text-[11px] text-slate-400 mt-1">창을 닫지 마세요</p>');
+  });
+});
+
+// ═══════════════ §10 보정 · 1108 실사용 시험 접수 6건(E1 ~ E6 · T12 ~ T17) ═══════════════
+describe('T12 (E1) 만드는 중 안내 = 포스터 이름 · 줄 나눔', () => {
+  const page = fe('pages/ImageStudioPage.tsx');
+  it('용도 표 넷 = 포스터 이름 칸(기계 추출)', () => {
+    const src = fe('components/studio/StudioUsePicker.tsx');
+    expect([...src.matchAll(/poster: '([^']+)' \}/g)].map((m) => m[1])).toEqual(['인앱 메시지용 포스터', '모바일 DM용 포스터', '이메일 마케팅용 포스터', '자유 형태 포스터']);
+  });
+  it('안내 = [N장 중 i번째] · {포스터}를 만들고 있어요 · 약 20~30초 걸려요 · 실패 칸 = {포스터}를 만들지 못했어요 · 옛 문구 0', () => {
+    expect(page).toContain("`${n > 1 ? `${n}장 중 ${i + 1}번째` : ''}\\n${slot.poster}를 만들고 있어요\\n약 20~30초 걸려요`");
+    expect(page).toContain('{slot.poster}를 만들지 못했어요');
+    expect(page).not.toContain('만드는 중 (약 20~30초)');
+    expect(page).not.toContain('{slot.label} · 만들지 못했어요');
+  });
+  it('안내 카드 = 줄마다 그림(위 작은 줄 · 굵은 줄 · 작은 줄 · 한 줄 메시지 = 굵은 줄 하나)', () => {
+    expect(page).toContain("const ls = String(overlayMsg || '').split('\\n');");
+    expect(page).toContain("if (ls.length === 1) return { step: '', title: ls[0], notes: [] as string[] };");
+    expect(page).toContain("return { step: ls[0], title: ls[1] || '', notes: ls.slice(2).filter(Boolean) };");
+    expect(page).toContain('<p className="text-[15px] font-bold text-slate-900 break-keep">{overlayLines.title}</p>');
+  });
+});
+
+describe('T13 (E2) 로고 = 기본 꺼짐(세 화면 같은 CT)', () => {
+  it('생성 직후 /layers = on false · 켜짐 갈래 = 사용자 동작만(로고 찾아 저장 · 모서리 · 크기)', () => {
+    const make = fe('components/studio/StudioMake.tsx');
+    expect(make).toContain('const lay = await postLayers(im.tempId, { on: false, corner: null, size: null }, textless);');
+    expect(make).not.toContain('postLayers(im.tempId, { on: true');
+    // (Codex 구현 1R ②) 못 읽은 카드의 설정 = 꺼짐(AI 수정 · 다시 시도가 로고를 켜지 않는다)
+    expect(fe('lib/studio-layers.ts')).toContain("return logo?.state === 'ready' ? { on: logo.on, corner: logo.corner, size: logo.size } : { on: false, corner: null, size: null };");
+    for (const f of ['pages/ImageStudioPage.tsx', 'components/dm/build/StudioInsertModal.tsx']) expect(fe(f)).toContain('useStudioMake(');
+  });
+});
+
+describe('T14 (E3) 할인 템플릿 = 글 자리 위 고정', () => {
+  const t = getTemplate('discount-price-cream')!;
+  const o = (readDiscountOffer({ before: 28500, sale: 19500, period: '11월10일~11월14일' }, 'price') as any).offer;
+  it('서버 = 할인이면 아래를 보내도 위(인앱용)', () => {
+    const p = buildPosterPrompt({ template: t, preset: resolvePreset('use-inapp'), hasProduct: true, texts: { title: '핑크앰플' }, textPosition: 'bottom', offer: o });
+    expect(p).toContain('The upper part of the square is a natural, color-matched calm continuation');
+    expect(p).not.toContain('The lower part of the square is a natural');
+    expect(p).toContain('at the upper third of the frame');
+    expect(p).not.toContain('lower third');
+  });
+  it('할인 아닌 템플릿 = 고른 자리 그대로', () => {
+    const p = buildPosterPrompt({ template: getTemplate('beauty-clean-bright')!, preset: resolvePreset('use-inapp'), hasProduct: true, texts: { title: '맑게' }, textPosition: 'bottom' });
+    expect(p).toContain('The lower part of the square is a natural');
+  });
+  it('화면 = 할인이면 위 고정 표시 · 본문 = 위(고르기 창 · 편집기 안 스튜디오 창)', () => {
+    expect(fe('components/studio/StudioUsePicker.tsx')).toContain("zone: zoneLocked ? 'top' : zone");
+    expect(fe('components/studio/StudioUsePicker.tsx')).toContain('위쪽에 글 · 할인 템플릿은 글이 위, 제품이 아래로 정해져 있어요.');
+    expect(fe('pages/ImageStudioPage.tsx')).toContain('zoneLocked={!!make.discountKind}');
+    expect(fe('components/dm/build/StudioInsertModal.tsx')).toContain('{make.discountKind ? (');
+  });
+});
+
+describe('T15 (E6) 할인 + 인앱용 = 혜택 줄 · 고정 틀도 안전 칸 안', () => {
+  const o = (readDiscountOffer({ items: ['앰버 세럼', '케이블 니트'], prices: [38000, 129000], sale: 139000, period: '11.10 ~ 11.16', gift: '울 머플러' }, 'set') as any).offer;
+  it('인앱용(0.8) = 「very top · very bottom」 0 · 바깥 10% 띠 문장 · 고정 틀 = 띠 = 배경만 · 가운데 80%', () => {
+    const lines = discountPromptLines(o, null, INAPP_CONTENT_SAFE).join('\n');
+    expect(lines).not.toMatch(/very top|very bottom/);
+    expect(lines).toContain('just inside the outer 10% band (never in it)');
+    const fixed = discountFixedLayoutLine(o, INAPP_CONTENT_SAFE);
+    expect(fixed).not.toMatch(/very top|very bottom/);
+    expect(fixed).toContain('that outer 10% band on every side is background only');
+    expect(fixed).toContain('stay inside the central 80% of the width and of the height');
+  });
+  it('인앱 아님 = 지금 문장 글자 그대로', () => {
+    expect(discountPromptLines(o).join('\n')).toContain('Date pill at the very top of the poster, above the headline');
+    expect(discountFixedLayoutLine(o)).toContain('the date pill at the very top');
+    expect(discountFixedLayoutLine(o)).toContain('The gift tag alone sits at the very bottom edge');
+    expect(discountFixedLayoutLine(o)).not.toContain('band');
+  });
+  it('프롬프트 조립 = 인앱용만 안전 칸 인자', () => {
+    const t = getTemplate('discount-price-cream')!;
+    const p1 = (readDiscountOffer({ before: 28500, sale: 19500, period: '11월10일~11월14일' }, 'price') as any).offer;
+    const inapp = buildPosterPrompt({ template: t, preset: resolvePreset('use-inapp'), hasProduct: true, texts: { title: '핑크앰플' }, offer: p1 });
+    const dm = buildPosterPrompt({ template: t, preset: resolvePreset('use-dm'), hasProduct: true, texts: { title: '핑크앰플' }, offer: p1 });
+    expect(inapp).toContain('that outer 10% band on every side is background only');
+    expect(inapp).not.toContain('Date pill at the very top');
+    expect(dm).not.toContain('outer 10% band');
+    expect(dm).toContain('Date pill at the very top');
+  });
+});
+
+describe('T16 (E4) 장 목록 빼기 · 뺀 뒤 선택', () => {
+  const K = ['A', 'B', 'C'];
+  it('activeAfterRemove 표(손으로 정한 값)', () => {
+    expect(activeAfterRemove(K, 1, 2)).toBe(1);   // B 편집 중 C 빼기 = B
+    expect(activeAfterRemove(K, 1, 0)).toBe(0);   // B 편집 중 A 빼기 = B(번호 0)
+    expect(activeAfterRemove(K, 1, 1)).toBe(0);   // B 빼기 = A
+    expect(activeAfterRemove(K, 0, 0)).toBe(0);   // 첫 장 빼기 = 새 첫 장(B)
+    expect(activeAfterRemove(K, 2, 2)).toBe(1);   // 끝 장 빼기 = 앞 장
+    expect(activeAfterRemove(['C', 'A', 'B'], 2, 0)).toBe(1);   // 재정렬 뒤(C,A,B) B 편집 중 C 빼기 = B
+    expect(activeAfterRemove(['A'], 0, 0)).toBe(0);
+  });
+  it('목록 줄마다 빼기 = 2장 이상 · 같은 함수(오른쪽 버튼 = 지금 장)', () => {
+    expect(fe('components/inapp/PosterEditor.tsx')).toContain('onRemove={onRemove && slides.length > 1 ? (id) => { const i = slides.findIndex((s) => s._k === id); if (i >= 0) onRemove(i); } : undefined}');
+    const p = fe('pages/InAppMessagesPage.tsx');
+    expect(p).toContain('setActive(activeAfterRemove(slides.map((s) => s._k), safeActive, i));');
+    expect(p).toContain('const removeSlide = () => removeSlideAt(safeActive);');
+    expect(p).toContain('onRemove={removeSlideAt}');
+  });
+});
+
+describe('T17 (E5) 앱 기본형 그림 잘림 · 그림 넣기 규칙', () => {
+  it('규칙 상수 = 깔린 앱(높이 45% · 팝업 좌우 20 · 최대 420 · 화면 390 × 844 · 문턱 90%)', () => {
+    expect(APP_BASIC_IMAGE).toMatchObject({ maxHeightRatio: 0.45, modalSideMargin: 20, modalMaxWidth: 420, view: { width: 390, height: 844 }, warnBelow: 0.9 });
+  });
+  it('보이는 비율 표(손으로 계산 · 팝업 폭 350 · 시트 폭 390 · 상한 379.8)', () => {
+    const near = (a: number | null, b: number) => expect(Math.abs((a as number) - b)).toBeLessThan(0.001);
+    near(appBasicImageVisible('center_modal', 1), 1);
+    near(appBasicImageVisible('center_modal', 4 / 3), 1);
+    near(appBasicImageVisible('center_modal', 3 / 4), 0.8139);
+    near(appBasicImageVisible('center_modal', 4 / 5), 0.8681);
+    near(appBasicImageVisible('center_modal', 9 / 16), 0.6104);
+    near(appBasicImageVisible('center_modal', 16 / 9), 1);
+    near(appBasicImageVisible('bottom_banner', 1), 0.9738);
+    near(appBasicImageVisible('bottom_banner', 3 / 4), 0.7304);
+    near(appBasicImageVisible('bottom_banner', 4 / 5), 0.7791);
+    near(appBasicImageVisible('bottom_banner', 9 / 16), 0.5478);
+    near(appBasicImageVisible('bottom_banner', 4 / 3), 1);
+    expect(appBasicImageVisible('center_modal', 0)).toBeNull();
+    expect(appBasicImageVisible('center_modal', NaN)).toBeNull();
+  });
+  it('그림 넣기 규칙 표(블록 media 있음 · 없음 · 블록 없음 · 명시 aspect 보존)', () => {
+    const withMedia = { template: 'center_modal', image_url: 'old', content_blocks: [{ type: 'headline', text: 'x' }, { type: 'media', variant: 'icon', url: 'o', aspect: '16:9' }] };
+    expect(withMessageImage(withMedia, 'N')).toEqual({ template: 'center_modal', image_url: 'N', content_blocks: [{ type: 'headline', text: 'x' }, { type: 'media', variant: 'image', url: 'N', aspect: '16:9' }] });
+    const noAspect = { template: 'center_modal', content_blocks: [{ type: 'media', variant: 'icon', url: 'o' }] };
+    expect(withMessageImage(noAspect, 'N').content_blocks[0]).toEqual({ type: 'media', variant: 'image', url: 'N', aspect: 'natural' });
+    const noMedia = { template: 'bottom_banner', content_blocks: [{ type: 'headline', text: 'x' }] };
+    expect(withMessageImage(noMedia, 'N').content_blocks).toEqual([{ type: 'media', variant: 'image', url: 'N', aspect: '16:9' }, { type: 'headline', text: 'x' }]);
+    expect(withMessageImage({ template: 'center_modal', image_url: null }, 'N')).toEqual({ template: 'center_modal', image_url: 'N' });
+  });
+  it('세 입구(업로드 · 라이브러리 · 기본형 스튜디오) = 같은 함수 · 옛 image_url 만 바꾸기 0', () => {
+    const p = fe('pages/InAppMessagesPage.tsx');
+    expect(p).toContain('setEditing((prev) => (prev ? withMessageImage(prev, data.url) : prev));');
+    expect(p).toContain('setEditing((prev) => (prev ? withMessageImage(prev, a.url) : prev));');
+    expect(p).toContain('if (!posterMode) { setEditing((prev) => (prev ? withMessageImage(prev, url) : prev)); return; }');
+    expect(p).not.toContain('setEditing({ ...editing, image_url: a.url });');
+  });
+  it('크기 = 주소별 세 상태 · 지금 주소 결과만 · 확인 대기 뒤 판정 · 실패 = 안내 줄(창 0)', () => {
+    const h = fe('components/inapp/useImageRatio.ts');
+    expect(h).toContain("setSt({ url, status: ok ? 'ready' : 'error', ratio: ok ? img.naturalWidth / img.naturalHeight : 0 });");
+    expect(h).toContain('if (!alive) return;');
+    const p = fe('pages/InAppMessagesPage.tsx');
+    expect(p).toContain("const basicKnown = !!basicImg && basicRatio.url === basicImg && (basicRatio.status === 'ready' || basicRatio.status === 'error');");
+    expect(p).toContain('if (basicKey && prevBasicKeyRef.current !== basicKey) cropCheckRef.current = { key: basicKey, url: basicImg };');
+    expect(p).toContain('if (!basicKnown) return;   // 크기 오기 전 = 기다림');
+    expect(p).toContain('if (basicVisible === null || basicVisible >= APP_BASIC_IMAGE.warnBelow) return;');
+    expect(p).toContain('const basicWarn = !!basicKey && basicKnown && (basicVisible === null || basicVisible < APP_BASIC_IMAGE.warnBelow);');
+    expect(p).toContain("altLabel: '다른 사진 고르기',");
+    expect(p).toContain("cancelLabel: '그대로 두기',");
+  });
+  it('미리보기 · 계약서 = 같은 상수(옛 150px 고정 0)', () => {
+    const pv = fe('components/InAppMessagePreview.tsx');
+    expect(pv).toContain("maxHeight: Math.round(APP_BASIC_IMAGE.previewScreenHeight * APP_BASIC_IMAGE.maxHeightRatio), objectFit: 'cover'");
+    expect(pv).not.toContain("style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }}");
+    const c = fe('components/inapp/AppIntegrationContract.tsx');
+    expect(c).toContain('화면 높이 ${Math.round(APP_BASIC_IMAGE.maxHeightRatio * 100)}%를 넘는 부분만 가운데 맞춤 cover로 자르세요');
+  });
+});
+
+describe('(Codex 구현 1R ①) 스튜디오 창 = 늘 붙은 하나 · 열린 동안 되돌리기 0', () => {
+  it('창 하나(포스터 · 기본형 공용 · 모양 조건부 붙이기 0) · 열린 동안 Ctrl+Z 무시', () => {
+    const p = fe('pages/InAppMessagesPage.tsx');
+    expect(p.match(/<StudioInsertModal\b/g)?.length).toBe(1);
+    expect(p).not.toContain('{posterMode && (() => {');
+    expect(p).not.toContain('{!posterMode && isApp && (');
+    expect(p).toContain('if (studioOpen) return;   // ★ C118 Codex 구현 1R ① 스튜디오 창이 열린 동안 = 편집기 되돌리기 · 다시 0');
   });
 });

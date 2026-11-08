@@ -9,13 +9,13 @@ import ModalBase, { ModalButton } from '../dm/modals/ModalBase';
 import { creditCost } from '../../constants/credit';
 
 export type StudioUseKey = 'inapp' | 'dm' | 'email' | 'free';
-export interface StudioUse { key: StudioUseKey; presetKey: string; label: string; size: string; desc: string; icon: LucideIcon; adminOnly?: boolean; ratio: string }
+export interface StudioUse { key: StudioUseKey; presetKey: string; label: string; size: string; desc: string; icon: LucideIcon; adminOnly?: boolean; ratio: string; /** ★ C118 E1 만드는 것 = 그 용도의 포스터(안내 · 실패 칸 문구) */ poster: string }
 /** 용도 넷 = 서버 CHANNEL_PRESETS(use-inapp 1:1 · use-dm 3:4 · use-email 4:3 · poster 3:4) */
 export const STUDIO_USES: readonly StudioUse[] = [
-  { key: 'inapp', presetKey: 'use-inapp', label: '인앱 메시지', size: '정사각 1:1', ratio: '1 / 1', desc: '앱 팝업 칸에 꽉 차게 · 글 자리를 비워 둔 그림', icon: Layers, adminOnly: true },
-  { key: 'dm', presetKey: 'use-dm', label: '모바일 DM', size: '세로 3:4', ratio: '3 / 4', desc: '휴대폰 화면 폭에 꽉 차는 세로 그림', icon: Smartphone },
-  { key: 'email', presetKey: 'use-email', label: '이메일 마케팅', size: '가로 4:3', ratio: '4 / 3', desc: '메일 첫 화면에 제목과 함께 보이는 그림', icon: Mail },
-  { key: 'free', presetKey: 'poster', label: '자유 형태', size: '세로 3:4 · 기본', ratio: '3 / 4', desc: '어디에나 쓰는 기본 포스터', icon: ImageIcon },
+  { key: 'inapp', presetKey: 'use-inapp', label: '인앱 메시지', size: '정사각 1:1', ratio: '1 / 1', desc: '앱 팝업 칸에 꽉 차게 · 글 자리를 비워 둔 그림', icon: Layers, adminOnly: true, poster: '인앱 메시지용 포스터' },
+  { key: 'dm', presetKey: 'use-dm', label: '모바일 DM', size: '세로 3:4', ratio: '3 / 4', desc: '휴대폰 화면 폭에 꽉 차는 세로 그림', icon: Smartphone, poster: '모바일 DM용 포스터' },
+  { key: 'email', presetKey: 'use-email', label: '이메일 마케팅', size: '가로 4:3', ratio: '4 / 3', desc: '메일 첫 화면에 제목과 함께 보이는 그림', icon: Mail, poster: '이메일 마케팅용 포스터' },
+  { key: 'free', presetKey: 'poster', label: '자유 형태', size: '세로 3:4 · 기본', ratio: '3 / 4', desc: '어디에나 쓰는 기본 포스터', icon: ImageIcon, poster: '자유 형태 포스터' },
 ];
 export function studioUseOfPreset(presetKey: string): StudioUse | null {
   return STUDIO_USES.find((u) => u.presetKey === presetKey) || null;
@@ -23,9 +23,11 @@ export function studioUseOfPreset(presetKey: string): StudioUse | null {
 
 export interface StudioUsePick { uses: StudioUseKey[]; zone: 'top' | 'bottom' }
 
-export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm }: {
+export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm, zoneLocked = false }: {
   open: boolean;
   isAdmin: boolean;
+  /** ★ C118 E3 할인 템플릿 = 글 자리 위 고정(고정 틀 · 서버도 위) — 고를 수 없는 칸을 내지 않는다 */
+  zoneLocked?: boolean;
   onClose: () => void;
   onConfirm: (pick: StudioUsePick) => void;
 }) {
@@ -44,7 +46,7 @@ export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm }: {
             {picked.length > 0 ? <><b className="text-slate-900">{picked.length}개</b> × {unit}크레딧 = <b className="text-violet-800">{total}크레딧</b></> : '하나 이상 골라 주세요'}
           </span>
           <ModalButton onClick={onClose}>취소</ModalButton>
-          <ModalButton variant="primary" disabled={picked.length === 0} onClick={() => onConfirm({ uses: STUDIO_USES.filter((u) => picked.includes(u.key)).map((u) => u.key), zone })}>
+          <ModalButton variant="primary" disabled={picked.length === 0} onClick={() => onConfirm({ uses: STUDIO_USES.filter((u) => picked.includes(u.key)).map((u) => u.key), zone: zoneLocked ? 'top' : zone })}>
             {picked.length > 0 ? `${picked.length}장 만들기` : '만들기'}
           </ModalButton>
         </div>
@@ -68,6 +70,9 @@ export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm }: {
               {u.key === 'inapp' && on && (
                 <div className="px-3 pb-3 -mt-1">
                   <div className="text-[11.5px] font-semibold text-slate-600 mb-1">글 자리</div>
+                  {zoneLocked ? (
+                    <p className="text-[12px] text-slate-700 leading-snug break-keep rounded-lg border border-slate-200 bg-white px-3 py-2">위쪽에 글 · 할인 템플릿은 글이 위, 제품이 아래로 정해져 있어요.</p>
+                  ) : (<>
                   <div className="grid grid-cols-2 gap-1.5">
                     {(['top', 'bottom'] as const).map((z) => (
                       <button key={z} type="button" onClick={() => setZone(z)} aria-pressed={zone === z}
@@ -77,6 +82,7 @@ export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm }: {
                     ))}
                   </div>
                   <p className="text-[11px] text-slate-500 mt-1.5 leading-snug break-keep">고른 쪽을 그림과 같은 색감으로 비워 두고 그 자리에 글을 넣어요. 상품과 장면은 반대쪽에 둬요.</p>
+                  </>)}
                 </div>
               )}
             </div>

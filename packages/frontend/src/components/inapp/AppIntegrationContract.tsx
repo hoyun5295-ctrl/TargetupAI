@@ -13,6 +13,7 @@ import { useEffect } from 'react';
 import { POSTER_FRAME_RULES as RULES } from './generated/poster-frame';
 // ★ C116-B D5 옛 연동 앱 그림 규칙 = 서버 규격과 같은 상수(손 글 숫자 0 · 계약 시험이 서버 ASPECT_RATIOS.inapp 과 대조)
 import { LEGACY_BAKE_SAFE } from './legacy-app-view';
+import { APP_BASIC_IMAGE } from './inappSlides';
 const LEGACY_PCT = Math.round(LEGACY_BAKE_SAFE.w * 100);
 
 /** 앱이 /inapp/active?caps= 로 알리는 낱말(서버 INAPP_CLIENT_CAPS · SDK INAPP_SDK_CAPS 와 같은 값) */
@@ -147,7 +148,7 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-07-18 정정2 — 앱 = 기본형 2위치 + 포스터형
         title: '표시 형태',
-        desc: "template: 앱 채널은 'center_modal'(기본형·중앙 모달) · 'bottom_banner'(기본형·바텀 시트) · 'full_image'(포스터형·전면 이미지) 3값을 받습니다. 모르는 값이 와도 기본형(바텀 시트)으로 폴백하세요.",
+        desc: `template: 앱 채널은 'center_modal'(기본형·중앙 모달) · 'bottom_banner'(기본형·바텀 시트) · 'full_image'(포스터형·전면 이미지) 3값을 받습니다. 모르는 값이 와도 기본형(바텀 시트)으로 폴백하세요. 기본형 그림(imageUrl)은 폭 가득 · 원본 비율로 그리고, 화면 높이 ${Math.round(APP_BASIC_IMAGE.maxHeightRatio * 100)}%를 넘는 부분만 가운데 맞춤 cover로 자르세요(중앙 모달 = 좌우 ${APP_BASIC_IMAGE.modalSideMargin}px · 최대 폭 ${APP_BASIC_IMAGE.modalMaxWidth}px).`,
       },
     ],
   },

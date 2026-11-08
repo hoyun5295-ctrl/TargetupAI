@@ -258,13 +258,17 @@ export function buildPosterPrompt(input: {
 }): string {
   const { template, preset, texts } = input;
   const lines: string[] = [];
+  // ★ C118 E3 할인 템플릿 = 글 자리 위 고정(고정 틀 줄이 위를 정한다 · 화면이 아래를 보내도 위 · 서버가 진실)
+  const textPosition = input.offer && input.textPosition ? 'top' : input.textPosition;
+  // ★ C118 E6 인앱용 = 할인 혜택 줄 · 고정 틀 줄도 안전 칸 안
+  const discountSafe = isStudioFullPreset(preset.key) ? INAPP_CONTENT_SAFE : null;
 
   // 1. 장면 스캐폴드(은닉 — 템플릿이 품은 정교한 지시)
   lines.push(input.scaffold || template.scaffold);
   // 1-1. ★ 2026-08-09(2) 문구 위치 지정 시 — 장면 단계에서 그 자리를 비워 구도가 텍스트와 싸우지 않게 한다.
   //      (실측: 최후미 규칙만으로는 textStyle 상단 문구 + 장면 구도에 밀려 미준수 — 모순 제거가 뿌리 수정)
-  if (input.textPosition) {
-    const zone = input.textPosition === 'top' ? 'upper third' : input.textPosition === 'center' ? 'vertical center' : 'lower third';
+  if (textPosition) {
+    const zone = textPosition === 'top' ? 'upper third' : textPosition === 'center' ? 'vertical center' : 'lower third';
     lines.push(`Scene composition requirement: reserve a calm, visually quiet zone at the ${zone} of the frame for the marketing copy, keep props, busy textures and strong highlights away from that zone.`);
   }
   // 2. 포스터 형식·비율
@@ -275,7 +279,7 @@ export function buildPosterPrompt(input: {
     const pct = Math.round(INAPP_CONTENT_SAFE * 100);
     const edge = Math.round((1 - INAPP_CONTENT_SAFE) * 50);
     lines.push(`Keep every piece of copy and the main subject inside the central ${pct}% of the width and the central ${pct}% of the height; the outer ${edge}% on every side must contain only background scenery.`);
-    const half = input.textPosition === 'bottom' ? 'lower' : 'upper';
+    const half = textPosition === 'bottom' ? 'lower' : 'upper';
     const other = half === 'upper' ? 'lower' : 'upper';
     lines.push(`The ${half} part of the square is a natural, color-matched calm continuation of the same scene where the copy sits, not a panel or overlay box. Place the main subject and props in the ${other} part so the copy never covers them.`);
   }
@@ -310,13 +314,13 @@ export function buildPosterPrompt(input: {
     lines.push('Render the following marketing copy INTO the image as part of the design, in polished native-quality Korean typography (correct spelling, exact characters):');
     lines.push(given.join('\n'));
     // 위치 지정 시 textStyle의 위치 발언권을 박탈(서체·무드만) — 위치 권한자는 최후미 규칙 하나뿐.
-    if (input.textPosition) {
+    if (textPosition) {
       lines.push(`Typography direction (font mood and styling reference ONLY, any position wording inside it is void; the text position is defined solely by the FINAL LAYOUT RULE at the end): ${template.textStyle}`);
     } else {
       lines.push(`Typography direction: ${template.textStyle}`);
     }
     // ★ 2026-11-08 C114 B 할인 혜택 줄 = 지정 문구 뒤 · 마지막 금지 줄 앞(그릴 숫자 = 지정 문구 · 금지 줄이 막지 않는다)
-    if (input.offer) lines.push(...discountPromptLines(input.offer, input.brandColor));
+    if (input.offer) lines.push(...discountPromptLines(input.offer, input.brandColor, discountSafe));
     // ★ 2026-11-08 C114 D 글자 바닥(모든 글 있는 포스터 · Harold 1108 「텍스트가 너무 보기에 작고」)
     lines.push(POSTER_LEGIBILITY_FLOOR);
   } else {
@@ -326,17 +330,17 @@ export function buildPosterPrompt(input: {
   lines.push('Use ONLY the text given above, exactly as written, do not add, translate, paraphrase, or modify any wording or numbers. Do not render any other text, prices, logos, QR codes, or watermarks.');
   // 8. (최후미) 문구 위치 강제 — 2026-08-09 보강: 모델이 마지막 지시에 가장 강하게 반응하므로 최종 제약 뒤에 둔다.
   //    템플릿 textStyle의 상단 배치 문구·장면 구도(하단 소품·상단 여백)에 밀리지 않도록 부정형 + 배경 정돈 지시 동반.
-  if (given.length && input.textPosition) {
-    const pos = input.textPosition === 'top'
+  if (given.length && textPosition) {
+    const pos = textPosition === 'top'
       ? 'in the upper third of the poster. Do NOT place it in the middle or lower part'
-      : input.textPosition === 'center'
+      : textPosition === 'center'
         ? 'at the exact vertical center of the poster, the headline must sit at the middle of the image height. Do NOT place the text block in the upper third'
         : 'in the lower third of the poster. Do NOT place it in the upper or middle part';
     lines.push(`FINAL LAYOUT RULE: this single rule overrides every placement direction mentioned anywhere above, including the typography direction: place the entire text block (label, headline and sub-headline together as one group) ${pos}.${input.hasProduct ? ' Keep the text block clear of the attached product.' : ''} Compose the scene so the area behind the text block stays visually calm and uncluttered for readability.`);
   }
 
   // ★ C114 B 할인 = 최후미 고정 틀(맨 위 제품명 → 혜택 → 정해진 제품 자리 · 숫자 그대로)
-  if (given.length && input.offer) lines.push(discountFixedLayoutLine(input.offer));
+  if (given.length && input.offer) lines.push(discountFixedLayoutLine(input.offer, discountSafe));
 
   return lines.join('\n');
 }

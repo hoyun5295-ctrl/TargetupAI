@@ -118,12 +118,14 @@ export function useImageSources(opts: {
 
 // ─────────────────────────────── 왼쪽 — 장 목록 ───────────────────────────────
 
-export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, onDropFiles, busy, top, notes }: {
+export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, onDropFiles, busy, top, notes, onRemove }: {
   layout: PosterLayout;
   slides: WsSlide[];
   active: number;
   onActive: (i: number) => void;
   onReorder: (from: number, to: number) => void;
+  /** ★ C118 E4 줄마다 빼기(2장 이상일 때만 · 그 장 번호) */
+  onRemove?: (i: number) => void;
   onAdd: () => void;
   onDropFiles: (files: FileList) => void;
   busy?: boolean;
@@ -153,6 +155,7 @@ export function SlideRail({ layout, slides, active, onActive, onReorder, onAdd, 
         selectedId={slides[active]?._k || null}
         onSelect={(id) => { const i = slides.findIndex((s) => s._k === id); if (i >= 0) onActive(i); }}
         onReorder={onReorder}
+        onRemove={onRemove && slides.length > 1 ? (id) => { const i = slides.findIndex((s) => s._k === id); if (i >= 0) onRemove(i); } : undefined}
         footer={(
           <div className="space-y-2.5">
             <button type="button" onClick={onAdd} disabled={full || busy}

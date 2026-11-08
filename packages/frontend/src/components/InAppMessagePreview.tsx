@@ -16,7 +16,7 @@ import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPrev
 // ★ 2026-11-05 인앱 포스터 재구성 §3-7 — 새 틀(통짜 · 떠 있는 카드 · 띠) = 그리는 부품(몰 화면과 같은 DOM) · 공용 미리보기 소비처 전부가 같은 갈래
 import { PosterFramePreview } from './inapp/PosterFramePreview';
 import { drawsWithPosterFrame, frameSlidesWithFlat } from './inapp/generated/poster-frame';
-import { legacyAppPreviewOf } from './inapp/inappSlides';
+import { legacyAppPreviewOf, APP_BASIC_IMAGE } from './inapp/inappSlides';
 import { legacyAppWillBake, legacyAppImageUrl, legacyAppBakesFull } from './inapp/legacy-app-view';
 import { LegacyBakedPreview, LegacyAppPreviewPending } from './inapp/LegacyBakedPreview';
 import { useOwnImageHosts, loadOwnImageHosts } from './inapp/inapp-image-hosts';
@@ -666,7 +666,8 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
         : { borderTopLeftRadius: 24, borderTopRightRadius: 24, width: '100%', paddingBottom: 10 }),
     }}>
       {img && (
-        <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 150, objectFit: 'cover', display: 'block' }} />
+        // ★ C118 E5 앱 기본형 = 깔린 앱 규칙(원본 비율 · 화면 높이 45% 상한 · 넘는 부분만 cover · APP_BASIC_IMAGE 하나 · 옛 = 150px 고정 = 앱보다 많이 잘림)
+        <img src={img} alt="" onError={hideOnError} style={{ width: '100%', height: 'auto', maxHeight: Math.round(APP_BASIC_IMAGE.previewScreenHeight * APP_BASIC_IMAGE.maxHeightRatio), objectFit: 'cover', display: 'block' }} />
       )}
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8, textAlign: ta }}>
         {badge ? (

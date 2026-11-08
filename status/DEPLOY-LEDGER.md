@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: c70830be · 2026-11-08 · Harold 실행 보고(C116-B · 서버 git pull · 확인 출력 = HEAD c70830be 2026-11-08 14:58:22 +0900) · 그 전 da9baa11(C117)
-- deployed_head: c70830be · 2026-11-08 · Harold 실행 보고(C116-B · 백엔드 · 프론트 build:safe · pm2 reload · online ↺68 · unstable 0 · 에러 로그 0줄) · 그 전 da9baa11(C117)
+- pulled_head: 5fc2d527 · 2026-11-08 · Harold 실행 보고(C118 · 서버 git pull · 서버 작업 사본 image-studio.ts 주석 한 글자(│) 되돌린 뒤 · 확인 출력 = HEAD 5fc2d527 2026-11-08 17:25:05 +0900) · 그 전 c70830be(C116-B)
+- deployed_head: 5fc2d527 · 2026-11-08 · Harold 실행 보고(C118 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺70 · created at 08:36:43Z · unstable 0 · reload 뒤 에러 로그 0줄) · 그 전 c70830be(C116-B)
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -62,7 +62,7 @@
 | C114 | b374ed44 |
 | C116 | ca7c99cd · c70830be |
 | C117 | da9baa11 |
-| C118 | 미커밋 |
+| C118 | 5fc2d527 |
 
 ## §1 대기
 
@@ -1563,9 +1563,17 @@ COMMIT;
 ### C118-H1 · 한줄로 배포(이미지 스튜디오 용도별 제작 + 앱 채널 모양 넷 + 인앱용 그림 여백 0 · 백엔드 + 프론트 + SDK 서빙 파일 · DDL 0 · ENV 0)
 - 카드: C118
 - 단계: 한줄로 배포
-- 선행: C116-H2 · Codex 구현 approve · 커밋(C118 경로만 · 다른 세션 파일 뺌) → push
+- 선행: C116-H2 · Codex 구현 3R approve · 커밋 5fc2d527(Harold · 48 경로 · 다른 세션 파일 뺌) → push
 - 기대: 설계서 docs/2026-11-08-c118-studio-per-use-inapp-app-design.md · 스튜디오 「만들기」 = 「어디에 쓸 그림인가요?」 넷 · 고른 수 × 2크레딧 · 인앱용 = 정사각 · 영구 이름 `.full.` · 만드는 중 안내 = 흰 카드 · 앱 채널 모양 = 넷 · 인앱용 그림 = 옛 연동 앱에 여백 0(통짜 = 원본 ?fit=inappfull&fr=1 · 사진 위 글 = 굽기 판 3) · [반영] 뒤 「앱 화면 준비됨」 · 웹 채널 · 미가입 · 직접발송만 = 변화 0
 - 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 스튜디오 인앱용 1장 실제 생성(약 $0.07 · 승인됨) → 영구 파일 이름 `.full.` → 앱 채널 통짜 포스터 게시 → 팝폰 완전히 껐다 켜기 = 그림 칸에 꽉 · 어둠 0
+- 결과: 1108 Harold = pull 이 서버 작업 사본 packages/backend/src/routes/image-studio.ts(544행 주석에 │ 한 글자 · 동작 무관)에 막힘 → 그 파일 checkout 뒤 pull → HEAD 5fc2d527(2026-11-08 17:25:05 +0900) · build:safe 둘 · reload → targetup-backend online ↺70 · created at 2026-11-08T08:36:43Z · unstable 0 · reload 뒤 에러 로그 0줄(남은 줄 = 16:13 엑셀 암호 파일 업로드 · 그 전 것) · 서버 사본 packages/sdk-js/package-lock.json 수정 = 그대로 둠 → 서버 단계 통과 · 인앱용 실제 생성 1장(Harold · 할인 템플릿 · 정사각 확인) · 실사용 시험 접수 6건 → C118-H2
+
+### C118-H2 · 한줄로 배포(C118 실사용 시험 보정 6건 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C118
+- 단계: 한줄로 배포
+- 선행: C118-H1 · Codex 설계 2R · 구현 approve · 커밋(§10 경로만 · 다른 세션 파일 뺌) → push
+- 기대: 설계서 §10 · 스튜디오 만드는 중 안내 = 「인앱 메시지용 포스터를 만들고 있어요」(여러 장 = 「N장 중 i번째」) · 결과 로고 = 꺼진 채 · 할인 템플릿 인앱 = 글 자리 「위(고정)」 · 장 목록 줄마다 빼기 · 앱 가운데 팝업 · 하단 시트 = 미리보기 원본 비율 · 잘리는 사진이면 안내 창 · 디자인 탭 안내 줄 · 웹 채널 · 포스터 · 미가입 · 직접발송만 = 변화 0
+- 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 스튜디오 만드는 중 안내 줄 · 로고 꺼짐 → 인앱 편집기 장 목록 빼기 → 앱 채널 포스터 → 가운데 팝업 바꾸기 = 세로 사진이면 안내 창
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

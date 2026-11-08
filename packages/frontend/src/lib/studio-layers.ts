@@ -65,9 +65,12 @@ export function logoRowView({ saved, failed, logo }: { saved: boolean; failed: b
   };
 }
 
-/** 지금 설정 — 확정 값(AI 수정 · 다시 얹기 뒤 같은 자리) · 준비됨이 아니면 켜짐 · 자리 · 크기 자동 */
+/**
+ * 지금 설정 — 확정 값(AI 수정 · 다시 얹기 뒤 같은 자리) · 준비됨이 아니면 **꺼짐** · 자리 · 크기 자동.
+ *   ★ C118 E2 · Codex 구현 1R ② 로고 = 기본 꺼짐(생성 직후 /layers 와 같은 값) — 못 읽은 카드에서 AI 수정 · 다시 시도가 로고를 켜지 않는다(켜기 = 사용자 동작만).
+ */
 export function logoSettingsOf(logo: LogoView | null): LogoSettings {
-  return logo?.state === 'ready' ? { on: logo.on, corner: logo.corner, size: logo.size } : { on: true, corner: null, size: null };
+  return logo?.state === 'ready' ? { on: logo.on, corner: logo.corner, size: logo.size } : { on: false, corner: null, size: null };
 }
 
 /** /layers 요청 몸 */

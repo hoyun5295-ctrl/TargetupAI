@@ -40,6 +40,11 @@ const editor = read([
   path.resolve(process.cwd(), '../frontend/src/pages/InAppMessagesPage.tsx'),
   path.resolve(process.cwd(), 'packages/frontend/src/pages/InAppMessagesPage.tsx'),
 ]);
+// ★ 2026-11-08 C118 E5 ⑤ 기본 표시 헬퍼 · 그림 넣기 규칙 = inappSlides.ts 로 옮김(업로드 · 라이브러리 · 스튜디오 셋이 같은 함수)
+const slidesCt = read([
+  path.resolve(process.cwd(), '../frontend/src/components/inapp/inappSlides.ts'),
+  path.resolve(process.cwd(), 'packages/frontend/src/components/inapp/inappSlides.ts'),
+]);
 
 describe('인앱 이미지 블록 전체보기(natural) — 실렌더·미리보기·편집기 미러', () => {
   it('네 소스를 모두 찾는다', () => {
@@ -47,6 +52,7 @@ describe('인앱 이미지 블록 전체보기(natural) — 실렌더·미리보
     expect(sdkApp, 'SDK inapp.ts 못 찾음').toBeTruthy();
     expect(preview, 'BlockPreview.tsx 못 찾음').toBeTruthy();
     expect(editor, 'InAppMessagesPage.tsx 못 찾음').toBeTruthy();
+    expect(slidesCt, 'inappSlides.ts 못 찾음').toBeTruthy();
   });
 
   it('SDK renderMedia — natural 박스 제거가 isNatural로 가드된다(paddingTop 무조건 제거 방지)', () => {
@@ -69,8 +75,8 @@ describe('인앱 이미지 블록 전체보기(natural) — 실렌더·미리보
 
   it('편집기 defaultMediaAspect — 배너만 16:9, 그 외 natural(항상 16:9 방지)', () => {
     // 배너 목록은 BANNER_INAPP_TEMPLATES Set로 정의(top/bottom 배너만 크롭 띠 유지)
-    expect(editor).toContain("BANNER_INAPP_TEMPLATES = new Set(['top_banner', 'bottom_banner'])");
-    const body = slice(editor, 'function defaultMediaAspect(', 'convertToBlocks');
+    expect(slidesCt).toContain("BANNER_INAPP_TEMPLATES = new Set(['top_banner', 'bottom_banner'])");
+    const body = slice(slidesCt, 'function defaultMediaAspect(', 'export function withMessageImage');
     expect(body).toBeTruthy();
     expect(body).toContain('BANNER_INAPP_TEMPLATES.has');
     // 삼항으로 배너=16:9 / 그 외=natural — 항상 16:9로 바뀌면 실패
@@ -78,10 +84,13 @@ describe('인앱 이미지 블록 전체보기(natural) — 실렌더·미리보
   });
 
   it('편집기 업로드·변환이 하드코딩 16:9가 아니라 헬퍼(+position 폴백)를 쓴다', () => {
-    expect(editor).toContain('aspect: defaultMediaAspect(prev.template || prev.position)');
+    expect(slidesCt).toContain('aspect: defaultMediaAspect(msg.template || msg.position)');
     expect(editor).toContain('aspect: defaultMediaAspect(m.template || m.position)');
     // 기존 미디어 블록 갱신 시에도 aspect 보존/기본 부여(icon→image 무aspect 크롭 방지)
-    expect(editor).toContain('nb[idx].aspect || defaultMediaAspect(prev.template || prev.position)');
+    expect(slidesCt).toContain('nb[idx].aspect || defaultMediaAspect(msg.template || msg.position)');
+    // 업로드 = 그림 넣기 규칙 하나(옛 페이지 안 갱신 코드 0)
+    expect(editor).toContain('setEditing((prev) => (prev ? withMessageImage(prev, data.url) : prev));');
+    expect(editor).not.toContain('function defaultMediaAspect(');
   });
 
   it('실렌더 오버레이 3종(center_modal·full_screen·slide_in) content에 스크롤 가드(overflowY:auto)', () => {

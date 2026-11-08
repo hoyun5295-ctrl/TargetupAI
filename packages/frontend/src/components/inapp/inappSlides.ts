@@ -240,6 +240,62 @@ export function appSafeLayoutKey(k: LayoutKey): LayoutKey {
   return k;
 }
 
+/**
+ * ★ 2026-11-08 C118 E5 앱 기본형(가운데 팝업 · 하단 시트) 그림 규칙 한 곳 — 깔린 앱(팝폰 09-29 InAppBottomSheet.tsx:75 · :305) 그대로 ·
+ *   폭 가득 · 원본 비율 · 화면 높이 maxHeightRatio 까지(넘는 부분만 가운데 맞춤 cover) · 가운데 팝업 = 좌우 modalSideMargin · 최대 modalMaxWidth.
+ *   판정 기준 화면 = view(서버 굽기 화면과 같은 390 × 844) · 편집기 미리보기 화면 높이 = previewScreenHeight(PosterEditor 휴대폰 논리 높이) ·
+ *   안내 = 보이는 비율 < warnBelow · 계약서 문장 · 미리보기 · 안내 창 · 안내 줄이 이 값 하나.
+ */
+export const APP_BASIC_IMAGE = {
+  maxHeightRatio: 0.45, modalSideMargin: 20, modalMaxWidth: 420,
+  view: { width: 390, height: 844 }, previewScreenHeight: 667, warnBelow: 0.9,
+} as const;
+/** 그 기본형에서 그림 세로가 보이는 비율(1 = 통째) · 비율(가로 / 세로)을 모르면 null */
+export function appBasicImageVisible(template: 'center_modal' | 'bottom_banner', ratioWH: number): number | null {
+  if (!(Number.isFinite(ratioWH) && ratioWH > 0)) return null;
+  const R = APP_BASIC_IMAGE;
+  const w = template === 'center_modal' ? Math.min(R.modalMaxWidth, R.view.width - 2 * R.modalSideMargin) : R.view.width;
+  const h = w / ratioWH;
+  return Math.min(1, (R.view.height * R.maxHeightRatio) / h);
+}
+
+/** ★ C118 E4 장을 뺀 뒤 고를 장 — 지금 장이 남으면 그 장(_k 기준) · 지금 장을 빼면 앞 장(첫 장이면 새 첫 장) */
+export function activeAfterRemove(keys: readonly string[], active: number, removed: number): number {
+  const next = keys.filter((_, i) => i !== removed);
+  if (next.length === 0) return 0;
+  if (removed !== active) {
+    const j = next.indexOf(keys[active]);
+    return j >= 0 ? j : 0;
+  }
+  return Math.min(next.length - 1, Math.max(0, removed - 1));
+}
+
+/** 사용자가 올린 이미지 블록 기본 표시 — 카드형은 전체보기(크롭 0), 배너(top/bottom)만 얇은 띠(16:9) 유지 */
+const BANNER_INAPP_TEMPLATES = new Set(['top_banner', 'bottom_banner']);
+export function defaultMediaAspect(template?: string | null): 'natural' | '16:9' {
+  return BANNER_INAPP_TEMPLATES.has(String(template || '')) ? '16:9' : 'natural';
+}
+/**
+ * ★ C118 E5 ⑤ 메시지 그림 넣기 규칙 하나(업로드 · 라이브러리 고르기 · 기본형 스튜디오 창) — 블록 메시지 = 첫 media 블록 그림 교체(명시 aspect 보존) ·
+ *   없으면 맨 앞에 media 블록 + image_url · 블록 없음 = image_url 만(옛 업로드 갈래를 옮긴 것 · Codex 설계 1R ①).
+ */
+export function withMessageImage<T extends { content_blocks?: any; image_url?: string | null; template?: string | null; position?: string | null }>(msg: T, url: string): T {
+  const blocks: any[] = Array.isArray(msg.content_blocks) ? msg.content_blocks : [];
+  if (blocks.length > 0) {
+    const idx = blocks.findIndex((b: any) => b?.type === 'media');
+    let nb: any[];
+    if (idx >= 0) {
+      nb = [...blocks];
+      // 기존 미디어 블록의 명시 aspect는 보존, 없으면(아이콘/일러스트였던 블록) 전체보기 기본 — 크롭 방지
+      nb[idx] = { ...nb[idx], variant: 'image', url, aspect: nb[idx].aspect || defaultMediaAspect(msg.template || msg.position) };
+    } else {
+      nb = [{ type: 'media', variant: 'image', url, aspect: defaultMediaAspect(msg.template || msg.position) }, ...blocks];
+    }
+    return { ...msg, image_url: url, content_blocks: nb };
+  }
+  return { ...msg, image_url: url };
+}
+
 /** 지금 메시지의 모양 키 — design 세 키(poster_layout · poster_text · poster_frame)를 함께 읽는다 */
 export function layoutKeyOf(m: Record<string, any>): LayoutKey {
   const t = String(m.template || m.position || 'center_modal');

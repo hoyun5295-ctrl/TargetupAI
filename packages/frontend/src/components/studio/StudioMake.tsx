@@ -253,7 +253,8 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
       cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
       // ★ C118 A3 인앱 용도 = 고른 글 자리(위 · 아래)를 모든 템플릿에 · 글 없는 판 = 아래(글을 얹을 자리)
-      textPosition: textless ? 'bottom' : (inappUse ? (opts?.textPosition || 'top') : (isEvent(template) ? textPosition : null)),
+      // ★ C118 E3 할인 템플릿 = 글 자리 위 고정(서버도 위)
+      textPosition: textless ? 'bottom' : (inappUse ? (discountKind ? 'top' : (opts?.textPosition || 'top')) : (isEvent(template) ? textPosition : null)),
       ...(discountKind && !textless && discountBuild?.ok ? { offer: discountBuild.offer } : {}),
     };
   };
@@ -271,7 +272,8 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       try { preview = await fetchAuthObjectUrl(im.url); } catch { /* 미리보기만 못 띄운다 · 저장·넣기는 tempId 로 된다 */ }
       // ★ 2026-11-07 로고 기본 켜짐(D8) — 실패 = 바탕 + 「로고를 얹지 못했어요 · 다시 얹기」(확정 설정 없음 = 보이는 그대로 바탕 저장)
       setBusyMsg('로고를 얹는 중...');
-      const lay = await postLayers(im.tempId, { on: true, corner: null, size: null }, textless);
+      // ★ C118 E2 로고 = 기본 꺼짐(Harold 1108 「로고 겁나 거슬리네」 · 켜기 · 모서리 · 크기 줄은 그대로 · 켜면 지금 갈래)
+      const lay = await postLayers(im.tempId, { on: false, corner: null, size: null }, textless);
       const logoState: LogoCardState = typeof lay === 'string' ? { logo: null, layered: null, logoFailed: true } : lay;
       // 헤드라인 = 저장 파일명(헤드라인_채널) 스냅샷(생성 시점 문구 고정 · 얼린 본문의 문구)
       const bt = (body.texts || {}) as StudioTexts;
@@ -292,7 +294,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
 
   return {
     template, texts, setTexts, hint, setHint, textPosition, setTextPosition,
-    discount, setDiscount, discountBuild,
+    discount, setDiscount, discountBuild, discountKind,
     items, remaining, full, removeItem, pickerOpen, setPickerOpen, fileRef,
     busyMsg, reset, restart, onPickMall, onUpload, generate, relayer, findLogo, saveFoundLogo,
     buildGenerateBody, runGenerateBody,
