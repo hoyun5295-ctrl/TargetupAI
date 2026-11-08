@@ -9,7 +9,7 @@ import type { PosterFrameSlide } from './generated/poster-frame';
 import { inAppDeadlineText, legacyStageOf } from './legacy-app-view';
 
 export function LegacyBakedPreview({
-  slides, design, accentColor, badge, endAt, replaceVars, active = 0, onActive, buttonLabel, buttonBg, buttonColor, optOutLabel,
+  slides, design, accentColor, badge, endAt, replaceVars, active = 0, onActive, buttonLabel, buttonBg, buttonColor, optOutLabel, full = false,
 }: {
   slides: PosterFrameSlide[];
   design: Record<string, any> | null | undefined;
@@ -24,6 +24,8 @@ export function LegacyBakedPreview({
   buttonBg?: string | null;
   buttonColor?: string | null;
   optOutLabel: string;
+  /** ★ C118 B2 전부 스튜디오 인앱용 그림 = 여백 0 · 모서리 0(서버 굽기 full 과 같은 모습) */
+  full?: boolean;
 }) {
   return (
     <div className="absolute inset-0" style={{ zIndex: 2 }}>
@@ -34,8 +36,9 @@ export function LegacyBakedPreview({
           <PosterFramePreview
             slides={slides} design={design} accentColor={accentColor} badge={badge} endAt={endAt}
             replaceVars={replaceVars} active={active} onActive={onActive}
-            still={{ deadlineText: inAppDeadlineText(endAt ?? null) }}
+            still={{ deadlineText: inAppDeadlineText(endAt ?? null), ...(full ? { full: true } : {}) }}
             bakeFit
+            bakeFull={full}
           />
         </div>
         <div style={{ padding: '12px 16px 6px' }}>

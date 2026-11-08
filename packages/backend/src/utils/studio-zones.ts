@@ -58,11 +58,15 @@ export function logoSizeOptions(posterW: number, posterH: number, logoW: number,
   return LOGO_SIZES.map((id) => ({ id, ok: id === 's' || rawTarget(posterW, posterH, logoW, logoH, id).width <= logoW }));
 }
 
-/** 모서리 자리 — 여백 = 포스터 폭 4% · 포스터 밖으로 나가지 않는다 */
-export function logoPlacement(posterW: number, posterH: number, box: { width: number; height: number }, corner: LogoCorner): { left: number; top: number } {
-  const m = Math.round(posterW * LOGO_MARGIN_RATIO);
-  const left = corner === 'tl' || corner === 'bl' ? m : posterW - m - box.width;
-  const top = corner === 'tl' || corner === 'tr' ? m : posterH - m - box.height;
+/**
+ * 모서리 자리 — 여백 = 포스터 폭 4% · 포스터 밖으로 나가지 않는다.
+ *   ★ C118 safeEdge(0 ~ 0.5) = 축마다 비워 둘 가장자리 비율(인앱용 = 안전 칸 밖 · 가로 · 세로 따로) · 0 = 지금 그대로.
+ */
+export function logoPlacement(posterW: number, posterH: number, box: { width: number; height: number }, corner: LogoCorner, safeEdge = 0): { left: number; top: number } {
+  const mx = safeEdge > 0 ? Math.ceil(posterW * safeEdge) : Math.round(posterW * LOGO_MARGIN_RATIO);
+  const my = safeEdge > 0 ? Math.ceil(posterH * safeEdge) : mx;
+  const left = corner === 'tl' || corner === 'bl' ? mx : posterW - mx - box.width;
+  const top = corner === 'tl' || corner === 'tr' ? my : posterH - my - box.height;
   return {
     left: Math.max(0, Math.min(left, posterW - box.width)),
     top: Math.max(0, Math.min(top, posterH - box.height)),

@@ -16,7 +16,7 @@ import { fitToCanvas, SERVE_MAX_WIDTH } from './image-serve';
 import { ASPECT_RATIOS, INAPP_STAGE_HEX } from './image-fit-spec';
 
 /** 굽기 판(그리는 방법을 바꾸면 올린다 → 모든 열쇠가 바뀐다) · ★ C116-B 2 = 최종 정사각 그림(투명 찍기 + 무대 합성) */
-export const INAPP_BAKE_VERSION = 2;
+export const INAPP_BAKE_VERSION = 3;
 /** 서버 크롬 화면(휴대폰 · 1108 시험과 같은 값) */
 export const INAPP_BAKE_VIEW = { width: 390, height: 844, deviceScaleFactor: 3 } as const;
 /** 옛 열쇠를 지우기 전 남기는 시간(이미 내려보낸 주소 · 그림 캐시 하루 · D12) */
@@ -45,16 +45,24 @@ export interface InAppBakeJob {
   payload: Record<string, unknown>;
   /** ★ C116-B 장마다 무대색(#hex · 길이 = expected · 판정 = inapp-message inAppBakePlan) */
   stages: string[];
+  /** ★ C118 B2 전부 스튜디오 인앱용 그림 = 여백 0(정사각으로만 맞춤) */
+  full?: boolean;
 }
 
 /**
  * ★ C116-B D3 찍은 틀 상자(투명 바탕 PNG) → 최종 그림 = 인앱 맞춤 규격(정사각 · 가운데 안전 칸 · 무대색) 그대로 · JPEG(q90).
  *   캔버스 변 = 상자 긴 변 ÷ 안전 칸(내용을 늘리지 않음) · 상한 SERVE_MAX_WIDTH · 맞춤 CT fitToCanvas 하나(대체 길과 같은 함수 · K6).
  */
-export async function composeInAppBakeSlide(png: Buffer, stage: string): Promise<Buffer> {
+export async function composeInAppBakeSlide(png: Buffer, stage: string, full = false): Promise<Buffer> {
   const safe = ASPECT_RATIOS.inapp.safe!;
   const meta = await sharp(png).metadata();
   const w = meta.width || 1, h = meta.height || 1;
+  if (full) {
+    // ★ C118 B2 인앱용(가장자리 10% = 배경만) = 정사각 cover · 여백 0 · 늘리지 않음(짧은 변 기준)
+    const side = Math.max(1, Math.min(SERVE_MAX_WIDTH, Math.min(w, h)));
+    const bg = INAPP_STAGE_HEX.test(stage) ? stage : safe.fill;
+    return sharp(png).resize({ width: side, height: side, fit: 'cover', position: 'centre' }).flatten({ background: bg }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
+  }
   const side = Math.max(1, Math.min(SERVE_MAX_WIDTH, Math.ceil(Math.max(w / safe.w, h / safe.h))));
   const fill = INAPP_STAGE_HEX.test(stage) ? stage : safe.fill;
   return sharp(await fitToCanvas(png, side, side, 'pad', { ...safe, fill })).flatten({ background: fill }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
@@ -414,7 +422,7 @@ async function runWithChrome(job: InAppBakeJob): Promise<Buffer[]> {
     }
     if (overflow) throw new Error('받은 바이트 상한 넘음');
     const finals: Buffer[] = [];
-    for (let s = 0; s < out.length; s++) finals.push(await composeInAppBakeSlide(out[s], job.stages[s]));
+    for (let s = 0; s < out.length; s++) finals.push(await composeInAppBakeSlide(out[s], job.stages[s], !!job.full));
     return finals;
   } finally {
     await page.close().catch(() => {});

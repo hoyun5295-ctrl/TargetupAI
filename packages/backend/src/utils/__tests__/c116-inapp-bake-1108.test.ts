@@ -522,7 +522,7 @@ describe('V11 편집기 거울 · 안내', () => {
     expect(pfp).toContain("text: replaceVars, displayFont: safeFontFamily(design?.font_display, ''), still,");
     expect(pfp).toContain('rail.textContent = PREVIEW_RAIL_CSS;');
     const lbp = fe('components/inapp/LegacyBakedPreview.tsx');
-    expect(lbp).toContain('still={{ deadlineText: inAppDeadlineText(endAt ?? null) }}');
+    expect(lbp).toContain('still={{ deadlineText: inAppDeadlineText(endAt ?? null), ...(full ? { full: true } : {}) }}');   // ★ C118 B2 인앱용 = full
     expect(fe('components/inapp/PosterEditor.tsx')).toContain('const bakeJudge = legacyApp ? legacyAppWillBake(');
     expect(fe('components/inapp/PosterEditor.tsx')).toContain('const bakedLegacy = bakeJudge === true;');
     expect(fe('components/InAppMessagePreview.tsx')).toContain('const bakeJudge = legacyPoster ? legacyAppWillBake(');

@@ -745,7 +745,7 @@ imageStudioRouter.post('/save', async (req: any, res: Response) => {
         try { fs.unlinkSync(path.join(INAPP_IMAGE_BASE, companyId, moved.filename)); } catch { /* noop */ }
       } else {
         const { companyId: _c, createdAt: _t, ...rest } = metaForRestore as any;
-        restorePermanentToTemp(companyId, effTempId, moved.ext, rest);
+        restorePermanentToTemp(companyId, effTempId, moved.ext, rest, moved.filename);
       }
       return res.status(503).json({ success: false, error: '라이브러리에 올리지 못했어요. 잠시 뒤 같은 그림으로 다시 저장해 주세요.', code: 'ASSET_REGISTER_FAILED' });
     }

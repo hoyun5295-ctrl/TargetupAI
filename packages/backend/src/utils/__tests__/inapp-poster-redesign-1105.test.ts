@@ -512,6 +512,6 @@ describe('화면 배선 — 죽은 단추 0 · 서버 결함 데려가기 · 앱
     const m = fe('components/dm/build/StudioInsertModal.tsx');
     expect(m).toContain('onInserted: (url: string, texts?: StudioTexts) => void;');
     expect(m).toContain('initialTemplateId?: string | null;');
-    expect(m).toContain('const r = await make.generate({ textless });');
+    expect(m).toContain("const r = await make.generate({ textless, presetKey: usePreset, textPosition: use === 'inapp' && !textless ? zone : null });");   // ★ C118 A4 용도 고정
   });
 });

@@ -31,6 +31,7 @@ import AssetLibraryPickerModal from '../components/assets/AssetLibraryPickerModa
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';
 import TemplatePicker, { type StudioTemplatePublic } from '../components/studio/TemplatePicker';
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../components/studio/StudioMake';
+import StudioUsePicker, { STUDIO_USES, studioUseOfPreset, type StudioUsePick, type StudioUseKey } from '../components/studio/StudioUsePicker';   // ★ C118 A1 용도 고르기
 import StudioWatermark from '../components/studio/StudioWatermark';
 import StudioLogoControls from '../components/studio/StudioLogoControls';
 import { layersForSave, logoSettingsOf, LOGO_LIMIT_TEXT, type LogoCandidate, type LogoCardState, type LogoSettings } from '../lib/studio-layers';
@@ -57,7 +58,7 @@ type LibAsset = { id: string; url: string; filename: string | null; bytes: numbe
 // ★ MMS 전용 생성 없음(Harold 확정 2026-07-19) — 항상 고품질 생성·저장, MMS는 발송 시 라이브러리 소재 자동 변환.
 const GENERATE_PRESET_KEY = 'poster';
 const presetLabel = (key: string) =>
-  key === 'poster' ? '포스터' : key === 'inapp-poster' ? '인앱 포스터' : key === 'dm-card' ? '모바일 DM' : key === 'email-hero' ? '이메일 히어로' : key;
+  studioUseOfPreset(key)?.label || (key === 'inapp-poster' ? '인앱 포스터' : key === 'dm-card' ? '모바일 DM' : key === 'email-hero' ? '이메일 히어로' : key);
 // 소재 channel_spec → 짧은 한글 라벨(용도 배지·캡션). 백엔드 channelLabelKo 미러.
 const specKo = (s?: string | null) => (s === 'poster' ? '포스터' : s === 'inapp-poster' ? '인앱' : s === 'dm' ? 'DM' : s === 'email' ? '이메일' : s === 'mms' ? 'MMS' : s === 'free' ? '자유' : '소재');
 
@@ -69,10 +70,11 @@ const STUDIO_CHANNELS: StudioChannel[] = [
   { key: 'dm', label: '모바일 DM 만들기', draftKey: STUDIO_DM_DRAFT_KEY, path: '/dm-builder', icon: Smartphone, box: 'border-amber-300 bg-amber-50 hover:bg-amber-100', iconColor: 'text-amber-700' },
   { key: 'email', label: '이메일 만들기', draftKey: STUDIO_EMAIL_DRAFT_KEY, path: '/email-campaigns', icon: Mail, box: 'border-cyan-300 bg-cyan-50 hover:bg-cyan-100', iconColor: 'text-cyan-700' },
 ];
-function ChannelButtons({ isAdmin, disabled, onPick }: { isAdmin: boolean; disabled?: boolean; onPick: (ch: StudioChannel) => void }) {
+function ChannelButtons({ isAdmin, disabled, onPick, only = null }: { isAdmin: boolean; disabled?: boolean; onPick: (ch: StudioChannel) => void; only?: StudioChannel['key'] | null }) {
+  // ★ C118 A2 용도로 만든 그림 = 그 용도 채널 하나(자유 형태 = 셋)
   return (
     <>
-      {STUDIO_CHANNELS.filter((ch) => !ch.adminOnly || isAdmin).map((ch) => (
+      {STUDIO_CHANNELS.filter((ch) => (!ch.adminOnly || isAdmin) && (!only || ch.key === only)).map((ch) => (
         <button key={ch.key} type="button" onClick={() => onPick(ch)} disabled={disabled} className={`flex items-center gap-2 px-3.5 py-3 rounded-xl border ${ch.box} text-xs font-semibold text-slate-800 transition disabled:opacity-40`}>
           <ch.icon className={`w-4 h-4 ${ch.iconColor}`} /> {ch.label}
         </button>
@@ -142,17 +144,45 @@ export default function ImageStudioPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── 완성 포스터 생성 (템플릿 + 누끼 + 지정 문구, 2크레딧·1장) ──
+  // ── 완성 포스터 생성 — ★ 2026-11-08 C118 A1 · A2 「만들기」 = 용도 고르기 → 고른 용도마다 칸(얼린 본문 + 표) → 차례로 ──
+  const [usePickerOpen, setUsePickerOpen] = useState(false);
+  type UseSlot = { use: StudioUseKey; presetKey: string; label: string; body: Record<string, unknown>; token: string };
+  const [failedSlots, setFailedSlots] = useState<UseSlot[]>([]);
   const generate = async () => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return; }
     if (!ready) { toast.error('이미지 스튜디오가 준비 중입니다'); return; }
-    const r = await make.generate();
-    if (!r) return;
+    setUsePickerOpen(true);
+  };
+  const runSlot = async (slot: UseSlot, i: number, n: number): Promise<boolean> => {
+    const r = await make.runGenerateBody(slot.body, slot.token, false, `${n > 1 ? `${i + 1} / ${n} · ` : ''}${slot.label} 만드는 중 (약 20~30초)`);
+    if (!r) return false;
     if (r.preview) objectUrls.current.push(r.preview);
     madeRef.current = true;
-    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: GENERATE_PRESET_KEY, title: r.title, texts: r.texts, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed, discountCheck: r.discountCheck ?? null }, ...prev]);
-    setStage('result');
+    setCandidates((prev) => [{ tempId: r.tempId, url: r.url, blob: r.preview, presetKey: slot.presetKey, title: r.title, texts: r.texts, logo: r.logo, layered: r.layered, logoFailed: r.logoFailed, discountCheck: r.discountCheck ?? null }, ...prev]);
+    return true;
   };
+  const runUses = async (pick: StudioUsePick) => {
+    setUsePickerOpen(false);
+    const slots: UseSlot[] = [];
+    for (const key of pick.uses) {
+      const u = STUDIO_USES.find((x) => x.key === key);
+      if (!u) continue;
+      const body = make.buildGenerateBody({ presetKey: u.presetKey, textPosition: u.key === 'inapp' ? pick.zone : null });
+      if (!body) return;
+      slots.push({ use: u.key, presetKey: u.presetKey, label: u.label, body, token: newStudioAttempt() });
+    }
+    const failed: UseSlot[] = [];
+    for (let i = 0; i < slots.length; i++) {
+      if (!(await runSlot(slots[i], i, slots.length))) failed.push(slots[i]);
+    }
+    setFailedSlots((prev) => [...failed, ...prev]);
+    if (slots.length > 0) setStage('result');
+  };
+  // 실패 · 응답 유실 칸 = 같은 표 + 같은 얼린 본문(입력을 바꿨어도 · 한 번만 걷힘)
+  const retrySlot = async (slot: UseSlot) => {
+    if (await runSlot(slot, 0, 1)) setFailedSlots((prev) => prev.filter((x) => x !== slot));
+  };
+  void GENERATE_PRESET_KEY;
 
   // ── AI 수정 ──────────────────────────
   // ★ 2026-09-30 4K 격상 제거(Harold 확정) — 생성 모델이 "같은 그림 4K"를 새로 그려 원본과 다른 포스터가 나왔다(운영 실측 3584×4800 · 구도·색 변경).
@@ -366,6 +396,14 @@ export default function ImageStudioPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* ★ C118 A2 만들지 못한 용도 = 그 칸만 다시(같은 표 · 같은 본문) */}
+              {failedSlots.map((slot) => (
+                <div key={slot.token} className="rounded-2xl border border-rose-200 bg-rose-50 p-4 flex flex-col gap-2">
+                  <b className="text-[13px] text-rose-900">{slot.label} · 만들지 못했어요</b>
+                  <p className="text-[12px] text-rose-800 break-keep">크레딧은 만든 그림에만 차감돼요. 같은 내용으로 다시 만들 수 있어요.</p>
+                  <button type="button" onClick={() => void retrySlot(slot)} disabled={busy} className="self-start h-9 px-4 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[12.5px] font-bold disabled:opacity-40">다시 만들기</button>
+                </div>
+              ))}
               {candidates.map((c) => {
                 // 저장한 카드 = 저장된 소재(실물) · 그 전 = 로고 미리보기 · 없으면 바탕
                 const shown = c.saved?.url || c.layered || c.blob;
@@ -376,7 +414,7 @@ export default function ImageStudioPage() {
                       ? <img src={shown} alt="완성 포스터" draggable={false} onContextMenu={(e) => e.preventDefault()} className="w-full object-contain max-h-[480px] bg-slate-100" />
                       : <div className="h-64 flex items-center justify-center px-6 text-center text-[12px] text-slate-500">미리보기를 불러오지 못했어요. 저장하면 라이브러리에서 볼 수 있어요.</div>}
                     {shown && <StudioWatermark />}
-                    <span className="absolute top-2 left-2 z-20 text-[10px] px-2 py-0.5 rounded-full bg-black/60 text-white/70 border border-slate-300">{presetLabel(c.presetKey)}</span>
+                    <span className="absolute top-2 left-2 z-20 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-black/70 text-white border border-white/20">{presetLabel(c.presetKey)}{studioUseOfPreset(c.presetKey) ? ` · ${studioUseOfPreset(c.presetKey)!.size}` : ''}</span>
                   </div>
                   <div className="p-3 space-y-2 bg-white">
                     {c.discountCheck && (
@@ -386,7 +424,8 @@ export default function ImageStudioPage() {
                       <p className="text-[12px] text-rose-700">기간이 지나 저장할 수 없어요. 다시 만들어 주세요.</p>
                     ) : (
                       <div className="flex flex-col gap-2">
-                        <ChannelButtons isAdmin={isCompanyAdmin} disabled={busy} onPick={(ch) => goChannel(c, ch)} />
+                        <ChannelButtons isAdmin={isCompanyAdmin} disabled={busy} onPick={(ch) => goChannel(c, ch)}
+                          only={(() => { const k = studioUseOfPreset(c.presetKey)?.key; return k === 'inapp' || k === 'dm' || k === 'email' ? k : null; })()} />
                       </div>
                     )}
                     {c.note === 'storage_full' && (
@@ -468,16 +507,18 @@ export default function ImageStudioPage() {
 
       {/* 처리 오버레이 */}
       {busy && (
-        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-violet-700 mx-auto mb-3" />
-            <p className="text-sm text-slate-700">{overlayMsg}</p>
-            <p className="text-[11px] text-slate-400 mt-1">창을 닫지 마세요</p>
+        <div className="fixed inset-0 z-[2500] flex items-center justify-center bg-slate-900/60 px-4" role="status" aria-live="polite">
+          {/* ★ C118 A5 = 흰 카드 위 진한 글씨(옛 = 어두운 흐림 위 회색 글씨 · 안 보였다) */}
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl px-6 py-6 text-center">
+            <Loader2 className="w-9 h-9 animate-spin text-violet-700 mx-auto mb-3" />
+            <p className="text-[15px] font-bold text-slate-900 break-keep">{overlayMsg}</p>
+            <p className="text-[13px] text-slate-600 mt-1.5">창을 닫지 마세요</p>
           </div>
         </div>
       )}
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
+      <StudioUsePicker open={usePickerOpen} isAdmin={isCompanyAdmin} onClose={() => setUsePickerOpen(false)} onConfirm={(p) => void runUses(p)} />
 
       {/* 라이브러리 전체 보기·관리 — 검색·삭제(픽커 재사용), 소재 클릭 = 발사대 모달 */}
       <AssetLibraryPickerModal

@@ -13,7 +13,7 @@ import type { Metadata, OverlayOptions } from 'sharp';
 import { runSerial } from './inflight-lock';
 import {
   GROUP_MAX_INPUT_PIXELS, inappImageLocalPath, readTempMeta, findTempFile, findPermanentByTempId, discardTemp, writeStudioPermanent, buildAssetDisplayName,
-  isStudioTempFull, writeTempBuffer, isValidTempId, moveTempToPermanent, StudioError,   // ★ C113 D9 찾기 = 임시 · 쓰기 = 영구
+  isStudioTempFull, writeTempBuffer, isValidTempId, moveTempToPermanent, StudioError, isStudioFullPreset,   // ★ C113 D9 찾기 = 임시 · 쓰기 = 영구 · ★ C118 인앱용 이름
 } from './image-studio';
 import { getStorageUsage, getAssetByUrl, registerAssetConfirmed, type RegisterAssetInput } from './assets';
 import { dmImageLocalPath } from './dm/dm-viewer-utils';
@@ -27,6 +27,11 @@ import {
   allowedLogoCorners, isLogoCorner, isLogoSize, logoSizeOptions, logoTargetSize, logoPlacement, needsPlate, plateTone, srgbLuminance, rgbLuminance,
   LOGO_DEFAULT_SIZE, PLATE_PAD_RATIO, PLATE_RADIUS_RATIO, PLATE_LIGHT, PLATE_DARK, type LogoCorner, type LogoSize,
 } from './studio-zones';
+import { INAPP_CONTENT_SAFE } from './image-fit-spec';
+/** ★ C118 인앱용 그림의 로고 = 안전 칸 안(가장자리 = (1 − 안전 칸) / 2 · 축마다) · 그 밖 = 지금 그대로(0) */
+export function logoSafeEdgeOf(presetKey: unknown): number {
+  return isStudioFullPreset(presetKey) ? (1 - INAPP_CONTENT_SAFE) / 2 : 0;
+}
 
 /** 회사별 로고 캐시 루트(저장 · 임시 폴더와 별개 · 스윕 대상 아님 · 회사당 한 장) */
 const STUDIO_LOGO_BASE = process.env.STUDIO_LOGO_PATH || path.resolve('./uploads/studio-logos');
@@ -291,6 +296,7 @@ export async function planLogo(
   logo: { png: Buffer; width: number; height: number },   // ★ C113 D8 — 상태가 읽은 그 바이트(비교 · 합성 같은 버퍼)
   req: { corner: LogoCorner | null; size: LogoSize | null },
   textless: boolean,
+  safeEdge = 0,
 ): Promise<LogoPlan | { error: 'corner' | 'size' }> {
   const corners = allowedLogoCorners(textless);
   if (req.corner && !corners.includes(req.corner)) return { error: 'corner' };
@@ -311,7 +317,7 @@ export async function planLogo(
   const pad = Math.max(2, Math.round(t.height * PLATE_PAD_RATIO));
   const outer = { width: t.width + pad * 2, height: t.height + pad * 2 };
   const measure = (c: LogoCorner) => {
-    const p = logoPlacement(W, H, outer, c);
+    const p = logoPlacement(W, H, outer, c, safeEdge);
     return { c, p, s: regionStats(img, { left: p.left, top: p.top, width: outer.width, height: outer.height }) };
   };
   let pick = req.corner ? measure(req.corner) : null;
@@ -435,14 +441,14 @@ export async function logoSaveStage(
   const st = await deps.logoState(companyId);
   if (st.state !== 'ready') return { status: 409, body: { success: false, error: '브랜드 키트 로고를 지금 쓸 수 없어요. 로고를 끄고 저장하거나 키트 로고를 바꿔 주세요.', code: 'LOGO_UNAVAILABLE' } };
   if (st.key !== layers.key) return { status: 409, body: { success: false, error: '브랜드 키트 로고가 바뀌었어요. 다시 확인해 주세요.', code: 'LOGO_CHANGED' } };
-  const plan = await planLogo(found.absPath, st, { corner: layers.corner, size: layers.size }, layers.textless);
+  const plan = await planLogo(found.absPath, st, { corner: layers.corner, size: layers.size }, layers.textless, logoSafeEdgeOf(meta.presetKey));
   if ('error' in plan) return { status: 400, body: { success: false, error: '로고 자리와 크기를 다시 골라 주세요.', code: 'LAYER_INVALID' } };
   const buf = await renderLogoComposite(found.absPath, st.png, plan);   // ★ C113 D8 — 키를 비교한 그 버퍼로 합성
   const usage = await deps.storageUsage(companyId);
   if (usage.usedBytes + buf.length > usage.limitBytes) {
     return { status: 409, body: { success: false, error: '저장 용량 한도를 초과했습니다. 라이브러리에서 정리 후 다시 저장해주세요.', code: 'STORAGE_FULL' } };
   }
-  const moved = writeStudioPermanent(companyId, tempId, 'jpeg', buf);
+  const moved = writeStudioPermanent(companyId, tempId, 'jpeg', buf, { full: isStudioFullPreset(meta.presetKey) });   // ★ C118 A3 인앱용 = `.full.` 이름 그대로
   const reg = await deps.registerConfirmed({
     companyId, createdBy: ctx.userId, kind: 'generated', origin: 'studio',
     url: moved.url, filename: buildAssetDisplayName(ctx.title, effectiveSpec, 'jpeg'), bytes: moved.bytes, format: 'jpg',
@@ -593,7 +599,7 @@ export async function previewLogoStage(
   }
   const st = await deps.logoState(companyId);
   if (st.state !== 'ready') return { status: 200, body: { success: true, logo: publicLogoState(st), preview: null } };
-  const plan = await planLogo(found.absPath, st, { corner: req.corner, size: req.size }, textless);
+  const plan = await planLogo(found.absPath, st, { corner: req.corner, size: req.size }, textless, logoSafeEdgeOf(meta.presetKey));
   if ('error' in plan) return { status: 400, body: { success: false, error: '로고 자리와 크기를 다시 골라 주세요.', code: 'LAYER_INVALID' } };
   if (!req.on) return { status: 200, body: { success: true, logo: readyView(st, plan, false), preview: null } };
   const preview = await renderLogoPreview(found.absPath, st.png, plan);

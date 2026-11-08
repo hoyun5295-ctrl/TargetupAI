@@ -64,7 +64,7 @@ import {
   countActiveSubscriptions,
   listPushCampaigns,
 } from '../utils/web-push';
-import { createInAppMessage, listInAppMessages, updateInAppMessage, deleteInAppMessage, isInAppMessageOwned, getActiveMessagesForCustomerV2, trackImpression, getMessageStatsBatch, setInAppAudienceFilter, sanitizeAppMessageColors, sanitizeActionUrl, sanitizeButtonsActionUrls, sanitizePosterSlidesActionUrls, parseInAppNotPublishable, INAPP_DRAFT_ON_LIVE_ERROR, INAPP_TEMPLATE_ALLOWED_BLOCKS, filterBlocksForTemplate, sanitizeInAppDesign, settleInAppPublish } from '../utils/inapp-message';
+import { createInAppMessage, listInAppMessages, updateInAppMessage, deleteInAppMessage, isInAppMessageOwned, getActiveMessagesForCustomerV2, trackImpression, getMessageStatsBatch, setInAppAudienceFilter, sanitizeAppMessageColors, sanitizeActionUrl, sanitizeButtonsActionUrls, sanitizePosterSlidesActionUrls, parseInAppNotPublishable, INAPP_DRAFT_ON_LIVE_ERROR, INAPP_TEMPLATE_ALLOWED_BLOCKS, filterBlocksForTemplate, sanitizeInAppDesign, settleInAppPublish, prebakeInAppMessage, inAppAppReady } from '../utils/inapp-message';
 // ★ 2026-07-18 P3 에셋 라이브러리 — 업로드 자동 등재 + 플랜별 용량 한도
 import { registerAsset, getStorageUsage, isAssetsTableMissing } from '../utils/assets';
 // ★ D215+ (2026-05-25) 인앱 메시지 압도적 강화 CT-77~84
@@ -1359,6 +1359,24 @@ router.get('/inapp/display-eligibility', async (req: Request, res: Response) => 
   }
 });
 
+// ★ 2026-11-08 C118 B3 앱 화면 준비 — [반영] 뒤 편집기가 「앱 화면 준비 중 → 준비됨」(서빙과 같은 사본 · 굽기 대상 전부 구운 판 = ready)
+router.get('/inapp/:id/app-ready', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const ownerId = resolveOwnerScope(req);
+    if (ownerId) return res.status(403).json({ success: false, error: '인앱 메시지는 회사 관리자만 이용할 수 있습니다.' });
+    if (!(await isInAppMessageOwned(companyId, req.params.id, ownerId))) {
+      return res.status(404).json({ success: false, error: '메시지를 찾을 수 없습니다.' });
+    }
+    return res.json({ success: true, status: await inAppAppReady(companyId, req.params.id) });
+  } catch (err: any) {
+    console.error('[CDP /inapp/:id/app-ready] 오류:', err);
+    if (respondUserError(res, err)) return;   // R10 사용자 조건 오류 = 그 상태 · 문장 그대로
+    return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
+  }
+});
+
 // ★ 2026-11-08 C116-B D6 우리 그림으로 인정하는 호스트(서버 CT trustedImageHosts 그대로) — 편집기 「구버전 앱 모습」 거울이 짐작하지 않게(공개 호스트 이름만 · 비밀값 0)
 router.get('/inapp/own-image-hosts', (req: Request, res: Response) => {
   if (!req.user?.companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
@@ -1479,6 +1497,8 @@ router.put('/inapp/:id', async (req: Request, res: Response) => {
       const publishing = wantsActive && prevStatus !== null && prevStatus !== 'active' && message.status === 'active';
       // ★ 2026-10-25 게시비 한 규칙(#92) — POST 와 같은 함수(걷지 못하면 이전 상태로 되돌리고 402 · 503)
       if (publishing) await settleInAppPublish(companyId, message.id, req.user?.userId, prevStatus as any);
+      // ★ 2026-11-08 C118 B3 게시 중 메시지 [반영] = 바로 굽기(앱 화면 준비 · 기다리지 않음 · 대상 = 앱 채널 묶음만 · 게시로 넘어간 건 위 정산 끝이 부른다)
+      else if (message.status === 'active') void prebakeInAppMessage(companyId, message.id);
       // ★ 2026-11-05 §3-3 통짜 [반영]이 멈춘 문구 변형 수(편집기가 그대로 알린다)
       return res.json({ success: true, message, variants_paused: message.variantsPaused });
     });

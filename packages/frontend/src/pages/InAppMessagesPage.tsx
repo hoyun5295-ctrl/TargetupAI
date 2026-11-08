@@ -66,7 +66,7 @@ import { PosterStage, SlideRail, SlidePanel, LayoutSwitcher, ImageSourceMenu, us
 import { resolvePosterLayout, type PosterLayout, type SheetEditKey } from '../components/inapp/PosterSheetPreview';
 import {
   slidesFromMessage, messagePatchFromSlides, restyleSlides, duplicateSlide, publishDefectOf, layoutKeyOf, isPosterLayout,
-  MAX_SLIDES, appCapsNote, designForKey, posterLayoutOfKey, type WsSlide, type LayoutKey,
+  MAX_SLIDES, appCapsNote, designForKey, posterLayoutOfKey, appSafeLayoutKey, type WsSlide, type LayoutKey,
 } from '../components/inapp/inappSlides';
 // ★ 2026-11-05 인앱 포스터 재구성 — 예시에서 시작 · 스튜디오 그림 틀 고르기 · 장 AI 그리기 · DM 참여 페이지 연결
 import type { InAppExampleItem } from '../components/inapp/InAppExampleGallery';
@@ -2303,12 +2303,29 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     setSelField(null);
     pickToast.info('모양을 바꿨어요. 마음에 안 들면 되돌리기(Ctrl+Z)');
   };
+  // ★ 2026-11-08 C118 B1 앱 채널 새 메시지(저장 전) = 이미 깔린 앱에서 그대로 보이는 모양으로(입구 · 예시 · 스튜디오 · AI 어디서 왔든 한 곳 · 저장된 행은 그대로 + 메뉴 경고)
+  const appShapeKey = layoutKeyOf(editing);
+  const appShapeStrip = editing.design && typeof editing.design === 'object' && (editing.design as any).poster_strip ? String((editing.design as any).poster_strip?.type || '') : '';
+  useEffect(() => {
+    if (!isApp || editing.id) return;
+    const safe = appSafeLayoutKey(appShapeKey);
+    if (safe !== appShapeKey) { switchLayout(safe); return; }
+    if (appShapeStrip === 'coupon' || appShapeStrip === 'countdown') {
+      setEditing((prev) => {
+        if (!prev || !prev.design || typeof prev.design !== 'object') return prev;
+        const { poster_strip: _drop, ...rest } = prev.design as Record<string, any>;
+        return { ...prev, design: rest };
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isApp, editing.id, appShapeKey, appShapeStrip]);
   const askConvertToSlides = () => setEditorConfirm({
     mode: 'info',
     title: '크게 보여 주기로 바꿀까요?',
     description: '장을 더하려면 이벤트 카드 모양으로 바꿉니다. 지금 쓴 글 · 사진 · 첫 버튼이 첫 장으로 옮겨지고 둘째 장이 생깁니다. 되돌리기(Ctrl+Z)로 돌아올 수 있어요.',
     confirmLabel: '바꾸기',
-    onConfirm: () => switchLayout('event_card', { addSlide: true }),
+    // ★ C118 B1 앱 = 이벤트 카드가 깔린 앱에서 보장되지 않는다 → 사진 위 글(여러 장 넘기기)
+    onConfirm: () => switchLayout(isApp ? 'overlay' : 'event_card', { addSlide: true }),
   });
 
   // ───────── ★ 2026-10-05 한줄로 시그니처 · 완성도 줄(한 줄로 만든 메시지만) ─────────
@@ -2411,6 +2428,27 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
     if (!wasPublished) setCreditOpen(true);
     else void doPublish();
   };
+  // ★ 2026-11-08 C118 B3 [반영] = 앱 화면 준비까지 — 2초마다 최대 60초 · 서버가 서빙과 같은 사본으로 판정(GET /api/cdp/inapp/:id/app-ready)
+  const appReadyGen = useRef(0);
+  const watchAppReady = async (id: string) => {
+    const gen = ++appReadyGen.current;
+    const key = savedKeyRef.current;
+    // (Codex 구현 1R ④) 반영한 그대로 · 게시 중 · 같은 메시지일 때만 표시를 바꾼다(고침 · 멈춤 · 다른 메시지 = 그 화면의 표시가 이긴다)
+    const same = () => gen === appReadyGen.current && editingRef.current.id === id && editingRef.current.status === 'active'
+      && savedKeyRef.current === key && keyOf(editingRef.current) === key;
+    setSaveInfo({ tone: 'saving', text: '게시 중 · 반영됨 · 앱 화면 준비 중' });
+    const t0 = Date.now();
+    while (Date.now() - t0 < 60_000) {
+      await new Promise((r) => setTimeout(r, 2000));
+      if (!same()) return;
+      const r = await fetch(`/api/cdp/inapp/${id}/app-ready`, { headers: authHeaders() }).catch(() => null);
+      const d: any = r ? await r.json().catch(() => ({})) : {};
+      if (!same()) return;
+      if (d?.status === 'ready' || d?.status === 'none') { setSaveInfo({ tone: 'saved', text: '게시 중 · 반영됨 · 앱 화면 준비됨' }); return; }
+    }
+    if (same()) setSaveInfo({ tone: 'error', text: '앱 화면 준비가 늦어지고 있어요 · 그동안 앱에는 대체 그림이 보여요' });
+  };
+  useEffect(() => () => { appReadyGen.current += 1; }, []);
   const applyLive = async () => {
     if (!checkPublish()) return;
     setPublishing(true);
@@ -2425,6 +2463,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
         savedKeyRef.current = keyOf(snap);
         setSaveInfo({ tone: 'saved', text: '게시 중 · 반영됨' });
         pickToast.success('게시 중인 메시지에 반영했어요');
+        if (snap.channel === 'app') void watchAppReady(snap.id);
         // ★ 2026-11-05 §3-3 — 통짜로 바꾼 [반영]이 멈춘 글만 다른 변형 수(서버가 센 값 그대로)
         const paused = Number(data?.variants_paused) || 0;
         if (paused > 0) pickToast.info(`글만 다른 A/B 변형 ${paused}개는 그림에 글이 들어간 메시지에서 비교할 수 없어 멈췄어요`);
@@ -2740,6 +2779,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
       endAt={editing.endAt || editing.end_at || null}
       onGoSchedule={() => setDrawerOpen(true)}
       onDraw={() => setStudioOpen(true)}
+      channel={isApp ? 'app' : 'web'}
       onPickDm={(t) => setDmPick(t)}
       stripFocus={stripFocus}
     />
@@ -3778,6 +3818,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
           <StudioInsertModal
             open={studioOpen}
             onClose={() => setStudioOpen(false)}
+            use="inapp"
             textless={!bakedNow}
             initialTemplateId={ex?.studioTemplateId || null}
             defaultLabel={bakedNow ? label : ''}

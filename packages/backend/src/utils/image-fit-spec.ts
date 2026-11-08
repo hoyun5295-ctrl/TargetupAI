@@ -21,8 +21,14 @@ export function inAppStageColor(bg: unknown): string {
   return INAPP_STAGE_HEX.test(v) ? v : INAPP_STAGE_FILL;
 }
 
+/**
+ * ★ 2026-11-08 C118 인앱 안전 칸 = 가로 · 세로 가운데 이 비율(설치된 앱 = 가운데 맞춤 cover 5:4 ~ 4:5 → 정사각 가장자리 10% 가 잘릴 수 있다).
+ *   여백 맞춤(inapp.safe) · 스튜디오 인앱용 프롬프트 · 인앱용 로고 자리 · SDK 정지 full 글 여백(POSTER_FRAME_RULES.fullTextPad ≥ 가장자리)이 이 값 하나를 본다(계약 시험 대조).
+ */
+export const INAPP_CONTENT_SAFE = 0.8;
+
 /** 허용 비율(키 → 가로:세로). 키는 캐시 디렉터리 이름에 들어가므로 영숫자·x만 쓴다. */
-export const ASPECT_RATIOS: Record<string, { w: number; h: number; rev?: number; safe?: { w: number; h: number; fill: string } }> = {
+export const ASPECT_RATIOS: Record<string, { w: number; h: number; rev?: number; cover?: boolean; safe?: { w: number; h: number; fill: string } }> = {
   '1x1': { w: 1, h: 1 },
   /**
    * ★ 2026-11-08 C116-B 옛 연동 앱(고객사 네이티브 앱 · caps 없음) 인앱 그림 = **모든 고객사 앱 공통 규칙 하나**
@@ -31,7 +37,12 @@ export const ASPECT_RATIOS: Record<string, { w: number; h: number; rev?: number;
    *   앱이 가운데 맞춤 cover 로 칸 세로/가로 0.8 ~ 1.25(5:4 ~ 4:5)를 채워도 원본 0 잘림 · contain · 원본 비율이면 통째(연동 계약에 적음).
    *   ⛔ 값을 바꾸면 rev 를 올린다 — rev = 변환본 캐시 폴더 이름 + 그림 주소의 `fr`(앱 · 중간 캐시가 옛 그림을 다시 쓰지 않게 · Codex 설계 1R ① · 2R ①).
    */
-  inapp: { w: 1, h: 1, rev: 2, safe: { w: 0.8, h: 0.8, fill: INAPP_STAGE_FILL } },
+  inapp: { w: 1, h: 1, rev: 2, safe: { w: INAPP_CONTENT_SAFE, h: INAPP_CONTENT_SAFE, fill: INAPP_STAGE_FILL } },
+  /**
+   * ★ 2026-11-08 C118 B2 스튜디오 인앱용 그림(파일 이름 `.full.` · 정사각 · 가장자리 10% = 배경만) = 정사각으로만 맞춤 · 여백 0(cover · 이미 정사각이면 크기만).
+   *   앱이 가운데 맞춤 cover 로 5:4 ~ 4:5 칸을 채워도 배경만 잘린다(글 · 주제 = 가운데 80%) · 그 밖 그림 = 위 `inapp`(여백 규칙) 그대로.
+   */
+  inappfull: { w: 1, h: 1, rev: 1, cover: true },
 };
 
 /**

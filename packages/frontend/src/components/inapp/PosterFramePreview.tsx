@@ -18,7 +18,7 @@ export type PosterFramePart = 'image' | 'cta' | 'strip';
 export const PREVIEW_RAIL_CSS = '[data-hjl-carousel]{scrollbar-width:none;-ms-overflow-style:none}[data-hjl-carousel]::-webkit-scrollbar{display:none;width:0;height:0}';
 
 export function PosterFramePreview({
-  slides, design, accentColor, badge, endAt, height, active = 0, onActive, onPart, replaceVars, copyable = false, still = null, bakeFit = false,
+  slides, design, accentColor, badge, endAt, height, active = 0, onActive, onPart, replaceVars, copyable = false, still = null, bakeFit = false, bakeFull = false,
 }: {
   slides: PosterFrameSlide[];
   design: Record<string, any> | null | undefined;
@@ -38,6 +38,8 @@ export function PosterFramePreview({
   still?: { deadlineText?: string | null } | null;
   /** ★ C116 Codex 구현 1R ⑤ 서버 굽기와 같은 모습 — 서버 화면(390 × 844)에서 그린 틀 상자를 이 칸의 안전 칸(80% × 92%) 가운데에 맞춘다 */
   bakeFit?: boolean;
+  /** ★ C118 B2 인앱용(전부 `.full.`) = 여백 0(서버 합성 = 정사각 cover) */
+  bakeFull?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [measured, setMeasured] = useState(0);
@@ -57,7 +59,7 @@ export function PosterFramePreview({
   const list = slides.filter((s) => s && String(s.image_url || '').trim());
   const count = list.length;
   const idx = Math.max(0, Math.min(count - 1, active));
-  const key = JSON.stringify([list, design, accentColor, badge, endAt, h, idx, copyable, still, bakeFit]);
+  const key = JSON.stringify([list, design, accentColor, badge, endAt, h, idx, copyable, still, bakeFit, bakeFull]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -87,7 +89,8 @@ export function PosterFramePreview({
       const r0 = built.root.getBoundingClientRect();
       const rw = r0.width / k, rh = r0.height / k, rx = (r0.left - sr.left) / k, ry = (r0.top - sr.top) / k;
       if (!(rw > 0 && rh > 0)) return;
-      const sc = Math.min((W * LEGACY_BAKE_SAFE.w) / rw, (H * LEGACY_BAKE_SAFE.h) / rh);
+      // ★ C118 B2 인앱용 = 정사각 칸을 꽉(서버 composeInAppBakeSlide full = cover) · 그 밖 = 가운데 안전 칸
+      const sc = bakeFull ? Math.max(W / rw, H / rh) : Math.min((W * LEGACY_BAKE_SAFE.w) / rw, (H * LEGACY_BAKE_SAFE.h) / rh);
       const tx = (W - rw * sc) / 2 - rx * sc;
       const ty = (H - rh * sc) / 2 - ry * sc;
       stage.style.transform = `translate(${tx}px, ${ty}px) scale(${sc})`;

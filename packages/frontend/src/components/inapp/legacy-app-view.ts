@@ -21,7 +21,8 @@ export function inAppDeadlineText(endAt: string | number | Date | null | undefin
  */
 export function legacyAppPreviewOf<S extends Record<string, any>>(
   design: Record<string, any> | null | undefined, slides: S[], endAt: string | number | Date | null | undefined, hosts: OwnHostsSnapshot,
-): { design: Record<string, any>; slides: S[]; unknown: boolean } {
+  flatImageUrl?: string | null,
+): { design: Record<string, any>; slides: S[]; unknown: boolean; full: boolean } {
   const { poster_frame: _f, dismiss_mode: _d, ...base } = design || {};
   let d: Record<string, any> = base;
   const baked = d.poster_text === 'baked';
@@ -41,13 +42,17 @@ export function legacyAppPreviewOf<S extends Record<string, any>>(
     }
   }
   let unknown = false;
+  // ★ C118 B2 그리는 그림 전부 인앱용(`.full.`) = 여백 0(inappfull) · 서버 inAppAllFullBleed 거울(장 없으면 flat 그림)
+  const drawnUrls = out.filter((s) => s && typeof s.image_url === 'string' && s.image_url.trim()).map((s) => String(s.image_url));
+  const fullUrls = drawnUrls.length > 0 ? drawnUrls : (flatImageUrl && String(flatImageUrl).trim() ? [String(flatImageUrl)] : []);
+  const full = fullUrls.length > 0 && fullUrls.every((u) => isFullBleedInAppImageUrl(u, hosts));
   out = out.map((s) => {
     if (!s || typeof s.image_url !== 'string') return s;
-    const u = legacyAppImageUrl(s.image_url, d, hosts);
+    const u = legacyAppImageUrl(s.image_url, d, hosts, full);
     if (u === null) { unknown = true; return s; }
     return { ...s, image_url: u };
   });
-  return { design: d, slides: out, unknown };
+  return { design: d, slides: out, unknown, full };
 }
 
 /**
@@ -105,7 +110,21 @@ export function legacyAppWillBake(input: {
     for (const s of drawn) texts.push(s.title, s.body, s.eyebrow, s.subtitle);
   }
   if (texts.some((t) => typeof t === 'string' && PERSONAL_RE.test(t))) return false;
-  return owned.includes('unknown') ? 'unknown' : true;
+  if (owned.includes('unknown')) return 'unknown';
+  // ★ C118 B2 통짜 시트(띠 · 카드 0) + 전부 인앱용 그림 = 그림이 곧 완성본 → 굽지 않고 원본(서버 inAppBakePlan 과 같은 갈래)
+  const stripType = strip ? String((strip as any).type || '') : '';
+  if (images.every((u) => isFullBleedInAppImageUrl(u, hosts)) && d.poster_text === 'baked' && d.poster_frame !== 'card' && stripType !== 'coupon' && stripType !== 'countdown') return false;
+  return true;
+}
+/** ★ C118 B2 여백 0 으로 굽는가 = 전부 인앱용 그림 + 시트 틀 + 띠 0(서버 inAppBakePlan fullCompose 거울 · 구운 모습 미리보기 = 여백 0 · 정지 모서리 0) */
+export function legacyAppBakesFull(slides: Array<Record<string, any>>, imageUrl: string | null | undefined, hosts: OwnHostsSnapshot, design?: Record<string, any> | null): boolean {
+  const d = design && typeof design === 'object' ? design : {};
+  const strip = d.poster_strip && typeof d.poster_strip === 'object' ? String(d.poster_strip.type || '') : '';
+  if (d.poster_frame === 'card' || strip === 'coupon' || strip === 'countdown') return false;
+  const has = (v: unknown) => typeof v === 'string' && v.trim().length > 0;
+  const drawn = (Array.isArray(slides) ? slides : []).filter((s) => s && has(s.image_url)).map((s) => s.image_url);
+  const images = drawn.length > 0 ? drawn : (has(imageUrl) ? [imageUrl] : []);
+  return images.length > 0 && images.every((u) => isFullBleedInAppImageUrl(u, hosts));
 }
 
 /**
@@ -113,8 +132,10 @@ export function legacyAppWillBake(input: {
  *   이벤트 카드 · 배너 시트 = 그대로 · 다른 fit 값 = 그대로 · 우리 그림 · 예시 그림 = 우리 맞춤 표시를 걷고 지금 판을 붙임 · 바깥 = 그대로 · unknown = null.
  */
 export const LEGACY_FIT_REV = 2;
+/** ★ C118 B2 서버 ASPECT_RATIOS.inappfull.rev 와 같은 값(계약 시험 대조) */
+export const LEGACY_FULL_FIT_REV = 1;
 const EXAMPLE_IMG_RE = /^\/api\/cdp\/inapp\/example-image\/[^/?#]+\/\d+$/;
-export function legacyAppImageUrl(url: unknown, design: Record<string, any> | null | undefined, hosts: OwnHostsSnapshot): string | null {
+export function legacyAppImageUrl(url: unknown, design: Record<string, any> | null | undefined, hosts: OwnHostsSnapshot, full = false): string | null {
   const raw = String(url ?? '').trim();
   if (!raw) return raw;
   const layout = String((design && typeof design === 'object' ? design.poster_layout : '') || '');
@@ -126,14 +147,27 @@ export function legacyAppImageUrl(url: unknown, design: Record<string, any> | nu
   const base = q >= 0 ? noHash.slice(0, q) : noHash;
   const params = q >= 0 ? noHash.slice(q + 1).split('&').filter(Boolean) : [];
   const keyOf = (p: string) => p.split('=')[0];
-  if (params.some((p) => keyOf(p) === 'fit' && p !== 'fit=inapp')) return raw;
+  if (params.some((p) => keyOf(p) === 'fit' && p !== 'fit=inapp' && p !== 'fit=inappfull')) return raw;
   if (!EXAMPLE_IMG_RE.test(base)) {
     const own = inAppImageOwnership(base, hosts);
     if (own === 'foreign') return raw;
     if (own === 'unknown') return null;
   }
   const rest = params.filter((p) => keyOf(p) !== 'fit' && keyOf(p) !== 'fr');
-  return `${base}?${[...rest, `fit=inapp&fr=${LEGACY_FIT_REV}`].join('&')}${hash}`;
+  return `${base}?${[...rest, full ? `fit=inappfull&fr=${LEGACY_FULL_FIT_REV}` : `fit=inapp&fr=${LEGACY_FIT_REV}`].join('&')}${hash}`;
+}
+
+/** ★ C118 B2 스튜디오 인앱용 그림 = 우리 그림 길 + 파일 이름 `.full.`(서버 isFullBleedInAppImage 거울 · 그림을 바꾸면 주소가 바뀌어 저절로 빠진다) */
+const FULL_BLEED_PATH_RE = /^\/api\/cdp\/inapp\/image\/[^/]+\/[^/?#]+\.full\.[a-z]{3,4}$/i;
+export function isFullBleedInAppImageUrl(url: unknown, hosts?: OwnHostsSnapshot): boolean {
+  const u = String(url || '').trim();
+  if (!u) return false;
+  let path = u.split(/[?#]/)[0];
+  if (!path.startsWith('/')) {
+    try { path = new URL(u).pathname; } catch { return false; }
+    if (hosts && inAppImageOwnership(u.split(/[?#]/)[0], hosts) !== 'own') return false;
+  }
+  return FULL_BLEED_PATH_RE.test(path);
 }
 
 /** ★ C116 Codex 구현 1R ⑤ · C116-B 서버 굽기 화면 · 안전 칸 · 무대색(백엔드 INAPP_BAKE_VIEW · ASPECT_RATIOS.inapp · INAPP_STAGE_FILL 과 같은 값 · 계약 시험 대조) */

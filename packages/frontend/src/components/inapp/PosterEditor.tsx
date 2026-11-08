@@ -14,10 +14,11 @@ import MallProductPickerModal, { type PickedMallProduct } from '../dm/MallProduc
 import AssetLibraryPickerModal, { type PickedAsset } from '../assets/AssetLibraryPickerModal';
 import { INAPP_FONT_CATALOG } from './blockTheme';
 import { PosterSheetPreview, POSTER_SHEET_DEFAULTS, hexOr, type PosterLayout, type SheetEditKey } from './PosterSheetPreview';
-import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNoteForKey, stripAllowedFor, legacyAppPreviewOf, type LayoutKey, type WsSlide } from './inappSlides';
+import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNoteForKey, stripAllowedFor, legacyAppPreviewOf, APP_LAYOUT_KEYS, type LayoutKey, type WsSlide } from './inappSlides';
+import { LayoutThumb } from './LayoutThumb';   // ★ C118 B4 모양 예시 그림 한 곳
 import { PosterFramePreview } from './PosterFramePreview';
 import { LegacyBakedPreview, LegacyAppPreviewPending } from './LegacyBakedPreview';
-import { legacyAppWillBake } from './legacy-app-view';
+import { legacyAppWillBake, isFullBleedInAppImageUrl, legacyAppBakesFull } from './legacy-app-view';
 import { useOwnImageHosts, loadOwnImageHosts } from './inapp-image-hosts';
 import { usesPosterFrame, drawsWithPosterFrame } from './generated/poster-frame';
 import { creditText } from '../../constants/credit';
@@ -394,6 +395,7 @@ export function PosterStage({
                 buttonBg={(cur as any)?.cta?.background_color || null}
                 buttonColor={(cur as any)?.cta?.text_color || null}
                 optOutLabel="다시 보지 않기"
+                full={legacyAppBakesFull(slides as any, null, ownHosts, design)}
               />
             ) : useFrame ? (
               <div className="absolute inset-0">
@@ -493,9 +495,11 @@ export function PosterStage({
 
 export function SlidePanel({
   layout, slides, active, design, selected, onSelect, onPatchSlide, onRemoveSlide, onDesign, images, variables, onInsertVar,
-  layoutKey, accentColor, onAccent, endAt, onGoSchedule, onDraw, onPickDm, stripFocus,
+  layoutKey, accentColor, onAccent, endAt, onGoSchedule, onDraw, onPickDm, stripFocus, channel = 'web',
 }: {
   layout: PosterLayout;
+  /** ★ C118 B1 · B2 채널(앱 = 띠 칸 0 · 인앱용 그림 안내) */
+  channel?: 'web' | 'app';
   /** ★ 2026-11-05 인앱 포스터 재구성 — 모양 키(통짜 · 카드 판정 · 띠 칸) · 강조색 · 남은 시간 마감 · AI 그리기 · DM 연결 */
   layoutKey: LayoutKey;
   accentColor?: string | null;
@@ -674,6 +678,13 @@ export function SlidePanel({
         {!baked && !isExampleImage(s.image_url) && (
           <button type="button" onClick={onDraw} className="mt-1.5 w-full h-9 rounded-xl border border-dashed border-violet-300 text-[12px] font-semibold text-violet-800 hover:bg-violet-50 inline-flex items-center justify-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />AI로 그리기 ({creditText('image-studio-generate')})</button>
         )}
+        {/* ★ C118 B2 앱 채널 = 스튜디오 인앱용(정사각 · 꽉 찬 그림)이 아니면 이미 깔린 앱에서 여백이 생긴다 → 그대로 알린다 */}
+        {channel === 'app' && !noImg && !isFullBleedInAppImageUrl(s.image_url) && (
+          <div className="mt-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="text-[11.5px] text-amber-900 leading-snug break-keep">앱에서 칸에 꽉 차게 보이려면 이미지 스튜디오의 인앱용(정사각)으로 만드세요. 지금 사진은 앱에서 가운데에 작게, 둘레에 여백을 두고 보입니다.</p>
+            <button type="button" onClick={onDraw} className="mt-1.5 h-8 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-[12px] font-bold inline-flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" />인앱용으로 다시 만들기 ({creditText('image-studio-generate')})</button>
+          </div>
+        )}
         {layout === 'banner_sheet' && <p className="text-[11px] text-slate-400 mt-1.5">상품 사진은 배경을 지운 사진(누끼)이 이 모양에 가장 잘 삽니다.</p>}
         {!noImg && (
           <button type="button" onClick={() => onPatchSlide({ image_url: '' })} className="mt-1.5 text-[11.5px] text-slate-500 hover:text-slate-900 inline-flex items-center gap-1"><Trash2 className="w-3 h-3" />이 장 사진 빼기</button>
@@ -693,7 +704,7 @@ export function SlidePanel({
         <input value={String(s.link_url || '')} onChange={(e) => onPatchSlide({ link_url: e.target.value })} placeholder="/event/… 또는 https://…" className={INPUT} />
         <button type="button" onClick={() => onPickDm('link')} className="mt-1.5 text-[12px] font-semibold text-violet-800 hover:text-violet-900 inline-flex items-center gap-1"><Link2 className="w-3.5 h-3.5" />내 DM 참여 페이지 연결</button>
       </div>
-      {stripAllowedFor(layoutKey) && (
+      {stripAllowedFor(layoutKey, channel) && (
         <StripPanel refEl={stripRef} design={design} onDesign={onDesign} accentColor={accentColor} onAccent={onAccent} endAt={endAt} onGoSchedule={onGoSchedule} frameMode={frameMode} />
       )}
       {layout !== 'overlay' && D && (
@@ -822,6 +833,8 @@ export function LayoutSwitcher({ channel, current, onPick }: {
 }) {
   const [open, setOpen] = useState(false);
   const keys = layoutsFor(channel, current);
+  // ★ C118 B1 앱 채널에서 지금 모양이 고를 수 없는 모양(저장된 옛 메시지) = 동작은 그대로 · 여기서만 알린다
+  const currentUnavailable = channel === 'app' && !APP_LAYOUT_KEYS.includes(current);
   const groups: Array<{ t: string; ks: LayoutKey[] }> = [
     { t: '크게 보여 주기 · 좌우 슬라이드', ks: keys.filter((k) => LAYOUT_INFO[k].kind === 'big') },
     { t: '기본 알림', ks: keys.filter((k) => LAYOUT_INFO[k].kind === 'basic') },
@@ -833,7 +846,7 @@ export function LayoutSwitcher({ channel, current, onPick }: {
         <Layers className="w-4 h-4 text-violet-800 shrink-0" />
         <div className="min-w-0 flex-1">
           <b className="block text-[13px] text-slate-900 truncate break-keep">{LAYOUT_INFO[current].name}</b>
-          <span className="block text-[11px] text-slate-400 truncate">{LAYOUT_INFO[current].desc}</span>
+          <span className={`block text-[11px] truncate ${currentUnavailable ? 'text-amber-700 font-semibold' : 'text-slate-400'}`}>{currentUnavailable ? '이 모양은 앱에서 그대로 보이지 않아요' : LAYOUT_INFO[current].desc}</span>
         </div>
         <button type="button" onClick={() => setOpen((v) => !v)} className="h-8 px-2.5 rounded-lg border border-slate-300 text-[12px] font-semibold text-slate-700 hover:bg-slate-100 shrink-0">모양 바꾸기</button>
       </div>
@@ -842,16 +855,17 @@ export function LayoutSwitcher({ channel, current, onPick }: {
           {groups.map((g) => (
             <div key={g.t}>
               <div className="text-[11.5px] font-bold text-slate-500 mb-1.5">{g.t}</div>
-              <div className="grid grid-cols-2 gap-1.5">
+              {/* ★ C118 B4 칸 = 같은 높이 · 위 예시 그림 · 아래 이름 + 한 줄(두 줄 고정) */}
+              <div className="grid grid-cols-2 gap-2 auto-rows-fr">
                 {g.ks.map((k) => {
                   const on = k === current;
-                  const note = channel === 'app' ? appCapsNoteForKey(k) : null;
-                  const lock = !!note;
+                  const note = channel === 'web' ? null : appCapsNoteForKey(k);
                   return (
                     <button key={k} type="button" onClick={() => { setOpen(false); if (!on) onPick(k); }}
-                      className={`text-left rounded-xl border px-2.5 py-2 ${on ? 'border-violet-300 bg-violet-100' : 'border-slate-200 bg-white hover:bg-slate-100'}`}>
-                      <span className="flex items-center gap-1 text-[12.5px] font-bold text-slate-900 break-keep">{on && <Check className="w-3 h-3 text-violet-800 shrink-0" />}{LAYOUT_INFO[k].name}</span>
-                      <span className="block text-[11px] text-slate-500 mt-0.5 leading-snug break-keep">{lock && note ? note.text : LAYOUT_INFO[k].desc}</span>
+                      className={`text-left rounded-xl border p-1.5 flex flex-col h-full transition-colors ${on ? 'border-violet-400 bg-violet-50 ring-2 ring-violet-200' : 'border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50'}`}>
+                      <LayoutThumb k={k} channel={channel} scale={0.42} />
+                      <span className="flex items-center gap-1 text-[12.5px] font-bold text-slate-900 break-keep mt-1.5 px-1">{on && <Check className="w-3 h-3 text-violet-800 shrink-0" />}{LAYOUT_INFO[k].name}</span>
+                      <span className="block text-[11px] text-slate-500 mt-0.5 px-1 pb-0.5 leading-snug break-keep line-clamp-2 min-h-[2.6em]">{note ? note.text : LAYOUT_INFO[k].desc}</span>
                     </button>
                   );
                 })}

@@ -30,7 +30,7 @@ import type { StudioTexts } from '../../../lib/studio-texts';
 type Step = 'pick' | 'make' | 'result';
 
 export default function StudioInsertModal({
-  open, onClose, onInserted, defaultTitle, defaultSubtitle, defaultLabel, textless = false, initialTemplateId,
+  open, onClose, onInserted, defaultTitle, defaultSubtitle, defaultLabel, textless = false, initialTemplateId, use = 'dm',
 }: {
   open: boolean;
   onClose: () => void;
@@ -44,6 +44,8 @@ export default function StudioInsertModal({
   textless?: boolean;
   /** ★ 2026-11-05 시작본 · 예시가 정한 템플릿 — 고르기를 건너뛰고 만들기 단계로 연다(누름 한 번 + 2크레딧 확인 · 없으면 고르기부터) */
   initialTemplateId?: string | null;
+  /** ★ 2026-11-08 C118 A4 용도 고정(묻지 않음) — DM 창 = use-dm(세로 3:4) · 인앱 창 = use-inapp(정사각 · 글 자리 위 / 아래 · 글 없는 판 = 아래 비움) */
+  use?: 'dm' | 'inapp';
 }) {
   const toast = useToast();
   const [step, setStep] = useState<Step>('pick');
@@ -68,6 +70,8 @@ export default function StudioInsertModal({
   useEffect(() => dropPreview, [dropPreview]);
 
   const generating = !!make.busyMsg;
+  const [zone, setZone] = useState<'top' | 'bottom'>('top');
+  const usePreset = use === 'inapp' ? 'use-inapp' : 'use-dm';
   // 처음 상태로 여는 것은 「처음 열 때」와 「넣기 성공 뒤 다음에 열 때」뿐이다. 그 밖의 다시 열기는 쓰던 그대로 이어서(닫기 = 숨김) —
   //   작성 중 · 만드는 중 · 생성 실패 뒤 · 결과 대기 모두 지우지 않는다(Codex 1016 1R · 설계서 §2-4).
   const freshRef = useRef(true);
@@ -78,6 +82,7 @@ export default function StudioInsertModal({
     setStep('pick');
     setTemplate(null);
     setStorageFull(false);
+    setZone('top');
     make.reset(initialTexts);
     // ★ 2026-11-05 §3-8 정해 둔 템플릿 = 고르기를 건너뛴다(목록에서 못 찾으면 고르기 그대로)
     if (initialTemplateId) {
@@ -95,7 +100,7 @@ export default function StudioInsertModal({
 
   const generate = async () => {
     if (generating) return;
-    const r = await make.generate({ textless });
+    const r = await make.generate({ textless, presetKey: usePreset, textPosition: use === 'inapp' && !textless ? zone : null });
     if (!r) return;
     dropPreview();
     previewUrl.current = r.preview;
@@ -185,7 +190,23 @@ export default function StudioInsertModal({
         {step === 'make' && template && (
           <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
             <div className="sm:col-span-2"><TemplateExampleCard template={template} /></div>
-            <div className="sm:col-span-3"><StudioMakeFields make={make} textless={textless} /></div>
+            <div className="sm:col-span-3 space-y-3">
+              {use === 'inapp' && !textless && (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="text-[12.5px] font-bold text-slate-800 mb-1.5">글 자리</div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(['top', 'bottom'] as const).map((z) => (
+                      <button key={z} type="button" onClick={() => setZone(z)} aria-pressed={zone === z} disabled={generating}
+                        className={`h-9 rounded-lg border text-[12.5px] font-semibold ${zone === z ? 'border-violet-500 bg-violet-50 text-violet-800' : 'border-slate-200 bg-white text-slate-600 hover:border-violet-300'}`}>
+                        {z === 'top' ? '위쪽에 글' : '아래쪽에 글'}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11.5px] text-slate-500 mt-1.5 leading-snug break-keep">앱 팝업 칸에 꽉 차는 정사각 그림으로 만들어요. 고른 쪽을 그림과 같은 색감으로 비워 두고 그 자리에 글을 넣어요.</p>
+                </div>
+              )}
+              <StudioMakeFields make={make} textless={textless} />
+            </div>
           </div>
         )}
         {step === 'result' && made && (

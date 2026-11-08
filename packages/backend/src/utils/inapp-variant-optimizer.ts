@@ -23,7 +23,7 @@ import { UserFacingError } from './http-error';
 import { query, withTransaction } from '../config/database';
 import { sampleBeta, computeBetaCredibleInterval } from './bandit-optimizer';
 // ★ P1-4/P0-2 (2026-07-12) — 블록 정규화·스킴 무해화는 CT-27 단일 정의 재사용 (인라인 중복 금지)
-import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides, inAppNotPublishableError, activateInAppMessage, judgeSavedInAppRow, isBakedPoster } from './inapp-message';
+import { sanitizeContentBlocks, sanitizeButtonsActionUrls, normalizeTheme, normalizeCardStyle, composeFlatFromPosterSlides, inAppNotPublishableError, activateInAppMessage, judgeSavedInAppRow, isBakedPoster, appShapeTransitionBlocked, APP_SHAPE_ERROR } from './inapp-message';
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -180,6 +180,10 @@ export async function createVariant(
   const variantFlat = variantSlides
     ? composeFlatFromPosterSlides(variantSlides, { title: input.title, body: input.body, imageUrl: input.image_url, buttons: [] })
     : null;
+  // ★ C118 B1 새 자식의 최종 값(요청 template · 물려받은 design · channel) = 앱 채널 모양 판정 · 보존 예외는 새 자식에 물려주지 않는다
+  if (appShapeTransitionBlocked(null, { template: input.template || parent.template, design: parent.design, channel: parent.channel === 'app' ? 'app' : 'web' })) {
+    throw new UserFacingError(400, 'APP_SHAPE_UNSUPPORTED', APP_SHAPE_ERROR);
+  }
 
   const r = await run(
     `INSERT INTO cdp_inapp_messages (

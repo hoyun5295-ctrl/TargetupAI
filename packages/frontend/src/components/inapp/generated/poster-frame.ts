@@ -30,6 +30,8 @@ export const POSTER_FRAME_RULES = {
   defaultAccent: '#111827',
   /** 그림 위에 얹는 HTML 부품(이것 밖 0) */
   overImageParts: ['pager'] as readonly string[],
+  /** ★ C118 정지 full(스튜디오 인앱용 정사각 굽기) 글 여백 = 그림 폭 비율 · 좌우 · 아래 ≥ 인앱 안전 칸 가장자리(백엔드 INAPP_CONTENT_SAFE · 계약 시험 대조) */
+  fullTextPad: 0.12,
 } as const;
 
 export const POSTER_FRAME_FONT = '"Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif';
@@ -91,7 +93,7 @@ export interface PosterFrameInput {
    *   닫기 줄 · 쪽 번호 · 장 버튼 칸 · 바닥 줄 · 쿠폰 「복사」 0 · 남은 시간 = 마감 시각 글(이름 없는 정적 글) · 높이 예산 = 띠만.
    *   부품 칸이 null 이라 소비자(SDK · 편집기)의 시계 · 버튼 · 복사 · 닫기 연결이 저절로 0(넘김 레일은 남김 · 앱도 넘겨 본다).
    */
-  still?: { deadlineText?: string | null } | null;
+  still?: { deadlineText?: string | null; full?: boolean } | null;
 }
 
 export interface PosterFrameParts {
@@ -238,16 +240,20 @@ export function buildPosterScrimEl(o: {
   title: string; body: string; badge: string;
   overlayColor: string; titleColor: string; bodyColor: string;
   titleSize: number; bodySize: number; displayFont: string;
+  /** ★ C118 정지 full = 글 · 배지를 안전 칸 안으로(좌우 · 아래 여백 = 폭 비율 · 정사각 칸이라 세로도 같은 길이) */
+  safeInset?: boolean;
 }): HTMLDivElement | null {
   if (!o.title && !o.body && !o.badge) return null;
   const scrim = document.createElement('div');
+  const padPct = Math.round(POSTER_FRAME_RULES.fullTextPad * 100);
   Object.assign(scrim.style, {
     position: 'absolute', left: '0', right: '0', bottom: '0',
-    padding: '52px 22px 18px',
+    padding: o.safeInset ? `52px ${padPct}% ${padPct}%` : '52px 22px 18px',
     background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)',
     color: o.overlayColor, boxSizing: 'border-box',
     // 본문이 그림 높이를 넘는 극단 경우 — 잘라내지 않고 그림 안에서 스크롤
-    maxHeight: '100%', overflowY: 'auto',
+    //   ★ C118 정지 full = 글 상자 전체가 가로 · 세로 fullTextPad ~ (1 − fullTextPad) 사각형 안(높이 상한 = 위 경계) · 넘침 = 굽기 쪽이 굽지 않음(inapp-bake 글 넘침 판정 · Codex 구현 2R)
+    maxHeight: o.safeInset ? `${100 - padPct}%` : '100%', overflowY: 'auto',
   });
   if (o.badge) {
     const badge = document.createElement('div');
@@ -350,7 +356,7 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   }
 
   // 여러 장 = 3:4 상자 → 폭 상한을 높이에서 바로 정한다 · 한 장 = 그림이 들어온 뒤 원본 비율로(fitPosterFrameWidth)
-  const multiMaxW = Math.max(160, Math.floor((Math.round(vh * R.maxHeightRatio) - chrome) * R.multiAspect));
+  const multiMaxW = Math.max(1, Math.floor((Math.round(vh * R.maxHeightRatio) - chrome) * R.multiAspect));   // ★ C118 B5 높이 상한 먼저
   const root = el('div', 'frame-root', {
     width: '100%', maxWidth: `${count > 1 ? Math.min(maxW, multiMaxW) : maxW}px`,
     position: 'relative', zIndex: input.mount === 'page' ? '2147483647' : '2',
@@ -388,7 +394,8 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
 
   const box = el('div', isCard ? 'card' : 'sheet', {
     width: '100%', background: '#ffffff', color: '#1b1d23', overflow: 'hidden', boxSizing: 'border-box',
-    borderRadius: isCard ? R.card.radius : R.sheet.radius,
+    // ★ C118 B2 정지 + 인앱용(full) = 모서리 0(앱이 자기 시트를 그린다 · 구운 그림 = 정사각 그대로)
+    borderRadius: still && input.still && input.still.full ? '0' : isCard ? R.card.radius : R.sheet.radius,
     // ★ C116-B D3 정지 = 그림자 0(찍는 틀 상자 밖으로 뻗어 잘리는 값 · 무대색 위에서는 보이지 않는다)
     boxShadow: still ? 'none' : isCard ? '0 18px 50px rgba(0,0,0,0.35)' : '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
     display: 'flex', flexDirection: 'column',
@@ -430,6 +437,7 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
         titleSize: sizeOr(s.title_size, 14, 32, sizeOr(design.poster_title_size, 14, 32, 20)),
         bodySize: sizeOr(s.body_size, 10, 22, sizeOr(design.poster_body_size, 10, 22, 14)),
         displayFont: input.displayFont || '',
+        safeInset: !!(input.still && input.still.full),
       });
       if (scrim) cell.appendChild(scrim);
     }
@@ -443,8 +451,10 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   let prev: HTMLElement | null = null;
   let next: HTMLElement | null = null;
   if (count > 1 && !still) {
+    // ★ C118 B5 사진 위 글이 있으면 쪽 번호 = 그림 오른쪽 위(아래쪽 글과 겹치지 않게) · 없으면 지금처럼 아래
+    const liveText = !baked && slides.some((s) => !!(String(s.title || '').trim() || String(s.body || '').trim() || String(s.eyebrow || '').trim()));
     pager = el('div', 'pager', {
-      position: 'absolute', right: `${R.pagerInset}px`, bottom: `${R.pagerInset}px`, height: '28px', borderRadius: '999px',
+      position: 'absolute', right: `${R.pagerInset}px`, ...(liveText ? { top: `${R.pagerInset}px` } : { bottom: `${R.pagerInset}px` }), height: '28px', borderRadius: '999px',
       background: 'rgba(17,24,39,0.62)', color: '#ffffff', fontSize: '12px', fontWeight: '700',
       display: 'flex', alignItems: 'center', zIndex: '3', overflow: 'hidden',
     });
@@ -537,10 +547,14 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
 
   // 한 장 = 그림이 들어오면 원본 비율로 높이 상한 안에 들도록 폭을 줄인다(자름 0)
   let fitVh = vh;
+  // ★ C118 B5 여러 장 칸 비율 = 첫 장 그림 실제 비율을 3:4 ~ 4:3 으로 묶음(들어오기 전 3:4) · 폭 상한 = 높이 상한 먼저(최소 160 은 그 안에서만)
+  let multiAspect: number = R.multiAspect;
   const fit = (nextVh: number) => {
     fitVh = Math.max(1, Math.floor(nextVh || fitVh));
     if (count > 1) {
-      root.style.maxWidth = `${Math.min(maxW, Math.max(160, Math.floor((Math.round(fitVh * R.maxHeightRatio) - chrome) * R.multiAspect)))}px`;
+      const capH = Math.round(fitVh * R.maxHeightRatio) - chrome;
+      const byHeight = Math.floor(capH * multiAspect);
+      root.style.maxWidth = `${Math.max(1, Math.min(maxW, byHeight))}px`;   // 높이 상한이 늘 이긴다(옛 최소 160 = 낮은 화면에서 높이 넘침)
       return;
     }
     const img = images[0];
@@ -552,6 +566,16 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
     const img = images[0];
     img.addEventListener('load', () => fit(fitVh));
     if (img.complete) fit(fitVh);
+  } else if (count > 1 && images[0]) {
+    const first = images[0];
+    const applyAspect = () => {
+      if (!(first.naturalWidth > 0 && first.naturalHeight > 0)) return;
+      multiAspect = Math.min(4 / 3, Math.max(3 / 4, first.naturalWidth / first.naturalHeight));
+      for (const c of cells) c.style.aspectRatio = `${Math.round(multiAspect * 1000)} / 1000`;
+      fit(fitVh);
+    };
+    first.addEventListener('load', applyAspect);
+    if (first.complete) applyAspect();
   }
 
   return {

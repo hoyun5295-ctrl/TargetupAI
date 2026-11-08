@@ -73,7 +73,7 @@ describe('K1 두 결과 화면 = 같은 로고 줄 · 같은 저장 layers(한�
 
   it('생성 결과 = 바탕 받은 뒤 곧바로 /layers(켜짐 · 자동) · 결과에 로고 상태', () => {
     const make = read('frontend/src/components/studio/StudioMake.tsx');
-    const gen = make.slice(make.indexOf('const generate = async'), make.indexOf('return {\n    template,'));
+    const gen = make.slice(make.indexOf('const buildGenerateBody = ('), make.indexOf('return {\n    template,'));   // ★ C118 생성 = 본문 짜기 + 보내기 + generate
     expect(gen).toMatch(/postLayers\(im\.tempId, \{ on: true, corner: null, size: null \}, textless\)/);
     expect(make).toMatch(/studioPost\('\/api\/image-studio\/layers', layerRequest\(/);
     expect(make).toMatch(/export interface StudioMade extends LogoCardState/);
@@ -112,7 +112,7 @@ describe('K2 /save = 로고 단계가 저장 잠금 안 · 지금 갈래 앞 · 
 
   it('로고 갈래 영구 이름 = 바탕 id · 옛 MMS 꼴 · 포스터 아닌 임시 그림은 로고 갈래 없음', () => {
     const stage = fnBody(LOGO, 'logoSaveStage');
-    expect(stage).toMatch(/writeStudioPermanent\(companyId, tempId, 'jpeg', buf\)/);
+    expect(stage).toMatch(/writeStudioPermanent\(companyId, tempId, 'jpeg', buf, \{ full: isStudioFullPreset\(meta\.presetKey\) \}\)/);   // ★ C118 A3 인앱용 = .full. 이름
     expect(stage).toMatch(/const wantLogo = !!layers && effectiveSpec !== 'mms' && meta\.kind === 'poster';/);
     // 1단계(남은 바탕의 영구 파일)가 켜짐 · 꺼짐 판단보다 앞
     expect(stage.indexOf('findPermanentByTempId(companyId, tempId)')).toBeLessThan(stage.indexOf('if (!wantLogo || !layers) return null;'));

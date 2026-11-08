@@ -212,10 +212,32 @@ export const LAYOUT_INFO: Record<LayoutKey, { name: string; kind: 'big' | 'basic
  *   (저장된 배너 시트는 그대로 그린다).
  */
 export function layoutsFor(channel: 'web' | 'app', current?: LayoutKey | null): LayoutKey[] {
+  // ★ 2026-11-08 C118 B1 앱 채널 = 이미 깔린 어느 앱에서든 그대로 보이는 모양만(Harold 「할 수 있는 것만 · 안 되는 것까지 되는 것처럼 하지 말고」)
+  if (channel === 'app') return [...APP_LAYOUT_KEYS];
   const poster: LayoutKey[] = ['baked_sheet', 'baked_card', 'overlay', 'live_card', 'event_card', ...(current === 'banner_sheet' ? ['banner_sheet' as LayoutKey] : [])];
-  return channel === 'app'
-    ? [...poster, 'center_modal', 'bottom_banner']
-    : [...poster, 'center_modal', 'slide_in', 'toast', 'floating_button'];
+  return [...poster, 'center_modal', 'slide_in', 'toast', 'floating_button'];
+}
+
+/** ★ C118 B1 앱 채널에서 고를 수 있는 모양(서버 appShapeAllowed 의 화면 거울 · 계약 시험이 같은 표본으로 대조) */
+export const APP_LAYOUT_KEYS: readonly LayoutKey[] = ['baked_sheet', 'overlay', 'center_modal', 'bottom_banner'];
+/** 서버 appShapeAllowed(template, design) 거울 — 가운데 팝업 · 하단 시트 = 허용 · 포스터 가족 = 통짜 시트 · 사진 위 글만(카드 · 이벤트 · 배너 · 띠 = 안 됨) · 그 밖 = 안 됨 */
+export function appShapeAllowedFor(template: unknown, design: unknown): boolean {
+  const t = String(template || '');
+  if (t === 'center_modal' || t === 'bottom_banner') return true;
+  if (t !== 'full_image') return false;
+  const d: Record<string, any> = design && typeof design === 'object' ? design as Record<string, any> : {};
+  const layout = String(d.poster_layout || '');
+  if (layout === 'event_card' || layout === 'banner_sheet') return false;
+  if (d.poster_frame === 'card') return false;
+  const strip = d.poster_strip && typeof d.poster_strip === 'object' ? String(d.poster_strip.type || '') : '';
+  return strip !== 'coupon' && strip !== 'countdown';
+}
+/** 앱 채널로 들어오는 새 메시지 = 가장 가까운 허용 모양(카드 → 통짜 · 사진 위 글 카드 · 이벤트 · 배너 → 사진 위 글 · 작은 웹 모양 → 가운데 팝업) */
+export function appSafeLayoutKey(k: LayoutKey): LayoutKey {
+  if (k === 'baked_card') return 'baked_sheet';
+  if (k === 'live_card' || k === 'event_card' || k === 'banner_sheet') return 'overlay';
+  if (k === 'slide_in' || k === 'toast' || k === 'floating_button') return 'center_modal';
+  return k;
 }
 
 /** 지금 메시지의 모양 키 — design 세 키(poster_layout · poster_text · poster_frame)를 함께 읽는다 */
@@ -255,7 +277,8 @@ export function designForKey(key: LayoutKey, design?: Record<string, any> | null
 }
 
 /** 이 모양에서 기능 띠를 고를 수 있는가(정규화가 버리는 조합은 칸을 그리지 않는다) */
-export function stripAllowedFor(k: LayoutKey): boolean {
+export function stripAllowedFor(k: LayoutKey, channel: 'web' | 'app' = 'web'): boolean {
+  if (channel === 'app') return false;   // ★ C118 B1 복사 버튼 · 시계 = 깔린 앱에서 동작 0
   return k === 'overlay' || k === 'baked_sheet' || k === 'baked_card' || k === 'live_card';
 }
 

@@ -17,7 +17,7 @@ import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPrev
 import { PosterFramePreview } from './inapp/PosterFramePreview';
 import { drawsWithPosterFrame, frameSlidesWithFlat } from './inapp/generated/poster-frame';
 import { legacyAppPreviewOf } from './inapp/inappSlides';
-import { legacyAppWillBake, legacyAppImageUrl } from './inapp/legacy-app-view';
+import { legacyAppWillBake, legacyAppImageUrl, legacyAppBakesFull } from './inapp/legacy-app-view';
 import { LegacyBakedPreview, LegacyAppPreviewPending } from './inapp/LegacyBakedPreview';
 import { useOwnImageHosts, loadOwnImageHosts } from './inapp/inapp-image-hosts';
 
@@ -578,10 +578,10 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
   const [bakedActive, setBakedActive] = useState(0);
   const bakedSlideList = Array.isArray(slidesIn) ? slidesIn.filter((s: any) => s && String(s.image_url || '').trim()) : [];
   const bakedBtn: any = bakedSlideList.length >= 2 ? (bakedSlideList[Math.min(bakedActive, bakedSlideList.length - 1)] as any)?.cta || null : (buttons || [])[0] || null;
-  const legacyView = legacyPoster && !bakedLegacy ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt, ownHosts) : null;
+  const legacyView = legacyPoster && !bakedLegacy ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt, ownHosts, imageUrlIn) : null;
   // ★ C116-B D6 대체 길 flat 그림 = 서버가 실제로 내주는 맞춤 주소(정사각 · 가운데 80% · 무대색) · 모르면 확인 중
   //   flat 그림 없음 = undefined(판정할 것 없음) · null = 호스트를 몰라 판정 보류 — 둘을 섞지 않는다(Codex 구현 1R ①)
-  const legacyFlat = legacyView && imageUrlIn ? legacyAppImageUrl(imageUrlIn, legacyView.design, ownHosts) : undefined;
+  const legacyFlat = legacyView && imageUrlIn ? legacyAppImageUrl(imageUrlIn, legacyView.design, ownHosts, legacyView.full) : undefined;
   const legacyPending = legacyPoster && (bakeJudge === 'unknown' || (!!legacyView && (legacyView.unknown || legacyFlat === null)));
   const imageUrl = legacyView ? (legacyFlat ?? imageUrlIn) : imageUrlIn;
   const design = legacyView ? legacyView.design : designIn;
@@ -730,6 +730,7 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
                 buttonBg={bakedBtn?.background_color || null}
                 buttonColor={bakedBtn?.text_color || null}
                 optOutLabel={appOptOut}
+                full={legacyAppBakesFull(Array.isArray(slidesIn) ? slidesIn : [], imageUrlIn, ownHosts, designIn)}
               />
             ) : (
             <div style={{ position: 'absolute', inset: 0, background: frameApp ? 'transparent' : 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>

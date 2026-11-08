@@ -193,7 +193,7 @@ async function buildServePath(
     if (!OPTIMIZABLE.has(ext) && !(safe && ext === '.gif')) return originalPath;
     if (!fs.existsSync(originalPath)) return originalPath;
 
-    const mode: FitMode = safe ? 'pad' : fit?.mode === 'crop' ? 'crop' : 'pad';
+    const mode: FitMode = safe ? 'pad' : (ratio?.cover || fit?.mode === 'crop') ? 'crop' : 'pad';   // ★ C118 B2 inappfull = 늘 cover
     // ★ C116-B 규격 rev = 폴더 이름에(값이 바뀌면 옛 변환본을 다시 쓰지 않는다 · rev 없는 키 = 옛 이름 그대로)
     const variant = ratio ? `${SERVE_MAX_WIDTH}-${fit!.aspect}-${mode}${ratio.rev ? `-r${ratio.rev}` : ''}` : String(SERVE_MAX_WIDTH);
 

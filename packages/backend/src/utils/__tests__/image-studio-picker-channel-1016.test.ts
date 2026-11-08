@@ -178,7 +178,7 @@ describe('5. 채널 · 겹친 창 · 업종 응답', () => {
   it('인앱 채널은 관리자만(공유 화면) · 판정은 ChannelButtons 한 곳', () => {
     const page = front('pages/ImageStudioPage.tsx');
     expect(page).toMatch(/key: 'inapp'[^\n]*adminOnly: true/);
-    expect(page).toContain('.filter((ch) => !ch.adminOnly || isAdmin)');
+    expect(page).toContain('.filter((ch) => (!ch.adminOnly || isAdmin) && (!only || ch.key === only))');   // ★ C118 A2 용도 채널 하나
     expect(page.match(/<ChannelButtons /g)?.length).toBe(2); // 결과 카드 · 발사대
   });
   it('채널 이동은 저장이 성공한 뒤에만 초안을 넣는다', () => {

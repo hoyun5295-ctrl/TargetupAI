@@ -398,7 +398,7 @@ export class HanjulloInAppModule {
    *   있으면 API 호출 0: 기록(click · dismiss · opt_out) · 이동 · 닫기 · 다시 보지 않기 · 하루 보지 않기 · 복사 = 다리 사건 · impression = 앱이 ready 뒤 한 번.
    */
   /** ★ C116 D8 호스트 정지 그리기(서버 굽기) · null = 보통 */
-  private hostStill: { deadlineText?: string | null } | null = null;
+  private hostStill: { deadlineText?: string | null; full?: boolean } | null = null;
   private host: { post: (e: InAppHostEvent) => void; closed: Set<string>; messageId: string } | null = null;
 
   constructor(
@@ -413,7 +413,7 @@ export class HanjulloInAppModule {
    *   메시지 DOM 이 어느 길로 사라지든 `close` 한 번. 반환 = 그렸는가.
    */
   public renderForHost(
-    payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null; still?: { deadlineText?: string | null } | null },
+    payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null; still?: { deadlineText?: string | null; full?: boolean } | null },
     post: (e: InAppHostEvent) => void = defaultHostBridge(),
   ): boolean {
     if (typeof window === 'undefined' || typeof document === 'undefined') return false;
@@ -421,7 +421,7 @@ export class HanjulloInAppModule {
     if (!msg || !msg.id) return false;
     // ★ 2026-11-08 C116 D8 정지 그리기(서버 굽기) — 살아 있는 부품 · 연결 · 움직임 0(renderPosterFrame)
     const st = payload.still && typeof payload.still === 'object' ? payload.still : null;
-    this.hostStill = st ? { deadlineText: typeof st.deadlineText === 'string' ? st.deadlineText : null } : null;
+    this.hostStill = st ? { deadlineText: typeof st.deadlineText === 'string' ? st.deadlineText : null, ...(st.full === true ? { full: true } : {}) } : null;   // ★ C118 B2 인앱용 = 모서리 0
     const host = { post, closed: new Set<string>(), messageId: String(msg.id) };
     this.host = host;
     const serverMs = payload.serverNow ? Date.parse(String(payload.serverNow)) : NaN;
@@ -2849,7 +2849,7 @@ export class HanjulloInAppModule {
  *   키 · 시크릿 · 주소 없음 = API 호출 0(기록 · 이동 · 닫기는 다리 사건). 그림 주소는 페이지 출처 기준(상대 주소 그대로).
  */
 export function renderInAppForHost(
-  payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null; still?: { deadlineText?: string | null } | null },
+  payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null; still?: { deadlineText?: string | null; full?: boolean } | null },
   post?: (e: InAppHostEvent) => void,
 ): boolean {
   return new HanjulloInAppModule('', '', '').renderForHost(payload, post);

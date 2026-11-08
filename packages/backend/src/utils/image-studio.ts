@@ -22,6 +22,7 @@ import crypto from 'crypto';
 import sharp from 'sharp';   // ★ 2026-11-02 제품 사진 여러 장 묶기(groupProductCutouts)
 import type { OutputInfo, OverlayOptions } from 'sharp';
 import { getSeasonContext } from './season-context';
+import { INAPP_CONTENT_SAFE } from './image-fit-spec';   // ★ C118 인앱 안전 칸 값 하나
 
 // ── env / 설정 ─────────────────────────────────────────────
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -159,7 +160,12 @@ export interface ChannelPreset {
 
 export const CHANNEL_PRESETS: Record<string, ChannelPreset> = {
   // ★ 2026-07-30 채널 축 폐기(Harold) — 생성은 'poster' 단일(3:4·채널 무관). 완성 포스터는 인앱/DM/이메일 어디든 통짜 삽입(0722 원칙).
-  'poster':       { key: 'poster',       label: '포스터',        aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'poster',       textZone: 'top' },
+  //   ★ 2026-11-08 C118 결정 바뀜(Harold 「각각 제작하게 · 하나로 모든 걸 커버하는 거 안 될 것 같다」) = 용도별 프리셋 셋 + 'poster' = 자유 형태(기본 3:4)
+  //   설계서 docs/2026-11-08-c118-studio-per-use-inapp-app-design.md A1 · 옛 키 넷(아래) = 옛 임시 · 자산 해석용 그대로(값 무변경)
+  'poster':       { key: 'poster',       label: '자유 형태',      aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'poster',       textZone: 'top' },
+  'use-inapp':    { key: 'use-inapp',    label: '인앱 메시지',    aspectRatio: '1:1', imageSize: '2K', track: 'quality', channelSpec: 'inapp-poster', textZone: 'top' },
+  'use-dm':       { key: 'use-dm',       label: '모바일 DM',      aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'dm',           textZone: 'top' },
+  'use-email':    { key: 'use-email',    label: '이메일 마케팅',  aspectRatio: '4:3', imageSize: '2K', track: 'quality', channelSpec: 'email',        textZone: 'top' },
   // 아래 4종 = 레거시 호환(옛 temp meta·기존 자산 channel_spec 해석용). 신규 생성 UI는 'poster'만 보낸다.
   'inapp-poster': { key: 'inapp-poster', label: '인앱 포스터형', aspectRatio: '3:4', imageSize: '2K', track: 'quality', channelSpec: 'inapp-poster', textZone: 'top' },
   'dm-card':      { key: 'dm-card',      label: 'DM 카드',      aspectRatio: '1:1', imageSize: '2K', track: 'quality', channelSpec: 'dm',           textZone: 'bottom' },
@@ -168,6 +174,16 @@ export const CHANNEL_PRESETS: Record<string, ChannelPreset> = {
   // MMS 전용 — 생성은 1K(896×1200), 서버가 1080px 리사이즈 + JPEG ≤300KB 보장(§4-4 트랙 B).
   'mms':          { key: 'mms',          label: 'MMS',          aspectRatio: '3:4', imageSize: '1K', track: 'mms',     channelSpec: 'mms',          textZone: 'top' },
 };
+
+/** ★ C118 A3 인앱용 프리셋(정사각 · 꽉 찬 그림 · 영구 이름 `.full.`) 판정 한 곳 */
+export const STUDIO_FULL_PRESET = 'use-inapp';
+export function isStudioFullPreset(presetKey: unknown): boolean {
+  return presetKey === STUDIO_FULL_PRESET;
+}
+/** ★ C118 A3 영구 이름 계약 하나 — 인앱용 = `<id>.full.<ext>` · 그 밖 = `<id>.<ext>`(저장 · 다시 찾기 · 되돌리기가 이 이름을 쓴다) */
+export function studioPermanentName(tempId: string, ext: string, full: boolean): string {
+  return full ? `${tempId}.full.${ext}` : `${tempId}.${ext}`;
+}
 
 export function resolvePreset(presetKey: string | undefined): ChannelPreset {
   return (presetKey && CHANNEL_PRESETS[presetKey]) || CHANNEL_PRESETS['poster'];
@@ -253,6 +269,16 @@ export function buildPosterPrompt(input: {
   }
   // 2. 포스터 형식·비율
   lines.push(`This is a complete marketing poster design, aspect ratio ${preset.aspectRatio}.`);
+  // 2-1. ★ C118 A3 인앱용 = 정사각 · 꽉 찬 그림 · 글 자리 = 같은 장면의 자연스러운 빈 공간 · 글 · 주제 = 가로 · 세로 가운데 80%(가장자리 10% = 배경만)
+  if (isStudioFullPreset(preset.key)) {
+    lines.push('Format: a full-bleed square in-app popup visual. The scene fills the whole square edge to edge, with no frame, border, card, box, banner bar or empty margins.');
+    const pct = Math.round(INAPP_CONTENT_SAFE * 100);
+    const edge = Math.round((1 - INAPP_CONTENT_SAFE) * 50);
+    lines.push(`Keep every piece of copy and the main subject inside the central ${pct}% of the width and the central ${pct}% of the height; the outer ${edge}% on every side must contain only background scenery.`);
+    const half = input.textPosition === 'bottom' ? 'lower' : 'upper';
+    const other = half === 'upper' ? 'lower' : 'upper';
+    lines.push(`The ${half} part of the square is a natural, color-matched calm continuation of the same scene where the copy sits, not a panel or overlay box. Place the main subject and props in the ${other} part so the copy never covers them.`);
+  }
   // 3. 제품 보존(누끼 첨부 시) — 픽셀 충실 지시
   if (input.hasProduct) {
     lines.push('A product photo with transparent background is attached. Place it as the hero of the composition on a natural surface. Preserve the attached product EXACTLY as provided, do not redraw, restyle, recolor, or alter its shape, proportions, packaging, or label text in any way. Integrate it with scene-consistent lighting and a realistic soft ground shadow.');
@@ -898,7 +924,8 @@ export function moveTempToPermanent(companyId: string, tempId: string): { url: s
   if (!found) return null;
   const destDir = path.join(INAPP_IMAGE_BASE, companyId);
   fs.mkdirSync(destDir, { recursive: true });
-  const filename = `${tempId}.${found.ext}`;
+  // ★ C118 A3 인앱용 = `.full.` 이름(이름 CT 하나 · 그림을 바꾸면 주소가 바뀌어 표지도 저절로 빠진다)
+  const filename = studioPermanentName(tempId, found.ext, isStudioFullPreset(readTempMeta(companyId, tempId)?.presetKey));
   const destPath = path.join(destDir, filename);
   // ★ 2026-11-07 C113 K21 — 크기를 옮기기 전에 읽는다(옛: 옮긴 뒤 읽다 실패하면 옮긴 파일이 기록 없이 남았다 · 되돌릴 수 없는 단계 = 마지막)
   const bytes = fs.statSync(found.absPath).size;
@@ -912,11 +939,11 @@ export function moveTempToPermanent(companyId: string, tempId: string): { url: s
  * ★ 2026-11-07 C112 영구 자리에 바로 쓴다 — 이름 = 저장한 임시 id(moveTempToPermanent · findPermanentByTempId 와 같은 이름 · 주소 규칙) ·
  *   그 폴더 안 임시 이름에 쓰고 이름 바꾸기(반쪽 파일이 서빙되지 않게). 같은 이름이 있으면 덮어쓴다(로고 저장의 0행 확정 뒤 다시 쓰기).
  */
-export function writeStudioPermanent(companyId: string, tempId: string, ext: string, buffer: Buffer): { url: string; filename: string; bytes: number; ext: string } {
+export function writeStudioPermanent(companyId: string, tempId: string, ext: string, buffer: Buffer, opts: { full?: boolean } = {}): { url: string; filename: string; bytes: number; ext: string } {
   if (!isValidTempId(tempId) || !/^[a-z]{3,4}$/.test(ext)) throw new Error('invalid permanent name');
   const destDir = path.join(INAPP_IMAGE_BASE, companyId);
   fs.mkdirSync(destDir, { recursive: true });
-  const filename = `${tempId}.${ext}`;
+  const filename = studioPermanentName(tempId, ext, !!opts.full);
   const tmp = path.join(destDir, `.tmp-${crypto.randomUUID()}`);
   fs.writeFileSync(tmp, buffer);
   fs.renameSync(tmp, path.join(destDir, filename));
@@ -929,12 +956,16 @@ export function writeStudioPermanent(companyId: string, tempId: string, ext: str
  */
 export function findPermanentByTempId(companyId: string, tempId: string): { url: string; bytes: number } | null {
   if (!isValidTempId(tempId)) return null;
-  for (const ext of ['png', 'jpeg', 'jpg', 'webp']) {
-    const p = path.join(INAPP_IMAGE_BASE, companyId, `${tempId}.${ext}`);
-    try {
-      const st = fs.statSync(p);
-      if (st.isFile()) return { url: `/api/cdp/inapp/image/${companyId}/${tempId}.${ext}`, bytes: st.size };
-    } catch { /* 없음 */ }
+  // ★ C118 A3 두 이름 다 찾는다(인앱용 = `.full.` · 저장 응답 유실 뒤 다시 저장이 409 가 되지 않게 · Codex 설계 3R ①)
+  for (const full of [false, true]) {
+    for (const ext of ['png', 'jpeg', 'jpg', 'webp']) {
+      const name = studioPermanentName(tempId, ext, full);
+      const p = path.join(INAPP_IMAGE_BASE, companyId, name);
+      try {
+        const st = fs.statSync(p);
+        if (st.isFile()) return { url: `/api/cdp/inapp/image/${companyId}/${name}`, bytes: st.size };
+      } catch { /* 없음 */ }
+    }
   }
   return null;
 }
@@ -943,9 +974,10 @@ export function findPermanentByTempId(companyId: string, tempId: string): { url:
  * ★ 2026-10-19 B-1016-3③ — 영구 위치로 옮긴 뒤 라이브러리 등재가 실패하면 되돌린다(같은 임시 id 로 다시 저장할 수 있게).
  *   파일을 임시 자리로 되돌리고 사이드카를 다시 쓴다. 되돌리기 실패 = 조용히 넘어간다(원래 오류를 그대로 돌려준다).
  */
-export function restorePermanentToTemp(companyId: string, tempId: string, ext: string, meta: Omit<TempMeta, 'companyId' | 'createdAt'>): void {
+export function restorePermanentToTemp(companyId: string, tempId: string, ext: string, meta: Omit<TempMeta, 'companyId' | 'createdAt'>, movedFilename?: string): void {
   try {
-    const destPath = path.join(INAPP_IMAGE_BASE, companyId, `${tempId}.${ext}`);
+    // ★ C118 A3 실제로 옮긴 이름으로 되돌린다(인앱용 = `.full.` · Codex 설계 3R ①)
+    const destPath = path.join(INAPP_IMAGE_BASE, companyId, movedFilename || `${tempId}.${ext}`);
     const dir = companyTempDir(companyId);
     fs.mkdirSync(dir, { recursive: true });
     fs.renameSync(destPath, path.join(dir, `${tempId}.${ext}`));

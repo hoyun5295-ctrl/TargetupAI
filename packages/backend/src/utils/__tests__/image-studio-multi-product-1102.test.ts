@@ -357,7 +357,7 @@ describe('S6 화면 계약 — 배선(소스 읽기 · 동작은 S6-가 + 직원
     expect(dm).toContain('onClick={generate} disabled={generating || (!!make.discountBuild && !make.discountBuild.ok)}');
   });
   it('생성 몸 = 칸 순서의 누끼 id 목록 · 옛 단일 칸은 보내지 않는다', () => {
-    const gen = make.slice(make.indexOf('const generate = async'), make.indexOf('return {\n    template,'));
+    const gen = make.slice(make.indexOf('const buildGenerateBody = ('), make.indexOf('return {\n    template,'));   // ★ C118 생성 = 본문 짜기 + 보내기 + generate
     expect(gen).toContain('cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),');
     expect(gen).not.toContain('cutoutTempId,');
   });

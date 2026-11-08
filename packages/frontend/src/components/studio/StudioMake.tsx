@@ -232,7 +232,9 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   // ★ 2026-10-19 B-1016-3② 결과를 못 받은 시도는 같은 표로 다시(서버가 이미 만든 결과를 주고 다시 걷지 않는다)
   const attemptRef = useRef<string | null>(null);
   // ★ 2026-11-05 §3-8 textless = 글 없는 판(인앱 글 얹기 장 · 렌더러가 글을 얹을 아래 자리를 비운다)
-  const generate = async (opts?: { textless?: boolean }): Promise<StudioMade | null> => {
+  // ★ 2026-11-08 C118 A1 · A2 용도별 제작 — 요청 본문 = 그때 입력을 얼린 사본(용도 칸 · 다시 만들기 = 같은 표 + 같은 본문)
+  //   presetKey = 서버 CHANNEL_PRESETS(use-inapp 1:1 · use-dm 3:4 · use-email 4:3 · poster 자유 3:4) · textPosition = 인앱 용도면 모든 템플릿
+  const buildGenerateBody = (opts?: { textless?: boolean; presetKey?: string; textPosition?: 'top' | 'bottom' | null }): Record<string, unknown> | null => {
     if (!template) { toast.error('템플릿을 먼저 골라주세요'); return null; }
     const textless = !!opts?.textless;
     // ★ C114 Codex 구현 1R ③ 할인형 = 화면에 보이는 칸(제품명)과 템플릿 기본 라벨만 보낸다(숨긴 라벨 · 부제의 옛 값이 그림에 들어가지 않게)
@@ -244,21 +246,25 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       if (!String(texts.title || '').trim()) { toast.error('제품명을 넣어 주세요. 포스터 맨 위에 들어가요.'); return null; }
       if (!discountBuild || !discountBuild.ok) { toast.error(discountBuild && !discountBuild.ok ? discountBuild.error : '혜택 숫자를 넣어 주세요.'); return null; }
     }
-    setBusyMsg('완성 포스터를 만드는 중... (약 20~30초)');
+    const inappUse = opts?.presetKey === 'use-inapp';
+    return {
+      templateId: template.id, presetKey: opts?.presetKey || 'poster',
+      texts: { ...sendTexts }, userHint: hint || null,
+      // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
+      cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
+      // ★ C118 A3 인앱 용도 = 고른 글 자리(위 · 아래)를 모든 템플릿에 · 글 없는 판 = 아래(글을 얹을 자리)
+      textPosition: textless ? 'bottom' : (inappUse ? (opts?.textPosition || 'top') : (isEvent(template) ? textPosition : null)),
+      ...(discountKind && !textless && discountBuild?.ok ? { offer: discountBuild.offer } : {}),
+    };
+  };
+
+  /** 얼린 본문 + 표 하나로 만든다(표는 부른 쪽이 들고 성공 결과를 받은 뒤에만 버린다 · Codex E2 · C118 Codex 설계 1R ①) */
+  const runGenerateBody = async (body: Record<string, unknown>, attemptToken: string, textless: boolean, label?: string): Promise<StudioMade | null> => {
+    setBusyMsg(label || '완성 포스터를 만드는 중... (약 20~30초)');
     try {
-      if (!attemptRef.current) attemptRef.current = newStudioAttempt();
-      const { status, ok, data } = await studioPost('/api/image-studio/generate', {
-        templateId: template.id, presetKey: 'poster',
-        texts: sendTexts, userHint: hint || null,
-        // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
-        cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
-        textPosition: textless ? 'bottom' : (isEvent(template) ? textPosition : null),
-        ...(discountKind && !textless && discountBuild?.ok ? { offer: discountBuild.offer } : {}),
-        attemptToken: attemptRef.current,
-      });
+      const { status, ok, data } = await studioPost('/api/image-studio/generate', { ...body, attemptToken });
       if (status === 402) { toast.error('크레딧이 부족합니다. 충전 후 다시 시도해주세요'); return null; }
       if (!ok || !data.images?.[0]) { toast.error(data?.error || '생성에 실패했어요'); return null; }
-      attemptRef.current = null;   // 성공 결과를 받았을 때만 표를 버린다(Codex E2)
       if (data.benefitNotice) toast.success(data.benefitNotice);
       const im = data.images[0];
       let preview: string | null = null;
@@ -267,11 +273,21 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       setBusyMsg('로고를 얹는 중...');
       const lay = await postLayers(im.tempId, { on: true, corner: null, size: null }, textless);
       const logoState: LogoCardState = typeof lay === 'string' ? { logo: null, layered: null, logoFailed: true } : lay;
-      // 헤드라인 = 저장 파일명(헤드라인_채널) 스냅샷(생성 시점 문구 고정)
-      return { tempId: im.tempId, url: im.url, preview, title: texts.title, texts: { ...sendTexts }, textless, ...logoState, discountCheck: typeof data.discountCheck === 'string' ? data.discountCheck : null };
+      // 헤드라인 = 저장 파일명(헤드라인_채널) 스냅샷(생성 시점 문구 고정 · 얼린 본문의 문구)
+      const bt = (body.texts || {}) as StudioTexts;
+      return { tempId: im.tempId, url: im.url, preview, title: bt.title, texts: { ...bt }, textless, ...logoState, discountCheck: typeof data.discountCheck === 'string' ? data.discountCheck : null };
     } finally {
       setBusyMsg('');
     }
+  };
+
+  const generate = async (opts?: { textless?: boolean; presetKey?: string; textPosition?: 'top' | 'bottom' | null }): Promise<StudioMade | null> => {
+    const body = buildGenerateBody(opts);
+    if (!body) return null;
+    if (!attemptRef.current) attemptRef.current = newStudioAttempt();
+    const r = await runGenerateBody(body, attemptRef.current, !!opts?.textless);
+    if (r) attemptRef.current = null;   // 성공 결과를 받았을 때만 표를 버린다(Codex E2)
+    return r;
   };
 
   return {
@@ -279,6 +295,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
     discount, setDiscount, discountBuild,
     items, remaining, full, removeItem, pickerOpen, setPickerOpen, fileRef,
     busyMsg, reset, restart, onPickMall, onUpload, generate, relayer, findLogo, saveFoundLogo,
+    buildGenerateBody, runGenerateBody,
   };
 }
 

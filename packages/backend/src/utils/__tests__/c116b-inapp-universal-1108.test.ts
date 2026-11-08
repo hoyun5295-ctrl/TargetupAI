@@ -133,7 +133,7 @@ describe('VB6 · VB7 장마다 무대색 · 판', () => {
     expect(requestInAppBake({ ...base, stages: undefined as any })).toBe('invalid');
     expect(requestInAppBake(base)).toBe('queued');
   });
-  it('굽기 판 2(최종 정사각 그림)', () => expect(INAPP_BAKE_VERSION).toBe(2));
+  it('굽기 판 3(최종 정사각 그림 · ★ C118 인앱용 full 합성)', () => expect(INAPP_BAKE_VERSION).toBe(3));
 });
 
 describe('VB8 맞춤 주소 정규화(멱등 · 입구 무관)', () => {
@@ -179,7 +179,7 @@ describe('VB10 화면 거울 = 서버 변환 결과(레이아웃별 전체)', ()
     expect(pe).toContain('<LegacyAppPreviewPending failed={ownHosts.status === \'error\'} onRetry={loadOwnImageHosts} />');
     const pv = fe('components/InAppMessagePreview.tsx');
     // (Codex 구현 1R ①) flat 그림 없음 = undefined(판정 보류 아님) · null 만 보류
-    expect(pv).toContain('const legacyFlat = legacyView && imageUrlIn ? legacyAppImageUrl(imageUrlIn, legacyView.design, ownHosts) : undefined;');
+    expect(pv).toContain('const legacyFlat = legacyView && imageUrlIn ? legacyAppImageUrl(imageUrlIn, legacyView.design, ownHosts, legacyView.full) : undefined;');   // ★ C118 B2 전부 인앱용 = inappfull
     expect(pv).toContain('legacyFlat === null');
     expect(pv).toContain('const imageUrl = legacyView ? (legacyFlat ?? imageUrlIn) : imageUrlIn;');
     expect(pv).toContain('<LegacyAppPreviewPending failed={ownHosts.status === \'error\'} onRetry={loadOwnImageHosts} />');
