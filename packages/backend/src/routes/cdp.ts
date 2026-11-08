@@ -115,6 +115,7 @@ import { resyncCafe24ScriptTagsForCompany } from '../utils/cafe24-scripttag';
 import { issueCdpMemberToken, isCdpMemberConfirmed } from '../utils/cdp-member-token';
 import { getCreditCost } from '../utils/ai-credit-calc';
 import { getServePath, parseFitOption } from '../utils/image-serve';
+import { trustedImageHosts } from '../utils/brand-image-resolver';   // ★ C116-B D6 편집기 거울 = 서버 목록
 // ★ 2026-11-05 인앱 포스터 재구성 §3-9 예시 갤러리 · §3-2 서빙 관문
 import { findInAppExample, findInAppExampleImage, listInAppExamplesForGallery } from '../utils/inapp-examples';
 import { parseInAppClientCaps } from '../utils/inapp-message';
@@ -650,7 +651,7 @@ router.get('/inapp/example-image/:id/:slide', async (req: any, res: any) => {
   res.setHeader('Content-Type', file.mime);
   res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  // ★ 2026-11-08 C116 D9 옛 앱 맞춤(?fit=inapp · 안전 칸) — 올린 그림 주소와 같은 CT 규칙(형식 위반 · 미지원 값 = 무시)
+  // ★ 2026-11-08 C116 D9 · C116-B 옛 연동 앱 맞춤(?fit=inapp · 정사각 · 가운데 80% · 무대색) — 올린 그림 주소와 같은 CT 규칙(형식 위반 · 미지원 값 = 무시)
   res.sendFile(path.resolve(await getServePath(file.absPath, parseFitOption(req.query))));
 });
 
@@ -1356,6 +1357,12 @@ router.get('/inapp/display-eligibility', async (req: Request, res: Response) => 
     if (respondUserError(res, err)) return;   // ★ 2026-10-25 R10 — 사용자 조건 오류 = 그 상태 · 문장 그대로
     return res.status(500).json({ success: false, error: publicErrorText(err, '조회 실패') });
   }
+});
+
+// ★ 2026-11-08 C116-B D6 우리 그림으로 인정하는 호스트(서버 CT trustedImageHosts 그대로) — 편집기 「구버전 앱 모습」 거울이 짐작하지 않게(공개 호스트 이름만 · 비밀값 0)
+router.get('/inapp/own-image-hosts', (req: Request, res: Response) => {
+  if (!req.user?.companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  return res.json({ success: true, hosts: Array.from(trustedImageHosts()) });
 });
 
 router.post('/inapp', async (req: Request, res: Response) => {

@@ -15,7 +15,7 @@ import { buildInAppWebviewPage, INAPP_WEBVIEW_SDK_PATH } from '../inapp-webview-
 import { ASPECT_RATIOS } from '../image-fit-spec';
 import { parseFitOption } from '../image-serve';
 import { usesPosterFrame, drawsWithPosterFrame } from '../../../../sdk-js/src/poster-frame';
-import { legacyAppPreviewOf, inAppDeadlineText as feDeadline } from '../../../../frontend/src/components/inapp/legacy-app-view';
+import { legacyAppPreviewOf, inAppDeadlineText as feDeadline, DEFAULT_OWN_IMAGE_HOSTS } from '../../../../frontend/src/components/inapp/legacy-app-view';
 
 const IMG = (n: number) => `/api/cdp/inapp/image/11111111-2222-3333-4444-555555555555/p${n}.jpg`;
 const serve = (m: any, capsRaw: string | undefined) => {
@@ -65,11 +65,11 @@ describe('CT-V1 서빙 변환 표 — 내보내지 않음 0', () => {
   it('옛 앱(caps 없음) · 카드 = 틀 지움(장 수 무관) · 장 그림 · flat 그림 = ?fit=inapp(여러 장 · 한 장)', () => {
     const multi = serve(msg({ poster_frame: 'card' }, 3), undefined);
     expect(multi.design).toEqual({});
-    expect(multi.posterSlides!.map((s) => s.image_url)).toEqual([0, 1, 2].map((i) => `${IMG(i)}?fit=inapp`));
-    expect(multi.imageUrl).toBe(`${IMG(0)}?fit=inapp`);
+    expect(multi.posterSlides!.map((s) => s.image_url)).toEqual([0, 1, 2].map((i) => `${IMG(i)}?fit=inapp&fr=2`));
+    expect(multi.imageUrl).toBe(`${IMG(0)}?fit=inapp&fr=2`);
     const one = serve(msg({ poster_frame: 'card' }, 1), undefined);
-    expect(one.posterSlides![0].image_url).toBe(`${IMG(0)}?fit=inapp`);
-    expect(one.imageUrl).toBe(`${IMG(0)}?fit=inapp`);
+    expect(one.posterSlides![0].image_url).toBe(`${IMG(0)}?fit=inapp&fr=2`);
+    expect(one.imageUrl).toBe(`${IMG(0)}?fit=inapp&fr=2`);
   });
 
   it('옛 앱 · 통짜 = 글 비움(옛 앱은 글이 비면 막을 안 그린다) · 대체 글 = 장 제목', () => {
@@ -121,16 +121,16 @@ describe('CT-V1 서빙 변환 표 — 내보내지 않음 0', () => {
 describe('그림 미리 맞춤 주소 · 비율 표', () => {
   // ★ C116 D9 · Codex 설계 1R ⑦ = 우리 그림 판정 = toOwnImageRef(믿는 호스트만) · 같은 경로 남의 호스트 = 그대로
   it('우리 그림만 ?fit=inapp · 남의 주소 · 남의 호스트 같은 경로 · 이미 fit = 그대로 · 쿼리 이어 붙임', () => {
-    expect(withInAppImageFit(IMG(1))).toBe(`${IMG(1)}?fit=inapp`);
-    expect(withInAppImageFit(`https://app.hanjul.ai${IMG(1)}`)).toBe(`https://app.hanjul.ai${IMG(1)}?fit=inapp`);
+    expect(withInAppImageFit(IMG(1))).toBe(`${IMG(1)}?fit=inapp&fr=2`);
+    expect(withInAppImageFit(`https://app.hanjul.ai${IMG(1)}`)).toBe(`https://app.hanjul.ai${IMG(1)}?fit=inapp&fr=2`);
     expect(withInAppImageFit(`https://evil.example${IMG(1)}`)).toBe(`https://evil.example${IMG(1)}`);
-    expect(withInAppImageFit('/api/cdp/inapp/example-image/beauty-1/0?v=123')).toBe('/api/cdp/inapp/example-image/beauty-1/0?v=123&fit=inapp');
+    expect(withInAppImageFit('/api/cdp/inapp/example-image/beauty-1/0?v=123')).toBe('/api/cdp/inapp/example-image/beauty-1/0?v=123&fit=inapp&fr=2');
     expect(withInAppImageFit('https://mall.example/a.jpg')).toBe('https://mall.example/a.jpg');
     expect(withInAppImageFit(`${IMG(1)}?fit=1x1`)).toBe(`${IMG(1)}?fit=1x1`);
     expect(withInAppImageFit('/api/cdp/inapp/image/../../etc/p.jpg')).toBe('/api/cdp/inapp/image/../../etc/p.jpg');
   });
-  it('서빙 CT = inapp(1:1 + 안전 칸) 를 읽는다 · 옛 4x5 지움(무시) · 1x1 그대로', () => {
-    expect(ASPECT_RATIOS.inapp).toEqual({ w: 1, h: 1, safe: { w: 0.8, h: 0.92 } });
+  it('서빙 CT = inapp(정사각 + 가운데 80% + 무대색) 를 읽는다 · 옛 4x5 지움(무시) · 1x1 그대로', () => {
+    expect(ASPECT_RATIOS.inapp).toEqual({ w: 1, h: 1, rev: 2, safe: { w: 0.8, h: 0.8, fill: '#111827' } });   // ★ C116-B 공통 규칙
     expect(ASPECT_RATIOS['4x5']).toBeUndefined();
     expect(parseFitOption({ fit: '4x5' })).toBeNull();
     expect(parseFitOption({ fit: 'inapp' })).toEqual({ aspect: 'inapp', mode: 'pad' });
@@ -156,11 +156,12 @@ describe("CT-V1' 편집기 「구버전 앱 모습」 = 서버 변환(caps 없�
     it(name, () => {
       const m = msg(d, n);
       const server = serve(m, undefined);
-      const fe = legacyAppPreviewOf(d, m.posterSlides, m.endAt);
+      const fe = legacyAppPreviewOf(d, m.posterSlides, m.endAt, { status: 'ready', hosts: DEFAULT_OWN_IMAGE_HOSTS });
       const { dismiss_mode: _x, ...serverDesign } = server.design || {};
       expect(fe.design).toEqual(serverDesign);
-      // 글(제목 · 본문) = 같은 값 · 그림 주소 미리 맞춤은 그리는 쪽(맞추기)이 같은 결과를 낸다
-      expect(fe.slides.map((s: any) => [s.title ?? '', s.body ?? ''])).toEqual(server.posterSlides!.map((s: any) => [s.title ?? '', s.body ?? '']));
+      // 글(제목 · 본문) · ★ C116-B 그림 주소(서버가 실제로 내주는 맞춤 주소) = 같은 값
+      expect(fe.slides.map((s: any) => [s.title ?? '', s.body ?? '', s.image_url])).toEqual(server.posterSlides!.map((s: any) => [s.title ?? '', s.body ?? '', s.image_url]));
+      expect(fe.unknown).toBe(false);
     });
   }
   it('게시 끝 시각 글 = 서버와 같다', () => {

@@ -184,7 +184,7 @@ export function PosterSheetPreview({
               ? { position: 'relative', width: '100%', aspectRatio: '4 / 5', maxHeight: px(440), overflow: 'hidden', background: hasImg ? '#23252c' : 'linear-gradient(135deg,#e8e8ee,#d4d4dd)' }
               : { position: 'relative', width: '100%', overflow: 'hidden' },
             multi || !hasImg ? {} : { height: 'auto', maxHeight: px(440) },
-            // ★ C114 K2 이 갈래 = 옛 앱 미리보기 전용(웹 · 웹뷰 = 새 틀) · 여러 장 = 서버가 4:5 로 미리 맞춘 그림 = 맞추기와 같은 결과(잘림 0)
+            // ★ C114 K2 이 갈래 = 옛 앱 미리보기 전용(웹 · 웹뷰 = 새 틀) · 여러 장 = 서버가 정사각(가운데 80% · 무대색)으로 맞춘 그림 주소(★ C116-B legacyAppImageUrl) = 맞추기와 같은 결과(잘림 0)
             multi ? 'contain' : 'cover', '#6b6b75',
             (eyebrowText || s.title || s.body || editable) ? (
               <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: `${px(52)}px ${px(22)}px ${px(18)}px`, background: 'linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.66) 100%)', color: msgOverlay, maxHeight: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>

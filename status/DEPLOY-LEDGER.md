@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: b374ed44 · 2026-11-08 · Harold 실행 보고(C114 · 서버 git pull · 확인 출력 = HEAD b374ed44 2026-11-08 07:59:40 +0900)
-- deployed_head: b374ed44 · 2026-11-08 · Harold 실행 보고(C114 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺62 · 에러 로그 0줄)
+- pulled_head: da9baa11 · 2026-11-08 · Harold 실행 보고(C117 · 서버 git pull · 확인 출력 = HEAD da9baa11 2026-11-08 13:34:41 +0900) · 그 전 ca7c99cd(C116)
+- deployed_head: da9baa11 · 2026-11-08 · Harold 실행 보고(C117 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺67 · unstable 0 · 에러 로그 0줄) · 그 전 ca7c99cd(C116)
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -60,7 +60,8 @@
 | C112 | 4ffe7988 |
 | C113 | 4ffe7988 |
 | C114 | b374ed44 |
-| C116 | 미커밋 |
+| C116 | ca7c99cd |
+| C117 | da9baa11 |
 
 ## §1 대기
 
@@ -1538,9 +1539,24 @@ COMMIT;
 ### C116-H1 · 한줄로 배포(인앱 구워 보내기 · 백엔드 + 프론트 + SDK 서빙 파일 · DDL 0 · ENV 0)
 - 카드: C116
 - 단계: 한줄로 배포
-- 선행: 커밋(Harold · C116 경로만 · C117 파일 뺌) → push
+- 선행: 커밋 ca7c99cd(Harold · 35 경로 · C117 파일 뺌) → push
 - 기대: 설계서 docs/2026-11-08-c116-inapp-bake-design.md · caps 없는 옛 앱 = 새 모양(틀 · 띠 · 통짜 · 카드)이 구운 그림으로 내려감 · 그림 맞춤 ?fit=inapp(1:1 + 안전 칸) · 바로가기 · 오늘 하루 보지 않기 · 닫기 = 앱 버튼 그대로 · caps 보내는 앱 · 미가입 · 직접발송만 = 변화 0
 - 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 테스트계정 헬로윈파티 다시 게시 한 번 → 서버 uploads/inapp/<회사>/bake-*.json · jpg 생김 → 팝폰(지금 설치판)에서 잘림 없이 새 모양 · 바로가기 동작
+- 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD ca7c99cd(2026-11-08 13:05:29 +0900) · targetup-backend online ↺66 · unstable 0 · 에러 로그 0줄 → 서버 단계 통과 · 굽기 = 팝폰 열람 요청으로 13:19:01(1310ms) · 13:19:28(930ms · 통짜 포스터 카드로 고친 뒤 새 열쇠) 3장씩 · jpg 셋 + json 생김 · 팝폰 = 포스터 통째(잘림 0) · ★Harold 「이렇게 밖에 안된다」 = 편집기 모습(가운데 카드 · 1/3 · 카드 안 버튼)이 아니라 바닥 시트 · 원인(설치판 소스맵 = 지금 InAppBottomSheet.tsx 와 같음) = 2장 이상은 바닥 시트 캐러셀 서랍 하나뿐 · 가운데 모달은 한 장만 → 그릇은 앱이 정함 · 처방 대기
+### C117-H1 · 한줄로 배포(오류접수 다섯 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C117
+- 단계: 한줄로 배포
+- 선행: 커밋 da9baa11(Harold · C117 경로 28 · 인앱 · 다른 세션 문서 뺌) → push
+- 기대: 설계서 docs/2026-11-08-c117-intake-five-design.md · 여정 A/B 칸 스팸 검사 · 켜기 통과 · 브랜드 인증번호 칸 0 · 대체 발송 화면 겹침 0 · 스크롤 · 이름 칸 · 통계 대상 이름 · 수신번호별 친구 / 비친구 · 미가입 · 직접발송만 = 변화 0
+- 확인: 서버 HEAD · dist 표식(withFriendYnField · 「번호 · 이름 검색」) · pm2 기동 · 에러 로그 → 직원 지시문 1 ~ 15(로드맵 묶음 끝 시트)
+- 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD da9baa11(2026-11-08 13:34:41 +0900) · 백엔드 dist 표식 3 · 프론트 dist 표식 1 · targetup-backend online ↺67 · unstable 0 · 에러 로그 0줄 → 서버 단계 통과 · 직원 확인 대기
+
+### C116-H2 · 한줄로 배포(C116-B 옛 연동 앱 출력 공통 규칙 · 백엔드 + 프론트 + SDK 서빙 파일 · DDL 0 · ENV 0)
+- 카드: C116
+- 단계: 한줄로 배포
+- 선행: C116-H1 · 커밋(Harold · C116-B 경로만 · C117 파일 뺌) → push
+- 기대: 설계서 docs/2026-11-08-c116b-inapp-universal-output-design.md · caps 없는 앱 = 구운 그림이 정사각 최종본(어두운 무대 위 카드 · 흰 귀퉁이 0 · 흐림 0) · 대체 그림 주소 ?fit=inapp&fr=2 · 편집기 「구버전 앱 모습」 = 같은 모습 · 관리 화면 앱 연동 안내 = 정사각 · 가운데 80% 문장 · caps 있는 클라이언트 · 미가입 · 직접발송만 = 변화 0
+- 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 팝폰 실행 한 번 → 서버 bake-*.jpg 새 열쇠 생김(정사각) → 팝폰 두 번째 실행에서 무대 위 카드 · 잘림 0
 - 결과:
 
 ## §2 덤프 뒤 적용분

@@ -8,12 +8,15 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import { servedSdkFilePath } from './sdk-serve';
 import { INAPP_WEBVIEW_SDK_VERSION } from './inapp-webview-page';
 import { sendSystemAlert } from './system-alert';
+import { fitToCanvas, SERVE_MAX_WIDTH } from './image-serve';
+import { ASPECT_RATIOS, INAPP_STAGE_HEX } from './image-fit-spec';
 
-/** 굽기 판(그리는 방법을 바꾸면 올린다 → 모든 열쇠가 바뀐다) */
-export const INAPP_BAKE_VERSION = 1;
+/** 굽기 판(그리는 방법을 바꾸면 올린다 → 모든 열쇠가 바뀐다) · ★ C116-B 2 = 최종 정사각 그림(투명 찍기 + 무대 합성) */
+export const INAPP_BAKE_VERSION = 2;
 /** 서버 크롬 화면(휴대폰 · 1108 시험과 같은 값) */
 export const INAPP_BAKE_VIEW = { width: 390, height: 844, deviceScaleFactor: 3 } as const;
 /** 옛 열쇠를 지우기 전 남기는 시간(이미 내려보낸 주소 · 그림 캐시 하루 · D12) */
@@ -40,6 +43,21 @@ export interface InAppBakeJob {
   expected: number;
   /** 웹뷰 페이지에 넣는 값 = { message(판 넷 사본 · 그림 = 상대 경로), still: { deadlineText } } */
   payload: Record<string, unknown>;
+  /** ★ C116-B 장마다 무대색(#hex · 길이 = expected · 판정 = inapp-message inAppBakePlan) */
+  stages: string[];
+}
+
+/**
+ * ★ C116-B D3 찍은 틀 상자(투명 바탕 PNG) → 최종 그림 = 인앱 맞춤 규격(정사각 · 가운데 안전 칸 · 무대색) 그대로 · JPEG(q90).
+ *   캔버스 변 = 상자 긴 변 ÷ 안전 칸(내용을 늘리지 않음) · 상한 SERVE_MAX_WIDTH · 맞춤 CT fitToCanvas 하나(대체 길과 같은 함수 · K6).
+ */
+export async function composeInAppBakeSlide(png: Buffer, stage: string): Promise<Buffer> {
+  const safe = ASPECT_RATIOS.inapp.safe!;
+  const meta = await sharp(png).metadata();
+  const w = meta.width || 1, h = meta.height || 1;
+  const side = Math.max(1, Math.min(SERVE_MAX_WIDTH, Math.ceil(Math.max(w / safe.w, h / safe.h))));
+  const fill = INAPP_STAGE_HEX.test(stage) ? stage : safe.fill;
+  return sharp(await fitToCanvas(png, side, side, 'pad', { ...safe, fill })).flatten({ background: fill }).jpeg({ quality: 90, mozjpeg: true }).toBuffer();
 }
 
 interface BakeManifest { v: 1; key: string; messageId: string; count: number; createdAt: string; supersededAt?: string | null }
@@ -195,6 +213,8 @@ export type InAppBakeRequestResult = 'queued' | 'duplicate' | 'full' | 'cooldown
 /** 굽기 요청(같은 열쇠 한 번 · 상한 20 · 실패 10분 쉼) — 기다리지 않는다(게시 · 서빙이 막히지 않게 · K5) */
 export function requestInAppBake(job: InAppBakeJob, now: number = Date.now()): InAppBakeRequestResult {
   if (!UUID_RE.test(job.companyId) || !KEY_RE.test(job.key) || !(job.expected >= 1)) return 'invalid';
+  // ★ C116-B 장마다 무대색 = 길이 · 꼴이 맞아야 굽는다(어긋나면 그림 · 무대 짝이 틀어진다 · K5)
+  if (!Array.isArray(job.stages) || job.stages.length !== job.expected || !job.stages.every((c) => INAPP_STAGE_HEX.test(String(c)))) return 'invalid';
   const k = ck(job.companyId, job.key);
   if (inflight.has(k) || queue.some((q) => ck(q.companyId, q.key) === k)) return 'duplicate';
   if ((failedUntil.get(k) || 0) > now) return 'cooldown';
@@ -388,11 +408,14 @@ async function runWithChrome(job: InAppBakeJob): Promise<Buffer[]> {
       const frame = await page.$('[data-hjl-frame]');
       const box = frame ? await frame.boundingBox() : null;
       if (!box) throw new Error('틀 상자 없음');
-      const buf = await page.screenshot({ type: 'jpeg', quality: 90, clip: box, captureBeyondViewport: false });
+      // ★ C116-B D3 투명 바탕 PNG(둥근 모서리 밖 = 투명 → 무대색 · 흰 귀퉁이 0)
+      const buf = await page.screenshot({ type: 'png', omitBackground: true, clip: box, captureBeyondViewport: false });
       out.push(Buffer.from(buf));
     }
     if (overflow) throw new Error('받은 바이트 상한 넘음');
-    return out;
+    const finals: Buffer[] = [];
+    for (let s = 0; s < out.length; s++) finals.push(await composeInAppBakeSlide(out[s], job.stages[s]));
+    return finals;
   } finally {
     await page.close().catch(() => {});
     if (browser) scheduleIdleClose();

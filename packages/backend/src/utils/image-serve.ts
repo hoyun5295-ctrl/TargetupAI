@@ -100,17 +100,17 @@ async function edgeStats(buf: Buffer): Promise<{ rgb: [number, number, number]; 
  */
 export async function fitToCanvas(
   buf: Buffer, canvasW: number, canvasH: number, mode: FitMode,
-  /** ★ 2026-11-08 C116 D9 안전 칸(캔버스 대비 폭 · 높이 비) — 있으면 원본을 그 칸 안에만 넣는다(늘 맞추기 · 바탕 규칙은 같음) */
-  safe?: { w: number; h: number } | null,
+  /**
+   * ★ 2026-11-08 C116 D9 · C116-B 안전 칸(캔버스 대비 폭 · 높이 비) + 무대색 — 있으면 원본을 그 칸 안에만 넣고(늘 맞추기)
+   *   빈자리는 무대색 단색(흐림 · 가장자리 색 0 · 투명한 곳도 무대색 · 설계서 C116-B D1 · D2)
+   */
+  safe?: { w: number; h: number; fill: string } | null,
 ): Promise<Buffer> {
   if (safe) {
     const fg = await sharp(buf)
       .resize({ width: Math.max(1, Math.round(canvasW * safe.w)), height: Math.max(1, Math.round(canvasH * safe.h)), fit: 'inside' })
       .toBuffer();
-    const { rgb, deviation } = await edgeStats(buf);
-    const bg = deviation < EDGE_UNIFORM_THRESHOLD
-      ? await sharp({ create: { width: canvasW, height: canvasH, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer()
-      : await sharp(buf).resize({ width: canvasW, height: canvasH, fit: 'cover' }).blur(24).modulate({ brightness: 1.03 }).toBuffer();
+    const bg = await sharp({ create: { width: canvasW, height: canvasH, channels: 3, background: safe.fill } }).png().toBuffer();
     return sharp(bg).composite([{ input: fg, gravity: 'center' }]).toBuffer();
   }
   if (mode === 'crop') {
@@ -194,7 +194,8 @@ async function buildServePath(
     if (!fs.existsSync(originalPath)) return originalPath;
 
     const mode: FitMode = safe ? 'pad' : fit?.mode === 'crop' ? 'crop' : 'pad';
-    const variant = ratio ? `${SERVE_MAX_WIDTH}-${fit!.aspect}-${mode}` : String(SERVE_MAX_WIDTH);
+    // ★ C116-B 규격 rev = 폴더 이름에(값이 바뀌면 옛 변환본을 다시 쓰지 않는다 · rev 없는 키 = 옛 이름 그대로)
+    const variant = ratio ? `${SERVE_MAX_WIDTH}-${fit!.aspect}-${mode}${ratio.rev ? `-r${ratio.rev}` : ''}` : String(SERVE_MAX_WIDTH);
 
     const dir = path.dirname(originalPath);
     const base = path.basename(originalPath);

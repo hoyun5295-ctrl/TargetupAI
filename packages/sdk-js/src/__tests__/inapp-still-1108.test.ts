@@ -111,3 +111,18 @@ describe('C116 V9 SDK 호스트 정지', () => {
     for (const n of ['card-close-row', 'pager', 'cta-host', 'strip-timer']) expect(part(document, n), n).toBeTruthy();
   });
 });
+
+/** ★ 2026-11-08 C116-B VB11 정지 = 틀 상자 그림자 0(찍는 상자 밖으로 뻗어 잘리는 값) · 정지 아님 = 그림자 그대로 */
+describe('C116-B VB11 정지 그림자', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  for (const frame of ['sheet', 'card']) {
+    it(`${frame}: 정지 = boxShadow none · 정지 아님 = 그림자 있음`, () => {
+      const design = frame === 'card' ? { poster_frame: 'card' } : {};
+      const base = { slides: two as any, design, now: Date.parse('2026-11-08T00:00:00Z'), endAt: null, mount: 'frame' as const, viewportHeight: 800 };
+      const boxOf = (r: ReturnType<typeof buildPosterFrame>) => r.root.querySelector(`[data-hjl-part="${frame === 'card' ? 'card' : 'sheet'}"]`) as HTMLElement;
+      expect(boxOf(buildPosterFrame({ ...base, still: { deadlineText: null } })).style.boxShadow).toBe('none');
+      expect(boxOf(buildPosterFrame(base)).style.boxShadow).not.toBe('none');
+      expect(boxOf(buildPosterFrame(base)).style.boxShadow).not.toBe('');
+    });
+  }
+});

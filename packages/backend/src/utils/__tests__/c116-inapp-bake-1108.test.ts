@@ -19,7 +19,7 @@ import {
 import { ASPECT_RATIOS } from '../image-fit-spec';
 import { getServePath } from '../image-serve';
 import { drawsWithPosterFrame } from '../../../../sdk-js/src/poster-frame';
-import { legacyAppWillBake, LEGACY_BAKE_VIEW, LEGACY_BAKE_SAFE } from '../../../../frontend/src/components/inapp/legacy-app-view';
+import { legacyAppWillBake, LEGACY_BAKE_VIEW, LEGACY_BAKE_SAFE, DEFAULT_OWN_IMAGE_HOSTS, type OwnHostsSnapshot } from '../../../../frontend/src/components/inapp/legacy-app-view';
 import { appCapsNote } from '../../../../frontend/src/components/inapp/inappSlides';
 
 const CO = '11111111-2222-3333-4444-555555555555';
@@ -33,6 +33,8 @@ const msg = (design: any, slides: number, over: Record<string, any> = {}): any =
   ...over,
 });
 const NONE = new Set<string>();
+/** ★ C116-B 화면 거울 호스트 = 서버 목록을 받은 상태(기본 넷) */
+const HOSTS: OwnHostsSnapshot = { status: 'ready', hosts: DEFAULT_OWN_IMAGE_HOSTS };
 const ALL = new Set<string>(INAPP_CLIENT_CAPS);
 const DESIGNS: Record<string, any> = {
   overlay: {}, baked_sheet: { poster_text: 'baked' }, baked_card: { poster_text: 'baked', poster_frame: 'card' }, live_card: { poster_frame: 'card' },
@@ -91,21 +93,21 @@ describe('V15 우리 그림 · 굽기 사본 주소', () => {
 
 describe('V2 구운 메시지', () => {
   const files = [0, 1, 2].map((i) => `/api/cdp/inapp/image/${CO}/bake-${'a'.repeat(24)}-${i}.jpg`);
-  it('글 칸 비움 · 장 버튼 · 그림 링크 · 메시지 버튼 그대로 · 장 그림 · imageUrl = 구운 주소 ?fit=inapp · 그리는 칸 지움', () => {
+  it('글 칸 비움 · 장 버튼 · 그림 링크 · 메시지 버튼 그대로 · 장 그림 · imageUrl = 구운 주소 그대로(★ C116-B 최종 그림 · 맞춤 0) · 그리는 칸 지움', () => {
     const full = toServedMessage(gateInAppForClient(msg({ poster_frame: 'card', poster_strip: { type: 'coupon', code: 'X' }, dismiss_mode: 'snooze_day' }, 3, { badgeText: '배지' }), ALL));
     const out = bakedLegacyMessage(full, files);
     expect([out.title, out.body, out.badgeText]).toEqual(['', '', null]);
     expect(out.design).toEqual({ dismiss_mode: 'snooze_day' });
-    expect(out.posterSlides.map((s) => s.image_url)).toEqual(files.map((f) => `${f}?fit=inapp`));
-    expect(out.imageUrl).toBe(`${files[0]}?fit=inapp`);
+    expect(out.posterSlides.map((s) => s.image_url)).toEqual(files);
+    expect(out.imageUrl).toBe(files[0]);
     expect(out.posterSlides.map((s) => s.cta?.label)).toEqual(['버튼0', '버튼1', '버튼2']);
     expect(out.posterSlides.every((s: any) => s.title === undefined && s.body === undefined && s.eyebrow === undefined)).toBe(true);
     expect(out.buttons).toEqual(full.buttons);
   });
-  it('(Codex 설계 1R ①) 장 없는 flat = 팝폰이 읽는 imageUrl 이 구운 그림 · 버튼 = 메시지 버튼', () => {
+  it('(Codex 설계 1R ①) 장 없는 flat = 단일 포스터 그림(imageUrl)이 구운 그림 · 버튼 = 메시지 버튼', () => {
     const full = toServedMessage(gateInAppForClient(msg({ poster_frame: 'card' }, 0), ALL));
     const out = bakedLegacyMessage(full, files.slice(0, 1));
-    expect(out.imageUrl).toBe(`${files[0]}?fit=inapp`);
+    expect(out.imageUrl).toBe(files[0]);
     expect(out.buttons[0].label).toBe('바로가기');
   });
 });
@@ -118,13 +120,13 @@ describe('V3 서빙 한 곳', () => {
     expect(out.posterSlides[0].image_url).toBe('/x/0.jpg');   // 남의 경로 꼴이라 맞춤 꼬리 없음(판정 = toOwnImageRef)
     expect(calls).toHaveLength(0);
   });
-  it('준비 안 됨 = 대체(?fit=inapp) + 요청 한 번', () => {
+  it('준비 안 됨 = 대체(?fit=inapp&fr=2) + 요청 한 번 · 장마다 무대색', () => {
     const calls: InAppBakeJob[] = [];
     const out = serveInAppForClient(m, NONE, CO, { read: () => null, request: (j) => calls.push(j) });
     expect(out).toEqual(legacyServeTransform(toServedMessage(gateInAppForClient(m, NONE)), NONE));
-    expect(out.posterSlides[0].image_url).toBe(`${IMG(0)}?fit=inapp`);
+    expect(out.posterSlides[0].image_url).toBe(`${IMG(0)}?fit=inapp&fr=2`);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ companyId: CO, messageId: m.id, expected: 2 });
+    expect(calls[0]).toMatchObject({ companyId: CO, messageId: m.id, expected: 2, stages: ['#111827', '#111827'] });
   });
   it('판 넷 = 원본 그대로 · 읽기 · 요청 0', () => {
     let reads = 0; const calls: unknown[] = [];
@@ -178,7 +180,7 @@ describe('V6 열쇠', () => {
 
 describe('V7 · V13 저장 · 쓸기 · 되돌림 · 캐시', () => {
   let dir: string;
-  const job = (key: string, messageId = 'm-1', expected = 2): InAppBakeJob => ({ companyId: CO, messageId, key, expected, payload: {} });
+  const job = (key: string, messageId = 'm-1', expected = 2): InAppBakeJob => ({ companyId: CO, messageId, key, expected, payload: {}, stages: Array(expected).fill('#111827') });
   const K = (c: string) => c.repeat(24);
   beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c116-bake-')); __inAppBakeTest.reset(); __inAppBakeTest.setImageBase(dir); });
   afterEach(() => { __inAppBakeTest.reset(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -306,7 +308,7 @@ describe('V8 대기열 · 시한 · 받은 바이트', () => {
   let dir: string;
   beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'c116-q-')); __inAppBakeTest.reset(); __inAppBakeTest.setImageBase(dir); });
   afterEach(() => { __inAppBakeTest.reset(); fs.rmSync(dir, { recursive: true, force: true }); });
-  const j = (c: string, co = CO): InAppBakeJob => ({ companyId: co, messageId: `m-${c}`, key: c.repeat(24 / c.length), expected: 1, payload: {} });
+  const j = (c: string, co = CO): InAppBakeJob => ({ companyId: co, messageId: `m-${c}`, key: c.repeat(24 / c.length), expected: 1, payload: {}, stages: ['#111827'] });
 
   it('같은 열쇠 한 번 · 상한 20 · 실패 = 쉼', async () => {
     let release: () => void = () => {};
@@ -390,8 +392,8 @@ describe('V12 서빙 한 곳(R60 · K6 · 소스에서 기계 추출)', () => {
   });
 });
 
-describe('V14 보이는 곳(규격 · 독립 계산)', () => {
-  // 원본 r_o(세로/가로)를 inapp 캔버스(1:1) 안전 칸(폭 sw · 높이 sh)에 inside 로 넣고, 칸 세로/가로 b 로 cover 했을 때 원본이 통째로 보이는가
+describe('V14 보이는 곳(★ C116-B 공통 규칙 · 독립 계산 · 한 앱 칸 공식 0)', () => {
+  // 원본 r_o(세로/가로)를 inapp 캔버스(정사각) 안전 칸에 inside 로 넣고, 칸 세로/가로 b 를 가운데 맞춤 cover 로 채웠을 때 원본이 통째로 보이는가
   const spec = ASPECT_RATIOS.inapp;
   const visible = (ro: number, b: number) => {
     const W = 1, H = spec.h / spec.w;   // 캔버스
@@ -403,16 +405,17 @@ describe('V14 보이는 곳(규격 · 독립 계산)', () => {
     const visH = b >= c ? H : H * (b / c);
     return fw <= visW + 1e-9 && fh <= visH + 1e-9;
   };
-  const boxes = (r: number) => [Math.min(1.25, 0.62 * r), Math.min(1, 0.66 * r)];
-  for (const ro of [1, 4 / 3, 1.5, 9 / 16]) {
-    for (const r of [1.5, 1 / 0.62 - 0.001, 1 / 0.62 + 0.001, 1.78, 2.0, 2.22]) {
-      it(`원본 세로/가로 ${ro.toFixed(3)} · 화면 ${r.toFixed(4)} = 통째로 보임`, () => {
-        for (const b of boxes(r)) expect(visible(ro, b), `b=${b}`).toBe(true);
-      });
+  // 연동 계약 약속 = 칸 가로:세로 5:4 ~ 4:5(세로/가로 0.8 ~ 1.25) · 원본 비율 무관
+  for (const ro of [1, 4 / 3, 1.5, 3, 9 / 16, 1 / 3]) {
+    for (const b of [0.8, 0.85, 0.93, 1, 1.1, 1.2, 1.25]) {
+      it(`원본 세로/가로 ${ro.toFixed(3)} · 칸 ${b} = 통째로 보임`, () => expect(visible(ro, b)).toBe(true));
     }
   }
-  it('1.5 미만(4:3 태블릿)은 세로 원본 위아래가 잘린다(설계서에 밝힌 지원 하한)', () => {
-    expect(boxes(4 / 3).some((b) => !visible(4 / 3, b))).toBe(true);
+  it('약속 범위 밖(칸 4:3 · 16:9 등) = 잘릴 수 있다(계약에 범위를 적은 까닭)', () => {
+    expect(visible(1, 1.5) && visible(1, 0.5625)).toBe(false);
+  });
+  it('규격 = 정사각 · 가운데 80% × 80% · 무대색 · rev 2(값을 바꾸면 rev 를 올린다)', () => {
+    expect(spec).toEqual({ w: 1, h: 1, rev: 2, safe: { w: 0.8, h: 0.8, fill: '#111827' } });
   });
 });
 
@@ -454,7 +457,7 @@ describe('V16 실제 서빙(getServePath · inapp)', () => {
     ['작은 정사각 1000×1000', 1000, 1000, 'sq.png', false], ['세로 600×900', 600, 900, 'tall.png', false], ['가로 900×500', 900, 500, 'wide.png', false],
     ['움직이는 정사각 webp', 400, 400, 'anim.webp', true], ['GIF 정사각', 400, 400, 'g.gif', false],
   ] as const) {
-    it(`${name} = 1:1 캔버스 · 원본이 안전 칸(80% × 92%) 안`, async () => {
+    it(`${name} = 정사각 캔버스 · 원본이 안전 칸(80% × 80%) 안 · 바깥 = 무대색`, async () => {
       const { p: src, fx, fy } = await make(w, h, file, animated);
       const out = await getServePath(src, { aspect: 'inapp', mode: 'pad' });
       expect(out).not.toBe(src);   // 원본 그대로 반환 0(Codex 설계 2R ① · 3R ①)
@@ -464,7 +467,13 @@ describe('V16 실제 서빙(getServePath · inapp)', () => {
       const ow = (b.x1 - b.x0 + 1) / fx, oh = (b.y1 - b.y0 + 1) / fy;
       expect(b.x1).toBeGreaterThan(b.x0);
       expect(ow).toBeLessThanOrEqual(b.W * 0.8 + 4);
-      expect(oh).toBeLessThanOrEqual(b.H * 0.92 + 4);
+      expect(oh).toBeLessThanOrEqual(b.H * 0.8 + 4);
+      // ★ C116-B 빈자리 = 무대색(흐림 · 가장자리 색 0) — 네 귀퉁이 픽셀
+      const { data, info } = await sharp(fs.readFileSync(out)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      for (const [x, y] of [[1, 1], [info.width - 2, 1], [1, info.height - 2], [info.width - 2, info.height - 2]]) {
+        const o = (y * info.width + x) * info.channels;
+        expect([data[o], data[o + 1], data[o + 2]].map((v, k) => Math.abs(v - [0x11, 0x18, 0x27][k]) <= 3)).toEqual([true, true, true]);
+      }
       const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
       expect(Math.abs(cx - b.W / 2)).toBeLessThanOrEqual(3);
       expect(Math.abs(cy - b.H / 2)).toBeLessThanOrEqual(3);
@@ -485,21 +494,21 @@ describe('V11 편집기 거울 · 안내', () => {
   for (const [name, m] of cases) {
     it(`${name}: 화면 legacyAppWillBake = 서버 inAppBakePlan(caps 없음)`, () => {
       const server = inAppBakePlan(m, NONE, CO).bake;
-      const fe = legacyAppWillBake({ design: m.design, slides: m.posterSlides, imageUrl: m.imageUrl, texts: [m.title, m.body, m.badgeText] });
+      const fe = legacyAppWillBake({ design: m.design, slides: m.posterSlides, imageUrl: m.imageUrl, texts: [m.title, m.body, m.badgeText] }, HOSTS);
       expect(fe).toBe(server);
     });
   }
   it('(Codex 구현 1R ⑤) 미리보기 굽기 화면 · 안전 칸 = 서버 값', () => {
     expect(LEGACY_BAKE_VIEW).toEqual({ width: INAPP_BAKE_VIEW.width, height: INAPP_BAKE_VIEW.height });
-    expect(LEGACY_BAKE_SAFE).toEqual(ASPECT_RATIOS.inapp.safe);
+    expect(LEGACY_BAKE_SAFE).toEqual({ w: ASPECT_RATIOS.inapp.safe!.w, h: ASPECT_RATIOS.inapp.safe!.h });
   });
   it('(Codex 구현 1R ④) 통짜 · 장 버튼 글 개인화 = 그림에 안 그리므로 굽힘(서버 = 화면) · 통짜 띠 코드 개인화 = 안 굽힘', () => {
     const m1 = msg({ poster_text: 'baked', poster_frame: 'card' }, 2, { posterSlides: [{ image_url: IMG(0), cta: { label: '%고객명%님 혜택' } }, { image_url: IMG(1) }] });
     expect(inAppBakePlan(m1, NONE, CO).bake).toBe(true);
-    expect(legacyAppWillBake({ design: m1.design, slides: m1.posterSlides, imageUrl: m1.imageUrl, texts: [m1.title, m1.body, m1.badgeText] })).toBe(true);
+    expect(legacyAppWillBake({ design: m1.design, slides: m1.posterSlides, imageUrl: m1.imageUrl, texts: [m1.title, m1.body, m1.badgeText] }, HOSTS)).toBe(true);
     const m2 = msg({ poster_text: 'baked', poster_strip: { type: 'coupon', code: '{{ customer.code }}' } }, 2);
     expect(inAppBakePlan(m2, NONE, CO).bake).toBe(false);
-    expect(legacyAppWillBake({ design: m2.design, slides: m2.posterSlides, imageUrl: m2.imageUrl, texts: [m2.title, m2.body, m2.badgeText] })).toBe(false);
+    expect(legacyAppWillBake({ design: m2.design, slides: m2.posterSlides, imageUrl: m2.imageUrl, texts: [m2.title, m2.body, m2.badgeText] }, HOSTS)).toBe(false);
   });
   it('안내 = 누르는 동작이 다른 것만(쿠폰 · 남은 시간) · 카드만 = 없음', () => {
     expect(appCapsNote({ poster_strip: { type: 'coupon', code: 'A' } }, 1)?.text).toBe('옛 앱에서는 쿠폰 복사 버튼 없이 코드만 보여요');
@@ -514,8 +523,10 @@ describe('V11 편집기 거울 · 안내', () => {
     expect(pfp).toContain('rail.textContent = PREVIEW_RAIL_CSS;');
     const lbp = fe('components/inapp/LegacyBakedPreview.tsx');
     expect(lbp).toContain('still={{ deadlineText: inAppDeadlineText(endAt ?? null) }}');
-    expect(fe('components/inapp/PosterEditor.tsx')).toContain('const bakedLegacy = legacyApp && legacyAppWillBake(');
-    expect(fe('components/InAppMessagePreview.tsx')).toContain('const bakedLegacy = legacyPoster && legacyAppWillBake(');
+    expect(fe('components/inapp/PosterEditor.tsx')).toContain('const bakeJudge = legacyApp ? legacyAppWillBake(');
+    expect(fe('components/inapp/PosterEditor.tsx')).toContain('const bakedLegacy = bakeJudge === true;');
+    expect(fe('components/InAppMessagePreview.tsx')).toContain('const bakeJudge = legacyPoster ? legacyAppWillBake(');
+    expect(fe('components/InAppMessagePreview.tsx')).toContain('const bakedLegacy = bakeJudge === true;');
     // (Codex 구현 1R ⑥) 넘긴 장의 버튼 = 여러 장 = 장 버튼 · 한 장 = 메시지 버튼(팝폰 InAppBottomSheet.tsx:145 · :232-235)
     expect(fe('components/InAppMessagePreview.tsx')).toContain('const bakedBtn: any = bakedSlideList.length >= 2 ? (bakedSlideList[Math.min(bakedActive, bakedSlideList.length - 1)] as any)?.cta || null : (buttons || [])[0] || null;');
     expect(fe('components/InAppMessagePreview.tsx')).toContain('onActive={setBakedActive}');

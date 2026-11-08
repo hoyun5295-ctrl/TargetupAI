@@ -40,8 +40,8 @@ const OWN_IMAGE_RE = /^\/api\/cdp\/inapp\/image\/([^/]+)\/([^/?#]+)$/;
 /** DNS 표기 정규화 — 소문자 + root dot 제거(`hanjul.ai.` = `hanjul.ai`) */
 const normalizeHost = (h: string): string => h.toLowerCase().replace(/\.$/, '');
 
-/** 절대 URL을 우리 서빙으로 인정할 호스트 — `brand-message.ts`와 같은 env 규약 */
-function trustedImageHosts(): Set<string> {
+/** 절대 URL을 우리 서빙으로 인정할 호스트 — `brand-message.ts`와 같은 env 규약 · ★ C116-B D6 내보냄(편집기 거울이 이 목록을 내려받는다 · 화면 짐작 0) */
+export function trustedImageHosts(): Set<string> {
   const hosts = new Set<string>(['hanjul.ai', 'app.hanjul.ai', 'localhost', '127.0.0.1']);
   for (const v of [process.env.HANJUL_BASE_URL, process.env.PUBLIC_BASE_URL]) {
     if (!v) continue;

@@ -24,6 +24,7 @@ import { findAiFillPlaceholder } from './copy-benefit-detector';   // ★ 2026-1
 import { textHasPersonalizationVar } from './inapp-personalization';   // ★ 2026-11-05 통짜 장 글 = 바꿔 넣기 글 금지(치환과 같은 근거)
 import { inAppDmLinkPolicyDefect } from './inapp-dm-link-policy';
 import { toOwnImageRef } from './brand-image-resolver';   // ★ 2026-11-08 C116 D1 우리 그림 판정 한 곳(R1)
+import { ASPECT_RATIOS, inAppStageColor } from './image-fit-spec';   // ★ C116-B 인앱 맞춤 규격 · 무대색 한 곳
 import { inAppBakeKey, readInAppBake, requestInAppBake, type InAppBakeJob } from './inapp-bake';   // ★ C116 굽기 CT   // ★ 2026-11-05 §3-6 DM 참여 연결 판정(트랜잭션 연결로만 읽음)
 import type { TxRun } from '../config/database';
 
@@ -1458,15 +1459,30 @@ export function gateInAppForClient(m: InAppMessageDetail, caps: ReadonlySet<stri
 }
 
 /**
- * ★ C114 I-2 · ★ 2026-11-08 C116 D9 옛 앱 그림 맞춤 = `?fit=inapp`(1:1 캔버스 + 가운데 안전 칸 · 팝폰 칸이 cover 로 잘라도 원본 통째로).
- *   우리 그림만(올린 그림 = `toOwnImageRef` 한 판정 · 믿는 호스트 · 예시 그림 = 상대 경로) · 남의 주소 = 그대로(Codex 설계 1R ⑦).
+ * ★ C114 I-2 · C116 D9 · ★ 2026-11-08 C116-B D1 옛 연동 앱 그림 맞춤 = **정규화 한 곳**(설계서 docs/2026-11-08-c116b-inapp-universal-output-design.md).
+ *   들어온 주소에서 우리 맞춤 표시(`fit=inapp` · `fr`)를 걷고 → 우리 그림(`toOwnImageRef` · 믿는 호스트) · 예시 그림이면 지금 판(`fit=inapp&fr=<rev>`)을 붙인다.
+ *   다른 fit 값이 든 주소 · 바깥 주소 = 그대로 · 몇 번 거쳐도 같은 결과(새 주소 · 저장 주소 · 옛 판 주소 모두 지금 판 하나 · Codex 설계 3R ①).
+ *   서버 서빙(parseFitOption)은 `fit` 만 읽는다 — `fr` = 주소만 바꿔 앱 · 중간 캐시가 옛 그림을 다시 쓰지 않게.
  */
-const INAPP_EXAMPLE_IMAGE_RE = /^\/api\/cdp\/inapp\/example-image\/[^/?#]+\/\d+(?:\?[^#]*)?$/;
+const INAPP_EXAMPLE_IMAGE_RE = /^\/api\/cdp\/inapp\/example-image\/[^/?#]+\/\d+$/;
+export function inAppFitQuery(): string {
+  return `fit=inapp&fr=${ASPECT_RATIOS.inapp.rev}`;
+}
 export function withInAppImageFit(url: string): string {
-  const u = String(url || '').trim();
-  if (!u || /[?&]fit=/.test(u)) return u;
-  if (toOwnImageRef(u) === null && !INAPP_EXAMPLE_IMAGE_RE.test(u)) return u;
-  return `${u}${u.includes('?') ? '&' : '?'}fit=inapp`;
+  const raw = String(url || '').trim();
+  if (!raw) return raw;
+  const h = raw.indexOf('#');
+  const hash = h >= 0 ? raw.slice(h) : '';
+  const noHash = h >= 0 ? raw.slice(0, h) : raw;
+  const q = noHash.indexOf('?');
+  const base = q >= 0 ? noHash.slice(0, q) : noHash;
+  const params = q >= 0 ? noHash.slice(q + 1).split('&').filter(Boolean) : [];
+  const keyOf = (p: string) => p.split('=')[0];
+  // 다른 맞춤(예 fit=1x1)이 든 주소 = 우리 것이 아니다 → 그대로
+  if (params.some((p) => keyOf(p) === 'fit' && p !== 'fit=inapp')) return raw;
+  if (toOwnImageRef(base) === null && !INAPP_EXAMPLE_IMAGE_RE.test(base)) return raw;
+  const rest = params.filter((p) => keyOf(p) !== 'fit' && keyOf(p) !== 'fr');
+  return `${base}?${[...rest, inAppFitQuery()].join('&')}${hash}`;
 }
 
 /** 게시 끝 시각 → 「11월 30일 23:59」(한국 시각 · 순수) · 없음 · 잘못된 값 = null */
@@ -1483,7 +1499,7 @@ export function inAppDeadlineText(endAt: Date | string | number | null | undefin
  * ★ 2026-11-08 C114 I-2 옛 앱 서버 변환 — caps 에 없는 판을 그 앱이 그릴 수 있는 꼴로(서빙 사본만 · 순수 · toServedMessage 뒤 · K1).
  *   ① 띠 판이 없음 = 띠를 지우고 글 한 줄(쿠폰 = 「쿠폰 코드 X」 · 남은 시간 = 「11월 30일 23:59까지」)을 메시지 본문 · 첫 장 본문 끝에.
  *      대체 줄을 넣은 통짜 = poster_text 를 지워 글 얹기로 내린다(Codex 설계 1R ① · 통짜 틀은 본문을 그리지 않는다 · 글은 이미 비었다).
- *   ② v4 판이 하나도 없는 옛 렌더러(v2 · v3) = 장 그림 · flat 그림 주소에 ?fit=inapp(★ C116 D9 · 팝폰 칸 = 높이 상한 + cover · 한 장도 잘렸다) ·
+ *   ② v4 판이 하나도 없는 옛 렌더러(v2 · v3) = 장 그림 · flat 그림 주소에 인앱 맞춤(★ C116-B D4 · 정사각 · 가운데 80% · 무대색 · 모든 고객사 앱 공통) ·
  *      이벤트 카드 = 장 image_fit contain(옛 v3 = 4:3 cover · 잘림 0).
  *   ★ C116 = 굽기 대상이면 이 변환은 아직 못 구웠을 때의 대체다(`serveInAppForClient`).
  *   웹 SDK · 웹뷰(판 넷) = 변환 0.
@@ -1530,7 +1546,7 @@ export function legacyServeTransform(m: InAppMessageDetail, caps: ReadonlySet<st
       out = { ...out, posterSlides: slides.map((s) => (s && typeof s.image_url === 'string' ? { ...s, image_url: withInAppImageFit(s.image_url) } : s)) };
     }
   }
-  // ★ C116 D9 한 장 · 장 없는 flat = 팝폰은 imageUrl 을 원본 비율 · 높이 66% 상한 cover 로 그린다 → 같은 맞춤
+  // ★ C116-B D4 한 장 · 장 없는 flat = 연동 계약 v2 의 단일 포스터 그림(imageUrl) → 같은 맞춤(칸 · cover · contain 무관 공통 규칙)
   if (noV4 && out.imageUrl) {
     const layout = out.design && typeof out.design === 'object' ? String(out.design.poster_layout || '') : '';
     if (layout !== 'event_card' && layout !== 'banner_sheet') out = { ...out, imageUrl: withInAppImageFit(out.imageUrl) };
@@ -1575,7 +1591,7 @@ function ownRelativeImage(url: unknown, companyId: string): string | null {
 
 export type InAppBakePlan =
   | { bake: false }
-  | { bake: true; full: InAppMessageDetail; key: string; expected: number; payload: Record<string, unknown> };
+  | { bake: true; full: InAppMessageDetail; key: string; expected: number; payload: Record<string, unknown>; stages: string[] };
 
 /**
  * D1 굽기 판정 한 곳 — 포스터 가족 · 틀로 그림(이벤트 카드 · 배너 아님) · 그릴 그림 ≥ 1 · 전부 이 회사 우리 그림 · 개인화 0 ·
@@ -1607,12 +1623,15 @@ export function inAppBakePlan(m: InAppMessageDetail, caps: ReadonlySet<string>, 
     key: inAppBakeKey(full as unknown as Record<string, unknown>),
     expected: drawn.length,
     payload: { message: bakeMessage, still: { deadlineText: inAppDeadlineText(full.endAt as any) } },
+    // ★ C116-B D3 장마다 무대색 = 그 장 bg_color(꼴 맞음) · 아니면 기본(SDK 여러 장 칸 채움과 같은 뜻 · 열쇠 = posterSlides 에 bg_color 포함)
+    stages: drawn.map((s) => inAppStageColor((s as any).bg_color)),
   };
 }
 
 /**
- * D5 구운 메시지 — 글 칸 비움 · 장 그림 · imageUrl = 구운 그림(?fit=inapp) · 장 버튼 · 그림 링크 · 메시지 버튼 그대로 · 그리는 칸(통짜 · 틀 · 띠 · 레이아웃) 지움.
- *   팝폰 = 두 장 이상이면 posterSlides · 한 장 · 장 없음이면 imageUrl 을 읽는다(InAppBottomSheet.tsx:143 · :232-235 · Codex 설계 1R ①).
+ * D5 구운 메시지 — 글 칸 비움 · 장 그림 · imageUrl = 구운 그림 · 장 버튼 · 그림 링크 · 메시지 버튼 그대로 · 그리는 칸(통짜 · 틀 · 띠 · 레이아웃) 지움.
+ *   ★ C116-B D3 구운 그림 = 최종 정사각(무대 합성 끝) → 서빙 맞춤 0(주소 그대로 · 열쇠 = 판 2 = 내용이 바뀌면 주소도 바뀐다).
+ *   연동 계약 = 두 장 이상이면 posterSlides(캐러셀) · 한 장 · 장 없음이면 imageUrl(단일 포스터)을 그린다 → 둘 다 채움(C116 Codex 설계 1R ①).
  */
 export function bakedLegacyMessage(full: InAppMessageDetail, files: string[]): InAppMessageDetail {
   const src = inAppDrawnSlides(full);
@@ -1623,7 +1642,7 @@ export function bakedLegacyMessage(full: InAppMessageDetail, files: string[]): I
     const o = src[i] || ({} as PosterSlide);
     const alt = String((o as any).alt || o.title || '').trim() || msgTitle;
     return {
-      image_url: withInAppImageFit(f),
+      image_url: f,
       ...(o.cta ? { cta: o.cta } : {}),
       ...(o.link_url ? { link_url: o.link_url } : {}),
       ...(alt ? { alt } : {}),
@@ -1644,7 +1663,7 @@ export function serveInAppForClient(
   if (plan.bake) {
     const files = (deps.read || readInAppBake)(companyId, plan.key, plan.expected);
     if (files) return bakedLegacyMessage(plan.full, files);
-    (deps.request || requestInAppBake)({ companyId, messageId: String(m.id), key: plan.key, expected: plan.expected, payload: plan.payload });
+    (deps.request || requestInAppBake)({ companyId, messageId: String(m.id), key: plan.key, expected: plan.expected, payload: plan.payload, stages: plan.stages });
   }
   return legacyServeTransform(toServedMessage(gateInAppForClient(m, caps)), caps);
 }
@@ -1660,7 +1679,7 @@ export async function prebakeInAppMessage(companyId: string, messageId: string):
     const m = mapRowToMessageDetail(r.rows[0]);
     const plan = inAppBakePlan(m, new Set<string>(), companyId);
     if (!plan.bake || readInAppBake(companyId, plan.key, plan.expected)) return;
-    requestInAppBake({ companyId, messageId, key: plan.key, expected: plan.expected, payload: plan.payload });
+    requestInAppBake({ companyId, messageId, key: plan.key, expected: plan.expected, payload: plan.payload, stages: plan.stages });
   } catch (e: any) {
     console.log(`[inapp-bake] 미리 굽기 요청 실패 ${messageId} · ${String(e?.message || e).slice(0, 160)}`);
   }

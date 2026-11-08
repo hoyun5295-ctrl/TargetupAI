@@ -11,6 +11,9 @@ import { X, Smartphone, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useEffect } from 'react';
 // ★ 2026-11-05 계약 v4 — 판 낱말 · 깔끔 규칙 값 = 그리는 부품 상수(SDK 원본의 글자 같은 사본 · 계약 시험 CT-IA1 · CT-IA4)
 import { POSTER_FRAME_RULES as RULES } from './generated/poster-frame';
+// ★ C116-B D5 옛 연동 앱 그림 규칙 = 서버 규격과 같은 상수(손 글 숫자 0 · 계약 시험이 서버 ASPECT_RATIOS.inapp 과 대조)
+import { LEGACY_BAKE_SAFE } from './legacy-app-view';
+const LEGACY_PCT = Math.round(LEGACY_BAKE_SAFE.w * 100);
 
 /** 앱이 /inapp/active?caps= 로 알리는 낱말(서버 INAPP_CLIENT_CAPS · SDK INAPP_SDK_CAPS 와 같은 값) */
 export const APP_CONTRACT_CAPS = ['poster_baked', 'frame_card', 'strip_coupon', 'strip_countdown'] as const;
@@ -74,7 +77,8 @@ Header: X-Hanjullo-Key: hjl_...
       {
         // ★ 2026-11-05 계약 v4 — 서빙 관문(설계서 docs/2026-11-05-inapp-poster-function-redesign-design.md §3-2)
         title: '그릴 수 있는 것 알리기 (caps · 계약 v4)',
-        desc: `아래 v4 모양을 네이티브로 직접 구현한 앱은 조회 주소에 caps 를 붙입니다(웹뷰로 붙인 앱은 0번 caps=webview 하나면 됩니다). caps 가 없는 앱(구버전)에도 서버는 메시지를 내보냅니다. 그 앱이 그릴 수 있는 꼴로 바꿔서 보냅니다: 떠 있는 카드는 틀을 지워 바닥 시트로, 통짜 포스터는 글 없이 그림만, 쿠폰 코드와 남은 시간 띠는 본문 한 줄 글로, 여러 장 그림은 4:5 로 미리 맞춰(잘림 0), 이벤트 카드 사진은 맞추기(contain)로. 구현한 낱말만 넣으세요(${APP_CONTRACT_CAPS.join(' · ')}). 응답의 serverNow(서버 시각 · ISO)는 남은 시간 띠의 기준 시각입니다.`,
+        // ★ 2026-11-08 C116-B D5 = 서버 동작 그대로(설계서 docs/2026-11-08-c116b-inapp-universal-output-design.md · 계약 시험 VB9)
+        desc: `아래 v4 모양을 네이티브로 직접 구현한 앱은 조회 주소에 caps 를 붙입니다(웹뷰로 붙인 앱은 0번 caps=webview 하나면 됩니다). caps 가 없는 앱(구버전)도 앱을 고치지 않고 모든 모양을 받습니다: 떠 있는 카드 · 통짜 포스터 · 쿠폰 코드 띠 · 남은 시간 띠 · 여러 장을 서버가 완성된 정사각 그림으로 구워 장마다 image_url 에(한 장 · 장 없는 메시지는 imageUrl 에도) 넣고, 글 칸(title · body · badgeText · 장 글)은 비워 보냅니다. 장 버튼(cta) · 그림 링크(link_url) · 메시지 버튼은 그대로 오니 앱 버튼으로 그리세요. 그림 안 내용은 가운데 ${LEGACY_PCT}% × ${LEGACY_PCT}% 안에 있고 남는 자리는 디자인 바탕색입니다. 그래서 그림을 원본 비율이나 contain 으로 그리면 통째로 보이고, 가운데 맞춤 cover(각 플랫폼 기본값)로 그려도 칸의 가로:세로가 5:4 ~ 4:5 안이면 내용이 잘리지 않습니다. 굽기 전이거나 굽지 않는 메시지(개인화 글 등)는 같은 정사각 규칙으로 맞춘 사진과 글 칸이 옵니다(쿠폰 코드 · 마감 시각은 본문 한 줄 · 지금처럼 글을 얹어 그리세요). 우리 서버가 아닌 바깥 주소 그림은 원본 그대로 옵니다. 그림 규칙이 바뀌면 주소(fr)가 달라지니 주소 단위로 캐시하세요. 이벤트 카드 · 배너 시트는 아래 레이아웃 규칙 그대로입니다. 구현한 낱말만 넣으세요(${APP_CONTRACT_CAPS.join(' · ')}). 응답의 serverNow(서버 시각 · ISO)는 남은 시간 띠의 기준 시각입니다.`,
         code: `GET .../api/cdp/inapp/active?channel=app&anonymous_id=DEVICE_UUID&caps=${APP_CONTRACT_CAPS.join(',')}`,
       },
     ],

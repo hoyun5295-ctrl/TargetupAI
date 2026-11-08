@@ -16,8 +16,9 @@ import { INAPP_FONT_CATALOG } from './blockTheme';
 import { PosterSheetPreview, POSTER_SHEET_DEFAULTS, hexOr, type PosterLayout, type SheetEditKey } from './PosterSheetPreview';
 import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNoteForKey, stripAllowedFor, legacyAppPreviewOf, type LayoutKey, type WsSlide } from './inappSlides';
 import { PosterFramePreview } from './PosterFramePreview';
-import { LegacyBakedPreview } from './LegacyBakedPreview';
+import { LegacyBakedPreview, LegacyAppPreviewPending } from './LegacyBakedPreview';
 import { legacyAppWillBake } from './legacy-app-view';
+import { useOwnImageHosts, loadOwnImageHosts } from './inapp-image-hosts';
 import { usesPosterFrame, drawsWithPosterFrame } from './generated/poster-frame';
 import { creditText } from '../../constants/credit';
 
@@ -249,13 +250,17 @@ export function PosterStage({
   // 구버전 앱 = 새 모양을 모르는 빌드 → 지금 포스터 · 다시 보지 않기로 그린다(설계서 §1-1 · §1-3)
   const drawLayout: PosterLayout = legacyApp ? 'overlay' : layout;
   // ★ 2026-11-08 C114 K2 구버전 앱 = 서버가 그 앱이 그릴 수 있는 꼴로 바꿔 보낸다(내보내지 않음 0) → 그 꼴 그대로 그린다
-  const legacy = legacyApp ? legacyAppPreviewOf(design, slides, endAt) : null;
+  // ★ C116-B D6 「우리 그림」 판정 = 서버가 내려준 호스트 목록(짐작 0 · 모르면 unknown = 확인 중 · 실패 칸)
+  const ownHosts = useOwnImageHosts();
+  const legacy = legacyApp ? legacyAppPreviewOf(design, slides, endAt, ownHosts) : null;
   const drawDesign = legacy ? legacy.design : design;
   const drawSlides = legacy ? legacy.slides : slides;
   // ★ C114 I-3 그리는 자리 판정 = drawsWithPosterFrame 하나(사진 위 글도 새 틀 · SDK 와 같음)
   const useFrame = !legacyApp && drawsWithPosterFrame(design);
   // ★ 2026-11-08 C116 D11 구버전 앱 = 서버가 구워 보내면(같은 판정 거울) 구운 모습 · 아니면 위 대체 거울
-  const bakedLegacy = legacyApp && legacyAppWillBake({ design, slides: slides as any, texts: [badge, ...(extraTexts || [])] });
+  const bakeJudge = legacyApp ? legacyAppWillBake({ design, slides: slides as any, texts: [badge, ...(extraTexts || [])] }, ownHosts) : false;
+  const bakedLegacy = bakeJudge === true;
+  const legacyPending = legacyApp && (bakeJudge === 'unknown' || (bakeJudge === false && !!legacy?.unknown));
 
   // ★ 2026-09-29 무대 맞춤(Harold 0929 「화면에서 잘려 밑에 글 쓰기가 힘들다」 · 1455×740 에서 휴대폰 43px 잘림 실측) —
   //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞춘다(DM·이메일 PreviewPair 와 같은 방식 · 큰 화면은 FIT_MAX 까지 키운다).
@@ -373,7 +378,9 @@ export function PosterStage({
           {isPc && <div className="h-6 bg-slate-100 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
           <div className="relative w-full" style={{ height: isPc ? PC_H - 24 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
-            {bakedLegacy ? (
+            {legacyPending ? (
+              <LegacyAppPreviewPending failed={ownHosts.status === 'error'} onRetry={loadOwnImageHosts} />
+            ) : bakedLegacy ? (
               <LegacyBakedPreview
                 slides={slides.map((s) => ({ ...s, image_url: String(s.image_url || '').trim() || PHOTO_SLOT })) as any}
                 design={design}

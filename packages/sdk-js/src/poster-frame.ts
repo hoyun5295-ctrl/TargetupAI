@@ -388,7 +388,8 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   const box = el('div', isCard ? 'card' : 'sheet', {
     width: '100%', background: '#ffffff', color: '#1b1d23', overflow: 'hidden', boxSizing: 'border-box',
     borderRadius: isCard ? R.card.radius : R.sheet.radius,
-    boxShadow: isCard ? '0 18px 50px rgba(0,0,0,0.35)' : '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
+    // ★ C116-B D3 정지 = 그림자 0(찍는 틀 상자 밖으로 뻗어 잘리는 값 · 무대색 위에서는 보이지 않는다)
+    boxShadow: still ? 'none' : isCard ? '0 18px 50px rgba(0,0,0,0.35)' : '0 -6px 24px rgba(0,0,0,0.22), 0 -24px 70px rgba(0,0,0,0.35)',
     display: 'flex', flexDirection: 'column',
   });
 

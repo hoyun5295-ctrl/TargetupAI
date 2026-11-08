@@ -8,16 +8,30 @@
  *   변환본이 따로 쌓이고 화면은 옛것을 계속 본다.
  */
 
+/**
+ * ★ 2026-11-08 C116-B 인앱 무대색 = SDK 여러 장 칸 채움(`POSTER_FRAME_RULES.multiFill`)과 같은 값.
+ *   옛 연동 앱에 보내는 그림의 빈자리를 이 색(또는 장 bg_color)으로 채운다 · 흐림 · 가장자리 색 0(계약 시험이 SDK 값과 대조).
+ */
+export const INAPP_STAGE_FILL = '#111827';
+/** 무대색으로 받는 꼴(3 · 6자리 · 알파 없음 — 단색 바탕) */
+export const INAPP_STAGE_HEX = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+/** 장 무대색 한 판정 = 장 bg_color(꼴 맞음) · 아니면 INAPP_STAGE_FILL(SDK `frameHexOr(s.bg_color, multiFill)` 과 같은 뜻 · 서버 판정 · 굽기 · 화면 거울이 이 규칙) */
+export function inAppStageColor(bg: unknown): string {
+  const v = typeof bg === 'string' ? bg.trim() : '';
+  return INAPP_STAGE_HEX.test(v) ? v : INAPP_STAGE_FILL;
+}
+
 /** 허용 비율(키 → 가로:세로). 키는 캐시 디렉터리 이름에 들어가므로 영숫자·x만 쓴다. */
-export const ASPECT_RATIOS: Record<string, { w: number; h: number; safe?: { w: number; h: number } }> = {
+export const ASPECT_RATIOS: Record<string, { w: number; h: number; rev?: number; safe?: { w: number; h: number; fill: string } }> = {
   '1x1': { w: 1, h: 1 },
   /**
-   * ★ 2026-11-08 C116 D9 옛 앱(업체 네이티브 렌더러) 인앱 그림 = 1:1 캔버스 + 가운데 안전 칸(폭 80% × 높이 92%).
-   *   팝폰 칸 세로/가로 b = 여러 장 min(1.25, 0.62 × 화면 세로/가로) · 한 장 min(1, 0.66 × 화면 세로/가로) · 둘 다 cover.
-   *   지원 하한 = 화면 세로/가로 1.5 → b ∈ [0.93, 1.25] · cover 가 남기는 곳의 교집합 = 폭 1/1.25 = 80% · 높이 0.93 → 92%(반올림 여유).
-   *   ⛔ 안전 칸 값을 바꾸면 키 이름도 바꾼다(변환본 캐시 폴더 이름 = 키 · 옛 변환본이 남는다) · 옛 `4x5` 키는 지웠다(C114 · 잘림).
+   * ★ 2026-11-08 C116-B 옛 연동 앱(고객사 네이티브 앱 · caps 없음) 인앱 그림 = **모든 고객사 앱 공통 규칙 하나**
+   *   (설계서 docs/2026-11-08-c116b-inapp-universal-output-design.md D1 · 한 앱 칸 공식 0).
+   *   정사각 캔버스 · 원본은 가운데 80% × 80% 안에 통째로 · 빈자리 = 무대색. 고객사 앱 칸은 모른다 → 손해가 대칭인 정사각 ·
+   *   앱이 가운데 맞춤 cover 로 칸 세로/가로 0.8 ~ 1.25(5:4 ~ 4:5)를 채워도 원본 0 잘림 · contain · 원본 비율이면 통째(연동 계약에 적음).
+   *   ⛔ 값을 바꾸면 rev 를 올린다 — rev = 변환본 캐시 폴더 이름 + 그림 주소의 `fr`(앱 · 중간 캐시가 옛 그림을 다시 쓰지 않게 · Codex 설계 1R ① · 2R ①).
    */
-  inapp: { w: 1, h: 1, safe: { w: 0.8, h: 0.92 } },
+  inapp: { w: 1, h: 1, rev: 2, safe: { w: 0.8, h: 0.8, fill: INAPP_STAGE_FILL } },
 };
 
 /**

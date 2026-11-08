@@ -17,8 +17,9 @@ import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPrev
 import { PosterFramePreview } from './inapp/PosterFramePreview';
 import { drawsWithPosterFrame, frameSlidesWithFlat } from './inapp/generated/poster-frame';
 import { legacyAppPreviewOf } from './inapp/inappSlides';
-import { legacyAppWillBake } from './inapp/legacy-app-view';
-import { LegacyBakedPreview } from './inapp/LegacyBakedPreview';
+import { legacyAppWillBake, legacyAppImageUrl } from './inapp/legacy-app-view';
+import { LegacyBakedPreview, LegacyAppPreviewPending } from './inapp/LegacyBakedPreview';
+import { useOwnImageHosts, loadOwnImageHosts } from './inapp/inapp-image-hosts';
 
 // ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
 //   SDK ZONE_PADS 미러 (미리보기 축소 스케일에 맞춰 비례 축소).
@@ -565,16 +566,24 @@ function DummyAppScreen() {
   );
 }
 
-export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageUrl, badge, buttons, backgroundColor, textColor, design: designIn, posterSlides: slidesIn, replaceVars, captureMode, legacyApp, accentColor, endAt }: AppInAppPreviewProps) {
+export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageUrl: imageUrlIn, badge, buttons, backgroundColor, textColor, design: designIn, posterSlides: slidesIn, replaceVars, captureMode, legacyApp, accentColor, endAt }: AppInAppPreviewProps) {
   // ★ 2026-11-08 C114 K2 구버전 앱 모습 = 서버가 옛 앱에 실제로 보내는 꼴(legacyAppPreviewOf = 서버 legacyServeTransform 거울 · 내보내지 않음 0)
   const legacyPoster = !!legacyApp && template === 'full_image';
   const bakedIn = !!designIn && (designIn as any).poster_text === 'baked';
   // ★ 2026-11-08 C116 D11 서버가 구워 보내면(같은 판정 거울) 구운 모습 · 아니면 대체 거울(legacyAppPreviewOf)
-  const bakedLegacy = legacyPoster && legacyAppWillBake({ design: designIn, slides: Array.isArray(slidesIn) ? slidesIn : [], imageUrl, texts: [titleIn, bodyIn, badge] });
+  // ★ C116-B D6 「우리 그림」 판정 = 서버가 내려준 호스트 목록(짐작 0 · 모르면 확인 중 · 실패 칸)
+  const ownHosts = useOwnImageHosts();
+  const bakeJudge = legacyPoster ? legacyAppWillBake({ design: designIn, slides: Array.isArray(slidesIn) ? slidesIn : [], imageUrl: imageUrlIn, texts: [titleIn, bodyIn, badge] }, ownHosts) : false;
+  const bakedLegacy = bakeJudge === true;
   const [bakedActive, setBakedActive] = useState(0);
   const bakedSlideList = Array.isArray(slidesIn) ? slidesIn.filter((s: any) => s && String(s.image_url || '').trim()) : [];
   const bakedBtn: any = bakedSlideList.length >= 2 ? (bakedSlideList[Math.min(bakedActive, bakedSlideList.length - 1)] as any)?.cta || null : (buttons || [])[0] || null;
-  const legacyView = legacyPoster && !bakedLegacy ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt) : null;
+  const legacyView = legacyPoster && !bakedLegacy ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt, ownHosts) : null;
+  // ★ C116-B D6 대체 길 flat 그림 = 서버가 실제로 내주는 맞춤 주소(정사각 · 가운데 80% · 무대색) · 모르면 확인 중
+  //   flat 그림 없음 = undefined(판정할 것 없음) · null = 호스트를 몰라 판정 보류 — 둘을 섞지 않는다(Codex 구현 1R ①)
+  const legacyFlat = legacyView && imageUrlIn ? legacyAppImageUrl(imageUrlIn, legacyView.design, ownHosts) : undefined;
+  const legacyPending = legacyPoster && (bakeJudge === 'unknown' || (!!legacyView && (legacyView.unknown || legacyFlat === null)));
+  const imageUrl = legacyView ? (legacyFlat ?? imageUrlIn) : imageUrlIn;
   const design = legacyView ? legacyView.design : designIn;
   const posterSlides = legacyView ? legacyView.slides : slidesIn;
   const title = legacyPoster && bakedIn ? '' : titleIn;
@@ -705,7 +714,9 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
                   design={design} accentColor={accentColor} badge={badge} endAt={endAt} replaceVars={replaceVars} height={580} />
               </div>
             )}
-            {bakedLegacy ? (
+            {legacyPending ? (
+              <LegacyAppPreviewPending failed={ownHosts.status === 'error'} onRetry={loadOwnImageHosts} />
+            ) : bakedLegacy ? (
               <LegacyBakedPreview
                 slides={frameSlidesWithFlat(Array.isArray(slidesIn) ? slidesIn : [], { image_url: imageUrl || null, title: titleIn || '', body: bodyIn || '', eyebrow: badge || null, cta: null, link_url: null }, designIn) as any}
                 design={designIn}
