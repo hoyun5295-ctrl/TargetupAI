@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: f0e7ea30 · 2026-11-08 · Harold 실행 보고(C119 · 서버 git pull · 확인 출력 = HEAD f0e7ea30 2026-11-08 20:33:50 +0900) · 그 전 b05a4dca(C118 보정)
-- deployed_head: f0e7ea30 · 2026-11-08 · Harold 실행 보고(C119 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺72 · created at 11:40:34Z · unstable 0 · reload 뒤 에러 로그 0줄) · 그 전 b05a4dca(C118 보정)
+- pulled_head: a06e041b · 2026-11-08 · Harold 실행 보고(C118 E7 · 서버 git pull · 확인 출력 = HEAD a06e041b 2026-11-08 21:31:44 +0900) · 그 전 f0e7ea30(C119)
+- deployed_head: a06e041b · 2026-11-08 · Harold 실행 보고(C118 E7 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺73 · created at 12:43:40Z · unstable 0 · reload 뒤 에러 로그 0줄) · 그 전 f0e7ea30(C119)
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -62,7 +62,7 @@
 | C114 | b374ed44 |
 | C116 | ca7c99cd · c70830be |
 | C117 | da9baa11 |
-| C118 | 5fc2d527 · b05a4dca |
+| C118 | 5fc2d527 · b05a4dca · a06e041b |
 | C119 | f0e7ea30 |
 
 ## §1 대기
@@ -1528,7 +1528,7 @@ COMMIT;
 - 선행: C114-H1
 - 기대: scripts/discount-template-samples.ts --save = 할인 8종 예시 저장 · 세트 템플릿 샘플 확인
 - 확인: 스크립트 출력 · 갤러리 카드
-- 결과:
+- 결과: 1108 Harold = 8장 생성(GPT · C118-H2 결과 줄) → 세트 업종 섞임 · 브랜드 이름 반려 → C119 에서 8종 보편화 + 24장 다시 생성(C119-H1 결과 · `_log.txt` 「실제엔진=openai · 예시 저장」 24줄) · 갤러리 눈 확인(Harold 1108)
 
 ### C114-P1 · 팝폰 웹뷰 호스트(스토어 빌드 · OTA 아님)
 - 카드: C114
@@ -1583,15 +1583,15 @@ COMMIT;
 - 선행: C118-H2 · Codex 설계 4R · 구현 2R approve · 커밋 f0e7ea30(Harold · 21 경로 · 다른 세션 파일 뺌) → push
 - 기대: 설계서 docs/2026-11-08-c119-discount-templates-20-design.md · 할인 포스터 = 24종 · 이름 · 설명에 업종 말 0 · 「가격 할인 웜 우드」 · 왼쪽 글형 6 · 인앱 용도 = 배치대로 고정 표시 · 다른 트랙 · 미가입 · 직접발송만 = 변화 0
 - 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 예시 24장 = 서버 셸 `cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scripts/discount-template-samples.ts --save`(OpenAI · 약 $1.61 · 줄마다 실제엔진=openai · 예시 저장) → 갤러리 24장 = 제품 없는 빈 자리 · 「상품명」
-- 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD f0e7ea30(2026-11-08 20:33:50 +0900) · targetup-backend online ↺72 · created at 2026-11-08T11:40:34Z · unstable 0 · reload 뒤 에러 로그 0줄(남은 줄 = 16:13 엑셀 암호 파일 · 그 전 것) → 서버 단계 통과 · 예시 24장 = Harold 실행 · `_log.txt` 「실제엔진=openai · 예시 저장」 24줄 · 실패 · 대체 0(장당 약 23 ~ 26초) · 남은 = 갤러리 눈 확인
+- 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD f0e7ea30(2026-11-08 20:33:50 +0900) · targetup-backend online ↺72 · created at 2026-11-08T11:40:34Z · unstable 0 · reload 뒤 에러 로그 0줄(남은 줄 = 16:13 엑셀 암호 파일 · 그 전 것) → 서버 단계 통과 · 예시 24장 = Harold 실행 · `_log.txt` 「실제엔진=openai · 예시 저장」 24줄 · 실패 · 대체 0(장당 약 23 ~ 26초) · 갤러리 눈 확인(Harold 1108 「갤러리 전부 눈으로 확인」)
 
 ### C118-H3 · 한줄로 배포(모바일 DM 2:3 · 백엔드 + 프론트 · DDL 0 · ENV 0)
 - 카드: C118
 - 단계: 한줄로 배포
-- 선행: C119-H1 · Codex approve · 커밋(E7 경로만) → push
+- 선행: C119-H1 · Codex 구현 2R approve · 커밋 a06e041b(Harold · 10 경로 · 다른 세션 파일 뺌) → push
 - 기대: C118 설계서 §11 · 스튜디오 고르기 창 모바일 DM = 「세로 2:3」 · DM 용도 생성 그림 = 2:3 · DM 편집기 안 스튜디오 창 = 2:3 · DM 카탈로그 쪽 창에서 연 스튜디오 = 3:4(판 비율) · 자유 형태 = 3:4 그대로
 - 확인: 서버 HEAD · pm2 · 에러 로그 → 스튜디오에서 모바일 DM 1장 생성(2크레딧) = 세로 2:3 · Gemini 대체 경로 2:3 = 미검증(대체가 날 때만)
-- 결과: (대기)
+- 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD a06e041b(2026-11-08 21:31:44 +0900) · targetup-backend online ↺73 · created at 2026-11-08T12:43:40Z · unstable 0 · reload 뒤 에러 로그 0줄(남은 줄 = 16:13 엑셀 암호 파일 · 그 전 것) → 서버 단계 통과 · 화면 = 고르기 창 모바일 DM 「세로 2:3」 · Harold 「체크완료」 · Gemini 대체 경로 2:3 = 미검증 그대로(대체가 날 때 확인)
 
 ## §2 덤프 뒤 적용분
 

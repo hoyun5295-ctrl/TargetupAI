@@ -209,3 +209,7 @@ DDL 0 · 백엔드 · 프론트 · SDK 서빙 파일(`backend/sdk-serving`) 한 
 - Codex 구현 2R = 지적 1(한 장 폴백이 이벤트 카드 · 배너 시트에도 바깥 칸을 섞음) · 1R ① 처방의 적용 범위(같은 함수 · 새 부류 아님) → 폴백 조건에 `drawsWithPosterFrame`.
 - Codex 구현 3R = 지적 1(장 없는 시트 첫 장에 배지 `badge_text` 누락 · 갤러리만) · 같은 함수의 입력 칸 빠짐(새 부류 아님) → `PosterFlatFallback.eyebrow` 필수 칸 · 장 없음 첫 장에만 · 기존 장에는 섞지 않음.
 - **Codex 구현 4R = approve**(지적 0 · 1108). 변이 M1 ~ M18 전부 빨간불 · tsc 0(백엔드 · 프론트 · SDK) · SDK vitest 25파일 251건.
+- 1108 배포 b374ed44(C114-H1) = 서버 확인 통과(online ↺62 · 에러 로그 0줄) · 웹뷰 주소 HTTP 200 · CSP default-src none · connect-src none(K9 와 같음) · 같은 확인 중 Harold 지적 셋(제작 화면 여백 · 장면 힌트 안내 · 할인 템플릿이 제품 지정형) = 원장 C114-H1 결과 줄.
+- 1108 C114-S1 할인 예시 8장 = Harold 생성 → 세트 업종 섞임 · 브랜드 이름 반려 → C119(8종 보편화 + 24장 다시 · 배치 둘 · f0e7ea30).
+- 1108 인앱 결함 이어짐 = 팝폰(caps 없음)에서 여전히 잘림 · 기능 축소 → C116 구워 보내기(ca7c99cd) → C116-B 공통 규칙(c70830be) → C118 앱 모양 넷 · 인앱용 그림(5fc2d527). C114-P1 팝폰 스토어 빌드 = 실행 0 · 같은 날 DECISIONS D116(깔린 앱 그대로가 기능 기준 · 팝폰 = 시험 수단 · 웹뷰 호스트 = 새로 붙이는 앱의 길).
+- 1108 기능 SoT 반영 = `docs/FEATURE-IMAGE-STUDIO.md` §2-8 · §4-1-F · §5 · §7 · `docs/인앱메세지전용.md` §10-F.

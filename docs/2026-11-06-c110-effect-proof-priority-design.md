@@ -376,5 +376,5 @@ SELECT COUNT(DISTINCT regexp_replace(phone, 'D', '', 'g')) AS phones FROM custom
 | 설계서 | 닫힘(구조체크 8회차 · Codex 5R approve) |
 | 구조체크 | 1회차 9 → 2회차 0 → 3회차(1R) 8 → 4회차 0 → 5회차(2R) 5 → 6회차 0 → 7회차(3R) 2 |
 | Codex 설계 | 1R 8건 → 2R 5건 → 3R 2건(약속 정정) → 4R 1건(경계 명시) → **5R approve(1106)** |
-| 구현 · Codex 구현 | 구현 끝 · Codex 구현 11R approve(7R ~ 11R = Harold 지시 · 미가입 회사 잇기 0 · 잇기 실패 = 발송 계속) · vitest 771 / 11,740 · 실 PG 61 / 444 · tsc 0 · 0 · 변이 5 빨간불 · 미커밋 |
-| DDL · 배포 · 직원 시트 | 대기(원장 C110-S1 · S2 · DDL-1 · H1 · S3) |
+| 구현 · Codex 구현 | 구현 끝 · Codex 구현 11R approve(7R ~ 11R = Harold 지시 · 미가입 회사 잇기 0 · 잇기 실패 = 발송 계속) · vitest 771 / 11,740 · 실 PG 61 / 444 · tsc 0 · 0 · 변이 5 빨간불 · 커밋 4ffe7988 |
+| DDL · 배포 · 직원 시트 | ★1107 S1 피로도 켠 회사 0 · S2 시험 회사 합성 번호 3,668 · DDL-1 통과(확인 18줄) · 배포 1 = 4ffe7988(C112 · C113 과 한 창 · online ↺60 · 에러 로그 0줄 · ad-send-gate 경고 0 · 23:27 restart --update-env ↺61) · 남은 = 첫 광고 발송 뒤 ad-send-gate 줄 세기 · 직원 시트 C110-S3(로드맵 묶음 끝 · 원장 C110-*) |

@@ -41,11 +41,22 @@
 > 그 2단계가 "이미지에 문구를 그린다"로 가면 **이 절의 원칙을 바꾸는 일**이 된다.
 > 설계·판단 원장 = [2026-09-01-ai-image-notice-design.md](2026-09-01-ai-image-notice-design.md) (호출어 **AI 이미지 표시**)
 
-### 2-6. 생성 축은 `poster` 하나다
-2026-07-30 확정 — 채널별 재생성(+크레딧) 축을 폐기했다. 생성은 3:4·2K 포스터 한 장이고, 인앱·DM·이메일·MMS는 저장된 그 한 장을 통짜로 쓴다(MMS만 서버가 1080px·300KB 이하로 변환). 옛 프리셋 4종은 호환용으로만 남아 있고 `resolvePreset` 폴백이 poster다.
+### 2-6. 생성 축 = 용도별 프리셋 넷(★2026-11-08 C118 · DECISIONS D114 · 07-30 「poster 하나」를 뒤집음 = §9)
+「만들기」 = 「어디에 쓸 그림인가요」 여러 개 고르기(`StudioUsePicker.tsx`) · 고른 수 × 2크레딧 · 칸마다 얼린 본문으로 따로 생성(실패 칸만 같은 본문으로 다시). 프리셋 = `image-studio.ts` `CHANNEL_PRESETS`:
+- `use-inapp` 1:1 = 꽉 찬 정사각 · 글 자리(위 · 아래) 자연 빈 공간 · 글 · 주제 · 얹는 층 = 가로 · 세로 가운데 80%(`image-fit-spec.ts` `INAPP_CONTENT_SAFE`) · 영구 이름 `.full.`(인앱 여백 0 대상 판정 = 파일 이름).
+- `use-dm` 2:3(★1108 E7 · 자유 3:4 와 다른 그림) · `use-email` 4:3 · `poster` 3:4 = 자유 형태(기본 · `resolvePreset` 폴백).
+- 편집기 안 스튜디오 창 = 용도 고정(`StudioInsertModal` `use` = 인앱 편집기 `use-inapp` · DM 자리 `use-dm` · DM 카탈로그 쪽 창 `poster` = 판 비율 3:4 `CATALOG_PAGE` 1200 × 1600).
+- 다른 비율이 필요하면 그 용도로 다시 만든다(비율 변환에 생성 모델 금지 = §2-3 그대로). MMS 는 저장된 그림을 서버가 1080px · 300KB 이하로 변환(그대로).
+경위 = [C118 설계서](2026-11-08-c118-studio-per-use-inapp-app-design.md) §2 · §10 · §11.
 
 ### 2-7. 손익 지렛대는 "크레딧당 호출 수" 하나뿐이다
 후보 장수를 줄여도 크레딧당 원가는 안 변한다(2장=2크레딧=2호출). 2026-07-30에 1장 생성·2크레딧으로 바꿔 크레딧당 호출 0.5회가 됐고, 그때 원가가 절반이 됐다. 수치·재검토 트리거 = `reference_image_studio_unit_economics`.
+
+### 2-8. 할인 · 혜택 문장 = `studio-discount.ts` 한 곳(★2026-11-08 C114 · C119 · DECISIONS D115)
+혜택 꼴 셋(`price` 가격 할인 · `nplus` 하나 더 · `set` 세트) · 숫자 = 넣은 값 그대로(서버 `readDiscountOffer` 검사 · 상한 1억 원 · 글 20자 · 화면 사본 `frontend/src/lib/studio-discount.ts`) · 프롬프트 문장 `discountPromptLines` · 고정 틀 줄 `discountFixedLayoutLine` · 배치 = 템플릿 속성 `layout`(§4-1-F) · 화면 글 자리 문구 = `StudioUsePicker.tsx` `discountZoneText` 한 곳. 다른 파일에 혜택 문장을 다시 쓰지 않는다.
+
+### 2-9. 브랜드 로고 = 생성 그림 위에 서버가 얹는 층 · 기본 꺼짐(★2026-11-07 C112 · ★1108 C118 E2)
+로고 = `studio-logo.ts` · 자리 = `studio-zones.ts`(모서리 4 · 크기 3 · 대비 3 미만이면 밝은 / 어두운 판) · 켜기 = 사용자 동작만(생성 직후 `/layers` on false) · 인앱용 = 안전 칸 안(`logoSafeEdgeOf`) · 저장하기 전 만든 지 7일 안에만 바꿈 · 키트가 비면 홈페이지에서 읽어 오기(빈 칸만 · 덮어쓰기 0). 경위 = [C112 설계서](2026-11-07-c112-studio-brand-logo-design.md).
 
 ---
 
@@ -62,6 +73,11 @@
 | `frontend/src/lib/studio-api.ts` · `studio-texts.ts` | ★1016 `/save` 409 두 코드(STORAGE_FULL · ALREADY_SAVED)를 가르는 `saveStudioTemp` 하나(두 화면이 지난다) · 문구 자동 채움 규칙(비어 있거나 직전 자동값 그대로인 칸만) |
 | `frontend/src/components/dm/build/StudioInsertModal.tsx` | DM 블록 삽입 창 · ★1016 고르기 → 만들기 → 결과 · 첫 장 자동 선택 폐기(Harold) · 닫기 = 숨김(넣기 성공 뒤에만 처음 상태) |
 | `uploads/studio-samples/` | 템플릿 예시 실샘플 파일(영구) |
+| `frontend/src/components/studio/StudioUsePicker.tsx` | ★1108 용도 고르기 창(§2-6) · 할인 글 자리 문구 `discountZoneText`(§2-8) |
+| `backend/src/utils/studio-discount.ts` · `frontend/src/lib/studio-discount.ts` | ★1108 할인 · 혜택 CT(§2-8) · 화면 사본 = 입력 검사 · 자동 채움 |
+| `backend/src/utils/image-studio-templates-discount.ts` | ★1108 할인 · 혜택 템플릿 24(§4-1-F) |
+| `backend/src/utils/studio-logo.ts` · `studio-zones.ts` · `frontend/src/lib/studio-layers.ts` · `components/studio/StudioLogoControls.tsx` | ★1107 브랜드 로고 층(§2-9) |
+| `backend/src/utils/image-fit-spec.ts` | 인앱 안전 칸 `INAPP_CONTENT_SAFE` 0.8(맞춤 · 인앱 프롬프트 · 로고 자리 · SDK 글 상자가 같은 값) |
 
 ### 3-1. 엔드포인트
 
@@ -73,7 +89,11 @@
 | `POST /generate` | 2 | 템플릿+문구(+누끼) → 완성 포스터 1장 |
 | `POST /edit` | 1 / 4K는 2 | 멀티턴 보존 편집·격상 |
 | `POST /remove-bg` · `/compose` · `/ingest-product` · `/upload-product` | 0 | 누끼·서버 합성·상품 이미지 준비 |
-| `POST /save` | 0 | 영구 저장 + `cdp_assets` 등재(tempId 1회성) |
+| `POST /save` | 0 | 영구 저장 + `cdp_assets` 등재(tempId 1회성) · ★1107 로고 층을 구워 저장 |
+| `POST /layers` | 0 | ★1107 로고 켜고 끄기 · 자리 · 크기 미리보기 |
+| `POST /logo/read` · `/logo/use` | 0 | ★1107 키트가 비면 홈페이지 로고 읽기 · 쓰기(빈 칸만) |
+
+`/generate` 는 ★1108 부터 `presetKey`(용도 · §2-6) · `offer`(할인 · 혜택 · §2-8)를 받는다.
 
 ### 3-2. 문구 위치 축 (2026-08-09 신설)
 
@@ -91,7 +111,7 @@
 
 ## §4 카탈로그 규약 — 템플릿 추가
 
-### 4-1. 현황 (2026-09-02 기준 **302종** · ★2026-10-04 **502종** = §4-1-C · ★2026-10-16 **582종** = §4-1-D · ★2026-10-31 **782종** = §4-1-E)
+### 4-1. 현황 (2026-09-02 기준 **302종** · ★2026-10-04 **502종** = §4-1-C · ★2026-10-16 **582종** = §4-1-D · ★2026-10-31 **782종** = §4-1-E · ★2026-11-08 할인 · 혜택 트랙 **24종** = §4-1-F)
 
 | 트랙(`kind`) | 카테고리 | 종수 |
 |---|---|---|
@@ -200,6 +220,15 @@ Harold 지시대로 뷰티·패션·행사·이벤트에 51종을 몰았고, 빈
 - **유사도는 무문자 표준 문장을 빼고 잰다.** 두 표준 문장은 규칙이 붙이는 같은 글이라 장면 차이가 아니다. 넣고 재면 소품 장면끼리 0.39 까지 올라 같은 장면처럼 보인다(Codex 1R 뒤 6곳에 붙였을 때 실측).
 - **Codex 1R** = 시즌 룩 장면의 가방이 의류 영업 풀로 샘 · 무문자 문장 누락(상자 · 파우치 · 선물 케이스 · 메모장) · 개선 단정 문구(「더 순하게 바꿨어요」) 3건 수용. 같은 부류를 200개 전체에서 다시 찾아 무문자 11곳 · 근거 없는 단정 문구 8곳(개선 · 연구 · 수량 · 원료 · 공동구매 이득)을 함께 고쳤다.
 
+### 4-1-F. ★2026-11-08 할인 · 혜택 트랙(C114 8종 → C119 24종 · DECISIONS D115)
+
+- 파일 = `image-studio-templates-discount.ts` · 템플릿 = 혜택 꼴(§2-8) × 보편 디자인 · **업종 0**(이름 · desc · useCase · 장면 · textStyle) · 기존 8 = 업종 말 걷음(예: 웜 카페 → 웜 우드) · 연출형 12(왼쪽 글형 6) · 베이직 4.
+- 배치 = 템플릿 속성 `layout` 둘 — `stack` 위 글 · 아래 가운데 제품 / `side` 왼쪽 한 기둥 글(큰 제목 · 가격 줄 · 날짜 줄) · 오른쪽 아래 제품 · 조건 = 왼쪽 아래 작은 알약. 공개 목록에 `layout`(할인만).
+- 인앱용(`use-inapp`) = 글 자리 위 고정 · 고정 틀 줄도 안전 칸(바깥 10% 띠 = 배경만).
+- 갤러리 예시 = 제품을 그리지 않은 빈 자리 + 제목 「상품명」 · 세트 「상품 A + 상품 B」 · 브랜드 이름 0 · 숫자(가격 · 할인율 · N+M · 기간)는 그대로 · 만드는 길 = §5 할인 스크립트.
+- **추가 규칙** = 업종으로 나누지 않는다(2+1 이면 2+1 · 할인이면 할인) · 늘리기 전에 기존 카탈로그 「세일·이벤트」를 먼저 대조한다 · 계약 시험 = `c114-discount-1108.test.ts` · `c119-discount-templates-1108.test.ts`.
+- 경위 = [C114 설계서](2026-11-08-c114-roadmap-v2-design.md) · [C119 설계서](2026-11-08-c119-discount-templates-20-design.md).
+
 ### 4-1-A. 추천 용도(`useCase`) — 2026-08-11 신설 (Harold 지시)
 
 `desc`가 **어떤 그림인지**를 말한다면 `useCase`는 **언제 고르면 되는지**를 말한다("고가 안티에이징·시그니처 스킨케어",
@@ -244,6 +273,12 @@ Harold 지시대로 뷰티·패션·행사·이벤트에 51종을 몰았고, 빈
 cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scripts/studio-samples.ts make 20
 ```
 
+- **할인 · 혜택 예시 = 별도 스크립트 `scripts/discount-template-samples.ts`(★1108 C114 · C119)** — 엔진 = OpenAI 고정(서버 기본 엔진 · ENV 무관) · 저장 = 실제 엔진이 openai 인 결과만 · `--save` 갤러리 저장 · `--only id,id`(값 없음 · 빈 목록 = 생성 전에 멈춤) · `--dry` 프롬프트만 · 제품 없이 빈 자리(§4-1-F). 1108 24장 = 실패 · 대체 0 · 장당 약 23 ~ 26초.
+
+```bash
+cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scripts/discount-template-samples.ts --save --only <id,id>
+```
+
 ---
 
 ## §6 크레딧·원가
@@ -275,6 +310,10 @@ cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scri
 | 2026-10-04~05 | **카탈로그 502종**(+200 · 고객사 뷰티 · 의류 · 요식업 기준 · 신설 3(외식·메뉴 · 안내·예약 · 모집·참여) · 보강 6) · 외식·메뉴 영업 업종표(food) 연결 · §5 배치 루프 고정 횟수 + 세션 넘겨받기 로그인 · **1005 배포 · 예시 배치 진행** | 이 문서 §4-1-C · §5 |
 | 2026-11-02~03 | **제품 사진 최대 3장 → 한 장 포스터**(고객사 요청 · Harold 「3개로 설계」 · 4장째는 막음) · 운영 실측 12장(OpenAI = 큰 글자 3장까지 그대로 · 가장 작은 줄은 2장부터 흔들림 · 의류 3장 깨끗) · 서버가 누끼를 한 장(높이 1200 · 폭 3600 이하 · 넣은 순서 왼쪽부터)으로 묶어 지금의 `generatePoster` 에 넘김 · 1장 = 지금 그대로 · 크레딧 2 그대로 · 화면 칸 3 · 칸 수명 = `lib/studio-products.ts` · Codex 설계 4R approve | [설계서](2026-11-02-image-studio-multi-product-design.md) · `image-studio-multi-product-1102.test.ts` · [직원 지시문](2026-11-02-image-studio-multi-product-staff-sheet.xlsx) |
 | 2026-08-09(2) | 문구 위치 실측 정정 2회 — ①코드 렌더(PIL) 파일럿 = 위치·한글 무결 통과했으나 조판(서체·자간·대비·겹침) 불합격 → **행사도 Gemini 유지 확정**, 코드 렌더는 §8 검토안으로 격하 ②최후미 규칙만으론 미준수 → 모순 제거 3신호로 재설계. **전량 배포완료·실측 통과**(중앙 1장 → 기본값 위 1장, Harold 확인) | 이 문서 §3-2·§9 · 교훈 = `LESSONS_BACKEND` 핵심 원칙 상단 |
+| 2026-11-07 | **브랜드 로고 층(C112 · 로드맵 3순위)** — 생성 그림 위에 서버가 얹는 층 · 모서리 4 · 크기 3 · 밝은 / 어두운 판 자동 · 키트가 비면 홈페이지 읽기 · 저장 전 7일 · 배포 1(4ffe7988) | [설계서](2026-11-07-c112-studio-brand-logo-design.md) · §2-9 |
+| 2026-11-08 | **할인 포스터 8종 + 템플릿 글자 바닥 + 제작 화면 정리(C114 · 로드맵 V2)** · 배포 b374ed44 | [설계서](2026-11-08-c114-roadmap-v2-design.md) · §2-8 · §4-1-F |
+| 2026-11-08 | **용도별 제작(C118 · D114)** — 인앱 1:1 · 모바일 DM · 이메일 4:3 · 자유 3:4 · 여러 개 = 고른 수 × 2크레딧 · 인앱용 = 꽉 찬 정사각 + 글 자리 · 배포 5fc2d527 → 실사용 보정 6건 b05a4dca(만드는 중 안내 · 로고 기본 꺼짐 · 할인 = 인앱 글 자리 위 · 장 빼기 · 앱 기본형 그림 = 원본 비율 + 잘림 안내 · 할인 인앱 안전 칸) → 모바일 DM 2:3 a06e041b(카탈로그 쪽 창 = 3:4) | [설계서](2026-11-08-c118-studio-per-use-inapp-app-design.md) §10 · §11 · §2-6 |
+| 2026-11-08 | **할인 · 혜택 24(C119 · D115)** — 혜택 꼴 × 보편 디자인(업종 0) · 배치 둘 · 예시 24장 = 빈 제품 자리(OpenAI) · 배포 f0e7ea30 | [설계서](2026-11-08-c119-discount-templates-20-design.md) · §4-1-F |
 
 ---
 
@@ -288,6 +327,8 @@ cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scri
 - **[범위 밖 · 1031 기록] 기존 행사 템플릿의 업종 섞임** — 옷걸이 · 팔레트 장면(event-mem-firstlook · event-open-mirror-showroom · event-class-beauty)이 뷰티 · 헬스 · 금융 · 디지털 · 서비스 · 교육 · 문화 영업 풀에 들어간다. 처방 = `OUTREACH_TEMPLATE_SKIP_INDUSTRIES` 줄 추가. 착수 판단 = Harold.
 - **생성 멱등키가 서버 생성** — 응답 유실 후 클라이언트 재시도 시 이중 차감 가능(0719부터·0730 Codex 범위 밖 지적). 착수 판단 = Harold.
 - **빈 기본틀 + 코드 렌더링 전환(검토안)** — 배경을 1회만 생성해 저장하고 문구는 `composeImage`로 그리는 방식. 위치 100% 통제·장당 원가 0·한글 무결이 장점. **0809 파일럿 판정 = 보류** — 위치·한글은 통과했으나 조판이 포스터 급 미달(서체 맑은고딕 1종·자간 제어 없음·배경 대비·소품 겹침, Harold 불합격). 재개 조건 = 무드별 무료 폰트 확충 + 조판 엔진 보강(자간·행간·그림자·배경 밝기 대비·텍스트 존) 후 재파일럿. 누끼형은 장면 통합(그림자·광원) 때문에 어차피 생성 유지가 맞다.
+- **[1108 미검증] Gemini 대체 경로의 비율** — OpenAI 가 실패해 Gemini 로 넘어갈 때 2:3(모바일 DM) 이 그대로 나오는지 실행 미검증(대체가 날 때 확인 · 원장 C118-H3).
+- **직원 시트** = C112-S1 · C118 §5 · C119 §5(로드맵 묶음이 끝난 뒤 한 번).
 
 ---
 
@@ -296,6 +337,10 @@ cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scri
 - **후보 2장 생성** — 같은 프롬프트·인자로 2회 호출한 것이라 레시피 차이가 없었다(좌우 선호는 우연). 0730에 1장으로 확정.
 - **착용컷 배경 교체 분기** — 인물·장면 광원 불일치로 합성 티가 나는 구조 한계. 분기·감지 호출을 전부 폐기하고 "의류는 단독컷 권장" 안내 1줄로 대체(0719 실측). 옷만 추출(고스트마네킹)은 상품 왜곡 위험으로 영구 미도입.
 - **블러 배경 연장으로 비율 맞추기** — 원본(선명)과 블러 경계가 액자 테두리처럼 떠서 완성 포스터에 부적합(0721 Harold 실측).
+- **생성 축 poster 하나(07-30)** → 1108 용도별 프리셋 넷(§2-6 · D114). 통짜 한 장을 인앱 · 앱 칸에 넣으면 어두운 무대 위 작은 그림이 된다(Harold 「저딴 퀄리티를 돈 주고 쓰겠냐」).
+- **로고 기본 켜짐(C112 D8)** → 1108 기본 꺼짐(C118 E2 · Harold 「겁나 거슬리네」).
+- **할인 템플릿을 업종(뷰티 · 의류 · 커머스)으로 나눔 · 예시에 브랜드 이름 · 세트에 다른 업종 제품** → 1108 반려 · 혜택 꼴 × 보편 디자인 · 빈 제품 자리(C119 · D115).
+- **모바일 DM 3:4** → 1108 2:3(자유 3:4 와 같은 그림이었다 · C118 E7).
 - **Claude(Anthropic) 이미지 생성으로 대체** — 생성 엔드포인트가 없다(텍스트·코드 출력만). 이미지 생성은 현행 유지. 단 "레이아웃·문안을 텍스트로 산출하고 서버가 렌더"하는 형태는 §8 검토안으로 살아 있다.
 
 ---
@@ -306,3 +351,4 @@ cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scri
 - 소재 라이브러리·발사대 배관 = `project_2026_0719_p4_image_studio`
 - 인앱 이미지 클릭 랜딩(같은 세션 산출·별 축) = `project_2026_0731_inapp_image_link_studio_event_track`
 - 사고 이력 = `status/lessons/LESSONS_BACKEND.md` · `status/lessons/LESSONS_FRONTEND.md`
+- ★1107 ~ 1108 설계서 = [C112 로고 층](2026-11-07-c112-studio-brand-logo-design.md) · [C114 로드맵 V2](2026-11-08-c114-roadmap-v2-design.md) · [C118 용도별 제작](2026-11-08-c118-studio-per-use-inapp-app-design.md) · [C119 할인 24](2026-11-08-c119-discount-templates-20-design.md) · 인앱 앱 채널 쪽 = [인앱메세지전용.md](인앱메세지전용.md) §10-F
