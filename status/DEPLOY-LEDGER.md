@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 5fc2d527 · 2026-11-08 · Harold 실행 보고(C118 · 서버 git pull · 서버 작업 사본 image-studio.ts 주석 한 글자(│) 되돌린 뒤 · 확인 출력 = HEAD 5fc2d527 2026-11-08 17:25:05 +0900) · 그 전 c70830be(C116-B)
-- deployed_head: 5fc2d527 · 2026-11-08 · Harold 실행 보고(C118 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺70 · created at 08:36:43Z · unstable 0 · reload 뒤 에러 로그 0줄) · 그 전 c70830be(C116-B)
+- pulled_head: b05a4dca · 2026-11-08 · Harold 실행 보고(C118 보정 · 서버 git pull · 확인 출력 = HEAD b05a4dca 2026-11-08 19:24:11 +0900) · 그 전 5fc2d527(C118)
+- deployed_head: b05a4dca · 2026-11-08 · Harold 실행 보고(C118 보정 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺71 · created at 10:29:54Z · unstable 0 · reload 뒤 에러 로그 0줄) · 그 전 5fc2d527(C118)
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -62,7 +62,8 @@
 | C114 | b374ed44 |
 | C116 | ca7c99cd · c70830be |
 | C117 | da9baa11 |
-| C118 | 5fc2d527 |
+| C118 | 5fc2d527 · b05a4dca |
+| C119 | 미커밋 |
 
 ## §1 대기
 
@@ -1571,9 +1572,17 @@ COMMIT;
 ### C118-H2 · 한줄로 배포(C118 실사용 시험 보정 6건 · 백엔드 + 프론트 · DDL 0 · ENV 0)
 - 카드: C118
 - 단계: 한줄로 배포
-- 선행: C118-H1 · Codex 설계 2R · 구현 approve · 커밋(§10 경로만 · 다른 세션 파일 뺌) → push
+- 선행: C118-H1 · Codex 설계 2R · 구현 3R approve · 커밋 b05a4dca(Harold · 21 경로 · 다른 세션 파일 뺌) → push
 - 기대: 설계서 §10 · 스튜디오 만드는 중 안내 = 「인앱 메시지용 포스터를 만들고 있어요」(여러 장 = 「N장 중 i번째」) · 결과 로고 = 꺼진 채 · 할인 템플릿 인앱 = 글 자리 「위(고정)」 · 장 목록 줄마다 빼기 · 앱 가운데 팝업 · 하단 시트 = 미리보기 원본 비율 · 잘리는 사진이면 안내 창 · 디자인 탭 안내 줄 · 웹 채널 · 포스터 · 미가입 · 직접발송만 = 변화 0
 - 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 스튜디오 만드는 중 안내 줄 · 로고 꺼짐 → 인앱 편집기 장 목록 빼기 → 앱 채널 포스터 → 가운데 팝업 바꾸기 = 세로 사진이면 안내 창
+- 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD b05a4dca(2026-11-08 19:24:11 +0900) · targetup-backend online ↺71 · created at 2026-11-08T10:29:54Z · unstable 0 · reload 뒤 에러 로그 0줄(남은 줄 = 16:13 엑셀 암호 파일 · 그 전 것) → 서버 단계 통과 · 화면 = 만드는 중 안내 · 로고 꺼짐 확인(Harold) · 할인 8종 예시 GPT 생성(C114-S1 · Harold) = 세트 업종 섞임 · 브랜드 이름 → C119
+
+### C119-H1 · 한줄로 배포(할인 · 혜택 템플릿 24 · 배치 둘 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C119
+- 단계: 한줄로 배포
+- 선행: C118-H2 · Codex 설계 4R · 구현 approve · 커밋(C119 경로만 · 다른 세션 파일 뺌) → push
+- 기대: 설계서 docs/2026-11-08-c119-discount-templates-20-design.md · 할인 포스터 = 24종 · 이름 · 설명에 업종 말 0 · 「가격 할인 웜 우드」 · 왼쪽 글형 6 · 인앱 용도 = 배치대로 고정 표시 · 다른 트랙 · 미가입 · 직접발송만 = 변화 0
+- 확인: 서버 HEAD · pm2 기동 · 에러 로그 → 예시 24장 = 서버 셸 `cd /home/administrator/targetup-app/packages/backend && /usr/bin/ts-node -T scripts/discount-template-samples.ts --save`(OpenAI · 약 $1.61 · 줄마다 실제엔진=openai · 예시 저장) → 갤러리 24장 = 제품 없는 빈 자리 · 「상품명」
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

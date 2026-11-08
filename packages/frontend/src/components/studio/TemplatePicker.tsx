@@ -24,6 +24,8 @@ export interface StudioTemplatePublic {
   kind?: 'product' | 'event' | 'discount';
   /** ★ C114 할인 트랙만 — 혜택 꼴(가격 할인 · 하나 더 · 세트) · 제작 칸이 이 값을 따른다 */
   offer?: 'price' | 'nplus' | 'set' | null;
+  /** ★ C119 할인 트랙만 — 배치(stack = 위 글 · 아래 제품 / side = 왼쪽 글 · 오른쪽 아래 제품) · 그 밖 null */
+  layout?: 'stack' | 'side' | null;
   exampleUrl: string | null;
   defaultTexts: { label?: string; title?: string; subtitle?: string };
   /** 카드 목업 예시 카피(템플릿 무드별 실카피). */

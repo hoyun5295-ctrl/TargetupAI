@@ -20,6 +20,7 @@ import ModalBase, { ModalButton } from '../modals/ModalBase';
 import { useToast } from '../../ToastProvider';
 import TemplatePicker, { ALL_STUDIO_TRACKS, studioTrackOf, type StudioTemplatePublic, type StudioTrackKind } from '../../studio/TemplatePicker';
 import { useStudioMake, StudioMakeFields, TemplateExampleCard } from '../../studio/StudioMake';
+import { discountZoneText } from '../../studio/StudioUsePicker';   // ★ C119 할인 글 자리 고정 문구 한 곳
 import StudioWatermark from '../../studio/StudioWatermark';
 import StudioLogoControls from '../../studio/StudioLogoControls';
 import { layersForSave, logoSettingsOf, type LogoCandidate, type LogoCardState, type LogoSettings } from '../../../lib/studio-layers';
@@ -195,7 +196,7 @@ export default function StudioInsertModal({
                 <div className="rounded-xl border border-slate-200 bg-white p-3">
                   <div className="text-[12.5px] font-bold text-slate-800 mb-1.5">글 자리</div>
                   {make.discountKind ? (
-                    <p className="text-[12px] text-slate-700 leading-snug break-keep">위쪽에 글 · 할인 템플릿은 글이 위, 제품이 아래로 정해져 있어요.</p>
+                    <p className="text-[12px] text-slate-700 leading-snug break-keep">{discountZoneText(template?.layout === 'side' ? 'side' : 'stack')}</p>
                   ) : (<>
                   <div className="grid grid-cols-2 gap-1.5">
                     {(['top', 'bottom'] as const).map((z) => (

@@ -106,8 +106,8 @@ describe('CT-V5 그릴 글자 · 확인 줄 · 프롬프트 줄(1108 샘플과 �
 
 describe('카탈로그 · 프롬프트', () => {
   const discount = STUDIO_TEMPLATES.filter((t) => t.kind === 'discount');
-  it('할인 템플릿 8 · 카테고리 하나 · 혜택 꼴 있음 · 공개 목록에 offer', () => {
-    expect(discount.length).toBe(8);
+  it('할인 템플릿 24(★ C119) · 카테고리 하나 · 혜택 꼴 있음 · 공개 목록에 offer', () => {
+    expect(discount.length).toBe(24);   // ★ C119 8 → 24(설계서 docs/2026-11-08-c119-discount-templates-20-design.md)
     expect(new Set(discount.map((t) => t.category))).toEqual(new Set(['할인·혜택']));
     expect(discount.every((t) => t.offer === 'price' || t.offer === 'nplus' || t.offer === 'set')).toBe(true);
     const pub = listTemplatesPublic().find((t) => t.id === 'discount-set-beige')!;

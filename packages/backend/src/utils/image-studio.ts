@@ -219,7 +219,7 @@ export function hasBenefitPattern(text: string | undefined | null): boolean {
 
 // ── buildPosterPrompt (★v2 재정의 — 템플릿 스캐폴드 + 지정 문구까지 AI가 완성 포스터로 렌더) ──
 import type { StudioTemplate } from './image-studio-templates';
-import { discountPromptLines, discountFixedLayoutLine, type DiscountOffer } from './studio-discount';
+import { discountPromptLines, discountFixedLayoutLine, type DiscountOffer, type DiscountLayout } from './studio-discount';
 
 /**
  * ★ 2026-11-08 C114 D 글자 바닥 — 글 있는 모든 포스터(템플릿 textStyle 의 small · light · thin 을 이긴다 · 마지막 금지 줄 바로 앞).
@@ -258,8 +258,11 @@ export function buildPosterPrompt(input: {
 }): string {
   const { template, preset, texts } = input;
   const lines: string[] = [];
-  // ★ C118 E3 할인 템플릿 = 글 자리 위 고정(고정 틀 줄이 위를 정한다 · 화면이 아래를 보내도 위 · 서버가 진실)
-  const textPosition = input.offer && input.textPosition ? 'top' : input.textPosition;
+  // ★ C118 E3 할인 템플릿 = 글 자리 = 템플릿 배치(고정 틀 줄이 정한다 · 화면이 아래를 보내도 · 서버가 진실) ·
+  //   ★ C119 stack = 위 · side = 왼쪽(위 · 가운데 · 아래 지점 문장 0 · 인앱 문장 = 왼쪽 글 · 오른쪽 아래 주제)
+  const discountLayout: DiscountLayout = template.layout === 'side' ? 'side' : 'stack';
+  const sideLayout = !!input.offer && discountLayout === 'side';
+  const textPosition = input.offer && input.textPosition ? (sideLayout ? null : 'top') : input.textPosition;
   // ★ C118 E6 인앱용 = 할인 혜택 줄 · 고정 틀 줄도 안전 칸 안
   const discountSafe = isStudioFullPreset(preset.key) ? INAPP_CONTENT_SAFE : null;
 
@@ -279,8 +282,8 @@ export function buildPosterPrompt(input: {
     const pct = Math.round(INAPP_CONTENT_SAFE * 100);
     const edge = Math.round((1 - INAPP_CONTENT_SAFE) * 50);
     lines.push(`Keep every piece of copy and the main subject inside the central ${pct}% of the width and the central ${pct}% of the height; the outer ${edge}% on every side must contain only background scenery.`);
-    const half = textPosition === 'bottom' ? 'lower' : 'upper';
-    const other = half === 'upper' ? 'lower' : 'upper';
+    const half = sideLayout ? 'left' : textPosition === 'bottom' ? 'lower' : 'upper';
+    const other = sideLayout ? 'lower right' : half === 'upper' ? 'lower' : 'upper';
     lines.push(`The ${half} part of the square is a natural, color-matched calm continuation of the same scene where the copy sits, not a panel or overlay box. Place the main subject and props in the ${other} part so the copy never covers them.`);
   }
   // 3. 제품 보존(누끼 첨부 시) — 픽셀 충실 지시
@@ -320,7 +323,7 @@ export function buildPosterPrompt(input: {
       lines.push(`Typography direction: ${template.textStyle}`);
     }
     // ★ 2026-11-08 C114 B 할인 혜택 줄 = 지정 문구 뒤 · 마지막 금지 줄 앞(그릴 숫자 = 지정 문구 · 금지 줄이 막지 않는다)
-    if (input.offer) lines.push(...discountPromptLines(input.offer, input.brandColor, discountSafe));
+    if (input.offer) lines.push(...discountPromptLines(input.offer, input.brandColor, discountSafe, discountLayout));
     // ★ 2026-11-08 C114 D 글자 바닥(모든 글 있는 포스터 · Harold 1108 「텍스트가 너무 보기에 작고」)
     lines.push(POSTER_LEGIBILITY_FLOOR);
   } else {
@@ -340,7 +343,7 @@ export function buildPosterPrompt(input: {
   }
 
   // ★ C114 B 할인 = 최후미 고정 틀(맨 위 제품명 → 혜택 → 정해진 제품 자리 · 숫자 그대로)
-  if (given.length && input.offer) lines.push(discountFixedLayoutLine(input.offer, discountSafe));
+  if (given.length && input.offer) lines.push(discountFixedLayoutLine(input.offer, discountSafe, discountLayout));
 
   return lines.join('\n');
 }

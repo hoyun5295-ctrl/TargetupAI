@@ -23,11 +23,18 @@ export function studioUseOfPreset(presetKey: string): StudioUse | null {
 
 export interface StudioUsePick { uses: StudioUseKey[]; zone: 'top' | 'bottom' }
 
-export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm, zoneLocked = false }: {
+/** ★ C119 할인 템플릿 글 자리 고정 문구 한 곳(고르기 창 · 편집기 안 스튜디오 창) — 배치대로 */
+export function discountZoneText(layout: 'stack' | 'side'): string {
+  return layout === 'side'
+    ? '왼쪽에 글 · 이 템플릿은 글이 왼쪽, 제품이 오른쪽 아래로 정해져 있어요.'
+    : '위쪽에 글 · 이 템플릿은 글이 위, 제품이 아래로 정해져 있어요.';
+}
+
+export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm, zoneLocked = null }: {
   open: boolean;
   isAdmin: boolean;
-  /** ★ C118 E3 할인 템플릿 = 글 자리 위 고정(고정 틀 · 서버도 위) — 고를 수 없는 칸을 내지 않는다 */
-  zoneLocked?: boolean;
+  /** ★ C118 E3 · C119 할인 템플릿 = 글 자리 = 템플릿 배치 고정(stack = 위 · side = 왼쪽 · 서버도 같음) — 고를 수 없는 칸을 내지 않는다 · null = 고르기 */
+  zoneLocked?: 'stack' | 'side' | null;
   onClose: () => void;
   onConfirm: (pick: StudioUsePick) => void;
 }) {
@@ -71,7 +78,7 @@ export default function StudioUsePicker({ open, isAdmin, onClose, onConfirm, zon
                 <div className="px-3 pb-3 -mt-1">
                   <div className="text-[11.5px] font-semibold text-slate-600 mb-1">글 자리</div>
                   {zoneLocked ? (
-                    <p className="text-[12px] text-slate-700 leading-snug break-keep rounded-lg border border-slate-200 bg-white px-3 py-2">위쪽에 글 · 할인 템플릿은 글이 위, 제품이 아래로 정해져 있어요.</p>
+                    <p className="text-[12px] text-slate-700 leading-snug break-keep rounded-lg border border-slate-200 bg-white px-3 py-2">{discountZoneText(zoneLocked)}</p>
                   ) : (<>
                   <div className="grid grid-cols-2 gap-1.5">
                     {(['top', 'bottom'] as const).map((z) => (

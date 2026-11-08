@@ -527,7 +527,7 @@ export default function ImageStudioPage() {
       )}
 
       <ConfirmModal state={confirm} onClose={() => setConfirm(null)} />
-      <StudioUsePicker open={usePickerOpen} isAdmin={isCompanyAdmin} zoneLocked={!!make.discountKind} onClose={() => setUsePickerOpen(false)} onConfirm={(p) => void runUses(p)} />
+      <StudioUsePicker open={usePickerOpen} isAdmin={isCompanyAdmin} zoneLocked={make.discountKind ? (template?.layout === 'side' ? 'side' : 'stack') : null} onClose={() => setUsePickerOpen(false)} onConfirm={(p) => void runUses(p)} />
 
       {/* 라이브러리 전체 보기·관리 — 검색·삭제(픽커 재사용), 소재 클릭 = 발사대 모달 */}
       <AssetLibraryPickerModal

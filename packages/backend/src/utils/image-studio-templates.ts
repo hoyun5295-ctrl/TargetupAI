@@ -23,7 +23,7 @@ import { TEMPLATES_2610 } from './image-studio-templates-2610';
 import { TEMPLATES_2611 } from './image-studio-templates-2611';
 // ★ 2026-11-08 C114 B 할인 포스터 트랙(kind 'discount') — 숫자 · 틀 줄 = studio-discount.ts
 import { TEMPLATES_DISCOUNT } from './image-studio-templates-discount';
-import type { DiscountOfferKind } from './studio-discount';
+import type { DiscountOfferKind, DiscountLayout } from './studio-discount';
 import { SUB_BY_ID } from './image-studio-template-subs';
 
 export type TemplateCategory =
@@ -46,6 +46,8 @@ export interface StudioTemplate {
   kind?: 'product' | 'event' | 'discount';
   /** ★ 2026-11-08 C114 B 할인 트랙만 — 혜택 꼴(가격 할인 · N+M · 세트) · 화면 칸과 서버 검사가 이 값을 따른다 */
   offer?: DiscountOfferKind;
+  /** ★ 2026-11-08 C119 할인 트랙만 — 배치(stack = 위 글 · 아래 가운데 제품 / side = 왼쪽 한 기둥 글 · 오른쪽 아래 제품) · 문장 = studio-discount.ts · 없음 = stack */
+  layout?: DiscountLayout;
   /** 갤러리 카드 한 줄 설명(고객 노출). */
   desc: string;
   /**
@@ -5820,7 +5822,9 @@ export function getTemplate(id: string): StudioTemplate | undefined {
 /** 갤러리용 공개 목록 — ★scaffold·textStyle(은닉 프롬프트) 절대 미포함. */
 export function listTemplatesPublic() {
   return STUDIO_TEMPLATES.map((t) => ({
-    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', offer: t.offer || null, desc: t.desc, useCase: t.useCase, accent: t.accent,
+    id: t.id, name: t.name, category: t.category, kind: t.kind || 'product', offer: t.offer || null,
+    layout: t.kind === 'discount' ? (t.layout || 'stack') : null,   // ★ C119 할인만 배치(화면 고정 표시 문구)
+    desc: t.desc, useCase: t.useCase, accent: t.accent,
     exampleUrl: t.exampleUrl || null, defaultTexts: t.defaultTexts, sample: t.sample,
     // ★ 2026-10-06 세부 카테고리(갤러리 걸러보기 · 20종 이상 카테고리만 · 없으면 null) = image-studio-template-subs.ts
     sub: SUB_BY_ID[t.id] || null,

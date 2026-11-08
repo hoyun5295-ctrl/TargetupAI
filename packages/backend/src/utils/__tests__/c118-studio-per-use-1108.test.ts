@@ -626,8 +626,8 @@ describe('T14 (E3) 할인 템플릿 = 글 자리 위 고정', () => {
   });
   it('화면 = 할인이면 위 고정 표시 · 본문 = 위(고르기 창 · 편집기 안 스튜디오 창)', () => {
     expect(fe('components/studio/StudioUsePicker.tsx')).toContain("zone: zoneLocked ? 'top' : zone");
-    expect(fe('components/studio/StudioUsePicker.tsx')).toContain('위쪽에 글 · 할인 템플릿은 글이 위, 제품이 아래로 정해져 있어요.');
-    expect(fe('pages/ImageStudioPage.tsx')).toContain('zoneLocked={!!make.discountKind}');
+    expect(fe('components/studio/StudioUsePicker.tsx')).toContain('위쪽에 글 · 이 템플릿은 글이 위, 제품이 아래로 정해져 있어요.');   // ★ C119 배치별 문구 한 곳(discountZoneText)
+    expect(fe('pages/ImageStudioPage.tsx')).toContain("zoneLocked={make.discountKind ? (template?.layout === 'side' ? 'side' : 'stack') : null}");
     expect(fe('components/dm/build/StudioInsertModal.tsx')).toContain('{make.discountKind ? (');
   });
 });
