@@ -103,8 +103,8 @@ export function isOwnServingImageUrl(imgUrl: unknown): boolean {
   return toOwnImageRef(String(imgUrl || '').trim()) !== null;
 }
 
-/** 우리 서빙 URL이면 `{companyId, filename}`, 아니면 null */
-function toOwnImageRef(imgUrl: string): { companyId: string; filename: string } | null {
+/** 우리 서빙 URL이면 `{companyId, filename}`, 아니면 null · ★ 2026-11-08 C116 D1 인앱 굽기 판정 · 맞춤 꼬리가 같은 판정을 쓴다(R1) */
+export function toOwnImageRef(imgUrl: string): { companyId: string; filename: string } | null {
   let pathname: string | null = null;
   if (imgUrl.startsWith('/api/cdp/inapp/image/')) {
     pathname = imgUrl.split(/[?#]/)[0];

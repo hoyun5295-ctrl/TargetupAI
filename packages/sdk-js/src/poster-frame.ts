@@ -85,6 +85,12 @@ export interface PosterFrameInput {
   imageSrc?: (u: string) => string;
   /** 글 얹기 제목 서체(이미 안전한 font-family 값) */
   displayFont?: string;
+  /**
+   * ★ 2026-11-08 C116 D8 정지 그리기(서버 굽기 · 편집기 「구버전 앱 모습」) — 살아 있는 부품을 만들지 않는다:
+   *   닫기 줄 · 쪽 번호 · 장 버튼 칸 · 바닥 줄 · 쿠폰 「복사」 0 · 남은 시간 = 마감 시각 글(이름 없는 정적 글) · 높이 예산 = 띠만.
+   *   부품 칸이 null 이라 소비자(SDK · 편집기)의 시계 · 버튼 · 복사 · 닫기 연결이 저절로 0(넘김 레일은 남김 · 앱도 넘겨 본다).
+   */
+  still?: { deadlineText?: string | null } | null;
 }
 
 export interface PosterFrameParts {
@@ -94,13 +100,15 @@ export interface PosterFrameParts {
   pager: HTMLElement | null;
   prev: HTMLElement | null;
   next: HTMLElement | null;
-  ctaHost: HTMLElement;
+  /** 정지 그리기면 null */
+  ctaHost: HTMLElement | null;
   strip: HTMLElement | null;
   stripCopy: HTMLElement | null;
   stripCode: HTMLElement | null;
   stripTimer: HTMLElement | null;
-  dismissDay: HTMLElement;
-  close: HTMLElement;
+  /** 정지 그리기면 null */
+  dismissDay: HTMLElement | null;
+  close: HTMLElement | null;
 }
 
 export interface PosterFrameResult {
@@ -323,16 +331,19 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   const isCard = frame === 'card';
   const maxW = isCard ? R.card.maxWidth : R.sheet.maxWidth;
   // 그림 밖 높이(띠 · 버튼 칸 · 닫기 줄) — 높이 상한 계산에 쓴다
+  const still = !!input.still;
   const hasCtaAny = slides.some((s) => s.cta && (s.cta.label || s.cta.action_url));
-  const chrome = (strip ? R.stripHeight : 0) + (hasCtaAny ? R.ctaHeight + 24 : 0) + (isCard ? R.card.closeRowHeight + 8 : R.sheet.footHeight);
+  // ★ C116 정지 = 버튼 칸 · 닫기 줄 · 바닥 줄을 만들지 않으므로 예산에서도 뺀다(버튼 유무가 그림 크기를 바꾸지 않게 · Codex 설계 1R ⑥)
+  const chrome = (strip ? R.stripHeight : 0) + (still ? 0 : (hasCtaAny ? R.ctaHeight + 24 : 0) + (isCard ? R.card.closeRowHeight + 8 : R.sheet.footHeight));
 
   const backdrop = el('div', 'frame-backdrop', {
     position: input.mount === 'page' ? 'fixed' : 'absolute', inset: '0',
-    background: 'rgba(8,10,18,0.55)', zIndex: input.mount === 'page' ? '2147483646' : '1',
+    // ★ C116 정지 = 바깥 어둠 0(구운 그림 모서리 · 편집기 앱 시트 안 그림)
+    background: still ? 'transparent' : 'rgba(8,10,18,0.55)', zIndex: input.mount === 'page' ? '2147483646' : '1',
     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: isCard ? 'center' : 'flex-end',
     padding: isCard ? `0 ${R.card.sideMargin}px` : '0', boxSizing: 'border-box',
   });
-  if (input.mount === 'page') {
+  if (input.mount === 'page' && !still) {
     backdrop.style.backdropFilter = 'blur(14px) saturate(1.35)';
     (backdrop.style as any).webkitBackdropFilter = 'blur(14px) saturate(1.35)';
   }
@@ -348,9 +359,11 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   root.setAttribute('data-hjl-text', baked ? 'baked' : 'live');
 
   // 떠 있는 카드 = 카드 위 어둠 위 한 줄(왼쪽 하루 보지 않기 흰 글 · 오른쪽 X 44px)
-  let dismissDay: HTMLElement;
-  let close: HTMLElement;
-  if (isCard) {
+  let dismissDay: HTMLElement | null = null;
+  let close: HTMLElement | null = null;
+  if (still) {
+    // ★ C116 정지 = 닫기 줄 · 바닥 줄 없음(앱이 자기 것을 그린다)
+  } else if (isCard) {
     const row = el('div', 'card-close-row', {
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: `${R.card.closeRowHeight}px`, marginBottom: '8px', color: '#ffffff',
     });
@@ -427,7 +440,7 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   let pager: HTMLElement | null = null;
   let prev: HTMLElement | null = null;
   let next: HTMLElement | null = null;
-  if (count > 1) {
+  if (count > 1 && !still) {
     pager = el('div', 'pager', {
       position: 'absolute', right: `${R.pagerInset}px`, bottom: `${R.pagerInset}px`, height: '28px', borderRadius: '999px',
       background: 'rgba(17,24,39,0.62)', color: '#ffffff', fontSize: '12px', fontWeight: '700',
@@ -473,12 +486,19 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
         whiteSpace: 'nowrap', userSelect: 'all', flex: '0 1 auto', minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis',
       }, String(strip.code || ''));
       stripCode.setAttribute('title', String(strip.code || ''));
-      stripCopy = el('button', 'strip-copy', {
-        height: '34px', padding: '0 14px', borderRadius: '999px', border: `1.5px solid ${accent}`, background: '#ffffff', color: accent,
-        fontSize: '13px', fontWeight: '800', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flex: '0 0 auto',
-      }, '복사');
       stripEl.appendChild(stripCode);
-      stripEl.appendChild(stripCopy);
+      if (!still) {
+        stripCopy = el('button', 'strip-copy', {
+          height: '34px', padding: '0 14px', borderRadius: '999px', border: `1.5px solid ${accent}`, background: '#ffffff', color: accent,
+          fontSize: '13px', fontWeight: '800', cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap', flex: '0 0 auto',
+        }, '복사');
+        stripEl.appendChild(stripCopy);
+      }
+    } else if (still) {
+      // ★ C116 정지 = 마감 시각 글(서버 inAppDeadlineText) · 시계 부품 칸에 내놓지 않는다(소비자 시계 연결 0)
+      stripEl.appendChild(el('span', 'strip-deadline', {
+        fontSize: '16px', fontWeight: '800', color: accent, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', flex: '0 0 auto',
+      }, String(input.still?.deadlineText || '').trim() || '마감 시각 미정'));
     } else {
       const endMs = countdownEndMs(input.endAt);
       stripTimer = el('span', 'strip-timer', {
@@ -490,12 +510,15 @@ export function buildPosterFrame(input: PosterFrameInput): PosterFrameResult {
   }
 
   // 장 버튼 칸(흰 칸 · 그림 위에 얹지 않음)
-  const ctaHost = el('div', 'cta-host', { padding: '12px 16px', boxSizing: 'border-box', flex: '0 0 auto' });
-  fillPosterFrameCta(ctaHost, slides[active], accent, input.text);
-  box.appendChild(ctaHost);
+  let ctaHost: HTMLElement | null = null;
+  if (!still) {
+    ctaHost = el('div', 'cta-host', { padding: '12px 16px', boxSizing: 'border-box', flex: '0 0 auto' });
+    fillPosterFrameCta(ctaHost, slides[active], accent, input.text);
+    box.appendChild(ctaHost);
+  }
 
   // 바닥 시트 = 바닥 흰 줄 52px(왼쪽 하루 보지 않기 · 오른쪽 닫기)
-  if (!isCard) {
+  if (!isCard && dismissDay && close) {
     const foot = el('div', 'foot', {
       display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: `${R.sheet.footHeight}px`, padding: '0 20px',
       background: '#ffffff', color: '#57534e', fontSize: '14px', boxSizing: 'border-box', borderTop: '1px solid #f4f4f5', flex: '0 0 auto',

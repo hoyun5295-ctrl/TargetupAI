@@ -26,6 +26,13 @@ const VERSION_RE = /^v[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9]+)?$/;
 export const SERVED_SDK_VERSIONS: readonly string[] = ['v0.3.5', 'v0.3.8', 'v0.3.9', 'v0.3.10', 'v0.3.11'];
 const sdkFileCache = new Map<string, Buffer>();
 
+/** ★ 2026-11-08 C116 D2 서빙 SDK 파일 경로(목록 안 판 · 파일 있음만) — 인앱 굽기 열쇠가 파일 내용 지문을 넣는다 */
+export function servedSdkFilePath(version: string): string | null {
+  if (!VERSION_RE.test(version) || !SERVED_SDK_VERSIONS.includes(version)) return null;
+  const p = resolve(SDK_DIR, version, 'hanjul.min.js');
+  return existsSync(p) ? p : null;
+}
+
 function parseVer(v: string): [number, number, number] {
   const parts = v.replace(/^v/, '').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
   return [parts[0] || 0, parts[1] || 0, parts[2] || 0];

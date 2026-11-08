@@ -2624,6 +2624,7 @@ function EditModal({ editing, setEditing, availableVariables, fileInputRef, onIm
         slides={slides}
         design={editing.design}
         badge={null}
+        extraTexts={[editing.title, editing.body, editing.badge_text]}
         active={safeActive}
         onActive={(i) => { setActive(i); setSelField(null); }}
         channel={isApp ? 'app' : 'web'}

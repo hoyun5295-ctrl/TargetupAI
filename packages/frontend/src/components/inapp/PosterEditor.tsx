@@ -16,6 +16,8 @@ import { INAPP_FONT_CATALOG } from './blockTheme';
 import { PosterSheetPreview, POSTER_SHEET_DEFAULTS, hexOr, type PosterLayout, type SheetEditKey } from './PosterSheetPreview';
 import { LAYOUT_INFO, MAX_SLIDES, layoutsFor, appCapsNoteForKey, stripAllowedFor, legacyAppPreviewOf, type LayoutKey, type WsSlide } from './inappSlides';
 import { PosterFramePreview } from './PosterFramePreview';
+import { LegacyBakedPreview } from './LegacyBakedPreview';
+import { legacyAppWillBake } from './legacy-app-view';
 import { usesPosterFrame, drawsWithPosterFrame } from './generated/poster-frame';
 import { creditText } from '../../constants/credit';
 
@@ -203,7 +205,7 @@ function FakeScreen({ app }: { app: boolean }) {
 
 export function PosterStage({
   layout, slides, design, badge, active, onActive, channel, pc, legacyApp, renderText, selected, onSelect, onChangeField,
-  onImagePick, onImageDrop, variables, busyImage, accentColor, endAt, onStripPick,
+  onImagePick, onImageDrop, variables, busyImage, accentColor, endAt, onStripPick, extraTexts,
 }: {
   layout: PosterLayout;
   slides: WsSlide[];
@@ -227,6 +229,8 @@ export function PosterStage({
   onImageDrop: (files: FileList) => void;
   variables: Array<{ key: string; label: string }>;
   busyImage?: boolean;
+  /** ★ C116 D11 메시지 제목 · 본문 · 배지(서버 굽기 판정이 개인화 낱말을 보는 칸 · 구버전 앱 모습 거울에 같이 넘김) */
+  extraTexts?: unknown[];
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
@@ -250,6 +254,8 @@ export function PosterStage({
   const drawSlides = legacy ? legacy.slides : slides;
   // ★ C114 I-3 그리는 자리 판정 = drawsWithPosterFrame 하나(사진 위 글도 새 틀 · SDK 와 같음)
   const useFrame = !legacyApp && drawsWithPosterFrame(design);
+  // ★ 2026-11-08 C116 D11 구버전 앱 = 서버가 구워 보내면(같은 판정 거울) 구운 모습 · 아니면 위 대체 거울
+  const bakedLegacy = legacyApp && legacyAppWillBake({ design, slides: slides as any, texts: [badge, ...(extraTexts || [])] });
 
   // ★ 2026-09-29 무대 맞춤(Harold 0929 「화면에서 잘려 밑에 글 쓰기가 힘들다」 · 1455×740 에서 휴대폰 43px 잘림 실측) —
   //   가운데 칸 높이를 재서 휴대폰(PC 틀)을 남는 높이에 맞춘다(DM·이메일 PreviewPair 와 같은 방식 · 큰 화면은 FIT_MAX 까지 키운다).
@@ -367,7 +373,22 @@ export function PosterStage({
           {isPc && <div className="h-6 bg-slate-100 flex items-center gap-1.5 px-3"><i className="w-2 h-2 rounded-full bg-rose-400" /><i className="w-2 h-2 rounded-full bg-amber-300" /><i className="w-2 h-2 rounded-full bg-emerald-400" /></div>}
           <div className="relative w-full" style={{ height: isPc ? PC_H - 24 : '100%' }}>
             <FakeScreen app={channel === 'app'} />
-            {useFrame ? (
+            {bakedLegacy ? (
+              <LegacyBakedPreview
+                slides={slides.map((s) => ({ ...s, image_url: String(s.image_url || '').trim() || PHOTO_SLOT })) as any}
+                design={design}
+                accentColor={accentColor}
+                badge={badge}
+                endAt={endAt}
+                replaceVars={renderText}
+                active={active}
+                onActive={onActive}
+                buttonLabel={(cur as any)?.cta ? ((cur as any).cta.label || '자세히 보기') : null}
+                buttonBg={(cur as any)?.cta?.background_color || null}
+                buttonColor={(cur as any)?.cta?.text_color || null}
+                optOutLabel="다시 보지 않기"
+              />
+            ) : useFrame ? (
               <div className="absolute inset-0">
                 <PosterFramePreview
                   slides={slides.map((s) => ({ ...s, image_url: String(s.image_url || '').trim() || PHOTO_SLOT })) as any}

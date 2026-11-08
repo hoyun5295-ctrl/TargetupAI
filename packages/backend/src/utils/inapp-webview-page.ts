@@ -11,7 +11,9 @@
 import { SERVED_SDK_VERSIONS } from './sdk-serve';
 
 /** 페이지가 싣는 SDK 판 = 서빙 폴더 중 가장 새 판(빌드 동기화가 v0.3.8 이상 전 폴더에 같은 파일을 둔다) */
-export const INAPP_WEBVIEW_SDK_PATH = `/api/cdp/sdk/${SERVED_SDK_VERSIONS[SERVED_SDK_VERSIONS.length - 1]}/hanjul.min.js`;
+/** ★ C116 웹뷰 페이지가 부르는 SDK 판(목록의 마지막) — 굽기 열쇠도 이 판 파일 지문을 쓴다 */
+export const INAPP_WEBVIEW_SDK_VERSION = SERVED_SDK_VERSIONS[SERVED_SDK_VERSIONS.length - 1];
+export const INAPP_WEBVIEW_SDK_PATH = `/api/cdp/sdk/${INAPP_WEBVIEW_SDK_VERSION}/hanjul.min.js`;
 
 export function inAppWebviewCsp(nonce: string): string {
   return [

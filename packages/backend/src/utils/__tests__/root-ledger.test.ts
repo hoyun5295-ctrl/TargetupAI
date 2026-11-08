@@ -1776,6 +1776,13 @@ const PLAIN_ERROR_OK: Record<string, string> = {
   "utils/dm/dm-ai.ts|JSON 배열 형식이 아닙니다": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
   "services/ai-orchestrator.ts|OrchestratorAI: target_a": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
   "services/ai-orchestrator.ts|OrchestratorAI: message_": "AI 응답 해석 실패(다시 시도 · 고객에게는 라우트 안내 문장)",
+  "utils/inapp-bake.ts|장 수 다름(기대 … · 그림 …)": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
+  "utils/inapp-bake.ts|그리기 …": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
+  "utils/inapp-bake.ts|그림 도착 시간 초과": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
+  "utils/inapp-bake.ts|그린 장 수 다름(기대 … · 그림 …)": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
+  "utils/inapp-bake.ts|장 넘김 실패(… → …)": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
+  "utils/inapp-bake.ts|틀 상자 없음": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
+  "utils/inapp-bake.ts|받은 바이트 상한 넘음": "내부 굽기 일꾼 실패(★C116 · 로그만 · 10분 쉼 · 고객 노출 0 · 옛 앱은 대체 서빙)",
 };
 describe('R10 넓힘(1025) — 사용자 조건 = 오류 종류(UserFacingError) · 라우트 catch = 공용 응답', () => {
   const found: string[] = [];
@@ -3263,6 +3270,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
   // 키 = 파일 + dedupKey 식 · 이유 = 회사가 없거나(메일함 · 미등록 발신) · 원인이 우리 처리기 · 인프라 · 외부 서비스 공통이거나 · 슈퍼관리자 실행 단위(여러 회사 · 내부 통제) · 보안
   // 새 null = 실패(이유를 적고 넣는다) · 사라진 null = 실패(목록을 지운다)
   const NULL_OK: Record<string, string> = {
+    'utils/inapp-bake.ts \'inapp-bake:chrome\'': '★C116 서버 크롬 실행 실패 = 서버 공통(굽기 전부 멈춤) · 회사 무관',
     'routes/admin.ts `agent-charge-order-stuck:${requestId}`': '슈퍼관리자가 해소한 실행 단위(여러 발송 ID · 여러 회사) · 주문 되돌리기 실패 직후라 다시 읽지 않는다',
     'utils/agency-send-mail-worker.ts \'agency-mail-login-fail\'': '공용 메일함 로그인 · 회사 없음',
     'utils/agency-send-mail-worker.ts \'agency-mail-poll-fail\'': '공용 메일함 폴링 · 회사 없음',
@@ -3391,6 +3399,7 @@ describe('R14 넓힘(1102 설계 docs/2026-11-01-credit-control-tower-design.md 
   // 감지 뒤 닫히는 사건 = alertPassFailures · persistPassFailures 의 항목 키(못 보낸 항목 = PG 원장 · 닫기 = 원장 기록 참일 때만).
   // 단위 키(메일함 · 회사 · 여정)는 기계로 못 가른다 = 대장 R14 점검표(설계 §17-1 세 질문 · 구조체크 · Codex 요청문 ④).
   const STATE_KEYS: Record<string, string> = {
+    "utils/inapp-bake.ts 'inapp-bake:chrome'": '★C116 크롬이 안 뜨는 동안 이어지는 상태(굽기 요청마다 다시 실패) · 6시간 쿨다운 안에서 한 번',
     "utils/agency-send-mail-worker.ts 'agency-mail-login-fail'": '메일함 로그인 실패 = 고칠 때까지 매 틱 다시',
     "utils/agency-send-mail-worker.ts 'agency-mail-poll-fail'": '메일함 폴링 실패 = 고칠 때까지 매 틱 다시',
     "utils/cafe24-client.ts 'cafe24-api-version-rejected'": '고정한 API 판 거절 = 모든 호출이 다시 실패',

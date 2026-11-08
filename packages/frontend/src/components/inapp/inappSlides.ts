@@ -267,16 +267,15 @@ export const APP_CONFIRMED_CAPS: ReadonlySet<string> = new Set<string>([]);
 
 /**
  * 앱 채널에서 옛 앱(웹뷰를 붙이지 않은 앱)이 이 메시지를 어떻게 보이나 · null = 그대로 보임.
- * ★ 2026-11-08 C114 I-4 = 내보내지 않음 0(서버가 옛 앱이 그릴 수 있는 꼴로 바꿔 보낸다) → hidden 은 늘 거짓 · 다르게 보이는 것만 말한다.
+ * ★ 2026-11-08 C114 I-4 = 내보내지 않음 0 → hidden 은 늘 거짓 · ★ C116 = 서버가 구워 보낸다 → 누르는 동작이 다른 것만 말한다(굽지 않는 개인화 · 남의 그림은 편집기 구버전 앱 모습이 대체 꼴로 보여 준다).
  *   판정 = 서버 관문과 같은 규칙(posterFrameRequiredCaps) · 웹뷰 앱 · 웹 = 그대로.
  */
 export function appCapsNote(design: Record<string, any> | null | undefined, slideCount: number): { hidden: boolean; text: string } | null {
   const need = posterFrameRequiredCaps(design, slideCount);
   const missing = new Set([...need.hard, ...need.soft].filter((c) => !APP_CONFIRMED_CAPS.has(c)));
-  const strip = missing.has('strip_coupon') || missing.has('strip_countdown');
-  if (missing.has('frame_card') && strip) return { hidden: false, text: '옛 앱에서는 바닥 시트로, 쿠폰 코드와 남은 시간은 글로 보여요' };
-  if (missing.has('frame_card')) return { hidden: false, text: '옛 앱에서는 바닥 시트로 보여요' };
-  if (strip) return { hidden: false, text: '옛 앱에서는 쿠폰 코드와 남은 시간이 글로 보여요' };
+  // ★ 2026-11-08 C116 D11 옛 앱 = 서버가 이 모양 그대로 그림으로 구워 보낸다 → 다른 것(누르는 동작)만 말한다
+  if (missing.has('strip_coupon')) return { hidden: false, text: '옛 앱에서는 쿠폰 복사 버튼 없이 코드만 보여요' };
+  if (missing.has('strip_countdown')) return { hidden: false, text: '옛 앱에서는 남은 시간 대신 마감 시각이 보여요' };
   return null;
 }
 

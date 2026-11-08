@@ -17,6 +17,8 @@ import { PosterSheetPreview, resolvePosterLayout } from './inapp/PosterSheetPrev
 import { PosterFramePreview } from './inapp/PosterFramePreview';
 import { drawsWithPosterFrame, frameSlidesWithFlat } from './inapp/generated/poster-frame';
 import { legacyAppPreviewOf } from './inapp/inappSlides';
+import { legacyAppWillBake } from './inapp/legacy-app-view';
+import { LegacyBakedPreview } from './inapp/LegacyBakedPreview';
 
 // ★ 2026-07-07(5) 형태 골격 — ticket(2톤)/poster(풀블리드) 존 분할 시 구간별 패딩.
 //   SDK ZONE_PADS 미러 (미리보기 축소 스케일에 맞춰 비례 축소).
@@ -567,7 +569,12 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
   // ★ 2026-11-08 C114 K2 구버전 앱 모습 = 서버가 옛 앱에 실제로 보내는 꼴(legacyAppPreviewOf = 서버 legacyServeTransform 거울 · 내보내지 않음 0)
   const legacyPoster = !!legacyApp && template === 'full_image';
   const bakedIn = !!designIn && (designIn as any).poster_text === 'baked';
-  const legacyView = legacyPoster ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt) : null;
+  // ★ 2026-11-08 C116 D11 서버가 구워 보내면(같은 판정 거울) 구운 모습 · 아니면 대체 거울(legacyAppPreviewOf)
+  const bakedLegacy = legacyPoster && legacyAppWillBake({ design: designIn, slides: Array.isArray(slidesIn) ? slidesIn : [], imageUrl, texts: [titleIn, bodyIn, badge] });
+  const [bakedActive, setBakedActive] = useState(0);
+  const bakedSlideList = Array.isArray(slidesIn) ? slidesIn.filter((s: any) => s && String(s.image_url || '').trim()) : [];
+  const bakedBtn: any = bakedSlideList.length >= 2 ? (bakedSlideList[Math.min(bakedActive, bakedSlideList.length - 1)] as any)?.cta || null : (buttons || [])[0] || null;
+  const legacyView = legacyPoster && !bakedLegacy ? legacyAppPreviewOf(designIn, Array.isArray(slidesIn) ? slidesIn : [], endAt) : null;
   const design = legacyView ? legacyView.design : designIn;
   const posterSlides = legacyView ? legacyView.slides : slidesIn;
   const title = legacyPoster && bakedIn ? '' : titleIn;
@@ -698,6 +705,22 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
                   design={design} accentColor={accentColor} badge={badge} endAt={endAt} replaceVars={replaceVars} height={580} />
               </div>
             )}
+            {bakedLegacy ? (
+              <LegacyBakedPreview
+                slides={frameSlidesWithFlat(Array.isArray(slidesIn) ? slidesIn : [], { image_url: imageUrl || null, title: titleIn || '', body: bodyIn || '', eyebrow: badge || null, cta: null, link_url: null }, designIn) as any}
+                design={designIn}
+                accentColor={accentColor}
+                badge={badge}
+                endAt={endAt}
+                replaceVars={replaceVars}
+                active={bakedActive}
+                onActive={setBakedActive}
+                buttonLabel={bakedBtn ? (bakedBtn.label || '자세히 보기') : null}
+                buttonBg={bakedBtn?.background_color || null}
+                buttonColor={bakedBtn?.text_color || null}
+                optOutLabel={appOptOut}
+              />
+            ) : (
             <div style={{ position: 'absolute', inset: 0, background: frameApp ? 'transparent' : 'rgba(10,10,15,0.6)', display: 'flex', flexDirection: 'column', justifyContent: isModal ? 'center' : 'flex-end', alignItems: 'center' }}>
               {frameApp ? null : isPoster && sheetLayout !== 'overlay'
                 ? (
@@ -732,6 +755,7 @@ export function AppInAppPreview({ template, title: titleIn, body: bodyIn, imageU
                     : posterCard)
                 : card}
             </div>
+            )}
           </div>
         </div>
       </div>

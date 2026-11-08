@@ -130,16 +130,15 @@ describe('CT-IA4 서빙 관문', () => {
   it('관문 자리 = 변형 고르기 뒤 · 매핑 직후 한 곳(쪽 반복이 이 뒤 수를 센다) · 라우트가 caps · serverNow 를 잇는다', () => {
     const ev = between(be('utils/inapp-message.ts'), 'async function evaluateInAppCandidates(', '\n// ════');
     const iSel = ev.indexOf('selectVariantForCustomer(');
-    const iGate = ev.indexOf('.map((m) => gateInAppForClient(m, clientCaps))');
-    const iServe = ev.indexOf('.map(toServedMessage)');
-    // ★ C114 K1 순서 = 관문 → 통짜 비우기 → 옛 앱 변환(null 거르기 0)
-    const iLegacy = ev.indexOf('.map((m) => legacyServeTransform(m, clientCaps))');
-    expect(iLegacy).toBeGreaterThan(iServe);
+    // ★ 2026-11-08 C116 D4 서빙 한 곳 = serveInAppForClient(굽기 판정 → 구운 메시지 · 아니면 관문 → 통짜 비우기 → 옛 앱 변환 · K1 순서는 그 함수 안)
+    const iGate = ev.indexOf('.map((m) => serveInAppForClient(m, clientCaps, input.companyId))');
+    const iServe = iGate;
+    const fn = between(be('utils/inapp-message.ts'), 'export function serveInAppForClient(', '\n/** D10');
+    expect(fn).toContain('return legacyServeTransform(toServedMessage(gateInAppForClient(m, caps)), caps);');
     expect(ev).not.toContain('m !== null');
     const iOpt = ev.indexOf("i.event_type = 'opt_out'");
     expect(iSel).toBeGreaterThan(-1);
     expect(iGate).toBeGreaterThan(iSel);
-    expect(iServe).toBeGreaterThan(iGate);
     expect(iOpt).toBeGreaterThan(iServe);
     const route = between(be('routes/cdp.ts'), "router.get('/inapp/active',", "router.post('/inapp/track',");
     expect(route).toContain('const clientCaps = parseInAppClientCaps(req.query.caps);');

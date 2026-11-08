@@ -22,7 +22,9 @@ import { selectVariantForCustomer } from './inapp-variant-optimizer';
 import { isTimeWindowValid } from './inapp-trigger-engine';
 import { findAiFillPlaceholder } from './copy-benefit-detector';   // ★ 2026-10-24 ⑮ 게시 = 공용 채울 자리 판정도 함께
 import { textHasPersonalizationVar } from './inapp-personalization';   // ★ 2026-11-05 통짜 장 글 = 바꿔 넣기 글 금지(치환과 같은 근거)
-import { inAppDmLinkPolicyDefect } from './inapp-dm-link-policy';   // ★ 2026-11-05 §3-6 DM 참여 연결 판정(트랜잭션 연결로만 읽음)
+import { inAppDmLinkPolicyDefect } from './inapp-dm-link-policy';
+import { toOwnImageRef } from './brand-image-resolver';   // ★ 2026-11-08 C116 D1 우리 그림 판정 한 곳(R1)
+import { inAppBakeKey, readInAppBake, requestInAppBake, type InAppBakeJob } from './inapp-bake';   // ★ C116 굽기 CT   // ★ 2026-11-05 §3-6 DM 참여 연결 판정(트랜잭션 연결로만 읽음)
 import type { TxRun } from '../config/database';
 
 // ════════════════════════════════════════════════════════════════════
@@ -833,6 +835,8 @@ export async function settleInAppPublish(companyId: string, messageId: string, c
     },
     what: '인앱 게시',
   });
+  // ★ 2026-11-08 C116 D10 게시 = 미리 굽기 요청(기다리지 않음 · 실패 = 기록만 · 게시는 그대로 · K5)
+  void prebakeInAppMessage(companyId, messageId);
 }
 
 export async function createInAppMessage(
@@ -1453,13 +1457,16 @@ export function gateInAppForClient(m: InAppMessageDetail, caps: ReadonlySet<stri
   return m;
 }
 
-/** ★ C114 I-2 옛 앱 그림 미리 맞춤 — 우리가 서빙하는 인앱 그림 주소 두 꼴(올린 그림 · 예시 그림)만 · 남의 주소 = 그대로 */
-const OWN_INAPP_IMAGE_RE = /^(?:https?:\/\/[^/?#]+)?\/api\/cdp\/inapp\/(?:image\/[0-9a-f-]{36}\/[^/?#]+|example-image\/[^/?#]+\/\d+)(?:\?[^#]*)?$/i;
-export function withInAppImageFit(url: string, aspect: '4x5'): string {
+/**
+ * ★ C114 I-2 · ★ 2026-11-08 C116 D9 옛 앱 그림 맞춤 = `?fit=inapp`(1:1 캔버스 + 가운데 안전 칸 · 팝폰 칸이 cover 로 잘라도 원본 통째로).
+ *   우리 그림만(올린 그림 = `toOwnImageRef` 한 판정 · 믿는 호스트 · 예시 그림 = 상대 경로) · 남의 주소 = 그대로(Codex 설계 1R ⑦).
+ */
+const INAPP_EXAMPLE_IMAGE_RE = /^\/api\/cdp\/inapp\/example-image\/[^/?#]+\/\d+(?:\?[^#]*)?$/;
+export function withInAppImageFit(url: string): string {
   const u = String(url || '').trim();
-  if (!OWN_INAPP_IMAGE_RE.test(u)) return u;
-  if (/[?&]fit=/.test(u)) return u;
-  return `${u}${u.includes('?') ? '&' : '?'}fit=${aspect}`;
+  if (!u || /[?&]fit=/.test(u)) return u;
+  if (toOwnImageRef(u) === null && !INAPP_EXAMPLE_IMAGE_RE.test(u)) return u;
+  return `${u}${u.includes('?') ? '&' : '?'}fit=inapp`;
 }
 
 /** 게시 끝 시각 → 「11월 30일 23:59」(한국 시각 · 순수) · 없음 · 잘못된 값 = null */
@@ -1476,8 +1483,9 @@ export function inAppDeadlineText(endAt: Date | string | number | null | undefin
  * ★ 2026-11-08 C114 I-2 옛 앱 서버 변환 — caps 에 없는 판을 그 앱이 그릴 수 있는 꼴로(서빙 사본만 · 순수 · toServedMessage 뒤 · K1).
  *   ① 띠 판이 없음 = 띠를 지우고 글 한 줄(쿠폰 = 「쿠폰 코드 X」 · 남은 시간 = 「11월 30일 23:59까지」)을 메시지 본문 · 첫 장 본문 끝에.
  *      대체 줄을 넣은 통짜 = poster_text 를 지워 글 얹기로 내린다(Codex 설계 1R ① · 통짜 틀은 본문을 그리지 않는다 · 글은 이미 비었다).
- *   ② v4 판이 하나도 없는 옛 렌더러(v2 · v3) = 여러 장 그림 주소에 ?fit=4x5(옛 캐러셀 = 4:5 cover · 미리 맞추면 잘림 0) ·
+ *   ② v4 판이 하나도 없는 옛 렌더러(v2 · v3) = 장 그림 · flat 그림 주소에 ?fit=inapp(★ C116 D9 · 팝폰 칸 = 높이 상한 + cover · 한 장도 잘렸다) ·
  *      이벤트 카드 = 장 image_fit contain(옛 v3 = 4:3 cover · 잘림 0).
+ *   ★ C116 = 굽기 대상이면 이 변환은 아직 못 구웠을 때의 대체다(`serveInAppForClient`).
  *   웹 SDK · 웹뷰(판 넷) = 변환 0.
  */
 export function legacyServeTransform(m: InAppMessageDetail, caps: ReadonlySet<string>): InAppMessageDetail {
@@ -1518,11 +1526,144 @@ export function legacyServeTransform(m: InAppMessageDetail, caps: ReadonlySet<st
     const layout = out.design && typeof out.design === 'object' ? String(out.design.poster_layout || '') : '';
     if (layout === 'event_card') {
       out = { ...out, posterSlides: slides.map((s) => ({ ...s, image_fit: 'contain' as const })) };
-    } else if (layout !== 'banner_sheet' && slides.length >= 2) {
-      out = { ...out, posterSlides: slides.map((s) => (s && typeof s.image_url === 'string' ? { ...s, image_url: withInAppImageFit(s.image_url, '4x5') } : s)) };
+    } else if (layout !== 'banner_sheet') {
+      out = { ...out, posterSlides: slides.map((s) => (s && typeof s.image_url === 'string' ? { ...s, image_url: withInAppImageFit(s.image_url) } : s)) };
     }
   }
+  // ★ C116 D9 한 장 · 장 없는 flat = 팝폰은 imageUrl 을 원본 비율 · 높이 66% 상한 cover 로 그린다 → 같은 맞춤
+  if (noV4 && out.imageUrl) {
+    const layout = out.design && typeof out.design === 'object' ? String(out.design.poster_layout || '') : '';
+    if (layout !== 'event_card' && layout !== 'banner_sheet') out = { ...out, imageUrl: withInAppImageFit(out.imageUrl) };
+  }
   return out;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-11-08 C116 인앱 구워 보내기 — 판정 · 사본 · 서빙 한 곳(설계서 docs/2026-11-08-c116-inapp-bake-design.md D1 · D4 · D5 · D10)
+// ════════════════════════════════════════════════════════════════════
+
+/** 굽지 않는 레이아웃(옛 앱이 자기 코드로 그린다 · SDK drawsWithPosterFrame 이 거짓인 둘) */
+export const INAPP_BAKE_EXCLUDED_LAYOUTS: readonly string[] = ['event_card', 'banner_sheet'];
+
+/** SDK 가 실제로 그리는 장 = 그림 있는 장(없으면 flat 그림으로 한 장 · SDK frameSlidesWithFlat 과 같은 거르기 · K2) */
+export function inAppDrawnSlides(m: InAppMessageDetail): PosterSlide[] {
+  const has = (v: unknown) => typeof v === 'string' && v.trim().length > 0;
+  const list = (Array.isArray(m.posterSlides) ? m.posterSlides : []).filter((s) => s && has(s.image_url));
+  if (list.length > 0) return list;
+  return has(m.imageUrl) ? [{ image_url: String(m.imageUrl), title: m.title, ...(m.imageLinkUrl ? { link_url: m.imageLinkUrl } : {}) } as PosterSlide] : [];
+}
+
+/** 그림에 그리는 글 칸(제목 · 본문 · 배지 · 장 글 · 띠 라벨 · 코드)에 개인화 낱말이 있는가(구운 그림은 손님 모두가 같은 그림 · 판정 = 기존 CT textHasPersonalizationVar) */
+export function inAppHasPersonalTokens(m: InAppMessageDetail): boolean {
+  const d = m.design && typeof m.design === 'object' ? m.design : {};
+  const strip = d.poster_strip && typeof d.poster_strip === 'object' ? d.poster_strip : null;
+  const texts: unknown[] = [m.title, m.body, m.badgeText, strip?.label, strip?.code];
+  // 장 버튼 글은 그림에 그리지 않는다(정지 그리기 = 버튼 칸 0 · 앱이 자기 버튼으로 그린다 · Codex 구현 1R ④)
+  for (const s of Array.isArray(m.posterSlides) ? m.posterSlides : []) {
+    if (!s) continue;
+    texts.push((s as any).title, (s as any).body, (s as any).eyebrow, (s as any).subtitle);
+  }
+  return texts.some((t) => textHasPersonalizationVar(t));
+}
+
+/** 이 회사의 우리 그림이면 상대 경로(크롬은 굽기 페이지 출처에서 연다 · D7), 아니면 null */
+function ownRelativeImage(url: unknown, companyId: string): string | null {
+  const ref = toOwnImageRef(String(url || '').trim());
+  if (!ref || ref.companyId.toLowerCase() !== String(companyId).toLowerCase()) return null;
+  return `/api/cdp/inapp/image/${ref.companyId}/${ref.filename}`;
+}
+
+export type InAppBakePlan =
+  | { bake: false }
+  | { bake: true; full: InAppMessageDetail; key: string; expected: number; payload: Record<string, unknown> };
+
+/**
+ * D1 굽기 판정 한 곳 — 포스터 가족 · 틀로 그림(이벤트 카드 · 배너 아님) · 그릴 그림 ≥ 1 · 전부 이 회사 우리 그림 · 개인화 0 ·
+ *   클라이언트에 v4 판이 하나도 없거나 메시지가 필요한 판 중 없는 것이 있다. 판 넷 클라이언트 = 늘 거짓(웹 SDK · 웹뷰 그대로).
+ *   full = 판 넷 사본(SDK 가 웹에 그리는 그대로) · payload = 웹뷰 페이지에 넣을 값(그림 = 상대 경로 · 정지 · 마감 시각 글).
+ */
+export function inAppBakePlan(m: InAppMessageDetail, caps: ReadonlySet<string>, companyId: string): InAppBakePlan {
+  if (!isPosterFamily(m)) return { bake: false };
+  const layout = m.design && typeof m.design === 'object' ? String(m.design.poster_layout || '') : '';
+  if (INAPP_BAKE_EXCLUDED_LAYOUTS.includes(layout)) return { bake: false };
+  const need = inAppRequiredCaps(m);
+  const noV4 = !INAPP_CLIENT_CAPS.some((c) => caps.has(c));
+  const unmet = [...need.hard, ...need.soft].some((c) => !caps.has(c));
+  if (!noV4 && !unmet) return { bake: false };
+  const full = toServedMessage(gateInAppForClient(m, new Set<string>(INAPP_CLIENT_CAPS)));
+  if (inAppHasPersonalTokens(full)) return { bake: false };
+  const drawn = inAppDrawnSlides(full);
+  if (drawn.length === 0) return { bake: false };
+  const rel = drawn.map((s) => ownRelativeImage(s.image_url, companyId));
+  if (rel.some((r) => r === null)) return { bake: false };
+  const hasSlides = Array.isArray(full.posterSlides) && full.posterSlides.some((s) => s && typeof s.image_url === 'string' && s.image_url.trim());
+  let i = 0;
+  const bakeMessage: InAppMessageDetail = hasSlides
+    ? { ...full, imageUrl: rel[0], posterSlides: full.posterSlides.map((s) => (s && typeof s.image_url === 'string' && s.image_url.trim() ? { ...s, image_url: rel[i++] as string } : s)) }
+    : { ...full, imageUrl: rel[0] };
+  return {
+    bake: true,
+    full,
+    key: inAppBakeKey(full as unknown as Record<string, unknown>),
+    expected: drawn.length,
+    payload: { message: bakeMessage, still: { deadlineText: inAppDeadlineText(full.endAt as any) } },
+  };
+}
+
+/**
+ * D5 구운 메시지 — 글 칸 비움 · 장 그림 · imageUrl = 구운 그림(?fit=inapp) · 장 버튼 · 그림 링크 · 메시지 버튼 그대로 · 그리는 칸(통짜 · 틀 · 띠 · 레이아웃) 지움.
+ *   팝폰 = 두 장 이상이면 posterSlides · 한 장 · 장 없음이면 imageUrl 을 읽는다(InAppBottomSheet.tsx:143 · :232-235 · Codex 설계 1R ①).
+ */
+export function bakedLegacyMessage(full: InAppMessageDetail, files: string[]): InAppMessageDetail {
+  const src = inAppDrawnSlides(full);
+  const d = full.design && typeof full.design === 'object' ? full.design : {};
+  const { poster_text: _t, poster_frame: _f, poster_strip: _s, poster_layout: _l, ...keep } = d as Record<string, any>;
+  const msgTitle = String(full.title || '').trim();
+  const slides: PosterSlide[] = files.map((f, i) => {
+    const o = src[i] || ({} as PosterSlide);
+    const alt = String((o as any).alt || o.title || '').trim() || msgTitle;
+    return {
+      image_url: withInAppImageFit(f),
+      ...(o.cta ? { cta: o.cta } : {}),
+      ...(o.link_url ? { link_url: o.link_url } : {}),
+      ...(alt ? { alt } : {}),
+    } as PosterSlide;
+  });
+  return { ...full, title: '', body: '', badgeText: null, design: keep, imageUrl: slides[0] ? slides[0].image_url : full.imageUrl, posterSlides: slides };
+}
+
+/**
+ * D4 서빙 한 곳 — 굽기 대상 + 구운 판 있음 = 구운 메시지 · 없음 = 대체(지금 옛 앱 변환) + 굽기 요청 · 대상 아님 = 지금 그대로.
+ *   관문 · 통짜 · 옛 앱 변환을 부르는 곳은 이 함수와 판정뿐(K6 · 시험 V12).
+ */
+export function serveInAppForClient(
+  m: InAppMessageDetail, caps: ReadonlySet<string>, companyId: string,
+  deps: { read?: typeof readInAppBake; request?: (job: InAppBakeJob) => unknown } = {},
+): InAppMessageDetail {
+  const plan = inAppBakePlan(m, caps, companyId);
+  if (plan.bake) {
+    const files = (deps.read || readInAppBake)(companyId, plan.key, plan.expected);
+    if (files) return bakedLegacyMessage(plan.full, files);
+    (deps.request || requestInAppBake)({ companyId, messageId: String(m.id), key: plan.key, expected: plan.expected, payload: plan.payload });
+  }
+  return legacyServeTransform(toServedMessage(gateInAppForClient(m, caps)), caps);
+}
+
+/** D10 게시 = 미리 굽기 요청(판 없는 옛 앱 기준 · 기다리지 않음 · 실패 = 기록만) */
+export async function prebakeInAppMessage(companyId: string, messageId: string): Promise<void> {
+  try {
+    const r = await query(
+      `SELECT * FROM cdp_inapp_messages WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'`,
+      [messageId, companyId],
+    );
+    if (!r.rows[0]) return;
+    const m = mapRowToMessageDetail(r.rows[0]);
+    const plan = inAppBakePlan(m, new Set<string>(), companyId);
+    if (!plan.bake || readInAppBake(companyId, plan.key, plan.expected)) return;
+    requestInAppBake({ companyId, messageId, key: plan.key, expected: plan.expected, payload: plan.payload });
+  } catch (e: any) {
+    console.log(`[inapp-bake] 미리 굽기 요청 실패 ${messageId} · ${String(e?.message || e).slice(0, 160)}`);
+  }
 }
 
 /**
@@ -1943,9 +2084,8 @@ async function evaluateInAppCandidates(
   //   ★ 2026-11-08 C114 I-2 = 내보내지 않음 0 · 관문(틀) → 통짜 비우기 → 옛 앱 변환(K1 순서)
   let messages = selected
     .map(mapRowToMessageDetail)
-    .map((m) => gateInAppForClient(m, clientCaps))
-    .map(toServedMessage)
-    .map((m) => legacyServeTransform(m, clientCaps));
+    // ★ 2026-11-08 C116 D4 서빙 한 곳 = 굽기 대상이면 구운 그림(없으면 대체 + 굽기 요청) · 아니면 관문 → 통짜 → 옛 앱 변환(K1 순서 그대로)
+    .map((m) => serveInAppForClient(m, clientCaps, input.companyId));
 
   // ★ 2026-07-16 Step 4.5 — "다시 보지 않기"(opt_out) 영구 억제. 명시 거부가 빈도 규칙보다 최우선(시간 무제한).
   //   variant에서 눌러도 부모 축(family)으로 억제해 형제 variant 재노출까지 차단.

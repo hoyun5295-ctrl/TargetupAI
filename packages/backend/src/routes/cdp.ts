@@ -650,7 +650,7 @@ router.get('/inapp/example-image/:id/:slide', async (req: any, res: any) => {
   res.setHeader('Content-Type', file.mime);
   res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  // ★ 2026-11-08 C114 I-2 옛 앱 캐러셀 미리 맞춤(?fit=4x5) — 올린 그림 주소와 같은 CT 규칙(형식 위반 · 미지원 값 = 무시)
+  // ★ 2026-11-08 C116 D9 옛 앱 맞춤(?fit=inapp · 안전 칸) — 올린 그림 주소와 같은 CT 규칙(형식 위반 · 미지원 값 = 무시)
   res.sendFile(path.resolve(await getServePath(file.absPath, parseFitOption(req.query))));
 });
 

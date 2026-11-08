@@ -397,6 +397,8 @@ export class HanjulloInAppModule {
    * ★ 2026-11-08 C114 I-1 웹뷰 호스트 모드(계약 v5) — null = 몰 화면(지금 그대로).
    *   있으면 API 호출 0: 기록(click · dismiss · opt_out) · 이동 · 닫기 · 다시 보지 않기 · 하루 보지 않기 · 복사 = 다리 사건 · impression = 앱이 ready 뒤 한 번.
    */
+  /** ★ C116 D8 호스트 정지 그리기(서버 굽기) · null = 보통 */
+  private hostStill: { deadlineText?: string | null } | null = null;
   private host: { post: (e: InAppHostEvent) => void; closed: Set<string>; messageId: string } | null = null;
 
   constructor(
@@ -411,12 +413,15 @@ export class HanjulloInAppModule {
    *   메시지 DOM 이 어느 길로 사라지든 `close` 한 번. 반환 = 그렸는가.
    */
   public renderForHost(
-    payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null },
+    payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null; still?: { deadlineText?: string | null } | null },
     post: (e: InAppHostEvent) => void = defaultHostBridge(),
   ): boolean {
     if (typeof window === 'undefined' || typeof document === 'undefined') return false;
     const msg = payload && payload.message;
     if (!msg || !msg.id) return false;
+    // ★ 2026-11-08 C116 D8 정지 그리기(서버 굽기) — 살아 있는 부품 · 연결 · 움직임 0(renderPosterFrame)
+    const st = payload.still && typeof payload.still === 'object' ? payload.still : null;
+    this.hostStill = st ? { deadlineText: typeof st.deadlineText === 'string' ? st.deadlineText : null } : null;
     const host = { post, closed: new Set<string>(), messageId: String(msg.id) };
     this.host = host;
     const serverMs = payload.serverNow ? Date.parse(String(payload.serverNow)) : NaN;
@@ -1233,10 +1238,16 @@ export class HanjulloInAppModule {
     const built = buildPosterFrame({
       slides, design, accentColor: msg.accentColor ?? msg.accent_color ?? null, badge,
       endAt, now: now(), active: 0, mount: 'page', viewportHeight: window.innerHeight || 800,
-      text, imageSrc: (u) => this.toAbsoluteImageUrl(u), displayFont,
+      text, imageSrc: (u) => this.toAbsoluteImageUrl(u), displayFont, still: this.hostStill,
     });
     const { backdrop, root, parts } = built;
     root.setAttribute('data-hanjullo-msg', msg.id);
+    if (this.hostStill) {
+      // ★ C116 D8 정지 = 붙이기만 한다(버튼 · 넘김 · 시계 · 키 · 창 크기 · 자동 닫힘 · 움직임 · 그림 누름 0 · Codex 설계 1R ④)
+      backdrop.setAttribute('data-hanjullo-wrap', '1');
+      document.body.appendChild(backdrop);
+      return;
+    }
     this.applyAnimation(root, animation, 'modal');
     // (Codex 구현 1R) 정리 한 곳 — 메시지가 어느 길로 사라지든(닫기 · 하루 보지 않기 · 버튼 · 그림 이동 · Esc · 자동 닫힘)
     //   전역 키 · 창 크기 리스너와 1초 시계를 떼어 낸다. 사라짐 판정 = 바깥 틀이 문서에서 빠짐(body 직속 자식 관찰).
@@ -1262,6 +1273,7 @@ export class HanjulloInAppModule {
     // 장 버튼 — 지금 장의 버튼(장을 넘기면 갈아 끼운다)
     let activeIdx = 0;
     const wireCta = () => {
+      if (!parts.ctaHost) return;
       const b = fillPosterFrameCta(parts.ctaHost, slides[activeIdx] as any, built.accent, text);
       if (!b) return;
       const idx = activeIdx;
@@ -1324,11 +1336,13 @@ export class HanjulloInAppModule {
 
     // 하루 보지 않기(또는 다시 보지 않기) · 닫기
     const snooze = String(design.dismiss_mode || '') === 'snooze_day';
-    parts.dismissDay.addEventListener('click', () => this.onOptOutOrSnooze(parts.dismissDay, msg, input, close, snooze));
-    parts.close.addEventListener('click', () => {
+    const dismissBtn = parts.dismissDay;
+    const closeBtn = parts.close;
+    if (dismissBtn) dismissBtn.addEventListener('click', () => this.onOptOutOrSnooze(dismissBtn, msg, input, close, snooze));
+    if (closeBtn) closeBtn.addEventListener('click', () => {
       this.track(msg.id, 'dismiss', input);
       this.dismissForSession(msg);
-      this.gracefulClose(parts.close, close);
+      this.gracefulClose(closeBtn, close);
     });
 
     // ←/→ = 장 넘기기 · Esc = 닫기 · 메시지가 사라지면 스스로 떼어 낸다
@@ -2835,7 +2849,7 @@ export class HanjulloInAppModule {
  *   키 · 시크릿 · 주소 없음 = API 호출 0(기록 · 이동 · 닫기는 다리 사건). 그림 주소는 페이지 출처 기준(상대 주소 그대로).
  */
 export function renderInAppForHost(
-  payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null },
+  payload: { message: InAppMessageSdk; serverNow?: string | null; customer?: Record<string, any> | null; still?: { deadlineText?: string | null } | null },
   post?: (e: InAppHostEvent) => void,
 ): boolean {
   return new HanjulloInAppModule('', '', '').renderForHost(payload, post);

@@ -98,7 +98,21 @@ async function edgeStats(buf: Buffer): Promise<{ rgb: [number, number, number]; 
  *   그 판정을 SNS 에서 다시 짜면 같은 사진이 화면마다 다르게 구워진다.
  *   ⛔ 이 함수는 순수 변환이다. 캐시·경로·서빙 규칙은 이 파일의 다른 함수가 갖는다.
  */
-export async function fitToCanvas(buf: Buffer, canvasW: number, canvasH: number, mode: FitMode): Promise<Buffer> {
+export async function fitToCanvas(
+  buf: Buffer, canvasW: number, canvasH: number, mode: FitMode,
+  /** ★ 2026-11-08 C116 D9 안전 칸(캔버스 대비 폭 · 높이 비) — 있으면 원본을 그 칸 안에만 넣는다(늘 맞추기 · 바탕 규칙은 같음) */
+  safe?: { w: number; h: number } | null,
+): Promise<Buffer> {
+  if (safe) {
+    const fg = await sharp(buf)
+      .resize({ width: Math.max(1, Math.round(canvasW * safe.w)), height: Math.max(1, Math.round(canvasH * safe.h)), fit: 'inside' })
+      .toBuffer();
+    const { rgb, deviation } = await edgeStats(buf);
+    const bg = deviation < EDGE_UNIFORM_THRESHOLD
+      ? await sharp({ create: { width: canvasW, height: canvasH, channels: 3, background: { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toBuffer()
+      : await sharp(buf).resize({ width: canvasW, height: canvasH, fit: 'cover' }).blur(24).modulate({ brightness: 1.03 }).toBuffer();
+    return sharp(bg).composite([{ input: fg, gravity: 'center' }]).toBuffer();
+  }
   if (mode === 'crop') {
     return sharp(buf).resize({ width: canvasW, height: canvasH, fit: 'cover', position: 'centre' }).toBuffer();
   }
@@ -172,11 +186,14 @@ async function buildServePath(
 ): Promise<string> {
   try {
     const ext = path.extname(originalPath).toLowerCase();
-    if (!OPTIMIZABLE.has(ext)) return originalPath;
+    const ratio = fit && ASPECT_RATIOS[fit.aspect] ? ASPECT_RATIOS[fit.aspect] : null;
+    // ★ 2026-11-08 C116 D9 안전 칸 규격 = 원본을 그대로 돌려주는 갈래를 모두 닫는다(읽기 실패만 남김) —
+    //   GIF · 다중 프레임 = 첫 장 정지 그림으로 맞춤 · 비율이 이미 같아도 안전 칸으로 · 늘 맞추기(Codex 설계 2R ① · 3R ①)
+    const safe = ratio?.safe ?? null;
+    if (!OPTIMIZABLE.has(ext) && !(safe && ext === '.gif')) return originalPath;
     if (!fs.existsSync(originalPath)) return originalPath;
 
-    const ratio = fit && ASPECT_RATIOS[fit.aspect] ? ASPECT_RATIOS[fit.aspect] : null;
-    const mode: FitMode = fit?.mode === 'crop' ? 'crop' : 'pad';
+    const mode: FitMode = safe ? 'pad' : fit?.mode === 'crop' ? 'crop' : 'pad';
     const variant = ratio ? `${SERVE_MAX_WIDTH}-${fit!.aspect}-${mode}` : String(SERVE_MAX_WIDTH);
 
     const dir = path.dirname(originalPath);
@@ -195,14 +212,14 @@ async function buildServePath(
     //   업로드 상한이 5MB라 버퍼로 읽는 비용은 작다.
     const srcBuf = fs.readFileSync(originalPath);
     const meta = await sharp(srcBuf).metadata();
-    // 애니메이션(다중 프레임)은 손대지 않는다.
-    if ((meta.pages || 1) > 1) return originalPath;
+    // 애니메이션(다중 프레임)은 손대지 않는다(안전 칸 규격 = 첫 장으로 맞춤 · sharp 기본 = 첫 장).
+    if ((meta.pages || 1) > 1 && !safe) return originalPath;
     if (!meta.width || !meta.height) return originalPath;
 
     // 할 일이 없으면 원본을 그대로 낸다(재인코딩은 품질만 깎는다).
     //   비율 맞춤이 없으면 = 이미 표시 기준 안일 때 / 있으면 = 이미 그 비율이고 표시 기준 안일 때.
     const alreadyRatio = ratio ? meta.width * ratio.h === meta.height * ratio.w : false;
-    if (meta.width <= SERVE_MAX_WIDTH && meta.height <= SERVE_MAX_WIDTH && (!ratio || alreadyRatio)) return originalPath;
+    if (!safe && meta.width <= SERVE_MAX_WIDTH && meta.height <= SERVE_MAX_WIDTH && (!ratio || alreadyRatio)) return originalPath;
 
     let pipeline: Sharp;
     if (ratio) {
@@ -214,13 +231,16 @@ async function buildServePath(
         mode === 'crop' ? Math.min(meta.width, meta.height) : Math.max(meta.width, meta.height),
       );
       const canvasH = Math.round((canvasW * ratio.h) / ratio.w);
-      pipeline = sharp(await fitToCanvas(srcBuf, canvasW, canvasH, mode));
+      pipeline = sharp(await fitToCanvas(srcBuf, canvasW, canvasH, mode, safe));
     } else {
       pipeline = sharp(srcBuf).resize({ width: SERVE_MAX_WIDTH, withoutEnlargement: true });
     }
     if (ext === '.png') {
       // PNG는 무손실 유지(투명도·선명한 경계가 이유로 PNG를 골랐을 것이다).
       pipeline = pipeline.png({ compressionLevel: 9 });
+    } else if (ext === '.gif') {
+      // ★ C116 안전 칸 규격만 여기 온다 — 공개 길의 Content-Type 이 확장자로 정해지므로 같은 형식(정지 한 장)으로 낸다
+      pipeline = pipeline.gif();
     } else if (ext === '.webp') {
       pipeline = pipeline.webp({ quality: SERVE_JPEG_QUALITY });
     } else {

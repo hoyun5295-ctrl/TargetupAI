@@ -61,12 +61,15 @@ describe('CT-V1 서빙 변환 표 — 내보내지 않음 0', () => {
     }
   });
 
-  it('옛 앱(caps 없음) · 카드 = 틀 지움(장 수 무관) · 여러 장 그림 = ?fit=4x5 · 한 장 = 그대로', () => {
+  // ★ C116 D9 대체 맞춤 = ?fit=inapp(1:1 캔버스 + 안전 칸) · 한 장 · flat(imageUrl)도(팝폰 한 장 = 66% 상한 cover 로 잘렸다)
+  it('옛 앱(caps 없음) · 카드 = 틀 지움(장 수 무관) · 장 그림 · flat 그림 = ?fit=inapp(여러 장 · 한 장)', () => {
     const multi = serve(msg({ poster_frame: 'card' }, 3), undefined);
     expect(multi.design).toEqual({});
-    expect(multi.posterSlides!.map((s) => s.image_url)).toEqual([0, 1, 2].map((i) => `${IMG(i)}?fit=4x5`));
+    expect(multi.posterSlides!.map((s) => s.image_url)).toEqual([0, 1, 2].map((i) => `${IMG(i)}?fit=inapp`));
+    expect(multi.imageUrl).toBe(`${IMG(0)}?fit=inapp`);
     const one = serve(msg({ poster_frame: 'card' }, 1), undefined);
-    expect(one.posterSlides![0].image_url).toBe(IMG(0));
+    expect(one.posterSlides![0].image_url).toBe(`${IMG(0)}?fit=inapp`);
+    expect(one.imageUrl).toBe(`${IMG(0)}?fit=inapp`);
   });
 
   it('옛 앱 · 통짜 = 글 비움(옛 앱은 글이 비면 막을 안 그린다) · 대체 글 = 장 제목', () => {
@@ -116,17 +119,21 @@ describe('CT-V1 서빙 변환 표 — 내보내지 않음 0', () => {
 });
 
 describe('그림 미리 맞춤 주소 · 비율 표', () => {
-  it('우리 그림 두 꼴만 · 남의 주소 · 이미 fit = 그대로 · 쿼리 이어 붙임', () => {
-    expect(withInAppImageFit(IMG(1), '4x5')).toBe(`${IMG(1)}?fit=4x5`);
-    expect(withInAppImageFit(`https://app.hanjul.ai${IMG(1)}`, '4x5')).toBe(`https://app.hanjul.ai${IMG(1)}?fit=4x5`);
-    expect(withInAppImageFit('/api/cdp/inapp/example-image/beauty-1/0?v=123', '4x5')).toBe('/api/cdp/inapp/example-image/beauty-1/0?v=123&fit=4x5');
-    expect(withInAppImageFit('https://mall.example/a.jpg', '4x5')).toBe('https://mall.example/a.jpg');
-    expect(withInAppImageFit(`${IMG(1)}?fit=1x1`, '4x5')).toBe(`${IMG(1)}?fit=1x1`);
-    expect(withInAppImageFit('/api/cdp/inapp/image/../../etc/p.jpg', '4x5')).toBe('/api/cdp/inapp/image/../../etc/p.jpg');
+  // ★ C116 D9 · Codex 설계 1R ⑦ = 우리 그림 판정 = toOwnImageRef(믿는 호스트만) · 같은 경로 남의 호스트 = 그대로
+  it('우리 그림만 ?fit=inapp · 남의 주소 · 남의 호스트 같은 경로 · 이미 fit = 그대로 · 쿼리 이어 붙임', () => {
+    expect(withInAppImageFit(IMG(1))).toBe(`${IMG(1)}?fit=inapp`);
+    expect(withInAppImageFit(`https://app.hanjul.ai${IMG(1)}`)).toBe(`https://app.hanjul.ai${IMG(1)}?fit=inapp`);
+    expect(withInAppImageFit(`https://evil.example${IMG(1)}`)).toBe(`https://evil.example${IMG(1)}`);
+    expect(withInAppImageFit('/api/cdp/inapp/example-image/beauty-1/0?v=123')).toBe('/api/cdp/inapp/example-image/beauty-1/0?v=123&fit=inapp');
+    expect(withInAppImageFit('https://mall.example/a.jpg')).toBe('https://mall.example/a.jpg');
+    expect(withInAppImageFit(`${IMG(1)}?fit=1x1`)).toBe(`${IMG(1)}?fit=1x1`);
+    expect(withInAppImageFit('/api/cdp/inapp/image/../../etc/p.jpg')).toBe('/api/cdp/inapp/image/../../etc/p.jpg');
   });
-  it('서빙 CT 가 4x5 를 읽는다 · 1x1 그대로', () => {
-    expect(ASPECT_RATIOS['4x5']).toEqual({ w: 4, h: 5 });
-    expect(parseFitOption({ fit: '4x5' })).toEqual({ aspect: '4x5', mode: 'pad' });
+  it('서빙 CT = inapp(1:1 + 안전 칸) 를 읽는다 · 옛 4x5 지움(무시) · 1x1 그대로', () => {
+    expect(ASPECT_RATIOS.inapp).toEqual({ w: 1, h: 1, safe: { w: 0.8, h: 0.92 } });
+    expect(ASPECT_RATIOS['4x5']).toBeUndefined();
+    expect(parseFitOption({ fit: '4x5' })).toBeNull();
+    expect(parseFitOption({ fit: 'inapp' })).toEqual({ aspect: 'inapp', mode: 'pad' });
     expect(parseFitOption({ fit: '1x1' })).toEqual({ aspect: '1x1', mode: 'pad' });
   });
   it('예시 그림 서빙도 ?fit= 을 읽는다(올린 그림과 같은 CT 규칙)', () => {

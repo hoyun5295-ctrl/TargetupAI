@@ -10,11 +10,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { buildPosterFrame, countdownEndMs, formatCountdown, frameSlidesWithFlat, type PosterFrameSlide } from './generated/poster-frame';
 import { safeFontFamily } from './blockTheme';
+import { LEGACY_BAKE_VIEW, LEGACY_BAKE_SAFE } from './legacy-app-view';
 
 export type PosterFramePart = 'image' | 'cta' | 'strip';
 
+/** 넘김 레일 스크롤바 숨김(SDK inapp.ts ensureCarouselStyle 과 같은 규칙) */
+export const PREVIEW_RAIL_CSS = '[data-hjl-carousel]{scrollbar-width:none;-ms-overflow-style:none}[data-hjl-carousel]::-webkit-scrollbar{display:none;width:0;height:0}';
+
 export function PosterFramePreview({
-  slides, design, accentColor, badge, endAt, height, active = 0, onActive, onPart, replaceVars, copyable = false,
+  slides, design, accentColor, badge, endAt, height, active = 0, onActive, onPart, replaceVars, copyable = false, still = null, bakeFit = false,
 }: {
   slides: PosterFrameSlide[];
   design: Record<string, any> | null | undefined;
@@ -30,6 +34,10 @@ export function PosterFramePreview({
   replaceVars?: (t: string) => string;
   /** 쿠폰 [복사]가 실제로 복사한다(예시 상세 창) · 편집 무대 = 띠 칸 열기 */
   copyable?: boolean;
+  /** ★ 2026-11-08 C116 D11 정지 그리기(구버전 앱 모습 = 서버가 구워 보내는 그림 그대로) · 시계 · 버튼 · 복사 · 닫기 부품 0 · 넘김 유지 */
+  still?: { deadlineText?: string | null } | null;
+  /** ★ C116 Codex 구현 1R ⑤ 서버 굽기와 같은 모습 — 서버 화면(390 × 844)에서 그린 틀 상자를 이 칸의 안전 칸(80% × 92%) 가운데에 맞춘다 */
+  bakeFit?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [measured, setMeasured] = useState(0);
@@ -49,19 +57,55 @@ export function PosterFramePreview({
   const list = slides.filter((s) => s && String(s.image_url || '').trim());
   const count = list.length;
   const idx = Math.max(0, Math.min(count - 1, active));
-  const key = JSON.stringify([list, design, accentColor, badge, endAt, h, idx, copyable]);
+  const key = JSON.stringify([list, design, accentColor, badge, endAt, h, idx, copyable, still, bakeFit]);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host || count === 0 || h <= 0) return;
     const shadow = host.shadowRoot || host.attachShadow({ mode: 'open' });
     shadow.textContent = '';
+    // ★ 2026-11-08 C116 D11 넘김 레일 스크롤바 숨김 — 그림자 DOM 이라 전역 CSS 가 닿지 않는다(SDK 는 inapp.ts ensureCarouselStyle 이 문서에 같은 규칙)
+    const rail = document.createElement('style');
+    rail.textContent = PREVIEW_RAIL_CSS;
+    shadow.appendChild(rail);
     const built = buildPosterFrame({
-      slides: list, design, accentColor, badge, endAt, now: Date.now(), active: idx, mount: 'frame', viewportHeight: h,
-      text: replaceVars, displayFont: safeFontFamily(design?.font_display, ''),
+      slides: list, design, accentColor, badge, endAt, now: Date.now(), active: idx, mount: 'frame', viewportHeight: bakeFit ? LEGACY_BAKE_VIEW.height : h,
+      text: replaceVars, displayFont: safeFontFamily(design?.font_display, ''), still,
     });
-    shadow.appendChild(built.backdrop);
+    // 서버 굽기와 같은 모습 = 서버 화면 크기 칸에서 그리고 틀 상자를 이 칸의 안전 칸에 맞춘다(크기 · 줄바꿈 · 여백 같음)
+    let stage: HTMLDivElement | null = null;
+    const placeBake = () => {
+      if (!stage) return;
+      const host2 = hostRef.current;
+      if (!host2) return;
+      stage.style.transform = 'none';
+      // ★ Codex 구현 2R ② = 1R ⑤ 와 같은 부류(좌표계 섞임) · 구조 처방 = 전부 변환 전 좌표 — 조상 배율(편집 무대 scale(fit))을 화면 측정값에서 나눈다
+      const W = host2.clientWidth, H = host2.clientHeight;
+      const k = W > 0 ? host2.getBoundingClientRect().width / W : 1;
+      if (!(k > 0)) return;
+      const sr = stage.getBoundingClientRect();
+      const r0 = built.root.getBoundingClientRect();
+      const rw = r0.width / k, rh = r0.height / k, rx = (r0.left - sr.left) / k, ry = (r0.top - sr.top) / k;
+      if (!(rw > 0 && rh > 0)) return;
+      const sc = Math.min((W * LEGACY_BAKE_SAFE.w) / rw, (H * LEGACY_BAKE_SAFE.h) / rh);
+      const tx = (W - rw * sc) / 2 - rx * sc;
+      const ty = (H - rh * sc) / 2 - ry * sc;
+      stage.style.transform = `translate(${tx}px, ${ty}px) scale(${sc})`;
+    };
+    if (bakeFit) {
+      stage = document.createElement('div');
+      Object.assign(stage.style, { position: 'absolute', left: '0', top: '0', width: `${LEGACY_BAKE_VIEW.width}px`, height: `${LEGACY_BAKE_VIEW.height}px`, transformOrigin: '0 0' });
+      stage.appendChild(built.backdrop);
+      shadow.appendChild(stage);
+    } else {
+      shadow.appendChild(built.backdrop);
+    }
     const { parts } = built;
+    const imgLoads: Array<() => void> = [];
+    if (bakeFit) {
+      requestAnimationFrame(placeBake);
+      for (const im of parts.images) { const f = () => placeBake(); im.addEventListener('load', f); imgLoads.push(() => im.removeEventListener('load', f)); }
+    }
     // 지금 장으로 바로(애니메이션 없이)
     requestAnimationFrame(() => { parts.rail.scrollLeft = idx * (parts.rail.clientWidth || 0); });
     let ticking = false;
@@ -102,6 +146,7 @@ export function PosterFramePreview({
       ? window.setInterval(() => { if (parts.stripTimer) parts.stripTimer.textContent = formatCountdown(endMs - Date.now()); }, 1000)
       : null;
     return () => {
+      for (const off of imgLoads) off();
       if (timer) window.clearInterval(timer);
       built.backdrop.removeEventListener('click', onClick);
       parts.rail.removeEventListener('scroll', onScroll);
