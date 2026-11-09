@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: a06e041b · 2026-11-08 · Harold 실행 보고(C118 E7 · 서버 git pull · 확인 출력 = HEAD a06e041b 2026-11-08 21:31:44 +0900) · 그 전 f0e7ea30(C119)
-- deployed_head: a06e041b · 2026-11-08 · Harold 실행 보고(C118 E7 · 백엔드 · 프론트 build:safe · pm2 reload · online ↺73 · created at 12:43:40Z · unstable 0 · reload 뒤 에러 로그 0줄) · 그 전 f0e7ea30(C119)
+- pulled_head: 21a73735 · 2026-11-09 · Harold 「배포완료」 보고(1109 요금제 안내 개편 · 카드 번호 없음 · 서버 git pull 확인 출력 미첨부 · d5458edf 문서 커밋 함께) · 그 전 a06e041b(C118 E7)
+- deployed_head: 21a73735 · 2026-11-09 · Harold 「배포완료」 보고(백엔드 · 프론트 build:safe · reload 출력 미첨부 · 배포 뒤 pm2 로그 「getAnalysisCreditFacts 오류」 0줄 · 요금제 안내 화면 확인 보고 대기 · DDL 0 · ENV 0 · push 전 test:pg 64파일 469건 통과 · 스탬프 기록) · 그 전 a06e041b(C118 E7)
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
