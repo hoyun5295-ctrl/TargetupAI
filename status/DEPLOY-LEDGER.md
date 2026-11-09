@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 21a73735 · 2026-11-09 · Harold 「배포완료」 보고(1109 요금제 안내 개편 · 카드 번호 없음 · 서버 git pull 확인 출력 미첨부 · d5458edf 문서 커밋 함께) · 그 전 a06e041b(C118 E7)
-- deployed_head: 21a73735 · 2026-11-09 · Harold 「배포완료」 보고(백엔드 · 프론트 build:safe · reload 출력 미첨부 · 배포 뒤 pm2 로그 「getAnalysisCreditFacts 오류」 0줄 · 요금제 안내 화면 확인 보고 대기 · DDL 0 · ENV 0 · push 전 test:pg 64파일 469건 통과 · 스탬프 기록) · 그 전 a06e041b(C118 E7)
+- pulled_head: b44a9cf8 · 2026-11-10 · Harold 서버 출력(git log -1 = b44a9cf8 2026-11-10 07:12:24 +0900 · 1110 C120 브랜드 창 명단 항목 칸) · 그 전 1e2505c1(1109 로그인 차단 지원팀원 · 이미지 스튜디오 · 서버 출력 1e2505c1 2026-11-09 16:22:58 +0900) · 그 전 21a73735
+- deployed_head: b44a9cf8 · 2026-11-10 · 프론트 build:safe(dist/index.html 07:18:29 · dist grep ks-list-scroll 2 · 「항목 검색」 1 · 1e2505c1 뒤 백엔드 실행 코드 변경 0 · 이번 reload 실행 여부 미확인 · 필요 없음) · Harold 화면 확인 넷 정상(C120 브랜드 창 타겟추출 칸 · 지원팀원 로그인 차단 메뉴 「+ 수동 차단」 없음 · 스튜디오 행사 포스터 제품 칸 없음 · 저장 전 결과 지우기 · 요금제 안내 화면) · 1e2505c1 = 11-09 백엔드 · 프론트 build:safe(dist 16:28:17 · 16:29:28 · backend dist grep 2 · 2 · 2 · 2 · 기동 19:19:49 KST · 관련 err 로그 0) · DDL 0 · ENV 0 · 그 전 21a73735
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -64,6 +64,7 @@
 | C117 | da9baa11 |
 | C118 | 5fc2d527 · b05a4dca · a06e041b |
 | C119 | f0e7ea30 |
+| C120 | b44a9cf8 |
 
 ## §1 대기
 
