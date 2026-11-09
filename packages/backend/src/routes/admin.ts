@@ -14,7 +14,7 @@ import { mysqlQuery, query, pool } from '../config/database';
 import { parseWonAmount } from '../utils/normalize';
 import type { PoolClient } from 'pg';
 import { authenticate, requireSuperAdmin, requireUuidId, requireBestLayoutViewer, requireAdminArea } from '../middlewares/auth';
-import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, readMapFor, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
+import { fetchAdminRole, normalizeAdminRole, canRead, canWrite, canDelete, readMapFor, writeMapFor, ADMIN_ROLES, ADMIN_ROLE_LABEL, ADMIN_ROLE_DESC, ACCESS_LEVEL_LABEL, PERMISSION_MATRIX } from '../utils/admin-role';
 import { ALL_SMS_TABLES, invalidateLineGroupCache, getCampaignSmsTables, smsCountAll, smsSelectAll, smsSelectPagedAll, smsAggAll, getTestSmsTables, findMissingSmsTables, withFriendYnField } from '../utils/sms-queue';
 import { streamCampaignSmsCsv } from '../utils/campaign-sms-export';
 import { insertCuratedSeeds, listCuratedSeeds, listCuratedSeedCounts, deleteCuratedSeed, saveCuratedSeedOne, updateCuratedSeed, SeedGateFail } from '../utils/copy-seed-curator';
@@ -1238,7 +1238,8 @@ router.delete('/geo/exceptions/:id', authenticate, requireSuperAdmin, requireAdm
  */
 router.get('/my-permissions', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const role = await fetchAdminRole(req.user?.userId);
-  return res.json({ role, canRead: readMapFor(role) });
+  // ★ 2026-11-09 canWrite = 버튼 숨김용(로그인 차단 수동 차단 = 대표 · 지원팀장 · 지원팀원 숨김) · 판정 = 등급표 CT writeMapFor
+  return res.json({ role, canRead: readMapFor(role), canWrite: writeMapFor(role) });
 });
 
 /** 계정 목록 + 권한분류표 + 내 등급 — 화면은 표를 스스로 만들지 않고 이 응답을 그린다 */

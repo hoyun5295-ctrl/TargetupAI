@@ -8,7 +8,8 @@
  *   등급표는 3.2 접근권한 분류표의 원본이라 「시스템과 문서 일치」(반려 3.2 ②)가 이 시험에 걸려 있다.
  *
  * 못 박는 것
- *   1. 보안 · 인증 축 7개에서 지원팀원은 전부 「없음」, 감사 로그는 대표만, 직원 계정은 지원팀장 조회만.
+ *   1. 보안 · 인증 축 7개에서 지원팀원은 로그인 차단만 조회 · 변경 · 삭제(★1109 Harold 「그 메뉴 하나만」) · 나머지 6개는 「없음」,
+ *      감사 로그는 대표만, 직원 계정은 지원팀장 조회만.
  *   2. 요청 방식 판정(조회 · 변경 · 삭제)과 메뉴 노출 판정이 등급표 하나에서 나온다.
  *   3. 막는 장치가 실제로 막는다(미들웨어 실행 · 조회 실패 = 닫힘) · 라우트마다 빠짐없이 붙어 있다.
  *   4. AI 영업 기본 허용 = ceo · suran.
@@ -26,7 +27,7 @@ vi.hoisted(() => { if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-o
 vi.mock('../../config/database', () => ({ query: vi.fn() }));
 
 import { query } from '../../config/database';
-import { PERMISSION_MATRIX, canRead, canWrite, canDelete, canForMethod, readMapFor, type AdminRole } from '../admin-role';
+import { PERMISSION_MATRIX, canRead, canWrite, canDelete, canForMethod, readMapFor, writeMapFor, type AdminRole } from '../admin-role';
 import { requireAdminArea } from '../../middlewares/auth';
 
 const mockQuery = query as unknown as ReturnType<typeof vi.fn>;
@@ -41,8 +42,11 @@ describe('1. 등급표 — 보안 · 인증 축', () => {
     for (const k of SECURITY_KEYS) expect(lv(k), k).toBeDefined();
   });
 
-  it('지원팀원은 7개 축 전부 「없음」', () => {
-    for (const k of SECURITY_KEYS) expect(lv(k)?.support, k).toBe('NONE');
+  // ★ 2026-11-09 Harold — 로그인 차단 관리 하나만 지원팀원에게 연다 = 조회 + 해제(2-A · 수동 차단은 대표 · 지원팀장). 나머지 6축은 「없음」 그대로.
+  it('지원팀원은 로그인 차단 조회 · 해제만 · 나머지 6개 축 전부 「없음」', () => {
+    expect(lv('loginBlocks')?.support).toBe('R');
+    expect(lv('loginUnblock')?.support).toBe('RWD');
+    for (const k of SECURITY_KEYS.filter((x) => x !== 'loginBlocks')) expect(lv(k)?.support, k).toBe('NONE');
   });
 
   it('감사 로그는 대표만(Harold 「오직 나만」)', () => {
@@ -56,10 +60,12 @@ describe('1. 등급표 — 보안 · 인증 축', () => {
     expect(canDelete('lead', 'adminAccounts')).toBe(false);
   });
 
-  it('금칙어 · 국외 접근 통제 · 로그인 차단 = 대표 · 지원팀장 조회 · 변경 · 삭제', () => {
-    for (const k of ['spamBlock', 'geoAccess', 'loginBlocks']) {
+  it('금칙어 · 국외 접근 통제 = 대표 · 지원팀장 조회 · 변경 · 삭제 · 로그인 차단 = 지원팀원 조회 · 해제 = 세 등급(★1109)', () => {
+    for (const k of ['spamBlock', 'geoAccess']) {
       expect(lv(k), k).toEqual({ super: 'RWD', lead: 'RWD', support: 'NONE' });
     }
+    expect(lv('loginBlocks')).toEqual({ super: 'RWD', lead: 'RWD', support: 'R' });
+    expect(lv('loginUnblock')).toEqual({ super: 'RWD', lead: 'RWD', support: 'RWD' });
   });
 
   it('운영 기록 대장 = 대표 · 지원팀장 작성 · 확인(작성자 ≠ 확인자가 성립하는 두 사람)', () => {
@@ -94,6 +100,19 @@ describe('2. 요청 방식 판정 · 메뉴 노출 판정 = 같은 등급표', (
     expect(readMapFor('lead').auditLogs).toBe(false);
     expect(readMapFor('support').opsRecords).toBe(false);
     expect(readMapFor('super').loginBlocks).toBe(true);
+    expect(readMapFor('support').loginBlocks).toBe(true);   // ★1109 지원팀원 메뉴에도 「로그인 차단 관리」가 보인다
+    expect(readMapFor('support').spamBlock).toBe(false);
+  });
+
+  it('★1109 writeMapFor = 등급표 축마다 canWrite 그대로 · 수동 차단 버튼은 지원팀원에게 숨는다 · 등급 없음 = 전부 닫힘', () => {
+    for (const role of ['super', 'lead', 'support', null] as (AdminRole | null)[]) {
+      const map = writeMapFor(role);
+      for (const r of PERMISSION_MATRIX) expect(map[r.key], `${role}:${r.key}`).toBe(canWrite(role, r.key));
+    }
+    expect(writeMapFor('support').loginBlocks).toBe(false);
+    expect(writeMapFor('lead').loginBlocks).toBe(true);
+    expect(Object.values(readMapFor(null)).some(Boolean)).toBe(false);
+    expect(Object.values(writeMapFor(null)).some(Boolean)).toBe(false);
   });
 });
 
@@ -122,12 +141,27 @@ describe('3. 막는 장치가 실제로 막는다', () => {
     return { passed: next.mock.calls.length === 1, code: res.code };
   }
 
-  it('대표 · 지원팀장은 통과, 지원팀원은 403', async () => {
-    expect((await run('loginBlocks', 'id-ceo', 'DELETE')).passed).toBe(true);
+  it('로그인 차단(★1109) = 대표 · 지원팀장 전부 · 지원팀원 조회 · 해제만(수동 차단 403) · 그 밖의 보안 축 403', async () => {
+    expect((await run('loginUnblock', 'id-ceo', 'DELETE')).passed).toBe(true);
     expect((await run('loginBlocks', 'id-suran', 'POST')).passed).toBe(true);
-    const e = await run('loginBlocks', 'id-eunji', 'GET');
+    expect((await run('loginBlocks', 'id-eunji', 'GET')).passed).toBe(true);
+    expect((await run('loginUnblock', 'id-eunji', 'DELETE')).passed).toBe(true);
+    expect((await run('loginBlocks', 'id-eunji', 'POST')).code).toBe(403);
+    expect((await run('loginBlocks', 'id-eunji', 'DELETE')).code).toBe(403);   // 해제 축이 아닌 길로 오면 막힌다
+    const e = await run('spamBlock', 'id-eunji', 'GET');
     expect(e.passed).toBe(false);
     expect(e.code).toBe(403);
+  });
+
+  it('★1109 비활성 · 미로그인 · 조회 실패 = 로그인 차단 조회 · 수동 차단 · 해제 모두 403(지원팀원 칸으로 접히지 않는다 · Codex 1R)', async () => {
+    const cases: [string, string][] = [['loginBlocks', 'GET'], ['loginBlocks', 'POST'], ['loginUnblock', 'DELETE']];
+    for (const [k, m] of cases) {
+      expect((await run(k, 'id-off', m)).code, `off ${k} ${m}`).toBe(403);
+      expect((await run(k, 'id-unknown', m)).code, `unknown ${k} ${m}`).toBe(403);
+      expect((await run(k, undefined, m)).code, `anon ${k} ${m}`).toBe(403);
+    }
+    mockQuery.mockImplementation(async () => { throw new Error('db down'); });
+    for (const [k, m] of cases) expect((await run(k, 'id-eunji', m)).code, `db down ${k} ${m}`).toBe(403);
   });
 
   it('지원팀장은 직원 계정 조회만 통과 · 변경은 403', async () => {
@@ -162,16 +196,28 @@ describe('3-2. 라우트마다 빠짐없이 붙어 있다', () => {
     }
   });
 
-  it('로그인 차단 — 라우터 전체를 슈퍼관리자 확인 뒤 loginBlocks 로 막는다', () => {
+  it('로그인 차단 — 라우터 전체를 슈퍼관리자 확인 뒤 막는다 · 해제(DELETE) = loginUnblock · 그 밖 = loginBlocks(★1109)', () => {
     const lb = read('routes/admin/login-blocks.ts');
-    const gate = lb.indexOf("router.use(requireAdminArea('loginBlocks'));");
+    const gate = lb.indexOf("router.use((req, res, next) => requireAdminArea(req.method === 'DELETE' ? 'loginUnblock' : 'loginBlocks')(req, res, next));");
     expect(gate).toBeGreaterThan(lb.indexOf("req.user?.userType !== 'super_admin'"));
     expect(gate).toBeLessThan(lb.indexOf("router.get('/active'"));
+    // 해제 라우트는 DELETE 하나뿐 — 다른 방식으로 해제하는 길이 생기면 loginBlocks 축으로 판정돼 이 계약이 깨진다
+    expect([...lb.matchAll(/router\.(get|post|put|patch|delete)\(/g)].map((m) => m[1])).toEqual(['get', 'get', 'post', 'delete']);
+  });
+
+  it('★1109 수동 차단 버튼 = my-permissions canWrite.loginBlocks 일 때만', () => {
+    const screen = read('../../frontend/src/components/admin/LoginBlocksManagement.tsx');
+    expect(screen).toContain('export default function LoginBlocksManagement({ canBlock }: { canBlock: boolean })');
+    expect(screen).toContain('{canBlock && (');
+    expect(screen).toContain('{canBlock && showAddModal && (');
+    const page = readAdminScreenSource();
+    expect(page).toContain('<LoginBlocksManagement canBlock={myPermWrite.loginBlocks === true} />');
+    expect(page).toContain("setMyPermWrite(d?.canWrite && typeof d.canWrite === 'object' ? d.canWrite : {});");
   });
 
   it('메뉴 노출 API 와 직원 계정 쓰기 표시', () => {
     expect(admin).toContain("router.get('/my-permissions', authenticate, requireSuperAdmin, async");
-    expect(admin).toContain('return res.json({ role, canRead: readMapFor(role) });');
+    expect(admin).toContain('return res.json({ role, canRead: readMapFor(role), canWrite: writeMapFor(role) });');
     expect(admin).toContain("canWrite: canWrite(myRole, 'adminAccounts'),");
   });
 

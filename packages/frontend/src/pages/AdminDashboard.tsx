@@ -121,6 +121,8 @@ export default function AdminDashboard() {
   // ★ 2026-10-03 보안 · 인증 묶음(대표 · 지원팀장) 메뉴 노출 — 서버 GET /api/admin/my-permissions 의 canRead 가 유일 소스.
   //   화면은 숨기기만 한다(실제 차단은 라우트가 같은 등급표로). 조회 실패 = 빈 값 = 숨김(닫힌 쪽으로).
   const [myPermRead, setMyPermRead] = useState<Record<string, boolean>>({});
+  // ★ 2026-11-09 같은 응답의 canWrite — 버튼 숨김용(로그인 차단 수동 차단 = 대표 · 지원팀장). 조회 실패 = 빈 값 = 숨김.
+  const [myPermWrite, setMyPermWrite] = useState<Record<string, boolean>>({});
   const [helpQAccessAllowed, setHelpQAccessAllowed] = useState(false); // ★ 2026-08-24 도움말 질문 이력(ceo 전용)
   const [featureInterestAllowed, setFeatureInterestAllowed] = useState(false); // ★ 2026-10-06 기능 관심 업체(ceo 전용)
   const [identityStatusAllowed, setIdentityStatusAllowed] = useState(false); // ★ 2026-10-07 본인인증 현황(ceo 전용)
@@ -963,7 +965,8 @@ useEffect(() => {
       const r = await fetch('/api/admin/my-permissions', { headers: { Authorization: `Bearer ${token}` } });
       const d = r.ok ? await r.json() : null;
       setMyPermRead(d?.canRead && typeof d.canRead === 'object' ? d.canRead : {});
-    } catch { setMyPermRead({}); }
+      setMyPermWrite(d?.canWrite && typeof d.canWrite === 'object' ? d.canWrite : {});
+    } catch { setMyPermRead({}); setMyPermWrite({}); }
   })();
 }, []);
 useEffect(() => { if (activeTab === 'templates') { loadAdminTemplates(); loadAdminRcsTemplates(); } }, [activeTab, templateFilter]);
@@ -4885,7 +4888,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
 
       {/* ★ D145 P0: 로그인 차단 관리 탭 */}
       {activeTab === 'loginBlocks' && (
-        <LoginBlocksManagement />
+        <LoginBlocksManagement canBlock={myPermWrite.loginBlocks === true} />
       )}
 
       {/* ★ 2026-10-03 운영 기록 대장(로그 점검 · 방화벽 변경 · 권한 점검) */}

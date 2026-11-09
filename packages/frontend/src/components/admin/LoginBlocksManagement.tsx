@@ -42,7 +42,8 @@ function formatRemain(seconds?: number): string {
   return `${m}분 ${s}초`;
 }
 
-export default function LoginBlocksManagement() {
+/** canBlock = 수동 차단 가능(등급표 loginBlocks 변경 · 대표 · 지원팀장) · 지원팀원은 조회 · 즉시 해제만(★ 2026-11-09 Harold 2-A · 서버도 같은 표로 막는다) */
+export default function LoginBlocksManagement({ canBlock }: { canBlock: boolean }) {
   const [tab, setTab] = useState<'active' | 'history'>('active');
   const [activeBlocks, setActiveBlocks] = useState<LoginBlock[]>([]);
   const [historyBlocks, setHistoryBlocks] = useState<LoginBlock[]>([]);
@@ -189,12 +190,14 @@ export default function LoginBlocksManagement() {
           >
             새로고침
           </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="px-3 py-1.5 text-sm bg-red-600 text-white hover:bg-red-700 rounded"
-          >
-            + 수동 차단
-          </button>
+          {canBlock && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="px-3 py-1.5 text-sm bg-red-600 text-white hover:bg-red-700 rounded"
+            >
+              + 수동 차단
+            </button>
+          )}
         </div>
       </div>
 
@@ -338,7 +341,7 @@ export default function LoginBlocksManagement() {
         </>
       )}
 
-      {showAddModal && (
+      {canBlock && showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl w-[480px] max-w-[90vw]">
             <div className="px-6 py-4 border-b flex justify-between items-center">

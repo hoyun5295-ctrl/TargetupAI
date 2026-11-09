@@ -9,8 +9,10 @@
  * ⛔ 설계 원칙 4개
  *  1. **권한분류표의 원본은 이 파일 하나다.** 화면은 이 매트릭스를 API로 받아 그린다.
  *     문서(docx)에 표를 따로 적어 두면 시스템과 갈라지고, 기준이 요구하는 "시스템과 문서의 일치"가 깨진다.
- *  2. **등급 판정은 실패 시 닫힌다.** 미로그인·미등록·조회 실패는 전부 최저 등급으로 본다.
+ *  2. **등급 판정은 실패 시 닫힌다.** 미로그인·미등록·비활성·조회 실패는 「등급 없음」(null)이고 모든 축이 `NONE`이다.
  *     권한 판정이 실패할 때 열리면 통제가 아니다(= utils/audit-log.ts `isSuperAdminAllowed`와 같은 규율).
+ *     ★ 2026-11-09 옛: 실패를 최저 등급 `support`로 접었다 — 지원팀원에게 로그인 차단을 열자(Harold) 사용 중지 계정 ·
+ *       조회 실패에도 그 축이 열렸다(Codex 1R). 「최저 등급」과 「닫힘」은 다른 값이라 null 로 가른다.
  *  3. **기존 ENV 화이트리스트를 대체하지 않는다.** 등급이 먼저 막고, 통과한 것만 기존 ENV가 한 번 더 본다(AND).
  *     그래야 이 축을 도입하면서 지금 닫혀 있는 것이 열리는 일이 구조적으로 불가능하다.
  *  4. **role 값이 비어 있거나 모르는 값이면 `support`로 본다.** 새 등급을 오타로 적었을 때 전권이 되면 안 된다.
@@ -33,7 +35,7 @@ export const ADMIN_ROLE_LABEL: Record<AdminRole, string> = {
 export const ADMIN_ROLE_DESC: Record<AdminRole, string> = {
   super: '전 영역 조회·변경·삭제. 관리자 계정 변경과 감사 기록은 이 등급만 다룬다.',
   lead: '운영 · 보안 전 영역 조회·변경·삭제. 직원 계정은 조회만. 감사 기록과 학습 데이터는 제외.',
-  support: '운영 영역 조회·변경. 삭제 · 시스템 설정 · 보안 화면은 제외.',
+  support: '운영 영역 조회·변경. 삭제 · 시스템 설정 · 보안 화면은 제외(로그인 차단 관리만 조회 · 해제).',
 };
 
 /** 권한 수준 — 심사 제출 표기와 같은 어휘를 쓴다 */
@@ -133,10 +135,20 @@ export const PERMISSION_MATRIX: PermissionRow[] = [
   },
   {
     // ★ 2026-10-03 보안 · 인증 묶음 — 로그인 차단 목록 · 이력 · 수동 차단 · 해제
+    // ★ 2026-11-09 Harold — 지원팀원도 이 메뉴 하나만 연다(직원이 비밀번호를 잊어 차단되면 대표 · 지원팀장 없이도 풀 수 있게).
+    //   지원팀원 = 조회 + 해제(아래 loginUnblock)만 · 수동 차단은 대표 · 지원팀장(Harold 2-A · 지원팀원이 대표 계정을 막는 길 차단 · Codex 1R).
+    //   보안 · 인증의 나머지 축은 지원팀원 「없음」 그대로.
     key: 'loginBlocks',
     area: '로그인 차단',
-    screens: '로그인 차단 관리',
-    levels: { super: 'RWD', lead: 'RWD', support: 'NONE' },
+    screens: '로그인 차단 관리(목록 · 이력 · 수동 차단)',
+    levels: { super: 'RWD', lead: 'RWD', support: 'R' },
+  },
+  {
+    // ★ 2026-11-09 해제(DELETE /api/admin/login-blocks/:id)만 따로 — 요청 방식 판정이 DELETE = 삭제라 RWD 로 둔다.
+    key: 'loginUnblock',
+    area: '로그인 차단 해제',
+    screens: '로그인 차단 관리(즉시 해제)',
+    levels: { super: 'RWD', lead: 'RWD', support: 'RWD' },
   },
   {
     key: 'auditLogs',
@@ -230,41 +242,42 @@ export function normalizeAdminRole(raw: string | null | undefined): AdminRole {
 }
 
 /**
- * 계정 등급 조회. 조회 실패·미등록은 `support`(최저)로 돌려준다.
- * ⚠ 여기서 `super`를 기본값으로 두면 DB 장애가 곧 전권 개방이 된다.
+ * 계정 등급 조회. 미로그인 · 미등록 · 비활성 · 조회 실패 = null(등급 없음 · 모든 축 NONE · 원칙 2).
+ * ⚠ 여기서 `super`를 기본값으로 두면 DB 장애가 곧 전권 개방이 된다. `support`로 접어도 지원팀원에게 열린 축(로그인 차단 해제)이 열린다.
  */
-export async function fetchAdminRole(superAdminId: string | null | undefined): Promise<AdminRole> {
-  if (!superAdminId) return 'support';
+export async function fetchAdminRole(superAdminId: string | null | undefined): Promise<AdminRole | null> {
+  if (!superAdminId) return null;
   try {
     const r = await query('SELECT role FROM super_admins WHERE id = $1 AND is_active = true', [superAdminId]);
-    if (r.rows.length === 0) return 'support';
+    if (r.rows.length === 0) return null;
     return normalizeAdminRole(r.rows[0].role);
   } catch (err: any) {
-    console.log('[admin-role] 등급 조회 실패 — 최저 등급으로 본다:', err?.message);
-    return 'support';
+    console.log('[admin-role] 등급 조회 실패 — 등급 없음(닫힘)으로 본다:', err?.message);
+    return null;
   }
 }
 
-/** 해당 축에 대한 등급의 권한 수준 */
-export function levelFor(role: AdminRole, key: string): AccessLevel {
+/** 해당 축에 대한 등급의 권한 수준 · 등급 없음(null) = NONE */
+export function levelFor(role: AdminRole | null, key: string): AccessLevel {
+  if (!role) return 'NONE';
   const row = PERMISSION_MATRIX.find((r) => r.key === key);
   if (!row) return 'NONE';
   return row.levels[role];
 }
 
 /** 조회 이상 가능한가 */
-export function canRead(role: AdminRole, key: string): boolean {
+export function canRead(role: AdminRole | null, key: string): boolean {
   return levelFor(role, key) !== 'NONE';
 }
 
 /** 변경 가능한가 */
-export function canWrite(role: AdminRole, key: string): boolean {
+export function canWrite(role: AdminRole | null, key: string): boolean {
   const lv = levelFor(role, key);
   return lv === 'RW' || lv === 'RWD';
 }
 
 /** 삭제 가능한가 */
-export function canDelete(role: AdminRole, key: string): boolean {
+export function canDelete(role: AdminRole | null, key: string): boolean {
   return levelFor(role, key) === 'RWD';
 }
 
@@ -272,7 +285,7 @@ export function canDelete(role: AdminRole, key: string): boolean {
  * ★ 2026-10-03 요청 방식으로 필요한 수준을 정한다 — 조회(GET · HEAD) = 조회, DELETE = 삭제, 그 밖(POST · PUT · PATCH) = 변경.
  * 라우트 묶음 하나를 같은 축으로 막을 때 방식마다 판정을 따로 적지 않게 한다(`middlewares/auth.ts` `requireAdminArea`).
  */
-export function canForMethod(role: AdminRole, key: string, method: string): boolean {
+export function canForMethod(role: AdminRole | null, key: string, method: string): boolean {
   const m = String(method || '').toUpperCase();
   if (m === 'GET' || m === 'HEAD') return canRead(role, key);
   if (m === 'DELETE') return canDelete(role, key);
@@ -283,8 +296,15 @@ export function canForMethod(role: AdminRole, key: string, method: string): bool
  * ★ 2026-10-03 등급표의 축마다 「조회 가능」 여부 — 슈퍼관리자 화면이 메뉴를 숨길 때 쓴다(`GET /api/admin/my-permissions`).
  * 화면이 등급 · 수준을 다시 계산하지 않게 판정 결과만 내려 보낸다. 실제 차단은 각 라우트가 같은 함수로 한다.
  */
-export function readMapFor(role: AdminRole): Record<string, boolean> {
+export function readMapFor(role: AdminRole | null): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   for (const row of PERMISSION_MATRIX) out[row.key] = canRead(role, row.key);
+  return out;
+}
+
+/** ★ 2026-11-09 축마다 「변경 가능」 — 화면이 버튼을 숨길 때 쓴다(로그인 차단 수동 차단 = 대표 · 지원팀장). 실제 차단은 라우트가 같은 함수로. */
+export function writeMapFor(role: AdminRole | null): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const row of PERMISSION_MATRIX) out[row.key] = canWrite(role, row.key);
   return out;
 }
