@@ -47,6 +47,7 @@ describe('2. 라우트 배선', () => {
     expect(body).toContain("if (verdict === 'saved') return res.status(409)");
     expect(body).toContain("if (verdict === 'not_poster') return res.status(400)");
     expect(body).toContain('try { discardTemp(companyId, tempId); }');
+    expect(body).toContain('const ue = userErrorResponse(err);');   // 뿌리 대장 R10 — 5xx 앞 공용 응답
     // 저장 라우트가 같은 줄 키를 쓴다(다르면 저장 도중에 지우기가 끼어든다)
     expect(r).toContain('await runSerial(`studio-save:${companyId}:${tempId}`, async () => {\n  // ★ 2026-11-07 C112');
   });

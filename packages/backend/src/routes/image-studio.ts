@@ -823,6 +823,8 @@ imageStudioRouter.delete('/temp/:tempId', async (req: any, res: Response) => {
     if (verdict === 'not_poster') return res.status(400).json({ success: false, error: '지울 수 있는 결과 그림이 아니에요.', code: 'NOT_POSTER' });
     if (verdict === 'delete') {
       try { discardTemp(companyId, tempId); } catch (err: any) {
+        const ue = userErrorResponse(err);   // 공용 응답 먼저(뿌리 대장 R10 · 이 파일의 다른 catch 와 같은 꼴)
+        if (ue) return res.status(ue.status).json(ue.body);
         console.error('[image-studio] 임시 그림 지우기 실패:', err?.message || err);
         return res.status(500).json({ success: false, error: '그림을 지우지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
       }
