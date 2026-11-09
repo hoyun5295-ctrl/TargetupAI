@@ -27,9 +27,14 @@ import { WorkspaceNotice } from './shared/SendWorkspaceShell';
 import KakaoSendHeader from './kakao-send/KakaoSendHeader';
 import '../styles/direct-send.css';
 import RecipientDirectInputModal, { type PastePreview } from './direct-send/RecipientDirectInputModal';
-import { checkAlimtalkPaste, planAppend, pickPhoneColumn, phonesFromColumn, pickNameColumn, namesByPhone } from '../utils/recipient-paste';
+import {
+  checkAlimtalkPaste, planAppend, pickPhoneColumn, phonesFromColumn, pickNameColumn,
+  recipientFieldLabels, fieldsByPhone, firstFilledRecord, columnPhoneOf, RECIPIENT_NAME_LABEL,
+} from '../utils/recipient-paste';
+import { extractionFieldTable } from '../utils/customerFilterBuild';
+import { DIRECT_FIELD_LABELS } from '../utils/formatDate';
 import AddressBookModal from './AddressBookModal';
-import DirectTargetFilterModal from './DirectTargetFilterModal';
+import DirectTargetFilterModal, { type FieldMeta } from './DirectTargetFilterModal';
 import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/target-extraction';
 import ConfirmDialogShell, { DialogHeadline, DialogRow, DialogCaution } from './shared/ConfirmDialogShell';
 import { BRAND_SPEC } from '../constants/brand-message-spec';
@@ -40,8 +45,10 @@ type AddrRow = { phone: string; name: string; extra1: string; extra2: string; ex
 const toAddrRow = (phone: string): AddrRow => ({ phone, name: '', extra1: '', extra2: '', extra3: '' });
 const digitsOnly = (v: unknown) => String(v ?? '').replace(/\D/g, '');
 
-/** ★ 2026-11-08 C117 D8 — 인계 명단 한 행(이름 = 보기용 · 발송 글에 쓰지 않는다) */
-export interface BrandRecipientSeed { phone: string; name?: string }
+/** ★ 2026-11-08 C117 D8 · ★1109 R86 — 인계 명단 한 행(번호 + 보기 칸 · 칸 이름 → 값 · 발송 글에 쓰지 않는다) */
+export interface BrandRecipientSeed { phone: string; fields?: Record<string, string> }
+/** 번호 → 칸 이름 → 값(보기 전용) */
+type RecipientFieldMap = Record<string, Record<string, string>>;
 
 export interface BrandSendModalProps {
   show: boolean;
@@ -111,16 +118,26 @@ export default function BrandSendModal({
   const [directInputOpen, setDirectInputOpen] = useState(false);
   const [addNotice, setAddNotice] = useState('');
   const [phones, setPhones] = useState<string[]>([]);
-  /** ★ 2026-11-08 C117 D8(Harold H2) — 보기용 이름(번호 숫자 → 이름) · 발송 · 중복 · 세대 규칙은 phones 하나 그대로 · 열 때 다시 만든다 */
-  const [names, setNames] = useState<Record<string, string>>({});
-  // ★ Codex 구현 1R #2 — 이미 있는 이름은 덮지 않는다(칸 바꾸기 · 겹친 번호가 다른 원천 이름으로 바뀌지 않게) · 명단에서 빠진 번호의 이름은 아래 effect 가 걷는다(지운 뒤 다시 넣어도 옛 이름 0)
-  const mergeNames = (add: Record<string, string>) => { if (Object.keys(add).length > 0) setNames((prev) => ({ ...add, ...prev })); };
+  /**
+   * ★ 2026-11-08 C117 D8(Harold H2) → ★1109 R86 — 보기 칸(번호 숫자 → 칸 이름 → 값 · 파일 · 주소록 · 타겟추출 · 인계가 가진 칸 그대로)
+   *   발송 · 중복 · 세대 규칙은 phones 하나 그대로 · 열 때 다시 만든다 · 칸 이름은 원천마다 CT(recipientFieldLabels) 한 번.
+   */
+  const [fields, setFields] = useState<RecipientFieldMap>({});
+  // ★ C117 Codex 구현 1R #2 → ★1109 행 단위 — 값이 있는 번호의 묶음은 덮지도 섞지도 않는다(칸 바꾸기 · 겹친 번호가 다른 원천 값으로 바뀌거나 두 사람 값이 섞이지 않게 · 공용 규칙 firstFilledRecord) · 명단에서 빠진 번호의 칸은 아래 effect 가 걷는다(지운 뒤 다시 넣어도 옛 값 0)
+  const mergeFields = (add: RecipientFieldMap) => {
+    if (Object.keys(add).length === 0) return;
+    setFields((prev) => {
+      const next = { ...prev };
+      for (const [p, f] of Object.entries(add)) next[p] = firstFilledRecord(prev[p], f);
+      return next;
+    });
+  };
   useEffect(() => {
-    setNames((prev) => {
+    setFields((prev) => {
       const keep = new Set(phones);
       const keys = Object.keys(prev);
       if (keys.every((k) => keep.has(k))) return prev;
-      const next: Record<string, string> = {};
+      const next: RecipientFieldMap = {};
       for (const k of keys) if (keep.has(k)) next[k] = prev[k];
       return next;
     });
@@ -170,13 +187,13 @@ export default function BrandSendModal({
       (initialRecipients || []).map((r) => String(r?.phone ?? '').replace(/[^0-9]/g, '')).filter(Boolean),
     ));
     setPhones(seeded);
-    const seededNames: Record<string, string> = {};
+    // ★1109 R86 — 인계 행의 보기 칸(같은 번호 여러 행 = 값이 있는 앞 행 통째 · 공용 규칙 firstFilledRecord)
+    const seededFields: RecipientFieldMap = {};
     for (const r of initialRecipients || []) {
       const p = String(r?.phone ?? '').replace(/[^0-9]/g, '');
-      const n = String(r?.name ?? '').trim();
-      if (p && n) seededNames[p] = n;
+      if (p) seededFields[p] = firstFilledRecord(seededFields[p], r?.fields ?? {});
     }
-    setNames(seededNames);
+    setFields(seededFields);
     setSeededCount(seeded.length);
     setListQuery('');
     setDirectInputOpen(false); setAddNotice('');
@@ -252,7 +269,8 @@ export default function BrandSendModal({
    */
   const addFromColumn = (column: string, rows: Record<string, unknown>[], base: string[], headers: readonly string[]): { base: string[]; seq: number } => {
     const list = phonesFromColumn(column, rows);
-    mergeNames(namesByPhone(column, pickNameColumn(headers), rows));   // ★ C117 D8 — 파일 이름 칸(보기용)
+    // ★1109 R86 — 파일의 모든 칸(보기용 · 이름 칸 = 「이름」 · 고른 번호 칸 = 뺌 · 칸 이름은 이 파일 한 장에 한 번)
+    mergeFields(fieldsByPhone(rows, columnPhoneOf(column), recipientFieldLabels(rows, { phoneKey: column, nameKey: pickNameColumn(headers) })));
     const plan = planAppend(list, base, dedupEnabled);
     setRecipients([...base, ...plan.add]);
     setAddNotice(list.length === 0
@@ -304,19 +322,21 @@ export default function BrandSendModal({
   };
 
   /** 주소록 창이 쓰는 줄 모양 ↔ 이 창의 번호 명단(불러오기 = 그 순간 명단에 더하기 · ★ C117 D8 이름은 보기용으로 함께 둔다) */
-  const addrRows = useMemo(() => phones.map((p) => ({ ...toAddrRow(p), name: names[p] || '' })), [phones, names]);
+  const addrRows = useMemo(() => phones.map((p) => ({ ...toAddrRow(p), name: fields[p]?.[RECIPIENT_NAME_LABEL] || '' })), [phones, fields]);
   const setAddrRows: React.Dispatch<React.SetStateAction<AddrRow[]>> = (action) => {
     updateRecipients((prev) => {
       const next = typeof action === 'function' ? action(prev.map(toAddrRow)) : action;
-      const add: Record<string, string> = {};
-      for (const r of next) { const p = digitsOnly(r.phone); const n = String(r.name ?? '').trim(); if (p && n) add[p] = n; }
-      mergeNames(add);
+      // ★1109 R86 — 주소록 칸(이름 · 기타1~3 · 문자 창과 같은 칸 이름) · 불러오기 한 번 = 원천 하나
+      mergeFields(fieldsByPhone(next, (r) => digitsOnly(r.phone), recipientFieldLabels(next, { phoneKey: 'phone', nameKey: 'name', labelOf: (k) => DIRECT_FIELD_LABELS[k] })));
       return next.map((r) => digitsOnly(r.phone)).filter(Boolean);
     });
   };
 
-  /** ★ 2026-11-05 C107 D-05 — 타겟추출(문자 직접발송과 같은 창) 담기 = 조건으로 뽑은 대상 = 명단을 그것으로 바꾼다(옛 AI 타겟추출과 같은 규칙) */
-  const handleTargetExtracted = async (ext: TargetExtraction) => {
+  /**
+   * ★ 2026-11-05 C107 D-05 — 타겟추출(문자 직접발송과 같은 창) 담기 = 조건으로 뽑은 대상 = 명단을 그것으로 바꾼다(옛 AI 타겟추출과 같은 규칙)
+   * ★1109 R86 — 추출 창이 넘기는 항목(meta)으로 문자 · 알림톡 창과 같은 표(extractionRowsToTable · 같은 항목 이름 · 같은 표기)를 만들어 칸으로 둔다 · 명단 교체 = 칸도 교체
+   */
+  const handleTargetExtracted = async (ext: TargetExtraction, meta: FieldMeta[]) => {
     setShowTargetExtract(false);
     const seq = ++reqSeqRef.current;
     setTargetLoading(true);
@@ -324,11 +344,12 @@ export default function BrandSendModal({
       const r = await fetchTargetExtractionRows(ext);
       if (seq !== reqSeqRef.current) return;
       if (!r.ok) { setAddNotice(r.expired ? '담은 명단의 보관 시간이 지났습니다. 다시 추출해 주세요.' : (r.error || '명단을 불러오지 못했습니다.')); return; }
-      const list = (r.data.recipients || []).map((row: any) => digitsOnly(row?.[ext.phoneField] ?? row?.phone)).filter((p: string) => p.length >= 10);
-      // ★ C117 D8 — 타겟추출 고객명(표준 필드 name · 보기용)
-      const add: Record<string, string> = {};
-      for (const row of r.data.recipients || []) { const p = digitsOnly(row?.[ext.phoneField] ?? row?.phone); const n = String(row?.name ?? '').trim(); if (p.length >= 10 && n) add[p] = n; }
-      mergeNames(add);
+      const raw: any[] = r.data.recipients || [];
+      const phoneAt = (i: number) => digitsOnly(raw[i]?.[ext.phoneField] ?? raw[i]?.phone);
+      const list = raw.map((_, i) => phoneAt(i)).filter((p: string) => p.length >= 10);
+      // 표 행 i = 원행 i(extractionRowsToTable = rows.map 1:1) → 번호는 원행 읽기 그대로 · 이름 항목이 없는 meta = 원행 이름 보존(CT)
+      const t = extractionFieldTable(raw, meta);
+      setFields(fieldsByPhone(t.rows, (_, i) => phoneAt(i), recipientFieldLabels(t.rows, { phoneKey: t.phoneKey, nameKey: t.nameKey })));
       const finalList = dedupEnabled ? Array.from(new Set(list)) as string[] : list;
       setRecipients(finalList);
       setAddNotice(`조건에 맞는 ${finalList.length.toLocaleString()}명을 담았습니다.${ext.skippedNoPhone > 0 ? ` (휴대폰 번호가 없는 ${ext.skippedNoPhone.toLocaleString()}명 제외)` : ''}`);
@@ -385,9 +406,16 @@ export default function BrandSendModal({
   const removedCount = Math.max(0, seededCount - phones.length);
   const LIST_PAGE_SIZE = 10;
   const listDigits = listQuery.replace(/[^0-9]/g, '');
-  // ★ C117 D8 — 검색 = 번호 또는 이름
+  // ★ C117 D8 → ★1109 R86 — 검색 = 번호 또는 칸 값
   const listText = listQuery.trim();
-  const listFiltered = phones.map((p, idx) => ({ p, idx })).filter((r) => !listText || (listDigits && r.p.includes(listDigits)) || (names[r.p] || '').includes(listText));
+  const listFiltered = phones.map((p, idx) => ({ p, idx })).filter((r) => !listText || (listDigits && r.p.includes(listDigits)) || Object.values(fields[r.p] || {}).some((v) => v.includes(listText)));
+  /** ★1109 R86 — 표 칸 = 「이름」 맨 앞(늘 둔다 · C117 과 같게) + 지금 명단 번호 순서로 처음 나온 칸 이름 */
+  const fieldCols = useMemo(() => {
+    const cols = [RECIPIENT_NAME_LABEL];
+    const seen = new Set(cols);
+    for (const p of phones) for (const k of Object.keys(fields[p] || {})) if (!seen.has(k)) { seen.add(k); cols.push(k); }
+    return cols;
+  }, [phones, fields]);
   const listTotalPages = Math.max(1, Math.ceil(listFiltered.length / LIST_PAGE_SIZE));
   const listCurrentPage = Math.min(listPage, listTotalPages - 1);
   const listPageItems = listFiltered.slice(listCurrentPage * LIST_PAGE_SIZE, (listCurrentPage + 1) * LIST_PAGE_SIZE);
@@ -473,12 +501,14 @@ export default function BrandSendModal({
         </div>
         <div className="ds-search-wrap">
           <Search size={15} strokeWidth={1.75} />
-          <input type="text" className="ds-search-in" placeholder="번호 · 이름 검색" value={listQuery}
+          <input type="text" className="ds-search-in" placeholder="번호 · 이름 · 항목 검색" value={listQuery}
             onChange={(e) => { setListQuery(e.target.value); setListPage(0); setListSelected(new Set()); }} />
         </div>
       </div>
 
       <div className="ds-list-frame">
+        {/* ★1109 R86 · R85 — 머리 · 줄 = 한 그릇(가로 · 세로 · 머리는 위에 붙음) · 격자 = 칸 수만큼(direct-send.css .ks-list-scroll) */}
+        <div className="ks-list-scroll" style={{ '--ks-cols': fieldCols.length } as React.CSSProperties}>
         <div className="ds-list-head">
           <label className="flex items-center cursor-pointer">
             <input type="checkbox" className="ds-chk ds-chk--lg ds-chk--purple"
@@ -490,7 +520,7 @@ export default function BrandSendModal({
               aria-label="전체 선택" />
           </label>
           <span>수신번호</span>
-          <span>이름</span>
+          {fieldCols.map((c) => <span key={c} title={c}>{c}</span>)}
         </div>
         {phones.length === 0 ? (
           <div className="ds-list-empty">
@@ -528,7 +558,6 @@ export default function BrandSendModal({
             )}
           </div>
         ) : (
-          <>
             <div className="ds-list-body">
               {listPageItems.length === 0 ? (
                 <div className="py-12 text-center text-stone-400 text-[13px]">"{listQuery}" 검색 결과가 없어요</div>
@@ -545,19 +574,22 @@ export default function BrandSendModal({
                         aria-label={`${p} 선택`} />
                     </label>
                     <span className="ds-num text-stone-800 font-medium">{p}</span>
-                    <span className="min-w-0 truncate text-[13px] text-stone-600">{names[p] || '-'}</span>
+                    {fieldCols.map((c) => {
+                      const v = fields[p]?.[c] || '';
+                      return <span key={c} className="text-[13px] text-stone-600" title={v || undefined}>{v || '-'}</span>;
+                    })}
                   </div>
                 ))
               )}
             </div>
-            {listTotalPages > 1 && (
-              <div className="ds-page">
-                <button type="button" onClick={() => setListPage((n) => Math.max(0, n - 1))} disabled={listCurrentPage === 0}>이전</button>
-                <span className="ds-page-num">{listCurrentPage + 1} / {listTotalPages}</span>
-                <button type="button" onClick={() => setListPage((n) => Math.min(listTotalPages - 1, n + 1))} disabled={listCurrentPage >= listTotalPages - 1}>다음</button>
-              </div>
-            )}
-          </>
+        )}
+        </div>
+        {phones.length > 0 && listTotalPages > 1 && (
+          <div className="ds-page">
+            <button type="button" onClick={() => setListPage((n) => Math.max(0, n - 1))} disabled={listCurrentPage === 0}>이전</button>
+            <span className="ds-page-num">{listCurrentPage + 1} / {listTotalPages}</span>
+            <button type="button" onClick={() => setListPage((n) => Math.min(listTotalPages - 1, n + 1))} disabled={listCurrentPage >= listTotalPages - 1}>다음</button>
+          </div>
         )}
       </div>
 
@@ -663,7 +695,7 @@ export default function BrandSendModal({
         <DirectTargetFilterModal
           show
           onClose={() => setShowTargetExtract(false)}
-          onExtracted={(ext) => { void handleTargetExtracted(ext); }}
+          onExtracted={(ext, meta) => { void handleTargetExtracted(ext, meta); }}
           hideAi={hideAi}
         />
       )}

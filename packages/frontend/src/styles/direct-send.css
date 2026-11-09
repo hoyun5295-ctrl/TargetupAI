@@ -2181,6 +2181,20 @@ p.ds-warn-good { margin: 0; display: flex; gap: 7px; align-items: center; paddin
 @container (max-width: 300px) {
   .ks-recipients .ds-rtab { padding: 0 6px; font-size: 13.5px; }
 }
+/* ★ 2026-11-09 R86 · R85 — 브랜드 명단 표 = 항목 칸 수만큼(파일 · 주소록 · 타겟추출 · 인계가 가진 칸).
+   머리 · 줄을 한 그릇(가로 · 세로)에 넣고 머리는 위에 붙인다 — 칸이 적으면 넓게 채우고, 많으면 표 안에서만 옆으로 민다(창은 밀리지 않는다).
+   격자 = 체크 44 · 번호 120(11자리 숫자 + 여백) · 칸마다 최소 92 · 최소 폭 = 좌우 여백 40 + 그 합(머리 · 줄이 같은 폭 = 칸이 어긋나지 않는다). 칸 수 = 화면이 --ks-cols 로 준다.
+   폭 실측(1109 정적 시험대): 1440 수신자 열 460(표 안 폭 394 = 세로 스크롤 막대 15 뺌) = 두 칸(이름 + 하나)까지 밀지 않음 · 그 이상은 표 안에서 민다. */
+.ks-recipients .ks-list-scroll { flex: 1; min-height: 0; min-width: 0; overflow: auto; display: flex; flex-direction: column; }
+.ks-recipients .ks-list-scroll > .ds-list-head { position: sticky; top: 0; z-index: 1; }
+.ks-recipients .ks-list-scroll > .ds-list-body { flex: 1 0 auto; overflow: visible; }
+.ks-recipients .ks-list-scroll .ds-list-head,
+.ks-recipients .ks-list-scroll .ds-list-row {
+  grid-template-columns: 44px 120px repeat(var(--ks-cols, 1), minmax(92px, 1fr));
+  min-width: calc(204px + var(--ks-cols, 1) * 92px);
+}
+.ks-recipients .ks-list-scroll .ds-list-head > span,
+.ks-recipients .ks-list-scroll .ds-list-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; }
 
 /* 발송 바 풍선(실패 시 문자) — 칸 위로 뜬다 */
 .ks-pop { position: absolute; bottom: calc(100% + 8px); right: 0; width: 460px; max-height: min(560px, calc(100vh - 170px)); overflow-y: auto; z-index: 60; background: #FFFFFF; border: 1px solid var(--ds-stone-200); border-radius: 14px; box-shadow: 0 20px 44px -12px rgb(0 0 0 / .3); padding: 14px 16px 16px; }

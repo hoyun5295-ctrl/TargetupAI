@@ -75,6 +75,8 @@ import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
 import BrandSendModal, { type BrandRecipientSeed } from '../components/BrandSendModal';
 import { carryPhonesToDirectRecipients } from '../utils/send-checks';
+import { recipientSeeds, pickNameKey } from '../utils/recipient-paste';
+import { extractionFieldTable } from '../utils/customerFilterBuild';
 // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본(서버) 요청 CT
 import {
   requestKeptExtraction, fetchTargetExtractionRows, fillTargetExtractionCallback, longestRowOf,
@@ -3011,7 +3013,10 @@ const campaignData = {
             else setToast({ show: true, type: 'error', message: r.error || '명단을 불러오지 못했습니다.' });
             return;
           }
-          setBrandInitialRecipients(r.data.recipients.map((row: any) => ({ phone: String(row?.phone ?? ''), name: typeof row?.name === 'string' ? row.name : undefined })).filter((x: BrandRecipientSeed) => !!x.phone));
+          // ★1109 R86 — 추출 항목 = 브랜드 창 타겟추출과 같은 표(CT extractionFieldTable · 이 추출과 함께 저장된 항목 meta · 이름 항목이 없으면 원행 이름 보존) · 표 행 i = 원행 i
+          const raw: any[] = r.data.recipients;
+          const t = extractionFieldTable(raw, targetFieldsMeta);
+          setBrandInitialRecipients(recipientSeeds(t.rows, (_, i) => String(raw[i]?.phone ?? ''), { phoneKey: t.phoneKey, nameKey: t.nameKey }));
           setBrandEntry('target');
           setShowBrandSend(true);
           setShowTargetSend(false);
@@ -3215,7 +3220,9 @@ const campaignData = {
           }}
           onBrandOpen={() => {
             // ★ 2026-07-29 브랜드메시지 진입. 알림톡과 같이 입력해 둔 수신자를 그대로 인계한다.
-            setBrandInitialRecipients(directRecipients.map((r: any) => ({ phone: String(r?.phone ?? r), name: typeof r?.name === 'string' ? r.name : undefined })).filter((x: BrandRecipientSeed) => !!x.phone));
+            // ★1109 R86 — 문자 목록에 보이던 칸만(이름 · 회신번호 · 기타1~3 · DirectSendPanel activeFields 와 같은 키)
+            const rows = directRecipients.map((r: any) => (r && typeof r === 'object' ? r : { phone: r }));
+            setBrandInitialRecipients(recipientSeeds(rows, (r) => String(r?.phone ?? ''), { phoneKey: 'phone', nameKey: 'name', keys: DIRECT_VAR_MAP.map((v) => v.fieldKey), labelOf: (k) => DIRECT_FIELD_LABELS[k] }));
             setBrandEntry('direct');
             setShowBrandSend(true);
           }}
@@ -3356,7 +3363,9 @@ const campaignData = {
           setAlimtalkInitialRecipients([]);
           setDirectSendChannel('sms');
           if (to === 'brand') {
-            setBrandInitialRecipients(phones.map((p, i) => ({ phone: p, name: typeof rows?.[i]?.name === 'string' ? rows[i].name : undefined })));
+            // ★1109 R86 — 알림톡 목록에 보이던 칸(번호 밖 키 전부 · 내부 키만 뺌) · 번호 = 넘겨받은 번호 그대로
+            const src = rows ?? phones.map((p) => ({ phone: p }));
+            setBrandInitialRecipients(recipientSeeds(src, (_, i) => String(phones[i] ?? ''), { phoneKey: 'phone', nameKey: pickNameKey(src), labelOf: (k) => DIRECT_FIELD_LABELS[k] }));
             setBrandEntry('direct');
             setShowBrandSend(true);
           } else {

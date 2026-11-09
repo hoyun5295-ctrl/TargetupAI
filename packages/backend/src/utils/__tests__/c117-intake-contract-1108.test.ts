@@ -27,7 +27,7 @@ import { billingTypeLabelOf } from '../billing-types';
 import { TARGETING_OPTIONS } from '../brand-message';
 import { FIELD_MAP } from '../standard-field-map';
 import { BRAND_TARGETING_NAMES as FRONT_NAMES, resolveChannelChipClass } from '../../../../frontend/src/utils/campaign-axis';
-import { RECIPIENT_NAME_HEADERS, pickNameColumn, namesByPhone } from '../../../../frontend/src/utils/recipient-paste';
+import { RECIPIENT_NAME_HEADERS, pickNameColumn, recipientFieldLabels, fieldsByPhone, columnPhoneOf } from '../../../../frontend/src/utils/recipient-paste';
 
 const PKG = join(__dirname, '..', '..', '..', '..');   // packages/
 const walk = (d: string, out: string[] = []): string[] => {
@@ -123,22 +123,25 @@ describe('B2 · R85 — 그릇이 칸 안 최소 크기를 받는다', () => {
     const f = FIELD_MAP.find((x) => x.fieldKey === 'name')!;
     expect(new Set(RECIPIENT_NAME_HEADERS)).toEqual(new Set([f.displayName, ...(f.aliases || []), f.fieldKey]));
     expect(pickNameColumn(['휴대폰', '성함'])).toBe('성함');
-    expect(namesByPhone('휴대폰', '이름', [{ 휴대폰: '010-0000-0001', 이름: ' 가 ' }, { 휴대폰: '0100000002', 이름: '' }])).toEqual({ '01000000001': '가' });
+    // ★1109 R86 — 이름 칸 = 보기 칸 「이름」(namesByPhone → 칸 CT · brand-recipient-fields-1109)
+    const rows = [{ 휴대폰: '010-0000-0001', 이름: ' 가 ' }, { 휴대폰: '0100000002', 이름: '' }];
+    expect(fieldsByPhone(rows, columnPhoneOf('휴대폰'), recipientFieldLabels(rows, { phoneKey: '휴대폰', nameKey: pickNameColumn(['휴대폰', '이름']) })))
+      .toEqual({ '01000000001': { 이름: '가' }, '0100000002': {} });   // 이름이 빈 줄 = 칸 없음(빈 묶음)
   });
-  it('B2-d · B2-e 이름은 보기용 · 인계 = 번호 · 이름 한 행', () => {
+  it('B2-d · B2-e 이름은 보기용 · 인계 = 번호 · 보기 칸 한 행(★1109 R86 = 이름 → 칸 전체)', () => {
     const modal = strip(readPkg('frontend/src/components/BrandSendModal.tsx'));
     expect(modal).toContain('await onSend({ ...payload, phones: sendPhones });');
     expect(modal).toMatch(/initialRecipients\?: BrandRecipientSeed\[\]/);
     const dash = strip(readPkg('frontend/src/pages/Dashboard.tsx'));
     expect(dash).toContain('useState<BrandRecipientSeed[]>([])');
     expect(dash).not.toMatch(/setBrandInitialNames|brandInitialNames/);
-    // Codex 구현 1R #2 — 새 이름은 있는 이름을 덮지 않는다 · 명단에서 빠진 번호의 이름은 걷는다
-    expect(modal).toContain('setNames((prev) => ({ ...add, ...prev }))');
-    expect(modal).toMatch(/useEffect\(\(\) => \{\s*setNames\(\(prev\) => \{\s*const keep = new Set\(phones\);[\s\S]*?\}, \[phones\]\);/);
-    // 넘기는 자리마다 행 꼴(번호만 넘기는 자리 0)
+    // Codex 구현 1R #2 — 새 값은 있는 값을 덮지 않는다 · 명단에서 빠진 번호의 값은 걷는다(★1109 R86 = 값이 있는 묶음 통째 · firstFilledRecord)
+    expect(modal).toContain('next[p] = firstFilledRecord(prev[p], f);');
+    expect(modal).toMatch(/useEffect\(\(\) => \{\s*setFields\(\(prev\) => \{\s*const keep = new Set\(phones\);[\s\S]*?\}, \[phones\]\);/);
+    // 넘기는 자리마다 행 꼴(번호만 넘기는 자리 0 · ★1109 = 인계 행 CT recipientSeeds)
     for (const m of dash.matchAll(/setBrandInitialRecipients\(/g)) {
       const a = argsAt(dash, m.index! + 'setBrandInitialRecipients'.length);
-      expect(a === '[]' || /phone:/.test(a), a).toBe(true);
+      expect(a === '[]' || /^recipientSeeds\(/.test(a.trim()), a).toBe(true);
     }
   });
 });

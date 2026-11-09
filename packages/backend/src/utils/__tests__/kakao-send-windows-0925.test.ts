@@ -174,7 +174,7 @@ describe('2. 브랜드 창 — 보내는 값·보내기 조건·확인 창 경�
   });
 
   it('★1105 C107 D-05 — 타겟추출 담기 = 명단 세대(새 담기 = 앞 응답 무효 · 담는 동안 명단을 고치면 버림 · 창을 다시 열면 무효)', () => {
-    const run = between(bm, 'const handleTargetExtracted = async (ext: TargetExtraction) => {', '\n  };\n');
+    const run = between(bm, 'const handleTargetExtracted = async (ext: TargetExtraction, meta: FieldMeta[]) => {', '\n  };\n');   // ★1109 R86 = 추출 항목(meta)도 받는다
     expect(run).toContain('const seq = ++reqSeqRef.current;');
     expect(run.indexOf('if (seq !== reqSeqRef.current) return;')).toBeGreaterThan(run.indexOf('await fetchTargetExtractionRows(ext);'));
     expect(run.indexOf('setRecipients(finalList);')).toBeGreaterThan(run.indexOf('if (seq !== reqSeqRef.current) return;'));

@@ -5,7 +5,7 @@
  * 그 규칙은 **그대로** 옮겨 여기 한 곳에 둔다 — 창이 입력하는 동안 보여 주는 검수(추가될 수 · 중복 · 형식 오류)와
  * 실제로 더하는 값이 같은 함수에서 나와야 "보인 수 = 더해진 수"가 어긋나지 않는다.
  */
-import { normalizePhoneKr } from './formatDate';
+import { normalizePhoneKr, cellToString } from './formatDate';
 
 export interface PasteCheck {
   /** 유효한 번호(각 창의 규칙으로 정규화 · 입력 순서 · 중복 포함) */
@@ -160,14 +160,90 @@ export function pickNameColumn(headers: readonly string[]): string | null {
   const want = new Set(RECIPIENT_NAME_HEADERS.map((h) => h.toLowerCase()));
   return headers.find((h) => want.has(String(h ?? '').trim().toLowerCase())) ?? null;
 }
-/** 고른 번호 칸 · 이름 칸에서 번호(phonesFromColumn 과 같은 읽기) → 이름. 이름이 빈 줄은 넣지 않는다 */
-export function namesByPhone(phoneColumn: string, nameColumn: string | null, rows: readonly Record<string, unknown>[]): Record<string, string> {
+/** 고른 번호 칸의 번호 읽기(phonesFromColumn 과 같은 읽기) — 칸 묶음을 번호에 짝지을 때 */
+export const columnPhoneOf = (column: string) => (row: Readonly<Record<string, unknown>>): string => digitsOf(normalizePhoneKr(row?.[column]));
+
+/**
+ * ★ 2026-11-09 R86 — 받는 사람 명단의 보기 칸(브랜드메시지 명단 표 · 발송 글에 쓰지 않는다 · 설계 docs/2026-11-09-brand-recipient-fields-design.md §3-1).
+ *   우리 코드가 명단 행에 넣는 내부 키 = 이것뿐(_templateVars = 문자 직접발송 칸 맞추기 등록 · originalIdx = 목록 계산).
+ *   키 철자(밑줄 시작)로 판단하지 않는다 — 사용자 머리 「_회원번호」는 칸이다.
+ */
+export const RECIPIENT_ROW_INTERNAL_KEYS: readonly string[] = ['_templateVars', 'originalIdx'];
+export const RECIPIENT_NAME_LABEL = '이름';
+
+/**
+ * 원천 하나(파일 한 장 · 추출 한 번 · 인계 한 번 · 주소록 불러오기 한 번)의 원키 → 칸 이름. 행마다 정하지 않는다
+ *   (행마다 키가 다른 명단에서 같은 항목이 줄마다 다른 칸으로 갈리지 않게). 빈 값을 거르기 전에 정한다.
+ *   nameKey = 「이름」 먼저 · 나머지 = labelOf(키) ?? 키 · 겹치면 뒤 키에 「 2」 · 「 3」 … · 번호 칸 · 내부 키 = 뺀다 · keys = 그 키만.
+ */
+export function recipientFieldLabels(
+  rows: readonly Readonly<Record<string, unknown>>[],
+  opts: { phoneKey: string; nameKey: string | null; labelOf?: (key: string) => string | undefined; keys?: readonly string[] },
+): Map<string, string> {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const r of rows) for (const k of Object.keys(r || {})) if (!seen.has(k)) { seen.add(k); order.push(k); }
+  const allowed = (k: string) => k !== opts.phoneKey && !RECIPIENT_ROW_INTERNAL_KEYS.includes(k) && (!opts.keys || opts.keys.includes(k));
+  const labels = new Map<string, string>();
+  const used = new Set<string>();
+  const take = (k: string, base: string) => {
+    let label = base;
+    for (let i = 2; used.has(label); i++) label = `${base} ${i}`;
+    used.add(label);
+    labels.set(k, label);
+  };
+  if (opts.nameKey && seen.has(opts.nameKey) && allowed(opts.nameKey)) take(opts.nameKey, RECIPIENT_NAME_LABEL);
+  for (const k of order) if (!labels.has(k) && allowed(k)) take(k, opts.labelOf?.(k) || k);
+  return labels;
+}
+
+/** 한 행 → 칸 이름 → 값(글자 · 앞뒤 공백 걷음). 빈 값은 뺀다 · 0 은 남는다(cellToString · 문자 D150-3 과 같은 판정) */
+export function rowFields(row: Readonly<Record<string, unknown>>, labels: ReadonlyMap<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  if (!nameColumn) return out;
-  for (const r of rows) {
-    const p = digitsOf(normalizePhoneKr(r?.[phoneColumn]));
-    const n = String(r?.[nameColumn] ?? '').trim();
-    if (p.length >= 10 && n) out[p] = n;
+  for (const [k, label] of labels) {
+    const v = cellToString(row?.[k]).trim();
+    if (v) out[label] = v;
   }
+  return out;
+}
+
+/** 이름 칸 키 — 행에 name 키가 있으면 name(직접입력 · 칸 맞춤 행) · 없으면 머리 이름으로(pickNameColumn) */
+export function pickNameKey(rows: readonly Readonly<Record<string, unknown>>[]): string | null {
+  const keys = new Set<string>();
+  for (const r of rows) for (const k of Object.keys(r || {})) keys.add(k);
+  return keys.has('name') ? 'name' : pickNameColumn([...keys]);
+}
+
+/** 행들 → 창 밖 인계 행(번호 + 보기 칸 · 칸 이름은 이 행 묶음에 한 번 · 번호가 빈 행은 뺀다) */
+export function recipientSeeds(
+  rows: readonly Readonly<Record<string, unknown>>[],
+  phoneOf: (row: Readonly<Record<string, unknown>>, index: number) => string,
+  opts: Parameters<typeof recipientFieldLabels>[1],
+): Array<{ phone: string; fields: Record<string, string> }> {
+  const labels = recipientFieldLabels(rows, opts);
+  return rows.map((r, i) => ({ phone: phoneOf(r, i), fields: rowFields(r, labels) })).filter((x) => !!x.phone);
+}
+
+/**
+ * 같은 번호의 두 칸 묶음 → 하나 = **값이 있는 앞 묶음을 통째로**(빈 묶음은 막지 않는다 · 칸을 섞지 않는다).
+ *   묶음 = 한 사람의 행. 칸마다 모으면 원본에 없는 조합(앞 줄 이름 + 뒤 줄 지역)이 보인다(Codex 구현 2R) ·
+ *   앞 묶음이 비면 뒤를 쓴다(Codex 구현 1R #1 — 중복 허용 주소록 불러오기에서 지금 명단의 빈 줄이 불러온 값을 막던 길).
+ *   쓰는 곳 = fieldsByPhone(한 원천 안) · 브랜드 창 합치기 · 창 열기(원천 사이) — 규칙 한 곳.
+ */
+export function firstFilledRecord(prev: Readonly<Record<string, string>> | undefined, next: Readonly<Record<string, string>>): Record<string, string> {
+  return prev && Object.keys(prev).length > 0 ? { ...prev } : { ...next };
+}
+
+/** 행들 → 번호별 칸(phoneOf 로 번호 · 10자리 미만 건너뜀 · 같은 번호 여러 줄 = firstFilledRecord) */
+export function fieldsByPhone(
+  rows: readonly Readonly<Record<string, unknown>>[],
+  phoneOf: (row: Readonly<Record<string, unknown>>, index: number) => string,
+  labels: ReadonlyMap<string, string>,
+): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  rows.forEach((r, i) => {
+    const p = phoneOf(r, i);
+    if (p.length >= 10) out[p] = firstFilledRecord(out[p], rowFields(r, labels));
+  });
   return out;
 }

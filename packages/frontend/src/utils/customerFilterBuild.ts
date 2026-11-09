@@ -18,6 +18,7 @@
  */
 
 import { cellToString, formatByType } from './formatDate';
+import { RECIPIENT_ROW_INTERNAL_KEYS } from './recipient-paste';
 
 /** 조건 빌드에 필요한 필드 메타(활성 필드 응답의 부분집합) */
 export interface FilterBuildField {
@@ -205,7 +206,7 @@ export function extractionFieldsMeta(enabledFields: FilterBuildField[], chosen: 
  *   머리글 = 항목 이름(같은 이름이 둘이면 뒤에 키를 붙인다) · 값 = 화면 표기(성별 F → 여성 · 금액 1,200,000 · CT formatByType) · 번호는 원문.
  *   번호 · 이름 칸은 미리 맞춰 둔다(기타1~3은 사람이 고른다).
  */
-const ROW_RESERVED_KEYS = new Set(['phone', 'name', 'extra1', 'extra2', 'extra3', 'callback', '_templateVars', 'originalIdx']);
+const ROW_RESERVED_KEYS = new Set(['phone', 'name', 'extra1', 'extra2', 'extra3', 'callback', ...RECIPIENT_ROW_INTERNAL_KEYS]);   // ★1109 R86 내부 키 = 상수 한 곳
 
 export function extractionRowsToTable(
   rows: Record<string, unknown>[],
@@ -230,6 +231,21 @@ export function extractionRowsToTable(
   if (headerOf('phone')) mapping.phone = headerOf('phone')!;
   if (headerOf('name')) mapping.name = headerOf('name')!;
   return { headers: cols.map((c) => c.header), data, mapping };
+}
+
+/**
+ * ★1109 R86 — 담은 고객(보관본 전체 행) → 받는 사람 보기 칸 표(브랜드메시지 명단 · 창 안 타겟추출 · 직접 타겟 인계가 함께 쓴다).
+ *   표 = extractionRowsToTable(문자 · 알림톡과 같은 항목 이름 · 같은 표기 · 행 i = 원행 i).
+ *   meta 에 이름 항목이 없으면(추출 창이 항목 목록을 못 받은 때 · Codex 구현 1R #2) 원행 표준 name 을 보존한다(옛 이름 표시 그대로) —
+ *   키 'name' = 표 머리로 쓰지 않는 예약 키(ROW_RESERVED_KEYS)라 표 칸과 겹치지 않는다.
+ */
+export function extractionFieldTable(
+  rows: Record<string, unknown>[],
+  meta: ExtractionFieldMeta[],
+): { rows: Record<string, string>[]; phoneKey: string; nameKey: string | null } {
+  const t = extractionRowsToTable(rows, meta);
+  if (t.mapping.name) return { rows: t.data, phoneKey: t.mapping.phone ?? '', nameKey: t.mapping.name };
+  return { rows: t.data.map((r, i) => ({ ...r, name: cellToString(rows[i]?.name) })), phoneKey: t.mapping.phone ?? '', nameKey: 'name' };
 }
 
 const DAY_LABELS: Record<string, string> ={ '7': '7일', '30': '30일', '90': '90일', '180': '180일', '365': '1년' };
