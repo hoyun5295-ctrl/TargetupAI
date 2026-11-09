@@ -4,7 +4,6 @@ import { useAuthStore } from '../stores/authStore';
 import { formatDate } from '../utils/formatDate';
 import { isCustomerSelectablePlan } from '../utils/planLabel'; // ★ 2026-07-28 내부 요금제(임직원 등) 노출 차단 — 단일 소스
 import { COMPANY_PHONE, COMPANY_PHONE_TEL } from '../constants/company';
-import { Sparkles, Users, Server, Cpu } from 'lucide-react';
 import CreditSummaryBar from '../components/credit/CreditSummaryBar';
 import CreditRechargeModal from '../components/credit/CreditRechargeModal';
 import PrepaidTermCard, { prepaidTermRequestNote, type PrepaidTermView } from '../components/PrepaidTermCard';
@@ -58,8 +57,23 @@ interface FreeMessagingInfo {
 /** 유형 표시 순서·이름은 서버 축(`FREE_MESSAGING_TYPES`)이 정한다 — 여기서 다시 정의하지 않는다. */
 const FREE_TYPE_LABEL: Record<string, string> = { SMS: 'SMS', LMS: 'LMS', MMS: 'MMS', KAKAO: '알림톡' };
 
-/** 미사용분 소멸·차감 시점을 한 줄로 알린다(설계 §5-1-A 정직성 요구) — 두 화면이 같은 문구를 쓴다. */
-const FREE_MESSAGING_NOTE = '매월 제공 · 발송 시도 시점에 차감되며 미사용분은 이월되지 않습니다';
+/** 미사용분 소멸·차감 시점을 한 줄로 알린다(설계 §5-1-A 정직성 요구) — 두 화면이 같은 문구를 쓴다(요금제 비교 각주 · 크레딧 요약 카드). */
+const FREE_MESSAGING_NOTE = '무료 메시지는 매월 제공됩니다. 발송을 시도할 때 차감되고, 남은 수량은 다음 달로 넘어가지 않습니다.';
+
+/**
+ * ★ 2026-11-09 요금제 비교 카드 아래 운영 방식(시안 = marketing/proposals/2026-11-hanjul-proposal/pricing-plans.html).
+ *   전용 등급(PLAN_INFRA.premium = 비즈니스 이상) = 캠페인 대행 운영 포함(Harold 1105) · 대행 항목에서 「기획」 뺌(Harold 1109).
+ */
+const PLAN_OPERATION = {
+  self: { title: '직접 운영', items: ['AI가 대상과 문안을 정하고', '담당자가 확인하고 보냅니다', '전 채널을 한 화면에서 보냅니다'] },
+  agency: { title: '캠페인 대행 운영 포함', items: ['전담 담당자 배정', '제작, 발송, 여정 운영', '매달 성과 리포트'] },
+};
+const AGENCY_SCOPE_NOTE = '캠페인 대행 운영의 한 달 운영 범위(캠페인 수와 채널)는 계약 때 함께 정합니다. 승인 없는 발송은 없습니다.';
+const BONUS_NOTE = '크레딧 옆 %는 월 요금 대비 더 드리는 AI 크레딧입니다.';
+const ANALYSIS_NOTE = 'DB 분석 차감은 지금 고객 DB 수로 계산한 한 달 값(×30일)입니다. 고객 DB가 늘거나 줄면 함께 바뀝니다.';
+/** DB 분석 차감 한 달 환산 일수 — 요금제 카드 · 가로띠 · 아래 DB 규모별 표가 같은 값을 쓴다. */
+const MONTH_DAYS = 30;
+const PLAN_BTN = 'h-11 w-full rounded-xl text-[14px] font-bold transition-colors';
 
 export default function PricingPage() {
   const navigate = useNavigate();
@@ -120,7 +134,8 @@ export default function PricingPage() {
 
       // 종량제 Phase 5: 내 AI 크레딧 잔여
       try {
-        const creditRes = await fetch('/api/companies/my-credit', { headers: { Authorization: `Bearer ${token}` } });
+        // usage30=1 = 지난 30일 AI 사용(분석 제외)을 함께 받는다(추천 기준 A · 이 화면만)
+        const creditRes = await fetch('/api/companies/my-credit?usage30=1', { headers: { Authorization: `Bearer ${token}` } });
         if (creditRes.ok) { const cd = await creditRes.json(); if (cd && cd.success !== false) setMyCredit(cd); }
       } catch { /* 조회 실패 시 게이지 숨김 */ }
 
@@ -282,24 +297,24 @@ export default function PricingPage() {
     return Math.min(100, (Number(companyInfo.current_customers) / Number(companyInfo.max_customers)) * 100);
   };
 
-  // 종량제 — 등급별 기능 차등 폐지(스타터부터 전 기능 동일). 인프라 등급 아이콘만 등급별로 구분.
-  const infraIcon = (planCode: string) => {
-    if (planCode === 'ENTERPRISE') return Cpu;
-    if (planCode === 'BUSINESS') return Server;
-    return Users;
-  };
-
-  const getRecommendedPlan = () => {
-    if (!companyInfo) return null;
-    const currentCount = Number(companyInfo.current_customers) || 0;
-    const recommended = plans.find(p => p.max_customers >= currentCount && p.plan_code !== 'ENTERPRISE');
-    return recommended?.id || null;
-  };
-
-  const recommendedPlanId = getRecommendedPlan();
-
-  // 크레딧 시각화 기준값 — 상대 게이지(최대 크레딧 기준)
-  const maxCredits = Math.max(1, ...plans.map(p => Number(p.ai_credits_per_month) || 0));
+  // ★ 2026-11-09 DB 분석 차감 · 실제 쓸 수 있는 크레딧 · 추천(Harold 기준 A · 목업 docs/mockups/2026-11-09-pricing-db-credit-mockup.html)
+  //   고객 수 = 차감 워커와 같은 셈(customers 회사별 COUNT · my-plan current_customers) · 하루 차감 = 식 한 벌(dailyDbAnalysisCredits) · 한 달 = ×MONTH_DAYS.
+  //   추천 = 한 달 분석 차감 + 지난 30일 AI 사용(분석 제외) 이상을 주는 가장 싼 요금제 · 지금 요금제 월 크레딧이 모자랄 때만.
+  //   옛 추천(고객 한도 max_customers 기준 · 미가입만)은 한도가 없어져 이 하나로 바꿨다.
+  const customerCount = Number(companyInfo?.current_customers) || 0;
+  const dailyAnalysis = dailyDbAnalysisCredits(customerCount);
+  const monthAnalysis = dailyAnalysis * MONTH_DAYS;
+  const showAnalysis = isAuthenticated && monthAnalysis > 0;
+  // 사실 셋(차감 대상 · 지금 요금제 월 크레딧 · 지난 30일 사용)은 서버 한 함수가 함께 읽는다 · null = 못 읽음(차감 없음 · 추천 문장을 내지 않는다 · Codex 1R)
+  const facts: { charged: boolean; planCredits: number; usage30: number } | null = myCredit?.analysisFacts ?? null;
+  const currentPlanCredits = facts?.charged ? Number(facts.planCredits) || 0 : 0;
+  const usage30: number | null = facts ? Number(facts.usage30) || 0 : null;
+  const needCredits = monthAnalysis + (usage30 ?? 0);
+  const needMore = showAnalysis && !!facts && currentPlanCredits < needCredits;
+  const recommendedPlan = needMore
+    ? plans.find((p) => p.id !== companyInfo?.plan_id && (Number(p.ai_credits_per_month) || 0) >= needCredits) ?? null
+    : null;
+  const recommendedPlanId = recommendedPlan?.id ?? null;
 
   if (loading) {
     return (
@@ -361,29 +376,29 @@ export default function PricingPage() {
           <>
             {/* 무료체험 D-N 만료 안내 — 요금제·DB는 아래 크레딧 카드가 보여주므로 만료 강조만 분리 */}
             {isOnTrial && (
-              <div className="mb-6 p-4 bg-gradient-to-r from-violet-50 via-purple-50 to-violet-50 border border-violet-200 rounded-xl">
+              <div className="mb-6 p-4 bg-[#FFF3EC] border border-[#FFE3D4] rounded-xl">
                 <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md shadow-violet-200">
+                  <div className="w-10 h-10 bg-[#FF5A1F] rounded-xl flex items-center justify-center flex-shrink-0">
                     <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
                     </svg>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-violet-900">
-                      현재 무료체험 중인 요금제는 <span className="text-purple-700">{equivalentPlanName} 플랜</span>입니다
+                    <p className="text-sm font-bold text-[#1A1A1A]">
+                      현재 무료체험 중인 요금제는 <span className="text-[#C8410C]">{equivalentPlanName} 플랜</span>입니다
                     </p>
-                    <p className="text-xs text-violet-700 mt-1 leading-relaxed">
+                    <p className="text-xs text-[#44403C] mt-1 leading-relaxed">
                       고객 DB {formatNumber(Number(companyInfo.max_customers))}명 · AI 메시지 · 자동발송 · 모바일 DM · AI 프리미엄 · 스팸필터 자동화 전 기능 이용 가능
                     </p>
                     {companyInfo.trial_expires_at && (
-                      <div className="mt-3 pt-3 border-t border-violet-200/70 flex items-center justify-between flex-wrap gap-2">
-                        <div className="flex items-center gap-1.5 text-xs text-violet-800">
+                      <div className="mt-3 pt-3 border-t border-[#FFE3D4] flex items-center justify-between flex-wrap gap-2">
+                        <div className="flex items-center gap-1.5 text-xs text-[#44403C]">
                           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
-                          <span>체험 만료 <b className="font-bold">{formatDate(companyInfo.trial_expires_at)}</b> · <b className="font-bold text-purple-700">{daysRemaining}일</b> 남음</span>
+                          <span>체험 만료 <b className="font-bold">{formatDate(companyInfo.trial_expires_at)}</b> · <b className="font-bold text-[#C8410C]">{daysRemaining}일</b> 남음</span>
                         </div>
-                        <span className="text-[11px] text-violet-500">
+                        <span className="text-[11px] text-[#8A847E]">
                           만료 시 자동으로 미가입 상태 전환
                         </span>
                       </div>
@@ -500,169 +515,273 @@ export default function PricingPage() {
           </div>
         )}
 
-        <h2 className="text-lg font-semibold mb-4">요금제 비교</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          {plans.map((plan) => {
-            const isCurrentPlan = companyInfo?.plan_id === plan.id;
-            // ★ CT-17: FREE(미가입) / TRIAL(무료체험)은 아직 유료 구독이 아니므로 모든 유료 플랜이 "업그레이드".
-            //   유료 가입자만 max_customers 크기 비교로 업/다운을 구분한다.
-            const isFreeOrTrial = companyInfo?.plan_code === 'FREE' || companyInfo?.plan_code === 'TRIAL';
-            const isUpgrade = companyInfo && (isFreeOrTrial || plan.max_customers > (companyInfo.max_customers || 0));
-            const isRecommended = plan.id === recommendedPlanId && companyInfo?.plan_code === 'FREE';
-            // 종량제 크레딧 시각화 (전부 실제 plan 데이터 — 임의 상수 없음)
-            const credits = Number(plan.ai_credits_per_month) || 0;
-            const creditPct = Math.max(4, Math.round((credits / maxCredits) * 100));
-            const bonusPct = planBonusPct(Number(plan.monthly_price) || 0, credits);
-            const infra = PLAN_INFRA[plan.plan_code] || { label: '고성능 공유 서버', benefit: '당사 IDC 고성능 서버를 멀티테넌트로 사용', premium: false };
-            const InfraIcon = infraIcon(plan.plan_code);
-            
-            return (
-              <div
-                key={plan.id}
-                className={`relative bg-white rounded-xl overflow-hidden flex flex-col transition-shadow ${
-                  isCurrentPlan ? 'ring-2 ring-blue-500 shadow-sm' :
-                  isRecommended ? 'ring-2 ring-purple-500 shadow-sm' :
-                  infra.premium ? 'ring-1 ring-violet-200 shadow-md shadow-violet-100' : 'shadow-sm'
-                }`}
-              >
-                <div className={`p-4 ${
-                  isRecommended ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' :
-                  isCurrentPlan ? 'bg-blue-50' :
-                  infra.premium ? 'bg-gradient-to-r from-violet-50 to-fuchsia-50' : 'bg-gray-50'
-                }`}>
-                  {isRecommended && (
-                    <div className="text-xs font-semibold mb-1 text-yellow-300">👉 추천</div>
-                  )}
-                  {isCurrentPlan && (
-                    <div className="text-xs font-semibold mb-1 text-blue-600">현재 플랜</div>
-                  )}
-                  {!isRecommended && !isCurrentPlan && infra.premium && (
-                    <div className="mb-1 inline-flex items-center gap-1 text-[10px] font-bold text-violet-600">
-                      <Sparkles className="h-3 w-3" /> 전용 인프라
-                    </div>
-                  )}
-                  <h3 className={`text-lg font-bold ${
-                    isRecommended ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    {plan.plan_name}
-                  </h3>
-                  <div className={`text-2xl font-bold mt-2 ${
-                    isRecommended ? 'text-white' : 'text-gray-900'
-                  }`}>
-                    {formatPrice(plan.monthly_price)}
-                    <span className={`text-sm font-normal ${
-                      isRecommended ? 'text-blue-200' : 'text-gray-500'
-                    }`}>/월</span>
+        {/* ★ 2026-11-09 요금제 비교 = 시안(marketing/proposals/2026-11-hanjul-proposal/pricing-plans.html) 모양 · 목업 = docs/mockups/2026-11-09-pricing-compare-mockup.html(Harold 승인)
+            고객 DB 줄 없음(전 요금제 저장 한도 없음 · 규모 = 아래 DB 분석 차감 표) · 숫자는 전부 plans · planQuotas 파생(화면에 적지 않는다) */}
+        {plans.length > 0 && (() => {
+          const quotas = freeMessaging?.planQuotas || planQuotasPublic;
+          const quotaEntriesOf = (code: string) => Object.entries(quotas?.[code] || {}).filter(([, v]) => Number(v) > 0);
+          // 대행 = 전용 등급(PLAN_INFRA.premium) · plans 는 월 요금 오름차순이라 첫 대행 칸 = 가장 싼 대행 요금제
+          const agencyIdx = plans.flatMap((p, i) => (PLAN_INFRA[p.plan_code]?.premium ? [i] : []));
+          const firstAgency = agencyIdx.length > 0 ? plans[agencyIdx[0]] : null;
+          const lastAgencyIdx = agencyIdx[agencyIdx.length - 1];
+          // 띠는 대행 칸이 붙어 있고 첫 줄(5칸) 안일 때만 그 칸 위에 건다 · 아니면 한 줄 전체(가운데 꼭지 없음)
+          const ribbonCol = firstAgency && lastAgencyIdx - agencyIdx[0] + 1 === agencyIdx.length && lastAgencyIdx < 5
+            ? `${agencyIdx[0] + 1} / span ${agencyIdx.length}` : undefined;
+          const agencyFromWon = Number(firstAgency?.monthly_price) || 0;
+          const notes = [
+            plans.some((p) => quotaEntriesOf(p.plan_code).length > 0) ? FREE_MESSAGING_NOTE : null,
+            firstAgency ? AGENCY_SCOPE_NOTE : null,
+            plans.some((p) => planBonusPct(Number(p.monthly_price) || 0, Number(p.ai_credits_per_month) || 0) > 0) ? BONUS_NOTE : null,
+            showAnalysis ? ANALYSIS_NOTE : null,
+          ].filter((t): t is string => !!t);
+          const currentUsable = Math.max(0, currentPlanCredits - monthAnalysis);
+          const analysisPct = currentPlanCredits > 0 ? Math.min(100, Math.round((monthAnalysis / currentPlanCredits) * 100)) : 0;
+          return (
+            <section className="break-keep">
+              <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+                <div>
+                  <div className="inline-flex items-center gap-2 text-[13px] font-bold text-[#C8410C]">
+                    <span className="h-[3px] w-5 rounded-full bg-[#FF5A1F]" />요금제 비교
                   </div>
-                  <div className={`text-xs mt-1 ${
-                    isRecommended ? 'text-blue-200' : 'text-gray-400'
-                  }`}>VAT 별도</div>
+                  <h2 className="mt-2 text-[22px] md:text-[26px] font-extrabold leading-snug tracking-[-0.035em] text-[#1A1A1A]">
+                    {plans[0].plan_name}부터{' '}
+                    <span style={{ background: 'linear-gradient(rgba(255,90,31,.22), rgba(255,90,31,.22)) no-repeat 0 88% / 100% 32%', padding: '0 3px' }}>AI 전 기능, 전 채널 발송</span>이 같습니다
+                  </h2>
+                  <p className="mt-1.5 text-[14px] md:text-[15px] font-medium text-[#44403C]">
+                    요금제마다 AI 크레딧, 무료 메시지, 서버가 달라집니다.{firstAgency && ` ${firstAgency.plan_name}부터는 캠페인 대행 운영이 들어갑니다.`}
+                  </p>
                 </div>
-
-                <div className="p-4 flex-1 flex flex-col">
-                  {/* 월 AI 크레딧 — 히어로 */}
-                  {credits > 0 ? (
-                    <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="text-[11px] font-medium text-violet-700">월 AI 크레딧</div>
-                        {bonusPct > 0 && (
-                          <span className="rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 px-1.5 py-0.5 text-[9px] font-bold text-white">보너스 +{bonusPct}%</span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 flex items-end gap-1">
-                        <span className="text-2xl font-bold tabular-nums text-slate-900">{formatNumber(credits)}</span>
-                        <span className="mb-0.5 text-[11px] text-slate-400">크레딧</span>
-                      </div>
-                      <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-100">
-                        <div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500" style={{ width: `${creditPct}%` }} />
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-violet-100 bg-violet-50/40 p-3 mb-3 text-[11px] text-slate-500">
-                      월 AI 크레딧 <b className="text-violet-700">맞춤 산정</b> · 상담 시 안내
-                    </div>
-                  )}
-
-                  {/* 인프라 등급 — 비즈니스·엔터 전용 강조 */}
-                  <div className={`rounded-xl border p-2.5 mb-3 ${infra.premium ? 'border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50' : 'border-gray-100 bg-gray-50'}`}>
-                    <div className="flex items-center gap-1.5">
-                      <InfraIcon className={`h-4 w-4 flex-shrink-0 ${infra.premium ? 'text-violet-600' : 'text-slate-400'}`} />
-                      <span className={`text-xs font-bold ${infra.premium ? 'text-violet-800' : 'text-slate-600'}`}>{infra.label}</span>
-                      {infra.premium && (
-                        <span className="ml-auto rounded-full bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold text-white">전용</span>
-                      )}
-                    </div>
-                    <div className="mt-1 text-[10px] leading-snug text-slate-400">{infra.benefit}</div>
-                  </div>
-
-                  <div className="mt-auto pt-4">
-                    {!isAuthenticated ? (
-                      <button
-                        onClick={() => openInquiryModal(plan.plan_name)}
-                        className="w-full py-2 px-4 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                      >
-                        이용 문의
-                      </button>
-                    ) : isCurrentPlan ? (
-                      <button
-                        disabled
-                        className="w-full py-2 px-4 bg-gray-100 text-gray-500 rounded-lg cursor-not-allowed"
-                      >
-                        이용 중
-                      </button>
-                    ) : hasPending ? (
-                      <button
-                        disabled
-                        className="w-full py-2 px-4 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-lg cursor-not-allowed text-sm"
-                      >
-                        신청 대기 중
-                      </button>
-                    ) : isUpgrade ? (
-                      <button
-                        onClick={() => handleRequestPlan(plan)}
-                        className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
-                          isRecommended 
-                            ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700'
-                            : 'bg-blue-600 text-white hover:bg-blue-700'
-                        }`}
-                      >
-                        업그레이드 신청
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleRequestPlan(plan)}
-                        className="w-full py-2 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm font-medium"
-                      >
-                        다운그레이드 신청
-                      </button>
-                    )}
-
-                    {/* ★ 2026-08-05 요금제 가입 메리트 — 이 요금제에 포함된 무료 메시지. `plans` 파생이라 화면에 수량을 적지 않는다. */}
-                    {(() => {
-                      const quota = (freeMessaging?.planQuotas || planQuotasPublic)?.[plan.plan_code];
-                      const entries = Object.entries(quota || {}).filter(([, v]) => Number(v) > 0);
-                      if (entries.length === 0) return null;
-                      return (
-                        <div className="mt-3 pt-3 border-t border-gray-100">
-                          <div className="text-[11px] font-medium text-gray-700 mb-1.5">포함된 무료 메시지</div>
-                          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
-                            {entries.map(([type, qty]) => (
-                              <div key={type} className="flex items-baseline justify-between">
-                                <span className="text-[11px] text-gray-500">{FREE_TYPE_LABEL[type] || type}</span>
-                                <span className="text-xs font-semibold text-gray-900">{formatNumber(Number(qty))}건</span>
-                              </div>
-                            ))}
-                          </div>
-                          <div className="mt-1.5 text-[10px] text-gray-400 leading-snug">{FREE_MESSAGING_NOTE}</div>
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
+                <div className="text-[13px] font-semibold text-[#66605B]">VAT 별도</div>
               </div>
-            );
-          })}
-        </div>
+
+              {/* ★ 2026-11-09 가로띠 — 지금 고객 DB 로 매일 · 한 달 분석 차감 · 지금 요금제에서 실제 쓸 수 있는 크레딧 · 추천 */}
+              {showAnalysis && (
+                <div className="mt-6 overflow-hidden rounded-[20px] border-[1.5px] border-[#FFE3D4] bg-white shadow-[0_12px_32px_rgba(28,25,23,.05)]">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#ECEAE7]">
+                    {[
+                      { label: '지금 고객 DB', sub: '', value: customerCount, unit: '명' },
+                      { label: '매일 분석 차감', sub: '', value: dailyAnalysis, unit: '크레딧' },
+                      { label: '한 달 분석 차감', sub: `(×${MONTH_DAYS}일)`, value: monthAnalysis, unit: '크레딧' },
+                    ].map((s) => (
+                      <div key={s.label} className="bg-white px-5 py-4">
+                        <div className="text-[13px] font-semibold text-[#66605B]">
+                          {s.label}{s.sub && <span className="ml-1 font-medium text-[#8A847E]">{s.sub}</span>}
+                        </div>
+                        <div className="mt-1 text-[22px] font-extrabold tabular-nums text-[#1A1A1A]">
+                          {formatNumber(s.value)}<span className="ml-0.5 text-[14px] font-semibold text-[#66605B]">{s.unit}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {!facts ? (
+                      <div className="bg-[#F7F6F4] px-5 py-4">
+                        <div className="text-[13px] font-semibold text-[#66605B]">{companyInfo?.plan_name}에서 실제 쓸 수 있는 크레딧</div>
+                        <div className="mt-1 text-[14px] font-semibold leading-snug text-[#44403C]">지금 불러오지 못했습니다. 잠시 뒤 다시 열어 주세요</div>
+                      </div>
+                    ) : facts.charged ? (
+                      <div className="bg-[#FFF3EC] px-5 py-4">
+                        <div className="text-[13px] font-semibold text-[#C8410C]">{companyInfo?.plan_name}에서 실제 쓸 수 있는 크레딧</div>
+                        <div className="mt-1 text-[22px] font-extrabold tabular-nums text-[#C8410C]">
+                          {formatNumber(currentUsable)}<span className="ml-1 text-[14px] font-semibold text-[#66605B]">/ 월 {formatNumber(currentPlanCredits)}</span>
+                        </div>
+                        <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-[#FFE3D4]">
+                          <div className="h-full bg-[#1A1A1A]" style={{ width: `${analysisPct}%` }} />
+                          <div className="h-full bg-[#FF5A1F]" style={{ width: `${100 - analysisPct}%` }} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-[#F7F6F4] px-5 py-4">
+                        <div className="text-[13px] font-semibold text-[#66605B]">지금 요금제에서는 분석 차감 없음</div>
+                        <div className="mt-1 text-[14px] font-semibold leading-snug text-[#44403C]">아래 요금제로 바꾸면 카드의 차감이 적용됩니다</div>
+                      </div>
+                    )}
+                  </div>
+                  {facts && usage30 !== null && (
+                    <div className="flex flex-col gap-3 bg-[#1A1A1A] px-5 py-4 md:flex-row md:items-center md:justify-between">
+                      <p className="text-[14px] font-medium leading-relaxed text-[#E7E5E4]">
+                        지난 30일 AI 사용 <b className="text-white">{formatNumber(usage30)}크레딧</b>(분석 제외)까지 더하면 한 달 <b className="text-white">{formatNumber(needCredits)}크레딧</b>이 필요합니다.{' '}
+                        {recommendedPlan ? (
+                          <b className="text-[#FF8A5C]">AI 오퍼레이터를 원활히 쓰시려면 {recommendedPlan.plan_name} 요금제를 추천합니다.</b>
+                        ) : needMore ? (
+                          <b className="text-[#FF8A5C]">가장 큰 요금제로도 모자라 맞춤 요금제를 상담해 드립니다.</b>
+                        ) : (
+                          <b className="text-[#FF8A5C]">지금 요금제로 충분합니다.</b>
+                        )}
+                      </p>
+                      {recommendedPlan ? (
+                        <button
+                          onClick={() => handleRequestPlan(recommendedPlan)}
+                          disabled={hasPending}
+                          className="h-10 flex-none rounded-xl bg-[#FF5A1F] px-5 text-[14px] font-bold text-white hover:bg-[#E64A12] disabled:cursor-not-allowed disabled:bg-[#66605B]"
+                        >
+                          {hasPending ? '신청 대기 중' : `${recommendedPlan.plan_name} 요금제 신청`}
+                        </button>
+                      ) : needMore ? (
+                        <button onClick={() => openInquiryModal()} className="h-10 flex-none rounded-xl bg-[#FF5A1F] px-5 text-[14px] font-bold text-white hover:bg-[#E64A12]">
+                          담당자 문의
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {firstAgency && (
+                <div className="mt-8 xl:grid xl:grid-cols-5 xl:gap-4">
+                  <div
+                    className="relative flex flex-wrap min-h-[34px] items-center justify-center gap-x-2.5 rounded-full bg-[#1A1A1A] px-4 py-1.5 text-center text-[14px] font-bold text-white"
+                    style={{ gridColumn: ribbonCol ?? '1 / -1' }}
+                  >
+                    <b className="text-[#FF8A5C]">월 {agencyFromWon % 10000 === 0 ? `${formatNumber(agencyFromWon / 10000)}만원` : formatPrice(agencyFromWon)}부터</b>
+                    <span>전담 담당자가 캠페인을 대신 운영합니다</span>
+                    {ribbonCol && (
+                      <span className="absolute left-1/2 -bottom-[7px] -ml-[7px] hidden xl:block h-0 w-0 border-x-[7px] border-t-[7px] border-x-transparent border-t-[#1A1A1A]" />
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className={`${firstAgency ? 'mt-5' : 'mt-8'} grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4`}>
+                {plans.map((plan) => {
+                  const isCurrentPlan = companyInfo?.plan_id === plan.id;
+                  // ★ CT-17: FREE(미가입) / TRIAL(무료체험)은 아직 유료 구독이 아니므로 모든 유료 플랜이 "업그레이드".
+                  //   유료 가입자만 max_customers 크기 비교로 업/다운을 구분한다.
+                  const isFreeOrTrial = companyInfo?.plan_code === 'FREE' || companyInfo?.plan_code === 'TRIAL';
+                  const isUpgrade = companyInfo && (isFreeOrTrial || plan.max_customers > (companyInfo.max_customers || 0));
+                  const isRecommended = plan.id === recommendedPlanId;
+                  const credits = Number(plan.ai_credits_per_month) || 0;
+                  const bonusPct = planBonusPct(Number(plan.monthly_price) || 0, credits);
+                  const infra = PLAN_INFRA[plan.plan_code] || { label: '고성능 공유 서버', benefit: '당사 IDC 고성능 서버를 멀티테넌트로 사용', premium: false };
+                  const top = infra.premium;
+                  const ops = top ? PLAN_OPERATION.agency : PLAN_OPERATION.self;
+                  // ★ 2026-08-05 요금제 가입 메리트 — 이 요금제에 포함된 무료 메시지. `plans` 파생이라 화면에 수량을 적지 않는다.
+                  const quotaEntries = quotaEntriesOf(plan.plan_code);
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className={`relative flex flex-col rounded-[20px] border-[1.5px] bg-white ${
+                        isCurrentPlan ? 'border-[#1A1A1A] shadow-[0_12px_32px_rgba(28,25,23,.10)]' :
+                        isRecommended ? 'border-[#FF5A1F] shadow-[0_16px_40px_rgba(255,90,31,.16)]' :
+                        top ? 'border-[#FF5A1F] shadow-[0_16px_40px_rgba(255,90,31,.12)]' : 'border-[#ECEAE7] shadow-[0_12px_32px_rgba(28,25,23,.06)]'
+                      }`}
+                    >
+                      {(isCurrentPlan || isRecommended) && (
+                        <span className={`absolute -top-3 left-5 rounded-full px-2.5 py-0.5 text-[12px] font-bold text-white ${isCurrentPlan ? 'bg-[#1A1A1A]' : 'bg-[#FF5A1F]'}`}>
+                          {isCurrentPlan ? '이용 중' : '추천'}
+                        </span>
+                      )}
+                      <div className={`rounded-t-[19px] border-b px-5 pt-5 pb-4 ${top ? 'border-[#FFE3D4] bg-[#FFF3EC]' : 'border-[#ECEAE7]'}`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="whitespace-nowrap text-[18px] font-extrabold tracking-[-0.02em] text-[#1A1A1A]">{plan.plan_name}</h3>
+                          <span className={`whitespace-nowrap rounded-full border px-2.5 py-1 text-[12px] font-bold ${top ? 'border-[#1A1A1A] bg-[#1A1A1A] text-white' : 'border-[#ECEAE7] bg-[#F7F6F4] text-[#44403C]'}`}>
+                            {infra.label}
+                          </span>
+                        </div>
+                        <div className="mt-3 whitespace-nowrap text-[26px] font-extrabold tabular-nums tracking-[-0.03em] text-[#1A1A1A]">
+                          {formatPrice(plan.monthly_price)}<span className="ml-0.5 text-[14px] font-semibold text-[#66605B]">/월</span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-1 flex-col px-5 pt-2 pb-5">
+                        <div className="flex items-center justify-between border-b border-[#ECEAE7] py-3">
+                          <span className="text-[13.5px] font-semibold text-[#66605B]">월 AI 크레딧</span>
+                          {credits > 0 ? (
+                            <span className="whitespace-nowrap text-[16px] font-extrabold tabular-nums text-[#1A1A1A]">
+                              {formatNumber(credits)}
+                              {bonusPct > 0 && <small className="ml-1.5 text-[12.5px] font-bold text-[#C8410C]">+{bonusPct}%</small>}
+                            </span>
+                          ) : (
+                            <span className="text-[13.5px] font-bold text-[#1A1A1A]">상담 시 안내</span>
+                          )}
+                        </div>
+
+                        {/* ★ 2026-11-09 지금 고객 DB 기준 — 한 달 분석 차감 · 실제 쓸 수 있는 크레딧 */}
+                        {showAnalysis && credits > 0 && (
+                          <>
+                            <div className="flex items-center justify-between border-b border-[#ECEAE7] py-2.5">
+                              <span className="text-[13px] font-medium text-[#8A847E]">DB 분석 차감 (월)</span>
+                              <span className="whitespace-nowrap text-[14px] font-bold tabular-nums text-[#66605B]">−{formatNumber(monthAnalysis)}</span>
+                            </div>
+                            <div className="flex items-center justify-between py-3">
+                              <span className="text-[13.5px] font-bold text-[#1A1A1A]">실제 쓸 수 있는 크레딧</span>
+                              <span className="whitespace-nowrap text-[17px] font-extrabold tabular-nums text-[#C8410C]">{formatNumber(Math.max(0, credits - monthAnalysis))}</span>
+                            </div>
+                          </>
+                        )}
+
+                        {quotaEntries.length > 0 && (
+                          <>
+                            <div className="mt-4 text-[13px] font-extrabold text-[#C8410C]">매월 무료 메시지</div>
+                            <div className={`mt-2 divide-y divide-[#ECEAE7] rounded-[14px] px-3.5 py-1 ${top ? 'bg-[#FFF8F4]' : 'bg-[#F7F6F4]'}`}>
+                              {quotaEntries.map(([type, qty]) => (
+                                <div key={type} className="flex items-center justify-between py-[7px] text-[14px]">
+                                  <span className="font-semibold text-[#44403C]">{FREE_TYPE_LABEL[type] || type}</span>
+                                  <b className="font-extrabold tabular-nums text-[#1A1A1A]">{formatNumber(Number(qty))}건</b>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        )}
+
+                        {/* 운영 방식 — 칸 높이를 채워 다섯 카드의 아래 끝을 맞춘다 */}
+                        <div className={`mt-4 flex-1 rounded-[14px] px-4 py-3.5 ${top ? 'bg-[#1A1A1A]' : 'bg-[#F7F6F4]'}`}>
+                          <div className={`text-[14.5px] font-extrabold ${top ? 'text-[#FF8A5C]' : 'text-[#1A1A1A]'}`}>{ops.title}</div>
+                          <ul className="mt-2 space-y-1.5">
+                            {ops.items.map((t) => (
+                              <li key={t} className={`flex items-start gap-2 text-[13px] font-semibold leading-snug ${top ? 'text-[#E7E5E4]' : 'text-[#44403C]'}`}>
+                                <span className="mt-[6px] h-1.5 w-1.5 flex-none rounded-full bg-[#FF5A1F]" />{t}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <div className="pt-5">
+                          {!isAuthenticated ? (
+                            <button onClick={() => openInquiryModal(plan.plan_name)} className={`${PLAN_BTN} bg-[#1A1A1A] text-white hover:bg-black`}>
+                              이용 문의
+                            </button>
+                          ) : isCurrentPlan ? (
+                            <button disabled className={`${PLAN_BTN} cursor-not-allowed bg-[#F7F6F4] text-[#A8A29E]`}>
+                              이용 중
+                            </button>
+                          ) : hasPending ? (
+                            <button disabled className={`${PLAN_BTN} cursor-not-allowed bg-[#FFF3EC] text-[#C8410C]`}>
+                              신청 대기 중
+                            </button>
+                          ) : isUpgrade ? (
+                            <button
+                              onClick={() => handleRequestPlan(plan)}
+                              className={`${PLAN_BTN} text-white ${isRecommended ? 'bg-[#FF5A1F] hover:bg-[#E64A12]' : 'bg-[#1A1A1A] hover:bg-black'}`}
+                            >
+                              {isRecommended ? '추천 요금제 신청' : '업그레이드 신청'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleRequestPlan(plan)}
+                              className={`${PLAN_BTN} border border-[#D6D3D1] bg-white text-[#1A1A1A] hover:bg-[#F7F6F4]`}
+                            >
+                              다운그레이드 신청
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {notes.length > 0 && (
+                <div className="mt-6 grid gap-x-10 gap-y-2 md:grid-cols-2">
+                  {notes.map((t) => (
+                    <p key={t} className="flex gap-2 text-[13px] font-medium leading-relaxed text-[#66605B]">
+                      <span className="mt-[8px] h-[5px] w-[5px] flex-none rounded-full bg-[#D6D3D1]" />{t}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })()}
 
         {/* DB 규모별 매일 분석 차감 안내 — 요금제 이용 중 고객 DB 보유 시 매일 오전 9시 자동 분석·차감 (공식 dailyDbAnalysisCredits 단일 소스) */}
         <div className="mt-8 bg-white rounded-xl border border-gray-200 p-6">
@@ -694,7 +813,7 @@ export default function PricingPage() {
                     <tr key={r.n} className="border-b border-gray-100 last:border-0">
                       <td className="py-2 pr-4 text-gray-800">{r.label}</td>
                       <td className="py-2 px-4 text-right font-semibold text-gray-900 tabular-nums">{daily} 크레딧</td>
-                      <td className="py-2 pl-4 text-right text-gray-600 tabular-nums">{(daily * 30).toLocaleString()} 크레딧</td>
+                      <td className="py-2 pl-4 text-right text-gray-600 tabular-nums">{(daily * MONTH_DAYS).toLocaleString()} 크레딧</td>
                     </tr>
                   );
                 })}

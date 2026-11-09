@@ -409,9 +409,16 @@ router.get('/my-credit', async (req: Request, res: Response) => {
   try {
     const companyId = (req as any).user?.companyId;
     if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
-    const { getCreditState, getMonthlyUsage } = await import('../utils/ai-credit');
-    const [state, used] = await Promise.all([getCreditState(companyId), getMonthlyUsage(companyId)]);
-    return res.json({ success: true, ...state, monthlyUsed: used });
+    const { getCreditState, getMonthlyUsage, getAnalysisCreditFacts } = await import('../utils/ai-credit');
+    // ★ 2026-11-09 요금제 안내 가로띠 · 추천만 쓰는 값 — ?usage30=1 일 때만 읽는다(이 주소를 부르는 다른 화면은 응답 · 쿼리 그대로)
+    //   analysisFacts = null 이면 못 읽은 것(화면은 차감 없음 · 추천 문장을 내지 않는다)
+    const withUsage30 = req.query.usage30 === '1';
+    const [state, used, analysisFacts] = await Promise.all([
+      getCreditState(companyId),
+      getMonthlyUsage(companyId),
+      withUsage30 ? getAnalysisCreditFacts(companyId) : Promise.resolve(null),
+    ]);
+    return res.json({ success: true, ...state, monthlyUsed: used, ...(withUsage30 ? { analysisFacts } : {}) });
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('column') && msg.includes('does not exist')) {

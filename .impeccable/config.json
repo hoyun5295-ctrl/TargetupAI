@@ -93,6 +93,15 @@
         ],
         "createdAt": "2026-11-06T01:29:20.414Z",
         "reason": "Claude 판단: 이미지 틀(.sheet)이 모서리 장식 원(::before)을 일부러 잘라 캡처 밖으로 안 나가게 함 · 띠(ribbon)는 틀 안쪽이라 잘리지 않음(캡처 확인)"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-09-pricing-compare-mockup.html"
+        ],
+        "createdAt": "2026-11-09T04:43:05.371Z",
+        "reason": "Claude: 버리는 목업이 Harold 제공 시안(marketing/proposals/2026-11-hanjul-proposal/pricing-plans.html)의 글자 크기 단계를 그대로 옮김 · 제목 26px 대 본문 15px"
       }
     ]
   }

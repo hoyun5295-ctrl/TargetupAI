@@ -14,6 +14,7 @@
  */
 
 import { isDemoCompany } from './demo-company';   // ★ 2026-10-09 시연 회사 = AI 크레딧 차감 0
+import { ACTIVE_PAID_PLAN_WHERE } from './plan-guard';   // ★ 2026-11-09 DB 일일 분석 대상 판정(워커와 같은 조각)
 import { pool } from '../config/database';
 import { needsMonthlyReset, creditApplies } from './ai-credit-calc';
 import { projectBaseAfterClose, creditSeqReady, monthKeyOf } from './ai-credit-month';
@@ -574,6 +575,53 @@ export async function getMonthlyUsage(companyId: string): Promise<number> {
   } catch (err: any) {
     console.warn('[ai-credit] getMonthlyUsage 오류:', err?.message);
     return 0;
+  }
+}
+
+/** 요금제 안내 가로띠 · 추천이 쓰는 사실 셋(★ 2026-11-09 · 한 함수가 한 번에 읽는다) */
+export interface AnalysisCreditFacts {
+  /** 지금 DB 일일 분석이 실제로 걷히는 회사인가 = 워커 대상(ACTIVE_PAID_PLAN_WHERE) · 시연 회사 아님 · 크레딧제 적용(차감 함수가 건너뛰지 않음) */
+  charged: boolean;
+  /** 지금 요금제 월 크레딧(크레딧제 미적용 = 0 · getCreditState planCredits 와 같은 행) */
+  planCredits: number;
+  /** 지난 30일 AI 순사용량(차감 − 환불) · DB 일일 분석(predictive-daily) 제외 — 분석은 고객 수로 따로 더하므로 여기서 빼야 두 번 세지 않는다 */
+  usage30: number;
+}
+
+/**
+ * ★ 2026-11-09 요금제 안내 추천(Harold 「데이터 보고 추천」 · 기준 A) — 추천 = 한 달 분석 차감 + usage30 이상을 주는 가장 싼 요금제.
+ *   셋 중 하나라도 못 읽으면 null 이다(Codex 1R) — 「모름」을 0 으로 접으면 유료 회사에 「차감 없음」 · 틀린 추천이 뜬다
+ *   (getCreditState 는 조회 실패를 0 으로 돌려주므로 여기서 쓰지 않고 같은 행 · 같은 판정 함수를 직접 부른다).
+ */
+export async function getAnalysisCreditFacts(companyId: string): Promise<AnalysisCreditFacts | null> {
+  if (!companyId) return null;
+  try {
+    const [row, demo, r] = await Promise.all([
+      loadCreditRow(pool, companyId, false),
+      isDemoCompany(companyId),
+      pool.query(
+        `SELECT (${ACTIVE_PAID_PLAN_WHERE}) AS active_paid,
+                (SELECT COALESCE(SUM(CASE WHEN t.type = 'deduct' THEN t.amount WHEN t.type = 'refund' THEN -t.amount ELSE 0 END), 0)
+                   FROM ai_credit_transactions t
+                  WHERE t.company_id = c.id AND t.type IN ('deduct', 'refund')
+                    AND t.source IS DISTINCT FROM 'predictive-daily'
+                    AND t.created_at >= NOW() - INTERVAL '30 days') AS used
+           FROM companies c
+           JOIN plans p ON c.plan_id = p.id
+          WHERE c.id = $1::uuid`,
+        [companyId]
+      ),
+    ]);
+    if (r.rows.length === 0) return null;
+    const applies = !!row && creditApplies(row);
+    return {
+      charged: r.rows[0].active_paid === true && !demo && applies,
+      planCredits: applies ? Number(row!.plan_credits) || 0 : 0,
+      usage30: Math.max(0, Number(r.rows[0].used) || 0),
+    };
+  } catch (err: any) {
+    console.warn('[ai-credit] getAnalysisCreditFacts 오류:', err?.message);
+    return null;
   }
 }
 
