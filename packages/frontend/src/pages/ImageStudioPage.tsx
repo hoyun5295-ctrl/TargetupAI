@@ -21,7 +21,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Loader2, Wand2, Check, Save, ChevronLeft, Sparkles, FolderOpen,
-  Layers, Smartphone, Mail, X, type LucideIcon,
+  Layers, Smartphone, Mail, X, Trash2, type LucideIcon,
 } from 'lucide-react';
 import { putStudioDraft, studioDraftFromAsset, STUDIO_INAPP_DRAFT_KEY, STUDIO_DM_DRAFT_KEY, STUDIO_EMAIL_DRAFT_KEY, type StudioDraft } from '../lib/studio-draft';
 import type { StudioTexts } from '../lib/studio-texts';
@@ -35,7 +35,7 @@ import StudioUsePicker, { STUDIO_USES, studioUseOfPreset, type StudioUsePick, ty
 import StudioWatermark from '../components/studio/StudioWatermark';
 import StudioLogoControls from '../components/studio/StudioLogoControls';
 import { layersForSave, logoSettingsOf, LOGO_LIMIT_TEXT, type LogoCandidate, type LogoCardState, type LogoSettings } from '../lib/studio-layers';
-import { saveStudioTemp, studioPost, newStudioAttempt, type SavedStudioAsset } from '../lib/studio-api';
+import { saveStudioTemp, studioPost, studioFetch, newStudioAttempt, type SavedStudioAsset } from '../lib/studio-api';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
@@ -290,6 +290,29 @@ export default function ImageStudioPage() {
     });
   };
 
+  // ── 저장하지 않은 결과 지우기(★ 2026-11-09 Harold 「라이브러리에 저장 안 해도 삭제」) ──
+  //   서버가 임시 그림을 지운 뒤에만 카드를 뺀다(실패 = 카드 그대로 + 알림) · 저장된 카드는 버튼이 없다(라이브러리에서 지운다).
+  const deleteCandidate = (c: Candidate) => {
+    setConfirm({
+      mode: 'danger',
+      title: '이 결과 지우기',
+      description: '라이브러리에 저장하지 않은 그림이라 지우면 되돌릴 수 없어요.',
+      confirmLabel: '지우기',
+      onConfirm: async () => {
+        setBusyMsg('지우는 중...');
+        try {
+          const { ok, data } = await studioFetch(`/api/image-studio/temp/${c.tempId}`, { method: 'DELETE' });
+          if (!ok) { toast.error(data?.error || '지우지 못했어요. 잠시 뒤 다시 시도해 주세요.'); return; }
+          if (c.blob) URL.revokeObjectURL(c.blob);
+          setCandidates((prev) => prev.filter((x) => x.tempId !== c.tempId));
+          setEditFor((cur) => (cur === c.tempId ? null : cur));
+        } finally {
+          setBusyMsg('');
+        }
+      },
+    });
+  };
+
   // ★ 2026-07-21 다운로드 제거(전 직원 요청 — 악용 소지). 소재는 한줄로 채널/발송으로만 활용, 파일 반출 차단.
   //   화면 표시본엔 워터마크 오버레이(스크린샷 유출 억제), 발송물은 원본 유지.
 
@@ -427,7 +450,12 @@ export default function ImageStudioPage() {
                       <p className="rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-800 break-keep">포스터에 들어간 숫자: <b className="font-bold">{c.discountCheck}</b>. 그림 속 숫자가 같은지 꼭 확인해 주세요.</p>
                     )}
                     {c.note === 'expired' ? (
-                      <p className="text-[12px] text-rose-700">기간이 지나 저장할 수 없어요. 다시 만들어 주세요.</p>
+                      <div className="flex items-center gap-2">
+                        <p className="flex-1 text-[12px] text-rose-700">기간이 지나 저장할 수 없어요. 다시 만들어 주세요.</p>
+                        <button onClick={() => deleteCandidate(c)} disabled={busy} aria-label="이 결과 지우기" className="flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-rose-300 hover:text-rose-700 hover:bg-rose-50 disabled:opacity-40">
+                          <Trash2 className="w-3.5 h-3.5" /> 삭제
+                        </button>
+                      </div>
                     ) : (
                       <div className="flex flex-col gap-2">
                         <ChannelButtons isAdmin={isCompanyAdmin} disabled={busy} onPick={(ch) => goChannel(c, ch)}
@@ -456,6 +484,9 @@ export default function ImageStudioPage() {
                             </button>
                             <button onClick={() => { setEditFor(editFor === c.tempId ? null : c.tempId); setEditText(''); }} disabled={busy} className="flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">
                               <Wand2 className="w-3.5 h-3.5" /> AI 수정 <span className="text-slate-400">1</span>
+                            </button>
+                            <button onClick={() => deleteCandidate(c)} disabled={busy} aria-label="이 결과 지우기" className="flex items-center gap-1 px-3 py-2 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-rose-300 hover:text-rose-700 hover:bg-rose-50 disabled:opacity-40">
+                              <Trash2 className="w-3.5 h-3.5" /> 삭제
                             </button>
                           </>
                         )}

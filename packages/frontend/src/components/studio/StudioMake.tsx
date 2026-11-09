@@ -61,8 +61,13 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
   /** ★ 2026-10-31 상품 준비 차례 — 처음 상태로 돌리면 올려 진행 중 준비의 늦은 응답을 버린다(Codex 1R · 새 제작에 지난 상품이 다시 들어오지 않게) */
   const prepSeq = useRef(0);
   const autoRef = useRef<StudioTexts>(EMPTY_STUDIO_TEXTS);
+  /**
+   * ★ 2026-11-09 행사 포스터 = 제품 없이(Harold 「헷갈리는 거 같아 · 빼버리자」) — 화면에 제품 칸이 없다.
+   *   다른 템플릿에서 담아 둔 칸은 지우지 않고(돌아가면 그대로) 행사 포스터에서만 쓰지 않는다 = 요청 · 자동 문구가 이 값을 읽는다.
+   */
+  const usedItems = studioTrackOf(template) === 'event' ? [] : items;
   /** 자동 문구 기준 = 칸 순서상 첫 몰 상품(사진 올리기 칸은 상품 정보가 없다) */
-  const product = items.find((i) => i.product)?.product ?? null;
+  const product = usedItems.find((i) => i.product)?.product ?? null;
   const remaining = STUDIO_MAX_PRODUCTS - items.length;
   const full = remaining <= 0;
 
@@ -251,7 +256,7 @@ export function useStudioMake(template: StudioTemplatePublic | null, initialText
       templateId: template.id, presetKey: opts?.presetKey || 'poster',
       texts: { ...sendTexts }, userHint: hint || null,
       // ★ 2026-11-02 제품 사진 목록(넣은 순서 = 포스터 왼쪽부터 · 준비 중엔 만들기가 막혀 있다)
-      cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),
+      cutoutTempIds: usedItems.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),   // ★ 2026-11-09 행사 포스터 = 빈 목록
       // ★ C118 A3 인앱 용도 = 고른 글 자리(위 · 아래)를 모든 템플릿에 · 글 없는 판 = 아래(글을 얹을 자리)
       // ★ C118 E3 할인 템플릿 = 글 자리 위 고정(서버도 위)
       textPosition: textless ? 'bottom' : (inappUse ? (discountKind ? 'top' : (opts?.textPosition || 'top')) : (isEvent(template) ? textPosition : null)),
@@ -520,21 +525,13 @@ export function StudioMakeFields({ make, disabled = false, textless = false }: {
         <input ref={make.fileRef} type="file" accept="image/*" multiple onChange={make.onUpload} className="hidden" />
       </div>
       {make.full && <p className={`${NOTE} mt-2`}>{STUDIO_MAX_PRODUCTS}개를 다 넣었어요. 바꾸려면 하나를 빼 주세요.</p>}
-      {make.items.length === 0 && !event && <p className={`${NOTE} mt-2`}>상품 없이도 만들 수 있어요. 의류는 착용컷보다 옷 단독컷이 잘 나와요.</p>}
+      {make.items.length === 0 && <p className={`${NOTE} mt-2`}>상품 없이도 만들 수 있어요. 의류는 착용컷보다 옷 단독컷이 잘 나와요.</p>}
       {make.items.length > 1 && <p className="text-[12px] leading-relaxed text-amber-700 mt-2 break-keep">여러 개를 넣으면 제품이 작아져 라벨의 아주 작은 글씨가 바뀔 수 있어요. 만든 뒤 꼭 확인해 주세요.</p>}
     </>
   );
   const count = <span className="text-[12px] font-semibold text-slate-400 tabular-nums">{make.items.length}/{STUDIO_MAX_PRODUCTS}</span>;
-  const productSection = event ? (
-    <details className="px-4 py-4 group" open={make.items.length > 0}>
-      <summary className="list-none cursor-pointer flex items-center gap-2 text-[13px] font-bold text-slate-900">
-        제품 함께 넣기 (선택) {count}
-      </summary>
-      <div className="mt-3">{productBody}</div>
-    </details>
-  ) : (
-    <Section title="상품" right={count}>{productBody}</Section>
-  );
+  // ★ 2026-11-09 행사 포스터 = 제품 칸 없음(옛 「제품 함께 넣기 (선택)」 접이식 칸 · Harold 「헷갈린다」) · 제품 · 할인 포스터 = 「상품」 칸 그대로
+  const productSection = <Section title="상품" right={count}>{productBody}</Section>;
 
   const hintSection = (
     <details className="px-4 py-4" open={!!make.hint}>
@@ -547,7 +544,7 @@ export function StudioMakeFields({ make, disabled = false, textless = false }: {
     <div className="rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100">
       <p className="px-4 py-3 text-[12px] text-slate-600 break-keep">입력한 글자가 그대로 새겨져요. 혜택과 숫자는 직접 넣어요.</p>
       {event ? (
-        <>{textSection}{productSection}{hintSection}</>
+        <>{textSection}{hintSection}</>
       ) : (
         <>{productSection}{discount && <DiscountFieldsBlock make={make} busy={busy} />}{textSection}{hintSection}</>
       )}

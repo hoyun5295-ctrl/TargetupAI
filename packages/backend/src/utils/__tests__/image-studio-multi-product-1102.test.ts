@@ -358,8 +358,19 @@ describe('S6 화면 계약 — 배선(소스 읽기 · 동작은 S6-가 + 직원
   });
   it('생성 몸 = 칸 순서의 누끼 id 목록 · 옛 단일 칸은 보내지 않는다', () => {
     const gen = make.slice(make.indexOf('const buildGenerateBody = ('), make.indexOf('return {\n    template,'));   // ★ C118 생성 = 본문 짜기 + 보내기 + generate
-    expect(gen).toContain('cutoutTempIds: items.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),');
+    expect(gen).toContain('cutoutTempIds: usedItems.flatMap((i) => (i.cutoutTempId ? [i.cutoutTempId] : [])),');
     expect(gen).not.toContain('cutoutTempId,');
+  });
+  it('★1109 행사 포스터 = 제품 칸 없음 · 담아 둔 칸은 요청 · 자동 문구에 쓰지 않는다(Harold 「헷갈린다 · 빼자」)', () => {
+    expect(make).toContain("const usedItems = studioTrackOf(template) === 'event' ? [] : items;");
+    expect(make).toContain('const product = usedItems.find((i) => i.product)?.product ?? null;');
+    // 요청 · 자동 문구 말고는 items 를 요청에 싣는 길이 없다(본문 짜기 안에 items. 직접 읽기 0)
+    const gen = make.slice(make.indexOf('const buildGenerateBody = ('), make.indexOf('const runGenerateBody = async'));
+    expect(gen).not.toMatch(/[^d]items\.(flatMap|map|filter|find)/);
+    // 화면 = 행사 갈래에 상품 칸이 없다 · 옛 접이식 칸 문구 0
+    expect(make).toContain('<>{textSection}{hintSection}</>');
+    expect(make).not.toContain('제품 함께 넣기 (선택) {count}');
+    expect(make).toContain('const productSection = <Section title="상품" right={count}>{productBody}</Section>;');
   });
   it('담기 = 남은 칸까지만 · 한 번에 여러 장 = 파일 이름 순 · 몰 창에 남은 칸 수', () => {
     expect(make).toContain('const take = sources.slice(0, room);');

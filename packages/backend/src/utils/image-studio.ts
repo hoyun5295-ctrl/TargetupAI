@@ -899,6 +899,20 @@ export function discardTemp(companyId: string, tempId: string): void {
   clearTempMeta(companyId, tempId);
 }
 
+/**
+ * ★ 2026-11-09 저장하지 않은 결과 그림 지우기 판정(Harold 「라이브러리에 저장 안 해도 삭제」) — 순수 · 판정 한 곳.
+ *   지우는 것 = 아직 라이브러리에 가지 않은 포스터 임시 그림뿐.
+ *   saved = 저장이 그 그림을 이미 옮겼거나(영구 파일 · MMS 저장 주소) 등재 확인을 남긴 상태 — 사이드카를 지우면 같은 id 재저장이 그 소재를 못 찾는다.
+ *   gone = 사이드카 없음(정리기 · 이미 지움 · 저장으로 소비) = 지운 것으로 본다.
+ */
+export type TempDeleteVerdict = 'delete' | 'gone' | 'saved' | 'not_poster';
+export function tempDeleteVerdict(meta: TempMeta | null, hasPermanent: boolean): TempDeleteVerdict {
+  if (hasPermanent || meta?.pendingAsset || meta?.savedAs) return 'saved';
+  if (!meta) return 'gone';
+  if (meta.kind !== 'poster') return 'not_poster';
+  return 'delete';
+}
+
 export function readTempMeta(companyId: string, tempId: string): TempMeta | null {
   if (!isValidTempId(tempId)) return null;
   const p = path.join(companyTempDir(companyId), `${tempId}.json`);

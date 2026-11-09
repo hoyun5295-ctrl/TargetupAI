@@ -36,7 +36,7 @@ import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../u
 // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
 import { aiZonePlanBlocked } from '../utils/plan-guard';
 import { registerAsset, registerAssetConfirmed, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
-import { isStudioReady, StudioError, readProductTempIds, studioProductFingerprint, groupProductCutouts, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
+import { isStudioReady, StudioError, readProductTempIds, studioProductFingerprint, groupProductCutouts, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, tempDeleteVerdict, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
 // ★ 2026-11-08 C114 B 할인 포스터 = 혜택 검사 · 확인 줄 · 브랜드 강조색(CT 한 곳)
 import { readDiscountOffer, discountCheckLine, discountBrandColor, type DiscountOffer } from '../utils/studio-discount';
@@ -807,6 +807,28 @@ imageStudioRouter.post('/mms-from-asset', async (req: any, res: Response) => {
     }
     return respondStudioError(res, err);
   }
+});
+
+// ── DELETE /temp/:tempId — 저장하지 않은 결과 그림 지우기(★ 2026-11-09 Harold 「저장 안 해도 삭제」) ──
+//   회사 폴더 안에서만 찾는다(= 소유 검증) · 같은 그림의 저장과 같은 줄(studio-save 키)에서 판정 · 지움(저장 도중에 끼어들지 않는다).
+//   판정 = tempDeleteVerdict 한 곳(저장된 그림 = 409 · 포스터가 아닌 임시 = 400 · 이미 없음 = 지운 것).
+imageStudioRouter.delete('/temp/:tempId', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  const tempId = String(req.params.tempId || '');
+  if (!isValidTempId(tempId)) return res.status(400).json({ success: false, error: '지울 그림을 찾을 수 없습니다.' });
+  await runSerial(`studio-save:${companyId}:${tempId}`, async () => {
+    const verdict = tempDeleteVerdict(readTempMeta(companyId, tempId), !!findPermanentByTempId(companyId, tempId));
+    if (verdict === 'saved') return res.status(409).json({ success: false, error: '이미 라이브러리에 저장된 그림이에요. 라이브러리에서 지워 주세요.', code: 'ALREADY_SAVED' });
+    if (verdict === 'not_poster') return res.status(400).json({ success: false, error: '지울 수 있는 결과 그림이 아니에요.', code: 'NOT_POSTER' });
+    if (verdict === 'delete') {
+      try { discardTemp(companyId, tempId); } catch (err: any) {
+        console.error('[image-studio] 임시 그림 지우기 실패:', err?.message || err);
+        return res.status(500).json({ success: false, error: '그림을 지우지 못했어요. 잠시 뒤 다시 시도해 주세요.' });
+      }
+    }
+    return res.json({ success: true });
+  });
 });
 
 // ── GET /temp/:tempId (인증 서빙 — 프론트 fetch+blob) ────────────
