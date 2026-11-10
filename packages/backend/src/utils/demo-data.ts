@@ -8,6 +8,7 @@
  */
 import { query } from '../config/database';
 import { isDemoCompany } from './demo-company';
+import { LEDGER_PURCHASES_SQL } from './two-door-purchase';   // ★ 1110 v3 원장 읽기 = 구매 행 CT-D6(환불 · 미래 날짜 행 제외)
 
 // ───── 결정적 난수 ─────
 function hash32(s: string): number {
@@ -91,6 +92,7 @@ export interface DemoCustomerRow {
   store_code: string; store_name: string; registered_store: string; region: string;
   recent_purchase_date?: string | null; recent_purchase_amount?: number | null; recent_purchase_store?: string | null;
   total_purchase_amount?: number; purchase_count?: number;
+  points?: number;   // ★ 1110 v3 만 싣는다(v2 행에는 없다)
 }
 export interface DemoPurchaseRow {
   customer_phone: string; purchase_date: string; product_code: string; product_name: string;
@@ -310,7 +312,11 @@ export function customersFromLedger(indexes: readonly number[], ledger: Readonly
 
 export interface DemoSyncKey { apiKey: string; apiSecret: string }
 
-async function postSync(path: 'customers' | 'purchases', rows: unknown[], key: DemoSyncKey): Promise<number> {
+/**
+ * strict(★ 1110 v3 만) = HTTP 200 이어도 본문 data.failedCount > 0 이면 던진다 → 그날 회차를 끝낸 것으로 적지 않는다(설계서 §5 · Codex 설계 1R #5).
+ *   v2(시연 회사)는 옛 동작 그대로(불변식 2 · 같은 틈은 설계서 §9 추가 과제).
+ */
+async function postSync(path: 'customers' | 'purchases', rows: unknown[], key: DemoSyncKey, opts: { strict?: boolean } = {}): Promise<number> {
   const port = process.env.PORT || 3000;
   let accepted = 0;
   for (let i = 0; i < rows.length; i += 2000) {
@@ -321,6 +327,10 @@ async function postSync(path: 'customers' | 'purchases', rows: unknown[], key: D
       body: JSON.stringify({ mode: 'incremental', [path]: chunk, batchIndex: Math.floor(i / 2000), totalBatches: Math.ceil(rows.length / 2000) }),
     });
     if (!res.ok) throw new Error(`sync ${path} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (opts.strict) {
+      const body: any = await res.json().catch(() => null);
+      if (body?.data?.failedCount !== 0) throw new Error(`sync ${path} failedCount=${body?.data?.failedCount}`);
+    }
     accepted += chunk.length;
   }
   return accepted;
@@ -398,6 +408,7 @@ export async function pushDemoSeed(key: DemoSyncKey, now: Date = new Date()): Pr
 export async function pushDemoDaily(key: DemoSyncKey, now: Date = new Date()): Promise<{ newCustomers: number; repeat: number; purchases: number; skipped?: string }> {
   const companyId = await syntheticTargetCompanyIdOfKey(key.apiKey);
   if (await isV1DemoCompany(companyId)) return { newCustomers: 0, repeat: 0, purchases: 0, skipped: '옛 방식 시연 회사라 넣지 않았어요(.env 키를 새 시연 회사로 바꾸면 이어집니다)' };
+  if (await isRealismCompany(companyId)) return pushRealismDaily(companyId, key, now);   // ★ 1110 v3(허용 목록 ∧ 시연 아님) · 시연 회사는 아래 v2 그대로
   const today = kstDate(now);
   const day = buildDailyBatch(today);
   const repeatPurchases = day.buyerPurchases;
@@ -446,7 +457,8 @@ const lastRunDay = new Map<string, string>();
  */
 export function startDemoDataWorker(): void {
   const keys = parseSyntheticSyncKeys();
-  if (!keys.length) return;
+  const cdpKeys = parseSyntheticCdpKeys();   // ★ 1110 v3 온라인 갈래(없으면 매장 갈래만 · 시작 로그에 개수)
+  if (!keys.length && !cdpKeys.length) return;
   if (timer) return;
   let running = false;
   const tick = async () => {
@@ -456,8 +468,7 @@ export function startDemoDataWorker(): void {
       const now = new Date();
       const today = kstDate(now);
       const kstHour = new Date(now.getTime() + 9 * 3600_000).getUTCHours();
-      if (kstHour < 7) return;
-      for (const key of keys) {
+      for (const key of kstHour >= 7 ? keys : []) {
         if (lastRunDay.get(key.apiKey) === today) continue;
         const tag = key.apiKey.slice(0, 10);
         try {
@@ -470,11 +481,420 @@ export function startDemoDataWorker(): void {
           console.error(`[demo-data] ${tag} 합성 데이터 적재 실패(다음 tick 에 다시):`, err?.message);
         }
       }
+      // ★ 1110 v3 온라인 = 10분 tick 마다 그 시각까지 생긴 사건(07:00 문 밖 · 밤에는 빈 회차) · 오류 = 그 키의 이번 tick 멈춤
+      for (const ck of cdpKeys) {
+        const tag = ck.apiKey.slice(0, 10);
+        try {
+          const r = await pushRealismOnline(ck, now);
+          if (r.skipped) {
+            if (!onlineSkipLogged.has(ck.apiKey)) console.log(`[demo-data] ${tag} ${r.skipped}`);
+            onlineSkipLogged.add(ck.apiKey);
+          } else if (r.sent || r.deferred) {
+            console.log(`[demo-data] ${today} ${tag} 자사몰 합성 · 보냄 ${r.sent} · 미룸 ${r.deferred}`);
+          }
+        } catch (err: any) {
+          console.error(`[demo-data] ${tag} 자사몰 합성 전송 실패(다음 tick 에 이어서):`, err?.message);
+        }
+      }
     } finally {
       running = false;
     }
   };
   timer = setInterval(() => { void tick(); }, 10 * 60_000);
   setTimeout(() => { void tick(); }, 60_000);
-  console.log(`[demo-data] 합성 데이터 워커 시작(매일 07:00 KST 이후 1회 · 키 ${keys.length}개)`);
+  console.log(`[demo-data] 합성 데이터 워커 시작(매일 07:00 KST 이후 1회 · 키 ${keys.length}개 · 자사몰 키 ${cdpKeys.length}개)`);
+}
+
+// ───── ★ 2026-11-10 v3 — 실제 회사처럼(설계서 docs/2026-11-10-synthetic-company-realism-design.md) ─────
+//   받는 회사 = 허용 목록 ∧ 시연 아님(isRealismCompany). 시연 회사는 위 v2 그대로(불변식 2).
+//   매장 = 지금 v2 줄을 같은 원장 키로(수량 1 · 행사가) + 함께 산 상품 줄(새 키) · 등급 · 포인트 · 수신거부 = 매장 고객 싱크.
+//   온라인 = 몰 회원 40% · 방문 · 조회 · 담기 · 결제 시작 · 주문을 진짜 자사몰 수집 API(루프백)로 · 그 시각까지 생긴 것만.
+//   번호 = demoPhone 그대로(도달 불가) · 이메일 0 · 결과 · 파생 표 직접 쓰기 0.
+
+/** v3 받는 회사인가 — 허용 목록에 있고 시연 회사가 아니다(실제 고객사 · 시연 회사 = 거짓). */
+export async function isRealismCompany(companyId: string, allow: ReadonlySet<string> = syntheticDataCompanyIds()): Promise<boolean> {
+  const id = String(companyId || '').toLowerCase();
+  return allow.has(id) && !(await isDemoCompany(id));
+}
+
+type Product = { code: string; name: string; price: number };
+/** v2 20종에 더하는 40종(정가 9천 ~ 8만 · 가정) — 덧붙인 줄 · 몰에서만 고른다(v2 줄 상품은 그대로). */
+const EXTRA_PRODUCTS: readonly Product[] = [
+  { code: 'SK-109', name: '판테놀 수분 크림', price: 31000 }, { code: 'SK-110', name: '어성초 진정 토너', price: 22000 },
+  { code: 'SK-111', name: '레티놀 나이트 세럼', price: 48000 }, { code: 'SK-112', name: '나이아신아마이드 앰플', price: 36000 },
+  { code: 'SK-113', name: '클렌징 오일', price: 25000 }, { code: 'SK-114', name: '클렌징 워터', price: 18000 },
+  { code: 'SK-115', name: '각질 패드 70매', price: 21000 }, { code: 'SK-116', name: '수분 미스트', price: 15000 },
+  { code: 'SK-117', name: '장벽 강화 로션', price: 27000 }, { code: 'SK-118', name: '탄력 아이패치 60매', price: 24000 },
+  { code: 'SN-203', name: '무기자차 선크림', price: 26000 }, { code: 'SN-204', name: '선스틱', price: 19000 },
+  { code: 'SN-205', name: '수분 선세럼', price: 24000 }, { code: 'SN-206', name: '톤업 선크림', price: 23000 },
+  { code: 'MU-306', name: '커버 컨실러', price: 17000 }, { code: 'MU-307', name: '세미매트 쿠션', price: 36000 },
+  { code: 'MU-308', name: '브로우 펜슬', price: 12000 }, { code: 'MU-309', name: '블러셔', price: 19000 },
+  { code: 'MU-310', name: '하이라이터', price: 22000 }, { code: 'MU-311', name: '립 오일', price: 16000 },
+  { code: 'MU-312', name: '벨벳 틴트', price: 15000 }, { code: 'MU-313', name: '픽서 미스트', price: 18000 },
+  { code: 'MU-314', name: '아이라이너', price: 14000 }, { code: 'MU-315', name: '메이크업 베이스', price: 23000 },
+  { code: 'BD-403', name: '바디 스크럽', price: 22000 }, { code: 'BD-404', name: '바디 워시', price: 18000 },
+  { code: 'BD-405', name: '바디 오일', price: 29000 }, { code: 'BD-406', name: '데오드란트', price: 13000 },
+  { code: 'BD-407', name: '풋 크림', price: 11000 }, { code: 'HR-503', name: '헤어 트리트먼트', price: 26000 },
+  { code: 'HR-504', name: '헤어 미스트', price: 17000 }, { code: 'HR-505', name: '두피 토닉', price: 28000 },
+  { code: 'HR-506', name: '컬링 에센스', price: 16000 }, { code: 'HR-507', name: '헤어 오일', price: 21000 },
+  { code: 'GF-602', name: '선케어 기프트 세트', price: 45000 }, { code: 'GF-603', name: '립 컬렉션 세트', price: 38000 },
+  { code: 'GF-604', name: '바디케어 기프트 세트', price: 52000 }, { code: 'GF-605', name: '트래블 키트', price: 29000 },
+  { code: 'GF-606', name: '프리미엄 스킨케어 세트', price: 79000 }, { code: 'GF-607', name: '미니 핸드크림 세트', price: 9000 },
+];
+const NEW_PRODUCT_FIRST_MONTH = '2026-11';
+const NEW_ITEM_TAGS = ['시즌 한정', '리뉴얼', '신상', '스페셜 에디션'] as const;
+const NEW_ITEM_KINDS = ['세럼', '크림', '토너', '쿠션', '틴트', '선크림', '마스크팩', '앰플'] as const;
+const nextMonth = (ym: string) => { const [y, m] = ym.split('-').map(Number); return m === 12 ? `${y + 1}-01` : `${y}-${pad2(m + 1)}`; };
+
+/** 그 날 팔 수 있는 상품 = v2 20 + 40 + 2026-11 부터 달마다 신상품 2종(출시 달 전에는 없다 · 결정적). */
+export function realismCatalogOn(ymd: string): Product[] {
+  const out: Product[] = [...DEMO_PRODUCTS, ...EXTRA_PRODUCTS];
+  for (let ym = NEW_PRODUCT_FIRST_MONTH; ym <= ymd.slice(0, 7); ym = nextMonth(ym)) {
+    const r = rng(`v3-new-${ym}`);
+    for (const n of [1, 2]) out.push({ code: `NW-${ym.slice(2, 4)}${ym.slice(5, 7)}-${n}`, name: `${pick(r, NEW_ITEM_TAGS)} ${pick(r, NEW_ITEM_KINDS)}`, price: intIn(r, 15, 60) * 1000 });
+  }
+  return out;
+}
+
+/** 행사 할인율 — 달마다 5일 · 10 ~ 30%(가정 · 결정적) · 행사 아닌 날 0. */
+export function promoDiscountOn(ymd: string): number {
+  const r = rng(`v3-promo-${ymd.slice(0, 7)}`);
+  const start = intIn(r, 1, 24);
+  const pct = intIn(r, 10, 30);
+  const d = Number(ymd.slice(8, 10));
+  return d >= start && d < start + 5 ? pct / 100 : 0;
+}
+const salePrice = (price: number, ymd: string) => Math.round((price * (1 - promoDiscountOn(ymd))) / 100) * 100;
+
+/** 한 방문 목표 줄 수 1 ~ 6(실측 평균 2.88 · 중간 2 · 90% 5 에 맞춘 가중치 · 평균 2.89). */
+const BASKET_WEIGHTS = [18, 32, 20, 12, 9, 9] as const;
+function basketSize(index: number, day: number): number {
+  let t = rng(`v3-basket-${index}-${day}`)() * 100;
+  for (let k = 0; k < BASKET_WEIGHTS.length; k++) { t -= BASKET_WEIGHTS[k]; if (t < 0) return k + 1; }
+  return BASKET_WEIGHTS.length;
+}
+
+/**
+ * 그 날 한 고객의 매장 줄(v3) — v2 줄은 같은 원장 키로(수량 1 · 행사가 · 시각 · 매장 = 첫 줄) · 모자란 만큼 「함께 산 상품」 새 키 demo-v3x-번호-날-n.
+ *   원장 업서트가 같은 키를 갱신하므로(sync-ingest ON CONFLICT DO UPDATE) 같은 날을 v2 · v3 로 한 번씩 보내도 두 번 쌓이지 않는다.
+ */
+export function realismPurchasesOn(index: number, day: number): DemoPurchaseRow[] {
+  const base = purchasesOn(index, day);
+  if (!base.length) return [];
+  const ymd = dayToYmd(day);
+  const head = base[0];
+  const lines: DemoPurchaseRow[] = base.map((b) => ({
+    ...b, purchase_date: head.purchase_date, store_code: head.store_code, store_name: head.store_name, quantity: 1, total_amount: salePrice(b.unit_price, ymd),
+  }));
+  const extra = basketSize(index, day) - lines.length;
+  if (extra > 0) {
+    const cat = realismCatalogOn(ymd);
+    const r = rng(`v3-extra-${index}-${day}`);
+    for (let n = 0; n < extra; n++) {
+      const p = pick(r, cat);
+      lines.push({
+        customer_phone: head.customer_phone, purchase_date: head.purchase_date, product_code: p.code, product_name: p.name,
+        quantity: 1, unit_price: p.price, total_amount: salePrice(p.price, ymd), store_code: head.store_code, store_name: head.store_name,
+        source_row_key: `demo-v3x-${index}-${day}-${n}`,
+      });
+    }
+  }
+  return lines;
+}
+
+/** 수신거부 날(결정적 · 하루 0.05% 위험률 · 가정) — 이 날부터 보내는 고객 행은 sms_opt_in = false. */
+const OPT_OUT_DAILY = 0.0005;
+export function optOutDay(index: number): number {
+  const u = rng(`v3-optout-${index}`)();
+  return demoSignupDay(index) + Math.floor(Math.log(1 - u) / Math.log(1 - OPT_OUT_DAILY));
+}
+
+const GRADE_ORDER = ['일반', '실버', '골드', 'VIP'] as const;
+const GRADE_BY_SPEND: Array<[number, number]> = [[2_000_000, 3], [800_000, 2], [300_000, 1]];   // 누적 구매 기준(가정)
+const POINT_RATE = 0.03;
+const POINT_USE_SHARE = 0.25;
+const usesPoints = (index: number, day: number) => rng(`v3-pts-${index}-${day}`)() < POINT_USE_SHARE;
+
+/**
+ * 등급 · 포인트(순수) — visits = 날짜순 방문 합계(그 끝 날까지만 넘긴다).
+ *   등급 = max(번호 고정 등급 · 누적 기준) · 포인트 = 방문마다 그날 합계 3% 적립 · 사용 방문은 그 전까지 쌓인 것을 다 쓰고 적립 · 소멸 없음(설계서 K6).
+ */
+export function loyaltyAt(index: number, baseGrade: string, visits: ReadonlyArray<{ day: number; amount: number }>, uses: (index: number, day: number) => boolean = usesPoints): { grade: string; points: number } {
+  let total = 0;
+  let points = 0;
+  for (const v of visits) {
+    total += v.amount;
+    if (uses(index, v.day)) points = 0;
+    points += Math.floor(v.amount * POINT_RATE);
+  }
+  const spendRank = GRADE_BY_SPEND.find(([min]) => total >= min)?.[1] ?? 0;
+  const rank = Math.max(Math.max(0, GRADE_ORDER.indexOf(baseGrade as (typeof GRADE_ORDER)[number])), spendRank);
+  return { grade: GRADE_ORDER[rank], points };
+}
+
+type LedgerRow = { day: number; ymd: string; at: string; amount: number; store: string | null };
+
+/** 매장 원장 행(그 번호들) — 등급 · 포인트 · 누적값의 원천. */
+async function readLedgerRows(companyId: string, phones: readonly string[]): Promise<Map<string, LedgerRow[]>> {
+  const out = new Map<string, LedgerRow[]>();
+  if (!phones.length) return out;
+  const r = await query(
+    `SELECT p.customer_phone, to_char(p.purchase_date, 'YYYY-MM-DD') AS d, to_char(p.purchase_date, 'YYYY-MM-DD HH24:MI:SS') AS at, p.total_amount, p.store_name
+       FROM ${LEDGER_PURCHASES_SQL} p
+      WHERE p.company_id = $1::uuid AND p.customer_phone = ANY($2::text[])`,
+    [companyId, phones],
+  );
+  for (const row of r.rows) {
+    const phone = String(row.customer_phone);
+    const ymd = String(row.d);
+    const list = out.get(phone) || [];
+    list.push({ day: dayNumber(ymd), ymd, at: String(row.at), amount: Number(row.total_amount) || 0, store: row.store_name ? String(row.store_name) : null });
+    out.set(phone, list);
+  }
+  return out;
+}
+
+/** 이미 고객 행이 있는 번호(is_active 무관). */
+async function existingPhones(companyId: string, phones: readonly string[]): Promise<Set<string>> {
+  if (!phones.length) return new Set();
+  const r = await query(`SELECT phone FROM customers WHERE company_id = $1::uuid AND phone = ANY($2::text[])`, [companyId, phones]);
+  return new Set(r.rows.map((x: any) => String(x.phone)));
+}
+
+/** 고객 행(v3) — 끝 날까지의 원장으로 누적 · 등급 · 포인트 · 판매일 기준 수신동의. */
+export function realismCustomerRow(index: number, rows: readonly LedgerRow[], endDay: number, salesDay: number): DemoCustomerRow {
+  const c = demoIdentity(index);
+  const upto = rows.filter((x) => x.day <= endDay);
+  const byDay = new Map<number, number>();
+  for (const x of upto) byDay.set(x.day, (byDay.get(x.day) || 0) + x.amount);
+  const visits = [...byDay].sort((a, b) => a[0] - b[0]).map(([day, amount]) => ({ day, amount }));
+  const { grade, points } = loyaltyAt(index, c.grade, visits);
+  const last = upto.reduce<LedgerRow | null>((a, b) => (!a || b.at > a.at ? b : a), null);
+  return {
+    ...c, grade, points, sms_opt_in: optOutDay(index) > salesDay,
+    total_purchase_amount: upto.reduce((s, x) => s + x.amount, 0), purchase_count: upto.length,
+    ...(last ? { recent_purchase_date: last.ymd, recent_purchase_amount: byDay.get(last.day) ?? last.amount, recent_purchase_store: last.store } : {}),
+  };
+}
+
+/** 하루치(v3 · 결정적) — 대상 번호와 매장 줄. */
+export function buildRealismBatch(today: string): { sd: number; newIndexes: number[]; buyerIndexes: number[]; optOutIndexes: number[]; purchases: DemoPurchaseRow[] } {
+  const sd = dayNumber(addDays(today, -1));
+  const base = dailyIndexBase(today);
+  const newIndexes = Array.from({ length: dailyNewCount(today) }, (_, k) => base + k);
+  const pool = [...Array.from({ length: DEMO_SEED_CUSTOMERS }, (_, i) => i), ...dailyIndexesBefore(today), ...newIndexes];
+  const buyerIndexes: number[] = [];
+  const optOutIndexes: number[] = [];
+  const purchases: DemoPurchaseRow[] = [];
+  for (const idx of pool) {
+    const rows = realismPurchasesOn(idx, sd);
+    if (rows.length) { buyerIndexes.push(idx); purchases.push(...rows); }
+    const o = optOutDay(idx);
+    if (o >= sd - 6 && o <= sd) optOutIndexes.push(idx);
+  }
+  return { sd, newIndexes, buyerIndexes, optOutIndexes, purchases };
+}
+
+/**
+ * 하루치 적재(v3) — ①그 회차 대상 중 **고객 행이 없는 번호만** 만든다(값 = 판매일 전날까지 · 이미 있는 고객은 안 보낸다 = 재실행에서 등급을 낮추는 쓰기 0 · Codex 설계 2R)
+ *   ②매장 줄 ③구매 뒤 고객 행(그날 구매 고객 ∪ 최근 7일 수신거부 · 판매일까지 원장 = 등급 · 포인트를 쓰는 유일한 단계) · 싱크 응답 실패 행 = 던짐(회차 미완).
+ */
+export async function pushRealismDaily(companyId: string, key: DemoSyncKey, now: Date = new Date()): Promise<{ newCustomers: number; repeat: number; purchases: number }> {
+  const b = buildRealismBatch(kstDate(now));
+  const targets = [...new Set([...b.newIndexes, ...b.buyerIndexes, ...b.optOutIndexes])];
+  const have = await existingPhones(companyId, targets.map(demoPhone));
+  const missing = targets.filter((i) => !have.has(demoPhone(i)));
+  if (missing.length) {
+    const led = await readLedgerRows(companyId, missing.map(demoPhone));
+    await postSync('customers', missing.map((i) => realismCustomerRow(i, led.get(demoPhone(i)) || [], b.sd - 1, b.sd)), key, { strict: true });
+  }
+  if (b.purchases.length) await postSync('purchases', b.purchases, key, { strict: true });
+  const post = [...new Set([...b.buyerIndexes, ...b.optOutIndexes])];
+  if (post.length) {
+    const led = await readLedgerRows(companyId, post.map(demoPhone));
+    await postSync('customers', post.map((i) => realismCustomerRow(i, led.get(demoPhone(i)) || [], b.sd, b.sd)), key, { strict: true });
+  }
+  return { newCustomers: missing.length, repeat: post.length, purchases: b.purchases.length };
+}
+
+// ── 온라인(자사몰) ──
+
+export interface CdpKey { apiKey: string; apiSecret: string }
+
+/** ENV SYNTHETIC_CDP_KEYS = 「hjl_키:sk_비밀」 쉼표 · 같은 키는 처음 것 · 키나 비밀이 빈 것은 버린다. */
+export function parseSyntheticCdpKeys(env: EnvLike = process.env): CdpKey[] {
+  const out: CdpKey[] = [];
+  const seen = new Set<string>();
+  for (const part of String(env.SYNTHETIC_CDP_KEYS || '').split(',')) {
+    const i = part.indexOf(':');
+    if (i <= 0) continue;
+    const apiKey = part.slice(0, i).trim();
+    const apiSecret = part.slice(i + 1).trim();
+    if (!apiKey || !apiSecret || seen.has(apiKey)) continue;
+    seen.add(apiKey);
+    out.push({ apiKey, apiSecret });
+  }
+  return out;
+}
+
+const MALL_MEMBER_SHARE = 0.4;
+const ONLINE_VISIT_SHARE = 0.05;
+export const ONLINE_WINDOW_DAYS = 7;
+const ONLINE_TICK_CAP = 600;
+const ONLINE_PACE_MS = 250;   // 쓰기 한도 10초 50(cdpWriteBurst) 아래 · 초당 4
+export const isMallMember = (index: number) => rng(`v3-mall-${index}`)() < MALL_MEMBER_SHARE;
+export const mallExternalId = (index: number) => `M${String(index).padStart(7, '0')}`;
+const isoKst = (ymd: string, sec: number) => `${ymd}T${pad2(Math.floor(sec / 3600))}:${pad2(Math.floor((sec % 3600) / 60))}:${pad2(sec % 60)}+09:00`;
+
+export interface OnlineSend { key: string; at: string; index: number; kind: 'event' | 'order'; body: Record<string, any> }
+
+/**
+ * 그 날 몰 일정(결정적) — 회원 = 그 날 전에 고객 행이 생긴 번호(시드 + 그 날 전 묶음) 중 40% · 하루 5% 방문 · 그 날 매장 구매가 있으면 몰 방문 0(두 문 CT-D1 · K5).
+ *   방문 = 홈 → 상품 조회 1 ~ 5 → 15% 담기(1 ~ 3) → 담은 사람 55% 결제 시작 → 그중 80% 주문(가정) · 시각 09:00 ~ 22:30 시작.
+ */
+export function onlineScheduleOn(ymd: string): OnlineSend[] {
+  const d = dayNumber(ymd);
+  const cat = realismCatalogOn(ymd);
+  const out: OnlineSend[] = [];
+  const members = [...Array.from({ length: DEMO_SEED_CUSTOMERS }, (_, i) => i), ...dailyIndexesBefore(ymd)].filter(isMallMember);
+  for (const idx of members) {
+    const r = rng(`v3-visit-${ymd}-${idx}`);
+    if (r() >= ONLINE_VISIT_SHARE) continue;
+    if (demoTimeline(idx).buys.some((b) => b.day === d)) continue;
+    const ext = mallExternalId(idx);
+    let t = intIn(r, 9 * 3600, (22 * 60 + 30) * 60);
+    let seq = 0;
+    const ev = (event_name: string, properties: Record<string, unknown>) => {
+      const key = `ev-${ymd}-${idx}-${seq++}`;
+      const at = isoKst(ymd, t);
+      out.push({ key, at, index: idx, kind: 'event', body: { event_name, external_id: ext, occurred_at: at, properties: { ...properties, event_key: key } } });
+      t += intIn(r, 30, 180);
+    };
+    ev('page_view', { path: '/' });
+    const viewed: Product[] = [];
+    for (let n = intIn(r, 1, 5); n > 0; n--) {
+      const p = pick(r, cat);
+      viewed.push(p);
+      ev('product_view', { product_code: p.code, product_name: p.name, price: salePrice(p.price, ymd) });
+    }
+    if (r() >= 0.15) continue;
+    const distinct = [...new Map(viewed.map((p) => [p.code, p])).values()];
+    const cart = distinct.slice(0, intIn(r, 1, Math.min(3, distinct.length)));
+    for (const p of cart) ev('cart_add', { product_code: p.code, product_name: p.name, price: salePrice(p.price, ymd), quantity: 1 });
+    if (r() >= 0.55) continue;
+    const total = cart.reduce((s, p) => s + salePrice(p.price, ymd), 0);
+    ev('checkout_start', { cart_value: total, item_count: cart.length });
+    if (r() >= 0.8) continue;
+    const orderId = `INV-${ymd.replace(/-/g, '')}-${idx}`;
+    const at = isoKst(ymd, t);
+    out.push({
+      key: orderId, at, index: idx, kind: 'order',
+      body: {
+        order_id: orderId, external_id: ext, status: 'paid', total_amount: total, item_count: cart.length, ordered_at: at,
+        items: cart.map((p) => ({ productId: p.code, productName: p.name, price: salePrice(p.price, ymd), quantity: 1 })),
+      },
+    });
+  }
+  return out;
+}
+
+/** 지금 보낼 차례인 것 = 최근 7일 일정 중 시각이 지금 이전 · 오래된 것부터. */
+export function dueOnlineSends(now: Date): OnlineSend[] {
+  const today = kstDate(now);
+  const all: OnlineSend[] = [];
+  for (let k = ONLINE_WINDOW_DAYS - 1; k >= 0; k--) all.push(...onlineScheduleOn(addDays(today, -k)));
+  const nowMs = now.getTime();
+  return all.filter((s) => Date.parse(s.at) <= nowMs).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+}
+
+/** 이미 적힌 사건 키 · 주문 번호(그 시각부터 · 자사몰 키 source = sdk) — 사건 이름으로 거르지 않는다(주문 사건 이름 판정 = 주문 CT 한 곳 · R22). */
+async function sentOnlineKeys(companyId: string, fromIso: string): Promise<Set<string>> {
+  const r = await query(
+    `SELECT properties->>'event_key' AS k, properties->>'order_id' AS o
+       FROM cdp_events
+      WHERE company_id = $1::uuid AND source = 'sdk' AND occurred_at >= $2::timestamptz
+        AND (properties ? 'event_key' OR properties ? 'order_id')`,
+    [companyId, fromIso],
+  );
+  const out = new Set<string>();
+  for (const row of r.rows) { if (row.k) out.add(String(row.k)); if (row.o) out.add(String(row.o)); }
+  return out;
+}
+
+/** 고객에 이어진 몰 회원 번호. */
+async function linkedExternalIds(companyId: string, externalIds: readonly string[]): Promise<Set<string>> {
+  if (!externalIds.length) return new Set();
+  const r = await query(
+    `SELECT external_id FROM cdp_identity_links WHERE company_id = $1::uuid AND source = 'sdk' AND external_id = ANY($2::text[]) AND customer_id IS NOT NULL`,
+    [companyId, externalIds],
+  );
+  return new Set(r.rows.map((x: any) => String(x.external_id)));
+}
+
+async function postCdp(path: 'identify' | 'event' | 'order', body: unknown, key: CdpKey): Promise<void> {
+  const port = process.env.PORT || 3000;
+  const res = await fetch(`http://127.0.0.1:${port}/api/cdp/${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Hanjullo-Key': key.apiKey, 'X-Hanjullo-Secret': key.apiSecret },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`cdp ${path} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+}
+
+const onlineSkipLogged = new Set<string>();
+const droppedLoggedDay = new Map<string, string>();
+/** 키 → 이 실제 시각(clock) 전에는 다시 보내지 않는다(실패 시각 + 10분 · tick 은 고정 주기라 실패 직후 tick 이 올 수 있다 · Codex 구현 1R · 2R) */
+const onlineRetryNotBefore = new Map<string, number>();
+const ONLINE_RETRY_WAIT_MS = 10 * 60_000;
+/** 시험 전용 — 프로세스 메모리 상태 비우기. */
+export function resetRealismOnlineState(): void {
+  onlineSkipLogged.clear();
+  droppedLoggedDay.clear();
+  onlineRetryNotBefore.clear();
+}
+
+/**
+ * 온라인 한 tick — 보낼 차례 − 이미 적힌 것 · 고객 행이 아직 없는 회원은 미룸 · 오래된 것부터 상한 600 · 회원 잇기는 그 회원 첫 사건 직전.
+ *   오류 = 던져서 이번 tick 을 멈춘다(같은 tick 안에서 다시 보내지 않음 · 다음 tick 이 적힌 키를 다시 읽는다 · 설계서 §5 상한).
+ *   7일 창에서 막 빠진 날의 미전송 = 보내지 않고 건수만 로그(하루 한 번).
+ */
+export async function pushRealismOnline(key: CdpKey, now: Date = new Date(), paceMs: number = ONLINE_PACE_MS, clock: () => number = Date.now): Promise<{ sent: number; deferred: number; skipped?: string }> {
+  // 시각 축 둘 — now = 사건 일정의 기준 시각 · clock = 실패 뒤 대기를 재는 실제 시계(tick 시작과 실제 실패 사이가 몇 분 벌어질 수 있다 · Codex 구현 2R)
+  if (clock() < (onlineRetryNotBefore.get(key.apiKey) ?? 0)) return { sent: 0, deferred: 0 };   // 실패 뒤 10분 = 늦게 끝나는 원 요청의 INSERT 를 기다린다
+  const owner = await query(`SELECT id FROM companies WHERE cdp_api_key = $1`, [key.apiKey]);
+  const companyId = owner.rows[0]?.id ? String(owner.rows[0].id).toLowerCase() : '';
+  if (!companyId || !(await isRealismCompany(companyId))) return { sent: 0, deferred: 0, skipped: '자사몰 합성 키가 허용 목록 회사(시연 아님) 것이 아닙니다. 보내지 않았습니다.' };
+  const today = kstDate(now);
+  const dropDay = addDays(today, -ONLINE_WINDOW_DAYS);
+  const sent = await sentOnlineKeys(companyId, `${dropDay}T00:00:00+09:00`);
+  if (droppedLoggedDay.get(key.apiKey) !== today) {
+    droppedLoggedDay.set(key.apiKey, today);
+    const dropped = onlineScheduleOn(dropDay).filter((s) => !sent.has(s.key)).length;
+    if (dropped) console.warn(`[demo-data] ${key.apiKey.slice(0, 10)} 자사몰 합성 ${dropDay} 미전송 ${dropped}건 = 7일 창 밖이라 보내지 않음`);
+  }
+  let pending = dueOnlineSends(now).filter((s) => !sent.has(s.key));
+  if (!pending.length) return { sent: 0, deferred: 0 };
+  const have = await existingPhones(companyId, [...new Set(pending.map((s) => demoPhone(s.index)))]);
+  const deferred = pending.filter((s) => !have.has(demoPhone(s.index))).length;
+  pending = pending.filter((s) => have.has(demoPhone(s.index))).slice(0, ONLINE_TICK_CAP);
+  const linked = await linkedExternalIds(companyId, [...new Set(pending.map((s) => mallExternalId(s.index)))]);
+  const pace = () => (paceMs > 0 ? new Promise((res) => setTimeout(res, paceMs)) : Promise.resolve());
+  let count = 0;
+  try {
+    for (const s of pending) {
+      const ext = mallExternalId(s.index);
+      if (!linked.has(ext)) {
+        await postCdp('identify', { external_id: ext, phone: demoPhone(s.index) }, key);
+        linked.add(ext);
+        await pace();
+      }
+      await postCdp(s.kind === 'order' ? 'order' : 'event', s.body, key);
+      count++;
+      await pace();
+    }
+  } catch (err) {
+    onlineRetryNotBefore.set(key.apiKey, clock() + ONLINE_RETRY_WAIT_MS);   // 실제 실패 시각 + 10분 뒤에 적힌 키를 다시 읽는다
+    throw err;
+  }
+  return { sent: count, deferred };
 }
