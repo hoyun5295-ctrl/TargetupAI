@@ -24,8 +24,13 @@ module.exports = {
   apps: [
     {
       name: 'targetup-backend',
-      script: '/usr/bin/ts-node',
-      args: 'src/app.ts',
+      // ★ 2026-11-10 운영 = 배포 관문을 통과한 컴파일본(dist) 실행(옛: /usr/bin/ts-node src/app.ts).
+      //   ts-node 는 실행 중 형 검사로 전 코드(1,391 파일 · 30만 7천 줄) 형 정보를 메모리에 계속 들었다 — 실측(로컬 · 같은 868 소스를
+      //   ts-node 로 컴파일) 형 검사 RSS 1,554MB / 끔 376MB. 운영 RSS 가 기동 42분에 1,688MB(상한 1,700M)라 큰 직접발송 적재 25 ~ 36초 뒤마다
+      //   강제 재시작 → 적재 끊김(10-28 톤28 7,790 · 11-10 SOOBIN02 9,906 미발송).
+      //   dist = npm run build:safe(tsc · 실패면 옛 dist 유지)가 만든 것만 돈다 → 관문(형 검사)과 실행 대상이 같다(Codex 1R #2).
+      //   경로: src 와 dist 는 같은 깊이(rootDir src · outDir dist)라 __dirname 기준 ../../fonts · assets · uploads 가 그대로 백엔드 뿌리다.
+      script: 'dist/app.js',
       cwd: '/home/administrator/targetup-app/packages/backend',
 
       // ★ 진정 1순위 fix — Heap 영역 2GB 확장 (기본 ~341MB → 2048MB)
