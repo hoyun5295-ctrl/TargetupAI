@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: b44a9cf8 · 2026-11-10 · Harold 서버 출력(git log -1 = b44a9cf8 2026-11-10 07:12:24 +0900 · 1110 C120 브랜드 창 명단 항목 칸) · 그 전 1e2505c1(1109 로그인 차단 지원팀원 · 이미지 스튜디오 · 서버 출력 1e2505c1 2026-11-09 16:22:58 +0900) · 그 전 21a73735
-- deployed_head: b44a9cf8 · 2026-11-10 · 프론트 build:safe(dist/index.html 07:18:29 · dist grep ks-list-scroll 2 · 「항목 검색」 1 · 1e2505c1 뒤 백엔드 실행 코드 변경 0 · 이번 reload 실행 여부 미확인 · 필요 없음) · Harold 화면 확인 넷 정상(C120 브랜드 창 타겟추출 칸 · 지원팀원 로그인 차단 메뉴 「+ 수동 차단」 없음 · 스튜디오 행사 포스터 제품 칸 없음 · 저장 전 결과 지우기 · 요금제 안내 화면) · 1e2505c1 = 11-09 백엔드 · 프론트 build:safe(dist 16:28:17 · 16:29:28 · backend dist grep 2 · 2 · 2 · 2 · 기동 19:19:49 KST · 관련 err 로그 0) · DDL 0 · ENV 0 · 그 전 21a73735
+- pulled_head: d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
+- deployed_head: d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -65,7 +65,7 @@
 | C118 | 5fc2d527 · b05a4dca · a06e041b |
 | C119 | f0e7ea30 |
 | C120 | b44a9cf8 |
-| C121 | 미커밋 |
+| C121 | d7a97ce5 |
 
 ## §1 대기
 
@@ -1585,6 +1585,7 @@ COMMIT;
 - 선행: Codex 설계 3R · 구현 3R approve · 커밋(Harold · 5 경로 · 다른 세션 파일 뺌) → push
 - 기대: 설계서 docs/2026-11-10-synthetic-company-realism-design.md · 인비토(허용 목록 · 시연 아님)만 v3 · 시연 회사 v2 그대로 · 실제 고객사 변화 0 · ENV 넣기 전 = 매장 갈래만 v3(다음 07:00 tick) · 온라인 갈래 꺼짐
 - 확인: 서버 HEAD · pm2 기동 · 에러 로그 · 기동 로그 「합성 데이터 워커 시작(매일 07:00 KST 이후 1회 · 키 2개 · 자사몰 키 0개)」
+- 결과: 1110 Harold = push · 서버 pull · 백엔드 build:safe · pm2 reload → HEAD d7a97ce5(2026-11-10 13:00:22 +0900) · src grep pushRealismOnline 2 · targetup-backend online ↺80 · unstable 0 · 13:09:26 「합성 데이터 워커 시작(매일 07:00 KST 이후 1회 · 키 2개 · 자사몰 키 0개)」 · 재기동 뒤 에러 로그 0줄 → 서버 단계 통과 · 매장 갈래 v3 = 다음 07:00 tick 부터(C121-S1)
 
 ### C121-A1 · 인비토 자사몰 키 쓸 수 있나(요금제 활성 유료 · 월 자사몰 호출 한도 · K10)
 - 카드: C121
@@ -1592,14 +1593,16 @@ COMMIT;
 - 선행: C121-H1
 - 기대: 서버 셸 한 줄(읽기만) = 인비토 회사의 plans.plan_code · 활성 유료 판정(ACTIVE_PAID_PLAN_WHERE) · plans.cdp_events_per_month · 이번 달 cdp_api_call_log 합 · 하루 약 330 사건 + 회원 잇기 = 한 달 약 1만 2천 호출이 한도 안
 - 확인: 활성 유료 t · 한도 ≥ 이번 달 합 + 15,000 이면 C121-ENV-1 로 · 아니면 멈추고 Harold 판단
+- 결과: 1110 Harold 서버 출력 = plan_code STAFF · subscription_status paid · active_paid t · monthly_limit NULL(무제한) · used_this_month 0 · has_cdp_key f · app_ids 0 → 통과 · 같은 출력 users = mobile admin · gwchae · sgbaek · suran user(인앱 메뉴 = 관리자만 · 담당자 403 · routes/cdp.ts 1295 · 1391)
 
 ### C121-ENV-1 · SYNTHETIC_CDP_KEYS(인비토 자사몰 키 · 합성 데이터 온라인 갈래)
 - 카드: C121
 - 단계: ENV
-- 선행: C121-A1 · 인비토 자사몰 키 발급(화면 「자사몰 연동」 · 비밀은 화면 1회 표시) · 등급 서열 등록(여정 등급 순서 창 · 일반 < 실버 < 골드 < VIP)
+- 선행: C121-A1 · 인비토 자사몰 키 발급(화면 「자사몰 연동」 /cdp-settings · 비밀은 화면 1회 표시) · 등급 서열 등록은 뺌(1110 Harold 「등급순서 그런 거 자체가 없다」 = 여는 자리 0 · 등급 상승 여정을 켤 때 필요 · 데이터 층은 등급 서열 없이 돈다)
 - 의미 바꿈: 예(인비토에 자사몰 방문 · 상품 조회 · 담기 · 결제 시작 · 주문이 10분마다 쌓인다 · 하루 약 330 사건 · 약 5 주문 · 비어 있으면 온라인 갈래 꺼짐 = 지금 동작)
 - 기대: 「hjl_키:sk_비밀」 한 쌍 · 비밀값(출력 금지)
 - 확인: restart --update-env 뒤 기동 로그 「자사몰 키 1개」 · 10분 안에 「자사몰 합성 · 보냄 N · 미룸 M」 · 「자사몰 합성 전송 실패」 0줄
+- 결과: 1110 Harold = 인비토 자사몰 키 발급(화면) → 서버 .env 저장 스크립트(꼴 hjl_ · sk_ 64자 · 퍼블릭키 회사 = c7c97996 · 시크릿 bcrypt 짝 대조 통과 · .env 백업) = 「저장됨 · SYNTHETIC_CDP_KEYS 줄 1개 · 값 길이 136」 · 1110 13:22 restart --update-env(적재 0건 확인 한 줄 · loading=0 · ↺81 online) → 13:22:54 「자사몰 키 1개」 · 13:23:54 매장 회차 시연 35 · 35 · 46(v2 그대로) · 인비토 새 고객 0 · 재구매 51 · 구매 100(같은 날 재실행 = 구매 전 쓰기 0 · 13:10 과 같은 값) · 13:27:31 「자사몰 합성 · 보냄 600 · 미룸 179」 · err = 「2026-11-03 미전송 350건 = 7일 창 밖」 1줄(첫 켬 안내) · 실패 0 · 자사몰 연동 화면 「자체 호스팅 / 그 외 자사몰 · 연결됨」(source sdk 24시간 집계) → 통과
 
 ### C121-S1 · 실측(배포 다음 날 07:00 뒤)
 - 카드: C121
