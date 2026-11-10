@@ -35,6 +35,16 @@ export function shapeOptionKeys(status: string, diff: Record<string, any>): stri
 
 export const numOrNull = (v: any): number | null => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Math.floor(Number(v)));
 
+/**
+ * ★ 2026-11-10 C123 — 「마친 뒤 N일 지나면」 칸의 최솟값. 서버가 여정 상세에 실어 준 값(시작 사건마다 다르다 · 화면이 표를 복사하지 않는다).
+ *   자동으로 다시 받기를 켜면 그 최솟값(사건으로 시작하는 여정도 1일). 서버 값이 없으면 0(옛 응답).
+ */
+export function reentryMinOf(journey: any, form: OptionForm): number {
+  const base = numOrNull(journey?.reentry_min_days) ?? 0;
+  const auto = numOrNull(journey?.auto_reentry_min_days) ?? base;
+  return form.autoReentryEnabled === true ? Math.max(base, auto) : base;
+}
+
 export function formFromJourney(j: any): OptionForm {
   const tf = j?.trigger_filters || {};
   const t = TIMING[j?.trigger_event];

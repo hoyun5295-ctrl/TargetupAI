@@ -58,12 +58,28 @@ export function isCustomerSendable(c: {
  *   params에 push(applyCustomerConditions와 동일 패턴) — 호출부는 cond 앞에 둔다. 반환은 'AND ...' 또는 ''.
  *   검증 컬럼: journey_executions.journey_id·customer_id·status·entered_at(executor·watcher 사용 중).
  */
+/**
+ * ★ 2026-11-10 C123(뿌리 R87) — 재진입 허용 여정에서 「이 실행이 있으면 다시 넣지 않는다」 조각(실행을 넣는 자리의 실행 시점 관문 · 저장값과 무관).
+ *   최솟값 0(사건 키로 한 번만 들어오는 시작) = 진행 중만(옛 글자 그대로) · 1 이상 = 진행 중 또는 **끝난 지 계약 최솟값 안**
+ *   (끝난 시각이 없는 실행 = 들어온 시각 · 상태 무관 = 방금 「이 발송 정지」로 끝낸 실행도 건다).
+ *   쓰는 곳 = 뽑기 안티조인(아래) · 진입 감시 묶음 넣기 가드 · 자동 재진입 워커 — 뽑기 수 = 넣기 수(따로 쓴 같은 판정 0).
+ *   floorDays = 계약 상수(journey-trigger-capability reentryFloorDays · autoReentryFloorDays)만 넘긴다(사용자 입력 아님 · 정수로 접어 글자로 싣는다).
+ */
+export function reentryHoldSql(execAlias: string, floorDays: number): string {
+  const f = Math.max(0, Math.floor(Number(floorDays) || 0));
+  return f > 0
+    ? `(${execAlias}.status = 'active' OR COALESCE(${execAlias}.completed_at, ${execAlias}.entered_at) > NOW() - INTERVAL '${f} days')`
+    : `${execAlias}.status = 'active'`;
+}
+
 export function buildReentryAntiJoin(
   alias: string,
   params: any[],
   journeyId: string,
   allowReentry: boolean,
   cooldownDays: number,
+  // ★ 2026-11-10 C123 — 계약 최솟값(필수 인자 · 기본값 없음 = 새 뽑기 갈래가 빠뜨리면 컴파일 실패 · Codex 설계 1R #4)
+  floorDays: number,
   // ★ 2026-09-30 여정 V2 5차 — 같은 계보(새 판 · 옛 판) 여정 id. 2개 이상일 때만 계보로 본다(없으면 옛 문장 그대로).
   lineageIds?: string[],
 ): string {
@@ -82,12 +98,12 @@ export function buildReentryAntiJoin(
     //   「한 번에 최대」를 넘었다며 여정이 멈출 수 있었다(Codex C104 구현 1R [범위 밖]).
     params.push(lineage || journeyId);
     const match = lineage ? `je.journey_id = ANY($${params.length}::uuid[])` : `je.journey_id = $${params.length}::uuid`;
-    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND je.status = 'active')`;
+    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND ${reentryHoldSql('je', floorDays)})`;
   }
   params.push(lineage || journeyId);
   const jIdx = params.length;
   params.push(String(cd));
   const cdIdx = params.length;
   const match = lineage ? `je.journey_id = ANY($${jIdx}::uuid[])` : `je.journey_id = $${jIdx}::uuid`;
-  return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND (je.status = 'active' OR je.entered_at > NOW() - ($${cdIdx} || ' days')::interval))`;
+  return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND (${reentryHoldSql('je', floorDays)} OR je.entered_at > NOW() - ($${cdIdx} || ' days')::interval))`;
 }

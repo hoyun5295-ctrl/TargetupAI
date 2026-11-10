@@ -9,7 +9,7 @@
 import { useState } from 'react';
 import { CalendarClock, ChevronDown, ChevronUp, Loader2, Plus, Unlink, Users } from 'lucide-react';
 import { ConditionRow, COND_FIELDS, condLabel, condValueText, useConditionValueOptions, type AudienceCondition } from '../JourneyBuilderUi';
-import { TIMING, STANDING_TRIGGERS, numOrNull, type OptionForm } from '../../../utils/journey-start-form';
+import { TIMING, STANDING_TRIGGERS, numOrNull, reentryMinOf, type OptionForm } from '../../../utils/journey-start-form';
 import { journeyCapHelp, journeyGraceHeldText } from '../../../utils/journey-cap-copy';
 import { formatPhoneNumber } from '../../../utils/formatDate';
 
@@ -53,13 +53,13 @@ function Toggle({ on, onChange, label, desc, disabled }: { on: boolean; onChange
   );
 }
 
-function NumField({ value, onChange, unit, placeholder, disabled, label, min, max }: {
-  value: any; onChange: (v: number | null) => void; unit: string; placeholder?: string; disabled?: boolean; label: string; min?: number; max?: number;
+function NumField({ value, onChange, onBlur, unit, placeholder, disabled, label, min, max }: {
+  value: any; onChange: (v: number | null) => void; onBlur?: () => void; unit: string; placeholder?: string; disabled?: boolean; label: string; min?: number; max?: number;
 }) {
   return (
     <span className="inline-flex items-center gap-1">
       <input type="number" inputMode="numeric" aria-label={label} min={min} max={max} disabled={disabled} value={value ?? ''} placeholder={placeholder}
-        onChange={(e) => onChange(numOrNull(e.target.value))}
+        onChange={(e) => onChange(numOrNull(e.target.value))} onBlur={onBlur}
         className="h-9 w-24 rounded-lg border border-slate-300 bg-white px-2 text-[13px] tabular-nums text-slate-900 disabled:bg-slate-100" />
       <span className="text-[13px] text-slate-600">{unit}</span>
     </span>
@@ -79,6 +79,9 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
   const conds: AudienceCondition[] = (form.customer_conditions || []) as AudienceCondition[];
   const setConds = (next: AudienceCondition[]) => setField('customer_conditions', next);
   const isCustom = te === 'custom';
+  // ★ 2026-11-10 C123 — 재진입 대기 최솟값(서버 값) · 지금 값이 그보다 작으면 올린다
+  const reentryMin = reentryMinOf(journey, form);
+  const raiseReentry = (min: number) => { if ((numOrNull(form.reentryCooldownDays) ?? 0) < min) setField('reentryCooldownDays', min); };
   const editableCond = (c: any) => !Array.isArray(c?.value) && !['in', 'not_in', 'is_null', 'not_null'].includes(String(c?.op)) && COND_FIELDS.some((f) => f.key === c?.field);
 
   const sec = 'border-t border-slate-100 pt-3 mt-3';
@@ -268,14 +271,16 @@ export default function JourneyStartCard({ journey, triggerLabel, form, setField
         {'exclude_dormant_return' in form && (
           <Toggle on={form.exclude_dormant_return === true} onChange={(v) => setField('exclude_dormant_return', v)} disabled={locked} label="돌아온 고객은 환영만" desc="휴면에서 돌아온 고객은 휴면 복귀 여정만 받아요." />
         )}
-        <Toggle on={form.allowReentry === true} onChange={(v) => setField('allowReentry', v)} disabled={locked} label="다시 들어오게 하기" desc="여정을 마친 고객이 다시 조건에 맞으면 또 받아요." />
+        {/* ★ 2026-11-10 C123 — 대기 일수 최솟값 = 서버가 준 값(시작 사건마다) · 켤 때와 칸을 떠날 때 최솟값보다 작으면 올려 보인다(저장은 사람이 누른다) */}
+        <Toggle on={form.allowReentry === true} onChange={(v) => { setField('allowReentry', v); if (v) raiseReentry(reentryMin); }} disabled={locked} label="다시 들어오게 하기" desc="여정을 마친 고객이 다시 조건에 맞으면 또 받아요." />
         {form.allowReentry && (
           <div className="space-y-1 pl-12">
             <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-slate-700">
-              마친 뒤 <NumField label="재진입 대기" value={form.reentryCooldownDays} onChange={(v) => setField('reentryCooldownDays', v ?? 0)} unit="일 지나면" disabled={locked} min={0} max={365} />
+              마친 뒤 <NumField label="재진입 대기" value={form.reentryCooldownDays} onChange={(v) => setField('reentryCooldownDays', v ?? reentryMin)} onBlur={() => raiseReentry(reentryMin)} unit="일 지나면" disabled={locked} min={reentryMin} max={365} />
+              {reentryMin >= 1 && <span className="text-[12px] text-slate-500">최소 {reentryMin}일</span>}
             </div>
-            <Toggle on={form.autoReentryEnabled === true} onChange={(v) => setField('autoReentryEnabled', v)} disabled={locked}
-              label="자동으로 다시 받기" desc="대기 일수가 지난 고객을 6시간마다 다시 넣어요. 광고 수신 동의 고객만, 한 고객당 진행 중 하나만이에요." />
+            <Toggle on={form.autoReentryEnabled === true} onChange={(v) => { setField('autoReentryEnabled', v); if (v) raiseReentry(reentryMinOf(journey, { ...form, autoReentryEnabled: true })); }} disabled={locked}
+              label="자동으로 다시 받기" desc="대기 일수가 지난 고객을 1시간마다 다시 넣어요. 광고 수신 동의 고객만, 한 고객당 진행 중 하나만이에요." />
           </div>
         )}
       </div>

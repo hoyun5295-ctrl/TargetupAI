@@ -41,7 +41,8 @@ import { crossDoorEntryOwnedSql } from './two-door-purchase';   // ★ 2026-11-0
 import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
 import { firstRunAtFor, isNightExemptStep } from './send-time-util';
-import { sendTimingForTrigger } from './journey-trigger-capability';
+import { sendTimingForTrigger, reentryFloorDays } from './journey-trigger-capability';
+import { reentryHoldSql } from './journey-safety-filter';   // ★ 2026-11-10 C123 재진입 조각(뽑기 안티조인과 같은 판정)
 import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJourney } from './journey-entry-ledger';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매(상품 자격 · 문 확인) · 진입 교체(새 주기면 옛 실행을 닫고 새로 넣는다).
 import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, qualifyProductBatch } from './journey-product';
@@ -848,7 +849,8 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   // ★ Fix #6 (2026-06-05): 한 명씩 루프 폐기 → 조건 맞는 전원을 한 방 일괄 INSERT(원래 의도 = 전체 진입).
   //   중복·cooldown은 추출 단계 안티조인(원장·재진입·execution)이 이미 제외. 아래 NOT EXISTS는 추가 안전망 —
   //   재진입 가능 = active만 / 재진입 불가 = 어떤 execution이라도 있으면 제외(checkCooldown과 동일 기준).
-  const reentryGuard = j.allow_reentry ? `AND je.status = 'active'` : ``;
+  // ★ 2026-11-10 C123(뿌리 R87) — 뽑기 안티조인과 같은 조각(진행 중 또는 끝난 지 계약 최솟값 안 = 다시 넣지 않는다 · 저장된 대기일과 무관한 실행 시점 관문)
+  const reentryGuard = j.allow_reentry ? `AND ${reentryHoldSql('je', reentryFloorDays(j.trigger_event))}` : ``;
   // ★ 2026-06-22: 진입 properties(장바구니 cart_add 등)를 id 순서에 정렬해 entry_event_properties로 동봉.
   //   props 미전달(타 트리거) 시 전부 null → entry_event_properties NULL(기존 동작 불변).
   let entryProps = buildEntryPropsArray(customerIds, propsByCustomer);

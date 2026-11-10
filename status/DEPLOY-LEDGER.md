@@ -67,6 +67,7 @@
 | C120 | b44a9cf8 |
 | C121 | d7a97ce5 |
 | C122 | 3f5f21ce · 23ede51c |
+| C123 | 미커밋 |
 
 ## §1 대기
 
@@ -1658,6 +1659,37 @@ COMMIT;
 - 단계: 사후
 - 선행: C122-H1
 - 기대: 설계서 §6 네 줄(인비토 회사 · 파일 3만 줄 예약 → Harold 30초 안 재시작(다른 회사 적재 0건 확인 한 줄 뒤) → 대상 30,000 · 적재 30,000 → 예약 취소 · 대기 0) + 직접입력 창 10,000 = 잠금 · 9,999 = 추가 + 여정 만들기 문안에 {{ }} 0 · %고객명% 만
+- 결과: (대기)
+
+### C123-P1 · 배포 전 실측(새 최솟값보다 짧게 저장된 재진입 여정 목록 · 읽기만)
+- 카드: C123
+- 단계: 배포 앞
+- 선행: 없음
+- 기대: 서버 셸 한 줄 = `SELECT co.company_name, j.name, j.status, j.trigger_event, COALESCE(j.reentry_cooldown_days,0) AS cd, j.auto_reentry_enabled AS auto FROM journeys j JOIN companies co ON co.id = j.company_id WHERE j.allow_reentry = true AND j.status IN ('active','paused','draft') AND ((j.trigger_event = 'customer.dormant' AND COALESCE(j.reentry_cooldown_days,0) < 7) OR (j.trigger_event IN ('customer.birthday_approaching','customer.points_expiring','customer.created') AND COALESCE(j.reentry_cooldown_days,0) < 1) OR (j.auto_reentry_enabled = true AND COALESCE(j.reentry_cooldown_days,0) < 1)) ORDER BY j.status, co.company_name` · 켜진 실제 고객사 여정이 있으면 배포 전에 목록을 Harold 께 보고(배포 뒤 그 여정은 끝난 뒤 최솟값 동안 다시 넣지 않는다 = 덜 보내는 쪽)
+- 확인: 행 = 미달 여정(1110 20시 다른 조건 실측 = 시연 회사 휴면 1건)
+- 결과: 1110 Harold 서버 출력 = 6행 — 시연 회사 「휴면 고객 다시 만나기」(켜짐 · 휴면 · 0일) · 시연 회사 「신규 가입 환영」(멈춤 · 가입 · 0일) · 인비토 「고른 고객에게」 넷(초안 2 · 멈춤 2 · 0일) · 자동으로 다시 받기 켠 여정 0 · 실제 고객사 0. → 이 출력으로 설계 정정: 고른 고객에게 최솟값 1 → 0(템플릿 기본이 재진입 켬 · 0일이라 그 넷의 켜기가 거절됐을 것 · 원래 한 번만 들어오는 시작 사건) → 인비토 넷 = 영향 0. 남는 둘(시연 회사) = 휴면 여정은 배포 뒤 끝난 뒤 7일 동안 다시 넣지 않음 · 신규 가입 여정은 다시 켤 때 「최소 1일」 안내 → 통과
+
+### C123-H1 · 한줄로 배포(여정 재진입 대기 최솟값 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C123
+- 단계: 한줄로 배포
+- 선행: C123-P1(결과 있음) · Codex 설계 2R · 구현 3R approve · 커밋(Harold · 다른 세션 파일 뺌) → push
+- 기대: 설계서 docs/2026-11-10-journey-reentry-floor-design.md · 재진입 허용 여정 = 끝난 뒤 계약 최솟값(휴면 7일 · 생일 · 포인트 · 가입 1일 · 사건형 · 고른 고객에게 0) 동안 다시 넣지 않음 · 자동으로 다시 받기 = 재진입 켠 여정만 · 끝난 뒤 최소 1일 · 미가입 직접발송 변화 0
+- 확인: 서버 HEAD · 백엔드 build:safe · 프론트 build:safe · 적재 0건 한 줄 → pm2 reload · 기동 에러 0 · dist grep reentryHoldSql ≥ 1 · 프론트 dist grep 「1시간마다 다시 넣어요」 ≥ 1
+- 결과: (대기)
+
+### C123-S1 · 실측(배포 다음 날 · 휴면 여정 재진입 0)
+- 카드: C123
+- 단계: 사후
+- 선행: C123-H1
+- 기대: 서버 셸 한 줄 = `SELECT COUNT(*) AS again FROM journey_executions e JOIN journeys j ON j.id = e.journey_id JOIN companies co ON co.id = j.company_id WHERE j.trigger_event = 'customer.dormant' AND j.allow_reentry = true AND e.entered_at > '<배포 시각>' AND EXISTS (SELECT 1 FROM journey_executions p WHERE p.journey_id = e.journey_id AND p.customer_id = e.customer_id AND p.id <> e.id AND p.status <> 'active' AND COALESCE(p.completed_at, p.entered_at) > e.entered_at - INTERVAL '7 days' AND COALESCE(p.completed_at, p.entered_at) <= e.entered_at)` = 0(배포 뒤 들어온 휴면 여정 실행 가운데 같은 고객의 앞 실행이 끝난 지 7일 안인 것 0)
+- 확인: again = 0
+- 결과: (대기)
+
+### C123-T1 · 직원 지시문(설계서 §7 일곱 줄 · 초안 여정 · 발송 0)
+- 카드: C123
+- 단계: 사후
+- 선행: C123-H1
+- 기대: 휴면 여정 = 「최소 7일」 · 0 을 넣어도 7 이상으로 저장 · 「1시간마다」 · 주문 완료 여정 = 0 저장 · 자동 켜면 최소 1일 · 재진입 끄면 자동도 꺼짐
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

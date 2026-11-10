@@ -18,7 +18,7 @@ describe('휴면 · 이미 쉬고 있는 고객도 받기', () => {
     const block = src.slice(src.indexOf("case 'customer.dormant': {"), src.indexOf("case 'customer.dormant': {") + 3000);
     expect(block).toContain('const includeExisting = filters.include_existing === true;');
     expect(block).toContain('const params: any[] = [companyId, String(d)];');
-    expect(block).toMatch(/if \(!includeExisting\) \{\s*params\.push\(String\(d \+ 7\)\);\s*upperBound = `AND c\.recent_purchase_date > \(\$\{KST_TODAY_DATE_SQL\} - \(\$\$\{params\.length\} \|\| ' days'\)::interval\)`;/);
+    expect(block).toMatch(/if \(!includeExisting\) \{\s*params\.push\(String\(d \+ DORMANT_ENTRY_WINDOW_DAYS\)\);\s*upperBound = `AND c\.recent_purchase_date > \(\$\{KST_TODAY_DATE_SQL\} - \(\$\$\{params\.length\} \|\| ' days'\)::interval\)`;/);
     expect(block).toContain('${upperBound}');
     expect(block).not.toContain("($3 || ' days')");
     expect(block).toContain('ORDER BY c.recent_purchase_date DESC');

@@ -32,7 +32,7 @@ import { journeyListWhere, executionStatusFilter } from './journey-list-filter';
 import { StartKind, normalizeStartKind, classifyStartKind } from './journey-start-kind';
 import { validateAlimtalkFallback, AlimtalkFallbackError } from './alimtalk-fallback';
 // ★ 2026-08-01 여정 재설계 — 활성화가 발송이 시작되는 유일한 길목이라 게이트를 여기 둔다(Codex 4R).
-import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT, sendTimingLine } from './journey-trigger-capability';
+import { resolveTriggerAvailability, toAvailabilityMap, triggerKeyForEvent, isImplementedTriggerEvent, isCreatableTriggerEvent, getTriggerContract, reentryFloorDays, autoReentryFloorDays, goalKindForTrigger, defaultGoalExitFor, isProductPickTrigger, AFTER_JOURNEY_EVENT, sendTimingLine } from './journey-trigger-capability';
 import { readAfterConfig } from './journey-after-config';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매 필터 검증(상품 · 문) · 키 규칙은 journey-product 한 곳.
 import { normalizeProductFilters } from './journey-product';
@@ -407,6 +407,8 @@ export async function createJourneyFromTemplate(input: CreateJourneyInput): Prom
     allowReentry = true;
     reentryCooldownDays = 0;
   }
+  // ★ 2026-11-10 C123(뿌리 R87) — 재진입 대기 최솟값 = 계약이 정한다(AI · 템플릿 초안이 켜기에서 막히지 않게 올린다 · 화면에서 넣은 미달 값은 옵션 저장이 거절)
+  if (allowReentry) reentryCooldownDays = Math.max(Number(reentryCooldownDays || 0), reentryFloorDays(resolvedTriggerEvent));
   // ★ 2026-10-20 여정 V.3 §8-2 — 새 주문 완료 여정은 「돌아온 고객은 환영만」 기본 켬(휴면 복귀 여정과 같은 구매에 두 통 0 · 끄면 같이 받는다).
   if (resolvedTriggerEvent === 'cdp.purchase' && (resolvedTriggerFilters as any).exclude_dormant_return === undefined) {
     (resolvedTriggerFilters as any).exclude_dormant_return = true;
@@ -716,16 +718,29 @@ export function validateJourneyEntryConfig(row: {
   reentry_cooldown_days: number | null;
   trigger_filters: any;
   threshold_recipients_per_step: number | null;
+  /** ★ 2026-11-10 C123 — 자동으로 다시 받기(켜기 = 여정 행 · 옵션 저장 = 병합값) */
+  auto_reentry_enabled?: boolean;
+  /**
+   * ★ 2026-11-10 C123(Codex 설계 1R #3) — 옵션 저장만 넘긴다: 이번 요청이 재진입 값을 정하는가(재진입 켜기 · 대기일 · 자동 켜기).
+   *   거짓 = 최솟값 검사 둘을 걸지 않는다(끄기 · 재진입과 무관한 옵션 저장이 저장된 미달 값 때문에 막히지 않게 · 실행 시점 관문은 저장값과 무관).
+   *   안 넘김(켜기) = 늘 검사.
+   */
+  reentry_touched?: boolean;
 }): string | null {
   const triggerEvent = String(row.trigger_event || '');
   // ★ §11-5(§9-N1 종결) — 재진입 허용 트리거의 최소 쿨다운을 레지스트리가 강제한다.
   //   장바구니가 기원: 정보 알림 빌더가 쿨다운 0을 고정하면 추출 안티조인이 사라져
   //   24시간 창 동안 5분마다 재발송·재차감됐다. 조건은 계약(TRIGGER_CONTRACTS)에만 산다.
-  const contract = getTriggerContract(triggerEvent);
-  if (contract?.cooldownMinDays != null && row.allow_reentry === true) {
+  // ★ 2026-11-10 C123(뿌리 R87) — 최솟값 = 계약 필수 칸(모든 시작 사건 · 옛: 적힌 넷만 봐서 휴면 · 생일 · 포인트의 0일이 통과했다) · 자동으로 다시 받기 = 사건형도 최소 1일.
+  if (row.allow_reentry === true && row.reentry_touched !== false) {
     const cd = Number(row.reentry_cooldown_days || 0);
-    if (cd < contract.cooldownMinDays) {
-      return `이 발송 조건은 같은 분께 다시 보내기까지 최소 ${contract.cooldownMinDays}일이 필요합니다. 재진입 간격을 지정해 주세요.`;
+    const floor = reentryFloorDays(triggerEvent);
+    if (cd < floor) {
+      return `이 발송 조건은 같은 분께 다시 보내기까지 최소 ${floor}일이 필요합니다. 재진입 간격을 지정해 주세요.`;
+    }
+    const autoFloor = autoReentryFloorDays(triggerEvent);
+    if (row.auto_reentry_enabled === true && cd < autoFloor) {
+      return `자동으로 다시 받기는 마친 뒤 최소 ${autoFloor}일이 지나야 해요. 대기 일수를 ${autoFloor}일 이상으로 정해 주세요.`;
     }
   }
   // ★ 2026-10-20 V.3 §18 — 붙인 여정은 앞 여정 · 넘길 결과가 있어야 받는다(없으면 영영 0건).
@@ -789,7 +804,7 @@ async function activationBlockCore(companyId: string, journeyId: string, opts: {
   const detail = await query(
     `SELECT j.callback_number, j.status, j.start_kind, j.anchor_date,
             j.trigger_event, j.threshold_recipients_per_step,
-            j.allow_reentry, j.reentry_cooldown_days, j.trigger_filters,
+            j.allow_reentry, j.reentry_cooldown_days, j.auto_reentry_enabled, j.trigger_filters,
             (SELECT json_agg(json_build_object(
               'id', id,
               'notMetGoto', not_met_goto,
@@ -865,6 +880,7 @@ async function activationBlockCore(companyId: string, journeyId: string, opts: {
       trigger_event: triggerEvent,
       allow_reentry: row.allow_reentry === true,
       reentry_cooldown_days: row.reentry_cooldown_days,
+      auto_reentry_enabled: row.auto_reentry_enabled === true,
       trigger_filters: row.trigger_filters,
       threshold_recipients_per_step: row.threshold_recipients_per_step,
     });
@@ -2315,7 +2331,9 @@ export async function getJourneyDetail(companyId: string, journeyId: string) {
     journey: { ...row, entry_ends_on: endsReady ? (endsText ?? null) : undefined, entry_ends_ready: endsReady, activation_cost: activationCostOf(row), pause_view: pauseView,
       copy_facts_view: 'copy_facts' in row ? journeyCopyFacts(parseCopyFacts(row.copy_facts)) : null,
       // ★ 2026-11-02 발송 갈래 한 줄(시작 칸 · 계약 sendTiming · 설계서 3-6)
-      send_timing_line: sendTimingLine(row.trigger_event, row.start_kind) },
+      send_timing_line: sendTimingLine(row.trigger_event, row.start_kind),
+      // ★ 2026-11-10 C123 — 재진입 대기 최솟값(화면 입력 칸의 최솟값 · 계약 표를 화면에 복사하지 않는다)
+      reentry_min_days: reentryFloorDays(row.trigger_event), auto_reentry_min_days: autoReentryFloorDays(row.trigger_event) },
     steps: stepsWithLabels,
   };
 }

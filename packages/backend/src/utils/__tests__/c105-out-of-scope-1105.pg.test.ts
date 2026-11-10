@@ -83,7 +83,7 @@ describe('H3 재진입 허용 · 쿨다운 0', () => {
   it('조각 = 지금 여정 진행 중 고객(x) 제외 · 끝난 고객(y) 포함(계보 없음 · 계보 있음 둘 다)', async () => {
     for (const lineage of [undefined, [JR, randomUUID()]]) {
       const params: any[] = [CO, [C.x, C.y]];
-      const frag = buildReentryAntiJoin('c', params, JR, true, 0, lineage);
+      const frag = buildReentryAntiJoin('c', params, JR, true, 0, 0, lineage);   // ★ 1110 C123 최솟값 인자(0 = 옛 조각 그대로)
       const r = await pool.query(`SELECT c.id FROM customers c WHERE c.company_id = $1 AND c.id = ANY($2::uuid[]) ${frag}`, params);
       expect(r.rows.map((x) => String(x.id))).toEqual([C.y]);
     }

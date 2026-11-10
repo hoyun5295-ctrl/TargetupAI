@@ -3987,7 +3987,7 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     await lockLineage(client, journeyId);
     // 잠근 상태로 읽고 판정한다(옛: 트랜잭션 밖에서 읽고 status 만 쓰기 조건 · 켜진 여정 그 자리 수정이 생겨 병합 결과를 검사해야 한다)
     const curRes = await client.query(
-      `SELECT status, trigger_filters, trigger_event, allow_reentry, reentry_cooldown_days, threshold_recipients_per_step
+      `SELECT status, trigger_filters, trigger_event, allow_reentry, reentry_cooldown_days, auto_reentry_enabled, threshold_recipients_per_step
          FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`,
       [journeyId, companyId],
     );
@@ -4026,12 +4026,18 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
       await rollback();
       return res.status(400).json({ success: false, error: '조건이 없으면 전체 고객에게 보내요. 전체 고객으로 보내려면 「전체 고객」을 골라 주세요.', code: 'ALL_CUSTOMERS_REQUIRED' });
     }
+    const reentryTouched = ('allowReentry' in body && norm.options.allowReentry === true) || 'reentryCooldownDays' in body
+      || ('autoReentryEnabled' in body && norm.options.autoReentryEnabled === true);
+    const reentryOff = 'allowReentry' in body && norm.options.allowReentry === false;
     const merged = {
       trigger_event: String(cur.trigger_event || ''),
       allow_reentry: 'allowReentry' in body ? norm.options.allowReentry : cur.allow_reentry === true,
       reentry_cooldown_days: 'reentryCooldownDays' in body ? norm.options.reentryCooldownDays : cur.reentry_cooldown_days,
       trigger_filters: mergedFilters,
       threshold_recipients_per_step: 'thresholdRecipients' in body ? norm.options.thresholdRecipients : cur.threshold_recipients_per_step,
+      // ★ 2026-11-10 C123(뿌리 R87) — 자동으로 다시 받기 병합값 · 최솟값 검사는 이번 요청이 재진입 값을 정할 때만(끄기 · 무관 옵션 저장은 저장된 미달 값으로 막지 않는다 · Codex 설계 1R #3)
+      auto_reentry_enabled: reentryOff ? false : ('autoReentryEnabled' in body ? norm.options.autoReentryEnabled : cur.auto_reentry_enabled === true),
+      reentry_touched: reentryTouched,
     };
     // 켜진 여정은 다음 켜기가 없다 → 켜기 관문과 같은 검사를 저장 때 본다(상한 비우기 · 쿨다운 · 조건 · 포인트 기준).
     if (status === 'active') {
@@ -4122,7 +4128,9 @@ router.patch('/operator/journeys/:id/options', async (req: Request, res: Respons
     if ('budgetMonthly' in body) add('budget_monthly', norm.options.budgetMonthly);
     if ('allowReentry' in body) add('allow_reentry', norm.options.allowReentry);
     if ('reentryCooldownDays' in body) add('reentry_cooldown_days', norm.options.reentryCooldownDays);
-    if ('autoReentryEnabled' in body) add('auto_reentry_enabled', norm.options.autoReentryEnabled);
+    // ★ 2026-11-10 C123 — 재진입을 끄면 자동으로 다시 받기도 같이 끈다(화면이 숨기는 스위치가 켜진 채 남지 않게 · 워커 조건과 두 겹 · 같은 칸을 두 번 쓰지 않는다)
+    if (reentryOff) add('auto_reentry_enabled', false);
+    else if ('autoReentryEnabled' in body) add('auto_reentry_enabled', norm.options.autoReentryEnabled);
     // ★ 2026-11-05 C103 F3 · SC-1 — 회신번호 = 회사 등록 번호만(판정 = journey-callback 한 곳 · 옛: 아무 번호나 받았다) · 빈 값 = 지우지 않음(옛 규칙)
     if ('callbackNumber' in body && norm.options.callbackNumber) add('callback_number', await assertJourneyCallbackRegistered(companyId, norm.options.callbackNumber));
     if ('callbackMode' in body) add('callback_mode', norm.options.callbackMode);

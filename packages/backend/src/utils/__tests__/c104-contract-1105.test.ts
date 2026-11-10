@@ -221,7 +221,7 @@ describe('C2 R58 · 여정 대상 세기 입력 = 진입 입력 CT(journeyEntryI
   it('진입 입력 CT = 여정 행 재진입 · 계보 · 작성자 범위 · 작성자 동의(실제 진입과 같은 넷)', () => {
     const ext = read('backend/src/utils/journey-target-extractor.ts');
     const ct = enclosing(ext, ext.indexOf('export async function journeyEntryInputs(')).body;
-    for (const s of ['lineageIds: await lineageJourneyIds(journeyId)', 'scopeSql: await getJourneyOwnerScopeSql(companyId, journeyId),', 'consent: await journeyOwnerConsent(companyId, journeyId),', 'SELECT allow_reentry, reentry_cooldown_days FROM journeys']) {
+    for (const s of ['lineageIds: await lineageJourneyIds(journeyId)', 'scopeSql: await getJourneyOwnerScopeSql(companyId, journeyId),', 'consent: await journeyOwnerConsent(companyId, journeyId),', 'SELECT allow_reentry, reentry_cooldown_days, trigger_event FROM journeys', 'floorDays: reentryFloorDays(row.trigger_event)']) {   // ★ 1110 C123(R87) 시작 사건 = 재진입 최솟값
       expect(ct).toContain(s);
     }
   });

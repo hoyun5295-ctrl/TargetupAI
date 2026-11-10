@@ -182,15 +182,16 @@ describe('K3 H2 여정 개별회신번호 = 직접발송과 같은 CT', () => {
 describe('K4 H3 재진입 쿨다운 0 = 넣기 가드와 같은 집합', () => {
   it('허용 · 쿨다운 0 = 계보(없으면 지금 여정) 진행 중 제외', () => {
     const p1: any[] = [];
-    expect(buildReentryAntiJoin('c', p1, 'J', true, 0)).toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status = 'active')");
+    expect(buildReentryAntiJoin('c', p1, 'J', true, 0, 0)).toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status = 'active')");
     expect(p1).toEqual(['J']);
     const p2: any[] = [];
-    buildReentryAntiJoin('c', p2, 'J', true, 0, ['J', 'OLD']);
+    buildReentryAntiJoin('c', p2, 'J', true, 0, 0, ['J', 'OLD']);
     expect(p2).toEqual([['J', 'OLD']]);
   });
   it('넣기 가드 = 허용이면 같은 계보 · 지금 여정의 active 제외(소스)', () => {
     const w = read('backend/src/utils/journey-trigger-watcher.ts');
-    expect(w).toContain("const reentryGuard = j.allow_reentry ? `AND je.status = 'active'` : ``;");
+    // ★ 2026-11-10 C123(R87) — 넣기 가드 = 뽑기 안티조인과 같은 조각(reentryHoldSql · 계약 최솟값 0 = `je.status = 'active'` 그대로)
+    expect(w).toContain("const reentryGuard = j.allow_reentry ? `AND ${reentryHoldSql('je', reentryFloorDays(j.trigger_event))}` : ``;");
     expect(w).toContain('const journeyMatch = lineage ? `je.journey_id = ANY($6::uuid[])` : `je.journey_id = $1::uuid`;');
   });
 });

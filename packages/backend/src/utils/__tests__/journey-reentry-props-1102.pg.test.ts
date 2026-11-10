@@ -21,11 +21,12 @@ const C2 = randomUUID();
 async function journeyWithDoneRun(id: string, trigger: string, customerId: string): Promise<void> {
   await insertMinimalRow(pool, 'journeys', {
     id, company_id: CO, created_by: OWNER, name: `재진입 ${trigger}`, status: 'active', start_kind: 'event', trigger_event: trigger,
-    auto_reentry_enabled: true, reentry_cooldown_days: 0,
+    // ★ 2026-11-10 C123(R87) — 자동 재진입 = 「다시 들어오게 하기」가 켜진 여정만 · 끝난 뒤 계약 최솟값(휴면 7일 · 포인트 1일)이 지나야 넣는다
+    auto_reentry_enabled: true, allow_reentry: true, reentry_cooldown_days: 0,
   });
   await insertMinimalRow(pool, 'journey_steps', { id: randomUUID(), journey_id: id, step_order: 1, step_type: 'message', channel: 'sms', message_template: '안내', delay_hours: 0 });
   await insertMinimalRow(pool, 'journey_executions', {
-    id: randomUUID(), journey_id: id, customer_id: customerId, current_step_order: 1, status: 'completed', completed_at: new Date(Date.now() - 3_600_000),
+    id: randomUUID(), journey_id: id, customer_id: customerId, current_step_order: 1, status: 'completed', entered_at: new Date(Date.now() - 11 * 86_400_000), completed_at: new Date(Date.now() - 10 * 86_400_000),
   });
 }
 

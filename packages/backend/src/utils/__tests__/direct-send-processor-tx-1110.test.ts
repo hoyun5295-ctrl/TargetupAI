@@ -1,5 +1,5 @@
 // ★ 2026-11-10 처리기 tx 갈래 — 세 채널 모두 QueueTxAbort 를 부분 수습하지 않고 던진다 · 피로도 = 커밋 뒤 · tx 를 넘기는 곳은 처리기 · 워커뿐(소스 계약)
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
@@ -34,7 +34,14 @@ const base = (over: Partial<SendChunkParams>): SendChunkParams => ({
 } as SendChunkParams);
 const fakeTx = () => { const hooks: Array<() => any> = []; const tx: QueueTx = { run: async () => [], afterCommit: (f) => { hooks.push(f); } }; return { tx, hooks }; };
 
-beforeEach(() => { Object.assign(st, { throwAbort: false, fatigue: 0, smsOpts: [], brandTx: [], alimTx: [] }); });
+// ★ 2026-11-10 — 시각 고정(KST 정오 · Date 만 · 타이머는 진짜): 브랜드메시지는 발송 창(08:00 ~ 20:50) 밖이면 조립에서 막혀 큐 CT 까지 가지 않는다
+//   → 밤에 돌리면 이 시험이 깨졌다(1110 22시 실측). 시험이 보는 것은 tx 전달 · 던짐이지 발송 창이 아니다.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-10T03:00:00Z'));
+  Object.assign(st, { throwAbort: false, fatigue: 0, smsOpts: [], brandTx: [], alimTx: [] });
+});
+afterEach(() => { vi.useRealTimers(); });
 
 describe('processSendChunk tx 갈래', () => {
   it('세 채널 모두 tx 를 큐 CT 에 넘기고 QueueTxAbort 는 그대로 던진다(부분 수습 0)', async () => {
