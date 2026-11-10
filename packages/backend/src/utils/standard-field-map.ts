@@ -230,6 +230,19 @@ export function getCustomFields(): StandardFieldMapping[] {
   return FIELD_MAP.filter(f => f.storageType === 'custom_fields');
 }
 
+/** 메시지 변수가 되는 컬럼 칸 = 컬럼 칸 중 휴대폰(수신번호) · 수신 동의(boolean) 제외(AI 데이터 매트릭스 · Liquid → %변수% 변환이 같은 목록) */
+export function getMessageVariableColumnFields(): StandardFieldMapping[] {
+  return getColumnFields().filter(f => f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in');
+}
+
+/**
+ * ★ 2026-11-10 Liquid {{ customer.<컬럼> }} → %표시명%(발송 사전 키) — 여정 생성물 출구(liquid-templating liquidCopyToPercent)가 쓴다.
+ *   목록 = 위 메시지 변수 칸(company-data-profile 매트릭스가 AI 에 보여 주는 칸과 같다 · 「AI 가 본 변수 = 바뀐 결과」).
+ */
+export const CUSTOMER_LIQUID_TO_PERCENT: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(getMessageVariableColumnFields().map(f => [f.columnName, f.displayName])),
+);
+
 /** field_key → 실제 customers 컬럼명 (직접 컬럼일 때) */
 export function fieldKeyToColumn(fieldKey: string): string | null {
   const field = FIELD_MAP.find(f => f.fieldKey === fieldKey && f.storageType === 'column');

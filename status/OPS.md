@@ -143,6 +143,7 @@ cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
 # lock은 생성물이고 정본은 커밋에 있으므로 서버 변경만 버린다. **소스 파일이 목록에 있으면 멈추고 확인.**
 # git checkout -- packages/backend/package-lock.json && git pull
 
+# ★1110 운영 백엔드 = dist 실행(ecosystem script dist/app.js · 메모리 처방) → 백엔드 코드가 바뀌면 재시작 전에 반드시 build:safe(빌드 없이 재시작 = 옛 dist 가 돈다)
 # 5. 백엔드 재시작 (변경 시) — env를 바꿨으면 `pm2 restart all --update-env`
 # ★1102 = 적재 중 대량 발송이 0건일 때만 재시작한다(확인과 재시작을 한 줄 조건으로 · 교훈 = LESSONS_DEPLOY 1102)
 #   원장이 restart-env 를 요구하면 아래 pm2 reload targetup-backend 자리를 pm2 restart targetup-backend --update-env 로 바꾼다

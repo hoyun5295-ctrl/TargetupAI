@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent }
 import { createPortal } from 'react-dom';
 import { PencilLine, ClipboardPaste, TableProperties, X } from 'lucide-react';
 import '../../styles/direct-send.css';
+import { DIRECT_PASTE_MAX } from '../../utils/recipient-paste';
 
 export type DirectInputTone = 'emerald' | 'amber' | 'violet';
 
@@ -102,8 +103,10 @@ export default function RecipientDirectInputModal({
   if (!open) return null;
 
   const preview = text.trim() ? previewPaste(text) : { add: 0, notes: [], invalid: [] } as PastePreview;
+  // ★ 2026-11-10 한 번에 더할 번호가 상한을 넘으면 [추가] 잠금 · 파일등록 안내(세 창 공용 · 상한 = recipient-paste DIRECT_PASTE_MAX)
+  const overLimit = preview.add > DIRECT_PASTE_MAX;
   const submitPaste = () => {
-    if (preview.add === 0) return;
+    if (preview.add === 0 || overLimit) return;
     onSubmitPaste(text);
     onClose();
   };
@@ -174,16 +177,21 @@ export default function RecipientDirectInputModal({
                 </div>
               )}
               {rows?.disabledReason && <p className="rdi-hint">{rows.disabledReason}</p>}
+              {overLimit && (
+                <p className="rdi-warn" role="alert">
+                  한 번에 넣을 수 있는 번호는 {DIRECT_PASTE_MAX.toLocaleString()}{unit}까지예요. 그보다 많은 명단은 [파일등록]으로 올려 주세요.
+                </p>
+              )}
               {pasteWarning && <p className="rdi-warn">{pasteWarning}</p>}
             </div>
             <div className="rdi-foot">
               <div className="rdi-note">
                 지금 명단 <b>{currentCount.toLocaleString()}{unit}</b>
-                {preview.add > 0 && <> → 추가하면 <b>{(currentCount + preview.add).toLocaleString()}{unit}</b></>}
+                {preview.add > 0 && !overLimit && <> → 추가하면 <b>{(currentCount + preview.add).toLocaleString()}{unit}</b></>}
               </div>
               <button type="button" className="rdi-btn-g" onClick={onClose}>취소</button>
-              <button type="button" className="rdi-btn-p" onClick={submitPaste} disabled={preview.add === 0}>
-                {preview.add > 0 ? `${preview.add.toLocaleString()}${unit} 추가` : '추가'}
+              <button type="button" className="rdi-btn-p" onClick={submitPaste} disabled={preview.add === 0 || overLimit}>
+                {preview.add > 0 && !overLimit ? `${preview.add.toLocaleString()}${unit} 추가` : '추가'}
               </button>
             </div>
           </>

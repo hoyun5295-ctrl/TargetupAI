@@ -36,6 +36,8 @@ import { ensureSenderName } from './messageUtils';
 import { buildJourneyStats, JourneyFullStats, JourneyStepStat } from './journey-stats';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 import { finishMany, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
+import { liquidCopyToPercent } from './liquid-templating';   // ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드)
+import { CUSTOMER_LIQUID_TO_PERCENT } from './standard-field-map';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -415,8 +417,9 @@ ${stepsDescription || '(단계 영역 없음)'}
         //   제목 + 본문 = 이어 읽는 단위(CT dropInventedEfficacyTitledBody · 여정 생성과 같은 규칙)
         const guardPair = (s: any) => {
           const g = dropInventedEfficacyTitledBody(
-            typeof s?.subject === 'string' ? replaceInventedBenefits(s.subject.slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
-            typeof s?.messageTemplate === 'string' ? replaceInventedBenefits(s.messageTemplate.slice(0, 2000), recGround) : '',
+            // ★ 2026-11-10 출구 가드 = %변수% 한 가지(옛 칸이 Liquid 면 추천이 그 꼴을 따라 쓴다 · 장바구니 변수만 보존)
+            typeof s?.subject === 'string' ? replaceInventedBenefits(liquidCopyToPercent(s.subject, CUSTOMER_LIQUID_TO_PERCENT).slice(0, JOURNEY_SUBJECT_MAX_CHARS), recGround) : '',
+            typeof s?.messageTemplate === 'string' ? replaceInventedBenefits(liquidCopyToPercent(s.messageTemplate, CUSTOMER_LIQUID_TO_PERCENT).slice(0, 2000), recGround) : '',
             recGround,
           );
           // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(제목 = 비움) · K1-1 문자 단계(여정 = 늘 광고) = 첫 줄 또는 제목에 전송자 명칭

@@ -16,6 +16,8 @@ import { splitLinesByMsgType } from './sms-line-split';
 import { toQtmsgType } from './qtmsg-type';
 // ★ 2026-07-07 비토 게이트웨이 라인 전용 SENDER_KEY 주입 (Agent v1.0.10 kakao_sender_key 필수 대응)
 import { withSenderKey } from './alimtalk-emphasize';
+// ★ 2026-11-10 묶음 트랜잭션(직접발송 워커 · 끊김 이어 싣기) — tx 를 받으면 그 연결로 · 배치 실패 = QueueTxAbort · 탐지 · 학습 = 커밋 뒤
+import { QueueTxAbort, type QueueTx } from './queue-load-tx';
 // ★ 2026-07-03 KAKAO 문안 학습 코퍼스 적재 (전 채널 학습 통합 Phase 2) — fire-and-forget, 발송 무영향
 import { logCampaignTraining, getSourceRef } from './training-logger';
 
@@ -1253,6 +1255,8 @@ export async function insertBrandQueue(
    *   테스트 청구·결과 화면이 `app_etc1 = 'test'` + bill_id로 계정을 가른다. 넘기지 않으면 종전 구문 그대로(bill_id 칸 없음).
    */
   billId?: string,
+  /** ★ 2026-11-10 묶음 트랜잭션(직접발송 워커만) — 있으면 그 연결로 INSERT · 실패 = QueueTxAbort(부분 커밋 0) · 없으면 지금 그대로 */
+  tx?: QueueTx,
 ): Promise<number> {
   if (rows.length === 0) return 0;
   // ★ 2026-10-09 시연 회사 최후 방어
@@ -1312,7 +1316,7 @@ export async function insertBrandQueue(
 
     // 배치는 각각 독립 커밋 — 실패해도 커밋된 건수를 실어서 던진다(B-0727-1 계약 미러).
     try {
-      await mysqlQuery(
+      await (tx ? tx.run : mysqlQuery)(
         `INSERT INTO ${table} (
           dest_no, call_back, msg_contents, msg_type, title_str,
           k_template_code, k_next_type, k_next_contents, k_button_json,
@@ -1321,6 +1325,7 @@ export async function insertBrandQueue(
         params
       );
     } catch (batchErr: any) {
+      if (tx) throw new QueueTxAbort(`브랜드메시지 큐 INSERT 실패(묶음 되돌림): ${batchErr?.message || batchErr}`);
       throw new BrandQueueInsertError(
         `브랜드메시지 큐 INSERT 실패 (앞선 ${inserted}건은 커밋됨): ${batchErr?.message || batchErr}`,
         inserted,
@@ -1576,6 +1581,8 @@ export async function insertAlimtalkQueue(
   // nextType = 실패 시 폴백 N/S/L/A/B(기본 L) · nextContents = A/B 대체 문구 · buttonJson = k_button_json · etcJson = k_etc_json(강조표기 title · senderkey 등)
   rows: AlimtalkQueueRow[],
   appEtc1?: string,   // ★ #4-c (2026-06-01): app_etc1 = 캠페인/추적 식별자 — 결과·정산 매칭(results.ts WHERE app_etc1=?). 누락 시 알림톡 발송 결과 미조회.
+  /** ★ 2026-11-10 묶음 트랜잭션(직접발송 워커만) — 있으면 그 연결로 INSERT · 실패 = QueueTxAbort · 학습 적재 = 커밋 뒤 · 없으면 지금 그대로 */
+  tx?: QueueTx,
 ): Promise<number> {
   if (rows.length === 0) return 0;
   // ★ 2026-10-09 시연 회사 최후 방어
@@ -1603,8 +1610,9 @@ export async function insertAlimtalkQueue(
     //   호출부가 "한 건도 안 들어갔다"로 알고 전량 환불하는데 실제로는 앞 배치가 나간다(환불 후 실발송).
     //   실패해도 **커밋된 건수를 실어서** 던진다 — 호출부가 그만큼은 적재된 것으로 세게.
     try {
-      await mysqlQuery(ins.sql, ins.params);
+      await (tx ? tx.run : mysqlQuery)(ins.sql, ins.params);
     } catch (batchErr: any) {
+      if (tx) throw new QueueTxAbort(`알림톡 큐 INSERT 실패(묶음 되돌림): ${batchErr?.message || batchErr}`);
       throw new AlimtalkQueueInsertError(
         `알림톡 큐 INSERT 실패 (앞선 ${inserted}건은 커밋됨): ${batchErr?.message || batchErr}`,
         inserted,
@@ -1620,7 +1628,7 @@ export async function insertAlimtalkQueue(
   //   ★ 2026-07-04 source_ref=hmac(appEtc1) 평문(결과 라벨 환류·dup-guard와 키 일치). companyId/appEtc1/본문 없으면 skip.
   //   ★ 2026-07-03 중복 가드(실측 결함 fix): 커밋/예약 경로는 createDirectSendCampaign가 이미 같은 캠페인의
   //     KAKAO 문안을 적재(source_ref=hmac(appEtc1)) — 그 행이 있으면 skip해 같은 발송 2행 적재를 차단.
-  void (async () => {
+  const trainingLog = async () => {
     try {
       const first = rows[0];
       if (!appEtc1 || !first?.companyId || !first?.message) return;
@@ -1647,7 +1655,8 @@ export async function insertAlimtalkQueue(
         finalSource: 'manual',
       });
     } catch { /* 학습 적재 실패는 발송에 영향 없음 */ }
-  })();
+  };
+  if (tx) tx.afterCommit(() => { void trainingLog(); }); else void trainingLog();
 
   return inserted;
 }
@@ -1783,10 +1792,11 @@ export async function bulkInsertSmsQueue(
   ctx?: SpamBlockContext,
   // ★ 2026-10-31 배치 INSERT 를 실행할 함수 — 여정 담당자 안내만 상한 있는 연결(withBoundedMysql)을 넘긴다.
   //   없으면 지금처럼 공용 풀(mysqlQuery) · 금칙어 탐지 · 시연 막기 · 라인 나누기 · 실패 배치 미집계는 그대로(설계서 2026-10-31 §2-8).
-  opts?: { run?: (sql: string, params?: any[]) => Promise<any> },
+  opts?: { run?: (sql: string, params?: any[]) => Promise<any>; tx?: QueueTx },
 ): Promise<number> {
   if (rows.length === 0) return 0;
-  const exec = opts?.run ?? mysqlQuery;
+  // ★ 2026-11-10 tx(직접발송 워커 묶음) = 그 연결 · 배치 실패를 삼키지 않는다(QueueTxAbort) · 탐지 = 커밋 뒤
+  const exec = opts?.tx ? opts.tx.run : (opts?.run ?? mysqlQuery);
   // ★ 2026-10-09 시연 회사 최후 방어 — 회사 = ctx 또는 행의 app_etc2(row[7])
   for (const id of new Set([(ctx as any)?.companyId, ...rows.map((r) => r[7])].filter((v) => typeof v === 'string' && v))) await guardDemoLeak('bulkInsertSmsQueue', id as string);
 
@@ -1838,6 +1848,7 @@ export async function bulkInsertSmsQueue(
           `code=${batchErr?.code || 'unknown'} errno=${batchErr?.errno ?? '-'} sqlState=${batchErr?.sqlState || '-'} ` +
           `msg=${String(batchErr?.message || '').replace(/\s+/g, ' ').slice(0, 200)}`
         );
+        if (opts?.tx) throw new QueueTxAbort(`문자 큐 INSERT 실패(${table} · 묶음 되돌림): code=${batchErr?.code || 'unknown'}`);
         // 실패 batch는 미집계 → 호출부에서 환불 처리
       }
     }
@@ -1845,7 +1856,10 @@ export async function bulkInsertSmsQueue(
 
   // ★0819 Codex 2R — **적재가 성공한 뒤에만** 탐지를 던진다.
   //   앞에서 던지면 큐에 한 건도 못 들어간 배치가 탐지 이력에는 N건으로 남아, 심사 증거와 실제가 어긋난다.
-  if (sentCount > 0) dispatchSpamDetection(spamSnapshot, tables, ctx);
+  if (sentCount > 0) {
+    if (opts?.tx) opts.tx.afterCommit(() => dispatchSpamDetection(spamSnapshot, tables, ctx));
+    else dispatchSpamDetection(spamSnapshot, tables, ctx);
+  }
 
   return sentCount;
 }

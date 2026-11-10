@@ -14,6 +14,8 @@ import { prepareSendMessage, replaceVariables } from './messageUtils';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
 import { resolveAlimtalkFallback } from './alimtalk-fallback';
 import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, getEtcJsonCapacity } from './sms-queue';
+// ★ 2026-11-10 묶음 트랜잭션(워커가 넘긴 tx · 배치 실패 = QueueTxAbort 를 그대로 던진다 · 부분 수습 안 탐)
+import { QueueTxAbort, type QueueTx } from './queue-load-tx';
 import { subjectForMsgType } from './qtmsg-type';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
 import { buildBrandQueuePayload, resolveBrandFallback,
@@ -88,6 +90,8 @@ export interface SendChunkParams {
   alimtalkNextContents?: string;
   alimtalkNextSubject?: string;
   alimtalkEtcJson?: string | null;
+  /** ★ 2026-11-10 묶음 트랜잭션(직접발송 워커 · 끊김 이어 싣기) — 있으면 세 큐 CT 가 이 연결로 싣고 실패를 던진다 · 피로도 = 커밋 뒤 */
+  tx?: QueueTx;
 }
 
 export interface SendChunkResult {
@@ -158,7 +162,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         p.campaignId, p.companyId, mms[0] || '', mms[1] || '', mms[2] || '',
       ]);
     }
-    sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow, { companyId: p.companyId, source: 'direct_scheduled' });
+    sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow, { companyId: p.companyId, source: 'direct_scheduled' }, p.tx ? { tx: p.tx } : undefined);
   }
 
   // 3-B. 브랜드메시지 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')
@@ -224,8 +228,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
           companyId: p.companyId,
         };
       });
-      kakaoSent = await insertBrandQueue(p.companyTables, brandRows, p.campaignId);
+      kakaoSent = await insertBrandQueue(p.companyTables, brandRows, p.campaignId, undefined, p.tx);
     } catch (brandErr) {
+      if (brandErr instanceof QueueTxAbort) throw brandErr;   // ★ 2026-11-10 묶음 트랜잭션 = 부분 수습 0(워커가 되돌리고 보류)
       if (brandErr instanceof BrandQueueInsertError) {
         kakaoSent = brandErr.inserted; // 앞선 배치는 커밋됨(B-0727-1 계약)
         console.error(`[direct-send-processor] 브랜드 큐 INSERT 부분 실패 (적재 ${kakaoSent}건):`, brandErr.message);
@@ -342,8 +347,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       // 강조표기형 7300 진단 로그(ALIMTALK-DEBUG2)는 원인 확정으로 제거(2026-06-10).
       // 근본 = 에이전트 qtmsg.xml select_sql의 sendercode 합성에서 sender_code NULL → k_etc_json 전체 NULL.
       // 한줄로 측 etcJson은 {"title":치환값}만 — IMC 메일(2026-06-10)로 확정.
-      sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId);
+      sentCount = await insertAlimtalkQueue(p.companyTables, alimtalkRows, p.campaignId, p.tx);
     } catch (alimtalkErr) {
+      if (alimtalkErr instanceof QueueTxAbort) throw alimtalkErr;   // ★ 2026-11-10 묶음 트랜잭션 = 부분 수습 0
       console.error('[direct-send-processor] 알림톡 INSERT 실패:', alimtalkErr);
       // ★ 2026-07-27 (B-0727-1): 실패해도 앞 배치는 커밋되어 발송된다. 0으로 지우면 워커가
       //   그만큼을 미적재로 보고 환불한 뒤 실제로는 나가버린다(환불 후 실발송).
@@ -354,7 +360,9 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
   // ★ 2026-07-05 발송 피로도 카운터 — 광고성만, 큐 커밋 후 fire-and-forget (staging 대량·자동마케팅 발송 공용 지점)
   // ★ 2026-09-28 한줄로 V2 m076·m106 — 수신자마다 나가는 날(워커가 채운 sendTime 'YYYY-MM-DD HH:mm:ss' · 즉시면 비어 있어 오늘)로 센다.
   if (p.finalIsAd && sentCount > 0) {
-    void recordFatigueSends(p.companyId, recipients.map((r) => String(r.phone || '')), recipients.map((r) => (r.sendTime ? String(r.sendTime).slice(0, 10) : null)));
+    const fatigue = () => { void recordFatigueSends(p.companyId, recipients.map((r) => String(r.phone || '')), recipients.map((r) => (r.sendTime ? String(r.sendTime).slice(0, 10) : null))); };
+    // ★ 2026-11-10 묶음 트랜잭션이면 커밋 뒤(되돌린 묶음이 피로도에 세이지 않게)
+    if (p.tx) p.tx.afterCommit(fatigue); else fatigue();
   }
 
   return { sentCount, failedCount: recipients.length - sentCount, brandSentCount };

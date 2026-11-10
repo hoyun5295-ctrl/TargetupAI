@@ -19,8 +19,11 @@ describe('워커 개별 회신번호 필터', () => {
     expect(loop).toMatch(/if \(cfg\.useIndividualCallback\) \{\s*const cb = await filterByIndividualCallback\(recipients, companyId, callbackFilterUserId\);/);
     expect(loop).toContain('chunkRecipients = cb.filtered;');
     expect(loop).toContain('callbackExcluded += cb.callbackSkippedCount;');
-    const call = loop.slice(loop.indexOf('await processSendChunk({'), loop.indexOf('});', loop.indexOf('await processSendChunk({')));
-    expect(call).toContain('recipients: chunkRecipients,');
+    // ★ 2026-11-10 묶음 트랜잭션 — 인자를 chunkParams 하나로 모아 두 갈래(옛 방식 · tx)가 같은 값으로 부른다
+    const params = loop.slice(loop.indexOf('const chunkParams = {'), loop.indexOf('};', loop.indexOf('const chunkParams = {')));
+    expect(params).toContain('recipients: chunkRecipients,');
+    expect(loop).toContain('result = await processSendChunk(chunkParams);');
+    expect(loop).toContain('result = await processSendChunk({ ...chunkParams, tx });');
   });
 
   it('제외 사유에 건수를 남긴다', () => {

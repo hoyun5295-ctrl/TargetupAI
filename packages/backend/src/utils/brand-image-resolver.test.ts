@@ -332,8 +332,9 @@ describe('조립기 호출 경로 4곳이 모두 치환을 거친다', () => {
     expect(iLoop).toBeGreaterThan(-1);
     expect(iPre).toBeLessThan(iLoop);
     // 청크에 확정된 값과 판정 결과를 함께 넘긴다
-    const call = src.slice(src.indexOf('const result = await processSendChunk({'));
-    const args = call.slice(0, call.indexOf('});'));
+    // ★ 2026-11-10 묶음 트랜잭션 — 인자를 chunkParams 하나로 모아 두 갈래(옛 방식 · tx)가 같은 값으로 부른다
+    const call = src.slice(src.indexOf('const chunkParams = {'));
+    const args = call.slice(0, call.indexOf('};'));
     expect(args).toContain('kakaoImageAiGenerated: brandPreflight.aiGenerated');
     expect(args).toContain('kakaoAttachmentJson: brandPreflight.attachmentJson');
   });

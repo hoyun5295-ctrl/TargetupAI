@@ -14,6 +14,12 @@ export interface PasteCheck {
   invalid: string[];
 }
 
+/**
+ * ★ 2026-11-10 직접입력 한 번에 더할 수 있는 번호 상한(문자 · 알림톡 · 브랜드 공용 직접입력 창 · Harold 「9,999건 이상 넣으면 파일로 올리라고 경고 · 안 올리게」).
+ *   직접입력은 소량용 편의 기능 · 대량 명단은 [파일등록]. 이 수를 넘는 붙여넣기는 [추가]가 잠긴다(파일 · 주소록 · 타겟추출 명단은 상관없다).
+ */
+export const DIRECT_PASTE_MAX = 9999;
+
 /** 문자 발송(직접발송) — 한 줄에 하나 · normalizePhoneKr · 10자리 이상(원래 [등록] 규칙 그대로) */
 export function checkDirectSendPaste(text: string): PasteCheck {
   const phones: string[] = [];

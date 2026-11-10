@@ -29,6 +29,8 @@ import { withCancelObligationLock } from './keyed-lock';
 import { filterByIndividualCallback, callbackAssignmentUserId, fixedCallbackRejectReason } from './callback-filter';
 // ★ 2026-09-26 한줄로 V2 F35(Codex 4차 1R A) — 취소 정산 공용 CT(취소 CT·재시도 워커·이 워커가 같은 산식)
 import { countCampaignRows, settleCancelledLoadRefund, settleCancelOutcome, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
+// ★ 2026-11-10 묶음 = MySQL 트랜잭션 하나 + 커밋 기록(끊김 이어 싣기 · 설계서 docs/2026-11-10-load-resume-design.md)
+import { openQueueTransaction, queueTxReady, claimLoadChunk, sealLoadChunk, deleteLoadChunks, LoadChunkAlreadyCommitted, LoadChunkLockTimeout, QueueTxAbort } from './queue-load-tx';
 
 const CHUNK = 10000;
 // ★ 2026-11-02 설계서 docs/2026-11-01-journey-automarketing-engine-design.md §16 G6 — 회사별 줄 · 회사 단위 순환 · 시간 몫 양보 · 정확한 재개.
@@ -47,6 +49,12 @@ export const LOAD_RESUME_MAX = 3;
 /** 직접발송 대기 밀림 경보 문턱(분 · §16 G3) */
 export const DIRECT_SEND_LAG_MINUTES = 30;
 const LOAD_PARKED = 'loadParkedAt';
+/** ★ 2026-11-10 사람 확인 표식 — tx 묶음 보류가 복구 횟수 상한에 닿음 · 고아 조회 · 줄 채우기에서 빠진다(지우면 다시 이어 넣기) */
+const LOAD_HOLD_MANUAL = 'loadHoldManual';
+/** ★ 2026-11-10 보류 = 종결 · 정산 · staging 정리 · 내려놓음 표식 전부 하지 않고 줄만 반납(processing · loadChunk 유지 → 끊김 복구) */
+class LoadHold extends Error {
+  constructor(message: string) { super(message); this.name = 'LoadHold'; }
+}
 const lanes = new Map<string, { companyId: string; small: boolean }>();
 /** 회사가 마지막으로 줄을 놓은 시각(회사 단위 순환 열쇠 · 하루 넘게 안 쓴 회사는 지운다) */
 const companyReleasedAt = new Map<string, number>();
@@ -360,6 +368,7 @@ export async function runDirectSendOnce(): Promise<void> {
       `SELECT id FROM campaigns
         WHERE send_phase = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'
           AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')
+          AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_HOLD_MANUAL}')
           AND NOT (id = ANY($1::uuid[]))
         ORDER BY updated_at ASC LIMIT 5`,
       [[...lanes.keys()]],
@@ -417,6 +426,23 @@ export async function runDirectSendOnce(): Promise<void> {
       }
     } catch (staleErr: any) {
       console.error('[direct-send-worker] preparing 잔존 감시 오류:', staleErr?.message || staleErr);
+    }
+    // ★ 2026-11-10 사람 확인 표식(적재 보류 상한) 개수 경보 — 남아 있는 한 다시 간다(공용 쿨다운 · 준비분 잔존 감시와 같은 꼴)
+    try {
+      const mh = await query(
+        `SELECT COUNT(*)::int AS cnt FROM campaigns
+          WHERE send_phase = 'processing' AND COALESCE(send_config, '{}'::jsonb) ? '${LOAD_HOLD_MANUAL}'`,
+      );
+      const mhCnt = Number(mh.rows[0]?.cnt || 0);
+      if (mhCnt > 0) {
+        void sendSystemAlert({
+          companyId: null,
+          dedupKey: 'direct-load-hold-manual',
+          message: `직접발송 적재 사람 확인 ${mhCnt}건(남은 분량 멈춤 · 종결 안 함). 목록: SELECT id, company_id, send_config->'loadChunk', send_config->'${LOAD_HOLD_MANUAL}' FROM campaigns WHERE send_phase = 'processing' AND send_config ? '${LOAD_HOLD_MANUAL}'`,
+        }).catch(() => undefined);
+      }
+    } catch (mhErr: any) {
+      console.error('[direct-send-worker] 사람 확인 표식 감시 오류:', mhErr?.message || mhErr);
     }
     // ★ §16 G3 — 직접발송 대기 밀림 = 줄을 30분 넘게 못 받은 캠페인(아직 시작 못 한 즉시 · 시각 지난 예약 / 30분 넘게 다음 몫을 못 받은 내려놓음).
     //   원인 하나 = 공용 키 한 통(회사마다 0 · 쿨다운은 경보 공용). 큰 캠페인이 몫마다 돌아가며 오래 넣는 것은 밀림이 아니다(설계 상한 I14 안).
@@ -609,25 +635,52 @@ async function classifyStaleLoad(campaignId: string): Promise<'recover' | 'parke
   const c = r.rows[0];
   if (!c) return 'skip';
   const lp = c.lp && typeof c.lp === 'object' ? c.lp : null;
-  if (c.finalizing || !lp || Number(c.attempts) >= LOAD_RESUME_MAX) return 'recover';
   const cfg: any = c.send_config || {};
-  if (isLoadStopped(null, cfg[LOAD_CANCEL_FLAG])) return 'recover';
-  if (c.in_chunk) {
+  // ★ 2026-11-10 tx 묶음(커밋 기록 있는 묶음) = 건수로 판정하지 않는다 — 이어 넣기가 맨 먼저 같은 PK 로 확정한다(설계서 §3-5 · 5-1)
+  const txChunk = !!c.in_chunk && !c.finalizing && !!lp && cfg.loadChunk && cfg.loadChunk.tx === true;
+  if (txChunk) {
+    if (Number(c.attempts) >= LOAD_RESUME_MAX) {
+      // 상한 = 종결하지 않는다(남은 분량이 또 버려진다) · 사람 확인 표식 · 고아 조회에서 빠짐 · 횟수 0(표식을 지우면 다시 상한까지)
+      const marked = await query(
+        `UPDATE campaigns
+            SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadResumeAttempts', '{${LOAD_HOLD_MANUAL}}', $2::jsonb),
+                updated_at = NOW()
+          WHERE id = $1 AND send_phase = 'processing' AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')
+          RETURNING id`,
+        [campaignId, JSON.stringify({ at: new Date().toISOString(), reason: `묶음 확정 ${LOAD_RESUME_MAX}회 실패(앞 트랜잭션 대기 · MySQL 오류)` })],
+      );
+      if (marked.rows.length > 0) {
+        console.error(`[direct-send-worker] 캠페인 ${campaignId} 적재 보류 ${LOAD_RESUME_MAX}회 — 사람 확인 표식(종결 0)`);
+        void sendSystemAlert({
+          companyId: c.company_id,
+          dedupKey: `direct-load-hold-manual:${campaignId}`,
+          message: `직접발송 적재 보류가 ${LOAD_RESUME_MAX}회 이어졌습니다(캠페인 ${campaignId}). 남은 분량은 버리지 않고 멈춰 있습니다. 개발팀 확인이 필요합니다.`,
+        }).catch(() => undefined);
+      }
+      return 'skip';
+    }
+  } else {
+    if (c.finalizing || !lp || Number(c.attempts) >= LOAD_RESUME_MAX) return 'recover';
+    if (isLoadStopped(null, cfg[LOAD_CANCEL_FLAG])) return 'recover';
+  }
+  if (c.in_chunk && !txChunk) {
     const tables: string[] = Array.isArray(cfg.sentTables) ? cfg.sentTables.filter((t: any) => typeof t === 'string' && t) : [];
     if (tables.length === 0) return 'recover';
     const measured = await measureLoadedRows(c.company_id, c.created_by, campaignId, cfg.sendChannel || 'sms', tables, campaignRefDates(c));
     const both = String(cfg.sendChannel || '').trim() === 'both';
     if (measured.sent !== Number(lp.sent || 0) || (both && measured.brandSent !== Number(lp.brandSent || 0))) return 'recover';
   }
+  // ★ 2026-11-10 tx 묶음 = 묶음 표식(loadChunk)을 지우지 않는다 — 이어 넣기가 맨 먼저 그 묶음을 같은 PK 로 확정한다(옛 묶음 = 지금처럼 지움)
   const parked = await query(
     `UPDATE campaigns
-        SET send_config = jsonb_set(jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadChunk', '{${LOAD_PARKED}}', to_jsonb(NOW())),
+        SET send_config = jsonb_set(jsonb_set(CASE WHEN $3::boolean THEN COALESCE(send_config, '{}'::jsonb) ELSE COALESCE(send_config, '{}'::jsonb) - 'loadChunk' END,
+                                              '{${LOAD_PARKED}}', to_jsonb(NOW())),
                                     '{loadResumeAttempts}', to_jsonb($2::int)),
             updated_at = NOW()
       WHERE id = $1 AND send_phase = 'processing' AND updated_at < NOW() - INTERVAL '10 minutes'
         AND NOT (COALESCE(send_config, '{}'::jsonb) ? '${LOAD_PARKED}')
       RETURNING id`,
-    [campaignId, Number(c.attempts) + 1],
+    [campaignId, Number(c.attempts) + 1, txChunk],
   );
   if (parked.rows.length > 0) console.warn(`[direct-send-worker] 캠페인 ${campaignId} 멈춘 적재 → 이어 넣기 대기(복구 ${Number(c.attempts) + 1}/${LOAD_RESUME_MAX})`);
   return parked.rows.length > 0 ? 'parked' : 'skip';
@@ -768,7 +821,8 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
   // ★ 2026-06-04 정정: commit에서 옮긴 정제 — 발송 직전 1회. count/commit과 같은 기준이라 모달=차감=발송 일치.
   //   첫 처리(processed===0)에만 수행(재시작 시 중복 정제 방지). dedup/unsub은 send_config 기준.
   //   적재하지 않는 경우(skipLoad)는 정제할 이유가 없다 — 제외 사유 기록이 0으로 남는다.
-  if (processed === 0 && !skipLoad) {
+  // ★ 2026-11-10 진행 기록이 있으면(이어 넣기) 다시 정제하지 않는다 — 다시 지우면 묶음의 행 · 첫 id 가 바뀌어 커밋 기록 판정이 틀어진다
+  if (processed === 0 && !lp && !skipLoad) {
     if (effectiveUnsubFilter(cfg.adEnabled === true, cfg.unsubFilterEnabled)) {   // ★ 2026-09-27 S5-05 광고면 항상(배포 전 예약 광고 포함)
       const r1 = await query(
         `DELETE FROM campaign_send_staging s USING unsubscribes u WHERE s.staging_id = $1 AND u.user_id = $2 AND u.phone = s.phone`,
@@ -797,8 +851,50 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
       [campaignId, progressJson()],
     );
   }
+  // ★ 2026-11-10 묶음 트랜잭션 관문(큐 테이블 + 커밋 기록 표 = InnoDB · 없으면 옛 방식)
+  const useTx = !skipLoad && await queueTxReady(companyTables);
+  // ★ 2026-11-10 다시 시작할 때 맨 먼저 = 보류 묶음 확정(Codex 설계 3R) — 아래 고리의 어떤 중단 검사보다 먼저
+  const pendingChunk = !skipLoad && cfg.loadChunk && cfg.loadChunk.tx === true && cfg.loadChunk.firstId != null ? cfg.loadChunk : null;
+  if (pendingChunk) {
+    if (!useTx) {
+      console.warn(`[direct-send-worker] 캠페인 ${campaignId} 보류 묶음이 있는데 트랜잭션 관문이 닫힘 — 보류`);
+      return;
+    }
+    let ptx: Awaited<ReturnType<typeof openQueueTransaction>> | null = null;
+    try {
+      ptx = await openQueueTransaction();
+      await claimLoadChunk(ptx, campaignId, String(pendingChunk.firstId), Number(pendingChunk.rows) || 0);
+      await ptx.rollback();   // INSERT 성공 = 앞 트랜잭션 되돌림 확정 → 적재 없이 되돌리고 표식만 지운다(아래 고리가 같은 묶음을 다시 싣는다)
+      await query(`UPDATE campaigns SET send_config = COALESCE(send_config, '{}'::jsonb) - 'loadChunk', updated_at = NOW() WHERE id = $1`, [campaignId]);
+      console.log(`[direct-send-worker] 캠페인 ${campaignId} 보류 묶음 = 되돌림 확정 · 같은 자리부터 다시 싣기`);
+    } catch (e: any) {
+      if (ptx) await ptx.rollback();
+      if (!(e instanceof LoadChunkAlreadyCommitted)) {
+        console.warn(`[direct-send-worker] 캠페인 ${campaignId} 보류 묶음 확정 못 함 — 보류(${e instanceof LoadChunkLockTimeout ? '앞 트랜잭션 대기 만료' : e?.message || e})`);
+        return;
+      }
+      // 이미 커밋됨 = 기록의 수로 진행 기록을 묶음 끝으로 옮긴다(고리 안 진행 기록과 같은 셈 · 같은 UPDATE)
+      sent += e.record.smsLoaded;
+      brandSent += e.record.brandLoaded;
+      chunkSkipped += Math.max(0, e.record.rowsRead - e.record.smsLoaded);
+      processed += e.record.rowsRead;
+      try {
+        await query(
+          `UPDATE campaigns SET processed_count = $1, updated_at = NOW(),
+                  send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadChunk' - 'loadResumeAttempts', '{loadProgress}', $3::jsonb)
+            WHERE id = $2`,
+          [processed, campaignId, progressJson()],
+        );
+      } catch (pe: any) {
+        console.warn(`[direct-send-worker] 캠페인 ${campaignId} 커밋된 보류 묶음 진행 기록 실패 — 보류:`, pe?.message || pe);
+        return;
+      }
+      console.log(`[direct-send-worker] 캠페인 ${campaignId} 보류 묶음 = 이미 커밋됨(${e.record.smsLoaded}건) · 진행 기록 ${processed}/${total}`);
+    }
+  }
   const sliceStartedAt = Date.now();
   let parkedHere = false;
+  let heldHere = false;
 
   // ★ 2026-07-27 (B-0727-1): 적재 중 예외가 나면 종결 블록(미적재분 환불 → 최종 상태·건수 기록 → staging 정리)에
   //   도달하지 못한 채 바깥 catch로 빠져나가, 선차감분이 환불되지 않고 실제로 나간 발송분도 후불 집계에서 빠졌다.
@@ -892,7 +988,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
     // ★ §16 G6 ③ — 청크 중 표식(이 청크 직전 id · 읽은 행 수) · 진행 기록 UPDATE 가 지운다 = 끊김 복구가 「청크 중에 멈춤」을 가린다
     await query(
       `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadChunk}', $2::jsonb), updated_at = NOW() WHERE id = $1`,
-      [campaignId, JSON.stringify({ firstId: chunkRes.rows[0]?.id != null ? String(chunkRes.rows[0].id) : null, rows: chunkRes.rows.length, at: new Date().toISOString() })],
+      [campaignId, JSON.stringify({ firstId: chunkRes.rows[0]?.id != null ? String(chunkRes.rows[0].id) : null, rows: chunkRes.rows.length, at: new Date().toISOString(), ...(useTx ? { tx: true } : {}) })],
     );
     let chunkRecipients = recipients;
     if (cfg.useIndividualCallback) {
@@ -900,7 +996,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
       chunkRecipients = cb.filtered;
       callbackExcluded += cb.callbackSkippedCount;
     }
-    const result = await processSendChunk({
+    const chunkParams = {
       companyId, campaignId, companyTables, recipients: chunkRecipients, directFieldMappings,
       kakaoImageAiGenerated: brandPreflight.aiGenerated,
       sendChannel: cfg.sendChannel || 'sms', msgType: cfg.msgType, message: cfg.message || '',
@@ -914,7 +1010,33 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
       alimtalkButtonJson: cfg.alimtalkButtonJson, alimtalkNextType: cfg.alimtalkNextType,
       alimtalkNextContents: cfg.alimtalkNextContents, alimtalkNextSubject: cfg.alimtalkNextSubject,
       alimtalkEtcJson: cfg.alimtalkEtcJson,
-    });
+    };
+    let result: Awaited<ReturnType<typeof processSendChunk>>;
+    if (!useTx) {
+      result = await processSendChunk(chunkParams);
+    } else {
+      // ★ 2026-11-10 묶음 = 트랜잭션 하나 · 첫 문장 = 커밋 기록(같은 PK = 같은 묶음 두 번 0) · 커밋 결과 세 갈래(확인 · 되돌림 확정 · 불명 = 보류)
+      const firstId = String(chunkRes.rows[0].id);
+      let tx: Awaited<ReturnType<typeof openQueueTransaction>>;
+      try { tx = await openQueueTransaction(); } catch (oe: any) { throw new LoadHold(`적재 트랜잭션을 열지 못함: ${oe?.message || oe}`); }
+      let already: LoadChunkAlreadyCommitted | null = null;
+      try {
+        await claimLoadChunk(tx, campaignId, firstId, chunkRes.rows.length);
+        result = await processSendChunk({ ...chunkParams, tx });
+        await sealLoadChunk(tx, campaignId, firstId, result.sentCount, result.brandSentCount || 0);
+      } catch (te: any) {
+        await tx.rollback();
+        if (te instanceof LoadChunkAlreadyCommitted) {
+          already = te;
+          result = { sentCount: te.record.smsLoaded, brandSentCount: te.record.brandLoaded, failedCount: Math.max(0, te.record.rowsRead - te.record.smsLoaded) };
+        } else if (te instanceof LoadChunkLockTimeout || te instanceof QueueTxAbort) {
+          throw new LoadHold(te.message);
+        } else {
+          throw te;   // 큐 밖 오류(고객 조회 등) = 되돌림 확정 · 지금 예외 종결 그대로
+        }
+      }
+      if (!already && (await tx.commit()) === 'unknown') throw new LoadHold('COMMIT 결과 불명');
+    }
     sent += result.sentCount;
     brandSent += result.brandSentCount || 0;
     chunkSkipped += Math.max(0, chunkRes.rows.length - result.sentCount);
@@ -931,12 +1053,18 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
     }
 
     // ★ §16 G6 ③ — 진행 기록 = 처리 수 + 셈 + 청크 중 표식 지움 + 복구 횟수 0 (한 UPDATE · 이 문장 직후가 청크 경계)
-    await query(
-      `UPDATE campaigns SET processed_count = $1, updated_at = NOW(),
-              send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadChunk' - 'loadResumeAttempts', '{loadProgress}', $3::jsonb)
-        WHERE id = $2`,
-      [processed, campaignId, progressJson()],
-    );
+    // ★ 2026-11-10 tx 묶음이면 실패 = 보류(커밋된 묶음을 종결 블록이 미적재로 셈하지 않게 · Codex 설계 2R #2)
+    try {
+      await query(
+        `UPDATE campaigns SET processed_count = $1, updated_at = NOW(),
+                send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb) - 'loadChunk' - 'loadResumeAttempts', '{loadProgress}', $3::jsonb)
+          WHERE id = $2`,
+        [processed, campaignId, progressJson()],
+      );
+    } catch (pe: any) {
+      if (useTx) throw new LoadHold(`커밋 뒤 진행 기록 실패: ${pe?.message || pe}`);
+      throw pe;
+    }
     await new Promise((res) => setImmediate(res)); // 이벤트루프 양보 — 다른 요청 블로킹 방지
     // ★ §16 G6 ② ④ — 경계에서 내려놓기: 종료 신호 · 몫 끝 + 다른 회사가 기다림(남은 행이 있을 때만)
     if (processed < total && (stopping || (Date.now() - sliceStartedAt >= tuning.sliceMs && await othersWaiting(campaignId)))) {
@@ -953,12 +1081,19 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
     }
   }
   } catch (loopErr: any) {
-    failureReason = String(loopErr?.message || loopErr).slice(0, 300);
-    console.error(`[direct-send-worker] 캠페인 ${campaignId} 적재 중단 (적재 ${sent}/${total}):`, loopErr);
+    if (loopErr instanceof LoadHold) {
+      heldHere = true;
+      console.warn(`[direct-send-worker] 캠페인 ${campaignId} 묶음 보류(종결 · 정산 없음 · 끊김 복구가 받는다): ${loopErr.message}`);
+    } else {
+      failureReason = String(loopErr?.message || loopErr).slice(0, 300);
+      console.error(`[direct-send-worker] 캠페인 ${campaignId} 적재 중단 (적재 ${sent}/${total}):`, loopErr);
+    }
   }
 
   // ★ §16 G6 ② — 내려놓았으면 종결하지 않는다(다음 차례에 이어 넣는다 · 셈 · 자리 = 진행 기록)
   if (parkedHere) return;
+  // ★ 2026-11-10 보류 = 종결 · 정산 · staging 정리 · 내려놓음 표식 0(processing · loadChunk 유지 → 10분 뒤 끊김 복구 → 같은 PK 로 확정)
+  if (heldHere) return;
 
   // ★ 2026-09-25 C-11: 끊긴 적재 정리 — 적재 수를 MySQL 실측으로 잡는다(메모리 카운트는 죽은 프로세스와 함께 사라졌다).
   //   실측이 실패하면 추측으로 돈을 움직이지 않는다 — 던져서 이번 사이클을 멈추고, 선점이 updated_at을 갱신했으므로 10분 뒤 재시도.
@@ -1115,6 +1250,8 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
     ).catch((e) => console.error('[direct-send-worker] refundPending 기록 실패:', e?.message || e));
   }
   await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1`, [stagingId]);
+  // ★ 2026-11-10 더는 적재가 없는 때 = 그 캠페인의 커밋 기록만 지운다(기간 정리 없음 · 실패 = 무시)
+  if (useTx || await queueTxReady(companyTables)) await deleteLoadChunks(campaignId);
   console.log(`[direct-send-worker] 캠페인 ${campaignId} 완료 — 발송 ${sent}/${total}, 실패 ${failed}`);
 }
 

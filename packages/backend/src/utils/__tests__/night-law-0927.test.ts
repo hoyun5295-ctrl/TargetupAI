@@ -97,7 +97,8 @@ describe('m126 대량 광고 적재 중 창이 닫히면 멈춘다', () => {
     expect(isNightStopDue({ adEnabled: true }, kst(8, 0, 0), ...W, LEAD)).toBe(false);
   });
   it('한 묶음이 창을 넘겨 끝났으면 경보(마지막 묶음이어도)', () => {
-    const tail = w.slice(w.indexOf('const result = await processSendChunk({'), w.indexOf('} catch (loopErr: any) {'));
+    // ★ 2026-11-10 묶음 트랜잭션 — 적재 부름이 chunkParams 로 바뀌었다(경보 자리는 그 뒤 그대로)
+    const tail = w.slice(w.indexOf('const chunkParams = {'), w.indexOf('} catch (loopErr: any) {'));
     expect(tail).toContain('isNightStopDue(cfg, new Date(), SEND_HOURS.start, SEND_HOURS.end)');
     expect(tail).toContain('dedupKey: `night-ad-overrun:${campaignId}`');
   });

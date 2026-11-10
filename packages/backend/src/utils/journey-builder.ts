@@ -48,6 +48,8 @@ import { normalizeJourneyOptions } from './journey-options-validator';
 import { isUuid } from './normalize';
 import { stepEditPolicy, blockedStepEditGroups, stepEditBlockedMessage, keepsPretestMarkerForStep } from './journey-step-edit-policy';
 import { getCompanyJourneyFacts, getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';   // ★ 2026-11-02 AI 지시문 변수 목록 = 회사 실측(3-13)
+import { liquidCopyToPercent } from './liquid-templating';   // ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드)
+import { CUSTOMER_LIQUID_TO_PERCENT } from './standard-field-map';
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부 · 모르는 종류는 거부).
 import { MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType, assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
@@ -581,7 +583,8 @@ async function generateCustomStepsUncharged(
 ): Promise<JourneyStepDefinition[]> {
   // ★ 2026-11-02 설계서 3-13 — 변수 목록 = 회사 실측(여정 AI 생성 journey-ai-generator 와 같은 함수 · 매핑에 없는 변수를 시키지 않는다)
   const dataProfile = await getCompanyDataProfile(companyId).catch(() => null);
-  const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
+  // ★ 2026-11-10 여정 = %변수% 세계(여정 AI 생성 journey-ai-generator 와 같은 지시 · 옛 기본값 'liquid' = 두 문법을 같이 보여 줬다)
+  const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile, { variableStyle: 'percent' }) : '';
   // ★ D188 Phase 2-B-1 (2026-05-21): wait + condition step 사용 가이드 + JSON 응답 형식 확장.
   const system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
 회사 admin이 자연어로 입력한 여정 목표를 받아, 2~7개의 step (시계열)을 JSON으로 응답합니다.
@@ -666,7 +669,8 @@ JSON 형식만 응답:
       base.channel = ['sms', 'lms', 'mms', 'kakao', 'email'].includes(s.channel) ? s.channel : 'sms';
       // ★ 2026-10-24 세 채널 구조체크 ② — 이 생산자만 거름이 없었다(R13 · 다른 여정 생성 경로와 같은 근거 = 회사가 준 목표문).
       //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
-      base.messageTemplate = dropInventedEfficacy(replaceInventedBenefits(aiStr(s.messageTemplate).slice(0, 2000), objective), objective).text;
+      // ★ 2026-11-10 출구 가드 = %변수% 한 가지(섞인 {{ }} · {% %} 를 옮기거나 평문화 · 장바구니 변수만 보존)
+      base.messageTemplate = dropInventedEfficacy(replaceInventedBenefits(liquidCopyToPercent(aiStr(s.messageTemplate), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 2000), objective), objective).text;
       base.isAd = resolveJourneyAdFlag(base.channel, s.isAd);   // ★ 2026-11-02 광고 판정 CT(CT-J8 · 알림톡 = 정보성)
       // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문) · K1-1 문자 광고 단계 = 첫 줄에 전송자 명칭
       const seasonless = dropSeasonSentences(base.messageTemplate || '', objective).text;

@@ -67,9 +67,10 @@ describe('2. 공용 직접입력 창', () => {
   });
   it('보인 수로만 더한다 — 추가할 게 0이면 버튼이 잠기고, 더한 뒤 창을 닫는다 · 창은 명단을 직접 바꾸지 않는다', () => {
     const submit = between(m, 'const submitPaste = () => {', '};');
-    expect(submit).toContain('if (preview.add === 0) return;');
+    // ★ 2026-11-10 상한(DIRECT_PASTE_MAX)을 넘어도 멈춘다 — 상한 계약 = direct-paste-max-1110
+    expect(submit).toContain('if (preview.add === 0 || overLimit) return;');
     expect(submit.indexOf('onSubmitPaste(text);')).toBeLessThan(submit.indexOf('onClose();'));
-    expect(m).toContain('disabled={preview.add === 0}');
+    expect(m).toContain('disabled={preview.add === 0 || overLimit}');
     expect(m).not.toMatch(/setRecipients|setDirectRecipients|setPhones/);
   });
   it('두 번째 방식은 rows 를 줄 때만 · 잠김 이유가 있으면 잠근다 · 겹침 2100(브랜드 창 2000 위)', () => {

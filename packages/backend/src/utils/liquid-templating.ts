@@ -137,19 +137,87 @@ export function stripLiquidLeftovers(text: string): string {
 }
 
 /**
+ * ★ 2026-11-10 생성물 평문화의 한 규칙(순수) — 발송 렌더가 쓰는 **같은 파서**(tokenize → parse) 의 구조에서 else 갈래만 고른다.
+ *   - 조건식은 계산하지 않는다(Codex 1R · 빈 고객 렌더는 != 조건이 참이 돼 등급 전용 문구를 남겼다)
+ *   - if · case = else 갈래만(else 없으면 덩어리째 없음) · for · assign · comment = 없음 · {{ … | default: 'x' }} = x · 그 밖 출력 = 없음
+ *   - 파서가 못 읽는 글(미지원 태그 · 짝 안 맞음 · 미종결) = 첫 {% 앞 글만 남긴다(조건부 글이 새지 않는 쪽 · 그런 글은 발송 렌더도 못 읽는다)
+ *   ★ Codex 2R ~ 4R(주석 · raw 경계)이 같은 부류로 세 번 = 정규식으로 따로 해석한 것이 뿌리 → 렌더 파서 하나로 묶었다(그 해석기는 지움).
+ */
+function flattenParsedElse(nodes: ASTNode[]): string {
+  let out = '';
+  for (const n of nodes) {
+    if (n.type === 'text') out += n.value;
+    else if (n.type === 'output') {
+      const d = /\|\s*default\s*:\s*(['"])([\s\S]*?)\1/.exec(n.expression);
+      out += d ? d[2] : '';
+    } else if (n.type === 'if' || n.type === 'case') {
+      if (n.elseChildren) out += flattenParsedElse(n.elseChildren);
+    }
+  }
+  return out;
+}
+
+function tidyFlattened(text: string): string {
+  return text
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/  +/g, ' ')
+    .trim();
+}
+
+/**
  * ★ 2026-07-06 생성물 평문화 (순수) — %변수% 세계(캠페인·오퍼레이터 문안) 생성물에 Liquid가 섞인 경우
- *   중립 컨텍스트로 렌더(조건 전부 false → else 분기 채택, {{ x | default: 'y' }} → 'y') 후 잔존 태그 제거.
+ *   else 갈래만 남기고({{ x | default: 'y' }} → 'y') 잔존 태그 제거.
+ *   ★ 2026-11-10 고르는 법 = 렌더 파서 구조(flattenParsedElse · 조건식 계산 없음) · 못 읽는 글 = 첫 {% 앞만.
  *   "존재하지 않는 필드 기반 문법"이 사용자 화면·발송에 절대 노출되지 않는 기계 보장 층.
- *   Liquid 허용 경로(여정·인앱)에서는 호출하지 않는다 — 분기 기능 보존.
+ *   Liquid 허용 경로(인앱)에서는 호출하지 않는다 — 분기 기능 보존.
  */
 export function flattenLiquidToPlainText(text: string): string {
   if (!text || !detectLiquidSyntax(text)) return text;
+  let nodes: ASTNode[];
   try {
-    const { rendered } = renderLiquid(text, { customer: {} });
-    return stripLiquidLeftovers(rendered);
+    nodes = parse(tokenize(text));
   } catch {
-    return stripLiquidLeftovers(text);
+    const cut = text.indexOf('{%');
+    const head = cut === -1 ? text : text.slice(0, cut);
+    try { return tidyFlattened(flattenParsedElse(parse(tokenize(head)))); } catch { const c2 = head.indexOf("{{"); return tidyFlattened(c2 === -1 ? head : head.slice(0, c2)); }
   }
+  return tidyFlattened(flattenParsedElse(nodes));
+}
+
+/**
+ * ★ 2026-11-10 여정 생성물 = %변수% 한 가지(순수) — 여정 AI 가 만든 문안에 섞인 Liquid 를 %변수% 세계로 옮긴다.
+ *   옛: 여정만 Liquid 세계로 지시받아 같은 요청도 {{ customer.name | default: '고객' }} 와 %고객명% 가 왔다갔다 했고,
+ *       {% if %} 분기는 쓰기 화면에 코드 원문으로 보이고 받는 모습엔 대상 고객 한 명의 분기만 보여 「문안이 다르다」로 읽혔다.
+ *   - {{ customer.X | … }} 중 아는 칸(toPercent 에 있는 칸) = %표시명% (필터 · default 는 버린다 · 빈 값 처리는 발송 치환이 한다)
+ *   - 그 밖 Liquid(분기 · 모르는 칸) = flattenLiquidToPlainText(렌더 파서 구조 · else 갈래만)
+ *   - 장바구니 문법(cart.)이 든 글 = 고객 칸 이름만 바꾸고 나머지는 그대로(장바구니 여정은 지금도 Liquid 렌더로 나간다 · 보낼 글 판정이 장바구니 여정에서만 허용 · send-placeholder-gate)
+ *   부르는 곳 = 새로 만드는 여정 문안 출구만(이미 저장된 문안 · 다듬기 · 스팸 회피 다시 쓰기는 원문 보존이라 부르지 않는다).
+ */
+export function liquidCopyToPercent(text: string, toPercent: Readonly<Record<string, string>>): string {
+  if (!text || !detectLiquidSyntax(text)) return text;
+  const out = text.replace(/\{\{\s*customer\.([A-Za-z0-9_]+)\s*(?:\|[^}]*)?\}\}/g, (whole, key: string) => {
+    const name = Object.prototype.hasOwnProperty.call(toPercent, key) ? toPercent[key] : '';
+    return name ? `%${name}%` : whole;
+  });
+  if (!detectLiquidSyntax(out)) return out;
+  let nodes: ASTNode[];
+  try { nodes = parse(tokenize(out)); } catch { return flattenLiquidToPlainText(out); }
+  if (referencesCart(nodes)) return out;
+  return flattenLiquidToPlainText(out);
+}
+
+/** 렌더 파서 AST 에서 장바구니(cart)를 실제로 참조하는가 — 주석 · 따옴표 안 글은 빼고 식(출력 · 조건 · for 대상 · assign · case)에서 뿌리 이름 cart 를 본다(Codex 5R · 정규식으로 원문을 훑으면 주석 속 cart 를 잡고 assign 별칭을 놓쳤다) */
+function referencesCart(nodes: ASTNode[]): boolean {
+  const refs = (expr: string) => /(^|[^\w.])cart(?!\w)/.test(String(expr || '').replace(/'[^']*'|"[^"]*"/g, ''));
+  for (const n of nodes) {
+    if (n.type === 'output' && refs(n.expression)) return true;
+    if (n.type === 'assign' && refs(n.expression)) return true;
+    if (n.type === 'for' && (refs(n.iterable) || referencesCart(n.children))) return true;
+    if (n.type === 'if' && (n.branches.some((b) => refs(b.condition) || referencesCart(b.children)) || (n.elseChildren && referencesCart(n.elseChildren)))) return true;
+    if (n.type === 'case' && (refs(n.expression) || n.whens.some((w) => refs(w.value) || referencesCart(w.children)) || (n.elseChildren && referencesCart(n.elseChildren)))) return true;
+  }
+  return false;
 }
 
 /**

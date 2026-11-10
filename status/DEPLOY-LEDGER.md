@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
-- deployed_head: d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
+- pulled_head: 3f5f21ce · 2026-11-10 · Harold 서버 출력(git pull d7a97ce5..3f5f21ce · ecosystem.config.js · C121 원장 문서 셋) · 그 전 d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
+- deployed_head: 3f5f21ce · 2026-11-10 18:37 · 메모리 처방 = 운영 백엔드 dist 실행(ecosystem script dist/app.js) · 백엔드 build:safe 18:37:02(dist/app.js 61,011 바이트) · 적재 0건 확인 한 줄 → pm2 delete targetup-backend · pm2 start ../../ecosystem.config.js --only targetup-backend · pm2 save(새 id 5) · 확인 = script path …/backend/dist/app.js · restarts 0 · 기동 18:37:54 배너 · RSS 기동 1분 291,788KB(전 42분 1,728,732KB) · kill_timeout 들어옴 · 환경 변수 이름 대조 = 빠진 것 GEMINI_API_KEY · GEMINI_IMAGE_MODEL 은 .env 2줄 있음(dotenv) · 나머지 = pm2 내부 칸 · 기동 뒤 오류 0 · 그 전 d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -66,6 +66,7 @@
 | C119 | f0e7ea30 |
 | C120 | b44a9cf8 |
 | C121 | d7a97ce5 |
+| C122 | 3f5f21ce |
 
 ## §1 대기
 
@@ -1626,6 +1627,38 @@ COMMIT;
 - 기대: C118 설계서 §11 · 스튜디오 고르기 창 모바일 DM = 「세로 2:3」 · DM 용도 생성 그림 = 2:3 · DM 편집기 안 스튜디오 창 = 2:3 · DM 카탈로그 쪽 창에서 연 스튜디오 = 3:4(판 비율) · 자유 형태 = 3:4 그대로
 - 확인: 서버 HEAD · pm2 · 에러 로그 → 스튜디오에서 모바일 DM 1장 생성(2크레딧) = 세로 2:3 · Gemini 대체 경로 2:3 = 미검증(대체가 날 때만)
 - 결과: 1108 Harold = 서버 pull · build:safe 둘 · reload → HEAD a06e041b(2026-11-08 21:31:44 +0900) · targetup-backend online ↺73 · created at 2026-11-08T12:43:40Z · unstable 0 · reload 뒤 에러 로그 0줄(남은 줄 = 16:13 엑셀 암호 파일 · 그 전 것) → 서버 단계 통과 · 화면 = 고르기 창 모바일 DM 「세로 2:3」 · Harold 「체크완료」 · Gemini 대체 경로 2:3 = 미검증 그대로(대체가 날 때 확인)
+
+### C122-DDL-1 · MySQL 커밋 기록 표 HANJUL_LOAD_CHUNK(root · 새 표 하나 · 기존 SMSQ 표 변경 0)
+- 카드: C122
+- 단계: DDL
+- 선행: 없음(표가 없으면 새 코드는 옛 방식으로 돈다 = 순서 자유 · 1101 규칙대로 DDL 먼저)
+- 의미 바꿈: 아니오(새 표만 · 큐 · 결과 표 변화 0 · smsuser 권한 = smsdb.* 스키마 단위라 따로 줄 것 없음)
+- 기대: 접속 꼴 = SCHEMA.md MySQL 절 「DDL 접속」(비밀번호 화면 입력 · 명령 줄 노출 0) · 문장 = `CREATE TABLE IF NOT EXISTS HANJUL_LOAD_CHUNK (campaign_id varchar(50) NOT NULL, first_staging_id bigint NOT NULL, rows_read int NOT NULL, sms_loaded int NOT NULL DEFAULT 0, brand_loaded int NOT NULL DEFAULT 0, committed_at datetime DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (campaign_id, first_staging_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4` · 같은 출력에서 information_schema 확인
+- 확인: `SELECT TABLE_NAME, ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA='smsdb' AND TABLE_NAME='HANJUL_LOAD_CHUNK'` = 1행 InnoDB
+- 결과: (대기)
+
+### C122-H1 · 한줄로 배포(여정 %변수% 통일 · 직접입력 9,999 상한 · 적재 이어 넣기 · 백엔드 + 프론트 · MySQL DDL 1 · ENV 0)
+- 카드: C122
+- 단계: 한줄로 배포
+- 선행: C122-DDL-1 · Codex 여정 · 직접입력 6R approve · 적재 이어 넣기 설계 4R · 구현 2R approve · 커밋(Harold · 다른 세션 파일 뺌) → push
+- 기대: 설계서 docs/2026-11-10-load-resume-design.md · 1만 건 묶음 = MySQL 트랜잭션 하나(끊기면 그 묶음 0 · 다시 시작 = 같은 묶음 PK 로 확정) · 여정 문안 = %고객명% 꼴만(Liquid 출구 변환) · 직접입력 창 9,999 넘으면 추가 잠금 + 파일등록 안내 · 미가입 직접발송 동작 변화 0(1만 건 이하 = 묶음 하나 = 옛 결과와 같음)
+- 확인: 서버 HEAD · 백엔드 build:safe · 프론트 build:safe · 적재 0건 한 줄 → pm2 reload(dist 실행 · OPS 「★1110 운영 백엔드 = dist」) · 기동 에러 0 · dist grep queueTxReady ≥ 1 · 프론트 dist grep 「한 번에 넣을 수 있는 번호는」 ≥ 1
+- 결과: (대기)
+
+### C122-S1 · 실측(배포 뒤 첫 1만 건 넘는 직접발송 한 건)
+- 카드: C122
+- 단계: 사후
+- 선행: C122-H1
+- 기대: 그 캠페인 HANJUL_LOAD_CHUNK 줄 = 묶음 수만큼 생겼다가 종결 뒤 0 · campaigns 적재 수 = 큐 행 수 · 로그 「보류」 · 「사람 확인」 0
+- 확인: 서버 셸 SQL(그때 안내 · smsuser 조회)
+- 결과: (대기)
+
+### C122-T1 · 직원 지시문(설계서 §6 · 배포 뒤 한 번)
+- 카드: C122
+- 단계: 사후
+- 선행: C122-H1
+- 기대: 직접입력 창 10,000 = 잠금 · 9,999 = 추가 · 여정 만들기 문안에 {{ }} 0 · %고객명% 만
+- 결과: (대기)
 
 ## §2 덤프 뒤 적용분
 

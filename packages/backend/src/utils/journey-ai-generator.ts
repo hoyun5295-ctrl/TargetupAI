@@ -35,6 +35,9 @@ import { stripAdParts, ensureSenderName } from './messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
+import { CUSTOMER_LIQUID_TO_PERCENT } from './standard-field-map';
+// ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드 · 장바구니 {{ cart.* }} 만 보존)
+import { liquidCopyToPercent } from './liquid-templating';
 // ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
 import { formatStepTiming, describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 이어달리기 — 트리거는 계약이 정한다(AI 출력에 약속을 걸지 않는다). 설계서 §6.
@@ -328,7 +331,8 @@ export async function generateJourneyPackage(input: JourneyAIGenerateInput): Pro
   // ★ D210+ Phase 2 (Harold 명시 2026-05-23): 회사 customer DB 실측 프로필 (CT-58).
   //   AI 시스템 프롬프트 안 안전/분기/차단 3단계 분류 동적 주입.
   const dataProfile = await getCompanyDataProfile(input.companyId).catch(() => null);
-  const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile) : '';
+  // ★ 2026-11-10 여정도 캠페인 · 대행 제안과 같은 %변수% 세계(옛 기본값 'liquid' = {{ customer.X }} 또는 %변수% 를 같이 보여 줘 AI 가 아무거나 골랐다)
+  const dataProfilePrompt = dataProfile ? formatProfileForAiPrompt(dataProfile, { variableStyle: 'percent' }) : '';
 
   let system = `당신은 한국 마케팅 자동화 여정 설계 전문가입니다.
 ${EFFICACY_PROMPT_RULES}
@@ -370,7 +374,7 @@ ${formatConditionMenuForAi()}
 
 2. step 개수: 기본 2~5개 (목표 + 시계열에 맞춰 자동 결정).
    ★ 단발성 발송 의무 룰: 사용자가 한 번만 보내려는 의도를 명시하면(예: "한번만", "1회만", "한 번", "딱 한 번", "한 차례") 반드시 step 1개만 생성한다. 시계열 시리즈로 늘리지 말 것. 사용자가 지정한 발송 횟수를 절대 무시하지 않는다.
-   ★ 단발성·단순 일률 발송의 본문은 Liquid 문법({{ }} / {% %})을 쓰지 말고 %고객명% 같은 단순 변수만 사용한다 (마케팅 담당자가 직접 편집하기 쉽도록). 등급별/조건 분기 등 고급 1:1 개인화를 명시한 경우에만 Liquid를 사용한다.
+   ★ 여정 본문의 개인화는 %고객명% 같은 %변수% 형태만 쓴다(제목은 아래 룰대로 변수 없이). Liquid 문법({{ }} / {% %})은 어떤 경우에도 쓰지 않는다(쓰기 화면에 코드로 보이고 받는 모습과 달라 보인다). 등급 · 구매 이력을 살리려면 %고객등급% 같은 변수를 문장에 자연스럽게 넣는다(문안 속 분기 금지).
 3. delay_hours: 0(즉시) / 24(1일) / 72(3일) / 168(7일) / 336(14일) / 720(30일) / 1440(60일) / 2160(90일) 자연 단위 (앞 칸 기준 상대값 · 최대 8760)
 4. channel: 'lms' default (광고 표기 + 무료거부 자동 합성 시 90바이트 SMS 한계 초과)
 5. isAd: 마케팅성은 true default (정보 안내성만 false)
@@ -421,7 +425,7 @@ ${formatConditionMenuForAi()}
 ✓ 보존 영역 (절대 변경 X, 회사 admin이 직접 작성할 영역):
    - 구체 혜택 (% / 원 / 무료 / 쿠폰 / 사은품 / 적립 / 무료배송) → [혜택 안내: 직접 수정해주세요] placeholder
    - 상품명 / 매장명 / 일시 / 숫자 / 연락처 / 주소 / URL → [URL 입력] placeholder 또는 실제 URL 작성
-   - 변수 {{ customer.X }} / %고객명% → 자리 그대로 보존
+   - 변수 %고객명% 등 %변수% → 자리 그대로 보존
 ✓ 자유 영역 (적극 활용, 카피라이터 감각으로):
    - 수식어 / 감성 표현 ("기다리시던" / "소중한" / "정성스럽게" / "오랜 시간 함께해주신")
    - 감성 묘사 (시간 불문, 인연·감사·설렘·일상 공감의 자연스러운 1~2 줄 묘사, 계절 단어 금지)
@@ -433,66 +437,19 @@ ${formatConditionMenuForAi()}
 ✗ "안녕하세요 고객님": 금지 (감성 도입 / 질문 / 숫자로 시작, 단 계절 단어는 금지)
 ✗ "특별한 혜택 / 소식 / 선물": 금지 (구체 혜택 placeholder 사용)
 ✗ "준비했어요 / 준비했습니다": 금지 ("지금 ~할 수 있어요" 또는 감성 도입부로)
-✗ "소중한 고객님": 금지 (%고객명% 또는 {{ customer.name | default: '고객' }} 직접 활용)
+✗ "소중한 고객님": 금지 (%고객명% 직접 활용)
 ✗ "다양한 혜택": 금지 (핵심 1가지 구체 placeholder)
 ✗ "많은 관심 부탁드립니다": 금지 (구체 CTA로)
 ✗ 느낌표 폭탄 (!!!): 전체에서 최대 2~3개
 ✗ 과장 형용사 ("초특가" / "역대급" / "미친" / "대박"): 금지
 
-[★ Liquid 동적 콘텐츠: D191 강화 (사용자별 1:1 개인화)]
-회사 admin이 고급 1:1 동적 콘텐츠를 원할 때 Liquid 문법 활용 권장. 발송 시점 사용자별 자동 분기 + 변수 계산:
-✓ 변수 출력: {{ customer.name | default: '고객' }} / {{ customer.grade }} / {{ customer.points }}
-✓ 기본값 fallback: {{ customer.name | default: '고객' }} (값 없으면 '고객'으로 자동 대체)
-✓ ★★ 필수 규칙: 모든 {{ customer.X }} 출력 변수에는 반드시 | default 를 붙인다. default 없는 {{ customer.X }}는 값 없는 고객에게 그 자리가 비어 발송되므로 절대 금지. 예: {{ customer.name | default: '고객' }} / {{ customer.grade | default: '' }} / {{ customer.region | default: '' }} (format_number 등 다른 필터가 이미 있으면 그대로 둔다)
-✓ 숫자 포맷: {{ customer.points | format_number }} → 2,300 (한국 천 단위 콤마 자동)
-✓ 조건 분기: {% if customer.grade == 'VIP' %} VIP 안내 {% elsif customer.purchase_count > 10 %} 오래 함께한 고객 안내 {% else %} 일반 안내 {% endif %}
-✓ 계산: {{ customer.points | minus: 1000 }} (포인트 차감) / {{ customer.amount | times: 0.1 | round: 0 }} (10% 환산)
-✓ 등급별 인사 / 지역별 매장 안내 / 직전 구매 회상 = 1개 메시지로 N가지 분기 자동 처리
-
-[Liquid 활용 가이드: AI 작성 시 의무]
-- 회사 admin이 "등급별 분기 / 지역별 / 직전 구매 회상" 영역 명시 시 Liquid 적극 활용
-- Liquid 분기 안의 구체 혜택 텍스트도 동일 룰: % / 원 / 무료 등 임의 작성 X → \`[혜택 안내: 직접 수정해주세요]\` placeholder
-- 단순 일률 발송 영역은 Liquid 미사용 (기존 %고객명% 변수만 사용 권장)
-- ★ D210+ Phase 2: 모르는 필드(customer.X) 사용 절대 금지. 아래 [회사 실측 데이터 활용 매트릭스]의 안전/분기 변수만 사용 의무.
+[개인화 변수 규칙]
+- 변수는 아래 [회사 실측 데이터 활용 매트릭스]의 %변수%만 쓴다(매트릭스에 없는 변수는 보낼 때 빈칸이라 켜기에서 막힌다).
+- {{ customer.X }} · {% if %} 같은 템플릿 문법은 쓰지 않는다.
 
 ${dataProfilePrompt}
 
 ${buildWeatherPromptBlock()}
-
-[★ ★ ★ AI 자율 예측 점수 활용 가이드: D197 신규 (Predictive Suite 통합) ★ ★ ★]
-발송 시점에 customer 객체에 자동 첨부되는 3 예측 점수 (0~1 매트릭스):
-✓ {{ customer.click_score }}: 다음 메시지 클릭 가능성
-✓ {{ customer.churn_risk }}: 이탈 위험 (높을수록 회복 캠페인 의무)
-✓ {{ customer.purchase_likelihood }}: 구매 가능성 (높을수록 구매 유도)
-
-[AI 자율 분기 작성 가이드: 회사 admin이 "이탈 고객 회복" / "구매 유도" / "AI가 알아서 분기" 영역 명시 시 적극 활용]
-
-예시 1 (이탈 위험 분기):
-{{ customer.name | default: '고객' }}님,
-{% if customer.churn_risk > 0.7 %}
-오랜만에 인사드려요. 다시 뵙고 싶은 마음을 담아 [회복 안내: 직접 작성해주세요] 소식을 전해 드려요.
-{% elsif customer.purchase_likelihood > 0.6 %}
-{{ customer.name | default: '고객' }}님께 어울리는 새 상품 [추천 안내: 직접 작성해주세요]
-{% else %}
-새로운 소식 전해드려요.
-{% endif %}
-
-예시 2 (클릭 가능성 + 등급 통합):
-{{ customer.name | default: '고객' }}님,
-{% if customer.click_score > 0.4 and customer.grade == 'VIP' %}
-VIP 회원님께 가장 먼저 안내드리는 소식.
-{% elsif customer.churn_risk > 0.6 %}
-오랜만에 안부 전해드려요.
-{% else %}
-새 소식 안내.
-{% endif %}
-
-[Predictive 점수 분기 본질 룰]
-✓ 점수는 발송 시점 자동 계산 (cache 24h TTL)
-✓ 신규 회사 영역도 cold start fallback 정합: 등급별 평균 점수 사용
-✓ 데이터 누적 시 모델 자동 정확도 향상: 시간 지날수록 정확도↑
-✗ 점수 자체를 메시지에 직접 노출 금지 (예: "당신의 이탈 위험은 87%입니다" X)
-✗ Liquid 분기 안 구체 혜택 임의 작성 X. placeholder 유지 의무
 
 [★ 문자 사용 절대 룰: 한국 통신사 SMS/LMS 표준]
 ✗ 이모지 절대 사용 금지: 🎂 🎉 💝 🌸 🎁 ✨ 💌 🌷 🍀 ❤ 등 모든 이모지 통신사 미지원 (발송 실패 / 깨짐 위험)
@@ -527,53 +484,16 @@ VIP 회원님께 가장 먼저 안내드리는 소식.
 
 자세히 → [URL 입력]
 
-[좋은 메시지 예시: 등급별 1:1 분기 (Liquid 활용 + 풍성 본문 + 단순 제목)]
-제목: "오랜만에 안부 전해요"
-
-본문:
-{{ customer.name | default: '고객' }}님, 안녕하세요.
-
-{% if customer.grade == 'VIP' %}
-저희 매장의 VIP 회원님이신 {{ customer.name | default: '고객' }}님께
-가장 먼저 전하고 싶은 소식이 있어 인사드려요.
-
-오랜 시간 변함없이 찾아주시는 발걸음 하나하나가
-저희에게는 가장 큰 힘이 되고 있어요.
-
-VIP 회원님께 먼저 전하는 이번 안내,
-가장 먼저 받아보실 수 있도록 정성껏 담았어요.
-{% elsif customer.purchase_count > 10 %}
-{{ customer.name | default: '고객' }}님과 함께한 {{ customer.purchase_count }}번의 만남,
-어느덧 오랜 시간 함께해주신 분이 되어주셨네요.
-
-매번 변함없는 신뢰로 찾아주셔서 진심으로 감사드려요.
-{{ customer.name | default: '고객' }}님 같은 고객님이 계셔서
-저희가 더 좋은 제품과 서비스를 고민할 수 있어요.
-
-오래 함께해주신 분들께만 전하는 인사를 담았어요.
-{% else %}
-새로운 소식 전해드리고 싶어
-{{ customer.name | default: '고객' }}님께 인사드려요.
-
-바쁜 하루하루 속에서도 잠시 미소 지을 수 있는 순간이 되길 바라며,
-저희가 준비한 새로운 이야기로
-%고객명%님의 일상에 작은 즐거움을 더해드릴게요.
-{% endif %}
-
-[혜택 안내: 직접 수정해주세요]
-
-자세히 → [URL 입력]
-
 [좋은 메시지 예시: 신규 가입 환영 (D209+ 신규 Onboarding LMS, 풍성 본문 + 단순 제목)]
 제목: "함께하게 되어 진심으로 반가워요"
 
 본문:
-{{ customer.name | default: '고객' }}님, 안녕하세요.
+%고객명%님, 안녕하세요.
 
 오늘 저희 매장의 새 가족이 되어주셔서
 진심으로 감사한 마음을 먼저 전해요.
 
-첫 인연을 맺게 된 {{ customer.name | default: '고객' }}님께
+첫 인연을 맺게 된 %고객명%님께
 저희가 가장 정성껏 준비한 첫 인사를 드리고 싶었어요.
 
 처음 만나는 분께만 드리는 작은 선물 한 가지,
@@ -583,28 +503,18 @@ VIP 회원님께 먼저 전하는 이번 안내,
 
 자세히 → [URL 입력]
 
-[좋은 메시지 예시: 휴면 고객 회복 (D209+ 신규 Dormant LMS, Predictive churn_risk 활용)]
+[좋은 메시지 예시: 휴면 고객 회복 (D209+ 신규 Dormant LMS)]
 제목: "오랜만에 안부 전해드려요"
 
 본문:
-{{ customer.name | default: '고객' }}님, 안녕하세요.
+%고객명%님, 안녕하세요.
 
-{% if customer.churn_risk > 0.7 %}
-오랜 시간 발걸음이 뜸하셨네요.
-혹시 그동안 불편하셨던 영역이 있었다면 부족함을 먼저 사과드리고 싶어요.
+문득 %고객명%님 생각이 나 잘 지내고 계신지 안부 전해드려요.
 
-다시 한 번 좋은 인연으로 이어가고 싶은 마음으로
-오랜 시간 함께해주신 분들께만 전하는 회복 안내를 담았어요.
-
-[혜택 안내: 직접 수정해주세요]
-{% else %}
-문득 {{ customer.name | default: '고객' }}님 생각이 나 잘 지내고 계신지 안부 전해드려요.
-
-오랜만에 전하는 소식과 함께 {{ customer.name | default: '고객' }}님께
+오랜만에 전하는 소식과 함께 %고객명%님께
 어울리는 작은 안내 드리고 싶었어요.
 
 [혜택 안내: 직접 수정해주세요]
-{% endif %}
 
 자세히 → [URL 입력]
 
@@ -746,8 +656,9 @@ VIP 회원님께 먼저 전하는 이번 안내,
   const steps: GeneratedStep[] = rawSteps.map((s: any, idx: number) => {
     const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
     // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
-    const rawMessage = aiStr(s.messageTemplate).slice(0, 2000);
-    const rawSubject = channel === 'sms' ? '' : aiStr(s.subject).slice(0, JOURNEY_SUBJECT_MAX_CHARS);
+    // ★ 2026-11-10 출구 가드 = %변수% 한 가지(지시를 어겨 섞인 {{ }} · {% %} 를 옮기거나 평문화 · 자르기 전에 · 장바구니 변수만 보존)
+    const rawMessage = liquidCopyToPercent(aiStr(s.messageTemplate), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 2000);
+    const rawSubject = channel === 'sms' ? '' : liquidCopyToPercent(aiStr(s.subject), CUSTOMER_LIQUID_TO_PERCENT).slice(0, JOURNEY_SUBJECT_MAX_CHARS);
     const messageSan = sanitizeForSms(rawMessage);
     const subjectSan = sanitizeForSms(rawSubject);
     if (messageSan.hadChanges) {
@@ -1165,8 +1076,9 @@ ${EFFICACY_PROMPT_RULES}
   const benefitBasis = String(input.objective || '');
   // ★ 2026-10-24 ② 혜택 → 효능(같은 근거 · 제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 제목 = 비워도 되는 칸)
   const g = dropInventedEfficacyTitledBody(
-    replaceInventedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.subject).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
-    replaceInventedBenefits(stripAdParts(sanitizeForSms(aiStr(parsed.message).slice(0, 4000)).sanitized), benefitBasis),
+    // ★ 2026-11-10 출구 가드 = %변수% 한 가지(여정 한 번에 만들기 출구와 같은 함수)
+    replaceInventedBenefits(stripAdParts(sanitizeForSms(liquidCopyToPercent(aiStr(parsed.subject), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
+    replaceInventedBenefits(stripAdParts(sanitizeForSms(liquidCopyToPercent(aiStr(parsed.message), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 4000)).sanitized), benefitBasis),
     benefitBasis,
   );
   // ★ 2026-10-28 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문 · 제목은 비워도 되는 칸) · K1-1 기준일 단계 = LMS 광고 → 첫 줄 또는 제목에 전송자 명칭

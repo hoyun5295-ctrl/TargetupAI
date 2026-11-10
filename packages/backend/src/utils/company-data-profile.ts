@@ -29,7 +29,7 @@
 import { query } from '../config/database';
 // ★ 2026-08-02: 등급 서열 확인 판정은 CT 단일 출처.
 import { hasUsableGradeOrder } from './customer-grade-rank';
-import { getColumnFields } from './standard-field-map';
+import { getMessageVariableColumnFields } from './standard-field-map';
 // ★ 2026-08-01 여정 재설계 — 신규/기존 판정 능력(순수 CT). 타입·판정 규칙은 그쪽이 소유한다.
 import { resolveNewCustomerJudgement, type CompanyIdentityCapability } from './journey-identity-signals';
 import { joinedAtEvidence } from './customer-joined-at';
@@ -79,8 +79,8 @@ interface FieldDef {
 //   (옛 하드코딩은 '등급'·'등록매장'·'가입매장'·'최근구매액' 등이 displayName '고객등급'·'매장명'·'등록매장정보'·'최근구매금액'과 어긋나 발송 시 빈칸이던 근본 원인.)
 //   phone(수신번호)·sms_opt_in(동의 boolean)은 메시지 변수가 아니므로 제외(buildVarCatalogFromFieldMap과 동일 정책).
 //   FIELD_MAP에 없던 avg_order_value·ltv_score·wedding_anniversary는 애초에 발송 치환 불가(사전에 없음)라 활용 목록에서 자연 제외 = 잠재 빈칸 버그 동시 제거.
-const ANALYZED_FIELDS: FieldDef[] = getColumnFields()
-  .filter((f) => f.fieldKey !== 'phone' && f.fieldKey !== 'sms_opt_in')
+//   ★ 2026-11-10 칸 목록 = standard-field-map getMessageVariableColumnFields(여정 생성물 Liquid → %변수% 변환표와 같은 목록 · 거르는 규칙 한 곳)
+const ANALYZED_FIELDS: FieldDef[] = getMessageVariableColumnFields()
   .map((f) => ({
     field: f.columnName,
     label: f.displayName,

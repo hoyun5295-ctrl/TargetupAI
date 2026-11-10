@@ -1575,6 +1575,9 @@ describe('R7 넓힘(1025) — 스팸 결과를 읽는 함수 = 공용 판정 셋
 // ── R10 넓힘 ──
 /** 유틸 · 서비스의 한국어 일반 Error — 사람이 고칠 입력 · 상태가 아닌 것(내부 · 설정 · 외부 원문 · AI 해석 · DB 마이그레이션 안내) · 키 = 파일|문장 앞머리 */
 const PLAIN_ERROR_OK: Record<string, string> = {
+  // ★1110 적재 묶음 트랜잭션 CT — 워커 안에서만 잡히는 내부 상태 오류(고객 응답 · 라우트 길 0)
+  "utils/queue-load-tx.ts|이미 끝난 적재 트랜잭션": "같은 트랜잭션 두 번 커밋 = 코드 잘못 방어 · 워커 안에서만 · 고객 응답 길 0",
+  "utils/queue-load-tx.ts|커밋 기록 중복인데 줄을 읽지 못함": "MySQL 이상(중복 키 뒤 줄 없음) · 워커가 보류로 받음 · 고객 응답 길 0",
   // ★1028 자사몰 대비 K8 · M24 — 사용자 조건이 아닌 운영 · 위조 갈래(라우트가 고객 문장으로 따로 답한다)
   "utils/oauth-pending.ts|승인 상태가 없습니다(만료 또는 변조).": "몰 콜백 위조 · 만료(콜백이 오류 화면으로 답함 · 코드 잘못 아님 · 고객 조건 아님)",
   "utils/secret-box-reseal.ts|CDP_SECRET_BOX_KEY 가 없거나": "운영 스크립트 전제(키 없음 = 서버 설정 · 화면 경로 없음)",
@@ -3280,6 +3283,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/agent-charge-core.ts `agent-charge-uncertain:${requestId}`': '슈퍼관리자 충전 커밋 응답 유실 · 내부 통제 경보',
     'utils/cafe24-client.ts \'cafe24-api-version-rejected\'': '앱 고정 API 판 = 전 몰 공통 · 몰 하나는 계기일 뿐',
     'utils/cdp-webhook-retry-worker.ts \'cdp-webhook-backlog\'': '처리기 적체(워커가 못 따라감) · 회사 무관',
+    'utils/direct-send-worker.ts \'direct-load-hold-manual\'': '적재 보류 사람 확인 표식 수 · 여러 회사 집계 · 회사 무관(회사별 1통은 따로 회사 id 로)',
     'utils/direct-send-worker.ts \'direct-preparing-stale\'': '처리기가 차감 중간에 죽은 흔적 · 여러 회사 집계 · 회사 무관',
     'utils/gateway-template-mapping-worker.ts \'gtm-auth-error\'': '게이트웨이 인증 = 전 호출 공통',
     'utils/gateway-template-mapping-worker.ts \'gtm-drift\'': '게이트웨이 대조 드리프트 = 동기화 처리기 · 여러 발송 ID 집계',
@@ -3405,6 +3409,7 @@ describe('R14 넓힘(1102 설계 docs/2026-11-01-credit-control-tower-design.md 
     "utils/cafe24-client.ts 'cafe24-api-version-rejected'": '고정한 API 판 거절 = 모든 호출이 다시 실패',
     "utils/cdp-webhook-retry-worker.ts 'cdp-webhook-exhausted'": '하루 창 집계(24시간) > 쿨다운(12시간) = 쿨다운 안 사건도 다음 경보 수에 다시',
     "utils/cdp-webhook-retry-worker.ts 'cdp-webhook-backlog'": '적체 수 = 남아 있는 동안 다시',
+    "utils/direct-send-worker.ts 'direct-load-hold-manual'": '사람 확인 표식 수 = 남아 있는 동안 다시(1110 설계 §3-5 · 준비분 잔존 감시와 같은 꼴)',
     "utils/direct-send-worker.ts 'direct-preparing-stale'": '차감 중간 잔존 수 = 남아 있는 동안 다시(0731 10R 설계)',
     "utils/gateway-template-mapping-worker.ts 'gtm-auth-error'": '게이트웨이 인증 실패 = 모든 호출이 다시 실패',
     "utils/gateway-template-mapping-worker.ts 'gtm-drift'": '대조 드리프트 수 = 남아 있는 동안 다시',
