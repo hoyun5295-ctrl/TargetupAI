@@ -11,7 +11,7 @@
  */
 import { randomUUID } from 'crypto';
 import { pausedSetSql, MANUAL_PAUSE_REASON } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
-import { query, pool } from '../config/database';
+import { query, pool, lockPool } from '../config/database';   // lockPool = ★ C129 여정 세션 잠금(잠금 전용 풀 · R41)
 import { JourneyInputError } from './journey-step-limits';
 
 let ready = false;
@@ -90,6 +90,56 @@ export async function oneShotColumnsReady(): Promise<boolean> {
 export function resetOneShotColumnsCache(value?: boolean): void {
   oneShotReady = value === true;
   oneShotAbsentUntil = value === false ? Date.now() + RECHECK_MS : 0;
+}
+
+/**
+ * ★ 2026-11-11 C129(D11 · Codex 구현 3R) — 여정마다 하나인 **세션 잠금** 안에서만 work 를 돈다(프로세스 사이에서도 한 번에 하나).
+ *   옛 한 번 보내기 잠금(journey-anchor-scheduler withOneShotLock · 1102 E1-2)의 꼴을 이름(space)만 바꿔 쓸 수 있게 여기로 모았다 — 그 함수는 이것을 부른다.
+ *   PG 세션 advisory lock · 잠금 전용 풀(lockPool · R41 · 작업 풀을 잡지 않는다) · 풀지 못하면 그 연결을 버린다(세션이 끝나야 잠금이 풀린다).
+ *   wait = 기다려 잡음 · 아니면 잡기 시도(못 잡으면 locked false = 다른 프로세스가 그 일을 하고 있다).
+ */
+export async function withJourneySessionLock<T>(space: string, journeyId: string, wait: boolean, work: () => Promise<T>): Promise<{ locked: true; value: T } | { locked: false }> {
+  const client = await lockPool.connect();
+  let locked = false;
+  let unlockFailed = false;
+  try {
+    if (wait) {
+      await client.query(`SELECT pg_advisory_lock(hashtext($1::text), hashtext($2::text))`, [space, journeyId]);
+      locked = true;
+    } else {
+      const got = await client.query(`SELECT pg_try_advisory_lock(hashtext($1::text), hashtext($2::text)) AS ok`, [space, journeyId]);
+      locked = got.rows[0]?.ok === true;
+    }
+    if (!locked) return { locked: false };
+    return { locked: true, value: await work() };
+  } finally {
+    if (locked) {
+      await client.query(`SELECT pg_advisory_unlock(hashtext($1::text), hashtext($2::text))`, [space, journeyId]).catch(() => { unlockFailed = true; });
+    }
+    client.release(unlockFailed ? new Error(`${space} 잠금 풀기 실패 · 연결 버림`) : undefined);
+  }
+}
+
+// ★ 2026-11-11 C129(D11) — 날짜형 시작(생일 임박 · 연 단위 포인트 소멸)의 훑은 날 칸(원장 C129-DDL-1). 없으면 옛 동작(따라잡기 0 · 기록 0).
+//   이름에 cursor = 새 판 복제 때 NULL(아래 createNewVersion 의 이름 규칙 · 새 판은 켠 날부터).
+let stateCursorReady = false;
+let stateCursorAbsentUntil = 0;
+export async function stateCursorColumnReady(): Promise<boolean> {
+  if (stateCursorReady) return true;
+  if (Date.now() < stateCursorAbsentUntil) return false;
+  const r = await query(
+    `SELECT COUNT(*)::int AS n FROM information_schema.columns WHERE table_name = 'journeys' AND column_name = 'last_state_cursor_on'`,
+  );
+  const ok = Number(r.rows[0]?.n || 0) === 1;
+  if (ok) stateCursorReady = true;
+  else stateCursorAbsentUntil = Date.now() + RECHECK_MS;
+  return ok;
+}
+
+/** 테스트 전용. */
+export function resetStateCursorColumnCache(value?: boolean): void {
+  stateCursorReady = value === true;
+  stateCursorAbsentUntil = value === false ? Date.now() + RECHECK_MS : 0;
 }
 
 /** 마지막 날 조건(KST 오늘까지 받음) — 목록 조각 · 잠금 뒤 판정 · 끝남 처리가 같은 식을 쓴다. */

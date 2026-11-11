@@ -26,10 +26,17 @@ export interface StepCampaignSpec {
   callbackNumber: string;
   kakaoTemplateId: string | null;
   mmsImagePaths: string | null;    // JSON 문자열 또는 null
+  /**
+   * ★ 2026-11-11 C129(D10) — 원장 꼴(선불 알림톡 칸만 넘긴다 = prepaid resolveKakaoCharge 의 shape · 차감 단가와 결과별 단가 전부).
+   *   한 단계 캠페인 = 한 과금 방식 · 한 차감 꼴: 넘겨받은 값(없음 포함)이 오늘 마지막 순번 캠페인의 값(없음 포함)과 다르면 순번 + 1.
+   *   정산기는 과금 차감 행 전부가 같은 결과별 단가일 때만 결과별 차액을 돌려주고(deduct-reference resolveAlimtalkLedgerUnits),
+   *   월 예산은 꼴 있는 캠페인을 잔액 원장으로 센다(journey-executor JOURNEY_MONTH_COST_SQL) — 섞이면 둘 다 틀린다.
+   */
+  ledgerShape?: string | null;
 }
 
 /** KST 기준 오늘 날짜(YYYY-MM-DD). */
-function kstDateString(): string {
+export function kstDateString(): string {
   return new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
@@ -126,7 +133,7 @@ export function resetStepCampaignSeqCache(): void {
   Object.assign(_seq, { column: false, continuation: false, columnAbsentUntil: 0, continuationAbsentUntil: 0, alertedAt: 0 });
 }
 
-export type StepCampaignPick = { campaignId: string } | { blocked: 'continuation_unavailable' };
+export type StepCampaignPick = { campaignId: string; sendDate: string } | { blocked: 'continuation_unavailable' };
 
 /**
  * ★ 2026-11-02 묶음 발송이 쓸 오늘 단계 캠페인(설계서 3-8 · 옛 getOrCreateStepCampaign 자리 · 부르는 곳 = 실행기 묶음 하나).
@@ -145,7 +152,8 @@ export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<
     const cur = await query(
       `SELECT jsc.campaign_id, ${st.seqColumn ? 'jsc.seq' : '0'}::int AS seq,
               (c.send_config->>'loadProtocol') AS protocol,
-              COALESCE((c.send_config->>'loadSealed')::boolean, false) AS sealed
+              COALESCE((c.send_config->>'loadSealed')::boolean, false) AS sealed,
+              (c.send_config->>'ledgerShape') AS ledger_shape
          FROM journey_step_campaigns jsc JOIN campaigns c ON c.id = jsc.campaign_id
         WHERE jsc.journey_id = $1::uuid AND jsc.step_id = $2::uuid AND jsc.send_date = $3
         ORDER BY ${st.seqColumn ? 'jsc.seq DESC' : 'jsc.created_at DESC'} LIMIT 1`,
@@ -154,8 +162,10 @@ export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<
     const row = cur.rows[0];
     let nextSeq = 0;
     if (row) {
-      if (!row.sealed && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id) };
-      if (!row.sealed && row.protocol !== LOAD_PROTOCOL_UNIT) {
+      // ★ 2026-11-11 C129(D10) — 원장 꼴이 다르면(한쪽만 있는 것 포함) 봉인된 것과 같은 길 = 이어 붙임(문자 칸 · 후불 · 옛 캠페인 = 양쪽 다 없음 = 같음)
+      const sameShape = (row.ledger_shape ?? null) === (spec.ledgerShape ?? null);
+      if (!row.sealed && sameShape && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id), sendDate };
+      if (!row.sealed && sameShape && row.protocol !== LOAD_PROTOCOL_UNIT) {
         const conv = await query(
           `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadProtocol}', to_jsonb($2::text))
             WHERE id = $1::uuid AND NOT (COALESCE(send_config, '{}'::jsonb) ? 'loadProtocol')
@@ -164,7 +174,7 @@ export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<
             RETURNING id`,
           [row.campaign_id, LOAD_PROTOCOL_UNIT],
         );
-        if (conv.rows.length > 0) return { campaignId: String(row.campaign_id) };
+        if (conv.rows.length > 0) return { campaignId: String(row.campaign_id), sendDate };
         const again = await query(`SELECT send_config->>'loadProtocol' AS protocol FROM campaigns WHERE id = $1::uuid`, [row.campaign_id]);
         if (again.rows[0]?.protocol === LOAD_PROTOCOL_UNIT) continue;   // 다른 자리가 먼저 달았다 = 다시 읽기
       }
@@ -178,7 +188,7 @@ export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<
       nextSeq = Number(row.seq) + 1;
     }
     const created = await createStepCampaignRow(spec, sendDate, nextSeq, st.seqColumn);
-    if (created) return { campaignId: created };
+    if (created) return { campaignId: created, sendDate };
     // 졌다 = 다시 읽기(이긴 쪽 행)
   }
   throw new Error(`단계 캠페인을 정하지 못했다 journey=${spec.journeyId} step=${spec.stepId}`);
@@ -212,7 +222,7 @@ async function createStepCampaignRow(spec: StepCampaignSpec, sendDate: string, s
       spec.kakaoTemplateId,
       spec.mmsImagePaths,
       // ★ 2026-09-26 새 원장 표식(위 JOURNEY_LEDGER_CONFIG) · ★ 2026-11-02 새 규약 표식(I5) — 이후 sentTables 기록은 jsonb_set이라 표식이 보존된다.
-      JSON.stringify({ ...JOURNEY_LEDGER_CONFIG, loadProtocol: LOAD_PROTOCOL_UNIT }),
+      JSON.stringify({ ...JOURNEY_LEDGER_CONFIG, loadProtocol: LOAD_PROTOCOL_UNIT, ...(spec.ledgerShape ? { ledgerShape: spec.ledgerShape } : {}) }),
     ],
   );
   const newId = camp.rows[0].id as string;

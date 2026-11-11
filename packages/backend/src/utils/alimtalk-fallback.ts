@@ -89,6 +89,16 @@ export function usesLmsFallback(t: AlimtalkNextType): boolean {
 }
 
 /**
+ * ★ 2026-11-11 C129(D10) — 대체 유형 → 대체 문자의 **과금 유형**(대체 안함 = null). 차감 꼴(prepaid resolveKakaoCharge)의 입력 한 곳.
+ *   빈 값 = 기본(L) = LMS · S · A = SMS · L · B = LMS.
+ */
+export function alimtalkFallbackChargeType(raw: string | null | undefined): 'SMS' | 'LMS' | null {
+  const t = normalizeAlimtalkNextType(raw);
+  if (t === 'N') return null;
+  return usesLmsFallback(t) ? 'LMS' : 'SMS';
+}
+
+/**
  * 저장 시점 검증 — 위반 사유 문자열, 통과면 null.
  * 라우트에서 400 응답 문구로 그대로 쓴다(throw 없이 판정만 필요한 자리).
  */

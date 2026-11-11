@@ -15,7 +15,7 @@
 import crypto from 'crypto';
 import { MANUAL_PAUSE_REASON } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { query, pool } from '../config/database';
-import { pauseJourneyLineage } from './journey-lineage';
+import { pauseJourneyLineage, lockLineage } from './journey-lineage';
 import { createShortUrl } from './short-url';
 import { latestSnapshotSql } from './journey-step-versions';   // ★ 2026-11-02 판 읽기 CT(설계서 3-0 CT-J1)
 
@@ -315,6 +315,15 @@ export async function pauseJourneyByToken(token: string): Promise<{ ok: true; ch
 /**
  * 자동 정지 (잔액 부족 / 통신사 fail 등 시스템 발화).
  * journey-executor.ts 안 실패 catch 영역에서 호출.
+ *
+ * ★ 2026-11-11 C129(설계서 docs/2026-11-11-journey-remaining-nine-design.md 4-1 · 4-2)
+ *   D2 — 다시 켜기 · 옵션 저장 · 감시와 같은 **계보 잠금 안에서** 여정 상태를 읽고, **여정이 멈춘 상태일 때만** 그 실행을 멈춘다.
+ *        부르는 쪽은 여정 멈춤(pauseJourney)을 먼저 한다. 여정이 켜져 있으면(멈춤이 실패했거나 그 사이 담당자가 다시 켰다) 아무것도 쓰지 않는다
+ *        → 켜진 여정에 멈춘 실행이 따로 남지 않는다(옛: 실행 행만 잠그는 따로 된 쓰기 = 두 쓰기 사이에 다시 켜면 그 실행만 멈춘 채 남았다).
+ *        여정 행은 잠그지 않고 읽는다(여정을 켜는 쓰기는 계보 잠금을 쥔다 · 완료 처리의 「실행 → 여정 통계」 순서와 엇갈리는 행 잠금 0).
+ *   D1 — 멈춤은 **진행 중(active)인 실행에만** 쓴다(뿌리 R93 · 옛: 조건 없이 덮어 완료 · 끝난 실행이 멈춤으로 바뀌었다).
+ *        멈춤 기록은 상태를 바꾼 때만 남긴다(기록 = 실제 멈춤과 1 대 1).
+ * 돌려주는 값 = 'paused'(멈췄다) · 'skipped'(여정이 멈춘 상태가 아니거나 진행 중인 실행이 아니다).
  */
 export async function autoPauseExecution(params: {
   companyId: string;
@@ -324,21 +333,30 @@ export async function autoPauseExecution(params: {
   // ★ 2026-10-25 #4 — 멈춤(paused)은 다시 켜기가 되살리는 사유만(journey-resume RESUME_REVIVE_REASONS · 짝 시험). 번호 오류는 끝냄(실행기).
   pauseReason: 'balance_insufficient' | 'carrier_temp_fail' | 'auto_retry_exhausted';
   pauseTriggerSource: string;
-}): Promise<void> {
+}): Promise<'paused' | 'skipped'> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // status UPDATE
-    const execRes = await client.query(
-      `SELECT status FROM journey_executions WHERE id = $1 FOR UPDATE`,
+    await lockLineage(client, params.journeyId);
+    const journeyRes = await client.query(`SELECT status FROM journeys WHERE id = $1`, [params.journeyId]);
+    if (journeyRes.rows[0]?.status !== 'paused') {
+      await client.query('ROLLBACK');
+      console.warn(`[JourneyPause] 실행 자동 멈춤 건너뜀 — 여정이 멈춘 상태가 아니다 journey=${params.journeyId} execution=${params.executionId} reason=${params.pauseReason}`);
+      return 'skipped';
+    }
+
+    // status UPDATE — 진행 중인 실행만
+    const upd = await client.query(
+      `UPDATE journey_executions SET status = 'paused' WHERE id = $1 AND status = 'active' RETURNING id`,
       [params.executionId],
     );
-    const executionStatusAtPause = execRes.rows[0]?.status || null;
-    await client.query(
-      `UPDATE journey_executions SET status = 'paused' WHERE id = $1`,
-      [params.executionId],
-    );
+    if (upd.rows.length === 0) {
+      await client.query('ROLLBACK');
+      console.warn(`[JourneyPause] 실행 자동 멈춤 건너뜀 — 진행 중인 실행이 아니다 journey=${params.journeyId} execution=${params.executionId} reason=${params.pauseReason}`);
+      return 'skipped';
+    }
+    const executionStatusAtPause = 'active';
 
     // snapshot 조회
     const snapRes = await client.query(
@@ -369,6 +387,7 @@ export async function autoPauseExecution(params: {
     );
 
     await client.query('COMMIT');
+    return 'paused';
   } catch (err) {
     await client.query('ROLLBACK');
     throw err;

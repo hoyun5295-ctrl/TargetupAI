@@ -78,6 +78,38 @@ async function runTargetSql(q: TargetQuery, sql: string, params: any[]): Promise
   }
 }
 
+/**
+ * ★ 2026-11-11 C129(D11) — 날짜형 시작(생일 임박 · 연 단위 포인트 소멸)의 훑기 입력(진입 감시만 넘긴다).
+ *   on = 이 회차의 기준일(KST 'YYYY-MM-DD' · 감시가 한 번 읽은 값 = 간격 · 추출 · 기록이 같은 날) · catchUpDays = 못 훑은 날 수.
+ */
+export interface JourneyDateScan { on: string; catchUpDays: number }
+
+/**
+ * 날짜형 시작의 추출 창 — 기준일 + N − g(g = 0..m) · m = min(못 훑은 날, N)(N − g >= 0 = 그 날이 기준일이거나 앞날 = 지난 고객은 넣지 않는다).
+ *   scan 없음 = 기준일은 SQL 의 KST 오늘 · m = 0 → 글자가 옛 문장과 같다(미리보기 · 인원 세기 · AI 시뮬레이션).
+ *   enteredGuard = m > 0 일 때 창 안(기준일 − m 일의 KST 0시부터)에 이미 이 계보에 들어온 고객을 뺀다 — 날짜형 시작은 한 창에 고객마다 날이 하나뿐이라
+ *   「창 안에 들어왔다 = 이번 몫을 받았다」 → 기록이 실제보다 뒤처져도 재진입 대기일과 무관하게 두 번 넣지 않는다.
+ */
+function dateScanWindow(scan: JourneyDateScan | undefined, daysBefore: number, params: any[], daysParam: string) {
+  let base: string = KST_TODAY_DATE_SQL;
+  let m = 0;
+  if (scan) {
+    params.push(scan.on);
+    base = `$${params.length}::date`;
+    m = Math.max(0, Math.min(Math.floor(Number(scan.catchUpDays) || 0), Math.max(0, Math.floor(Number(daysBefore) || 0))));
+  }
+  const dayExprs = Array.from({ length: m + 1 }, (_, g) => `(${base} + (${daysParam} || ' days')::interval${g > 0 ? ` - INTERVAL '${g} days'` : ''})`);
+  const enteredGuard = (alias: string, journeyId?: string, lineageIds?: string[]): string => {
+    if (m <= 0 || !journeyId) return '';
+    params.push(lineageIds && lineageIds.length > 0 ? lineageIds : [journeyId]);
+    return `
+           AND NOT EXISTS (SELECT 1 FROM journey_executions wje
+                            WHERE wje.journey_id = ANY($${params.length}::uuid[]) AND wje.customer_id = ${alias}.id
+                              AND wje.entered_at >= ((${base} - INTERVAL '${m} days')::timestamp AT TIME ZONE 'Asia/Seoul'))`;
+  };
+  return { dayExprs, enteredGuard };
+}
+
 export async function selectJourneyTargetCustomerIds(
   companyId: string,
   triggerEvent: string,
@@ -87,8 +119,9 @@ export async function selectJourneyTargetCustomerIds(
   reentry?: JourneyReentryInput,
   scopeSql = '',
   consent?: JourneyConsent,
+  scan?: JourneyDateScan,   // ★ C129(D11) 진입 감시만
 ): Promise<string[]> {
-  const q = await buildJourneyTargetQuery(companyId, triggerEvent, triggerFilters, limit, journeyId, reentry, scopeSql, consent);
+  const q = await buildJourneyTargetQuery(companyId, triggerEvent, triggerFilters, limit, journeyId, reentry, scopeSql, consent, scan);
   if (!q) return [];
   return (await runTargetSql(q, q.sql, q.params)).map((x: any) => x.customer_id);
 }
@@ -104,6 +137,7 @@ export async function buildJourneyTargetQuery(
   //   추출 SQL **안**(LIMIT 앞)에 건다 — 뒤에서 거르면 범위 밖 고객이 진입하지 않은 채 매 회차 상한을 차지해 범위 안 고객이 굶는다.
   scopeSql = '',
   consent?: JourneyConsent,   // ★ 2026-10-02 수신동의 조각(mall-consent journeyOwnerConsent · 없으면 고객 행)
+  scan?: JourneyDateScan,     // ★ 2026-11-11 C129(D11) 날짜형 시작의 훑기 입력(없으면 옛 문장 그대로)
 ): Promise<TargetQuery | null> {
   const filters = triggerFilters || {};
   // 이관 유예 일수 — 대상 트리거 목록은 CT가 소유한다(isBulkStateTrigger). 대상이 아니면 0 = 조건 없음.
@@ -376,22 +410,25 @@ export async function buildJourneyTargetQuery(
     // ★ 2026-09-27 한줄로 V2 R425 — 기준일 = KST 오늘(옛: UTC 날짜) · 2/29생은 평년엔 2/28에 진입(옛: 평년엔 영영 못 들어왔다).
     case 'customer.birthday_approaching': {
       const days = Number(filters.days_before || 7);
-      const birthdayTarget = `(${KST_TODAY_DATE_SQL} + ($2 || ' days')::interval)`;
-      const birthdayTargetMd = `TO_CHAR(${birthdayTarget}, 'MM-DD')`;
-      const birthdayLeapMd = `CASE WHEN TO_CHAR(${birthdayTarget}, 'MM-DD') = '02-28' AND TO_CHAR(${birthdayTarget} + INTERVAL '1 day', 'MM-DD') = '03-01' THEN '02-29' END`;
       const params: any[] = [companyId, String(days)];
+      // ★ 2026-11-11 C129(D11) — 날(들)마다 월-일 + 2/29 규칙(scan 없음 = 오늘 + N 하루 = 옛 문장과 같은 글자)
+      const win = dateScanWindow(scan, days, params, '$2');
+      const birthdayMds = win.dayExprs
+        .map((d) => `TO_CHAR(${d}, 'MM-DD'), CASE WHEN TO_CHAR(${d}, 'MM-DD') = '02-28' AND TO_CHAR(${d} + INTERVAL '1 day', 'MM-DD') = '03-01' THEN '02-29' END`)
+        .join(', ');
       const antiJoin = journeyId && reentry ? buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.floorDays, reentry.lineageIds) : '';
+      const seen = win.enteredGuard('c', journeyId, reentry?.lineageIds);
       const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);
       params.push(limitParam(limit));
       return { sql: `SELECT id AS customer_id FROM customers c
          WHERE c.company_id = $1::uuid
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND (
-             (c.birth_month_day IS NOT NULL AND c.birth_month_day IN (${birthdayTargetMd}, ${birthdayLeapMd}))
+             (c.birth_month_day IS NOT NULL AND c.birth_month_day IN (${birthdayMds}))
              OR
-             (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') IN (${birthdayTargetMd}, ${birthdayLeapMd}))
+             (c.birth_date IS NOT NULL AND TO_CHAR(c.birth_date, 'MM-DD') IN (${birthdayMds}))
            )
-           ${antiJoin}
+           ${antiJoin}${seen}
            ${cond ? ` AND ${cond}` : ''}
          LIMIT $${params.length}::int`, params };
     }
@@ -401,11 +438,17 @@ export async function buildJourneyTargetQuery(
       const cfg = resolvePointsExpiringConfig(filters);
       const params: any[] = [companyId, String(cfg.pointsMin)];
       let edgeClause: string;
+      let seen = '';
       if (cfg.mode === 'annual_date') {
         if (!cfg.expiryMonthDay) return null;  // 소멸일 미설정 = 발송 0 (안전)
         params.push(String(cfg.daysBefore));   // $3
         params.push(cfg.expiryMonthDay);       // $4
-        edgeClause = `TO_CHAR((${KST_TODAY_DATE_SQL} + ($3 || ' days')::interval), 'MM-DD') = $4`;
+        // ★ 2026-11-11 C129(D11) — 못 훑은 날이 「소멸일 − N」 이었으면 그 날도 본다(scan 없음 = 옛 문장과 같은 글자)
+        const win = dateScanWindow(scan, cfg.daysBefore, params, '$3');
+        edgeClause = win.dayExprs.length === 1
+          ? `TO_CHAR(${win.dayExprs[0]}, 'MM-DD') = $4`
+          : `$4 IN (${win.dayExprs.map((d) => `TO_CHAR(${d}, 'MM-DD')`).join(', ')})`;
+        seen = win.enteredGuard('c', journeyId, reentry?.lineageIds);
       } else {
         params.push(String(cfg.inactiveDays));  // $3
         edgeClause = `(c.recent_purchase_date IS NULL OR c.recent_purchase_date < (${KST_TODAY_DATE_SQL} - ($3 || ' days')::interval))`;
@@ -420,7 +463,7 @@ export async function buildJourneyTargetQuery(
            AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
            AND c.points IS NOT NULL AND c.points >= $2::int
            AND ${edgeClause}
-           ${antiJoin}
+           ${antiJoin}${seen}
            ${grace ? ` AND ${grace}` : ''}
            ${cond ? ` AND ${cond}` : ''}
          ORDER BY c.points DESC

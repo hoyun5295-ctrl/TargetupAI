@@ -73,6 +73,7 @@
 | C126 | 1a3fbdbf |
 | C127 | d8b5367d |
 | C128 | 1a3fbdbf |
+| C129 | 미커밋 |
 
 ## §1 대기
 
@@ -1785,13 +1786,62 @@ COMMIT;
 - 확인: C126-H1 과 같은 빌드 · 재시작 · 접수자 확인(C128-T1)으로 닫는다
 - 결과: 1111 C126-H1 과 같은 배포(HEAD 1a3fbdbf · 17:55:29 재시작) · dist messageUtils.js 의 옛 조건 이름 customerNameEmpty = 0(새 규칙 판) · 남은 = 접수자 확인(C128-T1)
 
+### C129-DDL-1 · journeys 날짜형 시작의 훑은 날(생일 임박 · 연 단위 포인트 소멸 따라잡기 · 설계서 docs/2026-11-11-journey-remaining-nine-design.md §10 처방 32) · ★ 배포 앞
+- 카드: C129
+- 단계: DDL
+- 선행: 없음(배포 앞)
+- 의미 바꿈: 아니오(칸 추가 · 옛 코드는 읽지 않는다 · 값 NULL = 따라잡지 않는다 = 종전 · 새 코드는 칸이 없으면 종전 동작)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journeys' AND column_name = 'last_state_cursor_on';
+- 확인: 한 줄 · date · YES
+- 결과: (대기)
+
+> C129-DDL-1 · 배포 앞 · 칸 추가 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C129-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE journeys
+  ADD COLUMN IF NOT EXISTS last_state_cursor_on date NULL;
+```
+
+### C129-P1 · 배포 전 실측(읽기만)
+- 카드: C129
+- 단계: 사전
+- 선행: 없음
+- 기대: 서버 셸 한 줄씩 = 설계서 docs/2026-11-11-journey-remaining-nine-design.md §8 의 P1 ① ② ③ SELECT + §10-7 의 ④ ⑤ SELECT
+- 확인: ① 끝난 시각이 있는데 멈춤으로 남은 실행 수(0 이 아니면 그 행을 completed 로 되돌리는 한 줄을 그때 낸다) ② 켜진 여정의 멈춘 실행 수 ③ 재진입 허용 여정의 시작 사건별 저장 대기일(최솟값 아래 줄 = 붙이기 · 떼기 흔적) ④ 선불 회사의 켜진 여정 알림톡 칸(0 이 아니면 = 배포 뒤 차감 단가가 max(알림톡, 고른 대체)로 오르는 대상 · 그 칸의 대체 유형과 회사 SMS · LMS 단가 설정을 함께 본다 · 고른 대체 단가가 비어 있으면 배포 뒤 그 칸에서 여정이 멈춘다) ⑤ 켜짐 · 멈춤 상태의 날짜형 시작(생일 임박 · 연 단위 소멸) 여정 수(멈춘 것 = 배포 뒤 처음 켤 때는 기록이 없어 따라잡지 않는다)
+- 결과: (대기)
+
+### C129-H1 · 한줄로 배포(여정 남은 결함 아홉 건 + 결정 둘 D10 · D11 · 백엔드만 · DDL 1 = C129-DDL-1 배포 앞 · ENV 0)
+- 카드: C129
+- 단계: 한줄로 배포
+- 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push · C129-P1 · C129-DDL-1(배포 앞 · 없이 올라가도 날짜형 따라잡기만 꺼진 종전 동작)
+- 기대: 설계서 §4 처방 1 ~ 25 + §10 처방 26 ~ 37 · 화면 수정 0 · 정산기 · 환불 함수 · 직접발송 수정 0 · 선불 차감 함수 = 여정 알림톡 칸의 원장 열쇠(kakaoCharge)만 추가(다른 호출 = 옵션 없음 = 종전)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 적재 0건 한 줄 → pm2 reload · status online · uptime 증가 · 기동 에러 0 · dist grep CLEAR_UNPAID_CLAIMS_SQL ≥ 1 · reentryFloorSetSql ≥ 1 · resolveKakaoCharge ≥ 1 · OPEN_STATE_SCAN_SQL ≥ 1
+- 결과: (대기)
+
+### C129-S1 · 실측(배포 뒤)
+- 카드: C129
+- 단계: 사후
+- 선행: C129-H1(하루 뒤)
+- 기대: 설계서 §8 P1 ① ② 를 다시 실행 + 켜진 날짜형 시작 여정의 last_state_cursor_on(SELECT id, trigger_event, last_state_cursor_on FROM journeys WHERE status = 'active' AND trigger_event IN ('customer.birthday_approaching', 'customer.points_expiring'))
+- 확인: ① 0 유지 · ② 켜진 여정의 멈춘 실행 0 유지 · 여정 쪽 오류 로그 0 · 날짜형 여정의 기록 = KST 오늘 또는 어제(회차가 열려 있는 동안은 어제) · 선불 여정 알림톡 차감 행이 생겼으면 설명에 「결과별 정산」 꼬리
+- 결과: (대기)
+
+### C129-T1 · 직원 시트(붙이기 · 떼기 대기 일수 · AI 수정의 알림톡 칸)
+- 카드: C129
+- 단계: 직원 시트
+- 선행: C129-H1
+- 기대: 설계서 §7 직원 지시문 1 ~ 5(테스트계정 · 초안 여정 · 발송 0)
+- 확인: 뗀 뒤 대기 일수 7 이상 · AI 수정 뒤 알림톡 칸의 템플릿 · 변수 · 실패 시 문자 그대로 · 알림톡 칸 추가 요청 = 안내 문구
+- 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
+
 ### C128-T1 · 접수자 확인(이새에프엔씨 · 박성용)
 - 카드: C128
 - 단계: 직원 시트
 - 선행: C128-H1
 - 기대: 고객 DB 에 다른 이름으로 들어 있는 번호를 엑셀에 다른 이름으로 올려 %이름% 문안으로 직접발송(자기 번호 한두 건)
 - 확인: 받은 문자의 이름 = 엑셀의 이름(화면 미리보기와 같다) · 엑셀 이름 칸을 비운 줄 = 고객 DB 이름
-- 결과: (대기)
+- 결과: 1111 저녁 Harold 전달 = 「직접발송 적용 잘 되었댄다」(접수자 확인) · 닫힘
 
 ## §2 덤프 뒤 적용분
 

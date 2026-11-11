@@ -369,7 +369,7 @@ describe('5. 만들기 길 차단 · 켜기 검사 · 감시 배선', () => {
     const w = SRC('journey-trigger-watcher.ts');
     expect(w).toContain("afterProps = Object.fromEntries(rows.map((x) => [x.customerId, { __entry: { src: 'after', key: x.afterExecId } }]));");
     // ★ 2026-11-02 설계서 3-8 — 넣기 한 자리(앞 여정 표식 · 그 밖 = 진입 정보 한 함수)
-    expect(w.indexOf('const r = await enqueueCandidates(j, ids, afterProps ?? await entryPropsFor(j, ids), expect);')).toBeGreaterThan(w.indexOf('대량 진입 감지'));
+    expect(w.indexOf('const r = await enqueueCandidates(j, ids, afterProps ?? await entryPropsFor(j, ids), expect, scan ? { on: scan.on, advance: !cut || backfill != null } : undefined);')   /* ★ C129 D11 — 날짜형 시작만 훑기 표식을 함께 넘긴다 */).toBeGreaterThan(w.indexOf('대량 진입 감지'));
     // 넣기 · 커서 넣기 · 멈춤 = 같은 시작 설정 조각(시작 사건 · after 면 앞 여정 · 결과 · 기준 시각 원문)으로 쓰기 직전에 다시 본다(Codex 적대 A 1R · 2R)
     expect(w).toContain("sql += ` AND ${a}trigger_filters->>'after_root' = $${n - 2} AND ${a}trigger_filters->>'after_outcome' = $${n - 1} AND ${a}last_event_cursor = $${n}::timestamptz`;");
     // 세대(start_gen) 비교 — 붙였다 떼는 왕복도 가른다(Codex 적대 A 3R)

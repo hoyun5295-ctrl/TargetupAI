@@ -43,7 +43,7 @@ import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
 import { kakaoStepVerdict, type KakaoTemplateRow } from './journey-kakao-step';
 import { journeyClickSql } from './journey-click';   // ★ 2026-11-02 여정 링크 클릭 판정 CT(설계서 3-0 CT-J9)   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
 import { fillAlimtalkVarMap } from './alimtalk-vars';
-import { resolveAlimtalkFallback } from './alimtalk-fallback';
+import { resolveAlimtalkFallback, alimtalkFallbackChargeType } from './alimtalk-fallback';
 import { buildDefaultFallbacks } from './var-fallback';
 import {
   listJourneyStepVariants,
@@ -57,7 +57,7 @@ import { isCallbackRegistered, individualCallbackOf } from './callback-filter'; 
 import { getFatigueCap, getFatigueBlockedSet, recordFatigueSends } from './fatigue-guard';
 import { randomUUID } from 'crypto';
 import { resolveAdGateMode, AdGateMode, gatePhones, linkAdMarksSafe, AdHold } from './ad-send-gate';   // ★ 2026-11-06 C110 광고 관문 · ★ C113 두 길
-import { prepaidDeduct } from './prepaid';
+import { prepaidDeduct, resolveKakaoCharge } from './prepaid';
 import { deductCreditSafe, deductCreditOutcome, isChargedByKey, InsufficientCreditError } from './ai-credit';
 import { getCreditCost, kstDateTag } from './ai-credit-calc';
 import { logCampaignTraining } from './training-logger';
@@ -65,6 +65,7 @@ import { normalizePhone } from './normalize-phone';
 import { getCompanyCosts, SEND_HOURS, NIGHT_AD_LOAD_LEAD_MS } from '../config/defaults';
 import { shortenUrlsInTexts } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
+import { KST_MONTH_START_SQL } from './stats-aggregation';   // ★ 2026-11-11 C129 D4 — 월 예산 달 = KST(조각 재사용)
 import { calculateNextRunAt, clampPersonalSendHour, isWithinSendHours, sendWindowStateFor, isNightExemptStep, nextDaySendWindowStart } from './send-time-util';
 import { pickStepCampaignForUnits } from './journey-step-campaign';
 import { judgeLoadUnit, recordLoadUnit, clearLoadUnit, confirmLoadUnit } from './journey-send-claim';
@@ -920,18 +921,18 @@ async function processMessageBatchBody(
     let monthCost = 0;
     if (head.budget_monthly != null) {
       // ★ 2026-06-06 J2 — 월 예산 = 이번 달 실제 발송 비용(journey_step_logs.cost · sent_at 당월) 합(묶음마다 한 번)
-      const monthCostRes = await query(
-        `SELECT COALESCE(SUM(l.cost), 0) AS month_cost
-         FROM journey_step_logs l
-         JOIN journey_executions e ON e.id = l.execution_id
-         WHERE e.journey_id = $1::uuid AND l.status = 'sent'
-           AND l.sent_at >= date_trunc('month', NOW())`,
-        [head.journey_id]
-      );
+      const monthCostRes = await query(JOURNEY_MONTH_COST_SQL, [head.journey_id]);
       monthCost = Number(monthCostRes.rows[0]?.month_cost || 0);
     }
     const isPrepaid = compRes.rows[0]?.billing_type === 'prepaid';
     let balance = Number(compRes.rows[0]?.balance || 0);
+    // ★ 2026-11-11 C129(D10) — 선불 알림톡 칸의 차감 꼴(차감과 같은 함수 · 여기는 잠금 없이 읽은 행 → 차감이 잠근 행으로 다시 확인한다).
+    //   지출 관문(칸 임계 · 월 예산의 이번 몫 · 잔액 사전 확인 · 차례 차감) = 차감 단가(guardCost) · 칸 기록 비용 · 통계 = sendCost 그대로(발송 시점 추정).
+    const kakaoFb = isKakao ? alimtalkFallbackChargeType(step.alimtalk_next_type) : null;
+    const kakaoCharge = isPrepaid && isKakao ? resolveKakaoCharge(compRes.rows[0] || {}, kakaoFb) : null;
+    const kakaoPay = kakaoCharge ? { fallback: kakaoFb, expectShape: kakaoCharge.unset === null ? kakaoCharge.shape : '' } : null;
+    const ledgerShape = kakaoCharge ? (kakaoCharge.unset === null ? kakaoCharge.shape : `KAKAO|UNSET|${kakaoCharge.unset}`) : undefined;
+    const guardCost = kakaoCharge && kakaoCharge.unset === null ? Math.round(kakaoCharge.unitPrice) : sendCost;
     const tables = demoCompany ? [] : await getCompanySmsTables(head.company_id, head.created_by || undefined);
     let sends = 0;
     // 렌더 갈래는 next_run_at 순 = 처음 걸리는 멈춤이 경계(1단계 경계보다 늘 앞이다 · 렌더 줄은 그 앞 고객만)
@@ -941,16 +942,16 @@ async function processMessageBatchBody(
       if (!isKakao && (msgType === 'LMS' || msgType === 'MMS') && (!r.subject || r.subject.trim().length === 0)) out = { kind: 'pause', reason: 'subject_empty_for_lms_mms', pauseText: `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단` };
       else if (!isKakao && (!r.message || r.message.trim().length < 2)) out = { kind: 'fail', reason: 'empty_message_after_prepare' };
       else if (!isKakao && spamBlocked.has(composeSpamCheckText({ message: r.message, subject: r.subject, msgType, isAd: false }))) out = { kind: 'fail', reason: 'spam_blocked' };
-      else if (head.threshold_cost_per_step != null && sendCost > Number(head.threshold_cost_per_step)) out = { kind: 'pause', reason: 'threshold_cost_exceeded', pauseText: `step 비용 ${sendCost.toLocaleString()}원 > 임계값 ${Number(head.threshold_cost_per_step).toLocaleString()}원` };
-      else if (head.budget_monthly != null && monthCost + sendCost * (sends + 1) > Number(head.budget_monthly)) out = { kind: 'pause', reason: 'budget_monthly_exceeded', pauseText: `이번 달 누적 ${(monthCost + sendCost * (sends + 1)).toLocaleString()}원 > 월 예산 ${Number(head.budget_monthly).toLocaleString()}원` };
+      else if (head.threshold_cost_per_step != null && guardCost > Number(head.threshold_cost_per_step)) out = { kind: 'pause', reason: 'threshold_cost_exceeded', pauseText: `step 비용 ${guardCost.toLocaleString()}원 > 임계값 ${Number(head.threshold_cost_per_step).toLocaleString()}원` };
+      else if (head.budget_monthly != null && monthCost + guardCost * (sends + 1) > Number(head.budget_monthly)) out = { kind: 'pause', reason: 'budget_monthly_exceeded', pauseText: `이번 달 누적 ${(monthCost + guardCost * (sends + 1)).toLocaleString()}원 > 월 예산 ${Number(head.budget_monthly).toLocaleString()}원` };
       else if (demoCompany) out = { kind: 'demo' };
-      else if (isPrepaid && balance < sendCost) out = { kind: 'pause', reason: 'insufficient_balance', pauseText: `잔액 부족 (보유 ${balance.toLocaleString()}원 < 필요 ${sendCost.toLocaleString()}원)`, autoPause: 'balance_insufficient' };
+      else if (isPrepaid && balance < guardCost) out = { kind: 'pause', reason: 'insufficient_balance', pauseText: `잔액 부족 (보유 ${balance.toLocaleString()}원 < 필요 ${guardCost.toLocaleString()}원)`, autoPause: 'balance_insufficient' };
       else if (!normalizePhone(r.q.customer.phone)) out = { kind: 'fail_end', reason: 'invalid_phone' };
       else if (tables.length === 0) out = { kind: 'pause', reason: 'no_sms_tables', pauseText: 'SMS 발송 테이블 미할당' };
       else {
         out = { kind: 'send' };
         sends++;
-        if (isPrepaid) balance -= sendCost;
+        if (isPrepaid) balance -= guardCost;
         sendRows.push({ idx: i, exec: r.q.exec, customer: r.q.customer, message: r.message, subject: r.subject, callback: r.q.callback, phone: normalizePhone(r.q.customer.phone), variantId: r.variantId });
       }
       outcomes[i].out = out;
@@ -959,7 +960,7 @@ async function processMessageBatchBody(
 
     // ── 31 적재(⑤ 적재 단위 계약) — 비발송 결말보다 먼저. 적재가 중간에 멈추면(돈 · 창 · 보류 · 바깥 멈춤 · 안 들어감 · 결과 불명) 그 자리 뒤 고객은
     //    이번 회차 결말 0(경계 계약 = 한 건 판의 「멈춘 뒤 진입 시점 정지」 · 다음 회차가 그 자리부터 다시 본다 · Codex 구현 1R) ──
-    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep }, res) : null;
+    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep, kakaoPay, ledgerShape }, res) : null;
     const end = boundary < 0 ? outcomes.length : boundary;
     await applyRowOutcomes(head, step, outcomes, stopIdx == null ? end : Math.min(stopIdx, end), res);
 
@@ -1040,7 +1041,8 @@ async function applyBoundaryPause(head: ExecutionRow, step: StepRow, row: { exec
  */
 async function sendUnits(
   head: ExecutionRow, step: StepRow, rows: Array<SendRow & { idx: number }>,
-  c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null>; snapshotId: string | null; adGateBatch?: string | null; adKeep?: Set<string> },
+  c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null>; snapshotId: string | null; adGateBatch?: string | null; adKeep?: Set<string>;
+       kakaoPay?: { fallback: 'SMS' | 'LMS' | null; expectShape: string } | null; ledgerShape?: string },
   res: BatchResult,
 ): Promise<number | null> {
   const prepaidMsgType = c.msgType === 'KAKAO' ? 'KAKAO' : c.msgType;
@@ -1050,6 +1052,7 @@ async function sendUnits(
     sendChannel: c.isKakao ? 'alimtalk' : 'sms', callbackNumber: rows[0].callback,
     kakaoTemplateId: c.isKakao && c.kakaoTemplateRow ? c.kakaoTemplateRow.id : null,
     mmsImagePaths: (c.msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,
+    ledgerShape: c.ledgerShape,   // ★ C129(D10) 선불 알림톡 칸 = 차감 꼴이 다르면 새 순번 캠페인
   });
   if ('blocked' in pick) {
     // I6 — 이어 붙임이 아직 닫혀 있다(DDL-2 전) = 그 (여정 · 칸)은 오늘 새 단위 0 → 다음날 발송 창 시작
@@ -1105,7 +1108,9 @@ async function sendUnits(
       shortened.forEach((m, k) => { unit[k].message = m; });
     }
     // 적재 시도 상한(그 실행 · 이 칸의 적재 실패 기록 >= LOAD_ATTEMPT_MAX) = 새 표식 앞 한 곳(가드 · 다른 묶음 · 고아 정리 어디서 표식이 지워졌든 · ★ Codex 구현 3R)
-    //   닿은 실행 = 다시 보내지 않고 실패 기록 + 전진(비용 0) · 여정 멈춤은 그 뒤 덤(실패해도 다시 보내기는 이미 막혔다) · 멈춤 결말 = 이 묶음 여기까지
+    //   닿은 실행 = 다시 보내지 않고 여정 멈춤 → 실패 기록 + 전진(비용 0) → 그 실행 멈춤 · 멈춤 결말 = 이 묶음 여기까지
+    //   ★ 2026-11-11 C129(D2) — 여정 멈춤이 먼저 성공해야 전진한다(옛: 전진 → 실행 멈춤 → 여정 멈춤 = 여정 멈춤이 실패하면 실행 하나만 멈춘 채 여정은 켜져 있었다).
+    //     던지면 전진 0 = 시도 기록이 그대로 → 다음 회차가 다시 이 갈래로 와 멈춤을 다시 시도한다(다시 보내기 = 아래 표식 문장의 상한 조건이 막는다).
     const spentRes = await query(
       `SELECT e.id FROM journey_executions e WHERE e.id = ANY($1::uuid[]) AND ${loadAttemptsSql('e', '$2')} >= ${LOAD_ATTEMPT_MAX}`,
       [unit.map((r) => r.exec.execution_id), step.id],
@@ -1114,13 +1119,19 @@ async function sendUnits(
       const spent = new Set(spentRes.rows.map((x: any) => String(x.id)));
       const gave = unit.filter((r) => spent.has(r.exec.execution_id)).map((r) => r.exec);
       console.error(`[JourneyExecutor] journey=${head.journey_id} step=${step.step_order} 적재 시도 상한(${LOAD_ATTEMPT_MAX}) 닿음 ${gave.length}명 — 다시 보내지 않고 실패로 넘김 · 여정 멈춤`);
+      try {
+        await pauseJourney(head.journey_id, '통신사 일시 발송 실패 (자동 재시도 1회 후에도 fail)');
+      } catch (pauseErr: any) {
+        console.error(`[JourneyExecutor] 적재 시도 상한 — 여정 멈춤 실패(전진하지 않고 다음 회차에 다시):`, pauseErr?.message);
+        return unit[0].idx;
+      }
       await logStepMany(gave.map((e) => e.execution_id), step.id, 'failed', 'queue_insert_failed');
       await advanceExecutions(head, step, gave.map((exec) => ({ exec, addedCost: 0 })));
       try {
+        // 여정이 멈춘 상태일 때만 · 전진으로 끝난(마지막 칸) 실행은 완료 그대로(D1)
         await autoPauseExecution({ companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, executionId: gave[0].execution_id, pauseReason: 'carrier_temp_fail', pauseTriggerSource: 'auto_retry_exhausted' });
-        await pauseJourney(head.journey_id, '통신사 일시 발송 실패 (자동 재시도 1회 후에도 fail)');
       } catch (retryErr: any) {
-        console.warn(`[JourneyExecutor] 적재 시도 상한 멈춤 사고 (skip · 다시 보내기는 이미 막혔다):`, retryErr?.message);
+        console.warn(`[JourneyExecutor] 적재 시도 상한 실행 멈춤 사고 (skip · 여정은 이미 멈췄다):`, retryErr?.message);
       }
       res.failed += gave.length;
       res.progressed = true;
@@ -1152,9 +1163,21 @@ async function sendUnits(
     const claimAt = claimByExec.get(claimed[0].exec.execution_id)!.sentAt;
 
     // 선불 차감 = 표식 수 한 번(참조 = 단계 캠페인 · 차감 → 적재 · ★ 0926 F05 · F06 · F11)
-    const deduct = await prepaidDeduct(head.company_id, claimed.length, prepaidMsgType as any, campaignId, head.created_by || undefined, 'journey');
+    // ★ 2026-11-11 C129(D10) — 알림톡 칸 = 원장 열쇠(차감 꼴 · 이 캠페인의 발송 날)를 넘긴다 → 차감이 잠근 회사 행으로 확인하고 대체까지 덮는 단가로 차감한다.
+    const deduct = await prepaidDeduct(head.company_id, claimed.length, prepaidMsgType as any, campaignId, head.created_by || undefined, 'journey', null,
+      c.kakaoPay ? { kakaoCharge: { ...c.kakaoPay, sendDay: pick.sendDate } } : undefined);
+    if (!deduct.ok && deduct.chargeChanged) {
+      // 과금 방식 · 단가 · 발송 날이 준비 때와 달라졌다 = 아무것도 싣지 않았다 → 표식 · 방금 시도 기록을 지우고 **멈추지 않고** 이 묶음을 여기서 끝낸다
+      //   (다음 회차가 회사 행을 새로 읽어 꼴을 다시 내고 그 꼴의 단계 캠페인을 고른다)
+      await query(CLEAR_UNPAID_CLAIMS_SQL, [claimIds, step.id, campaignId]);
+      console.warn(`[JourneyExecutor] journey=${head.journey_id} step=${step.step_order} 차감 꼴이 준비 때와 다름 — 차감 · 발송 0 · 다음 회차에 새 단계 캠페인으로`);
+      res.waited += claimed.length;
+      return unit[0].idx;
+    }
     if (!deduct.ok) {
-      await query(`DELETE FROM journey_step_logs WHERE id = ANY($1::uuid[]) AND status = 'sending'`, [claimIds]);
+      // ★ 2026-11-11 C129(D3 · R8) — 차감 실패 = 아무것도 싣지 않았다 → 표식을 지우면서 방금 남긴 시도 기록도 같이 지운다(한 문장 ·
+      //   옛: 시도 기록이 남아 차감 실패 두 번이면 한 번도 싣지 않고 「상한 닿음 · 실패로 넘김」)
+      await query(CLEAR_UNPAID_CLAIMS_SQL, [claimIds, step.id, campaignId]);
       console.warn(`[JourneyExecutor] journey=${head.journey_id} 차감 실패(잔액 동시 소진) — 발송하지 않고 여정 정지`);
       await pauseJourney(head.journey_id, deduct.error || '잔액 부족');
       await logStepMany([claimed[0].exec.execution_id], step.id, 'failed', 'insufficient_balance');
@@ -1167,6 +1190,7 @@ async function sendUnits(
       return unit[0].idx;
     }
 
+    let alimDowngraded = 0;   // ★ C129 D5 — 대체 문안이 빈 글이 된 고객 수(그 고객만 대체 없음 · 번호 원문은 로그에 쌓지 않는다)
     const outcome = c.isKakao && c.kakaoTemplateRow
       ? await loadQueueUnit({
           kind: 'alimtalk', tables: c.tables, appEtc1: campaignId,
@@ -1174,13 +1198,16 @@ async function sendUnits(
             const eventProps = (r.exec.entry_event_properties && typeof r.exec.entry_event_properties === 'object') ? r.exec.entry_event_properties : {};
             const customerWithEvent = { ...eventProps, ...(r.customer as Record<string, any>) };
             // ★ 2026-07-27 전환재발송 규칙 CT(alimtalk-fallback) · 대체 문구도 본문과 같은 변수 치환
+            // ★ 2026-11-11 C129(D5 · R1) — 행 단위 정책 = 직접발송 두 길과 같다: 이 고객의 변수가 전부 빈 값이라 대체 문안이 빈 글이 되면
+            //   그 고객만 대체 없음으로 내리고 알림톡은 그대로 보낸다(옛: 기본 정책 throw = 표식 · 차감 뒤 예외로 그 단위 전체가 미확정으로 남았다).
             const alimFallback = resolveAlimtalkFallback({
               nextType: step.alimtalk_next_type,
               nextContents: step.alimtalk_next_contents
                 ? fillAlimtalkVarMap(step.alimtalk_next_contents, step.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(step.alimtalk_variable_map || {}))
                 : step.alimtalk_next_contents,
               nextSubject: r.subject,
-            });
+            }, { emptyContentsPolicy: 'disableFallback' });
+            if (alimFallback.downgradedToNone) alimDowngraded++;
             return {
               phone: r.phone, callback: r.callback, message: r.message, titleStr: alimFallback.titleStr,
               templateCode: step.alimtalk_template_code || '', nextType: alimFallback.nextType, nextContents: alimFallback.nextContents,
@@ -1205,6 +1232,7 @@ async function sendUnits(
           record: (h) => recordLoadUnit(campaignId, h),
         });
 
+    if (alimDowngraded > 0) console.warn(`[JourneyExecutor] journey=${head.journey_id} step=${step.step_order} 알림톡 대체 문안이 빈 글이 된 ${alimDowngraded}명 = 대체 없음으로 발송`);
     if (outcome.state === 'loaded') {
       if (c.adKeep) for (const r of claimed) c.adKeep.add(normalizePhone(String(r.phone || '')));   // ★ C113 D10 — 실린 번호 = 끝 해제에서 남김
       // ★ 2026-11-06 C110 — 이 단위가 큐에 실렸다 = 그 번호들의 우선순위 예약 확정(캠페인 연결 · 실패해도 발송은 이미 나감 = 경고만 · 예약은 2시간 산다)
@@ -1267,22 +1295,33 @@ async function sendUnits(
   return null;
 }
 
-/** 안 들어감 확정 단위의 실행 = 지금 재시도 규칙(★ D218+ · 첫 실패 = 5분 뒤 재시도 · 이미 한 번 실패 = 그 실행 자동 멈춤 + 여정 멈춤 · 차례대로 경계) */
+/**
+ * 안 들어감 확정 단위의 실행 = 재시도 규칙(첫 실패 = 5분 뒤 재시도 · 그 칸의 시도 기록이 상한에 닿았으면 소진 = 여정 멈춤 → 실패 기록 → 전진 → 그 실행 멈춤 · 차례대로 경계)
+ * ★ 2026-11-11 C129(D2 · Codex 설계 2R) — 소진 판정 = **그 칸의 시도 기록 수 한 기준**(loadAttemptsSql · 표식 문장 · 상한 확인 · 결과 불명과 같은 조각).
+ *   옛: 실행 전체의 error_count >= 1(전진해도 안 지워진다) → 앞 칸에서 한 번 실패했던 실행은 뒤 칸 첫 실패에 바로 소진됐고, 그때 여정 멈춤이 실패하면
+ *   적재 관문(칸별 시도 < 상한)은 열려 있어 멈춤 재시도 앞에 다시 실렸다. 이제 소진(시도 2) 뒤에는 표식 앞 상한 확인이 먼저 잡는다.
+ *   error_count · last_error_at 은 진단 칸으로 계속 쌓는다.
+ *   순서 = 여정 멈춤이 먼저(던지면 전진 0) · 전진은 진행 중 상태에서(마지막 칸 = 완료 · 옛: 멈춤 → 전진 = 완료되지 않고 멈춘 채 되풀이).
+ */
 async function retryOrPauseAfterLoadFailure(head: ExecutionRow, step: StepRow, execs: ExecutionRow[], errMsg: string, res: BatchResult): Promise<void> {
-  const ec = await query(`SELECT id, COALESCE(error_count, 0) AS ec FROM journey_executions WHERE id = ANY($1::uuid[])`, [execs.map((e) => e.execution_id)]);
-  const ecById = new Map<string, number>(ec.rows.map((x: any) => [String(x.id), Number(x.ec) || 0]));
-  const firstExhausted = execs.findIndex((e) => (ecById.get(e.execution_id) || 0) >= 1);
-  const retry = (firstExhausted < 0 ? execs : execs.slice(0, firstExhausted)).filter((e) => (ecById.get(e.execution_id) || 0) < 1);
+  const tried = await query(
+    `SELECT e.id, ${loadAttemptsSql('e', '$2')}::int AS n FROM journey_executions e WHERE e.id = ANY($1::uuid[])`,
+    [execs.map((e) => e.execution_id), step.id],
+  );
+  const triedById = new Map<string, number>(tried.rows.map((x: any) => [String(x.id), Number(x.n) || 0]));
+  const spent = (e: ExecutionRow): boolean => (triedById.get(e.execution_id) || 0) >= LOAD_ATTEMPT_MAX;
+  const firstExhausted = execs.findIndex(spent);
+  const retry = firstExhausted < 0 ? execs : execs.slice(0, firstExhausted);
   if (retry.length > 0) {
     const ids = retry.map((e) => e.execution_id);
     await query(
-      `UPDATE journey_executions SET
+      `UPDATE journey_executions e SET
          next_run_at = NOW() + INTERVAL '5 minutes',
          error_count = COALESCE(error_count, 0) + 1,
          last_error_at = NOW(),
-         error_log = COALESCE(error_log, '[]'::jsonb) || $2::jsonb
-       WHERE id = ANY($1::uuid[]) AND COALESCE(error_count, 0) < 1`,
-      [ids, JSON.stringify([{ at: new Date().toISOString(), reason: 'queue_insert_failed', step_id: step.id, error: errMsg.slice(0, 300) }])]
+         error_log = COALESCE(e.error_log, '[]'::jsonb) || $2::jsonb
+       WHERE e.id = ANY($1::uuid[]) AND ${loadAttemptsSql('e', '$3')} < ${LOAD_ATTEMPT_MAX}`,
+      [ids, JSON.stringify([{ at: new Date().toISOString(), reason: 'queue_insert_failed', step_id: step.id, error: errMsg.slice(0, 300) }]), step.id]
     );
     await logStepMany(ids, step.id, 'failed', 'queue_insert_failed_retry_scheduled');
     res.failed += ids.length;
@@ -1291,13 +1330,18 @@ async function retryOrPauseAfterLoadFailure(head: ExecutionRow, step: StepRow, e
   if (firstExhausted >= 0) {
     const e = execs[firstExhausted];
     try {
-      await autoPauseExecution({ companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, executionId: e.execution_id, pauseReason: 'carrier_temp_fail', pauseTriggerSource: 'auto_retry_exhausted' });
       await pauseJourney(head.journey_id, '통신사 일시 발송 실패 (자동 재시도 1회 후에도 fail)');
-    } catch (retryErr: any) {
-      console.warn(`[JourneyExecutor] 재시도 분기 사고 (skip):`, retryErr?.message);
+    } catch (pauseErr: any) {
+      console.error(`[JourneyExecutor] 재시도 소진 — 여정 멈춤 실패(전진하지 않고 다음 회차에 다시):`, pauseErr?.message);
+      return;
     }
     await logStepMany([e.execution_id], step.id, 'failed', 'queue_insert_failed');
     await advanceExecutions(head, step, [{ exec: e, addedCost: 0 }]);   // ★ J1: 발송 실패 → 비용 0
+    try {
+      await autoPauseExecution({ companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, executionId: e.execution_id, pauseReason: 'carrier_temp_fail', pauseTriggerSource: 'auto_retry_exhausted' });
+    } catch (retryErr: any) {
+      console.warn(`[JourneyExecutor] 재시도 소진 실행 멈춤 사고 (skip · 여정은 이미 멈췄다):`, retryErr?.message);
+    }
     res.failed += 1;
     res.progressed = true;
   }
@@ -1311,10 +1355,56 @@ async function retryOrPauseAfterLoadFailure(head: ExecutionRow, step: StepRow, e
 export const LOAD_ATTEMPT_MAX = 2;
 
 /** 그 실행(별칭 e) · 그 칸($n)의 적재 시도 기록 수 = 실행 error_log 의 load_attempt 항목 — 적재 시도 상한의 판정 조각 한 곳 */
-function loadAttemptsSql(e: string, stepParam: string): string {
+export function loadAttemptsSql(e: string, stepParam: string): string {
   return `(SELECT COUNT(*) FROM jsonb_array_elements(COALESCE(${e}.error_log, '[]'::jsonb)) fl
             WHERE fl->>'reason' = 'load_attempt' AND fl->>'step_id' = ${stepParam}::text)`;
 }
+
+/**
+ * ★ 2026-11-11 C129(D3 · R8) — 그 실행(별칭 e)의 error_log 에서 그 칸 · 그 캠페인의 적재 시도 기록 가운데 **맨 뒤 하나**를 뺀 배열(식).
+ *   시각으로 고르지 않는다(시도 기록의 시각 = 마이크로초 · 노드가 읽은 표식 시각 = 밀리초). 맨 뒤 = 방금 표식 문장이 남긴 것
+ *   (실행기는 (여정 · 칸) 묶음을 한 번에 하나만 처리하고 시도 기록을 쓰는 자리는 표식 문장 하나다).
+ */
+export function dropLastLoadAttemptSql(e: string, stepParam: string, campaignParam: string): string {
+  return `(SELECT COALESCE(jsonb_agg(el.v ORDER BY el.n), '[]'::jsonb)
+             FROM jsonb_array_elements(COALESCE(${e}.error_log, '[]'::jsonb)) WITH ORDINALITY AS el(v, n)
+            WHERE el.n IS DISTINCT FROM (
+                    SELECT MAX(el2.n) FROM jsonb_array_elements(COALESCE(${e}.error_log, '[]'::jsonb)) WITH ORDINALITY AS el2(v, n)
+                     WHERE el2.v->>'reason' = 'load_attempt' AND el2.v->>'step_id' = ${stepParam}::text AND el2.v->>'campaign_id' = ${campaignParam}::text))`;
+}
+
+/** 차감 실패 갈래 — 아직 sending 인 표식을 지우고, 표식이 지워진 실행의 방금 시도 기록 하나를 같이 지운다. $1 = 표식 id 들 · $2 = 칸 · $3 = 캠페인 */
+export const CLEAR_UNPAID_CLAIMS_SQL =
+  `WITH del AS (
+     DELETE FROM journey_step_logs WHERE id = ANY($1::uuid[]) AND status = 'sending' RETURNING execution_id
+   )
+   UPDATE journey_executions e
+      SET error_log = ${dropLastLoadAttemptSql('e', '$2', '$3')}
+    WHERE e.id IN (SELECT execution_id FROM del)`;
+
+/** ★ 2026-11-11 C129(D4 · R18) — 월 예산 누적 = **KST 이번 달** 발송 로그 비용 합(옛: UTC 달 시작 → 매월 1일 아침 9시 전 발송분이 전달로 잡혔다). $1 = 여정 */
+/**
+ * ★ 2026-11-11 C129(D10) — 두 원천의 합:
+ *   (가) 원장 꼴이 없는 단계 캠페인(문자 칸 · 후불 · 옛 캠페인) = 칸 기록 비용(종전 식 그대로)
+ *   (나) 원장 꼴이 있는 단계 캠페인(선불 알림톡 칸) = 잔액 원장의 순지출(차감 − 환불 + 회수) · 달 = 캠페인 발송 날(그 캠페인의 모든 차감 날 · prepaidDeduct sendDay 확인)
+ *        결과 전에는 선차감(대체까지 덮는 단가) = 위쪽 한도 · 결과 뒤에는 실제 값으로 줄어든다. 후불 · 문자만 있는 여정 = (나) 0 = 종전 값.
+ */
+export const JOURNEY_MONTH_COST_SQL =
+  `SELECT COALESCE(SUM(l.cost), 0)
+          + (SELECT COALESCE(SUM(CASE WHEN t.type = 'deduct' THEN t.amount
+                                      WHEN t.type = 'refund' THEN -t.amount
+                                      WHEN t.type = 'admin_deduct' AND t.description LIKE '%환불 reverse%' THEN -t.amount
+                                      ELSE 0 END), 0)
+               FROM journey_step_campaigns jsc
+               JOIN campaigns sc ON sc.id = jsc.campaign_id AND (sc.send_config ? 'ledgerShape')
+               JOIN balance_transactions t ON t.company_id = sc.company_id AND t.reference_type = 'journey' AND t.reference_id = sc.id
+              WHERE jsc.journey_id = $1::uuid
+                AND jsc.send_date::date >= (${KST_MONTH_START_SQL} AT TIME ZONE 'Asia/Seoul')::date) AS month_cost
+     FROM journey_step_logs l
+     JOIN journey_executions e ON e.id = l.execution_id
+    WHERE e.journey_id = $1::uuid AND l.status = 'sent'
+      AND l.sent_at >= ${KST_MONTH_START_SQL}
+      AND NOT EXISTS (SELECT 1 FROM campaigns lc WHERE lc.id = l.campaign_id AND (lc.send_config ? 'ledgerShape'))`;
 
 /**
  * 결과 불명 단위의 실행 = 표식은 그대로(다음 회차 단위 판정) · 5분 뒤 다시 본다(그 사이 원 INSERT 가 끝난다 · 판정이 미적재를 증명하면 상한 안에서 한 번 더) · 진단 기록 한 줄.
@@ -1338,8 +1428,9 @@ async function holdUnknownLoad(head: ExecutionRow, step: StepRow, execs: Executi
   const first = execs.find((e) => exhausted.has(e.execution_id));
   if (first) {
     try {
-      await autoPauseExecution({ companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, executionId: first.execution_id, pauseReason: 'carrier_temp_fail', pauseTriggerSource: 'auto_retry_exhausted' });
+      // ★ C129 D2 — 여정 멈춤이 먼저(던지면 실행 멈춤에 닿지 않는다 · 시도 기록이 상한이라 다음 회차는 표식 앞 확인이 잡는다)
       await pauseJourney(head.journey_id, '통신사 일시 발송 실패 (자동 재시도 1회 후에도 fail)');
+      await autoPauseExecution({ companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, executionId: first.execution_id, pauseReason: 'carrier_temp_fail', pauseTriggerSource: 'auto_retry_exhausted' });
     } catch (retryErr: any) {
       console.warn(`[JourneyExecutor] 결과 불명 재시도 분기 사고 (skip):`, retryErr?.message);
     }
@@ -1912,6 +2003,8 @@ async function handleConditionEvalError(exec: ExecutionRow, step: StepRow): Prom
       return;
     }
     // 재평가 1회 후에도 실패 → 발송 안 하고 정지 + 담당자 안내 (pauseReason은 기존 값 재사용).
+    // ★ C129 D2 — 여정 멈춤이 먼저(던지면 실행 멈춤에 닿지 않는다 · error_count 가 그대로라 다음 회차 다시 이 갈래)
+    await pauseJourney(exec.journey_id, '조건 평가 DB 오류 (자동 재시도 후에도 실패)');
     await autoPauseExecution({
       companyId: exec.company_id,
       journeyId: exec.journey_id,
@@ -1920,7 +2013,6 @@ async function handleConditionEvalError(exec: ExecutionRow, step: StepRow): Prom
       pauseReason: 'auto_retry_exhausted',
       pauseTriggerSource: 'condition_eval_db_error',
     });
-    await pauseJourney(exec.journey_id, '조건 평가 DB 오류 (자동 재시도 후에도 실패)');
   } catch (retryErr: any) {
     console.warn('[JourneyExecutor] 조건 평가 재시도 분기 처리 실패 (skip):', retryErr?.message);
   }

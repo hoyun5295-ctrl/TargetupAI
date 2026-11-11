@@ -37,7 +37,9 @@ describe('resolveCampaignLedger', () => {
 describe('여정 실행기 차감 참조', () => {
   const src = readFileSync(join(__dirname, '..', 'journey-executor.ts'), 'utf8');
   it('차감은 단계 캠페인 id를 참조한다(여정 id 아님) · 유형은 journey 유지 · ★ 1102 수 = 이 적재 단위의 표식 수', () => {
-    expect(src).toContain("const deduct = await prepaidDeduct(head.company_id, claimed.length, prepaidMsgType as any, campaignId, head.created_by || undefined, 'journey');");
+    // ★ 2026-11-11 C129 D10 — 참조 · 유형 · 수는 그대로 · 알림톡 칸이면 원장 열쇠(차감 꼴 · 발송 날)를 덧붙인다
+    expect(src).toContain("const deduct = await prepaidDeduct(head.company_id, claimed.length, prepaidMsgType as any, campaignId, head.created_by || undefined, 'journey', null,");
+    expect(src).toContain('c.kakaoPay ? { kakaoCharge: { ...c.kakaoPay, sendDay: pick.sendDate } } : undefined);');
     expect(src).not.toMatch(/prepaidDeduct\([^)]*journey_id,/);
   });
 });
@@ -48,7 +50,7 @@ describe('여정 단계 캠페인 — 새 원장 표식 · 하루 마감 (Codex 
   it('새로 만드는 단계 캠페인은 send_config에 새 원장 표식을 싣는다(배포 전 캠페인과 경계)', () => {
     expect(JOURNEY_LEDGER_CONFIG).toEqual({ journeyLedger: 'campaign' });
     expect(stepSrc).toMatch(/mms_image_paths, send_type, send_config\s*\)/);
-    expect(stepSrc).toContain('JSON.stringify({ ...JOURNEY_LEDGER_CONFIG, loadProtocol: LOAD_PROTOCOL_UNIT })');   // ★ 1102 새 규약 표식(설계서 3-8 I5)도 같은 자리
+    expect(stepSrc).toContain('JSON.stringify({ ...JOURNEY_LEDGER_CONFIG, loadProtocol: LOAD_PROTOCOL_UNIT, ...(spec.ledgerShape ? { ledgerShape: spec.ledgerShape } : {}) })');   // ★ C129 D10 — 선불 알림톡 칸 = 원장 꼴도 같은 자리   // ★ 1102 새 규약 표식(설계서 3-8 I5)도 같은 자리
   });
 
   it('하루 마감 = 발송 기준 시각의 KST 날짜가 지금의 KST 날짜보다 앞', () => {
@@ -90,7 +92,9 @@ describe('여정 실행기 — 차감이 적재보다 앞', () => {
   it('차감 실패면 적재하지 않고 이 단위 표식을 지운 뒤 여정을 정지하고 돌아간다', () => {
     const seg = body.slice(deductAt, loadAt);
     expect(seg).toContain('if (!deduct.ok) {');
-    expect(seg).toContain("await query(`DELETE FROM journey_step_logs WHERE id = ANY($1::uuid[]) AND status = 'sending'`, [claimIds]);");
+    // ★ 2026-11-11 C129 D3 — 표식 삭제 + 방금 남긴 적재 시도 기록 삭제가 한 문장(차감 실패는 시도로 세지 않는다)
+    expect(seg).toContain('await query(CLEAR_UNPAID_CLAIMS_SQL, [claimIds, step.id, campaignId]);');
+    expect(src).toMatch(/export const CLEAR_UNPAID_CLAIMS_SQL =[\s\S]{0,120}DELETE FROM journey_step_logs WHERE id = ANY\(\$1::uuid\[\]\) AND status = 'sending' RETURNING execution_id/);
     expect(seg).toContain("await pauseJourney(head.journey_id, deduct.error || '잔액 부족');");
     expect(seg).toContain("await logStepMany([claimed[0].exec.execution_id], step.id, 'failed', 'insufficient_balance');");
     expect(seg).toContain('return unit[0].idx;');   // 멈춘 자리 = 이 단위 첫 고객(뒤 고객 결말 0)

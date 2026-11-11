@@ -339,7 +339,7 @@ describe('CT-J1 보낼 판 — 최신 판 읽기 · 신뢰도 칸 · 보낼 수 
     const ex = readFileSync(join(SRC_ROOT, 'utils', 'journey-executor.ts'), 'utf8');
     expect(ex).toContain('snapshotId = snap.id ? String(snap.id) : null;');
     expect(ex).toContain('return processMessageBatch(execs, step, res, { pendingSnapshotAt, snapshotReadFailed, snapshotId });');
-    expect(ex).toContain('variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep }, res)');   // ★ C113 D10 — 실린 · 결과 불명 번호를 끝 해제에서 남김   // ★ 2026-11-06 C110 광고 관문 묶음(원장을 쓴 판정일 때만)을 함께 넘김
+    expect(ex).toContain('variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep, kakaoPay, ledgerShape }, res)');   // ★ C129 D10 — 선불 알림톡 칸의 차감 꼴 · 원장 꼴   // ★ C113 D10 — 실린 · 결과 불명 번호를 끝 해제에서 남김   // ★ 2026-11-06 C110 광고 관문 묶음(원장을 쓴 판정일 때만)을 함께 넘김
     expect(ex).toContain('textStep ? [unit.map((r) => r.exec.execution_id), step.id, campaignId, c.sendCost, c.snapshotId]');
   });
 });
@@ -723,7 +723,10 @@ describe('3-7 · 3-8 진입 속도 · 진입 정보(D4 · D5)', () => {
       expect(src(f), f).not.toMatch(/const [A-Z_]*(?:BATCH|LIMIT)[A-Z_]* = [\d_]+;/);
     }
     const w = src('journey-trigger-watcher.ts');
-    expect(w).toContain('return { ...r, truncated: ids.length >= extractLimit };');
+    // ★ 2026-11-11 C129 D11 — 잘림 판정은 그대로(cut) · 날짜형 시작만 감싸는 함수가 「기록 문장이 1행을 돌려주지 못한 회차」를 잘린 회차로 돌린다
+    expect(w).toContain('const cut = ids.length >= extractLimit;');
+    expect(w).toContain('truncated: cut };');
+    expect(w).toContain('return ctx.scan && !ctx.done ? { ...got.value, truncated: true } : got.value;');
     expect(w).toContain('if (isStateTrigger && !result.paused && !result.truncated) _stateTriggerRanAt.set(j.id, Date.now());');
   });
   it('사건 · 상태 넣기 = 진입 정보를 entryPropsFor 에서 받는다(진입 감시 · 재진입 · 날짜 기준 · 한 번 보내기 = 허용 · 진입 정보 없음)', () => {

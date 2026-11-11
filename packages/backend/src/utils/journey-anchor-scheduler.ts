@@ -19,11 +19,11 @@
  *   - one_shot dispatch도 같은 단발 execution 경로 재사용.
  */
 
-import { query, pool, lockPool } from '../config/database';
+import { query, pool } from '../config/database';
 import { pausedSetSql, pausedCaseSetSql, ANCHOR_COMPLETED_PAUSE_REASON } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { createScanCursor } from './scan-cursor';
 // ★ 2026-09-30 여정 V2 5차 — 진입이 닫힌 옛 판은 새 날짜 사이클을 받지 않는다.
-import { entryOpenClause, lockEntryIfActive, lineageColumnsReady, oneShotColumnsReady } from './journey-lineage';
+import { entryOpenClause, lockEntryIfActive, lineageColumnsReady, oneShotColumnsReady, withJourneySessionLock } from './journey-lineage';
 import { selectAnchorAudienceIds, anchorAudienceSql } from './journey-target-extractor';
 // ★ 2026-09-27 한줄로 V2 S5-04 — 여정 작성자 분류코드 범위
 import { getJourneyOwnerScopeSql } from './store-scope';
@@ -456,25 +456,8 @@ async function markOneShotDispatched(run: SqlRun, journeyId: string): Promise<vo
  *   wait = 켜기 경로(기다려 잡음) · try = 회복(못 잡으면 그 판 이번 회차 넘김).
  */
 export async function withOneShotLock<T>(journeyId: string, wait: boolean, work: () => Promise<T>): Promise<{ locked: true; value: T } | { locked: false }> {
-  const client = await lockPool.connect();
-  let locked = false;
-  let unlockFailed = false;
-  try {
-    if (wait) {
-      await client.query(`SELECT pg_advisory_lock(hashtext('one-shot-settle'), hashtext($1::text))`, [journeyId]);
-      locked = true;
-    } else {
-      const got = await client.query(`SELECT pg_try_advisory_lock(hashtext('one-shot-settle'), hashtext($1::text)) AS ok`, [journeyId]);
-      locked = got.rows[0]?.ok === true;
-    }
-    if (!locked) return { locked: false };
-    return { locked: true, value: await work() };
-  } finally {
-    if (locked) {
-      await client.query(`SELECT pg_advisory_unlock(hashtext('one-shot-settle'), hashtext($1::text))`, [journeyId]).catch(() => { unlockFailed = true; });
-    }
-    client.release(unlockFailed ? new Error('one-shot-settle 잠금 풀기 실패 · 연결 버림') : undefined);
-  }
+  // ★ 2026-11-11 C129 — 잠금의 꼴은 공용(journey-lineage withJourneySessionLock) · 이름(one-shot-settle) · 키(여정 id)는 그대로 = 옛 프로세스와 같은 잠금
+  return withJourneySessionLock('one-shot-settle', journeyId, wait, work);
 }
 
 /**

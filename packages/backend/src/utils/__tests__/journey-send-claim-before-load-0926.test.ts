@@ -83,20 +83,25 @@ describe('여정 발송 표식 순서', () => {
     // 다음 칸으로 넘어가면 시도 기록 지움(쌓임 0)
     const adv = src.slice(src.indexOf('async function advanceExecutions('), src.indexOf('async function finishExecutions('));
     expect(adv).toContain("WHERE el.v->>'reason' IS DISTINCT FROM 'load_attempt')");
-    expect(units.indexOf("await logStepMany(gave.map((e) => e.execution_id), step.id, 'failed', 'queue_insert_failed');", spentAt)).toBeLessThan(units.indexOf('await pauseJourney(', spentAt));
-    expect(units.indexOf('await advanceExecutions(head, step, gave.map((exec) => ({ exec, addedCost: 0 })));', spentAt)).toBeLessThan(units.indexOf('await pauseJourney(', spentAt));
+    // ★ 2026-11-11 C129 D2 — 여정 멈춤이 먼저 성공해야 실패 기록 · 전진을 한다(옛: 실패 기록 · 전진 → 멈춤 = 여정 멈춤이 실패하면 실행 하나만 멈춘 채 남았다)
+    expect(units.indexOf('await pauseJourney(', spentAt)).toBeLessThan(units.indexOf("await logStepMany(gave.map((e) => e.execution_id), step.id, 'failed', 'queue_insert_failed');", spentAt));
+    expect(units.indexOf('await pauseJourney(', spentAt)).toBeLessThan(units.indexOf('await advanceExecutions(head, step, gave.map((exec) => ({ exec, addedCost: 0 })));', spentAt));
     expect(guard).not.toContain('LOAD_ATTEMPT_MAX');
     expect(hold).toContain("await pauseJourney(head.journey_id, '통신사 일시 발송 실패 (자동 재시도 1회 후에도 fail)');");
     expect(hold).not.toMatch(/advanceExecutions|DELETE FROM journey_step_logs|clearLoadUnit/);
     expect(units.slice(rejectedAt, rejectedAt + 400)).toContain('await clearLoadUnit(campaignId, claimIds);');
     expect(units.split('clearLoadUnit(').length - 1).toBe(1);
-    expect(units.split('DELETE FROM journey_step_logs').length - 1).toBe(1);   // 차감 실패(적재 전)
+    // 차감 실패(적재 전) = 표식 삭제 문장 한 곳(★ C129 D3 — 시도 기록 삭제와 한 문장 CLEAR_UNPAID_CLAIMS_SQL)
+    expect(units.split('DELETE FROM journey_step_logs').length - 1).toBe(0);
+    expect(units.split('CLEAR_UNPAID_CLAIMS_SQL').length - 1).toBe(2);   // 차감 실패 + ★ C129 D10 차감 꼴이 준비 때와 다름(둘 다 아무것도 싣지 않았다)
+    expect(src.split('DELETE FROM journey_step_logs').length - 1).toBe(1);
   });
 
   it('안 들어감 확정 = 지금 재시도 규칙(첫 실패 = 5분 뒤 · 이미 한 번 실패 = 그 실행 자동 멈춤 + 여정 멈춤 · 전진 비용 0)', () => {
     const r = src.slice(src.indexOf('async function retryOrPauseAfterLoadFailure('), src.indexOf('function alertUnprovableUnit('));
     expect(r).toContain("next_run_at = NOW() + INTERVAL '5 minutes'");
-    expect(r).toContain('AND COALESCE(error_count, 0) < 1');
+    // ★ 2026-11-11 C129 D2 — 소진 · 재시도 기준 = 그 칸의 적재 시도 기록 수(옛: 실행 전체 error_count < 1)
+    expect(r).toContain("AND ${loadAttemptsSql('e', '$3')} < ${LOAD_ATTEMPT_MAX}");
     expect(r).toContain("pauseReason: 'carrier_temp_fail', pauseTriggerSource: 'auto_retry_exhausted'");
     expect(r).toContain("await logStepMany([e.execution_id], step.id, 'failed', 'queue_insert_failed');");
     expect(r).toContain('await advanceExecutions(head, step, [{ exec: e, addedCost: 0 }]);');
@@ -149,7 +154,8 @@ describe('여정 발송 표식 순서', () => {
   });
 
   it("월 예산 합계는 'sent'만 센다(적재 중 표식 비용이 들어가지 않는다)", () => {
-    const b = src.slice(src.indexOf('이번 달 실제 발송 비용'), src.indexOf('이번 달 실제 발송 비용') + 600);
+    // ★ 2026-11-11 C129 D4 — 월 예산 문장 = JOURNEY_MONTH_COST_SQL(KST 달)
+    const b = src.slice(src.indexOf('export const JOURNEY_MONTH_COST_SQL'), src.indexOf('export const JOURNEY_MONTH_COST_SQL') + 1700);   // ★ C129 D10 — 원장 순지출 조각이 앞에 붙었다
     expect(b).toContain("l.status = 'sent'");
   });
 });

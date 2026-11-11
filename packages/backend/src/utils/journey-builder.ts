@@ -43,6 +43,7 @@ import { lineageColumnsReady, lockLineageEntry, CLOSE_OTHER_VERSIONS_ENTRY_SQL, 
 import { activationCostOf } from './journey-activation-cost';
 import { pauseReasonView } from './journey-pause-reason';
 import { applyResumeAdjustments } from './journey-resume';
+import { openExecutionSql } from './journey-safety-filter';   // ★ 2026-11-11 C129 D6 — 미완료 실행(진행 중 + 멈춤) 조각
 // ★ 2026-09-29 V2 (회의론자 0차 검증 2-나) — 생성 경로의 타이밍 필터도 옵션 PATCH 와 같은 정규화를 지난다(AI 가 지은 값 clamp).
 import { normalizeJourneyOptions } from './journey-options-validator';
 import { isUuid } from './normalize';
@@ -2127,13 +2128,13 @@ export async function deleteJourneyStep(
       );
     }
 
-    // ⛔ 'paused'를 넣지 않는 근거 — 재번호가 해를 주는 것은 **앞으로 step_order를 다시 소비할** 실행행뿐이다.
-    //   paused를 active로 되돌리는 경로가 코드 전체에 없어(2026-08-02 전수 grep) 정지된 실행행은 순번을 다시 읽지 않는다.
-    //   정지가 영구라 넣으면 고객 한 명만 정지해도 그 여정은 스텝을 영영 못 지운다.
-    //   **재개 기능을 만들면 이 조건을 함께 고쳐야 한다.**
+    // ★ 2026-11-11 C129(D6 · R87) — 재번호가 해를 주는 것은 **앞으로 step_order를 다시 소비할** 실행행이다 = 미완료(진행 중 + 멈춤 · openExecutionSql).
+    //   멈춘 실행은 다시 켜면 되살아나(journey-resume) 순번을 다시 읽는다 → 걸친 칸을 지우면 번호가 당겨져 그 고객이 한 칸을 건너뛴다.
+    //   (옛 0802: 되살리기가 없어 진행 중만 봤다 · 「재개 기능을 만들면 이 조건을 함께 고쳐야 한다」.)
+    //   못 지우는 동안 = 여정을 다시 켜 그 실행이 끝나거나 · 여정을 끝낸 뒤(끝내기가 멈춘 실행을 종결한다).
     const busy = await run(
-      `SELECT 1 FROM journey_executions
-        WHERE journey_id = $1::uuid AND status = 'active' AND current_step_order >= $2
+      `SELECT 1 FROM journey_executions e
+        WHERE e.journey_id = $1::uuid AND ${openExecutionSql('e')} AND e.current_step_order >= $2
         LIMIT 1`,
       [journeyId, deletedOrder - 1]
     );

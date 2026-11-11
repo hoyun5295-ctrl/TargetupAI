@@ -1108,7 +1108,9 @@ describe('R8 넓힘 — 여정 실행 · 재검사의 재시도에 상한', () =
         const stmt = src.slice(src.lastIndexOf('`', at), src.indexOf('`', at));
         const before = src.slice(Math.max(0, at - 900), at);
         // ★ 1102 묶음 발송 — 같은 문장 WHERE 의 상한(COALESCE(error_count, 0) < N)도 판정 자리다(상한을 넘은 행은 그 문장이 올리지 않는다)
-        if (!/THEN 'failed'/.test(stmt) && !/WHERE[\s\S]*COALESCE\(error_count, 0\) < \d+/.test(stmt) && !/if \(errorCount < \d+\)/.test(before)) bad.push(`${f}:${src.slice(0, at).split('\n').length}`);
+        // ★ 1111 C129 D2 — 적재 재시도의 상한 = 그 칸의 적재 시도 기록 수(같은 문장 WHERE 의 loadAttemptsSql < LOAD_ATTEMPT_MAX) · 소진 기준을 한 벌로 맞추며 판정 자리가 옮겨 갔다
+        const capInSameStmt = /WHERE[\s\S]*COALESCE\(error_count, 0\) < \d+/.test(stmt) || /WHERE[\s\S]*loadAttemptsSql\([^)]*\)\} < \$\{LOAD_ATTEMPT_MAX\}/.test(stmt);
+        if (!/THEN 'failed'/.test(stmt) && !capInSameStmt && !/if \(errorCount < \d+\)/.test(before)) bad.push(`${f}:${src.slice(0, at).split('\n').length}`);
       }
     }
     expect(bad).toEqual([]);
@@ -4400,7 +4402,8 @@ describe('R41 잠금을 쥔 연결이 같은 풀을 다시 기다리지 않는�
     // ★ 2026-11-11 C125 — 대행 워커의 묶음 잠금 구역(withSpamRecoverLock)이 더해졌다 · 같은 규칙(잠금 전용 풀 · 작업 풀에서 잠금 연결을 꺼내지 않는다)
     const LOCK_FNS: Record<string, [string, string]> = {
       'utils/agency-send-worker.ts': ['async function withSpamRecoverLock<T>(', 'async function recoverSpamErrorsOfBatch('],
-      'utils/journey-anchor-scheduler.ts': ['export async function withOneShotLock<T>(', 'export async function ensureOneShotSettled('],
+      // ★ 2026-11-11 C129 — 여정 세션 잠금의 꼴을 공용 하나로 모았다(한 번 보내기 잠금 withOneShotLock 은 이것을 부른다 · 날짜형 회차 잠금도 같은 함수)
+      'utils/journey-lineage.ts': ['export async function withJourneySessionLock<T>(', 'let stateCursorReady = false;'],
     };
     expect(users.sort()).toEqual(Object.keys(LOCK_FNS).sort());
     for (const f of users) {

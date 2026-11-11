@@ -85,6 +85,15 @@ function normalizeStep(s: any, idx: number): any {
     return base;
   }
 
+  // ★ 2026-11-11 C129(D7) — 끝 칸도 글이 없다(옛: 문자 칸 갈래로 떨어져 AI 가 실은 본문 · 제목이 남았다)
+  if (stepType === 'end') {
+    base.channel = channel;
+    base.messageTemplate = '';
+    base.subject = '';
+    base.isAd = false;
+    return base;
+  }
+
   if (stepType === 'wait') {
     base.channel = channel;
     base.messageTemplate = '';
@@ -243,6 +252,27 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   //   이미 있던 혜택은 산다. 요청문에 쓴 새 혜택도 사용자 입력이라 산다. AI 창작만 죽는다).
   //   kakao 스텝은 승인 템플릿이 본체라 무접촉, wait·condition은 본문이 비어 대상이 아니다.
   const curSteps: any[] = Array.isArray(cur.steps) ? cur.steps : [];
+  // ★ 2026-11-11 C129(D7 · R91) — AI 수정은 알림톡 칸을 만들지도 바꾸지도 못한다(승인 템플릿 · 변수 값 · 실패 시 문자는 사람이 정한 값).
+  //   결과의 카카오 칸마다 **템플릿 코드로** 원래 카카오 칸을 찾는다(자리로 찾지 않는다 = 자리 바꿈 · 끼워 넣기에 남의 설정이 실리지 않는다 · Codex 설계 1R #4):
+  //   원래에 그 코드가 정확히 하나 + 결과에도 정확히 하나일 때만 대응이 서고, 그 칸의 알림톡 설정 · 본문 · 제목 · 광고 여부를 원래 값으로 덮는다(자리 · 대기 시간은 AI 답).
+  //   대응이 서지 않는 카카오 칸(코드 없음 · 원래에 없는 새 칸 · 같은 코드 여럿) = 수정 전체 미적용 — 변수 맵의 글자 값 · 대체 종류로 관문 밖 글이 나가는 길 0(Codex 설계 1R #3).
+  {
+    const KAKAO_EDIT_NOTICE = '알림톡 칸은 AI 로 새로 만들거나 바꿀 수 없어요. 알림톡 칸은 직접 고쳐 주세요.';
+    const KAKAO_FIELDS = ['alimtalkProfileId', 'alimtalkTemplateCode', 'alimtalkVariableMap', 'alimtalkNextType', 'alimtalkNextContents', 'alimtalkNextSubject'] as const;
+    const codeOf = (x: any): string => String(x?.alimtalkTemplateCode || '').trim();
+    const origKakao = curSteps.filter((c) => c?.channel === 'kakao' && String(c?.stepType || 'message') === 'message');
+    const resultKakao = steps.filter((s) => s.stepType === 'message' && s.channel === 'kakao');
+    for (const s of resultKakao) {
+      const code = codeOf(s);
+      const origin = origKakao.filter((o) => codeOf(o) === code);
+      if (!code || origin.length !== 1 || resultKakao.filter((r) => codeOf(r) === code).length !== 1) throw new JourneyInputError(KAKAO_EDIT_NOTICE);
+      const o = origin[0];
+      s.messageTemplate = String(o.messageTemplate || '');
+      s.subject = String(o.subject || '');
+      s.isAd = resolveJourneyAdFlag('kakao', o.isAd);
+      for (const k of KAKAO_FIELDS) { if (o[k] === undefined || o[k] === null) delete s[k]; else s[k] = o[k]; }
+    }
+  }
   // ★ 2026-11-11 C126(D5) — 변수 꼴 관문(고치기 · journey-ai-copy). 대응을 먼저 정한다(사실 검사를 통과하는 칸을 골라 근거로 삼지 않는다 · Codex 설계 4R #2):
   //   편집 전 패키지에 템플릿 문법이 든 칸이 없으면 원문 = 빈 글(새 아는 변수 = %변수% · 그 밖 새 문법 = 미적용) ·
   //   하나라도 있으면 칸 수가 같아야 하고 i번째 결과 칸을 i번째 원래 칸의 같은 필드와 대조한다(조건 태그가 든 칸은 글자 그대로 돌아와야 한다).

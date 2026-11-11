@@ -171,7 +171,6 @@ describe('T1 R87 넓힘 — 진입을 막는 판정은 미완료 조각을 지�
       'utils/journey-anchor-scheduler.ts | processAnchorJourney': '날짜 기준 여정의 자동 정지 판정(그 회차 실행이 남았는가) · 여정 행 상태',
       'utils/journey-anchor-scheduler.ts | recoverPendingOneShots': '여정 행 상태(journeys.status)',
       'utils/journey-builder.ts | countInProgressExecutions': '칸 편집 정책(진행 중 + 멈춤을 센다)',
-      'utils/journey-builder.ts | deleteJourneyStep': '칸 편집 가드(설계서 §9 #9)',
       'utils/journey-entry-replace.ts | CLOSE_ACTIVE_FOR_REPLACEMENT_SQL': '닫기(진입 교체 · 진행 중 → 목표 달성)',
       'utils/journey-executor.ts | applyRowOutcomes': '실행기',
       'utils/journey-executor.ts | delayExecutions': '실행기',
@@ -188,6 +187,7 @@ describe('T1 R87 넓힘 — 진입을 막는 판정은 미완료 조각을 지�
       'utils/journey-lifecycle-map.ts | loadPendingGoalExits': '화면(생애주기 지도)',
       'utils/journey-lineage.ts | endDrainedVersions': '닫기(다 빠진 옛 판)',
       'utils/journey-lineage.ts | endJourneyLineage': '닫기(여정 끝내기 · 진행 중 + 멈춤)',
+      'utils/journey-pause-handler.ts | autoPauseExecution': '멈춤(자동 멈춤 = 진행 중인 실행에만 · C129 D1)',
       'utils/journey-pause-handler.ts | dueExecutionsSql': '멈춤(그날 정지 대상)',
       'utils/journey-pause-handler.ts | pauseStepForDay': '멈춤',
       'utils/journey-pretest-notifier.ts | detectLateNewCopy': '사전 검사 대상',
@@ -215,7 +215,7 @@ describe('T1 R87 넓힘 — 진입을 막는 판정은 미완료 조각을 지�
     expect([...found].sort()).toEqual(Object.keys(NOT_ENTRY).sort());
     for (const [file, name] of ENTRY_JUDGES) expect(NOT_ENTRY[`${file} | ${name}`], `${file} ${name} = 진입 판정`).toBeUndefined();
   });
-  it('미완료 조각을 쓰는 자리 = 뽑기 조각 · 앞 여정 뒤 뽑기 · 사건 커서의 다른 판 검사(조각 함수 호출을 구문 트리로 센다)', () => {
+  it('미완료 조각을 쓰는 자리 = 뽑기 조각 · 앞 여정 뒤 뽑기 · 사건 커서의 다른 판 검사 · 칸 지우기 가드(조각 함수 호출을 구문 트리로 센다)', () => {
     const callers = SRC_FILES.filter((f) => {
       const sf = sfOf(f);
       let n = 0;
@@ -223,7 +223,8 @@ describe('T1 R87 넓힘 — 진입을 막는 판정은 미완료 조각을 지�
       walk(sf);
       return n > 0;
     }).sort();
-    expect(callers).toEqual(['utils/journey-safety-filter.ts', 'utils/journey-target-extractor.ts', 'utils/journey-trigger-watcher.ts']);
+    // ★ 1111 C129 D6 — 칸 지우기 가드(journey-builder)도 미완료 조각을 쓴다(진입 판정은 아니고 같은 상태 집합)
+    expect(callers).toEqual(['utils/journey-builder.ts', 'utils/journey-safety-filter.ts', 'utils/journey-target-extractor.ts', 'utils/journey-trigger-watcher.ts']);
   });
   it('실행을 종결로 바꾸는 UPDATE 전수 = 같은 문장에 completed_at · 끝난 시각 없이 바꾸는 상태 = 미완료 목록 안', () => {
     const open = new Set(Array.from(openExecutionSql('x').matchAll(/'(\w+)'/g)).map((m) => m[1]));
@@ -546,7 +547,8 @@ describe('T5 생산자 결과 — AI 수정(패키지)', () => {
     await expect(edit([step(1, PLAIN), step(2, A), step(3, PLAIN)], [step(1, PLAIN), { stepOrder: 2, stepType: 'condition', conditionJsonb: { type: 'purchased' } }, step(3, PLAIN)])).rejects.toThrow(/조건문이 든 칸/);
     await expect(edit([step(1, CART), step(2, PLAIN)], [WAIT(1), step(2, PLAIN)])).rejects.toThrow(/조건문이 든 칸/);                       // 변수 출력만 든 칸도 같다
     await expect(edit([step(1, PLAIN, { subject: "{% if a %}가을{% endif %} 소식" }), step(2, PLAIN)], [WAIT(1), step(2, PLAIN)])).rejects.toThrow(/조건문이 든 칸/);   // 제목에만 있던 경우
-    await expect(edit([step(1, A), step(2, PLAIN)], [step(1, '카카오 본문입니다.', { channel: 'kakao' }), step(2, PLAIN)])).rejects.toThrow(/조건문이 든 칸/);
+    // ★ 1111 C129 D7 — 문자 칸을 알림톡으로 바꾼 답은 알림톡 칸 규칙이 먼저 막는다(AI 는 알림톡 칸을 새로 만들 수 없다)
+    await expect(edit([step(1, A), step(2, PLAIN)], [step(1, '카카오 본문입니다.', { channel: 'kakao' }), step(2, PLAIN)])).rejects.toThrow(/알림톡 칸은 AI 로/);
     // 템플릿 문법이 없던 문자 칸의 종류를 바꾸는 것은 그대로 된다(다른 칸의 조건문은 글자 그대로)
     const ok = await edit([step(1, A), step(2, PLAIN), step(3, PLAIN)], [step(1, A), WAIT(2), step(3, PLAIN)]);
     expect(ok.steps[0].messageTemplate).toBe(A);

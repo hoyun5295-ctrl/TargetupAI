@@ -33,7 +33,7 @@ import { journeyOwnerConsent } from './mall-consent';
 import { selectJourneyTargetCustomerIds, selectAfterJourneyCandidates, selectCdpEventRowsForCursor, selectPurchaseLedgerRowsForCursor, selectLastPriorPurchase, triggerEntryUsedSql, JOURNEY_COUNT_CAP, entryPropsFor, journeyEntryInputs } from './journey-target-extractor';
 import { planCdpCursorBatch, buildEntryPropsArray, resolveCdpCursorEventName, usesPurchaseLedger, type CdpCursorBatch, type CdpEventRow } from './journey-cdp-cursor';
 import { isFirstImportRunning } from './mall-import';
-import { clampInt } from './journey-points-trigger';
+import { clampInt, resolvePointsExpiringConfig } from './journey-points-trigger';
 // ★ 2026-08-01 §11-4 — 싱크 구매는 원장(purchases)이 문이다. 어느 회사에서 그 문을 열지·창 길이 판정.
 import { isLedgerRunWindowHour, PURCHASE_TRIGGER_MAX_AGE_HOURS } from './journey-purchase-ledger';
 import { crossDoorEntryOwnedSql } from './two-door-purchase';   // ★ 2026-11-04 C99 CT-D5 같은 날 다른 문 진입 소유
@@ -48,7 +48,9 @@ import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJou
 import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, qualifyProductBatch } from './journey-product';
 import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL, CLOSE_PAUSED_FOR_REPLACEMENT_SQL } from './journey-entry-replace';
 // ★ 2026-09-30 여정 V2 5차 — 새 판 · 계보: 진입이 닫힌 옛 판은 받지 않고, 재진입 판정은 계보 단위(DDL 전 = 옛 동작).
-import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
+import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry, stateCursorColumnReady, withJourneySessionLock } from './journey-lineage';
+import { KST_TODAY_DATE_SQL, KST_CLOCK_DATE_SQL } from './stats-aggregation';
+import type { JourneyDateScan } from './journey-target-extractor';
 import { JourneyInputError, backfillPerDayOf, entryCapExceeded, ENTERED_TODAY_KST_SQL, dailyRoomInLock } from './journey-step-limits';
 import { readAfterConfig, startGenOf } from './journey-after-config';
 import { interleaveByCompany } from './concurrency';
@@ -226,7 +228,7 @@ export async function runJourneyTriggerWatcher(): Promise<{ matched: number; enq
       const isStateTrigger = STATE_TRIGGER_EVENTS.has(j.trigger_event);
       if (isStateTrigger && Date.now() - (_stateTriggerRanAt.get(j.id) || 0) < STATE_TRIGGER_INTERVAL_MS) continue;
       try {
-        const result = await processJourneyTrigger(j);
+        const result = await runJourneyTriggerRound(j);
         // 대량 진입으로 자동 정지된 회차는 기록하지 않는다 — 고쳐서 다시 켜면 그 날 대상을 바로 다시 찾는다
         // ★ 2026-11-02 설계서 3-7 · D4 — 회차 상한에 닿은(잘린) 회차도 기록하지 않는다 = 1시간 쉬지 않고 다음 회차(5분)에 이어서
         if (isStateTrigger && !result.paused && !result.truncated) _stateTriggerRanAt.set(j.id, Date.now());
@@ -285,7 +287,74 @@ function judgesPriorPurchase(j: ActiveJourney): boolean {
     || (j.trigger_event === 'cdp.purchase' && (f.exclude_first_purchase === true || f.exclude_dormant_return === true));
 }
 
-async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: number; enqueued: number; skipped: number; paused?: boolean; truncated?: boolean }> {
+/**
+ * ★ 2026-11-11 C129(D11) — 날짜형 시작 = 대상이 하루만 열리는 시작(생일 임박 · 연 단위 포인트 소멸).
+ *   그날 훑지 못하면(멈춤 · 서버 정지) 그 해 진입 0 이던 것 → 훑은 날(journeys.last_state_cursor_on)을 남기고 못 훑은 날의 대상을 날짜가 지나기 전까지 따라잡는다.
+ *   휴면 · 미사용 일수 방식 포인트 소멸 = 조건이 이어지는 시작(다음에 훑으면 그대로 잡힌다) → 해당 없음.
+ */
+export function isDateEdgeTrigger(triggerEvent: string, filters: any): boolean {
+  if (triggerEvent === 'customer.birthday_approaching') return true;
+  return triggerEvent === 'customer.points_expiring' && resolvePointsExpiringConfig(filters || {}).mode === 'annual_date';
+}
+
+/**
+ * 훑은 날 기록(C129 D11) — 조건이 맞으면 같은 값이어도 다시 써서 1행을 돌려준다 = **끝난 회차의 유일한 증거**(앞 회차가 올려 둔 기록은 이번 회차를 대신하지 않는다).
+ *   조건 = 켜짐 · 시작 설정 그대로(세대) · 여정 조건이 이 회차가 처음 읽은 값 그대로(jsonb 구조 비교 · 세대를 올리지 않는 편집도 잡는다) · KST 오늘이 아직 기준일
+ *   (지금 시각 = clock_timestamp · 넣기 트랜잭션이 잠금을 기다리다 자정을 넘겨도 어제로 보지 않는다).
+ *   0행 = 그사이 무언가 바뀌었다 → 기록하지 않는다 = 다음 회차가 창을 다시 계산한다(추출의 창 안 제외가 이미 넣은 고객을 뺀다).
+ */
+async function markStateScan(run: { query: (text: string, params?: any[]) => Promise<any> }, j: ActiveJourney, expect: StartExpect, on: string): Promise<boolean> {
+  const params: any[] = [j.id, j.company_id, on, JSON.stringify(j.trigger_filters || {})];
+  const r = await run.query(
+    `UPDATE journeys SET last_state_cursor_on = $3::text::date
+      WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active'
+        AND ${KST_CLOCK_DATE_SQL}::text = $3::text
+        AND COALESCE(trigger_filters, '{}'::jsonb) = $4::jsonb${startSameSql(params, expect)}
+      RETURNING id`,
+    params,
+  );
+  return (r?.rows?.length || 0) === 1;
+}
+
+type TriggerRunResult = { matched: number; enqueued: number; skipped: number; paused?: boolean; truncated?: boolean };
+/** 날짜형 시작의 회차 상태(C129 D11) — dateEdge = 이 회차가 날짜형 회차 잠금 안에서 돈다 · scan = 읽은 기준일 · done = 기록 문장이 1행을 돌려줬다(끝난 회차의 유일한 증거) */
+interface DateScanCtx { dateEdge: boolean; scan?: JourneyDateScan; done: boolean }
+
+/** 날짜형 회차 잠금의 이름(여정마다 하나 · journey-lineage withJourneySessionLock) */
+export const DATE_SCAN_LOCK_SPACE = 'journey-date-scan';
+
+/**
+ * 날짜형 시작의 회차를 연다(C129 D11 · Codex 구현 2R) — 한 문장으로 ① 기준일(KST 오늘) ② 못 훑은 날 수(옛 기록과의 간격) 를 읽고
+ *   ③ **그날을 미완료로 먼저 내려 둔다**(기록이 오늘 이상이면 어제로 · 그보다 옛날 · 없음은 그대로).
+ *   끝났을 때만 기록 문장(markStateScan)이 오늘로 올린다 → 회차가 잘리든 · 상한 초과로 멈추든 · 예외로 끊기든 · 프로세스가 죽든 그날은 미완료로 남고,
+ *   다음 날 회차가 간격으로 그날의 창을 다시 본다(끝난 뒤에 되돌리는 쓰기가 없으므로 그 쓰기가 실패할 일도 없다).
+ *   아침에 끝난 날의 저녁 회차 = 옛 기록이 오늘 → 간격 0 → 못 훑은 날 0(오늘 창만) · 내려 둔 값 = 어제.
+ */
+const OPEN_STATE_SCAN_SQL =
+  `WITH cur AS (SELECT last_state_cursor_on AS was FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE)
+   UPDATE journeys j
+      SET last_state_cursor_on = CASE WHEN cur.was >= ${KST_TODAY_DATE_SQL} THEN ${KST_TODAY_DATE_SQL} - 1 ELSE cur.was END
+     FROM cur
+    WHERE j.id = $1::uuid AND j.company_id = $2::uuid
+   RETURNING ${KST_TODAY_DATE_SQL}::text AS scan_on, (${KST_TODAY_DATE_SQL} - cur.was) AS gap`;
+
+/**
+ * ★ 2026-11-11 C129(D11) — 날짜형 시작의 한 회차(열기 → 뽑기 → 넣기 → 기록)를 감싼다.
+ *   ① **한 여정의 회차는 프로세스 사이에서도 하나씩**(세션 잠금 · Codex 구현 3R): 열고 닫는 사이에 다른 프로세스의 회차가 끼면 서로의 미완료 · 완료를 덮는다
+ *      (값을 비교해 가려내려던 장치는 같은 값으로 연 두 회차를 못 가른다) → 다른 프로세스가 돌고 있으면 이 회차는 열지도 않고 넘긴다(다음 5분 회차가 다시).
+ *   ② 끝난 회차 = 기록 문장이 1행을 돌려준 회차뿐(ctx.done) — 그 밖의 결말은 1시간 쉼에 넣지 않는다(truncated). 본문의 나가는 길마다 따로 챙기지 않는다
+ *      (Codex 설계 4R · 5R · 구현 1R 같은 부류). 그날을 미완료로 두는 것은 회차를 열 때 이미 했다(OPEN_STATE_SCAN_SQL) → 예외로 나가도 따로 할 일이 없다.
+ *   날짜형 시작이 아니거나 칸이 없으면 잠금 · 열기 없이 본문 결과 그대로(종전).
+ */
+async function runJourneyTriggerRound(j: ActiveJourney): Promise<TriggerRunResult> {
+  const ctx: DateScanCtx = { dateEdge: isDateEdgeTrigger(j.trigger_event, j.trigger_filters) && await stateCursorColumnReady(), done: false };
+  if (!ctx.dateEdge) return processJourneyTrigger(j, ctx);
+  const got = await withJourneySessionLock(DATE_SCAN_LOCK_SPACE, j.id, false, () => processJourneyTrigger(j, ctx));
+  if (!got.locked) return { matched: 0, enqueued: 0, skipped: 0, truncated: true };
+  return ctx.scan && !ctx.done ? { ...got.value, truncated: true } : got.value;
+}
+
+async function processJourneyTrigger(j: ActiveJourney, ctx: DateScanCtx): Promise<TriggerRunResult> {
   j.lineageIds = await lineageJourneyIds(j.id);
   // ★ Phase 3: 구매·예약·배송(custom_order_shipped)은 이벤트 커서 경로(누락 0 + 정확히 1회 + properties 동봉). 그 외는 공유 컨트롤타워 추출.
   const cursorEvent = resolveCdpCursorEventName(j.trigger_event);
@@ -370,6 +439,16 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
   // ★ 2026-10-20 V.3 §18 — 앞 여정을 마치면: 후보마다 앞 실행 id 를 진입 표식으로 싣는다(한 번 마침 = 한 번 진입 · 상한 · 넣기는 아래 공용).
   //   ★ Codex 적대 A 1R — 설정(앞 여정 · 결과 · 기준 시각)은 추출 직전에 다시 읽고, 넣기가 계보 잠금 안에서 같은 값인지 다시 확인한다
   //     (그사이 떼기 · 옮기기 · 결과 바꾸기가 커밋되면 옛 설정의 후보는 넣지 않는다 · 같은 표식은 잠금 안에서 한 번만).
+  // ★ 2026-11-11 C129(D11) — 날짜형 시작: 회차를 연다 = 기준일 · 못 훑은 날 수를 읽고 그날을 미완료로 내려 둔다(한 문장 · 간격 · 추출 · 기록이 같은 날).
+  //   여정 설정은 다시 읽지 않는다 — 추출 · 상한 · 시작 설정 확인은 이 회차가 처음 읽은 행(j) 한 벌 그대로(조건만 다시 읽으면 새 세대 + 옛 상한이 섞인다).
+  let scan: JourneyDateScan | undefined;
+  if (ctx.dateEdge) {
+    const sr = await query(OPEN_STATE_SCAN_SQL, [j.id, j.company_id]);
+    if (sr.rows[0]) {
+      scan = { on: String(sr.rows[0].scan_on), catchUpDays: sr.rows[0].gap == null ? 0 : Math.max(0, Number(sr.rows[0].gap) - 1) };
+      ctx.scan = scan;   // 여기부터 이 회차가 끝났는지는 감싸는 함수(runJourneyTriggerRound)가 본다
+    }
+  }
   let afterProps: Record<string, Record<string, any>> | undefined;
   let expect: StartExpect = startExpectOf(j);
   let ids: string[];
@@ -387,9 +466,11 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     ids = rows.map((x) => x.customerId);
     afterProps = Object.fromEntries(rows.map((x) => [x.customerId, { __entry: { src: 'after', key: x.afterExecId } }]));
   } else {
-    ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, entry.scopeSql, entry.consent);
+    ids = await selectJourneyTargetCustomerIds(j.company_id, j.trigger_event, j.trigger_filters || {}, extractLimit, j.id, reentry, entry.scopeSql, entry.consent, scan);
   }
   if (ids.length === 0) {
+    // ★ C129(D11) 후보 0 = 창을 다 봤다 → 기록 문장(0행이면 = 그사이 조건 · 날이 바뀜 = 끝나지 않은 회차 → 감싸는 함수가 닫는다)
+    if (scan) ctx.done = await markStateScan({ query }, j, expect, scan.on);
     return { matched: 0, enqueued: 0, skipped: 0 };
   }
   if (entryCapExceeded(cap, backfill, ids.length)) {
@@ -404,9 +485,13 @@ async function processJourneyTrigger(j: ActiveJourney): Promise<{ matched: numbe
     return { matched: ids.length, enqueued: 0, skipped: ids.length, paused: true };
   }
   // ★ 2026-11-02 설계서 3-8 · D5 — 진입 정보 = entryPropsFor 한 곳(재진입과 같은 함수 · 장바구니 = 담은 상품 · 포인트 소멸 = 진입 때 포인트) · 앞 여정을 마치면 = 앞 실행 표식
-  const r = await enqueueCandidates(j, ids, afterProps ?? await entryPropsFor(j, ids), expect);
   // ★ 2026-11-02 설계서 3-7 · D4 — 회차 상한에 닿았다 = 남은 분이 있을 수 있다(상태 트리거도 다음 회차에 바로 이어서)
-  return { ...r, truncated: ids.length >= extractLimit };
+  const cut = ids.length >= extractLimit;
+  // ★ 2026-11-11 C129(D11) — 날짜형 시작: 기록하는 회차 = 창을 다 본 회차(잘리지 않음) 또는 하루 몫 여정의 회차(그날 몫 = 종전 뜻).
+  //   회차 상한으로 잘린 회차는 기록 문장을 돌리지 않는다 → 끝나지 않은 회차(그날은 회차를 열 때 이미 미완료 · 다음 5분 회차가 이어서).
+  const r = await enqueueCandidates(j, ids, afterProps ?? await entryPropsFor(j, ids), expect, scan ? { on: scan.on, advance: !cut || backfill != null } : undefined);
+  if (r.scanDone) ctx.done = true;
+  return { matched: r.matched, enqueued: r.enqueued, skipped: r.skipped, truncated: cut };
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -590,7 +675,6 @@ async function finishCursorBatch(
     const moved = await query(guardedCursorSql, guardedParams);
     return { matched: ids.length, enqueued: 0, skipped: ids.length, truncated: batch.truncated, advanced: (moved.rowCount || 0) > 0 };
   }
-  const firstStep = firstStepRes.rows[0] as FirstStepRow;
 
   // ★ 정확히 1회: 진입 전부 + 커서 전진을 한 트랜잭션 (크래시 시 통째 롤백 → 다음 회차 동일 창 재처리, 중복 0).
   const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 여정당 1회 조회
@@ -611,6 +695,18 @@ async function finishCursorBatch(
       return { matched: ids.length, enqueued: 0, skipped: ids.length };
     }
     j.lineageIds = fresh.lineageIds;
+    // ★ 2026-11-11 C129(D9 · R12) — 첫 발송 시각에 쓰는 첫 칸은 넣는 트랜잭션 안(계보 잠금 뒤 · 넣기 직전)에서 다시 읽는다.
+    //   옛: 트랜잭션 앞에서 읽은 값 = 뽑기 · 상한 판정에 걸린 시간만큼 옛 대기 시간으로 첫 문자 시각을 정했다(자동 재진입 워커는 C126 에서 같은 자리로 옮겼다).
+    //   칸 편집은 계보 잠금을 쥐지 않는다 → 여기서 읽은 값과 편집 커밋이 엇갈려도 「넣은 뒤 편집」과 같은 순서다. 칸이 없어졌으면 넣지 않는다(커서 그대로).
+    const liveFirstRes = await client.query(
+      `SELECT id, delay_hours, delay_mode, target_hour_kst, step_type, channel, alimtalk_next_type FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+      [j.id],
+    );
+    if (liveFirstRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { matched: ids.length, enqueued: 0, skipped: ids.length };
+    }
+    const liveFirst = liveFirstRes.rows[0] as FirstStepRow;
     // ★ 2026-11-02 Codex 구현 1R — 첫 칸 시각의 진입 시각 = 이 트랜잭션의 NOW()(넣는 entered_at 과 같은 값 · 자정 경계에서 하루 묶음 날짜가 갈리지 않게)
     const txNow: Date = (await client.query('SELECT NOW() AS now')).rows[0].now;
     for (const customerId of ids) {
@@ -641,7 +737,7 @@ async function finishCursorBatch(
         if (!allowed) { skipped++; continue; }
       }
       // ★ 2026-11-02 첫 칸 시각 = 갈래(트리거 계약 · 하루 묶음 = 다음날 칸 시각 · 설계서 3-2 ②)
-      const nextRunAt = firstRunAtFor(sendTimingForTrigger(j.trigger_event), firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst, txNow, { nightExempt: isNightExemptStep(firstStep) });
+      const nextRunAt = firstRunAtFor(sendTimingForTrigger(j.trigger_event), liveFirst.delay_mode, Number(liveFirst.delay_hours || 0), liveFirst.target_hour_kst, txNow, { nightExempt: isNightExemptStep(liveFirst) });
       const evProps = batch.propertiesByCustomer[customerId];
       // ★ 2026-09-29 여정 V2 1차 — 진입 표식(__entry): 트리거 사건으로 들어왔다는 것 + 그 사건 id.
       //   생애 지도 "이어받음" 숫자가 ①재진입 워커가 넣은 행(표식 없음)과 ②같은 구매로 두 여정에 동시에 들어온 경우(같은 key)를
@@ -835,7 +931,10 @@ async function processCdpCursorJourney(j: ActiveJourney, eventName: string): Pro
 // enqueue 처리 (cooldown 검증 + journey_executions INSERT)
 // ════════════════════════════════════════════════════════════════════
 
-async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsByCustomer: Record<string, Record<string, any>> | undefined, expect: StartExpect): Promise<{ matched: number; enqueued: number; skipped: number }> {
+async function enqueueCandidates(
+  j: ActiveJourney, customerIds: string[], propsByCustomer: Record<string, Record<string, any>> | undefined, expect: StartExpect,
+  scanMark?: { on: string; advance: boolean },   // ★ C129(D11) 날짜형 시작만 — 기준일 확인 + (advance 면) 넣기와 같은 트랜잭션에서 훑은 날 기록
+): Promise<{ matched: number; enqueued: number; skipped: number; scanDone?: boolean }> {
   const matched = customerIds.length;
   if (matched === 0) return { matched: 0, enqueued: 0, skipped: 0 };
 
@@ -847,7 +946,6 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   if (firstStepRes.rows.length === 0) {
     return { matched, enqueued: 0, skipped: matched };
   }
-  const firstStep = firstStepRes.rows[0] as FirstStepRow;
   const isSignup = j.trigger_event === 'customer.created';
 
   // ★ Fix #6 (2026-06-05): 한 명씩 루프 폐기 → 조건 맞는 전원을 한 방 일괄 INSERT(원래 의도 = 전체 진입).
@@ -863,6 +961,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   let entryProps = buildEntryPropsArray(customerIds, propsByCustomer);
   const holdoutPct = await getJourneyHoldoutPct(j.id);  // ★ 2026-07-11 홀드아웃 — 여정당 1회 조회
   let enqueued = 0;
+  let scanDone = false;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -874,9 +973,30 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
       return { matched, enqueued: 0, skipped: matched };
     }
     j.lineageIds = fresh.lineageIds;
+    // ★ 2026-11-11 C129(D9 · R12) — 첫 발송 시각에 쓰는 첫 칸은 넣는 트랜잭션 안(계보 잠금 뒤 · 넣기 직전)에서 다시 읽는다.
+    //   옛: 트랜잭션 앞에서 읽은 값 = 뽑기 · 상한 판정에 걸린 시간만큼 옛 대기 시간으로 첫 문자 시각을 정했다(자동 재진입 워커는 C126 에서 같은 자리로 옮겼다).
+    //   칸 편집은 계보 잠금을 쥐지 않는다 → 여기서 읽은 값과 편집 커밋이 엇갈려도 「넣은 뒤 편집」과 같은 순서다. 칸이 없어졌으면 넣지 않는다(커서 그대로).
+    const liveFirstRes = await client.query(
+      `SELECT id, delay_hours, delay_mode, target_hour_kst, step_type, channel, alimtalk_next_type FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+      [j.id],
+    );
+    if (liveFirstRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return { matched, enqueued: 0, skipped: matched };
+    }
+    const liveFirst = liveFirstRes.rows[0] as FirstStepRow;
+    // ★ 2026-11-11 C129(D11) — 날짜형 시작: 넣기 앞에 KST 오늘이 아직 이 회차의 기준일인가(자정을 넘긴 옛 창의 후보는 넣지 않는다 · 다음 회차가 새 날짜로 다시 뽑는다)
+    //   지금 시각(clock_timestamp)으로 본다 — NOW() 는 BEGIN 때 굳어 계보 잠금을 기다리다 자정을 넘겨도 어제다(Codex 구현 1R).
+    if (scanMark) {
+      const same = await client.query(`SELECT (${KST_CLOCK_DATE_SQL}::text = $1::text) AS same`, [scanMark.on]);
+      if (!same.rows[0]?.same) {
+        await client.query('ROLLBACK');
+        return { matched, enqueued: 0, skipped: matched, scanDone: false };
+      }
+    }
     // ★ 2026-11-02 첫 칸 시각 = 갈래(트리거 계약 · 설계서 3-2 ②) · 진입 시각 = 이 트랜잭션의 NOW()(넣는 entered_at 과 같은 값 · Codex 구현 1R)
     const txNow: Date = (await client.query('SELECT NOW() AS now')).rows[0].now;
-    const nextRunAt = firstRunAtFor(sendTimingForTrigger(j.trigger_event), firstStep.delay_mode, Number(firstStep.delay_hours || 0), firstStep.target_hour_kst, txNow, { nightExempt: isNightExemptStep(firstStep) });
+    const nextRunAt = firstRunAtFor(sendTimingForTrigger(j.trigger_event), liveFirst.delay_mode, Number(liveFirst.delay_hours || 0), liveFirst.target_hour_kst, txNow, { nightExempt: isNightExemptStep(liveFirst) });
     // ★ 2026-10-25 Codex 1R — 하루 몫은 잠금 안에서 다시 센다(재진입 워커와 같은 계보 잠금 · 추출 앞의 셈은 미리 줄이기일 뿐) · 넘는 분은 다음 회차
     const room = await dailyRoomInLock(client, j);
     if (room != null && room <= 0) {
@@ -948,6 +1068,8 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
         [j.id, enqueued]
       );
     }
+    // ★ 2026-11-11 C129(D11) — 훑은 날 기록 = 넣기와 같은 트랜잭션 · 같은 연결(같이 커밋되거나 같이 안 된다)
+    if (scanMark?.advance) scanDone = await markStateScan(client, j, expect, scanMark.on);
     await client.query('COMMIT');
   } catch (e) {
     await client.query('ROLLBACK');
@@ -956,7 +1078,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
     client.release();
   }
 
-  return { matched, enqueued, skipped: matched - enqueued };
+  return { matched, enqueued, skipped: matched - enqueued, scanDone };
 }
 
 export async function checkCooldown(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {

@@ -139,7 +139,7 @@ describe('경로 층 계약 — 절단점은 돈·큐보다 앞', () => {
     // ★ 1102 묶음 발송 — 시연 = 전이 표 27(잔액 28 · 적재 31 앞) · 시연 결말은 보낼 줄(sendRows → 캠페인 · 차감 · 큐)에 들어가지 않는다 · 기록 = demo_simulated
     const cut = s.indexOf("else if (demoCompany) out = { kind: 'demo' };");
     expect(cut).toBeGreaterThan(0);
-    expect(cut).toBeLessThan(s.indexOf('else if (isPrepaid && balance < sendCost)'));
+    expect(cut).toBeLessThan(s.indexOf('else if (isPrepaid && balance < guardCost)')   /* ★ C129 D10 — 잔액 사전 확인 = 차감 단가(guardCost) */);
     expect(cut).toBeLessThan(s.indexOf("out = { kind: 'send' };"));
     expect(s.slice(s.indexOf('async function applyRowOutcomes('), s.indexOf('async function applyBoundaryPause('))).toContain("'sent', 0, 'demo_simulated'");
     expect(s).toContain('const tables = demoCompany ? [] : await getCompanySmsTables(');

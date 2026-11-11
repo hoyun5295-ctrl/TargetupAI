@@ -9,7 +9,7 @@
  * 켜진 B 도 그 자리에서 바뀐다: 시작은 새로 들어오는 고객에게만 영향(진행 중 고객은 칸을 끝까지 받는다 · V.3 시작 조건 그 자리와 같다).
  */
 import { query, pool } from '../config/database';
-import { AFTER_JOURNEY_EVENT, triggerLabel } from './journey-trigger-capability';
+import { AFTER_JOURNEY_EVENT, triggerLabel, reentryFloorDays, autoReentryFloorDays } from './journey-trigger-capability';
 import { lineageColumnsReady, lockLineage } from './journey-lineage';
 import { dbAcceptsTriggerEvent, JourneyMigrationPendingError } from './journey-trigger-db';
 import { reseedOnActivate } from './journey-entry-ledger';
@@ -106,6 +106,18 @@ export function judgeAttach(a: AttachJourneyRow, b: AttachJourneyRow, outcome: A
 }
 
 type Runner = { query: (text: string, params?: any[]) => Promise<any> };
+
+/**
+ * ★ 2026-11-11 C129(D8 · R87) — 시작 사건을 바꾸는 UPDATE 의 SET 조각: 저장 대기일을 **새 시작의 계약 최솟값 이상으로** 올린다(줄이지 않는다).
+ *   옛: 붙이기 · 떼기가 재진입 칸을 그대로 둬, 화면의 대기 일수(예: 0일)와 실제로 걸리는 최솟값(예: 휴면 7일)이 달랐고 다음 재진입 저장은 거절됐다.
+ *   재진입 불가 여정 = 그대로 · 자동으로 다시 받기가 켜져 있으면 자동 최솟값. 값 = 저장 검증과 같은 계약 CT(숫자 바인드 둘).
+ */
+export function reentryFloorSetSql(params: any[], triggerEvent: string): string {
+  params.push(reentryFloorDays(triggerEvent), autoReentryFloorDays(triggerEvent));
+  const base = `$${params.length - 1}::int`;
+  const auto = `$${params.length}::int`;
+  return `reentry_cooldown_days = CASE WHEN allow_reentry THEN GREATEST(COALESCE(reentry_cooldown_days, 0), CASE WHEN auto_reentry_enabled THEN ${auto} ELSE ${base} END) ELSE reentry_cooldown_days END`;
+}
 
 /**
  * ★ Codex 적대 A 1R — 회사 단위 붙이기 잠금(붙이기 · 떼기가 줄을 선다). 뒤 여정 계보만 잠그면 반대 방향 두 붙이기(B→A · A→B)가
@@ -255,12 +267,14 @@ export async function attachJourney(companyId: string, journeyId: string, afterI
     };
     if (Array.isArray(f.customer_conditions)) next.customer_conditions = f.customer_conditions;
     if (f.logic) next.logic = f.logic;
+    const attachParams: any[] = [journeyId, companyId, AFTER_JOURNEY_EVENT, JSON.stringify(next)];
     await client.query(
       `UPDATE journeys SET trigger_event = $3, start_kind = 'event', trigger_filters = $4::jsonb,
               last_event_cursor = CASE WHEN status = 'active' THEN NOW() ELSE NULL END, last_event_cursor_id = NULL,
+              ${reentryFloorSetSql(attachParams, AFTER_JOURNEY_EVENT)},
               updated_at = NOW()
         WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [journeyId, companyId, AFTER_JOURNEY_EVENT, JSON.stringify(next)],
+      attachParams,
     );
     await client.query('COMMIT');
     return { ok: true, warns: v.warns };
@@ -312,14 +326,16 @@ export async function detachJourney(companyId: string, journeyId: string): Promi
       await client.query('ROLLBACK');
       throw new AttachBlockedError(['여정이 방금 바뀌었어요. 다시 시도해 주세요.']);
     }
+    const detachParams: any[] = [journeyId, companyId, restored, String(prev.start_kind || 'event'), JSON.stringify(back)];
     await client.query(
       `UPDATE journeys SET trigger_event = $3, start_kind = $4, trigger_filters = $5::jsonb,
               last_event_cursor = CASE WHEN status = 'active' THEN NOW() ELSE NULL END, last_event_cursor_id = NULL,
               last_purchase_cursor = CASE WHEN status = 'active' AND last_purchase_cursor IS NOT NULL THEN NOW() ELSE last_purchase_cursor END,
               last_purchase_cursor_id = CASE WHEN status = 'active' AND last_purchase_cursor IS NOT NULL THEN NULL ELSE last_purchase_cursor_id END,
+              ${reentryFloorSetSql(detachParams, restored)},
               updated_at = NOW()
         WHERE id = $1::uuid AND company_id = $2::uuid`,
-      [journeyId, companyId, restored, String(prev.start_kind || 'event'), JSON.stringify(back)],
+      detachParams,
     );
     await client.query('COMMIT');
   } catch (e) {

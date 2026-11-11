@@ -208,6 +208,11 @@ export const KST_MONTH_START_SQL = `(date_trunc('month', NOW() AT TIME ZONE 'Asi
 /** ★ 2026-09-27 한줄로 V2 R111 — KST 현재 연도(정수). 연도를 코드에 박지 않는다(옛 2026 하드코딩은 해가 바뀌면 나이가 틀어진다). */
 /** ★ 2026-09-27 한줄로 V2 R425 — KST 오늘 날짜(date). DB 세션 TimeZone = UTC라 CURRENT_DATE는 KST 09시까지 어제다. */
 export const KST_TODAY_DATE_SQL = `((NOW() AT TIME ZONE 'Asia/Seoul')::date)`;
+/**
+ * ★ 2026-11-11 C129(D11 · Codex 구현 1R) — KST 오늘 날짜를 **지금 시각**으로(clock_timestamp).
+ *   NOW() 는 트랜잭션 시작 시각에 굳는다 → 잠금을 기다리다 자정을 넘긴 트랜잭션이 「아직 어제」로 본다. 트랜잭션 안에서 날짜가 바뀌었는지 볼 때만 쓴다.
+ */
+export const KST_CLOCK_DATE_SQL = `((clock_timestamp() AT TIME ZONE 'Asia/Seoul')::date)`;
 export const KST_CURRENT_YEAR_SQL = `EXTRACT(YEAR FROM (NOW() AT TIME ZONE 'Asia/Seoul'))::int`;
 
 /**

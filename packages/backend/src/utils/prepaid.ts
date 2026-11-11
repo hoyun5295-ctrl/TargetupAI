@@ -16,6 +16,7 @@ import { parseDeductDescription, parseFreeCount, ledgerMessageTypeSql } from './
 // ★ 2026-08-05 요금제 무료 메시징 — 소진 길목은 이 파일 하나다(설계 §5-1).
 //   호출부 11곳에 흩뿌리면 "발송 5경로 부분 패치"가 그대로 재발한다.
 import { isFreeMessagingEligible, consumeFreeQuota, recordFreeAttempt } from './free-messaging';
+import { kstDateString } from './journey-step-campaign';   // ★ C129(D10) 단계 캠페인을 고를 때와 같은 시계
 
 /**
  * 이 (유형 × 참조)에 실제로 **차감된 총액과 건수**, 그리고 그 둘로 되살린 **정산 단가**.
@@ -126,6 +127,37 @@ function resolveAlimtalkSettleUnits(companyRow: any, companyId: string): Alimtal
 }
 
 /**
+ * ★ 2026-11-11 C129(D10 · R1) — 카카오 시도(알림톡 · 브랜드) + 고른 문자 대체의 차감 꼴 한 곳(순수).
+ *   차감 단가 = max(카카오, 고른 대체) · 결과별 단가 = 카카오 성공 · 고른 대체 유형은 그 단가 · 고르지 않은 유형 칸은 차감 단가(그 결과는 차액 0).
+ */
+export function resolveFallbackCharge(kakaoPrice: number, fbType: 'SMS' | 'LMS', fbPrice: number): { unitPrice: number; settleUnits: AlimtalkSettleUnits } {
+  const unitPrice = Math.max(kakaoPrice, fbPrice);
+  return { unitPrice, settleUnits: { KAKAO: kakaoPrice, SMS: fbType === 'SMS' ? fbPrice : unitPrice, LMS: fbType === 'LMS' ? fbPrice : unitPrice } };
+}
+
+/** 여정 알림톡 칸의 차감 꼴 — 미설정(유형 이름) 또는 차감 단가 · 결과별 단가(대체 없음 = null) · 꼴 글자 */
+export type KakaoCharge =
+  | { unset: 'KAKAO' | 'SMS' | 'LMS' }
+  | { unset: null; unitPrice: number; settleUnits: AlimtalkSettleUnits | null; shape: string };
+
+/**
+ * ★ 2026-11-11 C129(D10) — 여정 알림톡 칸의 차감 꼴. **실행기(잠금 없이 읽은 회사 행)와 prepaidDeduct(잠근 회사 행)가 같은 함수**로 낸다.
+ *   shape = 차감 단가와 결과별 단가 전부를 적은 글자 → 대체 유형이든 회사 단가든 하나라도 바뀌면 다른 글자(단계 캠페인을 가르고 · 차감이 확인한다).
+ */
+export function resolveKakaoCharge(companyRow: any, fallback: 'SMS' | 'LMS' | null): KakaoCharge {
+  const kakao = resolveChargeUnitPriceDetailed(companyRow, 'KAKAO');
+  if (kakao.unset) return { unset: 'KAKAO' };
+  if (!fallback) return { unset: null, unitPrice: kakao.price, settleUnits: null, shape: `KAKAO|N|${kakao.price}|-` };
+  const fb = resolveChargeUnitPriceDetailed(companyRow, fallback);
+  if (fb.unset || fb.unknownType) return { unset: fallback };
+  const fc = resolveFallbackCharge(kakao.price, fallback, fb.price);
+  return { unset: null, ...fc, shape: `KAKAO|${fallback}|${fc.unitPrice}|${fc.settleUnits.KAKAO}/${fc.settleUnits.SMS}/${fc.settleUnits.LMS}` };
+}
+
+/** 원장 열쇠(과금 방식 · 차감 꼴 · 발송 날)가 준비 때와 달라 차감하지 않았다 — 호출부는 멈추지 않고 다음 회차에 새로 읽는다 */
+const KAKAO_CHARGE_CHANGED = '과금 방식 · 단가 · 발송 날이 방금 바뀌어 이번 회차는 차감하지 않았습니다(다음 회차에 다시)';
+
+/**
  * 선불 차감
  * @param createdBy - ★ D98: 차감 실행 사용자 ID (user_id 기반 사용금액 격리용)
  * @param referenceType - ★ 2026-07-07: 차감 유형(campaign/test/spam/journey/brand). 기본 'campaign'(하위호환).
@@ -152,8 +184,12 @@ export async function prepaidDeduct(
   //   세이브포인트로 감싸 실패는 차감분만 되돌리고, 호출자 트랜잭션의 커밋·롤백·연결 반납은 호출자가 한다.
   // ★ 2026-11-05 C107 D-12 — brandFallback = 브랜드 전용 발송의 문자 대체 큐 유형(A = SMS · B = LMS · 대체 끔이면 넘기지 않는다).
   //   차감 단가 = max(브랜드, 고른 대체 문자) · 차감 행에 결과별 단가(브랜드메시지 · SMS 대체 · LMS 대체)를 실어 정산이 결과로 차액을 돌려준다.
-  opts?: { alimtalk?: boolean; client?: PoolClient; brandFallback?: 'A' | 'B' | null },
-): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number }> {
+  // ★ 2026-11-11 C129(D10) — kakaoCharge = 여정 알림톡 칸(유형 KAKAO · 참조 journey)의 **원장 열쇠**(과금 방식 · 차감 꼴 · 발송 날).
+  //   실행기가 준비 때 낸 꼴(expectShape) · 고른 단계 캠페인의 발송 날(sendDay)을 넘기면 잠근 회사 행으로 다시 내 본다.
+  //   하나라도 다르면(선불이 아님 · 날이 바뀜 · 단가 · 대체 유형이 바뀜) 차감하지 않고 chargeChanged — 한 단계 캠페인의 차감 행이 섞이지 않는다.
+  //   같으면 차감 단가 = max(알림톡, 고른 대체) · 결과별 단가를 싣는다(브랜드 대체와 같은 꼴 · 대체 없음 = 알림톡 단가 · 단가 미기재 = 종전).
+  opts?: { alimtalk?: boolean; client?: PoolClient; brandFallback?: 'A' | 'B' | null; kakaoCharge?: { fallback: 'SMS' | 'LMS' | null; expectShape: string; sendDay: string } | null },
+): Promise<{ ok: boolean; error?: string; amount?: number; balance?: number; insufficientBalance?: boolean; freeUsed?: number; chargeChanged?: boolean }> {
   // ★ 2026-10-09 시연 회사 최후 방어 — 경로 층이 차감 앞에서 끊으므로 여기 도달 = 누락 사고. 원장 0 · 실패로 돌려 발송을 멈춘다.
   if (await isDemoCompany(companyId)) {
     console.error(`[DEMO-LEAK] prepaidDeduct 에 시연 회사가 도달했다 — 경로 층 누락 · 차감·발송 차단 company=${companyId} ref=${referenceType}:${referenceId}`);
@@ -172,6 +208,8 @@ export async function prepaidDeduct(
   //   둘을 한 값으로 묶었더니 무료가 전량 실패해 소멸한 뒤 유료분이 성공하면 그 성공분을
   //   0원 청구하는 과소청구가 났다. 후불의 무료 적용은 정산이 성공 행에 한도를 배분해 확정한다
   //   (`readFreeDeductibleForBilling` — 설계 §5-2·§6). 여기에 소진을 두지 않는 것이 그 축 분리다.
+  // ★ C129(D10) 선불 꼴로 준비한 발송인데 회사가 선불이 아니다 = 차감 · 발송 0(꼴 있는 단계 캠페인에 원장 없는 발송이 붙지 않는다)
+  if (pre.rows[0].billing_type !== 'prepaid' && opts?.kakaoCharge) return { ok: false, chargeChanged: true, error: KAKAO_CHARGE_CHANGED };
   if (pre.rows[0].billing_type !== 'prepaid') {
     // 청구 축은 그대로 두고 **표시용 시도 카운터만** 올린다 — 안 올리면 후불 고객 화면이 영원히 0이다.
     if (isFreeMessagingEligible(messageType, referenceType)) {
@@ -199,6 +237,7 @@ export async function prepaidDeduct(
     const c = co.rows[0];
     if (c.billing_type !== 'prepaid') {
       await client.query(tx.rollback);
+      if (opts?.kakaoCharge) return { ok: false, chargeChanged: true, error: KAKAO_CHARGE_CHANGED };   // ★ C129(D10) 위와 같은 판정(잠근 행)
       return { ok: true, amount: 0 };
     }
 
@@ -235,13 +274,34 @@ export async function prepaidDeduct(
           amount: 0,
         };
       }
-      unitPrice = Math.max(resolved.price, fb.price);
-      settleUnits = {
-        KAKAO: resolved.price,
-        SMS: fbType === 'SMS' ? fb.price : unitPrice,
-        LMS: fbType === 'LMS' ? fb.price : unitPrice,
-      };
+      const fc = resolveFallbackCharge(resolved.price, fbType, fb.price);   // ★ C129 — 알림톡 칸과 같은 함수(값 종전)
+      unitPrice = fc.unitPrice;
+      settleUnits = fc.settleUnits;
       settleLabel = '브랜드메시지';
+    }
+    // ★ 2026-11-11 C129(D10) — 여정 알림톡 칸의 원장 열쇠 확인(위 opts 주석). 선불 여정 알림톡인데 열쇠가 없다 = 준비 때는 후불이었다 → 차감 0.
+    if (messageType === 'KAKAO' && referenceType === 'journey' && !opts?.kakaoCharge) {
+      await client.query(tx.rollback);
+      return { ok: false, chargeChanged: true, error: KAKAO_CHARGE_CHANGED };
+    }
+    if (messageType === 'KAKAO' && opts?.kakaoCharge) {
+      const kc = resolveKakaoCharge(c, opts.kakaoCharge.fallback);
+      if (kc.unset !== null) {
+        // 알림톡 단가 미설정은 위(resolved.unset)가 먼저 막는다 → 여기는 고른 대체 단가(브랜드 대체와 같은 계약 · 공짜 대체 0)
+        await client.query(tx.rollback);
+        console.error(`[선불차감차단] company=${companyId} 알림톡 ${kc.unset} 대체 단가 미설정 — 대체 문자가 차감 없이 나가는 것을 막았다`);
+        return {
+          ok: false,
+          error: `${kc.unset} 단가가 설정되지 않아 문자 대체발송을 할 수 없습니다. 슈퍼관리자 단가설정에서 ${kc.unset} 단가를 입력하거나 대체발송을 끄세요.`,
+          amount: 0,
+        };
+      }
+      if (kstDateString() !== opts.kakaoCharge.sendDay || kc.shape !== opts.kakaoCharge.expectShape) {
+        await client.query(tx.rollback);
+        return { ok: false, chargeChanged: true, error: KAKAO_CHARGE_CHANGED };
+      }
+      unitPrice = kc.unitPrice;
+      settleUnits = kc.settleUnits;
     }
     // ★ 2026-11-06 C107F ② 뿌리 R65 — 대상값이 친구가 아닌 브랜드 차감 = 같은 잠금 행에서 읽은 **친구 단가**를 결과별 정산에 싣는다.
     //   카카오가 실제 친구로 보고한 성공(SMSQ k_friend_yn = 'Y')은 스위퍼가 이 단가로 차액을 돌려준다(올려 받지 않는다).

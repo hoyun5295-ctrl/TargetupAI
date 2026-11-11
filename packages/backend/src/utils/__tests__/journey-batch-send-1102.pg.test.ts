@@ -68,7 +68,7 @@ import { pool } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
 import { ledgerBlockSql } from './pg/global-setup';
 import { runJourneyExecutor } from '../journey-executor';
-import { pickStepCampaignForUnits, resetStepCampaignSeqCache, type StepCampaignSpec } from '../journey-step-campaign';
+import { pickStepCampaignForUnits, resetStepCampaignSeqCache, kstDateString, type StepCampaignSpec } from '../journey-step-campaign';
 import { stepSendableSql, stepHeldSql } from '../journey-pretest-notifier';
 
 /** 옛 코드(배포본 journey-step-campaign.ts getOrCreateStepCampaign)의 매핑 문장 글자 그대로 */
@@ -180,7 +180,7 @@ describe('단계 캠페인 — DDL 없음(배포 앞 DDL-1 이 빠진 상태 · 
       const picking = pickStepCampaignForUnits(specOf(s));   // 매핑 문장이 이긴 쪽 커밋을 기다린다
       await new Promise((r) => setTimeout(r, 300));
       await a.query('COMMIT');
-      expect(await picking).toEqual({ campaignId: old });
+      expect(await picking).toEqual({ campaignId: old, sendDate: kstDateString() });   // ★ C129 D10 — 고른 캠페인의 발송 날을 함께 돌려준다
       const left = await pool.query(`SELECT COUNT(*)::int AS n FROM campaigns WHERE company_id = $1`, [s.co]);
       expect(left.rows[0].n).toBe(1);   // 진 쪽이 만든 캠페인은 지웠다
       const cfg = await pool.query(`SELECT send_config->>'loadProtocol' AS p FROM campaigns WHERE id = $1`, [old]);
@@ -336,7 +336,11 @@ describe('묶음 발송(DDL-1 뒤 = 배포 직후 상태)', () => {
 
   it('적재가 중간에 멈추면(재시도 소진 → 여정 멈춤) 그 뒤 비발송 고객은 결말 0(로그 · 전진 0 · Codex 구현 1R)', async () => {
     const s = await seed({ customers: [{}, { optIn: false }] });
-    await pool.query(`UPDATE journey_executions SET error_count = 1 WHERE id = $1`, [s.execs[0]]);
+    // ★ 2026-11-11 C129 D2 — 소진 기준 = 그 칸의 적재 시도 기록 수(옛: 실행 전체 error_count = 1) · 앞선 시도 하나를 심는다(이번 시도 = 2 = 상한)
+    await pool.query(
+      `UPDATE journey_executions SET error_log = COALESCE(error_log, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('reason', 'load_attempt', 'step_id', $2::text, 'campaign_id', 'prev', 'at', NOW())) WHERE id = $1`,
+      [s.execs[0], s.s1],
+    );
     ctl.outcomes = ['rejected'];
     await runJourneyExecutor();
     const logs = await logsOf(s);
@@ -484,7 +488,7 @@ describe('단계 캠페인 — DDL-1 상태 · DDL-2 뒤(I3 · I6)', () => {
         const picking = pickStepCampaignForUnits(specOf(s));
         await new Promise((r) => setTimeout(r, 300));
         await a.query('COMMIT');
-        expect(await picking).toEqual({ campaignId: won });
+        expect(await picking).toEqual({ campaignId: won, sendDate: kstDateString() });
         expect((await pool.query(`SELECT COUNT(*)::int AS n FROM campaigns WHERE company_id = $1`, [s.co])).rows[0].n).toBe(1);
         await sealStepCampaign(won);
         expect(await pickStepCampaignForUnits(specOf(s))).toEqual({ blocked: 'continuation_unavailable' });
@@ -515,7 +519,7 @@ describe('단계 캠페인 — DDL-1 상태 · DDL-2 뒤(I3 · I6)', () => {
       const picking = pickStepCampaignForUnits(specOf(s));
       await new Promise((r) => setTimeout(r, 300));
       await a.query('COMMIT');
-      expect(await picking).toEqual({ campaignId: won });
+      expect(await picking).toEqual({ campaignId: won, sendDate: kstDateString() });
       const rows = await pool.query(`SELECT seq, campaign_id FROM journey_step_campaigns WHERE journey_id = $1 ORDER BY seq`, [s.j]);
       expect(rows.rows.map((r: any) => Number(r.seq))).toEqual([0, 1]);
       expect((await pool.query(`SELECT COUNT(*)::int AS n FROM campaigns WHERE company_id = $1`, [s.co])).rows[0].n).toBe(2);
