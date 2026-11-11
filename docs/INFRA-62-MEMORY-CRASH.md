@@ -48,6 +48,8 @@
 | 11-02 11:01 | 비토 에이전트 hanjul02 SIGSEGV → 감시가 재시작 | 감시 | 감시 설계서 · memory hanjul03 「1102」 |
 | 11-02 12:02 | 백엔드(Node) SIGSEGV → 같은 초 자동 재기동 · 걸린 캠페인 0 | pm2.log | SERVERS ★1102 |
 | 11-02 | 서버 저장소 `.git` 객체 손상(손상 낱개 2 · 묶음 파일 3) → 같은 날 새 사본으로 교체 | `git pull` 의 gc 경고 → fsck | SERVERS ★1102 · LESSONS_DEPLOY 2026-11-02 |
+| 11-10 22:46 | 백엔드 빌드 산출물 한 파일 손상 — `dist/routes/billing.js` 에 소스 원문 120줄(billing.ts 3619행 주석 ~ 파일 끝)이 끼어듦 · 같은 서버 · 같은 커밋 · tsc 5.9.3 재빌드는 정상 → 운영이 dist 를 직접 실행(1110~)해 22:47 재시작부터 부팅 실패 · 1111 08:38 까지 정지 | 부팅 SyntaxError → 깨진 판과 새 판 `diff -rq`(billing.js · billing.js.map 만 다름) | STATUS-FEED C124 · ROOT-LEDGER R88 |
+| 11-11 09:05~09:23 | PG `customers_pkey` 2428번 페이지 16번 줄 길이 24 → 536(비트 하나 · 512) → 싱크 접수 `INSERT INTO customers` 가 건드릴 때마다 `PANIC: corrupted line pointer: offset = 7912, size = 536` 13번(마지막 09:29:37) · DB 자동 복구 반복 · 백엔드 재시작 14번(restarts 30 → 44) → 09:29:52 `REINDEX INDEX customers_pkey`(75MB → 51MB · amcheck 통과 · 고객 행 무변경 · 언제 깨졌는지는 모름) · 이후 PANIC 0. 같은 날 전체 점검(amcheck `bt_index_check` btree 1,100개 · `verify_heapam` 본체 전부)에서 더 나온 것 = 인덱스 4(`cdp_identity_links_company_id_source_external_id_key` · `cdp_webhook_deliveries_company_id_source_idempotency_key_key` · `idx_cdp_predictions_company_purchase` 항목 순서 어긋남 · `send_fatigue_daily_pkey` 상한 키 어긋남 · 정렬 규칙 버전은 2.41 = 2.41 로 같음) + 본체 2행 xmin 비트 하나(`purchases` (28090,40) 이웃 3,870,281 + 2^28 · `send_fatigue_daily` (20620,116) 이웃 47,673,505 + 2^30 · 삭제 표시 없는 정상 행인데 어떤 조회에도 안 보이던 상태) → 두 페이지 원본 저장(`~/pg-page-*-before.hex`) 뒤 `heap_force_freeze` 로 두 행 되살림 · 세 유일 키 중복 0 확인 · `REINDEX INDEX CONCURRENTLY` 4 → 재점검 btree bad 0 · 본체(시스템 · TOAST 포함) 0행 · 무효 인덱스 0. 값 안쪽(칸 내용)의 비트 변형은 이 점검이 잡지 못한다. | PG 기록 → pageinspect 로 인덱스 13개 줄 포인터 대조 | STATUS-FEED C124 |
 
 ## §3 점검 결과
 

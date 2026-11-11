@@ -128,6 +128,9 @@ cd packages/frontend && npm install
 # git pull만으로는 dist/ 미갱신 → 코드 수정이 서버에 반영 안 됨 (D67 교훈)
 # ★ 2026-07-30 정정 — 빌드는 **atomic safe-build만** 허용(CLAUDE.md). `npm run build`는 실패 시
 #   dist를 깨진 상태로 남겨 pm2 restart가 죽는다. build:safe는 dist-new에 빌드→검증→atomic mv.
+# ★ 2026-11-11 (C124 · R88) build:safe 는 같은 소스를 **두 번** 빌드해 두 판이 파일 하나까지 같고 .js 전부가 node 문법 검사를 통과할 때만 끼운다
+#   (1110 22:46 한 파일이 깨진 판이 끼워져 10시간 정지). 그래서 빌드 시간이 약 두 배다. 성공 판정 = 출력의 「[verify-dist] 통과」 줄 + 「빌드 성공」 줄.
+#   「판 검증 실패」가 나오면 옛 dist 가 그대로다 — 재시작하지 말고 [verify-dist] 줄(어느 파일)을 보고 다시 빌드한다. 출력을 | tail 로 자르지 않는다.
 cd /home/administrator/targetup-app/packages/backend && npm run build:safe
 
 # 4. 프론트엔드 빌드 (변경 시) — D61 난독화 플러그인 포함
@@ -149,8 +152,23 @@ cd /home/administrator/targetup-app/packages/frontend && npm run build:safe
 #   원장이 restart-env 를 요구하면 아래 pm2 reload targetup-backend 자리를 pm2 restart targetup-backend --update-env 로 바꾼다
 n=$(docker exec -i targetup-postgres psql -U targetup targetup -tAc "SELECT COUNT(*) FROM campaigns WHERE send_phase IN ('preparing','queued','processing')"); echo "loading=$n"; if [ "$n" = "0" ]; then pm2 reload targetup-backend; else echo "busy - restart skipped"; fi
 
-# 6. 확인
+# 6. 확인 — ★1111 재시작 뒤 targetup-backend 가 online 이고 uptime 이 늘어나는 것을 보기 전에는 배포가 끝난 것이 아니다
 pm2 status
+
+# 6-1. 자동 복구 감시 (★2026-11-11 C124 · R88 · administrator crontab · 한 번 설치)
+#   백엔드 밖에서 1분마다 pm2 상태를 본다. errored(pm2 가 재시작을 포기)일 때만 움직인다:
+#     · 죽은 프로세스가 지금 dist 로 시작했고(끼운 시각 표식 .installed <= 기동 시각) 그 판이 돌던 판이 아니며,
+#       dist-old 가 「이 감시가 5분 이상 도는 것을 직접 본 판」이면 → dist 를 dist-failed-<시각> 으로 옮기고 dist-old 를 dist 로 되돌려 켠다
+#     · 돌던 판이 죽었거나 · 죽은 뒤에 새 판을 끼웠거나 · 돌던 판이 남아 있지 않으면 → 그대로 다시 켠다
+#     · 어느 쪽이든 ops-alert(문자 + 메일) 경보 · online · stopped 는 건드리지 않는다 · 움직이기 직전 errored 를 다시 확인한다
+#   빌드와 감시는 같은 판 잠금(flock · packages/backend/.dist.lock)을 쓴다 — 빌드 중에는 감시가 건너뛰고, 감시가 판을 옮기는 동안 build:safe 는 최대 90초 기다린다.
+#     build:safe 가 「판 잠금을 쥐고 있습니다」로 끝나면 1분 뒤 다시 실행한다(두 세션이 동시에 빌드한 경우도 이 줄이 나온다).
+#   설치 전 리허설(운영 백엔드는 건드리지 않는다 · 임시 폴더 + 시험용 pm2 앱 wd-rehearsal): bash packages/backend/scripts/dist-gate-rehearsal.sh → 「실패 0」
+#   설치(경로는 `which node pm2` 출력이 PATH 안에 있는지 먼저 본다):
+#     (crontab -l; echo '* * * * * PATH=/usr/local/bin:/usr/bin:/bin node /home/administrator/targetup-app/packages/backend/scripts/backend-watchdog.js >> /home/administrator/backend-watchdog.log 2>&1') | crontab -
+#   「직전 판으로 되돌려 정상 기동」 경보를 받으면 = 서버 HEAD 의 새 코드는 돌고 있지 않다. packages/backend/dist-failed-* 가 실패한 판이다.
+#     pm2 logs targetup-backend --err 로 죽은 줄을 보고, 원인을 고친 뒤 build:safe → 5번 재시작. 확인이 끝나면 dist-failed-* 는 지운다.
+#   상태 파일 = ~/.hanjul-backend-watchdog.json(돌던 판 id · 마지막 경보) · 기록 = ~/backend-watchdog.log(평소에는 아무 줄도 없다)
 ```
 
 **7. 66번 동기화 — 매 작업의 마지막 단계(★2026-09-27 Harold · 문서만 바뀐 커밋도 포함)**

@@ -2,6 +2,9 @@ node_modules/
 dist/
 dist-old/
 dist-new/
+dist-new2/
+dist-failed-*/
+.dist.lock
 .vite/
 *.log
 

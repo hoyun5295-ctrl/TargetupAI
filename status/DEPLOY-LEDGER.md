@@ -67,7 +67,8 @@
 | C120 | b44a9cf8 |
 | C121 | d7a97ce5 |
 | C122 | 3f5f21ce · 23ede51c |
-| C123 | 미커밋 |
+| C123 | 5ed096e5 |
+| C124 | 미커밋 |
 
 ## §1 대기
 
@@ -1690,6 +1691,30 @@ COMMIT;
 - 단계: 사후
 - 선행: C123-H1
 - 기대: 휴면 여정 = 「최소 7일」 · 0 을 넣어도 7 이상으로 저장 · 「1시간마다」 · 주문 완료 여정 = 0 저장 · 자동 켜면 최소 1일 · 재진입 끄면 자동도 꺼짐
+- 결과: (대기)
+
+### C124-P1 · 리허설(서버 pm2 실물 · 시험용 앱 · 운영 백엔드 무관)
+- 카드: C124
+- 단계: 배포 앞
+- 선행: 커밋 → push → 서버 git pull(스크립트만 · 빌드 · 재시작 없음)
+- 기대: administrator 셸 한 줄 = `bash /home/administrator/targetup-app/packages/backend/scripts/dist-gate-rehearsal.sh` · 1부 판 관문 다섯 갈래 + 판 잠금 둘(남이 쥠 · 풀림) · 2부 시험용 pm2 앱(wd-rehearsal)으로 online 기록 → 깨진 판 errored → 잠금 쥔 동안 건너뜀 → 돌던 판으로 되돌림 → 다시 손대지 않음
+- 확인: 마지막 줄 「리허설 결과: 통과 14 · 실패 0」 · 「운영 백엔드 = 상태 · 재시작 횟수 · 기동 시각 그대로」(리허설 중 운영 백엔드가 따로 재시작되면 이 줄만 실패한다)
+- 결과: (대기)
+
+### C124-H1 · 서버 설치(자동 복구 감시 crontab 한 줄 · 빌드 0 · 재시작 0 · DDL 0 · ENV 0)
+- 카드: C124
+- 단계: 한줄로 배포
+- 선행: C124-P1
+- 기대: administrator crontab 에 backend-watchdog 1분 줄 · 공용 경보 /usr/local/bin/ops-alert 실행 가능 · 운영 백엔드 무변화
+- 확인: `which node pm2` 경로 = crontab PATH 안 · 1 ~ 2분 뒤 backend-watchdog.log 에 오류 줄 0 · 6분 뒤 ~/.hanjul-backend-watchdog.json 의 provenDistId 가 채워짐
+- 결과: (대기)
+
+### C124-S1 · 실측(다음 백엔드 배포 때 · 관문 줄)
+- 카드: C124
+- 단계: 사후
+- 선행: C124-H1
+- 기대: build:safe 출력에 「두 번째 빌드(대조용)」 · 「[verify-dist] 통과 — .js N개 문법 · 두 판 M개 파일 일치」 · 빌드 시간 약 두 배
+- 확인: 통과 줄이 있고 swap 줄이 그 뒤에 온다 · 실패면 옛 dist 유지(끼우지 않음)
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분
