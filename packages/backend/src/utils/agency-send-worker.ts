@@ -20,10 +20,10 @@
  *   지금은 `campaign_send_staging`에 넣고 `createDirectSendCampaign`을 부른다. 차감·정제·적재·
  *   미적재분 환불·`sentTables` 기록·적재 중 취소 감지는 전부 그쪽 CT가 소유한다.
  */
-import pool, { query } from '../config/database';
+import pool, { query, lockPool, type TxRun } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, readSpamTestOutcome, type SpamVerdict } from './spam-test-queue';
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
@@ -407,6 +407,8 @@ async function runSpamRound(row: any, startRound: number): Promise<{
         rejectNumber,
         maxRetries: 0,
         rendered: true,   // ★ 2026-11-06 C109(Codex 설계 4R) — 표본 = 렌더가 끝난 글(buildRenderedSample) · 큐가 다시 치환하지 않는다
+        // ★ 2026-11-11 C125(Codex 구현 1R) — 이 문안 버전에서 늦은 보고로 회복한 검사가 있으면 그 검사를 먼저 이어 본다(같은 키일 때만 · 새 검사 0)
+        preferTestId: (await recoveredSpamTestIdFor(String(row.id), Number(row.content_version || 0)).catch(() => null)) ?? undefined,
       });
       detail = { batchId: result.batchId, round: rounds, variants: result.variants };
 
@@ -459,16 +461,48 @@ async function runSpamRound(row: any, startRound: number): Promise<{
  */
 async function settleSpamCheckError(row: any, token: string, backTo: 'received' | 'approved', phase: 'first' | 'final', detail: any): Promise<void> {
   const version = Number(row.content_version || 0);
-  await logEvent(row.id, 'spam_check_error', { phase, version, batchId: detail?.batchId ?? null });
-  const r = await query(
-    `SELECT COUNT(*)::int AS n FROM agency_send_events
-      WHERE request_id = $1::uuid AND kind = 'spam_check_error' AND COALESCE(payload->>'version', '') = $2`,
-    [row.id, String(version)],
-  ).catch(() => ({ rows: [{ n: 0 }] }));
-  const n = Number(r.rows[0]?.n) || 0;
-  if (n >= SPAM_CHECK_ERROR_LIMIT) {
-    if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
-    await logEvent(row.id, 'test_failed', { reason: 'spam_check_error', count: n, phase });
+  const batchId = detail?.batchId ? String(detail.batchId) : '';
+  const requestId = String(row.id);
+  await logEvent(row.id, 'spam_check_error', { phase, version, batchId: batchId || null });
+
+  // ★ 2026-11-11 C125(Codex 구현 1R · 2R · 3R) — 「회복 확인 → 회복 안 된 장애 셈 → 상태 전환」을 늦은 보고 쪽의 회복 넣기와 **같은 묶음 잠금** 아래에서 한다.
+  //   따로 하면: 셈이 3을 본 직후 늦은 보고가 회복을 넣고 깨워도 접수는 아직 testing 이라 안 집히고, 이쪽은 그대로 사람 판단(test_failed · 발송 직전이면 예약 취소 안내)으로 넘긴다.
+  //   잠금 아래에서는 늦은 보고가 이 구역 앞(여기서 회복을 본다) 아니면 뒤(상태가 이미 되돌려져 있어 그쪽 깨우기가 집는다) 둘 중 하나다.
+  //   잠금 구역은 트랜잭션이 아니다(세션 잠금은 잠금 전용 풀의 연결이 쥐고 · 일은 작업 풀에서 문장마다 자동 커밋) — 회복 사건은 넣는 즉시 확정이라,
+  //   상태를 바꾼 뒤에 「넣었던 회복 사건이 사라지는」 일이 없다(3R).
+  //   경계: 사람 판단으로 넘긴 뒤에 닿은 늦은 보고는 접수를 되살리지 않는다(담당자 안내가 이미 나갔다 · 진행 기록에 회복 줄만 남는다).
+  type Settled = { kind: 'failed' | 'recovered' | 'backoff' | 'lost'; n: number };
+  let statusTried = false; // 상태 전환을 시도했는가(전환 자체가 던지면 옛 그대로 위로 올린다 · 다시 마감하지 않는다)
+  // 상태 전환의 결말 — 전환이 끝난 **그 식에서** 적는다. 그 뒤에 무엇이 실패해도(잠금 풀기 · 뒤에 덧붙는 호출) 결말은 이것이고 기록 · 통보 · 다시 집기는 그대로 간다
+  //   (Codex 구현 4R · 5R · 6R = 「전환 뒤의 실패가 다시 집기를 빼먹는다」를 시험으로 막던 것을 구조로 없앤다).
+  let outcome: Settled | undefined;
+  const decide = async (run: TxRun, underLock: boolean): Promise<Settled> => {
+    // 상태를 바꾸기 전에 읽을 것을 다 읽는다(이 구간에서 던지면 상태는 그대로다) · 상태를 바꾼 뒤에는 읽지 않는다
+    if (underLock && batchId) await recoverSpamErrorsOfBatchIn(run, batchId);
+    const recovered = batchId ? await spamErrorRecovered(requestId, batchId, run) : false;
+    const n = await countUnrecoveredSpamErrors(requestId, version, run);
+    statusTried = true;
+    if (n >= SPAM_CHECK_ERROR_LIMIT) {
+      return (outcome = { kind: (await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) ? 'failed' : 'lost', n });
+    }
+    // 상태 변경 결과를 본 뒤에만 기록한다(소유권을 잃었으면 가져간 쪽이 자기 기록을 남긴다 · ⓕ)
+    return (outcome = { kind: (await setStatus(row.id, backTo, { ...RELEASE }, token).catch(() => false)) ? (recovered ? 'recovered' : 'backoff') : 'lost', n });
+  };
+  const settled: Settled = await withSpamRecoverLock(batchId, () => decide(query, true)).catch(async (err: any) => {
+    if (outcome) {
+      console.warn(`${LOG} 검사 장애 마감 — 상태 전환 뒤 실패(결말 ${outcome.kind} 그대로 진행) request=${row.id}:`, err?.message || err);
+      return outcome;
+    }
+    if (statusTried) throw err;
+    // 잠금 구역이 상태를 바꾸기 전에 실패했다 → 회복 넣기 없이 옛 순서로 마감한다(읽기를 못 하면 셈 0 · 회복 아님 = 되돌림 · 옛 동작)
+    console.warn(`${LOG} 검사 장애 마감 잠금 구역 실패 — 회복 확인 없이 마감 request=${row.id}:`, err?.message || err);
+    return decide(async (text, params) => {
+      try { return await query(text, params); } catch { return { rows: [], rowCount: 0 } as any; }
+    }, false);
+  });
+
+  if (settled.kind === 'failed') {
+    await logEvent(row.id, 'test_failed', { reason: 'spam_check_error', count: settled.n, phase });
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
       callback: row.callback_number, title: phase === 'final' ? '[대행발송] 예약 취소 안내' : '[대행발송] 검사 확인 필요',
@@ -476,9 +510,13 @@ async function settleSpamCheckError(row: any, token: string, backTo: 'received' 
     });
     return;
   }
-  // 상태 변경 결과를 본 뒤에만 기록한다(소유권을 잃었으면 가져간 쪽이 자기 기록을 남긴다 · ⓕ)
-  const back = await setStatus(row.id, backTo, { ...RELEASE }, token).catch(() => false);
-  if (back) console.warn(`${LOG} 스팸 검사 장애(${n}/${SPAM_CHECK_ERROR_LIMIT}) request=${row.id} phase=${phase} — ${SPAM_CHECK_ERROR_BACKOFF_MINUTES}분 뒤 다시 검사`);
+  // 깨우기는 잠금 구역이 끝난(회복 사건이 커밋된) 뒤에 — 집기 SQL 은 다른 연결에서 그 사건을 읽는다
+  if (settled.kind === 'recovered') {
+    console.log(`${LOG} 늦은 보고로 검사 통과 — 대기 없이 다시 집는다 request=${row.id} phase=${phase}`);
+    kickSpamRetest([requestId]);
+  } else if (settled.kind === 'backoff') {
+    console.warn(`${LOG} 스팸 검사 장애(${settled.n}/${SPAM_CHECK_ERROR_LIMIT}) request=${row.id} phase=${phase} — ${SPAM_CHECK_ERROR_BACKOFF_MINUTES}분 뒤 다시 검사`);
+  }
 }
 
 /**
@@ -542,10 +580,141 @@ export function heldResultJson(row: { last_test_result?: any; content_version?: 
   return Object.keys(next).length > 0 ? JSON.stringify(next) : null;
 }
 
-/** 고르기 SQL 조각 — 방금(대기 시간 안) 검사 장애가 난 건은 다시 집지 않는다(LIMIT 앞 · B-0823-1 착수 주의) */
-function spamErrorBackoffSql(param: number): string {
+/**
+ * ★ 2026-11-11 C125 — 회복되지 않은 검사 장애 사건인가(SQL 조각 · se = 장애 사건 별칭).
+ *   검사가 닫힌 뒤(10분 안) 닿은 늦은 보고가 그 검사를 통과로 바꾸면 같은 묶음(batchId)의 회복 사건(spam_check_recovered)이 붙는다.
+ *   묶음 없는 장애(큐 등록 실패 등 · batchId NULL)는 견줄 값이 없어 회복되지 않는다. 장애 사건을 읽는 자리(집기 대기 · 3번 셈)는 전부 이 조각을 거친다.
+ */
+export function unrecoveredSpamErrorSql(se: string): string {
+  return `NOT EXISTS (SELECT 1 FROM agency_send_events sr WHERE sr.request_id = ${se}.request_id AND sr.kind = 'spam_check_recovered'
+                 AND sr.payload->>'batchId' = ${se}.payload->>'batchId')`;
+}
+
+/** 고르기 SQL 조각 — 방금(대기 시간 안) 검사 장애가 난 건은 다시 집지 않는다(LIMIT 앞 · B-0823-1 착수 주의) · 회복된 장애는 대기에서 뺀다(C125) */
+export function spamErrorBackoffSql(param: number): string {
   return `NOT EXISTS (SELECT 1 FROM agency_send_events se WHERE se.request_id = agency_send_requests.id AND se.kind = 'spam_check_error'
-                 AND se.created_at > NOW() - ($${param}::int * INTERVAL '1 minute'))`;
+                 AND se.created_at > NOW() - ($${param}::int * INTERVAL '1 minute')
+                 AND ${unrecoveredSpamErrorSql('se')})`;
+}
+
+/** 같은 문안 버전의 검사 장애 횟수 — 회복된 장애(장비 문제가 아니었다)는 세지 않는다(C125 · 3번째 = 사람 판단) */
+export async function countUnrecoveredSpamErrors(requestId: string, version: number, run: TxRun = query): Promise<number> {
+  const r = await run(
+    `SELECT COUNT(*)::int AS n FROM agency_send_events se
+      WHERE se.request_id = $1::uuid AND se.kind = 'spam_check_error' AND COALESCE(se.payload->>'version', '') = $2
+        AND ${unrecoveredSpamErrorSql('se')}`,
+    [requestId, String(version)],
+  );
+  return Number(r.rows[0]?.n) || 0;
+}
+
+/** 회복 넣기(늦은 보고 쪽)와 장애 마감(워커 쪽)이 함께 쥐는 묶음 잠금의 이름 칸(둘째 칸 = 묶음 id) */
+export const SPAM_RECOVER_LOCK_NS = 'agency-spam-recover';
+
+/**
+ * 그 묶음의 검사가 지금 전부 통과면, 그 묶음으로 장애가 남은 접수마다 회복 사건을 하나 남긴다. 회복된 접수 id 를 돌려준다.
+ *   판정은 검사 결과를 읽는 한 곳(readSpamTestOutcome)이 한다 — 여기서 결과 값을 따로 해석하지 않는다.
+ *   ⛔ 묶음 잠금 구역(withSpamRecoverLock) 안에서만 부른다 — 같은 검사의 늦은 보고 둘이 동시에 닿아도 회복 사건은 하나고,
+ *      장애 마감의 「셈 → 상태 전환」 사이에 끼어들지 못한다.
+ */
+async function recoverSpamErrorsOfBatchIn(run: TxRun, batchId: string): Promise<string[]> {
+  const tests = await run(`SELECT id FROM spam_filter_tests WHERE batch_id = $1::uuid`, [batchId]);
+  if (tests.rows.length === 0) return [];
+  for (const t of tests.rows) {
+    if ((await readSpamTestOutcome(String(t.id), run)).outcome !== 'pass') return [];
+  }
+  const r = await run(
+    `INSERT INTO agency_send_events (request_id, kind, payload)
+     SELECT DISTINCT se.request_id, 'spam_check_recovered', jsonb_build_object('batchId', $1::text, 'version', se.payload->'version')
+       FROM agency_send_events se
+      WHERE se.kind = 'spam_check_error' AND se.payload->>'batchId' = $1::text
+        AND ${unrecoveredSpamErrorSql('se')}
+     RETURNING request_id`,
+    [batchId],
+  );
+  return r.rows.map((x: any) => String(x.request_id));
+}
+
+/**
+ * 묶음 잠금 구역 — 회복 넣기(늦은 보고 쪽)와 장애 마감(워커 쪽)이 이 구역 하나를 같이 쓴다.
+ *   PG 세션 잠금 · 잠금 전용 풀(lockPool · R41 — 잠금 연결은 기다리기만 하고 일은 작업 풀에서 한다 · 한 번 보내기 잠금 withOneShotLock 과 같은 꼴).
+ *   일은 문장마다 자동 커밋이다(트랜잭션이 아니다) → 구역 안에서 넣은 회복 사건은 그 문장이 끝나는 즉시 확정이고, 끝에 실패할 COMMIT 이 없다(Codex 3R).
+ *   잠금은 끝에서 풀고, 풀지 못한 연결은 풀로 돌려보내지 않고 버린다(세션이 끝나야 잠금이 풀린다). 묶음이 없으면 잠금 없이 돈다.
+ */
+async function withSpamRecoverLock<T>(batchId: string, work: () => Promise<T>): Promise<T> {
+  if (!batchId) return work();
+  const client = await lockPool.connect();
+  let locked = false;
+  let unlockFailed = false;
+  try {
+    await client.query(`SELECT pg_advisory_lock(hashtext('${SPAM_RECOVER_LOCK_NS}'), hashtext($1::text))`, [batchId]);
+    locked = true;
+    return await work();
+  } finally {
+    if (locked) {
+      await client.query(`SELECT pg_advisory_unlock(hashtext('${SPAM_RECOVER_LOCK_NS}'), hashtext($1::text))`, [batchId]).catch(() => { unlockFailed = true; });
+    }
+    client.release(unlockFailed ? new Error('agency-spam-recover 잠금 풀기 실패 · 연결 버림') : undefined);
+  }
+}
+
+/** 묶음 잠금을 쥐고 회복 넣기(늦은 보고 쪽이 쓴다) */
+async function recoverSpamErrorsOfBatch(batchId: string): Promise<string[]> {
+  return withSpamRecoverLock(batchId, () => recoverSpamErrorsOfBatchIn(query, batchId));
+}
+
+/** 그 접수의 그 묶음 장애에 회복 사건이 붙어 있는가(누가 넣었는지는 묻지 않는다) */
+export async function spamErrorRecovered(requestId: string, batchId: string, run: TxRun = query): Promise<boolean> {
+  const r = await run(
+    `SELECT 1 FROM agency_send_events WHERE request_id = $1::uuid AND kind = 'spam_check_recovered' AND payload->>'batchId' = $2 LIMIT 1`,
+    [requestId, batchId],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * 이 접수 · 이 문안 버전에서 늦은 보고로 회복한 검사 id(가장 최근 회복 · 없으면 null).
+ *   다시 집힌 접수가 이 검사를 먼저 이어 보게 등록 함수에 넘긴다(preferTestId) — 키가 같은지 · 장애가 아닌지는 등록 함수의 한 문장이 다시 본다.
+ */
+export async function recoveredSpamTestIdFor(requestId: string, version: number): Promise<string | null> {
+  const r = await query(
+    `SELECT t.id FROM agency_send_events sr
+       JOIN spam_filter_tests t ON t.batch_id::text = sr.payload->>'batchId'
+      WHERE sr.request_id = $1::uuid AND sr.kind = 'spam_check_recovered' AND COALESCE(sr.payload->>'version', '') = $2
+      ORDER BY sr.created_at DESC, sr.id DESC, t.created_at DESC LIMIT 1`,
+    [requestId, String(version)],
+  );
+  return r.rows[0]?.id ? String(r.rows[0].id) : null;
+}
+
+/** 회복된 접수를 바로 다시 집는다 — 접수 직후 진입(triggerAgencySendFirstTest)과 같은 길 · 선점은 CAS 라 정기 tick 과 겹쳐도 한쪽만 잡는다 */
+function kickSpamRetest(requestIds: string[]): void {
+  for (const id of requestIds) {
+    void (async () => {
+      await runFirstTest(id);
+      await runFinalTest(id);
+    })().catch((err: any) => {
+      console.error(`${LOG} 회복 뒤 검사 시도 실패(정기 tick이 다시 맡는다) request=${id}:`, err?.message || err);
+    });
+  }
+}
+
+/**
+ * ★ 2026-11-11 C125 — 늦은 보고가 닫힌 검사의 결과 행을 고친 직후 부른다(routes/spam-filter.ts).
+ *   그 검사(묶음)가 이제 전부 통과면 그 묶음으로 「검사 장애」가 남아 15분 대기 중인 대행발송 건의 대기를 풀고 바로 다시 집는다.
+ *   다시 집힌 건은 같은 검사를 이어 본다(reuseSameDay) — 새 검사 문자 · 차감 0.
+ *   운영 실측(1111): 09:51:41 KT 미수신으로 장애 1/3 → 09:51:48 늦은 보고로 통과 → 10:09:38 에야 다시 집혔다(17분 50초 헛대기).
+ */
+export async function recoverAgencySpamErrors(testId: string, kick: (requestIds: string[]) => void = kickSpamRetest): Promise<string[]> {
+  const t = await query(`SELECT batch_id FROM spam_filter_tests WHERE id = $1::uuid`, [testId]);
+  const batchId = t.rows[0]?.batch_id ? String(t.rows[0].batch_id) : '';
+  if (!batchId) return [];
+  const recovered = await recoverSpamErrorsOfBatch(batchId);
+  if (recovered.length > 0) {
+    console.log(`${LOG} 늦은 보고로 검사 통과 — 대기 해제 request=${recovered.join(',')} batch=${batchId}`);
+    kick(recovered);
+  }
+  return recovered;
 }
 
 /**

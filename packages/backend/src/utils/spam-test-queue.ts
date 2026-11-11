@@ -86,6 +86,11 @@ export interface SpamTestEnqueueParams {
   /** ★ 2026-11-02 엔진 재설계 E3-2 — 재사용 창(일 · 기본 = 그날 · 여정 정기 재검사만 7 · reuseSameDay 와 함께 쓴다) */
   reuseDays?: number;
   /**
+   * ★ 2026-11-11 C125(Codex 구현 1R) — 이어 볼 검사를 먼저 지정한다(reuseSameDay 와 함께 · 같은 키일 때만 · 장애가 아닐 때만).
+   *   늦은 보고로 통과가 된 그 검사를 이어 본다 — 같은 키의 더 최신 검사가 장애로 끝났어도 새 검사를 걸지 않는다. 키가 다르거나 장애면 옛 규칙(가장 최근 검사) 그대로.
+   */
+  preferTestId?: string;
+  /**
    * ★ 2026-11-05 C103 F1(Codex 설계 1R H3) — 사람이 누른 검사 수락 규칙을 등록 트랜잭션 안에서 지난다(사용자 잠금 · 그 사용자 진행 중 사람 검사 1건).
    *   여정 칸 「지금 스팸 검사」가 쓴다(수동 검사 주소와 같은 규칙 · manualSpamInProgressInTx). 진행 중이 있으면 errorCode MANUAL_IN_PROGRESS.
    */
@@ -478,7 +483,7 @@ export interface SpamCheckKey {
  *   부르는 쪽: 진행 중 · 확인 중 = 새로 걸지 않고 기다림 · 통과 · 차단 = 재사용 · 장애 = 새 검사(장애 재시도 상한은 부르는 쪽 기존 규칙).
  *   ⛔ 날짜를 넘기면 새 검사(통신사 필터는 날마다 바뀐다) · 제목을 모르는 옛 장문 검사는 재사용에서 빠진다(IS NOT DISTINCT FROM).
  */
-export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query, windowDays?: number): Promise<{ testId: string; status: string; createdAt: Date; outcome: SpamVerdict } | null> {
+export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query, windowDays?: number, onlyTestId?: string): Promise<{ testId: string; status: string; createdAt: Date; outcome: SpamVerdict } | null> {
   if (!k.hash) return null;
   // ★ 2026-11-02 엔진 재설계 E3-2 — 재사용 창 = 기본 그날(지금 그대로 · 점검 판 엿보기 · AI 한줄로 · 자동마케팅) · 여정 정기 재검사만 N일(SC-25)
   const since = windowDays && windowDays > 1 ? `(${KST_TODAY_START_SQL} - INTERVAL '${Math.floor(windowDays) - 1} days')` : KST_TODAY_START_SQL;
@@ -488,8 +493,10 @@ export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query, windowD
         AND t.created_at >= ${since}
         AND t.subject IS NOT DISTINCT FROM $5
         AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
+        AND ($6::uuid IS NULL OR t.id = $6::uuid)
       ORDER BY t.created_at DESC LIMIT 1`,
-    [k.companyId, String(k.callback || '').replace(/\D/g, ''), k.hash, k.msgType, k.subject || null],
+    // ★ 2026-11-11 C125 — onlyTestId = 그 검사가 같은 키 · 같은 창일 때만 돌려준다(키 판정은 이 한 문장 그대로)
+    [k.companyId, String(k.callback || '').replace(/\D/g, ''), k.hash, k.msgType, k.subject || null, onlyTestId || null],
   );
   const t = found.rows[0];
   if (!t) return null;
@@ -596,7 +603,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
   const {
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
-    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission, rendered = false,
+    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission, rendered = false, preferTestId,
   } = params;
 
   try {
@@ -607,7 +614,13 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     //   여기는 빠른 길(잠금 없음) · 동시에 같은 키 둘이 「없음」을 보면 아래 트랜잭션이 키 잠금 아래에서 다시 찾는다(Codex 구현 1R #1 · 이중 차감 0)
     const checkKey: SpamCheckKey | null = reuseSameDay ? hashed.key : null;
     const reusable = async (run?: SqlRun) => {
-      const same = checkKey ? await spamCheckFor(checkKey, run, reuseDays) : null;
+      if (!checkKey) return null;
+      // ★ 2026-11-11 C125 — 지정한 검사(늦은 보고로 통과가 된 것)를 먼저 본다 · 같은 키가 아니거나 장애면 아래 옛 규칙으로
+      if (preferTestId) {
+        const preferred = await spamCheckFor(checkKey, run, reuseDays, preferTestId);
+        if (preferred && preferred.outcome !== 'error') return preferred;
+      }
+      const same = await spamCheckFor(checkKey, run, reuseDays);
       return same && same.outcome !== 'error' ? same : null;
     };
     const early = await reusable();
@@ -1543,6 +1556,8 @@ export async function autoSpamTestWithRegenerate(params: {
   budgetMs?: number;
   /** ★ 2026-11-06 C109 — 렌더가 끝난 글(대행 표본) · 큐가 다시 치환하지 않는다 */
   rendered?: boolean;
+  /** ★ 2026-11-11 C125 — 이어 볼 검사를 먼저 지정(대행 · 늦은 보고로 회복한 검사) · 같은 키 · 장애 아님일 때만 쓰인다 */
+  preferTestId?: string;
 }): Promise<AutoSpamTestResult> {
   const {
     companyId, userId, callbackNumber, messageType, subject,
@@ -1601,6 +1616,7 @@ export async function autoSpamTestWithRegenerate(params: {
       skipPrepaid: true, // 자동 검사 = 요금제 무관 무료(자동마케팅 진입 = 유료 요금제 전부 · 사용량은 크레딧)
       reuseSameDay: true, // ★ 2026-11-01 B1-4 — 같은 날 같은 글 = 이어 보기(대행 · 자동발송 · 상시 운영 · 플래너 공통)
       rendered: params.rendered === true,
+      preferTestId: params.preferTestId,
     });
 
     if (!enqueueResult.ok) {

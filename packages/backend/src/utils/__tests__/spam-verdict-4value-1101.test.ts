@@ -103,7 +103,8 @@ describe('보류 = 실패 · 정지 · 다시 쓰기 0(구현 2라운드)', () =
   it('같은 키 재조회 = 잠금을 쥔 그 연결로(풀에서 연결을 더 기다리지 않는다)', () => {
     const q = src('spam-test-queue.ts');
     expect(q).toContain('const late = await reusable((sql, params) => client.query(sql, params));');
-    expect(q).toMatch(/export async function spamCheckFor\(k: SpamCheckKey, run: SqlRun = query, windowDays\?: number\)/);
+    // ★ 2026-11-11 C125 — 넷째 인자(onlyTestId · 대행 늦은 보고로 회복한 검사 지정)가 붙었다 · 연결(run) · 창(windowDays)은 그대로
+    expect(q).toMatch(/export async function spamCheckFor\(k: SpamCheckKey, run: SqlRun = query, windowDays\?: number, onlyTestId\?: string\)/);
     expect(q).toContain('const { outcome } = await readSpamTestOutcome(String(t.id), run);');
   });
   it('대안 합산 = 통과 > 확인 중 > 검사 중 > 차단 > 장애(차례 검사와 같은 뜻 · 뒤 안이 확인 중이면 앞 안 차단으로 정지하지 않는다)', () => {

@@ -5,7 +5,7 @@
  * 막은 것을 지키는 기계 장치가 없었다. 그래서 이 시험은 **대상을 소스에서 기계로 뽑는다**(주소 · 호출 · 화면 파일).
  * 표에 적은 예외만 통과하고, 새 주소 · 새 호출 · 새 화면은 분류 없이 들어오면 실패한다(손으로 등재한 표 = 등재한 것만 지킨다 · LESSONS_BACKEND 1014).
  */
-import { stripComments } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
+import { stripComments, declarationsNamed } from './helpers/producer-scan';   // ★ 2026-11-07 C113 K19 — 공용 글자 단위(줄 주석 안 /* 가 코드를 지우던 옛 정규식 판 대신)
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -4397,12 +4397,30 @@ const R40_CAP_USERS: Record<string, string> = {
 describe('R41 잠금을 쥔 연결이 같은 풀을 다시 기다리지 않는다(키마다 기다리는 잠금 = 잠금 전용 풀)', () => {
   it('pg_advisory_lock( 을 쓰는 파일 = lockPool.connect() 로 잠금 연결 · lockPool 정의 = config/database 한 곳', () => {
     const users = SERVER_SRC.filter((f) => /\bpg_advisory_lock\(/.test(stripComments(be(f))));
-    expect(users).toEqual(['utils/journey-anchor-scheduler.ts']);
+    // ★ 2026-11-11 C125 — 대행 워커의 묶음 잠금 구역(withSpamRecoverLock)이 더해졌다 · 같은 규칙(잠금 전용 풀 · 작업 풀에서 잠금 연결을 꺼내지 않는다)
+    const LOCK_FNS: Record<string, [string, string]> = {
+      'utils/agency-send-worker.ts': ['async function withSpamRecoverLock<T>(', 'async function recoverSpamErrorsOfBatch('],
+      'utils/journey-anchor-scheduler.ts': ['export async function withOneShotLock<T>(', 'export async function ensureOneShotSettled('],
+    };
+    expect(users.sort()).toEqual(Object.keys(LOCK_FNS).sort());
     for (const f of users) {
       const src = stripComments(be(f));
       expect(src, f).toContain('await lockPool.connect()');
-      const fn = src.slice(src.indexOf('export async function withOneShotLock('), src.indexOf('export async function ensureOneShotSettled('));
+      // ★ Codex 구현 6R · 7R — 그 파일에서 lockPool 이라는 이름을 만드는 자리는 config/database 의 이름 붙은 가져오기 하나뿐이다.
+      //   별칭 · 다시 선언 · 매개변수 · 구조 분해로 작업 풀을 그 이름에 물리면 잠금 연결이 작업 풀에서 나온다 — 정규식은 꼴마다 새서 구문 트리로 센다.
+      const binds = declarationsNamed(ts.createSourceFile(f, be(f), ts.ScriptTarget.Latest, true), 'lockPool');
+      expect(binds.map((b) => ts.SyntaxKind[b.kind]), f).toEqual(['ImportSpecifier']);
+      const spec = binds[0] as ts.ImportSpecifier;
+      expect(spec.propertyName, f).toBeUndefined();
+      const decl = spec.parent.parent.parent;
+      expect(ts.isImportDeclaration(decl) && ts.isStringLiteral(decl.moduleSpecifier) && decl.moduleSpecifier.text, f).toBe('../config/database');
+      const [from, to] = LOCK_FNS[f];
+      const fn = src.slice(src.indexOf(from), src.indexOf(to));
+      expect(fn.length, f).toBeGreaterThan(100);
+      expect(fn, f).toContain('pg_advisory_lock(');
       expect(fn, f).not.toMatch(/\bpool\.connect\(\)/);
+      // 그 파일의 세션 잠금은 그 함수 안에만 있다
+      expect(src.split('pg_advisory_lock(').length - 1, f).toBe(fn.split('pg_advisory_lock(').length - 1);
     }
     expect(be('config/database.ts')).toMatch(/export const lockPool = new Pool\(/);
     expect(SERVER_SRC.filter((f) => /\blockPool\s*=\s*new Pool\(/.test(be(f)))).toEqual([]);

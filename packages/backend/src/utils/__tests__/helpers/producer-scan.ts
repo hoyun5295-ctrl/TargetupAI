@@ -265,3 +265,28 @@ export function unclassifiedAiUnits(units: FnUnit[], all: FnUnit[], wrappers: Se
   }).map((u) => u.key);
   return { ai, unclassified: Array.from(new Set(unclassified)) };
 }
+
+/**
+ * ★ 2026-11-11 C125(Codex 구현 6R · 7R · 8R) — 그 노드 아래에서 이름이 `name` 인 **선언 자리** 전부.
+ *   「계약이 보는 이름이 정말 그 변수인가」를 정규식으로 재면 꼴마다 샌다(별칭 · 다시 선언 · 매개변수 · 구조 분해 · 가리기) → 선언 자리를 세어 하나임을 본다.
+ *   쓰는 곳 = 뿌리 대장 R41(`lockPool` = config/database 가져오기 하나) · 대행 늦은 보고 계약(`outcome` · `statusTried` 가 가려지지 않는다).
+ */
+export function declarationsNamed(root: ts.Node, name: string): ts.Node[] {
+  const out: ts.Node[] = [];
+  const walk = (n: ts.Node): void => {
+    if (ts.isIdentifier(n) && n.text === name) {
+      const p: any = n.parent;
+      const declares = p && p.name === n && (ts.isImportSpecifier(p) || ts.isImportClause(p) || ts.isNamespaceImport(p) || ts.isImportEqualsDeclaration(p)
+        || ts.isVariableDeclaration(p) || ts.isParameter(p) || ts.isBindingElement(p) || ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p)
+        || ts.isClassDeclaration(p) || ts.isClassExpression(p) || ts.isEnumDeclaration(p) || ts.isEnumMember(p) || ts.isModuleDeclaration(p));
+      if (declares) out.push(p);
+    } else if (ts.isStringLiteralLike(n) && n.text === name) {
+      // enum 멤버는 이름을 문자열로도 적는다(`{ 'x' = 0 }` · `{ ['x'] = 0 }`) — 뒤의 초기화 식에서 맨이름 x 로 읽힌다(Codex 9R)
+      const holder: ts.Node = ts.isComputedPropertyName(n.parent) ? n.parent : n;
+      if (ts.isEnumMember(holder.parent) && holder.parent.name === holder) out.push(holder.parent);
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(root);
+  return out;
+}

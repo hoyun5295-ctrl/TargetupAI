@@ -68,7 +68,8 @@
 | C121 | d7a97ce5 |
 | C122 | 3f5f21ce · 23ede51c |
 | C123 | 5ed096e5 |
-| C124 | 미커밋 |
+| C124 | ede69d59 |
+| C125 | 미커밋 |
 
 ## §1 대기
 
@@ -1699,7 +1700,7 @@ COMMIT;
 - 선행: 커밋 → push → 서버 git pull(스크립트만 · 빌드 · 재시작 없음)
 - 기대: administrator 셸 한 줄 = `bash /home/administrator/targetup-app/packages/backend/scripts/dist-gate-rehearsal.sh` · 1부 판 관문 다섯 갈래 + 판 잠금 둘(남이 쥠 · 풀림) · 2부 시험용 pm2 앱(wd-rehearsal)으로 online 기록 → 깨진 판 errored → 잠금 쥔 동안 건너뜀 → 돌던 판으로 되돌림 → 다시 손대지 않음
 - 확인: 마지막 줄 「리허설 결과: 통과 14 · 실패 0」 · 「운영 백엔드 = 상태 · 재시작 횟수 · 기동 시각 그대로」(리허설 중 운영 백엔드가 따로 재시작되면 이 줄만 실패한다)
-- 결과: (대기)
+- 결과: 1111 09:57 Harold 서버 출력(HEAD ede69d59 · administrator 셸) = 통과 14 · 실패 0 — 판 관문 다섯 갈래 · 판 잠금 둘(flock 실물) · 시험용 앱 v1 online → 돌던 판 기록 → 깨진 v2 errored → 잠금 쥔 동안 건너뜀 → 「rollback 뒤 상태 = online」 → 다시 손대지 않음 · 운영 백엔드 online 44 · 기동 시각 그대로
 
 ### C124-H1 · 서버 설치(자동 복구 감시 crontab 한 줄 · 빌드 0 · 재시작 0 · DDL 0 · ENV 0)
 - 카드: C124
@@ -1707,7 +1708,7 @@ COMMIT;
 - 선행: C124-P1
 - 기대: administrator crontab 에 backend-watchdog 1분 줄 · 공용 경보 /usr/local/bin/ops-alert 실행 가능 · 운영 백엔드 무변화
 - 확인: `which node pm2` 경로 = crontab PATH 안 · 1 ~ 2분 뒤 backend-watchdog.log 에 오류 줄 0 · 6분 뒤 ~/.hanjul-backend-watchdog.json 의 provenDistId 가 채워짐
-- 결과: (대기)
+- 결과: 1111 10:00 Harold 서버 출력 = crontab 한 줄(PATH=/usr/bin … node …backend-watchdog.js) · 상태 파일 ~/.hanjul-backend-watchdog.json 10:00 생성 · provenDistId 61011-1794353885866(지금 도는 판) · 기록 0줄 · 운영 백엔드 online · restarts 44 · uptime 30m · 경보 경로 ops-alert 는 같은 날 09:48 백업 중단 경보로 문자 · 메일 성공 확인
 
 ### C124-S1 · 실측(다음 백엔드 배포 때 · 관문 줄)
 - 카드: C124
@@ -1715,6 +1716,22 @@ COMMIT;
 - 선행: C124-H1
 - 기대: build:safe 출력에 「두 번째 빌드(대조용)」 · 「[verify-dist] 통과 — .js N개 문법 · 두 판 M개 파일 일치」 · 빌드 시간 약 두 배
 - 확인: 통과 줄이 있고 swap 줄이 그 뒤에 온다 · 실패면 옛 dist 유지(끼우지 않음)
+- 결과: (대기)
+
+### C125-H1 · 한줄로 배포(대행발송 늦은 보고 대기 해제 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C125
+- 단계: 한줄로 배포
+- 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push
+- 기대: 설계서 docs/2026-11-11-agency-late-report-design.md · 늦은 보고가 닫힌 검사를 전부 통과로 바꾸면 그 검사로 장애가 남은 대행발송 건이 15분을 기다리지 않고 바로 다시 집힘 · 회복된 장애는 3번 셈에서 빠짐 · 검사 판정 · 청구 · 미가입 직접발송 변화 0
+- 확인: 서버 HEAD · 백엔드 build:safe(출력에 「[verify-dist] 통과」 = C124-S1 같이 확인) · 프론트 build:safe · 적재 0건 한 줄 → pm2 reload · status online · uptime 증가 · 기동 에러 0 · dist grep recoverAgencySpamErrors ≥ 1
+- 결과: (대기)
+
+### C125-S1 · 실측(배포 뒤 · 회복 사건이 생긴 접수의 대기 시간)
+- 카드: C125
+- 단계: 사후
+- 선행: C125-H1
+- 기대: 서버 셸 한 줄 = 설계서 §7 의 SELECT(장애 기록 시각 · 회복 시각 · 다음 단계 시각)
+- 확인: 회복된 행 = recovered_at 뒤 1분 안에 next_at · 회복 안 된 행 = 옛 그대로 15분 뒤 · 회복 사건이 0행이면 통신사 지연이 없었던 것(닫힘 아님 · 다음 발생 때 다시)
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

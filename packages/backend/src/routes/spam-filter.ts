@@ -14,6 +14,7 @@ import { matchProbeReport, spamProbeSchemaReady, spamTestFinalBy } from '../util
 // ★ 2026-09-26 한줄로 V2 m040 — 검사 발신번호 = 등록 번호만(발송 경로와 같은 CT)
 import { isManualSpamCallbackAllowed, manualSpamInProgressInTx, MANUAL_SPAM_IN_PROGRESS_SQL, spamTestRunElapsedMs } from '../utils/spam-test-queue';   // ★ C103 F1 수동 검사 수락 규칙 CT
 import { getSampleCustomerScope } from '../utils/store-scope';
+import { recoverAgencySpamErrors } from '../utils/agency-send-worker';   // ★ 2026-11-11 C125 늦은 보고 → 대행발송 대기 해제
 import { resolveOwnerScope } from '../utils/owner-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
@@ -592,6 +593,9 @@ router.post('/report', async (req: Request, res: Response) => {
     // ★ 2026-10-02 닫힌 검사의 차단·시간초과 행이 늦은 보고로 통과가 됐다 — 건수를 세는 로그(청구는 그대로: 통과·차단·시간초과 모두 청구 대상)
     if (target.late && updated) {
       console.log(`[SpamFilter] 늦은 보고로 판정 정정 — testId=${testId}, carrier=${device.carrier}, type=${detectedType}${reportAge}${reportTry}${reportApp}`);
+      // ★ 2026-11-11 C125 — 이 정정으로 검사가 전부 통과가 됐으면, 그 검사 때문에 15분 대기 중인 대행발송 건을 바로 이어 가게 한다.
+      //   보고 응답과 무관하다(기다리지 않는다 · 실패해도 보고는 성공 · 대기는 옛 그대로 15분 뒤 풀린다).
+      void recoverAgencySpamErrors(testId).catch((e: any) => console.warn('[SpamFilter] 대행발송 대기 해제 실패:', e?.message || e));
     }
 
     // 6) 모든 결과 수신 완료 체크 → 즉시 completed 전환
