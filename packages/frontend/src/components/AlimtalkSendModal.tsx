@@ -1304,7 +1304,8 @@ export default function AlimtalkSendModal({
         bodyText={ch.selectedTemplate?.content || ''}
         isAd={false}
         accent="amber"
-        onSave={(v) => { ch.setNextType(v.type as any); ch.setNextContents(v.contents); ch.setNextSubject(v.title); }}
+        // ★ 2026-11-11 긴급 — [저장] = 한 번의 변경(낱개 setter 셋을 이어 부르면 뒤의 호출이 옛 종류 · 옛 문안으로 덮었다 = 「원문 그대로」 고정)
+        onSave={(v) => ch.setNextAll({ nextType: v.type as (typeof channelState)['nextType'], nextContents: v.contents, nextSubject: v.title })}
         onClose={() => setFallbackOpen(false)}
       />
 

@@ -259,6 +259,14 @@ export function useAlimtalkChannel({
     onChange({ ...value, nextSubject: v });
   };
 
+  // ★ 2026-11-11 긴급(접수 1111 박성용) — 종류 · 대체문안 · 제목을 **한 번에** 바꾼다(창에서 고르고 쓴 뒤 [저장] = 한 번의 변경).
+  //   위 낱개 setter 는 그릴 때의 value 를 펼쳐 넘기므로 같은 손짓에서 둘 이상 이어 부르면 뒤의 호출이 앞의 변경을 옛 값으로 덮는다.
+  //   1105 C107 D-01 창의 [저장]이 셋을 이어 불러 종류 · 문안이 저장되지 않았다(「원문 그대로」 고정 → LMS 제목 요구로 발송 막힘).
+  //   창이 넘긴 값 그대로 넣는다(문안 채우기 = 창의 [본문 가져오기] · 필수 판정 = 창의 [저장] 막기와 validateAlimtalkChannelState).
+  const setNextAll = (next: { nextType: AlimtalkNextType; nextContents: string; nextSubject: string }) => {
+    onChange({ ...value, nextType: next.nextType, nextContents: next.nextContents, nextSubject: next.nextSubject });
+  };
+
   const requiresNextContents = value.nextType === 'A' || value.nextType === 'B';
   // ★ D188 (2026-05-21) 영업팀장 신고 #7-(2): L(LMS 대체) + B(LMS+문구) 모두 LMS = 제목 필수.
   const requiresNextSubject = value.nextType === 'L' || value.nextType === 'B';
@@ -293,7 +301,7 @@ export function useAlimtalkChannel({
 
   return {
     previewMode, setPreviewMode, approvedSenders, visibleTemplates, selectedTemplate, handleSelectTemplate,
-    setProfileId, setNextType, setNextContents, setNextSubject, requiresNextContents, requiresNextSubject, renderPreview,
+    setProfileId, setNextType, setNextContents, setNextSubject, setNextAll, requiresNextContents, requiresNextSubject, renderPreview,
   };
 }
 
