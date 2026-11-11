@@ -49,22 +49,25 @@ describe('계약 = 재진입 대기 최솟값을 읽는 함수 둘', () => {
 });
 
 describe('실행 시점 조각 reentryHoldSql · 뽑기 안티조인', () => {
-  it('최솟값 0 = 진행 중만(옛 글자 그대로) · 1 이상 = 진행 중 또는 끝난 지 최솟값 안', () => {
-    expect(reentryHoldSql('je', 0)).toBe("je.status = 'active'");
-    expect(reentryHoldSql('je', 7)).toBe("(je.status = 'active' OR COALESCE(je.completed_at, je.entered_at) > NOW() - INTERVAL '7 days')");
+  // ★ 2026-11-11 C126 — 미완료 = 진행 중 + 멈춤(D1) · 저장 대기일도 끝난 뒤 기준 한 갈래(D4) · 자세한 사례 = journey-recheck-1111.test.ts
+  it('최솟값 0 = 미완료만(진행 중 · 멈춤) · 1 이상 = 미완료 또는 끝난 지 최솟값 안', () => {
+    expect(reentryHoldSql('je', 0)).toBe("je.status IN ('active', 'paused')");
+    expect(reentryHoldSql('je', 7)).toBe("(je.status IN ('active', 'paused') OR COALESCE(je.completed_at, je.entered_at) > NOW() - INTERVAL '7 days')");
   });
-  it('안티조인: 최솟값 0 이면 옛 SQL 과 글자가 같다(사건형 · 옛 동작 보존)', () => {
+  it('안티조인: 최솟값 0 · 대기 0 = 미완료만 · 대기 30 = 끝난 뒤 30일(옛: 들어온 뒤 30일 · 바인드 둘)', () => {
     const p0: any[] = [];
     expect(buildReentryAntiJoin('c', p0, 'J', true, 0, 0))
-      .toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status = 'active')");
+      .toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status IN ('active', 'paused'))");
     const p1: any[] = [];
     expect(buildReentryAntiJoin('c', p1, 'J', true, 30, 0))
-      .toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND (je.status = 'active' OR je.entered_at > NOW() - ($2 || ' days')::interval))");
+      .toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND (je.status IN ('active', 'paused') OR COALESCE(je.completed_at, je.entered_at) > NOW() - INTERVAL '30 days'))");
+    expect(p1).toEqual(['J']);
   });
-  it('안티조인: 최솟값이 있으면 대기 0 · 대기 > 0 두 갈래 모두 끝난 뒤 최솟값을 건다', () => {
-    const hold = "(je.status = 'active' OR COALESCE(je.completed_at, je.entered_at) > NOW() - INTERVAL '7 days')";
-    expect(buildReentryAntiJoin('c', [], 'J', true, 0, 7)).toContain(`AND ${hold})`);
-    expect(buildReentryAntiJoin('c', [], 'J', true, 90, 7)).toContain(`AND (${hold} OR je.entered_at > NOW() - ($2 || ' days')::interval))`);
+  it('안티조인: 대기일 = max(최솟값, 저장 대기일) 하나(대기 0 · 최솟값 7 = 7일 · 대기 90 · 최솟값 7 = 90일)', () => {
+    const hold = (n: number) => `(je.status IN ('active', 'paused') OR COALESCE(je.completed_at, je.entered_at) > NOW() - INTERVAL '${n} days')`;
+    expect(buildReentryAntiJoin('c', [], 'J', true, 0, 7)).toContain(`AND ${hold(7)})`);
+    expect(buildReentryAntiJoin('c', [], 'J', true, 90, 7)).toContain(`AND ${hold(90)})`);
+    expect(buildReentryAntiJoin('c', [], 'J', true, 90, 7)).not.toMatch(/je\.entered_at > NOW\(\)/);
   });
   it('재진입 불가 = 그대로(실행이 하나라도 있으면 제외 · 최솟값 무관)', () => {
     expect(buildReentryAntiJoin('c', [], 'J', false, 0, 7))
@@ -137,7 +140,8 @@ describe('R87 방어값이 손 등재(선택 칸)라 등재 안 된 자리에서
   });
   it('진입 감시 묶음 넣기 = 공용 조각(reentryHoldSql · 계약 최솟값) · 사건 커서 넣기 = finishCursorBatch 한 곳(사건 키로 한 번)', () => {
     const w = src('utils/journey-trigger-watcher.ts');
-    expect(w).toContain("const reentryGuard = j.allow_reentry ? `AND ${reentryHoldSql('je', reentryFloorDays(j.trigger_event))}` : ``;");
+    expect(w).toContain('const reentryGuard = j.allow_reentry && !entersOncePerCustomer(j.trigger_event)');
+    expect(w).toContain("? `AND ${reentryHoldSql('je', reentryWaitDays(reentryFloorDays(j.trigger_event), j.reentry_cooldown_days))}` : ``;");
     const enqueue = w.slice(w.indexOf('async function enqueueCandidates('), w.indexOf('async function checkCooldown('));
     expect(enqueue).toContain('WHERE ${journeyMatch} AND je.customer_id = t.cid ${reentryGuard}');
     expect(enqueue).not.toMatch(/je\.status = 'active'/);   // 재진입 판정을 조각 밖에서 따로 쓰지 않는다
@@ -149,8 +153,8 @@ describe('R87 방어값이 손 등재(선택 칸)라 등재 안 된 자리에서
   it('자동 재진입 워커 = 재진입 허용 여정만 · 최솟값 = 공용 조각 한 곳(계보 전체 실행) · 저장값 바인드($2)는 옛 그대로(시간 비교 · 목표 달성 자격)', () => {
     const k = src('utils/journey-reentry-worker.ts');
     expect(k).toContain('AND allow_reentry = true');
-    expect(k).toContain("AND ${reentryHoldSql('je2', floorDays)}");
-    expect(k).toContain("const floorDays = autoReentryFloorDays(String(j.trigger_event || ''));");
+    expect(k).toContain("AND ${reentryHoldSql('je2', holdDays)}");
+    expect(k).toContain("const holdDays = reentryWaitDays(autoReentryFloorDays(String(j.trigger_event || '')), j.reentry_cooldown_days);");
     expect(k).toContain("AND (je.status = 'completed' OR (je.status = 'goal_met' AND $2 > 0))");
     expect(k).toContain("AND je.completed_at <= NOW() - ($2 * INTERVAL '1 day')");
     expect(k).toContain('[companyId, cooldownDays, pickLimit, lineage]');

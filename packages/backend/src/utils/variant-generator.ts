@@ -29,6 +29,7 @@ import { extractJsonFromAiText, aiStr } from './ai-json';
 import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { rewriteDropsLinks } from './voice-form-slots';
 import { finishMany, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
+import { journeyRevisedCopy, journeyRevisedKept, hasLiquidTags, LIQUID_TAG_NOTICE } from './journey-ai-copy';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(고치기)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -79,6 +80,10 @@ export async function generateVariantsFromMessage(input: {
       generatedAt: new Date(),
       warnings: ['기준 문안이 10자 이상이어야 변형을 만들 수 있어요.'],
     };
+  }
+  // ★ 2026-11-11 C126(D5) — 조건 태그({% %})가 든 기준 문안은 AI 가 고치지 않는다(갈래마다 받는 사람이 다른 글) · 과금 래퍼 진입 전(AI 호출 0 · 과금 0)
+  if (hasLiquidTags(baseMessage)) {
+    return { stepId, baseMessage, channel, variants: [], generatedAt: new Date(), warnings: [LIQUID_TAG_NOTICE] };
   }
 
   // 회사 정보 (브랜드 톤 + 업종)
@@ -163,7 +168,8 @@ ${baseMessage}
               v?.tone === '감성적' || v?.tone === '실용적' || v?.tone === '캐주얼'
                 ? v.tone
                 : '실용적';
-            const sanitized = sanitizeForSms(aiStr(v?.messageTemplate)).sanitized.slice(0, 2000);   // ★ 1026 Codex 2R — 글일 때만(객체 = 빈 글 → 아래 10자 거름)
+            // ★ 2026-11-11 C126(D5) — 꺼낸 직후: 기준 문안에 없던 아는 고객 변수 = %변수% · 그 밖 새 템플릿 문법이 든 변형 = 빈 글(아래 10자 거름)
+            const sanitized = sanitizeForSms(journeyRevisedCopy(aiStr(v?.messageTemplate), baseMessage) ?? '').sanitized.slice(0, 2000);   // ★ 1026 Codex 2R — 글일 때만(객체 = 빈 글 → 아래 10자 거름)
             const byteCount = computeByteCountSafe(sanitized);
             return {
               tone,
@@ -181,7 +187,9 @@ ${baseMessage}
             const bad = rewriteAddsFacts(v.messageTemplate, baseMessage) || rewriteDropsLinks(v.messageTemplate, baseMessage);
             if (bad) droppedFabricated++;
             return !bad;
-          });
+          })
+          // ★ 2026-11-11 C126(D5 · Codex 설계 8R) — 실제 돌려줄 글(글자 정리 뒤)의 최종 대조 · 아래 출구는 글을 바꾸지 않는다
+          .filter((v: GeneratedVariant) => journeyRevisedKept(v.messageTemplate, baseMessage));
 
         // ★ 2026-11-01 배포 2 C2 — 응답 글 = 출구(정산 안 · 검사 + 표식 · 글은 그대로 · 사실 판정 = 위 거름) · 변형마다 즉시 검사
         const fin = await finishMany(variants.map((v) => ({ text: v.messageTemplate, subject: v.subject, before: baseMessage })),

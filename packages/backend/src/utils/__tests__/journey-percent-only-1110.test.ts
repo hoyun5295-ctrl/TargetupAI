@@ -116,10 +116,12 @@ describe('소스 계약 — 여정 생성 출구 넷 · 지시 = %변수% 세계
   const src = (f: string) => readFileSync(join(__dirname, '..', f), 'utf8');
   it('여정 만들기 · 기념일 칸 = 본문 · 제목 출구에 가드', () => {
     const g = src('journey-ai-generator.ts');
-    expect(g).toContain('const rawMessage = liquidCopyToPercent(aiStr(s.messageTemplate), CUSTOMER_LIQUID_TO_PERCENT)');
-    expect(g).toContain("liquidCopyToPercent(aiStr(s.subject), CUSTOMER_LIQUID_TO_PERCENT)");
-    expect(g).toContain('liquidCopyToPercent(aiStr(parsed.subject), CUSTOMER_LIQUID_TO_PERCENT)');
-    expect(g).toContain('liquidCopyToPercent(aiStr(parsed.message), CUSTOMER_LIQUID_TO_PERCENT)');
+    // ★ 2026-11-11 C126 — 생산자는 변수 꼴 CT(journey-ai-copy journeyNewCopy = liquidCopyToPercent + 고객 칸 표)를 부른다
+    expect(g).toContain('const rawMessage = journeyNewCopy(aiStr(s.messageTemplate))');
+    expect(g).toContain('journeyNewCopy(aiStr(s.subject))');
+    expect(g).toContain('journeyNewCopy(aiStr(parsed.subject))');
+    expect(g).toContain('journeyNewCopy(aiStr(parsed.message))');
+    expect(src('journey-ai-copy.ts')).toContain('return liquidCopyToPercent(aiText, CUSTOMER_LIQUID_TO_PERCENT);');
     expect(g).toContain("formatProfileForAiPrompt(dataProfile, { variableStyle: 'percent' })");
     expect(g).not.toMatch(/formatProfileForAiPrompt\(dataProfile\)/);
     // 지시문에 분기 예시 · 고객 변수 출력 꼴이 남지 않는다(금지 문장의 꼴 설명만 남는다)
@@ -129,10 +131,10 @@ describe('소스 계약 — 여정 생성 출구 넷 · 지시 = %변수% 세계
   });
   it('여정 빌더 · 다음 칸 추천 = 같은 가드', () => {
     const b = src('journey-builder.ts');
-    expect(b).toContain('liquidCopyToPercent(aiStr(s.messageTemplate), CUSTOMER_LIQUID_TO_PERCENT)');
+    expect(b).toContain('journeyNewCopy(aiStr(s.messageTemplate))');
     expect(b).toContain("formatProfileForAiPrompt(dataProfile, { variableStyle: 'percent' })");
     const d = src('journey-step-diagnosis.ts');
-    expect(d).toContain('liquidCopyToPercent(s.messageTemplate, CUSTOMER_LIQUID_TO_PERCENT)');
-    expect(d).toContain('liquidCopyToPercent(s.subject, CUSTOMER_LIQUID_TO_PERCENT)');
+    expect(d).toContain('journeyNewCopy(s.messageTemplate)');
+    expect(d).toContain('journeyNewCopy(s.subject)');
   });
 });

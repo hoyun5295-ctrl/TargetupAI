@@ -19,7 +19,7 @@
 import { query } from '../config/database';
 import { netPurchaseSql, cdpEventNameMatchSql } from './cdp-order-revenue';   // ★ 2026-11-02 결제된 구매 CT(CT-J3)
 import { KST_TODAY_DATE_SQL } from './stats-aggregation';
-import { buildJourneySafetyFilter, buildReentryAntiJoin } from './journey-safety-filter';
+import { buildJourneySafetyFilter, buildReentryAntiJoin, openExecutionSql } from './journey-safety-filter';
 import { reentryFloorDays, DORMANT_ENTRY_WINDOW_DAYS } from './journey-trigger-capability';   // ★ 2026-11-10 C123 재진입 최솟값 · 휴면 창 = 계약 한 곳
 import type { JourneyConsent } from './mall-consent';
 import { resolvePointsExpiringConfig, clampInt } from './journey-points-trigger';
@@ -520,7 +520,7 @@ export async function afterJourneyTargetQuery(
                           AND be.entry_event_properties->'__entry'->>'src' = 'after'
                           AND be.entry_event_properties->'__entry'->>'key' = ae.id::text)
           AND NOT EXISTS (SELECT 1 FROM journey_executions ba
-                        WHERE ba.journey_id = ANY($${params.length}::uuid[]) AND ba.customer_id = c.id AND ba.status = 'active')`;
+                        WHERE ba.journey_id = ANY($${params.length}::uuid[]) AND ba.customer_id = c.id AND ${openExecutionSql('ba')})`;
     if (reentry) reentryClause = buildReentryAntiJoin('c', params, journeyId, reentry.allowReentry, reentry.cooldownDays, reentry.floorDays, reentry.lineageIds);
   }
   const cond = applyCustomerConditions(filters.customer_conditions || [], filters.logic || 'AND', params, consent);

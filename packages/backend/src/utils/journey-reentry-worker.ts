@@ -28,7 +28,7 @@
 import { query, pool } from '../config/database';
 import { pausedSetSql } from './journey-pause-reason';   // ★ 2026-11-02 여정 멈춤 CT(설계서 3-0 CT-J2)
 import { entryOpenClause, lockEntryIfActive } from './journey-lineage';
-import { buildJourneySafetyFilter, reentryHoldSql } from './journey-safety-filter';
+import { buildJourneySafetyFilter, reentryHoldSql, reentryWaitDays } from './journey-safety-filter';
 import { journeyOwnerConsent } from './mall-consent';
 import { getJourneyOwnerScopeSql } from './store-scope';
 import { firstRunAtFor, isNightExemptStep } from './send-time-util';
@@ -87,10 +87,12 @@ export async function runReentryBatch(): Promise<void> {
   let journeysProcessed = 0;
 
   try {
-    // 1) auto_reentry_enabled = true + status = 'active' 영역 journey 매트릭스
+    // 1) 돌 여정 목록 — ★ 2026-11-11 C126(D2 · 뿌리 R12) **id · 회사만** 읽는다(돌 순서 · 회사 돌아가며).
+    //   옛: 시작 사건 · 대기일 · 재진입 허용 · 상한 · 하루 몫을 여기서 읽어 잠금 안에서 그대로 썼다 → 그 사이 뗀 여정 · 대기일을 늘린 여정 ·
+    //   하루 몫을 줄인 여정 · 첫 칸 대기를 늘린 여정에 옛 값으로 넣었다. 판정에 쓰는 값은 전부 아래 잠금 안에서 읽는다.
     // ★ 2026-09-30 여정 V2 5차 — 진입이 닫힌 옛 판은 다시 태우지 않는다(DDL 전 = 옛 문장 그대로).
     const journeyRes = await query(
-      `SELECT id, company_id, reentry_cooldown_days, threshold_recipients_per_step, trigger_event, trigger_filters
+      `SELECT id, company_id
        FROM journeys
        WHERE auto_reentry_enabled = true
          AND allow_reentry = true   -- ★ 2026-11-10 C123 「다시 들어오게 하기」가 꺼진 여정은 돌지 않는다(화면은 끄면 자동 스위치를 숨긴다)
@@ -100,31 +102,10 @@ export async function runReentryBatch(): Promise<void> {
 
     // ★ 2026-11-02 엔진 재설계 E2-5 — 회사 돌아가며
     const ordered = interleaveByCompany(journeyRes.rows as any[], (x) => String(x.company_id));
-    for (const j of ordered) {
+    for (const pick of ordered) {
+      const journeyId = String(pick.id);
+      const companyId = String(pick.company_id);
       try {
-        const journeyId = j.id;
-        const companyId = j.company_id;
-        const cooldownDays = Number(j.reentry_cooldown_days) || 0;
-        // ★ 2026-11-10 C123(뿌리 R87) — 자동 재진입 최솟값(계약 · 사건형도 최소 1일) = 아래 공용 조각(reentryHoldSql) 한 곳이 건다:
-        //   계보의 어느 실행이든(후보 자신 포함) 끝난 지 최솟값 안이면 넣지 않는다 → 저장 0일 · 미달이어도 실제 대기 = max(저장값, 최솟값).
-        //   저장값 바인드($2)는 옛 그대로(시간 비교 · 목표 달성 자격 `$2 > 0`) — 보정값을 그 바인드에 넣으면 저장 0일 여정에서 빼던 구매 고객을 새로 받는다(Codex 설계 1R #2).
-        const floorDays = autoReentryFloorDays(String(j.trigger_event || ''));
-        // ★ 2026-10-02 수신동의 읽기 = CT(추출과 같은 조각 — 여정 작성자 기준)
-        const consent = await journeyOwnerConsent(companyId, journeyId);
-        // ★ 2026-10-25 #6 ③ — 작성자 범위(담당자 = 자기 매장 고객 · 진입 감시 · 미리보기와 같은 조각 · LIMIT 앞)
-        const scopeSql = await getJourneyOwnerScopeSql(companyId, journeyId);
-        // ★ 2026-10-25 #6 ② — 첫 칸 보낼 시각(진입 감시와 같은 CT · 옛: 지금 바로)
-        const first = await query(
-          `SELECT delay_hours, delay_mode, target_hour_kst, step_type, channel, alimtalk_next_type FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
-          [journeyId],
-        );
-        if (first.rows.length === 0) continue;
-        // ★ 2026-10-25 #6 ① — 상한 · 하루 몫 = 진입 감시와 같은 판정(entryCapExceeded · 하루 몫이 있으면 남은 몫만 · 없으면 cap + 1 까지 뽑아 넘으면 멈춤)
-        //   ★ Codex 1R — 상한 판정용 뽑기는 cap + 1(회차 1,000 명으로 먼저 자르면 상한 1,000 이상에서 넘침을 못 본다) · 1,000 명은 상한 통과 뒤 넣을 때
-        const cap = j.threshold_recipients_per_step != null ? Number(j.threshold_recipients_per_step) : null;
-        const backfill = backfillPerDayOf(j);
-        let pickLimit = cap != null ? cap + 1 : JOURNEY_COUNT_CAP;
-
         // 2) 진입 조건 매트릭스 매칭 → 상한 판정 → 신규 execution INSERT(같은 트랜잭션)
         // ★ 0930 Codex 2R — 진입 워커와 같은 진입 잠금 안에서 넣고 합계까지 한 트랜잭션(두 워커가 같은 고객을 동시에 넣지 않는다).
         const client = await pool.connect();
@@ -137,6 +118,36 @@ export async function runReentryBatch(): Promise<void> {
           const fresh = await lockEntryIfActive(client, journeyId);
           const lineage = fresh.lineageIds;
           if (!fresh.ok || !fresh.autoReentryEnabled) throw new EntryClosedSkip();
+          // ★ 2026-11-11 C126(D2) — 여정 행을 잠금 안에서 다시 읽는다(옵션 저장 · 칸 편집이 쥐는 행 잠금과 같은 줄 · 잠금 순서 = 계보 → 행 = 옵션 저장 주소와 같음).
+          //   아래 판정(재진입 허용 · 자동 켬 · 시작 사건의 최솟값 · 저장 대기일 · 상한 · 하루 몫 · 첫 칸 시각)은 전부 이 행과 이 연결에서 읽은 값으로 한다.
+          const jr = await client.query(
+            `SELECT id, company_id, allow_reentry, auto_reentry_enabled, reentry_cooldown_days, threshold_recipients_per_step, trigger_event, trigger_filters
+               FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid AND status = 'active' FOR UPDATE`,
+            [journeyId, companyId],
+          );
+          const j = jr.rows[0];
+          if (!j || j.auto_reentry_enabled !== true || j.allow_reentry !== true) throw new EntryClosedSkip();
+          // ★ 2026-10-25 #6 ② — 첫 칸 보낼 시각(진입 감시와 같은 CT · 옛: 지금 바로) · ★ C126 = 같은 연결(칸 편집은 여정 행 잠금을 쥐고 쓴다)
+          const first = await client.query(
+            `SELECT delay_hours, delay_mode, target_hour_kst, step_type, channel, alimtalk_next_type FROM journey_steps WHERE journey_id = $1::uuid AND step_order = 1`,
+            [journeyId],
+          );
+          if (first.rows.length === 0) throw new EntryClosedSkip();
+          const cooldownDays = Number(j.reentry_cooldown_days) || 0;
+          // ★ 2026-11-10 C123(뿌리 R87) — 자동 재진입 최솟값(계약 · 사건형도 최소 1일) = 아래 공용 조각(reentryHoldSql) 한 곳이 건다:
+          //   계보의 어느 실행이든(후보 자신 포함) 끝난 지 대기일 안이면 넣지 않는다.
+          //   ★ 2026-11-11 C126(D4) — 그 대기일 = max(자동 최솟값, 저장 대기일)(옛: 최솟값만 → 「이 발송 정지」로 끝낸 지 최솟값만 지나면 저장 대기일 전에 다시 넣었다).
+          //   저장값 바인드($2)는 옛 그대로(완료 시각 비교 · 목표 달성 자격 `$2 > 0`) — 보정값을 그 바인드에 넣으면 저장 0일 여정에서 빼던 구매 고객을 새로 받는다(Codex 설계 1R #2).
+          const holdDays = reentryWaitDays(autoReentryFloorDays(String(j.trigger_event || '')), j.reentry_cooldown_days);
+          // ★ 2026-10-02 수신동의 읽기 = CT(추출과 같은 조각 — 여정 작성자 기준)
+          const consent = await journeyOwnerConsent(companyId, journeyId);
+          // ★ 2026-10-25 #6 ③ — 작성자 범위(담당자 = 자기 매장 고객 · 진입 감시 · 미리보기와 같은 조각 · LIMIT 앞)
+          const scopeSql = await getJourneyOwnerScopeSql(companyId, journeyId);
+          // ★ 2026-10-25 #6 ① — 상한 · 하루 몫 = 진입 감시와 같은 판정(entryCapExceeded · 하루 몫이 있으면 남은 몫만 · 없으면 cap + 1 까지 뽑아 넘으면 멈춤)
+          //   ★ Codex 1R — 상한 판정용 뽑기는 cap + 1(회차 1,000 명으로 먼저 자르면 상한 1,000 이상에서 넘침을 못 본다) · 1,000 명은 상한 통과 뒤 넣을 때
+          const cap = j.threshold_recipients_per_step != null ? Number(j.threshold_recipients_per_step) : null;
+          const backfill = backfillPerDayOf(j);
+          let pickLimit = cap != null ? cap + 1 : JOURNEY_COUNT_CAP;
           const room = await dailyRoomInLock(client, j);
           if (room != null) pickLimit = Math.max(0, Math.min(room, cap ?? room, JOURNEY_COUNT_CAP));
           const cand = await client.query(
@@ -153,12 +164,12 @@ export async function runReentryBatch(): Promise<void> {
                AND je.completed_at <= NOW() - ($2 * INTERVAL '1 day')
                -- ★ Fix #1 (2026-06-05): 추출과 동일한 공통 안전필터(is_active·sms_opt_in·is_opt_out·is_invalid·수신거부 회사+전화).
                AND ${buildJourneySafetyFilter('c', consent?.isTrue)}${scopeSql}
-               -- 진행 중이거나 **가장 최근 실행이 끝난 지 최솟값 안**이면 넣지 않는다(상태 무관 · 오래된 완료 이력이 있어도 방금 ended · paused 로 끝난 고객 제외 · ★ C123 Codex 설계 1R #1)
+               -- 미완료(진행 중 · 멈춤)이거나 **계보의 어느 실행이든 끝난 지 대기일 안**이면 넣지 않는다(상태 무관 · 오래된 완료 이력이 있어도 방금 ended 로 끝난 고객 제외 · ★ C123 Codex 설계 1R #1 · C126 D1 · D4)
                AND NOT EXISTS (
                  SELECT 1 FROM journey_executions je2
                  WHERE je2.journey_id = ANY($4::uuid[])
                    AND je2.customer_id = je.customer_id
-                   AND ${reentryHoldSql('je2', floorDays)}
+                   AND ${reentryHoldSql('je2', holdDays)}
                )
                -- 가장 최근 completed execution 영역만 정합 (중복 신규 entry 차단)
                AND je.completed_at = (
@@ -222,7 +233,7 @@ export async function runReentryBatch(): Promise<void> {
         totalReentered += reenteredCount;
         journeysProcessed++;
       } catch (err: any) {
-        console.warn('[JourneyReentryWorker] journey batch 오류, skip:', j.id, err?.message);
+        console.warn('[JourneyReentryWorker] journey batch 오류, skip:', journeyId, err?.message);
       }
     }
 

@@ -117,7 +117,8 @@ describe('배선(소스 계약)', () => {
   });
   it('날짜 기준 · 재진입 = 회사 섞기', () => {
     expect(read('journey-anchor-scheduler.ts')).toContain('const ordered = interleaveByCompany(jres.rows as AnchorJourneyRow[], (x) => String(x.company_id));\n    for (const j of ordered) {');
-    expect(read('journey-reentry-worker.ts')).toContain('const ordered = interleaveByCompany(journeyRes.rows as any[], (x) => String(x.company_id));\n    for (const j of ordered) {');
+    // ★ 2026-11-11 C126(D2) — 목록 = id · 회사만(여정 값은 잠금 안에서 읽는다) → 반복 변수 이름이 pick
+    expect(read('journey-reentry-worker.ts')).toContain('const ordered = interleaveByCompany(journeyRes.rows as any[], (x) => String(x.company_id));\n    for (const pick of ordered) {');
   });
   it('자동마케팅 = 발송 패스 자기 가드 · 생성 중 운영자 제외(LIMIT 앞) · 제안 생성 = 회사 줄', () => {
     const op = read('continuous-operator.ts');

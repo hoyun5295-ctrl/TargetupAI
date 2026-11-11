@@ -193,6 +193,7 @@ export function flattenLiquidToPlainText(text: string): string {
  *   - 그 밖 Liquid(분기 · 모르는 칸) = flattenLiquidToPlainText(렌더 파서 구조 · else 갈래만)
  *   - 장바구니 문법(cart.)이 든 글 = 고객 칸 이름만 바꾸고 나머지는 그대로(장바구니 여정은 지금도 Liquid 렌더로 나간다 · 보낼 글 판정이 장바구니 여정에서만 허용 · send-placeholder-gate)
  *   부르는 곳 = 새로 만드는 여정 문안 출구만(이미 저장된 문안 · 다듬기 · 스팸 회피 다시 쓰기는 원문 보존이라 부르지 않는다).
+ *   ★ 2026-11-11 C126 — 생산자는 이 함수를 직접 부르지 않고 journey-ai-copy 의 journeyNewCopy(쓰기) · journeyRevisedCopy(고치기)를 부른다.
  */
 export function liquidCopyToPercent(text: string, toPercent: Readonly<Record<string, string>>): string {
   if (!text || !detectLiquidSyntax(text)) return text;
@@ -205,6 +206,14 @@ export function liquidCopyToPercent(text: string, toPercent: Readonly<Record<str
   try { nodes = parse(tokenize(out)); } catch { return flattenLiquidToPlainText(out); }
   if (referencesCart(nodes)) return out;
   return flattenLiquidToPlainText(out);
+}
+
+/**
+ * ★ 2026-11-11 C126(D5) — 렌더 파서의 토큰(글 · 출력 `{{ … }}` · 태그 `{% … %}`)을 그대로 내보낸다(값 = 파서가 앞뒤 공백만 뗀 안쪽 글자).
+ *   여정 AI 글의 고치기 관문(journey-ai-copy)이 원문과 결과의 템플릿 뼈대를 같은 파서로 비교한다. 닫히지 않은 출력 · 태그 = 던진다(렌더와 같음).
+ */
+export function liquidTokens(text: string): Array<{ type: 'text' | 'output' | 'tag'; value: string }> {
+  return tokenize(String(text ?? '')).map((t) => ({ type: t.type, value: t.value }));
 }
 
 /** 렌더 파서 AST 에서 장바구니(cart)를 실제로 참조하는가 — 주석 · 따옴표 안 글은 빼고 식(출력 · 조건 · for 대상 · assign · case)에서 뿌리 이름 cart 를 본다(Codex 5R · 정규식으로 원문을 훑으면 주석 속 cart 를 잡고 assign 별칭을 놓쳤다) */

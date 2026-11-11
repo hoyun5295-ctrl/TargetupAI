@@ -48,8 +48,7 @@ import { normalizeJourneyOptions } from './journey-options-validator';
 import { isUuid } from './normalize';
 import { stepEditPolicy, blockedStepEditGroups, stepEditBlockedMessage, keepsPretestMarkerForStep } from './journey-step-edit-policy';
 import { getCompanyJourneyFacts, getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';   // ★ 2026-11-02 AI 지시문 변수 목록 = 회사 실측(3-13)
-import { liquidCopyToPercent } from './liquid-templating';   // ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드)
-import { CUSTOMER_LIQUID_TO_PERCENT } from './standard-field-map';
+import { journeyNewCopy } from './journey-ai-copy';   // ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드) · 1111 C126 = 변수 꼴 CT
 // ★ 2026-09-29 여정 V2 0차 ⑧⑩ — 칸 종류 · 개수 · 대기 상한은 CT 한 곳(자르지 않고 거부 · 모르는 종류는 거부).
 import { MAX_JOURNEY_STEPS, MAX_STEP_DELAY_HOURS, MAX_WAIT_TIMEOUT_HOURS, isKnownStepType, resolveStepType, assertStepCountWithinLimit, assertStepsWithinLimit, MAX_MESSAGE_STEPS, JourneyInputError, JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
 // ★ 2026-09-29 여정 V2 0차 ② — 대상 조건 검증은 추출기와 같은 허용 목록(단일 출처).
@@ -672,7 +671,7 @@ JSON 형식만 응답:
       // ★ 2026-10-24 세 채널 구조체크 ② — 이 생산자만 거름이 없었다(R13 · 다른 여정 생성 경로와 같은 근거 = 회사가 준 목표문).
       //   혜택 → 자리표시 · 효능 → 문장 빼기(다 빠지면 직접 채울 자리 · 활성화 관문이 막는다)
       // ★ 2026-11-10 출구 가드 = %변수% 한 가지(섞인 {{ }} · {% %} 를 옮기거나 평문화 · 장바구니 변수만 보존)
-      base.messageTemplate = dropInventedEfficacy(replaceInventedBenefits(liquidCopyToPercent(aiStr(s.messageTemplate), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 2000), objective), objective).text;
+      base.messageTemplate = dropInventedEfficacy(replaceInventedBenefits(journeyNewCopy(aiStr(s.messageTemplate)).slice(0, 2000), objective), objective).text;
       base.isAd = resolveJourneyAdFlag(base.channel, s.isAd);   // ★ 2026-11-02 광고 판정 CT(CT-J8 · 알림톡 = 정보성)
       // ★ 2026-10-28 AI 메모리 설계 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문) · K1-1 문자 광고 단계 = 첫 줄에 전송자 명칭
       const seasonless = dropSeasonSentences(base.messageTemplate || '', objective).text;

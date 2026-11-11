@@ -19,3 +19,12 @@ export function usesEntryReplacement(triggerFilters: Record<string, any> | null 
 export const CLOSE_ACTIVE_FOR_REPLACEMENT_SQL =
   `UPDATE journey_executions SET status = 'goal_met', completed_at = NOW()
     WHERE journey_id = $1::uuid AND customer_id = $2::uuid AND status = 'active'`;
+
+/**
+ * ★ 2026-11-11 C126(D1) — 멈춘 옛 주기도 닫는다($1 여정 · $2 고객). 옛: 진행 중만 닫아 멈춘 실행이 남았고, 다시 켜면 되살아나 새 주기와 둘이 됐다.
+ *   상태 = `ended`(목표 달성이 아니다) — 뒤에 붙인 여정은 goal_met · completed 만 「마침」으로 받는다(journey-after-config outcomeStatuses)
+ *   → 멈춰 있던 고객에게 뒤 여정 문자가 새로 나가지 않는다(Codex 설계 3R #1).
+ */
+export const CLOSE_PAUSED_FOR_REPLACEMENT_SQL =
+  `UPDATE journey_executions SET status = 'ended', completed_at = NOW()
+    WHERE journey_id = $1::uuid AND customer_id = $2::uuid AND status = 'paused'`;

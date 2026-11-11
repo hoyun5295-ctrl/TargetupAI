@@ -125,7 +125,7 @@ describe('2. 후보 추출(selectAfterJourneyCandidates)', () => {
     expect(sql).toContain(`ae.completed_at > NOW() - ($4 || ' days')::interval`);
     expect(sql).toContain('ae.completed_at >= $5::timestamptz');
     expect(params[4]).toBe('2026-10-20 09:00:00.123456+09');   // 기준 시각 원문(µs) — 넣기가 같은 값으로 다시 본다
-    expect(sql).toContain("ba.customer_id = c.id AND ba.status = 'active'");   // 진행 중 고객은 상한 판정 전에 뺀다(Codex 적대 A 1R)
+    expect(sql).toContain("ba.customer_id = c.id AND ba.status IN ('active', 'paused')");   // 진행 중 고객은 상한 판정 전에 뺀다(Codex 적대 A 1R)
     expect(sql).toContain("be.entry_event_properties->'__entry'->>'src' = 'after'");
     expect(sql).toContain("be.entry_event_properties->'__entry'->>'key' = ae.id::text");
     expect(params[5]).toEqual([B, C]);   // 표식은 뒤 여정 계보 전체에서 본다

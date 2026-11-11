@@ -422,6 +422,14 @@ export function reentryFloorDays(triggerEvent: string | null | undefined): numbe
 }
 
 /** 자동으로 다시 받기 = 시작 사건 없이 시각만으로 다시 넣는다 → 사건형이어도 최소 1일(0일 = 마친 고객 전부를 매 회차 다시 넣는다). */
+/**
+ * ★ 2026-11-11 C126(D3) — 한 번만 들어오는 시작인가(상시 = 고른 고객에게): 대상 뽑기가 재진입 설정과 무관하게 「실행이 하나라도 있으면 뺀다」.
+ *   감시 묶음 넣기 가드가 같은 집합을 보게 하는 판정 한 곳(옛: 넣기 가드는 재진입 허용이면 진행 중만 빼 대조군 실행이 두 줄 생겼다).
+ */
+export function entersOncePerCustomer(triggerEvent: string | null | undefined): boolean {
+  return CONTRACT_BY_EVENT.get(String(triggerEvent || ''))?.cls === 'standing';
+}
+
 export function autoReentryFloorDays(triggerEvent: string | null | undefined): number {
   return Math.max(1, reentryFloorDays(triggerEvent));
 }

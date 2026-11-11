@@ -35,9 +35,8 @@ import { stripAdParts, ensureSenderName } from './messageUtils';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사 customer DB 실측 프로필 동적 주입.
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
-import { CUSTOMER_LIQUID_TO_PERCENT } from './standard-field-map';
 // ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드 · 장바구니 {{ cart.* }} 만 보존)
-import { liquidCopyToPercent } from './liquid-templating';
+import { journeyNewCopy, journeyRevisedCopy, journeyRevisedKept, hasLiquidTags, LIQUID_TAG_NOTICE } from './journey-ai-copy';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(쓰기 · 고치기)
 // ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
 import { formatStepTiming, describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 이어달리기 — 트리거는 계약이 정한다(AI 출력에 약속을 걸지 않는다). 설계서 §6.
@@ -657,8 +656,8 @@ ${buildWeatherPromptBlock()}
     const channel = ['sms', 'lms', 'mms'].includes(s.channel) ? s.channel : 'lms';
     // ★ D187-fix5: AI 응답에 이모지/비표준 특수문자 포함 가능성 — sanitize 자동 적용
     // ★ 2026-11-10 출구 가드 = %변수% 한 가지(지시를 어겨 섞인 {{ }} · {% %} 를 옮기거나 평문화 · 자르기 전에 · 장바구니 변수만 보존)
-    const rawMessage = liquidCopyToPercent(aiStr(s.messageTemplate), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 2000);
-    const rawSubject = channel === 'sms' ? '' : liquidCopyToPercent(aiStr(s.subject), CUSTOMER_LIQUID_TO_PERCENT).slice(0, JOURNEY_SUBJECT_MAX_CHARS);
+    const rawMessage = journeyNewCopy(aiStr(s.messageTemplate)).slice(0, 2000);
+    const rawSubject = channel === 'sms' ? '' : journeyNewCopy(aiStr(s.subject)).slice(0, JOURNEY_SUBJECT_MAX_CHARS);
     const messageSan = sanitizeForSms(rawMessage);
     const subjectSan = sanitizeForSms(rawSubject);
     if (messageSan.hadChanges) {
@@ -833,6 +832,9 @@ function buildJourneyContextBlock(jc: JourneyStepAiContext | undefined, hasBody:
 }
 
 export async function refineStepMessage(...args: Parameters<typeof refineStepMessageWithAi>): ReturnType<typeof refineStepMessageWithAi> {
+  // ★ 2026-11-11 C126(D5) — 조건 태그({% %})가 든 문안은 AI 가 고치지 않는다(갈래마다 받는 사람이 다른 글 · journey-ai-copy 규칙 ②).
+  //   과금 래퍼에 들어가기 전에 안내한다(AI 호출 0 · 과금 0 · 안에 두면 잔액 부족 오류가 안내를 가린다 · Codex 설계 8R).
+  if (hasLiquidTags(args[0].currentMessage)) throw new JourneyInputError(LIQUID_TAG_NOTICE);
   // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다듬은 안이 하나라도 남을 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
   const { result } = await runChargedAi({
     companyId: args[0].companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
@@ -896,7 +898,7 @@ ${buildJourneyContextBlock(jc, hasBody)}${factsBlock}
 ✗ (광고) / 무료수신거부 080 직접 작성 X
 ${buildWeatherRefineRule()}
 ✓ 최대 ${maxBytes}바이트 안
-✓ ★ D191 강화: Liquid 문법({{ }}, {% if %}, {% endif %}, {% elsif %}, {% else %}, | filter)이 원본에 있으면 정확히 보존. Liquid 분기 안 텍스트만 톤 정련. Liquid 미사용 영역은 기존대로 평문 처리.
+✓ 원본에 {{ … }} 변수가 있으면 글자 그대로 보존하고, 새 템플릿 문법({{ }} · {% %})은 만들지 않는다.
 ✓ ★ D209+ 강화 (옛 ai.ts 정합 통합):
   - 뻔한 표현 금지: "안녕하세요 고객님" / "특별한 혜택" / "준비했어요" / "소중한 고객님" / "다양한 혜택" / "많은 관심 부탁드립니다" / 느낌표 폭탄 / 과장 형용사 ("초특가" / "역대급" / "미친" / "대박")
   - SMS 호환 특수문자 화이트리스트 (EUC-KR 통신사 검증 정합): ★ ☆ ♥ ♡ ◆ ◇ ■ □ ▲ △ ▶ ◀ ● ○ ◎ ♨ ※ ☞ ☎ ① ② ③ ④ ⑤ ↑ ↓ ← → ㈜ ㎝ ㎏ ㎡
@@ -962,8 +964,10 @@ ${single
   //     "30% 행사를 알리고 싶다"는 말이 AI에게 그 숫자를 문안에 렌더링할 면허는 아니다(혜택은 사용자가 편집기에서 쓴다).
   //     생성 모드는 원본이 없으므로 구체 혜택이 전부 placeholder가 된다 = 의도한 동작.
   // 절단은 위(raw)에서 요청한 수만큼 이미 끝났다 — 여기서 다시 3으로 자르면 그 계약이 무의미해진다.
+  // ★ 2026-11-11 C126(D5) — 고치기 원문(본문이 없으면 빈 글 = 새 아는 변수만 %변수% · 그 밖 템플릿 문법이 든 안은 버린다 · 평문으로 접지 않는다)
+  const copyBase = hasBody ? input.currentMessage : '';
   const filtered: StepRefineCandidate[] = raw.map((c: any) => {
-    const rawMsg = aiStr(c.message).slice(0, maxBytes * 2);
+    const rawMsg = (journeyRevisedCopy(aiStr(c.message), copyBase) ?? '').slice(0, maxBytes * 2);   // null = 빈 글 → 아래 「빈 후보」 거름
     // ★ D187-fix5: refine 응답도 sanitize 자동 적용
     const san = sanitizeForSms(rawMsg);
     let pure = replaceInventedBenefits(stripAdParts(san.sanitized), benefitGround);
@@ -1000,7 +1004,9 @@ ${single
     // ★ 2026-10-28 K1-1 — 광고 단계 = 첫 줄에 전송자 명칭(숫자 대조 뒤에 붙인다 · 이름의 숫자가 새 숫자로 잡히지 않게)
     const n = ensureSenderName(o.message, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] });
     return { ...c, message: n.text, bytes: getBytes(n.text), check: o.check };
-  });
+  })
+    // ★ 2026-11-11 C126(D5 · Codex 설계 8R · 9R) — 실제 돌려줄 글(글자 정리 · 혜택 자리 · 링크 · 전송자 명칭까지 끝난 글)이 같은 규칙을 바꿀 것 없이 지나야 한다. 이 뒤에 글을 바꾸는 줄 0.
+    .filter((c) => journeyRevisedKept(c.message, copyBase));
 
   return { candidates };
 }
@@ -1077,8 +1083,8 @@ ${EFFICACY_PROMPT_RULES}
   // ★ 2026-10-24 ② 혜택 → 효능(같은 근거 · 제목 + 본문 = 이어 읽는 단위 · 본문 = 문장 빼기 · 제목 = 비워도 되는 칸)
   const g = dropInventedEfficacyTitledBody(
     // ★ 2026-11-10 출구 가드 = %변수% 한 가지(여정 한 번에 만들기 출구와 같은 함수)
-    replaceInventedBenefits(stripAdParts(sanitizeForSms(liquidCopyToPercent(aiStr(parsed.subject), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
-    replaceInventedBenefits(stripAdParts(sanitizeForSms(liquidCopyToPercent(aiStr(parsed.message), CUSTOMER_LIQUID_TO_PERCENT).slice(0, 4000)).sanitized), benefitBasis),
+    replaceInventedBenefits(stripAdParts(sanitizeForSms(journeyNewCopy(aiStr(parsed.subject)).slice(0, 80)).sanitized), benefitBasis).slice(0, 40),
+    replaceInventedBenefits(stripAdParts(sanitizeForSms(journeyNewCopy(aiStr(parsed.message)).slice(0, 4000)).sanitized), benefitBasis),
     benefitBasis,
   );
   // ★ 2026-10-28 K1-7 계절 낱말 = 문장 빼기(근거 = 목표문 · 제목은 비워도 되는 칸) · K1-1 기준일 단계 = LMS 광고 → 첫 줄 또는 제목에 전송자 명칭
@@ -1179,6 +1185,8 @@ export async function regenerateStepAvoidingSpam(
   /** ★ 2026-11-01 B1-4 — 보내기 전 재작성 후보: 차감 키 고정(판마다) · 정산 직전 「아직 내 후보인가」 확인(아니면 0원) */
   charge?: { idempotencyKey: string; stillMine: () => Promise<boolean> },
 ): Promise<string | null> {
+  // ★ 2026-11-11 C126(D5) — 조건 태그({% %})가 든 문안은 AI 가 다시 쓰지 않는다(자동 교체 없음 = 담당자 안내로 간다 · AI 호출 0 · 과금 0)
+  if (hasLiquidTags(input.currentMessage)) return null;
   // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다시 쓴 문안이 나올 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
   const { result } = await runChargedAi({
     companyId: input.companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
@@ -1234,8 +1242,14 @@ ${EFFICACY_REWRITE_RULE}
     source: 'journey-ai-refine',
   });
 
-  const cleaned = String(text || '').trim();
-  if (!cleaned) return null;
+  const cleanedRaw = String(text || '').trim();
+  if (!cleanedRaw) return null;
+  // ★ 2026-11-11 C126(D5) — 꺼낸 직후: 원문에 없던 아는 고객 변수 = %변수% · 그 밖 새 템플릿 문법 = 재작성을 버린다(사람 검토 없이 실발송 판을 바꾸는 길)
+  const cleaned = journeyRevisedCopy(cleanedRaw, input.currentMessage);
+  if (cleaned == null) {
+    console.log(`[journey-ai-refine] 원문에 없던 변수 표기가 생겨 재작성을 버림 company=${input.companyId}`);
+    return null;
+  }
   const san = sanitizeForSms(cleaned.slice(0, maxBytes * 2));
   const out = san.sanitized || null;
   // ★ 2026-09-26 한줄로 V2 R1-44 — 이 재작성은 사람 검토 없이 실발송 스냅샷을 바꾼다. 원본에 없던 혜택을 AI가 만들었으면
@@ -1275,5 +1289,7 @@ ${EFFICACY_REWRITE_RULE}
   // ★ 2026-11-01 배포 2 C2 — 출구 = 정산 안 · 검사 + 표식 · 글은 그대로(사실 판정 = 위 거름) · 전송자 명칭 앞
   const fin = await finishCopy({ companyId: input.companyId, producer: 'journey-pretest-regen', mode: 'rewrite', text: out, before: input.currentMessage, channel: input.channel, isAd: input.isAd });
   // ★ 2026-10-28 K1-1 광고 단계 = 첫 줄에 전송자 명칭(위 대조가 끝난 뒤)
-  return ensureSenderName(fin.text, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] }).text;
+  const named = ensureSenderName(fin.text, { isAd: input.isAd, channel: input.channel, names: [ctx.brandName, ctx.companyName] }).text;
+  // ★ 2026-11-11 C126(D5 · Codex 설계 8R · 9R) — 실제 돌려줄 글의 최종 대조(글자 정리 · 전송자 명칭 뒤) · 이 뒤에 글을 바꾸는 줄 0
+  return journeyRevisedKept(named, input.currentMessage) ? named : null;
 }

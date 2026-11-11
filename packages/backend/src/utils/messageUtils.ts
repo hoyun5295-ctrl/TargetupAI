@@ -195,7 +195,7 @@ export interface AddressBookFields {
  * @param customer          고객 데이터 (DB row). phone, name, grade, custom_fields 등. null이면 주소록 필드만 치환.
  * @param fieldMappings     { 한글라벨: VarCatalogEntry } — extractVarCatalog()에서 추출
  * @param addressBookFields (선택) 직접발송 주소록 기타 필드. 전달 시 %기타1/2/3%, %회신번호% 치환.
- *                          customer가 null이면 %이름%도 여기서 치환.
+ *                          올린 이름(name)이 있으면 %이름% · %고객명% · %성함% 도 여기서 그 이름으로 치환(★ 1111 C128 · 빈 값이면 고객 DB 이름).
  * @returns 치환 완료된 메시지
  */
 export function replaceVariables(
@@ -236,14 +236,14 @@ export function replaceVariables(
       .replace(/%기타3%/g, fmtExtra(addressBookFields.extra3))
       .replace(/%회신번호%/g, addressBookFields.callback || '');
 
-    // ★ D111 P2: 이름 폴백
-    //   - customer가 없으면 주소록 name 사용 (기존 로직)
-    //   - customer는 있지만 customer.name이 비어있으면 주소록 name으로 폴백 (NEW)
-    //   - customer.name이 있어도 아래 1단계 fieldMappings 치환이 동일한 결과를 내므로 덮어써도 무관
+    // ★ 2026-11-11 C128(접수 1111 이새에프엔씨) — **올린 이름이 있으면 그 이름이 나간다**(직접발송 화면 미리보기 = 올린 줄 그대로 · 본 것 = 나가는 것).
+    //   옛(D111 P2): 고객 DB 에 그 번호가 없거나 이름이 빈 때만 올린 이름을 썼다 → 고객 DB(싱크 연동)에 같은 번호가 다른 이름으로 있으면
+    //   엑셀 「테스트」가 화면에는 보이고 실제 문자는 DB 이름으로 나갔다. 「DB 이름과 올린 이름은 같다」는 가정이 틀린 경우다.
+    //   올린 이름이 빈 값이면 옛 그대로: 고객 DB 이름(아래 2단계 fieldMappings 치환) · 고객도 없으면 빈 글.
+    //   이름 변수 글자 = FIELD_MAP name 의 표시 이름 + 별칭(고객명 · 이름 · 성함 · 계약 시험 direct-send-uploaded-name-1111).
     // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워 활용 — 0/'0' 보존
-    const customerNameEmpty = !customer || !customer.name || String(customer.name).trim() === '';
     const fbName = cellToString(addressBookFields.name).trim();
-    if (customerNameEmpty && fbName) {
+    if (fbName) {
       // 이름+고객명+성함 등 FIELD_MAP.aliases 키 전부 커버 (가장 흔한 한글 변수명)
       result = result
         .replace(/%이름%/g, fbName)

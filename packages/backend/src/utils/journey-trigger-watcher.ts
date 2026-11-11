@@ -41,12 +41,12 @@ import { crossDoorEntryOwnedSql } from './two-door-purchase';   // ★ 2026-11-0
 import { resolveNewCustomerJudgement } from './journey-identity-signals';
 import { getCompanyIdentityCapability } from './company-data-profile';
 import { firstRunAtFor, isNightExemptStep } from './send-time-util';
-import { sendTimingForTrigger, reentryFloorDays } from './journey-trigger-capability';
-import { reentryHoldSql } from './journey-safety-filter';   // ★ 2026-11-10 C123 재진입 조각(뽑기 안티조인과 같은 판정)
+import { sendTimingForTrigger, reentryFloorDays, entersOncePerCustomer } from './journey-trigger-capability';
+import { reentryHoldSql, reentryWaitDays, openExecutionSql, recentlyEndedSql } from './journey-safety-filter';   // ★ 2026-11-10 C123 · 1111 C126 재진입 조각(뽑기 안티조인과 같은 판정 · 미완료 · 끝난 뒤 기준)
 import { getJourneyHoldoutPct, syncGradeStateWithClient, observeGradeStateForJourney } from './journey-entry-ledger';
 // ★ 2026-09-30 여정 V2 3차 — 상품 재구매(상품 자격 · 문 확인) · 진입 교체(새 주기면 옛 실행을 닫고 새로 넣는다).
 import { PRODUCT_TRIGGER_EVENT, normalizeProductFilters, qualifyProductBatch } from './journey-product';
-import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL } from './journey-entry-replace';
+import { usesEntryReplacement, CLOSE_ACTIVE_FOR_REPLACEMENT_SQL, CLOSE_PAUSED_FOR_REPLACEMENT_SQL } from './journey-entry-replace';
 // ★ 2026-09-30 여정 V2 5차 — 새 판 · 계보: 진입이 닫힌 옛 판은 받지 않고, 재진입 판정은 계보 단위(DDL 전 = 옛 동작).
 import { entryOpenClause, lineageJourneyIds, endDrainedVersions, lockLineageEntry } from './journey-lineage';
 import { JourneyInputError, backfillPerDayOf, entryCapExceeded, ENTERED_TODAY_KST_SQL, dailyRoomInLock } from './journey-step-limits';
@@ -631,7 +631,11 @@ async function finishCursorBatch(
       //   (옛 판에서 돌던 주기도 교체 · 닫기와 넣기가 늘 함께 · 닫기만 하고 못 넣는 경우 0). 교체가 아니면 옛 판정 그대로.
       if (replaceEntry) {
         if (!(await cooldownElapsed(j, customerId, client))) { skipped++; continue; }
-        for (const lid of j.lineageIds || [j.id]) await client.query(CLOSE_ACTIVE_FOR_REPLACEMENT_SQL, [lid, customerId]);
+        // ★ 2026-11-11 C126(D1) — 닫는 대상 = 미완료 전부: 진행 중 = 목표 달성(옛 그대로) · 멈춘 실행 = ended(되살아나 새 주기와 둘이 되지 않게 · 뒤 여정으로 넘어가지 않게)
+        for (const lid of j.lineageIds || [j.id]) {
+          await client.query(CLOSE_ACTIVE_FOR_REPLACEMENT_SQL, [lid, customerId]);
+          await client.query(CLOSE_PAUSED_FOR_REPLACEMENT_SQL, [lid, customerId]);
+        }
       } else {
         const allowed = await checkCooldown(j, customerId, client);
         if (!allowed) { skipped++; continue; }
@@ -850,7 +854,10 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   //   중복·cooldown은 추출 단계 안티조인(원장·재진입·execution)이 이미 제외. 아래 NOT EXISTS는 추가 안전망 —
   //   재진입 가능 = active만 / 재진입 불가 = 어떤 execution이라도 있으면 제외(checkCooldown과 동일 기준).
   // ★ 2026-11-10 C123(뿌리 R87) — 뽑기 안티조인과 같은 조각(진행 중 또는 끝난 지 계약 최솟값 안 = 다시 넣지 않는다 · 저장된 대기일과 무관한 실행 시점 관문)
-  const reentryGuard = j.allow_reentry ? `AND ${reentryHoldSql('je', reentryFloorDays(j.trigger_event))}` : ``;
+  // ★ 2026-11-11 C126 — (D4) 대기일 = max(계약 최솟값, 저장 대기일) · 끝난 뒤 기준 = 뽑기와 같은 값 · (D3) 한 번만 들어오는 시작(고른 고객에게)은
+  //   재진입 허용이어도 조각 없이 「실행이 하나라도 있으면 넣지 않는다」(뽑기와 같은 집합 · 옛: 진행 중만 빼 대조군 실행이 두 줄 생겼다)
+  const reentryGuard = j.allow_reentry && !entersOncePerCustomer(j.trigger_event)
+    ? `AND ${reentryHoldSql('je', reentryWaitDays(reentryFloorDays(j.trigger_event), j.reentry_cooldown_days))}` : ``;
   // ★ 2026-06-22: 진입 properties(장바구니 cart_add 등)를 id 순서에 정렬해 entry_event_properties로 동봉.
   //   props 미전달(타 트리거) 시 전부 null → entry_event_properties NULL(기존 동작 불변).
   let entryProps = buildEntryPropsArray(customerIds, propsByCustomer);
@@ -952,7 +959,7 @@ async function enqueueCandidates(j: ActiveJourney, customerIds: string[], propsB
   return { matched, enqueued, skipped: matched - enqueued };
 }
 
-async function checkCooldown(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {
+export async function checkCooldown(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {
   const run = runner ? (t: string, p: any[]) => runner.query(t, p) : (t: string, p: any[]) => query(t, p);
   // ★ 0930 V2 5차 — 같은 계보(새 판 · 옛 판)는 한 여정으로 본다. 계보가 없으면 옛 문장 그대로(자기 여정만).
   const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;
@@ -967,8 +974,9 @@ async function checkCooldown(j: ActiveJourney, customerId: string, runner?: { qu
   // 재진입 가능 — 계보의 다른 판에서 아직 진행 중이면 그 판에서 마무리한다(이중 진입 0).
   if (lineage) {
     const others = lineage.filter((x) => x !== j.id);
+    // ★ 2026-11-11 C126(D1) — 다른 판에 멈춘 실행이 있어도 그 판에서 마무리한다(미완료 = 진행 중 + 멈춤 · 조각 한 곳)
     const busy = await run(
-      `SELECT 1 FROM journey_executions WHERE journey_id = ANY($1::uuid[]) AND customer_id = $2::uuid AND status = 'active' LIMIT 1`,
+      `SELECT 1 FROM journey_executions e WHERE e.journey_id = ANY($1::uuid[]) AND e.customer_id = $2::uuid AND ${openExecutionSql('e')} LIMIT 1`,
       [others, customerId],
     );
     if (busy.rows.length > 0) return false;
@@ -976,29 +984,23 @@ async function checkCooldown(j: ActiveJourney, customerId: string, runner?: { qu
   return cooldownElapsed(j, customerId, runner);
 }
 
-/** 재진입 쿨다운(시간)만 본다 — 계보의 마지막 진입 뒤 쿨다운 일수가 지났는가. 쿨다운 0 = 늘 참. (★ 0930 Codex 1R 분리 · 문장 동일) */
-async function cooldownElapsed(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {
+/**
+ * 재진입 쿨다운(시간)만 본다 — 쿨다운 0 = 늘 참. (★ 0930 Codex 1R 분리)
+ * ★ 2026-11-11 C126(D4 · R90) — 계보의 **어느 실행이든** 끝난 지(끝난 시각이 없으면 들어온 지) 저장 대기일 안이면 아직이다.
+ *   옛: 가장 늦게 들어온 실행 하나의 **들어온 시각**만 봤다 → 화면 「마친 뒤 N일」과 달랐고, 대조군 실행이 더 늦게 들어왔으면 어제 끝난 실행을 놓쳤다.
+ *   시간 판정만(미완료 판정과 따로) — 진행 중 실행은 들어온 시각으로 읽혀 진입 교체의 「쿨다운 확인 → 닫기 → 새 실행」 순서가 옛과 같다.
+ */
+export async function cooldownElapsed(j: ActiveJourney, customerId: string, runner?: { query: (text: string, params?: any[]) => Promise<any> }): Promise<boolean> {
   const run = runner ? (t: string, p: any[]) => runner.query(t, p) : (t: string, p: any[]) => query(t, p);
   const lineage = (j.lineageIds || [j.id]).length > 1 ? j.lineageIds! : null;
-  const cooldownDays = Number(j.reentry_cooldown_days || 0);
+  const cooldownDays = reentryWaitDays(0, j.reentry_cooldown_days);
   if (cooldownDays <= 0) {
     return true;
   }
-
-  const last = lineage
-    ? await run(
-      `SELECT entered_at FROM journey_executions
-       WHERE journey_id = ANY($1::uuid[]) AND customer_id = $2::uuid
-       ORDER BY entered_at DESC LIMIT 1`,
-      [lineage, customerId])
-    : await run(
-      `SELECT entered_at FROM journey_executions
-       WHERE journey_id = $1::uuid AND customer_id = $2::uuid
-       ORDER BY entered_at DESC LIMIT 1`,
-      [j.id, customerId]);
-  if (last.rows.length === 0) return true;
-
-  const lastEntered = new Date(last.rows[0].entered_at).getTime();
-  const cooldownMs = cooldownDays * 24 * 60 * 60 * 1000;
-  return Date.now() - lastEntered >= cooldownMs;
+  const recent = await run(
+    `SELECT 1 FROM journey_executions e
+      WHERE ${lineage ? 'e.journey_id = ANY($1::uuid[])' : 'e.journey_id = $1::uuid'} AND e.customer_id = $2::uuid
+        AND ${recentlyEndedSql('e', cooldownDays)} LIMIT 1`,
+    [lineage || j.id, customerId]);
+  return recent.rows.length === 0;
 }

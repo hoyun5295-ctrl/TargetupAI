@@ -237,7 +237,7 @@ describe('Codex 2라운드', () => {
     expect(enq.indexOf('const fresh = await lockLineageEntry')).toBeLessThan(enq.indexOf('const journeyMatch'));
     const R = SRC('journey-reentry-worker.ts');
     // ★ 2026-10-25 Codex 1R — 넣기 관문 = 같은 잠금 안에서 켜짐 · 자동 재진입 켬 · 하루 몫 다시 셈
-    expect(R).toMatch(/await client\.query\('BEGIN'\);[\s\S]{0,600}const fresh = await lockEntryIfActive\(client, journeyId\);\r?\n\s+const lineage = fresh\.lineageIds;\r?\n\s+if \(!fresh\.ok \|\| !fresh\.autoReentryEnabled\) throw new EntryClosedSkip\(\);\r?\n\s+const room = await dailyRoomInLock\(client, j\);[\s\S]{0,200}\r?\n\s+const cand = await client\.query\(/);
+    expect(R).toMatch(/await client\.query\('BEGIN'\);[\s\S]{0,600}const fresh = await lockEntryIfActive\(client, journeyId\);\r?\n\s+const lineage = fresh\.lineageIds;\r?\n\s+if \(!fresh\.ok \|\| !fresh\.autoReentryEnabled\) throw new EntryClosedSkip\(\);[\s\S]{0,700}const jr = await client\.query\([\s\S]{0,4500}const room = await dailyRoomInLock\(client, j\);[\s\S]{0,200}\r?\n\s+const cand = await client\.query\(/);   // ★ 1111 C126 — 잠금 → 여정 행(잠금 안) → 하루 몫 → 후보
     // ★ 2026-10-25 #6 — 넣기 · 합계가 같은 트랜잭션(상한 멈춤 갈래의 COMMIT 과 갈라 본다)
     const ins = between(R, 'const r = ids.length === 0', "await client.query('COMMIT');");
     expect(ins).toContain('INSERT INTO journey_executions');

@@ -50,12 +50,12 @@ describe('DDL 전 = 옛 동작', () => {
     expect(buildReentryAntiJoin('c', p1, 'J', false, 0, 0)).toBe(buildReentryAntiJoin('c', p2, 'J', false, 0, 0, ['J']));
     const p0: any[] = [];
     const s0 = buildReentryAntiJoin('c', p0, 'J', true, 0, 0, ['J']);
-    expect(s0).toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status = 'active')");
+    expect(s0).toBe("AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE je.journey_id = $1::uuid AND je.customer_id = c.id AND je.status IN ('active', 'paused'))");   // ★ 1111 C126 미완료 조각
     expect(p0).toEqual(['J']);
     const p3: any[] = [];
     const s3 = buildReentryAntiJoin('c', p3, 'J', true, 0, 0, ['J', 'OLD']);
     expect(s3).toContain('ANY(');
-    expect(s3).toContain("je.status = 'active'");
+    expect(s3).toContain("je.status IN ('active', 'paused')");
     expect(p3).toEqual([['J', 'OLD']]);
     const p4: any[] = [];
     expect(buildReentryAntiJoin('c', p4, 'J', false, 0, 0, ['J', 'OLD'])).toContain('ANY(');
@@ -74,8 +74,8 @@ describe('워커 배선(원문)', () => {
   it('재진입 판정 · 상시 중복 제거 · 일괄 진입 가드가 계보를 본다', () => {
     const w = SRC('journey-trigger-watcher.ts');
     const cd = w.slice(w.indexOf('async function checkCooldown'));
-    expect(cd).toContain('journey_id = ANY($1::uuid[])');
-    expect(cd).toContain("status = 'active' LIMIT 1");
+    expect(cd).toContain('e.journey_id = ANY($1::uuid[])');
+    expect(cd).toContain("${openExecutionSql('e')} LIMIT 1");   // ★ 1111 C126 다른 판의 미완료(진행 중 · 멈춤)
     expect(w).toContain('je.journey_id = ANY($6::uuid[])');
     const ex = SRC('journey-target-extractor.ts');
     expect((ex.match(/reentry\.lineageIds\)/g) || []).length).toBe(8);   // ★1020 V.3 §18 앞 여정을 마치면 +1

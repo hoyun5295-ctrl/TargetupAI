@@ -53,23 +53,53 @@ export function isCustomerSendable(c: {
  *   SQL 자체 dedup이 없던 trigger의 LIMIT 창이 회차마다 다음 분으로 밀리게 해 501번째+ 영구 누락을 막는다.
  *   판정 기준 = checkCooldown(trigger-watcher)과 동일:
  *     - 재진입 불가 → execution이 하나라도 있으면 제외
- *     - 재진입 가능 + cooldown>0 → active이거나 마지막 진입이 cooldown 안이면 제외
- *     - 재진입 가능 + cooldown<=0 → 지금 진행 중(active)만 제외(★ 2026-11-05 C105 H3 · 진입 넣기 가드 `reentryGuard` 와 같은 집합 · 계보면 계보 전체)
+ *     - 재진입 가능 → 미완료 실행(진행 중 · 멈춤)이 있거나 끝난 지 max(계약 최솟값, 저장 대기일)일 안이면 제외
+ *       (★ 2026-11-11 C126 한 갈래 · 대기 0 = 미완료만 · 진입 넣기 가드 `reentryGuard` 와 같은 집합 · 계보면 계보 전체 · ★ 1105 C105 H3)
  *   params에 push(applyCustomerConditions와 동일 패턴) — 호출부는 cond 앞에 둔다. 반환은 'AND ...' 또는 ''.
  *   검증 컬럼: journey_executions.journey_id·customer_id·status·entered_at(executor·watcher 사용 중).
  */
 /**
  * ★ 2026-11-10 C123(뿌리 R87) — 재진입 허용 여정에서 「이 실행이 있으면 다시 넣지 않는다」 조각(실행을 넣는 자리의 실행 시점 관문 · 저장값과 무관).
- *   최솟값 0(사건 키로 한 번만 들어오는 시작) = 진행 중만(옛 글자 그대로) · 1 이상 = 진행 중 또는 **끝난 지 계약 최솟값 안**
- *   (끝난 시각이 없는 실행 = 들어온 시각 · 상태 무관 = 방금 「이 발송 정지」로 끝낸 실행도 건다).
+ *   대기 0 = 미완료 실행(진행 중 · 멈춤 = openExecutionSql)만 · 1 이상 = 미완료 또는 **끝난 지 대기일 안**
+ *   (끝난 시각이 없는 종결 실행 · 대조군 = 들어온 시각 · 방금 「이 발송 정지」로 끝낸 실행도 건다).
  *   쓰는 곳 = 뽑기 안티조인(아래) · 진입 감시 묶음 넣기 가드 · 자동 재진입 워커 — 뽑기 수 = 넣기 수(따로 쓴 같은 판정 0).
- *   floorDays = 계약 상수(journey-trigger-capability reentryFloorDays · autoReentryFloorDays)만 넘긴다(사용자 입력 아님 · 정수로 접어 글자로 싣는다).
+ *   waitDays = reentryWaitDays(계약 최솟값, 저장 대기일)(★ 2026-11-11 C126 D4 · 유한한 0 이상 정수로 접어 글자로 싣는다 · 다른 글자는 SQL 에 들어가지 않는다).
  */
-export function reentryHoldSql(execAlias: string, floorDays: number): string {
-  const f = Math.max(0, Math.floor(Number(floorDays) || 0));
-  return f > 0
-    ? `(${execAlias}.status = 'active' OR COALESCE(${execAlias}.completed_at, ${execAlias}.entered_at) > NOW() - INTERVAL '${f} days')`
-    : `${execAlias}.status = 'active'`;
+export function reentryHoldSql(execAlias: string, waitDays: number): string {
+  const n = reentryWaitDays(0, waitDays);
+  return n > 0 ? `(${openExecutionSql(execAlias)} OR ${recentlyEndedSql(execAlias, n)})` : openExecutionSql(execAlias);
+}
+
+/**
+ * ★ 2026-11-11 C126(D1 · 뿌리 R87 넓힘) — 아직 끝나지 않은 실행 = 진행 중 + **멈춤**(자동 멈춤된 실행은 끝난 시각 없이 남고 다시 켜면 되살아난다).
+ *   옛: 진입을 막는 판정이 `status = 'active'` 만 봐서 멈춘 실행을 들어온 시각으로 판정 → 같은 고객이 새로 들어오고, 되살리면 실행 둘.
+ *   진입을 막는 판정에 쓰는 미완료 상태 목록은 이 함수 한 곳(뽑기 안티조인 · 감시 넣기 가드 · 자동 재진입 워커 · 앞 여정 뒤 뽑기 · 사건 커서의 다른 판 검사).
+ */
+export function openExecutionSql(execAlias: string): string {
+  return `${execAlias}.status IN ('active', 'paused')`;
+}
+
+/** 끝난 지(끝난 시각이 없으면 들어온 지) N일 안 — 시간 판정만(미완료 판정과 따로 쓴다 = 사건 커서 쿨다운). N = reentryWaitDays 로 접은 값. */
+export function recentlyEndedSql(execAlias: string, days: number): string {
+  return `COALESCE(${execAlias}.completed_at, ${execAlias}.entered_at) > NOW() - INTERVAL '${reentryWaitDays(0, days)} days'`;
+}
+
+/** 대기일 상한(100년 = 사실상 영구) — 숫자가 아니거나 이보다 크면 이 값(막는 쪽) */
+export const REENTRY_WAIT_MAX_DAYS = 36500;
+
+/**
+ * ★ 2026-11-11 C126(D4 · 뿌리 R90) — 다시 넣기까지의 대기일 한 함수 = max(계약 최솟값, 저장 대기일) · 유한한 0 이상 정수.
+ *   **저장값을 줄이지 않는다**(만들기 주소 · AI 초안은 365일을 넘는 값을 저장할 수 있다 · 줄이면 막히던 고객이 통과한다 · Codex 설계 2R #5).
+ *   조각이 SQL 글자로 싣는 값은 이 함수의 결과(숫자 글자)뿐이다.
+ */
+export function reentryWaitDays(floorDays: unknown, storedDays: unknown): number {
+  const fold = (v: unknown): number => {
+    if (v == null || v === '') return 0;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return REENTRY_WAIT_MAX_DAYS;
+    return Math.min(REENTRY_WAIT_MAX_DAYS, Math.max(0, Math.floor(n)));
+  };
+  return Math.max(fold(floorDays), fold(storedDays));
 }
 
 export function buildReentryAntiJoin(
@@ -90,20 +120,10 @@ export function buildReentryAntiJoin(
     const match = lineage ? `je.journey_id = ANY($${params.length}::uuid[])` : `je.journey_id = $${params.length}::uuid`;
     return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id)`;
   }
-  const cd = Math.floor(Number(cooldownDays) || 0);
-  if (cd <= 0) {
-    // ★ 2026-11-05 C105 H3 — 진행 중이면 그 실행에서 마무리한다(지금 여정 · 계보 다른 판 모두 · 이중 진입 0).
-    //   = 진입 넣기 가드(journey-trigger-watcher `reentryGuard` = 허용이면 계보 · 지금 여정의 active 제외)와 같은 집합.
-    //   옛: 계보 없으면 조건 0 · 있으면 다른 판만 → 뽑기 · 세기가 지금 여정 진행 중 고객까지 세어 넣기 수와 달랐고
-    //   「한 번에 최대」를 넘었다며 여정이 멈출 수 있었다(Codex C104 구현 1R [범위 밖]).
-    params.push(lineage || journeyId);
-    const match = lineage ? `je.journey_id = ANY($${params.length}::uuid[])` : `je.journey_id = $${params.length}::uuid`;
-    return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND ${reentryHoldSql('je', floorDays)})`;
-  }
+  // ★ 2026-11-11 C126(D4 · R90) — 재진입 허용 = 한 규칙: 미완료 실행이 있거나 끝난 지 max(계약 최솟값, 저장 대기일)일 안이면 다시 넣지 않는다.
+  //   옛: 저장 대기일만 **들어온 시각** 기준(`je.entered_at > NOW() - 대기일`)이라 화면 「마친 뒤 N일」과 달랐다(14일짜리 여정 · 30일 = 끝난 지 16일 만에 재진입).
+  //   = 진입 넣기 가드(journey-trigger-watcher `reentryGuard`)와 같은 값 · 같은 조각(뽑기 수 = 넣기 수 · C105 H3).
   params.push(lineage || journeyId);
-  const jIdx = params.length;
-  params.push(String(cd));
-  const cdIdx = params.length;
-  const match = lineage ? `je.journey_id = ANY($${jIdx}::uuid[])` : `je.journey_id = $${jIdx}::uuid`;
-  return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND (${reentryHoldSql('je', floorDays)} OR je.entered_at > NOW() - ($${cdIdx} || ' days')::interval))`;
+  const match = lineage ? `je.journey_id = ANY($${params.length}::uuid[])` : `je.journey_id = $${params.length}::uuid`;
+  return `AND NOT EXISTS (SELECT 1 FROM journey_executions je WHERE ${match} AND je.customer_id = ${a}.id AND ${reentryHoldSql('je', reentryWaitDays(floorDays, cooldownDays))})`;
 }
