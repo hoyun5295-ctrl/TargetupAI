@@ -57,6 +57,7 @@ import { createStageGuard } from './stage-guard';
 // ★2026-09-25 맞춤법 검사(테스트 문자 뒤·승인 안내 앞 · 흐름을 막지 않는다 · docs/2026-09-25-agency-spell-check-design.md §3-4)
 import { readAgencySpellCount, runAgencySpellAfterTest } from './agency-send-spell';
 import { agencyCharPassedLines } from './agency-send-chars';   // ★ 2026-11-06 C109 승인 요청 문자 정리 줄
+import { agencyOptOutSmsLine } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 한 줄
 import { withMmsImageNames } from './mms-image-util';
 
 const LOG = '[agency-send][worker]';
@@ -871,12 +872,14 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         ? formatWhen(new Date(row.requested_at_original))
         : undefined;
       const charLines = await readAgencyCharLines(row.id);
+      // ★ 2026-11-13 C130 — 판정 글 = 이 자리 테스트 문자를 만든 finalContent(설계서 §4① A7)
+      const optOutLine = agencyOptOutSmsLine({ content: finalContent, isAd: row.is_ad });
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine }),
           row.company_id, row.id, linkRow, row.created_by ?? null),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
@@ -1029,12 +1032,14 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
       // ★2026-08-26(4) 단축 주소 + 요청 건수 동반
       const reappRow = (await freshLinkFields(target.id)) || target;
       const reappCount = Number(target.recipient_count || 0);
+      // ★ 2026-11-13 C130 — 판정 글 = 1020 테스트 문자를 만든 finalContent(설계서 §4① A8 · Codex 설계 1R #4)
+      const reappOptOut = agencyOptOutSmsLine({ content: finalContent, isAd: target.is_ad });
       await notifyManager({
         companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(reappRow),
         callback: target.callback_number, title: '[대행발송] 재승인 요청',
-        text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)), count: reappCount }),
+        text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)), count: reappCount, optOutLine: reappOptOut }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(reappRow), (approveUrl) =>
-          buildReapprovalNotify({ label, whenText: formatWhen(new Date(reappRow.requested_at)), count: reappCount, approveUrl }),
+          buildReapprovalNotify({ label, whenText: formatWhen(new Date(reappRow.requested_at)), count: reappCount, approveUrl, optOutLine: reappOptOut }),
           target.company_id, target.id, reappRow, target.created_by ?? null),
       });
       return;
@@ -1363,12 +1368,14 @@ async function dispatchAttempt(
       await logEvent(row.id, 'notify_failed', { error: String(err?.message || ''), kind: 'manager-test' });
     }
     const unappCount = Number(row.recipient_count || 0);
+    // ★ 2026-11-13 C130 — 판정 글 = 이 갈래 테스트 문자를 만든 row.current_content(buildSample(row) · 설계서 §4① A8)
+    const unappOptOut = agencyOptOutSmsLine({ content: row.current_content, isAd: row.is_ad });
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(unappRow),
       callback: row.callback_number, title: '[대행발송] 재승인 요청',
-      text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)), count: unappCount }),
+      text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)), count: unappCount, optOutLine: unappOptOut }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(unappRow), (approveUrl) =>
-        buildReapprovalNotify({ label, whenText: formatWhen(new Date(unappRow.requested_at)), count: unappCount, approveUrl }),
+        buildReapprovalNotify({ label, whenText: formatWhen(new Date(unappRow.requested_at)), count: unappCount, approveUrl, optOutLine: unappOptOut }),
         row.company_id, row.id, unappRow, row.created_by ?? null),
     });
     return;
@@ -2308,12 +2315,14 @@ export async function sendAgencyApprovalRequest(requestId: string): Promise<void
     const spellCount = await readAgencySpellCount(row.id);
     const count = Number(row.recipient_count || 0);
     const charLines = await readAgencyCharLines(row.id);
+    // ★ 2026-11-13 C130 — 판정 글 = 지금 승인 대상 글(행의 current_content · 이 갈래는 테스트 문자를 다시 보내지 않는다 · 설계서 §4① A7)
+    const optOutLine = agencyOptOutSmsLine({ content: row.current_content, isAd: row.is_ad });
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
       callback: row.callback_number, title: '[대행발송] 승인 요청',
-      text: buildPassedNotify({ label, whenText, count, spellCount, charLines }),
+      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines }),
+        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine }),
         row.company_id, row.id, linkRow, row.created_by ?? null),
     });
   } catch (err: any) {

@@ -74,6 +74,7 @@
 | C127 | d8b5367d |
 | C128 | 1a3fbdbf |
 | C129 | ddbea40c |
+| C130 | 미커밋 |
 
 ## §1 대기
 
@@ -1842,6 +1843,40 @@ ALTER TABLE journeys
 - 기대: 고객 DB 에 다른 이름으로 들어 있는 번호를 엑셀에 다른 이름으로 올려 %이름% 문안으로 직접발송(자기 번호 한두 건)
 - 확인: 받은 문자의 이름 = 엑셀의 이름(화면 미리보기와 같다) · 엑셀 이름 칸을 비운 줄 = 고객 DB 이름
 - 결과: 1111 저녁 Harold 전달 = 「직접발송 적용 잘 되었댄다」(접수자 확인) · 닫힘
+
+### C130-DDL-1 · 대행 메일 접수 원장에 반려 회신 제목 · 본문 칸(설계서 docs/2026-11-13-c130-agency-optout-notice-reply-body-design.md §3 · §4②) · ★ 배포 앞
+- 카드: C130
+- 단계: DDL
+- 선행: 없음(배포 앞 · .62 → .57 전환을 마친 뒤)
+- 의미 바꿈: 아니오(칸 추가 · NULL 허용 · 옛 코드는 읽지 않는다 · 새 코드는 칸이 없으면 종전 문장 · 관제는 「마이그레이션 필요」 안내)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, character_maximum_length, is_nullable FROM information_schema.columns WHERE table_name = 'agency_send_email_intake' AND column_name IN ('reply_subject', 'reply_text') ORDER BY column_name;
+- 확인: 두 줄 · reply_subject · character varying · 200 · YES / reply_text · text · (빈칸) · YES
+- 결과: 1113 07시대 Harold 서버 출력(.62 · administrator · hostname 확인 줄 통과) = SET · ALTER TABLE → 확인 두 줄 reply_subject · character varying · 200 · YES / reply_text · text · (빈칸) · YES · 코드 배포 앞에 실행(옛 코드는 칸을 읽지 않음)
+
+> C130-DDL-1 · 배포 앞 · 칸 추가 둘 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C130-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE agency_send_email_intake
+  ADD COLUMN IF NOT EXISTS reply_subject varchar(200) NULL,
+  ADD COLUMN IF NOT EXISTS reply_text text NULL;
+```
+
+### C130-H1 · 한줄로 배포(대행발송 수신거부 줄 겹침 안내 + 메일 반려 회신 본문 보기 · 백엔드 + 프론트 · DDL 1 = C130-DDL-1 배포 앞 · ENV 0)
+- 카드: C130
+- 단계: 한줄로 배포
+- 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push · .62 → .57 전환 끝 · C130-DDL-1
+- 기대: 설계서 §4 처방 ① ② · 미가입 · 직접발송 변화 0 · 광고 꼬리 문장(buildAdMessage) 결과 변화 0 · 고객 문안 고침 0
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → pm2 reload · status online · 기동 에러 0 · dist grep agencyOptOutNotice ≥ 1 · readRecentRejectedIntakes ≥ 1 · sendRejectReply ≥ 1
+- 결과: (대기)
+
+### C130-T1 · 직원 시트(수신거부 줄 안내 · 반려 회신 본문 보기)
+- 카드: C130
+- 단계: 직원 시트
+- 선행: C130-H1
+- 기대: 설계서 §6 직원 지시문(테스트계정 · 도달 불가 번호 · 발송 0)
+- 확인: 「무료」 없는 수신거부 줄 문안 = 미리보기 · 접수 · 상세 · 직원 상세에 안내 상자 · 「무료수신거부」 문안 = 상자 없음 · 메일 반려 1건 = 슈퍼관리자 메일 접수 행을 누르면 업체가 받은 메일 제목 · 본문
+- 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
 
 ## §2 덤프 뒤 적용분
 

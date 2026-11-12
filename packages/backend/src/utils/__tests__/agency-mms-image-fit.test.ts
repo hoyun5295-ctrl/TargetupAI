@@ -211,7 +211,7 @@ describe('배선 계약: 두 입구가 같은 함수를 지나고, 다른 발송
     const worker = read('../agency-send-mail-worker.ts');
     const retry = worker.slice(worker.indexOf('async function retryPendingReplies'), worker.indexOf('// ────────────── tick'));
     expect(retry.length).toBeGreaterThan(100);
-    expect(retry).toMatch(/recipient_count, file_name, mms_image_paths\s/);
+    expect(retry).toMatch(/recipient_count, file_name, mms_image_paths[,\s]/);   // ★ 2026-11-13 C130 = 뒤에 수신거부 안내용 칸(is_ad 등)이 이어진다
     expect(retry).toMatch(/const hasImages = req\.rows\.some\(\(r: any\) => Array\.isArray\(r\.mms_image_paths\) && r\.mms_image_paths\.length > 0\)/);
     expect(retry).toMatch(/\.\.\.\(hasImages \? \['첨부 이미지는 규격/);
     // DDL 전에 이 SELECT가 통째로 실패하면 재시도 패스가 멈춘다(requested_at_original과 같은 이유) — 주석이 아니라 SQL만 본다

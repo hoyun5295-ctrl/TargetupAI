@@ -31,7 +31,7 @@ import { describeMmsFitNote } from './mms-image-fit';
 import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
-  analyzeOneStep, createRequestCore, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
+  analyzeOneStep, createRequestCore, hasAgencyColumn, forgetAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
   type AgencyCallbackKinds,
 } from './agency-send-intake';
 import {
@@ -43,6 +43,7 @@ import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
 import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
+import { agencyOptOutNotice, loadAgencyOpt080 } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(재시도 회신 · 접수 전 080)
 import { sendSystemAlert, persistPassFailures, flushPassAlerts } from './system-alert';
 import { soleCompanyId } from './internal-company';
 
@@ -573,7 +574,50 @@ const REPLY_CAP_NOTICE = [
   '급하시면 한줄로 화면에서 바로 접수하실 수 있습니다.',
 ].join('\n');
 
-async function sendReplyAndRecord(intakeId: string, mailbox: string, toEmail: string, subject: string, text: string, inReplyTo: string | null, onceADayReason?: string, keepPendingOnRateLimit = false): Promise<void> {
+/** ★ 2026-11-13 C130 — 저장하는 회신 본문의 값 범위(NUL = PG text 가 거부 · 길이 상한 · 제목 200자) */
+const REPLY_TEXT_MAX = 20000;
+export function replyBodyForStore(subject: string, text: string): { subject: string; text: string } {
+  const clean = (v: string) => String(v ?? '').replace(/\u0000/g, '');
+  const t = clean(text);
+  return { subject: clean(subject).slice(0, 200), text: t.length > REPLY_TEXT_MAX ? `${t.slice(0, REPLY_TEXT_MAX)}…(이하 생략)` : t };
+}
+
+/**
+ * ★ 2026-11-13 C130(남지현 접수 cmwd365ga1co9jnscho414cx1 · 설계서 §3 · §4②) — 회신 상태를 적는 한 곳(종전 UPDATE 셋을 모았다 · 값은 종전 그대로).
+ *   body 가 있고 칸(C130-DDL-1)이 있으면 **같은 문장**에 회신 제목 · 본문을 싣는다(슈퍼관리자 메일 접수 화면이 그대로 보인다).
+ *   ⛔ 칸 확인이 던지면 이번 기록만 본문 없이(실패는 캐시하지 않는다 · 기존 CT) · 칸을 싣는 문장이 42703 이면 캐시를 지우고 종전 문장 한 번 더.
+ *   ⛔ 메일은 이 함수 밖에서 이미 한 번 나갔다 — 그 밖 오류는 종전처럼 위로 던지되, 본문 칸 때문에 상태 기록이 빠지는 일은 없다
+ *     (빠지면 재시도 패스가 같은 메일을 또 보낸다 · Codex 설계 1R #1).
+ */
+async function recordReply(intakeId: string, status: string, bumpAttempts: boolean, body: { subject: string; text: string } | null): Promise<void> {
+  const attempts = bumpAttempts ? ', reply_attempts = reply_attempts + 1' : '';
+  let store = false;
+  if (body) {
+    try {
+      store = await hasAgencyColumn(pool, 'reply_text', 'agency_send_email_intake');
+    } catch (err: any) {
+      log(`회신 본문 칸 확인 실패(이번 기록은 본문 없이): ${err?.message}`);
+    }
+  }
+  if (store && body) {
+    const b = replyBodyForStore(body.subject, body.text);
+    try {
+      await query(
+        `UPDATE agency_send_email_intake SET reply_status = $2${attempts}, reply_subject = $3, reply_text = $4, updated_at = NOW() WHERE id = $1`,
+        [intakeId, status, b.subject, b.text],
+      );
+      return;
+    } catch (err: any) {
+      if (err?.code !== '42703') throw err;
+      forgetAgencyColumn('reply_text', 'agency_send_email_intake');
+      log('회신 본문 칸이 없어(42703) 본문 없이 기록합니다');
+    }
+  }
+  await query(`UPDATE agency_send_email_intake SET reply_status = $2${attempts}, updated_at = NOW() WHERE id = $1`, [intakeId, status]);
+}
+
+/** 시험(agency-reply-body-c130 T2-1)이 부른다 — 동작은 종전 그대로 */
+export async function sendReplyAndRecord(intakeId: string, mailbox: string, toEmail: string, subject: string, text: string, inReplyTo: string | null, onceADayReason?: string, keepPendingOnRateLimit = false, opts: { storeBody?: boolean } = {}): Promise<void> {
   // ⛔ 반환은 객체다. `!(await replyAllowed(...))`로 쓰면 항상 false라 게이트가 열린 채로 남는다(★0905 §21-3 (1) 정정).
   const gate = await replyAllowed(mailbox, toEmail, onceADayReason);
   if (!gate.allow) {
@@ -585,24 +629,31 @@ async function sendReplyAndRecord(intakeId: string, mailbox: string, toEmail: st
     //   이 안내가 `sent`로 기록되어 카운트를 올리므로 다음 회차부터는 저절로 침묵한다.
     //   (capNotice는 상한이 켜진 경우에만 true라, 기본값 0에서 REPLY_CAP_NOTICE 문구가 나갈 일은 없다)
     if (gate.capNotice) {
-      const notice = await sendAgencyReplyMail({ to: toEmail, subject: '[한줄로] 안내 메일을 잠시 보낼 수 없습니다', text: REPLY_CAP_NOTICE, inReplyTo });
-      await query(
-        `UPDATE agency_send_email_intake SET reply_status = $2, reply_attempts = reply_attempts + 1, updated_at = NOW() WHERE id = $1`,
-        [intakeId, notice.outcome === 'sent' ? 'sent' : notice.outcome === 'rejected' ? 'rejected' : 'unknown'],
-      );
+      const capSubject = '[한줄로] 안내 메일을 잠시 보낼 수 없습니다';
+      const notice = await sendAgencyReplyMail({ to: toEmail, subject: capSubject, text: REPLY_CAP_NOTICE, inReplyTo });
+      // ★ C130 저장 = 실제로 나간 상한 안내 그대로(고객이 받은 메일 한 통 · 설계서 §3 저장 규칙)
+      await recordReply(intakeId, notice.outcome === 'sent' ? 'sent' : notice.outcome === 'rejected' ? 'rejected' : 'unknown', true,
+        opts.storeBody ? { subject: capSubject, text: REPLY_CAP_NOTICE } : null);
       if (notice.outcome !== 'sent') log(`상한 안내 미확정(${notice.outcome}): to=${toEmail} ${notice.detail}`);
       return;
     }
     // 반려 안내는 여기서 접는다(skipped) — 재전송하면 새 회신 기회가 생긴다.
-    await query(`UPDATE agency_send_email_intake SET reply_status = 'skipped', updated_at = NOW() WHERE id = $1`, [intakeId]);
+    // ★ C130 저장 = 만들었지만 보내지 않은 반려 회신(화면이 「보내지 않음」으로 보인다)
+    await recordReply(intakeId, 'skipped', false, opts.storeBody ? { subject, text } : null);
     return;
   }
   const r = await sendAgencyReplyMail({ to: toEmail, subject, text, inReplyTo });
-  await query(
-    `UPDATE agency_send_email_intake SET reply_status = $2, reply_attempts = reply_attempts + 1, updated_at = NOW() WHERE id = $1`,
-    [intakeId, r.outcome === 'sent' ? 'sent' : r.outcome === 'rejected' ? 'rejected' : 'unknown'],
-  );
+  await recordReply(intakeId, r.outcome === 'sent' ? 'sent' : r.outcome === 'rejected' ? 'rejected' : 'unknown', true,
+    opts.storeBody ? { subject, text } : null);
   if (r.outcome !== 'sent') log(`회신 미확정(${r.outcome}): to=${toEmail} ${r.detail}`);
+}
+
+/**
+ * ★ 2026-11-13 C130 — **반려 회신**은 이 한 길로 보낸다(본문 저장 켬 · 접수 완료 회신은 sendReplyAndRecord 그대로 = 저장 안 함 · 계약 시험 T2-2).
+ *   접수 완료 회신은 문안 · 담당자 번호를 담고 그 값은 접수 원장에 이미 있다 · 화면은 반려 · 오류 행만 그린다(개인정보 최소).
+ */
+export function sendRejectReply(intakeId: string, mailbox: string, toEmail: string, subject: string, text: string, inReplyTo: string | null, onceADayReason?: string): Promise<void> {
+  return sendReplyAndRecord(intakeId, mailbox, toEmail, subject, text, inReplyTo, onceADayReason, false, { storeBody: true });
 }
 
 // ────────────── 첨부 분류 = 접수 단위 만들기 (순수 · ★2026-09-05 §21-4) ──────────────
@@ -738,7 +789,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   }
   if (sender.outcome === 'owner_inactive') {
     await finalizeIntake(claimed.id, 'rejected', { reason: 'owner_inactive', companyId: sender.companyId, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+    await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
       buildRejectedReply(['접수 설정에 문제가 있어 접수되지 않았습니다. 한줄로 담당자에게 문의해 주세요.']), messageId, 'owner_inactive');
     await sendSystemAlert({
       companyId: sender.companyId ?? null,
@@ -766,7 +817,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     );
     if ((senderCount.rows[0]?.c || 0) >= DAILY_SENDER_LIMIT) {
       await finalizeIntake(claimed.id, 'rejected', { reason: 'daily_sender_limit', companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
-      await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+      await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
         buildRejectedReply([`이 주소로는 하루 ${DAILY_SENDER_LIMIT}통까지 접수할 수 있습니다. 내일 다시 보내시거나 화면에서 접수해 주세요.`]), messageId, 'daily_sender_limit');
       return;
     }
@@ -806,7 +857,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     const g = await checkCompanyGates(auth);
     if (!g.ok) {
       await finalizeIntake(claimed.id, 'rejected', { reason: g.code, companyId: auth.companyId, userId: auth.userId, replyStatus: 'pending' });
-      await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+      await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
         buildRejectedReply([g.reason]), messageId, g.code);
       return;
     }
@@ -816,7 +867,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   const octets = ctx.octets.get(seq) || 0;
   if (octets > MAX_MESSAGE_OCTETS) {
     await finalizeIntake(claimed.id, 'rejected', { reason: 'too_large', companyId: auth?.companyId ?? null, userId: auth?.userId ?? null, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
+    await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가',
       buildRejectedReply([`메일이 너무 큽니다. 요청서 양식 파일 하나만 첨부해 다시 보내주세요(${ATTACH_LIMIT_LABEL} 이내).`]), messageId);
     return;
   }
@@ -849,7 +900,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   const reject = async (reasons: string[], reasonCode: string, headers?: string[]) => {
     dropSavedImages();
     await finalizeIntake(claimed.id, 'rejected', { reason: reasonCode, companyId: mailCompanyId, userId: lastAcct?.userId ?? null, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가', buildRejectedReply(reasons, headers), messageId);
+    await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가', buildRejectedReply(reasons, headers), messageId);
   };
 
   const imageAtts = atts.filter((a) => isImageAttachment(a));
@@ -1118,7 +1169,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   if (plans.length === 0) {
     dropSavedImages();
     await finalizeIntake(claimed.id, 'rejected', { reason: 'duplicate_request', companyId: mailCompanyId, userId: lastAcct?.userId ?? null, replyStatus: 'pending' });
-    await sendReplyAndRecord(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 이미 접수된 요청서입니다',
+    await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 이미 접수된 요청서입니다',
       buildRejectedReply([
         multi
           ? `보내주신 요청서 ${units.length}건이 모두 이미 접수되어 진행 중입니다. 다시 접수할 필요가 없습니다.`
@@ -1131,7 +1182,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
 
   // 11) 접수 — 사전 조회는 트랜잭션 밖(§18-2), 코어가 검증·적재·리드타임을 집행한다.
   //   ⛔ 단위마다 계정·광고 여부가 다를 수 있어 사전 조회도 단위별이다.
-  const pres: Array<{ registeredSet: Awaited<ReturnType<typeof getRegisteredCallbackSet>>; window: Awaited<ReturnType<typeof loadSendWindow>>; minLeadMinutes: number; maxSmsBytes: number | null }> = [];
+  const pres: Array<{ registeredSet: Awaited<ReturnType<typeof getRegisteredCallbackSet>>; window: Awaited<ReturnType<typeof loadSendWindow>>; minLeadMinutes: number; maxSmsBytes: number | null; opt080: string }> = [];
   for (const p of plans) {
     pres.push({
       registeredSet: await getRegisteredCallbackSet(p.acct.companyId, p.acct.userId),
@@ -1139,6 +1190,8 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
       minLeadMinutes: EMAIL_MIN_LEAD_MINUTES,
       // ★ 2026-09-26 R1-08 — 분석이 잰 SMS 최장 바이트(코어가 트랜잭션 안에서 다시 조회하지 않게)
       maxSmsBytes: p.analysis.maxSmsBytes,
+      // ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내의 080(트랜잭션 밖 · 코어가 접수 완료 회신 블록에 싣는 줄을 만든다)
+      opt080: await loadAgencyOpt080(p.acct.userId, p.acct.companyId),
     });
   }
   const txClient = await pool.connect();
@@ -1259,7 +1312,8 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
     //   5건 중 1건만 말했다(첫 회신이 실패한 담당자가 받는 유일한 확인이 잘못된 내용이 된다).
     //   순서는 접수 순서 그대로 — 순번 표기가 담당자 문자와 같은 번호를 가리켜야 한다.
     const req = await query(
-      `SELECT id, subject, current_content, requested_at, callback_number, manager_phones, phone_column, recipient_count, file_name, mms_image_paths
+      `SELECT id, subject, current_content, requested_at, callback_number, manager_phones, phone_column, recipient_count, file_name, mms_image_paths,
+              is_ad, message_type, created_by, company_id
          FROM agency_send_requests WHERE id = ANY($1::uuid[])
         ORDER BY array_position($1::uuid[], id)`, [row.request_ids],
       // ⛔ 재시도 회신에 requested_at_original을 넣지 않는다 — 컬럼 부재(DDL 전) 시 이 SELECT가 통째로
@@ -1285,12 +1339,21 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
       continue;
     }
     const isMulti = req.rows.length > 1;
+    // ★ 2026-11-13 C130 — 첫 회신이 실은 수신거부 줄 겹침 안내를 재시도 회신도 싣는다(원장에 안내가 없으니 지금 글로 다시 계산 · 설계서 §2 A3)
+    const optOutById = new Map<string, string[]>();
+    for (const r of req.rows) {
+      optOutById.set(String(r.id), agencyOptOutNotice({
+        content: r.current_content, isAd: r.is_ad, messageType: r.message_type,
+        opt080: r.is_ad ? await loadAgencyOpt080(r.created_by, r.company_id) : '', how: 'mail',
+      }));
+    }
     const blocks = req.rows.map((r: any, i: number) => buildAcceptedReply({
       subject: r.subject || '', content: r.current_content || '', requestedAtIso: new Date(r.requested_at).toISOString(),
       callback: r.callback_number, callbackKinds: kindsById.get(String(r.id)) || 0,
       managerPhones: r.manager_phones || [], phoneColumn: r.phone_column || '전화번호',
       autoPickedPhoneColumn: false, total: r.recipient_count, valid: r.recipient_count, dup: 0, invalid: 0,
       seq: isMulti ? { index: i + 1, total: req.rows.length, fileName: String(r.file_name || '요청서') } : undefined,
+      charNotes: optOutById.get(String(r.id)) || [],
     }));
     // ★0905 Codex 1R 지적 ③ — 재시도는 **정본이 아니라 복구 경로**다. 접수 시점의 스킵 목록과
     //   확정 발송 계정은 원장에 스냅샷으로 남기지 않으므로(그러려면 컬럼 신설이 필요하다) 여기서 복원하지 않는다.

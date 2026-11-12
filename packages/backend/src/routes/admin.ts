@@ -84,7 +84,8 @@ import { setPlanMonthCredits, setPostpaidOverageLimit, listLowCreditCompanies, i
 // ★ 2026-10-04 선불 요금제 이용 기간 — 승인 판정·차감 CT · 관리 중 게이트(docs/2026-10-04-prepaid-plan-term-design.md §5)
 import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
+import { loadAgencyCallbackKinds, readRecentRejectedIntakes } from '../utils/agency-send-intake';   // ★ 2026-11-13 C130 최근 반려(회신 본문 포함)
+import { agencyOptOutNotice, loadAgencyOpt080 } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(직원 상세)
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordUserAccountDeleted, recordUnsubscribeDeleted } from '../utils/change-audit';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, isNoticeAckViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
@@ -6679,19 +6680,15 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
       const unregisteredToday = await query(
         `SELECT COUNT(*)::int AS c FROM agency_send_email_intake WHERE reason = 'unregistered' AND claimed_at > NOW() - interval '24 hours'`,
       );
-      const recentRejected = await query(
-        `SELECT i.uidl, i.from_email, i.reason, i.reply_status, i.claimed_at, i.decided_at, c.company_name
-           FROM agency_send_email_intake i
-           LEFT JOIN companies c ON c.id = i.company_id
-          WHERE i.status IN ('rejected', 'failed')
-          ORDER BY i.claimed_at DESC LIMIT 20`,
-      );
+      // ★ 2026-11-13 C130(남지현 접수 cmwd365ga1co9jnscho414cx1) — 업체가 받은 반려 회신(제목 · 본문)을 행 상세가 그대로 보인다(칸 확인 · 42703 갈래 = CT).
+      const recentRejected = await readRecentRejectedIntakes();
       mailIntake = {
         state: state.rows,
         counts: counts.rows,
         replyFailed: replyFailed.rows[0]?.c || 0,
         unregisteredToday: unregisteredToday.rows[0]?.c || 0,
         recentRejected: recentRejected.rows,
+        replyBodyReady: recentRejected.replyBodyReady,
       };
     } catch (mailErr: any) {
       const m = String(mailErr?.message || '');
@@ -6750,6 +6747,10 @@ router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (r
         mmsImagePaths: row.mms_image_paths || [],
         // ★2026-09-10 이미지 원본 파일명(고객 상세와 같은 값 · a.* 로 실린다 · DDL 전 행은 null)
         mmsImageNames: Array.isArray(row.mms_image_names) ? row.mms_image_names : null,
+        // ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내(직원 = 고객에게 고치라고 안내 · 설계서 §2 A6)
+        optOutNotice: row.is_ad
+          ? agencyOptOutNotice({ content: row.current_content, isAd: row.is_ad, messageType: row.message_type, opt080: await loadAgencyOpt080(row.created_by, row.company_id), how: 'staff' })
+          : [],
       },
       samples, shown: samples.length, total: row.recipient_count,
     });

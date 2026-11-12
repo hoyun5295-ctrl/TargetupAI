@@ -413,6 +413,40 @@ export async function getOpt080Number(userId: string | null, companyId: string):
  */
 export const AD_REJECT_FOOTER_RE = /무료\s*수신\s*거부|무료\s*거부/;
 
+/**
+ * ★ 2026-11-13 C130 — buildAdMessage 가 맨 끝에 붙이는 법정 꼬리 글(꼬리 식의 단일 소유 · 결과 글자는 종전 그대로).
+ *   대행발송 「수신거부 줄 겹침」 안내(agency-send-optout.ts)가 받는 사람에게 실제로 붙는 글을 그대로 보이려고 뽑았다.
+ *   LMS · MMS = `무료수신거부 080-…` · SMS = `무료거부080…`(숫자만) · 080 없음 = 낱말만.
+ */
+export function adRejectFooterText(msgType: string, opt080Number: string): string {
+  const isLms = msgType === 'LMS' || msgType === 'MMS';
+  return opt080Number
+    ? (isLms ? `무료수신거부 ${opt080Number}` : `무료거부${opt080Number.replace(/-/g, '')}`)
+    : (isLms ? `무료수신거부` : `무료거부`);
+}
+
+/**
+ * ★ 2026-11-13 C130(서수란 접수 cmwd36hnr1corjnscq7xlnim1) — 광고 문안에서 「무료」 없는 수신거부 줄 찾기(순수 · 판정 한 곳).
+ *   그런 줄이 있으면 buildAdMessage 가 법정 꼬리를 한 줄 더 붙여 받는 사람에게 수신거부 줄이 둘 보인다.
+ *   발송 글은 바꾸지 않는다(고객 문안 불변) — 대행발송 확인 자리가 이 결과로 겹침을 **알리기만** 한다.
+ *   판정 = 변수 조각(`%이름%` · var-tokens CT)을 뺀 글 기준. 이름은 발송 글이 아니다(이름 안 「무료수신거부」가 겹침 안내를 숨기면 안 된다 · Codex 설계 1R #3).
+ *   반환 = 원문 줄(앞뒤 공백 정리 · 문안 순서) · 꼬리를 붙이지 않을 글(법정 문구가 이미 있음) · 수신거부 줄 없음 = [].
+ *   ⛔ 발송 · 적재 · 미리보기 경로는 이 함수를 부르지 않는다(대행 알림 전용 · 계약 시험 C130 T1-3).
+ */
+export function findNonLegalOptOutLines(text: string | null | undefined): string[] {
+  const src = String(text ?? '');
+  if (!src) return [];
+  const lines = src.split(/\r?\n/);
+  // 변수 이름에는 공백 · 줄바꿈이 없어 조각이 줄을 넘지 않는다 = 줄마다 지운 결과의 이음 = 통째로 지운 결과
+  // ⛔ 빈 글로 지우지 않는다 — 양옆이 붙어 없던 법정 문구가 생긴다(`무료%고객명%수신거부` → 「무료수신거부」 · 실제 글은 「무료홍길동수신거부」 · Codex 설계 2R).
+  //   공백이 아닌 경계 글자(\u0001 · \s 가 아님)를 남겨 「무료 · 수신 · 거부」가 조각을 사이에 두고 이어지지 않게 한다.
+  const stripped = lines.map((l) => replaceVarTokens(l, () => '\u0001'));
+  if (AD_REJECT_FOOTER_RE.test(stripped.join('\n'))) return [];
+  const out: string[] = [];
+  stripped.forEach((s, i) => { if (/수신\s*거부/.test(s)) out.push(lines[i].trim()); });
+  return out;
+}
+
 export function buildAdMessage(
   message: string,
   msgType: string,
@@ -447,9 +481,7 @@ export function buildAdMessage(
   const minBreaks = 1;
   const actualBreaks = Math.max(trailingCount, minBreaks);
 
-  const rejectText = opt080Number
-    ? (isLms ? `무료수신거부 ${opt080Number}` : `무료거부${opt080Number.replace(/-/g, '')}`)
-    : (isLms ? `무료수신거부` : `무료거부`);
+  const rejectText = adRejectFooterText(msgType, opt080Number);   // ★ 2026-11-13 C130 꼬리 식 단일 소유(결과 글자 종전 그대로)
 
   const finalFooter = hasRejectFooter ? '' : `${'\n'.repeat(actualBreaks)}${rejectText}`;
   const body = finalFooter ? message.replace(/\n+$/, '') : message;

@@ -31,6 +31,8 @@ interface AdminAgencyDetail {
     companyName: string | null; userName: string | null; mmsImagePaths: unknown[];
     /** ★2026-09-10 이미지 원본 파일명(경로와 같은 순서 · 옛 접수는 null) */
     mmsImageNames?: string[] | null;
+    /** ★ 2026-11-13 C130 수신거부 줄 겹침 안내(서버 판정 · 옛 서버 = 키 없음) */
+    optOutNotice?: string[];
   };
   events: AgencySendEvent[];
   samples: AgencyPreviewSample[];
@@ -372,6 +374,11 @@ export default function AgencySendLedgerPanel() {
               {detail && !detailLoading && (
                 <>
                   <div>
+                    {(detail.request.optOutNotice || []).length > 0 && (
+                      <div className="mb-2 text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5">
+                        {(detail.request.optOutNotice || []).map((n, i) => <p key={i}>{n}</p>)}
+                      </div>
+                    )}
                     <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">문안</h4>
                     <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-[13px] text-gray-800 whitespace-pre-wrap leading-relaxed">
                       {detail.request.subject && <div className="font-semibold text-gray-900 mb-1">{detail.request.subject}</div>}

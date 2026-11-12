@@ -294,6 +294,12 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                     {(a.charNotice || []).map((n, i) => <p key={i}>{n}</p>)}
                   </div>
                 )}
+                {/* ★ 2026-11-13 C130 — 「무료」 없는 수신거부 줄 = 보낼 때 무료수신거부 줄이 한 번 더 붙는다(문안은 그대로 · 고칠지는 고객이 정한다) */}
+                {(a.optOutNotice || []).length > 0 && (
+                  <div className="text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5">
+                    {(a.optOutNotice || []).map((n, i) => <p key={i}>{n}</p>)}
+                  </div>
+                )}
 
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">

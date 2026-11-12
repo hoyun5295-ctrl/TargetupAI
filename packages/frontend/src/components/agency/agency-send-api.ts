@@ -159,10 +159,11 @@ export async function fetchAgencyRequests(offset = 0): Promise<{ requests: Agenc
   return { requests, total: Number(data.total) || requests.length };
 }
 
-export async function fetchAgencyRequest(id: string): Promise<{ request: AgencySendRequest; events: AgencySendEvent[] }> {
+export async function fetchAgencyRequest(id: string): Promise<{ request: AgencySendRequest; events: AgencySendEvent[]; optOutNotice: string[] }> {
   const res = await fetch(`/api/agency-send/${id}`, { headers: auth() });
   const data = await unwrap(res);
-  return { request: data.request, events: data.events || [] };
+  // ★ 2026-11-13 C130 — 지금 문안의 수신거부 줄 겹침 안내(서버 판정 · 옛 서버 응답 = 키 없음 = [])
+  return { request: data.request, events: data.events || [], optOutNotice: Array.isArray(data.optOutNotice) ? data.optOutNotice : [] };
 }
 
 /** 치환 미리보기 한 명 몫. 서버가 실물 조립(발송과 같은 CT)으로 만든 값이다 */
@@ -246,12 +247,13 @@ export async function approveAgencyRequest(id: string, revision: number): Promis
 
 export async function updateAgencyContent(
   id: string, content: string, revision: number, subject?: string,
-): Promise<{ request: AgencySendRequest; notice: string[] }> {
+): Promise<{ request: AgencySendRequest; notice: string[]; optOutNotice: string[] }> {
   const res = await fetch(`/api/agency-send/${id}/content`, {
     method: 'POST', headers: json(), body: JSON.stringify({ content, subject, revision }),
   });
   const data = await unwrap(res);
-  return { request: data.request, notice: Array.isArray(data.notice) ? data.notice : [] };   // ★ 2026-11-06 C109 글자 정리 알림
+  // ★ 2026-11-06 C109 글자 정리 알림 · ★ 2026-11-13 C130 저장한 문안의 수신거부 줄 안내(저장 문안과 같은 응답 · Codex 구현 1R)
+  return { request: data.request, notice: Array.isArray(data.notice) ? data.notice : [], optOutNotice: Array.isArray(data.optOutNotice) ? data.optOutNotice : [] };
 }
 
 /**
@@ -313,6 +315,8 @@ export interface OneStepAnalysisView {
   errors: Array<{ field: string; error: string }>;
   /** ★ 2026-11-06 C109 — 요청서 문안 · 명단에서 보낼 수 없는 글자를 빼거나 바꾼 알림(위 문안 · 명단은 이미 정리된 값) */
   charNotice?: string[];
+  /** ★ 2026-11-13 C130 — 「무료」 없는 수신거부 줄이 있어 보낼 때 무료수신거부 줄이 한 번 더 붙는다는 안내(서버 판정 · 없으면 []) */
+  optOutNotice?: string[];
 }
 
 export interface OneStepOverrides {

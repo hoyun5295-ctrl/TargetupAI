@@ -8,19 +8,26 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Inbox, Loader2, RefreshCw } from 'lucide-react';
 import TablePagination from '../common/TablePagination';
-import { ADMIN_TABLE_ONELINE, AdminLongText } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문
+import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문 · ★ 2026-11-13 C130 행 상세 창
 
 /** 반려·오류 목록 한 페이지 건수 — 슈퍼관리자 다른 목록과 같은 수로 맞춘다. */
 const MAIL_PER_PAGE = 10;
 
 interface MailState { mailbox: string; last_ok_at: string | null; login_fail_count: number; paused_at: string | null; paused_reason: string | null }
-interface RejectedRow { uidl: string; from_email: string | null; reason: string | null; reply_status: string | null; claimed_at: string; company_name: string | null }
+interface RejectedRow {
+  uidl: string; from_email: string | null; reason: string | null; reply_status: string | null; claimed_at: string; company_name: string | null;
+  /** ★ 2026-11-13 C130 — 업체가 받은(또는 받을 뻔한) 반려 안내 메일 그대로(칸 = C130-DDL-1 · 그 전에 처리된 건 = null) */
+  reply_subject?: string | null;
+  reply_text?: string | null;
+}
 interface MailIntake {
   state: MailState[];
   counts: Array<{ status: string; c: number }>;
   replyFailed: number;
   unregisteredToday: number;
   recentRejected: RejectedRow[];
+  /** ★ 2026-11-13 C130 — 회신 본문 칸이 있는가(없으면 상세 창이 마이그레이션 필요를 알린다 · 옛 서버 = 키 없음) */
+  replyBodyReady?: boolean;
 }
 
 const REASON_LABEL: Record<string, string> = {
@@ -67,6 +74,16 @@ const STATUS_KO: Record<string, string> = {
 
 const fmt = (v: string | null) => (v ? new Date(v).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '기록 없음');
 
+/** ★ 2026-11-13 C130 — 회신 상태 말(표 칸 = 짧게 · 상세 창 = 왜 그런지까지) */
+const REPLY_SHORT: Record<string, string> = { sent: '보냄', skipped: '안 보냄', rejected: '전송 실패', unknown: '결과 모름', pending: '보내는 중' };
+const REPLY_LONG: Record<string, string> = {
+  sent: '보냈습니다.',
+  skipped: '보내지 않음: 같은 안내를 24시간 안에 이미 보냈거나 시간당 상한에 걸렸습니다.',
+  rejected: '메일 서버가 받지 않았습니다(주소 오류 등).',
+  unknown: '보냈지만 메일 서버의 결과를 확인하지 못했습니다.',
+  pending: '아직 보내는 중입니다.',
+};
+
 export default function AgencyMailIntakePanel() {
   const [data, setData] = useState<MailIntake | null>(null);
   // ★2026-09-02 페이징 — 반려 목록을 전량 그려 화면이 길어지던 것을 10건씩 끊는다.
@@ -74,6 +91,8 @@ export default function AgencyMailIntakePanel() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  // ★ 2026-11-13 C130(남지현 접수 cmwd365ga1co9jnscho414cx1) — 행을 누르면 업체가 받은 반려 안내 메일을 그대로 보인다
+  const [openRow, setOpenRow] = useState<RejectedRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -177,12 +196,12 @@ export default function AgencyMailIntakePanel() {
                   </thead>
                   <tbody>
                     {pagedRejected.map((r) => (
-                      <tr key={r.uidl} className="border-b border-gray-100">
+                      <tr key={r.uidl} className={`border-b border-gray-100 ${ADMIN_TR_OPEN}`} {...adminRowOpen(() => setOpenRow(r))}>
                         <td className="py-2 pr-4 tabular-nums text-gray-600 whitespace-nowrap">{fmt(r.claimed_at)}</td>
-                        <td className="py-2 pr-4 text-gray-800"><AdminLongText text={r.from_email || '(주소 없음)'} max={220} label="보낸 주소" /></td>
-                        <td className="py-2 pr-4 text-gray-600"><AdminLongText text={r.company_name} max={160} label="회사" /></td>
-                        <td className="py-2 pr-4 text-gray-800"><AdminLongText text={REASON_LABEL[r.reason || ''] || r.reason || STATUS_KO.rejected} max={240} label="사유" /></td>
-                        <td className="py-2 text-gray-600">{r.reply_status === 'sent' ? '보냄' : r.reply_status === 'skipped' ? '안 보냄' : r.reply_status || ''}</td>
+                        <td className="py-2 pr-4 text-gray-800"><AdminLongText text={r.from_email || '(주소 없음)'} max={220} rowOpens /></td>
+                        <td className="py-2 pr-4 text-gray-600"><AdminLongText text={r.company_name} max={160} rowOpens /></td>
+                        <td className="py-2 pr-4 text-gray-800"><AdminLongText text={REASON_LABEL[r.reason || ''] || r.reason || STATUS_KO.rejected} max={240} rowOpens /></td>
+                        <td className="py-2 text-gray-600">{r.reply_status ? (REPLY_SHORT[r.reply_status] || r.reply_status) : ''}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -200,6 +219,37 @@ export default function AgencyMailIntakePanel() {
             )}
           </div>
         </div>
+      )}
+
+      {openRow && (
+        <AdminDetailModal title="반려 사유와 보낸 안내 메일" onClose={() => setOpenRow(null)}>
+          <dl>
+            <AdminDetailItem label="받은 시각">{fmt(openRow.claimed_at)}</AdminDetailItem>
+            <AdminDetailItem label="보낸 주소">{openRow.from_email || '(주소 없음)'}</AdminDetailItem>
+            <AdminDetailItem label="회사">{openRow.company_name || '-'}</AdminDetailItem>
+            <AdminDetailItem label="사유">{REASON_LABEL[openRow.reason || ''] || openRow.reason || STATUS_KO.rejected}</AdminDetailItem>
+            <AdminDetailItem label="안내 메일">
+              {openRow.reply_status ? (REPLY_LONG[openRow.reply_status] || openRow.reply_status) : '이 사유는 안내 메일을 보내지 않습니다(자동 발신 메일 · 미등록 발신 · 같은 메일 재수신 등).'}
+            </AdminDetailItem>
+          </dl>
+          {openRow.reply_status && (
+            <div className="mt-4">
+              <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">업체가 받은 안내 메일</h4>
+              {data?.replyBodyReady === false ? (
+                <p className="text-[12.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  DB 마이그레이션 필요: 메일 원장 회신 본문 칸(C130-DDL-1)을 넣으면 이후 반려부터 본문이 남습니다.
+                </p>
+              ) : openRow.reply_text ? (
+                <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 max-h-[50vh] overflow-y-auto">
+                  {openRow.reply_subject && <div className="text-[13px] font-semibold text-gray-900 mb-2">{openRow.reply_subject}</div>}
+                  <p className="text-[13px] text-gray-800 leading-relaxed whitespace-pre-wrap break-words">{openRow.reply_text}</p>
+                </div>
+              ) : (
+                <p className="text-[12.5px] text-gray-500">이 건은 안내 메일 본문을 남기기 전에 처리되어 짧은 사유만 있습니다.</p>
+              )}
+            </div>
+          )}
+        </AdminDetailModal>
       )}
     </div>
   );

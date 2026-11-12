@@ -36,6 +36,11 @@ export interface AgencyNotifyContext {
   originalWhenText?: string;
   /** ★ 2026-11-06 C109 D1 — 승인 요청에 싣는 「보낼 수 없는 글자를 빼고 보냅니다」 줄(agencyCharPassedLines · 없으면 []) */
   charLines?: string[];
+  /**
+   * ★ 2026-11-13 C130 — 「무료」 없는 수신거부 줄이 있어 꼬리가 한 줄 더 붙는다는 한 줄(agencyOptOutSmsLine · 없으면 '').
+   *   판정 글 = 그 자리에서 담당자 테스트 문자를 만든 바로 그 글(설계서 §4① A7 · A8 · Codex 설계 1R #4).
+   */
+  optOutLine?: string;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -65,6 +70,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
       ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
       `요청하신 ${ctx.originalWhenText}은 준비 시간이 촉박해 ${ctx.whenText}로 잡았습니다.`,
       ...(ctx.charLines || []),
+      ctx.optOutLine || '',
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
       ctx.approveUrl
         ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
@@ -79,6 +85,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
     ...(ctx.charLines || []),
+    ctx.optOutLine || '',
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
@@ -122,6 +129,7 @@ export function buildReapprovalNotify(ctx: AgencyNotifyContext): string {
     `건: ${shortLabel(ctx.label)}`,
     ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
+    ctx.optOutLine || '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 다시 승인해 주세요.'
       : '방금 보내 드린 문자를 확인하시고, 로그인하여 다시 승인해 주세요.',

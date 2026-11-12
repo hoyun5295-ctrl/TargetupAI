@@ -44,6 +44,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const senderAuth = useSenderAuth();
   const [req, setReq] = useState<AgencySendRequest | null>(null);
   const [events, setEvents] = useState<AgencySendEvent[]>([]);
+  // ★ 2026-11-13 C130 — 지금 문안의 수신거부 줄 겹침 안내(서버 판정 · 문안 위 상자)
+  const [optOutNotice, setOptOutNotice] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
@@ -66,10 +68,11 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     setLoading(true);
     setPreviewOpen(false); setPreview(null); setPreviewError('');
     fetchAgencyRequest(requestId)
-      .then(({ request, events: ev }) => {
+      .then(({ request, events: ev, optOutNotice: oo }) => {
         if (!alive) return;
         setReq(request);
         setEvents(ev);
+        setOptOutNotice(oo);
         setDraft(request.currentContent);
         setNewWhen(toLocalInput(new Date(request.requestedAt)));
         setEditing(false);
@@ -125,9 +128,10 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const refresh = async () => {
     if (!requestId) return;
     try {
-      const { request, events: ev } = await fetchAgencyRequest(requestId);
+      const { request, events: ev, optOutNotice: oo } = await fetchAgencyRequest(requestId);
       setReq(request);
       setEvents(ev);
+      setOptOutNotice(oo);
       setNewWhen(toLocalInput(new Date(request.requestedAt)));
     } catch { /* 조회 실패는 이미 뜬 오류 위에 덧씌우지 않는다 */ }
   };
@@ -154,8 +158,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     // ★ 2026-11-06 C109 D1 — 고친 글도 서버가 판정한다(뺌 · 바꿈 = 정리해 저장 + 위치 알림 · 막음 = 위치 반려 · 옛: 화면에서 먼저 막음)
     setBusy(true);
     try {
-      const { request: saved, notice } = await updateAgencyContent(req.id, draft, req.revision);
+      const { request: saved, notice, optOutNotice: oo } = await updateAgencyContent(req.id, draft, req.revision);
       apply(saved);
+      setOptOutNotice(oo);   // ★ 2026-11-13 C130 — 저장한 문안과 안내 상자를 같은 응답으로 함께 바꾼다(뒤따르는 조회에 기대지 않는다 · Codex 구현 1R)
       setEditing(false);
       toast.success('문안을 고쳤습니다. 검사를 다시 시작합니다.');
       for (const n of notice) toast.info(n);
@@ -266,6 +271,11 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
               )}
 
               <div>
+                {optOutNotice.length > 0 && (
+                  <div className="mb-2 text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5">
+                    {optOutNotice.map((n, i) => <p key={i}>{n}</p>)}
+                  </div>
+                )}
                 <div className="flex items-center justify-between mb-1.5">
                   <h4 className={CUI_SEC_TITLE}>{isApprovable(req.status) ? '승인할 문안' : '지금 문안'}</h4>
                   {changeable && !editing && (

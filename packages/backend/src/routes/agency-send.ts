@@ -40,6 +40,7 @@ import {
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
 import { agencyCharNotice } from '../utils/agency-send-chars';   // ★ 2026-11-06 C109 글자 정리 알림 줄
+import { agencyOptOutNotice, loadAgencyOpt080 } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 
 const router = Router();
 router.use(authenticate);
@@ -316,7 +317,7 @@ function oneStepFiles(req: Request): { formBuf: Buffer | null; listBuf: Buffer |
 }
 
 /** 화면에 내려보낼 분석 결과(수신자 전 행은 절대 안 내려간다) */
-function toAnalysisView(a: OneStepAnalysis) {
+function toAnalysisView(a: OneStepAnalysis, optOutNotice: string[] = []) {
   return {
     subject: a.subject, content: a.content, isAd: a.isAd, requestedAt: a.requestedAtIso,
     // ★0826(6) 촉박한 요청의 자동 조정 예고 — 확인 화면이 접수 전에 알린다(조용한 조정 금지)
@@ -327,6 +328,8 @@ function toAnalysisView(a: OneStepAnalysis) {
     sample: a.sample, sampleRows: a.sampleRows, messageType: a.messageType, fileName: a.fileName, errors: a.errors,
     // ★ 2026-11-06 C109 D1 — 보낼 수 없는 글자를 빼거나 바꾼 알림(확인 화면 · 문안 · 명단은 이미 정리된 값)
     charNotice: agencyCharNotice(a.charNotes),
+    // ★ 2026-11-13 C130 — 「무료」 없는 수신거부 줄 겹침 안내(확인 창 · 접수 전 · 설계서 §2 A1)
+    optOutNotice,
   };
 }
 
@@ -336,7 +339,10 @@ router.post('/one-step/preview', requireAgencySendMw, oneStepUpload, async (req:
   try {
     const { formBuf, listBuf, listName } = oneStepFiles(req);
     const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, parseOneStepOverrides(req.body?.overrides), true);
-    return res.json({ success: true, analysis: toAnalysisView(analysis) });
+    const optOutNotice = analysis.isAd
+      ? agencyOptOutNotice({ content: analysis.content, isAd: analysis.isAd, messageType: analysis.messageType, opt080: await loadAgencyOpt080(auth.userId, auth.companyId), how: 'upload' })
+      : [];
+    return res.json({ success: true, analysis: toAnalysisView(analysis, optOutNotice) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 원스텝 미리보기 실패:', err);
@@ -391,6 +397,8 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
       window: await loadSendWindow(auth.companyId, analysis.isAd),
       // ★ 2026-09-26 R1-08 — 분석이 잰 SMS 최장 바이트(코어가 트랜잭션 안에서 다시 조회하지 않게)
       maxSmsBytes: analysis.maxSmsBytes,
+      // ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내의 080(트랜잭션 밖 · 코어 notice 가 접수 성공 알림에 싣는다)
+      opt080: analysis.isAd ? await loadAgencyOpt080(auth.userId, auth.companyId) : '',
     };
     const client = await pool.connect();
     try {
@@ -572,7 +580,12 @@ router.get('/:id', async (req: Request, res: Response) => {
       `SELECT kind, payload, created_at FROM agency_send_events WHERE request_id = $1::uuid ORDER BY created_at DESC LIMIT 50`,
       [req.params.id],
     );
-    return res.json({ success: true, request: await toPublicWithKinds(r.rows[0]), events: events.rows });
+    // ★ 2026-11-13 C130 — 지금 문안의 수신거부 줄 겹침 안내(승인 전 문안 확인 자리 · 사라지지 않는 상자 · 설계서 §2 A5)
+    const row0 = r.rows[0];
+    const optOutNotice = row0.is_ad
+      ? agencyOptOutNotice({ content: row0.current_content, isAd: row0.is_ad, messageType: row0.message_type, opt080: await loadAgencyOpt080(row0.created_by, row0.company_id), how: 'edit' })
+      : [];
+    return res.json({ success: true, request: await toPublicWithKinds(row0), events: events.rows, optOutNotice });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 상세 조회 실패:', err);
@@ -691,7 +704,8 @@ router.post('/:id/content', async (req: Request, res: Response) => {
       via: 'screen',
     });
     if (!out.ok) return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });
-    return res.json({ success: true, request: await toPublicWithKinds(out.row), notice: out.notice || [] });   // ★ 2026-11-06 C109 글자 정리 알림
+    // ★ 2026-11-06 C109 글자 정리 알림 · ★ 2026-11-13 C130 저장한 문안의 수신거부 줄 안내(화면 상자 · 저장 문안과 같은 응답)
+    return res.json({ success: true, request: await toPublicWithKinds(out.row), notice: out.notice || [], optOutNotice: out.optOutNotice || [] });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 문안 수정 실패:', err);

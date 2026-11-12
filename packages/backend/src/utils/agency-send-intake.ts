@@ -13,6 +13,7 @@
  */
 import pool, { query } from '../config/database';
 import { prepareAgencyText, prepareAgencyCopy, createAgencyRecipientCleaner, mergeAgencyCharNotes, agencyCharNotice, EMPTY_AGENCY_CHAR_NOTES, type AgencyCharNotes } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
+import { agencyOptOutNotice, loadAgencyOpt080 } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 import { getRegisteredCallbackSet, isCallbackRegistered } from './callback-filter';
 import { validateMmsPayload } from './mms-validator';
 import { alignMmsImageNames } from './mms-image-util';
@@ -211,7 +212,7 @@ const columnCache = new Map<string, { value: boolean; checkedAt: number }>();
 export async function hasAgencyColumn(
   client: any,
   column: string,
-  table: 'agency_send_requests' | 'agency_send_recipients' = 'agency_send_requests',
+  table: 'agency_send_requests' | 'agency_send_recipients' | 'agency_send_email_intake' = 'agency_send_requests',   // ★ 2026-11-13 C130 메일 원장 회신 본문 칸
 ): Promise<boolean> {
   const now = Date.now();
   const key = `${table}.${column}`;
@@ -226,6 +227,39 @@ export async function hasAgencyColumn(
   );
   columnCache.set(key, { value: r.rows.length > 0, checkedAt: now });
   return r.rows.length > 0;
+}
+
+/**
+ * ★ 2026-11-13 C130(Codex 설계 1R #2) — 칸 판정 캐시 한 칸 지우기. 「있음」 캐시는 만료가 없어서, 칸이 없는 스키마로 돌아간 뒤
+ *   그 칸을 싣는 문장이 42703 으로 실패하면 부르는 쪽이 이것으로 지우고 종전 문장으로 한 번 더 간다(다음 판정 = 새로 조회).
+ */
+export function forgetAgencyColumn(
+  column: string,
+  table: 'agency_send_requests' | 'agency_send_recipients' | 'agency_send_email_intake' = 'agency_send_requests',
+): void {
+  columnCache.delete(`${table}.${column}`);
+}
+
+/**
+ * ★ 2026-11-13 C130(남지현 접수 cmwd365ga1co9jnscho414cx1) — 슈퍼관리자 메일 접수 관제의 「최근 반려 · 오류 20건」(회신 제목 · 본문 포함).
+ *   칸(C130-DDL-1) 확인이 던지면 없음 취급 · 칸을 싣는 SELECT 가 42703 이면 캐시를 지우고 종전 SELECT 한 번
+ *   (관제 전체가 null 로 사라지지 않게 · Codex 설계 1R #2). 그 밖 오류는 그대로 던진다(호출부 = 관제 묶음의 catch).
+ */
+export async function readRecentRejectedIntakes(): Promise<{ rows: any[]; replyBodyReady: boolean }> {
+  const sql = (withBody: boolean) => `SELECT i.uidl, i.from_email, i.reason, i.reply_status, i.claimed_at, i.decided_at, c.company_name${withBody ? ', i.reply_subject, i.reply_text' : ''}
+       FROM agency_send_email_intake i
+       LEFT JOIN companies c ON c.id = i.company_id
+      WHERE i.status IN ('rejected', 'failed')
+      ORDER BY i.claimed_at DESC LIMIT 20`;
+  let ready = false;
+  try { ready = await hasAgencyColumn(pool, 'reply_text', 'agency_send_email_intake'); } catch { ready = false; }
+  try {
+    return { rows: (await query(sql(ready))).rows, replyBodyReady: ready };
+  } catch (err: any) {
+    if (!(ready && err?.code === '42703')) throw err;
+    forgetAgencyColumn('reply_text', 'agency_send_email_intake');
+    return { rows: (await query(sql(false))).rows, replyBodyReady: false };
+  }
 }
 
 /**
@@ -285,6 +319,11 @@ export async function createRequestCore(
      *   담당자 승인 요청 문자 줄에 실리는 이력이라 바깥 글이 들어오면 안 된다)
      */
     charNotes?: AgencyCharNotes;
+    /**
+     * ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내에 쓸 080(loadAgencyOpt080 · 바깥 트랜잭션을 열기 **전에** 읽어 넘긴다).
+     *   없으면 = 자체 트랜잭션 입구(화면 접수)는 커밋 뒤 코어가 읽고 · 바깥 트랜잭션 입구는 '' (풀을 다시 기다리지 않는다).
+     */
+    opt080?: string;
   },
 ): Promise<CreateCoreResult> {
   // ★ 2026-11-06 C109 D1 · D5(뿌리 R68) — 쓰는 자리 판정(모든 검사 앞): 뺌 · 바꿈 = 적용 + 알림 · 막음 · 토큰 안 글자 · 정리 후 빈 값 = 반려 · 명단 값 같은 규칙.
@@ -563,7 +602,11 @@ export async function createRequestCore(
     //   ⛔ 커밋 전에 부르면 워커가 아직 없는 행을 찾는다. 외부 트랜잭션(원스텝 다건)은 호출부가 커밋 뒤에 부른다.
     kickFirstTest(request.id);
   }
-  return { ok: true, request, callbackKinds, notice: agencyCharNotice(charNotes) };
+  // ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내(접수한 글 · 확정 유형 · 광고 여부 그대로 · 발송 글은 무변경 · 설계서 §2 A2).
+  //   080 = 입구가 넘긴 값 → 없으면 자체 트랜잭션 입구만 여기서(연결을 돌려준 뒤) 읽는다 · 바깥 트랜잭션 입구는 '' (낱말만 붙는 꼬리 글).
+  const opt080 = pre?.opt080 !== undefined ? pre.opt080 : (own ? await loadAgencyOpt080(auth.userId, auth.companyId) : '');
+  const optOut = agencyOptOutNotice({ content: body, isAd: !!isAd, messageType: type, opt080, how: source === 'email' ? 'mail' : 'edit' });
+  return { ok: true, request, callbackKinds, notice: [...agencyCharNotice(charNotes), ...optOut] };
 }
 
 /**
