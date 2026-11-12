@@ -9,6 +9,7 @@
  * 쓰는 곳 = 직접발송 워커 · 처리기 · 세 큐 CT(sms-queue bulkInsertSmsQueue · insertBrandQueue · insertAlimtalkQueue 의 tx 인자)만.
  */
 import { mysqlPool, mysqlQuery } from '../config/database';
+import { noteQueueSql } from './queue-scan-guard';
 
 /** 커밋 기록 표(smsdb · InnoDB · DDL = 설계서 §3-0 · 없으면 관문이 옛 방식으로 돌린다) */
 export const LOAD_CHUNK_TABLE = 'HANJUL_LOAD_CHUNK';
@@ -54,7 +55,9 @@ export async function openQueueTransaction(pool: { getConnection(): Promise<any>
   const conn = await pool.getConnection();
   const close = () => { try { conn.destroy(); } catch { /* 닫기 실패 = 무시 */ } };
   try {
-    await conn.query(`SET SESSION innodb_lock_wait_timeout = ${LOAD_CHUNK_LOCK_WAIT_SEC}`);
+    const lockSql = `SET SESSION innodb_lock_wait_timeout = ${LOAD_CHUNK_LOCK_WAIT_SEC}`;
+    noteQueueSql('openQueueTransaction', lockSql);
+    await conn.query(lockSql);
     await conn.beginTransaction();
   } catch (e) {
     close();
@@ -64,6 +67,7 @@ export async function openQueueTransaction(pool: { getConnection(): Promise<any>
   let done = false;
   return {
     run: async (sql, params) => {
+      noteQueueSql('openQueueTransaction', sql, params); // C131 R94 지킴이 — 판정 · 기록만(던지지 않음)
       const [rows] = await conn.query(sql, params);
       return rows;
     },

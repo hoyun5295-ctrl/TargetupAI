@@ -4,6 +4,7 @@
 // 하드코딩 금지. 환경변수/설정파일 기반.
 
 import { mysqlQuery, mysqlPool } from '../config/database';
+import { noteQueueSql } from './queue-scan-guard';
 import { guardDemoLeak } from './demo-company';   // ★ 2026-10-09 시연 회사 최후 방어(적재 = 사고)
 import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry } from './spam-block';
 import { CACHE_TTL, BATCH_SIZES } from '../config/defaults';
@@ -1535,6 +1536,7 @@ export async function loadQueueUnit(p: {
     return { state: 'rejected', table, reason: `단위 기록 전 실패: ${String(e?.message || e).slice(0, 160)}` };
   }
   try {
+    noteQueueSql('loadQueueUnit', ins.sql, ins.params); // C131 R94 지킴이(INSERT = 빠른 길)
     await conn.query(ins.sql, ins.params);
   } catch (e: any) {
     try { conn.destroy(); } catch { /* 이미 끊김 */ }

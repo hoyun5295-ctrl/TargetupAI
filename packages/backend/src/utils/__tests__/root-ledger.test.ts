@@ -3466,6 +3466,7 @@ describe('R25 넓힘(1102 설계 §17-5) 경보 CT 명세(pass · failures)의 �
     'utils/agency-send-mail-worker.ts agency-mail-claim-exhausted': '선점 단계 · 발신자 판정 전 · 회사 없음',
     'utils/agency-send-worker.ts agency-dispatch-stuck': '처리기 건강(붙잡힌 연결 · 재시작 필요) · 회사 무관',
     'utils/expired-pending-sweeper.ts queue-abnormal-status-closed': '발송 대기열 상태값 이상 = 서버 · 커널 · 회사 무관',
+    'utils/queue-scan-guard.ts queue-scan-guard': '큐 표를 좁히지 않는 SQL 모양(실행 함수 · 서버 코드 · C131 R94) = 회사 무관',
     'utils/retention-sweeper.ts retention-pdf-outside': '보관 폴더 밖 경로 = 저장소 · 여러 회사 작업',
   };
   it('명세 안 companyId: null 자리 = 목록과 같다 · 명세 뽑기가 살아 있다', () => {

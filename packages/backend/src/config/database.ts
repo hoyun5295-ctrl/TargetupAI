@@ -1,5 +1,6 @@
 import { Pool, types, type QueryResult } from 'pg';
 import mysql from 'mysql2/promise';
+import { noteQueueSql } from '../utils/queue-scan-guard';
 
 // timestamp without timezone를 UTC로 처리 (PostgreSQL timezone=Etc/UTC)
 types.setTypeParser(1114, (str) => str + 'Z');
@@ -149,6 +150,7 @@ void (async () => {
 export const mysqlQuery = async (sql: string, params?: any[]) => {
   const conn = await mysqlPool.getConnection();
   try {
+    noteQueueSql('mysqlQuery', sql, params); // C131 R94 지킴이 — 판정 · 기록만(던지지 않음)
     const [rows] = await conn.query(sql, params);
     return rows;
   } finally {
@@ -201,6 +203,7 @@ export async function withBoundedMysql<T>(
   let destroyed = false;
   const run: BoundedMysqlRun = async (sql, params) => {
     try {
+      noteQueueSql('withBoundedMysql', sql, params); // C131 R94 지킴이 — 판정 · 기록만(던지지 않음)
       const [rows] = await raceBounded(conn.query(sql, params), deadline - Date.now(), '실행');
       return rows;
     } catch (err) {
@@ -257,9 +260,12 @@ export const mysqlBillingQuery = async (sql: string, params?: any[]) => {
   try {
     if (MYSQL_BILLING_STMT_TIMEOUT_MS > 0) {
       try {
-        await conn.query(`SET SESSION max_execution_time = ${Math.floor(MYSQL_BILLING_STMT_TIMEOUT_MS)}`);
+        const limitSql = `SET SESSION max_execution_time = ${Math.floor(MYSQL_BILLING_STMT_TIMEOUT_MS)}`;
+        noteQueueSql('mysqlBillingQuery', limitSql);
+        await conn.query(limitSql);
       } catch { /* MariaDB 등 미지원 서버 — 상한 없이 진행 */ }
     }
+    noteQueueSql('mysqlBillingQuery', sql, params); // C131 R94 지킴이 — 판정 · 기록만(던지지 않음)
     const [rows] = await conn.query(sql, params);
     return rows;
   } finally {
