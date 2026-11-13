@@ -20,6 +20,8 @@ export interface PickedMallProduct {
   productUrl: string | null;
   /** ★ 2026-10-10 서버가 다시 읽을 상품번호(/search 응답 · 없으면 null) */
   no?: string | null;
+  /** ★ 2026-11-13 C133 F2 ② 최근 30일 조회 · 구매(서버가 줄 때만 · 없으면 표시 없음) */
+  signal?: { views: number; orders: number };
 }
 
 interface ProviderTab { provider: string; label: string; }
@@ -196,6 +198,9 @@ export default function MallProductPickerModal({ open, onClose, onPick, provider
                           <span className="text-slate-900 font-bold">{won(p.price)}</span>
                         )}
                       </div>
+                      {p.signal && (
+                        <div className="mt-0.5 text-[11px] text-slate-500">최근 30일 조회 {p.signal.views.toLocaleString()} · 구매 {p.signal.orders.toLocaleString()}</div>
+                      )}
                     </div>
                     <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 self-center ${on ? 'bg-emerald-500 border-emerald-400 text-white' : 'border-slate-300 text-transparent'}`}>
                       <Check className="w-3.5 h-3.5" />

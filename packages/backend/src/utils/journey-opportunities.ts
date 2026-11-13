@@ -44,6 +44,7 @@ import { getCreditCost } from './ai-credit-calc';
 import { getOwnerCustomerScopeSql } from './store-scope';
 // ★ 2026-10-25 #9(D1 = A) — 「이 구간을 맡은 여정」 = 보는 사람 여정 + 관리자가 켠 여정(한 곳)
 import { journeyCoverSql } from './journey-access';
+import { v3Live } from './v3-stage';   // ★ 2026-11-13 C133 F1 단계 개방
 
 export type JourneyOpportunityType =
   | 'cart_recovery' | 'onboarding' | 'dormant' | 'birthday' | 'repurchase_due' | 'wishlist'
@@ -403,7 +404,7 @@ async function buildSuccessionOpportunities(
 //   표본 미달 · 연동 잠금 · 이미 있음을 숨기지 않고 상태 문구로 보여 준다. 캐시는 리듬 사실만(빈 곳 판정은 매번 · 회의론자 D7).
 // ════════════════════════════════════════════════════════════════════
 
-export type FlowPlanKey = 'signup' | 'first_purchase' | 'repurchase' | 'dormant' | 'dormant_return';
+export type FlowPlanKey = 'signup' | 'first_purchase' | 'repurchase' | 'dormant' | 'dormant_return' | 'cart' | 'browse' | 'birthday';
 
 export interface FlowPlanItem {
   key: FlowPlanKey;
@@ -432,6 +433,8 @@ export interface JourneyDiagnosis {
   products: Array<ProductCycle & { status: 'ready' | 'exists' }>;
   quote: { draftEach: number; activateEach: number };
   source: string;
+  /** ★ 2026-11-13 C133 F1 — 「기본 여정 한 번에 켜기」가 이 회사에 열렸는가(순간 칸 셋 · 혜택 칸을 그릴지 · 판정 = v3-stage) */
+  pack: boolean;
 }
 
 /** 이탈 기준일 = 재구매 간격 p90 을 30~365 로 묶은 값(표본 미달 = null · 지어내지 않는다). */
@@ -461,13 +464,15 @@ export function buildFlowPlan(
   draftedTriggers: Set<string> = new Set(),
   /** ★ 2026-10-25 #9 — 담당자 화면에서 관리자가 켠 여정이 맡은 구간(담당자 목록 · 지도에 없는 여정이라 이유를 따로 말한다) */
   othersTriggers: Set<string> = new Set(),
+  /** ★ 2026-11-13 C133 F1 — 순간 칸 셋(장바구니 · 조회 후 미구매 · 생일)을 넣는가. 기본 false = 종전 다섯 칸 그대로(단계가 닫힌 회사) */
+  momentSlots: boolean = false,
 ): FlowPlanItem[] {
   const f2s = rhythm?.firstToSecond;
   const gap = rhythm?.gap;
   const dormant = dormantDaysFromRhythm(rhythm);
   const dormantDays = dormant ?? DEFAULT_DORMANT_DAYS;
   const short = (n: number) => `표본 ${n.toLocaleString()}건이라 아직 실측으로 정하지 않았어요. 참고 간격으로 시작하고 초안에서 고칠 수 있어요.`;
-  const items: Array<Omit<FlowPlanItem, 'status' | 'reason'>> = [
+  const base: Array<Omit<FlowPlanItem, 'status' | 'reason'>> = [
     {
       key: 'signup', triggerEvent: 'customer.created', title: '신규 가입 환영',
       objective: '가입한 고객을 반기고 첫 구매로 이어지게 합니다.',
@@ -513,6 +518,30 @@ export function buildFlowPlan(
       evidence: `휴면 여정과 같은 기준(${dormantDays}일)으로 복귀를 봅니다.`,
     },
   ];
+  const moments: Array<Omit<FlowPlanItem, 'status' | 'reason'>> = [
+    // ★ 2026-11-13 C133 F1(설계서 docs/2026-11-13-hanjul-v3-design.md §3-1 2번) — 순간 칸 셋.
+    //   대상은 추출기가 시간 창으로 고른다(장바구니 · 조회 = 사건 뒤 하루 띠 · 생일 = 며칠 앞) → 간격을 잴 것이 없다 = 한 칸 · 참고 간격.
+    //   데이터가 없는 회사는 아래 잠금 판정(resolveTriggerAvailability)이 그대로 막는다. 포인트 소멸은 기준 포인트를 지어낼 수 없어 넣지 않는다.
+    {
+      key: 'cart', triggerEvent: 'cdp.cart_abandon', title: '장바구니 다시 알림',
+      objective: '장바구니에 담고 결제하지 않은 고객에게 담아 둔 상품을 다시 알립니다.',
+      daysFromStart: [0], dormantDays: null, measured: false, sample: null,
+      evidence: '장바구니에 담고 결제하지 않은 때 한 번 보내요. 기다리는 시간은 초안에서 고칠 수 있어요.',
+    },
+    {
+      key: 'browse', triggerEvent: 'cdp.browse_no_purchase', title: '보고 간 상품 다시 알림',
+      objective: '상품을 보고 사지 않은 고객에게 본 상품을 다시 알립니다.',
+      daysFromStart: [0], dormantDays: null, measured: false, sample: null,
+      evidence: '상품을 보고 사지 않은 때 한 번 보내요. 기다리는 날은 초안에서 고칠 수 있어요.',
+    },
+    {
+      key: 'birthday', triggerEvent: 'customer.birthday_approaching', title: '생일 축하',
+      objective: '생일이 다가오는 고객에게 축하 인사를 전합니다.',
+      daysFromStart: [0], dormantDays: null, measured: false, sample: null,
+      evidence: '생일이 다가오는 때 한 번 보내요. 며칠 전에 보낼지는 초안에서 고칠 수 있어요.',
+    },
+  ];
+  const items = momentSlots ? [...base, ...moments] : base;
   return items.map((raw) => {
     const daysFromStart = increasing(raw.daysFromStart);
     const it = wasCapped(raw.daysFromStart, daysFromStart)
@@ -584,6 +613,7 @@ export async function buildJourneyDiagnosis(companyId: string, viewerUserId?: st
     for (const k of (tf.product_keys || [])) coveredKeys.add(`${String(tf.door || '')}:${String(k)}`);
   }
   const availability = toAvailabilityMap(resolveTriggerAvailability(await getCompanyJourneyFacts(companyId)));
+  const pack = await v3Live('journey-pack', companyId);
   const rhythm = facts0.rhythm;
   const dormant = dormantDaysFromRhythm(rhythm);
   const facts: JourneyDiagnosis['facts'] = [];
@@ -605,7 +635,8 @@ export async function buildJourneyDiagnosis(companyId: string, viewerUserId?: st
     computedAt: new Date(facts0.at).toISOString(),
     rhythm,
     facts,
-    flowPlan: buildFlowPlan(rhythm, activeTriggers, availability, draftedTriggers, othersTriggers),
+    flowPlan: buildFlowPlan(rhythm, activeTriggers, availability, draftedTriggers, othersTriggers, pack),
+    pack,
     products: facts0.products.map((p) => ({ ...p, status: coveredKeys.has(`${p.door}:${p.key}`) ? 'exists' as const : 'ready' as const })),
     quote: { draftEach: getCreditCost('journey-ai-generate'), activateEach: getCreditCost('journey-activate') },
     source: rhythm
@@ -621,11 +652,25 @@ export async function buildJourneyDiagnosis(companyId: string, viewerUserId?: st
  *   날짜도 넣지 않는다 — 넣으면 자정을 넘긴 재시도가 다른 요청이 된다. 같은 내용 = 같은 키 → 과금 원장 시도 키(차감이 있으면 DRAFT_ALREADY_MADE).
  *   대가: 같은 내용의 초안을 다시 만들 수 없다(실측 간격이 바뀌면 키가 바뀐다 · 직접 만들기 경로는 그대로).
  */
-export function recoRequestId(companyId: string, userId: string, plan: Pick<FlowPlanItem, 'triggerEvent' | 'daysFromStart' | 'dormantDays'>): string {
+export function recoRequestId(
+  companyId: string,
+  userId: string,
+  plan: Pick<FlowPlanItem, 'triggerEvent' | 'daysFromStart' | 'dormantDays'>,
+  /** ★ 2026-11-13 C133 F1 — 적은 혜택(다른 혜택 = 다른 요청). 비우면 키가 종전과 글자 그대로 같다(이미 만든 초안의 「이미 만듦」 판정 유지) */
+  benefit?: string | null,
+): string {
+  const b = normalizeRecoBenefit(benefit);
   const h = createHash('sha256')
-    .update(`${companyId}|${userId}|reco|${plan.triggerEvent}|${plan.daysFromStart.join(',')}|${plan.dormantDays ?? ''}`)
+    .update(`${companyId}|${userId}|reco|${plan.triggerEvent}|${plan.daysFromStart.join(',')}|${plan.dormantDays ?? ''}${b ? `|benefit:${b}` : ''}`)
     .digest('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
+
+/** (순수) 추천 창에 적은 혜택 — 앞뒤 공백 · 이어진 공백 정리 · 빈 글 = 없음(길이 제한은 질문표 판정 decideJourneySpec 이 한다) */
+export function normalizeRecoBenefit(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const s = raw.replace(/\s+/g, ' ').trim();
+  return s === '' ? null : s;
 }
 
 /** 추천 계획 하나를 서버가 다시 계산해 돌려준다(화면이 보낸 숫자는 믿지 않는다 · 설계서 §5). */

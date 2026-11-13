@@ -365,7 +365,9 @@ describe('7. 배선 계약', () => {
   });
   it('몰 검색 응답 = 세 몰 모두 재조회 번호 · 정확 일치 · 상품 바꾸기 = 범위 확인', () => {
     const mp = BACK('routes', 'mall-products.ts');
-    expect((mp.match(/products: withLineFields\(products, q\)/g) || []).length).toBe(3);
+    // ★ 2026-11-13 C133 F2 ② — 세 몰 모두 withLineFields 를 지난 목록에 최근 30일 숫자를 덧붙인다(덧붙임 · 실패해도 목록은 그대로 = attachProductNumbers)
+    expect((mp.match(/products: await attachProductNumbers\(req\.user, withLineFields\(products, q\)\)/g) || []).length).toBe(3);
+    expect((mp.match(/withLineFields\(products, q\)/g) || []).length).toBe(3);
     const cards = between(mp, "mallProductsRouter.post('/cards'", "mallProductsRouter.get('/match'");
     expect(cards).toContain('resolveIntegrationActor(req.user)');
   });

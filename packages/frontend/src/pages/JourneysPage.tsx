@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { goUpTo } from '../lib/scroll-restoration';
+import { useV3Feature } from '../utils/v3-features';   // ★ 2026-11-13 C133 F1
 import {
   ArrowLeft, Loader2, Pause, Play, Plus, Power, RefreshCw, Sparkles,
   ShoppingCart, Cake, Calendar as CalendarIcon, UserPlus, Repeat, Moon, MessageSquare,
@@ -534,6 +535,7 @@ function detectUnsafe(text: string): string[] {
 
 export default function JourneysPage() {
   const navigate = useNavigate();
+  const journeyPackOpen = useV3Feature('journey-pack');   // ★ 2026-11-13 C133 F1
   const toast = useToast();
   // ★ 2026-08-02 §13-2 — 'studio' = 한 화면에서 스텝 하나를 완결하는 흐름(스텝마다 화면 전환).
   //   'review'(한 화면에 전부)는 정보 알림·날짜축 빌더와 저장된 여정 편집이 계속 쓴다.
@@ -1493,6 +1495,13 @@ export default function JourneysPage() {
       title={opportunities.length > 0 ? '오늘의 여정 기회' : '다음 수'}
       meta={opportunities.length > 0 ? '회사 데이터에서 찾은 비어 있는 여정' : undefined}
       right={opportunities.length > 0 ? (<>
+                    {/* ★ 2026-11-13 C133 F1 — 지도 화면 안쪽에 있던 진단 창으로 바로(단계가 열린 회사에만 · 창은 지도 화면이 연다) */}
+                    {journeyPackOpen && (
+                      <button type="button" onClick={() => navigate('/ai-journeys/map?open=diagnosis')}
+                        className="inline-flex items-center gap-1.5 h-9 px-3 rounded-lg bg-slate-900 hover:bg-slate-700 text-white text-[12.5px] font-semibold whitespace-nowrap transition-colors">
+                        <Sparkles className="w-3.5 h-3.5" />기본 여정 한 번에 켜기
+                      </button>
+                    )}
                     {oppTotalPages > 1 && (
                       <div className="flex items-center gap-1.5">
                         <button onClick={() => setOppPage(Math.max(0, oppPageIdx - 1))} disabled={oppPageIdx === 0} className="p-1.5 rounded-lg bg-white hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed" aria-label="이전">

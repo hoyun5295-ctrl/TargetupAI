@@ -491,7 +491,6 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
     'routes/campaigns.ts': '샘플 고객 1명(테스트 발송)',
     'routes/spam-filter.ts': '샘플 고객 1명(스팸 검사)',
     'utils/spam-test-queue.ts': '샘플 고객 1명(스팸 검사)',
-    'utils/performance-benchmark.ts': '동종 평균 통계',
   };
   const RAW = /sms_opt_in\s*=\s*(true|false)\b/;
 
@@ -506,7 +505,7 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
     expect(count('routes/campaigns.ts')).toBe(1);
     expect(count('routes/spam-filter.ts')).toBe(1);
     expect(count('utils/spam-test-queue.ts')).toBe(2);
-    expect(count('utils/performance-benchmark.ts')).toBe(3);   // 쿼리 2 + 출처 표기 문자열 1
+    expect(count('utils/performance-benchmark.ts')).toBe(0);   // ★ 2026-11-13 C133 F3 다시 씀 — 비율 지표만 · 고객 수(수신동의 열)를 읽지 않는다
     expect(count('utils/journey-safety-filter.ts')).toBe(1);
     expect(count('utils/channel-eligibility.ts')).toBe(1);
   });

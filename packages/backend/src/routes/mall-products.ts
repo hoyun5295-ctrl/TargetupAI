@@ -24,6 +24,7 @@ import { resolveIntegrationActor, canTouchIntegration, type IntegrationActor } f
 
 import { publicErrorText, respondUserError } from '../utils/http-error';
 import { parsePageParams } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
+import { attachProductNumbers } from '../utils/product-signal';   // ★ 2026-11-13 C133 F2 ② 상품마다 최근 30일 조회 · 구매(숫자를 볼 수 있는 요청자에게만 · 실패해도 목록은 그대로)
 const WOO_PREFIX = 'woocommerce:';
 
 /**
@@ -79,7 +80,7 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
       if (!integ) return res.status(404).json({ success: false, error: '카페24 연동이 없습니다.' });
       const creds = await getCafe24ByoCredentials(companyId, integ.mallId).catch(() => undefined);
       const products = await fetchCafe24Products(integ, { q, limit }, creds);
-      return res.json({ success: true, provider, products: withLineFields(products, q) });
+      return res.json({ success: true, provider, products: await attachProductNumbers(req.user, withLineFields(products, q)) });
     }
 
     if (provider === 'naver') {
@@ -88,14 +89,14 @@ mallProductsRouter.get('/search', async (req: any, res: Response) => {
       const creds = (await getNaverCommerceCredentials(companyId).catch(() => null)) || undefined;
       // storeUrl(스마트스토어 주소 슬러그) 확정 전 — 링크는 null. 확정 후 opts.storeUrl 주입.
       const products = await fetchNaverProducts(integ, { q, size: limit }, creds);
-      return res.json({ success: true, provider, products: withLineFields(products, q) });
+      return res.json({ success: true, provider, products: await attachProductNumbers(req.user, withLineFields(products, q)) });
     }
 
     if (provider.startsWith('woocommerce:')) {
       const integ = await wooMallOf(companyId, provider, await resolveIntegrationActor(req.user));
       if (!integ) return res.status(404).json({ success: false, error: '우커머스 연동이 없는 몰입니다.' });
       const products = await fetchWooStoreProducts(integ.siteUrl, { q, limit }, integ.mallId);
-      return res.json({ success: true, provider, products: withLineFields(products, q) });
+      return res.json({ success: true, provider, products: await attachProductNumbers(req.user, withLineFields(products, q)) });
     }
 
     return res.status(400).json({

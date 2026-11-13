@@ -25,6 +25,24 @@ import { FatigueCap, normalizeFatigueCap } from './fatigue-guard-core';
 export type { FatigueCap } from './fatigue-guard-core';
 export { buildFatigueGuardClause, normalizeFatigueCap } from './fatigue-guard-core';
 
+/**
+ * ★ 2026-11-13 C133 F1 — 회사 피로도 상한이 켜졌는가(화면 안내용 세 갈래).
+ *   getFatigueCap 은 못 읽은 것도 null(게이트 비활성)로 돌려준다. 화면 안내는 「꺼져 있어요」라고 단정하므로 못 읽은 것(unknown)과 꺼진 것(off)을 가른다.
+ *   unknown = 칸 없음 · 조회 실패 · 회사 없음 → 화면은 아무 말도 하지 않는다. 판정 = 게이트와 같은 normalizeFatigueCap.
+ */
+export async function fatigueCapState(companyId: string): Promise<'on' | 'off' | 'unknown'> {
+  try {
+    const r = await query(
+      `SELECT fatigue_cap_days, fatigue_cap_max FROM companies WHERE id = $1::uuid`,
+      [companyId],
+    );
+    if (r.rows.length === 0) return 'unknown';
+    return normalizeFatigueCap(r.rows[0].fatigue_cap_days, r.rows[0].fatigue_cap_max) ? 'on' : 'off';
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** 회사 피로도 상한 조회 — 미설정/컬럼 미존재(42703) = null(게이트 비활성). */
 export async function getFatigueCap(companyId: string): Promise<FatigueCap | null> {
   try {

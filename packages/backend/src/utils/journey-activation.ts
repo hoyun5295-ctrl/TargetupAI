@@ -28,6 +28,25 @@ export type GuardedActivation =
   | { ok: false; code: 'NOT_FOUND' | 'DB_MIGRATION_PENDING' | 'PRETEST_REQUIRED' | 'INSUFFICIENT_CREDIT' | 'ACTIVATE_FAILED' | 'CREDIT_SETTLE_FAILED' | 'DISPATCH_FAILED'; message: string }
   | { ok: false; code: 'CALLBACK_CONFIRM_REQUIRED'; message: string; callbackUnregisteredCount: number; unregisteredDetails: unknown };
 
+/** 켜기 요청이 실을 수 있는 최대 인원의 위쪽 끝(칸 = 정수 · 화면 입력 칸은 숫자 아홉 자리까지) */
+export const ACTIVATION_CAP_MAX = 999_999_999;
+
+/**
+ * (순수) 켜기 요청의 caps 읽기 — { 여정 id: 1 이상 정수 | null } 꼴만. 없음 = 빈 표(최대 인원을 건드리지 않는다 = 종전).
+ *   꼴이 틀리면 null(라우트가 400) — 틀린 값을 「건드리지 않음」으로 흘려 보내지 않는다.
+ */
+export function parseActivationCaps(raw: unknown): Map<string, number | null> | null {
+  const out = new Map<string, number | null>();
+  if (raw === undefined || raw === null) return out;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return null;
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (v === null) { out.set(id, null); continue; }
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > ACTIVATION_CAP_MAX) return null;
+    out.set(id, v);
+  }
+  return out;
+}
+
 /**
  * 여정 하나 켜기(게이트 전부). 옛 라우트 본문과 같은 순서:
  *   ①상태 · 검증 마커 조회(컬럼 없음 = 마이그레이션 필요) ②검증 마커 없음 = 거부 ③매장번호 모드 미등록 회신 확인
@@ -43,7 +62,8 @@ export async function activateJourneyGuarded(
   companyId: string,
   journeyId: string,
   userId: string,
-  opts: { confirmCallbackExclusion?: boolean; requireActiveSource?: string } = {},
+  /** setCap ★ 2026-11-13 C133 — 켜기 창이 보여 준 최대 인원(주면 켜는 문장이 함께 쓴다 · journey-builder activateJourney) */
+  opts: { confirmCallbackExclusion?: boolean; requireActiveSource?: string; setCap?: number | null } = {},
 ): Promise<GuardedActivation> {
   let stRow;
   try {
@@ -103,7 +123,8 @@ export async function activateJourneyGuarded(
     }
   }
 
-  const result = await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource });
+  // setCap 을 안 받았으면 undefined 그대로 넘어간다 = 최대 인원을 건드리지 않는다(종전)
+  const result = await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource, setCap: opts.setCap });
   if (!result.ok) return { ok: false, code: 'ACTIVATE_FAILED', message: result.reason || '활성화 실패' };
 
   // ★ 2026-11-02 엔진 재설계 E1-2 — 한 번 보내기 · 이번 켜기가 넣기 대기를 찍은 판 = 정산 · 되돌리기 · 적재를 여정 잠금 안에서(토큰 = 이번 시도만).
@@ -287,7 +308,8 @@ export async function activateJourneysInOrder(
   companyId: string,
   userId: string,
   journeyIds: string[],
-  opts: { confirmCallbackExclusionIds?: string[]; acknowledgedOverlaps?: string[] } = {},
+  /** caps ★ 2026-11-13 C133 — 여정 id → 켜기 창이 보여 준 최대 인원(null = 비움). 든 여정만 그 값으로 켠다(없는 여정 = 최대 인원 그대로). */
+  opts: { confirmCallbackExclusionIds?: string[]; acknowledgedOverlaps?: string[]; caps?: Map<string, number | null> } = {},
 ): Promise<BatchActivation> {
   const ids = [...new Set(journeyIds.map(String))].slice(0, MAX_BATCH_ACTIVATION);
   const lineageReady = await lineageColumnsReady();
@@ -335,7 +357,10 @@ export async function activateJourneysInOrder(
       continue;
     }
     try {
-      const result = await activateJourneyGuarded(companyId, j.id, userId, { confirmCallbackExclusion: confirmSet.has(j.id) });
+      const result = await activateJourneyGuarded(companyId, j.id, userId, {
+        confirmCallbackExclusion: confirmSet.has(j.id),
+        ...(opts.caps?.has(j.id) ? { setCap: opts.caps.get(j.id) as number | null } : {}),
+      });
       items.push({ journeyId: j.id, name: j.name, result });
       if (result.ok) {
         await persistOverlapAcks(companyId, [j.id], opts.acknowledgedOverlaps || []).catch((e: any) => console.warn('[Journeys activate-batch] 고른 겹침 저장 실패(켜기는 유지):', j.id, e?.message));

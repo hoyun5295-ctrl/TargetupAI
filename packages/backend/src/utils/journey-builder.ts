@@ -1110,7 +1110,12 @@ async function activationBlockCore(companyId: string, journeyId: string, opts: {
 export async function activateJourney(
   companyId: string, journeyId: string, userId: string,
   /** ★ V.3 Codex 적대 A2 — 새 모양 복제본을 켤 때 원본 id. 같은 계보 잠금 안에서 원본이 아직 켜져 있을 때만 켠다(그사이 사람이 멈췄으면 그만둔다). */
-  opts: { requireActiveSource?: string } = {},
+  /**
+   * setCap ★ 2026-11-13 C133(Codex 구현 1R ~ 3R 같은 계열) — 켜기 창이 보여 준 최대 인원(null = 비움 = 제한 없음).
+   *   주면 **켜는 그 UPDATE 문장에서** 값을 함께 쓴다 = 켜지는 값이 곧 화면의 값(따로 저장하는 요청이 없다 → 끊은 저장 · 잃은 응답 · 늦게 닿은 저장이 없다).
+   *   안 주면 최대 인원을 건드리지 않는다(하나씩 켜기 · 새 모양 켜기 = 종전 그대로).
+   */
+  opts: { requireActiveSource?: string; setCap?: number | null } = {},
 ): Promise<{
   ok: boolean; reason?: string;
   /** ★ 2026-11-02 E1-2 — 이 켜기가 찍은 approved_at(글자 · 마이크로초) = 이번 시도 토큰(한 번 보내기 되돌리기가 이 시도만 건드린다) */
@@ -1176,6 +1181,8 @@ export async function activateJourney(
         return { ok: false, reason: '진입 기준 기록에 실패해 여정을 켜지 못했습니다. 잠시 후 다시 켜 주세요.' };
       }
     }
+    // ★ 2026-11-13 C133 — 켜기 창이 준 최대 인원은 켜는 문장이 함께 쓴다(같은 행 · 같은 커밋 · 조건 = 초안 · 멈춤 + 검증 표식 그대로)
+    const withCap = opts.setCap !== undefined;
     r = await actClient.query(
     `UPDATE journeys SET
       status = 'active',
@@ -1183,7 +1190,8 @@ export async function activateJourney(
       approved_at = NOW(),
       paused_at = NULL,
       pause_reason = NULL,
-      updated_at = NOW()${oneShotCols ? `,
+      updated_at = NOW()${withCap ? `,
+      threshold_recipients_per_step = $4::int` : ''}${oneShotCols ? `,
       one_shot_dispatch_pending_at = CASE WHEN start_kind = 'one_shot' AND one_shot_dispatched_at IS NULL THEN NOW() ELSE one_shot_dispatch_pending_at END` : ''}
      WHERE id = $1::uuid AND company_id = $2::uuid AND status IN ('draft', 'paused')
        AND last_pretest_passed_at IS NOT NULL
@@ -1194,7 +1202,7 @@ export async function activateJourney(
     // ★ 2026-08-02 Codex 2R — **사전검사 마커도 같은 문장 안으로 옮겼다(같은 교훈의 두 번째 적용).**
     //   라우트가 SELECT로 마커를 확인한 뒤 여기까지 오는 사이에 스텝이 추가되면(추가는 마커를 NULL로 만든다)
     //   확인은 통과했는데 검사받지 않은 문안이 켜진다. 확인과 반영이 갈라져 있으면 그 틈이 곧 구멍이다.
-    [journeyId, companyId, userId]
+    [journeyId, companyId, userId].concat(withCap ? [opts.setCap as any] : [])
     );
     // ★ V.3 §6-1 ~ §6-3 — 멈춤 → 다시 켜기 보정(밀린 문자 일 단위 밀기 · 멈춘 동안 사건 안 받기 · 굳은 고객 되살리기). 첫 켜기는 손대지 않는다.
     //   실패 = 트랜잭션 되돌림(안 켜지는 방향 · 계보 컬럼 유무와 무관).

@@ -5,6 +5,9 @@ import { readPlanFreeQuotas } from '../utils/free-messaging';
 import { authenticate } from '../middlewares/auth';
 import { parseFeatureSeen, recordFeatureSeen, FEATURE_SEEN_RATE } from '../utils/feature-interest';
 import { buildFeatureIntrosPayload, resolveSignedMedia } from '../utils/plan-feature-intros-serve';
+import { claimIntro, dismissIntro } from '../utils/v3-intro';   // ★ 2026-11-13 C133 F7
+import { v3FeaturesFor } from '../utils/v3-stage';   // ★ 2026-11-13 C133 단계 개방
+import { handleDbMigrationError } from '../utils/db-migration-error';
 
 const router = Router();
 
@@ -58,6 +61,46 @@ router.post('/feature-seen', authenticate, featureSeenLimiter, async (req: Reque
   const input = parseFeatureSeen(req.body);
   if (input) await recordFeatureSeen(req, input);
   return res.status(204).end();
+});
+
+// ★ 2026-11-13 C133 F7 — 로그인 직후 「한줄로 V3」 소개 창(판정 · SQL = utils/v3-intro.ts · 설계서 docs/2026-11-13-hanjul-v3-design.md §2).
+//   claim = 띄울지 묻는 것이 곧 노출 한 번을 쓰는 것(서버 한 문장 선점 · 계정당 최대 3번 · 로그인당 1번) · 로그인 표식은 요청의 토큰에서 서버가 만든다.
+//   표가 없으면(DDL 전) 503 DB_MIGRATION_PENDING → 화면은 띄우지 않는다. 그 밖의 실패도 화면은 띄우지 않는다(모르면 띄우지 않는다).
+const bearerOf = (req: Request): string | null => {
+  const h = String(req.headers.authorization || '');
+  return h.startsWith('Bearer ') ? h.slice(7).trim() || null : null;
+};
+router.post('/v3-intro/claim', authenticate, featureSeenLimiter, async (req: Request, res: Response) => {
+  try {
+    const out = await claimIntro(req.user as any, bearerOf(req));
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    if (handleDbMigrationError(err, res, 'user_intro_acks')) return;
+    console.error('[plans/v3-intro/claim] 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '소개를 불러오지 못했습니다.' });
+  }
+});
+router.post('/v3-intro/dismiss', authenticate, featureSeenLimiter, async (req: Request, res: Response) => {
+  try {
+    await dismissIntro(req.user as any);
+    return res.json({ success: true });
+  } catch (err: any) {
+    if (handleDbMigrationError(err, res, 'user_intro_acks')) return;
+    console.error('[plans/v3-intro/dismiss] 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '저장하지 못했습니다.' });
+  }
+});
+
+// ★ 2026-11-13 C133 — 이 회사에 지금 열린 V3 기능(화면이 입구를 그릴지 묻는다 · 판정 = utils/v3-stage.ts 한 곳 · 닫힌 회사 = 전부 false).
+//   값은 입구를 그릴지에만 쓴다(권한은 각 기능의 서버 길이 다시 판정한다). 요금제를 못 읽으면 success: false(모름 = 화면은 이번에만 그리지 않고 다음에 다시 묻는다).
+router.get('/v3-features', authenticate, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  const user = req.user as any;
+  const companyId = user?.userType === 'super_admin' ? null : user?.companyId;
+  const features = await v3FeaturesFor(companyId);
+  if (!features) return res.json({ success: false, code: 'UNKNOWN' });
+  return res.json({ success: true, features });
 });
 
 // ★ 2026-10-07 기능 안내 원장 · 영상 — 로그인한 사람에게만(Harold 「구멍 자체를 만들지 마」) · 소유 = utils/plan-feature-intros-serve.ts

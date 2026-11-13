@@ -75,7 +75,8 @@ import AlimtalkSendModal from '../components/AlimtalkSendModal';
 // ★ 2026-07-29 브랜드메시지 발송 풀 화면 — 알림톡과 같은 진입 패턴, 성격은 다르다(템플릿 검수 불필요)
 import BrandSendModal, { type BrandRecipientSeed } from '../components/BrandSendModal';
 import { carryPhonesToDirectRecipients } from '../utils/send-checks';
-import { recipientSeeds, pickNameKey } from '../utils/recipient-paste';
+import { recipientSeeds, pickNameKey, appendUpdater } from '../utils/recipient-paste';
+import { takeAudience, fetchAudience, audienceLoadedText } from '../utils/product-insight';   // ★ 2026-11-13 C133 F2
 import { extractionFieldTable } from '../utils/customerFilterBuild';
 // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본(서버) 요청 CT
 import {
@@ -225,11 +226,15 @@ export default function Dashboard() {
   const [showDiagnosisWizard, setShowDiagnosisWizard] = useState(false);
   // ★ 2026-08-22 대행발송 안내 모달 — 아직 못 쓰는 회사가 헤더 메뉴를 눌렀을 때(미끼 진입점)
   const [showAgencyIntro, setShowAgencyIntro] = useState(false);
+  // ★ 2026-11-13 C133 F7 — 진단 상태를 한 번이라도 받아 봤는가(성공 · 실패 무관) · 로그인 소개 창이 초대 창과 겹치지 않게 기다리는 기준
+  const [diagnosisChecked, setDiagnosisChecked] = useState(false);
   const refreshDiagnosisState = async () => {
     try {
       const r = await diagnosisApi.state();
       if (r.ok && r.data?.success) setDiagnosisState(r.data);
-    } catch { /* fail-quiet */ }
+    } catch { /* fail-quiet */ } finally {
+      setDiagnosisChecked(true);
+    }
   };
   useEffect(() => { refreshDiagnosisState(); }, []);
   // 초대 모달 — eligible && 미완료 && 미초대 = 최초 1회. 표시 즉시 서버 기록(localStorage 판정 금지).
@@ -264,7 +269,12 @@ export default function Dashboard() {
   // ★ 2026-10-06 로그인 소개 창(AiOperatorLoginPromo)이 이 알림과 겹치지 않게 — 알림은 위 effect 에서 한 박자 늦게 정해지므로
   //   「열렸나」가 아니라 렌더 때 바로 아는 값으로 막는다: 요금제 정보 전 · 변경 알림이 있는데 아직 닫지 않음(Codex 1R)
   const [planChangeDone, setPlanChangeDone] = useState(false);
-  const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone);
+  // ★ 2026-11-13 C133 F7 — 마케팅 진단 초대 창과도 겹치지 않게(옛: 이 값이 초대 창을 몰라 두 창이 함께 뜰 수 있었다).
+  //   같은 원칙 = 렌더 때 바로 아는 값: 진단 상태를 아직 못 받았거나 · 초대가 곧 뜰 조건(위 effect 와 같은 식)이거나 · 떠 있는 동안 기다린다.
+  //   진단 조회가 실패해도 diagnosisChecked 가 켜지므로 소개 창이 영영 막히지 않는다(그때는 초대 창이 뜰 수 없다).
+  const diagnosisInviteDue = !!diagnosisState && !!diagnosisState.eligible && !diagnosisState.completedAt && !diagnosisState.invitedAt;
+  const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone)
+    || !diagnosisChecked || diagnosisInviteDue || showDiagnosisInvite;
   // 안내 확인/닫기 = 서버에 ack → 다음 조회부터 재노출 없음(계정당 1회, 브라우저·기기 무관)
   const closePlanChange = async () => {
     setPlanChange(null);
@@ -1270,6 +1280,19 @@ export default function Dashboard() {
 
   const [optOutNumber, setOptOutNumber] = useState('');
 
+  // ★ 2026-11-13 C133 F2 — 성과리포트 「…에게 보내기」가 맡긴 대상을 직접발송 명단에 **더한다**(R31 = 불러오기는 교체가 아니라 추가 · 같은 번호는 한 번).
+  //   명단은 서버가 지금 다시 센 것이다(그 사이 산 사람 · 수신거부는 빠진다). 맡긴 것이 없으면 아무 일도 하지 않는다(직접발송 입구의 종전 동작 그대로).
+  const loadPendingAudience = async () => {
+    const asked = takeAudience();
+    if (!asked) return;
+    const got = await fetchAudience(asked.kind, asked.value);
+    if (!got) { setToast({ show: true, type: 'error', message: '고객 명단을 불러오지 못했어요. 분석 화면에서 다시 눌러 주세요.' }); return; }
+    if (got.recipients.length === 0) { setToast({ show: true, type: 'info', message: '지금은 보낼 수 있는 고객이 없어요. 그 사이 구매했거나 수신을 거부한 고객은 빠집니다.' }); return; }
+    const rows = got.recipients.map((r) => ({ phone: r.phone, name: r.name, extra1: '', extra2: '', extra3: '', callback: '' }));
+    setDirectRecipients(appendUpdater<any>(rows, true, (r) => r.phone, () => undefined));
+    setToast({ show: true, type: 'success', message: audienceLoadedText(asked, got), duration: 6000 });
+  };
+
   // v1.5.0: 파일 업로드 오픈 전 싱크 차단 체크 (설계서 §4-4)
   const openFileUpload = () => {
     if (syncBlockActive) {
@@ -1337,7 +1360,7 @@ export default function Dashboard() {
     //   게이트는 각 진입 함수가 그대로 소유한다 — 여기서 판정을 다시 하지 않는다(openCustomerDb 선례).
     const openParam = searchParams.get('open');
     if (openParam) {
-      if (openParam === 'direct-send') { setShowDirectSend(true); setDirectSendChannel('sms'); }
+      if (openParam === 'direct-send') { setShowDirectSend(true); setDirectSendChannel('sms'); void loadPendingAudience(); }
       // ★ 2026-10-19 직접 타겟 발송 삭제 — 옛 링크는 AI 한줄로(조건 고르기 = 확인 창의 「직접 타겟 선택」)
       // ★ Codex B1 medium — 아래 쿼리 정리(setSearchParams)가 이동을 덮지 않게 이동하고 바로 끝낸다
       else if (openParam === 'target-send') { if (!hideAi) { navigate('/ai-line', { replace: true }); return; } }

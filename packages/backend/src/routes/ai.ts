@@ -158,12 +158,13 @@ import { diagnoseCompanyHealth } from '../utils/ai-self-diagnosis';
 // ★ D211+ Phase 2 (2026-05-23 Harold 명시): CT-59 Journey Step Diagnosis — 여정 단계별 진단 + 다음 단계 추천
 import { diagnoseJourneySteps, recommendNextJourneyStep } from '../utils/journey-step-diagnosis';
 // ★ D211+ Phase A (2026-05-23 Harold 명시): CT-60/CT-61 시뮬레이션 + variant 자동 생성 + 실시간 위치
-import { simulateJourney } from '../utils/journey-simulator';
+import { simulateJourney, parseSimulationCap } from '../utils/journey-simulator';
+import { v3Live } from '../utils/v3-stage';   // ★ 2026-11-13 C133 F1 단계 개방
 // ★ 2026-06-29: "오늘의 여정 기회" — 회사 실데이터로 여정 빈 지점 산출 (랜딩 1클릭 생성)
-import { buildJourneyOpportunities, buildJourneyDiagnosis, recoPlanFor, recoRequestId } from '../utils/journey-opportunities';
+import { buildJourneyOpportunities, buildJourneyDiagnosis, recoPlanFor, recoRequestId, normalizeRecoBenefit } from '../utils/journey-opportunities';
 // ★ 2026-09-29 여정 V2 1차 — 생애 지도 단일 조회(읽기 전용 · 화면은 그리기만).
 import { buildLifecycleMap, computeOverlapPairs } from '../utils/journey-lifecycle-map';
-import { activateJourneyGuarded, activateJourneysInOrder, MAX_BATCH_ACTIVATION, unresolvedOverlapPairs, persistOverlapAcks, resumeLineageSiblings } from '../utils/journey-activation';
+import { activateJourneyGuarded, activateJourneysInOrder, MAX_BATCH_ACTIVATION, unresolvedOverlapPairs, persistOverlapAcks, resumeLineageSiblings, parseActivationCaps } from '../utils/journey-activation';
 import { activationCostOf } from '../utils/journey-activation-cost';
 import { pauseReasonView } from '../utils/journey-pause-reason';
 import { reshapeJourney, ReshapeInputError } from '../utils/journey-reshape';
@@ -3315,7 +3316,9 @@ router.post('/operator/journeys-reco/design', async (req: Request, res: Response
     const { companyId } = gate;
     const userId = gate.userId;
     if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const { triggerEvent, callbackNumber, shownDays } = req.body || {};
+    const { triggerEvent, callbackNumber, shownDays, benefit } = req.body || {};
+    // ★ 2026-11-13 C133 F1 — 창에 적은 혜택(비우면 종전 그대로 = 혜택 자리를 표시해 두고 켜기 전에 채우게 한다) · AI 는 적힌 혜택만 쓴다
+    const benefitText = (await v3Live('journey-pack', companyId)) ? normalizeRecoBenefit(benefit) : null;   // 단계가 닫힌 회사 = 종전 그대로(혜택 답 없음)
     const plan = await recoPlanFor(companyId, userId, String(triggerEvent || ''));
     if (!plan) return res.status(400).json({ success: false, error: '추천에 없는 시작 사건이에요. 진단을 다시 열어 주세요.' });
     if (plan.status === 'locked') return res.status(409).json({ success: false, error: plan.reason || '지금 데이터로는 만들 수 없어요.', code: 'TRIGGER_LOCKED' });
@@ -3323,10 +3326,14 @@ router.post('/operator/journeys-reco/design', async (req: Request, res: Response
       companyId,
       userId,
       // 요청 키 = 계획 내용에서 결정적(화면 키 · 날짜를 쓰지 않는다 · 다시 열거나 새로고침 · 자정을 넘겨도 같은 요청 = 중복 생성 · 차감 0)
-      interviewId: recoRequestId(companyId, userId, plan),
+      interviewId: recoRequestId(companyId, userId, plan, benefitText),
       plan: { key: `reco-${plan.key}`, triggerEvent: plan.triggerEvent, title: plan.title, objective: plan.objective },
       // 시작 사건을 명시한다 — 추천 답(같은 레인 첫 열린 사건)에 맡기면 잠긴 사건이 다른 사건으로 바뀌어 만들어진다(명시 + 잠김 = 거절).
-      answers: { [`reco-${plan.key}:trigger`]: plan.triggerEvent, [`reco-${plan.key}:messages`]: String(plan.daysFromStart.length) },
+      answers: {
+        [`reco-${plan.key}:trigger`]: plan.triggerEvent,
+        [`reco-${plan.key}:messages`]: String(plan.daysFromStart.length),
+        ...(benefitText ? { [`reco-${plan.key}:benefit`]: benefitText } : {}),
+      },
       callbackNumber: callbackNumber ? String(callbackNumber) : null,
       timing: { daysFromStart: plan.daysFromStart, dormantDays: plan.dormantDays },
     });
@@ -3547,7 +3554,10 @@ router.post('/operator/journeys-activate-batch', async (req: Request, res: Respo
     const { companyId } = gate;
     const userId = gate.userId;
     if (!userId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
-    const { journeyIds, confirmCallbackExclusionIds, acknowledgedOverlaps } = req.body || {};
+    const { journeyIds, confirmCallbackExclusionIds, acknowledgedOverlaps, caps: rawCaps } = req.body || {};
+    // ★ 2026-11-13 C133 — 켜기 창이 보여 준 최대 인원(여정마다). 켜는 문장이 그 값을 함께 쓴다(따로 저장하는 요청 없음 · 안 보내면 최대 인원 그대로 = 종전).
+    const caps = parseActivationCaps(rawCaps);
+    if (!caps) return res.status(400).json({ success: false, error: '최대 인원은 1 이상의 숫자로 넣거나 비워 주세요.' });
     const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     const ids: string[] = Array.isArray(journeyIds) ? journeyIds.map(String).filter((x: string) => uuidRe.test(x)) : [];
     if (ids.length === 0) return res.status(400).json({ success: false, error: '켤 여정을 골라 주세요.' });
@@ -3558,6 +3568,7 @@ router.post('/operator/journeys-activate-batch', async (req: Request, res: Respo
     const out = await activateJourneysInOrder(companyId, userId, ids, {
       confirmCallbackExclusionIds: Array.isArray(confirmCallbackExclusionIds) ? confirmCallbackExclusionIds.map(String) : [],
       acknowledgedOverlaps: Array.isArray(acknowledgedOverlaps) ? acknowledgedOverlaps.map(String) : [],
+      caps,
     });
     if (!out.ok && out.code === 'OVERLAP_UNRESOLVED') return res.status(409).json({ success: false, error: out.message, code: out.code, pairs: out.pairs });   // ★ 1019 B-1009-5
     if (!out.ok) return res.status(402).json({ success: false, error: out.message, code: out.code, needed: out.needed });
@@ -5066,7 +5077,10 @@ router.get('/operator/journeys/:id/simulate', async (req: Request, res: Response
     const gate = await journeyGate(req, res);
     if (!gate) return;
     const { companyId } = gate;
-    const simulation = await simulateJourney(req.params.id, companyId);
+    // ★ 2026-11-13 C133 F1 — 켜기 창이 저장 전 최대 인원으로 물을 수 있다(?cap=숫자 · ?cap=none · 없으면 저장된 값 = 종전)
+    const capQ = parseSimulationCap(req.query.cap);
+    if (!capQ.ok) return res.status(400).json({ success: false, error: '최대 인원은 1 이상의 숫자로 넣거나 비워 주세요.' });
+    const simulation = await simulateJourney(req.params.id, companyId, capQ.cap === undefined ? {} : { cap: capQ.cap });
     return res.json({ success: true, simulation });
   } catch (err: any) {
     return journeyError(res, err, 'simulate', '시뮬레이션 중 오류가 발생했습니다.');

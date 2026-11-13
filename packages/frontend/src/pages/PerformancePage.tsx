@@ -23,6 +23,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import EffectProofCard from '../components/performance/EffectProofCard';   // ★ 2026-11-06 C110
+import ProductSignalSection from '../components/performance/ProductSignalSection';   // ★ 2026-11-13 C133 F2
+import ZoneStatStrip from '../components/zone/ZoneStatStrip';
+import { fetchBenchmark, successBenchLine, spamBenchCells, type BenchmarkView, type BenchLine } from '../utils/benchmark';   // ★ 2026-11-13 C133 F3
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -391,6 +394,14 @@ export default function PerformancePage() {
   };
 
   useEffect(() => () => { analysisAlive.current = false; }, []);
+
+  // ★ 2026-11-13 C133 F3 업종 평균 비교 — 창은 늘 최근 30일(기간 고르기와 따로) · 닫힌 회사 · 실패 = null = 비교 줄 없음
+  const [bench, setBench] = useState<BenchmarkView | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void fetchBenchmark().then((b) => { if (alive) setBench(b); });
+    return () => { alive = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -818,6 +829,7 @@ export default function PerformancePage() {
               <HeadlineKpiCard
                 label="성공률" accent="emerald" icon={<Activity className="w-4 h-4" />}
                 value={formatPct(snapshot.successRate.current)} metric={snapshot.successRate}
+                bench={successBenchLine(bench)}
                 onClick={() => openModal('trend')}
               />
               <HeadlineKpiCard
@@ -826,6 +838,15 @@ export default function PerformancePage() {
                 onClick={() => openModal('cohort')}
               />
             </div>
+
+            {/* ★ 2026-11-13 C133 F3 통신사별 스팸 검사 차단율 — 업종 평균이 있는 통신사가 있을 때만 */}
+            {bench && spamBenchCells(bench).length > 0 && (
+              <ZoneStatStrip
+                title={`통신사별 스팸 검사 차단율 · 최근 ${bench.windowDays}일`}
+                cells={spamBenchCells(bench)}
+                footnote={`우리 스팸 검사 단말로 직접 잰 값 · 같은 업종 ${bench.minPeers}곳 이상 평균과 견줍니다 · 낮을수록 좋아요`}
+              />
+            )}
 
             <div className="text-[11px] text-slate-400">
               이 기간 캠페인 {formatNum(snapshot.totalCampaigns.current)}건 · 총 발송 {formatNum(snapshot.totalSent.current)}건 · 신규 고객 {formatNum(snapshot.newCustomers.current)}명 · 직전 {period} 대비 비교
@@ -874,6 +895,9 @@ export default function PerformancePage() {
 
             {/* ★ 2026-11-06 C110 효과 증명(대조군 비교 · 늘어난 매출) */}
             <EffectProofCard days={periodToDays(period)} />
+
+            {/* ★ 2026-11-13 C133 F2 상품 · 검색어 반응(최근 30일 고정 창 · 닫힌 회사에는 아무것도 그리지 않는다) */}
+            <ProductSignalSection />
 
             {/* ════ AI 자율 진단(좌) + 요약 아이콘 카드(우) 동일 높이 2단 ════ */}
             <div className="flex flex-col lg:flex-row gap-3 lg:items-stretch">
@@ -1424,7 +1448,7 @@ export default function PerformancePage() {
 // ════════════════════════════════════════════════════════════════════
 
 function HeadlineKpiCard({
-  label, value, metric, icon, accent, sub, onClick,
+  label, value, metric, icon, accent, sub, bench, onClick,
 }: {
   label: string;
   value: string;
@@ -1432,6 +1456,8 @@ function HeadlineKpiCard({
   icon: React.ReactNode;
   accent: 'violet' | 'emerald' | 'cyan' | 'amber';
   sub?: string;
+  /** ★ 2026-11-13 C133 F3 업종 평균 비교 줄(없으면 지금 모양 그대로) */
+  bench?: BenchLine | null;
   onClick: () => void;
 }) {
   const ring: Record<string, string> = {
@@ -1455,6 +1481,11 @@ function HeadlineKpiCard({
         {metric && <span className={`text-[11px] font-mono ${diffColor}`}>{arrow} {formatDiff(metric)}</span>}
         {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
       </div>
+      {bench && (
+        <div className={`mt-1.5 text-[11px] leading-snug break-keep ${bench.tone === 'good' ? 'text-emerald-700 font-semibold' : bench.tone === 'bad' ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
+          {bench.text}
+        </div>
+      )}
     </button>
   );
 }

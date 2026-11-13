@@ -78,7 +78,7 @@
   "/api/ai/operator/journeys-suggest-trigger": 1,
   "/api/ai/operator/journeys/:p/pretest-validate": 2,
   "/api/balance": 1,
-  "/api/ai/operator/journeys/:p/options": 6,
+  "/api/ai/operator/journeys/:p/options": 5,
   "/api/ai/operator/journeys/:p/activate": 2,
   "/api/customers/filter-options": 1,
   "/api/ai/operator/journeys/:p": 4,

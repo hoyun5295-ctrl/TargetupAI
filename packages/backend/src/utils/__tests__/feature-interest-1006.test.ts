@@ -230,9 +230,15 @@ describe('화면 — 안내 창 한 곳에서 보내고 · 메뉴는 허용 계�
 describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 · 뜬 것과 바로가기 기록', () => {
   const promo = front('components/AiOperatorLoginPromo.tsx');
 
-  it('대상 = 허브와 같은 서버 판정이 false 일 때만(모름은 띄우지 않는다)', () => {
-    expect(promo).toContain("import { fetchAiOperatorAccess } from '../utils/ai-operator-access';");
-    expect(promo).toContain('if (alive && allowed === false) setEligible(true);');
+  // ★ 2026-11-13 C133 F7 — 창 내용 교체(한줄로 V3 소개). 대상 · 계정당 횟수는 서버 선점이 정한다(utils/v3-intro · 시험 = c133-v3-intro*.test.ts)
+  it('대상 = 서버 선점이 띄우라고 답할 때만(모름 · 실패는 띄우지 않는다)', () => {
+    expect(promo).toContain("import { claimV3Intro, dismissV3Intro, type V3Intro } from '../utils/v3-intro';");
+    expect(promo).toContain('const got = await claimV3Intro();');
+    expect(promo).toContain('if (!alive || !got) return;');
+    expect(promo).not.toContain('fetchAiOperatorAccess');   // 옛 판정(자동 마케팅을 못 쓰는 회사만)은 걷었다
+    const util = front('utils/v3-intro.ts');
+    expect(util).toContain("if (!r.ok || !d?.success || d.show !== true) return null;");
+    expect(util).toContain('if (posters.length === 0) return null;');
   });
 
   it('로그인 한 번(토큰)마다 한 번 · 이미 띄웠으면 묻지도 않는다', () => {
@@ -255,12 +261,21 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
     expect(show).toContain('if (!alive || readSeen() === mark) return false;');
     expect(show.indexOf('writeSeen(mark);')).toBeLessThan(show.indexOf('setOpen(true);'));
     expect(show.indexOf('if (!alive || !won) return;')).toBeLessThan(show.indexOf("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');"));
+    // ★ C133 — 서버에 묻는 것(= 노출 한 번)은 잠금을 잡은 탭만 · 이 화면에서 다시 묻지 않게 표시한 뒤 · 띄우기 전에
+    expect(show.indexOf('if (!alive || !won) return;')).toBeLessThan(show.indexOf('await claimV3Intro()'));
+    expect(show.indexOf('shownRef.current = true;')).toBeLessThan(show.indexOf('await claimV3Intro()'));
+    expect(show.indexOf('await claimV3Intro()')).toBeLessThan(show.indexOf('setOpen(true);'));
+    expect(show.match(/claimV3Intro\(/g)).toHaveLength(1);
   });
 
   it('★ Codex 1R — 다른 자동 안내 창(요금제 변경 알림)이 정해지기 전 · 열려 있는 동안은 기다린다(렌더 때 아는 값)', () => {
     expect(promo).toContain('if (!eligible || blocked || open || shownRef.current) return;');
     const dash = front('pages/Dashboard.tsx');
-    expect(dash).toContain('const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone);');
+    // ★ C133 — 마케팅 진단 초대 창도 자동 안내 창이다: 진단 상태를 알기 전 · 초대가 뜰 차례 · 떠 있는 동안에도 기다린다
+    expect(dash).toContain(
+      'const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone)\n'
+      + '    || !diagnosisChecked || diagnosisInviteDue || showDiagnosisInvite;');
+    expect(dash).toContain('const diagnosisInviteDue = !!diagnosisState && !!diagnosisState.eligible && !diagnosisState.completedAt && !diagnosisState.invitedAt;');
     expect(dash).toContain('<AiOperatorLoginPromo blocked={loginPromoBlocked} />');
     const close = dash.slice(dash.indexOf('const closePlanChange = async () => {'), dash.indexOf("fetch('/api/companies/plan-change/ack'"));
     expect(close).toContain('setPlanChangeDone(true);');
@@ -272,16 +287,30 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
     expect(promo).toContain('prevFocus?.focus?.();');
   });
 
-  it('뜬 것 · 지금 바로가기를 기록하고 허브로 간다', () => {
+  it('뜬 것 · 바로가기를 기록하고 이미지 스튜디오로 간다(★ C133 — 허브 → 이미지 스튜디오)', () => {
     expect(promo).toContain("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');");
     expect(promo).toContain("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'go');");
-    expect(promo).toContain("navigate('/ai-operator');");
+    expect(promo).toContain("navigate('/image-studio');");
+    expect(promo).not.toContain("navigate('/ai-operator');");
     expect(promo).toContain("export const LOGIN_PROMO_FEATURE_ID = 'login-promo';");
   });
 
-  it('무음 · 반복 · 화면 안 재생 · 움직임 줄이기면 재생 버튼 · native dialog 0', () => {
-    expect(promo).toMatch(/<video[\s\S]*?muted[\s\S]*?loop[\s\S]*?playsInline[\s\S]*?autoPlay=\{!reduceMotion\}[\s\S]*?controls=\{reduceMotion\}/);
+  it('★ C133 — 영상 대신 서버가 준 포스터 · 칩만 그린다 · 바깥을 눌러도 닫히지 않는다 · native dialog 0', () => {
+    expect(promo).not.toContain('<video');
+    expect(promo).toContain('{intro.posters.map((p, i) => (');
+    expect(promo).toContain('{intro.chips.map((c) => (');
+    expect(promo).toContain('if (!open || !intro) return null;');
+    // 바깥(어두운 판)에는 누름 처리가 없다 — 닫기는 X · Esc · 「다음에 볼게요」
+    const backdrop = promo.slice(promo.indexOf('<div className="fixed inset-0'), promo.indexOf('ref={dialogRef}'));
+    expect(backdrop).not.toContain('onClick');
     expect(promo).not.toMatch(/\b(alert|confirm|prompt)\(/);
+  });
+
+  it('★ C133 — 「이 소개 다시 보지 않기」는 서버에 적힌 뒤에만 약속한다(못 적으면 그렇다고 말한다)', () => {
+    const dismiss = promo.slice(promo.indexOf('const dismiss = async () => {'), promo.indexOf('return (', promo.indexOf('const dismiss = async () => {')));
+    expect(dismiss).toContain('const saved = await dismissV3Intro();');
+    expect(dismiss).toContain("if (saved) toast.success('이 계정에서는 다시 띄우지 않아요');");
+    expect(dismiss).toContain("else toast.error('저장하지 못했어요. 다음에 다시 눌러 주세요.');");
   });
 
   it('대시보드에 붙어 있다 · 슈퍼관리자 화면은 로그인 안내 창 이름과 바로가기를 보여 준다', () => {

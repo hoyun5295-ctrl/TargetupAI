@@ -1389,6 +1389,7 @@ const ONE_LINE_ROUTERS = new Set([
   'ai.ts', 'ai-line.ts', 'dm.ts', 'email.ts', 'cdp.ts', 'sns.ts', 'event-campaigns.ts', 'image-studio.ts', 'marketing-planner.ts',
   'planner-recheck-public.ts', 'autosend-stop-public.ts', 'journey-pause-public.ts', 'manager-board-public.ts', 'mall-products.ts', 'assets.ts', 'line-templates.ts',
   'send-policy.ts', 'targets.ts', 'saved-segments.ts',
+  'product-insight.ts', 'benchmark.ts',   // ★ 2026-11-13 C133 — 새 라우터는 면제가 아니라 같은 시험(R10 · R11 · R15)을 받는다
 ]);
 const OUT_OF_AXIS = (reason: string, files: string[]) => Object.fromEntries(files.map((f) => [f, reason]));
 const OUT_OF_AXIS_ROUTERS: Record<string, string> = {

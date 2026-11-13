@@ -77,6 +77,7 @@
 | C130 | f3623b12 |
 | C131 | c5b199d7 |
 | C132 | 5b7c709d |
+| C133 | 미커밋 |
 
 ## §1 대기
 
@@ -1977,6 +1978,130 @@ ALTER TABLE agency_send_requests
 - 선행: C132-H1 · C132-H2
 - 기대: 설계서 §7 직원 지시문 1 ~ 5(테스트계정 · 도달 불가 번호 · 발송 0)
 - 확인: 이메일 요청서 테스트 문자 · 상세 = (광고) · 무료수신거부 없음 · 화면 원스텝 = 종전 · 사용 범위 칸 · 브랜드 두 칸 · 콜비서 11월 통계 = 콘솔
+- 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
+
+### C133-DDL-1 · 소개 창 노출 기억 표(설계서 docs/2026-11-13-hanjul-v3-design.md §2 · §10 V3-DDL-1) · ★ 배포 앞
+- 카드: C133
+- 단계: DDL
+- 선행: 없음(배포 앞 · 새 표 · 표가 없으면 새 코드는 503 DB_MIGRATION_PENDING = 소개 창을 띄우지 않는다)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'user_intro_acks' ORDER BY ordinal_position;
+- 확인: 다섯 줄 · user_id uuid NO · intro_key character varying NO · login_marks ARRAY NO · dismissed_at timestamp with time zone YES · updated_at timestamp with time zone NO
+- 결과: (대기 · 62 → 57 전환 뒤)
+
+> C133-DDL-1 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C133-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS user_intro_acks (
+  user_id uuid NOT NULL,
+  intro_key varchar(40) NOT NULL,
+  login_marks text[] NOT NULL DEFAULT '{}',
+  dismissed_at timestamptz NULL,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, intro_key)
+);
+```
+
+### C133-DDL-2 · 상품 신호 표(설계서 docs/2026-11-13-hanjul-v3-design.md §5-1 · §10 V3-DDL-2 · 매출 칸은 읽는 곳이 없어 뺐다) · ★ 배포 앞
+- 카드: C133
+- 단계: DDL
+- 선행: 없음(배포 앞 · 새 표 · 표가 없으면 야간 워커는 로그 한 줄 · 화면 길은 503 DB_MIGRATION_PENDING)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'product_signal_daily' ORDER BY ordinal_position;
+- 확인: 아홉 줄 · company_id uuid NO · door character varying NO · product_key character varying NO · day date NO · product_name character varying YES · views integer NO · carts integer NO · orders integer NO · updated_at timestamp with time zone NO
+- 결과: (대기 · 62 → 57 전환 뒤)
+
+> C133-DDL-2 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C133-DDL-2
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS product_signal_daily (
+  company_id uuid NOT NULL,
+  door varchar(8) NOT NULL,
+  product_key varchar(200) NOT NULL,
+  day date NOT NULL,
+  product_name varchar(200) NULL,
+  views int NOT NULL DEFAULT 0,
+  carts int NOT NULL DEFAULT 0,
+  orders int NOT NULL DEFAULT 0,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (company_id, door, product_key, day)
+);
+CREATE INDEX IF NOT EXISTS idx_product_signal_company_day ON product_signal_daily (company_id, day);
+```
+
+### C133-DDL-4 · 업종 평균 스냅숏 표(설계서 docs/2026-11-13-hanjul-v3-design.md §4-1 · §10 V3-DDL-4) · ★ 배포 앞
+- 카드: C133
+- 단계: DDL
+- 선행: 없음(배포 앞 · 새 표 · 표가 없으면 야간 워커는 로그 한 줄 · 화면 길은 503 DB_MIGRATION_PENDING = 비교 줄 없음)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'benchmark_company_daily' ORDER BY ordinal_position;
+- 확인: 다섯 줄 · day date NO · company_id uuid NO · industry_code character varying NO · metric character varying NO · value double precision NO
+- 결과: (대기 · 62 → 57 전환 뒤)
+
+> C133-DDL-4 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C133-DDL-4
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS benchmark_company_daily (
+  day date NOT NULL,
+  company_id uuid NOT NULL,
+  industry_code varchar(40) NOT NULL,
+  metric varchar(40) NOT NULL,
+  value double precision NOT NULL,
+  PRIMARY KEY (day, company_id, metric)
+);
+CREATE INDEX IF NOT EXISTS idx_benchmark_day_industry_metric ON benchmark_company_daily (day, industry_code, metric);
+```
+
+### C133-H1 · 한줄로 배포(한줄로 V3 배포 A + B · 백엔드 + 프론트 · DDL 3 = C133-DDL-1 · -2 · -4 배포 앞 · 단계 ENV 전부 비운 채)
+- 카드: C133
+- 단계: 한줄로 배포
+- 선행: 62 → 57 전환 · Codex 설계 7R approve · 구현 배포 A 4R approve · 배포 B approve · 커밋(Harold · 다른 세션 파일 뺌) → push · C133-DDL-1 · C133-DDL-2 · C133-DDL-4
+- 기대: 설계서 docs/2026-11-13-hanjul-v3-design.md §2 ~ §5 · §18 · 단계 ENV 가 비어 있는 동안 바뀌는 것 = 로그인 소개 창의 내용(전 고객사 · 계정당 최대 3번)과 「켜기 전 점검」 창의 닫기(검증 중 닫기 = 취소 · 켜기 접수 뒤 닫기 = 숨김 · 최대 인원은 켜는 문장이 함께 씀)뿐 · 상품 구역 · 업종 평균 · 추천 칸 셋 · 혜택 칸 · 무료 추정은 닫힘 · 발송 · 과금 경로 변화 0
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · uptime · dist grep claimIntro ≥ 1 · runProductSignalPass ≥ 1 · snapshotBenchmarks ≥ 1 · parseActivationCaps ≥ 1 · v3FeaturesFor ≥ 1 · 기동 로그 「[product-signal] 워커 시작」 · 「[benchmark] 워커 시작」 각 한 줄 · 재시작 뒤 에러 로그에 새 종류 0
+- 결과: (대기)
+
+### C133-ENV-1 · 사내 회사에 단계 열기(V3_STAGE_PRODUCT_INSIGHT · V3_STAGE_BENCHMARK · V3_STAGE_JOURNEY_PACK = 인비토 회사 id 하나)
+- 카드: C133
+- 단계: ENV
+- 선행: C133-H1
+- 의미 바꿈: 예(그 회사에만 성과리포트 「상품 · 검색어 반응」 구역 · 성공률 카드의 업종 평균 줄 · 여정 추천 칸 셋 · 혜택 칸 · 켜기 창 무료 추정이 열린다 · 그 회사의 상품 신호를 밤마다 60일 다시 센다 · 업종 평균 스냅숏은 전 회사의 완료 캠페인 30일을 밤마다 한 번 읽는다(PG 만) · 비우면 전부 닫힘 = 되돌리기)
+- 기대: 세 ENV 에 인비토 회사 id(쉼표 없이 하나) · 비밀값 아님
+- 확인: restart --update-env 뒤 2분 안 로그 「[benchmark] 첫 채우기 — 스냅숏 N행」 · product_signal_daily 에 그 회사 행 > 0(기동 90초 뒤 첫 채우기) · 인비토 계정 화면에서 구역 · 줄이 보임 · 다른 회사 계정에는 안 보임
+- 결과: (대기)
+
+### C133-P1 · 실측(ENV 뒤 · 읽기 전용 SQL · 그날 하나씩 안내)
+- 카드: C133
+- 단계: 배포 뒤
+- 선행: C133-ENV-1
+- 기대: ① 소개 창 = user_intro_acks 의 cardinality(login_marks) 최댓값 ≤ 3 · 「다시 보지 않기」 계정은 그 뒤 늘지 않음 ② 상품 표 = 한 상품의 최근 30일 조회 수가 cdp_events 를 직접 센 값과 같음(같은 KST 경계) ③ 업종 평균 = 스냅숏 날짜 = 오늘 · 회사마다 success_rate 한 행 · 값 0 ~ 1 ④ 묶음 켜기 1회(인비토 · 초안 하나 · 최대 인원을 칸에서 바꿔 켬) = 켜진 여정의 최대 인원 = 화면 값 · 옵션 저장 요청 로그 0
+- 확인: 넷 다 일치 · 다르면 멈추고 원인부터
+- 결과: (대기)
+
+### C133-M1 · 서버에서 재야 할 사실(설계서 §15 · 읽기 전용 · 하나씩)
+- 카드: C133
+- 단계: 배포 뒤
+- 선행: 62 → 57 전환(배포와 무관하게 잴 수 있다)
+- 기대: ① 실패 행의 통신사 칸(mob_company) 채움 비율 = 통신사별 발송 성공률(C133-DDL-5 · 미룸)을 만들 수 있는지 ② 사건이 가장 많은 회사의 30일 product_view · cart_add · search 수와 상품 신호 다시 세기 실행 계획 ③ 조회 · 장바구니 사건의 상품 칸 꼴(items 배열 · 맨 위 칸) 분포 ④ 회사 업종(industry_code) 분포 = 업종마다 5곳이 되는지
+- 확인: 값을 설계서 §15 에 적고 · ① 이 「남는다」면 통신사별 성공률 구현 착수 판단 · ② 가 2분을 넘으면 전체 개방(*) 전에 처방
+- 결과: (대기)
+
+### C133-S1 · 실측(ENV 뒤 하루)
+- 카드: C133
+- 단계: 사후
+- 선행: C133-ENV-1(하루 뒤)
+- 기대: 밤 로그 「[product-signal] 밤 계산 — 다시 센 회사 1 · 지운 회사 0 · 실패 0」(KST 3시대) · 「[benchmark] 밤 계산 — 스냅숏 N행」(KST 4시대) · 두 워커 실패 로그 0
+- 확인: 위 로그 · 실패가 있으면 그 줄 그대로
+- 결과: (대기)
+
+### C133-T1 · 직원 시트(한줄로 V3)
+- 카드: C133
+- 단계: 직원 시트
+- 선행: C133-ENV-1 · 배포 C · D
+- 기대: 설계서 §13 의 직원 지시문(테스트계정 · 도달 불가 번호 · 발송 0)
+- 확인: 소개 창 3회 · 다시 보지 않기 · 상품 구역 → 직접발송 명단 · 업종 평균 줄 · 추천 칸 · 혜택 칸 · 켜기 창 추정 · 닫기 두 구간
 - 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
 
 ## §2 덤프 뒤 적용분

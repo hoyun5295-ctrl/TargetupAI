@@ -22,6 +22,8 @@ import { intakeGraceHeldText } from './journey-intake-grace';
 import { buildProjection, SegmentBreakdown, ProjectionStep } from './journey-simulator-core';
 import { backfillPerDayOf, entryCapExceeded } from './journey-step-limits';
 import { resolveCdpCursorEventName } from './journey-cdp-cursor';
+import { parseQueryInt } from './normalize';
+import { fatigueCapState } from './fatigue-guard';
 
 export interface JourneySimulationResult {
   journeyId: string;
@@ -42,11 +44,33 @@ export interface JourneySimulationResult {
   dataNote: string | null;
   reasoning: string;
   warnings: string[];
+  /** ★ 2026-11-13 C133 F1 — 켜면 첫 회차에 바로 멈추는가(진입 감시와 같은 판정 entryCapExceeded · 아래 경고 문장과 같은 조건) */
+  firstRoundCapExceeded: boolean;
+  /** 이 판정에 쓴 최대 인원(저장된 값 또는 화면이 물어본 값 · null = 제한 없음) */
+  capUsed: number | null;
+  /** 선불 회사의 지금 잔액(원) · 후불 = null — 켜기 창이 「잔액이 모자라요」 안내에만 쓴다(켜기 관문은 그대로) */
+  prepaidBalance: number | null;
+  /** 회사 피로도 상한(한 고객이 받는 광고 문자 상한) — off 일 때만 켜기 창이 안내한다 · unknown = 못 읽음(아무 말도 하지 않는다) */
+  fatigueCap: 'on' | 'off' | 'unknown';
+}
+
+/**
+ * (순수) 주소의 cap 값 읽기 — 없음 = 저장된 값(종전) · 'none' = 비움(제한 없음) · 1 이상 정수 = 그 값. 그 밖 = 거절.
+ *   켜기 창이 「지금 칸에 적힌 값」으로 물을 때 쓴다(저장은 하지 않는다).
+ */
+export function parseSimulationCap(raw: unknown): { ok: true; cap: number | null | undefined } | { ok: false } {
+  if (raw === undefined) return { ok: true, cap: undefined };
+  if (raw === 'none') return { ok: true, cap: null };
+  if (typeof raw !== 'string' || !/^[1-9][0-9]{0,8}$/.test(raw)) return { ok: false };
+  const cap = parseQueryInt(raw, { fallback: null, min: 1, max: 999_999_999 });   // 주소 숫자 값 = CT(R59)
+  return cap === null ? { ok: false } : { ok: true, cap };
 }
 
 export async function simulateJourney(
   journeyId: string,
   companyId: string,
+  /** cap: 없음(undefined) = 저장된 최대 인원 · null = 비움 · 숫자 = 그 값으로 판정(저장하지 않는다) */
+  opts: { cap?: number | null } = {},
 ): Promise<JourneySimulationResult> {
   // 회사 격리 + 여정 조회
   const jRes = await query(
@@ -64,7 +88,7 @@ export async function simulateJourney(
 
   // 회사 실 단가(원/건) — 임의 상수 대신 그 회사 설정값.
   const costRes = await query(
-    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis FROM companies WHERE id = $1::uuid`,
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, unit_price_basis, billing_type, balance FROM companies WHERE id = $1::uuid`,
     [companyId],
   );
   const c = costRes.rows[0] || {};
@@ -104,10 +128,12 @@ export async function simulateJourney(
   if (matched === 0) warnings.push('트리거 조건에 맞는 고객이 0명입니다. 활성화해도 즉시 보낼 대상이 없으니 조건을 확인해 주세요.');
   if (steps.length === 0) warnings.push('단계가 없어 보낼 메시지가 없습니다.');
   // ★ 2026-10-25 #12 — 진입 감시와 같은 판정(entryCapExceeded). 지금 인원이 첫 회차인 건 상시 대상만(사건형은 사건마다 들어온다).
-  const cap = journey.threshold_recipients_per_step != null ? Number(journey.threshold_recipients_per_step) : null;
+  const storedCap = journey.threshold_recipients_per_step != null ? Number(journey.threshold_recipients_per_step) : null;
+  const cap = opts.cap === undefined ? storedCap : opts.cap;
   const backfill = backfillPerDayOf(journey);
   const firstRoundIsMatched = !resolveCdpCursorEventName(String(journey.trigger_event || ''));
-  if (firstRoundIsMatched && entryCapExceeded(cap, backfill, matched)) {
+  const firstRoundCapExceeded = firstRoundIsMatched && entryCapExceeded(cap, backfill, matched);
+  if (firstRoundCapExceeded) {
     warnings.push(`지금 대상 ${matched.toLocaleString()}명이 한 번에 보낼 최대 인원(${cap!.toLocaleString()}명)을 넘어, 켜면 바로 멈춰요. 최대 인원을 늘리거나 하루 몫을 정해 주세요.`);
   }
   if (firstRoundIsMatched && backfill != null && matched > backfill) {
@@ -134,6 +160,10 @@ export async function simulateJourney(
     dataNote: projection.dataNote,
     reasoning: buildReasoning(matched, segments, projection, capped),
     warnings,
+    firstRoundCapExceeded,
+    capUsed: cap,
+    prepaidBalance: c.billing_type === 'prepaid' ? Number(c.balance) || 0 : null,
+    fatigueCap: await fatigueCapState(companyId),
   };
 }
 

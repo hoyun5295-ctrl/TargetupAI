@@ -52,6 +52,7 @@ describe('R54 ② 원장과 몰 결제를 한 문장에서 같이 읽는 SQL = �
     'utils/journey-product.ts': [1, '상품 재구매 목표 = 저장한 문 하나(문 매개변수로 한쪽만 · 더하지 않는다)'],
     'utils/journey-purchase-ledger.ts': [1, '문 안내 = 문마다 마지막 도착 시각(따로 MAX · 더하지 않는다)'],
     'utils/journey-target-extractor.ts': [2, '장바구니 · 둘러보고 안 삼 = 구매가 없나(NOT EXISTS · 있나만)'],
+    'utils/product-signal.ts': [1, '★ 1113 C133 상품 신호 다시 세기 = 문마다 따로 행(door 칸으로 갈라 쓴다 · 한 숫자로 더하지 않는다) · 「그 뒤 그 상품을 샀나」 = 있나만(NOT EXISTS)'],
     'utils/two-door-purchase.ts': [4, 'CT 자신(CT-D2 사실 · CT-D4 두 조각 · 회사 갈래 = 있나만)'],
     'utils/two-door-transition.ts': [1, '전환 패스 대상 회사 = 회사 갈래와 같은 판정(있나만)'],
   };

@@ -69,6 +69,13 @@ export default function JourneyMapPage() {
   const [statusFilter, setStatusFilter] = useState<MapStatusFilter>('all');
   const [search, setSearch] = useState('');
   const [gapOpen, setGapOpen] = useState(false);
+  // ★ 2026-11-13 C133 F1 — 여정 화면의 「기본 여정 한 번에 켜기」가 ?open=diagnosis 로 들어오면 진단 창을 연다.
+  //   열쇠는 읽은 뒤 주소에서 지운다(새로고침 · 뒤로 가기로 다시 열리지 않게). 모르는 값은 무시한다.
+  useEffect(() => {
+    if (searchParams.get('open') !== 'diagnosis') return;
+    setGapOpen(true);
+    setSearchParams((prev) => { const n = new URLSearchParams(prev); n.delete('open'); return n; }, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [interviewOpen, setInterviewOpen] = useState(false);
   // ★ 2026-10-23 한 줄 여정 한 길 — 지도 명령 줄 = 문장으로 만들기 창(그 문장을 바로 읽는다)
   const [interviewSentence, setInterviewSentence] = useState('');

@@ -74,7 +74,7 @@ describe('A2 · A9 켜기 · 멈춤 = 같은 계보 잠금 · 한 트랜잭션',
   it('새 모양 켜기 = 원본이 멈췄으면 같은 잠금 안에서 그만둔다(켜기 UPDATE 없음 · 되돌림)', () => {
     const b = SRC('journey-builder.ts');
     const fn = b.slice(b.indexOf('export async function activateJourney('), b.indexOf('// 활성화 종결 직후 = step snapshot 보존'));
-    expect(fn).toContain('opts: { requireActiveSource?: string } = {}');
+    expect(fn).toContain('opts: { requireActiveSource?: string; setCap?: number | null } = {}');   // ★ 2026-11-13 C133 — 켜기 창의 최대 인원을 켜는 문장이 함께 쓰는 칸이 더해졌다(안 주면 종전 그대로)
     const lock = fn.indexOf('await lockLineageEntry(actClient, journeyId);');
     const src = fn.indexOf('if (opts.requireActiveSource) {');
     const upd = fn.indexOf("status = 'active',");
@@ -83,7 +83,7 @@ describe('A2 · A9 켜기 · 멈춤 = 같은 계보 잠금 · 한 트랜잭션',
     expect(upd).toBeGreaterThan(src);
     expect(fn).toContain("if (String(src.rows[0]?.status || '') !== 'active') sourceStopped = true;");
     expect(SRC('journey-reshape.ts')).toContain('requireActiveSource: journeyId');
-    expect(SRC('journey-activation.ts')).toContain('activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource })');
+    expect(SRC('journey-activation.ts')).toContain('activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource, setCap: opts.setCap })');   // ★ 1113 C133 — 켜기 창의 최대 인원을 함께 넘긴다(없으면 undefined = 건드리지 않는다)
   });
   it('A9 — 계보 컬럼 유무와 무관하게 BEGIN · 보정 실패는 던진다(삼키지 않는다)', () => {
     const b = SRC('journey-builder.ts');

@@ -41,6 +41,10 @@ import { startAgencySendMailWorker } from './utils/agency-send-mail-worker';
 import { startSalesOutreachSweeper } from './utils/sales-outreach-sweeper'; // ★ 2026-08-24 아웃리치 sweeper
 // ★ D219+ Part 2 후속 (2026-05-27): 일일 인사이트 API (Performance 카드 + 메일 양쪽 활용)
 import insightRoutes from './routes/insight';
+import benchmarkRoutes from './routes/benchmark';   // ★ 2026-11-13 C133 F3 업종 평균 비교
+import { startBenchmarkWorker } from './utils/performance-benchmark';   // ★ 2026-11-13 C133 F3 업종 평균 야간 스냅숏
+import productInsightRoutes from './routes/product-insight';   // ★ 2026-11-13 C133 F2 성과리포트 「상품 · 검색어」
+import { startProductSignalWorker } from './utils/product-signal';   // ★ 2026-11-13 C133 F2 상품 신호 야간 계산
 import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
@@ -485,6 +489,8 @@ app.use('/api/sales-outreach', salesOutreachRoutes); // ★ 2026-08-24 AI 영업
 app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증)
 app.use('/api/outreach/u', outreachUnsubscribeRoutes); // ★ 2026-09-23 담당자 직접 발송 수신거부(무인증)
 app.use('/api/insight', insightRoutes);
+app.use('/api/product-insight', productInsightRoutes);   // ★ 2026-11-13 C133 F2
+app.use('/api/benchmark', benchmarkRoutes);   // ★ 2026-11-13 C133 F3
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);
@@ -721,6 +727,13 @@ app.listen(PORT, () => {
   //   클릭률 + 이탈 위험 + 구매 가능성 (Logistic Regression + cold start fallback)
   //   24h TTL — 발송 시점 cache 우선 + 없으면 즉시 계산
   startPredictiveWorker();
+
+  // ★ 2026-11-13 C133 F2: 상품 신호 야간 계산 — 매일 KST 3시대 · 단계 개방(V3_STAGE_PRODUCT_INSIGHT · V3_STAGE_RECO)이 열린 회사만.
+  //   ENV 명단이 비면 아무 회사도 계산하지 않는다(부하 0). 발송 · 과금 무접촉 · 실패는 그 회사만 건너뛴다.
+  startProductSignalWorker();
+
+  // ★ 2026-11-13 C133 F3: 업종 평균 스냅숏 — 매일 KST 4시대 · V3_STAGE_BENCHMARK 가 열렸을 때만(닫혀 있으면 쿼리 0). PG 만 읽는다 · 발송 · 과금 무접촉.
+  startBenchmarkWorker();
 
   // ★ 2026-07-04: 여정·브랜드 KAKAO 학습 라벨 스윕 — 30분 주기(환불·상태·큐 무접촉, 라벨 전용). 발견1(라벨 누수) fix.
   startCopyLabelSweeperWorker();

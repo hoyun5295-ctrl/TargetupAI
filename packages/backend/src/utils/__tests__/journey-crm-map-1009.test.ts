@@ -347,7 +347,8 @@ describe('추천 요청 키(결정적 · Codex 3R)', () => {
   it('라우트는 화면 키를 받지 않고 서버가 계산한 키로 부른다', () => {
     const r = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'ai.ts'), 'utf8');
     const route = r.slice(r.indexOf("router.post('/operator/journeys-reco/design'"), r.indexOf('// POST /api/ai/operator/journeys — 신규 여정 생성'));
-    expect(route).toContain('interviewId: recoRequestId(companyId, userId, plan),');
+    // ★ 2026-11-13 C133 F1 — 적은 혜택도 요청 키에 든다(다른 혜택 = 다른 요청 · 비우면 키가 종전과 글자 그대로 같다 = c133-deploy-b 시험)
+    expect(route).toContain('interviewId: recoRequestId(companyId, userId, plan, benefitText),');
     expect(route).not.toMatch(/recoRequestId\([^)]*toISOString/);
     expect(route).not.toContain('recoId');
   });

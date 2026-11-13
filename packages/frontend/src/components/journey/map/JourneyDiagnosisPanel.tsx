@@ -33,6 +33,8 @@ interface Diagnosis {
   products: ProductCycle[];
   quote: { draftEach: number; activateEach: number };
   source: string;
+  /** ★ 2026-11-13 C133 F1 — 「기본 여정 한 번에 켜기」가 이 회사에 열렸는가(서버 판정 · 열린 회사에만 혜택 칸) */
+  pack?: boolean;
 }
 
 interface Props {
@@ -44,6 +46,8 @@ interface Props {
 }
 
 const dayLabel = (d: number) => (d === 0 ? '바로' : `D+${d}`);
+/** 혜택 글 길이 — 서버 질문표 판정(backend journey-interview MAX_BENEFIT_CHARS)과 같은 값(넘으면 서버가 거절한다 · 여기는 입력 칸 길이) */
+const BENEFIT_MAX = 200;
 /**
  * 상품 초안 요청 키(결정적) — 상품 · 주기 **내용만**의 해시(Codex 3R high · 4R medium · 날짜를 넣으면 자정을 넘긴 재시도가 다른 요청).
  *   화면 수명에 묶인 무작위 키는 창 · 페이지를 다시 열 때마다 새로 생겨 결과를 모르는 요청이 다른 요청으로 보였다.
@@ -65,6 +69,8 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // ★ 2026-11-13 C133 F1 — 드릴 혜택(선택 · 추천 여정 초안 전부에 같은 혜택 · 비우면 종전처럼 혜택 자리를 표시해 두고 켜기 전에 채운다)
+  const [benefit, setBenefit] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -117,7 +123,7 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
       let stop = false;
       for (const p of diag.flowPlan.filter((x) => picked.has(`flow:${x.triggerEvent}`))) {
         setProgress(`${p.title} 초안을 만드는 중`);
-        const r = await call('/api/ai/operator/journeys-reco/design', { triggerEvent: p.triggerEvent, shownDays: p.daysFromStart });
+        const r = await call('/api/ai/operator/journeys-reco/design', { triggerEvent: p.triggerEvent, shownDays: p.daysFromStart, ...(diag.pack === true && benefit.trim() ? { benefit: benefit.trim() } : {}) });
         if (r.ok && r.d.journeyId) { made.push(String(r.d.journeyId)); if (r.d.recalculated) changed = true; continue; }
         // ★ 2026-10-19 B-1010-12 — 이미 만든 초안(같은 요청) = 그 초안을 연다(문구만 띄우고 길이 없던 것)
         if (!r.ok && r.d?.journeyId) { made.push(String(r.d.journeyId)); continue; }
@@ -209,6 +215,24 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
           );
         })}
       </ol>
+
+      {diag.pack === true && diag.flowPlan.some((p) => p.status === 'ready') && (
+        <label className="mt-3 block rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+          <span className="text-[12px] font-semibold text-slate-900">드릴 혜택이 있으면 적어 주세요 <span className="font-normal text-slate-500">(없으면 비워 두세요)</span></span>
+          <input
+            type="text"
+            value={benefit}
+            onChange={(e) => setBenefit(e.target.value)}
+            maxLength={BENEFIT_MAX}
+            disabled={busy}
+            placeholder="예: 첫 구매 10% 쿠폰"
+            className="mt-1.5 w-full h-9 px-2.5 rounded-lg border border-slate-200 bg-white text-[13px] text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-indigo-400 disabled:opacity-60"
+          />
+          <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+            적은 혜택만 추천 여정 문안에 넣어요. 비우면 혜택 자리를 표시해 두고, 켜기 전에 채우게 해요.
+          </span>
+        </label>
+      )}
 
       {diag.products.length > 0 && (
         <>

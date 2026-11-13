@@ -119,6 +119,45 @@ export async function fetchJson(url: string, timeoutMs = 10_000): Promise<Fetche
   }
 }
 
+/**
+ * ★ 2026-11-13 C133 — 쓰기 요청(POST · PATCH)에도 같은 시간 제한을(fetchJson 은 읽기 전용이라 본문 · 메서드를 못 싣는다).
+ *   응답이 멈추면 실패로 본다(status 0 · body null). 실패 응답(4xx · 5xx)의 본문은 읽어 돌려준다 — 화면이 서버 안내 문구를 보여 주려고.
+ *   ⛔ 머리(상태)만 오고 본문을 받다 끊기거나 시간 제한에 걸린 것도 status 0 이다(결과 모름 · ★ C133 Codex 구현 1R — 옛: 200 · body null 로
+ *     돌려줘 「켜졌는지 모르는 요청」이 「실패」로 읽혔다). 본문이 JSON 이 아닌 것만 그 상태 + body null.
+ *   signal 을 주면 바깥에서도 끊을 수 있다(창 닫기 = 취소).
+ */
+export async function sendJson(
+  url: string,
+  init: { method: 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown; signal?: AbortSignal },
+  timeoutMs = 10_000,
+): Promise<Fetched> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  const onOuterAbort = () => ctl.abort();
+  init.signal?.addEventListener('abort', onOuterAbort);
+  try {
+    if (init.signal?.aborted) return { ok: false, status: 0, body: null };
+    const r = await fetch(url, {
+      method: init.method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      signal: ctl.signal,
+    });
+    let body: any = null;
+    try {
+      body = await r.json();
+    } catch (e) {
+      if (!(e instanceof SyntaxError) || ctl.signal.aborted) return { ok: false, status: 0, body: null };   // 받다 끊김 · 시간 제한 = 결과 모름
+    }
+    return { ok: r.ok, status: r.status, body };
+  } catch {
+    return { ok: false, status: 0, body: null };
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener('abort', onOuterAbort);
+  }
+}
+
 export function serialRunner(run: () => Promise<void>): () => Promise<void> {
   let inFlight = false;
   let again = false;
