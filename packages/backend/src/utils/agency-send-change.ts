@@ -19,7 +19,7 @@ import {
   findUnregisteredRequestCallbacks, hasApprovalRequestedColumn, loadSendWindow, logEvent, logCharCleanedTx, unregisteredCallbackError, MAX_CONTENT,
 } from './agency-send-intake';
 import { prepareAgencyCopy, agencyCharNotice } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
-import { agencyOptOutNotice, loadAgencyOpt080 } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
+import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 import type { SpellIssue } from './spell-check';
 
 export type AgencyChangeResult =
@@ -192,8 +192,8 @@ export async function editAgencyContentTx(input: {
     ...(input.actor || {}),
   });
   // ★ 2026-11-13 C130 — 고친 글에도 「무료」 없는 수신거부 줄이 남았으면 알린다(연결을 돌려준 뒤 080 을 읽는다 · 설계서 §2 A4)
-  const optOut = row.is_ad
-    ? agencyOptOutNotice({ content: body, isAd: row.is_ad, messageType: saved?.message_type ?? row.message_type, opt080: await loadAgencyOpt080(row.created_by, row.company_id), how: 'edit' })
+  const optOut = agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text })   // ★ C132 이메일 접수 = 표기 없음 = 안내 0
+    ? agencyOptOutNotice({ content: body, isAd: true, messageType: saved?.message_type ?? row.message_type, opt080: await loadAgencyOpt080(row.created_by, row.company_id), how: 'edit' })
     : [];
   //   optOutNotice = 같은 판정을 따로 한 칸(화면이 저장한 문안과 안내 상자를 같은 응답으로 함께 바꾼다 · Codex 구현 1R)
   return { ok: true, row: saved, notice: [...agencyCharNotice({ content: copy.lines, recipients: { count: 0, examples: [] } }, '저장했습니다'), ...optOut], optOutNotice: optOut };

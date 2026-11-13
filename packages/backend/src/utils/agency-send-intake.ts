@@ -13,7 +13,7 @@
  */
 import pool, { query } from '../config/database';
 import { prepareAgencyText, prepareAgencyCopy, createAgencyRecipientCleaner, mergeAgencyCharNotes, agencyCharNotice, EMPTY_AGENCY_CHAR_NOTES, type AgencyCharNotes } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
-import { agencyOptOutNotice, loadAgencyOpt080 } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
+import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies, agencyAdTextForSource } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 import { getRegisteredCallbackSet, isCallbackRegistered } from './callback-filter';
 import { validateMmsPayload } from './mms-validator';
 import { alignMmsImageNames } from './mms-image-util';
@@ -238,6 +238,15 @@ export function forgetAgencyColumn(
   table: 'agency_send_requests' | 'agency_send_recipients' | 'agency_send_email_intake' = 'agency_send_requests',
 ): void {
   columnCache.delete(`${table}.${column}`);
+}
+
+/**
+ * ★ 2026-11-13 C132 — 접수 행에 넣을 광고 표기 정책(agency_send_requests.ad_text · C132-DDL-2).
+ *   칸이 없으면 null = 행이 NULL 로 남는다 = 종전 표기 — 재는 값 · 넣는 값 · 안내가 **같은 값**을 써야 해서(바이트 판정이 발송 글과 갈리지 않게) 한 곳에서 정한다.
+ *   run = 그 자리의 연결(트랜잭션 안이면 그 연결 · 밖이면 풀) — 바깥 트랜잭션이 연결을 쥔 채 풀을 다시 기다리지 않게.
+ */
+export async function agencyAdTextValue(run: any, source: string | null | undefined): Promise<boolean | null> {
+  return (await hasAgencyColumn(run, 'ad_text')) ? agencyAdTextForSource(source) : null;
 }
 
 /**
@@ -469,7 +478,7 @@ export async function createRequestCore(
   if (type === 'SMS' || type === 'AUTO') {
     const smsBytes = typeof pre?.maxSmsBytes === 'number'
       ? pre.maxSmsBytes
-      : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: body, isAd: !!isAd, recipients: rows });
+      : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: body, isAd: !!isAd, adText: await agencyAdTextValue(pool, source), recipients: rows });
     if (type === 'AUTO') {
       // 여기 온 AUTO = 이미지·제목 없음. 한도 안이면 SMS, 넘으면 장문이라 제목이 있어야 한다(없으면 반려 = 사용자가 제목을 넣는다).
       if (smsBytes <= SMS_MAX_BYTES) {
@@ -494,6 +503,7 @@ export async function createRequestCore(
   const client = extClient || await pool.connect();
   const own = !extClient;
   let request: any;
+  let adTextValue: boolean | null = null;   // ★ C132 넣은 표기 정책(안내도 이 값)
   try {
     if (own) await client.query('BEGIN');
     // 컬럼이 있을 때만 싣는다(위 주석 · DDL 후행 안전 + 라벨 보존).
@@ -512,6 +522,12 @@ export async function createRequestCore(
     if (source && await hasAgencyColumn(client, 'source')) {
       extraCols.push('source');
       extraVals.push(String(source));
+    }
+    // ★ 2026-11-13 C132 — 광고 표기 정책을 행에 고정(이메일 = false · 칸이 없으면 싣지 않음 = NULL = 종전 · Codex 설계 1R #2)
+    adTextValue = await agencyAdTextValue(client, source);
+    if (adTextValue !== null) {
+      extraCols.push('ad_text');
+      extraVals.push(adTextValue);
     }
     // ★0826(6) 자동 조정된 건은 사용자가 적은 원래 시각을 남긴다 — 담당자 문자 분기와 화면 표시의 근거다
     if (when.shifted && when.originalAt && await hasAgencyColumn(client, 'requested_at_original')) {
@@ -605,7 +621,7 @@ export async function createRequestCore(
   // ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내(접수한 글 · 확정 유형 · 광고 여부 그대로 · 발송 글은 무변경 · 설계서 §2 A2).
   //   080 = 입구가 넘긴 값 → 없으면 자체 트랜잭션 입구만 여기서(연결을 돌려준 뒤) 읽는다 · 바깥 트랜잭션 입구는 '' (낱말만 붙는 꼬리 글).
   const opt080 = pre?.opt080 !== undefined ? pre.opt080 : (own ? await loadAgencyOpt080(auth.userId, auth.companyId) : '');
-  const optOut = agencyOptOutNotice({ content: body, isAd: !!isAd, messageType: type, opt080, how: source === 'email' ? 'mail' : 'edit' });
+  const optOut = agencyOptOutNotice({ content: body, isAd: agencyAdTextApplies({ isAd, adText: adTextValue }), messageType: type, opt080, how: source === 'email' ? 'mail' : 'edit' });
   return { ok: true, request, callbackKinds, notice: [...agencyCharNotice(charNotes), ...optOut] };
 }
 
@@ -713,7 +729,11 @@ export async function analyzeOneStep(
    * ★2026-09-13 호출부가 **같은 버퍼로** 이미 읽은 요청서·명단. 이메일 워커는 사전 게이트에서 둘 다 읽는데
    *   여기서 다시 읽으면 큰 명단을 두 번 파싱한다(적대검토 medium · 워커가 API와 같은 프로세스라 그동안 전부 멈춘다).
    */
-  pre?: { form?: ReturnType<typeof parseAgencyRequestForm>; list?: ReturnType<typeof parseAgencyRecipientList> },
+  pre?: {
+    form?: ReturnType<typeof parseAgencyRequestForm>; list?: ReturnType<typeof parseAgencyRecipientList>;
+    /** ★ 2026-11-13 C132 — 접수될 행의 표기 정책(메일 = agencyAdTextValue(pool, 'email') · 비우면 표기 = 화면 · 원스텝) · SMS 바이트를 발송 글과 같은 글로 잰다 */
+    adText?: boolean | null;
+  },
 ): Promise<OneStepAnalysis> {
   const errors: AgencyFormError[] = [];
   const empty: OneStepAnalysis = {
@@ -950,7 +970,7 @@ export async function analyzeOneStep(
   //   이미지 = MMS · 제목이 있으면 LMS(종전 그대로) · 그 밖은 SMS로 조립해 90바이트를 넘으면 LMS.
   const maxSmsBytes = images.length > 0 || formSubject.trim()
     ? null
-    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: formContent.trim(), isAd: form.isAd, recipients: allRecipients });
+    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: formContent.trim(), isAd: form.isAd, adText: pre?.adText, recipients: allRecipients });
   const messageType: 'SMS' | 'LMS' | 'MMS' = images.length > 0
     ? 'MMS' : (formSubject.trim() || (maxSmsBytes !== null && maxSmsBytes > SMS_MAX_BYTES) ? 'LMS' : 'SMS');
 

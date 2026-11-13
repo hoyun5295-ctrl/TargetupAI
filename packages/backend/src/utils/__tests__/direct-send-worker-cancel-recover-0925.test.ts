@@ -116,6 +116,7 @@ describe('F02·F37 적재 루프 밖 예외', () => {
 
   it('필드 매핑·080 번호는 적재할 때만 준비한다(recover가 여기에 막히지 않는다)', () => {
     expect(src).toContain('= skipLoad ? {} : await prepareFieldMappings(companyId);');
-    expect(src).toContain("const opt080 = finalIsAd && !skipLoad ? await getOpt080Number(userId || null, companyId) : '';");
+    // ★ 2026-11-13 C132 — 080 은 표기를 붙일 때만(adTextOn = 광고이고 끔 표식이 아님 · 이메일 대행 = 문안 그대로) · 적재할 때만은 그대로
+    expect(src).toContain("const opt080 = adText && !skipLoad ? await getOpt080Number(userId || null, companyId) : '';");
   });
 });

@@ -75,8 +75,11 @@ describe('길목 배선 — 길이만 보던 인라인 검사가 남지 않는�
     const start = src.indexOf('export async function getRegisteredCallbackSet(');
     const body = src.slice(start, src.indexOf('\nexport ', start + 1));
     // ★ 2026-10-19 B-1005-5② — 규격은 저장 원문으로 보고 통과한 것의 숫자만 집합에 넣는다
-    expect(body).toContain('const v = checkCallbackSpec(r.phone);');
-    expect(body).toContain('if (v.ok) out.add(v.digits);');
+    // ★ 2026-11-13 C132 — 그 판정을 registeredDigits 로 꺼내 슈퍼관리자 사용 범위 칸과 같이 쓴다(뜻 그대로 · 원문 → 규격 → 숫자)
+    expect(body).toContain('return registeredDigits((registeredResult.rows as any[]).map((r) => r.phone));');
+    const fn = src.slice(src.indexOf('export function registeredDigits('), src.indexOf('\n}\n', src.indexOf('export function registeredDigits(')));
+    expect(fn).toContain('const v = checkCallbackSpec(p);');
+    expect(fn).toContain('if (v.ok) out.add(v.digits);');
   });
 
   it('발송 직전 회신번호 검사 3곳이 규격 함수를 부른다', () => {

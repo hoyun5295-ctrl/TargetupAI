@@ -9,6 +9,22 @@
  */
 import { adRejectFooterText, findNonLegalOptOutLines, getOpt080Number } from './messageUtils';
 
+/**
+ * ★ 2026-11-13 C132(서 팀장 요청 「이메일 대행 자동 (광고) + 무료수신거부 080 처리 제거」 · Harold 「책임도 지들이 지는 거야」) —
+ *   대행 글에 (광고) 머리 · 무료수신거부 꼬리를 **붙이는가** 한 곳. 이메일 접수 = 고객 문안 그대로(붙이지 않음).
+ *   광고 여부의 다른 쓰임(야간 창 · 080 명단 제외 · 광고 관문 · 피로도 · campaigns.is_ad)은 이 값이 아니라 is_ad 를 그대로 쓴다(설계서 §2 K1 ~ K6).
+ *   정책은 접수 때 행에 고정한다(agency_send_requests.ad_text · C132-DDL-2 · Codex 설계 1R #2) — 옛 행 NULL = 종전(표기) ·
+ *   배포 전에 들어온 접수는 승인 · 미리보기 · 테스트 · 발송이 모두 종전, 배포 뒤 이메일 접수는 모두 표기 없음(승인한 글 = 나가는 글).
+ */
+export function agencyAdTextApplies(input: { isAd: boolean | null | undefined; adText: boolean | null | undefined }): boolean {
+  return !!input.isAd && input.adText !== false;
+}
+
+/** ★ C132 — 접수 코어가 행에 넣는 값(접수 경로 → ad_text) · 이메일 = false · 화면 · 원스텝 · 그 밖 = true */
+export function agencyAdTextForSource(source: string | null | undefined): boolean {
+  return source !== 'email';
+}
+
 /** 고치는 길이 확인 자리마다 다르다 — mail = 메일 접수 회신 · upload = 화면 원스텝 확인 창(접수 전) · edit = 화면(접수 뒤 문안 고치기) · staff = 슈퍼관리자 */
 export type AgencyOptOutHow = 'mail' | 'upload' | 'edit' | 'staff';
 

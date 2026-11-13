@@ -419,7 +419,8 @@
 | cost_per_lms | numeric NULL — ★2026-07-24 |
 | cost_per_mms | numeric NULL — ★2026-07-24 |
 | cost_per_kakao | numeric NULL — ★2026-07-24 |
-| cost_per_brand | numeric NULL — ★2026-07-29 브랜드메시지(게이트웨이 MsgType `G`). **2026-08-14 information_schema 실측 확인** — 0729 트랙에서 DDL까지 끝나 있었는데 이 표가 0724 시점에 멈춰 있어 "미신설"로 오독됐다 |
+| cost_per_brand_nonfriend | numeric NULL — ★2026-11-13 C132 브랜드메시지 비친구 단가(게이트웨이 MsgType `GN` · 비면 친구 단가로 청구 = pickBrandPriceRaw 순서표) · **C132-DDL-1 배포 앞 · 실행 대기** |
+| cost_per_brand | numeric NULL — ★2026-07-29 브랜드메시지(게이트웨이 MsgType `G`). ★2026-11-13 C132 = 친구 단가. **2026-08-14 information_schema 실측 확인** — 0729 트랙에서 DDL까지 끝나 있었는데 이 표가 0724 시점에 멈춰 있어 "미신설"로 오독됐다 |
 - INDEX idx_company_agent_ids_company (company_id)
 - 2026-08-14 실측: **11컬럼**. 단가 5종(sms·lms·mms·kakao·brand) 전부 nullable(NULL=미설정 — 명시 0원과 구분).
   단가 컬럼 목록은 코드에서 `BILLING_TYPES.agentPriceColumn` 파생이라(billing-ledger.ts) 유형을 늘려도 SELECT·지문·미설정 가드가 자동 확장된다 — 목록을 손으로 두 벌 두지 않는다.
@@ -3418,6 +3419,7 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 - ⛔ **큐 적재는 당일 재검사 통과 뒤 1회뿐**이라 `queued` 이전 상태에는 MySQL 큐가 없다. 취소도 그 전에는 상태 변경만이다(0611 에이치피오 사고 경로를 구조로 제거).
 - `approval_version`은 승인 당시 `content_version`. 문안이 바뀌면(다듬기) 값이 어긋나 재승인으로 간다.
 - **`spell_check jsonb NULL`**(★2026-09-25 ADD 실행 완료 0925 Harold) = 맞춤법 검사 저장값 `{version, checkedAt, issues, failed}`. 워커 A 가 테스트 문자 뒤 `content_version` 조건으로 쓰고, 문안 수정 라우트가 NULL 로 지운다. 화면·승인 링크·안내 문자는 `version = content_version` 이고 실패가 아닐 때만 쓴다(`readAgencySpell`). 컬럼 부재 = `hasAgencyColumn` 으로 저장·표시를 건너뛴다. 설계 = [대행 맞춤법](../docs/2026-09-25-agency-spell-check-design.md) §3-3
+- **`ad_text boolean NULL`**(★2026-11-13 C132-DDL-2 · 배포 앞 · 실행 대기) = 접수 때 고정한 광고 표기 정책(이메일 = false = (광고) · 무료수신거부 없이 문안 그대로 · 화면 · 원스텝 = true · NULL = 칸 이전 접수 = 종전 표기) · 판정 CT = agency-send-optout `agencyAdTextApplies` · 넣는 값 = agency-send-intake `agencyAdTextValue`.
 - **`source varchar(16) NOT NULL DEFAULT 'screen'`**(★2026-08-26 ALTER 실행완료 · CHECK `('screen','one_step','email')`) = 접수 출처. 라벨은 프론트 `SOURCE_LABEL` 단일표 소유(파일명 유무 추정 폐지). 이메일 축 설계 = 대행발송 설계서 §18.
 
 ### agency_send_email_senders · agency_send_email_intake · agency_send_mail_state (대행발송 이메일 접수 · §18) — ★2026-08-26 CREATE 실행완료(information_schema 3테이블+source 실측)

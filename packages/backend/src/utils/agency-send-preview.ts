@@ -19,6 +19,7 @@ import { query } from '../config/database';
 import { buildSlotPlan, toSlotValues, toStoredVars } from './agency-send-vars';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
 import { eucKrByteLength } from './message-byte';
+import { agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C132 이메일 대행 = 문안 그대로(표기 판정 한 곳)
 
 /** 상세 미리보기 상한. 검토용 표본이다 — 전건 최종 보증은 담당자 테스트 문자와 발송이 맡는다. */
 export const AGENCY_PREVIEW_LIMIT = 50;
@@ -33,14 +34,17 @@ interface RenderCtx {
   plan: ReturnType<typeof buildSlotPlan>;
   mappings: Awaited<ReturnType<typeof prepareFieldMappings>>;
   opt080: string;
+  /** ★ C132 — (광고) · 무료수신거부를 붙이는가(agencyAdTextApplies · 이메일 접수 = false) */
+  adText: boolean;
 }
 
 /** 접수 한 건의 조립 재료(문안 슬롯 계획 · 필드 매핑 · 080)를 한 번만 읽는다. */
 async function loadRenderCtx(row: any): Promise<RenderCtx> {
   const plan = buildSlotPlan(String(row.current_content || ''));
   const mappings = await prepareFieldMappings(row.company_id);
-  const opt080 = row.is_ad ? await getOpt080Number(row.created_by || null, row.company_id) : '';
-  return { plan, mappings, opt080 };
+  const adText = agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text });
+  const opt080 = adText ? await getOpt080Number(row.created_by || null, row.company_id) : '';
+  return { plan, mappings, opt080, adText };
 }
 
 /** 수신자 한 명 몫의 실물 문장. 인자 구성은 옛 buildSample과 문자 단위로 같다. */
@@ -48,7 +52,7 @@ function renderOne(ctx: RenderCtx, row: any, phone: string, vars: Record<string,
   const slotValues = toSlotValues(vars, ctx.plan.order);
   const { message, subject } = prepareSendMessage(ctx.plan.slotContent, {}, ctx.mappings, {
     msgType: row.message_type,
-    isAd: !!row.is_ad,
+    isAd: ctx.adText,
     opt080Number: ctx.opt080,
     addressBookFields: slotValues,
     subject: String(row.subject || ''),
@@ -102,6 +106,8 @@ export async function measureAgencyMaxSmsBytes(input: {
   userId: string | null;
   content: string;
   isAd: boolean;
+  /** ★ 2026-11-13 C132 — 표기 정책(행의 ad_text · 접수 전 = 입구가 agencyAdTextForSource 로 넘긴다 · false = 표기 없이 잰다) */
+  adText: boolean | null | undefined;
   recipients: Array<{ vars?: Record<string, any> | null } | null | undefined>;
 }): Promise<number> {
   const content = String(input.content || '');
@@ -122,12 +128,13 @@ export async function measureAgencyMaxSmsBytes(input: {
     candidates = scored.slice(0, 5).map((x) => stored[x.idx]);
   }
   const mappings = await prepareFieldMappings(input.companyId);
-  const opt080 = input.isAd ? await getOpt080Number(input.userId || null, input.companyId) : '';
+  const adText = agencyAdTextApplies({ isAd: input.isAd, adText: input.adText });
+  const opt080 = adText ? await getOpt080Number(input.userId || null, input.companyId) : '';
   let max = 0;
   for (const vars of candidates) {
     const { message } = prepareSendMessage(plan.slotContent, {}, mappings, {
       msgType: 'SMS',
-      isAd: !!input.isAd,
+      isAd: adText,
       opt080Number: opt080,
       addressBookFields: toSlotValues(vars, plan.order),
       subject: '',

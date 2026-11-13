@@ -31,7 +31,7 @@ import { describeMmsFitNote } from './mms-image-fit';
 import { canUseAgencySend, loadPlanContext } from './plan-guard';
 import { getRegisteredCallbackSet } from './callback-filter';
 import {
-  analyzeOneStep, createRequestCore, hasAgencyColumn, forgetAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
+  analyzeOneStep, createRequestCore, hasAgencyColumn, forgetAgencyColumn, agencyAdTextValue, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
   type AgencyCallbackKinds,
 } from './agency-send-intake';
 import {
@@ -43,7 +43,7 @@ import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
 import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
-import { agencyOptOutNotice, loadAgencyOpt080 } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(재시도 회신 · 접수 전 080)
+import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(재시도 회신 · 접수 전 080)
 import { sendSystemAlert, persistPassFailures, flushPassAlerts } from './system-alert';
 import { soleCompanyId } from './internal-company';
 
@@ -969,6 +969,8 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   let ambiguousSeen = false;
   // ★2026-09-05 §21-3 (2) 시각 축은 원본·조정값 둘 다로 대조한다. 컬럼 탐지는 단위마다 하지 않는다
   const dupTimeSql = emailDupTimeSql(await hasAgencyColumn(pool, 'requested_at_original'));
+  // ★ 2026-11-13 C132 — 이 메일로 만들어질 행의 광고 표기 정책(이메일 = 표기 없음 · 칸이 없으면 null = 종전) · SMS 바이트를 발송 글과 같은 글로 잰다
+  const mailAdText = await agencyAdTextValue(pool, 'email');
 
   for (let ui = 0; ui < units.length; ui++) {
     const u = units[ui];
@@ -1085,7 +1087,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     // ★2026-09-13 위 사전 게이트가 같은 버퍼로 읽은 요청서·명단을 넘긴다(큰 명단을 다시 파싱하지 않는다).
     //   명단을 못 읽었으면(list = null) 넘기지 않아 분석이 종전처럼 스스로 읽고 그 사유를 반려에 싣는다.
     const analysis = await analyzeOneStep(unitAcct, u.formBuf, u.listBuf, u.listName, overrides, false, EMAIL_MIN_LEAD_MINUTES,
-      { form, ...(list ? { list } : {}) });
+      { form, ...(list ? { list } : {}), adText: mailAdText });
     if (analysis.errors.length > 0) {
       fail(analysis.errors.map((e) => `[${e.field}] ${e.error}`).join(' / '), 'form_invalid', analysis.headers);
       continue;
@@ -1311,9 +1313,11 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
     // ★2026-09-05 §21-4 **전량 조회**. 예전에는 request_ids[0]만 읽어, 다건 접수의 재시도 회신이
     //   5건 중 1건만 말했다(첫 회신이 실패한 담당자가 받는 유일한 확인이 잘못된 내용이 된다).
     //   순서는 접수 순서 그대로 — 순번 표기가 담당자 문자와 같은 번호를 가리켜야 한다.
+    // ★ 2026-11-13 C132 — 표기 정책 칸은 있을 때만 읽는다(DDL 전이면 이 SELECT 가 통째로 실패해 재시도 패스가 멈춘다 · 아래 ⛔ 와 같은 이유)
+    const retryAdTextCol = (await hasAgencyColumn(pool, 'ad_text')) ? ', ad_text' : '';
     const req = await query(
       `SELECT id, subject, current_content, requested_at, callback_number, manager_phones, phone_column, recipient_count, file_name, mms_image_paths,
-              is_ad, message_type, created_by, company_id
+              is_ad, message_type, created_by, company_id${retryAdTextCol}
          FROM agency_send_requests WHERE id = ANY($1::uuid[])
         ORDER BY array_position($1::uuid[], id)`, [row.request_ids],
       // ⛔ 재시도 회신에 requested_at_original을 넣지 않는다 — 컬럼 부재(DDL 전) 시 이 SELECT가 통째로
@@ -1343,8 +1347,8 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
     const optOutById = new Map<string, string[]>();
     for (const r of req.rows) {
       optOutById.set(String(r.id), agencyOptOutNotice({
-        content: r.current_content, isAd: r.is_ad, messageType: r.message_type,
-        opt080: r.is_ad ? await loadAgencyOpt080(r.created_by, r.company_id) : '', how: 'mail',
+        content: r.current_content, isAd: agencyAdTextApplies({ isAd: r.is_ad, adText: r.ad_text }), messageType: r.message_type,
+        opt080: agencyAdTextApplies({ isAd: r.is_ad, adText: r.ad_text }) ? await loadAgencyOpt080(r.created_by, r.company_id) : '', how: 'mail',
       }));
     }
     const blocks = req.rows.map((r: any, i: number) => buildAcceptedReply({

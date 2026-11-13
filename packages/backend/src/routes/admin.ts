@@ -85,7 +85,8 @@ import { setPlanMonthCredits, setPostpaidOverageLimit, listLowCreditCompanies, i
 import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
 import { loadAgencyCallbackKinds, readRecentRejectedIntakes } from '../utils/agency-send-intake';   // ★ 2026-11-13 C130 최근 반려(회신 본문 포함)
-import { agencyOptOutNotice, loadAgencyOpt080 } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(직원 상세)
+import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(직원 상세)
+import { CALLBACK_ASSIGNEES_SQL, describeCallbackUsage } from '../utils/callback-filter';   // ★ 2026-11-13 C132 발신번호 사용 범위 칸(발송 판정과 같은 함수)
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordUserAccountDeleted, recordUnsubscribeDeleted } from '../utils/change-audit';
 import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, isNoticeAckViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
@@ -2527,18 +2528,33 @@ router.post('/campaigns/:id/cancel', authenticate, requireSuperAdmin, async (req
 // 발신번호 목록 조회
 router.get('/callback-numbers', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const result = await query(`
-      SELECT 
+    // ★ 2026-11-13 C132(서수란 접수 cmwd74m3u1d94jnsc397ty8bx) — 사용 범위 칸(전체 · 발신번호 원장 · 지정 사용자 · 발송 불가) = 발송 판정과 같은 함수(CT callback-filter describeCallbackUsage)
+    const listSql = (withScope: boolean) => `
+      SELECT
         cn.id, cn.phone, cn.label, cn.is_default, cn.created_at,
-        c.company_name, c.company_code, c.id as company_id
+        c.company_name, c.company_code, c.id as company_id, cn.company_id AS cn_company_id${withScope ? `,
+        cn.assignment_scope, ${CALLBACK_ASSIGNEES_SQL}` : ''}
       FROM callback_numbers cn
       LEFT JOIN companies c ON cn.company_id = c.id
       ORDER BY c.company_name, cn.is_default DESC, cn.created_at DESC
-    `);
-    
-    res.json({ callbackNumbers: result.rows });
-  } catch (error) {
+    `;
+    let result;
+    try {
+      result = await query(listSql(true));
+    } catch (scopeErr: any) {
+      // 사용 범위 칸 · 배정 표가 없는 옛 스키마(D87 전) = 발송 판정도 범위를 보지 않는다(getRegisteredCallbackSet try/catch) → 칸 = 전체(같은 답 · Codex 구현 2R)
+      if (scopeErr?.code !== '42703' && scopeErr?.code !== '42P01') throw scopeErr;
+      result = await query(listSql(false));
+    }
+    // 판정의 회사 축 = 발신번호 행의 회사(발송 판정과 같은 칸 · 화면 묶음은 c.id 그대로)
+    const usage = await describeCallbackUsage(result.rows.map((r: any) => ({ ...r, company_id: r.cn_company_id })));
+    res.json({ callbackNumbers: result.rows.map(({ cn_company_id: _cc, ...r }: any) => ({ ...r, ...(usage.get(r.id) || {}) })) });
+  } catch (error: any) {
     console.error('발신번호 조회 실패:', error);
+    const msg = String(error?.message || '');
+    if ((msg.includes('relation') || msg.includes('column')) && msg.includes('does not exist')) {
+      return res.status(503).json({ success: false, error: 'DB 마이그레이션 필요: 운영자에게 callback_numbers ALTER 실행 요청', code: 'DB_MIGRATION_PENDING' });
+    }
     res.status(500).json({ error: '발신번호 조회 실패' });
   }
 });
@@ -6748,8 +6764,8 @@ router.get('/agency-send/:id/preview', authenticate, requireSuperAdmin, async (r
         // ★2026-09-10 이미지 원본 파일명(고객 상세와 같은 값 · a.* 로 실린다 · DDL 전 행은 null)
         mmsImageNames: Array.isArray(row.mms_image_names) ? row.mms_image_names : null,
         // ★ 2026-11-13 C130 — 수신거부 줄 겹침 안내(직원 = 고객에게 고치라고 안내 · 설계서 §2 A6)
-        optOutNotice: row.is_ad
-          ? agencyOptOutNotice({ content: row.current_content, isAd: row.is_ad, messageType: row.message_type, opt080: await loadAgencyOpt080(row.created_by, row.company_id), how: 'staff' })
+        optOutNotice: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text })   // ★ C132 이메일 접수 = 표기 없음 = 안내 0
+          ? agencyOptOutNotice({ content: row.current_content, isAd: true, messageType: row.message_type, opt080: await loadAgencyOpt080(row.created_by, row.company_id), how: 'staff' })
           : [],
       },
       samples, shown: samples.length, total: row.recipient_count,

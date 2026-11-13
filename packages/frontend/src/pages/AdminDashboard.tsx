@@ -799,7 +799,7 @@ const [emailResendAt, setEmailResendAt] = useState<string | null>(null);
   // 원장(선/후불·단가) 인라인 편집 상태
   const [editingAgentRowId, setEditingAgentRowId] = useState<string | null>(null);
   const [editAgentLedger, setEditAgentLedger] = useState({
-    billingType: 'postpaid', costPerSms: '', costPerLms: '', costPerMms: '', costPerKakao: '', costPerBrand: '', memo: '',
+    billingType: 'postpaid', costPerSms: '', costPerLms: '', costPerMms: '', costPerKakao: '', costPerBrand: '', costPerBrandNonfriend: '', memo: '',
   });
   const [agentLedgerSaving, setAgentLedgerSaving] = useState(false);
 

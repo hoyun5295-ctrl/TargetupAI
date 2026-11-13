@@ -2210,7 +2210,7 @@ router.get('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Reque
     // ★ 2026-07-24 §5-1 원장 격상 — ID별 선/후불·단가 동반 반환 (에이전트 축, 웹 companies.* 와 별개 지갑)
     const result = await query(
       `SELECT id, agent_send_id, memo, created_at,
-              billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand
+              billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend
        FROM company_agent_ids WHERE company_id = $1 ORDER BY created_at ASC`,
       [id]
     );
@@ -2260,11 +2260,11 @@ router.post('/:id/agent-ids', requireUuidId, requireSuperAdmin, async (req: Requ
     }
 
     const result = await query(
-      `INSERT INTO company_agent_ids (company_id, agent_send_id, memo, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, agent_send_id, memo, created_at, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand`,
+      `INSERT INTO company_agent_ids (company_id, agent_send_id, memo, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, agent_send_id, memo, created_at, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend`,
       [id, agentSendId, memo, ledger.billingType, ledger.costPerSms, ledger.costPerLms, ledger.costPerMms, ledger.costPerKakao,
-       ledger.costPerBrand]
+       ledger.costPerBrand, ledger.costPerBrandNonfriend]
     );
     return res.status(201).json({ agentId: result.rows[0] });
   } catch (error: any) {
@@ -2356,6 +2356,7 @@ router.patch('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, a
     if (patch.updates.cost_per_mms !== undefined) pushSet('cost_per_mms', patch.updates.cost_per_mms);
     if (patch.updates.cost_per_kakao !== undefined) pushSet('cost_per_kakao', patch.updates.cost_per_kakao);
     if (patch.updates.cost_per_brand !== undefined) pushSet('cost_per_brand', patch.updates.cost_per_brand);
+    if (patch.updates.cost_per_brand_nonfriend !== undefined) pushSet('cost_per_brand_nonfriend', patch.updates.cost_per_brand_nonfriend);   // ★ 2026-11-13 C132
     if ((req.body as any)?.memo !== undefined) {
       const memo = String((req.body as any).memo || '').trim() || null;
       if (memo && memo.length > 200) {
@@ -2373,7 +2374,7 @@ router.patch('/:id/agent-ids/:agentIdRowId', requireUuidId, requireSuperAdmin, a
       `UPDATE company_agent_ids
           SET ${sets.join(', ')}
         WHERE id = $${params.length - 1} AND company_id = $${params.length}
-        RETURNING id, agent_send_id, memo, created_at, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand`,
+        RETURNING id, agent_send_id, memo, created_at, billing_type, cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao, cost_per_brand, cost_per_brand_nonfriend`,
       params
     );
     if (result.rows.length === 0) {

@@ -241,8 +241,10 @@ export interface AgentUnitPriceRow {
   cost_per_lms: any;
   cost_per_mms: any;
   cost_per_kakao: any;
-  /** ★ 2026-07-29 브랜드메시지(구 친구톡). 게이트웨이 MsgType `G` */
+  /** ★ 2026-07-29 브랜드메시지(구 친구톡). 게이트웨이 MsgType `G` · ★ 2026-11-13 C132 = 친구 단가 */
   cost_per_brand: any;
+  /** ★ 2026-11-13 C132(서수란 접수 cmwbrqgnd19eojnscjynhf3fo) 브랜드메시지 비친구 단가 · 게이트웨이 MsgType `GN` · 비면 친구 단가(pickBrandPriceRaw 순서표) · 칸 = C132-DDL-1 */
+  cost_per_brand_nonfriend: any;
 }
 
 /**
@@ -301,6 +303,9 @@ export const FALLBACK_BILLING_CODE = { S: 'KS', L: 'KL' } as const;
  */
 export const BRAND_NONFRIEND_SMSQ_CODE = 'FN';
 
+/** ★ 2026-11-13 C132 — 발송ID(에이전트) 통계의 브랜드 비친구 코드. 비토 게이트웨이 paystats payMsgType 과 같은 글자(계약 시험 C132 T3-3 · 두 저장소) */
+export const BRAND_NONFRIEND_AGENT_CODE = 'GN';
+
 export const BILLING_TYPES: readonly BillingTypeDef[] = [
   { key: 'SMS',      label: 'SMS',           companyPriceColumn: 'cost_per_sms',      agentPriceColumn: 'cost_per_sms',   smsqCode: 'S',  agentCode: 'S' },
   { key: 'LMS',      label: 'LMS',           companyPriceColumn: 'cost_per_lms',      agentPriceColumn: 'cost_per_lms',   smsqCode: 'L',  agentCode: 'L' },
@@ -319,9 +324,9 @@ export const BILLING_TYPES: readonly BillingTypeDef[] = [
   // ★ 2026-11-05 C107 D-11 이름 「브랜드메시지」 → 「브랜드메시지(친구)」 — 비친구 줄과 짝 · 정산서 · 통계 · 발송결과가 이 이름 하나를 쓴다
   { key: 'BRAND',    label: '브랜드메시지(친구)', companyPriceColumn: 'cost_per_brand',    agentPriceColumn: 'cost_per_brand', smsqCode: 'F',  agentCode: 'G' },
   // ★ 2026-09-13 브랜드메시지 비친구(M·N·미지정). 매입이 친구·비친구로 갈려 단가가 다르다.
-  //   비친구 칸이 비면 친구 단가로 청구된다(resolveBillingUnitPricesDetailed). 발송ID(에이전트) 축은 두지 않는다 —
-  //   에이전트로는 브랜드를 보낼 수 없고 게이트웨이 통계에 대상 구분이 없어 읽을 곳이 없다.
-  { key: 'BRAND_NF', label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend', agentPriceColumn: null, smsqCode: BRAND_NONFRIEND_SMSQ_CODE, agentCode: null },
+  //   비친구 칸이 비면 친구 단가로 청구된다(resolveBillingUnitPricesDetailed · 발송ID 행 = priceBillingRows 의 pickBrandPriceRaw).
+  // ★ 2026-11-13 C132(서수란 접수 cmwbrqgnd19eojnscjynhf3fo) 발송ID 축 신설 — 비토 게이트웨이가 브랜드를 친구 G · 비친구 GN 으로 나눠 적재한다(paystats payMsgType · brand_targeting_is_friend).
+  { key: 'BRAND_NF', label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend', agentPriceColumn: 'cost_per_brand_nonfriend', smsqCode: BRAND_NONFRIEND_SMSQ_CODE, agentCode: BRAND_NONFRIEND_AGENT_CODE },
   // 2쪽 짧은 이름(테스트SMS 등) = 고객이 받아 온 PDF 표기 그대로(★2026-10-16 사본 삭제 때 옮겼다)
   { key: 'TEST_SMS', label: '테스트 SMS',     shortLabel: '테스트SMS', companyPriceColumn: 'cost_per_test_sms', agentPriceColumn: null,             smsqCode: null, agentCode: null },
   { key: 'TEST_LMS', label: '테스트 LMS',     shortLabel: '테스트LMS', companyPriceColumn: 'cost_per_test_lms', agentPriceColumn: null,             smsqCode: null, agentCode: null },

@@ -1081,8 +1081,10 @@ export interface AgentLedgerFields {
   costPerLms: number | null;
   costPerMms: number | null;
   costPerKakao: number | null;
-  /** ★ 2026-07-29 브랜드메시지(구 친구톡) — 게이트웨이 MsgType `G` */
+  /** ★ 2026-07-29 브랜드메시지(구 친구톡) — 게이트웨이 MsgType `G` · ★ C132 = 친구 단가 */
   costPerBrand: number | null;
+  /** ★ 2026-11-13 C132 브랜드메시지 비친구 단가 — 게이트웨이 MsgType `GN` · 비면 친구 단가로 청구 */
+  costPerBrandNonfriend: number | null;
 }
 
 // 단가 1개 값 검증 (등록·수정 공용) — null/빈 값 = 미설정(null), 그 외 0~1,000,000 유한수(소수 허용)
@@ -1114,12 +1116,14 @@ export function parseAgentLedgerFields(body: any): AgentLedgerFields | { error: 
   if ('error' in mms) return mms;
   const kakao = parseCostValue(body?.costPerKakao, '카카오');
   if ('error' in kakao) return kakao;
-  const brand = parseCostValue(body?.costPerBrand, '브랜드메시지');
+  const brand = parseCostValue(body?.costPerBrand, '브랜드메시지(친구)');
   if ('error' in brand) return brand;
+  const brandNf = parseCostValue(body?.costPerBrandNonfriend, '브랜드메시지(비친구)');
+  if ('error' in brandNf) return brandNf;
   return {
     billingType: rawBilling,
     costPerSms: sms.value, costPerLms: lms.value, costPerMms: mms.value,
-    costPerKakao: kakao.value, costPerBrand: brand.value,
+    costPerKakao: kakao.value, costPerBrand: brand.value, costPerBrandNonfriend: brandNf.value,
   };
 }
 
@@ -1131,6 +1135,8 @@ export interface AgentLedgerPatch {
     cost_per_mms?: number | null;
     cost_per_kakao?: number | null;
     cost_per_brand?: number | null;
+    /** ★ 2026-11-13 C132 브랜드 비친구 */
+    cost_per_brand_nonfriend?: number | null;
   };
 }
 
@@ -1153,7 +1159,8 @@ export function parseAgentLedgerPatch(body: any): AgentLedgerPatch | { error: st
     ['cost_per_lms', body?.costPerLms, 'LMS'],
     ['cost_per_mms', body?.costPerMms, 'MMS'],
     ['cost_per_kakao', body?.costPerKakao, '카카오'],
-    ['cost_per_brand', body?.costPerBrand, '브랜드메시지'],
+    ['cost_per_brand', body?.costPerBrand, '브랜드메시지(친구)'],
+    ['cost_per_brand_nonfriend', body?.costPerBrandNonfriend, '브랜드메시지(비친구)'],
   ];
   for (const [col, v, label] of entries) {
     if (v === undefined) continue;

@@ -40,7 +40,7 @@ import {
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
 import { agencyCharNotice } from '../utils/agency-send-chars';   // ★ 2026-11-06 C109 글자 정리 알림 줄
-import { agencyOptOutNotice, loadAgencyOpt080 } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
+import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies, agencyAdTextForSource } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 
 const router = Router();
 router.use(authenticate);
@@ -240,7 +240,8 @@ router.post('/', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
-    const result = await createRequestCore(auth, req.body || {});
+    // ★ 2026-11-13 C132 — 접수 경로는 입구가 정한다(본문의 source 를 믿지 않는다 · 경로가 광고 표기 정책을 정하므로 화면이 'email' 을 보내 표기를 끄지 못하게)
+    const result = await createRequestCore(auth, { ...(req.body || {}), source: 'screen' });
     if (!result.ok) {
       return res.status(result.status).json({ success: false, error: result.error, ...(result.code ? { code: result.code } : {}) });
     }
@@ -339,8 +340,9 @@ router.post('/one-step/preview', requireAgencySendMw, oneStepUpload, async (req:
   try {
     const { formBuf, listBuf, listName } = oneStepFiles(req);
     const analysis = await analyzeOneStep(auth, formBuf, listBuf, listName, parseOneStepOverrides(req.body?.overrides), true);
-    const optOutNotice = analysis.isAd
-      ? agencyOptOutNotice({ content: analysis.content, isAd: analysis.isAd, messageType: analysis.messageType, opt080: await loadAgencyOpt080(auth.userId, auth.companyId), how: 'upload' })
+    // ★ 2026-11-13 C132 — 원스텝으로 접수될 행의 정책(one_step = 표기 있음)으로 판정(정책 한 곳 · agencyAdTextForSource)
+    const optOutNotice = agencyAdTextApplies({ isAd: analysis.isAd, adText: agencyAdTextForSource('one_step') })
+      ? agencyOptOutNotice({ content: analysis.content, isAd: true, messageType: analysis.messageType, opt080: await loadAgencyOpt080(auth.userId, auth.companyId), how: 'upload' })
       : [];
     return res.json({ success: true, analysis: toAnalysisView(analysis, optOutNotice) });
   } catch (err: any) {
@@ -554,7 +556,8 @@ router.post('/sms-bytes', async (req: Request, res: Response) => {
     .slice(0, AGENCY_SMS_BYTES_MAX_CANDIDATES)
     .map((c: any) => ({ vars: c && typeof c.vars === 'object' && !Array.isArray(c.vars) ? c.vars : {} }));
   const maxBytes = await measureAgencyMaxSmsBytes({
-    companyId: auth.companyId, userId: auth.userId, content, isAd: !!req.body?.isAd, recipients: candidates,
+    // ★ 2026-11-13 C132 — 화면 접수 = 종전 표기(null = 붙임 · 이메일 정책은 메일 입구만)
+    companyId: auth.companyId, userId: auth.userId, content, isAd: !!req.body?.isAd, adText: null, recipients: candidates,
   });
   return res.json({ success: true, maxBytes, limit: SMS_MAX_BYTES });
 });
@@ -582,8 +585,8 @@ router.get('/:id', async (req: Request, res: Response) => {
     );
     // ★ 2026-11-13 C130 — 지금 문안의 수신거부 줄 겹침 안내(승인 전 문안 확인 자리 · 사라지지 않는 상자 · 설계서 §2 A5)
     const row0 = r.rows[0];
-    const optOutNotice = row0.is_ad
-      ? agencyOptOutNotice({ content: row0.current_content, isAd: row0.is_ad, messageType: row0.message_type, opt080: await loadAgencyOpt080(row0.created_by, row0.company_id), how: 'edit' })
+    const optOutNotice = agencyAdTextApplies({ isAd: row0.is_ad, adText: row0.ad_text })   // ★ C132 이메일 접수 = 표기 없음 = 안내 0
+      ? agencyOptOutNotice({ content: row0.current_content, isAd: true, messageType: row0.message_type, opt080: await loadAgencyOpt080(row0.created_by, row0.company_id), how: 'edit' })
       : [];
     return res.json({ success: true, request: await toPublicWithKinds(row0), events: events.rows, optOutNotice });
   } catch (err: any) {

@@ -53,6 +53,8 @@ export interface CallbacksTabProps {
 export default function CallbacksTab(props: CallbacksTabProps) {
   const { allManagers, callbackCompanyListPage, callbackCompanyPages, callbackNumbers, callbackSearch, callbackSubTab, closeModal, downloadSenderDoc, expandedCallbackCompanies, loadAllManagers, loadCallbackNumbers, loadSenderRegPendingCount, mgrFilter, mgrRejectId, mgrRejectReason, mgrSearch, pendingManagerCount, senderRegFilter, senderRegLoading, senderRegPendingCount, senderRegistrations, setCallbackCompanyListPage, setCallbackCompanyPages, setCallbackSearch, setCallbackSubTab, setEditingCallback, setExpandedCallbackCompanies, setMgrFilter, setMgrRejectId, setMgrRejectReason, setMgrSearch, setModal, setRejectReasonInput, setSenderRegDetail, setSenderRegFilter, setShowCallbackModal, setShowSenderRegDetailModal, showAlert, showConfirm } = props;
   const CALLBACKS_PER_COMPANY_PAGE = 10;
+  // ★ 2026-11-13 C132(서수란 접수 cmwd74m3u1d94jnsc397ty8bx) — 사용 범위 칸의 「지정 N명」을 누르면 배정 사용자 목록 창
+  const [scopeDetail, setScopeDetail] = useState<any | null>(null);
   const CALLBACK_COMPANIES_PER_PAGE = 20;
 
   const loadSenderRegDetail = async (id: string) => {
@@ -356,6 +358,7 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">발신번호</th>
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">별칭</th>
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대표</th>
+                                      <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용 범위</th>
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                                     </tr>
@@ -371,6 +374,20 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                                           ) : (
                                             <button onClick={() => handleSetDefault(cb.id)} className="whitespace-nowrap text-emerald-700 hover:text-emerald-800 text-xs">대표설정</button>
                                           )}
+                                        </td>
+                                        <td className="px-4 py-2.5 text-center">
+                                          {cb.usage_scope === 'assigned' ? (
+                                            <button type="button" onClick={() => setScopeDetail(cb)}
+                                              className="whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 hover:bg-amber-100">
+                                              지정 {Array.isArray(cb.assignees) ? cb.assignees.length : 0}명
+                                            </button>
+                                          ) : cb.usage_scope === 'ledger' ? (
+                                            <span className="whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700" title="발신번호 원장에 같은 번호가 있어 모든 사용자가 씁니다">전체(원장)</span>
+                                          ) : cb.usage_scope === 'all' ? (
+                                            <span className="whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">전체</span>
+                                          ) : cb.usage_scope === 'invalid' ? (
+                                            <span className="whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700" title="발신번호 규격에 맞지 않는 표기라 관리자를 포함해 아무도 이 번호로 보낼 수 없습니다. 번호를 규격 표기로 다시 등록해 주세요.">발송 불가(규격)</span>
+                                          ) : <span className="text-gray-400">-</span>}
                                         </td>
                                         <td className="px-4 py-2.5 text-center text-gray-500">{formatDate(cb.created_at)}</td>
                                         <td className="px-4 py-2.5 text-center">
@@ -665,6 +682,27 @@ export default function CallbacksTab(props: CallbacksTabProps) {
               </>
             )}
             </div>
+        )}
+        {scopeDetail && (
+          <AdminDetailModal title={`사용 범위 · ${scopeDetail.phone}`} onClose={() => setScopeDetail(null)}>
+            <dl>
+              <AdminDetailItem label="고객사">{scopeDetail.company_name || '-'}</AdminDetailItem>
+              <AdminDetailItem label="사용 범위">지정된 사용자만 이 번호로 보낼 수 있습니다. 관리자 계정은 지정과 관계없이 회사의 모든 등록 번호를 씁니다.</AdminDetailItem>
+            </dl>
+            <h4 className="mt-4 mb-1.5 text-[12.5px] font-semibold text-gray-500">지정된 사용자 {Array.isArray(scopeDetail.assignees) ? scopeDetail.assignees.length : 0}명</h4>
+            {Array.isArray(scopeDetail.assignees) && scopeDetail.assignees.length > 0 ? (
+              <ul className="rounded-xl border border-gray-100 divide-y divide-gray-100 max-h-[50vh] overflow-y-auto">
+                {scopeDetail.assignees.map((u: any, i: number) => (
+                  <li key={`${u.loginId || ''}-${i}`} className="flex items-center justify-between gap-3 px-3 py-2 text-[13px]">
+                    <span className="min-w-0 truncate text-gray-900">{u.name || '(이름 없음)'}</span>
+                    <span className="shrink-0 font-mono text-gray-500">{u.loginId || '-'}{u.userType === 'admin' ? ' · 관리자' : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[12.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">지정된 사용자가 없습니다. 지금은 관리자 계정만 이 번호로 보낼 수 있습니다.</p>
+            )}
+          </AdminDetailModal>
         )}
     </>
   );

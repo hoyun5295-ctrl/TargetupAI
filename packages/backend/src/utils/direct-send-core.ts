@@ -16,7 +16,7 @@ import { resolveRefundAxes, isBrandOnlyChannel } from './billing-types';
 import { buildRefundPending } from './refund-pending';
 import { sendSystemAlert } from './system-alert';
 import { triggerDirectSendWorker } from './direct-send-worker';
-import { CAMPAIGN_INSERT_SQL, buildDirectSendCampaignParams, withCampaignId, DirectSendError, type DirectSendSpec } from './direct-send-spec';
+import { CAMPAIGN_INSERT_SQL, adTextOn, buildDirectSendCampaignParams, withCampaignId, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining, type TrainingAuthorship } from './training-logger';
 import { findUneditedSendPlaceholder } from './send-placeholder-gate';
 import { composeSpamCheckText, kakaoFallbackSpamItems } from './messageUtils';
@@ -317,7 +317,7 @@ export async function createDirectSendCampaign(
   if (spamChannel === 'sms' || spamChannel === 'both') {
     const spamVerdict = await checkSpamBlockBeforeCharge({
       items: [{
-        text: composeSpamCheckText({ message: spec.message || '', subject: spec.subject || '', msgType: spec.msgType, isAd: spec.adEnabled === true }),
+        text: composeSpamCheckText({ message: spec.message || '', subject: spec.subject || '', msgType: spec.msgType, isAd: adTextOn(spec.adEnabled, spec.adTextApplies) }),
         recipients: spec.total,
       }],
       companyId: ctx.companyId, userId: ctx.userId, source: spec.sendType || 'direct_core',
@@ -327,7 +327,7 @@ export async function createDirectSendCampaign(
   // ★ 2026-11-05 C107 D-17 · 뿌리 R63 — 카카오(브랜드 · 알림톡)가 실패해 문자로 나가는 대체 문구도 같은 판정(원문 한 번 · 차감 앞).
   //   브랜드 = 본문을 대체 문구로 쓴다(processor 와 같은 기본 'SM') · 알림톡 = 대체 유형(L · S = 본문 그대로 · A · B = 대체문안).
   const fbSpamItems = isBrandOnlyChannel(spamChannel)
-    ? kakaoFallbackSpamItems({ nextType: brandFallbackQueueType(spec.kakaoResendType || 'SM'), nextContents: spec.message || '', isAd: spec.adEnabled === true, recipients: spec.total })
+    ? kakaoFallbackSpamItems({ nextType: brandFallbackQueueType(spec.kakaoResendType || 'SM'), nextContents: spec.message || '', isAd: adTextOn(spec.adEnabled, spec.adTextApplies), recipients: spec.total })
     : spamChannel === 'alimtalk'
       ? kakaoFallbackSpamItems({ nextType: spec.alimtalkNextType, nextContents: spec.alimtalkNextContents, titleStr: spec.alimtalkNextSubject, originalText: spec.message, isAd: false, recipients: spec.total })
       : [];

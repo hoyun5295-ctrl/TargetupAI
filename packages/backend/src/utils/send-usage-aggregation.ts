@@ -1574,7 +1574,10 @@ export function priceBillingRows(
       const p = bySendId.get(String(r.agentSendId || '').trim().toUpperCase());
       agentId = p ? String(p.id) : null;
       const col = AGENT_PRICE_COLUMN[r.typeKey];
-      const raw = col && p ? (p as any)[col] : null;
+      // ★ 2026-11-13 C132 — 발송ID 브랜드 = 회사 단가와 같은 순서표(비친구 칸이 비면 친구 단가 · 명시 0원은 설정값 · 둘 다 비면 미설정 = 아래 막음)
+      const raw = !p ? null
+        : r.typeKey === 'BRAND_NF' ? pickBrandPriceRaw(p, { targeting: 'N' })
+        : col ? (p as any)[col] : null;
       const resolved = toSupplyPrice(priceOrNull(raw), agentPriceBasis);
       if (resolved === null) {
         // 단가를 못 정한다. 0원으로 밀어넣지 않고 어디가 비었는지 남긴다.

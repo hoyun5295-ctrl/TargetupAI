@@ -108,11 +108,11 @@ describe('청구 유형 축 — 추가 시 빠뜨림 차단', () => {
     expect(new Set(agent).size, `에이전트 코드가 중복된다: ${agent.join(', ')}`).toBe(agent.length);
   });
 
-  it('브랜드 비친구 유형(BRAND_NF)은 웹 전용 집계 코드 FN · 비친구 단가 컬럼이다 (2026-09-13)', () => {
+  it('브랜드 비친구 유형(BRAND_NF)은 웹 집계 코드 FN · 비친구 단가 컬럼 · ★ 2026-11-13 C132 발송ID 축(코드 GN · 발송ID 비친구 칸)', () => {
     const nf = BILLING_TYPES.find((t) => t.key === 'BRAND_NF');
     expect(nf).toMatchObject({
       label: '브랜드메시지(비친구)', companyPriceColumn: 'cost_per_brand_nonfriend',
-      agentPriceColumn: null, smsqCode: 'FN', agentCode: null,
+      agentPriceColumn: 'cost_per_brand_nonfriend', smsqCode: 'FN', agentCode: 'GN',
     });
     // 청구서 인쇄 순서 — 친구 줄 바로 뒤
     const keys = BILLING_TYPES.map((t) => t.key);

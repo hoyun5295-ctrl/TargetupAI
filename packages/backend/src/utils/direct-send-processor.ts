@@ -17,6 +17,7 @@ import { bulkInsertSmsQueue, insertBrandQueue, BrandQueueInsertError, type Brand
 // ★ 2026-11-10 묶음 트랜잭션(워커가 넘긴 tx · 배치 실패 = QueueTxAbort 를 그대로 던진다 · 부분 수습 안 탐)
 import { QueueTxAbort, type QueueTx } from './queue-load-tx';
 import { subjectForMsgType } from './qtmsg-type';
+import { adTextOn } from './direct-send-spec';   // ★ 2026-11-13 C132 광고 표기 판정 한 곳(광고이고 끔 표식이 아닐 때만)
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑 — CT-12 단일 진입점
 import { buildBrandQueuePayload, resolveBrandFallback,
          appendAiImageNotice, BUBBLE_TYPES } from './brand-message';
@@ -56,6 +57,8 @@ export interface SendChunkParams {
   callback: string;
   useIndividualCallback: boolean;
   finalIsAd: boolean;
+  /** ★ 2026-11-13 C132 — 표기 끔 표식(false = 광고여도 (광고) · 무료수신거부를 붙이지 않음 · 비우면 종전) · 판정 = adTextOn(finalIsAd, adText) · 피로도 · 브랜드 광고 표식은 finalIsAd */
+  adText?: boolean;
   /** worker가 getOpt080Number로 1회 조회해 주입 */
   opt080: string;
   mmsImagePaths: any[];
@@ -148,7 +151,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
       const { message: finalMessage, subject: finalSubject } = prepareSendMessage(
         p.message, dbCustomer, p.directFieldMappings,
         {
-          msgType: p.msgType, isAd: p.finalIsAd, opt080Number: p.opt080,
+          msgType: p.msgType, isAd: adTextOn(p.finalIsAd, p.adText), opt080Number: p.opt080,
           addressBookFields: toAddressBookFields(r),
           // ★2026-09-22 단문 제목: 단문이면 제목을 싣지 않는다(판정 = subjectForMsgType · 행 msg_type 과 같은 축)
           subject: subjectForMsgType(p.msgType, p.subject), skipNumberFormatting: true,
@@ -194,7 +197,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         const brandFallback = resolveBrandFallback({
           resendType: p.sendChannel === 'both' ? 'NO' : (p.kakaoResendType || 'SM'),
           originalMessage: finalMessage,   // replaceVariables 결과 = 광고 표기 전(★ C107 D-14 · 고른 유형으로 표기 한 번)
-          isAd: p.finalIsAd === true,
+          isAd: adTextOn(p.finalIsAd, p.adText),
           opt080Number: p.opt080 || '',
         });
         // ★2026-09-02 AI 생성 이미지 안내 — 판정은 워커가 캠페인당 한 번 했고(p.kakaoImageAiGenerated),

@@ -74,7 +74,8 @@
 | C127 | d8b5367d |
 | C128 | 1a3fbdbf |
 | C129 | ddbea40c |
-| C130 | 미커밋 |
+| C130 | f3623b12 |
+| C132 | 미커밋 |
 
 ## §1 대기
 
@@ -1868,7 +1869,7 @@ ALTER TABLE agency_send_email_intake
 - 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push · .62 → .57 전환 끝 · C130-DDL-1
 - 기대: 설계서 §4 처방 ① ② · 미가입 · 직접발송 변화 0 · 광고 꼬리 문장(buildAdMessage) 결과 변화 0 · 고객 문안 고침 0
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → pm2 reload · status online · 기동 에러 0 · dist grep agencyOptOutNotice ≥ 1 · readRecentRejectedIntakes ≥ 1 · sendRejectReply ≥ 1
-- 결과: (대기)
+- 결과: 1113 오전 Harold 「배포 완료했고」(커밋 f3623b12 · push · 서버 pull · build:safe · 재시작은 Harold 직접 · 서버 출력 = 이 세션에 미수신 → dist grep · online · uptime 확인은 C132 배포 때 함께 받는다)
 
 ### C130-T1 · 직원 시트(수신거부 줄 안내 · 반려 회신 본문 보기)
 - 카드: C130
@@ -1876,6 +1877,64 @@ ALTER TABLE agency_send_email_intake
 - 선행: C130-H1
 - 기대: 설계서 §6 직원 지시문(테스트계정 · 도달 불가 번호 · 발송 0)
 - 확인: 「무료」 없는 수신거부 줄 문안 = 미리보기 · 접수 · 상세 · 직원 상세에 안내 상자 · 「무료수신거부」 문안 = 상자 없음 · 메일 반려 1건 = 슈퍼관리자 메일 접수 행을 누르면 업체가 받은 메일 제목 · 본문
+- 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
+
+### C132-DDL-1 · 발송ID 브랜드 비친구 단가 칸(설계서 docs/2026-11-13-c132-four-tickets-design.md §4 · 접수 cmwbrqgnd19eojnscjynhf3fo) · ★ 배포 앞
+- 카드: C132
+- 단계: DDL
+- 선행: 없음(배포 앞 · 새 코드의 청구 SELECT 가 이 칸을 읽는다)
+- 의미 바꿈: 아니오(칸 추가 · NULL = 비친구도 친구 단가 = 종전 금액)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'company_agent_ids' AND column_name = 'cost_per_brand_nonfriend';
+- 확인: 한 줄 · numeric · YES
+- 결과: 1113 Harold 서버 출력(.62 · administrator · hostname 확인 줄 통과) = SET · ALTER TABLE → 확인 한 줄 company_agent_ids · cost_per_brand_nonfriend · numeric · YES · 코드 배포 앞
+
+> C132-DDL-1 · 배포 앞 · 칸 추가 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C132-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE company_agent_ids
+  ADD COLUMN IF NOT EXISTS cost_per_brand_nonfriend numeric NULL;
+```
+
+### C132-DDL-2 · 대행 접수 광고 표기 정책 칸(이메일 접수 = 문안 그대로 · 설계서 §2 · 서 팀장 요청) · ★ 배포 앞
+- 카드: C132
+- 단계: DDL
+- 선행: 없음(배포 앞 · 칸이 없으면 새 코드도 종전 표기 = 이메일 접수 표기 제거가 꺼진 채로 돈다)
+- 의미 바꿈: 아니오(칸 추가 · NULL = 종전 표기 · 배포 전 접수는 승인 · 미리보기 · 발송 모두 종전)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'agency_send_requests' AND column_name = 'ad_text';
+- 확인: 한 줄 · boolean · YES
+- 결과: 1113 Harold 서버 출력(같은 명령) = SET · ALTER TABLE → 확인 한 줄 agency_send_requests · ad_text · boolean · YES · 코드 배포 앞(옛 코드는 칸을 읽지 않음 · 배포 전 접수 = NULL = 종전 표기)
+
+> C132-DDL-2 · 배포 앞 · 칸 추가 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C132-DDL-2
+SET lock_timeout = '3s';
+ALTER TABLE agency_send_requests
+  ADD COLUMN IF NOT EXISTS ad_text boolean NULL;
+```
+
+### C132-H1 · 한줄로 배포(이메일 대행 문안 그대로 · 발신번호 사용 범위 · 발송ID 브랜드 비친구 단가 · 백엔드 + 프론트 · DDL 2 배포 앞 · ENV 0)
+- 카드: C132
+- 단계: 한줄로 배포
+- 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push · C132-DDL-1 · C132-DDL-2
+- 기대: 설계서 §2 ~ §4 · 미가입 · 직접발송 변화 0 · 배포 전 접수 표기 그대로 · 배포 뒤 이메일 접수 = (광고) · 무료수신거부 없음
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · uptime · dist grep agencyAdTextValue ≥ 1 · CALLBACK_USAGE_SCOPE_SQL ≥ 1 · adTextOn ≥ 1
+- 결과: (대기)
+
+### C132-H2 · 비토 게이트웨이 배포(PAY 통계 성공 판정 = 콘솔과 같은 식 · 브랜드 G · GN · C131 과 한 번에)
+- 카드: C132
+- 단계: 게이트웨이 배포
+- 선행: C132-H1(한줄로가 GN 을 먼저 안다) · 비토 Codex approve · 비토 런북 scripts/gw
+- 기대: 적재기 카운터 = 결과 코드 판정(콜비서 V0011 Agent 경로 실패가 실패로) · 브랜드 묶음 = G · GN 한 문장
+- 확인: 배포 뒤 GW_PAY_STATS_LOOKBACK_DAYS 를 2026-11-01 까지 덮는 값으로 한 번 → 게이트웨이 로그 「PAY 통계 적재 완료」 full=true · since=2026-11-01 · failed=0 한 줄 → 원래 값(3) · 한줄로 에이전트 통계 콜비서 11월 = 비토 콘솔과 같은 성공 · 실패
+- 결과: (대기)
+
+### C132-T1 · 직원 시트(이메일 대행 문안 그대로 · 사용 범위 칸 · 브랜드 두 칸 · 콜비서 통계)
+- 카드: C132
+- 단계: 직원 시트
+- 선행: C132-H1 · C132-H2
+- 기대: 설계서 §7 직원 지시문 1 ~ 5(테스트계정 · 도달 불가 번호 · 발송 0)
+- 확인: 이메일 요청서 테스트 문자 · 상세 = (광고) · 무료수신거부 없음 · 화면 원스텝 = 종전 · 사용 범위 칸 · 브랜드 두 칸 · 콜비서 11월 통계 = 콘솔
 - 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
 
 ## §2 덤프 뒤 적용분

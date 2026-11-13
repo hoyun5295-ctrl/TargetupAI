@@ -13,9 +13,9 @@ import type { Plan } from '../../admin-types';
 export interface CompanyBasicTabProps {
   agencyEmailActiveCount: number | null;
   agentIdSaving: boolean;
-  agentIds: { id: string; agent_send_id: string; memo: string | null; cust_name?: string | null; billing_type?: string | null; cost_per_sms?: string | number | null; cost_per_lms?: string | number | null; cost_per_mms?: string | number | null; cost_per_kakao?: string | number | null; cost_per_brand?: string | number | null; }[];
+  agentIds: { id: string; agent_send_id: string; memo: string | null; cust_name?: string | null; billing_type?: string | null; cost_per_sms?: string | number | null; cost_per_lms?: string | number | null; cost_per_mms?: string | number | null; cost_per_kakao?: string | number | null; cost_per_brand?: string | number | null; cost_per_brand_nonfriend?: string | number | null; }[];
   agentLedgerSaving: boolean;
-  editAgentLedger: { billingType: string; costPerSms: string; costPerLms: string; costPerMms: string; costPerKakao: string; costPerBrand: string; memo: string; };
+  editAgentLedger: { billingType: string; costPerSms: string; costPerLms: string; costPerMms: string; costPerKakao: string; costPerBrand: string; costPerBrandNonfriend: string; memo: string; };
   editCompany: { id: string; companyName: string; contactName: string; contactEmail: string; contactPhone: string; status: string; planId: string; rejectNumber: string; businessNumber: string; ceoName: string; businessType: string; businessItem: string; industryCode: string; address: string; sendHourStart: number; sendHourEnd: number; dailyLimit: number; duplicateDays: number; costPerSms: string | number; costPerLms: string | number; costPerMms: string | number; costPerKakao: string | number; costPerBrand: string | number; costPerBrandNonfriend: string | number; costPerTestSms: string | number; costPerTestLms: string | number; unitPriceBasis: 'vat_included' | 'vat_excluded'; billingType: string; balance: number; balanceAdjustType: 'charge' | 'deduct'; balanceAdjustAmount: string; balanceAdjustReason: string; balanceAdjusting: boolean; targetStrategy: string; crossCategoryAllowed: boolean; excludedSegments: string[]; approvalRequired: boolean; allowCallbackSelfRegister: boolean; maxUsers: number; sessionTimeoutMinutes: number; storeCodeList: string[]; newStoreCode: string; newExcludedSegment: string; lineGroupId: string; kakaoEnabled: boolean; userIsolationEnabled: boolean; usageType: string; useAiOrchestrator: boolean; cdpAutoExecuteEnabled: boolean; cdpAutoExecuteMaxRecipients: number; cdpAutoExecuteMaxCostKrw: number; cdpAutoExecuteMaxRisk: string; agencySendEnabled: boolean; subscriptionStatus: string; trialExpiresAt: string | null | ''; planCode: string; aiOperatorTrialStartedAt: string | null | ''; aiOperatorTrialUntil: string | null | ''; };
   editingAgentRowId: string | null;
   industryOptions: { code: string; label: string; }[];
@@ -31,7 +31,7 @@ export interface CompanyBasicTabProps {
   setAgencyEmailModalOpen: Dispatch<SetStateAction<boolean>>;
   setAgentIdSaving: Dispatch<SetStateAction<boolean>>;
   setAgentLedgerSaving: Dispatch<SetStateAction<boolean>>;
-  setEditAgentLedger: Dispatch<SetStateAction<{ billingType: string; costPerSms: string; costPerLms: string; costPerMms: string; costPerKakao: string; costPerBrand: string; memo: string; }>>;
+  setEditAgentLedger: Dispatch<SetStateAction<{ billingType: string; costPerSms: string; costPerLms: string; costPerMms: string; costPerKakao: string; costPerBrand: string; costPerBrandNonfriend: string; memo: string; }>>;
   setEditCompany: Dispatch<SetStateAction<{ id: string; companyName: string; contactName: string; contactEmail: string; contactPhone: string; status: string; planId: string; rejectNumber: string; businessNumber: string; ceoName: string; businessType: string; businessItem: string; industryCode: string; address: string; sendHourStart: number; sendHourEnd: number; dailyLimit: number; duplicateDays: number; costPerSms: string | number; costPerLms: string | number; costPerMms: string | number; costPerKakao: string | number; costPerBrand: string | number; costPerBrandNonfriend: string | number; costPerTestSms: string | number; costPerTestLms: string | number; unitPriceBasis: 'vat_included' | 'vat_excluded'; billingType: string; balance: number; balanceAdjustType: 'charge' | 'deduct'; balanceAdjustAmount: string; balanceAdjustReason: string; balanceAdjusting: boolean; targetStrategy: string; crossCategoryAllowed: boolean; excludedSegments: string[]; approvalRequired: boolean; allowCallbackSelfRegister: boolean; maxUsers: number; sessionTimeoutMinutes: number; storeCodeList: string[]; newStoreCode: string; newExcludedSegment: string; lineGroupId: string; kakaoEnabled: boolean; userIsolationEnabled: boolean; usageType: string; useAiOrchestrator: boolean; cdpAutoExecuteEnabled: boolean; cdpAutoExecuteMaxRecipients: number; cdpAutoExecuteMaxCostKrw: number; cdpAutoExecuteMaxRisk: string; agencySendEnabled: boolean; subscriptionStatus: string; trialExpiresAt: string | null | ''; planCode: string; aiOperatorTrialStartedAt: string | null | ''; aiOperatorTrialUntil: string | null | ''; }>>;
   setEditingAgentRowId: Dispatch<SetStateAction<string | null>>;
   setLabOpen: Dispatch<SetStateAction<boolean>>;
@@ -113,6 +113,8 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
       costPerMms: a.cost_per_mms != null && String(a.cost_per_mms) !== '' ? String(Number(a.cost_per_mms)) : '',
       costPerKakao: a.cost_per_kakao != null && String(a.cost_per_kakao) !== '' ? String(Number(a.cost_per_kakao)) : '',
       costPerBrand: a.cost_per_brand != null && String(a.cost_per_brand) !== '' ? String(Number(a.cost_per_brand)) : '',
+      // ★ 2026-11-13 C132(서수란 접수 cmwbrqgnd19eojnscjynhf3fo) 브랜드 비친구 단가(비우면 친구 단가로 청구)
+      costPerBrandNonfriend: a.cost_per_brand_nonfriend != null && String(a.cost_per_brand_nonfriend) !== '' ? String(Number(a.cost_per_brand_nonfriend)) : '',
       memo: a.memo || '',
     });
   };
@@ -132,6 +134,7 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
           costPerMms: normalizeCostForSave(editAgentLedger.costPerMms),
           costPerKakao: normalizeCostForSave(editAgentLedger.costPerKakao),
           costPerBrand: normalizeCostForSave(editAgentLedger.costPerBrand),
+          costPerBrandNonfriend: normalizeCostForSave(editAgentLedger.costPerBrandNonfriend),
           memo: editAgentLedger.memo.trim(),
         }),
       });
@@ -435,7 +438,8 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                               { l: 'L', v: a.cost_per_lms },
                               { l: 'M', v: a.cost_per_mms },
                               { l: '카카오', v: a.cost_per_kakao },
-                              { l: '브랜드', v: a.cost_per_brand },
+                              { l: '브랜드(친구)', v: a.cost_per_brand },
+                              { l: '브랜드(비친구)', v: a.cost_per_brand_nonfriend },
                             ].filter((c) => c.v != null && String(c.v) !== '').map((c) => `${c.l} ${Number(c.v)}`).join(' · ');
                             return (
                               <div key={a.id} className="bg-white rounded-lg border border-gray-200 px-3 py-1.5">
@@ -491,8 +495,8 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                                     <div className="rounded-lg bg-emerald-50/70 px-2 py-1.5 text-[10px] text-emerald-800">
                                       발송ID 단가도 <b>VAT 별도 공급가</b>로 입력합니다. 건별 VAT 10%는 시스템이 자동 합산합니다.
                                     </div>
-                                    <div className="grid grid-cols-3 lg:grid-cols-5 gap-1.5">
-                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오'], ['costPerBrand', '브랜드']] as const).map(([k, label]) => {
+                                    <div className="grid grid-cols-3 lg:grid-cols-6 gap-1.5">
+                                      {([['costPerSms', 'SMS'], ['costPerLms', 'LMS'], ['costPerMms', 'MMS'], ['costPerKakao', '카카오'], ['costPerBrand', '브랜드(친구)'], ['costPerBrandNonfriend', '브랜드(비친구)']] as const).map(([k, label]) => {
                                         const raw = editAgentLedger[k];
                                         const pv = previewUnitPrice(raw);
                                         const empty = raw === '' || raw === null || raw === undefined;
@@ -507,7 +511,9 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                                               placeholder="미설정"
                                             />
                                             <div className="mt-0.5 text-[10px] text-emerald-700">
-                                              {empty ? <span className="text-gray-400">미설정: 청구 차단</span> : <>VAT 포함 {fmtPrice(pv.withVat)}원</>}
+                                              {empty
+                                                ? <span className="text-gray-400">{k === 'costPerBrandNonfriend' ? '비우면 친구 단가' : '미설정: 청구 차단'}</span>
+                                                : <>VAT 포함 {fmtPrice(pv.withVat)}원</>}
                                             </div>
                                           </div>
                                         );

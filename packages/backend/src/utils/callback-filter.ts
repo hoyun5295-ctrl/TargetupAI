@@ -148,6 +148,102 @@ export function callbackAssignmentUserId(role: string | null | undefined, userId
 }
 
 /**
+ * ★ 2026-11-13 C132(서수란 접수 cmwd74m3u1d94jnsc397ty8bx) — 발신번호 「전체 사용」 조건 한 곳.
+ *   발송 판정(getRegisteredCallbackSet)이 SQL 로 쓰고 · 같은 값 범위의 JS 판 = callbackScopeIsAll(슈퍼관리자 사용 범위 칸 · 계약 시험이 둘을 맞춘다).
+ */
+export function callbackScopeAllSql(alias: string): string {
+  return `(${alias}.assignment_scope = 'all' OR ${alias}.assignment_scope IS NULL)`;
+}
+
+/**
+ * ★ 2026-11-13 C132 — 「전체 사용」 판정의 JS 판(callbackScopeAllSql 과 같은 값 범위: 'all' · NULL · 칸 없음 = 전체 · 그 밖 = 지정).
+ *   칸이 없던 옛 스키마에서는 발송 판정이 범위를 보지 않으므로(아래 try/catch) 화면도 undefined = 전체.
+ */
+export function callbackScopeIsAll(scope: unknown): boolean {
+  return scope === 'all' || scope === null || scope === undefined;
+}
+
+/**
+ * ★ 2026-11-13 C132(Codex 구현 1R) — 등록 원문 → 쓸 수 있는 번호(숫자) 집합. 규격 위반 원문은 뺀다(B-1005 세칙).
+ *   발송 판정(getRegisteredCallbackSet)과 슈퍼관리자 사용 범위 칸(describeCallbackUsage)이 **같은 함수**를 쓴다
+ *   (옛 화면 SQL 은 숫자만 비교해 규격 위반 원장 행을 「전체(원장)」로 보였다 = 실제 발송은 거절).
+ */
+export function registeredDigits(phones: unknown[]): Set<string> {
+  const out = new Set<string>();
+  for (const p of phones) {
+    const v = checkCallbackSpec(p);
+    if (v.ok) out.add(v.digits);
+  }
+  return out;
+}
+
+/** ★ C132 — 슈퍼관리자 발신번호 목록 SELECT 에 붙이는 배정 사용자 조각(행 별칭 = cn · 이름 순) */
+export const CALLBACK_ASSIGNEES_SQL = `COALESCE((SELECT json_agg(json_build_object('id', u.id, 'name', u.name, 'loginId', u.login_id, 'userType', u.user_type) ORDER BY u.name, u.login_id)
+              FROM callback_number_assignments cna
+              JOIN users u ON u.id = cna.user_id
+             WHERE cna.callback_number_id = cn.id), '[]'::json) AS assignees`;
+
+export type CallbackUsage = 'ledger' | 'all' | 'assigned' | 'invalid';
+
+/**
+ * ★ 2026-11-13 C132(서수란 접수 cmwd74m3u1d94jnsc397ty8bx · Codex 구현 1R) — 발신번호 행마다 「누가 이 번호로 보낼 수 있나」.
+ *   규칙 = 발송 판정(getRegisteredCallbackSet)과 같다 · 같은 부품(registeredDigits · callbackScopeIsAll):
+ *     번호 d(행 원문의 숫자) ∈ 원장(sender_numbers 활성 · 규격 통과)      → 'ledger'   누구나
+ *     d ∈ 전체 사용 행(callback_numbers · 범위 전체 · 규격 통과)          → 'all'      누구나
+ *     d ∈ 지정 행(규격 통과)                                              → 'assigned' 그 행들에 배정된 사람(합집합) · 관리자 역할은 언제나(callbackAssignmentUserId)
+ *     그 밖(이 번호를 내는 규격 통과 등록이 없다)                          → 'invalid'  아무도 못 쓴다(규격 위반 표기 · 관리자 포함)
+ *   행 원문이 규격 위반이어도 같은 숫자의 정상 등록이 있으면 그 등록의 판정을 따른다(발송 판정이 숫자 집합으로 합치므로).
+ */
+export async function describeCallbackUsage(
+  rows: Array<{ id: string; company_id: string | null; phone: string; assignment_scope?: string | null; assignees?: any[] }>,
+): Promise<Map<string, { usage_scope: CallbackUsage; assignees: any[] }>> {
+  const companyIds = [...new Set(rows.map((r) => r.company_id).filter((v): v is string => !!v))];
+  const ledgerByCompany = new Map<string, unknown[]>();
+  if (companyIds.length > 0) {
+    const ledger = await query(
+      `SELECT company_id, phone_number FROM sender_numbers WHERE is_active = true AND company_id = ANY($1::uuid[])`,
+      [companyIds],
+    );
+    for (const l of ledger.rows as any[]) {
+      const k = String(l.company_id);
+      if (!ledgerByCompany.has(k)) ledgerByCompany.set(k, []);
+      ledgerByCompany.get(k)!.push(l.phone_number);
+    }
+  }
+  const byCompany = new Map<string, typeof rows>();
+  for (const r of rows) {
+    const k = String(r.company_id || '');
+    if (!byCompany.has(k)) byCompany.set(k, []);
+    byCompany.get(k)!.push(r);
+  }
+  const out = new Map<string, { usage_scope: CallbackUsage; assignees: any[] }>();
+  for (const [companyId, list] of byCompany) {
+    const ledgerSet = registeredDigits(ledgerByCompany.get(companyId) || []);
+    const allSet = registeredDigits(list.filter((r) => callbackScopeIsAll(r.assignment_scope)).map((r) => r.phone));
+    const assignedByDigits = new Map<string, Map<string, any>>();
+    for (const r of list) {
+      if (callbackScopeIsAll(r.assignment_scope)) continue;
+      const v = checkCallbackSpec(r.phone);
+      if (!v.ok) continue;
+      if (!assignedByDigits.has(v.digits)) assignedByDigits.set(v.digits, new Map());
+      const users = assignedByDigits.get(v.digits)!;
+      for (const u of Array.isArray(r.assignees) ? r.assignees : []) users.set(String(u?.id ?? `${u?.loginId}|${u?.name}`), u);
+    }
+    for (const r of list) {
+      const d = String(r.phone ?? '').replace(/\D/g, '');
+      if (ledgerSet.has(d)) out.set(r.id, { usage_scope: 'ledger', assignees: [] });
+      else if (allSet.has(d)) out.set(r.id, { usage_scope: 'all', assignees: [] });
+      else if (assignedByDigits.has(d)) {
+        const users = [...assignedByDigits.get(d)!.values()]
+          .sort((a, b) => String(a?.name ?? '').localeCompare(String(b?.name ?? '')) || String(a?.loginId ?? '').localeCompare(String(b?.loginId ?? '')));
+        out.set(r.id, { usage_scope: 'assigned', assignees: users });
+      } else out.set(r.id, { usage_scope: 'invalid', assignees: [] });
+    }
+  }
+  return out;
+}
+
+/**
  * 회사의 등록 발신번호 집합 (sender_numbers 활성 ∪ callback_numbers, assignment_scope 반영).
  * 정규화(하이픈 제거) 전화번호 Set. filterByIndividualCallback(리스트)·isCallbackRegistered(단건)이 공유.
  */
@@ -169,8 +265,7 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
         UNION SELECT cn.phone as phone FROM callback_numbers cn
         WHERE cn.company_id = $1
           AND (
-            cn.assignment_scope = 'all'
-            OR cn.assignment_scope IS NULL
+            ${callbackScopeAllSql('cn')}
             OR EXISTS (
               SELECT 1 FROM callback_number_assignments cna
               WHERE cna.callback_number_id = cn.id AND cna.user_id = $2
@@ -187,12 +282,7 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
   // ★1005 발신번호 규격(세칙) — 규격 이전에 등록된 위반 번호는 등록 번호로 치지 않는다(Codex 1R high · 개별 회신번호가 차감 · 적재까지 가던 구멍).
   //   이 집합을 쓰는 길목(개별 회신번호 필터 · 단건 판정 · 대행 · 스팸 검사)이 전부 여기서 같이 막힌다.
   //   ★ 1019 B-1005-5② — 규격은 저장 원문으로 보고(허용 문자 밖 = 위반 · 종전과 같다) 집합 값은 숫자만(normalizePhone 과 같은 표기).
-  const out = new Set<string>();
-  for (const r of registeredResult.rows as any[]) {
-    const v = checkCallbackSpec(r.phone);
-    if (v.ok) out.add(v.digits);
-  }
-  return out;
+  return registeredDigits((registeredResult.rows as any[]).map((r) => r.phone));   // ★ C132 화면 사용 범위 칸과 같은 함수
 }
 
 /**

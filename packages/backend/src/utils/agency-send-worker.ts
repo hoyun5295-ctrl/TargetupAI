@@ -57,7 +57,7 @@ import { createStageGuard } from './stage-guard';
 // ★2026-09-25 맞춤법 검사(테스트 문자 뒤·승인 안내 앞 · 흐름을 막지 않는다 · docs/2026-09-25-agency-spell-check-design.md §3-4)
 import { readAgencySpellCount, runAgencySpellAfterTest } from './agency-send-spell';
 import { agencyCharPassedLines } from './agency-send-chars';   // ★ 2026-11-06 C109 승인 요청 문자 정리 줄
-import { agencyOptOutSmsLine } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 한 줄
+import { agencyOptOutSmsLine, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 한 줄
 import { withMmsImageNames } from './mms-image-util';
 
 const LOG = '[agency-send][worker]';
@@ -394,7 +394,9 @@ async function runSpamRound(row: any, startRound: number): Promise<{
     while (rounds < MAX_TEST_ROUNDS) {
       rounds += 1;
       const sample = await buildSample({ ...row, current_content: content });
-      const rejectNumber = row.is_ad ? await getOpt080Number(row.created_by || null, row.company_id) : '';
+      // ★ 2026-11-13 C132 — 표기 = 행의 정책(이메일 접수 = 표본 · 검사 글에 (광고) · 080 없음 = 나가는 글 그대로)
+      const adText = agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text });
+      const rejectNumber = adText ? await getOpt080Number(row.created_by || null, row.company_id) : '';
 
       // 재생성은 우리가 직접 돌린다(다듬기 규칙이 캠페인 문안과 다르다) → maxRetries 0
       const result = await autoSpamTestWithRegenerate({
@@ -404,7 +406,7 @@ async function runSpamRound(row: any, startRound: number): Promise<{
         messageType: (row.message_type === 'MMS' ? 'MMS' : row.message_type === 'LMS' ? 'LMS' : 'SMS'),
         subject: sample.subject,
         variants: [{ variantId: 'agency', messageText: sample.text, subject: sample.subject }],
-        isAd: !!row.is_ad,
+        isAd: adText,
         rejectNumber,
         maxRetries: 0,
         rendered: true,   // ★ 2026-11-06 C109(Codex 설계 4R) — 표본 = 렌더가 끝난 글(buildRenderedSample) · 큐가 다시 치환하지 않는다
@@ -873,7 +875,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         : undefined;
       const charLines = await readAgencyCharLines(row.id);
       // ★ 2026-11-13 C130 — 판정 글 = 이 자리 테스트 문자를 만든 finalContent(설계서 §4① A7)
-      const optOutLine = agencyOptOutSmsLine({ content: finalContent, isAd: row.is_ad });
+      const optOutLine = agencyOptOutSmsLine({ content: finalContent, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
@@ -1033,7 +1035,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
       const reappRow = (await freshLinkFields(target.id)) || target;
       const reappCount = Number(target.recipient_count || 0);
       // ★ 2026-11-13 C130 — 판정 글 = 1020 테스트 문자를 만든 finalContent(설계서 §4① A8 · Codex 설계 1R #4)
-      const reappOptOut = agencyOptOutSmsLine({ content: finalContent, isAd: target.is_ad });
+      const reappOptOut = agencyOptOutSmsLine({ content: finalContent, isAd: agencyAdTextApplies({ isAd: target.is_ad, adText: target.ad_text }) });
       await notifyManager({
         companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(reappRow),
         callback: target.callback_number, title: '[대행발송] 재승인 요청',
@@ -1369,7 +1371,7 @@ async function dispatchAttempt(
     }
     const unappCount = Number(row.recipient_count || 0);
     // ★ 2026-11-13 C130 — 판정 글 = 이 갈래 테스트 문자를 만든 row.current_content(buildSample(row) · 설계서 §4① A8)
-    const unappOptOut = agencyOptOutSmsLine({ content: row.current_content, isAd: row.is_ad });
+    const unappOptOut = agencyOptOutSmsLine({ content: row.current_content, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(unappRow),
       callback: row.callback_number, title: '[대행발송] 재승인 요청',
@@ -1536,6 +1538,8 @@ async function dispatchAttempt(
         useIndividualCallback: individualCallback,
         sendChannel: 'sms',
         adEnabled: !!row.is_ad,
+        // ★ 2026-11-13 C132 — 표기만 행의 정책(이메일 접수 = 문안 그대로) · 광고 여부의 다른 쓰임(야간 · 080 명단 · 관문 · 피로도)은 adEnabled 그대로
+        adTextApplies: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }),
         adGateBatchId: adGateMarked ? stagingId : null,   // ★ 2026-11-06 C110 광고 관문 원장 잇기(차감 앞)
         scheduled: true,
         scheduledAt: new Date(row.requested_at).toISOString(),
@@ -2316,7 +2320,7 @@ export async function sendAgencyApprovalRequest(requestId: string): Promise<void
     const count = Number(row.recipient_count || 0);
     const charLines = await readAgencyCharLines(row.id);
     // ★ 2026-11-13 C130 — 판정 글 = 지금 승인 대상 글(행의 current_content · 이 갈래는 테스트 문자를 다시 보내지 않는다 · 설계서 §4① A7)
-    const optOutLine = agencyOptOutSmsLine({ content: row.current_content, isAd: row.is_ad });
+    const optOutLine = agencyOptOutSmsLine({ content: row.current_content, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
       callback: row.callback_number, title: '[대행발송] 승인 요청',

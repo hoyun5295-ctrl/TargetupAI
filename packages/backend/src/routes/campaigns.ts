@@ -76,7 +76,7 @@ import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, brandSendWindowError, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, queryCampaignInsert, effectiveUnsubFilter, stagingSendSignature } from '../utils/direct-send-core';
-import { DirectSendError, loadedSendFailureMessage } from '../utils/direct-send-spec';
+import { DirectSendError, loadedSendFailureMessage, adTextOn } from '../utils/direct-send-spec';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
@@ -4177,7 +4177,9 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     const msgType = campaign.rows[0].message_type;
     // ★ D102: 080 수신거부번호 — CT-AD 컨트롤타워 사용
     const campUserId = campaign.rows[0].user_id;
-    const optOut080 = adEnabled ? await getOpt080Number(campUserId, companyId) : '';
+    // ★ 2026-11-13 C132 — 표기는 저장된 표식까지 본다(대행 이메일 접수 캠페인 = 문안 그대로 · 키 없음 = 종전)
+    const adText = adTextOn(adEnabled, campaign.rows[0].send_config?.adText);
+    const optOut080 = adText ? await getOpt080Number(campUserId, companyId) : '';
 
     // 4. 테이블별로 그룹핑 후 Bulk UPDATE
     const tableGroups: Record<string, any[]> = {};
@@ -4217,7 +4219,7 @@ router.put('/:id/message', async (req: Request, res: Response) => {
           // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
           // ★ D142+ B1: sanitizedEditMessage(D103 순수본문) 사용 — 메시지 수정 시 (광고) 중복 부착 차단
           const { message: finalMessage, subject: finalSubject } = prepareSendMessage(sanitizedEditMessage, customer, editFieldMappings, {
-            msgType, isAd: adEnabled, opt080Number: optOut080,
+            msgType, isAd: adText, opt080Number: optOut080,
             subject: subject || '',
           });
 

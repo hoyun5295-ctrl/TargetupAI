@@ -1125,7 +1125,8 @@ describe('agentUsageKey — 에이전트 MsgType → 청구 유형키', () => {
   it('변환표에는 청구 단가가 있는 코드만 있다 — 별칭 포함', () => {
     // ★ 2026-09-04 KS·KL(카카오 실패 전환분) 추가 — 유형키가 아니라 SMS·LMS의 별칭이라
     //   그 문자 단가로 청구된다. 변환표에 없으면 발행이 통째로 막힌다(0904 랩디).
-    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['G', 'K', 'KL', 'KS', 'L', 'M', 'S']);
+    // ★ 2026-11-13 C132 GN(브랜드 비친구 · 비토 게이트웨이가 친구 G 와 나눠 적재) 추가
+    expect(Object.keys(AGENT_MSG_TYPE_TO_USAGE_KEY).sort()).toEqual(['G', 'GN', 'K', 'KL', 'KS', 'L', 'M', 'S']);
     // 변환표의 모든 코드는 단가가 붙는 유형키로 간다 — 하나라도 아니면 그 코드가 0원이 되거나 발행을 막는다.
     for (const key of Object.values(AGENT_MSG_TYPE_TO_USAGE_KEY)) {
       expect(BILLING_TYPES.find((t) => t.key === key)?.agentPriceColumn, `${key}에 발송ID 단가 컬럼이 없다`).toBeTruthy();

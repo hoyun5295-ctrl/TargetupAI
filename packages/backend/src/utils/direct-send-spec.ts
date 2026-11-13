@@ -32,6 +32,12 @@ export interface DirectSendSpec {
   callback?: string | null;
   sendChannel?: string;          // 'sms' | 'kakao' | 'alimtalk' ...
   adEnabled?: boolean;
+  /**
+   * ★ 2026-11-13 C132 — 광고여도 (광고) 머리 · 무료수신거부 꼬리를 **붙이지 않는다**(false · 대행 이메일 접수 = 고객 문안 그대로).
+   *   비우면 종전(adEnabled 대로 붙임). 광고 여부의 다른 쓰임(야간 창 · 080 명단 · 관문 · 피로도)은 adEnabled 그대로다.
+   *   ⛔ 대행 발송 워커만 넘긴다(계약 시험 C132 T4-5) — 다른 입구가 넘기면 광고 표기가 빠진 광고가 나간다.
+   */
+  adTextApplies?: boolean;
   scheduled?: boolean;
   scheduledAt?: string | null;
   splitEnabled?: boolean;
@@ -102,6 +108,14 @@ export function withCampaignId(sql: string, params: any[], id: string): { sql: s
   return { sql: sql.replace(head, `${head}id, `).replace(values, `${values}$${params.length + 1}::uuid, `), params: [...params, id] };
 }
 
+/**
+ * ★ 2026-11-13 C132 — 광고 표기를 붙이는가 한 곳(spec · 저장된 send_config · 예약 문안 고치기가 같은 식).
+ *   adText = 표기 끔 표식(false 일 때만 끈다 · 키 없음 = 종전).
+ */
+export function adTextOn(adEnabled: unknown, adText: unknown): boolean {
+  return adEnabled === true && adText !== false;
+}
+
 /** campaigns INSERT 파라미터($1~$18)를 합성. /direct-send/commit 원본 매핑과 동일. */
 export function buildDirectSendCampaignParams(
   spec: DirectSendSpec,
@@ -114,6 +128,8 @@ export function buildDirectSendCampaignParams(
     callback: spec.callback, useIndividualCallback: spec.useIndividualCallback, individualCallbackColumn: spec.individualCallbackColumn,
     ...(spec.callbackFilterUserId !== undefined ? { callbackFilter: { userId: spec.callbackFilterUserId } } : {}),
     adEnabled: finalIsAd, scheduled: spec.scheduled, scheduledAt: spec.scheduledAt,
+    // ★ C132 표기 끔 표식은 끌 때만 싣는다 — 다른 모든 캠페인의 send_config 는 글자 하나 안 바뀐다
+    ...(finalIsAd && spec.adTextApplies === false ? { adText: false } : {}),
     splitEnabled: spec.splitEnabled, splitCount: spec.splitCount, splitIntervalMinutes: spec.splitIntervalMinutes, mmsImagePaths: spec.mmsImagePaths,
     kakaoBubbleType: spec.kakaoBubbleType, kakaoSenderKey: spec.kakaoSenderKey, kakaoTargeting: spec.kakaoTargeting,
     kakaoAttachmentJson: spec.kakaoAttachmentJson, kakaoCarouselJson: spec.kakaoCarouselJson, kakaoResendType: spec.kakaoResendType,

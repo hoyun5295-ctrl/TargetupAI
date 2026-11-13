@@ -27,6 +27,7 @@ import { isLoadStopped, isLoadingSendPhase, NOT_LOAD_STOPPED_SQL, LOAD_CANCELLED
 import { withCancelObligationLock } from './keyed-lock';
 // ★ 2026-09-26 한줄로 V2 F19 — 개별 회신번호 등록 검사(동기 경로와 같은 CT)
 import { filterByIndividualCallback, callbackAssignmentUserId, fixedCallbackRejectReason } from './callback-filter';
+import { adTextOn } from './direct-send-spec';   // ★ 2026-11-13 C132 광고 표기 판정 한 곳
 // ★ 2026-09-26 한줄로 V2 F35(Codex 4차 1R A) — 취소 정산 공용 CT(취소 CT·재시도 워커·이 워커가 같은 산식)
 import { countCampaignRows, settleCancelledLoadRefund, settleCancelOutcome, campaignRefDates, CANCEL_SETTLE_MODE } from './cancel-settle';
 // ★ 2026-11-10 묶음 = MySQL 트랜잭션 하나 + 커밋 기록(끊김 이어 싣기 · 설계서 docs/2026-11-10-load-resume-design.md)
@@ -745,7 +746,9 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
   //   정산을 영영 못 해 선차감이 미환불로 남는다. 적재 루프는 skipLoad면 첫 줄에서 빠지므로 이 값을 쓰지 않는다.
   const directFieldMappings: Awaited<ReturnType<typeof prepareFieldMappings>> = skipLoad ? {} : await prepareFieldMappings(companyId);
   const finalIsAd = cfg.adEnabled === true;
-  const opt080 = finalIsAd && !skipLoad ? await getOpt080Number(userId || null, companyId) : '';
+  // ★ 2026-11-13 C132 — 표기는 저장된 표식까지 본다(대행 이메일 접수 = adText false = 문안 그대로) · 피로도 등 광고 쓰임은 finalIsAd 그대로
+  const adText = adTextOn(cfg.adEnabled, cfg.adText);
+  const opt080 = adText && !skipLoad ? await getOpt080Number(userId || null, companyId) : '';
   // ★ 2026-09-26 F19(Codex 4차 1R) — 개별 회신번호 배정 제한을 걸 사용자(관리자 = 제한 없음 · 동기 경로와 같은 CT).
   //   작성자 유형은 캠페인당 한 번 읽는다. users에 없는 작성자(슈퍼관리자 계정)는 역할을 몰라 CT가 본인 기준으로 걸지만,
   //   그 id로 배정된 번호가 없어 'assigned' 번호만 빠진다 — 회사 등록 여부(법적 요건)는 그대로 검사된다.
@@ -1002,7 +1005,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
       sendChannel: cfg.sendChannel || 'sms', msgType: cfg.msgType, message: cfg.message || '',
       subject: cfg.subject || '', callback: cfg.callback || '',
       useIndividualCallback: cfg.useIndividualCallback || false,
-      finalIsAd, opt080, mmsImagePaths: cfg.mmsImagePaths || [], useNow,
+      finalIsAd, adText, opt080, mmsImagePaths: cfg.mmsImagePaths || [], useNow,
       scheduled: !!cfg.scheduled,
       kakaoBubbleType: cfg.kakaoBubbleType, kakaoSenderKey: cfg.kakaoSenderKey, kakaoTargeting: cfg.kakaoTargeting,
       kakaoAttachmentJson: brandPreflight.attachmentJson ?? undefined, kakaoCarouselJson: cfg.kakaoCarouselJson, kakaoResendType: cfg.kakaoResendType,
