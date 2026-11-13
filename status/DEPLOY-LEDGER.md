@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: ddbea40c · 2026-11-12 · Harold 서버 출력(git rev-parse HEAD = ddbea40c3fd1) · 그 전 1a3fbdbf · 2026-11-11 · Harold 서버 출력(git log -1) · 그 전 d8b5367d · 그 전 0c955aab · 2026-11-11 · Harold 서버 출력(git pull ede69d59..0c955aab · C125 14 파일 836+ 30-) · 그 전 ede69d59 · 2026-11-11 · Harold 서버 출력(C124-P1 리허설 출력의 HEAD ede69d59 · 스크립트 · 문서 · 빌드 · 재시작 없음) · 그 사이 5ed096e5(C123) pull = 1110 밤(서버 출력이 이 원장에 없음) · 그 전 23ede51c · 2026-11-10 · Harold 서버 출력(git log -1 = 23ede51c 2026-11-10 19:03:02 +0900 · C122 2차 28 파일) · 그 전 3f5f21ce · 2026-11-10 · Harold 서버 출력(git pull d7a97ce5..3f5f21ce · ecosystem.config.js · C121 원장 문서 셋) · 그 전 d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
-- deployed_head: ddbea40c · 2026-11-12 00:08:47 · C129(백엔드 · 프론트는 다시 빌드만 · DDL C129-DDL-1 은 재시작 뒤 실행) · 그 전 1a3fbdbf · 2026-11-11 17:55:29 · C126 · C128(백엔드) · 그 전 d8b5367d · 2026-11-11 16:42:27 · C127(프론트 16:42 · 백엔드 재빌드 16:40) · 그 전 0c955aab · 2026-11-11 13:55:40 · C125(대행발송 늦은 보고 대기 해제 · 이 판에 C123 5ed096e5 · C124 ede69d59 코드 포함) · 백엔드 build:safe 13:19:18(「두 번째 빌드(대조용)」 → 「[verify-dist] 통과 — .js 868개 문법 · 두 판 3472개 파일 일치」 → swap · app.js 61011 bytes) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 성공) · 적재 0건 한 줄(loading=0) → pm2 reload · pm2.log 13:55:40 exited(code 0 · SIGINT) → starting → online · status online · uptime 2m · restarts 45 · script path dist/app.js · unstable restarts 0 · dist grep recoverAgencySpamErrors = utils/agency-send-worker.js 2 · routes/spam-filter.js 1 · 에러 로그 13:20 ~ 13:59 = 13:56:42 합성 데이터 안내 한 줄뿐(끼움 13:19 → 재시작 13:55 사이 36분 포함) · 메모리 = 재시작 2분 307.6MB · pm2.log(0422 부터 전부) 「exceeds」 41줄 중 마지막 = 1110 18:03:49(dist 전환 뒤 0건 · 단 끊기지 않고 돈 구간은 길어야 4시간 안팎 = 하룻밤 뒤 메모리 미검증) · 그 전 = 1111 08:38:07 다시 빌드한 판(1110 22:46 깨진 판 복구 · C124 경위 · HEAD 5ed096e5) · 그 전 23ede51c · 2026-11-10 19:12:58 · C122 2차(묶음 트랜잭션 · 직접입력 9,999 · 여정 %변수%) · 백엔드 build:safe(dist/utils/queue-load-tx.js 19:11:40 · app.js 19:11:44) · 프론트 build:safe(index.html 19:12:57) · pm2 재시작 19:12:58(pm2.log Stopping → online · 「exceeds」 줄 0) · 재시작 뒤 에러 로그 0줄 · 그 전 3f5f21ce · 2026-11-10 18:37 · 메모리 처방 = 운영 백엔드 dist 실행(ecosystem script dist/app.js) · 백엔드 build:safe 18:37:02(dist/app.js 61,011 바이트) · 적재 0건 확인 한 줄 → pm2 delete targetup-backend · pm2 start ../../ecosystem.config.js --only targetup-backend · pm2 save(새 id 5) · 확인 = script path …/backend/dist/app.js · restarts 0 · 기동 18:37:54 배너 · RSS 기동 1분 291,788KB(전 42분 1,728,732KB) · kill_timeout 들어옴 · 환경 변수 이름 대조 = 빠진 것 GEMINI_API_KEY · GEMINI_IMAGE_MODEL 은 .env 2줄 있음(dotenv) · 나머지 = pm2 내부 칸 · 기동 뒤 오류 0 · 그 전 d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
+- pulled_head: 5b7c709d · 2026-11-13 · Harold 서버 출력(git pull f3623b12..5b7c709d · Fast-forward · 42 파일 2103+ 101- · C131 c5b199d7 · C132 5b7c709d) · 그 전 f3623b12 · 2026-11-13 오전 · C130(Harold 「배포 완료했고」 · 서버 출력 이 원장에 없음) · 그 전 ddbea40c · 2026-11-12 · Harold 서버 출력(git rev-parse HEAD = ddbea40c3fd1) · 그 전 1a3fbdbf · 2026-11-11 · Harold 서버 출력(git log -1) · 그 전 d8b5367d · 그 전 0c955aab · 2026-11-11 · Harold 서버 출력(git pull ede69d59..0c955aab · C125 14 파일 836+ 30-) · 그 전 ede69d59 · 2026-11-11 · Harold 서버 출력(C124-P1 리허설 출력의 HEAD ede69d59 · 스크립트 · 문서 · 빌드 · 재시작 없음) · 그 사이 5ed096e5(C123) pull = 1110 밤(서버 출력이 이 원장에 없음) · 그 전 23ede51c · 2026-11-10 · Harold 서버 출력(git log -1 = 23ede51c 2026-11-10 19:03:02 +0900 · C122 2차 28 파일) · 그 전 3f5f21ce · 2026-11-10 · Harold 서버 출력(git pull d7a97ce5..3f5f21ce · ecosystem.config.js · C121 원장 문서 셋) · 그 전 d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
+- deployed_head: 5b7c709d · 2026-11-13 09:12 · C131(백엔드) · C132(백엔드 · 프론트) · 이 판에 C130 f3623b12 포함 · 백엔드 build:safe(「[verify-dist] 통과 — .js 871개 문법 · 두 판 3484개 파일 일치」) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 빌드 성공) · 적재 0건 한 줄(loading=0) → pm2 restart targetup-backend --update-env(원장 restart-env) · pm2 describe = online · uptime 2m · restarts 50 · unstable restarts 0 · 에러 로그 재시작 뒤 = 09:12:29 합성 데이터 안내 한 줄뿐(08:32 「Query execution was interrupted」 두 줄 = 재시작 전 옛 프로세스 · C131-DDL-1 실행 구간 안 · 원인 미검증) · dist grep 10줄 기대값 전부 일치(아래 C130-H1 · C131-H1 · C132-H1) · 에러 로그 [queue-scan-guard] 0줄 · 그 전 f3623b12 · 2026-11-13 오전 · C130(Harold 직접 · 서버 출력 이 원장에 없음 · 확인은 이 판에서) · 그 전 ddbea40c · 2026-11-12 00:08:47 · C129(백엔드 · 프론트는 다시 빌드만 · DDL C129-DDL-1 은 재시작 뒤 실행) · 그 전 1a3fbdbf · 2026-11-11 17:55:29 · C126 · C128(백엔드) · 그 전 d8b5367d · 2026-11-11 16:42:27 · C127(프론트 16:42 · 백엔드 재빌드 16:40) · 그 전 0c955aab · 2026-11-11 13:55:40 · C125(대행발송 늦은 보고 대기 해제 · 이 판에 C123 5ed096e5 · C124 ede69d59 코드 포함) · 백엔드 build:safe 13:19:18(「두 번째 빌드(대조용)」 → 「[verify-dist] 통과 — .js 868개 문법 · 두 판 3472개 파일 일치」 → swap · app.js 61011 bytes) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 성공) · 적재 0건 한 줄(loading=0) → pm2 reload · pm2.log 13:55:40 exited(code 0 · SIGINT) → starting → online · status online · uptime 2m · restarts 45 · script path dist/app.js · unstable restarts 0 · dist grep recoverAgencySpamErrors = utils/agency-send-worker.js 2 · routes/spam-filter.js 1 · 에러 로그 13:20 ~ 13:59 = 13:56:42 합성 데이터 안내 한 줄뿐(끼움 13:19 → 재시작 13:55 사이 36분 포함) · 메모리 = 재시작 2분 307.6MB · pm2.log(0422 부터 전부) 「exceeds」 41줄 중 마지막 = 1110 18:03:49(dist 전환 뒤 0건 · 단 끊기지 않고 돈 구간은 길어야 4시간 안팎 = 하룻밤 뒤 메모리 미검증) · 그 전 = 1111 08:38:07 다시 빌드한 판(1110 22:46 깨진 판 복구 · C124 경위 · HEAD 5ed096e5) · 그 전 23ede51c · 2026-11-10 19:12:58 · C122 2차(묶음 트랜잭션 · 직접입력 9,999 · 여정 %변수%) · 백엔드 build:safe(dist/utils/queue-load-tx.js 19:11:40 · app.js 19:11:44) · 프론트 build:safe(index.html 19:12:57) · pm2 재시작 19:12:58(pm2.log Stopping → online · 「exceeds」 줄 0) · 재시작 뒤 에러 로그 0줄 · 그 전 3f5f21ce · 2026-11-10 18:37 · 메모리 처방 = 운영 백엔드 dist 실행(ecosystem script dist/app.js) · 백엔드 build:safe 18:37:02(dist/app.js 61,011 바이트) · 적재 0건 확인 한 줄 → pm2 delete targetup-backend · pm2 start ../../ecosystem.config.js --only targetup-backend · pm2 save(새 id 5) · 확인 = script path …/backend/dist/app.js · restarts 0 · 기동 18:37:54 배너 · RSS 기동 1분 291,788KB(전 42분 1,728,732KB) · kill_timeout 들어옴 · 환경 변수 이름 대조 = 빠진 것 GEMINI_API_KEY · GEMINI_IMAGE_MODEL 은 .env 2줄 있음(dotenv) · 나머지 = pm2 내부 칸 · 기동 뒤 오류 0 · 그 전 d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -75,7 +75,8 @@
 | C128 | 1a3fbdbf |
 | C129 | ddbea40c |
 | C130 | f3623b12 |
-| C132 | 미커밋 |
+| C131 | c5b199d7 |
+| C132 | 5b7c709d |
 
 ## §1 대기
 
@@ -1869,7 +1870,7 @@ ALTER TABLE agency_send_email_intake
 - 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push · .62 → .57 전환 끝 · C130-DDL-1
 - 기대: 설계서 §4 처방 ① ② · 미가입 · 직접발송 변화 0 · 광고 꼬리 문장(buildAdMessage) 결과 변화 0 · 고객 문안 고침 0
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → pm2 reload · status online · 기동 에러 0 · dist grep agencyOptOutNotice ≥ 1 · readRecentRejectedIntakes ≥ 1 · sendRejectReply ≥ 1
-- 결과: 1113 오전 Harold 「배포 완료했고」(커밋 f3623b12 · push · 서버 pull · build:safe · 재시작은 Harold 직접 · 서버 출력 = 이 세션에 미수신 → dist grep · online · uptime 확인은 C132 배포 때 함께 받는다)
+- 결과: 1113 오전 Harold 「배포 완료했고」(커밋 f3623b12 · push · 서버 pull · build:safe · 재시작은 Harold 직접 · 서버 출력 = 이 세션에 미수신) → 1113 09:12 C132 판(5b7c709d · 이 코드 포함) 재시작 뒤 Harold 서버 출력 = dist grep utils/agency-send-intake.js 「function readRecentRejectedIntakes(」 1 · utils/agency-send-mail-worker.js 「function sendRejectReply(」 1 · online · uptime 2m · unstable 0 · 재시작 뒤 에러 0(agencyOptOutNotice 는 이번 grep 에 넣지 않음) · 닫힘
 
 ### C130-T1 · 직원 시트(수신거부 줄 안내 · 반려 회신 본문 보기)
 - 카드: C130
@@ -1878,6 +1879,47 @@ ALTER TABLE agency_send_email_intake
 - 기대: 설계서 §6 직원 지시문(테스트계정 · 도달 불가 번호 · 발송 0)
 - 확인: 「무료」 없는 수신거부 줄 문안 = 미리보기 · 접수 · 상세 · 직원 상세에 안내 상자 · 「무료수신거부」 문안 = 상자 없음 · 메일 반려 1건 = 슈퍼관리자 메일 접수 행을 누르면 업체가 받은 메일 제목 · 본문
 - 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
+
+### C131-DDL-1 · 비토 라인 큐 표 색인(MySQL .62 smsdb · SMSQ_SEND_16 · 13 · 14 · 15 · 설계서 docs/2026-11-13-c131-bito-line-scan-report-speed-design.md §4-1 · §7) · 배포와 무관
+- 카드: C131
+- 단계: 사전
+- 선행: 없음
+- 의미 바꿈: 아니오(색인 추가 · ALTER TABLE SMSQ_SEND_{16,13,14,15} ADD INDEX idx_status_seq_sendreq (status_code, seqno, sendreq_time), ALGORITHM=INPLACE, LOCK=NONE · lock_wait_timeout 60 · 표 하나씩 · PG 블록 아님)
+- 기대: 설계서 §7 순서 · ⑤ 판정(에이전트 큐 조회 = 색인 · filesort 0)
+- 확인: .57 = 전환 런북 §8-5 확인 SELECT 만
+- 결과: 1113 08:29:07 ~ 08:32:50 Harold 실행 끝(C131 세션 보고) = 16 2초 · 13 12초 · 14 3분 6초 · 15 21초 · 실패 0 · 14번 잠금을 막던 읽기 조회만 KILL QUERY 4 · ⑤ 합격(에이전트 조회 Covering index lookup idx_status_seq_sendreq · filesort 0 · 0.02 ~ 0.6ms)
+
+### C131-H1 · 한줄로 백엔드(R94 큐 표 전체 훑기 지킴이 · c5b199d7 · ENV 0 · DDL 0 · 프론트 변화 0)
+- 카드: C131
+- 단계: 한줄로 배포
+- 선행: C131 Codex 구현 approve · 커밋 · push
+- 기대: MySQL 실행 다섯 자리가 noteQueueSql 을 부른다 · 위반 = 로그 한 줄 + 경보(막지 않음)
+- 확인: dist grep noteQueueSql 호출 config/database.js 4 · utils/queue-load-tx.js 2 · utils/sms-queue.js 1 · dist/utils/queue-scan-guard.js 있음 · 재시작 뒤 [queue-scan-guard] 줄 0
+- 결과: 1113 09:12 C132 판(5b7c709d)과 한 재시작 · Harold 서버 출력 = dist 「noteQueueSql)(」 config/database.js 4 · utils/queue-load-tx.js 2 · utils/sms-queue.js 1 · utils/queue-scan-guard.js 「function noteQueueSql(」 1 · 에러 로그(console.warn 이 찍히는 곳) 「queue-scan-guard」 0줄(이 코드가 처음 든 판이라 파일 전체 = 재시작 뒤) · 경보 대기 표(system_alert_pending)는 보낸 뒤 지워지므로 로그 줄로 판정
+
+### C131-H2 · 비토 에이전트 새 판(bito-gateway 미커밋 reportQueue · grpc_client.go · report_queue_test.go)
+- 카드: C131
+- 단계: 출고
+- 선행: .62 → .57 전환 뒤 · 출고 절차 확정(DEPLOY-RUNBOOK 에 에이전트 절 없음 · AGENT_MANUAL §16)
+- 기대: 한 대씩 새 판 → 그 대 기동 · Poller 확인 → 그 대만 report_concurrency 1 → 8 → 다음 대(옛 판에서 report_concurrency 만 올리면 같은 행 결과 순서가 깨짐)
+- 확인: 대마다 기동 · 결과 반영 순서
+- 결과: (대기 · 1113 합친 배포에서 뺌 · C131 세션 권고 · DDL 뒤 측정에서 에이전트 병목 아님)
+
+### C131-S1 · 실측(백엔드 배포 뒤 하루)
+- 카드: C131
+- 단계: 사후
+- 선행: C131-H1(하루 뒤)
+- 기대: [queue-scan-guard] 로그 0 · 경보 원장 pass='queue-scan-guard' 0 · 첫 대량 발송 날 슬로 로그에 에이전트 큐 조회 · 감시 · 정리 워커 줄 0(설계서 §8)
+- 확인: 위 셋
+- 결과: (대기)
+
+### C131-T1 · 직원 시트
+- 카드: C131
+- 단계: 직원 시트
+- 선행: C131-H1
+- 기대: 없음(화면 변화 0 · 설계서 §9)
+- 확인: 닫힘 = Harold 실측(C131-S1)
+- 결과: 직원 시트 없음(설계서 §9)
 
 ### C132-DDL-1 · 발송ID 브랜드 비친구 단가 칸(설계서 docs/2026-11-13-c132-four-tickets-design.md §4 · 접수 cmwbrqgnd19eojnscjynhf3fo) · ★ 배포 앞
 - 카드: C132
@@ -1919,15 +1961,15 @@ ALTER TABLE agency_send_requests
 - 선행: Codex 구현 approve · 커밋(Harold · 다른 세션 파일 뺌) → push · C132-DDL-1 · C132-DDL-2
 - 기대: 설계서 §2 ~ §4 · 미가입 · 직접발송 변화 0 · 배포 전 접수 표기 그대로 · 배포 뒤 이메일 접수 = (광고) · 무료수신거부 없음
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · uptime · dist grep agencyAdTextValue ≥ 1 · CALLBACK_USAGE_SCOPE_SQL ≥ 1 · adTextOn ≥ 1
-- 결과: (대기)
+- 결과: 1113 Harold 서버 출력 = git pull f3623b12..5b7c709d · 백엔드 build:safe 「[verify-dist] 통과 — .js 871개 문법 · 두 판 3484개 파일 일치」 · 프론트 build:safe 성공 · loading=0 → pm2 restart targetup-backend --update-env · online · uptime 2m · restarts 50 · unstable 0 · 재시작 뒤 에러 = 합성 데이터 안내 한 줄뿐 · dist grep(각 「function 이름(」 줄 수) agency-send-intake.js agencyAdTextValue 1 · agency-send-optout.js agencyAdTextApplies 1 · direct-send-spec.js adTextOn 1 · callback-filter.js describeCallbackUsage 1(CALLBACK_USAGE_SCOPE_SQL 은 Codex 구현 1R 에서 describeCallbackUsage 로 바뀌어 이 이름으로 봄) · 화면 확인 = C132-T1
 
 ### C132-H2 · 비토 게이트웨이 배포(PAY 통계 성공 판정 = 콘솔과 같은 식 · 브랜드 G · GN · C131 과 한 번에)
 - 카드: C132
 - 단계: 게이트웨이 배포
 - 선행: C132-H1(한줄로가 GN 을 먼저 안다) · 비토 Codex approve · 비토 런북 scripts/gw
 - 기대: 적재기 카운터 = 결과 코드 판정(콜비서 V0011 Agent 경로 실패가 실패로) · 브랜드 묶음 = G · GN 한 문장
-- 확인: 배포 뒤 GW_PAY_STATS_LOOKBACK_DAYS 를 2026-11-01 까지 덮는 값으로 한 번 → 게이트웨이 로그 「PAY 통계 적재 완료」 full=true · since=2026-11-01 · failed=0 한 줄 → 원래 값(3) · 한줄로 에이전트 통계 콜비서 11월 = 비토 콘솔과 같은 성공 · 실패
-- 결과: (대기)
+- 확인: 배포 뒤 GW_PAY_STATS_LOOKBACK_DAYS 를 2026-11-01 까지 덮는 값으로 한 번 → 게이트웨이 로그 「PAY 통계 적재 완료」 full=true · since=2026-11-01 · failed=0 한 줄 → 원래 값(실측 = 10 · 0916 drop-in · 처음에 3 이라 적은 것 정정) · 한줄로 에이전트 통계 콜비서 11월 = 비토 콘솔과 같은 성공 · 실패
+- 결과: 1113 비토 커밋 8438331(Harold · 네 파일 경로 지정 · C131 미커밋 파일 뺌) · build.sh gateway = GW_BUILD_OK out/bito-gateway-8438331(C131 파일 여덟 개 stash 로 치우고 빌드 · BUILD_RC=0 · 되돌림 확인) · sha256 3278bf79…55fe · deploy.sh 62195b30…ff96(0929 판 그대로) · .65 현재 값 실측 = zz-paystats-lookback-0916.conf 10 · 프로세스 10 → zz-paystats-lookback-1113.conf(12) · daemon-reload(PID 2417457 그대로) → GW_DEPLOY_OK gateway 09:27:10(재기동 전 SENDING 0 · 백업 deploy-backups/20261113-092710-gateway.4f9m6B · DEPLOY_RC=0) · 새 PID 3079110 ERROR 0 · 09:27:25 「PAY 통계 적재 시작」 lookbackDays 12 · 09:27:41 「PAY 통계 적재 완료」 rows 51 · failed 0 · full true · since 2026-11-01 · 대조(V0011 · 닫힌 날짜) .65 콘솔 판정식(result-code.js 가 만드는 SQL 그대로) = pay-ingest-db RSRM_SalesStts 날짜마다 같음 = 11-06 6 · 1 · 5 · 0 / 11-10 3 · 2 · 1 · 0(L 2 · S 1) / 11-11 16,461 · 16,186 · 275 · 0 / 11-12 16,466 · 16,187 · 192 · 87(전체 · 성공 · 실패 · 대기) · upd 09:27:41 · 브랜드 = 11월 비토 고객(V) 유형 K · KL · L · S 뿐 = G · GN 발송 0 → ③ 비토 적재 실측은 첫 브랜드 발송 때 · 정리 = 1113 drop-in 삭제 · daemon-reload → 다음 기동 값 10 · PID 3079110 그대로 · /tmp 업로드 0 · 비토 push b858a23..8438331(Harold)
 
 ### C132-T1 · 직원 시트(이메일 대행 문안 그대로 · 사용 범위 칸 · 브랜드 두 칸 · 콜비서 통계)
 - 카드: C132
