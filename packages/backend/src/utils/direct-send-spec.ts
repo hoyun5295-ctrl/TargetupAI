@@ -116,6 +116,16 @@ export function adTextOn(adEnabled: unknown, adText: unknown): boolean {
   return adEnabled === true && adText !== false;
 }
 
+/**
+ * ★ 2026-11-16 C137 — 저장된 캠페인을 화면이 다시 그릴 때 내보내는 표기 칸 한 곳(재오픈 cmwd36hnr1corjnscq7xlnim1).
+ *   C132 는 글을 조립하는 자리만 표기 칸을 봤고, 저장된 글을 다시 그리는 화면은 is_ad 하나로 (광고) · 080 을 그렸다.
+ *   값 = send_config.adText 가 false 일 때만 false(대행 이메일 접수) · 그 밖 = NULL(키 없음 = 종전 = is_ad 를 따름).
+ *   화면 판정 = 프론트 `adTextOnFront(is_ad, ad_text)`(utils/formatDate.ts) · send_config 통째는 내부 값이라 내지 않는다.
+ */
+export function campaignAdTextSelect(alias = 'c'): string {
+  return `CASE WHEN ${alias}.send_config->>'adText' = 'false' THEN false END AS ad_text`;
+}
+
 /** campaigns INSERT 파라미터($1~$18)를 합성. /direct-send/commit 원본 매핑과 동일. */
 export function buildDirectSendCampaignParams(
   spec: DirectSendSpec,

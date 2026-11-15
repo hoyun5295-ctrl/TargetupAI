@@ -54,7 +54,8 @@ describe('대행발송 (광고) 판정 = 발송 규칙', () => {
 describe('대행발송 화면이 그 판정을 쓴다', () => {
   it('담당자 링크 승인 화면: 제목은 buildAdSubjectFront 한 벌로 그린다', () => {
     const src = read('pages/AgencyApprovePage.tsx');
-    expect(src).toMatch(/buildAdSubjectFront\(r\.subject \|\| '', r\.messageType, r\.isAd\)/);
+    // ★ 2026-11-16 C137 — 같은 CT 한 벌 · 표기 인자는 표기 칸까지 본다(이메일 접수 = 고객 문안 그대로 · 재오픈 cmwd36hnr1)
+    expect(src).toMatch(/buildAdSubjectFront\(r\.subject \|\| '', r\.messageType, adTextOnFront\(r\.isAd, r\.adText\)\)/);
     expect(src, '조건 없이 "(광고) "를 붙이던 형태가 되살아났다').not.toMatch(/isAd \? '\(광고\) ' : ''/);
   });
 

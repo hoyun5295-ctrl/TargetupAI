@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { calculateSmsBytes, buildAdSubjectFront } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdSubjectFront, adTextOnFront } from '../utils/formatDate';
 import { resolveChannelLabel, isKakaoFamilyChannel } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
 import CampaignCallbackField from './shared/CampaignCallbackField';
@@ -135,7 +135,7 @@ export default function ScheduledCampaignModal({
                       {/* LMS/MMS 제목 표시 */}
                       {(selectedScheduled.message_type === 'LMS' || selectedScheduled.message_type === 'MMS') && (selectedScheduled.message_subject || selectedScheduled.subject) && (
                         <div className="text-sm text-blue-600 mt-1">
-                          📋 제목: {buildAdSubjectFront(selectedScheduled.message_subject || selectedScheduled.subject || '', selectedScheduled.message_type, selectedScheduled.is_ad ?? false)}
+                          📋 제목: {buildAdSubjectFront(selectedScheduled.message_subject || selectedScheduled.subject || '', selectedScheduled.message_type, adTextOnFront(selectedScheduled.is_ad, selectedScheduled.ad_text))}
                         </div>
                       )}
                       {/* 회신번호 표시 — ★ 2026-10-01 B-1001-6 수신자별이면 「고객별 회신번호 … 외 N개」 + 목록 창 */}
@@ -446,7 +446,8 @@ export default function ScheduledCampaignModal({
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">제목</label>
                 <div className="relative">
-                  {selectedScheduled?.is_ad && (
+                  {/* ★ 2026-11-16 C137 앞에 붙는 (광고) 표시 = 표기 칸까지 본다(대행 이메일 접수 = 고친 제목도 그대로 나간다 · 서버 PUT /:id/message 와 같은 판정) */}
+                  {adTextOnFront(selectedScheduled?.is_ad, selectedScheduled?.ad_text) && (
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-orange-600 font-medium pointer-events-none select-none">(광고) </span>
                   )}
                   <input
@@ -454,8 +455,8 @@ export default function ScheduledCampaignModal({
                     value={editSubject}
                     onChange={(e) => setEditSubject(e.target.value)}
                     className="w-full border rounded-lg px-3 py-2"
-                    placeholder={selectedScheduled?.is_ad ? "제목 입력" : "제목 입력"}
-                    style={selectedScheduled?.is_ad ? { paddingLeft: '52px' } : {}}
+                    placeholder="제목 입력"
+                    style={adTextOnFront(selectedScheduled?.is_ad, selectedScheduled?.ad_text) ? { paddingLeft: '52px' } : {}}
                   />
                 </div>
               </div>

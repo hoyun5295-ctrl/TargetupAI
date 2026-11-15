@@ -1088,6 +1088,16 @@ export const LMS_SUBJECT_MAX_CHARS = 40;
  * - isAd=true + LMS/MMS일 때만 제목 앞에 "(광고) " 접두사
  * - 중복 방지: 이미 (광고)로 시작하면 안 붙임
  */
+/**
+ * ★ 2026-11-16 C137 — 저장된 건(캠페인 · 대행 접수)을 다시 그릴 때 광고 표기를 붙이는가 한 곳(재오픈 cmwd36hnr1corjnscq7xlnim1).
+ *   is_ad = 광고 발송인가(야간 제한 · 080 명단 · 광고 관문에 쓰임) · adText = 표기 칸(false = 대행 이메일 접수 = 고객 문안 그대로 · 없음 = 종전).
+ *   서버 판정과 같은 식 = backend direct-send-spec `adTextOn` · agency-send-optout `agencyAdTextApplies`.
+ *   ⛔ 저장된 건을 그리는 화면은 is_ad 를 표기 인자로 바로 넘기지 않는다(계약 시험 c137-ad-text-render).
+ */
+export function adTextOnFront(isAd: unknown, adText: unknown): boolean {
+  return !!isAd && adText !== false;
+}
+
 export function buildAdSubjectFront(subject: string, msgType: string, isAd: boolean): string {
   if (!isAd) return subject;
   if (msgType !== 'LMS' && msgType !== 'MMS') return subject;
@@ -1158,6 +1168,8 @@ export function formatCampaignMessageForDisplay(
     message_content?: string | null;
     message_type?: string | null;
     is_ad?: boolean | null;
+    /** ★ 2026-11-16 C137 표기 칸(서버 campaignAdTextSelect · false = 표기 끔 · 없음 = 종전) */
+    ad_text?: boolean | null;
     opt_out_080_number?: string | null;
     send_channel?: string | null;
     alimtalk_template_code?: string | null;
@@ -1188,7 +1200,8 @@ export function formatCampaignMessageForDisplay(
   // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — Harold님 명시 정책:
   //   광고체크 OFF (is_ad=false) → 사용자 입력 본문 그대로 표시 (어떤 처리도 안 함)
   //   사용자가 본문에 (광고)/무료거부 복붙한 경우도 사용자 입력이므로 그대로 보존
-  if (!campaign.is_ad) return source;
+  // ★ 2026-11-16 C137 — 표기 칸까지 본다(대행 이메일 접수 = 광고 발송이어도 고객 문안 그대로 나갔다)
+  if (!adTextOnFront(campaign.is_ad, campaign.ad_text)) return source;
 
   // ★ D143: 광고체크 ON일 때만 (광고)+무료거부 시스템 부착
   //   stripAdParts 호출 제거 — 사용자 입력 깎지 않음

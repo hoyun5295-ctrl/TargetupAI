@@ -18,7 +18,7 @@ import {
 } from '../components/agency/agency-send-api';
 import { useClockTick } from '../hooks/useClockTick';
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
-import { buildAdSubjectFront } from '../utils/formatDate';
+import { buildAdSubjectFront, adTextOnFront } from '../utils/formatDate';
 import { useApproveToken } from '../hooks/useApproveToken';
 import LinkConfirmSheet from '../components/link/LinkConfirmSheet';
 
@@ -31,6 +31,8 @@ interface ApprovalView {
   subject: string | null;
   content: string;
   isAd: boolean;
+  /** ★ 2026-11-16 C137 표기 칸(false = 이메일 접수 = 고객 문안 그대로 · null = 종전) */
+  adText?: boolean | null;
   callbackNumber: string;
   /** ★2026-09-13 고객별 회신번호 종류 수(0 = 대표 번호로 나감 · 1 = callbackSole로 나감 · 2 이상 = 고객별) */
   callbackKinds?: number;
@@ -242,12 +244,13 @@ export default function AgencyApprovePage() {
             <div className="rounded-xl bg-neutral-100 px-4 py-3.5 text-[13px] leading-relaxed text-neutral-900">
               {(r.messageType === 'LMS' || r.messageType === 'MMS') && (
                 // ★2026-09-10 발송과 같은 규칙(이미 (광고)로 시작하는 제목에는 다시 안 붙인다 · 남지현 접수)
-                <p className="font-extrabold mb-1.5">{buildAdSubjectFront(r.subject || '', r.messageType, r.isAd)}</p>
+                // ★2026-11-16 C137 표기 칸까지 본다(이메일 접수 = 받으신 테스트 문자처럼 고객 문안 그대로 · 재오픈 cmwd36hnr1)
+                <p className="font-extrabold mb-1.5">{buildAdSubjectFront(r.subject || '', r.messageType, adTextOnFront(r.isAd, r.adText))}</p>
               )}
               <p className="whitespace-pre-wrap break-words">{r.content}</p>
               <p className="mt-2.5 text-[11.5px] text-neutral-500">
                 받는 분마다 항목 값이 다르게 들어갑니다. 실제 모습은 받으신 테스트 문자와 같습니다.
-                {r.isAd ? ' 광고 표시와 무료 수신거부 번호는 자동으로 붙습니다.' : ''}
+                {adTextOnFront(r.isAd, r.adText) ? ' 광고 표시와 무료 수신거부 번호는 자동으로 붙습니다.' : ''}
               </p>
             </div>
             {Array.isArray(r.spellIssues) && r.spellIssues.length > 0 && ready && (

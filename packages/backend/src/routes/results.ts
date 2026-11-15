@@ -24,6 +24,7 @@ import { buildCampaignListCsv, channelPlainLabel, kakaoSplitCsvRows, CampaignCsv
 import { queryPayAgentByType, isPayStatsConfigured } from '../utils/pay-stats';
 import { isSendTypeFilter } from '../utils/send-type-axis';
 import { INDIVIDUAL_CALLBACK_SELECT_EXPR, listCampaignCallbacks } from '../utils/campaign-callback-list';
+import { campaignAdTextSelect } from '../utils/direct-send-spec';   // ★ 2026-11-16 C137 저장된 글을 그리는 화면의 표기 칸
 
 const router = Router();
 
@@ -333,7 +334,8 @@ router.get('/campaigns', async (req: Request, res: Response) => {
         (c.created_at AT TIME ZONE 'Asia/Seoul')::date as created_date_kst,
         c.cancelled_by_type, c.cancel_reason,
         u.login_id as created_by_name,
-        ${CAMPAIGN_OPT080_SELECT_EXPR}
+        ${CAMPAIGN_OPT080_SELECT_EXPR},
+        ${campaignAdTextSelect('c')}
        FROM campaigns c
        LEFT JOIN users u ON c.created_by = u.id
        ${CAMPAIGN_OPT080_LEFT_JOIN}
@@ -559,7 +561,7 @@ router.get('/campaigns/:id', async (req: Request, res: Response) => {
 
     const userType = req.user?.userType;
     // ★ B2: opt_out_080_number 포함을 위해 LEFT JOIN
-    let detailQuery = `SELECT c.*, ${CAMPAIGN_OPT080_SELECT_EXPR}
+    let detailQuery = `SELECT c.*, ${CAMPAIGN_OPT080_SELECT_EXPR}, ${campaignAdTextSelect('c')}
                        FROM campaigns c
                        ${CAMPAIGN_OPT080_LEFT_JOIN}
                        WHERE c.id = $1 AND c.company_id = $2`;

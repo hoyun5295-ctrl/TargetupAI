@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { X, FileText } from 'lucide-react';
-import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, getAlimtalkTemplateStatus } from '../utils/formatDate';
+import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, adTextOnFront, getAlimtalkTemplateStatus } from '../utils/formatDate';
 import {
   isAlimtalkChannel,
   isBrandOnlyChannel,
@@ -78,7 +78,7 @@ export default function CampaignDetailModal({
 
   const infoRows: { label: string; value: ReactNode }[] = [
     { label: '캠페인명', value: campaign.campaign_name },
-    ...(isLmsType && subject ? [{ label: '제목', value: buildAdSubjectFront(subject || '', campaign.message_type, campaign.is_ad ?? false) }] : []),
+    ...(isLmsType && subject ? [{ label: '제목', value: buildAdSubjectFront(subject || '', campaign.message_type, adTextOnFront(campaign.is_ad, campaign.ad_text)) }] : []),
     { label: '유형', value: `${resolveSendTypeLabel(campaign.send_type)} / ${channelLabel}` },
     { label: '발송자', value: campaign.created_by_name || '-' },
     // ★ 2026-10-01 B-1001-6 수신자별 회신번호 = 「고객별 회신번호 … 외 N개」 + 목록 창(그 밖은 종전 표시)
@@ -182,7 +182,7 @@ export default function CampaignDetailModal({
                         ) : (
                           <>
                             {isLmsType && subject && (
-                              <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{buildAdSubjectFront(subject || '', campaign.message_type, campaign.is_ad ?? false)}</div>
+                              <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{buildAdSubjectFront(subject || '', campaign.message_type, adTextOnFront(campaign.is_ad, campaign.ad_text))}</div>
                             )}
                             {previewBody}
                           </>

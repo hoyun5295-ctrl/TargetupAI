@@ -69,6 +69,8 @@ function toApprovalView(row: any) {
     subject: row.subject,
     content: row.current_content,
     isAd: !!row.is_ad,
+    // ★ 2026-11-16 C137 — 표기 칸(이메일 접수 = false · 칸 이전 접수 = null = 종전) · 화면은 adTextOnFront(isAd, adText) 로 제목 · 안내를 그린다
+    adText: row.ad_text === false ? false : null,
     callbackNumber: row.callback_number,
     requestedAt: row.requested_at,
     recipientCount: Number(row.recipient_count || 0),
