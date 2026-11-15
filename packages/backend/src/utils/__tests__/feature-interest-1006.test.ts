@@ -316,8 +316,10 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
   it('대시보드에 붙어 있다 · 슈퍼관리자 화면은 로그인 안내 창 이름과 바로가기를 보여 준다', () => {
     expect(front('pages/Dashboard.tsx')).toContain('<AiOperatorLoginPromo blocked={loginPromoBlocked} />');
     const tab = front('components/admin/FeatureInterestTab.tsx');
-    expect(tab).toContain("id === LOGIN_PROMO_ID ? '로그인 안내 창'");
-    expect(tab).toContain("const next = f.featureId === LOGIN_PROMO_ID ? f.goCompanies : f.pricingCompanies;");
+    // ★ 2026-11-15 C135 — 로그인 뒤 안내 창의 이름 · 다음 행동(주 버튼)은 등록부(constants/login-popups.ts)가 정한다(탭에 손으로 적지 않는다 · 새 창을 올려도 탭이 그대로 그린다)
+    expect(front('constants/login-popups.ts')).toContain("{ id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기' },");
+    expect(tab).toContain('const featureName = (id: string) => loginPopupOf(id)?.name || FEATURE_TITLES.get(id) || id;');
+    expect(tab).toContain('const next = loginPopupOf(f.featureId) ? f.goCompanies : f.pricingCompanies;');
   });
 });
 

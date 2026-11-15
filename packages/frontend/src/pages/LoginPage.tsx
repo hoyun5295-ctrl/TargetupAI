@@ -3,7 +3,8 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import IdentityVerifyModal from '../components/IdentityVerifyModal';
-import LoginPolicyNoticeModal, { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
+import { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
+import LoginNoticeSwitch from '../components/v3/LoginNoticeSwitch';   // ★ 2026-11-15 C135 안내 창의 갈래(V3 안내 창 · 종전 인증 안내 창)
 import MaintenanceNoticeModal from '../components/MaintenanceNoticeModal';
 import { isMaintenanceNoticeActive, MAINTENANCE_NOTICE_END_AT_MS } from '../constants/maintenanceNotice';
 import { DEFAULT_SESSION_TIMEOUT_MINUTES } from '../hooks/useSessionTimeout';
@@ -1028,7 +1029,7 @@ export default function LoginPage() {
 
       {/* 모달들 */}
       {showMaintenanceNotice && <MaintenanceNoticeModal onClose={() => setShowMaintenanceNotice(false)} />}
-      {showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}
+      {showPolicyNotice && <LoginNoticeSwitch onClose={() => setShowPolicyNotice(false)} />}
       {mfaModal}
       {identity && (
         <IdentityVerifyModal

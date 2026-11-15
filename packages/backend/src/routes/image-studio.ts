@@ -35,6 +35,8 @@ import { getServePath } from '../utils/image-serve';
 import { studioAttemptKey, rememberStudioResult, recallStudioResult } from '../utils/image-studio-attempt';
 // ★ 2026-10-24 요금제 = AI 존 서버 문 한 곳(뿌리 대장 R2 · 옛 studioPlanBlocked 1019 = 같은 판정의 사본) · 크레딧을 쓰는 생성 · 수정에만
 import { aiZonePlanBlocked } from '../utils/plan-guard';
+// ★ 2026-11-15 C135 미가입 회사 무료체험 3회(판정 · 선점 · 되돌림 = CT 한 곳 · 설계서 docs/2026-11-15-v3-popup-trial-design.md §5)
+import { studioTrialGate, reserveStudioTrial, releaseStudioTrial, trialRefusal, studioTrialView, requestStudioTrialFor, trialErrorResponse } from '../utils/studio-trial';
 import { registerAsset, registerAssetConfirmed, getStorageUsage, isAssetsTableMissing, getAsset, getAssetByUrl, deleteAsset } from '../utils/assets';
 import { isStudioReady, StudioError, readProductTempIds, studioProductFingerprint, groupProductCutouts, CREDIT_SOURCE, resolvePreset, buildPosterPrompt, hasBenefitPattern, buildAssetDisplayName, generatePoster, editOrUpscale, buildEditInstruction, studioImageEngine, removeBackground, composeImage, writeTempBuffer, allocTempPath, writeTempMeta, readTempMeta, clearTempMeta, findTempFile, moveTempToPermanent, restorePermanentToTemp, findPermanentByTempId, companyTempUsageBytes, isValidTempId, newTempId, tryAcquireGenerateLock, releaseGenerateLock, findTemplateSample, discardTemp, tempDeleteVerdict, isStudioTempFull, STUDIO_TEMP_CAP_BYTES, STUDIO_TEMP_TTL_DAYS, type TempMeta } from '../utils/image-studio';
 import { getTemplate, listTemplatesPublic, findUnfilledTemplateText } from '../utils/image-studio-templates';
@@ -128,7 +130,11 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
   if (!isStudioReady()) return respondStudioError(res, new StudioError('STUDIO_NOT_READY', 503));
 
-  if (await aiZonePlanBlocked(req, res)) return;
+  // ★ 2026-11-15 C135 — 요금제 문 자리에서 체험 판정을 함께(요금제 조회 한 번). 체험 길이 아니면 종전 요금제 문 그대로.
+  //   체험 길 = 무료체험을 신청한 미가입 회사뿐(지금 문이 여는 회사는 체험 행이 있어도 종전 길 · utils/studio-trial.ts).
+  const gate = await studioTrialGate(companyId, req.user);
+  const trial = gate.trial;
+  if (!trial && await aiZonePlanBlocked(req, res, gate.plan)) return;
   const { templateId, presetKey, userHint, texts, textPosition, offer: offerRaw } = req.body || {};
   // ★ 2026-10-19 B-1016-3② 시도 키(화면이 보낼 때만) — 같은 시도 = 기억한 결과 · 이미 걷혔으면 다시 걷지 않는다
   //   ★ 2026-11-02 제품 자리 = 보낸 값 그대로(옛 화면 cutoutTempId 생략 · null · id 는 지금 키 그대로 · 새 화면 = 배열 · Codex 설계 1R ①)
@@ -138,13 +144,17 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
   // ★ Codex E2 — 같은 시도의 결과 돌려주기 · 납부 확인 = 이 잠금 안에서 · 새 작업 검사(입력 · 잔액 · 임시 용량)보다 먼저
   //   (옛: 잠금 밖 · 잔액 확인 앞이라, 원요청이 막 걷은 뒤의 재요청이 402 · 409 를 받고 다시 걷힐 수 있었다)
   if (!tryAcquireGenerateLock(companyId)) return respondStudioError(res, new StudioError('BUSY', 409));
+  // ★ C135 체험이 잡은 칸(그림이 임시 저장까지 되면 비운다 · 그 전에 실패하면 아래 catch 가 되돌린다) · 응답에 싣는 사용 현황
+  let trialHeld: string | null = null;
+  let trialUse: { used: number; granted: number; remaining: number } | null = null;
   try {
   if (attemptKey) {
     const hit = recallStudioResult<Record<string, unknown>>(attemptKey);
     if (hit) return res.json(hit);
   }
-  let alreadyPaid = false;
-  if (attemptKey) {
+  // ★ C135 체험 길 = 크레딧을 보지도 걷지도 않는다(납부 확인 · 사전 확인 · 성공 뒤 차감을 모두 건너뛴다 · 횟수는 아래 선점이 센다)
+  let alreadyPaid = trial;
+  if (!trial && attemptKey) {
     try { alreadyPaid = await isChargedByKey(companyId, attemptKey); } catch {
       return res.status(503).json({ success: false, error: '크레딧 내역을 확인하지 못했어요. 잠시 뒤 다시 시도해주세요.', code: 'CREDIT_STATE_UNKNOWN' });
     }
@@ -213,6 +223,15 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
     // ★ 2026-07-30 1장 생성 (Harold 확정) — 옛 후보 2장은 같은 prompt·preset 무작위 2회 호출이라 레시피 차이가 없었다.
     //   1회 호출로 줄이고 크레딧은 2 유지 → 크레딧당 Gemini 호출 0.5회(원가 절반). 실패 = 미차감(throw → respondStudioError).
     //   ★ 2026-09-30 생성 엔진 = 스위치(STUDIO_IMAGE_ENGINE · 기본 gemini) — 원장 docs/2026-09-30-ai-model-prompt-upgrade.md §2-4
+    // ★ C135 체험 = 만들기 직전에 한 칸을 먼저 잡는다(한 문장 선점 · 키 = 시도 키 · 없으면 이 요청의 새 키).
+    //   못 잡으면 만들지 않는다: 이미 쓴 키 = 409(같은 키로 그림을 또 만들지 않는다) · 남은 칸 없음 = 403.
+    if (trial) {
+      const trialKey = attemptKey || `image-studio:${newTempId()}`;
+      const held = await reserveStudioTrial(companyId, trialKey);
+      if (held.state !== 'ok') { const no = trialRefusal(held); return res.status(no.status).json(no.body); }
+      trialHeld = trialKey;
+      trialUse = { used: held.used, granted: held.granted, remaining: Math.max(0, held.granted - held.used) };
+    }
     const oks = [await generatePoster(prompt, preset, cutout, { engine: studioImageEngine() })];
 
     // temp 기록
@@ -225,6 +244,7 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       });
       return { tempId, url: `/api/image-studio/temp/${tempId}`, presetKey: preset.key };
     });
+    trialHeld = null;   // ★ C135 그림이 임시 저장까지 됐다 = 잡은 칸은 쓴 칸
 
     // 성공 후 차감 — 생성 1회 = 단가표 값(★2026-07-30 Harold 확정: 1장 생성이어도 같은 값). 멱등키 = 생성 요청 uuid.
     const cost = getCreditCost(CREDIT_SOURCE.generate);
@@ -251,13 +271,45 @@ imageStudioRouter.post('/generate', async (req: any, res: Response) => {
       benefitNotice: benefitInHint ? '혜택 문구는 문구 칸(라벨·헤드라인·부제)에 입력해주세요. 장면 힌트에는 장면 묘사만 들어가요.' : null,
       // ★ C114 D8 결과 카드 「포스터에 들어간 숫자」(보낸 값 그대로 · 숫자 판독 호출 0)
       discountCheck: discountOffer ? discountCheckLine(discountOffer) : null,
+      // ★ C135 체험 길에서만 싣는다(화면의 「무료체험 n회 남음」)
+      ...(trialUse ? { trial: trialUse } : {}),
     };
     if (attemptKey) rememberStudioResult(attemptKey, body);
     return res.json(body);
   } catch (err) {
+    // ★ C135 만들다 실패 = 잡은 칸을 돌려준다. 되돌림까지 실패하면 칸 하나가 쓰인 채 남는다(모자라게 주는 쪽 · 넘치지 않는다) → 로그.
+    if (trialHeld) {
+      await releaseStudioTrial(companyId, trialHeld).catch((e: any) => console.error('[image-studio] 무료체험 칸 되돌림 실패:', companyId, e?.message || e));
+    }
     return respondStudioError(res, err);
   } finally {
     releaseGenerateLock(companyId);
+  }
+});
+
+// ── GET /trial · POST /trial/request — 무료체험 3회의 상태 · 신청(★ 2026-11-15 C135 · 판정 = utils/studio-trial.ts) ──
+//   신청 = 고객이 「무료체험 3회 이용하고 싶습니다」를 눌렀을 때만 · 두 번 눌러도 같은 답(3회가 다시 차지 않는다).
+imageStudioRouter.get('/trial', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  try {
+    return res.json({ success: true, ...(await studioTrialView(companyId, req.user)) });
+  } catch (err) {
+    const no = trialErrorResponse(err);
+    return res.status(no.status).json(no.body);
+  }
+});
+
+imageStudioRouter.post('/trial/request', async (req: any, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  try {
+    const status = await requestStudioTrialFor(companyId, req.user);
+    if (!status) return res.status(409).json({ success: false, error: '이 계정은 무료체험 대상이 아니에요.', code: 'TRIAL_NOT_ELIGIBLE' });
+    return res.json({ success: true, eligible: true, ...status });
+  } catch (err) {
+    const no = trialErrorResponse(err);
+    return res.status(no.status).json(no.body);
   }
 });
 

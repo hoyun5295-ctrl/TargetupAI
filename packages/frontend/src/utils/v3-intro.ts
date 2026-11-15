@@ -9,7 +9,11 @@ import { sendJson } from './dashboard-live';
 
 export interface V3IntroPoster { id: string; url: string }
 export interface V3IntroChip { key: string; label: string; text: string }
-export interface V3Intro { posters: V3IntroPoster[]; chips: V3IntroChip[] }
+/**
+ * ★ 2026-11-15 C135 — variant 'trial' = 요금제 미가입 회사의 이미지 스튜디오 무료체험 창(그림은 화면의 정적 파일이라 포스터가 없다).
+ *   introKey = 그 창의 판 열쇠(「다시 보지 않기」가 이 값을 돌려보낸다 · 무료체험 창을 숨겨도 V3 소개 창은 숨지 않는다).
+ */
+export interface V3Intro { posters: V3IntroPoster[]; chips: V3IntroChip[]; variant?: 'trial'; introKey?: string }
 
 /** 서버 선점 — 띄우라는 답일 때만 포스터 · 칩을 돌려준다 */
 export async function claimV3Intro(): Promise<V3Intro | null> {
@@ -17,6 +21,7 @@ export async function claimV3Intro(): Promise<V3Intro | null> {
   const r = await sendJson('/api/plans/v3-intro/claim', { method: 'POST' });
   const d: any = r.body;
   if (!r.ok || !d?.success || d.show !== true) return null;
+  if (d.variant === 'trial' && typeof d.introKey === 'string') return { variant: 'trial', introKey: d.introKey, posters: [], chips: [] };
   const posters: V3IntroPoster[] = Array.isArray(d.posters)
     ? d.posters.filter((p: any) => p && typeof p.id === 'string' && typeof p.url === 'string')
     : [];
@@ -27,9 +32,9 @@ export async function claimV3Intro(): Promise<V3Intro | null> {
   return { posters, chips };
 }
 
-/** 「이 소개 다시 보지 않기」 — 저장됐으면 true */
-export async function dismissV3Intro(): Promise<boolean> {
+/** 「이 소개 다시 보지 않기」 — 저장됐으면 true. introKey = 숨길 창의 판 열쇠(안 주면 V3 소개 창 = 종전 그대로) */
+export async function dismissV3Intro(introKey?: string): Promise<boolean> {
   if (!localStorage.getItem('token')) return false;
-  const r = await sendJson('/api/plans/v3-intro/dismiss', { method: 'POST' });
+  const r = await sendJson('/api/plans/v3-intro/dismiss', introKey ? { method: 'POST', body: { introKey } } : { method: 'POST' });
   return r.ok && (r.body as any)?.success === true;
 }

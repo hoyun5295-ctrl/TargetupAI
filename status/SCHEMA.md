@@ -2051,7 +2051,7 @@ kind별 payload 키:
 **`protect_completed_target_count`** — 완료된 캠페인의 `target_count` UPDATE 시 RAISE EXCEPTION으로 영구 차단.
 - 신설 사유: 폴라초이스 캠페인(`14df97e7`) PG `target_count`가 5/7 새벽 디버깅 도중 수동 SQL UPDATE로 잘못 박힘(15,640). 코드 흐름상 발생 불가 → audit 없는 데이터 오염 사고.
 - 동작: `BEFORE UPDATE OF target_count ON campaigns FOR EACH ROW`. `OLD.status = 'completed' AND OLD.target_count IS DISTINCT FROM NEW.target_count` 시 차단.
-- 정상 코드 흐름은 모두 `status='scheduled'` 가드라 영향 0 (campaigns.ts:2079, 2088, 926).
+- ~~정상 코드 흐름은 모두 `status='scheduled'` 가드라 영향 0~~ → **★2026-11-14 정정(B-1114-1 · C134)**: 여정 단계 캠페인(`send_type = 'journey'`)은 하루 동안 `sending` 인 채로 확정 문장(`journey-send-claim.ts confirmLoadUnit`)이 `target_count` 를 올린다. 그 행을 여정 밖 코드가 `completed` 로 바꾸면 이 트리거가 확정을 막는다(1114 운영 998900e1). 규칙 = 여정 단계 캠페인은 여정만 닫는다(`journey-step-campaign.ts closeFinishedStepCampaigns`) · 닫혀 있으면 확정 앞에서 다시 연다(`reopenStepCampaignForConfirm`) · 뿌리 R96 · 설계서 `docs/2026-11-14-journey-step-campaign-owner-design.md`.
 - 검증: `UPDATE campaigns SET target_count = 9999 WHERE id = '14df97e7'` → `ERROR: 완료된 캠페인의 target_count는 변경할 수 없습니다.`
 
 ### payments (PG 결제 내역) — D184 (2026-05-20) 이니시스 영역 9 컬럼 ALTER 정합
@@ -3327,6 +3327,14 @@ CREATE INDEX IF NOT EXISTS idx_journey_step_logs_execution ON journey_step_logs(
 - ★ 2026-07-11 여정 강화 패키지 ALTER 6건 — **적용 완료(2026-07-11 information_schema 6행 실측, Harold 제공)**: journeys `goal_kind`(varchar20 NOT NULL DEFAULT 'purchase' — 목표 종류 purchase/click/visit) · `holdout_pct`(smallint NOT NULL DEFAULT 0 — 홀드아웃 대조군 %) · `personal_send_time`(boolean NOT NULL DEFAULT false — send-time 개인화) / journey_steps `not_met_goto`(int — condition 미충족 분기 대상 step_order) · `wait_event_name`(varchar50 — wait 이벤트 대기) · `wait_timeout_hours`(int). journey_executions.status 신규 값 **'holdout'**(컬럼 아님 — 미발송 대조군, 발송 tick의 active 조회에서 자동 제외).
 - 운영 `customer.points_expiring` 여정 = **0건**(2026-06-30). 운영 여정 row 자체 0(아직 여정 사용 업체 없음) → start_kind 마이그레이션 backfill 불요 · points_expiring 흡수 마이그레이션 불요(코드 일반화만). 단 코드 경로 회귀 차단(9트리거·발송·통계)은 유지.
 
+### journey_selfcheck_daily (여정 자동 판정 기록 · ★2026-11-14 C134-DDL-1 · **미적용 — Harold 실행 뒤 갱신** · DDL 원문 = `status/DEPLOY-LEDGER.md` C134-DDL-1)
+`company_id uuid NOT NULL` · `day date NOT NULL`(KST 날짜) · `failed_executions` · `errored_executions` · `stuck_claims` · `fault_logs` · `unclosed_campaigns` · `count_mismatch` · `violations`(전부 `integer NOT NULL DEFAULT 0`) · `first_judged_at` · `last_judged_at`(`timestamptz NOT NULL DEFAULT NOW()`) · **PK (company_id, day)** · FK 없음.
+> 쓰는 곳 = `utils/journey-selfcheck.ts persistVerdict`(합성 회사만 · 하루 한 번 · **행을 만드는 것은 어제 하루의 관측뿐** · 그보다 앞선 6일은 이미 행이 있는 날만 항목마다 `GREATEST` 로 고친다 = 나빠지는 쪽으로만 남는다). 읽는 곳 = 같은 파일 `storedViolations`(연속 0 일수). 행이 없는 날 = 판정을 못 한 날(정상으로 세지 않는다 · 재계산으로 채우지 않는다). 표가 없으면(`42P01`) 판정 · 경보는 하고 연속 일수만 못 센다.
+
+### journey_selfcheck_set (합성 회사 여정 세트 원장 · ★2026-11-15 C134-DDL-2 · **미적용 — Harold 실행 뒤 갱신** · DDL 원문 = `status/DEPLOY-LEDGER.md` C134-DDL-2)
+`company_id uuid NOT NULL` · `set_key text NOT NULL`(세트 키 = 코드의 세트 표 행 · 예 `signup`) · `journey_id uuid`(그 행이 가리키는 여정 하나 · NULL = 아직 없음) · `def_rev integer NOT NULL`(그 여정을 만든 세트 정의의 판 번호) · `validations integer NOT NULL DEFAULT 0`(검증 시도 횟수 · 판마다 5까지) · `next_validate_at timestamptz`(다음 시도 가능 시각 · NULL = 지금 · `infinity` = 판을 올려야 다시) · `last_reason text` · `created_at` · `updated_at`(`timestamptz NOT NULL DEFAULT NOW()`) · **PK (company_id, set_key)** · FK 없음(사람이 여정을 지우면 행이 남아 「사람이 지움」으로 읽힌다 = 다시 만들지 않는다).
+> 쓰는 곳 · 읽는 곳 = `utils/journey-selfcheck-set.ts` 하나(스위치 ENV `JOURNEY_SELFCHECK_SET_COMPANY_IDS` 에 적힌 합성 회사만 · 워커가 직접 쓰는 표는 이것뿐 · 여정 표에는 운영 함수로만 닿는다). 세트 여정의 신원 = 이 행(이름과 무관). 만들기 · 검증 시도는 **시도를 시작하는 UPDATE 가 횟수 · 다음 시도 시각을 먼저 쓴다**(재기동해도 상한이 이어진다). 판 올림 = 이어진 여정이 없거나 보관 안 한 초안일 때만 `journey_id` 를 비우고 새 판으로(여정은 지우지 않는다). 표가 없으면(`42P01`) 세트 워커만 쉰다.
+
 ### 여정 엔진 재설계 신규 (2026-06-04 세션2 — Harold 실행: `docs/superpowers/plans/2026-06-04-journey-redesign.sql`)
 
 > 미적용 — Harold 직접 PG 실행 후 갱신.
@@ -3444,3 +3452,12 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 
 **benchmark_company_daily** (업종 평균 스냅숏 · 날짜 × 회사 × 지표): `day date NOT NULL, company_id uuid NOT NULL, industry_code varchar(40) NOT NULL, metric varchar(40) NOT NULL, value double precision NOT NULL, PRIMARY KEY (day, company_id, metric)` + INDEX `idx_benchmark_day_industry_metric (day, industry_code, metric)`
 > `metric` = `success_rate` · `spam_block:SKT|KT|LGU`(비율만 · 절댓값을 두지 않는다). 쓰는 곳 = `utils/performance-benchmark.ts` 야간 워커(오늘 것을 지우고 넣기 · 40일 지난 날짜 삭제). ⛔ 다른 회사 행은 서버 밖으로 나가지 않는다(응답 = 내 값 · 평균 · 차이 · 다른 회사 5곳 미만이면 평균 없음).
+
+### image_studio_trials (이미지 스튜디오 무료체험 3회 · C135) — ★2026-11-15 **CREATE 실행 대기**(배포 원장 C135-DDL-1 · 배포 앞)
+
+설계 = `docs/2026-11-15-v3-popup-trial-design.md` §5. SQL 원문 = `status/DEPLOY-LEDGER.md`(여기는 뜻만). 외래 키 없음.
+
+**image_studio_trials** (회사마다 한 행 · 요금제 미가입 회사가 「무료체험 3회 이용하고 싶습니다」를 눌렀을 때 생긴다): `company_id uuid PRIMARY KEY, requested_by uuid NULL(누른 사용자), requested_at timestamptz NOT NULL DEFAULT now(), granted integer NOT NULL DEFAULT 3, used_keys text[] NOT NULL DEFAULT '{}'`
+> `used_keys` = 만든 포스터의 시도 키 · **칸 수 = 쓴 횟수**(크레딧 원장과 무관 · 미가입 회사는 크레딧제가 적용되지 않을 수 있어 크레딧으로는 3회를 못 지킨다). 쓰는 곳 = `utils/studio-trial.ts` 하나: 신청 `TRIAL_REQUEST_SQL`(이미 있으면 그대로 = 3회가 다시 차지 않는다) · 생성 전 선점 `TRIAL_RESERVE_SQL`(한 문장 · 같은 키 두 번 · `granted` 초과는 0행) · 생성 실패 되돌림 `TRIAL_RELEASE_SQL`. 읽는 곳 = 생성 문(`routes/image-studio.ts /generate` 의 체험 길) · 로그인 직후 소개 창 갈래(`utils/v3-intro.ts`) · 슈퍼관리자 「무료체험 신청 업체」(`loadStudioTrials`). 기한 칸 없음(기한 없는 체험).
+
+> **user_intro_acks 에 더해진 뜻(C135 · DDL 0)**: `intro_key = 'studio-trial'` = 무료체험 안내 창의 판(노출 수 · 「다시 보지 않기」가 V3 소개 창과 따로) · `intro_key = '_login'` = **로그인 표식 문**(판이 아니다 · 그 계정의 최근 로그인 표식 10개 · 한 로그인에 자동 안내 창은 판을 통틀어 하나 · `dismissed_at` 을 쓰지 않는다). 선점 문장 `INTRO_CLAIM_SQL` 하나가 문과 판의 노출을 함께 잡는다.

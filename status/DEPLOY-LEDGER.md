@@ -7,8 +7,8 @@
 
 ## 머리
 
-- pulled_head: 5b7c709d · 2026-11-13 · Harold 서버 출력(git pull f3623b12..5b7c709d · Fast-forward · 42 파일 2103+ 101- · C131 c5b199d7 · C132 5b7c709d) · 그 전 f3623b12 · 2026-11-13 오전 · C130(Harold 「배포 완료했고」 · 서버 출력 이 원장에 없음) · 그 전 ddbea40c · 2026-11-12 · Harold 서버 출력(git rev-parse HEAD = ddbea40c3fd1) · 그 전 1a3fbdbf · 2026-11-11 · Harold 서버 출력(git log -1) · 그 전 d8b5367d · 그 전 0c955aab · 2026-11-11 · Harold 서버 출력(git pull ede69d59..0c955aab · C125 14 파일 836+ 30-) · 그 전 ede69d59 · 2026-11-11 · Harold 서버 출력(C124-P1 리허설 출력의 HEAD ede69d59 · 스크립트 · 문서 · 빌드 · 재시작 없음) · 그 사이 5ed096e5(C123) pull = 1110 밤(서버 출력이 이 원장에 없음) · 그 전 23ede51c · 2026-11-10 · Harold 서버 출력(git log -1 = 23ede51c 2026-11-10 19:03:02 +0900 · C122 2차 28 파일) · 그 전 3f5f21ce · 2026-11-10 · Harold 서버 출력(git pull d7a97ce5..3f5f21ce · ecosystem.config.js · C121 원장 문서 셋) · 그 전 d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
-- deployed_head: 5b7c709d · 2026-11-13 09:12 · C131(백엔드) · C132(백엔드 · 프론트) · 이 판에 C130 f3623b12 포함 · 백엔드 build:safe(「[verify-dist] 통과 — .js 871개 문법 · 두 판 3484개 파일 일치」) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 빌드 성공) · 적재 0건 한 줄(loading=0) → pm2 restart targetup-backend --update-env(원장 restart-env) · pm2 describe = online · uptime 2m · restarts 50 · unstable restarts 0 · 에러 로그 재시작 뒤 = 09:12:29 합성 데이터 안내 한 줄뿐(08:32 「Query execution was interrupted」 두 줄 = 재시작 전 옛 프로세스 · C131-DDL-1 실행 구간 안 · 원인 미검증) · dist grep 10줄 기대값 전부 일치(아래 C130-H1 · C131-H1 · C132-H1) · 에러 로그 [queue-scan-guard] 0줄 · 그 전 f3623b12 · 2026-11-13 오전 · C130(Harold 직접 · 서버 출력 이 원장에 없음 · 확인은 이 판에서) · 그 전 ddbea40c · 2026-11-12 00:08:47 · C129(백엔드 · 프론트는 다시 빌드만 · DDL C129-DDL-1 은 재시작 뒤 실행) · 그 전 1a3fbdbf · 2026-11-11 17:55:29 · C126 · C128(백엔드) · 그 전 d8b5367d · 2026-11-11 16:42:27 · C127(프론트 16:42 · 백엔드 재빌드 16:40) · 그 전 0c955aab · 2026-11-11 13:55:40 · C125(대행발송 늦은 보고 대기 해제 · 이 판에 C123 5ed096e5 · C124 ede69d59 코드 포함) · 백엔드 build:safe 13:19:18(「두 번째 빌드(대조용)」 → 「[verify-dist] 통과 — .js 868개 문법 · 두 판 3472개 파일 일치」 → swap · app.js 61011 bytes) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 성공) · 적재 0건 한 줄(loading=0) → pm2 reload · pm2.log 13:55:40 exited(code 0 · SIGINT) → starting → online · status online · uptime 2m · restarts 45 · script path dist/app.js · unstable restarts 0 · dist grep recoverAgencySpamErrors = utils/agency-send-worker.js 2 · routes/spam-filter.js 1 · 에러 로그 13:20 ~ 13:59 = 13:56:42 합성 데이터 안내 한 줄뿐(끼움 13:19 → 재시작 13:55 사이 36분 포함) · 메모리 = 재시작 2분 307.6MB · pm2.log(0422 부터 전부) 「exceeds」 41줄 중 마지막 = 1110 18:03:49(dist 전환 뒤 0건 · 단 끊기지 않고 돈 구간은 길어야 4시간 안팎 = 하룻밤 뒤 메모리 미검증) · 그 전 = 1111 08:38:07 다시 빌드한 판(1110 22:46 깨진 판 복구 · C124 경위 · HEAD 5ed096e5) · 그 전 23ede51c · 2026-11-10 19:12:58 · C122 2차(묶음 트랜잭션 · 직접입력 9,999 · 여정 %변수%) · 백엔드 build:safe(dist/utils/queue-load-tx.js 19:11:40 · app.js 19:11:44) · 프론트 build:safe(index.html 19:12:57) · pm2 재시작 19:12:58(pm2.log Stopping → online · 「exceeds」 줄 0) · 재시작 뒤 에러 로그 0줄 · 그 전 3f5f21ce · 2026-11-10 18:37 · 메모리 처방 = 운영 백엔드 dist 실행(ecosystem script dist/app.js) · 백엔드 build:safe 18:37:02(dist/app.js 61,011 바이트) · 적재 0건 확인 한 줄 → pm2 delete targetup-backend · pm2 start ../../ecosystem.config.js --only targetup-backend · pm2 save(새 id 5) · 확인 = script path …/backend/dist/app.js · restarts 0 · 기동 18:37:54 배너 · RSS 기동 1분 291,788KB(전 42분 1,728,732KB) · kill_timeout 들어옴 · 환경 변수 이름 대조 = 빠진 것 GEMINI_API_KEY · GEMINI_IMAGE_MODEL 은 .env 2줄 있음(dotenv) · 나머지 = pm2 내부 칸 · 기동 뒤 오류 0 · 그 전 d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
+- pulled_head: a7426275 · 2026-11-14 · Harold 서버 출력(git pull 로 a7426275 받음 · root 셸에서 받아 소유가 root 가 됨 → `chown -R administrator` 로 되돌림 · root_owned_left=0 · 장비 전환 뒤 새 장비 `git rev-parse --short HEAD` = a7426275) · 그 전 38c3671f · 2026-11-14 · Harold 서버 출력(git pull 5b7c709d..38c3671f · Fast-forward · 52 파일 5060+ 373- · C133 배포 A + B 38c3671f · 원장 문서 b8bda11a · 장비 = 전환 전 .62 = Xeon 6325P · tailnet 100.88.72.107) · 그 전 5b7c709d · 2026-11-13 · Harold 서버 출력(git pull f3623b12..5b7c709d · Fast-forward · 42 파일 2103+ 101- · C131 c5b199d7 · C132 5b7c709d) · 그 전 f3623b12 · 2026-11-13 오전 · C130(Harold 「배포 완료했고」 · 서버 출력 이 원장에 없음) · 그 전 ddbea40c · 2026-11-12 · Harold 서버 출력(git rev-parse HEAD = ddbea40c3fd1) · 그 전 1a3fbdbf · 2026-11-11 · Harold 서버 출력(git log -1) · 그 전 d8b5367d · 그 전 0c955aab · 2026-11-11 · Harold 서버 출력(git pull ede69d59..0c955aab · C125 14 파일 836+ 30-) · 그 전 ede69d59 · 2026-11-11 · Harold 서버 출력(C124-P1 리허설 출력의 HEAD ede69d59 · 스크립트 · 문서 · 빌드 · 재시작 없음) · 그 사이 5ed096e5(C123) pull = 1110 밤(서버 출력이 이 원장에 없음) · 그 전 23ede51c · 2026-11-10 · Harold 서버 출력(git log -1 = 23ede51c 2026-11-10 19:03:02 +0900 · C122 2차 28 파일) · 그 전 3f5f21ce · 2026-11-10 · Harold 서버 출력(git pull d7a97ce5..3f5f21ce · ecosystem.config.js · C121 원장 문서 셋) · 그 전 d7a97ce5 · 2026-11-10 · Harold 서버 출력(git log -1 = d7a97ce5 2026-11-10 13:00:22 +0900 · 1110 C121 인비토 합성 데이터 v3 1층) · 그 전 da47c9f7(원장 문서만) · 그 전 b44a9cf8(1110 C120 · 서버 출력 b44a9cf8 2026-11-10 07:12:24 +0900)
+- deployed_head: a7426275 · 2026-11-14 20:41 · 로그인 화면 서버 점검 안내 창(프론트 build:safe 만 · 백엔드 빌드 · 재시작 0 = 백엔드 dist 는 38c3671f 판 그대로 · https://hanjul.ai/login 에서 안내 창 확인 · 11-15 01:00 뒤 저절로 사라짐) · **★1114 21:50 ~ 22:15 장비 전환 = 이 판이 새 장비(58.227.193.62 = i7-10700 · 옛 .57 장비)에서 돈다**(마지막 복사가 앱 폴더 · 볼륨을 통째로 옮김 · 해시 대조 · 전환 뒤 HEAD a7426275 · C133 표 셋 · `last_state_cursor_on` 있음 · pm2 resurrect 22:11:47 online 5 · 재시작 횟수는 새 pm2 데몬이라 0 부터 · 백엔드 에러 로그 새 종류 0 · 옛 장비 = 58.227.193.57 보관 · 기록 = 미러 런북 §11 1114 줄) · 그 전 38c3671f · 2026-11-14 19:30 · C133 배포 A + B(백엔드 · 프론트 · 단계 ENV 전부 비운 채) · 백엔드 build:safe 19:26:31(「[verify-dist] 통과 — .js 876개 문법 · 두 판 3504개 파일 일치」 · app.js 62299 bytes) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 빌드 성공) · 적재 0건 한 줄(loading=0) → pm2 restart targetup-backend --update-env(원장 restart-env) · pm2 describe = online · uptime 94s · restarts 51 · unstable restarts 0 · script path dist/app.js · dist grep 「function 이름(」 = claimIntro · runProductSignalPass · snapshotBenchmarks · parseActivationCaps · v3FeaturesFor 각 1 · 기동 로그 19:30:01 「[product-signal] 워커 시작」 · 「[benchmark] 워커 시작」 각 한 줄 · 에러 로그 재시작 뒤 = 19:31:02 「[JourneyExecutor] 적재 중 표식 정리 실패 campaign=998900e1…」(재시작 전 17:36 부터 5분마다 같은 줄 = 새 종류 아님 · B-1114-1 · C129-S1) + 합성 데이터 안내 한 줄 · 장비 = 전환 전 .62(설계서 §14 전제 「서버 전환 끝」은 Harold 1114 「배포 시작하자」로 .62 에 진행 · 미러 실행 원장 §8-1 R4 = 마지막 복사가 앱 폴더 · PG 볼륨을 통째로 옮김 → 전환 밤 대조 = HEAD 38c3671f + 새 표 셋 user_intro_acks · product_signal_daily · benchmark_company_daily) · 커밋 자족 = 로컬 사본(미커밋 45파일 되돌림 = HEAD 해시 45 일치 · 미추적 31 삭제)에서 tsc 0 · 0 · 파일 하나 빼는 변이 빨간불 · 그 전 5b7c709d · 2026-11-13 09:12 · C131(백엔드) · C132(백엔드 · 프론트) · 이 판에 C130 f3623b12 포함 · 백엔드 build:safe(「[verify-dist] 통과 — .js 871개 문법 · 두 판 3484개 파일 일치」) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 빌드 성공) · 적재 0건 한 줄(loading=0) → pm2 restart targetup-backend --update-env(원장 restart-env) · pm2 describe = online · uptime 2m · restarts 50 · unstable restarts 0 · 에러 로그 재시작 뒤 = 09:12:29 합성 데이터 안내 한 줄뿐(08:32 「Query execution was interrupted」 두 줄 = 재시작 전 옛 프로세스 · C131-DDL-1 실행 구간 안 · 원인 미검증) · dist grep 10줄 기대값 전부 일치(아래 C130-H1 · C131-H1 · C132-H1) · 에러 로그 [queue-scan-guard] 0줄 · 그 전 f3623b12 · 2026-11-13 오전 · C130(Harold 직접 · 서버 출력 이 원장에 없음 · 확인은 이 판에서) · 그 전 ddbea40c · 2026-11-12 00:08:47 · C129(백엔드 · 프론트는 다시 빌드만 · DDL C129-DDL-1 은 재시작 뒤 실행) · 그 전 1a3fbdbf · 2026-11-11 17:55:29 · C126 · C128(백엔드) · 그 전 d8b5367d · 2026-11-11 16:42:27 · C127(프론트 16:42 · 백엔드 재빌드 16:40) · 그 전 0c955aab · 2026-11-11 13:55:40 · C125(대행발송 늦은 보고 대기 해제 · 이 판에 C123 5ed096e5 · C124 ede69d59 코드 포함) · 백엔드 build:safe 13:19:18(「두 번째 빌드(대조용)」 → 「[verify-dist] 통과 — .js 868개 문법 · 두 판 3472개 파일 일치」 → swap · app.js 61011 bytes) · 프론트 build:safe(lazy 청크 55건 실존 · 비literal 동적 import 0 · 성공) · 적재 0건 한 줄(loading=0) → pm2 reload · pm2.log 13:55:40 exited(code 0 · SIGINT) → starting → online · status online · uptime 2m · restarts 45 · script path dist/app.js · unstable restarts 0 · dist grep recoverAgencySpamErrors = utils/agency-send-worker.js 2 · routes/spam-filter.js 1 · 에러 로그 13:20 ~ 13:59 = 13:56:42 합성 데이터 안내 한 줄뿐(끼움 13:19 → 재시작 13:55 사이 36분 포함) · 메모리 = 재시작 2분 307.6MB · pm2.log(0422 부터 전부) 「exceeds」 41줄 중 마지막 = 1110 18:03:49(dist 전환 뒤 0건 · 단 끊기지 않고 돈 구간은 길어야 4시간 안팎 = 하룻밤 뒤 메모리 미검증) · 그 전 = 1111 08:38:07 다시 빌드한 판(1110 22:46 깨진 판 복구 · C124 경위 · HEAD 5ed096e5) · 그 전 23ede51c · 2026-11-10 19:12:58 · C122 2차(묶음 트랜잭션 · 직접입력 9,999 · 여정 %변수%) · 백엔드 build:safe(dist/utils/queue-load-tx.js 19:11:40 · app.js 19:11:44) · 프론트 build:safe(index.html 19:12:57) · pm2 재시작 19:12:58(pm2.log Stopping → online · 「exceeds」 줄 0) · 재시작 뒤 에러 로그 0줄 · 그 전 3f5f21ce · 2026-11-10 18:37 · 메모리 처방 = 운영 백엔드 dist 실행(ecosystem script dist/app.js) · 백엔드 build:safe 18:37:02(dist/app.js 61,011 바이트) · 적재 0건 확인 한 줄 → pm2 delete targetup-backend · pm2 start ../../ecosystem.config.js --only targetup-backend · pm2 save(새 id 5) · 확인 = script path …/backend/dist/app.js · restarts 0 · 기동 18:37:54 배너 · RSS 기동 1분 291,788KB(전 42분 1,728,732KB) · kill_timeout 들어옴 · 환경 변수 이름 대조 = 빠진 것 GEMINI_API_KEY · GEMINI_IMAGE_MODEL 은 .env 2줄 있음(dotenv) · 나머지 = pm2 내부 칸 · 기동 뒤 오류 0 · 그 전 d7a97ce5 · 2026-11-10 · 백엔드 build:safe · pm2 reload(Harold · 원장 요구는 restart-env 였으나 reload 로 실행 · C121 새 ENV 는 아직 안 넣음 · 다른 카드 ENV 항목은 그대로 대기) · 서버 확인 = src grep pushRealismOnline 2 · online · unstable 0 · 13:09:26 워커 시작 「키 2개 · 자사몰 키 0개」 · 재기동 뒤 에러 로그 0줄(마지막 줄 11:42) · DDL 0 · ENV 0 · 그 전 b44a9cf8 = 1110 프론트 build:safe(dist 07:18:29 · Harold 화면 확인 넷 정상) · 그날 아침 reload 도 실행됨(pm2 로그 07:18:47 워커 시작 · 옛 줄 「reload 실행 여부 미확인」 정정) · 그 전 1e2505c1
 - 이번 창 확인 출력: (없음)
 - 마지막 해시 대조: 2026-10-28 08:27 · 같음(운영 6c12ee8b = t_tpl_closed 6c12ee8b · 덤프 + §2 DDL-1 · DDL-3 · 그 전 07:43 덤프만 043ff07c 같음 · test:pg 1파일 15건 통과)
 - 덤프: 2026-10-27 21:55 서버 파일 · server_version 15.15 · datcollate en_US.utf8 · TimeZone Etc/UTC · 머리 SELECT 2026-10-28 07:42
@@ -77,7 +77,9 @@
 | C130 | f3623b12 |
 | C131 | c5b199d7 |
 | C132 | 5b7c709d |
-| C133 | 미커밋 |
+| C133 | 38c3671f |
+| C134 | 미커밋 |
+| C135 | 미커밋 |
 
 ## §1 대기
 
@@ -1764,7 +1766,7 @@ COMMIT;
 - 선행: C126-H1(하루 뒤 = 진입 감시 · 자동 재진입이 돈 뒤)
 - 기대: 서버 셸 한 줄 = 설계서 §8 의 S1 SELECT(배포 시각을 넣는다)
 - 확인: 상태형 뽑기로 들어오는 시작(휴면 · 생일 · 포인트 · 주기 이탈 · 등급 · 장바구니 · 조회)과 「고른 고객에게」 행 = 0 · 사건 커서로 들어오는 시작은 판정 대상 아님
-- 결과: (대기)
+- 결과: 1114 Harold 서버 출력(C133-H1 재시작 전 · 배포 시각 2026-11-11 17:55:29+09 넣음) = cdp.purchase 28 한 줄뿐(구매 사건 커서 시작 = `journey-cdp-cursor.ts resolveCdpCursorEventName` · 판정 대상 아님) · 상태형 뽑기 시작 · custom 행 0 = 기대대로
 
 ### C126-T1 · 직원 시트(여정 AI 고치기 넷의 변수 표기)
 - 카드: C126
@@ -1829,7 +1831,7 @@ ALTER TABLE journeys
 - 선행: C129-H1(하루 뒤)
 - 기대: 설계서 §8 P1 ① ② 를 다시 실행 + 켜진 날짜형 시작 여정의 last_state_cursor_on(SELECT id, trigger_event, last_state_cursor_on FROM journeys WHERE status = 'active' AND trigger_event IN ('customer.birthday_approaching', 'customer.points_expiring'))
 - 확인: ① 0 유지 · ② 켜진 여정의 멈춘 실행 0 유지 · 여정 쪽 오류 로그 0 · 날짜형 여정의 기록 = KST 오늘 또는 어제(회차가 열려 있는 동안은 어제) · 선불 여정 알림톡 차감 행이 생겼으면 설명에 「결과별 정산」 꼬리
-- 결과: (대기)
+- 결과: (닫히지 않음) 1114 Harold 서버 출력(C133-H1 재시작 전) = ① 0행 · ② 0행 유지 · 켜진 날짜형 시작 여정 0행(last_state_cursor_on 판정 표본 없음 = 미검증) · 여정 쪽 오류 로그 0 아님 = 「[JourneyExecutor] 적재 중 표식 정리 실패 campaign=998900e1-00af-4f17-bc58-003ff4bf07c6: 완료된 캠페인의 target_count는 변경할 수 없습니다 (old=9, new=10)」 5분마다(1114 치 에러 로그 journey 줄 107 · 1112 · 1113 치 파일 0 · 1111 치 13) → B-1114-1(원인 · 영향 미진단) · 선불 여정 알림톡 차감 행 = 이번에 재지 않음
 
 ### C129-T1 · 직원 시트(붙이기 · 떼기 대기 일수 · AI 수정의 알림톡 칸)
 - 카드: C129
@@ -1987,7 +1989,7 @@ ALTER TABLE agency_send_requests
 - 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'user_intro_acks' ORDER BY ordinal_position;
 - 확인: 다섯 줄 · user_id uuid NO · intro_key character varying NO · login_marks ARRAY NO · dismissed_at timestamp with time zone YES · updated_at timestamp with time zone NO
-- 결과: (대기 · 62 → 57 전환 뒤)
+- 결과: 1114 Harold 서버 출력(push 전 · 전환 전 .62) = CREATE TABLE · 확인 다섯 줄이 기대값과 같음
 
 > C133-DDL-1 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
 
@@ -2010,7 +2012,7 @@ CREATE TABLE IF NOT EXISTS user_intro_acks (
 - 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'product_signal_daily' ORDER BY ordinal_position;
 - 확인: 아홉 줄 · company_id uuid NO · door character varying NO · product_key character varying NO · day date NO · product_name character varying YES · views integer NO · carts integer NO · orders integer NO · updated_at timestamp with time zone NO
-- 결과: (대기 · 62 → 57 전환 뒤)
+- 결과: 1114 Harold 서버 출력(push 전 · 전환 전 .62) = CREATE TABLE · CREATE INDEX · 확인 아홉 줄이 기대값과 같음
 
 > C133-DDL-2 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
 
@@ -2038,7 +2040,7 @@ CREATE INDEX IF NOT EXISTS idx_product_signal_company_day ON product_signal_dail
 - 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'benchmark_company_daily' ORDER BY ordinal_position;
 - 확인: 다섯 줄 · day date NO · company_id uuid NO · industry_code character varying NO · metric character varying NO · value double precision NO
-- 결과: (대기 · 62 → 57 전환 뒤)
+- 결과: 1114 Harold 서버 출력(push 전 · 전환 전 .62) = CREATE TABLE · CREATE INDEX · 확인 다섯 줄이 기대값과 같음
 
 > C133-DDL-4 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
 
@@ -2055,13 +2057,195 @@ CREATE TABLE IF NOT EXISTS benchmark_company_daily (
 CREATE INDEX IF NOT EXISTS idx_benchmark_day_industry_metric ON benchmark_company_daily (day, industry_code, metric);
 ```
 
+### C134-DDL-1 · 여정 자동 판정 기록 표(설계서 docs/2026-11-14-journey-step-campaign-owner-design.md §5 S1) · 배포 앞뒤 무관
+- 카드: C134
+- 단계: DDL
+- 선행: 없음(새 표 · 표가 없으면 판정은 하되 기록을 안 남기고 로그에 「기록 표 없음(C134-DDL-1)」 · 발송 · 화면 길과 무관)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journey_selfcheck_daily' ORDER BY ordinal_position;
+- 확인: 열한 줄 · company_id uuid NO · day date NO · failed_executions · errored_executions · stuck_claims · fault_logs · unclosed_campaigns · count_mismatch · violations integer NO · first_judged_at · last_judged_at timestamp with time zone NO
+- 결과: (대기)
+
+> C134-DDL-1 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C134-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS journey_selfcheck_daily (
+  company_id uuid NOT NULL,
+  day date NOT NULL,
+  failed_executions integer NOT NULL DEFAULT 0,
+  errored_executions integer NOT NULL DEFAULT 0,
+  stuck_claims integer NOT NULL DEFAULT 0,
+  fault_logs integer NOT NULL DEFAULT 0,
+  unclosed_campaigns integer NOT NULL DEFAULT 0,
+  count_mismatch integer NOT NULL DEFAULT 0,
+  violations integer NOT NULL DEFAULT 0,
+  first_judged_at timestamptz NOT NULL DEFAULT NOW(),
+  last_judged_at timestamptz NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, day)
+);
+```
+
+### C134-DDL-2 · 여정 세트 원장 표(설계서 docs/2026-11-14-journey-step-campaign-owner-design.md §12-2 S3) · 배포 앞뒤 무관
+- 카드: C134
+- 단계: DDL
+- 선행: 없음(새 표 · 표가 없으면 여정 세트 워커만 쉬고 로그에 「원장 표 없음(C134-DDL-2)」 · 스위치 ENV 가 비어 있으면 이 표를 읽지도 않는다 · 발송 · 화면 길과 무관)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journey_selfcheck_set' ORDER BY ordinal_position;
+- 확인: 아홉 줄 · company_id uuid NO · set_key text NO · journey_id uuid YES · def_rev integer NO · validations integer NO · next_validate_at timestamp with time zone YES · last_reason text YES · created_at · updated_at timestamp with time zone NO
+- 결과: (대기)
+
+> C134-DDL-2 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C134-DDL-2
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS journey_selfcheck_set (
+  company_id uuid NOT NULL,
+  set_key text NOT NULL,
+  journey_id uuid,
+  def_rev integer NOT NULL,
+  validations integer NOT NULL DEFAULT 0,
+  next_validate_at timestamptz,
+  last_reason text,
+  created_at timestamptz NOT NULL DEFAULT NOW(),
+  updated_at timestamptz NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (company_id, set_key)
+);
+```
+
+### C134-H1 · 한줄로 배포(B-1114-1 여정 단계 캠페인은 여정만 닫는다 + S3 여정 세트 워커 · 백엔드 + 프론트 한 줄 · DDL 2 = C134-DDL-1 · C134-DDL-2 · ENV 0 = 여정 세트 스위치는 비운 채)
+- 카드: C134
+- 단계: 한줄로 배포
+- 선행: Codex 설계 1R 반영 · 구현 3R approve(1115) · S3(여정 세트 · 설계서 §12) 설계 Codex 4R approve · 구현 Codex 4R approve(1115) · 실 PG 전체 82파일 756 통과 = 통과 스탬프 찍힘(1115 09:16 · 낮 · 1114 23:36 · 1115 00:03 밤 실행에서 실패하던 다른 세션 시험 3건도 통과) · 단위 전체 820파일 13,193 중 13,192 통과(남은 1 = 아래 커밋 조건) · **C133 C + D 커밋 뒤 routes/ai.ts 의 통과 표식 세 줄을 CT(pretestAndMark) 호출로 바꾼다**(그때까지 계약 시험 journey-selfcheck-set-1115.test.ts 한 건이 빨간불 = 커밋 조건) · 커밋(Harold · 경로 · 문안 = 설계서 §11 · root-ledger.test.ts · journey-builder.ts 가 C133 C + D 와 한 파일 = 그 커밋 뒤) → push · C134-DDL-1 · C134-DDL-2
+- 기대: 설계서 docs/2026-11-14-journey-step-campaign-owner-design.md §3 · 여정을 안 쓰는 회사 = 변화 0 · 여정 단계 캠페인은 그날 「보내는 중」으로 보이고 다음 날 여정이 닫는다 · 운영의 998900e1(완료 + 미확정 표식)은 표식 정리 주기가 다시 열어 확정한 뒤 닫는다 · 여정 세트 워커는 스위치 ENV 가 비어 있어 아무것도 안 한다(원장 표도 읽지 않는다)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep closeFinishedStepCampaigns ≥ 1 · applyListAutoComplete ≥ 1 · reopenStepCampaignForConfirm ≥ 1 · runJourneySelfcheck ≥ 1 · journeySetTick ≥ 1 · pretestAndMark ≥ 1 · 재시작 뒤 에러 로그에서 「적재 중 표식 정리 실패 campaign=998900e1」 이 멎음 · 로그에 「[journey-set]」 0줄(스위치 꺼짐) · SELECT status, result_final, target_count, sent_count FROM campaigns WHERE id = '998900e1-00af-4f17-bc58-003ff4bf07c6'; = 대상 수 · 발송 수 10 · 그 캠페인의 journey_step_logs 에 sending 0
+- 결과: (대기)
+
+### C134-S1 · 실측(배포 다음 날 아침)
+- 카드: C134
+- 단계: 사후
+- 선행: C134-H1(다음 날 00:40 KST 뒤)
+- 기대: 로그 「[journey-selfcheck] YYYY-MM-DD company=c7c97996 위반 0(…) · 연속 0 일수 n/7 · 7일 동안 안 나간 (시작 종류/채널) …」 · 「여정 단계 캠페인 N건 닫음」(campaign-sync-worker · 00:10 뒤 첫 주기)
+- 확인: 위 두 줄 · 위반이 0 이 아니면 그 줄 그대로 · SELECT day, violations FROM journey_selfcheck_daily ORDER BY day DESC LIMIT 7;
+- 결과: (대기)
+
+### C134-ENV-1 · 합성 회사에 여정 세트 켜기(JOURNEY_SELFCHECK_SET_COMPANY_IDS = 인비토 회사 id 하나 · 설계서 §12)
+- 카드: C134
+- 단계: ENV
+- 선행: C134-H1 · C134-DDL-2 · C134-S1(첫 판정 줄을 본 뒤)
+- 의미 바꿈: 예(그 회사에만 워커가 시작 종류 11개의 여정을 만들고 · 발송 전 검증(스팸 검사 14건 · 회사 단가표 차감)을 거쳐 · 켠다(처음 켜기 크레딧 200 × 11 = 2,200 · 크레딧제 적용 회사일 때) · 켜진 여정은 합성 고객(도달 불가 번호)에게 문자를 낸다 = 통신사에서 전부 실패로 끝난다 · 손으로 켠 같은 시작 종류 여정이 있으면 같은 합성 고객이 두 통을 받는다 · 비우면 워커가 멈춘다(이미 켜진 세트 여정은 켜진 채 남는다 = 화면에서 멈추거나 끝낸다))
+- 기대: ENV 에 인비토 회사 id(쉼표 없이 하나) · 비밀값 아님 · 합성 회사 허용 목록(SYNTHETIC_DATA_COMPANY_IDS)에 없는 id 는 무시된다 · 낮 09 ~ 18시에만 · 10분마다 여정 하나 = 처음 켜는 날 약 2시간
+- 확인: restart --update-env 뒤 낮 시간 로그 「[journey-set] YYYY-MM-DD company=c7c97996 세트 11 · 켜짐 n · …」(하루 한 줄) · 「[journey-set] company=c7c97996 signup 켰다 …」 줄이 10분마다 · 못 켠 행은 사유 원문(크레딧 부족 · 보내는 번호 · 시작 종류 잠김 · 스팸 검사)이 같은 줄에 · SELECT set_key, journey_id IS NOT NULL AS made, def_rev, validations, next_validate_at, last_reason FROM journey_selfcheck_set ORDER BY set_key;
+- 결과: (대기)
+
+### C134-S2 · 실측(여정 세트 · ENV 다음 날 아침)
+- 카드: C134
+- 단계: 사후
+- 선행: C134-ENV-1(다음 날 00:40 KST 뒤)
+- 기대: 「[journey-set] … 세트 11 · 켜짐 11」 · 「[journey-selfcheck] … 위반 0 · 7일 동안 안 나간 (시작 종류/채널)」 줄이 줄어든다 · 세트 여정의 칸 알림은 꺼져 있어 담당자 휴대폰으로 결과 안내가 가지 않는다
+- 확인: 위 두 줄 · SELECT j.name, j.status, j.pause_reason, COUNT(e.id) AS entered FROM journeys j LEFT JOIN journey_executions e ON e.journey_id = j.id WHERE j.id IN (SELECT journey_id FROM journey_selfcheck_set) GROUP BY 1, 2, 3 ORDER BY 1; = 켜짐 · 진입 수 · 멈춘 것이 있으면 사유 그대로(워커는 다시 켜지 않는다) · 하루 발송 수(설계서 §12-6 어림 200 ~ 400 = 미검증 → 이 값으로 대체)
+- 결과: (대기)
+
+### C135-DDL-1 · 이미지 스튜디오 무료체험 표(설계서 docs/2026-11-15-v3-popup-trial-design.md §5-4) · ★ 배포 앞
+- 카드: C135
+- 단계: DDL
+- 선행: 없음(배포 앞 · 새 표 · 표가 없으면 체험 판정은 「없음」 = 미가입 회사는 종전 403 그대로 · 신청 · 상태 주소만 503 DB_MIGRATION_PENDING · 로그인 직후 창은 종전 소개 창)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'image_studio_trials' ORDER BY ordinal_position;
+- 확인: 다섯 줄 · company_id uuid NO · requested_by uuid YES · requested_at timestamp with time zone NO · granted integer NO · used_keys ARRAY NO
+- 결과: (대기)
+
+> C135-DDL-1 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C135-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS image_studio_trials (
+  company_id uuid PRIMARY KEY,
+  requested_by uuid NULL,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  granted integer NOT NULL DEFAULT 3,
+  used_keys text[] NOT NULL DEFAULT '{}'
+);
+```
+
+### C135-H1 · 한줄로 배포(V3 로그인 팝업 + V3 페이지 + 이미지 스튜디오 무료체험 3회 + 팝업 기록 · 백엔드 + 프론트 · DDL 1 = C135-DDL-1 배포 앞 · ENV 0 = V3_LOGIN_INTRO 비운 채)
+- 카드: C135
+- 단계: 한줄로 배포
+- 선행: 설계 Codex 3R · 목업 Codex 3R · 구현 Codex 3R approve(1115) · 커밋(Harold · 경로를 정해 = scratch/c135/commit-paths.txt · 문안 = scratch/c135/commit-msg.txt · 이 카드의 코드 파일 변경은 전부 C135 줄이고 다른 세션 미커밋 파일에 기대지 않는다 = 1115 git status -vv · import 대조로 확인 → 이 카드만 먼저 올릴 수 있다 · tp-push 는 쓰지 않는다) → C135-DDL-1 확인 출력 → push
+- 기대: 설계서 docs/2026-11-15-v3-popup-trial-design.md §10 · 로그인 화면 = 종전 인증 안내 창 그대로(스위치 꺼짐) · 요금제 미가입 + 아직 신청하지 않은 회사의 로그인 직후 창 = 무료체험 창(그 밖의 회사 = 종전 소개 창) · 무료체험을 신청하지 않은 미가입 회사의 이미지 스튜디오 = 종전 요금제 안내 그대로 · 유료 회사 · 30일 AI 체험 중인 회사 = 변화 0(체험 표를 읽지도 않는다) · 직접발송 · 과금 경로 무접촉
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep studioTrialGate ≥ 1 · reserveStudioTrial ≥ 1 · loadStudioTrials ≥ 1 · v3LoginIntroOn ≥ 1 · 프론트 dist 에 about-v3.html 과 v3/poster-serum.jpg 가 있다 · curl -s https://hanjul.ai/api/public/intro/v3-login = {"success":true,"on":false} · curl -sI https://hanjul.ai/about-v3.html 첫 줄 = 200(정적 파일이 그대로 나간다 = 미검증 → 이 값으로 확인) · 재시작 뒤 에러 로그에 studio-trial · image_studio_trials 0줄
+- 결과: (대기)
+
+### C135-S1 · 실측(미가입 시험 계정 · 무료체험 한 바퀴)
+- 카드: C135
+- 단계: 사후
+- 선행: C135-H1 · 미가입 시험 계정(noplan · 30일 AI 체험이 켜져 있지 않을 것 = 켜져 있으면 무료체험 창 대신 종전 소개 창이 뜬다)
+- 기대: 로그인 직후 무료체험 창(누끼 → 포스터 → MMS 장면) → 「무료체험 3회 이용하고 싶습니다」 → 「무료체험 3회가 열렸습니다 · 남은 횟수 3회」 → 이미지 스튜디오로 → 포스터 한 장 만들기 = 머리 줄 「무료체험 2회 남았어요」 → 세 장을 다 만든 뒤 넷째 = 「무료체험 3회를 모두 쓰셨어요」(만들지 않는다) → 만든 포스터 저장 → 직접발송의 MMS 이미지 첨부 「라이브러리에서 가져오기」로 붙는다 → 다시 로그인하면 무료체험 창이 아니라 종전 소개 창
+- 확인: SELECT company_id, requested_by, requested_at, granted, cardinality(used_keys) AS used FROM image_studio_trials ORDER BY requested_at DESC LIMIT 5; = 그 회사 한 줄 · used 3 · 슈퍼관리자 「기능 관심 업체」 탭의 「이미지 스튜디오 무료체험 신청 업체」 표에 그 회사 · 만든 포스터 3 / 3장 · 「기능별 관심」에 무료체험 안내 창 줄(뜬 회사 · 체험 신청) · 그 회사의 AI 크레딧 내역에 이미지 스튜디오 차감 줄 0 · 수정(AI 로 고치기)을 누르면 종전 요금제 안내
+- 결과: (대기)
+
+### C135-ENV-1 · 로그인 화면 V3 안내 창 켜기(V3_LOGIN_INTRO = on)
+- 카드: C135
+- 단계: ENV
+- 선행: C135-H1 · V3 단계 기능(상품 반응 · 기본 여정 한 번에 · 업종 평균)을 고객사에 연 뒤(C133-ENV-1 의 다음 단계 = 고객사로 넓힌 뒤 · 안 연 기능을 로그인 전에 소개하지 않는다)
+- 의미 바꿈: 예(모든 고객사 로그인 화면의 안내 창이 인증 안내 창 → 한줄로 V3 안내 창 다섯 장면 · 인증 안내는 다섯째 장면과 「인증 안내 전체 보기」로 남는다 · 슈퍼관리자 화면 · 점검 안내 창이 뜨는 동안은 그대로 · 비우면 종전 인증 안내 창으로 돌아간다)
+- 기대: ENV 값 on(그 밖의 값 · 빈 값 = 꺼짐) · 비밀값 아님
+- 확인: restart --update-env 뒤 curl -s https://hanjul.ai/api/public/intro/v3-login = {"success":true,"on":true} · 로그인 화면에 V3 안내 창 · 「V3 자세히 보기」 = /about-v3.html · 「오늘 하루 보지 않기」를 누르면 그날 다시 뜨지 않는다
+- 결과: (대기)
+
+### C133-DDL-6 · 나눠 보내기 표 둘(설계서 docs/2026-11-13-hanjul-v3-design.md §6 · §18 「배포 C-3」) · ★ 배포 앞
+- 카드: C133
+- 단계: DDL
+- 선행: 없음(배포 C 의 코드 앞 · 배포 A + B 와는 무관 = 먼저 실행해도 무해 · 새 표 · 표가 없으면 워커는 로그 한 줄 · 화면 길은 503 DB_MIGRATION_PENDING)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name, count(*) FROM information_schema.columns WHERE table_name IN ('campaign_split_tests', 'campaign_split_members') GROUP BY table_name ORDER BY table_name;
+- 확인: 두 줄 · campaign_split_members 4 · campaign_split_tests 19
+- 결과: (대기 · 배포 C 커밋 뒤 · 62 → 57 전환 뒤)
+
+> C133-DDL-6 · 배포 앞 · 새 표 둘 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C133-DDL-6
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS campaign_split_tests (
+  id uuid PRIMARY KEY,
+  company_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  status varchar(12) NOT NULL,
+  test_pct smallint NOT NULL,
+  wait_code varchar(8) NOT NULL,
+  start_at timestamptz NOT NULL,
+  decide_at timestamptz NOT NULL,
+  spec jsonb NOT NULL,
+  variants jsonb NOT NULL,
+  groups jsonb NOT NULL,
+  winner_index smallint NULL,
+  verdict varchar(20) NULL,
+  result jsonb NULL,
+  block_reason text NULL,
+  claim_token uuid NULL,
+  claimed_at timestamptz NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_split_due ON campaign_split_tests (status, decide_at);
+CREATE INDEX IF NOT EXISTS idx_campaign_split_company ON campaign_split_tests (company_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS campaign_split_members (
+  split_id uuid NOT NULL,
+  phone varchar(20) NOT NULL,
+  customer_id uuid NOT NULL,
+  grp smallint NOT NULL,
+  PRIMARY KEY (split_id, phone)
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_split_members_grp ON campaign_split_members (split_id, grp);
+```
+
 ### C133-H1 · 한줄로 배포(한줄로 V3 배포 A + B · 백엔드 + 프론트 · DDL 3 = C133-DDL-1 · -2 · -4 배포 앞 · 단계 ENV 전부 비운 채)
 - 카드: C133
 - 단계: 한줄로 배포
 - 선행: 62 → 57 전환 · Codex 설계 7R approve · 구현 배포 A 4R approve · 배포 B approve · 커밋(Harold · 다른 세션 파일 뺌) → push · C133-DDL-1 · C133-DDL-2 · C133-DDL-4
 - 기대: 설계서 docs/2026-11-13-hanjul-v3-design.md §2 ~ §5 · §18 · 단계 ENV 가 비어 있는 동안 바뀌는 것 = 로그인 소개 창의 내용(전 고객사 · 계정당 최대 3번)과 「켜기 전 점검」 창의 닫기(검증 중 닫기 = 취소 · 켜기 접수 뒤 닫기 = 숨김 · 최대 인원은 켜는 문장이 함께 씀)뿐 · 상품 구역 · 업종 평균 · 추천 칸 셋 · 혜택 칸 · 무료 추정은 닫힘 · 발송 · 과금 경로 변화 0
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · uptime · dist grep claimIntro ≥ 1 · runProductSignalPass ≥ 1 · snapshotBenchmarks ≥ 1 · parseActivationCaps ≥ 1 · v3FeaturesFor ≥ 1 · 기동 로그 「[product-signal] 워커 시작」 · 「[benchmark] 워커 시작」 각 한 줄 · 재시작 뒤 에러 로그에 새 종류 0
-- 결과: (대기)
+- 결과: 1114 19:30 Harold 서버 출력 = git pull 5b7c709d..38c3671f(52 파일) · 백엔드 build:safe 「[verify-dist] 통과 — .js 876개 문법 · 두 판 3504개 파일 일치」 · 프론트 build:safe 성공 · loading=0 → pm2 restart targetup-backend --update-env · online · uptime 94s · restarts 51 · unstable 0 · dist grep 다섯 이름 각 1 · 기동 로그 워커 시작 두 줄(19:30:01) · 재시작 뒤 에러 로그 새 종류 0(JourneyExecutor 표식 정리 실패 줄은 재시작 전부터 = B-1114-1) · 선행 「62 → 57 전환」 = 하지 않은 채 .62 에 배포(Harold 「배포 시작하자」 · 머리 deployed_head 줄) · 화면 확인(소개 창 · 켜기 전 점검 창 닫기) = 미검증(C133-T1)
 
 ### C133-ENV-1 · 사내 회사에 단계 열기(V3_STAGE_PRODUCT_INSIGHT · V3_STAGE_BENCHMARK · V3_STAGE_JOURNEY_PACK = 인비토 회사 id 하나)
 - 카드: C133
@@ -2070,7 +2254,7 @@ CREATE INDEX IF NOT EXISTS idx_benchmark_day_industry_metric ON benchmark_compan
 - 의미 바꿈: 예(그 회사에만 성과리포트 「상품 · 검색어 반응」 구역 · 성공률 카드의 업종 평균 줄 · 여정 추천 칸 셋 · 혜택 칸 · 켜기 창 무료 추정이 열린다 · 그 회사의 상품 신호를 밤마다 60일 다시 센다 · 업종 평균 스냅숏은 전 회사의 완료 캠페인 30일을 밤마다 한 번 읽는다(PG 만) · 비우면 전부 닫힘 = 되돌리기)
 - 기대: 세 ENV 에 인비토 회사 id(쉼표 없이 하나) · 비밀값 아님
 - 확인: restart --update-env 뒤 2분 안 로그 「[benchmark] 첫 채우기 — 스냅숏 N행」 · product_signal_daily 에 그 회사 행 > 0(기동 90초 뒤 첫 채우기) · 인비토 계정 화면에서 구역 · 줄이 보임 · 다른 회사 계정에는 안 보임
-- 결과: (대기)
+- 결과: (일부 · V3_STAGE_JOURNEY_PACK 은 열지 않음 = 설계서 §14 전제 C129-S1 이 B-1114-1 로 닫히지 않음) 1114 Harold 서버 출력 = 사전 확인 v3_lines=0 · 끝 줄바꿈 있음 → .env 에 V3_STAGE_PRODUCT_INSIGHT · V3_STAGE_BENCHMARK = c7c97996-19b3-4e4f-9c45-ce10deab257f 두 줄(백업 사본 없이 덧붙임 · 되돌리기 = 그 두 줄 삭제) · v3_lines=2 · loading=0 → pm2 restart targetup-backend --update-env 19:38:08 · online · uptime 3m · restarts 52 · unstable 0 · 19:40:08 「[benchmark] 첫 채우기 — 스냅숏 121행」(기동 120초 뒤 시작 · 같은 초에 끝) · product_signal_daily = 회사 한 줄(c7c97996) 1,622행 · 상품 62 · 2026-09-16 ~ 2026-11-14 · benchmark_company_daily = 2026-11-14 121행 · 회사 52 · 업종 10 · 에러 로그 [benchmark] · [product-signal] 0줄 · 화면 확인(인비토에 보임 · 다른 회사에 안 보임) = 대기
 
 ### C133-P1 · 실측(ENV 뒤 · 읽기 전용 SQL · 그날 하나씩 안내)
 - 카드: C133
@@ -2096,12 +2280,167 @@ CREATE INDEX IF NOT EXISTS idx_benchmark_day_industry_metric ON benchmark_compan
 - 확인: 위 로그 · 실패가 있으면 그 줄 그대로
 - 결과: (대기)
 
+### C133-P0 · 배포 C 앞 확인(읽기 전용 · 추천 자리 글자가 든 기존 본문 0)
+- 카드: C133
+- 단계: 사전
+- 선행: 없음(배포 C 의 코드 앞)
+- 기대: 여정 칸 본문 · 그 스냅숏 · 문안 후보에 「<추천상품」 글자가 든 행 0(배포 C 뒤에는 그 글자가 추천 자리로 읽힌다)
+- 확인: 세 수가 전부 0 · SELECT (SELECT count(*) FROM journey_steps WHERE message_template LIKE '%<추천상품%') AS steps, (SELECT count(*) FROM journey_step_snapshots WHERE message_body LIKE '%<추천상품%') AS snaps, (SELECT count(*) FROM journey_step_variants WHERE message_template LIKE '%<추천상품%') AS variants; · 0 이 아니면 그 행을 보고 멈춘다
+- 결과: (대기 · 배포 C 커밋 뒤)
+
+### C133-H2 · 한줄로 배포(한줄로 V3 배포 C = 추천 상품 자리 · 상품 묶음 앞세우기 · 받는 사람용 반응 숫자 · 나눠 보내기 · 백엔드 + 프론트 · DDL 1 = C133-DDL-6 배포 앞 · V3_STAGE_RECO · V3_STAGE_SPLIT 비운 채)
+- 카드: C133
+- 단계: 한줄로 배포
+- 선행: C133-H1(배포 A + B 가 먼저 = 발송 길을 바꾸는 배포는 한 번에 하나) · Codex 구현 C-1 4R · C-2 2R · C-3 3R approve(1114) · 커밋(Harold · 다른 세션 파일 뺌 · 경로 = 설계서 §18 「배포 C + D 커밋 경로」 = C 와 D 한 커밋) → push · C133-P0 · C133-DDL-6
+- 기대: 설계서 docs/2026-11-13-hanjul-v3-design.md §5-3 · §5-4 · §6 · §18 · 두 ENV 가 비어 있는 동안 바뀌는 것 = 0(추천 줄 · 상품 묶음의 「관심 상품을 앞에」 칸 · 나눠 보내기 패널과 현황 줄 = 그리지 않음 · 나눠 보내기 주소 = 403 · 워커 = 분당 빈 표 조회 한 번) · 상품 묶음의 「반응 숫자 표시」 칸은 배포 A 의 V3_STAGE_PRODUCT_INSIGHT 를 연 회사에만 보인다 · 발송 · 과금 경로 변화 0(직접발송 배관 파일 무수정)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · uptime · dist grep advanceSplit ≥ 1 · discardSplitStart ≥ 1 · pickRecoIndex ≥ 1 · markRecoFront ≥ 1 · shortenUrlsStrict ≥ 1 · 기동 로그 「[campaign-split-worker] 시작」 한 줄 · 재시작 뒤 에러 로그에 새 종류 0
+- 결과: (대기)
+
+### C133-ENV-2 · 사내 회사에 단계 열기(V3_STAGE_RECO · V3_STAGE_SPLIT = 인비토 회사 id 하나)
+- 카드: C133
+- 단계: ENV
+- 선행: C133-H2
+- 의미 바꿈: 예(그 회사에만 여정 문자의 「추천 상품」 줄 · 상품 묶음의 「관심 상품을 앞에」 칸 · AI 한줄로 결과 창의 「문안을 나눠 보내고 반응 좋은 쪽으로」 패널 · 대시보드 나눠 보내기 현황 줄이 열린다 · 비우면 전부 닫힘 = 되돌리기 · 진행 중인 나눠 보내기는 다음 단계에서 남은 묶음을 보내지 않고 끝난다)
+- 기대: 두 ENV 에 인비토 회사 id(쉼표 없이 하나) · 비밀값 아님
+- 확인: restart --update-env 뒤 인비토 계정 화면에서 네 자리가 보임 · 다른 회사 계정에는 안 보임
+- 결과: (대기)
+
+### C133-P2 · 실측(배포 C · ENV 뒤 · 인비토 회사 = 도달 불가 합성 번호 · 하나씩 안내)
+- 카드: C133
+- 단계: 배포 뒤
+- 선행: C133-ENV-2
+- 기대: ① 추천 칸 1개 여정의 실발송 1건 = 받는 글의 추천 자리가 후보 안의 이름 또는 대체 문장 · 차감 1건 ② 상품 묶음(관심 상품을 앞에 켬) 이메일 1통 = 그 고객이 최근에 본 상품이 맨 앞 · 모바일 DM 열람 1회도 같음 ③ 나눠 보내기 1회(문안 2 · 몫 30% · 1시간) = 시험 묶음 캠페인 둘(send_type operator · 문안별 인원 = 확인 창의 수) → 판정 시각 뒤 나머지 캠페인 하나 · campaign_split_tests 한 행 done · campaign_split_members 0행 · 차감 = 세 캠페인의 접수 건수
+- 확인: 셋 다 일치 · 다르면 멈추고 원인부터
+- 결과: (대기)
+
+### C133-M2 · 서버에서 재야 할 사실(배포 C · 읽기 전용 · 하나씩 · 고객사에 열기 전)
+- 카드: C133
+- 단계: 배포 뒤
+- 선행: C133-H2
+- 기대: ① 추천 고르기 조회(product-reco RECO_PICK_SQL)의 실행 계획과 시간 — 상품 신호가 가장 많은 회사 · 그 회사 고객 하나로(이메일은 받는 사람마다 한 번 돈다 · 설계서 §18 C-2 미측정) ② 나눠 보내기 판정 조회(campaign-split SPLIT_DEVICES_SQL)의 실행 계획 — message_click 이 가장 많은 회사 · 최근 6시간 ③ message_click 의 properties.ip 가 기기마다 다르게 찍히는가(최근 100건의 서로 다른 ip 수 · 전부 같은 값이면 누른 기기 수가 user_agent 만으로 묶인다)
+- 확인: 값을 설계서 §18 에 적고 · ① 이 받는 사람마다 수십 ms 를 넘으면 회사 값 부분을 발송 한 번에 한 번으로 올리는 처방 뒤에 고객사에 연다 · ③ 이 한 값이면 프록시 설정부터 본다(나눠 보내기를 고객사에 열지 않는다)
+- 결과: (대기)
+
+### C133-DDL-7 · 답장 상담 표 넷(설계서 docs/2026-11-13-hanjul-v3-design.md §7 · §18 「배포 D」) · ★ 배포 앞
+- 카드: C133
+- 단계: DDL
+- 선행: 없음(배포 D 의 코드 앞 · 먼저 실행해도 무해 · 새 표 · 표가 없으면 워커는 로그 한 줄 · 화면 길은 503 DB_MIGRATION_PENDING)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name, count(*) FROM information_schema.columns WHERE table_name IN ('inbound_numbers', 'inbound_messages', 'inbound_settings', 'inbound_kb_items') GROUP BY table_name ORDER BY table_name;
+- 확인: 네 줄 · inbound_kb_items 8 · inbound_messages 23 · inbound_numbers 8 · inbound_settings 10
+- 결과: (대기 · 배포 D 커밋 뒤 · 62 → 57 전환 뒤)
+
+> C133-DDL-7 · 배포 앞 · 새 표 넷 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C133-DDL-7
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS inbound_numbers (
+  number varchar(20) PRIMARY KEY,
+  company_id uuid NULL,
+  first_company_id uuid NULL,
+  shared_at timestamptz NULL,
+  note varchar(100) NULL,
+  created_by uuid NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT inbound_numbers_company_history CHECK (company_id IS NULL OR (first_company_id IS NOT NULL AND company_id = first_company_id)),
+  CONSTRAINT inbound_numbers_shared_alone CHECK (shared_at IS NULL OR (company_id IS NULL AND first_company_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_numbers_company ON inbound_numbers (company_id);
+CREATE TABLE IF NOT EXISTS inbound_messages (
+  id uuid PRIMARY KEY,
+  provider_msg_id varchar(100) NOT NULL UNIQUE,
+  direction varchar(3) NOT NULL,
+  from_phone varchar(20) NOT NULL,
+  to_number varchar(20) NOT NULL,
+  body text NOT NULL,
+  company_id uuid NULL,
+  status varchar(16) NOT NULL,
+  handled_by varchar(8) NULL,
+  kb_item_id uuid NULL,
+  draft text NULL,
+  note varchar(200) NULL,
+  reply_to uuid NULL,
+  reply_callback varchar(20) NULL,
+  reply_staging_id uuid NULL,
+  reply_campaign_id uuid NULL,
+  assigned_by uuid NULL,
+  ai_called_at timestamptz NULL,
+  claim_token uuid NULL,
+  claimed_at timestamptz NULL,
+  received_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_messages_thread ON inbound_messages (company_id, from_phone, received_at);
+CREATE INDEX IF NOT EXISTS idx_inbound_messages_box ON inbound_messages (company_id, status, received_at);
+CREATE INDEX IF NOT EXISTS idx_inbound_messages_work ON inbound_messages (status, received_at);
+CREATE INDEX IF NOT EXISTS idx_inbound_messages_ai ON inbound_messages (company_id, ai_called_at) WHERE ai_called_at IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_inbound_messages_ai_reply ON inbound_messages (reply_to) WHERE direction = 'out' AND handled_by = 'ai';
+CREATE TABLE IF NOT EXISTS inbound_settings (
+  company_id uuid PRIMARY KEY,
+  enabled boolean NOT NULL DEFAULT false,
+  mode varchar(8) NOT NULL DEFAULT 'auto',
+  reply_callback varchar(20) NULL,
+  auth_callback varchar(20) NULL,
+  daily_cap int NULL,
+  notify_phone varchar(20) NULL,
+  handoff_text varchar(200) NULL,
+  updated_by uuid NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS inbound_kb_items (
+  id uuid PRIMARY KEY,
+  company_id uuid NOT NULL,
+  title varchar(60) NOT NULL,
+  body varchar(600) NOT NULL,
+  enabled boolean NOT NULL DEFAULT true,
+  sort int NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_kb_company ON inbound_kb_items (company_id, sort);
+```
+
+### C133-H3 · 한줄로 배포(한줄로 V3 배포 D = 답장 상담 · 백엔드 + 프론트 · DDL 1 = C133-DDL-7 배포 앞 · V3_STAGE_INBOX · INBOUND_SMS_KEY 비운 채)
+- 카드: C133
+- 단계: 한줄로 배포
+- 선행: C133-H2(배포 C 가 먼저) · Codex 설계 D 3R approve · 구현 Codex approve · 커밋(C 와 한 커밋 · 경로 = 설계서 §18 「배포 C + D 커밋 경로」) → push · C133-DDL-7
+- 기대: 설계서 docs/2026-11-13-hanjul-v3-design.md §7 · §18 「배포 D」 · 두 ENV 가 비어 있는 동안 바뀌는 것 = 0(헤더의 「상담함」 · 편집기의 「상담 번호 넣기」 = 그리지 않음 · 상담함 주소 = 403 · 수신 입구 = 404 · 워커 = 분당 빈 표 조회 둘) · 슈퍼관리자에 「답장 상담」 탭이 생긴다(번호 0 · 미배정 0) · 발송 · 과금 경로 변화 0(직접발송 배관 파일 무수정)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · uptime · dist grep receiveInbound ≥ 1 · decideInbound ≥ 1 · sendClaimedReply ≥ 1 · discardSplitStart ≥ 1 · 기동 로그 「[inbound-worker] 시작」 한 줄 · 재시작 뒤 에러 로그에 새 종류 0
+- 결과: (대기)
+
+### C133-ENV-3 · 답장 상담 열기(V3_STAGE_INBOX = 인비토 회사 id 하나 · INBOUND_SMS_KEY = 수신 배선과 맞춘 열쇠)
+- 카드: C133
+- 단계: ENV
+- 선행: C133-H3 · Harold 수신 배선(공용 수신 번호 발급 · 들어온 문자를 한줄로로 넘기는 길)
+- 의미 바꿈: 예(V3_STAGE_INBOX = 그 회사 관리자에게만 상담함이 열린다 · 비우면 닫힘 = 되돌리기 · 받은 글은 남고 자동 답장은 멈춘다 / INBOUND_SMS_KEY = 수신 입구가 열린다 · 비우면 404)
+- 기대: V3_STAGE_INBOX 에 인비토 회사 id 하나 · INBOUND_SMS_KEY 는 비밀값(출력하지 않는다 · 설정 여부만 슈퍼관리자 「답장 상담」 탭의 「수신 입구 열쇠 = 설정됨」으로 본다)
+- 확인: restart --update-env 뒤 슈퍼관리자 탭에서 열쇠 = 설정됨 · 번호 하나 등록 → 인비토 회사에 묶기 → 인비토 관리자 계정 헤더에 「상담함」 · 담당자 계정과 다른 회사 계정에는 안 보임
+- 결과: (대기)
+
+### C133-P3 · 실측(배포 D · ENV 뒤 · 인비토 회사 = 도달 불가 합성 번호 · 하나씩 안내)
+- 카드: C133
+- 단계: 배포 뒤
+- 선행: C133-ENV-3
+- 기대: ① 상담 설정 = 켬 · 바로 답장 · 답변 항목 2개 저장(발신 인증 창이 뜨면 통과) ② 슈퍼관리자 「직접 등록」으로 묶인 번호에 문의 1건 → 1 ~ 2분 안에 상담함에 「자동으로 보냄」 답장 한 줄 · 발송결과에 「상담 답장 · ···끝4자리」 캠페인 1건(직접발송 · 광고 아님) · 차감 1건 ③ 「수신거부」 한 건 → 수신거부 메뉴에 그 번호(출처 inbound_sms) · 답장 0 ④ 등록 답변에 없는 문의 1건 → 넘김 문장 1통 + 상담함 「사람 필요」 → 직접 답장 1통 ⑤ 안 묶인 번호로 1건 → 미배정함 → 인비토로 배정 → 그 번호는 「직접 배정 전용」
+- 확인: 다섯 다 일치 · 다르면 멈추고 원인부터
+- 결과: (대기)
+
+### C133-M3 · 서버에서 재야 할 사실(배포 D · 읽기 전용 · 고객사에 열기 전)
+- 카드: C133
+- 단계: 배포 뒤
+- 선행: C133-P3
+- 기대: ① 수신 배선이 넘기는 본문의 칸 이름 · 번호 표기(입구가 받는 from · to · text · receivedAt · providerMsgId 와 같은가 · 같은 문자를 두 번 넘길 때 providerMsgId 가 같은가) ② 상담함 목록 조회(inbound-sms listThreads)의 실행 계획 — 받은 글이 쌓인 뒤 ③ AI 고르기의 정확도(등록 답변 5 ~ 10개 · 문의 20건 · 틀리게 고른 수)
+- 확인: 값을 설계서 §18 에 적고 · ① 이 다르면 입구의 본문 읽기를 맞춘 뒤에 · ③ 에서 틀리게 고른 답이 나가면 「초안만」 방식으로만 고객사에 연다
+- 결과: (대기)
+
 ### C133-T1 · 직원 시트(한줄로 V3)
 - 카드: C133
 - 단계: 직원 시트
 - 선행: C133-ENV-1 · 배포 C · D
 - 기대: 설계서 §13 의 직원 지시문(테스트계정 · 도달 불가 번호 · 발송 0)
-- 확인: 소개 창 3회 · 다시 보지 않기 · 상품 구역 → 직접발송 명단 · 업종 평균 줄 · 추천 칸 · 혜택 칸 · 켜기 창 추정 · 닫기 두 구간
+- 확인: 소개 창 3회 · 다시 보지 않기 · 상품 구역 → 직접발송 명단 · 업종 평균 줄 · 추천 칸 · 혜택 칸 · 켜기 창 추정 · 닫기 두 구간 · 여정 문자의 추천 상품 줄 · 상품 묶음의 반응 숫자와 관심 상품을 앞에 · 나눠 보내기(토글 잠금 이유 · 확인 창 · 시작 안 하기 · 요약 창 · 이어 보내기 · 그만) · 상담함(설정 켜기 · 답변 항목 · 직접 등록한 문의의 자동 답장 · 사람 필요 → 직접 답장 · 답 없이 닫기 · 상담 번호 넣기)
 - 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
 
 ## §2 덤프 뒤 적용분

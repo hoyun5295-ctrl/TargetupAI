@@ -163,7 +163,11 @@ describe('기능 화면 입구 — 주소로 직접 들어와도 같은 안내',
   });
 
   it('입구는 잠김일 때만 허브 안내로 보내고, 모름은 막지 않는다', () => {
-    expect(GATE).toMatch(/allowed === false \? 'locked' : 'open'/);
+    // ★ 2026-11-15 C135 — 같은 뜻을 두 줄로: 잠김(false)이 아니면 연다(모름 = 연다) · 잠김이면 잠근다.
+    //   그 사이에 이미지 스튜디오 한 화면만 「무료체험을 신청한 미가입 회사」를 더 연다(시험 = c135-v3-popup-trial.test.ts).
+    expect(GATE).toContain("if (allowed !== false) { setState('open'); return; }");
+    expect(GATE).toMatch(/setState\('locked'\);\s*\}\)\(\);/);
+    expect(GATE.match(/setState\('open'\)/g)).toHaveLength(2);   // 여는 길 = 지금 판정이 허용 · 체험 신청(이미지 스튜디오) 둘뿐
     expect(GATE).toMatch(/<Navigate to=\{`\/ai-operator\?intro=\$\{encodeURIComponent\(featureId\)\}`\} replace \/>/);
   });
 });

@@ -102,6 +102,51 @@
         ],
         "createdAt": "2026-11-09T04:43:05.371Z",
         "reason": "Claude: 버리는 목업이 Harold 제공 시안(marketing/proposals/2026-11-hanjul-proposal/pricing-plans.html)의 글자 크기 단계를 그대로 옮김 · 제목 26px 대 본문 15px"
+      },
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "packages/frontend/src/pages/PerformancePage.tsx"
+        ],
+        "createdAt": "2026-11-15T00:54:12.456Z",
+        "reason": "Claude 판정(1115): L684 · L730 · L737 · L745 · L1501 · L1503 = 제품 AI 표시 색(violet 그라데이션) · 디자인 기준 문서 status/lessons/LESSONS_FRONTEND.md 「디자인 최소 기준」의 AI 자율 진단 카드 규격(violet→fuchsia + Sparkles) 그대로 · 프론트 89파일 176곳이 같은 색 · 이 화면만 바꾸면 제품 안에서 어긋남 · PlanStatusCard 선례와 같은 판정 · 값 단위 무시 미지원"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-15-v3-popups-mockup.html"
+        ],
+        "createdAt": "2026-11-15T01:10:06.944Z",
+        "reason": "Claude 판단(1115): 창 안의 흰 카드 = 제품 화면 조각을 그린 삽화(상품 반응 표 · 여정 켜기 · 업종 평균 · 포스터 티켓) · 버리는 목업"
+      },
+      {
+        "rule": "clipped-overflow-container",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-15-v3-popups-mockup.html"
+        ],
+        "createdAt": "2026-11-15T01:10:07.252Z",
+        "reason": "Claude 판단(1115): 둥근 창과 목업 무대가 장식 글자 · 뒤 화면을 일부러 잘라 창 밖으로 안 나가게 함 · 창 안에 밖으로 나가야 하는 메뉴 · 말풍선 없음 · 버리는 목업"
+      },
+      {
+        "rule": "buried-raster",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-15-v3-popups-mockup.html"
+        ],
+        "createdAt": "2026-11-15T01:28:00.025Z",
+        "reason": "Claude 판단(1115): 후 A 무대의 세 겹(원본 사진 · 배경 지운 사진 · 완성 포스터)이 차례로 나타났다 사라지는 장면 = 시작 순간 투명한 것이 의도 · 버리는 목업"
+      },
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-15-v3-popups-mockup.html"
+        ],
+        "createdAt": "2026-11-15T01:47:47.374Z",
+        "reason": "Claude 판단(1115 2판): 포스터가 창 왼쪽 절반 · 아래 끝까지 여백 없이 꽉 차는 것이 의도한 배치(pop · vis) · 세 칸 숫자 줄(facts)은 세로 줄에서 22px 떨어져 있음 = 오탐 · 버리는 목업"
       }
     ]
   }

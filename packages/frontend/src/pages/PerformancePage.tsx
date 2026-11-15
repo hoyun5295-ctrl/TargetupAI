@@ -1297,7 +1297,7 @@ export default function PerformancePage() {
                   <span className="text-lg font-bold text-violet-800 font-mono">{explanation.overallScore}</span>
                   <span className="text-xs text-slate-400">/100</span>
                 </div>
-                <p className="text-sm text-slate-700 leading-relaxed p-3 bg-violet-50 border border-violet-200 rounded-xl">{explanation.topInsight}</p>
+                <p className="text-sm text-violet-950 leading-relaxed p-3 bg-violet-50 border border-violet-200 rounded-xl">{explanation.topInsight}</p>
                 {explanation.factors.length > 0 && (
                   <div>
                     <div className="text-xs font-semibold text-slate-500 mb-2">영향 요인 (성과를 이끈 / 새는 곳)</div>
@@ -1508,11 +1508,11 @@ function AiDiagnosisLine({
       </div>
       <div className="flex-1 min-h-0">
         {explanation ? (
-          <p className="text-xs text-slate-700 leading-relaxed line-clamp-3">{explanation.topInsight}</p>
+          <p className="text-xs text-violet-950 leading-relaxed line-clamp-3">{explanation.topInsight}</p>
         ) : loading ? (
-          <div className="text-xs text-slate-500 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)</div>
+          <div className="text-xs text-violet-900/70 flex items-center gap-1.5"><Loader2 className="w-3 h-3 animate-spin" /> AI 분석 중 (10~20초)</div>
         ) : (
-          <p className="text-xs text-slate-500 leading-relaxed">클릭 한 번으로 최근 30일 성과의 원인과 다음 액션을 AI가 진단합니다.</p>
+          <p className="text-xs text-violet-900/70 leading-relaxed">클릭 한 번으로 최근 30일 성과의 원인과 다음 액션을 AI가 진단합니다.</p>
         )}
       </div>
       {!loading && (
@@ -1555,19 +1555,19 @@ function QuickActionRow({
   disabled: boolean;
   onClick: () => void;
 }) {
-  const c: Record<string, { border: string; iconBg: string }> = {
-    rose: { border: 'border-l-rose-300', iconBg: 'bg-rose-100 text-rose-700' },
-    emerald: { border: 'border-l-emerald-300', iconBg: 'bg-emerald-100 text-emerald-700' },
-    amber: { border: 'border-l-amber-300', iconBg: 'bg-amber-100 text-amber-700' },
+  // 색 가름 = 아이콘 칸 하나(★ 2026-11-15 카드 왼쪽의 굵은 색 테두리를 걷었다 · 디자인 검사 side-tab)
+  const iconBg: Record<string, string> = {
+    rose: 'bg-rose-100 text-rose-700',
+    emerald: 'bg-emerald-100 text-emerald-700',
+    amber: 'bg-amber-100 text-amber-700',
   };
-  const s = c[color];
   return (
     <button
       onClick={onClick}
       disabled={loading || disabled}
-      className={`w-full flex items-center gap-2.5 p-2.5 bg-white border border-slate-200 border-l-2 ${s.border} rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-left`}
+      className="w-full flex items-center gap-2.5 p-2.5 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-left"
     >
-      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${s.iconBg}`}>{icon}</div>
+      <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${iconBg[color]}`}>{icon}</div>
       <div className="flex-1 min-w-0">
         <div className="text-xs font-semibold text-slate-700">{title}</div>
         <div className="text-[10px] text-slate-500 truncate">{desc}</div>

@@ -11,6 +11,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Navigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { fetchAiOperatorAccess, isAiOperatorAccessKnownAllowed } from '../utils/ai-operator-access';
+import { fetchStudioTrial } from '../utils/studio-trial';
+
+/** ★ 2026-11-15 C135 — 무료체험 3회가 닿는 기능 화면(이 화면 하나뿐 · 서버도 생성 주소 하나에만 체험 길을 둔다) */
+const TRIAL_FEATURE_ID = 'image-studio';
 
 export default function PlanGate({ featureId, children }: { featureId: string; children: ReactNode }) {
   const [state, setState] = useState<'loading' | 'open' | 'locked'>(() => (isAiOperatorAccessKnownAllowed() ? 'open' : 'loading'));
@@ -18,11 +22,20 @@ export default function PlanGate({ featureId, children }: { featureId: string; c
   useEffect(() => {
     if (state !== 'loading') return;
     let alive = true;
-    fetchAiOperatorAccess().then((allowed) => {
-      if (alive) setState(allowed === false ? 'locked' : 'open');
-    });
+    void (async () => {
+      const allowed = await fetchAiOperatorAccess();
+      if (!alive) return;
+      if (allowed !== false) { setState('open'); return; }
+      // ★ C135 요금제로 잠긴 회사라도 이미지 스튜디오 무료체험을 신청했으면 연다(판정 = 서버 · 다른 기능 입구는 그대로 · 모르면 잠근 채)
+      if (featureId === TRIAL_FEATURE_ID) {
+        const trial = await fetchStudioTrial();
+        if (!alive) return;
+        if (trial?.eligible && trial.requested) { setState('open'); return; }
+      }
+      setState('locked');
+    })();
     return () => { alive = false; };
-  }, [state]);
+  }, [state, featureId]);
 
   if (state === 'locked') return <Navigate to={`/ai-operator?intro=${encodeURIComponent(featureId)}`} replace />;
   if (state === 'loading') {

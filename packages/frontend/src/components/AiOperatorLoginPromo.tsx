@@ -15,13 +15,17 @@
  *   ③ Tab · Shift+Tab 은 창 안에서만 돌고, 닫으면 포커스를 원래 자리로 돌려놓는다.
  * ★ Codex 2R — 「한 번」은 원자적으로 잡을 수 있을 때만 약속한다: 탭 사이 잠금이 없거나 표식을 저장하지 못하면 띄우지 않는다
  *   (모르면 띄우지 않는다 · 중복 노출 · 닫아도 다시 뜨는 것보다 안 뜨는 쪽) · 한 화면에서는 한 번 띄우면 다시 띄우지 않는다.
+ * ★ 2026-11-15 C135 — 서버가 무료체험 창(variant 'trial' · 요금제 미가입 + 아직 신청 안 한 회사)이라고 답하면 안쪽을 StudioTrialPromo 로 그린다.
+ *   틀의 규칙(탭 사이 잠금 · 한 번 · 다른 자동 안내 창과 안 겹침 · Esc · Tab 가두기 · 스크롤 잠금)은 이 컴포넌트 그대로 · 기록의 기능 id 만 'studio-trial'.
  */
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, X } from 'lucide-react';
+import { STUDIO_TRIAL_POPUP_ID } from '../constants/login-popups';
 import { reportPlanFeature } from '../utils/plan-feature-report';
 import { claimV3Intro, dismissV3Intro, type V3Intro } from '../utils/v3-intro';
 import { useToast } from './ToastProvider';
+import StudioTrialPromo from './v3/StudioTrialPromo';
 
 export const LOGIN_PROMO_FEATURE_ID = 'login-promo';
 const SEEN_KEY = 'ai-op-login-promo-seen';
@@ -76,7 +80,8 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
       if (!alive || !got) return;
       setIntro(got);
       setOpen(true);
-      reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');
+      if (got.variant === 'trial') reportPlanFeature(STUDIO_TRIAL_POPUP_ID, 'open');
+      else reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');
     };
     void run().catch(() => { /* 잠금 실패 = 이번에는 띄우지 않는다 */ });
     return () => { alive = false; };
@@ -129,6 +134,9 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
     else toast.error('저장하지 못했어요. 다음에 다시 눌러 주세요.');
     setOpen(false);
   };
+
+  // ★ C135 무료체험 창 — 안쪽만 바꾼다(창 자리 = 같은 dialogRef · 닫기 = 같은 close)
+  if (intro.variant === 'trial') return <StudioTrialPromo introKey={intro.introKey} rootRef={dialogRef} onClose={close} />;
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center sm:p-4 bg-slate-950/60 backdrop-blur-[6px] animate-backdrop-in motion-reduce:animate-none">

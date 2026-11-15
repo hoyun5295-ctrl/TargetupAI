@@ -359,6 +359,23 @@ export function isAiOperatorAllowed(
   return false;
 }
 
+/**
+ * ★ 2026-11-15 C135 — 이미지 스튜디오 무료체험 3회의 자격(설계서 docs/2026-11-15-v3-popup-trial-design.md §5-1).
+ *   = 위 판정(isAiOperatorAllowed)이 막는 **미가입** 회사뿐.
+ *   30일 AI 체험 중 · 허용 명단 · 슈퍼관리자 · 유료 = 지금 길이 이미 열려 있으므로 자격 없음(체험이 기존 권한을 줄이지 않는다).
+ *   만료 · 정지 = 자격 없음(미가입이 아니다 · 종전 안내 그대로). 요금제를 모르면 자격 없음.
+ *   신청 · 생성 문 · 로그인 직후 소개 창 갈래 · 화면 입구가 모두 이 함수 하나를 부른다(판정 사본 0).
+ *   이 파일에 두는 이유 = 요금제 판정의 주인은 여기 한 곳이다(뿌리 대장 R2 · isAiOperatorAllowed 를 밖에서 따로 부르지 않는다).
+ */
+export function studioTrialEligible(
+  ctx: PlanContext | null | undefined,
+  user: { loginId?: string; userId?: string; userType?: string } | null | undefined,
+): boolean {
+  if (!ctx) return false;
+  if (isAiOperatorAllowed(ctx, user)) return false;
+  return isUnsubscribed(ctx) && !isSubscriptionBlocked(ctx).blocked;
+}
+
 /** AI 존 서버 문의 거절 코드(화면 = 요금제 안내 · 한 코드) */
 export const AI_ZONE_GATED_CODE = 'AI_OPERATOR_GATED';
 

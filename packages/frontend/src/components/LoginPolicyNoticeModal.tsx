@@ -40,7 +40,8 @@ export function shouldShowLoginPolicyNotice(): boolean {
   }
 }
 
-function hideLoginPolicyNoticeToday(): void {
+/** ★ 2026-11-15 C135 — 로그인 화면의 V3 안내 창(components/v3/V3LoginIntroModal)도 같은 「오늘 하루 보지 않기」를 쓴다(저장 열쇠 한 곳) */
+export function hideLoginPolicyNoticeToday(): void {
   try {
     localStorage.setItem(HIDE_KEY, todayInSeoul());
   } catch {
@@ -48,8 +49,11 @@ function hideLoginPolicyNoticeToday(): void {
   }
 }
 
-/** 바뀌는 것 세 가지 — 제목과 `detail` 모두 고객사에 바뀌는 것을 우리 말로(지금 구현된 동작만) */
-const CHANGES: Array<{ label: string; title: string; detail: string }> = [
+/**
+ * 바뀌는 것 세 가지 — 제목과 `detail` 모두 고객사에 바뀌는 것을 우리 말로(지금 구현된 동작만)
+ * ★ 2026-11-15 C135 — V3 안내 창의 다섯째 장면이 이 목록의 label · title 을 그대로 읽는다(문구 원본 한 곳).
+ */
+export const CHANGES: Array<{ label: string; title: string; detail: string }> = [
   {
     label: '로그인',
     title: '로그인할 때마다 휴대폰 인증번호 입력',

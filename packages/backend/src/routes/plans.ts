@@ -83,7 +83,7 @@ router.post('/v3-intro/claim', authenticate, featureSeenLimiter, async (req: Req
 });
 router.post('/v3-intro/dismiss', authenticate, featureSeenLimiter, async (req: Request, res: Response) => {
   try {
-    await dismissIntro(req.user as any);
+    await dismissIntro(req.user as any, req.body?.introKey);   // ★ 2026-11-15 C135 판 열쇠(닫힌 목록 검증 = CT)
     return res.json({ success: true });
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'user_intro_acks')) return;

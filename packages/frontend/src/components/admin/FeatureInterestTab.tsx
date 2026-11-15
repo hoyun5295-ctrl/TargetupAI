@@ -13,8 +13,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Building2, ChevronRight, X } from 'lucide-react';
 import { usePlanFeatureIntros } from '../../constants/plan-feature-intros'; // ★ 2026-10-07 원장 = 서버(로그인한 사람에게만)
-import ListPager, { pageSlice } from '../shared/ListPager';   // ★ 2026-10-07 업체 목록 쪽 넘김(20건)
+import ListPager, { pageSlice } from '../shared/ListPager';   // ★ 2026-10-07 업체 목록 쪽 넘김(20건)
 import { ADMIN_TABLE_ONELINE } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄
+import { LOGIN_POPUPS, loginPopupOf } from '../../constants/login-popups';   // ★ 2026-11-15 C135 로그인 뒤 안내 창 등록부
 
 type Period = 'today' | '7d' | 'month' | 'all';
 type PlanFilter = 'all' | 'unsubscribed' | 'subscribed';
@@ -36,7 +37,11 @@ interface InterestData {
   summary: { companies: number; opens: number; pricingCompanies: number; unsubscribedCompanies: number };
   features: { featureId: string; companies: number; pricingCompanies: number; goCompanies: number; opens: number }[];
   companies: CompanyRow[];
+  /** ★ 2026-11-15 C135 이미지 스튜디오 무료체험 신청 업체(기간 · 기능 · 회사 조건과 무관하게 전부) · null = 표가 아직 없음 */
+  trials?: TrialRow[] | null;
 }
+
+interface TrialRow { companyId: string; companyName: string; requestedBy: string; requestedAt: string; used: number; granted: number }
 
 const PERIODS: { key: Period; label: string }[] = [
   { key: 'today', label: '오늘' },
@@ -53,12 +58,14 @@ const PLAN_FILTERS: { key: PlanFilter; label: string }[] = [
 const authHeaders = () => ({ Authorization: `Bearer ${localStorage.getItem('token')}` });
 const segBtn = (on: boolean) =>
   `px-3 py-1.5 text-sm transition-colors ${on ? 'bg-cyan-50 text-cyan-700 font-medium' : 'text-gray-600 hover:bg-gray-100'}`;
-// ★ 2026-10-06 로그인 안내 창(AiOperatorLoginPromo) = 기능 원장 밖 항목 · 「지금 바로가기」(go) 가 다음 행동
-const LOGIN_PROMO_ID = 'login-promo';
+// ★ 2026-10-06 로그인 뒤 안내 창 = 기능 원장 밖 항목 · 그 창의 주 버튼(go)이 다음 행동
+// ★ 2026-11-15 C135 창의 이름 · 주 버튼 이름 = 등록부(constants/login-popups.ts) — 새 안내 창을 올리면 여기 손대지 않아도 탭에 나온다
 /** 기능 id → 이름 — 원장을 받으면 채운다(받기 전엔 id 그대로) */
 let FEATURE_TITLES = new Map<string, string>();
-const featureName = (id: string) => (id === LOGIN_PROMO_ID ? '로그인 안내 창' : FEATURE_TITLES.get(id) || id);
+const featureName = (id: string) => loginPopupOf(id)?.name || FEATURE_TITLES.get(id) || id;
 const EVENT_LABEL: Record<'open' | 'pricing' | 'go', string> = { open: '안내 창 열람', pricing: '요금제 보기', go: '지금 바로가기' };
+/** 기록 한 줄의 행동 이름 — 안내 창의 go 는 그 창의 주 버튼 이름으로 */
+const eventLabel = (e: { event: 'open' | 'pricing' | 'go'; featureId: string }) => (e.event === 'go' ? loginPopupOf(e.featureId)?.goLabel || EVENT_LABEL.go : EVENT_LABEL[e.event]);
 const fmt = (iso: string) => new Date(iso).toLocaleString('ko-KR', {
   timeZone: 'Asia/Seoul', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
 });
@@ -165,7 +172,7 @@ function CompanyDetailModal({ c, onClose }: { c: CompanyRow; onClose: () => void
                     <tr key={`${e.at}-${i}`} className="border-t border-dashed border-gray-200">
                       <td className="py-1.5 pr-3 whitespace-nowrap tabular-nums text-gray-500">{fmt(e.at)}</td>
                       <td className="py-1.5 pr-3 whitespace-nowrap">
-                        <span className={`inline-block px-1.5 py-px rounded-md text-[11.5px] font-semibold ${EVENT_CHIP[e.event]}`}>{EVENT_LABEL[e.event]}</span>
+                        <span className={`inline-block px-1.5 py-px rounded-md text-[11.5px] font-semibold ${EVENT_CHIP[e.event]}`}>{eventLabel(e)}</span>
                       </td>
                       <td className="py-1.5 pr-3 whitespace-nowrap">{featureName(e.featureId)}</td>
                       <td className="py-1.5 text-gray-500"><span className="block max-w-[220px] truncate">{e.userName || '이름 없음'}</span></td>
@@ -254,7 +261,7 @@ export default function FeatureInterestTab() {
         <select value={featureId} onChange={(e) => setFeatureId(e.target.value)}
           className="border rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-cyan-200">
           <option value="all">모든 기능</option>
-          <option value={LOGIN_PROMO_ID}>로그인 안내 창</option>
+          {LOGIN_POPUPS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           {(intros?.intros ?? []).map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
         </select>
         <span className="text-sm text-gray-500 font-medium">회사</span>
@@ -288,13 +295,53 @@ export default function FeatureInterestTab() {
         </div>
       </div>
 
+      {/* ★ 2026-11-15 C135 이미지 스튜디오 무료체험 신청 업체 — 위 조건(기간 · 기능 · 회사)과 무관하게 전부(기한 없는 체험) · 표가 아직 없으면 그리지 않는다 */}
+      {data?.trials && (
+        <div className="mx-6 mb-5 rounded-xl border border-gray-200/70 overflow-hidden">
+          <div className="px-4 py-3 border-b flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="text-sm font-semibold">이미지 스튜디오 무료체험 신청 업체</span>
+            <b className="text-sm text-cyan-700 tabular-nums">{data.trials.length.toLocaleString()}곳</b>
+            <span className="text-xs text-gray-400">로그인 뒤 안내 창에서 「무료체험 3회 이용하고 싶습니다」를 누른 회사 · 최근 신청 순 · 기간 조건과 무관하게 전부</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
+              <thead className="bg-gray-50 text-xs text-gray-500">
+                <tr>
+                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">회사</th>
+                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">신청한 사람</th>
+                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">신청 시각</th>
+                  <th className="text-right font-medium px-3 py-2 whitespace-nowrap">만든 포스터</th>
+                  <th className="text-left font-medium px-3 py-2 whitespace-nowrap">상태</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.trials.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">아직 무료체험을 신청한 회사가 없습니다</td></tr>}
+                {data.trials.map((t) => (
+                  <tr key={t.companyId} className="border-t border-gray-100 whitespace-nowrap">
+                    <td className="px-3 py-2.5 font-medium"><span className="block max-w-[240px] truncate" title={t.companyName}>{t.companyName}</span></td>
+                    <td className="px-3 py-2.5 text-gray-600"><span className="block max-w-[160px] truncate" title={t.requestedBy}>{t.requestedBy || '이름 없음'}</span></td>
+                    <td className="px-3 py-2.5 tabular-nums text-gray-600">{fmt(t.requestedAt)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums"><b className="text-gray-900">{t.used}</b><span className="text-gray-400"> / {t.granted}장</span></td>
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs ${t.used >= t.granted ? 'bg-emerald-50 text-emerald-700' : t.used > 0 ? 'bg-cyan-50 text-cyan-700' : 'bg-gray-100 text-gray-600'}`}>
+                        {t.used >= t.granted ? '다 씀' : t.used > 0 ? '쓰는 중' : '아직 안 씀'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="grid lg:grid-cols-[320px_minmax(0,1fr)] gap-4 px-6 pb-6">
         <div className="rounded-xl border border-gray-200/70 p-4 self-start">
           <div className="text-sm font-semibold mb-3">기능별 관심</div>
           {data && data.features.length === 0 && <div className="text-sm text-gray-400 py-6 text-center">이 기간에 안내 창을 연 회사가 없습니다</div>}
           <div className="space-y-2">
             {(data?.features || []).map((f) => {
-              const next = f.featureId === LOGIN_PROMO_ID ? f.goCompanies : f.pricingCompanies;
+              const next = loginPopupOf(f.featureId) ? f.goCompanies : f.pricingCompanies;
               return (
                 <div key={f.featureId} className="grid grid-cols-[92px_1fr_64px] gap-2 items-center text-[12.5px]">
                   <span className="truncate" title={featureName(f.featureId)}>{featureName(f.featureId)}</span>
@@ -307,7 +354,7 @@ export default function FeatureInterestTab() {
               );
             })}
           </div>
-          <div className="text-[11px] text-gray-400 mt-3">연한 막대 = 안내 창을 연 회사 · 진한 막대 = 거기서 「요금제 보기」를 누른 회사(로그인 안내 창은 「지금 바로가기」)</div>
+          <div className="text-[11px] text-gray-400 mt-3">연한 막대 = 안내 창을 연 회사 · 진한 막대 = 거기서 「요금제 보기」를 누른 회사(로그인 뒤 안내 창은 그 창의 주 버튼)</div>
         </div>
 
         <div className="rounded-xl border border-gray-200/70 overflow-hidden">

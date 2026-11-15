@@ -4,8 +4,15 @@
 import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { INTRO_RATE, parseDemoRequest, recordDemoRequest, recordIntroView } from '../utils/intro-leads';
+import { v3LoginIntroOn } from '../utils/v3-login-intro';   // ★ 2026-11-15 C135 로그인 화면 V3 안내 창 스위치
 
 const router = Router();
+
+// ★ 2026-11-15 C135 — 로그인 화면이 「한줄로 V3」 안내 창을 띄울지 묻는다(로그인 전 · 판정 = utils/v3-login-intro.ts 한 곳 · ENV 가 비면 꺼짐 = 종전 인증 안내 창)
+router.get('/v3-login', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, on: v3LoginIntroOn() });
+});
 
 const limiter = (cfg: { windowMs: number; max: number }) => rateLimit({
   ...cfg,

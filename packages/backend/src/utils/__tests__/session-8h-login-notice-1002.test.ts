@@ -80,7 +80,13 @@ describe('로그인 화면 사전 고지 창', () => {
     expect(login).not.toContain('2026년 9월 1일 시행');
     // ★ 2026-11-02 서버 점검 안내 기간에는 인증 안내 창 대신 점검 안내 창(아래 describe)
     expect(login).toContain('useState(() => !isSuperAdminOnly && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice())');
-    expect(login).toContain('{showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}');
+    // ★ 2026-11-15 C135 — 안내 창의 갈래(V3 안내 창 · 이 인증 안내 창)는 LoginNoticeSwitch 한 곳이 정한다.
+    //   로그인 화면은 「띄울 차례」만 정하고, 스위치가 꺼져 있거나 답을 못 받으면 이 창이 지금처럼 뜬다.
+    expect(login).toContain('{showPolicyNotice && <LoginNoticeSwitch onClose={() => setShowPolicyNotice(false)} />}');
+    expect(login).not.toContain('<LoginPolicyNoticeModal');
+    const sw = fe('components', 'v3', 'LoginNoticeSwitch.tsx');
+    expect(sw).toContain('return <LoginPolicyNoticeModal onClose={onClose} />;');
+    expect(sw).toContain("if (mode === 'v3') return <V3LoginIntroModal onClose={onClose} onAuthNotice={() => setMode('policy')} />;");
   });
 
   it('숨김은 「오늘 하루」뿐이다 — 확인을 눌러도 다음 방문에 다시 뜬다', () => {

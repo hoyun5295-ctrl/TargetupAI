@@ -14,6 +14,7 @@ import { recordAuditLog } from './audit-log';
 import { mapWithConcurrency } from './concurrency';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
 import { precheckPeriodStartSql } from './precheck-usage';
+import { loadStudioTrials, type StudioTrialListRow } from './studio-trial';   // ★ 2026-11-15 C135 무료체험 신청 업체
 
 // ★ 2026-10-06 go = 로그인 안내 창(featureId 'login-promo')의 「지금 바로가기」 — 요금제 보기와 다른 행동이라 다른 값으로 남긴다
 export const FEATURE_INTEREST_ACTIONS = { open: 'plan_feature_open', pricing: 'plan_feature_pricing', go: 'plan_feature_go' } as const;
@@ -84,6 +85,11 @@ export interface FeatureInterestData {
   summary: { companies: number; opens: number; pricingCompanies: number; unsubscribedCompanies: number };
   features: Array<{ featureId: string; companies: number; pricingCompanies: number; goCompanies: number; opens: number }>;
   companies: FeatureInterestCompanyRow[];
+  /**
+   * ★ 2026-11-15 C135 이미지 스튜디오 무료체험 신청 업체(신청 시각 · 사용 n / 3) — 관심 기록 · 위 조회 조건(기간 · 기능 · 요금제)과 무관하게 전부.
+   *   기한 없는 체험이라 기간으로 거르지 않는다. null = 표가 아직 없거나(DDL 앞) 못 읽음 → 화면은 이 표만 그리지 않는다.
+   */
+  trials: StudioTrialListRow[] | null;
 }
 
 /**
@@ -202,7 +208,14 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     .map(([featureId, v]) => ({ featureId, companies: v.companies.size, pricingCompanies: v.pricing.size, goCompanies: v.go.size, opens: v.opens }))
     .sort((x, y) => y.companies - x.companies || y.pricingCompanies - x.pricingCompanies || y.opens - x.opens);
 
+  // ★ C135 무료체험 신청 업체 — 못 읽어도 탭의 나머지는 그대로(이 표만 비운다)
+  const trials = await loadStudioTrials().catch((err: any) => {
+    console.error('[feature-interest] 무료체험 신청 업체 조회 실패:', err?.message || err);
+    return null;
+  });
+
   return {
+    trials,
     summary: {
       companies: companies.length,
       opens: companies.reduce((sum, c) => sum + c.features.reduce((t, f) => t + f.opens, 0), 0),

@@ -36,6 +36,8 @@ import StudioWatermark from '../components/studio/StudioWatermark';
 import StudioLogoControls from '../components/studio/StudioLogoControls';
 import { layersForSave, logoSettingsOf, LOGO_LIMIT_TEXT, type LogoCandidate, type LogoCardState, type LogoSettings } from '../lib/studio-layers';
 import { saveStudioTemp, studioPost, studioFetch, newStudioAttempt, type SavedStudioAsset } from '../lib/studio-api';
+import { fetchStudioTrial, type StudioTrialState } from '../utils/studio-trial';   // ★ 2026-11-15 C135 무료체험 3회
+import { isAiOperatorAccessKnownAllowed } from '../utils/ai-operator-access';
 
 const token = () => localStorage.getItem('token');
 const authFetch = (url: string, opts: RequestInit = {}) =>
@@ -137,9 +139,18 @@ export default function ImageStudioPage() {
     return u;
   }, []);
 
+  // ★ 2026-11-15 C135 무료체험 3회 — 요금제 미가입 + 신청한 회사에만 값이 있다(요금제로 열린 회사는 묻지 않는다 · 모르면 표시 없음)
+  const [trial, setTrial] = useState<StudioTrialState | null>(null);
+  const loadTrial = useCallback(async () => {
+    if (isAiOperatorAccessKnownAllowed()) return;
+    const t = await fetchStudioTrial();
+    setTrial(t && t.eligible && t.requested ? t : null);
+  }, []);
+
   useEffect(() => {
     authFetch('/api/image-studio/status').then((r) => r.json()).then((d) => setReady(!!d?.ready)).catch(() => setReady(true));
     loadLibrary();
+    void loadTrial();
     return () => { objectUrls.current.forEach((u) => URL.revokeObjectURL(u)); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -178,10 +189,12 @@ export default function ImageStudioPage() {
     }
     setFailedSlots((prev) => [...failed, ...prev]);
     if (slots.length > 0) setStage('result');
+    void loadTrial();   // ★ C135 남은 무료체험 횟수 다시 읽기(서버가 센 값)
   };
   // 실패 · 응답 유실 칸 = 같은 표 + 같은 얼린 본문(입력을 바꿨어도 · 한 번만 걷힘)
   const retrySlot = async (slot: UseSlot) => {
     if (await runSlot(slot, 0, 1)) setFailedSlots((prev) => prev.filter((x) => x !== slot));
+    void loadTrial();
   };
   void GENERATE_PRESET_KEY;
 
@@ -379,7 +392,13 @@ export default function ImageStudioPage() {
           ? [{ label: '템플릿으로', icon: ChevronLeft, onClick: () => setStage('gallery') }, { label: '저장 소재 관리', icon: FolderOpen, onClick: () => setLibManageOpen(true) }]
           : [{ label: '저장 소재 관리', icon: FolderOpen, onClick: () => setLibManageOpen(true) }],
       }}
-      blocks={!ready ? [{ text: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.' }] : []}
+      blocks={[
+        ...(!ready ? [{ text: '이미지 스튜디오가 준비 중입니다. 잠시 후 다시 시도해주세요.' }] : []),
+        // ★ C135 무료체험 중인 회사에만 — 남은 횟수와 MMS 로 쓰는 길 · 다 쓰면 요금제 안내
+        ...(trial ? [trial.remaining > 0
+          ? { text: `무료체험 ${trial.remaining}회 남았어요. 만든 포스터는 저장한 뒤, 문자 발송 화면의 MMS 이미지 첨부에서 「라이브러리에서 가져오기」로 붙여 보낼 수 있어요.` }
+          : { text: `무료체험 ${trial.granted}회를 모두 쓰셨어요. 요금제에 가입하면 계속 만들 수 있어요.`, actionLabel: '요금제 보기', onAction: () => navigate('/pricing') }] : []),
+      ]}
       commitBar={stage === 'setup' && template ? (
         <>
           <div className="min-w-0 flex-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-600">
@@ -388,7 +407,7 @@ export default function ImageStudioPage() {
             {make.discountBuild && (make.discountBuild.ok
               ? <span className="text-rose-700 font-semibold break-keep">{make.discountBuild.line}</span>
               : <span className="text-slate-400 break-keep">{make.discountBuild.error}</span>)}
-            <span className="text-slate-400">{creditText('image-studio-generate')}, 성공했을 때만 차감</span>
+            <span className="text-slate-400">{trial ? `무료체험 ${trial.remaining}회 남음` : `${creditText('image-studio-generate')}, 성공했을 때만 차감`}</span>
           </div>
           <button onClick={() => generate()} disabled={busy || !ready || (!!make.discountBuild && !make.discountBuild.ok)} className="shrink-0 text-white inline-flex items-center justify-center gap-2 h-11 px-5 rounded-xl bg-amber-500 hover:bg-amber-600 text-sm font-bold disabled:opacity-40">
             <Sparkles className="w-4 h-4" /> 완성 포스터 만들기

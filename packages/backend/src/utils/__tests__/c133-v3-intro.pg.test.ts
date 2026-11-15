@@ -81,7 +81,10 @@ describe('사용자 · 소개 판마다 따로(실 PG)', () => {
     const m = introLoginMark('u7-a')!;
     await pool.query(INTRO_DISMISS_SQL, [U(7), V3_INTRO_KEY]);
     expect(await claim(U(7), m)).toEqual([]);
-    expect(await claim(U(7), m, 'next-intro')).toEqual([{ shown: 1 }]);   // 다음 판 소개는 새로 센다
+    // ★ 2026-11-15 C135 — 한 로그인에 자동 안내 창은 판을 통틀어 하나(로그인 표식 문). 다음 판 소개는 새로 세되 **다음 로그인부터** 뜬다.
+    //   옛 기대(같은 로그인 표식으로 다른 판이 바로 뜬다)는 판이 둘이 되면서 「로그인당 한 번」을 깨는 길이었다(시험 = c135-studio-trial.pg.test.ts).
+    expect(await claim(U(7), m, 'next-intro')).toEqual([]);
+    expect(await claim(U(7), introLoginMark('u7-b')!, 'next-intro')).toEqual([{ shown: 1 }]);   // 다음 판 소개는 새로 센다(해제한 판과 무관)
     expect(await claim(U(8), m)).toEqual([{ shown: 1 }]);                 // 같은 표식이어도 다른 사용자
   });
 });
