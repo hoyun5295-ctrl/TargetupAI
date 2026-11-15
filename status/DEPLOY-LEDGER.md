@@ -2191,7 +2191,7 @@ CREATE TABLE IF NOT EXISTS image_studio_trials (
 - 의미 바꿈: 예(모든 고객사 로그인 화면의 안내 창이 인증 안내 창 → 한줄로 V3 안내 창 다섯 장면 · 인증 안내는 다섯째 장면과 「인증 안내 전체 보기」로 남는다 · 슈퍼관리자 화면 · 점검 안내 창이 뜨는 동안은 그대로 · 비우면 종전 인증 안내 창으로 돌아간다)
 - 기대: ENV 값 on(그 밖의 값 · 빈 값 = 꺼짐) · 비밀값 아님
 - 확인: restart --update-env 뒤 curl -s https://hanjul.ai/api/public/intro/v3-login = {"success":true,"on":true} · 로그인 화면에 V3 안내 창 · 「V3 자세히 보기」 = /about-v3.html · 「오늘 하루 보지 않기」를 누르면 그날 다시 뜨지 않는다
-- 결과: (대기)
+- 결과: 1115 18:3x 켬(Harold 「왜 안바뀌냐고」 = 선행의 「V3 를 고객사에 연 뒤」를 Harold 지시로 앞당김) · packages/backend/.env 에 V3_LOGIN_INTRO=on(한 줄 · 값 출력 0) → 적재 0건 확인 → pm2 restart targetup-backend --update-env · 운영 실측 18:34 = /api/public/intro/v3-login {"success":true,"on":true} · 남은 확인 = 로그인 화면의 V3 안내 창(Harold 화면) · 끄기 = 그 줄을 지우거나 값을 비우고 같은 재시작(답을 받는 즉시 종전 인증 안내 창)
 
 ### C135-H2 · 한줄로 배포(로그인 화면 안내 창을 첫 그림부터 띄움 · 배포 직후 접수 고침 · 프론트만 · DDL 0 · ENV 0)
 - 카드: C135
@@ -2199,6 +2199,14 @@ CREATE TABLE IF NOT EXISTS image_studio_trials (
 - 선행: C135-H1 · Codex approve · 커밋(Harold · 경로를 정해 = scratch/c135/fix-paths.txt · 문안 = scratch/c135/fix-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
 - 기대: 설계서 docs/2026-11-15-v3-popup-trial-design.md §12-5 · 로그인 화면의 안내 창이 로그인 화면의 첫 그림과 함께 뜬다(답을 기다렸다가 뒤늦게 나타나지 않는다) · 스위치가 꺼진 지금 = 종전 인증 안내 창 · 배포 전(a7426275)과 같은 동작 · 백엔드 변경 0(시험 파일만) = 재시작 없음
 - 확인: 서버 HEAD · 프론트 build:safe · 운영 로그인 화면을 강력 새로고침해 안내 창이 로그인 화면과 함께 뜨고 반투명 장면이 남지 않는다(Harold 화면) · 그 브라우저의 localStorage v3LoginIntroOn = 0
+- 결과: 1115 18:1x 배포(Harold) · 커밋 ae0d30c2(6 files) · push 03e5d935..ae0d30c2(이 커밋만) · 서버 pull → 백엔드 build:safe → 프론트 build:safe(출력 = lazy 청크 게이트 통과 55건 · 비literal 동적 import 0건 · 빌드 성공 + atomic swap) → pm2 reload targetup-backend(백엔드 운영 코드 변경 0 · 런북에 없는 재시작 한 번) · 운영 실측(18:13 ~ 18:2x) = index.html Last-Modified 16:19:34 → 18:14:36 KST · 번들 index-BWo8CEyL.js → index-Vbw1KjnA.js · 로그인 입력 칸과 안내 창이 그려진 시각의 차 13 ~ 14ms → 0.00ms(4회 · 창 안 MutationObserver) · 새 판을 받은 창의 localStorage v3LoginIntroOn = 0 · Harold 화면 캡처(18:2x) = 인증 안내 창이 선명하게 그려짐
+
+### C135-H3 · 한줄로 배포(로그인 화면 V3 안내 창의 넘김 = 마우스 멈춤 걷음 + 장면 시간 줄임 · 프론트만 · DDL 0 · ENV 0)
+- 카드: C135
+- 단계: 한줄로 배포
+- 선행: C135-H2 · C135-ENV-1(켜짐) · Codex approve · 커밋(Harold · 경로를 정해 = scratch/c135/pace-paths.txt · 문안 = scratch/c135/pace-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 기대: 설계서 docs/2026-11-15-v3-popup-trial-design.md §12-6 · 로그인 화면 V3 안내 창이 마우스가 창 위에 있어도 넘어간다 · 장면 시간 5 · 5.5 · 6 · 5.3 · 4초(한 바퀴 25.8초) · 멈춤 단추 · 움직임 줄이기는 종전 그대로 · 백엔드 변경 0(시험 파일만) = 재시작 없음
+- 확인: 서버 HEAD · 프론트 build:safe(빌드 성공 + atomic swap) · 운영 로그인 화면을 강력 새로고침해 마우스를 창 위에 둔 채 장면이 5초 안팎마다 넘어간다(Harold 화면)
 - 결과: (대기)
 
 ### C133-DDL-6 · 나눠 보내기 표 둘(설계서 docs/2026-11-13-hanjul-v3-design.md §6 · §18 「배포 C-3」) · ★ 배포 앞

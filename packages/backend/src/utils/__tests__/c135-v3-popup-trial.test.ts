@@ -366,6 +366,32 @@ describe('로그인 화면 스위치 — 비면 꺼짐(열지 않은 기능을 �
   });
 });
 
+// ★ 2026-11-15 배포 뒤 Harold 「자동으로 안 넘어가고 멈춰있는데 · 좀 느리네」(설계서 §12-6)
+describe('로그인 화면 V3 안내 창 — 넘김(마우스가 창 위여도 넘어간다 · 장면 시간 = 움직임이 끝난 뒤 읽는 여유)', () => {
+  const motion = front('components/v3/v3-motion.ts');
+  const parts = front('components/v3/v3-popup-parts.ts');
+  const code = motion.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const login = code.slice(code.indexOf('export function mountLoginIntro'), code.indexOf('export function mountTrialStage'));
+
+  it('멈추는 길은 멈춤 단추 · 움직임 줄이기 둘뿐 — 마우스가 올라와도 예약을 끊지 않는다', () => {
+    expect(login).not.toMatch(/mouseenter|mouseleave|mouseover|pointerenter|hover/);
+    expect(login).toContain("pop.classList.toggle('hold', off);");
+    expect(login).toContain('if (!off) timer = window.setTimeout(() => show(i + 1), msOf(i));');
+    expect(login).toContain('let off = reduce;');
+  });
+
+  it('장면 시간은 그 장면의 움직임이 끝난 시각(운영 화면에서 잰 값)보다 1초 넘게 길고 · 한 바퀴는 26초 안이다', () => {
+    const ms = [...parts.matchAll(/<div class="sl s(\d)(?: on)?" data-ms="(\d+)">/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(ms).toEqual([[1, 5000], [2, 5500], [3, 6000], [4, 5300], [5, 4000]]);
+    // 잰 값(1115 운영 · 장면 안 움직임의 끝) = 포스터 완성 2,450 + 옮겨 앉기 · 미구매 4,100 · 자동 발송 4,600 · 업종 비교 3,900 · 인증 1,170
+    const motionEnd = [3500, 4100, 4600, 3900, 1170];
+    ms.forEach(([, v], x) => expect(v - motionEnd[x]).toBeGreaterThanOrEqual(1000));
+    expect(ms.reduce((a, [, v]) => a + v, 0)).toBeLessThanOrEqual(26000);
+    // 포스터 장면의 완성 시각은 움직임 파일의 시간표가 정한다(이 값이 늘면 장면 시간도 같이 본다)
+    expect(motion).toContain(': { erase: 550, lift: 1350, fly: 1550, done: 2450, phone: 0, out: 0, next: 0 };');
+  });
+});
+
 describe('로그인 화면 V3 안내 창 스위치 — 화면 쪽 읽기(기억 · 서버 답)', () => {
   const store = new Map<string, string>();
   let blocked = false;

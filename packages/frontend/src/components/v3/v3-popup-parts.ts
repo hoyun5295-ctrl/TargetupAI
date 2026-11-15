@@ -339,7 +339,7 @@ const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="
 /** 로그인 전 팝업의 창 안쪽(무대 다섯 장면 + 글 + 쪽 번호) */
 export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
         
-<div class="sl s1 on" data-ms="7000">
+<div class="sl s1 on" data-ms="5000">
 <div class="mo" data-morph data-ph="0">
 <div class="im mo-post i-n1" role="img" aria-label="이미지 스튜디오로 만든 포스터"></div>
 <div class="mo-wrap"><div class="mo-card"><div class="mo-photo i-sk"></div><div class="mo-ck"></div><div class="beam"></div></div><div class="mo-fly i-ck"></div></div>
@@ -349,7 +349,7 @@ export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
 </div>
 </div>
         
-<div class="sl s2" data-ms="7500">
+<div class="sl s2" data-ms="5500">
 <span class="eg">예시 화면</span>
 <div class="card cart gh g2"></div><div class="card cart gh g1"></div>
 <div class="card cart main">
@@ -371,7 +371,7 @@ export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
 <div class="toast"><svg class="ic"><use xlink:href="#v3p-ck"/></svg>128명에게 보냈습니다</div>
 </div>
         
-<div class="sl s3" data-ms="9000">
+<div class="sl s3" data-ms="6000">
 <span class="eg">예시 화면</span>
 <div class="card join">
 <div class="uh">결온 회원가입</div>
@@ -410,7 +410,7 @@ export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
 <div class="toast"><svg class="ic"><use xlink:href="#v3p-ck"/></svg>대상을 고르지 않아도 자동으로 나갑니다</div>
 </div>
         
-<div class="sl s4" data-ms="7500">
+<div class="sl s4" data-ms="5300">
 <span class="eg">예시 화면</span>
 <div class="bn"><small>우리 문자 성공률</small><b><span data-count="98.2" data-dec="1" data-delay="200">0.0</span>%</b><p>잘하고 있는 걸까?</p></div>
 <div class="cmp">
@@ -426,7 +426,7 @@ export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
 </div>
 </div>
         
-<div class="sl s5" data-ms="6000">
+<div class="sl s5" data-ms="4000">
 <div class="card au"><div class="uh">인증 세 가지</div>
 <ul data-auth></ul>
 <button data-act="auth">인증 안내 전체 보기</button></div>

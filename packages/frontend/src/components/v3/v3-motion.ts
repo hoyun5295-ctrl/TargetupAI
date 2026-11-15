@@ -3,7 +3,8 @@
  *
  * 승인된 목업의 스크립트를 그대로 옮긴 것이다(시간표 · 단계 번호 · 그림 속 제품 자리 값 = 목업 값).
  * 화면(React)은 창의 틀과 버튼 동작만 맡고, 장면 안쪽(v3-popup-parts.ts 의 마크업)은 이 파일이 class · data-ph 로 움직인다.
- *   - 넘김: 장면이 끝나면 다음 장면 · 칸을 누르면 그 장면을 처음부터 · 멈추는 조건 셋(마우스가 창 위 · 멈춤 버튼 · 움직임 줄이기)
+ *   - 넘김: 장면이 끝나면 다음 장면 · 칸을 누르면 그 장면을 처음부터 · 멈추는 조건 둘(멈춤 버튼 · 움직임 줄이기 · 마우스가 창 위여도 넘어간다)
+ *     장면 시간(data-ms) = 그 장면의 움직임이 끝나는 시각 + 읽는 여유(잰 값 = 설계서 §12-6)
  *   - 누끼 → 포스터: 단계 1 사진 · 2 선이 내려가며 배경 지움 · 3 카드가 걷히고 제품만 · 4 제품이 포스터 자리로 · 5 완성 · 6 폰(MMS) · 7 걷힘
  *   - 멈춤(무료체험 무대) = 반복 예약을 끊고 그 업종의 완성 장면(문자 도착)에서 선다(어느 단계에서 눌러도 같다)
  *   - 움직임 줄이기 = 처음부터 멈춘 채 · 장면의 결론이 다 보이는 완성 장면
@@ -183,13 +184,14 @@ export function mountLoginIntro(pop: HTMLElement): () => void {
   let i = 0;
   let timer = 0;
   let stopScene: (() => void) | null = null;
-  let hover = false;
   let off = reduce;
-  const msOf = (x: number): number => Number(scenes[x]?.dataset.ms) || 7000;
+  const msOf = (x: number): number => Number(scenes[x]?.dataset.ms) || 5500;
+  // ★ 2026-11-15 (배포 뒤 Harold 「멈춰있는데 · 좀 느리네」 · 설계서 §12-6) — 마우스가 창 위에 있어도 넘어간다. 창이 화면 가운데를 크게 차지해
+  //   마우스가 그 위에 놓여 있기 쉽고, 그러면 내내 멈춘 것으로 보였다. 멈추는 길 = 멈춤 단추 · 움직임 줄이기 둘뿐.
   const arm = (): void => {
     window.clearTimeout(timer);
-    pop.classList.toggle('hold', hover || off);
-    if (!hover && !off) timer = window.setTimeout(() => show(i + 1), msOf(i));
+    pop.classList.toggle('hold', off);
+    if (!off) timer = window.setTimeout(() => show(i + 1), msOf(i));
   };
   function show(x: number): void {
     if (n === 0) return;
@@ -207,8 +209,6 @@ export function mountLoginIntro(pop: HTMLElement): () => void {
     paint();
     pp.addEventListener('click', () => { off = !off; paint(); arm(); }, on);
   }
-  pop.addEventListener('mouseenter', () => { hover = true; arm(); }, on);
-  pop.addEventListener('mouseleave', () => { hover = false; arm(); }, on);
   show(0);
   return () => {
     ac.abort();
