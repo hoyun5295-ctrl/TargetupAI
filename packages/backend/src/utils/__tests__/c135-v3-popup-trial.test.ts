@@ -345,14 +345,78 @@ describe('로그인 화면 스위치 — 비면 꺼짐(열지 않은 기능을 �
     expect(route).toContain("res.setHeader('Cache-Control', 'no-store');");
     const util = front('utils/v3-login-intro.ts');
     expect(util).toContain("fetch('/api/public/intro/v3-login', { signal: ctl.signal })");
-    expect(util).toContain('return d?.success === true && d.on === true;');
-    expect(util).toMatch(/catch \{\s*return false;/);
     expect(util).toContain('export const V3_LOGIN_INTRO_WAIT_MS = 1500;');
     const sw = front('components/v3/LoginNoticeSwitch.tsx');
-    expect(sw).toContain("void fetchV3LoginIntroOn().then((on) => { if (alive) setMode(on ? 'v3' : 'policy'); });");
-    expect(sw).toContain("if (mode === 'wait') return null;");
     expect(sw).toContain("if (mode === 'v3') return <V3LoginIntroModal onClose={onClose} onAuthNotice={() => setMode('policy')} />;");
     expect(sw).toContain('return <LoginPolicyNoticeModal onClose={onClose} />;');
+  });
+
+  // ★ 2026-11-15 배포 직후 접수(설계서 §12-5) — 답을 기다렸다가 창을 띄우면 이미 그려진 로그인 화면 위로 창이 뒤늦게 나타난다(나타나는 중간 장면이 보였다).
+  it('로그인 화면 안내 창은 첫 그림부터 뜬다 — 기다리는 갈래가 없고 · 무엇을 띄울지는 기억한 답 · 서버 답이 다를 때만 바꾼다', () => {
+    const sw = front('components/v3/LoginNoticeSwitch.tsx');
+    const code = sw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/return null/);          // 아무것도 안 띄우는 갈래 0
+    expect(code).not.toContain("'wait'");
+    expect(code).toContain('const first = useRef(rememberedV3LoginIntroOn());');
+    expect(code).toContain("useState<'v3' | 'policy'>(first.current ? 'v3' : 'policy')");
+    // 모르면(null) 그대로 · 첫 그림과 같으면 그대로(사용자가 그 사이 바꾼 창을 되돌리지 않는다)
+    expect(code).toContain("void fetchV3LoginIntroOn().then((on) => { if (alive && on !== null && on !== first.current) setMode(on ? 'v3' : 'policy'); });");
+    const fn = code.slice(code.indexOf('export default function LoginNoticeSwitch'));
+    expect(fn.match(/return </g)).toHaveLength(2);    // 두 갈래 모두 창을 돌려준다
+  });
+});
+
+describe('로그인 화면 V3 안내 창 스위치 — 화면 쪽 읽기(기억 · 서버 답)', () => {
+  const store = new Map<string, string>();
+  let blocked = false;
+  beforeEach(() => {
+    store.clear();
+    blocked = false;
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => { if (blocked) throw new Error('blocked'); return store.has(k) ? store.get(k)! : null; },
+      setItem: (k: string, v: string) => { if (blocked) throw new Error('blocked'); store.set(k, v); },
+    });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const answer = (status: number, body: unknown) => vi.stubGlobal('fetch', vi.fn(async () => ({ ok: status >= 200 && status < 300, json: async () => body })));
+
+  it('받은 적이 없으면 꺼짐(= 종전 인증 안내 창) · 켜짐을 받으면 기억해 다음 첫 그림이 V3 · 꺼짐을 받으면 다시 종전', async () => {
+    const m = await import('../../../../frontend/src/utils/v3-login-intro');
+    expect(m.rememberedV3LoginIntroOn()).toBe(false);
+    answer(200, { success: true, on: true });
+    expect(await m.fetchV3LoginIntroOn()).toBe(true);
+    expect(store.get('v3LoginIntroOn')).toBe('1');
+    expect(m.rememberedV3LoginIntroOn()).toBe(true);
+    answer(200, { success: true, on: false });
+    expect(await m.fetchV3LoginIntroOn()).toBe(false);
+    expect(store.get('v3LoginIntroOn')).toBe('0');
+    expect(m.rememberedV3LoginIntroOn()).toBe(false);
+  });
+
+  it('못 받은 답은 모름(null) — 기억을 고치지 않는다(오류 응답 · 꼴이 다른 응답 · 끊김)', async () => {
+    const m = await import('../../../../frontend/src/utils/v3-login-intro');
+    store.set('v3LoginIntroOn', '1');
+    answer(503, { success: false });
+    expect(await m.fetchV3LoginIntroOn()).toBeNull();
+    answer(200, { on: true });                       // success 가 없는 응답
+    expect(await m.fetchV3LoginIntroOn()).toBeNull();
+    // Codex 1R — on 이 빠졌거나 참 · 거짓이 아닌 응답을 「꺼짐」으로 읽지 않는다(켜 둔 창과 기억이 잘못 바뀐다)
+    for (const body of [{ success: true }, { success: true, on: null }, { success: true, on: 'false' }, { success: true, on: 0 }, null]) {
+      answer(200, body);
+      expect(await m.fetchV3LoginIntroOn()).toBeNull();
+      expect(store.get('v3LoginIntroOn')).toBe('1');
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
+    expect(await m.fetchV3LoginIntroOn()).toBeNull();
+    expect(store.get('v3LoginIntroOn')).toBe('1');
+  });
+
+  it('저장이 막힌 브라우저 = 기억은 꺼짐 · 받은 답은 그대로 돌려준다(던지지 않는다)', async () => {
+    const m = await import('../../../../frontend/src/utils/v3-login-intro');
+    blocked = true;
+    expect(m.rememberedV3LoginIntroOn()).toBe(false);
+    answer(200, { success: true, on: true });
+    expect(await m.fetchV3LoginIntroOn()).toBe(true);
   });
 });
 

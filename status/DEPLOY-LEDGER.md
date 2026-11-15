@@ -79,7 +79,7 @@
 | C132 | 5b7c709d |
 | C133 | 38c3671f |
 | C134 | 미커밋 |
-| C135 | 미커밋 |
+| C135 | 03e5d935 |
 
 ## §1 대기
 
@@ -2153,7 +2153,7 @@ CREATE TABLE IF NOT EXISTS journey_selfcheck_set (
 - 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'image_studio_trials' ORDER BY ordinal_position;
 - 확인: 다섯 줄 · company_id uuid NO · requested_by uuid YES · requested_at timestamp with time zone NO · granted integer NO · used_keys ARRAY NO
-- 결과: (대기)
+- 결과: 1115 15:4x 실행(Harold · 운영 장비 58.227.193.62) · CREATE TABLE · 칸 다섯 줄 기대값과 같음 · 같은 조회에서 user_intro_acks 다섯 줄(user_id uuid NO · intro_key character varying NO · login_marks ARRAY NO · dismissed_at timestamp with time zone YES · updated_at timestamp with time zone NO)도 새 장비에 있음 · 실행 길 = 새 장비의 administrator 가 docker 그룹에 없어 docker 소켓 거절 → root 셸 `usermod -aG docker administrator`(1115 · getent = docker:x:988:administrator) → 그 전에 맺은 접속(1114 22:25)에는 그룹이 안 붙어 `sg docker -c "…"` 로 감싸 실행
 
 > C135-DDL-1 · 배포 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
 
@@ -2171,10 +2171,10 @@ CREATE TABLE IF NOT EXISTS image_studio_trials (
 ### C135-H1 · 한줄로 배포(V3 로그인 팝업 + V3 페이지 + 이미지 스튜디오 무료체험 3회 + 팝업 기록 · 백엔드 + 프론트 · DDL 1 = C135-DDL-1 배포 앞 · ENV 0 = V3_LOGIN_INTRO 비운 채)
 - 카드: C135
 - 단계: 한줄로 배포
-- 선행: 설계 Codex 3R · 목업 Codex 3R · 구현 Codex 3R approve(1115) · 커밋(Harold · 경로를 정해 = scratch/c135/commit-paths.txt · 문안 = scratch/c135/commit-msg.txt · 이 카드의 코드 파일 변경은 전부 C135 줄이고 다른 세션 미커밋 파일에 기대지 않는다 = 1115 git status -vv · import 대조로 확인 → 이 카드만 먼저 올릴 수 있다 · tp-push 는 쓰지 않는다) → C135-DDL-1 확인 출력 → push
+- 선행: 설계 Codex 3R · 목업 Codex 3R · 구현 Codex 3R approve(1115) · 커밋(Harold · 경로를 정해 = scratch/c135/commit-paths.txt · 문안 = scratch/c135/commit-msg.txt · 이 카드의 코드 파일 변경은 전부 C135 줄이고 다른 세션 미커밋 파일에 기대지 않는다 = 1115 git status -vv · import 대조로 확인 → 커밋은 이 카드만 따로 선다 · tp-push 는 쓰지 않는다) → C135-DDL-1 확인 출력 → push(★1115 15:50 차단 = pre-push 가 작업 트리에서 단위 전체를 돌리고 빨간불 1건 = C134 의 의도된 커밋 조건 `journey-selfcheck-set-1115.test.ts` 「통과 표식을 찍는 문장은 CT 한 곳」 · 걸린 줄 = routes/ai.ts 4545행 인라인 · 시험 파일도 routes/ai.ts 도 이 커밋에 없다 · 전례 C55 = 그 세션 정리 뒤 재실행 · `--no-verify` 금지 → 처방 1115 16:0x(Harold 「처방을 하고 배포명령어를」) = C134 설계서 §11 의 남은 한 걸음(routes/ai.ts 켜기 전 점검 라우트의 인라인 표식 → CT `pretestAndMark`)을 작업 트리에서 앞당겨 함 · tsc 0 · 단위 전체 821파일 13,237 전부 통과(1115 16:07) · Codex 증분 1R approve · 이 수정은 이 커밋에 없다(C134 커밋에 실린다) → `git push origin 03e5d935:main` = 이 커밋만)
 - 기대: 설계서 docs/2026-11-15-v3-popup-trial-design.md §10 · 로그인 화면 = 종전 인증 안내 창 그대로(스위치 꺼짐) · 요금제 미가입 + 아직 신청하지 않은 회사의 로그인 직후 창 = 무료체험 창(그 밖의 회사 = 종전 소개 창) · 무료체험을 신청하지 않은 미가입 회사의 이미지 스튜디오 = 종전 요금제 안내 그대로 · 유료 회사 · 30일 AI 체험 중인 회사 = 변화 0(체험 표를 읽지도 않는다) · 직접발송 · 과금 경로 무접촉
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep studioTrialGate ≥ 1 · reserveStudioTrial ≥ 1 · loadStudioTrials ≥ 1 · v3LoginIntroOn ≥ 1 · 프론트 dist 에 about-v3.html 과 v3/poster-serum.jpg 가 있다 · curl -s https://hanjul.ai/api/public/intro/v3-login = {"success":true,"on":false} · curl -sI https://hanjul.ai/about-v3.html 첫 줄 = 200(정적 파일이 그대로 나간다 = 미검증 → 이 값으로 확인) · 재시작 뒤 에러 로그에 studio-trial · image_studio_trials 0줄
-- 결과: (대기)
+- 결과: 1115 16:2x ~ 16:3x 배포(Harold) · push a7426275..03e5d935(이 커밋만) · 서버 pull Fast-forward 57 files · 백엔드 build:safe → 프론트 build:safe → pm2 reload targetup-backend(세 줄을 이어 실행 · 빌드 출력은 받지 못함 · 적재 확인 줄 없이 재시작이 나감 → 뒤 확인 loading=0) · 서버 확인(16:4x) = HEAD 03e5d935 · dist 에 studioTrialGate · reserveStudioTrial · loadStudioTrials · v3LoginIntroOn 각 2파일 · targetup-backend online ↺ 1 · 에러 로그 220줄 중 studio-trial · image_studio_trials 0줄 · 운영 주소 실측(16:37) = /api/public/intro/v3-login {"success":true,"on":false} · /about-v3.html 200 제목 「한줄로 V3」 23,996B · /v3/poster-serum.jpg image/jpeg 51,022B(커밋 파일 크기와 같다) · **배포 직후 접수** = 로그인 화면 인증 안내 창이 반투명하고 뒤 화면이 비쳐 보임(Harold 캡처) → 원인 · 처방 = 설계서 §12-5 → C135-H2
 
 ### C135-S1 · 실측(미가입 시험 계정 · 무료체험 한 바퀴)
 - 카드: C135
@@ -2191,6 +2191,14 @@ CREATE TABLE IF NOT EXISTS image_studio_trials (
 - 의미 바꿈: 예(모든 고객사 로그인 화면의 안내 창이 인증 안내 창 → 한줄로 V3 안내 창 다섯 장면 · 인증 안내는 다섯째 장면과 「인증 안내 전체 보기」로 남는다 · 슈퍼관리자 화면 · 점검 안내 창이 뜨는 동안은 그대로 · 비우면 종전 인증 안내 창으로 돌아간다)
 - 기대: ENV 값 on(그 밖의 값 · 빈 값 = 꺼짐) · 비밀값 아님
 - 확인: restart --update-env 뒤 curl -s https://hanjul.ai/api/public/intro/v3-login = {"success":true,"on":true} · 로그인 화면에 V3 안내 창 · 「V3 자세히 보기」 = /about-v3.html · 「오늘 하루 보지 않기」를 누르면 그날 다시 뜨지 않는다
+- 결과: (대기)
+
+### C135-H2 · 한줄로 배포(로그인 화면 안내 창을 첫 그림부터 띄움 · 배포 직후 접수 고침 · 프론트만 · DDL 0 · ENV 0)
+- 카드: C135
+- 단계: 한줄로 배포
+- 선행: C135-H1 · Codex approve · 커밋(Harold · 경로를 정해 = scratch/c135/fix-paths.txt · 문안 = scratch/c135/fix-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 기대: 설계서 docs/2026-11-15-v3-popup-trial-design.md §12-5 · 로그인 화면의 안내 창이 로그인 화면의 첫 그림과 함께 뜬다(답을 기다렸다가 뒤늦게 나타나지 않는다) · 스위치가 꺼진 지금 = 종전 인증 안내 창 · 배포 전(a7426275)과 같은 동작 · 백엔드 변경 0(시험 파일만) = 재시작 없음
+- 확인: 서버 HEAD · 프론트 build:safe · 운영 로그인 화면을 강력 새로고침해 안내 창이 로그인 화면과 함께 뜨고 반투명 장면이 남지 않는다(Harold 화면) · 그 브라우저의 localStorage v3LoginIntroOn = 0
 - 결과: (대기)
 
 ### C133-DDL-6 · 나눠 보내기 표 둘(설계서 docs/2026-11-13-hanjul-v3-design.md §6 · §18 「배포 C-3」) · ★ 배포 앞
