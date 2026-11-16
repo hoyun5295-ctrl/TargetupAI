@@ -38,6 +38,7 @@ import { emailContentBlocker } from './email/email-send-gate';
 // ★ 2026-07-02 개인화 변수 동적화 — CT-58 회사 실측 프로필(채워진 필드만 노출)
 import { getCompanyDataProfile } from './company-data-profile';
 import type { Section } from './dm/dm-section-registry';
+import { recoOrderOn, markRecoFront } from './dm/dm-reco-order';   // ★ 2026-11-14 C133 F2 ① 받는 분마다 관심 상품을 앞에
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -96,7 +97,11 @@ export interface CreateCampaignInput {
   scheduledAt?: Date;
 }
 
-export interface EmailRecipient { email: string; name?: string; substitutions?: Record<string, string>; customer?: Record<string, any> }
+/**
+ * customerId = 고객 DB 에서 고른 받는 사람의 고객 번호(★ 2026-11-14 C133 F2 ① · 내부용 — 받는 분마다 고르는 판정이 읽는다).
+ *   개인화 값(customer)과 따로 둔다 = 글에 넣는 변수로 나가지 않는다. 직접 입력 · 고객 DB 에 없는 주소 = 없음.
+ */
+export interface EmailRecipient { email: string; name?: string; substitutions?: Record<string, string>; customer?: Record<string, any>; customerId?: string }
 
 export interface SendCampaignInput {
   campaignId: string;
@@ -572,6 +577,8 @@ async function sendEmailCampaignInner(input: SendCampaignInput): Promise<{ messa
   // 섹션 캠페인이면 수신자별로 Section[]을 렌더(변수 치환 + 조건부 표시). 섹션 없으면 기존 html_body 경로(무회귀).
   const campaignSections = Array.isArray(campaign.sections) ? (campaign.sections as Section[]) : [];
   const hasSections = campaignSections.length > 0;
+  // ★ 2026-11-14 C133 F2 ① — 「받는 분마다 관심 상품을 앞에」 판정은 발송 한 번에 한 번(켠 묶음이 있고 추천 상품이 열린 회사)
+  const recoOrder = hasSections && await recoOrderOn(campaignSections, campaign.companyId);
   const brandKit = hasSections ? await getCompanyBrandKit(campaign.companyId) : null;
   // 정보통신망법 §50④ — 전송자 명칭 + 연락처(발신 이메일) + 수신거부 방법 명시
   // ★ 2026-09-27 R226 — 실제 From과 같은 발신자(CT) · From 이름도 이 값으로 보낸다(아래 sendEmail fromName)
@@ -602,7 +609,8 @@ async function sendEmailCampaignInner(input: SendCampaignInput): Promise<{ messa
           if (hasSections) {
             const cust = recipient.customer || { name: recipient.name || '고객' };
             const resolved = resolveEmailSectionsForCustomer(campaignSections, cust);
-            let body = renderEmailSections(resolved, { brandKit, design: campaign.design, publicBase: process.env.PUBLIC_BASE_URL });
+            const ordered = await markRecoFront(resolved, recipient.customerId ?? null, campaign.companyId, recoOrder);
+            let body = renderEmailSections(ordered, { brandKit, design: campaign.design, publicBase: process.env.PUBLIC_BASE_URL });
             body = injectFooter(body, campaign.isAd && !hasUnsubLink(body) ? adFooter : '');
             personalizedHtml = body;
             personalizedSubject = renderEmailTextKeepingTokens(finalSubject, cust, keepKeys);
@@ -894,7 +902,13 @@ const RECIPIENT_PERSONALIZATION_COLS = [
 const RECIPIENT_NUMERIC_COLS = new Set([
   'age', 'points', 'recent_purchase_amount', 'total_purchase_amount', 'purchase_count', 'avg_order_value', 'ltv_score',
 ]);
-const RECIPIENT_SELECT_COLS = RECIPIENT_PERSONALIZATION_COLS.join(', ');
+/**
+ * 받는 사람 SELECT 열 = 고객 번호(customer_id · 내부용) + 개인화 열 — 고객 DB 에서 받는 사람을 고르는 네 조회가 모두 이 조각을 쓴다
+ *   (★ 2026-11-14 C133 Codex 구현 C-2 1R: 번호를 싣지 않아 「받는 분마다 관심 상품을 앞에」가 이메일에서 한 번도 고르지 않았다 ·
+ *    조회 하나가 번호를 빠뜨리면 그 길만 조용히 꺼지므로 열 목록을 한 곳에 둔다). alias = 표 별칭(끝의 점까지 · 예 'c.').
+ */
+const recipientColsSql = (alias = ''): string =>
+  [`${alias}id AS customer_id`, ...RECIPIENT_PERSONALIZATION_COLS.map((col) => `${alias}${col}`)].join(', ');
 
 export interface EmailPersonalizationVar {
   field: string;
@@ -942,6 +956,7 @@ function mapEmailRecipientRow(r: any): EmailRecipient {
     email: String(r.email).trim(),
     name: r.name ? String(r.name) : undefined,
     customer,
+    customerId: r.customer_id ? String(r.customer_id) : undefined,
   };
 }
 
@@ -960,7 +975,7 @@ export async function resolveCustomerRecipients(
     gradeClause = ` AND grade = ANY($${params.length})`;
   }
   const result = await query(
-    `SELECT DISTINCT ON (lower(email)) email, ${RECIPIENT_SELECT_COLS}
+    `SELECT DISTINCT ON (lower(email)) email, ${recipientColsSql()}
      FROM customers
      WHERE company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${gradeClause}${scopeSql}
      ORDER BY lower(email)`,
@@ -988,7 +1003,7 @@ export async function resolveCustomerRecipientsByFilter(
     inputFormat: 'structured',
   });
   const result = await query(
-    `SELECT DISTINCT ON (lower(c.email)) c.email, ${RECIPIENT_PERSONALIZATION_COLS.map((c) => `c.${c}`).join(', ')}
+    `SELECT DISTINCT ON (lower(c.email)) c.email, ${recipientColsSql('c.')}
      FROM customers c
      WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${filterSql}${scopeSql}
      ORDER BY lower(c.email)`,
@@ -1018,7 +1033,7 @@ export async function countCustomerEmailRecipients(companyId: string): Promise<n
  */
 export async function resolveCustomerRecipientsWhere(params: any[], scopeWhere: string, extraWhere: string): Promise<EmailRecipient[]> {
   const result = await query(
-    `SELECT DISTINCT ON (lower(c.email)) c.email, ${RECIPIENT_PERSONALIZATION_COLS.map((col) => `c.${col}`).join(', ')}
+    `SELECT DISTINCT ON (lower(c.email)) c.email, ${recipientColsSql('c.')}
      FROM customers c
      WHERE c.company_id = $1::uuid AND ${RECIPIENT_SAFETY_WHERE}${scopeWhere} ${extraWhere}
      ORDER BY lower(c.email)`,
@@ -1271,7 +1286,7 @@ export async function getCampaignResendRecipients(companyId: string, campaignId:
 
   // 고객DB 매칭 — 안전 필터 통과분(개인화 customer 포함). RECIPIENT_SAFETY_WHERE = 등급/필터 발송 경로와 동일.
   const safeRes = await query(
-    `SELECT DISTINCT ON (lower(email)) lower(email) AS email, ${RECIPIENT_SELECT_COLS}
+    `SELECT DISTINCT ON (lower(email)) lower(email) AS email, ${recipientColsSql()}
      FROM customers
      WHERE company_id = $1::uuid AND lower(email) = ANY($2) AND ${RECIPIENT_SAFETY_WHERE}
      ORDER BY lower(email)`,

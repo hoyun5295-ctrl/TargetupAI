@@ -3461,8 +3461,10 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
     const gate = await journeyGate(req, res);
     if (!gate) return;
     const { companyId } = gate;
-    const { journeyId, message, subject, isAd, channel } = req.body as { journeyId?: string; message?: string; subject?: string; isAd?: boolean; channel?: string };
+    const { journeyId, message, subject, isAd, channel, recoIndex } = req.body as { journeyId?: string; message?: string; subject?: string; isAd?: boolean; channel?: string; recoIndex?: unknown };
     if (!message) return res.json({ success: true, previewMessage: '', previewSubject: '', hasSample: false, sampleName: null });
+    // ★ 2026-11-13 C133 F2 ① — 추천 자리의 판(0부터 · 후보 수 = 대체 문장)을 강제해 본다. 정수가 아니면 표본 고객으로 고른 글(실발송과 같은 고르기).
+    const recoAt = typeof recoIndex === 'number' && Number.isInteger(recoIndex) && recoIndex >= 0 ? recoIndex : undefined;
     const ch = String(channel || 'lms').toLowerCase();
     if (!['sms', 'lms', 'mms'].includes(ch)) return res.status(400).json({ success: false, error: '문자 칸만 받는 모습을 볼 수 있어요.' });
     const jid = journeyId && isUuid(String(journeyId)) ? String(journeyId) : null;
@@ -3479,6 +3481,7 @@ router.post('/operator/journeys/preview-message', async (req: Request, res: Resp
       channel: ch,
       isAd,
       customer: sample,
+      recoIndex: recoAt,
     });
     return res.json({
       success: true,

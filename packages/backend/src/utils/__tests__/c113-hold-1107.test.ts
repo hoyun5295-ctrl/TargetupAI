@@ -233,6 +233,7 @@ describe('구현 1R 구조 — 끝정리 = 판정을 감싸는 finally(던짐 �
     { file: 'utils/continuous-operator.ts', re: /return await dispatchProposalSendBody\(p, capPath, coHold\);\s*\} finally \{\s*if \(coHold\.holding\) await coHold\.settle\(\);/ },
     { file: 'utils/journey-executor.ts', re: /\} finally \{\s*if \(adRelease\.hold\?\.holding\) await adRelease\.hold\.settle\(\[\.\.\.adRelease\.keep\]\);/ },
     { file: 'utils/direct-send-core.ts', re: /\} finally \{\s*await hold\.settle\(\);/ },
+    { file: 'utils/campaign-split.ts', re: /\} finally \{\s*if \(adHold\.holding\) await adHold\.settle\(\);/ },   // ★ 1114 C133 F4 나눠 보내기의 묶음 발송
   ];
   for (const f of FINALLY) it(`${f.file} · ${f.re.source.slice(0, 60)}`, () => expect(code(f.file)).toMatch(f.re));
 
@@ -256,7 +257,7 @@ describe('구현 1R 구조 — 끝정리 = 판정을 감싸는 finally(던짐 �
     expect(files.filter((f) => bespoke.test(f.src)).map((f) => f.rel)).toEqual([]);
     expect(files.filter((f) => f.rel !== 'utils/ad-send-gate.ts' && /\breleaseUnlinkedReservations\(/.test(f.src)).map((f) => f.rel)).toEqual([]);
     const holders = files.filter((f) => /new AdHold\(/.test(f.src)).map((f) => f.rel).sort();
-    expect(holders).toEqual(['routes/campaigns.ts', 'routes/dm.ts', 'utils/agency-send-worker.ts', 'utils/auto-campaign-worker.ts', 'utils/continuous-operator.ts', 'utils/direct-send-core.ts', 'utils/journey-executor.ts', 'utils/planner-executor.ts']);
+    expect(holders).toEqual(['routes/campaigns.ts', 'routes/dm.ts', 'utils/agency-send-worker.ts', 'utils/auto-campaign-worker.ts', 'utils/campaign-split.ts', 'utils/continuous-operator.ts', 'utils/direct-send-core.ts', 'utils/journey-executor.ts', 'utils/planner-executor.ts']);
     expect((files.find((f) => f.rel === 'routes/campaigns.ts')!.src.match(/new AdHold\(/g) || []).length).toBe(4);   // AI · 서버 적재 확정 · 직접 동기 · 브랜드
   });
 });

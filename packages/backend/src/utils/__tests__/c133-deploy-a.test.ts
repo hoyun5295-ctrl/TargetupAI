@@ -189,7 +189,7 @@ describe('라우트 관문', () => {
     const r = code(back('routes/product-insight.ts'));
     expect(r).toContain('router.use(authenticate);');
     const routes = [...r.matchAll(/router\.(get|post)\('([^']+)',\s*(\w+)/g)].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
-    expect(routes).toEqual(['get /summary async', 'get /products guarded', 'get /search-terms guarded', 'post /audience-counts guarded', 'post /audience guarded']);
+    expect(routes).toEqual(['get /summary async', 'get /products guarded', 'get /search-terms guarded', 'post /audience-counts guarded', 'post /audience guarded', 'post /signal-texts guarded', 'get /reco-candidates async']);
     const summary = r.slice(r.indexOf("router.get('/summary'"), r.indexOf("router.get('/products'"));
     expect(summary).not.toMatch(/listProductSignals|listSearchTerms|countViewedNotBought|listViewedNotBought/);
     const g = r.slice(r.indexOf('const guarded ='), r.indexOf("router.get('/summary'"));

@@ -20,6 +20,7 @@ import { findAiFillPlaceholder } from './copy-benefit-detector';
 import { findVarTokens, unknownVarNames } from './var-tokens';
 import { hasCartLiquidVars, detectLiquidSyntax } from './liquid-templating';
 import { scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 D6 막음 글자 판정(글자 CT)
+import { recoSlotIssue, hasRecoMark } from './reco-slot';   // ★ 2026-11-13 C133 F2 ① 추천 상품 자리(순수)
 
 export type SendPlaceholderCode = 'LINK_PLACEHOLDER_UNEDITED' | 'BENEFIT_PLACEHOLDER_UNEDITED';
 
@@ -50,7 +51,7 @@ export function hasUneditedJourneyPlaceholder(text: string | null | undefined): 
   return !!text && JOURNEY_PLACEHOLDER_PATTERN.test(text);
 }
 
-export type JourneyCopyIssueCode = 'PLACEHOLDER_UNEDITED' | 'UNSUPPORTED_CHARS' | 'UNKNOWN_VARIABLE' | 'CART_VARIABLE' | 'SUBJECT_VARIABLE';
+export type JourneyCopyIssueCode = 'PLACEHOLDER_UNEDITED' | 'UNSUPPORTED_CHARS' | 'UNKNOWN_VARIABLE' | 'CART_VARIABLE' | 'SUBJECT_VARIABLE' | 'RECO_SLOT';
 export interface JourneyCopyIssue { code: JourneyCopyIssueCode; message: string }
 
 /**
@@ -62,16 +63,29 @@ export interface JourneyCopyIssue { code: JourneyCopyIssueCode; message: string 
  *   - 제목의 변수 · 개인화 문법 = 제목은 치환하지 않아(messageUtils prepareSendMessage) 글자 그대로 나간다
  *   - ★ 2026-11-06 C109 D6 — 막음 글자(문자로 보낼 수 없고 바꿀 글자도 없는 글자 · smsCharAction block) = 그대로 나가면 통신사가 반려한다(9401).
  *     뺌 · 바꿈 글자(이모지 · 보이지 않는 글자)는 판정하지 않는다(발송 정리가 지금처럼 고친다 · P2).
+ *   - ★ 2026-11-13 C133 F2 ① — 추천 상품 자리(`<추천상품: … || …>`) = 꼴이 틀리거나 · 그 회사에 안 열렸거나 · 문안 A/B 칸이거나 ·
+ *     다른 문법 안에 끼었거나 · 제목에 있으면 막는다(reco-slot recoSlotIssue). 자리 글자가 없는 글 = 이 갈래를 지나지 않는다(판정 결과 종전과 같음).
  */
 export function journeyCopyIssue(
   copy: { bodies: Array<string | null | undefined>; subjects: Array<string | null | undefined> },
-  ctx: { knownVarNames: ReadonlySet<string>; cartJourney: boolean },
+  ctx: {
+    knownVarNames: ReadonlySet<string>; cartJourney: boolean;
+    /** 그 회사에 추천 상품이 열려 있는가(journeyCopyContext · 없으면 닫힘) */
+    recoAllowed?: boolean;
+    /** 그 칸이 문안 A/B 를 쓰는가(추천 자리 판정 · journeyCopyContext 의 넷째 인자 · 없으면 아님) */
+    hasVariants?: boolean;
+  },
 ): JourneyCopyIssue | null {
   const bodies = copy.bodies.map((t) => String(t || ''));
   const subjects = copy.subjects.map((t) => String(t || ''));
   for (const t of [...bodies, ...subjects]) {
     const m = JOURNEY_PLACEHOLDER_PATTERN.exec(t);
     if (m) return { code: 'PLACEHOLDER_UNEDITED', message: `채울 자리(${m[0]})가 남아 있어요. 내용을 직접 적거나 그 줄을 지워 주세요.` };
+  }
+  if (subjects.some((t) => hasRecoMark(t))) return { code: 'RECO_SLOT', message: '제목에는 추천 상품을 넣을 수 없어요. 본문에 넣어 주세요.' };
+  for (const t of bodies) {
+    const why = recoSlotIssue(t, { allowed: ctx.recoAllowed === true, hasVariants: ctx.hasVariants === true });
+    if (why) return { code: 'RECO_SLOT', message: why };
   }
   const blocked: string[] = [];
   for (const [label, list] of [['본문', bodies], ['제목', subjects]] as const) {

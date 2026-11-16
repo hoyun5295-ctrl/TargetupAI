@@ -14,6 +14,7 @@ import { buildAdMessageFront, buildAdSubjectFront, calculateSmsBytes, LMS_SUBJEC
 import { highlightVars, mergeVarsPlain } from '../../utils/highlightVars';
 import { renderLiquid, flattenCustomerForLiquid } from '../../utils/liquid-templating';
 import { stepChannelLabel } from '../../utils/journey-labels';
+import { recoComposedVersions, hasRecoMark } from '../../utils/reco-slot';   // ★ 2026-11-13 C133 F2 ① 추천 상품 자리
 
 export type ComposerChannel = 'sms' | 'lms' | 'mms';
 
@@ -39,13 +40,15 @@ interface Props {
   footer?: ReactNode;
   /** 칸이 바뀌면 [쓰기]로 돌아간다(다른 칸의 받는 모습을 보여 주지 않게). */
   resetKey?: string | number;
+  /** ★ 2026-11-13 C133 F2 ① — 받는 모습에서 볼 추천 상품 판(0부터 · 후보 수 = 대체 문장) · 없으면 고객에게 맞춘 글. */
+  recoIndex?: number;
 }
 
 const MAX_BYTES: Record<ComposerChannel, number> = { sms: 90, lms: 2000, mms: 2000 };
 
 export default function PhoneComposer({
   channel, subject, body, isAd, opt080Number = '', onSubject, onBody, textareaRef, journeyId,
-  sampleCustomer = null, sampleCustomerFields = null, senderLabel, imageCount = 0, placeholder, footer, resetKey,
+  sampleCustomer = null, sampleCustomerFields = null, senderLabel, imageCount = 0, placeholder, footer, resetKey, recoIndex,
 }: Props) {
   const msgType = channel.toUpperCase();
   const readOnly = !onBody;
@@ -60,8 +63,14 @@ export default function PhoneComposer({
   useEffect(() => { setMode('write'); }, [resetKey]);
   // ★ Codex 적대 B8 — 받는 모습 응답은 그 입력의 것이다. 칸 · 문안 · 제목 · 채널 · 광고 표기가 바뀌면 지난 응답 · 진행 중 요청을 버린다.
   useEffect(() => { reqSeq.current++; setServer(null); setServerErr(null); setServerBusy(false); }, [resetKey, body, subject, channel, isAd, journeyId]);
+  // ★ 2026-11-13 C133 F2 ① — 추천 상품 판을 바꾸면 지난 판의 응답 · 진행 중 요청을 버리고, 받는 모습을 보는 중이면 그 판으로 다시 묻는다(openSee 가 차례를 올리고 지난 글을 지운다)
+  useEffect(() => { reqSeq.current++; setServer(null); setServerErr(null); setServerBusy(false); if (mode === 'see') void openSee(); }, [recoIndex]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const composed = useMemo(() => buildAdMessageFront(body || '', msgType, isAd, opt080Number), [body, msgType, isAd, opt080Number]);
+  // ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 글의 바이트 = 완성된 판(후보마다 + 대체 문장) 가운데 가장 큰 것. 판은 서버와 같은 순서로 만든다
+  //   (자리 표식 → 광고 합성 → 판마다 채움 · recoComposedVersions). 자리가 없거나 꼴이 틀리면 null = composed 그대로.
+  const hasReco = hasRecoMark(body);
+  const recoVersions = useMemo(() => (hasReco ? recoComposedVersions(body || '', (masked) => buildAdMessageFront(masked, msgType, isAd, opt080Number)) : null), [hasReco, body, msgType, isAd, opt080Number]);
   // 잠금 줄 = 합성이 실제로 붙인 것만(본문에 이미 있으면 다시 그리지 않는다).
   const adPrefix = isAd && !startsWithAdMark(body || '') ? (channel === 'sms' ? '(광고)' : '(광고) ') : '';
   const footerLine = useMemo(() => {
@@ -70,7 +79,7 @@ export default function PhoneComposer({
     const rest = composed.slice((adPrefix + trimmed).length);
     return rest.startsWith('\n') ? rest.trim() : '';
   }, [composed, body, adPrefix, isAd]);
-  const bytes = useMemo(() => calculateSmsBytes(composed), [composed]);
+  const bytes = useMemo(() => (recoVersions !== null ? Math.max(...recoVersions.map((v) => calculateSmsBytes(v))) : calculateSmsBytes(composed)), [recoVersions, composed]);
   const maxBytes = MAX_BYTES[channel];
   const serverBytes = server ? calculateSmsBytes(server.message) : null;
   const shownBytes = mode === 'see' && serverBytes != null ? serverBytes : bytes;
@@ -79,12 +88,17 @@ export default function PhoneComposer({
 
   /** 화면 치환(초안 · 서버 미리보기를 못 쓸 때) — 샘플이 없으면 원문 그대로(지어낸 값 0). */
   const localSeen = useMemo(() => {
-    const raw = body || '';
-    const merged = sampleCustomer
-      ? mergeVarsPlain(renderLiquid(raw, { customer: flattenCustomerForLiquid(sampleCustomerFields || {}) }).rendered, sampleCustomer, sampleCustomerFields || undefined)
-      : raw;
-    return buildAdMessageFront(merged, msgType, isAd, opt080Number);
-  }, [body, sampleCustomer, sampleCustomerFields, msgType, isAd, opt080Number]);
+    const see = (raw: string) => {
+      const merged = sampleCustomer
+        ? mergeVarsPlain(renderLiquid(raw, { customer: flattenCustomerForLiquid(sampleCustomerFields || {}) }).rendered, sampleCustomer, sampleCustomerFields || undefined)
+        : raw;
+      return buildAdMessageFront(merged, msgType, isAd, opt080Number);
+    };
+    // 초안(서버에 못 묻는 글)의 추천 자리 = 고른 판 · 안 골랐으면 가장 큰 판(바이트) — 판은 서버와 같은 순서로(자리 표식 → 고객 값 · 광고 합성 → 채움)
+    const versions = recoComposedVersions(body || '', see);
+    if (!versions) return see(body || '');
+    return (recoIndex !== undefined ? versions[recoIndex] : undefined) ?? versions.reduce((a, b) => (calculateSmsBytes(b) > calculateSmsBytes(a) ? b : a));
+  }, [body, sampleCustomer, sampleCustomerFields, msgType, isAd, opt080Number, recoIndex]);
 
   const openSee = async () => {
     setMode('see');
@@ -97,7 +111,7 @@ export default function PhoneComposer({
       const r = await fetch('/api/ai/operator/journeys/preview-message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
-        body: JSON.stringify({ journeyId, message: body, subject, isAd, channel }),
+        body: JSON.stringify({ journeyId, message: body, subject, isAd, channel, ...(recoIndex !== undefined ? { recoIndex } : {}) }),
       });
       const d = await r.json().catch(() => ({}));
       if (seq !== reqSeq.current) return;
@@ -221,6 +235,7 @@ export default function PhoneComposer({
         <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[12px]">
           <span className={`tabular-nums ${over ? 'font-semibold text-rose-700' : 'text-slate-600'}`}>{shownBytes.toLocaleString('ko-KR')} / {maxBytes.toLocaleString('ko-KR')}바이트</span>
           {isAd && <span className="text-slate-400">광고 표기 포함</span>}
+          {recoVersions !== null && mode === 'write' && <span className="text-slate-500">추천 상품은 가장 긴 판 기준</span>}
           {mode === 'see' && serverBytes != null && serverBytes !== bytes && (
             <span className="text-slate-500">고객 값이 들어가면 {bytes.toLocaleString('ko-KR')}바이트에서 {serverBytes.toLocaleString('ko-KR')}바이트가 돼요</span>
           )}

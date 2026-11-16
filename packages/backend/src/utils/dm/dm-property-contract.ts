@@ -245,7 +245,7 @@ export const DM_PROBE_CONTEXT: {
     store_info: { address: '서울시 어딘가 1' },
     sns: { channels: [{ type: 'instagram', url: 'https://instagram.com/x', handle: '@x' }] },
     promo_code: { code: 'PROMO1', description: '설명' },
-    product_carousel: { products: [{ image_url: 'https://img.example/p.jpg', name: '상품', price: 10000, link_url: 'https://shop.example/p' }] },
+    product_carousel: { products: [{ image_url: 'https://img.example/p.jpg', name: '상품', price: 10000, link_url: 'https://shop.example/p', signal_text: '최근 30일 조회 12번', signal_name: '상품' }] },
     gallery: { images: [{ url: 'https://img.example/g.jpg', caption: '설명' }] },
     slideshow: { slides: [{ image_url: 'https://img.example/s.jpg', caption: '설명' }] },
     survey: { questions: [{ id: 'q1', type: 'single', question: '질문', options: ['A', 'B'], required: false }] },
@@ -260,6 +260,14 @@ export const DM_PROBE_CONTEXT: {
     'header.event_title': { variant: 'countdown' },
     'header.event_date': { variant: 'countdown' },
     'header.coupon_code': { variant: 'coupon' },
+    // ★ 2026-11-14 C133 F2 ② 반응 숫자 줄은 묶음이 켜져 있을 때만 그린다 — 상품의 글자 · 이름 칸은 켠 바탕에서 탐침한다
+    'product_carousel.products[].signal_text': { show_signal: true },
+    'product_carousel.products[].signal_name': { show_signal: true },
+    // ★ 2026-11-14 C133 F2 ① 받는 분마다 관심 상품을 앞에 — 열람 · 발송 길이 그 받는 사람에게 앞세울 자리(reco_front)를 실은 바탕에서 켬 · 끔이 순서를 바꾸는가
+    'product_carousel.reco_order': { reco_front: 1, products: [
+      { image_url: 'https://img.example/p1.jpg', name: '첫째 상품', price: 10000, link_url: 'https://shop.example/p1' },
+      { image_url: 'https://img.example/p2.jpg', name: '둘째 상품', price: 20000, link_url: 'https://shop.example/p2' },
+    ] },
     'header.discount_label': { variant: 'coupon' },
     'header.logo_size': { logo_url: 'https://img.example/logo.png' },
     'video.autoplay': { video_type: 'direct', video_url: 'https://cdn.example/v.mp4' },
@@ -306,6 +314,9 @@ export const DM_PROBE_CONTEXT: {
     'product_carousel.image_focus': 'bottom',
     'product_carousel.image_height': 'lg',
     'product_carousel.title_size': 'lg',
+    // ★ 2026-11-14 C133 F2 ② 글자는 서버가 만드는 꼴만 그린다(다른 문구 = 그리지 않음) → 탐침 값도 그 꼴 · 이름 칸은 상품 이름과 다르면 줄이 사라진다(출력이 달라진다)
+    'product_carousel.products[].signal_text': '최근 30일 조회 77번',
+    'product_carousel.products[].signal_name': '다른 상품',
     'gallery.layout': 'grid_3x3', // 편집기의 'masonry' 값은 렌더러가 안 읽는다(모자이크는 구도) — [범위 밖] BUGS 등재
     'gallery.full_bleed': true,
     'product_carousel.products[].discount_price': 8000,

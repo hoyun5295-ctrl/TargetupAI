@@ -36,7 +36,8 @@ import { stripAdParts, ensureSenderName } from './messageUtils';
 //   본질 = AI가 어설픈 변수 임의 작성 차단 (Harold 명시: "개인화 어설프게 실수로 들어가는게 더 안좋다").
 import { getCompanyDataProfile, formatProfileForAiPrompt } from './company-data-profile';
 // ★ 2026-11-10 여정 생성물 = %변수% 한 가지(출구 가드 · 장바구니 {{ cart.* }} 만 보존)
-import { journeyNewCopy, journeyRevisedCopy, journeyRevisedKept, hasLiquidTags, LIQUID_TAG_NOTICE } from './journey-ai-copy';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(쓰기 · 고치기)
+import { journeyNewCopy, journeyRevisedCopy, journeyRevisedKept, hasLiquidTags, LIQUID_TAG_NOTICE, RECO_SLOT_NOTICE } from './journey-ai-copy';
+import { hasRecoMark } from './reco-slot';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(쓰기 · 고치기)
 // ★ 2026-08-02 §13-3: 발송 시점 문구는 화면·브리핑과 같은 단일 출처를 쓴다(AI에게 다른 말로 설명하지 않는다).
 import { formatStepTiming, describeJourneyTrigger, describeJourneyTarget } from './journey-step-format';
 // ★ 2026-08-08 이어달리기 — 트리거는 계약이 정한다(AI 출력에 약속을 걸지 않는다). 설계서 §6.
@@ -835,6 +836,7 @@ export async function refineStepMessage(...args: Parameters<typeof refineStepMes
   // ★ 2026-11-11 C126(D5) — 조건 태그({% %})가 든 문안은 AI 가 고치지 않는다(갈래마다 받는 사람이 다른 글 · journey-ai-copy 규칙 ②).
   //   과금 래퍼에 들어가기 전에 안내한다(AI 호출 0 · 과금 0 · 안에 두면 잔액 부족 오류가 안내를 가린다 · Codex 설계 8R).
   if (hasLiquidTags(args[0].currentMessage)) throw new JourneyInputError(LIQUID_TAG_NOTICE);
+  if (hasRecoMark(args[0].currentMessage)) throw new JourneyInputError(RECO_SLOT_NOTICE);   // ★ 2026-11-13 C133 F2 ① 같은 자리 · 같은 까닭(AI 호출 0 · 과금 0)
   // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다듬은 안이 하나라도 남을 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
   const { result } = await runChargedAi({
     companyId: args[0].companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',
@@ -1187,6 +1189,8 @@ export async function regenerateStepAvoidingSpam(
 ): Promise<string | null> {
   // ★ 2026-11-11 C126(D5) — 조건 태그({% %})가 든 문안은 AI 가 다시 쓰지 않는다(자동 교체 없음 = 담당자 안내로 간다 · AI 호출 0 · 과금 0)
   if (hasLiquidTags(input.currentMessage)) return null;
+  // ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 문안도 AI 가 다시 쓰지 않는다(후보는 담당자가 고른 글자 · 걸린 후보를 빼는 것은 담당자가 본문을 고치는 일 · AI 호출 0 · 과금 0)
+  if (hasRecoMark(input.currentMessage)) return null;
   // ★ 2026-10-25 원장 Z4 — 돈 = AI 결과 정산 한 곳(다시 쓴 문안이 나올 때만) · 쓸 결과가 아니면 0원 · 잔액 부족 402 · 원장 쓰기 실패 503 · 바깥 묶음이면 0
   const { result } = await runChargedAi({
     companyId: input.companyId, cost: getCreditCost('journey-ai-refine'), source: 'journey-ai-refine',

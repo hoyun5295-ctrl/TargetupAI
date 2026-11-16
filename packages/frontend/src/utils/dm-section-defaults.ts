@@ -221,9 +221,10 @@ export type FooterProps = {
 
 // ────────────── D216+ 신규 16 Props ──────────────
 
-export type ProductCarouselItem = { id?: string; image_url: string; name: string; price: number; discount_price?: number; discount_rate?: number; link_url?: string; };
+// ★ 2026-11-14 C133 F2 ② signal_text · signal_name = 받는 사람에게 보이는 반응 숫자(서버가 만든 글자를 문서에 고정 · 그 숫자를 센 상품 이름). backend 미러.
+export type ProductCarouselItem = { id?: string; image_url: string; name: string; price: number; discount_price?: number; discount_rate?: number; link_url?: string; signal_text?: string; signal_name?: string; };
 // image_fit: 채우기(cover=꽉 차게·기존 기본) / 맞추기(contain=전체 보임·잘림 X). image_focus: cover일 때 보일 초점(정렬). 미지정=cover/center(회귀 0).
-export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; /* ★ 2026-08-26 제목 크기·색(임은지) — 백엔드 dm-section-registry 미러 */ title_size?: 'sm' | 'md' | 'lg'; title_color?: string; };
+export type ProductCarouselProps = { title?: string; products: ProductCarouselItem[]; show_indicator?: boolean; show_signal?: boolean; reco_order?: boolean; reco_front?: number; image_fit?: 'cover' | 'contain'; image_focus?: 'top' | 'center' | 'bottom'; background_color?: string; caption_bg_color?: string; image_height?: 'sm' | 'md' | 'lg'; /* ★ 2026-08-26 제목 크기·색(임은지) — 백엔드 dm-section-registry 미러 */ title_size?: 'sm' | 'md' | 'lg'; title_color?: string; };
 
 export type GalleryImage = { url: string; caption?: string; link_url?: string; };
 export type GalleryProps = { title?: string; images: GalleryImage[]; layout: 'grid_2x2' | 'grid_3x3' | 'list_1xN' | 'masonry'; enable_zoom?: boolean; enable_fullscreen?: boolean; full_bleed?: boolean; };

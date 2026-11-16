@@ -29,7 +29,8 @@ import { extractJsonFromAiText, aiStr } from './ai-json';
 import { rewriteAddsFacts, EFFICACY_REWRITE_RULE } from './copy-benefit-detector';
 import { rewriteDropsLinks } from './voice-form-slots';
 import { finishMany, copyResponse, type QuickCheck } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
-import { journeyRevisedCopy, journeyRevisedKept, hasLiquidTags, LIQUID_TAG_NOTICE } from './journey-ai-copy';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(고치기)
+import { journeyRevisedCopy, journeyRevisedKept, hasLiquidTags, LIQUID_TAG_NOTICE, RECO_SLOT_NOTICE } from './journey-ai-copy';
+import { hasRecoMark } from './reco-slot';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(고치기)
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 외부 노출 인터페이스
@@ -84,6 +85,10 @@ export async function generateVariantsFromMessage(input: {
   // ★ 2026-11-11 C126(D5) — 조건 태그({% %})가 든 기준 문안은 AI 가 고치지 않는다(갈래마다 받는 사람이 다른 글) · 과금 래퍼 진입 전(AI 호출 0 · 과금 0)
   if (hasLiquidTags(baseMessage)) {
     return { stepId, baseMessage, channel, variants: [], generatedAt: new Date(), warnings: [LIQUID_TAG_NOTICE] };
+  }
+  // ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 칸은 문안 A/B 를 만들지 않는다(검사 판이 변이 × 후보로 불어난다 · AI 호출 0)
+  if (hasRecoMark(baseMessage)) {
+    return { stepId, baseMessage, channel, variants: [], generatedAt: new Date(), warnings: [RECO_SLOT_NOTICE] };
   }
 
   // 회사 정보 (브랜드 톤 + 업종)

@@ -1094,6 +1094,7 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
                     <fieldset disabled={filling} aria-busy={filling} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white disabled:opacity-60">
                       <JourneyStepStudio
                         step={selStudio}
+                        stepUid={selected}
                         first={selected.startsWith(NEW_STEP_PREFIX) ? (detail.steps.length === 0 && newSteps[0]?.tempId === selected) : detail.steps[0]?.id === selected}
                         onPatch={(p) => patchSelected(p)}
                         onAi={() => void runAi()}

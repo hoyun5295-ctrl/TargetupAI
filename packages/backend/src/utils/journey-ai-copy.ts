@@ -13,19 +13,35 @@
  *     ③ 원문에 없던 {{ customer.<아는 칸> … }} 출력 → %표시명%(1 대 1 · 원문에 글자 그대로 있던 출력은 둔다)
  *     ④ 남은 템플릿 토큰 = 전부 출력이어야 하고(태그 = 새 조건문 = null) 그 순서열이 원문의 출력 순서열과 글자 그대로 같아야 한다
  *     ⑤ 렌더 파서가 못 읽는 글 = null
+ *     ⓪ ★ 2026-11-13 C133 F2 ① — 원문이나 결과에 추천 상품 자리 글자열이 있으면 → 결과가 원문과 글자 그대로 같을 때만 통과
+ *        = **추천 상품 자리가 든 글은 AI 가 고치지 않고 · AI 가 자리를 만들어 넣지도 못한다**(후보 · 대체 문장은 담당자가 고른 글자 = 나가는 글자).
+ *        고치는 자리 넷이 전부 이 함수를 지나므로 여정을 통째로 고치는 AI 수정도 함께 닫힌다(Codex 구현 1R 범위 밖 지적).
  *   · 출구 직전 = journeyRevisedKept(최종 글, 원문) — 글자 정리 · 전송자 명칭 붙이기까지 끝난 실제 반환 글이 같은 규칙을 **바꿀 것 없이** 지나야 한다
  *     (정리가 조건식 안 공백을 접거나 `{` 와 `%` 사이 숨은 글자를 지워 새 태그를 만든다 · 회사 이름에 템플릿 문법이 들어 있을 수 있다 · Codex 설계 8R · 9R).
  * 토큰 = 발송 렌더가 쓰는 같은 파서(liquid-templating tokenize) — 정규식으로 따로 해석하지 않는다(1110 교훈).
  */
 import { detectLiquidSyntax, liquidCopyToPercent, liquidTokens } from './liquid-templating';
 import { CUSTOMER_LIQUID_TO_PERCENT } from './standard-field-map';
+import { hasRecoMark } from './reco-slot';
 
 /** 조건 태그가 든 원문에 AI 고치기를 눌렀을 때의 안내(다듬기 · A/B · AI 수정 공용 문장) */
 export const LIQUID_TAG_NOTICE = '조건문({% %})이 든 문안은 AI 가 고치지 않아요. 직접 고쳐 주세요.';
+/** ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 문안도 AI 가 고치지 않는다(후보 · 대체 문장은 담당자가 고르고 본 글자 = 나가는 글자) */
+export const RECO_SLOT_NOTICE = '추천 상품 자리가 든 문안은 AI 가 고치지 않아요. 직접 고쳐 주세요.';
 
 /** 새로 쓰는 여정 AI 글(만들기 · 기념일 칸 · 직접 만든 칸 · 다음 칸 추천) — C122 ④ 변환 그대로 */
 export function journeyNewCopy(aiText: string): string {
   return liquidCopyToPercent(aiText, CUSTOMER_LIQUID_TO_PERCENT);
+}
+
+/**
+ * ★ 2026-11-13 C133 F2 ① — AI 수정이 칸 대응을 고정해야 하는 글인가(템플릿 문법이 있거나 추천 상품 자리가 있다).
+ *   여정을 통째로 고치는 AI 수정(journey-ai-editor)은 그런 칸이 하나라도 있으면 칸 수를 바꾸는 수정을 받지 않고, i번째 결과 칸을 i번째 원래 칸과 대조한다
+ *   (없으면 원문 = 빈 글로 대조한다 = 원문과 대조가 안 된다 → 추천 자리를 지워도 · 그대로 돌려줘도 틀린 답이 났다 · Codex 구현 2R 범위 밖 지적).
+ */
+export function copyPinned(text: string | null | undefined): boolean {
+  const t = String(text ?? '');
+  return detectLiquidSyntax(t) || hasRecoMark(t);
 }
 
 /** 그 글에 태그({% … %})가 있는가 — 렌더 파서가 못 읽는 글도 참(고치지 않는 쪽) */
@@ -39,6 +55,7 @@ export function hasLiquidTags(text: string | null | undefined): boolean {
 export function journeyRevisedCopy(aiText: string | null | undefined, before: string | null | undefined): string | null {
   const ai = String(aiText ?? '');
   const base = String(before ?? '');
+  if (hasRecoMark(base) || hasRecoMark(ai)) return ai === base ? ai : null;
   if (!detectLiquidSyntax(ai) && !detectLiquidSyntax(base)) return ai;
   if (hasLiquidTags(base)) return ai === base ? ai : null;
   let baseOutputs: string[];

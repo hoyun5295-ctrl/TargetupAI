@@ -16,6 +16,7 @@ import {
   listProductSignals, hasProductSignals, listSearchTerms,
   countViewedNotBought, countSearchedCustomers, listViewedNotBought, listSearchedCustomers,
 } from '../utils/product-signal';
+import { recoCandidatesFor, signalTextsFor, SIGNAL_TEXT_NAMES_MAX } from '../utils/product-reco';
 
 const router = Router();
 router.use(authenticate);
@@ -83,5 +84,27 @@ router.post('/audience', guarded('audience', async (req, res, companyId, userId)
     : await listSearchedCustomers(companyId, userId, value);
   return res.json({ success: true, kind, ...list });
 }));
+
+// POST /signal-texts — 상품 묶음(DM · 이메일)의 「반응 숫자 표시」가 받는 글자(★ 2026-11-14 C133 F2 ② · 설계서 §5-3)
+//   관문 = 상품 숫자를 볼 수 있는 요청자(guarded = productInsightOpenFor · 분류코드로 나뉜 담당자에게는 닫는다 = 회사 전체 값).
+//   글자 = 서버가 만든 꼴 그대로 · 조회가 없는 상품 이름은 응답에 없다. 편집기는 받은 글자를 문서에 고정한다(보여 줄 때 다시 세지 않는다).
+router.post('/signal-texts', guarded('signal-texts', async (req, res, companyId) => {
+  return res.json({ success: true, windowDays: PRODUCT_SIGNAL_WINDOW_DAYS, texts: await signalTextsFor(companyId, strList(req.body?.names, SIGNAL_TEXT_NAMES_MAX)) });
+}));
+
+// GET /reco-candidates — 추천 상품 후보 제안(★ 2026-11-13 C133 F2 ① · 설계서 §5-4)
+//   관문 = 추천 상품이 열린 회사만(판정 = product-reco recoCandidatesFor 한 곳 · 여기는 응답 꼴만). 이름만 준다(숫자 없음 = 분류코드로 나뉜 담당자에게도 같은 응답).
+//   live = false → 화면은 「추천 상품」 단추를 그리지 않는다 · hasSignals = false → 단추는 잠그고 이유 한 줄.
+router.get('/reco-candidates', async (req: Request, res: Response) => {
+  try {
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, ...(await recoCandidatesFor(req.user?.companyId ? String(req.user.companyId) : null)) });
+  } catch (err: any) {
+    if (handleDbMigrationError(err, res, 'product_signal_daily')) return;
+    if (respondUserError(res, err)) return;
+    console.error('[product-insight/reco-candidates] 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '추천 상품 후보를 불러오지 못했습니다.' });
+  }
+});
 
 export default router;

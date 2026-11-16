@@ -1061,7 +1061,7 @@ async function activationBlockCore(companyId: string, journeyId: string, opts: {
       }
       // ★ 2026-11-02 보낼 글 판정 = CT-J10(실행기 · 보내기 전 검사 · 칸 저장과 같은 함수 · 없는 변수 · 장바구니 변수 · 제목 변수 · 설계서 3-3 · 3-13)
       if (isTextStep) {
-        const ci = journeyCopyIssue({ bodies: [body], subjects: [ver.subject] }, await journeyCopyContext(companyId, triggerEvent, [body]));
+        const ci = journeyCopyIssue({ bodies: [body], subjects: [ver.subject] }, await journeyCopyContext(companyId, triggerEvent, [body], abRows.length > 0));
         if (ci) return { ...at, cause: ci.code === 'PLACEHOLDER_UNEDITED' ? 'placeholder_unedited' : 'copy_issue', message: `${tag} ${ci.message}` };
       }
       // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수 · ★ C104 판 제목(판 제목 또는 칸 제목)
@@ -1519,10 +1519,12 @@ async function kakaoStepCopyIn(
  */
 async function assertStepCopySendable(run: SqlRunner, companyId: string, stepId: string): Promise<void> {
   const cur = (await run(
-    `SELECT s.channel, s.message_template, s.subject, j.trigger_event FROM journey_steps s JOIN journeys j ON j.id = s.journey_id WHERE s.id = $1::uuid`, [stepId],
+    `SELECT s.channel, s.message_template, s.subject, j.trigger_event,
+            EXISTS (SELECT 1 FROM journey_step_variants v WHERE v.step_id = s.id) AS has_variants
+       FROM journey_steps s JOIN journeys j ON j.id = s.journey_id WHERE s.id = $1::uuid`, [stepId],
   )).rows[0];
   if (!cur || !['sms', 'lms', 'mms'].includes(String(cur.channel || 'lms'))) return;
-  const ci = journeyCopyIssue({ bodies: [cur.message_template], subjects: [cur.subject] }, await journeyCopyContext(companyId, cur.trigger_event, [cur.message_template]));
+  const ci = journeyCopyIssue({ bodies: [cur.message_template], subjects: [cur.subject] }, await journeyCopyContext(companyId, cur.trigger_event, [cur.message_template], cur.has_variants === true));
   if (ci) throw new JourneyStepGateError(ci.message, 'COPY_ISSUE');
 }
 

@@ -24,6 +24,7 @@ import { expandSlidePagesForSwipe, isSwipeImagePage, slideFillClassOf } from './
 import { isCatalogDm, isCatalogEnabled, catalogFirstImageUrl, CATALOG_VIEWPORT_META, renderCatalogOgMeta, renderCatalogCss, renderCatalogHtml, renderCatalogScript, renderCatalogMobileGridButton } from './dm-viewer-catalog';
 // ★ 2026-09-16 장 넘김 효과(settings.effect · 밀어내기 기본 = 미삽입 = 현행 바이트 동일)
 import { effectOf, effectBodyClass, renderEffectCss, renderEffectScript } from './dm-effect';
+import { applyRecoOrder } from './dm-reco-order';   // ★ 2026-11-14 C133 F2 ① 받는 분마다 관심 상품을 앞에
 
 export { inlineImage, youtubeEmbedUrl };
 
@@ -1159,7 +1160,8 @@ export async function renderDmViewerHtmlWithCustomer(
   const fieldMappings = await prepareFieldMappings(companyId);
   for (const p of pages) {
     const resolvedSecs = await resolveSections(p.sections, customer, companyId, fieldMappings);
-    resolvedPages.push({ id: p.id, name: p.name, sections: resolvedSecs });
+    // ★ 2026-11-14 C133 F2 ① — 「받는 분마다 관심 상품을 앞에」를 켠 상품 묶음은 그 고객 기준으로 순서만 바꾼다(고객을 모르면 · 닫힌 회사면 저장 순서)
+    resolvedPages.push({ id: p.id, name: p.name, sections: await applyRecoOrder(resolvedSecs, customer?.id ?? null, companyId) });
   }
   return renderPagesHtml(dm, trackApiBase, resolvedPages, mode);
 }

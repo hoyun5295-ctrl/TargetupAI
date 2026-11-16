@@ -29,6 +29,7 @@ import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026
 import AgencyEmailSendersModal from '../components/admin/AgencyEmailSendersModal'; // ★ 2026-08-26 대행발송 허용 발신 이메일(§18)
 import AgencyMailIntakePanel from '../components/admin/AgencyMailIntakePanel'; // ★ 2026-08-26 대행발송 메일 접수 관제(§18)
 import AgencySendLedgerPanel from '../components/admin/AgencySendLedgerPanel'; // ★ 2026-08-26(2) 대행발송 내역(전 고객사 진행현황)
+import InboundAdminPanel from '../components/admin/InboundAdminPanel'; // ★ 2026-11-14 C133 F5 답장 상담 운영(상담 번호 · 미배정함)
 import { AUDIT_ACTION_COLOR, AUDIT_ACTION_LABEL, formatAuditDetail } from '../constants/audit-action-labels'; // ★ 2026-08-24 감사 액션 한글화 CT
 import { resolveSpamHitSourceLabel, resolveSpamRuleSourceLabel } from '../constants/spam-block-labels'; // ★1003 금칙어 화면 내부 코드 표시명
 import { COMPANY_EMAIL } from '../constants/company';
@@ -99,7 +100,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'inbound' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -2782,6 +2783,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                   { key: 'agencyMail', label: '대행발송 접수' },
                   // ★ 2026-08-26(2) 전 고객사 대행발송 진행현황(진행 레일 + 접수구분 + 고객사·신청자)
                   { key: 'agencyLedger', label: '대행발송 내역' },
+                  // ★ 2026-11-14 C133 F5 답장 상담 — 상담 번호(등록 · 묶기 · 풀기) · 미배정함 · 직접 등록
+                  { key: 'inbound', label: '답장 상담' },
                   // ★ 2026-07-09 CRM 캠페인 대행 설계 — 비즈니스+ 업체 접수 요청서 분석 → 제안서 PDF (별도 페이지)
                   { key: 'campaignAgency', label: '캠페인 대행 설계', onClick: () => navigate('/admin/campaign-agency') },
                 ],
@@ -3028,6 +3031,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
       {/* ★2026-08-26 §18 대행발송 메일 접수 관제 탭 */}
       {activeTab === 'agencyMail' && <AgencyMailIntakePanel />}
       {activeTab === 'agencyLedger' && <AgencySendLedgerPanel />}
+      {activeTab === 'inbound' && <InboundAdminPanel companies={companies} />}
 
       {/* ★2026-08-26 §18 허용 발신 이메일 관리 — 회사 편집 모달 밖의 독립 오버레이(z-[60]).
           확인·알림 모달이 이 아래(문서 뒤쪽)에 렌더되므로 같은 z에서도 위에 뜬다(파일 내 중첩 관례). */}

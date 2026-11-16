@@ -554,6 +554,18 @@ describe('T5 생산자 결과 — AI 수정(패키지)', () => {
     expect(ok.steps[0].messageTemplate).toBe(A);
     expect(ok.steps[1].stepType).toBe('wait');
   });
+  it('★ 1113 C133 추천 상품 자리가 든 칸 = 글자 그대로 돌아와야 한다 · 자리를 지우거나 · 후보를 바꾸거나 · 칸 수 · 칸 종류를 바꾸거나 · 자리를 만들어 넣은 답 = 미적용', async () => {
+    const R = '%고객명%님, <추천상품: 수분크림 | 선크림 || 요즘 많이 찾는 상품> 어떠세요?';
+    const ok = await edit([step(1, R), step(2, PLAIN)], [step(1, R), step(2, '%고객명%님, 가을 신상품이 도착했습니다.')]);
+    expect(ok.steps[0].messageTemplate).toBe(R);
+    expect(ok.steps[1].messageTemplate).toBe('%고객명%님, 가을 신상품이 도착했습니다.');
+    await expect(edit([step(1, R), step(2, PLAIN)], [step(1, '%고객명%님, 요즘 많이 찾는 상품 어떠세요?'), step(2, PLAIN)])).rejects.toThrow(/추천 상품이 든 칸/);   // 자리를 지움
+    await expect(edit([step(1, R), step(2, PLAIN)], [step(1, R.replace('선크림', '립밤')), step(2, PLAIN)])).rejects.toThrow(/추천 상품이 든 칸/);            // 후보를 바꿈
+    await expect(edit([step(1, R), step(2, PLAIN)], [step(1, R), step(2, PLAIN), step(3, '새 칸입니다. 확인해 주세요.')])).rejects.toThrow(/칸 수/);
+    await expect(edit([step(1, R), step(2, PLAIN)], [{ stepOrder: 1, stepType: 'wait', delayHours: 24 }, step(2, PLAIN)])).rejects.toThrow(/추천 상품이 든 칸/);   // 칸 종류를 바꿔 글을 지움
+    await expect(edit([step(1, R), step(2, PLAIN)], [step(1, R), step(2, R)])).rejects.toThrow(/추천 상품이 든 칸/);                                          // 다른 칸에 자리를 만들어 넣음
+    await expect(edit([step(1, PLAIN)], [step(1, R)])).rejects.toThrow(/추천 상품이 든 칸/);                                                                   // 자리가 없던 패키지에 만들어 넣음
+  });
   it('조건값에 연속 공백이 든 원래 칸을 그대로 돌려줘도 글자 정리로 달라지면 미적용', async () => {
     const SP = "{% if customer.grade == 'VIP   A' %}VIP 안내{% endif %}";
     await expect(edit([step(1, SP)], [step(1, SP)])).rejects.toThrow(/조건문이 든 칸/);

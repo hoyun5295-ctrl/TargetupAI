@@ -47,6 +47,7 @@ import AboutGate from './components/AboutGate';   // ★ 2026-10-07 소개 페�
 const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내 — 도움말 봇과 같은 원장 · ★1007 주소 = GUIDE_PATH(도움말 봇 「자세히」로만)
 import { GUIDE_PATH } from './constants/guide-path';
 const AgencySendPage = lazyPage(() => import('./pages/AgencySendPage')); // ★ 2026-08-22 대행발송 셀프 접수
+const InboxPage = lazyPage(() => import('./pages/InboxPage')); // ★ 2026-11-14 C133 F5 답장 상담 상담함(회사 관리자 · 단계 개방)
 const SnsPage = lazyPage(() => import('./pages/SnsPage')); // ★ 2026-09-20 SNS 게시(S1 계정 연결)
 const AgencyApprovePage = lazyPage(() => import('./pages/AgencyApprovePage')); // ★ 2026-08-25 담당자 링크 승인(인증 X)
 const ChargeApprovePage = lazyPage(() => import('./pages/ChargeApprovePage')); // ★ 2026-08-28(3) 충전 승인 링크(인증 X)
@@ -802,6 +803,7 @@ function App() {
         {/* ★ 2026-10-07 소개 페이지 — 숨김(Harold: 허용 계정 hoyun 만 · 미팅 시연용 · 판정 = 서버 /api/ai/about-page/access) */}
         <Route path="/about" element={<PrivateRoute><AboutGate><AboutPage /></AboutGate></PrivateRoute>} />
         <Route path="/agency-send" element={<PrivateRoute><AgencySendPage /></PrivateRoute>} />
+        <Route path="/inbox" element={<PrivateRoute><InboxPage /></PrivateRoute>} />
         {/* ★ 2026-09-20 SNS 채널 — 허브 카드 경로라 PlanGate 가 그 기능 id로 걸려 있어야 한다(계약 테스트 7) */}
         <Route
           path="/sns"

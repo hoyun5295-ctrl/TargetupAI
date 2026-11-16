@@ -231,6 +231,10 @@ export type ProductCarouselItem = {
   discount_price?: number;
   discount_rate?: number;
   link_url?: string;
+  // ★ 2026-11-14 C133 F2 ② 받는 사람에게 보이는 반응 숫자 — 서버가 만든 글자를 문서에 고정한다(보여 줄 때 다시 세지 않는다).
+  //   signal_name = 그 숫자를 센 상품 이름(이름을 바꾸면 줄이 사라진다 = 옛 상품의 숫자가 붙지 않는다). 그리는 조건 = product-signal-text signalLineOf.
+  signal_text?: string;
+  signal_name?: string;
 };
 
 export type ProductCarouselProps = {
@@ -247,6 +251,11 @@ export type ProductCarouselProps = {
   // ★ 2026-08-26 제목 크기·색(임은지 접수) — 미지정 = 현행(md·본문색). DM·이메일 양쪽 렌더러가 함께 소비한다.
   title_size?: 'sm' | 'md' | 'lg';
   title_color?: string;
+  // ★ 2026-11-14 C133 F2 ② 반응 숫자 표시(미지정 = 끔 = 옛 출력 그대로) · F2 ① 받는 분마다 관심 상품을 앞에(열람 · 발송 때 서버가 순서만 바꾼다 · dm-reco-order)
+  show_signal?: boolean;
+  reco_order?: boolean;
+  // reco_front = 그 받는 사람에게 앞세울 상품의 자리 — 열람 · 발송 길이 그 사람 것으로 싣는 값(편집기 속성 아님 · 저장하는 값이 아니다 · dm-reco-order)
+  reco_front?: number;
 };
 
 export type GalleryImage = {

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { LifeBuoy } from 'lucide-react';
+import { useInboxEntry } from '../utils/inbox-status';   // ★ 2026-11-14 C133 F5 답장 상담(열린 회사에서만 서버에 묻는다)
 import { toggleHelp, useHelpEligible } from '../lib/help-open';
 import { HELP_HEADER_BTN } from './help/help-ui';
 
@@ -88,6 +89,9 @@ export default function DashboardHeader({
   const isCalendarLocked = customerDbEnabled === false;
 
   // ★ D88: 구독 만료 시 잠금 핸들러
+  // ★ 2026-11-14 C133 F5 답장 상담 — 상담 번호가 묶인 회사의 관리자에게만 「상담함」(켜기 전에도 보여야 설정에 들어가 켤 수 있다 · 닫힌 회사 = 요청 0)
+  const inbox = useInboxEntry();
+
   const lockGuard = (handler: () => void) => {
     if (isSubscriptionLocked) { onSubscriptionLocked?.(); return; }
     handler();
@@ -136,6 +140,9 @@ export default function DashboardHeader({
     //   ★ 2026-08-20 판정을 서버 플래그(advanced_access_enabled)로 — 코드 하드코딩이 STAFF 4개사를 막고 있었다.
     ...(advancedAccess
       ? [{ label: '캠페인 대행', onClick: () => navigate('/campaign-agency'), color: 'new' as MenuColor, path: '/campaign-agency' }]
+      : []),
+    ...(inbox.live && inbox.numbers.length > 0
+      ? [{ label: inbox.human > 0 ? `상담함 ${inbox.human}` : '상담함', onClick: () => navigate('/inbox'), color: 'new' as MenuColor, path: '/inbox' }]
       : []),
     { label: '수신거부', onClick: () => navigate('/unsubscribes'), color: 'gold', path: '/unsubscribes' },
     // ★ 2026-07-09 (Harold 지시): 'AI 사용량' 헤더 메뉴 제거 — 요금제 미가입 사용자가 다수인 헤더에 둘 이유 없음.

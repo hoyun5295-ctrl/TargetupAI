@@ -38,6 +38,7 @@ async function stepHeldNow(run: (sql: string, params?: any[]) => Promise<{ rows:
 // ★ Phase2 A (2026-06-26): α/β는 실측 count에서 도출(단일 진실) — bandit-arm 순수 모듈.
 import { deriveBanditArm } from './bandit-arm';
 import { JOURNEY_SUBJECT_MAX_CHARS } from './journey-step-limits';
+import { hasRecoMark } from './reco-slot';   // ★ 2026-11-13 C133 F2 ①
 
 // ════════════════════════════════════════════════════════════════════
 // 타입
@@ -546,10 +547,12 @@ export async function createJourneyStepVariant(input: {
     const heldEdit = journey.status === 'active' && await stepHeldNow(run, input.journeyId, input.stepId);
     if (journey.status === 'active' && !heldEdit) throw new JourneyStepGateError('켜진 여정의 A/B 문안은 그 칸이 스팸 검사에 걸려 멈춘 동안만 고칠 수 있어요(나가는 중인 글은 검사 없이 바꾸지 않아요). 바꾸려면 먼저 여정을 멈춰 주세요.', 'JOURNEY_ACTIVE');
     const own = await run(
-      `SELECT channel FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
+      `SELECT channel, message_template FROM journey_steps WHERE id = $1::uuid AND journey_id = $2::uuid`,
       [input.stepId, input.journeyId],
     );
     if (own.rows.length === 0) throw new JourneyStepGateError('이 여정의 칸이 아니에요. 화면을 새로 열어 주세요.', 'STEP_NOT_IN_JOURNEY');
+    // ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 칸 · 글에는 문안 A/B 를 만들지 않는다(검사 판이 변이 × 후보로 불어난다)
+    if (hasRecoMark(own.rows[0].message_template) || hasRecoMark(input.messageTemplate)) throw new JourneyStepGateError('문안 A/B 를 쓰는 칸에는 추천 상품을 넣을 수 없어요.', 'VARIANT_RECO');
     // ★ 2026-10-25 #1(R5) — 변이 = 같은 채널의 다른 글. 채널 · 알림톡 값은 칸 것을 그대로 쓴다(검사 · 재검사 · 실행기가 같은 판을 보게 · journey-step-versions).
     //   알림톡 칸은 승인 템플릿이 본문이라 A/B 문안을 만들지 않는다.
     const stepChannel = String(own.rows[0].channel || '');

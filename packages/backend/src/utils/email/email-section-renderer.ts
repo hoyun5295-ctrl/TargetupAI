@@ -35,6 +35,7 @@ import { normalizeWebUrl, formatKoreanDateTimeDisplay } from '../normalize';
 //   이메일 편집기가 DM의 SectionPropsEditor를 그대로 차용하므로, 여기서 다른 조건을 쓰면
 //   편집기가 감춘 컨트롤을 소비하거나 그 반대가 된다(임은지 접수 후속 — DM만 고쳤던 자리).
 import { ctaLayoutApplies } from '../dm/dm-art-direction';
+import { signalLineOf, recoOrderedProducts } from '../product-signal-text';   // ★ 2026-11-14 C133 F2 ② 상품 반응 숫자 줄
 
 export interface EmailRenderCtx {
   brandKit?: DmBrandKit | null;
@@ -495,7 +496,9 @@ function renderCoupon(p: CouponProps, b: EmailBrand, treatment: string): string 
 }
 
 function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: EmailRenderCtx, treatment: string): string {
-  const items = (p.products || []).filter((x) => x && x.name).slice(0, 6);
+  // ★ 2026-11-14 C133 F2 ① 받는 분마다 관심 상품을 앞에 — 켜져 있고(p.reco_order) 발송 길이 그 받는 사람에게 앞세울 자리를 실었으면 그 상품부터 그린다(없으면 저장 순서).
+  //   순서를 먼저 정하고 이름 없는 항목 거르기 · 6개 자르기를 한다(앞세운 상품이 잘리지 않게).
+  const items = recoOrderedProducts({ reco_order: p.reco_order, reco_front: p.reco_front, products: p.products }).filter((x) => x && x.name).slice(0, 6);
   if (items.length === 0) return '';
 
   // ★ 2026-08-26 편집기 속성 소비(임은지 접수 cmt9gn8of01vujnotzl63acsl) — 배경색·글씨공간 색·
@@ -530,6 +533,11 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       ? `<span style="font-size:${fs};color:${b.primary};font-weight:800">${formatWon(it.discount_price)}</span>${hasPrice ? ` <span style="color:${b.textMuted};text-decoration:line-through;font-size:${b.type.small.size}">${formatWon(it.price)}</span>` : ''}`
       : `<span style="font-size:${fs};color:${b.text};font-weight:800">${formatWon(it.price)}</span>`;
   };
+  // ★ 2026-11-14 C133 F2 ② — 상품 반응 숫자 줄 · 그릴지 = signalLineOf 한 곳(DM 렌더러와 같은 함수) · 아니면 빈 글(옛 출력 그대로)
+  const signalOf = (it: ProductCarouselItem): string => {
+    const text = signalLineOf({ show_signal: p.show_signal }, it);
+    return text ? `<div style="margin-top:${b.sp[1]};font-size:${b.type.small.size};color:${b.textMuted}">${esc(text)}</div>` : '';
+  };
   const linkOf = (it: ProductCarouselItem): string => {
     const normalizedLink = normalizeWebUrl(it.link_url || '');
     return /^https?:\/\//i.test(normalizedLink) ? normalizedLink : '';
@@ -551,7 +559,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       ? `<img src="${esc(img)}" alt="${esc(clampProductName(it.name))}" width="100%" height="${imgH}" style="width:100%;height:${imgH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">`
       : `<div style="width:100%;height:${imgH}px;background:${b.bg};border-radius:${b.radius.sm};font-size:0;line-height:0">&nbsp;</div>`;
     // 상품명은 2줄 분량으로 잘라 카드 높이를 맞춘다(줄 수가 다르면 이미지를 맞춰도 어긋난다).
-    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(clampProductName(it.name)).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+    const meta = `<div style="font-size:${b.type.small.size};color:${b.text};font-weight:600;margin-top:${b.sp[2]};line-height:1.4;min-height:37px">${esc(clampProductName(it.name)).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>${signalOf(it)}`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     const cardTable = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[3]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
     return `<td width="50%" valign="top" class="em-stack" style="padding:${b.sp[2]}">${cardTable}</td>`;
@@ -563,7 +571,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       const img = emailImg(it.image_url, ctx.publicBase);
       const url = linkOf(it);
       const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="${thumbH}" style="width:${thumbH}px;height:${thumbH}px;${imgFitCss};display:block;border:0;border-radius:${b.radius.sm}">` : '';
-      const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>`;
+      const meta = `<div style="font-size:${b.type.body.size};color:${b.text};font-weight:700;line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it)}</div>${signalOf(it)}`;
       const rowInner = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${imgTag ? `<td width="${thumbH}" valign="top" style="padding-right:${b.sp[4]}">${imgTag}</td>` : ''}<td valign="middle">${url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${meta}</a>` : meta}</td></tr></table>`;
       return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[3]} ${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${rowInner}</td></tr></table>`;
     };
@@ -588,7 +596,7 @@ function renderProductCarousel(p: ProductCarouselProps, b: EmailBrand, ctx: Emai
       : `width:100%;display:block;border:0;border-radius:${b.radius.sm}`;
     // width 속성 = style을 못 읽는 뷰어의 폭 계약(위 552 주석과 같은 축). 격자 구도(439행)와 같은 방식.
     const imgTag = img ? `<img src="${esc(img)}" alt="${esc(it.name)}" width="100%" style="${bigStyle}">` : '';
-    const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>`;
+    const meta = `<div style="font-family:${b.displayFont};font-size:${b.type.h3.size};color:${b.text};font-weight:700;margin-top:${b.sp[3]};line-height:1.4">${esc(it.name).replace(/\n/g, '<br>')}</div><div style="margin-top:${b.sp[1]}">${priceOf(it, true)}</div>${signalOf(it)}`;
     const inner = url ? `<a href="${esc(url)}" style="text-decoration:none;color:inherit">${imgTag}${meta}</a>` : `${imgTag}${meta}`;
     focusHtml = `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:${b.sp[2]};${ROUND_CELL_TABLE}"><tr><td style="padding:${b.sp[4]};background:${cardBg};border:1px solid ${b.border};border-radius:14px">${inner}</td></tr></table>`;
   }

@@ -34,10 +34,19 @@ describe('R69 광고 관문 — 발송 입구마다', () => {
   it('공용 발송 입구(createDirectSendCampaign)를 부르는 파일마다 관문 · 원장 묶음이 있다', () => {
     const callers = backend.filter((f) => f.p !== 'utils/direct-send-core.ts' && /await\s+createDirectSendCampaign\(/.test(codeOf(f.src)));
     expect(callers.map((f) => f.p).sort()).toEqual([
-      'routes/campaigns.ts', 'routes/dm.ts', 'utils/agency-send-worker.ts', 'utils/continuous-operator.ts', 'utils/planner-executor.ts',
+      'routes/campaigns.ts', 'routes/dm.ts', 'utils/agency-send-worker.ts', 'utils/campaign-split.ts', 'utils/continuous-operator.ts', 'utils/inbound-sms.ts', 'utils/planner-executor.ts',   // ★ 1114 C133 F4 나눠 보내기 · F5 답장 상담
     ]);
+    // 광고를 보내지 않는 입구(★ 1114 C133 F5 답장 상담 = 고객 문의에 대한 답장) — 관문이 없는 대신 호출마다 adEnabled: false 가 글자로 고정돼 있어야 한다
+    const NON_AD_ONLY = ['utils/inbound-sms.ts'];
     for (const f of callers) {
       const code = codeOf(f.src);
+      if (NON_AD_ONLY.includes(f.p)) {
+        const sends = code.split('await createDirectSendCampaign(').length - 1;
+        expect((code.match(/\badEnabled:\s*false\b/g) || []).length, `${f.p} 호출마다 adEnabled: false`).toBe(sends);
+        expect(/\badEnabled:\s*(?!\s|false\b)/.test(code), `${f.p} adEnabled 가 false 가 아닌 값`).toBe(false);
+        expect(/adGateBatchId:|adTextApplies:/.test(code), `${f.p} 광고 칸을 싣지 않는다`).toBe(false);
+        continue;
+      }
       expect(/gateStaging\(|gatePhones\(/.test(code), `${f.p} 관문 없음`).toBe(true);
       const calls = code.split('createDirectSendCampaign(').length - 1;
       const batches = (code.match(/adGateBatchId:/g) || []).length;
@@ -46,7 +55,7 @@ describe('R69 광고 관문 — 발송 입구마다', () => {
   });
 
   it('원장 잇기 = 원장을 쓴 판정일 때만(대조군 · 우선순위를 안 쓰는 회사 = 잇기 UPDATE 0 · 1106 Harold)', () => {
-    for (const p of ['routes/campaigns.ts', 'routes/dm.ts', 'utils/agency-send-worker.ts', 'utils/continuous-operator.ts', 'utils/planner-executor.ts']) {
+    for (const p of ['routes/campaigns.ts', 'routes/dm.ts', 'utils/agency-send-worker.ts', 'utils/campaign-split.ts', 'utils/continuous-operator.ts', 'utils/planner-executor.ts']) {
       const code = codeOf(backend.find((f) => f.p === p)!.src);
       for (const m of code.matchAll(/adGateBatchId:\s*([^,\n]+)/g)) expect(/[Mm]arked/.test(m[1]), `${p} adGateBatchId = ${m[1]}`).toBe(true);
     }
@@ -70,7 +79,8 @@ describe('R69 광고 관문 — 발송 입구마다', () => {
 
   it('피로도 배열 판정(getFatigueBlockedSet) = HEAD 의 입구 그대로(★ C113 D23 · 관문 CT 는 피로도를 보지 않는다)', () => {
     const users = backend.filter((f) => /getFatigueBlockedSet\(/.test(codeOf(f.src))).map((f) => f.p).sort();
-    expect(users).toEqual(['routes/campaigns.ts', 'utils/auto-campaign-worker.ts', 'utils/fatigue-guard.ts', 'utils/journey-executor.ts']);
+    // ★ 1114 C133 F4 — 나눠 보내기 = AI 한줄로 발송 길과 같은 판정(나가는 날 기준 · 적재 표의 번호 배열) · 관문 길이어도 피로도를 먼저 건다(설계서 §18 배포 C-3 흐름 표 5)
+    expect(users).toEqual(['routes/campaigns.ts', 'utils/auto-campaign-worker.ts', 'utils/campaign-split.ts', 'utils/fatigue-guard.ts', 'utils/journey-executor.ts']);
   });
 
   it('피로도를 기록하는 광고 발송 자리마다 관문이 있다(직접 동기 · AI · 자동 캠페인 · 여정 · 처리기 = 적재 표 경로가 관문을 지난 뒤)', () => {

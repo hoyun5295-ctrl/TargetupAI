@@ -25,8 +25,9 @@ import {
   Eye, ShieldCheck, Lock,
   ChevronDown, Image as ImageIcon,
   Trash2, XCircle, RotateCcw, ChevronRight,
-  Plus, Sparkles, Megaphone, Target,
+  Plus, Sparkles, Megaphone, Target, MessagesSquare,
 } from 'lucide-react';
+import { useInboxEntry } from '../utils/inbox-status';   // ★ 2026-11-14 C133 F5 답장 상담
 import { PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
 import DirectTargetFilterModal, { type FieldMeta } from './DirectTargetFilterModal';
 import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/target-extraction';
@@ -248,6 +249,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ★ D120: 커서 위치 기반 변수 삽입용 ref
   const directTextareaRef = useRef<HTMLTextAreaElement>(null);
   const directCursorPosRef = useRef<number>(0);
+  // ★ 2026-11-14 C133 F5 답장 상담 — 상담을 켠 회사에만 「상담 번호 넣기」(그 회사에 묶인 번호 글자를 본문에 넣는다 · 새 변수 없음)
+  const inbox = useInboxEntry();
 
   // ★ D152+ AI 인라인 다듬기 모달(맞춤법 결과 창에서 연다) = 공용 훅(useSendPrecheck)이 소유(★2026-09-29 R112).
 
@@ -840,6 +843,12 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
                       <Asterisk size={13} strokeWidth={1.75} />
                       <span>특수문자</span>
                     </button>
+                    {inbox.enabled && inbox.numbers.length > 0 && (
+                      <button type="button" className="ds-util ds-t" title="이 번호로 문자하면 상담해 드린다고 안내할 때 넣어요" onClick={() => insertAtCursorPos(directCursorPosRef.current, formatPhoneNumber(inbox.numbers[0]) || inbox.numbers[0], setDirectMessage, directTextareaRef.current, directCursorPosRef)}>
+                        <MessagesSquare size={13} strokeWidth={1.75} />
+                        <span>상담 번호 넣기</span>
+                      </button>
+                    )}
                     <button type="button" className="ds-util ds-t" onClick={() => { loadTemplates(); setShowTemplateBox('direct'); }}>
                       <Archive size={13} strokeWidth={1.75} />
                       <span>보관함</span>

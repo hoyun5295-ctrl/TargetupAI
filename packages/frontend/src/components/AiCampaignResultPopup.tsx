@@ -12,6 +12,8 @@ import SmsCharsetNotice from './SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import TargetRecipientsModal, { arrayPager } from './TargetRecipientsModal';
 import { AI_MESSAGE_CHANNELS, type AiMessageChannel } from '../utils/campaign-axis';
+// ★ 2026-11-14 C133 F4 — 문안을 나눠 보내고 반응 좋은 쪽으로(열린 회사에만 그린다 · 판정은 서버)
+import { SplitSendPanel, SplitStartDialog, useSplitStart } from './split/SplitSend';
 
 interface AiCampaignResultPopupProps {
   show: boolean;
@@ -52,6 +54,10 @@ interface AiCampaignResultPopupProps {
   formatRejectNumber: (num: string) => string;
   targetRecipients?: any[];
   sampleCustomer?: Record<string, string>;
+  // ★ 2026-11-14 C133 F4 나눠 보내기 — 회신번호 목록 · 발신 인증 창 · 시작 뒤 알림(안 넘기면 패널이 회신번호 없이 그려진다)
+  callbackNumbers?: { id: string; phone: string; label: string; is_default: boolean }[];
+  onSenderAuth?: (data: any, retry: () => void) => boolean;
+  onSplitStarted?: () => void;
 }
 
 // 6 sub-agent 흐름 — target/count/channel 즉시 완료, message 진행 중, compliance/schedule 700ms 간격
@@ -91,7 +97,17 @@ export default function AiCampaignResultPopup({
   setSpamFilterData, setShowMmsUploadModal, mmsUploadedImages, setMmsUploadedImages,
   wrapAdText, calculateBytes, optOutNumber, selectedCallback, campaign,
   formatRejectNumber, targetRecipients, sampleCustomer,
+  callbackNumbers, onSenderAuth, onSplitStarted,
 }: AiCampaignResultPopupProps) {
+  // ★ C133 F4 — 나눠 보내기를 켠 동안 · 이 창에서 나눠 보내기를 시작한 뒤에는 「캠페인 확정」(문안 하나 발송)을 잠근다
+  //   (두 길이 한 화면에서 섞이지 않게 · 시작한 뒤 같은 대상에게 문안 하나가 한 번 더 나가지 않게). 잠금은 창을 새로 열 때 풀린다.
+  const [splitOn, setSplitOn] = useState(false);
+  // 시작 요청의 주인 = 이 창(패널이 다시 만들어져도 · 채널을 바꿔도 · 창을 닫았다 열어도 남는다).
+  //   창을 새로 열 때: 켠 상태는 끄고 · 서버의 답을 못 받은 요청은 그대로 둔다(reopen 이 가린다 = 잠금이 이어진다)
+  const split = useSplitStart({ onSenderAuth, onStarted: onSplitStarted });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (show) { setSplitOn(false); split.reopen(); } }, [show]);
+  const splitLocked = splitOn || split.locked;
   const [showLmsAlert, setShowLmsAlert] = useState(false);
   const [lmsAlertBytes, setLmsAlertBytes] = useState(0);
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -156,7 +172,7 @@ export default function AiCampaignResultPopup({
   );
 
   const handleConfirmClick = () => {
-    if (charsetBlocked) return;
+    if (charsetBlocked || splitLocked) return;
     const selectedMsg = aiResult?.messages?.[selectedAiMsgIdx];
     if (selectedChannel === 'SMS') {
       const msg = selectedMsg?.message_text || '';
@@ -654,6 +670,21 @@ export default function AiCampaignResultPopup({
               </div>
             )}
 
+            {/* ★ 2026-11-14 C133 F4 나눠 보내기 — 문안 2개 이상일 때 · 열린 회사에만(패널이 스스로 판정) */}
+            <SplitSendPanel
+              key={aiResult?.messages?.length || 0}
+              messages={aiResult?.messages || []}
+              msgType={selectedChannel}
+              isAd={isAd}
+              targetFilter={aiResult?.target?.filters || {}}
+              defaultName={aiResult?.suggestedCampaignName || ''}
+              defaultCallback={selectedCallback}
+              callbackNumbers={callbackNumbers || []}
+              wrapAdText={wrapAdText}
+              start={split}
+              onActiveChange={setSplitOn}
+            />
+
             {/* 1-click 3 액션 카드 — amber/cyan/emerald color-coded */}
             <div className="grid grid-cols-3 max-md:grid-cols-1 gap-3 pt-2">
               <button
@@ -691,8 +722,8 @@ export default function AiCampaignResultPopup({
 
               <button
                 onClick={handleConfirmClick}
-                disabled={charsetBlocked}
-                title={charsetBlocked ? SMS_CHARSET_BLOCK_MESSAGE : undefined}
+                disabled={charsetBlocked || splitLocked}
+                title={charsetBlocked ? SMS_CHARSET_BLOCK_MESSAGE : split.state.started ? '이 창에서 나눠 보내기를 시작했어요. 다른 발송은 창을 닫고 새로 시작해 주세요' : splitLocked ? '나눠 보내기를 켠 동안에는 위의 「나눠 보내기 시작」으로 보내요' : undefined}
                 className="rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-500/10 border border-emerald-400/40 hover:from-emerald-500/30 hover:to-emerald-500/20 hover:border-emerald-400/60 p-4 text-left transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <div className="flex items-center gap-2 mb-2">
@@ -762,6 +793,9 @@ export default function AiCampaignResultPopup({
         channelLabel={selectedChannel}
         fetchPage={arrayPager(targetRecipients || [])}
       />
+
+      {/* 나눠 보내기 확인 창 — 시작 요청이 떠 있는 동안(어느 단계에서도) */}
+      <SplitStartDialog ctl={split} />
     </div>
   );
 }

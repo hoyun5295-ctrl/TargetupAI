@@ -16,6 +16,9 @@ import { sanitizeUnsendableForSms } from './message-sanitizer';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { journeyCopyIssue, type JourneyCopyIssue } from './send-placeholder-gate';   // ★ 2026-11-02 보낼 글 판정 CT(설계서 3-0 CT-J10)
 import { latestSnapshotSql, loadStepVariantRows, stepSendVersions } from './journey-step-versions';
+import { hasRecoMark, maskRecoSlot, fillRecoSlot, RecoSlotLostError } from './reco-slot';   // ★ 2026-11-13 C133 F2 ① 추천 상품 자리
+import { recoTextFor } from './product-reco';
+import { v3LiveState } from './v3-stage';
 
 export type JourneySmsType = 'SMS' | 'LMS' | 'MMS';
 
@@ -39,6 +42,11 @@ export interface JourneySmsRenderInput {
   shared?: JourneyRenderShared;
   /** ★ 2026-11-02 묶음 발송 — 이 고객 예측 값을 미리 읽었으면(enrichCustomersWithPredictions) 그대로 쓴다 */
   predictionsPreloaded?: boolean;
+  /**
+   * ★ 2026-11-13 C133 F2 ① — 추천 자리를 이 판으로 강제(검사 · 미리보기 · 0 ~ 후보 수 − 1 = 그 후보 · 후보 수 = 대체 문장).
+   *   안 주면 그 고객으로 고른다(실발송 · product-reco pickRecoIndex). 자리가 없는 본문에는 아무 뜻이 없다.
+   */
+  recoIndex?: number;
 }
 
 /** ★ 2026-11-02 렌더 회사 단위 값(필드 매핑 · 080 · 회사 이름) — 같은 값이라 묶음마다 한 번 읽는다(결과 글자 같음) */
@@ -63,11 +71,17 @@ export async function journeyCopyContext(
   companyId: string, triggerEvent: string | null | undefined,
   /** 판정할 본문 — %변수% 가 하나도 없으면 매핑을 읽지 않는다(볼 이름이 없다) */
   bodies: Array<string | null | undefined>,
-): Promise<{ knownVarNames: ReadonlySet<string>; cartJourney: boolean }> {
+  /** ★ 2026-11-13 C133 F2 ① — 그 칸이 문안 A/B 를 쓰는가(켜기 관문 · 켜기 검증 · 칸 저장이 넘긴다 · 추천 자리 판정) */
+  hasVariants: boolean = false,
+): Promise<{ knownVarNames: ReadonlySet<string>; cartJourney: boolean; recoAllowed: boolean; hasVariants: boolean }> {
   const hasVar = bodies.some((t) => findVarTokens(String(t || '')).length > 0);
   return {
     knownVarNames: hasVar ? new Set(Object.keys(await prepareFieldMappings(companyId))) : new Set<string>(),
     cartJourney: String(triggerEvent || '') === CART_TRIGGER_EVENT,
+    // ★ 2026-11-13 C133 F2 ① — 추천 자리가 든 본문이 있을 때만 단계 개방을 읽는다(없으면 조회 0). 닫힘이 확인된 회사만 막는다:
+    //   요금제를 못 읽은 순간(모름)에 이미 검사를 지난 글을 멈추지 않는다 — 나가는 것은 어느 갈래든 담당자가 본 후보 · 대체 문장이다.
+    recoAllowed: bodies.some((t) => hasRecoMark(t)) ? (await v3LiveState('reco', companyId)) !== 'closed' : false,
+    hasVariants,
   };
 }
 /** 장바구니 시작 사건(대상 추출 journey-target-extractor 의 갈래 이름 · 장바구니 값 {{ cart.* }} 이 그 고객 장바구니) */
@@ -94,7 +108,9 @@ export async function renderJourneySmsMessage(input: JourneySmsRenderInput): Pro
   const isAd = resolveJourneyAdFlag(input.channel, input.isAd ?? undefined);
   const { fieldMappings, opt080Number, company } = input.shared ?? await loadJourneyRenderShared(input.companyId, input.createdBy);
 
-  const template = String(input.template || '');
+  // ★ 2026-11-13 C133 F2 ① — 추천 자리(맞는 꼴 하나)를 맨 앞에서 영문 · 숫자 표식으로 바꿔 둔다. 자리가 없으면 reco = null · template = 원문 그대로.
+  const reco = maskRecoSlot(String(input.template || ''));
+  const template = reco ? reco.template : String(input.template || '');
   let customer: Record<string, any> | null = input.customer;
   let externalContext: Record<string, any> = {};
   if (customer) {
@@ -139,14 +155,24 @@ export async function renderJourneySmsMessage(input: JourneySmsRenderInput): Pro
     company,
     externalContext,
   });
-  return { message: prep.message, subject: prep.subject, msgType, isAd };
+  if (!reco) return { message: prep.message, subject: prep.subject, msgType, isAd };
+  // 기존 길(글자 정리 · %변수% · Liquid · 광고 표기)이 끝난 뒤에 표식을 고른 글자로 — 고른 글자는 변수 · 조건 문법으로 다시 읽히지 않는다.
+  //   넣는 글자도 본문과 같은 글자 정리를 거친다(후보는 저장 때 「그대로 나가는 글자」만 받으므로 바뀌는 글자가 없어야 정상).
+  //   ★ Codex 구현 3R #1 — 채우는 이 자리가 마지막 판정: 표식이 정확히 한 번 있어야 한다. 아니면 던진다(RecoSlotLostError).
+  //   Liquid 출력 값이 중괄호를 내거나(고객 값 포함) 남은 태그 지우기가 표식을 함께 지우는 꼴은 고객마다 달라 미리 읽는 판정으로 다 막을 수 없다.
+  //   부르는 쪽: 검사 = 통과 아님(고칠 글) · 실행기 = 그 고객 미발송 · 미리보기 = 사유 문장. 표식을 먼저 확인한다(없으면 고르기 조회도 하지 않는다).
+  if (fillRecoSlot(prep.message, reco.token, '') === null) throw new RecoSlotLostError();
+  const chosen = await recoTextFor(reco.slot, { companyId: input.companyId, customerId: input.customer?.id ?? null, recoIndex: input.recoIndex });
+  const filled = fillRecoSlot(prep.message, reco.token, sanitizeUnsendableForSms(chosen).sanitized);
+  if (filled === null) throw new RecoSlotLostError();
+  return { message: filled, subject: prep.subject, msgType, isAd };
 }
 
 /**
  * ★ 2026-11-16 C139(뿌리 R98 · 설계서 docs/2026-11-16-c139-results-display-design.md 2-1) — 여정 단계 캠페인 행의 대표 본문(문자 칸).
- *   = 위 렌더와 같은 차례(보낼 수 없는 글자 정리 → (광고) 머리 · 080 꼬리 = buildAdMessage)에서 **고객 값만 넣지 않은 글**.
- *   변수(%…%) · Liquid · 외부 값 · 예측 값 · 추천 고르기는 하지 않는다(DB · 망 호출 0).
- *   머리 · 꼬리를 붙이는가 = 원문(변수 자리는 그대로)의 고정 글자로 판정한다 — 변수 값이 판정을 바꾸는 고객(값이 「(광고)」로 시작 ·
+ *   = 위 렌더와 같은 차례(추천 자리 가림 → 보낼 수 없는 글자 정리 → (광고) 머리 · 080 꼬리 = buildAdMessage)에서 **고객 값만 넣지 않은 글**.
+ *   변수(%…%) · Liquid · 외부 값 · 예측 값 · 추천 고르기는 하지 않는다(DB · 망 호출 0). 추천 자리는 표식 글 그대로 되돌린다.
+ *   머리 · 꼬리를 붙이는가 = 원문(변수 · 추천 자리를 가린 채)의 고정 글자로 판정한다 — 변수 값이 판정을 바꾸는 고객(값이 「(광고)」로 시작 ·
  *   「무료수신거부」를 담음)은 받은 글과 이 글이 다르다(대표 본문은 한 고객의 글이 아니다 · 시험 c139-results-display R98-3 반례).
  *   ⛔ 발송 결과 화면 · 캘린더 · 통계 · AI 참고 글이 이 칸을 다시 그린다 — 고객에게 채운 글을 넣지 않는다(옛: 첫 고객의 렌더 결과).
  */
@@ -155,8 +181,12 @@ export function journeySmsDisplayCopy(input: { template: string | null | undefin
   if (!src.trim()) return '';
   const msgType = journeySmsType(input.channel);
   const isAd = resolveJourneyAdFlag(String(input.channel || 'lms'), input.isAd ?? undefined);
-  const sanitized = sanitizeUnsendableForSms(src).sanitized;
-  return buildAdMessage(sanitized, msgType, isAd, input.opt080Number);
+  const reco = maskRecoSlot(src);
+  const sanitized = sanitizeUnsendableForSms(reco ? reco.template : src).sanitized;
+  const wrapped = buildAdMessage(sanitized, msgType, isAd, input.opt080Number);
+  if (!reco) return wrapped;
+  // 표식은 본문에 한 번 있다(buildAdMessage 는 본문 글자를 지우거나 늘리지 않는다) · 그래도 못 되돌리면 표식 글이 새지 않게 가리지 않은 원문으로
+  return fillRecoSlot(wrapped, reco.token, reco.slot.raw) ?? buildAdMessage(sanitizeUnsendableForSms(src).sanitized, msgType, isAd, input.opt080Number);
 }
 
 /**

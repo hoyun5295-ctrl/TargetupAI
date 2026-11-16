@@ -2,10 +2,14 @@ import type { ProductCarouselProps, ProductCarouselItem } from '../../../../util
 import { Field, TextInput, TextArea, Toggle, ImageUploader, Select, ColorOverride } from '../FormControls';
 import { RepeatableList } from '../RepeatableList';
 import type { EditorProps } from '../SectionPropsEditor';
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import MallProductPickerModal, { type PickedMallProduct } from '../../MallProductPickerModal';
 // ★ 2026-07-14 Harold 지시 — 상품 정보 붙여넣기(이름/가격→할인/URL 블록) = 결정적 파서·크레딧 0 (이메일·DM 공용)
 import { parsePastedProducts } from '../../../../utils/product-paste';
+// ★ 2026-11-14 C133 F2 ① ② — 받는 분마다 관심 상품을 앞에 · 반응 숫자 표시(이메일 · DM 공용)
+import { sendJson } from '../../../../utils/dashboard-live';
+import { useV3Feature } from '../../../../utils/v3-features';
+import { signalLineOf, oneTurn, loadSignalTurn } from '../../../../utils/product-signal-text';
 
 export default function ProductCarouselEditor({ props, onUpdate, hidden }: EditorProps<ProductCarouselProps>) {
   const products = props.products || [];
@@ -21,6 +25,36 @@ export default function ProductCarouselEditor({ props, onUpdate, hidden }: Edito
   const [candNote, setCandNote] = useState<string | null>(null);
   // ★ 2026-07-19: 스샷 판독 상품명이 말줄임으로 잘린 경우 — 후보의 전체 이름을 "제안"(자동 교체 금지, 원탭 확정)
   const [nameSuggest, setNameSuggest] = useState<{ idx: number; title: string } | null>(null);
+  // ★ 2026-11-14 C133 F2 ② 반응 숫자 — 켤 때 서버가 만든 글자를 받아 문서에 고정한다(보여 줄 때 다시 세지 않는다). 열리지 않은 회사에는 칸이 없다.
+  const insightLive = useV3Feature('product-insight');
+  const recoLive = useV3Feature('reco');
+  const [signalBusy, setSignalBusy] = useState(false);
+  const [signalNote, setSignalNote] = useState<string | null>(null);
+  // 불러오기 = 한 차례(utils/product-signal-text loadSignalTurn). 차례를 끝내는 것 = 표시 끄기 · 상품 빼기 · 이 편집기가 내려감
+  //   (다른 묶음을 고르면 SectionPropsEditor 가 묶음마다 다시 만든다). 끝난 차례의 응답은 문서 · 안내 · 잠금을 건드리지 않는다.
+  //   응답은 돌아온 순간의 판(now)에 싣는다 — 불러오는 동안 고친 상품 · 다른 칸을 요청 때의 옛 값으로 덮지 않는다.
+  const now = useRef({ products, onUpdate });
+  useLayoutEffect(() => { now.current = { products, onUpdate }; });
+  const signalTurn = useRef(oneTurn()).current;
+  useLayoutEffect(() => () => signalTurn.end(), [signalTurn]);
+  const endSignalTurn = () => { signalTurn.end(); setSignalBusy(false); setSignalNote(null); };
+  const loadSignals = async () => {
+    if (signalBusy) return;
+    setSignalBusy(true);
+    setSignalNote(null);
+    const res = await loadSignalTurn({
+      turn: signalTurn,
+      fetchTexts: async (names) => {
+        const r = await sendJson('/api/product-insight/signal-texts', { method: 'POST', body: { names } });
+        return { ok: r.ok && !!r.body?.success, status: r.status, texts: r.body?.texts };
+      },
+      now: () => now.current,
+    });
+    if (res.kind === 'stale') return;   // 끝난 차례 = 끝낸 쪽이 이미 잠금 · 안내를 풀었다(내려간 화면이면 건드릴 것이 없다)
+    setSignalBusy(false);
+    if (res.kind === 'failed') setSignalNote(res.status === 403 ? '이 계정은 상품 반응 숫자를 쓸 수 없어요.' : '반응 숫자를 불러오지 못했어요. 잠시 뒤 다시 눌러 주세요.');
+    else setSignalNote(res.count > 0 ? `상품 ${res.count}개에 숫자를 붙였어요. 숫자는 지금 값으로 고정돼요.` : '최근 30일 조회가 있는 상품이 없어 붙일 숫자가 없어요.');
+  };
 
   const loadCandidates = async (i: number) => {
     const nm = (products[i]?.name || '').trim();
@@ -288,6 +322,15 @@ export default function ProductCarouselEditor({ props, onUpdate, hidden }: Edito
               </div>
               <div style={{ height: 6 }} />
               <TextInput type="url" value={it.link_url} onChange={(v) => setItem(i, { link_url: v })} placeholder="상품 링크 https://" />
+              {/* ★ 2026-11-14 C133 F2 ② 이 상품에 나갈 반응 숫자(발행물과 같은 판정 = signalLineOf) · 상품마다 뺄 수 있다 */}
+              {(props.show_signal ?? false) && (
+                <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px]">
+                  <span className={signalLineOf(props, it) ? 'text-gray-700' : 'text-gray-400'}>{signalLineOf(props, it) || '붙는 숫자 없음'}</span>
+                  {signalLineOf(props, it) && (
+                    <button type="button" onClick={() => { endSignalTurn(); setItem(i, { signal_text: '', signal_name: '' }); }} className="shrink-0 text-gray-500 underline hover:text-gray-800">이 상품은 빼기</button>
+                  )}
+                </div>
+              )}
             </>
           )}
         />
@@ -297,6 +340,27 @@ export default function ProductCarouselEditor({ props, onUpdate, hidden }: Edito
           점이 가리킬 대상도 없으므로 그 화면에서는 감춘다(눌러도 안 바뀌는 칸을 두지 않는다). */}
       {!hidden?.('show_indicator') && (
         <Field label="인디케이터" hint="상품 3개 이상이면 좌우로 넘기는 슬라이드 · 켜면 하단에 위치 점 표시"><Toggle value={props.show_indicator ?? true} onChange={(v) => onUpdate({ show_indicator: v })} /></Field>
+      )}
+      {/* ★ 2026-11-14 C133 F2 ② 반응 숫자 표시 — 받는 사람에게 「최근 30일 조회 n번」이 상품마다 보인다. 켤 때의 값으로 고정 · 다시 불러오면 새 값 */}
+      {insightLive && (
+        <Field label="반응 숫자 표시" hint="상품마다 최근 30일 조회 수를 보여요 · 켤 때의 값으로 고정돼요">
+          <div className="flex flex-wrap items-center gap-2">
+            <Toggle value={props.show_signal ?? false} onChange={(v) => { if (v) void loadSignals(); else { endSignalTurn(); onUpdate({ show_signal: false }); } }} />
+            {signalBusy && !(props.show_signal ?? false) && <span className="text-[11px] text-gray-500">숫자를 불러오는 중...</span>}
+            {(props.show_signal ?? false) && (
+              <button type="button" onClick={() => void loadSignals()} disabled={signalBusy} className="text-[11px] font-semibold text-gray-600 underline hover:text-gray-900 disabled:opacity-40">
+                {signalBusy ? '불러오는 중...' : '숫자 다시 불러오기'}
+              </button>
+            )}
+          </div>
+          {signalNote && <div className="mt-1 text-[11px] leading-relaxed text-gray-500">{signalNote}</div>}
+        </Field>
+      )}
+      {/* ★ 2026-11-14 C133 F2 ① 받는 분마다 관심 상품을 앞에 — 순서만 바뀐다(상품 · 그림 · 가격 · 링크는 고른 그대로) */}
+      {recoLive && (
+        <Field label="관심 상품을 앞에" hint="받는 분이 최근에 본 상품을 맨 앞에 보여요 · 이미 산 상품은 앞세우지 않아요">
+          <Toggle value={props.reco_order ?? false} onChange={(v) => onUpdate({ reco_order: v })} />
+        </Field>
       )}
       <MallProductPickerModal open={pickerOpen} onClose={() => setPickerOpen(false)} onPick={applyPicked} />
     </>

@@ -33,6 +33,7 @@ import { normalizeWebUrl } from '../normalize';
 import { DM_PRODUCT_CAROUSEL_PER_PAGE } from './dm-property-contract';
 // ★ 2026-07-22 탭 카드 content_type='product_list' 파서(백엔드 미러) — 발행 SSR이 상품 행으로 렌더.
 import { parseTabProductList } from './dm-tab-content';
+import { signalLineOf, recoOrderedProducts } from '../product-signal-text';   // ★ 2026-11-14 C133 F2 ② 상품 반응 숫자 줄
 
 // ────────────── 렌더 컨텍스트 ──────────────
 
@@ -782,7 +783,8 @@ const RENDERERS: { [K in SectionType]: (props: any, ctx: SectionRenderContext, t
 
 // ★ 2026-07-13 디자인 3.0 — product_carousel treatment (classic 2열 / focus 첫 상품 대형 / list 컴팩트 행)
 function renderProductCarousel(p: any, treatment?: string): string {
-  const products = Array.isArray(p?.products) ? p.products : [];
+  // ★ 2026-11-14 C133 F2 ① 받는 분마다 관심 상품을 앞에 — 켜져 있고(p.reco_order) 열람 길이 그 고객에게 앞세울 자리를 실었으면 그 상품부터 그린다(없으면 저장 순서)
+  const products: any[] = recoOrderedProducts({ reco_order: p?.reco_order, reco_front: p?.reco_front, products: Array.isArray(p?.products) ? p.products : [] });
   if (products.length === 0) {
     return `<div class="dm-section dm-product-carousel dm-mood-slot" style="padding:var(--dm-sp-6);text-align:center;color:var(--dm-neutral-400)">[상품을 추가해주세요]</div>`;
   }
@@ -819,7 +821,7 @@ function renderProductCarousel(p: any, treatment?: string): string {
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:${imgH}px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:${imgH}px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
       <div style="padding:10px 12px 12px;flex:1;display:flex;flex-direction:column;background:${cardBg}">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
-        ${priceHtml}
+        ${priceHtml}${productSignalHtml(p, it)}
       </div>`;
     const cardWrapStyle = `${isScroll ? 'flex:0 0 calc(50% - 6px)' : 'width:calc(50% - 8px)'};max-width:220px;box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:16px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`;
     const href = it.link_url ? safeUrl(it.link_url) : '#';
@@ -855,6 +857,15 @@ function renderProductCarousel(p: any, treatment?: string): string {
     <div class="dm-pc-items"${isScroll ? ' data-dm-pcarousel' : ''} style="${itemsStyle}">${itemsInner}</div>
     ${dots}
   </div>`;
+}
+
+/**
+ * ★ 2026-11-14 C133 F2 ② — 상품 반응 숫자 줄(「최근 30일 조회 1,240번」) · 구도 셋 공통.
+ *   그릴지 = product-signal-text signalLineOf 한 곳(켜짐 · 서버가 만든 꼴 · 그 숫자를 센 이름 = 지금 이름) · 아니면 빈 글(줄 없음 = 옛 출력 그대로).
+ */
+function productSignalHtml(p: any, it: any): string {
+  const text = signalLineOf({ show_signal: p?.show_signal }, it);
+  return text ? `<div class="dm-pc-signal" style="margin-top:4px;font-size:var(--dm-fs-tiny);color:var(--dm-neutral-500);font-variant-numeric:tabular-nums">${escapeHtml(text)}</div>` : '';
 }
 
 // 상품 가격 줄 공통 (focus/list 구도용)
@@ -923,13 +934,13 @@ function renderProductFocus(p: any, products: any[]): string {
     ${first.image_url ? `<img src="${escapeHtml(publicImageUrl(first.image_url))}" loading="lazy" alt="${escapeHtml(first.name || '')}" style="width:100%;height:${bigH}px;${fitCss};display:block"/>` : `<div style="width:100%;height:${bigH}px;background:var(--dm-neutral-100)"></div>`}
     <div style="padding:14px 16px 16px;background:${cardBg}">
       <div style="font-size:var(--dm-fs-h3);font-weight:700;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(first.name || '').replace(/\n/g, '<br>')}</div>
-      <div style="margin-top:6px">${productPriceHtml(first, true)}</div>
+      <div style="margin-top:6px">${productPriceHtml(first, true)}</div>${productSignalHtml(p, first)}
     </div>`, `display:block;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:18px;overflow:hidden;box-shadow:var(--dm-shadow-md);width:100%`);
   const restItems = rest.map((it: any) => wrapLink(it, `
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:100%;height:${restH}px;${fitCss};display:block;flex-shrink:0"/>` : `<div style="width:100%;height:${restH}px;background:var(--dm-neutral-100);flex-shrink:0"></div>`}
       <div style="padding:8px 10px 10px;flex:1;display:flex;flex-direction:column;background:${cardBg}">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
-        <div style="margin-top:auto;padding-top:4px">${productPriceHtml(it, false)}</div>
+        <div style="margin-top:auto;padding-top:4px">${productPriceHtml(it, false)}</div>${productSignalHtml(p, it)}
       </div>`, `width:calc(50% - 6px);box-sizing:border-box;display:flex;flex-direction:column;text-decoration:none;color:inherit;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:14px;overflow:hidden;box-shadow:var(--dm-shadow-sm)`)).join('');
   return `<div class="dm-section dm-product-carousel" style="padding:var(--dm-sp-6) var(--dm-sp-5)${sectionBg}">
     ${productTitleHtml(p)}
@@ -949,7 +960,7 @@ function renderProductList(p: any, products: any[]): string {
       ${it.image_url ? `<img src="${escapeHtml(publicImageUrl(it.image_url))}" loading="lazy" alt="${escapeHtml(it.name || '')}" style="width:${thumbH}px;height:${thumbH}px;${fitCss};border-radius:12px;flex-shrink:0"/>` : `<div style="width:${thumbH}px;height:${thumbH}px;background:var(--dm-neutral-100);border-radius:12px;flex-shrink:0"></div>`}
       <div style="flex:1;min-width:0;text-align:left">
         <div style="font-size:var(--dm-fs-small);font-weight:600;color:var(--dm-neutral-900);line-height:1.4;overflow-wrap:break-word">${escapeHtml(it.name || '').replace(/\n/g, '<br>')}</div>
-        <div style="margin-top:4px">${productPriceHtml(it, false)}</div>
+        <div style="margin-top:4px">${productPriceHtml(it, false)}</div>${productSignalHtml(p, it)}
       </div>
       ${it.link_url ? `<span aria-hidden="true" style="color:var(--dm-neutral-400);flex-shrink:0">→</span>` : ''}`;
     const style = `display:flex;align-items:center;gap:12px;padding:10px 12px;background:${cardBg};border:1px solid var(--dm-neutral-200);border-radius:14px;text-decoration:none;color:inherit`;

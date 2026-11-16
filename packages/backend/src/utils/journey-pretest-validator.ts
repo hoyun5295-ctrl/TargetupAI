@@ -23,6 +23,7 @@ import { hasUneditedJourneyPlaceholder, journeyCopyIssue } from './send-placehol
 import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-02 보낼 글 판정 회사 값(CT-J10)
 import { kakaoStepVerdict } from './journey-kakao-step';
 import { UserFacingError } from './http-error';   // ★ 2026-11-05 C103 F1 여정 칸 검사 입력 막힘
+import { hasRecoMark, recoVersionCount, recoVersionLabel, RecoSlotLostError } from './reco-slot';   // ★ 2026-11-13 C133 F2 ① 추천 자리 검사 판
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)   // ★ 2026-11-01 배포 2 C4 — 켜기 관문과 같은 자리 판정
 
 export type FailedReason =
@@ -126,7 +127,7 @@ export async function validateJourneyForActivation(
     for (const msg of messagesToValidate) {
       // a. placeholder 잔존 검증 (옛 D187-fix2 영구 룰 정합) · ★ 2026-11-02 문자 칸 = 보낼 글 판정 CT-J10(실행기 · 켜기 · 칸 저장과 같은 함수)
       const copyIssue = ['sms', 'lms', 'mms'].includes(String(step.channel))
-        ? journeyCopyIssue({ bodies: [msg.body], subjects: [msg.subject] }, await journeyCopyContext(companyId, triggerEvent, [msg.body]))
+        ? journeyCopyIssue({ bodies: [msg.body], subjects: [msg.subject] }, await journeyCopyContext(companyId, triggerEvent, [msg.body], msg.variantId != null))
         : null;
       if (copyIssue && copyIssue.code !== 'PLACEHOLDER_UNEDITED') {
         failedSteps.push({ stepId: step.step_id, variantId: msg.variantId, reason: 'copy_issue', details: copyIssue.message });
@@ -215,7 +216,10 @@ export async function validateJourneyForActivation(
             stepId: step.step_id,
             variantId: msg.variantId,
             reason: 'spam_filter_failed',
-            details: `통신사 차단: ${r.failedCarriers.join(', ')}`,
+            // ★ 2026-11-13 C133 F2 ① — 추천 자리 판 중 걸린 판이 있으면 그 후보 이름을 적는다(고칠 곳 = 후보)
+            details: r.recoBlocked && r.recoBlocked.length > 0
+              ? `추천 상품 후보(${r.recoBlocked.join(', ')})가 스팸 검사에 걸렸어요. 후보에서 빼거나 바꿔 주세요.`
+              : `통신사 차단: ${r.failedCarriers.join(', ')}`,
             matchedStopWords: r.matchedStopWords,
           });
           continue;
@@ -310,6 +314,8 @@ export interface StepSpamTestResult {
   matchedStopWords: string[];
   score: number;
   error?: string;
+  /** ★ 2026-11-13 C133 F2 ① — 추천 자리가 든 글: 차단된 판의 이름표(후보 이름 · 「대체 문장」) */
+  recoBlocked?: string[];
 }
 
 export interface StepSpamParams {
@@ -325,6 +331,8 @@ export interface StepSpamParams {
   variantId?: string;
   /** ★ 2026-11-02 E3-2 — 같은 글 재사용 창(일 · 기본 그날 · 정기 재검사 = 7) */
   reuseDays?: number;
+  /** ★ 2026-11-13 C133 F2 ① — 추천 자리의 이 판만(안 주면 runStepSpamTest · peekStepSpam 이 판 전부로 펼친다 · 부르는 쪽은 주지 않는다) */
+  recoIndex?: number;
 }
 
 /** 판마다 스팸 상태(점검 응답 · ★ 2026-11-01 배포 2 C5) — 차단 · 장애는 failedSteps 가 들고 있다 */
@@ -344,6 +352,7 @@ async function stepSpamInput(params: StepSpamParams) {
     channel: params.channel,
     isAd: params.isAd,
     customer: await pickJourneySampleCustomer(params.companyId, params.journeyId),
+    recoIndex: params.recoIndex,
   });
   // ★ 2026-11-06 C109 E11 · P5(Codex 설계 1R #7 · 4R #1) — 검사 글 = 렌더가 끝난 글(고객 · 회사 · 외부 값 치환 뒤)을 글자 정리 ·
   //   rendered = 큐가 다시 치환하지 않는다(고객 값 속 템플릿 글이 두 번째 치환에서 풀려 새 글자를 만들지 않게) · 칸 글 막음 글자 = CT-J10 이 먼저 막는다
@@ -366,15 +375,42 @@ async function stepSpamInput(params: StepSpamParams) {
  *   null = 검사 전(오늘 같은 글 검사 없음 · 지난 검사가 장애) · 그 밖 = runStepSpamTest 와 같은 꼴의 지금 결과.
  */
 export async function peekStepSpam(params: StepSpamParams): Promise<StepSpamTestResult | null> {
+  const n = params.recoIndex === undefined ? recoVersionCount(params.body) : 0;
+  if (n === 0) return peekOneStepSpam(params);
+  const rs = await Promise.all(Array.from({ length: n }, (_, i) => peekOneStepSpam({ ...params, recoIndex: i })));
+  // ★ Codex 구현 1R #7 — 이미 확정된 차단 · 반려가 있으면 그것부터 알린다(검사 전인 다른 판이 가리지 않게 · 고칠 후보가 이미 정해졌다).
+  //   판 번호가 이름표의 자리이므로 검사 전 판은 통과 자리 표시로 채워 합친다(판정은 차단 · 반려가 이긴다).
+  const settled = rs.some((r) => r !== null && (r.verdict === 'blocked' || r.verdict === 'rejected'));
+  if (!settled && rs.some((r) => r === null)) return null;   // 확정된 걸림 없이 한 판이라도 검사 전 = 검사 전(켜기가 전부 건다)
+  return mergeRecoResults(params.body, rs.map((r) => r ?? PEEK_NOT_YET));
+}
+
+/** 엿보기에서 검사 전인 판의 자리 표시(확정된 걸림이 있을 때만 합치는 데 쓴다 · 판정 순서상 차단 · 반려에 진다) */
+const PEEK_NOT_YET: StepSpamTestResult = { verdict: 'pass', ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 0 };
+
+/**
+ * ★ Codex 구현 3R #1 — 검사 글을 만들다 추천 자리가 사라졌다 = 그 판은 통과가 아니다(고칠 글 · 검사 등록 · 차감 0).
+ *   시연 회사는 지금처럼 검사 글도 만들지 않고 통과로 본다(검사 발송 0 · 1010 [DEMO-LEAK] 계약) — 시연 회사의 실행기는 실제로 보내지 않고,
+ *   렌더는 실행기에서도 같은 불변식을 지난다(자리가 사라진 고객 = reco_slot_lost).
+ */
+const recoLostResult = (err: RecoSlotLostError): StepSpamTestResult =>
+  ({ verdict: 'rejected', ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: err.message });
+
+async function peekOneStepSpam(params: StepSpamParams): Promise<StepSpamTestResult | null> {
   if (await isDemoCompany(params.companyId)) {
     return { verdict: 'pass', ok: true, enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: 100 };
   }
-  const seen = await peekSpamCheck(await stepSpamInput(params));
-  if (!seen || seen.outcome === 'error') return null;   // 장애 = 켜기 · 자동 검사가 새로 건다(등록 함수의 재사용 규칙과 같다)
-  if (seen.outcome !== 'blocked') return { verdict: seen.outcome, ok: seen.outcome === 'pass', enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: seen.outcome === 'pass' ? 100 : 0 };
-  const r = await readSpamTestOutcome(seen.testId);
-  const failedCarriers = r.carrierResults.filter((x) => x.result === 'blocked').map((x) => x.carrier);
-  return { verdict: 'blocked', ok: false, enqueueOk: true, failedCarriers, matchedStopWords: [], score: 0 };
+  try {
+    const seen = await peekSpamCheck(await stepSpamInput(params));
+    if (!seen || seen.outcome === 'error') return null;   // 장애 = 켜기 · 자동 검사가 새로 건다(등록 함수의 재사용 규칙과 같다)
+    if (seen.outcome !== 'blocked') return { verdict: seen.outcome, ok: seen.outcome === 'pass', enqueueOk: true, failedCarriers: [], matchedStopWords: [], score: seen.outcome === 'pass' ? 100 : 0 };
+    const r = await readSpamTestOutcome(seen.testId);
+    const failedCarriers = r.carrierResults.filter((x) => x.result === 'blocked').map((x) => x.carrier);
+    return { verdict: 'blocked', ok: false, enqueueOk: true, failedCarriers, matchedStopWords: [], score: 0 };
+  } catch (err) {
+    if (err instanceof RecoSlotLostError) return recoLostResult(err);   // 검사 글을 만들다 추천 자리가 사라졌다 = 검사 전도 · 통과도 아니다
+    throw err;
+  }
 }
 
 /**
@@ -400,6 +436,9 @@ export async function journeyStepSpamParams(companyId: string, userId: string, j
   const v = variantId ? versions.find((x) => x.variantId === variantId) : versions[0];
   if (!v) throw new UserFacingError(404, 'VARIANT_NOT_FOUND', '고른 문안을 찾을 수 없어요. 새로고침해 주세요.');
   if (!v.body.trim()) throw new UserFacingError(400, 'EMPTY_COPY', '검사할 문안을 먼저 써 주세요.');
+  // ★ 2026-11-13 C133 F2 ① — 이 창은 글 하나의 검사 하나를 보인다. 추천 자리가 든 칸은 나갈 글이 여럿(후보마다 + 대체 문장)이라 켜기 전 점검이 전부 검사한다.
+  //   ponytail: 이 창에서 판을 골라 검사하게 하려면 판 고르기와 판마다의 결과 보기를 붙인다(지금은 한 판만 통과로 보이는 일을 막는 쪽).
+  if (hasRecoMark(v.body)) throw new UserFacingError(400, 'RECO_STEP', '추천 상품이 든 칸은 켜기 전 점검에서 후보마다 검사해요.');
   return {
     companyId, userId, journeyId, callbackNumber,
     body: v.body, subject: v.subject, channel, isAd: resolveJourneyAdFlag(channel, step.is_ad),
@@ -451,7 +490,33 @@ export async function enqueueStepSpamCheck(params: StepSpamParams): Promise<Step
   return { ...(await stepSpamReadOf(input, false)), result };
 }
 
+/**
+ * ★ 2026-11-13 C133 F2 ① — 추천 자리가 든 글의 검사 = 나갈 수 있는 글 전부(후보마다 + 대체 문장 = recoVersionCount).
+ *   펼침이 이 함수 안 한 곳이라 켜기 검증 · 발송 2시간 전 · 주간 재검사 · 재작성 후보 검사(전부 이 함수를 부른다)가 같은 목록을 검사한다.
+ *   판마다 따로 등록 · 차감 · 같은 글 재사용(검사 글 = 그 판으로 렌더한 글) · 함께 기다린다(판 수만큼 30초씩 늘지 않게).
+ *   자리가 없는 글 = 종전 그대로 한 번.
+ */
 export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamTestResult> {
+  const n = params.recoIndex === undefined ? recoVersionCount(params.body) : 0;
+  if (n === 0) return runOneStepSpamTest(params);
+  return mergeRecoResults(params.body, await Promise.all(Array.from({ length: n }, (_, i) => runOneStepSpamTest({ ...params, recoIndex: i }))));
+}
+
+/** 추천 자리 판들의 결과 하나로 — 판정 = 판 여럿의 판정(mergeSpamVerdicts · 전부 통과일 때만 통과) · 차단된 판의 이름표를 싣는다 */
+function mergeRecoResults(body: string, rs: StepSpamTestResult[]): StepSpamTestResult {
+  const verdict = mergeSpamVerdicts(rs.map((r) => r.verdict));
+  const error = rs.map((r) => r.error).filter(Boolean).join(' · ');
+  return {
+    verdict, ok: verdict === 'pass', enqueueOk: rs.every((r) => r.enqueueOk),
+    failedCarriers: [...new Set(rs.flatMap((r) => r.failedCarriers))],
+    matchedStopWords: [...new Set(rs.flatMap((r) => r.matchedStopWords))],
+    score: Math.min(...rs.map((r) => r.score)),
+    ...(error ? { error } : {}),
+    recoBlocked: rs.map((r, i) => (r.verdict === 'blocked' ? recoVersionLabel(body, i) : '')).filter(Boolean),
+  };
+}
+
+async function runOneStepSpamTest(params: StepSpamParams): Promise<StepSpamTestResult> {
   // ★ 2026-10-10 시연 회사 = 실제 검사 발송 0 — 검사하지 않고 통과로 본다(자동마케팅 autoSpamTestWithRegenerate 와 같은 규칙).
   //   옛: 발송 2시간 전 스캐너가 시연 회사도 검사 대기열에 넣어 선불 차감 최후 방어에서 [DEMO-LEAK] 로 막히고 주기마다 다시 시도했다(1010 운영 로그).
   //   판정 조회 실패는 아래 catch 가 받는다(enqueueOk false = 기존 실패 처리 · 스캐너는 다음 주기 재시도).
@@ -461,6 +526,7 @@ export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamT
     }
     const batchId = randomUUID();
     const enqueueResult = await enqueueSpamTest({
+      // ★ Codex 구현 3R #1 — 검사 글을 만들다 추천 자리가 사라지면(RecoSlotLostError) 아래 catch 가 「고칠 글」로 돌려준다(등록 · 차감 전)
       ...(await stepSpamInput(params)),
       source: 'auto_ai',
       // ★ 2026-11-08 C117 D1 뿌리 R84 — 검사 행 variant_id = 자동마케팅 묶음 안 문안 이름표(varchar 10). 여정 변이 행 id(uuid)는 싣지 않는다(옛: 칸 길이 초과로 A/B 칸 검사 · 켜기 검증이 늘 실패)
@@ -484,6 +550,7 @@ export async function runStepSpamTest(params: StepSpamParams): Promise<StepSpamT
       score: spamScore.score,
     };
   } catch (err: any) {
+    if (err instanceof RecoSlotLostError) return recoLostResult(err);
     return { verdict: 'error', ok: false, enqueueOk: false, failedCarriers: [], matchedStopWords: [], score: 0, error: err?.message || 'spam_test_exception' };
   }
 }

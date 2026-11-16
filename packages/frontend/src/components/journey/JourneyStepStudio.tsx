@@ -15,6 +15,7 @@ import { Sparkles, Wand2, Clock, AlertTriangle, Loader2, Gift, Undo2 } from 'luc
 // ★ 2026-08-08 — 미리보기·바이트는 **실제 나가는 형태**로 잰다(백엔드 buildAdMessage 의 프론트 미러).
 //   ★ 2026-10-20 V.3 §9-4 — 쓰는 자리 · 보이는 모습 · 바이트는 큰 휴대폰(PhoneComposer) 한 벌이 맡는다.
 import PhoneComposer from './PhoneComposer';
+import RecoSlotControl from './RecoSlotControl';   // ★ 2026-11-13 C133 F2 ① 추천 상품 줄
 // MMS는 사진이 본체다 — 채널만 바꿔 두고 붙일 자리가 없으면 그 칸은 만들다 만 것이 된다.
 import JourneyMmsUploader from './JourneyMmsUploader';
 // ★ 2026-08-08 — 혜택·링크 자리는 텍스트 수술이 아니라 값 입력으로 채운다(판정·치환 단일 정의).
@@ -66,6 +67,11 @@ interface Props {
   opt080Number?: string;
   /** 저장된 여정이면 [받는 모습]을 서버 미리보기로(이 여정 대상 고객 1명 · 발송 치환 함수). */
   journeyId?: string;
+  /**
+   * ★ 2026-11-13 C133 F2 ① — 그 칸의 고유 식별자(저장된 칸 id · 새 칸 임시 id). 칸마다 따로 가져야 하는 편집 상태(추천 상품 줄)의 key.
+   *   칸 순서 번호는 칸을 빼고 더하면 겹친다(뺄 칸이 남은 채 새 칸이 같은 번호를 받는다 · Codex 구현 2R #5). 없으면 순서 번호.
+   */
+  stepUid?: string;
   /** 휴대폰 머리 줄 보낸 사람(회신번호). */
   senderLabel?: string;
   /** 화면에 넣을 수 있는 변수(회사 보유 컬럼 · `%` 없는 이름). */
@@ -117,7 +123,7 @@ const chip = (on: boolean) =>
 
 export default function JourneyStepStudio({
   step, first, onPatch, onAi, onDecorate, onUndoAi, onFillBenefit, onFillUrl, factsUnset, benefitSlots = false, urlSlots = false,
-  sampleCustomer = null, sampleCustomerFields = null, opt080Number = '', journeyId, senderLabel,
+  sampleCustomer = null, sampleCustomerFields = null, opt080Number = '', journeyId, stepUid, senderLabel,
   variables = [], decorateVars = [], triggerLabel, aiBusy = false,
   lockChannel = false, lockTiming = false, lockNote, headerActions, notifyControl, copyLock,
 }: Props) {
@@ -133,6 +139,10 @@ export default function JourneyStepStudio({
   const [customDelayOpen, setCustomDelayOpen] = useState(false);
   const stepKey = step.stepOrder;
   useEffect(() => { setCustomDelayOpen(false); }, [stepKey]);   // 칸을 옮기면 그 칸 값 기준으로 다시 판단한다
+  // ★ 2026-11-13 C133 F2 ① — 받는 모습에서 볼 추천 상품 판(칸을 옮기면 고객에게 맞춘 글로 되돌린다)
+  const recoKey = stepUid ?? String(stepKey);
+  const [recoView, setRecoView] = useState<number | undefined>(undefined);
+  useEffect(() => { setRecoView(undefined); }, [recoKey]);
 
   /**
    * ★ 2026-08-08 (Harold 지시) — **이미 문안에 쓰인 컬럼은 처음부터 선택돼 있다.**
@@ -163,8 +173,9 @@ export default function JourneyStepStudio({
   const nightHit = hourFixed && step.targetHourKst != null && !!sendPolicy && !isSendableHour(sendPolicy, Number(step.targetHourKst));
   const factsRow = (benefitSlots && onFillBenefit) || (urlSlots && onFillUrl) || (factsUnset && (onFillBenefit || onFillUrl));
 
-  const insertVar = (name: string) => {
-    const token = `%${name}%`;
+  const insertVar = (name: string) => insertText(`%${name}%`);
+  /** 본문 커서 자리에 글자를 넣는다(변수 · 추천 상품 자리가 같은 길) */
+  const insertText = (token: string) => {
     const ta = taRef.current;
     const body = step.messageTemplate || '';
     if (!ta) {
@@ -223,6 +234,7 @@ export default function JourneyStepStudio({
             imageCount={channel === 'mms' ? (step.mmsImagePaths?.length ?? 0) : 0}
             placeholder="이 칸에서 보낼 문안이에요. 비워 두고 AI 문안 쓰기를 눌러도 돼요."
             resetKey={stepKey}
+            recoIndex={recoView}
           />
           )}
         </div>
@@ -297,6 +309,18 @@ export default function JourneyStepStudio({
             </Row>
           )}
 
+          {/* 추천 상품 — 받는 분마다 관심 상품 이름이 한 자리에(★ 2026-11-13 C133 F2 ① · 열린 회사에만 줄이 생긴다 · 알림톡 칸 = 승인 템플릿이 본문이라 없음) */}
+          {!copyLock && step.channel !== 'kakao' && (
+            <RecoSlotControl
+              key={recoKey}   /* 칸마다 새 편집 상태 — 앞 칸에서 열어 둔 후보 · 대체 문장이 새 칸을 덮지 않게(Codex 구현 1R #4 · 2R #5 = 고유 식별자) */
+              body={step.messageTemplate || ''}
+              onInsert={insertText}
+              onBody={(next) => onPatch({ messageTemplate: next })}
+              viewIndex={recoView}
+              onViewIndex={setRecoView}
+              wrap={(children) => <Row name="추천 상품">{children}</Row>}
+            />
+          )}
           {/* 넣을 데이터 — 회사가 가진 컬럼만(우리가 지어내지 않는다) · 0이어도 줄을 숨기지 않는다(왜 없는지 보이게) */}
           {!copyLock && (
           <Row name="넣을 데이터">

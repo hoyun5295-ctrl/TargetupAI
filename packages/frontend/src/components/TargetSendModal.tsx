@@ -1,4 +1,4 @@
-import { Sparkles, Users, Eye, Type, Archive, Save, ImagePlus, Bell, Search, RotateCcw, Trash2, Wand2, Loader2, Megaphone, Server, RefreshCw, X, Plus, ChevronDown, Link2 } from 'lucide-react';
+import { Sparkles, Users, Eye, Type, Archive, Save, ImagePlus, Bell, Search, RotateCcw, Trash2, Wand2, Loader2, Megaphone, Server, RefreshCw, X, Plus, ChevronDown, Link2, MessagesSquare } from 'lucide-react';
 import SendWorkspaceShell, { FIELD_CLASS_INDIGO, WorkspaceNotice } from './shared/SendWorkspaceShell';
 import { creditText } from '../constants/credit';
 import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
@@ -6,6 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
 import { formatByType, buildAdMessageFront, replaceVarsByFieldMeta, getMaxByteMessage, cellToString } from '../utils/formatDate';
 import { insertAtCursor } from '../utils/textInsert';
+import { useInboxEntry } from '../utils/inbox-status';   // ★ 2026-11-14 C133 F5 답장 상담
+import { formatPhoneNumber as formatInboxNumber } from '../utils/formatDate';
 import BrandLinkChips from './BrandLinkChips';
 import MmsImagePreview from './shared/MmsImagePreview';
 import SmsCharsetNotice from './SmsCharsetNotice';
@@ -243,6 +245,8 @@ export default function TargetSendModal({
   // ★ D101: 수신자 선택삭제 — 키 = 번호(숫자만) · ★0929 R112 빼기는 서버 보관본에서 한다
   const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
   const smsTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // ★ 2026-11-14 C133 F5 답장 상담 — 상담을 켠 회사에만 「상담 번호 넣기」(그 회사에 묶인 번호 글자를 본문에 넣는다 · 새 변수 없음)
+  const inbox = useInboxEntry();
   // ★ 2026-08-21 AI 꾸미기 — 처리 중 잠금 + 적용 직전 원문(되돌리기 1회). 사용자가 본문을 고치면 되돌리기는 사라진다.
   const [decorating, setDecorating] = useState(false);
   const [decorateUndo, setDecorateUndo] = useState<string | null>(null);
@@ -647,6 +651,12 @@ export default function TargetSendModal({
             </div>
             <div className="flex items-center gap-1.5 flex-wrap">
               <button type="button" onClick={() => setShowSpecialChars('target')} className={TOOL_BTN}><Type className="w-3.5 h-3.5" />특수문자</button>
+              {inbox.enabled && inbox.numbers.length > 0 && (
+                <button
+                  type="button" className={TOOL_BTN} title="이 번호로 문자하면 상담해 드린다고 안내할 때 넣어요"
+                  onClick={() => { const n = formatInboxNumber(inbox.numbers[0]) || inbox.numbers[0]; if (!insertAtCursor(smsTextareaRef.current, n, setTargetMessage)) setTargetMessage(targetMessage + n); }}
+                ><MessagesSquare className="w-3.5 h-3.5" />상담 번호 넣기</button>
+              )}
               <button type="button" onClick={() => { loadTemplates(); setShowTemplateBox('target'); }} className={TOOL_BTN}><Archive className="w-3.5 h-3.5" />보관함</button>
               <button type="button" onClick={() => { if (!targetMessage.trim()) { setToast({show: true, type: 'error', message: '저장할 메시지를 먼저 입력해주세요.'}); setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000); return; } setTemplateSaveName(''); setShowTemplateSave('target'); }} className={TOOL_BTN}><Save className="w-3.5 h-3.5" />문자 저장</button>
 

@@ -72,6 +72,7 @@ import { judgeLoadUnit, recordLoadUnit, clearLoadUnit, confirmLoadUnit } from '.
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
 import { renderJourneySmsMessage, loadJourneyRenderShared, journeyCopyContext } from './journey-message-render';
+import { RecoSlotLostError } from './reco-slot';   // ★ 2026-11-13 C133 F2 ① 추천 자리가 사라진 렌더
 import { flattenLiquidToPlainText } from './liquid-templating';
 import { readOwnerConsentForCustomers } from './mall-consent';
 // ★ §11-5(§5-1) — 종료 신호는 트리거 계약(단일 출처)에서 파생한다.
@@ -877,7 +878,7 @@ async function processMessageBatchBody(
   if (renderQueue.length > 0) {
     const shared = isKakao ? null : await loadJourneyRenderShared(head.company_id, head.created_by);
     const enriched = isKakao ? renderQueue.map((q) => q.customer) : await enrichCustomersWithPredictions(renderQueue.map((q) => q.customer), head.company_id);
-    const rendered: Array<{ q: typeof renderQueue[number]; message: string; subject: string; variantId: string | null }> = [];
+    const rendered: Array<{ q: typeof renderQueue[number]; message: string; subject: string; variantId: string | null; recoLost?: boolean }> = [];
     for (let k = 0; k < renderQueue.length; k++) {
       const q = renderQueue[k];
       let rowStep = step;
@@ -893,11 +894,13 @@ async function processMessageBatchBody(
         const message = fillAlimtalkVarMap(String(kakaoTemplateRow.content || ''), rowStep.alimtalk_variable_map || {}, customerWithEvent, undefined, buildDefaultFallbacks(rowStep.alimtalk_variable_map || {}));
         rendered.push({ q, message, subject: rowStep.alimtalk_next_subject || '', variantId });
       } else {
+        // ★ 2026-11-13 C133 F2 ①(Codex 구현 3R #1) — 추천 자리가 이 고객의 글에서 사라졌으면(RecoSlotLostError) 그 고객에게는 보내지 않는다(아래 reco_slot_lost).
+        //   그 밖의 렌더 오류는 지금처럼 던진다(묶음 처리 예외).
         const r = await renderJourneySmsMessage({
           companyId: head.company_id, createdBy: head.created_by, template: rowStep.message_template || '', subject: rowStep.subject || '',
           channel: rowStep.channel || 'lms', isAd: rowStep.is_ad, customer: enriched[k] as Record<string, any>, shared: shared!, predictionsPreloaded: true,
-        });
-        rendered.push({ q, message: r.message, subject: r.subject, variantId });
+        }).catch((err) => { if (err instanceof RecoSlotLostError) return null; throw err; });
+        rendered.push(r ? { q, message: r.message, subject: r.subject, variantId } : { q, message: '', subject: rowStep.subject || '', variantId, recoLost: true });
       }
     }
     // 금칙어(★ 1003 전송자격인증 5.2 · 글자마다 · SC-24) — 렌더 갈래를 지난 문자 고객의 글자만
@@ -939,7 +942,8 @@ async function processMessageBatchBody(
     for (const r of rendered) {
       const i = r.q.idx;
       let out: RowOutcome;
-      if (!isKakao && (msgType === 'LMS' || msgType === 'MMS') && (!r.subject || r.subject.trim().length === 0)) out = { kind: 'pause', reason: 'subject_empty_for_lms_mms', pauseText: `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단` };
+      if (r.recoLost) out = { kind: 'fail', reason: 'reco_slot_lost' };   // 추천 자리가 사라진 글 = 이 고객 미발송(다음 칸으로 전진 · 비용 0)
+      else if (!isKakao && (msgType === 'LMS' || msgType === 'MMS') && (!r.subject || r.subject.trim().length === 0)) out = { kind: 'pause', reason: 'subject_empty_for_lms_mms', pauseText: `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단` };
       else if (!isKakao && (!r.message || r.message.trim().length < 2)) out = { kind: 'fail', reason: 'empty_message_after_prepare' };
       else if (!isKakao && spamBlocked.has(composeSpamCheckText({ message: r.message, subject: r.subject, msgType, isAd: false }))) out = { kind: 'fail', reason: 'spam_blocked' };
       else if (head.threshold_cost_per_step != null && guardCost > Number(head.threshold_cost_per_step)) out = { kind: 'pause', reason: 'threshold_cost_exceeded', pauseText: `step 비용 ${guardCost.toLocaleString()}원 > 임계값 ${Number(head.threshold_cost_per_step).toLocaleString()}원` };

@@ -769,6 +769,7 @@ const R13_AI_NOT_COPY: Record<string, string> = {
   'routes/analysis.ts#POST /run': '분석 인사이트(화면 설명)',
   'routes/upload.ts#POST /mapping': '업로드 컬럼 매핑',
   'utils/ai-column-mapper.ts#suggestVarColumnsWithAi': '변수 컬럼 매핑',
+  'utils/inbound-sms.ts#pickKbItemByAi': '답장 상담의 답변 항목 고르기(★1114 C133 F5 · 출력 = 번호 하나 · 고객에게 나가는 글은 회사가 등록한 글 그대로라 AI 가 쓴 글자가 0)',
   'utils/ai-column-mapper.ts#mapColumnsWithAiWithAi': '컬럼 매핑(★1025 성공 뒤 차감 감싸기로 안쪽 이름)',
   'utils/ai-mapping.ts#callAiMapping': '컬럼 매핑',
   'utils/ai-memory-accumulator-worker.ts#accumulateAvoidPatterns': '회사 메모리 학습(피할 표현 목록)',
@@ -1390,6 +1391,8 @@ const ONE_LINE_ROUTERS = new Set([
   'planner-recheck-public.ts', 'autosend-stop-public.ts', 'journey-pause-public.ts', 'manager-board-public.ts', 'mall-products.ts', 'assets.ts', 'line-templates.ts',
   'send-policy.ts', 'targets.ts', 'saved-segments.ts',
   'product-insight.ts', 'benchmark.ts',   // ★ 2026-11-13 C133 — 새 라우터는 면제가 아니라 같은 시험(R10 · R11 · R15)을 받는다
+  'campaign-split.ts',   // ★ 2026-11-14 C133 F4 나눠 보내기 — 같은 시험을 받는다
+  'inbox.ts', 'inbound-sms.ts', 'admin-inbound.ts',   // ★ 2026-11-14 C133 F5 답장 상담(상담함 · 수신 입구 · 운영자) — 같은 시험을 받는다
 ]);
 const OUT_OF_AXIS = (reason: string, files: string[]) => Object.fromEntries(files.map((f) => [f, reason]));
 const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
@@ -2018,6 +2021,7 @@ const R15_EXTERNAL: Record<string, string> = {
   'cdp.ts POST /push/unsubscribe': 'SDK 웹 푸시', 'cdp.ts POST /bulk-import': '대량 가져오기(고객사 서버)',
   'sns.ts GET /m/:token': 'SNS 플랫폼이 게시 사진 · 영상을 가져가는 주소', 'sns.ts GET /auth/callback/:platform': 'SNS 로그인 콜백(OAuth)',
   'sns.ts POST /deauthorize/:platform': 'SNS 플랫폼 연결 해제 웹훅',
+  'inbound-sms.ts POST /receive': '문자 수신 배선이 들어온 문자 한 건을 넘기는 주소(★1114 C133 F5 · 머리 열쇠 · 화면이 부르지 않는다)',
   'marketing-planner.ts GET /participate/:token': '고객이 받은 문자의 참여 링크', 'marketing-planner.ts GET /approval/:token': '옛 결재 문자 링크 착지(달만 정한다)',
   // ★ 1025 앞부분 규칙을 좁히자 드러난 공개 DM 주소(받은 사람 · 서버가 그린 뷰어 HTML 이 부른다 · 화면 소스에 글자가 없다)
   'dm.ts GET /fonts/:file': 'DM 뷰어 · 메일 글꼴(fonts.css 의 @font-face 가 부른다)', 'dm.ts GET /s/:code': '받은 사람이 여는 DM 단축 주소',

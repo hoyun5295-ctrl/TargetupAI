@@ -35,6 +35,7 @@ import { dmImageUrl } from '../../../utils/dm-image-url';
 // ★ 2026-07-22 탭 카드 content_type='product_list' — 발행 SSR과 같은 붙여넣기 파서 재사용(편집=단말).
 import { parsePastedProducts } from '../../../utils/product-paste';
 import { DmIcon, DmEventCard, DM_CTA_STYLE } from './dm-primitives';
+import { signalLineOf } from '../../../utils/product-signal-text';   // ★ 2026-11-14 C133 F2 ② 상품 반응 숫자 줄(발행 렌더와 같은 판정)
 
 // ────────────── 공통 영역 ──────────────
 
@@ -125,17 +126,28 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
       </div>
     );
   };
+  // ★ 2026-11-14 C133 F2 ② 상품 반응 숫자 줄 — 그릴지 = signalLineOf 한 곳(발행 SSR productSignalHtml 미러 · 켜짐 · 서버가 만든 꼴 · 그 숫자를 센 이름 = 지금 이름)
+  const signalRow = (p: ProductCarouselProps['products'][number]) => {
+    const text = signalLineOf({ show_signal: props?.show_signal }, { name: p.name, signal_text: p.signal_text, signal_name: p.signal_name });
+    return text ? <div className="dm-pc-signal" style={{ marginTop: 4, fontSize: 'var(--dm-fs-tiny)', color: 'var(--dm-neutral-500)', fontVariantNumeric: 'tabular-nums' }}>{text}</div> : null;
+  };
+  // ★ F2 ① 받는 분마다 관심 상품을 앞에(props.reco_order) — 순서는 열람 · 발송 때 서버가 바꾼다. 편집 화면에는 저장한 순서와 안내 한 줄만 보인다.
+  const recoNote = props?.reco_order === true && products.length > 1
+    ? <div style={{ marginBottom: 8, fontSize: 11, color: 'var(--dm-neutral-500)', textAlign: 'center' }}>받는 분마다 관심 상품이 맨 앞에 보여요</div>
+    : null;
   if (treatment === 'focus' && products.length > 0) {
     const [first, ...rest] = products;
     return (
       <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
         {props.title && <div className="dm-text-h2" style={productTitleStyle(props)}>{props.title}</div>}
+        {recoNote}
         <div className="dm-pc-items" style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ width: '100%', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 18, overflow: 'hidden', boxShadow: 'var(--dm-shadow-md)' }}>
             {first.image_url ? <img src={dmImageUrl(first.image_url)} alt={first.name} style={{ width: '100%', height: focusBigH, display: 'block', ...imgFit }} /> : <div style={{ width: '100%', height: focusBigH, background: 'var(--dm-neutral-100)' }} />}
             <div style={{ padding: '14px 16px 16px', background: cardBg }}>
               <div style={{ fontSize: 'var(--dm-fs-h3)', fontWeight: 700, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word', whiteSpace: 'pre-line' }}>{first.name}</div>
               <div style={{ marginTop: 6 }}>{priceRow(first, true)}</div>
+              {signalRow(first)}
             </div>
           </div>
           {rest.map((p, i) => (
@@ -144,6 +156,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
               <div style={{ padding: '8px 10px 10px', flex: 1, display: 'flex', flexDirection: 'column', background: cardBg }}>
                 <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word', whiteSpace: 'pre-line' }}>{p.name}</div>
                 <div style={{ marginTop: 'auto', paddingTop: 4 }}>{priceRow(p, false)}</div>
+                {signalRow(p)}
               </div>
             </div>
           ))}
@@ -155,6 +168,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
     return (
       <div className="dm-section dm-product-carousel" style={{ padding: 'var(--dm-sp-6) var(--dm-sp-5)', ...(props.background_color ? { background: props.background_color } : {}) }}>
         {props.title && <div className="dm-text-h2" style={productTitleStyle(props)}>{props.title}</div>}
+        {recoNote}
         <div className="dm-pc-items" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {products.map((p, i) => (
             <div key={p.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: cardBg, border: '1px solid var(--dm-neutral-200)', borderRadius: 14 }}>
@@ -162,6 +176,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
               <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                 <div style={{ fontSize: 'var(--dm-fs-small)', fontWeight: 600, color: 'var(--dm-neutral-900)', lineHeight: 1.4, overflowWrap: 'break-word', whiteSpace: 'pre-line' }}>{p.name}</div>
                 <div style={{ marginTop: 4 }}>{priceRow(p, false)}</div>
+                {signalRow(p)}
               </div>
               {p.link_url ? <span aria-hidden="true" style={{ color: 'var(--dm-neutral-400)', flexShrink: 0 }}>→</span> : null}
             </div>
@@ -210,6 +225,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
               </span>
             )}
           </div>
+          {signalRow(p)}
           {p.link_url ? (
             <div style={{ fontSize: 10, color: 'var(--dm-primary)', marginTop: 4 }}>링크 연결됨</div>
           ) : null}
@@ -236,6 +252,7 @@ export function ProductCarouselSection({ props, treatment }: { props: ProductCar
         <div style={PLACEHOLDER_STYLE}>[상품을 추가해주세요]</div>
       ) : (
         <>
+        {recoNote}
         <div className="dm-pc-items" style={isScroll
           ? { display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', scrollSnapType: 'x mandatory', gap: 0 }
           : { display: 'flex', flexWrap: 'wrap', justifyContent: 'var(--dm-section-justify, center)', gap: 12 }}>

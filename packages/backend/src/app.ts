@@ -45,6 +45,12 @@ import benchmarkRoutes from './routes/benchmark';   // ★ 2026-11-13 C133 F3 �
 import { startBenchmarkWorker } from './utils/performance-benchmark';   // ★ 2026-11-13 C133 F3 업종 평균 야간 스냅숏
 import productInsightRoutes from './routes/product-insight';   // ★ 2026-11-13 C133 F2 성과리포트 「상품 · 검색어」
 import { startProductSignalWorker } from './utils/product-signal';   // ★ 2026-11-13 C133 F2 상품 신호 야간 계산
+import campaignSplitRoutes from './routes/campaign-split';   // ★ 2026-11-14 C133 F4 나눠 보내기
+import { startCampaignSplitWorker } from './utils/campaign-split-worker';   // ★ 2026-11-14 C133 F4 나눠 보내기 워커(1분)
+import inboundSmsRoutes from './routes/inbound-sms';   // ★ 2026-11-14 C133 F5 답장 상담 수신 입구(머리 열쇠 · ENV 가 비면 404)
+import inboxRoutes from './routes/inbox';   // ★ 2026-11-14 C133 F5 답장 상담 고객사 상담함
+import adminInboundRoutes from './routes/admin-inbound';   // ★ 2026-11-14 C133 F5 답장 상담 운영자(번호 · 미배정함)
+import { startInboundWorker } from './utils/inbound-worker';   // ★ 2026-11-14 C133 F5 답장 상담 워커(1분)
 import plansRoutes from './routes/plans';
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
@@ -366,6 +372,8 @@ const outreachPublicLimiter = rateLimit({
   legacyHeaders: false,
   message: '<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>안내</title></head><body style="font-family:sans-serif;padding:40px;text-align:center;color:#333"><p>요청이 너무 잦습니다. 잠시 후 다시 열어주세요.</p></body></html>',
 });
+// ★ 2026-11-14 C133 F5 답장 상담 수신 입구(무로그인 · 머리 열쇠) — IP당 분 600(공개 축과 같은 수 · 버킷 따로)
+app.use('/api/inbound-sms', rateLimit({ windowMs: 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false, message: { success: false, error: '요청이 너무 잦습니다. 잠시 후 다시 시도해주세요.', code: 'RATE_LIMITED' } }));
 app.use('/api/outreach/v', outreachPublicLimiter);
 app.use('/api/outreach/u', outreachPublicLimiter); // ★ 2026-09-23 수신거부 경로도 같은 버킷(IP당 분 60)
 
@@ -490,6 +498,9 @@ app.use('/api/outreach/v', outreachPublicRoutes); // ★ 2026-08-24 아웃리치
 app.use('/api/outreach/u', outreachUnsubscribeRoutes); // ★ 2026-09-23 담당자 직접 발송 수신거부(무인증)
 app.use('/api/insight', insightRoutes);
 app.use('/api/product-insight', productInsightRoutes);   // ★ 2026-11-13 C133 F2
+app.use('/api/inbound-sms', inboundSmsRoutes);   // ★ 2026-11-14 C133 F5 답장 상담 수신 입구(ENV INBOUND_SMS_KEY 가 비면 404)
+app.use('/api/inbox', inboxRoutes);   // ★ 2026-11-14 C133 F5 답장 상담 상담함(단계 개방 V3_STAGE_INBOX · 회사 관리자 · 닫힌 회사 = 403)
+app.use('/api/campaign-split', campaignSplitRoutes);   // ★ 2026-11-14 C133 F4 나눠 보내기(단계 개방 V3_STAGE_SPLIT · 닫힌 회사 = 403)
 app.use('/api/benchmark', benchmarkRoutes);   // ★ 2026-11-13 C133 F3
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
@@ -525,6 +536,7 @@ app.use('/api/admin/ops-records', adminOpsRecordsRoutes);
 app.use('/api/admin/marketing-diagnosis', marketingDiagnosisAdminRoutes);
 // ★ 2026-10-04 선불 이용 기간 슈퍼관리자 — /api/admin 와일드카드 위
 app.use('/api/admin/companies/:id/plan-term', planTermAdminRoutes);
+app.use('/api/admin/inbound', adminInboundRoutes);   // ★ 2026-11-14 C133 F5 답장 상담 운영자(슈퍼관리자) — /api/admin 보다 앞
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
@@ -731,6 +743,8 @@ app.listen(PORT, () => {
   // ★ 2026-11-13 C133 F2: 상품 신호 야간 계산 — 매일 KST 3시대 · 단계 개방(V3_STAGE_PRODUCT_INSIGHT · V3_STAGE_RECO)이 열린 회사만.
   //   ENV 명단이 비면 아무 회사도 계산하지 않는다(부하 0). 발송 · 과금 무접촉 · 실패는 그 회사만 건너뛴다.
   startProductSignalWorker();
+  startInboundWorker();   // ★ 2026-11-14 C133 F5 — 표가 없거나 행이 없으면 조회 둘뿐(발송 · 차감 0)
+  startCampaignSplitWorker();   // ★ 2026-11-14 C133 F4 — 표가 없거나 행이 없으면 조회 한 번뿐(발송 · 차감 0)
 
   // ★ 2026-11-13 C133 F3: 업종 평균 스냅숏 — 매일 KST 4시대 · V3_STAGE_BENCHMARK 가 열렸을 때만(닫혀 있으면 쿼리 0). PG 만 읽는다 · 발송 · 과금 무접촉.
   startBenchmarkWorker();

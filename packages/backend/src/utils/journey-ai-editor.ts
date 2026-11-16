@@ -18,8 +18,7 @@ import { composeVoicePrompt, VOICE_KIND_BY_STEP } from './brand-voice-prompt';
 import { extractJsonFromAiText, aiStr } from './ai-json';
 import { callAIWithFallback } from '../services/ai';
 import { sanitizeForSms } from './message-sanitizer';
-import { detectLiquidSyntax } from './liquid-templating';
-import { journeyRevisedCopy, journeyRevisedKept } from './journey-ai-copy';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(고치기)
+import { journeyRevisedCopy, journeyRevisedKept, copyPinned } from './journey-ai-copy';   // ★ 2026-11-11 C126 여정 AI 글의 변수 꼴 CT(고치기)
 import { stripAdParts, ensureSenderName } from './messageUtils';
 import { query } from '../config/database';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
@@ -276,17 +275,18 @@ triggerEvent·templateCode·triggerFilters는 받은 값을 그대로 돌려주�
   // ★ 2026-11-11 C126(D5) — 변수 꼴 관문(고치기 · journey-ai-copy). 대응을 먼저 정한다(사실 검사를 통과하는 칸을 골라 근거로 삼지 않는다 · Codex 설계 4R #2):
   //   편집 전 패키지에 템플릿 문법이 든 칸이 없으면 원문 = 빈 글(새 아는 변수 = %변수% · 그 밖 새 문법 = 미적용) ·
   //   하나라도 있으면 칸 수가 같아야 하고 i번째 결과 칸을 i번째 원래 칸의 같은 필드와 대조한다(조건 태그가 든 칸은 글자 그대로 돌아와야 한다).
-  const liquidPackage = curSteps.some((c) => detectLiquidSyntax(String(c?.messageTemplate || '')) || detectLiquidSyntax(String(c?.subject || '')));
+  //   ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 칸도 같은 취급(copyPinned): 그 칸은 글자 그대로 돌아와야 하고 AI 가 다른 칸에 자리를 만들어 넣지 못한다.
+  const liquidPackage = curSteps.some((c) => copyPinned(c?.messageTemplate) || copyPinned(c?.subject));
   if (liquidPackage && steps.length !== curSteps.length) {
-    throw new JourneyInputError('변수 표기가 든 칸이 있어 칸 수를 바꾸는 수정은 적용하지 않았어요. 칸은 직접 추가하거나 지워 주세요.');
+    throw new JourneyInputError('변수 표기나 추천 상품이 든 칸이 있어 칸 수를 바꾸는 수정은 적용하지 않았어요. 칸은 직접 추가하거나 지워 주세요.');
   }
   const copyBaseOf = (i: number, field: 'messageTemplate' | 'subject'): string => (liquidPackage ? String(curSteps[i]?.[field] || '') : '');
-  const LIQUID_EDIT_NOTICE = '원문에 없던 변수 표기가 섞였거나 조건문이 든 칸이 바뀌어 수정을 적용하지 않았어요. 다시 눌러 주세요.';
+  const LIQUID_EDIT_NOTICE = '원문에 없던 변수 표기가 섞였거나 조건문이 든 칸 · 추천 상품이 든 칸이 바뀌어 수정을 적용하지 않았어요. 다시 눌러 주세요.';
   // 대조 대상 = (가) 결과가 문자 칸(카카오 제외)인 칸의 글 (나) **원래 칸의 그 글에 템플릿 문법이 있던 자리** — 결과 칸의 종류 · 채널과 무관하다.
   //   (나)가 없으면 AI 가 조건문이 든 문자 칸을 같은 자리의 대기 · 조건 · 카카오 칸으로 바꿔 돌려줄 때 그 글이 지워진 초안이 대조 없이 나간다(Codex 구현 1R).
   const COPY_FIELDS = ['messageTemplate', 'subject'] as const;
   const revisedGuarded = (s: { stepType: string; channel: string }, i: number, field: (typeof COPY_FIELDS)[number]): boolean =>
-    (s.stepType === 'message' && s.channel !== 'kakao') || detectLiquidSyntax(copyBaseOf(i, field));
+    (s.stepType === 'message' && s.channel !== 'kakao') || copyPinned(copyBaseOf(i, field));
   steps.forEach((s, i) => {
     for (const field of COPY_FIELDS) {
       if (!revisedGuarded(s, i, field)) continue;

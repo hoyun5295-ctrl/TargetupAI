@@ -25,6 +25,7 @@ import { getOwnerCustomerScopeSql } from './store-scope';
 import { ACTIVE_PAID_PLAN_WHERE } from './plan-guard';
 import { v3Live, v3LiveState, v3StageScope, type V3Feature } from './v3-stage';
 import { resolveHubStoreScope } from './store-scope';
+import { normProductName } from './product-signal-text';
 
 /** 화면 · 후보 · 고르기가 같이 쓰는 창(일) — 퍼널 창(cdp-diagnostics buildCdpFunnel)과 같은 값 */
 export const PRODUCT_SIGNAL_WINDOW_DAYS = 30;
@@ -59,9 +60,13 @@ export function signalItemNameSql(it: string): string {
 export function signalItemKeySql(it: string): string {
   return `LEFT(COALESCE(${[...SIGNAL_KEY_FIELDS, ...SIGNAL_NAME_FIELDS].map((k) => fieldSql(it, k)).join(', ')}), ${SIGNAL_KEY_MAX})`;
 }
-/** 이름 비교용 정리 SQL — 앞뒤 공백 제거 · 이어진 공백 하나로 · 소문자 · 빈 값 = NULL(NULL 끼리는 같지 않다) */
+/**
+ * 이름 비교용 정리 SQL — 이어진 공백류를 공백 하나로 접고 → 앞뒤 공백 제거 → 소문자 · 빈 값 = NULL(NULL 끼리는 같지 않다).
+ *   공백류 = 공백 · 탭 · 줄바꿈 · CR · FF · VT 여섯 글자(JS 쌍둥이 normName 과 글자 그대로 같은 집합).
+ *   ⛔ 다듬기(TRIM)를 먼저 하지 않는다 — PG TRIM 은 공백만 떼어 앞뒤 탭이 접힌 뒤 공백으로 남았다(JS 는 탭까지 떼어 두 답이 달랐다 · Codex 구현 2R #3).
+ */
 export function normNameSql(expr: string): string {
-  return `NULLIF(LOWER(regexp_replace(TRIM(${expr}), '\\s+', ' ', 'g')), '')`;
+  return `NULLIF(LOWER(TRIM(regexp_replace(${expr}, '[ \\t\\n\\r\\f\\v]+', ' ', 'g'))), '')`;
 }
 
 const trimOrNull = (v: unknown): string | null => {
@@ -82,18 +87,15 @@ export function signalItemKey(item: any): string | null {
   for (const k of [...SIGNAL_KEY_FIELDS, ...SIGNAL_NAME_FIELDS]) { const v = trimOrNull(item?.[k]); if (v) return v.slice(0, SIGNAL_KEY_MAX); }
   return null;
 }
-/** normNameSql 의 JS 쌍둥이 */
-export function normName(v: unknown): string | null {
-  const s = trimOrNull(v);
-  return s ? s.replace(/\s+/g, ' ').toLowerCase() : null;
-}
+/** normNameSql 의 JS 쌍둥이 = product-signal-text normProductName(순수 파일 한 곳 · 발행 렌더러도 같은 함수로 이름을 견준다) */
+export const normName = normProductName;
 
 // ── ② 쓰기 — 회사 하나를 통째로 다시 센다 ──
 
 /** KST 오늘에서 n일 전 날짜(오늘 포함 n+1일 범위의 첫날) */
-const kstDayAgoSql = (n: string) => `((NOW() AT TIME ZONE 'Asia/Seoul')::date - ${n})`;
+export const kstDayAgoSql = (n: string) => `((NOW() AT TIME ZONE 'Asia/Seoul')::date - ${n})`;
 /** 그 KST 날짜 0시의 시각(timestamptz) — cdp_events.occurred_at 범위 비교용(색인 company_id · event_name · occurred_at) */
-const kstDayStartSql = (dayExpr: string) => `(${dayExpr}::timestamp AT TIME ZONE 'Asia/Seoul')`;
+export const kstDayStartSql = (dayExpr: string) => `(${dayExpr}::timestamp AT TIME ZONE 'Asia/Seoul')`;
 
 export const SIGNAL_DELETE_SQL = 'DELETE FROM product_signal_daily WHERE company_id = $1::uuid';
 

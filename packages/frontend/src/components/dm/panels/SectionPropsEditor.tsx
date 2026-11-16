@@ -83,7 +83,9 @@ export default function SectionPropsEditor({
     case 'promo_code': return <PromoCodeEditor  {...common} />;
     case 'footer':     return <FooterEditor     {...common} />;
     // D216+ 신규 16
-    case 'product_carousel':  return <ProductCarouselEditor  {...common} />;
+    // ★ 2026-11-14 C133 — 이 편집기는 서버 응답을 기다렸다 문서에 쓴다(반응 숫자). 묶음이 바뀌면 다시 만든다 =
+    //   호출부가 key 를 걸지 않은 화면에서도 앞 묶음을 기다리던 응답이 다음 묶음에 실리지 않는다(내려갈 때 그 차례가 끝난다).
+    case 'product_carousel':  return <ProductCarouselEditor key={section.id} {...common} />;
     case 'gallery':           return <GalleryEditor          {...common} />;
     case 'slideshow':         return <SlideshowEditor        {...common} />;
     case 'tab_cards':         return <TabCardsEditor         {...common} />;

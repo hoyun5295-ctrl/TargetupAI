@@ -290,4 +290,51 @@ export async function getCampaignClickTotal(campaignId: string): Promise<number 
   return Number(r.rows[0]?.clicks) || 0;
 }
 
+/**
+ * 글 안의 주소 · 자리 · 종류(★ 2026-11-14 C133 F4 나눠 보내기) — 주소 판정 정규식과 「이미 줄인 주소」 규칙의 주인은 이 파일이다.
+ *   plain = 새로 줄일 수 있다 · short = 한줄로 짧은 주소 · dm_short = 모바일 DM 짧은 주소(둘 다 shortenUrlsInText 가 건너뛰는 것).
+ */
+export interface UrlSpot { url: string; start: number; end: number; kind: 'plain' | 'short' | 'dm_short' }
+export function listUrlsForTracking(text: string): UrlSpot[] {
+  const out: UrlSpot[] = [];
+  if (!text) return out;
+  const dmShortBase = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+  for (const m of text.matchAll(URL_REGEX)) {
+    const url = m[0];
+    const start = m.index ?? 0;
+    const kind = url.startsWith(`${SHORT_URL_BASE}/`) ? 'short' : dmShortBase && url.startsWith(`${dmShortBase}/`) ? 'dm_short' : 'plain';
+    out.push({ url, start, end: start + url.length, kind });
+  }
+  return out;
+}
+
+/**
+ * 글의 **모든** 주소를 새로 줄인다(★ 2026-11-14 C133 F4) — 하나라도 못 줄이면 던진다(조용히 원문 주소를 남기지 않는다).
+ *   shortenUrlsInText 와 다른 점: 이미 줄인 주소가 있으면 실패 · 한 건 실패 = 전체 실패 · 만든 해시를 돌려준다 ·
+ *   자리로 바꾼다(한 주소가 다른 주소의 앞부분이어도 섞이지 않는다). 같은 주소가 여러 번 나오면 해시 하나를 같이 쓴다.
+ *   그 글의 누름을 다른 글과 따로 세려는 호출부(나눠 보내기)가 쓴다 — 주소가 없으면 글 그대로 · 해시 0(판정은 호출부).
+ */
+/**
+ * 줄인 뒤의 글과 **길이가 같은** 글(★ C133 F4 미리 보기의 바이트 판정) — 새로 줄일 주소마다 짧은 주소와 같은 길이의 대역을 넣는다(DB 0).
+ *   짧은 주소 = 짧은 주소 머리 + 해시 HASH_LENGTH 글자(전부 ASCII)라 실제로 줄인 글과 바이트 수가 같다.
+ */
+export function shortenedLengthPreview(text: string): string {
+  const stand = `${SHORT_URL_BASE}/${'0'.repeat(HASH_LENGTH)}`;
+  let out = text || '';
+  for (const s of listUrlsForTracking(out).filter((x) => x.kind === 'plain').sort((a, b) => b.start - a.start)) out = out.slice(0, s.start) + stand + out.slice(s.end);
+  return out;
+}
+
+export async function shortenUrlsStrict(text: string, companyId: string): Promise<{ text: string; hashes: string[] }> {
+  const spots = listUrlsForTracking(text);
+  if (spots.some((s) => s.kind !== 'plain')) throw new UserFacingError(400, 'SHORT_LINK_ALREADY', '이미 줄인 주소는 새로 줄일 수 없어요. 원래 주소를 넣어 주세요.');
+  const made = new Map<string, { hash: string; shortUrl: string }>();
+  for (const s of spots) {
+    if (!made.has(s.url)) made.set(s.url, await createShortUrl({ companyId, fullUrl: s.url }));
+  }
+  let out = text;
+  for (const s of [...spots].sort((a, b) => b.start - a.start)) out = out.slice(0, s.start) + made.get(s.url)!.shortUrl + out.slice(s.end);
+  return { text: out, hashes: [...made.values()].map((m) => m.hash) };
+}
+
 export { SHORT_URL_BASE };

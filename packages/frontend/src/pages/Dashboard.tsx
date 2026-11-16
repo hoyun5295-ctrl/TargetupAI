@@ -84,6 +84,7 @@ import {
   type TargetExtraction,
 } from '../utils/target-extraction';
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
+import { SplitStatusCard } from '../components/split/SplitSend';   // ★ 2026-11-14 C133 F4 나눠 보내기 현황 줄
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
 import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
 import DiagnosisInviteModal from '../components/marketing-diagnosis/DiagnosisInviteModal';
@@ -180,6 +181,8 @@ export default function Dashboard() {
    */
   const senderAuthPreview = searchParams.get('senderAuthPreview');
   const senderAuth = useSenderAuth();
+  // ★ 2026-11-14 C133 F4 — 나눠 보내기 현황 줄을 다시 읽게 하는 값(시작 뒤)
+  const [splitRefresh, setSplitRefresh] = useState(0);
   const senderAuthState: SenderAuthState | null =
     senderAuth.state
     ?? (senderAuthPreview === '1'
@@ -2453,6 +2456,9 @@ const campaignData = {
           <LiveAutomationStrip scheduled={scheduledCampaigns} onOpen={openLive} onRunningChange={setLiveRunning} intro={intro} refreshKey={liveRefresh} />
         )}
 
+        {/* ★ 2026-11-14 C133 F4 나눠 보내기 현황(열린 회사 · 진행 중 · 멈춘 것 · 방금 끝난 것이 있을 때만) */}
+        {!hideAi && <SplitStatusCard refreshKey={splitRefresh} />}
+
         {/* ★ 2026-08-16 AI 마케팅 진단 히어로(설계서 §5-2) — dismiss 없음·판정은 서버 state */}
         {diagnosisHero === 'invite' && (
           <DiagnosisHeroCard
@@ -2776,6 +2782,9 @@ const campaignData = {
           calculateBytes={calculateBytes}
           optOutNumber={optOutNumber}
           selectedCallback={selectedCallback}
+          callbackNumbers={callbackNumbers}
+          onSenderAuth={senderAuth.handleResponse}
+          onSplitStarted={() => setSplitRefresh((n) => n + 1)}
           campaign={campaign}
           formatRejectNumber={formatRejectNumber}
           targetRecipients={targetRecipients}
