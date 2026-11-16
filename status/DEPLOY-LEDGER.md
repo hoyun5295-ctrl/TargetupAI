@@ -2266,7 +2266,7 @@ CREATE TABLE IF NOT EXISTS proposal_trials (
 ### C136-H2 · 한줄로 배포(배포 나 = 제안 페이지 /proposal + 제작 대행 체험 + 슈퍼관리자 「제안 체험」 탭 · 백엔드 + 프론트 · DDL 1 = C136-DDL-1 배포 앞 · ENV 0)
 - 카드: C136
 - 단계: 한줄로 배포
-- 선행: C136-H1 · C136-DDL-1 · 구현 Codex approve · **C133 C + D · C134 커밋 뒤**(App.tsx · Dashboard.tsx · AdminDashboard.tsx · app.ts 에 그 카드들의 미커밋 변경이 함께 있어 경로 커밋으로 가를 수 없다) · 커밋(Harold · 경로를 정해 = scratch/c136/b-paths.txt · 문안 = scratch/c136/b-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 선행: C136-H1 · C136-DDL-1 · 구현 Codex approve · **C133 C + D · C134 커밋 뒤**(App.tsx · Dashboard.tsx · AdminDashboard.tsx · app.ts 에 그 카드들의 미커밋 변경이 함께 있어 경로 커밋으로 가를 수 없다 · ★1116 저녁 = C134 는 f01c711f 로 커밋 끝 · 그 커밋의 파일 목록에 네 파일 없음 = 네 파일은 그대로 미커밋 → 남은 선행 = C133 C + D 커밋) · 커밋(Harold · 경로를 정해 = scratch/c136/b-paths.txt · 문안 = scratch/c136/b-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
 - 기대: 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §3 ~ §7 · 로그인 없이 /proposal?src=값 을 열면 한 줄과 로그인 단추만 · 로그인하면 제안 페이지로 돌아온다 · 사진 3 ~ 4장 + 한 줄 + 보낼 방식으로 신청(회사당 한 번) → 기계 제작(포스터 3 · 문안 3 · 모바일 DM 1 · 통신사 스팸 검사) → 슈퍼관리자 「제안 체험」 탭에서 확인 · 전달 → 담당자에게 문자 → 완성본 화면의 「명단만 올려 보내기」 = 직접발송 작성 화면에 문안 · 포스터가 채워진 채 열린다 · 신청하지 않은 회사 = 화면 · 동작 변화 0 · 발송 · 과금 코드 무수정
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep startProposalProduce = dist/utils/proposal-trial.js 정의 · dist/routes/proposal.js 호출 · deliverProposalKit ≥ 1 · 로그인 없이 https://hanjul.ai/proposal?src=test 를 열어 한 줄과 로그인 단추만 보이는지 · curl -s -o /dev/null -w "%{http_code}" https://hanjul.ai/api/plans/proposal = 401
 - 결과: (대기)

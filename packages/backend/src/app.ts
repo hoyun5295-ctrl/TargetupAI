@@ -52,6 +52,7 @@ import inboxRoutes from './routes/inbox';   // ★ 2026-11-14 C133 F5 답장 상
 import adminInboundRoutes from './routes/admin-inbound';   // ★ 2026-11-14 C133 F5 답장 상담 운영자(번호 · 미배정함)
 import { startInboundWorker } from './utils/inbound-worker';   // ★ 2026-11-14 C133 F5 답장 상담 워커(1분)
 import plansRoutes from './routes/plans';
+import proposalRoutes from './routes/proposal'; // ★ 2026-11-16 C136 제안 페이지 · 제작 대행 체험
 import customersRoutes from './routes/customers';
 import campaignsRoutes from './routes/campaigns';
 import resultsRoutes from './routes/results';
@@ -502,6 +503,7 @@ app.use('/api/inbound-sms', inboundSmsRoutes);   // ★ 2026-11-14 C133 F5 답�
 app.use('/api/inbox', inboxRoutes);   // ★ 2026-11-14 C133 F5 답장 상담 상담함(단계 개방 V3_STAGE_INBOX · 회사 관리자 · 닫힌 회사 = 403)
 app.use('/api/campaign-split', campaignSplitRoutes);   // ★ 2026-11-14 C133 F4 나눠 보내기(단계 개방 V3_STAGE_SPLIT · 닫힌 회사 = 403)
 app.use('/api/benchmark', benchmarkRoutes);   // ★ 2026-11-13 C133 F3
+app.use('/api/plans/proposal', proposalRoutes); // ★ 2026-11-16 C136 — 요금제 라우터보다 먼저(같은 머리 주소 아래의 제안 페이지 주소)
 app.use('/api/plans', plansRoutes);
 app.use('/api/customers', customersRoutes);
 app.use('/api/campaigns', campaignsRoutes);

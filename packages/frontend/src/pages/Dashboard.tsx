@@ -77,6 +77,7 @@ import BrandSendModal, { type BrandRecipientSeed } from '../components/BrandSend
 import { carryPhonesToDirectRecipients } from '../utils/send-checks';
 import { recipientSeeds, pickNameKey, appendUpdater } from '../utils/recipient-paste';
 import { takeAudience, fetchAudience, audienceLoadedText } from '../utils/product-insight';   // ★ 2026-11-13 C133 F2
+import { takeProposalPick, fetchProposalFill } from '../utils/proposal-kit';   // ★ 2026-11-16 C136 제안 페이지 완성본 → 작성 화면
 import { extractionFieldTable } from '../utils/customerFilterBuild';
 // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본(서버) 요청 CT
 import {
@@ -1296,6 +1297,23 @@ export default function Dashboard() {
     setToast({ show: true, type: 'success', message: audienceLoadedText(asked, got), duration: 6000 });
   };
 
+  /**
+   * ★ 2026-11-16 C136 — 제안 페이지의 완성본을 작성 칸에 채운다(담당자가 「명단만 올려 보내기」를 눌렀을 때만 값이 있다 · 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §6).
+   *   넘어온 것은 고른 번호뿐이다. 지금 로그인한 계정 · 회사의 것이고 10분 안일 때만 쓰고(takeProposalPick), 내용은 서버가 권한과 전달 상태를 다시 본 뒤 준다.
+   *   값이 없으면 아무 일도 하지 않는다(평소의 직접발송 화면 그대로) · 명단 · 발신번호 · 예약 · 발송은 평소 그대로다(이 함수는 문안 · 제목 · 그림 칸만 채운다).
+   */
+  const loadPendingProposalKit = async () => {
+    const pick = takeProposalPick({ userId: user?.id, companyId: user?.company?.id });
+    if (!pick) return;
+    const fill = await fetchProposalFill(pick);
+    if (!fill) { setToast({ show: true, type: 'error', message: '완성본을 불러오지 못했어요. 제안 페이지에서 다시 눌러 주세요.' }); return; }
+    setDirectMessage(fill.message);
+    setDirectSubject(fill.subject);
+    setDirectMsgType(fill.msgType);
+    if (fill.assetId) await handleMmsFromAsset(fill.assetId);
+    setToast({ show: true, type: 'success', message: '완성본을 채웠어요. 명단만 올려 보내시면 됩니다.', duration: 6000 });
+  };
+
   // v1.5.0: 파일 업로드 오픈 전 싱크 차단 체크 (설계서 §4-4)
   const openFileUpload = () => {
     if (syncBlockActive) {
@@ -1363,6 +1381,8 @@ export default function Dashboard() {
     //   게이트는 각 진입 함수가 그대로 소유한다 — 여기서 판정을 다시 하지 않는다(openCustomerDb 선례).
     const openParam = searchParams.get('open');
     if (openParam) {
+      // ★ 2026-11-16 C136 — 제안 페이지의 「명단만 올려 보내기」로 왔을 때만 넘김 값이 있다(없으면 아무 일도 하지 않는다 · 직접발송 열기 줄은 그대로)
+      if (openParam === 'direct-send') void loadPendingProposalKit();
       if (openParam === 'direct-send') { setShowDirectSend(true); setDirectSendChannel('sms'); void loadPendingAudience(); }
       // ★ 2026-10-19 직접 타겟 발송 삭제 — 옛 링크는 AI 한줄로(조건 고르기 = 확인 창의 「직접 타겟 선택」)
       // ★ Codex B1 medium — 아래 쿼리 정리(setSearchParams)가 이동을 덮지 않게 이동하고 바로 끝낸다

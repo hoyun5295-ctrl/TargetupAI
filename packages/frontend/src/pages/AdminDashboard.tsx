@@ -23,6 +23,7 @@ import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 
 import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import MallIntegrationMonitorTab from '../components/admin/MallIntegrationMonitorTab'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
 import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+import ProposalTrialTab from '../components/admin/ProposalTrialTab'; // ★ 2026-11-16 C136 제안 체험(소개 방문 탭과 같은 허용 계정)
 import CustomerNoticeAckTab from '../components/admin/CustomerNoticeAckTab'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import WatchLogTab from '../components/admin/WatchLogTab'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import PrecheckUsageTab from '../components/admin/PrecheckUsageTab'; // ★ 2026-09-26 스팸 검사·맞춤법 사용 현황(ceo 전용)
@@ -100,7 +101,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'inbound' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'inbound' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'proposalTrial' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -2757,6 +2758,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                   ...(diagnosisAllowed ? [{ key: 'marketingDiagnosis', label: '신규마케팅진단', badge: diagnosisBadge }] : []),
                   // ★ 2026-10-07 (Harold) 소개 방문 · 시연 요청 = 허용 계정(기본 ceo · suran)에만 노출
                   ...(introLeadsAllowed ? [{ key: 'introLeads', label: '소개 방문 · 시연 요청' }] : []),
+                  // ★ 2026-11-16 C136 제안 체험(제안 페이지 열람 → 신청 → 제작 확인 · 전달) = 소개 방문 탭과 같은 허용 계정(확인하고 전달하는 사람)
+                  ...(introLeadsAllowed ? [{ key: 'proposalTrial', label: '제안 체험' }] : []),
                   // ★ 2026-08-24: AI 영업 = 허용 계정(★1003 ceo · suran)에만 노출 · ★ 2026-10-09 별도 페이지(/admin/outreach · 뒤로가기 = 이 화면)
                   ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => navigate('/admin/outreach') }] : []),
                 ],
@@ -2931,6 +2934,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
         {activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}
         {activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}
         {activeTab === 'introLeads' && introLeadsAllowed && <IntroLeadsTab />}
+        {activeTab === 'proposalTrial' && introLeadsAllowed && <ProposalTrialTab />}
         {activeTab === 'noticeAck' && noticeAckAllowed && <CustomerNoticeAckTab />}
         {activeTab === 'watchLog' && watchLogAllowed && <WatchLogTab />}
 

@@ -103,6 +103,11 @@ const MONEY_ROUTE_EXEMPT: Record<string, string> = {
   'event-campaigns.ts POST /materials/quote': '견적 = 금액 계산 · 잔액 읽기만(돈을 쓰지 않는다)',
   'mall-products.ts POST /cards': '몰 상품 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(lookupMall)을 돈 함수로 본다',
   'mall-products.ts POST /line-candidates': '몰 후보 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(search)을 돈 함수로 본다',
+  // ★ 2026-11-16 C136 제작 대행 체험(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §1 · §4 · §5) — 요금제 미가입 회사에 여는 체험이라 요금제 문을 걸지 않는다
+  'proposal.ts POST /request': '제작 대행 체험 신청 = 미가입 회사 포함 회사당 한 번(자리 INSERT ON CONFLICT 가 문) · 제작은 우리 부담(크레딧 묶음 안 · 원장 무접촉) · 발송 0',
+  'proposal.ts POST /admin/:companyId/produce': '직원(슈퍼관리자 + 허용 계정)의 다시 만들기 · 우리 부담 제작(크레딧 묶음 안 · 원장 무접촉) · 발송 0',
+  'proposal.ts POST /admin/:companyId/deliver': '직원의 전달 = 담당자에게 안내 문자 한 통(안내 적재 CT · 인증 라인 · 우리 부담 · 고객 발송 아님)',
+  'proposal.ts POST /admin/:companyId/notify': '직원의 도착 알림 다시 보내기 = 같은 안내 문자 한 통(시도 수 CAS + 2분 대기 · 우리 부담)',
 };
 
 /** 서버 요금제 문(공용 CT 하나 · 문 도우미는 안에서 같은 함수를 부른다 — 아래 시험이 그 사실을 확인한다) · 도우미를 { plan: false } 로 부르면 문이 아니다 */
@@ -1402,7 +1407,7 @@ const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
   ...OUT_OF_AXIS('대행(계약 기능)', ['agency-send.ts', 'agency-approve.ts', 'campaign-agency.ts']),
   ...OUT_OF_AXIS('고객 DB · 쇼핑몰 연동', ['customers.ts', 'upload.ts', 'address-books.ts', 'sync.ts', 'sync-consent.ts', 'cafe24.ts', 'imweb.ts', 'woocommerce.ts', 'naver-commerce.ts', 'makeshop.ts', 'godo.ts', 'analysis.ts', 'insight.ts']),
   ...OUT_OF_AXIS('계정 · 회사 · 관리 · 도움말', ['auth.ts', 'companies.ts', 'manage-users.ts', 'manage-stats.ts', 'identity-return.ts', 'onboarding.ts', 'help.ts', 'internal-alert.ts', 'design-templates.ts', 'ai-memory.ts', 'ai-usage.ts']),
-  ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts']),
+  ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts', 'proposal.ts']),   // ★ 2026-11-16 C136 proposal.ts = 메일로 보낸 제안 페이지 · 제작 대행 체험(영업 체험 + 직원 확인 화면)
 };
 describe('라우터 분류 전수(1025) — 12기능 라우터 · 축 밖 라우터(이유) 둘 중 하나', () => {
   it('모든 라우터 파일이 분류에 있고 · 겹치지 않고 · 없는 파일이 분류에 없다', () => {

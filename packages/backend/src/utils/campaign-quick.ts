@@ -99,14 +99,24 @@ export function saveMaterialImages(companyId: string, files: ReadonlyArray<{ buf
   const dir = path.join(DM_IMAGE_DIR, companyId);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const out: SavedMaterialImage[] = [];
-  for (const f of files.slice(0, max)) {
-    const mt = sniffImageMediaType(f.buffer);
-    if (!mt) continue; // 위장 업로드 · 미지원 형식은 조용히 건너뛴다(응답 images 수로 드러난다)
-    const ext = mt === 'image/png' ? '.png' : mt === 'image/webp' ? '.webp' : '.jpg';
-    const filename = `${uuidv4()}${ext}`;
-    fs.writeFileSync(path.join(dir, filename), f.buffer);
-    const size = readImageSize(f.buffer);
-    out.push({ url: `/api/dm/v/images/${companyId}/${filename}`, width: size?.width ?? null, height: size?.height ?? null });
+  // ★ 2026-11-16 C136(Codex 설계 2R) — 쓰려는 경로를 쓰기 전에 적어 둔다. 한 장이라도 쓰다 실패하면 이 호출이 쓴 파일을 전부 지우고 던진다
+  //   (옛: 둘째 장에서 실패하면 첫째 장이 남는데 이름을 안에서 지어 부른 쪽이 지울 수 없었다 · 성공할 때의 반환은 그대로).
+  const written: string[] = [];
+  try {
+    for (const f of files.slice(0, max)) {
+      const mt = sniffImageMediaType(f.buffer);
+      if (!mt) continue; // 위장 업로드 · 미지원 형식은 조용히 건너뛴다(응답 images 수로 드러난다)
+      const ext = mt === 'image/png' ? '.png' : mt === 'image/webp' ? '.webp' : '.jpg';
+      const filename = `${uuidv4()}${ext}`;
+      const abs = path.join(dir, filename);
+      written.push(abs);
+      fs.writeFileSync(abs, f.buffer);
+      const size = readImageSize(f.buffer);
+      out.push({ url: `/api/dm/v/images/${companyId}/${filename}`, width: size?.width ?? null, height: size?.height ?? null });
+    }
+  } catch (err) {
+    for (const p of written) { try { fs.unlinkSync(p); } catch { /* 없는 파일 = 지운 것 */ } }
+    throw err;
   }
   return out;
 }

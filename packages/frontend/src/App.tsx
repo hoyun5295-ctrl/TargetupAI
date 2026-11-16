@@ -26,6 +26,7 @@ import JourneyPausePage from './pages/JourneyPausePage'; // ★ D218+ Public 정
 import ManagerBoardPage from './pages/ManagerBoardPage'; // ★ 2026-11-02 엔진 재설계 E5 — 담당자 상황판(인증 X · 읽기 전용)
 // ★ 2026-08-16 AI 마케팅 진단 공개 페이지(퍼널 B — 영업 링크 착지) — 공개 동선이라 정적 import(0718 사고 전례)
 import DiagnosisPage from './pages/DiagnosisPage';
+import ProposalPage from './pages/ProposalPage';   // ★ 2026-11-16 C136 메일로 받은 제안 페이지 · 제작 대행 체험
 import { rememberLoginReturn } from './utils/login-return';
 import PlanGate from './components/PlanGate'; // ★ 2026-09-15 AI Operator 기능 화면 입구(못 쓰는 회사 = 허브 요금제 안내로)
 
@@ -832,6 +833,8 @@ function App() {
         {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 잠재고객 · 인증 X) — ?src= 영업 링크 식별 */}
         <Route path="/diagnosis" element={<DiagnosisPage />} />
         <Route path="/intro" element={<IntroPage />} />
+        {/* ★ 2026-11-16 C136 제안 페이지 — 공개 경로지만 로그인 전에는 한 줄과 로그인 단추만 그린다(소개 글 · 그림은 로그인 뒤 서버가 준다 · 화면이 스스로 가른다) */}
+        <Route path="/proposal" element={<ProposalPage />} />
 
         {/* ★ 2026-08-25 대행발송 담당자 링크 승인 (인증 X · 안내 문자 속 주소 ?t=토큰) */}
         <Route path="/agency-approve" element={<AgencyApprovePage />} />
