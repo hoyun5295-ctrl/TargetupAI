@@ -78,6 +78,15 @@ describe('서버가 화면에 표기 칸을 내보낸다', () => {
     const detail = r.slice(r.indexOf("router.get('/campaigns/:id', "), r.indexOf("router.get('/campaigns/:id/callbacks'"));
     expect(detail).toContain("SELECT c.*, ${CAMPAIGN_OPT080_SELECT_EXPR}, ${campaignAdTextSelect('c')}");
   });
+  it('캘린더 · 예약 목록(GET /api/campaigns) · 슈퍼관리자 통계 상세가 그 칸을 싣는다(C137-H2)', () => {
+    const between = (s: string, head: string) => { const i = s.indexOf(head); expect(i, head).toBeGreaterThan(-1); const j = s.indexOf('\nrouter.', i + head.length); return s.slice(i, j < 0 ? undefined : j); };
+    const list = between(code(back('routes/campaigns.ts')), "router.get('/', ");
+    expect(list).toContain("${CAMPAIGN_OPT080_SELECT_EXPR},\n        ${campaignAdTextSelect('c')}\n       FROM campaigns c");
+    expect(list).toContain('const { send_config: _sendConfig, result_final: _resultFinal, ...rest } = c;');   // ad_text 는 rest 로 응답에 남는다
+    const sd = between(code(back('routes/admin.ts')), "router.get('/stats/send/detail'");
+    expect(sd).toContain("${CAMPAIGN_OPT080_SELECT_EXPR},\n        ${campaignAdTextSelect('c')},");
+    expect(sd).toContain('ad_text: c.ad_text ?? null,');
+  });
   it('승인 링크 재료가 표기 칸을 싣는다(이메일 접수 = false · 칸 이전 = null)', () => {
     const a = code(back('routes/agency-approve.ts'));
     const view = a.slice(a.indexOf('function toApprovalView'), a.indexOf('async function loadCallbackKinds'));

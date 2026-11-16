@@ -76,7 +76,7 @@ import { getUserTestContacts } from '../utils/test-contact-helper';
 import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } from '../utils/campaign-validation';
 import { isWithinBrandSendWindow, brandSendWindowError, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, queryCampaignInsert, effectiveUnsubFilter, stagingSendSignature } from '../utils/direct-send-core';
-import { DirectSendError, loadedSendFailureMessage, adTextOn } from '../utils/direct-send-spec';
+import { DirectSendError, loadedSendFailureMessage, adTextOn, campaignAdTextSelect } from '../utils/direct-send-spec';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
@@ -208,7 +208,8 @@ router.get('/', async (req: Request, res: Response) => {
         ${INDIVIDUAL_CALLBACK_SELECT_EXPR},
         c.mms_image_paths,
         c.send_config, c.result_final, c.sent_count, c.success_count, c.fail_count,
-        ${CAMPAIGN_OPT080_SELECT_EXPR}
+        ${CAMPAIGN_OPT080_SELECT_EXPR},
+        ${campaignAdTextSelect('c')}
        FROM campaigns c
        ${CAMPAIGN_OPT080_LEFT_JOIN}
        ${aliasedWhereClause}

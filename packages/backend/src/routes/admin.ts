@@ -62,6 +62,7 @@ import { getPendingBadgeCounts } from '../utils/pending-badges';
 import { sendSystemAlert } from '../utils/system-alert';
 // ★ 2026-07-24 슈퍼 에이전트 통계 엑셀(CSV) — 기간×고객사×발송ID×유형 (정산 대조)
 import { buildAdminAgentStatsXlsx } from '../utils/manage-stats-export';
+import { campaignAdTextSelect } from '../utils/direct-send-spec';   // ★ 2026-11-16 C137 저장된 글을 그리는 화면의 표기 칸(통계 상세)
 // ★ 2026-07-25 고객 대상 표는 엑셀(.xlsx)로 나간다 — LESSONS_BACKEND "고객 대상 xlsx = exceljs".
 import { buildXlsxBuffer, XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -3290,6 +3291,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         c.result_final, c.sent_count, c.success_count, c.fail_count,
         jsonb_build_object('sentTables', c.send_config->'sentTables') AS send_config,
         ${CAMPAIGN_OPT080_SELECT_EXPR},
+        ${campaignAdTextSelect('c')},
         u.id as user_id, u.name as user_name, u.login_id, u.department, u.store_codes
       FROM campaigns c
       LEFT JOIN users u ON c.created_by = u.id
@@ -3338,6 +3340,8 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
         // 카카오·알림톡은 message_type이 전부 LMS다 — 채널 판정은 이 값이 담당한다(화면 CT가 읽는다).
         send_channel: c.send_channel,
         is_ad: c.is_ad,
+        // ★ 2026-11-16 C137 표기 칸(이메일 대행 = false · 그 밖 null) · 화면 formatCampaignMessageForDisplay 가 is_ad 와 함께 본다
+        ad_text: c.ad_text ?? null,
         callback_number: c.callback_number,
         opt_out_080_number: c.opt_out_080_number ?? null,
         user_name: c.user_name,
