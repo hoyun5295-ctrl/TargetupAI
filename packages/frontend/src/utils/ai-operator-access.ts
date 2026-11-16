@@ -9,6 +9,8 @@
  * 캐시: "사용 가능"만 세션 동안 기억한다(기능 화면을 옮겨 다닐 때마다 묻지 않게).
  *   잠김·모름은 기억하지 않는다 — 요금제에 가입한 뒤 다시 들어오면 바로 열려야 한다.
  */
+import { fetchStudioTrial } from './studio-trial';
+
 let allowedForToken: string | null = null;
 /** 기능별 개방 플래그(`features`) 캐시 — 로그인 단위. 허브 카드 필터가 쓴다. */
 let featuresCache: { token: string; features: Record<string, boolean> } | null = null;
@@ -54,4 +56,22 @@ export async function fetchAiOperatorAccess(): Promise<boolean | null> {
   } catch {
     return null;
   }
+}
+
+/** ★ 2026-11-15 C135 무료체험 3회가 닿는 기능 화면(이 화면 하나뿐 · 서버도 생성 주소 하나에만 체험 길을 둔다) */
+export const STUDIO_TRIAL_FEATURE_ID = 'image-studio';
+
+/**
+ * ★ 2026-11-16 C138 — 그 기능 화면에 들어갈 수 있는가. **허브 카드와 화면 입구(PlanGate)가 이 함수 하나를 쓴다.**
+ *   (C135 가 무료체험 판정을 입구에만 넣어, 신청한 회사가 허브 카드로 들어가면 요금제 안내에 막혔다 — Harold 접수 1116.)
+ *   true = 들어간다 · false = 잠김(요금제 안내) · null = 모름(잠그지 않는다 · 기능마다 서버가 다시 막는다).
+ *   요금제로 잠긴 회사라도 이미지 스튜디오는 무료체험을 신청했으면 들어간다(판정 = 서버 /api/image-studio/trial · 그 답을 모르면 잠근 채).
+ *   access = 요금제 답을 이미 받은 호출부(허브)가 넘긴다 — 같은 답을 다시 묻지 않는다(둘째 물음이 실패해 「모름」이 「잠김」으로 굳는 길이 없다 · Codex 구현 1R).
+ */
+export async function fetchFeatureEntry(featureId: string, access?: boolean | null): Promise<boolean | null> {
+  const allowed = access === undefined ? await fetchAiOperatorAccess() : access;
+  if (allowed !== false) return allowed;
+  if (featureId !== STUDIO_TRIAL_FEATURE_ID) return false;
+  const trial = await fetchStudioTrial();
+  return !!(trial?.eligible && trial.requested);
 }

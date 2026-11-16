@@ -115,6 +115,33 @@ export const INTRO_DISMISS_SQL = `
 export const INTRO_LOGIN_SEEN_SQL = `
   SELECT 1 FROM user_intro_acks WHERE user_id = $1::uuid AND $2 = ANY(login_marks) LIMIT 1`;
 
+/**
+ * ★ 2026-11-16 C138 「다시 보지 않기」를 누른 계정 전부(Harold 「다시보지않기 누른 회사도 체크할 수 있도록」) — 슈퍼관리자 「기능 관심 업체」가 회사별로 묶어 보여 준다.
+ *   기간으로 거르지 않는다(누르면 그 계정에는 영구히 안 뜬다 = 지금 상태다). 문 행(_login)에는 해제 시각이 없다.
+ */
+export const INTRO_DISMISSED_SQL = `
+  SELECT u.company_id::text AS company_id, a.intro_key, a.dismissed_at, u.login_id, COALESCE(u.name, '') AS user_name
+    FROM user_intro_acks a
+    JOIN users u ON u.id = a.user_id
+   WHERE a.dismissed_at IS NOT NULL AND u.company_id IS NOT NULL
+   ORDER BY a.dismissed_at DESC, a.user_id`;
+
+export interface IntroDismissalRow { companyId: string; introKey: string; at: string; userName: string; loginId: string }
+
+/** 「다시 보지 않기」를 누른 계정 목록 — 표가 아직 없으면(42P01) null(화면은 그 칸을 비운다 · 탭의 나머지는 그대로) */
+export async function loadIntroDismissals(): Promise<IntroDismissalRow[] | null> {
+  try {
+    const r = await query(INTRO_DISMISSED_SQL, []);
+    return r.rows.map((x: any) => ({
+      companyId: String(x.company_id), introKey: String(x.intro_key), at: new Date(x.dismissed_at).toISOString(),
+      userName: String(x.user_name || ''), loginId: String(x.login_id || ''),
+    }));
+  } catch (err: any) {
+    if (err?.code === '42P01') return null;
+    throw err;
+  }
+}
+
 /** (순수) 판의 글 — 어느 판이든 같은 CSS · 업종 셋을 쓴다 */
 export function introContentOf(variant: IntroVariant): IntroContent {
   return { css: V3_POPUP_CSS, html: variant === 'trial' ? V3_TRIAL_HTML : V3_SCENES_HTML, sets: V3_MORPH_SETS };

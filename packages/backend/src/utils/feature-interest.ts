@@ -14,7 +14,8 @@ import { recordAuditLog } from './audit-log';
 import { mapWithConcurrency } from './concurrency';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
 import { precheckPeriodStartSql } from './precheck-usage';
-import { loadStudioTrials, type StudioTrialListRow } from './studio-trial';   // ★ 2026-11-15 C135 무료체험 신청 업체
+import { loadStudioTrials } from './studio-trial';   // ★ 2026-11-15 C135 무료체험 신청 업체
+import { loadIntroDismissals, type IntroDismissalRow } from './v3-intro';   // ★ 2026-11-16 C138 「다시 보지 않기」를 누른 계정
 
 // ★ 2026-10-06 go = 로그인 안내 창(featureId 'login-promo')의 「지금 바로가기」 — 요금제 보기와 다른 행동이라 다른 값으로 남긴다
 export const FEATURE_INTEREST_ACTIONS = { open: 'plan_feature_open', pricing: 'plan_feature_pricing', go: 'plan_feature_go' } as const;
@@ -55,16 +56,14 @@ export type FeatureInterestPlan = 'all' | 'unsubscribed' | 'subscribed';
 
 export interface FeatureInterestQuery {
   period: FeatureInterestPeriod;
-  featureId: string | null;
   plan: FeatureInterestPlan;
 }
 
-/** 조회 조건 정규화 — 모르는 값은 기본값(최근 7일 · 모든 기능 · 모든 회사) */
+/** 조회 조건 정규화 — 모르는 값은 기본값(최근 7일 · 모든 회사) · ★ C138 기능 조건은 화면이 받아 둔 줄에서 건다(서버 조건 삭제) */
 export function parseFeatureInterestQuery(q: any): FeatureInterestQuery {
   const period = (['today', '7d', 'month', 'all'] as const).find((p) => p === q?.period) ?? '7d';
   const plan = (['all', 'unsubscribed', 'subscribed'] as const).find((p) => p === q?.plan) ?? 'all';
-  const featureId = typeof q?.featureId === 'string' && FEATURE_ID_RE.test(q.featureId) ? q.featureId : null;
-  return { period, featureId, plan };
+  return { period, plan };
 }
 
 export interface FeatureInterestCompanyRow {
@@ -79,17 +78,26 @@ export interface FeatureInterestCompanyRow {
   lastAt: string;
   users: Array<{ name: string; loginId: string }>;
   events: Array<{ at: string; event: FeatureInterestEvent; featureId: string; userName: string }>;
+  /** ★ 2026-11-16 C138 이 조회 기간에 본 기록이 있는가 — false = 무료체험 신청 · 「다시 보지 않기」 때문에 올라온 줄(본 수는 0) */
+  seen: boolean;
+  /** ★ C138 이미지 스튜디오 무료체험(신청한 사람 · 시각 · 만든 수 / 받은 수) · 신청하지 않았으면 null */
+  trial: { requestedBy: string; requestedAt: string; used: number; granted: number } | null;
+  /** ★ C138 「다시 보지 않기」를 누른 기록(어느 창 · 누가 · 언제) · 최근 순 */
+  dismissed: Array<{ introKey: string; at: string; userName: string; loginId: string }>;
 }
 
 export interface FeatureInterestData {
-  summary: { companies: number; opens: number; pricingCompanies: number; unsubscribedCompanies: number };
-  features: Array<{ featureId: string; companies: number; pricingCompanies: number; goCompanies: number; opens: number }>;
+  /**
+   * 업체 줄 — 본 기록이 있는 회사(seen) + ★ C138 무료체험을 신청한 회사 · 「다시 보지 않기」를 누른 회사(기간과 무관하게 전부 · 본 기록이 없으면 seen = false).
+   *   ★ C138 요약 수 · 기능별 수는 내지 않는다 — 화면이 이 줄에서 센다(utils/feature-interest-view · 걸러 보기와 숫자가 한 벌).
+   */
   companies: FeatureInterestCompanyRow[];
   /**
-   * ★ 2026-11-15 C135 이미지 스튜디오 무료체험 신청 업체(신청 시각 · 사용 n / 3) — 관심 기록 · 위 조회 조건(기간 · 기능 · 요금제)과 무관하게 전부.
-   *   기한 없는 체험이라 기간으로 거르지 않는다. null = 표가 아직 없거나(DDL 앞) 못 읽음 → 화면은 이 표만 그리지 않는다.
+   * ★ C138 무료체험 신청 목록 · 「다시 보지 않기」 목록을 읽었는가 — false = 표가 아직 없거나(DDL 앞) 못 읽음 → 화면은 그 칸을 「알 수 없음」으로(「없음」이라 쓰지 않는다).
+   *   (C135 가 따로 내던 trials 목록은 업체 줄의 trial 칸으로 옮겼다 · 둘 다 기한 없는 지금 상태라 기간으로 거르지 않는다.)
    */
-  trials: StudioTrialListRow[] | null;
+  trialsKnown: boolean;
+  dismissalsKnown: boolean;
 }
 
 /**
@@ -102,7 +110,6 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
   const companyExpr = `COALESCE(al.details->>'companyId', u.company_id::text)`;
   let where = `al.action IN ($1, $2, $3) AND ${companyExpr} IS NOT NULL`;
   if (q.period !== 'all') where += ` AND al.created_at >= ${precheckPeriodStartSql(q.period)}`;
-  if (q.featureId) { params.push(q.featureId); where += ` AND al.details->>'featureId' = $${params.length}`; }
   const from = `FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id WHERE ${where}`;
 
   const [agg, people, recent] = await Promise.all([
@@ -126,14 +133,15 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     ),
   ]);
 
-  type Acc = FeatureInterestCompanyRow & { openMap: Map<string, number>; pricingFeatures: Set<string>; goFeatures: Set<string> };
+  type Acc = FeatureInterestCompanyRow & { openMap: Map<string, number>; sortAt: string };
   const byCompany = new Map<string, Acc>();
   const accOf = (companyId: string): Acc => {
     let a = byCompany.get(companyId);
     if (!a) {
       a = {
         companyId, companyName: '(회사 정보 없음)', planName: '', subscribed: false, features: [], pricingClicks: 0, goClicks: 0,
-        lastAt: new Date(0).toISOString(), users: [], events: [], openMap: new Map(), pricingFeatures: new Set(), goFeatures: new Set(),
+        lastAt: new Date(0).toISOString(), users: [], events: [], openMap: new Map(),
+        seen: false, trial: null, dismissed: [], sortAt: new Date(0).toISOString(),
       };
       byCompany.set(companyId, a);
     }
@@ -145,15 +153,14 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     const n = Number(row.n) || 0;
     if (row.action === FEATURE_INTEREST_ACTIONS.pricing) {
       a.pricingClicks += n;
-      if (n > 0) a.pricingFeatures.add(featureId);
     } else if (row.action === FEATURE_INTEREST_ACTIONS.go) {
       a.goClicks += n;
-      if (n > 0) a.goFeatures.add(featureId);
     } else {
       a.openMap.set(featureId, (a.openMap.get(featureId) || 0) + n);
     }
     const at = new Date(row.last_at).toISOString();
     if (at > a.lastAt) a.lastAt = at;
+    a.seen = true;
   }
   for (const row of people.rows) {
     const a = byCompany.get(String(row.company_id));
@@ -170,6 +177,23 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     });
   }
 
+  // ★ C135 무료체험 신청 업체 · ★ C138 「다시 보지 않기」를 누른 계정 — 못 읽어도 탭의 나머지는 그대로(그 칸만 비운다).
+  //   둘 다 기간과 무관한 지금 상태라 본 기록이 없는 회사도 줄을 만든다(회사 이름 · 요금제를 아래에서 같이 채운다).
+  const trials = await loadStudioTrials().catch((err: any) => {
+    console.error('[feature-interest] 무료체험 신청 업체 조회 실패:', err?.message || err);
+    return null;
+  });
+  const dismissals: IntroDismissalRow[] | null = await loadIntroDismissals().catch((err: any) => {
+    console.error('[feature-interest] 다시 보지 않기 목록 조회 실패:', err?.message || err);
+    return null;
+  });
+  for (const t of trials || []) accOf(t.companyId).trial = { requestedBy: t.requestedBy, requestedAt: t.requestedAt, used: t.used, granted: t.granted };
+  for (const d of dismissals || []) accOf(d.companyId).dismissed.push({ introKey: d.introKey, at: d.at, userName: d.userName, loginId: d.loginId });
+  // 줄 순서 = 가장 최근에 일어난 일(본 시각 · 신청 시각 · 누른 시각) 순 — 본 기록이 없는 줄의 lastAt 은 처음 값(1970) 그대로다
+  for (const a of byCompany.values()) {
+    a.sortAt = [a.lastAt, a.trial?.requestedAt || '', ...a.dismissed.map((d) => d.at)].reduce((m, x) => (x > m ? x : m));
+  }
+
   const accs = Array.from(byCompany.values());
   if (accs.length > 0) {
     const names = await query(`SELECT id::text AS id, company_name FROM companies WHERE id::text = ANY($1::text[])`, [accs.map((a) => a.companyId)]);
@@ -177,6 +201,7 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     for (const a of accs) a.companyName = nameOf.get(a.companyId) || '(회사 정보 없음)';
   }
   // 요금제 = 지금 기준(고객 화면 판정과 같은 함수)
+  // ponytail: 회사마다 요금제를 한 번씩 읽는다(무료체험 · 숨김 회사가 더해져 줄 수 = 기간과 무관하게 는다) · 수백 곳을 넘어 느려지면 요금제를 한 SQL 로 묶는다
   await mapWithConcurrency(accs, PLAN_CONCURRENCY, async (a) => {
     const ctx = await loadPlanContext(a.companyId).catch(() => null);
     a.planName = ctx?.planName || '알 수 없음';
@@ -185,44 +210,14 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
 
   const kept = accs
     .filter((a) => (q.plan === 'all' ? true : q.plan === 'subscribed' ? a.subscribed : !a.subscribed))
-    .sort((x, y) => (x.lastAt < y.lastAt ? 1 : x.lastAt > y.lastAt ? -1 : 0));
-
-  const featureAcc = new Map<string, { companies: Set<string>; pricing: Set<string>; go: Set<string>; opens: number }>();
-  const fa = (id: string) => {
-    let v = featureAcc.get(id);
-    if (!v) { v = { companies: new Set<string>(), pricing: new Set<string>(), go: new Set<string>(), opens: 0 }; featureAcc.set(id, v); }
-    return v;
-  };
-  for (const a of kept) {
-    for (const [featureId, opens] of a.openMap) { const v = fa(featureId); v.companies.add(a.companyId); v.opens += opens; }
-    for (const featureId of a.pricingFeatures) fa(featureId).pricing.add(a.companyId);
-    for (const featureId of a.goFeatures) fa(featureId).go.add(a.companyId);
-  }
+    .sort((x, y) => (x.sortAt < y.sortAt ? 1 : x.sortAt > y.sortAt ? -1 : 0));
 
   const companies: FeatureInterestCompanyRow[] = kept.map((a) => ({
     companyId: a.companyId, companyName: a.companyName, planName: a.planName, subscribed: a.subscribed,
     features: Array.from(a.openMap.entries()).map(([featureId, opens]) => ({ featureId, opens })).sort((x, y) => y.opens - x.opens),
     pricingClicks: a.pricingClicks, goClicks: a.goClicks, lastAt: a.lastAt, users: a.users, events: a.events,
+    seen: a.seen, trial: a.trial, dismissed: a.dismissed,
   }));
-  const features = Array.from(featureAcc.entries())
-    .map(([featureId, v]) => ({ featureId, companies: v.companies.size, pricingCompanies: v.pricing.size, goCompanies: v.go.size, opens: v.opens }))
-    .sort((x, y) => y.companies - x.companies || y.pricingCompanies - x.pricingCompanies || y.opens - x.opens);
 
-  // ★ C135 무료체험 신청 업체 — 못 읽어도 탭의 나머지는 그대로(이 표만 비운다)
-  const trials = await loadStudioTrials().catch((err: any) => {
-    console.error('[feature-interest] 무료체험 신청 업체 조회 실패:', err?.message || err);
-    return null;
-  });
-
-  return {
-    trials,
-    summary: {
-      companies: companies.length,
-      opens: companies.reduce((sum, c) => sum + c.features.reduce((t, f) => t + f.opens, 0), 0),
-      pricingCompanies: companies.filter((c) => c.pricingClicks > 0).length,
-      unsubscribedCompanies: companies.filter((c) => !c.subscribed).length,
-    },
-    features,
-    companies,
-  };
+  return { trialsKnown: trials !== null, dismissalsKnown: dismissals !== null, companies };
 }

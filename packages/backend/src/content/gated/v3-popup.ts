@@ -6,6 +6,7 @@
  *   프론트 번들(옛 packages/frontend/src/components/v3/v3-popup-parts.ts · v3-motion.ts 의 SETS)에 있던 글을 **스크립트로 값 그대로** 옮겼다.
  *   그림 자리는 `gated:파일이름` 으로 적혀 있고, 화면이 로그인 토큰으로 받아 온 그림 주소로 바꾼다(그림 = packages/backend/assets/gated/v3).
  * 옮기며 바꾼 것 = 그림 주소 꼴 · 장면 창은 로그인 화면 창의 다섯째 장면(인증 안내 요약)을 빼고 단추 줄을 로그인 뒤 틀에 맞춤(다음에 볼게요 · 다시 보지 않기).
+ * ★ 2026-11-16 C138 두 창의 「다시 보지 않기」 단추를 뺐다(Harold 「그거 눌러버리면 홍보가 안 되는데」) — 닫는 길 = X · 「다음에 볼게요」.
  * ⛔ 이 파일의 글 · 그림을 프론트 저장소(packages/frontend/src · public)에 다시 두지 않는다(계약 시험 c136-gated-content).
  * 글꼴 = 앱 전역 프리텐다드 하나. 색 = 흰 바탕 + 검정 + 주황 하나. 움직임의 시간표 = 프론트 components/v3/v3-motion.ts.
  */
@@ -434,7 +435,7 @@ export const V3_SCENES_HTML = `<svg width="0" height="0" style="position:absolut
 <div><h3 class="hd"><span class="ln" style="--i:0"><span>가입하는 순간,</span></span><span class="ln" style="--i:1"><span><em>환영 인사</em>가 먼저 갑니다</span></span></h3><p class="lead">여정을 한 번 켜 두면 가입, 장바구니, 생일, 휴면까지<br>대상을 고르지 않아도 때맞춰 나갑니다.</p></div>
 <div><h3 class="hd"><span class="ln" style="--i:0"><span><em>같은 업종 평균</em>을</span></span><span class="ln" style="--i:1"><span>바로 옆에 놓습니다</span></span></h3><p class="lead">우리 숫자만 보고 짐작하지 않아도 됩니다.<br>같은 업종 평균이 성과 옆에 함께 보입니다.</p></div>
 </div>
-<div class="act"><button class="cta" data-act="go">이미지 스튜디오 보기 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button><button class="ghost" data-act="later">다음에 볼게요</button><button class="ghost" data-act="dismiss">이 소개 다시 보지 않기</button></div>
+<div class="act"><button class="cta" data-act="go">이미지 스튜디오 보기 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button><button class="ghost" data-act="later">다음에 볼게요</button></div>
 <div class="tabs">
 <button data-tab class="on"><b>01</b>포스터</button><button data-tab><b>02</b>미구매 고객</button><button data-tab><b>03</b>자동 발송</button><button data-tab><b>04</b>업종 비교</button>
 <button class="pp" data-pp aria-label="자동 넘김 멈춤"><svg class="ic"><use xlink:href="#v3p-pau"/></svg><svg class="ic"><use xlink:href="#v3p-ply"/></svg></button>
@@ -464,7 +465,7 @@ export const V3_TRIAL_HTML = `<svg width="0" height="0" style="position:absolute
 <p class="lead rise" style="--i:4">갖고 계신 제품 사진에서 <b>배경을 지우고(누끼)</b>,<br>문구를 얹어 <b>포스터 한 장으로 합성</b>합니다.<br>완성본은 지금 쓰시는 <b>MMS에 바로 붙여</b> 보냅니다.</p>
 <div class="facts rise" style="--i:6"><div><b>무료 3회</b>포스터 3장</div><div><b>기한 없음</b>언제든 사용</div><div><b>가입 없이</b>요금제 그대로</div></div>
 <div class="trial rise" style="--i:8"><button class="cta" data-act="trial">무료체험 3회 이용하고 싶습니다 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button>
-<div class="lnk"><button data-act="later">다음에 볼게요</button><button data-act="dismiss">이 안내 다시 보지 않기</button></div></div>
+<div class="lnk"><button data-act="later">다음에 볼게요</button></div></div>
 <div class="done"><svg class="ic"><use xlink:href="#v3p-ck"/></svg><div>무료체험 3회가 열렸습니다<small data-remaining>남은 횟수 3회</small></div><button class="go" data-act="studio">이미지 스튜디오로 가기 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button></div>
 </div>`;
 

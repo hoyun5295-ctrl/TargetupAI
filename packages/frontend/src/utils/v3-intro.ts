@@ -2,7 +2,8 @@
  * v3-intro.ts — 로그인 직후 안내 창(「한줄로 V3」 장면 창 · 무료체험 창)의 서버 호출
  *   (★ 2026-11-13 C133 F7 · 설계서 docs/2026-11-13-hanjul-v3-design.md §2 → ★ 2026-11-16 C136 · 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2-1)
  *
- * 띄울지 · 어느 판인지는 서버가 정한다(계정당 최대 3번 · 로그인당 1번 · 「다시 보지 않기」 = 영구 · backend utils/v3-intro.ts).
+ * 띄울지 · 어느 판인지는 서버가 정한다(계정당 최대 3번 · 로그인당 1번 · backend utils/v3-intro.ts).
+ *   ★ 2026-11-16 C138 화면에서 숨기는 호출(「다시 보지 않기」)은 없앴다 — 전에 누른 계정은 서버 기록대로 계속 안 뜬다.
  * ★ C136 — 순서 = 준비(peek) → 그림 받기(utils/gated-content) → 선점(claim).
  *   준비는 노출을 쓰지 않는다. 선점이 노출 한 번을 쓴다 → 그림을 못 받은 로그인은 선점하지 않는다(노출 수를 태우지 않는다).
  *   선점은 준비한 판의 열쇠를 싣는다 — 그 사이 판이 바뀌었으면 서버가 선점하지 않는다.
@@ -33,11 +34,4 @@ export async function claimV3Intro(introKey: string): Promise<boolean> {
   const r = await sendJson('/api/plans/v3-intro/claim', { method: 'POST', body: { introKey } });
   const d: any = r.body;
   return r.ok && d?.success === true && d.show === true && d.introKey === introKey;
-}
-
-/** 「다시 보지 않기」 — 저장됐으면 true. introKey = 숨길 창의 판 열쇠(언제나 싣는다 · 열쇠 없는 요청은 서버가 옛 판에 적는다) */
-export async function dismissV3Intro(introKey: string): Promise<boolean> {
-  if (!localStorage.getItem('token')) return false;
-  const r = await sendJson('/api/plans/v3-intro/dismiss', { method: 'POST', body: { introKey } });
-  return r.ok && (r.body as any)?.success === true;
 }

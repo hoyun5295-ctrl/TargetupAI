@@ -106,12 +106,12 @@ describe('집계 — 회사 · 기능별', () => {
     });
   }
 
-  it('요약 · 기능별 · 업체별이 기록과 맞는다', async () => {
+  // ★ 2026-11-16 C138 — 서버는 업체 줄만 낸다. 요약 수 · 기능별 수 · 기능 조건은 화면이 받아 둔 줄에서 센다(c138-trial-entry-interest 「화면의 걸러 보기」)
+  it('업체별이 기록과 맞는다 · 서버는 요약 · 기능별 수를 따로 내지 않는다', async () => {
     fakeDb(rows);
     const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all' }));
-    expect(d.summary).toEqual({ companies: 2, opens: 4, pricingCompanies: 1, unsubscribedCompanies: 1 });
-    const am = d.features.find((f) => f.featureId === 'auto-marketing');
-    expect(am).toEqual({ featureId: 'auto-marketing', companies: 1, pricingCompanies: 1, goCompanies: 0, opens: 2 });
+    expect(Object.keys(d).sort()).toEqual(['companies', 'dismissalsKnown', 'trialsKnown']);
+    expect(d.companies).toHaveLength(2);
     const beauty = d.companies.find((c) => c.companyId === 'c-free')!;
     expect(beauty.companyName).toBe('표본뷰티');
     expect(beauty.subscribed).toBe(false);
@@ -124,7 +124,7 @@ describe('집계 — 회사 · 기능별', () => {
     expect(d.companies[0].companyId).toBe('c-free'); // 마지막 본 순
   });
 
-  it('★ Codex 1R — 오래된 「요금제 보기」도 기능별 막대에 남는다(상세 30건 밖이어도 수는 전부 센다)', async () => {
+  it('★ Codex 1R — 오래된 「요금제 보기」도 수에 남는다(상세 30건 밖이어도 수는 전부 센다)', async () => {
     const old = { action: 'plan_feature_pricing', created_at: '2026-10-01T00:00:00Z', feature_id: 'journeys', company_id: 'c-free', user_name: '김담당', login_id: 'beauty01', company_name: '표본뷰티' };
     const many = Array.from({ length: 35 }, (_, i) => ({
       action: 'plan_feature_open', created_at: `2026-10-06T08:${String(i).padStart(2, '0')}:00Z`, feature_id: 'image-studio',
@@ -135,19 +135,20 @@ describe('집계 — 회사 · 기능별', () => {
     const beauty = d.companies[0];
     expect(beauty.events).toHaveLength(30);
     expect(beauty.events.some((e) => e.featureId === 'journeys')).toBe(false); // 상세에는 없어도
-    expect(d.features.find((f) => f.featureId === 'journeys')).toEqual({ featureId: 'journeys', companies: 0, pricingCompanies: 1, goCompanies: 0, opens: 0 }); // 수에는 있다
-    expect(beauty.pricingClicks).toBe(1);
+    expect(beauty.pricingClicks).toBe(1);                                       // 수에는 있다
+    expect(beauty.features).toEqual([{ featureId: 'image-studio', opens: 35 }]);
   });
 
-  it('요금제 미가입만 · 기간 전체는 시각 조건이 없고 · 기능을 고르면 그 조건이 붙는다', async () => {
+  it('요금제 미가입만 · 기간 전체는 시각 조건이 없다 · ★ C138 기능 조건은 서버에 없다(화면이 거른다 · 보내도 무시)', async () => {
     fakeDb(rows);
     const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all', plan: 'unsubscribed', featureId: 'auto-marketing' }));
     expect(d.companies.map((c) => c.companyId)).toEqual(['c-free']);
+    expect(d.companies[0].features.map((f) => f.featureId).sort()).toEqual(['auto-marketing', 'image-studio']);
     const [sql, params] = mockQuery.mock.calls[0];
     expect(String(sql)).not.toContain('al.created_at >=');
     expect(String(sql)).toContain("al.action IN ($1, $2, $3)");
-    expect(String(sql)).toContain("al.details->>'featureId' = $4");
-    expect(params.slice(0, 4)).toEqual(['plan_feature_open', 'plan_feature_pricing', 'plan_feature_go', 'auto-marketing']);
+    expect(String(sql)).not.toContain('$4');
+    expect(params).toEqual(['plan_feature_open', 'plan_feature_pricing', 'plan_feature_go']);
   });
 
   it('★ 로그인 안내 창 — 뜬 것(open) · 「지금 바로가기」(go)를 요금제 보기와 따로 센다', async () => {
@@ -156,11 +157,10 @@ describe('집계 — 회사 · 기능별', () => {
       { action: 'plan_feature_open', created_at: '2026-10-06T09:00:00Z', feature_id: 'login-promo', company_id: 'c-free', user_name: '김담당', login_id: 'beauty01', company_name: '표본뷰티' },
     ]);
     const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all' }));
-    expect(d.features).toEqual([{ featureId: 'login-promo', companies: 1, pricingCompanies: 0, goCompanies: 1, opens: 1 }]);
+    expect(d.companies[0].features).toEqual([{ featureId: 'login-promo', opens: 1 }]);
     expect(d.companies[0].goClicks).toBe(1);
     expect(d.companies[0].pricingClicks).toBe(0);
     expect(d.companies[0].events[0].event).toBe('go');
-    expect(d.summary.pricingCompanies).toBe(0);
   });
 
   it('기간을 고르면 시각 조건이 붙는다 · 읽는 행 수 상한이 없다(묶음 SQL)', async () => {
@@ -172,8 +172,9 @@ describe('집계 — 회사 · 기능별', () => {
   });
 
   it('최근 7일이 기본 · 모르는 값은 기본값', () => {
-    expect(parseFeatureInterestQuery({})).toEqual({ period: '7d', featureId: null, plan: 'all' });
-    expect(parseFeatureInterestQuery({ period: 'x', plan: 'y', featureId: 'BAD ID' })).toEqual({ period: '7d', featureId: null, plan: 'all' });
+    expect(parseFeatureInterestQuery({})).toEqual({ period: '7d', plan: 'all' });
+    expect(parseFeatureInterestQuery({ period: 'x', plan: 'y', featureId: 'BAD ID' })).toEqual({ period: '7d', plan: 'all' });
+    expect(parseFeatureInterestQuery({ period: 'month', plan: 'subscribed', featureId: 'sns' })).toEqual({ period: 'month', plan: 'subscribed' });
   });
 });
 
@@ -317,49 +318,68 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
     for (const src of [promo, scenes]) expect(src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')).not.toMatch(/\b(alert|confirm|prompt)\(/);
   });
 
-  it('「이 소개 다시 보지 않기」는 서버에 적힌 뒤에만 약속한다(못 적으면 그렇다고 말한다) · 판 열쇠를 싣는다', () => {
-    const dismiss = scenes.slice(scenes.indexOf('const dismiss = async () => {'), scenes.indexOf('const onClick'));
-    expect(dismiss).toContain('const saved = await dismissV3Intro(introKey);');
-    expect(dismiss).toContain("if (saved) toast.success('이 계정에서는 다시 띄우지 않아요');");
-    expect(dismiss).toContain("else toast.error('저장하지 못했어요. 다음에 다시 눌러 주세요.');");
+  it('★ C138 두 안내 창에는 「다시 보지 않기」가 없다(Harold 「그거 눌러버리면 홍보가 안 되는데」) · 화면 코드에도 숨기는 길 0', () => {
+    const code = scenes.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+    for (const gone of ['dismiss', 'useToast', 'busyRef']) expect(code, gone).not.toContain(gone);
+    expect(scenes).toContain("if (act === 'close' || act === 'later') onClose();");
+    // 무료체험 안내 창도 같다 = 닫는 길은 X · 「다음에 볼게요」 · 신청 실패 안내(토스트)는 그대로
+    const trial = front('components/v3/StudioTrialPromo.tsx');
+    expect(trial.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')).not.toMatch(/dismiss|다시 띄우지 않아요/);
+    expect(trial).toContain("if (act === 'close' || act === 'later') onClose();");
+    expect(trial).toContain("toast.error('지금은 열지 못했어요. 잠시 뒤 다시 눌러 주세요.');");
   });
 
   it('대시보드에 붙어 있다 · 슈퍼관리자 화면은 로그인 안내 창 이름과 바로가기를 보여 준다', () => {
     expect(front('pages/Dashboard.tsx')).toContain('<AiOperatorLoginPromo blocked={loginPromoBlocked} />');
     const tab = front('components/admin/FeatureInterestTab.tsx');
     // ★ 2026-11-15 C135 — 로그인 뒤 안내 창의 이름 · 다음 행동(주 버튼)은 등록부(constants/login-popups.ts)가 정한다(탭에 손으로 적지 않는다 · 새 창을 올려도 탭이 그대로 그린다)
-    expect(front('constants/login-popups.ts')).toContain("{ id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기' },");
+    // ★ 2026-11-16 C138 — 등록부가 그 창의 판 열쇠(introKeys)도 쥔다(「다시 보지 않기」 기록을 창 이름으로 보여 준다)
+    expect(front('constants/login-popups.ts')).toContain("{ id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기', introKeys: ['v3-scenes', 'v3-intro'] },");
     expect(tab).toContain('const featureName = (id: string) => loginPopupOf(id)?.name || FEATURE_TITLES.get(id) || id;');
-    expect(tab).toContain('const next = loginPopupOf(f.featureId) ? f.goCompanies : f.pricingCompanies;');
+    expect(tab).toContain("(e.event === 'go' ? loginPopupOf(e.featureId)?.goLabel || EVENT_LABEL.go : EVENT_LABEL[e.event])");
   });
 });
 
 /**
- * ★ 2026-10-07 업체별 표 = 한 줄 · 본 기능 말줄임 + 말풍선 · 상세 창(Harold 목업 2안 「회사명부터 다 깨진다 · 클릭하면 모달」)
+ * ★ 2026-10-07 업체별 표 = 한 줄 · 상세 창(Harold 목업 2안 「회사명부터 다 깨진다 · 클릭하면 모달」)
+ * ★ 2026-11-16 C138 = 화면 가로를 다 쓰고 아무 칸도 자르지 않는다(Harold 「화면 가로로 풀로 해서 짤리는거 없도록」 · 말줄임 · 말풍선을 걷었다)
  */
-describe('업체별 표 — 한 줄 · 상세 창', () => {
+describe('업체별 표 — 자르지 않는다 · 상세 창', () => {
   const tab = front('components/admin/FeatureInterestTab.tsx');
   const code = tab.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
-  const table = tab.slice(tab.indexOf('업체별 · 마지막 본 순'), tab.indexOf('{tip && ('));
+  const table = tab.slice(tab.indexOf('<table className={`w-full text-sm'), tab.indexOf('<ListPager'));
 
-  it('줄마다 한 줄 — 줄바꿈 금지 · 회사명 · 본 기능은 칸 안 상자가 말줄임', () => {
-    expect(table).toContain('cursor-pointer whitespace-nowrap');
-    expect(table).toContain('<span className="block max-w-[200px] truncate" title={c.companyName}>{c.companyName}</span>');
-    expect(table).toContain('className="block max-w-[260px] truncate text-cyan-800"');
-    // 옛 펼침 줄 · 칩 여러 줄 · 사람 이름 두 줄은 없어졌다
+  it('표 칸은 자르지 않는다 — 말줄임 0 · 회사명과 본 기능은 길면 칸 안에서 줄을 바꾼다 · 남는 폭은 본 기능 칸 · 그 밖은 한 줄', () => {
+    expect(table.length).toBeGreaterThan(500);
+    for (const cut of ['truncate', 'line-clamp', 'text-ellipsis', 'overflow-hidden']) expect(table, cut).not.toContain(cut);
+    // 폭 상한은 줄을 바꾸는 자리(회사명)에만 있다 = 상한을 넘으면 잘리지 않고 다음 줄로
+    expect(table.match(/max-w-\[/g)).toHaveLength(2);
+    expect(table).toContain('<td className="px-2.5 py-2.5 font-medium !whitespace-normal"><span className="block w-max max-w-[180px] 2xl:max-w-[280px] [word-break:keep-all] [overflow-wrap:anywhere]">{c.companyName}</span></td>');
+    expect(table).toContain('<td className="px-2.5 py-2 !whitespace-normal min-w-[200px] w-full">');
+    expect(table).toContain('${ADMIN_TABLE_ONELINE}');
+    // 옛 펼침 줄 · 사람 이름 두 줄은 없어졌다
     expect(code).not.toContain('openRow');
     expect(code).not.toContain('Fragment');
     expect(table).not.toContain('c.users.slice(0, 2)');
   });
 
-  it('본 기능 말풍선 = 화면 기준 자리(가로 스크롤 상자에 잘리지 않게) · 스크롤하면 닫힘', () => {
-    expect(tab).toContain('className="fixed z-[60]');
-    expect(tab).toContain("window.addEventListener('scroll', hide, true);");
-    expect(table).toContain('onMouseLeave={() => setTip(null)}');
+  it('★ C138 말풍선 · 「기능별 관심」 칸 · 따로 있던 무료체험 표는 없다 — 업체 표 하나에 모았다', () => {
+    for (const gone of ['setTip', 'fixed z-[60]', '기능별 관심', 'data?.trials &&', 'data.trials.', 'data.trials)', 'LOGIN_POPUPS']) expect(code, gone).not.toContain(gone);
+    expect(code.match(/<table /g)).toHaveLength(2);   // 업체 표 + 상세 창의 시간순 기록
+    for (const head of ['무료체험', '다시 보지 않기', '마지막 본 시각']) expect(table).toContain(`<th className="text-left font-medium px-2.5 py-2">${head}</th>`);
+  });
+
+  it('★ C138 이 탭만 화면 가로를 다 쓴다 — CSS 계산 하나(가운데 정렬 틀 기준 · 좌우 24px) · 1280px 부터 · 폭을 재는 코드 0(창 크기가 바뀌어도 어긋나지 않는다)', () => {
+    expect(tab).toContain("const FULL_BLEED = 'xl:w-[calc(100vw_-_48px)] xl:ml-[calc(50%_-_50vw_+_24px)]';");
+    expect(tab).toContain('<div className={`bg-white rounded-2xl border border-gray-200/70 shadow-sm ${FULL_BLEED}`}>');
+    // 화면 폭을 재서 고치는 길은 없다(처음 값에 머물러 좁은 화면에서 가로로 넘쳤다 · 1116 폭 훑기)
+    for (const gone of ['useLayoutEffect', 'getBoundingClientRect', 'clientWidth', "addEventListener('resize'", 'style.width']) expect(code, gone).not.toContain(gone);
+    // 부모 틀(관리자 화면 본문)은 가운데 정렬 그대로다 — 계산의 전제
+    expect(front('pages/AdminDashboard.tsx')).toContain('<main className="max-w-7xl mx-auto px-4 md:px-6 pt-[18px] pb-10">');
   });
 
   it('줄을 누르면(Enter · Space 도) 상세 창 · 닫기 = X · [닫기] · ESC 만(배경 클릭 닫기 없음)', () => {
-    expect(table).toContain('onClick={() => { setTip(null); setDetail(c); }}');
+    expect(table).toContain('onClick={() => setDetail(c)}');
     expect(table).toContain("if (e.key === 'Enter' || e.key === ' ')");
     expect(tab).toContain('{detail && <CompanyDetailModal c={detail} onClose={() => setDetail(null)} />}');
     const modal = tab.slice(tab.indexOf('function CompanyDetailModal'), tab.indexOf('export default function FeatureInterestTab'));

@@ -80,8 +80,9 @@
 | C133 | 38c3671f |
 | C134 | 미커밋 |
 | C135 | 03e5d935 |
-| C136 | 미커밋 |
+| C136 | 50b50da1 |
 | C137 | 7e186fd7 |
+| C138 | 미커밋 |
 
 ## §1 대기
 
@@ -2217,7 +2218,7 @@ CREATE TABLE IF NOT EXISTS image_studio_trials (
 - 선행: 설계 Codex 4R · 목업 Codex 2R · 구현 Codex approve · 커밋(Harold · 경로를 정해 = scratch/c136/a-paths.txt · 문안 = scratch/c136/a-msg.txt · 이 배포의 파일은 다른 카드의 미커밋 파일과 겹치지 않는다 · tp-push 는 쓰지 않는다) → push(이 커밋만)
 - 기대: 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2 · §12 · 로그인 화면의 안내 창 = 종전 인증 안내 창(V3 안내 창 0) · 로그인 직후 창 = 한줄로 V3 장면 창(장면 넷 · 계정당 최대 3번 · 새 판이라 옛 소개 창을 다 본 계정에도 뜬다) · 무료체험 창은 대상 · 횟수 그대로 · 창의 글과 그림은 로그인 뒤에만 내려간다 · ENV V3_LOGIN_INTRO 는 읽는 코드가 없어진다(지워도 되고 남겨도 무해)
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep peekIntro ≥ 1 · gatedImageFile ≥ 1 · 서버에 packages/backend/assets/gated/v3 그림 12장 · curl -s -o /dev/null -w "%{http_code}" https://hanjul.ai/api/plans/gated/img/poster-serum.jpg = 401(로그인 없이 못 받는다) · curl -sI https://hanjul.ai/v3/poster-serum.jpg 의 content-type 이 image 가 아니다 · curl -s https://hanjul.ai/about-v3.html 에 「마케터가 하던 일을」이 없다 · curl -s https://hanjul.ai/api/public/intro/v3-login = 404 · 로그인 화면을 강력 새로고침하면 인증 안내 창 · 로그인하면 장면 창
-- 결과: (대기)
+- 결과: 1116 11:3x 배포(Harold) · push 8e7ec2c6..50b50da1(11:22 · push 전 검사 통과) · Harold 가 실행했다고 알려 준 서버 명령 = git pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload targetup-backend(빌드 출력 · 적재 0건 줄은 받지 못함 = 머리의 deployed_head 는 올리지 않음) · 받은 서버 확인 출력 = HEAD 50b50da1 · online · dist peekIntro 3 · gatedImageFile 2 · 서버 보관 그림 12장 · 옛 공개 파일 0 · /api/plans/v3-intro/peek 401 · /api/plans/gated/img/poster-serum.jpg 401 · /api/public/intro/v3-login 404 · /v3/poster-serum.jpg content-type text/html(그림 아님) · about-v3 문구 0 · 에러 로그 새 종류 0 · 운영에서 noplan 계정 로그인 뒤 장면 창이 그림과 함께 뜸(Harold 캡처) · 남은 확인 = 로그인 화면을 강력 새로고침했을 때 인증 안내 창만 뜨는지(Harold 화면) · 이 배포 뒤 접수 = 카드 C138(장면 창 숨김 단추 · 무료체험 입구)
 
 ### C136-DDL-1 · 제작 대행 체험 표(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §8) · ★ 배포 나 앞
 - 카드: C136
@@ -2299,6 +2300,22 @@ CREATE TABLE IF NOT EXISTS proposal_trials (
 - 선행: C137-H1
 - 기대: 설계서 docs/2026-11-16-c137-ad-text-render-design.md §6 열 줄 전부 맞음
 - 확인: 직원 결과(날짜 · 계정 · 사람) · 다름이면 캡처
+- 결과: (대기)
+
+### C138-H1 · 한줄로 배포(무료체험 신청 회사의 이미지 스튜디오 입구 통일 · 로그인 뒤 안내 창 둘(장면 창 · 무료체험 안내 창)의 「다시 보지 않기」 제거 · 슈퍼관리자 「기능 관심 업체」 화면 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C138
+- 단계: 한줄로 배포
+- 선행: 구현 Codex approve · 커밋(Harold · 경로를 정해 = scratch/c138/paths.txt · 문안 = scratch/c138/msg.txt · 이 카드의 코드 파일은 다른 카드의 미커밋 파일과 겹치지 않는다 · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 기대: 설계 기록 docs/2026-11-16-c138-trial-entry-interest-design.md §3 · 무료체험을 신청한 미가입 회사 = AI 오퍼레이터의 「이미지 스튜디오」 카드에 「무료체험」 표시 · 누르면 스튜디오로 들어간다(그 밖 카드 = 종전 자물쇠 · 요금제 안내) · 로그인 뒤 장면 창의 단추 = 「이미지 스튜디오 보기」 · 「다음에 볼게요」 둘 · 무료체험 안내 창도 숨김 단추 없음(신청 단추 아래 「다음에 볼게요」 하나 · Harold 1116 「같이 없앰」) · 슈퍼관리자 「기능 관심 업체」 = 표 하나(무료체험 · 다시 보지 않기 칸) · 보기 · 기능 걸러 보기 · 화면 가로 전체
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep INTRO_DISMISSED_SQL = dist/utils/v3-intro.js 정의 · dist/utils/feature-interest.js 에 loadIntroDismissals 호출 · dist/content/gated/v3-popup.js 에 「이 소개 다시 보지 않기」 0줄 · 「이 안내 다시 보지 않기」 0줄(data-act="dismiss" 0줄) · 에러 로그 새 종류 0
+- 결과: (대기)
+
+### C138-S1 · 실측(요금제 미가입 시험 계정 noplan = 무료체험 신청함 · 슈퍼관리자 ceo)
+- 카드: C138
+- 단계: 사후
+- 선행: C138-H1
+- 기대: 설계 기록 docs/2026-11-16-c138-trial-entry-interest-design.md §11 열두 줄 전부 맞음(12번은 미신청 미가입 계정이 있을 때만)
+- 확인: 결과(날짜 · 계정 · 사람) · 다름이면 캡처
 - 결과: (대기)
 
 ### C133-DDL-6 · 나눠 보내기 표 둘(설계서 docs/2026-11-13-hanjul-v3-design.md §6 · §18 「배포 C-3」) · ★ 배포 앞

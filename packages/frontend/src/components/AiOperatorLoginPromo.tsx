@@ -3,7 +3,8 @@
  *
  * 이 컴포넌트는 틀이다: 누가 · 몇 번 · 언제 띄우는지와 창이 열려 있는 동안의 키보드 규칙을 맡고, 창의 안쪽은 서버가 정한 판이 그린다.
  *   - 판 = 「한줄로 V3」 장면 창(V3ScenesPromo) · 이미지 스튜디오 무료체험 창(StudioTrialPromo · 요금제 미가입 + 아직 신청 안 한 회사).
- *   - 대상 · 노출 = 서버가 정한다(고객사 사용자 · 한 계정에 최대 3번 · 한 로그인에 한 번 · 「다시 보지 않기」 = 그 계정에 영구 · backend utils/v3-intro.ts).
+ *   - 대상 · 노출 = 서버가 정한다(고객사 사용자 · 한 계정에 최대 3번 · 한 로그인에 한 번 · backend utils/v3-intro.ts).
+ *     ★ 2026-11-16 C138 두 창 모두 「다시 보지 않기」 단추가 없다(Harold 「눌러버리면 홍보가 안 되는데」) — 전에 누른 계정은 서버 기록대로 계속 안 뜬다.
  *   - 바깥을 눌러도 닫히지 않는다(X · Esc · 「다음에 볼게요」).
  * ★ 2026-11-16 C136(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2 · Harold 「의미없이 전부 공개로 해놓으면 서비스 내용만 가져가서 복제」)
  *   창의 글 · 그림은 이 번들에 없다. 로그인 뒤 서버가 준다. 순서 = 준비(peek · 노출을 쓰지 않는다) → 그림 전부 받기 → 선점(claim · 노출 한 번) → 띄움.
@@ -41,8 +42,8 @@ function writeSeen(mark: string): boolean {
   try { localStorage.setItem(SEEN_KEY, mark); return localStorage.getItem(SEEN_KEY) === mark; } catch { return false; }
 }
 
-/** 띄울 창 — 판 열쇠 · 판 · 그림까지 받은 글 · 업종 셋 */
-interface Shown { introKey: string; variant: V3IntroVariant; text: ResolvedGated; sets: MorphSet[] }
+/** 띄울 창 — 판 · 그림까지 받은 글 · 업종 셋 */
+interface Shown { variant: V3IntroVariant; text: ResolvedGated; sets: MorphSet[] }
 
 export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 자동 안내 창이 열려 있으면 true — 닫힐 때까지 기다린다 */ blocked?: boolean }) {
   const [eligible, setEligible] = useState(false);
@@ -80,7 +81,7 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
       if (!alive) { text.release(); return; }
       const claimed = await claimV3Intro(peek.introKey); // 선점(노출 한 번 · 그 사이 판이 바뀌었으면 false)
       if (!alive || !claimed) { text.release(); return; }
-      setShown({ introKey: peek.introKey, variant: peek.variant, text, sets: readMorphSets(peek.content.sets) });
+      setShown({ variant: peek.variant, text, sets: readMorphSets(peek.content.sets) });
       reportPlanFeature(peek.variant === 'trial' ? STUDIO_TRIAL_POPUP_ID : LOGIN_PROMO_FEATURE_ID, 'open');
     };
     void run().catch(() => { /* 잠금 실패 = 이번에는 띄우지 않는다 */ });
@@ -121,6 +122,6 @@ export default function AiOperatorLoginPromo({ blocked = false }: { /** 다른 �
 
   if (!shown) return null;
   const close = () => setShown(null);
-  const inner = { introKey: shown.introKey, css: shown.text.css, html: shown.text.html, sets: shown.sets, rootRef: dialogRef, onClose: close };
+  const inner = { css: shown.text.css, html: shown.text.html, sets: shown.sets, rootRef: dialogRef, onClose: close };
   return shown.variant === 'trial' ? <StudioTrialPromo {...inner} /> : <V3ScenesPromo {...inner} />;
 }

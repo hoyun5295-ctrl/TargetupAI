@@ -523,7 +523,9 @@ describe('소스 계약 — 화면', () => {
   });
 
   it('★ C136 장면 창 = 로그인 화면 창의 다섯째 장면(인증 안내)을 빼고 로그인 뒤 틀의 단추로 · 로그인 화면에는 인증 안내 창만', () => {
-    for (const act of ['close', 'go', 'later', 'dismiss']) expect(scenesHtml).toContain(`data-act="${act}"`);
+    for (const act of ['close', 'go', 'later']) expect(scenesHtml).toContain(`data-act="${act}"`);
+    // ★ 2026-11-16 C138 장면 창에는 숨기는 단추가 없다(Harold 「그거 눌러버리면 홍보가 안 되는데」 · 계정당 최대 3번은 그대로)
+    for (const gone of ['data-act="dismiss"', '다시 보지 않기']) expect(scenesHtml, gone).not.toContain(gone);
     for (const gone of ['data-act="auth"', 'data-act="hide-today"', 'data-auth', '오늘 하루 보지 않기', '인증 안내 전체 보기']) expect(scenesHtml, gone).not.toContain(gone);
     expect(scenesHtml.match(/data-tab/g)).toHaveLength(4);
     expect(scenesHtml.match(/data-ms="/g)).toHaveLength(4);
@@ -537,35 +539,51 @@ describe('소스 계약 — 화면', () => {
     expect(login).toContain('{showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}');
   });
 
-  it('무료체험 창 = 서버가 열렸다고 답한 뒤에만 「열렸습니다」 · 판 열쇠를 실어 숨긴다 · 누름을 기록한다', () => {
+  it('무료체험 창 = 서버가 열렸다고 답한 뒤에만 「열렸습니다」 · 누름을 기록한다 · ★ C138 숨기는 단추 없음', () => {
     const promo = front('components/v3/StudioTrialPromo.tsx');
     expect(promo).toContain("reportPlanFeature(STUDIO_TRIAL_POPUP_ID, 'go');");
     expect(promo).toContain('const state = await requestStudioTrial();');
     expect(promo).toContain("if (!state || !state.requested) { toast.error('지금은 열지 못했어요. 잠시 뒤 다시 눌러 주세요.'); return; }");
     expect(promo.indexOf('if (!state || !state.requested)')).toBeLessThan(promo.indexOf("pop.classList.add('opened');"));
-    expect(promo).toContain('const saved = await dismissV3Intro(introKey);');
     expect(promo).toContain("else if (act === 'studio') { onClose(); navigate('/image-studio'); }");
     expect(promo).toContain('const stop = mountTrialStage(pop, sets);');
-    for (const act of ['close', 'trial', 'later', 'dismiss', 'studio']) expect(trialHtml).toContain(`data-act="${act}"`);
+    for (const act of ['close', 'trial', 'later', 'studio']) expect(trialHtml).toContain(`data-act="${act}"`);
+    // ★ 2026-11-16 C138 무료체험 창에도 숨기는 단추가 없다(Harold 「그거 눌러버리면 홍보가 안 되는데」 · 계약 = c138-trial-entry-interest)
+    for (const gone of ['data-act="dismiss"', '다시 보지 않기']) expect(trialHtml, gone).not.toContain(gone);
+    // 숨은 줄(신청 전 = .done · 신청 뒤 = .trial) 안의 단추를 전부 잠근다 = Tab 이 창 밖으로 새지 않는다 · 단추 이름을 세지 않는다(옛 글의 다른 단추도 잠긴다)
+    expect(promo).toContain("for (const el of Array.from(pop.querySelectorAll<HTMLElement>('.trial button, .done button'))) {");
+    expect(promo).toContain("el.toggleAttribute('disabled', el.closest('.trial') ? opened : !opened);");
+    // 그 두 줄의 보임은 서버 글의 CSS 가 정한다 · 창의 단추 가운데 두 줄 밖에 있는 것은 닫기(X) · 장면 멈춤뿐(언제나 보인다)
+    expect(V3_POPUP_CSS).toContain('.v3p .done{display:none;');
+    expect(V3_POPUP_CSS).toContain('.v3p .opened .trial{display:none}');
+    expect(V3_POPUP_CSS).toContain('.v3p .opened .done{display:flex;');
+    const rows = trialHtml.slice(trialHtml.indexOf('<div class="trial'));
+    for (const act of ['trial', 'later', 'studio']) expect(rows).toContain(`data-act="${act}"`);
+    expect(trialHtml.slice(0, trialHtml.indexOf('<div class="trial')).match(/<button /g)).toHaveLength(2);
     expect(trialHtml).toContain('무료체험 3회 이용하고 싶습니다');
     expect(trialHtml).toContain('data-stop aria-label="장면 반복 멈춤"');
     // 틀(로그인 안내 창)이 서버 답으로 안쪽을 바꾸고 기능 id 를 갈라 기록한다
     const frame = front('components/AiOperatorLoginPromo.tsx');
     expect(frame).toContain("return shown.variant === 'trial' ? <StudioTrialPromo {...inner} /> : <V3ScenesPromo {...inner} />;");
     expect(frame).toContain("reportPlanFeature(peek.variant === 'trial' ? STUDIO_TRIAL_POPUP_ID : LOGIN_PROMO_FEATURE_ID, 'open');");
-    // 화면은 판 열쇠를 언제나 싣는다(열쇠 없는 요청은 서버가 옛 판으로 읽는다)
+    // 화면은 선점에 판 열쇠를 언제나 싣는다 · ★ C138 숨기는 요청은 화면에 없다(서버 주소는 옛 화면 · 이미 적힌 기록용으로 남는다)
     const util = front('utils/v3-intro.ts');
     expect(util).toContain("sendJson('/api/plans/v3-intro/claim', { method: 'POST', body: { introKey } })");
-    expect(util).toContain("sendJson('/api/plans/v3-intro/dismiss', { method: 'POST', body: { introKey } })");
+    expect(util.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')).not.toMatch(/dismiss/);
     expect(util).toContain("if (d.variant !== 'scenes' && d.variant !== 'trial') return null;");
   });
 
   it('스튜디오 입구 · 남은 횟수 = 서버 값만 · 체험은 이미지 스튜디오 화면 하나에만', () => {
+    // ★ 2026-11-16 C138 입구 판정 = utils/ai-operator-access fetchFeatureEntry 한 곳(허브 카드도 같은 함수 · 계약 = c138-trial-entry-interest)
     const gate = front('components/PlanGate.tsx');
-    expect(gate).toContain("const TRIAL_FEATURE_ID = 'image-studio';");
-    expect(gate).toContain('if (featureId === TRIAL_FEATURE_ID) {');
-    expect(gate).toContain("if (trial?.eligible && trial.requested) { setState('open'); return; }");
-    expect(gate.indexOf("if (allowed !== false) { setState('open'); return; }")).toBeLessThan(gate.indexOf('fetchStudioTrial()'));
+    expect(gate).toContain("void fetchFeatureEntry(featureId).then((entry) => { if (alive) setState(entry === false ? 'locked' : 'open'); });");
+    const access = front('utils/ai-operator-access.ts');
+    const entry = access.slice(access.indexOf('export async function fetchFeatureEntry'));
+    expect(access).toContain("export const STUDIO_TRIAL_FEATURE_ID = 'image-studio';");
+    expect(entry).toContain('if (featureId !== STUDIO_TRIAL_FEATURE_ID) return false;');
+    expect(entry).toContain('return !!(trial?.eligible && trial.requested);');
+    expect(entry.indexOf('if (allowed !== false) return allowed;')).toBeGreaterThan(0);
+    expect(entry.indexOf('if (allowed !== false) return allowed;')).toBeLessThan(entry.indexOf('fetchStudioTrial()'));
     const page = front('pages/ImageStudioPage.tsx');
     expect(page).toContain('if (isAiOperatorAccessKnownAllowed()) return;');   // 요금제로 열린 회사는 묻지 않는다
     expect(page).toContain('setTrial(t && t.eligible && t.requested ? t : null);');
@@ -578,20 +596,22 @@ describe('소스 계약 — 화면', () => {
 
   it('등록부 ↔ 탭 ↔ 기록: 창의 기능 id 가 등록부에 있고 · 탭은 등록부로 이름과 다음 행동을 그린다', () => {
     const reg = front('constants/login-popups.ts');
-    expect(reg).toContain("{ id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기' },");
-    expect(reg).toContain("{ id: STUDIO_TRIAL_POPUP_ID, name: '무료체험 안내 창', goLabel: '체험 신청' },");
+    expect(reg).toContain("{ id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기', introKeys: ['v3-scenes', 'v3-intro'] },");
+    expect(reg).toContain("{ id: STUDIO_TRIAL_POPUP_ID, name: '무료체험 안내 창', goLabel: '체험 신청', introKeys: ['studio-trial'] },");
     expect(reg).toContain("export const STUDIO_TRIAL_POPUP_ID = 'studio-trial';");
     expect(front('components/AiOperatorLoginPromo.tsx')).toContain("export const LOGIN_PROMO_FEATURE_ID = 'login-promo';");
     for (const id of ['login-promo', 'studio-trial']) expect(id).toMatch(/^[a-z][a-z-]{1,39}$/);   // 기록 주소가 받는 id 형식(utils/feature-interest FEATURE_ID_RE)
     expect(back('utils/feature-interest.ts')).toContain('const FEATURE_ID_RE = /^[a-z][a-z-]{1,39}$/;');
     const tab = front('components/admin/FeatureInterestTab.tsx');
-    expect(tab).toContain("import { LOGIN_POPUPS, loginPopupOf } from '../../constants/login-popups';");
-    expect(tab).toContain('{LOGIN_POPUPS.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}');
-    expect(tab).toContain('{data?.trials && (');
-    expect(tab).toContain('아직 무료체험을 신청한 회사가 없습니다');
-    // 서버: 신청 업체 목록은 관심 기록과 따로 읽고 · 못 읽어도 탭의 나머지는 그대로
+    // ★ 2026-11-16 C138 탭 = 업체 표 하나(무료체험은 그 줄의 칸 · 기능은 단추로 거른다) · 안내 창도 기능 단추에 등록부 이름으로 나온다
+    expect(tab).toContain("import { loginPopupOf } from '../../constants/login-popups';");
+    expect(tab).toContain('{featureName(f.featureId)} <b className="tabular-nums">{f.companies}</b>');
+    expect(tab).toContain('{c.trial ? (');
+    expect(tab).toContain("{data && !data.trialsKnown ? '알 수 없음' : '없음'}");
+    // 서버: 신청 업체 목록은 관심 기록과 따로 읽고 · 못 읽어도 탭의 나머지는 그대로(그 칸만 「알 수 없음」)
     const fi = back('utils/feature-interest.ts');
     expect(fi).toContain('const trials = await loadStudioTrials().catch((err: any) => {');
-    expect(fi).toContain('trials: StudioTrialListRow[] | null;');
+    expect(fi).toContain('trialsKnown: trials !== null,');
+    expect(fi).toContain('for (const t of trials || []) accOf(t.companyId).trial = { requestedBy: t.requestedBy, requestedAt: t.requestedAt, used: t.used, granted: t.granted };');
   });
 });

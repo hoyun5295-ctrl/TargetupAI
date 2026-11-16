@@ -9,6 +9,7 @@
  * 「무료체험 3회 이용하고 싶습니다」 = 서버에 신청(POST /api/image-studio/trial/request) → 열렸다는 답을 받은 뒤에만 「열렸습니다」를 보인다.
  * 기록 = 그 버튼을 누름(go) → 슈퍼관리자 「기능 관심 업체」(뜸 open 은 틀이 남긴다). 신청 자체는 체험 표에 남는다.
  * 바깥을 눌러도 닫히지 않는다(X · Esc · 「다음에 볼게요」).
+ * ★ 2026-11-16 C138 「이 안내 다시 보지 않기」는 없앴다(Harold 「그거 눌러버리면 홍보가 안 되는데」 · 서버 보관 글에서도 뺐다 · 계정당 최대 3번은 그대로).
  */
 import { useEffect, useMemo, useRef, type MouseEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,13 +17,10 @@ import { useNavigate } from 'react-router-dom';
 import { STUDIO_TRIAL_POPUP_ID } from '../../constants/login-popups';
 import { reportPlanFeature } from '../../utils/plan-feature-report';
 import { requestStudioTrial } from '../../utils/studio-trial';
-import { dismissV3Intro } from '../../utils/v3-intro';
 import { useToast } from '../ToastProvider';
 import { mountTrialStage, type MorphSet } from './v3-motion';
 
-export default function StudioTrialPromo({ introKey, css, html, sets, rootRef, onClose }: {
-  /** 이 창의 판 열쇠(「이 안내 다시 보지 않기」가 서버에 돌려보낸다) */
-  introKey: string;
+export default function StudioTrialPromo({ css, html, sets, rootRef, onClose }: {
   /** 서버가 준 글(그림 주소까지 끼운 것) */
   css: string;
   html: string;
@@ -40,13 +38,12 @@ export default function StudioTrialPromo({ introKey, css, html, sets, rootRef, o
   /**
    * 지금 안 보이는 버튼은 잠가 둔다(disabled) — 틀의 Tab 가두기는 「잠기지 않은 버튼」의 처음과 끝으로 돈다.
    *   숨은 버튼이 끝 자리에 끼면 마지막 보이는 버튼에서 Tab 이 창 밖으로 샌다.
-   *   신청 전 = 「이미지 스튜디오로 가기」 잠금 · 신청 뒤 = 신청 · 다음에 · 다시 보지 않기 잠금.
+   *   보이는 줄은 글의 CSS 가 정한다: 신청 전 = .trial 줄 · 신청 뒤 = .done 줄 → 숨은 줄 안의 버튼을 전부 잠근다
+   *   (★ 2026-11-16 C138 버튼 이름을 세지 않는다 — 배포 중 받은 옛 글에 다른 버튼이 있어도 숨은 줄이면 잠긴다).
    */
   const lockHidden = (pop: HTMLElement, opened: boolean) => {
-    for (const el of Array.from(pop.querySelectorAll<HTMLElement>('[data-act]'))) {
-      const act = el.dataset.act;
-      const hidden = act === 'studio' ? !opened : act === 'trial' || act === 'later' || act === 'dismiss' ? opened : false;
-      el.toggleAttribute('disabled', hidden);
+    for (const el of Array.from(pop.querySelectorAll<HTMLElement>('.trial button, .done button'))) {
+      el.toggleAttribute('disabled', el.closest('.trial') ? opened : !opened);
     }
   };
 
@@ -79,24 +76,12 @@ export default function StudioTrialPromo({ introKey, css, html, sets, rootRef, o
     pop.querySelector<HTMLElement>('[data-act="studio"]')?.focus();
   };
 
-  /** 「이 안내 다시 보지 않기」 — 서버에 적힌 뒤에만 약속한다(못 적으면 그렇다고 말하고 닫는다) */
-  const dismiss = async () => {
-    if (busyRef.current) return;
-    busyRef.current = true;
-    const saved = await dismissV3Intro(introKey);
-    busyRef.current = false;
-    if (saved) toast.success('이 계정에서는 다시 띄우지 않아요');
-    else toast.error('저장하지 못했어요. 다음에 다시 눌러 주세요.');
-    onClose();
-  };
-
   const onClick = (e: MouseEvent<HTMLDivElement>) => {
     const el = (e.target as HTMLElement).closest<HTMLElement>('[data-act]');
     const act = el?.dataset.act;
     if (!el || !act) return;
     if (act === 'close' || act === 'later') onClose();
     else if (act === 'trial') void request(el);
-    else if (act === 'dismiss') void dismiss();
     else if (act === 'studio') { onClose(); navigate('/image-studio'); }
   };
 

@@ -124,7 +124,10 @@ describe('AI Operator 허브 — 서버 판정으로 막고 공통 안내 창을
     // ★ 2026-09-20 조각 단정으로 바꿈 — 순차 개방 플래그 분기가 같은 자리에 하나 더 들어갔다(아래 테스트가 그것을 본다).
     //   의도는 그대로다: 잠긴 카드는 **이동하지 않고** 그 기능의 안내를 연다.
     expect(tiles).toMatch(/const featureId = intros\?\.idForPath\(card\.path\) \?\? null;/);
-    expect(tiles).toMatch(/if \(planLocked && featureId\) \{ setPlanFeatureId\(featureId\); return; \}/);
+    // ★ 2026-11-16 C138 — 잠긴 회사의 카드 누름에 입구 판정(무료체험 = 이미지 스튜디오 카드만)이 끼었다. 그 판정이 열림이 아니면 종전대로 안내를 연다(시험 = c138-trial-entry-interest)
+    expect(tiles).toMatch(/if \(planLocked && featureId\) \{/);
+    expect(tiles).toMatch(/if \(!open\) \{ setPlanFeatureId\(featureId\); return; \}/);
+    expect(tiles).toMatch(/const open = trialCard && /);
     expect(tiles).toMatch(/navigate\(card\.path\);/);
     // 안내를 여는 분기가 navigate 보다 **앞**에 있어야 한다(뒤에 있으면 이미 이동한 뒤다)
     expect(tiles.indexOf('setPlanFeatureId(featureId); return;')).toBeLessThan(tiles.indexOf('navigate(card.path);'));
@@ -147,7 +150,8 @@ describe('AI Operator 허브 — 서버 판정으로 막고 공통 안내 창을
 
   it('기능 화면 입구에서 돌아오면(intro) 그 기능의 안내를 연다', () => {
     expect(HUB).toMatch(/searchParams\.get\('intro'\)/);
-    expect(HUB).toContain('if (locked) void loadPlanFeatureIntros().then((d) => { if (alive && d?.find(intro)) setPlanFeatureId(intro); });'); // ★ 2026-10-07 원장 = 서버
+    // ★ 2026-10-07 원장 = 서버 · ★ 2026-11-16 C138 그 기능의 입구가 열린다고 답하면(무료체험) 안내를 열지 않는다
+    expect(HUB).toContain('if (locked) void Promise.all([loadPlanFeatureIntros(), fetchFeatureEntry(intro, false)]).then(([d, entry]) => { if (alive && entry !== true && d?.find(intro)) setPlanFeatureId(intro); });');
   });
 });
 
@@ -163,11 +167,12 @@ describe('기능 화면 입구 — 주소로 직접 들어와도 같은 안내',
   });
 
   it('입구는 잠김일 때만 허브 안내로 보내고, 모름은 막지 않는다', () => {
-    // ★ 2026-11-15 C135 — 같은 뜻을 두 줄로: 잠김(false)이 아니면 연다(모름 = 연다) · 잠김이면 잠근다.
-    //   그 사이에 이미지 스튜디오 한 화면만 「무료체험을 신청한 미가입 회사」를 더 연다(시험 = c135-v3-popup-trial.test.ts).
-    expect(GATE).toContain("if (allowed !== false) { setState('open'); return; }");
-    expect(GATE).toMatch(/setState\('locked'\);\s*\}\)\(\);/);
-    expect(GATE.match(/setState\('open'\)/g)).toHaveLength(2);   // 여는 길 = 지금 판정이 허용 · 체험 신청(이미지 스튜디오) 둘뿐
+    // ★ 2026-11-16 C138 — 판정은 입구 함수 한 곳(utils/ai-operator-access fetchFeatureEntry · 허브 카드와 같은 함수)이 하고, 입구는 그 답이 잠김(false)일 때만 잠근다(모름 = 연다).
+    //   그 함수 안: 잠김(false)이 아니면 그 답 그대로 · 잠김이면 이미지 스튜디오 한 화면만 「무료체험을 신청한 미가입 회사」를 더 연다(시험 = c138-trial-entry-interest).
+    expect(GATE).toContain("void fetchFeatureEntry(featureId).then((entry) => { if (alive) setState(entry === false ? 'locked' : 'open'); });");
+    expect(GATE.match(/setState\(/g)).toHaveLength(1);   // 상태를 정하는 자리 = 그 한 줄
+    expect(ACCESS).toContain('if (allowed !== false) return allowed;');
+    expect(ACCESS).toContain('if (featureId !== STUDIO_TRIAL_FEATURE_ID) return false;');
     expect(GATE).toMatch(/<Navigate to=\{`\/ai-operator\?intro=\$\{encodeURIComponent\(featureId\)\}`\} replace \/>/);
   });
 });

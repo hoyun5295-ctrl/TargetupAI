@@ -6,7 +6,7 @@
  * 옛 넘기기(`ai_operator_prefill_objective`)가 남아 있으면 AI 한줄로로 보낸다(그 화면이 받아 입력창에 채운다).
  * ⛔ 모델명 0 · native dialog 0 · 줄표 0.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowRight, Lock } from 'lucide-react';
 import AiOperatorWalkthroughModal from '../components/AiOperatorWalkthroughModal';
@@ -15,7 +15,7 @@ import { SUB_MODULE_CARDS, HUB_CARD_ROWS, isCardOpen } from '../constants/ai-ope
 import { SurfaceToneProvider } from '../components/zone/surface-tone';
 import PlanFeatureModal from '../components/PlanFeatureModal';
 import { usePlanFeatureIntros, loadPlanFeatureIntros, PLAN_FEATURE_MIN_PLAN } from '../constants/plan-feature-intros';
-import { fetchAiOperatorAccess, fetchAiOperatorFeatures } from '../utils/ai-operator-access';
+import { fetchAiOperatorAccess, fetchAiOperatorFeatures, fetchFeatureEntry, STUDIO_TRIAL_FEATURE_ID } from '../utils/ai-operator-access';
 import AiHubBand from '../components/ai-line/AiHubBand';
 
 export default function AiOperatorPage() {
@@ -30,6 +30,12 @@ export default function AiOperatorPage() {
   //   못 쓰는 회사가 카드나 [생성]을 누르면 이동·호출 대신 공통 안내 창을 연다. 판정 전·조회 실패는 잠그지 않는다(서버가 다시 막는다).
   const [planLocked, setPlanLocked] = useState(false);
   const [planFeatureId, setPlanFeatureId] = useState<string | null>(null);
+  // ★ 2026-11-16 C138 요금제로 잠긴 회사라도 무료체험을 신청했으면 이미지 스튜디오 카드는 열린다 — 화면 입구(PlanGate)와 같은 함수로 묻는다.
+  //   「열림」이라는 답을 받았을 때만 true · 그 밖(답 전 · 못 받음 · 잠김)은 false 로 두고 누를 때 다시 묻는다(한 번 못 받은 답이 잠금으로 굳지 않게).
+  const [trialOpen, setTrialOpen] = useState(false);
+  // 카드 누름의 순번 — 누른 뒤 답(원장 · 무료체험)을 기다리는 동안 화면을 떠났거나 다른 카드를 눌렀으면 그 누름은 버린다(늦은 답이 사용자를 끌고 가지 않게 · Codex 구현 2R)
+  const clickSeq = useRef(0);
+  useEffect(() => () => { clickSeq.current = -1; }, []);
   // ★ 2026-09-20 기능별 개방 플래그 — 카드 필터 축(설계서 §3-11). 모르면 빈 객체 = 그 카드는 안 보인다.
   const [featureFlags, setFeatureFlags] = useState<Record<string, boolean>>({});
   // ★ 2026-10-07 기능 안내 원장 = 서버(로그인한 사람에게만) · 화면에 들어오면 미리 받아 둔다
@@ -42,10 +48,13 @@ export default function AiOperatorPage() {
       if (!alive) return;
       const locked = allowed === false;
       setPlanLocked(locked);
+      // 요금제 답(잠김)은 방금 받았으므로 넘긴다 — 다시 묻지 않는다
+      if (locked) void fetchFeatureEntry(STUDIO_TRIAL_FEATURE_ID, false).then((ok) => { if (alive && ok === true) setTrialOpen(true); });
       // 기능 화면 주소로 직접 들어왔다가 입구(PlanGate)에서 돌아온 경우 = 그 기능의 안내를 바로 연다
       const intro = searchParams.get('intro');
       if (intro) {
-        if (locked) void loadPlanFeatureIntros().then((d) => { if (alive && d?.find(intro)) setPlanFeatureId(intro); });
+        // ★ C138 그 기능의 입구가 열린다고 답하면(무료체험) 안내를 열지 않는다 — 카드 · 화면 입구와 같은 함수(모름 = 종전대로 안내)
+        if (locked) void Promise.all([loadPlanFeatureIntros(), fetchFeatureEntry(intro, false)]).then(([d, entry]) => { if (alive && entry !== true && d?.find(intro)) setPlanFeatureId(intro); });
         const next = new URLSearchParams(searchParams);
         next.delete('intro');
         setSearchParams(next, { replace: true });
@@ -87,6 +96,9 @@ export default function AiOperatorPage() {
                       .filter((card) => row.ids.includes(card.id) && (!card.adminOnly || (user as any)?.userType === 'company_admin'))
                       .map((card) => {
                         const Icon = card.icon;
+                        // ★ C138 이 카드가 잠겼는가 — 무료체험이 열린 이미지 스튜디오 카드는 잠기지 않는다(누름 · 자물쇠 표시가 같은 값)
+                        const trialCard = card.id === STUDIO_TRIAL_FEATURE_ID;
+                        const cardLocked = planLocked && !(trialCard && trialOpen);
                         return (
                           <button
                             key={card.label}
@@ -94,9 +106,16 @@ export default function AiOperatorPage() {
                             onClick={async () => {
                               // ★ 2026-09-15 못 쓰는 회사 = 이동 대신 그 기능의 안내(요금제 공통 안내 창)
                               // ★ 2026-10-07 원장을 아직 못 받았으면 받은 뒤 판정(받기 전 눌러도 안내 없이 들어가지 않게)
+                              const mine = ++clickSeq.current;
                               const intros = featureIntros ?? await loadPlanFeatureIntros();
+                              if (clickSeq.current !== mine) return;
                               const featureId = intros?.idForPath(card.path) ?? null;
-                              if (planLocked && featureId) { setPlanFeatureId(featureId); return; }
+                              if (planLocked && featureId) {
+                                // ★ C138 무료체험 카드 = 입구와 같은 판정 · 열림을 아직 모르면(답 전 · 한 번 못 받음) 지금 다시 묻는다
+                                const open = trialCard && (trialOpen || (await fetchFeatureEntry(STUDIO_TRIAL_FEATURE_ID, false)) === true);
+                                if (clickSeq.current !== mine) return;
+                                if (!open) { setPlanFeatureId(featureId); return; }
+                              }
                               // ★ 2026-09-20 순차 개방 중인 기능(카드 flag) = 카드는 보이되 아직인 회사는 같은 안내 창으로.
                               //   숨기지 않는다 — 없는 메뉴는 물어볼 수도 없다(Harold 확정).
                               if (!isCardOpen(card, featureFlags) && featureId) { setPlanFeatureId(featureId); return; }
@@ -112,10 +131,15 @@ export default function AiOperatorPage() {
                               <span className="block text-[15px] font-semibold text-slate-900">{card.label}</span>
                               <span className="block text-[12.5px] leading-snug mt-0.5 text-slate-500">{card.description}</span>
                             </span>
-                            {planLocked ? (
+                            {cardLocked ? (
                               <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200">
                                 <Lock className="w-3 h-3" />
                                 {PLAN_FEATURE_MIN_PLAN}부터
+                              </span>
+                            ) : planLocked ? (
+                              <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200">
+                                무료체험
+                                <ArrowRight className="w-3 h-3" />
                               </span>
                             ) : (
                               <ArrowRight className="shrink-0 w-[18px] h-[18px] text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition-all" />
