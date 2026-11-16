@@ -438,7 +438,10 @@ describe('K5 · R62 신설 — 비토 실패 코드 대역(한줄로 라벨 = �
     expect(map.getStatusLabel(60000)).toBe('코드 60000');
     expect(map.getStatusType(60000)).toBe('unknown');
     // ★ 1106 C107F R64 — 스팸 몰림 코드 목록 = 결과 표 ∪ 대역 표(규칙 = c107f-contract-1106 F1). 결과 표 자체에는 대역을 섞지 않는다(위 최대 키 단언)
-    expect(map.SPAM_BLOCK_STATUS_CODES).toEqual(expect.arrayContaining([40016, 49004, 49010, 39004, 39010]));
+    // ★ 1116 게이트웨이 표준코드 이름 = QTmsg 3.9 정의(게이트웨이 migrations/107) — 9003 = 「스팸 번호」 · 9004 = 「이통사 응답 없음」(스팸 아님)
+    expect(map.SPAM_BLOCK_STATUS_CODES).toEqual(expect.arrayContaining([40016, 49003, 49010, 39003, 39010]));
+    expect(map.SPAM_BLOCK_STATUS_CODES).not.toContain(49004);
+    expect(map.SPAM_BLOCK_STATUS_CODES).not.toContain(39004);
   });
 
   it('규칙 글자 = 게이트웨이 SQL 과 같다(형제 저장소가 있을 때) · 생성 스크립트도 같은 글자', () => {

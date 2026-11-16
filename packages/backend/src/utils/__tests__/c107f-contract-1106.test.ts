@@ -39,7 +39,10 @@ describe('C107F F1 스팸 몰림 코드 = 결과 표 ∪ 비토 대역 표(R64)'
     const want = [...new Set([...fromMap, ...fromBand])].sort((a, b) => a - b);
     expect([...SPAM_BLOCK_STATUS_CODES].sort((a, b) => a - b)).toEqual(want);
     expect(fromBand.length).toBeGreaterThan(0);
-    expect(SPAM_BLOCK_STATUS_CODES).toEqual(expect.arrayContaining([40016, 49004, 49010, 39004, 39010]));
+    // ★ 1116 게이트웨이 표준코드 이름 = QTmsg 3.9 정의(게이트웨이 migrations/107) — 9003 = 「스팸 번호」 · 9004 = 「이통사 응답 없음」(스팸 아님)
+    expect(SPAM_BLOCK_STATUS_CODES).toEqual(expect.arrayContaining([40016, 49003, 49010, 39003, 39010]));
+    expect(SPAM_BLOCK_STATUS_CODES).not.toContain(49004);
+    expect(SPAM_BLOCK_STATUS_CODES).not.toContain(39004);
   });
 
   it('목록의 코드는 전부 실패 유형이고, 카카오 채널 제재(제목에 「스팸」 없음)는 들어가지 않는다', () => {
