@@ -1116,6 +1116,8 @@ export async function activateJourney(
    *   안 주면 최대 인원을 건드리지 않는다(하나씩 켜기 · 새 모양 켜기 = 종전 그대로).
    */
   opts: { requireActiveSource?: string; setCap?: number | null } = {},
+  /** ★ 2026-11-15 C134 S3 — 참 = 초안일 때만 켠다(멈춘 여정을 다시 켜지 않는다 · 합성 회사 여정 세트 워커만 준다 · 안 주면 종전 그대로). */
+  draftOnly: boolean = false,
 ): Promise<{
   ok: boolean; reason?: string;
   /** ★ 2026-11-02 E1-2 — 이 켜기가 찍은 approved_at(글자 · 마이크로초) = 이번 시도 토큰(한 번 보내기 되돌리기가 이 시도만 건드린다) */
@@ -1169,6 +1171,12 @@ export async function activateJourney(
       [journeyId, companyId],
     );
     const prev = prevRes?.rows?.[0] || null;
+    // ★ 2026-11-15 C134 S3(Codex 구현 1R) — draftOnly = 위에서 잠근 행(FOR UPDATE)의 상태가 초안일 때만 켠다 · 판정과 켜는 문장이 같은 트랜잭션
+    //   (부르는 쪽이 초안이라고 읽은 뒤 사람이 켰다 멈춘 여정을 다시 켜지 않는다 = 읽고 나서 부르는 사이의 틈 0).
+    if (draftOnly && String(prev?.status || '') !== 'draft') {
+      await actClient.query('ROLLBACK');
+      return { ok: false, reason: '초안일 때만 켤 수 있어요.' };
+    }
     // 기준선(CT-J11) = 처음 · 초안 켜기 · 사람 멈춤 재개만(시스템 멈춤 재개 = 심지 않음) · active 로 바꾸기 전 · 같은 트랜잭션
     //   ⛔ 등급 기준선 칸이 없으면(42703) 던진다 = 켜지 않는다(기준 없이 켜면 첫 회차가 전 고객을 변동으로 오판)
     if (prev && ['draft', 'paused'].includes(String(prev.status))) {

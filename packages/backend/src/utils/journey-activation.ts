@@ -62,8 +62,11 @@ export async function activateJourneyGuarded(
   companyId: string,
   journeyId: string,
   userId: string,
-  /** setCap ★ 2026-11-13 C133 — 켜기 창이 보여 준 최대 인원(주면 켜는 문장이 함께 쓴다 · journey-builder activateJourney) */
-  opts: { confirmCallbackExclusion?: boolean; requireActiveSource?: string; setCap?: number | null } = {},
+  /**
+   * setCap ★ 2026-11-13 C133 — 켜기 창이 보여 준 최대 인원(주면 켜는 문장이 함께 쓴다 · journey-builder activateJourney)
+   * draftOnly ★ 2026-11-15 C134 S3 — 초안일 때만 켠다(켜는 트랜잭션 안에서 판정 · journey-builder activateJourney)
+   */
+  opts: { confirmCallbackExclusion?: boolean; requireActiveSource?: string; setCap?: number | null; draftOnly?: boolean } = {},
 ): Promise<GuardedActivation> {
   let stRow;
   try {
@@ -124,7 +127,10 @@ export async function activateJourneyGuarded(
   }
 
   // setCap 을 안 받았으면 undefined 그대로 넘어간다 = 최대 인원을 건드리지 않는다(종전)
-  const result = await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource, setCap: opts.setCap });
+  // draftOnly 를 받았을 때만 다섯째 인자를 싣는다(안 받은 호출 = 종전 호출 글자 그대로)
+  const result = opts.draftOnly
+    ? await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource, setCap: opts.setCap }, true)
+    : await activateJourney(companyId, journeyId, userId, { requireActiveSource: opts.requireActiveSource, setCap: opts.setCap });
   if (!result.ok) return { ok: false, code: 'ACTIVATE_FAILED', message: result.reason || '활성화 실패' };
 
   // ★ 2026-11-02 엔진 재설계 E1-2 — 한 번 보내기 · 이번 켜기가 넣기 대기를 찍은 판 = 정산 · 되돌리기 · 적재를 여정 잠금 안에서(토큰 = 이번 시도만).
@@ -308,8 +314,11 @@ export async function activateJourneysInOrder(
   companyId: string,
   userId: string,
   journeyIds: string[],
-  /** caps ★ 2026-11-13 C133 — 여정 id → 켜기 창이 보여 준 최대 인원(null = 비움). 든 여정만 그 값으로 켠다(없는 여정 = 최대 인원 그대로). */
-  opts: { confirmCallbackExclusionIds?: string[]; acknowledgedOverlaps?: string[]; caps?: Map<string, number | null> } = {},
+  /**
+   * caps ★ 2026-11-13 C133 — 여정 id → 켜기 창이 보여 준 최대 인원(null = 비움). 든 여정만 그 값으로 켠다(없는 여정 = 최대 인원 그대로).
+   * draftOnly ★ 2026-11-15 C134 S3 — 초안만 켠다(멈춘 여정은 「켤 수 없음」 · 같은 계보의 멈춘 옛 판도 다시 켜지 않는다 · 합성 회사 여정 세트 워커)
+   */
+  opts: { confirmCallbackExclusionIds?: string[]; acknowledgedOverlaps?: string[]; caps?: Map<string, number | null>; draftOnly?: boolean } = {},
 ): Promise<BatchActivation> {
   const ids = [...new Set(journeyIds.map(String))].slice(0, MAX_BATCH_ACTIVATION);
   const lineageReady = await lineageColumnsReady();
@@ -356,10 +365,15 @@ export async function activateJourneysInOrder(
       items.push({ journeyId: j.id, name: j.name, result: { ok: false, code: 'NOT_ALLOWED', message: j.status === 'active' ? '이미 켜져 있어요.' : '끝난 여정은 켤 수 없어요.' } });
       continue;
     }
+    if (opts.draftOnly && j.status !== 'draft') {
+      items.push({ journeyId: j.id, name: j.name, result: { ok: false, code: 'NOT_ALLOWED', message: '초안일 때만 켤 수 있어요.' } });
+      continue;
+    }
     try {
       const result = await activateJourneyGuarded(companyId, j.id, userId, {
         confirmCallbackExclusion: confirmSet.has(j.id),
         ...(opts.caps?.has(j.id) ? { setCap: opts.caps.get(j.id) as number | null } : {}),
+        ...(opts.draftOnly ? { draftOnly: true } : {}),
       });
       items.push({ journeyId: j.id, name: j.name, result });
       if (result.ok) {

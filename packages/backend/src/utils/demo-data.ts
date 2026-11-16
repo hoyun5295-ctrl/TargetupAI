@@ -344,7 +344,11 @@ type EnvLike = Record<string, string | undefined>;
  *   실제 고객사가 실수로 받지 않게 **id 를 손으로 적은 곳만** 받는다. uuid 모양이 아닌 글자는 버린다.
  */
 export function syntheticDataCompanyIds(env: EnvLike = process.env): Set<string> {
-  return new Set(String(env.SYNTHETIC_DATA_COMPANY_IDS || '').split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter((s) => UUID_RE.test(s)));
+  return uuidListOf(env.SYNTHETIC_DATA_COMPANY_IDS);
+}
+/** ENV 한 줄(쉼표 · 공백 · 세미콜론)에서 uuid 모양만 소문자로(회사 id 목록 ENV 공용 · ★ 2026-11-15 여정 세트 스위치도 같은 읽기) */
+export function uuidListOf(raw: string | undefined): Set<string> {
+  return new Set(String(raw || '').split(/[\s,;]+/).map((s) => s.trim().toLowerCase()).filter((s) => UUID_RE.test(s)));
 }
 
 /** 키가 가리키는 회사가 합성 데이터를 받아도 되는지 — 시연 회사이거나 허용 목록 회사. 아니면 넣지 않는다(실회사에 합성 데이터 0) */
@@ -495,6 +499,28 @@ export function startDemoDataWorker(): void {
         } catch (err: any) {
           console.error(`[demo-data] ${tag} 자사몰 합성 전송 실패(다음 tick 에 이어서):`, err?.message);
         }
+      }
+      // ★ 2026-11-14 C134 — 합성 회사(실제 회사처럼 도는 회사)마다 「목록 여는 동작」 흉내(tick 마다) + 여정 자동 판정(하루 한 번).
+      //   B-1114-1 의 방아쇠(누가 캠페인 목록을 연다)를 사람 없이 당기고, 여정 결함 0 을 측정값으로 남긴다(설계서 §5 S1 · S2).
+      const realism: string[] = [];
+      try {
+        for (const id of syntheticDataCompanyIds()) if (await isRealismCompany(id)) realism.push(id);
+        if (realism.length > 0) {
+          const { journeySelfcheckTick } = await import('./journey-selfcheck');
+          await journeySelfcheckTick(realism, now);
+        }
+      } catch (err: any) {
+        console.error('[demo-data] 여정 자동 판정 tick 실패(다음 tick 에 다시):', err?.message);
+      }
+      // ★ 2026-11-15 C134 S3 — 합성 회사에 여정 세트(시작 종류 11개)가 켜져 있게 한다(설계서 §12).
+      //   스위치 ENV(JOURNEY_SELFCHECK_SET_COMPANY_IDS)에 적힌 회사만 · 비면 아무것도 안 한다 · 낮에만 · 한 tick 에 행 하나.
+      try {
+        if (realism.length > 0) {
+          const { journeySetTick } = await import('./journey-selfcheck-set');
+          await journeySetTick(realism, now);
+        }
+      } catch (err: any) {
+        console.error('[demo-data] 여정 세트 tick 실패(다음 tick 에 다시):', err?.message);
       }
     } finally {
       running = false;

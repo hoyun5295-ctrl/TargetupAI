@@ -388,9 +388,10 @@ describe('T5 D10 — 선불 여정 알림톡 칸의 차감 꼴(브랜드 대체�
   it('단계 캠페인 — 꼴이 다르면(한쪽만 있는 것 포함) 이어 붙임 · 만들 때 꼴을 싣는다 · 고른 발송 날을 함께 돌려준다', () => {
     const src = be('utils/journey-step-campaign.ts');
     expect(src).toContain('const sameShape = (row.ledger_shape ?? null) === (spec.ledgerShape ?? null);');
-    expect(src).toContain('if (!row.sealed && sameShape && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id), sendDate };');
-    expect(src).toContain('if (!row.sealed && sameShape && row.protocol !== LOAD_PROTOCOL_UNIT) {');
-    expect(src).not.toMatch(/if \(!row\.sealed && row\.protocol/);
+    // ★ 2026-11-14 C134 — 이어 쓰는 두 갈래에 「열려 있는(sending) 행」 조건이 더해졌다(꼴 조건은 그대로)
+    expect(src).toContain('if (open && !row.sealed && sameShape && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id), sendDate };');
+    expect(src).toContain('if (open && !row.sealed && sameShape && row.protocol !== LOAD_PROTOCOL_UNIT) {');
+    expect(src).not.toMatch(/if \((open && )?!row\.sealed && row\.protocol/);
     expect(src).toContain('...(spec.ledgerShape ? { ledgerShape: spec.ledgerShape } : {})');
     expect(src).toContain('if (created) return { campaignId: created, sendDate };');
   });

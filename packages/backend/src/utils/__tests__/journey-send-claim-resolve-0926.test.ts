@@ -57,7 +57,9 @@ vi.mock('../sms-queue', async () => ({
   smsCampaignSubRowCounts: (...a: any[]) => (subMock as any)(...a),
   isMysqlThreadAlive: (...a: any[]) => (aliveMock as any)(...a),
 }));
-vi.mock('../journey-step-campaign', () => ({ LOAD_PROTOCOL_UNIT: 'unit' }));
+// ★ 2026-11-14 C134 — 확정 앞 다시 열기(닫혀 있던 단계 캠페인 · 실물은 step-campaign-owner-1114.pg.test.ts 가 실 PG 로 본다)
+const reopenMock = vi.fn(async (..._a: any[]) => false);
+vi.mock('../journey-step-campaign', () => ({ LOAD_PROTOCOL_UNIT: 'unit', reopenStepCampaignForConfirm: (...a: any[]) => (reopenMock as any)(...a) }));
 
 import { attributeClaimLoad, confirmLoadUnit, clearLoadUnit, judgeLoadUnit, CLAIM_PROOF_LIMIT_SEC } from '../journey-send-claim';
 
@@ -72,7 +74,7 @@ beforeEach(() => {
   state.tables = ['SMSQ_SEND_1', 'SMSQ_SEND_1_202609']; state.mysqlDown = false;
   state.protocol = null; state.unit = null; state.claims = []; state.alive = false; state.aliveThrows = false; state.confirmedRows = [];
   order.length = 0; sqlLog.length = 0;
-  queryMock.mockClear(); tablesMock.mockClear(); countAllMock.mockClear(); safeMock.mockClear(); subMock.mockClear(); aliveMock.mockClear();
+  queryMock.mockClear(); tablesMock.mockClear(); countAllMock.mockClear(); safeMock.mockClear(); subMock.mockClear(); aliveMock.mockClear(); reopenMock.mockClear();
 });
 
 describe('증명 (4R ①② — 추정하지 않는다)', () => {
@@ -158,6 +160,9 @@ describe('단위 확정 · 지움 = 한 문장', () => {
     const r = await confirmLoadUnit('camp-1', ['l1', 'l2'], { variantCounts: [{ variantId: 'v1', sent: 2 }, { variantId: 'v0', sent: 0 }] });
     expect(r).toEqual([{ id: 'l1', executionId: 'e1', cost: 27.5 }, { id: 'l2', executionId: 'e2', cost: 27.5 }]);
     expect(queryMock).toHaveBeenCalledTimes(1);
+    // ★ 2026-11-14 C134 — 확정 문장 앞에서 다시 열기를 한 번 부른다(같은 캠페인 · 같은 표식)
+    expect(reopenMock.mock.calls).toEqual([['camp-1', ['l1', 'l2']]]);
+    expect(reopenMock.mock.invocationCallOrder[0]).toBeLessThan(queryMock.mock.invocationCallOrder[0]);
     const { sql, params } = sqlLog[0];
     expect(sql).toMatch(/WITH confirmed AS \(\s*UPDATE journey_step_logs SET status = 'sent'\s*WHERE id = ANY\(\$2::uuid\[\]\) AND status = 'sending' AND campaign_id = \$1::uuid/);
     expect(sql).toContain('sent_count = sent_count + (SELECT COUNT(*) FROM confirmed)');

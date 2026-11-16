@@ -17,7 +17,8 @@
 import { query } from '../config/database';
 import { createNewVersion } from './journey-lineage';
 import { updateJourneyStep, addJourneyStep, deleteJourneyStep, deleteJourney, updateJourneyCallback, type JourneyStepDefinition } from './journey-builder';
-import { validateJourneyForActivation, type ValidationResult } from './journey-pretest-validator';
+import type { ValidationResult } from './journey-pretest-validator';
+import { pretestAndMark } from './journey-pretest-mark';
 import { activateJourneyGuarded } from './journey-activation';
 import { normalizeJourneyOptions } from './journey-options-validator';
 import { PRODUCT_TRIGGER_EVENT } from './journey-product';
@@ -137,21 +138,13 @@ export async function reshapeJourney(companyId: string, journeyId: string, userI
       await applyReshapeOptions(companyId, draftId, String(row.trigger_event || ''), change.options);
     }
 
-    // 사전검사 — 검사 시작 판(updated_at)을 잡아 두고 같은 판일 때만 표식(pretest-validate 주소와 같은 규약)
-    const before = await query(`SELECT updated_at::text AS rev FROM journeys WHERE id = $1::uuid AND company_id = $2::uuid`, [draftId, companyId]);
-    const rev: string | null = before.rows[0]?.rev ?? null;
-    const v = await validateJourneyForActivation(companyId, draftId, userId);
+    // 사전검사 — 검사 시작 판(updated_at)을 잡아 두고 같은 판일 때만 표식(pretest-validate 주소와 같은 규약 · ★ 2026-11-15 CT journey-pretest-mark 로 모음)
+    const { result: v, marked } = await pretestAndMark(companyId, draftId, userId);
     if (!v.ok) {
       await discard();
       return { ok: false, code: 'PRETEST_FAILED', message: '바꾼 문자가 발송 전 검사를 통과하지 못했어요. 걸린 칸을 고친 뒤 다시 저장해 주세요.', result: v };
     }
-    const mark = await query(
-      `UPDATE journeys SET last_pretest_passed_at = NOW()
-        WHERE id = $1::uuid AND company_id = $2::uuid AND updated_at IS NOT DISTINCT FROM $3::timestamptz
-        RETURNING id`,
-      [draftId, companyId, rev],
-    );
-    if (mark.rows.length === 0) {
+    if (!marked) {
       await discard();
       return { ok: false, code: 'ACTIVATE_FAILED', message: '검사하는 사이에 여정이 바뀌었어요. 다시 저장해 주세요.' };
     }

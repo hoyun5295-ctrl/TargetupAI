@@ -62,6 +62,93 @@ export function isStepCampaignDayClosed(sendBase: Date | string | null | undefin
   return kstDay(t) < kstDay(now.getTime());
 }
 
+// ════════════════════════════════════════════════════════════════════
+// ★ 2026-11-14 C134(B-1114-1 · 뿌리 R96) — 여정의 단계 캠페인은 여정만 닫는다
+//   (설계서 docs/2026-11-14-journey-step-campaign-owner-design.md · 흐름 표 docs/2026-11-14-journey-step-campaign-seam-ledger.md)
+//   단계 캠페인 행의 일생 칸(상태 · 굳힘 · 대상 수 · 발송 수)은 여정이 정한다. 여정 밖 코드는 그날이 닫힌 것만 건드리고,
+//   닫는 일(상태 = completed)은 아래 closeFinishedStepCampaigns 가 한다. 판정은 이 파일 한 곳.
+//   옛: 캠페인 목록 조회 두 곳이 결과가 다 왔다는 이유로 열린 날의 단계 캠페인을 completed 로 바꿔, 확정 문장(대상 수 + n)이
+//   트리거(campaigns_protect_completed_target_count)에 막히고 그날 그 칸의 발송이 멈췄다.
+// ════════════════════════════════════════════════════════════════════
+
+/** 여정 단계 캠페인의 발송 종류 값(값 집합의 소유 = send-type-axis · 여기는 판정에 쓰는 한 값) */
+export const JOURNEY_STEP_SEND_TYPE = 'journey';
+
+/** 여정 밖의 「결과가 다 왔으니 완료」 문장이 붙이는 조건 — 여정 행은 그 문장의 대상이 아니다(NULL 발송 종류 = 옛 행 = 대상 그대로). */
+export const NOT_JOURNEY_STEP_SQL = `send_type IS DISTINCT FROM '${JOURNEY_STEP_SEND_TYPE}'`;
+
+/** 닫기 유예 — 자정을 걸친 실행이 어제 캠페인을 고른 뒤 표식을 쓰기 전에 닫히는 길을 줄인다(남는 길 = 확정 앞 다시 열기). */
+export const STEP_CAMPAIGN_CLOSE_GRACE_MS = 10 * 60 * 1000;
+
+/** (순수) 열린 날의 여정 단계 캠페인인가 — 여정 밖 굳힘 · 재대조가 건너뛸 행. 기준 시각을 모르면 열린 것으로 본다(건드리지 않는 쪽). */
+export function isOpenJourneyStepCampaign(sendType: string | null | undefined, sendBase: Date | string | number | null | undefined, now: Date = new Date()): boolean {
+  if (sendType !== JOURNEY_STEP_SEND_TYPE) return false;
+  const base = typeof sendBase === 'number' ? (Number.isFinite(sendBase) && sendBase > 0 ? new Date(sendBase) : null) : sendBase;
+  return !isStepCampaignDayClosed(base, now);
+}
+
+/**
+ * (순수) 재대조가 쓸 발송 수 — 여정 행은 지금 값 그대로(실행기가 확정마다 올린 값 = 적재 수 · 선불 정산이 그 값으로 미적재를 센다).
+ *   큐 행 수로 올리면 알림톡 대체 행이 적재 수를 부풀린다(스위퍼 mysql-refund-sweeper 가 같은 이유로 여정 행을 안 올린다). 그 밖 = 올리기만(R37).
+ */
+export function stepCampaignSentWritten(sendType: string | null | undefined, pgSent: number, aggTotal: number): number {
+  const cur = Math.max(0, Number(pgSent) || 0);
+  if (sendType === JOURNEY_STEP_SEND_TYPE) return cur;
+  return Math.max(cur, Math.max(0, Number(aggTotal) || 0));
+}
+
+/** (순수) 닫을 수 있는 날의 끝 — 이 KST 날짜보다 앞선 날의 단계 캠페인만 닫는다(= (지금 − 유예)의 KST 날짜). */
+export function stepCampaignCloseBefore(now: Date = new Date()): string {
+  return new Date(now.getTime() - STEP_CAMPAIGN_CLOSE_GRACE_MS + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * 여정이 자기 단계 캠페인을 닫는다 — 그날이 지났고(유예 뒤) · 미확정 단위가 없는 것만 completed.
+ *   조건이 전부 한 문장 안에 있다(읽고 나서 쓰지 않는다). 미확정 표식 · 단위 기록이 남은 행은 표식 정리가 푼 뒤 다음 주기에 닫힌다.
+ *   날짜 기준 칸 = 정산 스위퍼의 send_base 와 같다(COALESCE(scheduled_at, sent_at, created_at) · 셋 다 timestamptz).
+ *   매핑 행이 없는 옛 여정 캠페인(고객 1명당 1건 시절)도 같은 조건으로 닫힌다 = sending 으로 영원히 남는 행 0.
+ *   빈 캠페인(발송 수 0 · 확정 표식 0 · 증명 못 해 닫은 표식 0 = 여정의 장부로 아무것도 안 들어갔다)은 닫으면서 굳힌다 —
+ *   안 굳히면 재대조(72시간 탈출구)가 발송 표 기록을 적재 증거로 읽어 0건 보류만 하며 매일 다시 훑는다(끝없이 쌓임 · Codex 설계 1R).
+ */
+export const CLOSE_FINISHED_STEP_CAMPAIGNS_SQL =
+    `UPDATE campaigns c SET status = 'completed', updated_at = NOW(),
+            result_final = CASE WHEN COALESCE(c.sent_count, 0) = 0
+                                 AND NOT EXISTS (SELECT 1 FROM journey_step_logs l WHERE l.campaign_id = c.id
+                                                  AND (l.status = 'sent' OR (l.status = 'failed' AND l.error_reason = 'load_unprovable')))
+                                THEN true ELSE c.result_final END
+      WHERE c.send_type = '${JOURNEY_STEP_SEND_TYPE}' AND c.status = 'sending'
+        AND (COALESCE(c.scheduled_at, c.sent_at, c.created_at) AT TIME ZONE 'Asia/Seoul')::date < $1::date
+        AND NOT (COALESCE(c.send_config, '{}'::jsonb) ? 'loadUnit')
+        AND NOT EXISTS (SELECT 1 FROM journey_step_logs l WHERE l.campaign_id = c.id AND l.status = 'sending')
+      RETURNING c.id`;
+export async function closeFinishedStepCampaigns(now: Date = new Date()): Promise<number> {
+  const r = await query(CLOSE_FINISHED_STEP_CAMPAIGNS_SQL, [stepCampaignCloseBefore(now)]);
+  return r.rows.length;
+}
+/**
+ * 확정 앞 다시 열기 — 미확정 표식이 남은 내 단계 캠페인이 completed 로 닫혀 있으면 sending 으로 되돌린다(굳힘도 푼다).
+ *   트리거는 옛 상태가 completed 인 행의 대상 수 변경을 막는다 → 먼저 열어야 확정 문장(대상 수 + n)이 지난다.
+ *   여정이 닫는 문장은 미확정 표식이 있는 행을 닫지 않으므로, 이 문장이 행을 바꿨다 = 주인 아닌 코드가 닫았다 → 경보(캠페인마다 하루 한 번).
+ *   조건이 전부 한 문장 안에 있다 · 열 것이 없으면 0행(평소 = 기본 키 한 번 읽기).
+ */
+export async function reopenStepCampaignForConfirm(campaignId: string, claimIds: string[]): Promise<boolean> {
+  if (!claimIds || claimIds.length === 0) return false;
+  const r = await query(
+    `UPDATE campaigns c SET status = 'sending', result_final = false, updated_at = NOW()
+      WHERE c.id = $1::uuid AND c.send_type = '${JOURNEY_STEP_SEND_TYPE}' AND c.status = 'completed'
+        AND EXISTS (SELECT 1 FROM journey_step_logs l WHERE l.campaign_id = c.id AND l.id = ANY($2::uuid[]) AND l.status = 'sending')
+      RETURNING c.id, c.company_id`,
+    [campaignId, claimIds],
+  );
+  if (r.rows.length === 0) return false;
+  console.warn(`[journey-step-campaign] 닫혀 있던 단계 캠페인을 다시 열었다(미확정 표식 확정용) campaign=${campaignId}`);
+  void sendSystemAlert({
+    companyId: null, dedupKey: `journey-step-campaign-reopened:${campaignId}`, cooldownMs: 24 * 60 * 60 * 1000,
+    message: `여정 단계 캠페인이 미확정 발송을 가진 채 완료로 닫혀 있어 다시 열었습니다(campaign=${campaignId}). 여정 밖 코드가 닫았다는 신호입니다(뿌리 R96).`,
+  }).catch(() => undefined);
+  return true;
+}
+
 /**
  * `campaigns.message_type` CHECK 제약이 허용하는 값 — 2026-07-27 `pg_constraint` 실측.
  * 이 목록 밖 값을 넣으면 INSERT가 통째로 깨진다(값이 조용히 무시되는 게 아니다).
@@ -150,7 +237,7 @@ export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<
   for (let attempt = 0; attempt < 3; attempt++) {
     const st = await stepCampaignSeqState();
     const cur = await query(
-      `SELECT jsc.campaign_id, ${st.seqColumn ? 'jsc.seq' : '0'}::int AS seq,
+      `SELECT jsc.campaign_id, ${st.seqColumn ? 'jsc.seq' : '0'}::int AS seq, c.status,
               (c.send_config->>'loadProtocol') AS protocol,
               COALESCE((c.send_config->>'loadSealed')::boolean, false) AS sealed,
               (c.send_config->>'ledgerShape') AS ledger_shape
@@ -164,8 +251,11 @@ export async function pickStepCampaignForUnits(spec: StepCampaignSpec): Promise<
     if (row) {
       // ★ 2026-11-11 C129(D10) — 원장 꼴이 다르면(한쪽만 있는 것 포함) 봉인된 것과 같은 길 = 이어 붙임(문자 칸 · 후불 · 옛 캠페인 = 양쪽 다 없음 = 같음)
       const sameShape = (row.ledger_shape ?? null) === (spec.ledgerShape ?? null);
-      if (!row.sealed && sameShape && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id), sendDate };
-      if (!row.sealed && sameShape && row.protocol !== LOAD_PROTOCOL_UNIT) {
+      // ★ 2026-11-14 C134(R96) — 이어 쓰는 행은 열려 있어야 한다(상태 sending). 닫힌 행(누가 completed 로 바꿨든)에 붙이면
+      //   확정 문장이 트리거에 막힌다 → 봉인과 같은 길(순번 + 1). 옛: 봉인 · 원장 꼴 · 규약만 보고 상태는 보지 않았다(B-1114-1).
+      const open = String(row.status) === 'sending';
+      if (open && !row.sealed && sameShape && row.protocol === LOAD_PROTOCOL_UNIT) return { campaignId: String(row.campaign_id), sendDate };
+      if (open && !row.sealed && sameShape && row.protocol !== LOAD_PROTOCOL_UNIT) {
         const conv = await query(
           `UPDATE campaigns SET send_config = jsonb_set(COALESCE(send_config, '{}'::jsonb), '{loadProtocol}', to_jsonb($2::text))
             WHERE id = $1::uuid AND NOT (COALESCE(send_config, '{}'::jsonb) ? 'loadProtocol')

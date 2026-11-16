@@ -46,6 +46,7 @@ import { validateSmsTables } from '../utils/sms-table-validator';
 import { cleanupScheduledCampaigns, cancelCampaign } from '../utils/campaign-lifecycle';
 import { getUserUnsubscribes, deleteUserUnsubscribes, exportUserUnsubscribes, CAMPAIGN_OPT080_SELECT_EXPR, CAMPAIGN_OPT080_LEFT_JOIN } from '../utils/unsubscribe-helper';
 import { buildDateRangeFilter, aggregateSmsCountsByCampaign, aggregateKakaoFallbackByCampaign, aggregateSmsSendTimesByCampaign, getCampaignResultCounts, loadKakaoFallbackForList, STAT_DATE_EXPR, STAT_STARTED_GUARD } from '../utils/stats-aggregation';
+import { listEffectiveStatus, autoCompleteTargetIds, applyListAutoComplete } from '../utils/campaign-list-autocomplete';   // ★ 2026-11-14 C134 — 목록 자동 완료 CT
 // ★ 2026-07-23: 슈퍼관리자 발송통계 웹/에이전트 구분 — 에이전트(엔진) 통계 CT 병행 반환
 import {
   queryPayAgentStatsAllCompanies, queryPayAgentStoreBreakdown, validateStatsDateRange, isPayStatsConfigured,
@@ -3525,14 +3526,13 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
     const adminAlimtalkMap = await loadKakaoFallbackForList(result.rows);
 
     // ★ D144 P4/P7 후속 (2026-05-07): status='sending' 자동 정리 — 결과 모두 도착(대기 0 + 성공/실패 > 0)이면 completed.
-    const autoCompleteIds: string[] = [];
+    // ★ 2026-11-14 C134(B-1114-1 · R96) — 판정 · 닫는 문장 = CT(campaign-list-autocomplete · 사용자 목록과 한 벌).
+    //   여정 단계 캠페인은 이 판정의 대상이 아니다(보이는 상태 = 저장된 상태 · 여정이 닫는다). 그 밖은 종전 그대로.
+    const adminCountsOf = (id: string) => adminResultMap.get(id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+    const autoCompleteIds = autoCompleteTargetIds(result.rows, adminCountsOf);
     const campaigns = result.rows.map((c: any) => {
-      const cnt = adminResultMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
-      let effectiveStatus = c.status;
-      if (c.status === 'sending' && cnt.pending === 0 && (cnt.success > 0 || cnt.fail > 0)) {
-        effectiveStatus = 'completed';
-        autoCompleteIds.push(c.id);
-      }
+      const cnt = adminCountsOf(c.id);
+      const effectiveStatus = listEffectiveStatus(c.status, cnt, c.send_type);
       return {
         ...c,
         status: effectiveStatus,
@@ -3545,14 +3545,8 @@ router.get('/campaigns/all', authenticate, requireSuperAdmin, async (req: Reques
       };
     });
 
-    // 백그라운드 fire-and-forget으로 PG status UPDATE (응답 지연 없음)
-    if (autoCompleteIds.length > 0) {
-      query(
-        `UPDATE campaigns SET status = 'completed', updated_at = NOW()
-         WHERE id = ANY($1::uuid[]) AND status = 'sending'`,
-        [autoCompleteIds]
-      ).catch((e) => console.warn('[admin][campaigns] sending→completed 자동 정리 실패:', e?.message));
-    }
+    // 백그라운드 fire-and-forget으로 PG status 맞춤 (응답 지연 없음 · CT · 여정 단계 캠페인 제외)
+    applyListAutoComplete(autoCompleteIds, '[admin][campaigns]');
 
     res.json({
       campaigns,

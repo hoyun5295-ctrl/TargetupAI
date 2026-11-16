@@ -77,7 +77,8 @@ export default function LiveAutomationStrip({ scheduled, onOpen, onRunningChange
     const [op, jr, sd] = await Promise.all([
       get('/api/ai/operator/continuous'),
       get('/api/ai/operator/journeys?status=active'),
-      get('/api/campaigns?status=sending&limit=1'),
+      // ★ 2026-11-14 C134 — 여정 단계 캠페인은 그날 내내 보내는 중이다(여정이 다음 날 닫는다) → 최신 한 건 자리에서 뺀다(적재 중인 다른 발송을 가리지 않게)
+      get('/api/campaigns?status=sending&limit=1&exclude_journey=1'),
     ]);
     let failed = false;
     if (op.ok && Array.isArray(op.body?.operators)) setOperators(op.body.operators); else failed = true;

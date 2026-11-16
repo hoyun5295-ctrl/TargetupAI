@@ -62,6 +62,8 @@ import { sendSystemAlert, queuePassFailures } from '../utils/system-alert';
 import { normalizeMmsImagePaths, type MmsImageItem } from '../utils/mms-image-util';
 import { validateMmsPayload } from '../utils/mms-validator';
 import { buildDateRangeFilter, getCampaignResultCounts, aggregateSmsSendTimesByCampaign } from '../utils/stats-aggregation';
+import { listEffectiveStatus, autoCompleteTargetIds, applyListAutoComplete } from '../utils/campaign-list-autocomplete';   // ★ 2026-11-14 C134 — 목록 자동 완료 CT(여정 단계 캠페인은 대상 밖)
+import { NOT_JOURNEY_STEP_SQL } from '../utils/journey-step-campaign';
 import { cancelCampaign, syncCampaignResults, cleanupScheduledCampaigns, failCampaignRun } from '../utils/campaign-lifecycle';
 import { buildFilterQueryCompat } from '../utils/customer-filter';
 import { findUnfilledAlimtalkVars, fillAlimtalkVarMap } from '../utils/alimtalk-vars';
@@ -157,6 +159,11 @@ router.get('/', async (req: Request, res: Response) => {
       whereClause += ` AND status = $${paramIndex++}`;
       params.push(status);
     }
+    // ★ 2026-11-14 C134 — 여정 단계 캠페인을 뺀 목록(대시보드 자동화 띠의 「지금 적재 중인 발송」 찾기).
+    //   여정 단계 캠페인은 그날 내내 보내는 중이라 최신 한 건만 읽는 자리에서 다른 발송을 가린다 → 부르는 쪽이 값을 실을 때만 뺀다(없으면 종전).
+    if (req.query.exclude_journey === '1') {
+      whereClause += ` AND ${NOT_JOURNEY_STEP_SQL}`;
+    }
 
     // 월별 필터링 (캘린더용) - 이벤트 기간도 포함
     if (year != null && month != null) {
@@ -187,6 +194,7 @@ router.get('/', async (req: Request, res: Response) => {
     const aliasedWhereClause = whereClause
       .replace(/\bcompany_id\b/g, 'c.company_id')
       .replace(/\bstatus\b/g, 'c.status')
+      .replace(/\bsend_type\b/g, 'c.send_type')   // ★ 2026-11-14 C134 exclude_journey 조건(위) — 조인 표와 칸 이름이 겹치지 않게
       .replace(/\bcreated_by\b/g, 'c.created_by')
       .replace(/\bscheduled_at\b/g, 'c.scheduled_at')
       .replace(/\bcreated_at\b/g, 'c.created_at')
@@ -242,17 +250,15 @@ router.get('/', async (req: Request, res: Response) => {
     //   Dashboard 진입 시 fire-and-forget sync-results가 호출되지만, 사용자가 캠페인 목록만 보고
     //   Dashboard 안 들어갈 수 있음. 목록 조회 시점에도 MySQL 결과 도착(pending=0 + success/fail>0) 시
     //   PG status를 'completed'로 자동 정리.
-    const userAutoCompleteIds: string[] = [];
+    // ★ 2026-11-14 C134(B-1114-1 · R96) — 판정 · 닫는 문장 = CT(campaign-list-autocomplete). 여정 단계 캠페인은 이 판정의 대상이 아니다
+    //   (하루 동안 이어 쓰는 행 · 여정이 닫는다 · 보이는 상태 = 저장된 상태). 그 밖의 캠페인은 종전 그대로.
+    const listCountsOf = (id: string) => listCountMap.get(id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+    const userAutoCompleteIds = autoCompleteTargetIds(result.rows, listCountsOf);
     const campaigns = result.rows.map((c: any) => {
-      const counts = listCountMap.get(c.id) || { sent: 0, success: 0, fail: 0, pending: 0 };
+      const counts = listCountsOf(c.id);
       const totalSuccess = counts.success;
       const totalFail = counts.fail;
-      const totalPending = counts.pending;
-      let effectiveStatus = c.status;
-      if (c.status === 'sending' && totalPending === 0 && (totalSuccess > 0 || totalFail > 0)) {
-        effectiveStatus = 'completed';
-        userAutoCompleteIds.push(c.id);
-      }
+      const effectiveStatus = listEffectiveStatus(c.status, counts, c.send_type);
       // ★ 2026-07-17: send_config·result_final은 집계 전용 내부 데이터 — 응답에 미노출(현행 응답 형태 유지.
       //   sent/success/fail_count는 지금도 계산값으로 덮어쓰는 자리라 raw 컬럼 추가의 응답 영향 0)
       const { send_config: _sendConfig, result_final: _resultFinal, ...rest } = c;
@@ -266,14 +272,8 @@ router.get('/', async (req: Request, res: Response) => {
       };
     });
 
-    // 백그라운드 fire-and-forget으로 PG status UPDATE
-    if (userAutoCompleteIds.length > 0) {
-      query(
-        `UPDATE campaigns SET status = 'completed', updated_at = NOW()
-         WHERE id = ANY($1::uuid[]) AND status = 'sending'`,
-        [userAutoCompleteIds]
-      ).catch((e) => console.warn('[campaigns] sending→completed 자동 정리 실패:', e?.message));
-    }
+    // 백그라운드 fire-and-forget으로 PG status 맞춤(CT · 여정 단계 캠페인 제외)
+    applyListAutoComplete(userAutoCompleteIds, '[campaigns]');
 
     return res.json({
       campaigns,

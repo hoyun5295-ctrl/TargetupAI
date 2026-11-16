@@ -17,7 +17,7 @@
  */
 import { query } from '../config/database';
 import { getCampaignSmsTablesWide, smsCountAll, smsCampaignCountsSafe, smsMsgTypeScopeSql, isMysqlThreadAlive } from './sms-queue';
-import { LOAD_PROTOCOL_UNIT } from './journey-step-campaign';
+import { LOAD_PROTOCOL_UNIT, reopenStepCampaignForConfirm } from './journey-step-campaign';
 /** 증명을 기다리는 상한 — 넘으면 다시 보내지 않고 닫는다(★ 0926 Harold 결정) */
 export const CLAIM_PROOF_LIMIT_SEC = 60 * 60;
 
@@ -116,6 +116,9 @@ export async function confirmLoadUnit(
 ): Promise<Array<{ id: string; executionId: string; cost: number }>> {
   const vIds = (opts.variantCounts || []).filter((v) => v.sent > 0).map((v) => v.variantId);
   const vNs = (opts.variantCounts || []).filter((v) => v.sent > 0).map((v) => v.sent);
+  // ★ 2026-11-14 C134(B-1114-1 · R96) — 미확정 표식이 남은 채 닫힌(completed) 캠페인이면 먼저 연다. 트리거가 완료 행의 대상 수 변경을 막아
+  //   아래 문장이 통째로 되돌아가고, 그 표식은 정리 주기마다 같은 자리에서 영원히 실패했다(닫히지 않는 상태 R6). 열 것이 없으면 0행.
+  await reopenStepCampaignForConfirm(campaignId, claimIds);
   const r = await query(
     `WITH confirmed AS (
        UPDATE journey_step_logs SET status = 'sent'

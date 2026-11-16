@@ -25,6 +25,8 @@ import { shouldFinalizeCampaign, shouldSkipReconcileWrite } from './sms-table-sp
 import { recordedLiveTables } from './stats-table-scope';
 import { resolveCampaignTableGroups } from './stats-aggregation';
 import { notifyJourneyStepResults } from './journey-result-notice';
+// ★ 2026-11-14 C134(B-1114-1 · R96) — 여정의 단계 캠페인은 여정만 닫는다: 닫기 = 여정 CT · 굳힘 · 재대조는 닫힌 날의 여정 행만 · 여정 발송 수는 안 올린다
+import { closeFinishedStepCampaigns, isOpenJourneyStepCampaign, stepCampaignSentWritten, JOURNEY_STEP_SEND_TYPE } from './journey-step-campaign';
 
 const INTERVAL_MS = 5 * 60 * 1000; // 5분
 const BOOT_DELAY_MS = 60 * 1000;   // 서버 startup 안정화 후 첫 실행
@@ -51,6 +53,15 @@ async function runOnce(): Promise<void> {
   _running = true;
   const startedAt = Date.now();
   try {
+    // ★ 2026-11-14 C134 — 여정이 자기 단계 캠페인을 닫는다(날이 지나고 미확정 단위가 없는 것만 completed · 아래 굳힘 · 재대조보다 먼저).
+    //   옛: 닫는 자리가 캠페인 목록 조회뿐이라 누가 목록을 열어야 닫혔고, 열린 날에도 닫혀 발송이 멈췄다(B-1114-1).
+    try {
+      const closed = await closeFinishedStepCampaigns();
+      if (closed > 0) log(`여정 단계 캠페인 ${closed}건 닫음(날이 지남 · 미확정 단위 0)`);
+    } catch (closeErr: any) {
+      log('여정 단계 캠페인 닫기 오류 (skip):', closeErr?.message || closeErr);
+    }
+
     // ★ D228+ (2026-05-30) 발송결과 속도 — 완료 6h 경과 캠페인 result_final 마킹.
     //   sync 대상 회사 유무와 독립이므로 사이클 진입 직후 항상 실행 (조기 return 전에 수행).
     try {
@@ -140,12 +151,43 @@ async function runOnce(): Promise<void> {
  *   ★ 2026-06-05: 확정 조건에 success+fail >= sent_count 추가 — 완전 집계분만 캐시 확정.
  *     미완성(LIVE→LOG 이동 중 등)이 과소 확정돼 발송결과가 실제보다 적게 굳던 문제 차단.
  */
+/**
+ * 굳히는 문장 — ★ 2026-11-14 C134(Codex 설계 1R · R12) 후보를 읽은 뒤 상태가 바뀐 행은 굳히지 않는다(상태 조건을 문장 안에).
+ *   옛: id 와 result_final 만 보고 썼다 → 후보 선정과 이 문장 사이에 여정이 다시 연(sending) 단계 캠페인을 옛 숫자로 굳힐 수 있었다.
+ */
+export const MARK_FINAL_SQL =
+  `UPDATE campaigns SET result_final = true, result_synced_at = NOW()
+    WHERE id = ANY($1::uuid[]) AND result_final = false AND status IN ('completed', 'failed')`;
+
+/**
+ * 재대조가 쓰는 문장 — ★ 2026-11-14 C134(Codex 설계 1R).
+ *   · `AND status = $7` = 읽은 뒤 상태가 바뀐 행(여정이 다시 열었다 · 다른 워커가 고쳤다)은 덮지 않는다(0행 = 다음 주기에 다시 · R12 · R93).
+ *   · 여정 단계 캠페인: 상태를 쓰지 않는다(여정이 정한다) · 발송 수를 쓰지 않는다(D3 = 실행기가 확정마다 올린 적재 수) ·
+ *     큐 행 수는 send_config.reconRows 에 따로 남긴다(올리기만) — 굳은 뒤 늦게 온 결과를 다시 고르는 기준(성공 + 실패 < 큐 행 수)이
+ *     발송 수를 안 올려도 종전처럼 돈다(알림톡 대체 행의 늦은 결과).
+ */
+export const RECONCILE_WRITE_SQL =
+  `UPDATE campaigns
+      SET status = CASE WHEN send_type = '${JOURNEY_STEP_SEND_TYPE}' THEN status ELSE $2::text END,
+          sent_count = CASE WHEN send_type = '${JOURNEY_STEP_SEND_TYPE}' THEN sent_count ELSE GREATEST(COALESCE(sent_count, 0), $3::int) END,
+          send_config = CASE WHEN send_type = '${JOURNEY_STEP_SEND_TYPE}'
+                             THEN jsonb_set(COALESCE(send_config, '{}'::jsonb), '{reconRows}',
+                                            to_jsonb(GREATEST(COALESCE(NULLIF(send_config->>'reconRows', '')::int, 0), $3::int)))
+                             ELSE send_config END,
+          success_count = $4, fail_count = $5,
+          result_final = CASE WHEN $6::boolean THEN true ELSE result_final END,
+          result_synced_at = NOW(), updated_at = NOW()
+    WHERE id = $1 AND status = $7::text`;
+
+/** 굳은 캠페인을 다시 고르는 기준 수 — 여정 단계 캠페인은 큐 행 수(reconRows)를 함께 본다(위). */
+export const RECONCILE_BENCHMARK_SQL = `GREATEST(sent_count, COALESCE(NULLIF(send_config->>'reconRows', '')::int, 0))`;
+
 async function markFinalizedCampaigns(): Promise<void> {
   // 후보: terminal + 미확정 + 발송 6h 경과. 확정 판정은 순수 shouldFinalizeCampaign(성공+실패 ≥ target/적재).
   //   ★ 2026-06-22: 옛 게이트 (성공+실패)>=sent_count는 sent_count 과소 기록(마트스마트 3095 vs 실제 3180) 시
   //   미해결 행이 남아도 조기 확정 → 요약(캐시) < 상세(라이브) 불일치 노출. target 완결 기준으로 교체.
   const cand = await query(`
-    SELECT id, status, success_count, fail_count, sent_count, target_count,
+    SELECT id, status, success_count, fail_count, sent_count, target_count, send_type,
            EXTRACT(EPOCH FROM COALESCE(scheduled_at, sent_at)) * 1000 AS send_base_ms
       FROM campaigns
      WHERE result_final = false
@@ -155,7 +197,10 @@ async function markFinalizedCampaigns(): Promise<void> {
        AND sent_count > 0
   `);
   const nowMs = Date.now();
+  const now = new Date(nowMs);
   const ids = cand.rows
+    // ★ 2026-11-14 C134(R96) — 열린 날의 여정 단계 캠페인은 굳히지 않는다(그날 발송이 더 붙는다 · 닫힌 날부터 굳힘)
+    .filter((c: any) => !isOpenJourneyStepCampaign(c.send_type, Number(c.send_base_ms) || 0, now))
     .filter((c: any) => shouldFinalizeCampaign({
       status: c.status,
       sendBaseMs: Number(c.send_base_ms) || 0,
@@ -167,11 +212,7 @@ async function markFinalizedCampaigns(): Promise<void> {
     }))
     .map((c: any) => c.id);
   if (ids.length === 0) return;
-  const r = await query(
-    `UPDATE campaigns SET result_final = true, result_synced_at = NOW()
-      WHERE id = ANY($1::uuid[]) AND result_final = false`,
-    [ids],
-  );
+  const r = await query(MARK_FINAL_SQL, [ids]);
   if (r.rowCount && r.rowCount > 0) {
     log(`result_final 확정 ${r.rowCount}건 (발송 6h 경과 + 성공+실패 ≥ target/적재 완결분 → PG 캐시 전환)`);
   }
@@ -208,7 +249,7 @@ const FINALIZE_FALLBACK_MS = 72 * 60 * 60 * 1000;
 
 async function reconcileFinalizedCampaigns(): Promise<void> {
   const targets = await query(`
-    SELECT id, company_id, created_by, status, result_final, success_count, fail_count, sent_count,
+    SELECT id, company_id, created_by, status, result_final, success_count, fail_count, sent_count, send_type,
            jsonb_build_object('sentTables', send_config->'sentTables') AS send_config,
            COALESCE(scheduled_at, sent_at) AS send_base
       FROM campaigns
@@ -221,7 +262,7 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
                    AND COALESCE(scheduled_at, sent_at) < NOW() - INTERVAL '24 hours'
                    -- ★ 2026-06-17: 캐시 불일치(성공+실패 < 적재)만 재대조. 정합 캠페인 1778건이 매 사이클
                    --   BATCH 50을 점유해, 최근 불일치(에이스 6/13)가 send_base ASC에서 영원히 안 잡히던 폭증 차단.
-                   AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) < sent_count)
+                   AND (COALESCE(success_count, 0) + COALESCE(fail_count, 0)) < ${RECONCILE_BENCHMARK_SQL})
                )
                AND COALESCE(scheduled_at, sent_at) >= NOW() - INTERVAL '21 days'
                AND (result_synced_at IS NULL
@@ -247,6 +288,13 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
   let skipped = 0;
   for (const camp of targets.rows) {
     try {
+      // ★ 2026-11-14 C134(R96) — 열린 날의 여정 단계 캠페인은 재대조하지 않는다(상태 · 수는 여정이 정한다 · 닫힌 날부터 대상).
+      //   재대조 시각만 찍는다(보류와 같은 꼴 · 같은 행이 매 주기 배치 50 을 점유하지 않게).
+      if (isOpenJourneyStepCampaign(camp.send_type, camp.send_base)) {
+        await query(`UPDATE campaigns SET result_synced_at = NOW() WHERE id = $1`, [camp.id]);
+        skipped++;
+        continue;
+      }
       // ★ 2026-09-26 한줄로 V2 F36 — 캠페인이 **실제로 적재된 테이블**을 읽는다(통계 화면과 같은 해석 CT:
       //   기록된 sentTables + 그 라인의 전 LOG, 기록이 없으면 (회사, 작성자) 라인). 옛 코드는 회사의 현재 라인만 읽어,
       //   발송 뒤 라인이 빠지거나 사용자 전용 라인으로 보낸 캠페인을 일부만 세고 sent_count를 낮춰 덮었다 →
@@ -296,7 +344,9 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
       const newStatus = (camp.status === 'failed' && sentCount > 0) ? 'completed' : camp.status;
       // ★ 2026-11-01 B-1101-4 · R37 — 적재 수는 읽기로 내리지 않는다(올리기만). 1101 .62 인덱스 어긋남으로 742행 중 274행만 읽히자
       //   이 자리가 sent 742 → 274 로 덮어 정산이 468건(12,097.8원)을 미적재로 환불할 뻔했다(0926 F36 라인 재배정과 같은 뿌리).
-      const sentWritten = Math.max(Number(camp.sent_count || 0), sentCount);
+      // ★ 2026-11-14 C134(D3) — 여정 단계 캠페인의 발송 수는 실행기가 확정마다 올린 값(적재 수)이다. 큐 행 수로 올리면 알림톡 대체 행이
+      //   적재 수를 부풀려 선불 정산의 미적재(차감 − 적재)가 준다(스위퍼가 0926 에 같은 이유로 여정 행을 안 올린다) → 여정 행은 지금 값 그대로.
+      const sentWritten = stepCampaignSentWritten(camp.send_type, Number(camp.sent_count || 0), sentCount);
       // ★ 2026-06-13 굳힘 탈출구(위 finalize) — 방금 쓴 실측값 그대로 굳힘(화면 숫자 연속). 선불은 굳힘 후에도 sweeper가 14일까지 보정.
       const changed =
         newStatus !== camp.status ||
@@ -304,14 +354,12 @@ async function reconcileFinalizedCampaigns(): Promise<void> {
         successCount !== Number(camp.success_count || 0) ||
         failCount !== Number(camp.fail_count || 0);
 
-      await query(
-        `UPDATE campaigns
-            SET status = $2, sent_count = GREATEST(COALESCE(sent_count, 0), $3::int), success_count = $4, fail_count = $5,
-                result_final = CASE WHEN $6::boolean THEN true ELSE result_final END,
-                result_synced_at = NOW(), updated_at = NOW()
-          WHERE id = $1`,
-        [camp.id, newStatus, sentCount, successCount, failCount, finalize]
-      );
+      const wrote = await query(RECONCILE_WRITE_SQL, [camp.id, newStatus, sentCount, successCount, failCount, finalize, camp.status]);
+      if (!wrote.rowCount) {
+        // 읽은 뒤 상태가 바뀌었다(여정이 다시 열었다 등) = 이번에는 쓰지 않는다 · 다음 주기가 새 상태로 다시 본다
+        log(`재대조 건너뜀 campaign=${camp.id} — 읽은 뒤 상태가 바뀜(읽은 값 ${camp.status})`);
+        continue;
+      }
       if (finalize) finalized++;
       if (changed) {
         fixed++;

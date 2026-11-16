@@ -2188,6 +2188,8 @@ const R6_CLOSERS: Record<string, { file?: string; has?: RegExp; why: string }> =
   'sns_accounts|pending': { file: 'utils/sns-accounts.ts', has: /SNS_PENDING_STUCK_MINUTES/, why: '계정 고르기 대기 · 오래된 대기 = 연결 화면이 「멈춤」으로 보이고 다시 연결' },
   // ★ 2026-11-01 B1-4 — 재작성 후보 검사 중 = 다음 회차가 이어 봐 닫고 · 7일 넘으면 failed(버려진 옛 판 · 쓰지 못한 재작성 환불)
   'journey_pretest_candidates|testing': { file: 'utils/journey-pretest-candidate.ts', why: '보내기 전 재작성 후보 검사 중 = 다음 회차 이어 보기 · 7일 넘음 = failed' },
+  // ★ 2026-11-14 C134(R96) — 여정 단계 캠페인: 확정 앞 다시 열기가 sending 을 쓴다 → 닫는 자리 = 같은 파일 closeFinishedStepCampaigns(날이 지나고 미확정 표식 0)
+  'campaigns|sending': { file: 'utils/journey-step-campaign.ts', why: '여정 단계 캠페인 = 날이 지나면 여정이 닫는다(유예 10분 · 미확정 표식 0 · 단위 기록 없음)' },
 };
 describe('R6 넓힘(1025) — 12기능 모듈이 쓰는 비종결 상태마다 닫는 자리(파일) 또는 살아 있는 상태 이유', () => {
   const writes = new Set<string>();
@@ -3308,6 +3310,9 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     "utils/journey-anchor-scheduler.ts 'journey-one-shot-lag'": '30분 넘게 못 넣은 한 번 보내기 수 = 원인 하나(★1102 E9 ④)',
     "utils/journey-executor.ts 'journey-executor-lag'": '실행기 밀림 = 플랫폼 처리량 원인 하나(★1102 E9 ①)',
     "utils/journey-step-campaign.ts 'journey-step-campaign-seq-missing'": '단계 캠페인 순번 칸(C96-DDL-1) 없음 = 스키마 · 회사 무관(★1102 묶음 발송 I6)',
+    'utils/journey-step-campaign.ts `journey-step-campaign-reopened:${campaignId}`': '여정 밖 코드가 단계 캠페인을 닫았다 = 서버 코드 결함의 신호(뿌리 R96) · 합성 회사에서도 울려야 한다(사내 회사 거름을 타면 측정이 사라진다 · ★1114 C134)',
+    'utils/journey-selfcheck.ts `journey-selfcheck:${companyId}:${y.day}`': '합성 회사 여정 자동 판정 = 판정 대상이 사내 합성 회사뿐 · 거름을 타면 경보 0(★1114 C134 S1)',
+    'utils/journey-selfcheck-set.ts `journey-set-${kind}:${companyId}:${def.key}:${def.rev}`': '합성 회사 여정 세트 워커 = 대상이 사내 합성 회사뿐 · 글이 검사에 걸림 · 검증 횟수를 다 씀 = 코드를 고쳐야 풀리는 신호 · 거름을 타면 경보 0(★1115 C134 S3)',
     "utils/journey-trigger-watcher.ts 'journey-watcher-budget'": '진입 감시 회차 예산 초과 = 플랫폼 원인 하나(★1102 E9 ②)',
     "utils/spam-test-queue.ts 'spam-queue-lag'": '스팸 검사 줄 밀림 = 시험 폰 · 큐 원인 하나(★1102 E9 ③)',
     "utils/direct-send-worker.ts 'direct-send-queue-lag'": '대량 직접발송 줄 밀림 = 워커 처리량 원인 하나(★1102 §16 G3)',
@@ -4224,7 +4229,8 @@ describe('R37 적재 기준은 읽기로 내리지 않는다 · 정산은 늘기
     for (const [f, why] of Object.entries(R37_PLAIN_SENT_EXEMPT)) expect(why.length, f).toBeGreaterThan(20);
   });
   it('재대조 · 예약 정리의 적재 수 쓰기 = GREATEST(올리기만)', () => {
-    expect(stripComments(be('utils/campaign-sync-worker.ts'))).toMatch(/sent_count = GREATEST\(COALESCE\(sent_count, 0\), \$3::int\)/);
+    // ★ 2026-11-14 C134(D3) — 여정 단계 캠페인은 지금 값 그대로(실행기가 확정마다 올린 적재 수) · 그 밖은 종전처럼 올리기만
+    expect(stripComments(be('utils/campaign-sync-worker.ts'))).toMatch(/sent_count = CASE WHEN send_type = '\$\{JOURNEY_STEP_SEND_TYPE\}' THEN sent_count ELSE GREATEST\(COALESCE\(sent_count, 0\), \$3::int\) END/);
     expect(stripComments(be('utils/campaign-lifecycle.ts'))).toMatch(/sent_count = GREATEST\(COALESCE\(sent_count, 0\), \$2::int\)/);
   });
   it('정산 스위퍼: 회수 한도 · 불변식 = 성공 기준 · 여정 실패 = 대체 기준 · 분리 축 적재 기준 = readHigh · 차액 = 기준(지급은 모호 아닌 회차만)', () => {
