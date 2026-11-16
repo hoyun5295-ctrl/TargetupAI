@@ -79,14 +79,14 @@ describe('로그인 화면 사전 고지 창', () => {
     expect(login).not.toContain('securityNotice20260901');
     expect(login).not.toContain('2026년 9월 1일 시행');
     // ★ 2026-11-02 서버 점검 안내 기간에는 인증 안내 창 대신 점검 안내 창(아래 describe)
-    expect(login).toContain('useState(() => !isSuperAdminOnly && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice())');
-    // ★ 2026-11-15 C135 — 안내 창의 갈래(V3 안내 창 · 이 인증 안내 창)는 LoginNoticeSwitch 한 곳이 정한다.
-    //   로그인 화면은 「띄울 차례」만 정하고, 스위치가 꺼져 있거나 답을 못 받으면 이 창이 지금처럼 뜬다.
-    expect(login).toContain('{showPolicyNotice && <LoginNoticeSwitch onClose={() => setShowPolicyNotice(false)} />}');
-    expect(login).not.toContain('<LoginPolicyNoticeModal');
-    const sw = fe('components', 'v3', 'LoginNoticeSwitch.tsx');
-    expect(sw).toContain('return <LoginPolicyNoticeModal onClose={onClose} />;');
-    expect(sw).toContain("if (mode === 'v3') return <V3LoginIntroModal onClose={onClose} onAuthNotice={() => setMode('policy')} />;");
+    // ★ 2026-11-16 C136 — 문의로 들어온 방문(?inquiry=1)은 첫 그림부터 문의 창이라 안내 창을 띄우지 않는다(그 밖의 방문 = 종전 조건 그대로)
+    expect(login).toContain('useState(() => !isSuperAdminOnly && !cameForInquiry && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice())');
+    expect(login).toContain("const [cameForInquiry] = useState(() => !isSuperAdminOnly && new URLSearchParams(window.location.search).get('inquiry') === '1');");
+    // ★ 2026-11-16 C136 — 로그인 화면의 안내 창은 다시 이 인증 안내 창 하나다(어제 C135 의 V3 안내 창 · 갈래 LoginNoticeSwitch 는 로그인 뒤로 옮기며 걷었다).
+    //   로그인 화면에는 소개 글 · 그림을 두지 않는다(로그인 없이 꺼내 볼 수 없게 · 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2-2).
+    expect(login).toContain('{showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}');
+    expect(login).not.toContain('LoginNoticeSwitch');
+    expect(login).not.toMatch(/V3LoginIntro|v3-login-intro|about-v3/);
   });
 
   it('숨김은 「오늘 하루」뿐이다 — 확인을 눌러도 다음 방문에 다시 뜬다', () => {

@@ -2,29 +2,18 @@
 /**
  * C133 F7 — 한줄로 V3 단계 개방 판정 · 로그인 소개 창(★ 2026-11-13 · 설계서 docs/2026-11-13-hanjul-v3-design.md §2 · §11 · §14)
  *   1. 단계 개방 = 요금제가 먼저 · ENV 명단이 뒤(명단에 든 미가입 회사가 뚫리지 않는다) · 비면 닫힘
- *   2. 소개 창 = 대상 · 로그인 표식 · 포스터 3장 · 칩은 「그 회사에 지금 열린 기능」만 · 금지 문구
- *   3. 선점 순서 = 포스터 확인이 선점보다 먼저(띄울 수 없는데 노출 수만 쓰지 않는다)
+ *   2. 소개 창 = 대상 · 로그인 표식
+ *   3. ★ 2026-11-16 C136(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2) — 옛 판(포스터 3장 · 기능 칩)은 띄우지 않는다.
+ *      순서 = 준비(노출을 쓰지 않는다) → 선점(준비한 판의 열쇠와 판정이 같을 때만 노출 한 번) · 옛 「띄울 수 없는데 노출 수만 쓰지 않는다」를 같은 뜻으로 옮김
  *   실 PG 판(상한 3 · 같은 로그인 한 번 · 다시 보지 않기 · 동시 요청) = c133-v3-intro.pg.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-const samples = new Set<string>();
 const planCtx: { value: any; fail: boolean } = { value: null, fail: false };
 
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { query: vi.fn(), connect: vi.fn() } }));
-vi.mock('../image-studio', () => ({
-  findTemplateSample: (id: string) => (samples.has(id) ? { absPath: `/x/${id}.jpg`, mime: 'image/jpeg', v: 7 } : null),
-}));
-vi.mock('../image-studio-templates', () => ({
-  listTemplatesPublic: () => [
-    { id: 't-food-1', category: 'food' }, { id: 't-food-2', category: 'food' },
-    { id: 't-beauty-1', category: 'beauty' }, { id: 't-beauty-2', category: 'beauty' }, { id: 't-etc-1', category: 'etc' },
-  ],
-}));
-vi.mock('../sales-outreach-produce', () => ({ studioIndustryCategories: (code: string | null) => (code === 'beauty' ? ['beauty'] : null) }));
-vi.mock('../copy-prompt-composer', () => ({ resolveCompanyIndustry: vi.fn(async () => 'beauty') }));
 vi.mock('../plan-guard', async (orig) => ({
   ...(await orig() as any),
   loadPlanContext: vi.fn(async () => { if (planCtx.fail) throw new Error('plan down'); return planCtx.value; }),
@@ -33,10 +22,11 @@ vi.mock('../plan-guard', async (orig) => ({
 import { query } from '../../config/database';
 import { V3_FEATURES, V3_STAGE_ENV, V3_PLAN_KEY, v3StageOpen, v3LiveWith, v3Live } from '../v3-stage';
 import {
-  V3_INTRO_KEY, V3_INTRO_MAX_SHOWN, V3_INTRO_POSTER_COUNT, V3_INTRO_MAX_CHIPS, V3_INTRO_CHIPS,
-  INTRO_CLAIM_SQL, INTRO_DISMISS_SQL,
-  isIntroAudience, introLoginMark, pickIntroPosters, introChipsFor, claimIntro, dismissIntro,
+  V3_INTRO_KEY, V3_SCENES_INTRO_KEY, STUDIO_TRIAL_INTRO_KEY, INTRO_KEYS, LIVE_INTRO_KEYS, V3_INTRO_MAX_SHOWN,
+  INTRO_CLAIM_SQL, INTRO_DISMISS_SQL, INTRO_LOGIN_SEEN_SQL, INTRO_STATE_SQL,
+  isIntroAudience, introLoginMark, decideIntro, peekIntro, claimIntro, dismissIntro,
 } from '../v3-intro';
+import { COMPANY_USAGE_SQL, GATED_CACHE_CONTROL } from '../gated-content';
 
 const mockQuery = query as unknown as ReturnType<typeof vi.fn>;
 const back = (rel: string) => readFileSync(join(__dirname, '..', '..', rel), 'utf8').replace(/\r\n/g, '\n');
@@ -53,7 +43,6 @@ const openAll = (value: string) => { for (const n of ENV_NAMES) process.env[n] =
 beforeEach(() => {
   for (const n of ENV_NAMES) { saved[n] = process.env[n]; delete process.env[n]; }
   mockQuery.mockReset();
-  samples.clear();
   planCtx.value = PAID;
   planCtx.fail = false;
 });
@@ -137,145 +126,113 @@ describe('소개 창 — 대상 · 로그인 표식', () => {
   });
 });
 
-describe('소개 창 — 포스터 3장(업종 먼저 · 실샘플만 · 모자라면 띄우지 않는다)', () => {
-  const T = [
-    { id: 'f1', category: 'food' }, { id: 'f2', category: 'food' },
-    { id: 'b1', category: 'beauty' }, { id: 'b2', category: 'beauty' }, { id: 'e1', category: 'etc' },
-  ];
-  const has = (ids: string[]) => (id: string) => (ids.includes(id) ? { v: 3 } : null);
-
-  it('회사 업종 카테고리를 먼저 · 모자라면 나머지에서 목록 순서대로', () => {
-    expect(pickIntroPosters(T, ['beauty'], has(['f1', 'f2', 'b1', 'b2', 'e1'])).map((p) => p.id)).toEqual(['b1', 'b2', 'f1']);
-    expect(pickIntroPosters(T, null, has(['f1', 'f2', 'b1', 'b2', 'e1'])).map((p) => p.id)).toEqual(['f1', 'f2', 'b1']);
-    expect(pickIntroPosters(T, ['nothing'], has(['f1', 'f2', 'b1'])).map((p) => p.id)).toEqual(['f1', 'f2', 'b1']);
-  });
-
-  it('실샘플 파일이 없는 템플릿은 건너뛴다 · 주소 = 공개 실샘플 주소 + 파일 시각', () => {
-    const got = pickIntroPosters(T, ['beauty'], has(['b2', 'f2', 'e1']));
-    expect(got).toEqual([
-      { id: 'b2', url: '/api/image-studio/template-sample/b2?v=3' },
-      { id: 'f2', url: '/api/image-studio/template-sample/f2?v=3' },
-      { id: 'e1', url: '/api/image-studio/template-sample/e1?v=3' },
-    ]);
-  });
-
-  it('3장을 못 채우면 빈 배열(두 장만 그리지 않는다)', () => {
-    expect(pickIntroPosters(T, ['beauty'], has(['b1', 'f1']))).toEqual([]);
-    expect(pickIntroPosters([], null, has([]))).toEqual([]);
-    expect(V3_INTRO_POSTER_COUNT).toBe(3);
-  });
-});
-
-describe('소개 창 — 칩 = 그 회사에 지금 열린 기능만', () => {
-  it('단계 ENV 가 전부 비었으면 이미지 스튜디오 칩 하나(아직 안 연 기능을 약속하지 않는다)', () => {
-    expect(introChipsFor(CO, PAID).map((c) => c.key)).toEqual(['image-studio']);
-  });
-
-  it('열린 기능만 · 목록 순서 그대로 · 최대 4개', () => {
-    process.env.V3_STAGE_BENCHMARK = '*';
-    process.env.V3_STAGE_INBOX = CO;
-    expect(introChipsFor(CO, PAID).map((c) => c.key)).toEqual(['image-studio', 'benchmark', 'inbox']);
-    expect(introChipsFor('c-other', PAID).map((c) => c.key)).toEqual(['image-studio', 'benchmark']);
-    openAll('*');
-    expect(introChipsFor(CO, PAID).map((c) => c.key)).toEqual(['image-studio', 'journey-pack', 'product-insight', 'benchmark']);
-    expect(V3_INTRO_MAX_CHIPS).toBe(4);
-  });
-
-  it('⛔ 미가입 · 요금제 모름 = 명단에 있어도 이미지 스튜디오 칩만', () => {
-    openAll('*');
-    expect(introChipsFor(CO, FREE).map((c) => c.key)).toEqual(['image-studio']);
-    expect(introChipsFor(CO, null).map((c) => c.key)).toEqual(['image-studio']);
-  });
-
-  it('칩은 화면에 줄 칸만 내보낸다(내부 기능 열쇠를 싣지 않는다)', () => {
-    openAll('*');
-    for (const c of introChipsFor(CO, PAID)) expect(Object.keys(c).sort()).toEqual(['key', 'label', 'text']);
-  });
-
-  it('칩의 기능 열쇠 = 단계 개방 기능 목록 안 · 늘 보이는 칩은 이미지 스튜디오뿐', () => {
-    expect(V3_INTRO_CHIPS.filter((c) => c.feature === null).map((c) => c.key)).toEqual(['image-studio']);
-    for (const c of V3_INTRO_CHIPS) if (c.feature) expect(V3_FEATURES).toContain(c.feature);
-  });
-
-  it('금지 문구: 약속 숫자 · 「업계 최고」 · 「무료」 · 줄표 · AI 모델 이름 · 영문 제품명 0', () => {
-    for (const c of V3_INTRO_CHIPS) {
-      const s = `${c.label} ${c.text}`;
-      expect(s).not.toMatch(/\d/);
-      expect(s).not.toMatch(/업계|최고|무료|보장|—|–/);
-      expect(s).not.toMatch(/opus|sonnet|haiku|gpt|claude|anthropic|gemini/i);
-      expect(s.replace(/AI/g, '')).not.toMatch(/[A-Za-z]/);
-    }
-  });
-});
-
-describe('claimIntro — 포스터 확인이 선점보다 먼저 · 행이 돌아온 요청만 띄운다', () => {
-  const enough = () => { for (const id of ['t-food-1', 't-beauty-1', 't-beauty-2']) samples.add(id); };
+describe('준비 → 선점 — 준비는 노출을 쓰지 않고 · 선점은 준비한 판의 열쇠와 판정이 같을 때만 쓴다(★ C136)', () => {
+  // 판정이 읽는 순서: 회사 용도 → 이 로그인이 이미 창을 띄웠나 → (요금제 = 유료 → 무료체험 판 아님 · 조회 0) → 장면 판의 노출 상태
+  const feed = (o: { usage?: string | null; seen?: boolean; state?: { dismissed: boolean; shown: number } } = {}) => {
+    mockQuery.mockResolvedValueOnce({ rows: [{ usage_type: o.usage === undefined ? 'web' : o.usage }] });
+    mockQuery.mockResolvedValueOnce({ rows: o.seen ? [{ ok: 1 }] : [] });
+    mockQuery.mockResolvedValueOnce({ rows: o.state ? [o.state] : [] });
+  };
+  const sqls = () => mockQuery.mock.calls.map((c) => c[0]);
 
   it('대상이 아니거나 토큰이 없으면 DB 를 부르지 않고 띄우지 않는다', async () => {
-    enough();
-    expect(await claimIntro({ ...USER, userType: 'super_admin' }, 'tok')).toEqual({ show: false });
-    expect(await claimIntro(USER, null)).toEqual({ show: false });
-    expect(await claimIntro(null, 'tok')).toEqual({ show: false });
+    expect(await decideIntro({ ...USER, userType: 'super_admin' }, 'tok')).toBeNull();
+    expect(await peekIntro(USER, null)).toEqual({ introKey: null });
+    expect(await claimIntro(null, 'tok', V3_SCENES_INTRO_KEY)).toEqual({ show: false });
     expect(mockQuery).not.toHaveBeenCalled();
   });
 
-  it('⛔ 포스터 3장이 없으면 선점하지 않는다(노출 수를 쓰지 않는다)', async () => {
-    samples.add('t-beauty-1');
-    samples.add('t-food-1');
-    expect(await claimIntro(USER, 'tok')).toEqual({ show: false });
-    expect(mockQuery).not.toHaveBeenCalled();
+  it('준비 = 장면 판과 그 판의 글 · 읽기 문장만(선점 문장을 부르지 않는다 = 노출을 쓰지 않는다)', async () => {
+    feed();
+    const got: any = await peekIntro(USER, 'tok');
+    expect(got.introKey).toBe(V3_SCENES_INTRO_KEY);
+    expect(got.variant).toBe('scenes');
+    expect(got.content.css).toContain('.v3p ');
+    expect(got.content.html).toContain('data-slides');
+    expect(got.content.sets).toHaveLength(3);
+    expect(sqls()).toEqual([COMPANY_USAGE_SQL, INTRO_LOGIN_SEEN_SQL, INTRO_STATE_SQL]);
+    for (const s of sqls()) expect(s).not.toMatch(/INSERT|UPDATE|DELETE/);
   });
 
-  it('선점 문장이 행을 안 돌려주면(상한 · 같은 로그인 · 다시 보지 않기) 띄우지 않는다', async () => {
-    enough();
-    mockQuery.mockResolvedValueOnce({ rows: [] });
-    expect(await claimIntro(USER, 'tok')).toEqual({ show: false });
+  it('에이전트 전용 회사 · 없는 회사 = 띄울 것 없음(글을 주지 않는다 · 그다음 조회 0)', async () => {
+    feed({ usage: 'agent' });
+    expect(await peekIntro(USER, 'tok')).toEqual({ introKey: null });
     expect(mockQuery).toHaveBeenCalledTimes(1);
+    mockQuery.mockReset();
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    expect(await peekIntro(USER, 'tok')).toEqual({ introKey: null });
   });
 
-  it('행이 돌아오면 포스터 3장(업종 먼저) + 칩 · 인자 = 사용자 · 판 열쇠 · 표식 · 상한 3', async () => {
-    enough();
-    process.env.V3_STAGE_BENCHMARK = '*';
+  it('이 로그인이 이미 창을 띄웠으면 없음 · 장면 판을 다 띄웠거나(3번) 숨긴 계정도 없음', async () => {
+    feed({ seen: true });
+    expect(await decideIntro(USER, 'tok')).toBeNull();
+    mockQuery.mockReset();
+    feed({ state: { dismissed: false, shown: 3 } });
+    expect(await decideIntro(USER, 'tok')).toBeNull();
+    mockQuery.mockReset();
+    feed({ state: { dismissed: true, shown: 1 } });
+    expect(await decideIntro(USER, 'tok')).toBeNull();
+    mockQuery.mockReset();
+    feed({ state: { dismissed: false, shown: 2 } });
+    expect(await decideIntro(USER, 'tok')).toEqual({ introKey: V3_SCENES_INTRO_KEY, variant: 'scenes' });
+  });
+
+  it('⛔ 선점 = 열쇠가 없거나(배포 전에 받아 둔 옛 화면) · 옛 판 · 모르는 값이면 DB 를 부르지 않고 띄우지 않는다', async () => {
+    expect(await claimIntro(USER, 'tok')).toEqual({ show: false });
+    expect(await claimIntro(USER, 'tok', V3_INTRO_KEY)).toEqual({ show: false });
+    expect(await claimIntro(USER, 'tok', 'x')).toEqual({ show: false });
+    expect(await claimIntro(USER, 'tok', 7)).toEqual({ show: false });
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(LIVE_INTRO_KEYS).toEqual([V3_SCENES_INTRO_KEY, STUDIO_TRIAL_INTRO_KEY]);
+  });
+
+  it('선점 = 판정이 준비한 열쇠와 같을 때만 선점 문장 · 인자 = 사용자 · 판 열쇠 · 표식 · 상한 3', async () => {
+    feed();
     mockQuery.mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-    const got = await claimIntro(USER, 'tok');
-    expect(got).toEqual({
-      show: true,
-      posters: [
-        { id: 't-beauty-1', url: '/api/image-studio/template-sample/t-beauty-1?v=7' },
-        { id: 't-beauty-2', url: '/api/image-studio/template-sample/t-beauty-2?v=7' },
-        { id: 't-food-1', url: '/api/image-studio/template-sample/t-food-1?v=7' },
-      ],
-      chips: [
-        { key: 'image-studio', label: '이미지 스튜디오', text: '사진 한 장으로 포스터' },
-        { key: 'benchmark', label: '업종 평균 비교', text: '같은 업종 평균과 견주기' },
-      ],
-    });
-    expect(mockQuery).toHaveBeenCalledWith(INTRO_CLAIM_SQL, ['u-1', V3_INTRO_KEY, introLoginMark('tok'), V3_INTRO_MAX_SHOWN]);
+    expect(await claimIntro(USER, 'tok', V3_SCENES_INTRO_KEY)).toEqual({ show: true, introKey: V3_SCENES_INTRO_KEY, variant: 'scenes' });
+    expect(mockQuery).toHaveBeenLastCalledWith(INTRO_CLAIM_SQL, ['u-1', V3_SCENES_INTRO_KEY, introLoginMark('tok'), V3_INTRO_MAX_SHOWN]);
     expect(V3_INTRO_MAX_SHOWN).toBe(3);
   });
 
-  it('요금제를 못 읽으면 창은 띄우되 단계 기능 칩은 빠진다(모르면 약속하지 않는다)', async () => {
-    enough();
-    openAll('*');
-    planCtx.fail = true;
-    mockQuery.mockResolvedValueOnce({ rows: [{ shown: 2 }] });
-    const got = await claimIntro(USER, 'tok');
-    expect(got.show).toBe(true);
-    expect((got as any).chips.map((c: any) => c.key)).toEqual(['image-studio']);
+  it('⛔ 준비한 판과 지금 판정이 다르면 선점하지 않는다(그 사이 판이 바뀌어도 노출 0)', async () => {
+    feed();
+    expect(await claimIntro(USER, 'tok', STUDIO_TRIAL_INTRO_KEY)).toEqual({ show: false });
+    expect(sqls()).not.toContain(INTRO_CLAIM_SQL);
+    mockQuery.mockReset();
+    feed({ seen: true });
+    expect(await claimIntro(USER, 'tok', V3_SCENES_INTRO_KEY)).toEqual({ show: false });
+    expect(sqls()).not.toContain(INTRO_CLAIM_SQL);
   });
 
-  it('표가 없으면(42P01) 삼키지 않고 던진다 → 라우트가 503 으로 바꾼다', async () => {
-    enough();
-    mockQuery.mockRejectedValueOnce(Object.assign(new Error('relation "user_intro_acks" does not exist'), { code: '42P01' }));
-    await expect(claimIntro(USER, 'tok')).rejects.toMatchObject({ code: '42P01' });
+  it('선점 문장이 행을 안 돌려주면(같은 로그인의 다른 요청이 먼저 · 그 사이 다 띄움) 띄우지 않는다', async () => {
+    feed();
+    mockQuery.mockResolvedValueOnce({ rows: [] });
+    expect(await claimIntro(USER, 'tok', V3_SCENES_INTRO_KEY)).toEqual({ show: false });
+    expect(mockQuery).toHaveBeenCalledTimes(4);
   });
 
-  it('다시 보지 않기: 대상만 적는다', async () => {
+  it('표가 없으면(42P01) 삼키지 않고 던진다 → 라우트가 503 으로 바꾼다(준비 · 선점 모두)', async () => {
+    const gone = () => Object.assign(new Error('relation "user_intro_acks" does not exist'), { code: '42P01' });
+    mockQuery.mockResolvedValueOnce({ rows: [{ usage_type: 'web' }] });
+    mockQuery.mockRejectedValueOnce(gone());
+    await expect(peekIntro(USER, 'tok')).rejects.toMatchObject({ code: '42P01' });
+    mockQuery.mockResolvedValueOnce({ rows: [{ usage_type: 'web' }] });
+    mockQuery.mockRejectedValueOnce(gone());
+    await expect(claimIntro(USER, 'tok', V3_SCENES_INTRO_KEY)).rejects.toMatchObject({ code: '42P01' });
+  });
+
+  it('다시 보지 않기: 대상만 적는다 · 열쇠 없음 · 모르는 값 = 옛 판(새 판을 숨기지 않는다) · 닫힌 목록의 값은 그 판', async () => {
     expect(await dismissIntro({ ...USER, userType: 'super_admin' })).toBe(false);
     expect(mockQuery).not.toHaveBeenCalled();
-    mockQuery.mockResolvedValueOnce({ rows: [] });
+    mockQuery.mockResolvedValue({ rows: [] });
     expect(await dismissIntro(USER)).toBe(true);
-    expect(mockQuery).toHaveBeenCalledWith(INTRO_DISMISS_SQL, ['u-1', V3_INTRO_KEY]);
+    expect(mockQuery).toHaveBeenLastCalledWith(INTRO_DISMISS_SQL, ['u-1', V3_INTRO_KEY]);
+    await dismissIntro(USER, 'nope');
+    expect(mockQuery).toHaveBeenLastCalledWith(INTRO_DISMISS_SQL, ['u-1', V3_INTRO_KEY]);
+    await dismissIntro(USER, V3_SCENES_INTRO_KEY);
+    expect(mockQuery).toHaveBeenLastCalledWith(INTRO_DISMISS_SQL, ['u-1', V3_SCENES_INTRO_KEY]);
+    expect(INTRO_KEYS).toEqual([V3_INTRO_KEY, V3_SCENES_INTRO_KEY, STUDIO_TRIAL_INTRO_KEY]);
+    expect(V3_INTRO_KEY).toBe('v3-intro');
   });
 });
 
@@ -283,20 +240,25 @@ describe('라우트 계약 — 로그인 필수 · 호출 상한 · 표 없음 =
   const routes = back('routes/plans.ts');
   const code = routes.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
 
-  it('두 주소 모두 authenticate + 사용자당 호출 상한', () => {
+  it('세 주소 모두 authenticate + 사용자당 호출 상한', () => {
+    expect(code).toContain("router.get('/v3-intro/peek', authenticate, featureSeenLimiter, async");
     expect(code).toContain("router.post('/v3-intro/claim', authenticate, featureSeenLimiter, async");
     expect(code).toContain("router.post('/v3-intro/dismiss', authenticate, featureSeenLimiter, async");
   });
 
-  it('로그인 표식은 서버가 요청의 토큰에서 만든다(본문 값을 받지 않는다)', () => {
+  it('로그인 표식은 서버가 요청의 토큰에서 만든다 · 본문에서 받는 것은 판 열쇠뿐 · 응답은 캐시에 남기지 않는다', () => {
+    const peek = code.slice(code.indexOf("router.get('/v3-intro/peek'"), code.indexOf("router.post('/v3-intro/claim'"));
     const claim = code.slice(code.indexOf("router.post('/v3-intro/claim'"), code.indexOf("router.post('/v3-intro/dismiss'"));
-    expect(claim).toContain('await claimIntro(req.user as any, bearerOf(req))');
-    expect(claim).not.toContain('req.body');
-    expect(claim).toContain("res.setHeader('Cache-Control', 'private, no-store');");
+    expect(peek).toContain('await peekIntro(req.user as any, bearerOf(req))');
+    expect(peek).not.toContain('req.body');
+    expect(claim).toContain('await claimIntro(req.user as any, bearerOf(req), req.body?.introKey)');
+    expect(claim.match(/req\.body/g)).toHaveLength(1);
+    for (const part of [peek, claim]) expect(part).toContain("res.setHeader('Cache-Control', GATED_CACHE_CONTROL);");
+    expect(GATED_CACHE_CONTROL).toBe('private, no-store');
   });
 
-  it('표가 없으면 503 DB_MIGRATION_PENDING(두 주소)', () => {
-    expect(code.match(/handleDbMigrationError\(err, res, 'user_intro_acks'\)/g)).toHaveLength(2);
+  it('표가 없으면 503 DB_MIGRATION_PENDING(세 주소)', () => {
+    expect(code.match(/handleDbMigrationError\(err, res, 'user_intro_acks'\)/g)).toHaveLength(3);
   });
 
   it('라우트에 표 SQL · 판정을 적지 않는다(CT 한 곳)', () => {

@@ -1,8 +1,10 @@
 /**
- * v3-motion.ts — 「한줄로 V3」 로그인 팝업 · 무료체험 팝업의 움직임 (★ 2026-11-15 C135 · 설계서 docs/2026-11-15-v3-popup-trial-design.md §2-3 · §4-2)
+ * v3-motion.ts — 「한줄로 V3」 장면 창 · 무료체험 창의 움직임 (★ 2026-11-15 C135 · 설계서 docs/2026-11-15-v3-popup-trial-design.md §2-3 · §4-2)
+ *   ★ 2026-11-16 C136 — 이 파일에는 움직임만 남는다(시간표 · 선택자 · 단계 이름표). 장면의 글 · 그림 · 업종 셋(가게 이름 · MMS 문안)은
+ *     로그인 뒤 서버가 준다(backend content/gated/v3-popup.ts) · 업종 셋은 인자(sets)로 받는다. ⛔ 여기에 소개 글 · 그림 주소를 다시 적지 않는다.
  *
  * 승인된 목업의 스크립트를 그대로 옮긴 것이다(시간표 · 단계 번호 · 그림 속 제품 자리 값 = 목업 값).
- * 화면(React)은 창의 틀과 버튼 동작만 맡고, 장면 안쪽(v3-popup-parts.ts 의 마크업)은 이 파일이 class · data-ph 로 움직인다.
+ * 화면(React)은 창의 틀과 버튼 동작만 맡고, 장면 안쪽(서버가 준 마크업)은 이 파일이 class · data-ph 로 움직인다.
  *   - 넘김: 장면이 끝나면 다음 장면 · 칸을 누르면 그 장면을 처음부터 · 멈추는 조건 둘(멈춤 버튼 · 움직임 줄이기 · 마우스가 창 위여도 넘어간다)
  *     장면 시간(data-ms) = 그 장면의 움직임이 끝나는 시각 + 읽는 여유(잰 값 = 설계서 §12-6)
  *   - 누끼 → 포스터: 단계 1 사진 · 2 선이 내려가며 배경 지움 · 3 카드가 걷히고 제품만 · 4 제품이 포스터 자리로 · 5 완성 · 6 폰(MMS) · 7 걷힘
@@ -10,17 +12,10 @@
  *   - 움직임 줄이기 = 처음부터 멈춘 채 · 장면의 결론이 다 보이는 완성 장면
  * 돌려주는 함수 = 정리(타이머 · 그리기 예약 · 누름 처리를 모두 걷는다).
  */
-import { V3_POPUP_IMAGES } from './v3-popup-parts';
-
 const $$ = <T extends HTMLElement = HTMLElement>(sel: string, root: ParentNode): T[] => Array.from(root.querySelectorAll<T>(sel));
 const pad = (n: number): string => (n < 10 ? '0' : '') + n;
 const fmt = (v: number, dec: number): string => (dec ? v.toFixed(dec) : Math.round(v).toLocaleString('en-US'));
 const prefersReduce = (): boolean => !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
-
-/** 그림 미리 받기 — 업종이 바뀔 때 빈 그림이 보이지 않게(실패해도 화면은 그대로) */
-function preloadImages(): void {
-  for (const src of V3_POPUP_IMAGES) { const im = new Image(); im.src = src; }
-}
 
 /** 숫자 올리기(장면이 시작될 때 0 에서 목표까지) — 돌려주는 함수 = 멈추고 목표 값으로 */
 function countUp(el: HTMLElement, reduce: boolean): () => void {
@@ -45,23 +40,23 @@ function countUp(el: HTMLElement, reduce: boolean): () => void {
 }
 
 /**
- * 누끼 → 포스터에 쓰는 세 업종.
+ * 누끼 → 포스터에 쓰는 업종 한 벌(서버가 준다 · 여기는 꼴만).
  *   c = 누끼 사진 속 제품의 가운데(가로 · 세로)와 폭 · p = 포스터 속 그 제품의 가운데와 폭(그림마다 잰 값 · 0 ~ 1)
- *   text = 그 포스터가 붙어 나가는 MMS 문안(광고 표기 + 무료수신거부 · 줄 단위)
+ *   src · cut · post = 그림을 가리키는 CSS 클래스 이름 · text = 그 포스터가 붙어 나가는 MMS 문안
  */
-interface MorphSet { src: string; cut: string; post: string; c: [number, number, number]; p: [number, number, number]; name: string; text: string }
-const SETS: readonly MorphSet[] = [
-  { src: 'i-sk', cut: 'i-ck', post: 'i-n1', c: [0.498, 0.504, 0.215], p: [0.681, 0.613, 0.1146], name: '결온',
-    text: '(광고)[결온]\n밤사이 채우는 윤기, 앰버 세럼\n\n하루의 끝, 세안 뒤 한 방울이면\n아침 피부가 달라집니다.\n이번 주 일요일까지\n회원 감사 주간이 이어집니다.\n\nhanjul.ai/s/kyeolon\n무료수신거부 080-000-0000' },
-  { src: 'i-so', cut: 'i-co', post: 'i-n3', c: [0.496, 0.566, 0.641], p: [0.496, 0.549, 0.343], name: '오후담',
-    text: '(광고)[오후담]\n겨울 시즌 메뉴, 메이플 크림 라떼\n\n찬 바람 부는 오후,\n따뜻한 한 잔이 생각날 때\n창가 자리를 비워 두겠습니다.\n\nhanjul.ai/s/ohudam\n무료수신거부 080-000-0000' },
-  { src: 'i-ss', cut: 'i-cs', post: 'i-n4', c: [0.486, 0.49, 0.668], p: [0.54, 0.655, 0.62], name: '소요웨어',
-    text: '(광고)[소요웨어]\n첫 추위엔 울 니트\n\n올겨울 처음 꺼내 입는 니트,\n포근한 케이블 짜임으로 준비했습니다.\n윈터 컬렉션이 지금 열렸습니다.\n\nhanjul.ai/s/soyo\n무료수신거부 080-000-0000' },
-];
+export interface MorphSet { src: string; cut: string; post: string; c: [number, number, number]; p: [number, number, number]; name: string; text: string }
+
+/** (순수) 서버가 준 업종 셋에서 꼴이 맞는 것만 — 하나도 없으면 빈 배열(= 움직임을 돌리지 않는다) */
+export function readMorphSets(raw: unknown): MorphSet[] {
+  const three = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((n) => typeof n === 'number' && Number.isFinite(n));
+  const cls = (v: unknown): v is string => typeof v === 'string' && /^[a-z0-9-]{1,24}$/.test(v);
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((x: any): x is MorphSet => !!x && cls(x.src) && cls(x.cut) && cls(x.post) && three(x.c) && three(x.p) && typeof x.name === 'string' && typeof x.text === 'string');
+}
 
 interface Morph { start(): void; stop(): void; pause(): void; resume(): void }
 
-function createMorph(root: HTMLElement, reduce: boolean): Morph {
+function createMorph(root: HTMLElement, reduce: boolean, sets: readonly MorphSet[]): Morph {
   const loop = root.dataset.morph === 'loop';
   const full = !!root.closest('.qA');
   const wrap = root.querySelector<HTMLElement>('.mo-wrap');
@@ -80,7 +75,7 @@ function createMorph(root: HTMLElement, reduce: boolean): Morph {
   let timers: number[] = [];
   let raf = 0;
   let k = 0;
-  let cur: MorphSet = SETS[0];
+  let cur: MorphSet = sets[0];
 
   const clear = (): void => { timers.forEach((t) => window.clearTimeout(t)); timers = []; cancelAnimationFrame(raf); };
   const at = (ms: number, fn: () => void): void => { timers.push(window.setTimeout(fn, ms)); };
@@ -126,7 +121,7 @@ function createMorph(root: HTMLElement, reduce: boolean): Morph {
   };
   const run = (): void => {
     clear();
-    const set = SETS[k];
+    const set = sets[k];
     phase(0, '원본 사진'); images(set); void root.offsetWidth; geo(set);
     if (tm) tm.textContent = '00:00';
     if (reduce) { phase(loop ? 6 : 5, loop ? 'MMS로 도착' : '포스터 완성'); if (tm) tm.textContent = '약 30초'; return; }
@@ -148,7 +143,7 @@ function createMorph(root: HTMLElement, reduce: boolean): Morph {
     if (loop) {
       at(T.phone, () => phase(6, 'MMS로 도착'));
       at(T.out, () => phase(7));
-      at(T.next, () => { k = (k + 1) % SETS.length; run(); });
+      at(T.next, () => { k = (k + 1) % sets.length; run(); });
     }
   };
   // 멈춤 = 예약을 끊고 그 업종의 완성 장면(문자 도착)을 보여 준 채 선다. 어느 단계에서 눌러도 같다(업종이 바뀌는 숨김 단계 7 에서 눌러도 무대가 비지 않는다).
@@ -157,16 +152,15 @@ function createMorph(root: HTMLElement, reduce: boolean): Morph {
 }
 
 /**
- * 로그인 전 팝업 — 다섯 장면 넘김. pop = 창(.pop.pA).
+ * 로그인 직후 장면 창 — 장면 넘김. pop = 창(.pop.pA) · sets = 서버가 준 업종 셋.
  *   장면 = [data-slides] 두 묶음(무대 .sl · 글 .msgs 의 자식)이 같은 번호로 함께 넘어간다.
  */
-export function mountLoginIntro(pop: HTMLElement): () => void {
+export function mountScenes(pop: HTMLElement, sets: readonly MorphSet[]): () => void {
   const reduce = prefersReduce();
   const ac = new AbortController();
   const on = { signal: ac.signal };
-  preloadImages();
   const morphs = new Map<HTMLElement, Morph>();
-  $$('[data-morph]', pop).forEach((el) => morphs.set(el, createMorph(el, reduce)));
+  if (sets.length > 0) $$('[data-morph]', pop).forEach((el) => morphs.set(el, createMorph(el, reduce, sets)));
 
   const runScene = (slide: HTMLElement): (() => void) => {
     const cancels = $$('[data-count]', slide).map((el) => countUp(el, reduce));
@@ -218,13 +212,12 @@ export function mountLoginIntro(pop: HTMLElement): () => void {
 }
 
 /** 무료체험 팝업 — 무대가 혼자 돈다(뷰티 → 카페 → 의류) + 멈춤 버튼. pop = 창(.pop.qA). */
-export function mountTrialStage(pop: HTMLElement): () => void {
+export function mountTrialStage(pop: HTMLElement, sets: readonly MorphSet[]): () => void {
   const reduce = prefersReduce();
   const ac = new AbortController();
-  preloadImages();
   const el = pop.querySelector<HTMLElement>('[data-morph]');
-  if (!el) return () => undefined;
-  const m = createMorph(el, reduce);
+  if (!el || sets.length === 0) return () => undefined;
+  const m = createMorph(el, reduce, sets);
   const stop = el.querySelector<HTMLElement>('[data-stop]');
   let off = false;
   const paint = (): void => {

@@ -80,6 +80,8 @@
 | C133 | 38c3671f |
 | C134 | 미커밋 |
 | C135 | 03e5d935 |
+| C136 | 미커밋 |
+| C137 | 7e186fd7 |
 
 ## §1 대기
 
@@ -2207,6 +2209,96 @@ CREATE TABLE IF NOT EXISTS image_studio_trials (
 - 선행: C135-H2 · C135-ENV-1(켜짐) · Codex approve · 커밋(Harold · 경로를 정해 = scratch/c135/pace-paths.txt · 문안 = scratch/c135/pace-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
 - 기대: 설계서 docs/2026-11-15-v3-popup-trial-design.md §12-6 · 로그인 화면 V3 안내 창이 마우스가 창 위에 있어도 넘어간다 · 장면 시간 5 · 5.5 · 6 · 5.3 · 4초(한 바퀴 25.8초) · 멈춤 단추 · 움직임 줄이기는 종전 그대로 · 백엔드 변경 0(시험 파일만) = 재시작 없음
 - 확인: 서버 HEAD · 프론트 build:safe(빌드 성공 + atomic swap) · 운영 로그인 화면을 강력 새로고침해 마우스를 창 위에 둔 채 장면이 5초 안팎마다 넘어간다(Harold 화면)
+- 결과: 1116 07:2x 배포(Harold) · 커밋 a2b6aeb2(6 files) · push ae0d30c2..a2b6aeb2(1115) · 서버 확인(1116) = pull 전 HEAD ae0d30c2 · data-ms 7500 → pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload(백엔드 운영 코드 변경 0 · 런북에 없는 재시작 한 번 · 빌드 출력은 받지 못함) · 운영 실측(1116 07:2x) = index.html Last-Modified 1115 18:14:36 → 1116 07:24:39 KST · 번들 index-Vbw1KjnA.js → index-jC5WBL_Q.js · 운영 V3 안내 창의 장면 시간 5000 · 5500 · 6000 · 5300 · 4000 · 창에 마우스가 올라온 채로 잰 넘김 시각 5.0 · 10.6 · 16.6 · 21.9 · 25.9초(hold 없음) · 남은 확인 = Harold 화면
+
+### C136-H1 · 한줄로 배포(배포 가 = 소개 내용을 로그인 뒤로 · 로그인 화면 V3 안내 창 · 공개 V3 페이지 · 그림을 서버 보관으로 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C136
+- 단계: 한줄로 배포
+- 선행: 설계 Codex 4R · 목업 Codex 2R · 구현 Codex approve · 커밋(Harold · 경로를 정해 = scratch/c136/a-paths.txt · 문안 = scratch/c136/a-msg.txt · 이 배포의 파일은 다른 카드의 미커밋 파일과 겹치지 않는다 · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 기대: 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2 · §12 · 로그인 화면의 안내 창 = 종전 인증 안내 창(V3 안내 창 0) · 로그인 직후 창 = 한줄로 V3 장면 창(장면 넷 · 계정당 최대 3번 · 새 판이라 옛 소개 창을 다 본 계정에도 뜬다) · 무료체험 창은 대상 · 횟수 그대로 · 창의 글과 그림은 로그인 뒤에만 내려간다 · ENV V3_LOGIN_INTRO 는 읽는 코드가 없어진다(지워도 되고 남겨도 무해)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep peekIntro ≥ 1 · gatedImageFile ≥ 1 · 서버에 packages/backend/assets/gated/v3 그림 12장 · curl -s -o /dev/null -w "%{http_code}" https://hanjul.ai/api/plans/gated/img/poster-serum.jpg = 401(로그인 없이 못 받는다) · curl -sI https://hanjul.ai/v3/poster-serum.jpg 의 content-type 이 image 가 아니다 · curl -s https://hanjul.ai/about-v3.html 에 「마케터가 하던 일을」이 없다 · curl -s https://hanjul.ai/api/public/intro/v3-login = 404 · 로그인 화면을 강력 새로고침하면 인증 안내 창 · 로그인하면 장면 창
+- 결과: (대기)
+
+### C136-DDL-1 · 제작 대행 체험 표(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §8) · ★ 배포 나 앞
+- 카드: C136
+- 단계: DDL
+- 선행: 없음(배포 나의 코드 앞 · 배포 가와는 무관 = 먼저 실행해도 무해 · 새 표 · 표가 없으면 제안 페이지의 신청 · 상태 주소만 503 DB_MIGRATION_PENDING)
+- 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'proposal_trials' ORDER BY ordinal_position;
+- 확인: 스물다섯 줄 · company_id uuid NO · requested_by uuid NO · requested_at timestamp with time zone NO · src character varying YES · channel character varying NO · brief text NO · extra text YES · notify_phone character varying YES · photo_urls ARRAY NO · status character varying NO · produce_token uuid YES · produce_beat_at timestamp with time zone YES · produce_error text YES · kit jsonb NO · revision integer NO · garbage jsonb NO · produced_at timestamp with time zone YES · delivered_at timestamp with time zone YES · delivered_by uuid YES · notify_tries integer NO · notify_tried_at timestamp with time zone YES · notified_at timestamp with time zone YES · opened_at timestamp with time zone YES · used_at timestamp with time zone YES · updated_at timestamp with time zone NO
+- 결과: (대기)
+
+> C136-DDL-1 · 배포 나 앞 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
+
+```sql ddl:C136-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS proposal_trials (
+  company_id uuid PRIMARY KEY,
+  requested_by uuid NOT NULL,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  src varchar(64) NULL,
+  channel varchar(8) NOT NULL,
+  brief text NOT NULL,
+  extra text NULL,
+  notify_phone varchar(20) NULL,
+  photo_urls text[] NOT NULL,
+  status varchar(16) NOT NULL DEFAULT 'requested',
+  produce_token uuid NULL,
+  produce_beat_at timestamptz NULL,
+  produce_error text NULL,
+  kit jsonb NOT NULL DEFAULT '{}',
+  revision integer NOT NULL DEFAULT 0,
+  garbage jsonb NOT NULL DEFAULT '[]',
+  produced_at timestamptz NULL,
+  delivered_at timestamptz NULL,
+  delivered_by uuid NULL,
+  notify_tries integer NOT NULL DEFAULT 0,
+  notify_tried_at timestamptz NULL,
+  notified_at timestamptz NULL,
+  opened_at timestamptz NULL,
+  used_at timestamptz NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+```
+
+### C136-H2 · 한줄로 배포(배포 나 = 제안 페이지 /proposal + 제작 대행 체험 + 슈퍼관리자 「제안 체험」 탭 · 백엔드 + 프론트 · DDL 1 = C136-DDL-1 배포 앞 · ENV 0)
+- 카드: C136
+- 단계: 한줄로 배포
+- 선행: C136-H1 · C136-DDL-1 · 구현 Codex approve · **C133 C + D · C134 커밋 뒤**(App.tsx · Dashboard.tsx · AdminDashboard.tsx · app.ts 에 그 카드들의 미커밋 변경이 함께 있어 경로 커밋으로 가를 수 없다) · 커밋(Harold · 경로를 정해 = scratch/c136/b-paths.txt · 문안 = scratch/c136/b-msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 기대: 설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §3 ~ §7 · 로그인 없이 /proposal?src=값 을 열면 한 줄과 로그인 단추만 · 로그인하면 제안 페이지로 돌아온다 · 사진 3 ~ 4장 + 한 줄 + 보낼 방식으로 신청(회사당 한 번) → 기계 제작(포스터 3 · 문안 3 · 모바일 DM 1 · 통신사 스팸 검사) → 슈퍼관리자 「제안 체험」 탭에서 확인 · 전달 → 담당자에게 문자 → 완성본 화면의 「명단만 올려 보내기」 = 직접발송 작성 화면에 문안 · 포스터가 채워진 채 열린다 · 신청하지 않은 회사 = 화면 · 동작 변화 0 · 발송 · 과금 코드 무수정
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep startProposalProduce = dist/utils/proposal-trial.js 정의 · dist/routes/proposal.js 호출 · deliverProposalKit ≥ 1 · 로그인 없이 https://hanjul.ai/proposal?src=test 를 열어 한 줄과 로그인 단추만 보이는지 · curl -s -o /dev/null -w "%{http_code}" https://hanjul.ai/api/plans/proposal = 401
+- 결과: (대기)
+
+### C136-S1 · 실측(인비토 시험 회사 · 제작 대행 체험 한 바퀴)
+- 카드: C136
+- 단계: 사후
+- 선행: C136-H2 · 인비토 시험 회사 계정(도달 불가 합성 번호 회사 · 등록 발신번호가 있을 것)
+- 기대: /proposal?src=invito-test 를 로그인 없이 열기 → 로그인 → 제안 페이지 → 사진 3장 + 한 줄 + MMS 로 신청 → 제작 중 화면 → 슈퍼관리자 「제안 체험」 탭에 그 회사가 「확인 대기」 · 포스터 3 · 문안 3(검사 결과) · 모바일 DM → 「담당자에게 전달」 → 알림 문자 「보냄」 → 담당자 화면이 완성본 → 「명단만 올려 보내기」 = 직접발송 작성 화면에 문안 · 포스터 · 「보내기 누름」 기록
+- 확인: SELECT company_id, status, revision, jsonb_array_length(garbage) AS garbage, notify_tries, notified_at IS NOT NULL AS notified, opened_at IS NOT NULL AS opened, used_at IS NOT NULL AS used FROM proposal_trials ORDER BY requested_at DESC LIMIT 5; = 그 회사 한 줄 · status delivered · garbage 0 · notified t · opened t · used t · 제작 뒤 SELECT COUNT(*) FROM ai_credit_transactions WHERE company_id = '그 회사' AND created_at > '신청 시각'; = 0(크레딧 원장 무접촉) · 스팸 검사 차감 0(spam_filter_tests 의 그 검사 source = 무료 자동 검사 표시값) · 모바일 DM 칸이 「만들지 못함」이면 pm2 로그의 [proposal-trial] 모바일 DM 발행 잠금 줄(code · 사유)을 적는다(실제 조립된 DM 이 첫 발행 잠금을 지나는지는 이 실측에서 처음 본다 · 미검증)
+- 결과: (대기)
+
+### C137-H1 · 한줄로 배포(재오픈 cmwd36hnr1 · 이메일 대행 건을 다시 그리는 화면의 광고 표기 = 승인 링크 · 발송 결과 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C137
+- 단계: 한줄로 배포
+- 선행: Codex 구현 approve · 단위 전체 · 실 PG(c137-ad-text-render.pg) · 커밋(Harold · 경로를 정해 = scratch/c137/commit-paths.txt · 문안 = scratch/c137/commit-msg.txt · 이 카드 파일은 다른 카드의 미커밋 변경과 겹치지 않는다 · tp-push 는 쓰지 않는다) → push(이 커밋만)
+- 기대: 설계서 docs/2026-11-16-c137-ad-text-render-design.md §4 · 이메일 대행 접수의 승인 링크 = 제목 앞 (광고) 없음 · 「광고 표시와 무료 수신거부 번호는 자동으로 붙습니다」 없음 / 발송 결과 목록 · 상세 = 이메일 대행 캠페인(send_config.adText = false · 1116 실측 3건)의 제목 · 본문에 (광고) · 080 없음 / 그 밖의 건 · 화면 = 종전 글자 그대로(미가입 · 직접발송 회사 변화 0) · 캘린더 · 예약 목록 · 슈퍼관리자 통계는 C137-H2 전까지 종전 그대로
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep campaignAdTextSelect = dist/utils/direct-send-spec.js 정의 · dist/routes/results.js 호출 · 에러 로그 새 종류 0 · 직원 시트 C137-T1
+- 결과: 1116 09:4x 배포(Harold) · push a2b6aeb22..7e186fd7b(이 커밋만 · 작업 폴더에 다른 카드 C136 미커밋 작업이 있어 커밋 판 그대로인 임시 작업 폴더 targetup-c137(git worktree · core.autocrlf=false = 줄 끝 LF · node_modules 연결)에서 실 PG 전체 79파일 593건 통과 · 통과 기록 09:31 → 그 폴더에서 push · push 전 검사 통과) · 서버 pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload(적재 확인 줄 없이 · 출력 받지 못함) · 서버 확인 = HEAD 7e186fd7 · dist grep campaignAdTextSelect = direct-send-spec.js 2 · results.js 2 · agency-approve.js 「ad_text === false」 1 · targetup-backend online · uptime 3m · restarts 5 · unstable 0 · script path dist/app.js · 에러 로그 끝 = 5분마다 여정 표식 정리 줄(B-1114-1 · 전부터) + 합성 데이터 안내 = 새 종류 0 · 운영 프론트 = index.html Last-Modified 1116 09:44:25 KST · 번들 index-jC5WBL_Q.js → index-DGcQkAVP.js · 남은 = C137-T1 직원 시트 · C137-H2
+
+### C137-H2 · 한줄로 배포(캘린더 · 예약 목록 · 슈퍼관리자 통계 상세에 표기 칸 · routes/campaigns.ts · routes/admin.ts · 백엔드만 · DDL 0 · ENV 0)
+- 카드: C137
+- 단계: 한줄로 배포
+- 선행: C137-H1 · ★1116 Harold 「캘린더랑 예약 목록도 마저 고치자」 = C133 C + D · C134 커밋을 기다리지 않고 앞당김 · 두 파일의 다른 카드 미커밋 변경은 싣지 않음(작업 트리 diff 를 거꾸로 적용해 HEAD 판을 되살려 blob 해시 대조 → 이 카드 줄만 다시 적용한 패치 scratch/c137/h2.patch 를 index 에만 얹어 커밋) · Codex approve · 커밋 판 임시 작업 폴더에서 실 PG · push
+- 기대: 캘린더 문안 · 예약 목록 제목과 문안 수정 칸의 (광고) 표시 · 슈퍼관리자 통계 상세 문안도 이메일 대행 건은 고객 문안 그대로(화면 코드는 C137-H1 에서 이미 표기 칸을 본다 = 칸만 오면 따른다)
+- 확인: dist grep campaignAdTextSelect = routes/campaigns.js · routes/admin.js · 직원 시트 C137-T1 에 줄 더함
+- 결과: 1116 10:1x 배포(Harold) · 커밋 8e7ec2c6(4 files · 커밋 안 서버 줄 = 이 카드 7줄뿐 · git log -p 확인) · push 7e186fd7b..8e7ec2c6a(임시 작업 폴더 · 실 PG 전체 79파일 593건 통과 10:05 · 첫 실행 8건 실패 = 그 시각 C136 실 PG 전체와 겹침(프로세스 확인) · push 전 검사 통과) · 서버 pull Fast-forward 4 files → 백엔드 build:safe([verify-dist] 통과 · .js 878 · 두 판 3512 일치 · 빌드 성공) → 적재 0건 한 줄(loading=0) → pm2 reload targetup-backend · online · restarts 6 · uptime 5s · 확인 = HEAD 8e7ec2c6 · dist routes/campaigns.js campaignAdTextSelect 1 · routes/admin.js campaignAdTextSelect 1 · 「ad_text: c.ad_text」 1 · 재시작 뒤 에러 로그 새 줄 0(재시작 전 10:09:27 「여정 일시정지 journey=e8cd588b 잔액 부족」 한 줄 = 이 카드와 무관 · 기록만) · 프론트 변경 0 · 남은 = C137-T1 직원 시트
+
+### C137-T1 · 직원 시트(서 팀장 · 접수 화면 그대로 · 시험용 회사 계정 · 받는 번호 = 직원 본인 휴대폰)
+- 카드: C137
+- 단계: 사후
+- 선행: C137-H1
+- 기대: 설계서 docs/2026-11-16-c137-ad-text-render-design.md §6 열 줄 전부 맞음
+- 확인: 직원 결과(날짜 · 계정 · 사람) · 다름이면 캡처
 - 결과: (대기)
 
 ### C133-DDL-6 · 나눠 보내기 표 둘(설계서 docs/2026-11-13-hanjul-v3-design.md §6 · §18 「배포 C-3」) · ★ 배포 앞

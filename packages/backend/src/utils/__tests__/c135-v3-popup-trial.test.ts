@@ -3,8 +3,9 @@
  * C135 — 한줄로 V3 로그인 팝업 · 이미지 스튜디오 무료체험 3회(★ 2026-11-15 · 설계서 docs/2026-11-15-v3-popup-trial-design.md §8)
  *   1. 체험 자격 = 지금 판정이 막는 미가입 회사뿐(기존 권한이 줄지 않는다 · 유료 회사에 체험이 닿지 않는다)
  *   2. 생성 문의 판정 · 선점 결과의 뜻(이미 쓴 키 · 다 씀) · 응답 코드
- *   3. 로그인 직후 소개 창의 체험 갈래 · 「다시 보지 않기」의 판 열쇠
- *   4. 로그인 화면 스위치
+ *   3. 로그인 직후 안내 창의 체험 갈래 · 「다시 보지 않기」의 판 열쇠
+ *   4. ★ 2026-11-16 C136(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2) — 로그인 화면의 V3 안내 창 · 스위치 · 공개 V3 페이지는 걷었다(소개 글 · 그림 = 로그인 뒤 서버가 준다).
+ *      그 창의 장면 · 넘김 · 글 규칙은 로그인 직후 장면 창으로 옮겨 여기서 그대로 지킨다(글의 원본 = backend content/gated/v3-popup.ts).
  *   5. 소스 계약 = 생성 주소의 순서(체험 판정 → 선점 → 생성 → 되돌림) · 체험이 다른 주소로 번지지 않음 · 화면 문구 규칙 · 등록부
  *   실 PG 판(신청 · 선점 · 되돌림 · 동시 요청 · 신청 업체 목록 · 판 열쇠 분리) = c135-studio-trial.pg.test.ts
  */
@@ -13,17 +14,8 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 
 const planCtx: { value: any; fail: boolean } = { value: null, fail: false };
-const samples = new Set<string>();
 
 vi.mock('../../config/database', () => ({ query: vi.fn(), pool: { query: vi.fn(), connect: vi.fn() } }));
-vi.mock('../image-studio', () => ({
-  findTemplateSample: (id: string) => (samples.has(id) ? { absPath: `/x/${id}.jpg`, mime: 'image/jpeg', v: 7 } : null),
-}));
-vi.mock('../image-studio-templates', () => ({
-  listTemplatesPublic: () => [{ id: 't-1', category: 'beauty' }, { id: 't-2', category: 'beauty' }, { id: 't-3', category: 'food' }],
-}));
-vi.mock('../sales-outreach-produce', () => ({ studioIndustryCategories: () => null }));
-vi.mock('../copy-prompt-composer', () => ({ resolveCompanyIndustry: vi.fn(async () => null) }));
 vi.mock('../plan-guard', async (orig) => ({
   ...(await orig() as any),
   loadPlanContext: vi.fn(async () => { if (planCtx.fail) throw new Error('plan down'); return planCtx.value; }),
@@ -37,10 +29,11 @@ import {
 } from '../studio-trial';
 import { studioTrialEligible } from '../plan-guard';
 import {
-  claimIntro, dismissIntro, INTRO_CLAIM_SQL, INTRO_DISMISS_SQL, INTRO_STATE_SQL, INTRO_KEYS, INTRO_LOGIN_GATE_KEY,
-  STUDIO_TRIAL_INTRO_KEY, V3_INTRO_KEY, V3_INTRO_MAX_SHOWN, introLoginMark,
+  claimIntro, decideIntro, peekIntro, dismissIntro, INTRO_CLAIM_SQL, INTRO_DISMISS_SQL, INTRO_STATE_SQL, INTRO_KEYS, INTRO_LOGIN_GATE_KEY,
+  STUDIO_TRIAL_INTRO_KEY, V3_INTRO_KEY, V3_SCENES_INTRO_KEY, V3_INTRO_MAX_SHOWN, introLoginMark,
 } from '../v3-intro';
-import { V3_LOGIN_INTRO_ENV, v3LoginIntroOn } from '../v3-login-intro';
+import { V3_POPUP_CSS, V3_SCENES_HTML, V3_TRIAL_HTML, V3_MORPH_SETS } from '../../content/gated/v3-popup';
+import { GATED_IMAGE_DIR } from '../gated-content';
 
 const mockQuery = query as unknown as ReturnType<typeof vi.fn>;
 const SRC = join(__dirname, '..', '..');
@@ -63,7 +56,6 @@ const NONE = { rows: [] };
 let savedAllow: string | undefined;
 beforeEach(() => {
   mockQuery.mockReset();
-  samples.clear();
   planCtx.value = FREE;
   planCtx.fail = false;
   savedAllow = process.env.AI_OPERATOR_ALLOWED_USERS;
@@ -220,29 +212,42 @@ describe('신청 · 상태 — 자격 없는 회사는 행을 만들지 않는�
   });
 });
 
-describe('로그인 직후 소개 창 — 체험 갈래', () => {
+describe('로그인 직후 안내 창 — 체험 갈래(★ C136 판정 = 읽기 함수 decideIntro · 선점은 준비한 판의 열쇠로)', () => {
   const mark = introLoginMark('tok')!;
-  const fillSamples = () => { for (const id of ['t-1', 't-2', 't-3']) samples.add(id); };
+  const WEB = { rows: [{ usage_type: 'web' }] };
+  /** 판정 앞머리의 두 조회(회사 용도 · 이 로그인이 이미 창을 띄웠나) */
+  const head = () => mockQuery.mockResolvedValueOnce(WEB).mockResolvedValueOnce(NONE);
+  const claimedKeys = () => mockQuery.mock.calls.filter((c) => c[0] === INTRO_CLAIM_SQL).map((c) => c[1][1]);
 
-  it('미가입 + 아직 신청 안 함 = 무료체험 창(판 열쇠 따로 · 포스터 조건을 보지 않는다)', async () => {
-    mockQuery.mockResolvedValueOnce(NONE).mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-    expect(await claimIntro(USER, 'tok')).toEqual({ show: true, variant: 'trial', introKey: 'studio-trial', posters: [], chips: [] });
-    expect(mockQuery.mock.calls[0]).toEqual([TRIAL_READ_SQL, [CO]]);
-    expect(mockQuery.mock.calls[1]).toEqual([INTRO_STATE_SQL, ['u-1', STUDIO_TRIAL_INTRO_KEY]]);
-    expect(mockQuery.mock.calls[2]).toEqual([INTRO_CLAIM_SQL, ['u-1', STUDIO_TRIAL_INTRO_KEY, mark, V3_INTRO_MAX_SHOWN]]);
-    expect(mockQuery).toHaveBeenCalledTimes(3);   // V3 소개 창의 노출 수는 쓰지 않는다
+  it('미가입 + 아직 신청 안 함 = 무료체험 판(판 열쇠 따로) · 선점은 그 열쇠로 한 번', async () => {
+    head().mockResolvedValueOnce(NONE).mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ shown: 1 }] });
+    expect(await claimIntro(USER, 'tok', STUDIO_TRIAL_INTRO_KEY)).toEqual({ show: true, variant: 'trial', introKey: 'studio-trial' });
+    expect(mockQuery.mock.calls[2]).toEqual([TRIAL_READ_SQL, [CO]]);
+    expect(mockQuery.mock.calls[3]).toEqual([INTRO_STATE_SQL, ['u-1', STUDIO_TRIAL_INTRO_KEY]]);
+    expect(mockQuery.mock.calls[4]).toEqual([INTRO_CLAIM_SQL, ['u-1', STUDIO_TRIAL_INTRO_KEY, mark, V3_INTRO_MAX_SHOWN]]);
+    expect(mockQuery).toHaveBeenCalledTimes(5);   // 장면 판의 노출 수는 쓰지 않는다
     // 두 번째 · 세 번째 노출(아직 여지가 있다)
     mockQuery.mockReset();
-    mockQuery.mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ dismissed: false, shown: 2 }] }).mockResolvedValueOnce({ rows: [{ shown: 3 }] });
-    expect(((await claimIntro(USER, 'tok-3')) as any).variant).toBe('trial');
+    head().mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ dismissed: false, shown: 2 }] });
+    expect(await decideIntro(USER, 'tok-3')).toEqual({ introKey: STUDIO_TRIAL_INTRO_KEY, variant: 'trial' });
   });
 
-  it('★ Codex 구현 1R — 선점이 0행(이 로그인이 이미 창을 띄웠다)이면 다른 판으로 넘어가지 않는다 · V3 소개 창을 선점하지 않는다', async () => {
-    fillSamples();   // 종전 소개 창을 띄울 재료가 다 있어도
-    mockQuery.mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ dismissed: false, shown: 1 }] }).mockResolvedValueOnce(NONE);
-    expect(await claimIntro(USER, 'tok')).toEqual({ show: false });
-    expect(mockQuery).toHaveBeenCalledTimes(3);
-    expect(mockQuery.mock.calls.filter((c) => c[0] === INTRO_CLAIM_SQL).map((c) => c[1][1])).toEqual([STUDIO_TRIAL_INTRO_KEY]);
+  it('★ C136 준비 = 무료체험 판의 글(신청 버튼이 든 마크업) · 노출을 쓰지 않는다', async () => {
+    head().mockResolvedValueOnce(NONE).mockResolvedValueOnce(NONE);
+    const got: any = await peekIntro(USER, 'tok');
+    expect(got.introKey).toBe(STUDIO_TRIAL_INTRO_KEY);
+    expect(got.variant).toBe('trial');
+    expect(got.content.html).toBe(V3_TRIAL_HTML);
+    expect(got.content.css).toBe(V3_POPUP_CSS);
+    expect(got.content.sets).toBe(V3_MORPH_SETS);
+    expect(claimedKeys()).toEqual([]);
+  });
+
+  it('★ Codex 구현 1R — 선점이 0행(이 로그인이 이미 창을 띄웠다)이면 다른 판으로 넘어가지 않는다 · 장면 판을 선점하지 않는다', async () => {
+    head().mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ dismissed: false, shown: 1 }] }).mockResolvedValueOnce(NONE);
+    expect(await claimIntro(USER, 'tok', STUDIO_TRIAL_INTRO_KEY)).toEqual({ show: false });
+    expect(mockQuery).toHaveBeenCalledTimes(5);
+    expect(claimedKeys()).toEqual([STUDIO_TRIAL_INTRO_KEY]);
   });
 
   it('선점 문장 = 로그인 표식 문(판을 통틀어 한 번)과 판의 노출을 한 문장에서 함께 잡는다', () => {
@@ -255,194 +260,90 @@ describe('로그인 직후 소개 창 — 체험 갈래', () => {
     expect(sql).toContain('WHERE NOT ($3 = ANY(g.login_marks)) RETURNING 1 )');
     expect(sql).toContain('SELECT $1::uuid, $2::varchar, ARRAY[$3]::text[] FROM gate');
     expect(sql).toContain('WHERE a.dismissed_at IS NULL AND cardinality(a.login_marks) < $4::int AND NOT ($3 = ANY(a.login_marks))');
-    // 부르는 쪽은 판을 먼저 정하고 한 번만 부른다(체험 갈래는 선점 결과를 그대로 돌려준다)
+    // 부르는 쪽은 판을 먼저 정하고(decideIntro) 선점 문장은 한 자리에서 한 번만 부른다
     const src = back('utils/v3-intro.ts');
-    expect(src).toContain("return t.rows.length > 0 ? { show: true, variant: 'trial', introKey: STUDIO_TRIAL_INTRO_KEY, posters: [], chips: [] } : { show: false };");
+    expect(src.match(/query\(INTRO_CLAIM_SQL/g)).toHaveLength(1);
+    expect(src).toContain('return claimed.rows.length > 0 ? { show: true, ...d } : { show: false };');
+    expect(src).toContain('if (!d || d.introKey !== expectedKey) return { show: false };');
   });
 
-  it('이미 신청한 회사 = 무료체험 창을 다시 띄우지 않는다(종전 소개 창 판정으로)', async () => {
-    fillSamples();
-    mockQuery.mockResolvedValueOnce(ROW([])).mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-    const got = await claimIntro(USER, 'tok');
-    expect(got).toMatchObject({ show: true });
-    expect((got as any).variant).toBeUndefined();
-    expect(mockQuery.mock.calls[1]).toEqual([INTRO_CLAIM_SQL, ['u-1', V3_INTRO_KEY, mark, V3_INTRO_MAX_SHOWN]]);
+  it('이미 신청한 회사 = 무료체험 판을 다시 띄우지 않는다(장면 판 판정으로)', async () => {
+    head().mockResolvedValueOnce(ROW([])).mockResolvedValueOnce(NONE);
+    expect(await decideIntro(USER, 'tok')).toEqual({ introKey: V3_SCENES_INTRO_KEY, variant: 'scenes' });
+    expect(mockQuery.mock.calls[3]).toEqual([INTRO_STATE_SQL, ['u-1', V3_SCENES_INTRO_KEY]]);
   });
 
-  it('무료체험 창을 다 띄웠거나(3번) 숨긴 계정 = 선점 전에 읽어 종전 소개 창 판정으로 간다(무료체험 판은 선점하지 않는다)', async () => {
-    fillSamples();
+  it('무료체험 판을 다 띄웠거나(3번) 숨긴 계정 = 선점 전에 읽어 장면 판 판정으로 간다(무료체험 판은 선점하지 않는다)', async () => {
     for (const state of [{ dismissed: false, shown: 3 }, { dismissed: true, shown: 1 }, { dismissed: true, shown: 0 }]) {
       mockQuery.mockReset();
-      mockQuery.mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [state] }).mockResolvedValueOnce({ rows: [{ shown: 2 }] });
-      const got = await claimIntro(USER, 'tok');
-      expect((got as any).variant, JSON.stringify(state)).toBeUndefined();
-      expect(got).toMatchObject({ show: true });
-      expect(mockQuery.mock.calls.filter((c) => c[0] === INTRO_CLAIM_SQL).map((c) => c[1][1])).toEqual([V3_INTRO_KEY]);
+      head().mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [state] }).mockResolvedValueOnce(NONE).mockResolvedValueOnce({ rows: [{ shown: 1 }] });
+      expect(await claimIntro(USER, 'tok', V3_SCENES_INTRO_KEY), JSON.stringify(state)).toEqual({ show: true, introKey: V3_SCENES_INTRO_KEY, variant: 'scenes' });
+      expect(claimedKeys()).toEqual([V3_SCENES_INTRO_KEY]);
     }
   });
 
-  it('유료 · AI 체험 중인 회사 = 체험 표를 읽지 않고 종전 소개 창', async () => {
-    fillSamples();
+  it('유료 · AI 체험 중인 회사 = 체험 표를 읽지 않고 장면 판', async () => {
     for (const p of [PAID, FREE_AI_TRIAL]) {
       mockQuery.mockReset();
       planCtx.value = p;
-      mockQuery.mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-      const got = await claimIntro(USER, 'tok');
-      expect((got as any).variant).toBeUndefined();
-      expect(mockQuery.mock.calls[0][0]).toBe(INTRO_CLAIM_SQL);
-      expect(mockQuery.mock.calls[0][1][1]).toBe(V3_INTRO_KEY);
+      head().mockResolvedValueOnce(NONE);
+      expect(await decideIntro(USER, 'tok')).toEqual({ introKey: V3_SCENES_INTRO_KEY, variant: 'scenes' });
+      expect(mockQuery.mock.calls.map((c) => c[0])).not.toContain(TRIAL_READ_SQL);
     }
   });
 
-  it('요금제 · 체험 표를 못 읽으면 체험 창을 띄우지 않는다(모르면 종전 판정)', async () => {
-    fillSamples();
+  it('요금제 · 체험 표를 못 읽으면 체험 판을 띄우지 않는다(모르면 장면 판 판정)', async () => {
     planCtx.fail = true;
-    mockQuery.mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-    expect(((await claimIntro(USER, 'tok')) as any).variant).toBeUndefined();
+    head().mockResolvedValueOnce(NONE);
+    expect((await decideIntro(USER, 'tok'))?.variant).toBe('scenes');
     planCtx.fail = false;
     mockQuery.mockReset();
-    mockQuery.mockRejectedValueOnce(Object.assign(new Error('no table'), { code: '42P01' })).mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-    const got = await claimIntro(USER, 'tok');
-    expect((got as any).variant).toBeUndefined();
-    expect(mockQuery.mock.calls[1][1][1]).toBe(V3_INTRO_KEY);
-    // 노출 상태를 못 읽어도 같다(체험 판을 선점하지 않는다)
+    head().mockRejectedValueOnce(Object.assign(new Error('no table'), { code: '42P01' })).mockResolvedValueOnce(NONE);
+    expect((await decideIntro(USER, 'tok'))?.variant).toBe('scenes');
+    // 노출 상태를 못 읽어도 같다(체험 판을 띄우지 않는다)
     mockQuery.mockReset();
-    mockQuery.mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('connection reset')).mockResolvedValueOnce({ rows: [{ shown: 1 }] });
-    expect(((await claimIntro(USER, 'tok')) as any).variant).toBeUndefined();
-    expect(mockQuery.mock.calls.filter((c) => c[0] === INTRO_CLAIM_SQL).map((c) => c[1][1])).toEqual([V3_INTRO_KEY]);
+    head().mockResolvedValueOnce(NONE).mockRejectedValueOnce(new Error('connection reset')).mockResolvedValueOnce(NONE);
+    expect((await decideIntro(USER, 'tok'))?.variant).toBe('scenes');
   });
 
-  it('「다시 보지 않기」 = 닫힌 목록 안의 판 열쇠만 · 밖의 값 · 없음 = V3 소개 창(종전 동작)', async () => {
-    expect(INTRO_KEYS).toEqual([V3_INTRO_KEY, STUDIO_TRIAL_INTRO_KEY]);
+  it('「다시 보지 않기」 = 닫힌 목록 안의 판 열쇠만 · 밖의 값 · 없음 = 옛 판(★ C136 — 옛 화면의 요청이 새 판을 숨기지 않는다)', async () => {
+    expect(INTRO_KEYS).toEqual([V3_INTRO_KEY, V3_SCENES_INTRO_KEY, STUDIO_TRIAL_INTRO_KEY]);
     mockQuery.mockResolvedValue({ rows: [] });
     await dismissIntro(USER, 'studio-trial');
     await dismissIntro(USER);
     await dismissIntro(USER, 'anything-else');
     await dismissIntro(USER, { introKey: 'studio-trial' });
+    await dismissIntro(USER, 'v3-scenes');
     expect(mockQuery.mock.calls.map((c) => [c[0], c[1][1]])).toEqual([
-      [INTRO_DISMISS_SQL, 'studio-trial'], [INTRO_DISMISS_SQL, 'v3-intro'], [INTRO_DISMISS_SQL, 'v3-intro'], [INTRO_DISMISS_SQL, 'v3-intro'],
+      [INTRO_DISMISS_SQL, 'studio-trial'], [INTRO_DISMISS_SQL, 'v3-intro'], [INTRO_DISMISS_SQL, 'v3-intro'], [INTRO_DISMISS_SQL, 'v3-intro'], [INTRO_DISMISS_SQL, 'v3-scenes'],
     ]);
     expect(back('routes/plans.ts')).toContain('await dismissIntro(req.user as any, req.body?.introKey);');
   });
 });
 
-describe('로그인 화면 스위치 — 비면 꺼짐(열지 않은 기능을 로그인 전에 약속하지 않는다)', () => {
-  it('on 일 때만 켜짐', () => {
-    expect(V3_LOGIN_INTRO_ENV).toBe('V3_LOGIN_INTRO');
-    expect(v3LoginIntroOn({})).toBe(false);
-    expect(v3LoginIntroOn({ V3_LOGIN_INTRO: '' })).toBe(false);
-    expect(v3LoginIntroOn({ V3_LOGIN_INTRO: 'off' })).toBe(false);
-    expect(v3LoginIntroOn({ V3_LOGIN_INTRO: '1' })).toBe(false);
-    expect(v3LoginIntroOn({ V3_LOGIN_INTRO: 'true' })).toBe(false);
-    expect(v3LoginIntroOn({ V3_LOGIN_INTRO: 'on' })).toBe(true);
-    expect(v3LoginIntroOn({ V3_LOGIN_INTRO: ' ON ' })).toBe(true);
-  });
-
-  it('공개 주소는 판정 함수만 부르고 · 화면은 못 받으면 종전 인증 안내 창', () => {
-    const route = back('routes/intro-public.ts');
-    expect(route).toContain("router.get('/v3-login', (_req: Request, res: Response) => {");
-    expect(route).toContain('res.json({ success: true, on: v3LoginIntroOn() });');
-    expect(route).toContain("res.setHeader('Cache-Control', 'no-store');");
-    const util = front('utils/v3-login-intro.ts');
-    expect(util).toContain("fetch('/api/public/intro/v3-login', { signal: ctl.signal })");
-    expect(util).toContain('export const V3_LOGIN_INTRO_WAIT_MS = 1500;');
-    const sw = front('components/v3/LoginNoticeSwitch.tsx');
-    expect(sw).toContain("if (mode === 'v3') return <V3LoginIntroModal onClose={onClose} onAuthNotice={() => setMode('policy')} />;");
-    expect(sw).toContain('return <LoginPolicyNoticeModal onClose={onClose} />;');
-  });
-
-  // ★ 2026-11-15 배포 직후 접수(설계서 §12-5) — 답을 기다렸다가 창을 띄우면 이미 그려진 로그인 화면 위로 창이 뒤늦게 나타난다(나타나는 중간 장면이 보였다).
-  it('로그인 화면 안내 창은 첫 그림부터 뜬다 — 기다리는 갈래가 없고 · 무엇을 띄울지는 기억한 답 · 서버 답이 다를 때만 바꾼다', () => {
-    const sw = front('components/v3/LoginNoticeSwitch.tsx');
-    const code = sw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    expect(code).not.toMatch(/return null/);          // 아무것도 안 띄우는 갈래 0
-    expect(code).not.toContain("'wait'");
-    expect(code).toContain('const first = useRef(rememberedV3LoginIntroOn());');
-    expect(code).toContain("useState<'v3' | 'policy'>(first.current ? 'v3' : 'policy')");
-    // 모르면(null) 그대로 · 첫 그림과 같으면 그대로(사용자가 그 사이 바꾼 창을 되돌리지 않는다)
-    expect(code).toContain("void fetchV3LoginIntroOn().then((on) => { if (alive && on !== null && on !== first.current) setMode(on ? 'v3' : 'policy'); });");
-    const fn = code.slice(code.indexOf('export default function LoginNoticeSwitch'));
-    expect(fn.match(/return </g)).toHaveLength(2);    // 두 갈래 모두 창을 돌려준다
-  });
-});
-
-// ★ 2026-11-15 배포 뒤 Harold 「자동으로 안 넘어가고 멈춰있는데 · 좀 느리네」(설계서 §12-6)
-describe('로그인 화면 V3 안내 창 — 넘김(마우스가 창 위여도 넘어간다 · 장면 시간 = 움직임이 끝난 뒤 읽는 여유)', () => {
+// ★ 2026-11-15 배포 뒤 Harold 「자동으로 안 넘어가고 멈춰있는데 · 좀 느리네」(C135 설계서 §12-6) · ★ 2026-11-16 C136 — 그 창이 로그인 직후 장면 창으로 옮겨 왔다(장면 넷)
+describe('장면 창 — 넘김(마우스가 창 위여도 넘어간다 · 장면 시간 = 움직임이 끝난 뒤 읽는 여유)', () => {
   const motion = front('components/v3/v3-motion.ts');
-  const parts = front('components/v3/v3-popup-parts.ts');
   const code = motion.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-  const login = code.slice(code.indexOf('export function mountLoginIntro'), code.indexOf('export function mountTrialStage'));
+  const scenes = code.slice(code.indexOf('export function mountScenes'), code.indexOf('export function mountTrialStage'));
 
   it('멈추는 길은 멈춤 단추 · 움직임 줄이기 둘뿐 — 마우스가 올라와도 예약을 끊지 않는다', () => {
-    expect(login).not.toMatch(/mouseenter|mouseleave|mouseover|pointerenter|hover/);
-    expect(login).toContain("pop.classList.toggle('hold', off);");
-    expect(login).toContain('if (!off) timer = window.setTimeout(() => show(i + 1), msOf(i));');
-    expect(login).toContain('let off = reduce;');
+    expect(scenes.length).toBeGreaterThan(500);
+    expect(scenes).not.toMatch(/mouseenter|mouseleave|mouseover|pointerenter|hover/);
+    expect(scenes).toContain("pop.classList.toggle('hold', off);");
+    expect(scenes).toContain('if (!off) timer = window.setTimeout(() => show(i + 1), msOf(i));');
+    expect(scenes).toContain('let off = reduce;');
   });
 
-  it('장면 시간은 그 장면의 움직임이 끝난 시각(운영 화면에서 잰 값)보다 1초 넘게 길고 · 한 바퀴는 26초 안이다', () => {
-    const ms = [...parts.matchAll(/<div class="sl s(\d)(?: on)?" data-ms="(\d+)">/g)].map((m) => [Number(m[1]), Number(m[2])]);
-    expect(ms).toEqual([[1, 5000], [2, 5500], [3, 6000], [4, 5300], [5, 4000]]);
-    // 잰 값(1115 운영 · 장면 안 움직임의 끝) = 포스터 완성 2,450 + 옮겨 앉기 · 미구매 4,100 · 자동 발송 4,600 · 업종 비교 3,900 · 인증 1,170
-    const motionEnd = [3500, 4100, 4600, 3900, 1170];
+  it('장면 시간은 그 장면의 움직임이 끝난 시각(운영 화면에서 잰 값)보다 1초 넘게 길고 · 한 바퀴는 22초 안이다', () => {
+    const ms = [...V3_SCENES_HTML.matchAll(/<div class="sl s(\d)(?: on)?" data-ms="(\d+)">/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(ms).toEqual([[1, 5000], [2, 5500], [3, 6000], [4, 5300]]);
+    // 잰 값(1115 운영 · 장면 안 움직임의 끝) = 포스터 완성 2,450 + 옮겨 앉기 · 미구매 4,100 · 자동 발송 4,600 · 업종 비교 3,900
+    const motionEnd = [3500, 4100, 4600, 3900];
     ms.forEach(([, v], x) => expect(v - motionEnd[x]).toBeGreaterThanOrEqual(1000));
-    expect(ms.reduce((a, [, v]) => a + v, 0)).toBeLessThanOrEqual(26000);
+    expect(ms.reduce((a, [, v]) => a + v, 0)).toBeLessThanOrEqual(22000);
     // 포스터 장면의 완성 시각은 움직임 파일의 시간표가 정한다(이 값이 늘면 장면 시간도 같이 본다)
     expect(motion).toContain(': { erase: 550, lift: 1350, fly: 1550, done: 2450, phone: 0, out: 0, next: 0 };');
-  });
-});
-
-describe('로그인 화면 V3 안내 창 스위치 — 화면 쪽 읽기(기억 · 서버 답)', () => {
-  const store = new Map<string, string>();
-  let blocked = false;
-  beforeEach(() => {
-    store.clear();
-    blocked = false;
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => { if (blocked) throw new Error('blocked'); return store.has(k) ? store.get(k)! : null; },
-      setItem: (k: string, v: string) => { if (blocked) throw new Error('blocked'); store.set(k, v); },
-    });
-  });
-  afterEach(() => { vi.unstubAllGlobals(); });
-  const answer = (status: number, body: unknown) => vi.stubGlobal('fetch', vi.fn(async () => ({ ok: status >= 200 && status < 300, json: async () => body })));
-
-  it('받은 적이 없으면 꺼짐(= 종전 인증 안내 창) · 켜짐을 받으면 기억해 다음 첫 그림이 V3 · 꺼짐을 받으면 다시 종전', async () => {
-    const m = await import('../../../../frontend/src/utils/v3-login-intro');
-    expect(m.rememberedV3LoginIntroOn()).toBe(false);
-    answer(200, { success: true, on: true });
-    expect(await m.fetchV3LoginIntroOn()).toBe(true);
-    expect(store.get('v3LoginIntroOn')).toBe('1');
-    expect(m.rememberedV3LoginIntroOn()).toBe(true);
-    answer(200, { success: true, on: false });
-    expect(await m.fetchV3LoginIntroOn()).toBe(false);
-    expect(store.get('v3LoginIntroOn')).toBe('0');
-    expect(m.rememberedV3LoginIntroOn()).toBe(false);
-  });
-
-  it('못 받은 답은 모름(null) — 기억을 고치지 않는다(오류 응답 · 꼴이 다른 응답 · 끊김)', async () => {
-    const m = await import('../../../../frontend/src/utils/v3-login-intro');
-    store.set('v3LoginIntroOn', '1');
-    answer(503, { success: false });
-    expect(await m.fetchV3LoginIntroOn()).toBeNull();
-    answer(200, { on: true });                       // success 가 없는 응답
-    expect(await m.fetchV3LoginIntroOn()).toBeNull();
-    // Codex 1R — on 이 빠졌거나 참 · 거짓이 아닌 응답을 「꺼짐」으로 읽지 않는다(켜 둔 창과 기억이 잘못 바뀐다)
-    for (const body of [{ success: true }, { success: true, on: null }, { success: true, on: 'false' }, { success: true, on: 0 }, null]) {
-      answer(200, body);
-      expect(await m.fetchV3LoginIntroOn()).toBeNull();
-      expect(store.get('v3LoginIntroOn')).toBe('1');
-    }
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('network'); }));
-    expect(await m.fetchV3LoginIntroOn()).toBeNull();
-    expect(store.get('v3LoginIntroOn')).toBe('1');
-  });
-
-  it('저장이 막힌 브라우저 = 기억은 꺼짐 · 받은 답은 그대로 돌려준다(던지지 않는다)', async () => {
-    const m = await import('../../../../frontend/src/utils/v3-login-intro');
-    blocked = true;
-    expect(m.rememberedV3LoginIntroOn()).toBe(false);
-    answer(200, { success: true, on: true });
-    expect(await m.fetchV3LoginIntroOn()).toBe(true);
   });
 });
 
@@ -531,15 +432,10 @@ describe('소스 계약 — 생성 주소: 체험 판정 → (종전 문) → �
 });
 
 describe('소스 계약 — 화면', () => {
-  const parts = front('components/v3/v3-popup-parts.ts');
-  const lit = (name: string) => {
-    const at = parts.indexOf(`export const ${name} = `);
-    const open = parts.indexOf('`', at);
-    return parts.slice(open + 1, parts.indexOf('`;', open));
-  };
-  const css = lit('V3_POPUP_CSS');
-  const loginHtml = parts.slice(parts.indexOf('export const V3_LOGIN_HTML'), parts.indexOf('export const V3_TRIAL_HTML'));
-  const trialHtml = parts.slice(parts.indexOf('export const V3_TRIAL_HTML'));
+  // ★ 2026-11-16 C136 — 창의 글(CSS · 마크업 · 업종 셋)의 원본은 backend content/gated/v3-popup.ts 다(프론트 번들에 없다)
+  const css = V3_POPUP_CSS;
+  const scenesHtml = V3_SCENES_HTML;
+  const trialHtml = V3_TRIAL_HTML;
   const visible = (html: string) => html.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, '\n');
   const walk = (dir: string): string[] => readdirSync(dir).flatMap((n) => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 
@@ -568,72 +464,77 @@ describe('소스 계약 — 화면', () => {
     expect(css).toContain('@media (prefers-reduced-motion:reduce){');
   });
 
-  it('아이콘 참조 = xlink:href(그냥 href 면 Tab 가두기가 아이콘을 버튼으로 세어 창 밖으로 샌다) · 그림 = 실제로 있는 정적 파일', () => {
-    expect(parts).not.toMatch(/<use href=/);
-    expect(parts.match(/<use xlink:href="#v3p-/g)!.length).toBeGreaterThan(8);
-    for (const html of [loginHtml, trialHtml]) for (const m of html.matchAll(/xlink:href="#(v3p-[a-z]+)"/g)) expect(parts, m[1]).toContain(`<symbol id="${m[1]}"`);
-    const urls = [...parts.matchAll(/\/v3\/[a-z0-9-]+\.(?:jpg|webp)/g)].map((m) => m[0]);
-    expect(new Set(urls).size).toBe(9);
-    for (const u of new Set(urls)) expect(existsSync(join(FRONT, 'public', u)), u).toBe(true);
-    expect(parts).not.toContain('data:image');
+  it('아이콘 참조 = xlink:href(그냥 href 면 Tab 가두기가 아이콘을 버튼으로 세어 창 밖으로 샌다) · 그림 = 서버 보관 폴더에 실제로 있는 파일(★ C136 그림 자리 = gated:이름)', () => {
+    for (const html of [scenesHtml, trialHtml]) {
+      expect(html).not.toMatch(/<use href=/);
+      for (const m of html.matchAll(/xlink:href="#(v3p-[a-z]+)"/g)) expect(html, m[1]).toContain(`<symbol id="${m[1]}"`);
+    }
+    expect((scenesHtml + trialHtml).match(/<use xlink:href="#v3p-/g)!.length).toBeGreaterThan(8);
+    const all = css + scenesHtml + trialHtml;
+    const names = [...new Set([...all.matchAll(/gated:([a-z0-9-]+\.(?:jpg|webp))/g)].map((m) => m[1]))];
+    expect(names).toHaveLength(9);
+    for (const n of names) expect(existsSync(join(GATED_IMAGE_DIR, n)), n).toBe(true);
+    expect(all).not.toMatch(/\/v3\//);          // 옛 공개 주소가 남지 않았다
+    expect(all).not.toContain('data:image');
+    // 업종 셋이 가리키는 그림 클래스는 CSS 에 있다
+    for (const set of V3_MORPH_SETS) for (const cls of [set.src, set.cut, set.post]) expect(css, cls).toContain(`.${cls}{background-image:url(gated:`);
   });
 
   it('보이는 글 = 줄표 · 가운뎃점 · 모델명 0 · 광고 문자는 광고 표기와 무료수신거부 · 알림톡에는 광고 표기 없음', () => {
-    const motion = front('components/v3/v3-motion.ts');
-    const texts = [visible(loginHtml), visible(trialHtml), ...[...motion.matchAll(/text: '([^']+)'/g)].map((m) => m[1])];
-    expect(texts[2]).toBeTruthy();
+    const sms = V3_MORPH_SETS.map((x) => x.text);
+    expect(sms).toHaveLength(3);
+    const texts = [visible(scenesHtml), visible(trialHtml), ...sms];
     for (const t of texts) {
       expect(t).not.toContain('—');
       expect(t).not.toContain('·');
       expect(t).not.toMatch(/Claude|GPT|Anthropic|Opus|Sonnet|Haiku|claude-|Gemini/i);
     }
-    for (const sms of [...motion.matchAll(/text: '([^']+)'/g)].map((m) => m[1])) {
-      expect(sms.startsWith('(광고)[')).toBe(true);
-      expect(sms).toContain('무료수신거부 080-');
+    for (const one of sms) {
+      expect(one.startsWith('(광고)[')).toBe(true);
+      expect(one).toContain('무료수신거부 080-');
     }
-    const sms2 = loginHtml.slice(loginHtml.indexOf('<div class="card sms">'), loginHtml.indexOf('</div>', loginHtml.indexOf('<div class="card sms">')));
+    const sms2 = scenesHtml.slice(scenesHtml.indexOf('<div class="card sms">'), scenesHtml.indexOf('</div>', scenesHtml.indexOf('<div class="card sms">')));
     expect(sms2).toContain('(광고)[결온]');
     expect(sms2).toContain('무료수신거부 080-000-0000');
-    const talk = loginHtml.slice(loginHtml.indexOf('<div class="at-bd">'), loginHtml.indexOf('<div class="at-btn">'));
+    const talk = scenesHtml.slice(scenesHtml.indexOf('<div class="at-bd">'), scenesHtml.indexOf('<div class="at-btn">'));
     expect(talk).toContain('결온의 가족이 되어 주셔서');
     expect(talk).not.toContain('(광고)');
     expect(talk).not.toContain('수신거부');
     // 화면 속 숫자는 예시라고 적는다(장면 2 · 3 · 4)
-    expect(loginHtml.match(/<span class="eg">예시 화면<\/span>/g)).toHaveLength(3);
+    expect(scenesHtml.match(/<span class="eg">예시 화면<\/span>/g)).toHaveLength(3);
   });
 
-  it('두 창 = 기본 대화상자 0 · 바깥(어두운 판)을 눌러도 닫히지 않는다 · 창 안쪽은 같은 문자열 한 번', () => {
-    for (const f of ['components/v3/V3LoginIntroModal.tsx', 'components/v3/StudioTrialPromo.tsx', 'components/v3/LoginNoticeSwitch.tsx', 'components/v3/v3-motion.ts', 'components/v3/use-dialog-trap.ts']) {
-      const s = front(f).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
-      expect(s, f).not.toMatch(/\b(alert|confirm|prompt)\(/);
-      expect(s, f).not.toMatch(/Claude|GPT|Anthropic|Opus|Sonnet|Haiku|claude-|Gemini/i);
+  it('두 창 = 기본 대화상자 0 · 바깥(어두운 판)을 눌러도 닫히지 않는다 · 창 안쪽은 받은 글 그대로 한 번', () => {
+    for (const f of ['components/v3/V3ScenesPromo.tsx', 'components/v3/StudioTrialPromo.tsx', 'components/v3/v3-motion.ts', 'components/AiOperatorLoginPromo.tsx', 'utils/gated-content.ts']) {
+      const src = front(f).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+      expect(src, f).not.toMatch(/\b(alert|confirm|prompt)\(/);
+      expect(src, f).not.toMatch(/Claude|GPT|Anthropic|Opus|Sonnet|Haiku|claude-|Gemini/i);
     }
-    for (const f of ['components/v3/V3LoginIntroModal.tsx', 'components/v3/StudioTrialPromo.tsx']) {
-      const s = front(f);
-      expect(s).toContain('<div className="scrim" />');
-      expect(s).toContain('<style>{V3_POPUP_CSS}</style>');
-      expect(s).toContain('role="dialog"');
-      expect(s).toContain('aria-modal="true"');
+    for (const f of ['components/v3/V3ScenesPromo.tsx', 'components/v3/StudioTrialPromo.tsx']) {
+      const src = front(f);
+      expect(src).toContain('<div className="scrim" />');
+      expect(src).toContain('<style>{css}</style>');
+      expect(src).toContain('role="dialog"');
+      expect(src).toContain('aria-modal="true"');
+      // 다시 그려져도 같은 객체 = React 가 안쪽을 다시 쓰지 않는다(움직임 · 신청 뒤 붙인 class 가 지워지지 않는다)
+      expect(src).toContain('const inner = useMemo(() => ({ __html: html }), [html]);');
+      expect(src).toContain('dangerouslySetInnerHTML={inner}');
     }
-    expect(front('components/v3/V3LoginIntroModal.tsx')).toContain('const LOGIN_INNER = { __html: V3_LOGIN_HTML };');
-    expect(front('components/v3/StudioTrialPromo.tsx')).toContain('const TRIAL_INNER = { __html: V3_TRIAL_HTML };');
   });
 
-  it('로그인 전 창 = 인증 세 줄은 인증 안내 창의 CHANGES 그대로 · 오늘 하루 보지 않기는 같은 저장 열쇠 · V3 페이지로', () => {
-    const modal = front('components/v3/V3LoginIntroModal.tsx');
-    expect(loginHtml).toContain('<ul data-auth></ul>');
-    expect(modal).toContain("import { CHANGES, hideLoginPolicyNoticeToday } from '../LoginPolicyNoticeModal';");
-    expect(modal).toContain('list.replaceChildren(...CHANGES.map((c, i) => {');
-    expect(modal).toContain("else if (act === 'hide-today') { hideLoginPolicyNoticeToday(); onClose(); }");
-    expect(modal).toContain("else if (act === 'go') window.location.assign(V3_PAGE_PATH);");
-    expect(modal).toContain("export const V3_PAGE_PATH = '/about-v3.html';");
-    expect(existsSync(join(FRONT, 'public', 'about-v3.html'))).toBe(true);
-    const policy = front('components/LoginPolicyNoticeModal.tsx');
-    expect(policy).toContain('export const CHANGES: Array<{ label: string; title: string; detail: string }> = [');
-    expect(policy).toContain('export function hideLoginPolicyNoticeToday(): void {');
-    for (const act of ['close', 'go', 'hide-today', 'auth']) expect(loginHtml).toContain(`data-act="${act}"`);
-    expect(loginHtml.match(/data-tab/g)).toHaveLength(5);
-    expect(loginHtml).toContain('data-pp aria-label="자동 넘김 멈춤"');
+  it('★ C136 장면 창 = 로그인 화면 창의 다섯째 장면(인증 안내)을 빼고 로그인 뒤 틀의 단추로 · 로그인 화면에는 인증 안내 창만', () => {
+    for (const act of ['close', 'go', 'later', 'dismiss']) expect(scenesHtml).toContain(`data-act="${act}"`);
+    for (const gone of ['data-act="auth"', 'data-act="hide-today"', 'data-auth', '오늘 하루 보지 않기', '인증 안내 전체 보기']) expect(scenesHtml, gone).not.toContain(gone);
+    expect(scenesHtml.match(/data-tab/g)).toHaveLength(4);
+    expect(scenesHtml.match(/data-ms="/g)).toHaveLength(4);
+    expect(scenesHtml).toContain('data-pp aria-label="자동 넘김 멈춤"');
+    for (const gone of ['components/v3/V3LoginIntroModal.tsx', 'components/v3/LoginNoticeSwitch.tsx', 'components/v3/v3-popup-parts.ts', 'utils/v3-login-intro.ts']) {
+      expect(existsSync(join(FRONT, 'src', gone)), gone).toBe(false);
+    }
+    expect(existsSync(join(SRC, 'utils', 'v3-login-intro.ts'))).toBe(false);
+    expect(back('routes/intro-public.ts')).not.toMatch(/v3-login|v3LoginIntroOn/);
+    const login = front('pages/LoginPage.tsx');
+    expect(login).toContain('{showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}');
   });
 
   it('무료체험 창 = 서버가 열렸다고 답한 뒤에만 「열렸습니다」 · 판 열쇠를 실어 숨긴다 · 누름을 기록한다', () => {
@@ -644,17 +545,19 @@ describe('소스 계약 — 화면', () => {
     expect(promo.indexOf('if (!state || !state.requested)')).toBeLessThan(promo.indexOf("pop.classList.add('opened');"));
     expect(promo).toContain('const saved = await dismissV3Intro(introKey);');
     expect(promo).toContain("else if (act === 'studio') { onClose(); navigate('/image-studio'); }");
+    expect(promo).toContain('const stop = mountTrialStage(pop, sets);');
     for (const act of ['close', 'trial', 'later', 'dismiss', 'studio']) expect(trialHtml).toContain(`data-act="${act}"`);
     expect(trialHtml).toContain('무료체험 3회 이용하고 싶습니다');
     expect(trialHtml).toContain('data-stop aria-label="장면 반복 멈춤"');
     // 틀(로그인 안내 창)이 서버 답으로 안쪽을 바꾸고 기능 id 를 갈라 기록한다
     const frame = front('components/AiOperatorLoginPromo.tsx');
-    expect(frame).toContain("if (intro.variant === 'trial') return <StudioTrialPromo introKey={intro.introKey} rootRef={dialogRef} onClose={close} />;");
-    expect(frame).toContain("if (got.variant === 'trial') reportPlanFeature(STUDIO_TRIAL_POPUP_ID, 'open');");
+    expect(frame).toContain("return shown.variant === 'trial' ? <StudioTrialPromo {...inner} /> : <V3ScenesPromo {...inner} />;");
+    expect(frame).toContain("reportPlanFeature(peek.variant === 'trial' ? STUDIO_TRIAL_POPUP_ID : LOGIN_PROMO_FEATURE_ID, 'open');");
+    // 화면은 판 열쇠를 언제나 싣는다(열쇠 없는 요청은 서버가 옛 판으로 읽는다)
     const util = front('utils/v3-intro.ts');
-    expect(util).toContain("if (d.variant === 'trial' && typeof d.introKey === 'string') return { variant: 'trial', introKey: d.introKey, posters: [], chips: [] };");
-    expect(util.indexOf("if (d.variant === 'trial'")).toBeLessThan(util.indexOf('if (posters.length === 0) return null;'));
-    expect(util).toContain("introKey ? { method: 'POST', body: { introKey } } : { method: 'POST' }");
+    expect(util).toContain("sendJson('/api/plans/v3-intro/claim', { method: 'POST', body: { introKey } })");
+    expect(util).toContain("sendJson('/api/plans/v3-intro/dismiss', { method: 'POST', body: { introKey } })");
+    expect(util).toContain("if (d.variant !== 'scenes' && d.variant !== 'trial') return null;");
   });
 
   it('스튜디오 입구 · 남은 횟수 = 서버 값만 · 체험은 이미지 스튜디오 화면 하나에만', () => {
@@ -690,23 +593,5 @@ describe('소스 계약 — 화면', () => {
     const fi = back('utils/feature-interest.ts');
     expect(fi).toContain('const trials = await loadStudioTrials().catch((err: any) => {');
     expect(fi).toContain('trials: StudioTrialListRow[] | null;');
-  });
-
-  it('공개 V3 페이지 = 배포된 기능 넷만 · 요금 약속 없음 · 로그인으로 · 그림은 실제로 있는 파일 · 글꼴 하나', () => {
-    const page = readFileSync(join(FRONT, 'public', 'about-v3.html'), 'utf8');
-    expect(page.match(/<section class="ft"/g)).toHaveLength(4);
-    for (const label of ['01 이미지 스튜디오', '02 상품 반응', '03 기본 여정', '04 업종 평균']) expect(page).toContain(label);
-    for (const gone of ['추천 상품', '나눠 보내기', '답장 상담', '요금은 그대로', '달라지는 발송 단가', '목업', 'data:image', 'href="#"']) expect(page, gone).not.toContain(gone);
-    expect(page.match(/href="\/login"/g)!.length).toBe(3);
-    const text = visible(page);
-    expect(text).not.toContain('—');
-    expect(text).not.toContain('·');
-    expect(text).not.toMatch(/Claude|GPT|Anthropic|Opus|Sonnet|Haiku|claude-|Gemini/i);
-    for (const u of new Set([...page.matchAll(/\/v3\/[a-z0-9-]+\.(?:jpg|webp)/g)].map((m) => m[0]))) expect(existsSync(join(FRONT, 'public', u)), u).toBe(true);
-    const fonts = [...page.matchAll(/font-family:([^;}]+)/g)].map((m) => m[1]);
-    expect(fonts).toHaveLength(1);
-    expect(fonts[0]).toContain('Pretendard');
-    expect(page).toContain('(광고)[결온]');
-    expect(page).toContain('무료수신거부 080-000-0000');
   });
 });

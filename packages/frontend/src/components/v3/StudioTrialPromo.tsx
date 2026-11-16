@@ -5,12 +5,12 @@
  *   무료체험 3회 이용하고 싶습니다를 눌러야 3회만 체험으로 열림」.
  * 누가 보는지(체험 자격이 있고 아직 신청하지 않은 회사) · 몇 번 띄울지는 서버가 정한다(AiOperatorLoginPromo 의 선점 응답 variant 'trial').
  *   이 컴포넌트는 그 창의 안쪽이다: 틀의 규칙(탭 사이 한 번 · 다른 자동 안내 창과 안 겹침 · Esc · Tab 가두기 · 스크롤 잠금)은 AiOperatorLoginPromo 가 그대로 맡는다.
- * 창 안쪽(무대 · 글 · 버튼)은 승인된 목업에서 떼어 온 마크업(v3-popup-parts.ts) · 움직임 = v3-motion.ts.
+ * 창 안쪽(무대 · 글 · 버튼)의 글 · 그림은 이 번들에 없다(★ 2026-11-16 C136) — 틀이 로그인 뒤 서버에서 받아 그림까지 끼운 문자열(css · html)과 업종 셋(sets)을 넘겨준다 · 움직임 = v3-motion.ts.
  * 「무료체험 3회 이용하고 싶습니다」 = 서버에 신청(POST /api/image-studio/trial/request) → 열렸다는 답을 받은 뒤에만 「열렸습니다」를 보인다.
  * 기록 = 그 버튼을 누름(go) → 슈퍼관리자 「기능 관심 업체」(뜸 open 은 틀이 남긴다). 신청 자체는 체험 표에 남는다.
  * 바깥을 눌러도 닫히지 않는다(X · Esc · 「다음에 볼게요」).
  */
-import { useEffect, useRef, type MouseEvent, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, type MouseEvent, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { STUDIO_TRIAL_POPUP_ID } from '../../constants/login-popups';
@@ -18,14 +18,15 @@ import { reportPlanFeature } from '../../utils/plan-feature-report';
 import { requestStudioTrial } from '../../utils/studio-trial';
 import { dismissV3Intro } from '../../utils/v3-intro';
 import { useToast } from '../ToastProvider';
-import { V3_POPUP_CSS, V3_TRIAL_HTML } from './v3-popup-parts';
-import { mountTrialStage } from './v3-motion';
+import { mountTrialStage, type MorphSet } from './v3-motion';
 
-const TRIAL_INNER = { __html: V3_TRIAL_HTML };
-
-export default function StudioTrialPromo({ introKey, rootRef, onClose }: {
+export default function StudioTrialPromo({ introKey, css, html, sets, rootRef, onClose }: {
   /** 이 창의 판 열쇠(「이 안내 다시 보지 않기」가 서버에 돌려보낸다) */
-  introKey?: string;
+  introKey: string;
+  /** 서버가 준 글(그림 주소까지 끼운 것) */
+  css: string;
+  html: string;
+  sets: readonly MorphSet[];
   /** 틀(AiOperatorLoginPromo)이 Tab 가두기에 쓰는 창 자리 */
   rootRef: RefObject<HTMLDivElement>;
   onClose: () => void;
@@ -33,6 +34,8 @@ export default function StudioTrialPromo({ introKey, rootRef, onClose }: {
   const navigate = useNavigate();
   const toast = useToast();
   const busyRef = useRef(false);
+  // 다시 그려져도 같은 객체 = React 가 안쪽 마크업을 다시 쓰지 않는다(신청 뒤 붙인 class · 잠금이 지워지지 않는다)
+  const inner = useMemo(() => ({ __html: html }), [html]);
 
   /**
    * 지금 안 보이는 버튼은 잠가 둔다(disabled) — 틀의 Tab 가두기는 「잠기지 않은 버튼」의 처음과 끝으로 돈다.
@@ -51,11 +54,11 @@ export default function StudioTrialPromo({ introKey, rootRef, onClose }: {
     const pop = rootRef.current;
     if (!pop) return;
     lockHidden(pop, pop.classList.contains('opened'));
-    const stop = mountTrialStage(pop);
+    const stop = mountTrialStage(pop, sets);
     // 처음 포커스 = 신청 버튼. 틀이 「원래 포커스 자리」를 먼저 적어 둔 다음에 옮긴다(닫으면 그 자리로 돌아간다)
     const t = window.setTimeout(() => pop.querySelector<HTMLElement>('[data-act="trial"]')?.focus(), 0);
     return () => { window.clearTimeout(t); stop(); };
-  }, [rootRef]);
+  }, [rootRef, sets]);
 
   /** 신청 — 요청 하나가 끝날 때까지 다시 누르지 못한다(버튼 잠금) · 열렸다는 답을 받은 뒤에만 「열렸습니다」 */
   const request = async (btn: HTMLElement) => {
@@ -99,7 +102,7 @@ export default function StudioTrialPromo({ introKey, rootRef, onClose }: {
 
   return createPortal(
     <div className="v3p">
-      <style>{V3_POPUP_CSS}</style>
+      <style>{css}</style>
       <div className="scrim" />
       <div
         ref={rootRef}
@@ -108,7 +111,7 @@ export default function StudioTrialPromo({ introKey, rootRef, onClose }: {
         aria-modal="true"
         aria-label="이미지 스튜디오 무료체험 안내"
         onClick={onClick}
-        dangerouslySetInnerHTML={TRIAL_INNER}
+        dangerouslySetInnerHTML={inner}
       />
     </div>,
     document.body,

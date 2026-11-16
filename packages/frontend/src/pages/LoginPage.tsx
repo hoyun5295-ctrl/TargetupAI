@@ -3,8 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authApi } from '../api/client';
 import { useAuthStore } from '../stores/authStore';
 import IdentityVerifyModal from '../components/IdentityVerifyModal';
-import { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
-import LoginNoticeSwitch from '../components/v3/LoginNoticeSwitch';   // ★ 2026-11-15 C135 안내 창의 갈래(V3 안내 창 · 종전 인증 안내 창)
+import LoginPolicyNoticeModal, { shouldShowLoginPolicyNotice } from '../components/LoginPolicyNoticeModal';
 import MaintenanceNoticeModal from '../components/MaintenanceNoticeModal';
 import { isMaintenanceNoticeActive, MAINTENANCE_NOTICE_END_AT_MS } from '../constants/maintenanceNotice';
 import { DEFAULT_SESSION_TIMEOUT_MINUTES } from '../hooks/useSessionTimeout';
@@ -48,7 +47,9 @@ export default function LoginPage() {
   const [forceLogoutMessage, setForceLogoutMessage] = useState('');
 
   // 서비스 이용신청 문의 모달 (비로그인 방문자용 — 공개 endpoint /api/companies/inquiry 재사용)
-  const [showInquiryModal, setShowInquiryModal] = useState(false);
+  // ★ 2026-11-16 C136 — 제안 페이지의 「서비스 이용신청 문의」로 들어오면(?inquiry=1) 첫 그림부터 문의 창이다(안내 창을 띄웠다 내리지 않는다)
+  const [cameForInquiry] = useState(() => !isSuperAdminOnly && new URLSearchParams(window.location.search).get('inquiry') === '1');
+  const [showInquiryModal, setShowInquiryModal] = useState(cameForInquiry);
   const [inquiryForm, setInquiryForm] = useState({
     companyName: '', contactName: '', phone: '', email: '', subject: '', message: '',
   });
@@ -84,7 +85,7 @@ export default function LoginPage() {
   //   띄울지 말지는 창이 가진 판정 하나가 정한다(「오늘 하루 보지 않기」만 숨긴다).
   // ★ 2026-11-02 서버 점검 안내 — 점검이 끝나는 시각 전까지 인증 안내 창 대신 뜬다(끝나면 인증 안내 창이 저절로 돌아온다 · constants/maintenanceNotice.ts).
   const [showMaintenanceNotice, setShowMaintenanceNotice] = useState(() => !isSuperAdminOnly && isMaintenanceNoticeActive());
-  const [showPolicyNotice, setShowPolicyNotice] = useState(() => !isSuperAdminOnly && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice());
+  const [showPolicyNotice, setShowPolicyNotice] = useState(() => !isSuperAdminOnly && !cameForInquiry && !isMaintenanceNoticeActive() && shouldShowLoginPolicyNotice());
   // ★ Codex 1R · 2R — 열어 둔 화면도 끝나는 시각에 점검 창을 닫고 인증 안내 창 판정으로 돌아간다(옛: 처음 한 번만 판정해 화면을 다시 열어야 돌아왔다).
   //   시각을 여기서 다시 묻지 않는다 = 처음에 점검 창을 띄운 화면이면 남은 시간 뒤(이미 지났으면 바로) 돌아간다(2R: 끝나기 직전에 열면 영영 안 돌아왔다).
   useEffect(() => {
@@ -95,6 +96,11 @@ export default function LoginPage() {
     }, Math.max(0, MAINTENANCE_NOTICE_END_AT_MS - Date.now()));
     return () => window.clearTimeout(t);
   }, []);
+
+  // 문의로 들어온 주소의 표시(?inquiry=1)는 지운다(새로 고침 · 주소 복사에 남지 않게)
+  useEffect(() => {
+    if (cameForInquiry) window.history.replaceState(null, '', window.location.pathname);
+  }, [cameForInquiry]);
 
   // 페이지 진입 시 강제 로그아웃 사유 확인
   useEffect(() => {
@@ -148,6 +154,7 @@ export default function LoginPage() {
       const cafe24Mall = sessionStorage.getItem('cafe24_return_mall_id');
       if (cafe24Mall) {
         sessionStorage.removeItem('cafe24_return_mall_id');
+        takeLoginReturn();   // ★ 2026-11-16 C136 — 카페24 갈래가 이길 때 남아 있던 복귀 경로를 함께 버린다(다음 로그인에 낡은 값이 살아나지 않게)
         navigate(`/cafe24/launch?mall_id=${encodeURIComponent(cafe24Mall)}`, { replace: true });
       } else {
         // ★ 2026-10-04 로그인 전에 가려던 화면(허용 경로만 · 플래너 행사 확인 등) → 없으면 대시보드
@@ -1029,7 +1036,7 @@ export default function LoginPage() {
 
       {/* 모달들 */}
       {showMaintenanceNotice && <MaintenanceNoticeModal onClose={() => setShowMaintenanceNotice(false)} />}
-      {showPolicyNotice && <LoginNoticeSwitch onClose={() => setShowPolicyNotice(false)} />}
+      {showPolicyNotice && <LoginPolicyNoticeModal onClose={() => setShowPolicyNotice(false)} />}
       {mfaModal}
       {identity && (
         <IdentityVerifyModal

@@ -5,7 +5,9 @@ import { readPlanFreeQuotas } from '../utils/free-messaging';
 import { authenticate } from '../middlewares/auth';
 import { parseFeatureSeen, recordFeatureSeen, FEATURE_SEEN_RATE } from '../utils/feature-interest';
 import { buildFeatureIntrosPayload, resolveSignedMedia } from '../utils/plan-feature-intros-serve';
-import { claimIntro, dismissIntro } from '../utils/v3-intro';   // ★ 2026-11-13 C133 F7
+import fs from 'fs';
+import { claimIntro, dismissIntro, peekIntro } from '../utils/v3-intro';   // ★ 2026-11-13 C133 F7 · ★ 2026-11-16 C136 준비(peek)
+import { canSeeIntroContent, gatedImageFile, GATED_CACHE_CONTROL } from '../utils/gated-content';   // ★ 2026-11-16 C136 로그인 뒤에만 주는 소개 그림
 import { v3FeaturesFor } from '../utils/v3-stage';   // ★ 2026-11-13 C133 단계 개방
 import { handleDbMigrationError } from '../utils/db-migration-error';
 
@@ -70,10 +72,25 @@ const bearerOf = (req: Request): string | null => {
   const h = String(req.headers.authorization || '');
   return h.startsWith('Bearer ') ? h.slice(7).trim() || null : null;
 };
+// ★ 2026-11-16 C136(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2-1) — 순서 = 준비(peek) → 그림 받기 → 선점(claim).
+//   peek = 이 로그인에 띄울 판과 그 판의 글을 준다 · 노출을 쓰지 않는다(그림을 못 받은 로그인이 노출 수를 태우지 않게).
+//   claim = 화면이 준비한 판의 열쇠(introKey)를 싣고 온다 · 서버 판정이 그 열쇠와 같을 때만 노출 한 번을 쓴다.
+//   글 · 그림은 로그인한 고객사 사용자에게만(에이전트 전용 회사 제외) · 머리말 = private, no-store.
+router.get('/v3-intro/peek', authenticate, featureSeenLimiter, async (req: Request, res: Response) => {
+  try {
+    const out = await peekIntro(req.user as any, bearerOf(req));
+    res.setHeader('Cache-Control', GATED_CACHE_CONTROL);
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    if (handleDbMigrationError(err, res, 'user_intro_acks')) return;
+    console.error('[plans/v3-intro/peek] 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '소개를 불러오지 못했습니다.' });
+  }
+});
 router.post('/v3-intro/claim', authenticate, featureSeenLimiter, async (req: Request, res: Response) => {
   try {
-    const out = await claimIntro(req.user as any, bearerOf(req));
-    res.setHeader('Cache-Control', 'private, no-store');
+    const out = await claimIntro(req.user as any, bearerOf(req), req.body?.introKey);
+    res.setHeader('Cache-Control', GATED_CACHE_CONTROL);
     return res.json({ success: true, ...out });
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'user_intro_acks')) return;
@@ -90,6 +107,35 @@ router.post('/v3-intro/dismiss', authenticate, featureSeenLimiter, async (req: R
     console.error('[plans/v3-intro/dismiss] 실패:', err?.message);
     return res.status(500).json({ success: false, error: '저장하지 못했습니다.' });
   }
+});
+
+// ★ 2026-11-16 C136 — 소개 그림(로그인 필수 · 고객사 사용자 · 에이전트 전용 회사 제외 · 보관 폴더에 있는 이름만 · 판정 = utils/gated-content.ts).
+//   화면은 로그인 토큰으로 받아 blob 주소로 바꿔 쓴다(img 주소로 직접 열 수 없다 = 주소를 알아도 로그인 없이는 못 받는다).
+//   못 주는 경우는 전부 404(있는 이름인지 알려 주지 않는다) · 회사 조회 실패 = 503.
+const gatedImageLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 240,   // 창 하나 = 그림 9장 · 제안 페이지 = 12장(새로고침 여유 포함)
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) => `gated-img:${req.user?.userId || 'anon'}`,
+  message: { success: false, error: '요청이 너무 잦습니다.', code: 'RATE_LIMITED' },
+});
+router.get('/gated/img/:name', authenticate, gatedImageLimiter, async (req: Request, res: Response) => {
+  res.setHeader('Cache-Control', GATED_CACHE_CONTROL);
+  let allowed = false;
+  try {
+    allowed = await canSeeIntroContent(req.user as any);
+  } catch (err: any) {
+    console.error('[plans/gated/img] 회사 조회 실패:', err?.message);
+    return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+  }
+  const file = allowed ? gatedImageFile(req.params.name) : null;
+  if (!file) return res.status(404).json({ success: false, error: '찾을 수 없습니다.' });
+  res.setHeader('Content-Type', file.mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  const stream = fs.createReadStream(file.absPath);
+  stream.on('error', () => { if (!res.headersSent) res.status(404).end(); else res.end(); });
+  return stream.pipe(res);
 });
 
 // ★ 2026-11-13 C133 — 이 회사에 지금 열린 V3 기능(화면이 입구를 그릴지 묻는다 · 판정 = utils/v3-stage.ts 한 곳 · 닫힌 회사 = 전부 false).

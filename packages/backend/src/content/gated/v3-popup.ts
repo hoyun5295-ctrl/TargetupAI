@@ -1,14 +1,17 @@
 /**
- * v3-popup-parts.ts — 「한줄로 V3」 로그인 팝업 · 이미지 스튜디오 무료체험 팝업의 CSS · 장면 마크업 (★ 2026-11-15 C135 · 설계서 docs/2026-11-15-v3-popup-trial-design.md §9)
+ * v3-popup.ts — 로그인 뒤에만 내려주는 소개 내용(「한줄로 V3」 장면 창 · 이미지 스튜디오 무료체험 창의 CSS · 마크업 · 업종 셋)
+ *   ★ 2026-11-16 C136 배포 가(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2).
  *
- * 승인된 목업(docs/mockups/2026-11-15-v3-popups-mockup.html · 목업 Codex 3R approve)에서 **스크립트로 떼어 온 것**이다(손으로 다시 치지 않았다).
- * 옮기며 바꾼 것 = 선택자 앞 .v3p · 키프레임 이름 앞 v3p-(앱 전역 fadeIn 과 겹치지 않게) · 아이콘 id 앞 v3p- · 그림 = 정적 파일 /v3/* ·
- *   컨테이너 = 화면 덮개(.v3p) · 인증 세 줄은 비워 둠(컴포넌트가 인증 안내 창의 CHANGES 로 채운다).
- * 이후로는 이 파일이 원본이다(목업은 버리는 목업). 움직임의 시간표 = v3-motion.ts.
- * 글꼴 = 앱 전역 프리텐다드 하나. 색 = 흰 바탕 + 검정 + 주황 하나.
+ * Harold 「의미없이 전부 공개로 해놓으면 서비스 내용만 가져가서 복제 · 안내창도 마찬가지로」 →
+ *   프론트 번들(옛 packages/frontend/src/components/v3/v3-popup-parts.ts · v3-motion.ts 의 SETS)에 있던 글을 **스크립트로 값 그대로** 옮겼다.
+ *   그림 자리는 `gated:파일이름` 으로 적혀 있고, 화면이 로그인 토큰으로 받아 온 그림 주소로 바꾼다(그림 = packages/backend/assets/gated/v3).
+ * 옮기며 바꾼 것 = 그림 주소 꼴 · 장면 창은 로그인 화면 창의 다섯째 장면(인증 안내 요약)을 빼고 단추 줄을 로그인 뒤 틀에 맞춤(다음에 볼게요 · 다시 보지 않기).
+ * ⛔ 이 파일의 글 · 그림을 프론트 저장소(packages/frontend/src · public)에 다시 두지 않는다(계약 시험 c136-gated-content).
+ * 글꼴 = 앱 전역 프리텐다드 하나. 색 = 흰 바탕 + 검정 + 주황 하나. 움직임의 시간표 = 프론트 components/v3/v3-motion.ts.
  */
+
 export const V3_POPUP_CSS = `.v3p{--ink:#0B0B0C;--sub:#5F6368;--mute:#6B6B70;--line:#E8E8E6;--soft:#F4F3EF;--acc:#CF4510;--acc-d:#B53C0D;--acc-t:#B53C0D;--out:cubic-bezier(.16,1,.3,1);--io:cubic-bezier(.65,0,.35,1);position:fixed;inset:0;z-index:70;display:grid;place-items:center;container:stage/inline-size;overflow-y:auto;overscroll-behavior:contain;color:var(--ink);line-height:normal;letter-spacing:normal;text-align:left;font-size:16px;-webkit-font-smoothing:antialiased;word-break:keep-all}
-.v3p .i-n1{background-image:url(/v3/poster-serum.jpg)}.v3p .i-n3{background-image:url(/v3/poster-latte.jpg)}.v3p .i-n4{background-image:url(/v3/poster-knit.jpg)}.v3p .i-sk{background-image:url(/v3/photo-serum.jpg)}.v3p .i-so{background-image:url(/v3/photo-latte.jpg)}.v3p .i-ss{background-image:url(/v3/photo-knit.jpg)}.v3p .i-ck{background-image:url(/v3/cut-serum.webp)}.v3p .i-co{background-image:url(/v3/cut-latte.webp)}.v3p .i-cs{background-image:url(/v3/cut-knit.webp)}
+.v3p .i-n1{background-image:url(gated:poster-serum.jpg)}.v3p .i-n3{background-image:url(gated:poster-latte.jpg)}.v3p .i-n4{background-image:url(gated:poster-knit.jpg)}.v3p .i-sk{background-image:url(gated:photo-serum.jpg)}.v3p .i-so{background-image:url(gated:photo-latte.jpg)}.v3p .i-ss{background-image:url(gated:photo-knit.jpg)}.v3p .i-ck{background-image:url(gated:cut-serum.webp)}.v3p .i-co{background-image:url(gated:cut-latte.webp)}.v3p .i-cs{background-image:url(gated:cut-knit.webp)}
 .v3p *{box-sizing:border-box;margin:0;padding:0}
 .v3p button{font:inherit;border:0;background:none;cursor:pointer;color:inherit}
 .v3p .ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
@@ -331,13 +334,8 @@ export const V3_POPUP_CSS = `.v3p{--ink:#0B0B0C;--sub:#5F6368;--mute:#6B6B70;--l
 .v3p .tg::after{transform:translateX(16px)}
 }`;
 
-/** 그림(실제 이미지 스튜디오 산출물 · 정적 파일) — 창이 뜰 때 미리 받아 둔다(업종이 바뀔 때 빈 그림이 보이지 않게) */
-export const V3_POPUP_IMAGES: readonly string[] = ["/v3/poster-serum.jpg","/v3/poster-latte.jpg","/v3/poster-knit.jpg","/v3/photo-serum.jpg","/v3/photo-latte.jpg","/v3/photo-knit.jpg","/v3/cut-serum.webp","/v3/cut-latte.webp","/v3/cut-knit.webp"];
-
-const ICONS = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="v3p-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol><symbol id="v3p-ar" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol><symbol id="v3p-ck" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol><symbol id="v3p-lf" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol><symbol id="v3p-clk" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol><symbol id="v3p-pau" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol><symbol id="v3p-ply" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol></svg>`;
-
-/** 로그인 전 팝업의 창 안쪽(무대 다섯 장면 + 글 + 쪽 번호) */
-export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
+/** 로그인 직후 장면 창의 안쪽(무대 네 장면 + 글 + 쪽 번호) */
+export const V3_SCENES_HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="v3p-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol><symbol id="v3p-ar" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol><symbol id="v3p-ck" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol><symbol id="v3p-lf" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol><symbol id="v3p-clk" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol><symbol id="v3p-pau" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol><symbol id="v3p-ply" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol></svg><div class="vis" data-slides>
         
 <div class="sl s1 on" data-ms="5000">
 <div class="mo" data-morph data-ph="0">
@@ -426,11 +424,6 @@ export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
 </div>
 </div>
         
-<div class="sl s5" data-ms="4000">
-<div class="card au"><div class="uh">인증 세 가지</div>
-<ul data-auth></ul>
-<button data-act="auth">인증 안내 전체 보기</button></div>
-</div>
 </div>
 <div class="txt">
 <button class="x" data-act="close" aria-label="닫기"><svg class="ic"><use xlink:href="#v3p-x"/></svg></button>
@@ -440,17 +433,16 @@ export const V3_LOGIN_HTML = ICONS + `<div class="vis" data-slides>
 <div><h3 class="hd"><span class="ln" style="--i:0"><span><em>담아 두고 안 산</em> 고객에게</span></span><span class="ln" style="--i:1"><span>바로 보냅니다</span></span></h3><p class="lead">장바구니에 담아 두기만 한 고객, 보고도 안 산 고객을<br>세어 두었다가 그 자리에서 문자를 보냅니다.</p></div>
 <div><h3 class="hd"><span class="ln" style="--i:0"><span>가입하는 순간,</span></span><span class="ln" style="--i:1"><span><em>환영 인사</em>가 먼저 갑니다</span></span></h3><p class="lead">여정을 한 번 켜 두면 가입, 장바구니, 생일, 휴면까지<br>대상을 고르지 않아도 때맞춰 나갑니다.</p></div>
 <div><h3 class="hd"><span class="ln" style="--i:0"><span><em>같은 업종 평균</em>을</span></span><span class="ln" style="--i:1"><span>바로 옆에 놓습니다</span></span></h3><p class="lead">우리 숫자만 보고 짐작하지 않아도 됩니다.<br>같은 업종 평균이 성과 옆에 함께 보입니다.</p></div>
-<div><h3 class="hd"><span class="ln" style="--i:0"><span>로그인과 발송 인증은</span></span><span class="ln" style="--i:1"><span>지금처럼 적용됩니다</span></span></h3><p class="lead">방송미디어통신위원회 고시에 따라<br>모든 대량문자 발송 사업자에게 똑같이 적용됩니다.</p></div>
 </div>
-<div class="act"><button class="cta" data-act="go">V3 자세히 보기 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button><button class="ghost" data-act="hide-today">오늘 하루 보지 않기</button></div>
+<div class="act"><button class="cta" data-act="go">이미지 스튜디오 보기 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button><button class="ghost" data-act="later">다음에 볼게요</button><button class="ghost" data-act="dismiss">이 소개 다시 보지 않기</button></div>
 <div class="tabs">
-<button data-tab class="on"><b>01</b>포스터</button><button data-tab><b>02</b>미구매 고객</button><button data-tab><b>03</b>자동 발송</button><button data-tab><b>04</b>업종 비교</button><button data-tab><b>안내</b>인증</button>
+<button data-tab class="on"><b>01</b>포스터</button><button data-tab><b>02</b>미구매 고객</button><button data-tab><b>03</b>자동 발송</button><button data-tab><b>04</b>업종 비교</button>
 <button class="pp" data-pp aria-label="자동 넘김 멈춤"><svg class="ic"><use xlink:href="#v3p-pau"/></svg><svg class="ic"><use xlink:href="#v3p-ply"/></svg></button>
 </div>
 </div>`;
 
-/** 무료체험 팝업의 창 안쪽(무대 + 글 + 신청 버튼) */
-export const V3_TRIAL_HTML = ICONS + `<div class="vis">
+/** 무료체험 창의 안쪽(무대 + 글 + 신청 버튼) */
+export const V3_TRIAL_HTML = `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="v3p-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol><symbol id="v3p-ar" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol><symbol id="v3p-ck" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol><symbol id="v3p-lf" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol><symbol id="v3p-clk" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol><symbol id="v3p-pau" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol><symbol id="v3p-ply" viewBox="0 0 24 24"><path d="M8 5.5v13l10-6.5z"/></symbol></svg><div class="vis">
 <div class="mo" data-morph="loop" data-ph="0">
 <div class="mo-wrap"><div class="mo-card"><div class="mo-photo i-sk"></div><div class="mo-ck"></div><div class="beam"></div></div><div class="mo-fly i-ck"></div></div>
 <div class="im mo-post i-n1" role="img" aria-label="이미지 스튜디오로 만든 포스터"></div>
@@ -475,3 +467,18 @@ export const V3_TRIAL_HTML = ICONS + `<div class="vis">
 <div class="lnk"><button data-act="later">다음에 볼게요</button><button data-act="dismiss">이 안내 다시 보지 않기</button></div></div>
 <div class="done"><svg class="ic"><use xlink:href="#v3p-ck"/></svg><div>무료체험 3회가 열렸습니다<small data-remaining>남은 횟수 3회</small></div><button class="go" data-act="studio">이미지 스튜디오로 가기 <svg class="ic"><use xlink:href="#v3p-ar"/></svg></button></div>
 </div>`;
+
+/**
+ * 누끼 → 포스터에 쓰는 세 업종.
+ *   c = 누끼 사진 속 제품의 가운데(가로 · 세로)와 폭 · p = 포스터 속 그 제품의 가운데와 폭(그림마다 잰 값 · 0 ~ 1)
+ *   text = 그 포스터가 붙어 나가는 MMS 문안(광고 표기 + 무료수신거부 · 줄 단위)
+ */
+export interface V3MorphSet { src: string; cut: string; post: string; c: [number, number, number]; p: [number, number, number]; name: string; text: string }
+export const V3_MORPH_SETS: readonly V3MorphSet[] = [
+  { src: 'i-sk', cut: 'i-ck', post: 'i-n1', c: [0.498, 0.504, 0.215], p: [0.681, 0.613, 0.1146], name: '결온',
+    text: '(광고)[결온]\n밤사이 채우는 윤기, 앰버 세럼\n\n하루의 끝, 세안 뒤 한 방울이면\n아침 피부가 달라집니다.\n이번 주 일요일까지\n회원 감사 주간이 이어집니다.\n\nhanjul.ai/s/kyeolon\n무료수신거부 080-000-0000' },
+  { src: 'i-so', cut: 'i-co', post: 'i-n3', c: [0.496, 0.566, 0.641], p: [0.496, 0.549, 0.343], name: '오후담',
+    text: '(광고)[오후담]\n겨울 시즌 메뉴, 메이플 크림 라떼\n\n찬 바람 부는 오후,\n따뜻한 한 잔이 생각날 때\n창가 자리를 비워 두겠습니다.\n\nhanjul.ai/s/ohudam\n무료수신거부 080-000-0000' },
+  { src: 'i-ss', cut: 'i-cs', post: 'i-n4', c: [0.486, 0.49, 0.668], p: [0.54, 0.655, 0.62], name: '소요웨어',
+    text: '(광고)[소요웨어]\n첫 추위엔 울 니트\n\n올겨울 처음 꺼내 입는 니트,\n포근한 케이블 짜임으로 준비했습니다.\n윈터 컬렉션이 지금 열렸습니다.\n\nhanjul.ai/s/soyo\n무료수신거부 080-000-0000' },
+];

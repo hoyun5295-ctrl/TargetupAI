@@ -230,15 +230,23 @@ describe('화면 — 안내 창 한 곳에서 보내고 · 메뉴는 허용 계�
 describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 · 뜬 것과 바로가기 기록', () => {
   const promo = front('components/AiOperatorLoginPromo.tsx');
 
-  // ★ 2026-11-13 C133 F7 — 창 내용 교체(한줄로 V3 소개). 대상 · 계정당 횟수는 서버 선점이 정한다(utils/v3-intro · 시험 = c133-v3-intro*.test.ts)
-  it('대상 = 서버 선점이 띄우라고 답할 때만(모름 · 실패는 띄우지 않는다)', () => {
-    expect(promo).toContain("import { claimV3Intro, dismissV3Intro, type V3Intro } from '../utils/v3-intro';");
-    expect(promo).toContain('const got = await claimV3Intro();');
-    expect(promo).toContain('if (!alive || !got) return;');
+  // ★ 2026-11-16 C136 — 창의 글 · 그림은 이 번들에 없고 로그인 뒤 서버가 준다(설계서 docs/2026-11-16-c136-proposal-kit-trial-design.md §2).
+  //   대상 · 판 · 계정당 횟수는 서버가 정한다(utils/v3-intro · 시험 = c133-v3-intro*.test.ts) · 순서 = 준비 → 그림 전부 받기 → 선점 → 띄움.
+  const scenes = front('components/v3/V3ScenesPromo.tsx');
+  const showPart = () => promo.slice(promo.indexOf('// ② 표시'), promo.indexOf('// 열려 있는 동안'));
+
+  it('대상 = 서버가 띄우라고 답할 때만(모름 · 실패 · 그림을 못 받음 = 띄우지 않는다)', () => {
+    expect(promo).toContain("import { claimV3Intro, peekV3Intro, type V3IntroVariant } from '../utils/v3-intro';");
+    expect(promo).toContain('const peek = await peekV3Intro();');
+    expect(promo).toContain('if (!alive || !peek) return;');
+    expect(promo).toContain('const text = await resolveGated(peek.content);');
+    expect(promo).toContain('if (!text) return;');
+    expect(promo).toContain('const claimed = await claimV3Intro(peek.introKey);');
+    expect(promo).toContain('if (!alive || !claimed) { text.release(); return; }');
     expect(promo).not.toContain('fetchAiOperatorAccess');   // 옛 판정(자동 마케팅을 못 쓰는 회사만)은 걷었다
     const util = front('utils/v3-intro.ts');
-    expect(util).toContain("if (!r.ok || !d?.success || d.show !== true) return null;");
-    expect(util).toContain('if (posters.length === 0) return null;');
+    expect(util).toContain("if (!r.ok || d?.success !== true || typeof d.introKey !== 'string') return null;");
+    expect(util).toContain('return r.ok && d?.success === true && d.show === true && d.introKey === introKey;');
   });
 
   it('로그인 한 번(토큰)마다 한 번 · 이미 띄웠으면 묻지도 않는다', () => {
@@ -247,29 +255,31 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
   });
 
   it('★ Codex 2R — 「한 번」은 원자적으로 잡을 수 있을 때만: 잠금이 없거나 표식을 저장 못 하면 띄우지 않는다 · 한 화면 한 번', () => {
-    const show = promo.slice(promo.indexOf('// ② 표시'), promo.indexOf('// 열려 있는 동안'));
+    const show = showPart();
     expect(show).toContain('if (!mark || !locks?.request) return;');
     expect(show).toContain('return writeSeen(mark);');
-    expect(show).toContain('if (!eligible || blocked || open || shownRef.current) return;');
-    expect(show.indexOf('shownRef.current = true;')).toBeLessThan(show.indexOf('setOpen(true);'));
-    expect(show).not.toContain(': claim();'); // 잠금 없는 직접 선점 분기 없음
+    expect(show).toContain('if (!eligible || blocked || open || askedRef.current) return;');
+    expect(show.indexOf('askedRef.current = true;')).toBeLessThan(show.indexOf('setShown({'));
+    expect(show).not.toContain(': take();'); // 잠금 없는 직접 선점 분기 없음
   });
 
-  it('★ Codex 1R — 탭 두 개여도 한 번: 탭 사이 잠금 안에서 표식을 다시 보고 잡은 탭만 띄우고 기록한다', () => {
-    const show = promo.slice(promo.indexOf('// ② 표시'), promo.indexOf('// 열려 있는 동안'));
-    expect(show).toContain("locks.request('ai-op-login-promo', async () => claim())");
+  it('★ Codex 1R — 탭 두 개여도 한 번: 탭 사이 잠금 안에서 표식을 다시 보고 잡은 탭만 묻고 띄우고 기록한다', () => {
+    const show = showPart();
+    expect(show).toContain("locks.request('ai-op-login-promo', async () => take())");
     expect(show).toContain('if (!alive || readSeen() === mark) return false;');
-    expect(show.indexOf('writeSeen(mark);')).toBeLessThan(show.indexOf('setOpen(true);'));
-    expect(show.indexOf('if (!alive || !won) return;')).toBeLessThan(show.indexOf("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');"));
-    // ★ C133 — 서버에 묻는 것(= 노출 한 번)은 잠금을 잡은 탭만 · 이 화면에서 다시 묻지 않게 표시한 뒤 · 띄우기 전에
-    expect(show.indexOf('if (!alive || !won) return;')).toBeLessThan(show.indexOf('await claimV3Intro()'));
-    expect(show.indexOf('shownRef.current = true;')).toBeLessThan(show.indexOf('await claimV3Intro()'));
-    expect(show.indexOf('await claimV3Intro()')).toBeLessThan(show.indexOf('setOpen(true);'));
+    // ★ C136 — 서버에 묻는 것은 잠금을 잡은 탭만 · 이 화면에서 다시 묻지 않게 표시한 뒤 · 준비 → 그림 → 선점(= 노출 한 번) → 띄움 → 기록
+    const order = [
+      'writeSeen(mark);', 'if (!alive || !won) return;', 'askedRef.current = true;',
+      'await peekV3Intro()', 'await resolveGated(', 'await claimV3Intro(', 'setShown({', "'open');",
+    ].map((x) => show.indexOf(x));
+    expect(order.every((n) => n >= 0)).toBe(true);
+    expect([...order].sort((x, y) => x - y)).toEqual(order);
     expect(show.match(/claimV3Intro\(/g)).toHaveLength(1);
+    expect(show.match(/peekV3Intro\(/g)).toHaveLength(1);
   });
 
   it('★ Codex 1R — 다른 자동 안내 창(요금제 변경 알림)이 정해지기 전 · 열려 있는 동안은 기다린다(렌더 때 아는 값)', () => {
-    expect(promo).toContain('if (!eligible || blocked || open || shownRef.current) return;');
+    expect(promo).toContain('if (!eligible || blocked || open || askedRef.current) return;');
     const dash = front('pages/Dashboard.tsx');
     // ★ C133 — 마케팅 진단 초대 창도 자동 안내 창이다: 진단 상태를 알기 전 · 초대가 뜰 차례 · 떠 있는 동안에도 기다린다
     expect(dash).toContain(
@@ -288,27 +298,28 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
   });
 
   it('뜬 것 · 바로가기를 기록하고 이미지 스튜디오로 간다(★ C133 — 허브 → 이미지 스튜디오)', () => {
-    expect(promo).toContain("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'open');");
-    expect(promo).toContain("reportPlanFeature(LOGIN_PROMO_FEATURE_ID, 'go');");
-    expect(promo).toContain("navigate('/image-studio');");
-    expect(promo).not.toContain("navigate('/ai-operator');");
+    expect(promo).toContain("reportPlanFeature(peek.variant === 'trial' ? STUDIO_TRIAL_POPUP_ID : LOGIN_PROMO_FEATURE_ID, 'open');");
     expect(promo).toContain("export const LOGIN_PROMO_FEATURE_ID = 'login-promo';");
+    expect(scenes).toContain("const FEATURE_ID = 'login-promo';");
+    expect(scenes).toContain("else if (act === 'go') { reportPlanFeature(FEATURE_ID, 'go'); onClose(); navigate('/image-studio'); }");
+    expect(scenes).not.toContain("navigate('/ai-operator');");
   });
 
-  it('★ C133 — 영상 대신 서버가 준 포스터 · 칩만 그린다 · 바깥을 눌러도 닫히지 않는다 · native dialog 0', () => {
+  it('★ C136 — 서버가 준 글만 그린다(번들에 창의 글 · 그림 0) · 바깥을 눌러도 닫히지 않는다 · native dialog 0 · 닫으면 그림 주소를 버린다', () => {
     expect(promo).not.toContain('<video');
-    expect(promo).toContain('{intro.posters.map((p, i) => (');
-    expect(promo).toContain('{intro.chips.map((c) => (');
-    expect(promo).toContain('if (!open || !intro) return null;');
+    expect(promo).toContain("return shown.variant === 'trial' ? <StudioTrialPromo {...inner} /> : <V3ScenesPromo {...inner} />;");
+    expect(promo).toContain('if (!shown) return null;');
+    expect(promo).toContain('useEffect(() => () => { text?.release(); }, [text]);');
+    expect(scenes).toContain('<style>{css}</style>');
+    expect(scenes).toContain('dangerouslySetInnerHTML={inner}');
     // 바깥(어두운 판)에는 누름 처리가 없다 — 닫기는 X · Esc · 「다음에 볼게요」
-    const backdrop = promo.slice(promo.indexOf('<div className="fixed inset-0'), promo.indexOf('ref={dialogRef}'));
-    expect(backdrop).not.toContain('onClick');
-    expect(promo).not.toMatch(/\b(alert|confirm|prompt)\(/);
+    expect(scenes).toContain('<div className="scrim" />');
+    for (const src of [promo, scenes]) expect(src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')).not.toMatch(/\b(alert|confirm|prompt)\(/);
   });
 
-  it('★ C133 — 「이 소개 다시 보지 않기」는 서버에 적힌 뒤에만 약속한다(못 적으면 그렇다고 말한다)', () => {
-    const dismiss = promo.slice(promo.indexOf('const dismiss = async () => {'), promo.indexOf('return (', promo.indexOf('const dismiss = async () => {')));
-    expect(dismiss).toContain('const saved = await dismissV3Intro();');
+  it('「이 소개 다시 보지 않기」는 서버에 적힌 뒤에만 약속한다(못 적으면 그렇다고 말한다) · 판 열쇠를 싣는다', () => {
+    const dismiss = scenes.slice(scenes.indexOf('const dismiss = async () => {'), scenes.indexOf('const onClick'));
+    expect(dismiss).toContain('const saved = await dismissV3Intro(introKey);');
     expect(dismiss).toContain("if (saved) toast.success('이 계정에서는 다시 띄우지 않아요');");
     expect(dismiss).toContain("else toast.error('저장하지 못했어요. 다음에 다시 눌러 주세요.');");
   });
