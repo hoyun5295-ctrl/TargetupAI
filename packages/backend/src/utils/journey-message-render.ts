@@ -11,7 +11,7 @@
  * 다른 것 하나: 링크 줄이기(short-url)는 실제 발송에서만 만든다(미리보기 · 검사가 추적 링크를 만들면 안 된다).
  */
 import { query } from '../config/database';
-import { prepareSendMessage, prepareFieldMappings, getOpt080Number, findVarTokens } from './messageUtils';
+import { prepareSendMessage, prepareFieldMappings, getOpt080Number, findVarTokens, buildAdMessage } from './messageUtils';
 import { sanitizeUnsendableForSms } from './message-sanitizer';
 import { resolveJourneyAdFlag } from './journey-ad-policy';
 import { journeyCopyIssue, type JourneyCopyIssue } from './send-placeholder-gate';   // ★ 2026-11-02 보낼 글 판정 CT(설계서 3-0 CT-J10)
@@ -140,6 +140,23 @@ export async function renderJourneySmsMessage(input: JourneySmsRenderInput): Pro
     externalContext,
   });
   return { message: prep.message, subject: prep.subject, msgType, isAd };
+}
+
+/**
+ * ★ 2026-11-16 C139(뿌리 R98 · 설계서 docs/2026-11-16-c139-results-display-design.md 2-1) — 여정 단계 캠페인 행의 대표 본문(문자 칸).
+ *   = 위 렌더와 같은 차례(보낼 수 없는 글자 정리 → (광고) 머리 · 080 꼬리 = buildAdMessage)에서 **고객 값만 넣지 않은 글**.
+ *   변수(%…%) · Liquid · 외부 값 · 예측 값 · 추천 고르기는 하지 않는다(DB · 망 호출 0).
+ *   머리 · 꼬리를 붙이는가 = 원문(변수 자리는 그대로)의 고정 글자로 판정한다 — 변수 값이 판정을 바꾸는 고객(값이 「(광고)」로 시작 ·
+ *   「무료수신거부」를 담음)은 받은 글과 이 글이 다르다(대표 본문은 한 고객의 글이 아니다 · 시험 c139-results-display R98-3 반례).
+ *   ⛔ 발송 결과 화면 · 캘린더 · 통계 · AI 참고 글이 이 칸을 다시 그린다 — 고객에게 채운 글을 넣지 않는다(옛: 첫 고객의 렌더 결과).
+ */
+export function journeySmsDisplayCopy(input: { template: string | null | undefined; channel: string | null | undefined; isAd: boolean | null | undefined; opt080Number: string }): string {
+  const src = String(input.template || '');
+  if (!src.trim()) return '';
+  const msgType = journeySmsType(input.channel);
+  const isAd = resolveJourneyAdFlag(String(input.channel || 'lms'), input.isAd ?? undefined);
+  const sanitized = sanitizeUnsendableForSms(src).sanitized;
+  return buildAdMessage(sanitized, msgType, isAd, input.opt080Number);
 }
 
 /**

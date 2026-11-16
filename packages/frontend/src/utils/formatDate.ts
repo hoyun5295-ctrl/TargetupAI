@@ -1214,6 +1214,26 @@ export function formatCampaignMessageForDisplay(
   );
 }
 
+/**
+ * ★ 2026-11-16 C139 — 캠페인 제목 표시 한 곳(발송 결과 상세 정보 줄 · 상세 미리보기 · 채널통합조회 메시지 내용 창).
+ *   장문 · 그림 캠페인이고 제목(subject → message_subject)이 있을 때만 · 광고 표기 = 표기 칸 판정(C137 adTextOnFront · is_ad 를 바로 넘기지 않는다).
+ *   그 밖 = 빈 값. 옛 CampaignDetailModal 식(`isLmsType && subject ? buildAdSubjectFront(…)`)과 같은 값.
+ */
+export function campaignSubjectForDisplay(campaign: {
+  subject?: string | null;
+  message_subject?: string | null;
+  message_type?: string | null;
+  is_ad?: boolean | null;
+  ad_text?: boolean | null;
+} | null | undefined): string {
+  if (!campaign) return '';
+  const t = campaign.message_type;
+  if (t !== 'LMS' && t !== 'MMS' && t !== 'L' && t !== 'M') return '';
+  const subject = campaign.subject || campaign.message_subject;
+  if (!subject) return '';
+  return buildAdSubjectFront(subject, String(t), adTextOnFront(campaign.is_ad, campaign.ad_text));
+}
+
 // ============================================================
 // ★ D142 (2026-04-28): displayValue 컨트롤타워 (프론트) — Harold님 원칙 그대로 구현.
 // 백엔드 standard-field-map.ts FIELD_DISPLAY_FORMAT_MAP / renderFieldValue 미러.

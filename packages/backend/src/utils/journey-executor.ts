@@ -67,7 +67,7 @@ import { shortenUrlsInTexts } from './short-url';
 import { autoPauseExecution } from './journey-pause-handler';
 import { KST_MONTH_START_SQL } from './stats-aggregation';   // ★ 2026-11-11 C129 D4 — 월 예산 달 = KST(조각 재사용)
 import { calculateNextRunAt, clampPersonalSendHour, isWithinSendHours, sendWindowStateFor, isNightExemptStep, nextDaySendWindowStart } from './send-time-util';
-import { pickStepCampaignForUnits } from './journey-step-campaign';
+import { pickStepCampaignForUnits, stepCampaignDisplayCopy } from './journey-step-campaign';
 import { judgeLoadUnit, recordLoadUnit, clearLoadUnit, confirmLoadUnit } from './journey-send-claim';
 import { evaluateCustomerFieldCondition, type ConditionOutcome } from './journey-condition';
 import { isCustomerSendable } from './journey-safety-filter';
@@ -960,7 +960,21 @@ async function processMessageBatchBody(
 
     // ── 31 적재(⑤ 적재 단위 계약) — 비발송 결말보다 먼저. 적재가 중간에 멈추면(돈 · 창 · 보류 · 바깥 멈춤 · 안 들어감 · 결과 불명) 그 자리 뒤 고객은
     //    이번 회차 결말 0(경계 계약 = 한 건 판의 「멈춘 뒤 진입 시점 정지」 · 다음 회차가 그 자리부터 다시 본다 · Codex 구현 1R) ──
-    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep, kakaoPay, ledgerShape }, res) : null;
+    // ★ 2026-11-16 C139(뿌리 R98) — 단계 캠페인 행 대표 본문 = 첫 보낼 줄이 받은 판(변이 = 렌더 :888 과 같은 applyVariantToStep)의 보낸 꼴에서 고객 값만 넣지 않은 글.
+    //   옛: sendUnits 가 rows[0].message(첫 고객에게 채운 글)를 넣어 발송 결과 · 캘린더 · 통계 · AI 참고 글이 그 고객의 이름 · 매장을 보였다(1116 접수 cmwilf3re1).
+    //   080 = 렌더가 쓴 shared 값(문자 갈래 · 879 에서 늘 만든다) · 알림톡은 shared 가 null 이고 080 을 쓰지 않는다(Codex 설계 3R).
+    const firstVariantId = sendRows.length > 0 ? (variantByExec.get(sendRows[0].exec.execution_id) ?? null) : null;
+    const firstVariant = firstVariantId ? variants.find((v) => v.id === firstVariantId) : undefined;
+    const firstStep = firstVariant ? ({ ...step, ...applyVariantToStep(step, firstVariant) } as StepRow) : step;
+    const displayMessage = stepCampaignDisplayCopy({
+      isKakao,
+      kakaoTemplateContent: kakaoTemplateRow ? String(kakaoTemplateRow.content || '') : null,
+      template: firstStep.message_template,
+      channel: firstStep.channel || 'lms',
+      isAd: firstStep.is_ad,
+      opt080Number: isKakao ? '' : shared!.opt080Number,
+    });
+    const stopIdx = sendRows.length > 0 ? await sendUnits(head, step, sendRows, { isKakao, msgType, isAd, sendCost, kakaoTemplateRow, tables, variantByExec, snapshotId: snap.snapshotId, adGateBatch: adGate?.marked ? adGateBatch : null, adKeep: adRelease.keep, kakaoPay, ledgerShape, displayMessage }, res) : null;
     const end = boundary < 0 ? outcomes.length : boundary;
     await applyRowOutcomes(head, step, outcomes, stopIdx == null ? end : Math.min(stopIdx, end), res);
 
@@ -1042,13 +1056,15 @@ async function applyBoundaryPause(head: ExecutionRow, step: StepRow, row: { exec
 async function sendUnits(
   head: ExecutionRow, step: StepRow, rows: Array<SendRow & { idx: number }>,
   c: { isKakao: boolean; msgType: string; isAd: boolean; sendCost: number; kakaoTemplateRow: any; tables: string[]; variantByExec: Map<string, string | null>; snapshotId: string | null; adGateBatch?: string | null; adKeep?: Set<string>;
-       kakaoPay?: { fallback: 'SMS' | 'LMS' | null; expectShape: string } | null; ledgerShape?: string },
+       kakaoPay?: { fallback: 'SMS' | 'LMS' | null; expectShape: string } | null; ledgerShape?: string;
+       /** ★ 2026-11-16 C139 — 단계 캠페인 행 대표 본문(stepCampaignDisplayCopy · 고객에게 채운 글이 아니다) */
+       displayMessage: string },
   res: BatchResult,
 ): Promise<number | null> {
   const prepaidMsgType = c.msgType === 'KAKAO' ? 'KAKAO' : c.msgType;
   const pick = await pickStepCampaignForUnits({
     companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, stepOrder: step.step_order, msgType: c.msgType,
-    representativeMessage: rows[0].message, subject: rows[0].subject || null, isAd: c.isAd, createdBy: head.created_by,
+    representativeMessage: c.displayMessage, subject: rows[0].subject || null, isAd: c.isAd, createdBy: head.created_by,
     sendChannel: c.isKakao ? 'alimtalk' : 'sms', callbackNumber: rows[0].callback,
     kakaoTemplateId: c.isKakao && c.kakaoTemplateRow ? c.kakaoTemplateRow.id : null,
     mmsImagePaths: (c.msgType === 'MMS' && step.mms_image_paths && step.mms_image_paths.length > 0) ? JSON.stringify(step.mms_image_paths) : null,

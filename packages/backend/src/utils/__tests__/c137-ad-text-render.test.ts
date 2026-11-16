@@ -162,8 +162,13 @@ describe('기계 추출 — 저장된 건을 그리는 자리에서 광고 여�
     const ap = code(front('pages/AgencyApprovePage.tsx'));
     expect(ap).toContain("buildAdSubjectFront(r.subject || '', r.messageType, adTextOnFront(r.isAd, r.adText))");
     expect(ap).toContain("{adTextOnFront(r.isAd, r.adText) ? ' 광고 표시와 무료 수신거부 번호는 자동으로 붙습니다.' : ''}");
+    // ★ 2026-11-16 C139 — 상세 창 제목 두 자리(정보 줄 · 미리보기)는 같은 식을 CT campaignSubjectForDisplay 로 옮겼다(값 같음) · 그 CT 가 표기 칸 판정을 지난다
     const cd = code(front('components/CampaignDetailModal.tsx'));
-    expect(cd.match(/adTextOnFront\(campaign\.is_ad, campaign\.ad_text\)/g)).toHaveLength(2);
+    expect(cd.match(/campaignSubjectForDisplay\(campaign\)/g)).toHaveLength(1);
+    expect(cd).not.toMatch(/buildAdSubjectFront\(/);
+    const fd = code(front('utils/formatDate.ts'));
+    const ct = fd.slice(fd.indexOf('export function campaignSubjectForDisplay'));
+    expect(ct.slice(0, ct.indexOf('\n}\n'))).toContain('adTextOnFront(campaign.is_ad, campaign.ad_text)');
     const sc = code(front('components/ScheduledCampaignModal.tsx'));
     expect(sc.match(/adTextOnFront\(selectedScheduled\??\.is_ad, selectedScheduled\??\.ad_text\)/g)).toHaveLength(3);
   });

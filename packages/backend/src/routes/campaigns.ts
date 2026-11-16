@@ -13,7 +13,7 @@ import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/t
 import { recordCustomerSends } from '../utils/customer-send-stats';
 import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts, composeSpamCheckText, kakaoFallbackSpamItems } from '../utils/messageUtils';
 import { checkSpamBlockBeforeCharge } from '../utils/spam-block';
-import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, getDisplayContents, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, getDisplayContents, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus, deliveredViewOf } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
@@ -1644,7 +1644,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
          SUM(CASE WHEN status_code IN (${SUCCESS_CODES_SQL}) AND msg_type = 'F' AND NOT (${KAKAO_INROW_FALLBACK_SMS_SQL}) AND NOT (${KAKAO_INROW_FALLBACK_LMS_SQL}) THEN 1 ELSE 0 END) AS ok_brand`,
         testWhere, queryParams),
       smsSelectPagedAll(allTables,
-        await withFriendYnField('seqno, dest_no, msg_contents, msg_type, sendreq_time, status_code, mobsend_time, bill_id, k_oriseq'),   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
+        // ★ 2026-11-16 C139 — 받은 모양(deliveredViewOf)에 제목 · 대체 유형 · 대체 문안 칸(1116 MySQL 실측 = msg_contents 를 가진 표 138 모두 두 칸 있음)
+        await withFriendYnField('seqno, dest_no, msg_contents, msg_type, title_str, k_next_type, k_next_contents, sendreq_time, status_code, mobsend_time, bill_id, k_oriseq'),   // ★ 2026-11-08 C117 D10 — 줄 필드 = 친구 칸 CT(withFriendYnField · 표마다)
         testWhere, queryParams, 'sendreq_time DESC, seqno DESC', TEST_LIST_LIMIT, 0),
     ]);
 
@@ -1687,18 +1688,25 @@ router.get('/test-stats', async (req: Request, res: Response) => {
     stats.cost = okBrand * costRow.brand + okSms * costSms + okMms * costMms + okOther * costLms;
 
     // 리스트 포맷팅
-    const list = allResults.map((r: any) => ({
-      id: r.seqno,
-      phone: r.dest_no,
-      // ★ 2026-09-26 S1-H06 브랜드 테스트가 이 목록에 들어온다 — 유형·본문은 표시 CT(브랜드 본문은 JSON이라 문구만 꺼낸다)
-      content: getDisplayContents(r.msg_type, r.msg_contents),
-      type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),   // ★ C107 — 결과 코드까지(브랜드 대체 = 「대체 SMS」 · 청구 = 테스트 SMS)
-      sentAt: r.sendreq_time,
-      status: isSuccess(r.status_code) ? 'success' : PENDING_CODES.includes(r.status_code) ? 'pending' : 'fail',
+    const list = allResults.map((r: any) => {
+      // ★ 2026-11-16 C139 — 메시지 내용 창이 받은 모양(제목 · 대체로 받은 유형 · 대체 문안)으로 그린다(원 칸은 응답에 싣지 않는다)
+      const view = deliveredViewOf(r);
+      return {
+        id: r.seqno,
+        phone: r.dest_no,
+        // ★ 2026-09-26 S1-H06 브랜드 테스트가 이 목록에 들어온다 — 유형·본문은 표시 CT(브랜드 본문은 JSON이라 문구만 꺼낸다)
+        content: getDisplayContents(r.msg_type, r.msg_contents),
+        type: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),   // ★ C107 — 결과 코드까지(브랜드 대체 = 「대체 SMS」 · 청구 = 테스트 SMS)
+        viewType: view.viewType,
+        subject: view.subject,
+        viewContent: view.viewContents,
+        sentAt: r.sendreq_time,
+        status: isSuccess(r.status_code) ? 'success' : PENDING_CODES.includes(r.status_code) ? 'pending' : 'fail',
 
-      testType: 'manager',
-      senderName: senderMap[r.bill_id] || '-',
-    }));
+        testType: 'manager',
+        senderName: senderMap[r.bill_id] || '-',
+      };
+    });
 
     // ========== 스팸필터 테스트 통합 ==========
     // ★ D104: 날짜 필터 컨트롤타워 사용
@@ -1746,7 +1754,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       SELECT
         r.id, r.phone, r.carrier, r.message_type, r.result, r.received,
         t.created_at as sent_at, t.user_id, t.callback_number,
-        t.message_content_sms, t.message_content_lms, t.source,
+        t.message_content_sms, t.message_content_lms, t.source, t.subject,
         u.name as sender_name
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
@@ -1764,6 +1772,8 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         id: r.id,
         phone: r.phone,
         content: msgType === 'LMS' ? (r.message_content_lms || '') : (r.message_content_sms || ''),
+        // ★ 2026-11-16 C139 — 장문 검사의 저장된 제목(1116 information_schema 실측 = spam_filter_tests.subject 있음 · 손 검사는 저장 칸이 비어 빈 값)
+        subject: msgType === 'LMS' ? String(r.subject || '').trim() : '',
         type: msgType,
         sentAt: r.sent_at,
         status: spamResultRowStatus(r.result),

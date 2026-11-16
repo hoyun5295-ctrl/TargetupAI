@@ -11,6 +11,7 @@
 
 import { query } from '../config/database';
 import { sendSystemAlert } from './system-alert';
+import { journeySmsDisplayCopy } from './journey-message-render';
 
 export interface StepCampaignSpec {
   companyId: string;
@@ -18,7 +19,14 @@ export interface StepCampaignSpec {
   stepId: string;
   stepOrder: number;
   msgType: string;                 // SMS | LMS | MMS | KAKAO
-  representativeMessage: string;   // 대표 본문(목록 표시용 — 실제 본문은 고객별 큐에 렌더됨)
+  /**
+   * 대표 본문(발송 결과 목록 · 상세 · 캘린더 · 통계 · 엑셀 · AI 참고 글이 다시 그린다 · 실제 본문은 고객별 큐에 렌더됨).
+   * ★ 2026-11-16 C139(뿌리 R98) = stepCampaignDisplayCopy 결과만 = 보낸 꼴에서 변수 · 추천 자리를 채우지 않은 글. 고객에게 채운 글을 넣지 않는다
+   *   (옛: 첫 고객의 렌더 결과 → 그 칸을 다시 그리는 화면 전부가 한 고객의 이름 · 매장을 보였다 · 1116 접수 cmwilf3re1).
+   * D103(campaigns.message_content = 순수 본문)의 예외: 여정 행은 다시 보내는 입력이 아니고(재발송 경로를 타지 않음) 보낸 꼴을 보존하는 기록이다
+   *   = (광고) 머리 · 080 꼬리가 보낸 그대로 남아 화면이 지금 080 설정으로 다시 붙이지 않는다(옛 여정 행도 머리 · 꼬리가 든 글).
+   */
+  representativeMessage: string;
   subject: string | null;
   isAd: boolean;
   createdBy: string | null;
@@ -33,6 +41,24 @@ export interface StepCampaignSpec {
    *   월 예산은 꼴 있는 캠페인을 잔액 원장으로 센다(journey-executor JOURNEY_MONTH_COST_SQL) — 섞이면 둘 다 틀린다.
    */
   ledgerShape?: string | null;
+}
+
+/**
+ * ★ 2026-11-16 C139(뿌리 R98) — 단계 캠페인 행의 대표 본문 고르기(설계서 docs/2026-11-16-c139-results-display-design.md 2-1).
+ *   알림톡 칸 = 템플릿 원문 그대로(`#{변수}` · 글자 정리 · 광고 표기 없음 = 실행기가 원문에 변수만 채우는 것과 같은 꼴).
+ *   문자 칸 = journeySmsDisplayCopy(렌더와 같은 차례 · 고객 값만 넣지 않음). 원문 빈 값 = 빈 값.
+ *   인자는 그 묶음의 첫 보낼 줄이 받은 판(변이 포함)의 값 · 080 = 그 묶음 렌더가 쓴 값(알림톡은 쓰지 않는다 = 빈 값).
+ */
+export function stepCampaignDisplayCopy(input: {
+  isKakao: boolean;
+  kakaoTemplateContent?: string | null;
+  template?: string | null;
+  channel?: string | null;
+  isAd?: boolean | null;
+  opt080Number: string;
+}): string {
+  if (input.isKakao) return String(input.kakaoTemplateContent || '');
+  return journeySmsDisplayCopy({ template: input.template, channel: input.channel, isAd: input.isAd, opt080Number: input.opt080Number });
 }
 
 /** KST 기준 오늘 날짜(YYYY-MM-DD). */

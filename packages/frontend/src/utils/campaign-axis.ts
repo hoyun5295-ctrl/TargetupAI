@@ -210,6 +210,14 @@ export function resolveSendTypeChipClass(sendType: string | null | undefined): s
   return 'bg-violet-100 text-violet-700';
 }
 
+/**
+ * ★ 2026-11-16 C139 — 여정 단계 캠페인인가(send_type 판정 한 곳 · 화면은 리터럴을 비교하지 않는다 = brand-axis-invariants).
+ *   여정 행의 저장 본문 = 보낸 꼴에서 고객 값만 넣지 않은 글(뿌리 R98) → 상세 미리보기가 첫 줄 실제 글(한 고객 이름)을 앞세우지 않는다.
+ */
+export function isJourneySendType(sendType: string | null | undefined): boolean {
+  return String(sendType || '').trim() === 'journey';
+}
+
 /** 발송결과 유형 필터 값 — `'all'`은 무필터 */
 export const SEND_TYPE_FILTERS = ['all', 'direct', 'ai', 'auto', 'journey', 'operator'] as const;
 export type SendTypeFilter = (typeof SEND_TYPE_FILTERS)[number];

@@ -14,7 +14,7 @@ import {
 } from '../utils/sms-queue';
 // ★ 2026-07-30 브랜드 SMSQ 합류(msg_type='F') — 채널 분기 판정은 CT 목록 하나만 쓴다
 import { BRAND_CAMPAIGN_CHANNELS, isKakaoSplitChannel } from '../utils/billing-types';
-import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, getSendTypeLabel, getQueueRowStatus, getDisplayContents, SUBSTITUTE_ROW_SQL } from '../utils/sms-result-map';
+import { STATUS_CODE_MAP, CARRIER_MAP, SUCCESS_CODES, PENDING_CODES, getStatusLabel, getStatusType, getCarrierLabel, getSendTypeLabel, getQueueRowStatus, getDisplayContents, SUBSTITUTE_ROW_SQL, deliveredViewOf } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL } from '../config/defaults';
 import { buildDateRangeFilter, buildPeriodFilter, STAT_DATE_EXPR, STAT_STARTED_GUARD, aggregateSmsCountsByCampaign, aggregateSmsSendTimesByCampaign, loadKakaoFallbackForList, aggregateKakaoFallbackByCampaign } from '../utils/stats-aggregation';
 import { computeDisplayCounts } from '../utils/sms-table-split';
@@ -64,7 +64,10 @@ const SMS_DETAIL_FIELDS = `seqno, dest_no, call_back, msg_type, msg_contents, st
   IFNULL(k_template_code, '') AS k_template_code,
   IFNULL(k_next_type, '') AS k_next_type,
   IFNULL(k_oriseq, 0) AS k_oriseq,
+  title_str, k_next_contents,
   (sendreq_time > NOW()) AS is_future`;
+// ★ 2026-11-16 C139 — title_str · k_next_contents = 메시지 내용 창의 받은 모양(deliveredViewOf) 원천 · 응답에는 원 칸을 싣지 않는다
+//   (1116 MySQL 실측 = msg_contents 를 가진 표 138 모두 두 칸 있음 · 이 칸은 회사 라인 · 이력 표 · 비토 라인 표를 UNION ALL 로 읽는다)
 
 /** 엑셀 export용 SMS 필드 (seqno 제외) — 엑셀 2컬럼 유지: 전송요청/발송 (B10: 수신확인 제거) */
 const SMS_EXPORT_FIELDS = `dest_no, call_back, msg_type, msg_contents, status_code, mob_company,
@@ -908,10 +911,15 @@ router.get('/campaigns/:id/messages', async (req: Request, res: Response) => {
 
     // sms-result-map.ts 기반 해석값 추가 (프론트 하드코딩 제거용)
     // ★ 2026-06-13: 발송 요청 시각이 미래인 대기 행 = "발송 예약" — 결과 대기와 구분 (Harold 지시)
-    const enrichedMessages = messages.map((m: any) => {
+    const enrichedMessages = messages.map(({ title_str, k_next_contents, ...m }: any) => {
       const rowStatus = getQueueRowStatus(Number(m.status_code), !!Number(m.is_future));
+      // ★ 2026-11-16 C139 — 메시지 내용 창 = 받은 모양(장문 제목 · 알림톡 · 브랜드의 문자 대체 = 문자 유형 · 대체 문안)
+      const view = deliveredViewOf({ ...m, title_str, k_next_contents });
       return {
         ...m,
+        view_type: view.viewType,
+        subject: view.subject,
+        view_contents: view.viewContents,
         // ★ 2026-07-30: 브랜드 행(msg_type='F')은 msg_contents가 JSON — 본문(MESSAGE)만 풀어 표시.
         msg_contents: getDisplayContents(m.msg_type, m.msg_contents),
         status_label: rowStatus.label,

@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react';
 import { X, FileText } from 'lucide-react';
-import { calculateSmsBytes, formatCampaignMessageForDisplay, buildAdSubjectFront, adTextOnFront, getAlimtalkTemplateStatus } from '../utils/formatDate';
+import { calculateSmsBytes, formatCampaignMessageForDisplay, campaignSubjectForDisplay, getAlimtalkTemplateStatus } from '../utils/formatDate';
 import {
   isAlimtalkChannel,
   isBrandOnlyChannel,
   resolveChannelLabel,
   resolveChannelChipClass,
   resolveSendTypeLabel,
+  isJourneySendType,
 } from '../utils/campaign-axis';
 import MmsImagePreview from './shared/MmsImagePreview';
 import CampaignCallbackField from './shared/CampaignCallbackField';
@@ -64,9 +65,10 @@ export default function CampaignDetailModal({
   const carrierMax = carrierEntries.reduce((m, [, v]) => Math.max(m, Number(v) || 0), 0) || 1;
   const errorMax = errorEntries.reduce((m, [, v]) => Math.max(m, Number(v) || 0), 0) || 1;
 
-  const isLmsType = campaign.message_type === 'LMS' || campaign.message_type === 'MMS' || campaign.message_type === 'L' || campaign.message_type === 'M';
-  const subject = campaign.subject || campaign.message_subject;
-  const previewBody = formatCampaignMessageForDisplay(campaign, firstMessageContent);
+  // ★ 2026-11-16 C139 — 제목 표시 = CT 한 곳(채널통합조회 메시지 내용 창과 같은 식 · 옛 이 자리의 식과 같은 값)
+  const displaySubject = campaignSubjectForDisplay(campaign);
+  // ★ 2026-11-16 C139(뿌리 R98) — 여정 캠페인은 저장 본문이 이미 보낸 꼴(변수 자리만 남김)이라 첫 줄 실제 글(한 고객 이름)을 앞세우지 않는다 · 그 밖 캠페인은 옛 그대로(D137)
+  const previewBody = formatCampaignMessageForDisplay(campaign, isJourneySendType(campaign.send_type) ? undefined : firstMessageContent);
   const mmsImages = Array.isArray(campaign.mms_image_paths) ? campaign.mms_image_paths : [];
 
   const previewChannelName = isAlimtalk ? '알림톡' : isKakao ? '카카오톡' : '문자메시지';
@@ -78,7 +80,7 @@ export default function CampaignDetailModal({
 
   const infoRows: { label: string; value: ReactNode }[] = [
     { label: '캠페인명', value: campaign.campaign_name },
-    ...(isLmsType && subject ? [{ label: '제목', value: buildAdSubjectFront(subject || '', campaign.message_type, adTextOnFront(campaign.is_ad, campaign.ad_text)) }] : []),
+    ...(displaySubject ? [{ label: '제목', value: displaySubject }] : []),
     { label: '유형', value: `${resolveSendTypeLabel(campaign.send_type)} / ${channelLabel}` },
     { label: '발송자', value: campaign.created_by_name || '-' },
     // ★ 2026-10-01 B-1001-6 수신자별 회신번호 = 「고객별 회신번호 … 외 N개」 + 목록 창(그 밖은 종전 표시)
@@ -181,8 +183,8 @@ export default function CampaignDetailModal({
                           </>
                         ) : (
                           <>
-                            {isLmsType && subject && (
-                              <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{buildAdSubjectFront(subject || '', campaign.message_type, adTextOnFront(campaign.is_ad, campaign.ad_text))}</div>
+                            {displaySubject && (
+                              <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{displaySubject}</div>
                             )}
                             {previewBody}
                           </>

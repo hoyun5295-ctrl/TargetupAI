@@ -8,6 +8,7 @@
 
 import { HANJUL_BAND_CODES } from './result-code-hanjul-band.generated';
 import { isBrandOnlyChannel, FALLBACK_BILLING_CODE, billingTypeLabelOf } from './billing-types';
+import { normalizeAlimtalkNextType, usesCustomContents } from './alimtalk-fallback';
 
 // ========================
 // Part 1: QTmsg status_code 매핑
@@ -394,6 +395,42 @@ export function getSendTypeLabel(msgType: string, kOriseq: number | string | nul
   if (msgType === 'S') return 'SMS';
   if (msgType === 'M') return 'MMS';
   return msgType;
+}
+
+/**
+ * ★ 2026-11-16 C139 — 큐 줄 하나를 「받은 사람이 받은 모양」으로 읽는다(발송결과 메시지 내용 창 · 설계서 docs/2026-11-16-c139-results-display-design.md 1-1).
+ *   viewType = 창이 그릴 유형(null = 창은 옛 유형 그대로) · subject = 받은 제목(장문 · 그림으로 받은 줄만 · 그 밖 빈 값) ·
+ *   viewContents = 받은 글이 줄 본문과 다를 때만(알림톡 · 브랜드가 대체 문안 A · B 로 문자 대체 = 큐 k_next_contents) · 그 밖 null.
+ *   대체 판정 = fallbackOf 하나 · 대체 유형 = alimtalk-fallback CT(정규화 · 대체 문안을 쓰는가).
+ */
+export interface DeliveredView {
+  viewType: 'SMS' | 'LMS' | null;
+  subject: string;
+  viewContents: string | null;
+}
+export function deliveredViewOf(row: {
+  msg_type?: string | null;
+  k_oriseq?: number | string | null;
+  status_code?: number | string | null;
+  title_str?: string | null;
+  k_next_type?: string | null;
+  k_next_contents?: string | null;
+}): DeliveredView {
+  const msgType = String(row.msg_type ?? '');
+  const title = String(row.title_str ?? '').trim();
+  const fb = fallbackOf(msgType, row.k_oriseq, row.status_code);
+  if (fb) {
+    const parent = KAKAO_FALLBACK_PARENT_TYPES.includes(msgType);
+    const custom = parent && usesCustomContents(normalizeAlimtalkNextType(row.k_next_type));
+    const next = custom ? String(row.k_next_contents ?? '') : '';
+    return {
+      viewType: fb === 'L' ? 'LMS' : 'SMS',
+      subject: fb === 'L' ? title : '',
+      viewContents: next.trim() ? next : null,
+    };
+  }
+  if (msgType === 'L' || msgType === 'M') return { viewType: null, subject: title, viewContents: null };
+  return { viewType: null, subject: '', viewContents: null };
 }
 
 /**

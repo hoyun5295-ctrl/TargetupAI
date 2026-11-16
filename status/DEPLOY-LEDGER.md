@@ -78,11 +78,12 @@
 | C131 | c5b199d7 |
 | C132 | 5b7c709d |
 | C133 | 38c3671f |
-| C134 | 미커밋 |
+| C134 | f01c711f |
 | C135 | 03e5d935 |
 | C136 | 50b50da1 |
 | C137 | 7e186fd7 |
 | C138 | 미커밋 |
+| C139 | 미커밋 |
 
 ## §1 대기
 
@@ -2067,7 +2068,7 @@ CREATE INDEX IF NOT EXISTS idx_benchmark_day_industry_metric ON benchmark_compan
 - 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journey_selfcheck_daily' ORDER BY ordinal_position;
 - 확인: 열한 줄 · company_id uuid NO · day date NO · failed_executions · errored_executions · stuck_claims · fault_logs · unclosed_campaigns · count_mismatch · violations integer NO · first_judged_at · last_judged_at timestamp with time zone NO
-- 결과: (대기)
+- 결과: 1116 Harold 실행(새 장비 .62 · DDL-2 와 한 줄 · push 앞) = SET · CREATE TABLE · information_schema 열한 줄 기대와 같음
 
 > C134-DDL-1 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
 
@@ -2096,7 +2097,7 @@ CREATE TABLE IF NOT EXISTS journey_selfcheck_daily (
 - 의미 바꿈: 아니오(새 표 · 옛 코드가 읽지 않음)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_name = 'journey_selfcheck_set' ORDER BY ordinal_position;
 - 확인: 아홉 줄 · company_id uuid NO · set_key text NO · journey_id uuid YES · def_rev integer NO · validations integer NO · next_validate_at timestamp with time zone YES · last_reason text YES · created_at · updated_at timestamp with time zone NO
-- 결과: (대기)
+- 결과: 1116 Harold 실행(새 장비 .62 · DDL-1 과 한 줄 · push 앞) = CREATE TABLE · information_schema 아홉 줄 기대와 같음
 
 > C134-DDL-2 · 새 표 · 되돌리기 = 남겨도 무해(옛 코드가 읽지 않음)
 
@@ -2122,7 +2123,7 @@ CREATE TABLE IF NOT EXISTS journey_selfcheck_set (
 - 선행: Codex 설계 1R 반영 · 구현 3R approve(1115) · S3(여정 세트 · 설계서 §12) 설계 Codex 4R approve · 구현 Codex 4R approve(1115) · 실 PG 전체 82파일 756 통과 = 통과 스탬프 찍힘(1115 09:16 · 낮 · 1114 23:36 · 1115 00:03 밤 실행에서 실패하던 다른 세션 시험 3건도 통과) · 단위 전체 820파일 13,193 중 13,192 통과(남은 1 = 아래 커밋 조건) · **C133 C + D 커밋 뒤 routes/ai.ts 의 통과 표식 세 줄을 CT(pretestAndMark) 호출로 바꾼다**(그때까지 계약 시험 journey-selfcheck-set-1115.test.ts 한 건이 빨간불 = 커밋 조건) · 커밋(Harold · 경로 · 문안 = 설계서 §11 · root-ledger.test.ts · journey-builder.ts 가 C133 C + D 와 한 파일 = 그 커밋 뒤) → push · C134-DDL-1 · C134-DDL-2 · **★1116 순서 바꿈 = C134 먼저 홀로**(1116 14:45 같은 결함 재발 · 운영 b3753555 · 합성 회사 · Harold 「꼼꼼히 수정해라」) = 겹치는 세 파일(routes/ai.ts · utils/journey-builder.ts · __tests__/root-ledger.test.ts)은 이 카드 절만 담은 패치 scratch/c134/partial.patch 를 index 에만(C133 C + D · C136 절은 작업 트리에 남음) · 커밋 판 사본(작업 트리 diff 를 거꾸로 적용해 HEAD 를 되살리고 blob 해시 대조 · 이 카드 파일만 얹음 · 다른 카드 새 파일 70 뺌)에서 backend tsc 0 · frontend tsc 0 · 단위 전체 820파일 통과 · 실 PG 전체 83파일 664 통과(1116 · 통과 기록 = 사본 판)
 - 기대: 설계서 docs/2026-11-14-journey-step-campaign-owner-design.md §3 · 여정을 안 쓰는 회사 = 변화 0 · 여정 단계 캠페인은 그날 「보내는 중」으로 보이고 다음 날 여정이 닫는다 · 운영의 998900e1(완료 + 미확정 표식)은 표식 정리 주기가 다시 열어 확정한 뒤 닫는다 · 여정 세트 워커는 스위치 ENV 가 비어 있어 아무것도 안 한다(원장 표도 읽지 않는다)
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep closeFinishedStepCampaigns ≥ 1 · applyListAutoComplete ≥ 1 · reopenStepCampaignForConfirm ≥ 1 · runJourneySelfcheck ≥ 1 · journeySetTick ≥ 1 · pretestAndMark ≥ 1 · 재시작 뒤 에러 로그에서 「적재 중 표식 정리 실패 campaign=998900e1」 이 멎음 · 로그에 「[journey-set]」 0줄(스위치 꺼짐) · SELECT status, result_final, target_count, sent_count FROM campaigns WHERE id = '998900e1-00af-4f17-bc58-003ff4bf07c6'; = 대상 수 · 발송 수 10 · 그 캠페인의 journey_step_logs 에 sending 0 · ★1116 재발 캠페인 b3753555-4ac9-4c92-8626-1a81bed5621c(배포 전 = completed · 대상 1 · 발송 1 · 실행 71c32db0 이 12번 오류 뒤 15:45 실패)도 같은 확인 = 대상 수 · 발송 수가 지금 값 + 그 캠페인의 sending 표식 수 · sending 0 · 두 캠페인을 다시 열 때 경보 「여정 단계 캠페인이 미확정 발송을 가진 채 완료로 닫혀 있어 다시 열었습니다」가 캠페인마다 한 번 = 기대(배포 전 목록이 닫은 흔적)
-- 결과: (대기)
+- 결과: 1116 17:05 ~ 17:07 Harold 실행(같은 pull 에 C138 beb01e0e 함께) = git pull 50b50da1..f01c711f fast-forward 48파일(package.json 0 = npm install 없음) · 백엔드 build:safe [verify-dist] 통과(.js 883 · 두 판 3532 파일 일치) · 빌드 성공 · 프론트 build:safe 빌드 성공(lazy 청크 55 · 비literal import 0) · `pm2 reload targetup-backend` ✓(적재 0건 한 줄 조건 없이 실행 · --update-env 없이 = 이번 범위의 새 env 는 비운 채 나가는 JOURNEY_SELFCHECK_SET_COMPANY_IDS 하나라 같은 결과 · 원장 계산의 AI_OPERATOR_ALLOWED_USERS 는 옛 이름(plan-guard.ts) · 원장 머리 a7426275 가 낡아 범위가 넓게 잡힌 것) · 배포 뒤 확인(1116 Harold 출력) = pm2 online · 서버 HEAD f01c711f · 적재 중 0 · dist grep 여섯 이름 ≥ 1 · b3753555 = 17:08:28 표식 정리 주기가 다시 열어 확정(대상 2 · 발송 2 · sending 0 · 다시 열기 경보 1번) · 그 뒤 「적재 중 표식 정리 실패」 0 · journey-selfcheck 첫 판정 위반 0 · 998900e1 = 대상 · 발송 9 · 그 캠페인 단계 기록 0 · 원인 = 그 여정이 지워져 칸 연결(journey_step_campaigns FK → journeys CASCADE) · 실행 · 단계 기록이 함께 지워짐(1116 C139 실측 = 칸 연결 없는 여정 캠페인 50 중 하나 · 단계 기록 0 · 살아 있는 칸 0 · 마지막 오류 10:47:37) · 기대한 10 은 지운 여정의 미확정 한 단위라 확정할 주인이 없다(큐에 10번째 줄이 있는지 = MySQL 미검증) · C138 dist 확인 = C138-H1 원장
 
 ### C134-S1 · 실측(배포 다음 날 아침)
 - 카드: C134
@@ -2316,6 +2317,22 @@ CREATE TABLE IF NOT EXISTS proposal_trials (
 - 선행: C138-H1
 - 기대: 설계 기록 docs/2026-11-16-c138-trial-entry-interest-design.md §11 열두 줄 전부 맞음(12번은 미신청 미가입 계정이 있을 때만)
 - 확인: 결과(날짜 · 계정 · 사람) · 다름이면 캡처
+- 결과: (대기)
+
+### C139-H1 · 한줄로 배포(발송결과 메시지 내용 창 제목 + 여정 발송 건 변수 자리 표기 · 백엔드 + 프론트 · DDL 0 · DB 쓰기 0 · ENV 0)
+- 카드: C139
+- 단계: 한줄로 배포
+- 선행: Codex 설계 4R · 구현 3R approve(1116) · 커밋(Harold · 경로 = scratch/c139/paths.txt · 일부 파일 = scratch/c139/partial.patch(git apply --cached) · 문안 = scratch/c139/msg.txt · journey-executor.ts · journey-message-render.ts 는 이 카드 줄만 = 다른 카드 C133 미커밋 덩어리와 한 파일 · journey-message-render.ts 의 C139 판 = 추천 자리 없는 판) → push · ★ 바로 앞 로컬 커밋 91568234(비토 대역 라벨 다시 생성 · 비토엔진 세션 · 1116 22:59 · Harold 요청이라는 전달 = 다음 배포에 함께)가 조상이라 이 push 에 함께 올라간다(Harold 1116 「C139 랑 하위세션에서 같이 배포해달라고 한거랑 같이 배포」) · push 전 단위 시험의 실 PG 통과 기록 대조 = 작업 트리 실 PG 전체 통과가 필요(1116 밤 = C133 나눠 보내기 시험 2건이 발송 창 밖 시각에 실패 · STATUS-FEED C133)
+- 기대: 설계서 docs/2026-11-16-c139-results-display-design.md · 테스트발송내역 · 채널통합조회 · 발송 내역의 메시지 내용 창 = 장문 · 그림 줄 · 캠페인에 제목 한 줄 · 알림톡 · 브랜드가 문자로 대체된 줄 = 문자 모양 창 · 받은 글 · 제목 · 그 밖 창 변화 0 · 다음 여정 발송부터 단계 캠페인 행 본문 = 보낸 꼴에서 고객 값만 넣지 않은 글(「%고객명%님」) · 배포 전 여정 행 55 = 옛 글 그대로(설계서 3절) · 미가입 · 직접발송 회사 = 메시지 내용 창 제목 한 줄 말고 변화 0
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep deliveredViewOf ≥ 1(dist/utils/sms-result-map.js · dist/routes/campaigns.js · dist/routes/results.js) · journeySmsDisplayCopy ≥ 1 · stepCampaignDisplayCopy ≥ 1(dist/utils/journey-executor.js) · 재시작 뒤 에러 로그에 발송 내역 · 테스트 목록 조회 오류(Unknown column) 0 · 91568234 가 함께 내려왔으면 dist/utils/result-code-hanjul-band.generated.js 에 「MIME 형식 오류」 ≥ 1
+- 결과: (대기)
+
+### C139-S1 · 실측(배포 다음 날 아침 · 인비토 합성 회사 여정 행)
+- 카드: C139
+- 단계: 사후
+- 선행: C139-H1(다음 날 오전 10시 30분 뒤)
+- 기대: 배포 다음 날 만든 여정 캠페인 행 = message_content 에 「%」 변수 자리가 있고 고객 이름 0 · 알림톡 행 = 템플릿 원문 · 그날 여정 실행 실패 0
+- 확인: SELECT 한 줄(배포 뒤 만든 send_type journey 행의 앞 30자 · 그 칸 판 앞 30자 · 대조) · 직원 시트 = 설계서 6절 두 장(묶음 작업 뒤 한 번)
 - 결과: (대기)
 
 ### C133-DDL-6 · 나눠 보내기 표 둘(설계서 docs/2026-11-13-hanjul-v3-design.md §6 · §18 「배포 C-3」) · ★ 배포 앞

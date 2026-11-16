@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { calculateSmsBytes, formatCampaignMessageForDisplay, formatPhoneNumber } from '../utils/formatDate';
+import { calculateSmsBytes, campaignSubjectForDisplay, formatCampaignMessageForDisplay, formatPhoneNumber } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 import CalendarModal from './CalendarModal';
 import CampaignDetailModal from './CampaignDetailModal';
@@ -136,10 +136,13 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
   // ★ B6+B7(0417 PDF #6 #7): msgDetailContent state 확장
   //   #6 타입라벨 오류(바이트 기반 판정 → 실제 msgType 우선) + #7 MMS 이미지 누락(mmsImages 전달)
   //   호출부 4곳(L412/649/703/1011)에서 객체로 wrapping하여 전달.
+  // ★ 2026-11-16 C139 — subject = 받은 제목(장문 · 그림 · 문자 대체 장문 · 캠페인 제목 · 판정은 서버 deliveredViewOf · 화면 CT campaignSubjectForDisplay)
+  //   여는 자리는 늘 subject 를 싣는다(빈 값 = 제목 줄 없음 · 계약 c139-results-display A-1)
   const [msgDetailContent, setMsgDetailContent] = useState<{
     content: string;
     msgType?: string;
     mmsImages?: any[];
+    subject: string;
   } | null>(null);
   const [enlargedImage, setEnlargedImage] = useState<{ url: string; filename: string } | null>(null); // ★ D123 P5: MMS 이미지 클릭 확대
 
@@ -715,6 +718,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                                 content,
                                 msgType: c.message_type,
                                 mmsImages: Array.isArray(c.mms_image_paths) ? c.mms_image_paths : (typeof c.mms_image_paths === 'string' ? (() => { try { return JSON.parse(c.mms_image_paths); } catch { return []; } })() : []),
+                                // 알림톡 · 브랜드 전용 캠페인의 제목 칸 = 대체 문자 제목(창 본문은 알림톡 · 브랜드 글) → 제목 줄 없음
+                                subject: (isAlimtalkChannel(c) || isBrandOnlyChannel(c)) ? '' : campaignSubjectForDisplay(c),
                               })}
                             />
                             <td className="px-3 py-3 text-center text-[13px] text-neutral-500 tabular-nums whitespace-nowrap">
@@ -991,7 +996,8 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                             <MessageCell
                               content={t.content || ''}
                               maxWidth="max-w-[300px]"
-                              onShowDetail={(content) => setMsgDetailContent({ content, msgType: t.type })}
+                              // 받은 모양(서버 deliveredViewOf) = 문자로 대체돼 나간 줄은 문자 유형 · 대체 문안 · 장문 제목
+                              onShowDetail={(content) => setMsgDetailContent({ content: t.viewContent ?? content, msgType: t.viewType ?? t.type, subject: t.subject || '' })}
                             />
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -1056,7 +1062,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                             <MessageCell
                               content={t.content || ''}
                               maxWidth="max-w-[200px]"
-                              onShowDetail={(content) => setMsgDetailContent({ content, msgType: t.type })}
+                              onShowDetail={(content) => setMsgDetailContent({ content, msgType: t.type, subject: t.subject || '' })}
                             />
                             <td className="px-3 py-2 text-center">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
@@ -1225,9 +1231,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                             <MessageCell
                               content={m.msg_contents || ''}
                               onShowDetail={(content) => setMsgDetailContent({
-                                content,
-                                msgType: m.msg_type, // 'S'/'L'/'M' (MySQL)
+                                // 받은 모양(서버 deliveredViewOf) = 알림톡 · 브랜드가 문자로 대체돼 나간 줄은 문자 유형 · 대체 문안 · 장문 제목
+                                content: m.view_contents ?? content,
+                                msgType: m.view_type ?? m.msg_type, // 'S'/'L'/'M'/'K'/'F' (MySQL) · 대체 줄 = 'SMS'/'LMS'
                                 mmsImages: Array.isArray(selectedCampaign?.mms_image_paths) ? selectedCampaign.mms_image_paths : [],
+                                subject: m.subject || '',
                               })}
                             />
                             {/* ★ D124: 등록일시 = 캠페인 created_at (한줄로에서 발송을 건 시간). 모든 행 동일 */}
@@ -1410,7 +1418,7 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
         {/* ★ D93→D120: 메시지 상세보기 모달 — 핸드폰 프레임 스타일 */}
         {/* ★ B6+B7(0417 PDF #6 #7): msgType 우선 타입 판정 + MMS 이미지 표시 */}
         {msgDetailContent !== null && (() => {
-          const { content, msgType, mmsImages } = msgDetailContent;
+          const { content, msgType, mmsImages, subject } = msgDetailContent;
           // ★ 알림톡(msg_type='K')은 카카오 톤 미리보기 — 문자(LMS/SMS/MMS·카카오실패 대체발송)는 아래 기존 문자창
           if (msgType === 'K') {
             return (
@@ -1475,6 +1483,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-indigo-100 grid place-items-center shrink-0 text-indigo-600"><Smartphone className="w-3.5 h-3.5" strokeWidth={2} /></div>
                             <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-neutral-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-neutral-700 max-w-[95%] select-text cursor-text">
+                              {/* ★ 2026-11-16 C139 — 받은 제목(접수 cmwilrt0m1 · 상세 미리보기 CampaignDetailModal 과 같은 모양) · 빈 값 = 줄 없음 */}
+                              {subject && (
+                                <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{subject}</div>
+                              )}
                               {content}
                               {isMms && hasImages && (
                                 <MmsImagePreview
