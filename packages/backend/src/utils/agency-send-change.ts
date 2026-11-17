@@ -21,6 +21,7 @@ import {
 import { prepareAgencyCopy, agencyCharNotice } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 import type { SpellIssue } from './spell-check';
+import { agencySmsBytesOver, agencySmsBytesOverText } from './agency-send-preview';   // ★ 2026-11-17 C142 SMS 길이(뿌리 R68 길이 축)
 
 export type AgencyChangeResult =
   | { ok: true; row: any; backTo?: AgencySendStatus; timeShifted?: boolean; notice?: string[]; optOutNotice?: string[] }
@@ -139,6 +140,11 @@ export async function editAgencyContentTx(input: {
   if (unknown.length > 0) {
     return fail(400, `명단에 연결하지 않은 항목이 있습니다: ${unknown.map((v) => `%${v}%`).join(' ')}. 그 부분을 빼거나 새로 접수해 주세요.`, 'UNKNOWN_VARS');
   }
+  // ★ 2026-11-17 C142(B-1117-3 · 남지현 접수 · 뿌리 R68 길이 축) — SMS 접수는 고친 글(글 그대로 · 맞춤법 여러 곳 함께)도 명단 전원의
+  //   실제 문장으로 90바이트 안이어야 저장한다. 옛: 접수 입구만 재서 91바이트 SMS 가 검사 · 승인 · 예약 뒤 통신사에서 전량 실패했다.
+  //   판정은 트랜잭션 앞(명단을 읽는다 · 판정과 UPDATE 사이 다른 대기 0 규칙은 아래 시도 키 잠금 판정에 그대로) · 명단 · 유형은 고치기로 안 바뀐다.
+  const overBytes = await agencySmsBytesOver(row, body);
+  if (overBytes !== null) return fail(400, agencySmsBytesOverText(overBytes), 'SMS_BYTES_OVER');
   // ★2026-09-13(3) 회신번호 등록을 고칠 때 다시 본다(판정은 발송 직전과 같은 CT 한 벌)
   const { missing } = await findUnregisteredRequestCallbacks({ id: input.requestId, company_id: row.company_id, created_by: row.created_by, callback_number: row.callback_number });
   if (missing.length > 0) return fail(400, unregisteredCallbackError(missing), 'CALLBACK_UNREGISTERED');

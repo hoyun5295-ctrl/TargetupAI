@@ -86,7 +86,11 @@ import { setPlanMonthCredits, setPostpaidOverageLimit, listLowCreditCompanies, i
 // ★ 2026-10-04 선불 요금제 이용 기간 — 승인 판정·차감 CT · 관리 중 게이트(docs/2026-10-04-prepaid-plan-term-design.md §5)
 import { applyPlanRequestWithClient, PlanTermError, planTermManagedSql, planTermManagedError } from '../utils/plan-term';
 // ★ 2026-06-11: 감사 로그 CT — 라인그룹 지정/해제 책임 추적 (에이치피오 예약취소 사고 후속)
-import { loadAgencyCallbackKinds, readRecentRejectedIntakes } from '../utils/agency-send-intake';   // ★ 2026-11-13 C130 최근 반려(회신 본문 포함)
+import { loadAgencyCallbackKinds, readRecentRejectedIntakes } from '../utils/agency-send-intake';
+import { likePattern } from '../utils/customer-timeline';   // ★ C142 검색어 LIKE escape CT
+import { isYmd } from '../utils/plan-term-calc';   // ★ C142 날짜 모양 CT
+/** ★ C142 — 대행발송 내역 한 번에 돌려주는 상한(넘으면 truncated = 「기간을 좁혀 주세요」) */
+const AGENCY_LEDGER_LIMIT = 200;   // ★ 2026-11-13 C130 최근 반려(회신 본문 포함)
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(직원 상세)
 import { CALLBACK_ASSIGNEES_SQL, describeCallbackUsage } from '../utils/callback-filter';   // ★ 2026-11-13 C132 발신번호 사용 범위 칸(발송 판정과 같은 함수)
 import { switchCompanyBillingType } from '../utils/billing-type-history';
@@ -6647,17 +6651,57 @@ router.get('/stats/export', authenticate, requireSuperAdmin, async (req: Request
   }
 });
 
+// ★ 2026-11-17 C142(남지현 접수 「접수 날짜 · 회사 등 상세 검색」) — 메일 접수 반려 · 오류 검색(회사명 · 보낸 주소 · 받은 날짜 · 최대 200 + truncated · 읽기 전용).
+//   거르지 않으면 대행발송 현황 응답의 최근 20건(mailIntake.recentRejected)을 그대로 쓴다(같은 CT readRecentRejectedIntakes).
+router.get('/agency-send/mail-rejected', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const r = await readRecentRejectedIntakes({
+      q: typeof req.query.q === 'string' ? req.query.q : null,
+      from: typeof req.query.from === 'string' ? req.query.from : null,
+      to: typeof req.query.to === 'string' ? req.query.to : null,
+    });
+    return res.json({ success: true, rows: r.rows, replyBodyReady: r.replyBodyReady, truncated: r.truncated });
+  } catch (error: any) {
+    const msg = String(error?.message || '');
+    if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
+      return res.status(503).json({ success: false, code: 'DB_MIGRATION_PENDING', error: 'DB 마이그레이션 필요: agency_send_email_intake 테이블 확인 요청' });
+    }
+    console.error('[Admin] 메일 접수 반려 검색 실패:', error);
+    return res.status(500).json({ success: false, error: '반려 목록을 불러오지 못했습니다.' });
+  }
+});
+
 // ★ 2026-08-22 대행발송 접수 현황 — 직원이 흐름을 보는 자리(읽기 전용).
 //   손으로 하던 일을 기계에 넘겼으니, 무엇이 어디서 멈췄는지는 사람이 볼 수 있어야 한다.
 router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const status = String(req.query.status || '').trim();
     const params: any[] = [];
-    let where = '';
+    const conds: string[] = [];
     if (status && status !== 'all') {
       params.push(status);
-      where = `WHERE a.status = $${params.length}`;
+      conds.push(`a.status = $${params.length}`);
     }
+    // ★ 2026-11-17 C142(남지현 접수 · 뿌리 R73) — 거르기를 서버로: 옛 = 최근 200건만 받아 화면이 검색어 · 접수구분으로 걸러
+    //   그보다 오래된 접수는 검색해도 「없음」이었고 잘렸다는 안내도 없었다. 검색 칸 = 옛 화면 검색 칸 전부(고객사 · 신청자 · 아이디 · 파일명 · 문안).
+    //   날짜 = 접수일(created_at) 또는 발송일(requested_at) · 서울 날짜 범위(buildDateRangeFilter) · 정렬 = 고른 날짜 최근 · 201건 읽어 넘으면 truncated.
+    const source = String(req.query.source || '').trim();
+    if (source && source !== 'all') {
+      params.push(source);
+      conds.push(`COALESCE(a.source, 'screen') = $${params.length}`);
+    }
+    const like = likePattern(typeof req.query.q === 'string' ? req.query.q : null);
+    if (like) {
+      params.push(like);
+      const n = params.length;
+      conds.push(`(c.company_name ILIKE $${n} OR u.name ILIKE $${n} OR u.login_id ILIKE $${n} OR a.file_name ILIKE $${n} OR a.current_content ILIKE $${n})`);
+    }
+    const dateCol = req.query.date_by === 'requested' ? 'a.requested_at' : 'a.created_at';
+    const from = isYmd(req.query.from) ? String(req.query.from) : undefined;
+    const to = isYmd(req.query.to) ? String(req.query.to) : undefined;
+    const dr = buildDateRangeFilter(dateCol, from, to, params.length + 1);
+    params.push(...dr.params);
+    const where = conds.length > 0 || dr.sql ? `WHERE TRUE${conds.map((c) => ` AND ${c}`).join('')}${dr.sql}` : '';
     // ★2026-08-26(2) 대행발송 내역 메뉴(Harold 지시) — 진행 레일·접수구분·고객사명·신청자명까지 이 응답이 재료다.
     //   source 컬럼은 DDL 후행 안전(부재 시 'screen'으로 읽힘)을 위해 to_jsonb 경유가 아니라 명시 컬럼으로 두되,
     //   이 배포 시점에는 이미 실행된 DDL이다(SCHEMA.md 0826 실측).
@@ -6670,10 +6714,12 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
          LEFT JOIN companies c ON c.id = a.company_id
          LEFT JOIN users u ON u.id = a.created_by
          ${where}
-        ORDER BY a.created_at DESC
-        LIMIT 200`,
+        ORDER BY ${dateCol} DESC
+        LIMIT ${AGENCY_LEDGER_LIMIT + 1}`,
       params,
     );
+    const truncated = rows.rows.length > AGENCY_LEDGER_LIMIT;
+    if (truncated) rows.rows.length = AGENCY_LEDGER_LIMIT;
     const summary = await query(
       `SELECT status, COUNT(*)::int AS c FROM agency_send_requests GROUP BY status`,
     );
@@ -6711,7 +6757,7 @@ router.get('/agency-send', authenticate, requireSuperAdmin, async (req: Request,
       }
     }
 
-    return res.json({ success: true, requests: rows.rows, summary: summary.rows, mailIntake });
+    return res.json({ success: true, requests: rows.rows, summary: summary.rows, mailIntake, truncated });
   } catch (error: any) {
     const msg = String(error?.message || '');
     if (msg.includes('relation') && msg.includes('does not exist')) {

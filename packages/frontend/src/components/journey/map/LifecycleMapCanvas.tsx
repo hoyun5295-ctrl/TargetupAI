@@ -20,6 +20,7 @@ import {
 import { FLOW_COLUMNS, L, PRODUCT_LANE, layoutMap, matchesFilter, type CardLayout, type MapStatusFilter } from '../../../utils/journey-map-layout';
 import { stepChannelLabel } from '../../../utils/journey-labels';
 import '../../../styles/journey-map.css';
+import GradeOrderUnlockButton from '../GradeOrderUnlockButton';   // ★ 2026-11-17 C142 등급 순서 잠금 풀기(Codex 구현 1R)
 
 export type { MapStatusFilter } from '../../../utils/journey-map-layout';
 
@@ -43,6 +44,8 @@ interface Props {
   /** ★ V.3 §18 — 뒤에 여정 붙이기 창 · 앞 여정에서 떼기(페이지가 창 · 확인을 소유한다). */
   onAttach: (journey: MapJourney) => void;
   onDetach: (journey: MapJourney) => void;
+  /** ★ 2026-11-17 C142 — 잠긴 빈 자리의 [등급 순서 정하기](페이지가 창을 연다) */
+  onGradeOrder?: () => void;
 }
 
 const TIERS: LineTier[] = ['solid', 'warn', 'empty'];
@@ -76,7 +79,7 @@ function lineLabel(ln: MapLine): string | null {
 }
 
 export default function LifecycleMapCanvas({
-  data, statusFilter, search, focusId, glance, busyId, onFocusJourney, onOpen, onEntrants, onAction, onCreate, onFix, onAttach, onDetach,
+  data, statusFilter, search, focusId, glance, busyId, onFocusJourney, onOpen, onEntrants, onAction, onCreate, onFix, onAttach, onDetach, onGradeOrder,
 }: Props) {
   const isDesktop = useMedia('(min-width: 768px)');
   const wide = useMedia('(min-width: 1280px)');
@@ -188,6 +191,7 @@ export default function LifecycleMapCanvas({
           <span>{g.reason || '데이터 연동이 필요해요.'}</span>
         </p>
       )}
+      {!g.available && g.unlock === 'grade_order' && onGradeOrder && <GradeOrderUnlockButton onClick={onGradeOrder} className="mt-2" />}
     </>
   );
 

@@ -39,7 +39,7 @@ import {
 import { isEmptyFilters, isUnresolvedEmptyTarget, HUB_TARGET_EMPTY_MESSAGE } from '../utils/all-customers-signal';
 import type { FilterCountResult } from '../services/ai';
 // ★ 2026-08-04 변화 축 — 기준선 유무 판정(화면 첫 회차 안내가 서버 답을 쓴다).
-import { segmentNeedsCycleBaseline, normalizeSegmentKey, schedulePeriod } from '../utils/automarketing-segment';
+import { segmentNeedsCycleBaseline, normalizeSegmentKey, schedulePeriod, readRepeatAck } from '../utils/automarketing-segment';
 import { hasCycleBaseline } from '../utils/operator-cycle-snapshot';
 import { formatDateValue, getOpt080Number } from '../utils/messageUtils';
 import { loadPlanContext, canUseFeature, requirePlanFeature, isAiOperatorAllowed, aiZonePlanBlocked } from '../utils/plan-guard';
@@ -2278,6 +2278,8 @@ router.put('/operator/continuous/:id', async (req: Request, res: Response) => {
       sendTimeMode: send_time_mode === undefined ? undefined : (send_time_mode === 'ai_optimal' ? 'ai_optimal' : 'fixed'),
       // ★ 2026-07-02 2단계: 문안 스타일 (미전송 = 변경 없음, null/그 외 = 해제)
       copyStyle: copy_style === undefined ? undefined : (typeof copy_style === 'string' ? copy_style : null),
+      // ★ 2026-11-17 C142 — 반복 짝 확인 창의 [지금 대상에게 매일 보내기] = 400 이 준 지문 그대로(모양 밖 = 없음 · CT 가 최종 짝 지문과 대조)
+      repeatAck: readRepeatAck(req.body?.repeat_ack),
     });
     if (!operator) return res.status(404).json({ success: false, error: '자동 마케팅을 찾을 수 없습니다.' });
     return res.json({ success: true, operator });

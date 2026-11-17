@@ -21,6 +21,7 @@ import JourneyModalShell from '../JourneyModalShell';
 import ZoneQuestion from '../../zone/ZoneQuestion';
 import type { AttachCheckRow, AttachFix, InterviewPlan, InterviewPrepared, InterviewQuestion } from '../../../utils/journey-map';
 import { newRequestId } from '../../../utils/request-id';
+import GradeOrderUnlockButton from '../GradeOrderUnlockButton';   // ★ 2026-11-17 C142 등급 순서 잠금 풀기(Codex 구현 1R)
 
 /** 시작 사건이 정해진 입구(빠른 시작 · 기회 카드 · 다음 수 · 한 줄 답 카드 · 지도 [만들기]). */
 export interface InterviewPreset { triggerEvent?: string; templateCode?: string; objective?: string }
@@ -44,6 +45,8 @@ interface Props {
   quickStarts?: InterviewQuickStart[];
   /** 만든 여정 열기 버튼 글(목록 = 작업 화면 열기 · 지도 = 지도에서 보기). */
   focusLabel?: string;
+  /** ★ 2026-11-17 C142 — 이어붙이기 점검의 잠긴 앞 여정 [등급 순서 정하기](페이지가 창을 연다) */
+  onGradeOrder?: () => void;
 }
 
 type Phase = 'input' | 'reading' | 'questions' | 'designing' | 'done';
@@ -63,7 +66,7 @@ function authHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` };
 }
 
-export default function InterviewModal({ open, onClose, onFix, onFocusJourney, onActivateMany, onCreated, initialSentence, preset, quickStarts, focusLabel }: Props) {
+export default function InterviewModal({ open, onClose, onFix, onFocusJourney, onActivateMany, onCreated, initialSentence, preset, quickStarts, focusLabel, onGradeOrder }: Props) {
   const [phase, setPhase] = useState<Phase>('input');
   const [sentence, setSentence] = useState('');
   const [prepared, setPrepared] = useState<InterviewPrepared | null>(null);
@@ -428,6 +431,7 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
                       <div className="flex-1 min-w-0">
                         <div className={`text-xs font-semibold ${r.tier === 'warn' ? 'text-amber-900' : 'text-slate-700'}`}>{r.text}</div>
                         <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{r.reason}</p>
+                        {r.unlock === 'grade_order' && onGradeOrder && <GradeOrderUnlockButton onClick={onGradeOrder} className="mt-1.5" />}
                       </div>
                       {r.fix && (
                         <button

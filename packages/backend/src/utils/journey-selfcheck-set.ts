@@ -117,7 +117,7 @@ export const SELFCHECK_SET: readonly SetDef[] = [
 
 /** 만들 수 있는 시작 종류 가운데 세트에서 뺀 것 → 뺀 이유(계약 시험이 등록부 전부를 「넣음」 또는 여기와 대조한다) */
 export const SELFCHECK_SET_EXCLUDED: Readonly<Record<string, string>> = {
-  'customer.grade_changed': '등급 순서를 등록할 화면이 없어 켜기 관문이 막는다(합성 회사 설계서 §9)',
+  'customer.grade_changed': '합성 회사는 등급 순서를 정하지 않아 켜기 관문이 막는다(합성 회사 설계서 §9 · ★1117 C142 이후 등급 순서 창은 잠금 자리마다 열린다)',
   'custom_order_shipped': '합성 데이터가 배송 사건을 보내지 않는다',
   'cdp.reservation_created': '예약 연동이 없어 모든 회사에서 잠겨 있다',
   'custom': '고른 고객에게 · 날짜 예약 · 한 번 보내기 = 매일 돌지 않거나 대상 조건을 따로 정해야 한다',

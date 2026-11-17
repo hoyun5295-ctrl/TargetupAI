@@ -338,6 +338,8 @@ export interface SegmentAvailability {
   available: boolean;
   /** 왜 되는지 / 왜 안 되는지 — 그대로 노출한다. */
   reason: string;
+  /** ★ 2026-11-17 C142 — 잠겼고 화면에서 풀 수 있는 할 일(등급 순서 = [등급 순서 정하기] 단추) */
+  unlock?: 'grade_order';
   params: SegmentParamDef[];
   /**
    * ★ 2026-08-04 변화 축 — 지난번 발송 때와 비교해 대상을 정하는 조건.

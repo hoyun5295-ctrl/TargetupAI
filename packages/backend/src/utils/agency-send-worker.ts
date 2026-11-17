@@ -29,7 +29,7 @@ import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
-  buildLinkActionNotify, buildUnsupportedCharsNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify,
+  buildLinkActionNotify, buildUnsupportedCharsNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify, buildSmsBytesNotify,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl, linkCancelTailOf } from './agency-send-link';
 import {
@@ -41,6 +41,7 @@ import {
 } from './agency-send-state';
 import { buildSlotPlan, toSlotValues } from './agency-send-vars';
 import { buildRenderedSample as buildSample } from './agency-send-preview';
+import { agencySmsBytesOver } from './agency-send-preview';   // ★ C142 SMS 길이(뿌리 R68 길이 축)
 import { campaignMayHaveSent, classifyAttemptCampaign, inspectAttemptCampaign, neutralizeCampaign } from './agency-send-campaign';
 import { insertTestSmsQueue, toKoreaTimeStr } from './sms-queue';
 import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
@@ -375,6 +376,8 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   heldContent?: string | null;
   /** ★ 2026-11-06 C109 — 검사 입구 글자 반려 문장(verdict = rejected 일 때) */
   rejection?: string | null;
+  /** ★ 2026-11-17 C142 — SMS 접수의 가장 긴 실제 문장이 90바이트를 넘음(verdict = rejected · 검사 · 다듬기 0 · 사람 판단) */
+  smsBytesOver?: number;
 }> {
   const original = String(row.current_content || '');
   let content = original;
@@ -391,6 +394,15 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   // ★ 2026-10-24 검사 단계(표본 · 실검사 · 다듬기)가 던진 예외도 검사 장애다(Codex 1024 1R) — 호출부의 catch 로 새면
   //   spam_check_error 를 남기지 않아 대기 · 3회 상한을 우회하고 매 주기 실검사를 다시 일으켰다. 발송 배관 예외는 이 함수 밖이라 섞이지 않는다.
   try {
+    // ★ 2026-11-17 C142(B-1117-3) — SMS 길이는 검사 앞에서 본다(첫 · 최종 검사 공통 · 배포 전에 저장된 글 포함) · 넘으면 검사 · 다듬기 0
+    //   옛: 재지 않아 91바이트 SMS 가 검사를 통과해 승인 · 예약 뒤 통신사에서 전량 실패했다. 측정 장애는 아래 catch = 검사 장애(다시 시도).
+    const overOriginal = await agencySmsBytesOver(row, original);
+    if (overOriginal !== null) return { verdict: 'rejected', passed: false, finalContent: original, rounds: startRound, detail: null, smsBytesOver: overOriginal };
+    if (content !== original && (await agencySmsBytesOver(row, content)) !== null) {
+      // 지난 주기에 검사 중이던 다듬은 글이 넘으면 버리고 원문부터(그 글은 나갈 수 없다)
+      content = original;
+      rounds = startRound;
+    }
     while (rounds < MAX_TEST_ROUNDS) {
       rounds += 1;
       const sample = await buildSample({ ...row, current_content: content });
@@ -445,6 +457,11 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       //   기록과 통보가 다시 갈린다.
       // ★ 2026-11-06 C109 D1 — 다듬은 문안(AI 글) = 만든 즉시 글자 정리(P2 · 알림 0) · 바뀜 판정도 정리된 글로
       const refinedText = cleanSmsTextAll(refined.content);
+      // ★ C142 — 다듬은 글(AI)이 SMS 길이를 넘으면 쓰지 않는다(다듬기 실패와 같은 갈래 · 앞 글로 끝)
+      if ((await agencySmsBytesOver(row, refinedText)) !== null) {
+        await logEvent(row.id, 'refine_failed', { round: rounds, reason: 'sms_bytes' });
+        break;
+      }
       const refineChanged = refinedText !== content;
       content = refinedText;
       await logEvent(row.id, refineChanged ? 'refined' : 'refine_nochange', { round: rounds });
@@ -546,6 +563,20 @@ export async function readAgencyCharLines(requestId: string): Promise<string[]> 
  * ★ 2026-11-06 C109 D4 E1 · E2 — 검사 입구 글자 반려 마감(장애 아님 · 뿌리 R7 넓힘).
  *   장애 셈(spam_check_error) 0 · 다시 검사 0 · 사람 판단(test_failed + 반려 위치 안내). 문안 · 명단을 고치면 접수 수정 배관이 다시 검사를 연다.
  */
+/**
+ * ★ 2026-11-17 C142(B-1117-3 · 뿌리 R68 길이 축) — SMS 접수의 가장 긴 실제 문장이 90바이트를 넘음 = 검사 입구 반려와 같은 사람 판단 갈래
+ *   (test_failed · 장애 셈 0 · 다시 검사 0 · 문안을 고치면 접수 수정 배관이 다시 검사를 연다) · 이력 · 담당자 문자 한 통(길이 안내).
+ */
+async function settleSmsBytesOver(row: any, token: string, phase: 'first' | 'final', bytes: number): Promise<void> {
+  if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+  await logEvent(row.id, 'test_failed', { reason: 'sms_bytes', bytes, phase, version: Number(row.content_version || 0) });
+  await notifyManager({
+    companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+    callback: row.callback_number, title: phase === 'final' ? '[대행발송] 예약 취소 안내' : '[대행발송] 문안 확인 필요',
+    text: buildSmsBytesNotify({ label: shortLabel(row.file_name || row.original_content), bytes, stopped: phase === 'final' }),
+  });
+}
+
 async function settleSpamRejected(row: any, token: string, phase: 'first' | 'final', rejection: string | null | undefined): Promise<void> {
   const message = String(rejection || '').trim() || null;
   if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
@@ -784,10 +815,11 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     try {
       // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
       if (!(await touchTestingLock(row.id, token))) continue;
-      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection } = await runSpamRound(row, 0);
+      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver } = await runSpamRound(row, 0);
       // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 접수 상태로 돌리고 대기 뒤 다시(같은 버전 3번째 = 사람 판단)
       if (verdict === 'error') { await settleSpamCheckError(row, token, 'received', 'first', detail); continue; }
       // ★ 2026-11-06 C109 — 보낼 수 없는 글자 반려 = 사람 판단(다시 검사 0)
+      if (smsBytesOver != null) { await settleSmsBytesOver(row, token, 'first', smsBytesOver); continue; }   // ★ C142 SMS 길이
       if (verdict === 'rejected') { await settleSpamRejected(row, token, 'first', rejection); continue; }
       if (isSpamHold(verdict)) { await settleSpamHold(row, token, 'received', 'first', verdict, detail, heldContent ?? null, rounds); continue; }
       // ⛔ 검사 결과부터 소유권을 확인하며 쓴다. 여기서 잃었으면 알림도 보내지 않는다 —
@@ -979,10 +1011,11 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
   const label = shortLabel(target.file_name || target.original_content);
 
   try {
-    const { verdict, passed, finalContent, rounds, detail, heldContent, rejection } = await runSpamRound(target, 0);
+    const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver } = await runSpamRound(target, 0);
     // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 승인 상태로 돌리고 대기 뒤 다시(시각이 지나면 만료 단계가 맡는다 · 같은 버전 3번째 = 사람 판단)
     if (verdict === 'error') { await settleSpamCheckError(target, token, 'approved', 'final', detail); return; }
     // ★ 2026-11-06 C109 — 보낼 수 없는 글자 반려 = 예약하지 않는다 · 사람 판단(다시 검사 0)
+    if (smsBytesOver != null) { await settleSmsBytesOver(target, token, 'final', smsBytesOver); return; }   // ★ C142 SMS 길이
     if (verdict === 'rejected') { await settleSpamRejected(target, token, 'final', rejection); return; }
     if (isSpamHold(verdict)) { await settleSpamHold(target, token, 'approved', 'final', verdict, detail, heldContent ?? null, rounds); return; }
     const version = await saveTestResult(target, finalContent, rounds, detail, token);
@@ -1392,6 +1425,19 @@ async function dispatchAttempt(
   if (!plan.ok) {
     if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
     await notifyFailed('dispatch_var_overflow', { vars: plan.order.length });
+    return;
+  }
+  // ★ 2026-11-17 C142(B-1117-3 · R47 효과 자리) — 발송 직전 마지막 문: SMS 의 가장 긴 실제 문장이 90바이트를 넘으면 예약하지 않는다
+  //   (당일 검사 통과 건 · 배포 전에 저장된 글 · 놓친 길) · 항목 수 초과와 같은 자리 · 같은 갈래(test_failed · 소유권 토큰).
+  const overBytes = await agencySmsBytesOver(row, content);
+  if (overBytes !== null) {
+    if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+    await logEvent(row.id, 'test_failed', { reason: 'sms_bytes', bytes: overBytes, phase: 'dispatch', version: Number(row.content_version || 0) });
+    await notifyManager({
+      companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+      callback: row.callback_number, title: '[대행발송] 예약 취소 안내',
+      text: buildSmsBytesNotify({ label, bytes: overBytes, stopped: true }),
+    });
     return;
   }
 

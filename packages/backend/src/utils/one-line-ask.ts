@@ -44,7 +44,7 @@ export interface LineAskAnswer {
   head: string;
   basis: { scope: 'mine' | 'company'; at: string; note?: string };
   cards: LineAskCard[];
-  blocked: Array<{ title: string; reason: string }>;
+  blocked: Array<{ title: string; reason: string; unlock?: 'grade_order' }>;   // ★ C142 unlock = [등급 순서 정하기]
   failed: string[];
 }
 
@@ -121,7 +121,7 @@ export async function buildJourneyAsk(companyId: string, userId: string | null |
   const cards = opps.ok && skip.ok && !sc.blocked ? journeyCardsFrom(opps.value, skip.value) : [];
   const blocked: LineAskAnswer['blocked'] = [];
   if (sc.blocked) blocked.push(UNASSIGNED);
-  if (diag.ok) for (const p of diag.value.flowPlan) if (p.status === 'locked') blocked.push({ title: p.title, reason: p.reason });
+  if (diag.ok) for (const p of diag.value.flowPlan) if (p.status === 'locked') blocked.push({ title: p.title, reason: p.reason, ...(p.unlock ? { unlock: p.unlock } : {}) });   // ★ C142 unlock
   return {
     head: cards.length > 0
       ? `지금 데이터로 본 가장 큰 빈 구간은 「${cards[0].title}」이에요. 순서는 조건에 맞는 고객 수와 1회 구매액 합 기준이고, 효과는 켠 뒤 성과리포트에서 재요.`
@@ -213,7 +213,7 @@ export async function buildInappAsk(companyId: string, userId: string | null | u
         action: { kind: 'inapp', objective: idea.objective },
       });
     } else {
-      blocked.push({ title: idea.title, reason: a.reason });
+      blocked.push({ title: idea.title, reason: a.reason, ...(a.unlock ? { unlock: a.unlock } : {}) });   // ★ C142 unlock
     }
   }
   return {

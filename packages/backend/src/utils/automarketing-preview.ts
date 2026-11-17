@@ -17,7 +17,7 @@ import { extractVarCatalog, filterVarCatalogByData } from '../services/ai';
 import { orchestrate } from '../services/ai-orchestrator';
 import { InsufficientCreditError } from './ai-credit';
 import { getCreditCost } from './ai-credit-calc';
-import { segmentNeedsCycleBaseline } from './automarketing-segment';
+import { segmentNeedsCycleBaseline, checkSchedulePairing, readRepeatAck, schedulePeriod, type LockUnlock } from './automarketing-segment';
 import {
   translateAudience, countContractAudience, forecastByDate, describeConditions, AudienceConditionError, loadAudienceFieldOptions,
   type AudienceTranslation, type AudienceCondition, type AudienceFieldOption,
@@ -102,7 +102,7 @@ export function operatorSaveErrorResponse(err: any): { status: number; body: Rec
   // ★ 2026-10-24 등록 한 트랜잭션(registerOperator) — 같은 키가 남의 행 = 409 · 차감 확인 실패 = 503(등록도 없다)
   if (err instanceof OperatorRegisterConflictError) return { status: 409, body: { success: false, error: err.message, code: err.code } };
   if (err instanceof OperatorChargeError) return { status: 503, body: { success: false, error: err.message, code: err.code } };
-  if (err instanceof OperatorPairingError) return { status: 400, body: { success: false, error: err.message, code: err.code } };
+  if (err instanceof OperatorPairingError) return { status: 400, body: { success: false, error: err.message, code: err.code, ackKey: err.ackKey } };   // ★ C142 지문 = 화면이 되돌려 보낼 값
   if (err instanceof OperatorScheduleChangedError) return { status: 409, body: { success: false, error: err.message, code: err.code } };
   const msg = err?.message || '';
   if (err?.code === 'DB_MIGRATION_PENDING' || err?.code === '42P01') {
@@ -283,6 +283,12 @@ export interface PreviewOutcome {
   notes: string[];
   /** ★ 1024 막힘 갈래(080 · 발신번호 · 데이터) — 화면이 등록 화면으로 안내한다 */
   blockCode: string | null;
+  /** ★ 2026-11-17 C142 — 막힘을 화면에서 풀 수 있으면 그 할 일(등급 순서 = [등급 순서 정하기] 단추) */
+  blockUnlock: LockUnlock | null;
+  /** ★ C142 — 막힌 축(등급 순서를 정한 뒤 화면이 이 축으로 다시 센다) */
+  blockAxis: string | null;
+  /** ★ C142 — 담당자가 직접 고른 반복 짝(매일 · 매주 + 상태 조건)의 경고 줄(누구에게 칸) · 반복 아님 = null */
+  repeatNotice: string | null;
   /** ★ 1024 문안 입력(대상 칸 · 혜택 · 채널 · 문안 방식)이 바뀌어 문안이 묵었다 — 시작 잠금 + [이 대상으로 다시 만들기] */
   copyStale: boolean;
   /** ★ 1024 보내는 번호 · 알림 받는 번호(추천으로 정한 값 · 화면이 [바꾸기]) */
@@ -436,8 +442,10 @@ async function settleQuestions(e: PreviewEntry): Promise<PreviewBlock | null> {
   const tr = e.translation;
   const needAxes = (tr.kind === 'blocked' && (tr.code === 'NO_CONDITION' || tr.code === 'TRANSLATE_FAILED'))
     || (tr.kind === 'axis' && tr.segmentKey === 'all' && tr.mapped);
+  // ★ C142 — 축 가용은 ② 선택지 · ③ 제안(열린 축만) 둘이 쓴다 · ③ 은 매일 · 매주일 때만 생긴다
+  const allAxes = needAxes || schedulePeriod(e.input.schedule) !== 'month' ? await listSegmentAvailability(e.companyId) : [];
   const axes = needAxes
-    ? (await listSegmentAvailability(e.companyId)).map((a) => ({ key: a.key, label: a.label, available: a.available, reason: a.reason }))
+    ? allAxes.map((a) => ({ key: a.key, label: a.label, available: a.available, reason: a.reason, ...(a.unlock ? { unlock: a.unlock } : {}) }))
     : [];
   const everyoneCount = needAxes
     ? await countContractAudience({ companyId: e.companyId, ownerUserId: owner, schedule: 'monthly', segmentKey: 'all' }).catch(() => null)
@@ -449,12 +457,26 @@ async function settleQuestions(e: PreviewEntry): Promise<PreviewBlock | null> {
   e.questions = buildOperatorQuestions({
     translation: tr, axes, everyoneCount,
     schedule: e.input.schedule || 'monthly',
+    repeatAck: e.input.repeatAck ?? null,
+    availableKeys: allAxes.filter((a) => a.available).map((a) => a.key),
     benefitAsk: renewal ? null : e.benefitAsk,
     callbackCandidates, adminPhoneMissing,
     voiceAsks,
     voicePrefill: savedVoice,
   });
   return block;
+}
+
+/** ★ C142 — 보관본의 지금 짝이 반복이고 담당자가 직접 골랐으면 경고 줄(판정 = 저장 셋과 같은 함수 · 같은 지문) */
+function repeatNoticeOf(e: PreviewEntry): string | null {
+  const tr = e.translation;
+  if (tr.kind !== 'axis' && tr.kind !== 'filters') return null;
+  const pair = checkSchedulePairing(
+    e.input.schedule,
+    tr.kind === 'axis' ? { segmentKey: tr.segmentKey, segmentParams: tr.segmentParams } : { conditions: tr.conditions },
+    e.input.repeatAck ?? null,
+  );
+  return pair.ok ? (pair.repeatNotice ?? null) : null;
 }
 
 /**
@@ -487,6 +509,9 @@ async function refreshEntry(
     finalCopies: null,
     notes: [...e.notes, ...dated.map((w) => `「${w}」은(는) 회차마다 지나가는 날짜라 문안에서 뺐어요.`)],
     blockCode: block?.code ?? (tr.kind === 'blocked' ? tr.code : null),
+    blockUnlock: !block && tr.kind === 'blocked' ? (tr.unlock ?? null) : null,
+    blockAxis: !block && tr.kind === 'blocked' ? (tr.axisKey ?? null) : null,
+    repeatNotice: repeatNoticeOf(e),
     copyStale: false,
     sendVia: { callback: e.input.callback?.callbackNumber ?? null, adminPhone: e.input.adminPhoneNumbers?.[0] ?? null },
     costs: { start: getCreditCost('continuous-operator'), copy: getCreditCost('ai-operator-propose'), send: getCreditCost('continuous-operator-send') },
@@ -738,6 +763,8 @@ async function applyAnswers(e: PreviewEntry, a: ReturnType<typeof decideOperator
     e.input = { ...e.input, schedule: 'monthly', scheduleDayOfWeek: null, scheduleDayOfMonth: earliestRoundDay(e.input.scheduleTime || '09:00', new Date()).dom };
     e.scheduleAnswered = true;
   }
+  // ★ C142 ③ 「지금 대상에게 매일 보내기」 = 그 짝의 지문(저장 셋이 최종 짝 지문과 다시 대조한다)
+  if (ans.repeatAck) e.input = { ...e.input, repeatAck: ans.repeatAck };
   if (ans.benefit !== undefined) {
     e.input = { ...e.input, benefitContent: ans.benefit };
     e.benefitAsk = null;
@@ -904,7 +931,8 @@ export interface ApprovalPreview {
  *   창을 연 뒤의 편집 · 승인은 보관본(updateOperatorPreview · approveOperatorFromScreen)이 맡는다 — 계약을 다시 정하는 곳은 없다.
  */
 async function resolveOperatorContract(companyId: string, op: ContinuousOperator, userId: string): Promise<AudienceTranslation> {
-  const base = { companyId, userId, objective: op.objective, schedule: op.schedule };
+  // ★ C142 — 번역은 늘 매월로(새 등록 창과 같은 §9-12) · 짝은 질문표 ③ 이 지금 주기 · 승인 기록의 동의로 한 번 본다(옛: 지금 주기로 번역해 반복 짝이면 막힘 창뿐 · 고를 길 0)
+  const base = { companyId, userId, objective: op.objective, schedule: 'monthly' };
   const stored = operatorContract(op);
   try {
     if (stored?.key) return await translateAudience({ ...base, segmentKey: stored.key, segmentParams: op.segmentParams });
@@ -940,6 +968,7 @@ export async function previewOperatorApproval(companyId: string, operatorId: str
       channel: op.channel, benefitContent: op.benefitContent, copyStyle: op.copyStyle,
       copyMode: op.copyMode, fixedCopy: op.fixedCopy, voiceForm: op.voiceForm,
       budgetMonthly: op.budgetMonthly, budgetDaily: op.budgetDaily,   // ★ 2026-11-02 3-2 A ④ 창에 보이는 예산 = 그 운영자 값
+      repeatAck: readRepeatAck(op.approvalMeta?.repeatAck),   // ★ C142 지난 승인의 반복 동의(지금 짝 지문과 같을 때만 ③ 을 다시 묻지 않는다)
     }, tr);
     // 승인 창도 서버 보관본 하나 — 편집(preview/update) · 승인(approve-window)이 이것만 쓴다. 보는 사람이 주인(잠금 · 꺼내기)
     const entry: PreviewEntry = {
@@ -1002,6 +1031,7 @@ export async function approveOperatorFromScreen(companyId: string, operatorId: s
       // ③ · ② 「매월로」 답일 때만 창이 보여 준 주기를 저장한다(창의 회차 = 이 주기) · 답이 없으면 넘기지 않는다(창을 연 뒤 바뀐 주기를 옛 값으로 덮지 않게)
       schedule: e.scheduleAnswered ? { schedule: e.input.schedule as any, scheduleDayOfWeek: e.input.scheduleDayOfWeek ?? null, scheduleDayOfMonth: e.input.scheduleDayOfMonth ?? null } : null,
       seenSchedule: e.scheduleSeen ?? null,
+      repeatAck: e.input.repeatAck ?? null,   // ★ C142 이 창이 본 반복 짝 지문(최종 짝과 다르면 400)
     });
     if (!win) return null;
     dropPreview(previewId);   // 승인한 창은 끝 — 같은 창으로 두 번 저장하지 않는다

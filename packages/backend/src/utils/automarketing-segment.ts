@@ -32,8 +32,18 @@
  *   비교할 항목을 스냅샷에 하나 더 담으면 축이 하나 더 열린다.
  */
 
+import { createHash } from 'crypto';
 import { UserFacingError } from './http-error';
 import { newSignupSql, NO_JOINED_AT_REASON } from './customer-joined-at';   // ★ 2026-11-02 가입 근거 CT(CT-J6)
+
+/**
+ * ★ 2026-11-17 C142(B-1117-1 · 뿌리 R56) — 등급 순서 잠금 한 벌.
+ *   옛: 사유가 자동마케팅 · 여정 두 벌이었고 「확인하면 열립니다」의 할 일(등급 순서 정하기)을 하는 단추가 화면에 0이었다.
+ *   사유는 이 상수 하나 · 잠금에는 unlock 표시를 싣고, 잠금을 그리는 화면마다 [등급 순서 정하기] 단추가 그 표시를 읽는다.
+ */
+export const GRADE_ORDER_UNLOCK = 'grade_order' as const;
+export type LockUnlock = typeof GRADE_ORDER_UNLOCK;
+export const GRADE_ORDER_LOCK_REASON = '고객등급 순서를 아직 정하지 않으셨어요. [등급 순서 정하기]에서 어느 등급이 위인지 정하면 열립니다.';
 /** 상태 축(명부 한 장으로 판정) */
 type StateSegmentKey = 'all' | 'dormant' | 'recent_buyers' | 'vip' | 'birthday' | 'new_customers';
 /** 변화 축(지난 회차 스냅샷과 비교해 판정 — 자동마케팅 고유) */
@@ -103,6 +113,8 @@ export interface SegmentAvailability {
    *   "대상 0" 또는 오류로 보여주면 담당자는 고장으로 읽는다 — 정상 동작이고 안내가 맞다.
    */
   needsCycleBaseline: boolean;
+  /** ★ C142 — 잠겼고 사람이 화면에서 풀 수 있으면 그 할 일(지금 = 등급 순서) · 화면이 [등급 순서 정하기] 단추를 그린다 */
+  unlock?: LockUnlock;
 }
 
 /** 축이 정해진 뒤 SQL을 만들 때 필요한, DB에서 해석해 넣어 주는 값. */
@@ -173,8 +185,8 @@ interface SegmentContract {
   params: SegmentParamDef[];
   /** 변화 축 = 지난 회차 스냅샷과 비교한다. 화면 첫 회차 안내와 워커 기준선 심기가 이 값을 본다. */
   needsCycleBaseline?: boolean;
-  /** 근거 판정. available=false면 컴파일하지 않는다. */
-  resolve: (f: CompanySegmentFacts) => { available: boolean; reason: string };
+  /** 근거 판정. available=false면 컴파일하지 않는다. unlock = 사람이 화면에서 풀 수 있는 잠금(C142). */
+  resolve: (f: CompanySegmentFacts) => { available: boolean; reason: string; unlock?: LockUnlock };
   /**
    * WHERE에 AND로 붙는 조각을 만들고 params에 값을 push한다(buildAudienceWhere와 같은 방식).
    * 잠긴 축은 호출되지 않는다 — 방어로 throw한다(조용히 0건을 내면 사유가 사라진다).
@@ -281,9 +293,7 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
     params: [],
     resolve: (f) => {
       if (f.hasGradeOrder) return { available: true, reason: '정해 두신 등급 순서에서 가장 위 등급 고객에게 보냅니다.' };
-      if (f.hasGradeValues) {
-        return { available: false, reason: '고객등급 순서를 아직 정하지 않으셨어요. 등급 순서를 확인하면 열립니다.' };
-      }
+      if (f.hasGradeValues) return { available: false, reason: GRADE_ORDER_LOCK_REASON, unlock: GRADE_ORDER_UNLOCK };
       return { available: false, reason: '고객등급 정보가 아직 없어요. 등급이 들어오면 열립니다.' };
     },
     build: (params, _values, ctx) => {
@@ -348,9 +358,7 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
     needsCycleBaseline: true,
     resolve: (f) => {
       if (f.hasGradeOrder) return { available: true, reason: '지난번보다 등급이 올라간 고객에게 보냅니다.' };
-      if (f.hasGradeValues) {
-        return { available: false, reason: '고객등급 순서를 아직 정하지 않으셨어요. 등급 순서를 확인하면 열립니다.' };
-      }
+      if (f.hasGradeValues) return { available: false, reason: GRADE_ORDER_LOCK_REASON, unlock: GRADE_ORDER_UNLOCK };
       return { available: false, reason: '고객등급 정보가 아직 없어요. 등급이 들어오면 열립니다.' };
     },
     // ⛔ 여정 등급 상승과 같은 판정 — 양쪽 등급이 모두 순서표에 있고 순위가 실제로 올라간 경우만.
@@ -450,23 +458,83 @@ export const SEGMENT_CONTRACTS: SegmentContract[] = [
 const REPEATING_STATE_KEYS = new Set<SegmentKey>(['all', 'dormant', 'recent_buyers', 'vip', 'new_customers']);
 const CHANGE_COUNTERPART: Partial<Record<SegmentKey, SegmentKey>> = { dormant: 'went_quiet', vip: 'grade_up' };
 
+/**
+ * ★ 2026-11-17 C142(B-1117-2 · Harold 1117 「Q9 를 풀되 명시 선택 + 경고」) — 짝 판정의 대상.
+ *   축이면 키 + 기준 숫자 · 칸 조건이면 조건 목록(판정 SQL 이 쓰는 field · operator · value).
+ */
+export interface PairingTarget {
+  segmentKey?: string | null;
+  segmentParams?: unknown;
+  conditions?: ReadonlyArray<{ field?: unknown; operator?: unknown; value?: unknown }> | null;
+}
+
+/** 짝 지문 모양(화면 · 보관본 · approval_meta 에 오가는 값) — 밖에서 온 값은 이 모양만 받는다 */
+export const REPEAT_ACK_RE = /^(day|week):[0-9a-f]{16}$/;
+export function readRepeatAck(raw: unknown): string | null {
+  return typeof raw === 'string' && REPEAT_ACK_RE.test(raw) ? raw : null;
+}
+
+function pairRepeats(period: RoundPeriod, target: PairingTarget): boolean {
+  if (period === 'month') return false;
+  const key = normalizeSegmentKey(target.segmentKey);
+  return key ? REPEATING_STATE_KEYS.has(key) : Array.isArray(target.conditions) && target.conditions.length > 0;
+}
+
+/**
+ * 짝 지문 = `${주기 단위}:${sha256(정규화한 대상) 앞 16자}` · 반복 짝이 아니면 null.
+ *   주기 단위 · 축 · 기준 숫자 · 칸 조건(field · operator · value) 중 하나라도 바뀌면 지문이 바뀐다(Codex 설계 1R #1).
+ *   칸 조건의 말(term) · 출처(source) · 표시 이름은 판정에 안 쓰여 넣지 않는다.
+ */
+export function repeatAckKey(schedule: string | null | undefined, target: PairingTarget): string | null {
+  const period = schedulePeriod(schedule);
+  if (!pairRepeats(period, target)) return null;
+  return `${period}:${createHash('sha256').update(JSON.stringify(canonicalTarget(target))).digest('hex').slice(0, 16)}`;
+}
+
+/** 정규화한 대상(지문 재료) — 축 = 키 + 기준 숫자(키 순) · 칸 조건 = (field · operator · value) 정렬 목록 · 대상 없음 = ['none'] */
+function canonicalTarget(target: PairingTarget): unknown[] {
+  const key = normalizeSegmentKey(target.segmentKey);
+  if (key) return ['axis', key, Object.entries(normalizeSegmentParams(key, target.segmentParams)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))];
+  if (Array.isArray(target.conditions) && target.conditions.length > 0) {
+    return ['conditions', target.conditions.map((c) => JSON.stringify([String(c?.field ?? ''), String(c?.operator ?? ''), c?.value ?? null])).sort()];
+  }
+  return ['none'];
+}
+
+/** 짝의 정체(반복 여부와 무관) — 저장 경로의 「바뀜」 판정(주기 단위 · 축 · 기준 숫자 · 칸 조건 중 하나라도 바뀌면 다르다 · C142 Codex 설계 1R #1) */
+export function pairFingerprint(schedule: string | null | undefined, target: PairingTarget): string {
+  return JSON.stringify([schedulePeriod(schedule), canonicalTarget(target)]);
+}
+
+/** 직접 고른 반복 짝의 경고 줄(승인 창 누구에게 칸) */
+export function repeatNoticeText(schedule: string | null | undefined): string {
+  const every = schedulePeriod(schedule) === 'day' ? '매일' : '매주';
+  return `같은 고객이 ${every} 다시 받아요. 직접 고르신 대로 ${every} 보냅니다.`;
+}
+
+/**
+ * 짝 판정 — 반복 짝(매일 · 매주 + 상태 조건)이면 ack(직접 고른 짝 지문)가 지금 짝 지문과 같을 때만 통과(+ 경고 줄).
+ *   아니면 막힘 + ackKey(지금 짝 지문 · 화면이 그대로 되돌려 보낸다 · 화면은 지문을 만들지 않는다).
+ *   isAvailable = 제안할 변화 축이 이 회사에서 열려 있는가(모르면 제안하지 않는다 · 잠긴 축을 가리키지 않는다 · C142 A5).
+ */
 export function checkSchedulePairing(
   schedule: string | null | undefined,
-  target: { segmentKey?: string | null; hasConditions?: boolean },
-): { ok: true } | { ok: false; reason: string; suggestKey: SegmentKey | null } {
-  const period = schedulePeriod(schedule);
-  if (period === 'month') return { ok: true };
+  target: PairingTarget,
+  ack?: string | null,
+  isAvailable?: (key: SegmentKey) => boolean,
+): { ok: true; repeatNotice?: string } | { ok: false; reason: string; suggestKey: SegmentKey | null; ackKey: string } {
+  const ackKey = repeatAckKey(schedule, target);
+  if (!ackKey) return { ok: true };
+  if (ack && ack === ackKey) return { ok: true, repeatNotice: repeatNoticeText(schedule) };
+  const every = schedulePeriod(schedule) === 'day' ? '매일' : '매주';
   const key = normalizeSegmentKey(target.segmentKey);
-  const repeats = key ? REPEATING_STATE_KEYS.has(key) : !!target.hasConditions;
-  if (!repeats) return { ok: true };
-  const every = period === 'day' ? '매일' : '매주';
-  const suggestKey = key ? (CHANGE_COUNTERPART[key] ?? null) : null;
+  const counterpart = key ? (CHANGE_COUNTERPART[key] ?? null) : null;
+  const suggestKey = counterpart && isAvailable && isAvailable(counterpart) ? counterpart : null;
   const suggestLabel = suggestKey ? getSegmentContract(suggestKey)?.label : null;
   const reason = `${every} 보내면 같은 고객이 ${every} 다시 받게 돼요. `
-    + (suggestLabel
-      ? `「${suggestLabel}」처럼 새로 해당된 고객만 고르거나, 주기를 매월로 바꿔 주세요.`
-      : '새로 해당된 고객만 고르는 조건(발길이 끊긴 고객 · 등급이 오른 고객 등)을 쓰거나, 주기를 매월로 바꿔 주세요.');
-  return { ok: false, reason, suggestKey };
+    + (suggestLabel ? `「${suggestLabel}」처럼 새로 해당된 고객만 고르거나` : '새로 해당된 고객만 고르는 조건을 쓰거나')
+    + `, 주기를 매월로 바꾸거나, 그래도 지금 대상에게 보내려면 「지금 대상에게 ${every} 보내기」를 눌러 주세요.`;
+  return { ok: false, reason, suggestKey, ackKey };
 }
 
 export function getSegmentContract(key: string | null | undefined): SegmentContract | null {
@@ -511,6 +579,7 @@ export function resolveSegmentAvailability(facts: CompanySegmentFacts): SegmentA
     return {
       key: c.key, label: c.label, available: r.available, reason: r.reason, params: c.params,
       needsCycleBaseline: c.needsCycleBaseline === true,
+      ...(!r.available && r.unlock ? { unlock: r.unlock } : {}),
     };
   });
 }

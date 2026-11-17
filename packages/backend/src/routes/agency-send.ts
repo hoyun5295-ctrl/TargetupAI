@@ -20,7 +20,7 @@ import {
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { type AgencySendStatus } from '../utils/agency-send-state';
 import { extractAgencyVars } from '../utils/agency-send-vars';
-import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples, measureAgencyMaxSmsBytes, AGENCY_SMS_BYTES_MAX_CANDIDATES } from '../utils/agency-send-preview';
+import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples, measureAgencyMaxSmsBytes, AGENCY_SMS_BYTES_MAX_CANDIDATES, measureAgencyRequestSmsBytes, agencySmsBytesOverText } from '../utils/agency-send-preview';
 import { SMS_MAX_BYTES } from '../utils/message-byte';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { senderAuthRejection } from '../utils/sender-auth';
@@ -649,6 +649,34 @@ router.get('/:id/preview', async (req: Request, res: Response) => {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 미리보기 조회 실패:', err);
     return res.status(500).json({ success: false, error: '미리보기를 불러오지 못했습니다.' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// POST /api/agency-send/:id/sms-bytes — 문안 고치기 칸의 SMS 길이(★ 2026-11-17 C142 · 남지현 접수 「바이트 수도 함께 표시」)
+//   저장 판정(editAgencyContentTx)과 같은 측정 = 그 접수 명단 전원을 실제 발송과 같은 조립으로 · 저장 0 · 크레딧 0 · SMS 접수만.
+// ════════════════════════════════════════════════════════════
+router.post('/:id/sms-bytes', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  try {
+    const content = String(req.body?.content ?? '').trim();   // 저장 코어와 같은 입력(앞뒤 공백을 지우고 잰다)
+    if (content.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
+    const r = await query(
+      `SELECT * FROM agency_send_requests
+        WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+      [req.params.id, auth.companyId, ownerParam(auth)],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ success: false, error: '접수를 찾을 수 없습니다.' });
+    const row = r.rows[0];
+    if (String(row.message_type || '').toUpperCase() !== 'SMS') return res.json({ success: true, sms: false, maxBytes: null, limit: SMS_MAX_BYTES, over: false, message: null });
+    const maxBytes = content ? await measureAgencyRequestSmsBytes(row, content) : 0;
+    const over = maxBytes > SMS_MAX_BYTES;
+    return res.json({ success: true, sms: true, maxBytes, limit: SMS_MAX_BYTES, over, message: over ? agencySmsBytesOverText(maxBytes) : null });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return migrationPending(res);
+    console.error('[agency-send] SMS 길이 측정 실패:', err);
+    return res.status(500).json({ success: false, error: 'SMS 길이를 재지 못했습니다.' });
   }
 });
 

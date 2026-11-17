@@ -22,6 +22,7 @@ import { zoneModule } from '../constants/ai-operator-modules';
 import { goBackOr } from '../lib/scroll-restoration';
 import LifecycleMapCanvas, { type MapStatusFilter } from '../components/journey/map/LifecycleMapCanvas';
 import GapFinderModal, { type GapOpportunity } from '../components/journey/map/GapFinderModal';
+import GradeOrderModal from '../components/journey/GradeOrderModal';   // ★ 2026-11-17 C142 지도 창들의 등급 순서 잠금을 여기서 푼다
 import JourneyWorkspace from '../components/journey/workspace/JourneyWorkspace';
 import { useJourneyActions } from '../components/journey/workspace/useJourneyActions';
 import InterviewModal from '../components/journey/map/InterviewModal';
@@ -69,6 +70,9 @@ export default function JourneyMapPage() {
   const [statusFilter, setStatusFilter] = useState<MapStatusFilter>('all');
   const [search, setSearch] = useState('');
   const [gapOpen, setGapOpen] = useState(false);
+  // ★ 2026-11-17 C142 — 등급 순서 창(지도 창들의 잠금 · [등급 순서 정하기]) · 저장 수 = 진단 다시 읽기 신호
+  const [gradeOrderOpen, setGradeOrderOpen] = useState(false);
+  const [gradeOrderRev, setGradeOrderRev] = useState(0);
   // ★ 2026-11-13 C133 F1 — 여정 화면의 「기본 여정 한 번에 켜기」가 ?open=diagnosis 로 들어오면 진단 창을 연다.
   //   열쇠는 읽은 뒤 주소에서 지운다(새로고침 · 뒤로 가기로 다시 열리지 않게). 모르는 값은 무시한다.
   useEffect(() => {
@@ -343,6 +347,7 @@ export default function JourneyMapPage() {
       {/* 캔버스: 데스크톱은 이 칸 안에서만 스크롤(레인 머리 고정) · 모바일은 페이지 스크롤 */}
       <div className="rounded-2xl border border-slate-200 bg-white md:max-h-[calc(100vh-120px)] md:overflow-auto">
         <LifecycleMapCanvas
+          onGradeOrder={() => setGradeOrderOpen(true)}
           data={data}
           statusFilter={statusFilter}
           search={search}
@@ -387,8 +392,17 @@ export default function JourneyMapPage() {
         onFocusJourney={focusJourney}
         onFix={(f) => void handleFix(f)}
         onDrafted={(ids) => { void load(true).then(() => setBatch({ open: true, preselect: ids })); }}
+        onGradeOrder={() => setGradeOrderOpen(true)}
+        gradeOrderRev={gradeOrderRev}
+      />
+      <GradeOrderModal
+        open={gradeOrderOpen}
+        onClose={() => setGradeOrderOpen(false)}
+        onSaved={() => { setGradeOrderOpen(false); setGradeOrderRev((n) => n + 1); void load(true); }}
+        token={localStorage.getItem('token') || ''}
       />
       <InterviewModal
+        onGradeOrder={() => setGradeOrderOpen(true)}
         open={interviewOpen}
         initialSentence={interviewSentence || undefined}
         onClose={() => setInterviewOpen(false)}

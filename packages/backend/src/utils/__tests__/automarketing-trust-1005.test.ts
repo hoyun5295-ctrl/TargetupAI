@@ -83,18 +83,20 @@ describe('1. 생일 = 회차 기간 · 월일 칸 또는 생년월일 · 2/29', 
 });
 
 describe('2. 주기 · 대상 짝 (Q9)', () => {
-  it('매일 · 매주 + 상태 축 = 막는다 · 짝이 있는 축은 변화 축을 권한다', () => {
-    const r = checkSchedulePairing('weekly', { segmentKey: 'dormant' });
+  // ★ 2026-11-17 C142(Harold 1117 「Q9 를 풀되 명시 선택 + 경고」) — 막힘은 그대로 기본값 · 담당자가 그 짝의 지문으로 직접 고르면 통과 ·
+  //   제안 = 이 회사에서 열린 축만(잠긴 축을 가리키지 않는다 · R56) · 칸 조건 = 조건 목록으로 판정(옛 hasConditions)
+  it('매일 · 매주 + 상태 축 = 막는다 · 짝이 있는 축은 (열려 있으면) 변화 축을 권한다', () => {
+    const r = checkSchedulePairing('weekly', { segmentKey: 'dormant' }, null, () => true);
     expect(r.ok).toBe(false);
     if (!r.ok) { expect(r.suggestKey).toBe('went_quiet'); expect(r.reason).toContain('발길이 끊긴 고객'); }
     expect(checkSchedulePairing('daily', { segmentKey: 'all' }).ok).toBe(false);
-    expect(checkSchedulePairing('daily', { hasConditions: true }).ok).toBe(false);
+    expect(checkSchedulePairing('daily', { conditions: [{ field: 'grade', operator: 'eq', value: 'VIP' }] }).ok).toBe(false);
   });
   it('생일(회차 기간) · 변화 축 · 매월은 통과', () => {
     expect(checkSchedulePairing('daily', { segmentKey: 'birthday' }).ok).toBe(true);
     expect(checkSchedulePairing('daily', { segmentKey: 'went_quiet' }).ok).toBe(true);
     expect(checkSchedulePairing('monthly', { segmentKey: 'dormant' }).ok).toBe(true);
-    expect(checkSchedulePairing('monthly', { hasConditions: true }).ok).toBe(true);
+    expect(checkSchedulePairing('monthly', { conditions: [{ field: 'grade', operator: 'eq', value: 'VIP' }] }).ok).toBe(true);
   });
 });
 

@@ -13,7 +13,7 @@ import {
   type ActiveFieldsResult, type UnexpressedTerm,
 } from '../services/ai';
 import {
-  SegmentKey, normalizeSegmentKey, normalizeSegmentParams, getSegmentContract, checkSchedulePairing,
+  SegmentKey, normalizeSegmentKey, normalizeSegmentParams, getSegmentContract, checkSchedulePairing, type LockUnlock,
   schedulePeriod, segmentNeedsCycleBaseline, kstMonthDays,
 } from './automarketing-segment';
 import { listSegmentAvailability, countOperatorAudienceFor, resolveOperatorStoreScope } from './operator-audience';
@@ -53,10 +53,11 @@ export interface AudienceFieldOption {
 }
 
 export type AudienceTranslation =
-  | { kind: 'axis'; segmentKey: SegmentKey; segmentParams: Record<string, number>; label: string; description: string; mapped: boolean }
-  | { kind: 'filters'; conditions: AudienceCondition[] }
+  // ★ 2026-11-17 C142 — repeatNotice = 반복 짝(매일 · 매주 + 상태 조건)을 담당자가 직접 골라 통과한 경고 줄 · ackKey = 막힌 짝의 지문(화면이 되돌려 보낸다) · unlock = 사람이 화면에서 풀 수 있는 잠금(등급 순서)
+  | { kind: 'axis'; segmentKey: SegmentKey; segmentParams: Record<string, number>; label: string; description: string; mapped: boolean; repeatNotice?: string }
+  | { kind: 'filters'; conditions: AudienceCondition[]; repeatNotice?: string }
   | { kind: 'needs_choice'; conditions: AudienceCondition[]; unresolved: UnexpressedTerm[]; options: AudienceFieldOption[] }
-  | { kind: 'blocked'; code: 'DATA_MISSING' | 'PAIRING' | 'NO_CONDITION' | 'TRANSLATE_FAILED'; reason: string; suggestKey?: SegmentKey | null };
+  | { kind: 'blocked'; code: 'DATA_MISSING' | 'PAIRING' | 'NO_CONDITION' | 'TRANSLATE_FAILED'; reason: string; suggestKey?: SegmentKey | null; ackKey?: string; unlock?: LockUnlock; axisKey?: SegmentKey };
 
 /** 사용자가 고른 칸 조건이 칸 목록에 없거나 모양이 틀렸다(400) */
 export class AudienceConditionError extends Error {}
@@ -243,11 +244,22 @@ export async function translateAudience(input: {
   conditions?: Array<{ term?: string; field: string; operator: string; value: any }> | null;
   /** 창 편집 — 지금 창의 번역. 그 번역의 말(term)은 하나도 빠지지 않아야 한다(이미 정한 말 = 그대로 · 못 정한 말 = 남으면 계속 고르기) */
   carry?: AudienceTranslation | null;
+  /** ★ C142 — 담당자가 직접 고른 반복 짝의 지문(보관본 · 승인 기록) · 지금 짝 지문과 같을 때만 통과 */
+  repeatAck?: string | null;
 }): Promise<AudienceTranslation> {
   const explicitKeyRaw = typeof input.segmentKey === 'string' && input.segmentKey.trim()
     ? input.segmentKey.trim()
     : (normalizeTargetHint(input.targetHint) || '');   // 옛 축 힌트 = 같은 이름의 축(AI 지시 갈래 삭제)
   const axes = await listSegmentAvailability(input.companyId);
+  // ★ C142 — 짝 막힘 제안은 이 회사에서 열린 축만(잠긴 「등급이 오른 고객」을 가리키지 않는다 · R56)
+  const isAvailable = (k: SegmentKey) => axes.some((x) => x.key === k && x.available);
+  const pairOf = (target: Parameters<typeof checkSchedulePairing>[1]) => checkSchedulePairing(input.schedule, target, input.repeatAck ?? null, isAvailable);
+  /** 칸 조건이 확정된 뒤의 짝 판정(지문 = 그 조건) — 통과 = filters(+ 경고 줄) · 막힘 = PAIRING + 지문 */
+  const filtersOrPairing = (conditions: AudienceCondition[]): AudienceTranslation => {
+    const pair = pairOf({ conditions });
+    if (!pair.ok) return { kind: 'blocked', code: 'PAIRING', reason: pair.reason, suggestKey: pair.suggestKey, ackKey: pair.ackKey };
+    return { kind: 'filters', conditions, ...(pair.repeatNotice ? { repeatNotice: pair.repeatNotice } : {}) };
+  };
 
   const asAxis = (key: SegmentKey, params: Record<string, number> | null | undefined, mapped: boolean): AudienceTranslation => {
     const a = axes.find((x) => x.key === key);
@@ -256,11 +268,13 @@ export async function translateAudience(input: {
       return {
         kind: 'blocked', code: 'DATA_MISSING',
         reason: `이 목표는 「${c?.label || key}」에게 보내는 목표인데, ${a?.reason || '이 조건을 지금은 쓸 수 없어요.'}`,
+        ...(a?.unlock ? { unlock: a.unlock, axisKey: key } : {}),   // ★ C142 — 막힘 창이 [등급 순서 정하기]를 그리고 · 저장 뒤 이 축으로 다시 센다
       };
     }
-    const pair = checkSchedulePairing(input.schedule, { segmentKey: key });
-    if (!pair.ok) return { kind: 'blocked', code: 'PAIRING', reason: pair.reason, suggestKey: pair.suggestKey };
-    return { kind: 'axis', segmentKey: key, segmentParams: normalizeSegmentParams(key, params), label: c?.label || key, description: c?.description || '', mapped };
+    const segmentParams = normalizeSegmentParams(key, params);
+    const pair = pairOf({ segmentKey: key, segmentParams });
+    if (!pair.ok) return { kind: 'blocked', code: 'PAIRING', reason: pair.reason, suggestKey: pair.suggestKey, ackKey: pair.ackKey };
+    return { kind: 'axis', segmentKey: key, segmentParams, label: c?.label || key, description: c?.description || '', mapped, ...(pair.repeatNotice ? { repeatNotice: pair.repeatNotice } : {}) };
   };
 
   if (explicitKeyRaw) {
@@ -277,8 +291,7 @@ export async function translateAudience(input: {
   ];
 
   if (Array.isArray(input.conditions) && input.conditions.length > 0) {
-    const pair = checkSchedulePairing(input.schedule, { hasConditions: true });
-    if (!pair.ok) return { kind: 'blocked', code: 'PAIRING', reason: pair.reason, suggestKey: pair.suggestKey };
+    // ★ C142 — 짝 판정은 조건이 확정된 뒤(지문 = 고른 조건) · 아래 filters 반환 자리
     if (input.conditions.length > 8) throw new AudienceConditionError('조건은 8개까지 고를 수 있어요.');   // 잘라 내면 그만큼 넓어진다
     const validated = input.conditions.map((c) => validateCondition(c, options, 'user'));
     if (validated.some((v) => !v)) throw new AudienceConditionError('고르신 칸이나 기준을 쓸 수 없어요. 값이 있는 칸과 숫자 기준으로 다시 골라 주세요.');
@@ -298,7 +311,7 @@ export async function translateAudience(input: {
       }
     }
     const uniq = termUniquer();
-    return { kind: 'filters', conditions: picked.map((c) => ({ ...c, term: uniq(c.term) })) };
+    return filtersOrPairing(picked.map((c) => ({ ...c, term: uniq(c.term) })));
   }
 
   const objective = String(input.objective || '').trim();
@@ -315,9 +328,6 @@ export async function translateAudience(input: {
   if (translated.everyone) {
     return { kind: 'blocked', code: 'NO_CONDITION', reason: '누구에게 보낼지 조건이 없어요. 받는 분을 골라 주세요. 모든 고객에게 보내려면 「전체 고객」을 고르면 돼요.' };
   }
-  const pair = checkSchedulePairing(input.schedule, { hasConditions: true });
-  if (!pair.ok) return { kind: 'blocked', code: 'PAIRING', reason: pair.reason, suggestKey: pair.suggestKey };
-
   // 말을 먼저 유일하게 — 같은 말의 조건 둘(하한 · 상한)이 고르기 한 번에 함께 사라지지 않게
   const uniq = termUniquer();
   const aiConditions = translated.conditions.map((c) => ({ ...c, term: uniq(c.term || c.field) }));
@@ -337,7 +347,7 @@ export async function translateAudience(input: {
   if (conditions.length === 0) {
     return { kind: 'blocked', code: 'NO_CONDITION', reason: '누구에게 보낼지 조건이 없어요. 받는 분을 골라 주세요. 모든 고객에게 보내려면 「전체 고객」을 고르면 돼요.' };
   }
-  return { kind: 'filters', conditions };
+  return filtersOrPairing(conditions);
 }
 
 // ── 대상 수 · 날짜별 예상 ──

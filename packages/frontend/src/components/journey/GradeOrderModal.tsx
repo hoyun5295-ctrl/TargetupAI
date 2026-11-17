@@ -31,6 +31,8 @@ interface Props {
   /** 저장이 끝난 뒤 — 잠겨 있던 자리를 다시 판정하게 한다. */
   onSaved?: () => void;
   token: string;
+  /** ★ 2026-11-17 C142 — 여는 창보다 위에 뜨게(자동마케팅 승인 창 z-[1200] 위 = z-[1300] · 뿌리 R27) · 기본 = 여정 창들 위 z-[75] */
+  zIndexClassName?: string;
 }
 
 /** 초안 순서 — 흔한 체계의 아래→위 순. 맞히려는 게 아니라 **사람이 고칠 출발점**을 주는 것이다. */
@@ -49,7 +51,7 @@ function draftScore(value: string): number {
   return idx >= 0 ? 100 + idx : 50;                     // 못 알아본 값은 가운데
 }
 
-export default function GradeOrderModal({ open, onClose, onSaved, token }: Props) {
+export default function GradeOrderModal({ open, onClose, onSaved, token, zIndexClassName = 'z-[75]' }: Props) {
   const light = useLightSurface(); // ★ 2026-09-30 AI 존(밝은 작업대)에서 열리면 밝은 짝 · 그 밖은 원래 짙은 값
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -161,7 +163,7 @@ export default function GradeOrderModal({ open, onClose, onSaved, token }: Props
 
   return (
     // ★ 2026-10-19 B-0816-1④ — 입력 중 바깥 누름 · Esc 로 닫혀 쓰던 값이 사라지지 않게(닫기 = 창의 닫기 버튼)
-    <JourneyModalShell open={open} onClose={onClose} labelledBy="grade-order-modal-title" zIndexClassName="z-[75]" disableDismiss>
+    <JourneyModalShell open={open} onClose={onClose} labelledBy="grade-order-modal-title" zIndexClassName={zIndexClassName} disableDismiss>
       <>
         <div className={light ? "flex items-start gap-3 border-b border-slate-200 px-5 py-4" : "flex items-start gap-3 border-b border-white/10 px-5 py-4"}>
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-400 to-orange-500">

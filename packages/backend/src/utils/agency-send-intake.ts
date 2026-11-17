@@ -29,6 +29,9 @@ import { validateRequestedAt } from './agency-send-state';
 import { buildSlotPlan, extractAgencyVars, resolveVarColumns, toStoredVars } from './agency-send-vars';
 // ★ 2026-09-26 한줄로 V2 R1-08 — SMS/LMS는 실제로 나가는 문장의 바이트로(조립 CT 한 벌)
 import { measureAgencyMaxSmsBytes } from './agency-send-preview';
+import { likePattern } from './customer-timeline';   // ★ C142 검색어 LIKE escape CT
+import { isYmd } from './plan-term-calc';   // ★ C142 날짜 모양 CT
+import { buildDateRangeFilter } from './stats-aggregation';   // ★ C142 서울 날짜 범위 CT
 import { SMS_MAX_BYTES } from './message-byte';
 import { suggestVarColumnsWithAi } from './ai-column-mapper';
 import { SEND_HOURS } from '../config/defaults';
@@ -254,22 +257,38 @@ export async function agencyAdTextValue(run: any, source: string | null | undefi
  *   칸(C130-DDL-1) 확인이 던지면 없음 취급 · 칸을 싣는 SELECT 가 42703 이면 캐시를 지우고 종전 SELECT 한 번
  *   (관제 전체가 null 로 사라지지 않게 · Codex 설계 1R #2). 그 밖 오류는 그대로 던진다(호출부 = 관제 묶음의 catch).
  */
-export async function readRecentRejectedIntakes(): Promise<{ rows: any[]; replyBodyReady: boolean }> {
+export async function readRecentRejectedIntakes(filter?: { q?: string | null; from?: string | null; to?: string | null }): Promise<{ rows: any[]; replyBodyReady: boolean; truncated: boolean }> {
+  // ★ 2026-11-17 C142(남지현 접수 「접수 날짜 · 회사 등 상세 검색」) — 거르기 = 회사명 · 보낸 주소(검색어) · 받은 날짜(서울 날짜 범위) · 상한 200 + 넘으면 truncated
+  //   거르기 없음 = 종전 그대로(최근 20 · 관제 응답) · 검색어 LIKE 는 % _ \ 를 escape(likePattern) · 날짜 = buildDateRangeFilter(서울 자정 경계)
+  const like = likePattern(filter?.q);
+  const from = filter && isYmd(filter.from) ? filter.from : undefined;
+  const to = filter && isYmd(filter.to) ? filter.to : undefined;
+  const filtered = Boolean(like || from || to);
+  const params: any[] = [];
+  let where = `i.status IN ('rejected', 'failed')`;
+  if (like) { params.push(like); where += ` AND (c.company_name ILIKE $${params.length} OR i.from_email ILIKE $${params.length})`; }
+  const dr = buildDateRangeFilter('i.claimed_at', from, to, params.length + 1);
+  where += dr.sql;
+  params.push(...dr.params);
+  const limit = filtered ? REJECTED_FILTER_LIMIT + 1 : 20;
   const sql = (withBody: boolean) => `SELECT i.uidl, i.from_email, i.reason, i.reply_status, i.claimed_at, i.decided_at, c.company_name${withBody ? ', i.reply_subject, i.reply_text' : ''}
        FROM agency_send_email_intake i
        LEFT JOIN companies c ON c.id = i.company_id
-      WHERE i.status IN ('rejected', 'failed')
-      ORDER BY i.claimed_at DESC LIMIT 20`;
+      WHERE ${where}
+      ORDER BY i.claimed_at DESC LIMIT ${limit}`;
+  const cut = (rows: any[]) => ({ rows: filtered ? rows.slice(0, REJECTED_FILTER_LIMIT) : rows, truncated: filtered && rows.length > REJECTED_FILTER_LIMIT });
   let ready = false;
   try { ready = await hasAgencyColumn(pool, 'reply_text', 'agency_send_email_intake'); } catch { ready = false; }
   try {
-    return { rows: (await query(sql(ready))).rows, replyBodyReady: ready };
+    return { ...cut((await query(sql(ready), params)).rows), replyBodyReady: ready };
   } catch (err: any) {
     if (!(ready && err?.code === '42703')) throw err;
     forgetAgencyColumn('reply_text', 'agency_send_email_intake');
-    return { rows: (await query(sql(false))).rows, replyBodyReady: false };
+    return { ...cut((await query(sql(false), params)).rows), replyBodyReady: false };
   }
 }
+/** ★ C142 — 거른 반려 목록 상한(관리자 화면이 쪽으로 나눈다 · 넘으면 「기간을 좁혀 주세요」) */
+export const REJECTED_FILTER_LIMIT = 200;
 
 /**
  * ★ 2026-11-06 C109 D1(Codex 설계 2R #3) — 트랜잭션 안 이력 쓰기(실패를 삼키지 않는다 = 접수 · 문안 수정째 롤백).

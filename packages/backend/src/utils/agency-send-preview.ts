@@ -18,7 +18,7 @@
 import { query } from '../config/database';
 import { buildSlotPlan, toSlotValues, toStoredVars } from './agency-send-vars';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage } from './messageUtils';
-import { eucKrByteLength } from './message-byte';
+import { eucKrByteLength, SMS_MAX_BYTES } from './message-byte';
 import { agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C132 이메일 대행 = 문안 그대로(표기 판정 한 곳)
 
 /** 상세 미리보기 상한. 검토용 표본이다 — 전건 최종 보증은 담당자 테스트 문자와 발송이 맡는다. */
@@ -93,13 +93,55 @@ export async function buildRenderedSamples(row: any, limit: number = AGENCY_PREV
 /** ★ 2026-09-26 R1-08(Codex 8차 1R) — 접수 화면이 SMS 판정을 물을 때 보내는 후보 수신자 상한(화면이 가중 점수 상위만 고른다) */
 export const AGENCY_SMS_BYTES_MAX_CANDIDATES = 20;
 
+/** SMS 길이 측정 재료(문안 한 벌 · 접수 한 건) — 조립 인자는 renderOne 과 같다(msgType 만 'SMS') */
+interface SmsMeasureCtx {
+  plan: ReturnType<typeof buildSlotPlan>;
+  mappings: Awaited<ReturnType<typeof prepareFieldMappings>>;
+  adText: boolean;
+  opt080: string;
+}
+/** adText = 표기 정책 판정 결과(부르는 쪽이 agencyAdTextApplies 로 · 행 정책 CT 를 지난 값만) */
+async function smsMeasureCtx(companyId: string, userId: string | null, content: string, adText: boolean): Promise<SmsMeasureCtx> {
+  const plan = buildSlotPlan(content);
+  const mappings = await prepareFieldMappings(companyId);
+  const opt080 = adText ? await getOpt080Number(userId || null, companyId) : '';
+  return { plan, mappings, adText, opt080 };
+}
+function smsBytesOfOne(ctx: SmsMeasureCtx, vars: Record<string, any> | null | undefined): number {
+  const { message } = prepareSendMessage(ctx.plan.slotContent, {}, ctx.mappings, {
+    msgType: 'SMS',
+    isAd: ctx.adText,
+    opt080Number: ctx.opt080,
+    addressBookFields: toSlotValues(vars ? toStoredVars(vars) : null, ctx.plan.order),
+    subject: '',
+    skipNumberFormatting: true,
+  });
+  return eucKrByteLength(message);
+}
+/** 측정 중 이벤트 루프에 양보하는 간격(줄) · 저장된 명단을 읽는 쪽 크기도 같다 */
+export const AGENCY_SMS_MEASURE_PAGE = 2000;
+const yieldLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
+
 /**
- * ★ 2026-09-26 한줄로 V2 R1-08 — **SMS로 보냈을 때 가장 긴 수신자 문장의 EUC-KR 바이트**.
+ * ★ 2026-11-17 C142(B-1117-3 · 뿌리 R68 길이 축 · Codex 설계 1R #3) — 넘겨받은 줄 **전부**를 실제 발송과 같은 조립으로 잰 최댓값.
+ *   옛: 변수 값 길이 점수 상위 5명만 조립했다. 조립은 값의 앞뒤 공백 정리(이름) · Liquid · 남은 변수 지우기를 거쳐
+ *   점수 순서가 문장 길이 순서와 같다는 보장이 없다(표본 밖 최장 문장을 놓친다). 표본을 두지 않는다.
+ */
+async function maxSmsBytesOfRows(ctx: SmsMeasureCtx, rows: ReadonlyArray<{ vars?: Record<string, any> | null } | null | undefined>, start = 0): Promise<number> {
+  let max = 0;
+  for (let i = 0; i < rows.length; i += 1) {
+    max = Math.max(max, smsBytesOfOne(ctx, rows[i]?.vars ?? null));
+    if ((start + i + 1) % AGENCY_SMS_MEASURE_PAGE === 0) await yieldLoop();
+  }
+  return max;
+}
+
+/**
+ * ★ 2026-09-26 한줄로 V2 R1-08 — **SMS로 보냈을 때 가장 긴 수신자 문장의 EUC-KR 바이트**(입구 = 접수 코어 · 원스텝 · 메일 분석 · 화면 /sms-bytes).
  * 옛 원스텝·메일 접수는 글자 수 45로 SMS/LMS를 갈랐다(광고 표기·무료거부 줄·변수 값 무시) → 90바이트를 넘는 SMS 접수 ·
  * 90바이트 안인 영문 문안의 LMS 과금. 조립은 실제 발송·미리보기와 같은 한 벌(renderOne과 같은 인자 · msgType 'SMS').
- * 후보 = 변수 값 바이트(문안 등장 횟수 가중) 상위 5명만 실제로 조립한다 — 치환은 값이 길수록 문장이 길어지므로
- * 최장 후보에 최장 문장이 있다(날짜 서식 등 예외를 덮으려고 1명이 아니라 5명). 수신자가 없으면 빈 값으로 한 벌.
- * 슬롯 계획이 실패하면(항목 과다) 문안 그대로의 바이트 — 그 반려는 호출부가 따로 한다.
+ * ★ C142 — 넘겨받은 명단 전원을 잰다(옛 상위 5명 표본 삭제 · 저장된 접수용 measureAgencyRequestSmsBytes 와 같은 핵심).
+ * 수신자가 없거나 문안에 변수가 없으면 한 번만 조립. 슬롯 계획이 실패하면(항목 과다) 문안 그대로의 바이트 — 그 반려는 호출부가 따로 한다.
  */
 export async function measureAgencyMaxSmsBytes(input: {
   companyId: string;
@@ -111,36 +153,57 @@ export async function measureAgencyMaxSmsBytes(input: {
   recipients: Array<{ vars?: Record<string, any> | null } | null | undefined>;
 }): Promise<number> {
   const content = String(input.content || '');
-  const plan = buildSlotPlan(content);
-  if (!plan.ok) return eucKrByteLength(content);
-  const occurrences: Record<string, number> = {};
-  for (const name of plan.order) {
-    occurrences[name] = content.split(`%${name}%`).length - 1;
-  }
-  const stored = (input.recipients || []).map((r) => toStoredVars(r?.vars));
-  let candidates: Array<Record<string, string | null> | null> = [null];
-  if (plan.order.length > 0 && stored.length > 0) {
-    const scored = stored.map((vars, idx) => ({
-      idx,
-      score: plan.order.reduce((acc, name) => acc + (occurrences[name] || 1) * eucKrByteLength(String(vars?.[name] ?? '')), 0),
-    }));
-    scored.sort((a, b) => b.score - a.score || a.idx - b.idx);
-    candidates = scored.slice(0, 5).map((x) => stored[x.idx]);
-  }
-  const mappings = await prepareFieldMappings(input.companyId);
   const adText = agencyAdTextApplies({ isAd: input.isAd, adText: input.adText });
-  const opt080 = adText ? await getOpt080Number(input.userId || null, input.companyId) : '';
-  let max = 0;
-  for (const vars of candidates) {
-    const { message } = prepareSendMessage(plan.slotContent, {}, mappings, {
-      msgType: 'SMS',
-      isAd: adText,
-      opt080Number: opt080,
-      addressBookFields: toSlotValues(vars, plan.order),
-      subject: '',
-      skipNumberFormatting: true,
-    });
-    max = Math.max(max, eucKrByteLength(message));
+  const ctx = await smsMeasureCtx(input.companyId, input.userId, content, adText);
+  if (!ctx.plan.ok) return eucKrByteLength(content);
+  const rows = input.recipients || [];
+  if (ctx.plan.order.length === 0 || rows.length === 0) return smsBytesOfOne(ctx, null);
+  return maxSmsBytesOfRows(ctx, rows);
+}
+
+/**
+ * ★ C142 — 저장된 접수(명단 = agency_send_recipients)를 이 문안으로 보냈을 때 가장 긴 SMS 문장의 바이트.
+ *   명단을 (row_no, id) 순 2,000줄씩 읽어 같은 핵심으로 잰다(앱 메모리 = 한 쪽 · 0912 「명단 크기 = 프로세스 메모리」 원칙).
+ *   접수 뒤 명단은 바뀌지 않는다(바꾸는 길 0 · 문안 고치기는 명단을 건드리지 않는다).
+ */
+export async function measureAgencyRequestSmsBytes(row: any, content: string): Promise<number> {
+  const text = String(content || '');
+  const adText = agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text });
+  const ctx = await smsMeasureCtx(String(row.company_id), row.created_by || null, text, adText);
+  if (!ctx.plan.ok) return eucKrByteLength(text);
+  if (ctx.plan.order.length === 0) return smsBytesOfOne(ctx, null);
+  let max = -1;
+  let seen = 0;
+  let lastRowNo = -2147483648;
+  let lastId = '0';
+  for (;;) {
+    const page = await query(
+      `SELECT id, row_no, vars FROM agency_send_recipients
+        WHERE request_id = $1::uuid AND (row_no, id) > ($2::int, $3::bigint)
+        ORDER BY row_no, id
+        LIMIT ${AGENCY_SMS_MEASURE_PAGE}`,
+      [row.id, lastRowNo, lastId],
+    );
+    if (page.rows.length === 0) break;
+    max = Math.max(max, await maxSmsBytesOfRows(ctx, page.rows, seen));
+    seen += page.rows.length;
+    const tail = page.rows[page.rows.length - 1];
+    lastRowNo = Number(tail.row_no);
+    lastId = String(tail.id);
+    if (page.rows.length < AGENCY_SMS_MEASURE_PAGE) break;
+    await yieldLoop();
   }
-  return max;
+  return max < 0 ? smsBytesOfOne(ctx, null) : max;
+}
+
+/** ★ C142 — SMS 접수를 이 문안으로 보내면 90바이트를 넘는가 · 넘으면 가장 긴 문장 바이트 · 아니면(LMS · MMS 포함) null */
+export async function agencySmsBytesOver(row: any, content: string): Promise<number | null> {
+  if (String(row?.message_type || '').toUpperCase() !== 'SMS') return null;
+  const bytes = await measureAgencyRequestSmsBytes(row, content);
+  return bytes > SMS_MAX_BYTES ? bytes : null;
+}
+
+/** ★ C142 — 고객에게 보이는 넘침 안내(고치기 저장 반려 · 화면 표시 · 담당자 문자가 같은 말) */
+export function agencySmsBytesOverText(bytes: number): string {
+  return `SMS는 ${SMS_MAX_BYTES}바이트까지 보낼 수 있어요. 이 문안은 실제로 나가는 문장 가운데 가장 긴 문장이 ${bytes}바이트예요. ${SMS_MAX_BYTES}바이트 안으로 줄이거나 LMS로 새로 접수해 주세요.`;
 }

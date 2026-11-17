@@ -66,7 +66,7 @@ export interface MapJourney {
   steps: MapStep[];
   graph: { edges: Array<{ from: number; to: number; kind: string }>; exitSlots: number[]; issues: string[] };
   edit: StepEditPolicy;
-  capability: { available: boolean; reason: string } | null;
+  capability: { available: boolean; reason: string; unlock?: 'grade_order' } | null;
   updatedAt: string | null;
   /** ★ 0930 V2 5차 — 계보 · 새 판 */
   lineageId: string | null;
@@ -120,9 +120,9 @@ export interface LifecycleMapData {
   lanes: Array<{ key: JourneyLane; label: string; band: 'flow' | 'moment' | 'standing' }>;
   journeys: MapJourney[];
   lines: MapLine[];
-  ghosts: Array<{ lane: JourneyLane; triggerEvent: string; label: string; available: boolean; reason: string; createMode: CreateMode }>;
+  ghosts: Array<{ lane: JourneyLane; triggerEvent: string; label: string; available: boolean; reason: string; unlock?: 'grade_order'; createMode: CreateMode }>;   // ★ C142 unlock
   overlaps: MapOverlap[];
-  lockedTriggers: Array<{ triggerEvent: string; label: string; reason: string }>;
+  lockedTriggers: Array<{ triggerEvent: string; label: string; reason: string; unlock?: 'grade_order' }>;   // ★ C142 unlock
   /** 크레딧 단가(서버 단가표) · 운영 = 보낸 날 하루 1번(계보당). */
   costs: { generate: number; activate: number; operation: number };
   /** ★ V.3 §10-2 — 머리 요약 한 줄(서버 셈). */
@@ -212,6 +212,8 @@ export interface AttachCheckRow {
   text: string;
   reason: string;
   fix: AttachFix | null;
+  /** ★ 2026-11-17 C142 — 앞 여정의 시작 사건이 잠겼고 화면에서 풀 수 있으면(등급 순서) */
+  unlock?: 'grade_order';
 }
 
 export interface InterviewPlan { key: string; triggerEvent: string; title: string; objective: string; sentence?: string }

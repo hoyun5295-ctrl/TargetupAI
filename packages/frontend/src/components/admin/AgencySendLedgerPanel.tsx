@@ -6,7 +6,7 @@
  * 데이터 = GET /api/admin/agency-send 의 requests(레일 재료 = approved_at·queued_at까지 실려 온다).
  * 표시 판정(레일·상태·출처 라벨)은 고객 화면과 **같은 CT**(agency-send-api)를 읽는다 — 두 화면이 다르게 읽히면 안 된다.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useClockTick } from '../../hooks/useClockTick';
 import { AlertTriangle, Eye, Loader2, RefreshCw, Search, Send, X } from 'lucide-react';
 import AgencyProgressRail from '../agency/AgencyProgressRail';
@@ -96,6 +96,13 @@ export default function AgencySendLedgerPanel() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState('all');
   const [keyword, setKeyword] = useState('');
+  // ★ 2026-11-17 C142(남지현 접수 「접수 날짜 or 발송 날짜로도 선택 조회」 · 뿌리 R73) — 거르기는 서버가 한다(옛: 최근 200건 안에서만 화면이 걸러 오래된 접수는 「없음」)
+  //   검색어 = 입력이 멈춘 뒤(0.4초) 서버로 · 날짜 기준 = 접수일 · 발송일 · 서울 날짜 · 200건을 넘으면 잘림 안내
+  const [query, setQuery] = useState('');
+  const [dateBy, setDateBy] = useState<'created' | 'requested'>('created');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [truncated, setTruncated] = useState(false);
   // ★2026-08-26(3) 운영 취소(고객이 전화로 급히 요청 · 직원은 고객 비밀번호를 모른다)
   const [cancelTarget, setCancelTarget] = useState<AdminAgencyRow | null>(null);
   const [cancelMemo, setCancelMemo] = useState('');
@@ -126,26 +133,40 @@ export default function AgencySendLedgerPanel() {
     }
   };
 
-  const load = useCallback(async (status: string) => {
+  const loadSeq = useRef(0);
+  const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError('');
     try {
-      const qs = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
-      const res = await fetch(`/api/admin/agency-send${qs}`, {
+      const qs = new URLSearchParams();
+      if (statusFilter !== 'all') qs.set('status', statusFilter);
+      if (sourceFilter !== 'all') qs.set('source', sourceFilter);
+      if (query.trim()) qs.set('q', query.trim());
+      qs.set('date_by', dateBy);   // 정렬 기준이기도 하다(날짜 범위가 없어도 고른 기준으로 최근 200 · Codex 구현 1R)
+      if (dateFrom) qs.set('from', dateFrom);
+      if (dateTo) qs.set('to', dateTo);
+      const res = await fetch(`/api/admin/agency-send${qs.toString() ? `?${qs.toString()}` : ''}`, {
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
       });
       const body = await res.json();
+      if (seq !== loadSeq.current) return;   // 늦게 온 답이 새 조건의 결과를 덮지 않게
       if (!res.ok || body?.success === false) throw new Error(body?.error || '내역을 불러오지 못했습니다.');
       setRows(body.requests || []);
       setSummary(body.summary || []);
+      setTruncated(body.truncated === true);
     } catch (e: any) {
-      setError(e?.message || '내역을 불러오지 못했습니다.');
+      if (seq === loadSeq.current) setError(e?.message || '내역을 불러오지 못했습니다.');
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
-  }, []);
+  }, [statusFilter, sourceFilter, query, dateBy, dateFrom, dateTo]);
 
-  useEffect(() => { void load(statusFilter); }, [load, statusFilter]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(keyword), 400);
+    return () => clearTimeout(t);
+  }, [keyword]);
 
   const openCancel = (row: AdminAgencyRow) => {
     setCancelTarget(row); setCancelMemo(''); setCancelError(''); setNotice('');
@@ -170,7 +191,7 @@ export default function AgencySendLedgerPanel() {
         ? '취소를 처리하고 있습니다. 예약 정리가 끝나면 목록의 상태가 취소됨으로 바뀝니다.'
         : '취소했습니다. 담당자 번호로 취소 안내 문자를 보냈습니다.');
       setCancelTarget(null);
-      await load(statusFilter);
+      await load();
     } catch (e: any) {
       setCancelError(e?.message || '취소하지 못했습니다.');
     } finally {
@@ -178,22 +199,15 @@ export default function AgencySendLedgerPanel() {
     }
   };
 
-  const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (sourceFilter !== 'all' && (r.source || 'screen') !== sourceFilter) return false;
-      if (!kw) return true;
-      return [r.company_name, r.user_name, r.user_login, r.file_name, r.content_preview]
-        .some((v) => String(v || '').toLowerCase().includes(kw));
-    });
-  }, [rows, sourceFilter, keyword]);
+  // ★ C142 — 거르기는 서버가 했다(검색어 · 접수구분 · 날짜) · 화면은 받은 줄을 쪽으로 나누기만 한다
+  const filtered = rows;
 
   // ★2026-09-02 페이징 — 전량을 한 화면에 그려 세로 스크롤이 끝없이 늘어나던 것을 10건씩 끊는다.
   //   서버는 이미 최근 200건만 주고 필터도 클라이언트에서 도는 축이라 여기서만 자른다(API 무변경).
   //   ⛔ 필터·검색이 바뀌면 반드시 1페이지로 되돌린다 — 3페이지를 보다 조건을 바꾸면 결과가 3페이지에
   //   못 미쳐 빈 화면이 된다("검색했는데 아무것도 없다"로 접수된다).
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [statusFilter, sourceFilter, keyword]);
+  useEffect(() => { setPage(1); }, [statusFilter, sourceFilter, query, dateBy, dateFrom, dateTo]);
 
   // 취소 처리·새로고침으로 건수가 줄어 현재 페이지가 범위를 넘으면 마지막 페이지로 당긴다.
   // 렌더 중 setState 대신 표시값을 보정한다(사용자가 페이저를 누르면 상태도 정상 범위로 들어온다).
@@ -236,12 +250,28 @@ export default function AgencySendLedgerPanel() {
             className="h-9 px-2.5 rounded-lg border border-gray-200 text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/25">
             {SOURCE_FILTERS.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
           </select>
-          <button onClick={() => void load(statusFilter)} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100" aria-label="새로고침">
+          <select value={dateBy} onChange={(e) => setDateBy(e.target.value === 'requested' ? 'requested' : 'created')} aria-label="날짜 기준"
+            className="h-9 px-2.5 rounded-lg border border-gray-200 text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/25">
+            <option value="created">접수일</option>
+            <option value="requested">발송일</option>
+          </select>
+          <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} aria-label="시작일" className="h-9 px-2.5 rounded-lg border border-gray-200 text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/25" />
+          <span className="text-[12px] text-gray-400">~</span>
+          <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} aria-label="끝일" className="h-9 px-2.5 rounded-lg border border-gray-200 text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/25" />
+          {(dateFrom || dateTo) && (
+            <button type="button" onClick={() => { setDateFrom(''); setDateTo(''); }} className="h-9 px-2.5 rounded-lg text-[12.5px] text-gray-500 hover:text-gray-800 hover:bg-gray-100">날짜 지우기</button>
+          )}
+          <button onClick={() => void load()} className="p-2 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100" aria-label="새로고침">
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
         </div>
       </div>
 
+      {truncated && (
+        <div className="mx-6 mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">
+          조건에 맞는 접수가 200건을 넘어 최근 200건만 보여요. 날짜나 검색어로 범위를 좁혀 주세요.
+        </div>
+      )}
       {/* 요약 — 지금 사람 손(고객사 담당자)을 기다리는 건이 몇인지부터 */}
       <div className="px-6 pt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="rounded-xl border border-gray-200 p-3.5">

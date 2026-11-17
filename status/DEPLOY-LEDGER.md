@@ -86,6 +86,7 @@
 | C139 | 미커밋 |
 | C140 | e3ecc4b9 |
 | C141 | 미커밋 |
+| C142 | 미커밋 |
 
 ## §1 대기
 
@@ -2641,6 +2642,22 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: C141-H1
 - 기대: ① 7일 무료체험 중 칸에 noplan(1124 12:16 까지 · 「7일 남음」 → 날이 지나며 줄어듦) ② 이미지 체험 신청 칸 = 그동안 신청한 회사 ③ 안내별 「7일 무료체험 배너」 본 · 누름 수가 원장 C140-S1 의 audit_logs 수와 맞음 ④ 보기만 함 칸을 누르면 회사 목록 · 20곳씩 넘김 ⑤ 줄을 누르면 상세 창 · ESC 로 닫힘 ⑥ 글자가 칸을 벗어나지 않음
 - 확인: 결과(날짜 · 다름이면 캡처)
+- 결과: (대기)
+
+### C142-H1 · 한줄로 배포(오류접수 4건 · 등급 순서 잠금 풀기 · 매일 주기 명시 선택 · 대행 SMS 길이 · 대행 조회 검색 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C142
+- 단계: 한줄로 배포
+- 선행: Codex 설계 3R · 구현 2R approve(1117) · 커밋(Harold · 다른 세션의 미커밋 줄과 한 파일인 문서 셋(status/BUGS.md · status/STATUS-FEED.md · status/DEPLOY-LEDGER.md)은 이 세션 줄만)
+- 기대: [설계서](../docs/2026-11-17-c142-staff-tickets-design.md) §2 · 자동마케팅 · 여정의 등급 순서 잠금 자리마다 [등급 순서 정하기] · 매일 + 같은 대상 = 질문 ③ 「지금 대상에게 매일 보내기」 · 대행 SMS 고치기 칸에 「가장 긴 문장 N / 90바이트」 · 슈퍼관리자 대행발송 내역 날짜 기준(접수일 / 발송일) · 메일 반려 검색
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `measureAgencyRequestSmsBytes` ≥ 1(dist/utils/agency-send-preview.js) · `repeatAckKey` ≥ 1(dist/utils/automarketing-segment.js) · `mail-rejected` ≥ 1(dist/routes/admin.js) · 재시작 뒤 에러 로그 새 종류 0 · does not exist 0
+- 결과: (대기)
+
+### C142-S1 · 실측(대행 SMS 대기 건 · 길이 막힘 기록)
+- 카드: C142
+- 단계: 사후
+- 선행: C142-H1
+- 기대: ① 배포 직후 대기 중 SMS 대행 건 목록(아래 1번) = 이 건들은 다음 검사 · 발송 직전에 명단 전원으로 다시 잰다 ② 90바이트를 넘는 건이면 그 시각에 test_failed + 이력 sms_bytes(아래 2번) + 담당자 문자 한 통(「문자(SMS) 길이를 넘는 문장이 있어」) · 11.20 11:30 테스트1.xlsx(인비토 · 91바이트) = 11.20 09:30 최종 검사에서 멈춤 ③ 길이 안의 건 = 종전 그대로
+- 확인: 서버 셸 한 줄 둘(PG) ① `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT r.id, c.company_name, r.status, r.requested_at, r.file_name FROM agency_send_requests r JOIN companies c ON c.id = r.company_id WHERE r.message_type = 'SMS' AND r.status IN ('received','testing','awaiting_approval','reapproval','approved','final_testing') ORDER BY r.requested_at;"` ② `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT e.request_id, e.created_at, e.payload FROM agency_send_events e WHERE e.kind = 'test_failed' AND e.payload->>'reason' = 'sms_bytes' ORDER BY e.created_at DESC LIMIT 20;"`
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

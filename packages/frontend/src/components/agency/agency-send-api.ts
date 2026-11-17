@@ -245,6 +245,23 @@ export async function approveAgencyRequest(id: string, revision: number): Promis
   return (await unwrap(res)).request;
 }
 
+/**
+ * ★ 2026-11-17 C142(남지현 접수 「고치기 수정 시 바이트 수도 함께」) — 문안 고치기 칸의 SMS 길이.
+ *   서버가 그 접수 명단 전원을 실제 발송과 같은 조립으로 잰 가장 긴 문장(저장 판정과 같은 측정 · 저장 0 · 크레딧 0).
+ */
+export interface AgencySmsBytes { sms: boolean; maxBytes: number | null; limit: number; over: boolean; message: string | null }
+export async function measureAgencySmsBytes(id: string, content: string): Promise<AgencySmsBytes> {
+  const res = await fetch(`/api/agency-send/${id}/sms-bytes`, { method: 'POST', headers: json(), body: JSON.stringify({ content }) });
+  const data = await unwrap(res);
+  return {
+    sms: data.sms === true,
+    maxBytes: typeof data.maxBytes === 'number' ? data.maxBytes : null,
+    limit: Number(data.limit) || 90,
+    over: data.over === true,
+    message: typeof data.message === 'string' ? data.message : null,
+  };
+}
+
 export async function updateAgencyContent(
   id: string, content: string, revision: number, subject?: string,
 ): Promise<{ request: AgencySendRequest; notice: string[]; optOutNotice: string[] }> {

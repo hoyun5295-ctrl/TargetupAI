@@ -7,6 +7,7 @@
  *   - 표본 미달 · 연동 잠금 · 이미 있음은 숨기지 않고 그 상태로 보여 준다. 자동으로 켜지 않는다(만든 뒤 켜기 전 점검으로).
  * ⛔ 성과 약속 숫자 · 지어낸 혜택 0 · 크레딧 합계 20 이상이면 확인 한 단계(크레딧 모달 규칙).
  */
+import GradeOrderUnlockButton from '../GradeOrderUnlockButton';   // ★ 2026-11-17 C142 등급 순서 잠금 풀기
 import { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, Loader2, Lock, Package, Sparkles, TrendingUp } from 'lucide-react';
 import { useToast } from '../../ToastProvider';
@@ -23,6 +24,8 @@ interface FlowPlanItem {
   sample: number | null;
   status: 'ready' | 'exists' | 'drafted' | 'locked';
   reason: string;
+  /** ★ 2026-11-17 C142 — 잠긴 칸을 화면에서 풀 수 있는 할 일(등급 순서) */
+  unlock?: 'grade_order';
 }
 interface ProductCycle { door: 'mall' | 'ledger'; key: string; name: string; buyers: number; medianDays: number; sample: number; status: 'ready' | 'exists' }   // ★ 2026-11-04 C99 상품 = (문, 키)
 interface Diagnosis {
@@ -43,6 +46,9 @@ interface Props {
   onDrafted: (journeyIds: string[]) => void;
   /** 만드는 동안 창을 닫지 못하게(닫기 = 취소인데 이미 나간 요청은 되돌릴 수 없다). */
   onBusyChange?: (busy: boolean) => void;
+  /** ★ C142 — [등급 순서 정하기](페이지가 창을 연다) · 저장하면 reloadKey 가 바뀌어 진단을 다시 읽는다 */
+  onGradeOrder?: () => void;
+  reloadKey?: number;
 }
 
 const dayLabel = (d: number) => (d === 0 ? '바로' : `D+${d}`);
@@ -60,7 +66,7 @@ async function productRequestId(key: string, periodDays: number): Promise<string
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
 }
 
-export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }: Props) {
+export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange, onGradeOrder, reloadKey = 0 }: Props) {
   const toast = useToast();
   const [diag, setDiag] = useState<Diagnosis | null>(null);
   const [loading, setLoading] = useState(false);
@@ -90,7 +96,7 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
       })
       .catch((e) => setError(e?.message || '진단을 불러오지 못했어요.'))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [open, reloadKey]);
 
   useEffect(() => { onBusyChange?.(busy); }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
   const total = useMemo(() => picked.size, [picked]);
@@ -202,6 +208,9 @@ export default function JourneyDiagnosisPanel({ open, onDrafted, onBusyChange }:
                     <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
                       {p.status === 'locked' ? <Lock className="w-3 h-3" /> : <CheckCircle2 className="w-3 h-3 text-emerald-600" />}{p.reason}
                     </p>
+                  )}
+                  {p.status === 'locked' && p.unlock === 'grade_order' && onGradeOrder && (
+                    <GradeOrderUnlockButton onClick={onGradeOrder} className="mt-1.5" />
                   )}
                 </div>
                 {ready && (

@@ -157,7 +157,7 @@ export interface MapJourney {
   graph: Pick<JourneyGraph, 'edges' | 'exitSlots' | 'issues'>;
   /** 칸 편집 정책(PATCH 게이트와 같은 함수 · journey-step-edit-policy). */
   edit: StepEditPolicy;
-  capability: { available: boolean; reason: string } | null;
+  capability: { available: boolean; reason: string; unlock?: 'grade_order' } | null;
   updatedAt: string | null;
   /** ★ 0930 V2 5차 — 계보(새 판 · 옛 판 묶음). 없으면 null. */
   lineageId: string | null;
@@ -212,6 +212,8 @@ export interface MapGhost {
   label: string;
   available: boolean;
   reason: string;
+  /** ★ 2026-11-17 C142 — 잠금을 화면에서 풀 수 있으면 그 할 일(등급 순서 = [등급 순서 정하기]) */
+  unlock?: 'grade_order';
   createMode: CreateMode;
 }
 
@@ -253,7 +255,7 @@ export interface LifecycleMap {
   ghosts: MapGhost[];
   overlaps: MapOverlap[];
   /** 이 회사 데이터로 아직 만들 수 없는 시작 사건(사유 = 무엇을 연동하면 열리는지). 빈 곳 찾기의 "데이터가 있어야 열리는 여정". */
-  lockedTriggers: Array<{ triggerEvent: string; label: string; reason: string }>;
+  lockedTriggers: Array<{ triggerEvent: string; label: string; reason: string; unlock?: 'grade_order' }>;   // ★ C142 unlock = [등급 순서 정하기]
   /** 크레딧 단가(단가표 = ai-credit-calc 한 곳) — 화면이 금액을 따로 적지 않게 싣는다. 초안 만들기 = AI 생성 1회 · 켜기 = 최초 활성화 1회(계보당) · 운영 = 보낸 날 하루 1번(계보당). */
   costs: { generate: number; activate: number; operation: number };
   /** ★ V.3 §10-2 — 머리 요약 한 줄. */
@@ -716,7 +718,7 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
   const capOf = (ev: string) => {
     const key = triggerKeyForEvent(ev);
     const v = key ? availability[key] : undefined;
-    return v ? { available: v.available, reason: v.reason } : null;
+    return v ? { available: v.available, reason: v.reason, ...(v.unlock ? { unlock: v.unlock } : {}) } : null;   // ★ C142 unlock
   };
 
   const goalJourneyIds = rows
@@ -974,7 +976,7 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     const c = TRIGGER_CONTRACTS.find((t) => t.lane === meta.key && t.implemented && t.key !== null);
     if (!c) continue;
     const cap = capOf(c.event);
-    ghosts.push({ lane: meta.key, triggerEvent: c.event, label: c.label, available: cap ? cap.available : true, reason: cap ? cap.reason : '', createMode: createModeOf(c.event) });
+    ghosts.push({ lane: meta.key, triggerEvent: c.event, label: c.label, available: cap ? cap.available : true, reason: cap ? cap.reason : '', ...(cap?.unlock ? { unlock: cap.unlock } : {}), createMode: createModeOf(c.event) });   // ★ C142 unlock
   }
   // 받는 여정이 없는 선의 도착점도 유령 카드로(레인에 다른 여정이 있어도 · 예: 휴면 전환은 있고 휴면 복귀가 없을 때). 트리거당 1장.
   for (const ln of lines) {
@@ -982,14 +984,14 @@ export async function buildLifecycleMap(companyId: string, viewerUserId?: string
     const lane = laneForTrigger(ln.toTrigger);
     if (!lane) continue;
     const cap = capOf(ln.toTrigger);
-    ghosts.push({ lane, triggerEvent: ln.toTrigger, label: triggerLabel(ln.toTrigger), available: cap ? cap.available : true, reason: cap ? cap.reason : '', createMode: createModeOf(ln.toTrigger) });
+    ghosts.push({ lane, triggerEvent: ln.toTrigger, label: triggerLabel(ln.toTrigger), available: cap ? cap.available : true, reason: cap ? cap.reason : '', ...(cap?.unlock ? { unlock: cap.unlock } : {}), createMode: createModeOf(ln.toTrigger) });
   }
 
   const lockedTriggers = TRIGGER_CONTRACTS
     .filter((c) => c.implemented && c.key !== null && c.cls !== 'reservation')
     .map((c) => ({ c, cap: capOf(c.event) }))
     .filter(({ cap }) => cap && !cap.available)
-    .map(({ c, cap }) => ({ triggerEvent: c.event, label: c.label, reason: cap!.reason }));
+    .map(({ c, cap }) => ({ triggerEvent: c.event, label: c.label, reason: cap!.reason, ...(cap!.unlock ? { unlock: cap!.unlock } : {}) }));   // ★ C142 unlock(Codex 구현 1R)
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1018,6 +1020,8 @@ export interface AttachCheckRow {
   reason: string;
   /** 1클릭 고치기 — 초안 · 멈춤 = 전부 · 켜진 여정 = 자동 종료 켜기만 · 나머지는 일시정지하고 고치기(설계서 §13-1). */
   fix: AttachFix | null;
+  /** ★ 2026-11-17 C142 — 앞 여정의 시작 사건이 잠겼고 화면에서 풀 수 있으면 그 할 일(등급 순서) */
+  unlock?: 'grade_order';
 }
 
 function fixForLine(ln: MapLine, byId: Map<string, MapJourney>): AttachCheckRow['fix'] {
@@ -1079,7 +1083,7 @@ export function buildAttachCheck(map: LifecycleMap, journeyIds: string[]): Attac
         push({
           id: `sender:${c.event}:${id}`, journeyId: id, kind: 'suggest_sender', tier: 'empty',
           text: `앞에 ${c.label} 여정이 있으면 이 여정으로 이어져요`,
-          reason: cap ? cap.reason : '목표를 이룬 고객이 이 여정으로 넘어옵니다.',
+          reason: cap ? cap.reason : '목표를 이룬 고객이 이 여정으로 넘어옵니다.', ...(cap?.unlock ? { unlock: cap.unlock } : {}),   // ★ C142
           fix: cap ? null : { action: 'create', triggerEvent: c.event, label: `${c.label} 여정 만들기`, createMode: createModeOf(c.event) },
         });
       }

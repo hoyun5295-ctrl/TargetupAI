@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { buildOperatorQuestions, decideOperatorAnswers, datedTerms, objectiveForRounds, type OperatorQuestionFacts } from '../automarketing-interview';
+import { repeatAckKey } from '../automarketing-segment';   // ★ C142 짝 지문
 import { operatorFinalCopy, operatorFinalCopyAt, proposalSendIndex, finalCopyCleared, copyFingerprint } from '../operator-final-copy';
 import { pickAnswer } from '../one-line-ct/questions';
 import { listenLine } from '../one-line-ct/listen';
@@ -62,16 +63,21 @@ describe('질문표 = 닫힌 목록 ①~⑥(순수)', () => {
     }
     // 사람이 고른 전체(mapped false) = 묻지 않는다
     expect(buildOperatorQuestions(base({ translation: { kind: 'axis', segmentKey: 'all', segmentParams: {}, label: '전체 고객', description: '', mapped: false } as any }))).toEqual([]);
-    // 매주면 전체 · VIP(반복 축)는 잠그지 않고 「매월로 보내요」 보기(답할 수 없는 질문 0 · Codex 1R) · 데이터 없는 축만 자물쇠
+    // 매주면 전체 · VIP(반복 축)는 잠그지 않고 축 그대로(★ C142 Q9 해제 · 옛 「매월로 보내요」 = 주기를 바꿔 매일 · 매주가 불가) · 경고는 설명에 · 고른 뒤 ③ 이 묻는다
     const weekly = buildOperatorQuestions(base({ schedule: 'weekly', translation: { kind: 'blocked', code: 'NO_CONDITION', reason: '' } as any }));
-    expect(weekly[0].options!.map((o) => [o.value, !!o.disabled])).toEqual([['axis:vip|monthly', false], ['axis:birthday', true], ['axis:all|monthly', false]]);
-    expect(weekly[0].options![0].label).toBe('상위 등급 고객 · 매월로 보내요');
-    expect(decideOperatorAnswers(weekly, { audience: 'axis:vip|monthly' })).toEqual({ ok: true, patch: { fields: {}, segmentKey: 'vip', schedule: 'monthly' } });
+    expect(weekly[0].options!.map((o) => [o.value, !!o.disabled])).toEqual([['axis:vip', false], ['axis:birthday', true], ['axis:all', false]]);
+    expect(weekly[0].options![0].label).toBe('상위 등급 고객');
+    expect(weekly[0].options![0].desc).toContain('같은 고객이 매주 다시 받아요');
+    expect(decideOperatorAnswers(weekly, { audience: 'axis:vip' })).toEqual({ ok: true, patch: { fields: {}, segmentKey: 'vip' } });
   });
   it('③ 매주 + 반복 축 = 묻는다(사람이 쓴 주기든 추천 주기든 · 질문 표시와 안전 검증이 같은 판정)', () => {
+    // ★ C142 — 「지금 대상에게 매주 보내기」 열림(값 = 그 짝의 지문) · 제안 = 열린 축만(이 사실 = 열린 축 목록 없음 → 제안 0)
     const q = buildOperatorQuestions(base({ schedule: 'weekly' }));
     expect(q[0]).toMatchObject({ id: 'schedule' });
-    expect(q[0].options!.map((o) => [o.value, !!o.disabled])).toEqual([['monthly', false], ['axis:grade_up', false], ['keep', true]]);
+    const key = repeatAckKey('weekly', { segmentKey: (base({}).translation as any).segmentKey, segmentParams: (base({}).translation as any).segmentParams });
+    expect(q[0].options!.map((o) => [o.value, !!o.disabled])).toEqual([['monthly', false], [`keep:${key}`, false]]);
+    const open = buildOperatorQuestions(base({ schedule: 'weekly', availableKeys: ['grade_up'] }));
+    expect(open[0].options!.map((o) => o.value)).toEqual(['monthly', 'axis:grade_up', `keep:${key}`]);
   });
   it('④ 혜택 · ⑤ 회신번호(후보 둘 이상만) · ⑥ 알림 번호', () => {
     const q = buildOperatorQuestions(base({
@@ -252,22 +258,24 @@ describe('원문 계약 — 등록 · 발송 돈 · 닫기 · 승인', () => {
   it('짝 = 등록 직전 마지막 문(질문 표시와 별개 · 400) · 추천 주기는 대상이 바뀔 때마다 다시 정한다 · 같은 화면 키라도 본문이 다르면 새 보관본(Codex 1R)', () => {
     const regAt = co.indexOf('export async function registerOperator(');
     const reg = co.slice(regAt, co.indexOf('\nexport ', regAt + 10));
-    expect(reg).toContain('const pair = checkSchedulePairing(schedule, segKey ? { segmentKey: segKey } : { hasConditions: true });');
-    expect(reg).toContain('if (!pair.ok) throw new OperatorPairingError(pair.reason);');
+    // ★ C142 — 짝 판정 = 지문(축 · 기준 숫자 · 칸 조건) + 담당자가 고른 지문 · 막힘 400 은 지금 짝 지문을 싣는다
+    expect(reg).toContain('const pair = checkSchedulePairing(schedule, pairTarget, readRepeatAck(input.repeatAck));');
+    expect(reg).toContain('if (!pair.ok) throw new OperatorPairingError(pair.reason, pair.ackKey);');
     expect(reg.indexOf('throw new OperatorPairingError')).toBeLessThan(reg.indexOf('BEGIN'));
     // 편집 · 승인 저장 = 행을 잠그는 같은 함수 · 저장과 같은 트랜잭션(Codex 2R · 잠그지 않은 조회 0)
     const lock = co.slice(co.indexOf('async function lockAndCheckPairing('), co.indexOf('export async function registerOperator('));
     expect(lock).toContain('FOR UPDATE');
-    expect(lock).toContain('const changed = schedule !== now.schedule || key !== nowKey;');
+    expect(lock).toContain('const changed = pairFingerprint(schedule, target)');   // ★ C142 바뀜 = 짝의 정체(기준 숫자 · 칸 조건 포함)
     const upAt = co.indexOf('export async function updateOperator(');
     const up = co.slice(upAt, co.indexOf('\nexport ', upAt + 10));
-    expect(up).toContain("await withTransaction(async (run) => (");
-    expect(up).toContain("(await lockAndCheckPairing(run, companyId, operatorId, { schedule: patch.schedule, segmentKey: withSegmentSet ? segFinalKey : undefined }, 'changed'))");
-    expect(up).toContain('? runUpdate(withSegmentSet && segColumnsReady, run) : null))');
+    expect(up).toContain('await withTransaction(async (run) => {');
+    expect(up).toContain("}, 'changed', null, patch.repeatAck ?? null);");
+    expect(up).toContain('const saved = await runUpdate(withSegmentSet && segColumnsReady, run);');
+    expect(up).toContain('await writeRepeatAck(run, operatorId, checked.repeatAck);');
     expect(up).not.toContain('checkSchedulePairing(');
     const apAt = co.indexOf('export async function approveOperatorWindow(');
     const ap = co.slice(apAt, co.indexOf('\n}\n', apAt));
-    expect(ap).toContain("}, 'always', input.seenSchedule);");
+    expect(ap).toContain("}, 'always', input.seenSchedule, input.repeatAck ?? null);");
     // 일정 비교 = 잠근 직후 · 짝 판정 앞(Codex 4R)
     expect(lock.indexOf('throw new OperatorScheduleChangedError()')).toBeGreaterThan(lock.indexOf('FOR UPDATE'));
     expect(lock.indexOf('throw new OperatorScheduleChangedError()')).toBeLessThan(lock.indexOf('checkSchedulePairing('));

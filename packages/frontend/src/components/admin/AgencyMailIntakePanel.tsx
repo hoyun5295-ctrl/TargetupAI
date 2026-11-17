@@ -5,7 +5,7 @@
  * 데이터 = 기존 GET /api/admin/agency-send 응답의 mailIntake 키(새 라우트 없음).
  * 사람을 부르는 축은 경보(시스템 알림)가 지고, 이 화면은 경보를 받고 확인하러 오는 자리다.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Inbox, Loader2, RefreshCw } from 'lucide-react';
 import TablePagination from '../common/TablePagination';
 import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from './ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 긴 글 = 말줄임 + 전문 · ★ 2026-11-13 C130 행 상세 창
@@ -93,10 +93,24 @@ export default function AgencyMailIntakePanel() {
   const [error, setError] = useState('');
   // ★ 2026-11-13 C130(남지현 접수 cmwd365ga1co9jnscho414cx1) — 행을 누르면 업체가 받은 반려 안내 메일을 그대로 보인다
   const [openRow, setOpenRow] = useState<RejectedRow | null>(null);
+  // ★ 2026-11-17 C142(남지현 접수 「접수 날짜 · 회사 등 상세 검색」) — 회사 · 보낸 주소 검색어 + 받은 날짜(서울) · 거르면 서버가 최대 200건
+  //   거르지 않으면 종전 그대로(최근 20건 · 관제 응답)
+  const [keyword, setKeyword] = useState('');
+  const [query, setQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [found, setFound] = useState<{ rows: RejectedRow[]; truncated: boolean; replyBodyReady: boolean } | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [findError, setFindError] = useState('');
+  const findSeq = useRef(0);
+  /** 새로고침 · 탭 복귀 = 거른 목록도 지금 조건으로 다시 읽는다(Codex 구현 1R) */
+  const [findRev, setFindRev] = useState(0);
+  const filtering = !!(query.trim() || dateFrom || dateTo);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    setFindRev((n) => n + 1);
     try {
       const res = await fetch('/api/admin/agency-send', {
         headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
@@ -118,9 +132,34 @@ export default function AgencyMailIntakePanel() {
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, [load]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setQuery(keyword), 400);
+    return () => clearTimeout(t);
+  }, [keyword]);
+  useEffect(() => {
+    setPage(1);
+    const seq = ++findSeq.current;
+    if (!filtering) { setFound(null); setFindError(''); setFinding(false); return; }
+    setFinding(true);
+    setFindError('');
+    const qs = new URLSearchParams();
+    if (query.trim()) qs.set('q', query.trim());
+    if (dateFrom) qs.set('from', dateFrom);
+    if (dateTo) qs.set('to', dateTo);
+    fetch(`/api/admin/agency-send/mail-rejected?${qs.toString()}`, { headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` } })
+      .then((r) => r.json().then((b) => ({ ok: r.ok, b })))
+      .then(({ ok, b }) => {
+        if (seq !== findSeq.current) return;   // 늦게 온 답이 새 조건의 결과를 덮지 않게
+        if (!ok || b?.success === false) throw new Error(b?.error || '반려 목록을 불러오지 못했습니다.');
+        setFound({ rows: b.rows || [], truncated: b.truncated === true, replyBodyReady: b.replyBodyReady !== false });
+      })
+      .catch((e) => { if (seq === findSeq.current) setFindError(e?.message || '반려 목록을 불러오지 못했습니다.'); })
+      .finally(() => { if (seq === findSeq.current) setFinding(false); });
+  }, [filtering, query, dateFrom, dateTo, findRev]);
+
   const countOf = (status: string) => data?.counts.find((c) => c.status === status)?.c || 0;
 
-  const rejected = data?.recentRejected || [];
+  const rejected = filtering ? (found?.rows || []) : (data?.recentRejected || []);
   const safePage = Math.min(page, Math.max(1, Math.ceil(rejected.length / MAIL_PER_PAGE)));
   const pagedRejected = rejected.slice((safePage - 1) * MAIL_PER_PAGE, safePage * MAIL_PER_PAGE);
 
@@ -178,9 +217,30 @@ export default function AgencyMailIntakePanel() {
 
           {/* 반려·오류 최근 20 */}
           <div>
-            <h3 className="text-sm font-semibold text-gray-800">반려·오류 최근 20건</h3>
-            {data.recentRejected.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-400">반려된 메일이 없습니다.</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-gray-800">
+                {filtering ? `찾은 반려와 오류 ${rejected.length.toLocaleString()}건` : '반려·오류 최근 20건'}
+                {finding && <Loader2 className="inline w-3.5 h-3.5 ml-1.5 animate-spin text-gray-400" />}
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="회사 이름 또는 보낸 주소" aria-label="회사 이름 또는 보낸 주소"
+                  className="h-9 px-3 rounded-lg border border-gray-200 text-[13px] w-[190px] focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-400" />
+                <span className="text-[12px] text-gray-500">받은 날짜</span>
+                <input type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => setDateFrom(e.target.value)} aria-label="받은 날짜 시작" className="h-9 px-2.5 rounded-lg border border-gray-200 text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/25" />
+                <span className="text-[12px] text-gray-400">~</span>
+                <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} aria-label="받은 날짜 끝" className="h-9 px-2.5 rounded-lg border border-gray-200 text-[13px] bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/25" />
+                {filtering && (
+                  <button type="button" onClick={() => { setKeyword(''); setQuery(''); setDateFrom(''); setDateTo(''); }} className="h-9 px-2.5 rounded-lg text-[12.5px] text-gray-500 hover:text-gray-800 hover:bg-gray-100">조건 지우기</button>
+                )}
+              </div>
+            </div>
+            {filtering && found?.truncated && (
+              <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-900">찾은 반려가 200건을 넘어 최근 200건만 보여요. 날짜나 검색어로 범위를 좁혀 주세요.</p>
+            )}
+            {filtering && findError ? (
+              <p className="mt-2 text-sm text-rose-600">{findError}</p>
+            ) : rejected.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-400">{filtering ? (finding ? '찾는 중입니다.' : '조건에 맞는 반려 메일이 없습니다.') : '반려된 메일이 없습니다.'}</p>
             ) : (
               <>
               <div className="mt-2 overflow-x-auto">
@@ -235,7 +295,7 @@ export default function AgencyMailIntakePanel() {
           {openRow.reply_status && (
             <div className="mt-4">
               <h4 className="text-[12.5px] font-semibold text-gray-500 mb-1.5">업체가 받은 안내 메일</h4>
-              {data?.replyBodyReady === false ? (
+              {(filtering ? found?.replyBodyReady === false : data?.replyBodyReady === false) ? (
                 <p className="text-[12.5px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   DB 마이그레이션 필요: 메일 원장 회신 본문 칸(C130-DDL-1)을 넣으면 이후 반려부터 본문이 남습니다.
                 </p>

@@ -9,13 +9,13 @@
  */
 import { voiceFormQuestions, decideVoiceForm, type VoiceFormSlot, type VoiceFormDecision } from './voice-form-slots';
 import { pickAnswer, type LineAnswers, type LineQuestion, type LineQuestionOption } from './one-line-ct/questions';
-import { checkSchedulePairing, getSegmentContract } from './automarketing-segment';
+import { checkSchedulePairing, getSegmentContract, readRepeatAck, type LockUnlock, type SegmentKey } from './automarketing-segment';
 import type { AudienceTranslation } from './audience-translate';
 
 export const OPERATOR_BENEFIT_MAX = 200;
 
-/** ② 선택지의 축 한 줄(이 회사에서 쓸 수 있는가 · 근거 = 축 가용 판정) */
-export interface OperatorAxisChoice { key: string; label: string; available: boolean; reason: string }
+/** ② 선택지의 축 한 줄(이 회사에서 쓸 수 있는가 · 근거 = 축 가용 판정 · unlock = 화면에서 풀 수 있는 잠금 · C142) */
+export interface OperatorAxisChoice { key: string; label: string; available: boolean; reason: string; unlock?: LockUnlock }
 
 /** 질문을 고를 사실(부르는 쪽이 보관본 · DB 에서 모은다) */
 export interface OperatorQuestionFacts {
@@ -26,6 +26,10 @@ export interface OperatorQuestionFacts {
   everyoneCount: number | null;
   /** 지금 주기(사람이 쓰지 않았으면 부르는 쪽이 대상에 맞춰 정한 추천 주기) */
   schedule: string;
+  /** ★ 2026-11-17 C142 — 담당자가 직접 고른 반복 짝 지문(보관본) · 지금 짝 지문과 같으면 ③ 을 다시 묻지 않는다 */
+  repeatAck?: string | null;
+  /** ★ C142 — 이 회사에서 열린 축(③ 「…에게만」 제안 = 열린 축만 · 모르면 제안 0) */
+  availableKeys?: string[];
   /** ④ 혜택을 물어야 하면 그 까닭과 채워 둘 사람 글 조각 · 묻지 않으면 null */
   benefitAsk: { reason: 'missing' | 'mixed'; prefill: string | null } | null;
   /** ⑤ 기본 번호가 없고 후보가 둘 이상이면 그 후보(숫자만) · 묻지 않으면 null */
@@ -54,12 +58,15 @@ function phoneLabel(d: string): string {
  * 이 주기로 이 축을 고를 수 있는가 — 데이터가 없으면 자물쇠 + 사유.
  *   짝(같은 고객 반복)에 막히면 잠그지 않고 「매월로 보내요」 보기로 준다(axis:KEY|monthly · Codex 1R: 보기가 전부 잠겨 답할 수 없는 질문 0).
  */
-function axisOption(a: OperatorAxisChoice, schedule: string, label = a.label): LineQuestionOption {
-  if (!a.available) return { value: `axis:${a.key}`, label, disabled: true, reason: a.reason };
+function axisOption(a: OperatorAxisChoice, schedule: string, label = a.label): LineQuestionOption & { unlock?: LockUnlock } {
+  if (!a.available) return { value: `axis:${a.key}`, label, disabled: true, reason: a.reason, ...(a.unlock ? { unlock: a.unlock } : {}) };
+  // ★ 2026-11-17 C142(Q9 해제 · Harold 1117) — 반복 짝도 축 그대로 고른다(옛 = 「· 매월로 보내요」로 주기를 바꿔 매일이 불가) ·
+  //   고른 뒤 ③ 이 「매월 · 지금 대상에게 매일」을 묻는다(담당자가 직접 누른 것만 반복) · 여기서는 경고만 설명에
+  const desc = getSegmentContract(a.key)?.description;
   const pair = checkSchedulePairing(schedule, { segmentKey: a.key });
-  return pair.ok
-    ? { value: `axis:${a.key}`, label, desc: getSegmentContract(a.key)?.description }
-    : { value: `axis:${a.key}|monthly`, label: `${label} · 매월로 보내요`, desc: pair.reason };
+  if (pair.ok) return { value: `axis:${a.key}`, label, desc };
+  const every = everyLabel(schedule);
+  return { value: `axis:${a.key}`, label, desc: `${desc ? `${desc} ` : ''}${every} 보내면 같은 고객이 ${every} 다시 받아요. 고르시면 다음에 보내는 주기를 여쭤봐요.` };
 }
 
 /** (순수) 사실 → 질문(없으면 빈 배열 = 바로 문안) */
@@ -103,8 +110,16 @@ export function buildOperatorQuestions(f: OperatorQuestionFacts): OperatorQuesti
 
   // ③ 주기가 같은 고객 반복에 막힘 — 막힌 값은 자물쇠 + 사유 · [매월로] · [새로 해당된 고객에게 같은 주기로]
   //   ★ Codex 1R — 질문 표시와 안전 검증을 가르지 않는다: 사람이 쓴 주기든 추천 주기든 막히면 묻는다(추천 주기는 부르는 쪽이 대상에 맞춰 다시 정한다)
+  //   ★ 2026-11-17 C142(Q9 해제 · Harold 1117 「경고를 보고 직접 눌러야만」) — 「지금 대상에게 매일 보내기」를 연다 · 값 = 그 짝의 지문(답 = 그 사람이 본 짝)
+  //   · 제안 「…에게만」 = 이 회사에서 열린 축만(잠긴 「등급이 오른 고객」을 가리키지 않는다 · R56)
   if ((tr.kind === 'axis' || tr.kind === 'filters') && !aiEveryone) {
-    const pair = checkSchedulePairing(f.schedule, tr.kind === 'axis' ? { segmentKey: tr.segmentKey } : { hasConditions: true });
+    const open = new Set(f.availableKeys || []);
+    const pair = checkSchedulePairing(
+      f.schedule,
+      tr.kind === 'axis' ? { segmentKey: tr.segmentKey, segmentParams: tr.segmentParams } : { conditions: tr.conditions },
+      f.repeatAck ?? null,
+      (k: SegmentKey) => open.has(k),
+    );
     if (!pair.ok) {
       const every = everyLabel(f.schedule);
       const suggest = pair.suggestKey ? getSegmentContract(pair.suggestKey) : null;
@@ -114,7 +129,7 @@ export function buildOperatorQuestions(f: OperatorQuestionFacts): OperatorQuesti
         options: [
           { value: 'monthly', label: '매월 한 번 보내기' },
           ...(suggest ? [{ value: `axis:${suggest.key}`, label: `「${suggest.label}」에게만 ${every} 보내기`, desc: suggest.description }] : []),
-          { value: 'keep', label: `지금 대상에게 ${every} 보내기`, disabled: true, reason: pair.reason },
+          { value: `keep:${pair.ackKey}`, label: `지금 대상에게 ${every} 보내기`, desc: `같은 고객이 ${every} 다시 받아요. 받는 분이 불편해하지 않을지 문안과 대상을 꼭 확인해 주세요.` },
         ],
       });
     }
@@ -171,6 +186,8 @@ export interface OperatorAnswerPatch {
   segmentKey?: string;
   /** ③ 매월로 */
   schedule?: 'monthly';
+  /** ③ ★ C142 「지금 대상에게 매일 보내기」 = 그 짝의 지문 */
+  repeatAck?: string;
   /** ④ undefined = 묻지 않음 · null = 혜택 없이 */
   benefit?: string | null;
   callback?: string;
@@ -219,7 +236,11 @@ export function decideOperatorAnswers(
       if (then === 'monthly') patch.schedule = 'monthly';   // 짝에 막힌 대상을 고르면 매월로(보기 글에 적혀 있다)
     } else if (q.id === 'schedule') {
       if (v === 'monthly') patch.schedule = 'monthly';
-      else patch.segmentKey = v.slice('axis:'.length);
+      else if (v.startsWith('keep:')) {
+        const ack = readRepeatAck(v.slice('keep:'.length));
+        if (!ack) return { ok: false, error: '화면을 새로 고친 뒤 다시 골라 주세요.' };
+        patch.repeatAck = ack;
+      } else patch.segmentKey = v.slice('axis:'.length);
     } else if (q.id === 'benefit') {
       const dated = datedTerms(v);
       if (dated.length > 0) return { ok: false, error: `혜택 글의 「${dated[0]}」은(는) 회차마다 지나가는 날짜예요. 날짜는 빼고 적어 주세요.` };

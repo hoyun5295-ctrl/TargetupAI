@@ -4,9 +4,11 @@
  *   라벨 · 도움말 · 알약(고르기) · 자물쇠 + 사유 · 글 칸 · 날짜 칸 · 「없이」 단추.
  *   색 = 존 색 규칙(LineStepsModal 머리) — 고른 답 = 보라(고객이 준 것) · 잠김 = 회색. 알약 높이 = 휴대폰 40 · 넓은 화면 32.
  */
+import type { ReactNode } from 'react';
 import { Lock } from 'lucide-react';
 
-export interface ZoneQuestionOption { value: string; label: string; desc?: string; disabled?: boolean; reason?: string }
+/** ★ 2026-11-17 C142 — unlock = 잠긴 보기를 화면에서 풀 수 있는 할 일(등급 순서) · 부르는 쪽이 renderUnlock 으로 단추를 그린다 */
+export interface ZoneQuestionOption { value: string; label: string; desc?: string; disabled?: boolean; reason?: string; unlock?: string }
 export interface ZoneQuestionModel {
   id: string;
   kind: 'choice' | 'text' | 'date';
@@ -26,13 +28,15 @@ const pill = (selected: boolean, disabled?: boolean) => disabled
     ? 'h-10 md:h-8 px-3 rounded-lg text-[13px] md:text-xs font-semibold border border-violet-400 bg-violet-100 text-violet-950 inline-flex items-center gap-1.5'
     : 'h-10 md:h-8 px-3 rounded-lg text-[13px] md:text-xs border border-slate-300 bg-white text-slate-600 hover:bg-slate-100 transition-colors inline-flex items-center gap-1.5';
 
-export default function ZoneQuestion({ q, value, onChange, recommendedValue, none }: {
+export default function ZoneQuestion({ q, value, onChange, recommendedValue, none, renderUnlock }: {
   q: ZoneQuestionModel;
   /** 지금 답(없으면 빈 글) */
   value: string;
   onChange: (v: string) => void;
   /** 고르기 질문의 추천 답(있으면 그 알약에 「추천」) */
   recommendedValue?: string;
+  /** ★ C142 — 잠긴 보기의 unlock 을 푸는 단추(없으면 사유 글만) */
+  renderUnlock?: (unlock: string) => ReactNode;
   /** 「없이」를 눌렀는가(글 칸) */
   none?: { on: boolean; toggle: (on: boolean) => void };
 }) {
@@ -89,6 +93,7 @@ export default function ZoneQuestion({ q, value, onChange, recommendedValue, non
         <p key={o.value} className="mt-1 flex items-start gap-1 text-[12px] md:text-[11px] text-slate-400">
           <Lock className="w-3 h-3 mt-0.5 shrink-0" />
           <span>{o.label}: {o.reason || '지금은 고를 수 없어요.'}</span>
+          {o.unlock && renderUnlock ? <span className="ml-1 shrink-0">{renderUnlock(o.unlock)}</span> : null}
         </p>
       ))}
     </div>

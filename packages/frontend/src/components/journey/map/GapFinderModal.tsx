@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { AlertCircle, ArrowRight, Lock, Plus, Sparkles, Users, X } from 'lucide-react';
 import JourneyModalShell from '../JourneyModalShell';
+import GradeOrderUnlockButton from '../GradeOrderUnlockButton';   // ★ 2026-11-17 C142 등급 순서 잠금 풀기
 import JourneyDiagnosisPanel from './JourneyDiagnosisPanel';
 import { LINE_SHORT, lineTargetText, type AttachFix, type CreateMode, type LifecycleMapData } from '../../../utils/journey-map';
 
@@ -34,6 +35,9 @@ interface Props {
   onFix: (fix: AttachFix) => void;
   /** ★ 2026-10-09 AI 진단 — 추천대로 만든 초안 → 페이지가 다시 읽고 켜기 전 점검을 연다. */
   onDrafted: (journeyIds: string[]) => void;
+  /** ★ 2026-11-17 C142 — [등급 순서 정하기](페이지가 창을 연다) · 저장 뒤 gradeOrderRev 가 바뀌면 진단을 다시 읽는다 */
+  onGradeOrder?: () => void;
+  gradeOrderRev?: number;
 }
 
 function Group({ title, count, desc, children }: { title: string; count: number; desc: string; children: React.ReactNode }) {
@@ -53,7 +57,7 @@ function Empty({ text }: { text: string }) {
   return <div className="rounded-lg border border-dashed border-slate-200 px-3 py-2.5 text-[11px] text-slate-400">{text}</div>;
 }
 
-export default function GapFinderModal({ open, onClose, data, opportunities, onCreate, onFocusJourney, onFix, onDrafted }: Props) {
+export default function GapFinderModal({ open, onClose, data, opportunities, onCreate, onFocusJourney, onFix, onDrafted, onGradeOrder, gradeOrderRev = 0 }: Props) {
   const [busy, setBusy] = useState(false);
   const nameOf = (id: string) => data.journeys.find((j) => j.id === id)?.name || '여정';
 
@@ -98,7 +102,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-        <JourneyDiagnosisPanel open={open} onDrafted={(ids) => { onClose(); onDrafted(ids); }} onBusyChange={setBusy} />
+        <JourneyDiagnosisPanel open={open} onDrafted={(ids) => { onClose(); onDrafted(ids); }} onBusyChange={setBusy} onGradeOrder={onGradeOrder} reloadKey={gradeOrderRev} />
         <Group title="비어 있는 구간" count={opportunities.length + ghostsOpen.length} desc={`초안 만들기 ${data.costs.generate} 크레딧 · 켜기 전에는 아무것도 발송되지 않습니다.`}>
           {opportunities.length === 0 && ghostsOpen.length === 0 && <Empty text="지금 데이터로 비어 보이는 구간이 없어요." />}
           {opportunities.map((o) => (
@@ -188,6 +192,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-amber-900">{j.name} · 새 고객이 들어오지 않아요</div>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-amber-900">{j.capability?.reason}</p>
+                {j.capability?.unlock === 'grade_order' && onGradeOrder && <GradeOrderUnlockButton onClick={onGradeOrder} className="mt-1.5" />}
               </div>
               {focusBtn(j.id)}
             </div>
@@ -216,6 +221,7 @@ export default function GapFinderModal({ open, onClose, data, opportunities, onC
               <div className="min-w-0">
                 <div className="text-xs font-semibold text-slate-700">{t.label}</div>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">{t.reason}</p>
+                {t.unlock === 'grade_order' && onGradeOrder && <GradeOrderUnlockButton onClick={onGradeOrder} className="mt-1.5" />}
               </div>
             </div>
           ))}

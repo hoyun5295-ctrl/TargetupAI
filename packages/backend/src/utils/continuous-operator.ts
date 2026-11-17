@@ -76,7 +76,7 @@ import { resolveOperatorAudienceGates, compileOperatorAudience, resolveOperatorS
 import { conditionsToFilters, describeConditions, type AudienceCondition } from './audience-translate';   // ★ 2026-10-05 신뢰 설계
 import { AudienceGates } from './operator-recipients';
 import { resolveConsentScope, consentJoinSql } from './mall-consent';
-import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline, schedulePeriod, contractCriteriaText, checkSchedulePairing } from './automarketing-segment';
+import { normalizeSegmentKey, normalizeSegmentParams, segmentNeedsCycleBaseline, schedulePeriod, contractCriteriaText, checkSchedulePairing, repeatAckKey, readRepeatAck, pairFingerprint } from './automarketing-segment';
 // ★ 2026-09-26 한줄로 V2 m104 — 회복 패스의 적재 묶음 id 검증
 import { isUuid } from './normalize';
 // ★ 2026-08-04 변화 축 — 회차 스냅샷(자동마케팅 고유 어휘의 유일한 근거).
@@ -178,6 +178,8 @@ export interface CreateOperatorInput {
   fixedCopy?: { subject?: string; body: string } | null;
   // ★ 2026-10-07 회신번호 — 라우트가 checkOperatorCallback 으로 검사한 값 · 없으면 칸을 참조하지 않는다(DDL 전 등록 그대로)
   callback?: { callbackNumber: string | null; useIndividualCallback: boolean } | null;
+  /** ★ 2026-11-17 C142 — 담당자가 경고를 보고 직접 고른 반복 짝의 지문(짝 판정 = 지금 짝 지문과 같을 때만 통과 · approval_meta.repeatAck 로 남긴다) */
+  repeatAck?: string | null;
 }
 
 /** ★ 2026-10-05 직접 쓴 문안 — spam = 같은 문안 1회 검사 결과(지문) */
@@ -338,9 +340,13 @@ export class OperatorRegisterConflictError extends Error {
   code = 'OPERATOR_KEY_CONFLICT';
   constructor() { super('이미 처리한 요청이에요. 화면을 새로 고친 뒤 다시 시도해 주세요.'); }
 }
-/** ★ 2026-10-24 주기 · 대상 짝이 같은 고객 반복(매일 · 매주 + 상태 조건) — 등록하지 않는다(400 · 차감 0) */
+/**
+ * ★ 2026-10-24 주기 · 대상 짝이 같은 고객 반복(매일 · 매주 + 상태 조건) — 등록하지 않는다(400 · 차감 0)
+ *   ★ 2026-11-17 C142 — ackKey = 막힌 짝의 지문. 화면이 「지금 대상에게 매일 보내기」로 이 값을 그대로 되돌려 보낸다(화면은 지문을 만들지 않는다).
+ */
 export class OperatorPairingError extends Error {
   code = 'AUDIENCE_PAIRING';
+  constructor(message: string, public ackKey: string | null = null) { super(message); }
 }
 
 /** ★ 2026-10-24 승인 창을 연 뒤 일정이 바뀌었다 — 창이 보여 준 회차 ≠ 지금 일정이라 저장하지 않는다(409 · Codex 3R) */
@@ -367,10 +373,12 @@ export function operatorScheduleShape(op: OperatorScheduleShape): OperatorSchedu
  */
 async function lockAndCheckPairing(
   run: TxRun, companyId: string, operatorId: string,
-  next: { schedule?: string | null; segmentKey?: string | null; conditions?: AudienceCondition[] | null },
+  next: { schedule?: string | null; segmentKey?: string | null; segmentParams?: Record<string, number> | null; conditions?: AudienceCondition[] | null },
   when: 'changed' | 'always',
   seen?: OperatorScheduleShape | null,
-): Promise<ContinuousOperator | null> {
+  /** ★ C142 — 이 요청을 낸 사람이 본 짝의 지문(직접 고른 반복) · 있으면 저장된 동의보다 먼저 · 최종 짝 지문과 다르면 400(Codex 설계 2R) */
+  requestAck?: string | null,
+): Promise<{ op: ContinuousOperator; repeatAck: string | null; metaColumn: boolean } | null> {
   const r = await run(`SELECT * FROM continuous_operators WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [operatorId, companyId]);
   if (r.rows.length === 0) return null;
   const now = mapRowToOperator(r.rows[0]);
@@ -378,13 +386,49 @@ async function lockAndCheckPairing(
   const nowKey = now.segmentKey ?? null;
   const schedule = next.schedule || now.schedule;
   const key = next.segmentKey !== undefined ? next.segmentKey : nowKey;
+  // ★ C142 — 기준 숫자도 최종 짝에 넣는다(축을 그대로 두고 기준만 바꿔도 지문이 바뀐다 · Codex 설계 1R #1)
+  const params = key ? (next.segmentParams !== undefined ? next.segmentParams : (key === nowKey ? now.segmentParams : null)) : null;
   const conditions = key ? null : (next.conditions !== undefined ? next.conditions : now.audienceConditions);
-  const changed = schedule !== now.schedule || key !== nowKey;
-  if ((when === 'always' || changed) && (key || conditions?.length)) {
-    const pair = checkSchedulePairing(schedule, key ? { segmentKey: key } : { hasConditions: true });
-    if (!pair.ok) throw new OperatorPairingError(pair.reason);
+  const target = { segmentKey: key, segmentParams: params, conditions };
+  const finalKey = repeatAckKey(schedule, target);
+  const stored = readRepeatAck(now.approvalMeta?.repeatAck);
+  const ack = readRepeatAck(requestAck);
+  // 바뀜 = 짝의 정체(주기 단위 · 축 · 기준 숫자 · 칸 조건)가 앞뒤로 다름(옛: 주기 · 축 키만)
+  const changed = pairFingerprint(schedule, target)
+    !== pairFingerprint(now.schedule, { segmentKey: nowKey, segmentParams: now.segmentParams, conditions: nowKey ? null : now.audienceConditions });
+  let accepted: string | null = null;
+  if (key || conditions?.length) {
+    if (ack) {
+      // ① 요청 ack = 그 사람이 본 짝에만 · 바뀜 판정보다 먼저 · 다르면 저장된 동의와 무관하게 막는다(반복이 아니게 됐으면 짝 판정 자체가 통과 · ack 는 버린다)
+      if (finalKey && ack !== finalKey) throw new OperatorPairingError(pairingReason(schedule, target), finalKey);
+      accepted = finalKey ? ack : null;
+    } else if (when === 'always' || changed) {
+      // ② 요청 ack 가 없을 때만 저장된 동의 · ③ 둘 다 아니면 짝 막힘
+      if (finalKey && stored !== finalKey) throw new OperatorPairingError(pairingReason(schedule, target), finalKey);
+      accepted = finalKey ? stored : null;
+    } else {
+      // 바뀌지 않은 저장(이름만 등) = 판정 밖 · 저장된 동의는 지금 짝과 같을 때만 이어 간다
+      accepted = finalKey && stored === finalKey ? stored : null;
+    }
   }
-  return now;
+  return { op: now, repeatAck: accepted, metaColumn: Object.prototype.hasOwnProperty.call(r.rows[0], 'approval_meta') };
+}
+
+/** ★ C142 — 승인 기록의 반복 동의 칸만 고친다(같은 트랜잭션 · 지문 = 쓰기 · null = 키 지움 · 갱신 안내 선점 등 다른 키 무접촉) */
+async function writeRepeatAck(run: TxRun, operatorId: string, repeatAck: string | null): Promise<void> {
+  await run(
+    `UPDATE continuous_operators
+        SET approval_meta = CASE WHEN $2::text IS NULL THEN approval_meta - 'repeatAck'
+                                 ELSE jsonb_set(COALESCE(approval_meta, '{}'::jsonb), '{repeatAck}', to_jsonb($2::text), true) END
+      WHERE id = $1::uuid AND (approval_meta IS NOT NULL OR $2::text IS NOT NULL)`,
+    [operatorId, repeatAck],
+  );
+}
+
+/** 짝 막힘 사유(저장 경로 · 제안 축 가용을 모르는 자리 = 일반 문장) */
+function pairingReason(schedule: string | null | undefined, target: Parameters<typeof checkSchedulePairing>[1]): string {
+  const pair = checkSchedulePairing(schedule, target);
+  return pair.ok ? '' : pair.reason;
 }
 /** ★ 2026-10-24 등록 차감이 원장에 남지 않았다(잔액 부족이 아닌 실패 · 503 · 등록도 없다) */
 export class OperatorChargeError extends Error {
@@ -485,8 +529,11 @@ export async function registerOperator(
     await assertSegmentUsable(input.companyId, segKey);
   }
   // ★ 2026-10-24 짝(같은 고객 반복) = 등록 직전 마지막 문 — 질문 표시와 별개의 안전 검증(Codex 1R · 화면 우회 · 편집은 updateOperator 의 같은 판정)
-  const pair = checkSchedulePairing(schedule, segKey ? { segmentKey: segKey } : { hasConditions: true });
-  if (!pair.ok) throw new OperatorPairingError(pair.reason);
+  //   ★ 2026-11-17 C142 — 반복 짝은 담당자가 경고를 보고 직접 고른 지문(input.repeatAck)이 지금 짝 지문과 같을 때만 · 그 지문을 승인 기록에 남긴다
+  const pairTarget = { segmentKey: segKey, segmentParams: segParams, conditions: audienceConditions };
+  const pair = checkSchedulePairing(schedule, pairTarget, readRepeatAck(input.repeatAck));
+  if (!pair.ok) throw new OperatorPairingError(pair.reason, pair.ackKey);
+  const acceptedRepeatAck = pair.repeatNotice ? repeatAckKey(schedule, pairTarget) : null;
 
   const insertParams: any[] = [
     input.companyId, input.createdBy, input.name, input.objective.trim(),
@@ -545,6 +592,7 @@ export async function registerOperator(
     if (!(await hasOperatorV2Columns())) throw new Error('DB 마이그레이션 필요: continuous_operators approved_until column does not exist');
     insertParams.push(opts.window.until, JSON.stringify({
       approvedAt: new Date().toISOString(), approvedBy: input.createdBy, windowStart: opts.window.startAt.toISOString(), renewalNoticeFor: null,
+      ...(acceptedRepeatAck ? { repeatAck: acceptedRepeatAck } : {}),   // ★ C142 직접 고른 반복 짝
     }));
     winCols = ', approved_until, approval_meta';
     winVals = `, $${insertParams.length - 1}, $${insertParams.length}::jsonb`;
@@ -701,6 +749,8 @@ export async function updateOperator(
     copyStyle?: string | null;
     // ★ 2026-07-30 (임은지 접수): MMS 이미지 — undefined = 유지, null/[] = 해제, 배열 = 교체(최대 3)
     mmsImagePaths?: string[] | null;
+    // ★ 2026-11-17 C142 — 반복 짝 확인 창에서 누른 지문(400 AUDIENCE_PAIRING 이 준 ackKey 그대로)
+    repeatAck?: string | null;
     // ★ 2026-10-07 회신번호 — 검사된 값(checkOperatorCallback) · undefined = 유지
     callback?: { callbackNumber: string | null; useIndividualCallback: boolean };
     // ★ 2026-10-24 꺼진 것을 다시 켜도 되는가(요금제 문을 지난 요청만 true) — 아니면 status 'active' 요청이 와도 꺼진 행은 그대로 둔다(★ Codex 2R)
@@ -879,10 +929,19 @@ export async function updateOperator(
   }
   // ★ 2026-10-24 짝(같은 고객 반복) — 편집도 등록과 같은 마지막 문 · 판정과 저장 = 한 트랜잭션 · 행 잠금(Codex 1R · 2R)
   //   주기나 대상을 건드리는 저장만 트랜잭션으로 연다(상태만 바꾸는 정지 링크 · 이름 편집은 종전 한 문장 그대로).
+  //   ★ 2026-11-17 C142 — 기준 숫자도 최종 짝에 · 요청 동의(repeatAck = 400 이 준 지문)가 있으면 그 짝에만 · 통과한 반복 짝의 지문을 같은 트랜잭션에서 승인 기록에 남긴다(아니면 지움)
   const result = patch.schedule || withSegmentSet
-    ? await withTransaction(async (run) => (
-      (await lockAndCheckPairing(run, companyId, operatorId, { schedule: patch.schedule, segmentKey: withSegmentSet ? segFinalKey : undefined }, 'changed'))
-        ? runUpdate(withSegmentSet && segColumnsReady, run) : null))
+    ? await withTransaction(async (run) => {
+      const checked = await lockAndCheckPairing(run, companyId, operatorId, {
+        schedule: patch.schedule,
+        segmentKey: withSegmentSet ? segFinalKey : undefined,
+        segmentParams: withSegmentSet ? segFinalParams : undefined,
+      }, 'changed', null, patch.repeatAck ?? null);
+      if (!checked) return null;
+      const saved = await runUpdate(withSegmentSet && segColumnsReady, run);
+      if (saved.rows.length > 0 && checked.metaColumn) await writeRepeatAck(run, operatorId, checked.repeatAck);
+      return saved;
+    })
     : await runUpdate(false, query);
   if (!result || result.rows.length === 0) return null;
   const updated = mapRowToOperator(result.rows[0]);
@@ -4260,6 +4319,8 @@ export async function approveOperatorWindow(input: {
   schedule?: { schedule: OperatorSchedule; scheduleDayOfWeek: number | null; scheduleDayOfMonth: number | null } | null;
   /** ★ 1024 승인 창을 열 때의 일정 — 잠근 행의 일정과 다르면(창을 연 뒤 편집) 저장하지 않는다(409 · Codex 3R) */
   seenSchedule?: OperatorScheduleShape | null;
+  /** ★ 2026-11-17 C142 — 승인 창이 본 반복 짝의 지문(창에서 고름 또는 승인 기록에서 이어받음) · 최종 짝 지문과 다르면 400 */
+  repeatAck?: string | null;
   now?: Date;
 }): Promise<{ until: Date; startAt: Date; rounds: Date[] } | null> {
   if (!(await hasOperatorV2Columns())) {
@@ -4280,16 +4341,21 @@ export async function approveOperatorWindow(input: {
   const contractKey = contract ? (contract.segmentKey ? normalizeSegmentKey(contract.segmentKey) : null) : undefined;
   // ★ 2026-10-24 짝 판정 · 저장 = 한 트랜잭션 · 행 잠금(편집과 같은 함수 · Codex 2R)
   const win = await withTransaction(async (run) => {
-    const op = await lockAndCheckPairing(run, input.companyId, input.operatorId, {
+    const checked = await lockAndCheckPairing(run, input.companyId, input.operatorId, {
       schedule: input.schedule?.schedule,
       segmentKey: contractKey,
+      segmentParams: contract && contractKey ? (contract.segmentParams ?? null) : undefined,
       conditions: contract ? (contractKey ? null : contract.conditions) : undefined,
-    }, 'always', input.seenSchedule);
-    if (!op) return null;
+    }, 'always', input.seenSchedule, input.repeatAck ?? null);
+    if (!checked) return null;
+    const op = checked.op;
     const win = input.window || computeApprovalWindow(op, input.now);
     const params: any[] = [
       input.operatorId, input.companyId, win.until,
-      JSON.stringify({ approvedAt: new Date().toISOString(), approvedBy: input.userId, windowStart: win.startAt.toISOString(), renewalNoticeFor: null }),
+      JSON.stringify({
+        approvedAt: new Date().toISOString(), approvedBy: input.userId, windowStart: win.startAt.toISOString(), renewalNoticeFor: null,
+        ...(checked.repeatAck ? { repeatAck: checked.repeatAck } : {}),   // ★ C142 승인 = 그 짝의 반복 동의를 다시 적는다(반복 아님 = 남기지 않음)
+      }),
     ];
     const sets: string[] = ['approved_until = $3', 'approval_meta = $4::jsonb', 'updated_at = NOW()'];
     if (contract) {

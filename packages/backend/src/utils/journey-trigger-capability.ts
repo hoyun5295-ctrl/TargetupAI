@@ -17,6 +17,7 @@
 import { isSingleStepKind } from './journey-start-kind';
 import { nightArriveLabelKo } from './send-time-util';
 import { NO_JOINED_AT_REASON } from './customer-joined-at';   // ★ 2026-11-04 C99 T10 신규 가입 잠금 문구 한 곳
+import { GRADE_ORDER_LOCK_REASON, GRADE_ORDER_UNLOCK, type LockUnlock } from './automarketing-segment';   // ★ 2026-11-17 C142 등급 순서 잠금 한 벌(R56)
 
 /** 화면 트리거 key — 프론트 카탈로그(journey-trigger-catalog.ts)의 key와 같다. */
 export type TriggerKey =
@@ -70,6 +71,8 @@ export interface TriggerAvailability {
   available: boolean;
   /** 왜 되는지 / 왜 안 되는지 — 화면에 그대로 나간다. */
   reason: string;
+  /** ★ C142 — 잠겼고 사람이 화면에서 풀 수 있으면 그 할 일(등급 순서) · 화면이 [등급 순서 정하기] 단추를 그린다 */
+  unlock?: LockUnlock;
 }
 
 /**
@@ -137,7 +140,7 @@ export function resolveTriggerAvailability(facts: CompanyJourneyFacts): TriggerA
     !f.hasGrade
       ? no('grade', '등급 정보가 없어요. 고객 정보에 등급이 있으면 열립니다.')
       : !f.hasGradeOrder
-        ? no('grade', '등급 순서를 한 번 정해 주시면 열립니다. 어느 등급이 위인지 알아야 올라간 분에게만 보낼 수 있어요.')
+        ? { key: 'grade', available: false, reason: GRADE_ORDER_LOCK_REASON, unlock: GRADE_ORDER_UNLOCK }
         : yes('grade', '회원 등급이 올라가면 발송합니다.'),
 
     // ★ 2026-09-30 여정 V2 3차 — 상품은 그 회사 현역 문에서 관측된 목록에서만 고른다(정답표 없음).
@@ -483,9 +486,9 @@ export function triggerTemplateCode(triggerEvent: string): CatalogTemplateCode |
 //   상한 없는 여정 = 조건에 맞는 분 모두(날짜 기준 · 한 번 보내기 = 끝까지 한 번에 · 사건 · 상태 = 회차당 10만 · 남은 분 다음 회차) · 상한 있는 여정 = 넘는 회차 자동 멈춤.
 
 /** 화면이 쓰기 좋은 형태 — key → 가능 여부·사유. */
-export function toAvailabilityMap(list: TriggerAvailability[]): Record<string, { available: boolean; reason: string }> {
-  const map: Record<string, { available: boolean; reason: string }> = {};
-  for (const a of list) map[a.key] = { available: a.available, reason: a.reason };
+export function toAvailabilityMap(list: TriggerAvailability[]): Record<string, { available: boolean; reason: string; unlock?: LockUnlock }> {
+  const map: Record<string, { available: boolean; reason: string; unlock?: LockUnlock }> = {};
+  for (const a of list) map[a.key] = { available: a.available, reason: a.reason, ...(!a.available && a.unlock ? { unlock: a.unlock } : {}) };
   return map;
 }
 
@@ -498,9 +501,9 @@ export function hasAnyAvailableTrigger(list: TriggerAvailability[]): boolean {
  * ★ 2026-09-30 여정 V2 2차 — 시작 사건(trigger_event) 기준 가능 여부. toAvailabilityMap 은 트리거 키 기준이다.
  * 키가 없는 사건(상시 · 구현 전 예약)은 넣지 않는다(= 판정 없음 · 호출부가 막지 않는다).
  */
-export function availabilityByEvent(list: TriggerAvailability[]): Record<string, { available: boolean; reason: string }> {
+export function availabilityByEvent(list: TriggerAvailability[]): Record<string, { available: boolean; reason: string; unlock?: LockUnlock }> {
   const byKey = toAvailabilityMap(list);
-  const out: Record<string, { available: boolean; reason: string }> = {};
+  const out: Record<string, { available: boolean; reason: string; unlock?: LockUnlock }> = {};
   for (const c of TRIGGER_CONTRACTS) {
     if (c.key && byKey[c.key]) out[c.event] = { ...byKey[c.key] };
   }

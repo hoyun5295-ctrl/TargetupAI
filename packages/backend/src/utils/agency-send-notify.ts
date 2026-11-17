@@ -160,6 +160,21 @@ export function buildUnsupportedCharsNotify(ctx: AgencyNotifyContext & { places:
   ]);
 }
 
+/**
+ * ★ 2026-11-17 C142(B-1117-3 · 뿌리 R68 길이 축) — SMS 접수인데 명단의 실제 문장 가운데 90바이트를 넘는 것이 있어 검사 · 발송 앞에서 멈췄다.
+ *   옛: 재지 않고 예약해 통신사가 바이트 초과로 전량 실패시켰고 업체는 무엇이 문제인지 몰랐다. stopped = 예약까지 갔던 건(발송 직전 · 최종 검사).
+ */
+export function buildSmsBytesNotify(ctx: AgencyNotifyContext & { bytes: number; stopped: boolean }): string {
+  return compose([
+    ctx.stopped
+      ? `${HEAD} 문자(SMS) 길이를 넘는 문장이 있어 예약을 멈췄습니다. 이대로는 발송되지 않습니다.`
+      : `${HEAD} 문자(SMS) 길이를 넘는 문장이 있어 검사하지 않고 멈췄습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    `가장 긴 문장 ${ctx.bytes}바이트 (SMS는 90바이트까지)`,
+    '로그인하여 문안을 90바이트 안으로 줄이거나 LMS로 새로 접수해 주세요.',
+  ]);
+}
+
 /** ④ 세 차례 모두 차단. 사람이 문안을 고쳐야 한다 */
 export function buildTestFailedNotify(ctx: AgencyNotifyContext): string {
   return compose([

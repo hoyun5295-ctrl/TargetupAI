@@ -14,6 +14,7 @@ import ZoneSegmented from '../zone/ZoneSegmented';
 import ZoneQuestion, { type ZoneQuestionModel } from '../zone/ZoneQuestion';
 import { useCreditBalance } from '../../hooks/useCreditBalance';
 import { ProposalJson, won, type OperatorFinalCopyView } from './types';
+import GradeOrderUnlockButton from '../journey/GradeOrderUnlockButton';   // ★ 2026-11-17 C142 등급 순서 잠금 풀기
 
 export interface AudienceConditionView {
   term: string; field: string; label: string; operator: string; value: any;
@@ -41,6 +42,11 @@ export interface OperatorPreviewData {
   /** ★ 1024 옮기고 알린 것(시각 · 읽은 혜택 · 문안에서 뺀 날짜 말) */
   notes: string[];
   blockCode: string | null;
+  /** ★ 2026-11-17 C142 — 막힘을 화면에서 풀 수 있는 할 일(등급 순서) · 막힌 축(정한 뒤 이 축으로 다시 센다) */
+  blockUnlock?: 'grade_order' | null;
+  blockAxis?: string | null;
+  /** ★ C142 — 담당자가 직접 고른 반복(매일 · 매주 + 같은 대상) 경고 줄 */
+  repeatNotice?: string | null;
   copyStale: boolean;
   sendVia: { callback: string | null; adminPhone: string | null };
   costs: { start: number; copy: number; send: number };
@@ -299,6 +305,7 @@ export default function OperatorPreviewModal({
                     q={q}
                     value={answers[q.id] || ''}
                     onChange={(v) => setAnswers((a) => ({ ...a, [q.id]: v }))}
+                    renderUnlock={(u) => (u === 'grade_order' ? <GradeOrderUnlockButton onClick={() => onBlockAction('GRADE_ORDER')} /> : null)}
                     none={q.noneLabel ? { on: !!none[q.id], toggle: (on) => setNone((x) => ({ ...x, [q.id]: on })) } : undefined}
                   />
                 </div>
@@ -391,6 +398,7 @@ export default function OperatorPreviewModal({
                         「{SUGGEST_LABEL[d.audience.suggestKey] || '새로 해당된 고객'}」으로 바꾸기
                       </button>
                     )}
+                    {d.blockUnlock === 'grade_order' && <GradeOrderUnlockButton onClick={() => onBlockAction('GRADE_ORDER')} className="h-10 md:h-9 px-3 text-[13px]" />}
                     {d.blockCode === 'OPT080_MISSING' && <button type="button" className={MK_BTN_OUTLINE} onClick={() => onBlockAction('OPT080_MISSING')}>080 번호 등록하기</button>}
                     {d.blockCode === 'CALLBACK_MISSING' && <button type="button" className={MK_BTN_OUTLINE} onClick={() => onBlockAction('CALLBACK_MISSING')}>발신번호 등록 화면 열기</button>}
                   </div>
@@ -398,6 +406,12 @@ export default function OperatorPreviewModal({
                 </div>
               ) : (
                 <div className="mt-2 rounded-xl border border-slate-200 divide-y divide-slate-100">
+                  {d.repeatNotice && (
+                    <div className="px-4 py-2.5 flex items-start gap-2 bg-amber-50 text-[12.5px] text-amber-900 leading-relaxed">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{d.repeatNotice}</span>
+                    </div>
+                  )}
                   {d.audience.mode === 'axis' && (
                     <div className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                       <span className="text-[12px] text-slate-500 w-20 shrink-0">조건</span>

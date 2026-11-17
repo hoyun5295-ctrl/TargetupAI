@@ -35,6 +35,7 @@ import MultiGoalModal from '../components/automarketing/MultiGoalModal';
 import OperatorsManageList from '../components/automarketing/OperatorsManageList';
 import DailyBriefCard, { DailyBrief, DailyBriefRecommendation } from '../components/automarketing/DailyBriefCard';
 import OperatorPreviewModal, { OperatorPreviewData } from '../components/automarketing/OperatorPreviewModal';
+import GradeOrderModal from '../components/journey/GradeOrderModal';   // ★ 2026-11-17 C142 승인 창 · 질문의 등급 순서 잠금을 여기서 푼다
 import { MK_LINE_EXTRA_BTN } from '../utils/make-ui';
 // ★ 2026-10-10 한 줄 묻기 — 질문이면 오늘의 추천으로 답한다(설계서 docs/2026-10-10-oneline-ask-design.md)
 import { useLineAsk } from '../hooks/useLineAsk';
@@ -78,6 +79,8 @@ export default function ContinuousOperatorPage() {
   const [editing, setEditing] = useState<Partial<ContinuousOperator> | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  // ★ C142 — 등급 순서 창(승인 창 막힘 · 질문 보기의 [등급 순서 정하기]) · 저장하면 승인 창을 다시 센다
+  const [gradeOrderOpen, setGradeOrderOpen] = useState(false);
   const [showMultiGoal, setShowMultiGoal] = useState(false);
   // ★ 2026-10-05 [제안 받기] = 미리보기 — 등록 전에 첫 제안을 보여 주고, 200은 [이대로 시작]에서만.
   // mode = new(처음 시작 · 서버 보관본) · renewal(실행 중의 다음 승인 · 조건 확인)
@@ -223,7 +226,7 @@ export default function ContinuousOperatorPage() {
     sequence_reminder_content: e.sequenceEnabled ? (e.sequenceReminderContent ?? null) : null,
   });
 
-  const updateOperator = async () => {
+  const updateOperator = async (repeatAck?: string) => {
     if (!editing?.id) return;
     setSaving(true);
     setError(null);
@@ -231,9 +234,20 @@ export default function ContinuousOperatorPage() {
       const res = await fetch(`/api/ai/operator/continuous/${editing.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...auth() },
-        body: JSON.stringify(serialize(editing)),
+        // ★ 2026-11-17 C142 — 반복 짝 확인 창에서 누른 지문(서버가 400 으로 준 값 그대로 · 화면은 지문을 만들지 않는다)
+        body: JSON.stringify({ ...serialize(editing), ...(repeatAck ? { repeat_ack: repeatAck } : {}) }),
       });
       const data = await res.json();
+      // ★ C142(Q9 해제 · Harold 1117) — 매일 · 매주 + 같은 대상 = 경고를 보고 직접 눌러야 저장(그 사이 대상이 바뀌면 서버가 다시 400 = 다시 묻는다)
+      if (!data.success && data.code === 'AUDIENCE_PAIRING' && typeof data.ackKey === 'string' && data.ackKey) {
+        const every = editing.schedule === 'weekly' ? '매주' : '매일';
+        setConfirmState({
+          mode: 'warning', title: `같은 고객이 ${every} 다시 받아요`, confirmLabel: `지금 대상에게 ${every} 보내기`, cancelLabel: '그만두기',
+          description: data.error || `${every} 보내면 같은 고객이 ${every} 다시 받게 돼요.`,
+          onConfirm: () => updateOperator(data.ackKey),
+        });
+        return;
+      }
       if (data.success) {
         toast.success('자동 마케팅이 수정되었습니다.');
         setEditing(null);
@@ -679,6 +693,7 @@ export default function ContinuousOperatorPage() {
       emphasis={lineAsk.ask ? (
         // ★ 2026-10-10 한 줄 묻기 — 답이 열려 있으면 어느 보기에서든 답이 먼저다(실행 중 탭에서 물어도 보이게)
         <LineAnswer
+          onGradeOrder={() => setGradeOrderOpen(true)}
           ask={lineAsk.ask}
           busy={previewing}
           // 카드 = 오늘의 추천 1클릭과 같은 함수(handleBriefStart = 늘 AI 문안 · [문안 직접 쓰기]와 무관) · 여정으로 넘기기 · 이메일 · DM 안내는 이동만이라 표시 없음
@@ -825,6 +840,18 @@ export default function ContinuousOperatorPage() {
       )}
       {showMultiGoal && <MultiGoalModal onClose={() => setShowMultiGoal(false)} />}
       <ConfirmModal state={confirmState} onClose={() => setConfirmState(null)} />
+      <GradeOrderModal
+        open={gradeOrderOpen}
+        zIndexClassName="z-[1300]"
+        onClose={() => setGradeOrderOpen(false)}
+        onSaved={() => {
+          setGradeOrderOpen(false);
+          // 막힌 축이면 그 축으로 다시 센다 · 질문 보기였으면 질문표를 다시 받는다(차감 0 · 문안 0)
+          const axis = preview?.data?.blockAxis;
+          void editPreview(axis ? { segment_key: axis } : {});
+        }}
+        token={localStorage.getItem('token') || ''}
+      />
       <OperatorPreviewModal
         open={!!preview}
         mode={preview?.mode || 'new'}
@@ -848,7 +875,7 @@ export default function ContinuousOperatorPage() {
         onBenefit={(benefit) => editPreview(preview?.mode === 'new' ? { benefit, regenerate: true } : { benefit }, preview?.mode === 'new' ? '문안을 만들고 있어요' : undefined)}
         onSchedule={(patch) => editPreview(patch)}
         onSendVia={(patch) => editPreview(patch)}
-        onBlockAction={(code) => navigate(code === 'OPT080_MISSING' ? '/settings' : '/manage')}
+        onBlockAction={(code) => (code === 'GRADE_ORDER' ? setGradeOrderOpen(true) : navigate(code === 'OPT080_MISSING' ? '/settings' : '/manage'))}
         onCharge={() => navigate('/pricing')}
       />
     </ZoneFrame>

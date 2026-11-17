@@ -7,7 +7,7 @@
  * ⛔ 승인 버튼은 서버가 준 상태와 문안 버전으로만 켜진다. 화면이 자격을 다시 계산하지 않는다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useClockTick } from '../../hooks/useClockTick';
 import { AlertTriangle, Check, Eye, Loader2, Send, SpellCheck, X } from 'lucide-react';
 import { useToast } from '../ToastProvider';
@@ -28,7 +28,7 @@ import {
 import {
   agencyCallbackLabel, applyAgencySpellToDraft, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
   isApprovable, isCancelable, isEditableStatus, isInSendChangeLock, rescheduleAgencyRequest, SEND_CHANGE_LOCK_REASON, SOURCE_LABEL, STATUS_LABEL,
-  STATUS_TONE, toLocalInput, updateAgencyContent, type AgencyPreviewSample, type AgencySendEvent,
+  STATUS_TONE, toLocalInput, updateAgencyContent, measureAgencySmsBytes, type AgencyPreviewSample, type AgencySendEvent,
   type AgencySendRequest,
 } from './agency-send-api';
 
@@ -61,6 +61,11 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   // ★2026-09-25 맞춤법 확인 — 화면에서만 접는 [그대로 두기] · 고치기 칸에 넣은 줄(저장해야 반영)
   const [spellKept, setSpellKept] = useState<Set<string>>(new Set());
   const [spellPut, setSpellPut] = useState<Set<string>>(new Set());
+  // ★ 2026-11-17 C142(남지현 접수 · 뿌리 R68 길이 축) — SMS 접수의 고치기 칸 = 서버가 잰 가장 긴 문장 바이트(저장 판정과 같은 측정)
+  //   for = 그 값을 잰 글(지금 칸 글과 같을 때만 「넘음」으로 저장을 잠근다 · 늦게 온 답은 버린다)
+  const [smsBytes, setSmsBytes] = useState<{ for: string; maxBytes: number | null; limit: number; over: boolean; message: string | null } | null>(null);
+  const [smsMeasuring, setSmsMeasuring] = useState(false);
+  const smsSeq = useRef(0);
 
   useEffect(() => {
     if (!requestId) { setReq(null); setEvents([]); return; }
@@ -153,8 +158,24 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     } finally { setBusy(false); }
   };
 
+  // ★ C142 — 고치기 칸이 열린 SMS 접수 = 입력이 멈춘 뒤 한 번 잰다(0.6초) · 닫으면 값을 비운다
+  useEffect(() => {
+    if (!editing || !req || req.messageType !== 'SMS') { smsSeq.current += 1; setSmsBytes(null); setSmsMeasuring(false); return; }
+    const seq = ++smsSeq.current;
+    const text = draft;
+    setSmsMeasuring(true);
+    const t = setTimeout(() => {
+      measureAgencySmsBytes(req.id, text)
+        .then((r) => { if (seq === smsSeq.current) setSmsBytes({ for: text, maxBytes: r.maxBytes, limit: r.limit, over: r.over, message: r.message }); })
+        .catch(() => { if (seq === smsSeq.current) setSmsBytes(null); })
+        .finally(() => { if (seq === smsSeq.current) setSmsMeasuring(false); });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [editing, draft, req?.id, req?.messageType]); // eslint-disable-line react-hooks/exhaustive-deps
+  const smsOver = !!smsBytes && smsBytes.for === draft && smsBytes.over;
+
   const doSaveContent = async () => {
-    if (!req || busy) return;
+    if (!req || busy || smsOver) return;
     // ★ 2026-11-06 C109 D1 — 고친 글도 서버가 판정한다(뺌 · 바꿈 = 정리해 저장 + 위치 알림 · 막음 = 위치 반려 · 옛: 화면에서 먼저 막음)
     setBusy(true);
     try {
@@ -285,9 +306,19 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 {editing ? (
                   <>
                     <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={7} className={CUI_TEXTAREA} />
+                    {req.messageType === 'SMS' && (
+                      <div className={`mt-1.5 text-[12px] tabular-nums ${smsOver ? 'text-rose-700' : 'text-neutral-500'}`} aria-live="polite">
+                        {smsMeasuring && (!smsBytes || smsBytes.for !== draft)
+                          ? <span className="inline-flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" />SMS 길이를 재는 중</span>
+                          : smsBytes && smsBytes.maxBytes !== null
+                            ? <span>가장 긴 문장 <b className={smsOver ? 'text-rose-700' : 'text-neutral-800'}>{smsBytes.maxBytes}</b> / {smsBytes.limit}바이트 <span className="text-neutral-400">(광고 표기, 수신거부 문구, 받는 분 이름을 넣은 실제 문장 기준)</span></span>
+                            : null}
+                        {smsOver && smsBytes?.message && <p className="mt-0.5">{smsBytes.message}</p>}
+                      </div>
+                    )}
                     <p className={CUI_HINT}>고치면 승인이 지워지고 검사를 처음부터 다시 합니다.</p>
                     <div className="mt-2 flex items-center gap-2">
-                      <button type="button" onClick={doSaveContent} disabled={busy} className={CUI_BTN_PRIMARY}>저장하고 다시 검사</button>
+                      <button type="button" onClick={doSaveContent} disabled={busy || smsOver} className={CUI_BTN_PRIMARY}>저장하고 다시 검사</button>
                       <button type="button" onClick={() => { setEditing(false); setDraft(req.currentContent); }} className={CUI_BTN_GHOST}>그만두기</button>
                     </div>
                   </>

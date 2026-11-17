@@ -10,14 +10,17 @@ import ZoneEmphasis from './ZoneEmphasis';
 import type { LineAskCard } from '../../utils/one-line';
 import type { LineAskState } from '../../hooks/useLineAsk';
 import { formatKstClock } from '../../utils/formatDate';
+import GradeOrderUnlockButton from '../journey/GradeOrderUnlockButton';   // ★ 2026-11-17 C142 등급 순서 잠금 풀기(Codex 구현 1R)
 
-export default function LineAnswer({ ask, onPick, onMakeAnyway, onClose, cardCost, makeCost, busy = false }: {
+export default function LineAnswer({ ask, onPick, onMakeAnyway, onClose, cardCost, makeCost, busy = false, onGradeOrder }: {
   ask: LineAskState;
   /** 카드 고르기 → 그 화면의 기존 함수 */
   onPick: (card: LineAskCard) => void;
   /** 질문이 아니었을 때 — 이 문장 그대로 지금처럼 만든다 */
   onMakeAnyway: () => void;
   onClose: () => void;
+  /** ★ 2026-11-17 C142 — 막힌 목록의 [등급 순서 정하기](그 화면의 쪽이 창을 연다 · 없으면 사유 글만) */
+  onGradeOrder?: () => void;
   /** 카드 버튼 옆 비용 글자(그 화면 단가표에서 읽는다 · 없으면 표시 안 함) */
   cardCost?: (card: LineAskCard) => string | undefined;
   /** 탈출구 버튼 옆 비용 글자 */
@@ -99,6 +102,7 @@ export default function LineAnswer({ ask, onPick, onMakeAnyway, onClose, cardCos
                   <li key={b.title} className="flex items-start gap-2 text-[12.5px] leading-relaxed text-slate-600">
                     <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400" />
                     <span className="break-keep"><span className="font-semibold text-slate-700">{b.title}</span> · {b.reason}</span>
+                    {b.unlock === 'grade_order' && onGradeOrder && <GradeOrderUnlockButton onClick={onGradeOrder} className="shrink-0" />}
                   </li>
                 ))}
               </ul>

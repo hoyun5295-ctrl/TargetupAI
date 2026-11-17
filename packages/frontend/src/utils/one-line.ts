@@ -982,7 +982,7 @@ export interface LineAskAnswer {
   head: string;
   basis: { scope: 'mine' | 'company'; at: string; note?: string };
   cards: LineAskCard[];
-  blocked: Array<{ title: string; reason: string }>;
+  blocked: Array<{ title: string; reason: string; unlock?: 'grade_order' }>;   // ★ C142 unlock = [등급 순서 정하기]
   failed: string[];
 }
 

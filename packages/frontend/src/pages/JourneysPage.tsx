@@ -53,6 +53,7 @@ import JourneyDataScopeNote from '../components/journey/JourneyDataScopeNote';
 import InterviewModal, { type InterviewPreset, type InterviewQuickStart } from '../components/journey/map/InterviewModal';
 import { RequestKeys } from '../utils/request-id';
 import GradeOrderModal from '../components/journey/GradeOrderModal';
+import { GRADE_ORDER_UNLOCK_LABEL } from '../components/journey/GradeOrderUnlockButton';   // ★ C142 단추 이름 한 곳
 import InfoAlertJourneyBuilder, { type InfoAlertBuildResult } from '../components/journey/InfoAlertJourneyBuilder';
 import DateAnchorJourneyBuilder, { type DateAnchorBuildResult } from '../components/journey/DateAnchorJourneyBuilder';
 import { TRIGGER_EVENTS } from '../utils/journey-trigger-catalog';
@@ -625,7 +626,7 @@ export default function JourneysPage() {
   const journeyCost = `${AI_GENERATE_COSTS['journey-ai-generate']}크레딧`;
   // ★ 2026-08-01 설계서 §2-3 — 이 회사가 지금 만들 수 있는 여정. 못 만드는 것은 사유와 함께 잠근다.
   //   조회 실패면 잠그지 않는다(화면 편의 게이트). 실제 발송 차단은 백엔드가 담당한다.
-  const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string }> | null>(null);
+  const [dataCap, setDataCap] = useState<Record<string, { available: boolean; reason: string; unlock?: 'grade_order' }> | null>(null);
   // ★ 2026-09-30 V2 4차 — 끝 칸 쓰기 스위치(서버 JOURNEY_END_CHIP_ENABLED). 꺼져 있으면 끝 칸을 고를 수 없다.
   const [endChipEnabled, setEndChipEnabled] = useState(false);
   // ★ 2026-08-02 §13-5 — 구매가 어느 문으로 들어오는지 + 마지막 도착 시각. 매장 문이면 하루 모아 다음 날 오전에 나간다.
@@ -1038,6 +1039,8 @@ export default function JourneysPage() {
           icon: v.icon,
           gradient: v.gradient,
           lockedReason,
+          // ★ 2026-11-17 C142 — 등급 순서 잠금 = 칩 옆 [등급 순서 정하기](옛: 1024 에 지운 뒤 여는 자리 0 · 창만 남았다)
+          ...(lockedReason && cap?.unlock === 'grade_order' ? { lockedAction: { label: GRADE_ORDER_UNLOCK_LABEL, onClick: () => setGradeOrderOpen(true) } } : {}),
         };
       }),
     [dataCap]
@@ -1612,6 +1615,7 @@ export default function JourneysPage() {
       } : null}
       emphasis={view === 'main' && lineAsk.ask ? (
         <LineAnswer
+          onGradeOrder={() => setGradeOrderOpen(true)}
           ask={lineAsk.ask}
           busy={false}
           cardCost={(c) => (c.action.kind === 'journey' ? journeyCost : undefined)}
@@ -2842,6 +2846,7 @@ export default function JourneysPage() {
         initialSentence={lineJourney?.sentence}
         preset={lineJourney?.preset || null}
         quickStarts={quickStartItems}
+        onGradeOrder={() => setGradeOrderOpen(true)}
         focusLabel="작업 화면 열기"
         onFocusJourney={(id) => openWorkspace(id)}
         onCreated={(made) => {

@@ -207,7 +207,7 @@ describe('T2-5 관제 「최근 반려」 네 갈래 = 관제가 사라지지 �
   it('칸 있음 = 본문 칸을 싣는 SELECT · replyBodyReady true', async () => {
     const { readRecentRejectedIntakes } = await import('../agency-send-intake');
     const r = await readRecentRejectedIntakes();
-    expect(r).toEqual({ rows: [{ uidl: 'u1' }], replyBodyReady: true });
+    expect(r).toEqual({ rows: [{ uidl: 'u1' }], replyBodyReady: true, truncated: false });
     expect(selects).toHaveLength(1);
     expect(selects[0]).toContain('i.reply_subject, i.reply_text');
   });
@@ -225,7 +225,7 @@ describe('T2-5 관제 「최근 반려」 네 갈래 = 관제가 사라지지 �
     const { readRecentRejectedIntakes } = await import('../agency-send-intake');
     info = 'throw';
     const r = await readRecentRejectedIntakes();
-    expect(r).toEqual({ rows: [{ uidl: 'u1' }], replyBodyReady: false });
+    expect(r).toEqual({ rows: [{ uidl: 'u1' }], replyBodyReady: false, truncated: false });
     expect(selects[0]).not.toContain('reply_text');
   });
 
@@ -233,7 +233,7 @@ describe('T2-5 관제 「최근 반려」 네 갈래 = 관제가 사라지지 �
     const { readRecentRejectedIntakes } = await import('../agency-send-intake');
     selectErr = Object.assign(new Error('column i.reply_text does not exist'), { code: '42703' });
     const r = await readRecentRejectedIntakes();
-    expect(r).toEqual({ rows: [{ uidl: 'u1' }], replyBodyReady: false });
+    expect(r).toEqual({ rows: [{ uidl: 'u1' }], replyBodyReady: false, truncated: false });
     expect(selects).toHaveLength(2);
     expect(selects[1]).not.toContain('reply_text');
     await readRecentRejectedIntakes();
@@ -248,7 +248,10 @@ describe('T2-5 관제 「최근 반려」 네 갈래 = 관제가 사라지지 �
 
   it('관리자 라우트 = 이 CT 하나로 읽고 응답에 replyBodyReady 를 싣는다(인라인 조회 0)', () => {
     const src = readFileSync(join(__dirname, '..', '..', 'routes', 'admin.ts'), 'utf8');
-    expect(src.split('readRecentRejectedIntakes(').length - 1).toBe(1);
+    // ★ 2026-11-17 C142 — 부르는 자리 둘 = 관제 응답(거르기 없음) · 반려 검색 주소(검색어 · 받은 날짜) · 둘 다 이 CT(인라인 조회 0 은 그대로)
+    expect(src.split('readRecentRejectedIntakes(').length - 1).toBe(2);
+    expect(src).toContain('const recentRejected = await readRecentRejectedIntakes();');
+    expect(src).toContain("router.get('/agency-send/mail-rejected'");
     expect(src).toContain('replyBodyReady: recentRejected.replyBodyReady');
     expect(src).not.toMatch(/i\.reply_text/);
   });

@@ -422,6 +422,8 @@ export interface FlowPlanItem {
   /** ready = 만들 수 있음 · exists = 켜진 여정 있음 · drafted = 초안 · 멈춤만 있음(다시 권하지 않는다) · locked = 데이터 연동 필요. */
   status: 'ready' | 'exists' | 'drafted' | 'locked';
   reason: string;
+  /** ★ 2026-11-17 C142 — 잠긴 칸을 사람이 화면에서 풀 수 있으면 그 할 일(등급 순서 · 화면이 [등급 순서 정하기]) */
+  unlock?: 'grade_order';
 }
 
 export interface JourneyDiagnosis {
@@ -460,7 +462,7 @@ const wasCapped = (xs: number[], out: number[]) => xs.some((x, i) => Math.round(
 export function buildFlowPlan(
   rhythm: PurchaseRhythm | null,
   activeTriggers: Set<string>,
-  availability: Record<string, { available: boolean; reason: string } | undefined>,
+  availability: Record<string, { available: boolean; reason: string; unlock?: 'grade_order' } | undefined>,
   draftedTriggers: Set<string> = new Set(),
   /** ★ 2026-10-25 #9 — 담당자 화면에서 관리자가 켠 여정이 맡은 구간(담당자 목록 · 지도에 없는 여정이라 이유를 따로 말한다) */
   othersTriggers: Set<string> = new Set(),
@@ -551,7 +553,7 @@ export function buildFlowPlan(
     if (activeTriggers.has(it.triggerEvent)) return { ...it, status: 'exists' as const, reason: '이미 켜진 여정이 있어요.' };
     if (othersTriggers.has(it.triggerEvent)) return { ...it, status: 'exists' as const, reason: '관리자가 켠 여정이 이 구간을 맡고 있어요.' };
     if (draftedTriggers.has(it.triggerEvent)) return { ...it, status: 'drafted' as const, reason: '만들어 둔 초안이 있어요. 켜기 전 점검에서 확인하고 켜 주세요.' };
-    if (cap && !cap.available) return { ...it, status: 'locked' as const, reason: cap.reason };
+    if (cap && !cap.available) return { ...it, status: 'locked' as const, reason: cap.reason, ...(cap.unlock ? { unlock: cap.unlock } : {}) };
     return { ...it, status: 'ready' as const, reason: '' };
   });
 }

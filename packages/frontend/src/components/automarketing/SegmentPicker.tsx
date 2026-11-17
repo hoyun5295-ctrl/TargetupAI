@@ -11,6 +11,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, Lock, Check, Users, AlertCircle, Sparkles } from 'lucide-react';
 import { SegmentAvailability } from './types';
+import GradeOrderModal from '../journey/GradeOrderModal';   // ★ 2026-11-17 C142 등급 순서를 여기서 정한다(잠금 · 고쳐 쓰기)
+import GradeOrderUnlockButton from '../journey/GradeOrderUnlockButton';
+
+/** ★ C142 — 등급 순서로 판정하는 축(열려 있으면 [등급 순서 바꾸기] = 고쳐 쓸 영구 입구) */
+const GRADE_ORDER_KEYS = new Set(['vip', 'grade_up']);
 
 interface Props {
   value: string | null;
@@ -54,6 +59,9 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
   /** 늦게 온 응답이 최신 선택을 덮지 않도록 — 축을 빠르게 바꿀 때 수가 뒤섞이면 그 화면은 거짓이 된다. */
   const reqSeq = useRef(0);
+  // ★ C142 — 등급 순서 창(이 부품이 하나 쥔다) · 저장하면 축 목록을 다시 읽는다(잠금이 풀린 것을 그 자리에서 보인다)
+  const [gradeOrderOpen, setGradeOrderOpen] = useState(false);
+  const [segmentsRev, setSegmentsRev] = useState(0);
 
   useEffect(() => {
     let alive = true;
@@ -72,7 +80,7 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
       }
     })();
     return () => { alive = false; };
-  }, []);
+  }, [segmentsRev]);
 
   const measure = useCallback(async (key: string, p: Record<string, number> | null) => {
     const seq = ++reqSeq.current;
@@ -132,7 +140,7 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
     const t = setTimeout(() => { void measure(value, params); }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, params, measure, operatorId]);
+  }, [value, params, measure, operatorId, segmentsRev]);   // ★ C142 등급 순서를 바꾸면 고른 축의 대상 수를 다시 센다(Codex 구현 1R)
 
   const pick = (s: SegmentAvailability) => {
     if (disabled || !s.available) return;
@@ -207,6 +215,16 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
           );
         })}
       </div>
+      {/* ★ C142 — 등급 순서로 고르는 카드(상위 등급 · 등급이 오른)가 잠겼으면 [등급 순서 정하기] · 열려 있으면 [등급 순서 바꾸기](고쳐 쓸 영구 입구) · 카드 높이를 흔들지 않게 묶음 아래 한 줄 */}
+      {!disabled && segments.some((x) => GRADE_ORDER_KEYS.has(x.key) && (x.unlock === 'grade_order' || x.available)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <GradeOrderUnlockButton
+            revise={!segments.some((x) => GRADE_ORDER_KEYS.has(x.key) && x.unlock === 'grade_order')}
+            onClick={() => setGradeOrderOpen(true)}
+          />
+          <span className="text-[11px] text-slate-500">상위 등급 고객과 등급이 오른 고객은 회사가 정한 등급 순서로 골라요.</span>
+        </div>
+      )}
 
       {(selected?.params || []).map((def) => {
         const cur = Number(params?.[def.key] ?? def.default);
@@ -281,6 +299,12 @@ export default function SegmentPicker({ value, params, onChange, disabled, legac
           ? '고른 조건이 그대로 저장됩니다. 매 회차 같은 조건으로 대상을 뽑고, 발송 직전에 다시 한 번 추출합니다.'
           : '조건을 고르면 회차마다 같은 기준으로 대상을 뽑습니다.'}
       </div>
+      <GradeOrderModal
+        open={gradeOrderOpen}
+        onClose={() => setGradeOrderOpen(false)}
+        onSaved={() => { setGradeOrderOpen(false); setSegmentsRev((n) => n + 1); }}
+        token={localStorage.getItem('token') || ''}
+      />
     </div>
   );
 }

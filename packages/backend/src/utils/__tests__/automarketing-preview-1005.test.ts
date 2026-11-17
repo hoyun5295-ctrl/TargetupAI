@@ -109,6 +109,7 @@ import {
 } from '../automarketing-preview';
 import { InsufficientCreditError } from '../ai-credit';
 import { query as dbQuery } from '../../config/database';
+import { repeatAckKey } from '../automarketing-segment';   // ★ C142 짝 지문
 
 const CO = 'company-1';
 const US = 'user-1';
@@ -252,8 +253,10 @@ describe('1. 미리보기 = 등록 0 · 대상은 번역 결과(계약) · 질�
     translateMock.mockResolvedValueOnce({ kind: 'axis', segmentKey: 'vip', segmentParams: {}, label: '상위 등급 고객', description: '', mapped: true });
     const out = await runOperatorPreview(CO, US, { name: 'VIP 소식', objective: '매주 VIP에게 신상품 소식', infer_schedule: true });
     const q = out.questions.find((x) => x.id === 'schedule')!;
-    expect(q.options!.map((o) => o.value)).toEqual(['monthly', 'axis:grade_up', 'keep']);
-    expect(q.options![2]).toMatchObject({ disabled: true });
+    // ★ 2026-11-17 C142(Q9 해제 · Harold 1117) — 「지금 대상에게 매주 보내기」 열림(값 = 그 짝의 지문) · 제안 = 열린 축만(이 회사 축 목록에 「등급이 오른 고객」 없음 → 제안 0)
+    const key = repeatAckKey('weekly', { segmentKey: 'vip', segmentParams: {} });
+    expect(q.options!.map((o) => o.value)).toEqual(['monthly', `keep:${key}`]);
+    expect(q.options![1].disabled).toBeFalsy();
     const after = await updateOperatorPreview(out.previewId!, CO, US, { revision: 0, answers: { schedule: 'monthly' } });
     expect(after).toMatchObject({ kind: 'proposal', window: { schedule: 'monthly' } });
   });
