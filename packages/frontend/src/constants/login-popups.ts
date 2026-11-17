@@ -14,10 +14,15 @@ export const STUDIO_TRIAL_POPUP_ID = 'studio-trial';
 /** ★ 2026-11-17 C140 대시보드 한 줄 배너(components/dashboard/LineTrialBanner.tsx) */
 export const LINE_TRIAL_BANNER_ID = 'line-trial';
 
+/**
+ * ★ 2026-11-17 C141 (Harold 「무료체험이 누구인지도 모르겠고」) — 체험이 둘이라 이름을 가른다:
+ *   7일 무료체험 배너(요금제가 7일 동안 열린다) · 이미지 체험 안내(이미지 스튜디오 3장). 이 이름은 슈퍼관리자 「기능 관심 업체」에만 쓰인다.
+ *   차례 = 그 화면 「안내별」 칸의 차례(체험 둘이 먼저).
+ */
 export const LOGIN_POPUPS: readonly LoginPopup[] = [
+  { id: LINE_TRIAL_BANNER_ID, name: '7일 무료체험 배너', goLabel: '7일 무료로 써 보기', introKeys: [] },
+  { id: STUDIO_TRIAL_POPUP_ID, name: '이미지 체험 안내', goLabel: '체험 신청', introKeys: ['studio-trial'] },
   { id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기', introKeys: ['v3-scenes', 'v3-intro'] },
-  { id: STUDIO_TRIAL_POPUP_ID, name: '무료체험 안내 창', goLabel: '체험 신청', introKeys: ['studio-trial'] },
-  { id: LINE_TRIAL_BANNER_ID, name: '대시보드 한 줄 배너', goLabel: '7일 무료로 써 보기', introKeys: [] },
 ];
 
 export const loginPopupOf = (id: string): LoginPopup | undefined => LOGIN_POPUPS.find((p) => p.id === id);

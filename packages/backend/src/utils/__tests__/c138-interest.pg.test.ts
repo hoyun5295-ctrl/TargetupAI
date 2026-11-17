@@ -117,6 +117,6 @@ describe('업체 줄(실 PG)', () => {
     const rows = mine(d.companies);
     expect(rows.map((c) => c.companyId).sort()).toEqual([CO(1), CO(2), CO(4)]);
     expect(rows.map((c) => `${c.companyId.slice(-1)}:${c.seen}`).sort()).toEqual(['1:false', '2:true', '4:false']);   // 회사 2 = 방금 남긴 본 기록
-    expect(Object.keys(d).sort()).toEqual(['companies', 'dismissalsKnown', 'trialsKnown']);
+    expect(Object.keys(d).sort()).toEqual(['companies', 'dismissalsKnown', 'lineTrialsKnown', 'trialsKnown']);   // ★ C141 7일 체험 목록을 읽었는가
   });
 });

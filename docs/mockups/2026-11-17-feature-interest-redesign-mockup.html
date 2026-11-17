@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>기능 관심 업체 화면 개편 목업</title>
+<!-- 버리는 목업(1117 Harold 「정신없다 · 무료체험이 누구인지도 모르겠다 · 칸도 벗어난다 · 목업 4가지」) · 기존 코드에 편입하지 않는다
+     대상 = 슈퍼관리자 「기능 관심 업체」 탭(components/admin/FeatureInterestTab.tsx)
+     글꼴 = 프리텐다드 하나 · 흰 바탕 + 검정 + 주황 하나 · 회사 이름과 숫자는 예시(실제 고객사 이름을 쓰지 않는다)
+     낱말 = 「7일 무료체험」(대시보드 한 줄 배너로 켜는 체험 요금제) · 「이미지 체험」(이미지 스튜디오 3장) 둘을 갈라 부른다 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{--ink:#0B0B0C;--sub:#5F6368;--line:#E4E4E1;--soft:#F1F1EE;--bg:#F5F6F8;--acc:#CF4510;--acc-d:#A8380B;--acc-soft:#FDF1EC}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,system-ui,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;word-break:keep-all;font-size:14.5px;line-height:1.5}
+button{font:inherit;border:0;background:none;cursor:pointer;color:inherit}
+b,strong{font-weight:700}
+.num{font-variant-numeric:tabular-nums}
+
+/* ── 목업을 고르는 띠(화면의 일부가 아니다) ── */
+.top{position:sticky;top:0;z-index:50;background:var(--ink);color:#fff;padding:10px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.top b{font-size:13px}
+.top span{font-size:12.5px;color:rgba(255,255,255,.75)}
+.pick{display:flex;gap:2px;background:rgba(255,255,255,.14);padding:3px;border-radius:10px;flex-wrap:wrap}
+.pick button{height:32px;padding:0 14px;border-radius:8px;font-size:13px;color:rgba(255,255,255,.85)}
+.pick button[aria-pressed="true"]{background:#fff;color:var(--ink);font-weight:700}
+.memo{max-width:1180px;margin:14px auto 0;padding:0 24px;font-size:13px;color:var(--sub);display:flex;gap:8px 20px;flex-wrap:wrap}
+.memo b{color:var(--ink)}
+
+/* ── 화면 틀(슈퍼관리자 본문 폭 안 · 가로를 화면 끝까지 늘이지 않는다) ── */
+.page{padding:14px 24px 64px}
+.screen{max-width:1180px;margin:0 auto}
+.hd{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;margin:6px 0 18px}
+.hd h1{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.hd p{font-size:13.5px;color:var(--sub);margin-top:2px}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.seg{display:inline-flex;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+.seg button{height:32px;padding:0 12px;border-radius:7px;font-size:13.5px;color:var(--sub);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff;font-weight:700}
+.v[hidden]{display:none}
+.card{background:#fff;border-radius:14px;box-shadow:0 1px 2px rgba(11,11,12,.05)}
+.h2{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:26px 0 10px;display:flex;align-items:baseline;gap:8px}
+.h2 span{font-size:13.5px;font-weight:600;color:var(--sub)}
+.plan{font-size:12.5px;color:var(--sub);font-weight:600}
+.plan.on{color:var(--acc-d)}
+.co{font-weight:700;font-size:15px;line-height:1.35}
+.sub{color:var(--sub);font-size:13px}
+.acc{color:var(--acc-d);font-weight:700}
+.days{display:inline-flex;gap:3px;vertical-align:middle;margin-left:8px}
+.days i{width:14px;height:6px;border-radius:3px;background:var(--line)}
+.days i.on{background:var(--acc)}
+.dis{font-size:12.5px;color:var(--sub)}
+
+/* ── 1안: 안내별 깔때기 + 한 일로 묶은 목록 ── */
+.funnel{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.fn{padding:16px 18px;text-align:left;display:flex;flex-direction:column;width:100%;border:2px solid transparent}
+.fn[aria-pressed="true"]{border-color:var(--ink)}
+.fn h3{font-size:15px;font-weight:800}
+.fn p{font-size:12.5px;color:var(--sub);margin-top:1px}
+.steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:auto;padding-top:14px;align-items:end;width:100%}
+.steps div{min-width:0}
+.steps em{display:block;font-style:normal;font-size:12.5px;color:var(--sub);line-height:1.3}
+.steps b{font-size:24px;font-weight:800;letter-spacing:-.02em;line-height:1.2}
+.steps b small{font-size:13px;font-weight:600;color:var(--sub);margin-left:1px}
+.steps .hit b{color:var(--acc-d)}
+.list{overflow:hidden}
+.row{display:grid;grid-template-columns:minmax(0,250px) minmax(0,1fr) 150px;gap:6px 20px;padding:14px 18px;align-items:start}
+.row + .row{border-top:1px solid var(--soft)}
+.row .when{text-align:right;font-size:13px;color:var(--sub)}
+.what p + p{margin-top:3px}
+.fold{margin-top:10px;font-size:13.5px;font-weight:700;color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+
+/* ── 2안: 단계 보드 ── */
+.board{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start}
+.col h3{font-size:15px;font-weight:800;display:flex;align-items:baseline;gap:6px;padding:0 4px 4px}
+.col h3 span{font-size:13.5px;color:var(--sub);font-weight:600}
+.col > p{font-size:12.5px;color:var(--sub);padding:0 4px 10px;min-height:48px}
+.col.hot h3{color:var(--acc-d)}
+.kc{padding:13px 15px;margin-bottom:8px}
+.kc .k1{font-size:15px;font-weight:800;margin-top:6px}
+.kc .k2{font-size:12.5px;color:var(--sub);margin-top:2px}
+.more{display:block;width:100%;padding:11px;border:1px dashed #C9C9C4;border-radius:12px;font-size:13px;font-weight:700;color:var(--sub)}
+
+/* ── 3안: 정돈한 표(안내를 칸으로) ── */
+.tblwrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;table-layout:fixed;min-width:1060px}
+th{font-size:12.5px;font-weight:700;color:var(--sub);text-align:left;padding:12px 14px;background:#FAFAF8;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:13px 14px;vertical-align:top;border-bottom:1px solid var(--soft);font-size:13.5px}
+tr:last-child td{border-bottom:0}
+td .a{display:block;font-weight:700;color:var(--acc-d)}
+td .s{display:block;color:var(--sub);font-size:12.5px}
+tr.grp td{background:#FAFAF8;font-size:12.5px;font-weight:800;color:var(--ink);padding:8px 14px}
+.legend{font-size:12.5px;color:var(--sub);margin:0 0 10px}
+
+/* ── 4안: 일어난 일 순서 + 체험 현황 ── */
+.two{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:16px;align-items:start}
+.feed{padding:6px 20px 14px}
+.day{font-size:12.5px;font-weight:800;color:var(--sub);padding:16px 0 6px}
+.ev{display:grid;grid-template-columns:52px minmax(0,1fr);gap:14px;padding:10px 0;border-top:1px solid var(--soft)}
+.ev time{font-size:13px;color:var(--sub);padding-top:1px}
+.ev p{font-size:14.5px}
+.ev.big p{font-weight:700}
+.ev .sub{display:block;font-weight:400}
+.rail{position:sticky;top:64px;display:grid;gap:12px}
+.rc{padding:16px 18px}
+.rc h3{font-size:14px;font-weight:800;margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline}
+.rc h3 span{font-size:12.5px;color:var(--sub);font-weight:600}
+.rl{display:flex;justify-content:space-between;gap:12px;padding:7px 0;font-size:13.5px}
+.rl + .rl{border-top:1px solid var(--soft)}
+.rl span:last-child{white-space:nowrap;font-weight:700}
+
+/* ── 통합안: 단계 칸(누가 어디까지) + 고른 단계의 회사 목록 + 안내별 숫자 · 일어난 일 ── */
+.stages{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.st{padding:16px 18px 14px;text-align:left;display:flex;flex-direction:column;width:100%;border:2px solid transparent}
+.st[aria-pressed="true"]{border-color:var(--ink)}
+.st h3{font-size:14px;font-weight:700;color:var(--sub)}
+.st .n{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1.2;margin-top:2px}
+.st .n small{font-size:14px;font-weight:600;color:var(--sub);margin-left:2px}
+.st.hot .n{color:var(--acc-d)}
+.st p{font-size:12.5px;color:var(--sub);margin-top:6px;line-height:1.45}
+.main5{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start;margin-top:16px}
+.lh{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap;padding:15px 18px 13px;border-bottom:1px solid var(--line)}
+.lh b{font-size:16px;font-weight:800}
+.lh span{font-size:13px;color:var(--sub)}
+.lh button{font-size:13px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.row5{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr) 112px;gap:4px 18px;padding:13px 18px;align-items:start;width:100%;text-align:left}
+.row5 + .row5{border-top:1px solid var(--soft)}
+.row5:hover{background:#FAFAF8}
+.row5 .when{text-align:right;font-size:13px;color:var(--sub)}
+.row5 .what p + p{margin-top:3px}
+.empty{padding:36px 18px;text-align:center;color:var(--sub);font-size:14px}
+.pager{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 18px;border-top:1px solid var(--line);font-size:13px;color:var(--sub)}
+.pager div{display:flex;gap:4px}
+.pager i{font-style:normal;min-width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-weight:700}
+.pager i.on{background:var(--ink);color:#fff}
+.side{display:grid;gap:12px}
+.gl{display:block;width:calc(100% + 20px);margin:0 -10px;padding:8px 10px;border-radius:10px;text-align:left}
+.gl:hover{background:#FAFAF8}
+.gl[aria-pressed="true"]{background:var(--soft)}
+.gl b{display:block;font-size:13.5px}
+.gl span{display:block;font-size:13px;color:var(--sub);margin-top:1px;white-space:nowrap}
+.gl span strong{color:var(--ink)}
+.gl span strong.acc{color:var(--acc-d)}
+.me{display:grid;grid-template-columns:76px minmax(0,1fr);gap:10px;padding:8px 0;font-size:13px}
+.me + .me{border-top:1px solid var(--soft)}
+.me time{color:var(--sub)}
+
+@media (max-width:1000px){
+  .funnel,.board,.stages{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .two,.main5{grid-template-columns:minmax(0,1fr)}
+  .row5{grid-template-columns:minmax(0,1fr)}
+  .row5 .when{text-align:left}
+  .rail{position:static}
+  .row{grid-template-columns:minmax(0,1fr)}
+  .row .when{text-align:left}
+}
+@media (max-width:560px){
+  .funnel,.board,.stages{grid-template-columns:minmax(0,1fr)}
+  .page{padding:12px 14px 48px}
+}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <b>기능 관심 업체 개편 목업</b>
+  <div class="pick" role="group" aria-label="안 고르기">
+    <button type="button" data-v="5" aria-pressed="true">통합안</button>
+    <button type="button" data-v="1" aria-pressed="false">1안 깔때기와 묶음</button>
+    <button type="button" data-v="2" aria-pressed="false">2안 단계 보드</button>
+    <button type="button" data-v="3" aria-pressed="false">3안 정돈한 표</button>
+    <button type="button" data-v="4" aria-pressed="false">4안 일어난 일 순서</button>
+  </div>
+  <span>회사 이름과 숫자는 예시입니다</span>
+</div>
+<div class="memo" id="memo"></div>
+
+<div class="page"><div class="screen">
+  <div class="hd">
+    <div>
+      <h1>기능 관심 업체</h1>
+      <p>안내 창과 배너를 본 회사, 버튼을 누른 회사, 무료체험 중인 회사</p>
+    </div>
+    <div class="filters">
+      <div class="seg" role="group" aria-label="기간">
+        <button type="button" aria-pressed="false">오늘</button><button type="button" aria-pressed="true">최근 7일</button><button type="button" aria-pressed="false">이번 달</button><button type="button" aria-pressed="false">전체</button>
+      </div>
+      <div class="seg" role="group" aria-label="회사">
+        <button type="button" aria-pressed="true">모든 회사</button><button type="button" aria-pressed="false">미가입만</button><button type="button" aria-pressed="false">요금제 사용 중만</button>
+      </div>
+    </div>
+  </div>
+
+  <section class="v" id="v5"></section>
+  <section class="v" id="v1" hidden></section>
+  <section class="v" id="v2" hidden></section>
+  <section class="v" id="v3" hidden></section>
+  <section class="v" id="v4" hidden></section>
+</div></div>
+
+<script>
+// ── 예시 데이터(실제 고객사 이름 아님) ─────────────────────────────────────
+// seen = 본 횟수(login 로그인 안내 창 · studio 이미지 체험 안내 · line 7일 체험 배너 · feat 기능 안내 창)
+// go = 누른 횟수 · line = 7일 무료체험(left 남은 날 · 0 = 오늘까지) · studio = 이미지 체험(used / of 장) · dis = 「다시 보지 않기」
+const D = [
+  { n: '미가입 테스트(noplan)', plan: '7일 체험', seen: { login: 4, studio: 1, line: 2, feat: 5 }, go: { line: 1, studio: 1 }, line: { at: '11.17 12:16', by: '시험 관리자', left: 7 }, studio: { at: '11.16 07:12', by: '시험 관리자', used: 0, of: 3 }, dis: [], last: '11.17 12:16', people: 1 },
+  { n: '봄날 베이커리', plan: '7일 체험', seen: { login: 9, studio: 2, line: 3 }, go: { line: 1 }, line: { at: '11.15 10:02', by: '박서연', left: 5 }, dis: [], last: '11.17 11:40', people: 2 },
+  { n: '소담 커머스', plan: '7일 체험', seen: { login: 6, studio: 3, line: 1 }, go: { line: 1 }, line: { at: '11.10 16:30', by: '이도윤', left: 0 }, dis: [['이미지 체험 안내', 1]], last: '11.17 09:12', people: 1 },
+  { n: '누리 코스메틱', plan: '미가입', seen: { login: 4, studio: 3 }, go: { studio: 1 }, studio: { at: '11.14 13:20', by: '최하늘', used: 2, of: 3 }, dis: [], last: '11.17 10:29', people: 1 },
+  { n: '한빛 제화', plan: '미가입', seen: { login: 10, studio: 5, feat: 8 }, go: { login: 2 }, dis: [], last: '11.17 11:35', people: 4 },
+  { n: '온결 뷰티', plan: '미가입', seen: { login: 11, studio: 3, line: 1 }, go: {}, dis: [], last: '11.17 12:20', people: 2 },
+  { n: '르메종 의류', plan: '미가입', seen: { login: 2, studio: 3 }, go: {}, dis: [], last: '11.17 12:21', people: 1 },
+  { n: '모아 키친', plan: '미가입', seen: { login: 76, studio: 23 }, go: {}, dis: [['로그인 안내 창', 8], ['이미지 체험 안내', 1]], last: '11.17 12:12', people: 20 },
+  { n: '그린테이블', plan: '미가입', seen: { login: 6, studio: 1 }, go: {}, dis: [['이미지 체험 안내', 1]], last: '11.17 12:03', people: 1 },
+  { n: '데일리핏', plan: '미가입', seen: { login: 12, studio: 2 }, go: {}, dis: [], last: '11.17 11:58', people: 3 },
+  { n: '인비토', plan: '임직원', seen: { login: 13 }, go: {}, dis: [['로그인 안내 창', 3]], last: '11.17 11:32', people: 4 },
+  { n: '라온 다이닝', plan: '미가입', seen: { studio: 1 }, go: {}, dis: [], last: '11.17 11:07', people: 1 },
+  { n: '이든 에프앤씨', plan: '미가입', seen: { login: 29, studio: 6, feat: 3 }, go: {}, dis: [['로그인 안내 창', 1]], last: '11.17 10:08', people: 2 },
+  { n: '세림 패션', plan: '스타터', seen: { login: 8 }, go: {}, dis: [], last: '11.17 10:08', people: 4 },
+  { n: '제이 글로벌', plan: '미가입', seen: { login: 43, studio: 6 }, go: {}, dis: [['이미지 체험 안내', 2]], last: '11.17 09:55', people: 3 },
+  { n: '트레일 스포츠', plan: '미가입', seen: { login: 4, studio: 2 }, go: {}, dis: [], last: '11.17 09:48', people: 1 },
+];
+const GUIDE = [
+  { k: 'line', name: '7일 무료체험 배너', where: '대시보드 맨 위 입력칸', go: '켠 회사', result: (rows) => ['체험 중', rows.filter((c) => c.line).length, '곳'] },
+  { k: 'studio', name: '이미지 체험 안내', where: '로그인 뒤 안내 창', go: '신청한 회사', result: (rows) => ['쓴 장수', rows.reduce((t, c) => t + (c.studio ? c.studio.used : 0), 0), '장'] },
+  { k: 'login', name: '로그인 안내 창', where: '로그인 뒤 소개 창', go: '바로가기 누름', result: (rows) => ['다시 보지 않기', rows.filter((c) => c.dis.some((d) => d[0] === '로그인 안내 창')).length, '곳'] },
+  { k: 'feat', name: '기능 안내 창', where: 'AI 오퍼레이터의 잠긴 기능', go: '요금제 보기 누름', result: () => ['요금제 신청', 0, '곳'] },
+];
+const SEEN_NAME = { login: '로그인 안내 창', studio: '이미지 체험 안내', line: '7일 체험 배너', feat: '기능 안내 창' };
+const stageOf = (c) => (c.line ? 'line' : c.studio ? 'studio' : Object.keys(c.go).length ? 'go' : 'seen');
+const leftText = (n) => (n === 0 ? '오늘까지' : n + '일 남음');
+const daysBar = (n) => '<span class="days" aria-hidden="true">' + Array.from({ length: 7 }, (_, i) => '<i' + (i < n ? ' class="on"' : '') + '></i>').join('') + '</span>';
+const planTag = (c) => '<span class="plan' + (c.plan === '7일 체험' ? ' on' : '') + '">' + c.plan + '</span>';
+const seenText = (c) => Object.keys(SEEN_NAME).filter((k) => c.seen[k]).map((k) => SEEN_NAME[k] + ' ' + c.seen[k] + '번').join(', ');
+const disText = (c) => (c.dis.length ? '다시 보지 않기: ' + c.dis.map((d) => d[0] + ' ' + d[1] + '명').join(', ') : '');
+const trialLines = (c) => [
+  c.line ? '<p><b>7일 무료체험</b> <b class="acc">' + leftText(c.line.left) + '</b>' + daysBar(c.line.left) + '<span class="sub"> ' + c.line.at + ' 켬, ' + c.line.by + '</span></p>' : '',
+  c.studio ? '<p><b>이미지 체험 ' + c.studio.used + '/' + c.studio.of + '장</b><span class="sub"> ' + c.studio.at + ' 신청, ' + c.studio.by + '</span></p>' : '',
+].join('');
+const goLines = (c) => [
+  c.go.login ? '<p><b>로그인 안내 창에서 바로가기 ' + c.go.login + '번</b></p>' : '',
+].join('');
+
+// ── 1안 ─────────────────────────────────────────────────────────────────
+function v1(only) {
+  const rows = only ? D.filter((c) => c.seen[only]) : D;
+  const sec = (title, note, list, body) => (list.length ? '<h2 class="h2">' + title + ' <span class="num">' + list.length + '곳</span><span>' + note + '</span></h2><div class="card list">' + list.map(body).join('') + '</div>' : '');
+  const row = (c, what) => '<div class="row"><div><div class="co">' + c.n + '</div>' + planTag(c) + '</div><div class="what">' + what + '</div><div class="when num">' + c.last + '<br>' + c.people + '명</div></div>';
+  return '<div class="funnel">' + GUIDE.map((g) => {
+    const seen = D.filter((c) => c.seen[g.k]);
+    const went = D.filter((c) => c.go[g.k]);
+    const r = g.result(D);
+    return '<button type="button" class="card fn" data-only="' + g.k + '" aria-pressed="' + (only === g.k) + '"><h3>' + g.name + '</h3><p>' + g.where + '</p><div class="steps">'
+      + '<div><em>본 회사</em><b class="num">' + seen.length + '<small>곳</small></b></div>'
+      + '<div class="hit"><em>' + g.go + '</em><b class="num">' + went.length + '<small>곳</small></b></div>'
+      + '<div><em>' + r[0] + '</em><b class="num">' + r[1] + '<small>' + r[2] + '</small></b></div></div></button>';
+  }).join('') + '</div>'
+    + sec('체험 중인 회사', '', rows.filter((c) => c.line || c.studio), (c) => row(c, trialLines(c) + (disText(c) ? '<p class="dis">' + disText(c) + '</p>' : '')))
+    + sec('버튼은 눌렀지만 체험은 아닌 회사', '', rows.filter((c) => stageOf(c) === 'go'), (c) => row(c, goLines(c) + '<p class="sub">' + seenText(c) + '</p>'))
+    + sec('보기만 한 회사', '최근에 본 순서', rows.filter((c) => stageOf(c) === 'seen'), (c) => row(c, '<p>' + seenText(c) + '</p>' + (disText(c) ? '<p class="dis">' + disText(c) + '</p>' : '')));
+}
+
+// ── 2안 ─────────────────────────────────────────────────────────────────
+function v2() {
+  const cols = [
+    ['seen', '보기만 함', '안내를 봤지만 아무것도 누르지 않은 회사', (c) => ['', seenText(c)]],
+    ['go', '버튼만 누름', '바로가기나 요금제 보기를 눌렀지만 체험은 아닌 회사', (c) => ['로그인 안내 창에서 바로가기 ' + c.go.login + '번', seenText(c)]],
+    ['studio', '이미지 체험', '이미지 스튜디오 3장 체험을 신청한 회사', (c) => [c.studio.used + '/' + c.studio.of + '장 씀', c.studio.at + ' 신청, ' + c.studio.by]],
+    ['line', '7일 무료체험', '대시보드 배너로 체험 요금제를 켠 회사', (c) => [leftText(c.line.left) + daysBar(c.line.left), c.line.at + ' 켬, ' + c.line.by + (c.studio ? ' / 이미지 체험 ' + c.studio.used + '/' + c.studio.of + '장' : '')]],
+  ];
+  return '<div class="board">' + cols.map(([k, title, note, body]) => {
+    const list = D.filter((c) => stageOf(c) === k);
+    const show = k === 'seen' ? list.slice(0, 5) : list;
+    return '<div class="col' + (k === 'line' ? ' hot' : '') + '"><h3>' + title + ' <span class="num">' + list.length + '곳</span></h3><p>' + note + '</p>'
+      + show.map((c) => { const [a, b] = body(c); return '<div class="card kc"><div class="co">' + c.n + '</div>' + planTag(c) + (a ? '<div class="k1' + (k === 'line' ? ' acc' : '') + '">' + a + '</div>' : '') + '<div class="k2">' + b + '</div>' + (disText(c) ? '<div class="k2">' + disText(c) + '</div>' : '') + '</div>'; }).join('')
+      + (list.length > show.length ? '<button type="button" class="more">' + (list.length - show.length) + '곳 더 보기</button>' : '') + '</div>';
+  }).join('') + '</div>';
+}
+
+// ── 3안 ─────────────────────────────────────────────────────────────────
+function v3() {
+  const order = ['line', 'studio', 'go', 'seen'];
+  const title = { line: '7일 무료체험 중', studio: '이미지 체험 중', go: '버튼만 누름', seen: '보기만 함' };
+  const cell = (c, k) => {
+    const acted = k === 'line' && c.line ? '켬' : k === 'studio' && c.studio ? '신청' : k === 'login' && c.go.login ? '바로가기 ' + c.go.login + '번' : '';
+    return '<td>' + (acted ? '<span class="a">' + acted + '</span>' : '') + (c.seen[k] ? '<span class="s num">' + c.seen[k] + '번 봄</span>' : '') + '</td>';
+  };
+  const state = (c) => (c.line ? '<span class="a">7일 무료체험, ' + leftText(c.line.left) + '</span><span class="s">' + c.line.at + ' 켬</span>' : '')
+    + (c.studio ? '<span class="' + (c.line ? 's' : 'a') + '">이미지 체험 ' + c.studio.used + '/' + c.studio.of + '장</span>' : '');
+  let html = '<p class="legend">굵은 주황 글씨는 누른 것, 회색 숫자는 본 횟수입니다. 본 적 없는 칸은 비워 둡니다.</p><div class="card tblwrap"><table><colgroup><col style="width:210px"><col style="width:190px"><col style="width:130px"><col style="width:130px"><col style="width:130px"><col style="width:110px"><col style="width:170px"><col style="width:110px"></colgroup>'
+    + '<thead><tr><th>회사</th><th>지금 상태</th><th>7일 체험 배너</th><th>이미지 체험 안내</th><th>로그인 안내 창</th><th>기능 안내 창</th><th>다시 보지 않기</th><th>마지막 본 시각</th></tr></thead><tbody>';
+  for (const k of order) {
+    const list = D.filter((c) => stageOf(c) === k);
+    if (!list.length) continue;
+    html += '<tr class="grp"><td colspan="8">' + title[k] + ' <span class="num">' + list.length + '곳</span></td></tr>';
+    html += list.map((c) => '<tr><td><div class="co">' + c.n + '</div>' + planTag(c) + '</td><td>' + state(c) + '</td>' + cell(c, 'line') + cell(c, 'studio') + cell(c, 'login') + cell(c, 'feat')
+      + '<td>' + c.dis.map((d) => '<span class="s">' + d[0] + ' ' + d[1] + '명</span>').join('') + '</td><td class="num"><span class="s">' + c.last + '</span></td></tr>').join('');
+  }
+  return html + '</tbody></table></div>';
+}
+
+// ── 4안 ─────────────────────────────────────────────────────────────────
+// 일어난 일(4안 · 통합안이 같이 쓴다) — [날, [[시각, 회사, 한 일, 덧붙임, 누른 것인가]]]
+const EV = [
+    ['오늘 11.17', [
+      ['12:21', '르메종 의류', '이미지 체험 안내를 봤습니다', '3번째', false],
+      ['12:20', '온결 뷰티', '7일 체험 배너를 처음 봤습니다', '', false],
+      ['12:16', '미가입 테스트(noplan)', '7일 무료체험을 켰습니다', '대시보드 한 줄 배너, 시험 관리자', true],
+      ['12:12', '모아 키친', '로그인 안내 창에서 「다시 보지 않기」를 눌렀습니다', '이 회사 8명째', true],
+      ['11:35', '한빛 제화', '로그인 안내 창에서 바로가기를 눌렀습니다', '2번째', true],
+      ['09:55', '제이 글로벌', '이미지 체험 안내에서 「다시 보지 않기」를 눌렀습니다', '이 회사 2명째', true],
+    ]],
+    ['어제 11.16', [
+      ['07:12', '미가입 테스트(noplan)', '이미지 체험을 신청했습니다', '3장 가운데 0장 씀', true],
+    ]],
+    ['11.15', [
+      ['10:02', '봄날 베이커리', '7일 무료체험을 켰습니다', '대시보드 한 줄 배너, 박서연', true],
+    ]],
+    ['11.14', [
+      ['13:20', '누리 코스메틱', '이미지 체험을 신청했습니다', '3장 가운데 2장 씀', true],
+    ]],
+  ];
+function v4(all) {
+  const line = D.filter((c) => c.line);
+  const studio = D.filter((c) => c.studio);
+  return '<div class="two"><div class="card feed">'
+    + '<div style="padding:14px 0 2px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><b style="font-size:16px">일어난 일</b>'
+    + '<div class="seg" role="group" aria-label="보기"><button type="button" data-all="0" aria-pressed="' + !all + '">누른 것만</button><button type="button" data-all="1" aria-pressed="' + !!all + '">본 것까지 전부</button></div></div>'
+    + EV.map(([day, list]) => [day, list.filter((e) => all || e[4])]).filter(([, list]) => list.length).map(([day, list]) => '<div class="day">' + day + '</div>' + list.map(([t, co, what, sub, big]) => '<div class="ev"><time class="num">' + t + '</time><p><b>' + co + '</b> <span' + (what.indexOf('7일 무료체험을 켰') === 0 ? ' class="acc"' : big ? '' : ' class="sub" style="display:inline;font-size:inherit"') + '>' + what + '</span>' + (sub ? '<span class="sub">' + sub + '</span>' : '') + '</p></div>').join('')).join('')
+    + '</div><div class="rail">'
+    + '<div class="card rc"><h3>7일 무료체험 중 <span class="num">' + line.length + '곳</span></h3>' + line.map((c) => '<div class="rl"><span>' + c.n + '</span><span class="acc num">' + leftText(c.line.left) + '</span></div>').join('') + '</div>'
+    + '<div class="card rc"><h3>이미지 체험 중 <span class="num">' + studio.length + '곳</span></h3>' + studio.map((c) => '<div class="rl"><span>' + c.n + '</span><span class="num">' + c.studio.used + '/' + c.studio.of + '장</span></div>').join('') + '</div>'
+    + '<div class="card rc"><h3>안내별 <span>본 회사, 누른 회사</span></h3>' + GUIDE.map((g) => '<div class="rl"><span>' + g.name + '</span><span class="num">' + D.filter((c) => c.seen[g.k]).length + '곳, ' + D.filter((c) => c.go[g.k]).length + '곳</span></div>').join('') + '</div>'
+    + '</div></div>';
+}
+
+// ── 통합안 ───────────────────────────────────────────────────────────────
+// 위 = 단계 칸 넷(누가 어디까지 · 2안) · 가운데 = 고른 단계의 회사 목록(줄 맞춘 칸 · 3안 · 20곳씩) · 오른쪽 = 안내별 숫자(1안) + 일어난 일(4안)
+const S5 = { stage: 'line', guide: null };
+function v5() {
+  const sets = {
+    line: D.filter((c) => c.line).sort((a, b) => a.line.left - b.line.left),
+    studio: D.filter((c) => c.studio),
+    go: D.filter((c) => stageOf(c) === 'go'),
+    seen: D.filter((c) => stageOf(c) === 'seen'),
+  };
+  const STAGE = [
+    ['line', '7일 무료체험 중', '곧 끝나는 순서'],
+    ['studio', '이미지 체험 중', '최근에 신청한 순서'],
+    ['go', '버튼만 누름', '최근에 누른 순서'],
+    ['seen', '보기만 함', '최근에 본 순서'],
+  ];
+  const names = (list) => (list.length ? list.slice(0, 3).map((c) => c.n).join(', ') + (list.length > 3 ? ' 외 ' + (list.length - 3) + '곳' : '') : '아직 없습니다');
+  const g = GUIDE.find((x) => x.k === S5.guide);
+  const list = sets[S5.stage].filter((c) => !g || c.seen[g.k]);
+  const extra = (c) => [disText(c)].filter(Boolean).map((t) => '<p class="dis">' + t + '</p>').join('');
+  const body = {
+    line: (c) => '<p><b class="acc">' + leftText(c.line.left) + '</b>' + daysBar(c.line.left) + '<span class="sub"> ' + c.line.at + ' 켬, ' + c.line.by + '</span></p><p class="sub">' + (c.studio ? '이미지 체험 ' + c.studio.used + '/' + c.studio.of + '장, ' : '') + seenText(c) + '</p>' + extra(c),
+    studio: (c) => '<p><b>' + c.studio.used + '/' + c.studio.of + '장 씀</b><span class="sub"> ' + c.studio.at + ' 신청, ' + c.studio.by + '</span></p><p class="sub">' + (c.line ? '7일 무료체험 ' + leftText(c.line.left) + ', ' : '') + seenText(c) + '</p>' + extra(c),
+    go: (c) => '<p><b>로그인 안내 창에서 바로가기 ' + c.go.login + '번</b></p><p class="sub">' + seenText(c) + '</p>' + extra(c),
+    seen: (c) => '<p>' + seenText(c) + '</p>' + extra(c),
+  }[S5.stage];
+  const title = STAGE.find((s) => s[0] === S5.stage);
+  // 오른쪽 칸은 좁다 — 한 일을 짧은 말로(「7일 무료체험 켬」) · 최근 다섯 건
+  const short = (what) => what.replace(/을 켰습니다$/, ' 켬').replace(/을 신청했습니다$/, ' 신청').replace(/에서 「다시 보지 않기」를 눌렀습니다$/, ' 다시 보지 않기').replace(/에서 바로가기를 눌렀습니다$/, ' 바로가기');
+  const events = EV.flatMap(([day, evs]) => evs.filter((e) => e[4]).map((e) => [day.replace(/^(오늘|어제) /, '') + ' ' + e[0], e[1], short(e[2])])).slice(0, 5);
+  return '<div class="stages">' + STAGE.map(([k, name]) => '<button type="button" class="card st' + (k === 'line' ? ' hot' : '') + '" data-stage="' + k + '" aria-pressed="' + (S5.stage === k) + '"><h3>' + name + '</h3><div class="n num">' + sets[k].length + '<small>곳</small></div><p>' + names(sets[k]) + '</p></button>').join('') + '</div>'
+    + '<div class="main5"><div class="card list">'
+    + '<div class="lh"><div><b>' + title[1] + ' <span class="num">' + list.length + '곳</span></b>' + (g ? ' <span>' + g.name + '을 본 회사만</span> <button type="button" data-g="">걸러 보기 풀기</button>' : '') + '</div><span>' + title[2] + ', 줄을 누르면 그 회사의 기록 전부</span></div>'
+    + (list.length ? list.map((c) => '<button type="button" class="row5"><div><div class="co">' + c.n + '</div>' + planTag(c) + '</div><div class="what">' + body(c) + '</div><div class="when num">' + c.last + '<br>' + c.people + '명</div></button>').join('') : '<div class="empty">이 조건에 맞는 회사가 없습니다</div>')
+    + '<div class="pager"><span class="num">' + list.length + '곳 가운데 ' + (list.length ? '1 ~ ' + list.length : '0') + '</span><div><i class="on num">1</i></div></div>'
+    + '</div><div class="side">'
+    + '<div class="card rc"><h3>안내별 <span>누르면 그 안내를 본 회사만</span></h3>' + GUIDE.map((x) => { const r = x.result(D); return '<button type="button" class="gl" data-g="' + x.k + '" aria-pressed="' + (S5.guide === x.k) + '"><b>' + x.name + '</b><span class="num">본 <strong>' + D.filter((c) => c.seen[x.k]).length + '곳</strong> → 누름 <strong class="acc">' + D.filter((c) => c.go[x.k]).length + '곳</strong> → ' + r[0] + ' <strong>' + r[1] + r[2] + '</strong></span></button>'; }).join('') + '</div>'
+    + '<div class="card rc"><h3>최근 일어난 일 <span>누른 것만</span></h3>' + events.map(([t, co, what]) => '<div class="me"><time class="num">' + t + '</time><div><b>' + co + '</b><br><span' + (what.indexOf('7일 무료체험 켬') === 0 ? ' class="acc"' : '') + '>' + what + '</span></div></div>').join('') + '</div>'
+    + '</div></div>';
+}
+
+const MEMO = {
+  5: ['<b>통합안</b>', '길이: 고른 단계의 회사만 목록으로, 20곳씩 넘깁니다', '안내별 숫자: 오른쪽에 늘 보이고 누르면 걸러집니다', '훑기: 줄 맨 앞에 지금 상태만 굵게, 빈칸 없는 줄', '회사별: 목록이 회사 단위이고 줄을 누르면 그 회사의 기록 전부'],
+  1: ['<b>1안 깔때기와 묶음</b>', '위: 안내마다 본 회사, 누른 회사, 결과 세 숫자', '아래: 회사를 한 일로 세 묶음(체험 중, 버튼만 누름, 보기만 함)', '위 칸을 누르면 그 안내를 본 회사만 남습니다'],
+  2: ['<b>2안 단계 보드</b>', '회사를 지금 단계의 칸에 놓습니다(보기만 함에서 7일 무료체험까지)', '누가 어디까지 왔는지가 가장 빨리 보입니다', '보기만 한 회사는 다섯 곳만 보이고 나머지는 접습니다'],
+  3: ['<b>3안 정돈한 표</b>', '지금 표를 살리되 안내를 칸으로 세우고 칸 폭을 고정합니다', '누른 것은 굵은 주황, 본 횟수는 회색, 없는 칸은 빈칸', '회사를 한 줄씩 훑어 견주기에 좋습니다'],
+  4: ['<b>4안 일어난 일 순서</b>', '왼쪽: 누가 언제 무엇을 눌렀는지 시간 순서', '오른쪽: 지금 체험 중인 회사와 남은 날이 늘 보입니다', '본 것은 기본으로 숨기고 누른 것만 보여 줍니다'],
+};
+const RENDER = { 1: () => v1(null), 2: v2, 3: v3, 4: () => v4(false), 5: v5 };
+function show(n) {
+  for (const k of [1, 2, 3, 4, 5]) document.getElementById('v' + k).hidden = k !== n;
+  document.getElementById('v' + n).innerHTML = RENDER[n]();
+  document.getElementById('memo').innerHTML = MEMO[n].map((t) => '<span>' + t + '</span>').join('');
+  for (const b of document.querySelectorAll('.pick button')) b.setAttribute('aria-pressed', String(Number(b.dataset.v) === n));
+}
+document.querySelector('.pick').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { show(Number(b.dataset.v)); history.replaceState(null, '', '#' + b.dataset.v); } });
+document.getElementById('v1').addEventListener('click', (e) => {
+  const b = e.target.closest('.fn');
+  if (!b) return;
+  const only = b.getAttribute('aria-pressed') === 'true' ? null : b.dataset.only;
+  document.getElementById('v1').innerHTML = v1(only);
+});
+document.getElementById('v4').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-all]');
+  if (b) document.getElementById('v4').innerHTML = v4(b.dataset.all === '1');
+});
+document.getElementById('v5').addEventListener('click', (e) => {
+  const s = e.target.closest('button[data-stage]');
+  const g = e.target.closest('button[data-g]');
+  if (s) S5.stage = s.dataset.stage;
+  else if (g) S5.guide = S5.guide === g.dataset.g || !g.dataset.g ? null : g.dataset.g;
+  else return;
+  document.getElementById('v5').innerHTML = v5();
+});
+show(Number((location.hash || '#5').slice(1)) || 5);
+</script>
+</body>
+</html>

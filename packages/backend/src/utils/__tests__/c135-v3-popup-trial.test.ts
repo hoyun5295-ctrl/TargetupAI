@@ -597,17 +597,17 @@ describe('소스 계약 — 화면', () => {
   it('등록부 ↔ 탭 ↔ 기록: 창의 기능 id 가 등록부에 있고 · 탭은 등록부로 이름과 다음 행동을 그린다', () => {
     const reg = front('constants/login-popups.ts');
     expect(reg).toContain("{ id: 'login-promo', name: '로그인 안내 창', goLabel: '바로가기', introKeys: ['v3-scenes', 'v3-intro'] },");
-    expect(reg).toContain("{ id: STUDIO_TRIAL_POPUP_ID, name: '무료체험 안내 창', goLabel: '체험 신청', introKeys: ['studio-trial'] },");
+    // ★ 2026-11-17 C141 이름을 「이미지 체험 안내」로(7일 무료체험과 가른다 · Harold 「무료체험이 누구인지도 모르겠고」)
+    expect(reg).toContain("{ id: STUDIO_TRIAL_POPUP_ID, name: '이미지 체험 안내', goLabel: '체험 신청', introKeys: ['studio-trial'] },");
     expect(reg).toContain("export const STUDIO_TRIAL_POPUP_ID = 'studio-trial';");
     expect(front('components/AiOperatorLoginPromo.tsx')).toContain("export const LOGIN_PROMO_FEATURE_ID = 'login-promo';");
     for (const id of ['login-promo', 'studio-trial']) expect(id).toMatch(/^[a-z][a-z-]{1,39}$/);   // 기록 주소가 받는 id 형식(utils/feature-interest FEATURE_ID_RE)
     expect(back('utils/feature-interest.ts')).toContain('const FEATURE_ID_RE = /^[a-z][a-z-]{1,39}$/;');
     const tab = front('components/admin/FeatureInterestTab.tsx');
-    // ★ 2026-11-16 C138 탭 = 업체 표 하나(무료체험은 그 줄의 칸 · 기능은 단추로 거른다) · 안내 창도 기능 단추에 등록부 이름으로 나온다
-    expect(tab).toContain("import { loginPopupOf } from '../../constants/login-popups';");
-    expect(tab).toContain('{featureName(f.featureId)} <b className="tabular-nums">{f.companies}</b>');
-    expect(tab).toContain('{c.trial ? (');
-    expect(tab).toContain("{data && !data.trialsKnown ? '알 수 없음' : '없음'}");
+    // ★ 2026-11-17 C141 탭 = 단계 칸 · 회사 목록 · 안내별(등록부 차례 · 이름 · 주 버튼 이름) · 이미지 체험 단계는 신청 목록을 읽었을 때만 수를 그린다
+    expect(tab).toContain("import { loginPopupOf, LINE_TRIAL_BANNER_ID } from '../../constants/login-popups';");
+    expect(tab).toContain('const guides = useMemo(() => guideStats(all), [all]);');
+    expect(tab).toContain("const stageKnown = (k: InterestStage) => !data || (k === 'line' ? data.lineTrialsKnown : k === 'studio' ? data.trialsKnown : data.lineTrialsKnown && data.trialsKnown);");
     // 서버: 신청 업체 목록은 관심 기록과 따로 읽고 · 못 읽어도 탭의 나머지는 그대로(그 칸만 「알 수 없음」)
     const fi = back('utils/feature-interest.ts');
     expect(fi).toContain('const trials = await loadStudioTrials().catch((err: any) => {');

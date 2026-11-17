@@ -16,6 +16,7 @@ import { isActivePaidPlan, loadPlanContext } from './plan-guard';
 import { precheckPeriodStartSql } from './precheck-usage';
 import { loadStudioTrials } from './studio-trial';   // ★ 2026-11-15 C135 무료체험 신청 업체
 import { loadIntroDismissals, type IntroDismissalRow } from './v3-intro';   // ★ 2026-11-16 C138 「다시 보지 않기」를 누른 계정
+import { loadLineTrials, type LineTrialListRow, type LineTrialSource } from './line-trial';   // ★ 2026-11-17 C141 7일 무료체험(지급 원장)
 
 // ★ 2026-10-06 go = 로그인 안내 창(featureId 'login-promo')의 「지금 바로가기」 — 요금제 보기와 다른 행동이라 다른 값으로 남긴다
 export const FEATURE_INTEREST_ACTIONS = { open: 'plan_feature_open', pricing: 'plan_feature_pricing', go: 'plan_feature_go' } as const;
@@ -25,6 +26,16 @@ export const FEATURE_INTEREST_TARGET = 'plan_feature';
 export const FEATURE_SEEN_RATE = { windowMs: 60 * 1000, max: 30 } as const;
 /** 업체별 시간순 기록 개수(상세 표시용 · 집계는 이 상한과 무관하게 전부 센다) */
 const EVENTS_PER_COMPANY = 30;
+/**
+ * ★ 2026-11-17 C141 업체별 최근 누름 기록 개수 = 화면 「최근 일어난 일」 건수(FeatureInterestTab 의 recentActivity(…, 6)).
+ *   열람을 빼고 상세 창의 30건과 따로 읽는다(상세 기록에서 고르면 누름 뒤 열람 30건에 밀린다 · Codex 구현 1R).
+ *   체험 단추마다(7일 체험 배너 · 이미지 체험 안내) · 그 밖 누름을 따로 센다 — 화면은 결과(켬 · 신청)가 있는 회사의 그 단추 누름을 결과 한 줄로 대신하므로,
+ *   묶음을 섞으면 가려질 누름이 상한을 차지해 남길 누름을 밀어낸다(Codex 구현 2R · 3R). 한 묶음 안의 누름은 다 보이거나 다 가려진다.
+ *   묶음마다 이 수면 전체 최근 이 수만큼이 빠지지 않는다(한 회사의 한 묶음이 그보다 많이 들어갈 수 없다).
+ */
+const CLICKS_PER_COMPANY = 6;
+/** 체험 안내의 주 버튼(누르면 결과가 남는다 = 7일 체험 지급 · 이미지 체험 신청) — 화면 등록부 LINE_TRIAL_BANNER_ID · STUDIO_TRIAL_POPUP_ID 와 같은 값(시험이 대조) */
+export const TRIAL_BUTTON_FEATURE_IDS = ['line-trial', 'studio-trial'] as const;
 const PLAN_CONCURRENCY = 4;
 /** 기능 id = 화면 원장(plan-feature-intros.ts)의 id 형식 */
 const FEATURE_ID_RE = /^[a-z][a-z-]{1,39}$/;
@@ -71,19 +82,24 @@ export interface FeatureInterestCompanyRow {
   companyName: string;
   planName: string;
   subscribed: boolean;
-  features: Array<{ featureId: string; opens: number }>;
+  /** 안내(기능)마다 본 수 · ★ 2026-11-17 C141 누른 수(그 안내의 주 버튼 · 요금제 보기 = 화면의 「안내별 누른 회사」) */
+  features: Array<{ featureId: string; opens: number; clicks: number }>;
   pricingClicks: number;
   /** 로그인 안내 창 「지금 바로가기」 */
   goClicks: number;
   lastAt: string;
   users: Array<{ name: string; loginId: string }>;
   events: Array<{ at: string; event: FeatureInterestEvent; featureId: string; userName: string }>;
+  /** ★ 2026-11-17 C141 최근 누름 기록(요금제 보기 · 주 버튼 · 열람 제외 · 회사당 최근 CLICKS_PER_COMPANY 건) */
+  recentClicks: Array<{ at: string; event: Exclude<FeatureInterestEvent, 'open'>; featureId: string; userName: string }>;
   /** ★ 2026-11-16 C138 이 조회 기간에 본 기록이 있는가 — false = 무료체험 신청 · 「다시 보지 않기」 때문에 올라온 줄(본 수는 0) */
   seen: boolean;
   /** ★ C138 이미지 스튜디오 무료체험(신청한 사람 · 시각 · 만든 수 / 받은 수) · 신청하지 않았으면 null */
   trial: { requestedBy: string; requestedAt: string; used: number; granted: number } | null;
   /** ★ C138 「다시 보지 않기」를 누른 기록(어느 창 · 누가 · 언제) · 최근 순 */
   dismissed: Array<{ introKey: string; at: string; userName: string; loginId: string }>;
+  /** ★ 2026-11-17 C141 7일 무료체험(지급 원장 한 줄 · 길 · 켠 시각 · 켠 사람 · 살아 있는가 · 남은 날) · 받은 적 없으면 null */
+  lineTrial: { source: LineTrialSource; grantedAt: string; grantedBy: string; alive: boolean; daysLeft: number | null; endsAt: string | null } | null;
 }
 
 export interface FeatureInterestData {
@@ -98,6 +114,8 @@ export interface FeatureInterestData {
    */
   trialsKnown: boolean;
   dismissalsKnown: boolean;
+  /** ★ C141 7일 무료체험 목록을 읽었는가(false = 화면은 그 단계를 「읽지 못했습니다」로) */
+  lineTrialsKnown: boolean;
 }
 
 /**
@@ -112,7 +130,18 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
   if (q.period !== 'all') where += ` AND al.created_at >= ${precheckPeriodStartSql(q.period)}`;
   const from = `FROM audit_logs al LEFT JOIN users u ON u.id = al.user_id WHERE ${where}`;
 
-  const [agg, people, recent] = await Promise.all([
+  /**
+   * 회사마다 최근 limit 건 — 상세 창의 시간순 기록(열람 포함) · ★ C141 최근 누름(열람 제외 · 체험 단추마다 · 그 밖을 따로 센다 · $4 = 체험 단추 id).
+   */
+  const recentSql = (limit: number, onlyClicks: boolean) =>
+    `SELECT company_id, action, created_at, feature_id, user_name FROM (
+       SELECT ${companyExpr} AS company_id, al.action, al.created_at, al.details->>'featureId' AS feature_id,
+              COALESCE(u.name, '') AS user_name,
+              ROW_NUMBER() OVER (PARTITION BY ${companyExpr}${onlyClicks ? ", CASE WHEN al.action = $3 AND al.details->>'featureId' = ANY($4::text[]) THEN al.details->>'featureId' ELSE '' END" : ''} ORDER BY al.created_at DESC) AS rn
+         ${from}${onlyClicks ? ' AND al.action IN ($2, $3)' : ''}
+     ) t WHERE rn <= ${limit}
+     ORDER BY created_at DESC`;
+  const [agg, people, recent, clicks] = await Promise.all([
     query(
       `SELECT ${companyExpr} AS company_id, al.details->>'featureId' AS feature_id, al.action,
               COUNT(*)::int AS n, MAX(al.created_at) AS last_at
@@ -121,27 +150,25 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
       params,
     ),
     query(`SELECT DISTINCT ${companyExpr} AS company_id, u.login_id, COALESCE(u.name, '') AS user_name ${from} AND u.id IS NOT NULL`, params),
-    query(
-      `SELECT company_id, action, created_at, feature_id, user_name FROM (
-         SELECT ${companyExpr} AS company_id, al.action, al.created_at, al.details->>'featureId' AS feature_id,
-                COALESCE(u.name, '') AS user_name,
-                ROW_NUMBER() OVER (PARTITION BY ${companyExpr} ORDER BY al.created_at DESC) AS rn
-           ${from}
-       ) t WHERE rn <= ${EVENTS_PER_COMPANY}
-       ORDER BY created_at DESC`,
-      params,
-    ),
+    query(recentSql(EVENTS_PER_COMPANY, false), params),
+    query(recentSql(CLICKS_PER_COMPANY, true), [...params, [...TRIAL_BUTTON_FEATURE_IDS]]),
   ]);
+  const eventOf = (row: any) => ({
+    at: new Date(row.created_at).toISOString(),
+    event: row.action === FEATURE_INTEREST_ACTIONS.pricing ? 'pricing' as const : row.action === FEATURE_INTEREST_ACTIONS.go ? 'go' as const : 'open' as const,
+    featureId: String(row.feature_id || ''),
+    userName: String(row.user_name || ''),
+  });
 
-  type Acc = FeatureInterestCompanyRow & { openMap: Map<string, number>; sortAt: string };
+  type Acc = FeatureInterestCompanyRow & { featureMap: Map<string, { opens: number; clicks: number }>; sortAt: string };
   const byCompany = new Map<string, Acc>();
   const accOf = (companyId: string): Acc => {
     let a = byCompany.get(companyId);
     if (!a) {
       a = {
         companyId, companyName: '(회사 정보 없음)', planName: '', subscribed: false, features: [], pricingClicks: 0, goClicks: 0,
-        lastAt: new Date(0).toISOString(), users: [], events: [], openMap: new Map(),
-        seen: false, trial: null, dismissed: [], sortAt: new Date(0).toISOString(),
+        lastAt: new Date(0).toISOString(), users: [], events: [], recentClicks: [], featureMap: new Map(),
+        seen: false, trial: null, dismissed: [], lineTrial: null, sortAt: new Date(0).toISOString(),
       };
       byCompany.set(companyId, a);
     }
@@ -151,13 +178,17 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     const a = accOf(String(row.company_id));
     const featureId = String(row.feature_id || '');
     const n = Number(row.n) || 0;
+    const f = a.featureMap.get(featureId) || { opens: 0, clicks: 0 };
     if (row.action === FEATURE_INTEREST_ACTIONS.pricing) {
       a.pricingClicks += n;
+      f.clicks += n;
     } else if (row.action === FEATURE_INTEREST_ACTIONS.go) {
       a.goClicks += n;
+      f.clicks += n;
     } else {
-      a.openMap.set(featureId, (a.openMap.get(featureId) || 0) + n);
+      f.opens += n;
     }
+    a.featureMap.set(featureId, f);
     const at = new Date(row.last_at).toISOString();
     if (at > a.lastAt) a.lastAt = at;
     a.seen = true;
@@ -166,15 +197,15 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     const a = byCompany.get(String(row.company_id));
     if (a && row.login_id) a.users.push({ name: String(row.user_name || ''), loginId: String(row.login_id) });
   }
+  for (const row of clicks.rows) {
+    const a = byCompany.get(String(row.company_id));
+    const e = eventOf(row);
+    if (a && e.event !== 'open') a.recentClicks.push({ ...e, event: e.event });
+  }
   for (const row of recent.rows) {
     const a = byCompany.get(String(row.company_id));
     if (!a) continue;
-    a.events.push({
-      at: new Date(row.created_at).toISOString(),
-      event: row.action === FEATURE_INTEREST_ACTIONS.pricing ? 'pricing' : row.action === FEATURE_INTEREST_ACTIONS.go ? 'go' : 'open',
-      featureId: String(row.feature_id || ''),
-      userName: String(row.user_name || ''),
-    });
+    a.events.push(eventOf(row));
   }
 
   // ★ C135 무료체험 신청 업체 · ★ C138 「다시 보지 않기」를 누른 계정 — 못 읽어도 탭의 나머지는 그대로(그 칸만 비운다).
@@ -187,11 +218,17 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
     console.error('[feature-interest] 다시 보지 않기 목록 조회 실패:', err?.message || err);
     return null;
   });
+  // ★ 2026-11-17 C141 7일 무료체험(지급 원장) — 같은 규약(기간과 무관한 지금 상태 · 못 읽으면 그 단계만 「모름」)
+  const lineTrials: LineTrialListRow[] | null = await loadLineTrials().catch((err: any) => {
+    console.error('[feature-interest] 7일 무료체험 목록 조회 실패:', err?.message || err);
+    return null;
+  });
   for (const t of trials || []) accOf(t.companyId).trial = { requestedBy: t.requestedBy, requestedAt: t.requestedAt, used: t.used, granted: t.granted };
   for (const d of dismissals || []) accOf(d.companyId).dismissed.push({ introKey: d.introKey, at: d.at, userName: d.userName, loginId: d.loginId });
-  // 줄 순서 = 가장 최근에 일어난 일(본 시각 · 신청 시각 · 누른 시각) 순 — 본 기록이 없는 줄의 lastAt 은 처음 값(1970) 그대로다
+  for (const t of lineTrials || []) accOf(t.companyId).lineTrial = { source: t.source, grantedAt: t.grantedAt, grantedBy: t.grantedBy, alive: t.alive, daysLeft: t.daysLeft, endsAt: t.endsAt };
+  // 줄 순서 = 가장 최근에 일어난 일(본 시각 · 신청 시각 · 켠 시각 · 누른 시각) 순 — 본 기록이 없는 줄의 lastAt 은 처음 값(1970) 그대로다
   for (const a of byCompany.values()) {
-    a.sortAt = [a.lastAt, a.trial?.requestedAt || '', ...a.dismissed.map((d) => d.at)].reduce((m, x) => (x > m ? x : m));
+    a.sortAt = [a.lastAt, a.trial?.requestedAt || '', a.lineTrial?.grantedAt || '', ...a.dismissed.map((d) => d.at)].reduce((m, x) => (x > m ? x : m));
   }
 
   const accs = Array.from(byCompany.values());
@@ -214,10 +251,11 @@ export async function loadFeatureInterest(q: FeatureInterestQuery): Promise<Feat
 
   const companies: FeatureInterestCompanyRow[] = kept.map((a) => ({
     companyId: a.companyId, companyName: a.companyName, planName: a.planName, subscribed: a.subscribed,
-    features: Array.from(a.openMap.entries()).map(([featureId, opens]) => ({ featureId, opens })).sort((x, y) => y.opens - x.opens),
-    pricingClicks: a.pricingClicks, goClicks: a.goClicks, lastAt: a.lastAt, users: a.users, events: a.events,
-    seen: a.seen, trial: a.trial, dismissed: a.dismissed,
+    features: Array.from(a.featureMap.entries()).map(([featureId, f]) => ({ featureId, opens: f.opens, clicks: f.clicks }))
+      .sort((x, y) => y.opens - x.opens || y.clicks - x.clicks || (x.featureId < y.featureId ? -1 : 1)),
+    pricingClicks: a.pricingClicks, goClicks: a.goClicks, lastAt: a.lastAt, users: a.users, events: a.events, recentClicks: a.recentClicks,
+    seen: a.seen, trial: a.trial, dismissed: a.dismissed, lineTrial: a.lineTrial,
   }));
 
-  return { trialsKnown: trials !== null, dismissalsKnown: dismissals !== null, companies };
+  return { trialsKnown: trials !== null, dismissalsKnown: dismissals !== null, lineTrialsKnown: lineTrials !== null, companies };
 }

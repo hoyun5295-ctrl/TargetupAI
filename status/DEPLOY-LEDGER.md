@@ -84,7 +84,8 @@
 | C137 | 7e186fd7 |
 | C138 | 미커밋 |
 | C139 | 미커밋 |
-| C140 | 미커밋 |
+| C140 | e3ecc4b9 |
+| C141 | 미커밋 |
 
 ## §1 대기
 
@@ -2616,7 +2617,7 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: C140-P0 · C140-DDL-1(서버에서 먼저 실행하고 결과 칸을 채운 뒤 push) · 설계 Codex 3R · 구현 Codex 2R approve(1117) · 커밋(Harold · 경로 = scratch/c140/paths.txt · 다른 세션의 미커밋 줄과 한 파일인 문서 둘(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md)은 이 카드 줄만 = scratch/c140/docs.patch(git apply --cached) · 문안 = scratch/c140/msg.txt · 이 카드의 코드 파일은 다른 카드의 미커밋 파일과 겹치지 않는다 · tp-push 는 쓰지 않는다) → push(이 커밋만 · push 전 검사의 실 PG 통과 기록 = 1117 11:19 작업 트리 전체 89파일 836건 통과 · 다른 카드 시험 c133-split.pg 261줄이 실행마다 갈려 통과 기록이 안 찍히면 다시 돌린다)
 - 기대: 설계서 docs/2026-11-17-line-trial-banner-design.md §4 · 미가입 고객사 관리자의 대시보드 = 옛 진단 띠 자리에 흰 배너(「이번에 알릴 것, 한 줄만 적어 보세요」 · 입력칸 · 「7일 무료로 써 보기」) · 진단 초대 창이 뜨지 않는다 · 한 줄을 적고 누르면 7일 무료체험이 켜지고(진단 체험과 같은 지급 원장 = 회사당 한 번) 직접발송 창 + AI 다듬기 창이 그 한 줄로 열려 초안이 바로 나온다 · 체험 중인 회사 = 같은 배너에 「무료체험 N일 남음」 · 「문자 초안 받기」 · 체험을 이미 쓴 회사 · 유료 회사 · 담당자 계정 = 배너 없음 · 배너를 누르지 않는 회사 = 동작 변화 0 · 발송 · 과금 · 정산 코드 무수정 · 문진 창(도움말의 「이 화면 열기」 · ?open=diagnosis)과 공개 진단은 그대로
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep runLineTrialStart = dist/utils/line-trial.js 정의 · dist/routes/marketing-diagnosis.js 호출 · lineBannerColumnsSql ≥ 1(두 파일) · curl -s -o /dev/null -w "%{http_code}" -X POST https://hanjul.ai/api/marketing-diagnosis/trial/start = 401(로그인 없이) · 재시작 뒤 에러 로그에 does not exist · null value in column 0
-- 결과: (대기)
+- 결과: 1117 12:07 배포 끝(Harold 실행 · 커밋 e3ecc4b9 · 26 files · 앞서 C140-P0 · C140-DDL-1 · push 5b2e7690..e3ecc4b9 = pre-push 통과 · 실릴 커밋 = 이 커밋 하나) · 서버 pull 5b2e7690..e3ecc4b9 Fast-forward 26 files · HEAD e3ecc4b9 · 백엔드 build:safe → 프론트 build:safe → pm2 reload targetup-backend(세 줄을 이어 실행 · 빌드 출력의 [verify-dist] 줄은 받지 못함 = 미확인 · 아래 dist 실측으로 봄) · dist/app.js 12:06 · 프론트 dist/index.html 12:07 · dist grep runLineTrialStart = line-trial.js 2 · marketing-diagnosis.js 1 · lineBannerColumnsSql = 3 · 2 · online · script path dist/app.js · restarts 12 · unstable restarts 0 · uptime 7s → 3m(재시작 횟수 그대로) · curl POST /api/marketing-diagnosis/trial/start = 401 · ★ 재시작은 적재 0건 한 줄 없이 돌았다 → 재시작 7초 뒤 loading=0 · 최근 45분 캠페인 = sent · completed 64 · sent · scheduled 6(failed · preparing · queued · processing 0행) = 재시작에 걸린 적재 없음 · 에러 로그 재시작 뒤 = 12:08:56 [demo-data] 합성 안내 한 줄(09:19 · 09:50 에도 있던 종류) = 새 종류 0 · does not exist · null value in column 0 / 기록만 = 에러 로그 09:16:11 uuid 파싱 오류(routine string_to_uuid · uuid.c 133) 한 건 = 이 배포 전 · 이 카드와 무관 · 원인 미확인 / 미확인 = 화면 · 실제 지급(C140-S1)
 
 ### C140-S1 · 실측(요금제 미가입 시험 계정 · 고객사 관리자 · 체험 지급 이력이 없는 회사 · 슈퍼관리자 ceo)
 - 카드: C140
@@ -2624,6 +2625,22 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: C140-H1 · 지급 이력이 없는 미가입 시험 회사의 관리자 계정(SELECT 로 그 회사의 diagnosis_trial_grants 0행을 먼저 본다 · 있으면 다른 시험 회사)
 - 기대: ① 대시보드에 흰 배너(진단 초대 창 없음) ② 빈 채로 누르면 「한 줄을 먼저 적어 주세요.」 ③ 한 줄을 적고 「7일 무료로 써 보기」 → 「7일 무료체험이 열렸어요.」 알림 · 직접발송 창 + AI 다듬기 창(원문 = 적은 한 줄 · 초안이 바로 나옴 · 요금제 변경 알림이 그 창을 덮지 않음) ④ 안 하나 적용 = 본문에 들어감 ⑤ 직접발송 창을 닫으면 「무료체험이 활성화되었습니다」 알림 한 번 ⑥ 배너가 「무료체험 7일 남음」 · 「문자 초안 받기」로 바뀜 · 다시 한 줄을 넣고 누르면 같은 길(체험이 한 번 더 켜지지 않음) ⑦ 같은 회사의 담당자 계정에는 배너 없음 ⑧ 슈퍼관리자 「기능 관심 업체」에 「대시보드 한 줄 배너」의 뜸 · 누름
 - 확인: SELECT g.company_id, g.diagnosis_id IS NULL AS no_diagnosis, g.granted_days, g.granted_by, c.trial_expires_at, UPPER(p.plan_code) AS plan FROM diagnosis_trial_grants g JOIN companies c ON c.id = g.company_id LEFT JOIN plans p ON p.id = c.plan_id WHERE g.granted_by LIKE 'line-banner:%' ORDER BY g.created_at DESC LIMIT 3; = 그 회사 한 줄 · no_diagnosis t · granted_days 7 · plan TRIAL · 만료 = 지급 7일 뒤 · ⑥ 뒤에도 한 줄 그대로 · AI 다듬기 1회 = 체험 크레딧에서 1 차감(SELECT ai_credits_base_remaining FROM companies WHERE id = '그 회사'; = 749) · 문자는 보내지 않는다(발송 0)
+- 결과: 1117 12:16 Harold(계정 noplan = 「미가입 테스트(noplan)」 · 관리자 · 실측 전 SELECT = FREE · has_grant f · base 0 · 서버 판 e3ecc4b9) 실제 지급 1건 = 확인 SELECT 한 줄 · company e9846b58 · no_diagnosis t · granted_days 7 · granted_by line-banner:6c78f52f…(사용자 id) · trial_expires_at 2026-11-24 03:16:12(세션 시간대 UTC = 서울 11-24 12:16 = 지급 7일 뒤) · plan TRIAL · base 749(체험 크레딧 750 에서 AI 다듬기 생성 1회 차감 = 넘김의 자동 생성이 운영에서 한 번 돌았다) / ⑧ 뜸 · 누름 기록 = SELECT(audit_logs · featureId line-trial) plan_feature_go 1(03:16:12 UTC = 지급과 같은 시각) · plan_feature_open 3(03:08 ~ 03:20 UTC) + Harold 화면(슈퍼관리자 「기능 관심 업체」 12:2x 캡처) = 기능 거르기에 「대시보드 한 줄 배너 2」 · noplan 줄에 「대시보드 한 줄 배너 2」 · 우주덕유산리조트 줄에 「대시보드 한 줄 배너 1」(= 배포 뒤 실제 미가입 고객사 한 곳에 떴다) / 화면 ① ~ ⑥ = 다름 보고 없음(Harold 가 번호별로 답하지는 않음 · SELECT 로 본 것은 지급 · 차감 · 기록까지) / 같은 캡처에서 새 접수 = 「기능 관심 업체」 화면이 정신없다 · 무료체험이 누구인지 모르겠다(이 카드 밖 · 설계안부터) / ★ noplan = 1124 12:16 까지 체험 요금제 · 그 뒤 미가입으로 돌아가도 제안 모양 배너는 다시 뜨지 않는다(회사당 한 번 소진)
+
+### C141-H1 · 한줄로 배포(슈퍼관리자 「기능 관심 업체」 화면 개편 통합안 · 백엔드 집계 + 프론트 탭 · DDL 0 · ENV 0)
+- 카드: C141
+- 단계: 한줄로 배포
+- 선행: Codex 구현 4R approve(1117) · 커밋(Harold · 경로 = scratch/c141/paths.txt · 다른 세션의 미커밋 줄과 한 파일인 문서 둘(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md)은 이 세션 줄만 = scratch/c141/docs.patch(git apply --cached · C140 배포 · 실측 결과 줄 포함) · 문안 = scratch/c141/msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만 · push 전 검사의 실 PG 통과 기록 = 1117 13:5x 작업 트리 전체 90파일 842건 통과 · 단위 전체 827파일 13,392건 통과 14:00)
+- 기대: 설계 docs/2026-11-17-c141-feature-interest-redesign-design.md §2 · 슈퍼관리자 「기능 관심 업체」 = 맨 위 단계 칸 넷(7일 무료체험 중 · 이미지 체험 신청 · 버튼만 누름 · 보기만 함 · 회사 수와 앞 세 곳 이름) · 처음 = 7일 무료체험 중 회사 목록(곧 끝나는 순 · 남은 날 · 켠 날 · 켠 길과 사람) · 오른쪽 안내별(본 → 누름 → 결과) · 최근 일어난 일 · 줄을 누르면 상세 창 · 관리자 본문 폭 안(화면 끝까지 늘이지 않음) · 고객 화면 · 발송 · 과금 무접촉
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep loadLineTrials = dist/utils/line-trial.js 정의 · dist/utils/feature-interest.js 호출 · TRIAL_BUTTON_FEATURE_IDS ≥ 1(dist/utils/feature-interest.js) · 재시작 뒤 에러 로그에 [feature-interest] 줄 0 · does not exist 0
+- 결과: (대기)
+
+### C141-S1 · 화면 확인(Harold · 슈퍼관리자 ceo · 「기능 관심 업체」)
+- 카드: C141
+- 단계: 사후
+- 선행: C141-H1
+- 기대: ① 7일 무료체험 중 칸에 noplan(1124 12:16 까지 · 「7일 남음」 → 날이 지나며 줄어듦) ② 이미지 체험 신청 칸 = 그동안 신청한 회사 ③ 안내별 「7일 무료체험 배너」 본 · 누름 수가 원장 C140-S1 의 audit_logs 수와 맞음 ④ 보기만 함 칸을 누르면 회사 목록 · 20곳씩 넘김 ⑤ 줄을 누르면 상세 창 · ESC 로 닫힘 ⑥ 글자가 칸을 벗어나지 않음
+- 확인: 결과(날짜 · 다름이면 캡처)
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

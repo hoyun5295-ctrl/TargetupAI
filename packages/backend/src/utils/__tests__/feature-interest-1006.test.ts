@@ -88,6 +88,17 @@ describe('집계 — 회사 · 기능별', () => {
         for (const r of raw) m.set(`${r.company_id}|${r.login_id}`, { company_id: r.company_id, login_id: r.login_id, user_name: r.user_name });
         return { rows: Array.from(m.values()) };
       }
+      // ★ C141 최근 누름(열람 제외 · 회사마다 체험 단추마다 · 그 밖을 6건씩) — 상세 기록 30건과 따로 읽는 문장
+      if (q.includes('ROW_NUMBER()') && q.includes('AND al.action IN ($2, $3)')) {
+        const byC = new Map<string, any[]>();
+        for (const r of [...raw].filter((x) => x.action !== 'plan_feature_open').sort((x, y) => (x.created_at < y.created_at ? 1 : -1))) {
+          const key = `${r.company_id}|${r.action === 'plan_feature_go' && ['line-trial', 'studio-trial'].includes(r.feature_id) ? r.feature_id : ''}`;
+          const list = byC.get(key) || [];
+          if (list.length < 6) list.push(r);
+          byC.set(key, list);
+        }
+        return { rows: Array.from(byC.values()).flat().sort((x, y) => (x.created_at < y.created_at ? 1 : -1)) };
+      }
       if (q.includes('ROW_NUMBER()')) {
         const byC = new Map<string, any[]>();
         for (const r of [...raw].sort((x, y) => (x.created_at < y.created_at ? 1 : -1))) {
@@ -97,6 +108,7 @@ describe('집계 — 회사 · 기능별', () => {
         }
         return { rows: Array.from(byC.values()).flat().sort((x, y) => (x.created_at < y.created_at ? 1 : -1)) };
       }
+      if (q.includes('FROM diagnosis_trial_grants')) return { rows: [] };   // ★ C141 7일 무료체험 목록(이 파일의 회사는 받은 적 없음)
       if (q.includes('FROM companies')) {
         const m = new Map<string, any>();
         for (const r of raw) m.set(r.company_id, { id: r.company_id, company_name: r.company_name });
@@ -110,7 +122,7 @@ describe('집계 — 회사 · 기능별', () => {
   it('업체별이 기록과 맞는다 · 서버는 요약 · 기능별 수를 따로 내지 않는다', async () => {
     fakeDb(rows);
     const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all' }));
-    expect(Object.keys(d).sort()).toEqual(['companies', 'dismissalsKnown', 'trialsKnown']);
+    expect(Object.keys(d).sort()).toEqual(['companies', 'dismissalsKnown', 'lineTrialsKnown', 'trialsKnown']);
     expect(d.companies).toHaveLength(2);
     const beauty = d.companies.find((c) => c.companyId === 'c-free')!;
     expect(beauty.companyName).toBe('표본뷰티');
@@ -118,7 +130,7 @@ describe('집계 — 회사 · 기능별', () => {
     expect(beauty.pricingClicks).toBe(1);
     expect(beauty.lastAt).toBe('2026-10-06T07:42:00.000Z');
     expect(beauty.users.map((u) => u.loginId).sort()).toEqual(['beauty01', 'beauty02']);
-    expect(beauty.features[0]).toEqual({ featureId: 'auto-marketing', opens: 2 });
+    expect(beauty.features[0]).toEqual({ featureId: 'auto-marketing', opens: 2, clicks: 1 });   // ★ C141 그 안내에서 누른 수(요금제 보기 1)
     expect(beauty.events[0].event).toBe('pricing');
     expect(d.companies.find((c) => c.companyId === 'c-paid')!.planName).toBe('스타터');
     expect(d.companies[0].companyId).toBe('c-free'); // 마지막 본 순
@@ -136,7 +148,10 @@ describe('집계 — 회사 · 기능별', () => {
     expect(beauty.events).toHaveLength(30);
     expect(beauty.events.some((e) => e.featureId === 'journeys')).toBe(false); // 상세에는 없어도
     expect(beauty.pricingClicks).toBe(1);                                       // 수에는 있다
-    expect(beauty.features).toEqual([{ featureId: 'image-studio', opens: 35 }]);
+    // ★ C141 Codex 구현 1R — 최근 누름은 열람을 빼고 따로 읽어 35건 열람 뒤에도 남는다(화면 「최근 일어난 일」의 원천)
+    expect(beauty.recentClicks).toEqual([{ at: '2026-10-01T00:00:00.000Z', event: 'pricing', featureId: 'journeys', userName: '김담당' }]);
+    // ★ C141 기능 줄 = 본 수 + 누른 수 · 본 기록이 없는 안내의 누름(오래된 요금제 보기)도 줄에 남는다(안내별 「누른 회사」에서 빠지지 않게)
+    expect(beauty.features).toEqual([{ featureId: 'image-studio', opens: 35, clicks: 0 }, { featureId: 'journeys', opens: 0, clicks: 1 }]);
   });
 
   it('요금제 미가입만 · 기간 전체는 시각 조건이 없다 · ★ C138 기능 조건은 서버에 없다(화면이 거른다 · 보내도 무시)', async () => {
@@ -157,7 +172,7 @@ describe('집계 — 회사 · 기능별', () => {
       { action: 'plan_feature_open', created_at: '2026-10-06T09:00:00Z', feature_id: 'login-promo', company_id: 'c-free', user_name: '김담당', login_id: 'beauty01', company_name: '표본뷰티' },
     ]);
     const d = await loadFeatureInterest(parseFeatureInterestQuery({ period: 'all' }));
-    expect(d.companies[0].features).toEqual([{ featureId: 'login-promo', opens: 1 }]);
+    expect(d.companies[0].features).toEqual([{ featureId: 'login-promo', opens: 1, clicks: 1 }]);
     expect(d.companies[0].goClicks).toBe(1);
     expect(d.companies[0].pricingClicks).toBe(0);
     expect(d.companies[0].events[0].event).toBe('go');
@@ -167,7 +182,7 @@ describe('집계 — 회사 · 기능별', () => {
     fakeDb(rows);
     await loadFeatureInterest(parseFeatureInterestQuery({ period: '7d' }));
     const sqls = mockQuery.mock.calls.map((c) => String(c[0]));
-    expect(sqls.filter((q) => q.includes('al.created_at >=')).length).toBe(3);
+    expect(sqls.filter((q) => q.includes('al.created_at >=')).length).toBe(4);   // 묶음 · 사람 · 상세 기록 · ★ C141 최근 누름
     expect(sqls.some((q) => /LIMIT \$/.test(q))).toBe(false);
   });
 
@@ -341,52 +356,40 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
 
 /**
  * ★ 2026-10-07 업체별 표 = 한 줄 · 상세 창(Harold 목업 2안 「회사명부터 다 깨진다 · 클릭하면 모달」)
- * ★ 2026-11-16 C138 = 화면 가로를 다 쓰고 아무 칸도 자르지 않는다(Harold 「화면 가로로 풀로 해서 짤리는거 없도록」 · 말줄임 · 말풍선을 걷었다)
+ * ★ 2026-11-16 C138 = 아무 칸도 자르지 않는다(말줄임 · 말풍선을 걷었다)
+ * ★ 2026-11-17 C141 통합안(Harold 「정신없다 · 칸도 벗어난다」) = 표 대신 회사 목록 · 화면 끝까지 늘이던 폭(FULL_BLEED)을 걷고 본문 폭 안에서 줄을 바꾼다
  */
-describe('업체별 표 — 자르지 않는다 · 상세 창', () => {
+describe('회사 목록 — 자르지 않는다 · 본문 폭 안 · 상세 창', () => {
   const tab = front('components/admin/FeatureInterestTab.tsx');
   const code = tab.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
-  const table = tab.slice(tab.indexOf('<table className={`w-full text-sm'), tab.indexOf('<ListPager'));
+  const list = tab.slice(tab.indexOf('{pageSlice(rows, page).map((c) => ('), tab.indexOf('<ListPager'));
 
-  it('표 칸은 자르지 않는다 — 말줄임 0 · 회사명과 본 기능은 길면 칸 안에서 줄을 바꾼다 · 남는 폭은 본 기능 칸 · 그 밖은 한 줄', () => {
-    expect(table.length).toBeGreaterThan(500);
-    for (const cut of ['truncate', 'line-clamp', 'text-ellipsis', 'overflow-hidden']) expect(table, cut).not.toContain(cut);
-    // 폭 상한은 줄을 바꾸는 자리(회사명)에만 있다 = 상한을 넘으면 잘리지 않고 다음 줄로
-    expect(table.match(/max-w-\[/g)).toHaveLength(2);
-    expect(table).toContain('<td className="px-2.5 py-2.5 font-medium !whitespace-normal"><span className="block w-max max-w-[180px] 2xl:max-w-[280px] [word-break:keep-all] [overflow-wrap:anywhere]">{c.companyName}</span></td>');
-    expect(table).toContain('<td className="px-2.5 py-2 !whitespace-normal min-w-[200px] w-full">');
-    expect(table).toContain('${ADMIN_TABLE_ONELINE}');
-    // 옛 펼침 줄 · 사람 이름 두 줄은 없어졌다
-    expect(code).not.toContain('openRow');
-    expect(code).not.toContain('Fragment');
-    expect(table).not.toContain('c.users.slice(0, 2)');
+  it('목록 글은 자르지 않는다 — 말줄임 0 · 회사 이름 · 상태 · 덧붙임은 칸 안에서 줄을 바꾼다(낱말 안에서 끊지 않는다)', () => {
+    expect(list.length).toBeGreaterThan(500);
+    for (const cut of ['truncate', 'line-clamp', 'text-ellipsis', 'overflow-hidden', 'whitespace-nowrap']) expect(list, cut).not.toContain(cut);
+    expect(tab).toContain("const WRAP = 'break-keep [overflow-wrap:anywhere]';");
+    expect(list.match(/\$\{WRAP\}/g)!.length).toBeGreaterThanOrEqual(2);   // 회사 이름 · 상태 칸
+    // 칸 폭 = 회사 · 상태(남는 폭 전부) · 시각 · 화살표 · 좁은 화면은 한 줄씩
+    expect(list).toContain('grid grid-cols-1 md:grid-cols-[minmax(0,190px)_minmax(0,1fr)_112px_16px]');
+    // 옛 펼침 줄 · 표 칸 · 말풍선은 없다
+    for (const gone of ['openRow', 'Fragment', 'setTip', 'fixed z-[60]', '기능별 관심', '<thead']) expect(code, gone).not.toContain(gone);
+    expect(code.match(/<table /g)).toHaveLength(1);   // 상세 창의 시간순 기록 하나
   });
 
-  it('★ C138 말풍선 · 「기능별 관심」 칸 · 따로 있던 무료체험 표는 없다 — 업체 표 하나에 모았다', () => {
-    for (const gone of ['setTip', 'fixed z-[60]', '기능별 관심', 'data?.trials &&', 'data.trials.', 'data.trials)', 'LOGIN_POPUPS']) expect(code, gone).not.toContain(gone);
-    expect(code.match(/<table /g)).toHaveLength(2);   // 업체 표 + 상세 창의 시간순 기록
-    for (const head of ['무료체험', '다시 보지 않기', '마지막 본 시각']) expect(table).toContain(`<th className="text-left font-medium px-2.5 py-2">${head}</th>`);
-  });
-
-  it('★ C138 이 탭만 화면 가로를 다 쓴다 — CSS 계산 하나(가운데 정렬 틀 기준 · 좌우 24px) · 1280px 부터 · 폭을 재는 코드 0(창 크기가 바뀌어도 어긋나지 않는다)', () => {
-    expect(tab).toContain("const FULL_BLEED = 'xl:w-[calc(100vw_-_48px)] xl:ml-[calc(50%_-_50vw_+_24px)]';");
-    expect(tab).toContain('<div className={`bg-white rounded-2xl border border-gray-200/70 shadow-sm ${FULL_BLEED}`}>');
-    // 화면 폭을 재서 고치는 길은 없다(처음 값에 머물러 좁은 화면에서 가로로 넘쳤다 · 1116 폭 훑기)
-    for (const gone of ['useLayoutEffect', 'getBoundingClientRect', 'clientWidth', "addEventListener('resize'", 'style.width']) expect(code, gone).not.toContain(gone);
-    // 부모 틀(관리자 화면 본문)은 가운데 정렬 그대로다 — 계산의 전제
+  it('★ C141 화면 끝까지 늘이지 않는다 — 관리자 본문 틀(1280) 안 · 폭을 재는 코드 0', () => {
+    for (const gone of ['FULL_BLEED', '100vw', 'useLayoutEffect', 'getBoundingClientRect', 'clientWidth', "addEventListener('resize'", 'style.width']) expect(code, gone).not.toContain(gone);
     expect(front('pages/AdminDashboard.tsx')).toContain('<main className="max-w-7xl mx-auto px-4 md:px-6 pt-[18px] pb-10">');
   });
 
-  it('줄을 누르면(Enter · Space 도) 상세 창 · 닫기 = X · [닫기] · ESC 만(배경 클릭 닫기 없음)', () => {
-    expect(table).toContain('onClick={() => setDetail(c)}');
-    expect(table).toContain("if (e.key === 'Enter' || e.key === ' ')");
-    expect(tab).toContain('{detail && <CompanyDetailModal c={detail} onClose={() => setDetail(null)} />}');
+  it('줄을 누르면 상세 창(줄 = 단추 = Enter · Space 도) · 닫기 = X · [닫기] · ESC 만(배경 클릭 닫기 없음)', () => {
+    expect(list).toContain('<button type="button" onClick={() => setDetail(c)} aria-label={`${c.companyName} 상세 보기`}');
+    expect(tab).toContain('{detail && <CompanyDetailModal c={detail} dismissalsKnown={!!data?.dismissalsKnown} onClose={() => setDetail(null)} />}');
     const modal = tab.slice(tab.indexOf('function CompanyDetailModal'), tab.indexOf('export default function FeatureInterestTab'));
     expect(modal).toContain("if (e.key === 'Escape' && !e.isComposing)");
     expect(modal).toContain('role="dialog" aria-modal="true"');
     expect(modal).not.toMatch(/bg-gray-900\/45[^"]*"\s+onClick/);
     expect(modal.match(/onClick=\{onClose\}/g)?.length).toBe(2);
-    // 상세 창은 표 응답 값만 그린다(서버 조회 추가 없음)
+    // 상세 창은 받은 줄의 값만 그린다(서버 조회 추가 없음)
     expect(modal).not.toContain('fetch(');
   });
 

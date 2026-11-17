@@ -324,7 +324,7 @@ describe('③ 소스 계약 — 대상을 소스에서 기계로 뽑는다(설�
   it('등록부에 배너가 있고 배너는 그 id 로 뜸 · 누름을 남긴다 · 도움말 글은 없어진 카드를 안내하지 않는다', () => {
     expect(LINE_TRIAL_BANNER_ID).toBe('line-trial');
     expect(/^[a-z][a-z-]{1,39}$/.test(LINE_TRIAL_BANNER_ID)).toBe(true);
-    expect(LOGIN_POPUPS.find((p) => p.id === LINE_TRIAL_BANNER_ID)).toEqual({ id: 'line-trial', name: '대시보드 한 줄 배너', goLabel: '7일 무료로 써 보기', introKeys: [] });
+    expect(LOGIN_POPUPS.find((p) => p.id === LINE_TRIAL_BANNER_ID)).toEqual({ id: 'line-trial', name: '7일 무료체험 배너', goLabel: '7일 무료로 써 보기', introKeys: [] });   // ★ C141 이름(슈퍼관리자 화면에만 쓰인다)
     expect(bannerCode).toContain("reportPlanFeature(LINE_TRIAL_BANNER_ID, 'open');");
     expect(bannerCode).toContain("if (offer) reportPlanFeature(LINE_TRIAL_BANNER_ID, 'go');");
     const catalog = readFileSync(resolve(BACK_SRC, 'content/feature-catalog.ts'), 'utf8');

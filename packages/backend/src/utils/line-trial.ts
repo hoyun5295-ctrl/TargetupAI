@@ -11,7 +11,7 @@
  *   - 이 파일은 발송 · 정산 길을 건드리지 않는다.
  */
 import type { PoolClient } from 'pg';
-import pool from '../config/database';
+import pool, { query } from '../config/database';
 import { judgeGrantEligibility, executeGrant, GrantConflictError, isDiagnosisRunner } from './marketing-diagnosis-grant';
 
 export type LineBanner = 'offer' | 'trial' | null;
@@ -39,6 +39,84 @@ export const lineBannerColumnsSql = (alias: string): string =>
   `${trialFutureSql(alias)} AS trial_future,
                 ${trialDaysLeftSql(alias)} AS trial_days_left,
                 EXISTS (SELECT 1 FROM diagnosis_trial_grants dtg WHERE dtg.company_id = ${alias}.id) AS has_grant`;
+
+/** 배너로 켠 지급의 기록자 머리(지급 원장 granted_by = 머리 + 누른 사용자 id) */
+export const LINE_BANNER_GRANTOR = 'line-banner:';
+
+/**
+ * 7일 체험 지급의 길 — 기록자 머리로 가른다.
+ *   배너 = 'line-banner:{users.id}'(이 파일 runLineTrialStart) · 슈퍼관리자 = 'admin:{super_admins.id}'(routes/marketing-diagnosis-admin.ts 수동 부여) ·
+ *   그 밖 = 진단 설문(executeGrant 기본값 'diagnosis-auto').
+ */
+export type LineTrialSource = 'banner' | 'diagnosis' | 'admin';
+export function lineTrialSourceOf(grantedBy: string | null | undefined): LineTrialSource {
+  const g = String(grantedBy ?? '');
+  if (g.startsWith(LINE_BANNER_GRANTOR)) return 'banner';
+  if (g.startsWith('admin:')) return 'admin';
+  return 'diagnosis';
+}
+
+/**
+ * 7일 무료체험 목록(★ 2026-11-17 C141 슈퍼관리자 「기능 관심 업체」) — 지급 원장 한 줄 = 회사 하나(UNIQUE(company_id)).
+ *   살아 있는가 · 남은 날 = 위 판정 그대로(요금제 · 만료 술어 · 서울 달력) · 켠 사람 = 배너 지급이면 그 계정 이름.
+ *   시각 칸은 ::timestamptz 로 읽는다(시간대 없는 칸이어도 쓴 쪽과 같은 세션 시간대 기준 · trialDaysLeftSql 과 같은 규약).
+ */
+export const LINE_TRIAL_LIST_SQL = `
+  SELECT g.company_id::text AS company_id, g.granted_by,
+         g.created_at::timestamptz AS granted_at,
+         g.trial_expires_at::timestamptz AS grant_ends_at,
+         c.trial_expires_at::timestamptz AS company_ends_at,
+         COALESCE(NULLIF(u.name, ''), u.login_id, '') AS granted_by_name,
+         UPPER(COALESCE(p.plan_code, '')) AS plan_code,
+         ${trialFutureSql('c')} AS trial_future,
+         ${trialDaysLeftSql('c')} AS days_left
+    FROM diagnosis_trial_grants g
+    JOIN companies c ON c.id = g.company_id
+    LEFT JOIN plans p ON p.id = c.plan_id
+    LEFT JOIN users u ON g.granted_by LIKE '${LINE_BANNER_GRANTOR}%' AND u.id::text = substring(g.granted_by from ${LINE_BANNER_GRANTOR.length + 1})
+   ORDER BY g.created_at DESC, g.company_id`;
+
+export interface LineTrialListRow {
+  companyId: string;
+  source: LineTrialSource;
+  grantedAt: string;
+  /** 배너로 켰으면 그 계정 이름(없으면 아이디) · 그 밖은 빈 값 */
+  grantedBy: string;
+  alive: boolean;
+  /** 살아 있을 때만(0 = 오늘이 마지막 날) */
+  daysLeft: number | null;
+  /** 살아 있으면 회사의 만료 시각 · 끝났으면 지급 때 정한 만료 시각 */
+  endsAt: string | null;
+}
+
+const isoOrNull = (v: unknown): string | null => {
+  if (v == null) return null;
+  const d = new Date(v as any);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+};
+
+/** 7일 무료체험 목록 — 표가 없으면(42P01) null(화면은 그 단계를 「읽지 못했습니다」로) */
+export async function loadLineTrials(): Promise<LineTrialListRow[] | null> {
+  try {
+    const r = await query(LINE_TRIAL_LIST_SQL, []);
+    return r.rows.map((x: any) => {
+      const alive = lineTrialAlive({ planCode: String(x.plan_code ?? ''), hasGrant: true, trialFuture: x.trial_future === true });
+      const days = Number(x.days_left);
+      return {
+        companyId: String(x.company_id),
+        source: lineTrialSourceOf(x.granted_by),
+        grantedAt: isoOrNull(x.granted_at) ?? new Date(0).toISOString(),
+        grantedBy: String(x.granted_by_name || ''),
+        alive,
+        daysLeft: alive && x.days_left != null && Number.isFinite(days) && days >= 0 ? days : null,
+        endsAt: alive ? isoOrNull(x.company_ends_at) : isoOrNull(x.grant_ends_at),
+      };
+    });
+  } catch (err: any) {
+    if (err?.code === '42P01') return null;
+    throw err;
+  }
+}
 
 /** 배너(진단) 체험이 살아 있는가 = 체험 요금제 + 지급 원장 행 + 만료일이 아직 안 지남 */
 export function lineTrialAlive(p: { planCode: string; hasGrant: boolean; trialFuture: boolean }): boolean {
@@ -71,7 +149,7 @@ async function startInTx(client: PoolClient, companyId: string, userId: string |
   const judged = await judgeGrantEligibility(client, companyId);
   if (judged.outcome === 'company_not_found') return { outcome: 'company_not_found' };
   if (judged.outcome === 'granted') {
-    const { trialExpiresAt } = await executeGrant(client, companyId, null, { grantedBy: `line-banner:${userId ?? 'unknown'}` });
+    const { trialExpiresAt } = await executeGrant(client, companyId, null, { grantedBy: `${LINE_BANNER_GRANTOR}${userId ?? 'unknown'}` });
     return { outcome: 'granted', trialExpiresAt };
   }
   if (judged.outcome === 'already_granted') {
