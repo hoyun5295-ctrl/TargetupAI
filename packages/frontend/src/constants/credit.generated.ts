@@ -22,7 +22,7 @@ export const CREDIT_COSTS: Readonly<Record<string, number>> = {
   'dm-ai-generate': 5,
   'dm-builder': 100,
   'dm-copy-generate': 3,
-  'dm-custom-short-link': 20,
+  'dm-custom-short-link': 2,
   'dm-interaction-publish': 120,
   'dm-quick-action-refine': 1,
   'email-ai-generate': 3,

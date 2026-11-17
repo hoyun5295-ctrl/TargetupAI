@@ -54,19 +54,22 @@ describe('한글 주소 — 두 입구가 같은 규칙을 쓴다', () => {
   });
 });
 
-describe('단축 URL 단가 — 원장 하나에서 읽는다 (2026-09-16 100 → 20)', () => {
+describe('단축 URL 단가 — 원장 하나에서 읽는다 (2026-09-16 100 → 20 · 2026-11-17 20 → 2)', () => {
   it('백엔드·프론트 단가가 같다 — 한쪽만 바꾸면 모달 표시가 실차감과 어긋난다', () => {
-    expect(creditSrc).toContain("'dm-custom-short-link': 20,");
-    expect(feCreditSrc).toContain("'dm-custom-short-link': 20,");
+    expect(creditSrc).toContain("'dm-custom-short-link': 2,");
+    expect(feCreditSrc).toContain("'dm-custom-short-link': 2,");
   });
 
-  it('20 이상이라 확인 모달이 유지된다 — 되돌릴 수 없는 발급 앞의 관문', () => {
+  it('단가와 무관하게 확인 모달이 유지된다 — 되돌릴 수 없는 발급 앞의 관문(2 = 20 미만이라 금액 기준으로는 의무가 아니다)', () => {
     // 한 번 쓴 코드는 비활성해도 재사용이 막힌다(옛 링크가 새 대상으로 가면 안 된다).
     // 그래서 오타 하나가 그 이름을 영구히 죽인다 — 확인 창은 클릭이 아니라 이름 자원을 지킨다.
     const m = /'dm-custom-short-link':\s*(\d+)/.exec(feCreditSrc);
     expect(m, '프론트 단가 등록이 없다').toBeTruthy();
-    expect(Number(m![1])).toBeGreaterThanOrEqual(20);
     expect(modalSrc).toContain('source="dm-custom-short-link"');
+    // 발급 단추는 확인 창만 연다(조건 = 주소 입력뿐 · 금액 조건 0) · 실제 발급은 확인 창의 확인에서만
+    expect(modalSrc).toContain('onClick={() => { if (url.trim()) setConfirmOpen(true); }}');
+    expect(modalSrc).toContain('onConfirm={() => { void handleCreate(); }}');
+    expect([...modalSrc.matchAll(/handleCreate\(\)/g)].length, '확인 창 밖에서 발급을 부르는 자리가 생겼다').toBe(1);
   });
 
   it('모달 안내 문구가 단가를 하드코딩하지 않는다 — 값이 바뀌는 날 거짓말이 된다', () => {

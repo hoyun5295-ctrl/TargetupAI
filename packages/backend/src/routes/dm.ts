@@ -58,7 +58,7 @@ import { runInCreditBundle } from '../utils/ai-credit-context';
 import type { Section } from '../utils/dm/dm-section-registry';
 import { selectSampleCustomers, selectSampleCustomerByKey, type SampleCustomerKey } from '../utils/dm/dm-sample-customer';
 import { lookupDmRecipientToken, issueDmRecipientTokensBulk, discardDmRecipientTokens, lookupDmShortLink, attachDmTokensToCampaign } from '../utils/dm/dm-recipient-token';
-// ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(도메인 평판 보호 · 2026-09-16 20크레딧)
+// ★ 2026-07-10 고객사 자체 URL 단축(hlj.kr) — 박성용 신기능(도메인 평판 보호 · 단가 = CREDIT_COST_MAP 'dm-custom-short-link' · 2026-11-17 2크레딧)
 import { createCustomShortLink, lookupCustomShortLink, recordCustomShortLinkClick, listCustomShortLinks, setCustomShortLinkActive, ShortLinkSlugTakenError, discardCustomShortLink, upsertDmAliasLink, getDmAliasLink } from '../utils/dm/dm-custom-short-link';
 import { validateCustomShortLinkUrl, normalizeCustomLinkTitle, CUSTOM_LINK_DAILY_LIMIT, validateCustomSlug } from '../utils/dm/dm-custom-short-link-core';
 import {
