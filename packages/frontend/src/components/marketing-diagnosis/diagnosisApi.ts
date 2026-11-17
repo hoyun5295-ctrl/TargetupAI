@@ -28,6 +28,12 @@ export interface DiagnosisEchoDto { tone: 'gap' | 'good'; text: string }
 export type DiagnosisEchoesDto = Record<string, Record<string, DiagnosisEchoDto>>;
 
 export interface DiagnosisStateDto {
+  /**
+   * ★ 2026-11-17 C140 대시보드 한 줄 배너 — 서버가 정한다(제안 · 체험 중 · 없음). 화면은 이 칸만 읽는다.
+   *   옛 서버 답에는 없다(없으면 그리지 않는다). bannerDaysLeft = 체험 중일 때 남은 날 수(서버가 센다 · 0 = 오늘이 마지막 날).
+   */
+  banner?: 'offer' | 'trial' | null;
+  bannerDaysLeft?: number | null;
   eligible: boolean;
   grantable: 'available' | 'already_granted' | 'not_eligible' | 'not_applicable';
   completedAt: string | null;
@@ -126,8 +132,7 @@ export const diagnosisApi = {
   /** v3 — 문항 + 실측 선치환(prefilled). 화면 안내용일 뿐 제출 시 서버가 재계산한다. */
   questions: async () => toJson(await fetch('/api/marketing-diagnosis/questions', { headers: authHeaders() })),
   report: async () => toJson(await fetch('/api/marketing-diagnosis/report', { headers: authHeaders() })),
-  invited: async () =>
-    toJson(await fetch('/api/marketing-diagnosis/invited', { method: 'POST', headers: authHeaders() })),
+  // ★ 2026-11-17 C140 — 초대 창을 걷어 「초대 표시 기록」(POST /invited)을 부르는 화면이 없다(서버 주소 · 표는 배포 중 옛 화면용으로 남는다)
   /** version = 사용자가 본 문항 세트(불일치 = 409 VERSION_CHANGED — 조용한 재해석 차단) */
   submit: async (answers: Record<string, string>, version?: string) =>
     toJson(await fetch('/api/marketing-diagnosis/submit', {
@@ -136,6 +141,12 @@ export const diagnosisApi = {
     })),
   consult: async () =>
     toJson(await fetch('/api/marketing-diagnosis/consult', { method: 'POST', headers: authHeaders() })),
+  /**
+   * ★ 2026-11-17 C140 대시보드 한 줄 배너 — 설문 없이 7일 체험을 켠다(몸통 없음 · 적은 한 줄은 서버로 가지 않는다).
+   *   답 = 200 granted · already_granted / 409 TRIAL_USED / 400 NOT_APPLICABLE / 503 DB_MIGRATION_PENDING. 부르는 곳 = LineTrialBanner 하나.
+   */
+  startTrial: async () =>
+    toJson(await fetch('/api/marketing-diagnosis/trial/start', { method: 'POST', headers: authHeaders() })),
 };
 
 /** 공개 축(퍼널 B — 미인증) */

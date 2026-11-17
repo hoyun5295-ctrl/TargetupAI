@@ -91,11 +91,13 @@ export class GrantConflictError extends Error {
  * grantedBy = 지급 행위자 스냅샷 — 같은 트랜잭션 안에서 영속화한다(★Codex 적대 2R 수용:
  * COMMIT과 사후 감사 기록 사이 크래시가 나도 "누가 지급했는가"는 원장에 남는다).
  * 자동 지급은 기본값 'diagnosis-auto', 관리자 수동 부여는 admin:{super_admins.id}.
+ * ★ 2026-11-17 C140 — diagnosisId null = 진단 없는 지급(대시보드 한 줄 배너 · utils/line-trial.ts · granted_by 'line-banner:{users.id}').
+ *   원장 칸의 NOT NULL 은 배포 원장 C140-DDL-1 이 푼다(가짜 진단 행으로 채우지 않는다). 회사당 1번 = UNIQUE(company_id) 그대로.
  */
 export async function executeGrant(
   client: PoolClient,
   companyId: string,
-  diagnosisId: string,
+  diagnosisId: string | null,
   opts: { days?: number; grantedBy?: string } = {},
 ): Promise<{ trialExpiresAt: Date | null }> {
   const days = opts.days ?? DIAGNOSIS_TRIAL_DAYS;

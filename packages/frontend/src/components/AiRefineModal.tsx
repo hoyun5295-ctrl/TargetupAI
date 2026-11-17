@@ -20,7 +20,7 @@
  */
 
 import { useLightSurface } from './zone/surface-tone';
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Sparkles, ArrowRight, Loader2, RotateCcw } from 'lucide-react';
 // ★ 2026-08-08 — Before/After 하이라이트(글자 단위 LCS)는 CT가 소유한다. 여정 다듬기도 같은 것을 쓴다.
 import { highlightAdditions } from '../utils/text-diff';
@@ -40,6 +40,12 @@ interface Props {
   isOpen: boolean;
   originalMessage: string;
   companyName?: string;
+  /**
+   * ★ 2026-11-17 C140 — 켜진 채 열려 놓이면 그 창(인스턴스)에서 한 번만 바로 생성한다(대시보드 한 줄 배너에서 넘어온 길 · 기본 꺼짐).
+   *   주는 곳 = components/direct-send/useSendPrecheck.tsx 의 넘김 창 하나 — 넘김마다 새 창을 놓고 닫으면 걷는다(창 하나 = 넘김 한 번).
+   *   그 밖 사용처는 종전대로 「다듬기 시작」을 누른다.
+   */
+  autoStart?: boolean;
   onClose: () => void;
   onApply: (text: string) => void;
 }
@@ -57,6 +63,7 @@ export default function AiRefineModal({
   isOpen,
   originalMessage,
   companyName,
+  autoStart = false,
   onClose,
   onApply,
 }: Props) {
@@ -65,8 +72,6 @@ export default function AiRefineModal({
   const [loading, setLoading] = useState(false);
   const [candidates, setCandidates] = useState<RefineCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
-
-  if (!isOpen) return null;
 
   const handleRefine = async () => {
     setLoading(true);
@@ -103,6 +108,19 @@ export default function AiRefineModal({
       setLoading(false);
     }
   };
+
+  // ★ 2026-11-17 C140 — autoStart = 열린 채 놓인 이 창에서 한 번만 바로 생성한다(다시 그려져도 · 개발 모드의 효과 두 번 실행에도 한 번).
+  //   넘김의 창은 넘김마다 새로 놓이고 닫으면 걷힌다(useSendPrecheck) → 결과 · 오류 · 진행 표시의 수명 = 그 창의 수명이다.
+  //   한 창 안에서 요청은 겹치지 않는다(생성 중에는 닫기 · 다시 다듬기 · 말투 단추가 잠긴다) → 늦은 답을 가를 장치를 두지 않는다.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (!isOpen || !autoStart || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    void handleRefine();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, autoStart]);
+
+  if (!isOpen) return null;
 
   const handleApply = (text: string) => {
     onApply(text);

@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>진단 배너 개편 목업</title>
+<!-- 버리는 목업(1117 Harold 「완벽한 배너를 만들어봐」) · 기존 코드에 편입하지 않는다
+     글꼴 = 프리텐다드 하나 · 흰 바탕 + 검정 + 주황 하나(로그인 안내 창과 같은 값 · backend content/gated/v3-popup.ts)
+     버튼 줄 · 아래 카드는 자리 표시(실제 대시보드 부품의 색 · 크기만 옮김) · 그림 없음 -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{--ink:#0B0B0C;--sub:#5F6368;--mute:#6B6B70;--line:#E8E8E6;--soft:#F4F3EF;--acc:#CF4510;--acc-d:#B53C0D;--out:cubic-bezier(.16,1,.3,1)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,system-ui,sans-serif;background:#E9E9E7;color:var(--ink);-webkit-font-smoothing:antialiased;word-break:keep-all}
+button{font:inherit;border:0;background:none;cursor:pointer;color:inherit}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+/* ── 목업을 고르는 띠(화면의 일부가 아니다) ── */
+.top{position:sticky;top:0;z-index:50;background:var(--ink);color:#fff;padding:10px 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+.top b{font-size:13px}
+.grp{display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.72)}
+.seg{display:flex;gap:2px;background:rgba(255,255,255,.12);padding:3px;border-radius:9px}
+.seg button{height:30px;padding:0 12px;border-radius:7px;font-size:12.5px;color:rgba(255,255,255,.8)}
+.seg button.on{background:#fff;color:var(--ink);font-weight:700}
+.page{padding:20px 16px 56px}
+.frame{max-width:1248px;margin:0 auto;display:flex;flex-direction:column;gap:30px}
+.cap{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px}
+.cap strong{font-size:16px;font-weight:800}
+.cap p{font-size:13px;color:var(--sub)}
+.dash{container:dash/inline-size;background:#F5F6F8;border-radius:16px;padding:16px}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}
+.notes div{background:#fff;border-radius:12px;padding:12px 14px;font-size:12.5px;line-height:1.6;color:#3C3C40}
+.notes b{display:block;font-size:12px;color:var(--ink);margin-bottom:2px}
+.reset{margin-top:10px;font-size:12.5px;font-weight:700;color:var(--acc-d);text-decoration:underline;text-underline-offset:3px}
+
+/* ── 자리 표시: 맨 위 버튼 줄(DashboardActionRow 의 색 · 높이) ── */
+.acts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-bottom:16px}
+.act{height:84px;border-radius:12px;color:#fff;display:flex;align-items:center;gap:12px;padding:0 16px;min-width:0;box-shadow:0 10px 15px -3px rgba(0,0,0,.1)}
+.act i{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.15);flex-shrink:0}
+.act span{min-width:0}
+.act b{display:block;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act small{display:block;margin-top:2px;font-size:13px;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act.v{background:linear-gradient(135deg,#6d28d9,#7e22ce 50%,#c026d3)}
+.act.e{background:linear-gradient(135deg,#059669,#14b8a6)}
+.act.a{background:linear-gradient(135deg,#f59e0b,#f97316)}
+@container dash (max-width:639px){.acts{gap:10px}.act{height:auto;flex-direction:column;align-items:flex-start;gap:8px;padding:12px;overflow:hidden}.act i{width:36px;height:36px}.act span{width:100%}.act b{font-size:13px}.act small{display:none}}
+@container dash (max-width:359px){.acts{gap:8px}.act{padding:10px}.act b{font-size:12px;letter-spacing:-.03em}}
+/* ── 자리 표시: 아래 네 칸(dash-card 의 흰 판) ── */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:16px}
+.card{background:#fff;border:1px solid #F3F4F6;border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.05);min-height:132px}
+.card b{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:700;color:#1F2937}
+.card b::before{content:"";width:4px;height:14px;border-radius:2px;background:#D1D5DB}
+.card u{display:block;height:10px;border-radius:5px;background:#EEF0F3;margin-top:14px}
+.card u+u{width:62%}
+@container dash (max-width:1099px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@container dash (max-width:599px){.cards{grid-template-columns:1fr}.card{min-height:96px}}
+
+/* ════════ 새 배너 ════════ */
+.bnw{container:bn/inline-size}
+.bn{background:#fff;border-radius:20px;padding:27px 33px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:18px 44px;align-items:center;box-shadow:0 1px 2px rgba(11,11,12,.06),0 18px 36px -24px rgba(11,11,12,.34)}
+.bn-kick{font-size:13px;font-weight:700;color:var(--sub);display:flex;align-items:center;gap:7px}
+.bn-kick i{width:7px;height:7px;border-radius:50%;background:var(--acc)}
+.bn-hd{margin-top:8px;font-size:25px;font-weight:900;letter-spacing:-.04em;line-height:1.24}
+.bn-hd span{display:inline-block}
+.bn-lead{margin-top:7px;font-size:14.5px;line-height:1.55;color:var(--sub);text-wrap:balance}
+.bn-row{display:flex;gap:10px}
+.bn-inw{position:relative;flex:1;min-width:0}
+.bn-in{display:block;width:100%;height:56px;border-radius:14px;border:1.5px solid var(--ink);padding:0 18px;font:inherit;font-size:16px;font-weight:600;color:var(--ink);background:#fff;outline:0;transition:box-shadow .2s}
+.bn-in:focus{box-shadow:0 0 0 4px rgba(11,11,12,.1)}
+.bn-ph{position:absolute;left:19.5px;right:19.5px;top:0;height:56px;display:flex;align-items:center;font-size:15px;font-weight:500;color:var(--mute);pointer-events:none;white-space:nowrap;overflow:hidden;transition:opacity .35s}
+.bn.has .bn-ph{opacity:0;transition:none}
+.bn-cta{height:56px;padding:0 22px;border-radius:14px;background:var(--acc);color:#fff;font-weight:800;font-size:16px;display:inline-flex;align-items:center;justify-content:center;gap:8px;white-space:nowrap;flex-shrink:0;transition:background .2s,transform .2s}
+.bn-cta:hover{background:var(--acc-d);transform:translateY(-1px)}
+.bn-cta:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.bn-cta[disabled]{cursor:default;transform:none;background:var(--acc-d)}
+.bn-cta .spin{display:none;width:16px;height:16px;border-radius:50%;border:2.4px solid rgba(255,255,255,.45);border-top-color:#fff;animation:bn-spin .8s linear infinite}
+.bn-cta[disabled] .spin{display:block}
+.bn-cta[disabled] .ic{display:none}
+@keyframes bn-spin{to{transform:rotate(360deg)}}
+.bn-note{margin-top:10px;font-size:13px;line-height:1.5;color:var(--mute)}
+.bn-note span{display:inline-block}
+.bn-note.warn{color:var(--ink);font-weight:700}
+/* 누른 뒤 — 같은 자리에서 한 줄로 알려 주고 화면을 옮긴다 */
+.bn-ok{display:none;grid-column:1/-1}
+.bn[data-state="done"]>.bn-t,.bn[data-state="done"]>.bn-f{display:none}
+.bn[data-state="done"]>.bn-ok{display:block;animation:bn-up .6s var(--out) both}
+@keyframes bn-up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.bn-ok .bn-line{margin-top:14px;display:inline-flex;align-items:center;gap:10px;max-width:100%;height:44px;padding:0 16px;border-radius:12px;background:var(--soft);font-size:15px;font-weight:600}
+.bn-ok .bn-line span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@container bn (max-width:899px){.bn{grid-template-columns:1fr;gap:18px;padding:24px}.bn-hd{font-size:23px}}
+@container bn (max-width:519px){.bn{padding:20px 18px;border-radius:18px}.bn-hd{font-size:21px}.bn-row{flex-direction:column}.bn-cta{width:100%}}
+@container bn (max-width:339px){.bn{padding:18px 16px}.bn-hd{font-size:20px}}
+@media (prefers-reduced-motion:reduce){.bn-ph,.bn-cta,.bn-in{transition:none}.bn[data-state="done"]>.bn-ok{animation:none}}
+
+/* ════════ 지금 배너(비교) — DiagnosisHeroCard 의 모양을 옮김 ════════ */
+.old{container:old/inline-size}
+.band{position:relative;overflow:hidden;border-radius:16px;color:#fff;background:linear-gradient(90deg,#4338ca,#4f46e5 50%,#0284c7);box-shadow:0 10px 15px -3px rgba(79,70,229,.2);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.band .l{display:flex;align-items:center;gap:12px;min-width:0}
+.band .l i{width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.2);flex-shrink:0}
+.band h3{font-size:17px;font-weight:800;letter-spacing:-.02em;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.band h3 em{font-style:normal;font-size:10px;font-weight:700;background:rgba(255,255,255,.25);padding:2px 6px;border-radius:6px}
+.band p{font-size:13px;color:rgba(255,255,255,.9);margin-top:4px}
+.tk{display:flex;align-items:stretch;flex-shrink:0;background:#fff;color:#0F172A;border-radius:16px;overflow:hidden;box-shadow:0 10px 24px -12px rgba(15,23,42,.55)}
+.tk .tl{padding:10px 16px;display:flex;flex-direction:column;justify-content:center;gap:2px;border-right:2px dashed #E2E8F0}
+.tk small{font-size:11px;font-weight:700;color:#6d28d9}
+.tk .tl b{font-size:19px;font-weight:900;letter-spacing:-.02em}
+.tk s{font-size:12px;color:#64748B}
+.tk s+span{font-size:12px;font-weight:800;color:#e11d48;margin-left:4px}
+.tk .tr{display:flex;align-items:center;padding:0 16px;background:#4338ca;color:#fff;font-weight:800;font-size:14px;white-space:nowrap}
+@container old (max-width:639px){.band{flex-direction:column;align-items:stretch}.tk .tl{flex:1}}
+</style>
+</head>
+<body>
+<div class="top">
+  <b>목업 · 진단 배너 개편(1117)</b>
+  <div class="grp">폭
+    <div class="seg" id="w">
+      <button class="on" data-w="1248">데스크톱</button>
+      <button data-w="768">태블릿 768</button>
+      <button data-w="390">휴대폰 390</button>
+      <button data-w="320">휴대폰 320</button>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+<div class="frame" id="frame">
+
+  <section>
+    <div class="cap"><strong>새 배너</strong><p>무료 요금제 관리자의 대시보드. 위 버튼 줄과 아래 카드는 자리 표시입니다. 입력칸에 적고 눌러 보세요.</p></div>
+    <div class="dash">
+      <div class="acts" aria-hidden="true">
+        <div class="act v"><i></i><span><b>AI 한줄로</b><small>한 줄 입력으로 완성하는 메시지 발송</small></span></div>
+        <div class="act e"><i></i><span><b>AI 오퍼레이터</b><small>마케팅 기능 12개 바로 열기</small></span></div>
+        <div class="act a"><i></i><span><b>고객 DB 업로드</b><small>엑셀 · CSV 로 고객 추가</small></span></div>
+      </div>
+
+      <div class="bnw">
+        <section class="bn" id="bn" data-state="idle" aria-label="7일 무료체험">
+          <div class="bn-t">
+            <p class="bn-kick"><i></i>7일 무료체험</p>
+            <h2 class="bn-hd"><span>이번에 알릴 것,</span> <span>한 줄만 적어 보세요</span></h2>
+            <p class="bn-lead">AI가 한 줄을 읽고 문자 초안을 써 드려요.</p>
+          </div>
+          <form class="bn-f" id="bnf" novalidate>
+            <div class="bn-row">
+              <div class="bn-inw">
+                <label class="sr" for="line">알릴 내용 한 줄</label>
+                <input class="bn-in" id="line" type="text" maxlength="80" autocomplete="off" aria-describedby="bnnote">
+                <span class="bn-ph" id="ph" aria-hidden="true">주말 이틀간 전 메뉴 20% 할인</span>
+              </div>
+              <button class="bn-cta" id="cta" type="submit">
+                <span id="ctal">7일 무료로 써 보기</span>
+                <svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                <i class="spin" aria-hidden="true"></i>
+              </button>
+            </div>
+            <p class="bn-note" id="bnnote" aria-live="polite"><span>누르면 AI 기능이 7일 동안 무료로 열려요.</span> <span>끝나면 지금 요금제로 돌아와요.</span></p>
+          </form>
+          <div class="bn-ok" aria-live="polite">
+            <p class="bn-kick"><i></i>무료체험 시작</p>
+            <h2 class="bn-hd"><span>7일 무료체험이 열렸어요</span></h2>
+            <p class="bn-lead">직접발송 창이 열리고, 방금 적은 한 줄로 AI가 초안을 만듭니다.</p>
+            <p class="bn-line"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span id="echo"></span></p>
+          </div>
+        </section>
+      </div>
+
+      <div class="cards" aria-hidden="true">
+        <div class="card"><b>요금제 현황</b><u></u><u></u></div>
+        <div class="card"><b>발송 현황</b><u></u><u></u></div>
+        <div class="card"><b>DB 현황</b><u></u><u></u></div>
+        <div class="card"><b>오늘의 추천</b><u></u><u></u></div>
+      </div>
+    </div>
+    <button class="reset" id="reset" type="button">처음 모양으로 되돌리기</button>
+  </section>
+
+  <section>
+    <div class="cap"><strong>체험이 켜진 뒤 같은 자리</strong><p>7일 동안은 같은 입력칸이 문자 초안 바로가기가 됩니다.</p></div>
+    <div class="dash">
+      <div class="bnw">
+        <section class="bn" aria-label="무료체험 진행 중">
+          <div class="bn-t">
+            <p class="bn-kick"><i></i>무료체험 6일 남음</p>
+            <h2 class="bn-hd"><span>이번에 알릴 것,</span> <span>한 줄만 적어 보세요</span></h2>
+            <p class="bn-lead">AI가 한 줄을 읽고 문자 초안을 써 드려요.</p>
+          </div>
+          <div class="bn-f">
+            <div class="bn-row">
+              <div class="bn-inw">
+                <input class="bn-in" type="text" aria-label="알릴 내용 한 줄" tabindex="-1">
+                <span class="bn-ph" aria-hidden="true">신상 니트 입고, 단골 먼저 안내</span>
+              </div>
+              <button class="bn-cta" type="button" tabindex="-1"><span>문자 초안 받기</span><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+            </div>
+            <p class="bn-note"><span>무료체험이 끝나면 지금 요금제로 돌아와요.</span></p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="cap"><strong>지금 배너(비교)</strong><p>최근 4일 동안 볼 수 있었던 27개 회사 중 누른 곳 0.</p></div>
+    <div class="dash">
+      <div class="old">
+        <div class="band">
+          <div class="l"><i></i><div><h3>3분 진단하면 베이직 7일이 무료예요 <em>NEW</em></h3><p>설문을 완료하시면 자동으로 7일 무료체험이 부여됩니다 · AI 진단서는 덤이에요</p></div></div>
+          <div class="tk"><div class="tl"><small>베이직 요금제 7일</small><b>0원</b><div><s>월 350,000원</s><span>무료</span></div></div><div class="tr">진단 시작 →</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="notes">
+    <div><b>누르면</b>7일 무료체험을 켜고 직접발송 창을 엽니다. AI 다듬기가 적은 한 줄을 원문으로 바로 초안을 만듭니다. 설문은 거치지 않습니다. 실제 화면에서는 이 자리의 안내 대신 알림 한 줄과 창이 뜹니다.</div>
+    <div><b>뺀 것</b>보라 띠, 쿠폰 모양, 월 350,000원, 진단과 설문이라는 말.</div>
+    <div><b>실측(1117)</b>최근 4일 로그인한 대상 27개 회사 중 고객 DB가 있는 곳 3, 없는 곳 24. AI 한줄로는 고객 0명이면 고객 파일부터 묻고 멈추므로 모든 회사를 직접발송 창으로 보냅니다.</div>
+  </section>
+
+</div>
+</div>
+
+<script>
+(() => {
+  const frame = document.getElementById('frame');
+  document.getElementById('w').addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    for (const x of b.parentElement.children) x.classList.toggle('on', x === b);
+    frame.style.maxWidth = b.dataset.w + 'px'; frame.style.width = '';
+  });
+
+  const bn = document.getElementById('bn');
+  const form = document.getElementById('bnf');
+  const input = document.getElementById('line');
+  const ph = document.getElementById('ph');
+  const cta = document.getElementById('cta');
+  const ctal = document.getElementById('ctal');
+  const note = document.getElementById('bnnote');
+  const NOTE = note.innerHTML;
+  const EX = ['주말 이틀간 전 메뉴 20% 할인', '신상 니트 입고, 단골 먼저 안내', '다음 주 휴진일 미리 안내'];
+  const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let i = 0;
+  // 예시는 조용히 바뀐다(적기 시작하면 멈춘다)
+  if (!still) setInterval(() => {
+    if (input.value || bn.dataset.state !== 'idle') return;
+    ph.style.opacity = '0';
+    setTimeout(() => { i = (i + 1) % EX.length; ph.textContent = EX[i]; ph.style.opacity = ''; }, 350);
+  }, 3400);
+
+  input.addEventListener('input', () => {
+    bn.classList.toggle('has', input.value.length > 0);
+    if (note.classList.contains('warn')) { note.classList.remove('warn'); note.innerHTML = NOTE; }
+  });
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    if (cta.disabled) return;
+    const line = input.value.trim();
+    if (!line) { note.classList.add('warn'); note.textContent = '한 줄을 먼저 적어 주세요.'; input.focus(); return; }
+    cta.disabled = true; ctal.textContent = '여는 중';
+    setTimeout(() => { document.getElementById('echo').textContent = line; bn.dataset.state = 'done'; }, 900);
+  });
+  document.getElementById('reset').addEventListener('click', () => {
+    bn.dataset.state = 'idle'; bn.classList.remove('has'); input.value = '';
+    cta.disabled = false; ctal.textContent = '7일 무료로 써 보기';
+    note.classList.remove('warn'); note.innerHTML = NOTE;
+  });
+
+  /* 폭 훑기(목업 확인용) — 320 ~ 1920 에서 넘침 · 구절 안 줄바꿈 · 예시 잘림을 센다 */
+  window.__sweep = () => {
+    const fails = []; const keep = { mw: frame.style.maxWidth, w: frame.style.width, ph: ph.textContent };
+    const one = (el) => el.getClientRects().length <= 1;
+    for (let w = 320; w <= 1920; w += 10) {
+      frame.style.maxWidth = 'none'; frame.style.width = w + 'px';
+      for (const b of document.querySelectorAll('.bn')) {
+        if (b.scrollWidth > b.clientWidth + 1) fails.push(w + ' 넘침');
+        for (const s of b.querySelectorAll('.bn-hd span, .bn-note span')) if (s.offsetParent && !one(s)) fails.push(w + ' 구절 안 줄바꿈: ' + s.textContent);
+        for (const c of b.querySelectorAll('.bn-cta')) if (c.offsetParent && c.offsetHeight !== 56) fails.push(w + ' 버튼 높이 ' + c.offsetHeight);
+        const hd = b.querySelector('.bn-t .bn-hd'); if (hd.offsetParent && hd.offsetHeight > parseFloat(getComputedStyle(hd).lineHeight) * 2 + 2) fails.push(w + ' 제목 세 줄');
+      }
+      for (const t of EX) { ph.textContent = t; if (ph.scrollWidth > ph.clientWidth) fails.push(w + ' 예시 잘림: ' + t); }
+    }
+    frame.style.maxWidth = keep.mw; frame.style.width = keep.w; ph.textContent = keep.ph;
+    return fails;
+  };
+})();
+</script>
+</body>
+</html>

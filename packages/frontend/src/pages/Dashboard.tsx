@@ -87,9 +87,9 @@ import {
 import AgencySendIntroModal from '../components/agency/AgencySendIntroModal';
 import { SplitStatusCard } from '../components/split/SplitSend';   // ★ 2026-11-14 C133 F4 나눠 보내기 현황 줄
 // ★ 2026-08-16 AI 마케팅 진단(퍼널 A — 설계서 §5-2·§5-3): FREE 진단 → TRIAL 7일 자동 지급
+// ★ 2026-11-17 C140 — 진단 띠 · 초대 창을 걷고 한 줄 배너(설문 없이 7일 체험)로. 문진 창은 도움말 봇 입구(?open=diagnosis)로만 남는다.
 import DiagnosisModal from '../components/marketing-diagnosis/DiagnosisModal';
-import DiagnosisInviteModal from '../components/marketing-diagnosis/DiagnosisInviteModal';
-import DiagnosisHeroCard from '../components/marketing-diagnosis/DiagnosisHeroCard';
+import LineTrialBanner, { type LineTrialOutcome } from '../components/dashboard/LineTrialBanner';
 import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-diagnosis/diagnosisApi';
 // ★ 2026-08-17 AI 추천 유형은 그대로 차감 축이 되므로 CT가 좁혀 준 값만 쓴다(campaign-axis).
 import { normalizeAiMessageChannel, type AiMessageChannel } from '../utils/campaign-axis';
@@ -226,37 +226,36 @@ export default function Dashboard() {
   // ★ 2026-08-16 AI 마케팅 진단 노출(설계서 §5-2) — 판정 전부 서버 state 한 응답.
   //   null = 로딩 중 또는 실패(fail-quiet: 이번 세션 미노출·무기록). 독립 useEffect — loadStats 직렬에 안 담는다.
   const [diagnosisState, setDiagnosisState] = useState<DiagnosisStateDto | null>(null);
-  const [showDiagnosisInvite, setShowDiagnosisInvite] = useState(false);
   const [showDiagnosisWizard, setShowDiagnosisWizard] = useState(false);
   // ★ 2026-08-22 대행발송 안내 모달 — 아직 못 쓰는 회사가 헤더 메뉴를 눌렀을 때(미끼 진입점)
   const [showAgencyIntro, setShowAgencyIntro] = useState(false);
-  // ★ 2026-11-13 C133 F7 — 진단 상태를 한 번이라도 받아 봤는가(성공 · 실패 무관) · 로그인 소개 창이 초대 창과 겹치지 않게 기다리는 기준
-  const [diagnosisChecked, setDiagnosisChecked] = useState(false);
   const refreshDiagnosisState = async () => {
     try {
       const r = await diagnosisApi.state();
       if (r.ok && r.data?.success) setDiagnosisState(r.data);
-    } catch { /* fail-quiet */ } finally {
-      setDiagnosisChecked(true);
-    }
+    } catch { /* fail-quiet */ }
   };
   useEffect(() => { refreshDiagnosisState(); }, []);
-  // 초대 모달 — eligible && 미완료 && 미초대 = 최초 1회. 표시 즉시 서버 기록(localStorage 판정 금지).
-  useEffect(() => {
-    if (!diagnosisState) return;
-    if (diagnosisState.eligible && !diagnosisState.completedAt && !diagnosisState.invitedAt) {
-      setShowDiagnosisInvite(true);
-      diagnosisApi.invited().catch(() => { /* 기록 실패 = 다음 세션 재노출(무해) */ });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [diagnosisState?.eligible, diagnosisState?.completedAt, diagnosisState?.invitedAt]);
-  const diagnosisHero: 'invite' | 'trial' | null = !diagnosisState
-    ? null
-    : diagnosisState.eligible && !diagnosisState.completedAt
-      ? 'invite'
-      : diagnosisState.completedAt && diagnosisState.trialExpiresAt && new Date(diagnosisState.trialExpiresAt).getTime() > Date.now()
-        ? 'trial'
-        : null;
+  // ★ 2026-11-17 C140 — 한 줄 배너를 그릴지(제안 · 체험 중 · 없음) = 서버가 준 banner 칸 하나. 화면은 요금제 · 역할 · 지급 이력을 따지지 않는다
+  //   (옛 서버 답 · 못 읽음 = 칸 없음 = 그리지 않는다). 옛 진단 초대 창(최초 1회)은 걷었다 — 같은 설문으로 가는 또 하나의 입구였다.
+  const lineBanner: 'offer' | 'trial' | null = diagnosisState?.banner === 'offer' || diagnosisState?.banner === 'trial' ? diagnosisState.banner : null;
+  // 배너에 적은 한 줄 — 체험 시작 답을 받은 뒤 직접발송 창의 AI 다듬기로 넘기는 값(받은 쪽이 가져가면 비운다 · 값이 없으면 평소의 직접발송 창)
+  const [lineHandoff, setLineHandoff] = useState<string | null>(null);
+  // 배너의 넘김으로 직접발송 창을 열었는가 — 그 창이 열려 있는 동안 요금제 변경 알림(무료체험 활성화)을 뒤로 미룬다(아래 planChangeHeld).
+  const [lineSession, setLineSession] = useState(false);
+  // 체험 시작 답을 받은 뒤의 넘김 — 목적지 하나 = 직접발송 창 + AI 다듬기(설계서 §4-3 3 ~ 6).
+  //   넘김의 완료 조건 = 서버의 시작 답 하나. 아래 다시 읽기(요금제 정보 · 진단 상태 · 오늘의 추천)는 표시를 맞추는 일이고 실패해도 넘김은 끝나 있다.
+  //   직접발송 창 열기 = 평소 여는 것과 같은 두 줄(?open=direct-send 와 같다) · 명단 · 발신번호 · 예약 · 전송은 건드리지 않는다.
+  const startLineTrialHandoff = (line: string, outcome: LineTrialOutcome) => {
+    if (outcome === 'granted') setToast({ show: true, type: 'success', message: '7일 무료체험이 열렸어요.', duration: 5000 });
+    setLineHandoff(line);
+    setLineSession(true);
+    setShowDirectSend(true);
+    setDirectSendChannel('sms');
+    setRecNonce((n) => n + 1);
+    void loadStats();
+    void refreshDiagnosisState();
+  };
   // ★ 2026-06-08: 요금제 변경(무료체험 활성/종료 포함) 최초 1회 알림 모달 (localStorage 비교)
   const [planChange, setPlanChange] = useState<{ from: string; to: string; toStatus?: string; lock?: { planName: string; reason: 'insufficient' | 'auto_off' | null } | null } | null>(null);
   // ★ 2026-07-06 요금제 변경 안내 = 서버 판정(my-plan의 plan_change)만 신뢰. localStorage 비교 폐기(브라우저 stale 값 반복 노출 근본 차단).
@@ -273,12 +272,8 @@ export default function Dashboard() {
   // ★ 2026-10-06 로그인 소개 창(AiOperatorLoginPromo)이 이 알림과 겹치지 않게 — 알림은 위 effect 에서 한 박자 늦게 정해지므로
   //   「열렸나」가 아니라 렌더 때 바로 아는 값으로 막는다: 요금제 정보 전 · 변경 알림이 있는데 아직 닫지 않음(Codex 1R)
   const [planChangeDone, setPlanChangeDone] = useState(false);
-  // ★ 2026-11-13 C133 F7 — 마케팅 진단 초대 창과도 겹치지 않게(옛: 이 값이 초대 창을 몰라 두 창이 함께 뜰 수 있었다).
-  //   같은 원칙 = 렌더 때 바로 아는 값: 진단 상태를 아직 못 받았거나 · 초대가 곧 뜰 조건(위 effect 와 같은 식)이거나 · 떠 있는 동안 기다린다.
-  //   진단 조회가 실패해도 diagnosisChecked 가 켜지므로 소개 창이 영영 막히지 않는다(그때는 초대 창이 뜰 수 없다).
-  const diagnosisInviteDue = !!diagnosisState && !!diagnosisState.eligible && !diagnosisState.completedAt && !diagnosisState.invitedAt;
-  const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone)
-    || !diagnosisChecked || diagnosisInviteDue || showDiagnosisInvite;
+  // ★ 2026-11-17 C140 — 마케팅 진단 초대 창을 걷어, 그 창과 겹치지 않으려고 진단 상태를 기다리던 조건(C133 F7)도 함께 걷었다(기다릴 창이 없다).
+  const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone);
   // 안내 확인/닫기 = 서버에 ack → 다음 조회부터 재노출 없음(계정당 1회, 브라우저·기기 무관)
   const closePlanChange = async () => {
     setPlanChange(null);
@@ -459,6 +454,10 @@ export default function Dashboard() {
   uploadModalOpenRef.current = showUploadProgressModal;
   const uploadProgressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showDirectSend, setShowDirectSend] = useState(false);
+  // ★ 2026-11-17 C140 — 배너로 체험이 켜지면 요금제 정보를 다시 읽는 순간 요금제 변경 알림(서버의 plan_change · 층이 가장 위)이 생긴다.
+  //   그 알림이 초안을 받는 직접발송 창 · AI 다듬기 창을 덮지 않게, 넘김으로 연 직접발송 창이 열려 있는 동안만 미룬다.
+  //   알림은 없애지 않는다(확인 기록도 그대로) — 창을 닫으면 종전처럼 한 번 뜬다. 평소 직접발송 창에는 걸리지 않는다(lineSession 은 넘김만 켠다).
+  const planChangeHeld = lineSession && showDirectSend;
   // ★ D224+ (2026-05-27) 영업팀장 박성용 신고 #2 fix: showDirectSend 변경 시 body.overflow='' reset 이중 안전망.
   //   옛 D218+ = AlimtalkSendModal useEffect 안전망만 추가됨 + Dashboard 부모 흐름 누락 사고. DirectSendPanel cleanup + 본 이중 안전망 동시 작동 = 스크롤 영구 차단 영구 사고 차단.
   useEffect(() => {
@@ -2479,24 +2478,18 @@ const campaignData = {
         {/* ★ 2026-11-14 C133 F4 나눠 보내기 현황(열린 회사 · 진행 중 · 멈춘 것 · 방금 끝난 것이 있을 때만) */}
         {!hideAi && <SplitStatusCard refreshKey={splitRefresh} />}
 
-        {/* ★ 2026-08-16 AI 마케팅 진단 히어로(설계서 §5-2) — dismiss 없음·판정은 서버 state */}
-        {diagnosisHero === 'invite' && (
-          <DiagnosisHeroCard
-            variant="invite"
-            attention={intro}
-            showTrialReward={diagnosisState?.grantable === 'available'}
-            onStart={() => setShowDiagnosisWizard(true)}
+        {/* ★ 2026-11-17 C140 대시보드 한 줄 배너(7일 무료체험) — 옛 진단 띠 자리 · 그릴지 = 서버 state 의 banner 칸(설계서 docs/2026-11-17-line-trial-banner-design.md) */}
+        {lineBanner && (
+          <LineTrialBanner
+            variant={lineBanner}
+            daysLeft={diagnosisState?.bannerDaysLeft ?? null}
+            onStarted={startLineTrialHandoff}
+            onUsed={() => { setToast({ show: true, type: 'error', message: '무료체험은 회사당 한 번이에요.' }); void refreshDiagnosisState(); }}
+            onFailed={() => { setToast({ show: true, type: 'error', message: '지금은 열지 못했어요. 잠시 뒤 다시 눌러 주세요.' }); void refreshDiagnosisState(); }}
           />
         )}
-        {diagnosisHero === 'trial' && (
-          <DiagnosisHeroCard
-            variant="trial"
-            trialExpiresAt={diagnosisState?.trialExpiresAt}
-            onFirstSend={() => { setShowDirectSend(true); setDirectSendChannel('sms'); }}
-          />
-        )}
-        {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 진단 카드 노출 중에는 suppress(소견이 흡수) */}
-        <BrandVoiceNudgeCard suppress={diagnosisHero === 'invite'} />
+        {/* ★ D225+ Brand Voice 미등록 회사 강력 push 카드 — 체험 제안 배너 노출 중에는 suppress(★ C140 옛: 진단 카드 노출 중) */}
+        <BrandVoiceNudgeCard suppress={lineBanner === 'offer'} />
 
 
         {/* ★ 2026-10-19 아래 한 줄 4칸(Harold 「2안」 · docs/2026-10-19-dashboard-four-cards-design.md) — 요금제 · 발송 현황 · DB 현황 · 오늘의 추천.
@@ -3235,6 +3228,7 @@ const campaignData = {
           isSpamFilterLocked={isSpamFilterLocked}
           onLockedFeature={openPlanFeature}
           isAiMessagingLocked={isAiMessagingLocked}
+          refineHandoff={lineHandoff} onRefineHandoffTaken={() => setLineHandoff(null)}
           setSpamFilterData={setSpamFilterData} setShowSpamFilter={setShowSpamFilter}
           spamModalOpen={showSpamFilter}
           kakaoTemplates={kakaoTemplates}
@@ -3655,13 +3649,7 @@ const campaignData = {
         }}
       />
 
-      {/* ★ 2026-08-16 AI 마케팅 진단 — 초대(최초 1회) + 문진·리포트 모달(설계서 §5-2·§5-3) */}
-      <DiagnosisInviteModal
-        open={showDiagnosisInvite}
-        onClose={() => setShowDiagnosisInvite(false)}
-        onStart={() => { setShowDiagnosisInvite(false); setShowDiagnosisWizard(true); }}
-        showTrialReward={diagnosisState?.grantable === 'available'}
-      />
+      {/* ★ 2026-08-16 AI 마케팅 진단 — 문진·리포트 모달(설계서 §5-3) · ★ 2026-11-17 C140 초대 창(최초 1회)은 걷었다 · 여는 길 = ?open=diagnosis(도움말 봇) */}
       <DiagnosisModal
         open={showDiagnosisWizard}
         onClose={() => setShowDiagnosisWizard(false)}
@@ -3677,7 +3665,7 @@ const campaignData = {
       />
 
       {/* 요금제 변경(무료체험 활성/종료) 최초 1회 알림 */}
-      {planChange && (
+      {planChange && !planChangeHeld && (
         <PlanChangeModal
           fromPlan={planChange.from}
           toPlan={planChange.to}

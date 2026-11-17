@@ -31,6 +31,8 @@ import {
   isDiagnosisRunner,
   judgeDiagnosisEligible,
 } from '../utils/marketing-diagnosis-grant';
+// ★ 2026-11-17 C140 — 대시보드 한 줄 배너(설문 없이 7일 체험) · 배너 판정 · 체험 시작은 CT 한 곳
+import { judgeLineBanner, runLineTrialStart, isGrantDdlPending, lineBannerColumnsSql } from '../utils/line-trial';
 
 const router = Router();
 router.use(authenticate);
@@ -68,11 +70,14 @@ router.get('/state', async (req: Request, res: Response) => {
   const companyId = req.user?.companyId;
   if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
   try {
-    const [setRes, compRes, dxRes, grantRes, invRes] = await Promise.all([
+    // ★ 2026-11-17 C140 — 지급 여부(has_grant)는 회사 행과 한 문장으로 읽는다(lineBannerColumnsSql · 한 스냅샷).
+    //   옛 꼴(지급 원장을 따로 읽는 문장)은 지급 COMMIT 과 겹치면 요금제와 지급 여부가 어긋났다.
+    const [setRes, compRes, dxRes, invRes] = await Promise.all([
       query(`SELECT version FROM diagnosis_question_sets WHERE is_active = true LIMIT 1`),
       query(
         `SELECT UPPER(COALESCE(p.plan_code, '')) AS plan_code, c.subscription_status, c.trial_expires_at,
-                ${planTermManagedSql('c')} AS plan_term_managed
+                ${planTermManagedSql('c')} AS plan_term_managed,
+                ${lineBannerColumnsSql('c')}
            FROM companies c LEFT JOIN plans p ON p.id = c.plan_id
           WHERE c.id = $1`,
         [companyId],
@@ -82,7 +87,6 @@ router.get('/state', async (req: Request, res: Response) => {
           WHERE company_id = $1 AND funnel = 'A' LIMIT 1`,
         [companyId],
       ),
-      query(`SELECT 1 FROM diagnosis_trial_grants WHERE company_id = $1`, [companyId]),
       query(`SELECT invited_at FROM diagnosis_invites WHERE company_id = $1`, [companyId]),
     ]);
     if (setRes.rows.length === 0) return activeSetMissing(res);
@@ -95,12 +99,27 @@ router.get('/state', async (req: Request, res: Response) => {
 
     let grantable: 'available' | 'already_granted' | 'not_eligible' | 'not_applicable';
     if (!eligible) grantable = 'not_applicable';
-    else if (grantRes.rows.length > 0) grantable = 'already_granted';
+    else if (comp.has_grant === true) grantable = 'already_granted';
     // ★ 2026-10-21 Harold 「기존 무료체험과는 별개로 진단은 딱 1회」 — 다른 체험 이력은 보지 않는다(지급 판정 judgeGrantEligibility 와 같은 규칙)
     else grantable = 'available';
 
+    // ★ 2026-11-17 C140 — 대시보드 한 줄 배너를 그릴지(제안 · 체험 중 · 없음). 화면은 이 칸만 읽는다(요금제 · 역할 · 지급 이력을 스스로 따지지 않는다).
+    //   아래 기존 칸은 값 · 뜻 그대로다(배포 중 옛 화면 · 문진 창이 읽는다).
+    const banner = judgeLineBanner({
+      userType: req.user?.userType,
+      planCode: comp.plan_code,
+      planTermManaged: comp.plan_term_managed === true,
+      hasGrant: comp.has_grant === true,
+      trialFuture: comp.trial_future === true,
+    });
+    // 체험 중 모양의 「N일 남음」 = 서버가 센 날 수(서울 달력 · 0 = 오늘이 마지막 날)
+    const daysLeft = Number(comp.trial_days_left);
+    const bannerDaysLeft = banner === 'trial' && Number.isFinite(daysLeft) && daysLeft >= 0 ? daysLeft : null;
+
     return res.json({
       success: true,
+      banner,
+      bannerDaysLeft,
       eligible,
       grantable,
       completedAt: dxRes.rows[0]?.created_at ?? null,
@@ -188,6 +207,45 @@ router.post('/invited', async (req: Request, res: Response) => {
     if (handleDbMigrationError(err, res, 'diagnosis_invites')) return;
     console.error('[marketing-diagnosis] invited 실패:', err);
     return res.status(500).json({ success: false, error: '기록에 실패했습니다.' });
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────
+// POST /trial/start — ★ 2026-11-17 C140 대시보드 한 줄 배너: 설문 없이 7일 체험을 켠다
+//   설계서 docs/2026-11-17-line-trial-banner-design.md §4-2 (나). 판정 · 지급 · 원장 = 설문 제출과 같은 CT(회사당 1번 = 같은 원장 UNIQUE).
+//   몸통 없음(배너에 적은 한 줄은 서버로 오지 않는다). 같은 요청이 두 번 와도 답이 같다(체험이 살아 있으면 already_granted).
+// ────────────────────────────────────────────────────────────────────
+router.post('/trial/start', async (req: Request, res: Response) => {
+  const companyId = req.user?.companyId;
+  if (!companyId) return res.status(401).json({ success: false, error: '인증 필요' });
+  // 지급이 회사 계약 상태를 바꾼다 — 화면을 우회해 직접 불러도 여기서 막힌다(설문 제출과 같은 관문)
+  if (blockedForNonAdmin(req, res)) return;
+  try {
+    const out = await runLineTrialStart(companyId, req.user?.userId ?? null);
+    if (out.outcome === 'granted' || out.outcome === 'already_granted') {
+      return res.json({ success: true, outcome: out.outcome, trialExpiresAt: out.trialExpiresAt });
+    }
+    // 4xx 무흔적 금지(기능 문서 §9) — 거절 사유를 서버에도 남긴다
+    console.warn(`[marketing-diagnosis] trial/start ${out.outcome} (company=${companyId}, user=${req.user?.userId})`);
+    if (out.outcome === 'trial_used') {
+      return res.status(409).json({ success: false, code: 'TRIAL_USED', error: '무료체험은 회사당 한 번이에요.' });
+    }
+    if (out.outcome === 'company_not_found') {
+      return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    }
+    return res.status(400).json({ success: false, code: 'NOT_APPLICABLE', error: '현재 요금제에서는 무료체험을 시작할 수 없습니다.' });
+  } catch (err) {
+    // 배포 원장 C140-DDL-1 전(진단 id 칸 NOT NULL) · 표 없음 = 503(db_alter_safety_net)
+    if (isGrantDdlPending(err)) {
+      return res.status(503).json({
+        success: false,
+        code: 'DB_MIGRATION_PENDING',
+        error: 'DB 마이그레이션 필요: diagnosis_trial_grants ALTER 실행 요청',
+      });
+    }
+    if (handleDbMigrationError(err, res, 'diagnosis_trial_grants')) return;
+    console.error('[marketing-diagnosis] trial/start 실패:', err);
+    return res.status(500).json({ success: false, error: '무료체험을 시작하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });
 

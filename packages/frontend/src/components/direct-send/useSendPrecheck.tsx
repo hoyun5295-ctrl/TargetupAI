@@ -20,6 +20,8 @@ import {
   type RecentSpamCheck, type SendCheckStatus, type SpellIssue, type SpellQuota, type SpellRow,
 } from '../../utils/send-checks';
 import { useAuthStore } from '../../stores/authStore';
+// ★ 2026-11-17 C140 — 대시보드 한 줄 배너에서 넘어온 한 줄을 AI 다듬기의 원문으로(넘김 규칙 = CT)
+import { planRefineHandoff } from '../../utils/line-trial';
 
 type ToastFn = (t: { show: boolean; type: 'success' | 'error' | 'warning'; message: string }) => void;
 
@@ -51,6 +53,12 @@ export interface SendPrecheckInput {
   setToast: ToastFn;
   /** 경고 창 [그냥 보내기] — 창의 발송 흐름을 이어 간다 */
   onSendAnyway: () => void;
+  /**
+   * ★ 2026-11-17 C140 — 대시보드 한 줄 배너에서 넘어온 한 줄(넘김 값 · 주는 곳 = DirectSendPanel 하나 · 안 주면 종전 그대로).
+   *   값이 오면 원문 스냅샷으로 옮겨 쥐고 onRefineHandoffTaken 으로 넘김 값을 비우게 한 뒤 AI 다듬기를 연다(한 번만 열린다).
+   */
+  refineHandoff?: string | null;
+  onRefineHandoffTaken?: () => void;
 }
 
 export interface SendPrecheck {
@@ -69,11 +77,35 @@ export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
     recipientsKey, hasRecipients, buildSpamTestContent, measureSmsBytes,
     spamModalOpen, isSpamFilterLocked, isAiMessagingLocked, onLockedFeature,
     setSpamFilterData, setShowSpamFilter, setToast, onSendAnyway,
+    refineHandoff = null, onRefineHandoffTaken,
   } = input;
   // 단문 바이트 계산은 최신 함수를 읽는다(맞춤법 창이 열린 동안만 · 의존 목록은 원본과 같다)
   const measureSmsBytesRef = useRef(measureSmsBytes);
   measureSmsBytesRef.current = measureSmsBytes;
   const [showAiRefineModal, setShowAiRefineModal] = useState(false);
+
+  // ★ 2026-11-17 C140 — 배너에서 넘어온 한 줄의 AI 다듬기(설계서 docs/2026-11-17-line-trial-banner-design.md §4-3 4 · 5).
+  //   원문 스냅샷이 있는 동안만 넘김의 AI 다듬기 창이 놓인다(아래 modals 의 둘째 창 · 평소 창과 다른 인스턴스 = 결과가 서로 새지 않는다).
+  //   스냅샷 = 그 창을 닫거나 안을 적용할 때까지 그대로(넘김 값은 받는 즉시 비운다 = 넘김 신호와 원문을 나눈다).
+  //   본문이 비었을 때만 그 한 줄을 본문에도 넣는다(쓰던 글은 건드리지 않는다).
+  //   이 길은 화면 잠금 값(isAiMessagingLocked)을 읽지 않는다 — 방금 서버가 체험을 켰고 관문은 서버다(창이 403 을 안에서 알린다).
+  const [refineSnapshot, setRefineSnapshot] = useState<string | null>(null);
+  // 넘김을 받는 순간의 본문(다시 그릴 때마다 최신 값 · 아래 맞춤법 절의 messageRef 와 같은 꼴 · 이 효과는 넘김 값이 바뀔 때만 돈다)
+  const handoffBodyRef = useRef(message);
+  handoffBodyRef.current = message;
+  useEffect(() => {
+    const plan = planRefineHandoff(handoffBodyRef.current, refineHandoff);
+    if (!plan) return;
+    if (plan.fillBody) setMessage(plan.snapshot);
+    setRefineSnapshot(plan.snapshot);
+    onRefineHandoffTaken?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refineHandoff]);
+  // AI 가 다듬은 안을 본문에 넣는다(평소 창 · 넘김 창이 같이 쓴다)
+  const applyRefined = (text: string) => {
+    setMessage(text);
+    setToast({ show: true, type: 'success', message: 'AI 안 적용됨 · 발송 전 미리보기 확인 권장' });
+  };
 
   const authUserId = useAuthStore((st) => st.user?.id || '');
   const [checkStatus, setCheckStatus] = useState<SendCheckStatus | null>(null);
@@ -345,11 +377,19 @@ export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
         isOpen={showAiRefineModal}
         originalMessage={message}
         onClose={() => setShowAiRefineModal(false)}
-        onApply={(text) => {
-          setMessage(text);
-          setToast({ show: true, type: 'success', message: 'AI 안 적용됨 · 발송 전 미리보기 확인 권장' });
-        }}
+        onApply={applyRefined}
       />
+      {/* ★ 2026-11-17 C140 — 배너에서 넘어온 한 줄의 AI 다듬기. 원문 스냅샷이 있는 동안만 놓이는 별도 창이다
+          (놓이자마자 한 번 생성 · 닫기 · 적용 = 스냅샷 비우기 = 창이 걷힌다 → 그 결과가 위 평소 창에 남지 않는다). */}
+      {refineSnapshot !== null && (
+        <AiRefineModal
+          isOpen
+          originalMessage={refineSnapshot}
+          autoStart
+          onClose={() => setRefineSnapshot(null)}
+          onApply={applyRefined}
+        />
+      )}
     </>
   );
 

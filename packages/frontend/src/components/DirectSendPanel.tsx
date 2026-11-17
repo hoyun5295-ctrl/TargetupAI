@@ -127,6 +127,12 @@ export interface DirectSendPanelProps {
 
   // ★ D152+ AI 다듬기 요금제 잠금 (BASIC 이상 + TRIAL만 활성, FREE/STARTER 잠금)
   isAiMessagingLocked?: boolean;
+  /**
+   * ★ 2026-11-17 C140 — 대시보드 한 줄 배너에서 넘어온 한 줄(값이 있을 때만 AI 다듬기가 그 한 줄로 열린다 · 없으면 평소의 직접발송 창 그대로).
+   *   받은 쪽(점검 훅)이 onRefineHandoffTaken 을 불러 대시보드의 넘김 값을 비운다.
+   */
+  refineHandoff?: string | null;
+  onRefineHandoffTaken?: () => void;
 
   // ★ 2026-07-04 미가입 보조기능 잠금 통일 — 스팸필터/AI 다듬기 클릭 시 요금제 업그레이드 모달(PlanUpgradeModal)
   /** 요금제가 필요한 기능을 눌렀을 때 — 공통 안내 창(PlanFeatureModal)의 기능 id(constants/plan-feature-intros.ts) */
@@ -221,6 +227,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     mmsUploadedImages, setMmsUploadedImages, setShowMmsUploadModal,
     isSpamFilterLocked, setSpamFilterData, setShowSpamFilter, spamModalOpen = false,
     isAiMessagingLocked, onLockedFeature,
+    refineHandoff = null, onRefineHandoffTaken,
     kakaoTemplates, kakaoSelectedTemplate, setKakaoSelectedTemplate,
     kakaoTemplateVars, setKakaoTemplateVars,
     alimtalkFallback, setAlimtalkFallback,
@@ -364,6 +371,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     spamModalOpen, isSpamFilterLocked, isAiMessagingLocked, onLockedFeature,
     setSpamFilterData, setShowSpamFilter, setToast,
     onSendAnyway: () => { void stageAndConfirm(); },
+    refineHandoff, onRefineHandoffTaken,
   });
 
   // ── 본문 칸: 창(전체 화면) 높이를 채우고 넘치면 칸 안 스크롤 = 공용 훅(★2026-09-29 R112 · 직접 타겟 발송 창과 같이 쓴다) ──

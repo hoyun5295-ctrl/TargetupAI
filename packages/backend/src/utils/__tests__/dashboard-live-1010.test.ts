@@ -132,7 +132,8 @@ describe('대시보드 화면 계약', () => {
   it('움직임 줄이기 = 이번에 붙인 들어오기 전부 정지 · 무한 ping 은 motion-safe 로만', () => {
     const files = [
       'components/dashboard/LiveAutomationStrip.tsx', 'components/CampaignSuccessModal.tsx', 'components/ToastProvider.tsx',
-      'components/UploadProgressModal.tsx', 'components/marketing-diagnosis/DiagnosisHeroCard.tsx', 'utils/dashboard-live.ts',
+      // ★ 2026-11-17 C140 옛 진단 띠(DiagnosisHeroCard)를 한 줄 배너가 대신한다
+      'components/UploadProgressModal.tsx', 'components/dashboard/LineTrialBanner.tsx', 'utils/dashboard-live.ts',
       'components/dashboard/CardDetailModal.tsx', 'components/AiOperatorLoginPromo.tsx', 'components/dashboard/CountUp.tsx',
       // ★ 2026-10-19 아래 한 줄 4칸 부품
       'components/dashboard/PlanStatusCard.tsx', 'components/dashboard/SendStatusCard.tsx', 'components/dashboard/DbStatusCard.tsx',
@@ -211,7 +212,9 @@ describe('회의론자 최종 검증 조건(2026-10-10)', () => {
     // 주의 점도 페이지를 새로 열 때만
     expect(read('components/dashboard/PlanStatusCard.tsx')).toContain("${intro ? 'motion-safe:animate-ping-twice' : ''}");
     expect(dash).toContain('intro={intro}');
-    expect(dash).toContain('attention={intro}');
+    // ★ 2026-11-17 C140 — 진단 띠(attention={intro} 로 주의 점을 받던 부품)를 걷었다. 새 한 줄 배너의 점은 움직이지 않는다
+    expect(dash).not.toContain('attention={intro}');
+    expect(read('components/dashboard/LineTrialBanner.tsx')).not.toMatch(/animate-ping/);
     // 잔여가 늘어난 이벤트 = 원장 다시 읽기 · 이력 창 열 때 다시 읽기
     expect(dash).toContain('if (b > cur) { void loadCredit(); return; }');
     expect(dash).toContain('setShowCreditHistory(true); void loadCredit();');

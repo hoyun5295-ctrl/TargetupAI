@@ -282,11 +282,10 @@ describe('로그인 안내 창 — 못 쓰는 회사 · 로그인마다 한 번 
   it('★ Codex 1R — 다른 자동 안내 창(요금제 변경 알림)이 정해지기 전 · 열려 있는 동안은 기다린다(렌더 때 아는 값)', () => {
     expect(promo).toContain('if (!eligible || blocked || open || askedRef.current) return;');
     const dash = front('pages/Dashboard.tsx');
-    // ★ C133 — 마케팅 진단 초대 창도 자동 안내 창이다: 진단 상태를 알기 전 · 초대가 뜰 차례 · 떠 있는 동안에도 기다린다
+    // ★ 2026-11-17 C140 — 마케팅 진단 초대 창(자동 안내 창)을 걷었다: 그 창과 겹치지 않으려고 진단 상태를 기다리던 조건(C133)도 없다 · 기다리는 것 = 요금제 변경 알림 하나
     expect(dash).toContain(
-      'const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone)\n'
-      + '    || !diagnosisChecked || diagnosisInviteDue || showDiagnosisInvite;');
-    expect(dash).toContain('const diagnosisInviteDue = !!diagnosisState && !!diagnosisState.eligible && !diagnosisState.completedAt && !diagnosisState.invitedAt;');
+      'const loginPromoBlocked = !planInfo || !!planChange || (!!planInfo.plan_change?.from && !!planInfo.plan_change?.to && !planChangeDone);');
+    for (const gone of ['diagnosisInviteDue', 'showDiagnosisInvite', 'diagnosisChecked']) expect(dash, gone).not.toContain(gone);
     expect(dash).toContain('<AiOperatorLoginPromo blocked={loginPromoBlocked} />');
     const close = dash.slice(dash.indexOf('const closePlanChange = async () => {'), dash.indexOf("fetch('/api/companies/plan-change/ack'"));
     expect(close).toContain('setPlanChangeDone(true);');

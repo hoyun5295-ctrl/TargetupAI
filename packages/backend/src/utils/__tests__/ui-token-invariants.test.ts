@@ -9,7 +9,7 @@
  * 이 파일이 잠그는 것 (전부 값 대조 — 오탐 0인 규칙만 둔다)
  *   1. 비활성 투명도는 앱 표준 집합 안의 값만 쓴다.
  *   2. 화면에 출처(Data source · 「출처:」) 줄 0 — ★2026-10-20 Harold 「출처 전부 없애 · 한줄로 DB 안에서 뽑은 것」(옛 = 캡션 한 벌 클래스 규약).
- *   3. 라이트 페이지에 인라인으로 놓이는 진단 히어로는 배경 알파를 쓰지 않는다.
+ *   3. 라이트 페이지에 인라인으로 놓이는 대시보드 한 줄 배너는 흰 판이다(★ 2026-11-17 C140 · 옛 = 진단 히어로는 배경 알파를 쓰지 않는다).
  *
  * ⛔ **넣지 않은 규칙** — "라이트 표면 컴포넌트에 다크 전제 색 금지"는 정적으로 판별할 수 없다.
  *   `<main>` 안에 있어도 대부분 모달이고, `from-gray-50/60 to-white`처럼 라이트 배경에 어두운
@@ -69,20 +69,19 @@ describe('화면 토큰 불변식 (frontend 전수 스캔)', () => {
   }, SCAN_TIMEOUT_MS);
 
   /**
-   * 진단 히어로는 **라이트 대시보드에 인라인으로** 놓이는 유일한 진단 표면이다.
-   * 알파 배경은 흰 배경에서 연해져 흰 글씨를 지운다(2026-08-17 Harold "저게 보이냐" 원인).
-   * 파일을 지정한 계약이라 오탐이 없다 — 라이트 표면이 늘면 그때 이 목록에 더한다.
+   * 대시보드 한 줄 배너는 **라이트 대시보드에 인라인으로** 놓이는 표면이다(★ 2026-11-17 C140 · 옛 진단 히어로 자리).
+   * 옛 히어로의 사고 = 알파 배경이 흰 배경에서 연해져 흰 글씨를 지웠다(2026-08-17 Harold "저게 보이냐").
+   * 새 배너는 흰 판이다 — 그라데이션 0 · 흰 글씨는 불투명 주황 버튼 하나에만 · 보라 계열 0(1115 금지 목록).
+   * 파일을 지정한 계약이라 오탐이 없다.
    */
-  it('진단 히어로(라이트 표면)는 배경 알파를 쓰지 않는다', () => {
-    const src = readFileSync(resolve(FRONT_SRC, 'components/marketing-diagnosis/DiagnosisHeroCard.tsx'), 'utf-8');
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, '');   // 주석의 사고 기록은 대상 아님
-    const alphaStops: string[] = [];
-    for (const m of code.matchAll(/bg-gradient-to-[a-z]+((?:\s+(?:from|via|to)-[a-z]+-\d+(?:\/\d+)?)+)/g)) {
-      if (/\/\d+/.test(m[1])) alphaStops.push(m[0]);
-    }
-    expect(alphaStops).toEqual([]);
-    // 흰 글씨가 놓이므로 배경은 어두운 계열이어야 한다(불투명 + 진한 색)
-    expect(code).toContain('text-white');
-    expect(code).toMatch(/from-(indigo|violet|slate|sky)-[6-9]00/);
+  it('대시보드 한 줄 배너(라이트 표면)는 흰 판 — 그라데이션 0 · 흰 글씨는 주황 버튼에만 · 보라 0', () => {
+    const src = readFileSync(resolve(FRONT_SRC, 'components/dashboard/LineTrialBanner.tsx'), 'utf-8');
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '');   // 주석의 경위 기록은 대상 아님
+    expect(code).not.toMatch(/bg-gradient-to-/);
+    expect(code).toContain('bg-white');
+    const whiteText = [...code.matchAll(/className="[^"]*\btext-white\b[^"]*"/g)].map((m) => m[0]);
+    expect(whiteText).toHaveLength(1);
+    expect(whiteText[0]).toContain('bg-[#CF4510]');
+    expect(code).not.toMatch(/\b(violet|purple|fuchsia|indigo)-\d/);
   }, SCAN_TIMEOUT_MS);
 });

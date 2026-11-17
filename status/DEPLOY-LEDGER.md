@@ -84,6 +84,7 @@
 | C137 | 7e186fd7 |
 | C138 | 미커밋 |
 | C139 | 미커밋 |
+| C140 | 미커밋 |
 
 ## §1 대기
 
@@ -2584,6 +2585,46 @@ CREATE INDEX IF NOT EXISTS idx_inbound_kb_company ON inbound_kb_items (company_i
 - 기대: 설계서 §13 의 직원 지시문(테스트계정 · 도달 불가 번호 · 발송 0)
 - 확인: 소개 창 3회 · 다시 보지 않기 · 상품 구역 → 직접발송 명단 · 업종 평균 줄 · 추천 칸 · 혜택 칸 · 켜기 창 추정 · 닫기 두 구간 · 여정 문자의 추천 상품 줄 · 상품 묶음의 반응 숫자와 관심 상품을 앞에 · 나눠 보내기(토글 잠금 이유 · 확인 창 · 시작 안 하기 · 요약 창 · 이어 보내기 · 그만) · 상담함(설정 켜기 · 답변 항목 · 직접 등록한 문의의 자동 답장 · 사람 필요 → 직접 답장 · 답 없이 닫기 · 상담 번호 넣기)
 - 결과: (대기 · 로드맵 묶음이 끝난 뒤 한 번)
+
+### C140-DDL-1 · 진단 체험 지급 원장의 진단 id 칸 NOT NULL 해제(설계서 docs/2026-11-17-line-trial-banner-design.md §4-2 (라)) · ★ 배포 앞
+- 카드: C140
+- 단계: DDL
+- 선행: 없음(배포 앞 · 제약만 푼다 · 행을 바꾸지 않는다 · 먼저 실행해도 옛 코드는 언제나 진단 id 를 넣으므로 무해 · 실행 전에 새 코드가 먼저 돌면 배너의 체험 시작 주소만 503 DB_MIGRATION_PENDING)
+- 의미 바꿈: 아니오(옛 코드가 이 칸에 NULL 을 넣지 않는다)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT is_nullable FROM information_schema.columns WHERE table_name = 'diagnosis_trial_grants' AND column_name = 'diagnosis_id';
+- 확인: 한 줄 · YES(실행 전 = NO)
+- 결과: 1117 11:5x Harold 실행(.62 · psql 한 번 · ON_ERROR_STOP · 원장 블록 글자 그대로 · 커밋 · push 앞 · C140-P0 뒤) = SET · ALTER TABLE · 확인 SELECT = is_nullable YES(1 row)
+
+> C140-DDL-1 · 배포 앞 · 되돌리기 = 필요 없음(진단 없는 지급 행이 생긴 뒤에는 NOT NULL 로 돌아가지 못한다 · 코드만 되돌린다)
+
+```sql ddl:C140-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
+```
+
+### C140-P0 · 배포 앞 확인(읽기 전용 · 운영 요금제 값 = 배너 문구 「7일 무료」 · 「AI 기능이 열려요」의 근거)
+- 카드: C140
+- 단계: 사전
+- 선행: 없음(C140-DDL-1 과 같은 창에서 먼저)
+- 기대: 체험 요금제(TRIAL)의 월 금액 0 · AI 문안 허용 true · 월 크레딧 750 / 미가입(FREE)의 AI 문안 허용 false(설계서 docs/2026-11-17-line-trial-banner-design.md §7 · §9 1 = status/SCHEMA.md plans 절의 0728 · 0915 실측 기록을 배포 전에 다시 본다)
+- 확인: SELECT plan_code, monthly_price, ai_messaging_enabled, ai_credits_per_month FROM plans WHERE plan_code IN ('FREE','TRIAL','BASIC') ORDER BY plan_code; · TRIAL 의 월 금액이 0 이 아니거나 AI 문안 허용이 true 가 아니면 배포하지 않고 멈춘다(배너 문구가 사실과 달라진다)
+- 결과: 1117 11:4x Harold 서버 출력(.62 · 서버 HEAD=5b2e7690 11-17 09:34 을 같은 줄에서 함께 봄 = 이번 pull 에 딸려 가는 다른 커밋 없음) = BASIC 350000.00 · t · 750 / FREE 0.00 · f · 0 / TRIAL 0.00 · t · 750(3 rows) = 기대와 같음
+
+### C140-H1 · 한줄로 배포(대시보드 한 줄 배너 + 7일 무료체험 · 옛 진단 띠 · 진단 초대 창 걷음 · 백엔드 + 프론트 · DDL 1 = C140-DDL-1 배포 앞 · ENV 0)
+- 카드: C140
+- 단계: 한줄로 배포
+- 선행: C140-P0 · C140-DDL-1(서버에서 먼저 실행하고 결과 칸을 채운 뒤 push) · 설계 Codex 3R · 구현 Codex 2R approve(1117) · 커밋(Harold · 경로 = scratch/c140/paths.txt · 다른 세션의 미커밋 줄과 한 파일인 문서 둘(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md)은 이 카드 줄만 = scratch/c140/docs.patch(git apply --cached) · 문안 = scratch/c140/msg.txt · 이 카드의 코드 파일은 다른 카드의 미커밋 파일과 겹치지 않는다 · tp-push 는 쓰지 않는다) → push(이 커밋만 · push 전 검사의 실 PG 통과 기록 = 1117 11:19 작업 트리 전체 89파일 836건 통과 · 다른 카드 시험 c133-split.pg 261줄이 실행마다 갈려 통과 기록이 안 찍히면 다시 돌린다)
+- 기대: 설계서 docs/2026-11-17-line-trial-banner-design.md §4 · 미가입 고객사 관리자의 대시보드 = 옛 진단 띠 자리에 흰 배너(「이번에 알릴 것, 한 줄만 적어 보세요」 · 입력칸 · 「7일 무료로 써 보기」) · 진단 초대 창이 뜨지 않는다 · 한 줄을 적고 누르면 7일 무료체험이 켜지고(진단 체험과 같은 지급 원장 = 회사당 한 번) 직접발송 창 + AI 다듬기 창이 그 한 줄로 열려 초안이 바로 나온다 · 체험 중인 회사 = 같은 배너에 「무료체험 N일 남음」 · 「문자 초안 받기」 · 체험을 이미 쓴 회사 · 유료 회사 · 담당자 계정 = 배너 없음 · 배너를 누르지 않는 회사 = 동작 변화 0 · 발송 · 과금 · 정산 코드 무수정 · 문진 창(도움말의 「이 화면 열기」 · ?open=diagnosis)과 공개 진단은 그대로
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep runLineTrialStart = dist/utils/line-trial.js 정의 · dist/routes/marketing-diagnosis.js 호출 · lineBannerColumnsSql ≥ 1(두 파일) · curl -s -o /dev/null -w "%{http_code}" -X POST https://hanjul.ai/api/marketing-diagnosis/trial/start = 401(로그인 없이) · 재시작 뒤 에러 로그에 does not exist · null value in column 0
+- 결과: (대기)
+
+### C140-S1 · 실측(요금제 미가입 시험 계정 · 고객사 관리자 · 체험 지급 이력이 없는 회사 · 슈퍼관리자 ceo)
+- 카드: C140
+- 단계: 사후
+- 선행: C140-H1 · 지급 이력이 없는 미가입 시험 회사의 관리자 계정(SELECT 로 그 회사의 diagnosis_trial_grants 0행을 먼저 본다 · 있으면 다른 시험 회사)
+- 기대: ① 대시보드에 흰 배너(진단 초대 창 없음) ② 빈 채로 누르면 「한 줄을 먼저 적어 주세요.」 ③ 한 줄을 적고 「7일 무료로 써 보기」 → 「7일 무료체험이 열렸어요.」 알림 · 직접발송 창 + AI 다듬기 창(원문 = 적은 한 줄 · 초안이 바로 나옴 · 요금제 변경 알림이 그 창을 덮지 않음) ④ 안 하나 적용 = 본문에 들어감 ⑤ 직접발송 창을 닫으면 「무료체험이 활성화되었습니다」 알림 한 번 ⑥ 배너가 「무료체험 7일 남음」 · 「문자 초안 받기」로 바뀜 · 다시 한 줄을 넣고 누르면 같은 길(체험이 한 번 더 켜지지 않음) ⑦ 같은 회사의 담당자 계정에는 배너 없음 ⑧ 슈퍼관리자 「기능 관심 업체」에 「대시보드 한 줄 배너」의 뜸 · 누름
+- 확인: SELECT g.company_id, g.diagnosis_id IS NULL AS no_diagnosis, g.granted_days, g.granted_by, c.trial_expires_at, UPPER(p.plan_code) AS plan FROM diagnosis_trial_grants g JOIN companies c ON c.id = g.company_id LEFT JOIN plans p ON p.id = c.plan_id WHERE g.granted_by LIKE 'line-banner:%' ORDER BY g.created_at DESC LIMIT 3; = 그 회사 한 줄 · no_diagnosis t · granted_days 7 · plan TRIAL · 만료 = 지급 7일 뒤 · ⑥ 뒤에도 한 줄 그대로 · AI 다듬기 1회 = 체험 크레딧에서 1 차감(SELECT ai_credits_base_remaining FROM companies WHERE id = '그 회사'; = 749) · 문자는 보내지 않는다(발송 0)
+- 결과: (대기)
 
 ## §2 덤프 뒤 적용분
 

@@ -147,6 +147,42 @@
         ],
         "createdAt": "2026-11-15T01:47:47.374Z",
         "reason": "Claude 판단(1115 2판): 포스터가 창 왼쪽 절반 · 아래 끝까지 여백 없이 꽉 차는 것이 의도한 배치(pop · vis) · 세 칸 숫자 줄(facts)은 세로 줄에서 22px 떨어져 있음 = 오탐 · 버리는 목업"
+      },
+      {
+        "rule": "low-contrast",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-17-diagnosis-banner-line-mockup.html"
+        ],
+        "createdAt": "2026-11-17T00:05:54.179Z",
+        "reason": "Claude 판단(1117): 네 건 전부 운영 화면을 옮긴 자리 표시 · 비교용(맨 위 버튼 줄의 초록 · 주황 그라데이션 흰 글씨 = DashboardActionRow · 지금 진단 띠의 끝 색 = DiagnosisHeroCard) · 새 배너 글자는 전부 4.5:1 이상 · 버리는 목업"
+      },
+      {
+        "rule": "undersized-ui-text",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-17-diagnosis-banner-line-mockup.html"
+        ],
+        "createdAt": "2026-11-17T00:05:55.355Z",
+        "reason": "Claude 판단(1117): 10px 는 지금 운영 띠의 NEW 표시(text-[10px])를 비교용으로 옮긴 것 · 버리는 목업"
+      },
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-17-diagnosis-banner-line-mockup.html"
+        ],
+        "createdAt": "2026-11-17T00:05:57.037Z",
+        "reason": "Claude 판단(1117): 보라는 운영 화면을 옮긴 자리 표시 · 비교용(AI 한줄로 버튼 · 지금 진단 띠)뿐 · 새 배너에는 없음 · 버리는 목업"
+      },
+      {
+        "rule": "nested-cards",
+        "value": "*",
+        "files": [
+          "docs/mockups/2026-11-17-diagnosis-banner-line-mockup.html"
+        ],
+        "createdAt": "2026-11-17T00:05:59.121Z",
+        "reason": "Claude 판단(1117): 목업 무대(대시보드 바탕 판) 안에 카드를 놓은 것과 지금 띠의 쿠폰을 비교용으로 옮긴 것 · 버리는 목업"
       }
     ]
   }
