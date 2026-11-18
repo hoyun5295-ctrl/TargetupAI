@@ -2792,6 +2792,21 @@ COMMIT;
 - 확인: 화면 + 서버 셸 한 줄 `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT status, company_id IS NOT NULL AS linked, count(*) FROM jbn_applications GROUP BY 1, 2;"`
 - 결과: 1118 서버 실측(Harold 출력) = curl /api/plans 코드 8(FREE · TRIAL · STAFF · STARTER · BASIC · PRO · BUSINESS · ENTERPRISE · JBN_ 0) · curl /api/public/jbn/plans = success true · 다섯(정가 · JBN 가격 105000 ~ 3850000 · 크레딧) / 화면(Harold 「다섯 단계 다 확인했어 정상이야」) = ① /jbn 사진 · 요금 다섯 · 30% ② 시험 신청 1건(도달 불가 번호) 완료 화면 ③ 「JBN 회원」 탭 확인 전 1 → 회원 맞음 → 시험 회사 연결 ④ 고객사 상세 요금제 칸에 JBN 판 다섯(저장 안 함 = 운영 회사 청구 이력 0) ⑤ 시험 신청 지우기 · 「적용 중」 전환은 실 PG 시험으로 확인(운영에서 요금제 저장 생략)
 
+### C144-H2 · 한줄로 배포(JBN 페이지 기능 구역 · 프론트만 · 백엔드 재시작 없음 · DDL 0 · ENV 0)
+- 카드: C144
+- 단계: 한줄로 배포
+- 선행: C144-S1 · 구현 Codex approve(1118 기능 구역) · 커밋(Harold · 공유 문서는 이 카드 줄만)
+- 기대: Harold 1118 「좋은 기능들 다 넣어야지 · 모션그래픽 예시 · AI 문안 생성 · 오퍼레이터 · 스팸함 위험 = 자사 기술 점검 · 고객사 목소리」 = /jbn 기능 구역 열 곳(components/jbn/JbnFeatures) · 서버 git pull = 이 커밋 하나 · 프론트 build:safe 만 · 백엔드 운영 코드 무변경(바뀐 백엔드 파일 = 시험 하나) = 백엔드 build · 재시작 없음
+- 확인: 서버 HEAD · 프론트 build:safe 통과 · dist grep `x-jnote` 파일 1 이상(packages/frontend/dist/assets)
+- 결과:
+
+### C144-S2 · 실측(JBN 페이지 기능 구역)
+- 카드: C144
+- 단계: 사후
+- 선행: C144-H2
+- 기대: hanjul.ai/jbn 을 PC 와 휴대폰으로 열어 기능 구역 열 곳(AI 한줄로 · 우리 회사 목소리 · AI 오퍼레이터 · 스팸 점검 · 여정 · 마케팅 플래너 · 모바일 DM과 이메일 · 이미지 스튜디오 · 데이터 연결 · 성과 리포트)이 화면에 들어올 때 처음부터 움직이고 · 휴대폰 폭 가로 넘침 0 · 가격 다섯과 신청 폼 그대로
+- 확인: 화면(Harold)
+- 결과:
 ## §2 덤프 뒤 적용분
 
 > 다음 재덤프 때 각 설계서(2026-10-27-mall-integration-hardening-design.md §3 · §11)로 옮기고 비운다.

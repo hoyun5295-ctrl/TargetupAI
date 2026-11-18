@@ -121,11 +121,20 @@ describe('③ 소스 계약', () => {
   });
   it('공개 화면 = 가운뎃점 · 줄표 · 모델명 0 · 검색 제외 meta · 공개 주소 둘 · 그림 폴더', () => {
     const page = front('pages/JbnPage.tsx');
-    expect(page).not.toMatch(/[·—]/);
-    expect(page).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|Gemini/i);
+    // 기능 구역(1118 덧붙임) = components/jbn/JbnFeatures. 같은 글 규칙 + 스팸 점검은 「테스트폰」이 아니라 자체 점검 기술로 쓴다(Harold 1118)
+    const feat = front('components/jbn/JbnFeatures.tsx');
+    for (const src of [page, feat]) {
+      expect(src).not.toMatch(/[·—]/);
+      expect(src).not.toMatch(/Opus|Sonnet|Haiku|GPT|Claude|Anthropic|Gemini/i);
+    }
+    expect(feat).not.toMatch(/테스트폰|테스트 폰/);
+    expect(feat).toContain('자체 개발한 점검 기술');
+    // 회사 명단으로만 열리는 SNS 채널은 싣지 않는다
+    expect(feat).not.toMatch(/SNS/);
+    expect(page).toContain('<JbnFeatures />');
     expect(page).toContain("'noindex, nofollow'");
     expect(page).toContain("from '../utils/jbn-public'");
-    expect(page).toContain("const A = '/jbn-assets/'");
+    expect(feat).toContain("const A = '/jbn-assets/'");
     const util = front('utils/jbn-public.ts');
     expect(util).toContain("JBN_PLANS_URL = '/api/public/jbn/plans'");
     expect(util).toContain("JBN_APPLY_URL = '/api/public/jbn/apply'");

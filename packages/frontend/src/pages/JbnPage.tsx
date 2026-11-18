@@ -12,11 +12,8 @@ import {
   JBN_CONSULT_CHOICES, discountPct, fetchJbnPlans, newApplicationId, submitJbnApplication, won,
   type JbnApplyBody, type JbnConsultKey, type JbnPlan,
 } from '../utils/jbn-public';
+import { Check, JbnFeatures, bg } from '../components/jbn/JbnFeatures';
 import './jbn-page.css';
-
-const A = '/jbn-assets/';
-const Check = () => <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>;
-const bg = (file: string) => ({ backgroundImage: `url("${A}${file}")` });
 
 /** 검색 제외: 이 화면이 열려 있는 동안만 robots meta 를 넣고, 떠날 때 원래대로 돌린다 */
 function useNoIndex(): void {
@@ -145,7 +142,7 @@ export default function JbnPage() {
           <div>
             <p className="lbl">JBN 대표님께만 드리는 특별가</p>
             <h1>고객관리,<br />이제 <em>한 줄</em>이면<br />됩니다</h1>
-            <p className="sub">카카오톡과 문자 발송, 고객 관리, 홍보 이미지까지 한줄로 하나로 끝납니다. 반복되는 일은 한줄로가 맡고, 대표님은 무엇을 보낼지만 정하시면 됩니다.</p>
+            <p className="sub">카카오톡과 문자 발송, 고객 관리, 자동 마케팅, 홍보 이미지까지 한줄로 하나로 끝납니다. 반복되는 일은 한줄로가 맡고, 대표님은 무엇을 보낼지만 정하시면 됩니다.</p>
             <div className="offer">
               <div><b>구독료</b><p>모든 요금제 월 구독료 <em>{offPct}% 평생 할인</em></p></div>
               <div><b>발송 단가</b><p>문자와 카카오톡, <em>온라인 최저가 수준</em></p></div>
@@ -192,78 +189,7 @@ export default function JbnPage() {
           </div>
         </section>
 
-        <div id="feat">
-          <section className="ft">
-            <div className="w fg">
-              <div>
-                <p className="q">보내기</p>
-                <h3>카카오톡과 문자,<br />한 화면에서 보냅니다</h3>
-                <p className="d">알림톡, 브랜드메시지, 문자를 같은 화면에서 고르고 보냅니다. 예약 발송도, 결과 확인도 한곳에서 끝납니다.</p>
-                <ul>
-                  <li><Check />받을 사람은 수신동의 고객만 자동으로</li>
-                  <li><Check />보내기 전에 스팸 검사로 한 번 더 확인</li>
-                  <li><Check />수신거부는 080 번호로 자동 처리</li>
-                </ul>
-              </div>
-              <div className="pn" aria-hidden="true">
-                <div className="ui">
-                  <div className="uh">새 메시지<small>오늘 오전 10:00 예약</small></div>
-                  <div className="seg"><span className="on">알림톡</span><span>브랜드메시지</span><span>문자</span></div>
-                  <div className="msg"><small>보낼 내용</small>[오후담] 겨울 시즌 메뉴 메이플 크림 라떼가 나왔어요. 이번 주 방문하시면 사이즈 업을 해 드려요.</div>
-                  <div className="kv">받는 사람<b>1,240명</b></div>
-                  <div className="ubtn">예약하기</div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="ft rev">
-            <div className="w fg">
-              <div>
-                <p className="q">고객 관리</p>
-                <h3>고객 명단 하나로<br />나누고, 골라 보냅니다</h3>
-                <p className="d">쓰던 엑셀을 그대로 올리면 항목은 AI가 맞춰 넣습니다. 최근 구매, 생일, 등급처럼 조건을 고르면 받을 사람이 바로 추려집니다.</p>
-                <ul>
-                  <li><Check />엑셀 올리기 한 번이면 고객 DB 완성</li>
-                  <li><Check />조건만 고르면 대상자 수가 바로 보입니다</li>
-                  <li><Check />생일, 재구매 안내는 자동 마케팅으로 매일 알아서</li>
-                </ul>
-              </div>
-              <div className="pn" aria-hidden="true">
-                <div className="ui">
-                  <div className="uh">우리 고객<small>전체 1,240명</small></div>
-                  <div className="r"><div><b>최근 3개월 구매</b><span>412명</span></div><em>보내기</em></div>
-                  <div className="r"><div><b>이번 달 생일</b><span>58명</span></div><em>보내기</em></div>
-                  <div className="r"><div><b>VIP 등급</b><span>96명</span></div><em>보내기</em></div>
-                  <div className="r"><div><b>6개월 넘게 안 오신 분</b><span>233명</span></div><em>보내기</em></div>
-                  <div className="ok"><Check />생일 안내는 매일 아침 자동으로 나갑니다</div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section className="ft last">
-            <div className="w fg">
-              <div>
-                <p className="q">홍보 이미지</p>
-                <h3>포스터는<br />이미지 스튜디오에서</h3>
-                <p className="d">템플릿을 고르고 상품 사진과 문구만 넣으면 포스터가 나옵니다. 옆의 그림은 모두 이미지 스튜디오로 만든 실제 결과물입니다.</p>
-                <ul>
-                  <li><Check />만든 포스터는 그대로 메시지에 붙여 보내기</li>
-                  <li><Check />디자이너 없이도 매번 같은 품질</li>
-                </ul>
-              </div>
-              <div className="pn">
-                <div className="pg">
-                  <div className="im" style={bg('n3-ohudam-windowbar.jpg')} role="img" aria-label="카페 시즌 메뉴 포스터" />
-                  <div className="im" style={bg('n2-kyeolon-niche.jpg')} role="img" aria-label="화장품 한정 상품 포스터" />
-                  <div className="im" style={bg('n1-kyeolon-monoshadow.jpg')} role="img" aria-label="화장품 신상품 포스터" />
-                  <div className="im" style={bg('n5-event-gallery.jpg')} role="img" aria-label="매장 오픈 행사 포스터" />
-                </div>
-              </div>
-            </div>
-          </section>
-        </div>
+        <JbnFeatures />
 
         <section className="sec sf" id="price">
           <div className="w">
