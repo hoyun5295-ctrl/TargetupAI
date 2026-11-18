@@ -504,7 +504,7 @@ describe('읽는 자리 전수 — 직접 읽기 잔존은 허용 목록뿐(소�
     const count = (f: string) => codeLines(join(SRC, f)).filter(({ l }) => RAW.test(l)).length;
     expect(count('routes/campaigns.ts')).toBe(1);
     expect(count('routes/spam-filter.ts')).toBe(1);
-    expect(count('utils/spam-test-queue.ts')).toBe(2);
+    expect(count('utils/spam-test-queue.ts')).toBe(1);   // ★ 2026-11-18 C143(설계 2R #2) — 실행 워커의 표본 다시 조회를 지웠다(등록 기본 표본 한 곳만 남음)
     expect(count('utils/performance-benchmark.ts')).toBe(0);   // ★ 2026-11-13 C133 F3 다시 씀 — 비율 지표만 · 고객 수(수신동의 열)를 읽지 않는다
     expect(count('utils/journey-safety-filter.ts')).toBe(1);
     expect(count('utils/channel-eligibility.ts')).toBe(1);

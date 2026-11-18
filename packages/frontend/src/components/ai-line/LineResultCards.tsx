@@ -21,7 +21,7 @@ const BUSY_RETRY_MS = 5000;
 const AUTO_LIMIT = 2;
 const RUNNING: ReadonlyArray<AiLineSpamChip['state']> = ['queued', 'running'];
 /** 검사를 다시 걸어도 결과가 같은 상태(사람이 고쳐야 바뀐다) — 지문이 바뀌기 전에는 자동으로 다시 걸지 않는다 */
-const HOLD: ReadonlyArray<AiLineSpamChip['state']> = ['demo', 'unavailable', 'unregistered', 'no_balance', 'charset', 'no_device'];
+const HOLD: ReadonlyArray<AiLineSpamChip['state']> = ['demo', 'unavailable', 'unregistered', 'no_balance', 'charset', 'no_device', 'too_long'];
 
 export interface LineResultCardsProps {
   run: AiLineRun;
@@ -65,6 +65,8 @@ function chipView(chip: AiLineSpamChip | undefined, stale: boolean): { tone: str
     }
     // ★ 2026-10-25 원장 #114 — 검사 장비(시험폰)가 없을 때(옛: 500 「처리 중 문제」)
     case 'no_device': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '지금은 스팸 검사를 할 수 없어요' };
+    // ★ 2026-11-18 C143 — SMS 90바이트 넘침(서버 판정 · 91바이트부터 통신사에서 통째로 실패)
+    case 'too_long': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: 'SMS 90바이트를 넘어요 · 줄이거나 LMS로 바꿔 주세요' };
     default: return { tone: 'bg-slate-100 text-slate-600', icon: 'wait', text: '검사 전' };
   }
 }

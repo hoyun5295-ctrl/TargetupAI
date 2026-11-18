@@ -292,6 +292,8 @@ export interface OperatorProposal {
    */
   finalCopies?: Array<OperatorFinalCopyView | null>;
   finalIndex?: number;
+  /** ★ 2026-11-18 C143 — 안마다 예상 발송비(그 안이 나가는 유형의 회사 단가 × 대상 수 · 서버 계산) · 단가를 못 읽으면 null */
+  finalCosts?: Array<number | null> | null;
   copyCheck?: 'passed' | 'rechecking' | 'blocked' | 'rejected' | 'unchecked' | 'stale' | 'none';
   /** ★ 2026-11-06 C109 — copyCheck = rejected 일 때 위치 문장(서버가 만든다 · 그 글자는 들어 있지 않다) */
   copyCheckReason?: string | null;

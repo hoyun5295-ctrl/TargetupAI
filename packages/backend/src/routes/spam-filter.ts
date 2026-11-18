@@ -5,6 +5,7 @@ import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { authenticate } from '../middlewares/auth';
 import { replaceVariables, prepareFieldMappings, getOpt080Number, buildAdSubject } from '../utils/messageUtils';
+import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from '../utils/message-byte';   // ★ 2026-11-18 C143 E3 — SMS 90바이트 판정 한 줄
 import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, spamFailDetail, deliveredUnreportedResult } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from '../utils/system-alert';
@@ -200,6 +201,12 @@ router.post('/test', authenticate, demoBlock, async (req: Request, res: Response
         code: 'SMS_UNSUPPORTED_CHARS',
         chars: unsupportedChars,
       });
+    }
+    // ★ 2026-11-18 C143 E3(뿌리 R68 길이 축 · Codex 설계 1R #4) — SMS 로 나갈 검사 글이 90바이트를 넘으면 검사 행 · 체험 횟수 · 차감 앞에서 멈춘다(글자 반려와 같은 자리 · 같은 꼴).
+    //   옛: 적재 CT 가 막으면 검사 행이 남아 결과가 시간 초과로 보였다(통신사 실패와도 다른 안내).
+    const tooLongSms = outgoing.find((o) => o.msgType === 'SMS' && smsRowOverLimit('S', o.content));
+    if (tooLongSms) {
+      return res.status(400).json({ error: smsTooLongText(eucKrByteLength(tooLongSms.content)), code: 'SMS_TOO_LONG' });
     }
 
     // ★ D103: getOpt080Number 컨트롤타워 사용 (인라인 조회 제거)

@@ -583,7 +583,8 @@ export default function StatsTab() {
                       <span className="flex h-5 w-5 items-center justify-center rounded-md bg-amber-100 text-amber-600">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M14.5 2v17.5c0 1.4-1.1 2.5-2.5 2.5s-2.5-1.1-2.5-2.5V2" /><path d="M8.5 2h7" /><path d="M9.5 16h5" /></svg>
                       </span>
-                      테스트 발송 <span className="text-slate-400 font-medium">({detail.testDetail.length}건)</span>
+                      {/* ★ 2026-11-18 C143 M2(R73) — 서버가 상한에서 잘랐으면 그렇다고(옛: 잘린 수를 전체처럼 보였다) */}
+                      테스트 발송 <span className="text-slate-400 font-medium">({detail.testDetail.length}건{detail.testDetailTruncated ? ' · 최근 것만' : ''})</span>
                     </h4>
                     <div className="rounded-xl border border-slate-200 overflow-hidden">
                     <table className="w-full text-sm">

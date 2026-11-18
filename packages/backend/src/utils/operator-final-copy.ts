@@ -12,7 +12,8 @@ import { createHash } from 'crypto';
 import { stripIncompatibleEmojis } from '../services/ai';
 import { buildAdMessage, buildAdSubject } from './messageUtils';
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
-import { eucKrByteLength } from './message-byte';
+import { eucKrByteLength, SMS_MAX_BYTES } from './message-byte';
+import { shortenedLengthBounds } from './short-url';   // ★ C143 — 주소 줄이기 두 갈래의 긴 쪽(SMS 고르기)
 import { spamCheckPassedIndex, operatorCharsReason } from './continuous-operator-policy';
 import { smsTextPlaces } from './message-sanitizer';   // ★ 2026-11-06 C109 P6 나가는 글 글자 판정
 
@@ -66,6 +67,17 @@ export function proposalSendIndex(pj: any): number {
   return 0;
 }
 
+/**
+ * ★ 2026-11-18 C143 W4(뿌리 R68 길이 축) — 자동마케팅 단문이 넘치는가 = **나가는 글**((광고) · 무료거부 줄을 붙인 SMS 글)의 바이트가 90 을 넘는가.
+ *   옛: (광고) · 무료거부 줄(약 25바이트)을 붙이기 전 본문을 재 본문 66 ~ 90바이트가 SMS 로 나가 통신사에서 통째로 실패했다(자동마케팅 = 늘 광고).
+ *   판정 = 승인 창이 보여 주는 나가는 글과 같은 조립(buildAdMessage) · 회차 문안 · 리마인드가 이 함수 하나.
+ */
+export function operatorSmsOverflows(body: string, opt080: string): boolean {
+  // ★ C143(Codex 구현 1R #2 같은 부류) — 발송은 주소를 줄여 보낸다(실패 = 원문 그대로 · continuous-operator 발송) → 두 갈래 중 긴 쪽으로 잰다
+  //   = SMS 를 고르면 줄이기가 성공하든 실패하든 90 안이다(짧은 원문 주소가 더 긴 짧은 주소로 바뀌어 넘치는 갈래까지).
+  return eucKrByteLength(buildAdMessage(shortenedLengthBounds(String(body ?? '')).max, 'SMS', true, opt080 || '')) > SMS_MAX_BYTES;
+}
+
 /** 이 안의 나가는 문안(없으면 null) — 사람 편집은 그 안을 고른 편집일 때만 */
 export function operatorFinalCopyAt(pj: any, index: number, ctx: OperatorCopyContext): OperatorFinalCopy | null {
   const msg = Array.isArray(pj?.messages) ? pj.messages[index] : null;
@@ -78,7 +90,7 @@ export function operatorFinalCopyAt(pj: any, index: number, ctx: OperatorCopyCon
   const subject = applyBenefitToBody(stripIncompatibleEmojis(rawSubject), ctx.benefit);
   const channel = String(pj?.channel?.recommended || 'SMS').toUpperCase();
   let msgType: 'SMS' | 'LMS' | 'MMS' = channel === 'LMS' || channel === 'MMS' ? channel : 'SMS';
-  if (msgType === 'SMS' && eucKrByteLength(body) > 90) msgType = 'LMS';   // 잘림 방지(옛: 편집했을 때만 · 지금: 혜택이 늘린 글도)
+  if (msgType === 'SMS' && operatorSmsOverflows(body, ctx.opt080 || '')) msgType = 'LMS';   // 잘림 방지(옛: 편집했을 때만 · 지금: 혜택이 늘린 글도 · ★ C143 = 나가는 글로)
   const sent = buildAdMessage(body, msgType, true, ctx.opt080 || '');   // 자동 마케팅 = 무조건 광고(Harold 0702)
   const fingerprint = copyFingerprint({ callback: ctx.callback, opt080: ctx.opt080, msgType, subject, body });
   return {

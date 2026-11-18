@@ -19,6 +19,7 @@
 import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { randomBytes } from 'crypto';
+import { eucKrByteLength } from './message-byte';   // ★ C143 길이 범위(shortenedLengthBounds)
 
 const HASH_LENGTH = 8;
 const HASH_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -323,6 +324,23 @@ export function shortenedLengthPreview(text: string): string {
   let out = text || '';
   for (const s of listUrlsForTracking(out).filter((x) => x.kind === 'plain').sort((a, b) => b.start - a.start)) out = out.slice(0, s.start) + stand + out.slice(s.end);
   return out;
+}
+
+/**
+ * ★ 2026-11-18 C143(뿌리 R68 길이 축 · Codex 구현 1R #2) — 줄이기가 성공하든 실패하든(실패 = 원문 그대로 · shortenUrlsInText) 나갈 글의 **길이 범위**.
+ *   새로 줄일 주소마다 원문과 짧은 주소(같은 길이의 대역 = shortenedLengthPreview) 가운데 EUC-KR 바이트가 짧은 쪽 = min · 긴 쪽 = max(DB 0).
+ *   쓰는 쪽: 「이 글은 어느 갈래로 나가도 적어도 이만큼」 = min(여정 렌더 판정 · 켜기 하한) · 「어느 갈래로 나가도 들어간다」 = max(자동마케팅 SMS 고르기).
+ */
+export function shortenedLengthBounds(text: string): { min: string; max: string } {
+  const stand = `${SHORT_URL_BASE}/${'0'.repeat(HASH_LENGTH)}`;
+  let min = text || '';
+  let max = text || '';
+  for (const s of listUrlsForTracking(text || '').filter((x) => x.kind === 'plain').sort((a, b) => b.start - a.start)) {
+    const shortFirst = eucKrByteLength(stand) <= eucKrByteLength(s.url);
+    min = min.slice(0, s.start) + (shortFirst ? stand : s.url) + min.slice(s.end);
+    max = max.slice(0, s.start) + (shortFirst ? s.url : stand) + max.slice(s.end);
+  }
+  return { min, max };
 }
 
 export async function shortenUrlsStrict(text: string, companyId: string): Promise<{ text: string; hashes: string[] }> {

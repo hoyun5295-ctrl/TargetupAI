@@ -106,6 +106,8 @@ export interface SendChunkResult {
    * kakao 단독은 sentCount와 동일 값이 들어간다.
    */
   brandSentCount: number;
+  /** ★ 2026-11-18 C143 — 90바이트를 넘어 적재 CT 가 싣지 않은 SMS 줄 수(미적재에 이미 들어 있다 · 워커 제외 기록의 진단 칸) */
+  smsTooLong?: number;
 }
 
 /**
@@ -141,6 +143,7 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
 
   let sentCount = 0;
   let brandSentCount = 0;   // ★ 2026-07-30 브랜드 축 적재수 — both 환불 분리용
+  let smsTooLong = 0;       // ★ 2026-11-18 C143 — 적재 CT 가 길이 초과로 뺀 SMS 줄(진단 칸)
 
   // 3-A. SMS (sms 또는 both)
   if (p.sendChannel === 'sms' || p.sendChannel === 'both') {
@@ -165,7 +168,10 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
         p.campaignId, p.companyId, mms[0] || '', mms[1] || '', mms[2] || '',
       ]);
     }
-    sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow, { companyId: p.companyId, source: 'direct_scheduled' }, p.tx ? { tx: p.tx } : undefined);
+    sentCount = await bulkInsertSmsQueue(p.companyTables, smsRows, p.useNow, { companyId: p.companyId, source: 'direct_scheduled' }, {
+      ...(p.tx ? { tx: p.tx } : {}),
+      onSmsTooLong: (n) => { smsTooLong += n; },
+    });
   }
 
   // 3-B. 브랜드메시지 (kakao 또는 both) — 2026-07-30 재구축: SMSQ 배치(msg_type='F')
@@ -368,5 +374,5 @@ export async function processSendChunk(p: SendChunkParams): Promise<SendChunkRes
     if (p.tx) p.tx.afterCommit(fatigue); else fatigue();
   }
 
-  return { sentCount, failedCount: recipients.length - sentCount, brandSentCount };
+  return { sentCount, failedCount: recipients.length - sentCount, brandSentCount, ...(smsTooLong > 0 ? { smsTooLong } : {}) };
 }

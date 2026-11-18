@@ -65,7 +65,7 @@ export interface OperatorPreviewData {
   window: { startAt: string; until: string; rounds: string[]; schedule: string; scheduleTime: string };
   copy: { mode: 'ai' | 'fixed'; subject: string; body: string; benefit: string | null; variables: string[] };
   /** ★ 2026-11-02 승인 기간 회차 = 예산만(회사 자동 상한은 걸지 않는다 · 서버 operatorCapPolicy) */
-  limits: { budgetMonthly: number | null; budgetDaily: number | null; unitCost: number; channel: string };
+  limits: { budgetMonthly: number | null; budgetDaily: number | null; unitCost: number; unitCostByType?: Record<'SMS' | 'LMS' | 'MMS', number>; channel: string };
   appliedSegment: { key: string; label: string } | null;
   segment: { key: string | null; params: Record<string, number> | null };
   /** 다음 승인 창 전용 */
@@ -194,7 +194,8 @@ export default function OperatorPreviewModal({
   const conds = d?.audience.conditions || [];
   const rounds = daily ? 7 : 1;
   const expectedPeople = d?.forecast ? d.forecast.reduce((s, x) => s + x.count, 0) : (d?.count ?? 0) * rounds;
-  const expectedCost = Math.round(expectedPeople * (d?.limits.unitCost || 0));
+  // ★ 2026-11-18 C143(Codex 구현 1R #1) — 고른 안이 나가는 유형(LMS 로 올린 SMS 안 포함)의 단가로 센다 · 서버 값이 없으면 채널 단가
+  const expectedCost = Math.round(expectedPeople * ((selFinal && d?.limits.unitCostByType?.[selFinal.msgType]) || d?.limits.unitCost || 0));
   const asking = d?.kind === 'questions' && d.questions.length > 0;
   const title = mode === 'renewal'
     ? (d?.needsContract ? '조건 확인' : daily ? '다음 주 승인' : '다음 회차 승인')

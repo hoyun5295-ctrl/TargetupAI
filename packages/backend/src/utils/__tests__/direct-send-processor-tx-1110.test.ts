@@ -50,7 +50,8 @@ describe('processSendChunk tx 갈래', () => {
     await expect(processSendChunk(base({ tx }))).rejects.toBeInstanceOf(QueueTxAbort);
     await expect(processSendChunk(base({ tx, sendChannel: 'kakao', kakaoSenderKey: 'k', kakaoBubbleType: 'TEXT' } as any))).rejects.toBeInstanceOf(QueueTxAbort);
     await expect(processSendChunk(base({ tx, sendChannel: 'alimtalk', alimtalkTemplateCode: 'T1', alimtalkNextType: 'N' } as any))).rejects.toBeInstanceOf(QueueTxAbort);
-    expect(st.smsOpts[0]).toEqual({ tx });
+    // ★ 2026-11-18 C143 — 적재 CT 에 길이 초과 알림(onSmsTooLong)을 함께 넘긴다(tx 는 그대로)
+    expect(st.smsOpts[0]).toEqual({ tx, onSmsTooLong: expect.any(Function) });
     expect(st.brandTx[0]).toBe(tx);
     expect(st.alimTx[0]).toBe(tx);
   });
@@ -62,7 +63,7 @@ describe('processSendChunk tx 갈래', () => {
     await hooks[0]();
     expect(st.fatigue).toBe(1);
     await processSendChunk(base({}));
-    expect(st.smsOpts[1]).toBeUndefined();
+    expect(st.smsOpts[1]).toEqual({ onSmsTooLong: expect.any(Function) });   // ★ C143 — tx 없음 = tx 칸 없음(옛 = 인자 없음)
     await new Promise((r) => setTimeout(r, 0));
     expect(st.fatigue).toBe(2);
   });

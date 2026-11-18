@@ -186,9 +186,12 @@ export async function loadWatchIps(page: number): Promise<{ watched: string[]; t
   };
 }
 
+/** ★ 2026-11-18 C143 M5(뿌리 R73) — 한 IP 기록 상한(최근) · 넘으면 truncated(옛: 100 에서 말없이 잘림) */
+export const WATCH_IP_EVENTS_LIMIT = 100;
+
 /** 한 IP 에서 감시 대상이 한 일(최근 100건 · 로그인 · 동시 접속 · 연 화면) */
-export async function loadWatchIpEvents(loginId: string, ip: string): Promise<Array<{ at: string; action: string; path: string; otherIp: string }>> {
-  if (!isWatchedLoginId(loginId)) return [];
+export async function loadWatchIpEvents(loginId: string, ip: string): Promise<{ events: Array<{ at: string; action: string; path: string; otherIp: string }>; truncated: boolean }> {
+  if (!isWatchedLoginId(loginId)) return { events: [], truncated: false };
   const r = await query(
     `SELECT al.created_at, al.action, COALESCE(al.details->>'path', '') AS path,
             COALESCE(al.details->>'takenOverIp', al.details->>'liveIp', '') AS other_ip
@@ -197,10 +200,12 @@ export async function loadWatchIpEvents(loginId: string, ip: string): Promise<Ar
         AND (LOWER(al.details->>'loginId') = $1
              OR al.user_id IN (SELECT id FROM users WHERE LOWER(login_id) = $1))
         AND al.action IN ('login_success', 'login_takeover', 'login_session_conflict', 'page_view', 'logout', 'privacy_view')
-      ORDER BY al.created_at DESC LIMIT 100`,
+      ORDER BY al.created_at DESC LIMIT ${WATCH_IP_EVENTS_LIMIT + 1}`,
     [String(loginId).toLowerCase(), normalizeIp(ip)],
   );
-  return r.rows.map((x: any) => ({ at: new Date(x.created_at).toISOString(), action: String(x.action), path: String(x.path), otherIp: String(x.other_ip) }));
+  const truncated = r.rows.length > WATCH_IP_EVENTS_LIMIT;
+  const rows = truncated ? r.rows.slice(0, WATCH_IP_EVENTS_LIMIT) : r.rows;
+  return { events: rows.map((x: any) => ({ at: new Date(x.created_at).toISOString(), action: String(x.action), path: String(x.path), otherIp: String(x.other_ip) })), truncated };
 }
 
 export type WatchEventKind = 'login' | 'takeover' | 'conflict';

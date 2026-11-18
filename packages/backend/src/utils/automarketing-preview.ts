@@ -319,7 +319,7 @@ export interface PreviewOutcome {
   window: { startAt: string; until: string; rounds: string[]; schedule: string; scheduleTime: string };
   copy: { mode: 'ai' | 'fixed'; subject: string; body: string; benefit: string | null; variables: string[] };
   /** ★ 2026-11-02 설계서 3-2 A ④ — 승인 기간 회차 = 예산만 본다(회사 자동 상한 = 회사 자율 회차 몫 · 판정 = operatorCapPolicy) → 창에는 예산을 보인다 */
-  limits: { budgetMonthly: number | null; budgetDaily: number | null; unitCost: number; channel: string };
+  limits: { budgetMonthly: number | null; budgetDaily: number | null; unitCost: number; unitCostByType: Record<'SMS' | 'LMS' | 'MMS', number>; channel: string };
   appliedSegment: { key: string; label: string } | null;
   segment: { key: string | null; params: Record<string, number> | null };
 }
@@ -538,6 +538,8 @@ async function refreshEntry(
       budgetMonthly: e.input.budgetMonthly ?? null,
       budgetDaily: e.input.budgetDaily ?? null,
       unitCost: Number(costs[channel]) || Number(costs.sms) || 0,
+      // ★ 2026-11-18 C143 W4(Codex 구현 1R #1) — 안이 나가는 유형(확정 함수가 LMS 로 올린 SMS 안)의 단가 · 창의 예상 발송비가 고른 안의 유형으로 센다
+      unitCostByType: { SMS: Number(costs.sms) || 0, LMS: Number(costs.lms) || 0, MMS: Number(costs.mms) || 0 },
       channel: channel.toUpperCase(),
     },
     appliedSegment: e.appliedSegment,

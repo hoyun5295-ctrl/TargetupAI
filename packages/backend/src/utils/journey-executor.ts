@@ -37,6 +37,8 @@ import {
 } from './sms-queue';
 import { sendSystemAlert, alertPassFailures, type PassFailure } from './system-alert';
 import { toQtmsgType, subjectForMsgType } from './qtmsg-type';
+import { smsRowOverLimit } from './message-byte';   // ★ 2026-11-18 C143 W2 — SMS 90바이트 판정 한 줄(렌더 뒤 · 비용 앞)
+import { shortenedLengthBounds } from './short-url';   // ★ C143 Codex 구현 1R #2 — 주소 줄이기 두 갈래의 짧은 쪽(렌더 판정)
 import { normalizeMmsImagePaths } from './mms-image-util';
 import { convertButtonsToQTmsg } from './alimtalk-button';
 import { buildAlimtalkEtcJson } from './alimtalk-emphasize';
@@ -945,6 +947,11 @@ async function processMessageBatchBody(
       if (r.recoLost) out = { kind: 'fail', reason: 'reco_slot_lost' };   // 추천 자리가 사라진 글 = 이 고객 미발송(다음 칸으로 전진 · 비용 0)
       else if (!isKakao && (msgType === 'LMS' || msgType === 'MMS') && (!r.subject || r.subject.trim().length === 0)) out = { kind: 'pause', reason: 'subject_empty_for_lms_mms', pauseText: `step ${step.step_order} 제목이 비어있어 LMS/MMS 발송 차단` };
       else if (!isKakao && (!r.message || r.message.trim().length < 2)) out = { kind: 'fail', reason: 'empty_message_after_prepare' };
+      // ★ 2026-11-18 C143 W2(뿌리 R68 길이 축) — 이 고객의 글이 SMS 90바이트를 넘으면 그 고객만 미발송(비용 0 · 다음 칸 · reco_slot_lost 와 같은 결말).
+      //   통신사가 통째로 실패시키는 글이다(1118 실측). 금칙어 · 비용 · 예산 · 잔액 판정보다 앞(이 고객 몫을 셈하지 않는다).
+      //   주소는 단위마다 줄여 보낸다(sendUnits) → 여기서는 줄이기 두 갈래의 짧은 쪽으로 잰다(줄이면 들어가는 글을 미리 떨어뜨리지 않는다 · Codex 구현 1R #2) ·
+      //   줄인 뒤의 실제 글은 sendUnits 가 표식 · 차감 앞에서 다시 잰다.
+      else if (!isKakao && smsRowOverLimit(toQtmsgType(msgType), shortenedLengthBounds(r.message).min)) out = { kind: 'fail', reason: 'sms_too_long' };
       else if (!isKakao && spamBlocked.has(composeSpamCheckText({ message: r.message, subject: r.subject, msgType, isAd: false }))) out = { kind: 'fail', reason: 'spam_blocked' };
       else if (head.threshold_cost_per_step != null && guardCost > Number(head.threshold_cost_per_step)) out = { kind: 'pause', reason: 'threshold_cost_exceeded', pauseText: `step 비용 ${guardCost.toLocaleString()}원 > 임계값 ${Number(head.threshold_cost_per_step).toLocaleString()}원` };
       else if (head.budget_monthly != null && monthCost + guardCost * (sends + 1) > Number(head.budget_monthly)) out = { kind: 'pause', reason: 'budget_monthly_exceeded', pauseText: `이번 달 누적 ${(monthCost + guardCost * (sends + 1)).toLocaleString()}원 > 월 예산 ${Number(head.budget_monthly).toLocaleString()}원` };
@@ -1107,7 +1114,7 @@ async function sendUnits(
   catch (cfgErr: any) { console.error(`[JourneyExecutor] sentTables 기록 실패 campaign=${campaignId}:`, cfgErr?.message || cfgErr); }
 
   for (let off = 0; off < rows.length; off += QUEUE_UNIT_MAX) {
-    const unit = rows.slice(off, off + QUEUE_UNIT_MAX);
+    let unit = rows.slice(off, off + QUEUE_UNIT_MAX);   // ★ C143 — 줄인 뒤 넘는 고객을 뺄 수 있다(아래)
     const rest = rows.slice(off);
     // I7 — 단위마다 발송 창
     const win = sendWindowStateFor(new Date(), isNightExemptStep(step));
@@ -1126,6 +1133,17 @@ async function sendUnits(
         ctx: { companyId: head.company_id, journeyId: head.journey_id, stepId: step.id, variantId: r.variantId || undefined, customerId: r.customer.id },
       })));
       shortened.forEach((m, k) => { unit[k].message = m; });
+      // ★ 2026-11-18 C143 W2(Codex 구현 1R #2) — 줄인 뒤의 실제 글로 고객마다 다시 잰다(줄이기 실패 = 원문 그대로 · 넘으면 그 고객만
+      //   failed sms_too_long + 전진 · 표식 · 차감 · 적재 0 = 렌더 판정과 같은 결말). 나머지 고객은 그대로 이 단위로 나간다(단위 전체 거절 = E2 로 가지 않게).
+      const tooLong = unit.filter((r) => smsRowOverLimit(toQtmsgType(c.msgType), r.message));
+      if (tooLong.length > 0) {
+        await logStepMany(tooLong.map((r) => r.exec.execution_id), step.id, 'failed', 'sms_too_long');
+        await advanceExecutions(head, step, tooLong.map((r) => ({ exec: r.exec, addedCost: 0 })));
+        res.failed += tooLong.length;
+        res.progressed = true;
+        unit = unit.filter((r) => !tooLong.includes(r));
+        if (unit.length === 0) continue;
+      }
     }
     // 적재 시도 상한(그 실행 · 이 칸의 적재 실패 기록 >= LOAD_ATTEMPT_MAX) = 새 표식 앞 한 곳(가드 · 다른 묶음 · 고아 정리 어디서 표식이 지워졌든 · ★ Codex 구현 3R)
     //   닿은 실행 = 다시 보내지 않고 여정 멈춤 → 실패 기록 + 전진(비용 0) → 그 실행 멈춤 · 멈춤 결말 = 이 묶음 여기까지

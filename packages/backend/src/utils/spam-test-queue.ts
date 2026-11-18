@@ -18,6 +18,7 @@ import pool, { mysqlQuery, query } from '../config/database';
 import { TIMEOUTS } from '../config/defaults';
 import { extractVarCatalog } from '../services/ai';
 import { replaceVariables, enrichWithCustomFields, buildAdMessage, buildAdSubject, prepareFieldMappings } from '../utils/messageUtils';
+import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from './message-byte';   // ★ 2026-11-18 C143 E3 — SMS 90바이트 판정 한 줄
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { unsupportedSmsCharCodes } from './sms-charset';
 import { cleanSmsTextAll, scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT · 위치 문장
@@ -547,7 +548,8 @@ export function isRenderedSample(firstRecipient: unknown): boolean {
 
 /** ★ 2026-11-06 C109 — 큐 등록 실패의 판정(순수 · 글자 반려 = rejected · 그 밖 = failed = 검사 장애) */
 export function enqueueFailureVerdict(errorCode: string | undefined): 'rejected' | 'failed' {
-  return errorCode === 'SMS_UNSUPPORTED_CHARS' ? 'rejected' : 'failed';
+  // ★ 2026-11-18 C143 E3 — SMS 90바이트 넘침도 고칠 글(글자 반려와 같은 갈래 · 사유 문장이 길이를 말한다)
+  return errorCode === 'SMS_UNSUPPORTED_CHARS' || errorCode === 'SMS_TOO_LONG' ? 'rejected' : 'failed';
 }
 
 /** ★ 2026-11-06 C109 — 글자 반려 문장 머리 · 기본 문장(사유가 비면) · 위치 읽기(쓰기 = enqueueSpamTest · 읽기 = 이 함수 · 한 파일) */
@@ -582,7 +584,9 @@ async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' 
   // ★ 2026-11-06 C109(Codex 설계 4R) — 렌더가 끝난 글은 다시 치환하지 않는다(지문 = 받은 글 그대로)
   const personalizedForHash = rendered ? rawContent : replaceVariables(rawContent, firstCustomer, fieldMappings, spamAddressBookFields);
   const messageHash = computeMessageHash(personalizedForHash);
-  const key: SpamCheckKey | null = messageHash
+  // ★ 2026-11-18 C143 E3(Codex 구현 1R #3) — 90바이트를 넘는 SMS 검사 글 = 같은 검사 키 없음(이어 보기 · 엿보기 0 → 등록이 길이 반려로 닫는다).
+  //   해시는 공백을 지우고 만들어 91바이트 글이 90바이트 글의 통과를 이어 받았다(키가 같아도 글 길이는 다르다) · 키를 쓰는 등록 · 엿보기가 모두 이 함수를 지난다.
+  const key: SpamCheckKey | null = messageHash && !(!isLmsType && smsRowOverLimit('S', personalizedForHash))
     ? { companyId, callback: callbackNumber, hash: messageHash, msgType: isLmsType ? 'LMS' : 'SMS', subject: (isLmsType ? subject : '') || null }
     : null;
   return { isLmsType, fieldMappings, firstCustomer, spamAddressBookFields, messageHash, key };
@@ -672,6 +676,12 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
         errorCode: 'SMS_UNSUPPORTED_CHARS',
         unsupportedChars,
       };
+    }
+    // ★ 2026-11-18 C143 E3(뿌리 R68 길이 축 · Codex 설계 1R #4) — SMS 로 나갈 검사 글(워커와 같은 조립 = outgoingTexts)이 90바이트를 넘으면
+    //   검사 행 · 결과 행 · 차감 앞에서 반려(rejected = 고칠 글). 옛: 적재 CT 가 막으면 결과 행이 남아 시간 초과로 보였다.
+    const smsIdx = messageTypes.indexOf('SMS');
+    if (smsIdx >= 0 && smsRowOverLimit('S', outgoingTexts[smsIdx * 2])) {
+      return { ok: false, error: smsTooLongText(eucKrByteLength(outgoingTexts[smsIdx * 2] || '')), errorCode: 'SMS_TOO_LONG' };
     }
 
     // 2-1) 고객사 080 수신거부번호 조회 (users 우선 → companies fallback)
@@ -1038,21 +1048,12 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
     await enrichWithCustomFields(fieldMappings, test.company_id);
 
     // ★ enqueue 시점 첫 고객(해시·미리보기 기준)을 그대로 재사용 — 발송 본문이 해시·미리보기와 일치.
-    //   과거 레코드(first_recipient 컬럼 도입 전)는 enqueue와 같은 name ASC NULLS LAST fallback으로 정렬 통일.
-    let firstCustomer: Record<string, any>;
-    if (test.first_recipient && typeof test.first_recipient === 'object' && Object.keys(test.first_recipient).length > 0) {
-      firstCustomer = test.first_recipient;
-    } else {
-      const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
-      const selectCols = [...new Set(['phone', 'custom_fields', ...mappingCols])].join(', ');
-      // ★ 2026-09-22 브랜드 격리(과거 레코드 폴백 경로도 같은 범위)
-      const sampleScope = await getSampleCustomerScope(test.company_id, test.user_id, { paramIndex: 2 });
-      const firstResult = await query(
-        `SELECT ${selectCols} FROM customers WHERE company_id = $1 AND is_active = true AND sms_opt_in = true${sampleScope.where} ORDER BY name ASC NULLS LAST LIMIT 1`,
-        [test.company_id, ...sampleScope.params]
-      );
-      firstCustomer = firstResult.rows[0] || {};
-    }
+    // ★ 2026-11-18 C143(Codex 설계 2R #2) — 저장된 표본이 없으면 = 등록 때 표본이 빈 고객이었다(등록이 빈 표본을 NULL 로 저장) → 같은 빈 표본으로 치환한다.
+    //   옛: 여기서 표본을 다시 조회해 등록 뒤 생긴 고객으로 치환 → 등록 때 잰 글(해시 · 글자 · 길이 판정)과 다른 글이 나갈 수 있었다.
+    //   first_recipient 칸이 생긴 뒤의 검사만 큐에 있다(옛 기록 갈래 0).
+    const firstCustomer: Record<string, any> = test.first_recipient && typeof test.first_recipient === 'object' && Object.keys(test.first_recipient).length > 0
+      ? test.first_recipient
+      : {};
 
     // 미발송 결과 행 조회
     const resultRows = await query(
@@ -1364,7 +1365,7 @@ export function isSpamHold(v: SpamVerdict): v is 'pending' | 'unconfirmed' {
 
 /** 판정 값의 사람 말(서버 문장 · 기록) — Record 라 새 값이 생기면 tsc 가 빈 칸을 잡는다 */
 export const SPAM_VERDICT_WORD: Record<SpamVerdict, string> = {
-  pass: '통과', unconfirmed: '확인 중', pending: '검사 중', blocked: '차단', rejected: '보낼 수 없는 글자', error: '검사 못 함',
+  pass: '통과', unconfirmed: '확인 중', pending: '검사 중', blocked: '차단', rejected: '보낼 수 없는 글', error: '검사 못 함',   // ★ C143 반려 = 글자 · 길이(사유 문장이 말한다)
 };
 
 /** ★ 2026-11-06 C109 — 반려 문장 읽기 CT(호출부가 같은 말을 쓴다 · P4 · 반려가 아니면 null) */

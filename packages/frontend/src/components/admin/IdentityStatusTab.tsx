@@ -220,7 +220,8 @@ export default function IdentityStatusTab() {
 
       <div className="px-6 pb-5">
         <div className="rounded-xl border border-gray-200/70 overflow-hidden">
-          <div className="px-4 py-3 text-sm font-semibold border-b">실패 기록 <span className="text-xs text-gray-400 font-normal">· 최근 30일 · 거절 코드 = 서버가 그 인증을 받지 않은 이유</span></div>
+          {/* ★ 2026-11-18 C143 M4(R73) — 목록은 최근 상한까지 · 전체 수(요약 카드와 같은 값)를 함께(옛: 「최근 30일」만 = 잘려도 전부처럼 보였다) */}
+          <div className="px-4 py-3 text-sm font-semibold border-b">실패 기록 <span className="text-xs text-gray-400 font-normal">· 최근 30일 · 최근 {data ? data.failures.length.toLocaleString() : '-'}건 / 전체 {s ? s.failures.toLocaleString() : '-'}건 · 거절 코드 = 서버가 그 인증을 받지 않은 이유</span></div>
           <div className="overflow-x-auto">
             <table className={`w-full text-sm ${ADMIN_TABLE_ONELINE}`}>
               <thead className="bg-gray-50 text-xs text-gray-500">

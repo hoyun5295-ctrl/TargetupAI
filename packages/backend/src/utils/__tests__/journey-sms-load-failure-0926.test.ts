@@ -27,7 +27,8 @@ describe('여정 문자 적재 실패 처리', () => {
     expect(fail).toContain('conn.destroy();');
     expect(fail).toContain("return { state: 'unknown', table, threadId,");
     // 문장 보내기 전 실패만 rejected(시연 막기 · 표 없음 · 연결 받기 · 연결 번호 · 단위 기록)
-    expect(unit.slice(0, sendAt).split("state: 'rejected'").length - 1).toBe(5);
+    // ★ 2026-11-18 C143 E2 — 90바이트를 넘는 SMS 줄 = 문장 보내기 전 거절(여섯째 갈래)
+    expect(unit.slice(0, sendAt).split("state: 'rejected'").length - 1).toBe(6);
     expect(unit.slice(sendAt).split("state: 'rejected'").length - 1).toBe(0);
   });
 

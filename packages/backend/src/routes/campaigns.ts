@@ -45,6 +45,9 @@ import {
   insertBrandQueue, BrandQueueInsertError, type BrandQueueRow, getEtcJsonCapacity,
   bulkInsertSmsQueue, insertAlimtalkQueue, AlimtalkQueueInsertError, toQtmsgType, insertTestSmsQueue
 } from '../utils/sms-queue';
+// ★ 2026-11-18 C143(뿌리 R68 길이 축) — SMS 90바이트 판정 한 줄 · 안내 문장 · 하한(테스트 발송 차감 앞 · 예약 문안 수정)
+import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from '../utils/message-byte';
+import { smsMinBytesIssue } from '../utils/sms-length';
 import { subjectForMsgType } from '../utils/qtmsg-type';
 // ★ 2026-07-30 브랜드 msg_contents 조립·대체발송 매핑은 CT-12에서만 — 라우트 인라인 금지
 import { buildBrandQueuePayload, resolveBrandFallback, brandFallbackQueueType, resolveBrandCallback,
@@ -400,6 +403,15 @@ router.post('/test-send', async (req: Request, res: Response) => {
     //   kakao=BRAND 단일 / both=문자(messageType)+BRAND 이중 / sms=messageType.
     //   옛 코드는 both 브랜드분이 무료였고, kakao 단독은 문자 단가로 깎였다.
     const testMsgType = (messageType || 'SMS') as string;
+    // ★ 2026-11-18 C143 E3(Codex 설계 1R #4) — 문자 축 SMS 테스트 글이 90바이트를 넘으면 차감 · 적재 앞에서 400.
+    //   글 = 아래 담당자별 적재(prepareSendMessage)와 같은 인자(받는 사람마다 같은 글) · 옛: 적재 CT 오류를 받는 사람별 실패로 삼켜 「0명에게 발송」 200 이 나갔다.
+    if ((testChannel === 'sms' || testChannel === 'both') && toQtmsgType(testMsgType) === 'S') {
+      const { message: probeMsg } = prepareSendMessage(messageContent, testFirstCustomer, testFieldMappings, {
+        msgType: messageType || 'SMS', isAd: isAd || false, opt080Number: testOpt080,
+        subject: req.body.subject || '',
+      });
+      if (smsRowOverLimit('S', probeMsg)) return res.status(400).json({ error: smsTooLongText(eucKrByteLength(probeMsg)), code: 'SMS_TOO_LONG' });
+    }
     // ★ 2026-09-26 한줄로 V2 F15·F17 — 요청마다 새 참조. 고정 zero-uuid를 공유하면 환불이 회사의 과거 테스트 환불 누적과
     //   비교돼 두 번째 실패부터 0원이 됐다(ok:true라 경보도 없었다). 차감·환불이 이 요청 안에서만 짝을 이룬다.
     const TEST_REF = randomUUID();
@@ -4098,6 +4110,16 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '발송 15분 전에는 수정할 수 없습니다', tooLate: true });
     }
 
+    // ★ 2026-11-18 C143 L8(뿌리 R68 길이 축) — SMS 예약의 새 글이 증명되는 하한(변수 없음 = 실제 글 · 변수 있음 = 고정 글자만 · Liquid = 생략)만으로
+    //   90바이트를 넘으면 어느 갈래(적재 전 queued · 큐 0 · 큐)든 고치지 않고 400. 큐 갈래는 아래에서 받는 분마다 실제 글로 다시 잰다.
+    //   표기 판정 · 080 = 아래 큐 갈래(adText · optOut080)와 같은 함수 · 같은 값.
+    if (toQtmsgType(campaign.rows[0].message_type) === 'S') {
+      const boundAdText = adTextOn(campaign.rows[0].is_ad === true, campaign.rows[0].send_config?.adText);
+      const boundOpt080 = boundAdText ? await getOpt080Number(campaign.rows[0].user_id, companyId) : '';
+      const boundIssue = smsMinBytesIssue({ template: sanitizedEditMessage, isAd: boundAdText, opt080: boundOpt080, sanitize: false });
+      if (boundIssue) return res.status(400).json({ success: false, error: boundIssue, code: 'SMS_TOO_LONG' });
+    }
+
     // ★ 2026-09-26 F24 — 적재 전(queued) 직접발송은 워커가 읽을 send_config의 message·subject까지 함께 바꾼다.
     //   **처음 읽은 상태가 queued면 큐를 보지 않고** 여기서 끝낸다(Codex 4차 1R: 그 사이 워커가 첫 청크를 적재하면 큐에 행이 보여
     //   아래 큐 편집 경로로 새어 적재된 청크만 새 문안이 됐다). send_phase='queued' 조건 = 워커 선점과 원자적 — 선점됐으면 0행 → 409.
@@ -4192,6 +4214,25 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     const adText = adTextOn(adEnabled, campaign.rows[0].send_config?.adText);
     const optOut080 = adText ? await getOpt080Number(campUserId, companyId) : '';
 
+    // ★ 2026-11-18 C143 L8 — 받는 분마다 새 글을 **먼저 다** 만든다(옛 배치 고리 안 조립과 같은 인자) → SMS 줄이 하나라도 90바이트를 넘으면 UPDATE 0 · 진행률 0 으로 400.
+    //   큐를 그 자리에서 고치는 유일한 길이라 적재 CT(마지막 문)를 지나지 않는다. 통과하면 아래 UPDATE 는 만든 값을 그대로 쓴다(문장 · 순서 무변).
+    const builtByRecipient = new Map<any, { message: string; subject: string }>();
+    let editOverMax = 0;
+    for (const recipient of recipients) {
+      const customer = customerMap.get(recipient.dest_no) || {};
+      // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
+      // ★ D142+ B1: sanitizedEditMessage(D103 순수본문) 사용 — 메시지 수정 시 (광고) 중복 부착 차단
+      const { message: builtMessage, subject: builtSubject } = prepareSendMessage(sanitizedEditMessage, customer, editFieldMappings, {
+        msgType, isAd: adText, opt080Number: optOut080,
+        subject: subject || '',
+      });
+      builtByRecipient.set(recipient, { message: builtMessage, subject: builtSubject });
+      if (smsRowOverLimit(recipient.msg_type, builtMessage)) editOverMax = Math.max(editOverMax, eucKrByteLength(builtMessage));
+    }
+    if (editOverMax > 0) {
+      return res.status(400).json({ success: false, error: smsTooLongText(editOverMax), code: 'SMS_TOO_LONG' });
+    }
+
     // 4. 테이블별로 그룹핑 후 Bulk UPDATE
     const tableGroups: Record<string, any[]> = {};
     for (const r of recipients) {
@@ -4225,14 +4266,8 @@ router.put('/:id/message', async (req: Request, res: Response) => {
         const seqnos: number[] = [];
 
         for (const recipient of batch) {
-          const customer = customerMap.get(recipient.dest_no) || {};
-
-          // ★ D103: prepareSendMessage 컨트롤타워 — 변수 치환 + (광고)+080 + ★ KISA 2026-05 제목(광고) 통합
-          // ★ D142+ B1: sanitizedEditMessage(D103 순수본문) 사용 — 메시지 수정 시 (광고) 중복 부착 차단
-          const { message: finalMessage, subject: finalSubject } = prepareSendMessage(sanitizedEditMessage, customer, editFieldMappings, {
-            msgType, isAd: adText, opt080Number: optOut080,
-            subject: subject || '',
-          });
+          // ★ C143 L8 — 위에서 만든 값(같은 인자 · 받는 분마다 한 번)
+          const { message: finalMessage, subject: finalSubject } = builtByRecipient.get(recipient)!;
 
           cases.push('WHEN seqno = ? THEN ?');
           caseParams.push(recipient.seqno, finalMessage);

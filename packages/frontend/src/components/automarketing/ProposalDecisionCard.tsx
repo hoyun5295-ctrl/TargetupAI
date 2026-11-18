@@ -53,7 +53,7 @@ const SPAM_RESULT_CHIP: Record<string, { text: string; cls: string }> = {
   unconfirmed: { text: '스팸 검사 확인 중', cls: 'bg-amber-50 text-amber-700' },
   pending: { text: '스팸 검사 중', cls: 'bg-slate-100 text-slate-600' },
   // ★ 2026-11-06 C109 — 검사 입구가 보낼 수 없는 글자로 반려(장애 아님 · 다시 검사로 안 풀린다 · 사유 줄은 아래)
-  rejected: { text: '보낼 수 없는 글자', cls: 'bg-amber-50 text-amber-800' },
+  rejected: { text: '보낼 수 없는 글', cls: 'bg-amber-50 text-amber-800' },   // ★ C143 반려 = 글자 · 길이(사유 문장이 말한다 · 서버 SPAM_VERDICT_WORD 와 같은 말)
 };
 /** ★ 2026-10-06 화면 스팸 검사 횟수(서버 PROPOSAL_SPAM_RETEST_LIMIT 와 같은 값 · 서버가 막는다) */
 const SPAM_RETEST_LIMIT = 5;
@@ -92,8 +92,6 @@ export default function ProposalDecisionCard({
   const channelReason = pj.channel?.reason;
   const messages = pj.messages || [];
   const revenue = perf.expectedRevenue;
-  const cost = proposal.costEstimate || pj.cost?.estimated || 0;
-  const roi = roiMultiple(revenue, cost);   // ★ 2026-10-25 원장 #32 — 매출 ÷ 비용(옛: 추정기 퍼센트 값 perf.roi 를 배수로 그려 100배)
   // ★ 2026-10-25 원장 #33 — 「추천」 표지 = 만들 때 저장한 추천(서버 보낼 안 판정이 쓰는 값 · 옛: 열 때 다시 뽑은 밴딧 추천이라 안 나갈 안에 「추천」)
   const recommendedIdx = typeof pj.recommendedIndex === 'number' && Number.isInteger(pj.recommendedIndex) && messages[pj.recommendedIndex] ? pj.recommendedIndex : undefined;
   const insufficient = basis.level === 'insufficient_data';
@@ -179,6 +177,13 @@ export default function ProposalDecisionCard({
   const effectiveIdx = selectedIdx != null && messages[selectedIdx] ? selectedIdx : serverIdx;
   const effectiveMsg = messages[effectiveIdx];
   const effectiveFinal = finals[effectiveIdx] || null;
+  // ★ 2026-11-18 C143(Codex 구현 1R #1) — 승인할 안의 발송비 · 유형 = 그 안이 나가는 유형(서버가 LMS 로 올린 SMS 안 포함 · 발송 차감과 같다)
+  //   승인 전 카드만 · 서버 값이 없으면 저장 금액 · 추천 유형 그대로(지난 제안 = 저장 금액)
+  const shownCost = canApprove ? proposal.finalCosts?.[effectiveIdx] : null;
+  const storedCost = proposal.costEstimate || pj.cost?.estimated || 0;
+  const cost = shownCost != null ? shownCost : storedCost;
+  const costType = canApprove && effectiveFinal ? effectiveFinal.msgType : channelName;
+  const roi = roiMultiple(revenue, cost);   // ★ 2026-10-25 원장 #32 — 매출 ÷ 비용(옛: 추정기 퍼센트 값 perf.roi 를 배수로 그려 100배)
   // 편집은 나가는 글(혜택을 넣은 글)에서 시작한다 — 고치지 않았으면 서버 글 그대로
   const effectiveBody = editedBody != null ? editedBody : (effectiveFinal?.body ?? (effectiveMsg?.body || effectiveMsg?.message || ''));
   const effectiveSubject = editedSubject != null ? editedSubject : (effectiveFinal?.subject ?? (effectiveMsg?.subject || ''));
@@ -239,7 +244,7 @@ export default function ProposalDecisionCard({
         <div className="text-[17px] md:text-[18px] font-bold text-slate-900 tabular-nums leading-none">{proposal.recipientCount.toLocaleString()}명</div>
       </div>
       <div className={`${roi != null ? 'pl-4 sm:pl-5 border-l' : 'sm:pl-5 sm:border-l'} border-slate-200`}>
-        <div className="text-[11px] text-slate-500 mb-1">발송비 · {channelName}</div>
+        <div className="text-[11px] text-slate-500 mb-1">발송비 · {costType}</div>
         <div className="text-[17px] md:text-[18px] font-bold text-slate-900 tabular-nums leading-none">{won(cost)}</div>
       </div>
     </div>
@@ -516,7 +521,7 @@ export default function ProposalDecisionCard({
       {compliance?.warnings && compliance.warnings.length > 0 && (
         <DetailRow label="컴플라이언스 경고"><DetailList items={compliance.warnings} tone="amber" /></DetailRow>
       )}
-      {pj.cost?.breakdown && <DetailRow label="비용 산출">{pj.cost.breakdown}</DetailRow>}
+      {pj.cost?.breakdown && cost === storedCost && <DetailRow label="비용 산출">{pj.cost.breakdown}</DetailRow>}
       {pj.meta?.aiSynthesis && <DetailRow label="AI 통합 분석">{pj.meta.aiSynthesis}</DetailRow>}
       {proposal.autoExecuteReason && <DetailRow label="자동 실행 판정">{proposal.autoExecuteReason}</DetailRow>}
     </div>
@@ -550,7 +555,7 @@ export default function ProposalDecisionCard({
       title={`발송 대상 확인${targetInfo?.segmentName ? `: ${targetInfo.segmentName}` : ''}`}
       objective={proposal.operatorObjective || null}
       criteria={targetInfo?.criteria ?? pj.target?.criteria ?? null}
-      channelLabel={channelName}
+      channelLabel={costType}
       totalCount={displayTotal}
       fetchPage={targetPage}
       extraColumns={targetInfo?.conditionColumns || null}

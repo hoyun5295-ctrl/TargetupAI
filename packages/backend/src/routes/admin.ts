@@ -1127,6 +1127,8 @@ router.get('/geo/status', authenticate, requireSuperAdmin, requireAdminArea('geo
  * ★ 2026-10-07 국내 대역 일괄 교체 · 되돌리기 라우트 삭제(Harold) — 「어디가 한국 IP 인가」 기준표는 직원 화면에서 바꾸는 값이 아니다.
  *   1007 그 칸에 IP 하나가 들어가 기준표가 1개가 되며 국내 로그인이 전부 막혔다. 갱신 = 서버 명령(status/OPS.md §2-2-F) · 직원은 예외 승인만.
  */
+/** ★ 2026-11-18 C143 M1(R73) — 접근 예외 목록 상한(최근 · 활성 먼저) · 넘으면 truncated */
+const GEO_EXCEPTIONS_LIMIT = 300;
 router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea('geoAccess'), async (req: Request, res: Response) => {
   try {
     // ★ 2026-10-08 본인 전용 계정의 예외 행은 본인에게만(기록은 남는다 · 화면 조회만 거른다)
@@ -1146,10 +1148,12 @@ router.get('/geo/exceptions', authenticate, requireSuperAdmin, requireAdminArea(
           -- ★1008 본인 전용 계정이 직접 승인한 global 예외(출장 IP)도 본인에게만 — 슈퍼관리자는 user_id 칸(→ users)에 못 들어가 global 로 건다
           AND NOT (a.scope = 'global' AND COALESCE(a.approved_by::text, '') = ANY($1::text[]))
         ORDER BY a.is_active DESC, a.approved_at DESC
-        LIMIT 300`,
+        LIMIT ${GEO_EXCEPTIONS_LIMIT + 1}`,
       [hidden]
     );
-    return res.json({ exceptions: result.rows });
+    // ★ 2026-11-18 C143 M1(뿌리 R73) — 상한 + 1 로 읽어 넘으면 자르고 알린다(옛: 300 에서 말없이 잘림)
+    const truncated = result.rows.length > GEO_EXCEPTIONS_LIMIT;
+    return res.json({ exceptions: truncated ? result.rows.slice(0, GEO_EXCEPTIONS_LIMIT) : result.rows, truncated });
   } catch (error: any) {
     if (isGeoSchemaMissing(error)) return res.status(503).json(GEO_MIGRATION_HINT);
     console.error('접근 예외 조회 실패:', error);
@@ -1966,6 +1970,8 @@ const isAgencyEmailMissingRelation = (err: any) => {
 };
 
 // 목록 + 귀속 사용자 후보(모달 드롭다운용 · 시스템 가상 계정 제외 관례 = COALESCE(is_system,false)=false)
+/** ★ 2026-11-18 C143 M3(R73) — 대행 발신 주소를 맡길 직원 목록 상한 · 넘으면 usersTruncated */
+const AGENCY_EMAIL_USERS_LIMIT = 200;
 router.get('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const senders = await query(
@@ -1980,10 +1986,12 @@ router.get('/companies/:id/agency-send-emails', authenticate, requireSuperAdmin,
     const users = await query(
       `SELECT id, name, login_id, status, is_active FROM users
         WHERE company_id = $1::uuid AND COALESCE(is_system, false) = false
-        ORDER BY name NULLS LAST, login_id LIMIT 200`,
+        ORDER BY name NULLS LAST, login_id LIMIT ${AGENCY_EMAIL_USERS_LIMIT + 1}`,
       [req.params.id],
     );
-    return res.json({ success: true, senders: senders.rows, users: users.rows });
+    // ★ 2026-11-18 C143 M3(뿌리 R73) — 맡길 직원 목록 = 상한 + 1 로 읽어 넘으면 자르고 알린다(옛: 200 에서 말없이 잘려 뒤 직원은 고를 수 없었다)
+    const usersTruncated = users.rows.length > AGENCY_EMAIL_USERS_LIMIT;
+    return res.json({ success: true, senders: senders.rows, users: usersTruncated ? users.rows.slice(0, AGENCY_EMAIL_USERS_LIMIT) : users.rows, usersTruncated });
   } catch (err: any) {
     if (isAgencyEmailMissingRelation(err)) return agencyEmailMigrationPending(res);
     console.error('[Admin] 허용 이메일 목록 조회 실패:', err);
@@ -5068,8 +5076,9 @@ router.get('/watch-log', authenticate, requireSuperAdmin, async (req: Request, r
 router.get('/watch-log/events', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     if (!(await isWatchLogViewer(req.user?.userId))) return res.status(403).json({ success: false, error: '감시 기록 열람 권한이 없습니다.' });
-    const events = await loadWatchIpEvents(String(req.query.loginId || ''), String(req.query.ip || ''));
-    return res.json({ success: true, events });
+    // ★ 2026-11-18 C143 M5(R73) — 최근 상한까지 + 넘었는가(truncated)
+    const { events, truncated } = await loadWatchIpEvents(String(req.query.loginId || ''), String(req.query.ip || ''));
+    return res.json({ success: true, events, truncated });
   } catch (err: any) {
     console.error('[admin/watch-log/events] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '감시 기록을 불러오지 못했습니다.' });

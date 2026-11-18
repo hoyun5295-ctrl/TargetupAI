@@ -106,7 +106,7 @@ export const SPAM_VERDICT_LABEL: Record<string, string> = {
   unconfirmed: '확인 중',
   pending: '검사 중',
   // ★ 2026-11-06 C109 — 검사 입구 글자 반려
-  rejected: '보낼 수 없는 글자',
+  rejected: '보낼 수 없는 글',   // ★ C143 반려 = 글자 · 길이(사유 문장이 말한다)
 };
 
 /**

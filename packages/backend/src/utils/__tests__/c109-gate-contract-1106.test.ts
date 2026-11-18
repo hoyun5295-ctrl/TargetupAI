@@ -90,7 +90,8 @@ describe('K8 반례 추적 — 렌더가 끝난 글은 다시 치환하지 않�
 describe('K4(R7) 반려 = rejected · 장애 아님', () => {
   it('판정 · 이름표 · 큐 실패 매핑', () => {
     expect(spamVerdictOf({ spamResult: 'rejected', carrierResults: [] } as any, 1)).toBe('rejected');
-    expect(SPAM_VERDICT_WORD.rejected).toBe('보낼 수 없는 글자');
+    // ★ 2026-11-18 C143 — 반려 = 글자 · 길이(90바이트) 둘 다(사유 문장이 무엇인지 말한다) → 이름표 「보낼 수 없는 글」
+    expect(SPAM_VERDICT_WORD.rejected).toBe('보낼 수 없는 글');
     expect(enqueueFailureVerdict('SMS_UNSUPPORTED_CHARS')).toBe('rejected');
     expect(enqueueFailureVerdict('NO_TEST_DEVICE')).toBe('failed');
     expect(enqueueFailureVerdict(undefined)).toBe('failed');

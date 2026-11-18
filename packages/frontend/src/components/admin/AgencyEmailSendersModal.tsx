@@ -53,6 +53,7 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
   //   있어도 "여러 귀속에 등록됨"은 사실이기 때문이다(아래 계산은 senders를 그대로 참조한다).
   const [page, setPage] = useState(1);
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [usersTruncated, setUsersTruncated] = useState(false);   // ★ 2026-11-18 C143 M3(R73) — 서버가 직원 목록을 상한에서 잘랐는가
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [migrationPending, setMigrationPending] = useState(false);
@@ -73,12 +74,14 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
         setMigrationPending(true);
         setSenders([]);
         setUsers([]);
+        setUsersTruncated(false);
         return;
       }
       if (!data?.success) throw new Error(data?.error || '목록을 불러오지 못했습니다.');
       setMigrationPending(false);
       setSenders(data.senders || []);
       setUsers(data.users || []);
+      setUsersTruncated(data.usersTruncated === true);
       onChanged?.((data.senders || []).filter((s: SenderRow) => s.is_active).length);
     } catch (e: any) {
       showAlert('불러오기 실패', e?.message || '허용 이메일 목록을 불러오지 못했습니다.', 'error');
@@ -223,6 +226,7 @@ export default function AgencyEmailSendersModal({ companyId, companyName, show, 
                         <option key={u.id} value={u.id} disabled={u.is_active !== true || u.status !== 'active'}>{userLabel(u)}</option>
                       ))}
                     </select>
+                    {usersTruncated && <p className="mt-1 text-[12px] text-gray-500">직원이 많아 이름순 앞 {users.length.toLocaleString()}명만 보여요.</p>}
                   </div>
                 </div>
                 <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-[1fr_110px] gap-2.5 items-end">

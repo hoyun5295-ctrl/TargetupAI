@@ -15,6 +15,8 @@ import { classifyResultTables, mergeCampaignCounts, type CampaignAggCounts } fro
 import type { AlimtalkResultAgg } from './refund-calc';
 import { splitLinesByMsgType } from './sms-line-split';
 import { toQtmsgType } from './qtmsg-type';
+// ★ 2026-11-18 C143(뿌리 R68 길이 축 · R47) — SMS 90바이트 판정 한 줄 · 넘침 오류(무거운 조립 모듈 없이)
+import { eucKrByteLength, smsRowOverLimit, SmsTooLongError } from './message-byte';
 // ★ 2026-07-07 비토 게이트웨이 라인 전용 SENDER_KEY 주입 (Agent v1.0.10 kakao_sender_key 필수 대응)
 import { withSenderKey } from './alimtalk-emphasize';
 // ★ 2026-11-10 묶음 트랜잭션(직접발송 워커 · 끊김 이어 싣기) — tx 를 받으면 그 연결로 · 배치 실패 = QueueTxAbort · 탐지 · 학습 = 커밋 뒤
@@ -181,6 +183,9 @@ export async function insertTestSmsQueue(
   const testTables = await getTestSmsTables();
   const table = testTables[0];
   const mType = toQtmsgType(msgType);
+  // ★ 2026-11-18 C143 E3 — 90바이트를 넘는 SMS 는 적재하지 않는다(통신사가 통째로 실패시킨다 · 1118 실측).
+  //   방어다: 쓰는 자리(직접 테스트 차감 앞 · 스팸 직접 검사 행 앞 · 스팸 큐 등록)가 먼저 막는다. 부르는 자리 전수 = 계약 c143 K4.
+  if (smsRowOverLimit(mType, content)) throw new SmsTooLongError(eucKrByteLength(content));
   // ★ D131: MMS 타입인데 이미지 0장이면 원천 거부 (status_code=9007 파일 오류 방지).
   //   실측 2026-04-21: 담당자 테스트 MMS 19건 중 7건(37%)이 이미지 없이 INSERT → 전부 9007.
   //   호출부가 이미지 체크 안 하고 넘기는 실수를 컨트롤타워에서 원천 차단.
@@ -1503,6 +1508,10 @@ export async function loadQueueUnit(p: {
   try {
     if (p.kind === 'sms') {
       const rows = p.smsRows!;
+      // ★ 2026-11-18 C143 E2 — 90바이트를 넘는 SMS 줄이 있으면 문장을 보내기 전에 거절(안 들어감 확정 · 기록 0).
+      //   여정 실행기가 렌더 뒤 · 비용 앞에서 그 고객을 먼저 거른다(sms_too_long) — 여기는 새 길이 그 판정을 빼먹었을 때의 마지막 문.
+      const over = rows.filter((r) => smsRowOverLimit(r[3], r[2])).length;
+      if (over > 0) return { state: 'rejected', table: null, reason: `SMS 90바이트 초과 ${over}건(적재하지 않음)` };
       for (const id of new Set([(p.ctx as any)?.companyId, ...rows.map((r) => r[7])].filter((v) => typeof v === 'string' && v))) await guardDemoLeak('loadQueueUnit', id as string);
       spamSnapshot = snapshotSendContents(rows);
       const hasMms = rows.some((r) => r[3] === 'M');
@@ -1794,13 +1803,36 @@ export async function bulkInsertSmsQueue(
   ctx?: SpamBlockContext,
   // ★ 2026-10-31 배치 INSERT 를 실행할 함수 — 여정 담당자 안내만 상한 있는 연결(withBoundedMysql)을 넘긴다.
   //   없으면 지금처럼 공용 풀(mysqlQuery) · 금칙어 탐지 · 시연 막기 · 라인 나누기 · 실패 배치 미집계는 그대로(설계서 2026-10-31 §2-8).
-  opts?: { run?: (sql: string, params?: any[]) => Promise<any>; tx?: QueueTx },
+  opts?: {
+    run?: (sql: string, params?: any[]) => Promise<any>; tx?: QueueTx;
+    /** ★ 2026-11-18 C143 — 90바이트를 넘어 싣지 않은 SMS 줄 수 · 가장 긴 바이트(부르는 쪽이 제외 기록에 남긴다 · 없으면 경보 줄만) */
+    onSmsTooLong?: (count: number, maxBytes: number) => void;
+  },
 ): Promise<number> {
   if (rows.length === 0) return 0;
   // ★ 2026-11-10 tx(직접발송 워커 묶음) = 그 연결 · 배치 실패를 삼키지 않는다(QueueTxAbort) · 탐지 = 커밋 뒤
   const exec = opts?.tx ? opts.tx.run : (opts?.run ?? mysqlQuery);
   // ★ 2026-10-09 시연 회사 최후 방어 — 회사 = ctx 또는 행의 app_etc2(row[7])
   for (const id of new Set([(ctx as any)?.companyId, ...rows.map((r) => r[7])].filter((v) => typeof v === 'string' && v))) await guardDemoLeak('bulkInsertSmsQueue', id as string);
+
+  // ★ 2026-11-18 C143 E1(뿌리 R68 길이 축 · R47 효과 자리) — 마지막 문: 90바이트를 넘는 SMS 줄은 싣지 않는다.
+  //   1118 실측 = 91바이트부터 통신사가 통째로 실패(잘려 가지 않음). 넘는 줄만 빼고 남은 줄은 옛 배열 순서 그대로 싣는다.
+  //   반환 = 실린 건수(옛 계약) → 부르는 쪽의 「미적재 = 차감 − 적재」 환불이 뺀 몫을 돌려준다(AI · 직접 동기 · 직접 워커 · 자동발송).
+  //   던지지 않는다(tx 묶음이 되돌려지지 않는다 · 넘는 줄이 전부면 INSERT 0 · 반환 0). 본문 · 번호는 로그에 싣지 않는다.
+  {
+    const kept: any[][] = [];
+    let over = 0;
+    let maxBytes = 0;
+    for (const r of rows) {
+      if (smsRowOverLimit(r[3], r[2])) { over += 1; maxBytes = Math.max(maxBytes, eucKrByteLength(String(r[2] ?? ''))); } else kept.push(r);
+    }
+    if (over > 0) {
+      console.warn(`[sms-queue][SMS_TOO_LONG] company=${(ctx as any)?.companyId || '-'} source=${ctx?.source || '-'} 건수=${over} 최장=${maxBytes}바이트 — 적재 안 함(미적재 환불 계약)`);
+      opts?.onSmsTooLong?.(over, maxBytes);
+      rows = kept;
+      if (rows.length === 0) return 0;
+    }
+  }
 
   // ★ 2026-08-18 전송자격인증 5.2 — 금칙어 **탐지**(0819 탐지 전용 · 임계 경로 밖).
   //   발송이 실제로 시작되는 길목이 여기다(소비처 17곳이 전부 이 함수를 지난다).

@@ -266,6 +266,7 @@ export default function AdminDashboard() {
   // ★ 2026-08-19 국외 접근 통제(전송자격인증 2.2) — 시행 스위치는 서버 env가 소유한다. 화면에 켜는 버튼을 두지 않는다.
   const [geoStatus, setGeoStatus] = useState<any>(null);
   const [geoExceptions, setGeoExceptions] = useState<any[]>([]);
+  const [geoExTruncated, setGeoExTruncated] = useState(false);   // ★ 2026-11-18 C143 M1(R73) — 서버가 상한에서 잘랐는가
   const [geoHits, setGeoHits] = useState<any[]>([]);
   const [geoHitsDenied, setGeoHitsDenied] = useState(false); // 403 = 권한 없음. "기록 없음"으로 그리면 거짓이다
   // ★ 2026-10-07 쪽 넘김(20건 · ListPager) — 차단 로그 = 서버가 쪽마다 · 예외 승인 = 받아 둔 목록을 자른다
@@ -285,7 +286,11 @@ export default function AdminDashboard() {
       loadGeoHits(geoHitsPage),
     ]);
     if (statusRes.ok) setGeoStatus(await statusRes.json());
-    if (exRes.ok) setGeoExceptions((await exRes.json()).exceptions || []);
+    if (exRes.ok) {
+      const exData = await exRes.json();
+      setGeoExceptions(exData.exceptions || []);
+      setGeoExTruncated(exData.truncated === true);
+    }
   };
 
   const loadGeoHits = async (page: number) => {
@@ -2938,7 +2943,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
         {activeTab === 'noticeAck' && noticeAckAllowed && <CustomerNoticeAckTab />}
         {activeTab === 'watchLog' && watchLogAllowed && <WatchLogTab />}
 
-        {activeTab === 'geoAccess' && <GeoAccessTab {...{ geoBusy, geoExPage, geoExceptions, geoForm, geoHits, geoHitsDenied, geoHitsPage, geoHitsTotal, geoStatus, loadGeoAccess, loadGeoHits, setGeoBusy, setGeoExPage, setGeoForm, showAlert }} />}
+        {activeTab === 'geoAccess' && <GeoAccessTab {...{ geoBusy, geoExPage, geoExceptions, geoExTruncated, geoForm, geoHits, geoHitsDenied, geoHitsPage, geoHitsTotal, geoStatus, loadGeoAccess, loadGeoHits, setGeoBusy, setGeoExPage, setGeoForm, showAlert }} />}
 
         {/* 요금제 관리 탭 */}
         {activeTab === 'spamBlock' && <SpamBlockTab {...{ loadSpamBlock, loadSpamHits, setSpamBusy, setSpamElements, setSpamModeBusyId, setSpamRuleName, setSpamRulesPage, setSpamSim, showAlert, showConfirm, spamBlockNotice, spamBusy, spamElements, spamHits, spamHitsPage, spamHitsTotal, spamModeBusyId, spamRuleName, spamRules, spamRulesPage, spamSim }} />}

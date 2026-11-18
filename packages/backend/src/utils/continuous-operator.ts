@@ -1585,7 +1585,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   await clearZeroTargetNotice(operator.id);
 
   // 6. 자동 발송 자격 체크 (ENT 옵션)
-  const costEstimate = orchestratorResult.cost?.estimated || 0;
+  let costEstimate = orchestratorResult.cost?.estimated || 0;
   const compliance = orchestratorResult.compliance || { passed: true, riskLevel: 'low' };
   // ★ 2026-07-02 (Harold 명시): 자동마케팅 = 무조건 광고. orchestrate에 forcedIsAd로 고정했지만
   //   이 파일 안 판정도 상수로 고정(이중 안전) — 스팸테스트·080 가드·발송 전부 광고 기준.
@@ -1614,6 +1614,15 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
   //   옛: 혜택은 발송 때만 치환돼 검사한 글 · 알린 글 ≠ 나간 글이었다. 담당자 문자의 「실제 발송될 문안」도 이 sent(남지현 1008 접수의 같은 CT).
   const copyCtx = { benefit: operator.benefitContent, opt080: adOpt080, callback: sendCallback };
   const firstFinal = operatorFinalCopy(orchestratorResult, copyCtx);
+  // ★ 2026-11-18 C143 W4(Codex 구현 1R #1) — 확정 함수가 SMS 안을 LMS 로 올렸으면 예상 비용 = LMS 단가(발송 차감 = 나가는 유형 · 옛: 승인 금액 SMS · 차감 LMS).
+  //   추천 유형(channel.recommended)은 그대로 둔다(다른 안의 판정 · 지문 기준) · 상한 판정 · 담당자 알림 · 저장 금액이 이 값을 쓴다.
+  if (channelForSpam === 'SMS' && firstFinal?.msgType === 'LMS') {
+    const unit = Number((getCompanyCosts(companyInfo) as Record<string, number>).lms);
+    if (Number.isFinite(unit)) {
+      costEstimate = Math.round(unit * recipientCount);
+      orchestratorResult = { ...orchestratorResult, cost: { ...(orchestratorResult.cost || {}), estimated: costEstimate, unitCost: unit, breakdown: `${recipientCount.toLocaleString()}건 × ${unit.toLocaleString()}원` } };
+    }
+  }
   const bestMessage = firstFinal?.body || '';
   const bestSubject = firstFinal?.subject || '';
   // ★ 2026-07-02: 담당자에게 안내할 "실제 발송될 문안" — 스팸 검사 뒤 저장된 제안으로 다시 정한다
@@ -2136,6 +2145,14 @@ export async function listProposals(
   // ★ 2026-10-08 (남지현 접수) 승인 화면 문안도 고객이 받는 모양으로 · ★ 2026-10-24 결함 1 — 화면이 흉내 내지 않는다:
   //   서버가 안마다 나가는 문안(operatorFinalCopy · 혜택 · 080 · 회신번호)과 보낼 안 번호 · 검사 상태를 싣는다.
   const ctxBy = new Map<string, Promise<OperatorCopyContext>>();
+  // ★ 2026-11-18 C143 W4(Codex 구현 1R #1) — 안마다 예상 비용 = 그 안이 나가는 유형(LMS 로 올린 SMS 안 포함)의 회사 단가 × 대상 수(발송 차감과 같은 유형 · 화면은 계산하지 않는다)
+  //   단가를 못 읽으면 싣지 않는다(화면 = 저장 금액 그대로 · 목록은 막지 않는다).
+  //   단가 읽기 = 회차 예상 비용과 같은 칸(회차 companyInfo 의 cost_per_* · 부가세 기준 칸 없이) = 저장 금액 · 담당자 알림과 같은 기준.
+  //   발송 직전 기록은 부가세 기준 칸까지 읽는다 = 이 카드 밖의 기존 차이(C143 범위 밖 기록 · 1118 실 PG 50 대 55).
+  const unitCosts = await query(
+    `SELECT cost_per_sms, cost_per_lms, cost_per_mms, cost_per_kakao FROM companies WHERE id = $1::uuid`,
+    [companyId],
+  ).then((r) => (r.rows[0] ? getCompanyCosts(r.rows[0]) as Record<string, number> : null)).catch(() => null);
   return Promise.all(result.rows.map(async (row: any) => {
     const opKey = String(row.operator_id || '');
     if (!ctxBy.has(opKey)) ctxBy.set(opKey, proposalCopyContext(companyId, row).catch(() => ({ benefit: row.benefit_content ?? null, opt080: '', callback: '' })));
@@ -2153,7 +2170,11 @@ export async function listProposals(
             : pj?.spamCheck?.fp ? 'stale' : 'none';
     const copyCheckReason = copyCheck !== 'rejected' ? null
       : operatorCharsReason(send?.charIssue || spamRejectionPlaces(typeof recheck?.rejection === 'string' ? recheck.rejection : null));
-    return { ...mapRowToProposal(row), adOptOut: ctx.opt080, finalCopies, finalIndex, copyCheck, copyCheckReason };
+    const mapped = mapRowToProposal(row);
+    const finalCosts = unitCosts
+      ? finalCopies.map((f) => { const u = f ? Number(unitCosts[f.msgType.toLowerCase()]) : NaN; return Number.isFinite(u) ? Math.round(u * mapped.recipientCount) : null; })
+      : null;
+    return { ...mapped, adOptOut: ctx.opt080, finalCopies, finalIndex, finalCosts, copyCheck, copyCheckReason };
   }));
 }
 
@@ -4589,10 +4610,20 @@ async function scheduleSequenceReminder(
     return;
   }
 
-  // 채널 — 1차와 같게, 단 관리자 문안이 SMS 한도를 넘으면 LMS 승격(잘림 방지 — 수동 편집 경로와 같은 규칙).
-  let reminderType = (primaryMsgType === 'LMS' || primaryMsgType === 'MMS') ? primaryMsgType : 'SMS';
-  if (reminderType === 'SMS' && eucKrByteLength(content) > 90) reminderType = 'LMS';
-  const reminderSubject = reminderType === 'SMS' ? '' : String(pj.messages?.[0]?.subject || op.name || '');
+  // 채널 — 1차와 같게, 단 나가는 글이 SMS 한도를 넘으면 LMS 승격(잘림 방지 — 수동 편집 경로와 같은 규칙).
+  // ★ 2026-11-18 C143 W4(Codex 설계 1R #2) — 유형 · 제목 · 예상 비용 = **확정 함수(operatorFinalCopy) 하나**의 결과로.
+  //   옛: 혜택 치환 전 본문(광고 표기 없이)으로 따로 재 저장 → 아래 확정(치환 · 080 · 광고 표기)이 다른 유형을 내면 저장 SMS · 비용 SMS · 나가는 LMS · 제목 빈 글.
+  //   080 조회가 실패하면 빈 값으로 판정하고(아래 검사 블록이 다시 읽는다) 예약은 막지 않는다(옛 갈래 = 이 함수는 080 을 읽지 않았다).
+  let reminderOpt080 = '';
+  try { reminderOpt080 = await getOpt080Number(op.created_by || null, companyId); } catch (e: any) { console.warn('[ContinuousOperator Sequence] 리마인드 080 조회 경고(빈 값으로 판정):', e?.message); }
+  const baseType = (primaryMsgType === 'LMS' || primaryMsgType === 'MMS') ? primaryMsgType : 'SMS';
+  const baseSubject = String(pj.messages?.[0]?.subject || op.name || '');
+  const draftFinal = operatorFinalCopy({
+    channel: { recommended: baseType, isAd: true },
+    messages: [{ variantId: 'reminder', body: content, subject: baseSubject }],
+  }, { benefit: op.benefit_content, opt080: reminderOpt080, callback: callback || '' });
+  const reminderType = draftFinal?.msgType || baseType;
+  const reminderSubject = reminderType === 'SMS' ? '' : baseSubject;
 
   // 예상 비용 — 1차 값 복사 금지(Codex 1R-e): SMS→LMS 승격이면 단가가 달라 표시 ≠ 실차감이 된다.
   //   리마인드 채널 단가 × 1차 수신 수(상한)로 다시 센다. 조회 실패 = 0(표시 전용 — 실차감은 발송 시 실측).

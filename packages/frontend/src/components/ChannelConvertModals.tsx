@@ -45,14 +45,16 @@ export function LmsConvertModal({
     ? `무료거부${optOutNumber.replace(/-/g, '')}`
     : `무료수신거부 ${optOutNumber}`;
 
+  // ★ 2026-11-18 C143 W1(뿌리 R56 안내 = 실제 · R68 길이 축) — 판정 식은 그대로(광고 = 90바이트 자리에서 무료거부 줄이 끊기면 SMS 불가).
+  //   잘린 글은 판정에만 쓴다 — 통신사는 90바이트를 넘는 SMS 를 잘라 보내지 않고 통째로 실패시킨다(1118 실측). 옛 잘린 미리보기와 「뒤가 잘려 받는다」는 거짓 약속을 걷었다.
   const truncated = truncateToSmsBytes(fullMsg, 90);
-  const truncatedBytes = calculateBytes(truncated);
   const isOptOutCut = adTextEnabled && !truncated.includes(optOutText);
   const isAdBlocked = adTextEnabled && isOptOutCut;
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[70]">
-      <div className="bg-white rounded-xl shadow-2xl w-[440px] overflow-hidden">
+      {/* ★ 2026-11-18 C143 — 좁은 폭: 화면 양옆 16px 여백 · 낱말 단위 줄바꿈(break-keep) · 단추는 640px 아래에서 위아래로(단추 글자 한 줄) */}
+      <div className="bg-white rounded-xl shadow-2xl w-[440px] max-w-[calc(100vw-2rem)] overflow-hidden break-keep">
         <div className="p-6 bg-gradient-to-r from-amber-50 to-orange-50 border-b">
           <div className="text-center relative">
             <button onClick={onClose} className="absolute right-0 top-0 text-gray-400 hover:text-gray-600 text-xl">✕</button>
@@ -66,38 +68,29 @@ export function LmsConvertModal({
             <div className="text-gray-600">SMS 제한을 초과했습니다</div>
           </div>
 
-          {/* 잘린 메시지 미리보기 */}
-          <div className="mb-4">
-            <div className="text-xs font-medium text-gray-500 mb-1.5">SMS 발송 시 수신 내용 ({truncatedBytes}/90 byte)</div>
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto">
-              {truncated}
-              <span className="text-red-400 bg-red-50 px-0.5">···(잘림)</span>
-            </div>
-          </div>
-
-          {/* 광고 문자 수신거부 잘림 경고 */}
+          {/* 광고 문자 = 무료수신거부 줄까지 들어가야 한다 */}
           {isAdBlocked && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
               <div className="flex items-start gap-2">
                 <span className="text-red-500 text-lg leading-none mt-0.5">⛔</span>
                 <div>
-                  <div className="text-sm font-semibold text-red-700">수신거부 번호가 잘립니다</div>
+                  <div className="text-sm font-semibold text-red-700">SMS로 보낼 수 없어요</div>
                   <div className="text-xs text-red-600 mt-0.5">
-                    광고 문자는 수신거부 번호를 반드시 포함해야 합니다 (정보통신망법 제50조).<br/>
-                    SMS로 발송할 수 없습니다. LMS로 전환해주세요.
+                    광고 문자는 무료수신거부 번호까지 들어가야 해요(정보통신망법 제50조).<br/>
+                    90바이트를 넘으면 SMS로 보낼 수 없어 LMS로 바꿔야 해요.
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* 비광고 잘림 경고 */}
+          {/* 비광고 = 넘는 받는 분에게는 보내지 않는다 */}
           {!isAdBlocked && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
               <div className="flex items-start gap-2">
                 <span className="text-amber-500 text-lg leading-none mt-0.5">⚠️</span>
                 <div className="text-xs text-amber-700">
-                  SMS로 발송하면 90바이트 이후 내용이 잘려서 수신됩니다.
+                  SMS는 90바이트를 넘으면 통신사가 받지 않아요. 90바이트를 넘는 받는 분에게는 보내지 않고, 그 몫은 청구하지 않아요.
                 </div>
               </div>
             </div>
@@ -109,7 +102,7 @@ export function LmsConvertModal({
               <div className="text-blue-600">LMS는 최대 2,000byte까지 발송 가능합니다</div>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {isAdBlocked ? (
               <button
                 disabled
@@ -119,7 +112,7 @@ export function LmsConvertModal({
               <button
                 onClick={onSmsOverride}
                 className="flex-1 py-3 border-2 border-amber-300 rounded-lg text-amber-700 font-medium hover:bg-amber-50"
-              >SMS 유지 (잘림 발송)</button>
+              >SMS로 보내기(넘는 분 제외)</button>
             )}
             <button
               onClick={onLmsConvert}

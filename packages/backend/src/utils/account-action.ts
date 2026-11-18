@@ -25,7 +25,8 @@ export type RestrictedStatus = 'locked' | 'dormant' | 'suspended';
 /** 조치 사유 → 이용자에게 보일 문구. 내부 코드명을 그대로 노출하지 않는다 */
 const REASON_MESSAGE: Record<string, string> = {
   mfa_failure: '인증번호를 여러 번 잘못 입력해 계정이 잠겼습니다.',
-  spam_report: '불법스팸 신고가 접수되어 서비스 이용이 제한되었습니다.',
+  // ★ 2026-11-18 C143 E4 — 앞뒤 고정 글 포함 단문(SMS) 90바이트 안(옛 「불법스팸 신고가 접수되어 …」 = 95바이트 = 늘 실패 · 계약 c143 K5 가 셈)
+  spam_report: '불법스팸 신고로 서비스 이용이 제한되었습니다.',
   admin_action: '관리자 조치로 서비스 이용이 제한되었습니다.',
   contract_end: '계약 종료로 서비스 이용이 종료되었습니다.',
 };

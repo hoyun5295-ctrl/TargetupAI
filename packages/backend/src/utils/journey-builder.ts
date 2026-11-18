@@ -61,6 +61,8 @@ import { journeyCopyContext } from './journey-message-render';   // ★ 2026-11-
 import { kakaoStepVerdict, kakaoTemplateContent } from './journey-kakao-step';
 import { assertJourneyCallbackRegistered } from './journey-callback';   // ★ 2026-11-05 C103 F3 회신번호 등록 판정 한 곳   // ★ 2026-11-02 알림톡 칸 판정 CT(설계서 3-0 CT-J5)
 import { resolveJourneyAdFlag } from './journey-ad-policy';   // ★ 2026-11-02 광고 판정 CT(설계서 3-0 CT-J8)
+import { smsMinBytesIssue } from './sms-length';   // ★ 2026-11-18 C143 W3 — SMS 칸 길이 하한(증명되는 하한만)
+import { getOpt080Number } from './messageUtils';   // ★ C143 W3 — 렌더(loadJourneyRenderShared)와 같은 080 조회
 import { loadVariantRowsByStep, stepSendVersions } from './journey-step-versions';   // ★ 2026-11-02 칸마다 A/B 문안(설계서 3-16) · ★ C104 G1 나갈 판
 import { finishMany, copyResponse } from './copy-finish';   // ★ 2026-11-01 배포 2 C2 출구 한 곳
 
@@ -802,7 +804,7 @@ async function activationBlockCore(companyId: string, journeyId: string, opts: {
   // ★ D188 Phase 2-B-1 (2026-05-21): step_type별 다른 검증 분기 — message/wait/condition.
   // ★ D194 (2026-05-22): Liquid 문법 사전 검증 + subject 빈 영역 검증 추가 (직원 테스트 발송 사고 0건 영구 안전망)
   const detail = await query(
-    `SELECT j.callback_number, j.status, j.start_kind, j.anchor_date,
+    `SELECT j.callback_number, j.status, j.start_kind, j.anchor_date, j.created_by,
             j.trigger_event, j.threshold_recipients_per_step,
             j.allow_reentry, j.reentry_cooldown_days, j.auto_reentry_enabled, j.trigger_filters,
             (SELECT json_agg(json_build_object(
@@ -1063,6 +1065,12 @@ async function activationBlockCore(companyId: string, journeyId: string, opts: {
       if (isTextStep) {
         const ci = journeyCopyIssue({ bodies: [body], subjects: [ver.subject] }, await journeyCopyContext(companyId, triggerEvent, [body], abRows.length > 0));
         if (ci) return { ...at, cause: ci.code === 'PLACEHOLDER_UNEDITED' ? 'placeholder_unedited' : 'copy_issue', message: `${tag} ${ci.message}` };
+      }
+      // ★ 2026-11-18 C143 W3(뿌리 R68 길이 축) — SMS 칸 = 증명되는 하한(변수 없음 = 실제 글 · 변수 있음 = 고정 글자만 · Liquid = 생략)이 90 을 넘으면 켜지 않는다.
+      //   렌더와 같은 재료(광고 판정 CT · 080 = 만든 사람 기준 · 글자 정리) · 고객마다 다른 넘침은 실행기(sms_too_long)가 맡는다.
+      if (channel === 'sms') {
+        const lenIssue = smsMinBytesIssue({ template: body, isAd: resolveJourneyAdFlag(channel), opt080: await getOpt080Number(row.created_by || null, companyId), sanitize: true, shortenUrls: true });   // 여정 = 단위마다 주소를 줄여 보낸다(짧은 쪽 하한)
+        if (lenIssue) return { ...at, cause: 'copy_issue', message: `${tag} ${lenIssue}` };
       }
       // ★ D194 (2026-05-22) 강화: subject 빈 영역 차단 — LMS/MMS 채널은 제목 필수 · ★ C104 판 제목(판 제목 또는 칸 제목)
       if (channel === 'lms' || channel === 'mms') {
@@ -1519,13 +1527,18 @@ async function kakaoStepCopyIn(
  */
 async function assertStepCopySendable(run: SqlRunner, companyId: string, stepId: string): Promise<void> {
   const cur = (await run(
-    `SELECT s.channel, s.message_template, s.subject, j.trigger_event,
+    `SELECT s.channel, s.message_template, s.subject, j.trigger_event, j.created_by,
             EXISTS (SELECT 1 FROM journey_step_variants v WHERE v.step_id = s.id) AS has_variants
        FROM journey_steps s JOIN journeys j ON j.id = s.journey_id WHERE s.id = $1::uuid`, [stepId],
   )).rows[0];
   if (!cur || !['sms', 'lms', 'mms'].includes(String(cur.channel || 'lms'))) return;
   const ci = journeyCopyIssue({ bodies: [cur.message_template], subjects: [cur.subject] }, await journeyCopyContext(companyId, cur.trigger_event, [cur.message_template], cur.has_variants === true));
   if (ci) throw new JourneyStepGateError(ci.message, 'COPY_ISSUE');
+  // ★ 2026-11-18 C143 W3 — 켜진 SMS 칸을 고친 글도 켜기와 같은 길이 하한(넘으면 409 COPY_ISSUE · 같은 트랜잭션)
+  if (String(cur.channel) === 'sms') {
+    const lenIssue = smsMinBytesIssue({ template: cur.message_template, isAd: resolveJourneyAdFlag(cur.channel), opt080: await getOpt080Number(cur.created_by || null, companyId), sanitize: true, shortenUrls: true });
+    if (lenIssue) throw new JourneyStepGateError(lenIssue, 'COPY_ISSUE');
+  }
 }
 
 /**

@@ -30,6 +30,9 @@ import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // �
 
 const router = Router();
 
+/** ★ 2026-11-18 C143 M2(R73) — 통계 상세 테스트 목록 상한(담당자 테스트 · 스팸 검사 각각 · 최근) · 넘으면 testDetailTruncated */
+const TEST_DETAIL_LIMIT = 50;
+
 // ============================================================
 //  발송 통계 API — 공용 (슈퍼관리자 + 고객사관리자)
 //  마운트: /api/manage/stats
@@ -276,6 +279,8 @@ router.get('/send/detail', async (req: Request, res: Response) => {
 
     // 테스트 발송 상세 (MySQL — 관리자 전용)
     let testDetail: any[] = [];
+    // ★ 2026-11-18 C143 M2(뿌리 R73) — 담당자 테스트 · 스팸 검사 목록을 상한 + 1 로 읽어 넘으면 자르고 알린다(옛: 50 + 50 에서 말없이 잘려 「테스트 발송 (N건)」이 잘린 수)
+    let testDetailTruncated = false;
     try {
       let mysqlDateWhere = '';
       const mysqlParams: any[] = [targetCompanyId];
@@ -293,10 +298,11 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         `SELECT ${testFields(testTable)}
         FROM ${testTable}
         WHERE app_etc1 = 'test' AND app_etc2 = ? ${mysqlDateWhere}
-        ORDER BY msg_instm DESC LIMIT 50`,
+        ORDER BY msg_instm DESC LIMIT ${TEST_DETAIL_LIMIT + 1}`,
         mysqlParams
       );
-      testDetail = (testRows as any[]).map(r => ({
+      if ((testRows as any[]).length > TEST_DETAIL_LIMIT) testDetailTruncated = true;
+      testDetail = (testRows as any[]).slice(0, TEST_DETAIL_LIMIT).map(r => ({
         phone: r.phone,
         // ★ 2026-09-26 S1-H06 브랜드 테스트가 들어온다 — 유형 라벨은 표시 CT
         msgType: getSendTypeLabel(r.msg_type, r.k_oriseq, r.status_code, r.friend_yn),   // ★ C107 결과 코드까지 · C117 친구
@@ -318,10 +324,11 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
         WHERE t.company_id = $1 ${sfDateCond}
-        ORDER BY t.created_at DESC LIMIT 50
+        ORDER BY t.created_at DESC LIMIT ${TEST_DETAIL_LIMIT + 1}
       `, [targetCompanyId, dateVal]);
 
-      sfDetail.rows.forEach((r: any) => {
+      if (sfDetail.rows.length > TEST_DETAIL_LIMIT) testDetailTruncated = true;
+      sfDetail.rows.slice(0, TEST_DETAIL_LIMIT).forEach((r: any) => {
         testDetail.push({
           phone: r.phone, msgType: r.message_type || 'SMS',
           status: spamResultRowStatus(r.result), result: r.result || 'pending',
@@ -337,6 +344,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
     res.json({
       ...detailResult,
       testDetail,
+      testDetailTruncated,
     });
   } catch (error) {
     console.error('발송 통계 상세 조회 실패:', error);

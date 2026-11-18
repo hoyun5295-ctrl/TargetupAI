@@ -33,7 +33,8 @@ describe('직원 접수 1008', () => {
     expect(src).toContain("'[AI 자동마케팅] 추천 문안', finalNoticeCopy)");
     expect(src).toContain('sendAutoSendPrepNotice(operator, proposalRes.rows[0].id, finalNoticeCopy,');
     expect(src).not.toContain('rejectNumber: ctx.reject_number || undefined');
-    expect(src).toContain('adOptOut: ctx.opt080, finalCopies, finalIndex, copyCheck');
+    // ★ 2026-11-18 C143(Codex 구현 1R #1) — 응답에 안마다 발송비(finalCosts)가 함께 실린다(080 · 나가는 문안 칸은 그대로)
+    expect(src).toContain('adOptOut: ctx.opt080, finalCopies, finalIndex, finalCosts, copyCheck');
     const fc = read('backend/src/utils/operator-final-copy.ts');
     expect(fc).toContain("const sent = buildAdMessage(body, msgType, true, ctx.opt080 || '');");
   });

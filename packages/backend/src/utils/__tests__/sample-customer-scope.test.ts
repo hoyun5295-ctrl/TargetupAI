@@ -80,15 +80,16 @@ describe('소스 계약 — 샘플 고객 조회 4곳이 전부 범위를 탄다
     expect(sample[0]).toContain('${testStoreFilterFinal}');
     expect(block).toMatch(/\[companyId, \.\.\.storeParams\]/);
   });
-  it('spam-filter.ts · spam-test-queue.ts(2곳): getSampleCustomerScope 조각이 샘플 조회에 붙는다', () => {
+  // ★ 2026-11-18 C143(설계 2R #2) — 실행 워커(executeSpamTest)의 표본 다시 조회를 지웠다(저장 표본이 없으면 등록 때와 같은 빈 표본) → spam-test-queue 의 샘플 조회 = 등록 기본 표본 한 곳
+  it('spam-filter.ts · spam-test-queue.ts(1곳): getSampleCustomerScope 조각이 샘플 조회에 붙는다', () => {
     const a = read('routes/spam-filter.ts');
     expect(a).toContain('getSampleCustomerScope(');
     expect((a.match(SAMPLE_RE) || []).every((s) => s.includes('${sampleScope.where}'))).toBe(true);
     expect((a.match(SAMPLE_RE) || []).length).toBe(1);
     const b = read('utils/spam-test-queue.ts');
-    expect((b.match(/getSampleCustomerScope\(/g) || []).length).toBe(2);
+    expect((b.match(/getSampleCustomerScope\(/g) || []).length).toBe(1);
     const samples = b.match(SAMPLE_RE) || [];
-    expect(samples).toHaveLength(2);
+    expect(samples).toHaveLength(1);
     expect(samples.every((s) => s.includes('${sampleScope.where}'))).toBe(true);
   });
   it('격리 판정을 다시 쓰지 않는다 — 세 파일 어디에도 store_codes 직접 조회가 없다', () => {

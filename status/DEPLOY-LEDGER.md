@@ -85,8 +85,9 @@
 | C138 | 미커밋 |
 | C139 | 미커밋 |
 | C140 | e3ecc4b9 |
-| C141 | 미커밋 |
-| C142 | 미커밋 |
+| C141 | e549b318 |
+| C142 | 7d8bb591 |
+| C143 | 미커밋 |
 
 ## §1 대기
 
@@ -2634,7 +2635,7 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: Codex 구현 4R approve(1117) · 커밋(Harold · 경로 = scratch/c141/paths.txt · 다른 세션의 미커밋 줄과 한 파일인 문서 둘(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md)은 이 세션 줄만 = scratch/c141/docs.patch(git apply --cached · C140 배포 · 실측 결과 줄 포함) · 문안 = scratch/c141/msg.txt · tp-push 는 쓰지 않는다) → push(이 커밋만 · push 전 검사의 실 PG 통과 기록 = 1117 13:5x 작업 트리 전체 90파일 842건 통과 · 단위 전체 827파일 13,392건 통과 14:00)
 - 기대: 설계 docs/2026-11-17-c141-feature-interest-redesign-design.md §2 · 슈퍼관리자 「기능 관심 업체」 = 맨 위 단계 칸 넷(7일 무료체험 중 · 이미지 체험 신청 · 버튼만 누름 · 보기만 함 · 회사 수와 앞 세 곳 이름) · 처음 = 7일 무료체험 중 회사 목록(곧 끝나는 순 · 남은 날 · 켠 날 · 켠 길과 사람) · 오른쪽 안내별(본 → 누름 → 결과) · 최근 일어난 일 · 줄을 누르면 상세 창 · 관리자 본문 폭 안(화면 끝까지 늘이지 않음) · 고객 화면 · 발송 · 과금 무접촉
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep loadLineTrials = dist/utils/line-trial.js 정의 · dist/utils/feature-interest.js 호출 · TRIAL_BUTTON_FEATURE_IDS ≥ 1(dist/utils/feature-interest.js) · 재시작 뒤 에러 로그에 [feature-interest] 줄 0 · does not exist 0
-- 결과: (대기)
+- 결과: 1118 07:37 끝 · C142 의 pull(서버 HEAD 7d8bb591)에 e549b318 이 함께 실려 같은 build:safe · pm2 reload 로 돎 · Harold 서버 출력 = online · uptime 108s · unstable restarts 0 · dist loadLineTrials = line-trial.js 2 · feature-interest.js 1 · TRIAL_BUTTON_FEATURE_IDS 3(feature-interest.js) · 재시작 뒤 에러 로그 15줄에 [feature-interest] 0 · does not exist 0(전문 = C142-H1 결과)
 
 ### C141-S1 · 화면 확인(Harold · 슈퍼관리자 ceo · 「기능 관심 업체」)
 - 카드: C141
@@ -2650,7 +2651,7 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: Codex 설계 3R · 구현 2R approve(1117) · 커밋(Harold · 다른 세션의 미커밋 줄과 한 파일인 문서 셋(status/BUGS.md · status/STATUS-FEED.md · status/DEPLOY-LEDGER.md)은 이 세션 줄만)
 - 기대: [설계서](../docs/2026-11-17-c142-staff-tickets-design.md) §2 · 자동마케팅 · 여정의 등급 순서 잠금 자리마다 [등급 순서 정하기] · 매일 + 같은 대상 = 질문 ③ 「지금 대상에게 매일 보내기」 · 대행 SMS 고치기 칸에 「가장 긴 문장 N / 90바이트」 · 슈퍼관리자 대행발송 내역 날짜 기준(접수일 / 발송일) · 메일 반려 검색
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `measureAgencyRequestSmsBytes` ≥ 1(dist/utils/agency-send-preview.js) · `repeatAckKey` ≥ 1(dist/utils/automarketing-segment.js) · `mail-rejected` ≥ 1(dist/routes/admin.js) · 재시작 뒤 에러 로그 새 종류 0 · does not exist 0
-- 결과: (대기)
+- 결과: 1118 07:37 끝 · Harold 서버 출력 = HEAD 7d8bb591 · git pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload(적재 0건 조건 없이 실행 · 확인 시점 loading=0) · targetup-backend online · uptime 108s · unstable restarts 0 · dist sms=4 ack=3 rej=1 · 프론트 dist/index.html 2026-11-18 07:37:53 · 재시작 뒤 에러 로그 = [demo-data] 안내 한 줄(재시작 전과 같은 종류) · does not exist 0 · 같은 pull 에 C141 e549b318 이 실림(C141 dist 확인 = C141-H1)
 
 ### C142-S1 · 실측(대행 SMS 대기 건 · 길이 막힘 기록)
 - 카드: C142
@@ -2658,7 +2659,31 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: C142-H1
 - 기대: ① 배포 직후 대기 중 SMS 대행 건 목록(아래 1번) = 이 건들은 다음 검사 · 발송 직전에 명단 전원으로 다시 잰다 ② 90바이트를 넘는 건이면 그 시각에 test_failed + 이력 sms_bytes(아래 2번) + 담당자 문자 한 통(「문자(SMS) 길이를 넘는 문장이 있어」) · 11.20 11:30 테스트1.xlsx(인비토 · 91바이트) = 11.20 09:30 최종 검사에서 멈춤 ③ 길이 안의 건 = 종전 그대로
 - 확인: 서버 셸 한 줄 둘(PG) ① `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT r.id, c.company_name, r.status, r.requested_at, r.file_name FROM agency_send_requests r JOIN companies c ON c.id = r.company_id WHERE r.message_type = 'SMS' AND r.status IN ('received','testing','awaiting_approval','reapproval','approved','final_testing') ORDER BY r.requested_at;"` ② `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT e.request_id, e.created_at, e.payload FROM agency_send_events e WHERE e.kind = 'test_failed' AND e.payload->>'reason' = 'sms_bytes' ORDER BY e.created_at DESC LIMIT 20;"`
-- 결과: (대기)
+- 결과: ① 1118 07:4x Harold 서버 출력 = 대기 SMS 대행 2건 · 금강제화 「[금강제화] 대리점 SALE SMS(11.20).xlsx」 approved · 11.20 10:00(최종 검사 08:00 부터 = 발송 시각 2시간 전) · 주식회사 인비토 「테스트1.xlsx」 approved · 11.20 11:30(최종 검사 09:30 부터) · 남은 = ②(11.20 09:30 뒤 · 인비토 건 test_failed sms_bytes 1행 + 담당자 문자 · 금강제화 건은 90 안이면 종전대로 발송)
+
+### C143-H1 · 한줄로 배포(SMS 90바이트 전 발송 길 + 관리자 고정 상한 목록 다섯 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C143
+- 단계: 한줄로 배포
+- 선행: Codex 설계 4R · 구현 4R approve(1118) · 커밋(Harold · 다른 세션의 미커밋 줄과 한 파일인 문서는 이 세션 줄만)
+- 기대: [설계서](../docs/2026-11-18-c143-sms-length-admin-lists-design.md) §2 · 넘는 SMS 글 = 쓰는 자리마다 400 · 막힘 문장(「SMS는 90바이트까지」) · 여정은 그 고객만 실패 sms_too_long · 적재 CT 가 넘는 줄을 빼고 그 몫 환불 · 직접발송 창 「SMS로 보내기(넘는 분 제외)」 · 자동마케팅 승인 카드 「발송비 · LMS」(올린 안) · 관리자 목록 다섯 「최근 N건만 보여요」
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `smsRowOverLimit` ≥ 1(dist/utils/sms-queue.js) · dist/utils/sms-length.js 있음 · `finalCosts` ≥ 1(dist/utils/continuous-operator.js) · `SMS_TOO_LONG` ≥ 1(dist/routes/spam-filter.js) · 재시작 뒤 에러 로그 새 종류 0 · does not exist 0
+- 결과:
+
+### C143-S1 · 실측(배포 뒤 하루 · 넘는 줄이 실제로 걸렸는가)
+- 카드: C143
+- 단계: 사후
+- 선행: C143-H1
+- 기대: pm2 로그 `[sms-queue][SMS_TOO_LONG]` 줄(회사 · 출처 · 건수 · 최장) = 0 이어도 정상(쓰는 자리가 먼저 막음) · 있으면 그 회사 · 출처를 보고 앞 판정이 빠진 길을 찾는다 · 여정 로그 error_reason = 'sms_too_long' 건수
+- 확인: 서버 셸 한 줄(pm2 로그 grep) + PG 한 줄(journey_step_logs · 명령은 배포 뒤 그 창에서)
+- 결과:
+
+### C143-M1 · 실측(알림톡 단문 대체 S · A 가 90 을 넘을 때 게이트웨이 결과 · 처방 앞)
+- 카드: C143
+- 단계: 사후(실측 먼저 · 처방은 결과 뒤 새 카드)
+- 선행: C143-H1 · Harold 님 라인그룹 확인
+- 기대: 대체 문자 S · A 의 90 초과 행 결과 코드 분포 → 실패면 같은 판정 CT 를 알림톡 대체 저장 · 적재에 거는 카드
+- 확인: 그 라인그룹 표만(`k_next_type IN ('S','A')` · 명령은 라인그룹 확인 뒤)
+- 결과:
 
 ## §2 덤프 뒤 적용분
 

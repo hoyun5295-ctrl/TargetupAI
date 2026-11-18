@@ -11,6 +11,7 @@ import { isDemoCompany } from '../utils/demo-company';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { buildAdMessage, buildAdSubject, getOpt080Number, prepareFieldMappings, replaceVariables } from '../utils/messageUtils';
 import { enqueueSpamTest, computeMessageHash, loadDefaultSpamFirstRecipient, spamCheckFor } from '../utils/spam-test-queue';
+import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from '../utils/message-byte';
 import { isAutoSpamSource } from '../utils/spam-trial';
 import { resolveHubStoreScope } from '../utils/store-scope';
 import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
@@ -21,7 +22,7 @@ import { spamCheckView as verdictOf } from '../utils/spam-test-view';
 /** 칩 상태 — 화면은 이 값만 그린다 */
 export type LineSpamState =
   | 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn'
-  | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device';
+  | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device' | 'too_long';
 
 export interface LineSpamStart {
   state: LineSpamState;
@@ -78,7 +79,10 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
   const mappingCols = Object.values(fieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
   // ★ Codex 2R — 1위 고객이 없으면 등록 함수와 같은 기본 고객으로(재사용 해시와 등록 해시가 같은 고객을 본다 · 같은 글 재과금 0)
   const first = (await loadFirstRecipient(v, input.sampleCustomerId, mappingCols)) || await loadDefaultSpamFirstRecipient(v.companyId, userId, fieldMappings);
-  const hash = computeMessageHash(replaceVariables(content, first, fieldMappings, { callback: cb, extra1: '', extra2: '', extra3: '', name: '' } as any));
+  const checked = replaceVariables(content, first, fieldMappings, { callback: cb, extra1: '', extra2: '', extra3: '', name: '' } as any);
+  const hash = computeMessageHash(checked);
+  // ★ 2026-11-18 C143 E3(Codex 구현 1R #3 같은 뿌리) — 90바이트를 넘는 SMS 검사 글 = 같은 검사 이어 보기 · 등록 0(해시는 공백을 지워 91바이트 글이 90바이트 글의 통과를 이어 받았다)
+  if (msgType === 'SMS' && smsRowOverLimit('S', checked)) return { state: 'too_long', message: smsTooLongText(eucKrByteLength(checked)) };
 
   // ★ Codex 1R high — 재사용 확인 · 진행 중 확인 · 등록(선불 차감)을 회사 잠금 하나 안에서 한다.
   //   두 탭 · 재전송이 둘 다 「없음」을 보고 각각 차감하던 경쟁을 막는다(뒤 요청은 앞 요청이 등록한 검사를 재사용 · busy 로 받는다).
@@ -129,6 +133,7 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
   if (!out.ok) {
     if (out.insufficientBalance) return { state: 'no_balance', message: out.error };
     if (out.errorCode === 'SMS_UNSUPPORTED_CHARS') return { state: 'charset', message: out.error };
+    if (out.errorCode === 'SMS_TOO_LONG') return { state: 'too_long', message: out.error };   // ★ C143 — 등록의 길이 반려(옛 갈래 없음 = 503 「시작하지 못했어요」)
     // ★ 2026-10-25 원장 #114 — 사유마다 다른 답(옛: 전부 일반 Error → 500 「처리 중 문제」)
     if (out.errorCode === 'NO_TEST_DEVICE') return { state: 'no_device' };
     if (out.errorCode === 'DB_MIGRATION_PENDING') throw new UserFacingError(503, 'DB_MIGRATION_PENDING', 'DB 마이그레이션 필요: spam_filter_tests ALTER 실행 요청');

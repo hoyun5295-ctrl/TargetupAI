@@ -11,6 +11,8 @@ export interface GeoAccessTabProps {
   geoBusy: boolean;
   geoExPage: number;
   geoExceptions: any[];
+  /** ★ 2026-11-18 C143 M1(R73) — 서버가 상한(300)에서 잘랐는가 */
+  geoExTruncated?: boolean;
   geoForm: { scope: string; target: string; cidr: string; reason: string; expiresAt: string; };
   geoHits: any[];
   geoHitsDenied: boolean;
@@ -26,7 +28,7 @@ export interface GeoAccessTabProps {
 }
 
 export default function GeoAccessTab(props: GeoAccessTabProps) {
-  const { geoBusy, geoExPage, geoExceptions, geoForm, geoHits, geoHitsDenied, geoHitsPage, geoHitsTotal, geoStatus, loadGeoAccess, loadGeoHits, setGeoBusy, setGeoExPage, setGeoForm, showAlert } = props;
+  const { geoBusy, geoExPage, geoExceptions, geoExTruncated, geoForm, geoHits, geoHitsDenied, geoHitsPage, geoHitsTotal, geoStatus, loadGeoAccess, loadGeoHits, setGeoBusy, setGeoExPage, setGeoForm, showAlert } = props;
 
   const geoPost = async (url: string, body: any, method: string = 'POST') => {
     const token = localStorage.getItem('token');
@@ -245,6 +247,7 @@ export default function GeoAccessTab(props: GeoAccessTabProps) {
                 </table>
               </div>
               <ListPager page={geoExPage} total={geoExceptions.length} onPage={setGeoExPage} />
+              {geoExTruncated && <p className="px-4 pb-3 text-[12px] text-gray-500">최근 {geoExceptions.length.toLocaleString()}건만 보여요(켜진 예외 먼저).</p>}
             </div>
 
             <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

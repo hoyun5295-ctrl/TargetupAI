@@ -93,7 +93,7 @@ export interface AiLineCard { type: AiLineType; label: string; body: string; sub
 
 export type AiLineSpamState =
   | 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn'
-  | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device';
+  | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device' | 'too_long';
 
 export interface AiLineSpamChip {
   state: AiLineSpamState | 'idle' | 'stale';

@@ -809,6 +809,8 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
   let callbackExcluded = 0;
   // ★ 2026-09-27 한줄로 V2 m126 — 광고 적재 중 발송 창이 닫혀 멈춘 남은 건수(종결 블록이 미적재로 환불)
   let nightStopped = 0;
+  // ★ 2026-11-18 C143 — 적재 CT 가 90바이트 초과로 뺀 SMS 줄(chunkSkipped 에 이미 들어 있다 · 진단 칸 · 종결 판정에 안 쓴다)
+  let smsTooLong = 0;
   // ★ §16 G6 ③ — 셈은 진행 기록(loadProgress · 청크 경계마다)에서 이어 받는다(내려놓기 · 멈춤 복구 이어 넣기 · 끊김 정리의 제외 사유)
   const lp = cfg.loadProgress && typeof cfg.loadProgress === 'object' ? cfg.loadProgress : null;
   if (lp) {
@@ -818,8 +820,9 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
     callbackExcluded = Number(lp.callbackExcluded) || 0;
     unsubRemoved = Number(lp.unsubRemoved) || 0;
     dupRemoved = Number(lp.dupRemoved) || 0;
+    smsTooLong = Number(lp.smsTooLong) || 0;
   }
-  const progressJson = () => JSON.stringify({ sent, brandSent, chunkSkipped, callbackExcluded, unsubRemoved, dupRemoved });
+  const progressJson = () => JSON.stringify({ sent, brandSent, chunkSkipped, callbackExcluded, unsubRemoved, dupRemoved, ...(smsTooLong > 0 ? { smsTooLong } : {}) });
 
   // ★ 2026-06-04 정정: commit에서 옮긴 정제 — 발송 직전 1회. count/commit과 같은 기준이라 모달=차감=발송 일치.
   //   첫 처리(processed===0)에만 수행(재시작 시 중복 정제 방지). dedup/unsub은 send_config 기준.
@@ -1042,6 +1045,7 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
     }
     sent += result.sentCount;
     brandSent += result.brandSentCount || 0;
+    smsTooLong += result.smsTooLong || 0;
     chunkSkipped += Math.max(0, chunkRes.rows.length - result.sentCount);
     processed += chunkRes.rows.length;
     // ★ 2026-09-27 m126(Codex NIGHT 1R) — 여유 시간을 두고 시작했는데도 이 묶음이 창 끝을 넘겨 끝났다 = 창 밖에 적재됐을 수 있다.
@@ -1172,9 +1176,13 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
   // ★ 2026-06-11 (근원 C): 제외 사유 기록 — 첫 기록만 보존(재시작 시 정제 카운트 0이라 덮지 않음).
   // ★ Codex E1 — 고정 회신번호 재판정 거절(적재 전 · 0건) = 예약이라도 실패로 마감(전량 환불했는데 예약 목록에 남았다)
   // ★ §16 G6 Codex 구현 1R #1 — 이어 넣기에서 거절 = 앞 몫이 큐에 있다 → 적재가 있으면 정상 결말(예약 = scheduled 유지 · 예약 취소로 큐를 지울 수 있다)
-  const finalStatus = fixedCallbackBlock && sent === 0 ? 'failed' : cfg.scheduled ? 'scheduled' : (sent === 0 ? 'failed' : 'completed');
+  // ★ 2026-11-18 C143(Codex 설계 1R #1 · 2R #1 · 3R #1) — 종결 = 채널 합계(both = 문자 + 브랜드 · 그 밖 = sent)가 0 이면 원인과 무관하게 실패.
+  //   옛: 예약 여부를 0건 판정보다 먼저 봐 「예약 + 적재 0건(전량 환불 · 큐 0)」이 예약으로 남았고(취소할 큐가 없다) · 선례는 고정 회신번호 거절 한 갈래뿐 ·
+  //   both 에서 문자가 모두 빠지고 브랜드만 실려도 실패로 마감했다. 판정은 집계 칸(smsTooLong 등)에 기대지 않는다(이어 넣기 · 커밋 기록 복구에서 잃는 값).
+  const loadedTotal = sent + (String(cfg.sendChannel || '').trim() === 'both' ? brandSent : 0);
+  const finalStatus = loadedTotal === 0 ? 'failed' : cfg.scheduled ? 'scheduled' : 'completed';
   const exclusions = JSON.stringify({
-    unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped, callbackExcluded, nightStopped,
+    unsub: unsubRemoved, dup: dupRemoved, skipped: chunkSkipped, callbackExcluded, nightStopped, ...(smsTooLong > 0 ? { smsTooLong } : {}),
     deducted: total, loaded: sent, recordedAt: new Date().toISOString(),
   });
   // ★ 2026-07-27 (B-0727-1): 적재가 중단됐어도 종결은 정상 경로와 같은 형태로 남긴다 —

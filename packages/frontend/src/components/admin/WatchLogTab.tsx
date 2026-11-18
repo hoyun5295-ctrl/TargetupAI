@@ -30,6 +30,7 @@ export default function WatchLogTab() {
   const [error, setError] = useState('');
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [events, setEvents] = useState<EventRow[] | null>(null);
+  const [eventsTruncated, setEventsTruncated] = useState(false);   // ★ 2026-11-18 C143 M5(R73) — 서버가 최근 상한에서 잘랐는가
 
   const load = useCallback(async (p: number) => {
     setError('');
@@ -47,10 +48,12 @@ export default function WatchLogTab() {
     if (openKey === key) { setOpenKey(null); return; }
     setOpenKey(key);
     setEvents(null);
+    setEventsTruncated(false);
     try {
       const r = await fetch(`/api/admin/watch-log/events?loginId=${encodeURIComponent(row.loginId)}&ip=${encodeURIComponent(row.ip)}`, { headers: auth() });
       const d = await r.json();
       setEvents(r.ok && d.success ? d.events : []);
+      setEventsTruncated(r.ok && d.success && d.truncated === true);
     } catch { setEvents([]); }
   };
 
@@ -108,6 +111,7 @@ export default function WatchLogTab() {
                                 </span>
                               </li>
                             ))}
+                            {eventsTruncated && <li className="text-[12px] text-gray-500">최근 {events.length.toLocaleString()}건만 보여요.</li>}
                           </ul>
                         )}
                       </td>
