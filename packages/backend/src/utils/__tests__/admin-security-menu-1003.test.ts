@@ -249,12 +249,12 @@ describe('5. 화면 — 메뉴 7묶음 · 노출 · 뱃지', () => {
 
   it('항목 36개 · 각 1번(삭제 0 · 중복 0)', () => {
     const keys = [...menu.matchAll(/\{ key: '(\w+)', label: '/g)].map((m) => m[1]);
-    expect(keys.length).toBe(39); // ★ 2026-11-16 제안 체험(proposalTrial · C136 · 소개 방문과 같은 허용 계정) · ★ 2026-11-14 답장 상담(inbound · C133 F5) · ★ 2026-10-07 소개 방문 · 시연 요청(introLeads) · 감시 기록(watchLog) 추가 · ★ 2026-10-27 자사몰 연동 감시(mallMonitor) · ★ 2026-10-29 공지 확인 현황(noticeAck)
-    expect(new Set(keys).size).toBe(39);
+    expect(keys.length).toBe(40); // ★ 2026-11-18 JBN 회원(jbnMembers · C144 · 소개 방문과 같은 허용 계정) · ★ 2026-11-16 제안 체험(proposalTrial · C136 · 소개 방문과 같은 허용 계정) · ★ 2026-11-14 답장 상담(inbound · C133 F5) · ★ 2026-10-07 소개 방문 · 시연 요청(introLeads) · 감시 기록(watchLog) 추가 · ★ 2026-10-27 자사몰 연동 감시(mallMonitor) · ★ 2026-10-29 공지 확인 현황(noticeAck)
+    expect(new Set(keys).size).toBe(40);
     for (const k of ['companies', 'users', 'marketingDiagnosis', 'salesOutreach', 'callbacks', 'templates', 'scheduled', 'allCampaigns', 'stats',
       'agencyMail', 'agencyLedger', 'inbound', 'campaignAgency', 'plans', 'requests', 'deposits', 'credits', 'billing',
       'adminAccounts', 'loginBlocks', 'geoAccess', 'spamBlock', 'auditLogs', 'identityStatus', 'opsRecords', 'noticeAck',
-      'syncAgents', 'mallMonitor', 'agentDeploy', 'lineGroups', 'bestCopy', 'bestLayout', 'aiTraining', 'helpQuestions', 'precheckUsage', 'featureInterest']) {
+      'syncAgents', 'mallMonitor', 'agentDeploy', 'lineGroups', 'bestCopy', 'bestLayout', 'aiTraining', 'helpQuestions', 'precheckUsage', 'featureInterest', 'jbnMembers']) {
       expect(keys, k).toContain(k);
     }
   });

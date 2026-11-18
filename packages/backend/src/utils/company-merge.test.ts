@@ -45,13 +45,14 @@ describe('COMPANY_MERGE_AXES — 표 자체의 불변식', () => {
 });
 
 describe('이동/잔류 판정 — 리터럴로 고정', () => {
-  it('이동 축 = 그 회사가 보유한 자산 7종 (★2026-08-16 마케팅 진단 원장 합류 — §4-7)', () => {
+  it('이동 축 = 그 회사가 보유한 자산 8종 (★2026-08-16 마케팅 진단 원장 합류 — §4-7 · ★2026-11-18 C144 JBN 신청 연결)', () => {
     expect(moveTables().sort()).toEqual(
       [
         'brand_message_templates',
         'company_agent_ids',
         'gateway_bill_mappings',
         'gateway_template_mappings',
+        'jbn_applications',
         'kakao_sender_profiles',
         'kakao_templates',
         'marketing_diagnoses',

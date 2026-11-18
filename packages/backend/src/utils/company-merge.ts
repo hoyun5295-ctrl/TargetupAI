@@ -61,6 +61,8 @@ export const COMPANY_MERGE_AXES: readonly MergeAxis[] = [
   // ★ 2026-08-16 마케팅 진단(설계서 §4-7) — 미등재면 진단 행 있는 회사의 병합이 통째로 차단된다.
   { table: 'marketing_diagnoses', action: 'move', reason: '진단·리드 원장: 관리 파이프라인 연속성. funnel A 부분 UNIQUE가 겹치면(양쪽 다 진단 완료) 충돌 차단 = 사람 판단' },
   { table: 'diagnosis_trial_grants', action: 'keep', reason: '진단 체험 지급 이력(1회 한정 원장): 병합 대상 자신의 지급 상태를 유지한다(선행 행 유지 §4-7). 옛 회사에 진단 행이 함께 있으면 간접 축이 차단한다' },
+  // ★ 2026-11-18 C144 — 미등재면 JBN 신청이 연결된 회사의 병합이 차단된다
+  { table: 'jbn_applications', action: 'move', reason: 'JBN 신청 연결: 회원 확인 · 특별가 이력이 살아 있는 회사를 따라간다' },
   { table: 'diagnosis_invites', action: 'keep', reason: '초대 표시 기록: UX 상태이지 자산이 아니다. 병합 대상 상태 유지(모달 1회 재노출은 무해)' },
 
   { table: 'users', action: 'keep', reason: '계정: 실사용 계정은 병합 대상에 이미 있고 옛 계정은 status로 로그인 차단된다' },

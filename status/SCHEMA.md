@@ -1191,6 +1191,32 @@ id company_id caller_phone customer_id(NULL 가능) transcript ai_response durat
 - `subscription_status` varchar(20) — `null | 'trial' | 'trial_expired' | 'paid' | 'active' | 'expired' | 'suspended'`
 - `trial_expires_at` timestamp — 30일 PRO 무료체험 만료 시각. `utils/trial-downgrade-worker.ts` Cron(매일 04:00 KST)이 만료 시 자동 강등.
 
+### plans 제휴 칸 + jbn_applications (JBN 특별가) ★2026-11-18 C144 — **DDL 대기(원장 C144-DDL-1 · C144-DML-1 · 배포 뒤)**
+
+> 설계 = [C144 설계서](../docs/2026-11-18-c144-jbn-special-price-design.md) §2 · CT = `utils/jbn.ts` · 공개 목록 판정 = `utils/plan-guard.ts publicCatalogPlanSql`(제휴 판 제외 · 칸이 없을 때도 참).
+
+- `plans` + `partner_code varchar(20) NULL`(NULL = 공개 요금제 · 'JBN' = JBN 특별가 판) · `base_plan_id uuid NULL FK plans(id)`(원 요금제) · CHECK `plans_partner_base_pair` = 둘이 함께 NULL 이거나 함께 값.
+- JBN 판 행 = 활성 유료 공개 요금제마다 한 줄(`plan_code` 'JBN_' + 원 코드 · `plan_name` 'JBN ' + 원 이름 · 월정액 = 원 × 0.7 · 나머지 칸 = 원 요금제 통째 복사) · 그 달 월 크레딧 고정값(`plan_month_credits`)도 같은 트랜잭션에서 복사.
+- 운영 실측 1118(시험 DB t_tpl_closed) = plans 제약 PK · `plans_plan_code_key` UNIQUE(plan_code) 둘 · `free_*_qty` 네 칸 있음.
+
+`jbn_applications`(공개 /jbn 신청 · 개인정보 = 90일 뒤 IP NULL · 1년 뒤 행 삭제 = `purgeJbnApplicationPii`):
+
+| 컬럼 | 타입 | 비고 |
+|---|---|---|
+| id | uuid PK(기본값 없음) | 화면이 신청 하나에 한 번 만든다 · `ON CONFLICT (id) DO NOTHING` = 다시 보내도 한 행 |
+| company_name · owner_name · nickname · phone | varchar(60 · 30 · 40 · 20) NOT NULL | 회사명 · 대표자 성함 · JBN 단톡방 닉네임 · 휴대폰(숫자만) |
+| interest_plan_code | varchar(20) NULL | 원 요금제 코드(그때 활성 JBN 판의 원 코드만) |
+| consult_method | varchar(10) NOT NULL CHECK phone · visit · video | |
+| memo | text NOT NULL DEFAULT '' | |
+| status | varchar(10) NOT NULL DEFAULT 'pending' CHECK pending · verified · rejected | 이동 = 요청이 본 상태와 같을 때만(연결된 신청은 확인 해제 불가) |
+| status_reason · status_by_label · status_at | text · varchar(100) · timestamptz | 슈퍼관리자 login_id |
+| company_id | uuid NULL FK companies ON DELETE SET NULL | 연결 = 확인된 신청만 · 직전값 비교 · 병합 축 move |
+| linked_by_label · linked_at | varchar(100) · timestamptz | |
+| ip_address | inet NULL | 90일 뒤 NULL |
+| created_at | timestamptz NOT NULL DEFAULT now() | |
+
+- 인덱스 = (created_at DESC) · (company_id) WHERE company_id IS NOT NULL. 감사 기록 action = `jbn_status` · `jbn_link` · `jbn_delete` · `jbn_purge`(target_type `jbn_application` · details 에 개인정보 없음).
+
 ### free_messaging_grants (요금제 무료 메시징 월 지급 원장) ★2026-08-05 신설 — **DDL 대기**
 
 > 설계·확정 = [요금제 무료 메시징 설계서](../docs/2026-08-05-plan-free-messaging-design.md). CT = `utils/free-messaging.ts`.

@@ -2685,6 +2685,112 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 확인: 그 라인그룹 표만(`k_next_type IN ('S','A')` · 명령은 라인그룹 확인 뒤)
 - 결과:
 
+### C144-P0 · 배포 앞 확인(읽기 전용 · JBN 판을 만들 공개 유료 요금제 · plans 칸 · 제약)
+- 카드: C144
+- 단계: 사전
+- 선행: 없음
+- 기대: ① 활성 유료 요금제 = STARTER 150000 · BASIC 350000 · PRO 1000000 · BUSINESS 3000000 · ENTERPRISE 5500000 다섯 줄(설계서 docs/2026-11-18-c144-jbn-special-price-design.md §2-2 · status/SCHEMA.md plans 절 0728 기록) ② plans 에 partner_code · base_plan_id 칸이 아직 없다 ③ plans 제약 = 새 행을 막을 CHECK 없음(PK · plan_code UNIQUE)
+- 확인: 서버 셸 한 줄 셋(PG) ① `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT plan_code, plan_name, monthly_price, ai_credits_per_month, is_active FROM plans WHERE is_active AND monthly_price > 0 ORDER BY monthly_price;"` ② `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = 'plans' ORDER BY ordinal_position;"` ③ `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'plans'::regclass;"` · ① 이 다섯 줄이 아니거나 ② 에 두 칸이 이미 있으면 멈춘다
+- 결과:
+
+### C144-H1 · 한줄로 배포(JBN 특별가 · 공개 신청 페이지 · 「JBN 회원」 탭 · 백엔드 + 프론트 · DDL 1 + DML 1 = 배포 뒤 · ENV 0)
+- 카드: C144
+- 단계: 한줄로 배포
+- 선행: C144-P0 · 설계 Codex 3R approve(1118) · 구현 Codex 3R approve(1118) · 커밋(Harold · 다른 세션의 미커밋 줄과 한 파일인 문서(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md · status/SCHEMA.md)는 이 카드 줄만)
+- 기대: 설계서 §7 · 재시작 뒤 공개 요금표 그대로(JBN 행은 아직 없다) · GET /api/public/jbn/plans = 503 DB_MIGRATION_PENDING(DDL 전 정상)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `publicCatalogPlanSql` ≥ 3
+- 결과:
+
+### C144-DDL-1 · plans 제휴 칸 둘 + JBN 신청 표(설계서 §2-1) · ★ 배포 뒤
+- 카드: C144
+- 단계: DDL
+- 선행: C144-H1(새 코드가 먼저 돈다 = 옛 코드가 도는 동안 JBN 행이 공개 목록에 섞이지 않는다 · DDL 전 새 코드 = 칸이 없으면 공개 목록 그대로 · JBN 주소만 503)
+- 의미 바꿈: 아니오(칸 · 표 추가만 · 기존 행의 partner_code NULL = 공개 그대로)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name FROM information_schema.columns WHERE table_name = 'plans' AND column_name IN ('partner_code', 'base_plan_id'); SELECT table_name FROM information_schema.tables WHERE table_name = 'jbn_applications';
+- 확인: 칸 두 줄 · 표 한 줄
+- 결과:
+
+> C144-DDL-1 · 배포 뒤 · 되돌리기 = 코드를 내린 뒤에만(C144-RB-1 먼저 · JBN 행을 쓰는 회사가 없을 때) DROP TABLE jbn_applications; DELETE FROM plans WHERE partner_code IS NOT NULL; ALTER TABLE plans DROP CONSTRAINT plans_partner_base_pair, DROP COLUMN base_plan_id, DROP COLUMN partner_code;
+
+```sql ddl:C144-DDL-1
+SET lock_timeout = '3s';
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS partner_code varchar(20);
+ALTER TABLE plans ADD COLUMN IF NOT EXISTS base_plan_id uuid REFERENCES plans(id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'plans_partner_base_pair') THEN
+    ALTER TABLE plans ADD CONSTRAINT plans_partner_base_pair CHECK ((partner_code IS NULL) = (base_plan_id IS NULL));
+  END IF;
+END $$;
+CREATE TABLE IF NOT EXISTS jbn_applications (
+  id uuid PRIMARY KEY,
+  company_name varchar(60) NOT NULL,
+  owner_name varchar(30) NOT NULL,
+  nickname varchar(40) NOT NULL,
+  phone varchar(20) NOT NULL,
+  interest_plan_code varchar(20),
+  consult_method varchar(10) NOT NULL CHECK (consult_method IN ('phone', 'visit', 'video')),
+  memo text NOT NULL DEFAULT '',
+  status varchar(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'verified', 'rejected')),
+  status_reason text,
+  status_by_label varchar(100),
+  status_at timestamptz,
+  company_id uuid REFERENCES companies(id) ON DELETE SET NULL,
+  linked_by_label varchar(100),
+  linked_at timestamptz,
+  ip_address inet,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_jbn_applications_created ON jbn_applications (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_jbn_applications_company ON jbn_applications (company_id) WHERE company_id IS NOT NULL;
+```
+
+### C144-DML-1 · 공개 유료 요금제마다 JBN 판 한 줄 + 그 달 월 크레딧 고정값 복사(설계서 §2-2) · 한 트랜잭션 · ★ 배포 뒤
+- 카드: C144
+- 단계: DML
+- 선행: C144-DDL-1
+- 의미 바꿈: 아니오(새 행만 · 기존 요금제 · 회사 · 고정값 무변)
+- 기대: JBN 행 수 = C144-P0 ① 의 줄 수 · 월정액 = 원 요금제 × 0.7(105000 · 245000 · 700000 · 2100000 · 3850000) · 기능 칸 = 원 요금제와 같다 · 두 번 실행해도 그대로
+- 확인: SELECT j.plan_code, j.plan_name, j.monthly_price, b.monthly_price AS base_price, j.ai_credits_per_month, j.is_active FROM plans j JOIN plans b ON b.id = j.base_plan_id WHERE j.partner_code = 'JBN' ORDER BY j.monthly_price;
+- 결과:
+
+> C144-RB-1(되돌리기 · 코드를 옛 판으로 내리기 **전에** 먼저 · 설계서 §7) = UPDATE plans SET is_active = false WHERE partner_code = 'JBN'; · 다시 올릴 때 true · JBN 판 회사의 청구 · 기능 판정은 행 id 로 읽어 무영향
+
+```sql dml:C144-DML-1
+BEGIN;
+SET LOCAL lock_timeout = '3s';
+DO $$ BEGIN
+  IF to_regclass('public.plan_month_credits') IS NOT NULL THEN
+    LOCK TABLE plan_month_credits IN SHARE ROW EXCLUSIVE MODE;
+  END IF;
+END $$;
+INSERT INTO plans
+SELECT (jsonb_populate_record(NULL::plans, to_jsonb(b) || jsonb_build_object(
+  'id', gen_random_uuid(), 'plan_code', 'JBN_' || b.plan_code, 'plan_name', 'JBN ' || b.plan_name,
+  'monthly_price', round(b.monthly_price * 0.7), 'partner_code', 'JBN', 'base_plan_id', b.id, 'created_at', now()))).*
+  FROM plans b
+ WHERE b.partner_code IS NULL AND b.is_active AND b.monthly_price > 0
+   AND NOT EXISTS (SELECT 1 FROM plans j WHERE j.partner_code = 'JBN' AND j.base_plan_id = b.id);
+DO $$ BEGIN
+  IF to_regclass('public.plan_month_credits') IS NOT NULL THEN
+    INSERT INTO plan_month_credits (month, plan_code, credits)
+    SELECT m.month, j.plan_code, m.credits
+      FROM plans j JOIN plans b ON b.id = j.base_plan_id
+      JOIN plan_month_credits m ON m.plan_code = b.plan_code
+     WHERE j.partner_code = 'JBN'
+    ON CONFLICT (month, plan_code) DO NOTHING;
+  END IF;
+END $$;
+COMMIT;
+```
+
+### C144-S1 · 실측(공개 요금표 · JBN 페이지 · 탭 · 시험 회사)
+- 카드: C144
+- 단계: 사후
+- 선행: C144-DML-1
+- 기대: 설계서 §7 · ① /pricing 가격 다섯 그대로(JBN 0) ② hanjul.ai/jbn 가격 다섯(정가 줄 그음 · 70%) ③ 시험 신청 1건(도달 불가 번호 010-0000-xxxx) → 「JBN 회원」 탭 확인 전 1 → 회원 맞음 → 시험 회사 연결 → 고객사 상세에서 그 회사를 JBN 판으로 → 적용 중 → 원래 요금제로 되돌림 → 시험 신청 지우기
+- 확인: 화면 + 서버 셸 한 줄 `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT status, company_id IS NOT NULL AS linked, count(*) FROM jbn_applications GROUP BY 1, 2;"`
+- 결과:
+
 ## §2 덤프 뒤 적용분
 
 > 다음 재덤프 때 각 설계서(2026-10-27-mall-integration-hardening-design.md §3 · §11)로 옮기고 비운다.

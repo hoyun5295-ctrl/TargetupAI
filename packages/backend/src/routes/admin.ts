@@ -99,6 +99,7 @@ import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, 
 import { loadNoticeAck } from '../utils/customer-notice'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+import { changeJbnStatus, deleteJbnApplication, linkJbnCompany, loadJbnOverview, parseJbnOverviewQuery, type JbnWriteResult } from '../utils/jbn'; // ★ 2026-11-18 C144 JBN 회원(ceo · suran)
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import { loadIdentityStatus } from '../utils/identity-status'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import { loadMallIntegrationMonitor } from '../utils/mall-integration-monitor'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
@@ -5101,6 +5102,60 @@ router.get('/intro-leads', authenticate, requireSuperAdmin, async (req: Request,
   } catch (err: any) {
     console.error('[admin/intro-leads] 조회 실패:', err);
     return res.status(500).json({ success: false, error: '소개 방문 · 시연 요청을 불러오지 못했습니다.' });
+  }
+});
+
+// ★ 2026-11-18 C144 JBN 회원(신청 · 단톡방 닉네임 회원 확인 · 회사 연결) — 열람 · 조작 = 소개 방문과 같은 관문(ceo · suran · Harold 1118)
+//   CT = utils/jbn.ts · 요금제를 실제로 바꾸는 일은 여기서 하지 않는다(회사 수정 경로 한 길 · 설계서 docs/2026-11-18-c144-jbn-special-price-design.md §1)
+const jbnActor = (req: Request) => ({ userId: req.user?.userId || null, label: String(req.user?.loginId || '') });
+const jbnDenied = (res: Response) => res.status(403).json({ success: false, error: 'JBN 회원 메뉴 권한이 없습니다.' });
+const jbnFail = (err: any, res: Response, what: string) => {
+  if (handleDbMigrationError(err, res, 'jbn_applications / plans.partner_code')) return;
+  console.error(`[admin/jbn] ${what} 실패:`, err?.message);
+  res.status(500).json({ success: false, error: `${what}에 실패했습니다.` });
+};
+const jbnSend = (res: Response, out: JbnWriteResult) =>
+  out.ok ? res.json({ success: true, row: out.row }) : res.status(out.status).json({ success: false, code: out.code, error: out.error, row: out.row ?? null });
+
+router.get('/jbn/access', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  res.json({ allowed: await isIntroLeadsViewer(req.user?.userId) });
+});
+
+router.get('/jbn/overview', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  if (!(await isIntroLeadsViewer(req.user?.userId))) return jbnDenied(res);
+  try {
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, ...(await loadJbnOverview(parseJbnOverviewQuery(req.query))) });
+  } catch (err: any) {
+    return jbnFail(err, res, 'JBN 회원 불러오기');
+  }
+});
+
+router.post('/jbn/applications/:id/status', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  if (!(await isIntroLeadsViewer(req.user?.userId))) return jbnDenied(res);
+  try {
+    return jbnSend(res, await changeJbnStatus(req.params.id, req.body, jbnActor(req), req));
+  } catch (err: any) {
+    return jbnFail(err, res, '회원 확인 저장');
+  }
+});
+
+router.post('/jbn/applications/:id/link', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  if (!(await isIntroLeadsViewer(req.user?.userId))) return jbnDenied(res);
+  try {
+    return jbnSend(res, await linkJbnCompany(req.params.id, req.body, jbnActor(req), req));
+  } catch (err: any) {
+    return jbnFail(err, res, '회사 연결 저장');
+  }
+});
+
+router.delete('/jbn/applications/:id', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  if (!(await isIntroLeadsViewer(req.user?.userId))) return jbnDenied(res);
+  try {
+    const done = await deleteJbnApplication(req.params.id, jbnActor(req), req);
+    return done ? res.json({ success: true }) : res.status(404).json({ success: false, code: 'NOT_FOUND', error: '신청을 찾을 수 없습니다.' });
+  } catch (err: any) {
+    return jbnFail(err, res, '신청 지우기');
   }
 });
 

@@ -7,6 +7,7 @@
 import { Response } from 'express';
 import { query } from '../config/database';
 import { validateDefinition, type DiagnosisDefinition } from './plan-recommend';
+import { PUBLIC_CATALOG_PLAN_SQL } from './plan-guard';   // ★ 2026-11-18 C144
 
 /**
  * 문항 투영 — 공개·인증 questions 라우트가 **같은 함수**를 쓴다(문항 2경로 드리프트 차단 — v3 M3).
@@ -36,12 +37,14 @@ export function projectQuestions(definition: DiagnosisDefinition) {
   };
 }
 
-/** 추천 CT 입력용 plans 로드 — op 표 전 축 컬럼(§4-5. 전부 2026-08-16 실측 실존 컬럼). */
+/** 추천 CT 입력용 plans 로드 — op 표 전 축 컬럼(§4-5. 전부 2026-08-16 실측 실존 컬럼).
+ *  ★ 2026-11-18 C144 제휴 판(JBN 특별가)은 추천 후보가 아니다(같은 기능 · 더 싼 행이 공개 진단에 추천되면 그 가격이 새어 나간다). */
 export const DIAGNOSIS_PLAN_ROWS_SQL = `
   SELECT id, plan_code, plan_name, monthly_price, is_active,
          ai_credits_per_month, max_auto_campaigns, cdp_events_per_month, max_customers,
          customer_db_enabled, auto_campaign_enabled, mobile_dm_enabled, cdp_enabled
-    FROM plans`;
+    FROM plans p
+   WHERE ${PUBLIC_CATALOG_PLAN_SQL}`;
 
 /** 활성 definition이 구조 검증을 통과하지 못했다 — 호출부는 503으로 변환한다(fail-closed). */
 export class DiagnosisDefinitionInvalidError extends Error {

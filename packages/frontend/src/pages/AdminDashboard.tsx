@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ConfirmModal, { type ConfirmState } from '../components/ConfirmModal';   // ★ C103 F8
-import { companiesApi, plansApi, billingApi, unitPriceApi } from '../api/client';
+import { companiesApi, billingApi, unitPriceApi } from '../api/client';
 import { previewUnitPrice, fmtPrice, toSupplyInputs } from '../utils/unitPrice'; // ★ 2026-07-26 단가 = VAT 별도 공급가
 import { useAuthStore } from '../stores/authStore';
 import { formatDateTime, formatDate, formatDateTimeShort, formatCampaignMessageForDisplay, getAlimtalkTemplateStatus, kstTodayStr } from '../utils/formatDate';
@@ -23,6 +23,7 @@ import FeatureInterestTab from '../components/admin/FeatureInterestTab'; // ★ 
 import IdentityStatusTab from '../components/admin/IdentityStatusTab'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import MallIntegrationMonitorTab from '../components/admin/MallIntegrationMonitorTab'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
 import IntroLeadsTab from '../components/admin/IntroLeadsTab'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
+import JbnMembersTab from '../components/admin/JbnMembersTab'; // ★ 2026-11-18 C144 JBN 회원(ceo · suran)
 import ProposalTrialTab from '../components/admin/ProposalTrialTab'; // ★ 2026-11-16 C136 제안 체험(소개 방문 탭과 같은 허용 계정)
 import CustomerNoticeAckTab from '../components/admin/CustomerNoticeAckTab'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import WatchLogTab from '../components/admin/WatchLogTab'; // ★ 2026-10-07 감시 기록(ceo 전용)
@@ -101,7 +102,7 @@ export default function AdminDashboard() {
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
 
-  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'inbound' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'proposalTrial' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
+  const [activeTab, setActiveTab] = useState<'companies' | 'users' | 'scheduled' | 'callbacks' | 'plans' | 'requests' | 'deposits' | 'credits' | 'allCampaigns' | 'stats' | 'billing' | 'syncAgents' | 'auditLogs' | 'lineGroups' | 'templates' | 'loginBlocks' | 'agentDeploy' | 'marketingDiagnosis' | 'spamBlock' | 'geoAccess' | 'helpQuestions' | 'agencyMail' | 'agencyLedger' | 'inbound' | 'adminAccounts' | 'precheckUsage' | 'featureInterest' | 'identityStatus' | 'introLeads' | 'jbnMembers' | 'proposalTrial' | 'watchLog' | 'opsRecords' | 'mallMonitor' | 'noticeAck'>('companies');
   // ★ 2026-06-11: 감사 로그 열람 권한 (AUDIT_LOG_VIEWER_IDS — 기본 ceo 전용) — 허용 계정에만 메뉴/탭 노출
   const [auditAccessAllowed, setAuditAccessAllowed] = useState(false);
   // ★ 2026-08-27 직원 계정·권한 (전송자격인증 3.2·3.3) — 권한분류표 원본은 서버(utils/admin-role.ts)
@@ -2207,12 +2208,16 @@ const handleSendBillingEmail = async (resend = false) => {
     //   첫 화면(대시보드 탭)에 필요한 고객사+요금제만 기다려 즉시 표시하고,
     //   나머지 5개는 병렬 백그라운드 — 각자 도착하는 대로 해당 탭 데이터가 채워진다(표시 값 동일).
     try {
-      const [companiesRes, plansRes] = await Promise.all([
+      const [companiesRes, planRows] = await Promise.all([
         companiesApi.list({ limit: 1000 }),
-        plansApi.list(),
+        // ★ 2026-11-18 C144 회사 등록 · 상세의 요금제 고르기 = 관리자 요금제 목록의 활성 행(JBN 판 포함).
+        //   공개 /api/plans 는 제휴 판(JBN 특별가)을 빼므로 여기서 쓰면 직원이 JBN 판을 고를 수 없다.
+        fetch('/api/admin/plans', { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`요금제 목록 ${r.status}`))))
+          .then((d) => (d.plans || []).filter((p: any) => p.is_active !== false)),
       ]);
       setCompanies(companiesRes.data.companies);
-      setPlans(plansRes.data.plans);
+      setPlans(planRows);
     } catch (error) {
       console.error('데이터 로드 실패:', error);
     } finally {
@@ -2765,6 +2770,8 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
                   ...(introLeadsAllowed ? [{ key: 'introLeads', label: '소개 방문 · 시연 요청' }] : []),
                   // ★ 2026-11-16 C136 제안 체험(제안 페이지 열람 → 신청 → 제작 확인 · 전달) = 소개 방문 탭과 같은 허용 계정(확인하고 전달하는 사람)
                   ...(introLeadsAllowed ? [{ key: 'proposalTrial', label: '제안 체험' }] : []),
+                  // ★ 2026-11-18 C144 JBN 회원(신청 · 단톡방 닉네임 회원 확인 · 회사 연결) = 소개 방문 탭과 같은 허용 계정(Harold 「ceo, suran 만」)
+                  ...(introLeadsAllowed ? [{ key: 'jbnMembers', label: 'JBN 회원' }] : []),
                   // ★ 2026-08-24: AI 영업 = 허용 계정(★1003 ceo · suran)에만 노출 · ★ 2026-10-09 별도 페이지(/admin/outreach · 뒤로가기 = 이 화면)
                   ...(outreachAllowed ? [{ key: 'salesOutreach', label: 'AI 영업', onClick: () => navigate('/admin/outreach') }] : []),
                 ],
@@ -2939,6 +2946,7 @@ const loadStatsDetail = async (date: string, companyId: string, companyName: str
         {activeTab === 'featureInterest' && featureInterestAllowed && <FeatureInterestTab />}
         {activeTab === 'identityStatus' && identityStatusAllowed && <IdentityStatusTab />}
         {activeTab === 'introLeads' && introLeadsAllowed && <IntroLeadsTab />}
+        {activeTab === 'jbnMembers' && introLeadsAllowed && <JbnMembersTab />}
         {activeTab === 'proposalTrial' && introLeadsAllowed && <ProposalTrialTab />}
         {activeTab === 'noticeAck' && noticeAckAllowed && <CustomerNoticeAckTab />}
         {activeTab === 'watchLog' && watchLogAllowed && <WatchLogTab />}

@@ -67,6 +67,8 @@ import marketingPlannerRoutes from './routes/marketing-planner';
 import marketingDiagnosisRoutes from './routes/marketing-diagnosis';
 import marketingDiagnosisPublicRoutes from './routes/marketing-diagnosis-public';
 import introPublicRoutes from './routes/intro-public'; // ★ 2026-10-07 공개 소개 페이지 방문 · 시연 요청(무인증)
+import jbnPublicRoutes from './routes/jbn-public'; // ★ 2026-11-18 C144 JBN 전용 페이지 요금 · 신청(무인증)
+import { startJbnRetentionWorker } from './utils/jbn'; // ★ 2026-11-18 C144 신청 보관 기한(90일 IP · 1년 삭제)
 import marketingDiagnosisAdminRoutes from './routes/marketing-diagnosis-admin';
 // ★ D184 (2026-05-20): 이니시스 표준결제 라우트 (레거시 invitobiz.com → 한줄로 이전)
 import paymentsRoutes from './routes/payments';
@@ -527,6 +529,7 @@ app.use('/api/marketing-diagnosis', marketingDiagnosisRoutes);
 app.use('/api/public/marketing-diagnosis', marketingDiagnosisPublicRoutes);
 // ★ 2026-10-07 공개 소개 페이지(/intro) — 방문 기록 · 시연 요청(무인증 · IP당 한도는 라우터 안)
 app.use('/api/public/intro', introPublicRoutes);
+app.use('/api/public/jbn', jbnPublicRoutes);
 // ★ D184: 이니시스 표준결제 (prepare/return/close/list/detail)
 app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin/billing', billingRoutes);
@@ -655,6 +658,9 @@ app.listen(PORT, () => {
 
   // ★ 2026-10-04 선불 요금제 이용 기간 — 만료 정산(자동 결제·잠금)·요금제 정렬(기동 즉시 + 10분 · DDL 전 건너뜀)
   startPlanTermWorker();
+
+  // ★ 2026-11-18 C144 JBN 신청 보관 기한(90일 IP · 1년 행 삭제 · 기동 1분 뒤 + 24시간 · DDL 전 건너뜀)
+  startJbnRetentionWorker();
 
   // ★ 2026-07-28 세금계산서 상태 전이 (5분 주기 — 팝빌 연동 전에는 ready에서 정지)
   startTaxbillWorker();

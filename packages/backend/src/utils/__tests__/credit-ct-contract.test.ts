@@ -213,6 +213,7 @@ const PLAN_CATALOG_EXEMPT: Record<string, { why: string; heads: string[][] }> = 
   'routes/admin.ts': { why: '요금제 만들기(INSERT INTO plans) · 신청 목록(SELECT) = 요금제 표 칸 그대로', heads: [['SELECT'], ['INSERT', 'INTO', 'PLANS']] },
   'utils/marketing-diagnosis-store.ts': { why: '진단 추천 = 요금제 표 칸으로 요금제를 고른다(SELECT · 돈 아님)', heads: [['SELECT']] },
   'utils/plan-term.ts': { why: '선불 기간 요금제 행 = 요금제 표 칸 그대로(SELECT)', heads: [['SELECT']] },
+  'utils/jbn.ts': { why: '★1118 C144 JBN 전용 페이지 요금 안내 = JBN 판 요금제 행의 월 크레딧을 보여 주기만(SELECT · 돈 아님)', heads: [['SELECT']] },
 };
 
 /**

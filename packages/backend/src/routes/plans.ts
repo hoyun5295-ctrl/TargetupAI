@@ -10,6 +10,7 @@ import { claimIntro, dismissIntro, peekIntro } from '../utils/v3-intro';   // �
 import { canSeeIntroContent, gatedImageFile, GATED_CACHE_CONTROL } from '../utils/gated-content';   // ★ 2026-11-16 C136 로그인 뒤에만 주는 소개 그림
 import { v3FeaturesFor } from '../utils/v3-stage';   // ★ 2026-11-13 C133 단계 개방
 import { handleDbMigrationError } from '../utils/db-migration-error';
+import { PUBLIC_CATALOG_PLAN_SQL } from '../utils/plan-guard';   // ★ 2026-11-18 C144
 
 const router = Router();
 
@@ -30,8 +31,9 @@ export function publicPlanRow(row: Record<string, unknown>): Record<string, unkn
 //     DDL 미실행이면 CT가 {}를 돌려주고, 그 밖의 실패도 목록 자체는 막지 않는다(키 추가라 기존 소비처 무영향).
 router.get('/', async (req: Request, res: Response) => {
   try {
+    // ★ 2026-11-18 C144 제휴 판(JBN 특별가)은 공개 목록에 없다(그 가격은 /jbn 링크에서만 · 판정 = PUBLIC_CATALOG_PLAN_SQL)
     const result = await query(
-      `SELECT * FROM plans WHERE is_active = true ORDER BY monthly_price ASC`
+      `SELECT * FROM plans p WHERE p.is_active = true AND ${PUBLIC_CATALOG_PLAN_SQL} ORDER BY p.monthly_price ASC`
     );
 
     let planQuotas: Record<string, Record<string, number>> = {};

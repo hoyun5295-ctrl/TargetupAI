@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JBN 회원 관리 목업</title>
+<!-- 버리는 목업(2026-11-18 JBN) · 슈퍼관리자 새 탭 「JBN 회원」 · 기존 코드에 편입하지 않는다
+     문법 = 1117 C141 「기능 관심 업체」 통합안(단계 칸 + 고른 단계의 목록 + 오른쪽 칸 + 줄 = 상세 창)
+     회사 이름 · 사람 이름 · 번호 = 예시(번호는 010-0000 대역의 도달 불가 값) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{--ink:#0B0B0C;--sub:#5F6368;--line:#E4E4E1;--soft:#F1F1EE;--bg:#F5F6F8;--acc:#CF4510;--acc-d:#A8380B;--acc-soft:#FDF1EC;--ok:#1F7A4D;--ok-soft:#E9F5EE;--no:#9A3412}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Pretendard Variable',Pretendard,system-ui,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word;font-size:14.5px;line-height:1.5}
+button,input,select,textarea{font:inherit;color:inherit}
+button{border:0;background:none;cursor:pointer}
+.num{font-variant-numeric:tabular-nums}
+.ic{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+/* 목업 띠(화면의 일부가 아니다) */
+.top{position:sticky;top:0;z-index:40;background:var(--ink);color:#fff;padding:10px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:12.5px}
+.top b{font-size:13px}
+.top span{color:rgba(255,255,255,.75)}
+
+/* 화면 틀 */
+.page{padding:14px 24px 64px}
+.screen{max-width:1180px;margin:0 auto}
+.hd{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 24px;flex-wrap:wrap;margin:6px 0 18px}
+.hd h1{font-size:22px;font-weight:800;letter-spacing:-.02em}
+.hd p{font-size:13.5px;color:var(--sub);margin-top:2px}
+.filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.seg{display:inline-flex;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px;gap:2px}
+.seg button{height:32px;padding:0 12px;border-radius:7px;font-size:13.5px;color:var(--sub);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff;font-weight:700}
+.find{position:relative}
+.find input{height:40px;width:250px;max-width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;padding:0 12px 0 34px;font-size:13.5px}
+.find input:focus{outline:none;border-color:var(--ink)}
+.find .ic{position:absolute;left:12px;top:12px;color:var(--sub)}
+.card{background:#fff;border-radius:14px;box-shadow:0 1px 2px rgba(11,11,12,.05)}
+
+/* 단계 칸 */
+.stages{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.st{padding:16px 18px 14px;text-align:left;display:flex;flex-direction:column;width:100%;border:2px solid transparent}
+.st[aria-pressed="true"]{border-color:var(--ink)}
+.st h2{font-size:14px;font-weight:700;color:var(--sub)}
+.st .n{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1.2;margin-top:2px}
+.st .n small{font-size:14px;font-weight:600;color:var(--sub);margin-left:2px}
+.st.hot .n{color:var(--acc-d)}
+.st p{font-size:12.5px;color:var(--sub);margin-top:6px;line-height:1.45}
+
+/* 목록 + 오른쪽 칸 */
+.main{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;align-items:start;margin-top:16px}
+.lh{display:flex;justify-content:space-between;align-items:baseline;gap:8px 16px;flex-wrap:wrap;padding:15px 18px 13px;border-bottom:1px solid var(--line)}
+.lh b{font-size:16px;font-weight:800}
+.lh span{font-size:13px;color:var(--sub)}
+.row{display:grid;grid-template-columns:minmax(0,200px) minmax(0,1fr) 128px;gap:4px 18px;padding:14px 18px;align-items:start;width:100%;text-align:left}
+.row + .row{border-top:1px solid var(--soft)}
+.row:hover{background:#FAFAF8}
+.co{font-weight:700;font-size:15px;line-height:1.35}
+.sub{color:var(--sub);font-size:13px}
+.nick{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:14px;background:var(--soft);border-radius:8px;padding:3px 9px}
+.nick small{font-size:11.5px;font-weight:700;color:var(--sub)}
+.what p + p{margin-top:4px}
+.when{text-align:right;font-size:13px;color:var(--sub)}
+.tag{display:inline-block;margin-top:4px;font-size:12px;font-weight:700;padding:3px 8px;border-radius:99px;white-space:nowrap}
+.tag.wait{background:var(--acc-soft);color:var(--acc-d)}
+.tag.ok{background:var(--ok-soft);color:var(--ok)}
+.tag.on{background:var(--ink);color:#fff}
+.tag.no{background:var(--soft);color:var(--sub)}
+.empty{padding:36px 18px;text-align:center;color:var(--sub);font-size:14px}
+.side{display:grid;gap:12px}
+.rc{padding:16px 18px}
+.rc h2{font-size:14px;font-weight:800;margin-bottom:8px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.rc h2 span{font-size:12.5px;color:var(--sub);font-weight:600}
+.link{display:flex;align-items:center;gap:8px;background:var(--soft);border-radius:10px;padding:9px 10px 9px 12px;font-size:13.5px;font-weight:700}
+.link span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mini{height:30px;padding:0 10px;border-radius:8px;background:var(--ink);color:#fff;font-size:12.5px;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+.mini.ln{background:#fff;color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.rc .note{font-size:12.5px;color:var(--sub);margin-top:8px}
+.pt{width:100%;border-collapse:collapse;font-size:13px}
+.pt th{font-size:12px;font-weight:700;color:var(--sub);text-align:right;padding:4px 0 6px}
+.pt th:first-child,.pt td:first-child{text-align:left}
+.pt td{padding:7px 0;border-top:1px solid var(--soft);text-align:right;white-space:nowrap}
+.pt td s{color:var(--sub);font-size:12px;display:block;line-height:1.2}
+.pt td b{font-weight:800}
+.me{display:grid;grid-template-columns:70px minmax(0,1fr);gap:10px;padding:8px 0;font-size:13px}
+.me + .me{border-top:1px solid var(--soft)}
+.me time{color:var(--sub)}
+
+/* 상세 창 */
+.dim{position:fixed;inset:0;background:rgba(11,11,12,.45);display:none;align-items:flex-start;justify-content:center;padding:48px 16px;z-index:60;overflow-y:auto}
+.dim.open{display:flex}
+.md{width:100%;max-width:640px;max-width:min(640px,calc(100vw - 2rem));background:#fff;border-radius:18px;box-shadow:0 30px 80px -30px rgba(0,0,0,.5)}
+.mh{display:flex;align-items:flex-start;gap:12px;padding:20px 22px 16px;border-bottom:1px solid var(--line)}
+.mh div{flex:1;min-width:0}
+.mh h2{font-size:19px;font-weight:800;letter-spacing:-.02em}
+.mh p{font-size:13px;color:var(--sub);margin-top:2px}
+.x{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;color:var(--sub)}
+.x:hover{background:var(--soft)}
+.mb{padding:6px 22px 22px}
+.kv{display:grid;grid-template-columns:110px minmax(0,1fr);gap:4px 16px;padding:14px 0;font-size:14px}
+.kv dt{color:var(--sub);font-size:13px;padding-top:1px}
+.kv dd{font-weight:600}
+.kv dd.memo{font-weight:400;color:var(--ink);line-height:1.6}
+.stp{border-top:1px solid var(--line);padding-top:16px;margin-top:4px}
+.stp + .stp{margin-top:18px}
+.stp h3{font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px}
+.stp h3 i{font-style:normal;width:22px;height:22px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;display:grid;place-items:center}
+.stp.done h4 i{background:var(--ok)}
+.stp.lock{opacity:.45;pointer-events:none}
+.stp .hint{font-size:13px;color:var(--sub);margin-top:6px;line-height:1.55}
+.big-nick{margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--soft);border-radius:12px;padding:12px 14px}
+.big-nick b{font-size:18px;font-weight:800;letter-spacing:-.01em;flex:1;min-width:0}
+.acts{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.bt{height:44px;border-radius:11px;font-weight:700;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap}
+.bt.pr{background:var(--ink);color:#fff}
+.bt.or{background:var(--acc);color:#fff}
+.bt.or:hover{background:var(--acc-d)}
+.bt.ln{box-shadow:inset 0 0 0 1px #CFCFCB;background:#fff}
+.in{width:100%;height:42px;border:1px solid #D6D6D2;border-radius:10px;padding:0 12px;font-size:14px;background:#fff}
+.in:focus{outline:none;border-color:var(--ink)}
+.fld{margin-top:12px}
+.fld>span{display:block;font-size:13px;font-weight:700;margin-bottom:6px}
+.fld>span em{font-style:normal;font-weight:500;color:var(--sub)}
+.pick{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+.found{margin-top:8px;font-size:13px;color:var(--sub);display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.found b{color:var(--ink)}
+.ck{display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:13.5px;line-height:1.5;cursor:pointer}
+.ck input{width:18px;height:18px;margin-top:1px;accent-color:var(--ink);flex-shrink:0}
+.ck small{display:block;color:var(--sub);font-size:12.5px}
+.sum{margin-top:14px;background:var(--acc-soft);border-radius:12px;padding:12px 14px;font-size:13.5px;line-height:1.6}
+.sum b{color:var(--acc-d)}
+.res{margin-top:10px;font-size:13.5px;font-weight:700;color:var(--ok);display:flex;gap:6px;align-items:center}
+.res.no{color:var(--no)}
+.foot-note{margin-top:14px;font-size:12.5px;color:var(--sub)}
+
+@media (max-width:1000px){
+  .stages{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .main{grid-template-columns:minmax(0,1fr)}
+  .row{grid-template-columns:minmax(0,1fr)}
+  .when{text-align:left}
+}
+@media (max-width:560px){
+  .page{padding:12px 14px 48px}
+  .find,.find input{width:100%}
+  .filters{width:100%}
+  .kv{grid-template-columns:1fr;gap:0 0}
+  .kv dd{margin-bottom:8px}
+  .acts{grid-template-columns:1fr}
+  .pick{grid-template-columns:1fr}
+  .mh,.mb{padding-left:16px;padding-right:16px}
+  .dim{padding:16px 8px}
+}
+</style>
+</head>
+<body>
+
+<div class="top"><b>JBN 회원 관리 목업</b><span>슈퍼관리자 새 탭(ceo, suran만 보임). 회사 이름, 사람 이름, 번호는 예시입니다. 줄을 누르면 상세 창이 열립니다.</span></div>
+
+<div class="page"><div class="screen">
+  <div class="hd">
+    <div>
+      <h1>JBN 회원</h1>
+      <p>JBN 전용 페이지로 들어온 신청, 단톡방 닉네임으로 회원 확인, 특별가 적용</p>
+    </div>
+    <div class="filters">
+      <label class="find"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="q" placeholder="회사명, 성함, 닉네임, 번호"></label>
+      <div class="seg" role="group" aria-label="기간">
+        <button type="button" aria-pressed="false">최근 7일</button><button type="button" aria-pressed="false">이번 달</button><button type="button" aria-pressed="true">전체</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="stages" id="stages"></div>
+
+  <div class="main">
+    <section class="card" style="overflow:hidden">
+      <div class="lh"><b id="lt"></b><span id="ls"></span></div>
+      <div id="list"></div>
+    </section>
+
+    <aside class="side">
+      <div class="card rc">
+        <h2>전용 페이지 주소<span>단톡방에 붙이는 주소</span></h2>
+        <div class="link"><span>hanjul.ai/jbn</span><button type="button" class="mini" id="cp-link"><svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>복사</button></div>
+        <p class="note">검색에 걸리지 않고, 다른 화면 어디에도 걸지 않습니다.</p>
+      </div>
+      <div class="card rc">
+        <h2>JBN 요금제<span>월, VAT 별도</span></h2>
+        <table class="pt num">
+          <thead><tr><th>요금제</th><th>JBN 가격</th><th>쓰는 회사</th></tr></thead>
+          <tbody id="plan-tb"></tbody>
+        </table>
+        <p class="note">가격을 바꾸려면 요금제 관리에서 JBN 요금제 줄을 고칩니다.</p>
+      </div>
+      <div class="card rc">
+        <h2>최근 처리<span>누가, 언제</span></h2>
+        <div id="log"></div>
+      </div>
+    </aside>
+  </div>
+</div></div>
+
+<!-- 상세 창 -->
+<div class="dim" id="dim" aria-hidden="true">
+  <div class="md" role="dialog" aria-modal="true" aria-labelledby="m-co">
+    <div class="mh">
+      <div><h2 id="m-co"></h2><p id="m-at"></p></div>
+      <span id="m-tag"></span>
+      <button type="button" class="x" id="m-x" aria-label="닫기"><svg class="ic" viewBox="0 0 24 24" style="width:18px;height:18px"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="mb">
+      <dl class="kv" id="m-kv"></dl>
+
+      <section class="stp" id="s1">
+        <h3><i>1</i>JBN 회원 확인</h3>
+        <p class="hint">JBN 단톡방에서 아래 닉네임을 찾아 주세요. 대표자 성함, 회사명과 맞는지도 함께 봅니다.</p>
+        <div class="big-nick"><b id="m-nick"></b><button type="button" class="mini ln" id="cp-nick"><svg class="ic" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>닉네임 복사</button></div>
+        <div id="s1-act">
+          <div class="acts">
+            <button type="button" class="bt pr" id="b-ok"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>JBN 회원 맞음</button>
+            <button type="button" class="bt ln" id="b-no">단톡방에 없음</button>
+          </div>
+        </div>
+        <p class="res" id="s1-res" hidden></p>
+      </section>
+
+      <section class="stp" id="s2">
+        <h3><i>2</i>특별가 적용</h3>
+        <p class="hint">상담을 마친 뒤 한줄로 회사를 연결하고 JBN 요금제를 고릅니다. 적용하면 월 구독료가 30% 할인된 금액으로 나갑니다.</p>
+        <div class="fld"><span>한줄로 회사</span>
+          <div class="pick"><input class="in" id="m-company" placeholder="회사명이나 사업자번호로 찾기"><button type="button" class="bt ln" style="height:42px;padding:0 14px">새 회사로 등록</button></div>
+          <p class="found" id="m-found"></p>
+        </div>
+        <div class="fld"><span>JBN 요금제 <em>(신청 때 고른 요금제가 먼저 골라져 있습니다)</em></span>
+          <select class="in" id="m-plan"></select>
+        </div>
+        <div class="sum" id="m-sum"></div>
+        <div class="acts" style="grid-template-columns:1fr"><button type="button" class="bt or" id="b-apply">JBN 특별가 적용</button></div>
+        <p class="res" id="s2-res" hidden></p>
+        <p class="foot-note">선불, 후불 어느 쪽이든 같습니다. 선불은 충전 잔액 차감액이, 후불은 정산서의 구독료 줄이 할인된 금액이 됩니다.</p>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script>
+const PLANS = [
+  { code: 'STARTER', name: '스타터', was: 150000, now: 105000, used: 0 },
+  { code: 'BASIC', name: '베이직', was: 350000, now: 245000, used: 1 },
+  { code: 'PRO', name: '프로', was: 1000000, now: 700000, used: 1 },
+  { code: 'BUSINESS', name: '비즈니스', was: 3000000, now: 2100000, used: 0 },
+  { code: 'ENTERPRISE', name: '엔터프라이즈', was: 5500000, now: 3850000, used: 0 },
+];
+const won = (n) => n.toLocaleString('ko-KR');
+// 상태: wait(확인 전) · ok(회원 확인) · on(특별가 적용 중) · no(회원 아님)
+const ROWS = [
+  { id: 1, st: 'wait', co: '바른손공방', nm: '김도윤', nick: '바른손공방 김도윤', ph: '010-0000-4821', plan: '베이직', how: '전화 상담', at: '11/18 10:42', memo: '지금은 다른 문자 사이트에서 직접 보내고 있습니다. 카톡으로도 보낼 수 있는지 궁금합니다.', ip: [] },
+  { id: 2, st: 'wait', co: '오늘의정원', nm: '이서연', nick: '정원 서연', ph: '010-0000-7310', plan: '아직 모르겠어요', how: '방문 상담', at: '11/18 09:15', memo: '', ip: [] },
+  { id: 3, st: 'wait', co: '다온푸드', nm: '박준호', nick: '다온 박준호 대표', ph: '010-0000-1957', plan: '프로', how: '화상 상담', at: '11/17 21:03', memo: '매장 세 곳 고객 명단을 합치고 싶습니다.', ip: [{ id: 'daon01', co: '다온푸드' }] },
+  { id: 4, st: 'ok', co: '해밀컴퍼니', nm: '최유나', nick: '해밀 최유나', ph: '010-0000-2290', plan: '베이직', how: '전화 상담', at: '11/17 15:30', memo: '', ip: [], by: 'ceo', byAt: '11/18 10:50' },
+  { id: 5, st: 'ok', co: '그레이스치과', nm: '정민재', nick: '그레이스 정민재', ph: '010-0000-6604', plan: '스타터', how: '방문 상담', at: '11/17 11:12', memo: '예약 안내 문자를 자동으로 보내고 싶습니다.', ip: [], by: 'ceo', byAt: '11/17 16:02' },
+  { id: 6, st: 'on', co: '그린랩', nm: '한지수', nick: '그린랩 한지수', ph: '010-0000-3381', plan: '프로', how: '화상 상담', at: '11/16 14:20', memo: '', ip: [], by: 'ceo', byAt: '11/16 15:00', applied: { plan: 'JBN 프로', at: '11/17 16:20', pay: '후불' } },
+  { id: 7, st: 'on', co: '모아상회', nm: '윤태호', nick: '모아 윤태호', ph: '010-0000-9152', plan: '베이직', how: '전화 상담', at: '11/16 10:05', memo: '', ip: [], by: 'ceo', byAt: '11/16 11:40', applied: { plan: 'JBN 베이직', at: '11/16 17:10', pay: '선불' } },
+  { id: 8, st: 'no', co: '스마일마트', nm: '오현석', nick: '스마일 오현석', ph: '010-0000-5527', plan: '스타터', how: '전화 상담', at: '11/16 08:47', memo: '', ip: [], by: 'ceo', byAt: '11/16 13:22', why: '단톡방에서 같은 닉네임을 찾지 못함. 전화로 다시 확인하기로.' },
+];
+const STAGES = [
+  { k: 'wait', t: '확인 전', d: '단톡방에서 닉네임을 찾아 회원인지 볼 신청', hot: true },
+  { k: 'ok', t: '회원 확인됨', d: '상담하고 JBN 요금제를 걸 차례' },
+  { k: 'on', t: '특별가 적용 중', d: 'JBN 요금제를 쓰는 회사' },
+  { k: 'no', t: '회원 아님', d: '단톡방에서 찾지 못한 신청' },
+];
+const TAG = { wait: ['wait', '확인 전'], ok: ['ok', '회원 확인됨'], on: ['on', '특별가 적용 중'], no: ['no', '회원 아님'] };
+const LOG = [
+  ['11/18 10:50', 'ceo', '해밀컴퍼니 회원 확인'],
+  ['11/17 16:20', 'ceo', '그린랩에 JBN 프로 적용'],
+  ['11/17 16:02', 'ceo', '그레이스치과 회원 확인'],
+  ['11/16 17:10', 'ceo', '모아상회에 JBN 베이직 적용'],
+  ['11/16 13:22', 'ceo', '스마일마트 회원 아님 처리'],
+];
+let stage = 'wait';
+let q = '';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const tagHtml = (st) => `<span class="tag ${TAG[st][0]}">${TAG[st][1]}</span>`;
+
+function render() {
+  $('stages').innerHTML = STAGES.map((s) => {
+    const n = ROWS.filter((r) => r.st === s.k).length;
+    return `<button type="button" class="card st${s.hot && n ? ' hot' : ''}" data-k="${s.k}" aria-pressed="${stage === s.k}"><h2>${s.t}</h2><span class="n num">${n}<small>곳</small></span><p>${s.d}</p></button>`;
+  }).join('');
+  const s = STAGES.find((x) => x.k === stage);
+  const rows = ROWS.filter((r) => r.st === stage && (!q || [r.co, r.nm, r.nick, r.ph].join(' ').includes(q)));
+  $('lt').textContent = s.t;
+  $('ls').textContent = `${rows.length}곳, 새 신청이 위`;
+  $('list').innerHTML = rows.length ? rows.map((r) => `
+    <button type="button" class="row" data-id="${r.id}">
+      <div><p class="co">${esc(r.co)}</p><p class="sub">${esc(r.nm)} 대표<br><span class="num">${r.ph}</span></p></div>
+      <div class="what">
+        <p><span class="nick"><small>닉네임</small>${esc(r.nick)}</span></p>
+        <p class="sub">${r.st === 'on' ? `${r.applied.plan} 적용 ${r.applied.at}, ${r.applied.pay}` : `관심 ${esc(r.plan)}, ${esc(r.how)}`}${r.st === 'ok' ? `, 확인 ${r.byAt} ${r.by}` : ''}${r.st === 'no' ? `, ${esc(r.why)}` : ''}</p>
+        ${r.memo && r.st === 'wait' ? `<p class="sub">「${esc(r.memo)}」</p>` : ''}
+      </div>
+      <div class="when"><span class="num">${r.at}</span><br>${tagHtml(r.st)}</div>
+    </button>`).join('') : `<div class="empty">${q ? '찾는 신청이 없습니다.' : '이 단계에 있는 신청이 없습니다.'}</div>`;
+  $('plan-tb').innerHTML = PLANS.map((p) => `<tr><td>${p.name}</td><td><s>${won(p.was)}</s><b>${won(p.now)}</b></td><td>${p.used}곳</td></tr>`).join('');
+  $('log').innerHTML = LOG.map((l) => `<div class="me"><time class="num">${l[0]}</time><span>${l[2]} <span class="sub">${l[1]}</span></span></div>`).join('');
+}
+
+let cur = null;
+function openRow(id) {
+  cur = ROWS.find((r) => r.id === id);
+  $('m-co').textContent = cur.co;
+  $('m-at').textContent = `${cur.at} 신청, JBN 전용 페이지`;
+  $('m-tag').innerHTML = tagHtml(cur.st);
+  $('m-kv').innerHTML = `
+    <dt>대표자</dt><dd>${esc(cur.nm)}</dd>
+    <dt>휴대폰</dt><dd class="num">${cur.ph}</dd>
+    <dt>관심 요금제</dt><dd>${esc(cur.plan)}</dd>
+    <dt>상담 방식</dt><dd>${esc(cur.how)}</dd>
+    ${cur.memo ? `<dt>궁금한 점</dt><dd class="memo">${esc(cur.memo)}</dd>` : ''}
+    <dt>같은 IP 로그인</dt><dd>${cur.ip.length ? cur.ip.map((x) => `${esc(x.co)} <span class="sub">${x.id}</span>`).join(', ') : '<span class="sub">없음</span>'}</dd>`;
+  $('m-nick').textContent = cur.nick;
+  // 1단계
+  const confirmed = cur.st === 'ok' || cur.st === 'on';
+  $('s1').classList.toggle('done', confirmed);
+  $('s1-act').hidden = cur.st !== 'wait';
+  const r1 = $('s1-res');
+  r1.hidden = cur.st === 'wait';
+  r1.className = 'res' + (cur.st === 'no' ? ' no' : '');
+  r1.innerHTML = cur.st === 'no' ? `회원 아님 처리 ${cur.byAt} ${cur.by}. ${esc(cur.why)} <button type="button" class="mini ln" id="b-undo">다시 확인 전으로</button>`
+    : confirmed ? `<svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>JBN 회원 확인 ${cur.byAt} ${cur.by}` : '';
+  // 2단계
+  $('s2').classList.toggle('lock', !confirmed);
+  $('s2').classList.toggle('done', cur.st === 'on');
+  const sel = $('m-plan');
+  sel.innerHTML = PLANS.map((p) => `<option value="${p.code}"${p.name === cur.plan || (cur.applied && cur.applied.plan === 'JBN ' + p.name) ? ' selected' : ''}>JBN ${p.name}  월 ${won(p.now)}원 (정가 ${won(p.was)}원)</option>`).join('');
+  $('m-company').value = cur.st === 'on' ? cur.co : '';
+  $('m-found').innerHTML = cur.st === 'on' ? `연결된 회사 <b>${esc(cur.co)}</b>` : cur.ip.length ? `같은 IP로 로그인한 회사가 있습니다: <b>${esc(cur.ip[0].co)}</b> <button type="button" class="mini ln" id="b-use">이 회사로</button>` : '';
+  $('b-apply').hidden = cur.st === 'on';
+  $('s2-res').hidden = cur.st !== 'on';
+  if (cur.st === 'on') $('s2-res').innerHTML = `<svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>${cur.applied.plan} 적용 ${cur.applied.at} ceo`;
+  sum();
+  $('dim').classList.add('open');
+  $('dim').setAttribute('aria-hidden', 'false');
+}
+function sum() {
+  const p = PLANS.find((x) => x.code === $('m-plan').value);
+  const co = $('m-company').value.trim() || '(회사를 고르세요)';
+  $('m-sum').innerHTML = `<b>${esc(co)}</b>의 요금제를 <b>JBN ${p.name}</b>(월 ${won(p.now)}원, 정가 ${won(p.was)}원)으로 바꿉니다. 발송 단가는 바꾸지 않습니다. 선불, 후불에 맞춰 단가 설정에서 따로 넣어 주세요.`;
+}
+function close() { $('dim').classList.remove('open'); $('dim').setAttribute('aria-hidden', 'true'); }
+
+document.addEventListener('click', (e) => {
+  const st = e.target.closest('.st'); if (st) { stage = st.dataset.k; render(); return; }
+  const row = e.target.closest('.row'); if (row) { openRow(Number(row.dataset.id)); return; }
+  if (e.target.closest('#m-x') || e.target === $('dim')) { close(); return; }
+  if (e.target.closest('#b-ok')) { cur.st = 'ok'; cur.by = 'ceo'; cur.byAt = '11/18 11:05'; LOG.unshift(['11/18 11:05', 'ceo', `${cur.co} 회원 확인`]); render(); openRow(cur.id); return; }
+  if (e.target.closest('#b-no')) { cur.st = 'no'; cur.by = 'ceo'; cur.byAt = '11/18 11:05'; cur.why = '단톡방에서 같은 닉네임을 찾지 못함.'; LOG.unshift(['11/18 11:05', 'ceo', `${cur.co} 회원 아님 처리`]); render(); openRow(cur.id); return; }
+  if (e.target.closest('#b-undo')) { cur.st = 'wait'; render(); openRow(cur.id); return; }
+  if (e.target.closest('#b-use')) { $('m-company').value = cur.ip[0].co; sum(); return; }
+  if (e.target.closest('#b-apply')) {
+    if (!$('m-company').value.trim()) { $('m-sum').innerHTML = '<b>한줄로 회사를 먼저 골라 주세요.</b>'; return; }
+    const p = PLANS.find((x) => x.code === $('m-plan').value);
+    cur.st = 'on'; cur.applied = { plan: 'JBN ' + p.name, at: '11/18 11:08', pay: '후불' }; p.used += 1;
+    LOG.unshift(['11/18 11:08', 'ceo', `${cur.co}에 JBN ${p.name} 적용`]); render(); openRow(cur.id); return;
+  }
+  if (e.target.closest('#cp-link') || e.target.closest('#cp-nick')) {
+    const b = e.target.closest('button'); const t = b.lastChild.textContent; b.lastChild.textContent = '복사됨'; setTimeout(() => (b.lastChild.textContent = t), 1200);
+  }
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.isComposing) close(); });
+$('m-plan').addEventListener('change', sum);
+$('m-company').addEventListener('input', sum);
+$('q').addEventListener('input', (e) => { q = e.target.value.trim(); render(); });
+render();
+</script>
+</body>
+</html>

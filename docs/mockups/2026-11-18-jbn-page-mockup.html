@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>한줄로 JBN 회원 전용</title>
+<!-- 버리는 목업(2026-11-18 JBN 전용 신청 페이지). 사진 = 생성 모델 실물 3장 · 포스터 = 이미지 스튜디오 실물(n 시리즈). 가격 = 요금제 표 7/28 기록값 예시(구현 때 서버 요금제에서 읽는다). 맨 위 검은 띠는 목업 전용. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<style>
+:root{--ink:#0B0B0C;--sub:#5F6368;--mute:#6B6B70;--line:#E8E8E6;--soft:#F4F3EF;--acc:#CF4510;--acc-d:#B53C0D;--acc-t:#B53C0D;--acc-bg:#FBEEE7}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'Pretendard Variable',Pretendard,system-ui,sans-serif;background:#fff;color:var(--ink);-webkit-font-smoothing:antialiased;word-break:keep-all;overflow-wrap:break-word}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.ic{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.w{max-width:1200px;margin:0 auto;padding:0 32px}
+.im{background-size:cover;background-position:center;background-color:#E9E6DF}
+
+/* 목업 전용 띠 */
+.mock{background:#0B0B0C;color:#fff;font-size:13px}
+.mock .w{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-top:9px;padding-bottom:9px}
+.mock span{opacity:.72;flex:1;min-width:220px}
+.mock button{height:30px;padding:0 12px;border-radius:8px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.3);color:#fff;font-size:12.5px;font-weight:700}
+.mock button.on{background:#fff;color:#0B0B0C}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:58px;padding:0 28px;border-radius:14px;font-weight:800;font-size:17px;transition:background .2s,transform .2s;white-space:nowrap}
+.btn:hover{transform:translateY(-1px)}
+.btn.or{background:var(--acc);color:#fff}.btn.or:hover{background:var(--acc-d)}
+.btn.ln{box-shadow:inset 0 0 0 1.5px var(--ink)}.btn.ln:hover{background:var(--soft)}
+.btn.sm{height:44px;padding:0 18px;border-radius:12px;font-size:15px}
+
+/* 머리 */
+.nav{display:flex;align-items:center;gap:6px;padding-top:22px;padding-bottom:22px}
+.nav .logo{font-weight:900;font-size:22px;letter-spacing:-.04em;display:flex;align-items:center;gap:10px}
+.nav .logo i{font-style:normal;font-size:12.5px;font-weight:800;color:var(--acc-t);background:var(--acc-bg);padding:5px 9px;border-radius:99px;letter-spacing:0}
+.nav .sp{flex:1}
+.nav a.t{font-size:15px;font-weight:600;color:var(--sub);padding:10px 14px}
+.nav a.t:hover{color:var(--ink)}
+
+/* 첫 화면 */
+.hero{display:grid;grid-template-columns:1.02fr 1fr;gap:56px;align-items:center;padding-top:30px;padding-bottom:104px}
+.lbl{font-size:15px;font-weight:800;color:var(--acc-t)}
+.hero h1{margin-top:16px;font-size:clamp(40px,5.4vw,72px);font-weight:900;line-height:1.12;letter-spacing:-.045em}
+.hero h1 em{font-style:normal;color:var(--acc)}
+.hero .sub{margin-top:24px;font-size:clamp(17px,1.5vw,20px);line-height:1.68;color:var(--sub);max-width:27em}
+.offer{margin-top:32px;border-top:2px solid var(--ink);max-width:520px}
+.offer div{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:baseline;padding:16px 0;border-bottom:1px solid var(--line)}
+.offer b{font-size:15px;font-weight:800;color:var(--mute);min-width:5.5em}
+.offer p{font-size:clamp(18px,1.7vw,21px);font-weight:800;letter-spacing:-.03em}
+.offer p em{font-style:normal;color:var(--acc-t)}
+.hero .cta{margin-top:32px;display:flex;gap:12px;flex-wrap:wrap}
+.hv{position:relative;aspect-ratio:1/1.12;border-radius:36px;overflow:hidden}
+.hv .ph{position:absolute;inset:0;background-position:50% 30%}
+.hv .phone{position:absolute;right:6%;bottom:7%;width:34%}
+.hv .done{position:absolute;left:6%;top:7%}
+.chip{display:flex;align-items:center;gap:11px;background:#fff;border-radius:16px;padding:11px 16px 11px 12px;box-shadow:0 14px 34px -18px rgba(0,0,0,.5);font-size:14px;font-weight:700;line-height:1.35}
+.chip .dot{width:34px;height:34px;border-radius:10px;background:var(--acc);display:grid;place-items:center;color:#fff}
+.chip .dot .ic{width:18px;height:18px;stroke-width:2.8}
+.chip small{display:block;font-size:12px;font-weight:600;color:var(--sub)}
+.phone{aspect-ratio:262/528;border-radius:16% / 8%;background:#0B0B0C;padding:3.8%;position:relative;box-shadow:0 34px 70px -30px rgba(0,0,0,.55);container-type:inline-size}
+.phone .scr{height:100%;border-radius:13.5% / 6.6%;background:#F2F2F4;overflow:hidden;display:flex;flex-direction:column}
+.phone .nt{position:absolute;left:50%;top:3.6%;width:30%;height:4.2%;border-radius:99px;background:#0B0B0C;transform:translateX(-50%)}
+.phone .bar0{padding:15cqi 5cqi 4cqi;text-align:center;background:#fff;border-bottom:1px solid #E6E6E8;font-size:4.6cqi;color:#5F6368}
+.phone .bar0 b{display:block;font-size:5.6cqi;color:#0B0B0C}
+.phone .th{flex:1;padding:4cqi 4.6cqi 5cqi;display:flex;flex-direction:column;justify-content:flex-end}
+.bub{background:#fff;border-radius:7cqi 7cqi 7cqi 2.4cqi;padding:3cqi;width:92%;font-size:4.6cqi;line-height:1.5;box-shadow:0 1px 0 rgba(0,0,0,.04)}
+.bub .im{aspect-ratio:3/4;border-radius:5cqi;margin-bottom:2.6cqi}
+.bub p{padding:0 1.4cqi 1cqi}
+
+/* 구역 공통 */
+.sec{padding:112px 0}
+.sec.sf{background:var(--soft)}
+.h2{font-size:clamp(30px,4.2vw,54px);font-weight:900;line-height:1.16;letter-spacing:-.045em;margin-top:12px}
+.h2 em{font-style:normal;color:var(--acc-t)}
+.lead{margin-top:20px;font-size:18px;line-height:1.7;color:var(--sub);max-width:34em}
+
+/* 이런 분께 */
+.who{display:grid;grid-template-columns:.86fr 1fr;gap:72px;align-items:center}
+.who .ph{aspect-ratio:4/5;border-radius:32px;background-position:50% 20%}
+.bf{margin-top:36px;border-top:2px solid var(--ink)}
+.bf div{padding:20px 0;border-bottom:1px solid #DEDDD8}
+.bf s{display:block;font-size:16px;color:var(--mute);text-decoration-thickness:1.5px}
+.bf p{margin-top:6px;font-size:clamp(19px,1.9vw,23px);font-weight:800;letter-spacing:-.03em;line-height:1.45}
+.bf p em{font-style:normal;color:var(--acc-t)}
+
+/* 기능 */
+.ft{padding:104px 0 0}
+.ft.last{padding-bottom:112px}
+.fg{display:grid;grid-template-columns:1fr 1fr;gap:72px;align-items:center}
+.ft.rev .fg .pn{order:-1}
+.ft .q{font-size:15px;font-weight:800;color:var(--acc-t)}
+.ft h3{font-size:clamp(28px,3.4vw,44px);font-weight:900;line-height:1.18;letter-spacing:-.045em;margin-top:12px}
+.ft .d{margin-top:18px;font-size:18px;line-height:1.72;color:var(--sub);max-width:29em}
+.ft ul{list-style:none;margin-top:22px;display:grid;gap:12px}
+.ft li{display:flex;gap:12px;align-items:flex-start;font-size:17px;font-weight:600;line-height:1.5}
+.ft li .ic{width:22px;height:22px;padding:4px;border-radius:50%;background:var(--ink);color:#fff;stroke-width:3;margin-top:2px}
+.pn{background:var(--soft);border-radius:32px;min-height:460px;display:grid;place-items:center;padding:44px}
+.ui{width:100%;max-width:400px;background:#fff;border-radius:22px;padding:22px;box-shadow:0 30px 60px -38px rgba(0,0,0,.4);font-size:14.5px}
+.ui .uh{font-size:15.5px;font-weight:800;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.ui .uh small{font-size:12.5px;font-weight:600;color:var(--mute)}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);background:#F1F0EC;border-radius:12px;padding:4px;margin-top:14px}
+.seg span{text-align:center;padding:9px 0;border-radius:9px;font-size:13.5px;font-weight:700;color:var(--sub)}
+.seg span.on{background:#fff;color:var(--ink);box-shadow:0 2px 6px -2px rgba(0,0,0,.18)}
+.msg{margin-top:14px;background:#F7F6F3;border-radius:14px;padding:14px 16px;font-size:14px;line-height:1.6}
+.msg small{display:block;font-size:12px;font-weight:700;color:var(--mute);margin-bottom:4px}
+.kv{display:flex;justify-content:space-between;align-items:baseline;padding:13px 0;border-top:1px solid var(--line);margin-top:14px;font-size:14px;color:var(--sub)}
+.kv b{font-size:16px;color:var(--ink)}
+.ubtn{margin-top:4px;height:48px;border-radius:12px;background:var(--ink);color:#fff;font-weight:700;font-size:14.5px;display:flex;align-items:center;justify-content:center;gap:8px}
+.r{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;padding:13px 0;border-top:1px solid var(--line)}
+.ui .uh+.r{margin-top:12px}
+.r b{display:block;font-size:14.5px;font-weight:700}
+.r span{font-size:13px;color:var(--sub)}
+.r em{font-style:normal;font-weight:800;font-size:13px;padding:7px 12px;border-radius:9px;background:var(--ink);color:#fff}
+.ok{margin-top:14px;font-size:13.5px;font-weight:700;color:var(--acc-t);display:flex;gap:8px;align-items:center}
+.pg{display:grid;grid-template-columns:1fr 1fr;gap:16px;width:100%;max-width:420px}
+.pg .im{aspect-ratio:3/4;border-radius:16px;box-shadow:0 24px 40px -30px rgba(0,0,0,.5)}
+.pg .im:nth-child(even){transform:translateY(28px)}
+
+/* 특별가 */
+.prh{display:flex;align-items:flex-end;justify-content:space-between;gap:32px;flex-wrap:wrap}
+.prh .note{font-size:15px;color:var(--sub);line-height:1.6}
+.plans{margin-top:44px;display:grid;grid-template-columns:repeat(5,1fr);gap:14px}
+.pl{background:#fff;border-radius:22px;padding:24px 18px 20px;display:flex;flex-direction:column;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+.pl .pt{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pl h4{font-size:17px;font-weight:800;white-space:nowrap}
+.pl .pp{margin-top:16px}
+.pl .was{font-size:14.5px;color:var(--mute);text-decoration:line-through;text-decoration-thickness:1.5px;font-variant-numeric:tabular-nums}
+.pl .now{margin-top:4px;font-size:clamp(22px,2.2vw,29px);font-weight:900;letter-spacing:-.04em;font-variant-numeric:tabular-nums;line-height:1.15;white-space:nowrap}
+.pl .now small{font-size:14px;font-weight:700;color:var(--sub);letter-spacing:0;margin-left:2px}
+.pl .off{font-size:12px;font-weight:800;color:var(--acc-t);background:var(--acc-bg);padding:4px 8px;border-radius:99px;white-space:nowrap}
+.pl ul{list-style:none;margin-top:18px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:8px;font-size:13.5px;color:var(--sub);line-height:1.45}
+.pl ul b{color:var(--ink);font-weight:700}
+.pl .pick{margin-top:auto;padding-top:18px}
+.pl .pick a{display:flex;height:42px;border-radius:11px;box-shadow:inset 0 0 0 1.5px var(--ink);align-items:center;justify-content:center;font-size:14px;font-weight:800}
+.pl .pick a:hover{background:var(--ink);color:#fff}
+.vat{margin-top:16px;font-size:14px;color:var(--mute)}
+.info{margin-top:40px;display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.info div{background:#fff;border-radius:22px;padding:26px 24px}
+.info small{font-size:13.5px;font-weight:800;color:var(--acc-t)}
+.info b{display:block;margin-top:8px;font-size:21px;font-weight:900;letter-spacing:-.035em}
+.info p{margin-top:10px;font-size:15px;line-height:1.65;color:var(--sub)}
+
+/* 신청 */
+.ap{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:start}
+.ap .ph{margin-top:36px;aspect-ratio:3/2;border-radius:28px;background-position:30% 50%}
+.steps{margin-top:32px;list-style:none;display:grid;gap:0;border-top:2px solid var(--ink)}
+.steps li{display:grid;grid-template-columns:44px 1fr;gap:12px;padding:16px 0;border-bottom:1px solid var(--line);font-size:16.5px;line-height:1.5}
+.steps li span{font-weight:900;color:var(--acc-t);font-variant-numeric:tabular-nums}
+.steps li b{font-weight:800}
+.steps li small{display:block;font-size:14.5px;color:var(--sub);margin-top:2px}
+.fm{background:#fff;border-radius:28px;padding:34px;box-shadow:0 40px 80px -50px rgba(0,0,0,.45),0 0 0 1px var(--line)}
+.fm h3{font-size:24px;font-weight:900;letter-spacing:-.04em}
+.fm .fs{margin-top:6px;font-size:15px;color:var(--sub);line-height:1.6}
+.f2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.fl{display:block;margin-top:20px}
+.fl>span{display:block;font-size:14px;font-weight:800;margin-bottom:8px}
+.fl>span i{font-style:normal;font-weight:600;color:var(--mute)}
+.in{width:100%;height:52px;padding:0 16px;border-radius:12px;border:1.5px solid #DADAD6;font:inherit;font-size:16px;background:#fff;transition:border-color .15s}
+.in:focus{outline:none;border-color:var(--ink)}
+textarea.in{height:96px;padding:14px 16px;resize:none;line-height:1.55}
+.opts{display:flex;flex-wrap:wrap;gap:8px}
+.opts button{height:42px;padding:0 15px;border-radius:11px;box-shadow:inset 0 0 0 1.5px #DADAD6;font-size:14.5px;font-weight:700;color:var(--sub);transition:all .15s}
+.opts button.on{box-shadow:inset 0 0 0 2px var(--ink);color:var(--ink);background:#F7F6F3}
+.agree{margin-top:20px;background:#F7F6F3;border-radius:14px;padding:14px 16px;font-size:13px;line-height:1.7;color:var(--sub)}
+.ck{margin-top:12px;display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700;cursor:pointer}
+.ck input{width:20px;height:20px;accent-color:var(--ink)}
+.err{margin-top:12px;font-size:14px;font-weight:700;color:#C62828;min-height:1px}
+.fm .btn{width:100%;margin-top:16px}
+.fm .tail{margin-top:14px;font-size:13.5px;color:var(--mute);text-align:center}
+.done-card{display:none;text-align:center;padding:24px 4px}
+.done-card .big{width:64px;height:64px;border-radius:50%;background:var(--acc);color:#fff;display:grid;place-items:center;margin:0 auto}
+.done-card .big .ic{width:30px;height:30px;stroke-width:3}
+.done-card h3{margin-top:20px}
+.done-card p{margin-top:10px;font-size:16px;line-height:1.65;color:var(--sub)}
+.done-card dl{margin:24px auto 0;max-width:340px;text-align:left;border-top:1px solid var(--line)}
+.done-card dl div{display:flex;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--line);font-size:14.5px}
+.done-card dt{color:var(--mute)}
+.done-card dd{font-weight:700}
+.fm.sent .form-body{display:none}
+.fm.sent .done-card{display:block}
+
+/* 바닥 */
+.foot{border-top:1px solid var(--line);padding:40px 0 56px;font-size:14px;color:var(--mute);line-height:1.7}
+.foot b{color:var(--ink);font-weight:900;font-size:17px;letter-spacing:-.03em}
+
+/* 모바일 아래 고정 단추 */
+.mcta{display:none}
+
+@media (max-width:1080px){
+  .plans{gap:10px}
+  .pl{padding:22px 14px 18px}
+  .pl .now{font-size:22px}
+}
+@media (max-width:960px){
+  .plans{grid-template-columns:1fr}
+  .pl{display:grid;grid-template-columns:110px 210px 1fr 150px;align-items:center;gap:16px;padding:20px 22px}
+  .pl .pt{flex-direction:column;align-items:flex-start;gap:8px}
+  .pl .pp{margin-top:0}
+  .pl .now{font-size:26px}
+  .pl ul{margin-top:0;padding-top:0;border-top:0}
+  .pl .pick{margin-top:0;padding-top:0}
+  .w{padding:0 24px}
+  .hero,.who,.fg,.ap{grid-template-columns:1fr;gap:40px}
+  .hero{padding-top:16px;padding-bottom:80px}
+  .ft.rev .fg .pn{order:0}
+  .sec{padding:80px 0}
+  .ft{padding:80px 0 0}
+  .ft.last{padding-bottom:80px}
+  .pn{min-height:0;padding:32px 20px}
+  .info div{padding:22px 18px}
+  .who .ph{aspect-ratio:4/3}
+  .nav a.t{display:none}
+}
+@media (max-width:640px){
+  .w{padding:0 16px}
+  .pl{grid-template-columns:1fr 1fr;row-gap:14px;padding:20px 18px}
+  .pl .pt{flex-direction:row;align-items:center}
+  .pl .pick{grid-column:1 / -1}
+  .info{grid-template-columns:1fr}
+  .hv{aspect-ratio:4/5;border-radius:26px}
+  .hv .phone{width:36%;right:auto;left:5%;bottom:5%}
+  .fm{padding:24px 18px;border-radius:22px}
+  .f2{grid-template-columns:1fr}
+  .btn{height:54px;font-size:16px}
+  .hero .cta .btn{flex:1 1 100%}
+  .nav .btn{display:none}
+  .mcta{display:block;position:fixed;left:0;right:0;bottom:0;z-index:20;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(255,255,255,.94);backdrop-filter:blur(8px);border-top:1px solid var(--line)}
+  .mcta .btn{width:100%}
+  body{padding-bottom:78px}
+}
+@media (max-width:420px){
+  .pl{grid-template-columns:1fr}
+  .offer div{grid-template-columns:1fr;gap:4px}
+  .chip{font-size:12.5px;padding:9px 12px 9px 9px}
+  .chip .dot{width:28px;height:28px}
+}
+</style>
+</head>
+<body>
+
+<div class="mock"><div class="w">
+  <span>목업 전용 띠(실제 페이지에는 없음). 가격은 요금제 표 7/28 기록값 예시이고, 실제 페이지는 서버 요금제에서 읽습니다.</span>
+  <button type="button" class="on" data-state="form">신청 전</button>
+  <button type="button" data-state="sent">신청 완료</button>
+</div></div>
+
+<header class="w nav">
+  <a class="logo" href="#top">한줄로<i>JBN 회원 전용</i></a>
+  <span class="sp"></span>
+  <a class="t" href="#who">이런 분께</a>
+  <a class="t" href="#feat">기능</a>
+  <a class="t" href="#price">특별가</a>
+  <a class="btn or sm" href="#apply">도입 상담 신청</a>
+</header>
+
+<main id="top">
+  <section class="w hero">
+    <div>
+      <p class="lbl">JBN 대표님께만 드리는 특별가</p>
+      <h1>고객관리,<br>이제 <em>한 줄</em>이면<br>됩니다</h1>
+      <p class="sub">카카오톡과 문자 발송, 고객 관리, 홍보 이미지까지 한줄로 하나로 끝납니다. 반복되는 일은 한줄로가 맡고, 대표님은 무엇을 보낼지만 정하시면 됩니다.</p>
+      <div class="offer">
+        <div><b>구독료</b><p>모든 요금제 월 구독료 <em>30% 평생 할인</em></p></div>
+        <div><b>발송 단가</b><p>문자와 카카오톡, <em>온라인 최저가 수준</em></p></div>
+      </div>
+      <div class="cta">
+        <a class="btn or" href="#apply">도입 상담 신청</a>
+        <a class="btn ln" href="#price">특별가 보기</a>
+      </div>
+    </div>
+    <div class="hv">
+      <div class="ph im" style="background-image:url(jbn-assets/hero-a.png)"></div>
+      <div class="chip done">
+        <span class="dot"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+        <span>단골 1,240명에게 발송 완료<small>오늘 오전 10:00 예약 발송</small></span>
+      </div>
+      <div class="phone">
+        <span class="nt"></span>
+        <div class="scr">
+          <div class="bar0"><b>소요웨어</b>알림톡</div>
+          <div class="th">
+            <div class="bub">
+              <div class="im" style="background-image:url(jbn-assets/n4-soyo-studioclean.jpg)"></div>
+              <p>첫 추위엔 울 니트. 윈터 컬렉션이 들어왔어요. 지난 겨울에 찾아 주신 고객님께 먼저 알려 드려요.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec sf" id="who">
+    <div class="w who">
+      <div class="ph im" style="background-image:url(jbn-assets/hero-b.png)"></div>
+      <div>
+        <p class="lbl">1인 기업, 소규모 회사</p>
+        <h2 class="h2">이런 일,<br>아직 손으로 하고 계신가요</h2>
+        <div class="bf">
+          <div><s>단골 명단을 엑셀로 정리하고 한 명씩 문자 보내기</s><p>고객 DB에 올려 두면 조건에 맞는 고객에게 <em>한 번에</em></p></div>
+          <div><s>행사 때마다 문구 고민하고 받을 사람 다시 고르기</s><p>한 줄만 적으면 <em>문안과 받을 사람</em>까지 AI가 준비</p></div>
+          <div><s>생일, 재구매 시기 챙기다가 놓치기</s><p>날짜가 되면 <em>알아서 보내는</em> 자동 마케팅</p></div>
+          <div><s>홍보 이미지 외주 맡기고 며칠 기다리기</s><p>템플릿 고르고 문구만 쓰면 <em>포스터 완성</em></p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="feat">
+    <section class="ft">
+      <div class="w fg">
+        <div>
+          <p class="q">보내기</p>
+          <h3>카카오톡과 문자,<br>한 화면에서 보냅니다</h3>
+          <p class="d">알림톡, 브랜드메시지, 문자를 같은 화면에서 고르고 보냅니다. 예약 발송도, 결과 확인도 한곳에서 끝납니다.</p>
+          <ul>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>받을 사람은 수신동의 고객만 자동으로</li>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>보내기 전에 스팸 검사로 한 번 더 확인</li>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>수신거부는 080 번호로 자동 처리</li>
+          </ul>
+        </div>
+        <div class="pn">
+          <div class="ui">
+            <div class="uh">새 메시지<small>오늘 오전 10:00 예약</small></div>
+            <div class="seg"><span class="on">알림톡</span><span>브랜드메시지</span><span>문자</span></div>
+            <div class="msg"><small>보낼 내용</small>[오후담] 겨울 시즌 메뉴 메이플 크림 라떼가 나왔어요. 이번 주 방문하시면 사이즈 업을 해 드려요.</div>
+            <div class="kv">받는 사람<b>1,240명</b></div>
+            <div class="ubtn">예약하기</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ft rev">
+      <div class="w fg">
+        <div>
+          <p class="q">고객 관리</p>
+          <h3>고객 명단 하나로<br>나누고, 골라 보냅니다</h3>
+          <p class="d">쓰던 엑셀을 그대로 올리면 항목은 AI가 맞춰 넣습니다. 최근 구매, 생일, 등급처럼 조건을 고르면 받을 사람이 바로 추려집니다.</p>
+          <ul>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>엑셀 올리기 한 번이면 고객 DB 완성</li>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>조건만 고르면 대상자 수가 바로 보입니다</li>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>생일, 재구매 안내는 자동 마케팅으로 매일 알아서</li>
+          </ul>
+        </div>
+        <div class="pn">
+          <div class="ui">
+            <div class="uh">우리 고객<small>전체 1,240명</small></div>
+            <div class="r"><div><b>최근 3개월 구매</b><span>412명</span></div><em>보내기</em></div>
+            <div class="r"><div><b>이번 달 생일</b><span>58명</span></div><em>보내기</em></div>
+            <div class="r"><div><b>VIP 등급</b><span>96명</span></div><em>보내기</em></div>
+            <div class="r"><div><b>6개월 넘게 안 오신 분</b><span>233명</span></div><em>보내기</em></div>
+            <div class="ok"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>생일 안내는 매일 아침 자동으로 나갑니다</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="ft last">
+      <div class="w fg">
+        <div>
+          <p class="q">홍보 이미지</p>
+          <h3>포스터는<br>이미지 스튜디오에서</h3>
+          <p class="d">템플릿을 고르고 상품 사진과 문구만 넣으면 포스터가 나옵니다. 옆의 그림은 모두 이미지 스튜디오로 만든 실제 결과물입니다.</p>
+          <ul>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>만든 포스터는 그대로 메시지에 붙여 보내기</li>
+            <li><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>디자이너 없이도 매번 같은 품질</li>
+          </ul>
+        </div>
+        <div class="pn">
+          <div class="pg">
+            <div class="im" style="background-image:url(jbn-assets/n3-ohudam-windowbar.jpg)"></div>
+            <div class="im" style="background-image:url(jbn-assets/n2-kyeolon-niche.jpg)"></div>
+            <div class="im" style="background-image:url(jbn-assets/n1-kyeolon-monoshadow.jpg)"></div>
+            <div class="im" style="background-image:url(jbn-assets/n5-event-gallery.jpg)"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section class="sec sf" id="price">
+    <div class="w">
+      <div class="prh">
+        <div>
+          <p class="lbl">JBN 회원 특별가</p>
+          <h2 class="h2">모든 요금제 월 구독료<br><em>30% 평생 할인</em></h2>
+        </div>
+        <p class="note">스타터부터 AI 기능과 발송 채널은 모두 같습니다.<br>회사 규모에 맞게 고르시면 됩니다.</p>
+      </div>
+
+      <div class="plans" id="plans"></div>
+      <p class="vat">모든 금액은 한 달 기준이며 부가세 별도입니다. 메시지 발송 비용은 보낸 만큼 따로 계산됩니다.</p>
+
+      <div class="info">
+        <div><small>발송 단가</small><b>온라인 최저가 수준</b><p>문자와 카카오톡 발송 단가를 온라인 최저가 수준으로 맞춰 드립니다. 자세한 단가는 상담 때 안내해 드립니다.</p></div>
+        <div><small>결제 방식</small><b>선불도, 후불도</b><p>충전해서 쓰는 선불, 한 달 쓰고 정산하는 후불 모두 됩니다. 어느 쪽이든 구독료는 30% 할인된 금액으로 나갑니다.</p></div>
+        <div><small>할인 기간</small><b>한 번 적용되면 계속</b><p>JBN 특별가는 요금제를 바꾸셔도 그대로 이어집니다.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="apply">
+    <div class="w ap">
+      <div>
+        <p class="lbl">도입 상담 신청</p>
+        <h2 class="h2">단톡방 닉네임과<br>연락처를 남겨 주세요</h2>
+        <ol class="steps">
+          <li><span>01</span><div><b>신청</b><small>지금 이 페이지에서 1분이면 끝납니다</small></div></li>
+          <li><span>02</span><div><b>회원 확인과 상담</b><small>단톡방 닉네임으로 회원을 확인하고, 업종에 맞춰 직접 보여 드립니다</small></div></li>
+          <li><span>03</span><div><b>JBN 특별가로 시작</b><small>고르신 요금제에 30% 할인을 걸어 드립니다</small></div></li>
+        </ol>
+        <div class="ph im" style="background-image:url(jbn-assets/desk.png)"></div>
+      </div>
+
+      <div class="fm" id="fm">
+        <div class="form-body">
+          <h3>JBN 회원 도입 상담</h3>
+          <p class="fs">JBN 단톡방 닉네임으로 회원 여부를 확인합니다.</p>
+          <div class="f2">
+            <label class="fl"><span>회사명</span><input class="in" id="f-co" maxlength="60" placeholder="예) 한줄상사"></label>
+            <label class="fl"><span>대표자 성함</span><input class="in" id="f-nm" maxlength="30" placeholder="예) 홍길동"></label>
+          </div>
+          <div class="f2">
+            <label class="fl"><span>JBN 단톡방 닉네임</span><input class="in" id="f-nick" maxlength="40" placeholder="예) 한줄상사 홍길동"></label>
+            <label class="fl"><span>휴대폰 번호</span><input class="in" id="f-ph" inputmode="numeric" maxlength="13" placeholder="010-0000-0000"></label>
+          </div>
+          <div class="fl"><span>관심 있는 요금제 <i>(선택)</i></span>
+            <div class="opts" data-group="plan">
+              <button type="button" class="on">아직 모르겠어요</button><button type="button">스타터</button><button type="button">베이직</button><button type="button">프로</button><button type="button">비즈니스</button><button type="button">엔터프라이즈</button>
+            </div>
+          </div>
+          <div class="fl"><span>상담 방식</span>
+            <div class="opts" data-group="how">
+              <button type="button" class="on">전화 상담</button><button type="button">방문 상담</button><button type="button">화상 상담</button>
+            </div>
+          </div>
+          <label class="fl"><span>궁금한 점 <i>(선택)</i></span><textarea class="in" id="f-memo" maxlength="500" placeholder="지금 쓰고 계신 발송 방법이나 궁금한 점을 적어 주세요"></textarea></label>
+          <div class="agree">수집 항목: 회사명, 성함, JBN 단톡방 닉네임, 휴대폰 번호, 접속 IP<br>목적: JBN 회원 확인, 도입 상담 연락<br>보관: 신청일로부터 1년 뒤 파기합니다. 동의하지 않으시면 신청을 받을 수 없습니다.</div>
+          <label class="ck"><input type="checkbox" id="f-ok">개인정보 수집과 이용에 동의합니다 (필수)</label>
+          <p class="err" id="f-err"></p>
+          <button type="button" class="btn or" id="f-send">상담 신청하기</button>
+          <p class="tail">신청하시면 담당자가 남겨 주신 번호로 연락드립니다.</p>
+        </div>
+        <div class="done-card">
+          <div class="big"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
+          <h3>신청을 받았습니다</h3>
+          <p>단톡방 닉네임으로 JBN 회원 확인을 마친 뒤<br>남겨 주신 번호로 담당자가 연락드립니다.</p>
+          <dl>
+            <div><dt>회사명</dt><dd id="d-co">한줄상사</dd></div>
+            <div><dt>단톡방 닉네임</dt><dd id="d-nick">한줄상사 홍길동</dd></div>
+            <div><dt>관심 요금제</dt><dd id="d-plan">아직 모르겠어요</dd></div>
+            <div><dt>상담 방식</dt><dd id="d-how">전화 상담</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot"><div class="w">
+  <b>한줄로</b><br>
+  주식회사 인비토<br>
+  이 페이지는 JBN 회원께만 안내되는 전용 페이지입니다.
+</div></footer>
+
+<div class="mcta"><a class="btn or" href="#apply">도입 상담 신청</a></div>
+
+<script>
+// 목업 데이터(요금제 표 7/28 기록값 · 실제 페이지는 서버의 JBN 요금제 줄에서 읽는다)
+const PLANS = [
+  { name: '스타터', was: 150000, now: 105000, credits: 300, infra: '고성능 공유 서버' },
+  { name: '베이직', was: 350000, now: 245000, credits: 750, infra: '고성능 공유 서버' },
+  { name: '프로', was: 1000000, now: 700000, credits: 2400, infra: '고성능 공유 서버' },
+  { name: '비즈니스', was: 3000000, now: 2100000, credits: 7800, infra: '전용 서버' },
+  { name: '엔터프라이즈', was: 5500000, now: 3850000, credits: 16500, infra: '전용 AI 서버' },
+];
+const won = (n) => n.toLocaleString('ko-KR');
+document.getElementById('plans').innerHTML = PLANS.map((p) => `
+  <div class="pl">
+    <div class="pt"><h4>${p.name}</h4><span class="off">30% 할인</span></div>
+    <div class="pp"><p class="was">월 ${won(p.was)}원</p><p class="now">${won(p.now)}원<small>/월</small></p></div>
+    <ul><li>AI 크레딧 <b>매월 ${won(p.credits)}</b></li><li>${p.infra}</li></ul>
+    <div class="pick"><a href="#apply" data-plan="${p.name}">이 요금제로 상담</a></div>
+  </div>`).join('');
+
+// 선택 칸
+document.querySelectorAll('.opts').forEach((g) => g.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  g.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
+}));
+// 요금제 카드 → 신청 칸의 요금제 미리 고르기
+document.getElementById('plans').addEventListener('click', (e) => {
+  const a = e.target.closest('a[data-plan]'); if (!a) return;
+  document.querySelectorAll('[data-group="plan"] button').forEach((x) => x.classList.toggle('on', x.textContent === a.dataset.plan));
+});
+const pickOf = (grp) => document.querySelector(`[data-group="${grp}"] button.on`)?.textContent || '';
+const fm = document.getElementById('fm');
+const err = document.getElementById('f-err');
+document.getElementById('f-send').addEventListener('click', () => {
+  const co = document.getElementById('f-co').value.trim();
+  const nm = document.getElementById('f-nm').value.trim();
+  const ph = document.getElementById('f-ph').value.replace(/[^0-9]/g, '');
+  if (!co) return (err.textContent = '회사명을 입력해 주세요.');
+  if (!nm) return (err.textContent = '대표자 성함을 입력해 주세요.');
+  const nick = document.getElementById('f-nick').value.trim();
+  if (!nick) return (err.textContent = 'JBN 단톡방 닉네임을 입력해 주세요. 회원 확인에 씁니다.');
+  if (!/^0\d{8,10}$/.test(ph)) return (err.textContent = '연락받으실 휴대폰 번호를 확인해 주세요.');
+  if (!document.getElementById('f-ok').checked) return (err.textContent = '개인정보 수집과 이용에 동의해 주셔야 신청을 받을 수 있습니다.');
+  err.textContent = '';
+  document.getElementById('d-co').textContent = co;
+  document.getElementById('d-nick').textContent = nick;
+  document.getElementById('d-plan').textContent = pickOf('plan');
+  document.getElementById('d-how').textContent = pickOf('how');
+  setState('sent');
+});
+// 목업 띠: 상태 바꾸기
+function setState(s) {
+  fm.classList.toggle('sent', s === 'sent');
+  document.querySelectorAll('.mock button').forEach((b) => b.classList.toggle('on', b.dataset.state === s));
+}
+document.querySelectorAll('.mock button').forEach((b) => b.addEventListener('click', () => {
+  setState(b.dataset.state);
+  if (b.dataset.state === 'sent') document.getElementById('apply').scrollIntoView();
+}));
+</script>
+</body>
+</html>

@@ -44,6 +44,7 @@ const Unsubscribes = lazyPage(() => import('./pages/Unsubscribes'));
 const PricingPage = lazyPage(() => import('./pages/PricingPage'));
 const AboutPage = lazyPage(() => import('./pages/AboutPage'));
 const IntroPage = lazyPage(() => import('./pages/IntroPage')); // ★ 2026-10-07 공개 소개(영상 · 기능 이름 · 시연 요청)
+const JbnPage = lazyPage(() => import('./pages/JbnPage')); // ★ 2026-11-18 C144 JBN 회원 전용 신청 페이지(링크로만 · 검색 제외)
 import AboutGate from './components/AboutGate';   // ★ 2026-10-07 소개 페이지 숨김 문(허용 계정만)   // ★ 2026-10-07 공개 소개 페이지(옛 /about-ai-operator.html 대체)
 const GuidePage = lazyPage(() => import('./pages/GuidePage')); // ★ 2026-08-22 기능 안내 — 도움말 봇과 같은 원장 · ★1007 주소 = GUIDE_PATH(도움말 봇 「자세히」로만)
 import { GUIDE_PATH } from './constants/guide-path';
@@ -833,6 +834,7 @@ function App() {
         {/* ★ 2026-08-16 AI 마케팅 진단(퍼널 B — 잠재고객 · 인증 X) — ?src= 영업 링크 식별 */}
         <Route path="/diagnosis" element={<DiagnosisPage />} />
         <Route path="/intro" element={<IntroPage />} />
+        <Route path="/jbn" element={<JbnPage />} />
         {/* ★ 2026-11-16 C136 제안 페이지 — 공개 경로지만 로그인 전에는 한 줄과 로그인 단추만 그린다(소개 글 · 그림은 로그인 뒤 서버가 준다 · 화면이 스스로 가른다) */}
         <Route path="/proposal" element={<ProposalPage />} />
 

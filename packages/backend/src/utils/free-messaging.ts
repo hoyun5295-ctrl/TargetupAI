@@ -19,6 +19,7 @@
 
 import pool, { query } from '../config/database';
 import { billingBaseType, billingBaseTypeSql } from './billing-types';
+import { PUBLIC_CATALOG_PLAN_SQL } from './plan-guard';   // ★ 2026-11-18 C144
 
 /** 무료 제공 대상 유형 축. `key`는 `prepaidDeduct(messageType)`·`billing_items.message_type`과 같은 값이다. */
 export interface FreeMessagingTypeDef {
@@ -461,7 +462,8 @@ export function allocateFreeToRows<T extends { channel: string; typeKey: string;
 export async function readPlanFreeQuotas(): Promise<Record<string, Record<string, number>>> {
   const cols = FREE_MESSAGING_TYPES.map((t) => `COALESCE(p.${t.planColumn}, 0) AS "${t.key}"`).join(', ');
   try {
-    const res = await query(`SELECT p.plan_code, ${cols} FROM plans p WHERE p.is_active = true`);
+    // ★ 2026-11-18 C144 공개 목록과 함께 나가는 값이라 제휴 판(JBN 특별가) 코드를 싣지 않는다
+    const res = await query(`SELECT p.plan_code, ${cols} FROM plans p WHERE p.is_active = true AND ${PUBLIC_CATALOG_PLAN_SQL}`);
     const out: Record<string, Record<string, number>> = {};
     for (const row of res.rows as any[]) {
       const per: Record<string, number> = {};

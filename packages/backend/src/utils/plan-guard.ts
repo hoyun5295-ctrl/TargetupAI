@@ -170,6 +170,13 @@ export const PLAN_STATUS_SELECT_EXPR = `
 export const ACTIVE_PAID_PLAN_WHERE =
   `p.plan_code <> 'FREE' AND COALESCE(c.subscription_status, '') NOT IN ('expired', 'suspended')`;
 
+/**
+ * ★ 2026-11-18 C144 공개 요금제 판정 조각(별칭 p) — 제휴 판(JBN 특별가 등 · plans.partner_code 있음)을 고객에게 보이는 목록에서 뺀다.
+ *   쓰는 자리 = 공개 요금제 목록(routes/plans.ts) · 진단 추천 후보(DIAGNOSIS_PLAN_ROWS_SQL) · 요금제별 무료 수량(readPlanFreeQuotas).
+ *   칸이 없을 때(DDL 전)도 참이 되도록 to_jsonb 로 읽는다 = 배포 전후 같은 행.
+ */
+export const PUBLIC_CATALOG_PLAN_SQL = `(to_jsonb(p) ->> 'partner_code') IS NULL`;   // 별칭 = plans p(세 자리 모두) · 함수가 아니라 상수 = 크레딧 계약 시험(R39)이 SQL 을 끝까지 펼친다
+
 // ═══════════════════════════════════════════════════════════
 // 통합 조회 — loadPlanContext
 // ═══════════════════════════════════════════════════════════
