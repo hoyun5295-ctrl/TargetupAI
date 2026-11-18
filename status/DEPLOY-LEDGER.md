@@ -88,6 +88,7 @@
 | C141 | e549b318 |
 | C142 | 7d8bb591 |
 | C143 | 미커밋 |
+| C144 | 8bfd3637 |
 
 ## §1 대기
 
@@ -2691,15 +2692,15 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 선행: 없음
 - 기대: ① 활성 유료 요금제 = STARTER 150000 · BASIC 350000 · PRO 1000000 · BUSINESS 3000000 · ENTERPRISE 5500000 다섯 줄(설계서 docs/2026-11-18-c144-jbn-special-price-design.md §2-2 · status/SCHEMA.md plans 절 0728 기록) ② plans 에 partner_code · base_plan_id 칸이 아직 없다 ③ plans 제약 = 새 행을 막을 CHECK 없음(PK · plan_code UNIQUE)
 - 확인: 서버 셸 한 줄 셋(PG) ① `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT plan_code, plan_name, monthly_price, ai_credits_per_month, is_active FROM plans WHERE is_active AND monthly_price > 0 ORDER BY monthly_price;"` ② `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = 'plans' ORDER BY ordinal_position;"` ③ `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'plans'::regclass;"` · ① 이 다섯 줄이 아니거나 ② 에 두 칸이 이미 있으면 멈춘다
-- 결과:
+- 결과: 1118 Harold 서버 출력(administrator@invito) = ① 다섯 줄 STARTER 150000.00 300 · BASIC 350000.00 750 · PRO 1000000.00 2400 · BUSINESS 3000000.00 7800 · ENTERPRISE 5500000.00 16500 · 전부 t ② 31칸 · partner_code · base_plan_id 없음(실 PG 시험 DB t_tpl_closed 31칸 · 타입 · 기본값과 같음 · created_at = timestamp without time zone) ③ plans_pkey PRIMARY KEY (id) · plans_plan_code_key UNIQUE (plan_code) 둘 = 기대와 같음
 
 ### C144-H1 · 한줄로 배포(JBN 특별가 · 공개 신청 페이지 · 「JBN 회원」 탭 · 백엔드 + 프론트 · DDL 1 + DML 1 = 배포 뒤 · ENV 0)
 - 카드: C144
 - 단계: 한줄로 배포
 - 선행: C144-P0 · 설계 Codex 3R approve(1118) · 구현 Codex 3R approve(1118) · 커밋(Harold · 다른 세션의 미커밋 줄과 한 파일인 문서(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md · status/SCHEMA.md)는 이 카드 줄만)
 - 기대: 설계서 §7 · 재시작 뒤 공개 요금표 그대로(JBN 행은 아직 없다) · GET /api/public/jbn/plans = 503 DB_MIGRATION_PENDING(DDL 전 정상)
-- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `publicCatalogPlanSql` ≥ 3
-- 결과:
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `PUBLIC_CATALOG_PLAN_SQL` 파일 5 = .js 4(utils/plan-guard.js · routes/plans.js · utils/marketing-diagnosis-store.js · utils/free-messaging.js) + 타입 선언 utils/plan-guard.d.ts · curl /api/public/jbn/plans = 503 DB_MIGRATION_PENDING(DDL 전 정상)
+- 결과: 1118 Harold 실행(push 8bfd3637 · 서버 git reflog = HEAD@{0} pull Fast-forward 1f59f662 → 8bfd3637 = 이번 pull 은 C144 한 커밋 · C143 1f59f662 는 그 전 pull HEAD@{1} 에서 받음(C143-H1 결과 칸 비어 있음 = 그 카드 몫 · 기록만) · 서버 git pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload targetup-backend · 빌드 출력의 [verify-dist] 줄과 적재 0건 한 줄은 받지 못함 = 미확인 · 아래 실측으로 봄) · pm2 describe = online · restarts 16 · unstable restarts 0 · uptime 4s · script path dist/app.js · dist grep PUBLIC_CATALOG_PLAN_SQL = 5(routes/plans.js · utils/plan-guard.js · utils/plan-guard.d.ts · utils/free-messaging.js · utils/marketing-diagnosis-store.js) · curl https://hanjul.ai/api/public/jbn/plans = 503 DB_MIGRATION_PENDING(DDL 전 정상) · 에러 로그 재시작(13:54:16) 뒤 = 13:55:17 [demo-data] 합성 안내 한 줄(전에도 있던 종류) = 새 종류 0 · 기동 로그 13:54:16 「[jbn] 보관 기한 워커 시작(1분 뒤 + 24시간)」 · 1분 뒤 첫 정리는 표 없음 = 조용히 넘김(오류 줄 0) / 기록만 = 재시작 전 10:30 AI Operator target-recipients SEGMENT_UNAVAILABLE 409(등급 순서 미설정 안내 · 이 카드와 무관)
 
 ### C144-DDL-1 · plans 제휴 칸 둘 + JBN 신청 표(설계서 §2-1) · ★ 배포 뒤
 - 카드: C144
@@ -2708,7 +2709,7 @@ ALTER TABLE diagnosis_trial_grants ALTER COLUMN diagnosis_id DROP NOT NULL;
 - 의미 바꿈: 아니오(칸 · 표 추가만 · 기존 행의 partner_code NULL = 공개 그대로)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name FROM information_schema.columns WHERE table_name = 'plans' AND column_name IN ('partner_code', 'base_plan_id'); SELECT table_name FROM information_schema.tables WHERE table_name = 'jbn_applications';
 - 확인: 칸 두 줄 · 표 한 줄
-- 결과:
+- 결과: 1118 Harold 실행(psql 한 번 · here-document <<'SQL' · ON_ERROR_STOP · 원장 블록 글자 그대로 · C144-H1 뒤) = SET · ALTER TABLE · ALTER TABLE · DO · CREATE TABLE · CREATE INDEX · CREATE INDEX · 확인 SELECT = jbn_applications 17칸(id ~ created_at · 기본값 memo '' · status pending · created_at now()) + plans partner_code · base_plan_id(NULL 허용) = 19줄 = 기대와 같음
 
 > C144-DDL-1 · 배포 뒤 · 되돌리기 = 코드를 내린 뒤에만(C144-RB-1 먼저 · JBN 행을 쓰는 회사가 없을 때) DROP TABLE jbn_applications; DELETE FROM plans WHERE partner_code IS NOT NULL; ALTER TABLE plans DROP CONSTRAINT plans_partner_base_pair, DROP COLUMN base_plan_id, DROP COLUMN partner_code;
 
@@ -2751,7 +2752,7 @@ CREATE INDEX IF NOT EXISTS idx_jbn_applications_company ON jbn_applications (com
 - 의미 바꿈: 아니오(새 행만 · 기존 요금제 · 회사 · 고정값 무변)
 - 기대: JBN 행 수 = C144-P0 ① 의 줄 수 · 월정액 = 원 요금제 × 0.7(105000 · 245000 · 700000 · 2100000 · 3850000) · 기능 칸 = 원 요금제와 같다 · 두 번 실행해도 그대로
 - 확인: SELECT j.plan_code, j.plan_name, j.monthly_price, b.monthly_price AS base_price, j.ai_credits_per_month, j.is_active FROM plans j JOIN plans b ON b.id = j.base_plan_id WHERE j.partner_code = 'JBN' ORDER BY j.monthly_price;
-- 결과:
+- 결과: 1118 Harold 실행(psql 한 번 · here-document · ON_ERROR_STOP · 원장 블록 글자 그대로 · DDL-1 뒤) = BEGIN · SET · DO · INSERT 0 5 · DO · COMMIT · 확인 SELECT = JBN_STARTER 105000.00(원 150000.00 · 300) · JBN_BASIC 245000.00(350000.00 · 750) · JBN_PRO 700000.00(1000000.00 · 2400) · JBN_BUSINESS 2100000.00(3000000.00 · 7800) · JBN_ENTERPRISE 3850000.00(5500000.00 · 16500) · 전부 t · 이름 JBN 스타터 ~ JBN 엔터프라이즈 = 기대와 같음
 
 > C144-RB-1(되돌리기 · 코드를 옛 판으로 내리기 **전에** 먼저 · 설계서 §7) = UPDATE plans SET is_active = false WHERE partner_code = 'JBN'; · 다시 올릴 때 true · JBN 판 회사의 청구 · 기능 판정은 행 id 로 읽어 무영향
 
@@ -2789,7 +2790,7 @@ COMMIT;
 - 선행: C144-DML-1
 - 기대: 설계서 §7 · ① /pricing 가격 다섯 그대로(JBN 0) ② hanjul.ai/jbn 가격 다섯(정가 줄 그음 · 70%) ③ 시험 신청 1건(도달 불가 번호 010-0000-xxxx) → 「JBN 회원」 탭 확인 전 1 → 회원 맞음 → 시험 회사 연결 → 고객사 상세에서 그 회사를 JBN 판으로 → 적용 중 → 원래 요금제로 되돌림 → 시험 신청 지우기
 - 확인: 화면 + 서버 셸 한 줄 `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT status, company_id IS NOT NULL AS linked, count(*) FROM jbn_applications GROUP BY 1, 2;"`
-- 결과:
+- 결과: 1118 서버 실측(Harold 출력) = curl /api/plans 코드 8(FREE · TRIAL · STAFF · STARTER · BASIC · PRO · BUSINESS · ENTERPRISE · JBN_ 0) · curl /api/public/jbn/plans = success true · 다섯(정가 · JBN 가격 105000 ~ 3850000 · 크레딧) / 화면(Harold 「다섯 단계 다 확인했어 정상이야」) = ① /jbn 사진 · 요금 다섯 · 30% ② 시험 신청 1건(도달 불가 번호) 완료 화면 ③ 「JBN 회원」 탭 확인 전 1 → 회원 맞음 → 시험 회사 연결 ④ 고객사 상세 요금제 칸에 JBN 판 다섯(저장 안 함 = 운영 회사 청구 이력 0) ⑤ 시험 신청 지우기 · 「적용 중」 전환은 실 PG 시험으로 확인(운영에서 요금제 저장 생략)
 
 ## §2 덤프 뒤 적용분
 
