@@ -89,7 +89,7 @@
 | C142 | 7d8bb591 |
 | C143 | 미커밋 |
 | C144 | 8bfd3637 |
-| C145 | 미커밋 |
+| C145 | 2cee9d79 |
 
 ## §1 대기
 
@@ -2815,7 +2815,7 @@ COMMIT;
 - 선행: 없음
 - 기대: ① user_sessions 에 ended_reason 칸이 아직 없다 ② public_page_visits 표가 아직 없다(설계서 docs/2026-11-19-c145-public-session-visits-design.md §6)
 - 확인: 서버 셸 한 줄(PG) `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT table_name, column_name FROM information_schema.columns WHERE (table_name = 'user_sessions' AND column_name = 'ended_reason') OR table_name = 'public_page_visits';"` · 0줄이 아니면 멈춘다
-- 결과:
+- 결과: 1119 Harold 서버 출력 = (0 rows) = 기대와 같음
 
 ### C145-H1 · 한줄로 배포(공개 페이지 세션 끊김 닫기 + 공개 페이지 방문 기록 · 백엔드 + 프론트 · DDL 2 = 배포 뒤 · ENV 0)
 - 카드: C145
@@ -2823,7 +2823,7 @@ COMMIT;
 - 선행: C145-P0 · 설계 Codex 4R approve(1119) · 구현 Codex 3R approve(1119) · 커밋(Harold · 공유 문서(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md · status/SCHEMA.md · docs/ROOT-LEDGER.md)는 이 카드 줄만 · 다른 세션의 미커밋 줄이 같은 파일에 있다)
 - 기대: 설계서 §6 · DDL 전 새 코드 = 세션 끄기는 지금 SQL(원인 칸 없음) · 꺼진 세션 문구 = 「로그인이 끝났습니다. 다시 로그인해 주세요.」 · POST /api/public/visits/start = 503 DB_MIGRATION_PENDING(DDL 전 정상 · 화면은 무시)
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `endSessions` 파일 3 이상(utils/session-manager.js · middlewares/auth.js · routes/auth.js) · dist/utils/public-visits.js 있음 · 기동 로그 「[public-visits] 보관 기한 워커 시작」 · 재시작 뒤 에러 로그 새 종류 0
-- 결과:
+- 결과: 1119 Harold 실행 · 커밋 c92567dc(C144 기록) · 2cee9d79(C145 · 38파일) push · 서버 git pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload targetup-backend(★적재 0건 확인 한 줄 없이 reload = 그 순간 적재 유무 미검증 · DDL 단계 첫 줄에서 지금 적재 단계 캠페인 확인) · 확인 출력 = HEAD 2cee9d79 · dist grep endSessions 3(middlewares/auth.js · routes/auth.js · utils/session-manager.js) · dist/utils/public-visits.js 16:35 · frontend dist/index.html 16:37 · online · restarts 19 · uptime 68s · unstable 0 · script path dist/app.js · POST /api/public/visits/start = 503 DB_MIGRATION_PENDING(DDL 전 정상) · 기동 16:37:11 「[jbn] 보관 기한 워커 시작」「[public-visits] 보관 기한 워커 시작」 · 에러 로그 재시작 뒤 = 16:38:12 [demo-data] 합성 안내 한 줄(전에도 있던 종류) = 새 종류 0 · 빌드 출력의 [verify-dist] 줄은 받지 못함(dist 실측으로 봄)
 
 ### C145-DDL-1 · user_sessions 끈 원인 칸(설계서 §2-4) · ★ 배포 뒤
 - 카드: C145
@@ -2832,19 +2832,19 @@ COMMIT;
 - 의미 바꿈: 아니오(칸 추가만 · 옛 행 NULL = 원인 없음 문구 · CHECK 는 NOT VALID = 표를 훑지 않는다)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'user_sessions' AND column_name = 'ended_reason'; SELECT conname FROM pg_constraint WHERE conname = 'user_sessions_ended_reason_check';
 - 확인: 칸 한 줄(character varying) · 제약 한 줄
-- 결과:
+- 결과: 1119 Harold 실행(psql 한 번 · here-document · ON_ERROR_STOP · DDL-1 · DDL-2 블록 글자 그대로 · C145-H1 뒤) = 첫 줄 적재 단계 캠페인 (0 rows) · SET · ALTER TABLE · DO · 확인 = ended_reason character varying 한 줄 = 기대와 같음
 
 > C145-RB-1(되돌리기 · **새 코드를 옛 판으로 내리고 재시작이 끝난 뒤에만** · 새 코드가 도는 동안 지우면 확인과 끄기 사이에 끄기가 실패한다 = 설계서 §2-4) = ALTER TABLE user_sessions DROP CONSTRAINT IF EXISTS user_sessions_ended_reason_check, DROP COLUMN IF EXISTS ended_reason; · 칸은 남겨도 옛 코드 무영향
 
 ```sql ddl:C145-DDL-1
 SET lock_timeout = '3s';
 ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS ended_reason varchar(20);
-DO $$ BEGIN
+DO $ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_sessions_ended_reason_check') THEN
     ALTER TABLE user_sessions ADD CONSTRAINT user_sessions_ended_reason_check
       CHECK (ended_reason IS NULL OR ended_reason IN ('login_elsewhere', 'account_stopped', 'company_closed', 'logout', 'expired')) NOT VALID;
   END IF;
-END $$;
+END $;
 ```
 
 ### C145-DDL-2 · 공개 페이지 방문 기록 표(설계서 §3-1) · ★ 배포 뒤
@@ -2854,7 +2854,7 @@ END $$;
 - 의미 바꿈: 아니오(새 표)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'public_page_visits' ORDER BY ordinal_position;
 - 확인: 13칸(id ~ last_seen_at)
-- 결과:
+- 결과: 1119 Harold 실행(DDL-1 과 같은 psql 한 번) = SET · CREATE TABLE · CREATE INDEX · CREATE INDEX · 확인 = public_page_visits 13칸 = 기대와 같음
 
 > C145-RB-2(되돌리기 · 새 코드를 내린 뒤에만) = DROP TABLE IF EXISTS public_page_visits;
 
@@ -2885,7 +2885,7 @@ CREATE INDEX IF NOT EXISTS idx_public_page_visits_page_browser ON public_page_vi
 - 선행: C145-DDL-1 · C145-DDL-2
 - 기대: 설계서 §5 시트 1 · 2 전 항목 「맞음」 · 서버 = 꺼진 세션에 원인이 적힘 · 방문 행이 생김
 - 확인: 화면(Harold 또는 직원 · 시트 1 · 2) · 서버 셸 한 줄 둘 ① `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT ended_reason, count(*) FROM user_sessions WHERE is_active = false AND last_activity_at > now() - interval '1 day' GROUP BY 1 ORDER BY 2 DESC;"` ② `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT page, count(*), count(application_id), round(avg(visible_seconds)) FROM public_page_visits GROUP BY 1;"`
-- 결과:
+- 결과: 1119 Harold 서버 확인 = ① 끝난 세션 원인 = 빈칸 96(DDL 전에 끈 행) · login_elsewhere 1(DDL 뒤 새 로그인 회전이 원인을 적음) ② public_page_visits jbn 1건 · 신청 0 · 머문 시간 2초 · nginx = 16:44:10 115.138.27.202 GET /api/public/jbn/plans 200 · POST visits/start 204 · 16:44:12 visits/beat 204 뒤 그 페이지 신호 0(2초 = 보이던 시간 그대로) / 남은 = 설계서 §5 시트 1(공개 페이지 끊김 · 원인 문구) · 시트 2(카카오톡 30초 · 신청 잇기 · 방문 기록 칸) 직원 실행
 
 ## §2 덤프 뒤 적용분
 
