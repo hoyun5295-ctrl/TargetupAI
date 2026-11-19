@@ -162,7 +162,8 @@ describe('로그아웃 — 서버 세션이 실제로 끊긴다', () => {
   it('로그아웃 endpoint가 존재하고 세션을 비활성화한다', () => {
     const src = read();
     expect(src, '/auth/logout이 없으면 클라이언트가 토큰만 지우고 서버 행은 살아남는다').toMatch(/router\.post\('\/logout'/);
-    expect(src).toMatch(/UPDATE user_sessions SET is_active = false WHERE id = \$1/);
+    // ★ 2026-11-19 C145 — 끄는 문장은 세션 CT 의 endSessions 하나(원인 logout · 활성 행만)
+    expect(src).toContain("endSessions({ query }, 'id = $1 AND user_id = $2', [decoded.sessionId, decoded.userId], 'logout')");
   });
 
   it('로그아웃에는 authenticate를 걸지 않는다 — 만료 토큰도 끊을 수 있어야 한다', () => {
@@ -182,7 +183,8 @@ describe('계약 종료 — 접속 중인 세션까지 끊는다', () => {
     const killed = await invalidateCompanySessions('company-1');
 
     expect(killed).toBe(4);
-    const [sql, params] = q.mock.calls[0];
+    // ★ 2026-11-19 C145 — 끄기 앞에 원인 칸 확인(읽기) 한 번 · 칸이 없으면(rows 0) 지금 SQL
+    const [sql, params] = q.mock.calls.find(([s]: any[]) => /UPDATE user_sessions/i.test(String(s)))!;
     expect(String(sql)).toMatch(/UPDATE user_sessions/i);
     expect(String(sql)).toMatch(/is_active\s*=\s*false/i);
     // 대상은 그 회사 소속 전원 — app_source를 가리지 않는다(계약이 끝나면 어느 앱이든 끊는다)

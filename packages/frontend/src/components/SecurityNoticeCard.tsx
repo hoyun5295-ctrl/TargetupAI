@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, X } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 import { isHelpHiddenPath } from './help/help-api';
+import { isPublicPath } from '../utils/public-paths';
 import { useBodyFlag } from '../lib/surface-flags';
 import { useToast } from './ToastProvider';
 import { SECURITY_ITEMS } from '../constants/security-report';
@@ -79,7 +80,8 @@ export default function SecurityNoticeCard() {
   const { isAuthenticated, user, token } = useAuthStore();
   const { pathname } = useLocation();
   if (!isAuthenticated || !user || user.userType === 'super_admin' || !token) return null;
-  if (isHelpHiddenPath(pathname) || pathname === SECURITY_REPORT_PATH) return null;
+  // ★ 2026-11-19 C145 — 로그인 사용자용 전역 부품은 공개 경로에서 그리지 않는다(utils/public-paths)
+  if (isHelpHiddenPath(pathname) || isPublicPath(pathname) || pathname === SECURITY_REPORT_PATH) return null;
   const loginMark = loginMarkOf(user.id, token);
   if (!loginMark) return null;
   return <NoticeCardForLogin key={loginMark} loginMark={loginMark} />;

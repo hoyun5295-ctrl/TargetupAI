@@ -64,7 +64,8 @@ describe('고객사 세션 기본 8시간', () => {
     expect(header).not.toContain('<SessionTimer');
     expect(header).not.toContain("from './SessionTimer'");
     const app = fe('App.tsx');
-    expect(app).toContain('useSessionTimeout({ onLogout: handleSessionLogout })');
+    // ★ 2026-11-19 C145 — 같은 자동 로그아웃 · 로그인했을 때만 센다(enabled)
+    expect(app).toContain('useSessionTimeout({ onLogout: handleSessionLogout, enabled: isAuthenticated })');
     expect(app).toContain('<SessionTimeoutModal');
     // 슈퍼관리자 화면은 세션이 30분이라 타이머를 그대로 둔다
     expect(readAdminScreenSource()).toContain('<SessionTimer />');

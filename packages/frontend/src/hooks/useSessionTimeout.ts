@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface UseSessionTimeoutOptions {
   onLogout: () => void;
+  /** ★ 2026-11-19 C145 — 로그인했을 때만 센다(로그인한 적 없는 방문자를 자동 로그아웃으로 로그인 화면에 보내지 않는다) */
+  enabled: boolean;
   onWarning?: () => void;
 }
 
@@ -26,7 +28,7 @@ const SERVER_PING_INTERVAL_MS = 5 * 60 * 1000;
  */
 export const DEFAULT_SESSION_TIMEOUT_MINUTES = 480;
 
-export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSessionTimeoutReturn {
+export function useSessionTimeout({ onLogout, enabled }: UseSessionTimeoutOptions): UseSessionTimeoutReturn {
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
 
@@ -94,9 +96,13 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
     onLogout();
   }, [onLogout]);
 
-  // 매초 체크하는 tick
+  // 매초 체크하는 tick(로그인했을 때만 · 로그인하는 순간 마지막 입력 시각을 지금으로)
   useEffect(() => {
+    if (!enabled) return;
     timeoutMinutesRef.current = getTimeoutMinutes();
+    lastActivityRef.current = Date.now();
+    lastServerPingRef.current = Date.now();
+    warningShownRef.current = false;
 
     const tick = () => {
       const now = Date.now();
@@ -127,7 +133,7 @@ export function useSessionTimeout({ onLogout }: UseSessionTimeoutOptions): UseSe
         clearInterval(tickIntervalRef.current);
       }
     };
-  }, [getTimeoutMinutes, handleLogout]);
+  }, [enabled, getTimeoutMinutes, handleLogout]);
 
   // 활동 이벤트 리스너 등록
   useEffect(() => {

@@ -264,6 +264,8 @@ const PRIVACY_KIND_LABEL: Record<string, string> = {
   customer_single: '고객 1명 등록·수정',
   customer_bulk: '고객 일괄 등록·수정',
   customer_upload: '고객 파일 업로드',
+  // ★ 2026-11-19 C145 파기(보관 기한)
+  public_page_visits: '공개 페이지 방문 기록',
 };
 
 /** 상세 JSON의 값 몇 가지 → 한글 */

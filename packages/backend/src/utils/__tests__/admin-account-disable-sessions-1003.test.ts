@@ -52,11 +52,14 @@ describe('인증 미들웨어 — 세션 행이 비활성이면 그 토큰은 �
   it('세션 대조는 is_active = true 행만 통과', () => {
     const auth = read('middlewares/auth.ts');
     expect(auth).toContain("'SELECT id, last_activity_at, expires_at FROM user_sessions WHERE id = $1 AND user_id = $2 AND is_active = true'");
-    expect(auth).toMatch(/if \(sessionResult\.rows\.length === 0\) \{\s*return res\.status\(401\)\.json\(\{[\s\S]*?forceLogout: true/);
+    // ★ 2026-11-19 C145 — 0행이면 끈 원인을 한 번 더 읽은 뒤 401 강제 표식(원인대로 문구)
+    expect(auth).toMatch(/if \(sessionResult\.rows\.length === 0\) \{[\s\S]*?return res\.status\(401\)\.json\(\{[\s\S]*?forceLogout: true/);
   });
 
   it('세션 CT 는 그 사용자의 활성 세션 전부를 앱 구분 없이 끊는다', () => {
     const sm = read('utils/session-manager.ts');
-    expect(sm).toContain('UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND is_active = true');
+    // ★ 2026-11-19 C145 — 끄는 문장 = endSessions 하나(활성 행만) · 사용자 단위 = 원인 account_stopped
+    expect(sm).toContain("return endSessions({ query }, 'user_id = $1', [userId], 'account_stopped');");
+    expect(sm).toContain('SET is_active = false WHERE is_active = true AND (${where})');
   });
 });

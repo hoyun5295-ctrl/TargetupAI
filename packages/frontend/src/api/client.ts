@@ -1,9 +1,7 @@
 import axios from 'axios';
 import { attachCreditInterceptor } from '../lib/credit-interceptor';
-import { clearSnsDrafts } from '../utils/sns-draft';
-import { clearAiLineRuns } from '../utils/ai-line';
-import { resetDashboardIntro } from '../utils/dashboard-live';
-import { clearSessionCompanyData } from '../utils/session-data';
+import { useAuthStore } from '../stores/authStore';
+import { endClientSession, SESSION_END_FALLBACK_MESSAGE } from '../utils/session-end';
 
 const api = axios.create({
   baseURL: '/api',
@@ -14,37 +12,27 @@ const api = axios.create({
 attachCreditInterceptor(api);
 
 // 요청 인터셉터 - 토큰 추가
+// ★ 2026-11-19 C145 — 보낼 때 실은 토큰과 그 순간 탭 토큰을 요청에 고정한다(401 이 닿을 때 다시 읽으면 그 사이 생긴 새 로그인을 끝난 것으로 읽는다 · utils/session-end)
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  (config as any).sessionAtSend = { sentToken: token || null, sentTabToken: useAuthStore.getState().token };
   return config;
 });
 
-// 응답 인터셉터 - 401 처리
+// 응답 인터셉터 - 401 처리 = 로그인 끝 처리 CT 하나(공개 경로 = 그 화면 그대로 · 로그인 필요 경로 = 사유 + 로그인 화면)
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       const data = error.response.data;
-
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      clearSnsDrafts();   // ★ 2026-09-24 SNS 쓰던 글(sns-draft.ts)
-      clearAiLineRuns();  // ★ 2026-10-19 AI 한줄로 진행 · 알림톡 넘기기(ai-line.ts)
-      resetDashboardIntro();  // ★ 2026-10-19 B-1010-11
-      clearSessionCompanyData();  // ★ 2026-10-19 B-1018-5③
-
-      // 강제 로그아웃 (다른 곳에서 로그인)
-      if (data?.forceLogout) {
-        sessionStorage.setItem('forceLogoutReason', data.error || '다른 곳에서 로그인되어 현재 세션이 종료되었습니다.');
-      }
-
-      // 이미 로그인 페이지면 무시
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
+      const sent = (error.config as any)?.sessionAtSend || {};
+      endClientSession({
+        endedToken: sent.sentToken ?? sent.sentTabToken ?? null,
+        serverReason: data?.forceLogout ? (data.error || SESSION_END_FALLBACK_MESSAGE) : null,
+      });
     }
     return Promise.reject(error);
   }

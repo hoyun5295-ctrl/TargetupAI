@@ -458,7 +458,9 @@ describe('④ 진행 저장 = 계정별 · 결과 카드 본문 없음(★1019 H
   });
   it('로그아웃 · 401 이 진행을 지운다 · 알림톡 넘기기는 같은 계정만 · 카드는 본문을 그리지 않는다', () => {
     expect(readFileSync(join(FE, 'stores', 'authStore.ts'), 'utf8')).toContain('clearAiLineRuns();');
-    expect(readFileSync(join(FE, 'api', 'client.ts'), 'utf8')).toContain('clearAiLineRuns();');
+    // ★ 2026-11-19 C145 — 401 은 로그인 끝 처리 CT(utils/session-end) → authStore.clearLocal 이 지운다(같은 뜻 · 자리 이동)
+    expect(readFileSync(join(FE, 'api', 'client.ts'), 'utf8')).toContain('endClientSession({');
+    expect(readFileSync(join(FE, 'utils', 'session-end.ts'), 'utf8')).toContain('store.clearLocal();');
     expect(readFileSync(join(FE, 'pages', 'Dashboard.tsx'), 'utf8')).toContain('h.owner !== aiLineOwner()');
     const cards = readFileSync(join(FE, 'components', 'ai-line', 'LineResultCards.tsx'), 'utf8');
     expect(cards).not.toContain('<pre');

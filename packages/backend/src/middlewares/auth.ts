@@ -5,6 +5,7 @@ import { TIMEOUTS, LIMITS, superAdminSessionMinutesFor } from '../config/default
 import { requestContext } from '../utils/request-context';
 import { isBestLayoutViewer } from '../utils/audit-log';
 import { fetchAdminRole, canForMethod } from '../utils/admin-role';
+import { endSessions, readSessionEndReason, sessionEndMessage, SESSION_TOKEN_EXPIRED_MESSAGE } from '../utils/session-manager';
 
 export interface JwtPayload {
   userId: string;
@@ -75,9 +76,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     );
 
     if (sessionResult.rows.length === 0) {
+      // ★ 2026-11-19 C145 — 꺼진 세션은 끈 원인대로 말한다(살아 있는 행 조회는 그대로 · 0행일 때만 원인을 한 번 더 읽는다 · R56)
+      const reason = await readSessionEndReason(decoded.sessionId, decoded.userId);
       return res.status(401).json({
-        error: '다른 곳에서 로그인되어 현재 세션이 종료되었습니다.',
-        forceLogout: true
+        error: sessionEndMessage(reason),
+        forceLogout: true,
+        code: 'SESSION_ENDED',
+        reason,
       });
     }
 
@@ -85,14 +90,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     const expiresAt = new Date(sessionResult.rows[0].expires_at);
     const now = new Date();
     if (now > expiresAt) {
-      // 세션 비활성화
-      query(
-        'UPDATE user_sessions SET is_active = false WHERE id = $1',
-        [decoded.sessionId]
-      ).catch(() => {});
+      // 세션 비활성화(끄는 문장 = 세션 CT 하나 · 원인 expired)
+      endSessions({ query }, 'id = $1', [decoded.sessionId], 'expired').catch(() => {});
       return res.status(401).json({
-        error: '세션이 만료되었습니다. 다시 로그인해주세요.',
-        forceLogout: true
+        error: sessionEndMessage('expired'),
+        forceLogout: true,
+        code: 'SESSION_ENDED',
+        reason: 'expired',
       });
     }
 
@@ -120,8 +124,25 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     }
 
     next();
-  } catch (error) {
+  } catch (error: any) {
+    // ★ 2026-11-19 C145 결정 ③ — 24시간 로그인 시간이 끝난 토큰은 안내와 함께 끝낸다(서명 틀림 등은 지금 그대로)
+    if (error?.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: SESSION_TOKEN_EXPIRED_MESSAGE, forceLogout: true, code: 'TOKEN_EXPIRED' });
+    }
     return res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+/**
+ * ★ 2026-11-19 C145 — 서명 · 만료만 본다(세션 행 조회 0). 공개 방문 기록이 「이 브라우저는 누구 것」을 적을 때만 쓴다.
+ * API 인증 토큰 꼴(userId + userType)이 아니면 null.
+ */
+export const verifyApiTokenSignature = (token: string): JwtPayload | null => {
+  try {
+    const d = jwt.verify(token, JWT_SECRET) as JwtPayload;
+    return d && d.userId && d.userType ? d : null;
+  } catch {
+    return null;
   }
 };
 

@@ -1553,6 +1553,23 @@ companies 5칸: `plan_term_expires_on date`(만료일 KST · NULL = 관리 대�
 | last_activity_at | timestamp |
 | expires_at | timestamp |
 | app_source | varchar | ★2026-08-18 실측 덤프로 등재(그동안 누락). 세션 격리 축 — `hanjul`·`flyer`·`super`. 활성 세션 판정은 `is_active=true AND expires_at > NOW()` 둘 다 필요(만료 행이 남는다 = 접속 인계 문서 §2-3) |
+| ended_reason | varchar(20) | ★2026-11-19 C145-DDL-1(배포 뒤) · 세션을 끈 원인 = `login_elsewhere`(같은 계정 · 같은 앱 새 로그인) · `account_stopped`(계정 중지 · 제한) · `company_closed`(회사 해지 · 정지) · `logout`(그 세션 로그아웃) · `expired`(만료 · 또는 이미 만료된 행을 다른 원인이 끔) · CHECK `user_sessions_ended_reason_check`(NOT VALID) · NULL = 칸이 생기기 전에 끈 행 · 쓰는 곳 = `utils/session-manager.ts` `endSessions` 하나 · 읽는 곳 = 인증 미들웨어(꺼진 세션 문구 = `sessionEndMessage`) |
+
+### public_page_visits (공개 페이지 방문 기록) ★2026-11-19 C145-DDL-2(배포 뒤) · CT `utils/public-visits.ts` · 설계서 docs/2026-11-19-c145-public-session-visits-design.md §3
+| 컬럼 | 타입 |
+|------|------|
+| id | uuid PK · 화면이 만든 방문 하나 |
+| page | varchar(40) NOT NULL · 등록 페이지 열쇠(`jbn`) |
+| browser_key | uuid NOT NULL · 같은 브라우저(localStorage `hanjul.visitor`) |
+| ip_address | inet · 90일 |
+| user_agent | text(앞 400자) |
+| referrer_host | varchar(200) · 호스트만 |
+| src | varchar(60) · 주소 `?src=` |
+| login_id · user_type | varchar(100) · varchar(20) · 그 브라우저의 로그인 흔적(서명만 확인) |
+| application_id | uuid · 이 방문에서 낸 JBN 신청(`jbn_applications.id` · FK 없음) |
+| visible_seconds | integer NOT NULL DEFAULT 0 · CHECK 0 ~ 21600 · 화면이 보이던 시간 합(서버가 흐른 시간으로 자름) |
+| started_at · last_seen_at | timestamptz NOT NULL DEFAULT now() |
+> 색인 = `idx_public_page_visits_page_started (page, started_at DESC)` · `idx_public_page_visits_page_browser (page, browser_key)` · 행 정체 = (id, browser_key, page) 셋(모든 쓰기의 ON CONFLICT WHERE · beat WHERE) · 보관 = 90일 지난 행 삭제(워커 `startPublicVisitRetentionWorker` · 파기 기록 audit_logs `privacy_purge` kind `public_page_visits`)
 
 ### campaign_send_staging (발송 수신자 임시 적재) ★2026-09-26 등재 (information_schema·pg_indexes 실측, Harold 실행)
 | 컬럼 | 타입 |

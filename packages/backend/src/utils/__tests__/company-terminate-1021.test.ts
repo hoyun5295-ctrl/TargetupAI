@@ -155,7 +155,8 @@ describe('세션 끊기 CT — 연결을 넘기면 그 연결로(해지 트랜�
   it('기본값 = 풀 query · 본문은 넘겨받은 db 로', () => {
     const fn = src.slice(src.indexOf('export async function invalidateCompanySessions('));
     expect(fn.slice(0, 400)).toContain('= { query },');
-    expect(fn.slice(0, 500)).toContain('const result = await db.query(');
+    // ★ 2026-11-19 C145 — 끄는 문장은 세션 CT 의 endSessions 하나 · 넘겨받은 db 로 부른다
+    expect(fn.slice(0, 500)).toContain('return endSessions(db, ');
   });
 });
 

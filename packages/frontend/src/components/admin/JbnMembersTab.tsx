@@ -247,8 +247,166 @@ export default function JbnMembersTab() {
         </aside>
       </div>
 
+      <VisitsSection />
+
       {open && <DetailModal row={open} onClose={() => setOpen(null)} onChanged={(row) => { setOpen(row); void load(); }} onDeleted={() => { setOpen(null); void load(); }} />}
     </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// ★ 2026-11-19 C145 방문 기록(누가 · 어떤 IP · 얼마나 · 설계서 docs/2026-11-19-c145-public-session-visits-design.md §3-3)
+//   셈 · 누구 판정 = 서버(utils/public-visits.ts) · 이 칸은 그리기만.
+// ─────────────────────────────────────────────
+
+type VisitWho =
+  | { kind: 'application'; applicationId: string; nickname: string | null; companyName: string | null }
+  | { kind: 'login'; loginId: string; userType: string | null }
+  | { kind: 'unknown' };
+interface VisitRow {
+  id: string; startedAt: string; seconds: number; ip: string | null; device: string; app: string;
+  who: VisitWho; browserVisits: number; referrerHost: string | null; src: string | null;
+}
+interface VisitsData {
+  days: number;
+  summary: { visits: number; browsers: number; avgSeconds: number; appliedBrowsers: number };
+  rows: VisitRow[];
+  truncated: boolean;
+}
+const VISIT_DAYS: Array<{ days: number; label: string }> = [
+  { days: 1, label: '오늘' }, { days: 7, label: '7일' }, { days: 30, label: '30일' }, { days: 90, label: '90일' },
+];
+const USER_TYPE: Record<string, string> = { super_admin: '슈퍼관리자', company_admin: '고객사 관리자', company_user: '고객사 사용자' };
+
+/** 머문 시간 = 「1분 20초」 */
+function dwell(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  if (s < 60) return `${s}초`;
+  if (s < 3600) return `${Math.floor(s / 60)}분${s % 60 ? ` ${s % 60}초` : ''}`;
+  const m = Math.floor((s % 3600) / 60);
+  return `${Math.floor(s / 3600)}시간${m ? ` ${m}분` : ''}`;
+}
+
+function VisitsSection() {
+  const [days, setDays] = useState(7);
+  const [data, setData] = useState<VisitsData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const turn = useRef(0);
+
+  const load = useCallback(async () => {
+    const my = ++turn.current;
+    setLoading(true);
+    setError('');
+    const ctl = new AbortController();
+    const timer = window.setTimeout(() => ctl.abort(), 15_000);
+    try {
+      const r = await fetch(`/api/admin/jbn/visits?days=${days}`, { headers: auth(), signal: ctl.signal });
+      const d = await r.json().catch(() => null);
+      if (my !== turn.current) return;
+      if (r.status === 503 && d?.code === 'DB_MIGRATION_PENDING') { setError('방문 기록 표가 아직 없습니다(배포 원장 C145-DDL-2 뒤에 쌓이기 시작합니다).'); setData(null); return; }
+      if (!r.ok || !d?.success) { setError(d?.error || '방문 기록을 불러오지 못했습니다.'); return; }
+      setError('');
+      setData(d);
+    } catch {
+      if (my === turn.current) setError('방문 기록을 불러오지 못했습니다.');
+    } finally {
+      window.clearTimeout(timer);
+      if (my === turn.current) setLoading(false);
+    }
+  }, [days]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => () => { turn.current += 1; }, []);
+
+  // 고른 기간과 같은 자료만 그린다(다른 기간을 고르다 실패해도 옛 기간 자료를 그 기간인 것처럼 보이지 않는다 · Codex 구현 1R)
+  const shown = data && data.days === days ? data : null;
+  const sum = shown?.summary;
+  const stats: Array<{ label: string; value: string; unit: string }> = [
+    { label: '방문', value: sum ? won(sum.visits) : '?', unit: '회' },
+    { label: '브라우저', value: sum ? won(sum.browsers) : '?', unit: '개' },
+    { label: '평균 머문 시간', value: sum ? dwell(sum.avgSeconds) : '?', unit: '' },
+    { label: '신청으로 이어짐', value: sum ? won(sum.appliedBrowsers) : '?', unit: '곳' },
+  ];
+
+  return (
+    <section className="bg-white rounded-[14px] shadow-sm overflow-hidden mt-4" aria-labelledby="jbn-visits-title">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-[18px] pt-[15px] pb-[13px] border-b border-gray-200">
+        <div className="min-w-0">
+          <h2 id="jbn-visits-title" className="text-[16px] font-extrabold">방문 기록</h2>
+          <p className="text-[12.5px] text-gray-500 break-keep">머문 시간은 화면이 실제로 보이던 시간입니다. IP 는 90일 뒤 지웁니다.</p>
+        </div>
+        <div role="group" aria-label="기간" className="inline-flex h-9 p-1 rounded-[10px] bg-[#F1F1EE]">
+          {VISIT_DAYS.map((x) => (
+            <button key={x.days} type="button" aria-pressed={days === x.days} onClick={() => setDays(x.days)}
+              className={`px-3 rounded-[8px] text-[13px] font-bold ${days === x.days ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}>
+              {x.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 border-b border-gray-200">
+        {stats.map((x, i) => (
+          <div key={x.label} className={`px-[18px] py-3 ${i % 2 ? 'border-l' : ''} ${i >= 2 ? 'border-t md:border-t-0' : ''} md:border-l md:first:border-l-0 border-gray-100`}>
+            <p className="text-[12.5px] font-bold text-gray-500">{x.label}</p>
+            <p className="text-[22px] font-extrabold tracking-tight tabular-nums text-gray-900">
+              {x.value}{x.unit && <small className="text-[13px] font-semibold text-gray-500 ml-0.5">{x.unit}</small>}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {error && <p className="px-[18px] py-3 text-[13.5px] font-semibold text-red-600">{error}</p>}
+      {shown?.truncated && <p className="px-[18px] py-2 text-[12.5px] text-[#A8380B] bg-[#FDF1EC]">이 기간 방문이 500건을 넘어 최근 500건만 보입니다.</p>}
+
+      {shown && shown.rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className={`w-full text-[13px] ${ADMIN_TABLE_ONELINE}`}>
+            <thead>
+              <tr className="text-left text-[12px] text-gray-500 bg-[#FAFAF8]">
+                <th className="px-[18px] py-2 font-bold">들어온 시각</th>
+                <th className="px-3 py-2 font-bold text-right">머문 시간</th>
+                <th className="px-3 py-2 font-bold">누구</th>
+                <th className="px-3 py-2 font-bold">기기</th>
+                <th className="px-3 py-2 font-bold">IP</th>
+                <th className="px-3 py-2 font-bold text-right">같은 브라우저 방문</th>
+                <th className="px-[18px] py-2 font-bold">들어온 곳</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.rows.map((v) => (
+                <tr key={v.id} className="border-t border-gray-100">
+                  <td className="px-[18px] py-2.5 tabular-nums text-gray-700">{formatKstMonthDayTime(v.startedAt)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums font-bold text-gray-900">{dwell(v.seconds)}</td>
+                  <td className="px-3 py-2.5">
+                    {v.who.kind === 'application' && (
+                      <span className="inline-flex items-center gap-1.5 bg-[#F1F1EE] rounded-lg px-2 py-0.5 font-bold text-gray-900">
+                        <small className="text-[11px] text-gray-500">신청</small>{v.who.nickname ?? '지운 신청'}
+                        {v.who.companyName && <small className="text-[11.5px] font-semibold text-gray-500">{v.who.companyName}</small>}
+                      </span>
+                    )}
+                    {v.who.kind === 'login' && (
+                      <span className="text-gray-900"><small className="text-[11px] text-gray-500 mr-1">로그인 흔적</small><b>{v.who.loginId}</b>
+                        {v.who.userType && <small className="text-[11.5px] text-gray-500 ml-1">{USER_TYPE[v.who.userType] ?? v.who.userType}</small>}
+                      </span>
+                    )}
+                    {v.who.kind === 'unknown' && <span className="text-gray-400">알 수 없음</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-gray-700">{v.device} · {v.app}</td>
+                  <td className="px-3 py-2.5 tabular-nums text-gray-700">{v.ip ?? '없음'}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-gray-700">{v.browserVisits}회</td>
+                  <td className="px-[18px] py-2.5 text-gray-500">{v.referrerHost ?? '바로 들어옴'}{v.src ? ` · ${v.src}` : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {shown && !loading && !error && shown.rows.length === 0 && (
+        <p className="px-[18px] py-9 text-center text-[14px] text-gray-500">이 기간에 들어온 방문이 없습니다.</p>
+      )}
+      {loading && !shown && <p className="px-[18px] py-9 text-center text-[14px] text-gray-500">불러오는 중</p>}
+    </section>
   );
 }
 

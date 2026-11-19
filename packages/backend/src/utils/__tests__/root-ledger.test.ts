@@ -1407,7 +1407,7 @@ const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
   ...OUT_OF_AXIS('대행(계약 기능)', ['agency-send.ts', 'agency-approve.ts', 'campaign-agency.ts']),
   ...OUT_OF_AXIS('고객 DB · 쇼핑몰 연동', ['customers.ts', 'upload.ts', 'address-books.ts', 'sync.ts', 'sync-consent.ts', 'cafe24.ts', 'imweb.ts', 'woocommerce.ts', 'naver-commerce.ts', 'makeshop.ts', 'godo.ts', 'analysis.ts', 'insight.ts']),
   ...OUT_OF_AXIS('계정 · 회사 · 관리 · 도움말', ['auth.ts', 'companies.ts', 'manage-users.ts', 'manage-stats.ts', 'identity-return.ts', 'onboarding.ts', 'help.ts', 'internal-alert.ts', 'design-templates.ts', 'ai-memory.ts', 'ai-usage.ts']),
-  ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts', 'proposal.ts', 'jbn-public.ts']),   // ★ 2026-11-16 C136 proposal.ts = 메일로 보낸 제안 페이지 · 제작 대행 체험(영업 체험 + 직원 확인 화면) · ★ 2026-11-18 C144 jbn-public.ts = JBN 전용 페이지 요금 · 신청(무인증 · 발송 0)
+  ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts', 'proposal.ts', 'jbn-public.ts', 'public-visits.ts']),   // ★ 2026-11-16 C136 proposal.ts = 메일로 보낸 제안 페이지 · 제작 대행 체험(영업 체험 + 직원 확인 화면) · ★ 2026-11-18 C144 jbn-public.ts = JBN 전용 페이지 요금 · 신청(무인증 · 발송 0) · ★ 2026-11-19 C145 public-visits.ts = 공개 페이지 방문 기록(무인증 · 등록 페이지만 · 발송 0)
 };
 describe('라우터 분류 전수(1025) — 12기능 라우터 · 축 밖 라우터(이유) 둘 중 하나', () => {
   it('모든 라우터 파일이 분류에 있고 · 겹치지 않고 · 없는 파일이 분류에 없다', () => {

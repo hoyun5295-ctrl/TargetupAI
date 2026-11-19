@@ -7,6 +7,8 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { ScrollManager } from './lib/scroll-restoration';
 import { useAuthStore, isAgentOnlyCompany } from './stores/authStore';
 import { useSessionGuard } from './hooks/useSessionGuard';
+import { isPublicPath } from './utils/public-paths'; // ★ 2026-11-19 C145 공개 경로 판정
+import { endClientSession, OTHER_WINDOW_LOGIN_MESSAGE, SESSION_NOTICE_EVENT } from './utils/session-end'; // ★ 2026-11-19 C145 로그인 끝 처리
 import { useSessionTimeout } from './hooks/useSessionTimeout';
 import SessionTimeoutModal from './components/SessionTimeoutModal';
 // ★ D212+ (2026-05-23 Harold 명시): Toast 알림 영역 — native alert() 영구 폐기 정합
@@ -152,7 +154,9 @@ function PrivateRoute({ children, allowedTypes }: { children: React.ReactNode; a
 // ★ 2026-10-09 시연 회사 띠(설계서 docs/2026-10-09-demo-company-design.md §6) — 로그인 응답 company.isDemo 일 때만 · 모든 화면 위 한 줄
 function DemoCompanyBanner() {
   const { isAuthenticated, user } = useAuthStore();
-  if (!isAuthenticated || !user?.company?.isDemo) return null;
+  const location = useLocation();
+  // ★ 2026-11-19 C145 — 로그인 사용자용 전역 부품은 공개 경로에서 그리지 않는다(utils/public-paths)
+  if (!isAuthenticated || !user?.company?.isDemo || isPublicPath(location.pathname)) return null;
   return (
     <div role="status" className="w-full bg-slate-800 text-slate-100 text-[12.5px] leading-7 px-4 text-center truncate" data-demo-banner>
       시연 회사 · 고객·구매는 매일 만들어지는 가상 데이터이고 문자는 실제로 나가지 않습니다
@@ -160,27 +164,26 @@ function DemoCompanyBanner() {
   );
 }
 
-// 세션 감시 + 강제 로그아웃 모달
+// 세션 감시 + 다른 창 새 로그인 안내 창
+// ★ 2026-11-19 C145 — 끊김 판정 · 지우기 · 이동은 로그인 끝 처리 CT(utils/session-end) 하나가 한다.
+//   이 창은 「이 브라우저의 다른 창에서 새로 로그인」(로그인 필요 경로)일 때만 뜬다 → 확인 = 새로 불러오기(새 로그인으로 처음부터 · 새 로그인의 토큰은 지우지 않는다).
 function SessionGuard() {
-  const navigate = useNavigate();
-  const { logout } = useAuthStore();
-  const [showModal, setShowModal] = useState(false);
   const [modalMessage, setModalMessage] = useState('');
 
-  const handleForceLogout = useCallback((message: string) => {
-    setModalMessage(message);
-    setShowModal(true);
+  useSessionGuard();
+
+  useEffect(() => {
+    const onNotice = (e: Event) => setModalMessage(String((e as CustomEvent).detail?.message || OTHER_WINDOW_LOGIN_MESSAGE));
+    window.addEventListener(SESSION_NOTICE_EVENT, onNotice);
+    return () => window.removeEventListener(SESSION_NOTICE_EVENT, onNotice);
   }, []);
 
-  useSessionGuard(handleForceLogout);
-
   const handleConfirm = () => {
-    setShowModal(false);
-    logout();
-    navigate('/login', { replace: true });
+    setModalMessage('');
+    window.location.assign('/');
   };
 
-  if (!showModal) return null;
+  if (!modalMessage) return null;
 
   return (
     <>
@@ -210,7 +213,7 @@ function SessionGuard() {
               onClick={handleConfirm}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
             >
-              로그인 페이지로 이동
+              새로 열기
             </button>
           </div>
         </div>
@@ -250,22 +253,21 @@ function PageViewTracker() {
 
 // 세션 타임아웃 (비활동 감지 → 자동 로그아웃) + Context Provider
 function SessionTimeoutGuard({ children }: { children: React.ReactNode }) {
-  const navigate = useNavigate();
-  const { isAuthenticated, logout } = useAuthStore();
+  const location = useLocation();
+  const { isAuthenticated } = useAuthStore();
 
+  // ★ 2026-11-19 C145 — 끝 처리 CT 하나(공개 경로 = 로그아웃만 · 이동 0) · 서버 세션은 살아 있으므로 서버도 끊는다
   const handleSessionLogout = useCallback(() => {
-    logout();
-    sessionStorage.setItem('forceLogoutReason', '장시간 활동이 없어 자동 로그아웃되었습니다.');
-    navigate('/login', { replace: true });
-  }, [logout, navigate]);
+    endClientSession({ endedToken: useAuthStore.getState().token, serverReason: '장시간 활동이 없어 자동 로그아웃되었습니다.', serverAlive: true });
+  }, []);
 
   const { showWarningModal, remainingSeconds, totalSeconds, extendSession, handleLogout } =
-    useSessionTimeout({ onLogout: handleSessionLogout });
+    useSessionTimeout({ onLogout: handleSessionLogout, enabled: isAuthenticated });
 
   return (
     <SessionTimerContext.Provider value={{ remainingSeconds, totalSeconds, extendSession }}>
       {children}
-      {isAuthenticated && (
+      {isAuthenticated && !isPublicPath(location.pathname) && (
         <SessionTimeoutModal
           isOpen={showWarningModal}
           remainingSeconds={remainingSeconds}

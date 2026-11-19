@@ -37,6 +37,77 @@ import { evaluateLoginOrigin, GEO_BLOCK_NOTICE } from './geo-access';
 /** 한 번에 허용되는 동시 로그인 세션 수 — 항상 1개 (D111 P0: D100의 5개 허용 폐기) */
 const MAX_SESSIONS_PER_APP = 1;
 
+// ─────────────────────────────────────────────
+// ★ 2026-11-19 C145 세션을 끈 원인(설계서 docs/2026-11-19-c145-public-session-visits-design.md §2-4 · 뿌리 R56)
+//   세션을 끄는 문장은 이 파일의 endSessions 하나다(계약 K4) — 원인을 같이 적어야 화면이 원인대로 말한다.
+// ─────────────────────────────────────────────
+
+/** user_sessions.ended_reason 값 = C145-DDL-1 CHECK 목록과 같다(계약 K5) */
+export const SESSION_END_REASONS = ['login_elsewhere', 'account_stopped', 'company_closed', 'logout', 'expired'] as const;
+export type SessionEndReason = typeof SESSION_END_REASONS[number];
+
+const SESSION_END_MESSAGES: Record<SessionEndReason, string> = {
+  login_elsewhere: '다른 곳에서 로그인되어 현재 세션이 종료되었습니다.',
+  account_stopped: '계정 사용이 중지되어 로그인이 끝났습니다. 담당자에게 문의해 주세요.',
+  company_closed: '회사의 서비스 이용이 중지되어 로그인이 끝났습니다. 담당자에게 문의해 주세요.',
+  logout: '로그아웃되어 로그인이 끝났습니다. 다시 로그인해 주세요.',
+  expired: '세션이 만료되었습니다. 다시 로그인해주세요.',
+};
+/** 원인을 모를 때(칸이 없던 때 끈 행 · 행 없음) — 「다른 곳」이라 말하지 않는다 */
+export const SESSION_END_UNKNOWN_MESSAGE = '로그인이 끝났습니다. 다시 로그인해 주세요.';
+/** 24시간 로그인 시간(JWT)이 끝났을 때(결정 ③ · 인증 미들웨어) */
+export const SESSION_TOKEN_EXPIRED_MESSAGE = '로그인 시간이 끝났습니다. 다시 로그인해 주세요.';
+
+export function sessionEndMessage(reason: unknown): string {
+  return (SESSION_END_REASONS as readonly unknown[]).includes(reason)
+    ? SESSION_END_MESSAGES[reason as SessionEndReason]
+    : SESSION_END_UNKNOWN_MESSAGE;
+}
+
+type SessionDb = { query: (sql: string, params?: any[]) => Promise<any> };
+
+/**
+ * 원인 칸이 있는가 — **부를 때마다** 같은 연결로 읽는다(기억 0 · 설계 1R 지적 1).
+ * 지키는 것 = 배포 뒤 DDL 순서(칸을 더하기 전 새 코드 · 더하는 순간). 칸 지우기는 새 코드가 다 내려간 뒤에만(§2-4).
+ */
+async function hasEndedReasonColumn(db: SessionDb): Promise<boolean> {
+  const r = await db.query(
+    `SELECT 1 FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'user_sessions' AND column_name = 'ended_reason'`,
+  );
+  return (r?.rows?.length ?? 0) > 0;
+}
+
+/**
+ * 세션을 끄는 유일한 문장. where = user_sessions 를 고르는 조건(호출부 상수 · 자리 표시 $1 부터).
+ * - 활성 행만 끈다 = 이미 꺼진 행의 첫 원인을 덮지 않는다(설계 1R 지적 4).
+ * - 이미 만료 시각이 지난 행은 원인 = expired(새 로그인 회전이 만료된 행을 끌 때 「다른 곳 로그인」이라 적지 않는다).
+ * - 칸이 없으면(DDL 전) 지금 SQL 그대로.
+ */
+export async function endSessions(db: SessionDb, where: string, params: any[], reason: SessionEndReason): Promise<number> {
+  const withReason = await hasEndedReasonColumn(db);
+  const r = withReason
+    ? await db.query(
+      `UPDATE user_sessions
+          SET is_active = false,
+              ended_reason = CASE WHEN expires_at <= NOW() THEN 'expired' ELSE $${params.length + 1}::varchar END
+        WHERE is_active = true AND (${where})`,
+      [...params, reason],
+    )
+    : await db.query(`UPDATE user_sessions SET is_active = false WHERE is_active = true AND (${where})`, params);
+  return r?.rowCount ?? 0;
+}
+
+/** 인증 미들웨어가 꺼진 세션의 원인을 읽는다 — 칸이 없거나 읽기 실패면 null(원인 없음 문구) */
+export async function readSessionEndReason(sessionId: string, userId: string): Promise<string | null> {
+  try {
+    const r = await query(`SELECT ended_reason FROM user_sessions WHERE id = $1 AND user_id = $2`, [sessionId, userId]);
+    return r.rows[0]?.ended_reason ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 같은 사용자 + 같은 app_source 의 기존 활성 세션 전부 무효화.
  * 새 로그인 직전에 호출.
@@ -44,13 +115,7 @@ const MAX_SESSIONS_PER_APP = 1;
  * ★ 핵심: app_source 기준 격리 — 한줄로 세션 무효화해도 전단AI 세션은 그대로 유지.
  */
 export async function invalidateAppSessions(userId: string, appSource: string): Promise<number> {
-  const result = await query(
-    `UPDATE user_sessions
-     SET is_active = false
-     WHERE user_id = $1 AND app_source = $2 AND is_active = true`,
-    [userId, appSource]
-  );
-  return (result as any).rowCount ?? 0;
+  return endSessions({ query }, 'user_id = $1 AND app_source = $2', [userId, appSource], 'login_elsewhere');
 }
 
 /**
@@ -62,16 +127,9 @@ export async function invalidateAppSessions(userId: string, appSource: string): 
 export async function invalidateCompanySessions(
   companyId: string,
   /** ★2026-10-21 해지 CT 가 해지와 같은 트랜잭션에서 끊으려고 연결을 넘긴다(없으면 지금처럼 풀) */
-  db: { query: (sql: string, params?: any[]) => Promise<any> } = { query },
+  db: SessionDb = { query },
 ): Promise<number> {
-  const result = await db.query(
-    `UPDATE user_sessions
-     SET is_active = false
-     WHERE is_active = true
-       AND user_id IN (SELECT id FROM users WHERE company_id = $1)`,
-    [companyId]
-  );
-  return (result as any).rowCount ?? 0;
+  return endSessions(db, 'user_id IN (SELECT id FROM users WHERE company_id = $1)', [companyId], 'company_closed');
 }
 
 /**
@@ -79,11 +137,7 @@ export async function invalidateCompanySessions(
  * `invalidateAppSessions`는 app_source 하나만 끊는다. 제한 조치는 앱을 가리지 않는다.
  */
 export async function invalidateUserSessions(userId: string): Promise<number> {
-  const result = await query(
-    `UPDATE user_sessions SET is_active = false WHERE user_id = $1 AND is_active = true`,
-    [userId]
-  );
-  return (result as any).rowCount ?? 0;
+  return endSessions({ query }, 'user_id = $1', [userId], 'account_stopped');
 }
 
 export interface CreateSessionParams {

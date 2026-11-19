@@ -392,6 +392,14 @@ export async function deleteJbnApplication(id: string, actor: { userId: string |
   return true;
 }
 
+/** ★ 2026-11-19 C145 — 방문 기록의 「누구」(신청 id → 닉네임 · 회사명) · 방문 CT(utils/public-visits.ts)는 신청 표를 모른다 */
+export async function loadJbnApplicationNames(ids: string[]): Promise<Map<string, { nickname: string; companyName: string }>> {
+  const ok = ids.filter(isUuid);
+  if (ok.length === 0) return new Map();
+  const r = await query(`SELECT id::text AS id, nickname, company_name FROM jbn_applications WHERE id = ANY($1::uuid[])`, [ok]);
+  return new Map(r.rows.map((x: any) => [String(x.id), { nickname: String(x.nickname || ''), companyName: String(x.company_name || '') }]));
+}
+
 // ─────────────────────────────────────────────
 // 보관 기한
 // ─────────────────────────────────────────────

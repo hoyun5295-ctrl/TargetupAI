@@ -99,10 +99,10 @@ describe('③ 소스 계약', () => {
     expect(dash).not.toMatch(/plansApi\.list\(\)/);
     expect(dash).toMatch(/fetch\('\/api\/admin\/plans'[\s\S]{0,400}?\.filter\(\(p: any\) => p\.is_active !== false\)/);
   });
-  it('관리자 JBN 주소 넷 = 관문(ceo · suran) 뒤', () => {
+  it('관리자 JBN 주소 = 관문(ceo · suran) 뒤', () => {
     const src = back('routes/admin.ts');
     const routes = [...src.matchAll(/router\.(get|post|delete)\('\/jbn\/[^']*'[\s\S]*?\n\}\);/g)].map((m) => m[0]);
-    expect(routes.length).toBe(5);
+    expect(routes.length).toBe(6);   // ★ 2026-11-19 C145 방문 기록 GET /jbn/visits 더함(같은 관문)
     for (const r of routes) expect(r).toContain('isIntroLeadsViewer(req.user?.userId)');
     for (const r of routes.filter((x) => !x.includes("'/jbn/access'"))) expect(r).toMatch(/if \(!\(await isIntroLeadsViewer\(req\.user\?\.userId\)\)\) return jbnDenied\(res\);/);
   });

@@ -99,7 +99,8 @@ import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, 
 import { loadNoticeAck } from '../utils/customer-notice'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
-import { changeJbnStatus, deleteJbnApplication, linkJbnCompany, loadJbnOverview, parseJbnOverviewQuery, type JbnWriteResult } from '../utils/jbn'; // ★ 2026-11-18 C144 JBN 회원(ceo · suran)
+import { changeJbnStatus, deleteJbnApplication, linkJbnCompany, loadJbnOverview, parseJbnOverviewQuery, loadJbnApplicationNames, type JbnWriteResult } from '../utils/jbn'; // ★ 2026-11-18 C144 JBN 회원(ceo · suran)
+import { loadPublicVisits, parseVisitDays } from '../utils/public-visits'; // ★ 2026-11-19 C145 JBN 방문 기록
 import { loadFeatureInterest, parseFeatureInterestQuery } from '../utils/feature-interest'; // ★ 2026-10-06 기능 관심 업체(ceo 전용)
 import { loadIdentityStatus } from '../utils/identity-status'; // ★ 2026-10-07 본인인증 현황(ceo 전용)
 import { loadMallIntegrationMonitor } from '../utils/mall-integration-monitor'; // ★ 2026-10-27 자사몰 연동 감시 표 1단(K10)
@@ -5128,6 +5129,19 @@ router.get('/jbn/overview', authenticate, requireSuperAdmin, async (req: Request
     return res.json({ success: true, ...(await loadJbnOverview(parseJbnOverviewQuery(req.query))) });
   } catch (err: any) {
     return jbnFail(err, res, 'JBN 회원 불러오기');
+  }
+});
+
+// ★ 2026-11-19 C145 JBN 페이지 방문 기록(누가 · 어떤 IP · 얼마나 · 설계서 docs/2026-11-19-c145-public-session-visits-design.md §3-2 · 같은 문)
+router.get('/jbn/visits', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  if (!(await isIntroLeadsViewer(req.user?.userId))) return jbnDenied(res);
+  try {
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, ...(await loadPublicVisits('jbn', parseVisitDays(req.query?.days), loadJbnApplicationNames)) });
+  } catch (err: any) {
+    if (handleDbMigrationError(err, res, 'public_page_visits')) return;
+    console.error('[admin/jbn] 방문 기록 불러오기 실패:', err?.message);
+    return res.status(500).json({ success: false, error: '방문 기록을 불러오지 못했습니다.' });
   }
 });
 

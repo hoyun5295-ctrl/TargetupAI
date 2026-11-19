@@ -66,6 +66,9 @@ export interface JbnApplyBody {
   consent: boolean;
   /** 사람 눈에 안 보이는 칸(자동 입력 거름) */
   website: string;
+  /** ★ 2026-11-19 C145 이 신청을 낸 방문과 같은 브라우저 열쇠(서버가 방문 기록에 잇는다, 없으면 잇지 않음) */
+  visitId?: string;
+  browserKey?: string;
 }
 
 /**

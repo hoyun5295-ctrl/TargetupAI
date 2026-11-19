@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { JBN_RATE, insertJbnApplication, loadJbnPlans, parseJbnApplication } from '../utils/jbn';
 import { handleDbMigrationError } from '../utils/db-migration-error';
+import { linkVisitApplication } from '../utils/public-visits';
 
 const router = Router();
 
@@ -35,6 +36,11 @@ router.post('/apply', limiter(JBN_RATE.apply), async (req: Request, res: Respons
     const parsed = parseJbnApplication(req.body, plans.map((p) => p.code));
     if (!parsed.ok) return res.status(400).json({ success: false, error: parsed.error });
     await insertJbnApplication(parsed.value, req.ip || null);
+    // ★ 2026-11-19 C145 — 이 신청을 낸 방문에 잇는다(방문 기록의 「누구」 · 도착 순서 무관 · 실패해도 신청 응답은 그대로)
+    await linkVisitApplication({
+      visitId: req.body?.visitId, browserKey: req.body?.browserKey, applicationId: parsed.value.id, page: 'jbn',
+      ip: req.ip || null, userAgent: req.headers['user-agent'],
+    }).catch((err: any) => console.error('[jbn] 방문 잇기 실패:', err?.message));
     return res.json({ success: true });
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'jbn_applications')) return;

@@ -5,7 +5,7 @@ import rateLimit from 'express-rate-limit';
 import { query } from '../config/database';
 import { TIMEOUTS, superAdminSessionMinutesFor } from '../config/defaults';
 import { authenticate, generateToken, JwtPayload } from '../middlewares/auth';
-import { rotateUserSession, normalizeAppSource, isRetiredAppSource, RETIRED_APP_SOURCE_MESSAGE, newSessionId, verifyPasswordChangeToken } from '../utils/session-manager';
+import { rotateUserSession, normalizeAppSource, isRetiredAppSource, RETIRED_APP_SOURCE_MESSAGE, newSessionId, verifyPasswordChangeToken, endSessions } from '../utils/session-manager';
 import { resolveCompanyAccessDenial } from '../utils/company-access';
 import { issueUserLogin, loadLoginUser } from '../utils/login-issue';
 import {
@@ -235,7 +235,8 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
         await query(
           `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
            VALUES (gen_random_uuid(), $1, 'login_takeover', 'super_admin', $2, $3, $4, NOW())`,
-          [admin.id, JSON.stringify({ loginId }), req.ip, req.headers['user-agent'] || '']
+          // ★ 2026-11-19 C145 D5 — 밀려난 쪽 IP 도 남긴다(고객사 경로 utils/login-issue.ts 와 같은 칸 · 계약 K6)
+          [admin.id, JSON.stringify({ loginId, takenOverIp: superRotate.liveIp ?? null }), req.ip, req.headers['user-agent'] || '']
         );
       }
 
@@ -463,11 +464,9 @@ router.post('/logout', async (req: Request, res: Response) => {
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
         if (decoded?.sessionId && decoded?.userId) {
-          await query(
-            'UPDATE user_sessions SET is_active = false WHERE id = $1 AND user_id = $2',
-            [decoded.sessionId, decoded.userId]
-          );
-          await query(
+          // ★ 2026-11-19 C145 — 끄는 문장 = 세션 CT 하나(원인 logout · 이미 꺼진 세션은 첫 원인 그대로) · 실제로 끈 때만 기록한다
+          const ended = await endSessions({ query }, 'id = $1 AND user_id = $2', [decoded.sessionId, decoded.userId], 'logout');
+          if (ended > 0) await query(
             `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
              VALUES (gen_random_uuid(), $1, 'logout', 'user', $2, $3, $4, NOW())`,
             [decoded.userId, JSON.stringify({ loginId: decoded.loginId }), req.ip, req.headers['user-agent'] || '']
@@ -1035,7 +1034,8 @@ router.post('/super/confirm-totp', async (req: Request, res: Response) => {
       await query(
         `INSERT INTO audit_logs (id, user_id, action, target_type, details, ip_address, user_agent, created_at)
          VALUES (gen_random_uuid(), $1, 'login_takeover', 'super_admin', $2, $3, $4, NOW())`,
-        [admin.id, JSON.stringify({ loginId: admin.login_id, step: 'totp_enroll' }), req.ip, req.headers['user-agent'] || '']
+        // ★ 2026-11-19 C145 D5 — 밀려난 쪽 IP(계약 K6 이 소스에서 뽑은 셋째 자리 · 손 조사 때 빠졌던 길)
+        [admin.id, JSON.stringify({ loginId: admin.login_id, step: 'totp_enroll', takenOverIp: enrollRotate.liveIp ?? null }), req.ip, req.headers['user-agent'] || '']
       );
     }
 

@@ -14,6 +14,7 @@ import {
 } from '../utils/jbn-public';
 import { Check, JbnFeatures, bg } from '../components/jbn/JbnFeatures';
 import './jbn-page.css';
+import { usePublicVisit } from '../hooks/usePublicVisit';
 
 /** 검색 제외: 이 화면이 열려 있는 동안만 robots meta 를 넣고, 떠날 때 원래대로 돌린다 */
 function useNoIndex(): void {
@@ -41,6 +42,8 @@ type PlansState = { kind: 'loading' } | { kind: 'ok'; plans: JbnPlan[] } | { kin
 
 export default function JbnPage() {
   useNoIndex();
+  // ★ 2026-11-19 C145 방문 기록(누가, 어떤 IP 로, 화면이 보이던 시간만큼 머물렀는지, 실패해도 페이지는 그대로)
+  const visit = usePublicVisit('jbn');
 
   // 요금 불러오기: 불러오기 하나에 차례 하나, 상한 10초
   const [plansState, setPlansState] = useState<PlansState>({ kind: 'loading' });
@@ -115,6 +118,7 @@ export default function JbnPage() {
       id: newApplicationId(),
       companyName: form.companyName.trim(), ownerName: form.ownerName.trim(), nickname: form.nickname.trim(),
       phone: form.phone, memo: form.memo, interestPlanCode: plan, consultMethod: method, consent, website,
+      visitId: visit.visitId, browserKey: visit.browserKey,   // ★ 2026-11-19 C145 이 신청을 낸 방문(방문 기록의 「누구」)
     };
     setSent(body);
     await send(body);

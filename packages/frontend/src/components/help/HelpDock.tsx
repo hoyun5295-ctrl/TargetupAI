@@ -19,6 +19,7 @@ import { LifeBuoy, X } from 'lucide-react';
 import { useSurfaceFlag } from '../../lib/surface-flags';
 import { closeHelp, setHelpEligible, toggleHelp, useHelpOpen } from '../../lib/help-open';
 import { fetchHelpContext, isHelpHiddenPath, type HelpContext } from './help-api';
+import { isPublicPath } from '../../utils/public-paths';
 import {
   HELP_LAUNCHER_BTN, HELP_LAUNCHER_COUNT, HELP_LAUNCHER_ICON, HELP_LAUNCHER_TEXT,
   HELP_LAUNCHER_TEXT_CLOSED, HELP_LAUNCHER_TEXT_OPEN, HELP_LAUNCHER_WRAP, HELP_TEASE_TEXT,
@@ -47,7 +48,8 @@ export default function HelpDock({ Panel }: Props) {
   const [teasing, setTeasing] = useState(false);
   const interrupt = useSurfaceFlag('data-interrupt-open');
 
-  const hidden = isHelpHiddenPath(path) || !localStorage.getItem('token');
+  // ★ 2026-11-19 C145 — 로그인 사용자용 전역 부품은 공개 경로에서 그리지 않는다(utils/public-paths)
+  const hidden = isHelpHiddenPath(path) || isPublicPath(path) || !localStorage.getItem('token');
   const eligible = !!ctx?.eligible;
 
   useEffect(() => {
