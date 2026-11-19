@@ -2798,7 +2798,7 @@ COMMIT;
 - 선행: C144-S1 · 구현 Codex approve(1118 기능 구역) · 커밋(Harold · 공유 문서는 이 카드 줄만)
 - 기대: Harold 1118 「좋은 기능들 다 넣어야지 · 모션그래픽 예시 · AI 문안 생성 · 오퍼레이터 · 스팸함 위험 = 자사 기술 점검 · 고객사 목소리」 = /jbn 기능 구역 열 곳(components/jbn/JbnFeatures) · 서버 git pull = 이 커밋 하나 · 프론트 build:safe 만 · 백엔드 운영 코드 무변경(바뀐 백엔드 파일 = 시험 하나) = 백엔드 build · 재시작 없음
 - 확인: 서버 HEAD · 프론트 build:safe 통과 · dist grep `x-jnote` 파일 1 이상(packages/frontend/dist/assets)
-- 결과:
+- 결과: 1118 Harold 실행 · 1차 = 서버 pull 이 push 보다 먼저 돌아 HEAD 8bfd3637 그대로 · x-jnote 0(옛 코드로 백엔드 · 프론트 build:safe + pm2 reload = 운영 코드 변화 0) → push 뒤 다시 실행 = 서버 HEAD 779d0670 · dist x-jnote 파일 2 · targetup-backend online(reload 두 번 · 백엔드 운영 코드 무변경) / 공개 페이지 대조(AI 브라우저 · hanjul.ai/jbn) = 기능 구역 열 곳 이름 그대로 · 전체 기능 한눈에 있음 · 가격 카드 다섯 · 「자체 개발한 점검 기술」 있음 · 「테스트폰」 0 · 검색 제외 meta · 가로 넘침 0
 
 ### C144-S2 · 실측(JBN 페이지 기능 구역)
 - 카드: C144
@@ -2806,7 +2806,8 @@ COMMIT;
 - 선행: C144-H2
 - 기대: hanjul.ai/jbn 을 PC 와 휴대폰으로 열어 기능 구역 열 곳(AI 한줄로 · 우리 회사 목소리 · AI 오퍼레이터 · 스팸 점검 · 여정 · 마케팅 플래너 · 모바일 DM과 이메일 · 이미지 스튜디오 · 데이터 연결 · 성과 리포트)이 화면에 들어올 때 처음부터 움직이고 · 휴대폰 폭 가로 넘침 0 · 가격 다섯과 신청 폼 그대로
 - 확인: 화면(Harold)
-- 결과:
+- 결과: 1118 Harold 휴대폰 카카오톡 안에서 hanjul.ai/jbn = 새 기능 구역 뜸(「떠」) · 단톡방 재안내 글 올림(Harold 작성)
+
 ## §2 덤프 뒤 적용분
 
 > 다음 재덤프 때 각 설계서(2026-10-27-mall-integration-hardening-design.md §3 · §11)로 옮기고 비운다.
