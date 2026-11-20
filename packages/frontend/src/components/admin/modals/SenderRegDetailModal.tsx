@@ -123,6 +123,18 @@ export default function SenderRegDetailModal(props: SenderRegDetailModalProps) {
                 </div>
               </div>
 
+              {/* ★ 2026-11-20 C148 T3 — 기타명의 무선 = 번호 명의자 휴대폰 본인인증(통신가입증명원 대신) */}
+              {senderRegDetail.owner_verification && (
+                <div>
+                  <span className="text-xs text-gray-500 block mb-1">명의자 휴대폰 본인인증</span>
+                  <p className={`text-sm rounded-lg p-3 ${senderRegDetail.owner_verification.phoneMatches ? 'text-emerald-800 bg-emerald-50' : 'text-red-700 bg-red-50'}`}>
+                    {senderRegDetail.owner_verification.maskedName} · {senderRegDetail.owner_verification.maskedPhone}
+                    {' · '}{senderRegDetail.owner_verification.phoneMatches ? '신청 번호와 일치' : '신청 번호와 다름'}
+                    {senderRegDetail.owner_verification.verifiedAt ? ` · 인증 ${formatDateTime(senderRegDetail.owner_verification.verifiedAt)}` : ''}
+                  </p>
+                </div>
+              )}
+
               {/* 요청 메모 */}
               {senderRegDetail.request_note && (
                 <div>

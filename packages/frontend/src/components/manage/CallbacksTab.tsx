@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { manageCallbacksApi } from '../../api/client';
 import CustomModal from '../CustomModal';
+import IdentityVerifyModal from '../IdentityVerifyModal';   // ★ 2026-11-20 C148 T3 기타명의 무선 명의자 본인인증
 import { useLegacyToast } from '../ToastProvider';
 import { formatDate, formatPhoneNumber } from '../../utils/formatDate';
 
@@ -107,6 +108,10 @@ export default function CallbacksTab() {
   const [regFiles, setRegFiles] = useState<File[]>([]);
   const [regDocTypes, setRegDocTypes] = useState<string[]>([]);
   const [regSubmitting, setRegSubmitting] = useState(false);
+  // ★ 2026-11-20 C148 T3(박성용 접수) — 번호 유형 뒤 유선 · 무선 두 번째 선택 · 기타명의 무선 = 명의자 휴대폰 본인인증(통신가입증명원 대신)
+  const [regLineType, setRegLineType] = useState<'landline' | 'mobile' | null>(null);
+  const [ownerVerify, setOwnerVerify] = useState<{ verificationId: string; name: string; maskedPhone: string; matches: boolean } | null>(null);
+  const [showOwnerVerify, setShowOwnerVerify] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 신청 이력
@@ -351,10 +356,20 @@ export default function CallbacksTab() {
     setRegDocTypes(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const ownerMobile = regNumberType === 'other' && regLineType === 'mobile';
+  const phoneDigits = regPhone.replace(/\D/g, '');
+  const phoneIsMobile = /^01[016789]\d{7,8}$/.test(phoneDigits);
+  const lineMismatch = !!phoneDigits && regLineType !== null && (regLineType === 'mobile') !== phoneIsMobile;
+
   const handleSubmitRegistration = async () => {
+    if (!regLineType) { setToast({ msg: '유선번호 · 무선번호 중 하나를 골라 주세요.', type: 'error' }); return; }
     if (!regPhone.trim()) { setToast({ msg: '발신번호를 입력해주세요.', type: 'error' }); return; }
+    if (lineMismatch) { setToast({ msg: regLineType === 'mobile' ? '무선번호는 010 같은 휴대폰 번호만 신청할 수 있어요.' : '휴대폰 번호는 [무선번호]를 골라 신청해 주세요.', type: 'error' }); return; }
+    if (ownerMobile && !(ownerVerify && ownerVerify.matches)) { setToast({ msg: '신청할 번호의 명의자가 그 휴대폰으로 본인인증을 해 주세요.', type: 'error' }); return; }
     if (regFiles.length === 0) {
-      const msg = regNumberType === 'other' ? '필요 서류를 첨부해주세요. (발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)' : '통신가입증명원을 첨부해주세요.';
+      const msg = regNumberType === 'company' ? '통신가입증명원을 첨부해주세요.'
+        : ownerMobile ? '필요 서류를 첨부해주세요. (발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일)'
+          : '필요 서류를 첨부해주세요. (발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)';
       setToast({ msg, type: 'error' }); return;
     }
     setRegSubmitting(true);
@@ -367,6 +382,7 @@ export default function CallbacksTab() {
       if (regStoreName.trim()) formData.append('storeName', regStoreName.trim());
       if (regNote.trim()) formData.append('requestNote', regNote.trim());
       formData.append('documentTypes', JSON.stringify(regDocTypes));
+      if (ownerMobile && ownerVerify) formData.append('ownerVerificationId', ownerVerify.verificationId);
       regFiles.forEach(file => formData.append('documents', file));
 
       const res = await fetch('/api/sender-registration', {
@@ -378,10 +394,12 @@ export default function CallbacksTab() {
       if (data.success) {
         setToast({ msg: '발신번호 등록 신청이 접수되었습니다.', type: 'success' });
         setRegPhone(''); setRegLabel(''); setRegStoreCode(''); setRegStoreName(''); setRegNote('');
-        setRegFiles([]); setRegDocTypes([]); setRegNumberType('company');
+        setRegFiles([]); setRegDocTypes([]); setRegNumberType('company'); setRegLineType(null); setOwnerVerify(null);
         setMyRegistrations([data.registration, ...myRegistrations]);
       } else {
         setToast({ msg: data.error || '신청 실패', type: 'error' });
+        // 서버가 본인인증을 다시 하라고 했으면(30분 지남 · 이미 쓴 인증 등 · 고정 코드 OWNER_VERIFY_*) 화면의 인증 표시도 지운다
+        if (ownerMobile && String(data.code || '').startsWith('OWNER_VERIFY_')) setOwnerVerify(null);
       }
     } catch {
       setToast({ msg: '신청 중 오류가 발생했습니다.', type: 'error' });
@@ -655,7 +673,7 @@ export default function CallbacksTab() {
                       regNumberType === 'company' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-200'
                     }`}>
                       <input type="radio" name="numberType" value="company" checked={regNumberType === 'company'}
-                        onChange={() => { setRegNumberType('company'); setRegFiles([]); setRegDocTypes([]); }}
+                        onChange={() => { setRegNumberType('company'); setRegFiles([]); setRegDocTypes([]); setOwnerVerify(null); }}
                         className="sr-only" />
                       <span className="text-sm font-medium text-gray-900">회사명의 발신번호</span>
                       <p className="text-xs text-slate-500 mt-0.5">회사(법인) 명의로 개통된 번호</p>
@@ -664,7 +682,7 @@ export default function CallbacksTab() {
                       regNumberType === 'other' ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-200'
                     }`}>
                       <input type="radio" name="numberType" value="other" checked={regNumberType === 'other'}
-                        onChange={() => { setRegNumberType('other'); setRegFiles([]); setRegDocTypes([]); }}
+                        onChange={() => { setRegNumberType('other'); setRegFiles([]); setRegDocTypes([]); setOwnerVerify(null); }}
                         className="sr-only" />
                       <span className="text-sm font-medium text-gray-900">기타명의 발신번호</span>
                       <p className="text-xs text-slate-500 mt-0.5">직원 개인, 대리점, 지사 등 타 명의 번호</p>
@@ -672,12 +690,58 @@ export default function CallbacksTab() {
                   </div>
                 </div>
 
+                {/* ★ 2026-11-20 C148 T3 — 유선 · 무선 두 번째 선택(고르기 전 아래 칸은 잠김) */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">번호 종류 *</label>
+                  <div className="flex gap-3">
+                    {([
+                      { v: 'landline' as const, title: '유선번호', desc: '02 · 031 등 지역번호 · 1588 같은 대표번호' },
+                      { v: 'mobile' as const, title: '무선번호', desc: regNumberType === 'other' ? '010 휴대폰 · 명의자 휴대폰 본인인증' : '010 휴대폰(회사 명의 개통)' },
+                    ]).map((o) => (
+                      <label key={o.v} className={`flex-1 cursor-pointer border-2 rounded-lg p-3 transition ${
+                        regLineType === o.v ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 hover:border-slate-300'
+                      }`}>
+                        <input type="radio" name="lineType" value={o.v} checked={regLineType === o.v}
+                          onChange={() => { setRegLineType(o.v); setRegFiles([]); setRegDocTypes([]); setOwnerVerify(null); }}
+                          className="sr-only" />
+                        <span className="text-sm font-medium text-gray-900">{o.title}</span>
+                        <p className="text-xs text-slate-500 mt-0.5">{o.desc}</p>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {regLineType === null ? (
+                  <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500 mb-4">
+                    유선번호 · 무선번호를 고르면 필요한 서류와 입력 칸이 나옵니다.
+                  </div>
+                ) : (<>
                 {/* 번호 유형별 안내 + 양식 다운로드 */}
                 <div className={`rounded-lg p-3 mb-4 border ${regNumberType === 'company' ? 'bg-slate-50 border-slate-200' : 'bg-orange-50 border-orange-200'}`}>
                   {regNumberType === 'company' ? (
                     <div>
                       <p className="text-sm font-medium text-slate-800">필요 서류: 통신가입증명원</p>
                       <p className="text-xs text-slate-500 mt-1">회사(법인) 명의로 개통된 번호의 통신가입증명원을 첨부해주세요.</p>
+                    </div>
+                  ) : ownerMobile ? (
+                    <div>
+                      <p className="text-sm font-medium text-orange-800">필요 서류 (해당하는 서류를 모두 첨부) + 명의자 휴대폰 본인인증</p>
+                      <div className="mt-2 space-y-1.5">
+                        <div className="text-xs text-orange-700">
+                          <span className="font-medium">직원 개인번호:</span> 재직증명서 + 발신번호 사용 동의서
+                        </div>
+                        <div className="text-xs text-orange-700">
+                          <span className="font-medium">대리점·지사·기타 명의:</span> 거래관계증명파일(계약서, 거래내역서) + 발신번호 사용 동의서
+                        </div>
+                        <div className="text-xs text-orange-700">통신가입증명원 대신 번호 명의자가 아래에서 휴대폰 본인인증을 합니다 · 명의자 한 사람당 3개까지</div>
+                      </div>
+                      <div className="mt-3">
+                        <a href="/templates/발신번호_사용_동의서.docx" download
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-orange-300 text-orange-700 rounded-lg text-sm hover:bg-orange-100 transition">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                          발신번호 사용 동의서 양식 다운로드
+                        </a>
+                      </div>
                     </div>
                   ) : (
                     <div>
@@ -705,8 +769,12 @@ export default function CallbacksTab() {
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">발신번호 *</label>
-                    <input type="text" value={regPhone} onChange={(e) => setRegPhone(e.target.value.replace(/[^\d-]/g, ''))}
-                      className="w-full px-3 py-2 border rounded-lg" placeholder="02-1234-5678" />
+                    {/* 번호를 고치면 명의자 인증은 다시(인증한 번호 = 신청 번호여야 한다) */}
+                    <input type="text" value={regPhone} onChange={(e) => { setRegPhone(e.target.value.replace(/[^\d-]/g, '')); setOwnerVerify(null); }}
+                      className={`w-full px-3 py-2 border rounded-lg ${lineMismatch ? 'border-rose-400' : ''}`} placeholder={regLineType === 'mobile' ? '010-1234-5678' : '02-1234-5678'} />
+                    {lineMismatch && (
+                      <p className="text-xs text-rose-600 mt-1">{regLineType === 'mobile' ? '무선번호는 010 같은 휴대폰 번호만 신청할 수 있어요.' : '휴대폰 번호는 [무선번호]를 골라 신청해 주세요.'}</p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">라벨 (별칭)</label>
@@ -731,12 +799,36 @@ export default function CallbacksTab() {
                     className="w-full px-3 py-2 border rounded-lg text-sm" rows={2} placeholder="특이사항이 있으면 기입해주세요" />
                 </div>
 
+                {/* ★ 2026-11-20 C148 T3 — 기타명의 무선 = 번호 명의자 휴대폰 본인인증(서버가 인증 번호 = 신청 번호를 다시 본다) */}
+                {ownerMobile && (
+                  <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex-1 min-w-[200px]">
+                        <p className="text-sm font-medium text-slate-800">명의자 휴대폰 본인인증 *</p>
+                        {ownerVerify ? (
+                          <p className={`text-xs mt-1 ${ownerVerify.matches ? 'text-emerald-700' : 'text-rose-600'}`}>
+                            {ownerVerify.name} · {ownerVerify.maskedPhone} · {ownerVerify.matches ? '입력한 번호와 같아요' : '입력한 발신번호와 달라요. 그 번호의 명의자가 그 휴대폰으로 다시 인증해 주세요'}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-500 mt-1">입력한 휴대폰 번호의 명의자가 그 휴대폰으로 인증합니다. 인증한 번호와 신청 번호가 같아야 신청됩니다.</p>
+                        )}
+                      </div>
+                      <button type="button" onClick={() => setShowOwnerVerify(true)} disabled={!phoneIsMobile}
+                        className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                        {ownerVerify ? '다시 인증' : '휴대폰 본인인증'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* 파일 첨부 */}
                 <div className="mb-4">
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     서류 첨부 * {regNumberType === 'company'
                       ? '(통신가입증명원)'
-                      : '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)'}
+                      : ownerMobile
+                        ? '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일)'
+                        : '(발신번호 사용 동의서 + 재직증명서 또는 거래관계증명파일 + 통신가입증명원)'}
                   </label>
                   <div className="flex items-center gap-3">
                     <button onClick={() => fileInputRef.current?.click()}
@@ -754,12 +846,12 @@ export default function CallbacksTab() {
                             {regNumberType === 'company' ? (
                               <option value="telecom_cert">통신가입증명원</option>
                             ) : (
-                              // ★ D150-5 (2026-05-09) PDF #6: 기타명의도 통신가입증명원 옵션 추가
+                              // ★ D150-5 (2026-05-09) PDF #6: 기타명의도 통신가입증명원 옵션 추가 · ★ C148 T3 기타명의 무선 = 본인인증이 대신(선택지에서도 뺀다)
                               <>
                                 <option value="consent_form">발신번호 사용 동의서</option>
                                 <option value="employment_cert">재직증명서</option>
                                 <option value="business_relation">거래관계증명파일</option>
-                                <option value="telecom_cert">통신가입증명원</option>
+                                {!ownerMobile && <option value="telecom_cert">통신가입증명원</option>}
                               </>
                             )}
                           </select>
@@ -771,11 +863,21 @@ export default function CallbacksTab() {
                   )}
                 </div>
 
-                <button onClick={handleSubmitRegistration} disabled={regSubmitting || !regPhone.trim() || regFiles.length === 0}
+                <button onClick={handleSubmitRegistration}
+                  disabled={regSubmitting || !regPhone.trim() || regFiles.length === 0 || lineMismatch || (ownerMobile && !ownerVerify?.matches)}
                   className="px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
                   {regSubmitting ? '신청 중...' : '등록 신청'}
                 </button>
+                </>)}
               </>
+            )}
+            {showOwnerVerify && ownerMobile && (
+              <IdentityVerifyModal
+                mode={{ kind: 'sender', phone: regPhone }}
+                onSenderVerified={(info) => { setOwnerVerify(info); setShowOwnerVerify(false); }}
+                onExpired={(message) => { setShowOwnerVerify(false); setToast({ msg: message, type: 'error' }); }}
+                onClose={() => setShowOwnerVerify(false)}
+              />
             )}
           </div>
 

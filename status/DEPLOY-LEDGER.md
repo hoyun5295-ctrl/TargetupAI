@@ -91,7 +91,8 @@
 | C144 | 8bfd3637 |
 | C145 | 2cee9d79 |
 | C146 | 092c4c57 |
-| C147 | 미커밋 |
+| C147 | b819fbed |
+| C148 | 미커밋 |
 
 ## §1 대기
 
@@ -2928,7 +2929,7 @@ CREATE INDEX IF NOT EXISTS idx_public_page_visits_page_browser ON public_page_vi
 - 선행: C147-P0 · 설계 Codex 11R approve(1120) · 구현 Codex 5R approve(1120) · 커밋(Harold · 공유 문서는 이 카드 줄만)
 - 기대: 설계서 §6 · DDL 전 새 코드 = 일꾼 「표 없음(DDL 전) — 건너뜀」 한 번 · 충전 내역 화면 = 지금 그대로(잔액 글 없음)
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist/utils/agent-fill-balance.js 있음 · 기동 로그 「[agent-fill-balance] 기동 (30초 주기)」 · 재시작 뒤 에러 로그 새 종류 0
-- 결과: (대기)
+- 결과: 1120 Harold 실행 · 커밋 b819fbed(13파일 · 공유 문서 넷 = C147 줄 + C146 해시 · C146-H1 결과만 scratch/c147/docs.patch) push · 서버 git pull → 백엔드 build:safe → 프론트 build:safe → pm2 reload targetup-backend(★적재 0건 확인 한 줄 없이 reload = 그 순간 적재 유무 미검증) · 확인 출력 = HEAD b819fbed · dist/utils/agent-fill-balance.js 18:42 · targetup-backend online(↺ 21) · 18:44:27 「[agent-fill-balance] 기동 (30초 주기)」 · 18:44:57 「표 없음(DDL 전) — 건너뜀」 · 에러 로그 재시작 뒤 = 18:45:28 [demo-data] 합성 안내 한 줄(전에도 있던 종류) = 새 종류 0 · 빌드 출력의 [verify-dist] 줄은 받지 못함(dist 실측으로 봄)
 
 ### C147-DDL-1 · 반영 뒤 잔액 기록 표(설계서 §2 P1) · ★ 배포 뒤
 - 카드: C147
@@ -2937,7 +2938,7 @@ CREATE INDEX IF NOT EXISTS idx_public_page_visits_page_browser ON public_page_vi
 - 의미 바꿈: 아니오(새 표)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'agent_fill_balance_marks' ORDER BY ordinal_position;
 - 확인: 12칸(seq_no ~ created_at)
-- 결과: (대기)
+- 결과: 1120 Harold 실행(psql 한 번 · here-document · ON_ERROR_STOP · 블록 글자 그대로 + 확인 SELECT · C147-H1 뒤) = SET · CREATE TABLE · CREATE INDEX · 확인 = agent_fill_balance_marks 12칸(seq_no ~ created_at) = 기대와 같음
 
 > C147-RB-1(되돌리기 · 새 코드를 내린 뒤에만) = DROP TABLE IF EXISTS agent_fill_balance_marks;
 
@@ -2967,6 +2968,54 @@ CREATE INDEX IF NOT EXISTS idx_agent_fill_balance_marks_open ON agent_fill_balan
 - 선행: C147-DDL-1 · 재시작 · DDL 뒤 30분(연속 관측 30분 · 첫 회차에 본 반영 줄이 이웃으로 30분 남는다 = 그 전 충전은 빈 칸이 맞다)
 - 기대: 설계서 §5 시트 1 · 2 · 3 전 항목 「맞음」 · 서버 = 그 충전 줄 captured 한 줄
 - 확인: 화면(직원 · 시트) · 서버 셸 한 줄(PG) `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT state, skip_reason, count(*), max(captured_at) FROM agent_fill_balance_marks GROUP BY 1, 2 ORDER BY 1, 2;"`
+- 결과: 1120 18:52:57 첫 회차(표 생긴 뒤) = 원장 7,108줄 기록(skipped missed 7,097 · pending 11) · 「다시 이어짐」 · pending 11 = 62 RsApplyFlag NULL 10줄(SeqNo 8 ~ 1120 · 2017 ~ 2021 · 발송ID 8개 = 회사 연결 0 = 화면 영향 0) + N 1줄(SeqNo 7090 · V0006 테스트주식회사 · 5,000 · 09-24 · 65 게이트웨이 충전 반영 줄 0 = V 발송ID 충전은 지금 반영하는 쪽 없음) → V0006 충전 줄은 반영되지 않아 잔액 빈 칸(설계서 §7) · **S1 = 새 시험 충전 대신 중계가 반영하는 발송ID 의 실제 다음 충전(담당자 처리분)이 19:23(S + 30분) 뒤 반영되면 서버에서 captured 줄 + 그 회사 화면** · 19:02 Harold 서버 출력 = 새 충전 줄 0 · 반영 대기 11줄 last_pending_at 10:01:57 UTC(19:01:57 · 30초 회차 갱신 = 일꾼 동작) · captured 0(새 충전 없음 = 맞음) · 대기(실제 다음 충전 반영 뒤 같은 명령)
+
+### C148-H1 · 한줄로 배포(그룹웨어 접수 세 건 · 백엔드 + 프론트 · ENV 0)
+- 카드: C148
+- 단계: 한줄로 배포
+- 선행: 설계 Codex approve(1120 · 4R) · 구현 Codex approve(1120 · 3R) · 커밋(Harold)
+- 기대: 설계서 docs/2026-11-20-c148-staff-tickets-three-design.md §1 ~ §3 · 로그인 본인인증 코드 무수정 · 발송 핵심 다섯 파일 무수정
+- 확인: 서버 HEAD · 백엔드 build:safe · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `operatorFinalSpamResult` · `SPELL_LOCATION_RULES` · `sender-owner-verify`
+- 결과: (대기)
+
+### C148-DDL-1 · 발신번호 명의 확인 표 + 신청 칸(설계서 §3-3) · ★ 배포 뒤
+- 카드: C148
+- 단계: DDL
+- 선행: C148-H1(DDL 전 = 기타명의 무선 신청 · 명의 본인인증만 503 DB_MIGRATION_PENDING · 그 밖 신청 · 승인 · 목록 그대로)
+- 의미 바꿈: 아니오(새 표 + 빈 칸)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name, column_name FROM information_schema.columns WHERE table_name = 'sender_owner_verifications' OR (table_name = 'sender_registrations' AND column_name = 'owner_verification_id') ORDER BY table_name, ordinal_position;
+- 확인: sender_owner_verifications 12칸(id ~ verified_at) · sender_registrations.owner_verification_id 1칸
+- 결과: (대기)
+
+> C148-RB-1(되돌리기 · 새 코드를 내린 뒤에만) = DROP INDEX IF EXISTS ux_sender_registrations_owner_verification; ALTER TABLE sender_registrations DROP COLUMN IF EXISTS owner_verification_id; DROP TABLE IF EXISTS sender_owner_verifications;
+
+```sql ddl:C148-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS sender_owner_verifications (
+  id uuid PRIMARY KEY,
+  company_id uuid NOT NULL,
+  user_id uuid NOT NULL,
+  status varchar(12) NOT NULL CHECK (status IN ('pending', 'verified', 'superseded')),
+  provider varchar(20) NOT NULL,
+  verified_name varchar(100),
+  verified_phone varchar(20),
+  dup_key_hash varchar(64),
+  provider_tx_id varchar(120),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  verified_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS idx_sender_owner_verifications_user_pending ON sender_owner_verifications (user_id) WHERE status = 'pending';
+ALTER TABLE sender_registrations ADD COLUMN IF NOT EXISTS owner_verification_id uuid;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_sender_registrations_owner_verification ON sender_registrations (owner_verification_id) WHERE owner_verification_id IS NOT NULL;
+```
+
+### C148-S1 · 실측(직원 시트 · 설계서 §6)
+- 카드: C148
+- 단계: 사후
+- 선행: C148-H1 · C148-DDL-1 · 재시작
+- 기대: T1 = 다음 자동마케팅 회차에서 늦은 보고가 오면 원래 시각 발송 · T2 = 대행 접수 맞춤법 고치기 한 번 뒤 바로 승인 문자 · T3 = 기타명의 무선 본인인증 신청 · 명의자 3회선
+- 확인: 직원 시트 · 서버 셸 한 줄(PG) `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT status, count(*), count(dup_key_hash) FROM sender_owner_verifications GROUP BY 1;"`
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분

@@ -28,7 +28,17 @@ export interface AgencySpellStored {
   checkedAt: string;
   issues: SpellIssue[];
   failed: boolean;
+  /** ★ 2026-11-20 C148 T2 — 맞춤법 고치기로 만든 판(AI 검사 없음 · 사람이 이미 제안을 골랐다 · 확인할 곳 0) */
+  afterFix?: boolean;
 }
+
+/**
+ * ★ 2026-11-20 C148 T2(서수란 접수 · 설계서 docs/2026-11-20-c148-staff-tickets-three-design.md §2-1 4 · 5행) —
+ *   맞춤법 고치기 UPDATE 가 같은 문장에서 쓰는 저장값(SET 안의 content_version = 옛 값 → + 1 = 새 판).
+ *   워커 훅은 저장값의 판 = 이번 판이면 AI 를 다시 부르지 않는다 → 고치기 → 스팸 검사 → 승인 요청 한 바퀴.
+ */
+export const AGENCY_SPELL_AFTER_FIX_SQL =
+  `jsonb_build_object('version', content_version + 1, 'checkedAt', NOW(), 'issues', '[]'::jsonb, 'failed', false, 'afterFix', true)`;
 
 function messageByteLimit(messageType: unknown): number | null {
   return String(messageType || '').toUpperCase() === 'SMS' ? SMS_SPELL_BYTE_LIMIT : null;
@@ -115,6 +125,10 @@ export async function runAgencySpellAfterTest(input: {
 }): Promise<void> {
   try {
     if (!await hasAgencySpellColumn()) return;
+    // ★ 2026-11-20 C148 T2 — 이 판의 결과가 이미 있으면(맞춤법 고치기로 만든 판 · 같은 판 재검사) AI 를 다시 부르지 않는다 · 실패 결과는 다시 검사
+    const cur = await query(`SELECT spell_check FROM agency_send_requests WHERE id = $1::uuid`, [input.requestId]);
+    const have: any = cur.rows[0]?.spell_check;
+    if (have && typeof have === 'object' && have.failed !== true && Number(have.version) === Number(input.version)) return;
     const r = await checkAgencySpelling({
       companyId: input.companyId, userId: input.userId, content: input.content, messageType: input.messageType,
     });

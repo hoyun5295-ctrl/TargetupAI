@@ -264,9 +264,11 @@ export async function measureAgencySmsBytes(id: string, content: string): Promis
 
 export async function updateAgencyContent(
   id: string, content: string, revision: number, subject?: string,
+  /** ★ 2026-11-20 C148 T2 — [고치기]로 넣은 맞춤법 제안 id(서버가 다시 적용해 같으면 맞춤법을 다시 검사하지 않는다) */
+  spellIssueIds?: string[],
 ): Promise<{ request: AgencySendRequest; notice: string[]; optOutNotice: string[] }> {
   const res = await fetch(`/api/agency-send/${id}/content`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ content, subject, revision }),
+    method: 'POST', headers: json(), body: JSON.stringify({ content, subject, revision, ...(spellIssueIds && spellIssueIds.length > 0 ? { spellIssueIds } : {}) }),
   });
   const data = await unwrap(res);
   // ★ 2026-11-06 C109 글자 정리 알림 · ★ 2026-11-13 C130 저장한 문안의 수신거부 줄 안내(저장 문안과 같은 응답 · Codex 구현 1R)

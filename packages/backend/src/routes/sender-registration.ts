@@ -8,7 +8,7 @@ import fs from 'fs';
 import { dropUploadedFiles } from '../utils/upload-cleanup';
 import { restoreUploadFileName } from '../utils/mms-image-fit';   // ★ 2026-10-19 B-1005-4③ 한글 첨부 이름
 import { isMissingSchemaError, migrationPendingBody } from '../utils/db-errors';
-import { publicErrorText } from '../utils/http-error';   // ★ 2026-10-24 R10 — 4xx 응답도 원문 0(우리 한국어 안내만 지나간다)
+import { publicErrorText, respondUserError } from '../utils/http-error';   // ★ 2026-10-24 R10 — 4xx 응답도 원문 0(우리 한국어 안내만 지나간다)
 import { recordCallbackNumberCreated } from '../utils/change-audit';
 import {
   // 담당자
@@ -33,6 +33,8 @@ import {
   getPendingCount,
 } from '../utils/sender-registration';
 import type { DocumentInfo, ManagerDocInfo } from '../utils/sender-registration';
+import { startSenderOwnerVerification, completeSenderOwnerVerification, isOwnerVerificationId } from '../utils/sender-owner-verify';   // ★ 2026-11-20 C148 T3
+import { normalizePhone } from '../utils/normalize-phone';
 
 const router = Router();
 
@@ -152,7 +154,7 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const { companyId, userId } = (req as any).user!;
-      const { phone, label, storeCode, storeName, requestNote, documentTypes, numberType } = req.body;
+      const { phone, label, storeCode, storeName, requestNote, documentTypes, numberType, ownerVerificationId } = req.body;
 
       if (!phone) {
         dropUploadedFiles(req); // ★ R341 같은 뿌리(위 담당자 등록과 같다)
@@ -192,20 +194,66 @@ router.post(
         numberType: numberType === 'other' ? 'other' : 'company',
         documents,
         requestNote,
+        ownerVerificationId,   // ★ 2026-11-20 C148 T3 기타명의 무선 = 명의자 본인인증 건
       });
 
       res.json({ success: true, registration });
     } catch (error: any) {
       dropUploadedFiles(req); // ★ R341 신청 실패 = 저장한 서류 삭제
+      // ★ 2026-11-20 C148 T3 — 명의자 인증 · 1인 회선 거절 = 오류 종류(상태 · 고정 코드 · 고객 문장 · 뿌리 R10) · 화면은 코드로 「다시 인증」을 가른다
+      if (respondUserError(res, error)) return;
       console.error('발신번호 등록 신청 실패:', error);
-      // ★1005 접수에 회선 상한 판정이 붙어 companies 회선 정책 칸을 읽는다
+      // ★1005 접수에 회선 상한 판정이 붙어 companies 회선 정책 칸을 읽는다 · ★ C148 기타명의 무선 = 명의 확인 표 · 신청 칸
       if (isMissingSchemaError(error)) {
-        return res.status(503).json(migrationPendingBody('companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER'));
+        return res.status(503).json(migrationPendingBody('C148-DDL-1(sender_owner_verifications · sender_registrations.owner_verification_id) 또는 companies.subscriber_type · mobile_line_limit · landline_line_limit ALTER'));
       }
       res.status(400).json({ error: publicErrorText(error, '등록 신청 실패') });
     }
   }
 );
+
+// ★ 2026-11-20 C148 T3(박성용 접수) — 기타명의 무선 = 번호 명의자 휴대폰 본인인증(전용 표 · 로그인 본인인증과 섞지 않는다 · utils/sender-owner-verify.ts)
+const OWNER_VERIFY_DDL = 'C148-DDL-1(sender_owner_verifications · sender_registrations.owner_verification_id)';
+
+// POST /owner-verify/start — 인증 창을 열 값(화면이 버튼을 누른 순간 연 팝업에 보낸다)
+router.post('/owner-verify/start', authenticate, requireCompanyAdmin, demoBlock, async (req: Request, res: Response) => {
+  try {
+    const { companyId, userId } = (req as any).user!;
+    const s = await startSenderOwnerVerification({ userId, companyId, req });
+    if (s.status === 'unavailable') return res.status(503).json({ code: 'IDENTITY_UNAVAILABLE', error: '지금은 휴대폰 본인인증을 쓸 수 없어요. 잠시 뒤 다시 해 주세요.' });
+    return res.json({ success: true, verificationId: s.verificationId, provider: s.provider, start: s.start });
+  } catch (error: any) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody(OWNER_VERIFY_DDL));
+    console.error('[sender-registration] 명의자 본인인증 시작 실패:', error?.message);
+    return res.status(500).json({ error: '본인인증을 시작하지 못했어요. 잠시 뒤 다시 해 주세요.' });
+  }
+});
+
+// POST /owner-verify/complete — 인증 창 결과 확인 · 응답 = 가린 이름 · 가린 번호 · 입력한 발신번호와 같은가(접수가 서버에서 다시 본다)
+router.post('/owner-verify/complete', authenticate, requireCompanyAdmin, demoBlock, async (req: Request, res: Response) => {
+  try {
+    const { companyId, userId } = (req as any).user!;
+    const verificationId = req.body?.verificationId;
+    if (!isOwnerVerificationId(verificationId)) return res.status(409).json({ code: 'IDENTITY_EXPIRED', error: '본인인증 시간이 지났어요. 처음부터 다시 해 주세요.' });
+    const done = await completeSenderOwnerVerification({ userId, companyId, verificationId, payload: req.body?.result, req });
+    if (done.status === 'verified') {
+      return res.json({
+        success: true, verificationId: done.verificationId, name: done.maskedName, maskedPhone: done.maskedPhone,
+        matches: normalizePhone(done.phone) === normalizePhone(String(req.body?.phone || '')),
+      });
+    }
+    if (done.status === 'expired') return res.status(409).json({ code: 'IDENTITY_EXPIRED', error: '본인인증 시간이 지났어요. 처음부터 다시 해 주세요.' });
+    if (done.status === 'unavailable') return res.status(503).json({ code: 'IDENTITY_UNAVAILABLE', error: '지금은 휴대폰 본인인증을 쓸 수 없어요. 잠시 뒤 다시 해 주세요.' });
+    return res.status(400).json({
+      code: 'IDENTITY_REJECTED',
+      error: done.reason === 'no_dup_key' ? '본인인증 결과에 명의자 확인값이 없어요. 다시 인증해 주세요.' : '본인인증을 완료하지 못했어요. 다시 해 주세요.',
+    });
+  } catch (error: any) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody(OWNER_VERIFY_DDL));
+    console.error('[sender-registration] 명의자 본인인증 완료 실패:', error?.message);
+    return res.status(500).json({ error: '본인인증 결과를 확인하지 못했어요. 잠시 뒤 다시 해 주세요.' });
+  }
+});
 
 // GET /my — 내 회사의 신청 목록 조회
 router.get('/my', authenticate, requireCompanyAdmin, async (req: Request, res: Response) => {

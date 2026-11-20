@@ -85,7 +85,9 @@ describe('sequenceSpamVariants — 첫 통과에서 멈춤', () => {
 describe('정책 사유는 한국어(영문 판정값을 화면에 싣지 않는다)', () => {
   it('blocked · timeout · failed', () => {
     expect(decideSpamOutcome('blocked', 2).reason).toContain('차단');
-    expect(decideSpamOutcome('timeout', 0).reason).toContain('결과를 받지 못함');
+    // ★ 2026-11-20 C148 T1 — 시간 초과 = 보류(늦은 보고로 통과할 수 있다 · 회복 일꾼이 다시 읽는다)
+    expect(decideSpamOutcome('timeout', 0)).toMatchObject({ status: 'admin_review', autoExecuteBlocked: true, hold: true });
+    expect(decideSpamOutcome('timeout', 0).reason).toContain('결과가 늦어지고 있어');
     expect(decideSpamOutcome('failed', 0).reason).toContain('검사 실패');
     for (const k of ['blocked', 'timeout', 'failed'] as const) expect(decideSpamOutcome(k, 0).reason).not.toMatch(/blocked|timeout|failed/);
     expect(decideSpamOutcome('blocked', 2).reason).toMatch(/담당자|검토/);

@@ -731,7 +731,11 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     // ★2026-10-18 축 1 — 본문은 CT(utils/agency-send-change.ts · 원본 복사 이동 · 담당자 링크 맞춤법 적용과 같은 함수) · 응답 계약 그대로
     const out = await editAgencyContentTx({
       requestId: req.params.id, companyId: auth.companyId, ownerUserId: ownerParam(auth), revision: req.body?.revision,
-      change: { kind: 'text', content: String(req.body?.content || ''), subject: req.body?.subject ?? null },
+      // ★ 2026-11-20 C148 T2(구현 Codex 1R) — [고치기]로 넣은 제안 id(서버가 다시 적용해 같을 때만 맞춤법 다시 검사 0)
+      change: {
+        kind: 'text', content: String(req.body?.content || ''), subject: req.body?.subject ?? null,
+        spellIssueIds: Array.isArray(req.body?.spellIssueIds) ? req.body.spellIssueIds.map(String).slice(0, 50) : undefined,
+      },
       via: 'screen',
     });
     if (!out.ok) return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });

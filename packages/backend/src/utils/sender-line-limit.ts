@@ -234,14 +234,57 @@ export async function checkSenderLineLimit(companyId: string, phone: string): Pr
  *   화면 표시용 카운트도 이 함수를 써서 판정과 같은 수를 본다.
  */
 export async function countCompanyLines(companyId: string): Promise<{ mobile: number; landline: number }> {
-  const held = await query('SELECT phone FROM callback_numbers WHERE company_id = $1', [companyId]);
+  // ★ 2026-11-20 C148 T3(박성용 접수) — 기타명의(직원 · 외부 관계자) 신청이 승인되어 만든 휴대폰은 회사 무선 총량에서 뺀다
+  //   (그 번호는 명의자 1인 3회선으로 센다 · checkOwnerMobileLimit) · 유선 셈은 그대로
+  const held = await query(
+    `SELECT cn.phone,
+            EXISTS (SELECT 1 FROM sender_registrations sr
+                     WHERE sr.approved_callback_id = cn.id AND sr.company_id = cn.company_id
+                       AND sr.status = 'approved' AND sr.number_type = 'other') AS other_owned
+       FROM callback_numbers cn WHERE cn.company_id = $1`,
+    [companyId],
+  );
   let mobile = 0;
   let landline = 0;
   for (const row of held.rows) {
-    if (isMobileNumber(row.phone)) mobile += 1;
+    if (isMobileNumber(row.phone)) { if (row.other_owned !== true) mobile += 1; }
     else landline += 1;
   }
   return { mobile, landline };
+}
+
+/** ★ 2026-11-20 C148 T3 — 기타명의 무선 = 명의자(본인인증 DI) 1인당 회선 수(같은 회사 안) */
+export const OWNER_MOBILE_LIMIT = 3;
+
+/**
+ * ★ 2026-11-20 C148 T3 — 기타명의 무선 신청 한 건을 더 받을 수 있는가(같은 회사 · 같은 명의자 · 트랜잭션 연결로 · 잠금 뒤 부른다).
+ *   셈 = 기타명의 신청 중 대기 + 승인(만든 번호가 아직 살아 있는 것) · 그 명의자의 본인인증 건 · 자기 신청 제외.
+ *   회사 무선 총량은 보지 않는다(기타명의 무선은 회사 총량에서 빠진다).
+ */
+export async function checkOwnerMobileLimit(
+  run: (sql: string, params?: any[]) => Promise<{ rows: any[] }>,
+  companyId: string,
+  dupHash: string,
+  excludeRegistrationId: string | null,
+): Promise<LineLimitVerdict> {
+  const r = await run(
+    `SELECT COUNT(*)::int AS n
+       FROM sender_registrations sr
+       JOIN sender_owner_verifications v ON v.id = sr.owner_verification_id
+       LEFT JOIN callback_numbers cn ON cn.id = sr.approved_callback_id
+      WHERE sr.company_id = $1::uuid AND sr.number_type = 'other' AND v.dup_key_hash = $2
+        AND (sr.status = 'pending' OR (sr.status = 'approved' AND cn.id IS NOT NULL))
+        AND ($3::uuid IS NULL OR sr.id <> $3::uuid)`,
+    [companyId, dupHash, excludeRegistrationId],
+  );
+  const current = Number(r.rows[0]?.n || 0);
+  if (current >= OWNER_MOBILE_LIMIT) {
+    return {
+      status: 'exceeded', kind: 'mobile', current, limit: OWNER_MOBILE_LIMIT,
+      message: `같은 명의자(본인인증 기준)의 무선 발신번호는 최대 ${OWNER_MOBILE_LIMIT}회선까지 등록할 수 있습니다. (현재 ${current}회선 · 승인 대기 포함)`,
+    };
+  }
+  return { status: 'ok', kind: 'mobile', current, limit: OWNER_MOBILE_LIMIT };
 }
 
 /** 화면용 — 현재 정책과 보유 수를 한 번에 */

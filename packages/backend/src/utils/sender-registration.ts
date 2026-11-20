@@ -7,8 +7,11 @@
 // ============================================================
 
 import pool from '../config/database';
-import { checkSenderLineLimit } from './sender-line-limit';
+import { checkSenderLineLimit, checkOwnerMobileLimit, isMobileNumber } from './sender-line-limit';
+import { lockOwnerVerificationForApply, lockOwnerLine, loadOwnerVerificationView, isOwnerVerificationId } from './sender-owner-verify';   // ★ 2026-11-20 C148 T3
 import { normalizePhone } from './normalize-phone';
+import { isMissingSchemaError } from './db-errors';
+import { UserFacingError } from './http-error';
 import { checkCallbackSpec } from './callback-spec';
 
 // ============================================================
@@ -59,6 +62,8 @@ export interface SenderRegistration {
   store_code: string | null;
   store_name: string | null;
   number_type: 'company' | 'other'; // 회사명의 / 기타명의
+  /** ★ 2026-11-20 C148 T3 — 기타명의 무선의 명의자 본인인증 건(C148-DDL-1 전 = 칸 없음) */
+  owner_verification_id?: string | null;
   documents: DocumentInfo[];
   request_note: string | null;
   status: string;
@@ -233,6 +238,8 @@ export async function createRegistration(data: {
   numberType?: 'company' | 'other';
   documents: DocumentInfo[];
   requestNote?: string;
+  /** ★ 2026-11-20 C148 T3 — 기타명의 무선 = 명의자 본인인증 건(sender_owner_verifications.id) */
+  ownerVerificationId?: unknown;
 }): Promise<SenderRegistration> {
   // ★1005 발신번호 규격(세칙) — 접수 단계에서 먼저 거른다(utils/callback-spec.ts · 특부가 재등록 증빙 ⑥)
   const spec = checkCallbackSpec(data.phone);
@@ -265,6 +272,12 @@ export async function createRegistration(data: {
     throw new Error('이미 등록된 발신번호입니다.');
   }
 
+  // ★ 2026-11-20 C148 T3(박성용 접수) — 기타명의 무선 = 명의자 본인인증 + 명의자 1인 3회선(회사 총량 대신) · 한 트랜잭션
+  //   (인증 건 잠금 → 회사 · 명의자 잠금 → 셈 → INSERT · ★ 설계 Codex 1R #3 남은 1회선에 동시 신청 둘 = 하나만)
+  if (data.numberType === 'other' && isMobileNumber(data.phone)) {
+    return createOwnerMobileRegistration(data);
+  }
+
   // ★1005 전송자격인증 2.1 — 신청 접수도 등록 길목과 같은 회선 상한 판정을 지난다.
   //   옛: 접수는 상한을 보지 않아 초과 신청이 「승인 대기」로 들어갔다(승인에서야 거부 · 고객 화면에선 통제가 안 보였다).
   // ponytail: 대기 중 신청 건수는 세지 않는다 — 상한 직전에 연달아 낸 신청은 approveRegistration 의 같은 판정이 마지막 문으로 막는다.
@@ -291,6 +304,44 @@ export async function createRegistration(data: {
     ]
   );
   return result.rows[0];
+}
+
+/** 본인인증 재사용(신청 칸 부분 유일 인덱스) 오류인가 */
+function isOwnerVerificationReuse(err: any): boolean {
+  return String(err?.code || '') === '23505' && String(err?.constraint || err?.message || '').includes('ux_sender_registrations_owner_verification');
+}
+
+/**
+ * ★ 2026-11-20 C148 T3 — 기타명의 무선 신청(설계서 §3-2 6행). 앞의 규격 · 담당자 · 중복 · 기존 번호 판정은 createRegistration 이 마쳤다.
+ *   한 트랜잭션: 인증 건 FOR UPDATE(계정 · 회사 · 확정 · 30분 · DI · 번호 일치) → 회사 + DI 잠금 → 1인 셈 → INSERT.
+ */
+async function createOwnerMobileRegistration(data: Parameters<typeof createRegistration>[0]): Promise<SenderRegistration> {
+  const client = await pool.connect();
+  const run = (sql: string, params?: any[]) => client.query(sql, params);
+  try {
+    await client.query('BEGIN');
+    const v = await lockOwnerVerificationForApply(run, { verificationId: data.ownerVerificationId, userId: data.requestedBy, companyId: data.companyId, phone: data.phone });
+    if (!v.ok) throw new UserFacingError(400, v.code, v.error);
+    await lockOwnerLine(run, data.companyId, v.dupHash);
+    const verdict = await checkOwnerMobileLimit(run, data.companyId, v.dupHash, null);
+    if (verdict.status === 'exceeded') throw new UserFacingError(400, 'OWNER_LINE_LIMIT', verdict.message);
+    const result = await client.query(
+      `INSERT INTO sender_registrations
+         (company_id, requested_by, phone, label, store_code, store_name, number_type, documents, request_note, owner_verification_id)
+       VALUES ($1, $2, $3, $4, $5, $6, 'other', $7, $8, $9::uuid)
+       RETURNING *`,
+      [data.companyId, data.requestedBy, data.phone, data.label || null, data.storeCode || null, data.storeName || null,
+        JSON.stringify(data.documents), data.requestNote || null, data.ownerVerificationId],
+    );
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (err: any) {
+    try { await client.query('ROLLBACK'); } catch { /* 원 오류 우선 */ }
+    if (isOwnerVerificationReuse(err)) throw new UserFacingError(409, 'OWNER_VERIFY_REUSED', '이 본인인증은 이미 다른 신청에 쓰였어요. 휴대폰 본인인증을 다시 해 주세요.');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** 고객사의 신청 목록 조회 */
@@ -360,7 +411,15 @@ export async function getRegistrationById(
      WHERE sr.id = $1`,
     [registrationId]
   );
-  return result.rows[0] || null;
+  const row = result.rows[0] || null;
+  // ★ 2026-11-20 C148 T3 — 기타명의 무선 = 명의자 본인인증 줄(슈퍼관리자 상세) · 표 전(DDL 전)이면 줄 없음
+  if (row && isOwnerVerificationId(row.owner_verification_id)) {
+    row.owner_verification = await loadOwnerVerificationView(row.owner_verification_id, row.phone).catch((e: any) => {
+      if (isMissingSchemaError(e)) return null;
+      throw e;
+    });
+  }
+  return row;
 }
 
 /** 승인 처리 — callback_numbers에 INSERT + 상태 변경 */
@@ -400,9 +459,22 @@ export async function approveRegistration(
     }
 
     // ★ 2026-08-18 전송자격인증 2.1 — 승인이 실제 등록 길목이다. 상한 초과면 승인하지 않는다
-    const lineVerdict = await checkSenderLineLimit(reg.company_id, reg.phone);
-    if (lineVerdict.status === 'exceeded') {
-      throw new Error(`${lineVerdict.message} 상한을 조정한 뒤 승인해주세요.`);
+    // ★ 2026-11-20 C148 T3 — 기타명의 무선 + 명의자 본인인증 = 접수와 같은 잠금(회사 + 명의자) · 같은 트랜잭션으로 1인 셈(자기 제외)
+    //   본인인증 없는 기타명의 무선(배포 전 신청) · 그 밖 = 회사 판정 그대로
+    const ownerVid = (reg as any).owner_verification_id;
+    const ownerHash: string | null = reg.number_type === 'other' && isMobileNumber(reg.phone) && isOwnerVerificationId(ownerVid)
+      ? ((await client.query(`SELECT dup_key_hash FROM sender_owner_verifications WHERE id = $1::uuid AND status = 'verified'`, [ownerVid])).rows[0]?.dup_key_hash ?? null)
+      : null;
+    if (ownerHash) {
+      const run = (sql: string, params?: any[]) => client.query(sql, params);
+      await lockOwnerLine(run, reg.company_id, ownerHash);
+      const ownerVerdict = await checkOwnerMobileLimit(run, reg.company_id, ownerHash, reg.id);
+      if (ownerVerdict.status === 'exceeded') throw new Error(`${ownerVerdict.message} 신청을 반려해주세요.`);
+    } else {
+      const lineVerdict = await checkSenderLineLimit(reg.company_id, reg.phone);
+      if (lineVerdict.status === 'exceeded') {
+        throw new Error(`${lineVerdict.message} 상한을 조정한 뒤 승인해주세요.`);
+      }
     }
 
     // 3. callback_numbers에 INSERT — ★ D142+ B5: 사용자 입력 phone 그대로 저장

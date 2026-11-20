@@ -457,12 +457,19 @@ export async function isManualSpamCallbackAllowed(companyId: string, userId: str
   return (await getRegisteredCallbackSet(companyId, userId)).has(normalizePhone(String(callback || '')));
 }
 
-/** 검사 한 건을 읽어 지금 결과 + 통신사별 행(spamTestOutcomeOf) */
-export async function readSpamTestOutcome(testId: string, run: SqlRun = query): Promise<{ outcome: SpamVerdict; carrierResults: Array<{ carrier: string; messageType: string; result: string | null }> }> {
-  const t = await run(`SELECT status FROM spam_filter_tests WHERE id = $1`, [testId]);
+/**
+ * 검사 한 건을 읽어 지금 결과 + 통신사별 행(spamTestOutcomeOf)
+ *   ★ 2026-11-20 C148 T1 — lateOpen = 닫힌 지 SPAM_LATE_REPORT_MINUTES 안(늦은 보고가 시간 초과 · 차단 줄을 아직 통과로 고칠 수 있다 · 판정은 DB 시계 한 곳)
+ */
+export async function readSpamTestOutcome(testId: string, run: SqlRun = query): Promise<{ outcome: SpamVerdict; lateOpen: boolean; carrierResults: Array<{ carrier: string; messageType: string; result: string | null }> }> {
+  const t = await run(
+    `SELECT status, (status = 'completed' AND completed_at >= NOW() - INTERVAL '${SPAM_LATE_REPORT_MINUTES} minutes') AS late_open
+       FROM spam_filter_tests WHERE id = $1`,
+    [testId],
+  );
   const rows = await run(`SELECT carrier, message_type, result FROM spam_filter_test_results WHERE test_id = $1 ORDER BY carrier, message_type`, [testId]);
   const carrierResults = rows.rows.map((r: any) => ({ carrier: String(r.carrier), messageType: String(r.message_type), result: r.result ?? null }));
-  return { outcome: t.rows[0] ? spamTestOutcomeOf(String(t.rows[0].status), carrierResults) : 'error', carrierResults };
+  return { outcome: t.rows[0] ? spamTestOutcomeOf(String(t.rows[0].status), carrierResults) : 'error', lateOpen: t.rows[0]?.late_open === true, carrierResults };
 }
 
 /** 같은 검사 키의 트랜잭션 잠금 이름(등록 함수 한 곳만 잡는다) */

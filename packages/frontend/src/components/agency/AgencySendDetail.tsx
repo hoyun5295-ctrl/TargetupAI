@@ -179,7 +179,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     // ★ 2026-11-06 C109 D1 — 고친 글도 서버가 판정한다(뺌 · 바꿈 = 정리해 저장 + 위치 알림 · 막음 = 위치 반려 · 옛: 화면에서 먼저 막음)
     setBusy(true);
     try {
-      const { request: saved, notice, optOutNotice: oo } = await updateAgencyContent(req.id, draft, req.revision);
+      const { request: saved, notice, optOutNotice: oo } = await updateAgencyContent(req.id, draft, req.revision, undefined, [...spellPut]);   // ★ C148 T2 넣은 제안 id
       apply(saved);
       setOptOutNotice(oo);   // ★ 2026-11-13 C130 — 저장한 문안과 안내 상자를 같은 응답으로 함께 바꾼다(뒤따르는 조회에 기대지 않는다 · Codex 구현 1R)
       setEditing(false);
@@ -319,7 +319,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                     <p className={CUI_HINT}>고치면 승인이 지워지고 검사를 처음부터 다시 합니다.</p>
                     <div className="mt-2 flex items-center gap-2">
                       <button type="button" onClick={doSaveContent} disabled={busy || smsOver} className={CUI_BTN_PRIMARY}>저장하고 다시 검사</button>
-                      <button type="button" onClick={() => { setEditing(false); setDraft(req.currentContent); }} className={CUI_BTN_GHOST}>그만두기</button>
+                      {/* ★ C148 T2(구현 Codex 2R) — 칸을 되돌리면 넣은 제안도 비운다(남으면 다음 저장이 넣지 않은 id 를 보내 서버 재적용과 어긋난다) */}
+                      <button type="button" onClick={() => { setEditing(false); setDraft(req.currentContent); setSpellPut(new Set()); }} className={CUI_BTN_GHOST}>그만두기</button>
                     </div>
                   </>
                 ) : (

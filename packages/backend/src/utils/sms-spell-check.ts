@@ -15,7 +15,7 @@ import { eucKrByteLength } from './message-byte';
 import { findBenefitSpans } from './copy-benefit-detector';
 import { findSnsLinkSpans } from './sns-caption-rules';
 import {
-  applySpellIssue, protectedWordSpans, runSpellCheck, padLinkSpans,
+  applySpellIssue, protectedWordSpans, runSpellCheck, padLinkSpans, SPELL_LOCATION_RULES,
   type SpellIssue, type SpellTextSpan,
 } from './spell-check';
 
@@ -92,8 +92,7 @@ const SYSTEM = [
   '너는 한국어 맞춤법 검사기다. 문자 메시지(광고 문자 포함)에서 맞춤법·띄어쓰기·오타만 찾는다.',
   '규칙:',
   '- 문체·표현·어순·말투는 고치지 않는다. 틀린 곳만 찾는다.',
-  '- before 는 원문에서 **그대로 복사한** 짧은 구간(틀린 낱말과 앞뒤 한두 낱말)이다. 원문에 한 번만 나오는 구간으로 잡는다.',
-  '- after 는 before 를 바로잡은 것이다.',
+  ...SPELL_LOCATION_RULES,   // ★ 2026-11-20 C148 T2 자리 잡기 규칙(공용 한 벌)
   '- 숫자·링크·가격·상호·전화번호·%이름% 같은 변수·(광고)·수신거부 문구·기호(★ ▶ 【】 같은 것)는 건드리지 않는다.',
   '- 상품명·외래어 표기·줄임말은 틀린 것으로 보지 않는다.',
   '- 틀린 곳이 없으면 빈 배열.',

@@ -10,7 +10,7 @@
 
 import {
   judgeSpellCandidates, protectedWordSpans, runSpellCheck, spellTextHash, padLinkSpans,
-  SPELL_MAX_CHANGE, SPELL_MAX_ISSUES,
+  SPELL_MAX_CHANGE, SPELL_MAX_ISSUES, SPELL_LOCATION_RULES,
   type SpellCandidate, type SpellIssue, type SpellKind,
 } from './spell-check';
 import { findBenefitSpans } from './copy-benefit-detector';
@@ -58,8 +58,8 @@ const SYSTEM = [
   '너는 한국어 맞춤법 검사기다. SNS 게시글에서 맞춤법·띄어쓰기·오타만 찾는다.',
   '규칙:',
   '- 문체·표현·어순·말투는 고치지 않는다. 틀린 곳만 찾는다.',
-  '- before 는 원문에서 **그대로 복사한** 짧은 구간(틀린 낱말과 앞뒤 한두 낱말)이다. 원문에 한 번만 나오는 구간으로 잡는다.',
-  '- after 는 before 를 바로잡은 것이다. 숫자·링크·가격·상호·해시태그·이모지는 건드리지 않는다.',
+  ...SPELL_LOCATION_RULES,   // ★ 2026-11-20 C148 T2 자리 잡기 규칙(공용 한 벌)
+  '- 숫자·링크·가격·상호·해시태그·이모지는 건드리지 않는다.',
   '- 신조어·상품명·외래어 표기·SNS 말투(ㅎㅎ, ~요~)는 틀린 것으로 보지 않는다.',
   '- 틀린 곳이 없으면 빈 배열.',
   '출력 형식(JSON 하나만):',

@@ -12,7 +12,7 @@ import { createHash } from 'crypto';
 import pool, { query } from '../config/database';
 import { AGENCY_SEND_LOCK_REASON, isAgencySendLocked, isEditable, isSameKstDay, validateRequestedAt, MIN_LEAD_MINUTES, resumeTwinBlockingSql, type AgencySendStatus } from './agency-send-state';
 import { buildSlotPlan, extractAgencyVars } from './agency-send-vars';
-import { hasAgencySpellColumn, readAgencySpell } from './agency-send-spell';
+import { hasAgencySpellColumn, readAgencySpell, AGENCY_SPELL_AFTER_FIX_SQL } from './agency-send-spell';
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from './agency-send-worker';
 import { SEND_CHANGE_LOCK_MINUTES, sendChangeLockFreeSql } from './campaign-validation';
 import {
@@ -83,7 +83,8 @@ export async function editAgencyContentTx(input: {
   companyId: string;
   ownerUserId: string | null;
   revision: unknown;
-  change: { kind: 'text'; content: string; subject?: string | null } | { kind: 'spell'; issueIds: string[] };
+  /** ★ 2026-11-20 C148 T2(구현 Codex 1R) — text 의 spellIssueIds = 로그인 화면 [고치기]로 넣은 제안 id(서버가 다시 적용해 같을 때만 「맞춤법만 고침」) */
+  change: { kind: 'text'; content: string; subject?: string | null; spellIssueIds?: string[] } | { kind: 'spell'; issueIds: string[] };
   via: 'screen' | 'link';
   actor?: Record<string, unknown>;
   now?: Date;
@@ -126,6 +127,15 @@ export async function editAgencyContentTx(input: {
     body = applied.content;
     if (body.length > MAX_CONTENT) return fail(400, `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.`);
   }
+  // ★ 2026-11-20 C148 T2(구현 Codex 1R) — 맞춤법만 고친 판인가(판정 = 서버 한 곳). 링크 [고치기] = 늘 그렇다.
+  //   로그인 화면은 [고치기]가 고치기 칸에 넣은 뒤 글 그대로 저장(text) → 넣은 제안 id 를 함께 받아, 저장된 제안을 그 id 대로 적용한 글 = 저장할 글 ·
+  //   제목 그대로일 때만 「맞춤법만 고침」(손으로 고친 글자가 섞이면 아니다 = 다시 검사).
+  let spellOnly = input.change.kind === 'spell';
+  if (input.change.kind === 'text' && Array.isArray(input.change.spellIssueIds) && input.change.spellIssueIds.length > 0
+    && (input.change.subject == null || input.change.subject === row.subject)) {
+    const replayed = applyAgencySpellFixes(String(row.current_content || ''), readAgencySpell(row), input.change.spellIssueIds);
+    spellOnly = replayed.ok && replayed.content.trim() === body;
+  }
   // ★ 2026-11-06 C109 D1(뿌리 R68) — 고친 글도 접수와 같은 글 준비(뺌 · 바꿈 = 적용 + 알림 · 막음 = 반려) · 저장 글 = 정리된 글
   const copy = prepareAgencyCopy({ content: body, subject }, 'save');
   if (!copy.ok) return fail(copy.status, copy.error, copy.code);
@@ -150,7 +160,12 @@ export async function editAgencyContentTx(input: {
   if (missing.length > 0) return fail(400, unregisteredCallbackError(missing), 'CALLBACK_UNREGISTERED');
 
   // ⛔ 컬럼 탐지는 차단 판정 **앞**에서 한다 — 판정과 UPDATE 사이에 다른 대기를 끼우지 않는다(옛 라우트 ⛔ 대행 ⓔ)
-  const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';
+  // ★ 2026-11-20 C148 T2(서수란 접수) — 맞춤법 고치기로 바뀐 판 = 「맞춤법은 이미 사람이 골랐다」를 새 판 번호로 남긴다(워커 훅이 AI 를 다시 부르지 않는다 ·
+  //   옛: NULL → 스팸 검사 뒤 AI 가 처음부터 다시 검사 → 새 제안 → 또 한 바퀴). 글자 직접 수정 = 새 낱말이 들어올 수 있어 그대로 NULL(다시 검사).
+  //   SET 안의 content_version 은 옛 값이다 → + 1 = 이 UPDATE 가 만드는 새 판.
+  const clearSpell = (await hasAgencySpellColumn())
+    ? (spellOnly ? `spell_check = ${AGENCY_SPELL_AFTER_FIX_SQL}, ` : 'spell_check = NULL, ')
+    : '';
   const clearAsk = (await hasApprovalRequestedColumn()) ? 'approval_requested_at = NULL, ' : '';
   // ★ 2026-10-19 Codex L3 — 한 트랜잭션: 행 잠금(FOR UPDATE) → 차단 판정 → UPDATE(보낼 시각 잠금 = 행 잠금을 쥔 뒤 판정 · 시각 변경과 같은 순서).
   //   잠금을 기다린 UPDATE 는 기다리기 전 조건을 다시 보지 않는다(READ COMMITTED) · 판정과 UPDATE 사이 다른 대기 0(대행 ⓔ)은 그대로.

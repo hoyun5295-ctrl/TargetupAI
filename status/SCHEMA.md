@@ -2370,9 +2370,26 @@ kind별 payload 키:
 | approved_callback_id | uuid FK → callback_numbers | 승인 시 생성된 발신번호 ID |
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
+| number_type | varchar | company(회사명의) / other(기타명의) · ★1120 운영 실측(GROUP BY 출력 = company 18 · other 17) · 타입 미기록 |
+| owner_verification_id | uuid NULL | ★ 2026-11-20 C148 T3 — 기타명의 무선의 명의자 본인인증 건(sender_owner_verifications.id) · 부분 유일 인덱스 `ux_sender_registrations_owner_verification`(인증 한 건 = 신청 한 건) · **원장 C148-DDL-1(배포 뒤 · 대기)** |
 - INDEX: company_id
 - INDEX: status WHERE status = 'pending'
 - INDEX: requested_by
+
+### sender_owner_verifications (기타명의 무선 발신번호 명의자 본인인증) — ★ 2026-11-20 C148 T3 · 원장 C148-DDL-1(배포 뒤 · 대기)
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| id | uuid PK | 인증 건 번호 = KMC 요청번호(certNum) |
+| company_id | uuid NOT NULL | 인증을 시작한 계정의 회사 |
+| user_id | uuid NOT NULL | 인증을 시작한 계정(신청자) |
+| status | varchar(12) NOT NULL | pending / verified / superseded (CHECK) |
+| provider | varchar(20) NOT NULL | 인증기관 구현 이름(kmc) |
+| verified_name · verified_phone | varchar(100) · varchar(20) | 인증기관이 확인한 명의자 이름 · 휴대폰(숫자만) |
+| dup_key_hash | varchar(64) | DI sha256 · 같은 회사 1인 3회선 셈 |
+| provider_tx_id | varchar(120) | 인증기관 거래 번호 |
+| created_at · expires_at · verified_at | timestamptz | 대기 10분 · 신청은 인증 뒤 30분 안 |
+- INDEX: idx_sender_owner_verifications_user_pending (user_id) WHERE status = 'pending'
+- ⛔ 로그인 본인인증(`identity_verifications`)과 따로 둔다 — 그 표는 로그인 관문 · 담당자 요약 · 슈퍼 현황이 목적을 가리지 않고 읽는다(설계 Codex 1R #1). 쓰는 곳 = `utils/sender-owner-verify.ts` 하나.
 
 ---
 

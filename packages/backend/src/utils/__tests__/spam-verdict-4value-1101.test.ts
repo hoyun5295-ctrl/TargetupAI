@@ -113,8 +113,11 @@ describe('보류 = 실패 · 정지 · 다시 쓰기 0(구현 2라운드)', () =
     expect(mergeAlternativeVerdicts(['blocked', 'pass'])).toBe('pass');
     expect(mergeAlternativeVerdicts(['blocked', 'error'])).toBe('blocked');
     expect(mergeAlternativeVerdicts([])).toBe('error');
-    expect(src('continuous-operator.ts')).toMatch(/const altVerdict = mergeAlternativeVerdicts\(tested\.map\(/);
-    expect(src('continuous-operator.ts')).toMatch(/: isSpamHold\(altVerdict\) \|\| altVerdict === 'blocked' \|\| altVerdict === 'rejected' \? altVerdict/);   // ★ 1106 C109 보낼 수 없는 글자도 그 판정 그대로
+    // ★ 2026-11-20 C148 T1 — 회차 최종 판정이 순수 함수(continuous-operator-policy.ts operatorFinalSpamResult)로 옮겨 갔다 · 같은 대안 합산 + 시간 초과 보류
+    expect(src('continuous-operator.ts')).toContain('const finalResult = operatorFinalSpamResult(tested, passedIndex, Number(spamResult.totalTestCount ?? 1));');
+    const pol = src('continuous-operator-policy.ts');
+    expect(pol).toMatch(/const alt = mergeAlternativeVerdicts\(tested\.map\(/);
+    expect(pol).toContain("if (alt === 'blocked' || alt === 'rejected') return alt;");   // ★ 1106 C109 보낼 수 없는 글자도 그 판정 그대로
   });
   it('플래너 사전 준비 = 가짜 링크가 접점마다 고정(같은 글 = 같은 검사) · 확인 중은 실패 수에 안 셈 · 만든 글을 검사 대기로 남김', () => {
     expect(plannerFakeDmLink('tp-1')).toBe(plannerFakeDmLink('tp-1'));

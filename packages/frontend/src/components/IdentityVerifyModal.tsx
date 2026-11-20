@@ -13,10 +13,13 @@
 import { useState } from 'react';
 import { launchIdentityProvider, openIdentityWindow, identityWindowErrorMessage } from '../utils/identityProvider';
 
-export type IdentityVerifyMode = { kind: 'login'; ticket: string } | { kind: 'change' };
+// ★ 2026-11-20 C148 T3 — sender = 기타명의 무선 발신번호의 명의자 확인(전용 주소 · 계정 담당자 번호는 바뀌지 않는다)
+export type IdentityVerifyMode = { kind: 'login'; ticket: string } | { kind: 'change' } | { kind: 'sender'; phone: string };
 
 interface Props {
   mode: IdentityVerifyMode;
+  /** 명의자 확인 경로 — 인증이 끝났다(입력한 발신번호와 같은가는 서버가 대조해 준다) */
+  onSenderVerified?: (info: { verificationId: string; name: string; maskedPhone: string; matches: boolean }) => void;
   /** 로그인 경로 — 인증이 끝나 세션을 받았다 */
   onLoginSuccess?: (data: any) => void;
   /** 로그인 경로 — 인증은 끝났는데 같은 아이디가 접속 중이다(인계 창으로 넘긴다) */
@@ -34,8 +37,9 @@ interface Started {
   start: Record<string, any>;
 }
 
-export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, onChanged, onExpired, onClose }: Props) {
+export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, onChanged, onSenderVerified, onExpired, onClose }: Props) {
   const isLogin = mode.kind === 'login';
+  const isSender = mode.kind === 'sender';
   const [started, setStarted] = useState<Started | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -51,13 +55,16 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
   };
 
   const finish = async (s: Started, result: any) => {
-    const path = isLogin ? '/api/auth/identity/complete' : '/api/auth/identity/change/complete';
-    const body = isLogin
+    const path = isLogin ? '/api/auth/identity/complete' : isSender ? '/api/sender-registration/owner-verify/complete' : '/api/auth/identity/change/complete';
+    const body = mode.kind === 'login'
       ? { identityTicket: mode.ticket, verificationId: s.verificationId, result, appSource: 'hanjul' }
-      : { verificationId: s.verificationId, result };
+      : mode.kind === 'sender'
+        ? { verificationId: s.verificationId, result, phone: mode.phone }
+        : { verificationId: s.verificationId, result };
     const { res, data } = await post(path, body);
     if (res.ok) {
       if (isLogin) onLoginSuccess?.(data);
+      else if (isSender) onSenderVerified?.({ verificationId: data.verificationId, name: data.name, maskedPhone: data.maskedPhone, matches: data.matches === true });
       else onChanged?.({ name: data.name, maskedPhone: data.maskedPhone });
       return;
     }
@@ -80,8 +87,8 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
     const win = openIdentityWindow();
     let handedOver = false;
     try {
-      const path = isLogin ? '/api/auth/identity/start' : '/api/auth/identity/change/start';
-      const { res, data } = await post(path, isLogin ? { identityTicket: mode.ticket } : {});
+      const path = isLogin ? '/api/auth/identity/start' : isSender ? '/api/sender-registration/owner-verify/start' : '/api/auth/identity/change/start';
+      const { res, data } = await post(path, mode.kind === 'login' ? { identityTicket: mode.ticket } : {});
       if (!res.ok) {
         // 티켓이 죽었거나, 그사이 이 계정의 본인인증이 이미 끝났다 — 창을 닫고 다시 로그인하게 한다
         if (data?.code === 'IDENTITY_TICKET_INVALID' || data?.code === 'IDENTITY_ALREADY_VERIFIED') {
@@ -131,16 +138,27 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
             </svg>
           </div>
-          <h3 className="text-lg font-bold text-gray-900">{isLogin ? '담당자 본인인증' : '담당자 변경'}</h3>
+          <h3 className="text-lg font-bold text-gray-900">{isLogin ? '담당자 본인인증' : isSender ? '번호 명의자 본인인증' : '담당자 변경'}</h3>
           <p className="text-sm text-gray-500 mt-2 leading-relaxed">
             {isLogin
               ? '이 계정을 사용하는 담당자 본인의 휴대폰으로 한 번만 인증해 주세요.'
-              : '새 담당자 본인의 휴대폰으로 인증하면 담당자가 바뀝니다.'}
+              : isSender
+                ? '신청할 휴대폰 번호의 명의자가 그 휴대폰으로 인증해 주세요.'
+                : '새 담당자 본인의 휴대폰으로 인증하면 담당자가 바뀝니다.'}
           </p>
         </div>
 
         <div className="px-6 pt-4">
-          {!stubStep && (
+          {!stubStep && isSender && (
+            <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 space-y-1.5">
+              <p className="text-xs text-gray-600 leading-relaxed">
+                · 인증한 <span className="font-medium text-gray-800">휴대폰번호</span>가 신청한 발신번호와 같아야 신청됩니다.
+              </p>
+              <p className="text-xs text-gray-600 leading-relaxed">· 명의자 한 사람당 무선 발신번호는 3개까지 등록할 수 있습니다.</p>
+              <p className="text-xs text-gray-500 leading-relaxed">· 이 인증은 계정 담당자 번호를 바꾸지 않습니다.</p>
+            </div>
+          )}
+          {!stubStep && !isSender && (
             <div className="bg-gray-50 border border-gray-100 rounded-xl px-4 py-3 space-y-1.5">
               <p className="text-xs text-gray-600 leading-relaxed">
                 · 인증한 <span className="font-medium text-gray-800">휴대폰번호</span>가 이 계정의 담당자 번호로 등록됩니다. 계정 이름은 바뀌지 않습니다.
@@ -195,7 +213,7 @@ export default function IdentityVerifyModal({ mode, onLoginSuccess, onTakeover, 
               disabled={busy || !stubName.trim() || !stubPhone}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-2.5 rounded-xl text-sm transition-colors"
             >
-              {busy ? '확인 중…' : isLogin ? '인증하고 로그인' : '인증하고 변경'}
+              {busy ? '확인 중…' : isLogin ? '인증하고 로그인' : isSender ? '인증하기' : '인증하고 변경'}
             </button>
           )}
           <button

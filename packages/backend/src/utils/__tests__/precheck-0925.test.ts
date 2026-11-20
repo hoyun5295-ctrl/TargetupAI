@@ -209,7 +209,8 @@ describe('4. 워커 A 순서 · 자동 교정 0 · 문안 수정이 결과를 �
   // ★2026-10-18 축 1 — 문안 수정 본문이 CT(utils/agency-send-change.ts)로 옮겨 갔다(같은 계약 · 승인 요청 시각 지우기 조각이 이어 붙는다)
   it('문안 수정 UPDATE가 결과를 지운다(컬럼이 있을 때)', () => {
     const ct = read('utils/agency-send-change.ts');
-    expect(ct).toContain("const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';");
+    // ★ 2026-11-20 C148 T2 — 글자 직접 수정 = 지운다(다시 검사) · 맞춤법 고치기 = 새 판의 「고친 뒤」 저장값(AI 다시 검사 0)
+    expect(ct).toContain("? (spellOnly ? `spell_check = ${AGENCY_SPELL_AFTER_FIX_SQL}, ` : 'spell_check = NULL, ')");
     expect(ct).toContain('SET ${clearSpell}${clearAsk}original_content = $1');
     expect(read('routes/agency-send.ts')).toMatch(/await editAgencyContentTx\(/);
   });

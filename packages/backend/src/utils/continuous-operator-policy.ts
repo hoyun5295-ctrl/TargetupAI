@@ -6,6 +6,7 @@
  */
 
 import { addMemory } from './company-memory';
+import { spamVerdictOf, mergeAlternativeVerdicts, isSpamHold } from './spam-test-queue';
 
 // ━━━ 외부 노출 타입 ━━━
 export type DeliveryPolicy = 'daily' | 'weekly' | 'monthly';
@@ -79,6 +80,16 @@ export function decideSpamOutcome(
       reason: `스팸 검사 결과를 ${SPAM_VERDICT_LABEL[finalResult]}이라 자동 발송을 보류했어요. 제안 상세에서 다시 검사하거나 승인해 주세요`,
     };
   }
+  // ★ 2026-11-20 C148 T1(남지현 접수) — 시간 초과 = 검사가 닫힐 때 통신사 결과가 아직 없던 줄 · 늦은 보고가 닫힌 뒤 10분 안에 통과로 고친다
+  //   (1120 실측 = 1 ~ 2분 뒤 전부 통과) → 미통과로 굳히지 않고 보류 · 회복 일꾼(recoverHeldProposals)이 다시 읽는다
+  if (finalResult === 'timeout') {
+    return {
+      status: 'admin_review',
+      autoExecuteBlocked: true,
+      hold: true,
+      reason: '스팸 검사 결과가 늦어지고 있어 자동 발송을 보류했어요. 결과가 오면 다시 판단해요. 제안 상세에서 다시 검사하거나 승인할 수도 있어요',
+    };
+  }
   if (finalResult === 'pass') {
     return {
       status: 'spam_passed',
@@ -94,6 +105,27 @@ export function decideSpamOutcome(
     // ★ 2026-10-03 화면(자동마케팅 카드 경고)에 그대로 나가는 문장이라 판정값을 한국어로 싣는다(옛: 'blocked' 영문 노출 · 임은지 접수)
     reason: `스팸필터 미통과 (AI 재생성 ${regenerateCount}회 후에도 ${SPAM_VERDICT_LABEL[finalResult] || '검사 실패'}). 담당자 검토 필요`,
   };
+}
+
+export type OperatorSpamFinal = 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending' | 'rejected';
+
+/**
+ * ★ 2026-11-20 C148 T1(설계 Codex 1R #2) — 자동마케팅 회차의 최종 판정(순수 · 옛 continuous-operator.ts 인라인 식을 옮김).
+ *   순서 = 통과 > 확인 중 · 검사 중 > 검사한 안 중 하나라도 시간 초과 > 차단 > 반려 > 그 밖(1안 원값 · 통과로 접지 않음).
+ *   시간 초과 안은 늦은 보고로 통과할 수 있다 → 막힌 안이 섞여도 보류(옛: 1안 timeout + 2안 blocked = 차단으로 굳어 회복 후보에서 빠졌다).
+ */
+export function operatorFinalSpamResult(
+  tested: ReadonlyArray<{ spamResult?: string | null; carrierResults?: Array<{ result?: string | null }> | null }>,
+  passedIndex: number | null,
+  totalTestCount: number,
+): OperatorSpamFinal {
+  if (passedIndex != null) return 'pass';
+  const alt = mergeAlternativeVerdicts(tested.map((v) => spamVerdictOf(v as any, totalTestCount)));
+  if (isSpamHold(alt)) return alt;
+  if (tested.some((v) => v.spamResult === 'timeout')) return 'timeout';
+  if (alt === 'blocked' || alt === 'rejected') return alt;
+  const first = tested[0]?.spamResult;
+  return (first && first !== 'pass' ? first : 'failed') as OperatorSpamFinal;
 }
 
 /** ★ 2026-10-03 스팸 검사 판정값의 고객 표기(정책 사유 · 화면 안별 결과가 같은 말을 쓴다) */

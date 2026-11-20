@@ -43,7 +43,7 @@ import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason, operatorFinalSpamResult } from './continuous-operator-policy';
 import { buildAutosendStopUrl } from './autosend-stop-link';
 import { operatorCapPolicy, operatorCapPathOf, autoSendLeadMinutesSql, type OperatorCapPath } from './autosend-policy';
 import { NOTICE_MAX_ATTEMPTS } from './journey-notice-once';   // ★ 2026-11-02 안내 시도 상한(한 정책 · 회차 안내도 같은 값)   // ★ 2026-11-02 상한 갈래 CT(설계서 3-0 CT-O2)
@@ -54,7 +54,7 @@ import { objectiveForRounds } from './automarketing-interview';
 import { buildLineEventText } from './one-line-facts';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, mergeAlternativeVerdicts, readSpamTestOutcome, spamRejectionOf, spamRejectionPlaces, toSpamCheckRecord, type SpamCheckRecord } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, readSpamTestOutcome, spamRejectionOf, spamRejectionPlaces, toSpamCheckRecord, SPAM_LATE_REPORT_MINUTES, type SpamCheckRecord } from './spam-test-queue';
 import { assertSmsTextSendable, smsTextBlockReason } from './message-sanitizer';   // ★ 2026-11-06 C109 D6 사람 글 저장 관문(위치)
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
@@ -1838,13 +1838,9 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       const passedTestedRaw = spamResult.passedVariantId ? tested.find((v) => v.variantId === spamResult.passedVariantId) : undefined;
       const passedIndex = passedTestedRaw && spamVerdictOf(passedTestedRaw as any, Number(spamResult.totalTestCount ?? 1)) === 'pass' ? letterIndex(spamResult.passedVariantId) : null;
       const firstTested = tested[0];
-      // 최종 판정 = 통과 안이 있으면 통과 · 없으면 대안 합산(차례 검사와 같은 뜻 · ★ 1101 Codex 구현 1R #3: 확인 중 · 검사 중인 안이 있으면 그 판정 = 보류 · 차단 안보다 먼저)
-      //   그 밖(장애)은 1안의 원값(판정이 통과가 아닌데 원값이 pass 면 통과로 접지 않는다)
-      const altVerdict = mergeAlternativeVerdicts(tested.map((v) => spamVerdictOf(v as any, Number(spamResult.totalTestCount ?? 1))));
-      // ★ 2026-11-06 C109 E5 — 보낼 수 없는 글자(rejected) = 차단 다음 · 장애 앞 · 사유 = 반려 안의 위치(다시 검사 0)
-      const finalResult = (passedIndex != null ? 'pass'
-        : isSpamHold(altVerdict) || altVerdict === 'blocked' || altVerdict === 'rejected' ? altVerdict
-          : (firstTested?.spamResult && firstTested.spamResult !== 'pass' ? firstTested.spamResult : 'failed')) as 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending' | 'rejected';
+      // 최종 판정 = 순수 함수 한 곳(★ 2026-11-20 C148 T1 · 통과 > 확인 중 · 검사 중 > 시간 초과 안 하나라도 > 차단 > 반려 > 1안 원값)
+      //   ★ 1101 Codex 구현 1R #3 확인 중 · 검사 중 = 보류 · ★ 1106 C109 E5 반려 = 차단 다음 · ★ 1120 C148 시간 초과 = 늦은 보고로 통과할 수 있어 보류
+      const finalResult = operatorFinalSpamResult(tested, passedIndex, Number(spamResult.totalTestCount ?? 1));
       const rejectedTested = finalResult === 'rejected' ? tested.find((v) => v.spamResult === 'rejected') : undefined;
       const rejection = rejectedTested ? spamRejectionOf(rejectedTested as any) : null;
       const regenCount = firstTested?.regenerateCount || 0;
@@ -1921,7 +1917,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
            WHERE id = $1::uuid AND status = 'scheduled' AND reviewed_at IS NULL`,
           [proposalRes.rows[0].id, outcome.reason],
         );
-        console.log(`[ContinuousOperator] ${operator.name} 스팸 검사 ${finalResult === 'pending' ? '진행 중' : '확인 중'} → 자동 발송 보류(정지 없음 · 결과가 나오면 회복)`);
+        console.log(`[ContinuousOperator] ${operator.name} 스팸 검사 ${finalResult === 'pending' ? '진행 중' : finalResult === 'timeout' ? '결과 늦음(시간 초과)' : '확인 중'} → 자동 발송 보류(정지 없음 · 결과가 나오면 회복)`);
       } else if (outcome.status === 'admin_review') {
         // 끝내 통과 X → 담당자 검토 대기 (자동 발송 차단 + scheduled 해제, 자동 폐기 X)
         //   ★ Codex 1R — 검사 중 사람이 승인·중지했으면(reviewed_at · 상태 변경) 그 판단을 덮지 않고 정지·통지도 하지 않는다.
@@ -2772,7 +2768,9 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
     `SELECT p.id, p.operator_id, p.company_id, p.created_at, p.proposal_json->'spamCheck' AS sc
        FROM operator_proposals p
       WHERE p.status = 'admin_review' AND p.reviewed_at IS NULL
-        AND p.spam_test_status IN ('pending', 'unconfirmed')
+        AND (p.spam_test_status IN ('pending', 'unconfirmed')
+             -- ★ 2026-11-20 C148 T1 — 시간 초과 보류 = 보류 갈래가 heldSendAt 을 남긴 회차만(배포 전 timeout 회차 = 미통과 갈래 · heldSendAt 없음 · 이미 안내됨 = 손대지 않는다)
+             OR (p.spam_test_status = 'timeout' AND p.proposal_json->'spamCheck' ? 'heldSendAt'))
         AND p.proposal_json->'spamCheck'->'recovery' IS NULL
         AND p.operator_id <> ALL($1::uuid[])
         AND ($2::uuid IS NULL OR p.id > $2::uuid)
@@ -2786,7 +2784,10 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
       const tested = (Array.isArray(row.sc?.results) ? row.sc.results : []).filter((r: any) => r?.testId && r?.fp);
       // 옛 회차(검사 id 를 남기기 전) = 사람 판단 그대로 · 안내 0
       if (tested.length === 0) { await markRecovery(row.id, 'legacy', null); continue; }
-      const read = await Promise.all(tested.map(async (r: any) => ({ index: Number(r.index), fp: String(r.fp), outcome: (await readSpamTestOutcome(String(r.testId))).outcome })));
+      const read = await Promise.all(tested.map(async (r: any) => {
+        const o = await readSpamTestOutcome(String(r.testId));
+        return { index: Number(r.index), fp: String(r.fp), outcome: o.outcome, lateOpen: o.lateOpen };
+      }));
       const pass = read.filter((x) => x.outcome === 'pass').sort((a, b) => a.index - b.index)[0];
       if (pass) {
         const r = await restoreHeldProposal(row, pass);
@@ -2794,7 +2795,8 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
         if (r === 'restored') out.restored++;
         continue;
       }
-      const waiting = read.some((x) => isSpamHold(x.outcome));
+      // ★ 2026-11-20 C148 T1 — 닫힌 지 10분 안의 장애(시간 초과 줄) · 막힘 = 늦은 보고가 아직 통과로 고칠 수 있다 → 기다림(1120 실측 = 1 ~ 2분 뒤 통과)
+      const waiting = read.some((x) => isSpamHold(x.outcome) || ((x.outcome === 'error' || x.outcome === 'blocked') && x.lateOpen));
       const old = Date.now() - new Date(row.created_at).getTime() >= HELD_RECOVERY_GIVEUP_HOURS * 60 * 60 * 1000;
       if (waiting && !old) continue;
       const result = waiting ? 'late' : read.some((x) => x.outcome === 'blocked') ? 'blocked' : 'error';
@@ -2803,7 +2805,10 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
         title: '[AI 자동마케팅] 이번 회차 검토 필요',
         body: result === 'late'
           ? `'${name}' 이번 회차 스팸 검사 결과가 ${HELD_RECOVERY_GIVEUP_HOURS}시간 넘게 나오지 않아 담당자 검토로 두었어요. 제안 상세에서 다시 검사하거나 승인해 주세요.`
-          : `'${name}' 이번 회차 문안이 스팸필터를 통과하지 못해 담당자 검토로 두었어요. 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인해 주세요. 자동마케팅은 그대로 돌아가요.`,
+          : result === 'error'
+            // ★ 2026-11-20 C148 T1 — 막힌 안 없이 결과를 못 받음 = 「통과하지 못해」라고 쓰지 않는다(옛 문자가 직원에게 차단으로 읽혔다)
+            ? `'${name}' 이번 회차 스팸 검사 결과를 받지 못해 담당자 검토로 두었어요. 제안 상세에서 다시 검사하거나 승인해 주세요. 자동마케팅은 그대로 돌아가요.`
+            : `'${name}' 이번 회차 문안이 스팸필터를 통과하지 못해 담당자 검토로 두었어요. 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인해 주세요. 자동마케팅은 그대로 돌아가요.`,
       })) out.settled++;
     } catch (err: any) {
       // R8 — 예상 밖 실패 = 종결 표식(매 분 다시 집지 않는다 · 회차는 이미 담당자 검토라 사람 길이 남아 있다)
