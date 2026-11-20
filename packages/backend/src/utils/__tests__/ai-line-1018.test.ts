@@ -356,7 +356,8 @@ describe('② 대상 찾기 돈 순서', () => {
 describe('② 대상 바꾸기(직접 타겟 선택 · 0크레딧)', () => {
   it('해석기가 버리는 조건 = untranslated · 1위 고객 · 칼럼을 만들지 않는다', async () => {
     countIs(7);
-    const out = await runLineRetarget(V, { age: { operator: 'gte', value: 30 } }, false);
+    // ★ 2026-11-20 R101 — mixed 나이 gte · lte · eq 는 이제 옮김(설계서 P2-1) · 버리는 꼴 = 표 밖 기준(contains)
+    const out = await runLineRetarget(V, { age: { operator: 'contains', value: '3' } }, false);
     expect(out.untranslated.map((u) => u.key)).toEqual(['age']);
     expect(out.top).toBeNull();
     expect(m.settle).not.toHaveBeenCalled();
@@ -376,7 +377,7 @@ describe('② 대상 바꾸기(직접 타겟 선택 · 0크레딧)', () => {
 describe('② Codex B1 — 보내는 조건 칸 확인 · 알림톡 기본 · 전체 판정', () => {
   it('만들기 · 진행 = 해석기가 버리는 칸이 있으면 차감 · AI 전에 거절', async () => {
     countIs(5);
-    await expect(runLineCompose(V, composeInput({ filters: { age: { operator: 'gte', value: 30 }, grade: { operator: 'eq', value: 'VIP' } } as any })))
+    await expect(runLineCompose(V, composeInput({ filters: { age: { operator: 'contains', value: '3' }, grade: { operator: 'eq', value: 'VIP' } } as any })))
       .rejects.toMatchObject({ code: 'TARGET_FILTER_UNTRANSLATED' });
     await expect(runLineProceed(V, '알림톡 쿠폰 만료 안내', { phone: { operator: 'contains', value: '010' } }, false))
       .rejects.toMatchObject({ code: 'TARGET_FILTER_UNTRANSLATED' });

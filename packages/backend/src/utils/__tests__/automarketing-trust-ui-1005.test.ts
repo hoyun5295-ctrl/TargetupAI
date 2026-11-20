@@ -86,7 +86,9 @@ describe('3. 승인 창 — 목업 그대로 · 시작은 서버 판정', () => 
     expect(modal).toContain('onClick={() => onAxis(d.audience.suggestKey!)}');
   });
   it('칸 고르기 = 값 있는 칸만(값 없는 칸은 눌리지 않음) · 근거 = 값 있는 고객 수 · 예시', () => {
-    expect(modal).toContain('disabled={o.disabled}');
+    // ★ 2026-11-20 P3 — 값 없는 칸 + 그 말의 기준과 맞지 않는 칸(서버 pickLocks) 둘 다 잠금
+    expect(modal).toContain('const off = !!o.disabled || !!lock;');
+    expect(modal).toContain('disabled={off}');
     expect(modal).toContain("값 있는 고객 0명 · 고를 수 없어요");
     expect(modal).toContain('값 있는 고객 ${o.fillCount.toLocaleString()}명');
   });

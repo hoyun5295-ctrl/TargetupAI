@@ -61,10 +61,13 @@ describe('F3 · SC-1 · 여정 회신번호를 쓰는 자리 = 등록 번호 판
       expect([rel, /numbers\.some\(\(n\) => n\.phone ===/.test(src)]).toEqual([rel, false]);
     }
   });
-  it('만들기 창은 등록 번호가 있으면 늘 「어느 번호로 보낼까요?」를 그리고 · [시작] 카드에 「보내는 번호」 칸이 있다', () => {
+  // ★ 2026-11-20 E2-1(임은지 접수 · 설계서 docs/2026-11-20-staff-tickets-four-design.md) — 서버가 기본 번호를 정하면 묻지 않는다(보내는 번호 = 기본 번호 · 바꾸기 = [시작] 카드)
+  it('만들기 창은 서버가 기본 번호를 정하지 못할 때만 「어느 번호로 보낼까요?」를 그리고 · [시작] 카드에 「보내는 번호」 칸이 있다', () => {
     const im = read('frontend/src/components/journey/map/InterviewModal.tsx');
     expect(im).not.toMatch(/needsCallbackChoice/);
     expect(im).toContain('어느 번호로 보낼까요?');
+    expect(im).toContain('const askCallback = !!prepared && !noCallback && !prepared.callback.defaultPhone;');
+    expect(im).toContain('{prepared && (noCallback || askCallback) && (');
     const card = read('frontend/src/components/journey/workspace/JourneyStartCard.tsx');
     expect(card).toContain('data-fix-target="callback"');
     expect(card).toMatch(/setField\('callbackNumber'/);

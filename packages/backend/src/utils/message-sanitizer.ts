@@ -20,6 +20,7 @@
 // ★ 2026-09-26 한줄로 V2 m068 — 보낼 수 있는 글자 판정(게이트웨이 CP949 표) · 발송 경로 정리가 쓴다
 import { isSmsEncodableChar } from './sms-charset';
 import { UserFacingError } from './http-error';
+import { tidyAiSmsLayout } from './ai-sms-layout';   // ★ 2026-11-20 R102 AI 문자 꼴 정리(이 함수 = AI 출력 전용 · 소비처 = 여정 생성 · 수정 · 운영자 꾸미기 · 변형)
 
 // ════════════════════════════════════════════════════════════════════
 // 이모지 유니코드 범위 (한국 통신사 SMS/LMS 미지원 매트릭스)
@@ -286,10 +287,12 @@ export interface SanitizeResult {
   replacedChars: string[];
 }
 
-export function sanitizeForSms(text: string): SanitizeResult {
-  if (!text) {
+export function sanitizeForSms(rawText: string): SanitizeResult {
+  if (!rawText) {
     return { sanitized: '', warnings: [], hadChanges: false, removedEmojis: [], replacedChars: [] };
   }
+  // ★ 2026-11-20 R102 — AI 가 쓴 글의 꼴(마크다운 링크 · 굵게 · 가리킴 표시 · 문장 가운데 강조 · 줄 머리 공백)을 먼저 정리(ai-sms-layout 한 곳)
+  const text = tidyAiSmsLayout(rawText);
 
   const warnings: string[] = [];
   const removedEmojis: string[] = [];

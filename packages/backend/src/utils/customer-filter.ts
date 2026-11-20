@@ -88,8 +88,29 @@ function getValue(field: any): any {
   return field;
 }
 
-/** 값이 날짜 패턴인지 감지 (YYYY-MM-DD 또는 YYYYMMDD) — 커스텀필드 캐스팅 자동 전환용 */
-function isDateLikeValue(value: any): boolean {
+/**
+ * ★ 2026-11-20 R101 — mixed 형식이 일부러 건너뛰는 키(기본 WHERE 가 소유 = 수신동의 · 전화번호). 변환기의 SPECIAL_FIELDS 와
+ *   판정 CT(filterConditionIssues)가 이 한 목록을 같이 읽는다(둘이 갈라지면 「건너뛴 정상 키」를 깨진 조건으로 막거나 그 반대가 된다).
+ */
+export const MIXED_BASE_WHERE_KEYS: readonly string[] = ['phone', 'sms_opt_in'];
+
+/**
+ * ★ 2026-11-20 R100 · R1 — 조건 기준 → 사람 말 한 곳(서버 문구 자리 = 자동마케팅 describeConditions · AI 한줄로 filterChipText 가 읽고,
+ *   화면 표 = 계약 시험이 이 키 전부를 가졌는지 대조). days_passed = 「N일 이상 지남」(칸 ≤ 오늘(KST) − N).
+ */
+export const FILTER_OPERATOR_TEXT: Readonly<Record<string, string>> = {
+  eq: '', in: '중 하나', contains: '포함', gte: '이상', lte: '이하', between: '사이',
+  date_gte: '이후', date_lte: '이전', days_within: '일 안', days_passed: '일 이상 지남', birth_month: '월',
+};
+
+/**
+ * ★ 2026-11-20 R100 반복해서 쓰는 대상 조건(자동마케팅 번역 · 자동발송 추천 recurring · 저장 세그먼트 생성)의 날짜 기간 말 규칙 한 줄.
+ *   한 번 보내는 발송(AI 한줄로 · AI 캠페인)의 지시에는 붙이지 않는다(그날 고정 날짜 = 맞음 · 지시 글자 무변경).
+ */
+export const RECURRING_RELATIVE_DATE_RULE = '날짜 칸(표준 날짜 칸 · 회사 날짜 칸)의 기간 말은 일수 기준으로만 쓴다: 「최근 N일 안 · N일 이내」 = days_within N, 「N일 이상 · N일 넘게 · 최근 N일 ~가 없는」 = days_passed N(값 = 일수 숫자). 반복해서 쓰는 조건이라 기간 말을 오늘 날짜로 계산한 고정 날짜(gte · lte · date_gte · date_lte)로 쓰지 않는다.';
+
+/** 값이 날짜 패턴인지 감지 (YYYY-MM-DD 또는 YYYYMMDD) — 커스텀필드 캐스팅 자동 전환용 · ★ 2026-11-20 자동마케팅 회사 칸 날짜 판정이 같은 식을 쓴다(export) */
+export function isDateLikeValue(value: any): boolean {
   if (typeof value !== 'string' && typeof value !== 'number') return false;
   const s = String(value);
   // 모양 게이트는 이 둘로 고정한다 — normalizeDate에 통째로 맡기면 6자리 숫자(250103)까지
@@ -127,6 +148,22 @@ function customNumberExpr(cfCol: string): string {
 function customDateKeyParam(value: any): string | null {
   const n = normalizeDate(String(value ?? '').trim());
   return n ? n.replace(/-/g, '') : null;
+}
+
+/** ★ 2026-11-20 R100 상대 기준 일수(days_within · days_passed) — 엄격 정수 0 ~ 9999 만(「2junk」 = null · days_within 옛 판정과 같은 식). */
+function relativeDays(value: unknown): number | null {
+  return /^\d{1,4}$/.test(String(value ?? '').trim()) ? parseInt(String(value).trim(), 10) : null;
+}
+
+/**
+ * ★ 2026-11-20 R100 회사 날짜 칸의 상대 기준 — days_within = 최근 N일 안(칸 ≥ 오늘(KST) − N) · days_passed = N일 이상 지남(칸 ≤ 오늘(KST) − N).
+ *   비교 = 날짜 키(YYYYMMDD · customDateKeyExpr) · 일수가 틀리면 0건(fail-closed) · 두 입력 형식이 같이 부른다.
+ */
+function customRelativeDaySql(cfCol: string, operator: 'days_within' | 'days_passed', value: unknown, nextRef: () => string, params: any[]): string {
+  const days = relativeDays(value);
+  if (days == null) return ' AND FALSE';
+  params.push(kstDateMinusDays(new Date(), days).replace(/-/g, ''));
+  return ` AND ${customDateKeyExpr(cfCol)} ${operator === 'days_within' ? '>=' : '<='} ${nextRef()}`;
 }
 
 /** 컬럼명에 테이블 alias 접두사 적용 */
@@ -269,6 +306,9 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           const placeholders = value.map(() => `$${paramIndex++}`).join(', ');
           sql += ` AND ${col(alias, field)} IN (${placeholders})`;
           params.push(...value);
+        } else {
+          // ★ 2026-11-20 R101 — 표 밖 기준(gte 등) = 0건(옛: SQL 0 = 조건이 빠져 대상이 넓어짐 · 설계서 docs/2026-11-20-staff-tickets-four-design.md P2-1)
+          sql += ' AND FALSE';
         }
 
       // ── store_code ──
@@ -280,6 +320,8 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           } else if (operator === 'in' && Array.isArray(value)) {
             sql += ` AND ${storeMembershipCond({ idCol: col(alias, 'id'), companyRef: companyIdParamRef, codeRef: `$${paramIndex++}`, many: true, requireConsent: storeConsent, consentMallCodes: storeConsentMallCodes })}`;
             params.push(value);
+          } else {
+            sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준 = 0건
           }
         }
 
@@ -305,6 +347,8 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         } else if (operator === 'between' && Array.isArray(value)) {
           sql += ` AND ${ageExpr} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
           bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
+        } else {
+          sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준 = 0건
         }
 
       // ── FIELD_MAP 동적 처리 — 위 핸들러에 없는 직접 컬럼 필드를 dataType 기반으로 자동 처리 ──
@@ -321,15 +365,18 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             else if (operator === 'between' && Array.isArray(value)) {
               sql += ` AND ${numberRef} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
               bindNumber(params, value[0], '조건 값'); bindNumber(params, value[1], '조건 값');
+            } else {
+              sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준 = 0건
             }
           } else if (fieldDef.dataType === 'date') {
             // ★ D83: safeDateValue 방어 — 비정상 날짜 입력 시 쿼리 에러 방지
             // ★ 2026-08-14 (Codex 2R): parseInt는 '2junk'도 2로 읽는다 — 엄격 숫자만 통과, 무효 비어있지 않은 값 = AND FALSE
-            if (operator === 'days_within') {
-              const days = /^\d{1,4}$/.test(String(value).trim()) ? parseInt(value) : NaN;
-              if (!isNaN(days)) {
+            if (operator === 'days_within' || operator === 'days_passed') {
+              const days = relativeDays(value);
+              if (days != null) {
                 // ★ 2026-09-27 한줄로 V2 R202 — 기준일 = KST(옛 UTC 날짜는 KST 00~09시에 하루가 더 들어갔다)
-                sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(kstDateMinusDays(new Date(), days));
+                // ★ 2026-11-20 R100 days_passed = 「N일 이상 지남」 = 칸 ≤ 오늘(KST) − N · 칸이 빈 고객(NULL) = 빠짐(여정 · AI 한줄로와 같음)
+                sql += ` AND ${columnRef} ${operator === 'days_within' ? '>=' : '<='} $${paramIndex++}`; params.push(kstDateMinusDays(new Date(), days));
               } else if (value != null && value !== '') { sql += ' AND FALSE'; }
             } else if (operator === 'birth_month') {
               const month = /^\d{1,2}$/.test(String(value).trim()) ? parseInt(value) : NaN;
@@ -341,13 +388,13 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
                 const monthExpr = birthMonthExpr(columnRef);
                 sql += ` AND ${monthExpr} = $${paramIndex++}`; params.push(month);
               }
-            } else if (operator === 'gte') {
+            } else if (operator === 'gte' || operator === 'date_gte') {   // ★ 2026-11-20 R101 date_gte = gte(자동마케팅 허용 표와 같은 표)
               // ★ 2026-08-14 (Codex 1R): 무효 날짜 = 조건 생략(대상 확대) 금지 — fail-closed 0건.
               //   값이 있는데 달력에 없으면 발송 대상이 넓어지는 쪽이 아니라 0으로 좁아져야 한다(0건=발송 차단 정책).
               const safe = safeDateValue(value);
               if (safe) { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(safe); }
               else if (value != null && value !== '') { sql += ' AND FALSE'; }
-            } else if (operator === 'lte') {
+            } else if (operator === 'lte' || operator === 'date_lte') {
               const safe = safeDateValue(value);
               if (safe) { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(safe); }
               else if (value != null && value !== '') { sql += ' AND FALSE'; }
@@ -362,6 +409,8 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
             } else if (operator === 'between') {
               // ★ 2026-08-14 (Codex 2R): 배열이 아닌 between 값 — 검증 자체를 건너뛰던 fail-open
               if (value != null && value !== '') sql += ' AND FALSE';
+            } else {
+              sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준(eq · date_lte 등) = 0건
             }
           } else {
             // 문자열 필드: contains 기본, eq/in도 지원
@@ -426,6 +475,10 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         } else if (operator === 'date_lte') {
           sql += ` AND ${customDateKeyExpr(cfCol)} <= $${paramIndex++}`;
           params.push(customDateKeyParam(value));
+        } else if (operator === 'days_within' || operator === 'days_passed') {
+          sql += customRelativeDaySql(cfCol, operator, value, () => `$${paramIndex++}`, params);   // ★ 2026-11-20 R100 회사 날짜 칸 상대 기준
+        } else {
+          sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준 = 0건
         }
       }
     }
@@ -451,9 +504,19 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
   // age (배열: [30, 39]) — ★ D79: age 컬럼 NULL이어도 birth_date에서 나이 동적 계산
   const ageExprMixed = `COALESCE(${col(alias, 'age')}, DATE_PART('year', AGE(${col(alias, 'birth_date')}))::int)`;
   const age = getValue(filters.age);
-  if (age && Array.isArray(age) && age.length === 2) {
-    sql += ` AND ${ageExprMixed} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
-    bindNumber(params, age[0], '나이'); bindNumber(params, age[1], '나이');
+  // ★ 2026-11-20 R101 — 옛: 배열 [최소, 최대]만 받고 {operator: gte|lte|eq} 를 말없이 뺐다(AI 칸 안내 = 숫자 칸 gte · lte) → structured 와 같은 기준 · 그 밖 = 0건
+  const ageOp = filters.age && typeof filters.age === 'object' && !Array.isArray(filters.age) ? String(filters.age.operator || '') : '';
+  const ageEmpty = age == null || age === '' || (Array.isArray(age) && age.length === 0);
+  if (!ageEmpty) {
+    if (Array.isArray(age) && age.length === 2) {
+      sql += ` AND ${ageExprMixed} BETWEEN $${paramIndex++} AND $${paramIndex++}`;
+      bindNumber(params, age[0], '나이'); bindNumber(params, age[1], '나이');
+    } else if (!Array.isArray(age) && (ageOp === 'eq' || ageOp === 'gte' || ageOp === 'lte')) {
+      sql += ` AND ${ageExprMixed} ${ageOp === 'eq' ? '=' : ageOp === 'gte' ? '>=' : '<='} $${paramIndex++}`;
+      bindNumber(params, age, '나이');
+    } else {
+      sql += ' AND FALSE';
+    }
   }
 
   // minAge/maxAge (기존 호환) — ★ D79: birth_date 폴백 동일 적용
@@ -512,7 +575,7 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
   // phone, sms_opt_in은 기본 WHERE절에 이미 포함 (필터 불필요)
   const SPECIAL_FIELDS = new Set([
     'gender', 'grade', 'region', 'age',  // normalize 헬퍼 사용
-    'phone', 'sms_opt_in',               // 기본 WHERE절에 포함
+    ...MIXED_BASE_WHERE_KEYS,             // 기본 WHERE절에 포함(phone · sms_opt_in · 판정 CT 와 같은 목록)
     'store_code',                          // 아래 별도 분기
   ]);
 
@@ -540,15 +603,17 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       } else if (operator === 'eq') {
         sql += ` AND ${numberRef} = $${paramIndex++}`;
         bindNumber(params, value, '조건 값');
+      } else {
+        sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준 = 0건
       }
     } else if (field.dataType === 'date') {
       // ★ D83: 날짜 필드 — safeDateValue로 비정상 입력 방어
       // ★ 2026-08-14 (Codex 2R): 엄격 숫자 검증 + 무효 비어있지 않은 값 = AND FALSE — 구조 경로와 동일
-      if (operator === 'days_within') {
-        const days = /^\d{1,4}$/.test(String(value).trim()) ? parseInt(value) : NaN;
-        if (!isNaN(days)) {
-          // ★ 2026-09-27 한줄로 V2 R202 — 기준일 = KST
-          sql += ` AND ${columnRef} >= $${paramIndex++}`;
+      if (operator === 'days_within' || operator === 'days_passed') {
+        const days = relativeDays(value);
+        if (days != null) {
+          // ★ 2026-09-27 한줄로 V2 R202 — 기준일 = KST · ★ 2026-11-20 R100 days_passed = 칸 ≤ 오늘(KST) − N(NULL 빠짐)
+          sql += ` AND ${columnRef} ${operator === 'days_within' ? '>=' : '<='} $${paramIndex++}`;
           params.push(kstDateMinusDays(new Date(), days));
         } else if (value != null && value !== '') { sql += ' AND FALSE'; }
       } else if (operator === 'birth_month') {
@@ -559,12 +624,12 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
           sql += ` AND ${monthExpr} = $${paramIndex++}`;
           params.push(month);
         } else if (value != null && value !== '') { sql += ' AND FALSE'; }
-      } else if (operator === 'gte') {
+      } else if (operator === 'gte' || operator === 'date_gte') {   // ★ 2026-11-20 R101 date_gte = gte(자동마케팅 허용 표와 같은 표)
         // ★ 2026-08-14 (Codex 1R): 무효 날짜 fail-closed — 구조 경로와 동일
         const safe = safeDateValue(value);
         if (safe) { sql += ` AND ${columnRef} >= $${paramIndex++}`; params.push(safe); }
         else if (value != null && value !== '') { sql += ' AND FALSE'; }
-      } else if (operator === 'lte') {
+      } else if (operator === 'lte' || operator === 'date_lte') {
         const safe = safeDateValue(value);
         if (safe) { sql += ` AND ${columnRef} <= $${paramIndex++}`; params.push(safe); }
         else if (value != null && value !== '') { sql += ' AND FALSE'; }
@@ -580,6 +645,8 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
       } else if (operator === 'between') {
         // ★ 2026-08-14 (Codex 2R): 배열이 아닌 between 값 — 검증을 건너뛰던 fail-open
         if (value != null && value !== '') sql += ' AND FALSE';
+      } else {
+        sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준(기준 없는 날짜 값 = eq 기본값 포함) = 0건
       }
     } else {
       // 문자열 필드: eq / in / contains
@@ -671,6 +738,10 @@ export function buildCustomerFilter(filters: any, options: FilterOptions): Filte
         } else if (operator === 'date_lte') {
           sql += ` AND ${customDateKeyExpr(cfCol)} <= $${paramIndex++}`;
           params.push(customDateKeyParam(value));
+        } else if (operator === 'days_within' || operator === 'days_passed') {
+          sql += customRelativeDaySql(cfCol, operator, value, () => `$${paramIndex++}`, params);   // ★ 2026-11-20 R100 회사 날짜 칸 상대 기준
+        } else {
+          sql += ' AND FALSE';   // ★ 2026-11-20 R101 표 밖 기준 = 0건
         }
       }
     }
@@ -771,4 +842,70 @@ export function buildFilterWhereClauseCompat(
     storeConsentMallCodes: brand.storeConsentMallCodes,
     inputFormat: 'mixed',
   });
+}
+
+// ============================================================
+// ★ 2026-11-20 R101 조건 모양 판정 한 곳(설계서 docs/2026-11-20-staff-tickets-four-design.md P2-2)
+// ============================================================
+
+export interface FilterConditionIssue {
+  /** 조건 키(표준 칸 key · custom_fields.custom_N · 회사 칸 key) — 화면 이름은 부르는 쪽이 붙인다 */
+  field: string;
+  /**
+   * empty = 값이 비어 변환이 건너뜀 · invalid = 값이 있는데 변환이 던짐 · 0건(AND FALSE) · 빈 매개변수 · SQL 0(표 밖 기준 · 모르는 칸)
+   * ignored = mixed 가 일부러 건너뛰는 키(MIXED_BASE_WHERE_KEYS · 기본 WHERE 가 소유) — 조건으로 안 붙는다는 사실만 알림
+   *   (저장 · 발송 거절 = 무시 · 「옮기지 못한 조건」 = 옮기지 못함으로 · 부르는 쪽이 고른다)
+   */
+  reason: 'empty' | 'invalid' | 'ignored';
+}
+
+/**
+ * 조건 키마다 그 키 하나만 같은 변환기(같은 입력 형식 · store_code = subquery · mixed 는 성별 정규화를 지나는 래퍼)로 바꿔 보고
+ * 깨진 조건을 돌려준다. 쓰는 자리(자동마케팅 · 자동발송 · 세그먼트 저장) · 실행 자리(자동발송 워커) · 「옮기지 못한 조건」 판정이 이 하나를 부른다.
+ *   ⛔ 「빈 조각 = 못 옮김」을 자리마다 sql.trim() 으로 재지 않는다(옛 = 0건 · 빈 매개변수 · 알려진 칸의 표 밖 기준을 각자 다르게 놓쳤다).
+ *   mixed 가 일부러 건너뛰는 키(MIXED_BASE_WHERE_KEYS) = reason ignored(조건이 안 붙는다는 사실 · 거절 문구는 무시).
+ */
+export function filterConditionIssues(filters: unknown, opts: { format?: 'mixed' | 'structured' } = {}): FilterConditionIssue[] {
+  if (filters === undefined || filters === null) return [];   // 조건 없음(부르는 쪽이 빈 조건 정책을 따로 가진다)
+  // ★ Codex 구현 1R #1 — 최상위 꼴이 객체가 아니면(배열 · 글자) 변환기가 키를 못 읽어 조건이 통째로 빠진다 = 깨진 조건(빈 조건으로 넘기지 않는다)
+  if (typeof filters !== 'object' || Array.isArray(filters)) return [{ field: '', reason: 'invalid' }];
+  const format = opts.format ?? 'mixed';
+  const out: FilterConditionIssue[] = [];
+  for (const [field, cond] of Object.entries(filters as Record<string, unknown>)) {
+    if (format === 'mixed' && MIXED_BASE_WHERE_KEYS.includes(field)) { out.push({ field, reason: 'ignored' }); continue; }
+    const plain = !!cond && typeof cond === 'object' && !Array.isArray(cond);
+    // structured 는 {operator, value} 만 조건이다(그 밖 꼴은 변환기가 건너뛴다 = 빠짐 = invalid)
+    if (format === 'structured' && !plain) { out.push({ field, reason: 'invalid' }); continue; }
+    const value = format === 'structured' ? (cond as any).value : getValue(cond);
+    if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
+      out.push({ field, reason: 'empty' });
+      continue;
+    }
+    let one: FilterResult;
+    try {
+      one = format === 'structured'
+        ? buildCustomerFilter({ [field]: cond }, { tableAlias: '', startParamIndex: 2, storeCodeMode: 'subquery', companyIdParamRef: '$1', inputFormat: 'structured' })
+        : buildFilterWhereClauseCompat({ [field]: cond }, 2);
+    } catch {
+      out.push({ field, reason: 'invalid' });
+      continue;
+    }
+    const badParam = one.params.some((p) => p === null || (typeof p === 'number' && Number.isNaN(p)));
+    if (!one.sql.trim() || /\bAND FALSE\b/.test(one.sql) || badParam) out.push({ field, reason: 'invalid' });
+  }
+  return out;
+}
+
+/**
+ * ★ 2026-11-20 R101 — 깨진 조건 거절 문구(쓰는 자리 · 실행 자리 공용). 칸 이름 = 표준 칸 표시 이름 · 회사 칸 = 「회사 칸」(내부 키 0).
+ *   문제가 없으면 null.
+ */
+export function filterConditionIssueMessage(issues: readonly FilterConditionIssue[]): string | null {
+  const broken = issues.filter((i) => i.reason !== 'ignored');   // 기본 WHERE 가 소유하는 키 = 거절 사유 아님
+  if (broken.length === 0) return null;
+  const names = [...new Set(broken.map((i) => {
+    const key = i.field.replace(/^custom_fields\./, '');
+    return getColumnFields().find((f) => f.fieldKey === key)?.displayName || (isValidCustomFieldKey(key) ? '회사 칸' : '알 수 없는 칸');
+  }))];
+  return `「${names.join('」 · 「')}」 조건을 쓸 수 없어요. 대상 조건을 다시 만들어 주세요.`;
 }

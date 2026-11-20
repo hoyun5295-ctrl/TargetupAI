@@ -28,7 +28,8 @@ import { extractJsonFromAiText, aiStr } from './ai-json';
 import { getCreditCost } from './ai-credit-calc';
 import { runChargedAi } from './ai-credit';
 import { callAIWithFallback } from '../services/ai';
-import { buildCustomerFilter } from './customer-filter';
+import { buildCustomerFilter, filterConditionIssues, RECURRING_RELATIVE_DATE_RULE } from './customer-filter';
+import { assertSegmentFilterUsable } from './saved-segments';
 import { ownerConsentSql } from './mall-consent';
 import { getOwnerCustomerScopeSql } from './store-scope';
 import { getFieldByKey, StandardFieldMapping } from './standard-field-map';
@@ -99,7 +100,7 @@ const STANDARD_FIELDS = [
   { key: 'grade', label: '회원 등급', type: 'string', allowed: 'eq / in', valueExample: '"VIP" 또는 ["VIP","골드"]' },
   { key: 'region', label: '지역', type: 'string', allowed: 'eq / in', valueExample: '"서울" 또는 ["서울","경기"]' },
   { key: 'birth_date', label: '생일', type: 'date', allowed: 'days_within / birth_month / gte / lte / between', valueExample: 'birth_month: 5 (5월생) / days_within: 30 (30일 안)' },
-  { key: 'recent_purchase_date', label: '최근 구매일', type: 'date', allowed: 'gte / lte / between / days_within', valueExample: 'gte: "2026-04-27" / days_within: 30' },
+  { key: 'recent_purchase_date', label: '최근 구매일', type: 'date', allowed: 'days_within / days_passed / gte / lte / between', valueExample: 'days_within: 30 (최근 30일 안) / days_passed: 90 (90일 이상 지남)' },
   { key: 'recent_purchase_amount', label: '최근 구매 금액', type: 'number', allowed: 'gte / lte / between', valueExample: '50000' },
   { key: 'total_purchase_amount', label: '누적 구매 금액', type: 'number', allowed: 'gte / lte / between', valueExample: '500000' },
   { key: 'purchase_count', label: '구매 횟수', type: 'number', allowed: 'gte / lte / between / eq', valueExample: '3' },
@@ -168,7 +169,7 @@ ${customFieldsBlock}
 
 [지원 operator]
 - eq (같음) / gte (이상) / lte (이하) / between ([최소, 최대]) / in (배열 안)
-- contains (문자열 포함) / days_within (N일 안, 날짜 전용) / birth_month (월만 매칭, 날짜 전용)
+- contains (문자열 포함) / days_within (최근 N일 안, 날짜 전용) / days_passed (N일 이상 지남, 날짜 전용) / birth_month (월만 매칭, 날짜 전용)
 
 [출력 형식: structured filter JSON 매트릭스]
 {
@@ -185,7 +186,7 @@ ${customFieldsBlock}
 6. 자동 완화 절대 X. 0건 매칭 위험이 있어도 사용자 조건 그대로 변환 의무
 7. 사용자가 조건 없이 전체 발송을 원하면(예: "전체 고객", "모든 고객에게", "전부 발송") = "all_customers": true + "filter": {} 출력
 8. 사용자가 회사가 붙인 이름(위 괄호 안)으로 말하면 그 칸의 키(custom_N)를 필드명으로 쓴다. "실제 값"이 적힌 칸은 그 값 중에서 띄어쓰기·대소문자 그대로 고른다. "(일부만 표시)" 칸에서 맞는 값이 목록에 없으면 사용자가 쓴 값을 그대로 쓴다
-9. 사용자 정의 날짜 칸에는 days_within·birth_month를 쓰지 않는다. 기준 날짜로 계산한 "YYYY-MM-DD" 값으로 gte / lte / between 을 쓴다
+9. 저장해 두고 다시 세는 조건이다. ${RECURRING_RELATIVE_DATE_RULE} 사용자 정의 날짜 칸에는 birth_month 를 쓰지 않는다. 사용자가 특정 날짜를 직접 말했을 때만 "YYYY-MM-DD" 값으로 gte / lte / between 을 쓴다
 
 [응답 형식: JSON 단일]
 \`\`\`json
@@ -305,32 +306,10 @@ async function convertNaturalLanguageToFilterWithAi(
   //   ★ 2026-10-12 조건마다 따로 본다. 옛: 전체 SQL 이 비었는지만 봐서, 빌더가 적용하지 못하는 조건(FIELD_MAP 밖 키 ·
   //   `custom_fields.custom_1` 형식 · 빈 값)이 다른 조건과 섞이면 그 조건만 조용히 빠지고 더 넓은 대상이 추출됐다.
   //   이제 하나라도 SQL 이 안 되면 멈춘다(빼고 진행하지 않는다 · "단 1의 오차도 없는 타겟").
-  const unapplied: string[] = [];
-  try {
-    for (const [key, condition] of Object.entries(filter)) {
-      let one: ReturnType<typeof buildCustomerFilter>;
-      try {
-        one = buildCustomerFilter({ [key]: condition }, {
-          tableAlias: 'c',
-          startParamIndex: 2,
-          storeCodeMode: 'skip',
-          inputFormat: 'structured',
-        });
-      } catch (e: any) {
-        // ★ 2026-11-05 C105 H4(R59) — 숫자 아닌 값은 이제 필터 CT 가 SQL 앞에서 멈춘다(INVALID_NUMBER_INPUT) = 옛 NaN 판정과 같은 「적용 못 한 조건」
-        if (e?.code === 'INVALID_NUMBER_INPUT') { unapplied.push(custom.labels[key] || getFieldByKey(key)?.displayName || key); continue; }
-        throw e;
-      }
-      // 값이 null(달력에 없는 날짜) · NaN(숫자 아닌 값)인 조건도 적용 못 한 것이다 — 그대로 두면 0건으로만 보여 이유를 모른다
-      const badValue = one.params.some((p) => p === null || (typeof p === 'number' && Number.isNaN(p)));
-      if (!one.sql.trim() || one.params.length === 0 || badValue) unapplied.push(custom.labels[key] || getFieldByKey(key)?.displayName || key);
-    }
-  } catch (e: any) {
-    throw new SegmentGenerationError(
-      'FILTER_VALIDATION_FAILED',
-      `필터 검증 실패: ${e.message}. 조건을 정정해주세요.`,
-    );
-  }
+  // ★ 2026-11-20 R101 — 판정 = 조건 모양 CT 하나(filterConditionIssues · 던짐 · 0건(AND FALSE) · 빈 매개변수 · SQL 0 · 빈 값 = 적용 못 한 조건)
+  //   옛 손 판정(키마다 변환 · 매개변수 0개 = 못 씀)과 같은 결과 + 알려진 칸의 표 밖 기준도 걸림
+  const unapplied: string[] = filterConditionIssues(filter, { format: 'structured' })
+    .map((i) => custom.labels[i.field] || getFieldByKey(i.field)?.displayName || i.field || '알 수 없는 칸');   // 빈 이름 = 최상위 꼴이 틀림(배열 · 글자)
   if (unapplied.length > 0) {
     throw new SegmentGenerationError(
       'FILTER_VALIDATION_FAILED',
@@ -494,6 +473,7 @@ export async function saveSegmentFromWizard(input: {
   naturalLanguage: string;
 }): Promise<{ id: string }> {
   const { companyId, userId, name, filter, naturalLanguage } = input;
+  assertSegmentFilterUsable(filter);   // ★ 2026-11-20 R101 쓰는 자리 판정(저장 세그먼트 CT 와 같은 판정)
 
   const result = await query(
     `INSERT INTO saved_segments (

@@ -228,7 +228,8 @@ describe('1. 미리보기 = 등록 0 · 대상은 번역 결과(계약) · 질�
     await expect(updateOperatorPreview(out.previewId!, CO, US, { revision: 0, answers: { 'field:포인트': 'custom_fields.nope' } })).rejects.toBeInstanceOf(PreviewInputError);
     translateMock.mockResolvedValueOnce(FILTERS);
     const after = await updateOperatorPreview(out.previewId!, CO, US, { revision: 0, answers: { 'field:포인트': 'custom_fields.custom_3' } });
-    expect(translateMock.mock.calls[1][0]).toMatchObject({ conditions: [{ term: '포인트', field: 'custom_fields.custom_3', operator: 'gte', value: 1000 }] });
+    // ★ 2026-11-20 P3 — 답 = 칸만 보낸다(기준 · 값은 번역기가 carry 의 원래 조건에서 채운다 · 규칙 = audience-condition 한 곳)
+    expect(translateMock.mock.calls[1][0].conditions).toEqual([{ term: '포인트', field: 'custom_fields.custom_3' }]);
     expect(translateMock.mock.calls[1][0].carry).toMatchObject({ kind: 'needs_choice', unresolved: [{ term: '포인트' }] });
     expect(after).toMatchObject({ kind: 'proposal', ready: true, revision: 1, audience: { mode: 'filters' } });
     expect(orchestrateMock).toHaveBeenCalledTimes(1);

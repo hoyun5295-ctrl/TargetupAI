@@ -24,7 +24,8 @@ export interface AudienceFieldOptionView {
   field: string; label: string; kind: 'standard' | 'custom'; dataType: 'string' | 'number' | 'date';
   fillCount: number; samples: string[]; disabled?: boolean;
 }
-export interface ConditionInput { term: string; field: string; operator: string; value: any }
+/** ★ 2026-11-20 P3 — 칸 고르기는 칸만 보낸다(operator · value 없음 = 서버가 그 말의 기준으로 채움 · 규칙 = 서버 audience-condition 한 곳) */
+export interface ConditionInput { term: string; field: string; operator?: string; value?: any }
 
 /** 서버 미리보기 · 승인 창 응답(automarketing-preview.ts PreviewOutcome · ApprovalPreview) */
 export interface OperatorPreviewData {
@@ -57,6 +58,8 @@ export interface OperatorPreviewData {
     conditions: AudienceConditionView[];
     unresolved: Array<{ term: string; operator?: string; value?: any }>;
     options: AudienceFieldOptionView[];
+    /** ★ 2026-11-20 P3 말 → 그 말의 기준과 맞지 않아 잠긴 칸 · 사유(서버 판정 그대로) */
+    pickLocks?: Record<string, Array<{ field: string; reason: string }>>;
     mapped: boolean;
     suggestKey: string | null;
   };
@@ -75,7 +78,8 @@ export interface OperatorPreviewData {
 
 const WEEK = ['일', '월', '화', '수', '목', '금', '토'];
 const SCHEDULE_ONCE: Record<string, string> = { weekly: '매주 1회', monthly: '매월 1회', yearly: '매년 1회' };
-const OP_TEXT: Record<string, string> = { gte: '이상', lte: '이하', eq: '', contains: '포함', days_within: '일 안', date_gte: '이후', date_lte: '이전', in: '중 하나', between: '사이', birth_month: '월' };
+// ★ 2026-11-20 R1 — 서버 기준 문구 표(customer-filter FILTER_OPERATOR_TEXT)와 같은 키 · 같은 글(계약 시험이 대조)
+const OP_TEXT: Record<string, string> = { gte: '이상', lte: '이하', eq: '', contains: '포함', days_within: '일 안', days_passed: '일 이상 지남', date_gte: '이후', date_lte: '이전', in: '중 하나', between: '사이', birth_month: '월' };
 const SUGGEST_LABEL: Record<string, string> = { went_quiet: '발길이 끊긴 고객', grade_up: '등급이 오른 고객' };
 /** 발송 가능 시각 = 서버 발송 창(30분 간격 · 끝 시각 전까지 · 서버가 다시 검증한다 · ★ 2026-10-25 원장 #40 옛: 08:00~20:30 숫자) */
 function timeChoices(p: SendPolicy | null): string[] {
@@ -211,12 +215,8 @@ export default function OperatorPreviewModal({
     if (!d || !pickFor || !pickField) return;
     const opt = d.audience.options.find((o) => o.field === pickField);
     if (!opt) return;
-    const ur = d.audience.unresolved.find((u) => u.term === pickFor);
-    const old = conds.find((c) => c.term === pickFor);
-    const numeric = opt.dataType === 'number';
-    const operator = ur?.operator || old?.operator || (numeric ? 'gte' : 'eq');
-    const value = ur?.value ?? old?.value ?? (numeric ? 1 : opt.samples[0] ?? '');
-    onConditions([...currentConditions().filter((c) => c.term !== pickFor), { term: pickFor, field: opt.field, operator, value }]);
+    // ★ 2026-11-20 P3 — 칸만 보낸다(기준 · 값 = 서버가 그 말의 기준으로 채움 · 옛 화면 규칙 「숫자 gte · 글자 eq」 삭제 = 날짜 칸 400 막다른 길의 한 벌)
+    onConditions([...currentConditions().filter((c) => c.term !== pickFor), { term: pickFor, field: opt.field }]);
   };
   const thresholdDirty = Object.keys(values).length > 0;
   const fixedDirty = d?.copy.mode === 'fixed' && (subject !== (d?.copy.subject || '') || body !== (d?.copy.body || ''));
@@ -421,7 +421,7 @@ export default function OperatorPreviewModal({
                     </div>
                   )}
                   {conds.map((c) => {
-                    const numeric = ['gte', 'lte', 'eq'].includes(c.operator) && typeof c.value === 'number';
+                    const numeric = ['gte', 'lte', 'eq', 'days_within', 'days_passed'].includes(c.operator) && typeof c.value === 'number';   // ★ 2026-11-20 일수 기준도 고쳐 다시 세기
                     return (
                       <div key={c.term} className="px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2">
                         <span className="text-[12px] text-slate-500 w-20 shrink-0">조건에 쓰는 칸</span>
@@ -463,18 +463,21 @@ export default function OperatorPreviewModal({
                       <div className="space-y-1.5 max-h-64 overflow-y-auto">
                         {d.audience.options.map((o) => {
                           const on = pickField === o.field;
+                          // ★ 2026-11-20 P3 — 그 말의 기준과 맞지 않는 칸 = 잠금 + 서버 사유(옛: 고르면 400 「…숫자 기준으로 다시 골라 주세요」 막다른 길)
+                          const lock = (d.audience.pickLocks?.[pickFor] || []).find((l) => l.field === o.field)?.reason || null;
+                          const off = !!o.disabled || !!lock;
                           return (
                             <button
                               key={o.field}
                               type="button"
-                              disabled={o.disabled}
+                              disabled={off}
                               onClick={() => setPickField(o.field)}
-                              className={`w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2.5 ${o.disabled ? 'border border-dashed border-slate-300 text-slate-400 cursor-not-allowed' : on ? 'border-2 border-violet-500 bg-white' : 'border border-slate-200 bg-white hover:border-slate-300'}`}
+                              className={`w-full text-left flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2.5 ${off ? 'border border-dashed border-slate-300 text-slate-400 cursor-not-allowed' : on ? 'border-2 border-violet-500 bg-white' : 'border border-slate-200 bg-white hover:border-slate-300'}`}
                             >
                               <span className={`w-4 h-4 rounded-full shrink-0 ${on ? 'border-[5px] border-violet-600' : 'border border-slate-300'}`} />
                               <span className="text-[13.5px] font-semibold">{o.label}</span>
                               <span className="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{o.kind === 'custom' ? '회사 전용 칸' : '표준 칸'} · {o.dataType === 'number' ? '숫자' : o.dataType === 'date' ? '날짜' : '글자'}</span>
-                              <span className="text-[12px] text-slate-500 sm:ml-auto">{o.disabled ? '값 있는 고객 0명 · 고를 수 없어요' : `값 있는 고객 ${o.fillCount.toLocaleString()}명${o.samples.length ? ` · 예: ${o.samples.join(' · ')}` : ''}`}</span>
+                              <span className="text-[12px] text-slate-500 sm:ml-auto">{o.disabled ? '값 있는 고객 0명 · 고를 수 없어요' : lock ? lock : `값 있는 고객 ${o.fillCount.toLocaleString()}명${o.samples.length ? ` · 예: ${o.samples.join(' · ')}` : ''}`}</span>
                             </button>
                           );
                         })}

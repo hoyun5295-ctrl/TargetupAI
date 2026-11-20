@@ -45,6 +45,13 @@ export function detectBenefits(input: string): BenefitDetectResult {
 export const BENEFIT_PLACEHOLDER = '[혜택 안내: 직접 수정해주세요]';
 
 /**
+ * ★ 2026-11-20 R33 · P5 — 문자 생성 길이 만드는 「혜택 값」 자리표 정확한 목록(사람 혜택 칸 답으로 채우는 자리 = 이것만 · applyBenefitToBody).
+ *   BENEFIT_PLACEHOLDER = 지어낸 혜택 바꾸기 · 목소리 뼈대 혜택 칸 / 「[혜택 내용을 입력해주세요]」 = AI 실패 비상 문안(services/ai getFallbackVariants).
+ *   ⛔ 그 밖 「[혜택…]」(「[혜택 적용 기한: 직접 입력해주세요]」 같은 다른 입력 자리 · 「[혜택몰]」 같은 정상 표기)은 채우지 않는다(Codex 설계 3R #1).
+ */
+export const BENEFIT_VALUE_PLACEHOLDERS: readonly string[] = [BENEFIT_PLACEHOLDER, '[혜택 내용을 입력해주세요]'];
+
+/**
  * ★ 2026-09-30 AI · 시스템이 넣는 "직접 채울 자리"(발송 길목 가드 send-placeholder-gate 가 본다).
  *   두 갈래로 잡는다.
  *   ① 꼴 — 대괄호 안이 "직접 입력/작성/수정해주세요"로 끝나는 자리. 혜택 자리 계열 전부가 이 꼴이다(문자 · 여정 · 인앱 · 이메일 · 템플릿).

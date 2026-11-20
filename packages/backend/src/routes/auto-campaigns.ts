@@ -17,7 +17,7 @@ import { query } from '../config/database';
 import { authenticate } from '../middlewares/auth';
 import { getStoreScope, storeMembershipClause } from '../utils/store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from '../utils/mall-consent';
-import { buildFilterQueryCompat } from '../utils/customer-filter';
+import { buildFilterQueryCompat, filterConditionIssues, filterConditionIssueMessage } from '../utils/customer-filter';
 // ★ 2026-10-15 B-1015-1 같은 뿌리: 조건이 WHERE 를 만들지 못하면(빈 객체 · 값이 빈 조건 · 객체 아님) 저장하지 않는다 — 자동발송은 조건 없는 전체 발송을 받지 않는다.
 //   판정은 실행 워커와 같은 빌더(buildFilterQueryCompat)로(Codex 3R: 브랜드 단독 조건 오판 방지).
 import { isEmptyAutoSendFilter } from '../utils/all-customers-signal';
@@ -390,6 +390,9 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
     if (isEmptyAutoSendFilter(target_filter, companyId)) {
       return res.status(400).json({ error: EMPTY_TARGET_FILTER_MESSAGE, code: 'TARGET_FILTER_EMPTY' });
     }
+    // ★ 2026-11-20 R101 — 조건 하나라도 깨졌으면(표 밖 기준 · 틀린 값 · 빈 값 · 모르는 칸) 저장하지 않는다(옛: 그 조건만 빠진 넓은 대상이 매 회차)
+    const createIssue = filterConditionIssueMessage(filterConditionIssues(target_filter));
+    if (createIssue) return res.status(400).json({ error: createIssue, code: 'TARGET_CONDITION_INVALID' });
     // ★ AI 문안생성 모드: 프리미엄 게이팅 + 필수값 검증
     if (ai_generate_enabled) {
       const aiPremium = await checkAiPremiumGating(companyId);
@@ -632,6 +635,9 @@ router.put('/:id', async (req: Request, res: Response) => {
       && (typeof target_filter !== 'object' || isEmptyAutoSendFilter(target_filter, companyId))) {
       return res.status(400).json({ error: EMPTY_TARGET_FILTER_MESSAGE, code: 'TARGET_FILTER_EMPTY' });
     }
+    // ★ 2026-11-20 R101 — 수정도 같은 판정(보내지 않으면 종전 값 유지)
+    const updateIssue = target_filter !== undefined && target_filter !== null ? filterConditionIssueMessage(filterConditionIssues(target_filter)) : null;
+    if (updateIssue) return res.status(400).json({ error: updateIssue, code: 'TARGET_CONDITION_INVALID' });
 
     // ★ AI 문안생성 모드 활성화/수정 시: 프리미엄 게이팅 + 필수값 검증
     const finalAiEnabled = ai_generate_enabled !== undefined ? ai_generate_enabled : ownership.campaign.ai_generate_enabled;

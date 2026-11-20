@@ -299,13 +299,15 @@ describe('buildTargetHintPromptBlock — 타겟 축 고정 지시 블록', () =>
 });
 
 describe('applyBenefitToBody — 혜택 placeholder 치환 (생성·발송 두 지점 공용)', () => {
-  it('[혜택 ...] 대괄호 placeholder를 관리자 입력값으로 전부 치환한다', async () => {
+  // ★ 2026-11-20 R33 · P5(Codex 설계 3R #1) — 채우는 자리 = 문자 생성 길의 혜택 값 자리표 목록(BENEFIT_VALUE_PLACEHOLDERS)만.
+  //   인앱 자리표(「[혜택 안내: 직접 작성해주세요]」)는 이 함수의 소비처(자동마케팅 · 플래너 · 오퍼레이터 · AI 한줄로)에 오지 않는다 → 그대로.
+  it('혜택 값 자리표 목록 둘을 관리자 입력값으로 치환한다 · 목록 밖 [혜택…] 은 그대로', async () => {
     const { applyBenefitToBody } = await import('./autosend-policy');
     const out = applyBenefitToBody(
-      '안녕하세요. [혜택 내용을 입력해주세요] 이번 달 준비했습니다. [혜택 안내: 직접 작성해주세요]',
+      '안녕하세요. [혜택 내용을 입력해주세요] 이번 달 준비했습니다. [혜택 안내: 직접 수정해주세요] [혜택 안내: 직접 작성해주세요]',
       '아메리카노 1잔 증정',
     );
-    expect(out).toBe('안녕하세요. 아메리카노 1잔 증정 이번 달 준비했습니다. 아메리카노 1잔 증정');
+    expect(out).toBe('안녕하세요. 아메리카노 1잔 증정 이번 달 준비했습니다. 아메리카노 1잔 증정 [혜택 안내: 직접 작성해주세요]');
   });
 
   it('혜택이 비어 있으면 원문 그대로(placeholder 보존 → 출구 가드 대상)', async () => {

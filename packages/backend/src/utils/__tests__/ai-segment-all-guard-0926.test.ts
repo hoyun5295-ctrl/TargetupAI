@@ -18,7 +18,8 @@ vi.mock('../ai-credit', async (orig) => ({
 vi.mock('../../config/database', () => ({ query: vi.fn(async () => ({ rows: [] })) }));
 const aiMock = vi.fn();
 vi.mock('../../services/ai', () => ({ callAIWithFallback: (...a: any[]) => aiMock(...a) }));
-vi.mock('../customer-filter', () => ({ buildCustomerFilter: vi.fn(() => ({ sql: 'AND 1=1', params: ['x'] })) }));
+// ★ 2026-11-20 R101 · R100 — 생성기가 같은 모듈의 판정 CT(filterConditionIssues) · 반복 조건 규칙 상수도 쓴다 → 나머지는 실물
+vi.mock('../customer-filter', async (orig) => ({ ...(await orig<any>()), buildCustomerFilter: vi.fn(() => ({ sql: 'AND 1=1', params: ['x'] })) }));
 
 import { convertNaturalLanguageToFilter, isPlainAllCustomersRequest } from '../ai-segment-generator';
 

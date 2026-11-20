@@ -19,7 +19,8 @@ describe('허브 LMS/MMS 제목 상한 = 다른 발송 화면과 같은 40자(CT
     expect(fmt).toContain('export const LMS_SUBJECT_MAX_CHARS = 40;');
   });
   it('허브의 세 자리(표시 산출 · 발송 · 입력칸)가 그 상수를 쓰고 17 은 남아 있지 않다', () => {
-    expect(page).toContain("import { validateMmsBeforeSend, LMS_SUBJECT_MAX_CHARS } from '../utils/formatDate';");
+    // ★ 2026-11-20 P5 — 같은 import 줄에 광고 합성 미러 · 바이트 셈이 붙었다(이름 목록은 무관 · 상수를 formatDate 에서 가져오는지만)
+    expect(page).toMatch(/import \{[^}]*\bLMS_SUBJECT_MAX_CHARS\b[^}]*\} from '\.\.\/utils\/formatDate';/);
     expect(page).toContain(".slice(0, LMS_SUBJECT_MAX_CHARS);");
     expect(page).toContain("resolveSubject(idx).slice(0, LMS_SUBJECT_MAX_CHARS)");
     expect(page).toContain('maxLength={LMS_SUBJECT_MAX_CHARS}');

@@ -65,6 +65,8 @@ import {
 // ★ D227+ 종량제: 풀분석 묶음 차감 — 진입점 1회, sub-agent는 묶음 컨텍스트로 0(과차감 방지)
 import { checkCredit, deductCreditOutcome, isChargedByKey, CreditSettleError } from '../utils/ai-credit';
 import { applyBenefitToBody, buildTargetHintPromptBlock, normalizeTargetHint } from '../utils/autosend-policy';
+import { eucKrByteLength, SMS_MAX_BYTES } from '../utils/message-byte';
+import { smsAdTotalBytes } from '../utils/sms-ad-bytes';
 import { currentUserId } from '../utils/request-context';
 import { runInCreditBundle } from '../utils/ai-credit-context';
 // ★ 2026-10-18 허브 대상 수 = 승인 발송과 같은 매장 범위(옛: 회사 전체를 셌다)
@@ -619,6 +621,11 @@ async function _orchestrateImpl(ctx: AgentContext): Promise<OrchestratorResult> 
   if (ctx.benefitContent && ctx.benefitContent.trim()) {
     for (const m of normalizedMessages) {
       m.body = applyBenefitToBody(m.body, ctx.benefitContent);
+      // ★ 2026-11-20 P5 — 글을 바꾼 뒤 파생 값(바이트 · 경고)도 바뀐 글로(옛 = 채우기 전 생성기 값 · 생성기가 SMS 만 값을 냄 = 그 꼴 유지)
+      if (String(targetResult.recommended_channel || '').toUpperCase() === 'SMS') {
+        m.byteCount = eucKrByteLength(m.body);
+        m.byteWarning = smsAdTotalBytes(m.body, !!targetResult.is_ad, ctx.companyInfo.reject_number) > SMS_MAX_BYTES;
+      }
     }
   }
 

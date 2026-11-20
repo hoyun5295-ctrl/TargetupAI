@@ -110,6 +110,9 @@ export function buildDynamicFiltersFromSelection(
       const dbCol = dbColMap[fieldKey] || fieldKey;
       if (typeof value === 'string' && value.startsWith('month:')) {
         filters[dbCol] = { operator: 'birth_month', value: parseInt(value.replace('month:', '')) };
+      } else if (dateDayMode(value) === 'over') {
+        // ★ 2026-11-20 R100 「N일 이상 지남」(over:N) = days_passed(서버 = 칸 ≤ 오늘(KST) − N · 회차마다 그날 기준)
+        filters[dbCol] = { operator: 'days_passed', value: dateDayCount(value) };
       } else {
         filters[dbCol] = { operator: 'days_within', value: parseInt(value) };
       }
@@ -251,6 +254,39 @@ export function extractionFieldTable(
 const DAY_LABELS: Record<string, string> ={ '7': '7일', '30': '30일', '90': '90일', '180': '180일', '365': '1년' };
 
 /**
+ * ★ 2026-11-20 R100 · R1 — 직접 타겟 날짜 칸 프리셋 · 값 꼴 · 글 한 곳(옛: 화면 두 파일에 프리셋 두 벌 · 칩 「이내」 · 요약 「최근 N일 안」 따로).
+ *   값 꼴 = 「N」(최근 N일 안 = days_within · 지금 그대로) · 「over:N」(N일 이상 지남 = days_passed · 새) · 「month:N」(생일 달).
+ */
+export const DATE_DAY_PRESETS: ReadonlyArray<{ label: string; days: number }> = [
+  { label: '7일', days: 7 }, { label: '30일', days: 30 }, { label: '90일', days: 90 }, { label: '180일', days: 180 }, { label: '1년', days: 365 },
+];
+export type DateDayMode = 'within' | 'over';
+/** 날짜 칸 값의 기준(over:N = 이상 지남 · 그 밖 = 최근 N일 안) */
+export function dateDayMode(v: unknown): DateDayMode {
+  return typeof v === 'string' && v.startsWith('over:') ? 'over' : 'within';
+}
+/** 날짜 칸 값의 일수(month: · 빈 값 = null) */
+export function dateDayCount(v: unknown): number | null {
+  const s = String(v ?? '');
+  if (!s || s.startsWith('month:')) return null;
+  const n = parseInt(s.startsWith('over:') ? s.slice(5) : s, 10);
+  return Number.isFinite(n) ? n : null;
+}
+/** 일수 + 기준 → 날짜 칸 값 */
+export function dateDayValue(days: number, mode: DateDayMode): string {
+  return mode === 'over' ? `over:${days}` : String(days);
+}
+/** 날짜 칸 값 → 글(칩 · 요약 공용) — 「30일 이내」 · 「90일 이상 지남」 · 「3월」 */
+export function dateFilterValueText(v: unknown): string {
+  const s = String(v ?? '');
+  if (!s) return '';
+  if (s.startsWith('month:')) return `${s.slice(6)}월`;
+  const n = dateDayCount(s);
+  const label = n == null ? s : (DAY_LABELS[String(n)] || `${n}일`);
+  return dateDayMode(s) === 'over' ? `${label} 이상 지남` : `${label} 이내`;
+}
+
+/**
  * ★ 2026-10-20 고른 조건 칩 글(추출 창 오른쪽 요약). 조건이 아니면 null.
  *   optionLabel = 선택지 값 → 화면 글(성별 'F' → '여성' 같은 표시 변환은 화면 CT 가 소유한다).
  */
@@ -283,10 +319,7 @@ export function conditionChipLabel(
     const shown = v.slice(0, 2).map((o: string) => optionLabel(k, o)).join('·');
     return v.length > 2 ? `${name} ${shown} 외 ${v.length - 2}` : `${name} ${shown}`;
   }
-  if (field.data_type === 'date') {
-    if (String(v).startsWith('month:')) return `${name} ${String(v).slice(6)}월`;
-    return `${name} ${DAY_LABELS[String(v)] || `${v}일`} 이내`;
-  }
+  if (field.data_type === 'date') return `${name} ${dateFilterValueText(v)}`;   // ★ 2026-11-20 R1 날짜 값 글 = CT 한 곳(over:N = 이상 지남)
   if (field.data_type === 'boolean') return `${name} ${v === 'true' ? '예' : '아니오'}`;
   return `${name} 「${String(v).trim()}」 포함`;
 }

@@ -7,6 +7,17 @@
  */
 import { UserFacingError } from './http-error';
 import { query } from '../config/database';
+import { filterConditionIssues, filterConditionIssueMessage } from './customer-filter';
+
+/**
+ * ★ 2026-11-20 R101 — 저장 세그먼트 조건(structured)이 하나라도 깨졌으면 저장하지 않는다(쓰는 자리 셋 = saveSegment · updateSegment · saveSegmentFromWizard).
+ *   옛: 받은 filter 를 검사 없이 저장 → 미리보기 · 다시 세기에서 그 조건만 빠진 넓은 수 또는 0명.
+ */
+export function assertSegmentFilterUsable(filter: unknown): void {
+  if (filter === undefined || filter === null) return;   // 조건 없는 저장(AI 한줄로 글만 저장 등) · 꼴 판정 = CT(배열 · 글자 = 깨진 조건 · Codex 구현 1R #1)
+  const msg = filterConditionIssueMessage(filterConditionIssues(filter, { format: 'structured' }));
+  if (msg) throw new UserFacingError(400, 'TARGET_CONDITION_INVALID', msg);
+}
 
 const MAX_SEGMENTS_PER_USER = 20;
 
@@ -55,6 +66,7 @@ export async function saveSegment(
   userId: string,
   data: SaveSegmentData
 ): Promise<SavedSegment> {
+  assertSegmentFilterUsable(data.filter);
   // 개수 제한 체크
   const countResult = await query(
     'SELECT COUNT(*)::int as cnt FROM saved_segments WHERE company_id = $1 AND user_id = $2',
@@ -137,6 +149,7 @@ export async function updateSegment(
   userId: string,
   data: Partial<SaveSegmentData>
 ): Promise<SavedSegment | null> {
+  assertSegmentFilterUsable(data.filter);
   const result = await query(
     `UPDATE saved_segments SET
       name = COALESCE($4, name),

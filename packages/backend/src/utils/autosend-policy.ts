@@ -7,7 +7,8 @@
  * - normalizeCdpAutoExecuteGate: 슈퍼관리자 자율발송 게이트 입력 정규화(clamp·화이트리스트).
  */
 import { clampInt } from './journey-points-trigger'; // 순수(DB 미import) CT — 테스트 DB-free 유지
-import { shiftToSendableHour, isWithinSendHours } from './send-time-util'; // 순수(설정 상수만) — ★ 2026-10-05 승인 기간 · ★ 2026-11-02 창 판정 본문
+import { shiftToSendableHour, isWithinSendHours } from './send-time-util';
+import { BENEFIT_VALUE_PLACEHOLDERS } from './copy-benefit-detector';   // ★ 2026-11-20 P5 혜택 값 자리표 목록(순수) // 순수(설정 상수만) — ★ 2026-10-05 승인 기간 · ★ 2026-11-02 창 판정 본문
 
 export function resolveAutoSendLeadMinutes(raw: number | null | undefined): number {
   const n = Math.floor(Number(raw));
@@ -411,7 +412,26 @@ export function applyBenefitToBody(body: string, benefit: string | null | undefi
   const v = String(benefit || '').trim();
   if (!v) return b;
   // 치환값은 함수로 — 문자열 치환은 $&·$$ 같은 특수 패턴을 해석해 관리자 입력에 $가 있으면 본문이 조용히 손상된다.
-  return b.replace(/\[혜택[^\]]*\]/g, () => v);
+  // ★ 2026-11-20 R33 · P5 — 채우는 자리 = 시스템 혜택 값 자리표 목록만(옛: 모든 「[혜택…]」 = 다른 입력 자리 · 「[혜택몰]」 까지 덮음 · Codex 설계 3R #1)
+  //   + 바로 뒤 짝 조사를 채운 글 받침으로(「[혜택 안내: …]을 드려요」 → 「30% 할인행사를 드려요」 · 뒤가 한글이면 조사 아님 = 「이번」)
+  return b.replace(BENEFIT_VALUE_PLACEHOLDER_RE, (_m, particle?: string) => v + (particle ? particleAfter(v, particle) : ''));
+}
+
+/** 혜택 값 자리표(공백 차이만 허용) + 바로 뒤에 붙은 짝 조사(그 뒤가 한글이 아닐 때만) */
+const BENEFIT_VALUE_PLACEHOLDER_RE = new RegExp(
+  `(?:${BENEFIT_VALUE_PLACEHOLDERS.map((p) => p.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*')).map((p) => p.replace(/^\\\[/, '\\[\\s*').replace(/\\\]$/, '\\s*\\]')).join('|')})(?:(으로|로|을|를|이|가|은|는|과|와)(?![가-힣]))?`,
+  'g',
+);
+
+/** 짝 조사 → 앞 글의 마지막 한글 음절 받침에 맞는 쪽(한글 음절로 끝나지 않으면 그대로 · ㄹ 받침 + 으로 = 로) */
+function particleAfter(word: string, particle: string): string {
+  const pairs: Record<string, [string, string]> = { 을: ['을', '를'], 를: ['을', '를'], 이: ['이', '가'], 가: ['이', '가'], 은: ['은', '는'], 는: ['은', '는'], 과: ['과', '와'], 와: ['과', '와'], 으로: ['으로', '로'], 로: ['으로', '로'] };
+  const pair = pairs[particle];
+  const code = word.slice(-1).charCodeAt(0);
+  if (!pair || !(code >= 0xac00 && code <= 0xd7a3)) return particle;
+  const jong = (code - 0xac00) % 28;
+  if (pair[0] === '으로') return jong !== 0 && jong !== 8 ? '으로' : '로';
+  return jong !== 0 ? pair[0] : pair[1];
 }
 
 /**

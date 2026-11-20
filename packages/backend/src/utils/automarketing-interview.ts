@@ -11,6 +11,7 @@ import { voiceFormQuestions, decideVoiceForm, type VoiceFormSlot, type VoiceForm
 import { pickAnswer, type LineAnswers, type LineQuestion, type LineQuestionOption } from './one-line-ct/questions';
 import { checkSchedulePairing, getSegmentContract, readRepeatAck, type LockUnlock, type SegmentKey } from './automarketing-segment';
 import type { AudienceTranslation } from './audience-translate';
+import { pickLockReason } from './audience-condition';
 
 export const OPERATOR_BENEFIT_MAX = 200;
 
@@ -81,13 +82,17 @@ export function buildOperatorQuestions(f: OperatorQuestionFacts): OperatorQuesti
         id: `field:${u.term}`, kind: 'choice', required: true,
         label: `「${u.term}」은(는) 어느 칸으로 볼까요?`,
         help: '값이 있는 칸만 고를 수 있어요. 맞는 칸이 없으면 대상을 넓혀서 보내지 않아요.',
-        options: tr.options.map((o) => ({
-          value: o.field,
-          label: o.label,
-          desc: o.disabled ? undefined : `값 있는 고객 ${o.fillCount.toLocaleString('ko-KR')}명${o.samples.length ? ` · 예: ${o.samples.join(' · ')}` : ''}`,
-          disabled: !!o.disabled,
-          reason: o.disabled ? '값 있는 고객이 없어 고를 수 없어요.' : undefined,
-        })),
+        // ★ 2026-11-20 P3 — 그 말의 기준과 맞지 않는 칸 = 잠금 + 사유(옛: 고르면 400 막다른 길 · 사유 = audience-condition 한 곳 · 번역기가 받는 검사 그대로)
+        options: tr.options.map((o) => {
+          const lock = o.disabled ? '값 있는 고객이 없어 고를 수 없어요.' : pickLockReason(u, o);
+          return {
+            value: o.field,
+            label: o.label,
+            desc: lock ? undefined : `값 있는 고객 ${o.fillCount.toLocaleString('ko-KR')}명${o.samples.length ? ` · 예: ${o.samples.join(' · ')}` : ''}`,
+            disabled: !!lock,
+            reason: lock || undefined,
+          };
+        }),
       });
     }
   }

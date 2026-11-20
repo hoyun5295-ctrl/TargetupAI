@@ -90,6 +90,7 @@
 | C143 | 미커밋 |
 | C144 | 8bfd3637 |
 | C145 | 2cee9d79 |
+| C146 | 미커밋 |
 
 ## §1 대기
 
@@ -2839,12 +2840,12 @@ COMMIT;
 ```sql ddl:C145-DDL-1
 SET lock_timeout = '3s';
 ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS ended_reason varchar(20);
-DO $ BEGIN
+DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_sessions_ended_reason_check') THEN
     ALTER TABLE user_sessions ADD CONSTRAINT user_sessions_ended_reason_check
       CHECK (ended_reason IS NULL OR ended_reason IN ('login_elsewhere', 'account_stopped', 'company_closed', 'logout', 'expired')) NOT VALID;
   END IF;
-END $;
+END $$;
 ```
 
 ### C145-DDL-2 · 공개 페이지 방문 기록 표(설계서 §3-1) · ★ 배포 뒤
@@ -2886,6 +2887,31 @@ CREATE INDEX IF NOT EXISTS idx_public_page_visits_page_browser ON public_page_vi
 - 기대: 설계서 §5 시트 1 · 2 전 항목 「맞음」 · 서버 = 꺼진 세션에 원인이 적힘 · 방문 행이 생김
 - 확인: 화면(Harold 또는 직원 · 시트 1 · 2) · 서버 셸 한 줄 둘 ① `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT ended_reason, count(*) FROM user_sessions WHERE is_active = false AND last_activity_at > now() - interval '1 day' GROUP BY 1 ORDER BY 2 DESC;"` ② `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT page, count(*), count(application_id), round(avg(visible_seconds)) FROM public_page_visits GROUP BY 1;"`
 - 결과: 1119 Harold 서버 확인 = ① 끝난 세션 원인 = 빈칸 96(DDL 전에 끈 행) · login_elsewhere 1(DDL 뒤 새 로그인 회전이 원인을 적음) ② public_page_visits jbn 1건 · 신청 0 · 머문 시간 2초 · nginx = 16:44:10 115.138.27.202 GET /api/public/jbn/plans 200 · POST visits/start 204 · 16:44:12 visits/beat 204 뒤 그 페이지 신호 0(2초 = 보이던 시간 그대로) / 남은 = 설계서 §5 시트 1(공개 페이지 끊김 · 원인 문구) · 시트 2(카카오톡 30초 · 신청 잇기 · 방문 기록 칸) 직원 실행
+
+### C146-P0 · 배포 앞 확인(읽기 전용 · 켜진 자동마케팅 · 저장 세그먼트의 조건 칸 × 기준 분포 = 설계서 §6 M4)
+- 카드: C146
+- 단계: 사전
+- 선행: 없음
+- 기대: 칸마다 기준이 표 안(기본 칸 = eq · in / 나이 · 숫자 = eq · gte · lte · between / 표준 날짜 = date_gte · date_lte · gte · lte · between · days_within · days_passed · birth_month(생일) / 회사 칸 = eq · in · contains · gte · lte · between · date_gte · date_lte · days_within · days_passed / 글자 칸 = 모두) · 표 밖 줄이 있으면 그 행은 배포 뒤 0명(차단) = 담당자 안내 대상(설계서 §3)
+- 확인: 서버 셸 한 줄(PG) `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT 'automarketing' AS src, c->>'field' AS field, c->>'operator' AS op, count(*) FROM continuous_operators o, jsonb_array_elements(CASE WHEN jsonb_typeof(o.audience_filters->'conditions') = 'array' THEN o.audience_filters->'conditions' ELSE '[]'::jsonb END) c WHERE o.status = 'active' GROUP BY 1, 2, 3 UNION ALL SELECT 'segment', e.key, e.value->>'operator', count(*) FROM saved_segments s, jsonb_each(CASE WHEN jsonb_typeof(s.filter_jsonb) = 'object' THEN s.filter_jsonb ELSE '{}'::jsonb END) e GROUP BY 1, 2, 3 ORDER BY 1, 4 DESC;"`
+- 결과: 1120 Harold 서버 출력 4줄 = 자동마케팅(mixed) gender eq 1 · age between 1 / 세그먼트(structured) points gte 2 · grade eq 2 = 칸 · 기준 모두 변환기 표 안(표 밖 기준 0 · 모르는 칸 0) · 값(빈 값 · 틀린 값)은 아래 C146-P0b 로 확인
+- 값 확인(C146-P0b): `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT 'automarketing' AS src, o.id::text AS id, o.audience_filters->'conditions' AS cond FROM continuous_operators o WHERE o.status = 'active' AND jsonb_typeof(o.audience_filters->'conditions') = 'array' UNION ALL SELECT 'segment', s.id::text, s.filter_jsonb FROM saved_segments s WHERE jsonb_typeof(s.filter_jsonb) = 'object' AND s.filter_jsonb <> '{}'::jsonb;"` · 결과: 1120 Harold 서버 출력 3행 = 자동마케팅 63a913de(age between [30, 49] · gender eq F) · 세그먼트 e40f2059(grade eq VIP · points gte 10000) · f3ceb383(grade eq 골든 · points gte 1000) = 값 모두 정상(빈 값 · 틀린 값 0) → **판정 CT 에 걸리는 행 0 · 배포 뒤 멈추는 회차 0 · 담당자 안내 대상 0** · C146-P0 닫힘
+
+### C146-H1 · 한줄로 배포(그룹웨어 오류접수 넷 + AI 한줄로 접수 · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C146
+- 단계: 한줄로 배포
+- 선행: C146-P0 · 설계 Codex 7R approve(1120) · 구현 Codex 7R approve(1120) · 커밋(Harold · 공유 문서(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md · status/BUGS.md · docs/ROOT-LEDGER.md)는 이 카드 줄만 · 다른 세션의 미커밋 줄이 같은 파일에 있다)
+- 기대: 설계서 §0(미가입 · 직접발송만 쓰는 회사 = 직접 타겟 날짜 칸에 토글 하나 · 기본 = 지금 그대로) · 발송 핵심 다섯 파일 무수정
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `filterConditionIssues` 파일 7(routes/auto-campaigns.js · services/ai-line.js · utils/ai-segment-generator.js · utils/audience-condition.js · utils/auto-campaign-worker.js · utils/customer-filter.js · utils/saved-segments.js) · dist/utils/ai-sms-layout.js · dist/utils/audience-condition.js 있음
+- 결과: (대기)
+
+### C146-S1 · 실측(직원 시트)
+- 카드: C146
+- 단계: 사후
+- 선행: C146-H1
+- 기대: 설계서 §5 시트 1 ~ 5 전 항목 「맞음」(시트 4 의 3 = 회신만)
+- 확인: 화면(직원 · 시트 1 ~ 5)
+- 결과: (대기)
 
 ## §2 덤프 뒤 적용분
 

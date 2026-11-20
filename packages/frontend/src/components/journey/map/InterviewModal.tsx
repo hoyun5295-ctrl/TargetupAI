@@ -177,10 +177,15 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
   const valueOf = (q: InterviewQuestion): string => answers[q.id] ?? recommendedOf(q) ?? '';
   const visible = (q: InterviewQuestion) => !(q.hideForTriggers || []).includes(triggerOf(q.planKey));
 
-  // ★ 2026-11-05 C103 F3 — 등록 번호가 하나라도 있으면 늘 묻는다(기본 번호 = 미리 고름 · 옛: 기본이 있거나 번호가 하나면 묻지 않아 고를 자리가 없었다 · 1104 접수 5)
+  // ★ 2026-11-05 C103 F3 → ★ 2026-11-20 E2-1 — 번호를 고칠 자리 = [시작] 카드 「보내는 번호」(C103 F3 에서 생김) · 만들기 창은 서버가 기본 번호를 정하지 못할 때만 묻는다
   const noCallback = !!prepared && prepared.callback.options.length === 0;
+  // ★ 2026-11-20 E2-1(임은지 접수 「여정 만들기 화면에서는 발신번호를 선택할 수 있는 란이 빠지고」) — 번호 칸 = 서버가 기본 번호를 정하지 못할 때만
+  //   (등록 2개 이상 · 기본 없음 = defaultPhone 빔 · 상품으로 만들기 창 ProductJourneyModal 과 같은 판정) · 번호는 [시작] 카드 「보내는 번호」에서 고친다
+  //   칸이 숨으면 보내는 번호 = 기본 번호 하나(세션 복원된 옛 선택 · 재시도는 숨은 칸에서 번호를 정하지 않는다 · Codex 설계 1R #5)
+  const askCallback = !!prepared && !noCallback && !prepared.callback.defaultPhone;
+  const sendPhone = askCallback ? callbackPhone : (prepared?.callback.defaultPhone || '');
   const totalCost = (prepared?.costPerJourney || 0) * plans.length;
-  const canBuild = plans.length > 0 && !noCallback && !!callbackPhone;
+  const canBuild = plans.length > 0 && !noCallback && !!sendPhone;
 
   /** only = 다시 시도할 계획(못 만든 것만 · 같은 요청 키). 없으면 처음부터 전부. */
   const build = async (only?: string[]) => {
@@ -204,7 +209,7 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
         const res = await fetch('/api/ai/operator/journeys-interview/design', {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ interviewId, plan: p, answers: planAnswers, callbackNumber: callbackPhone || undefined }),
+          body: JSON.stringify({ interviewId, plan: p, answers: planAnswers, callbackNumber: sendPhone || undefined }),
         });
         const d = await res.json().catch(() => null);
         if (d === null) throw new Error('본문을 못 읽음');   // 200 이어도 본문이 끊기면 만들어졌는지 모른다 = 결과 모름
@@ -340,7 +345,7 @@ export default function InterviewModal({ open, onClose, onFix, onFocusJourney, o
                 <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />{n}
               </p>
             ))}
-            {prepared && (
+            {prepared && (noCallback || askCallback) && (
               <section className={`rounded-xl border p-3 ${noCallback || !callbackPhone ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
                 <div className={`text-xs font-semibold ${noCallback || !callbackPhone ? 'text-amber-900' : 'text-slate-900'}`}>어느 번호로 보낼까요?</div>
                 {noCallback ? (

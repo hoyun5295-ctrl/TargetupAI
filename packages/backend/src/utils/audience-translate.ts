@@ -20,7 +20,10 @@ import { listSegmentAvailability, countOperatorAudienceFor, resolveOperatorStore
 import { normalizeTargetHint } from './autosend-policy';
 import { getColumnFields } from './standard-field-map';
 import { customFieldRef } from './safe-field-name';
-import { buildFilterWhereClauseCompat } from './customer-filter';
+import { isDateLikeValue, FILTER_OPERATOR_TEXT } from './customer-filter';
+// ★ 2026-11-20 P3 · Codex 구현 1R #3 — 칸 조건 검사 · 칸 고르기 = audience-condition 한 곳(순수) · 옛 이름은 다시 내보냄(소비처 무변경)
+import { AudienceConditionError, validateCondition, conditionsToFilters, conditionForPick, pickSourceOf } from './audience-condition';
+export { AudienceConditionError, validateCondition, conditionsToFilters };
 
 /** 칸 조건 하나(화면 · 저장 공용). 근거 숫자는 DB 가 채운다. */
 export interface AudienceCondition {
@@ -59,16 +62,7 @@ export type AudienceTranslation =
   | { kind: 'needs_choice'; conditions: AudienceCondition[]; unresolved: UnexpressedTerm[]; options: AudienceFieldOption[] }
   | { kind: 'blocked'; code: 'DATA_MISSING' | 'PAIRING' | 'NO_CONDITION' | 'TRANSLATE_FAILED'; reason: string; suggestKey?: SegmentKey | null; ackKey?: string; unlock?: LockUnlock; axisKey?: SegmentKey };
 
-/** 사용자가 고른 칸 조건이 칸 목록에 없거나 모양이 틀렸다(400) */
-export class AudienceConditionError extends Error {}
-
 const FREE_TEXT = new Set(['name', 'address', 'email']);
-const OPS_BY_TYPE: Record<'string' | 'number' | 'date', Set<string>> = {
-  string: new Set(['eq', 'in', 'contains']),
-  number: new Set(['eq', 'gte', 'lte', 'between']),
-  date: new Set(['days_within', 'gte', 'lte', 'date_gte', 'date_lte', 'birth_month']),
-};
-const CUSTOM_OPS = new Set(['eq', 'gte', 'lte', 'between', 'in', 'contains', 'date_gte', 'date_lte']);
 
 // ── 칸 목록 · 근거 ──
 
@@ -113,56 +107,18 @@ export async function loadAudienceFieldOptions(companyId: string, active?: Activ
     customKeys.forEach((k, i) => {
       const fillCount = Number(cc[`c${i}`]) || 0;
       const samples = (a.distinctValues[`custom_fields.${k}`] || []).slice(0, 3);
-      const numeric = samples.length > 0 && samples.every((s) => /^-?[\d,.]+$/.test(String(s)));
+      // ★ 2026-11-20 R100 — 표본이 모두 날짜 모양이면 날짜 칸(변환기가 이상 · 이하 · 상대 기준을 날짜로 비교하는 것과 같은 판정 isDateLikeValue)
+      const dated = samples.length > 0 && samples.every((s) => isDateLikeValue(s));
+      const numeric = !dated && samples.length > 0 && samples.every((s) => /^-?[\d,.]+$/.test(String(s)));
       const opt: AudienceFieldOption = {
         field: `custom_fields.${k}`, label: a.customFieldLabels[k], kind: 'custom',
-        dataType: numeric ? 'number' : 'string', fillCount, samples,
+        dataType: dated ? 'date' : numeric ? 'number' : 'string', fillCount, samples,
       };
       if (fillCount > 0) options.push(opt); else zero.push({ ...opt, disabled: true });
     });
   }
   options.sort((x, y) => y.fillCount - x.fillCount);
   return { options, zero, active: a };
-}
-
-/** 칸 조건 검증 — 칸 목록(값 있는 칸) · 연산자 · 값 모양. 틀리면 null(호출부가 고르기 필요로 돌린다). */
-export function validateCondition(
-  c: { term?: string; field: string; operator: string; value: any },
-  options: AudienceFieldOption[],
-  source: 'ai' | 'user',
-): AudienceCondition | null {
-  const opt = options.find((o) => o.field === c.field);
-  if (!opt) return null;
-  const op = String(c.operator || '').trim();
-  const allowed = opt.kind === 'custom' ? CUSTOM_OPS : (c.field === 'birth_date' ? OPS_BY_TYPE.date : OPS_BY_TYPE[opt.dataType]);
-  if (!allowed.has(op)) return null;
-  // 값이 비거나 숫자 문법이 아니면 조건이 아니다 — 숫자로 바꾸면 0 이 되어 「0 이상 = 전원」으로 넓어진다(Codex 2R · 3R: 「,」 도)
-  const present = (v: any) => v != null && String(v).trim() !== '';
-  const num = (v: any): number | null => {
-    const t = String(v ?? '').replace(/,/g, '').trim();
-    return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
-  };
-  let value = c.value;
-  if (op === 'between') {
-    if (!Array.isArray(value) || value.length !== 2) return null;
-    const nums = value.map(num);
-    if (nums.some((n: number | null) => n == null)) return null;
-    value = nums;
-  } else if (op === 'in') {
-    if (!Array.isArray(value) || value.length === 0 || !value.every(present)) return null;
-    value = value.map((v: any) => String(v)).slice(0, 50);
-  } else if (['gte', 'lte', 'days_within', 'birth_month'].includes(op) && opt.dataType !== 'date' || op === 'days_within' || op === 'birth_month') {
-    const n = num(value);
-    if (n == null) return null;
-    value = n;
-  } else {
-    if (value == null || String(value).trim() === '') return null;
-    value = String(value).trim().slice(0, 100);
-  }
-  return {
-    term: String(c.term || opt.label).slice(0, 40), field: opt.field, label: opt.label, operator: op, value,
-    fillCount: opt.fillCount, samples: opt.samples, source,
-  };
 }
 
 /**
@@ -180,40 +136,8 @@ export function termUniquer(): (raw: string | null | undefined) => string {
   };
 }
 
-/**
- * 칸 조건 → 컴파일용 filters(buildFilterWhereClauseCompat 형식) — 조건 → SQL 의 유일한 다리(등록 검증 · 미리보기 · 회차 · 발송 공용).
- *   ⛔ 조건이 하나라도 사라지면 대상이 넓어진다(Codex 1R) — 사라지는 입력은 여기서 거절한다(AudienceConditionError).
- *     ① 같은 칸은 이상 + 이하 한 쌍(between)만 — 그 밖 겹침은 앞 조건이 덮인다.
- *     ② 조건마다 SQL 이 실제로 나와야 한다 — 지원하지 않는 연산자는 빈 조각이 된다(★ 2026-10-18 매장 코드는 이제 소속 표 조건으로 나온다 · customer-filter 0-3).
- */
-export function conditionsToFilters(
-  conditions: Array<Pick<AudienceCondition, 'field' | 'operator' | 'value'> & { label?: string }>,
-): Record<string, { operator: string; value: any }> {
-  const out: Record<string, { operator: string; value: any }> = {};
-  const names: Record<string, string> = {};
-  for (const c of conditions) {
-    names[c.field] = c.label || names[c.field] || c.field;
-    const prev = out[c.field];
-    if (prev) {
-      if ((prev.operator === 'gte' && c.operator === 'lte') || (prev.operator === 'lte' && c.operator === 'gte')) {
-        const lo = prev.operator === 'gte' ? prev.value : c.value;
-        const hi = prev.operator === 'lte' ? prev.value : c.value;
-        out[c.field] = { operator: 'between', value: [lo, hi] };
-        continue;
-      }
-      throw new AudienceConditionError(`「${names[c.field]}」 칸에 조건이 겹쳐요. 한 칸에는 조건 하나(이상 · 이하는 한 쌍까지)만 쓸 수 있어요.`);
-    }
-    out[c.field] = { operator: c.operator, value: c.value };
-  }
-  for (const [field, f] of Object.entries(out)) {
-    if (!buildFilterWhereClauseCompat({ [field]: f }, 2).sql.trim()) {
-      throw new AudienceConditionError(`「${names[field]}」 조건은 발송 대상 조건으로 쓸 수 없어요. 다른 칸을 골라 주세요.`);
-    }
-  }
-  return out;
-}
-
-const OP_TEXT: Record<string, string> = { gte: '이상', lte: '이하', eq: '', contains: '포함', days_within: '일 안', date_gte: '이후', date_lte: '이전' };
+// ★ 2026-11-20 R1 — 기준 문구 = 변환기 옆 한 표(FILTER_OPERATOR_TEXT)
+const OP_TEXT = FILTER_OPERATOR_TEXT;
 
 /** 칸 조건 → 사람 말 한 줄(화면 기준 · 문안 대상 블록 공용). 예: 「잔여멤버쉽 1,000 이상 · 등급 VIP」 */
 export function describeConditions(conditions: Array<Pick<AudienceCondition, 'label' | 'operator' | 'value'>>): string {
@@ -222,6 +146,7 @@ export function describeConditions(conditions: Array<Pick<AudienceCondition, 'la
     if (c.operator === 'between' && Array.isArray(c.value)) return `${c.label} ${fmt(c.value[0])}~${fmt(c.value[1])}`;
     if (c.operator === 'in' && Array.isArray(c.value)) return `${c.label} ${c.value.join('·')}`;
     if (c.operator === 'birth_month') return `${c.label} ${fmt(c.value)}월`;
+    if (c.operator === 'days_passed') return `${c.label} ${fmt(c.value)}${OP_TEXT.days_passed}`;   // 「최근구매일 90일 이상 지남」
     const tail = OP_TEXT[c.operator] ?? '';
     return `${c.label} ${fmt(c.value)}${tail ? ` ${tail}` : ''}`;
   }).join(' · ');
@@ -241,7 +166,7 @@ export async function translateAudience(input: {
   segmentKey?: string | null;
   segmentParams?: Record<string, number> | null;
   targetHint?: string | null;
-  conditions?: Array<{ term?: string; field: string; operator: string; value: any }> | null;
+  conditions?: Array<{ term?: string; field: string; operator?: string; value?: any }> | null;   // ★ 2026-11-20 P3 기준 없음 = 칸만 고름(보관본 기준으로 채움)
   /** 창 편집 — 지금 창의 번역. 그 번역의 말(term)은 하나도 빠지지 않아야 한다(이미 정한 말 = 그대로 · 못 정한 말 = 남으면 계속 고르기) */
   carry?: AudienceTranslation | null;
   /** ★ C142 — 담당자가 직접 고른 반복 짝의 지문(보관본 · 승인 기록) · 지금 짝 지문과 같을 때만 통과 */
@@ -293,7 +218,15 @@ export async function translateAudience(input: {
   if (Array.isArray(input.conditions) && input.conditions.length > 0) {
     // ★ C142 — 짝 판정은 조건이 확정된 뒤(지문 = 고른 조건) · 아래 filters 반환 자리
     if (input.conditions.length > 8) throw new AudienceConditionError('조건은 8개까지 고를 수 있어요.');   // 잘라 내면 그만큼 넓어진다
-    const validated = input.conditions.map((c) => validateCondition(c, options, 'user'));
+    // ★ 2026-11-20 P3 — 기준 없이 칸만 온 조건(화면 「칸 고르기」 · 인터뷰 칸 답) = 보관본의 그 말 기준으로 서버가 채운다(규칙 한 곳)
+    const filled = input.conditions.map((c): { term?: string; field: string; operator: string; value: any } => {
+      if (String(c.operator || '').trim()) return { ...c, operator: String(c.operator), value: c.value };
+      const opt = options.find((o) => o.field === c.field);
+      const made = opt ? conditionForPick(pickSourceOf(input.carry, c.term), opt) : null;
+      if (!made) throw new AudienceConditionError(`「${c.term || '이 조건'}」은(는) 「${opt?.label || '고른'}」 칸으로 볼 수 없어요. 다른 칸을 골라 주세요.`);
+      return made;
+    });
+    const validated = filled.map((c) => validateCondition(c, options, 'user'));
     if (validated.some((v) => !v)) throw new AudienceConditionError('고르신 칸이나 기준을 쓸 수 없어요. 값이 있는 칸과 숫자 기준으로 다시 골라 주세요.');
     const picked = validated as AudienceCondition[];
     conditionsToFilters(picked);   // 겹침 · SQL 로 안 나오는 조건 = 400(저장 전에)

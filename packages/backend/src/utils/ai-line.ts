@@ -16,6 +16,7 @@ import { linePeriodMentioned, lineFingerprint } from './one-line-steps';
 import { kstDateTag } from './ai-credit-calc';
 import { aiLineComposePrice } from './ai-credit-price';
 import { SENDABLE_RECIPIENTS_LIMIT } from './operator-recipients';
+import { FILTER_OPERATOR_TEXT } from './customer-filter';   // ★ 2026-11-20 R1 기준 문구 한 표
 
 // ★ 2026-10-19 스위치 삭제(Harold 「스위치고 뭐고」) — 새 흐름 = 전 회사 · AI 한줄로의 유일한 흐름.
 
@@ -319,6 +320,7 @@ export function filterChipText(key: string, cond: unknown, label: string): strin
   if (op === 'date_gte') return `${L} ${String(v)} 이후`;
   if (op === 'date_lte') return `${L} ${String(v)} 이전`;
   if (op === 'days_within') return `${L} ${fmtNum(v)}일 안`;
+  if (op === 'days_passed') return `${L} ${fmtNum(v)}${FILTER_OPERATOR_TEXT.days_passed}`;   // ★ 2026-11-20 R100 「최근구매일 90일 이상 지남」(문구 = 변환기 옆 한 표)
   if (key === 'region' || key === 'address') return String(v);
   if (op === 'contains') return `${L} 「${String(v)}」 포함`;
   return `${L} ${String(v)}`;

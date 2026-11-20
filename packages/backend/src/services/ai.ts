@@ -5,12 +5,16 @@ import { FIELD_MAP, getColumnFields, applyFieldAliases, applyFieldDisplayNames }
 import { query } from '../config/database';
 import { currentUserId } from '../utils/request-context';
 import { AI_MODELS, AI_MAX_TOKENS, claudeRequestShape, copyThinkingEnabled, gptRequestShape, resolveMaxTokens } from '../config/defaults';
-import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
+import { buildFilterWhereClauseCompat, RECURRING_RELATIVE_DATE_RULE } from '../utils/customer-filter';   // ★ 2026-11-20 R100 반복 조건 날짜 규칙(순수 · 변환기 기준 옆)
 import { buildJourneySafetyFilter } from '../utils/journey-safety-filter';
 import { ownerConsentTrue, ownerBrandConsent } from '../utils/mall-consent';
 import { isPlainAllCustomersRequest } from '../utils/all-customers-signal';   // ★ 2026-10-15 B-1015-1 전체 고객 신호
 import { cleanLeftoverVars, ensureSenderName } from '../utils/messageUtils';
 import { calculateKoreanBytes, stripEmojis } from '../utils/copy-exit-guards';
+import { eucKrByteLength } from '../utils/message-byte';
+import { tidyAiSmsLayout } from '../utils/ai-sms-layout';
+export { RECURRING_RELATIVE_DATE_RULE };
+import { smsAdTotalBytes } from '../utils/sms-ad-bytes';
 // ★ D210+ Phase 2 (Harold 명시 2026-05-23): CT-58 — 회사별 customer DB 실측 데이터 프로필.
 //   AI 시스템 프롬프트 안 동적 주입 → 어설픈 개인화 사고 차단.
 import { CompanyDataProfile, formatProfileForAiPrompt } from '../utils/company-data-profile';
@@ -1438,10 +1442,9 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
       // ★ #9: SMS 바이트 초과 시 경고 로그 + 프론트 표시용 byte_count/byte_warning 추가
       if (channel === 'SMS') {
         for (const variant of result.variants) {
-          const msgBytes = calculateKoreanBytes((variant as any).message_text || '');
-          const totalBytes = isAd
-            ? msgBytes + 6 + 1 + 8 + (rejectNumber ? rejectNumber.replace(/-/g, '').length : 10)
-            : msgBytes;
+          // ★ 2026-11-20 P5 — 문자 길이 판정 CT · 광고 합계 = 실제 발송 합성 글 길이(옛 손 계산식 6 + 1 + 8 + 번호 자리 폐기 · sms-ad-bytes)
+          const msgBytes = eucKrByteLength((variant as any).message_text || '');
+          const totalBytes = smsAdTotalBytes((variant as any).message_text || '', !!isAd, rejectNumber);
           (variant as any).byte_count = msgBytes;
           (variant as any).byte_warning = totalBytes > 90;
           if (totalBytes > 90) {
@@ -1824,6 +1827,7 @@ ${buildFilterFieldsPrompt(fields)}
 4. unexpressed 에는 사용자가 쓴 말(term)과, 칸이 정해지면 쓸 연산자 · 값을 함께 적는다(예: 포인트가 있는 고객 = {"term":"포인트","operator":"gte","value":1}).
 5. 값은 목록에 나온 실제 값만 쓴다.
 6. 응답은 JSON 하나만: {"conditions": [{"term": "사용자가 쓴 말", "field": "칸 key", "operator": "연산자", "value": 값}], "unexpressed": [], "everyone": false}
+7. ${RECURRING_RELATIVE_DATE_RULE} unexpressed 에 넣는 날짜 조건도 같은 꼴로 적는다.
 다른 텍스트 절대 금지.`;
   try {
     const raw = await callAIWithFallback({
@@ -2625,6 +2629,8 @@ function validateAndNormalizeRefinedCandidates(
     // (z) ★ D152+ Harold님 지적: SMS/LMS EUC-KR 인코딩 — 이모지(😊⚡✨🤝) 발송 시 깨짐/물음표 변환/누락 사고.
     //   AI가 박은 이모지 자동 제거. SMS 호환 특수문자(★/♥/▶/♨ 등 Dashboard:3410 리스트)만 통과.
     text = stripIncompatibleEmojis(text);
+    // ★ 2026-11-20 R102 — 꼴 정리(마크다운 링크 = 실제 주소 · ▶ 를 주소 줄로 · 문장 가운데 ★ = 줄 머리 · 줄 머리 공백 · ai-sms-layout 한 곳)
+    text = tidyAiSmsLayout(text);
 
     // (c) AI가 박은 무료수신거부 패턴 제거
     text = stripRejectNumberPatterns(text);
@@ -2655,6 +2661,7 @@ function validateAndNormalizeRefinedCandidates(
     const factSource = `${originalMessage}\n${rejectFooterToRestore}`;
     // ★ 2026-10-24 세 채널 구조체크 ② — 다시 쓰기 판정 하나(새 숫자 ∥ 지어낸 혜택 ∥ 근거 없는 효능 · rewriteAddsFacts)
     // ★ 2026-10-31 원문 주소를 뺀(바꾼) 후보도 뺀다(설계서 docs/2026-10-31-ai-line-answer-link-design.md P6 · 지시문 「URL 100% 보존」을 판정으로 · 최종 다듬은 글 기준)
+    // ★ 2026-11-20 R102 — 주소 빠짐 대조 = 변환 없이 두 글 그대로 · 목적지 읽기(마크다운 목적지 포함)는 textLinks 한 곳(Codex 구현 3R · 4R = 두 쪽에 다른 변환을 걸거나 목적지 읽는 함수가 둘이면 그 사이로 샌다)
     if (rewriteAddsFacts(text, factSource) || rewriteDropsLinks(text, originalMessage)) {
       dropCounts.fabricated += 1;
       continue;

@@ -70,7 +70,7 @@ import { useCustomerDataGate, CustomerDataRequiredBanner, CustomerDataRequiredMo
 import MmsUploadModal from '../components/MmsUploadModal';
 import { useMmsUpload } from '../hooks/useMmsUpload';
 import { toMmsImagePaths } from '../utils/mmsImage';
-import { validateMmsBeforeSend, LMS_SUBJECT_MAX_CHARS } from '../utils/formatDate';
+import { validateMmsBeforeSend, LMS_SUBJECT_MAX_CHARS, buildAdMessageFront, calculateSmsBytes } from '../utils/formatDate';
 import HubRecommendModal from '../components/ai-line/HubRecommendModal';   // ★ 2026-10-19 추천 창 공용(대시보드 「오늘의 추천」과 같이)
 import { buildHubRecs, hubRecAction, hubRecLabel, loadSelfDiagnosis, stashJourneyObjective, type AutoMarketingSummary, type CompanyHealthDiagnosis, type DiagnosisBrief, type HubRec } from '../lib/hub-recommend';
 
@@ -986,9 +986,9 @@ export default function AiLinePage() {
         throw new Error(mmsErr);
       }
       // SMS 90byte 초과 차단 — 광고 문구 잘림/컴플라이언스 손실 방지 (LMS 권장)
+      // ★ 2026-11-20 P5 — 셈 = 실제 발송 합성 글(광고면 (광고) · 무료거부 꼬리 포함 · 서버 buildAdMessage 미러 · 옛 = 본문만 셈 → 광고 꼬리로 넘는 글이 통과)
       if (channel === 'SMS') {
-        let sb = 0;
-        for (let i = 0; i < body.length; i++) sb += body.charCodeAt(i) > 0x7F ? 2 : 1;
+        const sb = calculateSmsBytes(buildAdMessageFront(body, 'SMS', !!adEnabled, proposal?.channel?.rejectNumber || ''));
         if (sb > 90) throw new Error('본문이 SMS(90byte)를 초과합니다. 채널을 LMS로 변경 후 발송해주세요.');
       }
 
@@ -1587,6 +1587,8 @@ export default function AiLinePage() {
                 return bytes;
               };
               const activeBytes = bytesLen(activeBody);
+              // ★ 2026-11-20 P5 — SMS 경고 셈 = 실제 발송 합성 글(서버 buildAdMessage 미러 · 080 번호가 비어도 (광고) · 꼬리를 셈) · 표시 글 · 위 바이트 표시는 그대로
+              const smsSendBytes = calculateSmsBytes(buildAdMessageFront(rawActiveBody, 'SMS', !!isAd, rawReject));
 
               return (
                 // ★ D210+ Phase 2-fix3 (Harold 명시 2026-05-23): lg:grid-cols-5 매트릭스
@@ -1891,7 +1893,7 @@ export default function AiLinePage() {
                         )}
 
                         {/* SMS 바이트 경고 */}
-                        {effectiveChannel === 'SMS' && activeBytes > 90 && (
+                        {effectiveChannel === 'SMS' && smsSendBytes > 90 && (
                           <p className="flex items-center gap-1 text-[11px] text-amber-700">
                             <AlertTriangle className="w-3 h-3 shrink-0" />
                             SMS 90byte 초과분은 잘립니다 · LMS 권장

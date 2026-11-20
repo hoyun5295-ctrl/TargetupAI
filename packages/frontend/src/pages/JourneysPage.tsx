@@ -2848,7 +2848,8 @@ export default function JourneysPage() {
         quickStarts={quickStartItems}
         onGradeOrder={() => setGradeOrderOpen(true)}
         focusLabel="작업 화면 열기"
-        onFocusJourney={(id) => openWorkspace(id)}
+        // ★ 2026-11-20 E2-2(임은지 접수 「여정 생성 후 '시작' 페이지로 화면이 오픈」) — 만든 직후만 [시작] 칸(보내는 번호 · 개별회신번호를 먼저 보게) · 다른 길의 첫 칸 규칙 무변경
+        onFocusJourney={(id) => openWorkspace(id, 'start')}
         onCreated={(made) => {
           void loadAll();
           // 다음 수 안내의 근거 = 서버가 만든 여정의 실제 시작 신호(옛 저장 응답과 같은 규칙)

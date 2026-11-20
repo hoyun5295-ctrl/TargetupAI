@@ -157,7 +157,8 @@ describe('TX · TZ · YEAR', () => {
   it('R202 days_within 기준일 = KST', () => {
     const f = src('customer-filter.ts');
     expect(f).not.toContain("daysAgo.toISOString().split('T')[0]");
-    expect((f.match(/kstDateMinusDays\(new Date\(\), days\)/g) || []).length).toBe(2);
+    // ★ 2026-11-20 R100 — 세 자리 = 표준 날짜 칸 두 형식 + 회사 날짜 칸 상대 기준 CT(customRelativeDaySql · 두 형식이 같이 부름)
+    expect((f.match(/kstDateMinusDays\(new Date\(\), days\)/g) || []).length).toBe(3);
   });
   it('R274 싱크 오늘 = KST 0시 CT', () => {
     const s = src('..', 'routes', 'admin-sync.ts');

@@ -31,7 +31,7 @@ import { runWithRegenBudget, generationSlotsLeft } from './copy-exit-guards';
 import { storeMembershipClause } from './store-scope';
 import { resolveConsentScope, consentSql, brandConsentOption } from './mall-consent';
 import { query } from '../config/database';
-import { buildFilterQueryCompat } from './customer-filter';
+import { buildFilterQueryCompat, filterConditionIssues, filterConditionIssueMessage } from './customer-filter';
 import { getOpt080Number, prepareFieldMappings, prepareSendMessage, composeSpamCheckText, kakaoFallbackSpamItems } from './messageUtils';
 import { checkSpamBlockBeforeCharge } from './spam-block';
 import { fillAlimtalkVarMap } from './alimtalk-vars';
@@ -786,6 +786,13 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     if (!filterResult.where.trim()) {
       console.error(`${logPrefix} 발송 대상 조건이 비어 있어 보내지 않음 (조건 없는 전체 발송 차단) target_filter=${JSON.stringify(ac.target_filter).slice(0, 200)}`);
       await markFailed(ac, '발송 대상 조건이 비어 있어 보내지 않았습니다 (조건 없는 전체 발송 차단). 자동발송을 열어 대상 조건을 다시 설정해주세요.');
+      return;
+    }
+    // ★ 2026-11-20 R101 — 저장된 조건 하나라도 깨졌으면(표 밖 기준 · 틀린 값 · 빈 값 · 모르는 칸) 보내지 않는다(옛: 그 조건만 빠진 넓은 대상 · 같은 실패 꼴 = 5회 누적 시 자동 일시정지)
+    const conditionIssue = filterConditionIssueMessage(filterConditionIssues(ac.target_filter));
+    if (conditionIssue) {
+      console.error(`${logPrefix} 발송 대상 조건이 깨져 보내지 않음 target_filter=${JSON.stringify(ac.target_filter).slice(0, 200)}`);
+      await markFailed(ac, `${conditionIssue} 자동발송을 열어 대상 조건을 다시 설정해주세요.`);
       return;
     }
 

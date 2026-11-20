@@ -89,8 +89,8 @@ export default function BrandBasicInfoTab({ apiBase, token, onToast }: Props) {
       <section className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
         <div className="flex items-center gap-2 text-xs font-semibold text-slate-600"><Building2 className="w-4 h-4 text-sky-700" /> 회사·사업자 정보</div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div><label className={LB}>브랜드명</label><input className={IN} value={info.brand_name || ''} onChange={(e) => setInfo((s) => ({ ...s, brand_name: e.target.value }))} placeholder="예: 폴라초이스" /></div>
-          <div><label className={LB}>상호(법인명)</label><input className={IN} value={info.company_name || ''} onChange={(e) => setInfo((s) => ({ ...s, company_name: e.target.value }))} placeholder="예: (주)폴라초이스코리아" /></div>
+          <div><label className={LB}>브랜드명</label><input className={IN} value={info.brand_name || ''} onChange={(e) => setInfo((s) => ({ ...s, brand_name: e.target.value }))} placeholder="예: 한줄로" /></div>
+          <div><label className={LB}>상호(법인명)</label><input className={IN} value={info.company_name || ''} onChange={(e) => setInfo((s) => ({ ...s, company_name: e.target.value }))} placeholder="예: 주식회사 인비토" /></div>
           <div><label className={LB}>사업자등록번호</label><input className={IN} value={info.business_number || ''} onChange={(e) => setInfo((s) => ({ ...s, business_number: e.target.value }))} placeholder="000-00-00000" /></div>
           <div>
             <label className={LB}>업종 (문안·템플릿 추천 참조)</label>

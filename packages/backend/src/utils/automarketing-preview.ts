@@ -22,6 +22,7 @@ import {
   translateAudience, countContractAudience, forecastByDate, describeConditions, AudienceConditionError, loadAudienceFieldOptions,
   type AudienceTranslation, type AudienceCondition, type AudienceFieldOption,
 } from './audience-translate';
+import { pickLocksOf } from './audience-condition';
 import {
   CreateOperatorInput, ContinuousOperator, OperatorProposal, OperatorCompanyContext,
   registerOperator, generateProposalForOperator, validateOperatorInput, operatorContextFields,
@@ -311,6 +312,8 @@ export interface PreviewOutcome {
     conditions: AudienceCondition[];
     unresolved: Array<{ term: string; operator?: string; value?: any }>;
     options: AudienceFieldOption[];
+    /** ★ 2026-11-20 P3 말 → 그 말의 기준과 맞지 않아 잠긴 칸 · 사유(화면은 이것만 읽는다) */
+    pickLocks: Record<string, Array<{ field: string; reason: string }>>;
     mapped: boolean;
     suggestKey: string | null;
   };
@@ -503,6 +506,8 @@ async function refreshEntry(
   const print = copyPrint(e);
   const stale = !!e.result && e.resultPrint !== print;
   const dated = copyMode === 'ai' ? datedTerms(e.input.objective, e.input.schedule) : [];
+  // 칸 조건이면 [다른 칸 고르기] 목록(값 있는 칸 · DB 근거)도 싣는다 · ★ 2026-11-20 P3 말마다 잠긴 칸 + 사유(서버 한 곳 audience-condition)
+  const audienceOptions = tr.kind === 'needs_choice' ? tr.options : tr.kind === 'filters' ? (await loadAudienceFieldOptions(e.companyId)).options : [];
 
   const base: Omit<PreviewOutcome, 'kind' | 'previewId' | 'proposal' | 'reason' | 'ready' | 'count' | 'forecast'> = {
     questions: e.questions,
@@ -521,8 +526,8 @@ async function refreshEntry(
       description: tr.kind === 'axis' ? tr.description : tr.kind === 'filters' ? describeConditions(tr.conditions) : null,
       conditions: tr.kind === 'filters' || tr.kind === 'needs_choice' ? tr.conditions : [],
       unresolved: tr.kind === 'needs_choice' ? tr.unresolved : [],
-      // 칸 조건이면 [다른 칸 고르기] 목록(값 있는 칸 · DB 근거)도 싣는다
-      options: tr.kind === 'needs_choice' ? tr.options : tr.kind === 'filters' ? (await loadAudienceFieldOptions(e.companyId)).options : [],
+      options: audienceOptions,
+      pickLocks: pickLocksOf(tr, audienceOptions),
       mapped: tr.kind === 'axis' ? tr.mapped : tr.kind === 'filters' ? tr.conditions.some((c) => c.source === 'ai') : false,
       suggestKey: tr.kind === 'blocked' ? (tr.suggestKey ?? null) : null,
     },
@@ -640,7 +645,7 @@ export function scheduleBodyFromText(objective: string, body: any, now: Date = n
 /** 번역 → 보관본(★ 1024 번역은 늘 매월로 · 짝 판정은 질문표가 지금 주기로 한 번만 · §9-12) */
 async function retranslate(
   e: PreviewEntry,
-  x: { segmentKey?: string | null; segmentParams?: Record<string, number> | null; conditions?: Array<{ term?: string; field: string; operator: string; value: any }> | null },
+  x: { segmentKey?: string | null; segmentParams?: Record<string, number> | null; conditions?: Array<{ term?: string; field: string; operator?: string; value?: any }> | null },
 ): Promise<void> {
   try {
     e.translation = await translateAudience({
@@ -749,12 +754,8 @@ async function applyAnswers(e: PreviewEntry, a: ReturnType<typeof decideOperator
   const tr = e.translation;
   const picks = Object.entries(ans.fields);
   if (picks.length > 0 && tr.kind === 'needs_choice') {
-    const add = picks.map(([term, field]) => {
-      const u = tr.unresolved.find((x) => x.term === term);
-      const o = tr.options.find((x) => x.field === field);
-      const numeric = o?.dataType === 'number';
-      return { term, field, operator: u?.operator || (numeric ? 'gte' : 'eq'), value: u?.value ?? (numeric ? 1 : (o?.samples[0] ?? '')) };
-    });
+    // ★ 2026-11-20 P3 — 칸만 넘긴다(기준 · 값 = translateAudience 가 보관본의 그 말 기준으로 채움 · 규칙 한 곳 audience-condition)
+    const add = picks.map(([term, field]) => ({ term, field }));
     await retranslate(e, { conditions: [...tr.conditions.map((c) => ({ term: c.term, field: c.field, operator: c.operator, value: c.value })), ...add] });
   }
   if (ans.segmentKey) {

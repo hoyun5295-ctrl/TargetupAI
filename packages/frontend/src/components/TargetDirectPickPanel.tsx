@@ -14,7 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Filter, Loader2, RotateCcw, Search } from 'lucide-react';
 import { FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/formatDate';
-import { buildDynamicFiltersFromSelection } from '../utils/customerFilterBuild';
+import { buildDynamicFiltersFromSelection, dateFilterValueText } from '../utils/customerFilterBuild';
+import DateDayChips from './DateDayChips';
 
 export interface DirectPickResult {
   filter: Record<string, { operator: string; value: any }>;
@@ -49,11 +50,6 @@ const AGE_PRESETS = [
   { label: '10대', value: '10' }, { label: '20대', value: '20' },
   { label: '30대', value: '30' }, { label: '40대', value: '40' },
   { label: '50대', value: '50' }, { label: '60+', value: '60' },
-];
-const DAYS_PRESETS = [
-  { label: '7일', value: '7' }, { label: '30일', value: '30' },
-  { label: '90일', value: '90' }, { label: '180일', value: '180' },
-  { label: '1년', value: '365' },
 ];
 const BIRTH_MONTH_PRESETS = Array.from({ length: 12 }, (_, i) => ({ label: `${i + 1}월`, value: `month:${i + 1}` }));
 const AMOUNT_PRESETS = [
@@ -184,8 +180,7 @@ export default function TargetDirectPickPanel({ channel, onResult, onCountingCha
     }
     if (f.data_type === 'date') {
       if (!v) return '';
-      if (String(v).startsWith('month:')) return `${String(v).replace('month:', '')}월`;
-      return `최근 ${v}일 안`;
+      return dateFilterValueText(v);   // ★ 2026-11-20 R1 날짜 값 글 = CT 한 곳(N = 이내 · over:N = 이상 지남 · month:N = 월)
     }
     if (f.data_type === 'boolean') return v === 'false' ? '아니오' : '예';
     if (Array.isArray(v)) return v.length ? v.map((o) => optionLabel(fk, o)).join(', ') : '';
@@ -399,10 +394,17 @@ export default function TargetDirectPickPanel({ channel, onResult, onCountingCha
     if (field.data_type === 'date') {
       const val = filterValues[fk] || '';
       const isBirthday = fk === 'birthday' || fk === 'birth_date';
-      const presets = isBirthday ? BIRTH_MONTH_PRESETS : DAYS_PRESETS;
+      // ★ 2026-11-20 R100 — 생일 아닌 날짜 칸 = 「최근 N일 안 · N일 이상 지남」 토글 + 일수 칩(공용 부품 · 기본 = 지금 그대로)
+      if (!isBirthday) {
+        return (
+          <div className="mt-1.5">
+            <DateDayChips value={String(val)} onChange={(next) => setFilterValues((prev) => ({ ...prev, [fk]: next }))} chipClass={(on) => `px-2.5 py-1 text-[11px] rounded-lg font-medium border transition-colors ${on ? PILL_ON : PILL_OFF}`} label={field.display_name || fk} />
+          </div>
+        );
+      }
       return (
         <div className="flex flex-wrap gap-1.5 mt-1.5">
-          {presets.map((p) => (
+          {BIRTH_MONTH_PRESETS.map((p) => (
             <button key={p.value}
               onClick={() => setFilterValues((prev) => ({ ...prev, [fk]: prev[fk] === p.value ? '' : p.value }))}
               className={`px-2.5 py-1 text-[11px] rounded-lg font-medium border transition-colors ${val === p.value ? PILL_ON : PILL_OFF}`}

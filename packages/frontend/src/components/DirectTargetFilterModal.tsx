@@ -9,6 +9,7 @@ import { FRONT_FIELD_DISPLAY_MAP, reverseDisplayValueFront } from '../utils/form
 import {
   buildDynamicFiltersFromSelection, chosenFilterFields, conditionChipLabel, extractionFieldsMeta, fieldHasFilterValue,
 } from '../utils/customerFilterBuild';
+import DateDayChips from './DateDayChips';
 import { requestKeptExtraction, type TargetExtraction } from '../utils/target-extraction';
 
 // ★ D43-3c: 필드 메타 인터페이스 (TargetSendModal에서도 사용)
@@ -192,11 +193,6 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted, on
     { label: '10대', value: '10' }, { label: '20대', value: '20' },
     { label: '30대', value: '30' }, { label: '40대', value: '40' },
     { label: '50대', value: '50' }, { label: '60+', value: '60' },
-  ];
-  const DAYS_PRESETS = [
-    { label: '7일', value: '7' }, { label: '30일', value: '30' },
-    { label: '90일', value: '90' }, { label: '180일', value: '180' },
-    { label: '1년', value: '365' },
   ];
   const BIRTH_MONTH_PRESETS = [
     { label: '1월', value: 'month:1' }, { label: '2월', value: 'month:2' }, { label: '3월', value: 'month:3' },
@@ -565,10 +561,13 @@ export default function DirectTargetFilterModal({ show, onClose, onExtracted, on
     if (field.data_type === 'date') {
       const val = filterValues[fk] || '';
       const isBirthday = fk === 'birthday' || fk === 'birth_date';
-      const presets = isBirthday ? BIRTH_MONTH_PRESETS : DAYS_PRESETS;
+      // ★ 2026-11-20 R100 — 생일 아닌 날짜 칸 = 「최근 N일 안 · N일 이상 지남」 토글 + 일수 칩(공용 부품 · 프리셋 = CT 한 곳 · 기본 = 지금 그대로)
+      if (!isBirthday) {
+        return <DateDayChips value={String(val)} onChange={(next) => setValue(fk, next || undefined)} chipClass={(on) => chip(on)} label={field.display_name || field.field_label || fk} />;
+      }
       return (
         <div className="flex flex-wrap gap-1.5">
-          {presets.map(p => (
+          {BIRTH_MONTH_PRESETS.map(p => (
             <button key={p.value} type="button" onClick={() => setValue(fk, val === p.value ? undefined : p.value)} className={chip(val === p.value, isBirthday)}>{p.label}</button>
           ))}
         </div>

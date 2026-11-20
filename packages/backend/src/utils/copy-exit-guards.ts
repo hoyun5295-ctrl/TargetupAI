@@ -16,6 +16,7 @@ import { findInventedBenefits, replaceInventedBenefits, dropInventedEfficacy, fi
 import { cleanLeftoverVars, ensureSenderName } from './messageUtils';
 import { applyBrandLinkTokens, protectLinkTokens, type BrandLink } from './brand-link-core';
 import { stripLinkLines, ensureOnceLink } from './voice-form-slots';
+import { tidyAiSmsLayout } from './ai-sms-layout';
 
 /**
  * 메시지 내 개인화 변수 검증
@@ -223,6 +224,9 @@ export function applyCopyExitGuards(
       console.log(`[brand-link] 미등록 라벨 토큰 ${linkApplied.unresolvedCount}건 → placeholder 전환 (발송 시 편집 유도)`);
     }
   }
+  // ★ 2026-11-20 R102 — AI 문자 글 꼴 정리(마크다운 링크 = 실제 주소 · 굵게 · 가리킴 표시 · 문장 가운데 강조 · 줄 머리 공백 · 링크 구간 무접촉)
+  //   링크 단계(정해진 링크 · 브랜드 링크)가 다 놓인 뒤라 같은 주소를 두 번 붙이지 않는다 · 카카오 채널 무접촉(이모지 · 꼴 자유)
+  if (channel !== '카카오' && channel !== 'KAKAO') msgField = tidyAiSmsLayout(msgField);
   // ★ 2026-10-28 K1-1 전송자 명칭(법) — 광고 문안의 제목(LMS · MMS) · 본문 첫 줄에 이름이 없으면 맨 앞에 붙인다(바이트 계산 앞 · K1-3 이 몫을 미리 뺐다)
   const sender = ensureSenderName(msgField, { isAd: ctx.isAd, channel, subject: subject || null, names: ctx.senderNames });
   if (sender.added) { msgField = sender.text; flags.senderAdded = true; }

@@ -10,7 +10,9 @@
  */
 import { query } from '../config/database';
 import { recommendTarget, generateMessages, extractVarCatalog, filterVarCatalogByData } from './ai';
-import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
+import { buildFilterWhereClauseCompat, filterConditionIssues } from '../utils/customer-filter';
+import { applyBenefitToBody } from '../utils/autosend-policy';
+import { eucKrByteLength } from '../utils/message-byte';
 import { buildAudienceWhere } from '../utils/operator-recipients';
 import { resolveHubStoreScope } from '../utils/store-scope';
 import { viewerConsentSql, viewerBrandConsent } from '../utils/mall-consent';
@@ -133,7 +135,8 @@ export function describeLineFilters(line: string, filters: Record<string, any>, 
     const label = labelForFilterKey(key);
     const text = filterChipText(key, cond, label);
     const origin: 'line' | 'ai' = quoteInLine(line, quotes?.[key]) ? 'line' : 'ai';
-    if (buildFilterWhereClauseCompat({ [key]: cond }, 2).sql.trim()) conditions.push({ key, label, text, origin });
+    // ★ 2026-11-20 R101 — 판정 = 조건 모양 CT(옛: 빈 조각만 봐서 날짜 칸 글자 값 = 0건(AND FALSE)이 「옮긴 조건」으로 통과해 말없이 0명) · 기본 WHERE 키(ignored)도 옮기지 못함 그대로
+    if (filterConditionIssues({ [key]: cond }).length === 0) conditions.push({ key, label, text, origin });
     else untranslated.push({ key, text, origin });
   }
   return { conditions, untranslated };
@@ -644,7 +647,8 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     if (!body) continue;
     // ★ 2026-10-28 K3-2 목소리 회사 = 서버 이름(우리 문자처럼 · 혜택 먼저 · 짧게) · 아니면 지금 이름
     const label = (generated as any).voice_mode === true && vv?.variant_name ? String(vv.variant_name) : AI_LINE_TYPE_LABEL[t];
-    cards.push({ type: t, label, body, subject: String(vv?.subject || '').trim(), byteCount: Number(vv?.byte_count) || 0 });
+    // ★ 2026-11-20 R33 · P5 — 지어낸 혜택 자리표 = 사람이 혜택 칸에 적은 답 글자 그대로(자동마케팅 · 플래너와 같은 CT · 답이 비면 자리표 = 발송 길목이 막음)
+    cards.push({ type: t, label, body: applyBenefitToBody(body, input.facts.benefit), subject: applyBenefitToBody(String(vv?.subject || '').trim(), input.facts.benefit), byteCount: Number(vv?.byte_count) || 0 });
   }
   if (cards.length === 0) throw new AiLineError('COMPOSE_EMPTY', '문안을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요. 크레딧은 빠지지 않았어요.', 502);
 
@@ -671,6 +675,9 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
       }
     }
   }
+
+  // ★ 2026-11-20 P5 바이트 칸 = 채우기 · 꾸미기가 끝난 마지막 본문으로(옛 = 채우기 전 생성기 값 · SMS 만 값을 내는 꼴 유지 · 문자 길이 판정 CT)
+  if (channel === 'SMS') for (const c of cards) c.byteCount = eucKrByteLength(c.body);
 
   // 이미 낸 시도(기억이 사라진 뒤 재요청) = 낸 종류 수까지만 돌려주고 걷지 않는다
   if (paidCopies !== null) {

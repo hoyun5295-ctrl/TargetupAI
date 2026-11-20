@@ -13,7 +13,7 @@ import { SKELETON_SLOT } from './brand-voice-skeleton';
 import { COPY_CONTENT_TYPES } from './copy-content-type';
 import { LINK_PLACEHOLDER, LINK_TOKEN_RE, type BrandLink, type LinkHabit } from './brand-link-core';
 import type { LineQuestion } from './one-line-ct/questions';
-import { lineUrlSegments, trimLinkTail } from './one-line-steps';
+import { lineUrlSegments, trimLinkTail } from './link-segments';   // ★ 2026-11-20 순수 파일로(옛 one-line-steps = DB 를 끌어옴)
 
 export const VOICE_FORM_SLOTS = ['link', 'store', 'phone'] as const;
 export type VoiceFormSlot = (typeof VOICE_FORM_SLOTS)[number];
@@ -161,8 +161,14 @@ export function linkSpans(text: string): Array<{ start: number; end: number; lin
  * ★ 2026-10-31 (순수) 글 속 링크 꺼내기 한 곳 — http(s) 주소(lineUrls) + 공백으로 갈린 덩어리(앞뒤 괄호 · 끝 문장부호 뺀 몸)가 그대로 링크인 것(https:// 없이 적은 꼴).
  *   「링크가 결과에 있는가」(ensureOnceLink) · 「다시 쓰기가 링크를 뺐는가」(rewriteDropsLinks)가 이 함수 하나로 같은 링크를 본다(같음 = 글자 그대로).
  */
+/** ★ 2026-11-20 R102 마크다운 링크 [글](목적지) — 목적지 = 공백 없는 글자 + 짝 맞은 괄호 한 겹(「/item(v2)/sale」) · 한 곳(꼴 정리 CT 가 가져다 씀) */
+export const MD_LINK_RE = /\[([^\]\n]{1,200})\]\(((?:[^()\s]|\([^()\s]*\)){1,2048})\)/g;
+
 export function textLinks(text: string): string[] {
-  return [...new Set(linkSpans(text).map((sp) => sp.link))];
+  // ★ 2026-11-20 R102 · Codex 구현 4R · 5R — 마크다운 링크 [글](목적지)는 목적지를 맨 글로 둔 것과 똑같이 읽는다(한 읽기 · 마크다운이든 맨 글이든 같은 목적지).
+  //   꼴 정리 CT(ai-sms-layout)의 보존 확인과 다시 쓰기 대조가 모두 이 한 함수(목적지 읽는 길이 둘이면 그 사이로 샌다).
+  const plain = String(text ?? '').replace(MD_LINK_RE, (_m: string, _label: string, href: string) => ` ${href} `);
+  return [...new Set(linkSpans(plain).map((sp) => sp.link))];
 }
 
 /**

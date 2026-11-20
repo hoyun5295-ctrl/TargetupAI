@@ -156,7 +156,7 @@ describe('날짜 말 · 시각', () => {
 
 describe('나가는 문안 한 함수 · 지문 · 관문', () => {
   const ctx = { benefit: '30% 쿠폰', opt080: '0801234567', callback: '0212345678' };
-  const pj = { channel: { recommended: 'SMS' }, messages: [{ body: '생일 축하드려요 [혜택 내용]' }, { body: 'B안' }, { body: 'C안' }] };
+  const pj = { channel: { recommended: 'SMS' }, messages: [{ body: '생일 축하드려요 [혜택 안내: 직접 수정해주세요]' }, { body: 'B안' }, { body: 'C안' }] };   // ★ 2026-11-20 R33 · P5 채우는 자리 = 혜택 값 자리표 목록
   it('혜택 치환 · (광고) · 080 · 자리 없음', () => {
     const f = operatorFinalCopyAt(pj, 0, ctx)!;
     expect(f.body).toBe('생일 축하드려요 30% 쿠폰');
@@ -164,9 +164,13 @@ describe('나가는 문안 한 함수 · 지문 · 관문', () => {
     expect(f.sent).toContain('0801234567');
     expect(f.placeholderLeft).toBe(false);
     expect(operatorFinalCopyAt(pj, 0, { ...ctx, benefit: null })!.placeholderLeft).toBe(true);
+    // 목록 밖 [혜택…] = 채우지 않고 남김 → 관문이 막는다(덜 보내는 쪽 · 설계서 P5)
+    const odd = operatorFinalCopyAt({ ...pj, messages: [{ body: '생일 축하드려요 [혜택 내용]' }] }, 0, ctx)!;
+    expect(odd.body).toBe('생일 축하드려요 [혜택 내용]');
+    expect(odd.placeholderLeft).toBe(true);
   });
   it('90바이트 넘으면 LMS(혜택이 늘린 글도) · 지문 = 혜택 · 080 · 회신번호마다 다르다', () => {
-    const long = { ...pj, messages: [{ body: '가'.repeat(40) + '[혜택]' }] };
+    const long = { ...pj, messages: [{ body: '가'.repeat(40) + '[혜택 안내: 직접 수정해주세요]' }] };
     expect(operatorFinalCopyAt(long, 0, { ...ctx, benefit: '나'.repeat(10) })!.msgType).toBe('LMS');
     const a = operatorFinalCopyAt(pj, 0, ctx)!.fingerprint;
     expect(operatorFinalCopyAt(pj, 0, { ...ctx, benefit: '40% 쿠폰' })!.fingerprint).not.toBe(a);
@@ -181,7 +185,7 @@ describe('나가는 문안 한 함수 · 지문 · 관문', () => {
     expect(proposalSendIndex({ ...pj, userSelection: { variantIndex: 9 } })).toBe(0);
   });
   it('사람 편집은 그 안을 고른 편집일 때만 · 편집 글에도 혜택 치환', () => {
-    const f = operatorFinalCopy({ ...pj, userSelection: { variantIndex: 1, body: '고친 글 [혜택]' } }, ctx)!;
+    const f = operatorFinalCopy({ ...pj, userSelection: { variantIndex: 1, body: '고친 글 [혜택 안내: 직접 수정해주세요]' } }, ctx)!;
     expect(f).toMatchObject({ variantIndex: 1, body: '고친 글 30% 쿠폰' });
   });
   it('관문 = 통과 지문 또는 사람 승인 지문 = 지금 지문 · 옛 행(지문 없음)은 혜택 자리 없을 때만', () => {

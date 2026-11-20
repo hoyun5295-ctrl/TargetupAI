@@ -269,7 +269,7 @@ describe('K5(R68) 쓰는 자리 판정 — 대행 글 준비 CT', () => {
 });
 
 describe('K6(P6) 나가는 글 = 혜택 · 조립 뒤 글자 판정', () => {
-  const pj = { channel: { recommended: 'LMS' }, messages: [{ body: '가을 행사 [혜택] 받으세요', subject: '가을 행사' }] };
+  const pj = { channel: { recommended: 'LMS' }, messages: [{ body: '가을 행사 [혜택 안내: 직접 수정해주세요] 받으세요', subject: '가을 행사' }] };   // ★ 2026-11-20 R33 · P5 채우는 자리 = 혜택 값 자리표 목록
   it('혜택에 막음 글자 → charIssue · 발송 관문은 지문과 관계없이 막는다 · 정책 사유 = 같은 문장', () => {
     const ctx = { benefit: '카페 café 쿠폰', opt080: '0801234567', callback: '0212345678' };
     const f = operatorFinalCopyAt(pj, 0, ctx)!;

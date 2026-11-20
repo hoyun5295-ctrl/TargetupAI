@@ -362,8 +362,14 @@ export default function JourneyWorkspace({ journeyId, stepId, map, onClose, onCh
   }, [open]);
 
   // 처음 고를 칸 = 주소의 칸 · 없으면 첫 문자 칸 · 칸이 없으면 시작.
+  // ★ 2026-11-20 E2-2 — 주소 칸 = start(여정을 만든 직후) = 그 여정을 처음 열 때 한 번 시작 칸(같은 여정을 다시 읽을 때 사람이 고른 칸 · 새 칸을 덮지 않음)
+  const startOnceRef = useRef<string | null>(null);
   useEffect(() => {
     if (!detail) return;
+    if (stepId === 'start') {
+      if (startOnceRef.current !== journeyId) { startOnceRef.current = journeyId; setSelected('start'); }
+      return;
+    }
     const has = stepId && detail.steps.some((s) => s.id === stepId);
     if (has) { setSelected(stepId!); return; }
     if (selectedRef.current !== 'start' && (detail.steps.some((s) => s.id === selectedRef.current) || selectedRef.current.startsWith(NEW_STEP_PREFIX))) return;
