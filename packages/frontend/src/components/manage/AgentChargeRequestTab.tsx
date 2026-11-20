@@ -36,6 +36,8 @@ interface LedgerRow {
   filledAt: string;
   applied: boolean;
   appliedAt: string | null;
+  /** ★ C147 반영 뒤 잔액(기록 일꾼이 증거를 잡은 줄만 · 그 밖 null) */
+  balanceAfter?: number | null;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -343,6 +345,7 @@ export default function AgentChargeRequestTab() {
             </h3>
             <p className="mt-0.5 text-xs text-slate-400">
               담당자가 처리한 충전과 차감이 모두 표시됩니다. 요청을 거치지 않은 입금 확인 충전도 여기에 남습니다.
+              잔액은 반영을 확인하며 읽은 값이라 그 사이 발송한 만큼 다를 수 있습니다. 확인할 수 없었던 줄과 이 기능 전의 내역에는 표시되지 않습니다.
             </p>
           </div>
           <button type="button" onClick={() => loadLedger(ledgerPage)} className="text-xs text-slate-400 hover:text-slate-600 shrink-0">
@@ -381,7 +384,13 @@ export default function AgentChargeRequestTab() {
                     <td className="px-5 py-2.5 text-xs whitespace-nowrap">
                       {/* 반영 완료(게이트웨이가 잔액에 실제로 더한 상태)만 완료로 본다 — 등록 자체는 완료가 아니다. */}
                       {l.applied
-                        ? <span className="text-slate-500">반영 완료{l.appliedAt ? ` · ${String(l.appliedAt).slice(5, 16)}` : ''}</span>
+                        ? <span className="text-slate-500">
+                            반영 완료{l.appliedAt ? ` · ${String(l.appliedAt).slice(5, 16)}` : ''}
+                            {/* ★ C147 반영 뒤 잔액 = 반영을 확인하며 읽은 값 · 숫자일 때만(기록 없는 줄 = 지금 그대로) */}
+                            {typeof l.balanceAfter === 'number' && Number.isFinite(l.balanceAfter) && (
+                              <span className="tabular-nums text-slate-700"> · 잔액 {formatAgentBalance(l.balanceAfter)}원</span>
+                            )}
+                          </span>
                         : <span className="text-amber-600">반영 대기</span>}
                     </td>
                   </tr>

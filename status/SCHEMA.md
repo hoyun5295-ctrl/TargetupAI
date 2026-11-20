@@ -1571,6 +1571,20 @@ companies 5칸: `plan_term_expires_on date`(만료일 KST · NULL = 관리 대�
 | started_at · last_seen_at | timestamptz NOT NULL DEFAULT now() |
 > 색인 = `idx_public_page_visits_page_started (page, started_at DESC)` · `idx_public_page_visits_page_browser (page, browser_key)` · 행 정체 = (id, browser_key, page) 셋(모든 쓰기의 ON CONFLICT WHERE · beat WHERE) · 보관 = 90일 지난 행 삭제(워커 `startPublicVisitRetentionWorker` · 파기 기록 audit_logs `privacy_purge` kind `public_page_visits`)
 
+### agent_fill_balance_marks (충전 내역 반영 뒤 잔액 기록) ★2026-11-20 C147-DDL-1(배포 뒤) · CT `utils/agent-fill-balance.ts` · 설계서 docs/2026-11-20-c147-agent-charge-balance-after-design.md §2
+| 컬럼 | 타입 |
+|------|------|
+| seq_no · agent_send_id | integer · text NOT NULL · PK 짝 = 62 `RSRM_FillAmtHist.SeqNo` · `StoreId`(발송ID) |
+| fill_amount | numeric(18,3) NOT NULL · 처음 본 원장 금액(부호 그대로 · 판정 때 지금 원장 금액과 대조) |
+| state | varchar(12) NOT NULL · CHECK pending · applied · captured · skipped |
+| pending_seen_at · last_pending_at | timestamptz · 반영 대기(N)로 본 첫 · 마지막 회차(R1 시각) |
+| balance_before | numeric(18,3) · 마지막 반영 대기 회차의 발송ID 잔액(62 `RSRM_SalesMst.RemAmt` 대표 행) |
+| applied_seen_at | timestamptz · 반영(Y)을 처음 본 회차(R2 시각 · 상태 무관 = 이웃 판정 근거) |
+| balance_after | numeric(18,3) · captured 일 때만 = 고객사 충전 내역 반영 칸 「잔액」 |
+| skip_reason | varchar(16) · CHECK missed · gap · multi · no_evidence · gone |
+| captured_at · created_at | timestamptz · created_at NOT NULL DEFAULT now() |
+> 색인 = `idx_agent_fill_balance_marks_open (state) WHERE state IN ('pending','applied')` · 돈의 진실 아님(잔액 = 62) · 쓰는 곳 = 30초 일꾼 하나(회차 = 연결 · 트랜잭션 하나 + `pg_try_advisory_xact_lock`) · 읽는 곳 = `GET /api/agent-charge-orders/ledger` · 지우는 길 없음
+
 ### campaign_send_staging (발송 수신자 임시 적재) ★2026-09-26 등재 (information_schema·pg_indexes 실측, Harold 실행)
 | 컬럼 | 타입 |
 |------|------|

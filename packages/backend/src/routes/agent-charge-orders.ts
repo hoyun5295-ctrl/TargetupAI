@@ -4,6 +4,7 @@ import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { queryPayAgentBalances, getAgentCustNameMap, listAgentCharges, countAgentCharges, isPayStatsConfigured } from '../utils/pay-stats';
 import { parseAgentChargeOrder } from '../utils/agent-charge-orders';
+import { loadFillBalances, fillMarkKey } from '../utils/agent-fill-balance';   // ★ C147 반영 뒤 잔액
 import { notifyChargeApprovers } from '../utils/charge-approve-link';
 import { parsePageParams, parseQueryInt, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
@@ -145,6 +146,8 @@ router.get('/ledger', async (req: Request, res: Response) => {
 
     // 발급명 동반 — 고객사는 내부 코드(D0078)가 아니라 자기 발급명(런소프트)으로 계정을 안다.
     const nameMap = await getAgentCustNameMap();
+    // ★ C147 반영 뒤 잔액(기록 일꾼이 남긴 captured 만 · 못 읽으면 빈 Map = 목록을 막지 않음)
+    const balances = await loadFillBalances(rows);
     res.json({
       rows: rows.map((r) => ({
         seqNo: r.seqNo,
@@ -155,6 +158,7 @@ router.get('/ledger', async (req: Request, res: Response) => {
         filledAt: r.filledAt,
         applied: r.applied,
         appliedAt: r.appliedAt,
+        balanceAfter: balances.get(fillMarkKey(r.seqNo, r.agentSendId)) ?? null,
       })),
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),

@@ -30,6 +30,7 @@ import agencySendRoutes from './routes/agency-send';
 import agencyApproveRoutes from './routes/agency-approve';  // ★ 2026-08-25 링크 승인 (무인증)
 import chargeApproveRoutes from './routes/charge-approve';  // ★ 2026-08-28(3) 충전 승인 링크 (무인증)
 import { startAgentChargeReconciler } from './utils/agent-charge-reconciler';  // ★ 2026-08-29 충전 주문 대사 워커
+import { startAgentFillBalanceWorker } from './utils/agent-fill-balance';  // ★ 2026-11-20 C147 충전 내역 반영 뒤 잔액 기록
 import salesOutreachRoutes from './routes/sales-outreach'; // ★ 2026-08-24 AI 영업 아웃리치 (슈퍼관리자 ceo 전용 · docs/2026-07-31-ai-sales-outreach-design.md §15)
 import outreachPublicRoutes from './routes/outreach-public'; // ★ 2026-08-24 아웃리치 공개 샘플 페이지(무인증 · noindex · 만료)
 import { unsubscribeRouter as outreachUnsubscribeRoutes } from './routes/outreach-public'; // ★ 2026-09-23 담당자 직접 발송 수신거부(무인증 · GET 확인 · POST 기록)
@@ -712,6 +713,7 @@ app.listen(PORT, () => {
   //   AGENCY_MAIL_ENABLED + 계정 ENV가 없으면 부팅 로그 1회만 남기고 시작하지 않는다(회신 없는 접수 금지).
   startAgencySendMailWorker();
   startAgentChargeReconciler(); // ★ 2026-08-29 링크 승인 건의 fulfilled 수렴을 서버가 소유(화면 폴링 의존 폐기)
+  startAgentFillBalanceWorker(); // ★ 2026-11-20 C147 30초 · 62 읽기만 · 표 없음(DDL 전) · 62 미설정 = 조용히 건너뜀
 
   // ★ 2026-08-24 AI 영업 아웃리치 sweeper (10분 cron) — 좀비 잡 정직 종결 + 만료 산출물 파기.
   //   자동 재시도·발송·재생성 0(설계 §15-6). 테이블 미생성이면 각 순회가 로그만 남기고 넘어간다.

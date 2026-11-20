@@ -106,6 +106,7 @@
 - **E2-1**: `InterviewModal.tsx:344-360` 번호 칸 = 서버가 기본 번호를 정하지 못할 때만(`prepared.callback.defaultPhone` 이 빔 = 등록 2개 이상 · 기본 없음 · `journey-draft-save.ts:26-30` · 상품 창 `ProductJourneyModal.tsx:118` 과 같은 판정) · 등록 0 안내 그대로 · 서버 무변경. **보내는 번호 = 칸이 숨으면 `defaultPhone` 하나**(세션 복원 `:94-112` 의 옛 `callbackPhone` · 재시도는 숨은 칸에서 번호를 정하지 않는다 · Codex 설계 1R #5) · 칸이 보이면 고른 번호 · `canBuild` 도 같은 값으로.
 - **E2-2**: 만든 직후 「작업 화면 열기」(`:490`) · 계획 「열기」(`:407`) → `JourneysPage.tsx:2851` 가 `openWorkspace(id, 'start')` · `JourneyWorkspace.tsx:364-371` 첫 칸 규칙에 「주소 칸 = start = 그 여정을 처음 열 때 한 번 시작 칸」(같은 여정에서 다시 읽을 때 사람이 고른 칸을 덮지 않음). 다른 길 · 지도 창 무변경. 계약 `c103-intake-contract-1105.test.ts:64-74` 기대값을 새 판정으로.
 - **E4**: 코드 0. 근거 = 충전 원장 칸 8개에 반영 뒤 잔액 없음(Harold 1120 서버 출력) · C · D · B 발송ID 반영 순간 잔액은 중계 서버 PAY 엔진 안에만 · 같은 탭 맨 위 「발송ID 잔액」 카드(`AgentChargeRequestTab.tsx:228-`)가 지금 잔액을 이미 보임(앞서 추천한 「충전 내역 머리에 지금 잔액」은 같은 값을 한 번 더 보이는 것이라 거둠). 직원 회신 = §5 시트 4.
+  - ★1120 거둠: Harold 정정(접수 = 고객사가 직접 선불 충전하는 「충전 요청 → 충전 내역」 · 「62 에 보이는 걸 그렇게 보이게」) → 앞으로 반영되는 줄부터 반영 순간 잔액을 남기는 C147 이 대신함([설계서](2026-11-20-c147-agent-charge-balance-after-design.md)).
 
 ## §3 영향표
 

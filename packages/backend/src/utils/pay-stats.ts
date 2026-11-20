@@ -29,19 +29,45 @@ export function isPayStatsConfigured(): boolean {
   return !!(process.env.PAY_STATS_DB_USER && process.env.PAY_STATS_DB_PASSWORD);
 }
 
-function getPool(): mysql.Pool | null {
-  if (!isPayStatsConfigured()) return null;
-  if (_pool) return _pool;
-  _pool = mysql.createPool({
+/** 62 접속 값(풀 · C147 회차 연결이 같이 쓴다) */
+function payStatsConnectionConfig() {
+  return {
     host: process.env.PAY_STATS_DB_HOST || '127.0.0.1',
     port: Number(process.env.PAY_STATS_DB_PORT || 23388),
     user: process.env.PAY_STATS_DB_USER,
     password: process.env.PAY_STATS_DB_PASSWORD,
     database: process.env.PAY_STATS_DB_NAME || 'sales',
-    connectionLimit: 3,
     charset: 'utf8mb4',
-  });
+  };
+}
+
+function getPool(): mysql.Pool | null {
+  if (!isPayStatsConfigured()) return null;
+  if (_pool) return _pool;
+  _pool = mysql.createPool({ ...payStatsConnectionConfig(), connectionLimit: 3 });
   return _pool;
+}
+
+/**
+ * ★ 2026-11-20 C147 구현 3R — 반영 뒤 잔액 일꾼 회차만 쓰는 62 연결 하나.
+ * 공용 풀(3개)을 빌리면 mysql2 질의 시간 초과 뒤에도 그 연결이 서버 응답 전까지 돌아오지 않아(pool.js 'end' 때 반납)
+ * 풀이 바닥나면 다음 회차가 연결 대기에서 끝없이 멈춘다 → 회차마다 제 연결(접속 시간 제한)을 열고 끝나면 늘 destroy.
+ * 'error' 듣는 쪽 = 명령 없을 때 끊긴 연결의 오류가 프로세스를 죽이지 않게(회차는 다음 질의 실패로 안다).
+ */
+export async function openPayStatsConnection(timeoutMs: number): Promise<mysql.Connection> {
+  if (!isPayStatsConfigured()) throw new Error('PAY_STATS_DB_NOT_CONFIGURED');
+  const conn = await mysql.createConnection({ ...payStatsConnectionConfig(), connectTimeout: timeoutMs });
+  conn.on('error', () => undefined);
+  return conn;
+}
+
+/**
+ * C147 회차 연결 닫기(구현 4R) — mysql2 3.24.6 destroy() = close() = stream.end()(송신 쪽만 닫음)라
+ * 응답 · FIN 을 보내지 않는 62 에서는 소켓 · 명령이 남아 회차마다 쌓인다 → 소켓까지 destroy.
+ */
+export function closePayStatsConnection(conn: mysql.Connection): void {
+  try { conn.destroy(); } catch { /* 이미 닫힘 */ }
+  (conn as any).connection?.stream?.destroy?.();
 }
 
 /**
@@ -1496,6 +1522,33 @@ export async function listAgentCharges(filter: number | AgentChargeListFilter = 
   return (rows as any[]).map(toChargeRow);
 }
 
+/** 충전 원장 한 줄(C147 반영 뒤 잔액 일꾼 입력 · 판정에 쓰는 칸만) */
+export interface FillLedgerRow {
+  seqNo: number;
+  agentSendId: string;
+  amount: number;
+  applied: boolean;
+}
+
+/**
+ * ★ 2026-11-20 C147 — 충전 원장 **전체**(창 없음 · 설계서 docs/2026-11-20-c147-agent-charge-balance-after-design.md P2 1).
+ * 창을 두면 창 밖 줄이 이웃 판정에서 빠진다(Codex 설계 2R ~ 6R) → 매 회차 전체를 읽는다.
+ * 발송ID 가 빈 줄 = 어느 발송ID 의 이웃도 아니라 뺀다 · SeqNo 가 축 모양이 아니면 던진다(이웃을 조용히 빠뜨리지 않는다 = 그 회차 실패).
+ */
+export async function readFillLedgerAll(conn: mysql.Connection, timeoutMs: number): Promise<FillLedgerRow[]> {
+  const [rows] = await conn.query({ sql: 'SELECT SeqNo, StoreId, FillAmt, RsApplyFlag FROM RSRM_FillAmtHist', timeout: timeoutMs });
+  const out: FillLedgerRow[] = [];
+  for (const r of rows as any[]) {
+    const agentSendId = String(r.StoreId ?? '').trim();
+    if (!agentSendId) continue;
+    const seqNo = Number(r.SeqNo);
+    if (!Number.isSafeInteger(seqNo) || seqNo <= 0) throw new Error(`FILL_LEDGER_SEQ_SHAPE ${String(r.SeqNo)}`);
+    const amount = Number(r.FillAmt);
+    out.push({ seqNo, agentSendId, amount: Number.isFinite(amount) ? amount : 0, applied: String(r.RsApplyFlag || '').toUpperCase() === 'Y' });
+  }
+  return out;
+}
+
 /**
  * 발송ID 목록의 게이트웨이 잔액 — 조회 코어. (★ 2026-08-11 `queryPayAgentBalances`에서 분리, 동작 무변경)
  *
@@ -1503,7 +1556,7 @@ export async function listAgentCharges(filter: number | AgentChargeListFilter = 
  * `queryPayAgentBalances`로는 그 질문에 답할 수 없다. 회사 판정과 원장 조회를 갈라 둔다 —
  * 잔액 선택 규칙(대표 행·미확정 처리)은 여전히 `pickLedgerBalances` 한 곳이 소유한다.
  */
-export async function queryLedgerBalancesByIds(agentSendIds: string[]): Promise<PayAgentBalance[]> {
+export async function queryLedgerBalancesByIds(agentSendIds: string[], opts: { timeoutMs?: number; conn?: mysql.Connection } = {}): Promise<PayAgentBalance[]> {
   const pool = getPool();
   // ⛔ 미설정·조회 실패를 빈 배열로 삼키지 않는다(★ 2026-08-11 Codex 1R-1). 빈 배열은 "그 계정에 잔액 행이
   //    없다"는 뜻이고, 못 읽은 것과 뜻이 다르다. 못 읽은 것을 "없다"로 내리면 화면이 정상처럼 보이면서
@@ -1515,8 +1568,9 @@ export async function queryLedgerBalancesByIds(agentSendIds: string[]): Promise<
   // 계정 원장 전 행을 가져와 대표 행 판정은 순수 함수(pickLedgerBalances)가 한다 —
   // SQL에서 StoreId=CustId로 걸러버리면 "대표 행이 없는 계정"과 "계정 자체가 없는 경우"를 구분할 수 없다.
   const ph = custIds.map(() => '?').join(',');
-  const [rows] = await pool.query(
-    `SELECT CustId, StoreId, RemAmt, SeqNo FROM RSRM_SalesMst WHERE CustId IN (${ph})`,
+  // opts 없음 = 공용 풀 · 시간 제한 없음(undefined = mysql2 가 걸지 않음) = 기존 소비처 동작 그대로 · C147 일꾼만 제 연결 + 10초
+  const [rows] = await (opts.conn ?? pool).query(
+    { sql: `SELECT CustId, StoreId, RemAmt, SeqNo FROM RSRM_SalesMst WHERE CustId IN (${ph})`, timeout: opts.timeoutMs },
     custIds,
   );
   const picked = pickLedgerBalances(custIds, rows as PayLedgerRow[]);

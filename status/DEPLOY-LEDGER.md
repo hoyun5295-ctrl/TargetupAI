@@ -90,7 +90,8 @@
 | C143 | 미커밋 |
 | C144 | 8bfd3637 |
 | C145 | 2cee9d79 |
-| C146 | 미커밋 |
+| C146 | 092c4c57 |
+| C147 | 미커밋 |
 
 ## §1 대기
 
@@ -2903,7 +2904,7 @@ CREATE INDEX IF NOT EXISTS idx_public_page_visits_page_browser ON public_page_vi
 - 선행: C146-P0 · 설계 Codex 7R approve(1120) · 구현 Codex 7R approve(1120) · 커밋(Harold · 공유 문서(status/DEPLOY-LEDGER.md · status/STATUS-FEED.md · status/BUGS.md · docs/ROOT-LEDGER.md)는 이 카드 줄만 · 다른 세션의 미커밋 줄이 같은 파일에 있다)
 - 기대: 설계서 §0(미가입 · 직접발송만 쓰는 회사 = 직접 타겟 날짜 칸에 토글 하나 · 기본 = 지금 그대로) · 발송 핵심 다섯 파일 무수정
 - 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `filterConditionIssues` 파일 7(routes/auto-campaigns.js · services/ai-line.js · utils/ai-segment-generator.js · utils/audience-condition.js · utils/auto-campaign-worker.js · utils/customer-filter.js · utils/saved-segments.js) · dist/utils/ai-sms-layout.js · dist/utils/audience-condition.js 있음
-- 결과: (대기)
+- 결과: 1120 Harold 「배포까지 완료」 · 커밋 092c4c57(50파일 · 공유 문서 넷 = C146 줄만 scratch/c146/docs.patch) push · 서버 단계 출력은 이 세션에서 받지 않음
 
 ### C146-S1 · 실측(직원 시트)
 - 카드: C146
@@ -2911,6 +2912,61 @@ CREATE INDEX IF NOT EXISTS idx_public_page_visits_page_browser ON public_page_vi
 - 선행: C146-H1
 - 기대: 설계서 §5 시트 1 ~ 5 전 항목 「맞음」(시트 4 의 3 = 회신만)
 - 확인: 화면(직원 · 시트 1 ~ 5)
+- 결과: (대기)
+
+### C147-P0 · 배포 앞 확인(읽기 전용 · 62 충전 원장 줄 수 = 일꾼이 30초마다 읽는 양 · 설계서 §7)
+- 카드: C147
+- 단계: 사전
+- 선행: 없음
+- 기대: 수천 줄 이하(수십만 줄이면 멈추고 설계서 §7 을 다시 본다)
+- 확인: .62 서버 셸 한 줄 `docker exec -it pay-ingest-db mysql -uroot -p sales -e "SELECT COUNT(*) AS n, SUM(RsApplyFlag <> 'Y') AS waiting FROM RSRM_FillAmtHist;"`
+- 결과: 1120 Harold 서버 출력 n = 7,108 · waiting(반영 대기) = 1 = 기대와 같음(수천 줄) · 반영 대기 1줄이 남는 동안 그 발송ID 충전 줄은 모두 빈 칸(설계서 §7) = S1 에서 시험 발송ID 와 같은지 본다
+
+### C147-H1 · 한줄로 배포(충전 내역 반영 뒤 잔액 · 백엔드 + 프론트 · DDL 1 = 배포 뒤 · ENV 0)
+- 카드: C147
+- 단계: 한줄로 배포
+- 선행: C147-P0 · 설계 Codex 11R approve(1120) · 구현 Codex 5R approve(1120) · 커밋(Harold · 공유 문서는 이 카드 줄만)
+- 기대: 설계서 §6 · DDL 전 새 코드 = 일꾼 「표 없음(DDL 전) — 건너뜀」 한 번 · 충전 내역 화면 = 지금 그대로(잔액 글 없음)
+- 확인: 서버 HEAD · 백엔드 build:safe([verify-dist] 통과) · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist/utils/agent-fill-balance.js 있음 · 기동 로그 「[agent-fill-balance] 기동 (30초 주기)」 · 재시작 뒤 에러 로그 새 종류 0
+- 결과: (대기)
+
+### C147-DDL-1 · 반영 뒤 잔액 기록 표(설계서 §2 P1) · ★ 배포 뒤
+- 카드: C147
+- 단계: DDL
+- 선행: C147-H1(새 코드는 표가 없으면 조용히 건너뛴다 = 표를 만드는 순간 다음 회차부터 기록)
+- 의미 바꿈: 아니오(새 표)
+- 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'agent_fill_balance_marks' ORDER BY ordinal_position;
+- 확인: 12칸(seq_no ~ created_at)
+- 결과: (대기)
+
+> C147-RB-1(되돌리기 · 새 코드를 내린 뒤에만) = DROP TABLE IF EXISTS agent_fill_balance_marks;
+
+```sql ddl:C147-DDL-1
+SET lock_timeout = '3s';
+CREATE TABLE IF NOT EXISTS agent_fill_balance_marks (
+  seq_no integer NOT NULL,
+  agent_send_id text NOT NULL,
+  fill_amount numeric(18, 3) NOT NULL,
+  state varchar(12) NOT NULL CHECK (state IN ('pending', 'applied', 'captured', 'skipped')),
+  pending_seen_at timestamptz,
+  last_pending_at timestamptz,
+  balance_before numeric(18, 3),
+  applied_seen_at timestamptz,
+  balance_after numeric(18, 3),
+  skip_reason varchar(16) CHECK (skip_reason IS NULL OR skip_reason IN ('missed', 'gap', 'multi', 'no_evidence', 'gone')),
+  captured_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (seq_no, agent_send_id)
+);
+CREATE INDEX IF NOT EXISTS idx_agent_fill_balance_marks_open ON agent_fill_balance_marks (state) WHERE state IN ('pending', 'applied');
+```
+
+### C147-S1 · 실측(반영 뒤 잔액 · DDL 뒤 30분 지나서)
+- 카드: C147
+- 단계: 사후
+- 선행: C147-DDL-1 · 재시작 · DDL 뒤 30분(연속 관측 30분 · 첫 회차에 본 반영 줄이 이웃으로 30분 남는다 = 그 전 충전은 빈 칸이 맞다)
+- 기대: 설계서 §5 시트 1 · 2 · 3 전 항목 「맞음」 · 서버 = 그 충전 줄 captured 한 줄
+- 확인: 화면(직원 · 시트) · 서버 셸 한 줄(PG) `docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELECT state, skip_reason, count(*), max(captured_at) FROM agent_fill_balance_marks GROUP BY 1, 2 ORDER BY 1, 2;"`
 - 결과: (대기)
 
 ## §2 덤프 뒤 적용분
