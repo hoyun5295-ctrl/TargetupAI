@@ -2371,12 +2371,12 @@ kind별 payload 키:
 | created_at | timestamptz | |
 | updated_at | timestamptz | |
 | number_type | varchar | company(회사명의) / other(기타명의) · ★1120 운영 실측(GROUP BY 출력 = company 18 · other 17) · 타입 미기록 |
-| owner_verification_id | uuid NULL | ★ 2026-11-20 C148 T3 — 기타명의 무선의 명의자 본인인증 건(sender_owner_verifications.id) · 부분 유일 인덱스 `ux_sender_registrations_owner_verification`(인증 한 건 = 신청 한 건) · **원장 C148-DDL-1(배포 뒤 · 대기)** |
+| owner_verification_id | uuid NULL | ★ 2026-11-20 C148 T3 — 기타명의 무선의 명의자 본인인증 건(sender_owner_verifications.id) · 부분 유일 인덱스 `ux_sender_registrations_owner_verification`(인증 한 건 = 신청 한 건) · **원장 C148-DDL-1 실행완료 1120(Harold · information_schema 확인)** |
 - INDEX: company_id
 - INDEX: status WHERE status = 'pending'
 - INDEX: requested_by
 
-### sender_owner_verifications (기타명의 무선 발신번호 명의자 본인인증) — ★ 2026-11-20 C148 T3 · 원장 C148-DDL-1(배포 뒤 · 대기)
+### sender_owner_verifications (기타명의 무선 발신번호 명의자 본인인증) — ★ 2026-11-20 C148 T3 · 원장 C148-DDL-1 실행완료 1120(Harold · information_schema 12칸 확인)
 | 컬럼 | 타입 | 설명 |
 |------|------|------|
 | id | uuid PK | 인증 건 번호 = KMC 요청번호(certNum) |

@@ -4,12 +4,12 @@
  *   표 = 원장 블록 C148-DDL-1 글자 그대로 · 인증기관 = 시험 구현(이름 · 번호 · DI 를 그대로 믿음) · 번호 = 형식만 맞는 시험 값(발송 0)
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 import { pool } from '../../config/database';
 import { ledgerBlockSql } from './pg/global-setup';
 import { insertMinimalRow } from './pg/fixtures';
 import { registerIdentityProvider } from '../identity-verify';
-import { startSenderOwnerVerification, completeSenderOwnerVerification } from '../sender-owner-verify';
+import { startSenderOwnerVerification, completeSenderOwnerVerification, lockOwnerLine } from '../sender-owner-verify';
 import { createRegistration, approveRegistration } from '../sender-registration';
 import { countCompanyLines } from '../sender-line-limit';
 
@@ -115,16 +115,49 @@ describe('C148 T3 기타명의 무선 신청', () => {
     for (const r of regs) expect((await approveRegistration(r.id, SUPER)).registration.status).toBe('approved');
   });
 
-  it('★ 설계 Codex 1R #3 — 남은 1회선에 다른 인증 · 다른 번호 동시 신청 둘 = 정확히 하나만', async () => {
+  it('★ 설계 Codex 1R #3 — 같은 회사 · 명의자 접수는 한 잠금으로 줄 선다(앞 접수가 커밋 전이면 뒤 접수는 기다리고 · 커밋 뒤 셈 = 남은 1회선에 하나만)', async () => {
+    // ★ 1120 변이 M4(잠금 끄기)를 옛 「둘을 같이 띄우기」 시험이 못 잡았다(실제로는 거의 차례로 돌아 잠금 없이도 하나만 성공) → 앞 접수를 커밋 전으로 붙잡아 결정적으로 본다
     const di = 'DI-F';
+    const hash = createHash('sha256').update(di).digest('hex');
     for (let i = 0; i < 2; i++) { const p = phone(); await apply(p, await verified(ADMIN, CO, p, di)); }
     const pa = phone();
     const pb = phone();
     const va = await verified(ADMIN, CO, pa, di);
     const vb = await verified(ADMIN, CO, pb, di);
-    const r = await Promise.allSettled([apply(pa, va), apply(pb, vb)]);
-    expect(r.filter((x) => x.status === 'fulfilled')).toHaveLength(1);
-    expect(String((r.find((x) => x.status === 'rejected') as PromiseRejectedResult).reason?.message)).toMatch(/최대 3회선/);
+    const holder = await pool.connect();
+    let committed = false;
+    let broken = false;
+    // ★ 구현 Codex 4R — 뒤 접수의 성공 · 실패를 만든 즉시 받는다(처리되지 않은 거절 0) · 끝까지 회수한다
+    let later: Promise<{ ok: true } | { ok: false; e: any }> | null = null;
+    try {
+      await holder.query('BEGIN');
+      const holderPid = Number((await holder.query('SELECT pg_backend_pid() AS p')).rows[0].p);
+      await lockOwnerLine((s, p) => holder.query(s, p), CO, hash);
+      await holder.query(
+        `INSERT INTO sender_registrations (company_id, requested_by, phone, number_type, documents, owner_verification_id)
+         VALUES ($1::uuid, $2::uuid, $3, 'other', '[]'::jsonb, $4::uuid)`,
+        [CO, ADMIN, pa, va],
+      );
+      later = apply(pb, vb).then(() => ({ ok: true as const }), (e: any) => ({ ok: false as const, e }));
+      // ★ 구현 Codex 4R — 시간 짐작(「800ms 안 끝남」) 대신 DB 로 본다: 뒤 접수 세션이 앞 연결에 막혀 기다리는가(잠금이 없으면 끝내 안 보임 = 실패)
+      let blocked = false;
+      for (let i = 0; i < 50 && !blocked; i++) {
+        const w = await pool.query(`SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))`, [holderPid]);
+        blocked = Number(w.rows[0].n) > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(blocked).toBe(true);
+      await holder.query('COMMIT');
+      committed = true;
+      const r = await later;
+      expect(r.ok).toBe(false);
+      expect(String((r as any).e?.message)).toMatch(/최대 3회선/);
+    } finally {
+      // 판정이 중간에 실패해도 잠금 · 미커밋 행을 남기지 않는다(되돌리기 실패 = 연결을 버린다 · 처음 오류 그대로)
+      if (!committed) { try { await holder.query('ROLLBACK'); } catch { broken = true; } }
+      holder.release(broken ? true : undefined);
+      if (later) await later;
+    }
   });
 
   it('회사 무선 셈 = 승인된 기타명의 휴대폰은 빼고 회사명의 휴대폰 · 유선은 그대로', async () => {

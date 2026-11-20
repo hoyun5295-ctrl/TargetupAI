@@ -59,6 +59,7 @@ Harold 결정(1120 「추천대로」):
 
 ### §1-4 범위 밖(기록만)
 - 대행 · 여정 · 재검사 등 다른 검사 길은 검사 장애 = 1분 뒤 다시 검사(`spamVerdictWithRetry`) 구조라 이 결함과 길이 다르다.
+- ★ 1120 마무리 확인 = 여정 2시간 전 스캐너는 장애면 기록만(보류 · 문자 0 · `journey-pretest-notifier.ts:362-366`) · 다음 주기에 같은 키 최근 검사를 지금 결과로 다시 읽어(`spamCheckFor` · 늦은 보고 반영) 통과면 재사용 = 같은 결함 아님 · 코드 수정 0.
 - 화면 「다시 검사」(`runProposalSpamRetest`) 결과의 timeout = 사람이 누른 검사 · 이번 범위 아님.
 
 ## §2 T2 대행 맞춤법(개선 + 결함 둘)
@@ -167,8 +168,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_sender_registrations_owner_verification ON 
 - 파일: T1 `continuous-operator-policy.ts`(operatorFinalSpamResult · decideSpamOutcome timeout = hold) · `continuous-operator.ts`(최종 판정 호출 · 회복 후보 · 기다림 · 종결 문장) · `spam-test-queue.ts`(readSpamTestOutcome lateOpen) / T2 `spell-check.ts`(SPELL_LOCATION_RULES) · `sms-spell-check.ts` · `sns-spell-check.ts` · `agency-send-spell.ts`(AGENCY_SPELL_AFTER_FIX_SQL · 같은 판 건너뜀) · `agency-send-change.ts`(spellOnly) · `routes/agency-send.ts`(spellIssueIds) · 화면 `agency-send-api.ts` · `AgencySendDetail.tsx` / T3 새 `sender-owner-verify.ts` · `sender-line-limit.ts`(countCompanyLines · checkOwnerMobileLimit · OWNER_MOBILE_LIMIT 3) · `sender-registration.ts`(createOwnerMobileRegistration · 승인 소유 갈래 · 상세 본인인증 줄 · UserFacingError 코드 OWNER_*) · `routes/sender-registration.ts`(owner-verify/start · complete · respondUserError) · 화면 `IdentityVerifyModal.tsx`(mode sender) · `CallbacksTab.tsx`(유선 · 무선 · 명의자 인증 · 서류) · `SenderRegDetailModal.tsx` / 원장 C148-H1 · DDL-1 · S1.
 - 설계와 다르게 한 곳: 회복 기다림에 닫힌 지 10분 안 blocked 도 넣음(늦은 보고가 차단 줄도 고친다) · 맞춤법만 고친 판 판정 = 링크 [고치기] + 로그인 화면 [고치기](구현 1R · 서버가 넣은 제안 id 를 다시 적용해 같을 때).
 - 시험: 새 계약 c148-staff-tickets 14 + 갱신(spam-verdict-4value · precheck-0925 · automarketing-spam-variants) · 실 PG held-recovery C148 4건(13건 중) · 새 실 PG c148-sender-owner 7 · 뿌리 대장 R10 · R11 맞춤(면제 0) · 실 PG 전체 101파일 925건 통과(스탬프 기록).
-- 구현 Codex: 1R needs-attention 1(로그인 화면 [고치기]가 text 저장이라 afterFix 우회 → spellIssueIds 서버 재적용) · 2R 1([그만두기] 뒤 넣은 id 잔존 → 함께 비움) · **3R approve**.
+- 구현 Codex: 1R needs-attention 1(로그인 화면 [고치기]가 text 저장이라 afterFix 우회 → spellIssueIds 서버 재적용) · 2R 1([그만두기] 뒤 넣은 id 잔존 → 함께 비움) · **3R approve** · 배포 뒤 변이 M4 로 동시 신청 시험 보강 → 4R 2(시간 짐작 · 실패 경로 정리) → **5R approve**(운영 코드 무변경 · 시험만).
 - 확인 못 한 것: 신청 화면 · 승인 화면을 브라우저로 보지 못함(로컬 백엔드 · 로그인 없음 · 프론트 화면 시험 기반 없음) → C148-S1 직원 시트 · 본인인증 실제 휴대폰 1건 = 배포 뒤.
+
+## §5-3 닫기 칸(DEFECT-PLAYBOOK §2 · 결함 = T1 · 하나라도 비면 「미검증」)
+- [x] 흐름 표 빈칸 0 · Harold 확인 = 1120 「추천대로」(§1-2 · §2-1 · §3-2)
+- [x] 결함마다 처방 · 뿌리 번호(T1 = R89 넓힘 · ROOT-LEDGER 이력 1120) · 계약 시험(`c148-staff-tickets` T1 · 실 PG held-recovery C148 4) · 변이 = 1120 배포 뒤 다섯(M1 시간 초과 보류 순서 · M2 decideSpamOutcome 보류 · M3 회복 늦은 보고 창 · M4 회사 · 명의자 잠금 · M5 고친 판 건너뜀) 전부 빨간불 · 원복 해시 같음(`scratchpad c148-mutate.js`) · ★ M4 는 처음에 초록불 = 옛 동시 신청 시험(둘을 같이 띄움)이 잠금을 증명하지 못했다 → 앞 접수를 커밋 전으로 붙잡고 뒤 접수 세션이 막힌 것을 DB(`pg_blocking_pids`)로 확인하는 시험으로 바꾼 뒤 빨간불(구현 Codex 4R = 시간 짐작 · 실패 경로 정리 두 지적 반영 · 5R)
+- [x] tsc 0 · 백엔드 단위 전체(834파일 · 스탬프 1건 = 실 PG 전체 재실행으로 해소) · 실 PG 전체 101파일 925건
+- [x] Codex 설계 approve(4R) · Codex 구현 approve(3R)
+- [x] 서버 deployed_head = e8da2da0(원장 C148-H1 확인 출력) · DDL-1 끝
+- [ ] 직원 지시문 결과 = C148-S1(지시문 = 1120 대화 · 설계서 §6 줄과 같은 뜻)
+- [x] BUGS B-1120-5 상태 · 기능 문서 이력(FEATURE-AUTOMARKETING §7 · FEATURE-AGENCY-SEND §5 · 전송자격인증 설계서 D-8 행)
 
 ## §6 직원 회신(배포 뒤 · 말투 = 부드러운 반말 · 쉼표만 · 이름 0)
 - T1: 검사폰 보고가 늦게 와도 보류만 해 두고, 결과가 오면 원래 시각에 다시 예약되게 고쳤어, 이제 늦게 와서 통과한 안이 있으면 "결과가 늦게 나와 통과" 문자가 오고 원래 시각에 나가, 10분이 지나도 결과가 안 오면 그때 "검사 결과를 받지 못해" 문자로 검토를 요청해

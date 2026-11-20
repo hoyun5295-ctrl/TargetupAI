@@ -2976,7 +2976,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_fill_balance_marks_open ON agent_fill_balan
 - 선행: 설계 Codex approve(1120 · 4R) · 구현 Codex approve(1120 · 3R) · 커밋(Harold)
 - 기대: 설계서 docs/2026-11-20-c148-staff-tickets-three-design.md §1 ~ §3 · 로그인 본인인증 코드 무수정 · 발송 핵심 다섯 파일 무수정
 - 확인: 서버 HEAD · 백엔드 build:safe · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `operatorFinalSpamResult` · `SPELL_LOCATION_RULES` · `sender-owner-verify`
-- 결과: (대기)
+- 결과: 1120 Harold 실행 · 커밋 e8da2da0(30파일 · 공유 문서 넷 = C148 줄 + C147 배포 기록만 scratch/c148/docs.patch) push · 서버 pull · 백엔드 · 프론트 build:safe · pm2 reload(적재 0건 확인 없이 = 그 순간 적재 유무 미검증) · 확인 출력 = HEAD e8da2da0 · dist continuous-operator.js operatorFinalSpamResult 1 · dist/utils/sender-owner-verify.js 22:46 · targetup-backend online ↺22 · 99s
 
 ### C148-DDL-1 · 발신번호 명의 확인 표 + 신청 칸(설계서 §3-3) · ★ 배포 뒤
 - 카드: C148
@@ -2985,7 +2985,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_fill_balance_marks_open ON agent_fill_balan
 - 의미 바꿈: 아니오(새 표 + 빈 칸)
 - 기대: 서버 psql 에서 아래 블록 · 확인 = SELECT table_name, column_name FROM information_schema.columns WHERE table_name = 'sender_owner_verifications' OR (table_name = 'sender_registrations' AND column_name = 'owner_verification_id') ORDER BY table_name, ordinal_position;
 - 확인: sender_owner_verifications 12칸(id ~ verified_at) · sender_registrations.owner_verification_id 1칸
-- 결과: (대기)
+- 결과: 1120 Harold 실행(psql 한 번 · here-document · ON_ERROR_STOP · 블록 글자 그대로 + 확인 SELECT · C148-H1 뒤) = SET · CREATE TABLE · CREATE INDEX · ALTER TABLE · CREATE INDEX · 확인 = sender_owner_verifications 12칸 + sender_registrations.owner_verification_id = 13줄 = 기대와 같음
 
 > C148-RB-1(되돌리기 · 새 코드를 내린 뒤에만) = DROP INDEX IF EXISTS ux_sender_registrations_owner_verification; ALTER TABLE sender_registrations DROP COLUMN IF EXISTS owner_verification_id; DROP TABLE IF EXISTS sender_owner_verifications;
 
