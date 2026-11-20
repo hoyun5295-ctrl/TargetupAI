@@ -6,7 +6,7 @@
  */
 
 import { addMemory } from './company-memory';
-import { spamVerdictOf, mergeAlternativeVerdicts, isSpamHold } from './spam-test-queue';
+import { spamVerdictOf, mergeAlternativeVerdicts, isSpamHold, type SpamVerdict } from './spam-test-queue';
 
 // ━━━ 외부 노출 타입 ━━━
 export type DeliveryPolicy = 'daily' | 'weekly' | 'monthly';
@@ -126,6 +126,22 @@ export function operatorFinalSpamResult(
   if (alt === 'blocked' || alt === 'rejected') return alt;
   const first = tested[0]?.spamResult;
   return (first && first !== 'pass' ? first : 'failed') as OperatorSpamFinal;
+}
+
+/**
+ * ★ 2026-11-20 C148 §7 A — 보류 회차 회복이 다시 읽은 결과로 안별 결과(spamCheck.results[].result)를 새로 쓴다(순수).
+ *   옛: 회복이 통과 안 번호 · 지문만 써서, 늦은 보고로 통과해 예약된 안의 카드 칩이 「검사 결과 없음」으로 남았다(T1 접수 화면 절반).
+ *   통과 · 차단 · 확인 중 · 검사 중 = 그 값 · 장애(error) = 옛 값 그대로(장애를 통과 · 차단으로 덮지 않는다) · 검사 id 없는 안(반려 · 옛 회차) = 그대로.
+ *   결과 배열이 아니면 null(= 쓰지 않는다).
+ */
+export function refreshHeldResults(results: unknown, read: ReadonlyArray<{ testId: string; outcome: SpamVerdict }>): any[] | null {
+  if (!Array.isArray(results)) return null;
+  const byTest = new Map(read.map((x) => [String(x.testId), x.outcome]));
+  return results.map((r: any) => {
+    const o = r && r.testId ? byTest.get(String(r.testId)) : undefined;
+    if (o === 'pass' || o === 'blocked' || o === 'unconfirmed' || o === 'pending') return { ...r, result: o };
+    return r;
+  });
 }
 
 /** ★ 2026-10-03 스팸 검사 판정값의 고객 표기(정책 사유 · 화면 안별 결과가 같은 말을 쓴다) */

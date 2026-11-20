@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { decideSpamOutcome, operatorFinalSpamResult } from '../continuous-operator-policy';
+import { decideSpamOutcome, operatorFinalSpamResult, refreshHeldResults } from '../continuous-operator-policy';
 import { judgeSpellCandidates, SPELL_LOCATION_RULES } from '../spell-check';
 import { judgeSnsSpellCandidates } from '../sns-spell-check';
 
@@ -96,6 +96,69 @@ describe('T2 맞춤법 자리 잡기(AI 지시 · 판정 ① 그대로 · 서버
     expect(r).toHaveLength(1);
     expect(r[0].start).toBeLessThan(b.indexOf('친구에게'));
     expect(judgeSnsSpellCandidates('가 가 가', [{ before: '가', after: '까' }])).toHaveLength(0);   // 옛 계약
+  });
+});
+
+describe('§7 A 회복 = 안별 결과도 다시 읽은 값으로(카드 칩 = 지금 결과)', () => {
+  it('timeout → pass · timeout → blocked · 장애 = 옛 값 · 검사 id 없는 안 = 그대로 · 다른 칸 유지', () => {
+    const results = [
+      { index: 0, result: 'timeout', testId: 't0', fp: 'a', regenerated: false },
+      { index: 1, result: 'timeout', testId: 't1', fp: 'b' },
+      { index: 2, result: 'failed', testId: 't2', fp: 'c' },
+      { index: 3, result: 'rejected', rejection: '위치', testId: null },
+    ];
+    const r = refreshHeldResults(results, [
+      { testId: 't0', outcome: 'pass' }, { testId: 't1', outcome: 'blocked' }, { testId: 't2', outcome: 'error' },
+    ])!;
+    expect(r[0]).toEqual({ index: 0, result: 'pass', testId: 't0', fp: 'a', regenerated: false });
+    expect(r[1].result).toBe('blocked');
+    expect(r[2].result).toBe('failed');   // 장애를 통과 · 차단으로 덮지 않는다
+    expect(r[3]).toEqual(results[3]);
+    expect(refreshHeldResults(results, [{ testId: 't0', outcome: 'unconfirmed' }])![0].result).toBe('unconfirmed');
+    expect(refreshHeldResults(null, [])).toBeNull();
+  });
+  it('배선 — 되돌림 · 검토 · 종결 세 갈래가 같은 조각으로 안별 결과를 쓴다', () => {
+    const op = src('continuous-operator.ts');
+    expect(op).toContain('const refreshed = refreshHeldResults(row.sc?.results, read);');
+    expect(op).toContain('const r = await restoreHeldProposal(row, pass, refreshed);');
+    expect(op).toContain('}, query, refreshed)) out.settled++;');
+    expect((op.match(/\$\{keepPass\((5|6)\)\}/g) || []).length).toBe(2);
+    expect(op).toContain("COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || ${heldResultsPatch(4)} || jsonb_build_object('recovery',");
+  });
+});
+
+describe('§7 B · C 슈퍼관리자 화면 글자', () => {
+  const front = (rel: string) => readFileSync(join(__dirname, '..', '..', '..', '..', 'frontend', 'src', rel), 'utf8');
+  it('B 신청 상세 서류 이름 = 다섯 종류 표 · 「위임장」 단독 삼항 0', () => {
+    const m = front('components/admin/modals/SenderRegDetailModal.tsx');
+    for (const k of ['telecom_cert', 'authorization', 'consent_form', 'employment_cert', 'business_relation']) expect(m).toMatch(new RegExp(`\\b${k}: '`));
+    expect(m).toContain('{senderDocLabel(doc.type)}');
+    expect(m).not.toContain("'통신가입증명원' : '위임장'");
+    // ★ 구현 Codex §7-1R — 상속 속성(__proto__ 등)이 객체로 꺼내져 화면이 멈추지 않게: 직접 가진 키만 · 그 밖 = 「서류」 · 늘 글자
+    expect(m).toContain("typeof t === 'string' && Object.prototype.hasOwnProperty.call(SENDER_DOC_LABEL, t) ? SENDER_DOC_LABEL[t] : '서류'");
+    // 같은 판정을 여기서 돌려 본다(화면 함수와 같은 식 · 표 = 화면 파일에서 뽑은 키)
+    const block = m.slice(m.indexOf('const SENDER_DOC_LABEL'), m.indexOf('};', m.indexOf('const SENDER_DOC_LABEL')));
+    const keys = [...block.replace(/\r\n/g, '\n').matchAll(/^\s+([a-z_]+): '([^']+)',$/gm)].map((x) => [x[1], x[2]]);
+    const table: Record<string, string> = Object.fromEntries(keys);
+    const label = (t: unknown) => (typeof t === 'string' && Object.prototype.hasOwnProperty.call(table, t) ? table[t] : '서류');
+    expect(Object.keys(table)).toHaveLength(5);
+    for (const bad of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', '', 'xyz', null, 3]) expect(label(bad)).toBe('서류');
+    expect(label('consent_form')).toBe('발신번호 사용 동의서');
+  });
+  it('C 맞춤법 고친 판 = after_fix 상태 · 화면 문장', () => {
+    expect(src('precheck-usage.ts')).toContain("? (raw && typeof raw === 'object' && raw.afterFix === true ? 'after_fix' : 'ok')");
+    expect(front('components/admin/PrecheckUsageDetailModal.tsx')).toContain("after_fix: '담당자가 맞춤법 제안을 골라 고친 판이라 다시 검사하지 않았습니다.");
+  });
+});
+
+describe('§7 D 원장 DML 블록 = 본문에 BEGIN · COMMIT 0(시험 틀 BEGIN · ROLLBACK 을 확정하지 않는다)', () => {
+  it('블록 본문', () => {
+    const ledger = readFileSync(join(__dirname, '..', '..', '..', '..', '..', 'status', 'DEPLOY-LEDGER.md'), 'utf8').replace(/\r\n/g, '\n');
+    const s = ledger.indexOf('```sql dml:C148-DML-1\n');
+    const body = ledger.slice(s, ledger.indexOf('\n```', s + 10));
+    expect(s).toBeGreaterThan(0);
+    expect(body).not.toMatch(/^\s*(BEGIN|COMMIT)\s*;/m);
+    expect(body).toContain('ON CONFLICT (src, row_id) DO NOTHING;');
   });
 });
 

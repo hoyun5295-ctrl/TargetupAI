@@ -180,6 +180,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_sender_registrations_owner_verification ON 
 - [ ] 직원 지시문 결과 = C148-S1(지시문 = 1120 대화 · 설계서 §6 줄과 같은 뜻)
 - [x] BUGS B-1120-5 상태 · 기능 문서 이력(FEATURE-AUTOMARKETING §7 · FEATURE-AGENCY-SEND §5 · 전송자격인증 설계서 D-8 행)
 
+## §7 추가 결함 넷(1120 세션 마무리 중 발견 · Harold 「저것까지 제대로 위의 셋과 더불어 완벽하게 수정 · 코덱스 닫힐 때까지」)
+
+| # | 결함 | 사실(코드 · 실측) | 고객이 겪는 일 | 처방 |
+|---|---|---|---|---|
+| A | 회복이 회차를 되돌려도 안별 검사 결과는 옛 값 | `restoreHeldProposal` · `markRecovery` 가 passedIndex · fp · recovery 만 쓰고 `spamCheck.results[].result` 는 그대로 → 카드 칩(`ProposalDecisionCard.tsx:147 · 406`)이 그 값을 그린다 | 늦은 보고로 통과해 예약된 안에 「검사 결과 없음」 칩(T1 접수 「사이트에서도 검사 결과 없음」의 화면 절반) · 확인 중 · 검사 중 회복도 같다 | 회복이 다시 읽은 결과로 안별 결과를 함께 쓴다: 통과 · 차단 · 확인 중 · 검사 중 = 그 값 · 장애 = 옛 값 그대로(되돌림 · 검토 · 종결 세 갈래 · 순수 함수 `refreshHeldResults`) |
+| B | 슈퍼관리자 신청 상세 서류 이름 | `SenderRegDetailModal.tsx:157-159` = 통신가입증명원이 아니면 전부 「위임장」 · 서류 종류 다섯(`DocumentInfo.type`) | 사용 동의서 · 재직증명서 · 거래관계증명이 「위임장」(기타명의 무선 = 통신가입증명원 없음 → 더 잘 보임) | 종류 다섯 이름 표 · 모르는 값 = 「서류」 |
+| C | 슈퍼관리자 사용량 상세의 대행 맞춤법 | `precheck-usage.ts:381` = 이 판 저장값이 있으면 'ok' → T2 의 맞춤법 고친 판(빈 결과 · afterFix)이 「고칠 곳 없음」 | AI 가 검사하지 않은 판이 「검사했는데 고칠 곳 없음」 | 상태 'after_fix' 따로 · 화면 문장 「담당자가 맞춤법 제안을 골라 고친 판이라 다시 검사하지 않았습니다」 |
+| D | 옛 첨부 이름 깨짐 | 1120 실측(Harold 서버 출력): 담당자 위임장 23/30 · 발신번호 신청 서류 27/60 · 에셋 라이브러리 31/209 · 대행 이미지 0/54 · 깨진 이름은 전부 10-19 이전(03-18 ~ 10-19) = 10-19 B-1005-4③ 이후 새 업로드는 정상 · 저장값 자체가 UTF-8 을 라틴 글자로 읽은 글자 | 슈퍼관리자 등록현황 · 신청 상세 · 에셋 목록에 「(ì¬ë…)」 · 다운로드 이름 · 에셋 이름 찾기도 깨진 글자 | 저장값을 한 번 고쳐 쓴다(DML · 화면 덧칠 아님): 글자가 전부 U+0001 ~ U+00FF 이고 U+0080 ~ U+00FF 가 있는 이름만 latin1 바이트 → UTF-8 로 다시 읽기 · 다시 읽기 실패(올바른 UTF-8 아님 = 원래 라틴 글자 이름 · 예 「café」) = 그대로 · 고치기 전 값 = 백업 표 · 두 번 돌려도 그대로 |
+
+### §7-1 D DML(원장 C148-DML-1 · 한 트랜잭션 · 배포와 무관 · 코드 변경 0)
+- 대상 = sender_managers.authorization_doc.originalName · sender_registrations.documents[].originalName · cdp_assets.filename. 대행 이미지(0건) · SNS(이름 칸 없음) = 대상 아님.
+- 판정 · 변환 = 세션 함수 `pg_temp.c148_fix_name`(앱 `restoreUploadFileName` 규칙 + **다시 읽은 결과에 한글(완성형 가 ~ 힣 · 호환 자모 ㄱ ~ ㆎ · 조합용 자모 U+1100 ~ 11FF · A960 ~ A97F · D7B0 ~ D7FF = macOS 분해형(NFD) 이름 · ★ D-2R)이 있을 때만**(★ 설계 Codex D-1R #2 = 정상 라틴 이름 「Â².png」 · 두 번 깨진 이름이 한 겹씩 풀려 두 번째 실행이 또 바꾸던 것을 막는다 · 깨진 이름은 모두 한글 파일명) · 예외 = 원래 값) · 백업 = `c148_filename_fix_backup(src, row_id, old_value jsonb, fixed_at · PK (src, row_id))` · ON CONFLICT DO NOTHING = 처음 고치기 전 값만 남는다 · 되돌리기 = 원장 C148-RB-2.
+- 트랜잭션 = 원장 블록 본문에 BEGIN · COMMIT 을 두지 않는다(★ 설계 Codex D-1R #1 = 시험 틀의 BEGIN · ROLLBACK 을 안쪽 COMMIT 이 확정했다) · 운영 실행 = `psql -1`(한 트랜잭션) · 실 PG 시험 = 같은 본문을 바깥 트랜잭션 안에서.
+- 문서 배열은 순서(WITH ORDINALITY)를 지키고 바뀌는 요소만 바꾼다 · 이름이 NULL 인 요소 · 행은 건드리지 않는다.
+
+### §7-2 영향 · 범위 밖
+- A = 카드 칩 · 회복 결말만(발송 관문 · 지문 · 예약 무변) · B · C = 슈퍼관리자 화면 글자만 · D = 이름 글자만(파일 · 경로 · 저장 이름 storedName 무변).
+- 범위 밖 = 없음(대행 이미지 깨진 이름 0건 · SNS 저장 줄에 이름 칸 없음 · 새 업로드는 10-19 부터 복원 저장).
+
+### §7-3 계약 시험
+| # | 시험 |
+|---|---|
+| A | 순수 `refreshHeldResults`: timeout → pass · timeout → blocked · 장애 = 옛 값 · 검사 id 없는 안 = 그대로 / 실 PG: 시간 초과 회차 되돌림 뒤 results[0].result = pass · 막힘 종결 = blocked |
+| B | 소스 계약: 상세 창 서류 이름 표에 다섯 종류 · 「위임장」 단독 삼항 0 |
+| C | precheck-usage: afterFix 저장값 = 'after_fix' · 화면 상태 표에 after_fix 문장(Record = tsc) |
+| D | 실 PG: 깨진 이름(위임장 · 서류 배열 둘째 요소 · 에셋 · 분해형(NFD) 한글) = 한글로(분해형은 분해형 그대로) · 정상 한글 · 영문 · 「café」 · 「Â².png」(정상 라틴) · 두 번 깨진 한글 이름(한 겹 풀면 한글 아님) = 그대로 · 이름 NULL 요소 · 배열 아닌 documents = 그대로 · 배열 순서 · 다른 키 그대로 · 백업 행 = 바뀐 행 수 · 두 번째 실행 = 바뀜 0 · 백업 0 추가 / 소스 계약: 원장 블록 본문에 BEGIN · COMMIT 0 |
+
+### §7-4 기록(1120)
+- 설계 Codex: 1R needs-attention 2(#1 high 블록 안 COMMIT 이 시험 틀 확정 → 본문 BEGIN · COMMIT 삭제 · psql -1 / #2 medium 정상 라틴 이름 · 두 번 깨짐 다시 읽기 → 한글이 나올 때만 · 백업 PK) · 2R 1(분해형 한글 누락 → 조합용 자모 범위) · **3R approve**(A · B · C 는 1R 부터 지적 0). 첫 시도는 Codex 모델 붐빔(at capacity)으로 다시 띄움.
+- 구현: A `refreshHeldResults`(policy) · 회복 세 갈래 `heldResultsPatch($n)` / B `SENDER_DOC_LABEL` / C `after_fix` / D 원장 C148-DML-1 · ★ 편집 도구가 원장 SQL 의 `\u` 표기를 글자(ÿ · 가 ~ 힣)로 바꿔 저장했다(뜻은 같음 · 제어 문자 0 확인) → 스크립트로 `\u` 표기로 통일(붙여 넣는 원장 = 표기가 보여야 한다).
+- 시험: c148-staff-tickets §7 넷 · 실 PG held-recovery(안별 결과 기대) · 새 실 PG c148-filename-fix · 변이 8 전부 빨간불(MA2 는 처음 초록 = 종결 사례 저장값이 이미 blocked 라 바뀔 것이 없었다 → 저장값 timeout 으로 바꾼 뒤 빨간불).
+- 구현 Codex: 1R needs-attention 1(B 서류 종류 값 `__proto__` = 상속 속성이 객체로 꺼내져 상세 화면 멈춤 → 표가 직접 가진 키만 · 그 밖 「서류」 · 시험 = 화면 표를 뽑아 같은 식 · 변이 빨간불) · **2R approve** · 그 뒤 push 전 pg-test-stamp 가 새 실 PG 시험을 「기대는 CT import 0 = 판정 불가」로 막음 → 시험이 실제로 기대는 앱 복원 restoreUploadFileName 을 import 해 깨진 한글 넷 · café 에서 DML 과 같은 결과를 단언(라틴 전용 이름은 설계상 갈림 = 단언 안 함) · **3R approve**(시험 줄만).
+- 배포 = 원장 C148-H2(A · B · C) · C148-DML-1(D · 코드 무관 · psql -1).
+
 ## §6 직원 회신(배포 뒤 · 말투 = 부드러운 반말 · 쉼표만 · 이름 0)
 - T1: 검사폰 보고가 늦게 와도 보류만 해 두고, 결과가 오면 원래 시각에 다시 예약되게 고쳤어, 이제 늦게 와서 통과한 안이 있으면 "결과가 늦게 나와 통과" 문자가 오고 원래 시각에 나가, 10분이 지나도 결과가 안 오면 그때 "검사 결과를 받지 못해" 문자로 검토를 요청해
 - T2: 맞춤법 검사가 문안 끝까지 보고 같은 실수가 여러 곳이면 자리마다 따로 제안하게 했고, 맞춤법 고치기로 고친 문안은 맞춤법을 다시 제안하지 않고 스팸 검사 뒤 바로 승인 요청이 가게 했어, 접수하고 고칠 곳 고르고 한 번만 고치면 승인 문자까지 한 바퀴로 끝나

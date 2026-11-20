@@ -378,8 +378,9 @@ export async function loadPrecheckDetail(q: { type: PrecheckDetailType; ref: str
   // 결과를 쓸 수 있는지는 대행 CT(`readAgencySpell`)가 정한다. 못 쓰면 그 이유만 여기서 가른다(표시용).
   const issues = readAgencySpell(req);
   const raw: any = req.spell_check;
-  const state: 'ok' | 'changed' | 'failed' | 'missing' = issues
-    ? 'ok'
+  // ★ 2026-11-20 C148 §7 C — 맞춤법 고치기로 만든 판(afterFix · AI 검사 없음 · 빈 결과)을 「검사했는데 고칠 곳 없음」으로 보이지 않는다
+  const state: 'ok' | 'after_fix' | 'changed' | 'failed' | 'missing' = issues
+    ? (raw && typeof raw === 'object' && raw.afterFix === true ? 'after_fix' : 'ok')
     : !raw || typeof raw !== 'object' ? 'missing' : raw.failed === true ? 'failed' : 'changed';
   return {
     type: 'spell_agency' as const,

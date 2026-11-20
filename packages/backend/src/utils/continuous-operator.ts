@@ -43,7 +43,7 @@ import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason, operatorFinalSpamResult } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason, operatorFinalSpamResult, refreshHeldResults } from './continuous-operator-policy';
 import { buildAutosendStopUrl } from './autosend-stop-link';
 import { operatorCapPolicy, operatorCapPathOf, autoSendLeadMinutesSql, type OperatorCapPath } from './autosend-policy';
 import { NOTICE_MAX_ATTEMPTS } from './journey-notice-once';   // ★ 2026-11-02 안내 시도 상한(한 정책 · 회차 안내도 같은 값)   // ★ 2026-11-02 상한 갈래 CT(설계서 3-0 CT-O2)
@@ -2786,11 +2786,13 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
       if (tested.length === 0) { await markRecovery(row.id, 'legacy', null); continue; }
       const read = await Promise.all(tested.map(async (r: any) => {
         const o = await readSpamTestOutcome(String(r.testId));
-        return { index: Number(r.index), fp: String(r.fp), outcome: o.outcome, lateOpen: o.lateOpen };
+        return { index: Number(r.index), fp: String(r.fp), testId: String(r.testId), outcome: o.outcome, lateOpen: o.lateOpen };
       }));
+      // ★ 2026-11-20 C148 §7 A — 결말마다 안별 결과도 다시 읽은 값으로(카드 칩 = 지금 결과)
+      const refreshed = refreshHeldResults(row.sc?.results, read);
       const pass = read.filter((x) => x.outcome === 'pass').sort((a, b) => a.index - b.index)[0];
       if (pass) {
-        const r = await restoreHeldProposal(row, pass);
+        const r = await restoreHeldProposal(row, pass, refreshed);
         out.settled++;
         if (r === 'restored') out.restored++;
         continue;
@@ -2809,7 +2811,7 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
             // ★ 2026-11-20 C148 T1 — 막힌 안 없이 결과를 못 받음 = 「통과하지 못해」라고 쓰지 않는다(옛 문자가 직원에게 차단으로 읽혔다)
             ? `'${name}' 이번 회차 스팸 검사 결과를 받지 못해 담당자 검토로 두었어요. 제안 상세에서 다시 검사하거나 승인해 주세요. 자동마케팅은 그대로 돌아가요.`
             : `'${name}' 이번 회차 문안이 스팸필터를 통과하지 못해 담당자 검토로 두었어요. 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인해 주세요. 자동마케팅은 그대로 돌아가요.`,
-      })) out.settled++;
+      }, query, refreshed)) out.settled++;
     } catch (err: any) {
       // R8 — 예상 밖 실패 = 종결 표식(매 분 다시 집지 않는다 · 회차는 이미 담당자 검토라 사람 길이 남아 있다)
       console.error(`[ContinuousOperator Recover] ${row.id} 회복 실패 → 담당자 검토 그대로:`, err?.message || err);
@@ -2824,18 +2826,26 @@ type RecoveryNotice = { title: string; body: string } | null;
 const noticeJson = (n: RecoveryNotice) => (n ? JSON.stringify({ title: n.title, body: n.body, attempts: 0, sentAt: null }) : null);
 
 /** 회복 결말 표식(한 번만 · 표식이 있으면 회복이 다시 보지 않는다) + 안내 원장(같은 문장) */
-async function markRecovery(proposalId: string, result: string, notice: RecoveryNotice, run: (sql: string, params?: any[]) => Promise<{ rows: any[] }> = query): Promise<boolean> {
+async function markRecovery(
+  proposalId: string, result: string, notice: RecoveryNotice,
+  run: (sql: string, params?: any[]) => Promise<{ rows: any[] }> = query,
+  /** ★ 2026-11-20 C148 §7 A — 다시 읽은 안별 결과(refreshHeldResults · null = 그대로) */
+  results: any[] | null = null,
+): Promise<boolean> {
   const r = await run(
     `UPDATE operator_proposals
         SET proposal_json = jsonb_set(proposal_json, '{spamCheck}',
-              COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || jsonb_build_object('recovery',
+              COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || ${heldResultsPatch(4)} || jsonb_build_object('recovery',
                 jsonb_strip_nulls(jsonb_build_object('at', NOW(), 'result', $2::text, 'notice', $3::jsonb))), true)
       WHERE id = $1::uuid AND status = 'admin_review' AND reviewed_at IS NULL AND proposal_json->'spamCheck'->'recovery' IS NULL
       RETURNING id`,
-    [proposalId, result, noticeJson(notice)],
+    [proposalId, result, noticeJson(notice), results ? JSON.stringify(results) : null],
   );
   return r.rows.length > 0;
 }
+
+/** ★ 2026-11-20 C148 §7 A — spamCheck 에 안별 결과를 덮는 조각($n = 결과 배열 JSON · NULL = 덮지 않음) */
+const heldResultsPatch = (n: number) => `(CASE WHEN $${n}::jsonb IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('results', $${n}::jsonb) END)`;
 
 async function operatorNameOf(operatorId: string): Promise<string> {
   const r = await query(`SELECT name FROM continuous_operators WHERE id = $1::uuid`, [operatorId]);
@@ -2855,7 +2865,10 @@ async function loadOperatorForNotice(operatorId: string): Promise<ContinuousOper
 async function restoreHeldProposal(
   row: { id: string; operator_id: string; company_id: string; sc: any },
   pass: { index: number; fp: string },
+  /** ★ 2026-11-20 C148 §7 A — 다시 읽은 안별 결과(refreshHeldResults · null = 그대로) */
+  results: any[] | null = null,
 ): Promise<'restored' | 'review'> {
+  const resultsJson = results ? JSON.stringify(results) : null;
   return withTransaction(async (run) => {
     const op = (await run(`SELECT status, approved_until, approval_meta, name FROM continuous_operators WHERE id = $1::uuid FOR UPDATE`, [row.operator_id])).rows[0];
     const co = (await run(
@@ -2867,14 +2880,14 @@ async function restoreHeldProposal(
     const meta = typeof op?.approval_meta === 'string' ? JSON.parse(op.approval_meta) : op?.approval_meta;
     const eligible = String(op?.status || '') === 'active'
       && (co?.company_auto === true || isWithinApprovalWindow(op?.approved_until ? new Date(op.approved_until) : null, meta?.windowStart ?? null, sendAt));
-    const keepPass = `COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || jsonb_build_object('passedIndex', $2::int, 'fp', $3::text`;
+    const keepPass = (n: number) => `COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || ${heldResultsPatch(n)} || jsonb_build_object('passedIndex', $2::int, 'fp', $3::text`;
     if (eligible) {
       const label = sendAt.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
       const up = await run(
         `UPDATE operator_proposals
             SET status = 'scheduled', scheduled_send_at = $4::timestamptz, auto_executed = true, spam_test_status = 'pass',
                 auto_execute_reason = '스팸 검사 결과가 늦게 나와 통과 · 자동 발송 다시 예약',
-                proposal_json = jsonb_set(proposal_json, '{spamCheck}', ${keepPass},
+                proposal_json = jsonb_set(proposal_json, '{spamCheck}', ${keepPass(6)},
                   'restoredAt', NOW(), 'recovery', jsonb_build_object('at', NOW(), 'result', 'restored', 'notice', $5::jsonb)), true)
           WHERE id = $1::uuid AND status = 'admin_review' AND reviewed_at IS NULL AND proposal_json->'spamCheck'->'recovery' IS NULL
             AND NOT EXISTS (SELECT 1 FROM operator_proposals o2
@@ -2884,7 +2897,7 @@ async function restoreHeldProposal(
         [row.id, pass.index, pass.fp, sendAt, noticeJson({
           title: '[AI 자동마케팅] 자동 발송 다시 예약',
           body: `'${name}' 이번 회차 스팸 검사 결과가 늦게 나와 통과했어요. ${label}에 자동으로 보내요. 보내기 전까지 「승인할 제안」의 회차 카드에서 [자동 발송 정지]로 멈출 수 있어요.`,
-        })],
+        }), resultsJson],
       );
       if (up.rows.length > 0) return 'restored' as const;
     }
@@ -2892,13 +2905,13 @@ async function restoreHeldProposal(
     await run(
       `UPDATE operator_proposals
           SET spam_test_status = 'pass',
-              proposal_json = jsonb_set(proposal_json, '{spamCheck}', ${keepPass},
+              proposal_json = jsonb_set(proposal_json, '{spamCheck}', ${keepPass(5)},
                 'recovery', jsonb_build_object('at', NOW(), 'result', 'pass_review', 'notice', $4::jsonb)), true)
         WHERE id = $1::uuid AND status = 'admin_review' AND reviewed_at IS NULL AND proposal_json->'spamCheck'->'recovery' IS NULL`,
       [row.id, pass.index, pass.fp, noticeJson({
         title: '[AI 자동마케팅] 검사 통과 · 승인 필요',
         body: `'${name}' 이번 회차 스팸 검사는 통과했지만 ${why}. 제안 상세에서 확인하고 승인해 주세요.`,
-      })],
+      }), resultsJson],
     );
     return 'review' as const;
   });

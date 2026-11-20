@@ -20,6 +20,18 @@ export interface SenderRegDetailModalProps {
   setShowSenderRegDetailModal: Dispatch<SetStateAction<boolean>>;
 }
 
+/** ★ 2026-11-20 C148 §7 B — 서류 종류 이름(서버 DocumentInfo.type 다섯 · 옛: 통신가입증명원이 아니면 전부 「위임장」) · 모르는 값 = 「서류」 */
+const SENDER_DOC_LABEL: Record<string, string> = {
+  telecom_cert: '통신가입증명원',
+  authorization: '위임장',
+  consent_form: '발신번호 사용 동의서',
+  employment_cert: '재직증명서',
+  business_relation: '거래관계증명파일',
+};
+/** 표에 직접 있는 다섯 키만 이름으로 · 그 밖(`__proto__` 등 상속 속성 포함) = 「서류」(★ 구현 Codex §7-1R · 서버는 종류 값을 그대로 저장한다) */
+const senderDocLabel = (t: unknown): string =>
+  typeof t === 'string' && Object.prototype.hasOwnProperty.call(SENDER_DOC_LABEL, t) ? SENDER_DOC_LABEL[t] : '서류';
+
 export default function SenderRegDetailModal(props: SenderRegDetailModalProps) {
   const { downloadSenderDoc, loadCallbackNumbers, loadSenderRegPendingCount, loadSenderRegistrations, rejectReasonInput, senderRegDetail, senderRegFilter, setModal, setRejectReasonInput, setSenderRegDetail, setShowSenderRegDetailModal } = props;
 
@@ -156,7 +168,7 @@ export default function SenderRegDetailModal(props: SenderRegDetailModalProps) {
                           <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium mr-2 ${
                             doc.type === 'telecom_cert' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
                           }`}>
-                            {doc.type === 'telecom_cert' ? '통신가입증명원' : '위임장'}
+                            {senderDocLabel(doc.type)}
                           </span>
                           <span className="text-sm text-gray-700">{doc.originalName}</span>
                           {doc.fileSize && <span className="text-xs text-gray-400 ml-2">({(doc.fileSize / 1024).toFixed(0)}KB)</span>}

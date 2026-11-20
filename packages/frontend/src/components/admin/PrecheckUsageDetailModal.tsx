@@ -48,7 +48,7 @@ interface SpellAgencyDetail {
   messageType: string;
   subject: string | null;
   text: string;
-  state: 'ok' | 'changed' | 'failed' | 'missing';
+  state: 'ok' | 'after_fix' | 'changed' | 'failed' | 'missing';   // ★ C148 §7 C after_fix = 맞춤법 고친 판(다시 검사 안 함)
   issues: SpellIssue[] | null;
   checkedAt: string | null;
 }
@@ -238,6 +238,7 @@ function SpellDirectBody({ d, target }: { d: SpellDirectDetail; target: Precheck
 }
 
 const AGENCY_STATE_NOTE: Record<Exclude<SpellAgencyDetail['state'], 'ok'>, string> = {
+  after_fix: '담당자가 맞춤법 제안을 골라 고친 판이라 다시 검사하지 않았습니다. 아래는 지금 문안입니다.',
   changed: '검사 뒤 담당자가 문안을 고쳐 이 검사 결과는 남아 있지 않습니다. 아래는 지금 문안입니다.',
   failed: '이 접수의 마지막 맞춤법 검사가 실패했습니다. 아래는 지금 문안입니다.',
   missing: '이 접수에 남은 맞춤법 검사 결과가 없습니다. 아래는 지금 문안입니다.',

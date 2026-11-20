@@ -205,6 +205,9 @@ describe('E3-6 보류 회차 회복(실 PG)', () => {
       expect(new Date(now.scheduled_send_at).getTime()).toBe(held.getTime());
       expect(now.sc).toMatchObject({ passedIndex: 0, fp: 'fp-t1', recovery: { result: 'restored' } });
       expect(now.sc.recovery.notice.body).toContain('결과가 늦게 나와 통과');
+      // ★ C148 §7 A — 안별 결과 = 다시 읽은 값(카드 칩) · 1안 통과 · 2안 = 끝내 timeout 줄 = 장애 = 옛 값
+      expect(now.sc.results.map((r: any) => r.result)).toEqual(['pass', 'timeout']);
+      expect(now.sc.results[0]).toMatchObject({ index: 0, testId: t1, fp: 'fp-t1' });
     });
     it('닫힌 지 11분 · 끝내 시간 초과 = 담당자 검토 + 「결과를 받지 못해」(「통과하지 못해」 아님)', async () => {
       const op = await operator(true);
@@ -221,10 +224,13 @@ describe('E3-6 보류 회차 회복(실 PG)', () => {
       const op = await operator(true);
       const ta = await closedTest(11, ['pass', 'timeout']);
       const tb = await closedTest(11, ['blocked']);
-      const id = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: ta, fp: 'a' }, { index: 1, result: 'blocked', testId: tb, fp: 'b' }], new Date(Date.now() + 3600_000));
+      // 2안 = 회차 때 timeout 으로 적혔다가 뒤에 막힘으로 확정(확인 문자) → 종결이 안별 결과를 blocked 로 고쳐 써야 한다(변이 MA2)
+      const id = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: ta, fp: 'a' }, { index: 1, result: 'timeout', testId: tb, fp: 'b' }], new Date(Date.now() + 3600_000));
       await recoverHeldProposals();
       expect((await row(id)).sc.recovery.result).toBe('blocked');
       expect((await row(id)).sc.recovery.notice.body).toContain('통과하지 못해');
+      // ★ C148 §7 A — 종결도 안별 결과를 다시 읽은 값으로(막힌 안 = blocked · 장애 안 = 옛 값)
+      expect((await row(id)).sc.results.map((r: any) => r.result)).toEqual(['timeout', 'blocked']);
     });
     it('배포 전 시간 초과 회차(heldSendAt 칸 없음 · 이미 안내됨) = 통과로 바뀌었어도 손대지 않는다', async () => {
       const op = await operator(true);

@@ -3010,6 +3010,64 @@ ALTER TABLE sender_registrations ADD COLUMN IF NOT EXISTS owner_verification_id 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_sender_registrations_owner_verification ON sender_registrations (owner_verification_id) WHERE owner_verification_id IS NOT NULL;
 ```
 
+### C148-H2 · 한줄로 배포 2차(설계서 §7 A · B · C · 백엔드 + 프론트 · DDL 0 · ENV 0)
+- 카드: C148
+- 단계: 한줄로 배포
+- 선행: C148-H1 · 설계 Codex §7 approve(3R) · 구현 Codex §7 approve · 커밋(Harold)
+- 기대: 회복 일꾼이 안별 결과도 다시 읽은 값으로 씀(카드 칩) · 슈퍼관리자 신청 상세 서류 이름 다섯 · 사용량 상세 맞춤법 고친 판 문장 · 발송 핵심 다섯 파일 무수정
+- 확인: 서버 HEAD · 백엔드 build:safe · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `refreshHeldResults` · `after_fix`
+- 결과: (대기)
+
+### C148-DML-1 · 옛 첨부 이름 깨짐 고쳐 쓰기(설계서 §7 D · §7-1) · 한 트랜잭션(`psql -1` · 본문에 BEGIN · COMMIT 없음 = 시험 틀의 BEGIN · ROLLBACK 안에서도 그대로) · 배포와 무관
+- 카드: C148
+- 단계: DML
+- 선행: 없음(코드 변경 0 · 10-19 뒤 새 업로드는 이미 정상 저장)
+- 의미 바꿈: 아니오(이름 글자만 · 파일 · 경로 · storedName 무변)
+- 기대: 1120 실측 깨진 이름 = 위임장 23 · 신청 서류 27(요소) · 에셋 31 → 고친 뒤 같은 실측 SELECT 의 broken = 0(다시 읽기 실패한 이름이 있으면 그 수만 남는다) · 백업 표 행 = 위임장 행 + 신청 행 + 에셋 행 · 두 번째 실행 = INSERT 0 · UPDATE 0
+- 확인: SELECT src, count(*) FROM c148_filename_fix_backup GROUP BY src ORDER BY src; 와 설계서 §7 D 실측 SELECT(broken)
+- 결과: (대기)
+
+> C148-RB-2(되돌리기) = UPDATE sender_managers m SET authorization_doc = b.old_value FROM c148_filename_fix_backup b WHERE b.src = 'manager' AND b.row_id = m.id; UPDATE sender_registrations r SET documents = b.old_value FROM c148_filename_fix_backup b WHERE b.src = 'registration' AND b.row_id = r.id; UPDATE cdp_assets a SET filename = b.old_value #>> '{}' FROM c148_filename_fix_backup b WHERE b.src = 'asset' AND b.row_id = a.id;
+
+```sql dml:C148-DML-1
+SET LOCAL lock_timeout = '3s';
+CREATE OR REPLACE FUNCTION pg_temp.c148_fix_name(t text) RETURNS text LANGUAGE plpgsql AS $f$
+DECLARE r text;
+BEGIN
+  IF t IS NULL OR NOT (t ~ '[\u0080-\u00ff]') OR t ~ '[^\u0001-\u00ff]' THEN RETURN t; END IF;
+  r := convert_from(convert_to(t, 'LATIN1'), 'UTF8');
+  IF r ~ '[\uac00-\ud7a3\u3131-\u318e\u1100-\u11ff\ua960-\ua97f\ud7b0-\ud7ff]' THEN RETURN r; END IF;
+  RETURN t;
+EXCEPTION WHEN others THEN RETURN t;
+END $f$;
+CREATE TABLE IF NOT EXISTS c148_filename_fix_backup (src text NOT NULL, row_id uuid NOT NULL, old_value jsonb, fixed_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (src, row_id));
+INSERT INTO c148_filename_fix_backup (src, row_id, old_value)
+SELECT 'manager', id, authorization_doc FROM sender_managers
+ WHERE pg_temp.c148_fix_name(authorization_doc->>'originalName') IS DISTINCT FROM authorization_doc->>'originalName'
+ON CONFLICT (src, row_id) DO NOTHING;
+INSERT INTO c148_filename_fix_backup (src, row_id, old_value)
+SELECT 'registration', r.id, r.documents FROM sender_registrations r
+ WHERE jsonb_typeof(r.documents) = 'array'
+   AND EXISTS (SELECT 1 FROM jsonb_array_elements(r.documents) e WHERE pg_temp.c148_fix_name(e->>'originalName') IS DISTINCT FROM e->>'originalName')
+ON CONFLICT (src, row_id) DO NOTHING;
+INSERT INTO c148_filename_fix_backup (src, row_id, old_value)
+SELECT 'asset', id, to_jsonb(filename) FROM cdp_assets
+ WHERE pg_temp.c148_fix_name(filename) IS DISTINCT FROM filename
+ON CONFLICT (src, row_id) DO NOTHING;
+UPDATE sender_managers
+   SET authorization_doc = jsonb_set(authorization_doc, '{originalName}', to_jsonb(pg_temp.c148_fix_name(authorization_doc->>'originalName')))
+ WHERE pg_temp.c148_fix_name(authorization_doc->>'originalName') IS DISTINCT FROM authorization_doc->>'originalName';
+UPDATE sender_registrations r
+   SET documents = (SELECT jsonb_agg(CASE WHEN pg_temp.c148_fix_name(x.e->>'originalName') IS DISTINCT FROM x.e->>'originalName'
+                                          THEN jsonb_set(x.e, '{originalName}', to_jsonb(pg_temp.c148_fix_name(x.e->>'originalName')))
+                                          ELSE x.e END ORDER BY x.o)
+                      FROM jsonb_array_elements(r.documents) WITH ORDINALITY AS x(e, o))
+ WHERE jsonb_typeof(r.documents) = 'array'
+   AND EXISTS (SELECT 1 FROM jsonb_array_elements(r.documents) e WHERE pg_temp.c148_fix_name(e->>'originalName') IS DISTINCT FROM e->>'originalName');
+UPDATE cdp_assets SET filename = pg_temp.c148_fix_name(filename)
+ WHERE pg_temp.c148_fix_name(filename) IS DISTINCT FROM filename;
+```
+
 ### C148-S1 · 실측(직원 시트 · 설계서 §6)
 - 카드: C148
 - 단계: 사후
