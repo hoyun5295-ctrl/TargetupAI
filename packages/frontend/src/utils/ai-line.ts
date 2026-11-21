@@ -7,7 +7,7 @@
  * - 다듬은 문안은 `bodyOf` · `setBody` 로만 읽고 쓴다(반만 바꾸면 고친 글 대신 원본이 나간다 · 회의론자 화면 렌즈).
  * ⛔ 모델명 0 · 줄표 0.
  */
-import type { AskReadResult, AskSegments, AskPlan, AskCount, AskBenefitMode, AskComposeResult, AskAnswer } from './ai-ask';
+import type { AskReadResult, AskSegments, AskPlan, AskCount, AskBenefitMode, AskComposeResult, AskAnswer, AskPlace, AskCopyType } from './ai-ask';
 
 export type AiLineBranch = 'sms' | 'alimtalk' | 'ask_kakao';
 export type AiLineCopyType = 'emo' | 'benefit' | 'mz';
@@ -106,6 +106,8 @@ export interface AiLineSpamChip {
   elapsedSec?: number;
   autoRuns?: number;
   message?: string;
+  /** ★ C153 결과 없음(warn)인데 서버가 늦은 보고를 아직 받는 때(서버 판정 · 그동안 이어 읽는다 · 옛 진행 = 없음 = 이어 읽지 않음) */
+  lateOpen?: boolean;
 }
 
 /** 진행 상태 하나(화면 전체가 이 객체만 본다) */
@@ -342,14 +344,14 @@ export const aiLineApi = {
   decorate: (body: { body: string; vars: string[]; channel: AiLineChannel; isAd: boolean; attemptToken: string }) =>
     call<{ body: string; changed: boolean; charged: number }>('/decorate', body),
   spamStart: (body: { body: string; subject: string; channel: AiLineChannel; isAd: boolean; callback: string; sampleCustomerId: string | null }) =>
-    call<{ state: AiLineSpamState; testId?: string; reused?: boolean; message?: string }>('/spam-test', body),
+    call<{ state: AiLineSpamState; testId?: string; reused?: boolean; message?: string; lateOpen?: boolean }>('/spam-test', body),
   spamRead: (testId: string, channel: AiLineChannel) =>
-    call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET', SPAM_READ_TIMEOUT_MS),
+    call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number; lateOpen?: boolean }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET', SPAM_READ_TIMEOUT_MS),
   // ★ 2026-11-21 C151 한 줄로 묻기(같은 라우터 · 같은 요금제 관문 · 타입 = utils/ai-ask.ts)
   askRead: (line: string) => call<AskReadResult>('/ask/read', { line }),
   askSegments: () => call<AskSegments>('/ask/segments', undefined, 'GET', 30_000),
   askCount: (plan: AskPlan) => call<AskCount>('/ask/count', { plan }, 'POST', 30_000),
-  askCompose: (body: { line: string | null; plan: AskPlan; benefitMode: AskBenefitMode; benefit: string | null; retryBlocked: boolean; attemptToken: string }) =>
+  askCompose: (body: { line: string; plan: AskPlan; benefitMode: AskBenefitMode; benefit: string | null; place: AskPlace; link: string | null; types: AskCopyType[]; retryBlocked: boolean; attemptToken: string }) =>
     call<AskComposeResult>('/ask/compose', body),
   // ★ 2026-11-21 C152 B 질문에 답하기(5크레딧 · 같은 시도 표 + 같은 질문 = 낸 답 그대로)
   askAnswer: (question: string, attemptToken: string) => call<AskAnswer>('/ask/answer', { question, attemptToken }, 'POST', 120_000),

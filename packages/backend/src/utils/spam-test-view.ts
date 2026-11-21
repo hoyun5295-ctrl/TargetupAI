@@ -5,7 +5,7 @@
  * 내주는 것 = 상태 · 통신사별 결과 · 앞 대기 수 · 진행 초만(검사 행 원본 · 받는 사람 · 만든 사람 0 · Codex 설계 1R H2).
  */
 import { query } from '../config/database';
-import { spamTestStartedAtMs } from './spam-test-queue';
+import { spamTestStartedAtMs, readSpamTestOutcome } from './spam-test-queue';
 import { judgeSpamVerdict, withExpectedSpamDevices } from './spam-trial';
 
 export type SpamCheckViewState = 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn';
@@ -15,6 +15,8 @@ export interface SpamCheckView {
   carriers: Array<{ carrier: string; result: 'pass' | 'blocked' | 'checking' | 'none' }>;
   aheadCount: number;
   elapsedSec: number;
+  /** ★ 2026-11-22 C153 — 결과 없음(warn)인데 늦은 보고가 아직 그 줄을 통과로 고칠 수 있는 때(readSpamTestOutcome lateOpen · DB 시계 · C150 조각 하나) · 그 밖 상태 = false */
+  lateOpen: boolean;
 }
 
 /** 검사 한 건 → 보기(기대 테스트폰을 채운 판정 · 수동 검사 창과 같은 함수) */
@@ -53,6 +55,7 @@ export async function spamCheckView(testId: string, status: string, createdAt: D
     state,
     carriers: [...byCarrier.entries()].map(([carrier, result]) => ({ carrier, result })),
     aheadCount,
+    lateOpen: state === 'warn' ? (await readSpamTestOutcome(testId)).lateOpen : false,
     elapsedSec: status === 'active' ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0,
   };
 }

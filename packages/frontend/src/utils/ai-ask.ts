@@ -1,7 +1,7 @@
 /**
  * utils/ai-ask.ts — 「한 줄로 묻기」 화면 CT(타입 · 순수 판정 · 표 글) (★ 2026-11-21 C151 · 설계서 docs/2026-11-21-c151-ask-entry-design.md §3)
  *
- * 서버 호출 = utils/ai-line.ts aiLineApi.ask*(같은 라우터) · 직접발송 넘기기 = utils/product-insight.ts(kind 'ask').
+ * 서버 호출 = utils/ai-line.ts aiLineApi.ask*(같은 라우터) · 보내기 = 이 화면 4단계(직접발송 · AI 한줄로와 같은 확정 길 · ★ 2026-11-22 C153).
  * 숫자는 서버가 준 값만 그린다(지어내지 않는다) · 묶음 이름 · 설명 = 서버 한 곳(askGroupMeta).
  * ⛔ 모델명 0 · 검사 방식 낱말 0 · 줄표 0.
  */
@@ -9,6 +9,10 @@
 export type AskGroupKey = 'leave' | 'rest' | 'fade' | 'next' | 'loyal' | 'new' | 'nobuy';
 export type AskOrder = 'recent' | 'count';
 export type AskBenefitMode = 'line' | 'custom' | 'none';
+/** ★ C153 오실 곳(서버 readAskPlace 와 같은 값) · 문안 종류(서버 AI_LINE_COPY_TYPES) */
+export type AskPlace = 'none' | 'store' | 'online';
+export type AskCopyType = 'emo' | 'benefit' | 'mz';
+export const ASK_COPY_TYPES: readonly AskCopyType[] = ['emo', 'benefit', 'mz'];
 
 /** intent = 한 줄이 질문(ask)인가 보내기(send)인가(★ C152 B · 서버 askIntentOf) */
 export interface AskReadResult { groups: AskGroupKey[]; budget: number | null; hasBenefit: boolean; intent?: 'ask' | 'send' }
@@ -16,14 +20,19 @@ export interface AskGroupMeta { key: AskGroupKey; name: string; desc: string; ce
 /** spendSum · spendN = 그 칸의 보낼 수 있는 고객 중 누적 구매액이 있는 고객의 합 · 수(★ C152 C · 옛 서버 응답에는 없다) */
 export interface AskCell { key: string; row: number; col: number; group: AskGroupKey; total: number; sendable: number; spendSum?: number; spendN?: number }
 export interface AskPrice { lms: number; unset: boolean }
-export interface AskSegments { groups: AskGroupMeta[]; cells: AskCell[]; nobuy: { total: number; sendable: number; spendSum?: number; spendN?: number }; unitPrice: AskPrice }
+export interface AskSegments {
+  groups: AskGroupMeta[]; cells: AskCell[]; nobuy: { total: number; sendable: number; spendSum?: number; spendN?: number }; unitPrice: AskPrice;
+  /** ★ C153 목소리를 배운 회사의 종류 이름(서버) · 아니면 null = 화면 기본 이름 */
+  typeNames?: Partial<Record<AskCopyType, string>> | null;
+}
 export interface AskPlan { groups: AskGroupKey[]; mode: 'all' | 'budget'; budget: number | null; order: AskOrder }
 export interface AskCount {
   inScope: number; sendable: number; planned: number; amount: number; capped: boolean;
   cells: Array<{ key: string; n: number; taken: number }>; unitPrice: AskPrice;
 }
-export interface AskCard { body: string; subject: string; byteCount: number }
-export interface AskComposeResult { card: AskCard; channel: 'SMS' | 'LMS' | 'MMS'; count: number; charged: { base: number; copies: number }; benefitHole: boolean }
+/** hole = 혜택 자리가 남음(발송 길목이 막는 글) · ungrounded = 입력에 없는데 문안에 든 말(알림) */
+export interface AskCard { type: AskCopyType; label: string; body: string; subject: string; byteCount: number; hole: boolean; ungrounded: string[] }
+export interface AskComposeResult { cards: AskCard[]; channel: 'SMS' | 'LMS' | 'MMS'; count: number; charged: { base: number; copies: number } }
 
 /** 격자 머리(세로 = 마지막 구매 · 가로 = 구매 횟수) */
 export const ASK_ROW_LABELS = ['한 달 안', '1~3달 전', '3~6달 전', '6달~1년 전', '1년 넘음'] as const;
@@ -43,16 +52,30 @@ export function askBenefitMode(none: boolean, benefit: string): AskBenefitMode {
   return benefit.trim() ? 'custom' : 'line';
 }
 
-/** (순수) 문안 입력 지문 = 한 줄 · 묶음 키(정렬) · 혜택 갈래 · 혜택 글(문안이 기대는 사람 입력 전부 · 예산 · 순서는 문안을 바꾸지 않는다) */
-export function askInputFp(i: { line: string | null; groups: readonly AskGroupKey[]; mode: AskBenefitMode; benefit: string }): string {
-  return JSON.stringify([(i.line || '').trim(), [...i.groups].sort(), i.mode, i.mode === 'custom' ? i.benefit.trim() : '']);
+/** (순수) 문안 입력 지문 = 한 줄 · 묶음 키(정렬) · 혜택 갈래 · 혜택 글 · 오실 곳 · 링크 · 종류(정렬)(문안이 기대는 사람 입력 전부 · 예산 · 순서는 문안을 바꾸지 않는다) */
+export function askInputFp(i: { line: string | null; groups: readonly AskGroupKey[]; mode: AskBenefitMode; benefit: string; place?: AskPlace; link?: string; types?: readonly AskCopyType[] }): string {
+  return JSON.stringify([
+    (i.line || '').trim(), [...i.groups].sort(), i.mode, i.mode === 'custom' ? i.benefit.trim() : '',
+    i.place || 'none', i.place === 'online' ? (i.link || '').trim() : '', [...(i.types || [])].sort(),
+  ]);
+}
+
+/** (순수) 종류 고르기의 기본값 — 사람이 아직 고르지 않았을 때(혜택이 없으면 감성 쪽 · 있으면 혜택 쪽) */
+export const askDefaultTypes = (mode: AskBenefitMode): AskCopyType[] => (mode === 'none' ? ['emo'] : ['benefit']);
+
+/** (순수) 문안 만들기 잠금 사유(없으면 null) — 한 줄 5자 · 종류 1개 이상 · 받는 분 1명 이상 */
+export function askComposeBlock(s: { line: string; types: readonly AskCopyType[]; planned: number }): 'line' | 'types' | 'zero' | null {
+  if (s.line.trim().length < ASK_LINE_MIN) return 'line';
+  if (s.types.length === 0) return 'types';
+  if (s.planned <= 0) return 'zero';
+  return null;
 }
 
 export type AskTakeBlock = 'making' | 'no-card' | 'stale' | 'hole' | 'zero';
 
 /**
- * (순수) 「직접발송 창으로 가져가기」 잠금 사유(없으면 null = 눌림).
- *   문안이 지금 입력과 맞을 때만(지문 결속) · 채우지 않은 자리가 남은 문안(benefitHole = 직접발송 길목이 막는 글) = 잠김 · 보낼 인원 0 = 잠김.
+ * (순수) 보내기 단계로 넘어가기 · 보내기 잠금 사유(없으면 null = 눌림).
+ *   문안이 지금 입력과 맞을 때만(지문 결속) · 채우지 않은 자리가 남은 문안(benefitHole = 발송 길목이 막는 글) = 잠김 · 보낼 인원 0 = 잠김.
  */
 export function askTakeBlock(s: { making: boolean; cardFp: string | null; nowFp: string; benefitHole: boolean; planned: number }): AskTakeBlock | null {
   if (s.making) return 'making';
@@ -61,6 +84,24 @@ export function askTakeBlock(s: { making: boolean; cardFp: string | null; nowFp:
   if (s.benefitHole) return 'hole';
   if (s.planned <= 0) return 'zero';
   return null;
+}
+
+/**
+ * (순수) 고른 문안의 도착 확인 한 줄(확인 창 · 4단계) — 통과면 빈 글. fpNow = 지금 나갈 글의 지문(칩이 묶인 글과 다르면 = 그 글로는 확인하지 않았다).
+ *   발송은 막지 않는다(AI 한줄로 확인 창과 같은 규칙).
+ */
+export function askSpamNote(
+  chip: { state: string; fp?: string; carriers?: Array<{ carrier: string; result: string }> } | undefined, fpNow: string,
+): string {
+  if (!chip || chip.fp !== fpNow) return '이 글로는 도착 확인을 하지 않았어요.';
+  if (chip.state === 'blocked') {
+    const names = (chip.carriers || []).filter((c) => c.result === 'blocked').map((c) => c.carrier).join(' · ') || '통신사';
+    return `도착 확인에서 막혔어요(${names}). 그대로 보내면 일부 고객에게 안 갈 수 있어요.`;
+  }
+  if (chip.state === 'queued' || chip.state === 'running' || chip.state === 'busy') return '도착 확인이 아직 끝나지 않았어요.';
+  if (chip.state === 'warn' || chip.state === 'checking') return '도착 확인 결과를 아직 받지 못한 통신사가 있어요.';
+  if (chip.state === 'pass') return '';
+  return '이 글은 도착 확인을 하지 못했어요.';
 }
 
 /** (순수) 예산 입력 글 → 원(숫자만 · 빈 글 = 0) */

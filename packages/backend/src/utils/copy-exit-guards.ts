@@ -71,6 +71,11 @@ export interface CopyExitContext {
   bannedWords: ReadonlyArray<string>;
   /** 혜택 · 효능 · 날짜의 근거 글(사람 글) */
   benefitGround: string;
+  /**
+   * ★ 2026-11-22 C153 — 효능 · 날짜의 근거 글을 혜택 근거와 따로 줄 때만(없으면 benefitGround = 옛 모양 그대로).
+   *   한 줄로 묻기의 혜택 칸 · 혜택 없이 갈래 = 혜택 근거는 혜택 칸 글뿐인데 날짜 · 사실의 근거는 사람이 적은 글 전부다.
+   */
+  factGround?: string;
   baseDate: Date;
   /** 변수 검증 목록(개인화 = 고른 변수 · 아님 = 전체) */
   validationVars: string[];
@@ -147,22 +152,23 @@ export function applyCopyExitGuards(
   }
   // ★ 2026-09-30 WP2 혜택 서버 차단 — 근거에 없는 혜택 값 · 낱말은 자리표시로 바꾸고 재생성 1회를 유도한다.
   //   남은 자리표시는 발송 길목(send-placeholder-gate)이 막는다(사람이 채우거나 지운 뒤에만 발송).
+  const factGround = ctx.factGround ?? ctx.benefitGround;   // ★ C153 효능 · 날짜의 근거(따로 주지 않으면 혜택 근거와 같은 글)
   const inventedHere = findInventedBenefits(msgField, ctx.benefitGround);
   if (inventedHere.length > 0) {
     flags.inventedBenefits.push(...inventedHere);
     msgField = replaceInventedBenefits(msgField, ctx.benefitGround);
   }
   // ★ 2026-10-24 효능 단정 거름 — 근거 글에 없는 단정 문장은 빼고 재생성 1회 · 다 빠지면 직접 채울 자리
-  const effHere = dropInventedEfficacy(msgField, ctx.benefitGround);
+  const effHere = dropInventedEfficacy(msgField, factGround);
   if (effHere.dropped.length > 0) {
     flags.efficacyDropped.push(...effHere.dropped);
     msgField = effHere.text;
   }
   // ★ 2026-10-28 K1-4 없는 날짜 · 기간(법) — 근거 글에 없는 날짜 자리 = 직접 채울 자리 + 재생성 1회
-  const datesHere = findInventedDates(msgField, ctx.benefitGround, ctx.baseDate);
+  const datesHere = findInventedDates(msgField, factGround, ctx.baseDate);
   if (datesHere.length > 0) {
     flags.inventedDates.push(...datesHere);
-    msgField = replaceInventedDates(msgField, ctx.benefitGround, ctx.baseDate);
+    msgField = replaceInventedDates(msgField, factGround, ctx.baseDate);
   }
   msgField = msgField.trim();
 
@@ -179,15 +185,15 @@ export function applyCopyExitGuards(
       flags.inventedBenefits.push(...subjInvented);
       subj = replaceInventedBenefits(subj, ctx.benefitGround);
     }
-    const subjEff = dropInventedEfficacy(subj, ctx.benefitGround);
+    const subjEff = dropInventedEfficacy(subj, factGround);
     if (subjEff.dropped.length > 0) {
       flags.efficacyDropped.push(...subjEff.dropped);
       subj = subjEff.text;
     }
-    const subjDates = findInventedDates(subj, ctx.benefitGround, ctx.baseDate);
+    const subjDates = findInventedDates(subj, factGround, ctx.baseDate);
     if (subjDates.length > 0) {
       flags.inventedDates.push(...subjDates);
-      subj = replaceInventedDates(subj, ctx.benefitGround, ctx.baseDate);
+      subj = replaceInventedDates(subj, factGround, ctx.baseDate);
     }
     subject = cleanLeftoverVars(subj).replace(/  +/g, ' ').trim();
     // ★ 2026-11-06 C109 S1 — 제목도 본문과 같은 글자 정리(카카오 제외 · 옛: 본문만)

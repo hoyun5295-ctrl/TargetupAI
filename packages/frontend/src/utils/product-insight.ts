@@ -5,7 +5,6 @@
  * 숫자는 서버가 준 값만 쓴다(지어내지 않는다). 모르면 그리지 않는다 — 실패 · 시간 제한 · 닫힌 회사 = null.
  */
 import { fetchJson, sendJson } from './dashboard-live';
-import type { AskPlan } from './ai-ask';
 
 export interface ProductSignal {
   door: 'mall' | 'ledger';
@@ -90,37 +89,20 @@ export async function fetchAudience(kind: 'product' | 'search' | 'pair', value: 
   return { recipients: r.body.recipients, total: Number(r.body.total) || 0, truncated: r.body.truncated === true };
 }
 
-/** ★ 2026-11-21 C151 한 줄로 묻기 명단(서버가 §2-1 같은 문장으로 지금 다시 센다) */
-export async function fetchAskAudience(plan: AskPlan): Promise<AudienceList | null> {
-  const r = await sendJson('/api/ai-line/ask/audience', { method: 'POST', body: { plan } }, 30_000);
-  if (!r.ok || !r.body?.success || !Array.isArray(r.body.recipients)) return null;
-  return { recipients: r.body.recipients, total: Number(r.body.total) || 0, truncated: r.body.truncated === true };
-}
-
 // ── 직접발송으로 넘기기(주소에 싣지 않는다 · 한 번 쓰면 비운다) ──
 
-/** ★ C151 넘긴 계정 · 시각 · 고른 묶음 · 문안(C136 takeProposalPick 과 같은 꼴 · 지금 계정과 같고 10분 안일 때만 꺼낸다) */
-export const ASK_HANDOFF_MAX_AGE_MS = 10 * 60 * 1000;
-export interface AskHandoff { plan: AskPlan; message: { body: string; subject: string; msgType: 'LMS' }; owner: { companyId: string; userId: string }; at: number }
 export type PendingAudience =
   | { kind: 'product' | 'search'; value: string; label: string; seen: number }
   // ★ C152 D — value = 산 상품 · other = 안 산 상품(보이는 이름)
-  | { kind: 'pair'; value: string; other: string; label: string; seen: number }
-  | { kind: 'ask'; label: string; seen: number; ask: AskHandoff };
-export interface AudienceViewer { userId?: string | null; companyId?: string | null }
-
-/** (순수) 넘긴 계정 = 지금 계정(회사 · 사용자 둘 다) */
-export const askOwnerMatches = (ask: AskHandoff, me: AudienceViewer | null | undefined): boolean =>
-  !!me?.userId && !!me.companyId && ask.owner.userId === me.userId && ask.owner.companyId === me.companyId;
+  | { kind: 'pair'; value: string; other: string; label: string; seen: number };
 
 let pending: PendingAudience | null = null;
 /** 분석 화면이 「…에게 보내기」를 누를 때 맡긴다 → 대시보드가 직접발송 창을 열며 꺼내 간다 */
 export const stashAudience = (a: PendingAudience): void => { pending = a; };
-/** 한 번 꺼내고 비운다 · ask = 지금 계정과 같고 10분 안일 때만(그 밖 = null) · 옛 kind 둘 = 종전 그대로 */
-export const takeAudience = (me?: AudienceViewer | null, now: number = Date.now()): PendingAudience | null => {
+/** 한 번 꺼내고 비운다 */
+export const takeAudience = (): PendingAudience | null => {
   const a = pending;
   pending = null;
-  if (a?.kind === 'ask' && (!askOwnerMatches(a.ask, me) || now - a.ask.at < 0 || now - a.ask.at > ASK_HANDOFF_MAX_AGE_MS)) return null;
   return a;
 };
 
@@ -128,10 +110,6 @@ export const takeAudience = (me?: AudienceViewer | null, now: number = Date.now(
 export function audienceLoadedText(a: PendingAudience, now: AudienceList): string {
   const shown = now.recipients.length.toLocaleString();
   const cut = now.truncated ? ` · 앞에서부터 ${shown}명만 담았어요` : '';
-  if (a.kind === 'ask') {
-    const drift = a.seen !== now.recipients.length ? ` (고를 때 ${a.seen.toLocaleString()}명 → 지금 ${shown}명)` : '';
-    return `고른 고객 ${shown}명과 문안을 불러왔어요${drift}${cut}`;
-  }
   const what = a.kind === 'product' ? `「${a.label}」을 보고 안 산 고객`
     : a.kind === 'pair' ? `「${a.value}」을 사고 「${a.other}」은 안 산 고객`
       : `「${a.label}」을 찾은 고객`;

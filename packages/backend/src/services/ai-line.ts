@@ -560,7 +560,14 @@ export interface LineComposeInput {
    * ★ 2026-11-21 C151 한 줄로 묻기(있을 때만 · 설계서 docs/2026-11-21-c151-ask-entry-design.md §2 S3) — 대상 = 라우트가 §2-1 로 센 수 · 묶음 글.
    *   기본료 0(D3) · 과금 키 지문 = keyInput(사람 입력만 · 다시 센 수 · 묶음 글 · 참고 글은 넣지 않는다) · extraContext = 참고 글(근거 글 아님 · R33).
    */
-  ask?: { count: number; audienceText: string; extraContext?: string; keyInput: Record<string, unknown> };
+  ask?: {
+    count: number; audienceText: string; extraContext?: string; keyInput: Record<string, unknown>;
+    /**
+     * ★ 2026-11-22 C153 — 혜택 근거 글(있을 때만 · 빈 글 = 허가된 혜택 0 · 없으면 옛 모양 = 목적 글 전체가 혜택 근거).
+     *   주면 생성기의 혜택 근거(licenseText)는 이 글이고, 날짜 · 사실의 근거(factText)는 목적 글 전체로 따로 넘긴다.
+     */
+    benefitGround?: string;
+  };
 }
 
 export interface LineComposeCard { type: AiLineCopyType; label: string; body: string; subject: string; byteCount: number }
@@ -627,6 +634,8 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   const voiceForm = humanLink ? { ...voiceDecided.decision, link: { value: humanLink.url } } : voiceDecided.decision;
   const answers = split.others.map((x) => ({ q: x.q, a: withLinkToken(x.a, humanLink) }));
   const licenseText = `${buildLineEventText(withLinkToken(input.line, humanLink), { benefit: input.facts.benefit })}${periodLine}${lineAnswersLicense(answers)}`;
+  // ★ C153 — 혜택 근거를 따로 받았으면(한 줄로 묻기의 혜택 칸 · 혜택 없이) 그것만 혜택 근거 · 날짜 · 사실의 근거는 목적 글 전체(factText)
+  const splitGround = ask?.benefitGround !== undefined;
 
   const generated = await runInCreditBundle(async () => {
     const { companyInfo, customerStats } = await loadHubCompanyContext(v.companyId, v.userId, { userId: v.userId, userType: v.userType });
@@ -656,7 +665,8 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
         availableVars,
         model: 'sonnet',
         companyId: v.companyId,
-        licenseText,
+        licenseText: splitGround ? ask!.benefitGround! : licenseText,
+        ...(splitGround ? { factText: licenseText } : {}),
         exactVars: input.vars,
         // ★ 2026-10-20 문자 성격(광고 여부 하나) = 그 성격의 브랜드 보이스 가이드라인 · 대표 문안만
         // ★ 2026-10-28 K4-4 — 사람이 고른 종류가 있으면 성격은 종류에서(광고 여부는 법 축만)

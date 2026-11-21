@@ -20,14 +20,14 @@ export const ASK_COL_COUNTS = [1, 3] as const;
 export const ASK_NOBUY = 'nobuy';
 
 /** 묶음(목업 순서 = 화면 순서) · cells = 칸 키 'r{줄}c{칸}' */
-export const ASK_GROUPS: ReadonlyArray<{ key: AskGroupKey; name: string; desc: string; purpose: string; cells: readonly string[] }> = [
-  { key: 'leave', name: '떠나는 단골', desc: '네 번 이상 사고 반년 넘게 안 오신 분', purpose: '오래 안 오신 단골께 안부를 전하며 다시 찾아 주시길 권하는 문자', cells: ['r3c2', 'r4c2'] },
-  { key: 'rest', name: '오래 쉰 고객', desc: '세 번까지 사고 반년 넘게 안 오신 분', purpose: '오랜만에 안부를 전하며 다시 찾아 주시길 권하는 문자', cells: ['r3c0', 'r3c1', 'r4c0', 'r4c1'] },
-  { key: 'fade', name: '뜸해지는 중', desc: '마지막 구매가 3~6달 전인 분', purpose: '다시 찾아 주시길 권하는 문자', cells: ['r2c0', 'r2c1', 'r2c2'] },
-  { key: 'next', name: '다음 구매 차례', desc: '한 번 사고 1~3달이 지난 분', purpose: '다음 구매를 권하는 문자', cells: ['r1c0'] },
-  { key: 'loyal', name: '요즘 단골', desc: '석 달 안에 사셨고 두 번 이상 산 분', purpose: '자주 찾아 주셔서 고마운 마음을 전하는 문자', cells: ['r0c1', 'r0c2', 'r1c1', 'r1c2'] },
-  { key: 'new', name: '첫 구매 직후', desc: '한 달 안에 처음 산 분', purpose: '첫 구매에 고마운 마음을 전하고 다시 찾아 주시길 권하는 문자', cells: ['r0c0'] },
-  { key: 'nobuy', name: '구매 기록 없음', desc: '구매 기록이 아직 올라오지 않은 분', purpose: '첫 구매를 권하는 문자', cells: [ASK_NOBUY] },
+export const ASK_GROUPS: ReadonlyArray<{ key: AskGroupKey; name: string; desc: string; cells: readonly string[] }> = [
+  { key: 'leave', name: '떠나는 단골', desc: '네 번 이상 사고 반년 넘게 안 오신 분', cells: ['r3c2', 'r4c2'] },
+  { key: 'rest', name: '오래 쉰 고객', desc: '세 번까지 사고 반년 넘게 안 오신 분', cells: ['r3c0', 'r3c1', 'r4c0', 'r4c1'] },
+  { key: 'fade', name: '뜸해지는 중', desc: '마지막 구매가 3~6달 전인 분', cells: ['r2c0', 'r2c1', 'r2c2'] },
+  { key: 'next', name: '다음 구매 차례', desc: '한 번 사고 1~3달이 지난 분', cells: ['r1c0'] },
+  { key: 'loyal', name: '요즘 단골', desc: '석 달 안에 사셨고 두 번 이상 산 분', cells: ['r0c1', 'r0c2', 'r1c1', 'r1c2'] },
+  { key: 'new', name: '첫 구매 직후', desc: '한 달 안에 처음 산 분', cells: ['r0c0'] },
+  { key: 'nobuy', name: '구매 기록 없음', desc: '구매 기록이 아직 올라오지 않은 분', cells: [ASK_NOBUY] },
 ];
 const GROUP_BY_KEY = new Map(ASK_GROUPS.map((g) => [g.key, g]));
 const GROUP_OF_CELL = new Map(ASK_GROUPS.flatMap((g) => g.cells.map((c) => [c, g.key] as const)));
@@ -100,33 +100,59 @@ export function askAudienceText(groups: readonly AskGroupKey[]): string {
   return groups.map((k) => GROUP_BY_KEY.get(k)!).map((g) => `${g.name}(${g.desc})`).join(' · ');
 }
 
-/** 한 줄이 없을 때 근거 글 = 묶음 문장(혜택 · 금액 없음) */
-export function askGroupLine(groups: readonly AskGroupKey[]): string {
-  const gs = groups.map((k) => GROUP_BY_KEY.get(k)!);
-  if (gs.length === 1) return `${gs[0].name} 고객에게 보내는 ${gs[0].purpose}`;
-  return `${gs.map((g) => g.name).join(' · ')} 고객에게 보내는 안부와 다시 찾아 주시길 권하는 문자`;
-}
-
 const ASK_RETRY_CONTEXT = '[다시 쓰기]\n앞 문안이 통신사 스팸 검사에서 막혔다. 같은 사실로 광고 냄새가 강한 표현(과장 · 강한 권유 · 특수문자 남용)을 줄여 다시 쓴다.';
 
+// ── ★ 2026-11-22 C153 내용은 사람이 정한다(설계서 docs/2026-11-22-c153-ask-step3-redesign-design.md §2 S1 · S2) ──
+
+/** 오실 곳 — 사람이 고른 사실(none = 적지 않음 = 문안이 매장 · 온라인 어느 쪽도 말하지 않는다) */
+export type AskPlace = 'none' | 'store' | 'online';
+/** 오실 곳 답의 질문 글(서버 상수 · 목소리 꼴 칸 질문 글 · 링크 질문 글과 다른 글이어야 그 밖 답 = 「확인한 사실」로 간다) */
+export const ASK_PLACE_Q = '고객이 오실 곳';
+export const ASK_PLACE_ANSWER: Readonly<Record<Exclude<AskPlace, 'none'>, string>> = { store: '매장 방문', online: '온라인몰' };
+/** 입력 검사 — 없음 = 적지 않음 · 모르는 값 = null */
+export function readAskPlace(raw: unknown): AskPlace | null {
+  if (raw === undefined || raw === null || raw === 'none') return 'none';
+  return raw === 'store' || raw === 'online' ? raw : null;
+}
+
 /**
- * (순수) 혜택 세 갈래 → 근거 글(한 갈래만) · 혜택 · 참고 글(설계서 §2 S3).
- *   line = 근거 = 사람의 한 줄(없으면 묶음 문장) · custom = 근거 = 묶음 문장 + 혜택 칸 · none = 근거 = 묶음 문장 · 혜택 없음.
- *   custom · none 에서 사람의 한 줄은 참고 글로만(그 속 혜택이 근거가 되지 않는다 · R33) · 다시 고침 = 참고 글 한 줄.
+ * 쓰는 범위(언제나 붙는 참고 블록) — 사람이 주지 않은 내용을 보태지 않게 한다.
+ *   Harold 1122 「저런 이벤트는 누가 말해서 하는거냐」 · 「매장인지 온라인인지 체크도 안하고」.
  */
-export function askComposeLicense(line: string | null, plan: AskPlanInput, mode: 'line' | 'custom' | 'none', benefit: string | null, retry: boolean): {
-  licenseLine: string; benefit: string | null; extraContext: string | undefined;
+export const ASK_SCOPE_RULE = '[쓰는 범위]\n위 근거 글과 확인한 사실에 있는 내용만 쓴다. 근거에 없는 신제품 · 행사 · 체험 · 상담 · 사은품 · 매장 방문 · 온라인몰 · 기간 · 수량을 지어내지 않는다. 오실 곳이 확인한 사실에 없으면 매장 · 온라인 어느 쪽도 쓰지 않는다. 쓸 내용이 적으면 짧게 쓴다(길이를 채우려고 내용을 보태지 않는다).';
+
+/**
+ * (순수) 목적 글 · 혜택 근거 · 혜택 · 참고 글 — 목적 글(무엇을 쓸지) = **사람이 적은 한 줄 전체**(세 갈래 모두 · 묶음마다 정해 둔 문장을 쓰지 않는다).
+ *   혜택 근거(출구 검사 · 강조 지시가 보는 글 · benefitGround): line = 따로 두지 않는다(undefined = 한 줄 전체 · 한 줄 속 혜택 = 사람이 적은 혜택) ·
+ *     custom = 혜택 칸 글만 · none = 빈 글(허가된 혜택 0) → 한 줄에 무엇이 적혀 있든 그 갈래에서는 혜택 근거가 아니다
+ *     (한 줄에서 혜택 자리를 지우는 방식은 탐지가 놓치는 꼴 · 지나치게 지우는 꼴이 남아 버렸다 = Codex 설계 1R · 2R · 3R 같은 뿌리).
+ *     생성기가 한 줄의 혜택을 되살려 쓰면 출구가 자리표로 바꾼다 → custom = 혜택 칸 글이 그 자리에 · none = 자리표가 남아 발송 길목이 막는다.
+ *   날짜 · 사실의 근거는 언제나 사람이 적은 글 전부다(생성기 factText · runLineCompose 가 넘긴다).
+ *   쓰는 범위(ASK_SCOPE_RULE)는 언제나 붙는다 · 다시 고침 = 참고 글 한 줄.
+ */
+export function askComposeLicense(line: string, mode: 'line' | 'custom' | 'none', benefit: string | null, retry: boolean): {
+  licenseLine: string; benefitGround: string | undefined; benefit: string | null; extraContext: string;
 } {
-  const refs: string[] = [];
-  if (mode !== 'line' && line) {
-    refs.push(`[담당자가 적은 한 줄 · 참고만]\n${line}\n${mode === 'custom' ? '혜택은 [혜택] 칸에 적힌 것만 쓴다. 이 한 줄 속 혜택 · 금액 · 기간은 쓰지 않는다.' : '혜택 · 할인 · 쿠폰 · 금액은 쓰지 않는다.'}`);
-  }
+  const refs: string[] = [ASK_SCOPE_RULE];
+  if (mode === 'custom') refs.push('[혜택]\n혜택은 [혜택] 칸에 적힌 것만 쓴다. 한 줄 속 다른 혜택 · 금액 · 기간은 쓰지 않는다.');
+  if (mode === 'none') refs.push('[혜택]\n혜택 · 할인 · 쿠폰 · 금액은 쓰지 않는다.');
   if (retry) refs.push(ASK_RETRY_CONTEXT);
+  const custom = mode === 'custom' ? benefit : null;
   return {
-    licenseLine: mode === 'line' && line ? line : askGroupLine(plan.groups),
-    benefit: mode === 'custom' ? benefit : null,
-    extraContext: refs.length > 0 ? refs.join('\n\n') : undefined,
+    licenseLine: line,
+    benefitGround: mode === 'line' ? undefined : custom ? `[혜택] ${custom.trim()}` : '',
+    benefit: custom,
+    extraContext: refs.join('\n\n'),
   };
+}
+
+/** 안전망 낱말 — 사람이 주지 않았는데 문안에 자주 끼어드는 사실(막지 않는다 · 화면이 알린다) */
+export const ASK_UNGROUNDED_WATCH = ['매장', '방문', '신제품', '신상', '체험', '상담', '이벤트', '행사', '사은품', '증정', '온라인몰', '홈페이지', '앱'] as const;
+/** (순수) 문안에는 있고 근거(한 줄 · 혜택 · 오실 곳 답 · 링크)에는 없는 안전망 낱말 */
+export function askUngroundedWords(text: string, ground: string): string[] {
+  const t = String(text || '');
+  const g = String(ground || '');
+  return ASK_UNGROUNDED_WATCH.filter((w) => t.includes(w) && !g.includes(w));
 }
 
 // ── 단가 · 예산(순수) ──
@@ -299,6 +325,30 @@ export function readAskLine(line: unknown): { groups: AskGroupKey[]; budget: num
   const won = m ? wonOf(m[1], !!m[2]) : NaN;
   const budget = Number.isInteger(won) && won >= ASK_BUDGET_MIN && won <= ASK_BUDGET_MAX ? won : null;
   return { groups: groups.length > 0 ? groups : ['leave'], budget, hasBenefit: BENEFIT_WORDS.test(t), intent: askIntentOf(t) };
+}
+
+/**
+ * ★ C153 — 그 준비분의 접수 상태(확정 응답을 못 받은 화면의 「다시 확인」 · 읽기만 · 회사 범위 · 적재 행이 지워진 뒤에도 답한다).
+ *   accepted = 차감을 마치고 발송 가능 상태로 넘어간 캠페인이 있다(send_phase queued · processing · sent = direct-send-core 가 「전환이 실제로 됐다」로 보는 값) ·
+ *   pending = 캠페인은 생겼는데 아직 차감 · 전환 전(preparing · 그 뒤 차감 실패로 지워지거나 failed 가 될 수 있다 = 접수됐다고 말하면 안 된다 · Codex 설계 3R) ·
+ *   none = 없다(또는 failed 뿐) · 꼴이 틀리면 null.
+ *   stuck = pending 이 ASK_PENDING_STUCK_SEC 넘게 풀리지 않는다(차감은 됐는데 전환 · 되돌리기가 모두 실패해 preparing 으로 남은 드문 경우 ·
+ *     direct-send-core 가 그때 운영 경보 `direct-deduct-orphan` 을 낸다). 시간이 지났다고 none 으로 바꾸지 않는다(새로 보내게 두지 않는다 · Codex 설계 4R) —
+ *     화면이 「오래 끝나지 않는다 · 확인 번호」를 알릴 뿐이다.
+ */
+export type AskSentState = 'accepted' | 'pending' | 'none';
+export const ASK_PENDING_STUCK_SEC = 300;
+export async function askStagingState(companyId: string, stagingId: unknown): Promise<{ state: AskSentState; stuck: boolean } | null> {
+  if (typeof stagingId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(stagingId)) return null;
+  const r = await query(
+    `SELECT COALESCE(BOOL_OR(send_phase IN ('queued', 'processing', 'sent')), false) AS accepted,
+            COALESCE(BOOL_OR(send_phase = 'preparing'), false) AS pending,
+            COALESCE(EXTRACT(EPOCH FROM (NOW() - MIN(created_at) FILTER (WHERE send_phase = 'preparing'))), 0)::int AS pending_sec
+       FROM campaigns WHERE staging_id = $1::uuid AND company_id = $2::uuid`,
+    [stagingId, companyId],
+  );
+  const state: AskSentState = r.rows[0]?.accepted === true ? 'accepted' : r.rows[0]?.pending === true ? 'pending' : 'none';
+  return { state, stuck: state === 'pending' && (Number(r.rows[0]?.pending_sec) || 0) >= ASK_PENDING_STUCK_SEC };
 }
 
 /** 화면에 내려 주는 묶음 표(이름 · 설명 = 서버 한 곳) */

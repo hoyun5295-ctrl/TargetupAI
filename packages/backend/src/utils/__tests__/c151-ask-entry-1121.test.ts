@@ -4,17 +4,18 @@
  *   K1 묶음 표 = 목업 격자(기계 추출) · 칸 15 + 구매 기록 없음이 한 번씩 · 경계 상수
  *   K2 askPlan · askLimit(모두 · 예산 · 단가 0 · 미설정 · 예산 < 단가 · 5만 상한) · 세기 · 명단이 같은 함수
  *   K3 readAskLine 낱말 표 · 예산 · 혜택 유무 · 못 읽음 = 기본
- *   K4 runLineCompose — ask 없는 갈래 = 옛 문장 순서 그대로 · ask = 기본료 0 · 키 = keyInput 만 · 혜택 세 갈래의 근거 글
- *   K5 새 주소 = 같은 요금제 관문(읽기만 로그인) · benefitHole = 직접발송 길목 판정 한 곳
- *   K6 대시보드 = ask 일 때만 문안 칸을 채운다 · 옛 kind 갈래 그대로
- *   K7 넘기기 = 계정 · 10분 · 응답 뒤 계정 재확인 · 문안 지문 결속 · 자리표 잠김(화면 순수 함수)
+ *   K4 runLineCompose — ask 없는 갈래 = 옛 문장 순서 그대로 · ask = 기본료 0 · 키 = keyInput 만 · 혜택 세 갈래
+ *   K5 새 주소 = 같은 요금제 관문(읽기만 로그인) · 자리표(hole) = 발송 길목 판정 한 곳
+ *   K6 대시보드 넘기기 = 옛 kind 갈래 그대로(★ 2026-11-22 C153 — 한 줄로 묻기 넘기기 'ask' 는 없앴다 · 그 계약 = c153-ask-step3-1122.test.ts K6)
+ *   K7 문안 지문 결속 · 자리표 잠김 · 내역(화면 순수 함수)
+ * ★ 2026-11-22 C153 — 3단계 재작성으로 뒤집힌 계약(문안 한 안 고정 · 묶음 문장 근거 · 직접발송 창 넘기기)은 c153-ask-step3-1122.test.ts 가 새로 쥔다.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import * as ts from 'typescript';
 import {
-  ASK_GROUPS, ASK_ROW_DAYS, ASK_COL_COUNTS, ASK_AUDIENCE_MAX, askLimit, askPlan, readAskPlan, readAskLine, askComposeLicense, askGroupLine,
+  ASK_GROUPS, ASK_ROW_DAYS, ASK_COL_COUNTS, ASK_AUDIENCE_MAX, askLimit, askPlan, readAskPlan, readAskLine, askComposeLicense,
 } from '../ask-segments';
 import { aiLineCopyKey } from '../ai-line';
 import { findUneditedSendPlaceholder } from '../send-placeholder-gate';
@@ -22,7 +23,7 @@ import { BENEFIT_PLACEHOLDER } from '../copy-benefit-detector';
 import {
   askBenefitMode, askInputFp, askTakeBlock, askParts, askBudgetOf, askBudgetValid,
 } from '../../../../frontend/src/utils/ai-ask';
-import { stashAudience, takeAudience, askOwnerMatches, ASK_HANDOFF_MAX_AGE_MS, audienceLoadedText } from '../../../../frontend/src/utils/product-insight';
+import { stashAudience, takeAudience, audienceLoadedText } from '../../../../frontend/src/utils/product-insight';
 
 const ROOT = join(__dirname, '..', '..', '..', '..', '..');
 const BE = join(__dirname, '..', '..');
@@ -161,26 +162,26 @@ describe('K4 문안 갈래(runLineCompose)', () => {
     expect(body).toMatch(/const basePaid = \(paidCopies !== null \|\| ask\) \? true : await aiLineBasePaid\(v\.companyId, input\.line, now\)/);
     expect(body).toMatch(/aiLineCopyKey\(v\.companyId, input\.attemptToken, ask \? \{ ask: ask\.keyInput \} : \{\s*line: input\.line, facts: input\.facts, filters: input\.filters, allCustomers: input\.allCustomers,/);
     // 같은 사람 입력 = 같은 키(다시 센 수 · 묶음 글은 키에 없다)
-    const k = { line: '', groups: ['leave'], mode: 'line', benefit: '', retry: false };
+    const k = { line: '겨울 니트 입고', groups: ['leave'], mode: 'line', benefit: '', place: 'none', link: '', types: ['benefit'], retry: false };
     expect(aiLineCopyKey('co', 'tok-12345678', { ask: k })).toBe(aiLineCopyKey('co', 'tok-12345678', { ask: { ...k } }));
     const route = read(join(BE, 'routes', 'ai-line.ts'));
-    expect(routeBlock(route, 'post', '/ask/compose')).toMatch(/keyInput: \{ line: line \|\| '', groups: plan\.groups, mode, benefit: benefit \|\| '', retry \}/);
+    // ★ C153 — 키 = 사람 입력 전부(오실 곳 · 링크 · 종류가 더해졌다) · 종류가 바뀌면 다른 키
+    expect(routeBlock(route, 'post', '/ask/compose')).toContain("keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry },");
+    expect(aiLineCopyKey('co', 'tok-12345678', { ask: { ...k, types: ['benefit', 'emo'] } })).not.toBe(aiLineCopyKey('co', 'tok-12345678', { ask: k }));
   });
-  it('혜택 세 갈래 — 근거 글은 한 갈래만(custom · none = 사람의 한 줄은 참고 글로만)', () => {
-    const plan = { groups: ['leave' as const], mode: 'all' as const, budget: null, order: 'recent' as const };
+  it('혜택 세 갈래(★ C153) — 목적 글 = 사람의 한 줄 그대로 · 혜택 = custom 만 혜택 칸 글 · 참고 글 = 갈래 지시 + 다시 쓰기', () => {
     const line = '오래 안 온 단골에게 재구매 10% 쿠폰';
-    expect(askComposeLicense(line, plan, 'line', null, false)).toEqual({ licenseLine: line, benefit: null, extraContext: undefined });
-    expect(askComposeLicense(null, plan, 'line', null, false).licenseLine).toBe(askGroupLine(['leave']));
-    const custom = askComposeLicense(line, plan, 'custom', '적립금 5천 원', false);
-    expect(custom.licenseLine).toBe(askGroupLine(['leave']));
-    expect(custom.benefit).toBe('적립금 5천 원');
-    expect(custom.extraContext).toContain(line);
-    const none = askComposeLicense(line, plan, 'none', '무시', false);
-    expect([none.licenseLine, none.benefit]).toEqual([askGroupLine(['leave']), null]);
+    const asLine = askComposeLicense(line, 'line', null, false);
+    expect([asLine.licenseLine, asLine.benefitGround, asLine.benefit]).toEqual([line, undefined, null]);
+    const custom = askComposeLicense(line, 'custom', '적립금 5천 원', false);
+    expect([custom.licenseLine, custom.benefit, custom.benefitGround]).toEqual([line, '적립금 5천 원', '[혜택] 적립금 5천 원']);
+    expect(custom.extraContext).toMatch(/혜택은 \[혜택\] 칸에 적힌 것만 쓴다/);
+    const none = askComposeLicense(line, 'none', '무시', false);
+    expect([none.licenseLine, none.benefit, none.benefitGround]).toEqual([line, null, '']);
     expect(none.extraContext).toMatch(/쓰지 않는다/);
-    expect(askComposeLicense(null, plan, 'line', null, true).extraContext).toMatch(/다시 쓰기/);
-    // 묶음 문장(근거 글)에는 혜택 · 금액 낱말이 없다
-    for (const gg of ASK_GROUPS) expect(askGroupLine([gg.key])).not.toMatch(/%|쿠폰|할인|무료|증정|적립|\d/);
+    expect(askComposeLicense(line, 'line', null, true).extraContext).toMatch(/다시 쓰기/);
+    // 묶음마다 정해 둔 근거 문장은 없다(설계가 넣은 문장으로 문안을 만들지 않는다)
+    for (const gg of ASK_GROUPS) expect('purpose' in gg).toBe(false);
   });
   it('참고 글은 근거 글이 아니라 참고 블록에만 들어간다', () => {
     expect(body).toMatch(/buildMessageObjective\(licenseText, \[audienceBlock, lineAnswersContext\(answers\), ask\?\.extraContext\]/);
@@ -198,61 +199,32 @@ describe('K5 주소 · 관문 · 자리표 판정', () => {
       expect(b, p).toMatch(/const v = await lineGate\(req, res\);\s*if \(!v\) return;/);
     }
   });
-  it('benefitHole = 직접발송 길목과 같은 판정(findUneditedSendPlaceholder) · 혜택 감지 자리표를 잡는다', () => {
-    expect(routeBlock(route, 'post', '/ask/compose')).toMatch(/benefitHole: findUneditedSendPlaceholder\(card\.body, card\.subject\) !== null/);
+  it('자리표(hole) = 발송 길목과 같은 판정(findUneditedSendPlaceholder) · 카드마다 · 혜택 감지 자리표를 잡는다', () => {
+    expect(routeBlock(route, 'post', '/ask/compose')).toContain('hole: findUneditedSendPlaceholder(c.body, c.subject) !== null,');
     expect(findUneditedSendPlaceholder(`오랜만이에요. ${BENEFIT_PLACEHOLDER}`, '')).not.toBeNull();
     expect(findUneditedSendPlaceholder('오랜만에 안부 전해요.', '다시 만나요')).toBeNull();
   });
-  it('문안 = 한 안(혜택형) · 장문 · 광고 · 칼럼 0 · 대상 = §2-1 세기의 planned', () => {
+  it('문안 = 고른 종류(★ C153) · 장문 · 광고 · 칼럼 0 · 대상 = §2-1 세기의 planned', () => {
     const b = routeBlock(route, 'post', '/ask/compose');
-    expect(b).toMatch(/types: \['benefit'\], vars: \[\], channel: 'LMS', isAd: true/);
+    expect(b).toMatch(/\n\s+types, vars: \[\], channel: 'LMS', isAd: true/);
     expect(b).toMatch(/count: counted\.planned/);
   });
 });
 
-describe('K6 대시보드 넘기기', () => {
-  const dash = read(join(FE, 'pages', 'Dashboard.tsx'));
+describe('K6 대시보드 넘기기(옛 kind 갈래)', () => {
   const body = fnBody(join(FE, 'pages', 'Dashboard.tsx'), 'loadPendingAudience');
-  it('문안 · 제목 · 장문 · 광고 칸 = ask 일 때만 · 명단은 옛 kind 와 같은 더하기', () => {
-    expect(body).toMatch(/if \(asked\.kind === 'ask'\) \{\s*setDirectMessage\(asked\.ask\.message\.body\);\s*setDirectSubject\(asked\.ask\.message\.subject\);\s*setDirectMsgType\(asked\.ask\.message\.msgType\);\s*setAdTextEnabled\(true\);\s*\}/);
-    expect((body.match(/setDirectMessage\(/g) || []).length).toBe(1);
+  it('명단 = 더하기(같은 번호 한 번) · 문안 칸은 건드리지 않는다(★ C153 — 한 줄로 묻기 넘기기를 없앤 뒤 이 함수는 명단만 채운다)', () => {
     expect(body).toMatch(/setDirectRecipients\(appendUpdater<any>\(rows, true, \(r\) => r\.phone, \(\) => undefined\)\)/);
-    expect(body).toMatch(/asked\.kind === 'ask' \? await fetchAskAudience\(asked\.ask\.plan\) : await fetchAudience\(asked\.kind, asked\.value, asked\.kind === 'pair' \? asked\.other : undefined\)/);
-  });
-  it('받은 뒤 채우기 전에 지금 계정을 다시 본다(저장소의 지금 값)', () => {
-    expect(body).toMatch(/useAuthStore\.getState\(\)\.user[\s\S]*askOwnerMatches\(asked\.ask, \{ userId: nowUser\?\.id, companyId: nowUser\?\.company\?\.id \}\)\) return;[\s\S]*setDirectRecipients/);
-    expect(dash).toMatch(/takeAudience\(\{ userId: user\?\.id, companyId: user\?\.company\?\.id \}\)/);
+    expect(body).toMatch(/const got = await fetchAudience\(asked\.kind, asked\.value, asked\.kind === 'pair' \? asked\.other : undefined\);/);
+    expect(body).not.toMatch(/setDirectMessage\(|setDirectSubject\(|setDirectMsgType\(|setAdTextEnabled\(/);
   });
 });
 
 describe('K7 넘기기 값 · 문안 결속(화면 순수 함수)', () => {
-  const me = { userId: 'u1', companyId: 'c1' };
-  const askOf = (at: number, owner = { userId: 'u1', companyId: 'c1' }) => ({
-    kind: 'ask' as const, label: '떠나는 단골', seen: 3,
-    ask: { plan: { groups: ['leave' as const], mode: 'all' as const, budget: null, order: 'recent' as const }, message: { body: '본문', subject: '제목', msgType: 'LMS' as const }, owner, at },
-  });
-  it('같은 계정 · 10분 안 = 꺼냄 · 한 번 쓰면 비움', () => {
-    const now = 1_000_000;
-    stashAudience(askOf(now - 1000));
-    expect(takeAudience(me, now)?.kind).toBe('ask');
-    expect(takeAudience(me, now)).toBeNull();
-  });
-  it('다른 회사 · 다른 사용자 · 계정 모름 · 10분 지남 · 미래 시각 = 꺼내지 않음(값은 지워진다)', () => {
-    const now = 5_000_000;
-    for (const [a, who] of [
-      [askOf(now, { userId: 'u1', companyId: 'c2' }), me], [askOf(now, { userId: 'u2', companyId: 'c1' }), me],
-      [askOf(now), null], [askOf(now - ASK_HANDOFF_MAX_AGE_MS - 1), me], [askOf(now + 10), me],
-    ] as const) {
-      stashAudience(a);
-      expect(takeAudience(who, now)).toBeNull();
-      expect(takeAudience(me, now)).toBeNull();
-    }
-    expect(askOwnerMatches(askOf(now).ask, me)).toBe(true);
-    expect(askOwnerMatches(askOf(now).ask, { userId: 'u1', companyId: 'c9' })).toBe(false);
-  });
-  it('옛 kind 둘 = 계정 · 시각을 보지 않는다(종전 그대로)', () => {
+  it('옛 kind 둘 = 한 번 꺼내면 비운다(종전 그대로)', () => {
     stashAudience({ kind: 'product', value: 'P1', label: '수분 크림', seen: 2 });
-    expect(takeAudience(null)?.kind).toBe('product');
+    expect(takeAudience()?.kind).toBe('product');
+    expect(takeAudience()).toBeNull();
     stashAudience({ kind: 'search', value: 'q', label: 'q', seen: 1 });
     expect(takeAudience()?.kind).toBe('search');
     expect(audienceLoadedText({ kind: 'product', value: 'P1', label: '수분 크림', seen: 2 }, { recipients: [{ phone: '1', name: '' }, { phone: '2', name: '' }], total: 2, truncated: false }))

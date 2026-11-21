@@ -568,8 +568,10 @@ describe('③ 소스 계약', () => {
     expect(s).toContain('|| await loadDefaultSpamFirstRecipient(v.companyId, userId, fieldMappings)');   // ★ 2R — 등록과 같은 기본 고객
     expect(s).toContain('`ai-line-spam:${v.companyId}`');
     // ★ 2026-11-01 B1-4 — 재사용 찾기 = 공용 spamCheckFor(유형 · 제목까지 같은 키 · 같은 한국 날짜) · 결과 읽기는 이 화면 판정 그대로
-    expect(s).toContain('await spamCheckFor({ companyId: v.companyId, callback: cb, hash, msgType, subject: subject || null })');
-    expect(s).toContain('const read = await verdictOf(same.testId, same.status, same.createdAt, msgType);');
+    // ★ 2026-11-22 C153 — 이어 볼 검사 판정 = 한 곳(reusableLineSpamTest · 같은 키 · 결과 없음도 늦은 보고를 받는 동안은 이어 본다) · 시작 주소는 잠금 안에서 그것을 부른다
+    expect(s).toContain('await reusableLineSpamTest({ companyId: v.companyId, callback: cb, hash, msgType, subject: subject || null })');
+    expect(s).toContain('const same = await spamCheckFor(key);');
+    expect(s).toContain('const read = await verdictOf(same.testId, same.status, same.createdAt, key.msgType);');
     const q = read('utils/spam-test-queue.ts');
     const f = q.slice(q.indexOf('export async function spamCheckFor('));
     expect(f).toContain('AND t.subject IS NOT DISTINCT FROM $5');

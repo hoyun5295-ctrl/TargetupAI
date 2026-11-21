@@ -1125,6 +1125,11 @@ export async function generateMessages(
      *   안 주면 지금과 같다(prompt 가 근거).
      */
     licenseText?: string;
+    /**
+     * ★ 2026-11-22 C153 — 효능 · 날짜의 근거 글(있을 때만 · 없으면 licenseText 와 같은 근거 = 옛 모양).
+     *   한 줄로 묻기가 혜택 근거(licenseText)를 혜택 칸 글로만 좁힐 때, 날짜 · 사실의 근거는 사람이 적은 글 전부로 둔다.
+     */
+    factText?: string;
     /** ★ 2026-10-05 C안 시험 — 'punchy'면 C안 = 짧고 강한형. 없거나 'mz'면 지금 그대로. */
     cVariant?: CopyCVariant;
     /**
@@ -1393,6 +1398,7 @@ ${usePersonalization ? `- 사용할 개인화 변수: ${personalizationTags}
     const onceLink = formLink.once ?? null;
     const exitCtx = {
       channel, isAd, bannedWords, benefitGround, baseDate, onceLink,
+      ...(typeof extraContext?.factText === 'string' ? { factGround: extraContext.factText } : {}),
       validationVars: usePersonalization && personalizationVars.length > 0 ? personalizationVars : availableVars,
       stripAllVars: !!exactVars && exactVars.length === 0,
       brandLinks, linkOmit: formLink.mode === 'omit', senderNames: [senderName],

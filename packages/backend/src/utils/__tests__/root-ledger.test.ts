@@ -4634,3 +4634,61 @@ describe('R43 조치 명령의 종료 코드를 효과로 읽는다 — 서비�
     expect(tickSrc).not.toContain('sameInvocation(');
   });
 });
+
+// ── R105 문안의 근거가 사람이 준 글이 아니라 코드가 넣은 문장이다 ─────────────────────────
+//   ★ 2026-11-22 C153 — 한 줄로 묻기가 한 줄 없이 시작하면 묶음마다 정해 둔 문장을 근거로 문안을 만들었다(Harold 「어떤 내용의 메세지를 보낼건지는 누가 정한거냐」).
+//   대상 = 소스에서 기계로: 문자 생성기(generateMessages)를 부르는 자리 전부 · 그 목적 글(첫 인자)과 목적 글을 조립하는 함수의 첫 인자.
+describe('R105 문안의 목적 글은 사람이 준 글에서 온다 — 생성기 호출의 목적 글에 코드가 넣은 한글 문장이 없다', () => {
+  /** 허용 = 스팸 차단 뒤 다시 쓰기 꼬리표(내용이 아니라 고쳐 쓰라는 지시 · 사람의 목적 글 뒤에 붙는다) */
+  const ALLOWED_LITERALS = ['\n(이전 문안이 스팸필터에 차단되었습니다. 다른 표현으로 작성해주세요.)'];
+  /** 목적 글을 조립하는 함수 — 첫 인자가 목적 글 본문이다(그 인자를 같은 규칙으로 본다) */
+  const OBJECTIVE_BUILDERS = new Set(['buildMessageObjective', 'buildSpamRegeneratePrompt']);
+  const HANGUL = /[가-힣]/;
+
+  function hangulLiteralsIn(node: ts.Node, sf: ts.SourceFile): string[] {
+    const out: string[] = [];
+    const visit = (n: ts.Node): void => {
+      if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) { if (HANGUL.test(n.text)) out.push(n.text); return; }
+      if (ts.isTemplateExpression(n)) {
+        for (const part of [n.head, ...n.templateSpans.map((s) => s.literal)]) if (HANGUL.test(part.text)) out.push(part.text);
+        n.templateSpans.forEach((s) => visit(s.expression));
+        return;
+      }
+      // 조립 함수 = 첫 인자만 목적 글 본문(둘째부터는 참고 블록 · 지시)
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && OBJECTIVE_BUILDERS.has(n.expression.text)) { if (n.arguments[0]) visit(n.arguments[0]); return; }
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    return out.map((t) => t).filter((t) => !ALLOWED_LITERALS.includes(t));
+  }
+
+  const calls: Array<{ file: string; line: number; literals: string[] }> = [];
+  for (const rel of sourceFiles(BE, /\.ts$/)) {
+    const src = read(join(BE, rel));
+    if (!src.includes('generateMessages(')) continue;
+    const sf = ts.createSourceFile(rel, src, ts.ScriptTarget.Latest, true);
+    const visit = (n: ts.Node): void => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'generateMessages' && n.arguments[0]) {
+        calls.push({ file: rel, line: sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1, literals: hangulLiteralsIn(n.arguments[0], sf) });
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+
+  it('생성기를 부르는 자리를 소스에서 찾았다(0 이면 이 시험이 아무것도 지키지 않는다)', () => {
+    expect(calls.length).toBeGreaterThanOrEqual(8);
+    expect(calls.map((c) => c.file)).toContain('services/ai-line.ts');
+  });
+  it('어느 호출도 목적 글에 코드가 넣은 한글 문장을 싣지 않는다(허용 = 다시 쓰기 꼬리표 하나)', () => {
+    expect(calls.filter((c) => c.literals.length > 0).map((c) => `${c.file}:${c.line} ${JSON.stringify(c.literals)}`)).toEqual([]);
+  });
+  it('한 줄로 묻기 = 묶음마다 정해 둔 근거 문장이 없고 · 한 줄이 없으면 만들지 않는다(그 뿌리가 났던 자리)', () => {
+    const seg = be('utils/ask-segments.ts');
+    expect(seg).not.toContain('askGroupLine');
+    expect(seg).not.toMatch(/purpose\s*:/);
+    const route = routeBlocks(be('routes/ai-line.ts')).find((b) => key(b) === 'POST /ask/compose')!;
+    expect(route.body).toContain("code: 'LINE_REQUIRED'");
+    expect(route.body.indexOf("code: 'LINE_REQUIRED'")).toBeLessThan(route.body.indexOf('await runLineCompose('));
+  });
+});

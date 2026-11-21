@@ -380,7 +380,10 @@ describe('Codex 구현 1R #3 — 90바이트를 넘는 SMS 검사 글 = 같은 �
     const a = read('services/ai-line-spam.ts');
     const gate = a.indexOf("if (msgType === 'SMS' && smsRowOverLimit('S', checked)) return { state: 'too_long'");
     expect(gate).toBeGreaterThan(0);
-    expect(gate).toBeLessThan(a.indexOf('const same = hash ? await spamCheckFor('));
+    // ★ 1122 C153 — 이어 보기 판정 = reusableLineSpamTest 한 곳(시작 주소가 잠금 안에서 부른다) · 길이 관문은 그 호출보다 앞
+    const reuseAt = a.indexOf('const reuse = hash ? await reusableLineSpamTest(');
+    expect(reuseAt).toBeGreaterThan(0);
+    expect(gate).toBeLessThan(reuseAt);
     expect(a).toContain("if (out.errorCode === 'SMS_TOO_LONG') return { state: 'too_long', message: out.error };");
     const cards = readFront('components/ai-line/LineResultCards.tsx');
     expect(cards).toMatch(/const HOLD[^;]*'too_long'/);

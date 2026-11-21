@@ -209,7 +209,8 @@ describe('K13 화면', () => {
     expect(askNow).not.toMatch(/flow\.current\s*[!=]==/);
     expect(page).toContain('disabled={answering} maxLength={2000}');
     // ★ 1122 Harold 「뒤로가면 … 메인으로 나가야」 — 첫 화면의 뒤로 = 대시보드(입구 = 대시보드 카드 · 머리 띠 탭 · 형제 화면의 뒤로와 같은 곳 = AiHubBand)
-    expect(page).toContain("<button type=\"button\" disabled={answering} onClick={() => (inAnswer ? setAnswer(null) : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");
+    // ★ C153 — 문안을 만드는 동안 · 보내는 동안도 잠긴다 · 보낸 뒤의 뒤로 = 처음으로
+    expect(page).toContain("<button type=\"button\" disabled={answering || making || sending || !!unknown} onClick={() => (sent ? restart() : inAnswer ? setAnswer(null) : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");
     expect(page).not.toContain("navigate('/ai-line')");
     expect(read(join(FE, 'components', 'ai-line', 'AiHubBand.tsx'))).toContain("onClick={() => navigate('/dashboard')}");
     expect(page).toContain('disabled={!ready || reading || answering} onClick={() => begin(k, g)}');

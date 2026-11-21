@@ -453,7 +453,7 @@ export interface StepSpamCheckRead {
   subject: string | null;
 }
 
-const DEMO_SPAM_VIEW: SpamCheckView = { state: 'pass', carriers: [], aheadCount: 0, elapsedSec: 0 };
+const DEMO_SPAM_VIEW: SpamCheckView = { state: 'pass', carriers: [], aheadCount: 0, elapsedSec: 0, lateOpen: false };
 
 async function stepSpamReadOf(input: Awaited<ReturnType<typeof stepSpamInput>>, demo: boolean): Promise<StepSpamCheckRead> {
   const message = input.messageType === 'SMS' ? input.messageContentSms : input.messageContentLms;

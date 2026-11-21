@@ -10,7 +10,7 @@ import { pool, query } from '../config/database';
 import { isDemoCompany } from '../utils/demo-company';
 import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { buildAdMessage, buildAdSubject, getOpt080Number, prepareFieldMappings, replaceVariables } from '../utils/messageUtils';
-import { enqueueSpamTest, computeMessageHash, loadDefaultSpamFirstRecipient, spamCheckFor } from '../utils/spam-test-queue';
+import { enqueueSpamTest, computeMessageHash, loadDefaultSpamFirstRecipient, spamCheckFor, type SpamCheckKey } from '../utils/spam-test-queue';
 import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from '../utils/message-byte';
 import { isAutoSpamSource } from '../utils/spam-trial';
 import { resolveHubStoreScope } from '../utils/store-scope';
@@ -29,6 +29,8 @@ export interface LineSpamStart {
   testId?: string;
   reused?: boolean;
   message?: string;
+  /** ★ C153 결과 없음이지만 늦은 보고를 아직 받는 검사를 이어 본다(화면이 이어 읽는다) */
+  lateOpen?: boolean;
 }
 
 export interface LineSpamRead {
@@ -36,6 +38,7 @@ export interface LineSpamRead {
   carriers: Array<{ carrier: string; result: 'pass' | 'blocked' | 'checking' | 'none' }>;
   aheadCount: number;
   elapsedSec: number;
+  lateOpen: boolean;
 }
 
 const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '');
@@ -52,6 +55,26 @@ async function loadFirstRecipient(v: AiLineViewer, customerId: string | null, ma
     params,
   );
   return r.rows[0] || null;
+}
+
+/**
+ * ★ 2026-11-22 C153 — 같은 글의 검사를 이어 볼 것인가(이어 볼 것이 없으면 null = 새로 건다). 판정 한 곳(시작 주소가 잠금 안에서 부른다).
+ *   오늘 검사: 통과 · 막힘 · 진행 중 · 확인 중 = 이어 본다 · 결과 없음 = 늦은 보고를 아직 받는 때(lateOpen)면 이어 본다 · 그때가 지났으면 새로 건다.
+ *     (통신사가 늦게 전달하는 중에 같은 글을 또 보내면 돈만 더 들고 앞 문자의 늦은 도착이 뒤 검사로 붙는다 · spam-test-queue 「가를 수 없는 경우」)
+ *   오늘 검사가 없다(날짜가 바뀌었을 수 있다): 어제 검사가 결과 없음 + lateOpen 일 때만 이어 본다(자정 직전에 닫힌 검사 · Codex 설계 2R).
+ *     그 밖 = 날짜 규칙 그대로 새 검사(통신사 필터는 날마다 바뀐다).
+ */
+export async function reusableLineSpamTest(key: SpamCheckKey): Promise<LineSpamStart | null> {
+  const same = await spamCheckFor(key);
+  if (same) {
+    const read = await verdictOf(same.testId, same.status, same.createdAt, key.msgType);
+    if (read.state !== 'warn' || read.lateOpen) return { state: read.state, testId: same.testId, reused: true, ...(read.lateOpen ? { lateOpen: true } : {}) };
+    return null;
+  }
+  const prev = await spamCheckFor(key, undefined, 2);
+  if (!prev) return null;
+  const read = await verdictOf(prev.testId, prev.status, prev.createdAt, key.msgType);
+  return read.state === 'warn' && read.lateOpen ? { state: 'warn', testId: prev.testId, reused: true, lateOpen: true } : null;
 }
 
 export async function startLineSpamTest(v: AiLineViewer, input: {
@@ -106,11 +129,8 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
   // 같은 회사 · 발신번호 · 유형 · 제목 · 치환 뒤 글 = 같은 검사 이어 보기(통과 · 막힘 · 진행 중 · 확인 중 · 결과 없음은 다시)
   //   ★ Codex 1R medium — 유형(결과 행 · 큐 검사도 등록 때 결과 행이 생긴다)과 제목까지 같아야 한다. 제목을 모르는 옛 검사는 장문 재사용에서 빠진다.
   //   ★ 2026-11-01 B1-4 — 찾기 = 공용 spamCheckFor 한 곳(같은 한국 날짜 · 옛 24시간 창 대신)
-  const same = hash ? await spamCheckFor({ companyId: v.companyId, callback: cb, hash, msgType, subject: subject || null }) : null;
-  if (same) {
-    const read = await verdictOf(same.testId, same.status, same.createdAt, msgType);
-    if (read.state !== 'warn') return { state: read.state, testId: same.testId, reused: true };
-  }
+  const reuse = hash ? await reusableLineSpamTest({ companyId: v.companyId, callback: cb, hash, msgType, subject: subject || null }) : null;
+  if (reuse) return reuse;
 
   // 사용자당 줄에 선 자동 검사 1건(끝나면 화면이 다음 카드를 보낸다)
   const busy = await query(

@@ -22,6 +22,14 @@ const AUTO_LIMIT = 2;
 const RUNNING: ReadonlyArray<AiLineSpamChip['state']> = ['queued', 'running'];
 /** 검사를 다시 걸어도 결과가 같은 상태(사람이 고쳐야 바뀐다) — 지문이 바뀌기 전에는 자동으로 다시 걸지 않는다 */
 const HOLD: ReadonlyArray<AiLineSpamChip['state']> = ['demo', 'unavailable', 'unregistered', 'no_balance', 'charset', 'no_device', 'too_long'];
+/**
+ * ★ 2026-11-22 C153 늦은 도착 이어 읽기(설계서 docs/2026-11-22-c153-ask-step3-redesign-design.md §3-4) — 결과 없음(warn)이어도 서버가 늦은 보고를
+ *   아직 받는 때(lateOpen · 서버 DB 시계)면 이어 읽는다. 통신사가 60초를 넘겨 전달하면 검사는 결과 없음으로 닫히지만 서버는 늦은 보고로 통과로 고친다
+ *   (1122 실측 = 한 통신사 4분 50초 ~ 7분대). 그때를 화면 시계로 재지 않는다(줄 대기 시간만큼 어긋난다 · Codex 설계 1R).
+ */
+const LATE_POLL_MS = 15_000;
+/** (순수) 결과 없음 칩을 아직 이어 읽는 때인가(서버 판정) */
+export const lateOpen = (chip: AiLineSpamChip | undefined): boolean => !!chip && chip.state === 'warn' && !!chip.testId && chip.lateOpen === true;
 
 export interface LineResultCardsProps {
   run: AiLineRun;
@@ -38,12 +46,15 @@ export interface LineResultCardsProps {
   /** 칼럼 더 넣기(1크레딧) — 호출부가 서버를 부르고 다듬은 글을 쓴다 */
   onDecorate: (t: AiLineType, vars: string[]) => Promise<void>;
   onSpamPatch: (t: AiLineType, chip: AiLineSpamChip) => void;
+  /** ★ C153 좁은 칸에 놓일 때(한 줄로 묻기 3단계의 오른쪽 칸) = 카드를 언제나 한 줄에 하나씩(기본 = 화면 폭에 따라 2 · 3칸 = AI 한줄로 그대로) */
+  stack?: boolean;
 }
 
-function chipView(chip: AiLineSpamChip | undefined, stale: boolean): { tone: string; icon: 'ok' | 'bad' | 'wait' | 'none'; text: string } {
+function chipView(chip: AiLineSpamChip | undefined, stale: boolean, late: boolean): { tone: string; icon: 'ok' | 'bad' | 'wait' | 'none'; text: string } {
   if (stale && chip && !RUNNING.includes(chip.state)) return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '글이 바뀌었어요 · 다시 검사' };
   if (!chip || chip.state === 'idle') return { tone: 'bg-slate-100 text-slate-600', icon: 'wait', text: '검사 전' };
-  const carriersBy = (r: 'pass' | 'blocked' | 'checking') => (chip.carriers || []).filter((c) => c.result === r).map((c) => c.carrier);
+  // ★ C153 — 통신사 이름은 고객이 아는 표기로(서버 값 LGU = 「LG U+」)
+  const carriersBy = (r: 'pass' | 'blocked' | 'checking' | 'none') => (chip.carriers || []).filter((c) => c.result === r).map((c) => (/^LG/i.test(c.carrier) ? 'LG U+' : c.carrier));
   switch (chip.state) {
     case 'queued': return { tone: 'bg-slate-100 text-slate-700', icon: 'wait', text: chip.aheadCount ? `줄 대기 · 앞 ${chip.aheadCount}건` : '줄 대기' };
     case 'busy': return { tone: 'bg-slate-100 text-slate-700', icon: 'wait', text: '줄 대기' };
@@ -52,7 +63,10 @@ function chipView(chip: AiLineSpamChip | undefined, stale: boolean): { tone: str
     case 'blocked': return { tone: 'bg-rose-50 text-rose-800', icon: 'bad', text: `막힘 · ${carriersBy('blocked').join(' · ') || '통신사'}` };
     // ★ 2026-11-01 B1-4 — 통신사는 보냈는데 검사폰 보고가 늦음(길어도 20분 안에 확정 · 다시 걸어도 같은 검사를 이어 본다)
     case 'checking': return { tone: 'bg-amber-50 text-amber-800', icon: 'wait', text: `확인 중 · ${carriersBy('checking').join(' · ') || '통신사'}` };
-    case 'warn': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '결과 없음 · 다시 검사' };
+    // ★ C153 — 서버가 늦은 보고를 받는 동안 = 늦게 도착할 수 있다(이어 읽는 중 · 도착하면 통과로 바뀐다) · 지나면 결과 없음
+    case 'warn': return late
+      ? { tone: 'bg-amber-50 text-amber-800', icon: 'wait', text: `도착 확인이 늦어요 · ${carriersBy('none').join(' · ') || '통신사'}` }
+      : { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '결과 없음 · 다시 검사' };
     case 'demo': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '시연 계정은 검사하지 않아요' };
     case 'unavailable': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '요금제에 스팸 검사가 없어요' };
     case 'unregistered': return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '등록된 발신번호로만 검사해요' };
@@ -101,6 +115,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
       if (out.state === 'busy') setBusyTick((x) => x + 1);
       cur.onSpamPatch(t, {
         state: out.state, testId: out.state === 'busy' ? prev?.testId : out.testId, fp, message: out.message,
+        lateOpen: out.state === 'busy' ? prev?.lateOpen : out.lateOpen === true,
         autoRuns: out.state === 'busy' ? (prev?.autoRuns || 0) : (prev?.autoRuns || 0) + (manual ? 0 : 1),
       });
     } catch (e) {
@@ -112,7 +127,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
   };
 
   // 다음에 걸 카드 고르기(진행 중이 없을 때만)
-  const spamKey = JSON.stringify(Object.fromEntries(types.map((t) => [t, [run.spam[t]?.state, run.spam[t]?.fp, run.spam[t]?.autoRuns]])));
+  const spamKey = JSON.stringify(Object.fromEntries(types.map((t) => [t, [run.spam[t]?.state, run.spam[t]?.fp, run.spam[t]?.autoRuns, run.spam[t]?.lateOpen === true]])));
   const fpKey = types.map(fpOf).join('|');
   useEffect(() => {
     if (!p.callback) return;
@@ -140,9 +155,10 @@ export default function LineResultCards(p: LineResultCardsProps) {
   const pollingRef = useRef<Map<string, object>>(new Map());
   useEffect(() => {
     // ★ 2026-11-01 B1-4 — 확인 중 칩도 확정될 때까지 읽는다(다른 카드 자동 검사는 막지 않는다 · 확인 중만 남으면 15초)
-    const live = types.filter((t) => (RUNNING.includes(run.spam[t]?.state as any) || run.spam[t]?.state === 'checking') && run.spam[t]?.testId);
+    // ★ C153 — 결과 없음 칩도 서버가 늦은 보고를 받는 동안은 이어 읽는다(15초 · 늦게 도착하면 서버 판정이 통과로 바뀐다 · 그때가 지나면 서버가 lateOpen 을 내린다)
+    const live = types.filter((t) => (RUNNING.includes(run.spam[t]?.state as any) || run.spam[t]?.state === 'checking' || lateOpen(run.spam[t])) && run.spam[t]?.testId);
     if (live.length === 0) return;
-    const slow = live.every((t) => run.spam[t]?.state === 'checking');
+    const slow = live.every((t) => run.spam[t]?.state === 'checking' || run.spam[t]?.state === 'warn');
     const timer = setInterval(() => {
       for (const t of live) {
         const chip = latest.current.run.spam[t];
@@ -155,10 +171,10 @@ export default function LineResultCards(p: LineResultCardsProps) {
           const cur = latest.current;
           const now = cur.run.spam[t];
           if (cur.run.runId !== runId || !now || now.testId !== testId) return;
-          cur.onSpamPatch(t, { ...now, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec });
+          cur.onSpamPatch(t, { ...now, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec, lateOpen: r.lateOpen === true });
         }).catch(() => { /* 다음 읽기에서 다시(제한 시간 10초) */ }).finally(() => { if (pollingRef.current.get(t) === mark) pollingRef.current.delete(t); });
       }
-    }, slow ? 15_000 : POLL_MS);
+    }, slow ? LATE_POLL_MS : POLL_MS);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spamKey]);
@@ -170,7 +186,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
   const [decoError, setDecoError] = useState<string | null>(null);
   const decoCost = creditCost('ai-line-decorate');
 
-  const cols = types.length >= 3 ? 'lg:grid-cols-3' : types.length === 2 ? 'md:grid-cols-2' : '';
+  const cols = p.stack ? '' : types.length >= 3 ? 'lg:grid-cols-3' : types.length === 2 ? 'md:grid-cols-2' : '';
   return (
     <div className="mb-6 space-y-2">
       <div className={`grid grid-cols-1 ${cols} gap-3`}>
@@ -179,7 +195,7 @@ export default function LineResultCards(p: LineResultCardsProps) {
           const body = p.bodyAt(t);
           const chip = run.spam[t];
           const stale = !!chip?.fp && chip.fp !== fpOf(t);
-          const view = chipView(chip, stale);
+          const view = chipView(chip, stale, lateOpen(chip));
           const picked = p.pickedType === t;
           const isRec = rec === t;
           const unusedCols = p.columns.filter((c) => !c.locked && !body.includes(`%${c.token}%`));

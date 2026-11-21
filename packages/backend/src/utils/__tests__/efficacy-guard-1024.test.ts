@@ -109,7 +109,10 @@ describe('효능 단정 판정', () => {
     const banned = ai.indexOf('const hit = findBannedWords(msgField, [...ctx.bannedWords]);');
     expect(banned).toBeGreaterThan(0);
     expect(banned).toBeLessThan(ai.indexOf('const inventedHere = findInventedBenefits(msgField, ctx.benefitGround);'));
-    expect(banned).toBeLessThan(ai.indexOf('const effHere = dropInventedEfficacy(msgField, ctx.benefitGround);'));
+    // ★ 1122 C153 — 효능 · 날짜의 근거 = factGround(따로 받지 않으면 benefitGround 와 같은 글)
+    const eff = ai.indexOf('const effHere = dropInventedEfficacy(msgField, factGround);');
+    expect(eff).toBeGreaterThan(0);
+    expect(banned).toBeLessThan(eff);
     expect(ai.split('findBannedWords(').length - 1).toBe(1);
     expect(readFileSync(resolve(__dirname, '../../services/ai.ts'), 'utf8')).not.toContain('findBannedWords(msgField');
   });
@@ -154,8 +157,10 @@ describe('한 줄 CT 글 정리 = 같은 판정', () => {
     // ★ 2026-10-28 K12-1 — 출구 CT 하나(근거 글 = exitCtx.benefitGround = 같은 benefitGround)
     const exit = readFileSync(resolve(__dirname, '../copy-exit-guards.ts'), 'utf8');
     expect(ai).toContain('channel, isAd, bannedWords, benefitGround, baseDate,');
-    expect(exit).toContain('const effHere = dropInventedEfficacy(msgField, ctx.benefitGround);');
-    expect(exit).toContain('const subjEff = dropInventedEfficacy(subj, ctx.benefitGround);');
+    // ★ 1122 C153 — 효능 근거 = factGround · 기본값 = 혜택 근거와 같은 글(따로 넘기는 생산자만 다르다)
+    expect(exit).toContain('const factGround = ctx.factGround ?? ctx.benefitGround;');
+    expect(exit).toContain('const effHere = dropInventedEfficacy(msgField, factGround);');
+    expect(exit).toContain('const subjEff = dropInventedEfficacy(subj, factGround);');
     expect(ai).not.toContain('export async function generateCustomMessages(');
     // 프롬프트에 효능을 쓰라는 신호가 남지 않는다(LESSONS_BACKEND 0809 — 반대 신호를 세어 지운다)
     expect(ai).not.toMatch(/before\/after 기대감|성분 효능 \+|체감 변화 \+|건강 이점|피부가 달라지는 마스크팩|몸이 가벼워지는|성분\/효과 기반 설득/);

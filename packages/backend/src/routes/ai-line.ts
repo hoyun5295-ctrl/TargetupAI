@@ -14,7 +14,9 @@ import { InsufficientCreditError } from '../utils/ai-credit';
 import { isValidAttemptToken, isValidLineBenefit } from '../utils/one-line-facts';
 import { readLinePeriod } from '../utils/one-line-steps';   // ★ C105 H1
 import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
-import { readAiLine, sanitizeLineTypes, readLineAnswers, type AiLineAnswer } from '../utils/ai-line';
+import { readAiLine, sanitizeLineTypes, readLineAnswers, LINE_LINK_ASK, type AiLineAnswer } from '../utils/ai-line';
+import { voiceLearned } from '../utils/brand-voice-prompt';
+import { variantNamesFor } from '../utils/copy-house-rules';
 import {
   AiLineError, aiLineVarTokensFor,
   runLineIntake, runLineRecount, runLineRetarget, runLineProceed, runLineCompose, runLineDecorate, runLineAlimtalkMatch,
@@ -25,6 +27,7 @@ import { respondUserError } from '../utils/http-error';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import {
   readAskLine, readAskPlan, readAskPrice, countAskCells, countAskPlan, listAskAudience, askGroupMeta, askAudienceText, askComposeLicense,
+  readAskPlace, askUngroundedWords, askStagingState, ASK_PLACE_Q, ASK_PLACE_ANSWER,
 } from '../utils/ask-segments';
 import { answerAsk, ASK_QUESTION_MIN, ASK_QUESTION_MAX } from '../services/ask-answer';   // ★ C152 B 질문에 답하기
 
@@ -272,8 +275,10 @@ router.get('/ask/segments', async (req: Request, res: Response) => {
   try {
     const v = await lineGate(req, res);
     if (!v) return;
-    const [counted, price] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrice(v.companyId)]);
-    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price });
+    const [counted, price, learned] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrice(v.companyId), voiceLearned(v.companyId, 'marketing')]);
+    // ★ 2026-11-22 C153 D3 — 종류 칩 이름(목소리를 배운 회사 = 서버 이름 · 문안 카드 이름과 같은 판정 = 광고 문자 목소리) · 아니면 null = 화면 기본 이름
+    const typeNames = learned ? (([a, b, c]) => ({ emo: a, benefit: b, mz: c }))(variantNamesFor(true, '')) : null;
+    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price, typeNames });
   } catch (err: any) {
     return fail(res, err, 'ask-segments');
   }
@@ -295,7 +300,7 @@ router.post('/ask/count', async (req: Request, res: Response) => {
   }
 });
 
-// POST /ask/audience — 직접발송 창에 채울 명단(지금 다시 셈 · §2-1 같은 문장)
+// POST /ask/audience — 보낼 명단(지금 다시 셈 · §2-1 같은 문장 · ★ C153 한 줄로 묻기 4단계가 적재에 싣는다)
 router.post('/ask/audience', async (req: Request, res: Response) => {
   try {
     const v = await lineGate(req, res);
@@ -310,7 +315,8 @@ router.post('/ask/audience', async (req: Request, res: Response) => {
   }
 });
 
-// POST /ask/compose — 문안 한 안 · 2크레딧(기본료 0) · benefitHole = 직접발송 길목이 막을 자리가 남음
+// POST /ask/compose — 문안(고른 종류마다 한 안 · 안마다 2크레딧 · 기본료 0) · hole = 발송 길목이 막을 자리가 남음 · ungrounded = 입력에 없는 말(알림)
+// ★ 2026-11-22 C153 — 내용 = 사람이 적은 한 줄(필수 · 없으면 만들지 않는다) · 혜택 · 오실 곳 · 종류를 받은 뒤에만 만든다(설계서 docs/2026-11-22-c153-ask-step3-redesign-design.md §2 S1)
 router.post('/ask/compose', async (req: Request, res: Response) => {
   try {
     const v = await lineGate(req, res);
@@ -318,9 +324,19 @@ router.post('/ask/compose', async (req: Request, res: Response) => {
     const b = req.body || {};
     const plan = readAskPlan(b.plan);
     if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
-    const rawLine = typeof b.line === 'string' ? b.line.trim() : '';
-    const line = rawLine ? readLine(rawLine) : null;
-    if (rawLine && !line) return res.status(400).json({ success: false, error: '한 줄을 5자 이상 적어 주세요.', code: 'LINE_INVALID' });
+    const line = readLine(b.line);
+    if (!line) return res.status(400).json({ success: false, error: '무엇을 알릴지 한 줄(5자 이상) 적어 주세요.', code: 'LINE_REQUIRED' });
+    const types = sanitizeLineTypes(b.types);
+    if (types === 'invalid') return res.status(400).json({ success: false, error: '만들 문안 종류를 골라 주세요. 화면이 그대로면 새로 고쳐 주세요.', code: 'TYPES_INVALID' });
+    const place = readAskPlace(b.place);
+    if (!place) return res.status(400).json({ success: false, error: '오실 곳 고르기가 올바르지 않아요.', code: 'FACTS_INVALID' });
+    const link = place === 'online' && typeof b.link === 'string' && b.link.trim() ? b.link.trim() : null;
+    // 오실 곳 = 사람이 고른 사실(그 밖 답 = 근거 글의 「확인한 사실」) · 링크 = AI 한줄로의 링크 답과 같은 자리(1회용 링크 · 틀린 주소는 만들기가 거절)
+    const answers = readLineAnswers([
+      ...(place !== 'none' ? [{ q: ASK_PLACE_Q, a: ASK_PLACE_ANSWER[place] }] : []),
+      ...(link ? [{ q: LINE_LINK_ASK.label, a: link }] : []),
+    ]);
+    if (answers === 'invalid') return res.status(400).json({ success: false, error: '오실 곳 · 링크가 올바르지 않아요.', code: 'FACTS_INVALID' });
     const mode = b.benefitMode === 'line' || b.benefitMode === 'custom' || b.benefitMode === 'none' ? b.benefitMode : null;
     if (!mode) return res.status(400).json({ success: false, error: '혜택 고르기가 올바르지 않아요.', code: 'FACTS_INVALID' });
     const benefit = mode === 'custom' && typeof b.benefit === 'string' && isValidLineBenefit(b.benefit) ? b.benefit.trim() : null;
@@ -329,27 +345,45 @@ router.post('/ask/compose', async (req: Request, res: Response) => {
     const retry = b.retryBlocked === true;
     const counted = await countAskPlan(v.companyId, v.userId, plan, await readAskPrice(v.companyId));
     if (!counted) return res.status(400).json(ASK_PRICE_UNSET);
-    const lic = askComposeLicense(line, plan, mode, benefit, retry);
+    const lic = askComposeLicense(line, mode, benefit, retry);
     const out = await runLineCompose(v, {
-      line: lic.licenseLine, facts: { benefit: lic.benefit, periodEnd: null }, filters: {}, allCustomers: false,
-      types: ['benefit'], vars: [], channel: 'LMS', isAd: true, attemptToken: b.attemptToken,
+      line: lic.licenseLine, facts: { benefit: lic.benefit, periodEnd: null, ...(answers.length > 0 ? { answers } : {}) }, filters: {}, allCustomers: false,
+      types, vars: [], channel: 'LMS', isAd: true, attemptToken: b.attemptToken,
       ask: {
         count: counted.planned,
         audienceText: askAudienceText(plan.groups),
-        ...(lic.extraContext ? { extraContext: lic.extraContext } : {}),
-        // 과금 키 = 사람 입력만(정리한 한 줄 · 정렬한 묶음 키 · 혜택 갈래 · 혜택 글 · 다시 고침)
-        keyInput: { line: line || '', groups: plan.groups, mode, benefit: benefit || '', retry },
+        extraContext: lic.extraContext,
+        ...(lic.benefitGround !== undefined ? { benefitGround: lic.benefitGround } : {}),
+        // 과금 키 = 사람 입력만(한 줄 · 정렬한 묶음 키 · 혜택 갈래 · 혜택 글 · 오실 곳 · 링크 · 정렬한 종류 · 다시 고침)
+        keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry },
       },
     });
-    const card = out.cards[0];
+    // 안전망의 근거 = 사람이 준 글 전부(한 줄 · 혜택 칸 · 오실 곳 답 · 링크)
+    const ground = [line, lic.benefit || '', ...answers.map((x) => x.a)].join('\n');   // 안전망 낱말의 근거(혜택 근거와 다르다 = 사람이 적은 글 전부)
     return res.json({
       success: true,
-      card: { body: card.body, subject: card.subject, byteCount: card.byteCount },
+      cards: out.cards.map((c) => ({
+        type: c.type, label: c.label, body: c.body, subject: c.subject, byteCount: c.byteCount,
+        hole: findUneditedSendPlaceholder(c.body, c.subject) !== null,
+        ungrounded: askUngroundedWords(`${c.subject}\n${c.body}`, ground),
+      })),
       channel: out.channel, count: out.count, charged: out.charged,
-      benefitHole: findUneditedSendPlaceholder(card.body, card.subject) !== null,
     });
   } catch (err: any) {
     return fail(res, err, 'ask-compose');
+  }
+});
+
+// GET /ask/sent/:stagingId — 그 준비분의 접수 상태(★ C153 · 확정 응답을 못 받은 화면의 「다시 확인」 · 읽기만 · 회사 범위 · accepted · pending · none)
+router.get('/ask/sent/:stagingId', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    const out = await askStagingState(v.companyId, req.params.stagingId);
+    if (out === null) return res.status(400).json({ success: false, error: '요청 형식이 올바르지 않아요.', code: 'STAGING_INVALID' });
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    return fail(res, err, 'ask-sent');
   }
 });
 
