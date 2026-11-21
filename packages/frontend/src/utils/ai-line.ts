@@ -7,7 +7,7 @@
  * - 다듬은 문안은 `bodyOf` · `setBody` 로만 읽고 쓴다(반만 바꾸면 고친 글 대신 원본이 나간다 · 회의론자 화면 렌즈).
  * ⛔ 모델명 0 · 줄표 0.
  */
-import type { AskReadResult, AskSegments, AskPlan, AskCount, AskBenefitMode, AskComposeResult } from './ai-ask';
+import type { AskReadResult, AskSegments, AskPlan, AskCount, AskBenefitMode, AskComposeResult, AskAnswer } from './ai-ask';
 
 export type AiLineBranch = 'sms' | 'alimtalk' | 'ask_kakao';
 export type AiLineCopyType = 'emo' | 'benefit' | 'mz';
@@ -351,6 +351,8 @@ export const aiLineApi = {
   askCount: (plan: AskPlan) => call<AskCount>('/ask/count', { plan }, 'POST', 30_000),
   askCompose: (body: { line: string | null; plan: AskPlan; benefitMode: AskBenefitMode; benefit: string | null; retryBlocked: boolean; attemptToken: string }) =>
     call<AskComposeResult>('/ask/compose', body),
+  // ★ 2026-11-21 C152 B 질문에 답하기(5크레딧 · 같은 시도 표 + 같은 질문 = 낸 답 그대로)
+  askAnswer: (question: string, attemptToken: string) => call<AskAnswer>('/ask/answer', { question, attemptToken }, 'POST', 120_000),
   alimtalkMatch: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ charged: boolean; paid: boolean; matched: boolean; templates: Array<{ id: string; templateCode: string; name: string; profileId: string; profileName: string | null; content: string; score: number; reason: string }>; mappings: Array<{ templateVariable: string; customerFieldKey: string | null; customerFieldLabel: string | null; isExactMatch: boolean }>; suggestion: string | null }>('/alimtalk-match', { line, filters, allCustomers }),
 };

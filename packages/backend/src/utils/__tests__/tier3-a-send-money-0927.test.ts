@@ -101,12 +101,19 @@ describe('R082 AI 근거 질의', () => {
   it('크레딧 확인 뒤 호출 · 성공 뒤 차감(단가표) · 월 호출 한도 없음(★ 1101 Harold)', () => {
     expect(src('ai-credit-calc.ts')).toContain("'ai-operator-explain': 5,");
     const a = src('..', 'routes', 'ai.ts');
-    const b = between(a, "router.post('/operator/explain'", '\nrouter.');
+    const r = between(a, "router.post('/operator/explain'", '\nrouter.');
+    expect(r).not.toContain('checkAiRateLimit');
+    // ★ 2026-11-21 C152 — 몸통은 services/ask-answer runCompanyExplain 한 곳(라우트는 그 함수를 부른다 · 차례는 그대로)
+    expect(r).toContain('await runCompanyExplain({ user: req.user as any, question, idempotencyKey: `ai-explain:${randomUUID()}` })');
+    const svc = src('..', 'services', 'ask-answer.ts');
+    const b = between(svc, 'export async function runCompanyExplain', '\n}\n');
     expect(b).not.toContain('checkAiRateLimit');
-    expect(b).toContain("const explainCost = getCreditCost('ai-operator-explain');");
-    expect(b.indexOf('await checkCredit(companyId, explainCost);')).toBeLessThan(b.indexOf('await callAIWithCitations('));
-    expect(b.indexOf('await callAIWithCitations(')).toBeLessThan(b.indexOf("source: 'ai-operator-explain'"));
-    expect(b).toContain("await recordAiCall({ companyId, source: 'ai-operator-explain', modelType: 'opus', success: true });");
+    expect(svc).toContain("export const EXPLAIN_CREDIT_SOURCE = 'ai-operator-explain';");
+    expect(b).toContain('const cost = getCreditCost(EXPLAIN_CREDIT_SOURCE);');
+    expect(b.indexOf('await checkCredit(companyId, cost);')).toBeGreaterThan(-1);
+    expect(b.indexOf('await checkCredit(companyId, cost);')).toBeLessThan(b.indexOf('await callAIWithCitations('));
+    expect(b.indexOf('await callAIWithCitations(')).toBeLessThan(b.indexOf('await settleCreditAfterSuccess('));
+    expect(b).toContain("await recordAiCall({ companyId, source: EXPLAIN_CREDIT_SOURCE, modelType: 'opus', success: true });");
   });
 });
 

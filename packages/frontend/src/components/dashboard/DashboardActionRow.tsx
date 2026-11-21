@@ -4,7 +4,7 @@
  * Harold 1018: 「오른쪽 3개를 걷어내고 위에 3열 그리드로 · 상단 메뉴는 그대로」.
  * 옛 오른쪽 40% 세로 버튼 열(0707 확정 3색 그라데이션 · 글래스 칩 · 원형 화살표)을 같은 폭 한 줄로 옮겼다 — 높이만 줄였다.
  * 버튼마다의 누름 동작 · 잠금 판정은 대시보드가 그대로 넘긴다(이 부품은 모양만 소유).
- * 모바일 = 한 줄 작은 타일(아이콘 + 이름) · 4개면 2열 두 줄.
+ * 모바일 = 한 줄 작은 타일(아이콘 + 이름) · 4개면 1280px 아래에서 2열 두 줄.
  * ⛔ 이모지 0(잠김 = 자물쇠 아이콘) · 줄표 0 · 모델명 0.
  */
 import type { LucideIcon } from 'lucide-react';
@@ -35,7 +35,8 @@ const COLS: Record<number, string> = {
   1: 'grid-cols-1',
   2: 'grid-cols-2',
   3: 'grid-cols-3',
-  4: 'grid-cols-2 sm:grid-cols-4',
+  // ★ 2026-11-21 C152 — 4열은 1280px 부터(640 ~ 1279 에서 4열이면 이름이 잘렸다 · 폭 훑기 실측) · 그 아래는 2열 두 줄
+  4: 'grid-cols-2 xl:grid-cols-4',
 };
 
 export default function DashboardActionRow({ actions, enterClass = '' }: { actions: DashboardAction[]; enterClass?: string }) {
@@ -73,7 +74,8 @@ export default function DashboardActionRow({ actions, enterClass = '' }: { actio
                   <span className="truncate">{a.badge}</span>
                 </span>
               ) : (
-                <span className="hidden sm:block mt-0.5 text-[13px] text-white/80 truncate">{a.desc}</span>
+                // ★ 2026-11-21 C152 — 4열(카드 폭 약 300px)에서 긴 설명이 잘리지 않게 두 줄까지(옛: 한 줄 자르기)
+                <span className="hidden sm:block mt-0.5 text-[13px] leading-[1.3] text-white/80 line-clamp-2 break-keep text-balance">{a.desc}</span>
               )}
             </span>
             <span className="relative hidden md:flex w-8 h-8 rounded-full bg-white/15 ring-1 ring-white/25 items-center justify-center shrink-0 group-hover:translate-x-0.5 transition-transform">

@@ -190,7 +190,8 @@ describe('라우트 관문', () => {
     const r = code(back('routes/product-insight.ts'));
     expect(r).toContain('router.use(authenticate);');
     const routes = [...r.matchAll(/router\.(get|post)\('([^']+)',\s*(\w+)/g)].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
-    expect(routes).toEqual(['get /summary async', 'get /products guarded', 'get /search-terms guarded', 'post /audience-counts guarded', 'post /audience guarded', 'post /signal-texts guarded', 'get /reco-candidates async']);
+    // ★ 2026-11-21 C152 D — 같이 산 상품 주소(/pairs)도 guarded
+    expect(routes).toEqual(['get /summary async', 'get /products guarded', 'get /search-terms guarded', 'get /pairs guarded', 'post /audience-counts guarded', 'post /audience guarded', 'post /signal-texts guarded', 'get /reco-candidates async']);
     const summary = r.slice(r.indexOf("router.get('/summary'"), r.indexOf("router.get('/products'"));
     expect(summary).not.toMatch(/listProductSignals|listSearchTerms|countViewedNotBought|listViewedNotBought/);
     const g = r.slice(r.indexOf('const guarded ='), r.indexOf("router.get('/summary'"));
@@ -406,7 +407,7 @@ describe('화면 문구 · 금지', () => {
   it('상품 구역: 순위 · 재고를 약속하는 문구가 없다 · 인원이 0이거나 모르면 보내기 단추를 그리지 않는다', () => {
     const s = front('components/performance/ProductSignalSection.tsx');
     expect(code(s)).not.toMatch(/인기 ?1위|품절 임박|재고/);   // 주석 밖(화면에 나가는 글)
-    expect(s.match(/if \(n <= 0\) return null;/g)).toHaveLength(2);
+    expect(s.match(/if \(n <= 0\) return null;/g)).toHaveLength(3);   // 상품 · 검색어 · ★ C152 D 같이 산 상품 짝
     expect(s).toContain("const n = p.door === 'mall' ? counts?.products[p.key] ?? 0 : 0;");
   });
 });

@@ -107,7 +107,7 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
       `${i + 1}. ${r.name || '(이름 없음)'} (${new Date(r.sent_at).toLocaleDateString('ko-KR')}, 성공 ${r.success_count}건)\n   메시지: ${(r.message_content || '').slice(0, 200)}`
     );
     docs.push({
-      title: '최근 30일 캠페인 history',
+      title: '최근 30일 발송 이력',   // ★ 2026-11-21 C152 — 화면 「근거」 줄에 그대로 보이는 제목(옛: 캠페인 history)
       data: lines.join('\n\n'),
       context: '한줄로AI 등록된 본 회사 발송 이력',
     });

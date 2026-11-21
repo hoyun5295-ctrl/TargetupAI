@@ -149,7 +149,7 @@ describe('대시보드 아래 한 줄 4칸 화면 계약', () => {
     expect(ailine).not.toContain('aria-labelledby="hub-rec-title"');
     // 잠김: 구독 잠김 = 잠김 창 · 요금제 = AI 한줄로 소개 창(AI 한줄로 버튼과 같은 갈래)
     expect(dash).toContain("onLocked={(reason) => { if (reason === 'subscription') setShowSubscriptionLock(true); else openPlanFeature('ai-line'); }}");
-    expect(dash).toContain("if ((await fetchAiOperatorAccess()) === false) { openPlanFeature('ai-line'); return; }");
+    expect(dash).toContain("if ((await fetchAiOperatorAccess()) === false) { openPlanFeature(featureId); return; }");
     // 요금제 판정 = 칸이 읽는 self-diagnosis 의 403 · AI 한줄로 버튼의 /operator/access 와 같은 함수(서버 원문 대조) → 대시보드가 따로 묻지 않는다(Codex D1 · D2 같은 뿌리)
     const ai = readFileSync(resolve(__dirname, '../../routes/ai.ts'), 'utf8');
     const block = (start: string) => ai.slice(ai.indexOf(start), ai.indexOf('\nrouter.', ai.indexOf(start) + 1));

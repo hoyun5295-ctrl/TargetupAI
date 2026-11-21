@@ -7,20 +7,21 @@
  *   - 인앱 메시지 표 = 메시지별 최근 30일 노출 · 클릭 · 클릭률(이미 있는 인앱 통계 응답 그대로 · 응답이 비면 이 보기는 없다)
  *   - 줄 끝 버튼 = 「보고 안 산 고객 n명에게 보내기」 · 「이 말을 찾은 고객 n명에게 보내기」 → 직접발송 창이 그 고객들로 채워진 채 열린다.
  *     인원은 표와 따로 불러온다(표가 먼저 뜬다). 인원을 못 읽었거나 0명이면 버튼을 그리지 않는다. 보낼 때 서버가 지금 다시 센다.
+ *   - 같이 산 상품 표(★ 2026-11-21 C152 D) = 산 사람이 많은 상품마다 같은 고객이 함께 산 상품 · 「A 사고 B 안 산 고객 n명에게 보내기」(줄이 없으면 이 보기는 없다).
  * 숫자는 서버가 준 값만(지어내지 않는다) · 순위 · 재고를 약속하는 문구 없음.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowDown, ArrowUp, ArrowUpDown, MousePointerClick, Search, Send, ShoppingBag } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, MousePointerClick, Search, Send, ShoppingBag } from 'lucide-react';
 import ZoneSegmented from '../zone/ZoneSegmented';
 import {
-  fetchProductInsightLive, fetchProductInsight, fetchAudienceCounts, fetchInappTopMessages, stashAudience,
+  fetchProductInsightLive, fetchProductInsight, fetchAudienceCounts, fetchInappTopMessages, fetchBoughtTogether, fetchPairCounts, stashAudience,
   sortProducts, buyRate, viewDiff, hasBothDoors, DOOR_LABEL,
-  type ProductInsight, type ProductSignal, type ProductSortKey, type AudienceCounts, type InappTopMessage,
+  type ProductInsight, type ProductSignal, type ProductSortKey, type AudienceCounts, type InappTopMessage, type BoughtTogether, type BoughtTogetherView,
 } from '../../utils/product-insight';
 import { INAPP_TEMPLATE_LABELS } from '../inapp/blockTheme';
 
-type View = 'products' | 'terms' | 'inapp';
+type View = 'products' | 'terms' | 'inapp' | 'pairs';
 const FIRST_ROWS = 20;
 const num = (n: number) => n.toLocaleString();
 const pct = (r: number | null) => (r === null ? '—' : `${(r * 100).toFixed(1)}%`);
@@ -54,6 +55,9 @@ export default function ProductSignalSection() {
   const [failed, setFailed] = useState(false);
   const [counts, setCounts] = useState<AudienceCounts | null>(null);
   const [inapp, setInapp] = useState<InappTopMessage[]>([]);
+  // ★ C152 D 같이 산 상품(줄) · 짝마다 사고 안 산 고객 수(줄과 따로 불러 표가 먼저 뜬다)
+  const [pairs, setPairs] = useState<BoughtTogetherView | null>(null);
+  const [pairCounts, setPairCounts] = useState<number[] | null>(null);
   const [view, setView] = useState<View>('products');
   const [sortKey, setSortKey] = useState<ProductSortKey>('views');
   const [desc, setDesc] = useState(true);
@@ -70,6 +74,12 @@ export default function ProductSignalSection() {
       if (!got) { setFailed(true); return; }
       setData(got);
       void fetchInappTopMessages().then((m) => { if (alive) setInapp(m); });
+      void fetchBoughtTogether().then(async (v) => {
+        if (!alive || !v || v.pairs.length === 0) return;
+        setPairs(v);
+        const c = await fetchPairCounts(v.pairs.map((x) => ({ a: x.a, b: x.b })));
+        if (alive) setPairCounts(c);
+      });
       const keys = got.products.filter((p) => p.door === 'mall' && p.views > 0).map((p) => p.key);
       const terms = got.terms.filter((t) => t.customers > 0).map((t) => t.term);
       if (keys.length === 0 && terms.length === 0) return;
@@ -118,10 +128,20 @@ export default function ProductSignalSection() {
       </button>
     );
   };
+  const pairRows: BoughtTogether[] = pairs?.pairs || [];
+  const pairBtn = (x: BoughtTogether, i: number) => {
+    const n = pairCounts?.[i] ?? 0;
+    if (n <= 0) return null;
+    return (
+      <button type="button" className={SEND_BTN} onClick={() => { stashAudience({ kind: 'pair', value: x.a, other: x.b, label: x.a, seen: n }); navigate('/dashboard?open=direct-send'); }}>
+        <Send className="w-3.5 h-3.5" />사고 안 산 고객 {num(n)}명에게 보내기
+      </button>
+    );
+  };
   const rows = showAll ? sorted : sorted.slice(0, FIRST_ROWS);
-  const empty = !data.hasSignals && data.terms.length === 0 && inapp.length === 0;
-  // 인앱 응답이 늦게 비어 오면 그 보기에 머물지 않는다
-  const shown: View = view === 'inapp' && inapp.length === 0 ? 'products' : view;
+  const empty = !data.hasSignals && data.terms.length === 0 && inapp.length === 0 && pairRows.length === 0;
+  // 인앱 · 같이 산 상품 응답이 비어 있으면 그 보기에 머물지 않는다
+  const shown: View = (view === 'inapp' && inapp.length === 0) || (view === 'pairs' && pairRows.length === 0) ? 'products' : view;
 
   return (
     <section className={frame} aria-labelledby="product-signal-title">
@@ -139,6 +159,7 @@ export default function ProductSignalSection() {
               { id: 'products', label: '상품', icon: ShoppingBag, count: data.products.length },
               { id: 'terms', label: '검색어', icon: Search, count: data.terms.length },
               ...(inapp.length > 0 ? [{ id: 'inapp' as const, label: '인앱 메시지', icon: MousePointerClick, count: inapp.length }] : []),
+              ...(pairRows.length > 0 ? [{ id: 'pairs' as const, label: '같이 산 상품', icon: Boxes, count: pairRows.length }] : []),
             ]}
           />
         )}
@@ -152,6 +173,43 @@ export default function ProductSignalSection() {
             자사몰 연결 보기
           </button>
         </div>
+      ) : shown === 'pairs' ? (
+        <>
+          <div className="mt-3 hidden md:block overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-slate-200 text-left text-[12px] text-slate-500">
+                  <th scope="col" className="py-2 pr-3 font-semibold">산 상품</th>
+                  <th scope="col" className="py-2 px-2 font-semibold text-right whitespace-nowrap">산 고객</th>
+                  <th scope="col" className="py-2 px-2 font-semibold">같이 산 상품</th>
+                  <th scope="col" className="py-2 px-2 font-semibold text-right whitespace-nowrap">둘 다 산 고객</th>
+                  <th scope="col" className="py-2 pl-3 font-semibold text-right">바로 보내기</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pairRows.map((x, i) => (
+                  <tr key={`${i}:${x.a}`} className="border-b border-slate-100 last:border-0">
+                    <td className="py-2.5 pr-3 max-w-[240px] font-semibold text-slate-900 break-keep">{x.a}</td>
+                    <td className="py-2.5 px-2 text-right tabular-nums">{num(x.aBuyers)}명</td>
+                    <td className="py-2.5 px-2 max-w-[240px] text-slate-900 break-keep">{x.b}</td>
+                    <td className="py-2.5 px-2 text-right tabular-nums font-semibold text-slate-900">{num(x.both)}명</td>
+                    <td className="py-2 pl-3 text-right">{pairBtn(x, i)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="mt-3 md:hidden space-y-2">
+            {pairRows.map((x, i) => (
+              <li key={`${i}:${x.a}`} className="rounded-xl border border-slate-200 p-3">
+                <div className="font-semibold text-[14px] text-slate-900 break-keep">{x.a}</div>
+                <div className="mt-1 text-[12px] text-slate-600 break-keep">산 고객 {num(x.aBuyers)}명 · 같이 산 상품 「{x.b}」 · 둘 다 산 고객 {num(x.both)}명</div>
+                {pairBtn(x, i) && <div className="mt-2">{pairBtn(x, i)}</div>}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[11px] text-slate-400 break-keep">최근 {pairs?.windowDays ?? 60}일 · 같은 고객이 함께 산 상품(자사몰과 매장) · 둘 다 산 고객이 3명 이상인 짝만 · 보내기 대상은 그 상품을 한 번도 사지 않은 고객</p>
+        </>
       ) : shown === 'inapp' ? (
         <>
           <div className="mt-3 hidden md:block overflow-x-auto">

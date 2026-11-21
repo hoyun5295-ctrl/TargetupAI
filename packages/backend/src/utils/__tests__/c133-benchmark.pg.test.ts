@@ -128,7 +128,11 @@ describe('읽기(실 PG)', () => {
     // 한 곳을 지우면 ME 에게 다른 회사 = 4 → 안 보인다(자기를 넣어 5로 세면 보이게 된다 = 변이)
     await query(`DELETE FROM benchmark_company_daily WHERE company_id = $1::uuid`, [PEERS[4]]);
     const v = await readBenchmark(ME);
-    expect(v.successRate).toEqual({ available: false, reason: 'few_peers' });
+    // ★ 2026-11-21 C152 G — 평균이 모자라도 내 값은 싣는다(다른 회사 값 = avg · diff 칸은 없다)
+    expect(v.successRate).toMatchObject({ available: false, reason: 'few_peers' });
+    expect(typeof (v.successRate as any).mine).toBe('number');
+    expect(v.successRate).not.toHaveProperty('avg');
+    expect(v.successRate).not.toHaveProperty('diff');
     expect(v.ready).toBe(true);
     await snapshotBenchmarks();
     expect((await readBenchmark(ME)).successRate.available).toBe(true);
@@ -142,17 +146,18 @@ describe('읽기(실 PG)', () => {
     expect(skt).toMatchObject({ carrier: 'SKT', available: true });
     expect(skt.mine).toBeCloseTo(0.25, 10);
     expect(skt.avg).toBeCloseTo(0.5, 10);
-    expect(v.spamBlock[1]).toEqual({ carrier: 'KT', available: false, reason: 'few_peers' });   // KT 는 다른 회사가 한 곳뿐
+    expect(v.spamBlock[1]).toMatchObject({ carrier: 'KT', available: false, reason: 'few_peers' });   // KT 는 다른 회사가 한 곳뿐
+    expect(Object.keys(v.spamBlock[1]).sort()).toEqual(['available', 'carrier', 'mine', 'reason']);   // ★ C152 G 내 값만(평균 · 차이 칸 없음)
   });
 
   it('합성 회사는 자기 값과 실제 회사 평균을 본다 · 업종 혼자 · 업종 없음 · 다른 업종', async () => {
     const syn = await readBenchmark(SYN);
     expect((syn.successRate as any).mine).toBeCloseTo(0.1, 10);
     expect(syn.successRate.available).toBe(true);                       // 다른 회사 = ME + PEERS 다섯 = 6
-    expect((await readBenchmark(LONELY)).successRate).toEqual({ available: false, reason: 'few_peers' });
+    expect((await readBenchmark(LONELY)).successRate).toMatchObject({ available: false, reason: 'few_peers' });
     const none = await readBenchmark(NO_IND);
     expect(none).toMatchObject({ hasIndustry: false, ready: false, successRate: { available: false, reason: 'no_own' }, spamBlock: [] });
-    expect((await readBenchmark(OTHER_IND)).successRate).toEqual({ available: false, reason: 'few_peers' });
+    expect((await readBenchmark(OTHER_IND)).successRate).toMatchObject({ available: false, reason: 'few_peers' });
   });
 
   it('오래된 스냅숏은 비교하지 않는다(워커가 멈춘 채 옛 평균을 보이지 않는다)', async () => {
@@ -173,8 +178,8 @@ describe('읽기(실 PG)', () => {
 describe('순수 판정', () => {
   it('benchCell: 내 값 없음 · 회사 수 부족 · 평균 없음 · 정상', () => {
     expect(benchCell(null, 9, 0.5)).toEqual({ available: false, reason: 'no_own' });
-    expect(benchCell(0.9, 4, 0.5)).toEqual({ available: false, reason: 'few_peers' });
-    expect(benchCell(0.9, 5, null)).toEqual({ available: false, reason: 'few_peers' });
+    expect(benchCell(0.9, 4, 0.5)).toEqual({ available: false, reason: 'few_peers', mine: 0.9 });   // ★ C152 G 내 값은 싣는다 · 평균(0.5)은 싣지 않는다
+    expect(benchCell(0.9, 5, null)).toEqual({ available: false, reason: 'few_peers', mine: 0.9 });
     expect(benchCell(0.9, 5, 0.5)).toEqual({ available: true, mine: 0.9, avg: 0.5, diff: 0.4 });
     expect(benchCell(0, 5, 0)).toEqual({ available: true, mine: 0, avg: 0, diff: 0 });   // 0 도 값이다
   });

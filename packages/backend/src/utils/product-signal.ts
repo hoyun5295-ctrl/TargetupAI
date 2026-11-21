@@ -226,6 +226,17 @@ export async function productInsightOpenFor(user: SignalViewer | null | undefine
   const companyId = user?.companyId;
   if (!companyId || !user?.userId || user.userType === 'super_admin') return false;
   if (!(await v3Live('product-insight', companyId))) return false;
+  return companyWideViewer(user);
+}
+
+/**
+ * ★ 2026-11-21 C152 — 이 요청자가 회사 전체 값(전체 캠페인 · 전체 고객 통계 · 상품 · 유입 경로)을 볼 수 있는가(「사용자는 자기 것」의 판정 조각 한 곳).
+ *   회사 사용자이고 분류코드로 나뉘지 않은 사람(막히지 않음 · 범위 조건 없음). 분류코드로 나뉜 담당자 · 미배정 담당자 · 슈퍼관리자 = false.
+ *   쓰는 곳 = 위 productInsightOpenFor · 수치 질문의 답(services/ask-answer runCompanyExplain) · 유입 경로.
+ */
+export async function companyWideViewer(user: SignalViewer | null | undefined): Promise<boolean> {
+  const companyId = user?.companyId;
+  if (!companyId || !user?.userId || user.userType === 'super_admin') return false;
   const scope = await resolveHubStoreScope(companyId, user.userId, user.userType);
   return !scope.blocked && scope.storeFilter === '';
 }

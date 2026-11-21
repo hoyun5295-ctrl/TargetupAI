@@ -26,6 +26,7 @@ import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import {
   readAskLine, readAskPlan, readAskPrice, countAskCells, countAskPlan, listAskAudience, askGroupMeta, askAudienceText, askComposeLicense,
 } from '../utils/ask-segments';
+import { answerAsk, ASK_QUESTION_MIN, ASK_QUESTION_MAX } from '../services/ask-answer';   // ★ C152 B 질문에 답하기
 
 const router = Router();
 router.use(authenticate);
@@ -349,6 +350,27 @@ router.post('/ask/compose', async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     return fail(res, err, 'ask-compose');
+  }
+});
+
+// POST /ask/answer — 질문에 답(★ 2026-11-21 C152 B · 설계서 docs/2026-11-21-c152-snap-gap-upgrade-design.md §2-B-3)
+//   답 글 + 근거 + 표(데이터 있는 것만) · 답 전체를 한 번만 걷는다(시도 표 + 질문) · 회사 전체 값 = 분류코드로 나뉜 담당자 403(판정 = services/ask-answer)
+router.post('/ask/answer', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+    if (question.length < ASK_QUESTION_MIN || question.length > ASK_QUESTION_MAX) {
+      return res.status(400).json({ success: false, error: `질문을 ${ASK_QUESTION_MIN}자 이상 ${ASK_QUESTION_MAX}자 안으로 적어 주세요.`, code: 'QUESTION_INVALID' });
+    }
+    if (!isValidAttemptToken(req.body?.attemptToken)) return res.status(400).json({ success: false, error: '요청 형식이 올바르지 않아요. 화면을 새로 고쳐 주세요.', code: 'ATTEMPT_INVALID' });
+    const out = await answerAsk({
+      user: { companyId: v.companyId, userId: v.userId || undefined, userType: v.userType || undefined },
+      question, attemptToken: req.body.attemptToken,
+    });
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    return fail(res, err, 'ask-answer');
   }
 });
 

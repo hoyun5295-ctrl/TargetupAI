@@ -13,6 +13,7 @@
  */
 
 import { query } from '../config/database';
+import { netPurchaseSql } from './cdp-order-revenue';   // ★ C152 답의 퍼널 구매 단계
 
 export interface CdpProviderStats {
   source: string;             // 'cafe24' / 'naver' / 'shopify' / 'custom_sdk' / 'cdp_self_hosted' 등
@@ -244,13 +245,18 @@ export interface CdpFunnelResult {
   source: string;
 }
 
-export async function buildCdpFunnel(companyId: string, days: number = 30): Promise<CdpFunnelResult> {
+/**
+ * ★ 2026-11-21 C152 B — 셋째 인자 netPurchase: 구매 단계를 「매출 반영된 결제 주문」(netPurchaseSql)만 센다
+ *   (수치 질문의 답에 붙는 퍼널 표 = 상품 표 · 유입 경로와 같은 구매 정의). 인자가 없으면 옛 값 그대로(있는 소비처 무변경).
+ */
+export async function buildCdpFunnel(companyId: string, days: number = 30, opts: { netPurchase?: boolean } = {}): Promise<CdpFunnelResult> {
+  const purchase = opts.netPurchase ? netPurchaseSql('cdp_events') : `event_name IN ('purchase', 'order')`;
   const result = await query(
     `SELECT
         COUNT(*) FILTER (WHERE event_name = 'page_view')::int AS pv,
         COUNT(*) FILTER (WHERE event_name = 'cart_add')::int AS cart,
         COUNT(*) FILTER (WHERE event_name = 'checkout_start')::int AS checkout,
-        COUNT(*) FILTER (WHERE event_name IN ('purchase', 'order'))::int AS purchase
+        COUNT(*) FILTER (WHERE ${purchase})::int AS purchase
        FROM cdp_events
       WHERE company_id = $1::uuid
         AND occurred_at > NOW() - ($2 || ' days')::interval`,

@@ -10,11 +10,13 @@ export type AskGroupKey = 'leave' | 'rest' | 'fade' | 'next' | 'loyal' | 'new' |
 export type AskOrder = 'recent' | 'count';
 export type AskBenefitMode = 'line' | 'custom' | 'none';
 
-export interface AskReadResult { groups: AskGroupKey[]; budget: number | null; hasBenefit: boolean }
+/** intent = 한 줄이 질문(ask)인가 보내기(send)인가(★ C152 B · 서버 askIntentOf) */
+export interface AskReadResult { groups: AskGroupKey[]; budget: number | null; hasBenefit: boolean; intent?: 'ask' | 'send' }
 export interface AskGroupMeta { key: AskGroupKey; name: string; desc: string; cells: string[] }
-export interface AskCell { key: string; row: number; col: number; group: AskGroupKey; total: number; sendable: number }
+/** spendSum · spendN = 그 칸의 보낼 수 있는 고객 중 누적 구매액이 있는 고객의 합 · 수(★ C152 C · 옛 서버 응답에는 없다) */
+export interface AskCell { key: string; row: number; col: number; group: AskGroupKey; total: number; sendable: number; spendSum?: number; spendN?: number }
 export interface AskPrice { lms: number; unset: boolean }
-export interface AskSegments { groups: AskGroupMeta[]; cells: AskCell[]; nobuy: { total: number; sendable: number }; unitPrice: AskPrice }
+export interface AskSegments { groups: AskGroupMeta[]; cells: AskCell[]; nobuy: { total: number; sendable: number; spendSum?: number; spendN?: number }; unitPrice: AskPrice }
 export interface AskPlan { groups: AskGroupKey[]; mode: 'all' | 'budget'; budget: number | null; order: AskOrder }
 export interface AskCount {
   inScope: number; sendable: number; planned: number; amount: number; capped: boolean;
@@ -96,3 +98,43 @@ export function askGroupSendable(seg: Pick<AskSegments, 'cells' | 'nobuy'>, g: A
 }
 
 export const fmtNum = (n: number): string => Math.max(0, Math.round(n)).toLocaleString('ko-KR');
+
+// ── ★ 2026-11-21 C152 C 묶음별 1인 평균 구매액(설계서 docs/2026-11-21-c152-snap-gap-upgrade-design.md §2-C · §3-C) ──
+
+/** 서버 ASK_SPEND_MIN_N 과 같은 값(구매액이 있는 고객이 이보다 적으면 평균을 보이지 않는다) */
+export const ASK_SPEND_MIN_N = 5;
+
+/** (순수) 그 묶음의 1인 평균 구매액(원) — 구매 기록 없음 줄 · 고객이 모자람 · 옛 응답 = null(줄 없음) */
+export function askGroupSpend(seg: Pick<AskSegments, 'cells'>, g: AskGroupKey): number | null {
+  if (g === 'nobuy') return null;
+  const mine = seg.cells.filter((c) => c.group === g);
+  const n = mine.reduce((a, c) => a + (c.spendN || 0), 0);
+  return n >= ASK_SPEND_MIN_N ? Math.round(mine.reduce((a, c) => a + (c.spendSum || 0), 0) / n) : null;
+}
+
+/** (순수) 「12만 3천 원」 꼴 — 만 원 이상 = 만 · 천 단위 · 그 아래 = 천 원 단위 · 천 원 아래 = 원 */
+export function askSpendText(won: number): string {
+  const v = Math.max(0, Math.round(won));
+  if (v < 1000) return `${v.toLocaleString('ko-KR')}원`;
+  const man = Math.floor(v / 10_000);
+  const chun = Math.floor((v % 10_000) / 1000);
+  if (man === 0) return `${chun}천 원`;
+  return `${man.toLocaleString('ko-KR')}만${chun > 0 ? ` ${chun}천` : ''} 원`;
+}
+
+// ── ★ 2026-11-21 C152 B 질문에 답하기(§2-B · §3-B) ──
+
+export interface AskTable {
+  key: 'groups' | 'channels' | 'products' | 'funnel';
+  title: string;
+  columns: string[];
+  rows: string[][];
+  /** 고객 묶음 표만 — 줄마다 묶음 키 */
+  groupKeys?: AskGroupKey[];
+}
+export interface AskAnswer { text: string; citations: Array<{ citedText: string; documentTitle: string }>; documentTitles: string[]; tables: AskTable[] }
+/** 서버 ASK_QUESTION_MAX 와 같은 값 */
+export const ASK_QUESTION_MAX = 500;
+
+/** (순수) 답 요청의 시도 열쇠 — 질문이 같으면 같은 열쇠(응답을 못 받은 같은 질문 = 같은 시도 표로 다시 · 질문이 바뀌면 새 표) */
+export const askAnswerAttemptKey = (question: string): string => question.trim();

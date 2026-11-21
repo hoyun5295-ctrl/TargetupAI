@@ -24,8 +24,9 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import EffectProofCard from '../components/performance/EffectProofCard';   // ★ 2026-11-06 C110
 import ProductSignalSection from '../components/performance/ProductSignalSection';   // ★ 2026-11-13 C133 F2
+import InflowChannelCard from '../components/performance/InflowChannelCard';   // ★ 2026-11-21 C152 E
 import ZoneStatStrip from '../components/zone/ZoneStatStrip';
-import { fetchBenchmark, successBenchLine, spamBenchCells, type BenchmarkView, type BenchLine } from '../utils/benchmark';   // ★ 2026-11-13 C133 F3
+import { fetchBenchmark, successBenchLine, spamBenchCells, spamBenchFootnote, type BenchmarkView, type BenchLine } from '../utils/benchmark';   // ★ 2026-11-13 C133 F3
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -839,12 +840,15 @@ export default function PerformancePage() {
               />
             </div>
 
-            {/* ★ 2026-11-13 C133 F3 통신사별 스팸 검사 차단율 — 업종 평균이 있는 통신사가 있을 때만 */}
+            {/* ★ 2026-11-06 C110 효과 증명(대조군 비교 · 늘어난 매출) · ★ 2026-11-21 C152 F — 숫자 카드 바로 아래 첫 줄로(옛: 자동마케팅 ROI 아래) */}
+            <EffectProofCard days={periodToDays(period)} />
+
+            {/* ★ 2026-11-13 C133 F3 통신사별 스팸 검사 차단율 · ★ 2026-11-21 C152 G — 내 값이 있는 통신사가 있으면(업종 평균이 없어도) */}
             {bench && spamBenchCells(bench).length > 0 && (
               <ZoneStatStrip
                 title={`통신사별 스팸 검사 차단율 · 최근 ${bench.windowDays}일`}
                 cells={spamBenchCells(bench)}
-                footnote={`우리 스팸 검사로 직접 잰 값 · 같은 업종 ${bench.minPeers}곳 이상 평균과 견줍니다 · 낮을수록 좋아요`}
+                footnote={spamBenchFootnote(bench)}
               />
             )}
 
@@ -893,11 +897,11 @@ export default function PerformancePage() {
               </div>
             )}
 
-            {/* ★ 2026-11-06 C110 효과 증명(대조군 비교 · 늘어난 매출) */}
-            <EffectProofCard days={periodToDays(period)} />
-
             {/* ★ 2026-11-13 C133 F2 상품 · 검색어 반응(최근 30일 고정 창 · 닫힌 회사에는 아무것도 그리지 않는다) */}
             <ProductSignalSection />
+
+            {/* ★ 2026-11-21 C152 E 유입 경로별 방문 · 구매 · 매출(줄이 없으면 아무것도 그리지 않는다) */}
+            <InflowChannelCard />
 
             {/* ════ AI 자율 진단(좌) + 요약 아이콘 카드(우) 동일 높이 2단 ════ */}
             <div className="flex flex-col lg:flex-row gap-3 lg:items-stretch">

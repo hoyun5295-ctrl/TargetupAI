@@ -28,7 +28,7 @@ import {
  *   앞서 적힌 이름으로 읽힌다(최근 행의 이름이 비어도 끊긴 상품이 아니다). seen = 최근 창의 조회 + 장바구니 + 구매(0 = 끊긴 상품).
  *   칸 = door · product_key · name · norm(정리된 이름) · orders · views · seen.
  */
-function namedProductsSql(win: string): string {
+export function namedProductsSql(win: string): string {   // ★ C152 D 같이 산 상품(product-pairs keymap)도 이 이름 해석을 쓴다
   const latestName = `(array_agg(s.product_name ORDER BY s.day DESC) FILTER (WHERE s.product_name IS NOT NULL))[1]`;
   const inWindow = `s.day > ${kstDayAgoSql(win)}`;
   return `SELECT s.door, s.product_key, ${latestName} AS name, ${normNameSql(latestName)} AS norm,

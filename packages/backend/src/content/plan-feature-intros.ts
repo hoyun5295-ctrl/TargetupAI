@@ -92,6 +92,20 @@ export const PLAN_FEATURE_INTROS: PlanFeatureIntro[] = [
       { title: '광고 규정 자동', text: '광고 문자는 (광고) 표기와 무료수신거부 번호를 붙이고, 밤 9시부터 다음 날 오전 8시까지는 보내지 않습니다. 할인 같은 광고는 알림톡 대신 문자로 만들도록 안내합니다.' },
     ],
   },
+  // ★ 2026-11-21 C151 한 줄로 묻기 — 대시보드 「한 줄로 묻기」 카드의 소개 창(미가입 회사 · Harold 「미가입도 보이게 하고 클릭하면 메뉴 설명」)
+  //   문장 근거 = utils/ask-segments.ts(묶음 · 예산 · 순서 · 질문 판정) · services/ask-answer.ts(답 · 표) · pages/AiAskPage.tsx(시작 줄 셋 · 도착 확인 · 가져가기) · 허브 카드가 아니라 path 없음
+  {
+    id: 'ask-entry', title: '한 줄로 묻기', icon: 'Users', gradient: 'from-sky-400 to-indigo-500',
+    summary: '보낼 내용을 한 줄로 적으면 보낼 고객 묶음과 인원을 먼저 보여 드려요. 묶음과 예산을 고르면 LMS 문안을 만들어 직접발송 창에 받는 사람과 함께 채워 드립니다. 질문을 적으면 우리 회사 숫자를 근거로 답해 드려요.',
+    steps: [
+      { icon: 'Target', title: '한 줄 적기', text: '"떠나는 단골에게 다시 오시라는 쿠폰"처럼 적거나 시작 줄 셋 중 하나를 누릅니다. 한 줄에 맞는 고객 묶음이 먼저 골라져 있고, 바꿀 수 있습니다. "요즘 어떤 고객이 많아?"처럼 물으면 답 글과 고객 묶음 표를 보여 주고, 표에서 바로 보내기로 넘어갑니다.' },
+      { icon: 'Users', title: '고객 묶음 고르기', text: '마지막 구매일과 구매 횟수로 나눈 여섯 묶음과 구매 기록 없는 고객 가운데서 고릅니다. 묶음마다 문자를 받을 수 있는 인원이 보입니다.' },
+      { icon: 'ListChecks', title: '모두 또는 예산', text: '고른 묶음 모두에게 보내거나, 금액을 적고 최근에 산 분부터 또는 많이 산 분부터 예산 안에서 고릅니다.' },
+      { icon: 'Send', title: '문안 보고 가져가기', text: 'LMS 문안 한 안을 만들고, 요금제에 도착 확인이 있으면 세 통신사 결과가 붙습니다. 직접발송 창으로 가져가 받는 사람과 문안을 확인한 뒤 보냅니다.' },
+    ],
+    costs: [{ label: '문안 1안', source: 'ai-line-compose' }, { label: '질문에 답 받기', source: 'ai-operator-explain' }],
+    costNote: '도착 확인은 크레딧이 아니라 검사 문자 요금으로 빠집니다.',
+  },
   {
     id: 'ai-operator', title: '한 줄로 캠페인 맡기기', icon: 'Sparkles', gradient: 'from-amber-400 to-fuchsia-500',
     summary: '목표를 한 줄 적으면 대상·문안·발송 시점을 AI가 정해 제안합니다.',

@@ -217,7 +217,7 @@ describe('K6 대시보드 넘기기', () => {
     expect(body).toMatch(/if \(asked\.kind === 'ask'\) \{\s*setDirectMessage\(asked\.ask\.message\.body\);\s*setDirectSubject\(asked\.ask\.message\.subject\);\s*setDirectMsgType\(asked\.ask\.message\.msgType\);\s*setAdTextEnabled\(true\);\s*\}/);
     expect((body.match(/setDirectMessage\(/g) || []).length).toBe(1);
     expect(body).toMatch(/setDirectRecipients\(appendUpdater<any>\(rows, true, \(r\) => r\.phone, \(\) => undefined\)\)/);
-    expect(body).toMatch(/asked\.kind === 'ask' \? await fetchAskAudience\(asked\.ask\.plan\) : await fetchAudience\(asked\.kind, asked\.value\)/);
+    expect(body).toMatch(/asked\.kind === 'ask' \? await fetchAskAudience\(asked\.ask\.plan\) : await fetchAudience\(asked\.kind, asked\.value, asked\.kind === 'pair' \? asked\.other : undefined\)/);
   });
   it('받은 뒤 채우기 전에 지금 계정을 다시 본다(저장소의 지금 값)', () => {
     expect(body).toMatch(/useAuthStore\.getState\(\)\.user[\s\S]*askOwnerMatches\(asked\.ask, \{ userId: nowUser\?\.id, companyId: nowUser\?\.company\?\.id \}\)\) return;[\s\S]*setDirectRecipients/);
@@ -286,5 +286,29 @@ describe('K7 넘기기 값 · 문안 결속(화면 순수 함수)', () => {
     expect(askParts({ cells }, 'count')).toEqual([{ label: '4번 이상 산 분', n: 9, taken: 6 }, { label: '구매 기록 없는 분', n: 2, taken: 0 }]);
     expect(askBudgetOf('5,0000원')).toBe(50_000);
     expect([askBudgetValid(999), askBudgetValid(1000), askBudgetValid(100_000_001)]).toEqual([false, true, false]);
+  });
+});
+
+// ★ 2026-11-21 C151 2차 — 대시보드 상단 「한 줄로 묻기」 카드(Harold 「별도메뉴」 → 「미가입도 보이게 하고 클릭하면 메뉴 설명」)
+describe('K8 대시보드 카드 · 소개 창', () => {
+  const dash = read(join(FE, 'pages', 'Dashboard.tsx'));
+  it('AI 카드 줄 = AI 한줄로 · 한 줄로 묻기 · AI 오퍼레이터 · 고객 DB 업로드 차례 · 요금제와 상관없이 보이고 잠김은 구독만', () => {
+    const list = dash.slice(dash.indexOf('const dashboardActions: DashboardAction[] = hideAi'), dash.indexOf('// 모달용 데이터'));
+    const keys = [...list.split(': [')[2].matchAll(/\{ key: '([a-z]+)'/g)].map((m) => m[1]);
+    expect(keys).toEqual(['line', 'ask', 'operator', 'upload']);
+    expect(list).toContain("{ key: 'ask', label: '한 줄로 묻기', desc: '고객 골라 보내기', icon: Users, tone: 'sky', locked: isSubscriptionLocked, onClick: () => { void openAiLine('/ai-ask', 'ask-entry'); } },");
+  });
+  it('누르면 AI 한줄로와 같은 판정 · 못 쓰면 그 기능 소개 창 · 기본값 = 옛 동작 그대로', () => {
+    const body = fnBody(join(FE, 'pages', 'Dashboard.tsx'), 'openAiLine');
+    expect(dash).toContain("const openAiLine = async (path: '/ai-line' | '/ai-ask' = '/ai-line', featureId = 'ai-line') => {");
+    expect(body).toMatch(/if \(isSubscriptionLocked\) \{ setShowSubscriptionLock\(true\); return; \}\s*if \(\(await fetchAiOperatorAccess\(\)\) === false\) \{ openPlanFeature\(featureId\); return; \}\s*navigate\(path\);/);
+  });
+  it('소개 창 원장 ask-entry = 문안 크레딧은 한 줄로 묻기 문안과 같은 출처 · 허브 카드가 아니라 path 없음', async () => {
+    const { PLAN_FEATURE_INTROS } = await import('../../content/plan-feature-intros');
+    const f = PLAN_FEATURE_INTROS.find((x) => x.id === 'ask-entry');
+    expect(f?.title).toBe('한 줄로 묻기');
+    expect(f?.costs).toEqual([{ label: '문안 1안', source: 'ai-line-compose' }, { label: '질문에 답 받기', source: 'ai-operator-explain' }]);   // ★ C152 B 답 받기 줄
+    expect(f?.path).toBeUndefined();
+    expect(f?.video).toBeUndefined();
   });
 });

@@ -76,7 +76,9 @@ export async function snapshotBenchmarks(): Promise<number> {
 
 export type BenchCell =
   | { available: true; mine: number; avg: number; diff: number }
-  | { available: false; reason: 'few_peers' | 'no_own' };
+  // ★ 2026-11-21 C152 G — 평균이 모자라도 내 값은 싣는다(통신사 띠가 우리 값만이라도 보인다 · 다른 회사 값은 여전히 5곳 이상일 때만)
+  | { available: false; reason: 'few_peers'; mine: number }
+  | { available: false; reason: 'no_own' };
 
 export interface BenchmarkView {
   /** 이 회사의 업종이 정해져 있는가(없으면 화면이 「업종을 고르면 견줘 드려요」) */
@@ -104,10 +106,10 @@ export const BENCH_READ_SQL = `
          AND o.company_id <> $1::uuid AND NOT (o.company_id = ANY($2::uuid[]))
     ) p ON TRUE`;
 
-/** (순수) 내 값 · 다른 회사 수 · 평균 → 화면 칸. 회사 수가 모자라면 평균을 싣지 않는다 */
+/** (순수) 내 값 · 다른 회사 수 · 평균 → 화면 칸. 회사 수가 모자라면 평균을 싣지 않는다(내 값은 싣는다) */
 export function benchCell(mine: number | null | undefined, k: number, avg: number | null | undefined): BenchCell {
   if (mine === null || mine === undefined || !Number.isFinite(Number(mine))) return { available: false, reason: 'no_own' };
-  if (k < BENCH_MIN_PEERS || avg === null || avg === undefined || !Number.isFinite(Number(avg))) return { available: false, reason: 'few_peers' };
+  if (k < BENCH_MIN_PEERS || avg === null || avg === undefined || !Number.isFinite(Number(avg))) return { available: false, reason: 'few_peers', mine: Number(mine) };
   return { available: true, mine: Number(mine), avg: Number(avg), diff: Number(mine) - Number(avg) };
 }
 

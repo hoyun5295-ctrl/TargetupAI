@@ -212,7 +212,9 @@ describe('Codex 차수3 D 1R — 성공 뒤 차감 확정 · 순매출 · KST �
     expect(c).toContain('if (opts.throwOnInsufficient) throw err;');
     expect(src('cdp-fusion-explainer.ts')).toContain('await settleCreditAfterSuccess({ companyId, cost: explainCost, source: \'cdp-fusion-explainer\', idempotencyKey: `cdp-explain:${randomUUID()}` });');
     expect(src('inapp-ai-generator.ts')).toContain('await settleCreditAfterSuccess({ companyId: input.companyId, cost: inappCost, source: \'inapp-ai-generator\', idempotencyKey: `inapp-ai:${randomUUID()}` });');
-    expect(src('..', 'routes', 'ai.ts')).toContain('await settleCreditAfterSuccess({ companyId, cost: explainCost, source: \'ai-operator-explain\', idempotencyKey: `ai-explain:${randomUUID()}` });');
+    // ★ 2026-11-21 C152 — 근거 질의의 차감 확정은 services/ask-answer runCompanyExplain(라우트가 `ai-explain:<무작위>` 키를 넘긴다)
+    expect(src('..', 'services', 'ask-answer.ts')).toContain('if (!i.alreadyPaid) await settleCreditAfterSuccess({ companyId, cost, source: EXPLAIN_CREDIT_SOURCE, idempotencyKey: i.idempotencyKey });');
+    expect(src('..', 'routes', 'ai.ts')).toContain('await runCompanyExplain({ user: req.user as any, question, idempotencyKey: `ai-explain:${randomUUID()}` })');
     const cdp = src('..', 'routes', 'cdp.ts');
     expect(between(cdp, "router.post('/inapp/ai-generate'", '\nrouter.')).toContain('if (err instanceof InsufficientCreditError) return res.status(402)');
   });

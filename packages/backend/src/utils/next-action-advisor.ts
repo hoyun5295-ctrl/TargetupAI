@@ -123,16 +123,11 @@ export async function buildFunnelStats(companyId: string, days = 30): Promise<Fu
 // Performance Snapshot 생성
 // ════════════════════════════════════════════════════════════════════
 
-export async function buildPerformanceSnapshot(companyId: string): Promise<PerformanceSnapshot> {
-  // 1. 캠페인 성과 집계 (기존 stats-aggregation 활용)
-  const performance = await aggregateCampaignPerformance(companyId);
-
-  // 2. 채널별 성과
-  // ★ 2026-07-31 정정. 전에는 `message_type AS channel`로 묶었는데, 이 시스템은 카카오를
-  //   message_type이 아니라 send_channel로 구분한다 — 알림톡·브랜드메시지가 전부 'LMS'로 저장되므로
-  //   그 묶음은 **채널이 아니라 문자 규격**이었고, 세 채널이 LMS 한 줄로 합쳐져 AI에게 들어갔다.
-  //   두 컬럼으로 묶은 뒤 채널 라벨 CT로 합산한다(kakao·kakao_brand가 같은 라벨로 수렴).
-  const byChannelResult = await query(
+/**
+ * ★ 2026-11-21 C152 B — 최근 30일 채널별 발송 · 성공률(성과 스냅숏과 수치 질문의 답 표가 같이 쓰는 한 조회 · 옛: 스냅숏 함수 안에 있던 문장 그대로).
+ */
+export async function channelStats30d(companyId: string): Promise<PerformanceSnapshot['byChannel']> {
+  const r = await query(
     `SELECT
         send_channel,
         message_type,
@@ -145,6 +140,19 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
      GROUP BY send_channel, message_type`,
     [companyId]
   );
+  return mergeByChannelLabel(r.rows);
+}
+
+export async function buildPerformanceSnapshot(companyId: string): Promise<PerformanceSnapshot> {
+  // 1. 캠페인 성과 집계 (기존 stats-aggregation 활용)
+  const performance = await aggregateCampaignPerformance(companyId);
+
+  // 2. 채널별 성과
+  // ★ 2026-07-31 정정. 전에는 `message_type AS channel`로 묶었는데, 이 시스템은 카카오를
+  //   message_type이 아니라 send_channel로 구분한다 — 알림톡·브랜드메시지가 전부 'LMS'로 저장되므로
+  //   그 묶음은 **채널이 아니라 문자 규격**이었고, 세 채널이 LMS 한 줄로 합쳐져 AI에게 들어갔다.
+  //   두 컬럼으로 묶은 뒤 채널 라벨 CT로 합산한다(kakao·kakao_brand가 같은 라벨로 수렴).
+  const byChannel = await channelStats30d(companyId);
 
   // 3. 시간대별 성과
   // D183 fix: 성공률 영역 = success / sent (대기 영역 포함 분모) — 사용자 관점 정합
@@ -197,7 +205,7 @@ export async function buildPerformanceSnapshot(companyId: string): Promise<Perfo
     totalSent,
     totalSuccess,
     successRate: totalSent > 0 ? totalSuccess / totalSent : 0,
-    byChannel: mergeByChannelLabel(byChannelResult.rows),
+    byChannel,
     byHour: byHourResult.rows.map((r: any) => ({
       hour: r.hour,
       sent: parseInt(r.sent || '0'),

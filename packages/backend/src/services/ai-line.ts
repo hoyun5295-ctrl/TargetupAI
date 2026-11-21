@@ -209,6 +209,29 @@ function recallPaid<T>(key: string): T | null {
   return hit.value as T;
 }
 
+/**
+ * ★ 2026-11-21 C152 B — 「낸 결과는 한 번만 걷는다」 한 벌(위 네 조각을 묶은 길 · 수치 질문의 답 services/ask-answer 가 쓴다).
+ *   같은 키의 요청을 한 줄로 세운다 → 원장에 그 키가 있으면 이미 낸 것(alreadyPaid) · 기억한 결과가 있으면 그대로 돌려준다
+ *   → 없으면 work(alreadyPaid) 를 돌리고(이미 냈으면 잔액 확인 · 차감을 work 가 건너뛴다) 결과를 기억한다.
+ *   키 = 회사 · 시도 표 · 입력 지문(입력이 바뀌면 새 키). 기억 · 잠금의 한계(프로세스 메모리 · PM2 instances 1) = 위 조각 주석 그대로.
+ */
+export async function paidOnce<T>(companyId: string, key: string, work: (alreadyPaid: boolean) => Promise<T>): Promise<T> {
+  return withKeyLock(key, async () => {
+    const alreadyPaid = (await paidAmountOf(companyId, key)) !== null;
+    if (alreadyPaid) {
+      const remembered = recallPaid<T>(key);
+      if (remembered) return remembered;
+    }
+    const out = await work(alreadyPaid);
+    rememberPaid(key, out);
+    return out;
+  });
+}
+/** 시험 전용 — 기억을 비운다(재시작 흉내) */
+export function forgetPaidResultsForTest(): void {
+  paidResults.clear();
+}
+
 async function assertCreditFor(companyId: string, cost: number, source: string): Promise<void> {
   if (cost <= 0) return;
   if (!(await hasCreditForStrict(companyId, cost, source))) throw new InsufficientCreditError(cost, 0);

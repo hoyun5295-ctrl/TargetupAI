@@ -9,7 +9,8 @@ import { fetchJson } from './dashboard-live';
 
 export type BenchCell =
   | { available: true; mine: number; avg: number; diff: number }
-  | { available: false; reason: 'few_peers' | 'no_own' };
+  | { available: false; reason: 'few_peers'; mine?: number }
+  | { available: false; reason: 'no_own' };
 
 export interface BenchmarkView {
   hasIndustry: boolean;
@@ -60,18 +61,28 @@ const CARRIER_LABEL: Record<string, string> = { SKT: 'SKT', KT: 'KT', LGU: 'LG U
 
 export interface SpamBenchCell { label: string; value: string; tone?: 'emerald' | 'rose' }
 
-/** (순수) 통신사별 스팸 검사 차단율 띠의 칸 — 평균이 있는 통신사만. 낮을수록 좋다 */
+/**
+ * (순수) 통신사별 스팸 검사 차단율 띠의 칸 — 내 값이 있는 통신사. 낮을수록 좋다.
+ *   ★ 2026-11-21 C152 G — 업종 평균이 모자라도 내 값은 보인다(평균 있음 = 「내 값 · 업종 평균」 + 색 · 평균 없음 = 내 값만 · 색 없음).
+ */
 export function spamBenchCells(b: BenchmarkView | null): SpamBenchCell[] {
   if (!b) return [];
   const out: SpamBenchCell[] = [];
   for (const c of b.spamBlock) {
-    if (!c.available) continue;
-    const same = Math.abs(c.diff * 100) < 0.05;
-    out.push({
-      label: `${CARRIER_LABEL[c.carrier] || c.carrier} 차단율`,
-      value: `${pct(c.mine)} · 업종 평균 ${pct(c.avg)}`,
-      ...(same ? {} : { tone: c.diff < 0 ? 'emerald' as const : 'rose' as const }),
-    });
+    const label = `${CARRIER_LABEL[c.carrier] || c.carrier} 차단율`;
+    if (c.available) {
+      const same = Math.abs(c.diff * 100) < 0.05;
+      out.push({ label, value: `${pct(c.mine)} · 업종 평균 ${pct(c.avg)}`, ...(same ? {} : { tone: c.diff < 0 ? 'emerald' as const : 'rose' as const }) });
+    } else if (c.reason === 'few_peers' && typeof c.mine === 'number' && Number.isFinite(c.mine)) {
+      out.push({ label, value: pct(c.mine) });
+    }
   }
   return out;
+}
+
+/** (순수) 띠 발치 — 평균이 하나라도 있으면 견준다는 문장 · 하나도 없으면 우리 값이라는 것만 */
+export function spamBenchFootnote(b: BenchmarkView): string {
+  return b.spamBlock.some((c) => c.available)
+    ? `우리 스팸 검사로 직접 잰 값 · 같은 업종 ${b.minPeers}곳 이상 평균과 견줍니다 · 낮을수록 좋아요`
+    : '우리 스팸 검사로 직접 잰 값 · 낮을수록 좋아요';
 }

@@ -795,7 +795,8 @@ const R13_AI_NOT_COPY: Record<string, string> = {
   'routes/ai-usage.ts#POST /search-natural': '사용량 검색 답(관리 화면)',
   'routes/ai.ts#POST /operator/marketing-calendar/generate': '연간 기획 달력(회사 화면 · 캠페인 문안은 생성기가 따로 만든다)',
   'routes/ai.ts#POST /operator/marketing-calendar/regenerate-month': '연간 기획 달력 한 달 다시 만들기(회사 화면)',
-  'routes/ai.ts#POST /operator/explain': '판단 설명(화면)',
+  // ★ 2026-11-21 C152 — 옛 routes/ai.ts POST /operator/explain 의 몸통을 옮긴 자리(한 줄로 묻기의 답 주소도 이 함수를 부른다)
+  'services/ask-answer.ts#runCompanyExplain': '수치 질문의 답(담당자가 화면에서 읽는 설명 · 고객에게 나가는 글이 아니다)',
   'routes/analysis.ts#POST /run': '분석 인사이트(화면 설명)',
   'routes/upload.ts#POST /mapping': '업로드 컬럼 매핑',
   'utils/ai-column-mapper.ts#suggestVarColumnsWithAi': '변수 컬럼 매핑',

@@ -112,7 +112,9 @@ import { listBatchJobs, pollBatch } from '../utils/batch-ai';
 // ★ D190 #3 (2026-05-22): 알림톡 자동 템플릿 매칭 + 변수 자동 매핑 (Opus 4.7)
 import { matchAlimtalkTemplate } from '../utils/alimtalk-ai-matcher';
 // ★ D181 (2026-05-19): Anthropic Citations (AI 응답 근거 박음 — 사용자 신뢰)
-import { buildCompanyDocuments, callAIWithCitations } from '../utils/citations';
+import { runCompanyExplain } from '../services/ask-answer';   // ★ C152 수치 질문의 몸통 한 곳
+import { listInflowChannels, INFLOW_WINDOW_DAYS, INFLOW_LOOKBACK_DAYS } from '../utils/inflow-channel';   // ★ C152 E 유입 경로
+import { companyWideViewer } from '../utils/product-signal';
 // ★ D187 (2026-05-20): Journey Builder Lite — 7 표준 여정 + 자연어 진입 (Opus 4.7)
 import { createJourneyFromTemplate, pauseJourney, endJourney, archiveJourney, unarchiveJourney, deleteJourney, listJourneys, getJourneyDetail, updateJourneyStep, addJourneyStep, deleteJourneyStep, fillJourneyCopyFacts, JourneyInputError, validateJourneyEntryConfig, JOURNEY_TEMPLATES, JourneyTemplateCode, JourneyStatus } from '../utils/journey-builder';
 import { AlimtalkFallbackError } from '../utils/alimtalk-fallback';
@@ -1806,6 +1808,25 @@ router.get('/operator/performance/effect-proof', async (req: Request, res: Respo
   }
 });
 
+// ★ 2026-11-21 C152 E — GET /operator/performance/inflow-channels · 유입 경로별 방문 · 구매 · 매출(설계서 docs/2026-11-21-c152-snap-gap-upgrade-design.md §2-E)
+//   관문 = 효과 증명 주소와 같다(AI 존 요금제) · 회사 전체 값 = 분류코드로 나뉜 담당자에게는 빈 줄(화면은 카드를 그리지 않는다)
+router.get('/operator/performance/inflow-channels', async (req: Request, res: Response) => {
+  try {
+    const companyId = req.user?.companyId;
+    if (!companyId) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+    const planCtx = await loadPlanContext(companyId);
+    if (!planCtx) return res.status(404).json({ success: false, error: '회사 정보를 찾을 수 없습니다.' });
+    if (await aiZonePlanBlocked(req, res, planCtx)) return;
+    const rows = (await companyWideViewer(req.user as any)) ? await listInflowChannels(companyId) : [];
+    res.setHeader('Cache-Control', 'private, no-store');
+    return res.json({ success: true, windowDays: INFLOW_WINDOW_DAYS, lookbackDays: INFLOW_LOOKBACK_DAYS, rows });
+  } catch (err: any) {
+    console.error('[Performance] inflow-channels 오류:', err?.message || err);
+    if (respondUserError(res, err)) return;
+    return res.status(500).json({ success: false, error: '유입 경로를 불러오지 못했어요.' });
+  }
+});
+
 // 8) GET /operator/performance/data-availability
 router.get('/operator/performance/data-availability', async (req: Request, res: Response) => {
   try {
@@ -2960,38 +2981,10 @@ router.post('/operator/explain', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: '질문을 입력해주세요 (5자 이상).' });
     }
 
-    const documents = await buildCompanyDocuments(companyId);
-    if (documents.length === 0) {
-      return res.status(400).json({ success: false, error: '회사 데이터가 부족하여 근거를 제시할 수 없습니다. 일부 캠페인을 진행한 후 다시 시도해주세요.' });
-    }
-
-    const systemPrompt = `당신은 한줄로AI Operator의 분석 에이전트입니다.
-제공된 document에 명시된 사실만 응답 + 출처 근거 명시 (citations 활용).
-추측/창작 X. document에 없는 내용은 "정보가 없습니다"로 응답.
-한국어 존댓말 (~입니다 / ~합니다).`;
-
-    // ★ 2026-09-27 한줄로 V2 R082 — 이 호출은 AI 관문(services/ai)을 거치지 않아 크레딧이 없었다.
-    //   잔액을 먼저 보고 호출 · 성공 뒤 1회 차감(단가표 5 = R1-20 선례).
-    const explainCost = getCreditCost('ai-operator-explain');
-    await checkCredit(companyId, explainCost);
-    const answer = await callAIWithCitations({
-      model: 'opus',
-      system: systemPrompt,
-      userMessage: question.trim(),
-      documents,
-      maxTokens: 1500,
-    });
-    // ★ 2026-09-27 한줄로 V2 R082(Codex 차수3 1R) — 월 호출 기록(사용량 화면 통계 · ai_call_log)
-    await recordAiCall({ companyId, source: 'ai-operator-explain', modelType: 'opus', success: true });
-    // 차감 확정 — 동시 요청에 잔액이 먼저 쓰였으면 결과를 내주지 않는다(402 · Codex 차수3 D 1R)
-    await settleCreditAfterSuccess({ companyId, cost: explainCost, source: 'ai-operator-explain', idempotencyKey: `ai-explain:${randomUUID()}` });
-
-    return res.json({
-      success: true,
-      text: answer.text,
-      citations: answer.citations,
-      document_titles: documents.map((d) => d.title),
-    });
+    // ★ 2026-11-21 C152 B — 몸통(근거 문서 → 잔액 확인 → AI → 호출 기록 → 차감 확정)은 services/ask-answer runCompanyExplain 한 곳
+    //   (한 줄로 묻기의 답 주소와 같이 쓴다 · 회사 전체 값 판정 = 그 함수 첫 줄 · 분류코드로 나뉜 담당자 = 403).
+    const out = await runCompanyExplain({ user: req.user as any, question, idempotencyKey: `ai-explain:${randomUUID()}` });
+    return res.json({ success: true, text: out.text, citations: out.citations, document_titles: out.document_titles });
   } catch (err: any) {
     if (err instanceof InsufficientCreditError) return res.status(402).json({ success: false, code: 'INSUFFICIENT_CREDIT', error: 'AI 크레딧이 부족합니다. 크레딧을 충전해 주세요.' });
     if (respondUserError(res, err)) return;

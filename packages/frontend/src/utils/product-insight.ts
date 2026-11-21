@@ -20,6 +20,9 @@ export interface ProductSignal {
 export interface SearchTerm { term: string; searches: number; customers: number }
 export interface ProductInsight { windowDays: number; hasSignals: boolean; products: ProductSignal[]; terms: SearchTerm[] }
 export interface AudienceCounts { products: Record<string, number>; terms: Record<string, number> }
+/** ★ 2026-11-21 C152 D 같이 산 상품 — a 를 산 사람이 같이 산 b(보이는 이름 · 산 사람 수 · 겹친 사람 수) */
+export interface BoughtTogether { a: string; aBuyers: number; b: string; both: number }
+export interface BoughtTogetherView { windowDays: number; pairs: BoughtTogether[] }
 
 /** 이 사람에게 구역이 열렸는가(닫힘 · 실패 = false) */
 export async function fetchProductInsightLive(): Promise<boolean> {
@@ -33,6 +36,25 @@ export async function fetchProductInsight(): Promise<ProductInsight | null> {
   if (!p.ok || !p.body?.success || !Array.isArray(p.body.products)) return null;
   if (!t.ok || !t.body?.success || !Array.isArray(t.body.terms)) return null;
   return { windowDays: Number(p.body.windowDays) || 30, hasSignals: p.body.hasSignals === true, products: p.body.products, terms: t.body.terms };
+}
+
+/** 같이 산 상품 줄 — 못 읽으면 null(그 보기를 그리지 않는다) */
+export async function fetchBoughtTogether(): Promise<BoughtTogetherView | null> {
+  const r = await fetchJson('/api/product-insight/pairs', 30_000);
+  if (!r.ok || !r.body?.success || !Array.isArray(r.body.pairs)) return null;
+  return {
+    windowDays: Number(r.body.windowDays) || 60,
+    pairs: r.body.pairs.filter((p: any) => p && typeof p.a === 'string' && typeof p.b === 'string')
+      .map((p: any) => ({ a: p.a, aBuyers: Number(p.aBuyers) || 0, b: p.b, both: Number(p.both) || 0 })),
+  };
+}
+
+/** 짝마다 「a 사고 b 안 산」 고객 수(입력 차례 그대로) — 못 읽으면 null(단추를 그리지 않는다) */
+export async function fetchPairCounts(pairs: Array<{ a: string; b: string }>): Promise<number[] | null> {
+  if (pairs.length === 0) return [];
+  const r = await sendJson('/api/product-insight/audience-counts', { method: 'POST', body: { keys: [], terms: [], pairs } }, 30_000);
+  if (!r.ok || !r.body?.success || !Array.isArray(r.body.pairs)) return null;
+  return pairs.map((_, i) => Number(r.body.pairs[i]) || 0);
 }
 
 export interface InappTopMessage { messageId: string; title: string; template: string; impressions: number; clicks: number; ctr: number }
@@ -62,8 +84,8 @@ export async function fetchAudienceCounts(keys: string[], terms: string[]): Prom
 export interface AudienceList { recipients: Array<{ phone: string; name: string }>; total: number; truncated: boolean }
 
 /** 직접발송 창에 채울 명단(서버가 지금 다시 센다) */
-export async function fetchAudience(kind: 'product' | 'search', value: string): Promise<AudienceList | null> {
-  const r = await sendJson('/api/product-insight/audience', { method: 'POST', body: { kind, value } }, 30_000);
+export async function fetchAudience(kind: 'product' | 'search' | 'pair', value: string, other?: string): Promise<AudienceList | null> {
+  const r = await sendJson('/api/product-insight/audience', { method: 'POST', body: kind === 'pair' ? { kind, value, other } : { kind, value } }, 30_000);
   if (!r.ok || !r.body?.success || !Array.isArray(r.body.recipients)) return null;
   return { recipients: r.body.recipients, total: Number(r.body.total) || 0, truncated: r.body.truncated === true };
 }
@@ -82,6 +104,8 @@ export const ASK_HANDOFF_MAX_AGE_MS = 10 * 60 * 1000;
 export interface AskHandoff { plan: AskPlan; message: { body: string; subject: string; msgType: 'LMS' }; owner: { companyId: string; userId: string }; at: number }
 export type PendingAudience =
   | { kind: 'product' | 'search'; value: string; label: string; seen: number }
+  // ★ C152 D — value = 산 상품 · other = 안 산 상품(보이는 이름)
+  | { kind: 'pair'; value: string; other: string; label: string; seen: number }
   | { kind: 'ask'; label: string; seen: number; ask: AskHandoff };
 export interface AudienceViewer { userId?: string | null; companyId?: string | null }
 
@@ -108,7 +132,9 @@ export function audienceLoadedText(a: PendingAudience, now: AudienceList): strin
     const drift = a.seen !== now.recipients.length ? ` (고를 때 ${a.seen.toLocaleString()}명 → 지금 ${shown}명)` : '';
     return `고른 고객 ${shown}명과 문안을 불러왔어요${drift}${cut}`;
   }
-  const what = a.kind === 'product' ? `「${a.label}」을 보고 안 산 고객` : `「${a.label}」을 찾은 고객`;
+  const what = a.kind === 'product' ? `「${a.label}」을 보고 안 산 고객`
+    : a.kind === 'pair' ? `「${a.value}」을 사고 「${a.other}」은 안 산 고객`
+      : `「${a.label}」을 찾은 고객`;
   const drift = a.seen !== now.total ? ` (분석 화면 ${a.seen.toLocaleString()}명 → 지금 ${now.total.toLocaleString()}명)` : '';
   return `${what} ${shown}명을 불러왔어요${drift}${cut}`;
 }

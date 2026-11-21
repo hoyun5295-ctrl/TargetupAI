@@ -168,29 +168,43 @@ export function askPlan(sendable: number, price: AskPrice, plan: AskPlanInput): 
 
 // ── 세기 · 명단 ──
 
-export interface AskCell { key: string; row: number; col: number; group: AskGroupKey; total: number; sendable: number }
+/** spendSum · spendN = 그 칸의 보낼 수 있는 고객 가운데 누적 구매액이 있는(0보다 큰) 고객의 합 · 수(★ C152 C · 화면이 묶음으로 합쳐 「1인 평균 구매」) */
+export interface AskCellNumbers { total: number; sendable: number; spendSum: number; spendN: number }
+export interface AskCell extends AskCellNumbers { key: string; row: number; col: number; group: AskGroupKey }
+const NO_NUMBERS: AskCellNumbers = { total: 0, sendable: 0, spendSum: 0, spendN: 0 };
+/** 평균 구매액을 보이는 최소 고객 수(그보다 적으면 한두 사람의 구매액이 드러난다) */
+export const ASK_SPEND_MIN_N = 5;
+/** (순수) 칸들의 1인 평균 구매액(원 · 반올림) — 구매액이 있는 고객이 ASK_SPEND_MIN_N 명 미만이면 null */
+export function askSpendAvg(cells: ReadonlyArray<Pick<AskCellNumbers, 'spendSum' | 'spendN'>>): number | null {
+  const n = cells.reduce((a, c) => a + c.spendN, 0);
+  return n >= ASK_SPEND_MIN_N ? Math.round(cells.reduce((a, c) => a + c.spendSum, 0) / n) : null;
+}
 
 /** 칸마다 고른 범위 안 활성 고객 수 · 그중 보낼 수 있는 번호 수(안내용 · 칸 안에서 번호 하나 = 한 번) — 한 문장 */
-export async function countAskCells(companyId: string, viewerUserId: string | null | undefined): Promise<{ cells: AskCell[]; nobuy: { total: number; sendable: number } }> {
+export async function countAskCells(companyId: string, viewerUserId: string | null | undefined): Promise<{ cells: AskCell[]; nobuy: AskCellNumbers }> {
   const sendable = await sendableCustomerSql(companyId, viewerUserId);
   const scope = await getOwnerCustomerScopeSql(companyId, viewerUserId, 'c');
   const rows = await boundedRead(
-    `SELECT x.cell, COUNT(*)::int AS total, COUNT(DISTINCT x.sphone)::int AS sendable
-       FROM (SELECT ${askCellSql('c')} AS cell, CASE WHEN ${sendable} THEN NULLIF(TRIM(c.phone), '') END AS sphone
+    `SELECT x.cell, COUNT(*)::int AS total, COUNT(DISTINCT x.sphone)::int AS sendable,
+            COALESCE(SUM(x.spend), 0)::float8 AS spend_sum, COUNT(x.spend)::int AS spend_n
+       FROM (SELECT ${askCellSql('c')} AS cell, CASE WHEN ${sendable} THEN NULLIF(TRIM(c.phone), '') END AS sphone,
+                    CASE WHEN ${sendable} AND c.total_purchase_amount > 0 THEN c.total_purchase_amount END AS spend
                FROM customers c
               WHERE c.company_id = $1::uuid AND c.is_active = true${scope}) x
       GROUP BY x.cell`,
     [companyId],
   );
-  const by = new Map(rows.map((x: any) => [String(x.cell), { total: Number(x.total) || 0, sendable: Number(x.sendable) || 0 }]));
+  const by = new Map<string, AskCellNumbers>(rows.map((x: any) => [String(x.cell), {
+    total: Number(x.total) || 0, sendable: Number(x.sendable) || 0, spendSum: Number(x.spend_sum) || 0, spendN: Number(x.spend_n) || 0,
+  }]));
   const cells: AskCell[] = [];
   for (let row = 0; row <= ASK_ROW_DAYS.length; row++) {
     for (let col = 0; col <= ASK_COL_COUNTS.length; col++) {
       const key = `r${row}c${col}`;
-      cells.push({ key, row, col, group: GROUP_OF_CELL.get(key)!, ...(by.get(key) || { total: 0, sendable: 0 }) });
+      cells.push({ key, row, col, group: GROUP_OF_CELL.get(key)!, ...(by.get(key) || NO_NUMBERS) });
     }
   }
-  return { cells, nobuy: by.get(ASK_NOBUY) || { total: 0, sendable: 0 } };
+  return { cells, nobuy: by.get(ASK_NOBUY) || NO_NUMBERS };
 }
 
 export interface AskCount {
@@ -251,10 +265,23 @@ function wonOf(num: string, man: boolean): number {
 }
 
 /**
+ * ★ 2026-11-21 C152 B — (순수) 한 줄이 질문인가 보내기인가(설계서 docs/2026-11-21-c152-snap-gap-upgrade-design.md §2-B-1).
+ *   ask = 물음 꼴(줄 끝 물음표 · 물음 낱말)이고 보내기 낱말이 없다 · 그 밖 = send(지금 흐름 그대로).
+ *   틀리게 읽어도 길은 열려 있다: ask = 화면 확인 줄의 두 단추 · send = 처음 화면 상시 단추 「질문으로 물어보기」.
+ */
+export type AskIntent = 'ask' | 'send';
+const ASK_QUESTION_WORDS = /[?？]\s*$|왜|얼마|몇\s*명|몇\s*건|어때|어떤|어느|알려|궁금|분석|비교|추이|현황/;
+const ASK_SEND_WORDS = /보내|발송|문자|쿠폰|안내해|알림|홍보|메시지/;
+export function askIntentOf(line: unknown): AskIntent {
+  const t = typeof line === 'string' ? line.slice(0, 2000).trim() : '';
+  return ASK_QUESTION_WORDS.test(t) && !ASK_SEND_WORDS.test(t) ? 'ask' : 'send';
+}
+
+/**
  * (순수) 한 줄 → 미리 고를 묶음 · 예산 · 혜택 낱말 유무. 못 읽으면 묶음 = 떠나는 단골(먼저 챙길 분).
  *   예산 = 「예산 N원」 또는 「N원으로 · 안에서 · 어치 · 까지 · 이내」만(「5천원 쿠폰」 같은 혜택 금액은 예산이 아니다).
  */
-export function readAskLine(line: unknown): { groups: AskGroupKey[]; budget: number | null; hasBenefit: boolean } {
+export function readAskLine(line: unknown): { groups: AskGroupKey[]; budget: number | null; hasBenefit: boolean; intent: AskIntent } {
   const t = typeof line === 'string' ? line.slice(0, 2000) : '';
   const found = new Set<AskGroupKey>();
   const lapsed = /오래|안\s*온|안\s*오|쉰|발길|떠나|이탈/.test(t);
@@ -271,7 +298,7 @@ export function readAskLine(line: unknown): { groups: AskGroupKey[]; budget: num
   const m = t.match(new RegExp(`예산[^0-9]{0,6}${AMT}`)) || t.match(new RegExp(`${AMT}\\s*(?:으로|안에서|안|어치|까지|이내|내에서)`));
   const won = m ? wonOf(m[1], !!m[2]) : NaN;
   const budget = Number.isInteger(won) && won >= ASK_BUDGET_MIN && won <= ASK_BUDGET_MAX ? won : null;
-  return { groups: groups.length > 0 ? groups : ['leave'], budget, hasBenefit: BENEFIT_WORDS.test(t) };
+  return { groups: groups.length > 0 ? groups : ['leave'], budget, hasBenefit: BENEFIT_WORDS.test(t), intent: askIntentOf(t) };
 }
 
 /** 화면에 내려 주는 묶음 표(이름 · 설명 = 서버 한 곳) */

@@ -3,6 +3,7 @@
  *
  * 처음 화면(한 줄 · 시작 줄 셋) → 1단계 누구에게(묶음 여섯 + 구매 기록 없음 · 격자) → 2단계 몇 명에게(모두 · 예산 · 순서)
  * → 3단계 무엇을(문안 한 안 · 세 통신사 도착 확인 자동) → 직접발송 창으로 가져가기(명단은 그때 서버가 다시 센다).
+ * ★ 2026-11-21 C152 B · C — 한 줄이 질문이면 답 화면(답 글 + 근거 + 표 · 크레딧 값은 단추에 · 설계서 docs/2026-11-21-c152-snap-gap-upgrade-design.md §3-B) · 묶음 줄에 1인 평균 구매액.
  * 전용 틀(Harold 1121 결정 D1 · AI 존 남색 머리 띠를 쓰지 않는다) · 숫자 = 서버 값만 · 크레딧이 나가는 자리는 단추에 값을 적는다.
  * ⛔ 모델명 0 · 검사 방식 낱말 0 · native dialog 0 · 줄표 0.
  */
@@ -13,12 +14,12 @@ import { useAuthStore } from '../stores/authStore';
 import { creditCost } from '../constants/credit';
 import { aiLineApi, AiLineApiError, spamFp, type AiLineSpamState, type AiLineSpamChip } from '../utils/ai-line';
 import { newAttemptToken } from '../utils/one-line';
-import { stashAiLineObjective } from '../lib/hub-recommend';
 import { stashAudience } from '../utils/product-insight';
 import {
   ASK_BUDGET_CHIPS, ASK_COL_LABELS, ASK_LINE_MIN, ASK_ROW_LABELS,
   askBenefitMode, askBudgetOf, askBudgetValid, askGroupSendable, askInputFp, askParts, askTakeBlock, fmtNum,
-  type AskCard, type AskCount, type AskGroupKey, type AskOrder, type AskPlan, type AskSegments,
+  ASK_QUESTION_MAX, askAnswerAttemptKey, askGroupSpend, askSpendText,
+  type AskAnswer, type AskCard, type AskCount, type AskGroupKey, type AskOrder, type AskPlan, type AskSegments,
 } from '../utils/ai-ask';
 
 type Step = 0 | 1 | 2 | 3;
@@ -26,6 +27,8 @@ type Start = 'line' | 'coupon' | 'pick' | 'budget';
 type SpamView = { state: AiLineSpamState | 'idle'; testId?: string; fp: string; carriers?: AiLineSpamChip['carriers']; message?: string };
 
 const COMPOSE_COST = creditCost('ai-line-compose');
+/** 답 받기 한 번(서버 단가표 ai-operator-explain 과 같은 표) */
+const ANSWER_COST = creditCost('ai-operator-explain');
 const CARRIERS: Array<{ key: string; label: string }> = [{ key: 'SKT', label: 'SKT' }, { key: 'KT', label: 'KT' }, { key: 'LGU', label: 'LG U+' }];
 const carrierKey = (c: string) => (/^LG/i.test(c) ? 'LGU' : c.toUpperCase());
 const LIVE: ReadonlyArray<SpamView['state']> = ['queued', 'running', 'checking'];
@@ -70,6 +73,14 @@ export default function AiAskPage() {
   const [lineHint, setLineHint] = useState<string | null>(null);
   const [usedLine, setUsedLine] = useState<string | null>(null);
   const [start, setStart] = useState<Start>('pick');
+
+  // ★ C152 B 질문에 답하기 — asking = 질문으로 읽힌 줄(확인 줄) · answer = 받은 답 · flow = 흐름 번호(답 요청 · 시작이 올린다 = 앞서 떠난 읽기 응답이 화면을 못 바꾼다)
+  const [asking, setAsking] = useState<{ line: string; groups: AskGroupKey[] } | null>(null);
+  const [answer, setAnswer] = useState<{ question: string; data: AskAnswer; groups: AskGroupKey[] } | null>(null);
+  const [answering, setAnswering] = useState(false);
+  const [answerError, setAnswerError] = useState<{ text: string; scoped: boolean } | null>(null);
+  const answerAttempt = useRef<{ key: string; token: string } | null>(null);
+  const flow = useRef(0);
 
   // 묶음 숫자(서버)
   const [seg, setSeg] = useState<AskSegments | null>(null);
@@ -228,6 +239,10 @@ export default function AiAskPage() {
 
   // ── 시작 ──
   const begin = (from: Start, groups: AskGroupKey[], opts: { line?: string | null; budget?: number | null } = {}) => {
+    flow.current++;
+    setAsking(null);
+    setAnswer(null);
+    setAnswerError(null);
     setStart(from);
     setUsedLine(opts.line ?? null);
     setPicked(groups);
@@ -254,22 +269,49 @@ export default function AiAskPage() {
     const t = lineDraft.trim();
     if (t.length < ASK_LINE_MIN) { setLineHint(`한 줄을 ${ASK_LINE_MIN}자 이상 적어 주세요.`); return; }
     setLineHint(null);
+    setAnswerError(null);
     setReading(true);
+    const my = flow.current;
     try {
       const r = await aiLineApi.askRead(t);
+      if (flow.current !== my) return;   // 그 사이 답 요청 · 다른 시작이 떠났다(늦은 읽기 응답이 화면을 덮지 않는다)
+      // 질문으로 읽힌 줄 = 확인 줄(답 받기 · 보낼 고객 고르기) · 보내기로 읽힌 줄 = 지금 그대로 1단계
+      if (r.intent === 'ask') { setAsking({ line: t, groups: r.groups }); return; }
       begin('line', r.groups, { line: t, budget: r.budget });
     } catch (e) {
-      setLineHint(errText(e, '한 줄을 읽지 못했어요. 다시 눌러 주세요.'));
+      if (flow.current === my) setLineHint(errText(e, '한 줄을 읽지 못했어요. 다시 눌러 주세요.'));
     } finally {
       setReading(false);
     }
   };
 
-  const go = (s: Step) => { setStep(s); window.scrollTo(0, 0); };
-  const toAiLine = () => {
-    if (lineDraft.trim()) stashAiLineObjective(lineDraft.trim());
-    navigate('/ai-line');
+  // ── ★ C152 B 답 받기(크레딧 값 = ANSWER_COST) — 요청 하나 = 시도 표 하나(응답을 못 받은 같은 질문 = 같은 표 = 서버가 낸 답 그대로 · 성공하면 비운다) ──
+  const askNow = async (line: string, groups: AskGroupKey[] = ['leave']) => {
+    if (answering || reading) return;
+    const t = line.trim();
+    if (t.length < ASK_LINE_MIN) { setLineHint(`한 줄을 ${ASK_LINE_MIN}자 이상 적어 주세요.`); return; }
+    if (t.length > ASK_QUESTION_MAX) { setLineHint(`질문은 ${ASK_QUESTION_MAX}자 안으로 적어 주세요.`); return; }
+    flow.current++;   // 앞서 떠난 읽기 응답은 이제 화면을 못 바꾼다
+    const key = askAnswerAttemptKey(t);
+    if (!answerAttempt.current || answerAttempt.current.key !== key) answerAttempt.current = { key, token: newAttemptToken() };
+    setLineHint(null);
+    setAnswerError(null);
+    setAnswering(true);
+    try {
+      const data = await aiLineApi.askAnswer(t, answerAttempt.current.token);
+      // 낸 답은 버리지 않는다(Codex 구현 2R) — 답을 쓰는 동안 입력 칸 · 시작 줄 · 단추가 전부 잠겨 흐름이 바뀌지 않고, 받은 답은 언제나 보여 준다
+      answerAttempt.current = null;
+      setAsking(null);
+      setAnswer({ question: t, data, groups });
+      window.scrollTo(0, 0);
+    } catch (e) {
+      setAnswerError({ text: errText(e, '답을 받지 못했어요. 잠시 뒤 다시 눌러 주세요.'), scoped: e instanceof AiLineApiError && e.code === 'ASK_ANSWER_SCOPED' });
+    } finally {
+      setAnswering(false);
+    }
   };
+
+  const go = (s: Step) => { setStep(s); window.scrollTo(0, 0); };
 
   // ── 가져가기 ──
   const block = askTakeBlock({ making, cardFp: card?.fp ?? null, nowFp, benefitHole: !!card?.hole, planned: count?.planned ?? 0 });
@@ -311,7 +353,9 @@ export default function AiAskPage() {
 
   // 아래 줄 · 단추
   let sum: ReactNode = null;
-  if (step === 0) sum = '한 줄을 적거나 오른쪽에서 골라 시작하세요';
+  const inAnswer = step === 0 && !!answer;
+  if (inAnswer) sum = '표의 묶음에서 바로 보낼 수 있어요';
+  else if (step === 0) sum = '한 줄을 적거나 오른쪽에서 골라 시작하세요';
   else if (picked.length === 0) sum = '보낼 분을 한 줄 이상 골라 주세요';
   else if (making && step === 3) sum = '문안을 만들고 있어요';
   else if (countBusy && !count) sum = '고객을 세고 있어요';
@@ -320,7 +364,7 @@ export default function AiAskPage() {
     ? <><b className="text-[15px] text-[#191F28] tabular-nums">{fmtNum(count.inScope)}명</b>을 골랐어요</>
     : <><b className="text-[15px] text-[#191F28] tabular-nums">{fmtNum(count.planned)}명</b>에게 {won(count.amount)}으로 보내요</>;
   const needCompose = step === 2 && (!card || card.fp !== nowFp);
-  const nextDisabled = step === 0 ? reading || !ready
+  const nextDisabled = step === 0 ? reading || answering || !ready
     : step === 3 ? !!block || countBusy
       : !ready || picked.length === 0 || countBusy || !count || (step === 2 && (count.planned === 0 || !budgetOk));
   const onNext = () => {
@@ -335,8 +379,8 @@ export default function AiAskPage() {
     <div className="min-h-screen bg-[#F2F4F6] text-[14px] leading-normal text-[#191F28] [overflow-wrap:anywhere] break-keep">
       <div className="relative mx-auto flex min-h-screen max-w-[960px] flex-col bg-white min-[900px]:mt-4 min-[900px]:min-h-0 min-[900px]:rounded-[20px]">
         <header className="flex h-12 items-center gap-0.5 px-2.5 min-[900px]:px-[18px]">
-          <button type="button" onClick={() => (step === 0 ? navigate('/ai-line') : go((step - 1) as Step))}
-            className="flex h-10 w-10 items-center justify-center rounded-[10px] hover:bg-[#F2F4F6]" aria-label={step === 0 ? 'AI 한줄로로 돌아가기' : '이전'}>
+          <button type="button" disabled={answering} onClick={() => (inAnswer ? setAnswer(null) : step === 0 ? navigate('/ai-line') : go((step - 1) as Step))}
+            className="flex h-10 w-10 items-center justify-center rounded-[10px] hover:bg-[#F2F4F6]" aria-label={inAnswer ? '질문으로 돌아가기' : step === 0 ? 'AI 한줄로로 돌아가기' : '이전'}>
             <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2.2} />
           </button>
           <span className="flex-1 text-[14px] font-semibold text-[#4E5968]">한 줄로 묻기</span>
@@ -349,11 +393,78 @@ export default function AiAskPage() {
         )}
 
         <main className="relative px-5 pb-3 pt-5 min-[900px]:min-h-[432px] min-[900px]:px-7">
+          {answering && (
+            <div className="absolute inset-0 z-10 flex items-start justify-center bg-white/85 pt-24" role="status" aria-live="polite">
+              <p className="rounded-full bg-[#191F28] px-4 py-2 text-[13.5px] font-semibold text-white">답을 쓰는 중이에요</p>
+            </div>
+          )}
           {segState === 'locked' ? (
             <div className="max-w-[520px]">
               <h1 className="text-[20px] font-bold leading-[1.35] tracking-[-0.02em]">요금제에 가입하면 쓸 수 있어요</h1>
               <p className="mt-1.5 text-[14px] leading-[1.55] text-[#4E5968]">한 줄로 묻기는 AI 요금제에서 열려요. 요금제를 고르면 바로 쓸 수 있어요.</p>
               <button type="button" onClick={() => navigate('/pricing')} className="mt-5 h-11 rounded-xl bg-[#191F28] px-5 text-[15px] font-bold text-white">요금제 보기</button>
+            </div>
+          ) : inAnswer && answer ? (
+            <div>
+              <Label first>질문</Label>
+              <h1 className="mt-1 text-[18px] font-bold leading-[1.4] tracking-[-0.02em]">{answer.question}</h1>
+              <div className="mt-4 whitespace-pre-wrap rounded-2xl bg-[#F9FAFB] p-4 text-[14.5px] leading-[1.7] text-[#191F28]">{answer.data.text}</div>
+              {answer.data.documentTitles.length > 0 && (
+                <p className="mt-2 text-[12.5px] leading-[1.55] text-[#636D7A]">근거: {answer.data.documentTitles.join(' · ')}</p>
+              )}
+              {answer.data.tables.length > 0 && (
+                <div className="mt-5 grid grid-cols-1 gap-4 min-[900px]:grid-cols-2">
+                  {answer.data.tables.map((t) => (
+                    <section key={t.key} className={`rounded-2xl border border-[#E5E8EB] p-4 ${t.key === 'groups' ? 'min-[900px]:col-span-2' : ''}`} aria-label={t.title}>
+                      <h2 className="text-[13.5px] font-bold">{t.title}</h2>
+                      {/* 좁은 화면의 고객 묶음 = 줄마다 카드(이름 · 숫자 · 단추 · 4칸 표는 폭 375 에서 숫자가 잘려 접혔다 · 폭 훑기 실측) */}
+                      {t.groupKeys && (
+                        <ul className="mt-2 grid gap-2 sm:hidden">
+                          {t.rows.map((r, ri) => (
+                            <li key={ri} className="rounded-xl bg-[#F9FAFB] p-3">
+                              <div className="flex items-baseline justify-between gap-2">
+                                <b className="text-[14px] font-bold">{r[0]}</b>
+                                <span className="shrink-0 whitespace-nowrap text-[13.5px] font-bold tabular-nums">{r[1]}</span>
+                              </div>
+                              {r.slice(2).map((cell, ci) => cell !== '—' && (
+                                <p key={ci} className="mt-0.5 text-[12.5px] text-[#636D7A]">{t.columns[ci + 2]} <span className="whitespace-nowrap tabular-nums">{cell}</span></p>
+                              ))}
+                              <button type="button" disabled={!ready} onClick={() => begin('pick', [t.groupKeys![ri]])}
+                                className="mt-2 h-9 w-full rounded-lg bg-[#191F28] text-[13px] font-bold text-white hover:bg-[#333D4B] disabled:opacity-50">
+                                이 묶음에게 보내기
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <table className={`mt-2 w-full text-[13px] ${t.groupKeys ? 'hidden sm:table' : ''}`}>
+                        <thead>
+                          <tr className="border-b border-[#E5E8EB] text-left text-[12px] text-[#636D7A]">
+                            {t.columns.map((c, ci) => <th key={c} scope="col" className={`py-1.5 font-semibold ${ci === 0 ? 'pr-2' : 'whitespace-nowrap px-2 text-right'}`}>{c}</th>)}
+                            {t.groupKeys && <th scope="col" className="py-1.5 pl-2 text-right font-semibold"><span className="sr-only">보내기</span></th>}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {t.rows.map((r, ri) => (
+                            <tr key={ri} className="border-b border-[#F2F4F6] last:border-0">
+                              {r.map((cell, ci) => <td key={ci} className={`py-2 ${ci === 0 ? 'pr-2 font-semibold' : 'whitespace-nowrap px-2 text-right tabular-nums'}`}>{cell}</td>)}
+                              {t.groupKeys && (
+                                <td className="py-1.5 pl-2 text-right">
+                                  <button type="button" disabled={!ready} onClick={() => begin('pick', [t.groupKeys![ri]])}
+                                    className="h-8 whitespace-nowrap rounded-lg bg-[#191F28] px-3 text-[12.5px] font-bold text-white hover:bg-[#333D4B] disabled:opacity-50">
+                                    이 묶음에게 보내기
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </section>
+                  ))}
+                </div>
+              )}
+              <p className="mt-4 text-[12.5px] leading-[1.55] text-[#636D7A]">우리 회사 숫자를 근거로 AI 가 쓴 답이에요. 보내기는 담당자가 정해요.</p>
             </div>
           ) : step === 0 ? (
             <div className="grid grid-cols-1 gap-5 min-[900px]:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] min-[900px]:items-start min-[900px]:gap-8">
@@ -362,15 +473,42 @@ export default function AiAskPage() {
                 <p className="mt-1.5 text-[14px] leading-[1.55] text-[#4E5968]">누구에게, 몇 명에게, 무엇을 보낼지 차례로 골라 드려요.</p>
                 <label className="mt-[22px] flex items-end gap-2.5 border-b-2 border-[#191F28] pb-[7px]">
                   <img src="/brand/wordmark.png" alt="한줄로" className="mb-1 h-[17px] shrink-0 select-none" draggable={false} />
-                  <input value={lineDraft} onChange={(e) => { setLineDraft(e.target.value); setLineHint(null); }}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); void beginFromLine(); } }}
-                    maxLength={2000} placeholder="오래 안 온 단골에게 재구매 10% 쿠폰" aria-label="한 줄 입력"
+                  {/* 글을 고치면 흐름 번호를 올린다 = 앞서 떠난 읽기 응답이 옛 글의 확인 줄 · 1단계를 되살리지 않는다(Codex 구현 1R · 화면의 글과 다른 질문에 크레딧을 쓰지 않게) · 답을 쓰는 동안에는 칸을 잠근다(2R · 낸 답이 버려지지 않게) */}
+                  <input value={lineDraft} onChange={(e) => { flow.current++; setLineDraft(e.target.value); setLineHint(null); setAsking(null); setAnswerError(null); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); if (!answering) void beginFromLine(); } }}
+                    disabled={answering} maxLength={2000} placeholder="오래 안 온 단골에게 재구매 10% 쿠폰" aria-label="한 줄 입력"
                     className="min-w-0 flex-1 border-0 bg-transparent text-[16px] font-semibold outline-none placeholder:font-medium placeholder:text-[#636D7A]" />
                 </label>
                 {lineHint && <p className="mt-2 text-[13px] text-[#B91C1C]">{lineHint}</p>}
-                <button type="button" onClick={toAiLine} className="mt-3 inline-flex items-center gap-1 py-1.5 text-[13px] font-semibold text-[#636D7A] underline underline-offset-4">
-                  다른 걸 물어보시려면 AI 한줄로
-                </button>
+                {asking && (
+                  <div className="mt-3 rounded-2xl bg-[#F9FAFB] p-4" role="status">
+                    <p className="text-[14px] font-semibold leading-[1.55]">질문으로 읽었어요. 우리 회사 숫자를 근거로 답해 드릴까요?</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button type="button" disabled={answering} onClick={() => void askNow(asking.line, asking.groups)}
+                        className="h-10 rounded-xl bg-[#191F28] px-4 text-[14px] font-bold text-white hover:bg-[#333D4B] disabled:opacity-50">
+                        답 받기 <span className="ml-1.5 text-[12.5px] font-semibold text-[#D1D6DB]">{ANSWER_COST}크레딧</span>
+                      </button>
+                      <button type="button" disabled={answering || !ready} onClick={() => begin('line', asking.groups, { line: asking.line })}
+                        className="h-10 rounded-xl bg-white px-4 text-[14px] font-semibold text-[#4E5968] shadow-[inset_0_0_0_1px_#D1D6DB] hover:bg-[#F2F4F6] disabled:opacity-50">
+                        보낼 고객 고르기
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {answerError && (
+                  <p className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-[#B91C1C]" role="alert">
+                    {answerError.text}
+                    {answerError.scoped && (
+                      <button type="button" disabled={!ready} onClick={() => begin('pick', ['leave'])} className="h-8 rounded-lg bg-[#191F28] px-3 text-[13px] font-bold text-white disabled:opacity-50">보낼 고객 고르기</button>
+                    )}
+                  </p>
+                )}
+                {!asking && (
+                  <button type="button" disabled={reading || answering || lineDraft.trim().length < ASK_LINE_MIN} onClick={() => void askNow(lineDraft)}
+                    className="mt-3 inline-flex items-center gap-1 py-1.5 text-[13px] font-semibold text-[#4E5968] underline underline-offset-4 disabled:text-[#B0B8C1] disabled:no-underline">
+                    질문으로 물어보기 <span className="font-medium no-underline">{ANSWER_COST}크레딧</span>
+                  </button>
+                )}
               </div>
               <div>
                 <Label first>이렇게 시작해도 돼요</Label>
@@ -381,7 +519,7 @@ export default function AiAskPage() {
                     ['budget', '예산에 맞춰 보내기', '금액만 정하면 그만큼 골라 드려요', ['leave']],
                   ] as Array<[Start, string, string, AskGroupKey[]]>).map(([k, t, d, g]) => (
                     <li key={k}>
-                      <button type="button" disabled={!ready || reading} onClick={() => begin(k, g)}
+                      <button type="button" disabled={!ready || reading || answering} onClick={() => begin(k, g)}
                         className="flex w-full items-center gap-3 rounded-xl px-2.5 py-[9px] text-left hover:bg-[#F9FAFB] disabled:opacity-50">
                         <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2.5">
                           <b className="text-[15px] font-bold">{t}</b>
@@ -420,6 +558,9 @@ export default function AiAskPage() {
                                 {g.name}{g.key === 'leave' && <span className="rounded-md bg-[#FFEDD5] px-[7px] py-0.5 text-[11.5px] font-bold text-[#C2410C]">먼저 챙길 분</span>}
                               </b>
                               <span className="text-[12.5px] text-[#636D7A]">{g.desc}</span>
+                              {askGroupSpend(seg, g.key) !== null && (
+                                <span className="basis-full text-[12px] font-semibold text-[#4E5968]">1인 평균 구매 {askSpendText(askGroupSpend(seg, g.key)!)}</span>
+                              )}
                             </span>
                             <span className="shrink-0 text-[15px] font-bold tabular-nums">{fmtNum(askGroupSendable(seg, g.key))}명</span>
                           </button>
@@ -636,9 +777,13 @@ export default function AiAskPage() {
               <button type="button" onClick={() => go((step - 1) as Step)}
                 className="h-[46px] shrink-0 rounded-xl bg-white px-[18px] text-[15px] font-semibold text-[#4E5968] shadow-[inset_0_0_0_1px_#D1D6DB] hover:bg-[#F9FAFB] min-[900px]:h-11">이전</button>
             )}
-            <button type="button" onClick={onNext} disabled={nextDisabled}
+            {inAnswer && (
+              <button type="button" onClick={() => setAnswer(null)}
+                className="h-[46px] shrink-0 rounded-xl bg-white px-[18px] text-[15px] font-semibold text-[#4E5968] shadow-[inset_0_0_0_1px_#D1D6DB] hover:bg-[#F9FAFB] min-[900px]:h-11">다른 질문하기</button>
+            )}
+            <button type="button" onClick={inAnswer && answer ? () => begin('pick', answer.groups) : onNext} disabled={inAnswer ? !ready : nextDisabled}
               className="h-[46px] flex-1 rounded-xl bg-[#191F28] px-5 text-[15px] font-bold text-white hover:bg-[#333D4B] disabled:cursor-not-allowed disabled:bg-[#F2F4F6] disabled:text-[#4E5968] min-[900px]:h-11 min-[900px]:min-w-[176px] min-[900px]:flex-none">
-              {step === 0 ? (reading ? '읽는 중' : '시작하기')
+              {inAnswer ? '보낼 고객 고르기' : step === 0 ? (reading ? '읽는 중' : '시작하기')
                 : step === 3 ? '직접발송 창으로 가져가기'
                   : needCompose ? <>문안 만들기 <span className="ml-1.5 text-[12.5px] font-semibold text-[#D1D6DB]">{COMPOSE_COST}크레딧</span></>
                     : '다음'}

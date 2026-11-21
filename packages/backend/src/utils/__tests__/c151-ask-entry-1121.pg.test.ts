@@ -81,7 +81,7 @@ describe('C151 칸 판정 경계(한국 날짜)', () => {
     const { cells, nobuy } = await countAskCells(CO, ADMIN);
     const by = new Map(cells.map((c) => [c.key, c]));
     expect(cells).toHaveLength(15);
-    expect(nobuy).toEqual({ total: 1, sendable: 1 });
+    expect(nobuy).toEqual({ total: 1, sendable: 1, spendSum: 0, spendN: 0 });   // ★ C152 C 구매액 칸(이 회사 고객은 누적 구매액이 없다)
     expect(by.get('r0c0')).toMatchObject({ total: 2, sendable: 2, group: 'new' });
     // r4c2 = 9 · 21 · 22 · 23 · 24 · 27 · 31(활성 7) 중 보낼 수 있는 번호 = 9 · 31
     expect(by.get('r4c2')).toMatchObject({ total: 7, sendable: 2, group: 'leave' });

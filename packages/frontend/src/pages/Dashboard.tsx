@@ -404,10 +404,11 @@ export default function Dashboard() {
   const recRevalidateKey = `${planInfo?.plan_code ?? ''}|${planInfo?.subscription_status ?? ''}|${recNonce}`;
   // AI 한줄로 = 구독 잠김이면 잠김 창 · 요금제가 AI 를 못 쓰면 소개 창(영상 자리) · 그 밖 = 화면으로
   // ★ 2026-10-19 직접 타겟 발송 입구 삭제(Harold) — 조건 고르기는 AI 한줄로 확인 창의 「직접 타겟 선택」
-  const openAiLine = async () => {
+  // ★ 2026-11-21 C151 「한 줄로 묻기」 카드도 같은 판정(Harold 「미가입도 보이게 하고 클릭하면 메뉴 설명」) — 못 쓰면 그 기능 안내 창
+  const openAiLine = async (path: '/ai-line' | '/ai-ask' = '/ai-line', featureId = 'ai-line') => {
     if (isSubscriptionLocked) { setShowSubscriptionLock(true); return; }
-    if ((await fetchAiOperatorAccess()) === false) { openPlanFeature('ai-line'); return; }
-    navigate('/ai-line');
+    if ((await fetchAiOperatorAccess()) === false) { openPlanFeature(featureId); return; }
+    navigate(path);
   };
   const openUploadChecked = () => {
     if (syncBlockActive) { setShowSyncActiveBlock(true); return; }
@@ -421,6 +422,7 @@ export default function Dashboard() {
     ]
     : [
       { key: 'line', label: 'AI 한줄로', desc: '한 줄 입력으로 완성하는 메시지 발송', icon: Sparkles, tone: 'violet', locked: isSubscriptionLocked, onClick: () => { void openAiLine(); } },
+      { key: 'ask', label: '한 줄로 묻기', desc: '고객 골라 보내기', icon: Users, tone: 'sky', locked: isSubscriptionLocked, onClick: () => { void openAiLine('/ai-ask', 'ask-entry'); } },
       { key: 'operator', label: 'AI 오퍼레이터', desc: '마케팅 기능 12개 바로 열기', icon: LayoutGrid, tone: 'emerald', locked: isSubscriptionLocked, badge: liveRunning > 0 ? `자동화 ${liveRunning}개 작동 중` : null, onClick: () => openLive('hub') },
       { key: 'upload', label: '고객 DB 업로드', desc: '엑셀 · CSV 로 고객 추가', icon: UserPlus, tone: 'amber', locked: isSubscriptionLocked || isCustomerDbLocked, onClick: openUploadChecked },
     ];
@@ -1290,7 +1292,7 @@ export default function Dashboard() {
   const loadPendingAudience = async () => {
     const asked = takeAudience({ userId: user?.id, companyId: user?.company?.id });
     if (!asked) return;
-    const got = asked.kind === 'ask' ? await fetchAskAudience(asked.ask.plan) : await fetchAudience(asked.kind, asked.value);
+    const got = asked.kind === 'ask' ? await fetchAskAudience(asked.ask.plan) : await fetchAudience(asked.kind, asked.value, asked.kind === 'pair' ? asked.other : undefined);
     if (!got) { setToast({ show: true, type: 'error', message: asked.kind === 'ask' ? '고객 명단을 불러오지 못했어요. 한 줄로 묻기에서 다시 눌러 주세요.' : '고객 명단을 불러오지 못했어요. 분석 화면에서 다시 눌러 주세요.' }); return; }
     if (asked.kind === 'ask') {
       const nowUser = useAuthStore.getState().user as any;

@@ -176,6 +176,8 @@ export const AI_GENERATE_COSTS: Record<string, number> = pickCosts([
   // ★ 2026-10-28 AI 메모리 설계 K7-4 — 목소리 배우기 = 추출 + 견본(화면 금액은 서버 GET 이 내린 값 · 여기는 미러)
   'brand-voice-extract',
   'generate-messages',
+  // ★ 2026-11-21 C152 B — 한 줄로 묻기 「답 받기」 · 「질문으로 물어보기」 단추 라벨(백엔드 CREDIT_COST_MAP 미러 · 실제 차감은 서버 원장)
+  'ai-operator-explain',
 ]);
 
 export const CONFIRM_CREDIT_COSTS: Record<string, number> = pickCosts([
