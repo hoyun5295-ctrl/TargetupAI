@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>한줄로 파비콘 후보</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<style>
+  :root { --ink: #111; --sub: #6b6b6b; --line: #e8e8e8; --orange: #FF5A1F; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--ink); font-family: Pretendard, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  main { max-width: 1120px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 8px; }
+  .lead { color: var(--sub); font-size: 15px; margin: 0 0 40px; }
+  h2 { font-size: 18px; font-weight: 700; margin: 48px 0 16px; }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  .card { border: 1px solid var(--line); border-radius: 16px; padding: 20px 16px 18px; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .card .big { width: 112px; height: 112px; display: block; }
+  .sizes { display: flex; align-items: flex-end; gap: 12px; margin: 18px 0 14px; height: 40px; }
+  .sizes img { display: block; image-rendering: auto; }
+  .tag { font-size: 13px; font-weight: 800; color: var(--orange); letter-spacing: 0.04em; }
+  .name { font-size: 16px; font-weight: 700; margin: 4px 0 6px; }
+  .why { font-size: 13px; color: var(--sub); line-height: 1.55; margin: 0; }
+
+  .brand { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 0 36px; }
+  .brand .panel { flex: 1 1 320px; height: 120px; border-radius: 16px; padding: 22px 24px; color: #fff; background: linear-gradient(to right bottom, #059669, #0F766E, #1E40AF); display: flex; flex-direction: column; justify-content: space-between; }
+  .brand .panel b { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; display: flex; align-items: flex-end; gap: 6px; }
+  .brand .panel b i { display: inline-block; width: 44px; height: 3px; background: #fff; margin-bottom: 6px; }
+  .brand .panel span { font-size: 12px; opacity: .8; }
+  .brand .btn { flex: 0 1 220px; height: 120px; border-radius: 16px; background: #059669; color: #fff; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
+  /* 탭 막대 */
+  .strip { display: flex; align-items: flex-end; gap: 2px; padding: 8px 10px 0; border-radius: 12px 12px 0 0; overflow: hidden; }
+  .strip + .strip { margin-top: 10px; }
+  .tab { display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 14px; width: 230px; border-radius: 9px 9px 0 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; }
+  .tab img, .tab .dot { width: 16px; height: 16px; flex: none; display: block; }
+  .tab .dot { border-radius: 50%; }
+  .tab span { overflow: hidden; text-overflow: ellipsis; }
+  .tab .x { margin-left: auto; opacity: .6; font-size: 13px; }
+  .row-label { font-size: 12px; font-weight: 700; color: var(--sub); margin: 14px 0 6px; }
+  .dark .strip { background: #1f1f1f; }
+  .dark .tab { color: #e3e3e3; }
+  .dark .tab.on { background: #3a3a3a; }
+  .dark .tab .dot { background: #5a5a5a; }
+  .light .strip { background: #dfe3e8; }
+  .light .tab { color: #1f1f1f; }
+  .light .tab.on { background: #ffffff; }
+  .light .tab .dot { background: #a9adb3; }
+
+  /* 홈 화면 */
+  .home { display: flex; gap: 28px; flex-wrap: wrap; background: #e9e4dc; border-radius: 16px; padding: 28px; }
+  .app { display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 12px; color: #111; }
+  .app img { width: 60px; height: 60px; border-radius: 14px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } .tab { width: 170px; } }
+  @media (max-width: 520px) { main { padding: 32px 16px 60px; } .grid { grid-template-columns: 1fr; } .tab { width: 140px; padding: 0 10px; } .strip { overflow-x: auto; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>한줄로 파비콘 후보 다섯</h1>
+  <p class="lead">색은 지금 서비스 로그인 화면 그대로입니다(초록 #059669 → 청록 #0F766E → 파랑 #1E40AF). 아래 탭 막대는 실제 16px 크기입니다.</p>
+  <div class="brand"><div class="panel"><b>한줄로<i></i></b><span>로그인 화면 왼쪽 판(실제 색)</span></div><div class="btn">로그인 버튼 #059669</div></div>
+
+  <div class="grid" id="cards"></div>
+
+  <h2>브라우저 탭 · 어두운 화면</h2>
+  <div class="dark" id="dark"></div>
+
+  <h2>브라우저 탭 · 밝은 화면</h2>
+  <div class="light" id="light"></div>
+
+  <h2>휴대폰 홈 화면 바로가기</h2>
+  <div class="home" id="home"></div>
+</main>
+<script>
+  const C = [
+    { id: "A", file: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDU5NjY5Ii8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iIzBGNzY2RSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFFNDBBRiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjcuNSIgZmlsbD0idXJsKCNnKSIvPjxnIGZpbGw9IiNmZmYiPjxyZWN0IHg9IjEwLjIiIHk9IjUuOCIgd2lkdGg9IjQuOCIgaGVpZ2h0PSIyLjciLz48cmVjdCB4PSI3IiB5PSI5LjkiIHdpZHRoPSIxMS4yIiBoZWlnaHQ9IjIuOCIvPjxlbGxpcHNlIGN4PSIxMi42IiBjeT0iMTYuOTUiIHJ4PSIzLjE1IiByeT0iMi4zNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIuOCIvPjxyZWN0IHg9IjE5LjQiIHk9IjUuOCIgd2lkdGg9IjMiIGhlaWdodD0iMTUuNCIvPjxyZWN0IHg9IjIyLjQiIHk9IjEyLjMiIHdpZHRoPSIyLjgiIGhlaWdodD0iMi44Ii8+PHJlY3QgeD0iOS42IiB5PSIyMS42IiB3aWR0aD0iMyIgaGVpZ2h0PSI0LjYiLz48cmVjdCB4PSI5LjYiIHk9IjIzLjQiIHdpZHRoPSIxNCIgaGVpZ2h0PSIyLjgiLz48L2c+PC9zdmc+Cg==", name: "「한」 · 서비스 그라데이션", why: "로그인 화면의 초록에서 파랑으로 가는 그라데이션 칸에 흰 「한」. 지금 아이콘을 서비스 색으로 옮긴 정석안입니다." },
+    { id: "B", file: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDU5NjY5Ii8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iIzBGNzY2RSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFFNDBBRiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjcuNSIgZmlsbD0idXJsKCNnKSIvPjxnIGZpbGw9IiNmZmYiPjxyZWN0IHg9IjEzIiB5PSI2IiB3aWR0aD0iNiIgaGVpZ2h0PSIzIi8+PHJlY3QgeD0iNi44IiB5PSIxMC44IiB3aWR0aD0iMTguNCIgaGVpZ2h0PSIzIi8+PGVsbGlwc2UgY3g9IjE2IiBjeT0iMjAuNCIgcng9IjQuMyIgcnk9IjQiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzLjIiLz48L2c+PC9zdmc+Cg==", name: "「ㅎ」 모노그램", why: "획을 줄여 ㅎ 하나만. 16px 에서 가장 덜 뭉개지고, 한글 서비스라는 인상이 남습니다." },
+    { id: "C", file: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDU5NjY5Ii8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iIzBGNzY2RSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFFNDBBRiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxwYXRoIGQ9Ik04IDFoMTZhNyA3IDAgMCAxIDcgN3YxMmE3IDcgMCAwIDEtNyA3SDEzLjJsLTYuMSA0LjNhMSAxIDAgMCAxLTEuNi0uOFYyNi42QTcgNyAwIDAgMSAxIDIwVjhhNyA3IDAgMCAxIDctN3oiIGZpbGw9InVybCgjZykiLz48ZyBmaWxsPSIjZmZmIiB0cmFuc2Zvcm09InRyYW5zbGF0ZSgxNiAxNCkgc2NhbGUoLjgpIHRyYW5zbGF0ZSgtMTYgLTE2KSI+PHJlY3QgeD0iMTAuMiIgeT0iNS44IiB3aWR0aD0iNC44IiBoZWlnaHQ9IjIuNyIvPjxyZWN0IHg9IjciIHk9IjkuOSIgd2lkdGg9IjExLjIiIGhlaWdodD0iMi44Ii8+PGVsbGlwc2UgY3g9IjEyLjYiIGN5PSIxNi45NSIgcng9IjMuMTUiIHJ5PSIyLjM1IiBmaWxsPSJub25lIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMi44Ii8+PHJlY3QgeD0iMTkuNCIgeT0iNS44IiB3aWR0aD0iMyIgaGVpZ2h0PSIxNS40Ii8+PHJlY3QgeD0iMjIuNCIgeT0iMTIuMyIgd2lkdGg9IjIuOCIgaGVpZ2h0PSIyLjgiLz48cmVjdCB4PSI5LjYiIHk9IjIxLjYiIHdpZHRoPSIzIiBoZWlnaHQ9IjQuNiIvPjxyZWN0IHg9IjkuNiIgeT0iMjMuNCIgd2lkdGg9IjE0IiBoZWlnaHQ9IjIuOCIvPjwvZz48L3N2Zz4K", name: "말풍선 칸 + 「한」", why: "칸 자체를 말풍선 꼴로. 따로 그림을 얹지 않고도 문자 서비스라는 것이 윤곽으로 읽힙니다." },
+    { id: "D", file: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDU5NjY5Ii8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iIzBGNzY2RSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFFNDBBRiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjcuNSIgZmlsbD0idXJsKCNnKSIvPjxwYXRoIGQ9Ik0xNiA0LjZjLjggNC43IDIuNiA2LjUgNy4zIDcuMy00LjcuOC02LjUgMi42LTcuMyA3LjMtLjgtNC43LTIuNi02LjUtNy4zLTcuMyA0LjctLjggNi41LTIuNiA3LjMtNy4zeiIgZmlsbD0iI2ZmZiIvPjxyZWN0IHg9IjgiIHk9IjIyLjQiIHdpZHRoPSIxNiIgaGVpZ2h0PSIzLjIiIHJ4PSIxIiBmaWxsPSIjZmZmIi8+PC9zdmc+Cg==", name: "빈칸 위 AI", why: "로고 「한줄로 ___」의 빈칸 밑줄 위에 AI 반짝임. 로고에서 AI 를 밑줄 위에 앉히는 규칙을 그대로 줄였습니다." },
+    { id: "E", file: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMDU5NjY5Ii8+PHN0b3Agb2Zmc2V0PSIuNSIgc3RvcC1jb2xvcj0iIzBGNzY2RSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFFNDBBRiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjcuNSIgZmlsbD0iIzBGMTcyQSIvPjxnIGZpbGw9IiNmZmYiIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE2IDE0LjQpIHNjYWxlKC44KSB0cmFuc2xhdGUoLTE2IC0xNikiPjxyZWN0IHg9IjEwLjIiIHk9IjUuOCIgd2lkdGg9IjQuOCIgaGVpZ2h0PSIyLjciLz48cmVjdCB4PSI3IiB5PSI5LjkiIHdpZHRoPSIxMS4yIiBoZWlnaHQ9IjIuOCIvPjxlbGxpcHNlIGN4PSIxMi42IiBjeT0iMTYuOTUiIHJ4PSIzLjE1IiByeT0iMi4zNSIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIuOCIvPjxyZWN0IHg9IjE5LjQiIHk9IjUuOCIgd2lkdGg9IjMiIGhlaWdodD0iMTUuNCIvPjxyZWN0IHg9IjIyLjQiIHk9IjEyLjMiIHdpZHRoPSIyLjgiIGhlaWdodD0iMi44Ii8+PHJlY3QgeD0iOS42IiB5PSIyMS42IiB3aWR0aD0iMyIgaGVpZ2h0PSI0LjYiLz48cmVjdCB4PSI5LjYiIHk9IjIzLjQiIHdpZHRoPSIxNCIgaGVpZ2h0PSIyLjgiLz48L2c+PHJlY3QgeD0iOC41IiB5PSIyNSIgd2lkdGg9IjE1IiBoZWlnaHQ9IjIuNiIgcng9IjEiIGZpbGw9InVybCgjZykiLz48L3N2Zz4K", name: "남색 칸 + 「한」 + 그라데이션 줄", why: "사이트 theme-color 남색 칸에 흰 「한」, 아래 한 줄만 서비스 그라데이션. 가장 차분하고 무게감 있는 판입니다." },
+  ];
+  const title = '한줄로 | AI 마케팅 자동화';
+  const cards = document.getElementById('cards');
+  for (const c of C) {
+    cards.insertAdjacentHTML('beforeend', `
+      <div class="card">
+        <img class="big" src="${c.file}" alt="">
+        <div class="sizes"><img src="${c.file}" width="32" height="32" alt=""><img src="${c.file}" width="24" height="24" alt=""><img src="${c.file}" width="16" height="16" alt=""></div>
+        <div class="tag">${c.id}</div>
+        <div class="name">${c.name}</div>
+        <p class="why">${c.why}</p>
+      </div>`);
+  }
+  const strip = (icon, label) => `
+    <div class="row-label">${label}</div>
+    <div class="strip">
+      <div class="tab"><i class="dot"></i><span>다른 사이트</span><b class="x">✕</b></div>
+      <div class="tab on"><img src="${icon}" alt=""><span>${title}</span><b class="x">✕</b></div>
+      <div class="tab"><i class="dot"></i><span>다른 사이트</span><b class="x">✕</b></div>
+      <div class="tab"><i class="dot"></i><span>다른 사이트</span><b class="x">✕</b></div>
+    </div>`;
+  for (const id of ['dark', 'light']) {
+    const el = document.getElementById(id);
+    el.insertAdjacentHTML('beforeend', strip('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAADJElEQVR4nO1WPUgrQRCe3b3kEhUFT0EMSNCowT9QsFIQBCtRREUhjZVgp7WFiqWCpYpiYRNEKyu1EmxEEFPFIihoY0jAI/6E8/R29xXzuBfC5RLew0J4X3HF3Nx838zszB6RUsJ3gn5r9P8EpUApxYlzjmeBMUYIQaMQQggBAJRSSgsKJS6nyH5lB0UjIQSfpYhzI7BxcHBweXkJADMzMz09PUIISunV1VU0GgWAgYGB8fFxNDrLdATn3DCMt7c3wzAmJyfReXt72zAMXddN09zc3ETj7OyslPLr68sxjkMPUMvt7e3IyAjWIZPJeL1eAFheXl5fX7csq6OjY3R0VFEUAKioqHDJvmCT39/fHx4e8oypVCqVSqGI4eFhy7IAwLIsy7I458hXnABVt7S07O/ve71en8/3+PiYTCYZYw0NDfX19bqu19TUJJNJ9C8rK1MUxTE6QOEeIEzTXFhYCIfDVVVVmqZ1d3dvbGzgq729PQCglPb19a2urh4eHmLn8iI4EwghOOeZTKa9vR115J6QSCQihNjd3QUAW/jQ0JCU0rKsvFDOA8I5p5Senp7G43FFUaamphKJRCwW6+zsZIxFo9Hn5+fy8nIsQHV1dTAYbG5udgzlNsnpdJpSyjnv7+9vamoCgMbGxng8DgCvr6+MMZQSiUTW1tbwEzQWJ8CCDA4O4jJYWVm5ubl5eXk5OzsTQgQCgWAweHFx8TuEovj9fvR0gMugSSm3trZwAmwEAoHz83Mp5c7ODlrm5+eFEJ+fn6UOmp2EEGJubm5sbOzk5OTu7i6bzba1tU1MTGiaBgAejwc7TCklhBRaTW49QI7j4+N0Ou33+5eWllRVBQDTNFVV/fj4wEHLZrMuQYpsU0JIa2trIpEAgOvr666uLhRLKb2/v8cNGA6He3t7ZYH9Wvw+0DRNURRKaWVlpcfjse2hUCgUCv1R+hclygUhZHp62ufz5eYnhJBSqqp6dHRUV1fnuLGLE+i6jussFosV8nFpgxsBZr24uPj09IRHxdGNMVZbWwsFqlTSjfYvKF4i+8Z3Qe7PQB6+PYOf/+P18wl+ATKSIXs64VnMAAAAAElFTkSuQmCC', '지금'));
+    for (const c of C) el.insertAdjacentHTML('beforeend', strip(c.file, `${c.id} ${c.name}`));
+  }
+  const home = document.getElementById('home');
+  for (const c of C) home.insertAdjacentHTML('beforeend', `<div class="app"><img src="${c.file}" alt=""><span>${c.id} 한줄로</span></div>`);
+</script>
+</body>
+</html>
