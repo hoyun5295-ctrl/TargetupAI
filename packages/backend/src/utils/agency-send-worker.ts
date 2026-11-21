@@ -23,7 +23,7 @@
 import pool, { query, lockPool, type TxRun } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, readSpamTestOutcome, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, readSpamTestOutcome, mergeAlternativeVerdicts, type SpamVerdict } from './spam-test-queue';
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
@@ -85,10 +85,14 @@ async function touchTestingLock(requestId: string, token: string): Promise<boole
 
 // ────────────── 공통 ──────────────
 
+/** 사건 한 줄(실패하면 던진다) — 사건이 판정 근거인 자리(보류 사건 = heldSpamBatch 의 근거 · ★ C150 Codex 구현 1R #2)가 쓴다 */
+async function insertAgencyEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
+  await query(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, $2, $3::jsonb)`,
+    [requestId, kind, JSON.stringify(payload)]);
+}
 async function logEvent(requestId: string, kind: string, payload: Record<string, any> = {}): Promise<void> {
   try {
-    await query(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, $2, $3::jsonb)`,
-      [requestId, kind, JSON.stringify(payload)]);
+    await insertAgencyEvent(requestId, kind, payload);
   } catch (err: any) {
     console.warn(`${LOG} 이력 기록 실패:`, err?.message);
   }
@@ -403,6 +407,10 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       content = original;
       rounds = startRound;
     }
+    // ★ 2026-11-21 C150(R89 넓힘 · Codex 설계 1R #2) — 보류로 남긴 검사가 장애로 굳었으면 새 검사 없이 그 묶음으로 장애(부르는 쪽 = 옛 장애 갈래 · 셈 · 15분 대기 · 3번째 사람).
+    //   옛: 같은 키 장애 검사는 이어 보지 않아(enqueueSpamTest reusable) 새 검사를 걸고, 보류는 장애 횟수에 안 세어 단말 장애 때 같은 글 재검사가 끝없이 돌았다.
+    const held = await heldSpamBatch(String(row.id), Number(row.content_version || 0));
+    if (held && held.verdict === 'error') return { verdict: 'error', passed: false, finalContent: original, rounds: startRound, detail: { batchId: held.batchId } };
     while (rounds < MAX_TEST_ROUNDS) {
       rounds += 1;
       const sample = await buildSample({ ...row, current_content: content });
@@ -425,7 +433,8 @@ async function runSpamRound(row: any, startRound: number): Promise<{
         // ★ 2026-11-11 C125(Codex 구현 1R) — 이 문안 버전에서 늦은 보고로 회복한 검사가 있으면 그 검사를 먼저 이어 본다(같은 키일 때만 · 새 검사 0)
         preferTestId: (await recoveredSpamTestIdFor(String(row.id), Number(row.content_version || 0)).catch(() => null)) ?? undefined,
       });
-      detail = { batchId: result.batchId, round: rounds, variants: result.variants };
+      // ★ C150 — testIds = 이번 회차가 실제로 본 검사(이어 보기면 그 검사 · 그 검사의 batch_id 는 처음 회차 묶음이라 batchId 로는 못 찾는다) · 보류 사건이 싣는다
+      detail = { batchId: result.batchId, round: rounds, variants: result.variants, testIds: Object.values(result.testIds ?? {}) };
 
       const v = result.variants[0];
       // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
@@ -483,7 +492,15 @@ async function settleSpamCheckError(row: any, token: string, backTo: 'received' 
   const version = Number(row.content_version || 0);
   const batchId = detail?.batchId ? String(detail.batchId) : '';
   const requestId = String(row.id);
-  await logEvent(row.id, 'spam_check_error', { phase, version, batchId: batchId || null });
+  // ★ 2026-11-21 C150(Codex 구현 2R · 1R #2 와 같은 뿌리 = 판정 근거인 사건을 삼키는 기록기) — 장애 사건 = 15분 대기 · 3번 셈의 근거 → 삼키지 않는다.
+  //   못 남기면 상태를 되돌리지 않는다(검사 중 · 토큰 그대로 → 잠금 복구가 LOCK_STALE_MINUTES 뒤 되돌린다 = 그 자체가 대기).
+  //   옛: logEvent 가 실패를 삼켜 사건 없이 접수 상태로 돌아가, 대기 · 셈 없이 다음 주기에 다시 검사했다.
+  try {
+    await insertAgencyEvent(row.id, 'spam_check_error', { phase, version, batchId: batchId || null });
+  } catch (e: any) {
+    console.warn(`${LOG} 검사 장애 사건 저장 실패 request=${row.id} — 상태 그대로(잠금 복구가 되돌린다):`, e?.message || e);
+    return;
+  }
 
   // ★ 2026-11-11 C125(Codex 구현 1R · 2R · 3R) — 「회복 확인 → 회복 안 된 장애 셈 → 상태 전환」을 늦은 보고 쪽의 회복 넣기와 **같은 묶음 잠금** 아래에서 한다.
   //   따로 하면: 셈이 3을 본 직후 늦은 보고가 회복을 넣고 깨워도 접수는 아직 testing 이라 안 집히고, 이쪽은 그대로 사람 판단(test_failed · 발송 직전이면 예약 취소 안내)으로 넘긴다.
@@ -594,7 +611,17 @@ async function settleSpamRejected(row: any, token: string, phase: 'first' | 'fin
  *   다음 주기에 같은 문안을 다시 집으면 같은 검사를 이어 본다(spamCheckFor · 새 검사 0) · 확인 중은 확인 문자가 17분 안에 닫는다.
  */
 async function settleSpamHold(row: any, token: string, backTo: 'received' | 'approved', phase: 'first' | 'final', verdict: SpamVerdict, detail: any, heldContent: string | null, rounds: number): Promise<void> {
-  await logEvent(row.id, 'spam_check_hold', { phase, verdict, version: Number(row.content_version || 0), batchId: detail?.batchId ?? null, held: !!heldContent });
+  // ★ C150 — testIds = 그 회차가 본 검사(보류 감시 · 다음 회차 첫머리가 이 검사의 지금 결과를 읽는다 = heldSpamBatch)
+  //   ★ Codex 구현 1R #2 — 보류 사건 = 보류 장애 셈의 근거 → 삼키지 않는다. 못 남기면 보류로 돌리지 않고 검사 장애 갈래(셈 · 15분 대기)
+  //   (사건 없이 보류로 돌아가면 그 검사가 장애로 굳어도 heldSpamBatch 가 못 찾아 새 검사를 걸고 셈에서 빠진다)
+  const recorded = await insertAgencyEvent(row.id, SPAM_HOLD_EVENT, {
+    phase, verdict, version: Number(row.content_version || 0), batchId: detail?.batchId ?? null, held: !!heldContent,
+    testIds: Array.isArray(detail?.testIds) ? detail.testIds.map(String) : [],
+  }).then(() => true, (e: any) => {
+    console.warn(`${LOG} 보류 사건 저장 실패 request=${row.id}(검사 장애로 센다):`, e?.message || e);
+    return false;
+  });
+  if (!recorded) { await settleSpamCheckError(row, token, backTo, phase, detail).catch(() => undefined); return; }
   // 검사 중인 다듬은 문장 = 결과 칸(last_test_result)의 heldCandidate(발송 문안 · 버전은 그대로 · 담당자가 고치면 결과 칸째 지워진다) · 원문이 검사 중이면 지난 후보를 지운다
   //   ★ Codex 구현 2R #2 — 후보 · 회차 저장과 상태 되돌림 = 한 문장(setStatus · 소유권 토큰 조건) · 저장이 던지면 정상 보류가 아니라 검사 장애(횟수 상한) 갈래
   const back = await setStatus(row.id, backTo, { ...RELEASE, last_test_result: heldResultJson(row, heldContent, rounds) }, token)
@@ -749,6 +776,73 @@ export async function recoverAgencySpamErrors(testId: string, kick: (requestIds:
     kick(recovered);
   }
   return recovered;
+}
+
+/** ★ C150 — 보류 사건 종류 한 곳(쓰는 쪽 settleSpamHold · 읽는 쪽 heldSpamBatch · 보류 감시) */
+export const SPAM_HOLD_EVENT = 'spam_check_hold';
+
+/**
+ * ★ 2026-11-21 C150(R89 넓힘 · 설계서 docs/2026-11-21-c150-spam-carrier-delay-retest-design.md P3) — 보류로 남긴 검사의 지금 결과.
+ *   그 접수의 마지막 사건이 이 문안 버전의 보류일 때만 돌려준다(그 뒤에 무슨 일이든 있었으면 null = 옛 주기가 맡는다).
+ *   검사 = 사건 payload testIds(이어 본 검사 포함) · 없는 옛 사건 = payload batchId 의 검사. 결과 = 판정 읽기 한 곳(readSpamTestOutcome) → 대안 합치기.
+ *   batchId = 그 검사의 batch_id — 장애 마감 · C125 회복(recoverAgencySpamErrors = 검사 → batch_id)이 같은 키를 본다.
+ */
+export async function heldSpamBatch(requestId: string, version: number, run: TxRun = query): Promise<{ batchId: string; verdict: SpamVerdict } | null> {
+  const ev = await run(
+    `SELECT kind, payload FROM agency_send_events WHERE request_id = $1::uuid ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [requestId],
+  );
+  const e = ev.rows[0];
+  if (!e || e.kind !== SPAM_HOLD_EVENT || Number(e.payload?.version) !== Number(version)) return null;
+  const ids: string[] = Array.isArray(e.payload?.testIds) ? e.payload.testIds.map(String).filter(Boolean) : [];
+  const legacyBatch = e.payload?.batchId ? String(e.payload.batchId) : '';
+  if (ids.length === 0 && !legacyBatch) return null;
+  const tests = ids.length > 0
+    ? await run(`SELECT id, batch_id FROM spam_filter_tests WHERE id = ANY($1::uuid[]) ORDER BY created_at`, [ids])
+    : await run(`SELECT id, batch_id FROM spam_filter_tests WHERE batch_id = $1::uuid ORDER BY created_at`, [legacyBatch]);
+  if (tests.rows.length === 0) return null;
+  const outs = await Promise.all(tests.rows.map((t: any) => readSpamTestOutcome(String(t.id), run)));
+  const batchId = tests.rows[0].batch_id ? String(tests.rows[0].batch_id) : legacyBatch;
+  return { batchId, verdict: mergeAlternativeVerdicts(outs.map((o) => o.outcome)) };
+}
+
+/** ★ C150 보류 감시 주기 — 확인 문자 주기(30초)와 같다 */
+export const SPAM_HOLD_WAKE_MS = 30_000;
+let _holdWakeRunning = false;
+
+/**
+ * ★ C150(R89 넓힘) — 보류(확인 중 · 검사 중)로 돌려 둔 접수의 검사가 굳으면(통과 · 차단 · 장애) 다음 5분 주기를 기다리지 않고 바로 다시 집는다.
+ *   옛: 보류를 깨우는 자리가 없어 다음 주기 · 앞 접수 처리 시간만큼 더 기다렸다(1119 차단 뒤 재검사 13분 42초).
+ *   다시 집힌 접수 = 통과 · 차단은 같은 검사 이어 보기(새 검사 0) · 장애는 runSpamRound 첫머리가 장애 마감으로 보낸다.
+ *   집기는 CAS(runFirstTest · runFinalTest 고르기 SQL) — 정기 주기 · 회복 깨우기와 겹쳐도 한쪽만. 깨운 접수 id 를 돌려준다.
+ */
+export async function wakeResolvedSpamHolds(kick: (requestIds: string[]) => void = kickSpamRetest): Promise<string[]> {
+  if (_holdWakeRunning) return [];
+  _holdWakeRunning = true;
+  try {
+    const r = await query(
+      `SELECT r.id, r.content_version FROM agency_send_requests r
+         JOIN LATERAL (SELECT e.kind FROM agency_send_events e WHERE e.request_id = r.id ORDER BY e.created_at DESC, e.id DESC LIMIT 1) last ON last.kind = $1
+        WHERE r.status IN ('received', 'approved') AND r.updated_at > NOW() - INTERVAL '60 minutes'`,
+      [SPAM_HOLD_EVENT],
+    );
+    const woke: string[] = [];
+    for (const row of r.rows) {
+      try {
+        const held = await heldSpamBatch(String(row.id), Number(row.content_version || 0));
+        if (held && !isSpamHold(held.verdict)) woke.push(String(row.id));
+      } catch (err: any) {
+        console.warn(`${LOG} 보류 감시 건너뜀(다음 주기) request=${row.id}:`, err?.message || err);
+      }
+    }
+    if (woke.length > 0) {
+      console.log(`${LOG} 보류한 검사가 굳어 바로 다시 집는다 request=${woke.join(',')}`);
+      kick(woke);
+    }
+    return woke;
+  } finally {
+    _holdWakeRunning = false;
+  }
 }
 
 /**
@@ -963,6 +1057,16 @@ async function runFinalTest(onlyRequestId?: string): Promise<void> {
   }
 }
 
+/**
+ * ★ 2026-11-21 C150(Codex 구현 1R #1) — 발송 직전 단계 선점(적재 · 당일 재검사 두 갈래 공용).
+ *   $2 = 후보를 읽을 때의 revision — 읽은 뒤 바뀐 행(보류 감시 · 회복 깨우기가 그 사이 장애 마감으로 승인 상태에 돌려놓음 · 담당자 수정)을
+ *   옛 값으로 다시 잡지 않는다. 옛: 상태만 견줘, 고르기 SQL 의 장애 대기 조각을 지난 뒤 바뀐 행을 다시 잡아 15분 대기 없이 새 검사를 걸 수 있었다.
+ */
+export const FINAL_STAGE_CLAIM_SQL = `UPDATE agency_send_requests
+          SET status = 'final_testing', lock_at = NOW(), lock_token = gen_random_uuid(),
+              revision = revision + 1, updated_at = NOW()
+        WHERE id = $1::uuid AND status = 'approved' AND revision = $2::int RETURNING *`;
+
 /** 당일 재검사 한 행(★2026-09-13(3) 행 격리를 위해 runFinalTest 루프 본문을 그대로 옮겼다 · continue → return) */
 async function finalTestRow(row: any, now: Date): Promise<void> {
   const requestedAt = new Date(row.requested_at);
@@ -972,13 +1076,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
   //   두 갈래가 여기로 온다: 재승인 건 · **접수한 그날 나가는 건**(★2026-08-23(2) 워커 A가 통과 때 찍는다).
   //   ⛔ 여기서 또 검사하면 승인받은 문안이 통신사 결과에 따라 다시 뒤집히고, 남은 시간도 사라진다.
   if (isQueueDue('approved', requestedAt, now, finalTestedAt)) {
-    const locked = await query(
-      `UPDATE agency_send_requests
-          SET status = 'final_testing', lock_at = NOW(), lock_token = gen_random_uuid(),
-              revision = revision + 1, updated_at = NOW()
-        WHERE id = $1::uuid AND status = 'approved' RETURNING *`,
-      [row.id],
-    );
+    const locked = await query(FINAL_STAGE_CLAIM_SQL, [row.id, Number(row.revision)]);
     if (locked.rows.length === 0) return;
     const ready = locked.rows[0];
     try {
@@ -998,14 +1096,8 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
 
   if (!isFinalTestDue('approved', requestedAt, now, finalTestedAt)) return;
 
-  const locked = await query(
-    `UPDATE agency_send_requests
-        SET status = 'final_testing', lock_at = NOW(), lock_token = gen_random_uuid(),
-            revision = revision + 1, updated_at = NOW()
-      WHERE id = $1::uuid AND status = 'approved' RETURNING *`,
-    [row.id],
-  );
-  if (locked.rows.length === 0) return; // 다른 tick이 먼저 잡았다
+  const locked = await query(FINAL_STAGE_CLAIM_SQL, [row.id, Number(row.revision)]);
+  if (locked.rows.length === 0) return; // 다른 tick이 먼저 잡았다 · 후보를 읽은 뒤 바뀌었다(다음 주기가 새로 읽는다)
   const target = locked.rows[0];
   const token: string = target.lock_token;
   const label = shortLabel(target.file_name || target.original_content);
@@ -2337,7 +2429,13 @@ export function triggerAgencySendFirstTest(requestId: string): void {
 
 export function startAgencySendWorker(): void {
   setInterval(() => { void runAgencySendWorker(); }, TICK_MS);
-  console.log(`${LOG} 시작 (${TICK_MS / 60000}분 주기)`);
+  // ★ 2026-11-21 C150(R89 넓힘) — 보류 감시(검사가 굳은 보류 접수를 30초 안에 다시 집는다 · 표 · 칸이 없으면 다음 주기)
+  setInterval(() => {
+    void wakeResolvedSpamHolds().catch((err: any) => {
+      if (!isMissingSchemaError(err)) console.warn(`${LOG} 보류 감시 실패(다음 주기):`, err?.message || err);
+    });
+  }, SPAM_HOLD_WAKE_MS);
+  console.log(`${LOG} 시작 (${TICK_MS / 60000}분 주기 · 보류 감시 ${SPAM_HOLD_WAKE_MS / 1000}초)`);
 }
 
 /**

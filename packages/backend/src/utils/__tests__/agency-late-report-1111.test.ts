@@ -73,7 +73,7 @@ describe('C125 늦은 보고 → 대행발송 대기 해제(배선)', () => {
     };
     // 판정 본문 — 상태를 바꾸기 전에 읽을 것을 다 읽는다(읽기 뒤에만 상태 전환 · 전환 뒤에는 읽지 않는다)
     ordered([
-      "await logEvent(row.id, 'spam_check_error'",
+      "await insertAgencyEvent(row.id, 'spam_check_error'",   // ★ 2026-11-21 C150(Codex 구현 2R) — 장애 사건 = 셈 · 대기 근거 = 삼키지 않는 기록(못 남기면 상태 그대로)
       'if (underLock && batchId) await recoverSpamErrorsOfBatchIn(run, batchId);',
       'await spamErrorRecovered(requestId, batchId, run)',
       'await countUnrecoveredSpamErrors(requestId, version, run);',

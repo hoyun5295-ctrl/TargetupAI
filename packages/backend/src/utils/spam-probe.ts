@@ -15,7 +15,8 @@ import { query } from '../config/database';
 import { insertTestSmsQueue } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
 import { SPAM_RESULT } from './sms-result-map';
-import { computeMessageHash, spamReportHash, decideUnconfirmed, spamStampReady, SPAM_LATE_REPORT_MINUTES } from './spam-test-queue';
+import { computeMessageHash, spamReportHash, decideUnconfirmed, spamStampReady, SPAM_LATE_REPORT_MINUTES, spamProbeAfterMinutesSql } from './spam-test-queue';
+import { kstDateTag } from './ai-credit-calc';   // ★ C150 하루 측정 경보 키의 한국 날짜(R104)
 
 export const PROBE_DEADLINE_MINUTES = 5;
 export const PROBE_RECLAIM_MINUTES = 2;
@@ -149,12 +150,13 @@ export async function runSpamProbeCycle(): Promise<{ claimed: number; errored: n
     }
   }
 
-  // ③ 늦은 보고 창(10분)이 닫혔는데 아직 확인 중인 행
+  // ③ 확인 문자 시작 때가 지났는데 아직 확인 중인 행 — ★ 2026-11-21 C150 자동 검사 = 닫힌 뒤 1분(옛 = 늦은 보고 창 10분) · 사람 검사 = 10분 그대로
+  //   확인 문자를 일찍 보내도 원 문자 늦은 보고는 늦은 보고 창(§10 · 그 줄 10분) 안이면 차단 줄을 통과로 고친다(라우트 갱신 조건)
   const open = await query(
     `SELECT r.id, r.phone, r.carrier, t.callback_number
        FROM spam_filter_test_results r JOIN spam_filter_tests t ON t.id = r.test_id
       WHERE r.result = '${SPAM_RESULT.UNCONFIRMED}' AND t.status = 'completed'
-        AND t.completed_at < NOW() - INTERVAL '${SPAM_LATE_REPORT_MINUTES} minutes'
+        AND t.completed_at < NOW() - ${spamProbeAfterMinutesSql('t')} * INTERVAL '1 minute'
         ${ready.probes ? 'AND NOT EXISTS (SELECT 1 FROM spam_test_probes p WHERE p.result_id = r.id)' : ''}
       ORDER BY t.completed_at ASC
       LIMIT ${PROBE_BATCH}`,
@@ -243,7 +245,10 @@ export async function measureSpamVerdicts(): Promise<{ rows: Array<{ carrier: st
   if (after.length > 0) {
     void sendSystemAlert({
       companyId: null,
-      dedupKey: 'spam-verdict-after-decided',
+      // ★ 2026-11-21 C150(R104) — 하루 한 통 = 한국 날짜 키 + 24시간 쿨다운. 옛: 상수 키 + 6시간 쿨다운이라 배포 재시작으로 그날 측정이 다시 돌면
+      //   아침에 보낸 같은 24시간 건을 오후에 또 보냈다(1121 16:26). 그날 측정 뒤 생긴 건 = 다음 날 측정의 24시간 창 · 다음 날 키로 한 통.
+      dedupKey: `spam-verdict-after-decided:${kstDateTag(new Date())}`,
+      cooldownMs: 24 * 60 * 60 * 1000,
       message: `스팸 검사 판정이 굳은 뒤 문자 수신 보고가 닿았습니다(최근 24시간 · ${after.map((x) => `${x.carrier} ${x.afterDecided}건`).join(' · ')}). 차단 · 장애 판정 일부가 실제로는 받은 문자일 수 있습니다.`,
     }).catch(() => undefined);
   }

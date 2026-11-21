@@ -39,6 +39,7 @@ import {
 import { withTransaction } from '../../config/database';
 import { heldResultJson } from '../agency-send-worker';
 import { runSpamProbeCycle, matchProbeReport, measureSpamVerdicts, probeText, resetSpamProbeSchemaCache } from '../spam-probe';
+import { kstDateTag } from '../ai-credit-calc';
 import {
   claimCandidate, saveCandidate, readCandidate, sweepPretestCandidates, regenChargeKey, resetCandidatesReady, candidateStillMine, moveCandidate,
 } from '../journey-pretest-candidate';
@@ -124,8 +125,8 @@ describe('확인 문자(DDL-C · DDL-E)', () => {
     expect(await matchProbeReport({ devicePhone: '01000000001', carrier: 'LGU', messageContent: probeText(probe.nonce) })).toBe('probe');
   });
 
-  it('본문 보고가 7일 안에 없는 단말 = 확인 문자 없이 검사 장애 + 경보 · 창 안(10분 전)은 기다린다', async () => {
-    const fresh = await newTest({ minutesAgo: 3, rows: [{ phone: '01000000002', carrier: 'KT', result: 'unconfirmed' }] });
+  it('본문 보고가 7일 안에 없는 단말 = 확인 문자 없이 검사 장애 + 경보 · 확인 문자 시작 전(★ C150 자동 검사 = 닫힌 뒤 1분)은 기다린다', async () => {
+    const fresh = await newTest({ minutesAgo: 0, rows: [{ phone: '01000000002', carrier: 'KT', result: 'unconfirmed' }] });
     const old = await newTest({ minutesAgo: 12, rows: [{ phone: '01000000002', carrier: 'KT', result: 'unconfirmed' }] });
     const c = await runSpamProbeCycle();
     expect(c.errored).toBe(1);
@@ -208,7 +209,7 @@ describe('하루 측정(R36)', () => {
     expect(skt.unconfirmed).toBe(1);
     expect(skt.passed).toBe(1);
     expect(skt.afterDecided).toBe(1);
-    expect(ctl.alerts).toContain('spam-verdict-after-decided');
+    expect(ctl.alerts).toContain(`spam-verdict-after-decided:${kstDateTag(new Date())}`);   // ★ C150 R104 하루 한 통 = 날짜 키
     void testId;
   });
 });

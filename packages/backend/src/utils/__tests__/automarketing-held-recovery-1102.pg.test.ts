@@ -23,6 +23,7 @@ vi.mock('../system-alert', () => ({ sendSystemAlert: async () => 1 }));
 import { pool } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
 import { recoverHeldProposals, deliverRecoveryNotices, resetHeldRecoveryCursor, HELD_RECOVERY_GIVEUP_HOURS, HELD_RECOVERY_BATCH } from '../continuous-operator';
+import { SPAM_REPORT_TEXT_MATCH_SQL } from '../spam-test-queue';   // ★ C150 K-PG5
 
 const CO = randomUUID();
 const OWNER = randomUUID();
@@ -209,9 +210,13 @@ describe('E3-6 보류 회차 회복(실 PG)', () => {
       expect(now.sc.results.map((r: any) => r.result)).toEqual(['pass', 'timeout']);
       expect(now.sc.results[0]).toMatchObject({ index: 0, testId: t1, fp: 'fp-t1' });
     });
-    it('닫힌 지 11분 · 끝내 시간 초과 = 담당자 검토 + 「결과를 받지 못해」(「통과하지 못해」 아님)', async () => {
+    it('★ C150 자동 검사 시간 초과 줄 = 닫힌 지 11분이어도 기다림(통신사 지연 칸 30분) · 31분 = 담당자 검토 + 「결과를 받지 못해」(「통과하지 못해」 아님)', async () => {
       const op = await operator(true);
-      const t = await closedTest(11, ['pass', 'timeout']);
+      const wait = await closedTest(11, ['pass', 'timeout']);
+      const waitId = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: wait, fp: 'fp-wait' }], new Date(Date.now() + 3600_000));
+      await recoverHeldProposals();
+      expect((await row(waitId)).sc.recovery).toBeUndefined();
+      const t = await closedTest(31, ['pass', 'timeout']);
       const id = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: t, fp: 'fp-late' }], new Date(Date.now() + 3600_000));
       await recoverHeldProposals();
       const now = await row(id);
@@ -222,7 +227,7 @@ describe('E3-6 보류 회차 회복(실 PG)', () => {
     });
     it('시간 초과 + 막힌 안이 섞여 끝내 통과 0 = 「통과하지 못해」(막힌 안이 있다)', async () => {
       const op = await operator(true);
-      const ta = await closedTest(11, ['pass', 'timeout']);
+      const ta = await closedTest(31, ['pass', 'timeout']);   // ★ C150 자동 검사 시간 초과 줄 칸 30분 밖
       const tb = await closedTest(11, ['blocked']);
       // 2안 = 회차 때 timeout 으로 적혔다가 뒤에 막힘으로 확정(확인 문자) → 종결이 안별 결과를 blocked 로 고쳐 써야 한다(변이 MA2)
       const id = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: ta, fp: 'a' }, { index: 1, result: 'timeout', testId: tb, fp: 'b' }], new Date(Date.now() + 3600_000));
@@ -231,6 +236,36 @@ describe('E3-6 보류 회차 회복(실 PG)', () => {
       expect((await row(id)).sc.recovery.notice.body).toContain('통과하지 못해');
       // ★ C148 §7 A — 종결도 안별 결과를 다시 읽은 값으로(막힌 안 = blocked · 장애 안 = 옛 값)
       expect((await row(id)).sc.results.map((r: any) => r.result)).toEqual(['timeout', 'blocked']);
+    });
+    it('★ C150 K-PG5(Codex 설계 1R #1) — 확인 문자 보고가 먼저 = 차단 → 원 보고 전 회복 = 기다림 → 닫힌 지 5분 원 문자 늦은 보고 = 그 줄 칸 10분 안 → 되살아남 · 11분 차단 = 바로 「통과하지 못해」', async () => {
+      const op = await operator(true);
+      const t = await closedTest(5, ['pass', 'pass', 'blocked']);
+      await pool.query(`UPDATE spam_filter_tests SET message_hash = 'h-c150-k5', created_at = NOW() - INTERVAL '6 minutes' WHERE id = $1::uuid`, [t]);
+      await pool.query(`UPDATE spam_filter_test_results SET phone = '01000001550' WHERE test_id = $1::uuid AND carrier = 'LGU'`, [t]);
+      const held = new Date(Date.now() + 2 * 3600_000);
+      const id = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: t, fp: 'fp-c150' }], held);
+      await recoverHeldProposals();
+      expect((await row(id)).sc.recovery).toBeUndefined();   // 원 보고 전 = 미종결(차단 + 그 줄 칸 안 = 기다림)
+      expect((await row(id)).status).toBe('admin_review');
+      // 원 문자 늦은 보고 — 라우트가 고를 검사 = 그 검사 · 고칠 수 있음(차단 줄 칸 10분 안)
+      const pick = (await pool.query(SPAM_REPORT_TEXT_MATCH_SQL, ['0212345678', 'h-c150-k5', '01000001550', 'LGU', 'SMS', Date.now()])).rows[0];
+      expect(pick).toMatchObject({ id: t, correctable: true });
+      // 라우트 갱신 조건 그대로(routes/spam-filter.ts 보고 갱신 = 받지 않은 줄 · 발송 실패 아닌 줄)
+      const upd = await pool.query(
+        `UPDATE spam_filter_test_results SET received = true, received_at = NOW(), result = 'pass'
+          WHERE test_id = $1 AND carrier = 'LGU' AND message_type = 'SMS' AND phone = '01000001550' AND received = false AND (result IS NULL OR result <> 'failed')`,
+        [t],
+      );
+      expect(upd.rowCount).toBe(1);
+      await recoverHeldProposals();
+      const now = await row(id);
+      expect(now.status).toBe('scheduled');
+      expect(now.sc.recovery.result).toBe('restored');
+      // 닫힌 지 11분 차단 = 칸 밖 = 바로 마감(옛 실효와 같음)
+      const late = await closedTest(11, ['pass', 'blocked']);
+      const lateId = await timeoutProposal(op, [{ index: 0, result: 'timeout', testId: late, fp: 'fp-c150-late' }], new Date(Date.now() + 3600_000));
+      await recoverHeldProposals();
+      expect((await row(lateId)).sc.recovery.result).toBe('blocked');
     });
     it('배포 전 시간 초과 회차(heldSendAt 칸 없음 · 이미 안내됨) = 통과로 바뀌었어도 손대지 않는다', async () => {
       const op = await operator(true);

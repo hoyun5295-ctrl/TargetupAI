@@ -49,7 +49,8 @@ describe('T1 회차 최종 판정 순서(통과 > 확인 중 · 검사 중 > 시
     expect(op).toContain("const waiting = read.some((x) => isSpamHold(x.outcome) || ((x.outcome === 'error' || x.outcome === 'blocked') && x.lateOpen));");
     expect(op).toContain('이번 회차 스팸 검사 결과를 받지 못해 담당자 검토로 두었어요');
     const q = src('spam-test-queue.ts');
-    expect(q).toContain("(status = 'completed' AND completed_at >= NOW() - INTERVAL '${SPAM_LATE_REPORT_MINUTES} minutes') AS late_open");
+    // ★ 2026-11-21 C150 — lateOpen = 그 검사 줄들의 §10 칸 최댓값(라우트의 고칠 수 있는 때와 같은 조각)
+    expect(q).toContain("(t.status = 'completed' AND t.completed_at >= NOW() - COALESCE((\n        SELECT MAX(${spamRowLateMinutesSql('t', 'lr.result')}) FROM spam_filter_test_results lr WHERE lr.test_id = t.id\n      ), ${SPAM_LATE_REPORT_MINUTES}) * INTERVAL '1 minute') AS late_open");
   });
 });
 

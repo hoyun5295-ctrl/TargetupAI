@@ -200,8 +200,28 @@ export function computeMessageHash(content: string): string {
 //    지난 검사를 후보에서 미리 빼면 같은 보고의 재전송이 더 오래된 다른 검사로 넘어간다(Codex 2R).
 // ============================================================
 
-/** 닫힌 검사에 늦은 보고를 받아 주는 시간(분) — 앱 대기열의 보관 시간(10분)과 같다 */
+/** 닫힌 검사에 늦은 보고를 받아 주는 시간(분) — 앱 대기열의 보관 시간(10분)과 같다 · 사람 검사 전부 · 통신사 성공을 이미 본 줄 */
 export const SPAM_LATE_REPORT_MINUTES = 10;
+/**
+ * ★ 2026-11-21 C150(뿌리 R103 · 설계서 docs/2026-11-21-c150-spam-carrier-delay-retest-design.md §10) — 자동 검사의 시간 초과 줄(통신사 결과조차 없던 줄)을
+ *   받아 주는 시간(분). 늦음 원천이 앱 보고가 아니라 통신사 지연이다(1121 LG U+ 실측 = 닫힌 뒤 14분 20초에 전달 · ×2 여유).
+ */
+export const SPAM_AUTO_LATE_REPORT_MINUTES = 30;
+/** ★ C150 — 자동 검사 확인 중 줄의 확인 문자 시작(닫힌 뒤 · 분). 30일 실측 = 닫힌 뒤 2 ~ 10분에 앱 보고로 풀린 확인 중 0(옛 = 10분 기다림) */
+export const SPAM_AUTO_PROBE_AFTER_MINUTES = 1;
+/**
+ * ★ C150 §10 — 늦은 보고가 그 결과 줄을 아직 고칠 수 있는 때(닫힌 뒤 · 분) SQL 조각. 고칠 수 있는 때 · lateOpen 이 이 조각 하나를 쓴다.
+ *   자동 검사 + 시간 초과 줄 = SPAM_AUTO_LATE_REPORT_MINUTES · 그 밖(사람 검사 · 확인 중 · 차단 · 장애 줄) = SPAM_LATE_REPORT_MINUTES.
+ *   확인 중 · 차단 · 장애 줄은 닫히기 전에 통신사 성공을 봤다(이 선에서 통신사 성공 = 단말 수신 같은 초) → 원 문자 보고는 앱 보관 10분 안에 닿거나 안 닿는다.
+ *   test = spam_filter_tests 별칭 · result = 그 줄 결과 식 · 출처 목록 = notAutoSpamSourceSql 한 곳.
+ */
+export function spamRowLateMinutesSql(test: string, result: string): string {
+  return `(CASE WHEN ${result} = '${SPAM_RESULT.TIMEOUT}' AND NOT (${notAutoSpamSourceSql(`${test}.source`)}) THEN ${SPAM_AUTO_LATE_REPORT_MINUTES} ELSE ${SPAM_LATE_REPORT_MINUTES} END)`;
+}
+/** ★ C150 — 확인 중 줄에 확인 문자를 보내기 시작하는 때(닫힌 뒤 · 분) SQL 조각 · 자동 검사 = SPAM_AUTO_PROBE_AFTER_MINUTES · 사람 검사 = SPAM_LATE_REPORT_MINUTES */
+export function spamProbeAfterMinutesSql(test: string): string {
+  return `(CASE WHEN ${notAutoSpamSourceSql(`${test}.source`)} THEN ${SPAM_LATE_REPORT_MINUTES} ELSE ${SPAM_AUTO_PROBE_AFTER_MINUTES} END)`;
+}
 
 /**
  * 통신사가 받는 사람 화면 맨 앞에 붙이는 발신 구분 머리말을 뗀다(`[Web발신]` 등 — 보낸 문안에는 없다).
@@ -240,8 +260,8 @@ export function parseReportAgeMs(raw: unknown): number | null {
  * - 받은 때($6)는 라우트가 요청 도착 시각에서 앱이 잰 지난 시간을 뺀 값이다(spamReportReceivedAt). 이 문장을 언제 돌리든 같다.
  *   만든 때(created_at)는 DB 시계 · 받은 때는 백엔드 시계다 — 둘은 같은 서버에 있다(같은 시계).
  * - $6 이 없는 보고(1.1)는 받은 때를 모른다 → 종전처럼 진행 중인 검사만 본다(닫힌 검사를 고치지 않는다).
- * - correctable = 고칠 수 있는 때인가(진행 중 · 닫힌 지 10분 안). **후보를 거르는 조건이 아니다** — 고른 검사가 지났으면
- *   그 보고는 무시한다. 후보에서 미리 빼면 같은 보고의 재전송이 더 오래된 다른 검사로 넘어간다.
+ * - correctable = 고칠 수 있는 때인가(진행 중 · 닫힌 뒤 이 단말 줄의 §10 칸 안 = spamRowLateMinutesSql · ★ C150 자동 검사 시간 초과 줄 30분 · 그 밖 10분).
+ *   **후보를 거르는 조건이 아니다** — 고른 검사가 지났으면 그 보고는 무시한다. 후보에서 미리 빼면 같은 보고의 재전송이 더 오래된 다른 검사로 넘어간다.
  * - 고르는 순서: ① 진행 중이고 이 단말의 보고를 아직 기다리는 검사(종전 규칙과 같다 — 같은 문안의 검사가 겹쳐 돌 때 두 문자가
  *   두 검사에 하나씩 간다. 겹침은 등록 화면이 막지만 동시 등록·자동 검사와는 겹칠 수 있다) → ② 그 밖에는 가장 최근에 만든 것.
  * ⛔ **닫힌 검사**는 그 행이 고칠 수 있는 상태인가(수신 표시 없음 · 발송 실패 아님)로 고르지 않는다 — 라우트의 갱신 문장이 본다.
@@ -251,7 +271,10 @@ export function parseReportAgeMs(raw: unknown): number | null {
  */
 export const SPAM_REPORT_TEXT_MATCH_SQL = `
   SELECT t.id, t.status,
-         (t.status = 'active' OR t.completed_at >= NOW() - INTERVAL '${SPAM_LATE_REPORT_MINUTES} minutes') AS correctable
+         (t.status = 'active' OR t.completed_at >= NOW() - (
+            SELECT MAX(${spamRowLateMinutesSql('t', 'lr.result')}) FROM spam_filter_test_results lr
+             WHERE lr.test_id = t.id AND lr.phone = $3 AND lr.carrier = $4 AND lr.message_type = $5
+          ) * INTERVAL '1 minute') AS correctable
     FROM spam_filter_tests t
    WHERE REPLACE(t.callback_number, '-', '') = $1
      AND t.message_hash = $2
@@ -459,12 +482,15 @@ export async function isManualSpamCallbackAllowed(companyId: string, userId: str
 
 /**
  * 검사 한 건을 읽어 지금 결과 + 통신사별 행(spamTestOutcomeOf)
- *   ★ 2026-11-20 C148 T1 — lateOpen = 닫힌 지 SPAM_LATE_REPORT_MINUTES 안(늦은 보고가 시간 초과 · 차단 줄을 아직 통과로 고칠 수 있다 · 판정은 DB 시계 한 곳)
+ *   ★ 2026-11-20 C148 T1 — lateOpen = 늦은 보고가 시간 초과 · 차단 줄을 아직 통과로 고칠 수 있다(판정은 DB 시계 한 곳)
+ *   ★ 2026-11-21 C150 — 그 검사 줄들의 §10 칸(spamRowLateMinutesSql · 라우트의 고칠 수 있는 때와 같은 조각) 최댓값 안 · 줄 없음 = SPAM_LATE_REPORT_MINUTES
  */
 export async function readSpamTestOutcome(testId: string, run: SqlRun = query): Promise<{ outcome: SpamVerdict; lateOpen: boolean; carrierResults: Array<{ carrier: string; messageType: string; result: string | null }> }> {
   const t = await run(
-    `SELECT status, (status = 'completed' AND completed_at >= NOW() - INTERVAL '${SPAM_LATE_REPORT_MINUTES} minutes') AS late_open
-       FROM spam_filter_tests WHERE id = $1`,
+    `SELECT t.status, (t.status = 'completed' AND t.completed_at >= NOW() - COALESCE((
+        SELECT MAX(${spamRowLateMinutesSql('t', 'lr.result')}) FROM spam_filter_test_results lr WHERE lr.test_id = t.id
+      ), ${SPAM_LATE_REPORT_MINUTES}) * INTERVAL '1 minute') AS late_open
+       FROM spam_filter_tests t WHERE t.id = $1`,
     [testId],
   );
   const rows = await run(`SELECT carrier, message_type, result FROM spam_filter_test_results WHERE test_id = $1 ORDER BY carrier, message_type`, [testId]);

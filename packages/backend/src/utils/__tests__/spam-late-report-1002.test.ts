@@ -102,8 +102,9 @@ describe('문안으로 고르는 문장', () => {
   it('★ 닫힌 지 10분은 후보를 거르는 조건이 아니다 — 고른 검사가 고칠 수 있는 때인가(correctable)로만 돌려준다', () => {
     // Codex 2R: 지난 검사를 후보에서 미리 빼면, 같은 보고의 재전송이 더 오래된 다른 닫힌 검사로 넘어가 진짜 차단을 통과로 고친다
     expect(SPAM_LATE_REPORT_MINUTES).toBe(10);
-    expect(s).toContain("SELECT t.id, t.status, (t.status = 'active' OR t.completed_at >= NOW() - INTERVAL '10 minutes') AS correctable FROM");
-    expect(where.slice(where.indexOf('WHERE'))).not.toContain('completed_at');
+    // ★ 2026-11-21 C150 — 고칠 수 있는 때 = 이 단말 줄의 §10 칸(자동 검사 시간 초과 줄 30분 · 그 밖 10분 · 조각 = spamRowLateMinutesSql)
+    expect(s).toContain("SELECT t.id, t.status, (t.status = 'active' OR t.completed_at >= NOW() - ( SELECT MAX((CASE WHEN lr.result = 'timeout' AND NOT (COALESCE(t.source, '') NOT IN ('auto_ai', 'auto_ai_free')) THEN 30 ELSE 10 END)) FROM spam_filter_test_results lr WHERE lr.test_id = t.id AND lr.phone = $3 AND lr.carrier = $4 AND lr.message_type = $5 ) * INTERVAL '1 minute') AS correctable FROM");
+    expect(where.slice(where.indexOf('FROM spam_filter_tests t WHERE'))).not.toContain('completed_at');
   });
   it('★ 문자를 받은 뒤에 만들어진 검사는 뺀다 — 받은 때는 밖에서 정해 넘긴 값이다(문장을 돌리는 때의 시각 · 허용 오차를 쓰지 않는다)', () => {
     // Codex 2R: 문장 안에서 NOW() − 지난 시간으로 계산하면, 문장을 돌리기 전의 대기만큼 받은 때가 늦게 잡혀 뒤에 만든 검사가 후보에 든다

@@ -3335,7 +3335,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/system-monitor-worker.ts `band-label-missing:${codes.join(\',\')}`': '대역 라벨 파일 = 한줄로 코드 · 원천 = 게이트웨이 표준 코드 표 · 회사 무관(★1106 비토엔진 오류접수)',
     'utils/system-monitor-worker.ts dedupKey': '발송 큐 지연 = 게이트웨이 · 에이전트 처리 속도 · 여러 캠페인 집계',
     'utils/spam-probe.ts `spam-probe-device:${carrier}:${phone}`': '스팸 검사 단말 = 우리 장비(여러 회사 검사가 같은 단말 · 회사 무관)',
-    "utils/spam-probe.ts 'spam-verdict-after-decided'": '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관)',
+    'utils/spam-probe.ts `spam-verdict-after-decided:${kstDateTag(new Date())}`': '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관 · ★C150 날짜 키)',
     'utils/watch-alert.ts concurrent ? `watch:${e.loginId}:${e.kind}:${ip}:${otherIp}` : `watch:${e.loginId}:login:${ip}:${day}`': '보안 감시(동시 · 새 위치 로그인) = 늘 보낸다',
     "utils/journey-pretest-notifier.ts 'journey-pretest-snapshot-ddl'": '검사 기록 판 칸(DDL-3) 없음 = 스키마 · 회사 무관(★1102 엔진 재설계)',
     "utils/journey-pause-notice.ts 'journey-pause-notice-ddl'": '여정 멈춤 안내 원장 칸(DDL-1) 없음 = 스키마 · 회사 무관(★1102 핵심 처방 3-5)',
@@ -3470,7 +3470,6 @@ describe('R14 넓힘(1102 설계 docs/2026-11-01-credit-control-tower-design.md 
     "utils/pay-ingest-monitor.ts 'pay-db:aborted-spike'": '인증 실패 급증 = 이어지는 동안 다시',
     "utils/pay-ingest-monitor.ts 'pay-db:ingest-stall'": '적재 정체 = 이어지는 동안 다시',
     "utils/retention-sweeper.ts 'retention-pdf-delete-fail'": '지우지 못한 줄은 남아 다음 날 다시',
-    "utils/spam-probe.ts 'spam-verdict-after-decided'": '하루 한 번 측정 · 날이 다르면 24시간 > 쿨다운 · 같은 날 재측정 = 같은 자료',
     "utils/spam-test-queue.ts 'spam-queue-lag'": '검사 줄 밀림 = 이어지는 동안 다시',
     "utils/system-monitor-worker.ts 'queue-abnormal-status'": '깨진 행 수 = 48시간 닫기 전까지 다시',
     "utils/system-alert.ts 'system-alert-pending-ddl'": '경보 원장 표 없음 = DDL 전까지 다시',
@@ -4245,7 +4244,7 @@ describe('R36 스팸 차단 = 확인 문자 수신만 · 확인 중 · 기다림
     expect(p).toMatch(/closeProbes\(`status = 'sent' AND deadline_at < NOW\(\)`/);
     expect(p).toMatch(/WHERE p\.result_id = t\.id AND p\.status IN \('received', 'expired'\) AND t\.result = /);   // 대조 복구
     expect(p).toMatch(/p\.attempts < \$\{PROBE_MAX_ATTEMPTS\}/);
-    expect(p).toMatch(/t\.completed_at < NOW\(\) - INTERVAL '\$\{SPAM_LATE_REPORT_MINUTES\} minutes'/);
+    expect(p).toMatch(/t\.completed_at < NOW\(\) - \$\{spamProbeAfterMinutesSql\('t'\)\} \* INTERVAL '1 minute'/);   // ★ C150 자동 1분 · 사람 10분
     expect(p).toContain('await measureSpamVerdicts();');
     expect(stripComments(be('app.ts'))).toMatch(/startSpamTestQueueWorker\(\);\s*startSpamProbeWorker\(\);/);
   });
