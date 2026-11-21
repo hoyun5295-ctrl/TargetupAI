@@ -492,7 +492,7 @@ export default function ProposalDecisionCard({
                   )}
                   {isSel && ['SMS', 'LMS', 'MMS'].includes(channelName) && (
                     <div className="mt-1 text-[10px] text-slate-500">
-                      통신사 3곳 테스트폰으로 실제 수신을 확인합니다 · 무료 · {retestLeft > 0 ? `이 제안에서 ${retestLeft}회 남음` : '이 제안의 검사 횟수를 모두 썼습니다'}
+                      통신사 3곳에 잘 도착하는지 확인합니다 · 무료 ·{retestLeft > 0 ? `이 제안에서 ${retestLeft}회 남음` : '이 제안의 검사 횟수를 모두 썼습니다'}
                       {retestError && <div className="text-rose-700 mt-0.5">{retestError}</div>}
                     </div>
                   )}

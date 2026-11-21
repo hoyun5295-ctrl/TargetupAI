@@ -54,7 +54,7 @@ export function itemOfFailure(f: FailedStep, states: readonly StepSpamState[], a
     case 'spam_check_pending': {
       const st = states.find((s) => s.stepId === f.stepId && s.variantId === f.variantId)?.state;
       return st === 'unconfirmed'
-        ? { ...base, level: 'confirming', title: `스팸 검사 확인 중${ab}`, detail: '통신사는 보냈는데 시험 폰 확인이 늦어요. 길어도 20분 안에 정해져요.', fixTarget: null }
+        ? { ...base, level: 'confirming', title: `스팸 검사 확인 중${ab}`, detail: '통신사는 보냈는데 도착 확인이 늦어요. 길어도 20분 안에 정해져요.', fixTarget: null }
         : { ...base, level: 'running', title: `스팸 검사 중${ab}`, detail: '같은 글 검사가 진행 중이에요. 끝나면 여기 결과가 바뀌어요.', fixTarget: null };
     }
     case 'spam_check_unavailable':

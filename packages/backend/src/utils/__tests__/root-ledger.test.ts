@@ -587,6 +587,30 @@ describe('R11 화면 하한 — 출처 줄 0 · native dialog 0 · 모델명 0(�
     const bad = files.filter((f) => /['"`>][^'"`<>]*\b(Opus|Sonnet|Haiku|Claude|Anthropic)\b[^'"`<>]*['"`<]/.test(stripComments(read(join(FE, f)))));
     expect(bad).toEqual([]);
   });
+  // ★ 2026-11-21 Harold 「시험폰이라고 하면 우리의 비즈니스모델의 방식이 노출되잖아?」(0925 지시의 재발 · SpamFilterTestModal 머리 주석)
+  //   고객이 보는 글 = 화면(.tsx · .ts) + 서버가 만드는 글(백엔드 전수) + 공개 정적 문서(public 의 .html). 주석은 뺀다(내부 설명은 써도 된다).
+  //   대상은 소스에서 뽑는다(손 목록 0) — 새 화면 · 새 안내 글이 그 낱말을 쓰면 여기서 걸린다.
+  it('스팸 검사의 방식(테스트폰 · 시험 폰 · 실제 휴대폰으로)을 고객이 보는 글에 쓰지 않는다', () => {
+    const METHOD = /테스트\s*폰|시험\s*폰|실제\s*휴대폰으로/;
+    const PUB = join(FE, '..', 'public');
+    // 운영자 경보(sendSystemAlert = .env SYSTEM_ALERT_PHONES 로 가는 장애 통지)는 고객이 보는 글이 아니다 → 그 호출 자리만 구문 트리로 걷어 낸다
+    const withoutOpsAlerts = (file: string, text: string): string => {
+      const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+      const cuts: Array<[number, number]> = [];
+      const visit = (n: ts.Node): void => {
+        if (ts.isCallExpression(n) && n.expression.getText(sf) === 'sendSystemAlert') cuts.push([n.getStart(sf), n.getEnd()]);
+        else ts.forEachChild(n, visit);
+      };
+      visit(sf);
+      return cuts.reduceRight((s, [a, b]) => s.slice(0, a) + s.slice(b), text);
+    };
+    const bad = [
+      ...sourceFiles(FE, /\.tsx?$/).filter((f) => METHOD.test(stripComments(read(join(FE, f))))).map((f) => `frontend/src/${f}`),
+      ...sourceFiles(BE, /\.ts$/).filter((f) => METHOD.test(stripComments(be(f))) && METHOD.test(stripComments(withoutOpsAlerts(f, be(f))))).map((f) => `backend/src/${f}`),
+      ...sourceFiles(PUB, /\.html$/).filter((f) => METHOD.test(read(join(PUB, f)))).map((f) => `frontend/public/${f}`),
+    ];
+    expect(bad).toEqual([]);
+  });
 });
 
 // ── R13 고객 글 생산자 출구 = 혜택 · 숫자 · 효능 거름 짝(★ 2026-10-24 세 채널 구조체크 ② · 설계서 docs/2026-10-24-efficacy-guard-design.md §7) ──

@@ -29,7 +29,7 @@ export const ABOUT_SLOT_IDS = ['auto-marketing', 'journeys', 'marketing-planner'
 
 /** 「보내기 전에, 한줄로가 지키는 것」 — title = 원장 safeguards 제목 그대로 · line = 그 문장을 줄인 말 */
 export const ABOUT_GUARDS: { id: string; title: string; line: string }[] = [
-  { id: 'auto-marketing', title: '보내기 전 스팸 검사', line: '통신사 3곳 테스트폰으로 먼저 확인' },
+  { id: 'auto-marketing', title: '보내기 전 스팸 검사', line: '통신사 3곳 도착을 먼저 확인' },
   { id: 'marketing-planner', title: '승인 전에는 아무것도 안 나감', line: '승인한 그대로만 나갑니다' },
   { id: 'auto-marketing', title: '광고 규정 자동', line: '(광고) 표기 · 수신거부 · 야간 발송 금지' },
   { id: 'auto-marketing', title: '대상 없는 날은 쉼', line: '보낼 고객이 없으면 크레딧도 쓰지 않음' },
