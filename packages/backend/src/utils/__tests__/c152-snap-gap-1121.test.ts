@@ -208,7 +208,10 @@ describe('K13 화면', () => {
     //   답을 쓰는 동안 흐름을 바꿀 수 있는 자리(입력 칸 · 뒤로 · 시작 줄 · 확인 줄 단추 · 아래 단추)가 전부 잠긴다
     expect(askNow).not.toMatch(/flow\.current\s*[!=]==/);
     expect(page).toContain('disabled={answering} maxLength={2000}');
-    expect(page).toContain("<button type=\"button\" disabled={answering} onClick={() => (inAnswer ? setAnswer(null) : step === 0 ? navigate('/ai-line') : go((step - 1) as Step))}");
+    // ★ 1122 Harold 「뒤로가면 … 메인으로 나가야」 — 첫 화면의 뒤로 = 대시보드(입구 = 대시보드 카드 · 머리 띠 탭 · 형제 화면의 뒤로와 같은 곳 = AiHubBand)
+    expect(page).toContain("<button type=\"button\" disabled={answering} onClick={() => (inAnswer ? setAnswer(null) : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");
+    expect(page).not.toContain("navigate('/ai-line')");
+    expect(read(join(FE, 'components', 'ai-line', 'AiHubBand.tsx'))).toContain("onClick={() => navigate('/dashboard')}");
     expect(page).toContain('disabled={!ready || reading || answering} onClick={() => begin(k, g)}');
     expect(page).toContain("disabled={answering || !ready} onClick={() => begin('line', asking.groups, { line: asking.line })}");
     expect(page).toContain('const nextDisabled = step === 0 ? reading || answering || !ready');

@@ -379,8 +379,8 @@ export default function AiAskPage() {
     <div className="min-h-screen bg-[#F2F4F6] text-[14px] leading-normal text-[#191F28] [overflow-wrap:anywhere] break-keep">
       <div className="relative mx-auto flex min-h-screen max-w-[960px] flex-col bg-white min-[900px]:mt-4 min-[900px]:min-h-0 min-[900px]:rounded-[20px]">
         <header className="flex h-12 items-center gap-0.5 px-2.5 min-[900px]:px-[18px]">
-          <button type="button" disabled={answering} onClick={() => (inAnswer ? setAnswer(null) : step === 0 ? navigate('/ai-line') : go((step - 1) as Step))}
-            className="flex h-10 w-10 items-center justify-center rounded-[10px] hover:bg-[#F2F4F6]" aria-label={inAnswer ? '질문으로 돌아가기' : step === 0 ? 'AI 한줄로로 돌아가기' : '이전'}>
+          <button type="button" disabled={answering} onClick={() => (inAnswer ? setAnswer(null) : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}
+            className="flex h-10 w-10 items-center justify-center rounded-[10px] hover:bg-[#F2F4F6]" aria-label={inAnswer ? '질문으로 돌아가기' : step === 0 ? '대시보드로 돌아가기' : '이전'}>
             <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2.2} />
           </button>
           <span className="flex-1 text-[14px] font-semibold text-[#4E5968]">한 줄로 묻기</span>
