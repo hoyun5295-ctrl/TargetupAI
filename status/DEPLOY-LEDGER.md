@@ -3016,7 +3016,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_sender_registrations_owner_verification ON 
 - 선행: C148-H1 · 설계 Codex §7 approve(3R) · 구현 Codex §7 approve · 커밋(Harold)
 - 기대: 회복 일꾼이 안별 결과도 다시 읽은 값으로 씀(카드 칩) · 슈퍼관리자 신청 상세 서류 이름 다섯 · 사용량 상세 맞춤법 고친 판 문장 · 발송 핵심 다섯 파일 무수정
 - 확인: 서버 HEAD · 백엔드 build:safe · 프론트 build:safe · 적재 0건 한 줄 → 재시작 · online · dist grep `refreshHeldResults` · `after_fix`
-- 결과: (대기)
+- 결과: 1121 Harold 실행 · 커밋 77e54a10(13파일 · 공유 문서 셋 = C148 §7 줄만 scratch/c148/docs3.patch) push · 서버 배포(Harold 「배포완료했다」) · 확인 출력 = HEAD 77e54a10 · dist continuous-operator.js refreshHeldResults 3 · dist precheck-usage.js after_fix 1 · 프론트 assets after_fix 파일 1 · targetup-backend online ↺24
 
 ### C148-DML-1 · 옛 첨부 이름 깨짐 고쳐 쓰기(설계서 §7 D · §7-1) · 한 트랜잭션(`psql -1` · 본문에 BEGIN · COMMIT 없음 = 시험 틀의 BEGIN · ROLLBACK 안에서도 그대로) · 배포와 무관
 - 카드: C148
@@ -3025,7 +3025,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_sender_registrations_owner_verification ON 
 - 의미 바꿈: 아니오(이름 글자만 · 파일 · 경로 · storedName 무변)
 - 기대: 1120 실측 깨진 이름 = 위임장 23 · 신청 서류 27(요소) · 에셋 31 → 고친 뒤 같은 실측 SELECT 의 broken = 0(다시 읽기 실패한 이름이 있으면 그 수만 남는다) · 백업 표 행 = 위임장 행 + 신청 행 + 에셋 행 · 두 번째 실행 = INSERT 0 · UPDATE 0
 - 확인: SELECT src, count(*) FROM c148_filename_fix_backup GROUP BY src ORDER BY src; 와 설계서 §7 D 실측 SELECT(broken)
-- 결과: (대기)
+- 결과: 1121 Harold 실행(psql -1 -f - 글자 그대로) · INSERT 위임장 23 · 신청 21행 · 에셋 27 = UPDATE 23 · 21 · 27 · 백업 표 asset 27 · manager 23 · registration 21 · 다시 실측 broken = manager 0 · registration 0 · asset 4 · 남은 4 = 같은 이름 하나(「스크린샷 2026-09-16 100902-fit-fit.png」가 두 번 깨진 값 · 한 겹 풀어도 한글 아님 = 이 블록이 일부러 두는 꼴) → Harold 1121 「됐어 그건 이제 올라오는것만 제대로 올라오면되지」 = 4건 그대로 · DML-2 없음(새 업로드 = 10-19 복원 · 1120 실측 마지막 깨짐 = 10-19 이전)
 
 > C148-RB-2(되돌리기) = UPDATE sender_managers m SET authorization_doc = b.old_value FROM c148_filename_fix_backup b WHERE b.src = 'manager' AND b.row_id = m.id; UPDATE sender_registrations r SET documents = b.old_value FROM c148_filename_fix_backup b WHERE b.src = 'registration' AND b.row_id = r.id; UPDATE cdp_assets a SET filename = b.old_value #>> '{}' FROM c148_filename_fix_backup b WHERE b.src = 'asset' AND b.row_id = a.id;
 
