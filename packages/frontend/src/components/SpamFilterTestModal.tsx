@@ -426,11 +426,11 @@ export default function SpamFilterTestModal({
       if (r.result === 'unconfirmed' && checkingOpen) {
         const base = serverTestCreatedRef.current;
         const min = base ? Math.max(1, Math.round((Date.now() - base) / 60000)) : null;
-        return { cls: 'run', chip: '확인 중', sub: `통신사는 보냈어요 · 검사폰 확인을 기다려요${min ? ` (${min}분째)` : ''}` };
+        return { cls: 'run', chip: '확인 중', sub: `통신사는 보냈어요 · 도착 확인을 기다려요${min ? ` (${min}분째)` : ''}` };
       }
       if (r.result === 'failed' && r.failKind === 'rejected') return { cls: 'block', chip: '보내지 못했어요', sub: `보내기 전에 막혔어요: ${r.failLabel || '문자 규격 오류'}` };
       if (r.result === 'failed') return { cls: 'block', chip: '전달 실패', sub: '통신사가 문자를 받지 않았어요' };
-      if (r.result === 'error' || r.result === 'unconfirmed') return { cls: 'warn', chip: '결과 없음', sub: '검사폰 확인을 받지 못했어요(막힘으로 보지 않아요)' };
+      if (r.result === 'error' || r.result === 'unconfirmed') return { cls: 'warn', chip: '결과 없음', sub: '도착 확인을 받지 못했어요(막힘으로 보지 않아요)' };
       return { cls: 'warn', chip: '결과 없음', sub: '60초 안에 통신사 결과가 오지 않았어요' };
     }
     return { cls: 'run', chip: '확인 중', sub: '통신사 결과를 확인하고 있어요' };
@@ -572,7 +572,7 @@ export default function SpamFilterTestModal({
                   <span className="w-14 h-14 rounded-2xl grid place-items-center bg-amber-500 text-white shrink-0"><Loader2 className="w-6 h-6 animate-spin" strokeWidth={2.4} /></span>
                   <div className="min-w-0">
                     <h4 className="text-[16px] font-extrabold leading-snug text-amber-800 break-keep">{namesOf(checkingList)} 결과를 확인하고 있어요</h4>
-                    <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">통신사는 문자를 보냈는데 검사폰 확인이 늦어요. 길어도 20분 안에 확정되고, 창을 닫아도 확인은 계속돼요.</p>
+                    <p className="text-[12.5px] text-stone-600 mt-1 leading-relaxed break-keep">통신사는 문자를 보냈는데 도착 확인이 늦어요. 길어도 20분 안에 확정되고, 창을 닫아도 확인은 계속돼요.</p>
                   </div>
                 </div>
               ) : verdict === 'warn' ? (

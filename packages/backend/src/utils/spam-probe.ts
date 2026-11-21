@@ -223,16 +223,28 @@ export async function matchProbeReport(o: { devicePhone: string; carrier: string
 
 // ── 하루 측정(R36) — 처음 확인 중이던 행의 최종 통과 비율(오탐률) · 확정 뒤 수신 건수(1건 이상 = 경보) ──
 let _measuredDay = '';
-export async function measureSpamVerdicts(): Promise<{ rows: Array<{ carrier: string; phone: string; unconfirmed: number; passed: number; afterDecided: number }> } | null> {
+/**
+ * ★ 2026-11-21 C150(R104 · 배포 뒤 19:31 메일 = 옛 창이 「돌린 때부터 24시간」이라 늦게 돈 측정이 아침 건을 다시 셌다) —
+ *   하루 측정의 자료 창 = 그 날짜 키의 창 하나 = [전날 09시, 그날 09시)(한국 시각). 몇 시에 돌든(재시작 · 늦은 시작) 같은 날 = 같은 창 = 같은 키.
+ *   이웃한 날의 창은 겹치지도 비지도 않는다(그날 끝 = 다음 날 시작) → 사건 하나 = 경보 한 번. 한국 09시 = 같은 날짜 UTC 00시.
+ */
+export function spamMeasureWindow(now: Date): { day: string; start: Date; end: Date } {
+  const kst = new Date(now.getTime() + 9 * 3_600_000);
+  const end = new Date(Date.UTC(kst.getUTCFullYear(), kst.getUTCMonth(), kst.getUTCDate()));
+  return { day: kstDateTag(now), start: new Date(end.getTime() - 24 * 3_600_000), end };
+}
+export async function measureSpamVerdicts(now: Date = new Date()): Promise<{ rows: Array<{ carrier: string; phone: string; unconfirmed: number; passed: number; afterDecided: number }> } | null> {
   if (!(await spamStampReady())) return null;
+  const w = spamMeasureWindow(now);
   const r = await query(
     `SELECT carrier, phone,
             COUNT(*) FILTER (WHERE first_result = '${SPAM_RESULT.UNCONFIRMED}')::int AS unconfirmed,
             COUNT(*) FILTER (WHERE first_result = '${SPAM_RESULT.UNCONFIRMED}' AND result = '${SPAM_RESULT.PASS}')::int AS passed,
-            COUNT(*) FILTER (WHERE late_report_at >= NOW() - INTERVAL '24 hours')::int AS after_decided
+            COUNT(*) FILTER (WHERE late_report_at >= $1 AND late_report_at < $2)::int AS after_decided
        FROM spam_filter_test_results
-      WHERE decided_at >= NOW() - INTERVAL '24 hours' OR late_report_at >= NOW() - INTERVAL '24 hours'
+      WHERE (decided_at >= $1 AND decided_at < $2) OR (late_report_at >= $1 AND late_report_at < $2)
       GROUP BY carrier, phone`,
+    [w.start, w.end],
   );
   const rows = (r.rows as any[]).map((x) => ({
     carrier: String(x.carrier), phone: String(x.phone),
@@ -245,11 +257,11 @@ export async function measureSpamVerdicts(): Promise<{ rows: Array<{ carrier: st
   if (after.length > 0) {
     void sendSystemAlert({
       companyId: null,
-      // ★ 2026-11-21 C150(R104) — 하루 한 통 = 한국 날짜 키 + 24시간 쿨다운. 옛: 상수 키 + 6시간 쿨다운이라 배포 재시작으로 그날 측정이 다시 돌면
-      //   아침에 보낸 같은 24시간 건을 오후에 또 보냈다(1121 16:26). 그날 측정 뒤 생긴 건 = 다음 날 측정의 24시간 창 · 다음 날 키로 한 통.
-      dedupKey: `spam-verdict-after-decided:${kstDateTag(new Date())}`,
+      // ★ 2026-11-21 C150(R104) — 하루 한 통 = 그 창의 날짜 키 + 24시간 쿨다운(창 · 키가 같은 날짜 = spamMeasureWindow). 옛: 상수 키 + 6시간 쿨다운 ·
+      //   「돌린 때부터 24시간」 창이라 배포 재시작으로 그날 측정이 다시 돌면 아침에 보낸 같은 건을 오후에 또 보냈다(1121 16:26).
+      dedupKey: `spam-verdict-after-decided:${w.day}`,
       cooldownMs: 24 * 60 * 60 * 1000,
-      message: `스팸 검사 판정이 굳은 뒤 문자 수신 보고가 닿았습니다(최근 24시간 · ${after.map((x) => `${x.carrier} ${x.afterDecided}건`).join(' · ')}). 차단 · 장애 판정 일부가 실제로는 받은 문자일 수 있습니다.`,
+      message: `스팸 검사 판정이 굳은 뒤 문자 수신 보고가 닿았습니다(전날 09시 ~ 오늘 09시 · ${after.map((x) => `${x.carrier} ${x.afterDecided}건`).join(' · ')}). 차단 · 장애 판정 일부가 실제로는 받은 문자일 수 있습니다.`,
     }).catch(() => undefined);
   }
   return { rows };

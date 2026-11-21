@@ -204,12 +204,17 @@ describe('하루 측정(R36)', () => {
     const late = await newTest({ minutesAgo: 1, rows: [{ phone: '01000000009', carrier: 'SKT', result: 'blocked' }] });
     await noteAfterDecidedReport(late.testId, '01000000009', 'SKT', 'SMS');
     expect((await resultOf(late.rowIds[0])).late_report_at).not.toBeNull();
-    const m = await measureSpamVerdicts();
+    // ★ C150 R104 — 창 = 그 날짜 키의 [전날 09시, 그날 09시) · 지금 + 15시간의 창은 늘 지금을 담는다(지금이 09시 뒤면 다음 날 창 · 앞이면 오늘 창)
+    const at = new Date(Date.now() + 15 * 3_600_000);
+    const m = await measureSpamVerdicts(at);
     const skt = m!.rows.find((x) => x.carrier === 'SKT' && x.phone === '01000000009')!;
     expect(skt.unconfirmed).toBe(1);
     expect(skt.passed).toBe(1);
     expect(skt.afterDecided).toBe(1);
-    expect(ctl.alerts).toContain(`spam-verdict-after-decided:${kstDateTag(new Date())}`);   // ★ C150 R104 하루 한 통 = 날짜 키
+    expect(ctl.alerts).toContain(`spam-verdict-after-decided:${kstDateTag(at)}`);   // ★ C150 R104 하루 한 통 = 창의 날짜 키
+    // 그 창 밖(하루 전 창) = 같은 사건을 세지 않는다
+    const before = await measureSpamVerdicts(new Date(at.getTime() - 24 * 3_600_000));
+    expect(before!.rows.find((x) => x.carrier === 'SKT' && x.phone === '01000000009')?.afterDecided ?? 0).toBe(0);
     void testId;
   });
 });

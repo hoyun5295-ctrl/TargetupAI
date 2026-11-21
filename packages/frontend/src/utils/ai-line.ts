@@ -7,6 +7,7 @@
  * - 다듬은 문안은 `bodyOf` · `setBody` 로만 읽고 쓴다(반만 바꾸면 고친 글 대신 원본이 나간다 · 회의론자 화면 렌즈).
  * ⛔ 모델명 0 · 줄표 0.
  */
+import type { AskReadResult, AskSegments, AskPlan, AskCount, AskBenefitMode, AskComposeResult } from './ai-ask';
 
 export type AiLineBranch = 'sms' | 'alimtalk' | 'ask_kakao';
 export type AiLineCopyType = 'emo' | 'benefit' | 'mz';
@@ -344,6 +345,12 @@ export const aiLineApi = {
     call<{ state: AiLineSpamState; testId?: string; reused?: boolean; message?: string }>('/spam-test', body),
   spamRead: (testId: string, channel: AiLineChannel) =>
     call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET', SPAM_READ_TIMEOUT_MS),
+  // ★ 2026-11-21 C151 한 줄로 묻기(같은 라우터 · 같은 요금제 관문 · 타입 = utils/ai-ask.ts)
+  askRead: (line: string) => call<AskReadResult>('/ask/read', { line }),
+  askSegments: () => call<AskSegments>('/ask/segments', undefined, 'GET', 30_000),
+  askCount: (plan: AskPlan) => call<AskCount>('/ask/count', { plan }, 'POST', 30_000),
+  askCompose: (body: { line: string | null; plan: AskPlan; benefitMode: AskBenefitMode; benefit: string | null; retryBlocked: boolean; attemptToken: string }) =>
+    call<AskComposeResult>('/ask/compose', body),
   alimtalkMatch: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ charged: boolean; paid: boolean; matched: boolean; templates: Array<{ id: string; templateCode: string; name: string; profileId: string; profileName: string | null; content: string; score: number; reason: string }>; mappings: Array<{ templateVariable: string; customerFieldKey: string | null; customerFieldLabel: string | null; isExactMatch: boolean }>; suggestion: string | null }>('/alimtalk-match', { line, filters, allCustomers }),
 };

@@ -7,10 +7,10 @@
  */
 import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, LayoutGrid, Send, Sparkles } from 'lucide-react';
+import { ArrowLeft, LayoutGrid, Send, Sparkles, Users } from 'lucide-react';
 import CreditHistoryModal from '../credit/CreditHistoryModal';
 
-export type AiHubTab = 'line' | 'hub';
+export type AiHubTab = 'line' | 'ask' | 'hub';
 
 export interface AiCreditSummary {
   creditEnabled?: boolean;
@@ -22,6 +22,8 @@ export interface AiCreditSummary {
 
 const TABS: Array<{ id: AiHubTab; to: string; title: string; sub: string; icon: typeof Send }> = [
   { id: 'line', to: '/ai-line', title: 'AI 한줄로', sub: '한 줄로 발송', icon: Send },
+  // ★ 2026-11-21 C151 한 줄로 묻기(전용 틀 화면 · 이 띠를 쓰지 않는다 · 들어가는 탭만)
+  { id: 'ask', to: '/ai-ask', title: '한 줄로 묻기', sub: '고객 골라 보내기', icon: Users },
   { id: 'hub', to: '/ai-operator', title: 'AI 오퍼레이터', sub: '기능 12개', icon: LayoutGrid },
 ];
 
@@ -110,12 +112,13 @@ export default function AiHubBand({
                     type="button"
                     onClick={() => { if (!on) navigate(t.to); }}
                     aria-current={on ? 'page' : undefined}
-                    className={`flex-1 sm:flex-none sm:w-[168px] h-14 rounded-xl px-3 flex items-center gap-2.5 text-left transition-colors ${
+                    className={`flex-1 min-w-0 sm:flex-none sm:w-[168px] min-h-14 py-2 rounded-xl px-2.5 sm:px-3 flex items-center gap-2.5 text-left break-keep transition-colors ${
                       on ? 'bg-white text-slate-900' : 'bg-white/[0.06] border border-white/10 text-white hover:bg-white/[0.12]'
                     }`}
                     data-zone="hub-tab"
                   >
-                    <Icon className={`w-4 h-4 shrink-0 ${on ? 'text-indigo-600' : 'text-slate-300'}`} />
+                    {/* ★ C151 탭 셋 — 640px 아래는 아이콘을 빼고 높이를 글에 맞춘다(폭 320 에서 글이 칸을 넘지 않게) */}
+                    <Icon className={`hidden sm:block w-4 h-4 shrink-0 ${on ? 'text-indigo-600' : 'text-slate-300'}`} />
                     <span className="min-w-0 leading-tight">
                       <span className={`block text-[12px] ${on ? 'text-slate-500' : 'text-slate-300'}`}>{t.title}</span>
                       <span className="block text-[13.5px] font-semibold">{t.sub}</span>

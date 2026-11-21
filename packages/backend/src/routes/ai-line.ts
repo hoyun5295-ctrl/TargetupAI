@@ -22,6 +22,10 @@ import {
 } from '../services/ai-line';
 import { startLineSpamTest, readLineSpamTest } from '../services/ai-line-spam';
 import { respondUserError } from '../utils/http-error';
+import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
+import {
+  readAskLine, readAskPlan, readAskPrice, countAskCells, countAskPlan, listAskAudience, askGroupMeta, askAudienceText, askComposeLicense,
+} from '../utils/ask-segments';
 
 const router = Router();
 router.use(authenticate);
@@ -246,6 +250,105 @@ router.post('/alimtalk-match', async (req: Request, res: Response) => {
     return res.json({ success: true, matched: m.matched, templates: list, mappings: m.variableMappings, suggestion: m.suggestion, ...(m.note ? { note: m.note } : {}), charged, paid });
   } catch (err: any) {
     return fail(res, err, 'alimtalk-match');
+  }
+});
+
+// ─────────────── ★ 2026-11-21 C151 한 줄로 묻기(설계서 docs/2026-11-21-c151-ask-entry-design.md §2 S2) ───────────────
+
+const ASK_PLAN_INVALID = '고른 묶음 · 예산이 올바르지 않아요. 화면을 새로 고쳐 주세요.';
+/** 예산인데 단가 미설정 = 400(돈 계산을 지어내지 않는다) */
+const ASK_PRICE_UNSET = { success: false, error: '문자 단가가 정해지지 않아 예산으로 고를 수 없어요. 「모두에게 보내기」로 골라 주세요.', code: 'PRICE_UNSET' };
+
+// POST /ask/read — AI 0 · DB 0 · 무과금(/read 와 같은 관문 = 로그인)
+router.post('/ask/read', async (req: Request, res: Response) => {
+  const v = viewerOf(req);
+  if (!v) return res.status(403).json({ success: false, error: '회사 권한이 필요합니다.' });
+  return res.json({ success: true, ...readAskLine(req.body?.line) });
+});
+
+// GET /ask/segments — 칸 15 + 구매 기록 없음 · 칸마다 범위 안 고객 · 보낼 수 있는 번호 수 · 장문 단가
+router.get('/ask/segments', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    const [counted, price] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrice(v.companyId)]);
+    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price });
+  } catch (err: any) {
+    return fail(res, err, 'ask-segments');
+  }
+});
+
+// POST /ask/count — 2단계 인원 · 금액(§2-1 세기 · 고른 묶음이 바뀔 때마다)
+router.post('/ask/count', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    const plan = readAskPlan(req.body?.plan);
+    if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
+    const price = await readAskPrice(v.companyId);
+    const out = await countAskPlan(v.companyId, v.userId, plan, price);
+    if (!out) return res.status(400).json(ASK_PRICE_UNSET);
+    return res.json({ success: true, ...out, unitPrice: price });
+  } catch (err: any) {
+    return fail(res, err, 'ask-count');
+  }
+});
+
+// POST /ask/audience — 직접발송 창에 채울 명단(지금 다시 셈 · §2-1 같은 문장)
+router.post('/ask/audience', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    const plan = readAskPlan(req.body?.plan);
+    if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
+    const out = await listAskAudience(v.companyId, v.userId, plan, await readAskPrice(v.companyId));
+    if (!out) return res.status(400).json(ASK_PRICE_UNSET);
+    return res.json({ success: true, ...out });
+  } catch (err: any) {
+    return fail(res, err, 'ask-audience');
+  }
+});
+
+// POST /ask/compose — 문안 한 안 · 2크레딧(기본료 0) · benefitHole = 직접발송 길목이 막을 자리가 남음
+router.post('/ask/compose', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    const b = req.body || {};
+    const plan = readAskPlan(b.plan);
+    if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
+    const rawLine = typeof b.line === 'string' ? b.line.trim() : '';
+    const line = rawLine ? readLine(rawLine) : null;
+    if (rawLine && !line) return res.status(400).json({ success: false, error: '한 줄을 5자 이상 적어 주세요.', code: 'LINE_INVALID' });
+    const mode = b.benefitMode === 'line' || b.benefitMode === 'custom' || b.benefitMode === 'none' ? b.benefitMode : null;
+    if (!mode) return res.status(400).json({ success: false, error: '혜택 고르기가 올바르지 않아요.', code: 'FACTS_INVALID' });
+    const benefit = mode === 'custom' && typeof b.benefit === 'string' && isValidLineBenefit(b.benefit) ? b.benefit.trim() : null;
+    if (mode === 'custom' && !benefit) return res.status(400).json({ success: false, error: '혜택 칸을 적어 주세요.', code: 'FACTS_INVALID' });
+    if (!isValidAttemptToken(b.attemptToken)) return res.status(400).json({ success: false, error: '요청 형식이 올바르지 않아요. 화면을 새로 고쳐 주세요.', code: 'ATTEMPT_INVALID' });
+    const retry = b.retryBlocked === true;
+    const counted = await countAskPlan(v.companyId, v.userId, plan, await readAskPrice(v.companyId));
+    if (!counted) return res.status(400).json(ASK_PRICE_UNSET);
+    const lic = askComposeLicense(line, plan, mode, benefit, retry);
+    const out = await runLineCompose(v, {
+      line: lic.licenseLine, facts: { benefit: lic.benefit, periodEnd: null }, filters: {}, allCustomers: false,
+      types: ['benefit'], vars: [], channel: 'LMS', isAd: true, attemptToken: b.attemptToken,
+      ask: {
+        count: counted.planned,
+        audienceText: askAudienceText(plan.groups),
+        ...(lic.extraContext ? { extraContext: lic.extraContext } : {}),
+        // 과금 키 = 사람 입력만(정리한 한 줄 · 정렬한 묶음 키 · 혜택 갈래 · 혜택 글 · 다시 고침)
+        keyInput: { line: line || '', groups: plan.groups, mode, benefit: benefit || '', retry },
+      },
+    });
+    const card = out.cards[0];
+    return res.json({
+      success: true,
+      card: { body: card.body, subject: card.subject, byteCount: card.byteCount },
+      channel: out.channel, count: out.count, charged: out.charged,
+      benefitHole: findUneditedSendPlaceholder(card.body, card.subject) !== null,
+    });
+  } catch (err: any) {
+    return fail(res, err, 'ask-compose');
   }
 });
 

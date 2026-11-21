@@ -93,7 +93,8 @@ describe('직접발송으로 넘기기', () => {
   it('대시보드: 명단을 **더한다**(교체 아님 · R31) · 빈 명단 · 실패는 덮지 않는다 · 주소에 대상을 싣지 않는다', () => {
     const dash = front('pages/Dashboard.tsx');
     const fn = dash.slice(dash.indexOf('const loadPendingAudience = async () => {'), dash.indexOf('// v1.5.0', dash.indexOf('const loadPendingAudience = async () => {')));
-    expect(fn).toContain('const asked = takeAudience();');
+    // ★ 1121 C151 — 꺼낼 때 지금 계정을 넘긴다(한 줄로 묻기 kind ask 만 계정 · 10분을 본다 · 옛 kind 둘은 종전 그대로 = c151 K7)
+    expect(fn).toContain('const asked = takeAudience({ userId: user?.id, companyId: user?.company?.id });');
     expect(fn).toContain('if (!asked) return;');
     expect(fn).toContain('setDirectRecipients(appendUpdater<any>(rows, true, (r) => r.phone, () => undefined));');
     expect(fn.match(/setDirectRecipients\(/g)).toHaveLength(1);

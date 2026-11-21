@@ -844,7 +844,7 @@ export default function PerformancePage() {
               <ZoneStatStrip
                 title={`통신사별 스팸 검사 차단율 · 최근 ${bench.windowDays}일`}
                 cells={spamBenchCells(bench)}
-                footnote={`우리 스팸 검사 단말로 직접 잰 값 · 같은 업종 ${bench.minPeers}곳 이상 평균과 견줍니다 · 낮을수록 좋아요`}
+                footnote={`우리 스팸 검사로 직접 잰 값 · 같은 업종 ${bench.minPeers}곳 이상 평균과 견줍니다 · 낮을수록 좋아요`}
               />
             )}
 

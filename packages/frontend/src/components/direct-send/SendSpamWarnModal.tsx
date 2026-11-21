@@ -74,7 +74,7 @@ export default function SendSpamWarnModal({
               {variant === 'none' && '정상 문자도 고객 스팸함으로 갈 수 있어요'}
               {variant === 'blocked' && '글을 고친 뒤 다시 검사해 보세요'}
               {variant === 'running' && '결과가 나온 뒤 보내면 막히는지 확인할 수 있어요. 1분 안에 끝나요.'}
-              {variant === 'checking' && '통신사는 문자를 보냈는데 검사폰 확인이 늦어요. 길어도 20분 안에 확정돼요.'}
+              {variant === 'checking' && '통신사는 문자를 보냈는데 도착 확인이 늦어요. 길어도 20분 안에 확정돼요.'}
               {variant === 'warn' && `${carriersText}의 결과가 오지 않았어요. 다시 검사해 보세요.`}
               {variant === 'spell' && '고친 뒤 보내면 받는 사람이 보는 글이 깔끔해져요.'}
             </small>

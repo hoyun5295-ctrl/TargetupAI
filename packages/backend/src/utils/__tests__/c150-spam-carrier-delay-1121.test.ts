@@ -14,7 +14,7 @@ import { stripComments } from './helpers/producer-scan';
 import {
   SPAM_LATE_REPORT_MINUTES, SPAM_AUTO_LATE_REPORT_MINUTES, SPAM_AUTO_PROBE_AFTER_MINUTES, spamRowLateMinutesSql, spamProbeAfterMinutesSql,
 } from '../spam-test-queue';
-import { PROBE_DEADLINE_MINUTES, PROBE_RECLAIM_MINUTES } from '../spam-probe';
+import { PROBE_DEADLINE_MINUTES, PROBE_RECLAIM_MINUTES, spamMeasureWindow } from '../spam-probe';
 
 const BE = join(__dirname, '..', '..');
 const FE = join(__dirname, '..', '..', '..', '..', 'frontend', 'src');
@@ -166,6 +166,19 @@ describe('K6 (R104) 하루 측정 경보 = 날짜 키 + 24시간 쿨다운', () 
       ts.forEachChild(n, visit);
     };
     visit(sf);
-    expect(found).toEqual(['`spam-verdict-after-decided:${kstDateTag(new Date())}` | 24 * 60 * 60 * 1000']);
+    expect(found).toEqual(['`spam-verdict-after-decided:${w.day}` | 24 * 60 * 60 * 1000']);
+  });
+  it('★ 배포 뒤 19:31 메일 — 자료 창 = 그 날짜 키의 [전날 09시, 그날 09시) · 몇 시에 돌든 같은 날 = 같은 창 · 이웃 날 창은 겹침 · 빈틈 0 · 「돌린 때부터 24시간」 0', () => {
+    const at0931 = spamMeasureWindow(new Date('2026-11-21T00:31:00Z'));   // 한국 09:31
+    const at1931 = spamMeasureWindow(new Date('2026-11-21T10:31:49Z'));   // 한국 19:31(배포 재시작)
+    expect(at1931).toEqual(at0931);
+    expect(at1931).toEqual({ day: '20261121', start: new Date('2026-11-20T00:00:00Z'), end: new Date('2026-11-21T00:00:00Z') });
+    const next = spamMeasureWindow(new Date('2026-11-22T00:05:00Z'));     // 다음 날 한국 09:05
+    expect(next.day).toBe('20261122');
+    expect(next.start.getTime()).toBe(at1931.end.getTime());              // 그날 끝 = 다음 날 시작
+    const body = fnBody('utils/spam-probe.ts', 'measureSpamVerdicts');
+    expect(body).toContain('const w = spamMeasureWindow(now);');
+    expect(body).toContain('[w.start, w.end],');
+    expect(body).not.toMatch(/INTERVAL '24 hours'/);
   });
 });

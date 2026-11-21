@@ -590,15 +590,16 @@ describe('R11 화면 하한 — 출처 줄 0 · native dialog 0 · 모델명 0(�
   // ★ 2026-11-21 Harold 「시험폰이라고 하면 우리의 비즈니스모델의 방식이 노출되잖아?」(0925 지시의 재발 · SpamFilterTestModal 머리 주석)
   //   고객이 보는 글 = 화면(.tsx · .ts) + 서버가 만드는 글(백엔드 전수) + 공개 정적 문서(public 의 .html). 주석은 뺀다(내부 설명은 써도 된다).
   //   대상은 소스에서 뽑는다(손 목록 0) — 새 화면 · 새 안내 글이 그 낱말을 쓰면 여기서 걸린다.
-  it('스팸 검사의 방식(테스트폰 · 시험 폰 · 실제 휴대폰으로)을 고객이 보는 글에 쓰지 않는다', () => {
-    const METHOD = /테스트\s*폰|시험\s*폰|실제\s*휴대폰으로/;
+  it('스팸 검사의 방식(테스트폰 · 시험 폰 · 실제 휴대폰으로 · 검사폰 · 검사 단말)을 고객이 보는 글에 쓰지 않는다', () => {
+    // ★ 2026-11-21 C150 넓힘(C149 빈틈) — 「검사폰 · 검사 단말」 이 식에 없어 고객 글 일곱 줄(직접발송 경고 창 · 수동 검사 창 셋 · 성과 화면 각주 · 여정 켜기 안내 · 결과표 이름)에 남았다
+    const METHOD = /테스트\s*폰|시험\s*폰|실제\s*휴대폰으로|검사\s*폰|검사\s*단말/;
     const PUB = join(FE, '..', 'public');
-    // 운영자 경보(sendSystemAlert = .env SYSTEM_ALERT_PHONES 로 가는 장애 통지)는 고객이 보는 글이 아니다 → 그 호출 자리만 구문 트리로 걷어 낸다
+    // 운영자 경보(sendSystemAlert = .env SYSTEM_ALERT_PHONES 로 가는 장애 통지) · 서버 로그(console.*)는 고객이 보는 글이 아니다 → 그 호출 자리만 구문 트리로 걷어 낸다
     const withoutOpsAlerts = (file: string, text: string): string => {
       const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
       const cuts: Array<[number, number]> = [];
       const visit = (n: ts.Node): void => {
-        if (ts.isCallExpression(n) && n.expression.getText(sf) === 'sendSystemAlert') cuts.push([n.getStart(sf), n.getEnd()]);
+        if (ts.isCallExpression(n) && (n.expression.getText(sf) === 'sendSystemAlert' || /^console\.(log|warn|error|info)$/.test(n.expression.getText(sf)))) cuts.push([n.getStart(sf), n.getEnd()]);
         else ts.forEachChild(n, visit);
       };
       visit(sf);
@@ -3335,7 +3336,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/system-monitor-worker.ts `band-label-missing:${codes.join(\',\')}`': '대역 라벨 파일 = 한줄로 코드 · 원천 = 게이트웨이 표준 코드 표 · 회사 무관(★1106 비토엔진 오류접수)',
     'utils/system-monitor-worker.ts dedupKey': '발송 큐 지연 = 게이트웨이 · 에이전트 처리 속도 · 여러 캠페인 집계',
     'utils/spam-probe.ts `spam-probe-device:${carrier}:${phone}`': '스팸 검사 단말 = 우리 장비(여러 회사 검사가 같은 단말 · 회사 무관)',
-    'utils/spam-probe.ts `spam-verdict-after-decided:${kstDateTag(new Date())}`': '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관 · ★C150 날짜 키)',
+    'utils/spam-probe.ts `spam-verdict-after-decided:${w.day}`': '스팸 판정 하루 측정 = 여러 회사 검사 집계(회사 무관 · ★C150 날짜 키 = 창의 날짜)',
     'utils/watch-alert.ts concurrent ? `watch:${e.loginId}:${e.kind}:${ip}:${otherIp}` : `watch:${e.loginId}:login:${ip}:${day}`': '보안 감시(동시 · 새 위치 로그인) = 늘 보낸다',
     "utils/journey-pretest-notifier.ts 'journey-pretest-snapshot-ddl'": '검사 기록 판 칸(DDL-3) 없음 = 스키마 · 회사 무관(★1102 엔진 재설계)',
     "utils/journey-pause-notice.ts 'journey-pause-notice-ddl'": '여정 멈춤 안내 원장 칸(DDL-1) 없음 = 스키마 · 회사 무관(★1102 핵심 처방 3-5)',

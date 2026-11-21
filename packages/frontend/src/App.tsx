@@ -64,6 +64,7 @@ const AlimtalkSendersPage = lazyPage(() => import('./pages/AlimtalkSendersPage')
 // ★ D163 (2026-05-19) Braze급 SaaS Step 0 — AI Operator placeholder (ENT/BUSINESS 대상 베타)
 const AiOperatorPage = lazyPage(() => import('./pages/AiOperatorPage'));
 const AiLinePage = lazyPage(() => import('./pages/AiLinePage'));   // ★ 2026-10-18 AI 한줄로(설계서 docs/2026-10-18-ai-line-design.md §4-3)
+const AiAskPage = lazyPage(() => import('./pages/AiAskPage'));   // ★ 2026-11-21 C151 한 줄로 묻기(설계서 docs/2026-11-21-c151-ask-entry-design.md §3)
 // ★ D172 (2026-05-19): 한줄로 CDP — 자사몰 → 한줄로 sync 설정 페이지
 const CdpSettingsPage = lazyPage(() => import('./pages/CdpSettingsPage'));
 // ★ D174 (2026-05-19): Step 1 — 성과 리포트 + AI 다음 캠페인 추천
@@ -530,6 +531,15 @@ function App() {
           element={
             <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
               <AiLinePage />
+            </PrivateRoute>
+          }
+        />
+        {/* ★ 2026-11-21 C151 한 줄로 묻기 — 고객 묶음 → 인원 · 예산 → 문안 · 도착 확인 → 직접발송 창(요금제 = 서버 관문) */}
+        <Route
+          path="/ai-ask"
+          element={
+            <PrivateRoute allowedTypes={['company_admin', 'company_user']}>
+              <AiAskPage />
             </PrivateRoute>
           }
         />

@@ -533,6 +533,11 @@ export interface LineComposeInput {
   attemptToken: string;
   /** ★ 2026-10-28 K4-4 화면 종류 칩(사람이 고른 것 = 입력 종류 · 없으면 광고 여부로 성격) */
   contentType?: CopyContentType | null;
+  /**
+   * ★ 2026-11-21 C151 한 줄로 묻기(있을 때만 · 설계서 docs/2026-11-21-c151-ask-entry-design.md §2 S3) — 대상 = 라우트가 §2-1 로 센 수 · 묶음 글.
+   *   기본료 0(D3) · 과금 키 지문 = keyInput(사람 입력만 · 다시 센 수 · 묶음 글 · 참고 글은 넣지 않는다) · extraContext = 참고 글(근거 글 아님 · R33).
+   */
+  ask?: { count: number; audienceText: string; extraContext?: string; keyInput: Record<string, unknown> };
 }
 
 export interface LineComposeCard { type: AiLineCopyType; label: string; body: string; subject: string; byteCount: number }
@@ -545,10 +550,16 @@ export function aiLineVarTokens(): Set<string> {
 export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, now: Date = new Date()): Promise<{
   cards: LineComposeCard[]; channel: 'SMS' | 'LMS' | 'MMS'; count: number; charged: { base: number; copies: number };
 }> {
-  assertFiltersTranslated(input.filters);
-  const audience = await compileHubAudience(v, input.filters, input.allCustomers);
-  assertAudienceOpen(audience);
-  const count = await countHubAudience(audience);
+  const ask = input.ask;
+  let count: number;
+  if (ask) {
+    count = ask.count;   // ★ C151 대상 = 라우트가 §2-1 로 센 수(조건 해석 · 허브 대상을 거치지 않는다)
+  } else {
+    assertFiltersTranslated(input.filters);
+    const audience = await compileHubAudience(v, input.filters, input.allCustomers);
+    assertAudienceOpen(audience);
+    count = await countHubAudience(audience);
+  }
   assertCountSendable(count);
 
   // ★ 2026-10-31 문자 링크 = 링크 질문 한 자리의 답(P1 · 목소리 링크 답이 있으면 그것 · 없으면 LINE_LINK_ASK 답) · 입력만으로 정해진다(채널 · 키 앞)
@@ -560,7 +571,8 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   //   원장 키 채널 = 옛 규칙(칼럼만 · Codex 설계 1R ① · 배포 전에 낸 시도를 배포 뒤 같은 attemptToken 으로 불러도 같은 키 · 출력 채널은 키 입력만으로 정해진다)
   const keyChannel: 'SMS' | 'LMS' | 'MMS' = input.vars.length > 0 && input.channel === 'SMS' ? 'LMS' : input.channel;
   const channel: 'SMS' | 'LMS' | 'MMS' = (input.vars.length > 0 || humanLink) && input.channel === 'SMS' ? 'LMS' : input.channel;
-  const copyKey = aiLineCopyKey(v.companyId, input.attemptToken, {
+  // ★ C151 ask = 사람 입력만의 지문(응답 유실 뒤 같은 시도 = 같은 키 · 그 사이 인원이 바뀌어도) · 없으면 옛 모양 그대로
+  const copyKey = aiLineCopyKey(v.companyId, input.attemptToken, ask ? { ask: ask.keyInput } : {
     line: input.line, facts: input.facts, filters: input.filters, allCustomers: input.allCustomers,
     types: input.types, vars: input.vars, channel: keyChannel, isAd: input.isAd,
     ...(input.contentType ? { contentType: input.contentType } : {}),   // 종류 없음 = 옛 모양(같은 시도 재요청 키 무변)
@@ -573,11 +585,12 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     if (remembered) return { ...remembered, count, charged: { base: 0, copies: 0 } };
   }
   // ★ Codex 2R — 기본료 납부는 기본 키로만 판정한다(문안료 원장은 기본료 납부를 증명하지 않는다 · 이미 낸 갈래는 아무것도 걷지 않는다)
-  const basePaid = paidCopies !== null ? true : await aiLineBasePaid(v.companyId, input.line, now);
+  // ★ C151 ask = 기본료 없음(D3 · 대상 찾기 AI 를 쓰지 않는다)
+  const basePaid = (paidCopies !== null || ask) ? true : await aiLineBasePaid(v.companyId, input.line, now);
   const quote = aiLineComposeCost(paidCopies !== null ? 0 : input.types.length, basePaid);
   if (paidCopies === null) await assertCreditFor(v.companyId, quote.total, AI_LINE_SOURCE.compose);
   const { conditions } = describeLineFilters(input.line, input.filters, undefined);
-  const audienceText = input.allCustomers && conditions.length === 0 ? '전체 고객' : conditions.map((c) => c.text).join(' · ');
+  const audienceText = ask ? ask.audienceText : input.allCustomers && conditions.length === 0 ? '전체 고객' : conditions.map((c) => c.text).join(' · ');
   const periodLine = input.facts.periodEnd ? `\n[기간] ${linePeriodLabel(input.facts.periodStart, input.facts.periodEnd)}` : '';   // ★ C105 H1
   // ★ 2026-10-20 AI 가 물은 그 밖 질문의 답 = 근거 글의 「확인한 사실」(사람이 적은 답만 · 묻고 답하지 않은 것은 쓰지 않는다)
   //   ★ Codex R1 high — 질문 글(AI 가 씀)은 근거 글에 넣지 않고 참고 글로만(질문 속 혜택이 근거가 되지 않게)
@@ -602,7 +615,7 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
     // ★ 2026-11-01 배포 2 C1 — 회사 학습 메모리는 generateMessages → composeVoicePrompt 한 곳에서 들어간다(여기서 또 넣으면 두 번)
     const audienceBlock = `[실제 발송 대상: 이 대상에게 맞게 쓴다]\n${audienceText}\n목표 문장과 대상이 다르면 대상을 따른다. 다른 고객군을 지칭하지 않는다.`;
     return generateMessages(
-      buildMessageObjective(licenseText, [audienceBlock, lineAnswersContext(answers)].filter(Boolean).join('\n\n')),
+      buildMessageObjective(licenseText, [audienceBlock, lineAnswersContext(answers), ask?.extraContext].filter(Boolean).join('\n\n')),
       {
         total_count: count,
         avg_purchase_count: parseFloat(customerStats?.avg_purchase_count) || 0,

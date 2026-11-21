@@ -62,7 +62,7 @@ export type PublicFeatureJob = Omit<FeatureJob, 'sourceFile' | 'status' | 'stubU
 export const JOB_GROUPS: { key: string; label: string; jobs: string[] }[] = [
   { key: 'start', label: '시작 준비', jobs: ['sender-register', 'credits-and-plan', 'manage-accounts', 'ai-usage', 'ai-batches', 'sns-connect'] },
   { key: 'customers', label: '고객 명단', jobs: ['upload-customers', 'ai-column-mapping', 'view-customer', 'manage-unsubscribes', 'connect-shop', 'segments'] },
-  { key: 'send', label: '보내기', jobs: ['send-direct', 'send-target', 'schedule-send', 'send-alimtalk', 'check-spam', 'auto-spam-test', 'agency-send', 'ai-operator'] },
+  { key: 'send', label: '보내기', jobs: ['send-direct', 'send-target', 'schedule-send', 'send-alimtalk', 'check-spam', 'auto-spam-test', 'agency-send', 'ai-operator', 'ask-entry'] },
   { key: 'create', label: '만들기', jobs: ['write-copy-ai', 'mobile-dm', 'image-studio', 'email-campaign', 'inapp-message', 'push-campaign', 'quick-campaign'] },
   { key: 'automate', label: '자동으로 돌리기', jobs: ['auto-marketing', 'journeys', 'marketing-planner', 'marketing-calendar', 'auto-send-legacy'] },
   { key: 'results', label: '결과 보기', jobs: ['check-results', 'performance', 'predictive', 'ai-explain', 'send-calendar'] },
@@ -516,6 +516,31 @@ const READY: FeatureJob[] = [
     related: ['auto-marketing', 'write-copy-ai', 'upload-customers'],
     status: 'ready', stubUntil: null,
     sourceFile: 'frontend/src/pages/AiLinePage.tsx',
+  },
+  {
+    // ★ 2026-11-21 C151 한 줄로 묻기(설계서 docs/2026-11-21-c151-ask-entry-design.md)
+    id: 'ask-entry',
+    title: '고객 골라 보내기',
+    goal: '고객 묶음과 예산을 고르면 문안까지 만들어 직접발송 창에 채운다',
+    keywords: ['한 줄로 묻기', '고객 묶음', '떠나는 단골', '예산에 맞춰', '이탈 고객', '재구매 안내', '누구에게 보낼지'],
+    steps: [
+      '대시보드 "AI 한줄로"로 들어가 위쪽 "한 줄로 묻기" 탭을 누릅니다',
+      '보낼 내용을 한 줄로 적고 Enter를 누르거나, 오른쪽 시작 줄 셋 중 하나를 누릅니다',
+      '1단계에서 보낼 고객 묶음을 고릅니다. "표로 보기"에서 마지막 구매 · 구매 횟수 칸을 눌러도 골라집니다',
+      '2단계에서 "모두에게 보내기" 또는 "예산에 맞춰 보내기"(금액 · 누구부터)를 고르고 "문안 만들기"를 누릅니다',
+      '3단계에서 문안과 세 통신사 도착 확인을 보고 "직접발송 창으로 가져가기"를 누릅니다. 받는 사람 · 문안이 채워진 직접발송 창에서 확인하고 보냅니다',
+    ],
+    blockers: [
+      { symptom: '"예산에 맞춰 보내기"를 고를 수 없습니다', fix: '회사 LMS 단가가 정해지지 않았습니다. 관리자에게 단가 설정을 요청하거나 "모두에게 보내기"로 고르세요' },
+      { symptom: '"문안에 혜택 자리가 남았어요"가 뜨고 가져가기가 눌리지 않습니다', fix: '혜택 칸에 혜택을 적거나 "혜택 없이"를 누른 뒤 문안을 다시 만드세요' },
+      { symptom: '한 통신사가 "막힘"으로 나옵니다', fix: '"고쳐서 다시 확인"으로 표현을 고친 문안을 다시 만들 수 있습니다. 막힌 채로 보내면 그 통신사 고객에게는 도착하지 않을 수 있습니다' },
+    ],
+    entry: { path: '/ai-ask', via: '대시보드 "AI 한줄로" → 위쪽 "한 줄로 묻기" 탭' },
+    planKey: 'ai_premium',
+    creditSource: 'ai-line-compose',
+    related: ['ai-operator', 'send-direct'],
+    status: 'ready', stubUntil: null,
+    sourceFile: 'frontend/src/pages/AiAskPage.tsx',
   },
   {
     id: 'mobile-dm',

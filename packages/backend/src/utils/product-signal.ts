@@ -297,8 +297,8 @@ export async function listSearchTerms(companyId: string): Promise<Array<{ term: 
 
 // ── ④ 「보고 안 산 고객」 · 「이 말을 찾은 고객」 — 세는 길 = 명단 길 ──
 
-/** 주인(요청자) 기준 수신 가능 조건 + 분류코드 범위 — 여정 추출과 같은 두 CT */
-async function sendableCustomerSql(companyId: string, viewerUserId: string | null | undefined): Promise<string> {
+/** 주인(요청자) 기준 수신 가능 조건 + 분류코드 범위 — 여정 추출과 같은 두 CT(★ C151 한 줄로 묻기 묶음도 이 CT) */
+export async function sendableCustomerSql(companyId: string, viewerUserId: string | null | undefined): Promise<string> {
   const consent = await ownerJourneyConsent(companyId, viewerUserId);
   const scope = await getOwnerCustomerScopeSql(companyId, viewerUserId, 'c');
   return `${buildJourneySafetyFilter('c', consent?.isTrue)}${scope}`;
@@ -359,7 +359,7 @@ export function searchedCustomersSql(sendable: string): string {
 
 /** 대상 조회 한 번의 시간 제한(ms) — 사건 30일을 훑는다 · 넘으면 그 요청만 실패(화면은 단추를 그리지 않는다) */
 export const AUDIENCE_QUERY_TIMEOUT_MS = 25_000;
-async function boundedRead(sql: string, params: any[]): Promise<any[]> {
+export async function boundedRead(sql: string, params: any[]): Promise<any[]> {
   return withTransaction(async (run) => {
     await run(`SET LOCAL statement_timeout = ${AUDIENCE_QUERY_TIMEOUT_MS}`);
     return (await run(sql, params)).rows;

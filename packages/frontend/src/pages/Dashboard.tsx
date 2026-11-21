@@ -76,7 +76,7 @@ import AlimtalkSendModal from '../components/AlimtalkSendModal';
 import BrandSendModal, { type BrandRecipientSeed } from '../components/BrandSendModal';
 import { carryPhonesToDirectRecipients } from '../utils/send-checks';
 import { recipientSeeds, pickNameKey, appendUpdater } from '../utils/recipient-paste';
-import { takeAudience, fetchAudience, audienceLoadedText } from '../utils/product-insight';   // ★ 2026-11-13 C133 F2
+import { takeAudience, fetchAudience, fetchAskAudience, askOwnerMatches, audienceLoadedText } from '../utils/product-insight';   // ★ 2026-11-13 C133 F2 · ★ 1121 C151 한 줄로 묻기
 import { takeProposalPick, fetchProposalFill } from '../utils/proposal-kit';   // ★ 2026-11-16 C136 제안 페이지 완성본 → 작성 화면
 import { extractionFieldTable } from '../utils/customerFilterBuild';
 // ★ 2026-09-29 한줄로 V2 R112 — 직접 타겟 추출 보관본(서버) 요청 CT
@@ -1285,14 +1285,26 @@ export default function Dashboard() {
 
   // ★ 2026-11-13 C133 F2 — 성과리포트 「…에게 보내기」가 맡긴 대상을 직접발송 명단에 **더한다**(R31 = 불러오기는 교체가 아니라 추가 · 같은 번호는 한 번).
   //   명단은 서버가 지금 다시 센 것이다(그 사이 산 사람 · 수신거부는 빠진다). 맡긴 것이 없으면 아무 일도 하지 않는다(직접발송 입구의 종전 동작 그대로).
+  //   ★ 2026-11-21 C151 — 「한 줄로 묻기」(kind ask)는 넘긴 계정 · 10분을 보고 꺼내며(takeAudience), 명단을 받은 뒤 채우기 직전에 지금 계정을 한 번 더 본다.
+  //   ask 일 때만 문안 · 제목 · 장문 · 광고 표기를 채운다(옛 kind 둘 = 명단만 · 종전 그대로).
   const loadPendingAudience = async () => {
-    const asked = takeAudience();
+    const asked = takeAudience({ userId: user?.id, companyId: user?.company?.id });
     if (!asked) return;
-    const got = await fetchAudience(asked.kind, asked.value);
-    if (!got) { setToast({ show: true, type: 'error', message: '고객 명단을 불러오지 못했어요. 분석 화면에서 다시 눌러 주세요.' }); return; }
+    const got = asked.kind === 'ask' ? await fetchAskAudience(asked.ask.plan) : await fetchAudience(asked.kind, asked.value);
+    if (!got) { setToast({ show: true, type: 'error', message: asked.kind === 'ask' ? '고객 명단을 불러오지 못했어요. 한 줄로 묻기에서 다시 눌러 주세요.' : '고객 명단을 불러오지 못했어요. 분석 화면에서 다시 눌러 주세요.' }); return; }
+    if (asked.kind === 'ask') {
+      const nowUser = useAuthStore.getState().user as any;
+      if (!askOwnerMatches(asked.ask, { userId: nowUser?.id, companyId: nowUser?.company?.id })) return;   // 받는 사이 계정이 바뀜 = 버림
+    }
     if (got.recipients.length === 0) { setToast({ show: true, type: 'info', message: '지금은 보낼 수 있는 고객이 없어요. 그 사이 구매했거나 수신을 거부한 고객은 빠집니다.' }); return; }
     const rows = got.recipients.map((r) => ({ phone: r.phone, name: r.name, extra1: '', extra2: '', extra3: '', callback: '' }));
     setDirectRecipients(appendUpdater<any>(rows, true, (r) => r.phone, () => undefined));
+    if (asked.kind === 'ask') {
+      setDirectMessage(asked.ask.message.body);
+      setDirectSubject(asked.ask.message.subject);
+      setDirectMsgType(asked.ask.message.msgType);
+      setAdTextEnabled(true);
+    }
     setToast({ show: true, type: 'success', message: audienceLoadedText(asked, got), duration: 6000 });
   };
 

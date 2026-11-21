@@ -598,7 +598,7 @@ export const SPAM_RESULT_LABEL: Record<string, string> = {
   [SPAM_RESULT.FAILED]: '실패',
   [SPAM_RESULT.TIMEOUT]: '시간초과',
   [SPAM_RESULT.UNCONFIRMED]: '확인 중',
-  [SPAM_RESULT.ERROR]: '검사폰 확인 불가',
+  [SPAM_RESULT.ERROR]: '도착 확인 불가',
 };
 
 /** 스팸필터 result → 표시명 (null/undefined → '대기') */

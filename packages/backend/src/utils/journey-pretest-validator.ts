@@ -207,7 +207,7 @@ export async function validateJourneyForActivation(
             reason: 'spam_check_pending',
             details: r.verdict === 'pending'
               ? '스팸 검사가 아직 진행 중이에요. 잠시 뒤 다시 켜면 같은 검사 결과를 이어서 봐요(다시 차감하지 않아요).'
-              : '통신사는 문자를 보냈는데 검사폰 확인이 늦어 결과를 확인하는 중이에요. 길어도 20분 안에 확정돼요. 그 뒤 다시 켜 주세요.',
+              : '통신사는 문자를 보냈는데 도착 확인이 늦어 결과를 확인하는 중이에요. 길어도 20분 안에 확정돼요. 그 뒤 다시 켜 주세요.',
           });
           continue;
         }

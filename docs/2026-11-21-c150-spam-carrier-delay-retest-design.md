@@ -143,7 +143,9 @@ export async function wakeResolvedSpamHolds(kick = kickSpamRetest): Promise<stri
 
 ### P5 상세 (`spam-probe.ts:243-249`)
 
-`dedupKey: \`spam-verdict-after-decided:${kstDateTag(new Date())}\`` · `cooldownMs: 24 * 60 * 60 * 1000` (한국 날짜 태그 = 기존 CT `ai-credit-calc.ts` `kstDateTag` · YYYYMMDD). 09시 측정 뒤에 생긴 건 = 다음 날 09시 측정의 24시간 창에 들어가 다음 날 키로 한 번(놓침 0).
+`dedupKey: \`spam-verdict-after-decided:${kstDateTag(new Date())}\`` · `cooldownMs: 24 * 60 * 60 * 1000` (한국 날짜 태그 = 기존 CT `ai-credit-calc.ts` `kstDateTag` · YYYYMMDD).
+
+**P5 2판(배포 adb43a01 뒤 · 1121 19:31:49 메일)** — 1판은 키만 날짜로 바꾸고 자료 창은 「돌린 때부터 24시간」 그대로였다. 배포 재시작 뒤 측정이 19:31 에 다시 돌아 아침 08:18 건을 다시 셌고, 새 키에는 보낸 기록이 없어 쿨다운이 비었다. 창이 돌린 때에 매이면 늦게 돈 날은 다음 날 창과 겹치고 앞 구간을 빠뜨린다. 2판 = 자료 창 = 그 날짜 키의 창 하나 `spamMeasureWindow(now)` = [전날 09시, 그날 09시)(한국 시각 · 한국 09시 = 같은 날짜 UTC 00시) · `measureSpamVerdicts(now)` 가 경계를 `$1 · $2` 로 · 키 = 창의 날짜 · 메시지 「전날 09시 ~ 오늘 09시」. 같은 날 몇 번을 돌려도 같은 창 · 같은 키(24시간 쿨다운) · 이웃 날 창은 끝 = 시작 = 사건 하나 = 경보 한 번. 그날 09시 뒤 생긴 건 = 다음 날 측정에서 한 번. 함께 = C149 빈틈(§9-1) 고침(Harold 「빈틈도 고쳐야지?」). 09시 측정 뒤에 생긴 건 = 다음 날 09시 측정의 24시간 창에 들어가 다음 날 키로 한 번(놓침 0).
 
 ## §4 영향표 (바뀌는 값을 읽는 전 소비처)
 
@@ -192,7 +194,7 @@ export async function wakeResolvedSpamHolds(kick = kickSpamRetest): Promise<stri
 
 ## §9 범위 밖 (기록만 · 착수 0)
 
-1. C149 빈틈 — 고객이 보는 글 일곱 줄에 「검사폰 · 검사 단말」이 남았다(`SendSpamWarnModal.tsx:77` · `SpamFilterTestModal.tsx:429 · 433 · 575` · `PerformancePage.tsx:847` · `journey-pretest-validator.ts:210` · `sms-result-map.ts:601` 결과표 이름 = 사용량 화면). C149 계약(R11) 식이 「테스트폰 · 시험 폰 · 실제 휴대폰으로」만 본다. 미가입이 보는 문장이라 이번 축에서 손대지 않는다.
+1. (★ 1121 P5 2판과 함께 고침 · Harold 「빈틈도 고쳐야지?」 · R11 식 넓힘) C149 빈틈 — 고객이 보는 글 일곱 줄에 「검사폰 · 검사 단말」이 남았다(`SendSpamWarnModal.tsx:77` · `SpamFilterTestModal.tsx:429 · 433 · 575` · `PerformancePage.tsx:847` · `journey-pretest-validator.ts:210` · `sms-result-map.ts:601` 결과표 이름 = 사용량 화면). C149 계약(R11) 식이 「테스트폰 · 시험 폰 · 실제 휴대폰으로」만 본다. 미가입이 보는 문장이라 이번 축에서 손대지 않는다.
 2. (2판에서 P3 ② 로 닫음 — 단말 장애 재검사 고리)
 3. 대행 일꾼 한 주기가 접수를 차례로 검사(한 건 60 ~ 90초 + 다듬기) — 같은 회사 여러 건이 몰리면 뒤 건이 그만큼 밀린다(11-19 16:05 ~ 16:07 금강제화 8건).
 4. 게이트웨이가 중계에 넘긴 시각 대조(LG U+ 지연이 중계 · 통신사 어느 쪽인지) — 게이트웨이 원장 조회.
