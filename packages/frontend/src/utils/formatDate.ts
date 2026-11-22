@@ -31,21 +31,73 @@ export interface VarToken {
  *   - 숫자 바로 뒤의 % 는 퍼센트 기호다. 그 자리에서 시작하는 조각은 변수가 아니다(`30%할인+10%적립`).
  *   - 건너뛸 때는 닫는 % 부터 다시 찾는다(`10%할인%이름%`).
  */
+/** ★ C160 S1 ① 백엔드 `var-tokens.ts encodedPercentStarts` 미러 — 완성된 UTF-8 인코딩 묶음의 `%` 자리(시험이 같은 값을 대조한다) */
+export function encodedPercentStarts(text: string): Set<number> {
+  const out = new Set<number>();
+  if (!text || !text.includes('%')) return out;
+  const run = /(?:%[0-9A-Fa-f]{2})+/g;
+  let m: RegExpExecArray | null;
+  while ((m = run.exec(text)) !== null) {
+    const at: number[] = [];
+    for (let i = m.index; i < m.index + m[0].length; i += 3) at.push(i);
+    const bytes = at.map((i) => parseInt(text.slice(i + 1, i + 3), 16));
+    let j = 0;
+    while (j < bytes.length) {
+      const b = bytes[j];
+      const need = b >= 0xc2 && b <= 0xdf ? 1 : b >= 0xe0 && b <= 0xef ? 2 : b >= 0xf0 && b <= 0xf4 ? 3 : 0;
+      if (need > 0 && j + need < bytes.length && bytes.slice(j + 1, j + 1 + need).every((x) => x >= 0x80 && x <= 0xbf)) {
+        for (let k = j; k <= j + need; k++) out.add(at[k]);
+        j += need + 1;
+      } else j += 1;
+    }
+  }
+  return out;
+}
+
 export function findVarTokens(text: string): VarToken[] {
   const out: VarToken[] = [];
   if (!text) return out;
+  const enc = encodedPercentStarts(text);
   const re = /%([가-힣A-Za-z_][^%\s]{0,19})%/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const start = m.index;
     const end = start + m[0].length;
-    if (start > 0 && /[0-9]/.test(text[start - 1])) {
+    if (enc.has(start)) {   // ★ C160 S1 ① 인코딩 바이트 = 조각 아님
+      re.lastIndex = start + 3;
+      continue;
+    }
+    if (start > 0 && /[0-9]/.test(text[start - 1]) && !enc.has(start - 3)) {
       re.lastIndex = end - 1;
       continue;
     }
     out.push({ start, end, name: m[1] });
   }
   return out;
+}
+
+/** ★ C160 S1 ② 백엔드 `replaceLiteralVar` 미러 — 매핑 이름 글자 대조 치환(인코딩 자리에서 시작하는 일치만 건너뜀 · 값은 글자 그대로 넣는다) */
+export function replaceLiteralVar(text: string, token: string, value: string): string {
+  if (!text || !token || !text.includes(token)) return text;
+  const enc = encodedPercentStarts(text);
+  let out = '';
+  let pos = 0;
+  let i = text.indexOf(token);
+  while (i !== -1) {
+    if (enc.has(i)) { i = text.indexOf(token, i + 1); continue; }
+    out += text.slice(pos, i) + value;
+    pos = i + token.length;
+    i = text.indexOf(token, pos);
+  }
+  return out + text.slice(pos);
+}
+
+/** ★ C160 S1 ② 백엔드 `hasLiteralVar` 미러 */
+export function hasLiteralVar(text: string, token: string): boolean {
+  if (!text || !token || !text.includes(token)) return false;
+  const enc = encodedPercentStarts(text);
+  for (let i = text.indexOf(token); i !== -1; i = text.indexOf(token, i + 1)) if (!enc.has(i)) return true;
+  return false;
 }
 
 /** 조각마다 바꿀 값을 받아 문장을 다시 잇는다(값이 undefined면 그 조각은 원문 그대로) — 백엔드 `replaceVarTokens` 미러 */
@@ -463,9 +515,10 @@ export function replaceDirectVars(
     } else {
       displayVal = useFallbackLabels ? label : '';
     }
+    // ★ 2026-11-22 C160 구현 Codex 1R #1 — 값은 글자 그대로(함수 인자 = 값 안의 `$'` 등을 바꾸기 문법으로 읽지 않는다 · 백엔드 0단계와 같은 뜻)
     result = result.replace(
       new RegExp(variable.replace(/%/g, '%'), 'g'),
-      displayVal
+      () => displayVal
     );
   }
   // 잔여 %변수% 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
@@ -638,21 +691,21 @@ export function replaceMessageVars(
     const val = data[f.field_key];
     const dt = f.data_type || (f.field_type ? f.field_type.toLowerCase() : undefined);
     if (label && val != null) {
-      result = result.replace(new RegExp(`%${escapeRegex(label)}%`, 'g'), renderValue(f.field_key, val, dt));
+      result = replaceLiteralVar(result, `%${label}%`, renderValue(f.field_key, val, dt));
     }
   }
 
   // column 키로도 치환 (sampleCustomer가 column 키일 때 호환)
   for (const [k, v] of Object.entries(data)) {
     if (v != null) {
-      result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), renderValue(k, v, typeMap[k]));
+      result = replaceLiteralVar(result, `%${k}%`, renderValue(k, v, typeMap[k]));
     }
   }
 
   // 추가 치환 (회신번호 등 필드 외 변수)
   if (options?.extraReplacements) {
     for (const [pattern, value] of Object.entries(options.extraReplacements)) {
-      result = result.replace(new RegExp(escapeRegex(pattern), 'g'), value);
+      result = result.replace(new RegExp(escapeRegex(pattern), 'g'), () => value);   // ★ C160 구현 Codex 1R #1 값은 글자 그대로
     }
   }
 
@@ -706,13 +759,11 @@ export function replaceVarsByFieldMeta(
   options?: { fallback?: boolean }
 ): string {
   if (!text || !recipient) return text;
-  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const fallback = options?.fallback ?? false;
   let result = text;
 
   fieldsMeta.forEach(fm => {
     if (fm.field_key === 'phone' || fm.field_key === 'sms_opt_in') return;
-    const pattern = new RegExp(escapeRegex(fm.variable), 'g');
     let rawValue = recipient[fm.field_key];
     if ((rawValue == null || rawValue === '') && recipient.custom_fields && typeof recipient.custom_fields === 'object') {
       rawValue = recipient.custom_fields[fm.field_key];
@@ -727,7 +778,7 @@ export function replaceVarsByFieldMeta(
     } else {
       display = fallback ? (fm.display_name || fm.field_key) : '';
     }
-    result = result.replace(pattern, display);
+    result = replaceLiteralVar(result, fm.variable, display);   // ★ C160 S1 ② 발송 2단계와 같은 글자 대조
   });
 
   return result;
@@ -758,7 +809,6 @@ export function replaceVarsBySampleCustomer(
   if (!text) return text;
   const sc = sampleCustomer || {};
   let result = text;
-  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   // ★ D142 (2026-04-28): displayValue 단일 진입점.
   //   k가 fieldKey면 22개 룰대로 / 한글 라벨 또는 미지정이면 String(v) 원본.
@@ -768,7 +818,7 @@ export function replaceVarsBySampleCustomer(
   Object.entries(sc).forEach(([k, v]) => {
     if (v == null) return;
     const display = displayValue(v, k);
-    result = result.replace(new RegExp(`%${escapeRegex(k)}%`, 'g'), display);
+    result = replaceLiteralVar(result, `%${k}%`, display);
   });
 
   // 2) aliasMap 적용 (예: sc["이름"] = "김철수"이면 %고객명%, %성함%도 치환)
@@ -778,7 +828,7 @@ export function replaceVarsBySampleCustomer(
       if (val == null) return;
       const display = displayValue(val, realKey);
       aliases.forEach(a => {
-        result = result.replace(new RegExp(`%${escapeRegex(a)}%`, 'g'), display);
+        result = replaceLiteralVar(result, `%${a}%`, display);
       });
     });
   }
@@ -1024,7 +1074,7 @@ export function getMaxByteMessage(msg: string, recipients: any[], variableMap: R
       };
       maxValue = defaults[variable] || '가나다라마바';
     }
-    result = result.replace(new RegExp(variable.replace(/%/g, '%'), 'g'), maxValue);
+    result = replaceLiteralVar(result, variable, maxValue);   // ★ C160 S1 ② 발송 2단계와 같은 글자 대조
   });
   return result;
 }

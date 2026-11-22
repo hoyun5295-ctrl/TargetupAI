@@ -81,7 +81,8 @@ describe('S1 나가는 문자 종류의 규칙(설계서 S4-b)', () => {
     const rest = code(fn.slice(fn.indexOf('// Step 1: Liquid 렌더링')));
     expect(rest.match(/\/%[^%/]+%\/g/g)).toBeNull();
     expect(rest).toContain('const pattern = `%${varName}%`;');
-    expect(rest).toContain('result = result.split(pattern).join(displayValue);');
+    // ★ 2026-11-22 C160 S1 ② — 글자 그대로 바꾸기는 그대로 · 주소의 인코딩 자리에서 시작하는 일치만 건너뛴다(replaceLiteralVar = 그 밖은 split · join 과 같은 결과)
+    expect(rest).toContain('result = replaceLiteralVar(result, pattern, displayValue);');
     expect(rest).toContain('result = cleanLeftoverVars(result);');
   });
 });

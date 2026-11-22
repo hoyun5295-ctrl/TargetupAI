@@ -38,6 +38,9 @@ export function smsMinBytes(input: SmsMinBytesInput): SmsMinBytes | null {
   const reco = maskRecoSlot(src);
   let text = reco ? reco.template.split(reco.token).join('') : src;
   const tokens = findVarTokens(text);
+  // ★ 2026-11-22 C160 S1 ④ 변수 조각 + 인코딩 바이트(%XX)가 함께 든 글 = 하한을 내지 않는다(Liquid 생략과 같은 꼴) — 치환 값에 따라 인코딩 묶음이
+  //   이어지거나 끊겨(`%X%EC%9D%B4%`) 길이가 값마다 달라 증명할 수 없다 · 받는 분마다의 실제 길이는 뒤 관문(큐 적재 CT · 예약 수정 큐 갈래 · 여정 실행기)이 잰다.
+  if (tokens.length > 0 && /%[0-9A-Fa-f]{2}/.test(text)) return null;
   for (const t of [...tokens].reverse()) text = text.slice(0, t.start) + text.slice(t.end);
   const bounded = input.shortenUrls ? shortenedLengthBounds(text).min : text;
   const clean = input.sanitize ? sanitizeUnsendableForSms(bounded).sanitized : bounded;

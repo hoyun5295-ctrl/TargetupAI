@@ -100,7 +100,8 @@ interface CarryLink {
  * 이 실패에서는 발송 시도 표식을 남길 이유가 없다 — 남기면 한 통도 안 나간 달의 대행료 환불이 "발송 시작됨"으로 막힌다.
  * 그 밖의 실패는 커밋 여부가 미확정이므로 표식을 유지한다(§3-9-1).
  */
-export const DEFINITE_NO_COMMIT = new Set(['INSUFFICIENT_BALANCE', 'LINK_PLACEHOLDER_UNEDITED', 'BENEFIT_PLACEHOLDER_UNEDITED', 'NIGHT_AD_RESTRICTED', SPAM_BLOCKED_CODE]);
+// ★ 2026-11-22 C160 S2 UNKNOWN_VARIABLE = 공용 발송 길 맨 앞(캠페인 INSERT · 차감 앞)의 없는 변수 판정 — 확실히 안 나감(정리 · 문안비 되돌림 · 사유)
+export const DEFINITE_NO_COMMIT = new Set(['INSUFFICIENT_BALANCE', 'LINK_PLACEHOLDER_UNEDITED', 'BENEFIT_PLACEHOLDER_UNEDITED', 'NIGHT_AD_RESTRICTED', SPAM_BLOCKED_CODE, 'UNKNOWN_VARIABLE']);
 
 // ── 공통 도우미 ──────────────────────────────────────────────────────
 async function skip(tp: PlannerTouchpointRow, reason: string, notice: string, fromStatuses?: string[], claimToken?: string): Promise<ExecOutcome> {

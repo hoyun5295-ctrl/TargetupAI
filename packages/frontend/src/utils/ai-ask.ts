@@ -5,7 +5,7 @@
  * 숫자는 서버가 준 값만 그린다(지어내지 않는다) · 묶음 이름 · 설명 = 서버 한 곳(askGroupMeta).
  * ⛔ 모델명 0 · 검사 방식 낱말 0 · 줄표 0.
  */
-import { findVarTokens } from './formatDate';
+import { findVarTokens, hasLiteralVar } from './formatDate';
 import { detectLiquidSyntax } from './liquid-templating';
 import { SPLIT_COUNT_RANGE, SPLIT_INTERVAL_RANGE } from './split-send';
 import { sendRejectionReasonOf, type AiLineColumn } from './ai-line';
@@ -274,7 +274,7 @@ export function askSendChannel(chosen: AskChannel, body: string, mappingNames: r
   if (chosen !== 'SMS') return chosen;
   const t = String(body || '');
   if (!t) return chosen;
-  const has = (name: string) => !!name && t.includes(`%${name}%`);
+  const has = (name: string) => !!name && hasLiteralVar(t, `%${name}%`);   // ★ C160 S1 ② 발송 2단계와 같은 글자 대조
   const vars = ASK_STEP0_VAR_NAMES.some(has) || mappingNames.some(has) || detectLiquidSyntax(t) || findVarTokens(t).length > 0;
   return vars || ASK_URL.test(t) ? 'LMS' : 'SMS';
 }

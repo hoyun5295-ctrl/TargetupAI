@@ -41,6 +41,8 @@ export interface AutoCampaignNotifyContext {
   // ★ D111 P5: (광고)+무료거부 부착용
   isAd?: boolean;
   opt080Number?: string;
+  /** ★ 2026-11-22 C160 S2 — 이번 회차 문안이 발송 길목에서 막힐 사유(없는 변수 등 · 2시간 전 검사가 같은 판정으로 낸 문장) */
+  copyIssue?: string | null;
 }
 
 // ════════════════════════════════════════════════════════════
@@ -283,6 +285,11 @@ export function buildSpamTestResultNotifyMessage(ctx: AutoCampaignNotifyContext)
     lines.push('');
     lines.push('[경고] 문안이 스팸필터에 차단되었습니다.');
     lines.push('관리자 페이지에서 문안을 수정하거나 일시정지해주세요.');
+  }
+  if (ctx.copyIssue) {
+    lines.push('');
+    lines.push(`[확인 필요] ${ctx.copyIssue}`);
+    lines.push('고치지 않으면 이번 회차는 보내지 않아요.');
   }
   return lines.join('\n');
 }

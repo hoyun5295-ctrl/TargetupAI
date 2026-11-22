@@ -137,6 +137,35 @@ export function stripLiquidLeftovers(text: string): string {
 }
 
 /**
+ * ★ 2026-11-22 C160 — 발송 치환 3단계(남은 %조각% 지움)에 닿을 수 있는 글 조각(순수 · 없는 변수 판정 var-tokens unknownVarNames 가 쓴다).
+ *   발송(messageUtils replaceVariables)과 같은 길을 같은 파서로 따른다: Liquid 가 없으면 [원문] · 파싱이 되면 렌더는 AST 대로 간다(평가는 오류를 모으기만 하고
+ *   던지지 않는다) = 글 노드 전부(모든 if · case 갈래 · for 안 · 주석 노드는 글이 없다) · 파싱이 실패하면 렌더가 원문을 돌려주고 남은 태그만 지운다 = [stripLiquidLeftovers(원문)].
+ *   정규식으로 태그 · 주석 경계를 흉내 내지 않는다(구현 Codex 1R · 2R = 판정 두 벌의 어긋남).
+ */
+export function liquidTextsReachingStep3(template: string): string[] {
+  const t = String(template ?? '');
+  if (!detectLiquidSyntax(t)) return [t];
+  let ast: ASTNode[];
+  try { ast = parse(tokenize(t)); } catch { return [stripLiquidLeftovers(t)]; }
+  const out: string[] = [];
+  // ★ 판정 경계(구현 Codex 7R 뒤 확정) = 글 노드 + 출력식 **하나**를 그 안의 Liquid 변수가 모두 빈 채로 평가한 글. assign · for 변수의 흐름은 따라가지 않는다 —
+  //   갈래 · 반복을 정적으로 예측하면 놓침 · 거짓 막힘을 함께 없앨 수 없다(6R 에 넣은 흐름 흉내가 7R 의 두 반례를 낳았다) · 그 흐름은 Liquid 자기 판정(설계서 §8-13).
+  const walk = (nodes: ASTNode[]): void => {
+    for (const n of nodes) {
+      if (n.type === 'text') out.push(n.value);
+      // ★ C160 구현 Codex 4R · 5R — 출력식은 값이 빈 고객에게 나가는 글을 렌더의 평가기(evalExpression = 필터 · 인자 파싱 그대로)로 얻는다:
+      //   default 대체값(`{{ customer.name | default: '%닉네임%' }}` · 이스케이프 따옴표 포함) · 글자 출력식이 낸 글. 정규식으로 따로 뽑지 않는다(판정 두 벌).
+      else if (n.type === 'output') { try { out.push(stringifyValue(evalExpression(n.expression, {}, []))); } catch { /* 평가 못 하는 식 = 글 없음 */ } }
+      else if (n.type === 'if') { for (const b of n.branches) walk(b.children); if (n.elseChildren) walk(n.elseChildren); }
+      else if (n.type === 'case') { for (const w of n.whens) walk(w.children); if (n.elseChildren) walk(n.elseChildren); }
+      else if (n.type === 'for') walk(n.children);
+    }
+  };
+  walk(ast);
+  return out;
+}
+
+/**
  * ★ 2026-11-10 생성물 평문화의 한 규칙(순수) — 발송 렌더가 쓰는 **같은 파서**(tokenize → parse) 의 구조에서 else 갈래만 고른다.
  *   - 조건식은 계산하지 않는다(Codex 1R · 빈 고객 렌더는 != 조건이 참이 돼 등급 전용 문구를 남겼다)
  *   - if · case = else 갈래만(else 없으면 덩어리째 없음) · for · assign · comment = 없음 · {{ … | default: 'x' }} = x · 그 밖 출력 = 없음

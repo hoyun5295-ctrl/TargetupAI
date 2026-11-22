@@ -6,12 +6,12 @@ import { checkBrandSendGate } from '../utils/kakao-brand-gate';
 // ★ 2026-09-27 한줄로 V2 m070 — 발송 뒤 상태(캠페인 상태 축 CT)
 import { CAMPAIGN_POST_SEND_STATUSES } from '../utils/campaign-sweep-scope';
 import { authenticate } from '../middlewares/auth';
-import { extractVarCatalog, validatePersonalizationVars, VarCatalogEntry } from '../services/ai';
+import { VarCatalogEntry } from '../services/ai';
 import { buildGenderFilter, buildGradeFilter, buildRegionFilter, getRegionVariants, findLinkDefectInText, parseOffsetParam } from '../utils/normalize';
 import { getSourceRef, logTrainingData, updateTrainingMetrics } from '../utils/training-logger';
 // ★ 2026-07-03 Gap5 Layer2: 고객별 발송 카운터 (예측 분모 전용 — 타겟 선정 무관)
 import { recordCustomerSends } from '../utils/customer-send-stats';
-import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, stripAdParts, composeSpamCheckText, kakaoFallbackSpamItems } from '../utils/messageUtils';
+import { replaceVariables, enrichWithCustomFields, getOpt080Number, buildAdMessage, prepareFieldMappings, prepareSendMessage, pickCustomVarMappings, stripAdParts, composeSpamCheckText, kakaoFallbackSpamItems } from '../utils/messageUtils';
 import { checkSpamBlockBeforeCharge } from '../utils/spam-block';
 import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isSuccess, SPAM_RESULT, getSendTypeLabel, KAKAO_INROW_FALLBACK_SMS_SQL, KAKAO_INROW_FALLBACK_LMS_SQL, getDisplayContents, spamBilledResultSql, spamFailedResultSql, spamResultRowStatus, deliveredViewOf } from '../utils/sms-result-map';
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
@@ -82,7 +82,7 @@ import { validateScheduledAt, isInSendChangeLock, SEND_CHANGE_LOCK_MINUTES } fro
 import { isWithinBrandSendWindow, brandSendWindowError, parseSplitSetting, planSplitSchedule, splitSendTime, splitSpanError, resolveSplitFirstSend } from '../utils/send-time-util';
 import { countStagingFiltered, countStagingChecks, planIndividualCallbackExclusion, createDirectSendCampaign, queryCampaignInsert, effectiveUnsubFilter, stagingSendSignature } from '../utils/direct-send-core';
 import { DirectSendError, loadedSendFailureMessage, adTextOn, campaignAdTextSelect } from '../utils/direct-send-spec';
-import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
+import { findUneditedSendPlaceholder, findSendCopyIssue, knownSendVarNames } from '../utils/send-placeholder-gate';
 import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
@@ -624,7 +624,8 @@ router.post('/', async (req: Request, res: Response) => {
 
     // ★ 2026-07-02 링크 placeholder 발송 가드 — 미완성 링크 자리 잔존 시 실발송 차단 (AI 캠페인/타겟 발송 경로)
     // ★ 2026-09-30 AI 혜택 자리까지(발송 길목 CT send-placeholder-gate · 본문 + 제목)
-    const createPh = findUneditedSendPlaceholder(messageContent, subject);
+    // ★ 2026-11-22 C160 S2 — 없는 변수(그 회사 매핑에 없는 %이름%)도 같은 길목에서(고객 DB 로 보내는 길 = 매핑 이름만)
+    const createPh = findSendCopyIssue({ bodies: [messageContent], others: [subject] }, knownSendVarNames(Object.keys(await prepareFieldMappings(companyId)), false));
     if (createPh) return res.status(400).json({ error: createPh.error, code: createPh.code });
 
     // ★ D143 (2026-05-04, 정식 오픈 D-Day 1일 전) — D142+ 자동 승격 정책 폐지
@@ -901,9 +902,10 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
     const fieldMappings = await prepareFieldMappings(companyId);
-    // availableVars는 변수 검증용으로 별도 추출 (extractVarCatalog는 순수 함수)
-    const companySchemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
-    const { availableVars } = extractVarCatalog(companySchemaResult.rows[0]?.customer_schema);
+    // ★ 2026-11-22 C160 S2 — 저장된 본문의 없는 변수 = 발송 대신 400(옛: 경고만 찍고 빈 글자로 발송 · 만든 뒤 칼럼 이름이 바뀐 캠페인도 여기서 걸린다).
+    //   아는 이름 = 아래 치환이 쓰는 같은 매핑(고객 DB 로 보내는 길 · 주소록 칸 없음) · 차감 · 실행 기록 앞.
+    const sendCopy = findSendCopyIssue({ bodies: [campaign.message_content] }, knownSendVarNames(Object.keys(fieldMappings), false));
+    if (sendCopy) return res.status(400).json({ error: sendCopy.error, code: sendCopy.code });
 
     // ★ field_mappings에서 필요한 컬럼 자동 추출 (동적 SELECT)
     // ★ store_phone 포함: 개별회신번호 사용 시 callback이 없으면 store_phone을 폴백으로 사용
@@ -960,13 +962,6 @@ router.post('/:id/send', async (req: Request, res: Response) => {
 
     if (customers.length === 0) {
       return res.status(400).json({ error: '발송 대상이 없습니다.' });
-    }
-
-    // ★ 발송 전 메시지 변수 검증 (잘못된 변수가 고객에게 노출되는 것을 방지)
-    const messageValidation = validatePersonalizationVars(campaign.message_content || '', availableVars);
-    if (!messageValidation.valid) {
-      console.warn(`[발송 변수 검증] 잘못된 변수 발견: ${messageValidation.invalidVars.join(', ')}`);
-      // 잘못된 변수는 빈 문자열로 치환하여 발송 (차단하지 않고 안전하게 처리)
     }
 
 // excluded_phones 목록 조회
@@ -2430,7 +2425,12 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
     }
     // ★ 2026-09-30 채우지 않은 링크 · AI 자리(혜택 · 기간 등)도 차감 앞에서 막는다(발송 길목 CT). 이 라우트는 AI 오퍼레이터 승인 발송이 쓴다 —
     //   생성 문안의 지어낸 혜택이 자리표시로 바뀌므로(0930 혜택 대조) 여기를 비우면 자리표시가 고객에게 나간다. 알림톡 실패 대체 문안도 본다.
-    const directPh = findUneditedSendPlaceholder(...textsToCheck, alimtalkNextContents, alimtalkNextSubject);
+    // ★ 2026-11-22 C160 S2 — 없는 변수도 같은 길목(주소록 줄을 넘기는 길 = 매핑 이름 + 주소록 칸) · 매핑은 아래 치환이 쓰는 같은 값을 여기서 한 번 읽는다.
+    const directFieldMappings = await prepareFieldMappings(companyId);
+    const directPh = findSendCopyIssue(
+      { bodies: [message, ...textsToCheck.slice(2), alimtalkNextContents], others: [subject, alimtalkNextSubject] },
+      knownSendVarNames(Object.keys(directFieldMappings), true),
+    );
     if (directPh) return res.status(400).json({ success: false, error: directPh.error, code: directPh.code });
 
     const resolvedSendType: string = isDirectPipelineSendType(sendType) ? sendType : 'direct';
@@ -2937,8 +2937,7 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
     // ★ D142+ B1: finalIsAd(광고 자동 승격 결과) 기준 — 사용자가 본문에 (광고) 박았으면 080번호 조회
     const directOpt080 = finalIsAd ? await getOpt080Number(userId, companyId) : '';
 
-    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
-    const directFieldMappings = await prepareFieldMappings(companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 · ★ C160 S2 — 읽기는 길목 판정 앞(directFieldMappings)에서 한 번(판정 = 치환이 같은 값)
     // ★ storageType 기반 동적 필터 — 직접 컬럼만 SELECT, JSONB 내부 키는 custom_fields 컬럼에서 접근 (D72)
     const directMappingCols = Object.values(directFieldMappings).filter((m: any) => m.storageType !== 'custom_fields').map((m: any) => m.column);
     const directSelectCols = [...new Set(['phone', 'custom_fields', ...directMappingCols])].join(', ');
@@ -4099,7 +4098,11 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'LMS/MMS는 제목이 필수입니다' });
     }
     // ★ 2026-09-30 예약 문안 수정도 발송 길목 — 채우지 않은 링크 · AI 혜택 자리는 저장하지 않는다(생성 길목과 같은 CT).
-    const editPh = findUneditedSendPlaceholder(message, subject);
+    // ★ 2026-11-22 C160 S2 — 없는 변수도. 아는 이름은 갈래마다 다르다: 적재 전(처음 읽은 send_phase = queued · 아래 그 갈래로 간다) = 일꾼이 나중에
+    //   주소록 줄과 함께 치환 = 매핑 + 주소록 칸 · 그 밖(큐 0 · 큐 갈래) = 아래에서 주소록 인자 없이 다시 만든다 = 매핑만. 매핑은 여기서 한 번 읽어 큐 갈래가 같은 값을 쓴다.
+    const editFieldMappings = await prepareFieldMappings(companyId);
+    const editQueued = campaign.rows[0].send_phase === 'queued';
+    const editPh = findSendCopyIssue({ bodies: [message], others: [subject] }, knownSendVarNames(Object.keys(editFieldMappings), editQueued));
     if (editPh) return res.status(400).json({ success: false, error: editPh.error, code: editPh.code });
 
     // 15분 이내 체크
@@ -4124,7 +4127,7 @@ router.put('/:id/message', async (req: Request, res: Response) => {
     //   **처음 읽은 상태가 queued면 큐를 보지 않고** 여기서 끝낸다(Codex 4차 1R: 그 사이 워커가 첫 청크를 적재하면 큐에 행이 보여
     //   아래 큐 편집 경로로 새어 적재된 청크만 새 문안이 됐다). send_phase='queued' 조건 = 워커 선점과 원자적 — 선점됐으면 0행 → 409.
     //   큐 행이 없으니 알림톡·브랜드는 채널로 거절한다(아래 큐 기반 거절과 같은 규칙).
-    if (campaign.rows[0].send_phase === 'queued') {
+    if (editQueued) {
       const queuedChannel = String(campaign.rows[0].send_channel || '');
       if (queuedChannel === 'alimtalk') {
         return res.status(400).json({ success: false, error: '알림톡 예약 캠페인은 문안 수정을 지원하지 않습니다. 알림톡은 승인된 템플릿 그대로 발송됩니다. 예약을 취소한 뒤 다시 발송해주세요.' });
@@ -4132,13 +4135,15 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       if ((BRAND_CAMPAIGN_CHANNELS as readonly string[]).includes(queuedChannel)) {
         return res.status(400).json({ success: false, error: '브랜드메시지가 포함된 예약 캠페인은 문안 수정을 지원하지 않습니다. 예약을 취소한 뒤 다시 발송해주세요.' });
       }
+      // ★ C160 S4 — 발송 자료의 글이 바뀌므로 실린 매핑(varMappings)도 고친 글 · 지금 매핑으로 다시 만든다(옛 이름이 남거나 새 이름이 빠지지 않게 · 같은 UPDATE)
+      const editVarMappings = pickCustomVarMappings(editFieldMappings, [sanitizedEditMessage]);
       const queuedUpd = await query(
         `UPDATE campaigns
             SET message_template = $1, message_subject = $2, message_content = $3,
-                send_config = COALESCE(send_config, '{}'::jsonb) || jsonb_build_object('message', $3::text, 'subject', $2::text),
+                send_config = (COALESCE(send_config, '{}'::jsonb) - 'varMappings') || jsonb_build_object('message', $3::text, 'subject', $2::text) || $5::jsonb,
                 updated_at = NOW()
           WHERE id = $4 AND send_phase = 'queued'`,
-        [sanitizedEditMessage, subject || null, sanitizedEditMessage, campaignId]
+        [sanitizedEditMessage, subject || null, sanitizedEditMessage, campaignId, JSON.stringify(editVarMappings ? { varMappings: editVarMappings } : {})]
       );
       if (queuedUpd.rowCount === 0) {
         return res.status(409).json({ success: false, code: 'LOADING_IN_PROGRESS', error: '발송 준비(적재)가 시작돼 지금은 수정할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' });
@@ -4184,8 +4189,7 @@ router.put('/:id/message', async (req: Request, res: Response) => {
       return res.json({ success: true, message: '문안이 수정되었습니다 (발송 시 적용)' });
     }
 
-    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 (customer_schema 조회 + extractVarCatalog + enrichWithCustomFields)
-    const editFieldMappings = await prepareFieldMappings(companyId);
+    // ★ D102: prepareFieldMappings 컨트롤타워로 통합 · ★ C160 S2 — 읽기는 길목 판정 앞(editFieldMappings)에서 한 번(판정 = 치환이 같은 값)
 
     // ★ D32: 동적 컬럼 SELECT — fieldMappings에서 필요한 컬럼 자동 추출
     const editBaseColumns = ['phone', 'custom_fields'];

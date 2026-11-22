@@ -58,7 +58,7 @@ import { getFieldByKey } from './standard-field-map';
 import { isWithinSendHours } from './send-time-util';
 // ★ B5/B6: 신규 컨트롤타워
 import { fetchTargetSampleCustomer } from './target-sample';
-import { findUneditedSendPlaceholder } from './send-placeholder-gate';
+import { findSendCopyIssue, knownSendVarNames } from './send-placeholder-gate';
 import {
   buildAiGeneratedNotifyMessage,
   buildPreNotifyMessage,
@@ -894,7 +894,8 @@ async function executeAutoCampaign(ac: any): Promise<void> {
     // ★ 2026-09-30 채우지 않은 링크 · AI 자리(혜택 · 기간 등)가 남은 문안은 보내지 않는다(발송 길목 CT · 캠페인 · 직접발송과 같은 판정).
     //   AI 문안 모드는 전날 생성 → 담당자 알림 → 수정이 없으면 그대로 발송이다. 0930 혜택 대조로 지어낸 혜택이 자리표시로 바뀌고,
     //   AI 실패 비상 문안도 자리표시를 둔다 — 여기를 비우면 자리표시가 고객에게 나간다. 캠페인 행 생성 · 차감 앞이다.
-    const autoPh = findUneditedSendPlaceholder(messageContent, messageSubject);
+    // ★ 2026-11-22 C160 S2 — 없는 변수도(회차마다 그 순간의 매핑으로 채운다 = 저장 뒤 칼럼 이름이 바뀐 문안도 여기서 걸린다 · 고객 DB 길 = 매핑 이름만)
+    const autoPh = findSendCopyIssue({ bodies: [messageContent], others: [messageSubject] }, knownSendVarNames(Object.keys(fieldMappings), false));
     if (autoPh) {
       console.warn(`${logPrefix} 채우지 않은 자리가 남은 문안 — 본 발송 중단 (${autoPh.code})`);
       await markFailed(ac, autoPh.error);
@@ -1433,6 +1434,12 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
       return;
     }
 
+    // ★ 2026-11-22 C160 S2 — 본 발송 길목(위 실행 판정)과 같은 판정을 2시간 전에 미리 · 걸리면 담당자 알림 문자에 사유를 싣는다(실행 때는 알림이 가지 않는다)
+    const preSendCopyIssue = findSendCopyIssue(
+      { bodies: [messageContent], others: [ac.message_subject || ac.generated_message_subject] },
+      knownSendVarNames(Object.keys(await prepareFieldMappings(ac.company_id)), false),
+    );
+
     const channel = ac.message_type || 'SMS';
 
     // ★ B5: 타겟 첫 고객 조회 — CT-A target-sample.ts
@@ -1601,6 +1608,7 @@ async function executePreSendSpamTest(ac: any): Promise<void> {
         messageContent,
         isAd: ac.is_ad ?? false,
         opt080Number: spamOpt080,
+        copyIssue: preSendCopyIssue?.error ?? null,
       });
 
       const notifyRows: any[][] = [];

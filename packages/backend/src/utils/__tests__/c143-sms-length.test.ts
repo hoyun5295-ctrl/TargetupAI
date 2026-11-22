@@ -292,7 +292,9 @@ describe('W2 · W3 여정 · L8 예약 문안 수정 · 워커 종결(소스 계
     const ts = read('routes/campaigns.ts');
     const h = ts.slice(ts.indexOf("router.put('/:id/message'"), ts.indexOf("router.get('/:id/message/progress'"));
     expect(h.indexOf('smsMinBytesIssue(')).toBeGreaterThan(0);
-    expect(h.indexOf('smsMinBytesIssue(')).toBeLessThan(h.indexOf("if (campaign.rows[0].send_phase === 'queued')"));
+    // ★ 2026-11-22 C160 S2 — 갈래 조건은 판정 앞에서 한 번 뽑은 editQueued(처음 읽은 send_phase · 아는 이름도 이 값으로 고른다)
+    expect(h).toContain("const editQueued = campaign.rows[0].send_phase === 'queued';");
+    expect(h.indexOf('smsMinBytesIssue(')).toBeLessThan(h.indexOf('if (editQueued) {'));
     expect(h.indexOf('smsRowOverLimit(recipient.msg_type, builtMessage)')).toBeGreaterThan(0);
     expect(h.indexOf('smsRowOverLimit(recipient.msg_type, builtMessage)')).toBeLessThan(h.indexOf('UPDATE ${table}'));
     expect(h.indexOf("code: 'SMS_TOO_LONG'", h.indexOf('builtByRecipient'))).toBeLessThan(h.indexOf('message_edit:'));

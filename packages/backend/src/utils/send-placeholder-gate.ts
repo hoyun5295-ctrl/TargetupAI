@@ -17,7 +17,7 @@
  */
 import { hasUneditedLinkPlaceholder, LINK_PLACEHOLDER } from './brand-link-core';
 import { findAiFillPlaceholder } from './copy-benefit-detector';
-import { findVarTokens, unknownVarNames } from './var-tokens';
+import { findVarTokens, unknownVarNames, STEP0_VAR_NAMES } from './var-tokens';
 import { hasCartLiquidVars, detectLiquidSyntax } from './liquid-templating';
 import { scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 D6 막음 글자 판정(글자 CT)
 import { recoSlotIssue, hasRecoMark } from './reco-slot';   // ★ 2026-11-13 C133 F2 ① 추천 상품 자리(순수)
@@ -40,6 +40,35 @@ export function findUneditedSendPlaceholder(
     if (found) return { code: 'BENEFIT_PLACEHOLDER_UNEDITED', error: fillPlaceholderError(found) };
   }
   return null;
+}
+
+/** ★ 2026-11-22 C160 S2 없는 변수 문장 한 곳 — 여정(journeyCopyIssue) · 발송 길목(findSendCopyIssue)이 같은 글자를 쓴다 */
+export const unknownVarMessage = (names: string[]): string =>
+  `고객 정보에 없는 변수(${names.map((n) => `%${n}%`).join(', ')})는 보낼 때 빈칸이 돼요. 있는 항목으로 바꾸거나 지워 주세요.`;
+
+/**
+ * ★ C160 S2 그 길의 치환이 실제로 채우는 이름 — 매핑 이름(prepareFieldMappings 키) + (주소록 줄을 넘기는 길이면) 0단계 주소록 칸 일곱.
+ *   고객 DB 로 보내는 길(캠페인 · 자동발송 · 예약 수정 적재 뒤)에서 `%기타1%` 은 채워지지 않는다(설계서 §0-3 K3).
+ */
+export function knownSendVarNames(mappingNames: Iterable<string>, addressBook: boolean): ReadonlySet<string> {
+  return new Set<string>([...mappingNames, ...(addressBook ? STEP0_VAR_NAMES : [])]);
+}
+
+export type SendCopyIssueCode = SendPlaceholderCode | 'UNKNOWN_VARIABLE';
+
+/**
+ * ★ C160 S2 발송 길목 판정 한 함수(뿌리 R50 을 전 길목에) — ① 채울 자리(종전 판정 · 문장 · 코드 그대로 · 먼저) ② 본문의 없는 변수.
+ *   bodies = 치환을 지나는 글(본문 · 알림톡 대체 본문 · 개인화 치환본) · others = 채울 자리만 보는 글(제목 · 제목은 어느 길에서도 치환하지 않는다).
+ *   아는 이름은 필수 인자다 — 길목이 반쪽(채울 자리만)을 부를 수 없다.
+ */
+export function findSendCopyIssue(
+  copy: { bodies: Array<string | null | undefined>; others?: Array<string | null | undefined> },
+  knownVarNames: ReadonlySet<string>,
+): { code: SendCopyIssueCode; error: string } | null {
+  const ph = findUneditedSendPlaceholder(...copy.bodies, ...(copy.others || []));
+  if (ph) return ph;
+  const unknown = [...new Set(copy.bodies.flatMap((t) => unknownVarNames(t, knownVarNames)))];
+  return unknown.length > 0 ? { code: 'UNKNOWN_VARIABLE', error: unknownVarMessage(unknown) } : null;
 }
 
 // ★ 2026-06-26 라프레리 신고 fix(옛 journey-builder): 대괄호가 있기만 하면 막던 판정이 「[송파가락점]」 같은 정상 글까지 막았다 →
@@ -103,7 +132,7 @@ export function journeyCopyIssue(
   if (subjVar) return { code: 'SUBJECT_VARIABLE', message: '제목에는 고객 정보 변수를 넣을 수 없어요(제목은 글자 그대로 나가요). 변수를 빼고 적어 주세요.' };
   const unknown = [...new Set(bodies.flatMap((t) => unknownVarNames(t, ctx.knownVarNames)))];
   if (unknown.length > 0) {
-    return { code: 'UNKNOWN_VARIABLE', message: `고객 정보에 없는 변수(${unknown.map((n) => `%${n}%`).join(', ')})는 보낼 때 빈칸이 돼요. 있는 항목으로 바꾸거나 지워 주세요.` };
+    return { code: 'UNKNOWN_VARIABLE', message: unknownVarMessage(unknown) };
   }
   if (!ctx.cartJourney && bodies.some((t) => hasCartLiquidVars(t))) {
     return { code: 'CART_VARIABLE', message: '장바구니 상품 변수({{ cart.… }})는 장바구니 여정에서만 채워져요. 지우거나 다른 문구로 바꿔 주세요.' };

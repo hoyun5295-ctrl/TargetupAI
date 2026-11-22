@@ -53,6 +53,11 @@ export interface DirectSendSpec {
    * 안 밝히면(undefined) 싣지 않는다 → 워커가 종전처럼 DB 로 판정(다른 호출부 무변경).
    */
   callbackFilterUserId?: string | null;
+  /**
+   * ★ 2026-11-22 C160 S4 — 확정 순간의 커스텀 칼럼 매핑 가운데 글에 든 이름(messageUtils pickCustomVarMappings) · **공용 길(createDirectSendCampaign)이 채운다**
+   *   (호출자가 넘긴 값은 덮인다) · 일꾼이 그때 읽은 매핑 위에 덮는다(mergeStoredVarMappings) · 없으면 싣지 않는다(다른 캠페인 send_config 무변).
+   */
+  varMappings?: Record<string, import('../services/ai').VarCatalogEntry>;
   /** 경로 문자열 또는 {path, originalName}(표시 이름) · 발송 배관은 normalizeMmsImagePaths 로 경로만 읽는다(★2026-10-03 대행발송 원본명) */
   mmsImagePaths?: MmsImageItem[] | null;
   dedupEnabled?: boolean;
@@ -147,6 +152,7 @@ export function buildDirectSendCampaignParams(
     alimtalkNextType: spec.alimtalkNextType, alimtalkNextContents: spec.alimtalkNextContents, alimtalkNextSubject: spec.alimtalkNextSubject,
     alimtalkEtcJson: spec.alimtalkEtcJson,
     dedupEnabled: spec.dedupEnabled, unsubFilterEnabled: spec.unsubFilterEnabled,
+    ...(spec.varMappings ? { varMappings: spec.varMappings } : {}),   // ★ C160 S4 실을 것이 있을 때만
   };
   return [
     ctx.companyId,

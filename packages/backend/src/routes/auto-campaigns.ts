@@ -31,7 +31,8 @@ import { filterByIndividualCallback } from '../utils/callback-filter';
 import { loadPlanContext, canUseFeature, resolveMaxAutoCampaigns, type PlanContext } from '../utils/plan-guard';
 import { normalizePhone } from '../utils/normalize-phone';
 // ★ D150-3 (2026-05-10) LOW#7: 광고성 자동발송 등록 시 080 무료거부 번호 검증
-import { getOpt080Number } from '../utils/messageUtils';
+import { getOpt080Number, prepareFieldMappings } from '../utils/messageUtils';
+import { findSendCopyIssue, knownSendVarNames } from '../utils/send-placeholder-gate';   // ★ 2026-11-22 C160 S2 저장 길목
 import { smsTextBlockReason } from '../utils/message-sanitizer';   // ★ 2026-11-06 C109 D6 사람 글 저장 관문(위치)
 
 const router = Router();
@@ -413,6 +414,12 @@ async function _deprecatedCreateAutoCampaign(req: Request, res: Response) {
     if (!message_content?.trim() && !ai_generate_enabled) {
       return res.status(400).json({ error: '메시지 내용을 입력해주세요.' });
     }
+    // ★ 2026-11-22 C160 S2 — 저장 길목에서 없는 변수 · 채울 자리(회차 실행 판정과 같은 함수 · 고객 DB 길 = 매핑 이름만)
+    const createCopy = findSendCopyIssue(
+      { bodies: [typeof message_content === 'string' ? message_content : null, typeof fallback_message_content === 'string' ? fallback_message_content : null], others: [typeof message_subject === 'string' ? message_subject : null] },
+      knownSendVarNames(Object.keys(await prepareFieldMappings(companyId)), false),
+    );
+    if (createCopy) return res.status(400).json({ error: createCopy.error, code: createCopy.code });
     // ★ D93: 개별회신번호 사용 시 발신번호 미필수
     if (!use_individual_callback && !callback_number?.trim()) {
       return res.status(400).json({ error: '발신번호를 선택해주세요.' });
@@ -620,6 +627,12 @@ router.put('/:id', async (req: Request, res: Response) => {
         { label: 'AI 실패 때 보낼 문안', text: typeof fallback_message_content === 'string' ? fallback_message_content : null },
       ]);
     if (charBlock) return res.status(400).json({ error: charBlock, code: 'UNSUPPORTED_CHARS' });
+    // ★ 2026-11-22 C160 S2 — 고치는 글(들어온 칸만)의 없는 변수 · 채울 자리(회차 실행 판정과 같은 함수 · 매핑 이름만)
+    const updateCopy = findSendCopyIssue(
+      { bodies: [typeof message_content === 'string' ? message_content : null, typeof fallback_message_content === 'string' ? fallback_message_content : null], others: [typeof message_subject === 'string' ? message_subject : null] },
+      knownSendVarNames(Object.keys(await prepareFieldMappings(companyId)), false),
+    );
+    if (updateCopy) return res.status(400).json({ error: updateCopy.error, code: updateCopy.code });
 
     // 스케줄 변경 시 유효성 검증
     const finalScheduleType = schedule_type || ownership.campaign.schedule_type;
@@ -807,6 +820,12 @@ router.put('/:id/generated-message', async (req: Request, res: Response) => {
       ]);
       if (charBlock) return res.status(400).json({ error: charBlock, code: 'UNSUPPORTED_CHARS' });
     }
+    // ★ 2026-11-22 C160 S2 — 사람이 고친 생성 문안의 없는 변수 · 채울 자리(회차 실행 판정과 같은 함수 · 매핑 이름만)
+    const generatedCopy = findSendCopyIssue(
+      { bodies: [String(generated_message_content)], others: [typeof generated_message_subject === 'string' ? generated_message_subject : null] },
+      knownSendVarNames(Object.keys(await prepareFieldMappings(companyId)), false),
+    );
+    if (generatedCopy) return res.status(400).json({ error: generatedCopy.error, code: generatedCopy.code });
 
     await query(
       `UPDATE auto_campaigns SET

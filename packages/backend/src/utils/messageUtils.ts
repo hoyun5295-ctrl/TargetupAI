@@ -18,7 +18,7 @@ import { query } from '../config/database';
 import { renderLiquid, detectLiquidSyntax, flattenCustomerForLiquid, stripLiquidLeftovers } from './liquid-templating';
 import { applyVarFallback } from './var-fallback';
 // ★ 2026-09-26 한줄로 V2 R269 — %변수% 조각 판정(숫자 바로 뒤 %는 퍼센트 기호) · 순수 CT
-import { replaceVarTokens } from './var-tokens';
+import { replaceVarTokens, replaceLiteralVar, hasLiteralVar } from './var-tokens';
 import { toQtmsgType, subjectForMsgType } from './qtmsg-type';
 export { findVarTokens } from './var-tokens';
 
@@ -230,11 +230,12 @@ export function replaceVariables(
       if (options?.skipNumberFormatting) return s;
       return formatNumericLike(s) ?? s;
     };
+    // ★ 2026-11-22 C160 구현 Codex 1R #1 — 값은 글자 그대로 넣는다(함수 인자 = 값 안의 `$'` · `$&` · `$$` 를 바꾸기 문법으로 읽지 않는다 · 2단계 · 화면 미리보기와 같은 뜻)
     result = result
-      .replace(/%기타1%/g, fmtExtra(addressBookFields.extra1))
-      .replace(/%기타2%/g, fmtExtra(addressBookFields.extra2))
-      .replace(/%기타3%/g, fmtExtra(addressBookFields.extra3))
-      .replace(/%회신번호%/g, addressBookFields.callback || '');
+      .replace(/%기타1%/g, () => fmtExtra(addressBookFields.extra1))
+      .replace(/%기타2%/g, () => fmtExtra(addressBookFields.extra2))
+      .replace(/%기타3%/g, () => fmtExtra(addressBookFields.extra3))
+      .replace(/%회신번호%/g, () => addressBookFields.callback || '');
 
     // ★ 2026-11-11 C128(접수 1111 이새에프엔씨) — **올린 이름이 있으면 그 이름이 나간다**(직접발송 화면 미리보기 = 올린 줄 그대로 · 본 것 = 나가는 것).
     //   옛(D111 P2): 고객 DB 에 그 번호가 없거나 이름이 빈 때만 올린 이름을 썼다 → 고객 DB(싱크 연동)에 같은 번호가 다른 이름으로 있으면
@@ -246,9 +247,9 @@ export function replaceVariables(
     if (fbName) {
       // 이름+고객명+성함 등 FIELD_MAP.aliases 키 전부 커버 (가장 흔한 한글 변수명)
       result = result
-        .replace(/%이름%/g, fbName)
-        .replace(/%고객명%/g, fbName)
-        .replace(/%성함%/g, fbName);
+        .replace(/%이름%/g, () => fbName)
+        .replace(/%고객명%/g, () => fbName)
+        .replace(/%성함%/g, () => fbName);
     } else if (!customer) {
       // customer도 없고 addressBookFields.name도 없으면 빈값으로 처리 (안전망 진입 전 선치환)
       result = result.replace(/%이름%/g, '').replace(/%고객명%/g, '').replace(/%성함%/g, '');
@@ -317,8 +318,8 @@ export function replaceVariables(
     // ★ 2026-06-22: 빈 값이면 대체값 적용 (fieldDefaults 미전달 시 원래 값 — 직접발송 불변)
     const displayValue = applyVarFallback(rendered, varName, options?.fieldDefaults);
 
-    // 전역 치환 (동일 변수가 여러 번 나올 수 있음)
-    result = result.split(pattern).join(displayValue);
+    // 전역 치환 (동일 변수가 여러 번 나올 수 있음) · ★ C160 S1 ② 주소의 인코딩 자리(`%EC%9D%B4`)에서 시작하는 일치는 바꾸지 않는다
+    result = replaceLiteralVar(result, pattern, displayValue);
   }
 
   // 3단계 안전장치: 매핑에 없는 잔여 %...% 패턴 제거 (D144 P2: 시작 문자 한글/영문 강제로 본문 % 보존)
@@ -679,6 +680,33 @@ export function kakaoFallbackSpamItems(p: {
  * campaigns.ts 4곳 + spam-filter.ts 1곳 + auto-campaign-worker.ts 1곳 + spam-test-queue.ts 2곳에서
  * 인라인으로 반복되던 코드.
  */
+/**
+ * ★ 2026-11-22 C160 S4 — 확정 순간의 커스텀 칼럼 매핑 가운데 **글에 든 이름만**(발송 자료 send_config.varMappings 에 싣는다).
+ *   일꾼은 큰 발송을 양보 · 재개할 때마다 매핑을 다시 읽는다(direct-send-worker) — 그 사이 칼럼 이름이 바뀌면 같은 캠페인의 뒤 청크가 빈칸이 됐다(R47).
+ *   기본 칼럼 이름 · 별칭은 코드 상수라 싣지 않는다. 실을 것이 없으면 undefined(발송 자료에 칸을 만들지 않는다).
+ */
+export function pickCustomVarMappings(
+  mappings: Record<string, VarCatalogEntry>, texts: Array<string | null | undefined>,
+): Record<string, VarCatalogEntry> | undefined {
+  const out: Record<string, VarCatalogEntry> = {};
+  for (const [name, m] of Object.entries(mappings)) {
+    if (m?.storageType === 'custom_fields' && texts.some((t) => hasLiteralVar(String(t || ''), `%${name}%`))) out[name] = m;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** ★ C160 S4 — 일꾼이 그때 읽은 매핑 위에 실린 값을 덮는다 · 꼴이 틀린 값(커스텀 칼럼이 아님 · 칸 이름 없음)은 버린다(SELECT 칸이 되지 않게) */
+export function mergeStoredVarMappings(
+  current: Record<string, VarCatalogEntry>, stored: unknown,
+): Record<string, VarCatalogEntry> {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return current;
+  const out: Record<string, VarCatalogEntry> = { ...current };
+  for (const [name, m] of Object.entries(stored as Record<string, any>)) {
+    if (m && typeof m === 'object' && m.storageType === 'custom_fields' && typeof m.column === 'string' && m.column) out[name] = m as VarCatalogEntry;
+  }
+  return out;
+}
+
 export async function prepareFieldMappings(companyId: string): Promise<Record<string, VarCatalogEntry>> {
   const schemaResult = await query('SELECT customer_schema FROM companies WHERE id = $1', [companyId]);
   const { fieldMappings } = extractVarCatalog(schemaResult.rows[0]?.customer_schema);

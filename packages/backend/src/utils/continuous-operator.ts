@@ -4066,7 +4066,9 @@ async function dispatchProposalSendBody(
       await notify('[AI 자동마케팅] 발송 생략', `'${op.name || ''}' 잔액 부족으로 이번 사이클 발송을 생략했습니다.`);
       return { action: 'skipped', reason: '잔액 부족' };
     }
-    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = '발송 오류. 담당자 검토' WHERE id = $1::uuid`, [proposalId]).catch(() => {});
+    // ★ 2026-11-22 C160 S2 — 없는 변수로 막힌 것은 그 문장을 사유로(카드가 뒤에 「. 문안을 확인하고 …」를 붙이므로 끝 마침표만 뺀다) · 그 밖 = 종전 그대로
+    const reviewReason = e instanceof DirectSendError && e.code === 'UNKNOWN_VARIABLE' ? String(e.message || '').replace(/[.\s]+$/, '') : '발송 오류. 담당자 검토';
+    await query(`UPDATE operator_proposals SET status = 'admin_review', scheduled_send_at = NULL, auto_execute_reason = $2 WHERE id = $1::uuid`, [proposalId, reviewReason]).catch(() => {});
     throw e;
   }
 

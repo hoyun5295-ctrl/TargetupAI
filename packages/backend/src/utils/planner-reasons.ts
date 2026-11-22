@@ -42,6 +42,8 @@ export function sendRejectReason(code: string | null | undefined, message?: stri
   const c = String(code || '');
   // ★ 2026-10-24 세 채널 구조체크 ② — 이 코드는 혜택 자리만이 아니라 AI 가 남긴 채울 자리 전부다(효능을 뺀 「[상품 소개: …]」 등).
   //   관문 문장(fillPlaceholderError)이 인용한 자리 글자가 혜택 자리가 아니면 그 글자로 말한다.
+  // ★ 2026-11-22 C160 S2 — 없는 변수 문장은 우리 판정 함수(unknownVarMessage)가 만든 고정 꼴 · 어느 이름인지까지 그대로 말한다
+  if (c === 'UNKNOWN_VARIABLE' && message) return String(message);
   if (c === 'BENEFIT_PLACEHOLDER_UNEDITED') {
     const found = findAiFillPlaceholder(String(message || ''));
     if (found && !found.startsWith('[혜택')) return `문안에 직접 채울 자리(${found})가 남아 있습니다.`;

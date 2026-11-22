@@ -18,8 +18,8 @@ import { sendSystemAlert } from './system-alert';
 import { triggerDirectSendWorker } from './direct-send-worker';
 import { CAMPAIGN_INSERT_SQL, adTextOn, buildDirectSendCampaignParams, withCampaignId, DirectSendError, type DirectSendSpec } from './direct-send-spec';
 import { logCampaignTraining, type TrainingAuthorship } from './training-logger';
-import { findUneditedSendPlaceholder } from './send-placeholder-gate';
-import { composeSpamCheckText, kakaoFallbackSpamItems } from './messageUtils';
+import { findSendCopyIssue, knownSendVarNames } from './send-placeholder-gate';
+import { composeSpamCheckText, kakaoFallbackSpamItems, prepareFieldMappings, pickCustomVarMappings } from './messageUtils';
 import { brandFallbackQueueType } from './brand-message';
 import { checkSpamBlockBeforeCharge } from './spam-block';
 // ★ 2026-07-12 D-2: 야간 광고 발송 제한 — SEND_HOURS 창 밖 광고 접수 거부(순수 판정 CT 재사용)
@@ -298,8 +298,13 @@ export async function createDirectSendCampaign(
   //   직접발송 commit + 자율발송 + DM 공통 길목 (혜택 placeholder 차단과 동일 철학 — 미완성 문안 고객 발송 0).
   // ★ 2026-09-30 AI 혜택 자리까지 · 제목도(발송 길목 CT send-placeholder-gate · 링크 문구 · 코드는 종전 그대로).
   //   알림톡 실패 대체문안 · 대체 제목도 고객에게 나가는 글이다(Codex 0930 1R — 이 길목만 본문 · 제목만 보고 있었다).
-  const sendPh = findUneditedSendPlaceholder(spec.message, spec.subject, spec.alimtalkNextContents, spec.alimtalkNextSubject);
+  // ★ 2026-11-22 C160 S2 — 없는 변수도 같은 길목(주소록 줄을 넘기는 길 = 매핑 이름 + 주소록 칸 · 캠페인 INSERT · 차감 앞 = DEFINITE_NO_COMMIT)
+  //   S4 — 판정에 쓴 같은 매핑에서 글에 든 커스텀 칼럼만 발송 자료에 싣는다(일꾼이 양보 · 재개 때 다시 읽어도 확정 때의 칸으로 채운다 · 호출자 값은 덮는다)
+  const coreBodies = [spec.message, spec.alimtalkNextContents];
+  const coreMappings = coreBodies.some((t) => String(t || '').includes('%')) ? await prepareFieldMappings(ctx.companyId) : {};
+  const sendPh = findSendCopyIssue({ bodies: coreBodies, others: [spec.subject, spec.alimtalkNextSubject] }, knownSendVarNames(Object.keys(coreMappings), true));
   if (sendPh) throw new DirectSendError(sendPh.code, sendPh.error, 400);
+  spec = { ...spec, varMappings: pickCustomVarMappings(coreMappings, coreBodies) };
 
   // ★ 2026-07-12 D-2: 야간 광고 발송 제한(정보통신망법) — 광고(adEnabled)는 발송 시각(즉시=지금,
   //   예약=예약 시각 KST)이 발송 가능 창 밖이면 접수 거부. 직접발송·DM 발송·자율발송 공통 길목(1곳 = 전 경로).

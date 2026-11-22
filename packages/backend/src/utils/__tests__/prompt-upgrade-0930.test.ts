@@ -36,25 +36,28 @@ describe('WP1 발송 길목 자리표시 가드', () => {
   });
   it('캠페인 생성 · 예약 문안 수정 · 브랜드메시지 · 옛 동기 직접발송(AI 오퍼레이터) · 직접 발송 공통 · 자동발송 길목이 같은 CT 를 부른다', () => {
     const c = SRC('routes', 'campaigns.ts');
-    expect((c.match(/findUneditedSendPlaceholder\(/g) || []).length).toBe(4);
+    // ★ 2026-11-22 C160 S2 — 길목은 findSendCopyIssue(채울 자리 → 없는 변수 · 안에서 findUneditedSendPlaceholder) · 브랜드메시지만 옛 함수 그대로(K6)
+    expect((c.match(/findUneditedSendPlaceholder\(/g) || []).length).toBe(1);
+    expect((c.match(/findSendCopyIssue\(/g) || []).length).toBe(4);
     expect(c).not.toContain('hasUneditedLinkPlaceholder(');
-    expect(c).toContain('findUneditedSendPlaceholder(messageContent, subject)');
-    expect(c).toContain('findUneditedSendPlaceholder(message, subject)');
+    expect(c).toContain('findSendCopyIssue({ bodies: [messageContent], others: [subject] }');
+    expect(c).toContain('findSendCopyIssue({ bodies: [message], others: [subject] }');
     // 옛 동기 /direct-send — 차감 앞(링크 결함 검사 바로 뒤)에서 막는다
     const syncStart = c.indexOf("router.post('/direct-send', singleFlight('direct-send', async");
-    const syncGate = c.indexOf('findUneditedSendPlaceholder(...textsToCheck, alimtalkNextContents, alimtalkNextSubject)');
+    const syncGate = c.indexOf('{ bodies: [message, ...textsToCheck.slice(2), alimtalkNextContents], others: [subject, alimtalkNextSubject] }');
     const syncDeduct = c.indexOf('const directDeduct = await prepaidDeduct(');
     expect(syncStart).toBeGreaterThan(0);
     expect(syncGate).toBeGreaterThan(syncStart);
     expect(syncGate).toBeLessThan(syncDeduct);
     const d = SRC('utils', 'direct-send-core.ts');
-    expect(d).toContain('findUneditedSendPlaceholder(spec.message, spec.subject, spec.alimtalkNextContents, spec.alimtalkNextSubject)');
-    expect(d.indexOf('findUneditedSendPlaceholder(')).toBeLessThan(d.indexOf('await prepaidDeduct('));
+    expect(d).toContain('const coreBodies = [spec.message, spec.alimtalkNextContents];');
+    expect(d).toContain('findSendCopyIssue({ bodies: coreBodies, others: [spec.subject, spec.alimtalkNextSubject] }, knownSendVarNames(Object.keys(coreMappings), true))');
+    expect(d.indexOf('findSendCopyIssue(')).toBeLessThan(d.indexOf('await prepaidDeduct('));
     expect(d).not.toContain('hasUneditedLinkPlaceholder(');
     // 자동발송 — 캠페인 행 생성 · 차감 앞
     const w = SRC('utils', 'auto-campaign-worker.ts');
     const wExec = w.indexOf('async function executeAutoCampaign(');
-    const wGate = w.indexOf('findUneditedSendPlaceholder(messageContent, messageSubject)', wExec);
+    const wGate = w.indexOf('findSendCopyIssue({ bodies: [messageContent], others: [messageSubject] }', wExec);
     expect(wGate).toBeGreaterThan(wExec);
     expect(wGate).toBeLessThan(w.indexOf('INSERT INTO campaigns (', wExec));
     expect(wGate).toBeLessThan(w.indexOf('await prepaidDeduct(', wExec));
@@ -165,8 +168,9 @@ describe('WP6 화면에 글자 그대로 보이는 AI 자유 답변 = 마크다�
 describe('Codex 0930 1R — 대조 · 길목 틈', () => {
   const sep30 = new Date('2026-09-30T03:00:00Z');
   it('[high] 알림톡 실패 대체문안 · 대체 제목도 공통 직접발송 길목에서 본다', () => {
+    // ★ C160 S2 — 본문 · 대체 본문 = bodies · 제목 · 대체 제목 = others(채울 자리) · 같은 길목 함수
     expect(SRC('utils', 'direct-send-core.ts'))
-      .toContain('findUneditedSendPlaceholder(spec.message, spec.subject, spec.alimtalkNextContents, spec.alimtalkNextSubject)');
+      .toContain('findSendCopyIssue({ bodies: coreBodies, others: [spec.subject, spec.alimtalkNextSubject] }, knownSendVarNames(Object.keys(coreMappings), true))');
   });
   it('[high] 한글 백분율도 출력 · 근거에 같은 규칙으로 읽는다("프로모션" 같은 낱말은 그대로)', () => {
     expect(findInventedBenefits('오늘 30퍼센트 할인', '신상품 안내')).toEqual(['30%']);

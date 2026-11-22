@@ -26,10 +26,12 @@ describe('예약 문안 수정(PUT /:id/message)', () => {
 
   it('처음 읽은 상태가 queued면 수신자 수와 상관없이 조건부 UPDATE로 간다(그사이 첫 청크가 적재돼도 우회 못 함 · Codex 4차 1R)', () => {
     const h = r();
-    expect(h).toContain("if (campaign.rows[0].send_phase === 'queued') {");
+    // ★ 2026-11-22 C160 S2 — 처음 읽은 send_phase 는 판정 앞에서 한 번 뽑아(editQueued) 아는 이름과 갈래가 같은 값을 쓴다
+    expect(h).toContain("const editQueued = campaign.rows[0].send_phase === 'queued';");
+    expect(h).toContain('if (editQueued) {');
     expect(h).not.toContain("recipients.length === 0 && campaign.rows[0].send_phase === 'queued'");
     // 수신자(큐) 조회보다 앞에서 끝난다
-    expect(h.indexOf("if (campaign.rows[0].send_phase === 'queued') {")).toBeLessThan(h.indexOf('getCampaignQueueTables('));
+    expect(h.indexOf('if (editQueued) {')).toBeLessThan(h.indexOf('getCampaignQueueTables('));
   });
 
   it('적재 전(queued)은 send_config의 message·subject까지 함께 · send_phase=queued 조건 · 0행이면 409', () => {

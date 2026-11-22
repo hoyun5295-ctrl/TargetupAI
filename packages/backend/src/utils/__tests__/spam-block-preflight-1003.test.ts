@@ -182,7 +182,7 @@ describe('★ 배선 5곳 — 전부 차감 · 캠페인 생성 앞', () => {
     const at = w.indexOf('checkSpamBlockBeforeCharge(');
     expect(at).toBeGreaterThan(0);
     // 이 회차의 캠페인 행 생성 · 차감이 전부 판정 뒤에 있다(판정 앞에는 캠페인 INSERT 가 없다)
-    const fnStart = w.lastIndexOf('const autoPh = findUneditedSendPlaceholder(', at);
+    const fnStart = w.lastIndexOf('const autoPh = findSendCopyIssue(', at);   // ★ C160 S2 길목 판정 한 함수
     expect(fnStart).toBeGreaterThan(0);
     expect(w.slice(fnStart, at)).not.toContain('INSERT INTO campaigns (');
     expect(w.indexOf('INSERT INTO campaigns (', at)).toBeGreaterThan(at);

@@ -4692,3 +4692,28 @@ describe('R105 문안의 목적 글은 사람이 준 글에서 온다 — 생성
     expect(route.body.indexOf("code: 'LINE_REQUIRED'")).toBeLessThan(route.body.indexOf('await runLineCompose('));
   });
 });
+
+describe('R106 글자 꼴로 변수를 판정하는 식은 주소의 퍼센트 인코딩을 가른다 — %이름% 꼴 판정 · 글자 대조 치환은 CT 두 곳(var-tokens · 화면 미러)만', () => {
+  // ★ 2026-11-22 C160 S1 — 조각 판정(findVarTokens) · 2단계 글자 대조(replaceLiteralVar · hasLiteralVar)가 인코딩 자리(encodedPercentStarts)를 건너뛴다.
+  //   같은 꼴을 따로 판정하는 정규식 · 글자 대조 치환이 CT 밖에 새로 생기면 실패(분류 없이 늘지 않게 · 소스에서 기계로 뽑음).
+  const CT_FILES = new Set(['BE:utils/var-tokens.ts', 'FE:utils/formatDate.ts']);
+  /** 분류한 예외 — 이유가 사라지면 지운다 */
+  const CLASSIFIED: Record<string, string> = {
+    'BE:utils/message-sanitizer.ts': 'detectUnresolvedVariables = 호출 0곳(죽은 코드 · 1122 grep)',
+    'FE:pages/InAppMessagesPage.tsx': '인앱 편집 화면의 ‹이름› 표시(문자 발송 아님 · 인코딩 주소가 ‹EC› 로 보이는 것은 추가 과제)',
+  };
+  const VAR_SHAPE = /%\(?\[가-힣A-Za-z_\]/;   // 정규식 글자 안의 「% + 이름 첫 글자 묶음」
+  const LITERAL_REPLACE = /\.split\(`%\$\{|new RegExp\(`%\$\{/;   // 변수 이름을 글자 그대로 바꾸는 옛 꼴
+  it('변수 꼴 정규식이 있는 파일 = CT 둘 + 분류한 예외', () => {
+    const hits = [
+      ...sourceFiles(BE, /\.ts$/).filter((f) => VAR_SHAPE.test(stripComments(read(join(BE, f))))).map((f) => `BE:${f}`),
+      ...sourceFiles(FE, /\.tsx?$/).filter((f) => VAR_SHAPE.test(stripComments(read(join(FE, f))))).map((f) => `FE:${f}`),
+    ].sort();
+    expect(hits).toEqual([...CT_FILES, ...Object.keys(CLASSIFIED)].sort());
+  });
+  it('발송 치환 · 미리보기 치환에 변수 이름 글자 대조의 옛 꼴(split · RegExp 조립)이 없다', () => {
+    expect(stripComments(be('utils/messageUtils.ts'))).not.toMatch(LITERAL_REPLACE);
+    expect(stripComments(read(join(FE, 'utils/formatDate.ts')))).not.toMatch(LITERAL_REPLACE);
+    expect(stripComments(be('utils/var-tokens.ts'))).toContain('if (enc.has(start)) {');
+  });
+});

@@ -9,7 +9,7 @@ import { query } from '../config/database';
 import { SEND_HOURS, NIGHT_AD_LOAD_LEAD_MS } from '../config/defaults';
 import { isNightStopDue } from './autosend-policy';
 import { effectiveUnsubFilter } from './direct-send-core';
-import { prepareFieldMappings, getOpt080Number } from './messageUtils';
+import { prepareFieldMappings, mergeStoredVarMappings, getOpt080Number } from './messageUtils';
 import { prepaidRefund, REFUND_KEYS } from './prepaid';
 import { buildRefundPending, recheckZeroLoadObligation, dropRefundPendingAxes } from './refund-pending';
 import { getCampaignQueueTables, smsCountAll } from './sms-queue';
@@ -744,7 +744,9 @@ async function processCampaign(campaignId: string, mode: 'normal' | 'recover' | 
   }
   // ★ 2026-09-26 F02·F37: 적재에만 쓰는 준비는 적재할 때만 한다 — recover(끊긴 적재 정리)가 여기서 막히면
   //   정산을 영영 못 해 선차감이 미환불로 남는다. 적재 루프는 skipLoad면 첫 줄에서 빠지므로 이 값을 쓰지 않는다.
-  const directFieldMappings: Awaited<ReturnType<typeof prepareFieldMappings>> = skipLoad ? {} : await prepareFieldMappings(companyId);
+  // ★ 2026-11-22 C160 S4 — 확정 때 실린 커스텀 칼럼 매핑(send_config.varMappings)을 그때 읽은 매핑 위에 덮는다:
+  //   양보 · 재개(LOAD_PARKED) · 오류 보류 뒤 이어 받을 때마다 여기서 다시 읽는다 → 그 사이 칼럼 이름이 바뀌어도 같은 캠페인의 뒤 청크가 빈칸이 되지 않는다(R47).
+  const directFieldMappings: Awaited<ReturnType<typeof prepareFieldMappings>> = skipLoad ? {} : mergeStoredVarMappings(await prepareFieldMappings(companyId), cfg.varMappings);
   const finalIsAd = cfg.adEnabled === true;
   // ★ 2026-11-13 C132 — 표기는 저장된 표식까지 본다(대행 이메일 접수 = adText false = 문안 그대로) · 피로도 등 광고 쓰임은 finalIsAd 그대로
   const adText = adTextOn(cfg.adEnabled, cfg.adText);
