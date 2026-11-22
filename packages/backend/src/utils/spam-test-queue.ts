@@ -22,7 +22,7 @@ import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from './message-byte
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { unsupportedSmsCharCodes } from './sms-charset';
 import { cleanSmsTextAll, scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT · 위치 문장
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql, deliveredUnreportedResult, gatewayRejectionFromCodes } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql, deliveredUnreportedResult, gatewayRejectionReason } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
@@ -597,6 +597,21 @@ export function isCharsRejection(rejection: string | null | undefined): boolean 
   const r = String(rejection || '').trim();
   return !r || r.startsWith(SPAM_REJECTED_PREFIX);
 }
+/**
+ * ★ 2026-11-22 C159 — 접수 거절 반려 문장의 정본 꼴(글자 반려와 같은 뼈대 = 머리 + `: ` + 내용 + `.`).
+ *   날것으로 그리는 자리(자동발송 사유 · 제안 카드)는 문장 그대로 · 제 말투가 있는 자리(대행 문자 · 플래너 · 자동마케팅)는 사유만 뽑아 쓴다.
+ *   쓰기 = spamGatewayRejectionOf 한 곳 · 읽기 = spamSendRejectionReason · 화면 거울 = frontend utils/ai-line SEND_REJECTED_PREFIX(계약 시험이 같은 글인지 본다)
+ */
+export const SPAM_SEND_REJECTED_PREFIX = '검사 문자를 보내지 못했어요';
+export function sendRejectionText(reason: string): string {
+  return `${SPAM_SEND_REJECTED_PREFIX}: ${reason}.`;
+}
+/** 접수 거절 반려 문장 → 사유(정본 꼴이 아니면 빈 글) */
+export function spamSendRejectionReason(rejection: string | null | undefined): string {
+  const r = String(rejection || '').trim();
+  if (!r.startsWith(`${SPAM_SEND_REJECTED_PREFIX}: `)) return '';
+  return r.slice(SPAM_SEND_REJECTED_PREFIX.length + 2).replace(/\.$/, '').trim();
+}
 
 /** 검사 등록과 같은 치환 · 해시 · 같은 검사 키(★ 2026-11-01 배포 2 C5 — 등록 함수에서 원문 그대로 옮김 · 점검 응답의 엿보기도 이것을 쓴다) */
 async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient' | 'rendered'>) {
@@ -894,23 +909,28 @@ export async function fetchSpamQtmsgRows(testId: string, now: Date = new Date())
 }
 
 /**
- * ★ 2026-11-22 C158 — 검사 문자가 문안 사유로 접수 거절됐으면 그 사유(sms-result-map 사유 표) · 아니면 null.
+ * ★ 2026-11-22 C158 · C159 — 검사 문자가 문안 사유로 접수 거절됐으면 그 반려 문장(정본 꼴 sendRejectionText) · 아니면 null. **판정 한 곳.**
  *   결과 표에는 「발송 실패」만 남아 판정이 거절과 장애를 가르지 못했다(1122 차단된 URL 9407 = 세 번 재검사 뒤 장애 안내).
+ *   조건 = 그 검사의 결과 행 전부가 발송 실패이고 코드가 전부 문안 사유 접수 거절(gatewayRejectionReason · 통과 · 시간 초과 행이 섞이면 null).
  *   코드는 큐 행에서 읽는다(폴링 · 결과 창과 같은 CT · 같은 매칭 = 단말 번호 + 유형) · 못 읽으면 null = 종전 판정.
- *   ponytail: 큐 행이 남아 있는 동안만 읽힌다(검사 직후에 부른다) · 뒤늦게도 읽어야 하면 결과 표에 코드 칸을 둔다.
+ *   부르는 자리 = 말하는 자리 가까이 다섯(자동 검사 공용 입구 runOneTest · 대행 보류 갈래 · 자동마케팅 보류 회복 · 여정 결과 기다림 · 칩 보기).
+ *   ⛔ readSpamTestOutcome 안에 넣지 않는다 — 트랜잭션 연결로 불리는 자리가 있다(그 안에서 풀 연결 · MySQL 을 더 잡지 않는다) · 값 범위(재사용 · 엿보기 · 회복)도 그대로 둔다.
+ *   ponytail: 큐 행이 남아 있는 동안만 읽힌다(검사가 닫힌 직후에 부른다) · 뒤늦게도 읽어야 하면 결과 표에 코드 칸을 둔다.
  */
 export async function spamGatewayRejectionOf(testId: string): Promise<string | null> {
   try {
-    const failed = await query(
-      `SELECT phone, message_type FROM spam_filter_test_results WHERE test_id = $1 AND result = $2`,
-      [testId, SPAM_RESULT.FAILED],
+    const rows = await query(
+      `SELECT phone, message_type, result FROM spam_filter_test_results WHERE test_id = $1`,
+      [testId],
     );
-    if (failed.rows.length === 0) return null;
+    // 실패 행이 하나도 없으면 큐 행을 읽지 않는다(통과 · 진행 중 검사에서 MySQL 조회 0)
+    if (rows.rows.length === 0 || rows.rows.some((r: any) => r.result !== SPAM_RESULT.FAILED)) return null;
     const mqRows = await fetchSpamQtmsgRows(testId);
-    return gatewayRejectionFromCodes(failed.rows.map((r: any) => {
+    const reason = gatewayRejectionReason(rows.rows.map((r: any) => {
       const m = mqRows.find((q: any) => q.dest_no === r.phone && q.msg_type === toQtmsgType(r.message_type));
-      return m && Number.isFinite(Number(m.status_code)) ? Number(m.status_code) : null;
+      return { failed: true, code: m && Number.isFinite(Number(m.status_code)) ? Number(m.status_code) : null };
     }));
+    return reason ? sendRejectionText(reason) : null;
   } catch (e: any) {
     console.warn('[SpamTestQueue] 접수 거절 사유 조회 실패(종전 판정):', e?.message || e);
     return null;
@@ -1599,6 +1619,70 @@ export async function sequenceSpamVariants(p: {
   }
   return { variants: out, passedVariantId: null, regenerateCount };
 }
+/**
+ * ★ 2026-11-22 C159(D2 · 설계 Codex 1R #2) — 안 하나를 검사하고(차단이면 재생성 · 다시 검사) 안별 결과로 묶는다.
+ *   autoSpamTestWithRegenerate 의 「안마다 도는 고리」 본문을 그대로 옮겼다(검사 · 재생성은 받은 함수 = 시험이 가짜 검사를 넣는다).
+ *   바뀐 것 하나 = 반려 사유를 등록 성공 갈래에서도 옮긴다. 접수 거절은 등록은 됐고 보내기 전에 거절된 것이라,
+ *   옛 고리(등록 실패 갈래에서만 옮김)로는 사유가 버려지고 안별 결과에 기본 글자 반려 문장이 채워졌다.
+ */
+export async function runSpamVariantWithRegenerate(p: {
+  variant: AutoSpamTestVariant;
+  subject?: string;
+  maxRetries: number;
+  runTest: (variantId: string, message: string, subject?: string) => Promise<{
+    enqueued: boolean; spamResult: string; carrierResults: Array<{ carrier: string; messageType: string; result: string }>; rejection?: string;
+  }>;
+  regenerate?: (blockedVariantId: string) => Promise<{ messageText: string; subject?: string } | null>;
+}): Promise<{ result: AutoSpamVariantResult; regenerateCount: number }> {
+  const { variant, maxRetries } = p;
+  let currentMessage = variant.messageText;
+  let currentSubject = variant.subject || p.subject;
+  let regenerateCount = 0;
+  let spamResult: string = 'pending';
+  let rejection: string | undefined;   // ★ 2026-11-06 C109 글자 반려 문장 · ★ C159 접수 거절 문장
+  let carrierResults: Array<{ carrier: string; messageType: string; result: string }> = [];
+
+  // 최대 재시도 횟수까지 반복
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const one = await p.runTest(variant.variantId, currentMessage, currentSubject);
+    spamResult = one.spamResult;
+    rejection = one.rejection;   // 반려가 아니면 비어 있다(앞 회차의 사유가 뒤 회차 결과에 남지 않는다)
+    // ★ 2026-11-06 C109 — 등록 실패 = 반려(rejected) · 장애(failed)를 가른다(옛: 전부 failed) · 통신사 결과 없음
+    if (!one.enqueued) break;
+    carrierResults = one.carrierResults;
+
+    // 통과했으면 종료
+    if (spamResult === 'pass') break;
+
+    // 차단됐고 재생성 가능하면 재시도
+    if (spamResult === 'blocked' && attempt < maxRetries && p.regenerate) {
+      console.log(`[SpamTestQueue] variant ${variant.variantId} 스팸 차단 → 재생성 시도 (${attempt + 1}/${maxRetries})`);
+      const newMessage = await p.regenerate(variant.variantId);
+      if (newMessage) {
+        currentMessage = newMessage.messageText;
+        if (newMessage.subject) currentSubject = newMessage.subject;
+        regenerateCount++;
+      } else {
+        break; // 재생성 실패 → 현재 결과로 확정
+      }
+    } else {
+      break; // 재시도 불가 또는 최대 횟수 초과
+    }
+  }
+
+  return {
+    result: autoVariantResult({
+      variantId: variant.variantId,
+      messageText: currentMessage,
+      subject: currentSubject,
+      carrierResults,
+      regenerated: regenerateCount > 0,
+      regenerateCount,
+    }, spamResult as AutoSpamVerdict, rejection),
+    regenerateCount,
+  };
+}
+
 export async function autoSpamTestWithRegenerate(params: {
   companyId: string;
   userId: string;
@@ -1709,6 +1793,12 @@ export async function autoSpamTestWithRegenerate(params: {
     }));
     // ★ 2026-10-24 R7 — 통신사 결과가 비거나 시간 초과 · 실패가 섞인 「완료」는 통과가 아니다(검사 장애 = failed · 판정 자리 한 곳).
     //   옛: 그대로 pass 로 넘겨, 결과를 「차단이 아니면 통과」로 읽는 호출처(대행발송 · 옛 자동발송)와 통과 안 번호(자동마케팅)가 검사 못 한 문안을 통과로 봤다.
+    // ★ 2026-11-22 C159(D2) — 검사 문자가 문안 사유로 접수 거절됐으면 장애가 아니라 반려 + 사유(C109 반려 갈래 = 다시 검사 0 · 재생성 0).
+    //   자동 검사를 쓰는 기능 전부(대행 · 자동발송 · 자동마케팅 · 플래너 · 제안 체험)가 이 한 곳을 지난다. 등록은 성공(enqueued true)이다.
+    if (verdict === 'failed') {
+      const sendRejection = await spamGatewayRejectionOf(enqueueResult.testId!);
+      if (sendRejection) return { enqueued: true, spamResult: 'rejected', carrierResults, rejection: sendRejection };
+    }
     const settled = spamVerdictOf({ spamResult: verdict, carrierResults }, 1);
     return {
       enqueued: true,
@@ -1739,55 +1829,9 @@ export async function autoSpamTestWithRegenerate(params: {
   }
 
   for (const variant of variants) {
-    let currentMessage = variant.messageText;
-    let currentSubject = variant.subject || subject;
-    let regenerateCount = 0;
-    let spamResult: string = 'pending';
-    let rejection: string | undefined;   // ★ 2026-11-06 C109 — 글자 반려 문장
-    let carrierResults: Array<{ carrier: string; messageType: string; result: string }> = [];
-
-    // 최대 재시도 횟수까지 반복
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const one = await runOneTest(variant.variantId, currentMessage, currentSubject);
-      if (!one.enqueued) {
-        // ★ 2026-11-06 C109 — 반려(rejected) · 장애(failed)를 가른다(옛: 전부 failed)
-        spamResult = one.spamResult;
-        rejection = one.rejection;
-        break;
-      }
-      spamResult = one.spamResult;
-      carrierResults = one.carrierResults;
-
-      // 통과했으면 종료
-      if (spamResult === 'pass') {
-        break;
-      }
-
-      // 차단됐고 재생성 가능하면 재시도
-      if (spamResult === 'blocked' && attempt < maxRetries && regenerateCallback) {
-        console.log(`[SpamTestQueue] variant ${variant.variantId} 스팸 차단 → 재생성 시도 (${attempt + 1}/${maxRetries})`);
-        const newMessage = await regenerateCallback(variant.variantId);
-        if (newMessage) {
-          currentMessage = newMessage.messageText;
-          if (newMessage.subject) currentSubject = newMessage.subject;
-          regenerateCount++;
-          totalRegenerateCount++;
-        } else {
-          break; // 재생성 실패 → 현재 결과로 확정
-        }
-      } else {
-        break; // 재시도 불가 또는 최대 횟수 초과
-      }
-    }
-
-    resultVariants.push(autoVariantResult({
-      variantId: variant.variantId,
-      messageText: currentMessage,
-      subject: currentSubject,
-      carrierResults,
-      regenerated: regenerateCount > 0,
-      regenerateCount,
-    }, spamResult as AutoSpamVerdict, rejection));
+    const one = await runSpamVariantWithRegenerate({ variant, subject, maxRetries, runTest: runOneTest, regenerate: regenerateCallback });
+    totalRegenerateCount += one.regenerateCount;
+    resultVariants.push(one.result);
   }
 
   return {

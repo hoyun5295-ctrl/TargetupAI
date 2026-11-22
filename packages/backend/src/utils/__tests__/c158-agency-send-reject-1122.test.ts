@@ -13,7 +13,7 @@ import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import * as ts from 'typescript';
 import { stripComments } from './helpers/producer-scan';
-import { GATEWAY_CONTENT_REJECT_TEXT, GATEWAY_REJECT_CODES, gatewayRejectionFromCodes } from '../sms-result-map';
+import { GATEWAY_CONTENT_REJECT_TEXT, GATEWAY_REJECT_CODES, gatewayRejectionReason } from '../sms-result-map';
 import { SPAM_REJECTED_PREFIX, SPAM_REJECTED_DEFAULT_TEXT, isCharsRejection } from '../spam-test-queue';
 import { buildTestErrorNotify, buildSendRejectedNotify, buildUnsupportedCharsNotify } from '../agency-send-notify';
 import { unrecoveredSpamErrorSql } from '../agency-send-worker';
@@ -42,16 +42,18 @@ function fnBody(rel: string, name: string): string {
 }
 
 describe('K1 문안 사유 접수 거절 = 사유 문장', () => {
+  // ★ C159 — 판정이 받는 것 = 결과 행 전부(실패 여부 + 코드) · 옛 = 실패 행의 코드만
+  const failed = (...codes: Array<number | null>) => codes.map((code) => ({ failed: true, code }));
   it('1122 운영 꼴 = 세 통신사 행이 모두 9407 → 주소가 차단 대상이라는 사유', () => {
-    const why = gatewayRejectionFromCodes([9407, 9407, 9407]);
+    const why = gatewayRejectionReason(failed(9407, 9407, 9407));
     expect(why).toBe('문안에 든 주소(URL)가 발송 차단 대상');
   });
   it('코드를 못 읽은 행 · 문안 탓이 아닌 거절 · 통신사 실패가 섞이면 null(종전 판정 그대로)', () => {
-    expect(gatewayRejectionFromCodes([])).toBeNull();
-    expect(gatewayRejectionFromCodes([9407, null])).toBeNull();
-    expect(gatewayRejectionFromCodes([9407, 9409])).toBeNull();   // 중복 접수 = 문안 탓 아님
-    expect(gatewayRejectionFromCodes([9404])).toBeNull();          // 수신번호 형식 = 검사 번호 쪽
-    expect(gatewayRejectionFromCodes([4000, 4000, 4000])).toBeNull(); // 전송 시간 초과 = 통신사
+    expect(gatewayRejectionReason([])).toBeNull();
+    expect(gatewayRejectionReason(failed(9407, null))).toBeNull();
+    expect(gatewayRejectionReason(failed(9407, 9409))).toBeNull();   // 중복 접수 = 문안 탓 아님
+    expect(gatewayRejectionReason(failed(9404))).toBeNull();          // 수신번호 형식 = 검사 번호 쪽
+    expect(gatewayRejectionReason(failed(4000, 4000, 4000))).toBeNull(); // 전송 시간 초과 = 통신사
   });
   it('사유 표의 코드는 전부 접수 거절 코드 안 · 사유 글에 우리 쪽 원인 말 0', () => {
     for (const [code, text] of Object.entries(GATEWAY_CONTENT_REJECT_TEXT)) {
@@ -70,22 +72,23 @@ describe('K1 문안 사유 접수 거절 = 사유 문장', () => {
 });
 
 describe('K2 대행발송 — 접수 거절 = 반려(다시 검사 0 · 사유를 알린다)', () => {
-  it('검사 회차가 장애로 끝내기 전에 접수 거절 사유를 읽고, 있으면 반려로 돌려준다', () => {
+  it('방금 돌린 검사의 접수 거절 = 자동 검사 공용 입구가 반려로 돌려준다(★ C159 — 대행의 자체 읽기는 지웠다) · 대행은 그 반려를 반려 갈래로 받는다', () => {
     const body = fnBody('utils/agency-send-worker.ts', 'runSpamRound');
     const errAt = body.indexOf(`if (verdict === 'error')`);
     expect(errAt).toBeGreaterThan(-1);
-    const branch = body.slice(errAt, body.indexOf(`if (verdict === 'rejected')`, errAt));
-    expect(branch).toMatch(/sendRejectionOfTests\(Object\.values\(result\.testIds/);
-    expect(branch).toMatch(/verdict: 'rejected'[\s\S]*rejection:/);
+    const rejAt = body.indexOf(`if (verdict === 'rejected')`, errAt);
+    expect(rejAt).toBeGreaterThan(errAt);
+    expect(body.slice(errAt, rejAt)).not.toMatch(/sendRejectionOfTests\(|spamGatewayRejectionOf\(/);
+    expect(body.slice(rejAt, rejAt + 200)).toMatch(/rejection: spamRejectionOf\(v\)/);
   });
-  it('보류로 남겼다가 장애로 굳은 검사도 같은 판정을 먼저 지난다(Codex 1R #1) — 검사를 본 뒤 장애로 끝내는 두 자리가 한 곳을 부른다', () => {
+  it('보류로 남겼다가 장애로 굳은 검사도 같은 판정을 먼저 지난다(Codex 1R #1) — 장애로 돌려주기 전에 읽는다', () => {
     const body = fnBody('utils/agency-send-worker.ts', 'runSpamRound');
     const heldAt = body.indexOf(`held.verdict === 'error'`);
     expect(heldAt).toBeGreaterThan(-1);
     const heldBranch = body.slice(heldAt, body.indexOf('while (rounds < MAX_TEST_ROUNDS)', heldAt));
     expect(heldBranch).toMatch(/sendRejectionOfTests\(held\.testIds\)/);
     expect(heldBranch.indexOf('sendRejectionOfTests(')).toBeLessThan(heldBranch.indexOf(`verdict: 'error'`));
-    expect(body.match(/sendRejectionOfTests\(/g)?.length).toBe(2);
+    expect(body.match(/sendRejectionOfTests\(/g)?.length).toBe(1);   // ★ C159 — 보류 묶음 갈래 하나(방금 돌린 검사는 공용 입구가 한다)
     expect(fnBody('utils/agency-send-worker.ts', 'sendRejectionOfTests')).toMatch(/spamGatewayRejectionOf\(/);
     // 보류 판정이 읽은 검사 번호를 돌려준다(그 검사에서 사유를 읽는다)
     expect(fnBody('utils/agency-send-worker.ts', 'heldSpamBatch')).toMatch(/testIds: tests\.rows\.map/);
@@ -93,7 +96,7 @@ describe('K2 대행발송 — 접수 거절 = 반려(다시 검사 0 · 사유�
   it('접수 거절 사유 읽기 = 큐 행 읽기 CT(폴링 · 결과 창과 같은 곳) · 못 읽으면 null', () => {
     const body = fnBody('utils/spam-test-queue.ts', 'spamGatewayRejectionOf');
     expect(body).toMatch(/fetchSpamQtmsgRows\(/);
-    expect(body).toMatch(/gatewayRejectionFromCodes\(/);
+    expect(body).toMatch(/gatewayRejectionReason\(/);
     expect(body).toMatch(/catch[\s\S]*return null/);
   });
   it('마감 = 글자 반려는 옛 사건 · 옛 안내 그대로, 접수 거절은 제 사건 · 제 안내', () => {
@@ -104,6 +107,10 @@ describe('K2 대행발송 — 접수 거절 = 반려(다시 검사 0 · 사유�
     expect(body).toMatch(/buildUnsupportedCharsNotify\(/);
     expect(body).toMatch(/buildSendRejectedNotify\(/);
     expect(body).not.toMatch(/settleSpamCheckError\(/);   // 반려는 장애 셈 · 15분 대기에 들어가지 않는다
+    // ★ C159 — 접수 거절 = 정본 문장에서 사유만 뽑아 문자 · 사건에 싣는다(「사유: 검사 문자를 보내지 못했어요: …」가 되지 않는다)
+    expect(body).toMatch(/const reason = chars \? null : \(spamSendRejectionReason\(message\) \|\| message\);/);
+    expect(body).toMatch(/message: chars \? message : reason/);
+    expect(body).toMatch(/buildSendRejectedNotify\(\{ label, reason: reason \|\| '' \}\)/);
   });
   it('접수 거절 안내 문자 = 사유를 말한다 · 글자 반려 글 · 우리 쪽 원인 말 0', () => {
     const text = buildSendRejectedNotify({ label: '겨울 세일', reason: '문안에 든 주소(URL)가 발송 차단 대상' });

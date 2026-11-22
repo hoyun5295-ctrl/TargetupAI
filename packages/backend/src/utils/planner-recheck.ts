@@ -15,7 +15,7 @@
  *   - 승인 직후 즉시 실행은 이 파일이 하지 않는다(실행부 순환 import 금지) — 라우트가 `kickPlannerTouchpointNow`(실행부 · 발송 시간대 안에서만 · B1)를 부른다.
  *   - 고객 문장은 사유 사전(planner-reasons) · 원문 오류는 로그에만 · 줄표 0.
  */
-import { SPAM_ERROR_RETRY_MAX, isSpamHold, spamRejectionPlaces } from './spam-test-queue';
+import { SPAM_ERROR_RETRY_MAX, isSpamHold } from './spam-test-queue';
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { pool, query } from '../config/database';
 import { SEND_HOURS } from '../config/defaults';
@@ -35,13 +35,13 @@ import { PlannerEventRow, loadPlannerEvent, firstSendDate } from './planner-even
 import { PLANNER_APPROVAL_DEADLINE_HOUR, computeTouchpointFingerprints, plannerNumbersOf, plannerSendNumberTexts, plannerSendNumbers, type PlannerSendNumbers } from './planner-confirm';
 import {
   PlannerCopy, PLANNER_COPY_MAX, EDITED_COPY_SPAM_FAILED, carrierGroups, copyInputHash, generatePlannerCopyText,
-  loadPlannerCompanyContext, loadPlannerDefaultCallback, spamCheckPlannerVerdict, stripDmLink,
+  loadPlannerCompanyContext, loadPlannerDefaultCallback, spamCheckPlannerVerdict, stripDmLink, plannerRejectedReason, plannerViewRejectedReason,
 } from './planner-copy';
 import { isPastApprovalDeadline } from './planner-approve';
 import { countPlannerAudience, PlannerAudienceCount } from './planner-audience';
 import { firstBlockedChannel } from './planner-channel-gate';
 import { formatPlannerDay, recheckPastDeadlineNotice, settleEventIfFinished } from './planner-review';
-import { PLANNER_REASON, plannerCharsReason } from './planner-reasons';
+import { PLANNER_REASON } from './planner-reasons';
 import { tryAcquireInflight, releaseInflight } from './inflight-lock';
 
 // ── 모양 ─────────────────────────────────────────────────────────────
@@ -57,6 +57,8 @@ export interface PlannerRecheckMeta {
   /** 새 문안을 마지막으로 만들어 본 날(KST · 하루 1회) */
   proposalTried?: string | null;
   proposalError?: 'failed' | 'unsafe' | 'blocked' | null;
+  /** ★ 2026-11-22 C159 — 새 문안이 반려(보낼 수 없는 글자 · 접수 거절)였을 때의 사유(재확인 판이 그린다 · 고정 문장만 = plannerViewRejectedReason · 그 밖 = null) */
+  proposalReason?: string | null;
   /** ★ 2026-10-25 원장 #48 — 검사 장애로 판정을 못 받은 새 문안(다음 주기에 이 글로 다시 검사 · AI 다시 부르지 않음) · 장애 횟수 */
   proposalDraft?: { body: string; subject: string } | null;
   proposalCheckErrors?: number;
@@ -626,6 +628,7 @@ async function prepareProposal(p: RecheckPair, today: string): Promise<void> {
   const withDmLink = withDmLinkOf(p);
   let proposal: PlannerRecheckMeta['proposal'] = null;
   let proposalError: PlannerRecheckMeta['proposalError'] = 'failed';
+  let proposalReason: string | null = null;
   try {
     const ctx = await loadPlannerCompanyContext(p.ev.companyId);
     const callback = await loadPlannerDefaultCallback(p.ev.companyId);
@@ -660,13 +663,15 @@ async function prepareProposal(p: RecheckPair, today: string): Promise<void> {
           else { proposalError = 'unsafe'; console.warn(`[planner-recheck] 새 문안 버림(${issue}) carrier=${p.carrier.id}`); }
         } else {
           proposalError = check.verdict === 'blocked' ? 'blocked' : 'failed';
+          // ★ 2026-11-22 C159(설계 Codex 1R #4) — 새 문안이 반려면 사유를 남긴다(옛: 「만들지 못함」으로 접혀 왜인지 알 수 없었다)
+          if (check.verdict === 'rejected') proposalReason = plannerViewRejectedReason(check.rejection, 'prepare');
         }
       }
     }
   } catch (e: any) {
     console.warn(`[planner-recheck] 새 문안 준비 실패 carrier=${p.carrier.id}:`, e?.message || e);
   }
-  await patchRecheck(p, { proposal, proposalTried: today, proposalError, proposalDraft: null, proposalCheckErrors: 0 });
+  await patchRecheck(p, { proposal, proposalTried: today, proposalError, proposalReason, proposalDraft: null, proposalCheckErrors: 0 });
 }
 
 /** 고친 글 검사(이 회차 · 실주소 링크 · 재생성 0) — 검사한 글이 그대로일 때만 결과를 쓴다(CAS). 검사 장애는 다음 주기에 다시. */
@@ -685,7 +690,7 @@ async function checkEditedCopy(p: RecheckPair): Promise<void> {
   if (check.verdict === 'rejected') {
     // ★ 2026-11-06 C109 E9 — 고친 글에 보낼 수 없는 글자 = 통과 못 함 + 위치 사유(다시 검사로 안 풀린다 · 사람이 다시 고친다)
     await setTouchpointMetaIfCopyIs(p.ev.companyId, p.carrier.id, c,
-      { copy: { ...c, spam: 'fail', checkedAt }, copy_error: { reason: plannerCharsReason(spamRejectionPlaces(check.rejection), 'prepare'), at: checkedAt } });
+      { copy: { ...c, spam: 'fail', checkedAt }, copy_error: { reason: plannerRejectedReason(check.rejection, 'prepare'), at: checkedAt, viewReason: plannerViewRejectedReason(check.rejection, 'prepare') } });   // ★ C159 viewReason = 재확인 판이 그리는 사유(고정 문장만 · 위치 문장은 싣지 않는다)
     return;
   }
   void (check.verdict satisfies 'pass' | 'blocked');
@@ -796,8 +801,9 @@ export interface RecheckView {
   deadline: { date: string; hour: number };
   /** 지금 승인하면 언제 나가는가(B1 · 승인 결과와 같은 판정) */
   sendsAt: 'now' | 'morning' | 'date';
-  current: { text: string; subject: string; edited: boolean; state: 'blocked' | 'pending' | 'pass' | 'fail' | 'stale' | 'missing'; hash: string | null; rawText: string };
-  proposal: { state: 'ready' | 'preparing' | 'failed' | 'unsafe'; text: string; subject: string; hash: string | null };
+  /** ★ 2026-11-22 C159 — reason = 반려 사유(반려로 통과하지 못했을 때만 · 그 밖 null · 고정 문장만 = 위치 · 고객 값 0) */
+  current: { text: string; subject: string; edited: boolean; state: 'blocked' | 'pending' | 'pass' | 'fail' | 'stale' | 'missing'; hash: string | null; rawText: string; reason: string | null };
+  proposal: { state: 'ready' | 'preparing' | 'failed' | 'unsafe'; text: string; subject: string; hash: string | null; reason: string | null };
   dm: { html: string | null } | null;
   recipients: PlannerAudienceCount;
   copyCost: number;
@@ -814,6 +820,15 @@ export interface RecheckView {
 async function loadCompanyName(companyId: string): Promise<string> {
   const r = await query(`SELECT COALESCE(NULLIF(brand_name, ''), company_name) AS name FROM companies WHERE id = $1::uuid`, [companyId]).catch(() => null);
   return String(r?.rows[0]?.name || '').trim();
+}
+
+/**
+ * ★ 2026-11-22 C159 — 고친 글의 반려 사유(검사가 반려로 끝났을 때만 viewReason 이 남는다 · 차단 · 그 밖 실패 = null).
+ *   ⛔ copy_error.reason(위치 문장 · 표본 고객 값이 섞일 수 있다)은 읽지 않는다 — 이 보기는 로그인 없이 여는 링크로도 나간다(구현 Codex 1R).
+ */
+function copyRejectedReason(p: RecheckPair): string | null {
+  const e = (p.carrier.execMeta as any)?.copy_error;
+  return e && typeof e.viewReason === 'string' && e.viewReason.trim() ? e.viewReason : null;
 }
 
 export async function buildRecheckView(p: RecheckPair, opts: { mode: 'public' | 'member'; req?: { ip?: string; headers?: any }; now?: Date }): Promise<RecheckView> {
@@ -869,8 +884,8 @@ export async function buildRecheckView(p: RecheckPair, opts: { mode: 'public' | 
     today,
     deadline: { date: p.recheck.date, hour: PLANNER_APPROVAL_DEADLINE_HOUR },
     sendsAt: p.recheck.date !== today ? 'date' : isSendableHourKst(now, SEND_HOURS.start, SEND_HOURS.end) ? 'now' : 'morning',
-    current: { text: cur?.text ? render(cur.text) : '', subject: String(cur?.subject || ''), edited: !!cur?.edited, state: curState, hash: curHash, rawText: String(cur?.text || '') },
-    proposal: { state: prState, text: p.recheck.proposal?.text ? render(p.recheck.proposal.text) : '', subject: String(p.recheck.proposal?.subject || ''), hash: prHash },
+    current: { text: cur?.text ? render(cur.text) : '', subject: String(cur?.subject || ''), edited: !!cur?.edited, state: curState, hash: curHash, rawText: String(cur?.text || ''), reason: curState === 'fail' ? copyRejectedReason(p) : null },
+    proposal: { state: prState, text: p.recheck.proposal?.text ? render(p.recheck.proposal.text) : '', subject: String(p.recheck.proposal?.subject || ''), hash: prHash, reason: prState === 'failed' ? (p.recheck.proposalReason || null) : null },
     dm: dmTp ? { html: dmHtml } : null,
     recipients,
     copyCost: getCreditCost(PLANNER_SEND_SOURCE),

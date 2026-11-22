@@ -392,7 +392,8 @@ describe('K7 칩 = AI 한줄로 부품 하나 · 늦은 보고', () => {
     expect(page).not.toContain('chipOf');
   });
   it('보기의 lateOpen = 결과 없음일 때만 서버 판정(readSpamTestOutcome) · 그 밖 false', () => {
-    expect(view).toContain("lateOpen: state === 'warn' ? (await readSpamTestOutcome(testId)).lateOpen : false,");
+    // ★ 1122 C159 — 접수 거절로 닫힌 검사(늦은 보고로 고쳐지지 않는다)는 창을 열지 않는다 · 그 밖은 그대로 서버 판정
+    expect(view).toContain("lateOpen: state === 'warn' && !rejection ? (await readSpamTestOutcome(testId)).lateOpen : false,");
   });
   it('같은 글 다시 걸기 = 결과 없음이어도 늦은 보고를 받는 동안은 그 검사를 이어 본다 · 오늘 검사가 없으면 어제까지 넓혀 그 조건일 때만', () => {
     const fn = spam.slice(spam.indexOf('export async function reusableLineSpamTest'), spam.indexOf('export async function startLineSpamTest'));
@@ -405,7 +406,7 @@ describe('K7 칩 = AI 한줄로 부품 하나 · 늦은 보고', () => {
   it('화면 = 서버 lateOpen 인 동안만 이어 읽는다(화면 시계 0) · 읽을 때마다 그 값을 받는다 · 글이 갈린다', () => {
     expect(cards).toContain("export const lateOpen = (chip: AiLineSpamChip | undefined): boolean => !!chip && chip.state === 'warn' && !!chip.testId && chip.lateOpen === true;");
     expect(cards).toContain("|| lateOpen(run.spam[t])) && run.spam[t]?.testId);");
-    expect(cards).toContain('lateOpen: r.lateOpen === true });');
+    expect(cards).toContain('lateOpen: r.lateOpen === true, ...(r.rejection ? { message: r.rejection } : {}) });');   // ★ 1122 C159 접수 거절 사유를 같이 받는다
     // ★ C157 구현 Codex 2R — 늦은 보고 여부는 검사 번호 · 지문 · 종류와 같이 움직인다(busy = 앞 검사의 것 · 새 검사 = 서버 값)
     expect(cards).toContain('? { testId: prev?.testId, fp: prev?.fp, channel: prev?.channel, lateOpen: prev?.lateOpen }');
     expect(cards).toContain(': { testId: out.testId, fp, channel: ch, lateOpen: out.lateOpen === true };');

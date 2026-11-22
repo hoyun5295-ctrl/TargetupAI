@@ -28,7 +28,7 @@ import { pickOwnerContact } from './owner-contact';
 import { getPlatformNoticeCallback } from './sms-queue';
 import { insertNoticeSms } from './sms-notice';   // ★ 2026-11-06 C109 D6 안내 적재 CT
 import { runStepSpamTest, mergeSpamVerdicts } from './journey-pretest-validator';
-import { isSpamHold } from './spam-test-queue';
+import { isSpamHold, isCharsRejection } from './spam-test-queue';
 import { candidatesReady, readCandidate, claimCandidate, candidateStillMine, saveCandidate, moveCandidate, regenChargeKey, sweepPretestCandidates, CANDIDATE_GENERATING_TTL_MINUTES } from './journey-pretest-candidate';
 import { regenerateStepAvoidingSpam } from './journey-ai-generator';
 import { groupPretestBundles, kstDateOf, PretestScanRow, PretestBundle } from './journey-pretest-scan';
@@ -446,12 +446,18 @@ async function processBundle(b: PretestBundle, summary: ScanSummary): Promise<vo
  *   (held = 주간 묶음이 원문 검사를 건너뛰고 유료 재작성을 돌리는 결정 · 같은 글은 고쳐도 같은 반려라 비용만 나간다).
  */
 function alertPretestRejected(b: PretestBundle, rejection: string | undefined): void {
+  // ★ 2026-11-22 C159 — 접수 거절(차단된 주소 · 길이)은 코드 회귀가 아니라 그 칸 문안의 문제다 → 제목 · 조치를 가른다(글자 반려 경보는 그대로)
+  const send = !isCharsRejection(rejection);
   void sendSystemAlert({
     companyId: b.companyId,
     dedupKey: `journey-pretest-rejected:${b.journeyId}:${b.stepId}`,
-    title: '여정 발송 전 검사가 보낼 수 없는 글자로 반려되었습니다(정리된 검사 글이라 오면 안 되는 갈래 · 코드 확인 필요).',
+    title: send
+      ? '여정 발송 전 검사 문자가 접수 거절됐습니다(그 칸 문안의 주소 · 길이 확인 필요).'
+      : '여정 발송 전 검사가 보낼 수 없는 글자로 반려되었습니다(정리된 검사 글이라 오면 안 되는 갈래 · 코드 확인 필요).',
     details: [`사유: ${rejection || '보낼 수 없는 글자'}`, `journey=${b.journeyId} step=${b.stepId}`],
-    action: '검사 입력 정리(stepSpamInput) · 렌더 표식을 확인해 주세요. 그 판은 검사 장애로 세어 하루 상한 뒤 멈춥니다.',
+    action: send
+      ? '그 칸 문안의 주소가 차단 목록에 있는지 · 문안 길이를 확인해 주세요. 그 판은 검사 장애로 세어 하루 상한 뒤 멈춥니다.'
+      : '검사 입력 정리(stepSpamInput) · 렌더 표식을 확인해 주세요. 그 판은 검사 장애로 세어 하루 상한 뒤 멈춥니다.',
   }).catch(() => undefined);
 }
 

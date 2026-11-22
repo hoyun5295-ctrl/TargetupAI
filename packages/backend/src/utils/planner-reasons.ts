@@ -98,3 +98,13 @@ export function plannerCharsReason(places: string, when: 'send' | 'prepare'): st
   const tail = when === 'send' ? '문안에서 그 글자를 빼 주세요.' : '혜택 문구나 문안에서 그 글자를 빼 주세요.';
   return places ? `${head}: ${places}. ${tail}` : `${head}. ${tail}`;
 }
+
+/**
+ * ★ 2026-11-22 C159 — 접수 거절 반려 사유(why = 사유 · 차단된 주소 등 · 그 글은 고객 문안의 내용이 아니라 사유 표의 문장).
+ *   글자 반려와 가르는 판정은 planner-copy 의 plannerRejectedReason(이 사전은 순수 모듈이라 검사 모듈을 불러오지 않는다).
+ */
+export function plannerSendRejectedReason(why: string, when: 'send' | 'prepare'): string {
+  return when === 'send'
+    ? `검사 문자를 보내지 못해 오늘 발송을 보류했습니다: ${why}. 문안을 고쳐 주세요.`
+    : `검사 문자를 보내지 못해 문안을 준비하지 못했습니다: ${why}. 혜택 문구나 문안을 고쳐 주세요.`;
+}

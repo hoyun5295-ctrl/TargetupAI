@@ -5,7 +5,7 @@
  * 내주는 것 = 상태 · 통신사별 결과 · 앞 대기 수 · 진행 초만(검사 행 원본 · 받는 사람 · 만든 사람 0 · Codex 설계 1R H2).
  */
 import { query } from '../config/database';
-import { spamTestStartedAtMs, readSpamTestOutcome } from './spam-test-queue';
+import { spamTestStartedAtMs, readSpamTestOutcome, spamGatewayRejectionOf } from './spam-test-queue';
 import { judgeSpamVerdict, withExpectedSpamDevices } from './spam-trial';
 
 export type SpamCheckViewState = 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn';
@@ -17,6 +17,8 @@ export interface SpamCheckView {
   elapsedSec: number;
   /** ★ 2026-11-22 C153 — 결과 없음(warn)인데 늦은 보고가 아직 그 줄을 통과로 고칠 수 있는 때(readSpamTestOutcome lateOpen · DB 시계 · C150 조각 하나) · 그 밖 상태 = false */
   lateOpen: boolean;
+  /** ★ 2026-11-22 C159 — 결과 없음(warn)으로 닫힌 검사가 문안 사유 접수 거절일 때의 반려 문장(그 밖 = 없음 · 고객 정보 0) */
+  rejection?: string;
 }
 
 /** 검사 한 건 → 보기(기대 테스트폰을 채운 판정 · 수동 검사 창과 같은 함수) */
@@ -51,11 +53,15 @@ export async function spamCheckView(testId: string, status: string, createdAt: D
     if (cur === 'blocked' || (cur === 'checking' && val !== 'blocked') || (cur === 'pass' && val === 'none')) continue;
     byCarrier.set(r.carrier, val);
   }
+  // ★ 2026-11-22 C159(D3) — 결과 없음으로 닫힌 검사가 접수 거절이면 사유를 싣는다(판정 = 결과 행 전부가 접수 거절일 때만 · 통과 · 시간 초과 행이 섞이면 null).
+  //   그 검사는 늦은 보고로 고쳐지지 않는다 → lateOpen = false(이어 읽기 · 같은 날 재사용에 묶지 않는다 = 다시 누르면 새 검사).
+  const rejection = state === 'warn' ? await spamGatewayRejectionOf(testId) : null;
   return {
     state,
     carriers: [...byCarrier.entries()].map(([carrier, result]) => ({ carrier, result })),
     aheadCount,
-    lateOpen: state === 'warn' ? (await readSpamTestOutcome(testId)).lateOpen : false,
+    lateOpen: state === 'warn' && !rejection ? (await readSpamTestOutcome(testId)).lateOpen : false,
     elapsedSec: status === 'active' ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0,
+    ...(rejection ? { rejection } : {}),
   };
 }

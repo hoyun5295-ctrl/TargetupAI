@@ -122,7 +122,9 @@ describe('§7 A 회복 = 안별 결과도 다시 읽은 값으로(카드 칩 = �
     const op = src('continuous-operator.ts');
     expect(op).toContain('const refreshed = refreshHeldResults(row.sc?.results, read);');
     expect(op).toContain('const r = await restoreHeldProposal(row, pass, refreshed);');
-    expect(op).toContain('}, query, refreshed)) out.settled++;');
+    // ★ 1122 C159 — 종결 갈래의 안별 결과 = 접수 거절 사유까지 읽은 값(settledRead)으로 같은 조각(refreshHeldResults)을 지난다
+    expect(op).toContain('const settledResults = refreshHeldResults(row.sc?.results, settledRead);');
+    expect(op).toContain('}, query, settledResults)) out.settled++;');
     expect((op.match(/\$\{keepPass\((5|6)\)\}/g) || []).length).toBe(2);
     expect(op).toContain("COALESCE(proposal_json->'spamCheck', '{}'::jsonb) || ${heldResultsPatch(4)} || jsonb_build_object('recovery',");
   });

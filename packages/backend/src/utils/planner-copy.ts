@@ -20,7 +20,7 @@ import { getCompanyCosts } from '../config/defaults';
 import { orchestrate } from '../services/ai-orchestrator';
 import { generateMessages } from '../services/ai';
 import { buildSpamRegeneratePrompt } from './continuous-operator-policy';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, type SpamVerdict, spamRejectionPlaces, isCharsRejection, spamSendRejectionReason } from './spam-test-queue';
 import { smsTextBlockReason } from './message-sanitizer';   // ★ 2026-11-06 C109 사람 글 저장 관문(위치 문장)
 import { applyBenefitToBody, hasUneditedBenefitPlaceholder } from './autosend-policy';
 import { getOpt080Number } from './messageUtils';
@@ -32,7 +32,7 @@ import {
 } from './planner-execution';
 import { PlannerTouchpointRow, loadEventTouchpoints, setTouchpointMetaIfCopyIs, guardPlannerMetaOrSkip } from './planner-touchpoint';
 import { loadPlannerEvent, staleBuildChannels, PlannerEventRow } from './planner-event';
-import { PLANNER_REASON, plannerCharsReason } from './planner-reasons';
+import { PLANNER_REASON, plannerCharsReason, plannerSendRejectedReason } from './planner-reasons';
 
 // ── 회사 축(실행부와 공용 — 같은 값으로 검사하고 같은 값으로 보낸다) ─────────
 export interface PlannerCompanyContext { companyInfo: any; customerStats: any; rejectNumber: string }
@@ -255,6 +255,26 @@ async function runPlannerSpamTest(input: PlannerSpamInput) {
 }
 
 /**
+ * ★ 2026-11-22 C159 — 반려 사유 한 문장(글자 반려 = 위치 · 접수 거절 = 사유). 반려를 말하는 자리 전부가 이 함수 하나를 부른다
+ *   (준비 둘 · 고친 글 검사 · 발송 당일 둘 · 재확인의 새 문안). 글자 반려 문장은 plannerCharsReason 그대로 · 판정 = isCharsRejection 한 곳.
+ */
+export function plannerRejectedReason(rejection: string | null | undefined, when: 'send' | 'prepare'): string {
+  if (isCharsRejection(rejection)) return plannerCharsReason(spamRejectionPlaces(rejection), when);
+  return plannerSendRejectedReason(spamSendRejectionReason(rejection) || String(rejection || '').trim(), when);
+}
+
+/**
+ * ★ 2026-11-22 C159(구현 Codex 1R) — 재확인 보기에 싣는 반려 사유 = **고정 문장만**(그 보기는 로그인 없이 여는 링크로도 나간다).
+ *   글자 반려의 위치 문장은 싣지 않는다: 검사 글은 표본 고객 값으로 치환한 글이라, 위치 문장(문제 글자 앞 글)에 그 고객의 이름이 섞일 수 있다.
+ *   접수 거절 = 사유 표(sms-result-map)의 문장만 · 그 꼴이 아닌 반려 문장 = null(모르는 글은 내보내지 않는다).
+ */
+export function plannerViewRejectedReason(rejection: string | null | undefined, when: 'send' | 'prepare'): string | null {
+  if (isCharsRejection(rejection)) return plannerCharsReason('', when);
+  const why = spamSendRejectionReason(rejection);
+  return why ? plannerSendRejectedReason(why, when) : null;
+}
+
+/**
  * 스팸 검사(CT-09) — 판정 셋을 돌려준다(통과 · 차단 · 검사 장애). `regenerate` = 사람이 보기 전에만 true(이 파일의 사전 준비 · 재확인 새 문안).
  * 입력 `body`는 **링크까지 붙은 최종 형태**여야 한다. 재생성본도 같은 링크를 다시 붙인다(검사한 문안 = 나갈 문안).
  * 예외(큐 · DB)도 error 로 접는다(검사 장애 ≠ 차단).
@@ -352,7 +372,7 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
           generationFailed = true;
           const at = new Date().toISOString();
           await setTouchpointMetaIfCopyIs(companyId, carrier.id, cur,
-            { copy: { ...cur, spam: 'fail', checkedAt: at }, copy_error: { reason: plannerCharsReason(spamRejectionPlaces(check.rejection), 'prepare'), at } }).catch(() => false);
+            { copy: { ...cur, spam: 'fail', checkedAt: at }, copy_error: { reason: plannerRejectedReason(check.rejection, 'prepare'), at } }).catch(() => false);
           continue;
         }
         void (check.verdict satisfies 'pass' | 'blocked');
@@ -409,7 +429,7 @@ export async function preparePlannerEventCopy(companyId: string, eventId: string
       if (check.verdict !== 'pass') {
         generationFailed = true;
         // ★ 2026-11-06 C109 E9 — 글자 반려 = 위치 사유(AI 글은 출구 CT 가 이미 정리 → 출처 = 다시 넣은 혜택 문구) · 옛: 만들기 실패 일반 문장
-        const reason = check.verdict === 'rejected' ? plannerCharsReason(spamRejectionPlaces(check.rejection), 'prepare')
+        const reason = check.verdict === 'rejected' ? plannerRejectedReason(check.rejection, 'prepare')
           : check.verdict === 'blocked' ? PLANNER_REASON.spamFailed : PLANNER_REASON.copyFailed;
         await setTouchpointMetaIfCopyIs(companyId, carrier.id, before,
           { copy_error: { reason, at: new Date().toISOString() } }).catch(() => false);

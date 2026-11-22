@@ -11,7 +11,7 @@
 //   - journey_executions 7일 트리거 패턴 (예상 비용)
 
 import { query } from '../config/database';
-import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, enqueueFailureVerdict, SPAM_REJECTED_DEFAULT_TEXT, type SpamVerdict, type SpamTestEnqueueResult } from './spam-test-queue';
+import { enqueueSpamTest, spamVerdictOf, readSpamTestOutcome, isSpamHold, peekSpamCheck, enqueueFailureVerdict, SPAM_REJECTED_DEFAULT_TEXT, type SpamVerdict, type SpamTestEnqueueResult, spamGatewayRejectionOf } from './spam-test-queue';
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 P5 검사 입력(렌더 뒤) 글자 정리
 import { spamCheckView, type SpamCheckView } from './spam-test-view';   // ★ 2026-11-05 C103 F1 검사 한 건 보기 CT
 import { renderJourneySmsMessage, pickJourneySampleCustomer } from './journey-message-render';
@@ -287,6 +287,8 @@ async function pollSpamResult(
   failedCarriers: string[];
   matchedStopWords: string[];
   score: number;
+  /** ★ 2026-11-22 C159 — 접수 거절 반려 문장(verdict = rejected 일 때) */
+  error?: string;
 }> {
   const start = Date.now();
   for (;;) {
@@ -294,6 +296,9 @@ async function pollSpamResult(
     if (outcome !== 'pending' || Date.now() - start >= timeoutMs) {
       // 화면에 적는 차단 통신사 = 실제 차단만(검사 장애 · 확인 중 통신사는 차단이 아니다)
       const failedCarriers = carrierResults.filter((c) => c.result === 'blocked').map((c) => `${c.carrier}(${c.messageType})`);
+      // ★ 2026-11-22 C159(D3) — 장애로 닫힌 검사가 문안 사유 접수 거절이면 반려 + 사유(고칠 글 · 값 범위는 readSpamTestOutcome 그대로 = 다음에 누르면 새 검사)
+      const sendRejection = outcome === 'error' ? await spamGatewayRejectionOf(testId) : null;
+      if (sendRejection) return { verdict: 'rejected', failedCarriers, matchedStopWords: [], score: 0, error: sendRejection };
       return { verdict: outcome, failedCarriers, matchedStopWords: [], score: outcome === 'pass' ? 95 : outcome === 'blocked' ? 50 : 0 };
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -548,6 +553,7 @@ async function runOneStepSpamTest(params: StepSpamParams): Promise<StepSpamTestR
       failedCarriers: spamScore.failedCarriers,
       matchedStopWords: spamScore.matchedStopWords,
       score: spamScore.score,
+      ...(spamScore.error ? { error: spamScore.error } : {}),   // ★ C159 접수 거절 사유
     };
   } catch (err: any) {
     if (err instanceof RecoSlotLostError) return recoLostResult(err);

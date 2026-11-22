@@ -8,7 +8,7 @@
 import { findVarTokens } from './formatDate';
 import { detectLiquidSyntax } from './liquid-templating';
 import { SPLIT_COUNT_RANGE, SPLIT_INTERVAL_RANGE } from './split-send';
-import type { AiLineColumn } from './ai-line';
+import { sendRejectionReasonOf, type AiLineColumn } from './ai-line';
 
 export type AskGroupKey = 'leave' | 'rest' | 'fade' | 'next' | 'loyal' | 'new' | 'nobuy';
 export type AskOrder = 'recent' | 'count';
@@ -116,7 +116,7 @@ export function askTakeBlock(s: { making: boolean; cardFp: string | null; nowFp:
  *   발송은 막지 않는다(AI 한줄로 확인 창과 같은 규칙).
  */
 export function askSpamNote(
-  chip: { state: string; fp?: string; carriers?: Array<{ carrier: string; result: string }> } | undefined, fpNow: string,
+  chip: { state: string; fp?: string; carriers?: Array<{ carrier: string; result: string }>; message?: string } | undefined, fpNow: string,
 ): string {
   if (!chip || chip.fp !== fpNow) return '이 글로는 도착 확인을 하지 않았어요.';
   if (chip.state === 'blocked') {
@@ -124,6 +124,9 @@ export function askSpamNote(
     return `도착 확인에서 막혔어요(${names}). 그대로 보내면 일부 고객에게 안 갈 수 있어요.`;
   }
   if (chip.state === 'queued' || chip.state === 'running' || chip.state === 'busy') return '도착 확인이 아직 끝나지 않았어요.';
+  // ★ 2026-11-22 C159 — 결과를 못 받은 것이 아니라 도착 확인 문자가 접수 거절된 것(차단된 주소 등) = 사유 · 실제 발송도 같은 판정으로 막힌다
+  const sendWhy = chip.state === 'warn' ? sendRejectionReasonOf(chip.message) : '';
+  if (sendWhy) return `도착 확인 문자를 보내지 못했어요: ${sendWhy}. 그대로 보내면 발송에서도 막혀요.`;
   if (chip.state === 'warn' || chip.state === 'checking') return '도착 확인 결과를 아직 받지 못한 통신사가 있어요.';
   if (chip.state === 'pass') return '';
   return '이 글은 도착 확인을 하지 못했어요.';

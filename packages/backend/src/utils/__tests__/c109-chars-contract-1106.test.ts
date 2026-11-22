@@ -308,7 +308,9 @@ describe('K4 자리 단위 — 검사 공용 함수를 부르는 자리마다 re
     expect(branch).toContain("end('locked'");
     expect(sliceFn(read('utils/planner-review.ts'), "if (check.verdict === 'rejected') {", "return 'fail';")).toContain("status: 'locked'");
     expect(read('utils/planner-recheck.ts')).toContain("if (check.verdict === 'rejected') {");
-    expect((read('utils/planner-copy.ts').match(/plannerCharsReason\(spamRejectionPlaces\(check\.rejection\), 'prepare'\)/g) || []).length).toBe(2);
+    // ★ 1122 C159 — 반려를 말하는 자리 = 가르는 함수 하나(글자 반려 = 위치 문장 그대로 · 접수 거절 = 사유) · 사전 준비 두 자리는 그대로 둘
+    expect((read('utils/planner-copy.ts').match(/plannerRejectedReason\(check\.rejection, 'prepare'\)/g) || []).length).toBe(2);
+    expect(read('utils/planner-copy.ts')).toContain('if (isCharsRejection(rejection)) return plannerCharsReason(spamRejectionPlaces(rejection), when);');
   });
   it('여정 사전 검사 = 장애 기록 + 경보 · held 0 · 검사 입력 = 렌더 뒤 정리 + rendered', () => {
     const n = read('utils/journey-pretest-notifier.ts');

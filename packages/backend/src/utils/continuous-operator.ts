@@ -43,7 +43,7 @@ import { shouldSkipProposalGeneration } from './operator-proposal-dedup';
 import { insertProposalVariants, recommendVariantForProposal, recordVariantReward } from './bandit-optimizer';
 // ★ D212+ 정책 (2026-05-23 Harold 명시): CT-64 영역 통합 — 검증 영역 + 담당자 학습
 // ★ D227+ 스팸 안전망 격상 — decideSpamOutcome(실제 테스트 결과 → 상태) + buildSpamRegeneratePrompt(AI 재작성)
-import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason, operatorFinalSpamResult, refreshHeldResults } from './continuous-operator-policy';
+import { recordAdminStopLearning, decideSpamOutcome, buildSpamRegeneratePrompt, spamCheckPassedIndex, AUTO_SEND_SPAM_VERIFIED_SQL, PROPOSAL_SPAM_RETEST_LIMIT, operatorCharsReason, operatorRejectedReason, heldRejectedNotice, operatorFinalSpamResult, refreshHeldResults } from './continuous-operator-policy';
 import { buildAutosendStopUrl } from './autosend-stop-link';
 import { operatorCapPolicy, operatorCapPathOf, autoSendLeadMinutesSql, type OperatorCapPath } from './autosend-policy';
 import { NOTICE_MAX_ATTEMPTS } from './journey-notice-once';   // ★ 2026-11-02 안내 시도 상한(한 정책 · 회차 안내도 같은 값)   // ★ 2026-11-02 상한 갈래 CT(설계서 3-0 CT-O2)
@@ -54,7 +54,7 @@ import { objectiveForRounds } from './automarketing-interview';
 import { buildLineEventText } from './one-line-facts';
 import { getOpt080Number, buildAdMessage } from './messageUtils';
 // ★ D227+ 검증된 스팸 자산 재사용 (auto-campaign-worker와 동일 패턴) — 실제 테스트폰 발송 + AI 재생성 + 재테스트
-import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, readSpamTestOutcome, spamRejectionOf, spamRejectionPlaces, toSpamCheckRecord, SPAM_LATE_REPORT_MINUTES, type SpamCheckRecord } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, spamVerdictWithRetry, isSpamHold, readSpamTestOutcome, spamRejectionOf, spamRejectionPlaces, isCharsRejection, spamSendRejectionReason, spamGatewayRejectionOf, toSpamCheckRecord, SPAM_LATE_REPORT_MINUTES, type SpamCheckRecord } from './spam-test-queue';
 import { assertSmsTextSendable, smsTextBlockReason } from './message-sanitizer';   // ★ 2026-11-06 C109 D6 사람 글 저장 관문(위치)
 import { generateMessages, stripIncompatibleEmojis } from '../services/ai';
 // ★ D227+ 종량제: AI 사이클 크레딧 부족 감지 + 담당자 무과금 알림(인증 라인 재사용)
@@ -1900,7 +1900,7 @@ async function generateProposalForOperatorRound(operatorId: string, opts?: { pre
       finalNoticeCopy = operatorFinalCopy(saved.rows[0].proposal_json, copyCtx)?.sent || finalNoticeCopy;
 
       // 스팸 결과 저장 + 상태 결정 (decideSpamOutcome 순수 정책)
-      const outcome = decideSpamOutcome(finalResult, regenCount, spamRejectionPlaces(rejection));
+      const outcome = decideSpamOutcome(finalResult, regenCount, spamRejectionPlaces(rejection), rejection);   // ★ C159 접수 거절이면 사유를 말한다
       await query(
         `UPDATE operator_proposals SET
            spam_test_status = $2, spam_test_retry_count = $3, spam_test_reasoning = $4
@@ -2164,8 +2164,10 @@ export async function listProposals(
         : (pj?.spamCheck?.fp === send.fingerprint || pj?.approvedFp === send.fingerprint) ? 'passed'
           : recheck && recheck.fp === send.fingerprint ? (recheck.result === 'blocked' ? 'blocked' : recheck.result === 'rejected' ? 'rejected' : recheck.result === 'unchecked' ? 'unchecked' : 'rechecking')
             : pj?.spamCheck?.fp ? 'stale' : 'none';
+    // ★ C159 — 나가는 글의 글자 문제(charIssue)가 먼저 · 그 밖 = 다시 검사의 반려 문장(글자 반려 = 위치 · 접수 거절 = 사유)
     const copyCheckReason = copyCheck !== 'rejected' ? null
-      : operatorCharsReason(send?.charIssue || spamRejectionPlaces(typeof recheck?.rejection === 'string' ? recheck.rejection : null));
+      : send?.charIssue ? operatorCharsReason(send.charIssue)
+        : operatorRejectedReason(typeof recheck?.rejection === 'string' ? recheck.rejection : null);
     const mapped = mapRowToProposal(row);
     const finalCosts = unitCosts
       ? finalCopies.map((f) => { const u = f ? Number(unitCosts[f.msgType.toLowerCase()]) : NaN; return Number.isFinite(u) ? Math.round(u * mapped.recipientCount) : null; })
@@ -2801,17 +2803,25 @@ export async function recoverHeldProposals(): Promise<{ restored: number; settle
       const waiting = read.some((x) => isSpamHold(x.outcome) || ((x.outcome === 'error' || x.outcome === 'blocked') && x.lateOpen));
       const old = Date.now() - new Date(row.created_at).getTime() >= HELD_RECOVERY_GIVEUP_HOURS * 60 * 60 * 1000;
       if (waiting && !old) continue;
+      // ★ 2026-11-22 C159(D3-2 · 설계 Codex 2R) — 종결할 때 **안마다** 본다: 장애로 닫힌 검사가 접수 거절이면 그 안 = 반려 + 사유.
+      //   회차 결말을 합친 뒤에 보면 다른 안이 차단인 회차에서 사유가 사라지고 그 안이 「검사 중」으로 남는다. 결말의 차례는 그대로(통과 > 기다림 > 차단 > 그 밖).
+      //   기다리는 회차는 여기 오지 않는다(매 분 큐 표를 읽지 않는다).
+      const settledRead = await Promise.all(read.map(async (x) => ({ ...x, rejection: x.outcome === 'error' ? await spamGatewayRejectionOf(x.testId) : null })));
+      const settledResults = refreshHeldResults(row.sc?.results, settledRead);
+      const heldRejection = settledRead.find((x) => x.rejection)?.rejection ?? null;
       const result = waiting ? 'late' : read.some((x) => x.outcome === 'blocked') ? 'blocked' : 'error';
       const name = await operatorNameOf(row.operator_id);
       if (await markRecovery(row.id, result, {
         title: '[AI 자동마케팅] 이번 회차 검토 필요',
         body: result === 'late'
           ? `'${name}' 이번 회차 스팸 검사 결과가 ${HELD_RECOVERY_GIVEUP_HOURS}시간 넘게 나오지 않아 담당자 검토로 두었어요. 제안 상세에서 다시 검사하거나 승인해 주세요.`
+          : result === 'error' && heldRejection
+            ? heldRejectedNotice(name, heldRejection)   // ★ C159 — 접수 거절 안이 있으면 사유를 말한다(「결과를 받지 못해」가 아니다)
           : result === 'error'
             // ★ 2026-11-20 C148 T1 — 막힌 안 없이 결과를 못 받음 = 「통과하지 못해」라고 쓰지 않는다(옛 문자가 직원에게 차단으로 읽혔다)
             ? `'${name}' 이번 회차 스팸 검사 결과를 받지 못해 담당자 검토로 두었어요. 제안 상세에서 다시 검사하거나 승인해 주세요. 자동마케팅은 그대로 돌아가요.`
             : `'${name}' 이번 회차 문안이 스팸필터를 통과하지 못해 담당자 검토로 두었어요. 제안 상세에서 다른 안을 고르거나 고친 뒤 스팸 검사를 하고 승인해 주세요. 자동마케팅은 그대로 돌아가요.`,
-      }, query, refreshed)) out.settled++;
+      }, query, settledResults)) out.settled++;
     } catch (err: any) {
       // R8 — 예상 밖 실패 = 종결 표식(매 분 다시 집지 않는다 · 회차는 이미 담당자 검토라 사람 길이 남아 있다)
       console.error(`[ContinuousOperator Recover] ${row.id} 회복 실패 → 담당자 검토 그대로:`, err?.message || err);
@@ -4727,6 +4737,8 @@ async function scheduleSequenceReminder(
     } catch (e: any) {
       console.warn('[ContinuousOperator Sequence] 리마인드 스팸 검증 예외:', e?.message);
     }
+    // ★ C159 — 접수 거절 반려의 사유(글자 반려면 null = 옛 문장 그대로)
+    const sendWhy = spamRejection != null && !isCharsRejection(spamRejection) ? (spamSendRejectionReason(spamRejection) || spamRejection) : null;
     if (spamPassed) {
       // CAS — '검증 중' 그대로일 때만 승격. 그 사이 사람이 승인·중지했으면 그 판단을 덮지 않는다.
       const up = await query(
@@ -4744,12 +4756,17 @@ async function scheduleSequenceReminder(
         `UPDATE operator_proposals SET auto_execute_reason = $2
           WHERE id = $1::uuid AND status = 'admin_review' AND auto_execute_reason = $3
           RETURNING id`,
-        [reminderId, spamRejection != null
+        [reminderId, sendWhy != null
+          // ★ C159 — 접수 거절(차단된 주소 등) = 사유를 말한다(글자 반려 문장은 아래 그대로)
+          ? `리마인드 문안의 검사 문자를 보내지 못해 자동 예약을 보류했어요: ${sendWhy}. 문안을 고친 뒤 승인해 주세요`
+          : spamRejection != null
           ? `리마인드 문안에 문자로 보낼 수 없는 글자가 있어 자동 예약을 보류했어요: ${spamRejectionPlaces(spamRejection) || '위치를 확인해 주세요'}. 문안을 고친 뒤 승인해 주세요`
           : spamUnchecked ? '리마인드 문안 스팸 검사를 마치지 못했어요. 검사하거나 그대로 승인해 주세요' :`리마인드 문안 스팸 검증 미통과(${spamNote}). 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
       ).catch((e: any) => { console.warn('[ContinuousOperator Sequence] 리마인드 사유 갱신 경고:', e?.message); return { rows: [] as any[] }; });
       if (marked.rows.length > 0) {
-        await tell('[AI 자동마케팅] 리마인드 검토 필요', spamRejection != null
+        await tell('[AI 자동마케팅] 리마인드 검토 필요', sendWhy != null
+          ? `'${op.name || ''}' 리마인드 문안의 검사 문자를 보내지 못해 자동 예약을 보류했습니다: ${sendWhy}. 문안을 고친 뒤 승인해 주세요.`
+          : spamRejection != null
           ? `'${op.name || ''}' 리마인드 문안에 문자로 보낼 수 없는 글자가 있어 자동 예약을 보류했습니다: ${spamRejectionPlaces(spamRejection) || '위치를 확인해 주세요'}. 문안을 고친 뒤 승인해 주세요.`
           : spamUnchecked
           ? `'${op.name || ''}' 리마인드 문안의 스팸 검사를 마치지 못해 자동 예약을 보류했습니다. 제안 상세에서 검사하거나 그대로 승인해 주세요.`

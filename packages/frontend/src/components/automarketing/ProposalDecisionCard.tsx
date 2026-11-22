@@ -15,6 +15,7 @@ import StatusBadge from './StatusBadge';
 import TargetRecipientsModal, { arrayPager, TargetRecipient } from '../TargetRecipientsModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../../utils/smsSafeChars';
+import { isSendRejectionText } from '../../utils/ai-line';
 
 // [타겟확인] 응답 — 1회 로드(LIMIT 100) 후 클라 페이징(서버 재호출 0)
 interface TargetListInfo {
@@ -300,7 +301,8 @@ export default function ProposalDecisionCard({
       {/* ★ 2026-10-24 지금 나갈 글의 검사 상태(서버 판정 · 통과 지문 · 재검사) */}
       {proposal.copyCheck && COPY_CHECK_CHIP[proposal.copyCheck] && (
         <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full ${COPY_CHECK_CHIP[proposal.copyCheck].cls}`}>
-          <ShieldCheck className="w-3 h-3" />{COPY_CHECK_CHIP[proposal.copyCheck].text}
+          {/* ★ 2026-11-22 C159 — 반려가 접수 거절(차단된 주소 등)이면 「글자」라고 말하지 않는다(사유는 아래 줄) */}
+          <ShieldCheck className="w-3 h-3" />{proposal.copyCheck === 'rejected' && isSendRejectionText(proposal.copyCheckReason) ? '보낼 수 없는 글이에요. 문안을 고쳐 주세요' : COPY_CHECK_CHIP[proposal.copyCheck].text}
         </span>
       )}
       {proposal.copyCheck === 'rejected' && proposal.copyCheckReason && (

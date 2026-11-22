@@ -23,7 +23,7 @@
 import pool, { query, lockPool, type TxRun } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, isCharsRejection, spamGatewayRejectionOf, readSpamTestOutcome, mergeAlternativeVerdicts, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, isCharsRejection, spamSendRejectionReason, spamGatewayRejectionOf, readSpamTestOutcome, mergeAlternativeVerdicts, type SpamVerdict } from './spam-test-queue';
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
@@ -456,13 +456,9 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       const v = result.variants[0];
       // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
       const verdict = spamVerdictOf(v, result.totalTestCount);
-      if (verdict === 'error') {
-        // ★ 2026-11-22 C158 — 검사 문자가 문안 사유로 접수 거절(차단된 URL 등)이면 장애가 아니라 반려(다시 검사 0 · 15분 대기 0 · 사유를 알린다)
-        //   옛(1122 실측): 결과 표의 「발송 실패」만 보고 장애로 읽어 같은 글을 세 번 다시 검사한 뒤 「문안 문제는 아닙니다」를 보냈다.
-        const sendRejection = await sendRejectionOfTests(Object.values(result.testIds ?? {}));
-        if (sendRejection) return { verdict: 'rejected', passed: false, finalContent: original, rounds, detail, rejection: sendRejection };
-        return { verdict, passed: false, finalContent: original, rounds, detail };
-      }
+      // ★ 2026-11-22 C159(D2) — 방금 돌린 검사의 접수 거절은 자동 검사 공용 입구(runOneTest)가 반려 + 사유로 돌려준다(아래 rejected 갈래).
+      //   C158 이 여기 달았던 자체 사유 읽기는 지웠다. 보류로 남겼다가 닫힌 검사만 이 함수 첫머리에서 따로 읽는다(sendRejectionOfTests).
+      if (verdict === 'error') return { verdict, passed: false, finalContent: original, rounds, detail };
       // ★ 2026-11-06 C109 D4 — 보낼 수 없는 글자 반려 = 장애 아님 · 다듬기 · 다시 검사 0(같은 글은 같은 반려) · 사람이 고친다
       if (verdict === 'rejected') return { verdict, passed: false, finalContent: original, rounds, detail, rejection: spamRejectionOf(v) };
       // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 원문 그대로 잡기 전 상태로(장애 횟수에 안 셈) · 다듬은 문장이면 그 글을 남겨 다음 주기에 이어 본다
@@ -621,16 +617,18 @@ async function settleSpamRejected(row: any, token: string, phase: 'first' | 'fin
   const message = String(rejection || '').trim() || null;
   // ★ 2026-11-22 C158 — 반려 둘을 가른다: 글자 반려(C109 · 위치를 알린다) · 접수 거절(차단된 URL 등 · 사유를 알린다). 둘 다 다시 검사 0 · 장애 셈 0
   const chars = isCharsRejection(message);
+  // ★ C159 — 접수 거절 = 정본 문장에서 사유만 뽑아 쓴다(문자의 「사유:」 줄 · 진행 기록 · 대행 글은 합니다체라 문장을 그대로 싣지 않는다)
+  const reason = chars ? null : (spamSendRejectionReason(message) || message);
   const label = shortLabel(row.file_name || row.original_content);
   if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
-  await logEvent(row.id, chars ? 'spam_rejected_chars' : 'spam_rejected', { phase, version: Number(row.content_version || 0), message });
+  await logEvent(row.id, chars ? 'spam_rejected_chars' : 'spam_rejected', { phase, version: Number(row.content_version || 0), message: chars ? message : reason });
   await logEvent(row.id, 'test_failed', { reason: chars ? 'unsupported_chars' : 'send_rejected', phase });
   await notifyManager({
     companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
     callback: row.callback_number, title: phase === 'final' ? '[대행발송] 예약 취소 안내' : '[대행발송] 문안 확인 필요',
     text: chars
       ? buildUnsupportedCharsNotify({ label, places: spamRejectionPlaces(message) })
-      : buildSendRejectedNotify({ label, reason: message || '' }),
+      : buildSendRejectedNotify({ label, reason: reason || '' }),
   });
 }
 

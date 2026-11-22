@@ -27,8 +27,9 @@ export interface RecheckView {
   today: string;
   deadline: { date: string; hour: number };
   sendsAt: 'now' | 'morning' | 'date';
-  current: { text: string; subject: string; edited: boolean; state: 'blocked' | 'pending' | 'pass' | 'fail' | 'stale' | 'missing'; hash: string | null; rawText: string };
-  proposal: { state: 'ready' | 'preparing' | 'failed' | 'unsafe'; text: string; subject: string; hash: string | null };
+  /** ★ 2026-11-22 C159 — reason = 반려 사유(보낼 수 없는 글자 · 접수 거절 · 그 밖 null · 옛 서버 = 없음) */
+  current: { text: string; subject: string; edited: boolean; state: 'blocked' | 'pending' | 'pass' | 'fail' | 'stale' | 'missing'; hash: string | null; rawText: string; reason?: string | null };
+  proposal: { state: 'ready' | 'preparing' | 'failed' | 'unsafe'; text: string; subject: string; hash: string | null; reason?: string | null };
   dm: { html: string | null } | null;
   recipients: { state: 'known' | 'blocked' | 'error'; count: number | null };
   copyCost: number;

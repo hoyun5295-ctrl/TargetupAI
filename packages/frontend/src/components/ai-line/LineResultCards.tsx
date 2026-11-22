@@ -13,7 +13,7 @@ import { Check, Loader2, PencilLine, ShieldCheck, ShieldAlert, Wand2, Clock3, Ro
 import { creditCost } from '../../constants/credit';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, type AiLineSpamChip, type AiLineColumn,
-  aiLineApi, spamFp, audienceOf, missingVarsIn,
+  aiLineApi, spamFp, audienceOf, missingVarsIn, sendRejectionReasonOf,
 } from '../../utils/ai-line';
 
 const POLL_MS = 3000;
@@ -58,7 +58,7 @@ export interface LineResultCardsProps {
 /** 그 카드의 문자 종류(카드마다 정하는 화면은 channelAt · 아니면 channel 하나) */
 export const cardChannel = (p: Pick<LineResultCardsProps, 'channel' | 'channelAt'>, t: AiLineType): AiLineChannel => (p.channelAt ? p.channelAt(t) : p.channel);
 
-function chipView(chip: AiLineSpamChip | undefined, stale: boolean, late: boolean): { tone: string; icon: 'ok' | 'bad' | 'wait' | 'none'; text: string } {
+function chipView(chip: AiLineSpamChip | undefined, stale: boolean, late: boolean): { tone: string; icon: 'ok' | 'bad' | 'wait' | 'none'; text: string; note?: string } {
   if (stale && chip && !RUNNING.includes(chip.state)) return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '글이 바뀌었어요 · 다시 검사' };
   if (!chip || chip.state === 'idle') return { tone: 'bg-slate-100 text-slate-600', icon: 'wait', text: '검사 전' };
   // ★ C153 — 통신사 이름은 고객이 아는 표기로(서버 값 LGU = 「LG U+」)
@@ -72,7 +72,10 @@ function chipView(chip: AiLineSpamChip | undefined, stale: boolean, late: boolea
     // ★ 2026-11-01 B1-4 — 통신사는 보냈는데 검사폰 보고가 늦음(길어도 20분 안에 확정 · 다시 걸어도 같은 검사를 이어 본다)
     case 'checking': return { tone: 'bg-amber-50 text-amber-800', icon: 'wait', text: `확인 중 · ${carriersBy('checking').join(' · ') || '통신사'}` };
     // ★ C153 — 서버가 늦은 보고를 받는 동안 = 늦게 도착할 수 있다(이어 읽는 중 · 도착하면 통과로 바뀐다) · 지나면 결과 없음
-    case 'warn': return late
+    // ★ 2026-11-22 C159 — 결과 없음이 아니라 검사 문자가 접수 거절된 것(차단된 주소 등 · 서버가 사유를 실어 준다) = 사유를 말한다.
+    //   칩은 줄바꿈 없는 알약이라 짧게 두고 사유는 카드 아래 한 줄(note)로 낸다(폭 320 에서 긴 칩이 화면을 26px 넘쳤다 · 미리보기 실측).
+    case 'warn': if (sendRejectionReasonOf(chip.message)) return { tone: 'bg-rose-50 text-rose-800', icon: 'bad', text: '보내지 못했어요', note: `${sendRejectionReasonOf(chip.message)}. 문안을 고친 뒤 다시 검사해 주세요.` };
+      return late
       ? { tone: 'bg-amber-50 text-amber-800', icon: 'wait', text: `도착 확인이 늦어요 · ${carriersBy('none').join(' · ') || '통신사'}` }
       : { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '결과 없음 · 다시 검사' };
     case 'demo': return { tone: 'bg-slate-100 text-slate-600', icon: 'none', text: '시연 계정은 검사하지 않아요' };
@@ -187,7 +190,8 @@ export default function LineResultCards(p: LineResultCardsProps) {
           const cur = latest.current;
           const now = cur.run.spam[t];
           if (cur.run.runId !== runId || !now || now.testId !== testId) return;
-          cur.onSpamPatch(t, { ...now, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec, lateOpen: r.lateOpen === true });
+          // ★ C159 — 접수 거절 사유(서버 rejection)는 칩의 message 칸에 싣는다(없으면 그대로)
+          cur.onSpamPatch(t, { ...now, state: r.state, carriers: r.carriers, aheadCount: r.aheadCount, elapsedSec: r.elapsedSec, lateOpen: r.lateOpen === true, ...(r.rejection ? { message: r.rejection } : {}) });
         }).catch(() => { /* 다음 읽기에서 다시(제한 시간 10초) */ }).finally(() => { if (pollingRef.current.get(t) === mark) pollingRef.current.delete(t); });
       }
     }, slow ? LATE_POLL_MS : POLL_MS);
@@ -238,6 +242,9 @@ export default function LineResultCards(p: LineResultCardsProps) {
                   {view.text}
                 </button>
               </div>
+              {view.note && (
+                <p className="rounded-lg bg-rose-50 border border-rose-200 px-2.5 py-1.5 text-[12px] text-rose-800 break-keep">{view.note}</p>
+              )}
               {t === 'direct' && !body.trim() && (
                 <button type="button" onClick={() => p.onEdit(t)} className="w-full h-11 rounded-xl border border-dashed border-slate-300 text-[13px] text-slate-500 hover:border-indigo-400 hover:text-indigo-700">
                   직접 쓰기 · 변수 · 특수문자 넣기

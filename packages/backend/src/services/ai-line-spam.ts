@@ -39,6 +39,8 @@ export interface LineSpamRead {
   aheadCount: number;
   elapsedSec: number;
   lateOpen: boolean;
+  /** ★ 2026-11-22 C159 — 접수 거절 반려 문장(칩이 「보내지 못했어요 · 사유」로 그린다) */
+  rejection?: string;
 }
 
 const digits = (s: unknown) => String(s ?? '').replace(/\D/g, '');

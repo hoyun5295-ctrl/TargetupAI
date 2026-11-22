@@ -237,12 +237,15 @@ export const GATEWAY_CONTENT_REJECT_TEXT: Readonly<Record<number, string>> = {
 };
 
 /**
- * ★ 2026-11-22 C158 — 검사 문자 실패 행들의 결과 코드 → 문안 사유 접수 거절이면 그 사유 · 아니면 null(순수).
- *   null = 종전 판정 그대로: 실패 행 0 · 코드를 못 읽은 행(null) · 문안 탓이 아닌 코드가 하나라도 섞임.
+ * ★ 2026-11-22 C158 · C159 — 검사 한 건의 결과 행 **전부** → 문안 사유 접수 거절이면 그 사유 · 아니면 null(순수).
+ *   조건 = 행이 하나 이상 · 전부 발송 실패 · 그 코드가 전부 문안 사유 접수 거절(문안은 통신사마다 같으므로 문안 사유 거절은 행 전부에서 난다).
+ *   null = 종전 판정 그대로: 행 0 · 통과 · 시간 초과 · 확인 중 행이 하나라도 있음 · 코드를 못 읽은 행 · 문안 탓이 아닌 코드.
+ *   ★ C159(설계 Codex 1R #1) — 옛 C158 은 실패 행만 보아, 시간 초과 행이 남은 검사(늦게 도착할 수 있다)까지 접수 거절로 굳힐 수 있었다
+ *     → 늦은 보고 보호가 풀려 새 유료 검사가 걸리고 늦은 문자가 뒤 검사에 붙는다.
  */
-export function gatewayRejectionFromCodes(codes: ReadonlyArray<number | null | undefined>): string | null {
-  if (codes.length === 0) return null;
-  const texts = codes.map((c) => (c == null ? undefined : GATEWAY_CONTENT_REJECT_TEXT[Number(c)]));
+export function gatewayRejectionReason(rows: ReadonlyArray<{ failed: boolean; code?: number | null }>): string | null {
+  if (rows.length === 0) return null;
+  const texts = rows.map((r) => (r.failed && r.code != null ? GATEWAY_CONTENT_REJECT_TEXT[Number(r.code)] : undefined));
   return texts.every(Boolean) ? (texts[0] as string) : null;
 }
 

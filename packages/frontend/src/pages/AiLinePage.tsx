@@ -45,7 +45,7 @@ import LineIntakeModal from '../components/ai-line/LineIntakeModal';
 import LineResultCards from '../components/ai-line/LineResultCards';
 import {
   type AiLineRun, type AiLineType, type AiLineChannel, aiLineApi, newAiLineRun, saveAiLineRun, loadAiLineRun,
-  activeFilters, allCustomersFlag, audienceOf, spamFp, aiLineOwner, AI_LINE_ALIMTALK_HANDOFF, isAdOf,
+  activeFilters, allCustomersFlag, audienceOf, spamFp, aiLineOwner, AI_LINE_ALIMTALK_HANDOFF, isAdOf, sendRejectionReasonOf,
 } from '../utils/ai-line';
 // ★ D210+ Phase 2-fix1 (Harold 명시 2026-05-23): 회사 데이터 활용 매트릭스 안내 카드 (3축 100% 보완).
 import AiProposalSummaryModal from '../components/AiProposalSummaryModal';
@@ -1084,6 +1084,8 @@ export default function AiLinePage() {
         if (!chip || chip.fp !== fpNow) return '이 글로는 스팸 검사를 하지 않았어요.\n';
         if (chip.state === 'blocked') return `스팸 검사에서 막혔어요(${(chip.carriers || []).filter((c) => c.result === 'blocked').map((c) => c.carrier).join(' · ') || '통신사'}). 그대로 보내면 일부 고객에게 안 갈 수 있어요.\n`;
         if (chip.state === 'queued' || chip.state === 'running' || chip.state === 'busy') return '스팸 검사가 아직 끝나지 않았어요.\n';
+        // ★ 2026-11-22 C159 — 접수 거절(차단된 주소 등)이면 「결과를 받지 못했어요」보다 먼저 사유를 말한다(실제 발송도 같은 판정으로 막힌다)
+        if (chip.state === 'warn' && sendRejectionReasonOf(chip.message)) return `스팸 검사 문자를 보내지 못했어요: ${sendRejectionReasonOf(chip.message)}. 그대로 보내면 발송에서도 막혀요.\n`;
         if (chip.state === 'warn') return '스팸 검사 결과를 받지 못했어요.\n';
         return '';
       })() + (staged && staged.excluded > 0 ? `회신번호가 없거나 중복인 ${staged.excluded.toLocaleString()}명을 빼고 보내요.\n` : '');

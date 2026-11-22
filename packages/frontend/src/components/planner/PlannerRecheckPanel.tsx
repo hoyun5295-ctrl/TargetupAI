@@ -95,6 +95,9 @@ export default function PlannerRecheckPanel({
         {note && <p className={`mt-2 text-[12.5px] leading-snug ${selectable ? 'text-emerald-800' : 'text-slate-600'} flex items-start gap-1.5`}>
           {(key === 'proposal' && view.proposal.state === 'preparing') || (key === 'current' && view.current.state === 'pending')
             ? <Loader2 className="w-3.5 h-3.5 mt-0.5 shrink-0 animate-spin" /> : null}{note}</p>}
+        {/* ★ 2026-11-22 C159 — 반려 사유(보낼 수 없는 글자의 위치 · 접수 거절 사유) = 왜 못 썼는지 한 줄 */}
+        {(key === 'proposal' ? view.proposal.reason : view.current.reason)
+          ? <p className="mt-1.5 text-[12.5px] leading-snug text-rose-700 break-keep">{key === 'proposal' ? view.proposal.reason : view.current.reason}</p> : null}
       </button>
     );
   };

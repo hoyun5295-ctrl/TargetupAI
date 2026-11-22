@@ -96,6 +96,22 @@ export type AiLineSpamState =
   | 'queued' | 'running' | 'pass' | 'blocked' | 'checking' | 'warn'
   | 'demo' | 'unavailable' | 'unregistered' | 'no_balance' | 'busy' | 'charset' | 'no_device' | 'too_long';
 
+/**
+ * ★ 2026-11-22 C159 — 접수 거절 반려 문장의 머리(서버 spam-test-queue SPAM_SEND_REJECTED_PREFIX 의 거울 · 계약 시험이 같은 글인지 본다).
+ *   문장 꼴 = 머리 + `: ` + 사유 + `.`(뒤에 고치는 길이 붙을 수 있다 = 자동마케팅 사유)
+ */
+export const SEND_REJECTED_PREFIX = '검사 문자를 보내지 못했어요';
+/** (순수) 접수 거절 반려 문장인가 */
+export function isSendRejectionText(message: string | null | undefined): boolean {
+  return String(message || '').trim().startsWith(`${SEND_REJECTED_PREFIX}: `);
+}
+/** (순수) 접수 거절 반려 문장 → 사유(그 꼴이 아니면 빈 글 · 끝 마침표는 뗀다) */
+export function sendRejectionReasonOf(message: string | null | undefined): string {
+  const m = String(message || '').trim();
+  if (!isSendRejectionText(m)) return '';
+  return m.slice(SEND_REJECTED_PREFIX.length + 2).replace(/\.$/, '').trim();
+}
+
 export interface AiLineSpamChip {
   state: AiLineSpamState | 'idle' | 'stale';
   testId?: string;
@@ -348,7 +364,7 @@ export const aiLineApi = {
   spamStart: (body: { body: string; subject: string; channel: AiLineChannel; isAd: boolean; callback: string; sampleCustomerId: string | null }) =>
     call<{ state: AiLineSpamState; testId?: string; reused?: boolean; message?: string; lateOpen?: boolean }>('/spam-test', body),
   spamRead: (testId: string, channel: AiLineChannel) =>
-    call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number; lateOpen?: boolean }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET', SPAM_READ_TIMEOUT_MS),
+    call<{ state: AiLineSpamState; carriers: AiLineSpamChip['carriers']; aheadCount: number; elapsedSec: number; lateOpen?: boolean; rejection?: string }>(`/spam-test/${encodeURIComponent(testId)}?type=${channel === 'SMS' ? 'SMS' : 'LMS'}`, undefined, 'GET', SPAM_READ_TIMEOUT_MS),
   // ★ 2026-11-21 C151 한 줄로 묻기(같은 라우터 · 같은 요금제 관문 · 타입 = utils/ai-ask.ts)
   askRead: (line: string) => call<AskReadResult>('/ask/read', { line }),
   askSegments: () => call<AskSegments>('/ask/segments', undefined, 'GET', 30_000),

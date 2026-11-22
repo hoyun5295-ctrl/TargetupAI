@@ -42,7 +42,7 @@ const fmt = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleStr
 const phoneFmt = (p: string | null | undefined) => { const d = String(p || '').replace(/\D/g, ''); return d.length === 11 ? `${d.slice(0, 3)}-${d.slice(3, 7)}-${d.slice(7)}` : d; };
 const authHeaders = (json = false): Record<string, string> => ({ Authorization: `Bearer ${localStorage.getItem('token')}`, ...(json ? { 'Content-Type': 'application/json' } : {}) });
 
-const SPAM_TEXT: Record<Spam, string> = { none: '검사 전', pass: '통신사 검사 통과', blocked: '통신사가 막음', checking: '통신사 확인 중(잠시 뒤 검사 다시)', rejected: '보낼 수 없는 글자가 있음', unknown: '검사하지 못함' };
+const SPAM_TEXT: Record<Spam, string> = { none: '검사 전', pass: '통신사 검사 통과', blocked: '통신사가 막음', checking: '통신사 확인 중(잠시 뒤 검사 다시)', rejected: '보낼 수 없는 글', unknown: '검사하지 못함' };
 const SPAM_TONE: Record<Spam, string> = { none: 'text-gray-500', pass: 'text-emerald-700', blocked: 'text-red-700', checking: 'text-amber-700', rejected: 'text-red-700', unknown: 'text-amber-700' };
 
 export default function ProposalTrialTab() {

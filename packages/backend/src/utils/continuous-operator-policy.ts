@@ -6,7 +6,7 @@
  */
 
 import { addMemory } from './company-memory';
-import { spamVerdictOf, mergeAlternativeVerdicts, isSpamHold, type SpamVerdict } from './spam-test-queue';
+import { spamVerdictOf, mergeAlternativeVerdicts, isSpamHold, isCharsRejection, spamRejectionPlaces, spamSendRejectionReason, type SpamVerdict } from './spam-test-queue';
 
 // ━━━ 외부 노출 타입 ━━━
 export type DeliveryPolicy = 'daily' | 'weekly' | 'monthly';
@@ -62,15 +62,31 @@ export function operatorCharsReason(places: string | null | undefined): string {
     : '문자로 보낼 수 없는 글자가 있어 검사하지 못했어요. 문안에서 그 글자를 빼 주세요';
 }
 
+/**
+ * ★ 2026-11-22 C159 — 반려 사유 한 문장(글자 반려 = 위치 · 접수 거절 = 사유). 제안 사유 · 제안 목록의 다시 검사 사유가 같은 말을 쓴다.
+ *   글자 반려 문장은 operatorCharsReason 그대로(한 글자도 바꾸지 않는다) · 판정 = isCharsRejection 한 곳.
+ */
+export function operatorRejectedReason(rejection: string | null | undefined): string {
+  if (isCharsRejection(rejection)) return operatorCharsReason(spamRejectionPlaces(rejection));
+  return `검사 문자를 보내지 못했어요: ${spamSendRejectionReason(rejection) || String(rejection || '').trim()}. 문안을 고쳐 주세요`;
+}
+
+/** ★ 2026-11-22 C159(D3-2) — 보류 회복이 「결과를 받지 못함」으로 종결하는데 반려 안이 있을 때의 회차 안내(사유를 말한다) */
+export function heldRejectedNotice(name: string, rejection: string): string {
+  return `'${name}' 이번 회차 문안의 검사 문자를 보내지 못해 담당자 검토로 두었어요: ${spamSendRejectionReason(rejection) || rejection}. 문안을 고친 뒤 제안 상세에서 승인해 주세요. 자동마케팅은 그대로 돌아가요.`;
+}
+
 export function decideSpamOutcome(
   finalResult: 'pass' | 'blocked' | 'failed' | 'timeout' | 'unconfirmed' | 'pending' | 'rejected',
   regenerateCount: number,
   /** ★ 2026-11-06 C109 — rejected 일 때 위치 문장 */
   rejectionPlaces?: string | null,
+  /** ★ 2026-11-22 C159 — rejected 일 때 반려 문장 전체(접수 거절이면 사유를 말한다 · 없으면 옛 그대로 = 글자 반려) */
+  rejection?: string | null,
 ): SpamOutcome {
   // ★ 2026-11-06 C109 E5 — 보낼 수 없는 글자 = 장애도 차단도 아니다(다시 검사로 안 풀린다) · 자동 발송 막고 담당자 검토 · 사유 = 위치
   if (finalResult === 'rejected') {
-    return { status: 'admin_review', autoExecuteBlocked: true, reason: operatorCharsReason(rejectionPlaces) };
+    return { status: 'admin_review', autoExecuteBlocked: true, reason: rejection != null && !isCharsRejection(rejection) ? operatorRejectedReason(rejection) : operatorCharsReason(rejectionPlaces) };
   }
   if (finalResult === 'unconfirmed' || finalResult === 'pending') {
     return {
@@ -134,11 +150,14 @@ export function operatorFinalSpamResult(
  *   통과 · 차단 · 확인 중 · 검사 중 = 그 값 · 장애(error) = 옛 값 그대로(장애를 통과 · 차단으로 덮지 않는다) · 검사 id 없는 안(반려 · 옛 회차) = 그대로.
  *   결과 배열이 아니면 null(= 쓰지 않는다).
  */
-export function refreshHeldResults(results: unknown, read: ReadonlyArray<{ testId: string; outcome: SpamVerdict }>): any[] | null {
+export function refreshHeldResults(results: unknown, read: ReadonlyArray<{ testId: string; outcome: SpamVerdict; rejection?: string | null }>): any[] | null {
   if (!Array.isArray(results)) return null;
-  const byTest = new Map(read.map((x) => [String(x.testId), x.outcome]));
+  const byTest = new Map(read.map((x) => [String(x.testId), x]));
   return results.map((r: any) => {
-    const o = r && r.testId ? byTest.get(String(r.testId)) : undefined;
+    const x = r && r.testId ? byTest.get(String(r.testId)) : undefined;
+    const o = x?.outcome;
+    // ★ 2026-11-22 C159(D3-2) — 장애로 닫힌 검사가 접수 거절이면 그 안 = 반려 + 사유(사유는 회차가 아니라 안에 붙는다 · 「검사 중」으로 남지 않는다)
+    if (o === 'error' && x?.rejection) return { ...r, result: 'rejected', rejection: x.rejection };
     if (o === 'pass' || o === 'blocked' || o === 'unconfirmed' || o === 'pending') return { ...r, result: o };
     return r;
   });
