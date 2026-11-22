@@ -101,6 +101,8 @@ export interface AiLineSpamChip {
   testId?: string;
   /** 칩이 묶인 글 지문(본문 · 제목 · 채널 · 광고 · 발신번호) — 달라지면 「다시 검사」 */
   fp?: string;
+  /** ★ 2026-11-22 C157 — 그 검사를 건 때의 문자 종류(진행 중인 검사는 이 종류로 이어 읽는다 · 옛 칩에는 없다 = 지금 종류로 읽는다) */
+  channel?: AiLineChannel;
   carriers?: Array<{ carrier: string; result: 'pass' | 'blocked' | 'checking' | 'none' }>;
   aheadCount?: number;
   elapsedSec?: number;
@@ -354,7 +356,9 @@ export const aiLineApi = {
   askCompose: (body: { line: string; plan: AskPlan; benefitMode: AskBenefitMode; benefit: string | null; place: AskPlace; link: string | null; types: AskCopyType[]; retryBlocked: boolean; attemptToken: string }) =>
     call<AskComposeResult>('/ask/compose', body),
   // ★ 2026-11-21 C152 B 질문에 답하기(5크레딧 · 같은 시도 표 + 같은 질문 = 낸 답 그대로)
-  askAnswer: (question: string, attemptToken: string) => call<AskAnswer>('/ask/answer', { question, attemptToken }, 'POST', 120_000),
+  // ★ 2026-11-22 C155 — history = 앞 문답(맥락 · 있을 때만 싣는다 = 첫 질문은 옛 요청과 같은 몸)
+  askAnswer: (question: string, attemptToken: string, history: Array<{ q: string; a: string }> = []) =>
+    call<AskAnswer>('/ask/answer', { question, attemptToken, ...(history.length > 0 ? { history } : {}) }, 'POST', 120_000),
   alimtalkMatch: (line: string, filters: Record<string, unknown>, allCustomers: boolean) =>
     call<{ charged: boolean; paid: boolean; matched: boolean; templates: Array<{ id: string; templateCode: string; name: string; profileId: string; profileName: string | null; content: string; score: number; reason: string }>; mappings: Array<{ templateVariable: string; customerFieldKey: string | null; customerFieldLabel: string | null; isExactMatch: boolean }>; suggestion: string | null }>('/alimtalk-match', { line, filters, allCustomers }),
 };

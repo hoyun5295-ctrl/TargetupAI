@@ -44,6 +44,8 @@ import { startSalesOutreachSweeper } from './utils/sales-outreach-sweeper'; // �
 import insightRoutes from './routes/insight';
 import benchmarkRoutes from './routes/benchmark';   // ★ 2026-11-13 C133 F3 업종 평균 비교
 import { startBenchmarkWorker } from './utils/performance-benchmark';   // ★ 2026-11-13 C133 F3 업종 평균 야간 스냅숏
+import { startInflowOriginRefresher } from './utils/short-url';   // ★ 2026-11-22 C156 문자 링크 유입 표식의 등록 도메인 기억
+import { startSendLedgerRollupWorker } from './utils/send-ledger-rollup';   // ★ 2026-11-22 C154 발송 원장 굴리기(통신사별 성공률 · 묶음별 성과)
 import productInsightRoutes from './routes/product-insight';   // ★ 2026-11-13 C133 F2 성과리포트 「상품 · 검색어」
 import { startProductSignalWorker } from './utils/product-signal';   // ★ 2026-11-13 C133 F2 상품 신호 야간 계산
 import campaignSplitRoutes from './routes/campaign-split';   // ★ 2026-11-14 C133 F4 나눠 보내기
@@ -764,6 +766,12 @@ app.listen(PORT, () => {
 
   // ★ 2026-11-13 C133 F3: 업종 평균 스냅숏 — 매일 KST 4시대 · V3_STAGE_BENCHMARK 가 열렸을 때만(닫혀 있으면 쿼리 0). PG 만 읽는다 · 발송 · 과금 무접촉.
   startBenchmarkWorker();
+
+  // ★ 2026-11-22 C154: 발송 원장 굴리기 — 10분마다. 귀속 닫기 · 보관 정리는 PG 만 · MySQL 낱행 읽기(읽기 전용)는 V3_STAGE_ROLLUP 이 열린 회사만. 발송 · 과금 무접촉 · 표가 없으면(DDL 전) 로그 한 줄.
+  startSendLedgerRollupWorker();
+
+  // ★ 2026-11-22 C156: 문자 링크 유입 표식 — 등록 도메인 기억 채우기(60초마다 조회 하나 · SHORT_URL_INFLOW_TAG 명단이 비면 조회 0 = 닫힘). 넘겨주기 길은 이 기억만 본다.
+  startInflowOriginRefresher();
 
   // ★ 2026-07-04: 여정·브랜드 KAKAO 학습 라벨 스윕 — 30분 주기(환불·상태·큐 무접촉, 라벨 전용). 발견1(라벨 누수) fix.
   startCopyLabelSweeperWorker();

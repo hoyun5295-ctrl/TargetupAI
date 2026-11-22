@@ -22,7 +22,7 @@ import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from './message-byte
 import { getTestSmsTables, toQtmsgType, insertTestSmsQueue } from './sms-queue';
 import { unsupportedSmsCharCodes } from './sms-charset';
 import { cleanSmsTextAll, scanSmsText, describeSmsCharFindings } from './message-sanitizer';   // ★ 2026-11-06 C109 글자 판단 CT · 위치 문장
-import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql, deliveredUnreportedResult } from '../utils/sms-result-map';
+import { SUCCESS_CODES, PENDING_CODES, SPAM_RESULT, SPAM_RESULT_DECIDE_SQL, spamFailedResultSql, deliveredUnreportedResult, gatewayRejectionFromCodes } from '../utils/sms-result-map';
 import { prepaidDeduct, prepaidRefund, REFUND_KEYS } from '../utils/prepaid';
 import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
@@ -592,6 +592,11 @@ export function spamRejectionPlaces(rejection: string | null | undefined): strin
   const r = String(rejection || '');
   return r.startsWith(`${SPAM_REJECTED_PREFIX}: `) ? r.slice(SPAM_REJECTED_PREFIX.length + 2).trim() : '';
 }
+/** ★ 2026-11-22 C158 — 반려 문장이 글자 반려(C109)인가 · 사유가 비면 옛 기본 = 글자 반려 · 그 밖 = 사유 문장 그대로 알린다(접수 거절 등) */
+export function isCharsRejection(rejection: string | null | undefined): boolean {
+  const r = String(rejection || '').trim();
+  return !r || r.startsWith(SPAM_REJECTED_PREFIX);
+}
 
 /** 검사 등록과 같은 치환 · 해시 · 같은 검사 키(★ 2026-11-01 배포 2 C5 — 등록 함수에서 원문 그대로 옮김 · 점검 응답의 엿보기도 이것을 쓴다) */
 async function spamHashInputsOf(params: Pick<SpamTestEnqueueParams, 'companyId' | 'userId' | 'callbackNumber' | 'messageContentSms' | 'messageContentLms' | 'messageType' | 'subject' | 'firstRecipient' | 'rendered'>) {
@@ -886,6 +891,30 @@ export async function fetchSpamQtmsgRows(testId: string, now: Date = new Date())
     } catch (e) { /* 로그 테이블 미존재 시 무시 */ }
   }
   return rows;
+}
+
+/**
+ * ★ 2026-11-22 C158 — 검사 문자가 문안 사유로 접수 거절됐으면 그 사유(sms-result-map 사유 표) · 아니면 null.
+ *   결과 표에는 「발송 실패」만 남아 판정이 거절과 장애를 가르지 못했다(1122 차단된 URL 9407 = 세 번 재검사 뒤 장애 안내).
+ *   코드는 큐 행에서 읽는다(폴링 · 결과 창과 같은 CT · 같은 매칭 = 단말 번호 + 유형) · 못 읽으면 null = 종전 판정.
+ *   ponytail: 큐 행이 남아 있는 동안만 읽힌다(검사 직후에 부른다) · 뒤늦게도 읽어야 하면 결과 표에 코드 칸을 둔다.
+ */
+export async function spamGatewayRejectionOf(testId: string): Promise<string | null> {
+  try {
+    const failed = await query(
+      `SELECT phone, message_type FROM spam_filter_test_results WHERE test_id = $1 AND result = $2`,
+      [testId, SPAM_RESULT.FAILED],
+    );
+    if (failed.rows.length === 0) return null;
+    const mqRows = await fetchSpamQtmsgRows(testId);
+    return gatewayRejectionFromCodes(failed.rows.map((r: any) => {
+      const m = mqRows.find((q: any) => q.dest_no === r.phone && q.msg_type === toQtmsgType(r.message_type));
+      return m && Number.isFinite(Number(m.status_code)) ? Number(m.status_code) : null;
+    }));
+  } catch (e: any) {
+    console.warn('[SpamTestQueue] 접수 거절 사유 조회 실패(종전 판정):', e?.message || e);
+    return null;
+  }
 }
 
 // ============================================================
@@ -1438,7 +1467,8 @@ export function readSpamCheckRecord(json: unknown): SpamCheckRecord | null {
  * ★ 2026-10-24 검사 판정 한 곳(뿌리 대장 R7 · 1018 플래너 B6 판정을 공용으로 · docs/ROOT-LEDGER.md) — 순수.
  *   pass    = 판정 통과 + 통신사 결과 1개 이상 + 그 결과에 시간 초과 · 실패 · 빈 값 0(시연 회사 = 검사 0건 통과 = 그대로 통과)
  *   blocked = 통신사가 막았다(진짜 스팸)
- *   error   = 그 밖(큐 등록 실패 · 시간 초과 · 결과 0행 · 결과 NULL) — 검사 장비 문제다. **통과도 차단도 아니다.**
+ *   error   = 그 밖(큐 등록 실패 · 시간 초과 · 결과 0행 · 결과 NULL) — 검사를 마치지 못한 것이다. **통과도 차단도 아니다.**
+ *             ★ 2026-11-22 C158 — 원인은 여기서 모른다(접수 거절 · 단말 · 통신사) · 고객 글에 원인을 단정하지 않는다 · 접수 거절 사유 = spamGatewayRejectionOf
  * 옛: 대행발송 · 옛 자동발송이 「차단이 아니면 통과」로 읽어, 검사가 못 돈 문안이 나갔다(B-0823-1 가).
  */
 export function spamVerdictOf(

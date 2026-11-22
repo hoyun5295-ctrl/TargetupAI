@@ -26,7 +26,7 @@ import { mapSampleCustomerRow, SAMPLE_CUSTOMER_COLUMNS } from '../utils/sample-c
 import { loadHubCompanyContext } from '../utils/hub-company-context';
 import { viewerConsentSql, viewerConsentJoin, ownerJourneyConsent, journeyOwnerConsent, viewerBrandConsent } from '../utils/mall-consent';
 import { buildFilterWhereClauseCompat } from '../utils/customer-filter';
-import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildSendableStagingInsertSql, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
+import { buildSendableRecipientsSql, buildSendableRecipientsTopSql, buildSendableStagingInsertSql, sealServerStaging, buildAudienceCountSql, resolveConditionColumns, SENDABLE_RECIPIENTS_LIMIT } from '../utils/operator-recipients';
 import { planIndividualCallbackExclusion, effectiveUnsubFilter, stagingSendSignature, dedupStagingRows } from '../utils/direct-send-core';   // ★ 2026-11-02 E1-4 AI 한줄로 서버 적재
 import { callbackAssignmentUserId } from '../utils/callback-filter';
 // ★ 2026-07-10 [타겟확인]: 발송 피로도 cap — dispatchProposalSend 준비부와 동일 산출(원칙 2)
@@ -1182,39 +1182,18 @@ router.post('/operator/preview-recipients', async (req: Request, res: Response) 
       const stagingId = randomUUID();
       const ins = buildSendableStagingInsertSql(stagingId, baseParams, filterWhere, filterParams, storeFilter, recipientGates, { callbackFromStorePhone: individual });
       await query(ins.sql, ins.params);
-      const duplicates = await dedupStagingRows(stagingId, companyId);
-      let callbackExcluded = 0;
-      if (individual) {
-        const plan = await planIndividualCallbackExclusion(stagingId, companyId, callbackAssignmentUserId(userType, userId) ?? undefined, true);
-        if (plan.moveIds.length > 0) {
-          await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid AND id = ANY($3::bigint[])`, [stagingId, companyId, plan.moveIds]);
-        }
-        callbackExcluded = plan.removed;
-      }
-      // ★ 2026-11-06 C110 광고 관문(설계서 §4 ai 한줄로 적재) — 서명 전에 지운다(load · 예약 0 · 확정 = commit 이 같은 묶음 · 같은 갈래 'ai' 로 다시 판정)
-      // ★ 2026-11-07 C113 D23 두 길 — 옛 길 = HEAD 응답 그대로(관문 0) · 관문 길(요금제 씀 + 새 기능)만
-      const stageMode: AdGateMode = req.body?.adEnabled === true ? await resolveAdGateMode(companyId) : { mode: 'legacy' };
-      let adGate: AdGateCounts | null = null;
-      if (stageMode.mode === 'gate') {
-        adGate = (await gateStaging(stageMode.policy, {
-          branch: branchOfDirect('operator'), stagingId, unsubUserId: String(userId || ''), mode: 'load', span: sendSpanOf(req.body?.scheduled ? req.body?.scheduledAt : null),
-        })).counts;   // 관문 장애 = AdGateUnavailableError(공용 사용자 오류 503) → 바깥 catch 의 respondUserError
-      }
-      const signature = await stagingSendSignature(stagingId, companyId, String(userId || ''), true, effectiveUnsubFilter(req.body?.adEnabled === true, true));
-      const sample = await query(
-        `SELECT phone, name FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid ORDER BY id LIMIT 100`,
-        [stagingId, companyId],
-      );
-      const dcb = await query(
-        `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
-        [companyId],
-      );
+      // ★ 2026-11-22 C157 — 마감(중복 제거 → 회신번호 제외 → 광고 관문 → 서명 → 표본)은 CT 한 곳(한 줄로 묻기의 서버 적재와 같이 쓴다 · 옮긴 순서 그대로)
+      //   관문 장애 = AdGateUnavailableError(공용 사용자 오류 503) → 바깥 catch 의 respondUserError
+      const sealed = await sealServerStaging({
+        stagingId, companyId, userId, userType, adEnabled: req.body?.adEnabled === true, individualCallback: individual,
+        sendPlan: { scheduled: req.body?.scheduled, scheduledAt: req.body?.scheduledAt }, branch: branchOfDirect('operator'),
+      });
       return res.json({
-        success: true, staged: true, stagingId, signature,
-        total: Number(signature.split(':')[0]) || 0,
-        excluded: adGate ? { duplicates, callback: callbackExcluded, adGate } : { duplicates, callback: callbackExcluded },
-        ...(adGate ? { adGateNotice: adGateNotice(adGate) } : {}),   // ★ C113 관문 길만
-        sample: sample.rows, defaultCallback: dcb.rows[0]?.phone || null,
+        success: true, staged: true, stagingId, signature: sealed.signature,
+        total: sealed.total,
+        excluded: sealed.excluded,
+        ...(sealed.adGateNotice !== undefined ? { adGateNotice: sealed.adGateNotice } : {}),   // ★ C113 관문 길만
+        sample: sealed.sample, defaultCallback: sealed.defaultCallback,
       });
     }
 

@@ -9,6 +9,8 @@
  * ⛔ 모델명 · 줄표를 사용자 문장에 쓰지 않는다.
  */
 import { query } from '../config/database';
+import { sendBodyVars } from '../utils/var-tokens';
+import { listUrlsForTracking } from '../utils/short-url';
 import { recommendTarget, generateMessages, extractVarCatalog, filterVarCatalogByData } from './ai';
 import { buildFilterWhereClauseCompat, filterConditionIssues } from '../utils/customer-filter';
 import { applyBenefitToBody } from '../utils/autosend-policy';
@@ -332,7 +334,7 @@ export interface LineIntakeResult {
 }
 
 /** 대상 1위 고객(고객명 가림) · 칼럼 채움(이 대상 안) — 대상 찾기와 직접 고른 대상 다시 세기가 같은 계산을 쓴다 */
-async function audienceDetail(companyId: string, audience: HubAudience, count: number, recommendedVars: readonly string[]): Promise<{
+export async function audienceDetail(companyId: string, audience: HubAudience, count: number, recommendedVars: readonly string[]): Promise<{
   top: LineIntakeResult['top']; sampleCustomer: LineIntakeResult['sampleCustomer']; columns: LineColumn[];
 }> {
   if (count <= 0) return { top: null, sampleCustomer: null, columns: [] };
@@ -570,6 +572,22 @@ export interface LineComposeInput {
   };
 }
 
+/**
+ * ★ 2026-11-22 C157 — 나가는 문자 종류의 규칙 한 곳: 칼럼(변수)이나 링크가 들면 SMS 는 LMS 로 올린다(치환 뒤 길이 · 허브 규칙) · 그 밖은 그대로.
+ *   생성기(runLineCompose)와 한 줄로 묻기의 본문 판정(lineBodySendChannel)이 같이 쓴다.
+ */
+export function lineSendChannel(channel: 'SMS' | 'LMS' | 'MMS', hasVars: boolean, hasLink: boolean): 'SMS' | 'LMS' | 'MMS' {
+  return (hasVars || hasLink) && channel === 'SMS' ? 'LMS' : channel;
+}
+
+/**
+ * 최종 본문으로 나가는 종류를 정한다 — 변수 = 발송 치환이 실제로 바꾸는 것 전부(var-tokens sendBodyVars) ·
+ *   링크 = 추적 링크로 바꿀 때 쓰는 같은 주소 찾기(short-url listUrlsForTracking). 매핑 이름들 = prepareFieldMappings(회사)의 키.
+ */
+export function lineBodySendChannel(channel: 'SMS' | 'LMS' | 'MMS', body: string, mappingNames: Iterable<string>): 'SMS' | 'LMS' | 'MMS' {
+  return lineSendChannel(channel, sendBodyVars(body, mappingNames).any, listUrlsForTracking(body).length > 0);
+}
+
 export interface LineComposeCard { type: AiLineCopyType; label: string; body: string; subject: string; byteCount: number }
 
 /** 문안 변수로 고를 수 있는 칼럼 표시 이름(FIELD_MAP 컬럼 · 제외 목록 밖) */
@@ -599,8 +617,8 @@ export async function runLineCompose(v: AiLineViewer, input: LineComposeInput, n
   if (sentLink && !humanLink) throw new AiLineError('VOICE_FORM_INVALID', LINK_INVALID_ERROR);
   // 칼럼을 넣으면 SMS 는 LMS 로 올린다(치환 뒤 길이 · 지금 허브 규칙과 같다) · ★ 2026-10-31 정해진 링크도(P3 · Harold 1031 결정)
   //   원장 키 채널 = 옛 규칙(칼럼만 · Codex 설계 1R ① · 배포 전에 낸 시도를 배포 뒤 같은 attemptToken 으로 불러도 같은 키 · 출력 채널은 키 입력만으로 정해진다)
-  const keyChannel: 'SMS' | 'LMS' | 'MMS' = input.vars.length > 0 && input.channel === 'SMS' ? 'LMS' : input.channel;
-  const channel: 'SMS' | 'LMS' | 'MMS' = (input.vars.length > 0 || humanLink) && input.channel === 'SMS' ? 'LMS' : input.channel;
+  const keyChannel: 'SMS' | 'LMS' | 'MMS' = lineSendChannel(input.channel, input.vars.length > 0, false);
+  const channel: 'SMS' | 'LMS' | 'MMS' = lineSendChannel(input.channel, input.vars.length > 0, !!humanLink);
   // ★ C151 ask = 사람 입력만의 지문(응답 유실 뒤 같은 시도 = 같은 키 · 그 사이 인원이 바뀌어도) · 없으면 옛 모양 그대로
   const copyKey = aiLineCopyKey(v.companyId, input.attemptToken, ask ? { ask: ask.keyInput } : {
     line: input.line, facts: input.facts, filters: input.filters, allCustomers: input.allCustomers,

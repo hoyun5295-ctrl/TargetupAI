@@ -12,6 +12,8 @@
  * - 건너뛸 때는 닫는 % 부터 다시 찾는다 — 그 % 가 다음 변수의 여는 % 일 수 있다(`10%할인%이름%`).
  */
 
+import { detectLiquidSyntax } from './liquid-templating';
+
 export interface VarToken {
   /** 여는 % 위치 */
   start: number;
@@ -59,4 +61,35 @@ export function replaceVarTokens(text: string, fn: (name: string) => string | un
     pos = t.end;
   }
   return out + text.slice(pos);
+}
+
+// ── ★ 2026-11-22 C157 본문에 「발송 치환이 바꿀 것」이 있는가(설계서 docs/2026-11-22-c157-ask-send-options-design.md §2 S4-b) ──
+
+/**
+ * 치환 0단계(messageUtils.replaceVariables)가 **글자 그대로** 바꾸는 주소록 칸 이름 — 숫자 바로 뒤여도 바뀐다(`/%이름%/g` 꼴).
+ *   ⛔ 이 목록 = 치환 코드의 0단계 리터럴과 같은 집합이어야 한다(계약 시험이 messageUtils 소스에서 리터럴을 뽑아 대조한다).
+ */
+export const STEP0_VAR_NAMES = ['기타1', '기타2', '기타3', '회신번호', '이름', '고객명', '성함'] as const;
+
+/**
+ * 본문에 발송 치환이 바꿀 변수가 있는가 — 치환의 단계마다 같은 방식으로 본다.
+ *   0단계 = 주소록 칸 이름의 `%이름%` 글자 대조 · 2단계 = 그 회사 매핑 이름마다 `%이름%` 글자 대조(치환이 split 으로 바꾸는 것과 같은 방식 =
+ *   숫자 뒤 여부를 보지 않는다) · 3단계 = 남은 조각(findVarTokens) · Liquid.
+ *   any = 넷 가운데 하나라도 · needsCustomer = 고객 원장의 그 행을 찾아야 채워지는 것(0단계 이름이 아닌 매핑 이름 · Liquid — 이름 · 주소록 칸은 적재 줄에서 채워진다).
+ *   매핑 이름들 = prepareFieldMappings(회사)의 키(확정 · 일꾼이 쓰는 같은 함수).
+ */
+export function sendBodyVars(text: string | null | undefined, mappingNames: Iterable<string>): { any: boolean; needsCustomer: boolean } {
+  const t = String(text || '');
+  if (!t) return { any: false, needsCustomer: false };
+  const has = (name: string) => t.includes(`%${name}%`);
+  const step0 = new Set<string>(STEP0_VAR_NAMES);
+  let any = STEP0_VAR_NAMES.some(has);
+  let needsCustomer = false;
+  for (const name of mappingNames) {
+    if (!name || !has(name)) continue;
+    any = true;
+    if (!step0.has(name)) needsCustomer = true;
+  }
+  const liquid = detectLiquidSyntax(t);
+  return { any: any || liquid || findVarTokens(t).length > 0, needsCustomer: needsCustomer || liquid };
 }

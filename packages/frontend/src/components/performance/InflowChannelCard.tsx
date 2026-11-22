@@ -70,7 +70,11 @@ export default function InflowChannelCard() {
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-[11px] text-slate-400 break-keep">구매는 같은 방문 또는 구매 앞 {data.lookbackDays}일 안 마지막 방문의 경로로 셉니다 · 이어진 방문이 없는 구매는 「방문 기록 없음」</p>
+      <p className="mt-2 text-[11px] leading-[1.6] text-slate-400 break-keep">구매는 같은 방문 또는 구매 앞 {data.lookbackDays}일 안 마지막 방문의 경로로 셉니다 · 이어진 방문이 없는 구매는 「방문 기록 없음」</p>
+      {/* ★ 2026-11-22 C156 — 「한줄로 메시지 링크」 줄이 있을 때만 그 줄의 뜻을 적는다 */}
+      {data.rows.some((r) => r.channel === '한줄로 메시지 링크') && (
+        <p className="mt-1 text-[11px] leading-[1.6] text-slate-400 break-keep">한줄로 메시지 링크 = 한줄로가 줄여 보낸 링크(여정 · 자동 마케팅)를 눌러 들어온 방문이에요. 본문에 주소를 그대로 적어 보낸 문자는 직접 방문에 들어 있어요.</p>
+      )}
     </section>
   );
 }

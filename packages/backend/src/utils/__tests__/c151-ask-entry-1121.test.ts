@@ -166,7 +166,7 @@ describe('K4 문안 갈래(runLineCompose)', () => {
     expect(aiLineCopyKey('co', 'tok-12345678', { ask: k })).toBe(aiLineCopyKey('co', 'tok-12345678', { ask: { ...k } }));
     const route = read(join(BE, 'routes', 'ai-line.ts'));
     // ★ C153 — 키 = 사람 입력 전부(오실 곳 · 링크 · 종류가 더해졌다) · 종류가 바뀌면 다른 키
-    expect(routeBlock(route, 'post', '/ask/compose')).toContain("keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry },");
+    expect(routeBlock(route, 'post', '/ask/compose')).toContain("keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry, ...(plan.channel ? { channel: plan.channel } : {}) },");   // ★ C157 — 종류가 LMS(기본)가 아닐 때만 키에 든다(LMS = 옛 키와 같은 값)
     expect(aiLineCopyKey('co', 'tok-12345678', { ask: { ...k, types: ['benefit', 'emo'] } })).not.toBe(aiLineCopyKey('co', 'tok-12345678', { ask: k }));
   });
   it('혜택 세 갈래(★ C153) — 목적 글 = 사람의 한 줄 그대로 · 혜택 = custom 만 혜택 칸 글 · 참고 글 = 갈래 지시 + 다시 쓰기', () => {
@@ -206,7 +206,8 @@ describe('K5 주소 · 관문 · 자리표 판정', () => {
   });
   it('문안 = 고른 종류(★ C153) · 장문 · 광고 · 칼럼 0 · 대상 = §2-1 세기의 planned', () => {
     const b = routeBlock(route, 'post', '/ask/compose');
-    expect(b).toMatch(/\n\s+types, vars: \[\], channel: 'LMS', isAd: true/);
+    expect(b).toMatch(/\n\s+types, vars: \[\], channel, isAd: true/);   // ★ C157 — 종류 = 사람이 고른 값(없으면 LMS)
+    expect(b).toContain('const channel = askChannelOf(plan);');
     expect(b).toMatch(/count: counted\.planned/);
   });
 });

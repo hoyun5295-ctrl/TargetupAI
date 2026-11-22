@@ -33,7 +33,8 @@ describe('E8-1 링크 미리보기 · 로봇 = 클릭 아님', () => {
   });
   it('넘김 = 그대로 · 세기 전에 HEAD · 미리보기면 끝(클릭 수 · 클릭 사건 · A/B 보상 0)', () => {
     const r = read('../routes/short-url.ts');
-    const redirect = r.indexOf('res.redirect(302, resolved.fullUrl);');
+    // ★ 2026-11-22 C156 — 넘겨주는 주소 = 유입 표식 판정의 값(명단이 비면 원래 주소 그대로 · 동기 · DB 0 · 시험 c156-inflow-link)
+    const redirect = r.indexOf('res.redirect(302, inflowRedirectUrl(resolved));');
     const gate = r.indexOf("if (req.method === 'HEAD' || isLinkPreviewAgent(userAgent)) return;");
     expect(redirect).toBeGreaterThan(-1);
     expect(gate).toBeGreaterThan(redirect);
@@ -81,9 +82,15 @@ describe('E1-4 AI 한줄로 서버 적재 = 보여 준 명단 = 나가는 명단
     const r = read('../routes/ai.ts');
     const st = r.slice(r.indexOf('if (req.body?.stage === true) {'), r.indexOf('const { sql, params } = buildSendableRecipientsSql(filterWhere'));
     expect(st).toContain('buildSendableStagingInsertSql(stagingId, baseParams, filterWhere, filterParams, storeFilter, recipientGates');
-    expect(st).toContain('await dedupStagingRows(stagingId, companyId)');
-    expect(st).toContain('planIndividualCallbackExclusion(');
-    expect(st).toContain('stagingSendSignature(');
+    // ★ 2026-11-22 C157 — 마감(중복 제거 → 회신번호 제외 → 광고 관문 → 서명)은 CT 한 곳으로 옮겼다(한 줄로 묻기의 서버 적재와 같이 쓴다)
+    expect(st).toContain('await sealServerStaging({');
+    expect(st).not.toMatch(/dedupStagingRows\(|planIndividualCallbackExclusion\(|gateStaging\(|stagingSendSignature\(/);   // 주소에 낱개 호출 0
+    const ct = read('../utils/operator-recipients.ts');
+    const seal = ct.slice(ct.indexOf('export async function sealServerStaging('));
+    const at = (needle: string) => { const i = seal.indexOf(needle); expect(i, needle).toBeGreaterThan(-1); return i; };
+    expect(at('await dedupStagingRows(i.stagingId, i.companyId)')).toBeLessThan(at('planIndividualCallbackExclusion('));
+    expect(at('planIndividualCallbackExclusion(')).toBeLessThan(at('gateStaging(stageMode.policy'));
+    expect(at('gateStaging(stageMode.policy')).toBeLessThan(at('stagingSendSignature('));
     expect(read('../services/ai-line.ts')).not.toContain("'TARGET_TOO_MANY'");
   });
 });

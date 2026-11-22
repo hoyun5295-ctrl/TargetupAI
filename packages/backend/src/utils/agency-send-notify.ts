@@ -137,18 +137,35 @@ export function buildReapprovalNotify(ctx: AgencyNotifyContext): string {
   ]);
 }
 
-/** ④-2 ★ 2026-10-24 검사 장비 문제로 세 차례 검사를 마치지 못했다(문안 문제가 아니다 · B-0823-1) */
+/**
+ * ④-2 ★ 2026-10-24 세 차례 검사를 마치지 못했다(B-0823-1).
+ *   ★ 2026-11-22 C158(Harold 「장비문제로 인해 이것 좀 버려 · 맨날 우리탓으로 돌리잖아」) — 원인을 단정하지 않는다.
+ *   옛 글 「스팸 검사 장비 문제로 … 문안 문제는 아닙니다」는 차단된 URL 로 접수 거절된 건(문안 사유)에도 나갔다(1122 실측).
+ */
 export function buildTestErrorNotify(ctx: AgencyNotifyContext): string {
   return compose([
-    `${HEAD} 스팸 검사 장비 문제로 문안 검사를 마치지 못해 진행을 멈췄습니다.`,
+    `${HEAD} 스팸 검사를 마치지 못해 진행을 멈췄습니다.`,
     `건: ${shortLabel(ctx.label)}`,
-    '문안 문제는 아닙니다. 운영팀이 확인하고 있으며, 로그인하여 다시 진행하시면 검사를 다시 시작합니다.',
+    '로그인하여 다시 진행하시면 검사를 다시 시작합니다.',
+  ]);
+}
+
+/**
+ * ★ 2026-11-22 C158 — 검사 문자가 문안 사유로 접수 거절됐다(차단된 URL 등 · 장애 아님 · 다시 검사 0 · 사람이 문안을 고친다).
+ *   reason = 사유(sms-result-map GATEWAY_CONTENT_REJECT_TEXT · 워커 settleSpamRejected 가 넘긴다)
+ */
+export function buildSendRejectedNotify(ctx: AgencyNotifyContext & { reason: string }): string {
+  return compose([
+    `${HEAD} 문안을 보낼 수 없어 검사하지 못하고 멈췄습니다.`,
+    `건: ${shortLabel(ctx.label)}`,
+    ctx.reason ? `사유: ${ctx.reason}` : '',
+    '문안을 고친 뒤 다시 진행해 주세요.',
   ]);
 }
 
 /**
  * ★ 2026-11-06 C109 D4 E1 · E2 — 검사 입구가 보낼 수 없는 글자로 반려(장애 아님 · 다시 검사 0 · 사람이 그 글자를 뺀다).
- *   옛: 장애 갈래 = 「장비 문제 · 문안 문제는 아닙니다」 안내(거꾸로 된 말) · 같은 글을 세 번 다시 검사했다.
+ *   옛: 장애 갈래 = 「문안 문제는 아닙니다」 안내(거꾸로 된 말) · 같은 글을 세 번 다시 검사했다.
  *   places = 위치 문장(그 글자는 넣지 않는다 · P4)
  */
 export function buildUnsupportedCharsNotify(ctx: AgencyNotifyContext & { places: string }): string {

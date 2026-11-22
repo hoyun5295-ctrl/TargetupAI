@@ -4,7 +4,8 @@
  * 옛 판(요금제 축 · 절댓값 · 부르는 곳 0)을 걷고 다시 썼다.
  *   축 = 업종(companies.industry_code · 브랜드 학습 창이 저장) · 지표 = **비율만**(다른 회사 규모가 드러나는 절댓값은 싣지 않는다).
  *   지표: success_rate = 최근 30일 결과가 확정된 캠페인의 성공 ÷ 발송 / spam_block:<통신사> = 최근 30일 스팸 검사의 차단 ÷ (정상 + 차단).
- *   ※ 통신사별 발송 성공률은 실패 행에 통신사가 남는지 서버에서 잰 뒤에 붙인다(설계서 §15 · 재기 전에는 만들지 않는다).
+ *   ★ 2026-11-22 C154 — send_success:<통신사> = 굴린 통신사 줄(send-ledger-rollup)의 최근 30일 성공 ÷ (성공 + 실패) · 굴리기 단계가 열린 회사만
+ *     (설계서 docs/2026-11-22-c154-send-ledger-rollup-design.md S3 · 내 값은 화면 요청 때 굴린 줄에서 바로 읽고 평균만 스냅숏에서 가져온다).
  *
  * 하루 한 번 워커가 **회사마다 그 시점의 업종 · 지표 값**을 benchmark_company_daily(배포 원장 C133-DDL-4)에 쓴다(분모 0 · 업종 빈 회사는 행 없음).
  * 화면 요청은 **가장 최근 날짜의 그 스냅숏만** 읽는다: 내 값 = 내 행 · 평균 = 같은 날 · 같은 업종 · 같은 지표의 **다른 회사 행**의 산술 평균
@@ -21,6 +22,7 @@ import { listDemoCompanyIds } from './demo-company';
 import { syntheticDataCompanyIds } from './demo-data';
 import { resolveCompanyIndustry } from './copy-prompt-composer';
 import { v3StageScope } from './v3-stage';
+import { CARRIER_NET_RATES_SQL, CARRIER_WINDOW_DAYS, CARRIER_MIN_SENT, rollupLiveCompanyIds, readCarrierSendRates } from './send-ledger-rollup';
 
 export const BENCH_MIN_PEERS = 5;
 export const BENCH_WINDOW_DAYS = 30;
@@ -30,6 +32,7 @@ export const BENCH_KEEP_DAYS = 40;
 export const BENCH_STALE_DAYS = 3;
 export const BENCH_METRIC_SUCCESS = 'success_rate';
 export const BENCH_METRIC_SPAM_PREFIX = 'spam_block:';
+export const BENCH_METRIC_SEND_PREFIX = 'send_success:';
 /** 스팸 검사 단말의 통신사 표기(spam_filter_test_results.carrier) */
 export const BENCH_CARRIERS = ['SKT', 'KT', 'LGU'] as const;
 
@@ -63,14 +66,38 @@ export const BENCH_SPAM_SQL = `
      AND co.status = 'active' AND NULLIF(TRIM(co.industry_code), '') IS NOT NULL
    GROUP BY t.company_id, ${INDUSTRY_SQL}, r.carrier`;
 
+/** 회사 · 통신사별 발송 성공률 — 굴린 통신사 줄에서($1 창 일수 · $2 굴리기 단계가 열린 회사들 · $3 최소 건수). 업종 빈 회사 · 활성 아님은 행 없음 */
+export const BENCH_SEND_SQL = `
+  INSERT INTO benchmark_company_daily (day, company_id, industry_code, metric, value)
+  SELECT ${kstToday}, t.company_id, ${INDUSTRY_SQL}, '${BENCH_METRIC_SEND_PREFIX}' || t.net, t.rate
+    FROM (${CARRIER_NET_RATES_SQL}) t
+    JOIN companies co ON co.id = t.company_id
+   WHERE co.status = 'active' AND NULLIF(TRIM(co.industry_code), '') IS NOT NULL`;
+
 /** 오늘(KST) 스냅숏을 통째로 다시 쓴다(지우고 넣기 · 한 트랜잭션) + 보관 기간 밖 날짜 삭제. 돌려주는 값 = 넣은 행 수 */
-export async function snapshotBenchmarks(): Promise<number> {
+export async function snapshotBenchmarks(rollupIds?: string[]): Promise<number> {
+  // 굴리기 단계가 열린 회사(명단이 비면 조회 0 · 빈 배열) — 판정에 실패해도 앞의 두 지표는 그대로 쓴다
+  const sendIds = rollupIds ?? await rollupLiveCompanyIds().catch((err: any) => {
+    console.error('[benchmark] 굴리기 단계 회사 판정 실패(발송 성공률 지표만 건너뜀):', err?.message);
+    return [] as string[];
+  });
   return withTransaction(async (run) => {
     await run(`SET LOCAL statement_timeout = 120000`);
     await run(`DELETE FROM benchmark_company_daily WHERE day = ${kstToday} OR day < ${kstToday} - $1::int`, [BENCH_KEEP_DAYS]);
     const a = await run(BENCH_SUCCESS_SQL, [BENCH_WINDOW_DAYS]);
     const b = await run(BENCH_SPAM_SQL, [BENCH_WINDOW_DAYS, [...BENCH_CARRIERS]]);
-    return (a.rowCount || 0) + (b.rowCount || 0);
+    let sent = 0;
+    if (sendIds.length > 0) {
+      // 굴린 표가 없거나(DDL 전) 이 문장이 실패해도 앞의 두 지표는 남긴다(되돌림 지점)
+      await run('SAVEPOINT bench_send');
+      try {
+        sent = (await run(BENCH_SEND_SQL, [CARRIER_WINDOW_DAYS, sendIds, CARRIER_MIN_SENT])).rowCount || 0;
+      } catch (err: any) {
+        await run('ROLLBACK TO SAVEPOINT bench_send');
+        console.error('[benchmark] 발송 성공률 지표 실패(표가 없으면 DDL C154-DDL-1 확인 · 다른 지표는 유지):', err?.message);
+      }
+    }
+    return (a.rowCount || 0) + (b.rowCount || 0) + sent;
   });
 }
 
@@ -134,6 +161,35 @@ export async function readBenchmark(companyId: string): Promise<BenchmarkView> {
       .filter((c) => byMetric.has(`${BENCH_METRIC_SPAM_PREFIX}${c}`))
       .map((c) => ({ carrier: c, ...cell(`${BENCH_METRIC_SPAM_PREFIX}${c}`) })),
   };
+}
+
+export interface SendSuccessView {
+  /** 통신사(알뜰폰을 그 망에 더한 세 줄)마다 발송 성공률 — 내 값 = 지금 굴린 줄 · 평균 = 가장 최근 스냅숏(5곳 미만이면 평균 없이 내 값만) */
+  sendSuccess: Array<{ carrier: string } & BenchCell>;
+  /** 통신사를 알 수 없는 실패 수(최근 30일 · 성공률에서 뺀 건수) */
+  unknownFail: number;
+}
+
+/**
+ * 통신사별 발송 성공률 칸(굴리기 단계가 열린 회사에게만 부른다 · 주소가 판정한다).
+ *   읽기에 실패하면(표 없음 = DDL 전 등) null = 응답에 이 칸을 싣지 않는다(업종 평균의 다른 칸은 그대로).
+ */
+export async function readSendSuccess(companyId: string): Promise<SendSuccessView | null> {
+  try {
+    const [rates, excluded] = await Promise.all([readCarrierSendRates(companyId), benchExcludedCompanyIds()]);
+    const r = await query(BENCH_READ_SQL, [companyId, excluded, BENCH_STALE_DAYS]);
+    const byMetric = new Map<string, any>(r.rows.map((x: any) => [String(x.metric), x]));
+    return {
+      sendSuccess: rates.rates.map(({ carrier, rate }) => {
+        const x = byMetric.get(`${BENCH_METRIC_SEND_PREFIX}${carrier}`);
+        return { carrier, ...benchCell(rate, Number(x?.k || 0), x?.avg === null || x?.avg === undefined ? null : Number(x.avg)) };
+      }),
+      unknownFail: rates.unknownFail,
+    };
+  } catch (err: any) {
+    console.error('[benchmark] 발송 성공률 읽기 실패(표가 없으면 DDL C154-DDL-1 확인):', err?.message);
+    return null;
+  }
 }
 
 // ── 야간 워커 ──

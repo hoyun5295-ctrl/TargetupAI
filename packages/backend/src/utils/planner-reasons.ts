@@ -84,7 +84,7 @@ export const PLANNER_REASON = {
   recheckMissed: '다시 확인되지 않아 보내지 않았습니다.',
   recheckPastDeadline: `마감(${PLANNER_APPROVAL_DEADLINE_HOUR}시) 뒤 검사에 막혀 이 날 발송을 건너뛰었습니다.`,   // ★ 1025 #62 서버 마감 값
   recheckSkipped: '담당자가 이 날 발송을 건너뛰기로 했습니다.',
-  spamCheckDown: '스팸 검사 장비 문제로 오늘 발송을 보류했습니다. [다시 시작]을 누르면 다시 검사합니다.',
+  spamCheckDown: '스팸 검사를 마치지 못해 오늘 발송을 보류했습니다. [다시 시작]을 누르면 다시 검사합니다.',   // ★ 2026-11-22 C158 — 원인을 단정하지 않는다
   // ★ 2026-11-06 C109 E9 — 검사 입구 글자 반려(장애 아님 · 다시 검사로 안 풀린다 · 위치는 plannerCharsReason)
   unsupportedChars: '문자로 보낼 수 없는 글자가 있어 오늘 발송을 보류했습니다. 문안에서 그 글자를 빼 주세요.',
 } as const;

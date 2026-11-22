@@ -55,6 +55,7 @@ describe('R54 ② 원장과 몰 결제를 한 문장에서 같이 읽는 SQL = �
     'utils/product-pairs.ts': [1, '★ 1121 C152 같이 산 상품 = 사람 · 상품 집합(DISTINCT)과 「산 적이 있나」만 본다(금액 · 건수를 더하지 않는다 = 두 문에 같은 구매가 겹쳐도 답이 같다 · 추천 상품의 buys 와 같은 조각)'],
     'utils/product-signal.ts': [1, '★ 1113 C133 상품 신호 다시 세기 = 문마다 따로 행(door 칸으로 갈라 쓴다 · 한 숫자로 더하지 않는다) · 「그 뒤 그 상품을 샀나」 = 있나만(NOT EXISTS)'],
     'utils/product-reco.ts': [1, '★ 1113 C133 고객별 추천 고르기 = 그 고객이 그 상품을 「샀나」만 본다(있나만 · NOT EXISTS · 금액 · 건수를 더하지 않는다 = 두 문에 같은 구매가 겹쳐도 답이 같다)'],
+    'utils/send-ledger-rollup.ts': [1, '★ 1122 C154 귀속을 열지 말지의 관문 = 구매 사실이 올라오는 회사인가(원장 줄이 있나 OR 최근 90일 몰 결제가 있나 = 있나만 · 겹쳐도 값이 같다 · 귀속 숫자는 CT-D2 purchaseFactsSql 을 지난 두 문장)'],
     'utils/two-door-purchase.ts': [4, 'CT 자신(CT-D2 사실 · CT-D4 두 조각 · 회사 갈래 = 있나만)'],
     'utils/two-door-transition.ts': [1, '전환 패스 대상 회사 = 회사 갈래와 같은 판정(있나만)'],
   };

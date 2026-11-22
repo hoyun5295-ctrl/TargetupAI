@@ -64,7 +64,7 @@ describe('K2 종류 · 오실 곳 · 과금 키', () => {
   it('종류 = 아는 값 1 ~ 3개(공용 검사 sanitizeLineTypes) · 틀리면 400 TYPES_INVALID · 고른 종류를 그대로 만든다', () => {
     expect(compose).toContain('const types = sanitizeLineTypes(b.types);');
     expect(compose).toContain("code: 'TYPES_INVALID'");
-    expect(compose).toMatch(/\n\s+types, vars: \[\], channel: 'LMS', isAd: true, attemptToken: b\.attemptToken,/);
+    expect(compose).toMatch(/\n\s+types, vars: \[\], channel, isAd: true, attemptToken: b\.attemptToken,/);   // ★ C157 — 종류 = 사람이 고른 값(없으면 LMS)
     expect(compose).not.toContain("types: ['benefit']");
   });
   it('오실 곳 = none · store · online · 모르는 값 = null(400) · 없음 = 적지 않음', () => {
@@ -84,7 +84,7 @@ describe('K2 종류 · 오실 곳 · 과금 키', () => {
     expect(compose).toContain("const link = place === 'online' && typeof b.link === 'string' && b.link.trim() ? b.link.trim() : null;");
   });
   it('과금 키 = 사람 입력 전부(한 줄 · 묶음 · 혜택 갈래 · 혜택 글 · 오실 곳 · 링크 · 정렬한 종류 · 다시 고침) · 다시 센 수 · 참고 글 · 근거 줄은 넣지 않는다', () => {
-    expect(compose).toContain("keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry },");
+    expect(compose).toContain("keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry, ...(plan.channel ? { channel: plan.channel } : {}) },");   // ★ C157 — 종류가 LMS(기본)가 아닐 때만 키에 든다(LMS = 옛 키와 같은 값)
   });
   it('응답 = 종류별 카드 · 카드마다 자리표(hole) · 안전망 낱말(ungrounded)', () => {
     expect(compose).toContain('cards: out.cards.map((c) => ({');
@@ -194,7 +194,7 @@ describe('K4 화면 — 2단계 다음에 생성 0 · 「문안 만들기」만 
     expect(askComposeBlock({ line: '겨울 니트 입고', types: ['emo'], planned: 0 })).toBe('zero');
     expect(askComposeBlock({ line: '겨울 니트 입고', types: ['emo', 'mz'], planned: 1 })).toBeNull();
     expect(ASK_LINE_MIN).toBe(5);
-    expect(page).toContain("const composeBlock = askComposeBlock({ line: what, types, planned: count?.planned ?? 0 });");
+    expect(page).toContain("const composeBlock = askComposeBlock({ line: what, types, planned: count?.planned ?? 0, needImage: channel === 'MMS' && images.length === 0 });");   // ★ C157 — MMS 는 이미지가 있어야 만든다
     expect(page).toContain('if (making || composeBlock || countBusy) return;');
   });
   it('종류 기본값 = 혜택이 없으면 감성 쪽 · 있으면 혜택 쪽 · 아는 종류 셋', () => {
@@ -224,27 +224,27 @@ describe('K4 화면 — 2단계 다음에 생성 0 · 「문안 만들기」만 
   });
   it('문안을 만드는 동안 · 보내는 동안 = 뒤로 · 이전 잠금(낸 결과를 버리는 길 0)', () => {
     // 접수 여부를 모르는 동안(unknown)에도 잠긴다 = 쥐고 있는 확정 본문과 화면의 문안이 달라지지 않는다
-    expect(page).toContain("<button type=\"button\" disabled={answering || making || sending || !!unknown} onClick={() => (sent ? restart() : inAnswer ? setAnswer(null) : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");
-    expect(page).toContain('<button type="button" disabled={making || sending || !!unknown} onClick={() => go((step - 1) as Step)}');
+    expect(page).toContain("<button type=\"button\" disabled={answering || making || sending || !!unknown || sendLocked} onClick={() => (sent ? restart() : inAnswer ? closeThread() : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");   // ★ C155 — 답 화면의 뒤로 = 대화 닫기
+    expect(page).toContain('<button type="button" disabled={making || sending || !!unknown || sendLocked} onClick={() => go((step - 1) as Step)}');   // ★ C157 — 칼럼을 넣는 동안 · 이미지를 올리는 동안에도 잠긴다
   });
 });
 
-describe('K5 보내기 — 명단 → 적재 → 집계 → 확인 → 확정', () => {
+// ★ 2026-11-22 C157 — 명단 · 적재 · 집계를 화면이 잇지 않는다: 서버 적재 한 번(POST /ask/stage)이 명단을 싣고 고정한다(설계서 docs/2026-11-22-c157-ask-send-options-design.md D1)
+describe('K5 보내기 — 서버 적재 → 확인 → 확정', () => {
   const send = page.slice(page.indexOf('const prepareSend = async'), page.indexOf('const bodyRef = useRef'));
   const commit = page.slice(page.indexOf('const commitSend = async'), page.indexOf('const recheckSend = async'));
   const recheck = page.slice(page.indexOf('const recheckSend = async'), page.indexOf('const prepareSend = async'));
   const call = page.slice(page.indexOf('const sendCall = async'), page.indexOf('useEffect(() => { if (sent) window.scrollTo(0, 0); }, [sent]);'));
   const settle = page.slice(page.indexOf('const settle = async'), page.indexOf('const commitSend = async'));
-  it('차례 = 명단(지금 다시 셈) → 적재 → 집계 → 확인 창 · 확정은 확인 창의 단추만 부른다', () => {
-    expect(ascending(order(send, "sendCall('POST', '/api/ai-line/ask/audience', token, { plan })", "sendCall('POST', '/api/campaigns/direct-send/stage', token,", "sendCall('POST', '/api/campaigns/direct-send/count', token,", 'setConfirm('))).toBe(true);
+  it('차례 = 서버 적재(명단을 지금 다시 세어 고정) → 확인 창 · 확정은 확인 창의 단추만 부른다', () => {
+    expect(ascending(order(send, "sendCall('POST', '/api/ai-line/ask/stage', token,", 'setConfirm('))).toBe(true);
     expect(send).not.toContain("'/api/campaigns/direct-send/commit'");
-    expect((send.match(/void commitSend\(job\)/g) || []).length).toBe(2);
+    expect(send).not.toContain('void commitSend(job)');
+    expect((send.match(/onConfirm: \(\) => \{ confirmSend\(job\); \}/g) || []).length).toBe(2);
     expect(send).toContain("if (sendCount <= 0) throw new Error(");
-    expect(send).toContain("if (recipients.length === 0) throw new Error(");
   });
-  it('확정 본문 = 장문 · 광고 · 중복 제거 · 수신거부 제거 켬 · 출처 operator(새 값 0) · 개별 회신 · 나눠 보내기 0', () => {
-    for (const s of ["msgType: 'LMS'", "sendChannel: 'sms'", 'adEnabled: true', 'dedupEnabled: true, unsubFilterEnabled: true', "sendType: 'operator'", 'useIndividualCallback: false', 'splitEnabled: false']) expect(send).toContain(s);
-    expect(send).toContain("stagingId, dedupEnabled: true, unsubFilterEnabled: true, adEnabled: true, sendType: 'operator', scheduled, scheduledAt,");
+  it('확정 본문 = 광고 · 중복 제거 · 수신거부 제거 켬 · 출처 operator(새 값 0) · 종류 · 개별 회신 · 나눠 보내기는 C157 이 채운다', () => {
+    for (const s of ["sendChannel: 'sms'", 'adEnabled: true', 'dedupEnabled: true, unsubFilterEnabled: true', "sendType: 'operator'"]) expect(send).toContain(s);
   });
   it('한 번만 = 화면이 쥔 잠금 하나(준비 · 확정 · 다시 확인 모두 그 잠금) · 발신 인증 뒤에는 같은 확정 건으로만', () => {
     for (const fn of [send, commit, recheck]) expect(fn).toContain('if (sendLock.current');
@@ -264,7 +264,7 @@ describe('K5 보내기 — 명단 → 적재 → 집계 → 확인 → 확정', 
     // 인증을 그만두면 = 같은 판정(접수 상태)으로 없음일 때만 놓는다 · 창의 닫는 단추 둘 다 그 길
     expect(page).toContain('if (job) void recheckSend(job, AUTH_CANCELED);');
     // ★ Codex 구현 4R · 5R · 6R 같은 부류(창이 떠 있는 동안 뒤 화면이 눌려 창의 단추와 엇갈림) — 확인 창 · 인증 창이 떠 있는 동안 뒤 화면 전체를 막는다(inert) · 보내기 단추는 inert 를 모르는 브라우저에서도 잠긴다
-    expect(page).toContain('const modalOpen = !!confirm || !!senderAuth.state;');
+    expect(page).toContain('const modalOpen = !!confirm || !!senderAuth.state || mmsOpen;');   // ★ C157 — 이미지 창이 떠 있는 동안에도 뒤 화면을 막는다
     expect(page).toContain("const inertProps: Record<string, string> = modalOpen ? { inert: '' } : {};");
     expect((page.match(/\{\.\.\.inertProps\}/g) || []).length).toBe(1);
     expect(page).toContain('<div {...inertProps} className="relative mx-auto flex min-h-screen');
@@ -304,9 +304,9 @@ describe('K5 보내기 — 명단 → 적재 → 집계 → 확인 → 확정', 
     expect(settle).not.toContain('hold(job)');
   });
   it('모름 상태에서는 다시 확인만 · 접수 상태를 먼저 묻고 없음일 때만 같은 확정 건으로 다시(새 명단 · 새 적재 0)', () => {
-    expect(ascending(order(send, 'if (sendLock.current || sending) return;', 'if (heldRef.current) { void recheckSend(heldRef.current); return; }', "'/api/ai-line/ask/audience'"))).toBe(true);
+    expect(ascending(order(send, 'if (sendLock.current || sending) return;', 'if (heldRef.current) { void recheckSend(heldRef.current); return; }', "'/api/ai-line/ask/stage'"))).toBe(true);
     expect(ascending(order(recheck, "again = (await settle(job, reason)) === 'none';", 'if (again) void commitSend(job);'))).toBe(true);
-    for (const fn of [recheck, settle, commit]) expect(fn).not.toContain("'/api/campaigns/direct-send/stage'");
+    for (const fn of [recheck, settle, commit]) { expect(fn).not.toContain("'/api/campaigns/direct-send/stage'"); expect(fn).not.toContain("'/api/ai-line/ask/stage'"); }
   });
   // ★ Codex 구현 1R #2 · 2R #2 — 화면 · 계정의 문은 서버 호출 한 곳(sendCall)에 있다(부르는 자리마다 두지 않는다)
   it('보내기 흐름의 문 = sendCall 한 곳(떠난 화면 · 바뀐 계정이면 요청을 보내지 않는다) · 인증은 시작할 때 한 번 읽어 끝까지', () => {
@@ -406,7 +406,9 @@ describe('K7 칩 = AI 한줄로 부품 하나 · 늦은 보고', () => {
     expect(cards).toContain("export const lateOpen = (chip: AiLineSpamChip | undefined): boolean => !!chip && chip.state === 'warn' && !!chip.testId && chip.lateOpen === true;");
     expect(cards).toContain("|| lateOpen(run.spam[t])) && run.spam[t]?.testId);");
     expect(cards).toContain('lateOpen: r.lateOpen === true });');
-    expect(cards).toContain("lateOpen: out.state === 'busy' ? prev?.lateOpen : out.lateOpen === true,");
+    // ★ C157 구현 Codex 2R — 늦은 보고 여부는 검사 번호 · 지문 · 종류와 같이 움직인다(busy = 앞 검사의 것 · 새 검사 = 서버 값)
+    expect(cards).toContain('? { testId: prev?.testId, fp: prev?.fp, channel: prev?.channel, lateOpen: prev?.lateOpen }');
+    expect(cards).toContain(': { testId: out.testId, fp, channel: ch, lateOpen: out.lateOpen === true };');
     expect(cards).toContain("run.spam[t]?.lateOpen === true]])));");
     expect(cards).toContain('도착 확인이 늦어요 · ');
     expect(cards).toContain("text: '결과 없음 · 다시 검사'");

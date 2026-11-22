@@ -122,7 +122,10 @@ describe('HEAD 원문이 지금 코드에 그대로(옛 길)', () => {
     const d = read('routes/dm.ts');
     expect(d).toContain("return res.status(400).json({ error: '수신 가능한 대상이 0명입니다(수신거부 제외 후).', code: 'ZERO_MATCH' });");
     expect(d).toContain('if (!dmAdGate) return res.json({ success: true, campaignId, sent: sendCount, msgType });');
-    expect(read('routes/ai.ts')).toContain(': { duplicates, callback: callbackExcluded },');
+    // ★ 2026-11-22 C157 — AI 한줄로 적재의 마감이 CT(sealServerStaging)로 옮겨 갔다(같은 꼴 = 관문을 안 쓰는 회사의 응답에 adGate 칸이 없다) · 주소는 그 값을 그대로 낸다
+    expect(read('utils/operator-recipients.ts')).toContain(': { duplicates, callback: callbackExcluded },');
+    expect(read('routes/ai.ts')).toContain('excluded: sealed.excluded,');
+    expect(read('routes/ai.ts')).toContain('...(sealed.adGateNotice !== undefined ? { adGateNotice: sealed.adGateNotice } : {}),');
   });
   it('AI 실행 행 실패 = 옛 길 failCampaignRun 그 자체 · 관문 길 = 시작 잠금 안 「쥔 예약 해제 → failCampaignRun」', () => {
     const c = read('routes/campaigns.ts');

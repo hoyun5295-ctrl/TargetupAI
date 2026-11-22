@@ -20,6 +20,8 @@ import { UserFacingError } from './http-error';
 import { query } from '../config/database';
 import { randomBytes } from 'crypto';
 import { eucKrByteLength } from './message-byte';   // ★ C143 길이 범위(shortenedLengthBounds)
+import { normOrigin } from './mall-origins';
+import { companyListAllows } from './sns-constants';
 
 const HASH_LENGTH = 8;
 const HASH_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -35,6 +37,143 @@ export const MANAGER_LINK_PATHS = ['charge-approve', 'agency-approve', 'autosend
 const MANAGER_LINK_RE = new RegExp(`/(?:${MANAGER_LINK_PATHS.join('|')})(?:#|\\?|$)`);
 export function isManagerLinkUrl(fullUrl: string): boolean {
   return MANAGER_LINK_RE.test(String(fullUrl || ''));
+}
+
+// ── ★ 2026-11-22 C156 문자 링크 유입 표식(설계서 docs/2026-11-22-c156-message-link-inflow-design.md §2 S1) ──
+//   추적 링크가 넘겨주는 주소 끝에 우리만 쓰는 쿼리 칸 하나를 붙여, 그 방문을 유입 경로 「한줄로 메시지 링크」로 가린다(읽는 쪽 = inflow-channel).
+//   ⛔ 붙이는 것은 판정표를 전부 지난 주소뿐 · 있던 글자는 한 글자도 바꾸지 않는다 · 넘겨주기 길에서 DB 를 읽지 않는다.
+
+/** 붙이는 칸 이름 · 붙이는 글자(읽는 쪽 inflowOwnSql 도 이 상수로 만든다) */
+export const INFLOW_MARK_KEY = 'hanjul_link';
+export const INFLOW_MARK = `${INFLOW_MARK_KEY}=1`;
+/** 켜는 회사 명단(비어 있음 = 닫힘 · `*` = 전 회사 · 회사 id 쉼표 목록) */
+export const INFLOW_TAG_ENV = 'SHORT_URL_INFLOW_TAG';
+const INFLOW_URL_MAX = 2000;
+const INFLOW_PARAMS_MAX = 8;
+const INFLOW_NAME_RE = /^[A-Za-z0-9_.\-\[\]]{1,40}$/;
+/** 값 = 24자까지 · 영숫자와 몇 기호만(긴 값 · `/` `=` `:` 가 든 값 = 서명 · 토큰 · 인코딩된 덩어리일 수 있다) */
+const INFLOW_VALUE_RE = /^[A-Za-z0-9_.\-,%+]{0,24}$/;
+/** 서명 · 인증류 칸 이름(소문자) — 같은 이름 · 앞 글자 · 끝 글자 */
+const INFLOW_SIGNED_NAMES = new Set([
+  'sig', 'sign', 'signature', 'token', 'auth', 'authorization', 'key', 'apikey', 'api_key', 'hmac', 'hash', 'expires', 'expire', 'exp',
+  'nonce', 'ticket', 'otp', 'password', 'passwd', 'pw', 'secret', 'session', 'sessionid', 'session_id', 'sid', 'code', 'state', 'policy', 'credential',
+]);
+const INFLOW_SIGNED_PREFIX = ['x-amz-', 'x-goog-'];
+const INFLOW_SIGNED_SUFFIX = ['token', 'signature', 'secret', 'password', '_sig'];
+
+/**
+ * (순수) 이 주소가 표식을 붙여도 되는 꼴이면 그 Origin(정규화한 값) · 아니면 null(= 원문 그대로 넘긴다).
+ *   위에서부터 하나라도 걸리면 null: ① 길이 · 읽기 실패 · http(s) 아님 · 사용자 정보 ② 담당자 링크 ③ 조각(#) ④ 칸 8개 초과
+ *   ⑤ 칸의 이름 · 값이 단순한 꼴이 아님 · `=` 없는 칸 ⑥ 고객이 단 utm_source · 이미 붙은 표식 · 서명 인증류 이름.
+ */
+export function inflowTagOrigin(fullUrl: string): string | null {
+  const raw = String(fullUrl || '');
+  if (!raw || raw.length > INFLOW_URL_MAX) return null;
+  let u: URL;
+  try { u = new URL(raw); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (u.username || u.password) return null;
+  if (isManagerLinkUrl(raw)) return null;
+  if (raw.includes('#')) return null;
+  const q = raw.indexOf('?');
+  const queryText = q < 0 ? '' : raw.slice(q + 1);
+  const body = queryText.endsWith('&') ? queryText.slice(0, -1) : queryText;   // 끝의 `&` 하나는 빈 칸이 아니다
+  const parts = body === '' ? [] : body.split('&');
+  if (parts.length > INFLOW_PARAMS_MAX) return null;
+  for (const part of parts) {
+    const eq = part.indexOf('=');
+    if (eq < 0) return null;
+    const name = part.slice(0, eq);
+    if (!INFLOW_NAME_RE.test(name) || !INFLOW_VALUE_RE.test(part.slice(eq + 1))) return null;
+    const n = name.toLowerCase();
+    if (n === 'utm_source' || n === INFLOW_MARK_KEY) return null;
+    if (INFLOW_SIGNED_NAMES.has(n) || INFLOW_SIGNED_PREFIX.some((x) => n.startsWith(x)) || INFLOW_SIGNED_SUFFIX.some((x) => n.endsWith(x))) return null;
+  }
+  return normOrigin(u.origin);
+}
+
+/** (순수) 넘겨줄 주소 — 붙여도 되는 꼴이고 Origin 이 등록 목록에 있을 때만 받은 글자 **뒤에** 표식을 붙인다 · 그 밖 = 받은 주소 그대로 */
+export function inflowTaggedUrl(fullUrl: string, allowedOrigins: readonly string[]): string {
+  const origin = inflowTagOrigin(fullUrl);
+  if (!origin || !allowedOrigins.map(normOrigin).includes(origin)) return fullUrl;
+  const sep = !fullUrl.includes('?') ? '?' : /[?&]$/.test(fullUrl) ? '' : '&';
+  return `${fullUrl}${sep}${INFLOW_MARK}`;
+}
+
+/** 등록 Origin 기억을 새로 채우는 간격 · 이보다 오래된 기억은 쓰지 않는다(채우기가 멈췄다 = 원문으로 넘긴다) */
+export const INFLOW_ORIGIN_REFRESH_MS = 60_000;
+export const INFLOW_ORIGIN_STALE_MS = 300_000;
+const originMemo: { at: number; byCompany: Map<string, string[]> } = { at: 0, byCompany: new Map() };
+let originRefreshing = false;
+
+/** (동기 · DB 0) 그 회사의 등록 Origin 목록 — 기억이 없거나 오래됐으면 null · 등록이 없는 회사 = 빈 목록 */
+export function allowedOriginsNow(companyId: string, now: number = Date.now()): string[] | null {
+  if (originMemo.at === 0 || now - originMemo.at > INFLOW_ORIGIN_STALE_MS) return null;
+  return originMemo.byCompany.get(String(companyId)) || [];
+}
+
+async function loadInflowOrigins(all: boolean, ids: string[]): Promise<Array<{ id: string; origins: string[] }>> {
+  const r = await query(
+    `SELECT id, cdp_allowed_origins FROM companies
+      WHERE COALESCE(array_length(cdp_allowed_origins, 1), 0) > 0 AND ($1::boolean OR id = ANY($2::uuid[]))`,
+    [all, ids],
+  );
+  return r.rows.map((x: any) => ({ id: String(x.id), origins: Array.isArray(x.cdp_allowed_origins) ? x.cdp_allowed_origins.map(String) : [] }));
+}
+
+/**
+ * 등록 Origin 기억을 통째로 새로 채운다 — 명단이 비면 기억을 비우고 끝(DB 0) · 앞 채우기가 끝나지 않았으면 이번 차례를 건너뛴다
+ *   (동시에 도는 조회 = 언제나 하나 이하) · 실패 = 옛 기억 유지(기한이 지나면 allowedOriginsNow 가 null).
+ */
+export async function refreshInflowOrigins(
+  env: Record<string, string | undefined> = process.env,
+  load: (all: boolean, ids: string[]) => Promise<Array<{ id: string; origins: string[] }>> = loadInflowOrigins,
+  now: () => number = Date.now,
+): Promise<'empty' | 'skipped' | 'filled' | 'failed'> {
+  const list = String(env[INFLOW_TAG_ENV] || '').split(',').map((x) => x.trim()).filter(Boolean);
+  if (list.length === 0) {
+    originMemo.at = 0;
+    originMemo.byCompany = new Map();
+    return 'empty';
+  }
+  if (originRefreshing) return 'skipped';
+  originRefreshing = true;
+  try {
+    const rows = await load(list.includes('*'), list.filter((x) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x)));
+    originMemo.byCompany = new Map(rows.map((r) => [r.id, r.origins]));
+    originMemo.at = now();
+    return 'filled';
+  } catch (err: any) {
+    console.error('[short-url] 등록 도메인 기억 채우기 실패(옛 기억 유지 · 기한이 지나면 표식을 붙이지 않는다):', err?.message);
+    return 'failed';
+  } finally {
+    originRefreshing = false;
+  }
+}
+
+/**
+ * (동기 · 더해지는 대기 0) 추적 링크가 넘겨줄 주소 — 차례 = 명단 → 붙여도 되는 꼴 → 기억의 등록 Origin → 붙이기.
+ *   어느 단계에서든 아니면 · 무엇이 던져지든 받은 주소 그대로(넘겨주기가 이 기능 때문에 실패하지 않는다).
+ */
+export function inflowRedirectUrl(r: { companyId: string; fullUrl: string }, env: Record<string, string | undefined> = process.env): string {
+  try {
+    if (!companyListAllows(r.companyId, String(env[INFLOW_TAG_ENV] || ''))) return r.fullUrl;
+    if (!inflowTagOrigin(r.fullUrl)) return r.fullUrl;
+    const allowed = allowedOriginsNow(r.companyId);
+    if (!allowed) return r.fullUrl;
+    return inflowTaggedUrl(r.fullUrl, allowed);
+  } catch {
+    return r.fullUrl;
+  }
+}
+
+let originTimer: ReturnType<typeof setInterval> | null = null;
+/** 등록 Origin 기억 채우기 — 기동 직후 한 번 + 60초마다(명단이 비면 조회 0) */
+export function startInflowOriginRefresher(): void {
+  if (originTimer) return;
+  void refreshInflowOrigins();
+  originTimer = setInterval(() => { void refreshInflowOrigins(); }, INFLOW_ORIGIN_REFRESH_MS);
+  originTimer.unref?.();
 }
 
 function generateHash(): string {

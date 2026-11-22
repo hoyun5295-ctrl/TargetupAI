@@ -232,6 +232,6 @@ describe('C125 늦은 보고 → 대행발송 대기 해제(배선)', () => {
   it('화면 진행 기록 = 새 사건 종류의 문구가 있다(사건 종류에 CHECK 없음 · 라벨 등재가 같은 커밋)', () => {
     const log = read(join(FE, 'components', 'agency', 'AgencyEventLog.tsx'));
     expect(log).toMatch(/spam_check_recovered: '늦게 도착한 수신 확인으로 검사를 이어 갑니다',/);
-    expect(log).toMatch(/spam_check_error: '검사 장비 문제로 검사를 마치지 못해 잠시 뒤 다시 검사합니다',/);
+    expect(log).toMatch(/spam_check_error: '검사를 마치지 못해 잠시 뒤 다시 검사합니다',/);   // ★ 1122 C158 원인을 단정하지 않는다
   });
 });

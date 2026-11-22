@@ -11,7 +11,7 @@ import { authenticate } from '../middlewares/auth';
 import { handleDbMigrationError } from '../utils/db-migration-error';
 import { respondUserError } from '../utils/http-error';
 import { v3Live } from '../utils/v3-stage';
-import { readBenchmark, BENCH_MIN_PEERS, BENCH_WINDOW_DAYS } from '../utils/performance-benchmark';
+import { readBenchmark, readSendSuccess, BENCH_MIN_PEERS, BENCH_WINDOW_DAYS } from '../utils/performance-benchmark';
 
 const router = Router();
 router.use(authenticate);
@@ -25,7 +25,9 @@ router.get('/summary', async (req: Request, res: Response) => {
       return res.json({ success: true, live: false });
     }
     const view = await readBenchmark(companyId);
-    return res.json({ success: true, live: true, minPeers: BENCH_MIN_PEERS, windowDays: BENCH_WINDOW_DAYS, ...view });
+    // ★ 2026-11-22 C154 — 통신사별 발송 성공률 칸은 굴리기 단계(rollup)가 열린 회사에게만 더한다(닫힘 = 칸 자체가 없다 · 기존 칸 무변화)
+    const send = (await v3Live('rollup', companyId)) ? await readSendSuccess(companyId) : null;
+    return res.json({ success: true, live: true, minPeers: BENCH_MIN_PEERS, windowDays: BENCH_WINDOW_DAYS, ...view, ...(send || {}) });
   } catch (err: any) {
     if (handleDbMigrationError(err, res, 'benchmark_company_daily')) return;
     if (respondUserError(res, err)) return;

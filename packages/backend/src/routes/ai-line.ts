@@ -7,6 +7,7 @@
  * 실패 응답 = { success:false, error, code } · 크레딧 부족 402 INSUFFICIENT_CREDIT · 원장 조회 실패 503.
  */
 import { Router, Request, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { isCopyContentType } from '../utils/copy-content-type';
 import { authenticate } from '../middlewares/auth';
 import { aiZonePlanBlocked } from '../utils/plan-guard';
@@ -20,16 +21,28 @@ import { variantNamesFor } from '../utils/copy-house-rules';
 import {
   AiLineError, aiLineVarTokensFor,
   runLineIntake, runLineRecount, runLineRetarget, runLineProceed, runLineCompose, runLineDecorate, runLineAlimtalkMatch,
+  audienceDetail, lineBodySendChannel,
   type AiLineViewer,
 } from '../services/ai-line';
 import { startLineSpamTest, readLineSpamTest } from '../services/ai-line-spam';
 import { respondUserError } from '../utils/http-error';
 import { findUneditedSendPlaceholder } from '../utils/send-placeholder-gate';
 import {
-  readAskLine, readAskPlan, readAskPrice, countAskCells, countAskPlan, listAskAudience, askGroupMeta, askAudienceText, askComposeLicense,
+  readAskLine, readAskPlan, readAskPrice, readAskPrices, countAskCells, countAskPlan, listAskAudience, askGroupMeta, askAudienceText, askComposeLicense,
   readAskPlace, askUngroundedWords, askStagingState, ASK_PLACE_Q, ASK_PLACE_ANSWER,
+  askChannelOf, askAudienceWhere, askCellsOf, askAmount, stageAskAudience, dropAskStaging,
 } from '../utils/ask-segments';
-import { answerAsk, ASK_QUESTION_MIN, ASK_QUESTION_MAX } from '../services/ask-answer';   // ★ C152 B 질문에 답하기
+import { sendableCustomerSql } from '../utils/product-signal';
+import { prepareFieldMappings } from '../utils/messageUtils';
+import { sendBodyVars } from '../utils/var-tokens';
+import { sealServerStaging } from '../utils/operator-recipients';
+import { branchOfDirect } from '../utils/ad-send-gate-core';
+import { parseSplitSetting } from '../utils/send-time-util';
+import { answerAsk, readAskHistory, ASK_QUESTION_MIN, ASK_QUESTION_MAX, ASK_THREAD_FULL_TEXT, ASK_HISTORY_INVALID_TEXT } from '../services/ask-answer';   // ★ C152 B 질문에 답하기 · C155 대화
+import { v3Live } from '../utils/v3-stage';
+import { companyWideViewer } from '../utils/product-signal';
+import { handleDbMigrationError } from '../utils/db-migration-error';
+import { readGroupPerformance, GROUP_PERF_WINDOW_DAYS, GROUP_PERF_MIN_N, ATTRIBUTION_DAYS } from '../utils/send-ledger-rollup';   // ★ C154 고객 묶음별 성과
 
 const router = Router();
 router.use(authenticate);
@@ -275,12 +288,31 @@ router.get('/ask/segments', async (req: Request, res: Response) => {
   try {
     const v = await lineGate(req, res);
     if (!v) return;
-    const [counted, price, learned] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrice(v.companyId), voiceLearned(v.companyId, 'marketing')]);
+    // ★ 2026-11-22 C157 — unitPrices = 문자 종류 셋의 1통 값(2단계 종류 칩) · varNames = 발송 치환이 쓰는 매핑 이름들(화면이 「칼럼이 든 SMS = LMS」를 미리 보여 줄 때 쓰는 거울 · 주인은 적재 주소)
+    const [counted, prices, learned, mappings] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrices(v.companyId), voiceLearned(v.companyId, 'marketing'), prepareFieldMappings(v.companyId)]);
+    const price = prices.LMS;   // 옛 화면이 읽는 칸(unitPrice = LMS)
     // ★ 2026-11-22 C153 D3 — 종류 칩 이름(목소리를 배운 회사 = 서버 이름 · 문안 카드 이름과 같은 판정 = 광고 문자 목소리) · 아니면 null = 화면 기본 이름
     const typeNames = learned ? (([a, b, c]) => ({ emo: a, benefit: b, mz: c }))(variantNamesFor(true, '')) : null;
-    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price, typeNames });
+    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price, unitPrices: prices, varNames: Object.keys(mappings), typeNames });
   } catch (err: any) {
     return fail(res, err, 'ask-segments');
+  }
+});
+
+// GET /ask/group-performance — ★ 2026-11-22 C154 고객 묶음별 성과(최근 90일 · 귀속이 닫힌 발송 · 보낸 뒤 7일 안에 받은 분이 산 금액)
+//   관문 차례 = 요금제(lineGate) → 굴리기 단계(v3Live 'rollup') → 회사 전체를 보는 사용자(companyWideViewer · 굴린 표는 담당자 범위로 다시 자를 수 없다).
+//   닫힘 · 담당자 = live:false 한 줄(화면은 카드 · 격자 칸을 그리지 않는다). 표가 없으면(DDL 전) 503 DB_MIGRATION_PENDING.
+router.get('/ask/group-performance', async (req: Request, res: Response) => {
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    res.setHeader('Cache-Control', 'private, no-store');
+    if (!(await v3Live('rollup', v.companyId)) || !(await companyWideViewer(req.user as any))) return res.json({ success: true, live: false });
+    const out = await readGroupPerformance(v.companyId);
+    return res.json({ success: true, live: true, windowDays: GROUP_PERF_WINDOW_DAYS, attributionDays: ATTRIBUTION_DAYS, minN: GROUP_PERF_MIN_N, ...out });
+  } catch (err: any) {
+    if (handleDbMigrationError(err, res, 'campaign_cell_results')) return;
+    return fail(res, err, 'ask-group-performance');
   }
 });
 
@@ -291,23 +323,24 @@ router.post('/ask/count', async (req: Request, res: Response) => {
     if (!v) return;
     const plan = readAskPlan(req.body?.plan);
     if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
-    const price = await readAskPrice(v.companyId);
+    const price = await readAskPrice(v.companyId, askChannelOf(plan));   // ★ C157 — 그 계획의 문자 종류 1통 값(없으면 LMS = 옛 요청 그대로)
     const out = await countAskPlan(v.companyId, v.userId, plan, price);
     if (!out) return res.status(400).json(ASK_PRICE_UNSET);
-    return res.json({ success: true, ...out, unitPrice: price });
+    return res.json({ success: true, ...out, unitPrice: price, channel: askChannelOf(plan) });
   } catch (err: any) {
     return fail(res, err, 'ask-count');
   }
 });
 
-// POST /ask/audience — 보낼 명단(지금 다시 셈 · §2-1 같은 문장 · ★ C153 한 줄로 묻기 4단계가 적재에 싣는다)
+// POST /ask/audience — 보낼 명단(지금 다시 셈 · §2-1 같은 문장)
+//   ★ 2026-11-22 C157 D14 — 새 화면은 부르지 않는다(받는 분은 서버가 적재 = /ask/stage). 배포 때 열려 있던 옛 화면 번들이 4단계에서 부르므로 이번 배포에서는 남긴다(삭제 = 다음 배포).
 router.post('/ask/audience', async (req: Request, res: Response) => {
   try {
     const v = await lineGate(req, res);
     if (!v) return;
     const plan = readAskPlan(req.body?.plan);
     if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
-    const out = await listAskAudience(v.companyId, v.userId, plan, await readAskPrice(v.companyId));
+    const out = await listAskAudience(v.companyId, v.userId, plan, await readAskPrice(v.companyId, askChannelOf(plan)));
     if (!out) return res.status(400).json(ASK_PRICE_UNSET);
     return res.json({ success: true, ...out });
   } catch (err: any) {
@@ -343,23 +376,34 @@ router.post('/ask/compose', async (req: Request, res: Response) => {
     if (mode === 'custom' && !benefit) return res.status(400).json({ success: false, error: '혜택 칸을 적어 주세요.', code: 'FACTS_INVALID' });
     if (!isValidAttemptToken(b.attemptToken)) return res.status(400).json({ success: false, error: '요청 형식이 올바르지 않아요. 화면을 새로 고쳐 주세요.', code: 'ATTEMPT_INVALID' });
     const retry = b.retryBlocked === true;
-    const counted = await countAskPlan(v.companyId, v.userId, plan, await readAskPrice(v.companyId));
+    const channel = askChannelOf(plan);   // ★ C157 — 사람이 고른 문자 종류(없으면 LMS)
+    const counted = await countAskPlan(v.companyId, v.userId, plan, await readAskPrice(v.companyId, channel));
     if (!counted) return res.status(400).json(ASK_PRICE_UNSET);
     const lic = askComposeLicense(line, mode, benefit, retry);
     const out = await runLineCompose(v, {
       line: lic.licenseLine, facts: { benefit: lic.benefit, periodEnd: null, ...(answers.length > 0 ? { answers } : {}) }, filters: {}, allCustomers: false,
-      types, vars: [], channel: 'LMS', isAd: true, attemptToken: b.attemptToken,
+      types, vars: [], channel, isAd: true, attemptToken: b.attemptToken,
       ask: {
         count: counted.planned,
         audienceText: askAudienceText(plan.groups),
         extraContext: lic.extraContext,
         ...(lic.benefitGround !== undefined ? { benefitGround: lic.benefitGround } : {}),
         // 과금 키 = 사람 입력만(한 줄 · 정렬한 묶음 키 · 혜택 갈래 · 혜택 글 · 오실 곳 · 링크 · 정렬한 종류 · 다시 고침)
-        keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry },
+        //   ★ C157 — 문자 종류는 LMS(기본)가 아닐 때만 넣는다(LMS = 옛 키와 글자 그대로 같다 = 이미 걷은 문안의 재생이 깨지지 않는다)
+        keyInput: { line, groups: plan.groups, mode, benefit: benefit || '', place, link: link || '', types: [...types].sort(), retry, ...(plan.channel ? { channel: plan.channel } : {}) },
       },
     });
     // 안전망의 근거 = 사람이 준 글 전부(한 줄 · 혜택 칸 · 오실 곳 답 · 링크)
     const ground = [line, lic.benefit || '', ...answers.map((x) => x.a)].join('\n');   // 안전망 낱말의 근거(혜택 근거와 다르다 = 사람이 적은 글 전부)
+    // ★ C157 D13 · S5 — 표본 고객 · 칼럼 목록 = 이 문안 실행에 하나로 묶는다(AI 한줄로의 대상 상세와 같은 함수 · 대상 = 고른 묶음의 보낼 수 있는 고객).
+    //   실패해도 문안은 내준다(표본 없음 = 회사 기본 첫 고객으로 검사 · 칼럼 더 넣기 없음).
+    const detail = await audienceDetail(v.companyId, {
+      blocked: false, unresolved: false, empty: false,
+      where: askAudienceWhere(await sendableCustomerSql(v.companyId, v.userId)), params: [v.companyId, askCellsOf(plan.groups)],
+    }, counted.planned, []).catch((err: any) => {
+      console.warn('[ai-line ask-compose] 표본 · 칼럼을 읽지 못해 뺀다:', err?.message || err);
+      return { top: null, sampleCustomer: null, columns: [] };
+    });
     return res.json({
       success: true,
       cards: out.cards.map((c) => ({
@@ -368,9 +412,71 @@ router.post('/ask/compose', async (req: Request, res: Response) => {
         ungrounded: askUngroundedWords(`${c.subject}\n${c.body}`, ground),
       })),
       channel: out.channel, count: out.count, charged: out.charged,
+      sample: detail.top ? { id: detail.top.id, name: detail.top.name } : null, columns: detail.columns,
     });
   } catch (err: any) {
     return fail(res, err, 'ask-compose');
+  }
+});
+
+// POST /ask/stage — ★ 2026-11-22 C157 받는 분을 서버가 적재한다(설계서 docs/2026-11-22-c157-ask-send-options-design.md §2 S2 · S4-b)
+//   화면은 명단을 받지 않는다 · 확정 = /api/campaigns/direct-send/commit { stagingId, signature, msgType = 이 응답의 channel }(명단이 바뀌면 차감 전에 409).
+//   나가는 문자 종류 = 사람이 고른 종류와 **최종 본문**으로 서버가 다시 정한다(변수 · 주소가 든 SMS = LMS) → 그 종류로 단가 · 예산 인원 · 적재.
+//   마감(중복 제거 → 회신번호 제외 → 광고 관문 → 서명) = AI 한줄로와 같은 CT · 광고 관문의 기간 = 확정과 같은 함수(나눠 보내기 값 포함).
+router.post('/ask/stage', async (req: Request, res: Response) => {
+  let staged: string | null = null;
+  let companyId = '';
+  try {
+    const v = await lineGate(req, res);
+    if (!v) return;
+    companyId = v.companyId;
+    const b = req.body || {};
+    const plan = readAskPlan(b.plan);
+    if (!plan) return res.status(400).json({ success: false, error: ASK_PLAN_INVALID, code: 'PLAN_INVALID' });
+    const message = typeof b.message === 'string' ? b.message : '';
+    if (!message.trim()) return res.status(400).json({ success: false, error: '보낼 문안이 비어 있어요.', code: 'MESSAGE_REQUIRED' });
+    const split = parseSplitSetting(b.splitEnabled, b.splitCount, b.splitIntervalMinutes);
+    if (!split.ok) return res.status(400).json({ success: false, error: split.error, code: split.code });
+    // 나가는 종류 · 고객 원장을 찾아야 채워지는 변수가 있는가 = 발송 치환이 쓰는 매핑 이름으로(확정 · 일꾼과 같은 함수)
+    const names = Object.keys(await prepareFieldMappings(v.companyId));
+    const channel = lineBodySendChannel(askChannelOf(plan), message, names);
+    const price = await readAskPrice(v.companyId, channel);
+    const individual = b.individualCallback === true;
+    const stagingId = randomUUID();
+    const put = await stageAskAudience(v.companyId, v.userId, plan, price, {
+      stagingId, individualCallback: individual, plainOnly: sendBodyVars(message, names).needsCustomer,
+    });
+    if (!put) return res.status(400).json(ASK_PRICE_UNSET);
+    staged = stagingId;
+    if (put.staged <= 0) {
+      await dropAskStaging(v.companyId, stagingId);
+      staged = null;
+      return res.status(400).json({ success: false, error: '보낼 수 있는 분이 없어요.', code: 'NO_RECIPIENTS' });
+    }
+    const sealed = await sealServerStaging({
+      stagingId, companyId: v.companyId, userId: v.userId, userType: v.userType, adEnabled: true, individualCallback: individual,
+      sendPlan: {
+        scheduled: b.scheduled === true, scheduledAt: typeof b.scheduledAt === 'string' ? b.scheduledAt : null,
+        splitEnabled: b.splitEnabled, splitCount: b.splitCount, splitIntervalMinutes: b.splitIntervalMinutes,
+      },
+      branch: branchOfDirect('operator'),
+    });
+    if (sealed.total <= 0) {
+      await dropAskStaging(v.companyId, stagingId);
+      staged = null;
+      const gateNote = sealed.adGateNotice ? ` ${sealed.adGateNotice}` : '';
+      return res.status(400).json({ success: false, code: 'NO_RECIPIENTS', error: `중복 · 회신번호 · 수신거부를 빼면 보낼 수 있는 분이 0명이에요.${gateNote}` });
+    }
+    return res.json({
+      success: true, stagingId, signature: sealed.signature, total: sealed.total,
+      channel, unitPrice: price, amount: askAmount(sealed.total, price),
+      excluded: { ...sealed.excluded, unfillable: put.unfillable },
+      ...(sealed.adGateNotice !== undefined ? { adGateNotice: sealed.adGateNotice } : {}),
+    });
+  } catch (err: any) {
+    // 적재한 뒤 마감에서 실패했으면 그 묶음을 지운다(서명을 주지 않은 명단을 남기지 않는다)
+    if (staged && companyId) await dropAskStaging(companyId, staged).catch(() => undefined);
+    return fail(res, err, 'ask-stage');
   }
 });
 
@@ -398,9 +504,13 @@ router.post('/ask/answer', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: `질문을 ${ASK_QUESTION_MIN}자 이상 ${ASK_QUESTION_MAX}자 안으로 적어 주세요.`, code: 'QUESTION_INVALID' });
     }
     if (!isValidAttemptToken(req.body?.attemptToken)) return res.status(400).json({ success: false, error: '요청 형식이 올바르지 않아요. 화면을 새로 고쳐 주세요.', code: 'ATTEMPT_INVALID' });
+    // ★ 2026-11-22 C155 — 앞 문답(맥락 · 화면이 쥔 문답 줄) · 없으면 옛 요청 그대로 · 꼴이 틀리면 400 · 열 문답이 찼으면 새 대화로
+    const history = readAskHistory(req.body?.history);
+    if (history === 'invalid') return res.status(400).json({ success: false, error: ASK_HISTORY_INVALID_TEXT, code: 'HISTORY_INVALID' });
+    if (history === 'full') return res.status(400).json({ success: false, error: ASK_THREAD_FULL_TEXT, code: 'THREAD_FULL' });
     const out = await answerAsk({
       user: { companyId: v.companyId, userId: v.userId || undefined, userType: v.userType || undefined },
-      question, attemptToken: req.body.attemptToken,
+      question, attemptToken: req.body.attemptToken, history,
     });
     return res.json({ success: true, ...out });
   } catch (err: any) {

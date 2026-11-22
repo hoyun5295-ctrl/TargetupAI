@@ -12,6 +12,15 @@
  */
 import { query } from '../config/database';
 
+/**
+ * ★ 2026-11-22 C156 — 수집 허용 도메인(Origin) 비교용 정규화 한 곳: 앞뒤 공백 · 소문자 · 끝 `/` 뗌 · 스킴 뒤 `www.` 뗌.
+ *   www 와 non-www 는 같은 사이트로 본다(다른 하위 도메인 · 스킴 · 포트는 그대로 구분). 쓰는 곳 = 브라우저 수집 판정
+ *   (cdp-auth requireCdpBrowserOrigin · 옛 인라인 식을 글자 그대로 옮김) · 문자 링크 유입 표식(short-url inflowTagOrigin).
+ */
+export function normOrigin(o: string): string {
+  return String(o).trim().toLowerCase().replace(/\/+$/, '').replace(/^(https?:\/\/)www\./, '$1');
+}
+
 /** 몰 식별자 · 확인된 호스트 → 수집 허용 도메인(판정은 www. 만 떼므로 모바일 m. 은 따로 넣는다) */
 export function mallPlatformOrigins(provider: string, host: string): string[] {
   const h = String(host || '').trim().toLowerCase();

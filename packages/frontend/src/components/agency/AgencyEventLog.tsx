@@ -18,8 +18,8 @@ const EVENT_LABEL: Record<string, string> = {
   // ★2026-09-25 맞춤법 검사(테스트 문자 뒤 · 승인 안내 앞). 확인할 곳 수는 상세 화면 목록이 보여 준다
   spell_checked: '맞춤법을 확인했습니다',
   spam_blocked: '스팸 검사에 걸렸습니다',
-  // ★2026-10-24 검사 장비 문제로 검사를 마치지 못한 회차(문안 문제가 아니다 · 잠시 뒤 다시 검사 · B-0823-1)
-  spam_check_error: '검사 장비 문제로 검사를 마치지 못해 잠시 뒤 다시 검사합니다',
+  // ★2026-10-24 검사를 마치지 못한 회차(잠시 뒤 다시 검사 · B-0823-1) · ★2026-11-22 C158 원인을 단정하지 않는다
+  spam_check_error: '검사를 마치지 못해 잠시 뒤 다시 검사합니다',
   // ★2026-11-11 C125 통신사 전달이 늦어 검사가 닫힌 뒤에 수신 확인이 닿았다 — 기다리지 않고 그 결과로 이어 간다
   spam_check_recovered: '늦게 도착한 수신 확인으로 검사를 이어 갑니다',
   refined: '문안을 다듬었습니다',
@@ -86,6 +86,8 @@ const EVENT_LABEL: Record<string, string> = {
   content_cleaned: '문안에서 문자로 보낼 수 없는 글자를 뺐습니다',
   recipients_cleaned: '명단에서 문자로 보낼 수 없는 글자를 뺐습니다',
   spam_rejected_chars: '문자로 보낼 수 없는 글자가 있어 검사하지 못했습니다',
+  // ★ 2026-11-22 C158 검사 문자가 문안 사유로 접수 거절(차단된 주소 등 · 서버 settleSpamRejected 와 같은 커밋 · 사유는 아래 문장이 붙인다)
+  spam_rejected: '문안을 보낼 수 없어 검사하지 못했습니다',
 };
 
 /** 줄 목록(서버가 남긴 위치 문장 · 글자 자체는 들어 있지 않다) */
@@ -128,6 +130,11 @@ export function describeAgencyEvent(e: AgencySendEvent): string {
     const at = msg.includes(': ') ? msg.slice(msg.indexOf(': ') + 2) : '';
     return `${EVENT_LABEL[e.kind]}${at ? `: ${at}` : ''}. 그 글자를 빼고 다시 진행해 주세요`;
   }
+  if (e.kind === 'spam_rejected') {
+    const why = typeof e.payload?.message === 'string' ? e.payload.message.trim() : '';
+    return `${EVENT_LABEL[e.kind]}${why ? `: ${why}` : ''}. 문안을 고친 뒤 다시 진행해 주세요`;
+  }
+  if (e.kind === 'test_failed' && e.payload?.reason === 'send_rejected') return '문안을 보낼 수 없어 문안 확인이 필요합니다';
   if (e.kind === 'test_failed' && e.payload?.reason === 'unsupported_chars') return '문자로 보낼 수 없는 글자가 있어 문안 확인이 필요합니다';
   return EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다';
 }

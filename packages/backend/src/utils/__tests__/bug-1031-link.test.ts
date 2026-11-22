@@ -215,8 +215,10 @@ describe('배선(계약)', () => {
   const svc = read(BACK, 'services/ai-line.ts');
   it('AI 한줄로 만들기: 링크 = 링크 질문 한 자리 · 키 채널 = 칼럼 규칙 · 출력 채널 = 칼럼 또는 링크 · 결정 · 사실 글 토큰', () => {
     expect(svc).toContain('const sentLink = split.voice.link !== undefined ? split.voice.link : split.lineLink;');
-    expect(svc).toContain("const keyChannel: 'SMS' | 'LMS' | 'MMS' = input.vars.length > 0 && input.channel === 'SMS' ? 'LMS' : input.channel;");
-    expect(svc).toContain("const channel: 'SMS' | 'LMS' | 'MMS' = (input.vars.length > 0 || humanLink) && input.channel === 'SMS' ? 'LMS' : input.channel;");
+    // ★ 2026-11-22 C157 — 종류를 올리는 식이 규칙 함수 하나(lineSendChannel)로 옮겨 갔다(같은 값 = c157 시험의 열두 갈래 표) · 키 채널 = 칼럼만 · 출력 채널 = 칼럼 또는 링크
+    expect(svc).toContain("const keyChannel: 'SMS' | 'LMS' | 'MMS' = lineSendChannel(input.channel, input.vars.length > 0, false);");
+    expect(svc).toContain("const channel: 'SMS' | 'LMS' | 'MMS' = lineSendChannel(input.channel, input.vars.length > 0, !!humanLink);");
+    expect(svc).toContain("return (hasVars || hasLink) && channel === 'SMS' ? 'LMS' : channel;");
     expect(svc).toContain('types: input.types, vars: input.vars, channel: keyChannel, isAd: input.isAd,');
     expect(svc).toContain('const voiceForm = humanLink ? { ...voiceDecided.decision, link: { value: humanLink.url } } : voiceDecided.decision;');
     expect(svc).toContain('${buildLineEventText(withLinkToken(input.line, humanLink), { benefit: input.facts.benefit })}');

@@ -128,7 +128,10 @@ describe('K4 (R89 넓힘) 보류 깨우기 · 보류 장애 셈', () => {
   it('runSpamRound — 검사 회차의 detail 에 검사 id · 보류 묶음 장애 = 검사 호출 앞에서 장애로 돌려준다(새 검사 0)', () => {
     const body = fnBody(W, 'runSpamRound');
     const held = body.indexOf('const held = await heldSpamBatch(String(row.id), Number(row.content_version || 0));');
-    const guard = body.indexOf("if (held && held.verdict === 'error') return { verdict: 'error', passed: false, finalContent: original, rounds: startRound, detail: { batchId: held.batchId } };");
+    // ★ 1122 C158 — 보류 묶음 장애 갈래 = 블록(접수 거절이면 반려 · 아니면 장애) · 어느 쪽이든 검사 호출 앞에서 돌려준다(새 검사 0)
+    const guardOpen = body.indexOf("if (held && held.verdict === 'error') {");
+    const guard = body.indexOf("return { verdict: 'error', passed: false, finalContent: original, rounds: startRound, detail: { batchId: held.batchId } };", guardOpen);
+    expect(guardOpen).toBeGreaterThan(0);
     const call = body.indexOf('await autoSpamTestWithRegenerate(');
     expect(held).toBeGreaterThan(0);
     expect(guard).toBeGreaterThan(held);

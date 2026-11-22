@@ -23,13 +23,13 @@
 import pool, { query, lockPool, type TxRun } from '../config/database';
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
-import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, readSpamTestOutcome, mergeAlternativeVerdicts, type SpamVerdict } from './spam-test-queue';
+import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, isCharsRejection, spamGatewayRejectionOf, readSpamTestOutcome, mergeAlternativeVerdicts, type SpamVerdict } from './spam-test-queue';
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
-  buildLinkActionNotify, buildUnsupportedCharsNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify, buildSmsBytesNotify,
+  buildLinkActionNotify, buildUnsupportedCharsNotify, buildSendRejectedNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify, buildSmsBytesNotify,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl, linkCancelTailOf } from './agency-send-link';
 import {
@@ -369,6 +369,18 @@ async function sendManagerTest(opts: {
  *   (오늘도 T-2h 재검사가 타임아웃이면 통과로 읽고 발송한다). 고치려면 실패를 판정이 아니라
  *   의존 장애로 다루는 재시도·백오프 설계가 함께 필요해 별도 과제로 뺐다(설계서 §14-6).
  */
+/**
+ * ★ 2026-11-22 C158 — 검사 회차를 장애로 끝내는 자리마다 먼저 부르는 한 곳: 그 회차가 본 검사 가운데 문안 사유 접수 거절이 있으면 그 사유(없으면 null).
+ *   자리 = 방금 돌린 검사의 장애 · 보류로 남겼다가 장애로 굳은 검사(Codex 구현 1R #1 — 한 자리에만 달면 다른 길로 「검사를 마치지 못했다」가 나간다).
+ */
+async function sendRejectionOfTests(testIds: ReadonlyArray<unknown>): Promise<string | null> {
+  for (const id of testIds) {
+    const why = id ? await spamGatewayRejectionOf(String(id)) : null;
+    if (why) return why;
+  }
+  return null;
+}
+
 async function runSpamRound(row: any, startRound: number): Promise<{
   /** ★ 2026-10-24 판정 3분할(뿌리 대장 R7) — error = 검사 장애(통과도 반려도 아니다 · 다듬은 문장은 검사받지 못해 버린다) */
   verdict: SpamVerdict;
@@ -410,7 +422,12 @@ async function runSpamRound(row: any, startRound: number): Promise<{
     // ★ 2026-11-21 C150(R89 넓힘 · Codex 설계 1R #2) — 보류로 남긴 검사가 장애로 굳었으면 새 검사 없이 그 묶음으로 장애(부르는 쪽 = 옛 장애 갈래 · 셈 · 15분 대기 · 3번째 사람).
     //   옛: 같은 키 장애 검사는 이어 보지 않아(enqueueSpamTest reusable) 새 검사를 걸고, 보류는 장애 횟수에 안 세어 단말 장애 때 같은 글 재검사가 끝없이 돌았다.
     const held = await heldSpamBatch(String(row.id), Number(row.content_version || 0));
-    if (held && held.verdict === 'error') return { verdict: 'error', passed: false, finalContent: original, rounds: startRound, detail: { batchId: held.batchId } };
+    if (held && held.verdict === 'error') {
+      // ★ 2026-11-22 C158(Codex 구현 1R #1) — 보류로 남긴 검사가 접수 거절로 끝난 경우도 같은 판정(줄 대기가 길어 보류됐다가 9407 로 닫힌 검사)
+      const heldRejection = await sendRejectionOfTests(held.testIds);
+      if (heldRejection) return { verdict: 'rejected', passed: false, finalContent: original, rounds: startRound, detail: { batchId: held.batchId }, rejection: heldRejection };
+      return { verdict: 'error', passed: false, finalContent: original, rounds: startRound, detail: { batchId: held.batchId } };
+    }
     while (rounds < MAX_TEST_ROUNDS) {
       rounds += 1;
       const sample = await buildSample({ ...row, current_content: content });
@@ -439,7 +456,13 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       const v = result.variants[0];
       // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
       const verdict = spamVerdictOf(v, result.totalTestCount);
-      if (verdict === 'error') return { verdict, passed: false, finalContent: original, rounds, detail };
+      if (verdict === 'error') {
+        // ★ 2026-11-22 C158 — 검사 문자가 문안 사유로 접수 거절(차단된 URL 등)이면 장애가 아니라 반려(다시 검사 0 · 15분 대기 0 · 사유를 알린다)
+        //   옛(1122 실측): 결과 표의 「발송 실패」만 보고 장애로 읽어 같은 글을 세 번 다시 검사한 뒤 「문안 문제는 아닙니다」를 보냈다.
+        const sendRejection = await sendRejectionOfTests(Object.values(result.testIds ?? {}));
+        if (sendRejection) return { verdict: 'rejected', passed: false, finalContent: original, rounds, detail, rejection: sendRejection };
+        return { verdict, passed: false, finalContent: original, rounds, detail };
+      }
       // ★ 2026-11-06 C109 D4 — 보낼 수 없는 글자 반려 = 장애 아님 · 다듬기 · 다시 검사 0(같은 글은 같은 반려) · 사람이 고친다
       if (verdict === 'rejected') return { verdict, passed: false, finalContent: original, rounds, detail, rejection: spamRejectionOf(v) };
       // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 원문 그대로 잡기 전 상태로(장애 횟수에 안 셈) · 다듬은 문장이면 그 글을 남겨 다음 주기에 이어 본다
@@ -485,7 +508,7 @@ async function runSpamRound(row: any, startRound: number): Promise<{
 
 /**
  * ★ 2026-10-24 검사 장애 마감(B-0823-1 가 · 나 · 뿌리 대장 R7) — 장애는 통과도 반려도 아니다.
- *   사건(spam_check_error · 문안 버전)을 남기고, 같은 버전에서 SPAM_CHECK_ERROR_LIMIT 번째면 사람 판단(test_failed + 장비 문제 안내),
+ *   사건(spam_check_error · 문안 버전)을 남기고, 같은 버전에서 SPAM_CHECK_ERROR_LIMIT 번째면 사람 판단(test_failed + 검사를 마치지 못했다는 안내),
  *   아니면 잡기 전 상태로 돌려놓는다(다시 집기는 고르기 SQL 이 SPAM_CHECK_ERROR_BACKOFF_MINUTES 뒤에만 · 실패 건이 앞자리를 차지하지 않게).
  */
 async function settleSpamCheckError(row: any, token: string, backTo: 'received' | 'approved', phase: 'first' | 'final', detail: any): Promise<void> {
@@ -596,13 +619,18 @@ async function settleSmsBytesOver(row: any, token: string, phase: 'first' | 'fin
 
 async function settleSpamRejected(row: any, token: string, phase: 'first' | 'final', rejection: string | null | undefined): Promise<void> {
   const message = String(rejection || '').trim() || null;
+  // ★ 2026-11-22 C158 — 반려 둘을 가른다: 글자 반려(C109 · 위치를 알린다) · 접수 거절(차단된 URL 등 · 사유를 알린다). 둘 다 다시 검사 0 · 장애 셈 0
+  const chars = isCharsRejection(message);
+  const label = shortLabel(row.file_name || row.original_content);
   if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
-  await logEvent(row.id, 'spam_rejected_chars', { phase, version: Number(row.content_version || 0), message });
-  await logEvent(row.id, 'test_failed', { reason: 'unsupported_chars', phase });
+  await logEvent(row.id, chars ? 'spam_rejected_chars' : 'spam_rejected', { phase, version: Number(row.content_version || 0), message });
+  await logEvent(row.id, 'test_failed', { reason: chars ? 'unsupported_chars' : 'send_rejected', phase });
   await notifyManager({
     companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
     callback: row.callback_number, title: phase === 'final' ? '[대행발송] 예약 취소 안내' : '[대행발송] 문안 확인 필요',
-    text: buildUnsupportedCharsNotify({ label: shortLabel(row.file_name || row.original_content), places: spamRejectionPlaces(message) }),
+    text: chars
+      ? buildUnsupportedCharsNotify({ label, places: spamRejectionPlaces(message) })
+      : buildSendRejectedNotify({ label, reason: message || '' }),
   });
 }
 
@@ -647,8 +675,14 @@ export function heldResultJson(row: { last_test_result?: any; content_version?: 
  *   묶음 없는 장애(큐 등록 실패 등 · batchId NULL)는 견줄 값이 없어 회복되지 않는다. 장애 사건을 읽는 자리(집기 대기 · 3번 셈)는 전부 이 조각을 거친다.
  */
 export function unrecoveredSpamErrorSql(se: string): string {
+  // ★ 2026-11-22 C158 — 그 장애 뒤에 사람이 다시 진행(시각 변경) · 문안 수정을 했으면 세지 않는다 = 셈 · 집기 대기를 새로 시작.
+  //   그 두 사건은 변경과 같은 트랜잭션에서 남는다(agency-send-change · Codex 구현 1R #2 — 사건이 못 남으면 변경째 되돌린다 = 변경은 됐는데 셈이 남는 일 0).
+  //   옛(1122 실측): 세 번째 장애로 멈춘 뒤 「다시 진행하시면 검사를 다시 시작합니다」 문자대로 눌러도 셈이 남아 다음 장애 하나에 다시 멈추고,
+  //   직전 장애의 15분 대기도 남아 19분 뒤에야 검사했다(11:29:56 다시 진행 → 11:49:10 검사). 사건 차례 = id(같은 시각에 찍혀도 갈린다).
   return `NOT EXISTS (SELECT 1 FROM agency_send_events sr WHERE sr.request_id = ${se}.request_id AND sr.kind = 'spam_check_recovered'
-                 AND sr.payload->>'batchId' = ${se}.payload->>'batchId')`;
+                 AND sr.payload->>'batchId' = ${se}.payload->>'batchId')
+          AND NOT EXISTS (SELECT 1 FROM agency_send_events hr WHERE hr.request_id = ${se}.request_id
+                 AND hr.kind IN ('rescheduled', 'content_edited') AND hr.id > ${se}.id)`;
 }
 
 /** 고르기 SQL 조각 — 방금(대기 시간 안) 검사 장애가 난 건은 다시 집지 않는다(LIMIT 앞 · B-0823-1 착수 주의) · 회복된 장애는 대기에서 뺀다(C125) */
@@ -658,7 +692,7 @@ export function spamErrorBackoffSql(param: number): string {
                  AND ${unrecoveredSpamErrorSql('se')})`;
 }
 
-/** 같은 문안 버전의 검사 장애 횟수 — 회복된 장애(장비 문제가 아니었다)는 세지 않는다(C125 · 3번째 = 사람 판단) */
+/** 같은 문안 버전의 검사 장애 횟수 — 회복된 장애(늦은 보고로 통과) · 사람이 다시 진행한 앞의 장애는 세지 않는다(C125 · C158 · 3번째 = 사람 판단) */
 export async function countUnrecoveredSpamErrors(requestId: string, version: number, run: TxRun = query): Promise<number> {
   const r = await run(
     `SELECT COUNT(*)::int AS n FROM agency_send_events se
@@ -787,7 +821,7 @@ export const SPAM_HOLD_EVENT = 'spam_check_hold';
  *   검사 = 사건 payload testIds(이어 본 검사 포함) · 없는 옛 사건 = payload batchId 의 검사. 결과 = 판정 읽기 한 곳(readSpamTestOutcome) → 대안 합치기.
  *   batchId = 그 검사의 batch_id — 장애 마감 · C125 회복(recoverAgencySpamErrors = 검사 → batch_id)이 같은 키를 본다.
  */
-export async function heldSpamBatch(requestId: string, version: number, run: TxRun = query): Promise<{ batchId: string; verdict: SpamVerdict } | null> {
+export async function heldSpamBatch(requestId: string, version: number, run: TxRun = query): Promise<{ batchId: string; verdict: SpamVerdict; testIds: string[] } | null> {
   const ev = await run(
     `SELECT kind, payload FROM agency_send_events WHERE request_id = $1::uuid ORDER BY created_at DESC, id DESC LIMIT 1`,
     [requestId],
@@ -803,7 +837,8 @@ export async function heldSpamBatch(requestId: string, version: number, run: TxR
   if (tests.rows.length === 0) return null;
   const outs = await Promise.all(tests.rows.map((t: any) => readSpamTestOutcome(String(t.id), run)));
   const batchId = tests.rows[0].batch_id ? String(tests.rows[0].batch_id) : legacyBatch;
-  return { batchId, verdict: mergeAlternativeVerdicts(outs.map((o) => o.outcome)) };
+  // ★ C158 — testIds = 이 판정이 읽은 검사(장애로 굳었을 때 접수 거절 사유를 그 검사에서 읽는다)
+  return { batchId, verdict: mergeAlternativeVerdicts(outs.map((o) => o.outcome)), testIds: tests.rows.map((t: any) => String(t.id)) };
 }
 
 /** ★ C150 보류 감시 주기 — 확인 문자 주기(30초)와 같다 */

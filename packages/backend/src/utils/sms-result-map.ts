@@ -226,6 +226,27 @@ export function getStatusLabel(statusCode: number): string {
 export const GATEWAY_REJECT_CODES: readonly number[] = [9401, 9402, 9403, 9404, 9405, 9406, 9407, 9408, 9409];
 
 /**
+ * ★ 2026-11-22 C158 — 접수 거절 가운데 **문안이 원인**인 코드와 그 사유(고객이 읽는 「사유:」 줄 · 사건 기록).
+ *   운영 실측(1122): 검사 문자가 9407(차단된 URL)로 접수 거절 → 결과 표에는 「발송 실패」만 남아 판정이 장애로 읽고 세 번 재검사했다.
+ *   여기 없는 거절 코드(수신번호 형식 · 식별코드 · 중복 접수 등)는 문안 탓이 아니다 = 반려로 읽지 않는다.
+ */
+export const GATEWAY_CONTENT_REJECT_TEXT: Readonly<Record<number, string>> = {
+  9401: '문안에 문자로 보낼 수 없는 글자가 있음',
+  9402: '문안이 문자 길이를 넘음',
+  9407: '문안에 든 주소(URL)가 발송 차단 대상',
+};
+
+/**
+ * ★ 2026-11-22 C158 — 검사 문자 실패 행들의 결과 코드 → 문안 사유 접수 거절이면 그 사유 · 아니면 null(순수).
+ *   null = 종전 판정 그대로: 실패 행 0 · 코드를 못 읽은 행(null) · 문안 탓이 아닌 코드가 하나라도 섞임.
+ */
+export function gatewayRejectionFromCodes(codes: ReadonlyArray<number | null | undefined>): string | null {
+  if (codes.length === 0) return null;
+  const texts = codes.map((c) => (c == null ? undefined : GATEWAY_CONTENT_REJECT_TEXT[Number(c)]));
+  return texts.every(Boolean) ? (texts[0] as string) : null;
+}
+
+/**
  * ★ 2026-09-29 한줄로 V2 차수 5(B-0928-1 범위 밖 ①) — 스팸 검사 발송 실패 행의 사유(화면용).
  * 옛: 모달이 실패를 전부 「통신사가 문자를 받지 않았어요」로 보여 게이트웨이 반려(글자·길이 등 · 고쳐서 다시 검사하면 된다)와
  *   통신사 실패를 가를 수 없었다(0928 U+200B 9401 반려 = 3사 모두 '전달 실패').
@@ -530,6 +551,43 @@ export const CARRIER_MAP: Record<string, string> = {
 /** mob_company → 표시명 (매핑에 없으면 원본 반환) */
 export function getCarrierLabel(mobCompany: string): string {
   return CARRIER_MAP[mobCompany] || mobCompany || '알 수 없음';
+}
+
+/**
+ * ★ 2026-11-22 C154 — 통신사 키(발송 원장 굴리기가 저장하는 값 · 설계서 docs/2026-11-22-c154-send-ledger-rollup-design.md D4).
+ *   저장 = 여덟(통신사 셋 · 그 알뜰폰 셋 · 그 밖 · 미상). 결과 화면과 대조할 때는 이 여덟 그대로(결과 화면은 알뜰폰을 따로 보인다).
+ *   띠(성과 화면) = carrierNet 으로 알뜰폰을 그 망의 통신사에 더해 세 줄.
+ */
+export const CARRIER_KEYS = ['SKT', 'SKT_MVNO', 'KT', 'KT_MVNO', 'LGU', 'LGU_MVNO', 'etc', 'unknown'] as const;
+export type CarrierKey = (typeof CARRIER_KEYS)[number];
+export const CARRIER_NETS = ['SKT', 'KT', 'LGU'] as const;
+export type CarrierNet = (typeof CARRIER_NETS)[number];
+
+const CARRIER_KEY_OF: Record<string, CarrierKey> = {
+  '11': 'SKT', SKT: 'SKT', '12': 'SKT_MVNO',
+  '16': 'KT', KTF: 'KT', '17': 'KT_MVNO',
+  '19': 'LGU', LGT: 'LGU', '20': 'LGU_MVNO',
+};
+
+/** mob_company → 저장 키(빈 값 = 미상 · 표에 없는 값 = 그 밖) */
+export function carrierKey(mobCompany: string | null | undefined): CarrierKey {
+  const v = String(mobCompany ?? '').trim();
+  if (!v) return 'unknown';
+  return CARRIER_KEY_OF[v] || 'etc';
+}
+
+const NET_OF: Record<CarrierKey, CarrierNet | null> = {
+  SKT: 'SKT', SKT_MVNO: 'SKT', KT: 'KT', KT_MVNO: 'KT', LGU: 'LGU', LGU_MVNO: 'LGU', etc: null, unknown: null,
+};
+
+/** 저장 키 → 망(띠의 세 통신사) · 그 밖 · 미상 = null */
+export function carrierNet(key: CarrierKey): CarrierNet | null {
+  return NET_OF[key] ?? null;
+}
+
+/** (SQL) 저장 키 칸 → 망(그 밖 · 미상 = NULL) — carrierNet 과 같은 표에서 만든다(접기가 둘이 되지 않게) */
+export function carrierNetSql(col: string): string {
+  return `(CASE ${CARRIER_NETS.map((n) => `WHEN ${col} IN (${CARRIER_KEYS.filter((k) => NET_OF[k] === n).map((k) => `'${k}'`).join(', ')}) THEN '${n}'`).join(' ')} END)`;
 }
 
 // ========================

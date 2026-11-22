@@ -14,7 +14,8 @@
 import { companyListAllows } from './sns-constants';
 import { canUseFeature, loadPlanContext, type FeatureKey, type PlanContext } from './plan-guard';
 
-export const V3_FEATURES = ['journey-pack', 'product-insight', 'benchmark', 'reco', 'split', 'inbox'] as const;
+// ★ 2026-11-22 C154 — rollup = 발송 원장 굴리기(통신사별 발송 성공률 · 고객 묶음별 성과 · 설계서 docs/2026-11-22-c154-send-ledger-rollup-design.md D2)
+export const V3_FEATURES = ['journey-pack', 'product-insight', 'benchmark', 'reco', 'split', 'inbox', 'rollup'] as const;
 export type V3Feature = (typeof V3_FEATURES)[number];
 
 /** 기능 → ENV 이름(값을 여기서만 정한다 · 배포 원장 ENV 항목과 같은 이름) */
@@ -25,6 +26,7 @@ export const V3_STAGE_ENV: Record<V3Feature, string> = {
   reco: 'V3_STAGE_RECO',
   split: 'V3_STAGE_SPLIT',
   inbox: 'V3_STAGE_INBOX',
+  rollup: 'V3_STAGE_ROLLUP',
 };
 
 /** 기능 → 요금제 기능 키(새 키를 만들지 않는다 · 설계 회의 기획 수렴 = 스타터부터 · 미가입만 닫힘) */
@@ -35,6 +37,7 @@ export const V3_PLAN_KEY: Record<V3Feature, FeatureKey> = {
   reco: 'ai_premium',
   split: 'ai_premium',
   inbox: 'ai_premium',
+  rollup: 'ai_premium',
 };
 
 /** (순수) 요금제가 허용했고 ENV 명단에 든 회사인가 — 요금제가 먼저다(planAllowed 가 false 면 ENV 를 보지 않는다) */

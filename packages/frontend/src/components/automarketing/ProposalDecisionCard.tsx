@@ -62,8 +62,8 @@ const COPY_CHECK_CHIP: Record<string, { text: string; cls: string }> = {
   passed: { text: '스팸 검사 통과', cls: 'bg-emerald-50 text-emerald-700' },
   rechecking: { text: '혜택이 바뀌어 다시 검사하는 중', cls: 'bg-slate-100 text-slate-600' },
   blocked: { text: '바뀐 문안이 스팸 검사에 걸렸어요', cls: 'bg-rose-50 text-rose-700' },
-  // ★ 2026-10-25 원장 #18 — 검사 장비 문제로 끝내 검사를 못 함(차단이 아니다)
-  unchecked: { text: '검사 장비 문제로 다시 검사하지 못했어요 · 스팸 검사를 눌러 주세요', cls: 'bg-amber-50 text-amber-800' },
+  // ★ 2026-10-25 원장 #18 — 끝내 검사를 마치지 못함(차단이 아니다) · ★ 2026-11-22 C158 원인을 단정하지 않는다
+  unchecked: { text: '다시 검사를 마치지 못했어요 · 스팸 검사를 눌러 주세요', cls: 'bg-amber-50 text-amber-800' },
   stale: { text: '검사한 뒤 혜택이 바뀌어 다시 검사가 필요해요', cls: 'bg-amber-50 text-amber-800' },
   // ★ 2026-11-06 C109 E6 — 나가는 글(혜택 포함)에 보낼 수 없는 글자(통과 지문보다 먼저 · 위치는 copyCheckReason)
   rejected: { text: '보낼 수 없는 글자가 있어요. 문안에서 빼 주세요', cls: 'bg-amber-50 text-amber-800' },

@@ -25,8 +25,9 @@ import { useNavigate } from 'react-router-dom';
 import EffectProofCard from '../components/performance/EffectProofCard';   // ★ 2026-11-06 C110
 import ProductSignalSection from '../components/performance/ProductSignalSection';   // ★ 2026-11-13 C133 F2
 import InflowChannelCard from '../components/performance/InflowChannelCard';   // ★ 2026-11-21 C152 E
+import GroupPerformanceCard from '../components/performance/GroupPerformanceCard';   // ★ 2026-11-22 C154
 import ZoneStatStrip from '../components/zone/ZoneStatStrip';
-import { fetchBenchmark, successBenchLine, spamBenchCells, spamBenchFootnote, type BenchmarkView, type BenchLine } from '../utils/benchmark';   // ★ 2026-11-13 C133 F3
+import { fetchBenchmark, successBenchLine, spamBenchCells, spamBenchFootnote, sendBenchCells, sendBenchFootnote, type BenchmarkView, type BenchLine } from '../utils/benchmark';   // ★ 2026-11-13 C133 F3
 import { goBackOr } from '../lib/scroll-restoration';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
@@ -842,6 +843,18 @@ export default function PerformancePage() {
 
             {/* ★ 2026-11-06 C110 효과 증명(대조군 비교 · 늘어난 매출) · ★ 2026-11-21 C152 F — 숫자 카드 바로 아래 첫 줄로(옛: 자동마케팅 ROI 아래) */}
             <EffectProofCard days={periodToDays(period)} />
+
+            {/* ★ 2026-11-22 C154 고객 묶음별 성과(보낸 뒤 7일 안에 받은 분이 산 금액 · 닫힌 회사 · 담당자에게는 아무것도 그리지 않는다) */}
+            <GroupPerformanceCard />
+
+            {/* ★ 2026-11-22 C154 통신사별 발송 성공률(굴린 발송 결과 · 내 값이 있는 통신사가 있을 때만) */}
+            {bench && sendBenchCells(bench).length > 0 && (
+              <ZoneStatStrip
+                title={`통신사별 발송 성공률 · 최근 ${bench.windowDays}일`}
+                cells={sendBenchCells(bench)}
+                footnote={sendBenchFootnote(bench)}
+              />
+            )}
 
             {/* ★ 2026-11-13 C133 F3 통신사별 스팸 검사 차단율 · ★ 2026-11-21 C152 G — 내 값이 있는 통신사가 있으면(업종 평균이 없어도) */}
             {bench && spamBenchCells(bench).length > 0 && (

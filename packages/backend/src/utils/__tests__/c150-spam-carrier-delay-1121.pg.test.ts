@@ -139,13 +139,13 @@ describe('K-PG4 보류 묶음 읽기 · 보류 감시', () => {
     const t = await closedTest({ source: 'auto_ai_free', minutesAgo: 3, batchId: firstBatch, rows: [{ carrier: 'LGU', phone: '01000001521', result: 'unconfirmed' }] });
     const req = await request();
     await holdEvent(req, { phase: 'first', verdict: 'unconfirmed', version: 1, batchId: randomUUID(), held: false, testIds: [t.id] });
-    expect(await heldSpamBatch(req, 1)).toEqual({ batchId: firstBatch, verdict: 'unconfirmed' });
+    expect(await heldSpamBatch(req, 1)).toMatchObject({ batchId: firstBatch, verdict: 'unconfirmed' });
     // 확인 중인 동안 감시 = 깨우지 않음
     const kicked: string[][] = [];
     expect(await wakeResolvedSpamHolds((ids) => { kicked.push(ids); })).not.toContain(req);
     // 확인 문자로 차단 확정 → 감시가 깨움
     await pool.query(`UPDATE spam_filter_test_results SET result = 'blocked' WHERE test_id = $1`, [t.id]);
-    expect(await heldSpamBatch(req, 1)).toEqual({ batchId: firstBatch, verdict: 'blocked' });
+    expect(await heldSpamBatch(req, 1)).toMatchObject({ batchId: firstBatch, verdict: 'blocked' });
     expect(await wakeResolvedSpamHolds((ids) => { kicked.push(ids); })).toContain(req);
     expect(kicked.flat()).toContain(req);
   });
@@ -154,7 +154,7 @@ describe('K-PG4 보류 묶음 읽기 · 보류 감시', () => {
     const t = await closedTest({ source: 'auto_ai', minutesAgo: 8, batchId: b, rows: [{ carrier: 'LGU', phone: '01000001522', result: 'error' }] });
     const req = await request();
     await holdEvent(req, { phase: 'first', verdict: 'unconfirmed', version: 1, batchId: b, testIds: [t.id] });
-    expect(await heldSpamBatch(req, 1)).toEqual({ batchId: b, verdict: 'error' });
+    expect(await heldSpamBatch(req, 1)).toMatchObject({ batchId: b, verdict: 'error' });
     expect(await wakeResolvedSpamHolds(() => undefined)).toContain(req);
     await pool.query(`UPDATE spam_filter_test_results SET result = 'pass', received = true WHERE test_id = $1`, [t.id]);
     expect((await heldSpamBatch(req, 1))?.verdict).toBe('pass');
@@ -164,7 +164,7 @@ describe('K-PG4 보류 묶음 읽기 · 보류 감시', () => {
     await closedTest({ source: 'auto_ai', minutesAgo: 3, batchId: b, rows: [{ carrier: 'LGU', phone: '01000001523', result: 'pass' }] });
     const legacy = await request();
     await holdEvent(legacy, { phase: 'first', verdict: 'pending', version: 1, batchId: b });
-    expect(await heldSpamBatch(legacy, 1)).toEqual({ batchId: b, verdict: 'pass' });
+    expect(await heldSpamBatch(legacy, 1)).toMatchObject({ batchId: b, verdict: 'pass' });
     // 문안 버전이 바뀌었다(담당자가 고침) = 그 보류는 지난 일
     expect(await heldSpamBatch(legacy, 2)).toBeNull();
     // 보류 뒤 다른 사건 = 이미 다음 일이 일어났다

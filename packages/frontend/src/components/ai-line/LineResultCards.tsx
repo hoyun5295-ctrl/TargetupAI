@@ -37,6 +37,11 @@ export interface LineResultCardsProps {
   bodyAt: (t: AiLineType) => string;
   subjectAt: (t: AiLineType) => string;
   channel: AiLineChannel;
+  /**
+   * ★ 2026-11-22 C157 — 카드마다 나가는 문자 종류(본문에서 종류가 정해지는 화면 = 한 줄로 묻기). 없으면 channel 하나(AI 한줄로 그대로).
+   *   도착 확인은 카드마다 자기 종류로 건다(고른 카드의 종류가 다른 카드의 검사 · 요금을 바꾸지 않는다 · 구현 Codex 1R).
+   */
+  channelAt?: (t: AiLineType) => AiLineChannel;
   isAd: boolean;
   /** 검사 발신번호(등록 번호 · 개별 회신이면 기본 번호) · 없으면 검사하지 않는다 */
   callback: string;
@@ -49,6 +54,9 @@ export interface LineResultCardsProps {
   /** ★ C153 좁은 칸에 놓일 때(한 줄로 묻기 3단계의 오른쪽 칸) = 카드를 언제나 한 줄에 하나씩(기본 = 화면 폭에 따라 2 · 3칸 = AI 한줄로 그대로) */
   stack?: boolean;
 }
+
+/** 그 카드의 문자 종류(카드마다 정하는 화면은 channelAt · 아니면 channel 하나) */
+export const cardChannel = (p: Pick<LineResultCardsProps, 'channel' | 'channelAt'>, t: AiLineType): AiLineChannel => (p.channelAt ? p.channelAt(t) : p.channel);
 
 function chipView(chip: AiLineSpamChip | undefined, stale: boolean, late: boolean): { tone: string; icon: 'ok' | 'bad' | 'wait' | 'none'; text: string } {
   if (stale && chip && !RUNNING.includes(chip.state)) return { tone: 'bg-amber-50 text-amber-800', icon: 'none', text: '글이 바뀌었어요 · 다시 검사' };
@@ -88,7 +96,7 @@ function chipView(chip: AiLineSpamChip | undefined, stale: boolean, late: boolea
 export default function LineResultCards(p: LineResultCardsProps) {
   const { run } = p;
   const types = run.cards.map((c) => c.type);
-  const fpOf = (t: AiLineType) => spamFp(p.bodyAt(t), p.subjectAt(t), p.channel, p.isAd, p.callback);
+  const fpOf = (t: AiLineType) => spamFp(p.bodyAt(t), p.subjectAt(t), cardChannel(p, t), p.isAd, p.callback);
   // 순서 = 추천 → 고른 카드 → 나머지
   const rec = run.intake?.recommend?.type ?? null;
   const order = [...types].sort((a, b) => (a === rec ? -2 : a === p.pickedType ? -1 : 0) - (b === rec ? -2 : b === p.pickedType ? -1 : 0));
@@ -105,17 +113,24 @@ export default function LineResultCards(p: LineResultCardsProps) {
     if (!cur.callback || body.length < 2 || startingRef.current) return;
     startingRef.current = true;
     const prev = cur.run.spam[t];
-    const fp = spamFp(cur.bodyAt(t), cur.subjectAt(t), cur.channel, cur.isAd, cur.callback);
+    const ch = cardChannel(cur, t);
+    const fp = spamFp(cur.bodyAt(t), cur.subjectAt(t), ch, cur.isAd, cur.callback);
     try {
       const out = await aiLineApi.spamStart({
-        body: cur.bodyAt(t), subject: cur.subjectAt(t), channel: cur.channel, isAd: cur.isAd, callback: cur.callback,
+        body: cur.bodyAt(t), subject: cur.subjectAt(t), channel: ch, isAd: cur.isAd, callback: cur.callback,
         sampleCustomerId: audienceOf(cur.run).top?.id ?? null,
       });
       if (latest.current.run.runId !== cur.run.runId) return;   // 그 사이 다른 진행 = 버린다
       if (out.state === 'busy') setBusyTick((x) => x + 1);
+      // 칩의 「어느 검사인가」 = 검사 번호 · 그 검사의 글 지문 · 건 때의 종류 · 늦은 보고 여부 — **넷은 늘 같이 움직인다**.
+      //   새 검사가 걸렸으면 넷 다 새 검사의 것 · 걸리지 못했으면(busy = 앞 검사를 이어 쥔다) 넷 다 앞 검사의 것.
+      //   (옛: busy 에서 검사 번호는 앞의 것 · 지문만 새 글의 것 → 앞 검사의 늦은 결과가 검사하지 않은 새 글을 통과로 만들었다 · 구현 Codex 2R)
+      //   화면의 「글이 바뀌었어요」 판정 = 칩의 지문과 지금 글의 지문을 그릴 때 견준다(칩에 지금 글의 지문을 미리 적지 않는다).
+      const test = out.state === 'busy'
+        ? { testId: prev?.testId, fp: prev?.fp, channel: prev?.channel, lateOpen: prev?.lateOpen }
+        : { testId: out.testId, fp, channel: ch, lateOpen: out.lateOpen === true };
       cur.onSpamPatch(t, {
-        state: out.state, testId: out.state === 'busy' ? prev?.testId : out.testId, fp, message: out.message,
-        lateOpen: out.state === 'busy' ? prev?.lateOpen : out.lateOpen === true,
+        state: out.state, message: out.message, ...test,
         autoRuns: out.state === 'busy' ? (prev?.autoRuns || 0) : (prev?.autoRuns || 0) + (manual ? 0 : 1),
       });
     } catch (e) {
@@ -167,7 +182,8 @@ export default function LineResultCards(p: LineResultCardsProps) {
         const testId = chip.testId;
         const mark = {};
         pollingRef.current.set(t, mark);
-        void aiLineApi.spamRead(testId, latest.current.channel).then((r) => {
+        // 읽는 종류 = 그 검사를 건 때의 것(지금 종류로 읽으면 건 뒤 종류가 바뀐 검사의 결과를 못 찾는다) · 옛 칩(종류 없음)은 지금 종류
+        void aiLineApi.spamRead(testId, chip.channel ?? cardChannel(latest.current, t)).then((r) => {
           const cur = latest.current;
           const now = cur.run.spam[t];
           if (cur.run.runId !== runId || !now || now.testId !== testId) return;

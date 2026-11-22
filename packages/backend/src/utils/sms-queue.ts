@@ -3,7 +3,7 @@
 // campaigns.ts, manage-scheduled.ts 등 모든 라우트는 이 모듈을 통해 MySQL 큐에 접근한다.
 // 하드코딩 금지. 환경변수/설정파일 기반.
 
-import { mysqlQuery, mysqlPool } from '../config/database';
+import { mysqlQuery, mysqlPool, withBoundedMysql } from '../config/database';
 import { noteQueueSql } from './queue-scan-guard';
 import { guardDemoLeak } from './demo-company';   // ★ 2026-10-09 시연 회사 최후 방어(적재 = 사고)
 import { loadActiveRules, evaluateContent, logSpamBlockHits, SpamBlockLogEntry } from './spam-block';
@@ -696,6 +696,35 @@ export async function smsGroupByAll(
   const result: Record<string, number> = {};
   for (const r of rows) result[String(r._grp ?? '')] = Number(r.cnt || 0);
   return result;
+}
+
+/** 낱행 읽기 한 문장의 실행 시간 상한(ms) — 서버 힌트 + 상한 있는 연결(넘기면 던진다 = 부르는 쪽이 그 캠페인을 실패 시도로 센다) */
+export const CAMPAIGN_ROWS_QUERY_MS = 5000;
+export const CAMPAIGN_ROWS_PAGE_MAX = 10000;
+/** 대기 전용 라이브에서 「만료 실패」로 읽는 줄의 조건 — 낱행 읽기 문장과 켜기 전 확인(scripts/c154-m1-queue-facts.ts)이 같은 글자를 쓴다(구현 Codex 3R) */
+export const CAMPAIGN_EXPIRED_ROWS_WHERE = `status_code NOT IN (${SUCCESS_CODES.join(',')}, ${PENDING_CODES.join(',')}) AND mobsend_time IS NULL`;
+
+/**
+ * ★ 2026-11-22 C154 — 캠페인의 낱행을 표 하나에서 seqno 순으로 나눠 읽는다
+ *   (발송 원장 굴리기 전용 · 설계서 docs/2026-11-22-c154-send-ledger-rollup-design.md S2).
+ *   expiredOnly = 대기 전용 라이브에서 「만료 실패」만 읽는다 — 캠페인 합계 CT(smsCampaignCountsSafe)가 그 표에서 세는 실패와 같은 조건
+ *     (비성공 · 비대기이고 mobsend_time 이 없다 · 대기 행과 이력으로 옮기는 중인 행은 읽지 않는다 = 이중 집계 0).
+ *   조건 맨 앞 = app_etc1(R94 · 표 전체를 훑지 않는다) · 오프셋 없음(seqno 키 = 깊은 쪽이 느려지지 않는다).
+ *   문장을 만드는 함수를 따로 둔다 = 켜기 전 서버 확인(scripts/c154-m1-queue-facts.ts)이 **같은 문장**을 EXPLAIN 한다.
+ */
+export function smsCampaignRowsSql(table: string, limit: number, expiredOnly: boolean): string {
+  const lim = Math.min(Math.max(Math.floor(Number(limit) || 0), 1), CAMPAIGN_ROWS_PAGE_MAX);
+  const expired = expiredOnly ? ` AND ${CAMPAIGN_EXPIRED_ROWS_WHERE}` : '';
+  return `SELECT /*+ MAX_EXECUTION_TIME(${CAMPAIGN_ROWS_QUERY_MS}) */ seqno, dest_no, status_code, mob_company FROM ${table} WHERE app_etc1 = ? AND seqno > ?${expired} ORDER BY seqno LIMIT ${lim}`;
+}
+
+/** 위 문장으로 한 쪽을 읽는다(인자 = 캠페인 · 이 줄 번호 뒤부터) — 실행 시간 상한을 넘기면 던진다 */
+export async function smsCampaignRowsAfter(
+  table: string, campaignId: string, afterSeq: number, limit: number, expiredOnly: boolean,
+): Promise<Array<{ seqno: number; dest_no: string; status_code: number; mob_company: string | null }>> {
+  if (!isValidSmsTable(table)) return [];
+  const sql = smsCampaignRowsSql(table, limit, expiredOnly);
+  return await withBoundedMysql(CAMPAIGN_ROWS_QUERY_MS, (run) => run(sql, [campaignId, Math.max(0, Math.floor(Number(afterSeq) || 0))])) as any[];
 }
 
 /** DELETE/UPDATE: 해당 테이블 모두 실행 */

@@ -15,6 +15,12 @@
 import { buildJourneySafetyFilter } from './journey-safety-filter';
 // ★ 2026-07-05: 발송 피로도 보호 — 순수 clause 빌더(DB import 0)라 본 모듈 순수성 유지.
 import { buildFatigueGuardClause, FatigueCap } from './fatigue-guard-core';
+import { query } from '../config/database';
+import { planIndividualCallbackExclusion, effectiveUnsubFilter, stagingSendSignature, dedupStagingRows, countStagingFiltered } from './direct-send-core';
+import { callbackAssignmentUserId } from './callback-filter';
+import { resolveAdGateMode, gateStaging, directSendSpanOf, type AdGateMode } from './ad-send-gate';
+import { adGateNotice, type AdGateCounts, type AdBranch } from './ad-send-gate-core';
+import { parseSplitSetting } from './send-time-util';
 
 /**
  * ★ 2026-08-03 자동마케팅 타겟팅 재설계 A-1 — 대상 판정 WHERE 단일 길목.
@@ -254,4 +260,84 @@ export function buildSendableStagingInsertSql(
        FROM customers c
       WHERE ${where}`;
   return { sql, params };
+}
+
+// ── ★ 2026-11-22 C157 서버 적재의 마감 한 곳(설계서 docs/2026-11-22-c157-ask-send-options-design.md §2 S1) ──
+
+/** 보낼 때(예약 · 나눠 보내기) — 광고 관문이 보는 기간을 확정과 같은 함수(directSendSpanOf)로 낸다 */
+export interface StagingSendPlan {
+  scheduled?: unknown;
+  scheduledAt?: string | Date | null;
+  splitEnabled?: unknown;
+  splitCount?: unknown;
+  splitIntervalMinutes?: unknown;
+}
+
+export interface SealedStaging {
+  /** 명단 서명(실제 발송 집합) — 확정이 같은 값으로 대조한다(다르면 차감 전에 409) */
+  signature: string;
+  /** 서명이 센 수 = 중복 · 회신번호 · 광고 관문 · 수신거부를 뺀 실제 발송 수 */
+  total: number;
+  excluded: { duplicates: number; callback: number; adGate?: AdGateCounts };
+  adGateNotice?: string;
+  sample: Array<{ phone: string; name: string | null }>;
+  defaultCallback: string | null;
+}
+
+/**
+ * 서버가 적재한 명단을 고정한다 — AI 한줄로(`/operator/preview-recipients` stage) · 한 줄로 묻기(`/ask/stage`)가 같이 부른다.
+ *   차례(옮겨 온 순서 그대로): 중복 제거 → (개별 회신) 제외 → 광고 관문(load · 서명 전에 지운다) → 서명 → 표본 100 · 기본 회신번호.
+ *   광고 관문의 기간 = 확정과 같은 함수(나눔이 없으면 예약 시각의 그날 = 옮기기 전 AI 한줄로가 넘기던 값과 같다 ·
+ *   나눔이 있으면 마지막 나눔 날까지 = 확정이 보는 기간 · 그때만 관문 전 인원을 센다).
+ *   광고 관문 장애(AdGateUnavailableError)는 밖으로 던진다(부른 주소의 공용 오류 처리).
+ */
+export async function sealServerStaging(i: {
+  stagingId: string;
+  companyId: string;
+  userId: string | null | undefined;
+  userType: string | null | undefined;
+  adEnabled: boolean;
+  individualCallback: boolean;
+  sendPlan: StagingSendPlan;
+  branch: AdBranch;
+}): Promise<SealedStaging> {
+  const unsubUserId = String(i.userId || '');
+  const duplicates = await dedupStagingRows(i.stagingId, i.companyId);
+  let callbackExcluded = 0;
+  if (i.individualCallback) {
+    const plan = await planIndividualCallbackExclusion(i.stagingId, i.companyId, callbackAssignmentUserId(i.userType as any, i.userId as any) ?? undefined, true);
+    if (plan.moveIds.length > 0) {
+      await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid AND id = ANY($3::bigint[])`, [i.stagingId, i.companyId, plan.moveIds]);
+    }
+    callbackExcluded = plan.removed;
+  }
+  // 광고 관문 — 옛 길 = 관문 0 · 관문 길(요금제 씀 + 새 기능)만 · 확정이 같은 묶음 · 같은 갈래로 다시 판정한다
+  const stageMode: AdGateMode = i.adEnabled ? await resolveAdGateMode(i.companyId) : { mode: 'legacy' };
+  let adGate: AdGateCounts | null = null;
+  if (stageMode.mode === 'gate') {
+    const split = parseSplitSetting(i.sendPlan.splitEnabled, i.sendPlan.splitCount, i.sendPlan.splitIntervalMinutes);
+    const preGate = split.ok && split.split
+      ? (await countStagingFiltered(i.stagingId, i.companyId, unsubUserId, true, true, true)).sendCount
+      : 0;
+    adGate = (await gateStaging(stageMode.policy, {
+      branch: i.branch, stagingId: i.stagingId, unsubUserId, mode: 'load', span: directSendSpanOf(i.sendPlan, preGate),
+    })).counts;
+  }
+  const signature = await stagingSendSignature(i.stagingId, i.companyId, unsubUserId, true, effectiveUnsubFilter(i.adEnabled, true));
+  const sample = await query(
+    `SELECT phone, name FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid ORDER BY id LIMIT 100`,
+    [i.stagingId, i.companyId],
+  );
+  const dcb = await query(
+    `SELECT regexp_replace(phone, '[^0-9]', '', 'g') AS phone FROM callback_numbers WHERE company_id = $1 AND is_default = true LIMIT 1`,
+    [i.companyId],
+  );
+  return {
+    signature,
+    total: Number(signature.split(':')[0]) || 0,
+    excluded: adGate ? { duplicates, callback: callbackExcluded, adGate } : { duplicates, callback: callbackExcluded },
+    ...(adGate ? { adGateNotice: adGateNotice(adGate) } : {}),
+    sample: sample.rows,
+    defaultCallback: dcb.rows[0]?.phone || null,
+  };
 }

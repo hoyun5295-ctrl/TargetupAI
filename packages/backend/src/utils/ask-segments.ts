@@ -13,6 +13,9 @@ import { resolveChargeUnitPriceDetailed } from './unit-price';
 
 export type AskGroupKey = 'leave' | 'rest' | 'fade' | 'next' | 'loyal' | 'new' | 'nobuy';
 export type AskOrder = 'recent' | 'count';
+/** ★ 2026-11-22 C157 — 한 줄로 묻기에서 고르는 문자 종류(없으면 LMS = 옛 요청 그대로) */
+export type AskChannel = 'SMS' | 'LMS' | 'MMS';
+export const ASK_CHANNELS: readonly AskChannel[] = ['SMS', 'LMS', 'MMS'];
 
 /** 줄 = 마지막 구매(지난 일수 상한 · 마지막 줄 = 그 밖) · 칸 = 구매 횟수(상한) */
 export const ASK_ROW_DAYS = [30, 90, 180, 365] as const;
@@ -31,6 +34,8 @@ export const ASK_GROUPS: ReadonlyArray<{ key: AskGroupKey; name: string; desc: s
 ];
 const GROUP_BY_KEY = new Map(ASK_GROUPS.map((g) => [g.key, g]));
 const GROUP_OF_CELL = new Map(ASK_GROUPS.flatMap((g) => g.cells.map((c) => [c, g.key] as const)));
+/** 칸 키 → 묶음(표에 없는 칸 = null) — ★ 2026-11-22 C154 굴린 칸 합계를 묶음으로 접을 때 같은 표를 쓴다 */
+export const askGroupOfCell = (cell: string): AskGroupKey | null => GROUP_OF_CELL.get(cell) ?? null;
 
 /** 한 번에 넘기는 최대 인원 = 직접발송 명단 상한(product-signal 과 같은 값) */
 export const ASK_AUDIENCE_MAX = AUDIENCE_LIST_MAX;
@@ -42,10 +47,19 @@ export const ASK_BUDGET_MAX = 100_000_000;
  *   지난 일수 = 한국 날짜 오늘 − 마지막 구매일(미래 날짜 = 음수 = 0줄) · 구매 횟수 NULL · 0 = 1번 이하(날짜가 있으니 한 번은 산 분).
  */
 export function askCellSql(a: string): string {
-  const d = `(${kstDayAgoSql('0')} - ${a}.recent_purchase_date)`;
+  return askCellOfSql(kstDayAgoSql('0'), `${a}.recent_purchase_date`, `${a}.purchase_count`);
+}
+
+/**
+ * 칸 식의 몸통(한 곳) — 기준 날짜 · 마지막 구매일 · 구매 횟수를 식으로 받는다.
+ *   ★ 2026-11-22 C154 — 발송 원장 굴리기가 「발송 시점의 칸」을 되짚을 때 같은 식을 발송 날짜 · 그때의 구매일 · 횟수로 부른다
+ *   (설계서 docs/2026-11-22-c154-send-ledger-rollup-design.md S4 · 칸 판정이 둘이 되지 않게). 지금 쓰임 = askCellSql(오늘 · 요약 칸).
+ */
+export function askCellOfSql(dayExpr: string, recentExpr: string, countExpr: string): string {
+  const d = `(${dayExpr} - ${recentExpr})`;
   const row = `CASE ${ASK_ROW_DAYS.map((n, i) => `WHEN ${d} <= ${n} THEN ${i}`).join(' ')} ELSE ${ASK_ROW_DAYS.length} END`;
-  const col = `CASE WHEN COALESCE(${a}.purchase_count, 0) <= ${ASK_COL_COUNTS[0]} THEN 0 WHEN ${a}.purchase_count <= ${ASK_COL_COUNTS[1]} THEN 1 ELSE 2 END`;
-  return `(CASE WHEN ${a}.recent_purchase_date IS NULL THEN '${ASK_NOBUY}' ELSE 'r' || (${row})::text || 'c' || (${col})::text END)`;
+  const col = `CASE WHEN COALESCE(${countExpr}, 0) <= ${ASK_COL_COUNTS[0]} THEN 0 WHEN ${countExpr} <= ${ASK_COL_COUNTS[1]} THEN 1 ELSE 2 END`;
+  return `(CASE WHEN ${recentExpr} IS NULL THEN '${ASK_NOBUY}' ELSE 'r' || (${row})::text || 'c' || (${col})::text END)`;
 }
 
 /** 순서 칸(대표 행 고르기 · 명단 순서 · 예산 자르기가 같은 식) */
@@ -55,24 +69,40 @@ export function askOrderSql(a: string, order: AskOrder): string {
     : `${a}.recent_purchase_date DESC NULLS LAST`;
 }
 
+/** ★ 2026-11-22 C157 — (SQL) 고객의 번호를 숫자만 남긴 값(발송 적재 · 일꾼의 고객 찾기가 쓰는 꼴 · 적재 표 칸 폭 20) */
+export const askPhoneSql = (a: string): string => `regexp_replace(COALESCE(${a}.phone, ''), '[^0-9]', '', 'g')`;
+
+/** (SQL) 대상 조건 — $1 회사 · $2 칸 키들 · 별칭 c. 보낼 수 있는 고객 · 숫자가 든 번호(1 ~ 20자) · 고른 칸 */
+export function askAudienceWhere(sendable: string): string {
+  return `c.company_id = $1::uuid AND ${sendable} AND length(${askPhoneSql('c')}) BETWEEN 1 AND 20 AND ${askCellSql('c')} = ANY($2::text[])`;
+}
+
 /**
- * §2-1 대상 한 문장 — 고른 칸 전체에서 번호 하나 = 한 사람(칸끼리 같은 번호 = 한 번 · 요청 순서의 앞 행이 대표).
- *   $1 회사 · $2 칸 키들. 세기 · 명단 · 예산 자르기가 이 CTE 하나를 쓴다.
+ * §2-1 대상 한 문장 — 고른 칸 전체에서 번호 하나 = 한 사람(칸끼리 같은 번호 = 한 번).
+ *   $1 회사 · $2 칸 키들. 세기 · 적재 · 표본 · 옛 명단 · 예산 자르기가 이 CTE 하나를 쓴다.
+ *   ★ 2026-11-22 C157 D11 — 번호 = **숫자만 남긴 값**(옛: TRIM = 꼴만 다른 같은 번호를 두 명으로 세고 적재 뒤 한 명이 됐다) ·
+ *     같은 번호의 행이 여럿이면 대표 = 저장된 번호가 숫자 꼴인 행 먼저(발송 일꾼이 `phone = 번호` 로 칼럼 값을 찾는 바로 그 행) → 요청 순서 → id.
+ *   칸: plain = 저장된 번호가 숫자 꼴인가(아니면 일꾼이 그 고객의 칼럼 값을 찾지 못한다) · store_phone = 그 고객의 매장 번호(개별 회신).
  */
 export function askAudienceSql(sendable: string, order: AskOrder): string {
+  const phone = askPhoneSql('c');
   return `WITH picked AS (
-      SELECT DISTINCT ON (TRIM(c.phone)) c.id, TRIM(c.phone) AS phone, c.name, c.recent_purchase_date, c.purchase_count, ${askCellSql('c')} AS cell
+      SELECT DISTINCT ON (${phone}) c.id, ${phone} AS phone, c.name, c.recent_purchase_date, c.purchase_count, ${askCellSql('c')} AS cell,
+             (c.phone = ${phone}) AS plain, NULLIF(btrim(COALESCE(c.store_phone, '')), '') AS store_phone
         FROM customers c
-       WHERE c.company_id = $1::uuid AND ${sendable} AND NULLIF(TRIM(c.phone), '') IS NOT NULL AND ${askCellSql('c')} = ANY($2::text[])
-       ORDER BY TRIM(c.phone), ${askOrderSql('c', order)}, c.id
+       WHERE ${askAudienceWhere(sendable)}
+       ORDER BY ${phone}, (c.phone = ${phone}) DESC, ${askOrderSql('c', order)}, c.id
     )`;
 }
 
 // ── 입력 ──
 
-export interface AskPlanInput { groups: AskGroupKey[]; mode: 'all' | 'budget'; budget: number | null; order: AskOrder }
+/** channel = 사람이 고른 문자 종류 — LMS(기본)이면 칸을 두지 않는다(옛 요청과 같은 값 = 문안 과금 키가 그대로) */
+export interface AskPlanInput { groups: AskGroupKey[]; mode: 'all' | 'budget'; budget: number | null; order: AskOrder; channel?: AskChannel }
+/** 그 계획의 문자 종류(없으면 LMS) */
+export const askChannelOf = (plan: Pick<AskPlanInput, 'channel'>): AskChannel => plan.channel ?? 'LMS';
 
-/** 입력 검사 한 곳 — 아는 묶음만 · 1개 이상 · 예산 = 1,000 ~ 1억 원 정수 · 틀리면 null */
+/** 입력 검사 한 곳 — 아는 묶음만 · 1개 이상 · 예산 = 1,000 ~ 1억 원 정수 · 문자 종류 = 셋 가운데 하나(없으면 LMS) · 틀리면 null */
 export function readAskPlan(raw: unknown): AskPlanInput | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const r = raw as Record<string, unknown>;
@@ -84,10 +114,12 @@ export function readAskPlan(raw: unknown): AskPlanInput | null {
   if (!mode) return null;
   const order: AskOrder | null = r.order === undefined || r.order === 'recent' ? 'recent' : r.order === 'count' ? 'count' : null;
   if (!order) return null;
-  if (mode === 'all') return { groups, mode, budget: null, order };
+  if (r.channel !== undefined && !(ASK_CHANNELS as readonly unknown[]).includes(r.channel)) return null;
+  const ch = r.channel !== undefined && r.channel !== 'LMS' ? { channel: r.channel as AskChannel } : {};
+  if (mode === 'all') return { groups, mode, budget: null, order, ...ch };
   const b = r.budget;
   if (typeof b !== 'number' || !Number.isInteger(b) || b < ASK_BUDGET_MIN || b > ASK_BUDGET_MAX) return null;
-  return { groups, mode, budget: b, order };
+  return { groups, mode, budget: b, order, ...ch };
 }
 
 /** 고른 묶음 → 칸 키들 */
@@ -157,13 +189,30 @@ export function askUngroundedWords(text: string, ground: string): string[] {
 
 // ── 단가 · 예산(순수) ──
 
+/**
+ * 1통 값 — `lms` 칸 = **그 계획의 문자 종류** 1통 값(칸 이름은 옛 화면 · 옛 응답과 같은 꼴을 지키려고 그대로 둔다 · 종류를 안 넘기면 LMS).
+ */
 export interface AskPrice { lms: number; unset: boolean }
 
-/** 회사 장문 단가(부가세 포함 · 차감과 같은 CT) · 미설정 = 예산 잠김 */
-export async function readAskPrice(companyId: string): Promise<AskPrice> {
-  const r = await query('SELECT cost_per_lms, unit_price_basis FROM companies WHERE id = $1', [companyId]);
-  const p = resolveChargeUnitPriceDetailed(r.rows[0] || null, 'LMS');
-  return { lms: p.price, unset: p.unset || !r.rows[0] };
+/** 회사의 그 종류 단가(부가세 포함 · 차감과 같은 CT) · 미설정 = 예산 잠김 */
+export async function readAskPrice(companyId: string, channel: AskChannel = 'LMS'): Promise<AskPrice> {
+  return (await readAskPrices(companyId))[channel];
+}
+
+/** ★ 2026-11-22 C157 — 문자 종류 셋의 단가를 한 번에(2단계의 종류 칩 · 차감과 같은 CT resolveChargeUnitPriceDetailed) */
+export async function readAskPrices(companyId: string): Promise<Record<AskChannel, AskPrice>> {
+  const r = await query('SELECT cost_per_sms, cost_per_lms, cost_per_mms, unit_price_basis FROM companies WHERE id = $1', [companyId]);
+  const row = r.rows[0] || null;
+  const of = (channel: AskChannel): AskPrice => {
+    const p = resolveChargeUnitPriceDetailed(row, channel);
+    return { lms: p.price, unset: p.unset || !row };
+  };
+  return { SMS: of('SMS'), LMS: of('LMS'), MMS: of('MMS') };
+}
+
+/** (순수) n명에게 보내는 금액(원) — askPlan 과 같은 셈(전 단위로 곱해 반올림) */
+export function askAmount(n: number, price: AskPrice): number {
+  return Math.round((Math.max(0, Math.floor(n)) * Math.round(price.lms * 100)) / 100);
 }
 
 const cents = (won: number): number => Math.round(won * 100);
@@ -213,7 +262,7 @@ export async function countAskCells(companyId: string, viewerUserId: string | nu
   const rows = await boundedRead(
     `SELECT x.cell, COUNT(*)::int AS total, COUNT(DISTINCT x.sphone)::int AS sendable,
             COALESCE(SUM(x.spend), 0)::float8 AS spend_sum, COUNT(x.spend)::int AS spend_n
-       FROM (SELECT ${askCellSql('c')} AS cell, CASE WHEN ${sendable} THEN NULLIF(TRIM(c.phone), '') END AS sphone,
+       FROM (SELECT ${askCellSql('c')} AS cell, CASE WHEN ${sendable} AND length(${askPhoneSql('c')}) BETWEEN 1 AND 20 THEN ${askPhoneSql('c')} END AS sphone,
                     CASE WHEN ${sendable} AND c.total_purchase_amount > 0 THEN c.total_purchase_amount END AS spend
                FROM customers c
               WHERE c.company_id = $1::uuid AND c.is_active = true${scope}) x
@@ -278,6 +327,54 @@ export async function listAskAudience(companyId: string, viewerUserId: string | 
   const recipients = rows.map((x: any) => ({ phone: String(x.phone), name: String(x.name || '') }));
   const p = askPlan(Number(rows[0]?.sendable) || 0, price, plan)!;
   return { recipients, total: p.want, truncated: p.capped };
+}
+
+/**
+ * ★ 2026-11-22 C157 — 받는 분을 서버가 적재한다(화면은 명단을 받지 않는다 · 설계서 docs/2026-11-22-c157-ask-send-options-design.md §2 S2).
+ *   세기(countAskPlan)와 같은 대상 문장 · 같은 순서 · 같은 상한. 적재 줄 = 번호(숫자만) · 이름(· 개별 회신이면 그 고객의 매장 번호).
+ *   plainOnly = 고객 원장을 찾아야 채워지는 변수가 든 문안 — 대표 행의 저장 번호가 숫자 꼴이 아닌 고객(일꾼이 칼럼 값을 찾지 못한다)을 빼고
+ *     남은 사람으로 상한을 채운다 · unfillable = 그래서 빠진 사람 수(빼지 않았다면 이번에 들어갔을 사람 가운데).
+ *   $1 회사 · $2 칸 키들 · $3 상한 · $4 적재 id. 예산인데 단가 미설정 = null.
+ */
+export function askStagingInsertSql(sendable: string, order: AskOrder, opts: { callback: boolean; plainOnly: boolean }): string {
+  const keep = opts.plainOnly ? 'p.plain' : 'true';
+  const by = `${askOrderSql('p', order)}, p.id`;
+  return `${askAudienceSql(sendable, order)},
+    ranked AS (
+      SELECT p.phone, p.name, p.store_phone, (${keep}) AS keep,
+             ROW_NUMBER() OVER (ORDER BY ${by}) AS rn_all,
+             SUM(CASE WHEN ${keep} THEN 1 ELSE 0 END) OVER (ORDER BY ${by} ROWS UNBOUNDED PRECEDING) AS rn_keep
+        FROM picked p
+    ),
+    ins AS (
+      INSERT INTO campaign_send_staging (staging_id, company_id, phone, name${opts.callback ? ', callback' : ''})
+      SELECT $4::uuid, $1::uuid, r.phone, r.name${opts.callback ? ', r.store_phone' : ''}
+        FROM ranked r WHERE r.keep AND r.rn_keep <= $3::int
+       ORDER BY r.rn_all
+      RETURNING 1
+    )
+    SELECT (SELECT COUNT(*)::int FROM ins) AS staged,
+           (SELECT COUNT(*)::int FROM ranked r WHERE NOT r.keep AND r.rn_all <= $3::int) AS unfillable`;
+}
+
+export async function stageAskAudience(
+  companyId: string, viewerUserId: string | null | undefined, plan: AskPlanInput, price: AskPrice,
+  opts: { stagingId: string; individualCallback: boolean; plainOnly: boolean },
+): Promise<{ staged: number; unfillable: number } | null> {
+  const limit = askLimit(price, plan);
+  if (limit === null) return null;
+  if (limit <= 0) return { staged: 0, unfillable: 0 };
+  const sendable = await sendableCustomerSql(companyId, viewerUserId);
+  const [r] = await boundedRead(
+    askStagingInsertSql(sendable, plan.order, { callback: opts.individualCallback, plainOnly: opts.plainOnly }),
+    [companyId, askCellsOf(plan.groups), limit, opts.stagingId],
+  );
+  return { staged: Number(r?.staged) || 0, unfillable: Number(r?.unfillable) || 0 };
+}
+
+/** 적재 줄 지우기(0명 · 마감 실패 뒤 정리 · 그 회사의 그 묶음만) */
+export async function dropAskStaging(companyId: string, stagingId: string): Promise<void> {
+  await query(`DELETE FROM campaign_send_staging WHERE staging_id = $1::uuid AND company_id = $2::uuid`, [stagingId, companyId]);
 }
 
 // ── 한 줄 읽기(순수 · AI 0) ──

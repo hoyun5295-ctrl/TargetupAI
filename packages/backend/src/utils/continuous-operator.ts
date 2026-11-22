@@ -4746,13 +4746,13 @@ async function scheduleSequenceReminder(
           RETURNING id`,
         [reminderId, spamRejection != null
           ? `리마인드 문안에 문자로 보낼 수 없는 글자가 있어 자동 예약을 보류했어요: ${spamRejectionPlaces(spamRejection) || '위치를 확인해 주세요'}. 문안을 고친 뒤 승인해 주세요`
-          : spamUnchecked ? '리마인드 문안 스팸 검사를 하지 못했어요(검사 장비 문제). 검사하거나 그대로 승인해 주세요' : `리마인드 문안 스팸 검증 미통과(${spamNote}). 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
+          : spamUnchecked ? '리마인드 문안 스팸 검사를 마치지 못했어요. 검사하거나 그대로 승인해 주세요' :`리마인드 문안 스팸 검증 미통과(${spamNote}). 문안 수정 후 승인 필요`, REMINDER_SPAM_PENDING_REASON],
       ).catch((e: any) => { console.warn('[ContinuousOperator Sequence] 리마인드 사유 갱신 경고:', e?.message); return { rows: [] as any[] }; });
       if (marked.rows.length > 0) {
         await tell('[AI 자동마케팅] 리마인드 검토 필요', spamRejection != null
           ? `'${op.name || ''}' 리마인드 문안에 문자로 보낼 수 없는 글자가 있어 자동 예약을 보류했습니다: ${spamRejectionPlaces(spamRejection) || '위치를 확인해 주세요'}. 문안을 고친 뒤 승인해 주세요.`
           : spamUnchecked
-          ? `'${op.name || ''}' 리마인드 문안을 검사 장비 문제로 스팸 검사하지 못해 자동 예약을 보류했습니다. 제안 상세에서 검사하거나 그대로 승인해 주세요.`
+          ? `'${op.name || ''}' 리마인드 문안의 스팸 검사를 마치지 못해 자동 예약을 보류했습니다. 제안 상세에서 검사하거나 그대로 승인해 주세요.`
           : `'${op.name || ''}' 리마인드 문안이 스팸 검증을 통과하지 못해 자동 예약을 보류했습니다. 문안 수정 후 승인해 주세요.`);
       }
     }

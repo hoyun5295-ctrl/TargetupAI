@@ -17,7 +17,7 @@
  */
 
 import { Request, Response, Router } from 'express';
-import { resolveShortUrl, isManagerLinkUrl } from '../utils/short-url';
+import { resolveShortUrl, isManagerLinkUrl, inflowRedirectUrl } from '../utils/short-url';
 import { trackEvent } from '../utils/cdp-events';
 import { recordVariantClickConversion } from '../utils/bandit-optimizer';
 import { detectKoreanEcommerce, isMobileUserAgent, isLinkPreviewAgent } from '../utils/korean-ecommerce-domains';
@@ -45,7 +45,9 @@ router.get('/c/:hash', async (req: Request, res: Response) => {
     // ───────────────────────────────────────────────────────────
     // 즉시 302 redirect (사용자 경험 우선 — 트래킹은 모두 비동기)
     // ───────────────────────────────────────────────────────────
-    res.redirect(302, resolved.fullUrl);
+    // ★ 2026-11-22 C156 — 넘겨주는 주소 = 유입 표식 판정(명단 → 붙여도 되는 꼴 → 기억의 등록 도메인 · 동기 · DB 0 · 아니면 원래 주소 그대로).
+    //   아래의 누름 기록 · 자사몰 인지 · 고객 연결은 원래 주소(resolved.fullUrl)로 지금 그대로다(기록되는 주소가 바뀌지 않는다).
+    res.redirect(302, inflowRedirectUrl(resolved));
 
     // ★2026-08-29 승인 링크(fragment에 승인 토큰)는 **트래킹하지 않는다** (충전 링크 Codex 1R critical 정정
     //   + 대행발송 동일 유출 B-0828-7 종결). 종전에는 full_url 전체(토큰 포함)를 그 회사 cdp_events의

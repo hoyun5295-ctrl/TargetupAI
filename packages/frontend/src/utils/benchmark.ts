@@ -19,6 +19,9 @@ export interface BenchmarkView {
   windowDays: number;
   successRate: BenchCell;
   spamBlock: Array<{ carrier: string } & BenchCell>;
+  /** ★ 2026-11-22 C154 — 통신사별 발송 성공률 · 통신사를 알 수 없는 실패 수(굴리기 단계가 열린 회사에게만 온다 · 없으면 띠를 그리지 않는다) */
+  sendSuccess?: Array<{ carrier: string } & BenchCell>;
+  unknownFail?: number;
 }
 
 export async function fetchBenchmark(): Promise<BenchmarkView | null> {
@@ -29,6 +32,7 @@ export async function fetchBenchmark(): Promise<BenchmarkView | null> {
     hasIndustry: d.hasIndustry === true, ready: d.ready === true,
     minPeers: Number(d.minPeers) || 5, windowDays: Number(d.windowDays) || 30,
     successRate: d.successRate, spamBlock: d.spamBlock,
+    ...(Array.isArray(d.sendSuccess) ? { sendSuccess: d.sendSuccess, unknownFail: Math.max(0, Number(d.unknownFail) || 0) } : {}),
   };
 }
 
@@ -59,7 +63,8 @@ export function successBenchLine(b: BenchmarkView | null): BenchLine | null {
 
 const CARRIER_LABEL: Record<string, string> = { SKT: 'SKT', KT: 'KT', LGU: 'LG U+' };
 
-export interface SpamBenchCell { label: string; value: string; tone?: 'emerald' | 'rose' }
+/** sub = 숫자 아래 덧글(★ C154 발송 성공률 띠 = 업종 평균을 아래 줄에 · 좁은 칸에서 내 값이 잘리지 않게) */
+export interface SpamBenchCell { label: string; value: string; tone?: 'emerald' | 'rose'; sub?: string }
 
 /**
  * (순수) 통신사별 스팸 검사 차단율 띠의 칸 — 내 값이 있는 통신사. 낮을수록 좋다.
@@ -85,4 +90,33 @@ export function spamBenchFootnote(b: BenchmarkView): string {
   return b.spamBlock.some((c) => c.available)
     ? `우리 스팸 검사로 직접 잰 값 · 같은 업종 ${b.minPeers}곳 이상 평균과 견줍니다 · 낮을수록 좋아요`
     : '우리 스팸 검사로 직접 잰 값 · 낮을수록 좋아요';
+}
+
+/**
+ * (순수) ★ 2026-11-22 C154 통신사별 발송 성공률 띠의 칸 — 내 값이 있는 통신사 + 마지막 칸 「통신사 미상 실패」. 높을수록 좋다.
+ *   평균 있음 = 「내 값 · 업종 평균」 + 색 · 평균 없음 = 내 값만 · 내 값이 하나도 없으면 띠 자체가 없다(빈 배열).
+ */
+export function sendBenchCells(b: BenchmarkView | null): SpamBenchCell[] {
+  if (!b || !Array.isArray(b.sendSuccess)) return [];
+  const out: SpamBenchCell[] = [];
+  for (const c of b.sendSuccess) {
+    const label = `${CARRIER_LABEL[c.carrier] || c.carrier} 발송 성공률`;
+    if (c.available) {
+      const same = Math.abs(c.diff * 100) < 0.05;
+      out.push({ label, value: pct(c.mine), sub: `업종 평균 ${pct(c.avg)}`, ...(same ? {} : { tone: c.diff > 0 ? 'emerald' as const : 'rose' as const }) });
+    } else if (c.reason === 'few_peers' && typeof c.mine === 'number' && Number.isFinite(c.mine)) {
+      out.push({ label, value: pct(c.mine) });
+    }
+  }
+  if (out.length === 0) return [];
+  out.push({ label: '통신사 미상 실패', value: `${Math.max(0, Math.round(b.unknownFail || 0)).toLocaleString('ko-KR')}건` });
+  return out;
+}
+
+/** (순수) 발송 성공률 띠 발치 — 미상 실패 · 알뜰폰을 어떻게 셌는지 + 평균이 하나라도 있으면 견준다는 문장 */
+export function sendBenchFootnote(b: BenchmarkView): string {
+  const base = '통신사를 알 수 없는 실패(없는 번호 등)는 성공률에서 뺐어요 · 알뜰폰은 그 망의 통신사에 더했어요';
+  return (b.sendSuccess || []).some((c) => c.available)
+    ? `${base} · 같은 업종 ${b.minPeers}곳 이상 평균과 견줍니다 · 높을수록 좋아요`
+    : `${base} · 높을수록 좋아요`;
 }

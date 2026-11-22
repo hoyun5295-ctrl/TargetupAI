@@ -28,6 +28,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { normOrigin } from './mall-origins';
 import bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { query } from '../config/database';
@@ -304,7 +305,7 @@ export async function requireCdpBrowserOrigin(req: Request, res: Response, next:
 
     // 등록 도메인(Origin) 검증 — 정규화(소문자 + trailing slash 제거 + www. 제거) 후 일치
     // www/non-www는 같은 사이트 — 고객사 접속 도메인이 제각각이라 동일 취급(다른 서브도메인은 그대로 구분)
-    const norm = (o: string) => o.trim().toLowerCase().replace(/\/+$/, '').replace(/^(https?:\/\/)www\./, '$1');
+    const norm = normOrigin;   // ★ 2026-11-22 C156 — 정규화 식은 mall-origins 한 곳(문자 링크 유입 표식과 같은 비교)
     const origin = norm((req.headers['origin'] as string) || '');
     const allowed: string[] = Array.isArray(company.cdp_allowed_origins) ? company.cdp_allowed_origins.map(norm) : [];
     if (!origin || !allowed.includes(origin)) {

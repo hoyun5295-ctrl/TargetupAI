@@ -163,12 +163,32 @@ export async function buildCompanyDocuments(companyId: string): Promise<CompanyD
  * - documents 박은 영역에 citations.enabled: true 박음
  * - 응답 박은 영역에 citations 배열 박음 (각 text block 박음)
  */
+/** 앞 문답 한 쌍(질문 · 그때 받은 답) — 대화 이어 가기의 맥락(★ 2026-11-22 C155) */
+export interface CitedTurn { q: string; a: string }
+
+/** 대화일 때만 시스템 글 끝에 붙는 한 줄 — 앞 답의 숫자가 굳지 않게(숫자의 근거는 매번 지금 받은 document) */
+export const HISTORY_SYSTEM_LINE = '앞 문답은 맥락이다. 숫자와 사실은 이번에 받은 document 에서만 답한다. 앞 답의 숫자가 이번 document 와 다르면 이번 document 가 옳다.';
+
+/**
+ * (순수) 요청의 메시지 줄 — 앞 문답은 글만(질문 = user · 답 = assistant) 차례로 놓고, **document 는 이번 질문 메시지에만** 붙인다.
+ *   앞 문답이 없으면 메시지 하나(document + 이번 질문) = 이 인자가 생기기 전과 글자 그대로 같은 요청.
+ */
+export function citationMessages(documentBlocks: any[], userMessage: string, history: readonly CitedTurn[] = []): Anthropic.MessageParam[] {
+  const past: Anthropic.MessageParam[] = history.flatMap((t): Anthropic.MessageParam[] => [
+    { role: 'user', content: t.q },
+    { role: 'assistant', content: t.a },
+  ]);
+  return [...past, { role: 'user', content: [...documentBlocks, { type: 'text', text: userMessage }] }];
+}
+
 export async function callAIWithCitations(input: {
   model?: 'sonnet' | 'opus';
   system: string;
   userMessage: string;
   documents: CompanyDocument[];
   maxTokens?: number;
+  /** ★ 2026-11-22 C155 — 앞 문답(맥락). 넘기지 않으면 지금과 같은 요청 */
+  history?: readonly CitedTurn[];
 }): Promise<CitedAnswer> {
   if (!ANTHROPIC_API_KEY) {
     throw new Error('ANTHROPIC_API_KEY 환경변수가 설정되지 않았습니다.');
@@ -193,22 +213,15 @@ export async function callAIWithCitations(input: {
     citations: { enabled: true },
   }));
 
+  const history = input.history || [];
   // 모델별 생각 끄기 형태(claudeRequestShape) — 생략하면 adaptive 자동 ON 으로 max_tokens 잠식 · citations 누락
   const citationThinking: any = claudeRequestShape(modelId);
   const response = await (anthropic.messages as any).create({
     model: modelId,
     max_tokens: resolveMaxTokens(input.maxTokens || 2000, modelId),
     ...citationThinking,
-    system: input.system,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          ...documentBlocks,
-          { type: 'text', text: input.userMessage },
-        ],
-      },
-    ],
+    system: history.length > 0 ? `${input.system}\n${HISTORY_SYSTEM_LINE}` : input.system,
+    messages: citationMessages(documentBlocks, input.userMessage, history),
   });
 
   // 응답 박은 영역에서 text + citations 박음

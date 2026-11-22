@@ -16,7 +16,7 @@ import { hasAgencySpellColumn, readAgencySpell, AGENCY_SPELL_AFTER_FIX_SQL } fro
 import { ATTEMPT_LOCK_PREFIX, attemptBlocksChange, attemptIdleSql } from './agency-send-worker';
 import { SEND_CHANGE_LOCK_MINUTES, sendChangeLockFreeSql } from './campaign-validation';
 import {
-  findUnregisteredRequestCallbacks, hasApprovalRequestedColumn, loadSendWindow, logEvent, logCharCleanedTx, unregisteredCallbackError, MAX_CONTENT,
+  findUnregisteredRequestCallbacks, hasApprovalRequestedColumn, loadSendWindow, logEventTx, logCharCleanedTx, unregisteredCallbackError, MAX_CONTENT,
 } from './agency-send-intake';
 import { prepareAgencyCopy, agencyCharNotice } from './agency-send-chars';   // ★ 2026-11-06 C109 D1 대행 글 준비 CT
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
@@ -198,6 +198,13 @@ export async function editAgencyContentTx(input: {
       saved = updated.rows[0];
       // ★ 2026-11-06 C109 D1(구조체크 S10 · Codex 설계 2R #3) — 고친 글 = 줄이 없어도 content_cleaned 를 남긴다(옛 접수 이력이 고친 글에 붙지 않게) · 같은 트랜잭션(실패 = 수정째 롤백) · 명단 이력은 그대로
       await logCharCleanedTx(client, input.requestId, { content: copy.lines, recipients: { count: 0, examples: [] } }, { forceContent: true, contentOnly: true });
+      // ★ 2026-11-22 C158(Codex 구현 1R #2) — 문안 수정 사건 = 검사 장애 대기를 푸는 근거(agency-send-worker unrecoveredSpamErrorSql) → 수정과 같은 트랜잭션.
+      //   옛: 커밋 뒤 · 실패를 삼키는 기록이라, 사건만 못 남으면 수정은 됐는데 앞 장애의 대기가 남았다. 이제 사건이 못 남으면 수정째 되돌린다.
+      await logEventTx(client, input.requestId, 'content_edited', {
+        version: saved?.content_version, via: input.via,
+        ...(input.change.kind === 'spell' ? { spellFixed: input.change.issueIds.length } : {}),
+        ...(input.actor || {}),
+      });
     }
     await client.query('COMMIT'); committed = true;
   } finally {
@@ -207,11 +214,6 @@ export async function editAgencyContentTx(input: {
   }
   // 0행 응답의 지금 행은 연결을 돌려준 뒤 읽는다(시각 변경과 같은 규칙)
   if (stale) return staleFail(input.requestId, input.companyId);
-  await logEvent(input.requestId, 'content_edited', {
-    version: saved?.content_version, via: input.via,
-    ...(input.change.kind === 'spell' ? { spellFixed: input.change.issueIds.length } : {}),
-    ...(input.actor || {}),
-  });
   // ★ 2026-11-13 C130 — 고친 글에도 「무료」 없는 수신거부 줄이 남았으면 알린다(연결을 돌려준 뒤 080 을 읽는다 · 설계서 §2 A4)
   const optOut = agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text })   // ★ C132 이메일 접수 = 표기 없음 = 안내 0
     ? agencyOptOutNotice({ content: body, isAd: true, messageType: saved?.message_type ?? row.message_type, opt080: await loadAgencyOpt080(row.created_by, row.company_id), how: 'edit' })
@@ -320,6 +322,13 @@ export async function rescheduleAgencyRequestTx(input: {
     if (updated.rows.length === 0) {
       stale = true;
     } else {
+      // ★ 2026-11-22 C158(Codex 구현 1R #2) — 다시 진행 사건 = 검사 장애 셈 · 15분 대기를 새로 시작하는 근거(agency-send-worker unrecoveredSpamErrorSql)
+      //   → 시각 변경과 같은 트랜잭션. 옛: 커밋 뒤 · 실패를 삼키는 기록이라, 사건만 못 남으면 다시 진행은 됐는데 셈 · 대기가 남았다(1122 실측의 그 대기).
+      await logEventTx(client, input.requestId, 'rescheduled', {
+        requestedAt: when.at?.toISOString(), status: backTo, keepFinalTest, via: input.via,
+        ...(when.shifted ? { timeShifted: true, originalAt: when.originalAt?.toISOString() } : {}),
+        ...(input.actor || {}),
+      });
       await client.query('COMMIT'); committed = true;
       saved = updated.rows[0];
     }
@@ -330,18 +339,5 @@ export async function rescheduleAgencyRequestTx(input: {
   }
   // 0행 응답의 지금 행은 연결을 돌려준 **뒤에** 읽는다(★ Codex D 2R · 쥔 채 풀에서 또 꺼내면 동시 재진행이 풀을 말린다)
   if (stale) return staleFail(input.requestId, input.companyId);
-  // 커밋 뒤 = 이력만(실패해도 바뀐 시각은 그대로 · logEvent 는 오류를 삼킨다)
-  return afterReschedule(input, saved, backTo, when, keepFinalTest);
-}
-
-async function afterReschedule(
-  input: { requestId: string; via: 'screen' | 'link'; actor?: Record<string, unknown> }, row: any, backTo: AgencySendStatus,
-  when: ReturnType<typeof validateRequestedAt>, keepFinalTest: boolean,
-): Promise<AgencyChangeResult> {
-  await logEvent(input.requestId, 'rescheduled', {
-    requestedAt: when.at?.toISOString(), status: backTo, keepFinalTest, via: input.via,
-    ...(when.shifted ? { timeShifted: true, originalAt: when.originalAt?.toISOString() } : {}),
-    ...(input.actor || {}),
-  });
-  return { ok: true, row, backTo, ...(when.shifted ? { timeShifted: true } : {}) };
+  return { ok: true, row: saved, backTo, ...(when.shifted ? { timeShifted: true } : {}) };
 }

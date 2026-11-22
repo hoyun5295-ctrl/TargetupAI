@@ -203,14 +203,14 @@ describe('K13 화면', () => {
     const page = read(join(FE, 'pages', 'AiAskPage.tsx'));
     expect(page).toContain("const ANSWER_COST = creditCost('ai-operator-explain');");
     const askNow = page.slice(page.indexOf('const askNow = async'), page.indexOf('const go = (s: Step)'));
-    expect(ascending(order(askNow, 'flow.current++;', 'if (!answerAttempt.current || answerAttempt.current.key !== key) answerAttempt.current = { key, token: newAttemptToken() };', 'await aiLineApi.askAnswer(t, answerAttempt.current.token)', 'answerAttempt.current = null;', 'setAnswer({ question: t, data, groups })'))).toBe(true);
+    expect(ascending(order(askNow, 'flow.current++;', 'if (!answerAttempt.current || answerAttempt.current.key !== key) answerAttempt.current = { key, token: newAttemptToken() };', 'await aiLineApi.askAnswer(t, answerAttempt.current.token, askHistoryOf(before))', 'answerAttempt.current = null;', 'setThread([...before, { question: t, data }]);'))).toBe(true);   // ★ C155 — 답 = 문답 줄에 붙는다(앞 문답을 싣는 이어 묻기 포함)
     // ★ Codex 구현 2R — 낸 답은 버리지 않는다: 답 요청의 성공 · 실패 갈래에 흐름 번호 대조가 없고(받은 답은 언제나 보여 준다),
     //   답을 쓰는 동안 흐름을 바꿀 수 있는 자리(입력 칸 · 뒤로 · 시작 줄 · 확인 줄 단추 · 아래 단추)가 전부 잠긴다
     expect(askNow).not.toMatch(/flow\.current\s*[!=]==/);
     expect(page).toContain('disabled={answering} maxLength={2000}');
     // ★ 1122 Harold 「뒤로가면 … 메인으로 나가야」 — 첫 화면의 뒤로 = 대시보드(입구 = 대시보드 카드 · 머리 띠 탭 · 형제 화면의 뒤로와 같은 곳 = AiHubBand)
     // ★ C153 — 문안을 만드는 동안 · 보내는 동안도 잠긴다 · 보낸 뒤의 뒤로 = 처음으로
-    expect(page).toContain("<button type=\"button\" disabled={answering || making || sending || !!unknown} onClick={() => (sent ? restart() : inAnswer ? setAnswer(null) : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");
+    expect(page).toContain("<button type=\"button\" disabled={answering || making || sending || !!unknown || sendLocked} onClick={() => (sent ? restart() : inAnswer ? closeThread() : step === 0 ? navigate('/dashboard') : go((step - 1) as Step))}");   // ★ C155 — 답 화면의 뒤로 = 대화 닫기(문답이 둘 이상이면 확인 창)
     expect(page).not.toContain("navigate('/ai-line')");
     expect(read(join(FE, 'components', 'ai-line', 'AiHubBand.tsx'))).toContain("onClick={() => navigate('/dashboard')}");
     expect(page).toContain('disabled={!ready || reading || answering} onClick={() => begin(k, g)}');
@@ -218,12 +218,15 @@ describe('K13 화면', () => {
     expect(page).toContain('const nextDisabled = step === 0 ? reading || answering || !ready');
     const read1 = page.slice(page.indexOf('const beginFromLine = async'), page.indexOf('const askNow = async'));
     expect(ascending(order(read1, 'const my = flow.current;', 'await aiLineApi.askRead(t)', 'if (flow.current !== my) return;', "if (r.intent === 'ask')"))).toBe(true);
-    expect(page).toMatch(/const begin = \(from: Start[^\n]*\n\s*flow\.current\+\+;/);
+    // ★ C155 구현 Codex 1R — 답을 쓰는 동안에는 시작을 받지 않는다(그 문 뒤에 흐름 번호를 올린다)
+    expect(page.replace(/^\s*\/\/.*\n/gm, '')).toMatch(/const begin = \(from: Start[^\n]*\n\s*if \(answering\) return;\n\s*flow\.current\+\+;/);
     // ★ Codex 구현 1R — 읽는 중에 글을 고치면 옛 글의 읽기 응답은 버린다(화면의 글과 다른 질문으로 답 받기 · 1단계가 열리지 않는다)
     expect(page).toContain('onChange={(e) => { flow.current++; setLineDraft(e.target.value); setLineHint(null); setAsking(null); setAnswerError(null); }}');
     expect(read1).toContain("if (flow.current === my) setLineHint(errText(e, '한 줄을 읽지 못했어요. 다시 눌러 주세요.'));");
     expect(askAnswerAttemptKey(' 질문 ')).toBe(askAnswerAttemptKey('질문'));
-    expect(page).toContain("onClick={() => begin('pick', [t.groupKeys![ri]])}");
+    // ★ C155 — 표 묶음은 조각(components/ai-ask/AskAnswerTables)으로 옮겼다: 화면이 묶음 키를 받아 1단계를 열고, 조각의 단추가 그 줄의 키를 넘긴다
+    expect(page).toContain("onSend={(g) => begin('pick', [g])}");
+    expect(read(join(FE, 'components', 'ai-ask', 'AskAnswerTables.tsx'))).toContain('onClick={() => onSend(keys[ri])}');
     expect(page).not.toMatch(/\{5\}크레딧|5크레딧/);   // 숫자를 손으로 적지 않는다
   });
   it('대시보드 카드 4칸 = 1280px 부터 4열 · 그 아래 2열 · 설명은 두 줄까지(잘림 없음)', () => {

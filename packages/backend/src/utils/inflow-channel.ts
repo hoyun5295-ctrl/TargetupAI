@@ -5,12 +5,15 @@
  * 구매 = 매출 반영된 결제 주문(netPurchaseSql). 구매 하나는 한 경로에만 센다:
  *   ① 같은 session_id 의 방문 시작 ② 없으면 그 고객의 구매 시각 앞 7일 안 가장 늦은 방문 시작 ③ 없으면 「방문 기록 없음」.
  * 줄 = 창 안 방문이 있거나 귀속된 구매가 있는 경로(창 앞 7일 방문에 귀속된 구매는 그 경로 줄 · 방문 0).
- * 알고 두는 한계 = 문자 링크로 들어온 방문은 referrer 가 비어 「직접 방문」 · 웹훅 주문은 세션이 없어 고객 기준 길만 탄다.
+ * ★ 2026-11-22 C156 — 추적 링크가 붙인 표식(short-url INFLOW_MARK)으로 **시작한** 세션 = 「한줄로 메시지 링크」
+ *   (세션의 가장 이른 시각의 페이지뷰들 가운데 표식이 든 줄이 있을 때 · 그 뒤 시각의 표식은 갈래를 바꾸지 않는다 · 여섯 갈래 식은 그대로).
+ * 알고 두는 한계 = 본문에 주소를 그대로 적어 보낸 문자의 방문은 referrer 가 비어 「직접 방문」 · 웹훅 주문은 세션이 없어 고객 기준 길만 탄다.
  * 주소 · referrer = SDK auto-capture/pageview.ts 가 싣고 cdp-events.ts normalizeBrowserEvent 가 properties 에 남긴 칸(url · referrer).
  */
 import { netPurchaseSql } from './cdp-order-revenue';
 import { mallAmountSql } from './two-door-purchase';
 import { boundedRead, kstDayAgoSql, kstDayStartSql } from './product-signal';
+import { INFLOW_MARK } from './short-url';
 
 export const INFLOW_WINDOW_DAYS = 30;
 export const INFLOW_LOOKBACK_DAYS = 7;
@@ -18,6 +21,16 @@ export const INFLOW_ROWS_MAX = 12;
 export const INFLOW_NO_VISIT = '방문 기록 없음';
 export const INFLOW_REST = '그 밖';
 const TAG_MAX = 40;
+/** ★ C156 추적 링크의 표식으로 시작한 방문의 줄 이름 */
+export const INFLOW_OWN_LABEL = '한줄로 메시지 링크';
+
+/**
+ * (SQL) 이 주소에 우리 표식 칸이 있는가 — 조각(#…)을 떼고 **첫 `?` 뒤의 쿼리만** 꺼내 그 안에서 칸으로 찾는다.
+ *   경로 · 조각 · 다른 칸의 값 안에 든 같은 글자는 잡지 않는다. 글자 = 붙이는 쪽과 같은 상수(INFLOW_MARK).
+ */
+export function inflowOwnSql(url: string): string {
+  return `COALESCE(substring(split_part(${url}, '#', 1) from '[?](.*)$') ~ '(^|&)${INFLOW_MARK}(&|$)', false)`;
+}
 
 const hostSql = (v: string) => `lower(COALESCE(substring(${v} from '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#:]+)'), ''))`;
 
@@ -53,13 +66,16 @@ export const INFLOW_SQL = `
        AND e.occurred_at >= w.since - make_interval(days => $3::int) AND e.occurred_at <= NOW()
   ),
   sess AS (
-    SELECT s.session_id, s.at, s.customer_id, ${inflowChannelSql('s.url', 's.ref')} AS channel
+    SELECT s.session_id, s.at, s.customer_id,
+           (CASE WHEN s.own THEN '${INFLOW_OWN_LABEL}' ELSE ${inflowChannelSql('s.url', 's.ref')} END) AS channel
       FROM (
         SELECT p.session_id, MIN(p.occurred_at) AS at,
                (array_agg(p.url ORDER BY p.occurred_at))[1] AS url,
                (array_agg(p.ref ORDER BY p.occurred_at))[1] AS ref,
-               (array_agg(p.customer_id ORDER BY p.occurred_at) FILTER (WHERE p.customer_id IS NOT NULL))[1] AS customer_id
-          FROM pv p GROUP BY p.session_id
+               (array_agg(p.customer_id ORDER BY p.occurred_at) FILTER (WHERE p.customer_id IS NOT NULL))[1] AS customer_id,
+               COALESCE(BOOL_OR(p.own) FILTER (WHERE p.occurred_at = p.first_at), false) AS own
+          FROM (SELECT v.*, MIN(v.occurred_at) OVER (PARTITION BY v.session_id) AS first_at, ${inflowOwnSql('v.url')} AS own FROM pv v) p
+         GROUP BY p.session_id
       ) s
   ),
   buys AS (

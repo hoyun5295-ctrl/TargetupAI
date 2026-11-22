@@ -10,6 +10,8 @@ export interface ZoneStatCell {
   label: string;
   value: ReactNode;
   tone?: 'emerald' | 'amber' | 'rose';
+  /** ★ 2026-11-22 C154 — 숫자 아래 덧글(선택 · 줄바꿈 허용). 견줄 값을 숫자 옆에 이어 적으면 좁은 칸에서 숫자가 잘린다 → 아래 줄로 내린다 */
+  sub?: string;
 }
 const TONE = { emerald: 'text-emerald-700', amber: 'text-amber-700', rose: 'text-rose-700' } as const;
 // 칸 수 → 열 수. 7~8칸은 한 줄에 두면 금액이 잘린다(★0930 캡처 "₩4,310,…") → 4칸 2줄.
@@ -37,6 +39,7 @@ export default function ZoneStatStrip({ title, icon: Icon, cells, footnote }: {
           <div key={c.label} className={`bg-white px-5 py-3.5 min-w-0 ${i === cells.length - 1 ? LAST_SPAN[cells.length] || '' : ''}`}>
             <div className="text-[12.5px] text-slate-500 truncate">{c.label}</div>
             <div className={`text-[20px] font-bold tabular-nums mt-0.5 truncate ${c.tone ? TONE[c.tone] : 'text-slate-900'}`}>{c.value}</div>
+            {c.sub && <div className="mt-0.5 text-[12px] tabular-nums text-slate-500 break-keep">{c.sub}</div>}
           </div>
         ))}
       </div>
