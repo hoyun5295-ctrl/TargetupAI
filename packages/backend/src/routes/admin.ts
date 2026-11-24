@@ -93,9 +93,10 @@ import { isYmd } from '../utils/plan-term-calc';   // ★ C142 날짜 모양 CT
 const AGENCY_LEDGER_LIMIT = 200;   // ★ 2026-11-13 C130 최근 반려(회신 본문 포함)
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(직원 상세)
 import { CALLBACK_ASSIGNEES_SQL, describeCallbackUsage } from '../utils/callback-filter';   // ★ 2026-11-13 C132 발신번호 사용 범위 칸(발송 판정과 같은 함수)
+import { lookupCallbackNumber, parseLookupPhone, parseLookupPage } from '../utils/callback-lookup';   // ★ 2026-11-23 특부가 갱신 1-1 ④ 발신번호 조회
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordUserAccountDeleted, recordUnsubscribeDeleted } from '../utils/change-audit';
-import { recordAuditLog, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, isNoticeAckViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
+import { recordAuditLog, recordAuditLogStrict, isAuditLogViewer, isAiTrainingViewer, isGeoHitsViewer, isHelpQuestionViewer, isLineGroupAdmin, isSettlementOverviewViewer, isBestLayoutViewer, isPrecheckUsageViewer, isFeatureInterestViewer, isIdentityStatusViewer, isIntroLeadsViewer, isWatchLogViewer, isNoticeAckViewer, hiddenAccessOwnerIds, diffFields } from '../utils/audit-log';
 import { loadNoticeAck } from '../utils/customer-notice'; // ★ 2026-10-29 공지 확인 현황(ceo · suran)
 import { loadWatchIps, loadWatchIpEvents } from '../utils/watch-alert'; // ★ 2026-10-07 감시 기록(ceo 전용)
 import { loadIntroLeads, parseIntroLeadsQuery } from '../utils/intro-leads'; // ★ 2026-10-07 소개 방문 · 시연 요청(ceo · suran)
@@ -2585,6 +2586,30 @@ router.post('/campaigns/:id/cancel', authenticate, requireSuperAdmin, async (req
   }
 });
 // ===== 발신번호 관리 API =====
+
+// ★ 2026-11-23 발신번호 조회(특부가 갱신 1-1 ④ 「발신번호로 계정 ID, 이용자명, 발신일 조회」) — 읽기만 · 조회마다 감사 기록(개인정보 접속기록)
+//   POST = 조회할 번호가 주소(접속 기록)에 남지 않게 본문으로 받는다.
+router.post('/callback-lookup', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  const phone = parseLookupPhone(req.body?.phone);
+  if (!phone) return res.status(400).json({ success: false, error: '발신번호를 숫자 8 ~ 12자리로 입력해 주세요.' });
+  const page = parseLookupPage(req.body?.page);
+  try {
+    const result = await lookupCallbackNumber(phone, page);
+    // 기록이 남지 않으면 결과를 내보내지 않는다(Strict = 실패를 던짐 · Codex 1R)
+    await recordAuditLogStrict({
+      actorUserId: req.user?.userId,
+      action: 'callback_lookup',
+      targetType: 'callback_number',
+      details: { phone, page, registrations: result.registrations.length, sends: result.total },
+      req,
+    });
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('callback_numbers · callback_number_assignments ALTER'));
+    console.error('발신번호 조회 실패:', error);
+    res.status(500).json({ success: false, error: '발신번호 조회 실패' });
+  }
+});
 
 // 발신번호 목록 조회
 router.get('/callback-numbers', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {

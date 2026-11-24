@@ -475,7 +475,7 @@ const [messageDetailContent, setMessageDetailContent] = useState<{ name: string;
   });
 
   // 발신번호 등록 신청 관리
-  const [callbackSubTab, setCallbackSubTab] = useState<'manage' | 'registrations' | 'managers'>('manage');
+  const [callbackSubTab, setCallbackSubTab] = useState<'manage' | 'registrations' | 'managers' | 'lookup'>('manage');
   const [senderRegistrations, setSenderRegistrations] = useState<any[]>([]);
   const [senderRegFilter, setSenderRegFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [senderRegLoading, setSenderRegLoading] = useState(false);

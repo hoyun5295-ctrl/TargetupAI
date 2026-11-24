@@ -5,6 +5,7 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { formatDate } from '../../../utils/formatDate';
 import TablePagination from '../../common/TablePagination';
+import CallbackLookupPanel from '../CallbackLookupPanel';   // ★ 2026-11-23 특부가 갱신 1-1 ④ 발신번호 조회
 import type { ModalState } from '../admin-types';
 import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 행 = 상세 창
 
@@ -14,7 +15,7 @@ export interface CallbacksTabProps {
   callbackCompanyPages: Record<string, number>;
   callbackNumbers: any[];
   callbackSearch: string;
-  callbackSubTab: 'manage' | 'registrations' | 'managers';
+  callbackSubTab: 'manage' | 'registrations' | 'managers' | 'lookup';
   closeModal: () => void;
   downloadSenderDoc: (filename: string, originalName?: string) => Promise<void>;
   expandedCallbackCompanies: Set<string>;
@@ -33,7 +34,7 @@ export interface CallbacksTabProps {
   setCallbackCompanyListPage: Dispatch<SetStateAction<number>>;
   setCallbackCompanyPages: Dispatch<SetStateAction<Record<string, number>>>;
   setCallbackSearch: Dispatch<SetStateAction<string>>;
-  setCallbackSubTab: Dispatch<SetStateAction<'manage' | 'registrations' | 'managers'>>;
+  setCallbackSubTab: Dispatch<SetStateAction<'manage' | 'registrations' | 'managers' | 'lookup'>>;
   setEditingCallback: Dispatch<any>;
   setExpandedCallbackCompanies: Dispatch<SetStateAction<Set<string>>>;
   setMgrFilter: Dispatch<SetStateAction<'pending' | 'approved' | 'rejected' | 'all'>>;
@@ -228,7 +229,20 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setCallbackSubTab('lookup')}
+                className={`whitespace-nowrap px-6 py-3 text-[13px] font-medium border-b-2 ${
+                  callbackSubTab === 'lookup'
+                    ? 'border-emerald-500 text-emerald-700'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                발신번호 조회
+              </button>
             </div>
+
+            {/* 서브탭: 발신번호 조회(★ 2026-11-23 · 번호 → 등록 고객사 · 배정 계정 · 보낸 계정 · 발신일) */}
+            {callbackSubTab === 'lookup' && <CallbackLookupPanel />}
 
             {/* 서브탭: 발신번호 관리 */}
             {callbackSubTab === 'manage' && (
