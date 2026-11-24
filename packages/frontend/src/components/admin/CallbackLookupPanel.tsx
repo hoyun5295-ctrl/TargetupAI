@@ -28,14 +28,16 @@ const SCOPE_LABEL: Record<string, string> = {
 interface LookupResult {
   phone: string;
   registrations: Array<{ id: string; companyName: string | null; phone: string; label: string | null; createdAt: string | null; usageScope: string; assignees: Array<{ loginId: string; name: string | null }> }>;
-  sends: Array<{ campaignId: string; sentAt: string | null; scheduledAt: string | null; createdAt: string | null; status: string | null; companyName: string | null; loginId: string | null; userName: string | null; campaignName: string | null; sendType: string; targetCount: number | null; successCount: number | null; failCount: number | null }>;
+  sends: Array<{ campaignId: string; sentAt: string | null; scheduledAt: string | null; createdAt: string | null; status: string | null; companyName: string | null; loginId: string | null; userName: string | null; otherCompany: boolean; otherCompanyName: string | null; campaignName: string | null; sendType: string; targetCount: number | null; successCount: number | null; failCount: number | null }>;
   total: number;
   page: number;
   pageSize: number;
 }
 
-const th = 'px-4 py-2 text-left text-xs font-medium text-gray-500';
-const td = 'px-4 py-2.5 text-[13px] text-gray-800';
+// ★1124 칸 여백 px-3 · 캠페인명 200px · 고객사 160px · 다른 소속은 계정 ID 아래 둘째 줄 = 관리자 화면 폭(1,188px)에 실패 칸까지 들어간다
+//   (실측 표 1,246 → 1,163px · 예약일도 연도가 있는 꼴 · Codex 1124 1R)
+const th = 'px-3 py-2 text-left text-xs font-medium text-gray-500';
+const td = 'px-3 py-2.5 text-[13px] text-gray-800';
 const n = (v: number | null) => (v === null || v === undefined ? '-' : v.toLocaleString('ko-KR'));
 
 export default function CallbackLookupPanel() {
@@ -176,10 +178,17 @@ export default function CallbackLookupPanel() {
                         <td className={td}>{s.sentAt ? formatDateTime(s.sentAt) : <span className="text-gray-400">-</span>}</td>
                         <td className={td}>{s.scheduledAt ? formatDateTime(s.scheduledAt) : <span className="text-gray-400">-</span>}</td>
                         <td className={td}>{s.status ? (STATUS_LABEL[s.status] || s.status) : '-'}</td>
-                        <td className={td}>{s.companyName || '-'}</td>
-                        <td className={td}>{s.loginId || '-'}</td>
+                        <td className={`${td} max-w-[160px] truncate`} title={s.companyName || ''}>{s.companyName || '-'}</td>
+                        <td className={td}>
+                          {s.loginId || '-'}
+                          {s.otherCompany && (
+                            <div className="max-w-[140px] truncate text-[11px] text-amber-700" title={`소속: ${s.otherCompanyName || '없음'}`}>
+                              소속: {s.otherCompanyName || '없음'}
+                            </div>
+                          )}
+                        </td>
                         <td className={td}>{s.userName || '-'}</td>
-                        <td className={`${td} max-w-[240px] truncate`} title={s.campaignName || ''}>{s.campaignName || '-'}</td>
+                        <td className={`${td} max-w-[200px] truncate`} title={s.campaignName || ''}>{s.campaignName || '-'}</td>
                         <td className={td}>{s.sendType}</td>
                         <td className={`${td} text-right`}>{n(s.targetCount)}</td>
                         <td className={`${td} text-right`}>{n(s.successCount)}</td>
