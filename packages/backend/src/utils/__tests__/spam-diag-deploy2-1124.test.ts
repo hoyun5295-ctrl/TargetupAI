@@ -238,6 +238,44 @@ describe('★ 1124 회사 스위치(슈퍼관리자 · companies.spam_diag_enabl
     expect(body).toContain("if (typeof enabled !== 'boolean') return res.status(400)");
     expect(body).toContain("migrationPendingBody('companies.spam_diag_enabled ALTER')");
   });
+  it('★ 1124 확인 문자 1분 · Codex 2R — 검사 창 다시 읽기 = 응답이 지금 검사(liveIdRef)의 것일 때만 적용(「다시 검사」 뒤 옛 응답 무시)', () => {
+    const modal = fe('components/SpamFilterTestModal.tsx');
+    const poll = modal.slice(modal.indexOf('const pollResults = async (id: string) => {'));
+    const body = poll.slice(0, poll.indexOf('\n  };\n'));
+    const json = body.indexOf('const data = await res.json();');
+    const guard = body.indexOf('if (!res.ok || liveIdRef.current !== id || seq <= appliedSeqRef.current) return;');   // ★ Codex 7R — 실패 응답은 순번을 올리지 않는다
+    // ★ Codex 6R — 응답 순번: 보낼 때 순번을 받고(fetch 앞) · 적용한 가장 늦은 순번 이하의 응답은 버리고 · 적용할 때 그 순번을 적는다(상태 쓰기 앞)
+    expect(body.indexOf('const seq = ++pollSeqRef.current;')).toBeGreaterThan(-1);
+    expect(body.indexOf('const seq = ++pollSeqRef.current;')).toBeLessThan(body.indexOf('await fetch('));
+    expect(body.indexOf('appliedSeqRef.current = seq;')).toBeGreaterThan(guard);
+    expect(body.indexOf('appliedSeqRef.current = seq;')).toBeLessThan(body.indexOf('setResults('));
+    expect(json).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(json);
+    for (const apply of ['setResults(', 'setHints(', 'setFinalBy(', 'setStatus(', 'startSlowPoll()']) expect(body.indexOf(apply)).toBeGreaterThan(guard);
+    // ★ Codex 3R 구조 — 15초 다시 읽기 타이머 = startSlowPoll 한 곳 · 틱마다 지금 검사(liveIdRef)를 읽는다(옛 id 를 붙잡지 않음) · 카드 onSent = 지금 검사가 아니면 아무것도 안 함
+    expect((modal.match(/slowRef\.current = setInterval\(/g) || []).length).toBe(1);
+    // ★ Codex 4R — 지금 검사가 없으면 걸지 않음 · 틱에서 없으면 스스로 끔 · 닫힘(언마운트) = 지금 검사를 먼저 비우고 타이머 끔(두 갈래)
+    expect(modal).toContain('if (!mountedRef.current || slowRef.current || !liveIdRef.current) return;');
+    expect(modal).toMatch(/slowRef\.current = setInterval\(\(\) => \{\s*const cur = liveIdRef\.current;\s*if \(!cur\) \{ if \(slowRef\.current\) \{ clearInterval\(slowRef\.current\); slowRef\.current = null; \} return; \}\s*void pollResults\(cur\);/);
+    expect((modal.match(/return \(\) => \{ mountedRef\.current = false; liveIdRef\.current = null; clearTimers\(\); \};/g) || []).length).toBe(2);
+    expect(modal).not.toMatch(/return \(\) => clearTimers\(\);/);
+    // ★ Codex 5R — 타이머를 거는 세 자리(카운트다운 · 빠른 읽기 · 15초 읽기) = 창이 열려 있을 때만(닫힌 뒤 늦게 끝난 요청이 되살리지 않음)
+    expect((modal.match(/= setInterval\(/g) || []).length).toBe(3);
+    for (const [fn, timer] of [['const startServerBasedCountdown = useCallback(() => {', 'countdownRef.current = setInterval('], ['const startPolling = useCallback((id: string) => {', 'pollRef.current = setInterval('], ['const startSlowPoll = () => {', 'slowRef.current = setInterval(']]) {
+      const at = modal.indexOf(fn);
+      const seg = modal.slice(at, modal.indexOf(timer, at));
+      expect(at, fn).toBeGreaterThan(-1);
+      expect(seg, fn).toMatch(/if \(!mountedRef\.current[^)]*\) return;/);
+    }
+    expect(modal).toContain('    mountedRef.current = true;\n    if (journeyStep)');
+    const onSent = modal.slice(modal.indexOf('<SpamBlockHintCard testId={testId}'));
+    const sentBody = onSent.slice(0, onSent.indexOf('}} />'));
+    expect(sentBody.indexOf('if (liveIdRef.current !== testId) return;')).toBeGreaterThan(-1);
+    expect(sentBody.indexOf('if (liveIdRef.current !== testId) return;')).toBeLessThan(sentBody.indexOf('void pollResults(testId);'));
+    expect(sentBody).toContain('startSlowPoll();');
+    expect(modal).toContain('const resetForRetest = useCallback(() => {');
+    expect(modal.slice(modal.indexOf('const resetForRetest'))).toMatch(/^[\s\S]{0,600}liveIdRef\.current = null;/);
+  });
   it('화면 = 회사 상세 기본 탭에 스위치(값은 컴포넌트가 직접 GET · PATCH) · 꺼진 회사 카드 = 다시 확인 칸째 숨김', () => {
     expect(fe('components/admin/company-detail/tabs/CompanyBasicTab.tsx')).toContain('<SpamDiagSwitch companyId={editCompany.id} showAlert={showAlert} />');
     const sw = fe('components/admin/company-detail/SpamDiagSwitch.tsx');

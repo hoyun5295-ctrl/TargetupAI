@@ -115,6 +115,11 @@ export default function SpamFilterTestModal({
   // ★ 2026-11-01 B1-4 — 확인 중 행이 있는 닫힌 검사 = 서버가 준 finalBy 까지 15초마다 다시 읽는다
   const slowRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveIdRef = useRef<string | null>(null);
+  // ★ 2026-11-24 창이 열려 있는가 — 닫힌 뒤 늦게 끝난 요청(열 때의 진행 중 검사 읽기 · 검사 시작)이 타이머를 다시 걸지 않게(Codex 5R · 2R ~ 4R 와 같은 부류)
+  const mountedRef = useRef(false);
+  // ★ 2026-11-24 다시 읽기 응답 순서 — 보낸 순번 · 적용한 가장 늦은 순번. 늦게 닿은 옛 응답(먼저 보낸 요청)은 새 응답을 덮지 못한다(Codex 6R · 같은 부류의 뿌리 = 응답은 순서 없이 닿는다)
+  const pollSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
   const [finalBy, setFinalBy] = useState<number | null>(null);
   // ★ 2026-11-24 막혔을 수 있는 부분(D1 · D2) — 서버 hints 그대로 · 확인 판이 결과를 기다리면 15초 읽기를 이어 간다
   const [hints, setHints] = useState<SpamBlockHints | null>(null);
@@ -140,6 +145,7 @@ export default function SpamFilterTestModal({
 
   // 서버 시간 기반 카운트다운 시작
   const startServerBasedCountdown = useCallback(() => {
+    if (!mountedRef.current) return;   // 닫힌 창 = 타이머 0
     // 즉시 한번 계산
     setCountdown(calcRemaining());
 
@@ -157,6 +163,7 @@ export default function SpamFilterTestModal({
 
   // 폴링 시작
   const startPolling = useCallback((id: string) => {
+    if (!mountedRef.current) return;   // 닫힌 창 = 지금 검사 · 타이머 0
     liveIdRef.current = id;
     pollRef.current = setInterval(() => pollResults(id), 2000);
   }, []);
@@ -202,10 +209,12 @@ export default function SpamFilterTestModal({
 
   // 모달 열릴 때 active 테스트 확인 + ★2026-09-25 체험/청구 안내용 현황 · ★ C103 F1 여정 칸 모드 = 그 칸 검사 읽기만
   useEffect(() => {
-    if (journeyStep) { void readJourney().finally(() => setLoading(false)); return () => clearTimers(); }
+    // ★ 2026-11-24 닫힘 = 지금 검사를 먼저 비우고 타이머를 끈다(닫힌 뒤 늦게 닿은 응답 · 카드 콜백이 다시 읽기를 되살리지 않게 · Codex 4R)
+    mountedRef.current = true;
+    if (journeyStep) { void readJourney().finally(() => setLoading(false)); return () => { mountedRef.current = false; liveIdRef.current = null; clearTimers(); }; }
     checkActiveTest();
     fetchSendCheckStatus().then((st) => { if (st) setCheckStatus(st); });
-    return () => clearTimers();
+    return () => { mountedRef.current = false; liveIdRef.current = null; clearTimers(); };
   }, []);
 
   // ESC 닫기(한글 조합 중 ESC는 무시)
@@ -368,10 +377,27 @@ export default function SpamFilterTestModal({
     } catch (err) { setErrorKind('generic'); setError('네트워크 오류가 발생했습니다.'); setStatus('ready'); }
   };
 
+  // ★ 2026-11-24 15초 다시 읽기 = 한 곳에서만 건다 · 타이머는 검사 id 를 붙잡지 않고 매 틱 지금 검사(liveIdRef)를 읽는다
+  //   (옛 검사의 늦은 콜백이 건 타이머도 지금 검사를 읽는다 · 「다시 검사」 = clearTimers 가 끄고 liveIdRef 를 비운다 · Codex 2R · 3R 같은 부류 = 늦은 콜백의 옛 id)
+  //   지금 검사가 없으면(닫힘 · 「다시 검사」 뒤) 걸지 않고, 틱에서 지금 검사가 없으면 스스로 꺼진다(Codex 4R)
+  const startSlowPoll = () => {
+    if (!mountedRef.current || slowRef.current || !liveIdRef.current) return;
+    slowRef.current = setInterval(() => {
+      const cur = liveIdRef.current;
+      if (!cur) { if (slowRef.current) { clearInterval(slowRef.current); slowRef.current = null; } return; }
+      void pollResults(cur);
+    }, 15000);
+  };
+
   const pollResults = async (id: string) => {
+    const seq = ++pollSeqRef.current;
     try {
       const res = await fetch(`/api/spam-filter/tests/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
+      // ★ 2026-11-24 지금 이 창의 검사가 아닌 응답은 버린다(「다시 검사」 뒤 늦게 닿은 옛 검사 응답이 초기화 · 새 검사 타이머를 덮지 않게 · Codex 2R)
+      //   같은 검사라도 이미 적용한 응답보다 먼저 보낸 요청의 응답은 버린다(Codex 6R) · 실패 응답은 순번 · 화면 모두 건드리지 않는다(Codex 7R)
+      if (!res.ok || liveIdRef.current !== id || seq <= appliedSeqRef.current) return;
+      appliedSeqRef.current = seq;
       if (data.results) setResults(data.results);
       setHints(data.hints ?? null);
       if (data.test?.created_at) serverTestCreatedRef.current = new Date(data.test.created_at).getTime();
@@ -383,7 +409,7 @@ export default function SpamFilterTestModal({
           // 확인 중 = 빠른 읽기 · 남은 시간만 멈추고 15초 읽기로 바꾼다(창을 닫아도 서버가 확정한다)
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
           if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
-          if (!slowRef.current) slowRef.current = setInterval(() => pollResults(id), 15000);
+          startSlowPoll();
         } else {
           clearTimers();
         }
@@ -645,9 +671,10 @@ export default function SpamFilterTestModal({
 
               {verdict === 'block' && hints && testId ? (
                 <SpamBlockHintCard testId={testId} token={token} hints={hints} onSent={() => {
-                  // 판을 보냈다 = 결과가 날 때까지 15초 읽기(창을 닫아도 확인은 서버가 이어 간다)
+                  // 판을 보냈다 = 결과가 날 때까지 15초 읽기(창을 닫아도 확인은 서버가 이어 간다) · 그 사이 「다시 검사」로 바뀐 창이면 아무것도 안 함(Codex 3R)
+                  if (liveIdRef.current !== testId) return;
                   void pollResults(testId);
-                  if (!slowRef.current) slowRef.current = setInterval(() => pollResults(testId), 15000);
+                  startSlowPoll();
                 }} />
               ) : verdict === 'block' && (
                 <div className="border border-dashed border-rose-200 rounded-xl px-3 py-2.5 text-[12.5px] text-stone-700 leading-relaxed bg-white break-keep">

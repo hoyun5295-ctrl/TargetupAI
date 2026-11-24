@@ -220,8 +220,14 @@ export const SPAM_LATE_REPORT_MINUTES = 10;
  *   받아 주는 시간(분). 늦음 원천이 앱 보고가 아니라 통신사 지연이다(1121 LG U+ 실측 = 닫힌 뒤 14분 20초에 전달 · ×2 여유).
  */
 export const SPAM_AUTO_LATE_REPORT_MINUTES = 30;
-/** ★ C150 — 자동 검사 확인 중 줄의 확인 문자 시작(닫힌 뒤 · 분). 30일 실측 = 닫힌 뒤 2 ~ 10분에 앱 보고로 풀린 확인 중 0(옛 = 10분 기다림) */
-export const SPAM_AUTO_PROBE_AFTER_MINUTES = 1;
+/**
+ * 확인 중 줄의 확인 문자 시작(닫힌 뒤 · 분) — 사람 검사 · 자동 검사 모두.
+ *   ★ C150 = 자동 검사만 1분(30일 실측 = 닫힌 뒤 2 ~ 10분에 앱 보고로 풀린 확인 중 0 · 옛 = 10분 기다림) · 사람 검사는 10분 그대로였다.
+ *   ★ 2026-11-24 Harold 「1분으로 바꿔」 — 사람 검사도 1분. 1124 실측(11-01 뒤 처음 확인 중이던 줄) = 사람 27행 전부 막힘 확정 · 늦은 앱 보고로 통과 0 ·
+ *     자동 22행 = 막힘 21 · 통과 1(닫힌 직후 0.0분 보고) → 10분 기다림이 고친 줄 0. 일찍 보내도 원 문자의 늦은 보고는 늦은 보고 창
+ *     (SPAM_LATE_REPORT_MINUTES 10분 · spamRowLateMinutesSql) 안이면 차단 줄을 통과로 고친다(무변경).
+ */
+export const SPAM_PROBE_AFTER_MINUTES = 1;
 /**
  * ★ C150 §10 — 늦은 보고가 그 결과 줄을 아직 고칠 수 있는 때(닫힌 뒤 · 분) SQL 조각. 고칠 수 있는 때 · lateOpen 이 이 조각 하나를 쓴다.
  *   자동 검사 + 시간 초과 줄 = SPAM_AUTO_LATE_REPORT_MINUTES · 그 밖(사람 검사 · 확인 중 · 차단 · 장애 줄) = SPAM_LATE_REPORT_MINUTES.
@@ -231,9 +237,9 @@ export const SPAM_AUTO_PROBE_AFTER_MINUTES = 1;
 export function spamRowLateMinutesSql(test: string, result: string): string {
   return `(CASE WHEN ${result} = '${SPAM_RESULT.TIMEOUT}' AND NOT (${notAutoSpamSourceSql(`${test}.source`)}) THEN ${SPAM_AUTO_LATE_REPORT_MINUTES} ELSE ${SPAM_LATE_REPORT_MINUTES} END)`;
 }
-/** ★ C150 — 확인 중 줄에 확인 문자를 보내기 시작하는 때(닫힌 뒤 · 분) SQL 조각 · 자동 검사 = SPAM_AUTO_PROBE_AFTER_MINUTES · 사람 검사 = SPAM_LATE_REPORT_MINUTES */
-export function spamProbeAfterMinutesSql(test: string): string {
-  return `(CASE WHEN ${notAutoSpamSourceSql(`${test}.source`)} THEN ${SPAM_LATE_REPORT_MINUTES} ELSE ${SPAM_AUTO_PROBE_AFTER_MINUTES} END)`;
+/** ★ C150 — 확인 중 줄에 확인 문자를 보내기 시작하는 때(닫힌 뒤 · 분) SQL 조각 · ★ 1124 출처와 무관하게 SPAM_PROBE_AFTER_MINUTES(부르는 자리 · 계약 시험을 그대로 두려고 모양 유지) */
+export function spamProbeAfterMinutesSql(_test: string): string {
+  return `(${SPAM_PROBE_AFTER_MINUTES})`;
 }
 
 /**

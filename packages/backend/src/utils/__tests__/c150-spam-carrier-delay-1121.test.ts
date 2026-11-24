@@ -12,7 +12,7 @@ import { join } from 'path';
 import * as ts from 'typescript';
 import { stripComments } from './helpers/producer-scan';
 import {
-  SPAM_LATE_REPORT_MINUTES, SPAM_AUTO_LATE_REPORT_MINUTES, SPAM_AUTO_PROBE_AFTER_MINUTES, spamRowLateMinutesSql, spamProbeAfterMinutesSql,
+  SPAM_LATE_REPORT_MINUTES, SPAM_AUTO_LATE_REPORT_MINUTES, SPAM_PROBE_AFTER_MINUTES, spamRowLateMinutesSql, spamProbeAfterMinutesSql,
 } from '../spam-test-queue';
 import { PROBE_DEADLINE_MINUTES, PROBE_RECLAIM_MINUTES, spamMeasureWindow } from '../spam-probe';
 
@@ -69,9 +69,9 @@ describe('K1 · K2 (R103) 늦은 보고 창 = 조각 하나 · 자동 시간 초
 });
 
 describe('K3 미가입 0 — 사람 검사 값 그대로 · 고객 문구 상한', () => {
-  it('사람 검사 = 늦은 보고 10분 · 확인 문자 시작 10분 · 기한 5분 · 다시 보내기 2분(옛 값) · 자동 확인 문자 시작 = 1분', () => {
-    expect([SPAM_LATE_REPORT_MINUTES, PROBE_DEADLINE_MINUTES, PROBE_RECLAIM_MINUTES, SPAM_AUTO_PROBE_AFTER_MINUTES]).toEqual([10, 5, 2, 1]);
-    expect(spamProbeAfterMinutesSql('t')).toBe(`(CASE WHEN COALESCE(t.source, '') NOT IN ('auto_ai', 'auto_ai_free', 'spam_diag') THEN 10 ELSE 1 END)`);
+  it('사람 검사 = 늦은 보고 10분 · 기한 5분 · 다시 보내기 2분(옛 값) · 확인 문자 시작 = 사람 · 자동 모두 1분(★ 1124 Harold 「1분으로 바꿔」 · 옛 사람 10분)', () => {
+    expect([SPAM_LATE_REPORT_MINUTES, PROBE_DEADLINE_MINUTES, PROBE_RECLAIM_MINUTES, SPAM_PROBE_AFTER_MINUTES]).toEqual([10, 5, 2, 1]);
+    expect(spamProbeAfterMinutesSql('t')).toBe('(1)');
   });
   it('고객 화면 · 서버 문구 「길어도 N분」 = 화면 다시 읽기 마감(spamTestFinalBy = 10 + 5 + 2 + 2분) 이상', () => {
     const finalByMin = SPAM_LATE_REPORT_MINUTES + PROBE_DEADLINE_MINUTES + PROBE_RECLAIM_MINUTES + 2;

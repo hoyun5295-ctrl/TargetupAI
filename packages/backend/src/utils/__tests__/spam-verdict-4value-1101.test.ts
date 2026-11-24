@@ -95,6 +95,13 @@ describe('화면이 읽기를 멈추는 때', () => {
     expect(spamTestFinalBy(at, [{ result: 'pass' }])).toBeNull();
     expect(spamTestFinalBy(null, [{ result: 'unconfirmed' }])).toBeNull();
   });
+  it('★ 1124 확인 중 없이 막힘 행 = 닫힌 때 + 늦은 보고 창 10분(그 안에 원 문자 보고가 오면 통과로 고쳐진다 · 확인 문자 시작 1분 · Codex 1R)', () => {
+    const at = '2026-11-01T03:00:00.000Z';
+    expect(spamTestFinalBy(at, [{ result: 'pass' }, { result: 'blocked' }])).toBe('2026-11-01T03:10:00.000Z');
+    expect(spamTestFinalBy(at, [{ result: 'blocked' }, { result: 'unconfirmed' }])).toBe('2026-11-01T03:19:00.000Z');   // 확인 중이 있으면 그 마감
+    expect(spamTestFinalBy(at, [{ result: 'error' }, { result: 'pass' }])).toBeNull();
+    expect(spamTestFinalBy(null, [{ result: 'blocked' }])).toBeNull();
+  });
 });
 
 // ★ 2026-11-01 Codex 구현 1R(A #3 · #4 · #6 · #7) — 보류가 실패 · 정지 · 다시 쓰기로 새지 않는다

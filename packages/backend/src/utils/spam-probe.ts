@@ -34,14 +34,20 @@ const PROBE_CYCLE_MS = 30_000;
 const LOG = '[spam-probe]';
 
 /**
- * 화면이 다시 읽기를 멈추는 때(순수) — 확인 중 행이 있는 닫힌 검사만: 닫힌 때 + 늦은 보고 창 + 확인 문자 기한 + 다시 보내기 + 주기 여유 2분.
- *   확인 중 행이 없거나 아직 안 닫혔으면 null.
+ * 화면이 다시 읽기를 멈추는 때(순수) — 확인 중 행이 있는 닫힌 검사: 닫힌 때 + 늦은 보고 창 + 확인 문자 기한 + 다시 보내기 + 주기 여유 2분.
+ *   ★ 1124 확인 중 행 없이 막힘 행이 있으면: 닫힌 때 + 늦은 보고 창(그 안이면 통과로 고쳐질 수 있다). 둘 다 없거나 아직 안 닫혔으면 null.
  */
 export function spamTestFinalBy(completedAt: string | Date | null | undefined, rows: ReadonlyArray<{ result?: string | null }>): string | null {
-  if (!completedAt || !rows.some((r) => r.result === SPAM_RESULT.UNCONFIRMED)) return null;
+  if (!completedAt) return null;
   const at = new Date(completedAt).getTime();
   if (!Number.isFinite(at)) return null;
-  return new Date(at + (SPAM_LATE_REPORT_MINUTES + PROBE_DEADLINE_MINUTES + PROBE_RECLAIM_MINUTES + 2) * 60_000).toISOString();
+  if (rows.some((r) => r.result === SPAM_RESULT.UNCONFIRMED)) {
+    return new Date(at + (SPAM_LATE_REPORT_MINUTES + PROBE_DEADLINE_MINUTES + PROBE_RECLAIM_MINUTES + 2) * 60_000).toISOString();
+  }
+  // ★ 2026-11-24 확인 문자 시작 1분(SPAM_PROBE_AFTER_MINUTES · 사람 검사 포함) — 막힘이 늦은 보고 창(닫힌 뒤 10분) 안에서 정해질 수 있어,
+  //   그 창 안에 원 문자 보고가 닿으면 서버가 차단 줄을 통과로 고친다(spamRowLateMinutesSql · 막힘 줄 = 10분) → 열린 창은 창 끝까지 다시 읽는다(Codex 1R)
+  if (rows.some((r) => r.result === SPAM_RESULT.BLOCKED)) return new Date(at + SPAM_LATE_REPORT_MINUTES * 60_000).toISOString();
+  return null;
 }
 
 /** 확인 문자 본문 — 고정 무해 글 + nonce(해시가 확인 문자마다 유일하다) */

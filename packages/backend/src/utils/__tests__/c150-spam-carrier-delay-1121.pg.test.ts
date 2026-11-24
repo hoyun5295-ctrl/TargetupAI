@@ -1,7 +1,7 @@
 // replaces: none
 /**
  * C150 스팸 검사 통신사 늦은 전달 판정 + 재검사 대기 — 실 PostgreSQL 판(★ 2026-11-21 · 설계서 docs/2026-11-21-c150-spam-carrier-delay-retest-design.md §5)
- *   K-PG1 고칠 수 있는 때(§10 · 그 단말 줄) · K-PG2 lateOpen(줄 최댓값) · K-PG3 확인 문자 시작(자동 1분 · 사람 10분) · K-PG4 보류 묶음 읽기 · 보류 감시.
+ *   K-PG1 고칠 수 있는 때(§10 · 그 단말 줄) · K-PG2 lateOpen(줄 최댓값) · K-PG3 확인 문자 시작(자동 · 사람 모두 1분 · ★ 1124 옛 사람 10분) · K-PG4 보류 묶음 읽기 · 보류 감시.
  *   새 칸 · 새 표 0. 바깥(테스트 문자 적재 · 운영 경보)만 시험이 쥔다.
  */
 import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
@@ -106,8 +106,8 @@ describe('K-PG2 lateOpen = 그 검사 줄 칸의 최댓값', () => {
   });
 });
 
-describe('K-PG3 확인 문자 시작 = 자동 닫힌 뒤 1분 · 사람 10분', () => {
-  it('자동 확인 중 2분 = 보냄 · 사람 2분 = 안 보냄 · 사람 11분 = 보냄', async () => {
+describe('K-PG3 확인 문자 시작 = 자동 · 사람 모두 닫힌 뒤 1분(★ 1124 Harold 「1분으로 바꿔」 · 옛 사람 10분)', () => {
+  it('자동 확인 중 2분 = 보냄 · 사람 2분 = 보냄 · 사람 11분 = 보냄 · 닫힌 지 1분 안 = 자동 · 사람 모두 아직', async () => {
     const auto2 = await closedTest({ source: 'auto_ai_free', minutesAgo: 2, rows: [{ carrier: 'LGU', phone: LG, result: 'unconfirmed' }] });
     const man2 = await closedTest({ source: 'manual', minutesAgo: 2, rows: [{ carrier: 'LGU', phone: LG, result: 'unconfirmed' }] });
     const man11 = await closedTest({ source: 'manual', minutesAgo: 11, rows: [{ carrier: 'LGU', phone: LG, result: 'unconfirmed' }] });
@@ -115,11 +115,13 @@ describe('K-PG3 확인 문자 시작 = 자동 닫힌 뒤 1분 · 사람 10분', 
     const probed = async (testId: string) => Number((await pool.query(
       `SELECT COUNT(*)::int AS n FROM spam_test_probes p JOIN spam_filter_test_results r ON r.id = p.result_id WHERE r.test_id = $1`, [testId])).rows[0].n);
     expect(await probed(auto2.id)).toBe(1);
-    expect(await probed(man2.id)).toBe(0);
+    expect(await probed(man2.id)).toBe(1);
     expect(await probed(man11.id)).toBe(1);
     const auto0 = await closedTest({ source: 'auto_ai', minutesAgo: 0, rows: [{ carrier: 'LGU', phone: LG, result: 'unconfirmed' }] });
+    const man0 = await closedTest({ source: 'manual', minutesAgo: 0, rows: [{ carrier: 'LGU', phone: LG, result: 'unconfirmed' }] });
     await runSpamProbeCycle();
     expect(await probed(auto0.id)).toBe(0);   // 닫힌 지 1분 안 = 아직
+    expect(await probed(man0.id)).toBe(0);
   });
 });
 
