@@ -23,6 +23,7 @@ import { syntheticDataCompanyIds } from './demo-data';
 import { resolveCompanyIndustry } from './copy-prompt-composer';
 import { v3StageScope } from './v3-stage';
 import { CARRIER_NET_RATES_SQL, CARRIER_WINDOW_DAYS, CARRIER_MIN_SENT, rollupLiveCompanyIds, readCarrierSendRates } from './send-ledger-rollup';
+import { spamCustomerTestSql } from './spam-trial';   // ★ 1124 확인 판(일부러 막힐 만한 글) 제외 — 통신사 차단율 지표를 흐린다
 
 export const BENCH_MIN_PEERS = 5;
 export const BENCH_WINDOW_DAYS = 30;
@@ -63,6 +64,7 @@ export const BENCH_SPAM_SQL = `
     JOIN companies co ON co.id = t.company_id
    WHERE t.status = 'completed' AND t.created_at > NOW() - ($1::int * INTERVAL '1 day')
      AND r.result IN ('pass', 'blocked') AND r.carrier = ANY($2::text[])
+     AND ${spamCustomerTestSql('t')}
      AND co.status = 'active' AND NULLIF(TRIM(co.industry_code), '') IS NOT NULL
    GROUP BY t.company_id, ${INDUSTRY_SQL}, r.carrier`;
 

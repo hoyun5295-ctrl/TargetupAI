@@ -2242,8 +2242,9 @@ kind별 payload 키:
 | message_content_lms | text (nullable) | LMS 테스트 메시지 본문 |
 | message_hash | varchar(64) (nullable) | 메시지 해시 (앱 매칭용) |
 | spam_check_number | varchar(20) (nullable) | 스팸 체크 번호 |
-| source | varchar(20) DEFAULT 'manual' | 발원지: manual / auto_campaign(코드는 auto_ai) / **trial**(★2026-09-25 미가입 무료 체험 · 회사당 3회 · 차감 0 · 청구·비용 집계 제외 = `spam-trial.ts spamBillableTestSql`) · ⚠ CHECK 제약 유무 미확인(배포 전 `pg_constraint` 확인) |
-| variant_id | varchar(2) (nullable) | A/B 테스트 변형 ID (A/B) |
+| source | varchar(20) DEFAULT 'manual' | 발원지: manual / auto_campaign(코드는 auto_ai) / **trial**(★2026-09-25 미가입 무료 체험 · 회사당 3회 · 차감 0 · 청구·비용 집계 제외 = `spam-trial.ts spamBillableTestSql`) · **auto_ai_free** · **spam_diag**(★2026-11-24 확인 판 · 막힌 검사에서 의심 부분을 뺀 글을 막힌 통신사 단말에만 · 청구 제외 · 자동 목록 · 고객 목록 · 건수 제외 = `spamCustomerTestSql` · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md) · ★1124 `pg_constraint` 실측 = 이 표 CHECK 제약 0 |
+| variant_id | varchar(10) (nullable) | A/B 테스트 변형 ID (A/B) · 확인 판은 통신사 머리 글자 + 판 번호(`K1` · `L2` 등) · ★1124 information_schema 실측 = varchar(10)(옛 문서의 varchar(2) 는 틀렸음) |
+| diag_of | uuid (nullable) | ★1124 **추가 예정(DDL 대기 · 설계서 §9 DDL-1)** — 확인 판의 부모 검사 id(FK 없음) · 일반 검사는 NULL · 유일 부분 인덱스 `uq_spam_filter_tests_diag (diag_of, variant_id) WHERE diag_of IS NOT NULL`(DDL-2 · 1124 실측 = 아직 없음) |
 | batch_id | uuid (nullable) | 배치 그룹화 ID (자동 테스트용) |
 | subject | text (nullable) | LMS 제목 (2026-06-13 information_schema 실측 확인) |
 | first_recipient | jsonb (nullable) | 첫 수신자 정보 (2026-06-13 information_schema 실측 확인) |

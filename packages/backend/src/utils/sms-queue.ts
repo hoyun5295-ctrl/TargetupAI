@@ -176,8 +176,18 @@ export async function insertTestSmsQueue(
   msgType: string,
   testId: string,
   subject: string,
-  extra?: { companyId?: string; billId?: string; mmsImages?: string[] }
+  extra?: { companyId?: string; billId?: string; mmsImages?: string[] },
+  // ★ 2026-11-24 MySQL 절대 기한(epoch ms · 확인 판 확인 문자 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2-1) — 있으면 INSERT 문장만
+  //   상한 있는 연결(withBoundedMysql · 남은 시간 · 넘기면 연결을 버리고 던짐 · 남은 시간이 없으면 연결을 빌리지 않고 던짐)로 · 준비(PG 조회 · 판정)는 연결 밖.
+  //   없으면 지금 그대로 공용 풀(mysqlQuery).
+  opts?: { mysqlDeadline?: number },
 ): Promise<void> {
+  const deadline = opts?.mysqlDeadline;
+  const exec = deadline == null ? mysqlQuery : (sql: string, params: any[]) => {
+    const left = deadline - Date.now();
+    if (left <= 0) throw new Error('MySQL 적재 상한을 넘겨 적재하지 않음(연결 빌리기 전)');
+    return withBoundedMysql(left, (run) => run(sql, params), undefined, deadline);   // 절대 기한 하나로 연결 받기 · 제출 직전 판정(★ Codex 구현 13R)
+  };
   // ★ 2026-10-09 시연 회사 최후 방어 — 회사를 아는 분기만(인자 없는 분기 = 시스템 경로)
   await guardDemoLeak('insertTestSmsQueue', extra?.companyId);
   const testTables = await getTestSmsTables();
@@ -194,7 +204,7 @@ export async function insertTestSmsQueue(
   }
   if (extra?.companyId || extra?.billId || extra?.mmsImages) {
     // campaigns.ts test-send 호환 (app_etc2=companyId, bill_id=userId, file_name)
-    await mysqlQuery(
+    await exec(
       `INSERT INTO ${table} (
         dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1, app_etc2, bill_id, file_name1, file_name2, file_name3
       ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?, ?, ?, ?, ?, ?)`,
@@ -203,7 +213,7 @@ export async function insertTestSmsQueue(
        extra.mmsImages?.[0] || '', extra.mmsImages?.[1] || '', extra.mmsImages?.[2] || '']
     );
   } else {
-    await mysqlQuery(
+    await exec(
       `INSERT INTO ${table} (
         dest_no, call_back, msg_contents, msg_type, title_str, sendreq_time, status_code, rsv1, app_etc1
       ) VALUES (?, ?, ?, ?, ?, NOW(), 100, '1', ?)`,

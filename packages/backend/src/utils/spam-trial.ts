@@ -25,8 +25,16 @@ export const SPAM_TRIAL_SOURCE = 'trial';
  * 적재할 때 차감 건너뜀 플래그 하나로 정한다(spam-test-queue enqueueSpamTest) — 선불·후불이 갈라질 수 없다. 칸 = varchar(20).
  */
 export const SPAM_AUTO_FREE_SOURCE = 'auto_ai_free';
+/**
+ * ★ 2026-11-24 확인 판(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6 · §10-1) — 막힌 검사에서 의심 부분을 뺀 글을
+ *   막힌 통신사 단말에만 보내 보는 검사 행. 고객 무료(청구 제외) · 자동 검사 취급(수동 창 복원 제외 · 자동 시간 값) ·
+ *   고객에게 보이는 목록 · 건수에서는 spamCustomerTestSql 로 뺀다. 칸 = varchar(20).
+ */
+export const SPAM_DIAG_SOURCE = 'spam_diag';
 /** 청구·비용 집계에서 빼는 표시값 — 아래 SQL 조각과 함수가 이 목록 하나를 쓴다. */
-const SPAM_BILL_EXEMPT_SOURCES = [SPAM_TRIAL_SOURCE, SPAM_AUTO_FREE_SOURCE] as const;
+const SPAM_BILL_EXEMPT_SOURCES = [SPAM_TRIAL_SOURCE, SPAM_AUTO_FREE_SOURCE, SPAM_DIAG_SOURCE] as const;
+/** 자동 검사(큐 워커의 자동 판정) 표시값 — 함수판(isAutoSpamSource) · SQL판(notAutoSpamSourceSql)이 이 목록 하나를 쓴다. */
+const SPAM_AUTO_SOURCES = ['auto_ai', SPAM_AUTO_FREE_SOURCE, SPAM_DIAG_SOURCE] as const;
 
 /**
  * 청구·비용 집계에 넣어도 되는 검사인가 — SQL 조각(WHERE에 AND로 붙인다).
@@ -41,9 +49,9 @@ export function isSpamTestBillable(source: string | null | undefined): boolean {
   return !(SPAM_BILL_EXEMPT_SOURCES as readonly string[]).includes(source || 'manual');
 }
 
-/** 자동 검사(큐 워커의 자동 판정)인가 — 유료('auto_ai')·무료 둘 다. */
+/** 자동 검사(큐 워커의 자동 판정)인가 — 유료('auto_ai')·무료 · 확인 판(★1124). */
 export function isAutoSpamSource(source: string | null | undefined): boolean {
-  return source === 'auto_ai' || source === SPAM_AUTO_FREE_SOURCE;
+  return (SPAM_AUTO_SOURCES as readonly string[]).includes(source || '');
 }
 
 /**
@@ -51,7 +59,15 @@ export function isAutoSpamSource(source: string | null | undefined): boolean {
  *   AI 한줄로 자동 검사를 자기 검사로 집어 가지 않게(설계서 docs/2026-10-18-ai-line-design.md §7).
  */
 export function notAutoSpamSourceSql(col = 'source'): string {
-  return `COALESCE(${col}, '') NOT IN ('auto_ai', '${SPAM_AUTO_FREE_SOURCE}')`;
+  return `COALESCE(${col}, '') NOT IN (${SPAM_AUTO_SOURCES.map((s) => `'${s}'`).join(', ')})`;
+}
+
+/**
+ * ★ 2026-11-24 고객에게 보이는 목록 · 건수 · 이어 보기에서 확인 판을 빼는 SQL 조각(설계서 §10-1 「확인 판 제외」 자리 전부).
+ *   확인 판은 한 통신사 결과 행만 가진 우리 쪽 진단이라 고객이 건 검사로 세거나 이어 보면 안 된다. 표시값 없는 옛 행은 남는다.
+ */
+export function spamCustomerTestSql(alias = 't'): string {
+  return `COALESCE(${alias}.source, '') <> '${SPAM_DIAG_SOURCE}'`;
 }
 
 /**

@@ -116,7 +116,7 @@ import { classifyHelpDbError, helpQuestionKind, helpReasonLabel, HELP_REQUEST_PH
 import { runPredictiveBatchNow } from '../utils/predictive-worker';
 import { sendTypeLabel } from '../utils/send-type-axis';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
-import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
+import { spamBillableTestSql, isSpamTestBillable, spamCustomerTestSql } from '../utils/spam-trial';   // ★ 1124 확인 판 제외(상세 · 판정 집계 · 차단 문안 표본)
 import { swrCache } from '../utils/swr-cache';
 import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP, QUERY_PAGE_MAX } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 import { standardFieldColumn } from '../utils/standard-field-map';   // ★ 2026-11-05 C103 F6 칸 데이터 유무 = 표준 필드 칸 CT
@@ -3433,7 +3433,7 @@ router.get('/stats/send/detail', authenticate, requireSuperAdmin, async (req: Re
                t.created_at as sent_at
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
-        WHERE t.company_id = $1 ${sfDateCond}
+        WHERE t.company_id = $1 ${sfDateCond} AND ${spamCustomerTestSql('t')}
         ORDER BY t.created_at DESC LIMIT 50
       `, [companyId, dateVal]);
 
@@ -5845,6 +5845,7 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
          FROM spam_filter_tests t
          JOIN spam_filter_test_results r ON r.test_id = t.id
          WHERE COALESCE(NULLIF(t.message_content_lms, ''), NULLIF(t.message_content_sms, '')) IS NOT NULL
+           AND ${spamCustomerTestSql('t')}
          GROUP BY t.id
        ) x`,
       ),
@@ -5857,6 +5858,7 @@ router.get('/ai-training/overview', authenticate, requireSuperAdmin, async (req:
          FROM spam_filter_tests t
          JOIN spam_filter_test_results r ON r.test_id = t.id
          WHERE COALESCE(NULLIF(t.message_content_lms,''), NULLIF(t.message_content_sms,'')) IS NOT NULL
+           AND ${spamCustomerTestSql('t')}
          GROUP BY t.id, msg
          HAVING bool_or(r.result = 'blocked')
        ) x

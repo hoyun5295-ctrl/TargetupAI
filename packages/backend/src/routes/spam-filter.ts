@@ -20,7 +20,7 @@ import { resolveOwnerScope } from '../utils/owner-scope';
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
   SPAM_TRIAL_LIMIT, SPAM_TRIAL_LOCK_SQL, SPAM_TRIAL_SOURCE, countSpamTrialsInTx, judgeSpamVerdict, readSpamTrialStatus, withExpectedSpamDevices,
-  notAutoSpamSourceSql,
+  notAutoSpamSourceSql, spamCustomerTestSql,
 } from '../utils/spam-trial';
 
 import { spamAppTokenVerdict } from '../utils/spam-app-auth';
@@ -730,6 +730,7 @@ router.post('/recent-check', authenticate, async (req: Request, res: Response) =
           AND t.created_at > NOW() - INTERVAL '24 hours'
           AND regexp_replace(COALESCE(${isLms ? 't.message_content_lms' : 't.message_content_sms'}, ''), '[[:space:]]+', '', 'g') = $3
           AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
+          AND ${spamCustomerTestSql('t')}   -- ★ 1124 확인 판(한 통신사 결과만)은 「검사함」으로 읽지 않는다
         ORDER BY t.created_at DESC
         LIMIT 1`,
       [companyId, cb, norm, sentType],
@@ -786,11 +787,12 @@ router.get('/tests', authenticate, async (req: Request, res: Response) => {
     const baseParams = mineOnly ? [companyId, limit, offset, userId] : [companyId, limit, offset];
     const countParams = mineOnly ? [companyId, userId] : [companyId];
     const countWhere = mineOnly
-      ? 'WHERE company_id = $1 AND user_id = $2'
-      : 'WHERE company_id = $1';
+      ? 'WHERE t.company_id = $1 AND t.user_id = $2'
+      : 'WHERE t.company_id = $1';
 
+    // ★ 1124 확인 판(우리 쪽 진단 · 사람이 건 검사가 아님)은 목록 · 개수에서 뺀다(spamCustomerTestSql · 설계서 §10-1)
     const countResult = await query(
-      `SELECT COUNT(*) FROM spam_filter_tests ${countWhere}`,
+      `SELECT COUNT(*) FROM spam_filter_tests t ${countWhere} AND ${spamCustomerTestSql('t')}`,
       countParams
     );
 
@@ -804,7 +806,7 @@ router.get('/tests', authenticate, async (req: Request, res: Response) => {
                  FROM spam_filter_test_results r WHERE r.test_id = t.id) as results
        FROM spam_filter_tests t
        JOIN users u ON u.id = t.user_id
-       ${whereClause}
+       ${whereClause} AND ${spamCustomerTestSql('t')}
        ORDER BY t.created_at DESC
        LIMIT $2 OFFSET $3`,
       baseParams

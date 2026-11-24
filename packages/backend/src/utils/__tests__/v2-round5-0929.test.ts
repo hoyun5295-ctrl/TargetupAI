@@ -217,7 +217,8 @@ describe('②-2 스팸 결과 판정 쓰기 = 아직 판정 안 된 행만(Codex
     const q = codeOnly(read('utils/spam-test-queue.ts'));
     // ★ 2026-11-01 B1-4 — 여섯 자리 = 판정 쓰기 함수 decideSpamResult(안에서 CT 문장 · 칸이 있으면 처음 판정 · 확정 시각을 같은 조건으로)
     expect((route.match(/decideSpamResult\(/g) || []).length).toBe(4);
-    expect((q.match(/await decideSpamResult\(/g) || []).length).toBe(2);
+    // ★ 2026-11-24 +1 = 확인 판 관문 거부 닫기(sendDiagTestRow · 잠금 트랜잭션 연결로 같은 CT 를 run 인자로 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2-1)
+    expect((q.match(/await decideSpamResult\(/g) || []).length).toBe(3);
     expect(route).not.toMatch(/SPAM_RESULT_DECIDE_SQL/);
     expect(q).toMatch(/WHERE id = \$2 AND received = false AND result IS NULL`\s*: SPAM_RESULT_DECIDE_SQL,/);
     for (const s of [route, q]) expect(s).not.toMatch(/UPDATE spam_filter_test_results SET result = \$[12] WHERE id = \$[12]`/);

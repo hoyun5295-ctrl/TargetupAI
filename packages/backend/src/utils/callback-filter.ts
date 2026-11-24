@@ -247,7 +247,14 @@ export async function describeCallbackUsage(
  * 회사의 등록 발신번호 집합 (sender_numbers 활성 ∪ callback_numbers, assignment_scope 반영).
  * 정규화(하이픈 제거) 전화번호 Set. filterByIndividualCallback(리스트)·isCallbackRegistered(단건)이 공유.
  */
-export async function getRegisteredCallbackSet(companyId: string, userId?: string): Promise<Set<string>> {
+export async function getRegisteredCallbackSet(
+  companyId: string, userId?: string,
+  opts: { strict?: boolean; run?: (sql: string, params?: any[]) => Promise<{ rows: any[] }> } = {},
+): Promise<Set<string>> {
+  // ★ 2026-11-24 strict(확인 판 권한 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2 5) — 배정 칸 확인이 실패하면
+  //   회사 전체 목록으로 내려가지 않고 던진다(배정 안 된 번호가 섞이면 안 되는 자리 전용). 기본값 = 지금 동작 그대로.
+  //   run = 확인 판 관문이 잠금을 쥔 트랜잭션 연결로 읽을 때(같은 풀의 다른 연결을 기다리지 않게) · 기본 = 전역 query.
+  const q = opts.run ?? query;
   // D91: userId가 있으면 assignment_scope 필터 적용 — 'all' 또는 본인 배정된 'assigned'만 허용
   // ★ 2026-10-19 B-1005-5② — 저장 원문을 그대로 읽는다(옛: 하이픈만 빼서 괄호 · 점 · 공백 표기로 등록한 정상 번호가 입력 쪽 숫자와 안 맞아 미등록으로 거절됐다).
   let registeredSql = `
@@ -259,7 +266,7 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
   if (userId) {
     // assignment_scope 컬럼 존재 시에만 필터 적용 (하위호환)
     try {
-      await query(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
+      await q(`SELECT assignment_scope FROM callback_numbers LIMIT 0`);
       registeredSql = `
         SELECT phone_number as phone FROM sender_numbers WHERE company_id = $1 AND is_active = true
         UNION SELECT cn.phone as phone FROM callback_numbers cn
@@ -273,12 +280,13 @@ export async function getRegisteredCallbackSet(companyId: string, userId?: strin
           )
       `;
       registeredParams.push(userId);
-    } catch {
-      // assignment_scope 컬럼 미존재 — 기존 쿼리 유지
+    } catch (err) {
+      // assignment_scope 컬럼 미존재 — 기존 쿼리 유지(strict 면 던진다)
+      if (opts.strict) throw err;
     }
   }
 
-  const registeredResult = await query(registeredSql, registeredParams);
+  const registeredResult = await q(registeredSql, registeredParams);
   // ★1005 발신번호 규격(세칙) — 규격 이전에 등록된 위반 번호는 등록 번호로 치지 않는다(Codex 1R high · 개별 회신번호가 차감 · 적재까지 가던 구멍).
   //   이 집합을 쓰는 길목(개별 회신번호 필터 · 단건 판정 · 대행 · 스팸 검사)이 전부 여기서 같이 막힌다.
   //   ★ 1019 B-1005-5② — 규격은 저장 원문으로 보고(허용 문자 밖 = 위반 · 종전과 같다) 집합 값은 숫자만(normalizePhone 과 같은 표기).

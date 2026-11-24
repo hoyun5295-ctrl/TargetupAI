@@ -87,7 +87,7 @@ import { isDirectPipelineSendType } from '../utils/send-type-axis';
 // ★ 2026-09-12 발신 인증(전송자격인증 3.5) — 판정·응답 모두 CT가 소유한다
 import { checkSenderAuthGate, senderAuthRejection } from '../utils/sender-auth';
 // ★2026-09-25 무료 체험 스팸 검사 표시(비용 0)
-import { SPAM_TRIAL_SOURCE, spamBillableTestSql } from '../utils/spam-trial';
+import { SPAM_TRIAL_SOURCE, spamBillableTestSql, spamCustomerTestSql } from '../utils/spam-trial';   // ★ 1124 확인 판 제외(검사 집계 · 목록)
 import { parsePageParams, parseQueryInt, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 // ★ toKoreaTimeStr → utils/sms-queue.ts로 이동 (import 사용)
@@ -1742,7 +1742,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
         SUM(CASE WHEN ${spamBilledResultSql('r')} AND ${spamBillableTestSql('t')} AND COALESCE(r.message_type, 'SMS') <> 'SMS' THEN 1 ELSE 0 END) as billed_lms
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
-      WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere}
+      WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere} AND ${spamCustomerTestSql('t')}
     `, spamParams);
 
     const sf = spamAgg.rows[0];
@@ -1766,7 +1766,7 @@ router.get('/test-stats', async (req: Request, res: Response) => {
       FROM spam_filter_test_results r
       JOIN spam_filter_tests t ON r.test_id = t.id
       LEFT JOIN users u ON t.user_id = u.id
-      WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere}
+      WHERE t.company_id = $1 ${spamDateWhere} ${spamUserWhere} AND ${spamCustomerTestSql('t')}
       ORDER BY t.created_at DESC
       LIMIT 100
     `, spamParams);

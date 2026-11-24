@@ -229,7 +229,7 @@ describe('5. 스팸 무료 체험 · 청구 제외', () => {
     expect(SPAM_TRIAL_LIMIT).toBe(3);
     expect(SPAM_TRIAL_SOURCE).toBe('trial');
     // ★ 2026-09-26 F49: 무료 자동 검사(auto_ai_free)도 함께 뺀다
-    expect(spamBillableTestSql('t')).toBe("COALESCE(t.source, 'manual') NOT IN ('trial', 'auto_ai_free')");
+    expect(spamBillableTestSql('t')).toBe("COALESCE(t.source, 'manual') NOT IN ('trial', 'auto_ai_free', 'spam_diag')");
   });
   const route = read('routes/spam-filter.ts');
   it('체험은 차감하지 않는다 · 잠금 안에서 세고 넣는다 · 한 통도 못 나가면 되돌린다', () => {

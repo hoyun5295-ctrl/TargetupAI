@@ -26,7 +26,7 @@ describe('청구 제외 판정 CT', () => {
   });
 
   it('SQL 조각은 체험과 무료 자동 검사를 함께 뺀다(표시값 없는 옛 행 = manual = 청구)', () => {
-    expect(spamBillableTestSql('t')).toBe("COALESCE(t.source, 'manual') NOT IN ('trial', 'auto_ai_free')");
+    expect(spamBillableTestSql('t')).toBe("COALESCE(t.source, 'manual') NOT IN ('trial', 'auto_ai_free', 'spam_diag')");
   });
 
   it('함수 판정이 SQL 조각과 같은 집합', () => {
@@ -53,7 +53,7 @@ describe('적재·워커·비용 표시 배선', () => {
   });
 
   it('큐 워커는 CT로 자동 검사를 판정한다', () => {
-    expect(queue).toContain('await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id);');
+    expect(queue).toContain('await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id, test.source);');   // ★ 1124 출처를 넘긴다(확인 판 catch)
   });
 
   it('테스트 결과 목록의 비용은 청구 제외 판정 CT를 따른다(체험 표시는 그대로)', () => {

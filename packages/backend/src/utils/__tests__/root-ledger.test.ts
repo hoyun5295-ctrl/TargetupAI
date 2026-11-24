@@ -1784,6 +1784,7 @@ const PLAIN_ERROR_OK: Record<string, string> = {
   "utils/sms-queue.ts|MMS는 이미지 첨부가 필수입니다 (inse": "내부 불변식(코드가 넘기는 값 · 사람이 고칠 입력 아님)",
   "utils/sms-queue.ts|적재 단위 …행 > 상한 …(호출부 오류)": "내부 불변식(묶음 발송이 단위를 상한 안으로 자른다 · ★1102)",
   "utils/sms-queue.ts|연결 번호 없음": "적재 단위 내부 실패(문장을 보내기 전 = 안 들어감 확정 · 재시도 · ★1102)",
+  "utils/sms-queue.ts|MySQL 적재 상한을 넘겨 적재하지 않음(": "내부 적재 상한(★1124 확인 판 확인 문자 · 문장을 내기 전 = 안 들어감 확정 · 부르는 쪽 로그만 · 고객 노출 0)",
   "utils/journey-step-campaign.ts|단계 캠페인을 정하지 못했다 journey=": "묶음 발송 내부 불변식(★1102)",
   "utils/spam-test-queue.ts|환불 미완(… …건)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",
   "utils/spam-test-queue.ts|환불 미완(…)": "내부 처리 실패(로그 · 경보 · 고객에게는 라우트 안내 문장)",

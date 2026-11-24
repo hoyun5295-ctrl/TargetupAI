@@ -12,7 +12,7 @@ import { getRegisteredCallbackSet } from '../utils/callback-filter';
 import { buildAdMessage, buildAdSubject, getOpt080Number, prepareFieldMappings, replaceVariables } from '../utils/messageUtils';
 import { enqueueSpamTest, computeMessageHash, loadDefaultSpamFirstRecipient, spamCheckFor, type SpamCheckKey } from '../utils/spam-test-queue';
 import { eucKrByteLength, smsRowOverLimit, smsTooLongText } from '../utils/message-byte';
-import { isAutoSpamSource } from '../utils/spam-trial';
+import { isAutoSpamSource, spamCustomerTestSql } from '../utils/spam-trial';
 import { resolveHubStoreScope } from '../utils/store-scope';
 import { SPAM_FILTER_OPEN_SQL } from '../utils/plan-guard';
 import type { AiLineViewer } from './ai-line';
@@ -135,8 +135,9 @@ export async function startLineSpamTest(v: AiLineViewer, input: {
   if (reuse) return reuse;
 
   // 사용자당 줄에 선 자동 검사 1건(끝나면 화면이 다음 카드를 보낸다)
+  //   ★ 1124 확인 판(우리 쪽 진단 · 자동 목록에 들지만 사람의 줄이 아니다)은 점유로 치지 않는다(설계서 §10-1)
   const busy = await query(
-    `SELECT id, source FROM spam_filter_tests WHERE user_id = $1 AND status IN ('queued', 'active') ORDER BY created_at ASC`,
+    `SELECT id, source FROM spam_filter_tests t WHERE t.user_id = $1 AND t.status IN ('queued', 'active') AND ${spamCustomerTestSql('t')} ORDER BY t.created_at ASC`,
     [userId],
   );
   const busyAuto = busy.rows.find((r: any) => isAutoSpamSource(r.source));

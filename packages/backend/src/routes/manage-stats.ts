@@ -25,7 +25,7 @@ import { queryPayAgentStats, queryPayAgentStoreBreakdown, validateStatsDateRange
 import { buildManageStatsXlsx, type StatsExportWebRow } from '../utils/manage-stats-export';
 import { XLSX_CONTENT_TYPE, xlsxContentDisposition } from '../utils/xlsx-writer';
 // ★2026-09-25 무료 체험 스팸 검사는 비용 집계에서 뺀다(조건 한 벌 = spam-trial CT)
-import { spamBillableTestSql, isSpamTestBillable } from '../utils/spam-trial';
+import { spamBillableTestSql, isSpamTestBillable, spamCustomerTestSql } from '../utils/spam-trial';   // ★ 1124 확인 판 제외(상세 목록)
 import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
 const router = Router();
@@ -323,7 +323,7 @@ router.get('/send/detail', async (req: Request, res: Response) => {
         SELECT r.phone, r.carrier, r.message_type, r.result, t.source, t.created_at as sent_at
         FROM spam_filter_test_results r
         JOIN spam_filter_tests t ON r.test_id = t.id
-        WHERE t.company_id = $1 ${sfDateCond}
+        WHERE t.company_id = $1 ${sfDateCond} AND ${spamCustomerTestSql('t')}
         ORDER BY t.created_at DESC LIMIT ${TEST_DETAIL_LIMIT + 1}
       `, [targetCompanyId, dateVal]);
 

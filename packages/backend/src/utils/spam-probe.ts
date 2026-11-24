@@ -11,16 +11,23 @@
  * 멱등 · 상한(R8): claim = 행당 하나(result_id UNIQUE) · 발송 전 죽은 claim 은 2분 뒤 한 번만 다시(attempts ≤ 2) · 그 뒤 expired → error.
  */
 import { randomBytes } from 'crypto';
-import { query } from '../config/database';
+import pool, { query } from '../config/database';
+import { DIAG_LOCK_SQL, diagLockKey, diagSendsOn, isDiagTest, judgeDiagProbeSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
 import { insertTestSmsQueue } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
 import { SPAM_RESULT } from './sms-result-map';
 import { computeMessageHash, spamReportHash, decideUnconfirmed, spamStampReady, SPAM_LATE_REPORT_MINUTES, spamProbeAfterMinutesSql } from './spam-test-queue';
 import { kstDateTag } from './ai-credit-calc';   // ★ C150 하루 측정 경보 키의 한국 날짜(R104)
+import { spamCustomerTestSql } from './spam-trial';   // ★ 1124 확인 판 제외
 
 export const PROBE_DEADLINE_MINUTES = 5;
 export const PROBE_RECLAIM_MINUTES = 2;
 export const PROBE_MAX_ATTEMPTS = 2;
+/**
+ * ★ 2026-11-24 확인 판 확인 문자 적재 상한(ms · Codex 구현 5R ~ 11R) — 관문 시각부터 이 안에서만 MySQL(적재 CT 의 mysqlDeadline · INSERT 문장만 withBoundedMysql · 대행 담당자 문자 적재 상한 NOTIFY_TIMEOUT_MS 와 같은 값).
+ *   응답 기한은 관문 시각에 한 번만 정한다 = 관문 시각 + 이 상한 + PROBE_DEADLINE_MINUTES(적재가 상한 안에 끝나면 적재 뒤 최소 5분 · 기한을 다시 쓰는 일 0).
+ */
+export const DIAG_PROBE_LOAD_WAIT_MS = 60_000;
 export const PROBE_DEVICE_FRESH_DAYS = 7;
 const PROBE_BATCH = 20;
 const PROBE_CYCLE_MS = 30_000;
@@ -94,8 +101,94 @@ async function closeProbes(probeWhere: string, params: any[], probeTo: 'received
   return (r.rows as any[]).map((x) => ({ resultId: String(x.result_id), phone: String(x.phone), carrier: String(x.carrier), closed: x.closed === true }));
 }
 
-/** 확인 문자 한 통을 보내고 sent 로 적는다(claim 을 가진 손만 부른다) */
+/**
+ * ★ 2026-11-24 확인 판의 확인 문자 한 통 = 관문 아래 적재(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2-1).
+ *   ★ Codex 구현 2R 구조 — 잠금 아래에서는 판정과 「보내기로 정함」 표시(sent · 기한)까지만 하고 커밋(잠금 풀림) → MySQL 적재는 잠금 밖.
+ *     sent 를 먼저 적으므로 첫 선점 · 다시 보내기가 둘 다 와도 뒤에 온 쪽은 claimed 가 아니라 내 것 아님(한 통).
+ *     ★ Codex 구현 3R ~ 7R 구조 — 기한은 이 표시 한 번에 정한다 = 관문 시각(gateAt) + 적재 상한(60초) + 5분 · 적재 상한도 같은 gateAt 부터.
+ *     적재 = MySQL 절대 기한(gateAt + 60초 · INSERT 문장만 상한 있는 연결 · 넘기면 연결을 버리고 던짐) · 상한 안에 끝나면 적재 뒤 최소 5분이 보고 창 · 적재가 던지거나 기한을 넘기면 기한 처리가 닫는다 ·
+ *     다시 보내지 않는다. 기한을 다시 쓰는 갱신 · 기한 빈 상태 · 그 정리가 없다(그 사이 경계가 없다).
+ *   순서 = 도장 칸 값(잠금 앞) → BEGIN → 부모 진단 잠금 → 확인 문자 행 · 결과 행 FOR UPDATE → 저장점 → 권한(같은 연결 · 엄격) → 관문 → 표시 · 커밋 → 적재.
+ *   내 것 아님(claimed 가 아님) = 아무것도 안 씀 · 거부 = 확인 문자 expired + 결과가 아직 unconfirmed 일 때만 error(정해진 결과는 둔다).
+ */
+export async function sendDiagProbe(p: { id: string; phone: string; nonce: string; callback: string }, k: { parentTestId: string | null; testId: string; companyId: string; userId: string; createdAt: unknown }): Promise<void> {
+  const switchOn = diagSendsOn();
+  const stamped = await spamStampReady().catch(() => false);   // 잠금 안 거부 쓰기가 같은 풀을 다시 쓰지 않게 값으로 넘긴다
+  const client = await pool.connect();
+  const run = (sql: string, params?: any[]) => client.query(sql, params);
+  let decided: DiagGate = 'reject';
+  let gateAt = 0;
+  try {
+    await client.query('BEGIN');
+    await client.query(DIAG_LOCK_SQL, [diagLockKey(k.parentTestId || k.testId)]);
+    const cur = await client.query(
+      `SELECT p.status AS probe_status, r.id AS result_id, r.result
+         FROM spam_test_probes p JOIN spam_filter_test_results r ON r.id = p.result_id
+        WHERE p.id = $1
+        FOR UPDATE OF p, r`,
+      [p.id],
+    );
+    const c = cur.rows[0];
+    const mine = !!c && c.probe_status === 'claimed';
+    let callbackAllowed = false;
+    await client.query('SAVEPOINT diag_gate');
+    if (mine && switchOn && k.parentTestId) {
+      try {
+        callbackAllowed = await diagCallbackAllowed(k.companyId, k.userId, p.callback, run);
+      } catch (err: any) {
+        await client.query('ROLLBACK TO SAVEPOINT diag_gate');
+        console.warn(`${LOG} 확인 판 권한 조회 실패 — 보내지 않고 닫는다 probe=${p.id}:`, err?.message || err);
+      }
+    }
+    decided = judgeDiagProbeSend({
+      switchOn, probeStatus: c ? String(c.probe_status) : '', result: c ? (c.result ?? null) : null,
+      diagCreatedAtMs: new Date(k.createdAt as any).getTime(), nowMs: Date.now(), hasParent: !!k.parentTestId, callbackAllowed,
+    });
+    if (decided === 'pass') {
+      // ★ Codex 구현 7R — 기한과 적재 상한을 같은 기준 시각(gateAt · 이 프로세스 시계 = PG 와 같은 장비)에서 잰다
+      gateAt = Date.now();
+      await client.query(
+        `UPDATE spam_test_probes SET status = 'sent', sent_at = $2::timestamptz, deadline_at = $3::timestamptz
+          WHERE id = $1 AND status = 'claimed'`,
+        [p.id, new Date(gateAt), new Date(gateAt + DIAG_PROBE_LOAD_WAIT_MS + PROBE_DEADLINE_MINUTES * 60_000)],
+      );
+    } else if (decided === 'reject') {
+      await client.query(`UPDATE spam_test_probes SET status = 'expired', decided_at = NOW() WHERE id = $1 AND status = 'claimed'`, [p.id]);
+      if (c?.result_id) await decideUnconfirmed(String(c.result_id), 'error', run, stamped);   // 아직 unconfirmed 일 때만 바뀐다(CT 조건)
+      console.log(`${LOG} 확인 판 확인 문자 관문 거부 — 보내지 않고 닫음 probe=${p.id} parent=${k.parentTestId || '-'}`);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (decided !== 'pass') return;
+  // 잠금 밖 적재(위에서 sent · 기한으로 정한 한 통) — ★ Codex 구현 5R ~ 11R: MySQL 절대 기한 = gateAt + 60초. 적재 CT 가 준비(PG 조회 · 판정)를 연결 밖에서 하고
+  //   INSERT 문장만 상한 있는 연결(withBoundedMysql)로 한다 · 넘기면 그 연결을 버리고 던진다(멈춘 적재가 공용 발송 풀을 쌓아 막지 않음 · 다음 확인 문자는 새 연결) ·
+  //   남은 시간이 없으면 연결을 빌리지 않고 던진다. 던짐 = 위로(주기가 로그만 · 행은 sent 라 다시 보내지 않음 · 기한 처리가 닫는다).
+  //   끊어도 서버 쪽 INSERT 는 끝날 수 있다 — 그 한 통의 보고도 기한 안이면 받는다(단말이 이 번호의 문자를 받는다는 사실 · 적재 시각과 무관).
+  await insertTestSmsQueue(p.phone, p.callback, probeText(p.nonce), 'SMS', p.id, '', undefined, { mysqlDeadline: gateAt + DIAG_PROBE_LOAD_WAIT_MS });
+}
+
+/**
+ * 확인 문자 한 통을 보내고 sent 로 적는다(claim 을 가진 손만 부른다).
+ *   ★ 2026-11-24 — 부르는 자리(첫 선점 · 다시 보내기)에 기대지 않고 이 함수가 그 검사의 출처를 스스로 읽어, 확인 판이면 관문(sendDiagProbe)으로 간다.
+ *   diag_of 는 to_jsonb 로만 읽는다(DDL 전에도 이 문장이 깨지지 않는다 · 확인 판 행은 DDL 뒤에만 생긴다).
+ */
 async function sendProbe(p: { id: string; phone: string; nonce: string; callback: string }): Promise<void> {
+  const kind = await query(
+    `SELECT t.id AS test_id, t.source, t.company_id, t.user_id, t.created_at, (to_jsonb(t) ->> 'diag_of') AS diag_of
+       FROM spam_test_probes sp JOIN spam_filter_test_results r ON r.id = sp.result_id JOIN spam_filter_tests t ON t.id = r.test_id
+      WHERE sp.id = $1`,
+    [p.id],
+  );
+  const k = kind.rows[0];
+  if (k && isDiagTest(k.source)) {
+    await sendDiagProbe(p, { parentTestId: k.diag_of ? String(k.diag_of) : null, testId: String(k.test_id), companyId: String(k.company_id), userId: String(k.user_id), createdAt: k.created_at });
+    return;
+  }
   await insertTestSmsQueue(p.phone, p.callback, probeText(p.nonce), 'SMS', p.id, '');
   await query(
     `UPDATE spam_test_probes SET status = 'sent', sent_at = NOW(), deadline_at = NOW() + INTERVAL '${PROBE_DEADLINE_MINUTES} minutes'
@@ -242,8 +335,10 @@ export async function measureSpamVerdicts(now: Date = new Date()): Promise<{ row
             COUNT(*) FILTER (WHERE first_result = '${SPAM_RESULT.UNCONFIRMED}' AND result = '${SPAM_RESULT.PASS}')::int AS passed,
             COUNT(*) FILTER (WHERE late_report_at >= $1 AND late_report_at < $2)::int AS after_decided
        FROM spam_filter_test_results
-      WHERE (decided_at >= $1 AND decided_at < $2) OR (late_report_at >= $1 AND late_report_at < $2)
+      WHERE ((decided_at >= $1 AND decided_at < $2) OR (late_report_at >= $1 AND late_report_at < $2))
+        AND EXISTS (SELECT 1 FROM spam_filter_tests t WHERE t.id = spam_filter_test_results.test_id AND ${spamCustomerTestSql('t')})
       GROUP BY carrier, phone`,
+    // ★ 2026-11-24 확인 판 제외(설계서 §10-1) — 일부러 막힐 만한 글을 보낸 판이라 오탐률을 흐린다
     [w.start, w.end],
   );
   const rows = (r.rows as any[]).map((x) => ({

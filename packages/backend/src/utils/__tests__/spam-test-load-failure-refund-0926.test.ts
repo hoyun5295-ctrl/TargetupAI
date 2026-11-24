@@ -52,9 +52,9 @@ describe('큐 스팸 검사 적재 실패', () => {
   });
 
   it('환불 대상 회사는 호출부가 넘긴다 — 첫 조회가 실패해도 환불을 건너뛰지 않는다(Codex 1R high)', () => {
-    expect(queue).toContain('async function executeSpamTest(testId: string, isAuto: boolean, companyId: string): Promise<void> {');
+    expect(queue).toContain('async function executeSpamTest(testId: string, isAuto: boolean, companyId: string, source?: string | null): Promise<void> {');   // ★ 1124 출처 = 확인 판이면 catch 첫머리에서 돌아간다(spam-diag-gate-1124)
     expect(queue).toContain('let refundCompanyId: string | null = companyId;');
-    expect(queue).toContain('await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id);');
+    expect(queue).toContain('await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id, test.source);');
   });
 
   it('예외면 나간 건수만 남기고 NOT_LOADED 환불(결과 행 유형 = 차감 유형)', () => {

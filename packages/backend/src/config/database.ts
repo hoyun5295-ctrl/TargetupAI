@@ -190,21 +190,33 @@ export async function withBoundedMysql<T>(
   timeoutMs: number,
   work: (run: BoundedMysqlRun) => Promise<T>,
   pool: BoundedMysqlPool = mysqlPool as unknown as BoundedMysqlPool,
+  // ★ 2026-11-24(확인 판 확인 문자 · Codex 구현 13R) — 부르는 쪽의 절대 기한(epoch ms) · 있으면 연결 받기 · 제출 직전 판정이 이 값 하나를 쓴다(상대 시간을 다시 더하며 밀리지 않게)
+  absDeadline?: number,
 ): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = absDeadline ?? Date.now() + timeoutMs;
+  // ★ 2026-11-24(Codex 구현 14R) — 기한 판정 세 자리 = 같은 deadline: ① 들어올 때 지났으면 연결을 빌리지 않는다 ② 연결을 받은 직후 지났으면 일을 부르지 않고
+  //   그 연결을 돌려준다(문장을 내지 않은 깨끗한 연결 = destroy 아님) ③ 문장을 내기 직전 지났으면 내지 않는다(같은 이유로 돌려준다). 낸 뒤 상한을 넘긴 문장만 destroy.
+  if (deadline - Date.now() <= 0) throw new BoundedMysqlTimeout('MySQL 연결 받기 상한 넘김(빌리기 전)');
   const acquiring = pool.getConnection();
   let conn: Awaited<typeof acquiring>;
   try {
-    conn = await raceBounded(acquiring, timeoutMs, '연결 받기');
+    conn = await raceBounded(acquiring, deadline - Date.now(), '연결 받기');
   } catch (err) {
     acquiring.then((late) => late.destroy(), () => undefined);
     throw err;
   }
+  if (deadline - Date.now() <= 0) {
+    conn.release();
+    throw new BoundedMysqlTimeout('MySQL 연결 받기 상한 넘김(받은 직후)');
+  }
   let destroyed = false;
   const run: BoundedMysqlRun = async (sql, params) => {
+    noteQueueSql('withBoundedMysql', sql, params); // C131 R94 지킴이 — 판정 · 기록만(던지지 않음)
+    // ★ 2026-11-24(Codex 구현 12R) — 기한이 이미 지났으면 문장을 서버에 내지 않는다(늦게 낸 뒤 끊어도 서버가 끝내는 적재 0 · 연결은 깨끗 = finally 가 돌려준다)
+    const left = deadline - Date.now();
+    if (left <= 0) throw new BoundedMysqlTimeout('MySQL 실행 상한 넘김(제출 전)');
     try {
-      noteQueueSql('withBoundedMysql', sql, params); // C131 R94 지킴이 — 판정 · 기록만(던지지 않음)
-      const [rows] = await raceBounded(conn.query(sql, params), deadline - Date.now(), '실행');
+      const [rows] = await raceBounded(conn.query(sql, params), left, '실행');
       return rows;
     } catch (err) {
       if (err instanceof BoundedMysqlTimeout && !destroyed) { destroyed = true; conn.destroy(); }

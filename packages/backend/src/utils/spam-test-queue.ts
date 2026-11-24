@@ -28,9 +28,10 @@ import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
 import { KST_TODAY_START_SQL } from './stats-aggregation';
 // ★ 2026-09-26 한줄로 V2 F49 — 무료 자동 검사 표시값·자동 판정(청구 제외 판정 CT와 한 벌)
-import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource, notAutoSpamSourceSql } from './spam-trial';
+import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource, notAutoSpamSourceSql, spamCustomerTestSql } from './spam-trial';
 import { getRegisteredCallbackSet } from './callback-filter';   // ★ 2026-11-05 C103 F1 수동 검사 수락 규칙(배정 발신번호)
 import { normalizePhone } from './normalize-phone';
+import { DIAG_LOCK_SQL, diagLockKey, diagSendsOn, isDiagTest, judgeDiagTestSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
 
 // ============================================================
 // 상수
@@ -409,9 +410,12 @@ export function resetSpamStampCache(value?: boolean): void {
  *   칸이 있으면 처음 판정(first_result)과 최종 확정 시각(decided_at · 확인 중은 최종이 아니다)을 함께 남긴다 — 늦은 보고 · 확인 문자가
  *   뒤에 덮어써도 「처음에 확인 중이었다」가 남는다(오탐률 측정 R36).
  */
-export async function decideSpamResult(result: string, rowId: string): Promise<number> {
-  const stamped = await spamStampReady().catch(() => false);
-  const r = await query(
+/** ★ 2026-11-24 run = 확인 판 관문이 잠금을 쥔 트랜잭션 연결로 쓸 때(같은 행을 다른 연결로 쓰면 스스로 막힌다) · 기본 = 지금 그대로 */
+type SqlWrite = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
+export async function decideSpamResult(result: string, rowId: string, run: SqlWrite = query, stampedKnown?: boolean): Promise<number> {
+  // stampedKnown = 잠금 앞에서 미리 정한 도장 칸 유무(잠금 안에서 같은 풀을 다시 쓰지 않게 · ★Codex 구현 2R) · 없으면 지금처럼 읽는다
+  const stamped = stampedKnown ?? await spamStampReady().catch(() => false);
+  const r = await run(
     stamped
       ? `UPDATE spam_filter_test_results
             SET result = $1::varchar, first_result = $1::varchar,
@@ -436,9 +440,9 @@ export async function noteAfterDecidedReport(testId: string, phone: string, carr
   );
 }
 
-export async function decideUnconfirmed(resultId: string, final: 'blocked' | 'error'): Promise<number> {
-  const stamped = await spamStampReady().catch(() => false);
-  const r = await query(
+export async function decideUnconfirmed(resultId: string, final: 'blocked' | 'error', run: SqlWrite = query, stampedKnown?: boolean): Promise<number> {
+  const stamped = stampedKnown ?? await spamStampReady().catch(() => false);
+  const r = await run(
     `UPDATE spam_filter_test_results SET result = $2${stamped ? ', decided_at = NOW()' : ''}
       WHERE id = $1 AND result = '${SPAM_RESULT.UNCONFIRMED}'`,
     [resultId, final],
@@ -528,7 +532,9 @@ export async function spamCheckFor(k: SpamCheckKey, run: SqlRun = query, windowD
         AND t.subject IS NOT DISTINCT FROM $5
         AND EXISTS (SELECT 1 FROM spam_filter_test_results r WHERE r.test_id = t.id AND r.message_type = $4)
         AND ($6::uuid IS NULL OR t.id = $6::uuid)
+        AND ${spamCustomerTestSql('t')}
       ORDER BY t.created_at DESC LIMIT 1`,
+    // ★ 2026-11-24 확인 판 제외(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §10-1) — 확인 판은 한 통신사 결과만이라 같은 글의 검사로 이어 보면 안 된다
     // ★ 2026-11-11 C125 — onlyTestId = 그 검사가 같은 키 · 같은 창일 때만 돌려준다(키 판정은 이 한 문장 그대로)
     [k.companyId, String(k.callback || '').replace(/\D/g, ''), k.hash, k.msgType, k.subject || null, onlyTestId || null],
   );
@@ -1085,17 +1091,18 @@ export async function processSpamTestQueue(): Promise<void> {
 
     const test = nextTest.rows[0];
 
-    // active로 전환
-    await query(
-      `UPDATE spam_filter_tests SET status = 'active' WHERE id = $1`,
+    // active로 전환 — ★ 2026-11-24 아직 queued 일 때만(읽은 뒤 닫힌 검사 · 진단 닫기가 완료한 확인 판을 다시 열지 않는다 · Codex 구현 1R)
+    const activated = await query(
+      `UPDATE spam_filter_tests SET status = 'active' WHERE id = $1 AND status = 'queued'`,
       [test.id]
     );
+    if ((activated.rowCount ?? 0) === 0) return;   // 그사이 닫힘 = 다음 회차
     _activatedAt.set(test.id, Date.now());   // ★ 2026-09-26 F46·F47 실행 시작 시각
 
     console.log(`[SpamTestQueue] 테스트 실행 시작 — testId=${test.id}, source=${test.source}`);
 
     // 테스트 실행
-    await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id);
+    await executeSpamTest(test.id, isAutoSpamSource(test.source), test.company_id, test.source);
   } catch (err) {
     console.error('[SpamTestQueue] 큐 워커 오류:', err);
   } finally {
@@ -1103,10 +1110,83 @@ export async function processSpamTestQueue(): Promise<void> {
   }
 }
 
+/**
+ * ★ 2026-11-24 확인 판 검사 문자 한 통 = 관문 아래 적재(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2-1).
+ *   ★ Codex 구현 2R 구조(1R H1 과 같은 부류 두 번째 = PG 잠금을 쥔 채 바깥 시스템(MySQL)을 기다린 것) —
+ *     잠금 아래에서는 「판정」까지만 하고 커밋(잠금 풀림)한 뒤 **MySQL 적재는 잠금 밖**에서 한다. 잠금이 MySQL 지연을 기다리지 않는다.
+ *     「닫힌 뒤 새로 판정을 통과하는 적재」는 여전히 0(진단 닫기와 같은 잠금) · 판정을 통과한 그 한 통은 닫기 뒤에 나갈 수 있다(그 결과는 판정에 쓰지 않는다).
+ *     검사 문자의 「보내기로 정함」 표시 = 판이 active 이고 결과가 NULL 인 그 상태 자체(한 판의 실행기는 대기열이 하나만 띄운다).
+ *   순서 = 도장 칸 값(잠금 앞) → BEGIN → 부모 진단 잠금 → 판 · 결과 행 FOR UPDATE → 저장점 → 권한(같은 연결 · 엄격) → 관문 → 커밋 → 적재.
+ *   내 것 아님 = 결과 쓰기 0(단 판이 active 인데 미결 결과가 없으면 = 진단 닫기가 먼저 닫은 판 → 판만 completed · 대기열이 멈추지 않게) ·
+ *   거부 = 결과가 아직 NULL 이면 error + 판 completed(열린 값만). 돌려줌 = 적재했는가.
+ *   적재가 던지면 위로 올린다(판은 active · 결과 NULL 로 남아 멈춘 검사 정리가 timeout 으로 닫는다 · 부르는 쪽이 공통 완료로 보내지 않는다).
+ */
+export async function sendDiagTestRow(p: {
+  testId: string; parentTestId: string | null; companyId: string; userId: string; callback: string;
+  rowId: string; phone: string; messageType: string; content: string; title: string;
+}): Promise<boolean> {
+  const switchOn = diagSendsOn();
+  const stamped = await spamStampReady().catch(() => false);   // 잠금 안 거부 쓰기가 같은 풀을 다시 쓰지 않게 값으로 넘긴다
+  const client = await pool.connect();
+  const run: SqlWrite = (sql, params) => client.query(sql, params);
+  let decided: DiagGate = 'reject';
+  try {
+    await client.query('BEGIN');
+    await client.query(DIAG_LOCK_SQL, [diagLockKey(p.parentTestId || p.testId)]);
+    const cur = await client.query(
+      `SELECT t.status, t.created_at, r.result
+         FROM spam_filter_tests t JOIN spam_filter_test_results r ON r.test_id = t.id
+        WHERE t.id = $1 AND r.id = $2
+        FOR UPDATE OF t, r`,
+      [p.testId, p.rowId],
+    );
+    const c = cur.rows[0];
+    const mine = !!c && c.status === 'active' && c.result === null;
+    // 권한 = 잠금 아래 같은 연결로(엄격) · 조회 오류면 이 트랜잭션은 실패 상태 → 저장점으로 되돌리고 거부
+    let callbackAllowed = false;
+    await client.query('SAVEPOINT diag_gate');
+    if (mine && switchOn && p.parentTestId) {
+      try {
+        callbackAllowed = await diagCallbackAllowed(p.companyId, p.userId, p.callback, run);
+      } catch (err: any) {
+        await client.query('ROLLBACK TO SAVEPOINT diag_gate');
+        console.warn(`[SpamTestQueue] 확인 판 권한 조회 실패 — 보내지 않고 닫는다 testId=${p.testId}:`, err?.message || err);
+      }
+    }
+    decided = judgeDiagTestSend({
+      switchOn, status: c ? String(c.status) : '', result: c ? (c.result ?? null) : 'gone',
+      createdAtMs: c ? new Date(c.created_at).getTime() : NaN, nowMs: Date.now(), hasParent: !!p.parentTestId, callbackAllowed,
+    });
+    if (decided === 'not_mine') {
+      if (c && c.status === 'active') {
+        await client.query(
+          `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+            WHERE id = $1 AND status = 'active' AND NOT EXISTS (SELECT 1 FROM spam_filter_test_results WHERE test_id = $1 AND result IS NULL)`,
+          [p.testId],
+        );
+      }
+    } else if (decided === 'reject') {
+      await decideSpamResult(SPAM_RESULT.ERROR, p.rowId, run, stamped);
+      await client.query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1 AND status = 'active'`, [p.testId]);
+      console.log(`[SpamTestQueue] 확인 판 관문 거부 — 보내지 않고 닫음 testId=${p.testId} parent=${p.parentTestId || '-'}`);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (decided !== 'pass') return false;
+  // 잠금 밖 적재(위 판정을 통과한 한 통)
+  await insertTestSmsQueue(p.phone, p.callback, p.content, p.messageType, p.testId, p.title);
+  return true;
+}
+
 // ============================================================
 // [3] 테스트 실행: QTmsg INSERT + 폴링
 // ============================================================
-async function executeSpamTest(testId: string, isAuto: boolean, companyId: string): Promise<void> {
+async function executeSpamTest(testId: string, isAuto: boolean, companyId: string, source?: string | null): Promise<void> {
   // ★ 2026-09-26 한줄로 V2 F30 — 적재에 성공한 건수. 예외면 나간 만큼만 남기고 선불을 되돌린다(catch).
   //   환불 대상 회사는 호출부가 이미 읽은 값으로 시작한다(Codex 1R high: 첫 조회가 실패해도 환불을 건너뛰지 않게).
   let sentCount = 0;
@@ -1151,6 +1231,18 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
       // ★ 2026-11-06 C109 — 렌더가 끝난 검사 = 받은 글 그대로(재치환 0 · 지문 · 입구 판정과 같은 글)
       const content = isRenderedSample(test.first_recipient) ? (rawContent || '') : replaceVariables(rawContent || '', firstCustomer, fieldMappings, testAddressBookFields);
       const titleStr = (row.message_type === 'LMS' || row.message_type === 'MMS') ? (test.subject || '') : '';
+      // ★ 2026-11-24 확인 판 = 관문 아래 적재(§6-2-1) · 못 보냈으면(닫힘 · 내 것 아님) 폴링 없이 끝(판은 이미 닫혀 있거나 다른 손 것)
+      //   diag_of 는 t.* 로만 읽는다(DDL 전에도 일반 검사 문장에 새 칸 0 · 확인 판 행은 DDL 뒤에만 생긴다)
+      if (isDiagTest(test.source)) {
+        // 예외는 이 함수의 catch 가 확인 판이면 active 로 둔다(멈춘 검사 정리가 timeout 으로 닫는다 · 공통 완료로 가지 않는다)
+        const sent = await sendDiagTestRow({
+          testId, parentTestId: test.diag_of ? String(test.diag_of) : null, companyId: String(test.company_id), userId: String(test.user_id),
+          callback: String(test.callback_number || ''), rowId: String(row.id), phone: row.phone, messageType: row.message_type, content, title: titleStr,
+        });
+        if (!sent) return;
+        sentCount += 1;
+        continue;
+      }
       await insertTestSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
       sentCount += 1;
     }
@@ -1276,6 +1368,9 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
 
   } catch (err) {
     console.error('[SpamTestQueue] 테스트 실행 오류:', err);
+    // ★ 2026-11-24 확인 판(Codex 구현 2R) — 관문 앞 조회(검사 정보 · 결과 행) 실패도 공통 완료(completed + 결과 NULL)로 보내지 않는다.
+    //   active 로 두면 멈춘 검사 정리(cleanupStaleActiveTests)가 NULL 결과를 timeout 으로 닫는다 · 확인 판은 차감 0 이라 환불할 것도 없다.
+    if (isDiagTest(source)) return;
     // ★ 2026-09-26 한줄로 V2 F30 — 등록 때 차감한 선불을 **나간 건수만 남기고** 되돌린다(keepCount = 적재 성공 건수).
     //   종전엔 completed만 적어 한 통도 안 나가도 차감이 남았다. 차감이 없던 검사(skipPrepaid·후불)는 prepaidRefund가 0원으로 돌아온다.
     //   유형은 결과 행의 유형 = 등록 때의 차감 유형(단일 유형)이다.

@@ -14,7 +14,7 @@
 import { query } from '../config/database';
 import { isUuid } from './normalize';
 import { mapWithConcurrency } from './concurrency';
-import { SPAM_TRIAL_SOURCE, isAutoSpamSource, readSpamTrialStatus } from './spam-trial';
+import { SPAM_TRIAL_SOURCE, isAutoSpamSource, readSpamTrialStatus, spamCustomerTestSql } from './spam-trial';
 import { DIRECT_SPELL_SOURCE, SPELL_FREE_MONTHLY_LIMIT, readSpellUsage } from './spell-check-quota';
 import { AGENCY_SPELL_EVENT, readAgencySpell } from './agency-send-spell';
 import { isActivePaidPlan, loadPlanContext } from './plan-guard';
@@ -85,7 +85,7 @@ function eventsSql(startSql: string): string {
     SELECT 'spam'::text AS kind, COALESCE(t.source, 'manual')::text AS sub, t.company_id, t.user_id, t.created_at,
            t.status::text AS status, NULL::int AS issues, t.id::text AS ref_id
       FROM spam_filter_tests t
-     WHERE t.created_at >= ${startSql}
+     WHERE t.created_at >= ${startSql} AND ${spamCustomerTestSql('t')}   -- ★ 1124 확인 판(우리 쪽 진단)은 이용 기록이 아니다
     UNION ALL
     SELECT 'spell', 'direct', u.company_id, u.user_id, u.created_at, u.status::text, u.issue_count, u.id::text
       FROM spell_check_uses u
