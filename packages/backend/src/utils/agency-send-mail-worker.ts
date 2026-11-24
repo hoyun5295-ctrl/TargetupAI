@@ -43,6 +43,7 @@ import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
 import { extractAgencyVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
+import { buildSpamResultMail } from './agency-spam-diag';   // ★ 2026-11-24 검사 결과 회신 메일 본문(M3)
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(재시도 회신 · 접수 전 080)
 import { sendSystemAlert, persistPassFailures, flushPassAlerts } from './system-alert';
 import { soleCompanyId } from './internal-company';
@@ -1379,6 +1380,60 @@ async function retryPendingReplies(mailbox: string): Promise<void> {
   }
 }
 
+/**
+ * ★ 2026-11-24 검사 결과 회신 메일(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-2 M3) — 메일로 접수한 건이 스팸 검사로 막혀
+ *   사람 판단(test_failed)이 되면 접수 메일 주소로 그 결과를 한 번 알린다. **접수 행 상태로 다시 찾는다**(상태 저장과 사건 기록 사이에 죽어도 다음 틱이 찾는다).
+ *   보낼 것 = test_failed · source email · 24시간 안 · 마지막 사람 판단 사건이 스팸 막힘(사유 없음 · spam_address) · 지금 문안 버전에 결과 sent · rejected 사건 없음 · unknown 3회 미만.
+ *   막힘 근거 = 사유 없음은 이 문안 버전의 spam_blocked · spam_address(4a)는 이 문안 버전의 spam_hint 4a 확정 사건.
+ *   받는 곳 = request_ids 에 그 접수가 들고 회사가 같은 accepted 원장 행(from_email · 답장 이음 = message_id).
+ *   보내기 = replyAllowed(상한) 게이트 → 막히면 기록 없이 다음 틱 · 보낸 뒤 결과를 사건 spam_result_mail 로(기록 전 종료 = 다음 틱이 한 번 더 · 누락보다 중복 · 기존 회신과 같은 선택).
+ */
+export async function sendPendingSpamResultMails(mailbox: string): Promise<void> {
+  if (!(await hasAgencyColumn(pool, 'source'))) return;
+  const rows = await query(
+    `SELECT r.id, r.company_id, r.content_version, r.current_content, r.file_name, r.original_content, i.from_email, i.message_id
+       FROM agency_send_requests r
+       JOIN LATERAL (SELECT x.from_email, x.message_id FROM agency_send_email_intake x
+                      WHERE x.mailbox = $1 AND x.status = 'accepted' AND x.company_id = r.company_id AND r.id = ANY(x.request_ids)
+                      ORDER BY x.id DESC LIMIT 1) i ON true
+      WHERE r.status = 'test_failed' AND r.source = 'email' AND r.updated_at > NOW() - INTERVAL '24 hours'
+        -- ★ 배포 2 Codex 1R — 지금의 test_failed 가 스팸 막힘에서 온 것일 때만(틀린 메일보다 빠진 메일이 낫다):
+        --   ① 이 접수의 마지막 사건(안내 실패 · 이 회신 기록 제외)이 스팸 막힘 사람 판단(test_failed · final_test_failed · 사유 없음 · spam_address)이고 ② 그 사건이 상태를 바꾼 직후(5분 안)에 남았고
+        --   ③ 그 앞에 막힘 사건(spam_blocked)이 이 문안 버전 안(마지막 문안 수정 뒤)에 있다. 발송 단계 실패(dispatch_*) · 장애 셈 · 글자 · 길이는 마지막 사건이 달라 빠진다.
+        AND EXISTS (
+          SELECT 1 FROM (SELECT e.id, e.kind, e.payload, e.created_at FROM agency_send_events e
+                          WHERE e.request_id = r.id AND e.kind NOT IN ('spam_result_mail', 'notify_failed')   -- 사람 판단 뒤에 붙는 기록(안내 실패 · 이 회신)은 건너뛴다
+                          ORDER BY e.id DESC LIMIT 1) last
+           WHERE last.kind IN ('test_failed', 'final_test_failed')
+             AND COALESCE(last.payload->>'reason', 'spam') IN ('spam', 'spam_address')
+             AND last.created_at >= r.updated_at - INTERVAL '5 minutes'
+             -- ★ 배포 2 Codex 4R — 4a(spam_address) = 그 확정 사건(이 문안 버전 spam_hint 4a · 상태와 같은 트랜잭션)이 근거 · 처음 막힘 기록(logEvent · 실패를 삼킴)에 기대지 않는다
+             AND (CASE WHEN last.payload->>'reason' = 'spam_address'
+                  THEN EXISTS (SELECT 1 FROM agency_send_events h WHERE h.request_id = r.id AND h.kind = 'spam_hint' AND h.id < last.id
+                                AND h.payload->>'branch' = '4a' AND h.payload->>'version' = r.content_version::text)
+                  ELSE EXISTS (SELECT 1 FROM agency_send_events b WHERE b.request_id = r.id AND b.kind = 'spam_blocked' AND b.id < last.id
+                                AND b.id > COALESCE((SELECT MAX(c.id) FROM agency_send_events c WHERE c.request_id = r.id AND c.kind = 'content_edited'), 0))
+                  END))
+        AND NOT EXISTS (SELECT 1 FROM agency_send_events m WHERE m.request_id = r.id AND m.kind = 'spam_result_mail'
+                         AND COALESCE(m.payload->>'version', '') = r.content_version::text AND m.payload->>'outcome' IN ('sent', 'rejected'))
+        AND (SELECT COUNT(*) FROM agency_send_events m WHERE m.request_id = r.id AND m.kind = 'spam_result_mail'
+              AND COALESCE(m.payload->>'version', '') = r.content_version::text AND m.payload->>'outcome' = 'unknown') < $2
+      ORDER BY r.updated_at ASC LIMIT 5`,
+    [mailbox, REPLY_MAX_ATTEMPTS],
+  );
+  for (const row of rows.rows as any[]) {
+    if (!row.from_email) continue;
+    const mail = await buildSpamResultMail(row).catch((e: any) => { log(`검사 결과 메일 본문 실패(다음 틱): ${e?.message}`); return null; });
+    if (!mail) continue;
+    const gate = await replyAllowed(mailbox, row.from_email);
+    if (!gate.allow) continue;   // 상한 = 기록 없이 다음 틱(24시간 창 안)
+    const r = await sendAgencyReplyMail({ to: row.from_email, subject: mail.subject, text: mail.text, inReplyTo: row.message_id || null });
+    await query(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, 'spam_result_mail', $2::jsonb)`,
+      [row.id, JSON.stringify({ version: Number(row.content_version || 0), outcome: r.outcome })]);
+    if (r.outcome !== 'sent') log(`검사 결과 메일 미확정(${r.outcome}): request=${row.id} ${r.detail}`);
+  }
+}
+
 // ────────────── tick ──────────────
 
 let running = false;
@@ -1455,6 +1510,8 @@ export async function runAgencyMailTick(): Promise<void> {
 
       // ★적대 2R: 회신 재시도는 새 메일 유무와 무관하게 돈다(빈 편지함 틱에서 밀린 완료 회신이 멈추면 안 된다)
       await retryPendingReplies(mailbox);
+      // ★ 2026-11-24 스팸 검사로 멈춘 메일 접수 = 결과 회신(새 메일 유무와 무관 · 실패는 다음 틱)
+      await sendPendingSpamResultMails(mailbox).catch((e: any) => log(`검사 결과 메일 패스 실패(다음 틱): ${e?.message}`));
 
       if (uidls.length === 0) return;
       // 원장 대조 — 처리할 것만 남긴다(경보만 남은 접수는 빠진다 · 위 닫기 단계 몫)

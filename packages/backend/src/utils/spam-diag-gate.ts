@@ -23,6 +23,8 @@ export const DIAG_TEST_SEND_MINUTES = 15;
 export const DIAG_PROBE_SEND_MINUTES = 30;
 /** 부모 진단 잠금 — 트랜잭션 잠금(커밋 · 되돌림에 풀린다) */
 export const DIAG_LOCK_SQL = 'SELECT pg_advisory_xact_lock(hashtext($1))';
+/** ★ 2026-11-24 확인 판 등록 고정 키(설계서 §6-3 · 등록 전부가 이 키로 줄 서서 하루 상한을 센다 · 같은 DIAG_LOCK_SQL) */
+export const DIAG_CAP_LOCK_KEY = 'spam_diag_cap';
 
 export type DiagGate = 'not_mine' | 'pass' | 'reject';
 

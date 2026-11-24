@@ -194,7 +194,8 @@ describe('C125 늦은 보고 → 대행발송 대기 해제(배선)', () => {
 
   it('다시 집힌 접수 = 회복한 그 검사를 먼저 이어 본다(Codex 구현 1R) — 대행 검사 호출이 preferTestId 를 넘기고, 등록 함수가 같은 키 · 장애 아님일 때만 그것을 쓴다', () => {
     const round = stripComments(fnBody(worker, 'async function runSpamRound('));
-    expect(round).toMatch(/preferTestId: \(await recoveredSpamTestIdFor\(String\(row\.id\), Number\(row\.content_version \|\| 0\)\)\.catch\(\(\) => null\)\) \?\? undefined,/);
+    // ★ 2026-11-24 진단 대기 뒤 첫 회차만 T 를 먼저(resumePrefer) · 그 밖은 회복한 검사(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7)
+    expect(round).toMatch(/preferTestId: resumePrefer \?\? \(await recoveredSpamTestIdFor\(String\(row\.id\), Number\(row\.content_version \|\| 0\)\)\.catch\(\(\) => null\)\) \?\? undefined,/);
     const queue = stripComments(read(join(SRC, 'utils', 'spam-test-queue.ts')));
     const a = queue.indexOf('const reusable = async (run?: SqlRun) => {');
     const reusable = queue.slice(a, queue.indexOf('const early = await reusable();', a));

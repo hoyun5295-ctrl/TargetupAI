@@ -96,9 +96,12 @@ describe('효과 CT · 직접발송 = 같은 판정(소스 계약)', () => {
     expect((c.match(/return staleFail\(input\.requestId, input\.companyId\)/g) || []).length).toBe(2);
     // Codex L3 — 두 CT 모두 행 잠금(FOR UPDATE)을 쥔 뒤 UPDATE(잠금을 기다린 UPDATE 는 조건을 다시 보지 않는다)
     const lockSql = 'SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE';
-    expect((c.match(/SELECT 1 FROM agency_send_requests WHERE id = \$1::uuid AND company_id = \$2::uuid FOR UPDATE/g) || []).length).toBe(2);
+    // ★ 2026-11-24 문안 수정 = 같은 행 잠금에서 진단 대기(last_test_result.diagHold)도 함께 읽는다(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2-2)
+    const editLockSql = 'SELECT last_test_result, content_version FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE';
+    expect((c.match(/SELECT 1 FROM agency_send_requests WHERE id = \$1::uuid AND company_id = \$2::uuid FOR UPDATE/g) || []).length).toBe(1);
     const edit = c.slice(c.indexOf('export async function editAgencyContentTx('), c.indexOf('export async function findBlockingTwinRequest('));
-    expect(edit.indexOf(lockSql)).toBeLessThan(edit.indexOf('UPDATE agency_send_requests'));
+    expect(edit.indexOf(editLockSql)).toBeGreaterThan(-1);
+    expect(edit.indexOf(editLockSql)).toBeLessThan(edit.indexOf('UPDATE agency_send_requests'));
     const resch = c.slice(c.indexOf('export async function rescheduleAgencyRequestTx('));
     expect(resch.indexOf("await client.query('BEGIN');")).toBeLessThan(resch.indexOf(lockSql));
     expect(resch.indexOf(lockSql)).toBeLessThan(resch.indexOf('UPDATE agency_send_requests'));

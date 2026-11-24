@@ -215,7 +215,7 @@ const columnCache = new Map<string, { value: boolean; checkedAt: number }>();
 export async function hasAgencyColumn(
   client: any,
   column: string,
-  table: 'agency_send_requests' | 'agency_send_recipients' | 'agency_send_email_intake' = 'agency_send_requests',   // ★ 2026-11-13 C130 메일 원장 회신 본문 칸
+  table: 'agency_send_requests' | 'agency_send_recipients' | 'agency_send_email_intake' | 'spam_filter_tests' = 'agency_send_requests',   // ★ 2026-11-13 C130 메일 원장 회신 본문 칸 · ★1124 확인 판 diag_of(spam-diag hasDiagColumn)
 ): Promise<boolean> {
   const now = Date.now();
   const key = `${table}.${column}`;

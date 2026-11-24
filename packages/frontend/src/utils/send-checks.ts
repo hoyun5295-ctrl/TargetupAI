@@ -161,6 +161,8 @@ export interface RecentSpamCheck {
   trial?: boolean;
   blockedCarriers?: string[];
   missingCarriers?: string[];
+  /** ★ 2026-11-24 막힌 글의 확인 결과 한 줄(확정된 확인 판 결과 · 없으면 「막혔을 수 있는 부분: …」) · 없으면 없음 */
+  hintLine?: string;
 }
 
 /** 이 문안을 최근 24시간 안에 검사했는가(서버 원장). 실패 = 모름. */

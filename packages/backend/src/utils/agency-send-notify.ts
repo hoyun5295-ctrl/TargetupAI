@@ -193,11 +193,30 @@ export function buildSmsBytesNotify(ctx: AgencyNotifyContext & { bytes: number; 
 }
 
 /** ④ 세 차례 모두 차단. 사람이 문안을 고쳐야 한다 */
-export function buildTestFailedNotify(ctx: AgencyNotifyContext): string {
+export function buildTestFailedNotify(ctx: AgencyNotifyContext & {
+  /** ★ 2026-11-24 막힌 통신사 표시명(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-4) · 없으면 통신사 없이 */
+  carriers?: string[];
+  /** 확정된 확인 판 결과 문장 · 없으면 의심 부분 한 줄(「막혔을 수 있는 부분: …」) · 없으면 줄 없음 */
+  resultLine?: string;
+  /** 4a = 막힌 통신사 전부에서 주소만 뺀 글이 도착(주소를 바꿔야 한다 · 한 차례에서 멈춘 건) */
+  addressCause?: boolean;
+}): string {
+  // ★ 2026-11-24 「세 차례」 낱말은 뺀다 — 주소가 원인이면 한 차례에서 멈춘다(다듬기는 주소를 못 바꾼다)
+  const names = (ctx.carriers || []).filter(Boolean).join(', ');
+  const login = `${String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/^https?:\/\//, '').replace(/\/+$/, '')}/agency-send`;
+  if (ctx.addressCause && names) {
+    return compose([
+      `${HEAD} 문안이 ${names} 스팸 검사에 걸렸습니다.`,
+      `건: ${shortLabel(ctx.label)}`,
+      `글 속 주소를 빼니 ${names}에 도착했습니다. 주소를 바꿔 주세요.`,
+      `로그인: ${login}`,
+    ]);
+  }
   return compose([
-    `${HEAD} 문안이 세 차례 스팸 검사에 걸렸습니다.`,
+    `${HEAD} 문안이 스팸 검사에 걸렸습니다${names ? `(${names})` : ''}.`,
     `건: ${shortLabel(ctx.label)}`,
-    '로그인하여 문안을 고쳐 주세요. 고치면 검사를 다시 시작합니다.',
+    ctx.resultLine || '',
+    `로그인하여 문안을 고쳐 주세요: ${login}`,
   ]);
 }
 

@@ -549,6 +549,7 @@ export const CARRIER_MAP: Record<string, string> = {
   'SKT': 'SKT',
   'KTF': 'KT',
   'LGT': 'LG U+',
+  'LGU': 'LG U+',   // ★ 2026-11-24 스팸 검사 단말 통신사 값(spam_filter_devices.carrier · 담당자 문자 · 회신 메일 표시)
 };
 
 /** mob_company → 표시명 (매핑에 없으면 원본 반환) */

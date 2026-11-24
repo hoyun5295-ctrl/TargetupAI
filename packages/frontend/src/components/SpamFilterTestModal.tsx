@@ -15,6 +15,7 @@ import { AlertTriangle, Ban, Check, ChevronDown, Loader2, Play, RotateCcw, Shiel
 import { useAuthStore } from '../stores/authStore';
 import { formatPhoneNumber, replaceDirectVars, buildAdSubjectFront } from '../utils/formatDate';
 import { carrierLabel, fetchSendCheckStatus, type SendCheckStatus } from '../utils/send-checks';
+import SpamBlockHintCard, { hasPendingDiag, hintMarks, markText, type SpamBlockHints } from './SpamBlockHintCard';
 
 interface SpamFilterTestModalProps {
   onClose: () => void;
@@ -65,6 +66,8 @@ interface TestHistoryItem {
   total_count: number;
   source?: string | null;
   results?: { carrier: string; received: boolean; result: string | null }[];
+  /** ★ 2026-11-24 막힌 검사의 의심 한 줄(서버 · 글 속 주소가 있으면 'url') */
+  hint?: 'url' | null;
 }
 
 type ErrorKind = 'dup' | 'money' | 'trial' | 'generic';
@@ -113,6 +116,8 @@ export default function SpamFilterTestModal({
   const slowRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const liveIdRef = useRef<string | null>(null);
   const [finalBy, setFinalBy] = useState<number | null>(null);
+  // ★ 2026-11-24 막혔을 수 있는 부분(D1 · D2) — 서버 hints 그대로 · 확인 판이 결과를 기다리면 15초 읽기를 이어 간다
+  const [hints, setHints] = useState<SpamBlockHints | null>(null);
   // 서버 시작 시간 기준 타이머용
   const serverCreatedAtRef = useRef<number | null>(null);
   // ★2026-09-25 도착 시간 표시용 — 서버 시각끼리만 뺀다(타이머 기준과 섞지 않는다 · 시계 차이 방지)
@@ -256,6 +261,7 @@ export default function SpamFilterTestModal({
     setError('');
     setTotalCount(0);
     setFinalBy(null);
+    setHints(null);
     liveIdRef.current = null;
     serverCreatedAtRef.current = null;
     serverTestCreatedRef.current = null;
@@ -367,10 +373,11 @@ export default function SpamFilterTestModal({
       const res = await fetch(`/api/spam-filter/tests/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (data.results) setResults(data.results);
+      setHints(data.hints ?? null);
       if (data.test?.created_at) serverTestCreatedRef.current = new Date(data.test.created_at).getTime();
       if (data.test?.status === 'completed') {
         const by = data.finalBy ? Date.parse(data.finalBy) : NaN;
-        const waiting = Number.isFinite(by) && Date.now() < by;
+        const waiting = (Number.isFinite(by) && Date.now() < by) || hasPendingDiag(data.hints);
         setFinalBy(Number.isFinite(by) ? by : null);
         if (waiting) {
           // 확인 중 = 빠른 읽기 · 남은 시간만 멈추고 15초 읽기로 바꾼다(창을 닫아도 서버가 확정한다)
@@ -495,7 +502,7 @@ export default function SpamFilterTestModal({
                       {(journeyStep ? jSub : subject) && (messageType === 'LMS' || messageType === 'MMS') && (
                         <b className="block text-stone-900 pb-1.5 mb-1.5 border-b border-stone-200">{journeyStep ? jSub : buildAdSubjectFront(subject || '', messageType, isAd ?? false)}</b>
                       )}
-                      {previewMessage || '메시지 없음'}
+                      {previewMessage ? (verdict === 'block' && hints ? markText(previewMessage, hintMarks(hints)) : previewMessage) : '메시지 없음'}
                     </div>
                   </div>
                   <div className="px-2 py-2 text-center text-[10.5px] text-stone-400 border-t border-stone-100">
@@ -636,7 +643,13 @@ export default function SpamFilterTestModal({
                 ))}
               </div>
 
-              {verdict === 'block' && (
+              {verdict === 'block' && hints && testId ? (
+                <SpamBlockHintCard testId={testId} token={token} hints={hints} onSent={() => {
+                  // 판을 보냈다 = 결과가 날 때까지 15초 읽기(창을 닫아도 확인은 서버가 이어 간다)
+                  void pollResults(testId);
+                  if (!slowRef.current) slowRef.current = setInterval(() => pollResults(testId), 15000);
+                }} />
+              ) : verdict === 'block' && (
                 <div className="border border-dashed border-rose-200 rounded-xl px-3 py-2.5 text-[12.5px] text-stone-700 leading-relaxed bg-white break-keep">
                   <b className="text-rose-700">이렇게 해 보세요</b> · 막힌 표현을 바꾼 뒤 [다시 검사]를 누르면 이 창에서 바로 비교돼요. 지난 결과는 [지난 검사]에 남아요.
                 </div>
@@ -685,6 +698,7 @@ export default function SpamFilterTestModal({
                           </span>
                           <span className="flex-1 min-w-0 text-[12.5px] text-stone-600 truncate">
                             {item.source === 'trial' && <span className="mr-1.5 text-[10.5px] font-bold text-violet-700 bg-violet-50 ring-1 ring-inset ring-violet-200 rounded px-1">무료 체험</span>}
+                            {blockedCnt > 0 && item.hint === 'url' && <span className="mr-1.5 text-[10.5px] font-bold text-rose-700 bg-rose-50 ring-1 ring-inset ring-rose-200 rounded px-1">의심: 글 속 주소</span>}
                             {msgPreview || '(메시지 없음)'}
                           </span>
                           <span className="flex gap-1 shrink-0">

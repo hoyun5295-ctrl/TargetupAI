@@ -279,22 +279,24 @@ export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
     ? '맞춤법 검사는 크레딧이 들지 않아요'
     : `이번 달 무료 ${spellFreeRemaining ?? 0}/${checkStatus?.spell?.limit ?? 5}회 남음 · 요금제는 무제한`;
 
-  const [sendWarn, setSendWarn] = useState<{ variant: SendWarnVariant; carriersText: string } | null>(null);
+  const [sendWarn, setSendWarn] = useState<{ variant: SendWarnVariant; carriersText: string; hintLine?: string } | null>(null);
   /** [전송하기] 직전 — 스팸 검사를 안 했거나(24시간 안 · 같은 문안) 막혔거나 끝나지 않았으면, 맞춤법 고칠 곳이 남았으면 묻는다 */
-  const decideSendWarn = async (): Promise<{ variant: SendWarnVariant; carriersText: string } | null> => {
+  const decideSendWarn = async (): Promise<{ variant: SendWarnVariant; carriersText: string; hintLine?: string } | null> => {
     let variant: SendWarnVariant | null = null;
     let carriersText = '';
+    let hintLine = '';
     if (!useIndividualCallback && callback) {
       const pre = await refreshSpamCheck();
       if (pre?.checked && pre.verdict && pre.verdict !== 'pass') {
         variant = pre.verdict;
         carriersText = carriersOf(pre);
+        if (pre.verdict === 'blocked') hintLine = pre.hintLine || '';   // ★ 1124 창을 닫은 뒤 확정된 확인 결과를 사람이 보는 자리(D3)
       } else if (!pre?.checked && !isSendWarnDismissed(authUserId)) {
         variant = 'none';
       }
     }
     if (!variant && spellOpenCount > 0) variant = 'spell';
-    return variant ? { variant, carriersText } : null;
+    return variant ? { variant, carriersText, hintLine } : null;
   };
 
   const onWarnCheckSpam = () => { setSendWarn(null); void handleSpamFilter(); };
@@ -361,6 +363,7 @@ export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
         open={!!sendWarn}
         variant={sendWarn?.variant || 'none'}
         carriersText={sendWarn?.carriersText || ''}
+        hintLine={sendWarn?.hintLine || ''}
         spellOpenCount={spellOpenCount}
         trialRemaining={spamTrialRemaining}
         onCheckSpam={onWarnCheckSpam}

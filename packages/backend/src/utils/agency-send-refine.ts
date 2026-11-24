@@ -124,11 +124,13 @@ const ROUND_RULES: Record<number, string> = {
   ].join('\n'),
 };
 
-export function buildRefinePrompt(original: string, round: number): { system: string; user: string } {
+export function buildRefinePrompt(original: string, round: number, avoid: ReadonlyArray<string> = []): { system: string; user: string } {
   const rule = ROUND_RULES[round] || ROUND_RULES[2];
+  // ★ 2026-11-24 확인 판(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7 4b) — 그 줄을 빼니 도착한 표현 = 이번에는 다른 말로(보존 값은 넣지 않는다 · classifyDiag)
+  const avoidLine = avoid.length > 0 ? `\n\n특히 아래 표현이 걸린 것으로 확인됐습니다. 이 표현은 같은 뜻의 다른 말로 바꿉니다: ${avoid.join(', ')}` : '';
   return {
     system: `${BASE_RULES}\n${rule}`,
-    user: `아래 문안을 다듬어 주세요.\n\n${original}`,
+    user: `아래 문안을 다듬어 주세요.${avoidLine}\n\n${original}`,
   };
 }
 
@@ -153,12 +155,14 @@ export async function refineForSpam(opts: {
   companyId: string;
   original: string;
   round: number;
+  /** ★ 2026-11-24 확인 판 4b — 피할 표현(그 줄을 빼니 도착) */
+  avoid?: ReadonlyArray<string>;
   callModel?: (system: string, user: string) => Promise<{ text: string; inputTokens: number; outputTokens: number }>;
 }): Promise<RefineResult> {
   const original = String(opts.original || '').trim();
   if (!original) return { ok: false, reason: 'empty-original' };
 
-  const built = buildRefinePrompt(original, opts.round);
+  const built = buildRefinePrompt(original, opts.round, opts.avoid || []);
   // ★ 2026-10-28 AI 메모리 설계 K11-1 — 대행 스팸 회피 = 고치기(예시 0 · 원문 꼴 유지 · 평문 출력) · 성격 = 원문 광고 표기
   const { system } = await composeVoicePrompt({
     companyId: opts.companyId, producer: 'agency-spam-refine', mode: 'rewrite',

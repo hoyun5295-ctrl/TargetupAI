@@ -27,6 +27,11 @@ import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf,
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
+  diagHoldOf, diagHoldJson, startAgencyDiag, stepAgencyDiag, settleAgencyDiag4a, releaseAgencyDiag, agencyBlockSummary, SPAM_HINT_EVENT, type DiagHold,
+} from './agency-spam-diag';   // ★ 2026-11-24 막힌 부분 짚어 보기(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7)
+import { closeDiagnosis } from './spam-diag';
+import { getCarrierLabel } from './sms-result-map';
+import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
   buildLinkActionNotify, buildUnsupportedCharsNotify, buildSendRejectedNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify, buildSmsBytesNotify,
@@ -381,7 +386,12 @@ async function sendRejectionOfTests(testIds: ReadonlyArray<unknown>): Promise<st
   return null;
 }
 
-async function runSpamRound(row: any, startRound: number): Promise<{
+/**
+ * ★ 2026-11-24 진단(설계서 §7) — opts.diag = 워커 A 첫 검사만(이 버전 첫 막힘에 확인 판 · 진단 대기) ·
+ *   opts.resume = 진단 대기를 마친 뒤 이어 보기(T 의 글 · 회차 · T 를 같은 검사 이어 보기로 다시 읽음 · 4b 면 첫 다듬기에 avoid).
+ */
+interface SpamRoundOpts { diag?: boolean; resume?: { content: string; rounds: number; preferTestId: string; avoid?: string[]; passed?: boolean } }
+async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = {}): Promise<{
   /** ★ 2026-10-24 판정 3분할(뿌리 대장 R7) — error = 검사 장애(통과도 반려도 아니다 · 다듬은 문장은 검사받지 못해 버린다) */
   verdict: SpamVerdict;
   passed: boolean;
@@ -394,6 +404,8 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   rejection?: string | null;
   /** ★ 2026-11-17 C142 — SMS 접수의 가장 긴 실제 문장이 90바이트를 넘음(verdict = rejected · 검사 · 다듬기 0 · 사람 판단) */
   smsBytesOver?: number;
+  /** ★ 2026-11-24 이 버전 첫 막힘에 확인 판을 걸었다 = 다듬지 않고 진단 대기(부르는 쪽 = 접수를 받기 전 상태로 · last_test_result.diagHold) */
+  diagHold?: DiagHold;
 }> {
   const original = String(row.current_content || '');
   let content = original;
@@ -405,6 +417,19 @@ async function runSpamRound(row: any, startRound: number): Promise<{
   if (held && Number(held.version) === Number(row.content_version || 0) && typeof held.content === 'string' && held.content.trim() && held.content !== original) {
     content = held.content;
     rounds = Math.max(startRound, Math.min(MAX_TEST_ROUNDS - 1, (Number(held.rounds) || 1) - 1));
+  }
+  // ★ 2026-11-24 진단 대기를 마친 뒤 = T 의 글 · 회차부터(첫 회차는 T 를 같은 검사 이어 보기로 다시 읽는다 · 새 검사 0)
+  let resumePrefer: string | undefined;
+  let resumeAvoid: string[] | undefined;
+  if (opts.resume) {
+    // ★ 배포 2 Codex 1R — 대기 사이 T 가 통과(늦은 보고)면 다시 검사하지 않고 T 가 근거인 통과(자정을 넘겨 같은 검사 이어 보기가 안 되는 날에도 T 그대로)
+    if (opts.resume.passed) {
+      return { verdict: 'pass', passed: true, finalContent: opts.resume.content, rounds: Math.max(startRound, Number(opts.resume.rounds) || 1), detail: { round: opts.resume.rounds, testIds: [opts.resume.preferTestId], resumedFrom: 'diag' } };
+    }
+    content = opts.resume.content;
+    rounds = Math.max(startRound, Math.min(MAX_TEST_ROUNDS - 1, (Number(opts.resume.rounds) || 1) - 1));
+    resumePrefer = opts.resume.preferTestId;
+    resumeAvoid = opts.resume.avoid && opts.resume.avoid.length > 0 ? opts.resume.avoid : undefined;
   }
 
   // ★ 2026-10-24 검사 단계(표본 · 실검사 · 다듬기)가 던진 예외도 검사 장애다(Codex 1024 1R) — 호출부의 catch 로 새면
@@ -448,10 +473,15 @@ async function runSpamRound(row: any, startRound: number): Promise<{
         maxRetries: 0,
         rendered: true,   // ★ 2026-11-06 C109(Codex 설계 4R) — 표본 = 렌더가 끝난 글(buildRenderedSample) · 큐가 다시 치환하지 않는다
         // ★ 2026-11-11 C125(Codex 구현 1R) — 이 문안 버전에서 늦은 보고로 회복한 검사가 있으면 그 검사를 먼저 이어 본다(같은 키일 때만 · 새 검사 0)
-        preferTestId: (await recoveredSpamTestIdFor(String(row.id), Number(row.content_version || 0)).catch(() => null)) ?? undefined,
+        preferTestId: resumePrefer ?? (await recoveredSpamTestIdFor(String(row.id), Number(row.content_version || 0)).catch(() => null)) ?? undefined,
       });
+      // ★ 배포 2 Codex 1R — 첫 회차가 실제로 T 를 이어 봤을 때만 이미 남긴 T 의 막힘을 다시 남기지 않는다(자정을 넘겨 새 검사면 남긴다)
+      const resumedT = resumePrefer !== undefined && Object.values(result.testIds ?? {})[0] === resumePrefer;
+      resumePrefer = undefined;   // 이어 보기는 첫 회차만
       // ★ C150 — testIds = 이번 회차가 실제로 본 검사(이어 보기면 그 검사 · 그 검사의 batch_id 는 처음 회차 묶음이라 batchId 로는 못 찾는다) · 보류 사건이 싣는다
       detail = { batchId: result.batchId, round: rounds, variants: result.variants, testIds: Object.values(result.testIds ?? {}) };
+      // ★ 배포 2 Codex 3R — T 를 이어 본 통과도 진단 대기 뒤 통과(그 검사의 통과 시각 ≠ 이 시각 · 자정 경계) → 당일 검사로 세지 않는다
+      if (resumedT) detail.resumedFrom = 'diag';
 
       const v = result.variants[0];
       // ★ 2026-10-24 공용 판정(B-0823-1 가) — 옛: 「차단이 아니면 통과」라 큐 등록 실패 · 시간 초과 · 결과 없음도 통과로 승인 요청 · 발송됐다
@@ -466,10 +496,17 @@ async function runSpamRound(row: any, startRound: number): Promise<{
       if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };
       void (verdict satisfies 'blocked');
 
-      await logEvent(row.id, 'spam_blocked', { round: rounds, carriers: v.carrierResults });
+      if (!resumedT) await logEvent(row.id, 'spam_blocked', { round: rounds, carriers: v.carrierResults });
+      // ★ 2026-11-24 이 버전 첫 막힘(T) = 확인 판 → 다듬지 않고 진단 대기(워커 A · 문안 버전당 한 번 · 발송까지 2시간 이상 · fail-open)
+      if (opts.diag && !opts.resume) {
+        const tId = result.testIds?.[v.variantId] ?? Object.values(result.testIds ?? {})[0];
+        const hold = tId ? await startAgencyDiag(row, String(tId), content, rounds) : null;
+        if (hold) return { verdict: 'pending', passed: false, finalContent: original, rounds, detail, diagHold: hold };
+      }
       if (rounds >= MAX_TEST_ROUNDS) break;
 
-      const refined = await refineForSpam({ companyId: row.company_id, original: content, round: rounds });
+      const refined = await refineForSpam({ companyId: row.company_id, original: content, round: rounds, avoid: resumeAvoid });
+      resumeAvoid = undefined;   // 피할 표현은 진단 뒤 첫 다듬기에만
       if (!refined.ok || !refined.content) {
         await logEvent(row.id, 'refine_failed', { round: rounds, reason: refined.reason });
         // ★ 2026-10-24 다듬기 AI 장애는 내용 반려가 아니다(B-0823-1 나) — 검사 장애와 같은 갈래(원문 그대로 · 다시 시도)
@@ -657,6 +694,49 @@ async function settleSpamHold(row: any, token: string, backTo: 'received' | 'app
       return false;
     });
   if (back) console.log(`${LOG} 스팸 검사 ${verdict === 'pending' ? '진행 중' : '확인 중'} request=${row.id} phase=${phase} — 다음 주기에 이어 본다`);
+}
+
+/**
+ * ★ 2026-11-24 진단 대기 보류(설계서 §7 절차 1 · 기존 보류와 같은 꼴) — 다듬지 않고 접수를 받기 전 상태로 · 결과 칸에 diagHold · 장애 셈 0.
+ *   ★ 배포 2 Codex 1R — 저장이 던지면 진단은 부가 동작이라 일반 검사 장애로 세지 않는다: 방금 등록한 판을 닫고(진단 닫기 · 실패해도 판은 관문 15분 상한에 닫힌다)
+ *   접수는 검사 중 · 토큰 그대로 둔다 → 잠금 복구가 되돌리고, 다음 주기는 진단 대기 없이 T 의 글부터 지금처럼(이 버전 진단 사건이 있어 판 0).
+ */
+async function settleDiagHold(row: any, token: string, hold: DiagHold): Promise<void> {
+  const back = await setStatus(row.id, 'received', { ...RELEASE, last_test_result: diagHoldJson(row, hold) }, token)
+    .catch(async (e: any) => {
+      console.warn(`${LOG} 진단 대기 저장 실패 request=${row.id}(판을 닫고 잠금 복구에 맡김 · 장애 셈 0):`, e?.message || e);
+      await closeDiagnosis(hold.parentTestId).catch(() => undefined);
+      return false;
+    });
+  if (back) console.log(`${LOG} 스팸 검사 진단 대기 request=${row.id} parent=${hold.parentTestId} — 다음 주기에 판 결과를 본다`);
+}
+
+/** ★ 2026-11-24 4a = 막힌 통신사 전부 주소만 뺀 글 도착 → 한 트랜잭션 확정(test_failed + 진단 닫기) 뒤 사건 · 담당자 문자(메일 접수면 회신 패스가 메일) */
+async function settleDiag4a(row: any, token: string, hold: DiagHold): Promise<void> {
+  const r = await settleAgencyDiag4a(row, token, hold, diagHoldJson(row, null)).catch((e: any) => {
+    console.warn(`${LOG} 4a 확정 실패 request=${row.id}(잠금 복구가 되돌린다):`, e?.message || e);
+    return { status: 'error' as const };
+  });
+  if (r.status === 'changed') { await setStatus(row.id, 'received', { ...RELEASE }, token).catch(() => false); return; }   // 다음 주기에 다시 판정
+  if (r.status !== 'ok') return;
+  // ★ 배포 2 Codex 1R — 통신사 · 문장 = 잠근 값으로 다시 판정한 것(잠금 앞 판정이 아니라)
+  const { carriers } = r;
+  // 확정 사건 둘(spam_hint 4a · test_failed)은 settleAgencyDiag4a 가 상태와 같은 트랜잭션에 남겼다(★ 배포 2 Codex 3R) · 여기는 커밋 뒤 담당자 문자만
+  await notifyManager({
+    companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
+    callback: row.callback_number, title: '[대행발송] 문안 확인 요청',
+    text: buildTestFailedNotify({ label: shortLabel(row.file_name || row.original_content), carriers: carriers.map(getCarrierLabel), addressCause: true }),
+  });
+}
+
+/** (순수) 회차 결과의 마지막 검사 id · 막힌 통신사(담당자 문자 요약 재료) */
+export function lastSpamTestId(detail: any): string | null {
+  const ids = Array.isArray(detail?.testIds) ? detail.testIds : [];
+  return ids.length > 0 ? String(ids[ids.length - 1]) : null;
+}
+export function blockedCarriersOf(detail: any): string[] {
+  const cr = Array.isArray(detail?.variants?.[0]?.carrierResults) ? detail.variants[0].carrierResults : [];
+  return [...new Set(cr.filter((c: any) => c?.result === 'blocked').map((c: any) => String(c.carrier)))] as string[];
 }
 
 /** (순수) 결과 칸에 검사 중 후보를 얹거나(다듬은 글 · 그 글을 검사한 회차 · 그 행 문안 버전) 지운 값 · 남는 것이 없으면 null(옛 값 그대로 = 비어 있음) */
@@ -942,7 +1022,24 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     try {
       // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
       if (!(await touchTestingLock(row.id, token))) continue;
-      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver } = await runSpamRound(row, 0);
+      // ★ 2026-11-24 진단 대기 이어 보기(설계서 §7 절차 2 · 3) — 대기 = 다시 보류 · 4a = 한 트랜잭션 확정 · 그 밖 = 진단 닫고 T 부터 이어 보기
+      let resume: SpamRoundOpts['resume'];
+      const hold = diagHoldOf(row);
+      if (hold) {
+        const step = await stepAgencyDiag(row, hold);
+        if (step.kind === 'wait') { await settleDiagHold(row, token, hold); continue; }
+        if (step.kind === '4a') { await settleDiag4a(row, token, hold); continue; }
+        const released = await releaseAgencyDiag(row, token, hold, diagHoldJson(row, null)).catch((e: any) => {
+          console.warn(`${LOG} 진단 닫기 실패 request=${row.id}(잠금 복구가 되돌린다):`, e?.message || e);
+          return false;
+        });
+        if (!released) continue;
+        if (step.kind !== 'pass' && step.sentence) await logEvent(row.id, SPAM_HINT_EVENT, { version: hold.version, parentTestId: hold.parentTestId, branch: step.kind, sentence: step.sentence });
+        row.last_test_result = row.last_test_result && typeof row.last_test_result === 'object' ? { ...row.last_test_result, diagHold: undefined } : row.last_test_result;
+        resume = { content: hold.content, rounds: hold.rounds, preferTestId: hold.parentTestId, avoid: step.kind === '4b' ? step.avoid : undefined, passed: step.kind === 'pass' };
+      }
+      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver, diagHold } = await runSpamRound(row, 0, { diag: true, resume });
+      if (diagHold) { await settleDiagHold(row, token, diagHold); continue; }
       // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 접수 상태로 돌리고 대기 뒤 다시(같은 버전 3번째 = 사람 판단)
       if (verdict === 'error') { await settleSpamCheckError(row, token, 'received', 'first', detail); continue; }
       // ★ 2026-11-06 C109 — 보낼 수 없는 글자 반려 = 사람 판단(다시 검사 0)
@@ -959,10 +1056,12 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       if (!passed) {
         if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) continue;
         await logEvent(row.id, 'test_failed', { rounds });
+        // ★ 2026-11-24 M2 — 막힌 통신사 · 확정된 확인 판 결과(없으면 의심 부분) 한 줄 · 「세 차례」 낱말 0
+        const sum = await agencyBlockSummary(row, lastSpamTestId(detail), blockedCarriersOf(detail));
         await notifyManager({
           companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
           callback: row.callback_number, title: '[대행발송] 문안 확인 요청',
-          text: buildTestFailedNotify({ label }),
+          text: buildTestFailedNotify({ label, carriers: sum.carriers, resultLine: sum.resultLine }),
         });
         continue;
       }
@@ -979,7 +1078,9 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       //   그것은 넘어간 그 날의 검사다(그 날 나가는 건이면 유효하고, 아니면 워커 B가 2시간 전에 다시 본다).
       //   비교와 저장에 **같은 한 시각**을 쓴다 — 따로 찍으면 자정 경계에서 둘이 갈린다.
       const passedAt = new Date();
-      const sameDaySend = isSameKstDay(passedAt, new Date(row.requested_at));
+      // ★ 배포 2 Codex 2R — 진단 대기 뒤 T 근거 통과(resumedFrom = diag)는 그 검사의 통과 시각이 이 시각이 아니다(자정 앞 통과 · 자정 뒤 재개) →
+      //   당일 검사로 치지 않는다(final_test_at 0 · 발송일에 워커 B 가 당일 검사를 한다 · 보수 쪽)
+      const sameDaySend = detail?.resumedFrom !== 'diag' && isSameKstDay(passedAt, new Date(row.requested_at));
       // ★2026-10-18 축 4 — 승인 요청 시각 = 상태를 바꾸는 바로 그 UPDATE(24시간 승인 대기의 시작 · 컬럼 전 = 쉼)
       const askStamp = (await hasApprovalRequestedColumn()) ? { approval_requested_at: passedAt } : {};
       if (!await setStatus(
@@ -1213,10 +1314,11 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
       callback: target.callback_number, title: '[대행발송] 예약 취소 안내',
       text: buildFinalBlockedNotify({ label }),
     });
+    const sumB = await agencyBlockSummary(target, lastSpamTestId(detail), blockedCarriersOf(detail));   // ★ 2026-11-24 M2
     await notifyManager({
       companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
       callback: target.callback_number, title: '[대행발송] 문안 확인 요청',
-      text: buildTestFailedNotify({ label }),
+      text: buildTestFailedNotify({ label, carriers: sumB.carriers, resultLine: sumB.resultLine }),
     });
   } catch (err: any) {
     console.error(`${LOG} 당일 재검사 실패 request=${target.id}:`, err);

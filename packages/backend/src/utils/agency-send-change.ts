@@ -22,6 +22,8 @@ import { prepareAgencyCopy, agencyCharNotice } from './agency-send-chars';   // 
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내
 import type { SpellIssue } from './spell-check';
 import { agencySmsBytesOver, agencySmsBytesOverText } from './agency-send-preview';   // ★ 2026-11-17 C142 SMS 길이(뿌리 R68 길이 축)
+import { diagHoldOf } from './agency-spam-diag';
+import { closeDiagnosis } from './spam-diag';   // ★ 2026-11-24 문안 수정 = 옛 문안 진단 닫기(설계서 §6-2-2)
 
 export type AgencyChangeResult =
   | { ok: true; row: any; backTo?: AgencySendStatus; timeShifted?: boolean; notice?: string[]; optOutNotice?: string[] }
@@ -176,7 +178,9 @@ export async function editAgencyContentTx(input: {
   let stale = false;
   try {
     await client.query('BEGIN');
-    await q(`SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [input.requestId, input.companyId]);
+    // ★ 2026-11-24 진단 대기 = 결과 칸을 지우기 전에 잠근 행에서 읽는다(설계서 §6-2-2 · 커밋 뒤 따로 닫으면 그 사이 종료에 참조를 잃는다)
+    const lockedRow = await q(`SELECT last_test_result, content_version FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [input.requestId, input.companyId]);
+    const openDiag = lockedRow.rows[0] ? diagHoldOf(lockedRow.rows[0]) : null;
     const blocked = alreadyDispatched(await attemptBlocksChange(input.companyId, input.requestId, row.dispatch_key, q));
     if (blocked) return blocked;
     const updated = await q(
@@ -205,6 +209,8 @@ export async function editAgencyContentTx(input: {
         ...(input.change.kind === 'spell' ? { spellFixed: input.change.issueIds.length } : {}),
         ...(input.actor || {}),
       });
+      // ★ 2026-11-24 옛 문안의 진단(확인 판)을 같은 트랜잭션에서 닫는다(설계서 §6-2-2 · 남은 판 · 확인 문자 적재 0 · 잠금 순서 = 접수 행 → 진단 잠금)
+      if (openDiag) await closeDiagnosis(openDiag.parentTestId, q);
     }
     await client.query('COMMIT'); committed = true;
   } finally {

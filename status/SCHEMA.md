@@ -3498,6 +3498,7 @@ CREATE INDEX idx_gtm_company ON gateway_template_mappings (company_id);
 **agency_send_events**: `id bigserial PK, request_id uuid NOT NULL REFERENCES agency_send_requests(id) ON DELETE CASCADE, kind varchar(32) NOT NULL, payload jsonb NOT NULL DEFAULT '{}', created_at timestamptz NOT NULL DEFAULT NOW()`. 인덱스 `(request_id, created_at DESC)`.
 
 - ⛔ `agency_send_events.kind`에 **CHECK 없음**(★2026-08-31 `pg_constraint` 실측 = PK·FK 2개뿐). 새 이벤트 종류는 DDL 0으로 늘릴 수 있다 — 대신 프론트 `AgencyEventLog`의 `EVENT_LABEL` 등재가 **같은 커밋**이다(미등재 kind는 화면에서 문장이 뭉개진다).
+- ★2026-11-24 새 사건 kind 둘(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7 · §8-2 · DDL 0 · `AgencyEventLog` 등재 같은 커밋): `spam_hint` = 막힌 부분 짚어 보기(문안 버전당 진단 시작 한 번 · payload `version` · `parentTestId`(T) · `sentTo`(판을 보낸 통신사) · `skipped`(lead · error) / 확정 결과 = `branch`(4a · 4b · 4c) · `sentence`) · `spam_result_mail` = 메일 접수 검사 결과 회신(payload `version` · `outcome` sent · rejected · unknown · 버전당 sent · rejected 한 번 · unknown 3회까지). `agency_send_requests.last_test_result.diagHold` = 진단 대기(`parentTestId` · `version` · `content` · `rounds` · `startedAt` · 문안 수정이 결과 칸째 지우고 같은 트랜잭션에서 진단을 닫는다).
 - ⛔ `created_by`·`approved_by`·`campaign_id`에 **FK 없음**(0728 `23503` 원칙 + 캠페인 정리 워커가 옛 행을 지운다).
 - ⛔ **큐 적재는 당일 재검사 통과 뒤 1회뿐**이라 `queued` 이전 상태에는 MySQL 큐가 없다. 취소도 그 전에는 상태 변경만이다(0611 에이치피오 사고 경로를 구조로 제거).
 - `approval_version`은 승인 당시 `content_version`. 문안이 바뀌면(다듬기) 값이 어긋나 재승인으로 간다.

@@ -17,6 +17,8 @@ interface Props {
   open: boolean;
   variant: SendWarnVariant;
   carriersText: string;
+  /** ★ 2026-11-24 막힌 글의 확인 결과 한 줄(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-1 D3) · 빈 값 = 줄 없음 */
+  hintLine?: string;
   spellOpenCount: number;
   /** 미가입 회사의 스팸 체험 남은 횟수. 유료면 null */
   trialRemaining: number | null;
@@ -27,7 +29,7 @@ interface Props {
 }
 
 export default function SendSpamWarnModal({
-  open, variant, carriersText, spellOpenCount, trialRemaining, onCheckSpam, onOpenSpell, onSendAnyway, onClose,
+  open, variant, carriersText, hintLine, spellOpenCount, trialRemaining, onCheckSpam, onOpenSpell, onSendAnyway, onClose,
 }: Props) {
   const [dismiss, setDismiss] = useState(false);
   const onCloseRef = useRef(onClose);
@@ -114,6 +116,11 @@ export default function SendSpamWarnModal({
                 스팸 검사 1분이면 미리 막을 수 있어요
               </p>
             </>
+          )}
+          {variant === 'blocked' && hintLine && (
+            <div className="ds-warn-card ds-warn-card--amber">
+              <p>{hintLine}</p>
+            </div>
           )}
           {variant === 'warn' && (
             <div className="ds-warn-card ds-warn-card--amber">

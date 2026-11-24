@@ -47,8 +47,9 @@ describe('청구 제외 판정 CT', () => {
 
 describe('적재·워커·비용 표시 배선', () => {
   it('차감을 건너뛴 자동 검사만 무료 표시값으로 적재한다', () => {
-    expect(queue).toContain("const storedSource = source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;");
-    const ins = queue.slice(queue.indexOf('INSERT INTO spam_filter_tests'), queue.indexOf('// 4) 선불 차감'));
+    // ★ 2026-11-24 확인 판(diag) = spam_diag(청구 제외 목록) · 그 밖은 종전 그대로
+    expect(queue).toContain("const storedSource = diag ? SPAM_DIAG_SOURCE : source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;");
+    const ins = queue.slice(queue.indexOf('const insertValues = ['), queue.indexOf('// 4) 선불 차감'));
     expect(ins).toContain('storedSource, variantId || null');
   });
 

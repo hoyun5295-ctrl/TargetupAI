@@ -84,7 +84,8 @@ describe('J1 · R84 — 검사 등록 이름표 칸에 다른 축 식별자 0', 
     const sites = callSites('enqueueSpamTest');
     expect(sites.length).toBeGreaterThanOrEqual(4);
     const withVariant = sites.filter((s) => /\bvariantId\b/.test(s.args));
-    expect(withVariant.map((s) => s.rel)).toEqual(['backend/src/utils/spam-test-queue.ts']);
+    // ★ 2026-11-24 확인 판(spam-diag registerDiag) = variant_id 에 판 번호(K1 · L2 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-1 · 유일 인덱스 (diag_of, variant_id)) — 같은 축(검사의 변형 이름표)
+    expect(withVariant.map((s) => s.rel).sort()).toEqual(['backend/src/utils/spam-diag.ts', 'backend/src/utils/spam-test-queue.ts']);
   });
   it('D2 — 등록 실패 문장에 오류 원문 0 · ENQUEUE_FAILED', () => {
     const t = readPkg('backend/src/utils/spam-test-queue.ts');

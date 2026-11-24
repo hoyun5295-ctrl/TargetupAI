@@ -28,10 +28,10 @@ import { sendSystemAlert } from './system-alert';
 import { getSampleCustomerScope } from './store-scope';
 import { KST_TODAY_START_SQL } from './stats-aggregation';
 // ★ 2026-09-26 한줄로 V2 F49 — 무료 자동 검사 표시값·자동 판정(청구 제외 판정 CT와 한 벌)
-import { SPAM_AUTO_FREE_SOURCE, isAutoSpamSource, notAutoSpamSourceSql, spamCustomerTestSql } from './spam-trial';
+import { SPAM_AUTO_FREE_SOURCE, SPAM_DIAG_SOURCE, isAutoSpamSource, notAutoSpamSourceSql, spamCustomerTestSql } from './spam-trial';
 import { getRegisteredCallbackSet } from './callback-filter';   // ★ 2026-11-05 C103 F1 수동 검사 수락 규칙(배정 발신번호)
 import { normalizePhone } from './normalize-phone';
-import { DIAG_LOCK_SQL, diagLockKey, diagSendsOn, isDiagTest, judgeDiagTestSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
+import { DIAG_LOCK_SQL, DIAG_CAP_LOCK_KEY, diagLockKey, diagSendsOn, isDiagTest, judgeDiagTestSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
 
 // ============================================================
 // 상수
@@ -76,7 +76,7 @@ export interface SpamTestEnqueueParams {
   messageType: 'SMS' | 'LMS' | 'MMS';
   subject?: string;
   firstRecipient?: Record<string, any>;
-  source: 'manual' | 'auto_ai';   // 적재 표시값은 enqueueSpamTest가 정한다(차감 건너뛴 자동 = SPAM_AUTO_FREE_SOURCE)
+  source: 'manual' | 'auto_ai' | typeof SPAM_DIAG_SOURCE;   // 적재 표시값은 enqueueSpamTest가 정한다(차감 건너뛴 자동 = SPAM_AUTO_FREE_SOURCE · 확인 판 = spam_diag · diag 인자와 함께)
   variantId?: string;
   batchId?: string;
   skipPrepaid?: boolean;
@@ -102,6 +102,18 @@ export interface SpamTestEnqueueParams {
    *   옛: 렌더된 글을 큐가 다시 치환해 고객 값 속 템플릿 글(`{{ 'Å' | downcase }}`)이 두 번째 치환에서 풀렸다.
    */
   rendered?: boolean;
+  /**
+   * ★ 2026-11-24 확인 판 등록(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-3) — 부모 검사 · 통신사 하나 · 하루 상한.
+   *   있으면: 단말 = 그 통신사 하나(결과 행 · 발송 건수가 같은 목록) · 출처 spam_diag · 차감 0(skipPrepaid 와 함께) ·
+   *   한 트랜잭션에서 고정 키 잠금 → 같은 판이 있으면 그 판(상한 소모 0) → 상한 셈(발신번호 · 전체 · 한국 날짜) →
+   *   INSERT … ON CONFLICT (diag_of, variant_id) DO NOTHING(유일 부분 인덱스 · 무효면 오류 = 판 없음) → 결과 행.
+   *   상한 = errorCode DIAG_CAP · error 'callback' | 'total'.
+   */
+  diag?: {
+    parentTestId: string; carrier: string; capPerCallback: number; capTotal: number;
+    /** ★ 배포 2 Codex 1R — 부모 진단 잠금 아래에서 부르는 쪽 조건(대행 = 접수 토큰 · 문안 버전 · 진단 대기) · 거짓 = 등록 0(DIAG_CLOSED) */
+    guard?: (run: SqlRun) => Promise<boolean>;
+  };
 }
 
 export interface SpamTestEnqueueResult {
@@ -666,8 +678,12 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
   const {
     companyId, userId, callbackNumber,
     messageContentSms, messageContentLms, messageType, subject,
-    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission, rendered = false, preferTestId,
+    source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission, rendered = false, preferTestId, diag,
   } = params;
+  // ★ 1124 확인 판 = 출처 · 차감 · 이어 보기가 정해진 값이어야 한다(부르는 쪽 실수로 청구 · 이어 보기가 섞이지 않게)
+  if (diag && (source !== SPAM_DIAG_SOURCE || !skipPrepaid || reuseSameDay || manualAdmission || !variantId)) {
+    return { ok: false, errorCode: 'ENQUEUE_FAILED', error: '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 시도해 주세요.' };
+  }
 
   try {
     const hashed = await spamHashInputsOf(params);
@@ -697,9 +713,10 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     }
 
     // 2) 디바이스 조회 + 발송 건수 계산
-    const devices = await query(
-      `SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true ORDER BY carrier`
-    );
+    // ★ 1124 확인 판 = 그 통신사 단말만(결과 행 · 발송 건수가 같은 목록에서 나온다 · 설계서 §6-3)
+    const devices = diag
+      ? await query(`SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true AND carrier = $1 ORDER BY id LIMIT 1`, [diag.carrier])   // ★ 배포 2 Codex 1R — 단말 한 대(결과 행 · 적재 · 판정 하나)
+      : await query(`SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true ORDER BY carrier`);
     if (devices.rows.length === 0) {
       return { ok: false, error: '지금은 스팸 검사를 할 수 없습니다. 관리자에게 문의하세요.', errorCode: 'NO_TEST_DEVICE' };
     }
@@ -761,7 +778,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     //   회사 행을 맨 먼저 잠근다: 검사 행 INSERT의 회사 FK가 KEY SHARE를 잡은 뒤 차감이 FOR UPDATE로 올리면
     //   같은 회사의 동시 등록 둘이 서로의 KEY SHARE를 기다린다(교착). 먼저 잠그면 뒤 등록은 앞 등록의 커밋을 기다린다.
     // ★ 2026-09-26 한줄로 V2 F49 — 차감을 건너뛴 자동 검사는 청구 제외 표시값으로 남긴다(후불 정산·비용 표시가 이 값으로 뺀다).
-    const storedSource = source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;
+    const storedSource = diag ? SPAM_DIAG_SOURCE : source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;
     const client = await pool.connect();
     let testId = '';
     try {
@@ -786,19 +803,70 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
         }
       }
       if (!skipPrepaid) await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [companyId]);
-      const testResult = await client.query(
-        `INSERT INTO spam_filter_tests
-         (company_id, user_id, callback_number, message_content_sms, message_content_lms,
-          message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12)
-         RETURNING id, created_at`,
-        [companyId, userId, callbackNumber,
+      // ★ 1124 확인 판 — 고정 키 잠금(확인 판 등록 전부가 줄 선다) → 같은 판이면 그 판 → 상한 셈(잠금 아래 · 동시 등록 둘이 마지막 한 자리를 함께 못 쓴다)
+      //   ponytail: 전역 잠금 = 하루 몇 통이라 충분 · 늘면 발신번호 키로
+      if (diag) {
+        // ★ 배포 2 Codex 1R — 부모 진단 잠금(진단 닫기와 같은 잠금) 아래에서 다시 본다:
+        //   부모의 그 통신사가 아직 막혔나 · 부르는 쪽 조건(대행 = 접수 토큰 · 문안 버전) — 닫기가 먼저면 등록 0, 등록이 먼저면 닫기가 이 판까지 닫는다
+        //   ★ 배포 2 Codex 2R — 부모의 그 통신사 결과 행을 먼저 잠근다(늦은 보고 갱신과 직렬화 · 순서 = 부모 결과 행 → 진단 잠금 → 고정 키 = 대행 4a 확정과 같은 순서 · 교착 0)
+        const still = await client.query(
+          `SELECT result FROM spam_filter_test_results WHERE test_id = $1::uuid AND carrier = $2 ORDER BY id FOR UPDATE`,
+          [diag.parentTestId, diag.carrier],
+        );
+        await client.query(DIAG_LOCK_SQL, [diagLockKey(diag.parentTestId)]);
+        if (!still.rows.some((r: any) => r.result === SPAM_RESULT.BLOCKED)) { await client.query('ROLLBACK'); return { ok: false, errorCode: 'DIAG_NOT_BLOCKED', error: 'not_blocked' }; }
+        if (diag.guard && !(await diag.guard((sql, params) => client.query(sql, params)))) {
+          await client.query('ROLLBACK');
+          return { ok: false, errorCode: 'DIAG_CLOSED', error: 'closed' };
+        }
+        await client.query(DIAG_LOCK_SQL, [DIAG_CAP_LOCK_KEY]);
+        const same = await client.query(`SELECT id FROM spam_filter_tests WHERE diag_of = $1::uuid AND variant_id = $2`, [diag.parentTestId, variantId]);
+        if (same.rows[0]) {
+          await client.query('ROLLBACK');
+          return { ok: true, testId: String(same.rows[0].id), reused: true };
+        }
+        const cnt = await client.query(
+          `SELECT COUNT(*) FILTER (WHERE REPLACE(callback_number, '-', '') = $1)::int AS cb, COUNT(*)::int AS total
+             FROM spam_filter_tests WHERE source = '${SPAM_DIAG_SOURCE}' AND created_at >= ${KST_TODAY_START_SQL}`,
+          [String(callbackNumber || '').replace(/\D/g, '')],
+        );
+        const over = Number(cnt.rows[0]?.total || 0) >= diag.capTotal ? 'total' : Number(cnt.rows[0]?.cb || 0) >= diag.capPerCallback ? 'callback' : null;
+        if (over) {
+          await client.query('ROLLBACK');
+          return { ok: false, errorCode: 'DIAG_CAP', error: over };
+        }
+      }
+      const insertValues = [companyId, userId, callbackNumber,
          messageContentSms || null, messageContentLms || null,
          messageHash || null, spamCheckNumber,
          storedSource, variantId || null, batchId || null, subject || null,
          // ★ 2026-11-06 C109 — 렌더가 끝난 글 = 표식(워커가 다시 치환하지 않는다) · 그 밖 = 표본 고객(정리된 사본)
-         rendered ? JSON.stringify({ [RENDERED_SAMPLE_MARK]: true }) : (firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null)]
-      );
+         rendered ? JSON.stringify({ [RENDERED_SAMPLE_MARK]: true }) : (firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null)];
+      // ★ 1124 확인 판 = diag_of 를 싣고 유일 부분 인덱스로 충돌을 가린다(행이 안 돌아오면 이미 있음 · 인덱스가 무효면 충돌 판정 자리를 못 찾아 오류 = 판 없음)
+      //   일반 검사 문장은 그대로(새 칸 0 · 배포 1 · DDL 앞에서도 무변경)
+      const testResult = diag
+        ? await client.query(
+          `INSERT INTO spam_filter_tests
+           (company_id, user_id, callback_number, message_content_sms, message_content_lms,
+            message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient, diag_of)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13::uuid)
+           ON CONFLICT (diag_of, variant_id) WHERE diag_of IS NOT NULL DO NOTHING
+           RETURNING id, created_at`,
+          [...insertValues, diag.parentTestId],
+        )
+        : await client.query(
+          `INSERT INTO spam_filter_tests
+           (company_id, user_id, callback_number, message_content_sms, message_content_lms,
+            message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12)
+           RETURNING id, created_at`,
+          insertValues,
+        );
+      if (diag && testResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        const again = await query(`SELECT id FROM spam_filter_tests WHERE diag_of = $1::uuid AND variant_id = $2`, [diag.parentTestId, variantId]);
+        return again.rows[0] ? { ok: true, testId: String(again.rows[0].id), reused: true } : { ok: false, errorCode: 'ENQUEUE_FAILED', error: '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 시도해 주세요.' };
+      }
       testId = testResult.rows[0].id;
 
       // 결과 행 — 커밋 전이라 워커가 이 검사를 집을 때는 늘 전부 있다
@@ -988,11 +1056,18 @@ export async function cleanupStaleActiveTests(thresholdMs: number): Promise<numb
   }
   for (const id of Array.from(_activatedAt.keys())) if (!activeIds.has(id)) _activatedAt.delete(id);
   if (staleIds.length === 0) return 0;
-  await query(
-    `UPDATE spam_filter_test_results SET result = $2
-     WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL`,
-    [staleIds, SPAM_RESULT.TIMEOUT]
+  // ★ 2026-11-24 한 문장 = 결과 행 한 줄(여러 줄을 한 문장으로 쥐면 확인 판 진단 쪽 행 잠금과 서로 기다릴 수 있다 · spam-probe closeProbes 와 같은 이유 · 배포 2 Codex 5R 구조)
+  const open = await query(
+    `SELECT id FROM spam_filter_test_results WHERE test_id = ANY($1::uuid[]) AND received = false AND result IS NULL ORDER BY id`,
+    [staleIds]
   );
+  for (const { id } of open.rows as Array<{ id: string }>) {
+    await query(
+      `UPDATE spam_filter_test_results SET result = $2
+       WHERE id = $1 AND received = false AND result IS NULL`,
+      [id, SPAM_RESULT.TIMEOUT]
+    );
+  }
   await query(
     `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
      WHERE id = ANY($1::uuid[]) AND status = 'active'`,

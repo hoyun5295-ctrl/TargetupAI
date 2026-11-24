@@ -11,6 +11,7 @@
 import { Clock, History } from 'lucide-react';
 import { formatWhen, type AgencySendEvent } from './agency-send-api';
 import { CUI_SEC_TITLE } from '../../utils/console-ui';
+import { carrierLabel } from '../../utils/send-checks';
 
 /** 검사 이력을 담당자 언어로 */
 const EVENT_LABEL: Record<string, string> = {
@@ -88,6 +89,9 @@ const EVENT_LABEL: Record<string, string> = {
   spam_rejected_chars: '문자로 보낼 수 없는 글자가 있어 검사하지 못했습니다',
   // ★ 2026-11-22 C158 검사 문자가 문안 사유로 접수 거절(차단된 주소 등 · 서버 settleSpamRejected 와 같은 커밋 · 사유는 아래 문장이 붙인다)
   spam_rejected: '문안을 보낼 수 없어 검사하지 못했습니다',
+  // ★ 2026-11-24 막힌 부분 짚어 보기(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-2 M4 · 서버 agency-send-worker 와 같은 커밋 · 문장은 아래가 붙인다)
+  spam_hint: '막혔을 수 있는 부분을 짚어 두었습니다',
+  spam_result_mail: '검사 결과를 메일로 알렸습니다',
 };
 
 /** 줄 목록(서버가 남긴 위치 문장 · 글자 자체는 들어 있지 않다) */
@@ -134,6 +138,17 @@ export function describeAgencyEvent(e: AgencySendEvent): string {
     const why = typeof e.payload?.message === 'string' ? e.payload.message.trim() : '';
     return `${EVENT_LABEL[e.kind]}${why ? `: ${why}` : ''}. 문안을 고친 뒤 다시 진행해 주세요`;
   }
+  // ★ 2026-11-24 막힌 통신사 · 확인 판 · 결과 메일(서버 payload: spam_blocked.carriers · spam_hint.sentTo · sentence · spam_result_mail.outcome)
+  if (e.kind === 'spam_blocked' && Array.isArray(e.payload?.carriers)) {
+    const blocked = [...new Set((e.payload.carriers as any[]).filter((c) => c?.result === 'blocked').map((c) => carrierLabel(String(c.carrier))))];
+    if (blocked.length > 0) return `${EVENT_LABEL[e.kind]} (${blocked.join(', ')} 막힘)`;
+  }
+  if (e.kind === 'spam_hint') {
+    if (typeof e.payload?.sentence === 'string' && e.payload.sentence) return e.payload.sentence;
+    const sentTo = Array.isArray(e.payload?.sentTo) ? (e.payload.sentTo as unknown[]).map((c) => carrierLabel(String(c))) : [];
+    if (sentTo.length > 0) return `막힌 부분을 확인하려고 고친 글을 ${sentTo.join(', ')}로 다시 보냈습니다`;
+  }
+  if (e.kind === 'spam_result_mail' && e.payload?.outcome && e.payload.outcome !== 'sent') return '검사 결과 메일을 보내지 못했습니다';
   if (e.kind === 'test_failed' && e.payload?.reason === 'send_rejected') return '문안을 보낼 수 없어 문안 확인이 필요합니다';
   if (e.kind === 'test_failed' && e.payload?.reason === 'unsupported_chars') return '문자로 보낼 수 없는 글자가 있어 문안 확인이 필요합니다';
   return EVENT_LABEL[e.kind] || '진행 상황을 기록했습니다';

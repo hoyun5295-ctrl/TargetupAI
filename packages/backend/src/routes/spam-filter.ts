@@ -17,6 +17,8 @@ import { isManualSpamCallbackAllowed, manualSpamInProgressInTx, MANUAL_SPAM_IN_P
 import { getSampleCustomerScope } from '../utils/store-scope';
 import { recoverAgencySpamErrors } from '../utils/agency-send-worker';   // ★ 2026-11-11 C125 늦은 보고 → 대행발송 대기 해제
 import { resolveOwnerScope } from '../utils/owner-scope';
+import { buildSpamBlockHints, spamHintsResponse, spamHintLine, registerDiag, isDiagColumnMissing, diagReasonText, textHasUrl, agencyOwnsDiag } from '../utils/spam-diag';
+import { migrationPendingBody } from '../utils/db-errors';   // ★ 2026-11-24 막힌 부분 짚어 보기(D1 ~ D4)
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
   SPAM_TRIAL_LIMIT, SPAM_TRIAL_LOCK_SQL, SPAM_TRIAL_SOURCE, countSpamTrialsInTx, judgeSpamVerdict, readSpamTrialStatus, withExpectedSpamDevices,
@@ -747,7 +749,18 @@ router.post('/recent-check', authenticate, async (req: Request, res: Response) =
     // 진행 중인데 시간을 넘긴 건은 끝난 것으로 본다(판정만 · 행은 기존 정리 경로가 닫는다)
     const expired = test.status === 'active' && spamTestRunElapsedMs(test.id, test.created_at) > TEST_TIMEOUT_MS;   // ★ C103 공용 CT(줄에서 기다린 시간 제외)
     const verdict = judgeSpamVerdict(expired ? 'completed' : String(test.status), rows);
+    // ★ 2026-11-24 D3 — 막힌 글이면 확인 결과 한 줄(확정된 확인 판 결과 · 없으면 의심 부분) · 실패해도 경고는 그대로(줄만 없음)
+    let hintLine = '';
+    if (verdict === 'blocked') {
+      try {
+        const h = await buildSpamBlockHints(String(test.id));
+        hintLine = h ? spamHintLine(h) : '';
+      } catch (e: any) {
+        console.warn('[SpamFilter] 막힌 부분 한 줄 계산 실패(줄 없이 응답):', e?.message || e);
+      }
+    }
     return res.json({
+      hintLine,
       checked: true,
       testId: test.id,
       verdict,
@@ -812,8 +825,13 @@ router.get('/tests', authenticate, async (req: Request, res: Response) => {
       baseParams
     );
 
+    // ★ 2026-11-24 D4 — 막힌 검사 줄에 「의심: 글 속 주소」(저장 글에 주소가 있을 때 · 순수 계산 · 읽기 0)
+    const rowsWithHint = tests.rows.map((t: any) => {
+      const blocked = Array.isArray(t.results) && t.results.some((r: any) => r?.result === SPAM_RESULT.BLOCKED);
+      return { ...t, hint: blocked && textHasUrl(String(t.message_content_lms || t.message_content_sms || '')) ? 'url' : null };
+    });
     res.json({
-      tests: tests.rows,
+      tests: rowsWithHint,
       total: parseInt(countResult.rows[0].count),
       page,
       totalPages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
@@ -895,8 +913,19 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    // ★ 2026-11-24 D1 · D2 — 막힌 통신사가 있으면 막혔을 수 있는 부분 · 확인 판 상태 · 다음 판 자격(이 사용자 기준) · 실패하면 hints 없이(화면 깨짐 0)
+    let hints: Awaited<ReturnType<typeof spamHintsResponse>> | null = null;
+    if (testData.status === 'completed' && resultRows.some((r: any) => r.result === SPAM_RESULT.BLOCKED)) {
+      try {
+        const h = await buildSpamBlockHints(String(testId));
+        if (h) hints = await spamHintsResponse(h, String((req as any).user.userId));
+      } catch (e: any) {
+        console.warn('[SpamFilter] 막힌 부분 계산 실패(hints 없이 응답):', e?.message || e);
+      }
+    }
     res.json({
       test: testData,
+      hints,
       results: resultRows,
       // ★ 2026-11-01 B1-4 — 확인 중 행이 있으면 화면은 이 시각까지 15초마다 다시 읽는다(넘으면 「결과를 받지 못했어요」로 멈춤)
       finalBy: spamTestFinalBy(testData.completed_at, resultRows),
@@ -905,6 +934,45 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[SpamFilter] 상세 조회 오류:', err);
     res.status(500).json({ error: '조회 중 오류가 발생했습니다.' });
+  }
+});
+
+// ============================================================
+// [POST] /api/spam-filter/tests/:id/diagnose — 막힌 통신사로 의심 부분을 뺀 글 한 통(확인 판 · ★2026-11-24 D2)
+//   설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6 · §8-1 — 사람이 누르는 발송 입구라 demoBlock · 사용자 범위 = /tests/:id 와 같다 ·
+//   자격(스위치 · 부모 · 보낸 글 · 판 순서 · 발신번호 권한 · 하루 상한)은 registerDiag 한 곳 · 고객 무료(차감 0).
+// ============================================================
+router.post('/tests/:id/diagnose', authenticate, demoBlock, async (req: Request, res: Response) => {
+  try {
+    const companyId = (req as any).user.companyId;
+    const userId = String((req as any).user.userId);
+    const testId = String(req.params.id || '');
+    const carrier = String(req.body?.carrier || '');
+    const variant = Number(req.body?.variant);
+    if (!/^[0-9a-f-]{36}$/i.test(testId) || !['SKT', 'KT', 'LGU'].includes(carrier) || (variant !== 1 && variant !== 2)) {
+      return res.status(400).json({ ok: false, error: '다시 확인할 수 없는 요청이에요.' });
+    }
+    const ownerId = resolveOwnerScope(req);
+    // ★ 배포 2 Codex 1R — 화면 단추는 사람이 건 검사(직접발송 · 체험)만 · 자동 검사(대행 · 여정 · 자동마케팅)의 진단은 그 길(대행 = 진단 대기)이 맡는다(닫힌 진단에 화면이 판을 더하지 않게)
+    const own = await query(
+      `SELECT t.id FROM spam_filter_tests t WHERE t.id = $1 AND t.company_id = $2${ownerId ? ' AND t.user_id = $3' : ''} AND ${spamCustomerTestSql('t')} AND ${notAutoSpamSourceSql('t.source')}`,
+      ownerId ? [testId, companyId, ownerId] : [testId, companyId],
+    );
+    if (own.rows.length === 0) return res.status(404).json({ ok: false, error: '검사를 찾을 수 없어요.' });
+    // ★ 배포 2 Codex 3R — 이 아래는 DB 가 돌려준 정본 id 만 쓴다(대문자 id 로 소유 · 잠금 키 · 대행 소유 대조가 어긋나지 않게)
+    const parentId = String(own.rows[0].id);
+    // ★ 배포 2 Codex 2R — 대행이 이어 본 검사의 진단은 대행이 소유(화면 등록 0 · spam-diag agencyOwnsDiag)
+    if (await agencyOwnsDiag(parentId)) return res.status(409).json({ ok: false, reason: 'off', error: diagReasonText('off') });
+    // 등록 트랜잭션의 부모 진단 잠금 아래에서 한 번 더(그 사이 대행이 진단을 시작 · 닫은 경우 = 등록 0)
+    const r = await registerDiag({ parentTestId: parentId, carrier, variant: variant as 1 | 2, actorUserId: userId, guard: async (run) => !(await agencyOwnsDiag(parentId, run)) });
+    if (r.ok) return res.json({ ok: true, testId: r.testId, reused: r.reused });
+    return res.status(409).json({ ok: false, reason: r.reason, error: diagReasonText(r.reason) });
+  } catch (err: any) {
+    if (isDiagColumnMissing(err)) {
+      return res.status(503).json({ ok: false, ...migrationPendingBody('spam_filter_tests ALTER(diag_of)') });   // db_alter_safety_net · 공용 문장(줄표 0)
+    }
+    console.error('[SpamFilter] 확인 판 등록 오류:', err?.message || err);
+    return res.status(500).json({ ok: false, error: '지금은 다시 확인할 수 없어요.' });
   }
 });
 

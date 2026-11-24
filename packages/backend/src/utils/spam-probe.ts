@@ -79,16 +79,21 @@ function alertDevice(phone: string, carrier: string, why: string): void {
   }).catch(() => undefined);
 }
 
+type ClosedProbe = { resultId: string; phone: string; carrier: string; closed: boolean };
+
 /**
- * 확인 문자 닫기 + 원 행 확정 = 한 문장(★ Codex 구현 1R #5 — 확인 문자만 닫히고 원 행이 확인 중으로 영영 남는 길 0).
+ * 확인 문자 한 줄 닫기 + 원 행 확정 = 한 문장(★ Codex 구현 1R #5 — 확인 문자만 닫히고 원 행이 확인 중으로 영영 남는 길 0).
  *   원 행은 아직 확인 중일 때만 바꾼다(늦은 보고가 먼저 통과로 고쳤으면 그대로) · closed = 이번에 원 행을 닫았는가.
+ *   ★ 2026-11-24 oneRowWhere = 한 줄만 고르는 조건(id · 유일 키 message_hash · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md · 배포 2 Codex 5R · 6R 구조).
+ *     한 문장이 쥐는 것 = 확인 문자 한 줄 + 그 결과 행 하나 → 진단 잠금을 쥐고 판의 확인 문자 → 결과 행을 여러 줄 잡는 쪽(spam-diag lockDiagResultRows)과 고리가 생기지 않는다.
+ *     기한 같은 시각 조건도 고르기와 쓰기가 같은 문장(같은 NOW())이다.
  */
-async function closeProbes(probeWhere: string, params: any[], probeTo: 'received' | 'expired', resultTo: 'blocked' | 'error'): Promise<Array<{ resultId: string; phone: string; carrier: string; closed: boolean }>> {
+async function closeProbeRow(oneRowWhere: string, params: any[], probeTo: 'received' | 'expired', resultTo: 'blocked' | 'error'): Promise<ClosedProbe | null> {
   const stamped = await spamStampReady().catch(() => false);
   const r = await query(
     `WITH p AS (
        UPDATE spam_test_probes SET status = '${probeTo}', decided_at = NOW()
-        WHERE ${probeWhere}
+        WHERE ${oneRowWhere}
         RETURNING result_id, phone, carrier
      ), x AS (
        UPDATE spam_filter_test_results t SET result = $${params.length + 1}${stamped ? ', decided_at = NOW()' : ''}
@@ -98,7 +103,20 @@ async function closeProbes(probeWhere: string, params: any[], probeTo: 'received
      SELECT p.result_id, p.phone, p.carrier, (p.result_id IN (SELECT id FROM x)) AS closed FROM p`,
     [...params, resultTo],
   );
-  return (r.rows as any[]).map((x) => ({ resultId: String(x.result_id), phone: String(x.phone), carrier: String(x.carrier), closed: x.closed === true }));
+  const x = (r.rows as any[])[0];
+  return x ? { resultId: String(x.result_id), phone: String(x.phone), carrier: String(x.carrier), closed: x.closed === true } : null;
+}
+
+/**
+ * 정리 주기의 여러 줄 닫기 = 대상 id 를 먼저 읽고 한 줄씩 closeProbeRow(같은 조건을 다시 건다 · 겹쳐 돌아도 줄마다 한쪽만) ·
+ *   줄이 커밋되면 바로 onClosed(셈 · 단말 경보) — 뒤 줄이 던져도 앞 줄의 경보는 이미 났다(★ 배포 2 Codex 6R).
+ */
+async function closeProbes(probeWhere: string, params: any[], probeTo: 'received' | 'expired', resultTo: 'blocked' | 'error', onClosed: (r: ClosedProbe) => void): Promise<void> {
+  const ids = await query(`SELECT id FROM spam_test_probes WHERE ${probeWhere} ORDER BY id`, params);
+  for (const { id } of ids.rows as Array<{ id: string }>) {
+    const r = await closeProbeRow(`id = $${params.length + 1} AND ${probeWhere}`, [...params, id], probeTo, resultTo);
+    if (r) onClosed(r);
+  }
 }
 
 /**
@@ -203,44 +221,70 @@ async function sendProbe(p: { id: string; phone: string; nonce: string; callback
  */
 export async function runSpamProbeCycle(): Promise<{ claimed: number; errored: number; expired: number }> {
   const out = { claimed: 0, errored: 0, expired: 0 };
+  // ★ 2026-11-24 단계 중간에 한 줄이 던져도 이미 커밋된 줄의 셈은 주기 기록에 남긴다(줄마다 커밋 · 배포 2 Codex 7R) · 오류는 그대로 워커로
+  try {
+    await probeCycleSteps(out);
+  } finally {
+    if (out.claimed || out.errored || out.expired) console.log(`${LOG} 주기 — 보냄 ${out.claimed} · 단말 확인 불가 ${out.errored} · 기한 지남 ${out.expired}`);
+  }
+  return out;
+}
+
+async function probeCycleSteps(out: { claimed: number; errored: number; expired: number }): Promise<void> {
   const ready = await spamProbeSchemaReady();
 
   if (ready.probes) {
     // ⓪ 닫힌 확인 문자인데 원 행이 아직 확인 중(옛 분리 쓰기 · 수동 정리 뒤) = 그 결과로 맞춘다(R6 · 대조 복구)
+    //   ★ 2026-11-24 한 문장 = 결과 행 한 줄(closeProbes 와 같은 이유 · 배포 2 Codex 5R 구조)
     const stamped = await spamStampReady().catch(() => false);
-    await query(
-      `UPDATE spam_filter_test_results t SET result = CASE p.status WHEN 'received' THEN $1 ELSE $2 END${stamped ? ', decided_at = NOW()' : ''}
-         FROM spam_test_probes p
-        WHERE p.result_id = t.id AND p.status IN ('received', 'expired') AND t.result = '${SPAM_RESULT.UNCONFIRMED}'`,
-      ['blocked', 'error'],
+    const repair = await query(
+      `SELECT t.id FROM spam_filter_test_results t JOIN spam_test_probes p ON p.result_id = t.id
+        WHERE p.status IN ('received', 'expired') AND t.result = '${SPAM_RESULT.UNCONFIRMED}' ORDER BY t.id`,
     );
+    for (const { id } of repair.rows as Array<{ id: string }>) {
+      await query(
+        `UPDATE spam_filter_test_results t SET result = CASE p.status WHEN 'received' THEN $1 ELSE $2 END${stamped ? ', decided_at = NOW()' : ''}
+           FROM spam_test_probes p
+          WHERE t.id = $3 AND p.result_id = t.id AND p.status IN ('received', 'expired') AND t.result = '${SPAM_RESULT.UNCONFIRMED}'`,
+        ['blocked', 'error', id],
+      );
+    }
 
     // ① 기한 안에 보고가 안 온 확인 문자 = 단말 장애
-    for (const r of await closeProbes(`status = 'sent' AND deadline_at < NOW()`, [], 'expired', 'error')) {
+    await closeProbes(`status = 'sent' AND deadline_at < NOW()`, [], 'expired', 'error', (r) => {
       out.expired++;
       if (r.closed) alertDevice(r.phone, r.carrier, `확인 문자를 ${PROBE_DEADLINE_MINUTES}분 안에 보고하지 않음`);
-    }
+    });
 
     // ② 발송 전에 멈춘 claim — 상한 안이면 한 번 더 보내고, 넘었으면 expired → error
-    const again = await query(
-      `UPDATE spam_test_probes p SET attempts = p.attempts + 1, claimed_at = NOW()
-         FROM spam_filter_test_results r JOIN spam_filter_tests t ON t.id = r.test_id
-        WHERE p.result_id = r.id AND p.status = 'claimed' AND p.attempts < ${PROBE_MAX_ATTEMPTS}
-          AND p.claimed_at < NOW() - INTERVAL '${PROBE_RECLAIM_MINUTES} minutes'
-        RETURNING p.id, p.phone, p.nonce, t.callback_number`,
+    //   ★ 2026-11-24 한 문장 = 확인 문자 한 줄(closeProbes 와 같은 이유 · 배포 2 Codex 5R 구조)
+    const stuck = await query(
+      `SELECT id FROM spam_test_probes
+        WHERE status = 'claimed' AND attempts < ${PROBE_MAX_ATTEMPTS} AND claimed_at < NOW() - INTERVAL '${PROBE_RECLAIM_MINUTES} minutes' ORDER BY id`,
     );
-    for (const r of again.rows as any[]) {
-      await sendProbe({ id: String(r.id), phone: String(r.phone), nonce: String(r.nonce), callback: String(r.callback_number) })
-        .catch((e) => console.warn(`${LOG} 확인 문자 다시 보내기 실패 probe=${r.id}:`, e?.message || e));
+    //   횟수를 올린 줄은 그 자리에서 바로 다시 보낸다(★ 배포 2 Codex 6R — 뒤 줄이 던져도 앞 줄의 마지막 기회가 보내기 없이 소진되지 않게)
+    for (const { id } of stuck.rows as Array<{ id: string }>) {
+      const one = await query(
+        `UPDATE spam_test_probes p SET attempts = p.attempts + 1, claimed_at = NOW()
+           FROM spam_filter_test_results r JOIN spam_filter_tests t ON t.id = r.test_id
+          WHERE p.id = $1 AND p.result_id = r.id AND p.status = 'claimed' AND p.attempts < ${PROBE_MAX_ATTEMPTS}
+            AND p.claimed_at < NOW() - INTERVAL '${PROBE_RECLAIM_MINUTES} minutes'
+          RETURNING p.id, p.phone, p.nonce, t.callback_number`,
+        [id],
+      );
+      for (const r of one.rows as any[]) {
+        await sendProbe({ id: String(r.id), phone: String(r.phone), nonce: String(r.nonce), callback: String(r.callback_number) })
+          .catch((e) => console.warn(`${LOG} 확인 문자 다시 보내기 실패 probe=${r.id}:`, e?.message || e));
+      }
     }
-    const dead = await closeProbes(
+    await closeProbes(
       `status = 'claimed' AND attempts >= ${PROBE_MAX_ATTEMPTS} AND claimed_at < NOW() - INTERVAL '${PROBE_RECLAIM_MINUTES} minutes'`,
       [], 'expired', 'error',
+      (r) => {
+        out.expired++;
+        if (r.closed) alertDevice(r.phone, r.carrier, '확인 문자를 보내지 못함');
+      },
     );
-    for (const r of dead) {
-      out.expired++;
-      if (r.closed) alertDevice(r.phone, r.carrier, '확인 문자를 보내지 못함');
-    }
   }
 
   // ③ 확인 문자 시작 때가 지났는데 아직 확인 중인 행 — ★ 2026-11-21 C150 자동 검사 = 닫힌 뒤 1분(옛 = 늦은 보고 창 10분) · 사람 검사 = 10분 그대로
@@ -286,9 +330,6 @@ export async function runSpamProbeCycle(): Promise<{ claimed: number; errored: n
     await sendProbe({ id: String(id), phone, nonce, callback: String(r.callback_number) })
       .catch((e) => console.warn(`${LOG} 확인 문자 보내기 실패 probe=${id}(2분 뒤 다시):`, e?.message || e));
   }
-
-  if (out.claimed || out.errored || out.expired) console.log(`${LOG} 주기 — 보냄 ${out.claimed} · 단말 확인 불가 ${out.errored} · 기한 지남 ${out.expired}`);
-  return out;
 }
 
 /**
@@ -305,11 +346,12 @@ export async function matchProbeReport(o: { devicePhone: string; carrier: string
     return used.rows.length > 0 ? 'ignored' : 'none';
   }
   // 단말은 받는다 → 원 문자를 못 받은 것은 통신사 차단이다(확인 문자 닫기와 원 행 확정 = 한 문장)
-  const got = await closeProbes(
+  //   ★ 2026-11-24 한 줄 = 유일 키 message_hash · 기한 조건과 쓰기가 같은 문장(같은 NOW() · 배포 2 Codex 6R)
+  const got = await closeProbeRow(
     `message_hash = $1 AND phone = $2 AND carrier = $3 AND status IN ('claimed', 'sent') AND (deadline_at IS NULL OR deadline_at >= NOW())`,
     [hash, o.devicePhone, o.carrier], 'received', 'blocked',
   );
-  if (got.length > 0) return 'probe';
+  if (got) return 'probe';
   const known = await query(`SELECT 1 FROM spam_test_probes WHERE message_hash = $1 LIMIT 1`, [hash]);
   return known.rows.length > 0 ? 'probe' : 'none';
 }

@@ -99,6 +99,7 @@ const MONEY_ROUTE_EXEMPT: Record<string, string> = {
   'campaigns.ts POST /direct-send/commit': '직접 발송 축 = 전 요금제 기본 기능 · 통제 = 선불 잔액',
   'campaigns.ts POST /brand-send': '직접 발송 축(브랜드 메시지) = 요금제 문 대상 아님 · 통제 = 선불 잔액 · 채널 등록',
   'spam-filter.ts POST /test': '스팸 검사 = 요금제 칸 OR 대행 스위치(plan-guard SPAM_FILTER_OPEN_SQL · ★1026)를 주소 안에서 판정 · 닫힌 회사 = 체험 횟수',
+  'spam-filter.ts POST /tests/:id/diagnose': '★1124 확인 판 = 고객 무료(차감 0) · 이미 요금제 칸 · 체험으로 허락돼 사람이 건 막힌 검사의 부가 확인만 · 등록 문 = 운영 스위치 · 하루 상한 · 엄격 발신번호 권한(spam-diag registerDiag · 설계서 §6-2)',
   'event-campaigns.ts POST /extract-image': '사진 판독 = 입력칸 공용(AI 한줄로 · DM · 이메일 · 인앱) · 크레딧 확인 뒤 성공 때만 걷는다(원장 §4-G 결함 아님)',
   'event-campaigns.ts POST /materials/quote': '견적 = 금액 계산 · 잔액 읽기만(돈을 쓰지 않는다)',
   'mall-products.ts POST /cards': '몰 상품 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(lookupMall)을 돈 함수로 본다',
@@ -3351,6 +3352,7 @@ describe('R25 넓힘(1028 Codex R1) 회사 null = 이유 있는 목록 — 회�
     'utils/journey-selfcheck-set.ts `journey-set-${kind}:${companyId}:${def.key}:${def.rev}`': '합성 회사 여정 세트 워커 = 대상이 사내 합성 회사뿐 · 글이 검사에 걸림 · 검증 횟수를 다 씀 = 코드를 고쳐야 풀리는 신호 · 거름을 타면 경보 0(★1115 C134 S3)',
     "utils/journey-trigger-watcher.ts 'journey-watcher-budget'": '진입 감시 회차 예산 초과 = 플랫폼 원인 하나(★1102 E9 ②)',
     "utils/spam-test-queue.ts 'spam-queue-lag'": '스팸 검사 줄 밀림 = 시험 폰 · 큐 원인 하나(★1102 E9 ③)',
+    'utils/spam-diag.ts `spam-diag-cap:${kstDay}`': '확인 판 전체 하루 상한 = 여러 회사 판을 센 상한 하나(★1124 설계서 §6-2 6 · 회사 무관)',
     "utils/direct-send-worker.ts 'direct-send-queue-lag'": '대량 직접발송 줄 밀림 = 워커 처리량 원인 하나(★1102 §16 G3)',
     "utils/operator-lag.ts 'operator-send-lag'": '자동마케팅 발송 패스 밀림 = 패스 처리량 원인 하나(★1102 §16 G3)',
     "utils/operator-lag.ts 'operator-generate-lag'": '자동마케팅 제안 생성 밀림 = 생성 처리량 원인 하나(★1102 §16 G3)',
@@ -4245,7 +4247,7 @@ describe('R36 스팸 차단 = 확인 문자 수신만 · 확인 중 · 기다림
   it('확인 중은 닫힌다(확인 문자 주기 · 기한 · 재claim 상한 · 창 닫힘) · 하루 측정 · 둘 다 서버가 띄운다', () => {
     const p = stripComments(be('utils/spam-probe.ts'));
     expect(p).toMatch(/closeProbes\(`status = 'sent' AND deadline_at < NOW\(\)`/);
-    expect(p).toMatch(/WHERE p\.result_id = t\.id AND p\.status IN \('received', 'expired'\) AND t\.result = /);   // 대조 복구
+    expect(p).toMatch(/WHERE t\.id = \$3 AND p\.result_id = t\.id AND p\.status IN \('received', 'expired'\) AND t\.result = /);   // 대조 복구(★ 2026-11-24 한 줄씩 · 배포 2 Codex 5R 구조)
     expect(p).toMatch(/p\.attempts < \$\{PROBE_MAX_ATTEMPTS\}/);
     expect(p).toMatch(/t\.completed_at < NOW\(\) - \$\{spamProbeAfterMinutesSql\('t'\)\} \* INTERVAL '1 minute'/);   // ★ C150 자동 1분 · 사람 10분
     expect(p).toContain('await measureSpamVerdicts();');
