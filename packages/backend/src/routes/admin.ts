@@ -1957,6 +1957,51 @@ router.patch('/companies/:id/agency-send', authenticate, requireSuperAdmin, asyn
   }
 });
 
+// ★ 2026-11-24 스팸 검사 「막힌 부분 다시 확인」(확인 판) 회사 스위치 — 슈퍼관리자가 회사마다 켠다(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §9 ·
+//   Harold 「슈퍼관리자에서 선택적으로 회사단위로 키고 끌 수 있도록」). 판정 = spam-diag-gate diagEnabledFor 한 곳(등록 · 두 발송 관문).
+//   ⛔ 끈다고 이미 나간 확인 판 결과가 지워지지 않는다 · 끈 뒤 새 판 등록 0 · 대기 중인 판은 발송 관문이 거부로 닫는다.
+router.get('/companies/:id/spam-diag', authenticate, requireSuperAdmin, requireUuidId, async (req: Request, res: Response) => {
+  try {
+    // to_jsonb = 칸이 없어도(DDL 전) 문장이 깨지지 않는다 · ready = 칸이 있는가(화면이 「DB 준비 전」을 보인다)
+    const r = await query(
+      `SELECT (to_jsonb(c) ->> 'spam_diag_enabled') = 'true' AS enabled, (to_jsonb(c) ? 'spam_diag_enabled') AS ready
+         FROM companies c WHERE c.id = $1::uuid`,
+      [req.params.id],
+    );
+    if (r.rows.length === 0) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    res.json({ success: true, enabled: r.rows[0].enabled === true, ready: r.rows[0].ready === true });
+  } catch (error) {
+    console.error('확인 판 스위치 조회 실패:', error);
+    res.status(500).json({ error: '확인 판 스위치 조회 실패' });
+  }
+});
+
+router.patch('/companies/:id/spam-diag', authenticate, requireSuperAdmin, requireUuidId, async (req: Request, res: Response) => {
+  const enabled = req.body?.enabled;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled는 boolean 필수' });
+  try {
+    const result = await query(
+      `UPDATE companies SET spam_diag_enabled = $1, updated_at = NOW()
+        WHERE id = $2::uuid
+        RETURNING id, company_name, spam_diag_enabled`,
+      [enabled, req.params.id],
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: '회사를 찾을 수 없습니다.' });
+    console.log(`[Admin] 확인 판 스위치: company=${result.rows[0].company_name} → enabled=${enabled}`);
+    res.json({
+      success: true,
+      enabled: result.rows[0].spam_diag_enabled === true,
+      message: enabled
+        ? '막힌 부분 다시 확인을 켰습니다. 이 회사의 막힌 검사에서 확인 판을 보낼 수 있습니다.'
+        : '막힌 부분 다시 확인을 껐습니다. 새 확인 판은 나가지 않고, 의심 부분 안내는 그대로 보입니다.',
+    });
+  } catch (error: any) {
+    if (isMissingSchemaError(error)) return res.status(503).json(migrationPendingBody('companies.spam_diag_enabled ALTER'));
+    console.error('확인 판 스위치 저장 실패:', error);
+    res.status(500).json({ error: '확인 판 스위치 저장 실패' });
+  }
+});
+
 // ★ 2026-08-26 대행발송 허용 발신 이메일 — 이메일 접수(§18)의 발신자 → 회사·귀속 사용자 매핑 원장.
 //   ⛔ 스위치 PATCH에 끼우지 않는다(불리언 하나짜리 계약 유지 · §18-2). 별도 라우트 4개.
 //   ⛔ 귀속 사용자 필수 — created_by가 비면 승인까지 끝난 건이 발송 직전에 dispatch_no_owner로 죽는다.

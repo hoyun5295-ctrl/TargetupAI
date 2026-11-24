@@ -205,3 +205,47 @@ describe('배선(소스 계약)', () => {
     }
   });
 });
+
+describe('★ 1124 회사 스위치(슈퍼관리자 · companies.spam_diag_enabled · ENV 없앰)', () => {
+  const FE = join(SRC, '..', '..', 'frontend', 'src');
+  const fe = (p: string) => readFileSync(join(FE, p), 'utf8');
+  it('판정 = diagEnabledFor 한 곳 · ENV 스위치 잔존 0(서버 전수)', () => {
+    const walk = (dir: string): string[] => readdirSync(join(SRC, dir), { withFileTypes: true }).flatMap((d) =>
+      d.isDirectory() ? (d.name === '__tests__' ? [] : walk(`${dir}/${d.name}`)) : d.name.endsWith('.ts') ? [`${dir}/${d.name}`] : []);
+    const all = ['utils', 'routes', 'services', 'config'].flatMap(walk);
+    expect(all.filter((f) => /SPAM_DIAG_SENDS|diagSendsOn/.test(read(f)))).toEqual([]);
+    expect(all.filter((f) => /diagEnabledFor\(/.test(read(f))).sort()).toEqual(['utils/spam-diag-gate.ts', 'utils/spam-diag.ts', 'utils/spam-probe.ts', 'utils/spam-test-queue.ts']);
+    expect(read('utils/spam-diag-gate.ts')).toContain("(to_jsonb(c) ->> 'spam_diag_enabled') = 'true' AS on FROM companies c WHERE c.id = $1::uuid");
+  });
+  it('소비처 셋 = 그 판의 회사 id · 발송 관문 둘은 잠금 아래 같은 연결 · 저장점 안(권한보다 먼저)', () => {
+    expect(read('utils/spam-diag.ts')).toContain('if (!(await diagEnabledFor(parent.companyId))) return { ok: false, reason: \'off\' };');
+    for (const [f, who] of [['utils/spam-probe.ts', 'k'], ['utils/spam-test-queue.ts', 'p']] as const) {
+      const s = read(f);
+      const sp = s.indexOf("await client.query('SAVEPOINT diag_gate');");
+      const on = s.indexOf(`switchOn = await diagEnabledFor(${who}.companyId, run);`);
+      const cb = s.indexOf(`if (switchOn) callbackAllowed = await diagCallbackAllowed(${who}.companyId,`);
+      expect(sp).toBeGreaterThan(-1);
+      expect(on).toBeGreaterThan(sp);
+      expect(cb).toBeGreaterThan(on);
+    }
+  });
+  it('슈퍼관리자 API = GET · PATCH /companies/:id/spam-diag · 슈퍼관리자 · uuid · boolean 필수 · 칸 없음 503', () => {
+    const admin = read('routes/admin.ts');
+    expect(admin).toContain("router.get('/companies/:id/spam-diag', authenticate, requireSuperAdmin, requireUuidId,");
+    expect(admin).toContain("router.patch('/companies/:id/spam-diag', authenticate, requireSuperAdmin, requireUuidId,");
+    const patch = admin.slice(admin.indexOf("router.patch('/companies/:id/spam-diag'"));
+    const body = patch.slice(0, patch.indexOf('\n});\n'));
+    expect(body).toContain("if (typeof enabled !== 'boolean') return res.status(400)");
+    expect(body).toContain("migrationPendingBody('companies.spam_diag_enabled ALTER')");
+  });
+  it('화면 = 회사 상세 기본 탭에 스위치(값은 컴포넌트가 직접 GET · PATCH) · 꺼진 회사 카드 = 다시 확인 칸째 숨김', () => {
+    expect(fe('components/admin/company-detail/tabs/CompanyBasicTab.tsx')).toContain('<SpamDiagSwitch companyId={editCompany.id} showAlert={showAlert} />');
+    const sw = fe('components/admin/company-detail/SpamDiagSwitch.tsx');
+    expect(sw).toContain('fetch(`/api/admin/companies/${companyId}/spam-diag`, { headers');
+    expect(sw).toContain("method: 'PATCH'");
+    expect(sw).not.toMatch(/window\.(alert|confirm)|\balert\(|confirm\(/);
+    const card = fe('components/SpamBlockHintCard.tsx');
+    expect(card).toContain("const off = !h.eligible && h.reason === 'off';");
+    expect(card).toContain('{(last || (idleText && !off)) && (');
+  });
+});

@@ -7,14 +7,16 @@
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { randomUUID } from 'crypto';
 
-vi.mock('../sms-queue', async (orig) => ({ ...(await orig() as any), insertTestSmsQueue: async () => undefined }));
+const loaded = vi.hoisted(() => ({ n: 0 }));   // ★ 배포 3 Codex 1R — 관문이 적재까지 갔는가
+vi.mock('../sms-queue', async (orig) => ({ ...(await orig() as any), insertTestSmsQueue: async () => { loaded.n += 1; } }));
 vi.mock('../system-alert', async (orig) => ({ ...(await orig() as any), sendSystemAlert: async () => 1 }));
 
 import { pool } from '../../config/database';
 import { insertMinimalRow } from './pg/fixtures';
 import { ledgerBlockSql } from './pg/global-setup';
-import { enqueueSpamTest, RENDERED_SAMPLE_MARK, resetSpamStampCache } from '../spam-test-queue';
+import { enqueueSpamTest, RENDERED_SAMPLE_MARK, resetSpamStampCache, sendDiagTestRow } from '../spam-test-queue';
 import { resetSpamProbeSchemaCache } from '../spam-probe';
+import { diagEnabledFor } from '../spam-diag-gate';
 import { registerDiag, buildSpamBlockHints, closeDiagnosis, lockDiagResultRows, readDiagChecks, spamHintLine } from '../spam-diag';
 
 const CO = randomUUID();
@@ -42,6 +44,8 @@ beforeAll(async () => {
   // 설계서 §9 DDL-1 · DDL-2 그대로
   await pool.query(`SET lock_timeout = '3s'; ALTER TABLE spam_filter_tests ADD COLUMN IF NOT EXISTS diag_of uuid NULL;`);
   await pool.query(`CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_spam_filter_tests_diag ON spam_filter_tests (diag_of, variant_id) WHERE diag_of IS NOT NULL;`);
+  // ★ 1124 설계서 §9 DDL-4 그대로(회사 스위치 · 슈퍼관리자)
+  await pool.query(`SET lock_timeout = '3s'; ALTER TABLE companies ADD COLUMN IF NOT EXISTS spam_diag_enabled boolean NOT NULL DEFAULT false;`);
   resetSpamStampCache();
   resetSpamProbeSchemaCache();
   await insertMinimalRow(pool, 'companies', { id: CO });
@@ -51,7 +55,7 @@ beforeAll(async () => {
   for (const [carrier, phone] of [['SKT', '01000001123'], ['KT', '01000001122'], ['KT', '01000001129'], ['LGU', '01000001124']]) {
     await pool.query(`INSERT INTO spam_filter_devices (device_id, carrier, phone, is_active) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING`, [`dev-1124-${carrier}-${phone}`, carrier, phone]);
   }
-  process.env.SPAM_DIAG_SENDS = 'on';
+  await pool.query(`UPDATE companies SET spam_diag_enabled = true WHERE id = $1`, [CO]);
 });
 
 describe('확인 판 등록(registerDiag → enqueueSpamTest diag)', () => {
@@ -90,11 +94,11 @@ describe('확인 판 등록(registerDiag → enqueueSpamTest diag)', () => {
     expect(await registerDiag({ parentTestId: q, carrier: 'KT', variant: 1, actorUserId: US, hint: h! })).toMatchObject({ ok: false, reason: 'not_blocked' });
   });
 
-  it('스위치 꺼짐 · 막히지 않은 통신사 · 확인 판을 부모로 = 판 0', async () => {
+  it('회사 스위치 꺼짐 · 막히지 않은 통신사 · 확인 판을 부모로 = 판 0', async () => {
     const p = await parent();
-    process.env.SPAM_DIAG_SENDS = 'off';
+    await pool.query(`UPDATE companies SET spam_diag_enabled = false WHERE id = $1`, [CO]);
     expect(await registerDiag({ parentTestId: p, carrier: 'KT', variant: 1, actorUserId: US })).toMatchObject({ ok: false, reason: 'off' });
-    process.env.SPAM_DIAG_SENDS = 'on';
+    await pool.query(`UPDATE companies SET spam_diag_enabled = true WHERE id = $1`, [CO]);
     expect(await registerDiag({ parentTestId: p, carrier: 'SKT', variant: 1, actorUserId: US })).toMatchObject({ ok: false });
     const d = await registerDiag({ parentTestId: p, carrier: 'KT', variant: 1, actorUserId: US });
     expect(await registerDiag({ parentTestId: (d as any).testId, carrier: 'KT', variant: 1, actorUserId: US })).toMatchObject({ ok: false });
@@ -132,6 +136,68 @@ describe('읽기 · 닫기', () => {
     const h2 = await buildSpamBlockHints(p);
     expect(spamHintLine(h2!)).toBe('확인을 마치지 못했어요.');
   });
+
+  it('★ 배포 3 Codex 1R — 회사 스위치 끄기 저장이 관문보다 먼저 커밋되면 검사 문자 관문은 꺼짐을 읽는다(관문이 끄기 커밋을 기다림 · 적재 0)', async () => {
+    const p = await parent();
+    const r = await registerDiag({ parentTestId: p, carrier: 'KT', variant: 1, actorUserId: US });
+    const tid = String((r as any).testId);
+    const row = (await pool.query(`SELECT id, phone FROM spam_filter_test_results WHERE test_id = $1`, [tid])).rows[0];
+    await pool.query(`UPDATE spam_filter_tests SET status = 'active' WHERE id = $1`, [tid]);   // 대기열이 집은 판
+    const a = await pool.connect();
+    loaded.n = 0;
+    try {
+      await a.query('BEGIN');
+      await a.query(`UPDATE companies SET spam_diag_enabled = false WHERE id = $1`, [CO]);   // 슈퍼관리자 끄기 저장(커밋 전)
+      const gate = sendDiagTestRow({ testId: tid, parentTestId: p, companyId: CO, userId: US, callback: CB, rowId: String(row.id), phone: String(row.phone), messageType: 'LMS', content: '글', title: '' });
+      gate.catch(() => undefined);
+      await new Promise((res) => setTimeout(res, 500));
+      await a.query('COMMIT');
+      expect(await gate).toBe(false);
+      expect(loaded.n).toBe(0);
+      expect((await pool.query(`SELECT result FROM spam_filter_test_results WHERE id = $1`, [row.id])).rows[0].result).toBe('error');
+    } finally {
+      await a.query('ROLLBACK').catch(() => undefined);
+      a.release();
+      await pool.query(`UPDATE companies SET spam_diag_enabled = true WHERE id = $1`, [CO]);
+    }
+  });
+
+  it('★ 배포 3 Codex 3R — 시간 상한은 회사 행 읽기 한 문장에만 · 읽은 뒤 그 트랜잭션의 직전 값으로 되돌린다', async () => {
+    const c = await pool.connect();
+    try {
+      await c.query('BEGIN');
+      await c.query(`SET LOCAL statement_timeout = '7s'`);
+      expect(await diagEnabledFor(CO, (sql, params) => c.query(sql, params))).toBe(true);
+      expect((await c.query(`SELECT current_setting('statement_timeout') AS v`)).rows[0].v).toBe('7s');
+    } finally {
+      await c.query('ROLLBACK').catch(() => undefined);
+      c.release();
+    }
+  });
+
+  it('★ 배포 3 Codex 2R — 다른 쓰기가 회사 행을 오래 쥐어도 관문은 대기 상한(2초) 안에 거부로 끝난다(적재 0 · 대기열이 멈추지 않음)', async () => {
+    const p = await parent();
+    const r = await registerDiag({ parentTestId: p, carrier: 'KT', variant: 1, actorUserId: US });
+    const tid = String((r as any).testId);
+    const row = (await pool.query(`SELECT id, phone FROM spam_filter_test_results WHERE test_id = $1`, [tid])).rows[0];
+    await pool.query(`UPDATE spam_filter_tests SET status = 'active' WHERE id = $1`, [tid]);
+    const a = await pool.connect();
+    loaded.n = 0;
+    try {
+      await a.query('BEGIN');
+      await a.query(`SELECT id FROM companies WHERE id = $1 FOR UPDATE`, [CO]);   // 선불 차감 등 회사 행을 쥔 쓰기(끝나지 않음)
+      const t0 = Date.now();
+      const sent = await sendDiagTestRow({ testId: tid, parentTestId: p, companyId: CO, userId: US, callback: CB, rowId: String(row.id), phone: String(row.phone), messageType: 'LMS', content: '글', title: '' });
+      const took = Date.now() - t0;
+      expect(sent).toBe(false);
+      expect(loaded.n).toBe(0);
+      expect(took).toBeLessThan(6_000);
+      expect((await pool.query(`SELECT result FROM spam_filter_test_results WHERE id = $1`, [row.id])).rows[0].result).toBe('error');
+    } finally {
+      await a.query('ROLLBACK').catch(() => undefined);
+      a.release();
+    }
+  }, 20_000);
 
   it('★ 배포 2 Codex 4R — 4a 확정(판 행 잠금 + 진단 닫기)과 확인 문자 기한 처리(확인 문자 → 결과 행)가 겹쳐도 교착 0', async () => {
     const p = await parent();

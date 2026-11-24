@@ -108,7 +108,9 @@ function CarrierHint({ testId, token, h, onSent }: { testId: string; token: stri
   const btnText = h.next === 1 ? `주소 빼고 ${c}로 다시 확인` : `${lineWord} 빼고 ${c}로 다시 확인`;
   const idleText = h.next === 1 ? <>주소만 뺀 글을 <b>{c}로만</b> 한 통 보내 도착하는지 확인해요. 요금은 없어요.</>
     : h.next === 2 ? <>{lineWord}을 뺀 글을 <b>{c}로만</b> 한 통 보내 도착하는지 확인해요. 요금은 없어요.</> : null;
-  const reason = !h.eligible && h.next !== null && !pending ? h.reasonText : '';
+  // ★ 2026-11-24 꺼진 회사(회사 스위치 · reason 'off') = 다시 확인 칸째 숨김(단추 · 사유 줄 0) · 이미 있는 판의 결과는 그대로 보인다
+  const off = !h.eligible && h.reason === 'off';
+  const reason = !h.eligible && !off && h.next !== null && !pending ? h.reasonText : '';
 
   const send = async () => {
     if (!canSend || busy) return;
@@ -158,7 +160,7 @@ function CarrierHint({ testId, token, h, onSent }: { testId: string; token: stri
         </p>
       )}
 
-      {(last || idleText) && (
+      {(last || (idleText && !off)) && (
         <div className={`mt-3 rounded-xl border px-3 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2.5 ${box}`}>
           {pending && <Loader2 className="w-4 h-4 text-amber-500 animate-spin shrink-0" />}
           <p className="flex-1 min-w-0 text-[12.5px] text-stone-700 leading-relaxed">

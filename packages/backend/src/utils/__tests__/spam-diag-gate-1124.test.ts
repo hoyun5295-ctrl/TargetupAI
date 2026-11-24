@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
-  judgeDiagTestSend, judgeDiagProbeSend, diagSendsOn, diagLockKey, DIAG_TEST_SEND_MINUTES, DIAG_PROBE_SEND_MINUTES,
+  judgeDiagTestSend, judgeDiagProbeSend, diagEnabledFor, diagLockKey, DIAG_TEST_SEND_MINUTES, DIAG_PROBE_SEND_MINUTES,
 } from '../spam-diag-gate';
 
 const NOW = Date.parse('2026-11-24T05:00:00Z');
@@ -61,10 +61,21 @@ describe('확인 문자 관문(judgeDiagProbeSend)', () => {
 });
 
 describe('스위치 · 잠금 키', () => {
-  it('스위치 = ENV SPAM_DIAG_SENDS 가 정확히 on 일 때만', () => {
-    expect(diagSendsOn({ SPAM_DIAG_SENDS: 'on' })).toBe(true);
-    expect(diagSendsOn({ SPAM_DIAG_SENDS: 'ON' })).toBe(false);
-    expect(diagSendsOn({})).toBe(false);
+  it('★ 1124 스위치 = 회사 칸(companies.spam_diag_enabled) 이 true 일 때만 · 칸 없음 · 회사 없음 = 꺼짐 · 잠금 연결에서는 던짐', async () => {
+    const seen: string[] = [];
+    const run = (rows: any[]) => async (sql: string, params?: any[]) => { seen.push(`${sql}|${(params || []).join(',')}`); return { rows }; };
+    expect(await diagEnabledFor('c1', run([{ on: true }]))).toBe(true);
+    expect(await diagEnabledFor('c1', run([{ on: false }]))).toBe(false);
+    expect(await diagEnabledFor('c1', run([{ on: null }]))).toBe(false);   // to_jsonb 에 칸이 없으면 NULL
+    expect(await diagEnabledFor('c1', run([]))).toBe(false);               // 회사 없음
+    // ★ 배포 3 Codex 2R · 3R — 잠금 연결 = 직전 값 읽기 → 문장 총 시간 상한(2초) → 회사 행 FOR SHARE(끄기 저장과 순서 · 1R) → 직전 값으로 되돌림
+    expect(seen[0]).toBe("SELECT current_setting('statement_timeout') AS v|");
+    expect(seen[1]).toBe("SELECT set_config('statement_timeout', $1, true)|2s");
+    expect(seen[2]).toMatch(/to_jsonb\(c\) ->> 'spam_diag_enabled'/);
+    expect(seen[2]).toMatch(/\|c1$/);
+    expect(seen[2]).toMatch(/WHERE c\.id = \$1::uuid FOR SHARE\|/);
+    expect(seen[3]).toBe("SELECT set_config('statement_timeout', $1, true)|0");   // 가짜 연결의 직전 값 = 없음 → '0'
+    await expect(diagEnabledFor('c1', async () => { throw new Error('conn'); })).rejects.toThrow('conn');
   });
   it('잠금 키 = 부모 검사 id 하나(닫기 · 두 적재 함수가 같은 키)', () => {
     expect(diagLockKey('abc')).toBe('spam_diag:abc');

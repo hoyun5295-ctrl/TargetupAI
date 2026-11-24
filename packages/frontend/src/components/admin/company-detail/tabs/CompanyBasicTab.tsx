@@ -9,6 +9,7 @@ import { PlanTermLockNote } from '../../PlanTermBox';
 import { formatAgentIdLabel } from '../../../../utils/agentLabel';
 import { previewUnitPrice, fmtPrice } from '../../../../utils/unitPrice';
 import type { Plan } from '../../admin-types';
+import SpamDiagSwitch from '../SpamDiagSwitch';   // ★ 2026-11-24 확인 판 회사 스위치
 
 export interface CompanyBasicTabProps {
   agencyEmailActiveCount: number | null;
@@ -774,6 +775,8 @@ export default function CompanyBasicTab(props: CompanyBasicTabProps) {
                       </button>
                     </div>
                   </div>
+                  {/* ★ 2026-11-24 스팸 검사 「막힌 부분 다시 확인」 회사 스위치(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §9) · 값은 컴포넌트가 직접 읽고 쓴다 */}
+                  <SpamDiagSwitch companyId={editCompany.id} showAlert={showAlert} />
                   {/* ★ 2026-08-26 실험실 — 실사용 0~1개사 기능을 접어 정리(실측: 카카오 0사 · Orchestrator 1사 · 자율발송 0사).
                       기능·값·저장 계약(카카오 = 폼 통째 저장 · Orchestrator = 즉시 PATCH · 자율발송 = 자체 저장 버튼)은 무변경 */}
                   <div className="border border-gray-200 rounded-xl overflow-hidden">

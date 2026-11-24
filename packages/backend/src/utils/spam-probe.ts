@@ -12,7 +12,7 @@
  */
 import { randomBytes } from 'crypto';
 import pool, { query } from '../config/database';
-import { DIAG_LOCK_SQL, diagLockKey, diagSendsOn, isDiagTest, judgeDiagProbeSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
+import { DIAG_LOCK_SQL, diagLockKey, diagEnabledFor, isDiagTest, judgeDiagProbeSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
 import { insertTestSmsQueue } from './sms-queue';
 import { sendSystemAlert } from './system-alert';
 import { SPAM_RESULT } from './sms-result-map';
@@ -130,10 +130,10 @@ async function closeProbes(probeWhere: string, params: any[], probeTo: 'received
  *   내 것 아님(claimed 가 아님) = 아무것도 안 씀 · 거부 = 확인 문자 expired + 결과가 아직 unconfirmed 일 때만 error(정해진 결과는 둔다).
  */
 export async function sendDiagProbe(p: { id: string; phone: string; nonce: string; callback: string }, k: { parentTestId: string | null; testId: string; companyId: string; userId: string; createdAt: unknown }): Promise<void> {
-  const switchOn = diagSendsOn();
   const stamped = await spamStampReady().catch(() => false);   // 잠금 안 거부 쓰기가 같은 풀을 다시 쓰지 않게 값으로 넘긴다
   const client = await pool.connect();
   const run = (sql: string, params?: any[]) => client.query(sql, params);
+  let switchOn = false;   // ★ 2026-11-24 회사 스위치 = 잠금 아래 같은 연결로(저장점 안 · 조회 오류 = 꺼짐)
   let decided: DiagGate = 'reject';
   let gateAt = 0;
   try {
@@ -150,9 +150,10 @@ export async function sendDiagProbe(p: { id: string; phone: string; nonce: strin
     const mine = !!c && c.probe_status === 'claimed';
     let callbackAllowed = false;
     await client.query('SAVEPOINT diag_gate');
-    if (mine && switchOn && k.parentTestId) {
+    if (mine && k.parentTestId) {
       try {
-        callbackAllowed = await diagCallbackAllowed(k.companyId, k.userId, p.callback, run);
+        switchOn = await diagEnabledFor(k.companyId, run);
+        if (switchOn) callbackAllowed = await diagCallbackAllowed(k.companyId, k.userId, p.callback, run);
       } catch (err: any) {
         await client.query('ROLLBACK TO SAVEPOINT diag_gate');
         console.warn(`${LOG} 확인 판 권한 조회 실패 — 보내지 않고 닫는다 probe=${p.id}:`, err?.message || err);

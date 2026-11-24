@@ -19,7 +19,7 @@ import { hasAgencyColumn } from './agency-send-intake';
 import { sendSystemAlert } from './system-alert';
 import { getCarrierLabel } from './sms-result-map';
 import { tokenizeSpamText, rankSuspects, makeDiagVariant, type Suspect, type CarrierChecks, type DiagCheckState, type DiagVariantBasis } from './spam-block-hint';
-import { diagSendsOn, diagCallbackAllowed, DIAG_LOCK_SQL, diagLockKey } from './spam-diag-gate';
+import { diagEnabledFor, diagCallbackAllowed, DIAG_LOCK_SQL, diagLockKey } from './spam-diag-gate';
 
 type SqlRun = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
 
@@ -201,8 +201,9 @@ export async function buildSpamBlockHints(testId: string, opts: { templateText?:
  *   actorUserId = 판 행의 user_id 로 고정될 등록 계정(직접발송 = 누른 사용자 · 대행 = 접수 계정).
  */
 export async function diagEligibility(i: { hint: SpamBlockHints; carrier: string; variant: 1 | 2 | null; actorUserId: string }): Promise<{ ok: true } | { ok: false; reason: DiagIneligible }> {
-  if (!diagSendsOn()) return { ok: false, reason: 'off' };
   const { parent, sendable, carriers } = i.hint;
+  // ★ 2026-11-24 회사 스위치(슈퍼관리자 · companies.spam_diag_enabled · 조회 실패 = 꺼짐)
+  if (!(await diagEnabledFor(parent.companyId))) return { ok: false, reason: 'off' };
   if (parent.source === SPAM_DIAG_SOURCE || parent.diagOf) return { ok: false, reason: 'diag_parent' };
   const c = carriers.find((x) => x.carrier === i.carrier);
   if (!c || parent.status !== 'completed') return { ok: false, reason: 'not_blocked' };

@@ -135,7 +135,7 @@
 
 ### 6-2. 등록 자격(`diagEligibility` · 하나라도 아니면 판 없음 · 사유 표시)
 
-1. 운영 스위치 `SPAM_DIAG_SENDS=on`(프로세스 ENV · 기본 꺼짐 · 켜고 끄기 = 백엔드 재시작 · §6-2-1).
+1. 회사 스위치 `companies.spam_diag_enabled = true`(★1124 회사 스위치 · Harold 「슈퍼관리자에서 선택적으로 회사단위로 키고 끌 수 있도록」 · 슈퍼관리자 회사 상세 기본 탭 · 기본 꺼짐 · 재시작 0 · 옛 ENV `SPAM_DIAG_SENDS` 는 없앰 · §9).
 2. 부모 = 같은 회사의 **일반 검사**(`source <> 'spam_diag'` · `diag_of IS NULL`) · 닫힌 검사 · 그 통신사 결과 행이 **지금** `blocked`. 확인 판을 부모로 받지 않는다(재귀 0).
 3. 보낸 글 복원 가능(§5-1).
 4. 판 순서(§6-1) — 판 ① 은 주소가 있을 때 · 판 ② 는 판 ① 이 빼도 막힘 확정이거나 판 ① 이 없을 때.
@@ -144,7 +144,7 @@
 
 ### 6-2-1. 발송 관문(`diagSendGate` · ★Codex 3R 구조)
 
-> ★1124 구현 이름: 판정 · 스위치 · 잠금 키 · 엄격 권한 CT = `utils/spam-diag-gate.ts`(`judgeDiagTestSend` · `judgeDiagProbeSend` · `diagSendsOn` · `diagLockKey` · `DIAG_LOCK_SQL` · `diagCallbackAllowed` · `isDiagTest`) · 잠금 트랜잭션은 적재하는 쪽 파일에 = `spam-test-queue.ts sendDiagTestRow`(executeSpamTest 가 확인 판이면 부름) · `spam-probe.ts sendDiagProbe`(sendProbe 가 출처를 스스로 읽고 부름). 순환 import 0(관문 CT 는 두 파일을 import 하지 않는다).
+> ★1124 구현 이름: 판정 · 스위치 · 잠금 키 · 엄격 권한 CT = `utils/spam-diag-gate.ts`(`judgeDiagTestSend` · `judgeDiagProbeSend` · `diagEnabledFor`(★1124 회사 스위치 · 옛 `diagSendsOn`) · `diagLockKey` · `DIAG_LOCK_SQL` · `diagCallbackAllowed` · `isDiagTest`) · 잠금 트랜잭션은 적재하는 쪽 파일에 = `spam-test-queue.ts sendDiagTestRow`(executeSpamTest 가 확인 판이면 부름) · `spam-probe.ts sendDiagProbe`(sendProbe 가 출처를 스스로 읽고 부름). 순환 import 0(관문 CT 는 두 파일을 import 하지 않는다).
 
 - **왜 함수 안인가** — 1R · 2R · 3R 에 같은 부류(「관문이 빠진 발송 자리」)가 세 번 나왔다. 부르는 자리를 세어 관문을 붙이면 자리가 더 나온다(대기열 집기 · 확인 문자 첫 선점 · 다시 보내기). **확인 판의 문자는 두 함수로만 적재된다** — 검사 문자 = `executeSpamTest` 의 적재(`spam-test-queue.ts:1154` · 확인 판은 대기열 검사만 · 사람 검사 라우트의 직접 적재 `routes/spam-filter.ts:319` 를 타지 않는다) · 확인 문자 = `sendProbe`(`spam-probe.ts:98` · 첫 선점 `:193` · 다시 보내기 `:140` 모두 이 함수). 관문은 이 두 함수 안, 적재 직전에 둔다(2R 의 「집는 자리 · 선점 자리」 관문 둘은 지운다).
 - **확인과 「보내기로 정함」을 한 잠금 아래에서**(★Codex 설계 4R 구조 — 확인한 뒤 행동까지의 틈에 진단이 닫히면 닫힌 뒤에 나간다): 두 함수는 확인 판일 때 PG 트랜잭션을 열고 **부모 진단 잠금** `pg_advisory_xact_lock(hashtext('spam_diag:' || 부모 id))` 을 잡은 뒤 → 영속 상태를 다시 읽어 관문을 보고 → 통과면 「보내기로 정함」을 확정(확인 문자 = `sent` · 기한 / 검사 문자 = 판 active · 결과 NULL 그대로 · 한 판의 실행기는 하나) → 커밋.
@@ -160,7 +160,7 @@
 - 관문 조회가 SQL 오류를 내면 그 트랜잭션은 실패 상태라 → **저장점으로 되돌린 뒤** 닫기를 쓰고 커밋한다(★Codex 6R). 연결이 끊기면 닫기 없이 끝나고 지금의 길대로 간다(★Codex 7R · 두 길이 다르다): **검사 문자** = 판이 `active` 로 남았다가 멈춘 검사 정리(`cleanupStaleActiveTests` · `spam-test-queue.ts:973-997`)가 `NULL` 결과를 `timeout` 으로 쓰고 닫는다 → **다시 보내지 않는다** · 판 결과 = 「확인을 마치지 못했어요」(받아들인 결과 · 진단만 빠진다) / **확인 문자** = `claimed` 로 남아, **시도 여유가 있으면**(`attempts < PROBE_MAX_ATTEMPTS = 2`) 2분 뒤 다시 보내기(`spam-probe.ts:131-141` · 시도 수를 먼저 올린다)가 `sendProbe` 를 다시 불러 같은 관문을 다시 지난다 · **상한에 닿았으면** 지금 규칙대로 적재 없이 확인 문자 `expired` + 결과 `error` 로 닫힌다(`:143-146` · 지금 발송 상한 그대로 · ★Codex 8R).
 - 검사의 결과 판정 쓰기(`SPAM_RESULT_DECIDE_SQL` = `… WHERE id = $2 AND received = false AND result IS NULL` · `sms-result-map.ts:644`)는 `NULL` 행만 쓰므로 닫힌(`error`) 행을 덮지 않는다. 15초 확인 고리 · 시간 제한은 적재 잠금 밖에서 그대로 돈다.
 - 첫 선점 INSERT(`spam-probe.ts:182-188`)는 그대로 둔다 — 후보를 읽은 뒤 진단이 닫혀 `claimed` 가 늦게 생겨도, 그 확인 문자는 `sendProbe` 의 잠금 아래 관문에서 「결과가 이미 `unconfirmed` 가 아님」으로 거부 · `expired` 된다(적재 0). (5R 에 덧댔던 「조건부 첫 선점」은 6R 에 지웠다 — 되돌리기를 앱 정지 상태로만 하므로 필요 없어졌다 · §12 · §15.)
-- 스위치 = 프로세스 ENV 라 **끄려면 백엔드 재시작이 필요하다**(★Codex 7R). 대기열 일꾼 · 확인 문자 일꾼은 백엔드 한 프로세스 안에서 돈다(`app.ts:653-654` · `ecosystem.config.js:26` · `:45-46` `instances: 1` · `fork`) → 재시작으로 옛 프로세스가 끝나면 그 안의 진행 중 적재도 끝나고, 새 프로세스부터 관문이 모든 확인 판 문자(대기 · 첫 선점 · 다시 보내기)를 막는다. 끄기 직전에 관문을 이미 지난 적재는 나갈 수 있다(진행 중이던 몇 통).
+- (★1124 회사 스위치 앞 · 기록) 스위치 = 프로세스 ENV 라 **끄려면 백엔드 재시작이 필요하다**(★Codex 7R). ★1124 회사 스위치 뒤 = 회사 칸을 두 관문이 잠금 아래 같은 연결로 매번 읽으므로 끈 뒤 새로 관문을 지나는 적재 0 · 재시작 불필요 · 이 줄의 나머지는 옛 ENV 판의 기록이다. 대기열 일꾼 · 확인 문자 일꾼은 백엔드 한 프로세스 안에서 돈다(`app.ts:653-654` · `ecosystem.config.js:26` · `:45-46` `instances: 1` · `fork`) → 재시작으로 옛 프로세스가 끝나면 그 안의 진행 중 적재도 끝나고, 새 프로세스부터 관문이 모든 확인 판 문자(대기 · 첫 선점 · 다시 보내기)를 막는다. 끄기 직전에 관문을 이미 지난 적재는 나갈 수 있다(진행 중이던 몇 통).
 - 관문은 그 검사의 출처가 `spam_diag` 일 때만 열리고 그때만 `diag_of` 를 읽는다 — 배포 1(DDL 앞)에서도 일반 검사가 지나는 문장에 새 칸 0.
 - 일반 검사(부모 · 사람 검사 · 자동 검사)는 이 관문을 지나지 않는다(무변경).
 
@@ -313,7 +313,13 @@ docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELE
 - ★1124 DDL-0 실측(Harold 실행): `diag_of` 없음 · `variant_id` **varchar(10)**(옛 SCHEMA 의 varchar(2) 는 틀렸음 · `K1` 등 들어감) · `source` varchar(20) · `user_id` uuid NOT NULL · `callback_number` varchar(20) NOT NULL · **CHECK 0** · `uq_spam_filter_tests_diag` 없음 · `spam_test_probes` 의 status · attempts · claimed_at · decided_at 있음 → DDL-1 · DDL-2 그대로.
 - DDL-3 기대: 1행 · `indisvalid = t` · `indisunique = t` · 정의 = `(diag_of, variant_id) WHERE (diag_of IS NOT NULL)`. **무효(f)면** `DROP INDEX CONCURRENTLY uq_spam_filter_tests_diag;` 뒤 DDL-2 를 다시 · 유효를 볼 때까지 스위치를 켜지 않는다.
 - 안전망(`db_alter_safety_net`): `POST /tests/:id/diagnose` 의 catch 에서 `column` · `does not exist` → 503 `DB_MIGRATION_PENDING` 「DB 마이그레이션 필요 — spam_filter_tests ALTER 실행 요청」. `GET /tests/:id` 의 판 읽기가 42703 이면 `diag.checks` 빈 배열(A 만 · 화면 깨짐 0). 대행 = §7 fail-open.
-- 스위치 = `SPAM_DIAG_SENDS`(기본 꺼짐) — 꺼져 있으면 판 등록 0 · A 와 이미 있는 판 읽기는 그대로.
+- 스위치 = 회사 칸 `companies.spam_diag_enabled`(★1124 회사 스위치 · 기본 꺼짐 · 슈퍼관리자 `GET` · `PATCH /api/admin/companies/:id/spam-diag` · 회사 상세 기본 탭 `SpamDiagSwitch`) — 판정 CT = `spam-diag-gate.ts diagEnabledFor`(칸 없음 · 회사 없음 · 조회 실패 = 꺼짐 · 잠금 연결에서는 던져 저장점 되돌림 뒤 거부) · 소비처 = 등록 자격 · 두 발송 관문. 꺼진 회사 = 판 등록 0 · 대기 판은 관문이 거부로 닫음 · A 는 그대로 · 카드의 다시 확인 칸째 숨김. 전체를 급히 끄기 = `UPDATE companies SET spam_diag_enabled = false`.
+- DDL-4(★1124 회사 스위치):
+
+```bash
+docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SET lock_timeout = '3s'; ALTER TABLE companies ADD COLUMN IF NOT EXISTS spam_diag_enabled boolean NOT NULL DEFAULT false;"
+```
+- DDL-4 앞 실측(Harold 1124): `companies` 에 `spam_diag_enabled` 없음 · 같은 꼴 스위치 칸 = `agency_send_enabled` · `use_ai_orchestrator` · `cdp_auto_execute_enabled` 모두 `boolean NOT NULL DEFAULT false`.
 
 ---
 
@@ -376,7 +382,7 @@ docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELE
 | 정해진 값 보존 | 관문이 거부할 때 결과가 이미 `pass` → 그대로 둠(확인 문자 행만 `expired`) / 닫힌 행을 결과 판정 쓰기(`result IS NULL`)가 덮지 않음 |
 | 확인 문자 소유 | **첫 선점이 늦어져 다시 보내기와 같은 `claimed` 를 둘이 잡음** → 잠금 아래 먼저 온 쪽만 보내고 `sent` · 뒤에 온 쪽은 `claimed` 가 아니라 아무것도 안 씀(그 `sent` 행 · `unconfirmed` 결과 그대로) |
 | 관문 SQL 오류 | 잠금을 잡은 뒤 권한 조회가 SQL 오류 → 저장점으로 되돌리고 닫기 커밋(열린 채 남지 않음) / 연결 끊김 — **검사 문자** = 멈춘 검사 정리가 `timeout` 으로 닫고 다시 안 보냄 · 늦게 도착한 실행기는 「내 것 아님」(`NULL` 아님)으로 적재 0 / **확인 문자** = 시도 여유가 있으면 다시 보내기가 관문을 다시 지남 · **마지막 시도의 관문 조회 중 끊김** → 상한 규칙대로 적재 없이 `expired` + 결과 `error` |
-| 스위치 끔 | ENV 끔 + 재시작 뒤 대기 · 첫 선점 · 다시 보내기 적재 0 · 재시작 전 프로세스는 끝나 있음 · 다른 앱(`outreach-render` = `src/workers/outreach-render-worker.ts`)은 검사 · 확인 문자를 적재하지 않음(grep 1123 = 검사 대기열 · 확인 문자 · `insertTestSmsQueue` 참조 0) |
+| 스위치 끔 | (★1124 회사 스위치) 그 회사 칸 끔 = 끈 뒤 관문을 지나는 대기 · 첫 선점 · 다시 보내기 적재 0(재시작 0) · (옛 ENV 판) ENV 끔 + 재시작 뒤 대기 · 첫 선점 · 다시 보내기 적재 0 · 재시작 전 프로세스는 끝나 있음 · 다른 앱(`outreach-render` = `src/workers/outreach-render-worker.ts`)은 검사 · 확인 문자를 적재하지 않음(grep 1123 = 검사 대기열 · 확인 문자 · `insertTestSmsQueue` 참조 0) |
 | 배포 1 · DDL 앞 | 일반 검사 문장에 `diag_of` 0(칸 없어도 검사 · 확인 문자 정상) |
 | 대행 확정 vs 판의 늦은 보고 | 확정 트랜잭션이 판 결과 행을 잠근 뒤 다시 읽음 → 늦은 보고가 먼저면 바뀐 값으로 다시 판정 · 확정이 먼저면 늦은 보고는 표시만 바꿈 |
 | 상한 직렬화 | **서로 다른 부모 둘이 동시에 마지막 한 자리를 노림** → 하나만 등록 / 같은 판 두 번 → 결과 행 · 상한 소모 0 |
@@ -409,9 +415,9 @@ docker exec -i targetup-postgres psql -U targetup targetup -P pager=off -c "SELE
 - ② · ③ 은 출처가 아니라 `diag_of IS NOT NULL` 로 찾는다(② 를 다시 돌려도 이미 출처가 바뀐 판을 찾는다).
 2. DDL-0 → DDL-1 → DDL-2 → DDL-3(유효 확인).
 3. **배포 2 = 판 등록 · A · 화면 · 대행 · 메일**(스위치 기본 꺼짐) · 구현 Codex 닫힘 → 배포. A · 화면 · 문구는 스위치와 무관하게 이때부터 보인다(판 단추는 자격 사유 「지금은 다시 확인할 수 없어요」로 숨김).
-4. DDL-3 유효를 본 뒤 `SPAM_DIAG_SENDS=on` → S1.
+4. DDL-3 유효를 본 뒤 → (★1124 회사 스위치) 회사 스위치 배포(DDL-4 → 백엔드 · 프론트) → 시험 회사 하나만 켬 → S1 → 넓힘.
 
-되돌리기 = 스위치 끔(ENV 끔 + 백엔드 재시작 · 재시작 뒤부터 두 함수 관문이 대기 · 확인 문자 · 다시 보내기를 막는다 · 옛 프로세스의 진행 중 적재는 프로세스와 함께 끝난다 · §6-2-1) → 필요하면 배포 2 되돌림(배포 1 은 남긴다 · 이 되돌림 자체가 재시작이다 · 남은 판은 배포 1 의 관문이 막는다) · 칸 · 인덱스는 남아도 무해. 스위치를 켜는 것도 같은 재시작이다(§12 4번).
+되돌리기 = 스위치 끔(★1124 회사 스위치 = 회사 칸 끔 · 재시작 0 · 옛 ENV 판 = ENV 끔 + 백엔드 재시작 · 재시작 뒤부터 두 함수 관문이 대기 · 확인 문자 · 다시 보내기를 막는다 · 옛 프로세스의 진행 중 적재는 프로세스와 함께 끝난다 · §6-2-1) → 필요하면 배포 2 되돌림(배포 1 은 남긴다 · 이 되돌림 자체가 재시작이다 · 남은 판은 배포 1 의 관문이 막는다) · 칸 · 인덱스는 남아도 무해. 스위치를 켜는 것도 같은 재시작이다(§12 4번).
 
 ---
 

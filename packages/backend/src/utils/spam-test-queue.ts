@@ -31,7 +31,7 @@ import { KST_TODAY_START_SQL } from './stats-aggregation';
 import { SPAM_AUTO_FREE_SOURCE, SPAM_DIAG_SOURCE, isAutoSpamSource, notAutoSpamSourceSql, spamCustomerTestSql } from './spam-trial';
 import { getRegisteredCallbackSet } from './callback-filter';   // ★ 2026-11-05 C103 F1 수동 검사 수락 규칙(배정 발신번호)
 import { normalizePhone } from './normalize-phone';
-import { DIAG_LOCK_SQL, DIAG_CAP_LOCK_KEY, diagLockKey, diagSendsOn, isDiagTest, judgeDiagTestSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
+import { DIAG_LOCK_SQL, DIAG_CAP_LOCK_KEY, diagLockKey, diagEnabledFor, isDiagTest, judgeDiagTestSend, diagCallbackAllowed, type DiagGate } from './spam-diag-gate';   // ★ 1124 확인 판 발송 관문
 
 // ============================================================
 // 상수
@@ -1200,10 +1200,10 @@ export async function sendDiagTestRow(p: {
   testId: string; parentTestId: string | null; companyId: string; userId: string; callback: string;
   rowId: string; phone: string; messageType: string; content: string; title: string;
 }): Promise<boolean> {
-  const switchOn = diagSendsOn();
   const stamped = await spamStampReady().catch(() => false);   // 잠금 안 거부 쓰기가 같은 풀을 다시 쓰지 않게 값으로 넘긴다
   const client = await pool.connect();
   const run: SqlWrite = (sql, params) => client.query(sql, params);
+  let switchOn = false;   // ★ 2026-11-24 회사 스위치 = 잠금 아래 같은 연결로(저장점 안 · 조회 오류 = 꺼짐)
   let decided: DiagGate = 'reject';
   try {
     await client.query('BEGIN');
@@ -1220,9 +1220,10 @@ export async function sendDiagTestRow(p: {
     // 권한 = 잠금 아래 같은 연결로(엄격) · 조회 오류면 이 트랜잭션은 실패 상태 → 저장점으로 되돌리고 거부
     let callbackAllowed = false;
     await client.query('SAVEPOINT diag_gate');
-    if (mine && switchOn && p.parentTestId) {
+    if (mine && p.parentTestId) {
       try {
-        callbackAllowed = await diagCallbackAllowed(p.companyId, p.userId, p.callback, run);
+        switchOn = await diagEnabledFor(p.companyId, run);
+        if (switchOn) callbackAllowed = await diagCallbackAllowed(p.companyId, p.userId, p.callback, run);
       } catch (err: any) {
         await client.query('ROLLBACK TO SAVEPOINT diag_gate');
         console.warn(`[SpamTestQueue] 확인 판 권한 조회 실패 — 보내지 않고 닫는다 testId=${p.testId}:`, err?.message || err);

@@ -378,6 +378,7 @@
 | user_isolation_enabled | boolean | ★ 실측 |
 | cdp_auto_execute_enabled | boolean | ★ 실측 (자동마케팅 C게이트) |
 | agency_send_enabled | boolean NOT NULL DEFAULT false | ★2026-08-22 ALTER 실행완료(information_schema 실측). 대행발송 셀프 접수 스위치 — 슈퍼관리자가 회사별로 켠다. 실제 이용 = 이 값 AND 유료(`canUseAgencySend`). 메뉴 자체는 모든 회사에 보인다(미끼). 설계 = docs/2026-08-22-agency-send-design.md |
+| spam_diag_enabled | boolean NOT NULL DEFAULT false | ★2026-11-24 새 칸(DDL-4 · 실행 전 = 1124 information_schema 실측 「없음」 · 실행 뒤 이 줄을 「실행완료」로). 스팸 검사 「막힌 부분 다시 확인」(확인 판) 회사 스위치 — 슈퍼관리자 회사 상세 기본 탭(`PATCH /api/admin/companies/:id/spam-diag`). 판정 = `spam-diag-gate.ts diagEnabledFor`(to_jsonb 로 읽어 칸 없음 = 꺼짐). 설계 = docs/2026-11-23-spam-block-cause-hint-design.md §9 |
 | cdp_auto_execute_max_recipients | integer | ★ 실측 |
 | cdp_auto_execute_max_cost_krw | integer | ★ 실측 |
 | cdp_auto_execute_max_risk | varchar | ★ 실측 |

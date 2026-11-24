@@ -9,11 +9,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const insertMock = vi.fn(async () => { sqls.push('INSERT'); });
 const callbackSetMock = vi.fn(async () => new Set(['0212345678']));
 let lockedRow: any = null;
+let companyOn = true;   // ★ 회사 스위치(companies.spam_diag_enabled) — 잠금 아래 같은 연결로 읽는다
 const sqls: string[] = [];
 const fakeClient = {
   query: vi.fn(async (sql: string) => {
     sqls.push(sql);
     if (/FOR UPDATE OF/.test(sql)) return { rows: lockedRow ? [lockedRow] : [], rowCount: lockedRow ? 1 : 0 };
+    if (/spam_diag_enabled/.test(sql)) return { rows: [{ on: companyOn }], rowCount: 1 };
     return { rows: [], rowCount: 1 };
   }),
   release: vi.fn(),
@@ -44,7 +46,7 @@ beforeEach(() => {
   insertMock.mockClear();
   callbackSetMock.mockReset();
   callbackSetMock.mockImplementation(async () => new Set(['0212345678']));
-  process.env.SPAM_DIAG_SENDS = 'on';
+  companyOn = true;
 });
 
 describe('검사 문자(sendDiagTestRow)', () => {
@@ -73,8 +75,8 @@ describe('검사 문자(sendDiagTestRow)', () => {
     expect(wrote(/UPDATE spam_filter_tests SET status = 'completed'[\s\S]*NOT EXISTS/)).toBe(true);
   });
 
-  it('스위치 꺼짐 = 적재 0 · 아직 NULL 인 결과만 error · 판 completed', async () => {
-    process.env.SPAM_DIAG_SENDS = 'off';
+  it('회사 스위치 꺼짐 = 적재 0 · 아직 NULL 인 결과만 error · 판 completed', async () => {
+    companyOn = false;
     lockedRow = { status: 'active', created_at: new Date(NOW - 60_000), result: null };
     expect(await sendDiagTestRow(testArgs)).toBe(false);
     expect(insertMock).not.toHaveBeenCalled();
@@ -158,8 +160,8 @@ describe('확인 문자(sendDiagProbe)', () => {
     expect(resultWrite).toMatch(/result = 'unconfirmed'/);
   });
 
-  it('스위치 꺼짐 = 적재 0(첫 선점 · 다시 보내기 모두 이 함수를 지난다)', async () => {
-    process.env.SPAM_DIAG_SENDS = '';
+  it('회사 스위치 꺼짐 = 적재 0(첫 선점 · 다시 보내기 모두 이 함수를 지난다)', async () => {
+    companyOn = false;
     lockedRow = { probe_status: 'claimed', result_id: 'r1', result: 'unconfirmed' };
     await sendDiagProbe(probeArgs, probeKind);
     expect(insertMock).not.toHaveBeenCalled();
