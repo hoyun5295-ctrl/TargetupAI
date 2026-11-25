@@ -25,6 +25,7 @@ import {
 // ★ 2026-09-26 한줄로 V2 S1-H03 — 엑셀 파싱은 별도 프로세스(CT)
 import { parseAgencyFilesIsolated, planAgencyWorkbookIsolated } from './agency-send-parse-isolated';
 import { normalizePhone, normalizeAgencyPhone } from './normalize-phone';
+import { isAcceptablePhoneDigits, pickPhonesWithinWidth } from './column-width';   // ★ C163 번호 칸 폭 판정 한 곳(R108)
 import { validateRequestedAt } from './agency-send-state';
 import { buildSlotPlan, extractAgencyVars, resolveVarColumns, toStoredVars } from './agency-send-vars';
 // ★ 2026-11-25 대행 접수 실수 잡기 · 한 파일 여러 건(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md)
@@ -57,6 +58,8 @@ export const MAX_CONTENT = 2000;
 const RECIPIENT_INSERT_CHUNK = 2000;
 /** 테스트 문자를 받을 담당자 수 상한. 그 이상은 실수로 명단을 넣은 것이다 */
 export const MAX_MANAGER_PHONES = 10;
+/** ★ 2026-11-25 C163(R108) 적은 담당자 번호가 모두 번호 칸(20자)을 넘을 때(테스트 명단으로 넘어가지 않는다) */
+export const MANAGER_PHONE_TOO_LONG_ERROR = '담당자 휴대폰 번호가 너무 깁니다. 번호를 확인해 주세요.';
 /**
  * 회신번호 종류 상한.
  * ★2026-09-12 근거가 바뀌었다. 종전(20)은 "접수가 그만큼 나뉘어 사람이 승인할 수 없다"였는데,
@@ -438,18 +441,13 @@ export async function createRequestCore(
   }
 
   // ── 담당자 번호(테스트 문자를 받을 곳). **여러 명일 수 있다**(Harold 2026-08-23)
-  const managerList: string[] = [];
-  const managerSeen = new Set<string>();
   const managerRaw: any[] = Array.isArray(managerPhones) ? managerPhones : [managerPhone];
-  for (const raw of managerRaw) {
-    // 0 유실 복원 포함(★0826 §18-4 · 엑셀 숫자 셀 대비)
-    const phone = normalizeAgencyPhone(raw);
-    if (!phone || phone.length < 10 || managerSeen.has(phone)) continue;
-    managerSeen.add(phone);
-    managerList.push(phone);
-    if (managerList.length >= MAX_MANAGER_PHONES) break;
-  }
+  // 0 유실 복원 포함(★0826 §18-4 · 엑셀 숫자 셀 대비)
+  // ★ 2026-11-25 C163(R108 · Codex 설계 2R #2) — 고르기 = 번호 칸 폭 CT(순서 · 10명 자르기 · 중복 그대로 · 폭 넘는 번호는 자리 차지하고 빠짐)
+  const managerPick = pickPhonesWithinWidth(managerRaw.map((raw) => normalizeAgencyPhone(raw)), { max: MAX_MANAGER_PHONES, dedupe: true });
+  const managerList = managerPick.phones;
   if (managerList.length === 0) {
+    if (managerPick.tooLong > 0) return { ok: false, status: 400, error: MANAGER_PHONE_TOO_LONG_ERROR };
     return { ok: false, status: 400, error: '테스트 문자를 받을 담당자 휴대폰 번호를 넣어 주세요.' };
   }
 
@@ -466,7 +464,7 @@ export async function createRequestCore(
   for (const raw of Array.isArray(recipients) ? recipients : []) {
     // 0 유실 복원 포함(★0826 §18-4) — 명단 값이 엑셀 숫자 셀이면 앞 0이 떨어져 온다
     const phone = normalizeAgencyPhone(raw?.phone ?? raw ?? '');
-    if (!phone || phone.length < 10 || seen.has(phone)) continue;
+    if (!isAcceptablePhoneDigits(phone) || seen.has(phone)) continue;   // ★ C163(R108) — 10자 미만 · 번호 칸 폭(20) 초과 = 같은 무효
     seen.add(phone);
     const cb = normalizePhone(String(raw?.callback ?? ''));
     rows.push({
@@ -954,9 +952,17 @@ export async function analyzeOneStep(
   const requestedAtIso = requestedAt && !Number.isNaN(requestedAt.getTime()) ? requestedAt.toISOString() : null;
   if (hasRequestedAtOverride && !requestedAtIso) errors.push({ field: '보낼 시각', error: '보낼 시각을 정해 주세요.' });
   const hasManagerOverride = Array.isArray(overrides.managerPhones);
-  const managerPhones = (hasManagerOverride ? overrides.managerPhones! : form.managerPhones)
-    .map((p) => normalizeAgencyPhone(p)).filter((p) => p.length >= 10).slice(0, MAX_MANAGER_PHONES);
-  if (managerPhones.length === 0 && !form.errors.find((e) => e.field === '담당자 번호')) {
+  // ★ 2026-11-25 C163(R108) — 고르기 = 번호 칸 폭 CT(덮어쓰기 = 지금처럼 중복 그대로 · 순서 · 10명 자르기 · 폭 넘는 번호는 자리 차지하고 빠짐)
+  const managerPick = pickPhonesWithinWidth(
+    (hasManagerOverride ? overrides.managerPhones! : form.managerPhones).map((p) => normalizeAgencyPhone(p)),
+    { max: MAX_MANAGER_PHONES, dedupe: false },
+  );
+  const managerPhones = managerPick.phones;
+  //   적은 번호가 모두 폭을 넘으면 반려 · 화면 덮어쓰기가 있으면 그 목록으로 다시 판정(고치면 풀린다 · Codex 설계 3R #2) · 없으면 요청서 칸 판정
+  const managerTooLong = hasManagerOverride ? managerPick.tooLong : (form.managerTooLong ?? 0);
+  if (managerPhones.length === 0 && managerTooLong > 0) {
+    errors.push({ field: '담당자 번호', error: MANAGER_PHONE_TOO_LONG_ERROR });
+  } else if (managerPhones.length === 0 && !form.errors.find((e) => e.field === '담당자 번호')) {
     errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 번호가 없습니다.' });
   }
 
@@ -1047,7 +1053,7 @@ export async function analyzeOneStep(
     for (const [rowIdx, r] of rows.entries()) {
       // 0 유실 복원 포함(★0826 §18-4)
       const phone = normalizeAgencyPhone(r[phoneColumn]);
-      if (!phone || phone.length < 10) { invalid++; continue; }
+      if (!isAcceptablePhoneDigits(phone)) { invalid++; continue; }   // ★ C163(R108) — 번호 칸 폭(20) 초과도 「번호 오류」
       if (seen.has(phone)) { dup++; continue; }
       let groupKey = callback.mode === 'fixed' ? callback.number : '';
       if (callback.mode === 'column') {

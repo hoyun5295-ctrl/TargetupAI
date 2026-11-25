@@ -24,6 +24,7 @@
  */
 import * as XLSX from 'xlsx';
 import { normalizePhone, normalizeAgencyPhone, restoreMobileLeadingZero } from './normalize-phone';
+import { pickPhonesWithinWidth } from './column-width';
 import { formatSheetDateCode } from './normalize';
 
 export interface AgencyFormError { field: string; error: string }
@@ -36,6 +37,8 @@ export interface ParsedAgencyForm {
   callbackRaw: string;
   isAd: boolean;
   managerPhones: string[];
+  /** ★ 2026-11-25 C163(R108) 담당자 칸에 적은 번호 중 번호 칸(20자)을 넘은 수 · 다 넘으면 테스트 명단으로 넘어가지 않는다 · 오류 판정 = analyzeOneStep(화면 덮어쓰기 기준) */
+  managerTooLong?: number;
   /** ★2026-08-26 §18-4 양식 신설 칸 "수신자 열 이름". 값이 있으면 그것이 진실(추정 제거) · 선택 항목이라 비면 '' */
   phoneColumnName: string;
   /**
@@ -276,7 +279,7 @@ export function agencyRowsLookLikeList(aoa: any[][]): boolean {
  * ★ 2026-11-25 「테스트 명단」 옆 표에서 담당자(테스트) 번호를 읽는다(설계서 §8-1 · 시세이도 실물 「(오른쪽 테스트 명단 참고) →」).
  *   「테스트 명단」 칸 아래 첫 머리줄에서 휴대폰 · 핸드폰 열을 먼저, 없으면 전화 · 연락처 · 번호 열을 고르고 아래로 빈칸 전까지.
  */
-function readTestListPhones(rows: any[][]): string[] {
+function readTestListPhones(rows: any[][]): { phones: string[]; tooLong: number } {
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
     if (!Array.isArray(row)) continue;
@@ -288,21 +291,17 @@ function readTestListPhones(rows: any[][]): string[] {
       const cols = head.map((c, i) => ({ i, k: normLabel(c) })).filter((x) => x.i >= c0 && x.k);
       const pick = cols.find((x) => /휴대폰|핸드폰/.test(x.k)) || cols.find((x) => /전화|연락처|번호/.test(x.k) && !/매장|지점|점포/.test(x.k));
       if (!pick) continue;
-      const out: string[] = [];
-      const seen = new Set<string>();
+      // ★ 2026-11-25 C163(R108) — 고르기 = 번호 칸 폭 CT(순서 · 10명 자르기 · 중복 그대로 · 폭 넘는 번호는 자리 차지하고 빠짐)
+      const cells: string[] = [];
       for (let d = h + 1; d < rows.length; d++) {
         const v = Array.isArray(rows[d]) ? rows[d][pick.i] : null;
         if (v === null || v === undefined || String(v).trim() === '') break;
-        const phone = normalizeAgencyPhone(String(v));
-        if (!phone || phone.length < 10 || seen.has(phone)) continue;
-        seen.add(phone);
-        out.push(phone);
-        if (out.length >= 10) break;
+        cells.push(normalizeAgencyPhone(String(v)));
       }
-      return out;
+      return pickPhonesWithinWidth(cells, { max: 10, dedupe: true });   // 폭 넘은 수도 넘긴다(다 넘으면 「없음」이 아니라 폭 오류 · Codex 설계 4R)
     }
   }
-  return [];
+  return { phones: [], tooLong: 0 };
 }
 
 /**
@@ -436,18 +435,20 @@ export function parseAgencyRequestForm(buffer: Buffer, opts: { formSheet?: strin
     errors.push({ field: '문자타입', error: '이 접수는 문자(SMS·LMS·MMS)만 받습니다. 알림톡·친구톡 발송은 담당자에게 따로 요청해 주세요.' });
   }
   const managerPhones: string[] = [];
+  let managerTooLong = 0;
   {
-    const seen = new Set<string>();
-    for (const raw of pick('담당자 번호').split(/[\s,;\n/]+/)) {
-      // 0 유실 복원(★0826 §18-4) — 요청서 B열도 엑셀 숫자 셀이면 앞 0이 떨어진다
-      const phone = normalizeAgencyPhone(raw);
-      if (!phone || phone.length < 10 || seen.has(phone)) continue;
-      seen.add(phone);
-      managerPhones.push(phone);
-      if (managerPhones.length >= 10) break;
-    }
+    // 0 유실 복원(★0826 §18-4) — 요청서 B열도 엑셀 숫자 셀이면 앞 0이 떨어진다
+    // ★ 2026-11-25 C163(R108 · Codex 설계 2R #2) — 고르기 = 번호 칸 폭 CT(순서 · 10명 자르기 · 중복 그대로 · 폭 넘는 번호는 자리 차지하고 빠짐)
+    const picked = pickPhonesWithinWidth(pick('담당자 번호').split(/[\s,;\n/]+/).map((raw) => normalizeAgencyPhone(raw)), { max: 10, dedupe: true });
+    managerPhones.push(...picked.phones);
+    managerTooLong = picked.tooLong;
     // ★ 2026-11-25 칸에 번호가 없으면(「(오른쪽 테스트 명단 참고) →」 · 빈칸) 시트의 「테스트 명단」 표에서 읽는다(설계서 §8-1)
-    if (managerPhones.length === 0) managerPhones.push(...readTestListPhones(rows));
+    //   적은 번호가 모두 폭을 넘으면 넘어가지 않는다(승인권이 다른 명단으로 가지 않게 · C163 Codex 설계 2R #2)
+    if (managerPhones.length === 0 && managerTooLong === 0) {
+      const testList = readTestListPhones(rows);
+      managerPhones.push(...testList.phones);
+      managerTooLong = testList.tooLong;   // 테스트 명단도 다 넘으면 폭 오류(분석이 덮어쓰기 기준으로 판정 · 고치면 풀린다)
+    }
   }
 
   if (!content) errors.push({ field: '문안', error: '문안 칸이 비어 있습니다.' });
@@ -455,10 +456,11 @@ export function parseAgencyRequestForm(buffer: Buffer, opts: { formSheet?: strin
   if (!requestedAtText) errors.push({ field: '보낼 시각', error: '보낼 시각 칸이 비어 있습니다.' });
   else if (!requestedAt) errors.push({ field: '보낼 시각', error: `보낼 시각을 읽지 못했습니다: "${requestedAtText}". 예: 8월 30일 10시 30분 또는 2026-09-01 14:00` });
   // ★ 2026-11-25 빈 회신번호 판정은 명단을 아는 analyzeOneStep 이 한다(명단 매장번호 열 · 설계서 §8-2 · 같은 문장)
-  if (managerPhones.length === 0) errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 휴대폰 번호가 없습니다.' });
+  // ★ C163 — 폭 넘는 번호만 있으면 오류 줄은 analyzeOneStep 이 화면 덮어쓰기 기준으로 판정한다(여기서 넣으면 고쳐도 남는다 · Codex 설계 3R #2)
+  if (managerPhones.length === 0 && managerTooLong === 0) errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 휴대폰 번호가 없습니다.' });
 
   return {
-    subject, content, requestedAtText, requestedAt, callbackRaw, isAd, managerPhones, phoneColumnName,
+    subject, content, requestedAtText, requestedAt, callbackRaw, isAd, managerPhones, managerTooLong, phoneColumnName,
     imageFileName, imageFileNames: readImageFileNames(rows), billingTarget: pick('청구 계정'), errors,
   };
 }

@@ -8,6 +8,8 @@ import { authenticate } from '../middlewares/auth';
 import { resolveTargetOwner, ownerClause } from '../utils/owner-scope';
 import { cellToString, isUuid } from '../utils/normalize';
 import { insertAddressBookContacts, type AddressBookRow } from '../utils/address-book-insert';
+import { isAcceptablePhoneDigits } from '../utils/column-width';
+import { respondUserError } from '../utils/http-error';
 // ★ 2026-09-14 박성용 접수(주소록 번호 앞 0 생략): 업로드 파서가 CSV·엑셀의 앞 0을 숫자로 떨어뜨린다.
 //   저장·추가·조회·다운로드 네 곳이 같은 복원 규칙(휴대폰 10자리만 0 붙임)을 쓴다. 옛 저장분은 DB를 고치지 않고 읽을 때 붙인다.
 import { normalizeAgencyPhone as normalizeBookPhone } from '../utils/normalize-phone';
@@ -158,7 +160,7 @@ router.post('/', async (req: Request, res: Response) => {
     const rows: AddressBookRow[] = [];
     for (const contact of contacts) {
       const phone = normalizeBookPhone(contact.phone);
-      if (phone.length >= 10) {
+      if (isAcceptablePhoneDigits(phone)) {   // ★ 1125 C163(R108) — 10자 이상 + 번호 칸 폭(20) · 넘는 번호 = 10자 미만처럼 뺀다
         // ★ D150-3 (2026-05-09) PDF #5: cellToString 컨트롤타워(normalize.ts) 사용 — 인라인 safeStr 폐기
         rows.push({ phone, name: cellToString(contact.name), extra1: cellToString(contact.extra1), extra2: cellToString(contact.extra2), extra3: cellToString(contact.extra3) });
       }
@@ -167,6 +169,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     return res.json({ success: true, message: `${insertCount}건 저장 완료`, insertCount });
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ 1125 C163 — 칸 폭 초과(ADDRESS_BOOK_TEXT_TOO_LONG) = 400 그 문장
     console.error('주소록 저장 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
   }
@@ -297,7 +300,7 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
 
     for (const contact of contacts) {
       const phone = normalizeBookPhone(contact.phone);
-      if (phone.length < 10) {
+      if (!isAcceptablePhoneDigits(phone)) {   // ★ 1125 C163(R108) — 번호 칸 폭(20) 초과도 무효 N건에 넣는다
         invalidCount++;
         continue;
       }
@@ -325,6 +328,7 @@ router.post('/:groupName/append', async (req: Request, res: Response) => {
       invalidCount,
     });
   } catch (error) {
+    if (respondUserError(res, error)) return;   // ★ 1125 C163 — 칸 폭 초과(ADDRESS_BOOK_TEXT_TOO_LONG) = 400 그 문장
     console.error('주소록 추가 에러:', error);
     return res.status(500).json({ error: '서버 오류' });
   }

@@ -46,7 +46,11 @@ afterAll(() => new Promise<void>((done) => server.close(() => done())));
 
 /** SQL 종류별 응답. storedPhones = 그룹에 이미 저장된 번호(0 없는 옛 저장분 포함) */
 function mockDb(storedPhones: string[] = []) {
-  q.mockImplementation(async (sql: string) => {
+  q.mockImplementation(async (sql: string, params?: any[]) => {
+    // ★ 2026-11-25 C163(R108) — 적재 CT 한 문장 = 넣은 수 · 칸 폭 넘는 수 한 행을 돌려준다(실제 PG 판 = phone-width-1125.pg)
+    if (/INSERT INTO address_books/i.test(sql)) {
+      return { rows: [{ inserted: Array.isArray(params?.[3]) ? params![3].length : 0, long_group: false, long_phone: 0, long_name: 0, long_extra: 0 }], rowCount: 1 };
+    }
     if (/COUNT\(\*\)::int AS cnt FROM address_books\s+WHERE company_id = \$1 AND group_name/i.test(sql)) {
       return { rows: [{ cnt: storedPhones.length }] };
     }

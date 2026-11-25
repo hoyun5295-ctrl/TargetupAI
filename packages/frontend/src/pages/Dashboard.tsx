@@ -3328,7 +3328,7 @@ const campaignData = {
             // ★1005 발신 인증(3.5) — 인증 뒤 이 발송을 그대로 다시 실행한다(창은 열린 채 · 내용 보존)
             if (senderAuth.handleResponse(data, () => { void sendBrand(payload); })) return;
             if (!res.ok || data?.success === false) throw new Error(data?.error || '브랜드메시지 발송 실패');
-            setToast({ show: true, type: 'success', message: `브랜드메시지 ${Number(data?.sentCount || 0).toLocaleString()}건 발송했습니다${data?.adGateNotice ? `. ${data.adGateNotice}` : ''}` });   // ★ C113 D6 관문 길 한 줄
+            setToast({ show: true, type: 'success', message: `브랜드메시지 ${Number(data?.sentCount || 0).toLocaleString()}건 발송했습니다${data?.adGateNotice ? `. ${data.adGateNotice}` : ''}${Number(data?.invalidCount || 0) > 0 ? `. 번호가 잘못된 ${Number(data.invalidCount).toLocaleString()}건은 보내지 않았습니다` : ''}` });   // ★ C113 D6 관문 길 한 줄
             setShowBrandSend(false);
             setBrandInitialRecipients([]);
           } catch (e: any) {
@@ -3390,6 +3390,7 @@ const campaignData = {
             count: data.count,
             unsubscribeCount: data.unsubscribeCount,
             duplicateCount: data.duplicateCount,
+            invalidCount: data.invalidCount,   // ★ C163 — 번호 칸(20자)을 넘어 알림톡 창이 뺀 수
             from: 'direct',
             msgType: '알림톡',
             // ★ 2026-06-05: stage 적재 stagingId 전달 — 없으면 executeDirectSend commit이 "발송 준비 정보 없음" 차단.

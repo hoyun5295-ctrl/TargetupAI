@@ -475,6 +475,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
     //   commit/worker와 숫자가 정확히 일치. 청크(5만) 적재라 body 한도·timeout 무관.
     const CHUNK = 50000;
     let stagingId: string | undefined;
+    let invalidCount = 0;   // ★ 2026-11-25 C163(R108) — 번호 · 회신번호가 번호 칸(20자)을 넘어 서버가 넣지 않은 수
     for (let i = 0; i < directRecipients.length; i += CHUNK) {
       const slice = directRecipients.slice(i, i + CHUNK).map((r: any) => ({
         phone: r.phone,
@@ -495,6 +496,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
         return;
       }
       stagingId = stageData.stagingId;
+      invalidCount += Number(stageData.skipped || 0);
     }
     const countRes = await fetch('/api/campaigns/direct-send/count', {
       method: 'POST',
@@ -514,6 +516,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
       count: countData.sendCount,
       unsubscribeCount: countData.unsubscribeCount,
       duplicateCount: countData.duplicateCount,
+      invalidCount,
       dateTime: reserveEnabled && reserveDateTime ? reserveDateTime : undefined,
       from: 'direct',
       msgType: directMsgType,

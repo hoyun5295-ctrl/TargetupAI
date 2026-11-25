@@ -21,6 +21,7 @@
  */
 import jwt from 'jsonwebtoken';
 import { normalizePhone } from './normalize-phone';
+import { pickPhonesWithinWidth } from './column-width';
 import { createShortUrl } from './short-url';
 
 // ⛔ 폴백 키 금지(★2026-08-30 보안 보강 B3) — 저장소에 공개된 문자열로 서명하면 소스를 본 사람이
@@ -128,15 +129,9 @@ export async function buildShortAgencyApproveUrl(
 export function agencyManagerPhones(row: any): string[] {
   const list: string[] = Array.isArray(row?.manager_phones) ? row.manager_phones : [];
   const merged = list.length > 0 ? list : [row?.manager_phone];
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of merged) {
-    const phone = normalizePhone(String(raw || ''));
-    if (!phone || phone.length < 10 || seen.has(phone)) continue;
-    seen.add(phone);
-    out.push(phone);
-  }
-  return out;
+  // ★ 2026-11-25 C163(R108 · Codex 설계 1R #6) — 번호 칸 폭 CT 한 곳. 예전 접수 행의 담당자 목록(text[] · 폭 없음)에 남은 21자 이상 값은
+  //   승인권이 없고 승인 문자 큐(dest_no varchar(20))로 가지 않는다. 10 ~ 20자 = 지금과 같은 목록 · 순서 · 중복 지움.
+  return pickPhonesWithinWidth(merged.map((raw) => normalizePhone(String(raw || ''))), { max: Infinity, dedupe: true }).phones;
 }
 
 /* ★2026-11-05 「계정 MFA 번호와 같은 담당자 번호에만 링크」(1016 · 승인 계정 판정 · 직원 회사 ENV)를 지웠다.

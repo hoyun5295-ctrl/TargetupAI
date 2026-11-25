@@ -29,11 +29,13 @@ describe('1. 알림톡 창 — 보내는 값·검증·적재는 그대로', () =
   it('검증 순서 — 수신자 → 템플릿 → 승인 → 예약 시각 → 대체발송 → 변수 → 적재', () => {
     const order = [
       "if (recipients.length === 0) {",
+      // ★ 2026-11-25 C163(R108 · Codex 설계 2R #3) 번호 칸 폭 판정 = 변수 검증보다 앞 · 그 뒤 전부 같은 남은 목록
+      "const sendRecipients = recipients.filter((r) => stagedPhoneFits(r.phone));",
       'if (!kakaoSelectedTemplate) {',
       "if (!['approved', 'APPROVED', 'APR', 'A'].includes(kakaoSelectedTemplate.status)) {",
       'if (reserveEnabled) {',
       'const fallbackViolation = validateAlimtalkChannelState({',
-      'const varCheck = validateAlimtalkVariables(kakaoSelectedTemplate?.content, kakaoTemplateVars, recipients);',
+      'const varCheck = validateAlimtalkVariables(kakaoSelectedTemplate?.content, kakaoTemplateVars, sendRecipients);',
       'setSending(true);',
       "await fetch('/api/campaigns/direct-send/stage', {",
       "await fetch('/api/unsubscribes/check', {",
@@ -53,8 +55,8 @@ describe('1. 알림톡 창 — 보내는 값·검증·적재는 그대로', () =
       "type: reserveEnabled ? 'scheduled' : 'immediate',",
       'dateTime: reserveEnabled ? reserveDateTime : undefined,',
       'splitEnabled,', 'splitCount,',
-      'count: recipients.length - unsubCount - dupCount,',
-      "from: 'alimtalk',", 'stagingId,', 'recipients,',
+      'count: sendRecipients.length - unsubCount - dupCount,', 'invalidCount,',
+      "from: 'alimtalk',", 'stagingId,', 'recipients: sendRecipients,',
       'selectedTemplate: kakaoSelectedTemplate,', 'variableMap: stagedVariableMap,',
       'fallback: alimtalkFallback,', 'nextContents: alimtalkNextContents,',
       "nextSubject: alimtalkNextSubject || '',", 'profileId: alimtalkProfileId,',

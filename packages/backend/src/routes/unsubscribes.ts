@@ -14,6 +14,7 @@ import { mapWithConcurrency } from '../utils/concurrency';
 import { isOpt080CallbackIp } from '../utils/ip-allowlist';
 import { deduplicateByPhone } from '../utils/deduplicate';
 import { normalizePhone, formatPhoneDisplay } from '../utils/normalize';
+import { isAcceptablePhoneDigits } from '../utils/column-width';
 import { isFirstRowHeaderRow } from '../utils/excel-columns';
 import { parsePageParams, QUERY_LIMIT_NO_CAP } from '../utils/normalize';   // ★ C105 H4(R59) 주소 · SQL 숫자 값 CT
 
@@ -163,7 +164,7 @@ router.get('/080callback', async (req: Request, res: Response) => {
     const phone = String(cid).replace(/\D/g, '');
     const opt080Number = String(fr).replace(/\D/g, '');
 
-    if (phone.length < 10) {
+    if (!isAcceptablePhoneDigits(phone)) {   // ★ 1125 C163(R108) — 10자 미만 · 번호 칸 폭(20) 초과 = 같은 '0' 응답(넣으면 22001)
       console.log(`[080콜백] 잘못된 전화번호 - cid=${cid}`);
       return res.send('0');
     }

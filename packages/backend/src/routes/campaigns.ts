@@ -17,6 +17,7 @@ import { SUCCESS_CODES, PENDING_CODES, SUCCESS_CODES_SQL, PENDING_CODES_SQL, isS
 import { DEFAULT_COSTS, getCompanyCosts, redis, CACHE_TTL, BATCH_SIZES, SEND_HOURS } from '../config/defaults';
 import { isValidSmsTable } from '../utils/sms-table-validator';
 import { normalizePhone } from '../utils/normalize-phone';
+import { PHONE_COLUMN_WIDTH, fitsPhoneColumn, varcharFitsSql, hasOnlyScalarFields } from '../utils/column-width';   // ★ 1125 C163 칸 폭 판정 한 곳(R108)
 import { checkCallbackSpec } from '../utils/callback-spec';
 import { isValidCustomFieldKey } from '../utils/safe-field-name';
 import { fieldKeyToColumn, getFieldByKey } from '../utils/standard-field-map';
@@ -1895,6 +1896,11 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
     if (recipients.length > 50000) {
       return res.status(413).json({ success: false, error: '청크는 최대 5만건입니다', code: 'CHUNK_TOO_LARGE' });
     }
+    // ★ 2026-11-25 C163(R108 · 설계서 docs/2026-11-25-phone-width-root-design.md D1 · D2) — 수신자 한 명 = 넣는 행 한 줄.
+    //   배열 · 객체 칸은 UNNEST 가 펼쳐 수신자와 회신번호가 어긋난다(화면은 글자 · 숫자 · null 만 보낸다 · API 만 해당).
+    if (!recipients.every((r: any) => hasOnlyScalarFields(r, ['phone', 'name', 'extra1', 'extra2', 'extra3', 'callback']))) {
+      return res.status(400).json({ success: false, code: 'RECIPIENT_FORMAT', error: '수신자 목록 형식이 올바르지 않습니다.' });
+    }
     const stagingId = incoming || randomUUID();
     // ★ 2026-09-26 한줄로 V2 F38 — 받은 stagingId에 덧붙일 수 있는 것은 **아직 커밋 전인 우리 회사 준비분**뿐이다.
     //   커밋된 준비분에 덧붙이면 워커가 그 행까지 읽어 차감·정제 없이 발송됐다(화면은 이 경로를 안 쓰지만 API로 가능).
@@ -1915,13 +1921,20 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
       extra3s.push(r.extra3 ?? null);
       callbacks.push(r.callback ?? null);
     });
-    const insertRows = () => query(
-      `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, extra2, extra3, callback)
-       SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1, u.extra2, u.extra3, u.callback
-       FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
-         AS u(phone, name, extra1, extra2, extra3, callback)`,
-      [stagingId, companyId, phones, names, extra1s, extra2s, extra3s, callbacks]
-    );
+    // ★ 2026-11-25 C163(R108) — 번호 · 회신번호 칸(varchar(20))을 넘는 행은 넣지 않는다. 판정 = 넣는 문장 안에서 PG 가 보는 글자로
+    //   (옛: 한 칸이 넘으면 22001 로 5만 건 묶음 전체가 실패 · 화면엔 이유 없는 오류). 뺀 수 = 받은 수 − 넣은 수(위 형식 판정으로 1:1).
+    let inserted = 0;
+    const insertRows = async () => {
+      const r = await query(
+        `INSERT INTO campaign_send_staging (staging_id, company_id, phone, name, extra1, extra2, extra3, callback)
+         SELECT $1::uuid, $2::uuid, u.phone, u.name, u.extra1, u.extra2, u.extra3, u.callback
+         FROM UNNEST($3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
+           AS u(phone, name, extra1, extra2, extra3, callback)
+         WHERE ${varcharFitsSql('u.phone', PHONE_COLUMN_WIDTH)} AND ${varcharFitsSql('u.callback', PHONE_COLUMN_WIDTH)}`,
+        [stagingId, companyId, phones, names, extra1s, extra2s, extra3s, callbacks]
+      );
+      inserted = r.rowCount ?? 0;
+    };
     // ★ 2026-09-26 한줄로 V2 F38 — 받은 stagingId에 덧붙일 수 있는 것은 **아직 커밋 전인 우리 회사 준비분**뿐이다.
     //   커밋된 준비분에 덧붙이면 워커가 그 행까지 읽어 차감·정제 없이 발송됐다(화면은 이 경로를 안 쓰지만 API로 가능).
     //   다른 회사 준비분은 존재를 드러내지 않는다(404). ★ Codex 1R high: 검사와 INSERT 사이에 commit이 끼지 않게 준비분 잠금 안에서 한다
@@ -1946,7 +1959,8 @@ router.post('/direct-send/stage', async (req: Request, res: Response) => {
     } else {
       await insertRows();
     }
-    return res.json({ success: true, stagingId, staged: recipients.length });
+    const skipped = recipients.length - inserted;
+    return res.json({ success: true, stagingId, staged: inserted, ...(skipped > 0 ? { skipped } : {}) });   // ★ C163 — 뺀 것 없으면 지금과 같은 본문
   } catch (err: any) {
     const msg = err?.message || '';
     if (msg.includes('relation') && msg.includes('does not exist')) {
@@ -2354,7 +2368,7 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       subject,        // 제목 (LMS/MMS)
       message,        // 메시지 내용 (광고문구 포함된 최종 메시지)
       callback,       // 회신번호
-      recipients,     // [{phone, name, extra1, extra2, extra3}]
+      recipients: requestedRecipients,     // [{phone, name, extra1, extra2, extra3}] · ★ C163 아래에서 칸 폭 판정 뒤 recipients
       customMessages, // ★ S9-01: [{phone, message}] — 프론트에서 치환 완료된 개인화 메시지
       adEnabled,      // 광고문구 포함 여부
       scheduled: scheduledInput,     // 예약 여부(요청값 · 아래에서 분할 첫 회차로 정규화한 `scheduled`를 쓴다 · B-1013-1)
@@ -2479,7 +2493,14 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
 
     // ★ D102: customMessageMap 제거 — 프론트 치환 폐기, 백엔드 replaceVariables 컨트롤타워 통일
 
-    if (!recipients || recipients.length === 0) {
+    if (!requestedRecipients || requestedRecipients.length === 0) {
+      return res.status(400).json({ success: false, error: '수신자가 없습니다' });
+    }
+    // ★ 2026-11-25 C163(R108 · 설계서 D8) — 번호(큐 · 광고 관문과 같은 정리 = 숫자 글자)가 번호 칸(varchar(20))을 넘는 행은 뺀다.
+    //   회신번호는 보지 않는다(고정 = 등록 대조 · 개별 = CT-08 등록 대조로 이미 칸 폭 안 · Codex 설계 1R). 칸 폭 안이면 같은 배열 그대로.
+    const recipients = requestedRecipients.filter((r: any) => fitsPhoneColumn(normalizePhone(String(r?.phone ?? ''))));
+    const phoneInvalidCount = requestedRecipients.length - recipients.length;
+    if (recipients.length === 0) {
       return res.status(400).json({ success: false, error: '수신자가 없습니다' });
     }
 
@@ -3461,6 +3482,7 @@ router.post('/direct-send', singleFlight('direct-send', async (req: Request, res
       callbackUnregisteredCount,
       message: `${directTotalSent}건 발송 ${scheduled ? '예약' : '완료'}${duplicateCount > 0 ? ` (중복 ${duplicateCount}건 제거)` : ''}${directFailTotal > 0 ? ` (${directFailTotal}건 실패, 자동 환불)` : ''}${excludedCount > 0 ? ` (수신거부 ${excludedCount}건 제외)` : ''}${callbackMissingCount > 0 ? ` (회신번호 없음 ${callbackMissingCount}명 제외)` : ''}${callbackUnregisteredCount > 0 ? ` (미등록 회신번호 ${callbackUnregisteredCount}명 제외)` : ''}${directFatigueSkipped > 0 ? ` (피로도 보호 ${directFatigueSkipped}명 제외)` : ''}${directAdGateLine ? ` ${directAdGateLine}` : ''}`,
       ...(directAdGateCounts ? { adGate: directAdGateCounts } : {}),   // ★ C113 관문 길만
+      ...(phoneInvalidCount > 0 ? { invalidCount: phoneInvalidCount } : {}),   // ★ C163 — 뺀 것 없으면 지금과 같은 본문
     });
 
     } catch (sendError) {
@@ -4478,7 +4500,7 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       senderKey,
       targeting,
       isAd,
-      phones,         // string[]
+      phones: requestedPhones,         // string[] · ★ C163 아래에서 칸 폭 판정 뒤 phones
       message,
       header,
       additionalContent,
@@ -4509,8 +4531,15 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       carouselVariableJson,
     } = req.body;
 
-    if (!phones || !Array.isArray(phones) || phones.length === 0) {
+    if (!requestedPhones || !Array.isArray(requestedPhones) || requestedPhones.length === 0) {
       return res.status(400).json({ error: '수신자 목록이 필요합니다' });
+    }
+    // ★ 2026-11-25 C163(R108 · 설계서 D7) — 번호(광고 관문 · 큐와 같은 정리 = 숫자 글자)가 번호 칸(varchar(20))을 넘으면 맨 앞에서 뺀다
+    //   (관문 표 ad_send_marks · 큐 dest_no 가 둘 다 20자 · 칸 폭 안이면 같은 배열 그대로 · 글자가 아닌 값은 지금처럼 관문은 글자로 보고 큐 CT 가 버린다).
+    const phones: any[] = requestedPhones.filter((x: any) => fitsPhoneColumn(normalizePhone(String(x ?? ''))));
+    const phoneInvalidCount = requestedPhones.length - phones.length;
+    if (phones.length === 0) {
+      return res.status(400).json({ error: '보낼 수 있는 번호가 없습니다.' });
     }
     // ★ 2026-09-30 브랜드메시지도 발송 길목 — 채우지 않은 링크 · AI 혜택 자리는 보내지 않는다(생성 길목과 같은 CT).
     const brandPh = findUneditedSendPlaceholder(message, header, additionalContent, resendMessage, resendTitle);
@@ -4523,6 +4552,10 @@ router.post('/brand-send', async (req: Request, res: Response) => {
 
     // 큐에 실릴 회신번호를 먼저 확정한다 — campaigns와 큐가 다른 번호를 갖지 않게(판정은 CT 한 곳).
     const resolvedCallback = await resolveBrandCallback(companyId, resendFrom);
+    // ★ C163(Codex 설계 1R #5) — 확정 회신번호 = 캠페인 행(callback_number varchar(20)) · 큐(call_back 20) 두 자리에 들어간다 → 행을 만들기 전에 판정
+    if (resolvedCallback && !fitsPhoneColumn(resolvedCallback)) {
+      return res.status(400).json({ error: '회신번호를 확인해 주세요.' });
+    }
 
     // ★1005 발신 인증(전송자격인증 3.5 · Harold 결정 D-9) — 브랜드메시지도 이용자가 직접 보내는 발송이고 실패 시 문자 대체 발송이 있다.
     //   직접발송과 같은 게이트를 캠페인 생성 · 차감 · 적재 앞에서 세운다. 번호가 없으면 게이트가 계정 축으로 잡는다.
@@ -4703,6 +4736,7 @@ router.post('/brand-send', async (req: Request, res: Response) => {
       sentCount: result.sentCount,
       failCount: result.failCount,
       ...(brandGateCounts ? { adGate: brandGateCounts, adGateNotice: adGateNotice(brandGateCounts) } : {}),   // ★ C113 관문 길만
+      ...(phoneInvalidCount > 0 ? { invalidCount: phoneInvalidCount } : {}),   // ★ C163 — 뺀 것 없으면 지금과 같은 본문
     });
   } catch (error) {
     console.error('[brand-send] 에러:', error);

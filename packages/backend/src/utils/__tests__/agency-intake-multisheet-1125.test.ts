@@ -438,3 +438,31 @@ describe('★1125(2) Codex 짝 4R — 짝이 둘인데 남는 명단 · 숨김 �
     expect(planAgencyWorkbook(bookHidden([['내용', formSheet('a', '')], ['고객리스트', listSheet()], ['지난달', formSheet('old', '')], ['지난달리스트', people(5)]], ['지난달', '지난달리스트']))).toEqual({ kind: 'single' });
   });
 });
+
+// ★ 2026-11-25 C163(R108 · Codex 설계 2R #2 · 4R) — 담당자 · 테스트 명단 번호 칸 폭(20자)
+describe('요청서 담당자 번호 칸 폭 — 순서 · 10명 자르기 그대로 · 다 넘으면 테스트 명단으로 넘어가지 않고 폭 수만 넘긴다', () => {
+  const LONG = '0'.repeat(21);
+  const withCell = (cell: string, testPhones: [string, string]) => {
+    const s = formSheet('문안', '');
+    s[3][7] = testPhones[0];
+    s[4][2] = cell;
+    s[4][7] = testPhones[1];
+    return parseAgencyRequestForm(book([['요청서', s], ['고객리스트', listSheet()]]), { formSheet: '요청서' });
+  };
+  it('담당자 칸 번호가 모두 넘으면 = 담당자 0 · managerTooLong · 「없음」 오류 줄 없음(분석이 덮어쓰기 기준으로 판정)', () => {
+    const f = withCell(LONG, ['010-0000-0001', '010-0000-0002']);
+    expect(f.managerPhones).toEqual([]);
+    expect(f.managerTooLong).toBe(1);
+    expect(f.errors.map((e) => e.field)).not.toContain('담당자 번호');
+  });
+  it('테스트 명단 번호가 모두 넘어도 = 폭 수로 넘긴다(Codex 설계 4R)', () => {
+    const f = withCell('(오른쪽 테스트 명단 참고) →', [LONG, LONG + '1']);
+    expect(f.managerPhones).toEqual([]);
+    expect(f.managerTooLong).toBe(2);
+    expect(f.errors.map((e) => e.field)).not.toContain('담당자 번호');
+  });
+  it('하나라도 맞으면 그 번호만 · 10 ~ 20자 번호만 있으면 지금과 같다', () => {
+    expect(withCell(`${LONG}, 010-0000-0009`, ['010-0000-0001', '010-0000-0002']).managerPhones).toEqual(['01000000009']);
+    expect(withCell('(오른쪽 테스트 명단 참고) →', ['010-0000-0001', '010-0000-0002'])).toMatchObject({ managerPhones: ['01000000001', '01000000002'], managerTooLong: 0 });
+  });
+});

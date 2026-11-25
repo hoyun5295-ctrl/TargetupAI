@@ -44,7 +44,7 @@ import { fetchTargetExtractionRows, type TargetExtraction } from '../utils/targe
 import { extractionRowsToTable } from '../utils/customerFilterBuild';
 import { validateAlimtalkVariables, extractAlimtalkVariables } from '../utils/alimtalkVars';
 import RecipientDirectInputModal, { type PastePreview, type RowAddResult } from './direct-send/RecipientDirectInputModal';
-import { checkAlimtalkPaste, planAppend } from '../utils/recipient-paste';
+import { checkAlimtalkPaste, planAppend, stagedPhoneFits, toStageCell } from '../utils/recipient-paste';
 
 // 주소록/엑셀 표준 필드 → 사용자 표시 라벨. 미리보기 컬럼 + 변수 매칭 드롭다운 공용.
 const FIELD_LABEL_MAP: Record<string, string> = { name: '이름', extra1: '기타1', extra2: '기타2', extra3: '기타3' };
@@ -84,6 +84,8 @@ export interface AlimtalkSendModalProps {
     count: number;
     unsubscribeCount: number;
     duplicateCount: number;
+    /** ★ C163 번호 칸(20자)을 넘어 뺀 수 */
+    invalidCount?: number;
     from: 'alimtalk';
     msgType: '알림톡';
     recipients: any[];
@@ -567,6 +569,14 @@ export default function AlimtalkSendModal({
       setToast({ show: true, type: 'error', message: '수신자를 먼저 추가해주세요.' });
       return;
     }
+    // ★ 2026-11-25 C163(R108 · Codex 설계 2R #3) — 번호 칸(20자)을 넘는 번호는 서버가 넣지 않는다. 변수 검증보다 먼저 빼고
+    //   변수 검증 · 적재 · 수신거부 · 중복 확인 · 확인 창 셈이 같은 남은 목록을 쓴다(빠질 행의 빈 변수가 정상 행을 막지 않게).
+    const sendRecipients = recipients.filter((r) => stagedPhoneFits(r.phone));
+    const invalidCount = recipients.length - sendRecipients.length;
+    if (sendRecipients.length === 0) {
+      setToast({ show: true, type: 'error', message: '보낼 수 있는 번호가 없습니다.' });
+      return;
+    }
     if (!kakaoSelectedTemplate) {
       setToast({ show: true, type: 'error', message: '템플릿을 선택해주세요.' });
       return;
@@ -601,7 +611,7 @@ export default function AlimtalkSendModal({
       return;
     }
     // ★ #3-2 (2026-06-01): 발송 전 변수 검증 — 빈 변수 / 데이터 없는 @@필드@@ 차단 (깨진 알림톡·미수신 방지)
-    const varCheck = validateAlimtalkVariables(kakaoSelectedTemplate?.content, kakaoTemplateVars, recipients);
+    const varCheck = validateAlimtalkVariables(kakaoSelectedTemplate?.content, kakaoTemplateVars, sendRecipients);
     if (!varCheck.ok) {
       const unfilled = varCheck.issues.filter((i) => i.kind === 'unfilled').map((i) => i.variable);
       const noData = varCheck.issues.find((i) => i.kind === 'no_data');
@@ -640,9 +650,9 @@ export default function AlimtalkSendModal({
         setSending(false);
         return;
       }
-      const stageRecipients = recipients.map((r) => {
+      const stageRecipients = sendRecipients.map((r) => {
         const out: Record<string, any> = { phone: r.phone };
-        for (const [col, slot] of Object.entries(colToSlot)) out[slot] = r[col] ?? null;
+        for (const [col, slot] of Object.entries(colToSlot)) out[slot] = toStageCell(r[col]);   // ★ C163 — 객체 값 = 지금 서버가 넣던 JSON 글자 그대로
         return out;
       });
       const stagedVariableMap: Record<string, string> = {};
@@ -675,7 +685,7 @@ export default function AlimtalkSendModal({
         stagingId = stageData.stagingId;
       }
 
-      const phones = recipients.map((r) => r.phone);
+      const phones = sendRecipients.map((r) => r.phone);
       let unsubCount = 0;
       let dupCount = 0;
       if (unsubFilterEnabled) {
@@ -695,13 +705,14 @@ export default function AlimtalkSendModal({
         splitEnabled,
         splitCount,
         splitInterval,
-        count: recipients.length - unsubCount - dupCount,
+        count: sendRecipients.length - unsubCount - dupCount,
         unsubscribeCount: unsubCount,
         duplicateCount: dupCount,
+        invalidCount,
         from: 'alimtalk',
         msgType: '알림톡',
         stagingId,
-        recipients,
+        recipients: sendRecipients,
         selectedTemplate: kakaoSelectedTemplate,
         variableMap: stagedVariableMap,
         fallback: alimtalkFallback,

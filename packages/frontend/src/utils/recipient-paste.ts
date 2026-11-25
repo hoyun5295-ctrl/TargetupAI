@@ -20,6 +20,36 @@ export interface PasteCheck {
  */
 export const DIRECT_PASTE_MAX = 9999;
 
+/**
+ * ★ 2026-11-25 C163(뿌리 R108) 번호 칸 폭 = 백엔드 `utils/column-width.ts PHONE_COLUMN_WIDTH` 와 같은 값(계약 시험 R108-6이 대조).
+ *   서버 적재는 이 폭을 넘는 번호를 넣지 않는다. 알림톡 창은 적재 전에 같은 폭으로 빼서 확인 창 셈이 실제로 넣는 행과 같게 한다.
+ */
+export const PHONE_COLUMN_WIDTH = 20;
+
+/**
+ * 적재 번호가 번호 칸 폭 안인가 — 서버 적재와 같은 정리로 본다(백엔드 `normalize-phone.ts normalizePhone` = 글자면 숫자만 · 글자가 아니면 빈 값).
+ *   원문 길이로 보면 구분 기호 때문에 길 뿐 숫자는 20자 이하인 번호까지 빠진다(★ Codex 구현 1R #1).
+ */
+export function stagedPhoneFits(phone: unknown): boolean {
+  // 배열 · 객체 번호 = 서버 적재가 묶음 전체를 400(RECIPIENT_FORMAT)으로 거절한다 → 화면이 그 행만 「번호 오류」로 뺀다(★ Codex 구현 2R #1)
+  if (phone !== null && typeof phone === 'object') return false;
+  const digits = typeof phone === 'string' ? phone.replace(/\D/g, '') : '';
+  return digits.length <= PHONE_COLUMN_WIDTH;
+}
+
+/**
+ * ★ 2026-11-25 C163(Codex 설계 3R #1 · 구현 1R #2) 적재 칸 값 = 한 글자 값. 서버 적재는 배열 · 객체 칸을 받지 않는다(수신자와 칸이 어긋나지 않게).
+ *   고객 추가 칸 같은 값(AI 한줄로 → 알림톡 명단)은 지금 서버가 넣던 글자와 같은 글자로 화면이 미리 바꿔 보낸다:
+ *   객체 = JSON 글자(node-pg 가 하던 것) · 원소 하나 배열 = 그 원소(지금 PG 배열을 펼쳐 넣던 값) · 원소 여럿 배열 = JSON 글자(지금은 칸이 어긋나거나 실패하던 값).
+ */
+export function toStageCell(v: unknown): string | number | boolean | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') return v;
+  if (v instanceof Date) return v.toISOString();   // 요청 본문 JSON 이 하던 그대로
+  if (Array.isArray(v) && v.length === 1) return toStageCell(v[0]);
+  return JSON.stringify(v);
+}
+
 /** 문자 발송(직접발송) — 한 줄에 하나 · normalizePhoneKr · 10자리 이상(원래 [등록] 규칙 그대로) */
 export function checkDirectSendPaste(text: string): PasteCheck {
   const phones: string[] = [];

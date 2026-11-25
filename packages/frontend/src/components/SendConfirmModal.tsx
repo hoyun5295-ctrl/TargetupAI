@@ -21,6 +21,8 @@ export interface SendConfirmState {
   unsubscribeCount: number;
   /** ★ D137 D4: 중복 제외 건수 (0이거나 undefined면 UI 숨김) */
   duplicateCount?: number;
+  /** ★ 2026-11-25 C163(R108) 번호가 번호 칸(20자)을 넘어 적재에서 뺀 수(0이거나 undefined면 UI 숨김) */
+  invalidCount?: number;
   dateTime?: string;
   /** 발송 경로 — 어느 실행 함수로 보낼지 판정한다 */
   from?: 'direct' | 'target' | 'alimtalk' | 'brand';
@@ -44,7 +46,7 @@ export default function SendConfirmModal({
 
   const immediate = sendConfirm.type === 'immediate';
   const tone = immediate ? 'emerald' : 'blue';
-  const excluded = (sendConfirm.unsubscribeCount || 0) + (sendConfirm.duplicateCount || 0);
+  const excluded = (sendConfirm.unsubscribeCount || 0) + (sendConfirm.duplicateCount || 0) + (sendConfirm.invalidCount || 0);
 
   const scheduledAt = sendConfirm.dateTime
     ? new Date(sendConfirm.dateTime).toLocaleString('ko-KR', {
@@ -96,6 +98,13 @@ export default function SendConfirmModal({
             label="중복 제외"
             value={`${(sendConfirm.duplicateCount || 0).toLocaleString()}명`}
             accent="amber"
+          />
+        )}
+        {(sendConfirm.invalidCount || 0) > 0 && (
+          <DialogRow
+            label="번호 오류 제외"
+            value={`${(sendConfirm.invalidCount || 0).toLocaleString()}명`}
+            accent="slate"
           />
         )}
         {excluded > 0 && (

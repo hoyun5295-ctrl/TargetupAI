@@ -4903,3 +4903,327 @@ describe('R107 화면 전역에 막기를 걸고 필요한 자리만 풀지 않�
     for (const a of [null, '', 'closed']) expect(run(a)).toEqual({ ctx: true, f12: true, inspect: true, copy: false, paste: false });
   });
 });
+
+// ── R108 칸 폭 판정 한 곳(★ 2026-11-25 C163 · 설계서 docs/2026-11-25-phone-width-root-design.md §5) ──
+describe('R108 받는 값을 칸에 넣는 자리는 칸 폭을 본다 — 번호 = utils/column-width.ts 한 곳 · 하한만 있는 판정 0', () => {
+  const JUDGE = /\b(fitsVarchar|fitsPhoneColumn|isAcceptablePhoneDigits|varcharFitsSql)\(/;
+  const beFiles = () => sourceFiles(BE, /\.ts$/).filter((f) => f !== 'utils/column-width.ts');
+
+  /** SQL 글자에서 주석(-- 줄 · /* *\/)을 걷는다 · 작은따옴표 글자 안은 그대로 */
+  function stripSqlComments(sql: string): string {
+    let out = '';
+    for (let i = 0; i < sql.length;) {
+      const c = sql[i];
+      if (c === "'") { const j = sql.indexOf("'", i + 1); const e = j < 0 ? sql.length : j + 1; out += sql.slice(i, e); i = e; continue; }
+      if (c === '-' && sql[i + 1] === '-') { const j = sql.indexOf('\n', i); i = j < 0 ? sql.length : j; continue; }
+      if (c === '/' && sql[i + 1] === '*') { const j = sql.indexOf('*/', i + 2); i = j < 0 ? sql.length : j + 2; out += ' '; continue; }
+      out += c; i++;
+    }
+    return out;
+  }
+  /** 소스의 템플릿 글자마다 { raw = 원문(${} 자리 = 표식 '${}') · sql = SQL 주석 걷은 글자 } — 구문 트리라 TS 주석 속 글자는 빠진다 */
+  function sqlTemplateTexts(src: string, file: string): Array<{ raw: string; sql: string }> {
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const out: Array<{ raw: string; sql: string }> = [];
+    const text = (n: { rawText?: string; text: string }) => n.rawText ?? n.text;
+    const visit = (n: ts.Node) => {
+      let raw: string | null = null;
+      if (ts.isNoSubstitutionTemplateLiteral(n)) raw = text(n);
+      else if (ts.isTemplateExpression(n)) raw = [text(n.head), ...n.templateSpans.map((sp) => '${}' + text(sp.literal))].join('');
+      if (raw !== null) out.push({ raw, sql: stripSqlComments(raw) });
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return out;
+  }
+  /**
+   * INSERT 문장 읽기 한 곳(★ Codex 구현 4R — 시험 2 · 7 이 같은 결과를 쓴다 · 둘이 다른 식으로 읽으면 그 틈으로 문장이 빠진다).
+   * 모든 「INSERT INTO」 = 읽힘(표 · 열 · 열 목록 뒤 글자) 또는 못 읽음(머리 글자) 둘 중 하나. 읽는 꼴 = 표 이름(따옴표 · 스키마 없음) 또는 ${} · AS 별칭 선택 · 열 목록.
+   */
+  type InsertRead = { ok: true; table: string; cols: string[]; tail: string } | { ok: false; head: string };
+  function readInserts(sql: string): InsertRead[] {
+    const out: InsertRead[] = [];
+    for (const m of sql.matchAll(/INSERT\s+INTO\b/gi)) {
+      const rest = sql.slice(m.index!);
+      const p = rest.match(/^INSERT\s+INTO\s+([a-z0-9_]+|\$\{\})(?:\s+AS\s+[a-z_]\w*)?\s*\(([^)]*)\)/i);
+      if (p) out.push({ ok: true, table: p[1] === '${}' ? '${table}' : p[1], cols: p[2].split(',').map((x) => x.trim().replace(/\$\{\}/g, '').toLowerCase()).filter(Boolean), tail: rest.slice(p[0].length) });
+      else out.push({ ok: false, head: rest.replace(/\s+/g, ' ').slice(0, 90) });
+    }
+    return out;
+  }
+  /**
+   * 한 행이 확실한 문장 = 열 목록 바로 뒤 「VALUES ( … )」 괄호 하나(그 뒤에 쉼표로 이은 괄호 없음).
+   * ★ Codex 구현 5R(이 부류 다섯 번째) — 여러 행 꼴(SELECT · unnest · VALUES ${} · 괄호 여럿 · WITH …)을 하나씩 알아보지 않고 판정을 뒤집었다:
+   *   한 행이 확실한 것만 빼고 전부 「여러 행 가능」으로 세어 분류를 요구한다(새 꼴이 나와도 기본값 = 센다).
+   */
+  function isSingleRow(tail: string): boolean {
+    const m = tail.match(/^\s*VALUES\s*\(/i);
+    if (!m) return false;
+    let depth = 0;
+    let i = m[0].length - 1;
+    for (; i < tail.length; i++) {
+      const c = tail[i];
+      if (c === "'") { const j = tail.indexOf("'", i + 1); i = j < 0 ? tail.length : j; continue; }
+      if (c === '(') depth++;
+      else if (c === ')') { depth--; if (depth === 0) break; }
+    }
+    // 괄호 뒤 = 허용 목록(문장 끝 · ; · 감싼 괄호 닫힘 · ON CONFLICT · RETURNING)만 한 행 · 그 밖(쉼표 · UNION · ${} 등) = 센다(Codex 구현 6R)
+    return depth === 0 && /^\s*($|;|\)|ON\s+CONFLICT\b|RETURNING\b)/i.test(tail.slice(i + 1));
+  }
+  const isMultiRow = (r: { tail: string }) => !isSingleRow(r.tail);
+  /** 달러 따옴표($$ · $이름$ · 그 안의 -- 를 주석으로 걷게 된다) — `$${번호}` 자리표는 제외 · 원문에서 찾는다 */
+  const DOLLAR_QUOTE = /\$\$(?!\{\})|\$[A-Za-z_]\w*\$/;
+  /** 이름이 names 인 함수를 부르는 호출식 수(구문 트리 · 이름 뒤 공백 · 주석 무관 · 주석 속 예시 0) */
+  function countCallsNamed(src: string, file: string, names: ReadonlySet<string>): number {
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let n = 0;
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node)) {
+        const e = node.expression;
+        const name = ts.isIdentifier(e) ? e.text : ts.isPropertyAccessExpression(e) ? e.name.text : '';
+        if (names.has(name)) n++;
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return n;
+  }
+
+  const QUEUE_FN = new Set(['insertTestSmsQueue', 'insertBrandQueue', 'insertAlimtalkQueue', 'bulkInsertSmsQueue', 'buildSmsQueueInsert']);
+  /**
+   * ★ Codex 구현 1R ~ 4R 같은 부류(추출기가 코드 모양에 따라 하나씩 놓친다) → 구조: 추출기가 셀 수 없는 꼴 자체를 계약 위반으로.
+   *   ① readInserts 가 못 읽는 INSERT(따옴표 · 스키마 이름 · 열 목록 없음 · 그 밖) ② 달러 따옴표 SQL
+   *   ③ 큐 함수를 직접 호출이 아닌 방식으로 쓰는 곳(별칭 import · 이름 바꾼 구조 분해 · 값으로 넘김 · call · apply · bind)
+   *   큐 함수를 정의하는 파일(utils/sms-queue.ts)도 ① ② 는 그대로 보고, ③ 에서 그 함수 선언 이름만 뺀다(Codex 구현 4R).
+   */
+  function untrackableShapes(src: string, file: string): string[] {
+    const out: string[] = [];
+    for (const { raw, sql } of sqlTemplateTexts(src, file)) {
+      for (const r of readInserts(sql)) if (!r.ok) out.push(`insert|${r.head}`);
+      if (DOLLAR_QUOTE.test(raw)) out.push('dollar-quote');
+    }
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const visit = (n: ts.Node) => {
+      if (ts.isIdentifier(n) && QUEUE_FN.has(n.text)) {
+        const p = n.parent;
+        const directCall = ts.isCallExpression(p) && p.expression === n;
+        const methodCall = ts.isPropertyAccessExpression(p) && p.name === n && ts.isCallExpression(p.parent) && p.parent.expression === p;
+        const plainImport = ts.isImportSpecifier(p) && !p.propertyName;
+        const plainBinding = ts.isBindingElement(p) && !p.propertyName && p.name === n;
+        const declaredHere = file === 'utils/sms-queue.ts' && ts.isFunctionDeclaration(p) && p.name === n;
+        if (!(directCall || methodCall || plainImport || plainBinding || declaredHere)) out.push(`queue-ref|${n.text}`);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+    return out;
+  }
+
+  it('0 추출기 자체 — SQL 주석 속 문장 0 · 주석 낀 문장 1 · 같은 문장 둘 = 2 · 이름 뒤 공백 · 주석 낀 호출 = 1 · 주석 속 호출 0 · 셀 수 없는 꼴은 잡힌다(Codex 구현 2R · 3R)', () => {
+    const odd = [
+      'import { bulkInsertSmsQueue as enqueue } from "./sms-queue";',
+      'const { insertBrandQueue: ib } = await import("./sms-queue");',
+      'bulkInsertSmsQueue.call(null, [], [], true);',
+      'const f = insertAlimtalkQueue;',
+      'const q1 = `INSERT INTO "campaign_send_staging" (phone) SELECT 1`;',
+      'const q2 = `INSERT INTO public.campaign_send_staging (phone) SELECT 1`;',
+      'const q3 = `DO $$ BEGIN INSERT INTO t (phone) SELECT 1; -- x\n END $$`;',
+      'const q4 = `SELECT $body$ x $body$`;',
+      'const ok = `INSERT INTO t AS a (phone) SELECT 1 WHERE id = $${n}`; insertTestSmsQueue("p"); const { bulkInsertSmsQueue } = await import("./sms-queue");',
+      'export async function bulkInsertSmsQueue() {}',
+    ].join('\n');
+    expect(untrackableShapes(odd, 'x.ts').sort()).toEqual([
+      'dollar-quote', 'dollar-quote', 'insert|INSERT INTO "campaign_send_staging" (phone) SELECT 1', 'insert|INSERT INTO public.campaign_send_staging (phone) SELECT 1',
+      'queue-ref|bulkInsertSmsQueue', 'queue-ref|bulkInsertSmsQueue', 'queue-ref|bulkInsertSmsQueue', 'queue-ref|insertAlimtalkQueue', 'queue-ref|insertBrandQueue',
+    ].sort());
+    // 큐 함수 선언 이름은 큐 모듈 파일에서만 예외(Codex 구현 4R)
+    expect(untrackableShapes('export async function bulkInsertSmsQueue() {}', 'utils/sms-queue.ts')).toEqual([]);
+    // 시험 2 · 7 이 같은 읽기 함수: AS 별칭 뒤 SELECT = 여러 행 문장 1건(Codex 구현 4R)
+    const aliased = readInserts(sqlTemplateTexts('const a = `INSERT INTO t AS a (phone) SELECT x.phone FROM s x`;', 'x.ts')[0].sql);
+    expect(aliased.map((r) => (r.ok ? [r.table, r.cols, isMultiRow(r)] : r.head))).toEqual([['t', ['phone'], true]]);
+    // 한 행이 확실한 것만 뺀다(Codex 구현 5R): 괄호 하나 = 한 행 · 괄호 둘 · WITH · VALUES ${} = 여러 행 가능
+    const multiOf = (q: string) => readInserts(sqlTemplateTexts(`const q = \`${q}\`;`, 'x.ts')[0].sql).map((r) => r.ok && isMultiRow(r));
+    expect(multiOf("INSERT INTO t (phone, name) VALUES ($1, 'a,(b)') ON CONFLICT DO NOTHING")).toEqual([false]);
+    expect(multiOf('INSERT INTO t (phone) VALUES ($1), ($2)')).toEqual([true]);
+    expect(multiOf('INSERT INTO t (phone) WITH s AS (SELECT 1) SELECT x FROM s')).toEqual([true]);
+    expect(multiOf('INSERT INTO t (phone) VALUES ${v}')).toEqual([true]);
+    expect(multiOf('INSERT INTO t (phone) VALUES ($1::text) UNION ALL SELECT phone FROM r')).toEqual([true]);
+    expect(multiOf('INSERT INTO t (phone) VALUES ($1)${more}')).toEqual([true]);
+    expect(multiOf('WITH ins AS (INSERT INTO t (phone) VALUES ($1)) SELECT 1')).toEqual([false]);
+    expect(multiOf('INSERT INTO t (phone) VALUES ($1) RETURNING id')).toEqual([false]);
+    const src = [
+      'const a = `INSERT INTO t (phone) SELECT u.p FROM unnest($1::text[]) u(p)`;',
+      'const b = `INSERT INTO t (phone) SELECT u.p FROM unnest($1::text[]) u(p)`;',
+      'const c = `-- INSERT INTO t (phone) SELECT 1\n SELECT 1`;',
+      'const d = `INSERT INTO t (phone) /* 메모 */ SELECT x.phone FROM s x`;',
+      '// const e = `INSERT INTO t (phone) SELECT 1`;',
+      'bulkInsertSmsQueue /* 출처 */ ([], [], true); q.bulkInsertSmsQueue([]); // bulkInsertSmsQueue([])',
+    ].join('\n');
+    const reads = sqlTemplateTexts(src, 'x.ts').flatMap(({ sql }) => readInserts(sql));
+    expect(reads.filter((r) => r.ok && isMultiRow(r)).length).toBe(3);
+    expect(countCallsNamed(src, 'x.ts', new Set(['bulkInsertSmsQueue']))).toBe(2);
+  });
+
+  /** 하한(8 · 10)만 있는 길이 판정 면제 — 키 = 파일|식 · 값 = 왜 칸 폭을 볼 필요가 없나 */
+  const LOWER_ONLY_OK: Record<string, string> = {
+    'utils/agency-send-intake.ts|cb.length >= 8': '고객별 회신번호 = 넣기 전 등록 발신번호 대조(varchar(20) 표)가 21자 이상을 미등록으로 반려 · 칸에 닿지 않는다(설계서 D5\')',
+    'utils/agency-send-intake.ts|cb.length < 8': '원스텝 · 메일 분석 = 회신 열 값이 등록 발신번호 대조를 지나야 접수된다 · 칸에 닿지 않는다(설계서 D5\')',
+    'utils/proposal-trial.ts|p.length >= 8': '회사 등록 발신번호 표(varchar(20))를 읽기만 한다 · 칸에 넣지 않는다',
+    'utils/journey-callback.ts|d.length >= 8': '고른 회신번호를 회사 등록 발신번호와 비교만 한다 · 칸에 넣지 않는다',
+    'utils/proposal-trial.ts|d.length >= 10': '화면 표시용 가림(010-****-0000) · 칸에 넣지 않는다',
+    'utils/planner-recheck.ts|mfa.length < 10': '2차 인증 번호와 비교만 한다 · 칸에 넣지 않는다',
+  };
+
+  it('1 하한(8 · 10)만 있는 번호 길이 판정 = 0 · 같은 식에 상한이 있거나 면제(이유)뿐 · 낡은 면제 0', () => {
+    // 번호 판정 = 이름이 번호 꼴(phone · cb · d · p · digits …)이거나 그 줄이 번호를 다룬다(phone · callback 낱말) · 비밀번호 · 글 길이는 대상 아님
+    const LOWER = /\b([A-Za-z_]\w*)\.length\s*(<|>=)\s*(8|10)\b/g;
+    const PHONE_NAME = /^(phone|cb|p|d|digits|clean|cleaned|callback|tel|mobile)$/;
+    const PHONE_LINE = /phone|Phone|callback|Callback/;
+    const hits: string[] = [];
+    for (const f of beFiles()) {
+      for (const line of stripComments(be(f)).split('\n')) {
+        for (const m of line.matchAll(LOWER)) {
+          if (!PHONE_NAME.test(m[1]) && !PHONE_LINE.test(line)) continue;
+          const both = line.match(new RegExp(`\\b${m[1]}\\.length\\s*(<|<=|>|>=)\\s*\\d+`, 'g')) || [];
+          if (both.length >= 2) continue;   // 같은 식에 상한도 있다(예: >= 10 && <= 11)
+          hits.push(`${f}|${m[0].replace(/\s+/g, ' ')}`);
+        }
+      }
+    }
+    const uniq = [...new Set(hits)].sort();
+    expect(uniq.filter((k) => !LOWER_ONLY_OK[k])).toEqual([]);
+    expect(Object.keys(LOWER_ONLY_OK).filter((k) => !uniq.includes(k))).toEqual([]);
+  });
+
+  /** 번호 칸에 여러 행을 넣는 문장(파일|표) 분류 = [문장 수, 이유] — ct = 그 파일이 판정 함수를 부른다 · 그 밖 = 값의 출처가 이미 칸 폭 안(이유)
+   *  문장 수까지 대조한다: 분류된 파일에 판정 없는 문장이 하나 더 생겨도 빨간불(Codex 구현 1R #3) → 새 문장을 보고 수 · 이유를 고친다 */
+  const MULTI_ROW: Record<string, [number, string]> = {
+    'routes/campaigns.ts|campaign_send_staging': [1, 'ct'],
+    'utils/address-book-insert.ts|address_books': [1, 'ct'],
+    'utils/agency-send-intake.ts|agency_send_recipients': [1, 'ct'],
+    'utils/extraction-keep.ts|campaign_send_staging': [1, 'ct'],
+    'routes/dm.ts|campaign_send_staging': [1, '고객 표(customers.phone · callback = varchar(20)) 에서 고른 수신자'],
+    'routes/upload.ts|unsubscribes': [1, '고객 표 번호 복사'],
+    'utils/ad-send-gate.ts|ad_send_marks': [2, '적재 표 · 입구 판정(R108-3)을 거친 번호 · 앞 줄 복사'],
+    'utils/agency-send-worker.ts|campaign_send_staging': [1, '대행 명단 표(agency_send_recipients = 접수 코어 판정 뒤) 복사'],
+    'utils/ask-segments.ts|campaign_send_staging': [1, '고객 표에서 고른 수신자'],
+    'utils/bito-sender-sync.ts|bito_sender_sync': [1, '회사 등록 발신번호 표(varchar(20)) 번호'],
+    'utils/campaign-split.ts|campaign_send_staging': [1, '나눠 보내기 고정 명단(고객 표 번호)'],
+    'utils/campaign-split.ts|campaign_split_members': [1, '고객 표에서 고른 수신자'],
+    'utils/dm/dm-interaction.ts|dm_winners': [1, '한 건(응답 한 줄) · 여러 행 아님(INSERT … SELECT 매개변수 · 한 건 자리 목록 = 설계서 §8)'],
+    'utils/fatigue-guard.ts|send_fatigue_daily': [1, '보낸 큐 행 번호(dest_no = varchar(20))'],
+    'utils/inbound-sms.ts|inbound_messages': [3, '받은 문자 행 복사'],
+    'utils/journey-entry-ledger.ts|journey_entry_ledger': [4, '고객 표 번호 복사'],
+    'utils/journey-trigger-watcher.ts|journey_entry_ledger': [1, '고객 표 번호 복사'],
+    'utils/operator-recipients.ts|campaign_send_staging': [1, '고객 표에서 고른 수신자'],
+    'utils/same-phone-consent.ts|sync_consent_marks': [2, '싱크 번호 = normalize.ts normalizePhone(휴대폰 꼴 12자 이하만)'],
+    'utils/same-phone-consent.ts|sync_consent_stage': [1, '싱크 번호 = normalize.ts normalizePhone(휴대폰 꼴 12자 이하만)'],
+    'utils/sms-queue.ts|${table}': [4, '발송 큐 CT · 값 = 적재 표 · 고객 표 · 대행 명단 · 입구 판정(R108-3)을 거친 목록'],
+    'utils/sync-unsubscribes.ts|unsubscribes': [4, '고객 표 번호 복사'],
+    'utils/unsubscribe-helper.ts|unsubscribes': [4, '고객 표 번호 복사 · 한 번호 매개(수동 등록 = normalize.ts 휴대폰 꼴 · 080 = isAcceptablePhoneDigits)'],
+  };
+
+  it('2 번호 칸에 여러 행을 넣는 문장(소스 추출) = 파일 · 표마다 문장 수까지 분류 · ct 는 그 파일이 판정 함수를 부른다 · 새 자리 · 없어진 분류 = 실패', () => {
+    const PHONE_COL = (c: string) => /(phone|callback|dest_no|call_back)/.test(c) && !/(_column|_mode|^use_|_yn$|_at$|_count$|_id$)/.test(c);
+    const found = new Map<string, number>();
+    for (const f of beFiles()) {
+      // 문장 = 소스의 템플릿 글자(구문 트리 · ${} 자리는 표식) · SQL 주석(-- · /* */)을 걷은 뒤 센다(주석 속 문장 0 · 주석 낀 문장 1 · Codex 구현 2R #2)
+      for (const { sql } of sqlTemplateTexts(be(f), f)) {
+        for (const r of readInserts(sql)) {
+          if (!r.ok || !r.cols.some(PHONE_COL) || !isMultiRow(r)) continue;   // 못 읽는 문장 = 시험 7 이 잡는다(같은 읽기 함수)
+          found.set(`${f}|${r.table}`, (found.get(`${f}|${r.table}`) || 0) + 1);
+        }
+      }
+    }
+    expect(Object.fromEntries([...found].sort())).toEqual(Object.fromEntries(Object.entries(MULTI_ROW).map(([k, [n]]) => [k, n] as [string, number]).sort()));
+    const ctMissing = Object.entries(MULTI_ROW).filter(([, [, why]]) => why === 'ct').map(([k]) => k.split('|')[0])
+      .filter((f) => !JUDGE.test(stripComments(be(f))));
+    expect(ctMissing).toEqual([]);
+  });
+
+  it('3 사용자 번호 목록 입구 = 필드마다 판정 글자(한 필드 판정을 지우면 빨간불)', () => {
+    const want: Array<[string, string, string, RegExp[]]> = [
+      ['routes/campaigns.ts', 'POST', '/direct-send/stage', [/varcharFitsSql\('u\.phone', PHONE_COLUMN_WIDTH\)/, /varcharFitsSql\('u\.callback', PHONE_COLUMN_WIDTH\)/]],
+      ['routes/campaigns.ts', 'POST', '/direct-send', [/fitsPhoneColumn\(normalizePhone\(String\(r\?\.phone \?\? ''\)\)\)/]],
+      ['routes/campaigns.ts', 'POST', '/brand-send', [/fitsPhoneColumn\(normalizePhone\(String\(x \?\? ''\)\)\)/, /fitsPhoneColumn\(resolvedCallback\)/]],
+      ['routes/address-books.ts', 'POST', '/', [/isAcceptablePhoneDigits\(phone\)/]],
+      ['routes/address-books.ts', 'POST', '/:groupName/append', [/isAcceptablePhoneDigits\(phone\)/]],
+    ];
+    const missing: string[] = [];
+    for (const [f, method, path, pats] of want) {
+      const b = routeBlocks(stripComments(be(f))).find((r) => r.method === method && r.path === path);
+      for (const p of pats) if (!b || !p.test(b.body)) missing.push(`${method} ${path} ${p}`);
+    }
+    expect(missing).toEqual([]);
+  });
+
+  /** 발송 큐(MySQL dest_no · call_back = varchar(20)) 넣기 함수를 부르는 파일 = [호출 수, 번호 출처(칸 폭 안 · 입구 판정)] · 호출 수까지 대조(Codex 구현 1R #3) */
+  const QUEUE_CALLERS: Record<string, [number, string]> = {
+    'routes/campaigns.ts': [7, '테스트 번호(테스트 연락처 표) · 캠페인 발송(고객 표) · 옛 동기 · 브랜드 입구 판정(R108-3)'],
+    'routes/dm.ts': [1, 'DM 테스트 = 10 ~ 11자 번호만'],
+    'routes/spam-filter.ts': [1, '스팸 검사 기기 번호 표'],
+    'routes/internal-alert.ts': [1, '운영 알림 받는 번호(설정 값 · 한 건)'],
+    'utils/agency-send-worker.ts': [1, '대행 담당자(접수 코어 판정) · 대행 명단 표'],
+    'utils/spam-probe.ts': [2, '스팸 검사 기기 번호 표'],
+    'utils/spam-test-queue.ts': [2, '스팸 검사 기기 번호 표'],
+    'utils/brand-message.ts': [2, '브랜드 입구 판정(R108-3)을 거친 번호'],
+    'utils/direct-send-processor.ts': [3, '적재 표(R108-3 판정 · 칸 폭 안)'],
+    'utils/auto-campaign-worker.ts': [2, '고객 표'],
+    'utils/system-alimtalk.ts': [1, '인증번호 받는 번호 = 계정 2차 인증 번호(users.mfa_phone varchar(20)) · 발신 인증 번호(sender-auth.ts 가 sender_auth_challenges.phone varchar(20) 에 먼저 넣는다)'],
+    'utils/sms-notice.ts': [2, '알림 문자 CT · 받는 번호 = 각 기능 설정 값(대행 담당자 = agencyManagerPhones 판정 · 승인 · 운영자 번호 등 한 건 자리 · 자동발송 알림 번호는 서버 상한 없음 = 설계서 §8 한 건 자리 목록)'],
+  };
+
+  it('5 발송 큐 넣기 호출(소스 추출) = 파일마다 호출 수까지 분류 · 새 호출 · 없어진 분류 = 실패', () => {
+    // 호출 = 구문 트리의 호출식(이름 뒤 공백 · 주석이 끼어도 · 주석 속 예시는 0 · Codex 구현 2R #3) · 다른 모양으로 쓰면 시험 7 이 잡는다
+    const found: Record<string, number> = {};
+    for (const f of beFiles()) {
+      if (f === 'utils/sms-queue.ts') continue;
+      const n = countCallsNamed(be(f), f, QUEUE_FN);
+      if (n > 0) found[f] = n;
+    }
+    expect(Object.fromEntries(Object.entries(found).sort())).toEqual(Object.fromEntries(Object.entries(QUEUE_CALLERS).map(([k, [n]]) => [k, n] as [string, number]).sort()));
+  });
+
+  /**
+   * 셀 수 없는 꼴 면제 = 파일|문장 머리(공백 접은 앞 90자) → [나온 수, 이유] · 나온 수까지 대조(같은 파일 · 표에 새 문장이 생기면 빨간불 · Codex 구현 4R)
+   *   그 밖의 셀 수 없는 꼴 = 실패. 큐 함수를 정의하는 파일(utils/sms-queue.ts)도 본다(선언 이름만 예외).
+   */
+  const UNTRACKABLE_OK: Record<string, [number, string]> = {
+    'utils/journey-lineage.ts|insert|INSERT INTO journeys SELECT (jsonb_populate_record(NULL::journeys, to_jsonb(j) || $2::json':
+      [1, '같은 표 행 복사(열 목록 없음) · 덮는 값 = 코드가 정한 아이디 · 상태 · 이름 · 시각 · 통계(번호 칸 = 원래 행 값 = 칸 폭 안)'],
+    'utils/journey-lineage.ts|insert|INSERT INTO journey_steps SELECT (jsonb_populate_record(NULL::journey_steps, to_jsonb(s) |':
+      [1, '같은 표 행 복사(열 목록 없음) · 덮는 값 = 아이디 · 여정 아이디 · 시각'],
+  };
+
+  it('7 추출기가 셀 수 없는 꼴 = 면제(이유 · 나온 수)뿐 — 못 읽는 INSERT · 달러 따옴표 SQL · 큐 함수 별칭 · 값 참조 · call · apply(Codex 구현 3R · 4R)', () => {
+    const found: Record<string, number> = {};
+    for (const f of beFiles()) for (const k of untrackableShapes(be(f), f)) found[`${f}|${k}`] = (found[`${f}|${k}`] || 0) + 1;
+    expect(Object.fromEntries(Object.entries(found).sort())).toEqual(Object.fromEntries(Object.entries(UNTRACKABLE_OK).map(([k, [n]]) => [k, n] as [string, number]).sort()));
+  });
+
+  it('6 화면 폭 상수 = 백엔드 폭 상수 · 알림톡 창이 적재 전에 그 상수로 뺀다', async () => {
+    const be108 = await import('../column-width');
+    const fe = await import('../../../../frontend/src/utils/recipient-paste');
+    expect(fe.PHONE_COLUMN_WIDTH).toBe(be108.PHONE_COLUMN_WIDTH);
+    const alim = stripComments(read(join(FE, 'components/AlimtalkSendModal.tsx')));
+    expect(alim).toMatch(/recipients\.filter\(\(r\) => stagedPhoneFits\(r\.phone\)\)/);
+    // 화면 판정 = 서버 적재와 같은 정리(글자면 숫자만 · 글자가 아니면 빈 값 · Codex 구현 1R #1) · 칸 값 = 서버가 넣던 글자(1R #2)
+    expect([fe.stagedPhoneFits('010-0000-0000-0000-00'), fe.stagedPhoneFits('0'.repeat(21)), fe.stagedPhoneFits(12345678901234567890123), fe.stagedPhoneFits(null)]).toEqual([true, false, true, true]);
+    expect([fe.stagedPhoneFits(['01000000001']), fe.stagedPhoneFits({ p: 1 })]).toEqual([false, false]);   // 서버 형식 400 → 화면이 그 행만 뺀다(구현 2R #1)
+    expect([fe.toStageCell(['일반']), fe.toStageCell({ a: 1 }), fe.toStageCell(['a', 'b']), fe.toStageCell(null), fe.toStageCell(7)]).toEqual(['일반', '{"a":1}', '["a","b"]', null, 7]);
+  });
+
+  it('4 주소록 적재 CT 가 글자 칸 · 번호 칸 폭을 본다 · 두 라우트 catch 가 사용자 오류를 그 상태로 돌려준다', () => {
+    const ins = stripComments(be('utils/address-book-insert.ts'));
+    expect(ins).toContain('const W = ADDRESS_BOOK_WIDTH;');
+    for (const field of ["over('$3::text', W.groupName)", "over('x.phone', PHONE_COLUMN_WIDTH)", "over('x.name', W.name)", "over('x.extra1', W.extra)", "over('x.extra2', W.extra)", "over('x.extra3', W.extra)"]) {
+      expect(ins, field).toContain(field);   // 필드 하나 판정을 지우면 빨간불
+    }
+    expect(ins).toContain("'ADDRESS_BOOK_TEXT_TOO_LONG'");
+    for (const path of ['/', '/:groupName/append']) {
+      const b = routeBlocks(stripComments(be('routes/address-books.ts'))).find((r) => r.method === 'POST' && r.path === path)!;
+      const c = b.body.slice(b.body.lastIndexOf('} catch'));
+      expect(c, path).toMatch(/if \(respondUserError\(res, \w+\)\) return;/);
+    }
+  });
+});

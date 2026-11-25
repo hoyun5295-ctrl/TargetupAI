@@ -17,6 +17,7 @@ import { randomUUID } from 'crypto';
 import { query, pool } from '../config/database';
 import { getColumnFields, FIELD_DISPLAY_MAP, reverseDisplayValue } from './standard-field-map';
 import { normalizePhone } from './normalize-phone';
+import { PHONE_COLUMN_WIDTH, fitsPhoneColumn } from './column-width';
 import { STAGING_COMMIT_MAX_AGE_HOURS, withStagingLock, restoreParkedStagingRows } from './staging-sweeper';
 import { getStoreScope } from './store-scope';
 
@@ -28,8 +29,8 @@ export const EXTRACTION_SEARCH_MIN_DIGITS = 3;
 export const EXTRACTION_SEARCH_LIMIT = 50;
 /** 빼기 한 번에 받는 최대 번호 수 */
 export const EXTRACTION_REMOVE_MAX = 1000;
-/** campaign_send_staging.phone · callback 폭(information_schema 0929) */
-export const STAGING_TEXT_MAX = 20;
+/** campaign_send_staging.phone · callback 폭(information_schema 0929) · ★ 1125 C163 = 칸 폭 CT 한 곳(R108) */
+export const STAGING_TEXT_MAX = PHONE_COLUMN_WIDTH;
 /** 보관 적재 한 문장 행 수 — /direct-send/stage 청크 상한과 같다 */
 const KEEP_CHUNK = 50000;
 
@@ -111,7 +112,7 @@ export function buildKeptSelect(phoneField: unknown): ExtractSelect {
 /** 보관 행으로 넣을 번호 — 숫자만 · 1~20자. 그 밖은 null(넣지 않는다) */
 export function keepablePhone(raw: unknown): string | null {
   const p = normalizePhone(String(raw ?? ''));
-  return p && p.length <= STAGING_TEXT_MAX ? p : null;
+  return p && fitsPhoneColumn(p) ? p : null;   // 숫자 글자 = 길이 판정과 같다(R108)
 }
 
 /**
