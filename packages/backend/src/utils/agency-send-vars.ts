@@ -17,6 +17,8 @@
  */
 
 import { findVarTokens, replaceVarTokens } from './var-tokens';
+import { getFieldByKey } from './standard-field-map';
+import { agencyCellIsMobile } from './agency-send-form';
 
 /** 주소록 슬롯 순서. 직접발송이 쓰는 이름 그대로다(`messageUtils.replaceVariables` 0단계) */
 export const SLOT_VARS = ['이름', '기타1', '기타2', '기타3'] as const;
@@ -85,10 +87,73 @@ export function buildSlotPlan(content: string): SlotPlan {
 /**
  * 문안 항목 이름과 같은 이름의 명단 열을 찾는다(공백만 무시).
  * 화면 접수(AgencySendComposer)가 같은 규칙을 미러로 갖고 있다 — 규칙을 바꾸면 양쪽을 함께 바꾼다.
+ * (같은 뜻 이름 synonymColumn 은 서버가 분석하는 입구(메일 · 원스텝)에만 있다 — 화면 접수는 사용자가 연결 표에서 열을 고른다)
  */
 export function sameNameColumn(headers: string[], varName: string): string | null {
   const key = String(varName || '').replace(/\s+/g, '');
   return headers.find((h) => String(h || '').replace(/\s+/g, '') === key) || null;
+}
+
+/**
+ * ★ 2026-11-25(2) 같은 뜻 이름의 열 — Harold 「이름 고객명정도는 붙여줘도 되는거아니냐? 원하는게 사람이 하는것과 같은 대행인데」.
+ *   문안은 「[고객명]」 · 「%고객명%」인데 명단 열은 「이름」인 접수(실 접수 시험 파일)를 사람은 당연히 잇는다.
+ *   기준 = 표준 필드 표(standard-field-map FIELD_MAP)의 **표시 이름 + 동의어** 한 벌(「고객명」 = 「이름」 = 「성함」) — 여기서 새 낱말을 적지 않는다.
+ *   지금은 고객 이름 항목만 쓴다(요청 범위 · 등급 · 포인트 묶음도 같은 표에 있다). 받는 사람 번호 항목은 쓰지 않는다.
+ *   ⛔ 같은 이름의 열이 없을 때만 · 같은 뜻 이름의 열이 **정확히 하나**일 때만 잇는다(「이름」 · 「성함」 둘 다 있으면 고르지 않는다 = 사람도 묻는다).
+ */
+const SYNONYM_FIELD_KEYS = ['name'];
+const nameKey = (v: unknown) => String(v || '').replace(/\s+/g, '');
+
+/** 같은 뜻 이름의 열 전부(명단 차례) — 화면의 고르기 후보에도 쓴다(둘 이상이면 사람이 고른다) */
+export function synonymColumns(headers: string[], varName: string): string[] {
+  const key = nameKey(varName);
+  if (!key) return [];
+  for (const fieldKey of SYNONYM_FIELD_KEYS) {
+    const f = getFieldByKey(fieldKey);
+    if (!f) continue;
+    const group = [f.displayName, ...(f.aliases || [])].map(nameKey);
+    if (group.includes(key)) return headers.filter((h) => group.includes(nameKey(h)));
+  }
+  return [];
+}
+
+/**
+ * 그 열의 값이 사람 이름일 수 없는 모양인가 — 과반이 휴대폰 번호 · 또는 과반이 「점 · 지점 · 매장 · 점포」로 끝남(매장 이름).
+ *   사람도 열 이름만 보지 않고 값을 본다(「이름」 열에 강남점 · 성수점이 들어 있으면 고객 이름으로 잇지 않는다 · Codex 같은 뜻 1R).
+ */
+function valuesRuleOutPersonName(column: string, rows: Array<Record<string, any>>): boolean {
+  // 명단 전체를 **한 번** 훑어 같이 센다(채워진 칸 · 매장 이름 꼴 · 휴대폰 번호 칸) · 같은 분석(같은 rows) 안에서는 열별 결과를 다시 쓴다
+  //   (괄호 자리마다 이 판정을 부른다 · 앞쪽만 보면 뒤쪽 값이 다른 열을 놓친다 · Codex 같은 뜻 4R · 5R).
+  //   기준 하나 = **이름일 수 없는 값(매장 이름 꼴 + 휴대폰 번호)이 채워진 값의 절반을 넘으면** 참. 둘을 따로 재면 반씩 섞인 열이 빠져나간다
+  //   (경계 사례 세 라운드 = 기준을 하나로 · 6R). 「김순점」 · 「김민지」처럼 절반 이하면 이름 열이다.
+  let byColumn = ruleOutCache.get(rows);
+  if (!byColumn) { byColumn = new Map(); ruleOutCache.set(rows, byColumn); }
+  const cached = byColumn.get(column);
+  if (cached !== undefined) return cached;
+  let filled = 0; let store = 0; let mobile = 0;
+  for (const r of rows) {
+    const v = String(r?.[column] ?? '').trim();
+    if (!v) continue;
+    filled++;
+    if (/(점|지점|매장|점포)$/.test(v)) store++;
+    else if (agencyCellIsMobile(v)) mobile++;
+  }
+  const out = filled > 0 && (store + mobile) * 2 > filled;
+  byColumn.set(column, out);
+  return out;
+}
+const ruleOutCache = new WeakMap<object, Map<string, boolean>>();
+
+/** 같은 뜻 이름으로 **저절로** 이을 열 = 그런 열이 정확히 하나이고 값 모양이 어긋나지 않을 때만(rows 를 주면 값도 본다) */
+export function synonymColumn(headers: string[], varName: string, rows?: Array<Record<string, any>> | null): string | null {
+  const hits = synonymColumns(headers, varName);
+  if (hits.length !== 1) return null;
+  return rows && valuesRuleOutPersonName(hits[0], rows) ? null : hits[0];
+}
+
+/** 문안 항목에 저절로 이을 열 = 같은 이름 → 없으면 같은 뜻 이름(하나뿐 · 값 모양 맞음). 메일 · 원스텝 분석 · 괄호 자리 변환이 같이 쓴다 */
+export function autoColumn(headers: string[], varName: string, rows?: Array<Record<string, any>> | null): string | null {
+  return sameNameColumn(headers, varName) || synonymColumn(headers, varName, rows);
 }
 
 export interface VarColumnResolution {
@@ -99,12 +164,14 @@ export interface VarColumnResolution {
 }
 
 /**
- * 문안 항목을 명단 열에 잇는다. 우선순위 = 확인 화면 조정값 > 같은 이름.
+ * 문안 항목을 명단 열에 잇는다. 우선순위 = 확인 화면 조정값 > 같은 이름 > 같은 뜻 이름(하나뿐일 때 · ★1125(2)).
  * ⛔ 조정값이 명단에 없는 열이면 **폴백하지 않고** badOverrides로 돌려준다
  *   (사용자가 본 것과 다른 열로 접수되면 안 된다 · 원스텝 ★Codex 적대 2R 계약과 같은 선).
  */
 export function resolveVarColumns(
   vars: string[], headers: string[], overrideMap?: Record<string, string> | null,
+  /** ★(2) 명단 행 — 같은 뜻 이름으로 이을 때 값 모양도 본다(안 주면 이름만) */
+  rows?: Array<Record<string, any>> | null,
 ): { resolved: VarColumnResolution[]; badOverrides: string[] } {
   const badOverrides: string[] = [];
   const resolved = vars.map((name): VarColumnResolution => {
@@ -114,7 +181,7 @@ export function resolveVarColumns(
       badOverrides.push(name);
       return { name, column: null, via: null };
     }
-    const same = sameNameColumn(headers, name);
+    const same = autoColumn(headers, name, rows);
     return same ? { name, column: same, via: 'same' } : { name, column: null, via: null };
   });
   return { resolved, badOverrides };

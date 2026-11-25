@@ -145,7 +145,9 @@ describe('문안 항목 ↔ 명단 열 잇기 (★2026-08-25 원스텝 §17-6)',
       { name: '포인트', column: '포인트', via: 'same' },
     ]);
     expect(badOverrides).toEqual([]);
-    expect(resolveVarColumns(['이름'], HEADERS).resolved[0]).toEqual({ name: '이름', column: null, via: null });
+    expect(resolveVarColumns(['담당매장'], HEADERS).resolved[0]).toEqual({ name: '담당매장', column: null, via: null });
+    // ★ 2026-11-25(2) 같은 뜻 이름(표준 필드 「고객명」 = 이름 · 성함)은 저절로 잇는다
+    expect(resolveVarColumns(['이름'], HEADERS).resolved[0]).toEqual({ name: '이름', column: '고객명', via: 'same' });
   });
 
   it('조정값이 명단에 없는 열이면 폴백하지 않고 badOverrides로 알린다', () => {
@@ -156,7 +158,7 @@ describe('문안 항목 ↔ 명단 열 잇기 (★2026-08-25 원스텝 §17-6)',
   });
 
   it('조정값의 빈 문자열은 "아직 안 골랐다"라 같은 이름 규칙으로 내려간다', () => {
-    const { resolved } = resolveVarColumns(['포인트', '이름'], HEADERS, { 포인트: '', 이름: '' });
+    const { resolved } = resolveVarColumns(['포인트', '담당매장'], HEADERS, { 포인트: '', 담당매장: '' });
     expect(resolved[0]).toEqual({ name: '포인트', column: '포인트', via: 'same' });
     expect(resolved[1].column).toBeNull();
   });

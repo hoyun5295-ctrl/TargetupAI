@@ -15,7 +15,7 @@ import { fork } from 'child_process';
 import { createRequire } from 'module';
 import path from 'path';
 import {
-  parseAgencyRequestForm, parseAgencyRecipientList, unreadableAgencyForm, type ParsedAgencyForm,
+  parseAgencyRequestForm, parseAgencyRecipientList, unreadableAgencyForm, readAgencyWorkbook, type ParsedAgencyForm,
 } from './agency-send-form';
 import { planAgencyWorkbook, type AgencyWorkbookPlan } from './agency-send-workbook';
 
@@ -144,6 +144,13 @@ export interface IsolatedWorkbookPlan {
   plan: AgencyWorkbookPlan;
   /** pairs = 짝마다 · single = [오늘 고르기 규칙의 요청서 시트 이름표] · invalid = [] */
   imageNames: string[][];
+  /**
+   * ★ 2026-11-25(2) pairs 일 때 짝마다 **이미 해석한** 요청서 · 명단 — 통합 문서를 한 번만 읽은 판에서 뽑는다.
+   *   짝마다 파일을 다시 읽으면 공유 문자열 xlsx · xls 는 읽을 때마다 문자열 표 · 파일 전체를 다시 푼다
+   *   (12짝 × 5,000명 실측: 판정 3.9초 + 짝 읽기 9.0초 · xls 11.2초 + 24.5초 ↔ 한 번 읽기 1.2초 · 0.9초 · Codex 상한 1R · 짝 1R).
+   *   onlyPair 를 준 호출(원스텝 = 고른 건 하나)은 그 짝만 명단을 싣는다(나머지 = null).
+   */
+  parsed?: Array<{ form: ParsedAgencyForm; list: ParsedAgencyList | null } | null>;
 }
 
 /** 판정 실패(자식 죽음 · 시간 초과 · 판정 없는 답) = 접수를 멈춘다 */
@@ -153,12 +160,23 @@ const PLAN_FAILED: IsolatedWorkbookPlan = {
 };
 
 /** 판정 + 이름표(자식 · 같은 프로세스 대체 경로가 같은 함수) */
-export function computeWorkbookPlan(buf: Buffer): IsolatedWorkbookPlan {
+export function computeWorkbookPlan(buf: Buffer, onlyPair?: number | null): IsolatedWorkbookPlan {
   const plan = planAgencyWorkbook(buf);
-  const imageNames = plan.kind === 'pairs'
-    ? plan.pairs.map((pr) => parseAgencyRequestForm(buf, { formSheet: pr.formSheet }).imageFileNames)
-    : plan.kind === 'single' ? [parseAgencyRequestForm(buf).imageFileNames] : [];
-  return { plan, imageNames };
+  if (plan.kind !== 'pairs') {
+    return { plan, imageNames: plan.kind === 'single' ? [parseAgencyRequestForm(buf).imageFileNames] : [] };
+  }
+  // 짝 파일 = 통합 문서를 한 번만 읽고 그 판에서 짝마다 해석(요청서는 전부 = 이름표 · 명단은 필요한 짝만)
+  let wb: ReturnType<typeof readAgencyWorkbook> | null = null;
+  try { wb = readAgencyWorkbook(buf); } catch { wb = null; }
+  if (!wb) return { plan, imageNames: plan.pairs.map((pr) => parseAgencyRequestForm(buf, { formSheet: pr.formSheet }).imageFileNames) };
+  const forms = plan.pairs.map((pr) => parseAgencyRequestForm(buf, { formSheet: pr.formSheet, workbook: wb }));
+  const parsed = plan.pairs.map((pr, k) => {
+    if (onlyPair != null && onlyPair !== k) return null;
+    let list: ParsedAgencyList | null = null;
+    try { list = parseAgencyRecipientList(buf, { listSheet: pr.listSheet, workbook: wb }); } catch { list = null; }
+    return { form: forms[k], list };
+  });
+  return { plan, imageNames: forms.map((f) => f.imageFileNames), parsed };
 }
 
 /**
@@ -166,12 +184,15 @@ export function computeWorkbookPlan(buf: Buffer): IsolatedWorkbookPlan {
  *   자식이 죽거나 · 시간을 넘기거나 · 판정 없이 답하면 = 판정 실패(invalid · 접수를 멈춘다). single 로 떨어뜨리면 여러 건 중 표준 한 짝만
  *   접수되고 나머지가 조용히 빠진다(Codex 설계 7R). single 은 판정이 성공했을 때만이다.
  */
-export async function planAgencyWorkbookIsolated(buf: Buffer, opts: { timeoutMs?: number } = {}): Promise<IsolatedWorkbookPlan> {
+export async function planAgencyWorkbookIsolated(buf: Buffer, opts: { timeoutMs?: number; onlyPair?: number | null } = {}): Promise<IsolatedWorkbookPlan> {
+  const onlyPair = Number.isInteger(opts.onlyPair) ? (opts.onlyPair as number) : null;
   return runInChild<IsolatedWorkbookPlan>(
-    { kind: 'plan', formBuf: buf },
-    () => computeWorkbookPlan(buf),
+    { kind: 'plan', formBuf: buf, onlyPair },
+    () => computeWorkbookPlan(buf, onlyPair),
     PLAN_FAILED,
-    (msg) => (msg.plan ? { plan: msg.plan, imageNames: Array.isArray(msg.imageNames) ? msg.imageNames : [] } : PLAN_FAILED),
+    (msg) => (msg.plan
+      ? { plan: msg.plan, imageNames: Array.isArray(msg.imageNames) ? msg.imageNames : [], ...(Array.isArray(msg.parsed) ? { parsed: msg.parsed } : {}) }
+      : PLAN_FAILED),
     opts.timeoutMs ?? AGENCY_PARSE_TIMEOUT_MS,
   );
 }

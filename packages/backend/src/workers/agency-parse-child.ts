@@ -29,7 +29,7 @@ process.once('message', (msg: any) => {
   if (msg?.kind === 'plan') {
     const buf = toBuffer(msg?.formBuf);
     let out: Record<string, unknown>;
-    try { out = buf ? { ...computeWorkbookPlan(buf) } : { plan: null }; } catch { out = { plan: null }; }   // 판정이 던지면 판정 없음 = 부모가 판정 실패로 멈춘다
+    try { out = buf ? { ...computeWorkbookPlan(buf, Number.isInteger(msg?.onlyPair) ? msg.onlyPair : null) } : { plan: null }; } catch { out = { plan: null }; }   // 판정이 던지면 판정 없음 = 부모가 판정 실패로 멈춘다
     process.send!({ type: 'result', ...out }, () => process.exit(0));
     return;
   }

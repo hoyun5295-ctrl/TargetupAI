@@ -3,6 +3,7 @@
  * 기대값 출처 = 실물 문장(수스 c8f7f2b0 「"OOO점만의  행사!"」 · 시세이도 생일 문안 [고객명] [소속매장명] [소속매장전화번호])과 손으로 정한 예.
  */
 import { describe, it, expect } from 'vitest';
+import { resolveVarColumns, synonymColumn } from '../agency-send-vars';
 import {
   findAgencyBlanks, matchBlankColumns, findSuffixDup, countEmptyVarRows,
   convertBracketVars, applySlotFills, agencyBlankApprovalLine, agencyBlankIntakeLines, blankLabel,
@@ -211,5 +212,95 @@ describe('Codex 구현 4R — 채운 뒤 원래 있던 항목도 그 자리에�
     const r = applySlotFills('1[지점명] 방문', [{ start: 1, end: 6, before: '[지점명]', column: '지점명' }], ['지점명']);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toContain('요청서에서');
+  });
+});
+
+describe('★1125(2) 괄호 자리의 가까운 열 = 수신번호 열은 권하지 않는다(실 접수 「[고객명]」 ↔ 「고객연락처 (수신번호)」)', () => {
+  const blankOf = (text: string) => findAgencyBlanks(`소중한 ${text} 고객님`).find((b) => b.text === text)!;
+  const rows = [
+    { 이름: '테스트1', '고객연락처 (수신번호)': '010-0000-0011', 고객등급: 'VIP', 매장번호: '02-0000-0001' },
+    { 이름: '테스트2', '고객연락처 (수신번호)': '010-0000-0012', 고객등급: 'GOLD', 매장번호: '02-0000-0002' },
+  ];
+  const headers = ['이름', '고객연락처 (수신번호)', '고객등급', '매장번호'];
+  it('휴대폰 번호가 든 열은 후보에서 빠지고 · 글자가 겹치는 다른 열은 남는다', () => {
+    const cols = matchBlankColumns(blankOf('[고객명]'), headers, rows).map((c) => c.column);
+    expect(cols).not.toContain('고객연락처 (수신번호)');
+    expect(cols).toContain('고객등급');
+  });
+  it('느슨한 이름이 같아도 휴대폰 번호 열은 후보가 아니다(「[고객명]」 ↔ 「고객전화」 · Codex 짝 2R)', () => {
+    const rows2 = [{ 고객전화: '010-0000-0011', 이름: '가' }, { 고객전화: '010-0000-0012', 이름: '나' }];
+    expect(matchBlankColumns(blankOf('[고객명]'), ['고객전화', '이름'], rows2).map((c) => c.column)).not.toContain('고객전화');
+  });
+  it('유선 번호 열(매장 전화)은 그대로 후보다', () => {
+    expect(matchBlankColumns(blankOf('[매장전화번호]'), headers, rows).map((c) => c.column)).toContain('매장번호');
+  });
+});
+
+describe('★1125(2) 같은 뜻 이름의 열 = 표준 필드 표 기준(「고객명」 = 「이름」 = 「성함」) — 실 접수 「[고객명]」 ↔ 「이름」 열', () => {
+  const headers = ['이름', '고객연락처 (수신번호)', '기타'];
+  it('괄호 자리 「[고객명]」 = 「이름」 열이 하나면 변수로 바뀌고 그 열에 이어진다', () => {
+    const r = convertBracketVars('소중한 [고객명] 고객님', headers);
+    expect(r.content).toBe('소중한 %고객명% 고객님');
+    expect(r.converted).toEqual([{ from: '[고객명]', column: '이름' }]);
+    expect(resolveVarColumns(['고객명'], headers).resolved).toEqual([{ name: '고객명', column: '이름', via: 'same' }]);
+  });
+  it('어느 쪽으로도 잇는다(「%이름%」 ↔ 「고객명」 열 · 「%성함%」 ↔ 「이름」 열)', () => {
+    expect(synonymColumn(['고객명', '휴대폰'], '이름')).toBe('고객명');
+    expect(synonymColumn(['이름', '휴대폰'], '성함')).toBe('이름');
+  });
+  it('같은 이름 열이 있으면 그 열이 먼저다', () => {
+    expect(resolveVarColumns(['고객명'], ['이름', '고객명']).resolved[0].column).toBe('고객명');
+  });
+  it('같은 뜻 이름의 열이 둘이면 고르지 않는다(사람도 묻는다) · 묶음 밖 이름은 잇지 않는다', () => {
+    expect(synonymColumn(['이름', '성함', '휴대폰'], '고객명')).toBeNull();
+    expect(convertBracketVars('소중한 [고객명] 고객님', ['이름', '성함']).converted).toEqual([]);
+    expect(synonymColumn(['이름', '휴대폰'], '매장명')).toBeNull();
+    expect(synonymColumn(['고객연락처', '휴대폰'], '고객명')).toBeNull();
+  });
+  it('받는 사람 번호 · 등급 · 포인트 묶음은 쓰지 않는다(요청 범위 = 고객 이름)', () => {
+    expect(synonymColumn(['고객전화번호'], '연락처')).toBeNull();
+    expect(synonymColumn(['고객등급'], '등급')).toBeNull();
+  });
+});
+
+describe('★1125(2) 같은 뜻 이름 — 값 모양 · 고르기 후보(Codex 같은 뜻 1R)', () => {
+  const blankOf = (text: string) => findAgencyBlanks(`소중한 ${text} 고객님`).find((x) => x.text === text)!;
+  it('「이름」 열 값이 매장 이름 · 휴대폰 번호면 저절로 잇지 않는다(사람도 값을 본다)', () => {
+    const stores = [{ 이름: '강남점', 회원명: '가' }, { 이름: '성수점', 회원명: '나' }];
+    expect(synonymColumn(['이름', '회원명'], '고객명', stores)).toBeNull();
+    expect(convertBracketVars('소중한 [고객명] 고객님', ['이름', '회원명'], stores).converted).toEqual([]);
+    expect(resolveVarColumns(['고객명'], ['이름', '회원명'], null, stores).resolved[0].column).toBeNull();
+    const phones = [{ 이름: '010-0000-0011' }, { 이름: '010-0000-0012' }];
+    expect(synonymColumn(['이름'], '고객명', phones)).toBeNull();
+    const people = [{ 이름: '김가' }, { 이름: '이나' }];
+    expect(synonymColumn(['이름'], '고객명', people)).toBe('이름');
+  });
+  it('빈 칸이 많아도 채워진 값의 과반이 휴대폰 번호면 번호 열이다(빈 칸으로 비율이 낮아져 통과하지 않는다 · Codex 같은 뜻 2R)', () => {
+    const sparse = [{ 이름: '010-0000-0011', 휴대폰: '010-0000-0021' }, { 이름: '', 휴대폰: '010-0000-0022' }, { 이름: '', 휴대폰: '010-0000-0023' }];
+    expect(synonymColumn(['이름', '휴대폰'], '고객명', sparse)).toBeNull();
+    expect(convertBracketVars('소중한 [고객명] 고객님', ['이름', '휴대폰'], sparse).converted).toEqual([]);
+    const sparseLoose = [{ 고객메모: '010-0000-0011' }, { 고객메모: '' }, { 고객메모: '' }];
+    expect(matchBlankColumns(blankOf('[고객명]'), ['고객메모'], sparseLoose).map((c) => c.column)).toEqual([]);
+  });
+  it('번호가 정확히 절반 · 이름과 번호가 한 칸에 같이 적힌 열은 번호 열이 아니다(Codex 같은 뜻 3R)', () => {
+    const half = [{ 이름: '김민지' }, { 이름: '010-0000-0011' }, { 이름: '' }];
+    expect(synonymColumn(['이름'], '고객명', half)).toBe('이름');
+    const mixed = [{ 이름: '김민지 (010-0000-0011)' }, { 이름: '이나 (010-0000-0012)' }];
+    expect(synonymColumn(['이름'], '고객명', mixed)).toBe('이름');
+    // 이름이 「점」으로 끝나는 사람이 정확히 절반이어도 이름 열이다(Codex 같은 뜻 5R)
+    expect(synonymColumn(['이름'], '고객명', [{ 이름: '김순점' }, { 이름: '김민지' }])).toBe('이름');
+    // 매장 이름과 휴대폰 번호가 반씩 섞인 열 = 이름일 수 없는 값이 전부 → 잇지 않는다(기준 하나 · Codex 같은 뜻 6R)
+    expect(synonymColumn(['이름'], '고객명', [{ 이름: '강남점' }, { 이름: '010-0000-0011' }])).toBeNull();
+  });
+  it('값 모양은 명단 전체로 본다(201행 뒤가 번호 · 매장 이름인 열 · Codex 같은 뜻 4R)', () => {
+    const late = [...Array.from({ length: 200 }, (_, i) => ({ 이름: `사람${i}` })), ...Array.from({ length: 800 }, (_, i) => ({ 이름: `010-0000-${String(i).padStart(4, '0')}` }))];
+    expect(synonymColumn(['이름'], '고객명', late)).toBeNull();
+    const lateStore = [...Array.from({ length: 200 }, (_, i) => ({ 이름: `사람${i}` })), ...Array.from({ length: 800 }, () => ({ 이름: '강남점' }))];
+    expect(synonymColumn(['이름'], '고객명', lateStore)).toBeNull();
+  });
+  it('같은 뜻 이름의 열이 둘이면 저절로 잇지 않되 화면 후보에는 둘 다 나온다', () => {
+    const rows = [{ 이름: '김가', 성함: '김가', 휴대폰: '010-0000-0011' }, { 이름: '이나', 성함: '이나', 휴대폰: '010-0000-0012' }];
+    expect(convertBracketVars('소중한 [고객명] 고객님', ['이름', '성함', '휴대폰'], rows).converted).toEqual([]);
+    expect(matchBlankColumns(blankOf('[고객명]'), ['이름', '성함', '휴대폰'], rows).map((c) => c.column)).toEqual(['이름', '성함']);
   });
 });

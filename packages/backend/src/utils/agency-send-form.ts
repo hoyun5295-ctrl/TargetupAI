@@ -224,6 +224,13 @@ export function unreadableAgencyForm(): ParsedAgencyForm {
 /** ★ 2026-11-25 문안 칸 라벨(요청서 시트 판정 · planAgencyWorkbook 과 해석기가 같은 표를 쓴다) */
 const CONTENT_LABELS = ['문안', '문안내용', '내용', '메시지 내용'];
 const WHEN_LABELS = ['보낼 시각', '발송일시', '발송 시각', '요청발송일시', '발송날짜 및 시간', '발송 날짜', '발송날짜'];
+/**
+ * ★ 2026-11-25(2) 탭 이름 판정 한 벌(공백 뺀 이름) — 짝 판정(planAgencyWorkbook)과 명단 시트 고르기가 같이 쓴다.
+ *   안내 · 예시 탭 = 요청서 · 명단 어느 쪽도 아님 / 테스트 탭(「테스트 명단」) = 받는 사람 명단이 아님(테스트 번호가 실제 발송 대상에 붙지 않게).
+ */
+export const AGENCY_GUIDE_SHEET_RE = /(안내|예시|설명|가이드|참고|guide|sample|example)/i;
+export const AGENCY_TEST_SHEET_RE = /(테스트|test)/i;
+
 /** ★ 2026-11-25 명단 시트 이름 꼴(한 파일 여러 건 · 「고객리스트1」 · 공백 뺀 이름) */
 export const AGENCY_LIST_SHEET_RE = /^(고객리스트|고객명단)(\d*)$/;
 
@@ -248,6 +255,21 @@ export function agencyRowsLookLikeRequest(rows: any[][]): boolean {
     if (whenKeys.has(k)) when = true;
   }
   return content && when;
+}
+
+/**
+ * ★ 2026-11-25 이 시트 행들이 명단으로 보이는가 — 한 열의 과반이 휴대폰 번호이고 그 번호가 두 줄 이상
+ *   (전화번호 열 점수표 scorePhoneColumns = 명단 해석과 같은 판정 한 벌).
+ *   한 파일 여러 건 판정이 이름에 「리스트」 · 「명단」이 없는 명단 시트(「Sheet2」 · 「DB」)를 알아보는 데 쓴다.
+ *   ⛔ 연락처 한 칸만 적힌 메모 시트는 명단이 아니다(번호 두 줄 이상).
+ */
+export function agencyRowsLookLikeList(aoa: any[][]): boolean {
+  const body = (aoa || []).filter((r) => Array.isArray(r) && r.some((c) => cellText(c) !== ''));
+  if (body.length < 2) return false;
+  const width = body.reduce((w, r) => Math.max(w, r.length), 0);
+  const cols = Array.from({ length: width }, (_, i) => `c${i}`);
+  const rows = body.map((r) => Object.fromEntries(cols.map((h, i) => [h, r[i]])));
+  return scorePhoneColumns(cols, rows).some((sc) => sc.ratio >= 0.5 && rows.filter((r) => looksMobile(r[sc.column])).length >= 2);
 }
 
 /**
@@ -322,23 +344,22 @@ function readImageFileNames(rows: any[][]): string[] {
  * 요청서 시트를 라벨 기준으로 읽는다.
  * ★ 2026-11-25 opts.formSheet = 한 파일 여러 건의 짝 시트 이름(planAgencyWorkbook). 없으면 종전 고르기 규칙 그대로.
  */
-export function parseAgencyRequestForm(buffer: Buffer, opts: { formSheet?: string | null } = {}): ParsedAgencyForm {
+export function parseAgencyRequestForm(buffer: Buffer, opts: { formSheet?: string | null; workbook?: XLSX.WorkBook | null } = {}): ParsedAgencyForm {
   const errors: AgencyFormError[] = [];
   let rows: any[][] = [];
   try {
+    // ★ 2026-11-25(2) opts.workbook = 호출부가 이미 통째로 읽은 통합 문서(readAgencyWorkbook). 한 파일 여러 건은 짝마다 다시 읽지 않는다
+    //   (공유 문자열 xlsx · xls 는 시트만 골라 읽어도 읽을 때마다 문자열 표 · 파일 전체를 다시 푼다 = 12짝 × 5,000명 실측 9초 · 24초 → 한 번 1초).
     // ★2026-09-13 **요청서 시트만** 읽는다(적대검토 medium). 통일 양식은 한 파일에 고객리스트 시트가 같이 있어
     //   워크북 전체를 읽으면 명단을 한 번 더 파싱한다(0913 실측 20만 행: 전체 4,174ms · 시트 이름만 2ms · 요청서 시트만 1ms).
     //   시트 고르는 규칙은 종전 그대로이고, 형식상 시트만 골라 읽기가 안 되면 종전처럼 전체를 읽는다.
-    const names = XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames;
+    const names = opts.workbook ? opts.workbook.SheetNames : XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames;
     if (opts.formSheet && !names.includes(opts.formSheet)) return unreadableAgencyForm();
     // ⛔ 시트는 이름으로 먼저 찾는다(★Codex 적대 1R) — 첫 시트만 읽으면 숨김·잔여 시트가
     //   보이는 값과 다른 값을 진실로 만들 수 있다. "요청서"(구양식) → "내용"(통일 양식) → 첫 시트.
-    const sheetName = opts.formSheet
-      || names.find((n) => normLabel(n) === '요청서')
-      || names.find((n) => normLabel(n) === '내용')
-      || names[0];
-    let sheet = XLSX.read(buffer, { ...SHEET_READ_OPTS, sheets: [sheetName] }).Sheets[sheetName];
-    if (!sheet) sheet = XLSX.read(buffer, SHEET_READ_OPTS).Sheets[sheetName];
+    const sheetName = opts.formSheet || pickAgencyFormSheet(names);
+    let sheet = opts.workbook ? opts.workbook.Sheets[sheetName] : XLSX.read(buffer, { ...SHEET_READ_OPTS, sheets: [sheetName] }).Sheets[sheetName];
+    if (!sheet && !opts.workbook) sheet = XLSX.read(buffer, SHEET_READ_OPTS).Sheets[sheetName];
     sheetDatesToText(sheet);
     rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
   } catch {
@@ -466,18 +487,28 @@ export const MAX_LIST_COLUMNS = 100;
  *   그대로 두면 첫 고객이 열 이름으로 소비돼 **조용히 1명 유실**된다(Harold 실물 명단 실측).
  *   열 이름을 "열1·열2…"로 합성하고 첫 줄부터 데이터로 읽는다(자리 보존 원칙 동일).
  */
-export function parseAgencyRecipientList(buffer: Buffer, opts: { listSheet?: string | null } = {}): {
+export function parseAgencyRecipientList(buffer: Buffer, opts: { listSheet?: string | null; workbook?: XLSX.WorkBook | null } = {}): {
   headers: string[]; rows: Record<string, any>[]; duplicates: string[]; truncated: boolean; columnsOverflow: boolean;
   /** 첫 줄이 데이터(무헤더)로 판정됐는가. 열 이름은 합성("열N")이다 */
   headerless: boolean;
 } {
-  const wb = XLSX.read(buffer, SHEET_READ_OPTS);
+  // ★ 2026-11-25 **명단 시트만** 읽는다(요청서 읽기와 같은 방식 · 0913). 한 파일 여러 건은 짝마다 이 함수를 부르므로
+  //   통합 문서 전체를 읽으면 짝 수 × 전체 크기로 불어난다(12짝 × 5,000명 실측 = 짝당 1.1초 · Codex 상한 1R).
+  //   시트 고르는 규칙은 종전 그대로이고, 형식상 시트만 골라 읽기가 안 되면 종전처럼 전체를 읽는다.
+  //   ★(2) opts.workbook = 이미 통째로 읽은 통합 문서(요청서 해석과 같음 · 여러 건은 파일마다 한 번만 읽는다).
+  const names = opts.workbook ? opts.workbook.SheetNames : (XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames || []);
   // ★2026-08-26(2) 통일 양식(한 파일)은 "고객리스트" 시트가 명단이다. 이름 정확 일치가 없을 때만
   //   첫 시트(별도 명단 파일 = 구양식·자유형 하위호환). "고객 명단 예시" 같은 예시 시트는 일치하지 않는다.
   // ★ 2026-11-25 opts.listSheet = 한 파일 여러 건의 짝 명단 시트(planAgencyWorkbook) · 없으면 종전 규칙 · 지정했는데 없으면 빈 명단(엉뚱한 시트로 폴백 0)
-  if (opts.listSheet && !wb.SheetNames.includes(opts.listSheet)) return { headers: [], rows: [], duplicates: [], truncated: false, columnsOverflow: false, headerless: false };
-  const sheetName = opts.listSheet || wb.SheetNames.find((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n))) || wb.SheetNames[0];
-  const sheet = wb.Sheets[sheetName];
+  if (opts.listSheet && !names.includes(opts.listSheet)) return { headers: [], rows: [], duplicates: [], truncated: false, columnsOverflow: false, headerless: false };
+  //   ⛔ 이 고르기 규칙(표준 이름 → 첫 시트)은 바꾸지 않는다 — 탭 이름 일부(「안내」 · 「테스트」)로 첫 시트를 건너뛰면
+  //   「당첨 안내 대상」 같은 진짜 명단 대신 뒤 시트(지난달 명단)가 받는 사람이 된다(Codex 짝 3R · 2R 에 넣었다가 되돌림).
+  const sheetName = opts.listSheet || pickAgencyListSheet(names);
+  let sheet = opts.workbook ? opts.workbook.Sheets[sheetName]
+    : sheetName ? XLSX.read(buffer, { ...SHEET_READ_OPTS, sheets: [sheetName] }).Sheets[sheetName] : undefined;
+  if (!sheet && !opts.workbook) sheet = XLSX.read(buffer, SHEET_READ_OPTS).Sheets[sheetName];
+  // 시트를 못 찾음 = 종전처럼 읽지 못함(호출부가 「명단 파일을 읽지 못했습니다」로 받는다 · 빈 명단으로 조용히 넘기지 않는다)
+  if (!sheet) throw new Error('agency-send-form: list sheet not readable');
   // ★2026-09-13(3) 날짜 셀 = 엑셀에 보이는 벽시계 글자(SHEET_READ_OPTS 주석 · 종전에는 UTC ISO로 저장돼 문자에 들어갔다)
   sheetDatesToText(sheet);
   const aoa = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null }) as any[][];
@@ -525,6 +556,30 @@ function looksMobile(v: any): boolean {
 }
 
 /**
+ * ★ 2026-11-25(2) 그 열의 **비어 있지 않은 값**(명단 전체)의 **절반을 넘는** 칸이 휴대폰 번호인가 — 문안 자리(이름 등)에 이을 열에서 번호 열을 가려낸다.
+ *   아래 점수표(수신번호 열 고르기)는 빈 칸도 행 수에 넣으므로 빈 칸이 많은 번호 열이 과반 미만으로 나온다 → 이 판정을 따로 둔다
+ *   (같은 뜻 이름 자동 연결 · 괄호 자리 후보 제외가 같이 쓴다 · Codex 같은 뜻 2R).
+ *   ⛔ 칸 **전체**가 번호 모양인 값만 센다 — 「김민지 (010-0000-0011)」처럼 이름과 번호가 같이 적힌 칸은 번호 칸이 아니다 · 정확히 절반은 번호 열이 아니다(3R).
+ *   명단 전체를 한 번 훑는다(앞 200행만 보면 뒤쪽이 번호인 열을 놓친다 · 4R) — 부르는 쪽은 후보로 오른 열에만 부른다.
+ */
+export function agencyColumnMostlyMobile(column: string, rows: Array<Record<string, any>>): boolean {
+  let filled = 0; let mobile = 0;
+  for (const r of rows) {
+    const t = cellText(r?.[column]);
+    if (t === '') continue;
+    filled++;
+    if (agencyCellIsMobile(t)) mobile++;
+  }
+  return filled > 0 && mobile * 2 > filled;
+}
+
+/** 칸 전체가 휴대폰 번호인가(숫자 · 공백 · 하이픈 · 괄호 · 마침표 · 더하기만 + 휴대폰 번호 모양) — 위 판정과 같은 뜻 이름 판정이 같이 쓴다 */
+export function agencyCellIsMobile(v: any): boolean {
+  const t = cellText(v);
+  return t !== '' && /^[0-9\s\-().+]+$/.test(t) && looksMobile(t);
+}
+
+/**
  * 전화번호 열 점수표 — 각 열의 **휴대폰 번호 비율**(표본 최대 200행)을 비율 내림차순으로 돌려준다.
  * ★2026-08-26 §18-4: 판정 구현은 이 한 벌이다. 화면(0.5)과 이메일(0.9 + 격차)은 **임계만 다르다** —
  *   임계별로 구현을 복제하면 화면과 메일의 열 선정이 갈린다(회의론자 지적).
@@ -564,13 +619,39 @@ export function pickPhoneColumnStrict(headers: string[], rows: Record<string, an
  */
 export function looksLikeRequestForm(buffer: Buffer): boolean {
   try {
-    const wb = XLSX.read(buffer, { type: 'buffer', bookSheets: true });
-    const names = (wb.SheetNames || []).map((n) => normLabel(n));
-    return names.includes('요청서')
-      || (names.includes('내용') && names.some((n) => RECIPIENT_SHEET_NAMES.has(n)));
+    return namesLookLikeRequestForm(XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames || []);
   } catch {
     return false;
   }
+}
+
+/** ★ 2026-11-25(2) 위 판정의 이름판(이미 시트 이름을 가진 호출부 = 짝 판정이 파일을 다시 읽지 않게 · 규칙은 이 한 벌) */
+export function namesLookLikeRequestForm(sheetNames: string[]): boolean {
+  const names = sheetNames.map((n) => normLabel(n));
+  return names.includes('요청서')
+    || (names.includes('내용') && names.some((n) => RECIPIENT_SHEET_NAMES.has(n)));
+}
+
+/** 명단 시트(고객리스트 · 고객명단)가 있는가 — 이름판 */
+export function namesHaveRecipientSheet(sheetNames: string[]): boolean {
+  return sheetNames.some((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n)));
+}
+
+/**
+ * ★ 2026-11-25(2) 오늘 고르기 규칙 한 벌 — 해석기 둘과 짝 판정(planAgencyWorkbook)이 같은 함수를 쓴다.
+ *   판정이 「이 시트가 보인다」고 확인한 시트와 해석기가 실제로 읽는 시트가 다르면, 확인하지 않은 시트(숨긴 지난달 명단)가 읽힌다(Codex 짝 7R).
+ *   요청서 = "요청서"(구양식) → "내용"(통일 양식) → 첫 시트 · 명단 = 파일 차례로 처음 나오는 고객리스트 · 고객명단 → 첫 시트.
+ */
+export function pickAgencyFormSheet(sheetNames: string[]): string {
+  return sheetNames.find((n) => normLabel(n) === '요청서') || sheetNames.find((n) => normLabel(n) === '내용') || sheetNames[0];
+}
+export function pickAgencyListSheet(sheetNames: string[]): string {
+  return sheetNames.find((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n))) || sheetNames[0];
+}
+
+/** ★ 2026-11-25(2) 통합 문서를 통째로 한 번 읽는다(해석기와 같은 읽기 옵션) — 한 파일 여러 건의 짝마다 해석에 넘긴다 */
+export function readAgencyWorkbook(buffer: Buffer): XLSX.WorkBook {
+  return XLSX.read(buffer, SHEET_READ_OPTS);
 }
 
 /**
@@ -579,8 +660,7 @@ export function looksLikeRequestForm(buffer: Buffer): boolean {
  */
 export function hasRecipientSheet(buffer: Buffer): boolean {
   try {
-    const wb = XLSX.read(buffer, { type: 'buffer', bookSheets: true });
-    return (wb.SheetNames || []).some((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n)));
+    return namesHaveRecipientSheet(XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames || []);
   } catch {
     return false;
   }

@@ -76,6 +76,29 @@ function workbook(storeHeader = '소속매장명'): Buffer {
 /** 규격 안 JPG 꼴(맞춤 없이 그대로 받는 크기 · 그림마다 바이트가 다르다) */
 const jpg = (fill: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(100, fill)]);
 
+/** ★1125 실 접수 꼴 = 한 파일 24시트(요청서 · 명단 12짝) · 이미지 없음 · 짝마다 다른 문안 · 다른 명단 */
+function workbook12(): Buffer {
+  const wb = XLSX.utils.book_new();
+  for (let i = 1; i <= 12; i++) {
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(formSheet(`등급${i}`, '')), `정기문자(생일_G${i})`);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ['고객명', '휴대폰번호', '소속매장명', '소속매장전화번호'],
+      ['다', `010-0001-${String(i * 10 + 1).padStart(4, '0')}`, '강남점', '02-0000-0001'],
+      ['라', `010-0001-${String(i * 10 + 2).padStart(4, '0')}`, '부산점', '02-0000-0002'],
+    ]), `고객리스트${i}`);
+  }
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+}
+function rawMailNoImage(messageId: string, xlsx: Buffer): Buffer {
+  const b64 = (buf: Buffer) => buf.toString('base64').replace(/.{76}/g, '$&\r\n');
+  return Buffer.from(
+    `From: Kim <kim@example.invalid>\r\nTo: intake@example.invalid\r\nSubject: =?UTF-8?B?${Buffer.from('12등급 생일 문안').toString('base64')}?=\r\nMessage-ID: <${messageId}@example.invalid>\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="B"\r\n\r\n`
+    + `--B\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nplease\r\n`
+    + `--B\r\nContent-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet; name="birthday12.xlsx"\r\nContent-Disposition: attachment; filename="birthday12.xlsx"\r\nContent-Transfer-Encoding: base64\r\n\r\n${b64(xlsx)}\r\n`
+    + `--B--\r\n`,
+  );
+}
+
 function rawMail(messageId: string, xlsx: Buffer): Buffer {
   const b64 = (buf: Buffer) => buf.toString('base64').replace(/.{76}/g, '$&\r\n');
   const part = (type: string, name: string, buf: Buffer) =>
@@ -174,4 +197,42 @@ describe('대행 메일 = 한 파일 여러 건 + 이미지 이름 맞추기(실
     expect(text).toContain('[소속매장명]');
     expect(text).toContain('가까운 열: 소속 매장');
   });
+
+  it('④ 한 파일 24시트(12짝) 메일 = 12건 접수 · 건 수 상한 없음(★1125 Harold 「제한없어 이어붙어있으면」) · 처리 시간 기록', async () => {
+    const before = Number((await query(`SELECT COUNT(*)::int AS n FROM agency_send_requests WHERE company_id = $1::uuid`, [CO])).rows[0].n);
+    const t0 = Date.now();
+    await deliver(MB, 'u4', rawMailNoImage(`m4-${randomUUID()}`, workbook12()));
+    const ms = Date.now() - t0;
+    console.log(`[1125 12짝 메일] processMessage ${ms}ms`);
+    const ir = await intakeRow(MB, 'u4');
+    expect(ir.status, `${ir.reason} · ${String(replies.at(-1)?.text ?? '').split('\n').join(' | ').slice(0, 900)}`).toBe('accepted');
+    expect(ir.request_ids).toHaveLength(12);
+    const after = Number((await query(`SELECT COUNT(*)::int AS n FROM agency_send_requests WHERE company_id = $1::uuid`, [CO])).rows[0].n);
+    expect(after - before).toBe(12);
+    const names = (await query(`SELECT file_name FROM agency_send_requests WHERE id = ANY($1::uuid[])`, [ir.request_ids])).rows.map((r: any) => String(r.file_name));
+    expect(names.filter((n) => /\/ 정기문자\(생일_G(1[0-2]|[1-9])\)$/.test(n))).toHaveLength(12);
+  }, 180_000);
+
+  it('⑤ 실 접수 꼴 = 명단 시트 이름 「…리스트」 · 열 이름 「이름」 + 문안 [고객명] → 접수 · 회신에 채우는 열(★1125(2) 접수 384 · 385 · Harold 「이름 고객명정도는」)', async () => {
+    replies.length = 0;
+    const wb = XLSX.utils.book_new();
+    for (const [g, phone] of [['PT', '010-0002-0101'], ['GOLD', '010-0002-0201']] as Array<[string, string]>) {
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(formSheet(g, '')), `정기문자(생일_${g})`);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+        ['이름', '고객연락처 (수신번호)', '소속매장명', '소속매장전화번호'],
+        [`고객${g}`, phone, '강남점', '02-0000-0001'],
+      ]), `정기문자(생일_${g})리스트`);
+    }
+    await deliver(MB, 'u5', rawMailNoImage(`m5-${randomUUID()}`, XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer));
+    const ir = await intakeRow(MB, 'u5');
+    expect(ir.status, `${ir.reason} · ${String(replies.at(-1)?.text ?? '').split('\n').join(' | ').slice(0, 600)}`).toBe('accepted');
+    expect(ir.request_ids).toHaveLength(2);
+    const text = String(replies.at(-1)?.text ?? '');
+    expect(text).toContain('문안의 [고객명] 자리는 명단 「이름」 열 값으로 고객마다 채웁니다.');
+    const reqs = (await query(`SELECT id, file_name, current_content FROM agency_send_requests WHERE id = ANY($1::uuid[]) ORDER BY file_name`, [ir.request_ids])).rows;
+    const gold = reqs.find((r: any) => String(r.file_name).endsWith('/ 정기문자(생일_GOLD)'));
+    expect(gold.current_content).toContain('소중한 %고객명% 고객님 GOLD 단독 혜택');
+    const rec = (await query(`SELECT phone, vars FROM agency_send_recipients WHERE request_id = $1::uuid`, [gold.id])).rows;
+    expect(rec.map((x: any) => [x.phone, x.vars['고객명']])).toEqual([['01000020201', '고객GOLD']]);
+  }, 120_000);
 });

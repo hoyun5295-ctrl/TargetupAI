@@ -158,9 +158,15 @@ describe('2. 방문 기록', () => {
     await recordVisitStart({ id, page: 'jbn', browserKey: bk, src: null, referrerHost: null }, ctx());
     await backdate(id, 20);
     for (let i = 0; i < 360; i++) await recordVisitBeat({ id, page: 'jbn', browserKey: bk, seconds: 60 });
-    const v = (await row(id)).visible_seconds;
-    expect(v).toBeGreaterThan(0);
-    expect(v).toBeLessThanOrEqual(25);
+    // ★ 2026-11-25 신호 360번을 보내는 동안에도 시간이 흐른다 — 25 이하로 고정하면 360번이 1초를 넘는 날(전체 실행 부하 · 느린 PC)
+    //   26이 나와 흔들린다(C162 push 관문 · 단독 실행 3회 중 1회 실패 실측). 상한은 **서버 계약 그대로** 그 행에서 계산한다:
+    //   마지막 신호 때의 흐른 시간(last_seen_at − started_at · 내림) + 5초. 시험 쪽 시계로 재면 올림 · 조회 대기만큼 상한이 느슨해진다(Codex 1R).
+    const b = (await query(
+      `SELECT visible_seconds AS v, (FLOOR(EXTRACT(EPOCH FROM (last_seen_at - started_at))) + 5)::int AS cap FROM public_page_visits WHERE id = $1`, [id],
+    )).rows[0];
+    expect(b.v).toBeGreaterThan(0);
+    expect(b.v).toBeLessThanOrEqual(b.cap);
+    expect(b.cap).toBeGreaterThanOrEqual(25); // 20초 전으로 돌려놓은 방문이다(상한이 0 근처로 계산돼 위 대조가 헛돌지 않게)
 
     await query(`UPDATE public_page_visits SET visible_seconds = 21590, started_at = now() - interval '10 hours', last_seen_at = now() - interval '1 hour' WHERE id = $1`, [id]);
     await recordVisitBeat({ id, page: 'jbn', browserKey: bk, seconds: 60 });

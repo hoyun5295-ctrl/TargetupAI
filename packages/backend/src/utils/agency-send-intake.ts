@@ -811,9 +811,12 @@ export async function analyzeOneStep(
   let sheetPick: { formSheet?: string; listSheet?: string } = {};
   let pairs: Array<{ index: number; label: string }> = [];
   let pairIndex: number | null = null;
+  let prePair: { form: ReturnType<typeof parseAgencyRequestForm>; list: ReturnType<typeof parseAgencyRecipientList> | null } | null = null;
   if (!listBuf && !pre?.form && !pre?.list) {
     // 판정도 자식 프로세스에서(큰 파일을 이 프로세스에서 읽지 않는다 · Codex 설계 6R)
-    const plan = (await planAgencyWorkbookIsolated(formBuf)).plan;
+    // ★(2) 짝 파일이면 판정이 고른 건의 요청서 · 명단까지 같은 읽기에서 해석해 준다(아래에서 다시 읽지 않는다)
+    const iso = await planAgencyWorkbookIsolated(formBuf, { onlyPair: overrides.pairIndex ?? 0 });
+    const plan = iso.plan;
     if (plan.kind === 'invalid') {
       errors.push(...plan.reasons.map((error) => ({ field: '요청서', error })));
       return empty;
@@ -833,6 +836,7 @@ export async function analyzeOneStep(
         }
       }
       sheetPick = plan.pairs[pairIndex ?? 0];
+      prePair = iso.parsed?.[pairIndex ?? 0] ?? null;
     }
   }
   // ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 명단 파일이 따로 없으면
@@ -849,7 +853,7 @@ export async function analyzeOneStep(
   const needForm = !pre?.form;
   const needList = !pre?.list;
   const parsed = needForm || needList
-    ? await parseAgencyFilesIsolated(needForm ? formBuf : null, needList ? effectiveListBuf : null, sheetPick)
+    ? (prePair ?? await parseAgencyFilesIsolated(needForm ? formBuf : null, needList ? effectiveListBuf : null, sheetPick))
     : null;
   const form = pre?.form ?? parsed?.form ?? unreadableAgencyForm();
   errors.push(...form.errors);
@@ -881,7 +885,7 @@ export async function analyzeOneStep(
 
   // ★ 2026-11-25 괄호 변수 · 빈 자리 채우기(설계서 §4-1 · §8-3) — 명단 열 이름을 안 뒤 · 항목 뽑기 앞.
   //   글 차례 = 문자 정리 → 괄호 변수 = baseContent(채우기 위치 기준) → 채우기 → 문자 정리 한 번 더 = 분석 글(미리보기 · 확정 같은 글).
-  const bracket = convertBracketVars(formContent, headers);
+  const bracket = convertBracketVars(formContent, headers, rows);
   const baseContent = bracket.content;
   let analysisContent = baseContent;
   let varMappingIn = overrides.varMapping;
@@ -898,7 +902,7 @@ export async function analyzeOneStep(
       let conflict: string | null = null;
       for (const [name, col] of Object.entries(filled.mapping)) {
         const pickedOverride = overrides.varMapping?.[name];
-        const linked = baseVarNames.has(name) ? resolveVarColumns([name], headers, overrides.varMapping).resolved[0]?.column : null;
+        const linked = baseVarNames.has(name) ? resolveVarColumns([name], headers, overrides.varMapping, rows).resolved[0]?.column : null;
         if ((pickedOverride && pickedOverride !== col) || (linked && linked !== col)) {
           conflict = `%${name}% 항목은 이미 「${pickedOverride || linked}」 열에 이어져 있어 「${col}」 열로 채울 수 없습니다. 한 열만 골라 주세요.`;
           break;
@@ -992,7 +996,7 @@ export async function analyzeOneStep(
 
   // 문안 항목 ↔ 명단 열: 확인 화면 조정값 > 같은 이름(화면 접수와 같은 규칙 · CT 소유)
   const usedVars = extractAgencyVars(analysisContent);
-  const varResolution = resolveVarColumns(usedVars, headers, varMappingIn);
+  const varResolution = resolveVarColumns(usedVars, headers, varMappingIn, rows);
   let varsMatched: OneStepAnalysis['varsMatched'] = varResolution.resolved;
   // 이름이 다른 항목은 **미리보기 초회 분석에서만** AI가 열을 추천해 미리 골라 둔다(★2026-08-25 §17-6).
   //   추천은 확정이 아니다 — 화면이 이 매핑을 조정값으로 다시 보내야 접수된다. 확정 경로는
@@ -1123,8 +1127,22 @@ export async function analyzeOneStep(
   const messageType: 'SMS' | 'LMS' | 'MMS' = images.length > 0
     ? 'MMS' : (formSubject.trim() || (maxSmsBytes !== null && maxSmsBytes > SMS_MAX_BYTES) ? 'LMS' : 'SMS');
 
+  // ★(2) 알림 줄 규칙(열은 언제나 **최종 연결값** · 확인 화면에서 바꾸면 바꾼 열 · 최종 연결이 없으면 적지 않는다 = 그 항목은 오류 줄이 알린다):
+  //   ① 괄호 자리를 변수로 바꾼 항목은 전부 적는다(이름이 같은 열이어도 = 문안의 괄호가 바뀌었다는 안내 · 괄호 표기로).
+  //   ② 그 밖의 항목은 **항목 이름과 다른 이름의 열**로 채울 때 적는다(%항목% 표기 · 저절로 이은 것과 화면에서 고른 것을 가르지 않는다 —
+  //      가르면 고른 열이 알림에서 빠진다 · Codex 같은 뜻 1R ~ 3R).
+  const nkv = (v: unknown) => String(v || '').replace(/\s+/g, '');
+  const finalColumn = (name: string) => varsMatched.find((v) => nkv(v.name) === nkv(name))?.column || null;
+  const bracketNames = new Set(bracket.converted.map((c) => nkv(c.from.slice(1, -1))));
+  const synonymNotes = varsMatched
+    .filter((v) => !!v.column && nkv(v.column) !== nkv(v.name) && !bracketNames.has(nkv(v.name)))
+    .map((v) => `문안의 %${v.name}% 자리는 명단 「${v.column}」 열 값으로 고객마다 채웁니다.`);
   const autoNotes = [
-    ...bracket.converted.map((c) => `문안의 ${c.from} 자리는 명단 「${c.column}」 열 값으로 고객마다 채웁니다.`),
+    ...bracket.converted
+      .map((c) => ({ from: c.from, col: finalColumn(c.from.slice(1, -1)) }))
+      .filter((x) => !!x.col)
+      .map((x) => `문안의 ${x.from} 자리는 명단 「${x.col}」 열 값으로 고객마다 채웁니다.`),
+    ...synonymNotes,
     ...(storeCallbackNote ? [storeCallbackNote] : []),
   ];
   return {

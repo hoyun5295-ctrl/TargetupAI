@@ -7,7 +7,8 @@
  * ⛔ 고객 문장은 이 파일 한 곳에서 만든다(줄표 · 가운뎃점 0).
  */
 import { findVarTokens } from './var-tokens';
-import { extractAgencyVars, sameNameColumn } from './agency-send-vars';
+import { extractAgencyVars, autoColumn, synonymColumns } from './agency-send-vars';
+import { agencyColumnMostlyMobile } from './agency-send-form';
 
 export interface AgencyBlank {
   start: number;
@@ -158,7 +159,15 @@ export function matchBlankColumns(
   let cols: string[];
   if (blank.kind === 'bracket') {
     const inner = blank.text.slice(1, -1);
-    cols = looseColumns(inner, headers);
+    // ★ 2026-11-25(2) 휴대폰 번호가 든 열(수신번호 열)은 느슨한 대조의 후보가 아니다 — 「[고객명]」에 「고객연락처 (수신번호)」를
+    //   「가까운 열」로 권하면(글자 「고객」이 겹침) 그 열 이름을 고객명으로 바꿔 보내 이름 자리에 전화번호가 들어간다(1125 실 접수 파일로 확인).
+    //   이름이 같은 열은 이 판정 앞에서 이미 변수로 바뀌었다(convertBracketVars) → 예외를 두지 않는다
+    //   (느슨한 키로 예외를 두면 「[고객명]」 ↔ 「고객전화」가 같은 키 「고객」으로 되살아난다 · Codex 짝 2R).
+    //   판정 = 비어 있지 않은 값의 과반이 휴대폰 번호(같은 뜻 이름 자동 연결과 같은 함수).
+    // ★(2) 같은 뜻 이름의 열은 전부 후보다 — 「이름」 · 「성함」 둘 다 있어 저절로 잇지 않은 자리도 화면에서 고를 수 있게(Codex 같은 뜻 1R)
+    //   번호 열 판정은 후보로 오른 열에만 돌린다(명단 전체를 훑으므로 모든 열에 돌리지 않는다).
+    const syn = synonymColumns(headers, inner);
+    cols = [...syn, ...looseColumns(inner, headers).filter((h) => !syn.includes(h))].filter((h) => !agencyColumnMostlyMobile(h, rows));
   } else {
     // 접미어(점 · 지점 · 매장 · 점포)가 붙은 자리 = 매장 이름 · 그 밖(「OOO님」 등) = 매장 · 사람 이름 둘 다 후보
     const words = blank.suffix ? STORE_WORDS : [...STORE_WORDS, ...NAME_WORDS];
@@ -188,7 +197,11 @@ export function matchBlankColumns(
  * 명단 열과 같은 이름(공백 무시)의 `[X]` = 변수(§8-3). 바꾼 것은 화면 · 회신에 한 줄로 알린다.
  * ⛔ 대괄호만 본다(소괄호 · 낫표는 바꾸지 않는다) · 이미 변수 조각 · 주소 안은 그대로.
  */
-export function convertBracketVars(content: string, headers: string[]): { content: string; converted: Array<{ from: string; column: string }> } {
+export function convertBracketVars(
+  content: string, headers: string[],
+  /** ★(2) 명단 행 — 같은 뜻 이름으로 이을 때 값 모양도 본다(안 주면 이름만) */
+  rows?: Array<Record<string, any>> | null,
+): { content: string; converted: Array<{ from: string; column: string }> } {
   const text = String(content || '');
   if (!text.includes('[') || headers.length === 0) return { content: text, converted: [] };
   const ex = excludedRanges(text);
@@ -198,7 +211,7 @@ export function convertBracketVars(content: string, headers: string[]): { conten
   while ((m = re.exec(text)) !== null) {
     const whole = m[0];
     if (inRanges(ex, m.index, m.index + whole.length)) continue;
-    const col = sameNameColumn(headers, m[1].trim());
+    const col = autoColumn(headers, m[1].trim(), rows);   // ★(2) 같은 이름 → 없으면 같은 뜻 이름(「[고객명]」 ↔ 「이름」 열 · 하나뿐 · 값 모양 맞을 때)
     const name = nk(m[1]);
     if (!col || !name || !/^[가-힣A-Za-z_]/.test(name) || name.length > 20 || name.includes('%')) continue;
     hits.push({ start: m.index, end: m.index + whole.length, whole, name, column: col });

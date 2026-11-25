@@ -15,7 +15,7 @@ import { suggestVarColumnsWithAi } from '../ai-column-mapper';
 
 // 확정 경로 AI 0(§18-8 13)을 **행동으로** 검증한다 — 소스 스캔은 조건 반전을 못 잡는다(LESSONS_BACKEND 47행)
 vi.mock('../ai-column-mapper', () => ({
-  suggestVarColumnsWithAi: vi.fn(async () => [{ name: '이름', column: '고객명' }]),
+  suggestVarColumnsWithAi: vi.fn(async () => [{ name: '이름', column: '받는분' }]),
 }));
 vi.mock('../callback-filter', () => ({
   getRegisteredCallbackSet: vi.fn(async () => new Set(['0500000000'])),
@@ -110,7 +110,8 @@ describe('원스텝 분석 — 확정 경로에서 AI를 부르지 않는다 (§
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
   };
   const listBuf = () => {
-    const ws = XLSX.utils.aoa_to_sheet([['고객명', '연락처'], ['김하나', '01000001111'], ['이두리', '01000002222']]);
+    // ★ 2026-11-25(2) 「이름」 ↔ 「고객명」은 같은 뜻 이름이라 AI 없이 저절로 잇는다 → 이 시험의 「안 맞는 이름」은 그 밖의 열(받는분)로 둔다
+    const ws = XLSX.utils.aoa_to_sheet([['받는분', '연락처'], ['김하나', '01000001111'], ['이두리', '01000002222']]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, '명단');
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;

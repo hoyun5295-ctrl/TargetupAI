@@ -663,7 +663,10 @@ export function sendRejectReply(intakeId: string, mailbox: string, toEmail: stri
 
 // ────────────── 첨부 분류 = 접수 단위 만들기 (순수 · ★2026-09-05 §21-4) ──────────────
 
-/** 메일 한 통이 만들 수 있는 접수 건수 상한. ⛔ MAX_ATTACH_FILES를 넘기면 표 N장이 too_many_files로 조용히 반려된다 */
+/**
+ * 메일 한 통에 **따로 첨부한 요청서 파일 수** 상한. ⛔ MAX_ATTACH_FILES를 넘기면 표 N장이 too_many_files로 조용히 반려된다.
+ * ★ 2026-11-25 한 파일 안에 이어 붙인 요청서 · 명단 짝은 세지 않는다(Harold 「제한없어 이어붙어있으면」 · 실 접수 24시트 = 12짝 · C162 뒤).
+ */
 export const MAX_FORMS = 5;
 
 /** 접수 단위 하나 = 요청서 버퍼 + 명단 버퍼 + 이름 둘 */
@@ -679,6 +682,8 @@ export interface IntakeUnit {
   listSheet?: string;
   /** ★ 2026-11-25 이 건의 요청서 「이미지 파일명」 이름표(자식 프로세스 판정이 함께 읽은 값 · 여러 건 + 이미지 맞추기 재료) */
   imageNames?: string[];
+  /** ★ 2026-11-25(2) 판정 때 한 번 읽은 판에서 이미 해석한 요청서 · 명단(있으면 이 건을 다시 읽지 않는다) */
+  pre?: { form: ReturnType<typeof unreadableAgencyForm>; list: Awaited<ReturnType<typeof parseAgencyFilesIsolated>>['list'] };
 }
 export type IntakeUnitsResult =
   | { ok: true; units: IntakeUnit[] }
@@ -772,9 +777,19 @@ function buildIntakeUnitsCore(
   // ★ 2026-11-25 한 파일 여러 건(설계서 §6-2) — 파일마다 짝 판정. 모든 파일이 single 이면 아래 오늘 분기 그대로.
   //   하나라도 짝 파일이면 모든 파일이 짝 파일이거나 자립형이어야 한다(별도 명단 두 파일 꼴과 섞으면 짝짓기가 파일 추론이 된다).
   const plans: AgencyWorkbookPlan[] = isolated ? isolated.map((x) => x.plan) : sheets.map((a) => planAgencyWorkbook(a.content));
-  const invalid = plans.flatMap((pl, i) => (pl.kind === 'invalid' ? pl.reasons.map((r) => `${unitName(sheets[i], '대행발송요청서.xlsx')}: ${r}`) : []));
+  // ★ 2026-11-25(2) 두 파일(이름으로 요청서인 파일 하나 + 다른 파일 하나) = 아래 오늘 분기가 먼저다 — 「별도 명단이 이긴다」 그대로.
+  //   짝 판정이 명단을 넓게 알아보면서(이름 「리스트」 · 「명단」 · 휴대폰 열) 요청서 파일 안 명단 꼴 시트가 한 짝으로,
+  //   명단 파일 안 메모 탭이 짝 없는 요청서로 읽힐 수 있다 → 그 판정이 오늘 받던 두 파일 메일을 막지 않게 한다.
+  //   요청서 파일의 판정이 반려이거나 · 요청서가 둘 이상 든 파일이 섞였으면 오늘 분기로 가지 않는다(한 건만 접수되고 나머지가 빠지지 않게).
+  const nameForms = sheets.map((a, i) => (looksLikeRequestForm(a.content) ? i : -1)).filter((i) => i >= 0);
+  //   ★ 반려 판정이어도 그 파일의 요청서 꼴 시트가 하나뿐이면(보조 탭 「이전리스트」 때문의 반려) 오늘 분기로 간다(Codex 짝 1R).
+  const formPlan = nameForms.length === 1 ? plans[nameForms[0]] : null;
+  const todayTwoFiles = sheets.length === 2 && !!formPlan
+    && !(formPlan.kind === 'invalid' && !(formPlan.requestSheets !== undefined && formPlan.requestSheets <= 1))
+    && !plans.some((pl) => pl.kind === 'pairs' && pl.pairs.length > 1);
+  const invalid = todayTwoFiles ? [] : plans.flatMap((pl, i) => (pl.kind === 'invalid' ? pl.reasons.map((r) => `${unitName(sheets[i], '대행발송요청서.xlsx')}: ${r}`) : []));
   if (invalid.length > 0) return { ok: false, code: 'sheet_pairs_invalid', reasons: invalid };
-  if (plans.some((pl) => pl.kind === 'pairs')) {
+  if (!todayTwoFiles && plans.some((pl) => pl.kind === 'pairs')) {
     const units: IntakeUnit[] = [];
     for (let i = 0; i < sheets.length; i++) {
       const pl = plans[i];
@@ -785,6 +800,7 @@ function buildIntakeUnitsCore(
             // 명단 이름 = 접수 행 file_name 이 된다 → 건마다 시트 이름을 붙여 목록 · 상세에서 다섯 건이 갈린다
             formBuf: sheets[i].content, listBuf: sheets[i].content, listName: agencyUnitLabel(name, pr.formSheet), fileName: agencyUnitLabel(name, pr.formSheet),
             formSheet: pr.formSheet, listSheet: pr.listSheet, ...(isolated ? { imageNames: isolated[i]?.imageNames[k] ?? [] } : {}),
+            ...(isolated?.[i]?.parsed?.[k] ? { pre: isolated[i].parsed![k]! } : {}),
           });
         });
       } else if (looksLikeRequestForm(sheets[i].content) && hasRecipientSheet(sheets[i].content)) {
@@ -793,8 +809,9 @@ function buildIntakeUnitsCore(
         return { ok: false, code: 'form_not_identified', reasons: [`${name}: 요청서가 여러 건 든 파일과 함께 보낼 때는 파일마다 요청서 시트와 고객리스트 시트가 모두 들어 있어야 합니다.`] };
       }
     }
-    if (units.length > MAX_FORMS) {
-      return { ok: false, code: 'too_many_forms', reasons: [`요청서는 메일 한 통에 ${MAX_FORMS}건까지 보낼 수 있습니다. 지금은 ${units.length}건입니다. 나눠서 보내주세요.`] };
+    // 상한 = 따로 첨부한 파일 수(아래 자립형 여러 장과 같은 문장) · 한 파일 안 짝 수는 세지 않는다(★1125 Harold)
+    if (sheets.length > MAX_FORMS) {
+      return { ok: false, code: 'too_many_forms', reasons: [`요청서는 메일 한 통에 ${MAX_FORMS}개까지 보낼 수 있습니다. 지금은 ${sheets.length}개입니다. 나눠서 보내주세요.`] };
     }
     return { ok: true, units };
   }
@@ -1010,17 +1027,8 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     await sendRejectReply(claimed.id, ctx.mailbox, fromAddr, '[한줄로] 대행발송 접수 불가', buildRejectedReply(reasons, headers), messageId);
   };
 
-  const imageAtts = atts.filter((a) => isImageAttachment(a));
-  /** 접수에 실을 이미지(맞춘 뒤의 바이트 · 첨부 순서 그대로). 저장은 아래 단건 경로에서만 한다 */
-  let preparedImages: PreparedMailImage[] = [];
-  if (imageAtts.length > 0) {
-    const prepared = await prepareMailMmsImages(imageAtts, LIMITS.mmsImageCount * MAX_FORMS);
-    if (!prepared.ok) {
-      await reject(prepared.reasons, 'mms_image_invalid');
-      return;
-    }
-    preparedImages = prepared.images;
-  }
+  // ★ 2026-11-25 값싼 판정(압축 · 첨부 개수 · 용량)을 이미지 맞춤(변환) **앞**에 둔다 — 장수 상한을 첨부 상한으로 올렸으므로
+  //   어차피 반려할 메일(엑셀 1 + 이미지 20 = 첨부 21)에 변환 CPU 를 쓰지 않는다(Codex 상한 1R).
   if (atts.some((a) => /\.zip$/i.test(String(a.filename || '')))) {
     await reject(['압축(zip) 파일은 받지 않습니다. 요청서와 명단을 각각 엑셀 또는 CSV로 첨부해 주세요.'], 'zip_not_allowed');
     return;
@@ -1032,6 +1040,18 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   if (atts.reduce((a, b) => a + (b.size || b.content?.length || 0), 0) > MAX_ATTACH_TOTAL) {
     await reject([`첨부 용량이 큽니다. ${ATTACH_LIMIT_LABEL} 이내로 보내주세요.`], 'attachments_too_large');
     return;
+  }
+  const imageAtts = atts.filter((a) => isImageAttachment(a));
+  /** 접수에 실을 이미지(맞춘 뒤의 바이트 · 첨부 순서 그대로). 저장은 아래 단건 경로에서만 한다 */
+  let preparedImages: PreparedMailImage[] = [];
+  if (imageAtts.length > 0) {
+    // 장수 총량 = 첨부 상한(건마다 3장은 이름 맞추기가 · 건 하나 3장은 아래가 본다 · 한 파일 여러 건은 건 수 상한이 없다 ★1125)
+    const prepared = await prepareMailMmsImages(imageAtts, MAX_ATTACH_FILES);
+    if (!prepared.ok) {
+      await reject(prepared.reasons, 'mms_image_invalid');
+      return;
+    }
+    preparedImages = prepared.images;
   }
   // ★2026-08-26(2) 표준 = 통일 양식 **한 파일**(시트1 내용 + 시트2 고객리스트). 요청서와 명단을
   //   두 파일로 나눠 첨부한 메일도 그대로 받는다(반려당할 이유가 없는 메일을 반려하지 않는다).
@@ -1114,7 +1134,9 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     // 8) 요청서 파싱 — 이메일 전용 사전 게이트(§18-3 · 확인 화면이 없는 경로의 추가 반려 규칙)
     // ★ 2026-09-26 한줄로 V2 S1-H03 — 요청서·명단을 한 번에 **별도 프로세스에서** 읽는다(워커가 API와 같은 프로세스라
     //   큰 명단을 여기서 읽으면 그동안 전부 멈췄다). 명단을 못 읽었으면 list = null(종전 catch와 같은 판정).
-    const parsedFiles = await parseAgencyFilesIsolated(u.formBuf, u.listBuf, { formSheet: u.formSheet, listSheet: u.listSheet });
+    const parsedFiles = u.pre
+      ? { form: u.pre.form, list: u.pre.list }   // ★(2) 판정 때 한 번 읽은 판(파일을 건마다 다시 읽지 않는다)
+      : await parseAgencyFilesIsolated(u.formBuf, u.listBuf, { formSheet: u.formSheet, listSheet: u.listSheet });
     const form = parsedFiles.form ?? unreadableAgencyForm();
 
     // 8b) ★0827 §18-13 + ★0905 §21-2 발송 ID 확정.

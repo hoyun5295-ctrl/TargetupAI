@@ -190,7 +190,7 @@ describe('메일 워커 배선 (소스 계약) — MMS 개통이 되돌아가지
   it('이미지 무조건 반려(has_image)가 되살아나지 않았다 — 맞춤 준비만 있다(★0910)', () => {
     expect(worker).not.toMatch(/'has_image'/);
     // ★ 2026-11-25 장수 상한은 부르는 쪽이 정한다(한 파일 여러 건 = 건마다 3장 · 단건 3장은 단위가 정해진 뒤 따로 본다)
-    expect(worker).toMatch(/prepareMailMmsImages\(imageAtts, LIMITS\.mmsImageCount \* MAX_FORMS\)/);
+    expect(worker).toMatch(/prepareMailMmsImages\(imageAtts, MAX_ATTACH_FILES\)/);
     expect(worker).toMatch(/!multi && preparedImages\.length > LIMITS\.mmsImageCount/);
     expect(worker).toMatch(/'mms_image_invalid'/);
   });
