@@ -16,10 +16,16 @@
  *   그래서 항목마다 **고객사에 바뀌는 것**(`detail`)을 우리 말로 적고, 근거는 맨 아래 한 줄(링크 없음)로만 둔다.
  *   ⛔ `detail` 은 지금 구현된 동작만 적는다(인증번호 6자리 · 매 로그인 · 담당자 휴대폰 · 발신 인증 유지 시간 = `SENDER_AUTH_TRUST_HOURS`).
  *      동작이 바뀌면 이 문구를 같이 고친다(계약 테스트가 유지 시간을 코드 값과 대조한다).
+ *
+ * ★2026-11-25 2쪽 (Harold 「약관 수정하고, 공지 팝업을 띄우면 되잖아? 기존에 담당자 본인인증이랑 같이 2페이지로」 · 추천 순서)
+ *   1쪽 = 이용약관 개정 안내(기한 있는 새 소식이라 앞) · 2쪽 = 위 인증 안내(종전 그대로).
+ *   시행일 = `constants/termsRevision.ts` 하나(약관 부칙과 같은 값) · 숨김 규칙 · 확인 단추(닫기만)는 종전 그대로.
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { POLICY_ENFORCE_DATE_TEXT, isPolicyEnforced } from '../constants/sendAuthPolicy';
+import { TERMS_REVISION_EFFECTIVE_DATE_TEXT, useTermsRevisionEffective } from '../constants/termsRevision';
+import { COMPANY_PHONE } from '../constants/company';
 
 /** 시행일 — 설정 화면 카드와 같은 날짜를 본다(`constants/sendAuthPolicy.ts`) */
 const ENFORCE_DATE_TEXT = POLICY_ENFORCE_DATE_TEXT;
@@ -71,12 +77,41 @@ export const CHANGES: Array<{ label: string; title: string; detail: string }> = 
   },
 ];
 
+/**
+ * ★2026-11-25 1쪽 — 이용약관에서 바뀌는 세 조항(고객사에 바뀌는 것을 우리 말로 · 법률 원문 = 약관 화면)
+ * ⛔ 약관 원문(TermsPage 제41조 제5항 · 제42조 제3항 · 제6항 · 제7항)과 뜻이 달라지면 안 된다(계약 시험이 조항 번호를 대조한다).
+ */
+export const TERMS_CHANGES: Array<{ label: string; title: string; detail: string }> = [
+  {
+    label: '발신번호 변작',
+    title: '변작 번호 문자를 확인하면 그 회선 제공을 멈출 수 있습니다',
+    detail: '발신번호가 변작된 문자를 확인하거나 과학기술정보통신부 장관 또는 한국인터넷진흥원의 요청이 있으면 해당 회선에 대한 전기통신역무의 제공을 중지할 수 있습니다. 제41조 제5항을 새로 넣었습니다.',
+  },
+  {
+    label: '발신번호 수',
+    title: '등록할 수 있는 발신번호 수를 실제 기준에 맞췄습니다',
+    detail: '개인과 외국인은 고시가 정한 수까지, 법인은 회사가 확인한 자료에 따라 정한 범위에서 등록합니다. 종전의 「최대 10개」 문구를 바꿨습니다(제42조 제3항).',
+  },
+  {
+    label: '문자 속 URL',
+    title: '문자에 든 URL을 보내기 전에 검사할 수 있습니다',
+    detail: '문자에 든 URL을 발송 전에 분석할 수 있고, 한국인터넷진흥원 등이 제공하는 악성 URL 정보와 일치하면 발송을 차단할 수 있습니다. 차단한 URL과 차단 건수 등 차단 정보는 한국인터넷진흥원에 제공할 수 있습니다(제42조 제6항, 제7항 신설).',
+  },
+];
+
 export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => void }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
   const enforced = isPolicyEnforced();
+  const termsEffective = useTermsRevisionEffective();
+  // 0 = 약관 개정 안내 · 1 = 인증 안내
+  const [page, setPage] = useState<0 | 1>(0);
 
   useEffect(() => {
-    confirmRef.current?.focus();
+    (page === 0 ? nextRef : confirmRef).current?.focus();
+  }, [page]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
@@ -132,46 +167,92 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
             id="lpn-title"
             className="relative pr-8 text-[21px] font-bold leading-[1.3] tracking-[-0.02em] text-white [text-wrap:balance] sm:text-[24px]"
           >
-            {enforced ? (
+            {page === 0 ? (
+              termsEffective ? <>이용약관이<br />바뀌었습니다</> : <>이용약관이<br />바뀝니다</>
+            ) : enforced ? (
               <>로그인·발송 인증이<br />의무 적용되고 있습니다</>
             ) : (
               <>{ENFORCE_DATE_TEXT}부터<br />로그인·발송 인증이 의무화됩니다</>
             )}
           </h3>
-          <p className="relative mt-2.5 break-keep text-[14px] leading-[1.6] text-emerald-50 sm:text-[15px]">
-            {enforced && <>{ENFORCE_DATE_TEXT}부터 시행 중입니다.<br /></>}
-            한줄로만의 정책이 아닙니다.
-            <br />
-            방송미디어통신위원회 고시에 따라{' '}
-            <b className="font-semibold text-white">모든 대량문자 발송 사업자</b>에게 똑같이 적용됩니다.
-          </p>
+          {page === 0 ? (
+            <p className="relative mt-2.5 break-keep text-[14px] leading-[1.6] text-emerald-50 sm:text-[15px]">
+              <b className="font-semibold text-white">{TERMS_REVISION_EFFECTIVE_DATE_TEXT}</b>부터 {termsEffective ? '시행 중입니다.' : '시행합니다.'}
+              <br />
+              문자 발송 사업자가 지켜야 하는 기준에 맞춰 세 조항을 고쳤습니다.
+            </p>
+          ) : (
+            <p className="relative mt-2.5 break-keep text-[14px] leading-[1.6] text-emerald-50 sm:text-[15px]">
+              {enforced && <>{ENFORCE_DATE_TEXT}부터 시행 중입니다.<br /></>}
+              한줄로만의 정책이 아닙니다.
+              <br />
+              방송미디어통신위원회 고시에 따라{' '}
+              <b className="font-semibold text-white">모든 대량문자 발송 사업자</b>에게 똑같이 적용됩니다.
+            </p>
+          )}
         </div>
 
-        {/* 바뀌는 것 세 가지 — 고객사에 바뀌는 것 */}
+        {/* 1쪽 = 약관에서 바뀌는 세 조항 · 2쪽 = 인증에서 바뀌는 것 세 가지 — 고객사에 바뀌는 것 */}
         <div className="min-h-0 flex-1 overflow-y-auto px-6 sm:px-9">
-          <dl>
-            {CHANGES.map((c) => (
-              <div
-                key={c.label}
-                className="grid gap-x-5 gap-y-1 border-b border-slate-100 py-3 sm:grid-cols-[84px_1fr] sm:items-baseline"
-              >
-                <dt className="text-[13px] font-semibold text-emerald-700">{c.label}</dt>
-                <dd>
-                  <p className="text-[15.5px] font-semibold leading-snug tracking-[-0.01em] text-slate-900 sm:text-[16px]">{c.title}</p>
-                  <p className="mt-1.5 break-keep rounded-lg bg-slate-50 px-3 py-2 text-[13.5px] leading-[1.6] text-slate-700">{c.detail}</p>
-                </dd>
-              </div>
-            ))}
-          </dl>
+          {page === 0 ? (
+            <>
+              <dl>
+                {TERMS_CHANGES.map((c) => (
+                  <div
+                    key={c.label}
+                    className="grid gap-x-5 gap-y-1 border-b border-slate-100 py-3 sm:grid-cols-[96px_1fr] sm:items-baseline"
+                  >
+                    <dt className="text-[13px] font-semibold text-emerald-700">{c.label}</dt>
+                    <dd>
+                      <p className="break-keep text-[15.5px] font-semibold leading-snug tracking-[-0.01em] text-slate-900 sm:text-[16px]">{c.title}</p>
+                      <p className="mt-1.5 break-keep rounded-lg bg-slate-50 px-3 py-2 text-[13.5px] leading-[1.6] text-slate-700">{c.detail}</p>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
 
-          {/* 근거 — 맨 아래 한 줄(링크 없음) */}
-          <p className="py-3 text-[12px] leading-relaxed text-slate-500">
-            근거: 방송미디어통신위원회 전송자격인증제(2026년 10월 26일 전 사업자 시행)
-          </p>
+              {/* 약관 제3조 제3항 그대로 — 해지 요청권 · 동의 간주 조건(효력 발생일부터 7일이 지난 뒤에도 거부 의사 없이 계속 이용 · Codex 1R) */}
+              <p className="pt-3 break-keep text-[13px] leading-[1.6] text-slate-600">
+                바뀐 약관에 동의하지 않으시면 고객센터({COMPANY_PHONE})로 거부 의사를 알리거나 이용계약 해지를 요청하실 수 있습니다. 시행일부터 7일이 지난 뒤에도 거부 의사를 밝히지 않고 서비스를 계속 이용하시면 바뀐 약관에 동의하신 것으로 봅니다.
+              </p>
+              <p className="py-3">
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[13.5px] font-semibold text-emerald-700 underline-offset-4 transition hover:text-emerald-800 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                >
+                  약관 전문 보기
+                </a>
+              </p>
+            </>
+          ) : (
+            <>
+              <dl>
+                {CHANGES.map((c) => (
+                  <div
+                    key={c.label}
+                    className="grid gap-x-5 gap-y-1 border-b border-slate-100 py-3 sm:grid-cols-[84px_1fr] sm:items-baseline"
+                  >
+                    <dt className="text-[13px] font-semibold text-emerald-700">{c.label}</dt>
+                    <dd>
+                      <p className="text-[15.5px] font-semibold leading-snug tracking-[-0.01em] text-slate-900 sm:text-[16px]">{c.title}</p>
+                      <p className="mt-1.5 break-keep rounded-lg bg-slate-50 px-3 py-2 text-[13.5px] leading-[1.6] text-slate-700">{c.detail}</p>
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              {/* 근거 — 맨 아래 한 줄(링크 없음) */}
+              <p className="py-3 text-[12px] leading-relaxed text-slate-500">
+                근거: 방송미디어통신위원회 전송자격인증제(2026년 10월 26일 전 사업자 시행)
+              </p>
+            </>
+          )}
         </div>
 
         {/* 버튼 */}
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-slate-100 px-6 py-3 sm:px-9">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-slate-100 px-6 py-3 sm:px-9">
           <button
             type="button"
             onClick={hideToday}
@@ -179,14 +260,39 @@ export default function LoginPolicyNoticeModal({ onClose }: { onClose: () => voi
           >
             오늘 하루 보지 않기
           </button>
-          <button
-            ref={confirmRef}
-            type="button"
-            onClick={onClose}
-            className="rounded-xl bg-emerald-600 px-7 py-2.5 text-[15px] font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:bg-emerald-800"
-          >
-            확인했습니다
-          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="px-1 text-[12.5px] font-medium tabular-nums text-slate-400" aria-label={`전체 2쪽 중 ${page + 1}쪽`}>
+              {page + 1} / 2
+            </span>
+            {page === 0 ? (
+              <button
+                ref={nextRef}
+                type="button"
+                onClick={() => setPage(1)}
+                className="rounded-xl bg-emerald-600 px-6 py-2.5 text-[15px] font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:bg-emerald-800 sm:px-7"
+              >
+                다음
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setPage(0)}
+                  className="rounded-xl border border-slate-200 px-4 py-2.5 text-[15px] font-semibold text-slate-600 transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                >
+                  이전
+                </button>
+                <button
+                  ref={confirmRef}
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-xl bg-emerald-600 px-5 py-2.5 text-[15px] font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 active:bg-emerald-800 sm:px-7"
+                >
+                  확인했습니다
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

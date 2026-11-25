@@ -1,7 +1,27 @@
+import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { COMPANY_NAME, COMPANY_PHONE, COMPANY_EMAIL } from '../constants/company';
+import { TERMS_REVISION_EFFECTIVE_DATE_TEXT, useTermsRevisionEffective } from '../constants/termsRevision';
+
+/**
+ * ★2026-11-25 개정 조항 — 시행 전에는 현행 조항(있으면)을 그대로 두고 개정문을 시행일이 붙은 예고로 함께 보인다(Codex 1R ·
+ * 공지 기간에도 지금 적용되는 조항을 볼 수 있어야 한다). 시행일부터는 개정문만 본문이다.
+ * 판정은 화면이 한 번 읽어 네 조항에 같은 값을 준다(Codex 2R · 열어 둔 화면도 시행 시각에 바뀐다 = useTermsRevisionEffective).
+ */
+function RevisedClause({ effective, children, replaces }: { effective: boolean; children: ReactNode; replaces?: string }) {
+  if (effective) return <p>{children}</p>;
+  return (
+    <>
+      {replaces && <p>{replaces}</p>}
+      <p className="rounded-md bg-amber-50 px-2 py-1 text-amber-900">
+        <b className="font-semibold">[{replaces ? '개정' : '신설'} 예고, {TERMS_REVISION_EFFECTIVE_DATE_TEXT} 시행]</b> {children}
+      </p>
+    </>
+  );
+}
 
 export default function TermsPage() {
+  const revised = useTermsRevisionEffective();
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex flex-col">
       <div className="flex-1 py-12 px-4">
@@ -390,15 +410,21 @@ export default function TermsPage() {
               <p>2. 회사는 거짓으로 표시된 전화번호를 송신하였다는 신고가 접수된 경우 대량 발송 여부 및 서비스 변경이력을 확인하여 메시지를 차단하고, 그 사실을 이용자에게 통지합니다.</p>
               <p>3. 이용자 신고 등을 통해 거짓 표시 발신을 차단하고자 하는 경우 기간통신사업자에게 해당 전화번호에 대한 차단을 요청합니다.</p>
               <p>4. 부정 이용자의 아이디 및 비밀번호는 계정 잠금을 통해 서비스를 중지하며, 3개월 이내 이의신청이 없거나 합당한 이유가 없는 경우 이용계약을 해지합니다.</p>
+              {/* ★2026-11-25 신설 — 특부가 5번 서식 예시 「약관에 필히 반영」 문구 그대로(시행일 = 부칙 3) */}
+              <RevisedClause effective={revised}>5. 회사는 발신번호가 변작된 문자메시지를 인지하거나 과학기술정보통신부 장관 또는 한국인터넷진흥원의 요청이 있는 경우 해당 회선에 대한 전기통신역무의 제공을 중지할 수 있습니다.</RevisedClause>
             </section>
 
             <section>
               <h3 className="font-semibold text-gray-800 mb-1">제42조 (부정가입 방지, 발신번호 등록·관리 등에 대한 사업자·이용자의 의무 및 기타 이용자 고지사항)</h3>
               <p>1. 회사는 문자메시지를 발송하는 이용자에 대해 부정가입 방지를 위하여 제7조 제1항에 해당하는 서류를 제출받아 인증을 통한 본인 확인을 거쳐야 합니다.</p>
               <p>2. 이용자는 직접 발신번호를 등록·변경·삭제할 수 없으며, 변경을 원하면 본인 확인 서류를 제출한 후 회사가 직접 변경하고 이용자에게 통보합니다.</p>
-              <p>3. 회사는 이용자가 사용할 수 있는 본인 소유 전화번호를 최대 10개까지 등록할 수 있습니다.</p>
+              {/* ★2026-11-25 수정 — 현행 문구는 실제 운영(개인 고시 기준 · 법인 확인 자료)과 달라 고침 · 시행 전에는 현행 문구 + 예고(시행일 = 부칙 3) */}
+              <RevisedClause effective={revised} replaces="3. 회사는 이용자가 사용할 수 있는 본인 소유 전화번호를 최대 10개까지 등록할 수 있습니다.">3. 개인과 외국인 이용자는 관련 고시에서 정한 수까지, 법인 이용자는 회사가 확인한 자료에 따라 정한 범위에서 발신번호를 등록할 수 있습니다.</RevisedClause>
               <p>4. 회사는 발신번호의 전체 번호수가 8~11자리인 경우에만 문자메시지를 발송하도록 조치합니다. 단, 112·1335 등 특수번호(국가·지자체·공공기관 등에 한함), 15YY·16YY 등 대표번호(8자리에 한함), 030·050으로 시작하는 번호(12자리까지)는 예외로 합니다.</p>
               <p>5. 회사는 이용자가 등록한 전화번호 외에는 문자메시지 발신번호로 사용될 수 없도록 조치합니다.</p>
+              {/* ★2026-11-25 신설 — 특부가 1-3 서식 고려사항(자체 개발 · 문자 안 URL 분석 · 차단 정보 KISA 제공)(시행일 = 부칙 3) */}
+              <RevisedClause effective={revised}>6. 회사는 악성 문자메시지 차단을 위하여 이용자가 전송하는 문자메시지에 포함된 URL을 발송 전에 분석할 수 있으며, 한국인터넷진흥원 등이 제공하는 악성 URL 정보와 일치하는 URL이 포함된 문자메시지는 발송을 차단할 수 있습니다.</RevisedClause>
+              <RevisedClause effective={revised}>7. 회사는 제6항에 따라 차단한 URL과 차단 건수 등 차단 정보를 한국인터넷진흥원에 제공할 수 있습니다.</RevisedClause>
             </section>
 
             {/* ── 제10장 손해배상 및 면책 ── */}
@@ -489,6 +515,7 @@ export default function TermsPage() {
               <h3 className="font-semibold text-gray-800 mb-1">부칙</h3>
               <p>1. 본 약관은 2024년 6월 1일부터 시행하며, 종전까지 시행 중이던 약관은 본 약관으로 대체합니다.</p>
               <p>2. 한줄로 서비스 관련 사항(제1조·제5조 한줄로 부분 및 한줄로 서비스 관련 특약)은 서비스 화면 공지 후 7일이 경과한 날인 2026년 7월 23일부터 시행합니다.</p>
+              <p>3. 제41조 제5항, 제42조 제3항, 제6항 및 제7항은 서비스 화면 공지 후 7일이 경과한 날인 {TERMS_REVISION_EFFECTIVE_DATE_TEXT}부터 시행합니다.</p>
             </section>
 
           </div>
