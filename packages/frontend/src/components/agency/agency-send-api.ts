@@ -64,6 +64,11 @@ export interface AgencySendRequest {
    * ⛔ 화면에서 날짜를 다시 계산하지 않는다. 판정은 서버 하나가 소유한다.
    */
   finalTestRequired: boolean;
+  /**
+   * ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 판정(서버 한 곳 · 화면은 그대로 그린다).
+   *   ok = 고를 수 있음 · text = 그대로 보낼 글 · retime = 시각만 바꾸면 고를 수 있음(사유 = reason).
+   */
+  spamOverride?: { ok: boolean; reason: string | null; text: string | null; retime: boolean };
   reapprovalCount: number;
   queuedAt: string | null;
   campaignId: string | null;
@@ -83,6 +88,8 @@ export interface AgencySendRequest {
   callbackKinds?: number;
   /** 한 종류일 때 그 번호(대표 번호와 다를 수 있다) */
   callbackSole?: string | null;
+  /** ★ 2026-11-24 지금 문안 = 그대로 보내기를 고른 글(단건 응답에만 · 서버 판정 · null = 확인 못 함 = 「통과」 문구도 쓰지 않는다) */
+  spamOverridden?: boolean | null;
 }
 
 /**
@@ -236,6 +243,14 @@ export async function createAgencyRequest(input: CreateAgencyRequestInput): Prom
   const res = await fetch('/api/agency-send', { method: 'POST', headers: json(), body: JSON.stringify(input) });
   const data = await unwrap(res);
   return { request: data.request, notice: Array.isArray(data.notice) ? data.notice : [] };
+}
+
+/** ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 — 승인 대기로 돌아가고 테스트 문자 · 승인 요청을 다시 받는다 */
+export async function overrideAgencySpamBlock(id: string, revision: number): Promise<AgencySendRequest> {
+  const res = await fetch(`/api/agency-send/${id}/spam-override`, {
+    method: 'POST', headers: json(), body: JSON.stringify({ revision }),
+  });
+  return (await unwrap(res)).request;
 }
 
 export async function approveAgencyRequest(id: string, revision: number): Promise<AgencySendRequest> {
@@ -509,12 +524,22 @@ export function lockLinkActions(a: AgencyLinkActions | undefined, requestedAt: s
  */
 export function linkApprovedCard(input: {
   justApproved: boolean; status: AgencySendStatus; when: string; cancel: AgencyLinkActionState | undefined;
+  /** ★ 2026-11-24 그대로 보내기를 고른 문안(마지막 검사 결과와 관계없이 나간다) */
+  overridden?: boolean;
+  /** ★ 2026-11-24 발송일 당일 검사를 이미 마쳤다 = final_testing 은 예약 준비 중(검사 문장을 쓰지 않는다) */
+  finalTested?: boolean;
 }): { title: string; body: string } | null {
   const { justApproved, status, when, cancel } = input;
   if (status !== 'approved' && status !== 'final_testing' && status !== 'queued') return null;
+  // ★ 2026-11-24 마지막 검사 중 = 다시 열어도 같은 문장(예약이 아직 잡히지 않았다 · Codex 구현 3R #2)
+  if (status === 'final_testing' && input.finalTested) {
+    return { title: justApproved ? '승인되었습니다' : '승인된 발송입니다', body: `예약을 준비하고 있어요. 준비가 끝나면 ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` };
+  }
+  if (status === 'final_testing') {
+    return { title: justApproved ? '승인되었습니다' : '승인된 발송입니다', body: input.overridden ? `발송 전 마지막 검사를 하고 있어요. 스팸 판정과 관계없이 발송 준비를 이어 가고, 준비가 끝나면 ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` : `발송 전 마지막 검사를 하고 있어요. 통과하면 ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` };
+  }
   if (justApproved) {
     if (status === 'approved') return { title: '승인되었습니다', body: '발송 2시간 전에 자동으로 예약을 잡고, 정해진 시각에 나갑니다. 이 창은 닫으셔도 됩니다.' };
-    if (status === 'final_testing') return { title: '승인되었습니다', body: `발송 전 마지막 검사를 하고 있어요. 통과하면 ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` };
     return { title: '승인되었습니다', body: `예약을 잡았습니다. ${when}에 나갑니다. 이 창은 닫으셔도 됩니다.` };
   }
   if (cancel?.ok) return { title: '승인되었습니다', body: '정해진 시각에 나갑니다. 보내지 않으려면 아래에서 취소할 수 있어요.' };

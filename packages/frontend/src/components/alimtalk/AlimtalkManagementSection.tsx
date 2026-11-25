@@ -1081,9 +1081,9 @@ export default function AlimtalkManagementSection({ onCount }: Props = {}) {
                       <div className={CUI_CELL_NAME}>{t.template_name}</div>
                       {/* ★ 2026-07-22(접수2): 고객사 관리코드는 코드이므로 템플릿코드 열로 이동 — 템플릿명 아래에는 표시 안 함 */}
                     </td>
-                    {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트 + select-text.
+                    {/* ★ D188 (2026-05-21) 영업팀장 신고 #3: 템플릿코드 컬럼 row. font-mono + 작은 텍스트(글자 선택 = 전역 기본 · 2026-11-24 R107 땜질 제거).
                         ★ 2026-07-22(접수2): 고객사 지정 관리코드도 코드이므로 여기(템플릿코드 열)에 함께 표시 */}
-                    <td className={`${CUI_TD} select-text cursor-text`}>
+                    <td className={`${CUI_TD} cursor-text`}>
                       <span className={CUI_CELL_CODE}>{t.template_code || '-'}</span>
                       {t.custom_template_code && (
                         <div className="mt-1">

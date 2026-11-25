@@ -8,6 +8,7 @@ import TablePagination from '../../common/TablePagination';
 import CallbackLookupPanel from '../CallbackLookupPanel';   // ★ 2026-11-23 특부가 갱신 1-1 ④ 발신번호 조회
 import type { ModalState } from '../admin-types';
 import { ADMIN_TABLE_ONELINE, ADMIN_TR_OPEN, AdminDetailItem, AdminDetailModal, AdminLongText, adminRowOpen } from '../ui/admin-ui'; // ★ 2026-10-20 표 칸 한 줄 · 행 = 상세 창
+import BitoSyncBadge from '../BitoSyncBadge';   // ★ 2026-11-24 B-1124-3 비토엔진 업체 번호의 비토 허용번호 상태
 
 export interface CallbacksTabProps {
   allManagers: any[];
@@ -373,6 +374,9 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 whitespace-nowrap">별칭</th>
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">대표</th>
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">사용 범위</th>
+                                      {paged.some((cb: any) => cb.bitoSync) && (
+                                        <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap" title="비토엔진 업체 번호는 2분 안에 비토 허용 발신번호에도 들어갑니다">비토 허용번호</th>
+                                      )}
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">등록일</th>
                                       <th className="px-4 py-2 text-center text-xs font-medium text-gray-500 whitespace-nowrap">관리</th>
                                     </tr>
@@ -403,6 +407,9 @@ export default function CallbacksTab(props: CallbacksTabProps) {
                                             <span className="whitespace-nowrap px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-700" title="발신번호 규격에 맞지 않는 표기라 관리자를 포함해 아무도 이 번호로 보낼 수 없습니다. 번호를 규격 표기로 다시 등록해 주세요.">발송 불가(규격)</span>
                                           ) : <span className="text-gray-400">-</span>}
                                         </td>
+                                        {paged.some((x: any) => x.bitoSync) && (
+                                          <td className="px-4 py-2.5 text-center"><BitoSyncBadge view={cb.bitoSync} /></td>
+                                        )}
                                         <td className="px-4 py-2.5 text-center text-gray-500">{formatDate(cb.created_at)}</td>
                                         <td className="px-4 py-2.5 text-center">
                                           <button onClick={() => setEditingCallback({ id: cb.id, phone: cb.phone, label: cb.label || '' })} className="whitespace-nowrap text-emerald-700 hover:text-emerald-800 text-[13px] mr-2">수정</button>

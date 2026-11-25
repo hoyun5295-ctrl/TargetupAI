@@ -336,6 +336,8 @@ describe('C 대행 SMS 길이 — 명단 전원 · 문안을 쓰는 모든 자�
   it('K-C1 소스: 대행 표의 문안을 쓰는 자리 전수(기계 추출) = 그 자리의 판정이 있다', () => {
     const GUARD: Record<string, RegExp> = {
       'utils/agency-send-change.ts#editAgencyContentTx': /agencySmsBytesOver\(row, body\)/,
+      // ★ 2026-11-24 그대로 보내기 = 표식의 보낼 글을 쓴다 · 쓰기 전에 같은 판정
+      'utils/agency-send-change.ts#overrideSpamBlockTx': /agencySmsBytesOver\(row, String\(pre\.text/,
       'utils/agency-send-intake.ts#createRequestCore': /measureAgencyMaxSmsBytes\(/,
       // 검사 결과 저장 = runSpamRound 가 낸 글(원문 · 이어 본 글 · 다듬은 글)만 · 그 셋을 runSpamRound 가 잰다(아래)
       'utils/agency-send-worker.ts#saveTestResult': /UPDATE agency_send_requests/,

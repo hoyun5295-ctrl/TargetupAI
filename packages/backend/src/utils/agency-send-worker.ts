@@ -28,6 +28,7 @@ import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 
 import { refineForSpam } from './agency-send-refine';
 import {
   diagHoldOf, diagHoldJson, startAgencyDiag, stepAgencyDiag, settleAgencyDiag4a, releaseAgencyDiag, agencyBlockSummary, SPAM_HINT_EVENT, type DiagHold,
+  spamOverrideMarker,   // ★ 2026-11-24 그대로 보내기 표식(진단 CT 가 소유 · 워커 · 4a 가 같은 함수)
 } from './agency-spam-diag';   // ★ 2026-11-24 막힌 부분 짚어 보기(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7)
 import { closeDiagnosis } from './spam-diag';
 import { getCarrierLabel } from './sms-result-map';
@@ -143,7 +144,8 @@ export function attemptIdleSql(prefixParam: number): string {
 async function setStatus(
   requestId: string, status: AgencySendStatus, extra: Record<string, any>, token: string,
   // ★2026-09-13(2) lock 복구 전용. 켜면 **시도 키 잠금이 비어 있을 때만** 바꾼다(아래 `runLockRecovery` 주석)
-  opts: { onlyIfAttemptIdle?: boolean } = {},
+  // ★ 2026-11-24 spamOverridable = 통신사 막힘 갈래만 넘긴다(결과 칸에 「그대로 보낼 수 있음」 표식 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3)
+  opts: { onlyIfAttemptIdle?: boolean; spamOverridable?: { version: number; submitted: string; checkedAt: string; submittedTested: boolean } } = {},
 ): Promise<boolean> {
   // ⛔ 토큰은 **필수**다(★2026-08-23 Codex 3R high). 선택으로 두면 "토큰 없이 부르는 자리"가 생기고,
   //   그 자리가 워커가 잡아 둔 행을 덮는다(만료 단계가 정확히 그랬다). 토큰 없는 전이는 각자
@@ -172,9 +174,19 @@ async function setStatus(
     const params: any[] = [requestId, status];
     let i = 3;
     for (const [col, val] of Object.entries(extra)) {
-      sets.push(`${col} = $${i}`);
+      // ★ 2026-11-24 결과 칸을 넘겨도 그 값에서 「그대로 보낼 수 있음」 표식은 뺀다(표식은 막힘 갈래만 · SQL NULL 은 NULL 그대로)
+      sets.push(col === 'last_test_result' ? `${col} = ($${i}::jsonb) - 'spamOverridable'` : `${col} = $${i}`);
       params.push(val);
       i += 1;
+    }
+    // ★ 2026-11-24 상태가 바뀌면 표식은 기본으로 지운다(적재 직전 거절 · 장애 · 길이 등 다른 test_failed 에 옛 표식이 남지 않게 · 같은 UPDATE · lock_token 조건).
+    //   막힘 갈래가 넘기면 지금 결과 칸에 표식을 얹는다(나머지 키 그대로).
+    if (opts.spamOverridable) {
+      sets.push(`last_test_result = jsonb_set(COALESCE(last_test_result, '{}'::jsonb), '{spamOverridable}', $${i}::jsonb)`);
+      params.push(JSON.stringify(opts.spamOverridable));
+      i += 1;
+    } else if (!('last_test_result' in extra)) {
+      sets.push(`last_test_result = last_test_result - 'spamOverridable'`);
     }
     params.push(token);
     // 잠금 조건은 **같은 UPDATE 한 문장 안에** 둔다. 행의 현재 시도 키로 트랜잭션 잠금을 시도하므로, 살아 있는 시도가
@@ -291,7 +303,7 @@ const managerPhonesOf = agencyManagerPhones;
  */
 async function freshLinkFields(requestId: string): Promise<any | null> {
   const r = await query(
-    `SELECT content_version, requested_at, manager_phones, manager_phone FROM agency_send_requests WHERE id = $1::uuid`,
+    `SELECT content_version, requested_at, manager_phones, manager_phone, status FROM agency_send_requests WHERE id = $1::uuid`,
     [requestId],
   );
   return r.rows[0] || null;
@@ -406,6 +418,11 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
   smsBytesOver?: number;
   /** ★ 2026-11-24 이 버전 첫 막힘에 확인 판을 걸었다 = 다듬지 않고 진단 대기(부르는 쪽 = 접수를 받기 전 상태로 · last_test_result.diagHold) */
   diagHold?: DiagHold;
+  /**
+   * ★ 2026-11-24 막힘(blocked) 때만 — 이번 차례 첫 회차의 글과 그 글을 본 검사 행의 시각(큐가 이어 본 검사면 그 검사 · AutoSpamTestResult.testCreatedAt).
+   *   「그대로 보내기」 당일 근거(Codex 구현 1R ~ 8R 같은 뿌리의 구조 답 = 짐작 0 · 따로 읽기 0).
+   */
+  firstTest?: { content: string; createdAt: string | null } | null;
 }> {
   const original = String(row.current_content || '');
   let content = original;
@@ -432,6 +449,7 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
     resumeAvoid = opts.resume.avoid && opts.resume.avoid.length > 0 ? opts.resume.avoid : undefined;
   }
 
+  let firstTest: { content: string; createdAt: string | null } | null | undefined;   // ★ 2026-11-24 첫 회차의 글 · 검사 행 시각(막힘 반환에 싣는다)
   // ★ 2026-10-24 검사 단계(표본 · 실검사 · 다듬기)가 던진 예외도 검사 장애다(Codex 1024 1R) — 호출부의 catch 로 새면
   //   spam_check_error 를 남기지 않아 대기 · 3회 상한을 우회하고 매 주기 실검사를 다시 일으켰다. 발송 배관 예외는 이 함수 밖이라 섞이지 않는다.
   try {
@@ -478,6 +496,7 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
       // ★ 배포 2 Codex 1R — 첫 회차가 실제로 T 를 이어 봤을 때만 이미 남긴 T 의 막힘을 다시 남기지 않는다(자정을 넘겨 새 검사면 남긴다)
       const resumedT = resumePrefer !== undefined && Object.values(result.testIds ?? {})[0] === resumePrefer;
       resumePrefer = undefined;   // 이어 보기는 첫 회차만
+      if (firstTest === undefined) { const vid = Object.keys(result.testIds ?? {})[0]; firstTest = vid ? { content, createdAt: result.testCreatedAt?.[vid] ?? null } : null; }
       // ★ C150 — testIds = 이번 회차가 실제로 본 검사(이어 보기면 그 검사 · 그 검사의 batch_id 는 처음 회차 묶음이라 batchId 로는 못 찾는다) · 보류 사건이 싣는다
       detail = { batchId: result.batchId, round: rounds, variants: result.variants, testIds: Object.values(result.testIds ?? {}) };
       // ★ 배포 2 Codex 3R — T 를 이어 본 통과도 진단 대기 뒤 통과(그 검사의 통과 시각 ≠ 이 시각 · 자정 경계) → 당일 검사로 세지 않는다
@@ -536,7 +555,7 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
     return { verdict: 'error', passed: false, finalContent: original, rounds, detail };
   }
 
-  return { verdict: 'blocked', passed: false, finalContent: content, rounds, detail };
+  return { verdict: 'blocked', passed: false, finalContent: content, rounds, detail, firstTest: firstTest ?? null };
 }
 
 /**
@@ -988,6 +1007,47 @@ async function saveTestResult(
   return Number(r.rows[0].content_version);
 }
 
+/**
+ * ★ 2026-11-24 이 문안 버전에 담당자의 「그대로 보내기」(사건 spam_override · 고른 트랜잭션에서 새 버전으로 남김)가 있는가.
+ *   판정 한 곳 = 2시간 전 검사 갈래 · 승인 요청 문자 · 상세 응답(spamOverridden)이 같이 쓴다(통과한 것처럼 쓰지 않는다 · Codex 구현 1R #4).
+ */
+export async function isSpamOverriddenVersion(requestId: string, version: number): Promise<boolean> {
+  const r = await query(
+    `SELECT 1 FROM agency_send_events WHERE request_id = $1::uuid AND kind = 'spam_override' AND payload->>'version' = $2 LIMIT 1`,
+    [requestId, String(version)],
+  );
+  return r.rows.length > 0;
+}
+
+/**
+ * ★ 2026-11-24 「그대로 보내기」를 고른 버전의 2시간 전 검사가 통신사 막힘 = 당일 검사 결과를 받아들인다.
+ *   소유권 토큰 조건 final_test_at · 사건 spam_override_final 을 한 트랜잭션으로(갱신 0행 · 사건 실패 = 롤백 · 적재하지 않는다 · 설계 3R #2).
+ */
+async function acceptOverriddenFinalBlock(requestId: string, token: string, version: number, rounds: number): Promise<boolean> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const u = await client.query(
+      `UPDATE agency_send_requests SET final_test_at = NOW(), revision = revision + 1, updated_at = NOW()
+        WHERE id = $1::uuid AND lock_token = $2::uuid`,
+      [requestId, token],
+    );
+    if ((u.rowCount || 0) === 0) { await client.query('ROLLBACK'); return false; }
+    await client.query(
+      `INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, 'spam_override_final', $2::jsonb)`,
+      [requestId, JSON.stringify({ version, rounds })],
+    );
+    await client.query('COMMIT');
+    return true;
+  } catch (e: any) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    console.warn(`${LOG} 그대로 보내기 당일 검사 받아들이기 실패 request=${requestId}(적재하지 않는다 · 잠금 복구가 되돌린다):`, e?.message || e);
+    return false;
+  } finally {
+    client.release();
+  }
+}
+
 // ────────────── A. 1차 검사 ──────────────
 
 async function runFirstTest(onlyRequestId?: string): Promise<void> {
@@ -1038,7 +1098,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         row.last_test_result = row.last_test_result && typeof row.last_test_result === 'object' ? { ...row.last_test_result, diagHold: undefined } : row.last_test_result;
         resume = { content: hold.content, rounds: hold.rounds, preferTestId: hold.parentTestId, avoid: step.kind === '4b' ? step.avoid : undefined, passed: step.kind === 'pass' };
       }
-      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver, diagHold } = await runSpamRound(row, 0, { diag: true, resume });
+      const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver, diagHold, firstTest } = await runSpamRound(row, 0, { diag: true, resume });
       if (diagHold) { await settleDiagHold(row, token, diagHold); continue; }
       // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 접수 상태로 돌리고 대기 뒤 다시(같은 버전 3번째 = 사람 판단)
       if (verdict === 'error') { await settleSpamCheckError(row, token, 'received', 'first', detail); continue; }
@@ -1054,7 +1114,11 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       const whenText = formatWhen(new Date(row.requested_at));
 
       if (!passed) {
-        if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) continue;
+        // ★ 2026-11-24 통신사 막힘 = 「그대로 보낼 수 있음」 표식(보낼 글 = 담당자가 마지막으로 넣은 글 original_content · 버전 · 막힌 시각)
+        //   submittedTested = 보낼 글 자체를 이 주기에 새로 검사했는가(아니면 당일 검사 끝으로 세지 않는다 · Codex 구현 1R #2)
+        const submitted = String(row.original_content || '');
+        const marker = spamOverrideMarker(savedVersion, submitted, firstTest);
+        if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token, { spamOverridable: marker })) continue;
         await logEvent(row.id, 'test_failed', { rounds });
         // ★ 2026-11-24 M2 — 막힌 통신사 · 확정된 확인 판 결과(없으면 의심 부분) 한 줄 · 「세 차례」 낱말 0
         const sum = await agencyBlockSummary(row, lastSpamTestId(detail), blockedCarriersOf(detail));
@@ -1237,7 +1301,9 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
   const label = shortLabel(target.file_name || target.original_content);
 
   try {
-    const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver } = await runSpamRound(target, 0);
+    // ★ 2026-11-24 이 문안 버전에 담당자의 「그대로 보내기」가 있으면 다듬기 없이 한 차례만 본다(설계서 docs/2026-11-24-agency-spam-override-design.md §3 2시간 전 재검사)
+    const overridden = await isSpamOverriddenVersion(target.id, Number(target.content_version));
+    const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver, firstTest } = await runSpamRound(target, overridden ? MAX_TEST_ROUNDS - 1 : 0);
     // ★ 2026-10-24 검사 장애 = 반려가 아니다(B-0823-1 가) — 승인 상태로 돌리고 대기 뒤 다시(시각이 지나면 만료 단계가 맡는다 · 같은 버전 3번째 = 사람 판단)
     if (verdict === 'error') { await settleSpamCheckError(target, token, 'approved', 'final', detail); return; }
     // ★ 2026-11-06 C109 — 보낼 수 없는 글자 반려 = 예약하지 않는다 · 사람 판단(다시 검사 0)
@@ -1306,8 +1372,23 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
       return;
     }
 
+    // ★ 2026-11-24 담당자가 「그대로 보내기」를 고른 버전 = 통신사 막힘이어도 진행한다.
+    //   「당일 검사 끝」(final_test_at · 당일 검사 결과를 받아들임)과 사건을 한 트랜잭션으로 남긴 뒤 적재한다(갱신 0행 · 사건 실패 = 적재 0 · 설계 3R #2).
+    //   적재가 일시 실패해 approved 로 돌아가도 다음 주기는 isQueueDue 갈래로 적재만 다시 한다(재검사 반복 0 · 설계 1R #4).
+    if (overridden) {
+      const accepted = await acceptOverriddenFinalBlock(target.id, token, Number(target.content_version), rounds);
+      // 못 남겼으면 적재하지 않고 승인 상태로 돌린다(다음 주기가 다시 본다 · 소유권을 잃었으면 이 줄도 0행 ·
+      //   예외는 삼키지 않고 바깥 catch 의 revertAfterDispatchError 로 = 되돌리기 한 곳 · 불변식 agency-worker-residuals)
+      if (!accepted) { await setStatus(target.id, 'approved', { ...RELEASE }, token); return; }
+      await dispatchToPipeline(target, String(target.current_content || ''), token);
+      return;
+    }
+
     // 세 번 다 걸렸다. 나가지 않는다
-    if (!await setStatus(target.id, 'test_failed', { ...RELEASE }, token)) return;
+    // ★ 2026-11-24 표식 = 보낼 글은 재검사를 시작한 글(담당자가 승인했던 글) · 버전 = 결과 저장 뒤 버전
+    const finalSubmitted = String(target.current_content || '');
+    const finalMarker = spamOverrideMarker(version, finalSubmitted, firstTest);
+    if (!await setStatus(target.id, 'test_failed', { ...RELEASE }, token, { spamOverridable: finalMarker })) return;
     await logEvent(target.id, 'final_test_failed', { rounds });
     await notifyManager({
       companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
@@ -2578,11 +2659,15 @@ export function startAgencySendWorker(): void {
  * 테스트 문자 · 「예약취소」 원문 제외 · 최종 검증 4). 새 링크 = 새 보낼 시각 기준 만료 · 24시간은 시각 변경 UPDATE 가 다시 시작했다.
  * ⛔ 던지지 않는다(조작은 이미 커밋됐다 · 안내 실패는 이력에만) · 상태가 승인 대기가 아니면 보내지 않는다(그 사이 바뀌었다).
  */
-export async function sendAgencyApprovalRequest(requestId: string): Promise<void> {
+export async function sendAgencyApprovalRequest(requestId: string, opts: { withTest?: boolean; version?: number } = {}): Promise<void> {
   try {
     const r = await query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid`, [requestId]);
     const row = r.rows[0];
     if (!row || row.status !== 'awaiting_approval') return;
+    // ★ 2026-11-24 부른 쪽이 커밋한 버전이 아니면 보내지 않는다(그 사이 바뀐 쪽이 자기 안내를 낸다 · Codex 구현 1R #3)
+    if (opts.version !== undefined && Number(row.content_version) !== opts.version) return;
+    // ★ 2026-11-24 그대로 보내기를 고른 버전 = 통과한 것처럼 쓰지 않는다(Codex 구현 1R #4 · 시각 변경 뒤 다시 보내는 승인 요청도 같은 판정)
+    const overridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version));
     const label = shortLabel(row.file_name || row.original_content);
     const whenText = formatWhen(new Date(row.requested_at));
     if (isApprovalExpired('awaiting_approval', new Date(row.requested_at), new Date(),
@@ -2590,11 +2675,28 @@ export async function sendAgencyApprovalRequest(requestId: string): Promise<void
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
         callback: row.callback_number, title: '[대행발송] 시각 확인 요청',
-        text: buildTooTightNotify({ label, whenText }),
+        text: buildTooTightNotify({ label, whenText, overridden }),
       });
       return;
     }
-    const linkRow = (await freshLinkFields(row.id)) || row;
+    // ★ 2026-11-24 「그대로 보내기」 = 승인 전에 실물 테스트 문자(통과 갈래와 같은 모양 · 담당자는 이 문자를 보고 승인한다)
+    if (opts.withTest) {
+      const sample = await buildSample({ ...row, current_content: row.current_content });
+      const images = Array.isArray(row.mms_image_paths) ? row.mms_image_paths : [];
+      await sendManagerTest({
+        companyId: row.company_id, requestId: row.id, createdBy: row.created_by,
+        phones: managerPhonesOf(row), callback: row.callback_number,
+        text: sample.text, subject: sample.subject || '[대행발송] 테스트',
+        messageType: row.message_type, mmsImages: images,
+      });
+    }
+    // ★ 2026-11-24 링크 = 이 문자가 말하는 버전 · 시각 · 상태 그대로일 때만(테스트 문자를 기다리는 사이 바뀌었으면 옛 문자에 새 링크를 싣지 않는다 · Codex 구현 1R #3)
+    const linkRow = await freshLinkFields(row.id);
+    if (!linkRow || linkRow.status !== 'awaiting_approval' || Number(linkRow.content_version) !== Number(row.content_version)
+      || new Date(linkRow.requested_at).getTime() !== new Date(row.requested_at).getTime()) {
+      await logEvent(row.id, 'approval_request_skipped', { reason: 'changed', version: Number(row.content_version) });
+      return;
+    }
     const spellCount = await readAgencySpellCount(row.id);
     const count = Number(row.recipient_count || 0);
     const charLines = await readAgencyCharLines(row.id);
@@ -2603,9 +2705,9 @@ export async function sendAgencyApprovalRequest(requestId: string): Promise<void
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
       callback: row.callback_number, title: '[대행발송] 승인 요청',
-      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine }),
+      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine, overridden }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine }),
+        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine, overridden }),
         row.company_id, row.id, linkRow, row.created_by ?? null),
     });
   } catch (err: any) {

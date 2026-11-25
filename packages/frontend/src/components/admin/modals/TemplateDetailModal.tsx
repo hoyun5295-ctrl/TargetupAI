@@ -53,7 +53,7 @@ export default function TemplateDetailModal(props: TemplateDetailModalProps) {
               </div>
               <button onClick={() => setTemplateDetail(null)} className="whitespace-nowrap text-gray-400 hover:text-gray-600 text-xl">&times;</button>
             </div>
-            <div className="p-6 overflow-auto space-y-4 text-sm" style={{ userSelect: 'text' }}>
+            <div className="p-6 overflow-auto space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
                 <div><div className="text-xs text-gray-400 mb-0.5">템플릿명</div><div className="text-gray-800">{templateDetail.template_name || '-'}</div></div>
                 <div><div className="text-xs text-gray-400 mb-0.5">템플릿코드</div><div className="text-gray-800 font-mono">{templateDetail.template_code || '-'}</div></div>

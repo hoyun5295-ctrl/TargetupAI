@@ -41,10 +41,22 @@ export interface AgencyNotifyContext {
    *   판정 글 = 그 자리에서 담당자 테스트 문자를 만든 바로 그 글(설계서 §4① A7 · A8 · Codex 설계 1R #4).
    */
   optOutLine?: string;
+  /**
+   * ★ 2026-11-24 이 문안 버전 = 담당자가 스팸 검사 결과와 관계없이 「그대로 보내기」를 고른 글(사건 spam_override · isSpamOverriddenVersion).
+   *   검사를 통과한 것처럼 쓰지 않는다(Codex 구현 1R #4 · 승인하는 사람도 걸린 통신사 이용자에게 닿지 않을 수 있음을 안다).
+   */
+  overridden?: boolean;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
 const HEAD = '[대행발송]';
+
+/** 승인 요청 첫머리(통과 · 그대로 보내기를 가른다) */
+function passedHead(ctx: AgencyNotifyContext): string[] {
+  return ctx.overridden
+    ? [`${HEAD} 스팸 검사에 걸린 문안을 담당자 선택대로 그대로 보내기로 했습니다.`, '걸린 통신사를 쓰시는 분께는 문자가 닿지 않을 수 있습니다.']
+    : [`${HEAD} 스팸 검사를 통과했습니다.`];
+}
 
 function compose(lines: string[]): string {
   return sanitizeSmsText(lines.filter(Boolean).join('\n')).trim();
@@ -65,7 +77,7 @@ export function shortLabel(input: string, max = 20): string {
 export function buildPassedNotify(ctx: AgencyNotifyContext): string {
   if (ctx.originalWhenText) {
     return compose([
-      `${HEAD} 스팸 검사를 통과했습니다.`,
+      ...passedHead(ctx),
       `건: ${shortLabel(ctx.label)}`,
       ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
       `요청하신 ${ctx.originalWhenText}은 준비 시간이 촉박해 ${ctx.whenText}로 잡았습니다.`,
@@ -80,7 +92,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     ]);
   }
   return compose([
-    `${HEAD} 스팸 검사를 통과했습니다.`,
+    ...passedHead(ctx),
     `건: ${shortLabel(ctx.label)}`,
     ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
@@ -103,7 +115,9 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
  */
 export function buildTooTightNotify(ctx: AgencyNotifyContext): string {
   return compose([
-    `${HEAD} 문안은 검사를 통과했지만 요청하신 시각까지 준비 시간이 모자랍니다.`,
+    ctx.overridden
+      ? `${HEAD} 그대로 보내기로 하신 문안을 요청하신 시각까지 준비하기에 시간이 모자랍니다.`
+      : `${HEAD} 문안은 검사를 통과했지만 요청하신 시각까지 준비 시간이 모자랍니다.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.whenText ? `요청 시각: ${ctx.whenText}` : '',
     '로그인하여 보낼 시각을 다시 정해 주세요. 시각을 정하시면 그대로 이어서 진행됩니다.',
@@ -209,14 +223,15 @@ export function buildTestFailedNotify(ctx: AgencyNotifyContext & {
       `${HEAD} 문안이 ${names} 스팸 검사에 걸렸습니다.`,
       `건: ${shortLabel(ctx.label)}`,
       `글 속 주소를 빼니 ${names}에 도착했습니다. 주소를 바꿔 주세요.`,
-      `로그인: ${login}`,
+      // ★ 2026-11-24 로그인 화면에서 「그대로 보내기」도 고를 수 있다(설계서 docs/2026-11-24-agency-spam-override-design.md · 문자에 링크 0)
+      `로그인하면 주소를 바꾸거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: ${login}`,
     ]);
   }
   return compose([
     `${HEAD} 문안이 스팸 검사에 걸렸습니다${names ? `(${names})` : ''}.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.resultLine || '',
-    `로그인하여 문안을 고쳐 주세요: ${login}`,
+    `로그인하면 문안을 고치거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: ${login}`,
   ]);
 }
 

@@ -25,9 +25,10 @@ import { SMS_MAX_BYTES } from '../utils/message-byte';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { senderAuthRejection } from '../utils/sender-auth';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
-import { editAgencyContentTx, rescheduleAgencyRequestTx } from '../utils/agency-send-change';
+import { editAgencyContentTx, rescheduleAgencyRequestTx, overrideSpamBlockTx } from '../utils/agency-send-change';
+import { spamOverrideOf } from '../utils/agency-send-actions';   // ★ 2026-11-24 상세 응답의 그대로 보내기 판정
 import { approvalDeadline } from '../utils/agency-send-state';
-import { sendAgencyApprovalRequest } from '../utils/agency-send-worker';
+import { sendAgencyApprovalRequest, isSpamOverriddenVersion } from '../utils/agency-send-worker';
 // ★2026-09-25 맞춤법 검사(설계 docs/2026-09-25-agency-spell-check-design.md · 자동 교정 0 · 결과는 문안 버전에 묶인다)
 import { checkAgencySpelling, readAgencySpell } from '../utils/agency-send-spell';
 import { takeSpellMinuteSlot } from '../utils/spell-check-quota';
@@ -161,6 +162,10 @@ function toPublic(row: any) {
      * ⛔ 같은 날 판정을 화면에서 다시 계산하지 않는다 — 판정이 둘이 되면 화면과 워커가 갈린다.
      */
     finalTestRequired: !row.final_test_at,
+    // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 판정(서버 한 곳 · 화면은 이 값으로 단추 · 불가 사유를 그린다 · text = 그대로 보낼 글)
+    spamOverride: (() => { const o = spamOverrideOf(row); return { ok: o.ok, reason: o.reason, text: o.ok ? o.text : null, retime: o.retime }; })(),
+    // ★ 2026-11-24 지금 문안 버전 = 그대로 보내기를 고른 글(단건 응답에만 · 화면이 「통과」라고 쓰지 않는다 · Codex 구현 1R #4)
+    ...(row.spam_overridden !== undefined ? { spamOverridden: row.spam_overridden === null ? null : !!row.spam_overridden } : {}),
     reapprovalCount: row.reapproval_count,
     queuedAt: row.queued_at,
     campaignId: row.campaign_id,
@@ -183,7 +188,9 @@ function withCallbackKinds(row: any, kinds: AgencyCallbackKinds | undefined): an
 
 /** 단건 응답: 회신번호 종류를 조회해 싣고 공개형으로 바꾼다(조회 실패는 CT가 흡수 · 대표 번호 표시) */
 async function toPublicWithKinds(row: any) {
-  return toPublic(withCallbackKinds(row, (await loadAgencyCallbackKinds([row])).get(row.id)));
+  // 커밋 뒤 응답 = 조회 실패를 실패로 돌리지 않는다(null = 확인 못 함 · 화면은 「통과」도 「그대로 보내기」도 쓰지 않는다 · Codex 구현 2R #4)
+  const spamOverridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version)).catch(() => null);
+  return toPublic(withCallbackKinds({ ...row, spam_overridden: spamOverridden }, (await loadAgencyCallbackKinds([row])).get(row.id)));
 }
 
 // ════════════════════════════════════════════════════════════
@@ -745,6 +752,33 @@ router.post('/:id/content', async (req: Request, res: Response) => {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 문안 수정 실패:', err);
     return res.status(500).json({ success: false, error: '문안을 고치지 못했습니다.' });
+  }
+});
+
+// ════════════════════════════════════════════════════════════
+// POST /api/agency-send/:id/spam-override — 통신사 스팸 막힘 「그대로 보내기」(★ 2026-11-24 · 설계서 docs/2026-11-24-agency-spam-override-design.md)
+//   승인 대기로 돌리고 테스트 문자 · 승인 요청을 다시 보낸다(승인 없는 발송 0 그대로 · 일반 사용자는 본인 접수만)
+// ════════════════════════════════════════════════════════════
+router.post('/:id/spam-override', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  try {
+    const out = await overrideSpamBlockTx({
+      requestId: req.params.id, companyId: auth.companyId, ownerUserId: ownerParam(auth), revision: req.body?.revision, actorUserId: auth.userId,
+      req: { ip: req.ip, headers: req.headers },
+    });
+    if (!out.ok) {
+      // 발신 인증(3.5) = 승인과 같은 몸통(화면 인증 창 · 통과하면 이 요청을 다시 보낸다)
+      if ('senderAuth' in out) return res.status(403).json(senderAuthRejection(out.senderAuth));
+      return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });
+    }
+    // 테스트 문자 · 승인 링크 = 방금 커밋한 버전에만(그 사이 바뀌면 보내지 않는다 · Codex 구현 1R #3)
+    void sendAgencyApprovalRequest(String(out.row.id), { withTest: true, version: Number(out.row.content_version) });
+    return res.json({ success: true, request: await toPublicWithKinds(out.row) });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return migrationPending(res);
+    console.error('[agency-send] 그대로 보내기 실패:', err);
+    return res.status(500).json({ success: false, error: '그대로 보내기를 처리하지 못했습니다.' });
   }
 });
 

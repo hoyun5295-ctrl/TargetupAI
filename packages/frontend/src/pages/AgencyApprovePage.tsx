@@ -47,6 +47,10 @@ interface ApprovalView {
   spellIssues?: SpellIssueView[] | null;
   /** ★2026-10-18 이 링크로 할 수 있는 조작(서버 판정 한 벌) · 화면은 lockLinkActions 로 지금 시각 잠금만 덧씌운다 */
   actions?: AgencyLinkActions;
+  /** ★ 2026-11-24 지금 문안 = 담당자가 스팸 검사 결과와 관계없이 그대로 보내기를 고른 글(서버 판정 · null = 확인 못 함 · 통과로 쓰지 않는다) */
+  spamOverridden?: boolean | null;
+  /** ★ 2026-11-24 발송일 당일 검사를 이미 마쳤는가(마지막 검사 중 · 예약 준비 중을 가른다) */
+  finalTested?: boolean;
 }
 
 type Sheet = 'approve' | 'cancel' | 'reschedule' | 'resume' | 'spell' | null;
@@ -211,7 +215,7 @@ export default function AgencyApprovePage() {
   const a = lockLinkActions(r.actions, r.requestedAt, nowMs);
   const doneByStatus = r.status === 'approved' || r.status === 'final_testing' || r.status === 'queued';
   // ★ 2026-10-20 승인된 건의 카드 = 상태대로(막 승인 · 승인과 함께 예약됨 · 15분 잠금으로 못 바꿈)
-  const card = linkApprovedCard({ justApproved: state.kind === 'done', status: r.status, when: formatWhen(r.requestedAt), cancel: a?.cancel });
+  const card = linkApprovedCard({ justApproved: state.kind === 'done', status: r.status, when: formatWhen(r.requestedAt), cancel: a?.cancel, overridden: r.spamOverridden === true, finalTested: r.finalTested === true });
   const fixable = (r.spellIssues || []).filter((i) => !i.blocked);
   const ready = state.kind === 'ready';
 
@@ -348,6 +352,7 @@ export default function AgencyApprovePage() {
       {/* ── 확인 창(Harold ① · 버튼마다 한 번 더 · 위험 동작 자동 포커스 끔) ── */}
       <LinkConfirmSheet open={sheet === 'approve'} title="이 문안 그대로 승인할까요?" rows={summaryRows} tone="primary" busy={working}
         notes={[
+          ...(r.spamOverridden === true ? [{ tone: 'warn' as const, text: '이 문안은 스팸 검사에 걸렸지만 담당자가 그대로 보내기로 했어요. 걸린 통신사를 쓰시는 분께는 닿지 않을 수 있어요.' }] : []),
           { tone: 'info', text: '승인하면 정해진 시각에 그대로 나갑니다. 보내기 전까지 이 화면에서 취소할 수 있어요.' },
         ]}
         confirmLabel={`승인하기 · ${r.recipientCount.toLocaleString()}명`} onConfirm={() => { void approve(); }} onCancel={() => setSheet(null)} />
@@ -360,7 +365,7 @@ export default function AgencyApprovePage() {
       <LinkConfirmSheet open={sheet === 'reschedule'} title="보낼 시각을 바꿀까요?" tone="primary" busy={working}
         rows={[{ label: '지금 시각', value: formatWhen(r.requestedAt) }, { label: '받는 사람', value: `${r.recipientCount.toLocaleString()}명` }]}
         notes={[
-          { tone: 'info', text: r.status === 'test_failed' ? '처음부터 다시 검사한 뒤 테스트 문자와 승인 요청을 보내 드려요.' : '검사를 통과한 문안 그대로 승인 대기로 돌아가고, 새 승인 요청 문자를 보내 드려요.' },
+          { tone: 'info', text: r.status === 'test_failed' ? '처음부터 다시 검사한 뒤 테스트 문자와 승인 요청을 보내 드려요.' : r.spamOverridden === true ? '그대로 보내기로 한 문안 그대로 승인 대기로 돌아가고, 새 승인 요청 문자를 보내 드려요.' : r.spamOverridden === false ? '검사를 통과한 문안 그대로 승인 대기로 돌아가고, 새 승인 요청 문자를 보내 드려요.' : '지금 문안 그대로 승인 대기로 돌아가고, 새 승인 요청 문자를 보내 드려요.' },
           { tone: 'info', text: '담당자 모두에게 바뀐 시각을 알려 드려요.' },
         ]}
         confirmLabel="이 시각으로 바꾸기" onConfirm={() => { if (when) void runAction('reschedule', { requestedAt: new Date(when).toISOString() }); }} onCancel={() => setSheet(null)}>

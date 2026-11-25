@@ -92,6 +92,10 @@ const EVENT_LABEL: Record<string, string> = {
   // ★ 2026-11-24 막힌 부분 짚어 보기(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-2 M4 · 서버 agency-send-worker 와 같은 커밋 · 문장은 아래가 붙인다)
   spam_hint: '막혔을 수 있는 부분을 짚어 두었습니다',
   spam_result_mail: '검사 결과를 메일로 알렸습니다',
+  // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」(설계서 docs/2026-11-24-agency-spam-override-design.md · 서버 agency-send-change · worker 와 같은 커밋)
+  spam_override: '스팸 검사 결과와 관계없이 그대로 보내기로 했습니다',
+  spam_override_final: '발송 직전 검사에 걸렸지만 담당자 선택대로 진행합니다',
+  approval_request_skipped: '그 사이 내용이 바뀌어 이전 승인 요청 문자는 보내지 않았습니다',
 };
 
 /** 줄 목록(서버가 남긴 위치 문장 · 글자 자체는 들어 있지 않다) */

@@ -35,11 +35,14 @@
     <!-- Font -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" />
 
-    <!-- 소스 보호: 우클릭/개발자도구/텍스트선택 차단 (sys.hanjullo.com 제외) -->
+    <!-- 소스 보호: 우클릭 · 개발자도구 단축키 차단 · 글자 선택은 막지 않는다(★2026-11-24 뿌리 R107 · 설계서 docs/2026-11-24-copy-selection-root-design.md) -->
     <script>
       (function() {
-        // 우클릭 차단
-        document.addEventListener('contextmenu', function(e) { e.preventDefault(); });
+        // 우클릭 차단 — 슈퍼관리자로 로그인한 탭만 연다(<html data-ctx-menu="open"> · 다는 곳 = src/utils/text-select.ts bindAdminContextMenu)
+        document.addEventListener('contextmenu', function(e) {
+          if (document.documentElement.getAttribute('data-ctx-menu') === 'open') return;
+          e.preventDefault();
+        });
 
         // 키보드 단축키 차단
         document.addEventListener('keydown', function(e) {
@@ -56,22 +59,6 @@
         });
       })();
     </script>
-    <style>
-      /* 텍스트 드래그 선택 차단 (sys.hanjullo.com에서는 JS로 제거) */
-      body {
-        -webkit-user-select: none;
-        -moz-user-select: none;
-        -ms-user-select: none;
-        user-select: none;
-      }
-      /* input, textarea는 선택 허용 */
-      input, textarea, [contenteditable="true"] {
-        -webkit-user-select: text;
-        -moz-user-select: text;
-        -ms-user-select: text;
-        user-select: text;
-      }
-    </style>
       </head>
   <body>
     <div id="root"></div>

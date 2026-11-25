@@ -35,6 +35,7 @@ import {
 import type { DocumentInfo, ManagerDocInfo } from '../utils/sender-registration';
 import { startSenderOwnerVerification, completeSenderOwnerVerification, isOwnerVerificationId } from '../utils/sender-owner-verify';   // ★ 2026-11-20 C148 T3
 import { normalizePhone } from '../utils/normalize-phone';
+import { isBitoCompany } from '../utils/bito-sender-sync';   // ★ 2026-11-24 B-1124-3 비토엔진 업체 = 승인 창 · 완료 안내 한 줄
 
 const router = Router();
 
@@ -378,7 +379,9 @@ router.get('/admin/:id', authenticate, requireSuperAdmin, async (req: Request, r
     if (!registration) {
       return res.status(404).json({ error: '신청을 찾을 수 없습니다.' });
     }
-    res.json({ success: true, registration });
+    // ★ 2026-11-24 B-1124-3 비토엔진 업체면 승인 창에 「비토 허용번호에도 등록됩니다」(판정 실패 = 문장 없음 · 상세는 막지 않는다)
+    const bitoEngine = await isBitoCompany(registration.company_id).catch(() => false);
+    res.json({ success: true, registration: { ...registration, bitoEngine } });
   } catch (error: any) {
     console.error('신청 상세 조회 실패:', error);
     res.status(500).json({ error: '조회 실패' });
@@ -402,6 +405,8 @@ router.post('/admin/:id/approve', authenticate, requireSuperAdmin, async (req: R
       message: '발신번호가 승인되어 등록되었습니다.',
       registration: result.registration,
       callbackNumber: result.callbackNumber,
+      // ★ 2026-11-24 B-1124-3 비토엔진 업체 = 2분 안에 비토 허용번호에도 들어간다(비토 동기화가 당겨 감 · 판정 실패 = false)
+      bitoEngine: await isBitoCompany(result.registration?.company_id).catch(() => false),
     });
   } catch (error: any) {
     console.error('승인 처리 실패:', error);

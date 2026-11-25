@@ -85,6 +85,7 @@ import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
 import smsTemplatesRoutes from './routes/sms-templates';
 import internalAlertRoutes from './routes/internal-alert'; // ★ D145 (2026-05-07): 시스템 알림 SMS (localhost 전용)
+import bitoSyncRoutes from './routes/bito-sync'; // ★ 2026-11-24 B-1124-3 비토엔진 발신번호 거울 입구(토큰 + 출발지 · ENV 없으면 503)
 import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
 import sendChecksRoutes from './routes/send-checks'; // ★ 2026-09-25 직접발송 보내기 전 점검(맞춤법 월 5회 · 스팸 체험 현황)
@@ -552,6 +553,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
 app.use('/api/internal', internalAlertRoutes); // ★ D145: localhost 전용 시스템 알림
+app.use('/api/bito-sync', bitoSyncRoutes); // ★ 2026-11-24 B-1124-3 비토 동기화 작업자 전용
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);
 app.use('/api/saved-segments', savedSegmentsRoutes);

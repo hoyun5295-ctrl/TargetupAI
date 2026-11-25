@@ -145,14 +145,13 @@ export default function TemplatesTab(props: TemplatesTabProps) {
                           {t.template_code && (
                             <div
                               className="text-xs text-gray-400 hover:text-blue-600 cursor-pointer inline-block"
-                              style={{ userSelect: 'text' }}
                               title="클릭하면 복사"
                               onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(t.template_code); showAlert('복사 완료', '템플릿코드를 복사했습니다.', 'success'); }}
                             >{t.template_code}</div>
                           )}
                           {/* ★ 2026-07-22(접수2): 고객사 지정 관리코드 표시 + 검색 대상 */}
                           {t.custom_template_code && (
-                            <div className="text-[11px] text-gray-400" style={{ userSelect: 'text' }}>관리코드: {t.custom_template_code}</div>
+                            <div className="text-[11px] text-gray-400">관리코드: {t.custom_template_code}</div>
                           )}
                         </td>
                         <td className="px-4 py-2 text-gray-600">{t.category || '-'}</td>

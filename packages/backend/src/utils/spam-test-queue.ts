@@ -178,6 +178,11 @@ export interface AutoSpamTestResult {
   totalRegenerateCount: number;
   /** ★ 2026-11-02 엔진 재설계 E3-6 — 안마다 마지막으로 건 검사 id(기다림이 끝난 뒤 결과를 다시 읽는다 · 이어 보기면 그 검사) */
   testIds?: Record<string, string>;
+  /**
+   * ★ 2026-11-24 안마다 마지막 검사 행이 만들어진 시각(ISO · 큐가 이어 본 검사면 그 검사의 시각 · 완료 대기가 이미 읽는 행에서 함께 받는다 = 따로 읽기 0).
+   *   대행 「그대로 보내기」 당일 근거(Codex 구현 1R ~ 8R 같은 뿌리의 구조 답) · 덧붙인 칸 = 다른 소비처 무변경.
+   */
+  testCreatedAt?: Record<string, string>;
 }
 
 // ============================================================
@@ -1557,15 +1562,17 @@ export async function getSpamTestBatchResults(batchId: string): Promise<SpamTest
 // ============================================================
 // [5] 테스트 완료 대기 (Promise 기반)
 // ============================================================
-async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUTS.spamFilterSafety): Promise<string> {
+async function waitForTestCompletion(testId: string, timeoutMs: number = TIMEOUTS.spamFilterSafety, seen?: { createdAt?: Date }): Promise<string> {
   const startTime = Date.now();
   return new Promise((resolve) => {
     const checkInterval = setInterval(async () => {
       try {
         const test = await query(
-          `SELECT status FROM spam_filter_tests WHERE id = $1`,
+          `SELECT status, created_at FROM spam_filter_tests WHERE id = $1`,
           [testId]
         );
+        // ★ 2026-11-24 검사 행 시각 = 같은 읽기에서 함께(부르는 쪽이 따로 읽지 않는다)
+        if (seen && test.rows[0]?.created_at) seen.createdAt = new Date(test.rows[0].created_at);
         if (test.rows[0]?.status === 'completed') {
           clearInterval(checkInterval);
 
@@ -1908,6 +1915,7 @@ export async function autoSpamTestWithRegenerate(params: {
   let totalTestCount = 0;
   let totalRegenerateCount = 0;
   const testIds: Record<string, string> = {};
+  const testCreatedAt: Record<string, string> = {};
 
   // 한 문안을 한 번 검사한다(광고 표기 · 큐 등록 · 완료 대기 · 통신사별 결과). 큐 등록 실패 = enqueued false.
   const runOneTest = async (variantId: string, message: string, subj?: string): Promise<{
@@ -1955,7 +1963,9 @@ export async function autoSpamTestWithRegenerate(params: {
     testIds[variantId] = enqueueResult.testId!;
 
     // 테스트 완료 대기
-    const verdict = await waitForTestCompletion(enqueueResult.testId!);
+    const seen: { createdAt?: Date } = {};
+    const verdict = await waitForTestCompletion(enqueueResult.testId!, undefined, seen);
+    if (seen.createdAt && Number.isFinite(seen.createdAt.getTime())) testCreatedAt[variantId] = seen.createdAt.toISOString();
 
     // 결과 조회
     const results = await query(
@@ -2002,6 +2012,7 @@ export async function autoSpamTestWithRegenerate(params: {
       totalRegenerateCount: seq.regenerateCount,
       passedVariantId: seq.passedVariantId,
       testIds,
+      testCreatedAt,
     };
   }
 
@@ -2017,6 +2028,7 @@ export async function autoSpamTestWithRegenerate(params: {
     totalTestCount,
     totalRegenerateCount,
     testIds,
+    testCreatedAt,
   };
 }
 

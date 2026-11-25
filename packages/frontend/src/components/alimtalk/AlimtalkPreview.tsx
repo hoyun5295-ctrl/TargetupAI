@@ -25,7 +25,7 @@ interface Props {
   profileName?: string;
 }
 
-// ★ D188 (2026-05-21) 영업팀장 신고 #7-(3): 카카오 말풍선 미리보기 영역 복사 가능 정합 — wrapper의 select-none 차단 사고 영구 종결 (select-text 변경).
+// ★ D188 (2026-05-21) 영업팀장 신고 #7-(3): 카카오 말풍선 미리보기 영역 복사 가능 정합 — wrapper의 select-none 차단 제거(★2026-11-24 R107 = 글자 선택은 전역 기본 · 자리별 풀기 0).
 export default function AlimtalkPreview({
   messageType,
   emphasizeType,
@@ -55,7 +55,7 @@ export default function AlimtalkPreview({
     : null;
 
   return (
-    <div className="bg-gradient-to-b from-amber-50 to-amber-100/70 rounded-2xl p-4 max-w-sm mx-auto select-text">
+    <div className="bg-gradient-to-b from-amber-50 to-amber-100/70 rounded-2xl p-4 max-w-sm mx-auto">
       <p className="text-xs text-gray-500 mb-2">
         {profileName ? `@${profileName}` : '카카오톡 미리보기'}
       </p>

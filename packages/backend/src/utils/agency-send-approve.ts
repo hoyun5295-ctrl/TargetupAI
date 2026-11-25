@@ -33,6 +33,24 @@ import { agencyManagerPhones } from './agency-send-link';
 import { loadRequestRowCallbacks } from './agency-send-intake';
 import { checkSenderAuthGate, isSenderAuthEnforced, SENDER_AUTH_NOTICE, type SenderAuthGate } from './sender-auth';
 
+/**
+ * 대행 접수의 발신 인증(3.5) 관문 — 잠금을 쥐기 전에 부른다(인증번호 문자 = 외부 호출) · 스위치가 꺼져 있으면 DB 를 건드리지 않고 통과한다.
+ *   승인(발송 결정)과 「그대로 보내기」(막힌 글을 보내기로 정함 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3)가 같은 관문을 지난다.
+ */
+export async function agencySenderAuthGate(row: any, userId: string, req: { ip?: string; headers?: any } | undefined): Promise<SenderAuthGate> {
+  const useIndividualCallback = isSenderAuthEnforced()
+    ? (await loadRequestRowCallbacks(String(row.id))).length > 0
+    : false;
+  return checkSenderAuthGate({
+    req: req || {},
+    userId,
+    companyId: String(row.company_id),
+    callback: row.callback_number,
+    useIndividualCallback,
+    recipientCount: Number(row.recipient_count || 0),
+  });
+}
+
 export type ApproveVia = 'screen' | 'link';
 
 export type ApproveOutcome =
@@ -116,17 +134,7 @@ export async function approveAgencyRequestTx(opts: {
 
   // ④ 발신 인증(3.5) — 잠금을 쥐기 전에. 스위치가 꺼져 있으면 게이트는 DB 를 건드리지 않고 통과한다.
   if (approverUserId) {
-    const useIndividualCallback = isSenderAuthEnforced()
-      ? (await loadRequestRowCallbacks(String(preRow.id))).length > 0
-      : false;
-    const gate = await checkSenderAuthGate({
-      req: opts.req || {},
-      userId: approverUserId,
-      companyId: String(preRow.company_id),
-      callback: preRow.callback_number,
-      useIndividualCallback,
-      recipientCount: Number(preRow.recipient_count || 0),
-    });
+    const gate = await agencySenderAuthGate(preRow, approverUserId, opts.req);
     if (!gate.ok) return { ok: false, status: 403, error: SENDER_AUTH_NOTICE, code: 'SENDER_AUTH_REQUIRED', senderAuth: gate };
   }
 

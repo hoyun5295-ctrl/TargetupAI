@@ -28,7 +28,7 @@ import {
 import {
   agencyCallbackLabel, applyAgencySpellToDraft, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
   isApprovable, isCancelable, isEditableStatus, isInSendChangeLock, rescheduleAgencyRequest, SEND_CHANGE_LOCK_REASON, SOURCE_LABEL, STATUS_LABEL,
-  STATUS_TONE, toLocalInput, updateAgencyContent, measureAgencySmsBytes, type AgencyPreviewSample, type AgencySendEvent,
+  STATUS_TONE, toLocalInput, updateAgencyContent, measureAgencySmsBytes, overrideAgencySpamBlock, type AgencyPreviewSample, type AgencySendEvent,
   type AgencySendRequest,
 } from './agency-send-api';
 
@@ -207,6 +207,21 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     } finally { setBusy(false); }
   };
 
+  // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 — 승인 대기로 돌아가고 테스트 문자 · 승인 요청을 다시 받는다(설계서 docs/2026-11-24-agency-spam-override-design.md)
+  const doSpamOverride = async () => {
+    if (!req || busy) return;
+    setBusy(true);
+    try {
+      apply(await overrideAgencySpamBlock(req.id, req.revision));
+      toast.success('테스트 문자와 승인 요청을 다시 보내 드렸어요. 확인하고 승인해 주세요.');
+    } catch (e: any) {
+      // 발신 인증(3.5) = 승인과 같은 인증 창 · 통과하면 이 요청을 다시 보낸다(서버가 막으면 상태 변경 · 문자 0)
+      if (senderAuth.handleResponse(e?.data, () => { void doSpamOverride(); })) return;
+      toast.error(e?.message || '그대로 보내기를 처리하지 못했습니다.');
+      await refresh();
+    } finally { setBusy(false); }
+  };
+
   const doCancel = async () => {
     if (!req || busy) return;
     setBusy(true);
@@ -275,8 +290,10 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                   <Check className={CUI_INFO_ICON} size={16} strokeWidth={2} />
                   <p className={CUI_INFO_TEXT}>
                     담당자 번호로 보내 드린 문자를 확인하셨나요? 아래 문안 그대로 나갑니다.
-                    {!req.finalTestRequired
-                      ? ' 검사는 이미 통과했으니 승인하시면 요청한 시각에 예약됩니다.'
+                    {req.spamOverridden === true
+                      ? ` 스팸 검사에 걸린 문안을 그대로 보내기로 하셨어요. 걸린 통신사를 쓰시는 분께는 닿지 않을 수 있어요.${req.finalTestRequired ? ' 발송 두 시간 전에 한 번 더 검사하지만 스팸 판정과 관계없이 발송 준비를 이어 갑니다.' : ''}`
+                      : !req.finalTestRequired
+                      ? (req.spamOverridden === false ? ' 검사는 이미 통과했으니 승인하시면 요청한 시각에 예약됩니다.' : ' 승인하시면 요청한 시각에 예약됩니다.')
                       : ' 승인하면 요청한 시각에 예약됩니다. 발송일이 오늘이 아니라서 발송 두 시간 전에 한 번 더 검사합니다.'}
                   </p>
                 </div>
@@ -285,9 +302,23 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
               {req.status === 'test_failed' && (
                 <div className={CUI_DANGER_BOX}>
                   <AlertTriangle className={CUI_DANGER_ICON} size={16} strokeWidth={2} />
-                  <p className={CUI_DANGER_TEXT}>
-                    문안이 스팸 검사를 통과하지 못했습니다. 아래에서 문안을 고치면 검사를 다시 시작합니다.
-                  </p>
+                  <div className="min-w-0">
+                    <p className={CUI_DANGER_TEXT}>
+                      문안이 스팸 검사를 통과하지 못했습니다. 아래에서 문안을 고치면 검사를 다시 시작합니다.
+                    </p>
+                    {/* ★ 2026-11-24 통신사 막힘이면 검사 결과와 관계없이 그대로 보낼 수 있다(판정 = 서버 spamOverride · 승인은 그대로 거친다) */}
+                    {req.spamOverride?.ok && req.spamOverride.text ? (
+                      <button type="button" disabled={busy} className={`${CUI_BTN_GHOST} mt-2`}
+                        onClick={() => setConfirm({
+                          mode: 'warning', title: '검사 결과와 관계없이 이 글 그대로 보낼까요?',
+                          description: `스팸 검사에 걸린 통신사를 쓰는 분께는 문자가 닿지 않을 수 있어요.\n고르면 아래 글로 테스트 문자와 승인 요청을 다시 보내 드리고, 승인해야 예약돼요.\n\n${req.spamOverride!.text}`,
+                          confirmLabel: '그대로 보내기', cancelLabel: '닫기',
+                          onConfirm: () => { setConfirm(null); void doSpamOverride(); },
+                        })}>검사 결과와 관계없이 이 글 그대로 보내기</button>
+                    ) : req.spamOverride?.retime && req.spamOverride.reason ? (
+                      <p className={`${CUI_DANGER_TEXT} mt-1`}>{req.spamOverride.reason}</p>
+                    ) : null}
+                  </div>
                 </div>
               )}
 
@@ -402,7 +433,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                   </button>
                   <p className={CUI_HINT}>
                     실제 발송과 같은 치환으로 만든 문장을 사람마다 확인할 수 있습니다.
-                    {req.finalTestRequired ? ' 예약은 발송 두 시간 전 검사를 통과한 뒤 걸립니다.' : ''}
+                    {req.finalTestRequired && req.spamOverridden === false ? ' 예약은 발송 두 시간 전 검사를 통과한 뒤 걸립니다.' : ''}
                   </p>
                 </div>
               )}

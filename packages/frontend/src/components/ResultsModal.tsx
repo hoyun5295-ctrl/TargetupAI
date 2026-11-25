@@ -1436,10 +1436,10 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                             <MessageSquare className="w-3.5 h-3.5 text-[#3C1E1E]" strokeWidth={2.2} />
                             <span className="text-[12px] font-bold text-[#3C1E1E]">알림톡</span>
                           </div>
-                          <div className="flex-1 overflow-y-auto p-3 select-text">
+                          <div className="flex-1 overflow-y-auto p-3">
                             <div className="bg-white rounded-xl overflow-hidden shadow-sm max-w-[92%] border border-black/5">
                               <div className="bg-[#FEE500] px-3 py-2 text-[12px] font-bold text-[#3C1E1E]">알림톡 도착</div>
-                              <div className="p-3 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-neutral-700 select-text cursor-text">{content}</div>
+                              <div className="p-3 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-neutral-700 cursor-text">{content}</div>
                               <div className="border-t border-neutral-100 px-3 py-2 text-center text-[11px] text-neutral-500 bg-neutral-50">채널 추가</div>
                             </div>
                           </div>
@@ -1478,11 +1478,11 @@ export default function ResultsModal({ onClose, token, customerDbEnabled, onFeat
                           <span className="text-[11px] text-neutral-400 font-medium">문자메시지</span>
                           <span className="text-[11px] font-bold text-indigo-600">{typeLabel}</span>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-indigo-50/40 to-white select-text">
+                        <div className="flex-1 overflow-y-auto p-3 bg-gradient-to-b from-indigo-50/40 to-white">
                           {/* ★ D131: 첫 화면(폰프레임)과 동일 구조 — 이미지는 본문 아래, size=sm (일관성) */}
                           <div className="flex gap-2">
                             <div className="w-7 h-7 rounded-full bg-indigo-100 grid place-items-center shrink-0 text-indigo-600"><Smartphone className="w-3.5 h-3.5" strokeWidth={2} /></div>
-                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-neutral-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-neutral-700 max-w-[95%] select-text cursor-text">
+                            <div className="bg-white rounded-2xl rounded-tl-sm p-3 shadow-sm border border-neutral-100 text-[12px] leading-[1.6] whitespace-pre-wrap break-all text-neutral-700 max-w-[95%] cursor-text">
                               {/* ★ 2026-11-16 C139 — 받은 제목(접수 cmwilrt0m1 · 상세 미리보기 CampaignDetailModal 과 같은 모양) · 빈 값 = 줄 없음 */}
                               {subject && (
                                 <div className="font-bold text-neutral-900 mb-1 pb-1 border-b border-neutral-200">{subject}</div>

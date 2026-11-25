@@ -23,7 +23,10 @@ import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from './age
 import type { SpellIssue } from './spell-check';
 import { agencySmsBytesOver, agencySmsBytesOverText } from './agency-send-preview';   // ★ 2026-11-17 C142 SMS 길이(뿌리 R68 길이 축)
 import { diagHoldOf } from './agency-spam-diag';
+import { spamOverrideOf } from './agency-send-actions';   // ★ 2026-11-24 그대로 보내기 판정(순수 · 화면 actions 와 같은 함수)
 import { closeDiagnosis } from './spam-diag';   // ★ 2026-11-24 문안 수정 = 옛 문안 진단 닫기(설계서 §6-2-2)
+import { agencySenderAuthGate } from './agency-send-approve';   // ★ 2026-11-24 그대로 보내기 = 승인과 같은 발신 인증 관문
+import { SENDER_AUTH_NOTICE, type SenderAuthGate } from './sender-auth';
 
 export type AgencyChangeResult =
   | { ok: true; row: any; backTo?: AgencySendStatus; timeShifted?: boolean; notice?: string[]; optOutNotice?: string[] }
@@ -346,4 +349,94 @@ export async function rescheduleAgencyRequestTx(input: {
   // 0행 응답의 지금 행은 연결을 돌려준 **뒤에** 읽는다(★ Codex D 2R · 쥔 채 풀에서 또 꺼내면 동시 재진행이 풀을 말린다)
   if (stale) return staleFail(input.requestId, input.companyId);
   return { ok: true, row: saved, backTo, ...(when.shifted ? { timeShifted: true } : {}) };
+}
+
+/**
+ * ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」(로그인 화면 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3).
+ *   한 트랜잭션: 행 잠금 → 수정 번호 → 잠근 행으로 판정 다시(spamOverrideOf) → 시도 키 → 보낼 글 · 문안 버전 +1(글이 같아도 = 옛 승인 링크 무효) ·
+ *   「당일 검사 끝」 · 승인 대기 · 표식 삭제 → 사건 spam_override(새 버전). 커밋 뒤 테스트 문자 · 승인 요청은 부르는 쪽(라우트)이 보낸다.
+ *   ⛔ 승인 없는 발송 0 그대로(여기는 승인 대기로 돌릴 뿐) · 발신 인증(3.5) = 승인과 같은 관문을 잠금 앞에서(설계 §3 · Codex 구현 1R #1 ·
+ *   막히면 상태 변경 · 테스트 문자 0 · 403 몸통 = 라우트가 senderAuthRejection 으로).
+ */
+export async function overrideSpamBlockTx(input: {
+  requestId: string;
+  companyId: string;
+  ownerUserId: string | null;
+  revision: unknown;
+  actorUserId: string;
+  req?: { ip?: string; headers?: any };
+  now?: Date;
+}): Promise<AgencyChangeResult | { ok: false; status: 403; error: string; code: 'SENDER_AUTH_REQUIRED'; senderAuth: Extract<SenderAuthGate, { ok: false }> }> {
+  const r = await query(
+    `SELECT * FROM agency_send_requests
+      WHERE id = $1::uuid AND company_id = $2::uuid AND ($3::uuid IS NULL OR created_by = $3::uuid)`,
+    [input.requestId, input.companyId, input.ownerUserId],
+  );
+  if (r.rows.length === 0) return fail(404, '접수를 찾을 수 없습니다.');
+  const row = r.rows[0];
+  const observedRevision = Number(input.revision);
+  if (input.revision === undefined || input.revision === null || !Number.isFinite(observedRevision)) return fail(400, '화면을 새로 고친 뒤 다시 시도해 주세요.', 'REVISION_REQUIRED');
+  // 이미 어긋난 화면 = 인증번호 앞에서 409(인증을 마치고 409 를 보는 길 0 · Codex 구현 2R #1)
+  if (Number(row.revision) !== observedRevision) return fail(409, '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.', 'STATE_CHANGED', row);
+  const pre = spamOverrideOf(row, input.now ?? new Date());
+  if (!pre.ok) return fail(400, pre.reason || '지금은 그대로 보낼 수 없어요.', 'SPAM_OVERRIDE_UNAVAILABLE', row);
+  const dispatched = alreadyDispatched(row.campaign_id);
+  if (dispatched) return dispatched;
+  // ★ C142 SMS 길이(뿌리 R68 · 문안을 쓰는 모든 자리) — 보낼 글을 명단 전원으로 다시 잰다(문안 수정과 같은 판정 · 넘으면 쓰기 0)
+  const overBytes = await agencySmsBytesOver(row, String(pre.text || ''));
+  if (overBytes !== null) return fail(400, agencySmsBytesOverText(overBytes), 'SMS_BYTES_OVER');
+  // 발신 인증(3.5) — 판정을 지난 건에만 인증번호를 보낸다(문자 비용 · 의미 없는 인증 0) · 잠금 앞(외부 호출)
+  const gate = await agencySenderAuthGate(row, input.actorUserId, input.req);
+  if (!gate.ok) return { ok: false, status: 403, error: SENDER_AUTH_NOTICE, code: 'SENDER_AUTH_REQUIRED', senderAuth: gate };
+  // ⛔ 컬럼 탐지는 차단 판정 앞(판정과 UPDATE 사이 다른 대기 0 · 문안 수정과 같은 규칙)
+  const clearSpell = (await hasAgencySpellColumn()) ? 'spell_check = NULL, ' : '';
+  const askSet = (await hasApprovalRequestedColumn()) ? 'approval_requested_at = NOW(), ' : '';
+  const client = await pool.connect();
+  const q = (text: string, params?: any[]) => client.query(text, params);
+  let saved: any = null;
+  let committed = false;
+  let stale = false;
+  try {
+    await client.query('BEGIN');
+    const lockedRow = (await q(`SELECT * FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE`, [input.requestId, input.companyId])).rows[0];
+    if (!lockedRow || Number(lockedRow.revision) !== observedRevision) {
+      await client.query('ROLLBACK'); committed = true;
+      return fail(409, '그 사이 상태가 바뀌었습니다. 화면을 새로 고치고 다시 시도해 주세요.', 'STATE_CHANGED', lockedRow || undefined);
+    }
+    const offer = spamOverrideOf(lockedRow, input.now ?? new Date());
+    if (!offer.ok || !offer.text) {
+      await client.query('ROLLBACK'); committed = true;
+      return fail(400, offer.reason || '지금은 그대로 보낼 수 없어요.', 'SPAM_OVERRIDE_UNAVAILABLE', lockedRow);
+    }
+    const blocked = alreadyDispatched(await attemptBlocksChange(input.companyId, input.requestId, lockedRow.dispatch_key, q));
+    if (blocked) { await client.query('ROLLBACK'); committed = true; return blocked; }
+    const updated = await q(
+      `UPDATE agency_send_requests
+          SET ${clearSpell}${askSet}current_content = $1, content_version = content_version + 1, status = 'awaiting_approval',
+              last_test_result = last_test_result - 'spamOverridable', final_test_at = $2::timestamptz,
+              approved_at = NULL, approved_by = NULL, approval_version = NULL,
+              dispatch_key = NULL, campaign_id = NULL, expired_at = NULL,
+              lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
+        WHERE id = $3::uuid AND company_id = $4::uuid AND revision = $5 AND status = 'test_failed'
+          AND campaign_id IS NULL
+          AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.staging_id = agency_send_requests.dispatch_key AND c.company_id = agency_send_requests.company_id)${attemptIdleSql(6)}${sendChangeLockFreeSql('agency_send_requests.requested_at', 7)}
+        RETURNING *`,
+      [offer.text, offer.finalTestedAt ? offer.finalTestedAt.toISOString() : null, input.requestId, input.companyId, observedRevision, ATTEMPT_LOCK_PREFIX, SEND_CHANGE_LOCK_MINUTES],
+    );
+    if (updated.rows.length === 0) stale = true;
+    else {
+      saved = updated.rows[0];
+      // 고른 기록 = 상태 변경과 같은 트랜잭션(사건이 못 남으면 선택째 되돌린다 · 2시간 전 재검사가 이 사건의 버전으로 「고른 버전」을 안다)
+      await logEventTx(client, input.requestId, 'spam_override', {
+        version: Number(saved.content_version), fromVersion: Number(lockedRow.content_version),
+        userId: input.actorUserId, via: 'screen', sameDay: !!offer.finalTestedAt,
+      });
+    }
+    await client.query(stale ? 'ROLLBACK' : 'COMMIT'); committed = true;
+  } finally {
+    if (!committed) await client.query('ROLLBACK').catch(() => { /* 원 오류 우선 */ });
+    client.release();
+  }
+  if (stale) return staleFail(input.requestId, input.companyId);
+  return { ok: true, row: saved };
 }

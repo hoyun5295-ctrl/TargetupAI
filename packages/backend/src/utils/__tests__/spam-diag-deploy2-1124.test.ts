@@ -56,11 +56,11 @@ describe('진단 대기 칸(last_test_result.diagHold)', () => {
 describe('담당자 문자(M2)', () => {
   it('4a = 통신사 · 주소를 바꿔 주세요 · 로그인 주소 · 「세 차례」 0', () => {
     const t = buildTestFailedNotify({ label: '하늘몰 겨울 대축제', carriers: ['KT'], addressCause: true });
-    expect(t).toBe('[대행발송] 문안이 KT 스팸 검사에 걸렸습니다.\n건: 하늘몰 겨울 대축제\n글 속 주소를 빼니 KT에 도착했습니다. 주소를 바꿔 주세요.\n로그인: hanjul.ai/agency-send');
+    expect(t).toBe('[대행발송] 문안이 KT 스팸 검사에 걸렸습니다.\n건: 하늘몰 겨울 대축제\n글 속 주소를 빼니 KT에 도착했습니다. 주소를 바꿔 주세요.\n로그인하면 주소를 바꾸거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: hanjul.ai/agency-send');   // ★ 2026-11-24 그대로 보내기 안내
   });
   it('그 밖 = 통신사 괄호 · 결과 한 줄(있을 때) · 「세 차례」 0', () => {
     const t = buildTestFailedNotify({ label: '건', carriers: ['KT', 'LG U+'], resultLine: '막혔을 수 있는 부분: 글 속 주소' });
-    expect(t).toBe('[대행발송] 문안이 스팸 검사에 걸렸습니다(KT, LG U+).\n건: 건\n막혔을 수 있는 부분: 글 속 주소\n로그인하여 문안을 고쳐 주세요: hanjul.ai/agency-send');
+    expect(t).toBe('[대행발송] 문안이 스팸 검사에 걸렸습니다(KT, LG U+).\n건: 건\n막혔을 수 있는 부분: 글 속 주소\n로그인하면 문안을 고치거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: hanjul.ai/agency-send');   // ★ 2026-11-24 그대로 보내기 안내
     expect(buildTestFailedNotify({ label: '건' })).not.toMatch(/세 차례/);
   });
 });
@@ -71,7 +71,7 @@ describe('배선(소스 계약)', () => {
   const mail = read('utils/agency-send-mail-worker.ts');
   it('워커 A 만 진단(diag: true) · 워커 B 는 진단 0 · 진단 대기 이어 보기가 runSpamRound 앞', () => {
     expect(worker.match(/runSpamRound\([^)]*\{ diag: true/g)?.length).toBe(1);
-    expect(worker).toContain('await runSpamRound(target, 0);');
+    expect(worker).toContain('await runSpamRound(target, overridden ? MAX_TEST_ROUNDS - 1 : 0);');   // ★ 2026-11-24 그대로 보내기 버전 = 한 차례 · 진단 옵션 없음은 그대로
     const a = worker.indexOf('const hold = diagHoldOf(row);');
     expect(a).toBeGreaterThan(-1);
     expect(a).toBeLessThan(worker.indexOf("await runSpamRound(row, 0, { diag: true, resume });"));

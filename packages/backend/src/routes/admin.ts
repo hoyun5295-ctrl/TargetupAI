@@ -93,6 +93,7 @@ import { isYmd } from '../utils/plan-term-calc';   // ★ C142 날짜 모양 CT
 const AGENCY_LEDGER_LIMIT = 200;   // ★ 2026-11-13 C130 최근 반려(회신 본문 포함)
 import { agencyOptOutNotice, loadAgencyOpt080, agencyAdTextApplies } from '../utils/agency-send-optout';   // ★ 2026-11-13 C130 수신거부 줄 겹침 안내(직원 상세)
 import { CALLBACK_ASSIGNEES_SQL, describeCallbackUsage } from '../utils/callback-filter';   // ★ 2026-11-13 C132 발신번호 사용 범위 칸(발송 판정과 같은 함수)
+import { loadBitoSyncViews } from '../utils/bito-sender-sync';   // ★ 2026-11-24 B-1124-3 비토엔진 업체 번호의 비토 등록 상태 칸
 import { lookupCallbackNumber, parseLookupPhone, parseLookupPage } from '../utils/callback-lookup';   // ★ 2026-11-23 특부가 갱신 1-1 ④ 발신번호 조회
 import { switchCompanyBillingType } from '../utils/billing-type-history';
 import { recordCallbackNumberCreated, recordCallbackNumberUpdated, recordCallbackNumberDefaultChanged, recordCallbackNumberDeleted, recordUserAccountDeleted, recordUnsubscribeDeleted } from '../utils/change-audit';
@@ -2634,7 +2635,10 @@ router.get('/callback-numbers', authenticate, requireSuperAdmin, async (req: Req
     }
     // 판정의 회사 축 = 발신번호 행의 회사(발송 판정과 같은 칸 · 화면 묶음은 c.id 그대로)
     const usage = await describeCallbackUsage(result.rows.map((r: any) => ({ ...r, company_id: r.cn_company_id })));
-    res.json({ callbackNumbers: result.rows.map(({ cn_company_id: _cc, ...r }: any) => ({ ...r, ...(usage.get(r.id) || {}) })) });
+    // ★ 2026-11-24 B-1124-3 비토엔진 업체(V 발송ID) 번호만 비토 등록 상태 칸(판정 = CT bito-sender-sync · 표 없음 · 조회 실패 = 칸 없음 = 지금 화면 그대로 · 목록은 막지 않는다)
+    const bito = await loadBitoSyncViews(result.rows.map((r: any) => ({ id: r.id, company_id: r.cn_company_id, phone: r.phone })))
+      .catch((e: any) => { console.error('[bito-sync] 상태 칸 조회 실패:', e?.message || e); return new Map(); });
+    res.json({ callbackNumbers: result.rows.map(({ cn_company_id: _cc, ...r }: any) => ({ ...r, ...(usage.get(r.id) || {}), ...(bito.has(r.id) ? { bitoSync: bito.get(r.id) } : {}) })) });
   } catch (error: any) {
     console.error('발신번호 조회 실패:', error);
     const msg = String(error?.message || '');

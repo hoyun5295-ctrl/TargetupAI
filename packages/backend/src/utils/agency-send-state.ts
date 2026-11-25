@@ -51,7 +51,8 @@ const TRANSITIONS: Record<AgencySendStatus, readonly AgencySendStatus[]> = {
   testing: ['awaiting_approval', 'test_failed', 'received'],             // received = lock 복구
   // ★2026-10-16 축 1 전이표 정정 — awaiting_approval 자기 자신 = 승인 대기 중 시각 변경(같은 문안 · 새 승인 요청)
   awaiting_approval: ['approved', 'received', 'expired', 'cancelling', 'awaiting_approval'],  // received = 담당자가 문안 수정
-  test_failed: ['received', 'cancelling'],
+  // ★ 2026-11-24 awaiting_approval = 통신사 스팸 막힘을 담당자가 「그대로 보내기」로 고름(테스트 문자 · 승인을 다시 지난다 · 설계서 docs/2026-11-24-agency-spam-override-design.md)
+  test_failed: ['received', 'cancelling', 'awaiting_approval'],
   // expired = 승인은 받았는데 워커가 재검사·적재를 넣을 시간이 지났다(발송하지 않는다)
   approved: ['final_testing', 'queued', 'expired', 'cancelling'],
   // queued = 재승인 건(당일 검사를 이미 통과한 문안)은 재검사 없이 적재로 간다

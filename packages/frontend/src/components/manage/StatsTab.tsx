@@ -675,7 +675,7 @@ export default function StatsTab() {
             </div>
             {/* 본문 */}
             <div className="p-5 overflow-auto">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words select-text">{msgDetail.content}</div>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-800 leading-relaxed whitespace-pre-wrap break-words">{msgDetail.content}</div>
             </div>
             {/* 푸터 — 글자 수 + 복사 */}
             <div className="px-5 py-3 border-t border-gray-100 bg-white flex items-center justify-between gap-3">

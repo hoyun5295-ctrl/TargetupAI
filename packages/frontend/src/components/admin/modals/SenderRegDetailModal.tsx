@@ -44,7 +44,8 @@ export default function SenderRegDetailModal(props: SenderRegDetailModalProps) {
       });
       const data = await res.json();
       if (res.ok) {
-        setModal({ type: 'alert', title: '승인 완료', message: '발신번호가 승인되어 등록되었습니다.', variant: 'success' });
+        // ★ 2026-11-24 B-1124-3 비토엔진 업체 = 비토 동기화가 2분 안에 비토 허용번호에도 넣는다(결과 = 발신번호 관리 「비토 허용번호」 칸)
+        setModal({ type: 'alert', title: '승인 완료', message: data.bitoEngine ? '발신번호가 승인되어 등록되었습니다. 비토엔진 업체라 2분 안에 비토 허용 발신번호에도 등록됩니다.' : '발신번호가 승인되어 등록되었습니다.', variant: 'success' });
         setShowSenderRegDetailModal(false);
         setSenderRegDetail(null);
         loadSenderRegistrations(senderRegFilter);
@@ -196,6 +197,9 @@ export default function SenderRegDetailModal(props: SenderRegDetailModalProps) {
               {/* 승인/반려 액션 (pending일 때만) */}
               {senderRegDetail.status === 'pending' && (
                 <div className="border-t pt-5 space-y-4">
+                  {senderRegDetail.bitoEngine && (
+                    <p className="text-[12.5px] text-emerald-800 bg-emerald-50 rounded-lg px-3 py-2">비토엔진 업체입니다. 승인하면 비토 허용 발신번호에도 등록됩니다(2분 안 · 발신번호 관리의 「비토 허용번호」 칸에서 확인).</p>
+                  )}
                   <div className="flex gap-3">
                     <button
                       onClick={() => handleApproveSenderReg(senderRegDetail.id)}

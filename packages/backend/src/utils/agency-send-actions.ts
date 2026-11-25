@@ -8,7 +8,7 @@
  * ⛔ 순수(DB 0) · 문장은 사람이 읽는 말 · 줄표 0.
  */
 import {
-  AGENCY_SEND_LOCK_REASON, approvalDeadline, canCancel, checkApproval, isAgencySendLocked, isEditable, MIN_LEAD_MINUTES, type AgencySendStatus,
+  AGENCY_SEND_LOCK_REASON, approvalDeadline, canCancel, checkApproval, isAgencySendLocked, isEditable, isSameKstDay, MIN_LEAD_MINUTES, type AgencySendStatus,
 } from './agency-send-state';
 import { readAgencySpell } from './agency-send-spell';
 
@@ -22,6 +22,8 @@ export interface AgencyActions {
   resume: AgencyActionState;
   spellFix: AgencyActionState;
   editText: AgencyActionState;
+  /** ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」(로그인 화면만 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3) */
+  spamOverride: AgencyActionState;
   /** 승인 마감(ISO) · 승인 대기가 아니면 null */
   approveBy: string | null;
 }
@@ -75,6 +77,55 @@ export function agencyActions(actor: AgencyActor, row: any, now: Date = new Date
         : minutesLeft < MIN_LEAD_MINUTES ? no(`보낼 시각까지 ${MIN_LEAD_MINUTES}분이 남지 않아 고치면 다시 검사 · 승인할 시간이 없어요.`) : yes;
   const editText = actor !== 'user' ? no('문안을 직접 고치는 일은 한줄로 화면에서 해요.')
     : !editable ? no('지금은 문안을 고칠 수 있는 상태가 아니에요.') : locked ? no(AGENCY_SEND_LOCK_REASON) : yes;
+  const offer = spamOverrideOf(row, now);
+  const spamOverride = actor !== 'user' ? no('그대로 보내기는 한줄로 화면에서 골라요.') : offer.ok ? yes : no(offer.reason || '지금은 그대로 보낼 수 없어요.');
   const by = approvalDeadline(status, requestedAt, finalTestedAt, approvalRequestedAt);
-  return { approve, cancel, reschedule, resume, spellFix, editText, approveBy: by ? by.toISOString() : null };
+  return { approve, cancel, reschedule, resume, spellFix, editText, spamOverride, approveBy: by ? by.toISOString() : null };
+}
+
+/** 「그대로 보낼 수 있음」 표식(결과 칸 `last_test_result.spamOverridable` · 통신사 막힘 세 갈래만 쓴다 · 다른 상태 변경은 지운다) */
+/**
+ * submittedTested = 보낼 글(submitted) 자체를 checkedAt 의 검사에서 새로 봤는가(★ Codex 구현 1R #2 · 다듬은 글이나 다른 날 검사를 이어 본 글만 막혔으면 false
+ *   = 「당일 검사 끝」으로 세지 않는다 · 값이 없는 옛 표식도 false).
+ */
+export interface SpamOverrideMarker { version: number; submitted: string; checkedAt: Date; submittedTested: boolean }
+export function spamOverrideMarkerOf(row: any): SpamOverrideMarker | null {
+  const m = row?.last_test_result?.spamOverridable;
+  if (!m || typeof m !== 'object') return null;
+  const version = Number(m.version);
+  const submitted = typeof m.submitted === 'string' ? m.submitted : '';
+  const checkedAt = dateOf(m.checkedAt);
+  if (!Number.isFinite(version) || !submitted.trim() || !checkedAt) return null;
+  return { version, submitted, checkedAt, submittedTested: m.submittedTested === true };
+}
+
+export interface SpamOverrideOffer {
+  ok: boolean;
+  reason: string | null;
+  /** 그대로 보낼 글(허용일 때) */
+  text: string | null;
+  /** 그대로 보낸 뒤 「당일 검사 끝」(막힘이 보낼 날 · KST 에 확정됐으면 그 시각 · 아니면 null = 발송 2시간 전 검사가 한 번 돈다) */
+  finalTestedAt: Date | null;
+  /** 막힘 표식은 맞는데 보낼 시각 때문에 못 고른다(시각을 바꾸면 다시 검사 · 다시 고를 수 있다) */
+  retime: boolean;
+}
+
+/**
+ * (순수) 지금 이 접수를 「그대로 보내기」할 수 있는가 · 보낼 글 · 「당일 검사 끝」.
+ *   상태 test_failed · 표식 version = 지금 문안 버전 · 이미 적재 0 · 15분 잠금 밖 · 그리고 그대로 보낸 뒤 승인이 통하는가(승인 판정과 같은 함수 ·
+ *   설계 Codex 1R #1 = 2시간 안쪽에서 고르면 승인이 「너무 늦음」으로 막히던 길 · 당일 막힘은 그 검사를 받아들인 것이라 「당일 검사 끝」 = 막힌 시각).
+ */
+export function spamOverrideOf(row: any, now: Date = new Date()): SpamOverrideOffer {
+  const none = (reason: string, retime = false): SpamOverrideOffer => ({ ok: false, reason, text: null, finalTestedAt: null, retime });
+  if (String(row?.status || '') !== 'test_failed') return none('스팸 검사에 막힌 접수만 그대로 보낼 수 있어요.');
+  const marker = spamOverrideMarkerOf(row);
+  if (!marker || marker.version !== Number(row?.content_version)) return none('스팸 검사 막힘이 아닌 사유라 그대로 보낼 수 없어요. 문안을 고쳐 주세요.');
+  if (row?.campaign_id) return none('이미 발송 준비가 시작된 건이에요.');
+  if (isAgencySendLocked(row?.requested_at, now)) return none(AGENCY_SEND_LOCK_REASON, true);
+  const requestedAt = dateOf(row?.requested_at) || new Date(0);
+  const finalTestedAt = marker.submittedTested && isSameKstDay(marker.checkedAt, requestedAt) ? marker.checkedAt : null;
+  const revision = Number(row?.revision);
+  const appr = checkApproval({ status: 'awaiting_approval', revision, requestedAt, finalTestedAt, approvalRequestedAt: now }, revision, now);
+  if (!appr.ok) return none('보낼 시각이 가까워 그대로 보내려면 시각을 먼저 바꿔 주세요.', true);
+  return { ok: true, reason: null, text: marker.submitted, finalTestedAt, retime: false };
 }

@@ -215,7 +215,9 @@ describe('배선 — 발급 · 링크 열기 · 승인 라우트', () => {
 
   it('승인 CT: 게이트는 BEGIN 앞 · 승인 판정이 게이트 앞', () => {
     const s = src('utils/agency-send-approve.ts');
-    const gate = s.indexOf('checkSenderAuthGate(');
+    // ★ 2026-11-24 관문 본문 = 공용 함수 agencySenderAuthGate(그대로 보내기와 한 벌 · 코드 이동) · 순서 계약은 승인 CT 안의 호출 자리로 본다
+    expect(s.slice(s.indexOf('export async function agencySenderAuthGate('), s.indexOf('export type ApproveVia'))).toContain('checkSenderAuthGate(');
+    const gate = s.indexOf('agencySenderAuthGate(preRow');
     expect(gate).toBeGreaterThan(0);
     expect(gate).toBeLessThan(s.indexOf("client.query('BEGIN')"));
     expect(s.indexOf('checkApproval(')).toBeLessThan(gate);

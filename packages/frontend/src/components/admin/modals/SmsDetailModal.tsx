@@ -137,8 +137,8 @@ export default function SmsDetailModal(props: SmsDetailModalProps) {
                         {/* ★ 발송일시 = sendreqTime(발송요청/예약 시각, KST) — 목록·통계와 동일 기준(D233+). mobsendTime(통신사 응답)은 지연 시 다음날·대기 시 빈칸이라 불일치 */}
                         <td className="px-3 py-2 text-center text-xs text-gray-500 whitespace-nowrap">{r.sendreqTime ? new Date(r.sendreqTime).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-'}</td>
                         <td className="px-3 py-2 text-center text-xs text-gray-600 whitespace-nowrap">{r.sendType || '-'}</td>
-                        <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs hover:text-blue-600 cursor-pointer" style={{ userSelect: 'text' }} title="클릭하면 복사" onClick={() => { if (r.destNo) { navigator.clipboard.writeText(String(r.destNo)); showAlert('복사 완료', '수신번호를 복사했습니다.', 'success'); } }}>{r.destNo}</td>
-                        <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs hover:text-blue-600 cursor-pointer" style={{ userSelect: 'text' }} title="클릭하면 복사" onClick={() => { if (r.callBack) { navigator.clipboard.writeText(String(r.callBack)); showAlert('복사 완료', '회신번호를 복사했습니다.', 'success'); } }}>{r.callBack}</td>
+                        <td className="px-3 py-2 text-center text-gray-700 font-mono text-xs hover:text-blue-600 cursor-pointer" title="클릭하면 복사" onClick={() => { if (r.destNo) { navigator.clipboard.writeText(String(r.destNo)); showAlert('복사 완료', '수신번호를 복사했습니다.', 'success'); } }}>{r.destNo}</td>
+                        <td className="px-3 py-2 text-center text-gray-500 font-mono text-xs hover:text-blue-600 cursor-pointer" title="클릭하면 복사" onClick={() => { if (r.callBack) { navigator.clipboard.writeText(String(r.callBack)); showAlert('복사 완료', '회신번호를 복사했습니다.', 'success'); } }}>{r.callBack}</td>
                         <td className="px-3 py-2 text-gray-700 text-xs max-w-xs">
                           <div
                             className="truncate cursor-pointer hover:text-blue-600 hover:underline"

@@ -1434,6 +1434,7 @@ const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
   ...OUT_OF_AXIS('대행(계약 기능)', ['agency-send.ts', 'agency-approve.ts', 'campaign-agency.ts']),
   ...OUT_OF_AXIS('고객 DB · 쇼핑몰 연동', ['customers.ts', 'upload.ts', 'address-books.ts', 'sync.ts', 'sync-consent.ts', 'cafe24.ts', 'imweb.ts', 'woocommerce.ts', 'naver-commerce.ts', 'makeshop.ts', 'godo.ts', 'analysis.ts', 'insight.ts']),
   ...OUT_OF_AXIS('계정 · 회사 · 관리 · 도움말', ['auth.ts', 'companies.ts', 'manage-users.ts', 'manage-stats.ts', 'identity-return.ts', 'onboarding.ts', 'help.ts', 'internal-alert.ts', 'design-templates.ts', 'ai-memory.ts', 'ai-usage.ts']),
+  ...OUT_OF_AXIS('비토 서버 전용 입구(전용 토큰 + 출발지 IP · 사용자 화면 0)', ['bito-sync.ts']),   // ★ 2026-11-24 C161 B-1124-3 비토 허용번호 거울 = 비토가 V 회사 등록 번호를 읽고 결과를 적는다 · 발송 0
   ...OUT_OF_AXIS('공개 소개 · 진단 · 영업 표본', ['intro-public.ts', 'outreach-public.ts', 'marketing-diagnosis-public.ts', 'marketing-diagnosis.ts', 'proposal.ts', 'jbn-public.ts', 'public-visits.ts']),   // ★ 2026-11-16 C136 proposal.ts = 메일로 보낸 제안 페이지 · 제작 대행 체험(영업 체험 + 직원 확인 화면) · ★ 2026-11-18 C144 jbn-public.ts = JBN 전용 페이지 요금 · 신청(무인증 · 발송 0) · ★ 2026-11-19 C145 public-visits.ts = 공개 페이지 방문 기록(무인증 · 등록 페이지만 · 발송 0)
 };
 describe('라우터 분류 전수(1025) — 12기능 라우터 · 축 밖 라우터(이유) 둘 중 하나', () => {
@@ -4718,5 +4719,187 @@ describe('R106 글자 꼴로 변수를 판정하는 식은 주소의 퍼센트 �
     expect(stripComments(be('utils/messageUtils.ts'))).not.toMatch(LITERAL_REPLACE);
     expect(stripComments(read(join(FE, 'utils/formatDate.ts')))).not.toMatch(LITERAL_REPLACE);
     expect(stripComments(be('utils/var-tokens.ts'))).toContain('if (enc.has(start)) {');
+  });
+});
+
+describe('R107 화면 전역에 막기를 걸고 필요한 자리만 풀지 않는다 — 글자 선택은 기본 허용 · 고르기로 끝난 클릭 = 바깥 한 곳 · 우클릭 = 슈퍼관리자 로그인 탭', () => {
+  // ★ 2026-11-24 설계서 docs/2026-11-24-copy-selection-root-design.md §4 — 옛 index.html 의 body 선택 차단 + 접수마다 select-text 땜질(16줄)을 걷었다.
+  const FE_ROOT = join(FE, '..');
+  const indexHtml = () => read(join(FE_ROOT, 'index.html'));
+
+  it('1 index.html · 전역 CSS 에 body · html · :root · #root · * 선택 차단 0', () => {
+    const GLOBAL_NONE = /(^|[}\s,>;])(body|html|:root|#root|\*)\s*(,[^{]*)?\{[^}]*user-select\s*:\s*none/i;
+    const css = sourceFiles(FE, /\.css$/).map((f) => ({ f, s: read(join(FE, f)) }));
+    const hits = [{ f: 'index.html', s: indexHtml() }, ...css].filter(({ s }) => GLOBAL_NONE.test(s)).map(({ f }) => f);
+    expect(hits).toEqual([]);
+  });
+
+  it('2 자리별 풀기 땜질 0(select-text · userSelect: text)', () => {
+    const PATCH = /\bselect-text\b|userSelect\s*:\s*['"]text['"]/;
+    const hits = sourceFiles(FE, /\.tsx?$/).filter((f) => PATCH.test(stripComments(read(join(FE, f)))));
+    expect(hits).toEqual([]);
+  });
+
+  it('3 설치 계약 — main.tsx 가 createRoot 앞에서 두 장치를 설치 · 부르는 곳은 main.tsx 하나 · index.html 우클릭이 data-ctx-menu 를 본다', () => {
+    const main = stripComments(read(join(FE, 'main.tsx')));
+    const root = main.indexOf('createRoot(');
+    expect(root).toBeGreaterThan(0);
+    for (const call of ['installSelectionClickGuard()', 'bindAdminContextMenu(useAuthStore)']) {
+      const at = main.indexOf(call);
+      expect(at, call).toBeGreaterThan(0);
+      expect(at, call).toBeLessThan(root);
+    }
+    const callers = sourceFiles(FE, /\.tsx?$/)
+      .filter((f) => f !== 'utils/text-select.ts' && /\b(installSelectionClickGuard|bindAdminContextMenu)\(/.test(stripComments(read(join(FE, f)))));
+    expect(callers).toEqual(['main.tsx']);
+    expect(indexHtml()).toContain(`getAttribute('data-ctx-menu') === 'open'`);
+  });
+
+  // ── 4 text-select 동작(가짜 window · 선택 · 요소) ──
+  type Ev = Record<string, any>;
+  const nodeA = { nodeType: 3, name: 'A' }, nodeA2 = { nodeType: 3, name: 'A' }, nodeB = { nodeType: 3, name: 'B' };
+  const plain = { nodeType: 1, closest: () => null, isContentEditable: false, parentElement: null };
+  const control = { nodeType: 1, closest: () => ({}), isContentEditable: false, parentElement: null };
+  const editable = { nodeType: 1, closest: () => null, isContentEditable: true, parentElement: null };
+  function sel(o: { collapsed?: boolean; text?: string; a?: any; ao?: number; f?: any; fo?: number; hits?: boolean } = {}) {
+    const collapsed = o.collapsed ?? false;
+    return {
+      rangeCount: 1, isCollapsed: collapsed, anchorNode: o.a ?? nodeA, anchorOffset: o.ao ?? 0, focusNode: o.f ?? nodeA, focusOffset: o.fo ?? (collapsed ? 0 : 3),
+      toString: () => (collapsed ? '' : (o.text ?? 'abc')),
+      getRangeAt: () => ({ intersectsNode: () => o.hits ?? true }),
+    };
+  }
+  const CARET = () => sel({ collapsed: true, ao: 0, fo: 0 });
+  const PICKED = (x: { hits?: boolean; text?: string; fo?: number } = {}) => sel({ ao: 0, fo: 3, ...x });
+  async function harness() {
+    const ts = await import('../../../../frontend/src/utils/text-select');
+    // ★ Codex 구현 1R — 등록 단계(캡처 · 거품)를 보존하고 실제 순서(window 캡처 → 앱 루트 → window 거품)로 전달한다(캡처를 거품으로 바꾸는 회귀를 잡는다)
+    const L: Record<string, Array<{ fn: (e: Ev) => void; capture: boolean }>> = {};
+    let current: any = CARET();
+    const win: any = {
+      addEventListener: (t: string, fn: any, opt?: any) => { (L[t] ||= []).push({ fn, capture: opt === true || opt?.capture === true }); },
+      removeEventListener: () => {}, getSelection: () => current,
+    };
+    ts.installSelectionClickGuard(win);
+    const fire = (t: string, e: Ev) => (L[t] || []).forEach((l) => l.fn(e));
+    const setSel = (s: any) => { current = s; };
+    const down = (pointerId = 1) => fire('pointerdown', { button: 0, pointerId });
+    const move = (pointerId = 1) => fire('pointermove', { buttons: 1, pointerId });
+    const up = (pointerId = 1) => fire('pointerup', { pointerId });
+    const cancel = (pointerId = 1) => fire('pointercancel', { pointerId });
+    /** 클릭 = window 캡처 처리기 → (전파가 멈추지 않았으면) 앱 루트 처리기 1회 → window 거품 처리기 — 앱이 돈 횟수를 돌려준다 */
+    const click = (e: Ev = {}) => {
+      let stopped = false, app = 0;
+      const ev = { detail: 1, pointerId: 1, target: plain, ...e, stopPropagation: () => { stopped = true; } };
+      for (const l of L.click || []) if (l.capture && !stopped) l.fn(ev);
+      if (!stopped) app++;
+      for (const l of L.click || []) if (!l.capture && !stopped) l.fn(ev);
+      return app;
+    };
+    return { setSel, down, move, up, cancel, click, records: () => ts.selectionGuardRecords() };
+  }
+  /** 규칙 1 ~ 5 가 모두 참이 되는 누름(누를 때 접힘 → 클릭 때 고른 글자) */
+  async function pressed(pointerId = 1) {
+    const h = await harness();
+    h.setSel(CARET()); h.down(pointerId); h.setSel(PICKED()); h.up(pointerId);
+    return h;
+  }
+
+  it('4-1 기준(규칙 1 ~ 5 모두 참) = 앱 0회 · 규칙마다 그 규칙만 거짓 = 앱 1회', async () => {
+    expect((await pressed()).click()).toBe(0);
+    expect((await pressed()).click({ detail: 0 })).toBe(1);                                            // 1
+    { const h = await pressed(); h.setSel(sel({ collapsed: true, ao: 2, fo: 2 })); expect(h.click()).toBe(1); }   // 2 접힘
+    { const h = await pressed(); h.setSel(sel({ text: '' })); expect(h.click()).toBe(1); }                     // 2 글자 0
+    { const h = await pressed(); h.setSel(PICKED({ hits: false })); expect(h.click()).toBe(1); }              // 3
+    expect((await pressed()).click({ target: control })).toBe(1);                                       // 4 조작부
+    expect((await pressed()).click({ target: editable })).toBe(1);                                      // 4 편집 가능
+    { const h = await harness(); h.setSel(PICKED()); h.down(); h.up(); expect(h.click()).toBe(1); }          // 5 누를 때 = 클릭 때
+    { const h = await harness(); h.setSel(PICKED()); expect(h.click({ pointerId: 5 })).toBe(1); }            // 기록 없음 + 1 ~ 4 참
+  });
+
+  it('4-2 규칙 5 갈래 — 되돌린 끌기 = 0회 · 가만히 누름 = 1회 · 움직였지만 선택 그대로 = 1회 · 노드는 객체로 비교', async () => {
+    { const h = await harness(); h.setSel(PICKED()); h.down(); h.setSel(PICKED({ fo: 5 })); h.move(); h.setSel(PICKED()); h.up(); expect(h.click()).toBe(0); }
+    { const h = await harness(); h.setSel(PICKED()); h.down(); h.up(); expect(h.click()).toBe(1); }
+    { const h = await harness(); h.setSel(PICKED()); h.down(); h.move(); h.move(); h.up(); expect(h.click()).toBe(1); }
+    { const h = await harness(); h.setSel(sel({ a: nodeA, f: nodeA })); h.down(); h.setSel(sel({ a: nodeA2, f: nodeA2 })); h.up(); expect(h.click()).toBe(0); }
+    { const h = await harness(); h.setSel(sel({ a: nodeB, f: nodeB })); h.down(); h.up(); expect(h.click()).toBe(1); }
+  });
+
+  it('4-3 누름 기록 상태 — 소비 · 보존 · 취소 · 끝남 정리 · detail 0 · pointerId 없는 클릭', async () => {
+    const h = await harness();
+    h.down(1); h.down(2);
+    expect([...h.records().keys()].sort()).toEqual([1, 2]);
+    h.up(1); h.click({ pointerId: 1 });
+    expect([...h.records().keys()]).toEqual([2]);                     // 클릭은 제 기록만 지운다
+    h.cancel(2);
+    expect(h.records().size).toBe(0);                                  // 취소가 그 기록을 지운다
+    h.down(3); h.up(3);
+    expect(h.records().get(3)?.ended).toBe(true);
+    h.down(4);
+    expect([...h.records().keys()]).toEqual([4]);                      // 다음 누름이 끝난 기록을 정리 · 진행 중은 남김
+    h.click({ detail: 0, pointerId: 4 });
+    expect([...h.records().keys()]).toEqual([4]);                      // detail 0 은 기록을 건드리지 않는다
+    h.up(4); h.down(5); h.up(5);                                       // 5 누름이 끝난 4 를 정리
+    expect([...h.records().keys()]).toEqual([5]);
+    h.click({ pointerId: undefined });
+    expect(h.records().size).toBe(0);                                  // pointerId 없는 클릭 = 가장 최근에 끝난 기록과 짝
+    // pointerId 없는 클릭 — 진행 중 기록은 건드리지 않고, 끝난 기록이 둘이면 가장 최근에 끝난 것
+    const n = await harness();
+    n.down(1); n.down(2); n.up(1);
+    n.click({ pointerId: undefined });
+    expect([...n.records().keys()]).toEqual([2]);
+    n.cancel(2); n.down(3); n.down(4); n.up(4); n.up(3);
+    n.click({ pointerId: undefined });
+    expect([...n.records().keys()]).toEqual([4]);
+    // 클릭 없이 끝난 터치 기록 뒤 마우스 끌기 → 마우스 클릭은 제 기록으로 판정
+    const t = await harness();
+    t.setSel(CARET()); t.down(9); t.up(9);
+    t.down(1); t.setSel(PICKED()); t.up(1);
+    expect(t.click({ pointerId: 1 })).toBe(0);
+  });
+
+  it('4-4 bindAdminContextMenu — 슈퍼관리자 로그인 동안만 <html data-ctx-menu="open">', async () => {
+    const { bindAdminContextMenu } = await import('../../../../frontend/src/utils/text-select');
+    const mkDoc = () => { const attrs = new Map<string, string>(); return { attrs, doc: { documentElement: { setAttribute: (k: string, v: string) => attrs.set(k, v), removeAttribute: (k: string) => attrs.delete(k) } } as any }; };
+    const { attrs, doc } = mkDoc();
+    let state: any = { isAuthenticated: false, user: null };
+    const subs: Array<(s: any) => void> = [];
+    const store = { getState: () => state, subscribe: (fn: any) => { subs.push(fn); return () => {}; } };
+    const emit = (s: any) => { state = s; subs.forEach((fn) => fn(s)); };
+    bindAdminContextMenu(store, doc);
+    expect(attrs.get('data-ctx-menu')).toBeUndefined();
+    emit({ isAuthenticated: true, user: { userType: 'super_admin' } });
+    expect(attrs.get('data-ctx-menu')).toBe('open');
+    emit({ isAuthenticated: true, user: { userType: 'company_admin' } });
+    expect(attrs.get('data-ctx-menu')).toBeUndefined();
+    emit({ isAuthenticated: true, user: { userType: 'super_admin' } });
+    emit({ isAuthenticated: false, user: { userType: 'super_admin' } });
+    expect(attrs.get('data-ctx-menu')).toBeUndefined();
+    emit({ isAuthenticated: true, user: null });
+    expect(attrs.get('data-ctx-menu')).toBeUndefined();
+    const second = mkDoc();
+    bindAdminContextMenu({ getState: () => ({ isAuthenticated: true, user: { userType: 'super_admin' } }), subscribe: () => () => {} }, second.doc);
+    expect(second.attrs.get('data-ctx-menu')).toBe('open');            // 처음 상태도 바로 적용
+  });
+
+  it('5 index.html 인라인 스크립트(격리 실행) — data-ctx-menu=open 만 우클릭 통과 · F12 등은 늘 막음', async () => {
+    const { runInNewContext } = await import('vm');
+    const script = /<script>([\s\S]*?)<\/script>/.exec(indexHtml())?.[1] || '';
+    expect(script).toContain('contextmenu');
+    const run = (attr: string | null) => {
+      const L: Record<string, (e: any) => void> = {};
+      const document = { addEventListener: (t: string, fn: any) => { L[t] = fn; }, documentElement: { getAttribute: (k: string) => (k === 'data-ctx-menu' ? attr : null) } };
+      runInNewContext(script, { document });
+      const fire = (t: string, e: any) => { let prevented = false; L[t]({ ...e, preventDefault: () => { prevented = true; } }); return prevented; };
+      return {
+        ctx: fire('contextmenu', {}),
+        f12: fire('keydown', { key: 'F12' }),
+        inspect: fire('keydown', { key: 'I', ctrlKey: true, shiftKey: true }),
+        copy: fire('keydown', { key: 'c', ctrlKey: true }),
+        paste: fire('keydown', { key: 'v', ctrlKey: true }),
+      };
+    };
+    expect(run('open')).toEqual({ ctx: false, f12: true, inspect: true, copy: false, paste: false });
+    for (const a of [null, '', 'closed']) expect(run(a)).toEqual({ ctx: true, f12: true, inspect: true, copy: false, paste: false });
   });
 });

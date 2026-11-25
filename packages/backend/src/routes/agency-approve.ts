@@ -29,7 +29,7 @@ import {
   AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, linkCancelReason,
 } from '../utils/agency-send-link';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
-import { notifyManager, sendAgencyApprovalRequest } from '../utils/agency-send-worker';
+import { notifyManager, sendAgencyApprovalRequest, isSpamOverriddenVersion } from '../utils/agency-send-worker';
 import { buildLinkActionNotify, buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
 import { agencyActions } from '../utils/agency-send-actions';
 import { editAgencyContentTx, rescheduleAgencyRequestTx } from '../utils/agency-send-change';
@@ -81,17 +81,22 @@ function toApprovalView(row: any) {
     spellIssues: readAgencySpell(row),
     // ★2026-10-18 이 링크로 할 수 있는 조작 · 승인 마감(서버 판정 한 벌)
     actions: agencyActions('link', row),
+    // ★ 2026-11-24 발송일 당일 검사를 이미 마쳤는가(마지막 검사 중 · 예약 준비 중을 화면이 가른다 · Codex 구현 4R #2)
+    finalTested: !!row.final_test_at,
   };
 }
 
 /**
- * 고객별 회신번호 종류 수(★2026-09-13 적대검토). 승인 화면이 대표 번호 하나만 보여 주면
+ * 링크 화면 부가 정보 = 고객별 회신번호 종류 수(★2026-09-13 적대검토) · 그대로 보내기 여부(★2026-11-24). 승인 화면이 대표 번호 하나만 보여 주면
  * 승인자는 다른 번호로도 나간다는 것을 모른 채 승인한다. 번호 목록은 내보내지 않는다(건수만).
  * 실패해도 승인 화면·승인 결과를 막지 않는다(0 = 표시 안 함).
  * ★2026-09-13(3) 규칙·조회는 CT(`loadAgencyCallbackKinds`)로 올렸다(목록·상세·운영 화면과 한 벌 · 빈 번호 = 대표 번호 규칙 그대로).
  */
-async function loadCallbackKinds(row: any): Promise<{ callbackKinds: number; callbackSole: string | null }> {
-  return (await loadAgencyCallbackKinds([row])).get(row.id) ?? { callbackKinds: 0, callbackSole: null };
+async function loadLinkExtras(row: any): Promise<{ callbackKinds: number; callbackSole: string | null; spamOverridden: boolean | null }> {
+  const kinds = (await loadAgencyCallbackKinds([row])).get(row.id) ?? { callbackKinds: 0, callbackSole: null };
+  // ★ 2026-11-24 지금 문안 버전 = 담당자가 스팸 검사 결과와 관계없이 그대로 보내기를 고른 글(승인하는 사람이 통과로 읽지 않게 · Codex 구현 1R #4)
+  //   커밋 뒤 응답(승인 · 취소 · 시각)에도 실린다 = 조회 실패는 null(확인 못 함)로 · 조작 결과를 실패로 돌리지 않는다(Codex 구현 2R #4)
+  return { ...kinds, spamOverridden: await isSpamOverriddenVersion(String(row.id), Number(row.content_version)).catch(() => null) };
 }
 
 router.get('/info', async (req: Request, res: Response) => {
@@ -103,7 +108,7 @@ router.get('/info', async (req: Request, res: Response) => {
     const actions = agencyActions('link', row);
     return res.json({
       success: true,
-      request: { ...toApprovalView(row), ...(await loadCallbackKinds(row)) },
+      request: { ...toApprovalView(row), ...(await loadLinkExtras(row)) },
       approvable: actions.approve.ok,
       blockReason: actions.approve.ok ? null : actions.approve.reason,
     });
@@ -163,7 +168,7 @@ router.post('/approve', async (req: Request, res: Response) => {
       req,
     });
 
-    return res.json({ success: true, request: { ...toApprovalView(outcome.row), ...(await loadCallbackKinds(outcome.row)) } });
+    return res.json({ success: true, request: { ...toApprovalView(outcome.row), ...(await loadLinkExtras(outcome.row)) } });
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 승인 실패:', err);
@@ -211,13 +216,13 @@ router.post('/cancel', async (req: Request, res: Response) => {
     if (!out.ok) {
       return res.status(out.status).json({
         success: false, error: out.error, ...(out.code ? { code: out.code } : {}), ...(out.tooLate ? { tooLate: true } : {}),
-        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadCallbackKinds(out.current)) } } : {}),
+        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadLinkExtras(out.current)) } } : {}),
       });
     }
     afterLinkAction(req, resolved, 'cancel', out.row, { pending: out.pending, ...(out.finalizedElsewhere ? { finalizedElsewhere: true } : {}) });
     // 워커가 먼저 확정했으면 화면도 「결과를 문자로 알려 드립니다」 쪽(이 요청이 문자를 보내지 않았다)
     const pending = out.pending || !!out.finalizedElsewhere;
-    return res.status(pending ? 202 : 200).json({ success: true, pending, request: { ...toApprovalView(out.row), ...(await loadCallbackKinds(out.row)) } });
+    return res.status(pending ? 202 : 200).json({ success: true, pending, request: { ...toApprovalView(out.row), ...(await loadLinkExtras(out.row)) } });
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 링크 취소 실패:', err?.message || err);
@@ -238,12 +243,12 @@ router.post('/reschedule', async (req: Request, res: Response) => {
     if (!out.ok) {
       return res.status(out.status).json({
         success: false, error: out.error, ...(out.code ? { code: out.code } : {}),
-        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadCallbackKinds(out.current)) } } : {}),
+        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadLinkExtras(out.current)) } } : {}),
       });
     }
     afterLinkAction(req, resolved, 'reschedule', out.row, { status: out.backTo, timeShifted: !!out.timeShifted });
     if (out.backTo === 'awaiting_approval') void sendAgencyApprovalRequest(String(out.row.id));
-    return res.json({ success: true, request: { ...toApprovalView(out.row), ...(await loadCallbackKinds(out.row)) }, ...(out.timeShifted ? { timeShifted: true } : {}) });
+    return res.json({ success: true, request: { ...toApprovalView(out.row), ...(await loadLinkExtras(out.row)) }, ...(out.timeShifted ? { timeShifted: true } : {}) });
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 링크 시각 변경 실패:', err?.message || err);
@@ -265,7 +270,7 @@ router.post('/spell-fix', async (req: Request, res: Response) => {
     if (!out.ok) {
       return res.status(out.status).json({
         success: false, error: out.error, ...(out.code ? { code: out.code } : {}),
-        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadCallbackKinds(out.current)) } } : {}),
+        ...(out.current ? { request: { ...toApprovalView(out.current), ...(await loadLinkExtras(out.current)) } } : {}),
       });
     }
     afterLinkAction(req, resolved, 'spell', out.row, { spellCount: ids.length });

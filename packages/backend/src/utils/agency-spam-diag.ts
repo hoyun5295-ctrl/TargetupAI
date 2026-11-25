@@ -31,7 +31,7 @@ export interface DiagHold { parentTestId: string; version: number; content: stri
 export type DiagStep =
   | { kind: 'wait' }
   | { kind: 'pass' }
-  | { kind: '4a'; carriers: string[]; arrived: string[]; sentence: string }
+  | { kind: '4a'; carriers: string[]; arrived: string[]; sentence: string; /** ★ 2026-11-24 판정에서 이미 읽은 T 행 시각(그대로 보내기 표식 · 다시 읽기 0) */ parentCreatedAt?: string }
   | { kind: '4b'; avoid: string[]; sentence: string }
   | { kind: '4c'; sentence: string };
 
@@ -140,7 +140,7 @@ async function decide(hold: DiagHold, run: SqlRun): Promise<DiagStep | { kind: '
   if (cls.branch === '4a') {
     // ★ 배포 2 Codex 3R — 도착 = T 에서 실제로 통과한 통신사만(시간 초과 · 확인 못 함은 도착이 아니다 · 회신 메일 상태 줄)
     const arrived = [...new Set(outcome.carrierResults.filter((r) => r.result === 'pass').map((r) => r.carrier))].filter((c) => !blocked.includes(c)).sort();
-    return { kind: '4a', carriers: blocked, arrived, sentence: sentenceOf(byCarrier, blocked, 1) };
+    return { kind: '4a', carriers: blocked, arrived, sentence: sentenceOf(byCarrier, blocked, 1), parentCreatedAt: parent.createdAt };
   }
   if (cls.branch === '4b') {
     // ★ 배포 2 Codex 1R — 피할 표현 = 원문(이 문안 버전의 글)에도 있는 조각만(보낸 글은 표본 고객 값이 치환된 글 · 이름 같은 값이 다듬기 AI 로 가지 않게)
@@ -174,6 +174,18 @@ export async function stepAgencyDiag(row: any, hold: DiagHold, now = new Date())
 }
 
 /**
+ * ★ 2026-11-24 「그대로 보낼 수 있음」 표식 — 당일 근거 = 보낼 글을 본 검사 행의 시각(spam_filter_tests.created_at · 큐가 같은 날 같은 키를 이어 봤으면 그 검사의 시각).
+ *   보낼 글이 첫 회차 글이 아니거나(다듬은 글만 막힘) 검사 행 시각이 없으면 submittedTested = false(당일 검사 끝으로 세지 않는다).
+ *   (순수 · 읽기 0) 시각은 부르는 쪽이 이미 읽은 행에서 넘긴다 = 따로 읽기가 막힘 처리를 멈추는 길 0(Codex 구현 5R ~ 8R).
+ */
+export function spamOverrideMarker(version: number, submitted: string, firstTest: { content: string; createdAt?: string | Date | null } | null | undefined) {
+  const raw = firstTest && firstTest.content === submitted ? firstTest.createdAt : null;
+  const at = raw ? new Date(raw) : null;
+  const ok = !!at && Number.isFinite(at.getTime());
+  return { version, submitted, checkedAt: (ok ? at! : new Date()).toISOString(), submittedTested: ok };
+}
+
+/**
  * 4a 확정 = 한 트랜잭션(설계서 §7 절차 3) — 접수 행 FOR UPDATE(선점 토큰 · 버전) → T 결과 행 FOR UPDATE → 진단 잠금 · 판 결과 행 FOR UPDATE →
  *   잠근 값으로 다시 판정해 4a 일 때만 test_failed(진단 대기 지움) + 진단 닫기 + 확정 사건 둘(spam_hint 4a · test_failed spam_address) → 커밋.
  *   돌려줌 = 'ok' | 'changed'(다시 판정이 4a 가 아님 · 되돌림) | 'lost'(소유권 · 버전이 바뀜).
@@ -190,11 +202,17 @@ export async function settleAgencyDiag4a(row: any, token: string, hold: DiagHold
     // ★ 배포 2 Codex 1R — 사건 · 담당자 문자 = 잠근 값으로 다시 판정한 통신사 · 문장(잠금 앞 판정의 통신사가 아니라)
     const locked = await decide(hold, run);
     if (locked.kind !== '4a') { await client.query('ROLLBACK'); return { status: 'changed' }; }
+    // 그대로 보내기 표식 = 판정(decide)이 이 트랜잭션에서 이미 읽은 T 행의 시각 그대로(다시 읽기 0 · 판정 뒤 추가 조회 0 · Codex 구현 9R)
+    const marker = spamOverrideMarker(hold.version, String(row.original_content || ''), { content: hold.content, createdAt: locked.parentCreatedAt });
+    // ★ 2026-11-24 주소 원인 막힘(4a)도 통신사 막힘 = 「그대로 보낼 수 있음」 표식(보낼 글 = 담당자가 마지막으로 넣은 글 · 버전 · 확정 시각 ·
+    //   이 갈래는 last_test_at 을 쓰지 않아 당일 판정은 이 시각으로 한다 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3)
+    //   ★ Codex 구현 1R ~ 4R — 당일 근거 = 막힌 검사(T) 행의 시각 · 보낼 글이 T 가 본 글일 때만(워커와 같은 함수 · 잠금을 쥔 연결로 읽는다)
     await run(
-      `UPDATE agency_send_requests SET status = 'test_failed', last_test_result = $3::jsonb, lock_at = NULL, lock_token = NULL,
-              revision = revision + 1, updated_at = NOW()
+      `UPDATE agency_send_requests SET status = 'test_failed',
+              last_test_result = jsonb_set(COALESCE($3::jsonb, '{}'::jsonb), '{spamOverridable}', $4::jsonb),
+              lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
         WHERE id = $1::uuid AND lock_token = $2::uuid`,
-      [row.id, token, lastTestResult],
+      [row.id, token, lastTestResult, JSON.stringify(marker)],
     );
     await closeDiagnosis(hold.parentTestId, run);
     // ★ 배포 2 Codex 3R — 확정 사건 둘 = 상태와 같은 트랜잭션(사건이 못 남으면 상태째 되돌림 · 회신 메일 대상 SQL 이 이 사건으로 고른다)
