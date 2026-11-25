@@ -17,6 +17,7 @@ import path from 'path';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, unreadableAgencyForm, type ParsedAgencyForm,
 } from './agency-send-form';
+import { planAgencyWorkbook, type AgencyWorkbookPlan } from './agency-send-workbook';
 
 export type ParsedAgencyList = ReturnType<typeof parseAgencyRecipientList>;
 
@@ -31,11 +32,14 @@ const AGENCY_PARSE_TIMEOUT_MS = 120_000;
 /** 자식 힙 상한 = 운영 본 프로세스와 같은 값(큰 명단을 읽을 수 있어야 한다) */
 const AGENCY_PARSE_CHILD_HEAP_MB = 2048;
 
-function inlineParse(formBuf: Buffer | null, listBuf: Buffer | null): IsolatedAgencyParse {
-  const form = formBuf ? parseAgencyRequestForm(formBuf) : null;
+/** ★ 2026-11-25 한 파일 여러 건의 짝 시트 이름(planAgencyWorkbook · 생략 = 종전 고르기 규칙) */
+export interface AgencySheetPick { formSheet?: string | null; listSheet?: string | null }
+
+function inlineParse(formBuf: Buffer | null, listBuf: Buffer | null, sheets: AgencySheetPick = {}): IsolatedAgencyParse {
+  const form = formBuf ? parseAgencyRequestForm(formBuf, { formSheet: sheets.formSheet }) : null;
   let list: ParsedAgencyList | null = null;
   if (listBuf) {
-    try { list = parseAgencyRecipientList(listBuf); } catch { list = null; }
+    try { list = parseAgencyRecipientList(listBuf, { listSheet: sheets.listSheet }); } catch { list = null; }
   }
   return { form, list, via: 'inline' };
 }
@@ -53,24 +57,27 @@ function childLaunch(): { script: string; execArgv: string[] } | null {
   }
 }
 
-export async function parseAgencyFilesIsolated(
-  formBuf: Buffer | null,
-  listBuf: Buffer | null,
-  opts: { timeoutMs?: number } = {},
-): Promise<IsolatedAgencyParse> {
-  if (!formBuf && !listBuf) return { form: null, list: null, via: 'inline' };
+/**
+ * 자식 프로세스 한 번(기동 → ready → payload → result → 종료). 띄울 수 없으면 inline(이 프로세스) · 준비 뒤 죽음 · 시간 초과 = failValue.
+ * ★ 2026-11-25 요청서 · 명단 해석과 한 파일 여러 건 판정이 같은 길을 쓴다(판정도 큰 파일을 이 프로세스에서 읽지 않게 · Codex 설계 6R).
+ */
+function runInChild<T>(
+  payload: Record<string, unknown>,
+  inline: () => T,
+  failValue: T,
+  fromMessage: (msg: any) => T,
+  timeoutMs: number,
+): Promise<T> {
   const launch = childLaunch();
   if (!launch) {
     console.warn('[agency-parse] 자식 프로세스 실행 모듈이 없어 이 프로세스에서 읽음');
-    return inlineParse(formBuf, listBuf);
+    return Promise.resolve(inline());
   }
-
-  return new Promise<IsolatedAgencyParse>((resolve) => {
+  return new Promise<T>((resolve) => {
     let settled = false;
     let ready = false;
-    const unreadable: IsolatedAgencyParse = { form: formBuf ? unreadableAgencyForm() : null, list: null, via: 'child' };
     let child: ReturnType<typeof fork>;
-    const finish = (r: IsolatedAgencyParse) => {
+    const finish = (r: T) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -78,12 +85,12 @@ export async function parseAgencyFilesIsolated(
       resolve(r);
     };
     const timer = setTimeout(() => {
-      console.warn(`[agency-parse] 자식 프로세스 시간 초과(${opts.timeoutMs ?? AGENCY_PARSE_TIMEOUT_MS}ms) — 읽지 못함으로 반려`);
-      finish(unreadable);
-    }, opts.timeoutMs ?? AGENCY_PARSE_TIMEOUT_MS);
+      console.warn(`[agency-parse] 자식 프로세스 시간 초과(${timeoutMs}ms) — 읽지 못함으로 반려`);
+      finish(failValue);
+    }, timeoutMs);
     const startFailed = (why: string) => {
       console.warn(`[agency-parse] 자식 프로세스를 띄우지 못해 이 프로세스에서 읽음: ${why}`);
-      finish(inlineParse(formBuf, listBuf));
+      finish(inline());
     };
     try {
       child = fork(launch.script, [], { execArgv: launch.execArgv, serialization: 'advanced' });
@@ -94,18 +101,16 @@ export async function parseAgencyFilesIsolated(
     child.on('message', (msg: any) => {
       if (msg?.type === 'ready' && !ready) {
         ready = true;
-        child.send({ formBuf, listBuf });
+        child.send(payload);
         return;
       }
-      if (msg?.type === 'result') {
-        finish({ form: msg.form ?? null, list: msg.list ?? null, via: 'child' });
-      }
+      if (msg?.type === 'result') finish(fromMessage(msg));
     });
     child.on('error', (e: any) => {
       if (!ready) startFailed(e?.message || String(e));
       else {
         console.warn('[agency-parse] 자식 프로세스 오류 — 읽지 못함으로 반려:', e?.message || e);
-        finish(unreadable);
+        finish(failValue);
       }
     });
     child.on('exit', (code, signal) => {
@@ -113,8 +118,60 @@ export async function parseAgencyFilesIsolated(
       if (!ready) startFailed(`준비 전 종료 code=${code} signal=${signal}`);
       else {
         console.warn(`[agency-parse] 자식 프로세스가 결과 없이 종료 code=${code} signal=${signal} — 읽지 못함으로 반려`);
-        finish(unreadable);
+        finish(failValue);
       }
     });
   });
+}
+
+export async function parseAgencyFilesIsolated(
+  formBuf: Buffer | null,
+  listBuf: Buffer | null,
+  opts: { timeoutMs?: number } & AgencySheetPick = {},
+): Promise<IsolatedAgencyParse> {
+  if (!formBuf && !listBuf) return { form: null, list: null, via: 'inline' };
+  return runInChild<IsolatedAgencyParse>(
+    { formBuf, listBuf, formSheet: opts.formSheet ?? null, listSheet: opts.listSheet ?? null },
+    () => inlineParse(formBuf, listBuf, opts),
+    { form: formBuf ? unreadableAgencyForm() : null, list: null, via: 'child' },
+    (msg) => ({ form: msg.form ?? null, list: msg.list ?? null, via: 'child' }),
+    opts.timeoutMs ?? AGENCY_PARSE_TIMEOUT_MS,
+  );
+}
+
+/** ★ 2026-11-25 한 파일 여러 건 판정 + 건마다 이미지 파일명 이름표(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §6 · §7) */
+export interface IsolatedWorkbookPlan {
+  plan: AgencyWorkbookPlan;
+  /** pairs = 짝마다 · single = [오늘 고르기 규칙의 요청서 시트 이름표] · invalid = [] */
+  imageNames: string[][];
+}
+
+/** 판정 실패(자식 죽음 · 시간 초과 · 판정 없는 답) = 접수를 멈춘다 */
+const PLAN_FAILED: IsolatedWorkbookPlan = {
+  plan: { kind: 'invalid', reasons: ['요청서 파일을 끝까지 확인하지 못했습니다. 잠시 뒤 다시 올려 주세요.'] },
+  imageNames: [],
+};
+
+/** 판정 + 이름표(자식 · 같은 프로세스 대체 경로가 같은 함수) */
+export function computeWorkbookPlan(buf: Buffer): IsolatedWorkbookPlan {
+  const plan = planAgencyWorkbook(buf);
+  const imageNames = plan.kind === 'pairs'
+    ? plan.pairs.map((pr) => parseAgencyRequestForm(buf, { formSheet: pr.formSheet }).imageFileNames)
+    : plan.kind === 'single' ? [parseAgencyRequestForm(buf).imageFileNames] : [];
+  return { plan, imageNames };
+}
+
+/**
+ * ★ 2026-11-25 한 파일 여러 건 판정을 자식 프로세스에서(Codex 설계 6R · 큰 파일의 압축 풀기 · 공유 문자열 표를 이 프로세스에서 읽지 않는다).
+ *   자식이 죽거나 · 시간을 넘기거나 · 판정 없이 답하면 = 판정 실패(invalid · 접수를 멈춘다). single 로 떨어뜨리면 여러 건 중 표준 한 짝만
+ *   접수되고 나머지가 조용히 빠진다(Codex 설계 7R). single 은 판정이 성공했을 때만이다.
+ */
+export async function planAgencyWorkbookIsolated(buf: Buffer, opts: { timeoutMs?: number } = {}): Promise<IsolatedWorkbookPlan> {
+  return runInChild<IsolatedWorkbookPlan>(
+    { kind: 'plan', formBuf: buf },
+    () => computeWorkbookPlan(buf),
+    PLAN_FAILED,
+    (msg) => (msg.plan ? { plan: msg.plan, imageNames: Array.isArray(msg.imageNames) ? msg.imageNames : [] } : PLAN_FAILED),
+    opts.timeoutMs ?? AGENCY_PARSE_TIMEOUT_MS,
+  );
 }

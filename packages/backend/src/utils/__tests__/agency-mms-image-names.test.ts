@@ -168,9 +168,9 @@ describe('배선 계약: 세 입구가 원본명을 넘기고, 상세 두 화면
     expect(route).toMatch(/mmsImageNames: Array\.isArray\(overrides\.mmsImageNames\) \? overrides\.mmsImageNames : \[\]/);
   });
 
-  it('메일 접수는 첨부 원본명을 넘긴다(다중이면 이미지가 없다)', () => {
+  it('메일 접수는 첨부 원본명을 넘긴다(다중 = 건마다 이름으로 맞춘 첨부 · ★ 2026-11-25)', () => {
     const worker = read('../agency-send-mail-worker.ts');
-    expect(worker).toMatch(/mmsImageNames: multi \? \[\] : savedImageNames/);
+    expect(worker).toMatch(/mmsImageNames: multi \? p\.imageNames : savedImageNames/);
   });
 
   it('상세 응답 두 곳이 원본명을 싣는다(고객 · 슈퍼관리자)', () => {

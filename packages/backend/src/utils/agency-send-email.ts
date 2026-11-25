@@ -221,9 +221,11 @@ export interface PreparedMailImage {
  */
 export async function prepareMailMmsImages(
   atts: MailImageAttachment[],
+  /** ★ 2026-11-25 장수 상한(기본 = 한 건 3장 · 한 파일 여러 건 메일 = 건마다 3장 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §7) */
+  maxCount: number = LIMITS.mmsImageCount,
 ): Promise<{ ok: boolean; reasons: string[]; images: PreparedMailImage[] }> {
-  if (atts.length > LIMITS.mmsImageCount) {
-    return { ok: false, reasons: [`이미지가 ${atts.length}장입니다. 최대 ${LIMITS.mmsImageCount}장까지 첨부할 수 있습니다.`], images: [] };
+  if (atts.length > maxCount) {
+    return { ok: false, reasons: [`이미지가 ${atts.length}장입니다. 최대 ${maxCount}장까지 첨부할 수 있습니다.`], images: [] };
   }
   const reasons: string[] = [];
   const images: PreparedMailImage[] = [];

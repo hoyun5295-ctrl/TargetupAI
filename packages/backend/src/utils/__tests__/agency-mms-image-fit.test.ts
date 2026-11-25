@@ -193,7 +193,7 @@ describe('배선 계약: 두 입구가 같은 함수를 지나고, 다른 발송
 
   it('메일 접수: 규격 검사 대신 맞춤 준비를 거치고, 저장은 맞춘 바이트다', () => {
     const worker = read('../agency-send-mail-worker.ts');
-    expect(worker).toMatch(/await prepareMailMmsImages\(imageAtts\)/);
+    expect(worker).toMatch(/await prepareMailMmsImages\(imageAtts, LIMITS\.mmsImageCount \* MAX_FORMS\)/);
     expect(worker).toMatch(/saveMmsImageBuffer\(unitAcct\.companyId, preparedImages\[i\]\.buffer\)/);
     expect(worker, '원본 첨부를 그대로 저장하면 줄인 결과가 버려진다').not.toMatch(/saveMmsImageBuffer\(unitAcct\.companyId, imageAtts\[i\]\.content/);
     expect(worker, '옛 규격 반려 함수가 되살아났다').not.toMatch(/validateMailMmsImages/);

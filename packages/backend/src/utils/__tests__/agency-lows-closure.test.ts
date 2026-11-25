@@ -86,7 +86,8 @@ describe('대행 ② 회신번호 종류 표시', { timeout: 30_000 }, () => {
   it('접수 코어가 종류를 돌려주고 received 이력에 싣는다(세 입구 모두)', () => {
     expect(intake).toMatch(/\| \{ ok: true; request: any; callbackKinds: AgencyCallbackKinds; notice: string\[\] \}/);   // ★ 1106 C109 글자 정리 알림 칸
     expect(intake).toMatch(/const callbackKinds = countCallbackKinds\(rows\.map\(\(r\) => r\.callback\), callback\);/);
-    expect(intake).toMatch(/return \{ ok: true, request, callbackKinds, notice: \[\.\.\.agencyCharNotice\(charNotes\), \.\.\.optOut\] \};/);   // ★ 2026-11-13 C130 수신거부 줄 안내가 뒤에 붙는다
+    // ★ 2026-11-25 빈 자리 · 점점 · 빈 값 줄이 앞에 붙는다(세 입구 공통 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §4-5)
+    expect(intake).toMatch(/return \{ ok: true, request, callbackKinds, notice: \[\.\.\.blankLines, \.\.\.agencyCharNotice\(charNotes\), \.\.\.optOut\] \};/);   // ★ 2026-11-13 C130 수신거부 줄 안내가 뒤에 붙는다
     expect(between(intake, "await logEvent(request.id, 'received', {", '});')).toContain('...callbackKinds');
     expect(route).toMatch(/via: 'one-step', \.\.\.createdKinds\[i\]/);
     expect(between(mailWorker, "await logEvent(requestRows[i].id, 'received', {", '});')).toContain('...requestKinds[i]');

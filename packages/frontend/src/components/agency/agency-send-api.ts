@@ -37,6 +37,10 @@ export interface AgencySendRequest {
    * ⛔ 자동으로 고치지 않는다. [고치기]는 고치기 칸에 넣을 뿐이고, **저장**해야 기존 수정 경로로 재검사가 시작된다.
    */
   spellIssues?: AgencySpellIssue[] | null;
+  /** ★ 2026-11-25 지금 문안의 채우지 않은 자리(서버 판정 · 승인 확인과 같은 함수) */
+  blanks?: AgencyBlankView[];
+  /** ★ 2026-11-25 문안 항목 값이 빈 수신자 수(상세 조회에만 · 없으면 빈 배열) */
+  emptyVarRows?: Array<{ name: string; count: number }>;
   /**
    * 행 수정 번호. **승인·문안 수정·시각 변경은 이 값을 그대로 되돌려준다**(낙관적 잠금).
    * 화면이 보고 있던 것과 서버의 것이 다르면 서버가 거절한다 — 담당자가 못 본 문안이나 시각으로
@@ -126,6 +130,38 @@ async function unwrap(res: Response): Promise<any> {
 }
 
 /** ★2026-09-25 맞춤법 확인 한 줄(서버 `SpellIssue`와 같은 모양 · 위치는 그 버전 문안 기준) */
+/** ★ 2026-11-25 채우지 않은 자리(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §3) */
+export interface AgencyBlankView {
+  start: number;
+  end: number;
+  text: string;
+  kind: 'mark' | 'bracket';
+  /** 기호 꼴 뒤에 붙은 점 · 지점 · 매장 · 점포(없으면 '') */
+  suffix: string;
+  /** 화면 · 문장에 쓰는 자리 이름(「OOO점」 · 「[매장명]」) */
+  label: string;
+}
+/** ★ 2026-11-25 빈 자리를 채울 명단 열 후보(점 세기 = 전체 행) */
+export interface AgencyBlankCandidate {
+  column: string;
+  endsWithSuffix: number;
+  notSuffix: number;
+  empty: number;
+  distinct: number;
+  exampleWithSuffix: string;
+  exampleWithoutSuffix: string;
+}
+export interface AgencyBlankWithCandidates extends AgencyBlankView { candidates: AgencyBlankCandidate[] }
+/** ★ 2026-11-25 원스텝 채우기(위치 = 미리보기 baseContent) */
+export interface AgencySlotFill { start: number; end: number; before: string; column?: string; text?: string }
+
+/** ★ 2026-11-25 화면 접수의 채우지 않은 자리 판정(서버 CT 한 벌 · 저장 0) */
+export async function checkAgencyBlanks(content: string, headers: string[], rows: Array<Record<string, unknown>>): Promise<AgencyBlankWithCandidates[]> {
+  const res = await fetch('/api/agency-send/blank-check', { method: 'POST', headers: json(), body: JSON.stringify({ content, headers, rows: rows.slice(0, 200) }) });
+  const data = await unwrap(res);
+  return Array.isArray(data.blanks) ? data.blanks : [];
+}
+
 export interface AgencySpellIssue {
   id: string;
   start: number;
@@ -253,9 +289,10 @@ export async function overrideAgencySpamBlock(id: string, revision: number): Pro
   return (await unwrap(res)).request;
 }
 
-export async function approveAgencyRequest(id: string, revision: number): Promise<AgencySendRequest> {
+/** ★ 2026-11-25 blankAck = 「채우지 않은 자리 그대로 승인」 확인(빈 자리가 있으면 서버가 이 값 없이는 409 BLANK_ACK_REQUIRED) */
+export async function approveAgencyRequest(id: string, revision: number, blankAck = false): Promise<AgencySendRequest> {
   const res = await fetch(`/api/agency-send/${id}/approve`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ revision }),
+    method: 'POST', headers: json(), body: JSON.stringify({ revision, ...(blankAck ? { blankAck: true } : {}) }),
   });
   return (await unwrap(res)).request;
 }
@@ -351,6 +388,14 @@ export interface OneStepAnalysisView {
   charNotice?: string[];
   /** ★ 2026-11-13 C130 — 「무료」 없는 수신거부 줄이 있어 보낼 때 무료수신거부 줄이 한 번 더 붙는다는 안내(서버 판정 · 없으면 []) */
   optOutNotice?: string[];
+  /** ★ 2026-11-25 채우기 전 글(채우기 위치 기준) · 빈 자리 + 후보 열 · 알림 줄 · 한 파일 여러 건 */
+  baseContent?: string;
+  blanks?: AgencyBlankWithCandidates[];
+  intakeNotes?: string[];
+  pairs?: Array<{ index: number; label: string }>;
+  pairIndex?: number | null;
+  /** ★ 2026-11-25 조정값 채우기를 받지 못한 사유(없으면 null) */
+  fillError?: string | null;
 }
 
 export interface OneStepOverrides {
@@ -370,6 +415,10 @@ export interface OneStepOverrides {
    * 확정 때 다시 추론하지 않는다(화면에서 본 것과 같은 열 보장).
    */
   varMapping?: Record<string, string>;
+  /** ★ 2026-11-25 채우지 않은 자리 채우기(위치 = 미리보기 baseContent) */
+  slotFills?: AgencySlotFill[];
+  /** ★ 2026-11-25 한 파일 여러 건의 짝 차례(0부터 · 짝이 2 이상이면 접수에 필수) */
+  pairIndex?: number;
 }
 
 /**

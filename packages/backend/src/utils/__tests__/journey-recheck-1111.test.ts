@@ -409,13 +409,20 @@ describe('T5 계약 — 여정 AI 글 출구의 생산자 이름 = 알려진 집
     ]);
   });
   it('liquidCopyToPercent 를 부르는 운영 파일 = journey-ai-copy.ts 하나 · 변수 꼴 CT 를 부르는 생산자 파일', () => {
-    const callersOf = (name: string) => SRC_FILES.filter((f) => {
-      const sf = sfOf(f);
-      let n = 0;
-      const walk = (x: ts.Node): void => { if (ts.isCallExpression(x) && ts.isIdentifier(x.expression) && x.expression.text === name) n++; ts.forEachChild(x, walk); };
-      walk(sf);
-      return n > 0;
-    }).sort();
+    // ★ 2026-11-25 파일마다 한 번만 읽고 네 이름을 같이 센다 · 이름 글자가 없는 파일은 구문 트리를 만들지 않는다(호출이 있으려면 이름 글자가 있어야 한다)
+    //   옛 판 = 이름마다 소스 전수(약 1,100파일)를 구문 트리로 네 번 읽음 → 단위 전체 부하에서 60초 초과로 push 관문이 막힘(C162 · 단독 13.8초 · 부하 74초)
+    const NAMES = ['liquidCopyToPercent', 'journeyNewCopy', 'journeyRevisedCopy', 'journeyRevisedKept'];
+    const callers = new Map(NAMES.map((n) => [n, [] as string[]]));
+    for (const f of SRC_FILES) {
+      const text = be(f);
+      // 식별자 유니코드 이스케이프(`l…` · `\u{…}`)는 글자가 달라도 같은 이름이다 → `\u` 가 든 파일도 구문 트리로 본다(Codex 1R)
+      if (!NAMES.some((n) => text.includes(n)) && !text.includes('\\u')) continue;
+      const seen = new Set<string>();
+      const walk = (x: ts.Node): void => { if (ts.isCallExpression(x) && ts.isIdentifier(x.expression) && callers.has(x.expression.text)) seen.add(x.expression.text); ts.forEachChild(x, walk); };
+      walk(ts.createSourceFile(f, text, ts.ScriptTarget.Latest, true));
+      for (const n of seen) callers.get(n)!.push(f);
+    }
+    const callersOf = (name: string) => [...callers.get(name)!].sort();
     expect(callersOf('liquidCopyToPercent')).toEqual(['utils/journey-ai-copy.ts']);
     expect(callersOf('journeyNewCopy')).toEqual(['utils/journey-ai-generator.ts', 'utils/journey-builder.ts', 'utils/journey-step-diagnosis.ts']);
     expect(callersOf('journeyRevisedCopy')).toEqual(['utils/journey-ai-copy.ts', 'utils/journey-ai-editor.ts', 'utils/journey-ai-generator.ts', 'utils/variant-generator.ts']);

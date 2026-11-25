@@ -32,6 +32,7 @@ import { triggerAgencySendDispatch } from './agency-send-worker';
 import { agencyManagerPhones } from './agency-send-link';
 import { loadRequestRowCallbacks } from './agency-send-intake';
 import { checkSenderAuthGate, isSenderAuthEnforced, SENDER_AUTH_NOTICE, type SenderAuthGate } from './sender-auth';
+import { findAgencyBlanks, agencyBlankAckError } from './agency-send-blanks';   // ★ 2026-11-25 빈 자리 승인 확인(설계서 §5-1)
 
 /**
  * 대행 접수의 발신 인증(3.5) 관문 — 잠금을 쥐기 전에 부른다(인증번호 문자 = 외부 호출) · 스위치가 꺼져 있으면 DB 를 건드리지 않고 통과한다.
@@ -108,6 +109,11 @@ export async function approveAgencyRequestTx(opts: {
    *   (라우트가 먼저 걸러도, 그 읽기와 이 쓰기 사이의 변경은 여기서만 막을 수 있다).
    */
   link?: { phone: string; contentVersion: number; ip?: string; ua?: string };
+  /**
+   * ★ 2026-11-25 「채우지 않은 자리 그대로 승인」 확인(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5).
+   *   지금 문안에 빈 자리가 있으면 이 값이 참일 때만 승인한다(승인하는 사람이 접수한 사람과 다를 수 있다 · 지금 확인 창 단추가 곧 확인 = 단계 0).
+   */
+  blankAck?: boolean;
 }): Promise<ApproveOutcome> {
   if (opts.via === 'link' && !opts.link) {
     return { ok: false, status: 400, error: '승인 정보가 올바르지 않습니다.' };
@@ -131,6 +137,11 @@ export async function approveAgencyRequestTx(opts: {
   // ③ 승인할 수 없는 건에는 인증번호를 보내지 않는다(문자 비용 · 의미 없는 인증)
   const preCheck = approvalCheckOf(preRow, opts.revision);
   if (!preCheck.ok) return approvalRejection(preCheck, String(preRow.status));
+  // ★ 2026-11-25 빈 자리 확인 = 발신 인증 문자 전(승인 못 할 건에 인증번호 0) · revision 을 이미 대조한 그 행으로
+  const preBlanks = findAgencyBlanks(preRow.current_content);
+  if (preBlanks.length > 0 && opts.blankAck !== true) {
+    return { ok: false, status: 409, error: agencyBlankAckError(preBlanks), code: 'BLANK_ACK_REQUIRED' };
+  }
 
   // ④ 발신 인증(3.5) — 잠금을 쥐기 전에. 스위치가 꺼져 있으면 게이트는 DB 를 건드리지 않고 통과한다.
   if (approverUserId) {
@@ -162,6 +173,12 @@ export async function approveAgencyRequestTx(opts: {
     if (!check.ok) {
       await client.query('ROLLBACK');
       return approvalRejection(check, String(row.status));
+    }
+    // ★ 2026-11-25 잠금 아래 다시(그 사이 문안이 바뀌었으면 revision 이 이미 막지만 판정 글은 잠근 행으로 한 번 더)
+    const lockedBlanks = findAgencyBlanks(row.current_content);
+    if (lockedBlanks.length > 0 && opts.blankAck !== true) {
+      await client.query('ROLLBACK');
+      return { ok: false, status: 409, error: agencyBlankAckError(lockedBlanks), code: 'BLANK_ACK_REQUIRED' };
     }
 
     const updated = await client.query(

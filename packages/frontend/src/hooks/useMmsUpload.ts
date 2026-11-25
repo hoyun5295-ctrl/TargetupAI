@@ -188,7 +188,8 @@ export function useMmsUpload(onError: (msg: string) => void, opts?: MmsUploadOpt
         await fetch(img.url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
       } catch { /* 서버 삭제 실패해도 UI에서는 제거 */ }
     }
-    setMmsUploadedImages(prev => prev.filter((_, i) => i !== index));
+    // ★ 2026-11-25 칸 번호가 아니라 누른 그 이미지를 지운다 — 서버 삭제를 기다리는 사이 목록이 바뀌면(자리 바꾸기 · 원스텝 건 바꾸기) 칸 번호는 다른 이미지를 가리킨다(Codex 구현 7R)
+    setMmsUploadedImages(prev => (img ? prev.filter((x) => x !== img) : prev));
   };
 
   // ★ 2026-09-29 두 칸의 사진 자리 바꾸기(끌어 놓기 · ◀ ▶). 서버 파일은 그대로 · 목록 순서만 바뀐다.

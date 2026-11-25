@@ -25,6 +25,7 @@ import { useToast } from '../ToastProvider';
 import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
 import SmsCharsetNotice from '../SmsCharsetNotice';
+import AgencyBlankFixBox from './AgencyBlankFixBox';
 import { buildAdSubjectFront, startsWithAdMark, pickAgencySmsCandidates, estimateAgencySmsBytesFromCandidates, normalizeAgencyPhoneFront, findVarTokens } from '../../utils/formatDate';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
@@ -35,6 +36,7 @@ import {
   AGENCY_MMS_UPLOAD, aiGuessPhoneColumn, applyAgencySpellToDraft, checkAgencyContentSpelling, createAgencyRequest,
   extractAgencyVars, MAX_AGENCY_VARS, toLocalInput,
   type AgencySendRequest, type AgencySpellIssue,
+  checkAgencyBlanks, type AgencyBlankWithCandidates, type AgencySlotFill,
 } from './agency-send-api';
 
 interface SenderNumber { phone_number?: string; phone?: string }
@@ -252,6 +254,72 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
   const usedVars = useMemo(() => extractAgencyVars(content), [content]);
   /** 문안 칩으로 쓸 열(전화번호 열은 뺀다) */
   const varColumns = useMemo(() => headers.filter((h) => h !== phoneColumn), [headers, phoneColumn]);
+
+  // ★ 2026-11-25 채우지 않은 자리(서버 판정 한 벌 · /sms-bytes 꼴 0.4초 대기 · 늦은 응답 버림 · 실패 = 상자 안 그림 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §4-4)
+  const [blankRaw, setBlankRaw] = useState<AgencyBlankWithCandidates[]>([]);
+  const [blankFor, setBlankFor] = useState('');
+  useEffect(() => {
+    const text = content;
+    if (!text.trim()) { setBlankRaw([]); setBlankFor(''); return; }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      try {
+        const cols = varColumns;
+        const sample = rows.slice(0, 200).map((r) => Object.fromEntries(cols.map((c) => [c, r[c] ?? null])));
+        const list = await checkAgencyBlanks(text, cols, sample);
+        if (alive) { setBlankRaw(list); setBlankFor(text); }
+      } catch { if (alive) { setBlankRaw([]); setBlankFor(''); } }
+    }, 400);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [content, varColumns, rows]);
+  /** 점 세기는 화면이 가진 명단 전체로 다시 센다(서버에는 앞 200행만 보냈다) · 지금 글과 다른 판정은 그리지 않는다 */
+  const composerBlanks = useMemo<AgencyBlankWithCandidates[]>(() => {
+    if (blankFor !== content) return [];
+    return blankRaw.map((b) => ({
+      ...b,
+      candidates: b.candidates.map((c) => {
+        const suffix = b.suffix || '점';
+        const vals = rows.map((r) => String(r[c.column] ?? '').trim());
+        const filled = vals.filter(Boolean);
+        const withS = filled.filter((v) => v.endsWith(suffix));
+        const without = filled.filter((v) => !v.endsWith(suffix));
+        return { ...c, endsWithSuffix: withS.length, notSuffix: without.length, empty: vals.length - filled.length, distinct: new Set(filled).size, exampleWithSuffix: withS[0] || '', exampleWithoutSuffix: without[0] || '' };
+      }),
+    }));
+  }, [blankRaw, blankFor, content, rows]);
+  /** 항목이 지금 이어진 열 = 명시 연결 · 없으면 같은 이름 열(3단계 자동 연결과 같은 규칙 · 미리보기 · 채우기가 같이 쓴다) */
+  const linkedColumn = (name: string): string | undefined =>
+    varMapping[name] || headers.find((h) => h.replace(/\s+/g, '') === name.replace(/\s+/g, ''));
+  /** 채우기 = 접수 전 글을 바로 바꾼다(그 자리 글이 그대로일 때만 · 화면 접수는 초안이라 서버 조정값이 필요 없다) */
+  const applyComposerFill = (fills: AgencySlotFill[]) => {
+    const f = fills[fills.length - 1];
+    if (!f) return;
+    if (content.slice(f.start, f.end) !== f.before) { toast.error('문안이 바뀌어 그 자리를 찾지 못했습니다. 다시 눌러 주세요.'); return; }
+    // 넣을 항목 이름이 변수로 읽혀야 한다(숫자로 시작 · 20자 넘음 = 안 읽힌다 · 서버 판정과 같은 규칙 · Codex 구현 2R)
+    if (f.column && !/^[가-힣A-Za-z_][^%\s]{0,19}$/.test(f.column.replace(/\s+/g, ''))) { toast.error(`열 이름 「${f.column}」은 문안 항목으로 쓸 수 없습니다. 열 이름을 한글이나 영문으로 시작하게 바꿔 주세요.`); return; }
+    const name = f.column ? f.column.replace(/\s+/g, '') : '';
+    // 문안에 이미 있는 항목이면 지금 이어진 열(미리보기 · 3단계 자동 연결과 같은 규칙)과 고른 열이 같아야 한다 — 다르면 원래 자리 값까지 바뀐다(Codex 구현 3R · 4R)
+    const linked = f.column && findVarTokens(content).some((t) => t.name === name) ? linkedColumn(name) : undefined;
+    if (f.column && linked && linked !== f.column) { toast.error(`%${name}% 항목은 이미 「${linked}」 열에 이어져 있습니다. 한 열만 골라 주세요.`); return; }
+    const put = f.column ? `%${name}%` : String(f.text || '').trim();
+    if (!f.column && put.includes('%')) { toast.error('넣을 이름에 % 는 쓸 수 없습니다.'); return; }
+    const next = content.slice(0, f.start) + put + content.slice(f.end);
+    // 채운 뒤 변수 = 원래 변수(옮긴 위치) + 열로 채운 자리, 정확히 이 집합(숫자 바로 뒤 % = 퍼센트 · 서버 판정과 같은 대조 · Codex 구현 4R)
+    const delta = put.length - (f.end - f.start);
+    const want = [
+      ...findVarTokens(content).filter((t) => t.end <= f.start || t.start >= f.end).map((t) => ({ start: t.start >= f.end ? t.start + delta : t.start, name: t.name })),
+      ...(f.column ? [{ start: f.start, name }] : []),
+    ];
+    const got = findVarTokens(next);
+    if (got.length !== want.length || want.some((w) => !got.some((t) => t.start === w.start && t.name === w.name))) {
+      toast.error(f.column
+        ? `「${f.before}」 바로 앞이 숫자라 열 값이 들어가지 않습니다. 문안에서 그 앞에 띄어쓰기를 넣은 뒤 다시 채워 주세요.`
+        : '넣은 이름이 숫자로 끝나 바로 뒤 항목에 값이 들어가지 않습니다. 문안에서 그 자리 뒤에 띄어쓰기를 넣은 뒤 다시 채워 주세요.');
+      return;
+    }
+    if (f.column) setVarMapping({ ...varMapping, [name]: f.column });
+    setContent(next);
+  };
 
   const reset = () => {
     setStep(1); setFileName(null); setHeaders([]); setRows([]); setPhoneColumn(''); setPasted('');
@@ -486,7 +554,7 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
       let v: any;
       if (recipientInfo.source === 'file') {
         // 매핑표가 아직 안 채워진 항목도 같은 이름 열이면 미리 채워 보여준다(3단계로 넘어갈 때 자동으로 맞는 것과 같은 규칙)
-        const col = varMapping[name] || headers.find((h) => h.replace(/\s+/g, '') === name.replace(/\s+/g, ''));
+        const col = linkedColumn(name);
         v = col ? recipientInfo.srcRows?.[idx]?.[col] : undefined;
       } else {
         v = row?.vars?.[name];
@@ -724,6 +792,16 @@ export default function AgencySendComposer({ show, onClose, onCreated, prefill }
                       texts={[content, subject]}
                       onApply={(fix) => { setContent((prev) => fix(prev)); setSubject((prev) => fix(prev)); }}
                     />
+                    {/* ★ 2026-11-25 채우지 않은 자리 — 명단 열로 1클릭 · 열이 없으면 두 길(설계서 §4-4) */}
+                    <div className="mt-2">
+                      <AgencyBlankFixBox
+                        blanks={composerBlanks}
+                        fills={[]}
+                        onChange={applyComposerFill}
+                        varCount={usedVars.length}
+                        onRedoFile={() => setStep(1)}
+                      />
+                    </div>
                     {/* ★2026-09-25 접수 전 맞춤법 검사 — 접수 뒤 검사(테스트 문자 뒤)와 같은 판정. 접수 전에 고치면 재검사 왕복이 없다 */}
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
                       <button type="button" onClick={runComposerSpell} disabled={spellBusy || !content.trim()} className={CUI_BTN_OUTLINE}>

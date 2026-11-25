@@ -29,6 +29,8 @@ import {
   AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, linkCancelReason,
 } from '../utils/agency-send-link';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
+import { findAgencyBlanks, blankLabel } from '../utils/agency-send-blanks';   // ★ 2026-11-25 빈 자리 판정 CT
+import { loadAgencyEmptyVarRows } from '../utils/agency-send-intake';
 import { notifyManager, sendAgencyApprovalRequest, isSpamOverriddenVersion } from '../utils/agency-send-worker';
 import { buildLinkActionNotify, buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
 import { agencyActions } from '../utils/agency-send-actions';
@@ -79,6 +81,8 @@ function toApprovalView(row: any) {
     approvedAt: row.approved_at,
     // ★2026-09-25 맞춤법 확인 목록(문안에서 나온 것뿐이라 노출 규칙 안) · ★2026-10-18 고르면 링크에서 고친다(축 3 · 잠긴 제안 = blocked)
     spellIssues: readAgencySpell(row),
+    // ★ 2026-11-25 채우지 않은 자리(승인 확인과 같은 함수 · 설계서 §4-5 · §5)
+    blanks: findAgencyBlanks(row.current_content).map((b) => ({ ...b, label: blankLabel(b) })),
     // ★2026-10-18 이 링크로 할 수 있는 조작 · 승인 마감(서버 판정 한 벌)
     actions: agencyActions('link', row),
     // ★ 2026-11-24 발송일 당일 검사를 이미 마쳤는가(마지막 검사 중 · 예약 준비 중을 화면이 가른다 · Codex 구현 4R #2)
@@ -92,11 +96,16 @@ function toApprovalView(row: any) {
  * 실패해도 승인 화면·승인 결과를 막지 않는다(0 = 표시 안 함).
  * ★2026-09-13(3) 규칙·조회는 CT(`loadAgencyCallbackKinds`)로 올렸다(목록·상세·운영 화면과 한 벌 · 빈 번호 = 대표 번호 규칙 그대로).
  */
-async function loadLinkExtras(row: any): Promise<{ callbackKinds: number; callbackSole: string | null; spamOverridden: boolean | null }> {
+async function loadLinkExtras(row: any): Promise<{ callbackKinds: number; callbackSole: string | null; spamOverridden: boolean | null; emptyVarRows: Array<{ name: string; count: number }> }> {
   const kinds = (await loadAgencyCallbackKinds([row])).get(row.id) ?? { callbackKinds: 0, callbackSole: null };
   // ★ 2026-11-24 지금 문안 버전 = 담당자가 스팸 검사 결과와 관계없이 그대로 보내기를 고른 글(승인하는 사람이 통과로 읽지 않게 · Codex 구현 1R #4)
   //   커밋 뒤 응답(승인 · 취소 · 시각)에도 실린다 = 조회 실패는 null(확인 못 함)로 · 조작 결과를 실패로 돌리지 않는다(Codex 구현 2R #4)
-  return { ...kinds, spamOverridden: await isSpamOverriddenVersion(String(row.id), Number(row.content_version)).catch(() => null) };
+  return {
+    ...kinds,
+    spamOverridden: await isSpamOverriddenVersion(String(row.id), Number(row.content_version)).catch(() => null),
+    // ★ 2026-11-25 문안 항목 값이 빈 수신자 수(읽을 때 셈 · 실패 = 줄 안 그림 · 설계서 §5-3)
+    emptyVarRows: await loadAgencyEmptyVarRows(row).catch(() => []),
+  };
 }
 
 router.get('/info', async (req: Request, res: Response) => {
@@ -132,6 +141,8 @@ router.post('/approve', async (req: Request, res: Response) => {
       approvedBy: null,
       via: 'link',
       req: { ip: req.ip, headers: req.headers },
+      // ★ 2026-11-25 「채우지 않은 자리 그대로 승인」 확인(설계서 §5)
+      blankAck: req.body?.blankAck === true,
       link: {
         phone: resolved.phone,
         contentVersion: resolved.contentVersion,

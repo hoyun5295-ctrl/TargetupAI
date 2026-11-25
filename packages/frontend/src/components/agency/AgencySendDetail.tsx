@@ -49,6 +49,8 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+  // ★ 2026-11-25 채우지 않은 자리에 넣을 이름(한 매장)
+  const [blankName, setBlankName] = useState('');
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [newWhen, setNewWhen] = useState('');
@@ -141,18 +143,20 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     } catch { /* 조회 실패는 이미 뜬 오류 위에 덧씌우지 않는다 */ }
   };
 
-  const doApprove = async () => {
+  /** ★ 2026-11-25 blankAck = 「채우지 않은 자리 그대로 승인」 확인(빈 자리가 있으면 서버가 이 값 없이는 409 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5-2) */
+  const doApprove = async (blankAck = false) => {
     if (!req || busy) return;
     // ★ 2026-09-10 문자로 보낼 수 없는 글자가 남아 있으면 승인하지 않는다(설계 D2 · 문안 아래 안내에서 바꾼 뒤 저장)
     if (hasUnsupportedSmsChars(req.currentContent)) { toast.error(SMS_CHARSET_BLOCK_MESSAGE); return; }
     setBusy(true);
     try {
-      apply(await approveAgencyRequest(req.id, req.revision));
+      apply(await approveAgencyRequest(req.id, req.revision, blankAck));
       toast.success('승인했습니다. 요청한 시각에 나가도록 예약됩니다.');
     } catch (e: any) {
       // ★2026-10-16 승인 = 발송 결정이라 발신 인증(3.5)을 서버가 요구할 수 있다 — 인증 창을 띄우고, 통과하면 이 승인을 다시 보낸다
       //   (판정은 서버 소유 · 화면은 응답 코드만 본다 · 설계서 docs/2026-10-16-agency-send-mobile-control-design.md §2 축 0)
-      if (senderAuth.handleResponse(e?.data, () => { void doApprove(); })) return;
+      // ★ 2026-11-25 인증을 마치고 다시 부르는 승인도 같은 확인값을 들고 간다(인증 뒤 409 되풀이 0)
+      if (senderAuth.handleResponse(e?.data, () => { void doApprove(blankAck); })) return;
       toast.error(e?.message || '승인하지 못했습니다.');
       await refresh();
     } finally { setBusy(false); }
@@ -368,6 +372,44 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 )}
               </div>
 
+              {/* ★ 2026-11-25 채우지 않은 자리 · 빈 값(한 매장 = 이름을 고치기 칸에 넣기 · 여러 매장 = 새로 접수 안내 · 설계서 §4-5) */}
+              {((req.blanks || []).length > 0 || (req.emptyVarRows || []).length > 0) && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 space-y-2 break-keep">
+                  {(req.blanks || []).length > 0 && (
+                    <>
+                      <p className="flex items-center gap-1.5 text-[13px] font-bold text-amber-900">
+                        <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={2} />
+                        채우지 않은 자리가 있어요: {[...new Set((req.blanks || []).map((b) => b.label))].join(', ')}
+                      </p>
+                      <p className="text-[12.5px] text-amber-900 leading-relaxed">
+                        이대로 승인하면 받는 분 모두에게 이 글자 그대로 나가요. 한 매장이면 아래에 매장 이름을 넣어 고쳐 주세요. 매장마다 다르면 이 발송을 취소하고 매장명 열이 있는 명단으로 새로 접수해 주세요.
+                      </p>
+                      {changeable && (
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <input value={blankName} onChange={(e) => setBlankName(e.target.value)} placeholder="넣을 이름(예: 강남점)"
+                            className={`${CUI_INPUT} sm:max-w-[240px]`} aria-label="채우지 않은 자리에 넣을 이름" />
+                          <button type="button" disabled={!blankName.trim()} className={`${CUI_BTN_OUTLINE} justify-center`}
+                            onClick={() => {
+                              const label = (req.blanks || [])[0]?.label || '';
+                              const base = editing ? draft : req.currentContent;
+                              const at = label ? base.indexOf(label) : -1;
+                              if (at < 0) { toast.error('고치기 칸에서 그 자리를 찾지 못했습니다. 직접 고쳐 주세요.'); return; }
+                              setDraft(base.slice(0, at) + blankName.trim() + base.slice(at + label.length));
+                              setEditing(true);
+                              setBlankName('');
+                            }}>
+                            고치기 칸에 넣기
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {(req.emptyVarRows || []).map((e) => (
+                    <p key={e.name} className="text-[12.5px] text-amber-800">명단 {e.count.toLocaleString()}명은 「{e.name}」 칸이 비어 있어 그 자리가 빈칸으로 나가요.</p>
+                  ))}
+                </div>
+              )}
+
               {/* ★2026-09-25 맞춤법 확인(검사 결과 · 자동으로 고치지 않는다 · 고치고 저장하면 검사를 다시 한다) */}
               {changeable && Array.isArray(req.spellIssues) && req.spellIssues.some((i) => !spellKept.has(i.id)) && (
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3.5">
@@ -464,7 +506,21 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
               })}>취소하기</button>
           ) : <span />}
           {req && isApprovable(req.status) && !editing && !locked && (
-            <button type="button" onClick={doApprove} disabled={busy} className={CUI_BTN_PRIMARY}>
+            <button type="button" disabled={busy} className={CUI_BTN_PRIMARY}
+              onClick={() => {
+                // ★ 2026-11-25 빈 자리가 있을 때만 한 번 묻는다(그대로 승인 = 확인 · 고치기 = 고치기 칸 · 설계서 §5-2)
+                const labels = [...new Set((req.blanks || []).map((b) => b.label))].join(', ');
+                if (!labels) { void doApprove(); return; }
+                setConfirm({
+                  mode: 'warning',
+                  title: '채우지 않은 자리가 있어요',
+                  description: `${labels} 자리가 채워지지 않았어요. 이대로 승인하면 받는 분 모두에게 이 글자 그대로 나가요.`,
+                  confirmLabel: '그대로 승인하기',
+                  altLabel: '고치기',
+                  onAlt: () => { setConfirm(null); setDraft(req.currentContent); setEditing(true); },
+                  onConfirm: () => { setConfirm(null); void doApprove(true); },
+                });
+              }}>
               {busy ? <Loader2 className="w-[15px] h-[15px] animate-spin" /> : <Check className="w-[15px] h-[15px]" />}
               승인하고 예약하기
             </button>

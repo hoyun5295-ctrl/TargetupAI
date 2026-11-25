@@ -51,6 +51,10 @@ interface ApprovalView {
   spamOverridden?: boolean | null;
   /** ★ 2026-11-24 발송일 당일 검사를 이미 마쳤는가(마지막 검사 중 · 예약 준비 중을 가른다) */
   finalTested?: boolean;
+  /** ★ 2026-11-25 채우지 않은 자리(서버 판정 · 승인 확인과 같은 함수 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5) */
+  blanks?: Array<{ start: number; label: string }>;
+  /** ★ 2026-11-25 문안 항목 값이 빈 수신자 수 */
+  emptyVarRows?: Array<{ name: string; count: number }>;
 }
 
 type Sheet = 'approve' | 'cancel' | 'reschedule' | 'resume' | 'spell' | null;
@@ -161,7 +165,9 @@ export default function AgencyApprovePage() {
     if (working || state.kind !== 'ready' || state.forToken !== token) return;
     setWorking(true);
     try {
-      const out = await post('approve', { revision: state.request.revision });
+      // ★ 2026-11-25 빈 자리가 있으면 이 확인 창의 단추가 곧 「그대로 승인」 확인이다(서버는 이 값 없이는 409 · 단계 0)
+      const hasBlanks = (state.request.blanks || []).length > 0;
+      const out = await post('approve', { revision: state.request.revision, ...(hasBlanks ? { blankAck: true } : {}) });
       if (!out) return;
       if (!out.failed) { setSheet(null); setState({ kind: 'done', request: out.request }); return; }
       setSheet(null);
@@ -215,6 +221,8 @@ export default function AgencyApprovePage() {
   const a = lockLinkActions(r.actions, r.requestedAt, nowMs);
   const doneByStatus = r.status === 'approved' || r.status === 'final_testing' || r.status === 'queued';
   // ★ 2026-10-20 승인된 건의 카드 = 상태대로(막 승인 · 승인과 함께 예약됨 · 15분 잠금으로 못 바꿈)
+  // ★ 2026-11-25 채우지 않은 자리 이름(문장 · 확인 창 단추가 같은 값)
+  const blankLabels = [...new Set((r.blanks || []).map((b) => b.label))].join(', ');
   const card = linkApprovedCard({ justApproved: state.kind === 'done', status: r.status, when: formatWhen(r.requestedAt), cancel: a?.cancel, overridden: r.spamOverridden === true, finalTested: r.finalTested === true });
   const fixable = (r.spellIssues || []).filter((i) => !i.blocked);
   const ready = state.kind === 'ready';
@@ -257,6 +265,26 @@ export default function AgencyApprovePage() {
                 {adTextOnFront(r.isAd, r.adText) ? ' 광고 표시와 무료 수신거부 번호는 자동으로 붙습니다.' : ''}
               </p>
             </div>
+            {/* ★ 2026-11-25 채우지 않은 자리 · 빈 값(여기서는 고칠 수 없다 = 할 길을 문장으로 · 설계서 §4-5) */}
+            {((r.blanks || []).length > 0 || (r.emptyVarRows || []).length > 0) && (
+              <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 break-keep">
+                {(r.blanks || []).length > 0 && (
+                  <>
+                    <p className="flex items-center gap-1.5 text-[13px] font-bold text-amber-900">
+                      <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={2} />
+                      채워지지 않은 자리가 있어요: {blankLabels}
+                    </p>
+                    <p className="mt-1 text-[12.5px] text-amber-900 leading-relaxed">이대로 승인하면 받는 분 모두에게 {blankLabels} 글자 그대로 나가요.</p>
+                    <p className="mt-1 text-[12.5px] text-amber-800 leading-relaxed">
+                      한 매장이면 한줄로 대행발송 상세에서 고치기로 매장 이름을 넣어 주세요. 매장마다 다르면 아래에서 이 발송을 취소하고 매장명 열이 있는 명단으로 새로 접수해 주세요.
+                    </p>
+                  </>
+                )}
+                {(r.emptyVarRows || []).map((e) => (
+                  <p key={e.name} className="mt-1 text-[12.5px] text-amber-800">명단 {e.count.toLocaleString()}명은 「{e.name}」 칸이 비어 있어 그 자리가 빈칸으로 나가요.</p>
+                ))}
+              </div>
+            )}
             {Array.isArray(r.spellIssues) && r.spellIssues.length > 0 && ready && (
               <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50/60 px-4 py-3">
                 <p className="text-[13px] font-bold text-emerald-900">맞춤법을 확인할 곳 {r.spellIssues.length}곳</p>
@@ -353,9 +381,13 @@ export default function AgencyApprovePage() {
       <LinkConfirmSheet open={sheet === 'approve'} title="이 문안 그대로 승인할까요?" rows={summaryRows} tone="primary" busy={working}
         notes={[
           ...(r.spamOverridden === true ? [{ tone: 'warn' as const, text: '이 문안은 스팸 검사에 걸렸지만 담당자가 그대로 보내기로 했어요. 걸린 통신사를 쓰시는 분께는 닿지 않을 수 있어요.' }] : []),
+          // ★ 2026-11-25 빈 자리 = 이 창의 단추가 곧 확인(설계서 §5-2)
+          ...((r.blanks || []).length > 0 ? [{ tone: 'warn' as const, text: `${blankLabels} 자리가 채워지지 않았어요. 받는 분 모두에게 이 글자 그대로 나가요.` }] : []),
           { tone: 'info', text: '승인하면 정해진 시각에 그대로 나갑니다. 보내기 전까지 이 화면에서 취소할 수 있어요.' },
         ]}
-        confirmLabel={`승인하기 · ${r.recipientCount.toLocaleString()}명`} onConfirm={() => { void approve(); }} onCancel={() => setSheet(null)} />
+        confirmLabel={(r.blanks || []).length > 0
+          ? `${(r.blanks || []).length === 1 ? blankLabels : '빈 자리'} 그대로 두고 승인하기`
+          : `승인하기 · ${r.recipientCount.toLocaleString()}명`} onConfirm={() => { void approve(); }} onCancel={() => setSheet(null)} />
       <LinkConfirmSheet open={sheet === 'cancel'} title="이 발송을 취소할까요?" rows={summaryRows} tone="danger" busy={working}
         notes={[
           { tone: 'warn', text: '취소하면 되돌릴 수 없어요. 다시 보내려면 새로 접수해야 해요.' },

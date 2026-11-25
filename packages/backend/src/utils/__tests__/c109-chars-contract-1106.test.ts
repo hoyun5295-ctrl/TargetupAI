@@ -230,9 +230,10 @@ describe('K5(R68) 쓰는 자리 판정 — 대행 글 준비 CT', () => {
     expect(core.indexOf('prepareAgencyText(')).toBeLessThan(core.indexOf('const body = String(content'));
     expect(core.indexOf('await logCharCleanedTx(client, request.id, charNotes);')).toBeLessThan(core.indexOf("if (own) await client.query('COMMIT');"));
     const an = sliceFn(intake, 'export async function analyzeOneStep(', 'export async function hasApprovalRequestedColumn(');
-    expect(an.indexOf('prepareAgencyCopy(')).toBeLessThan(an.indexOf('extractAgencyVars(formContent)'));
+    // ★ 2026-11-25 분석 글 = 정리 → 괄호 변수 → 채우기 → 정리 한 번 더(analysisContent · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §4-1)
+    expect(an.indexOf('prepareAgencyCopy(')).toBeLessThan(an.indexOf('extractAgencyVars(analysisContent)'));
     expect(an).toContain('recipientCleaner.clean(vars, rowIdx + 1)');
-    expect(an).toContain('content: formContent.trim()');
+    expect(an).toContain('content: analysisContent.trim()');
     const change = read('utils/agency-send-change.ts');
     expect(change.indexOf('prepareAgencyCopy(')).toBeLessThan(change.indexOf('buildSlotPlan(body)'));
     expect(change).toContain("{ forceContent: true, contentOnly: true }");

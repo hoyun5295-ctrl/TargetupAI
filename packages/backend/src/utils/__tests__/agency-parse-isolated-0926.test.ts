@@ -75,7 +75,8 @@ describe('배선', () => {
     expect(stub).toBeLessThan(child.indexOf("require('../utils/agency-send-form')"));
   });
   it('이메일 워커도 별도 프로세스에서 읽는다', () => {
-    expect(worker).toContain('await parseAgencyFilesIsolated(u.formBuf, u.listBuf)');
+    // ★ 2026-11-25 한 파일 여러 건 = 짝 시트 이름을 함께 넘긴다(생략 = 오늘 고르기 규칙)
+    expect(worker).toContain('await parseAgencyFilesIsolated(u.formBuf, u.listBuf, { formSheet: u.formSheet, listSheet: u.listSheet })');
     expect(worker).not.toContain('parseAgencyRequestForm(u.formBuf)');
     expect(worker).not.toContain('parseAgencyRecipientList(u.listBuf)');
   });

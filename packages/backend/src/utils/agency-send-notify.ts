@@ -46,6 +46,8 @@ export interface AgencyNotifyContext {
    *   검사를 통과한 것처럼 쓰지 않는다(Codex 구현 1R #4 · 승인하는 사람도 걸린 통신사 이용자에게 닿지 않을 수 있음을 안다).
    */
   overridden?: boolean;
+  /** ★ 2026-11-25 「문안에 채우지 않은 자리(OOO점)가 있습니다. 승인 전에 확인해 주세요.」(agencyBlankApprovalLine · 없으면 '' · 설계서 §5-4) */
+  blankLine?: string;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -83,6 +85,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
       `요청하신 ${ctx.originalWhenText}은 준비 시간이 촉박해 ${ctx.whenText}로 잡았습니다.`,
       ...(ctx.charLines || []),
       ctx.optOutLine || '',
+    ctx.blankLine || '',
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
       ctx.approveUrl
         ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
@@ -98,6 +101,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
     ...(ctx.charLines || []),
     ctx.optOutLine || '',
+    ctx.blankLine || '',
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'

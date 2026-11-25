@@ -38,9 +38,12 @@ import {
   pickPhoneColumnStrict, resolveCallbackPlan,
   looksLikeRequestForm, hasRecipientSheet, unreadableAgencyForm,
 } from './agency-send-form';
+// ★ 2026-11-25 한 파일 여러 건 · 이미지 이름 맞추기 · 괄호 자리(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §6-2 · §7 · §8-3)
+import { planAgencyWorkbook, matchAgencyUnitImages, agencyUnitLabel, type AgencyWorkbookPlan } from './agency-send-workbook';
+import { findAgencyBlanks } from './agency-send-blanks';
 // ★ 2026-09-26 한줄로 V2 S1-H03 — 엑셀 파싱은 별도 프로세스(CT)
-import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
-import { extractAgencyVars } from './agency-send-vars';
+import { parseAgencyFilesIsolated, planAgencyWorkbookIsolated, type IsolatedWorkbookPlan } from './agency-send-parse-isolated';
+import { extractAgencyVars, toStoredVars } from './agency-send-vars';
 import { EMAIL_MIN_LEAD_MINUTES, EMAIL_DUP_BLOCKING_SQL, emailDupTimeSql } from './agency-send-state';
 import { agencyMailUser, isAgencyMailerReady, sendAgencyReplyMail } from './agency-mailer';
 import { buildSpamResultMail } from './agency-spam-diag';   // ★ 2026-11-24 검사 결과 회신 메일 본문(M3)
@@ -66,7 +69,8 @@ const MAX_ATTACH_TOTAL = 50 * 1024 * 1024;
  * 첨부 상한의 1.67배를 유지한다(종전 25/15와 같은 비율).
  */
 const MAX_MESSAGE_OCTETS = Math.round(MAX_ATTACH_TOTAL * 5 / 3);
-const MAX_ATTACH_FILES = 5;
+// ★ 2026-11-25 5 → 20 = 요청서 파일 5 + 이미지 15(한 파일 여러 건 메일 = 건마다 3장 · 설계서 §7) · 실질 방어선은 용량 상한
+const MAX_ATTACH_FILES = 20;
 /** 안내 문구에 쓰는 표기(상한을 바꾸면 문구가 저절로 따라온다 — 숫자를 문장에 다시 적지 않는다) */
 const ATTACH_LIMIT_LABEL = `${Math.round(MAX_ATTACH_TOTAL / 1024 / 1024)}MB`;
 /**
@@ -670,6 +674,11 @@ export interface IntakeUnit {
   listName: string;
   /** 사람이 이 건을 부르는 이름 = 요청서 첨부 파일명(회신 블록·담당자 문자 라벨) */
   fileName: string;
+  /** ★ 2026-11-25 한 파일 여러 건의 짝 시트 이름(없으면 오늘 고르기 규칙) */
+  formSheet?: string;
+  listSheet?: string;
+  /** ★ 2026-11-25 이 건의 요청서 「이미지 파일명」 이름표(자식 프로세스 판정이 함께 읽은 값 · 여러 건 + 이미지 맞추기 재료) */
+  imageNames?: string[];
 }
 export type IntakeUnitsResult =
   | { ok: true; units: IntakeUnit[] }
@@ -682,6 +691,57 @@ const asUnit = (a: { filename?: string | undefined; content: Buffer }): IntakeUn
 };
 
 /**
+ * ★ 2026-11-25 이미 접수된 같은 건이 있는가(3층 대조 · 실 PG 시험이 부르는 한 함수).
+ *   지문 = 회사 · 시각(원본 · 조정) · 문안 · 정렬된 번호 · 제목 · 받는 사람마다 회신번호 · 문안 값(SQL · 번호 집합이 같고 번호가 겹치지 않으니 한쪽 EXCEPT 로 같음)
+ *   + 붙는 이미지 **바이트 지문 차례**(저장 파일을 읽어 대조 · Codex 설계 7R · 구현 1R).
+ *   ⛔ 이미지 파일 이름은 지문이 아니다(같은 그림을 다른 이름으로 다시 보내면 두 번 접수 · 이름만 같고 그림이 바뀌면 건너뜀).
+ *   저장 파일을 못 읽은 옛 행 = 보수 쪽으로 원본 이름 차례 대조(두 번 발송 · 청구보다 건너뜀이 안전 · 다시 보내면 회신이 알린다).
+ */
+export async function findAcceptedEmailDuplicate(a: {
+  companyId: string; requestedAtIso: string | null; content: string; phones: string[]; subject: string;
+  /** 이 건에 붙는 이미지 바이트(sha256 hex · 첨부 차례) · 원본 이름(같은 차례) */
+  imageDigests: string[]; imageNames: string[];
+  dupTimeSql: string;
+  /** ★ 받는 사람마다 적용 회신번호 · 저장형 문안 값(toStoredVars) — 원장 행과 jsonb 로 같아야 중복(값만 바로잡은 재전송 = 중복 아님 · Codex 구현 1R) */
+  /** 받는 사람마다 번호 · 실제 발신번호(숫자만 · 행 번호가 없으면 대표 번호) · 저장형 문안 값 */
+  recipients: Array<{ phone: string; callback: string; vars: Record<string, unknown> }>;
+}): Promise<boolean> {
+  const r = await query(
+    `SELECT id, mms_image_paths, to_jsonb(agency_send_requests) -> 'mms_image_names' AS image_names FROM agency_send_requests
+      WHERE company_id = $1::uuid AND ${a.dupTimeSql} AND original_content = $3 AND ${EMAIL_DUP_BLOCKING_SQL}
+        AND (SELECT string_agg(x.phone, ',' ORDER BY x.phone COLLATE "C")
+               FROM agency_send_recipients x WHERE x.request_id = agency_send_requests.id) = $4
+        AND COALESCE(subject, '') = $5
+        AND NOT EXISTS (
+          SELECT x.phone,
+                 COALESCE(NULLIF(regexp_replace(COALESCE(x.callback, ''), '[^0-9]', '', 'g'), ''), regexp_replace(COALESCE(agency_send_requests.callback_number, ''), '[^0-9]', '', 'g')),
+                 x.vars
+            FROM agency_send_recipients x WHERE x.request_id = agency_send_requests.id
+          EXCEPT
+          SELECT e->>'phone', COALESCE(e->>'callback', ''), COALESCE(e->'vars', '{}'::jsonb) FROM jsonb_array_elements($6::jsonb) e
+        )
+      ORDER BY created_at DESC, id
+      LIMIT 50`,   // R12 = 순서 있는 LIMIT(후보는 같은 회사 · 시각 · 문안 · 명단 · 제목뿐이라 50 을 넘지 않는다 · 최근 접수부터 대조)
+    [a.companyId, a.requestedAtIso, a.content, a.phones.join(','), a.subject, JSON.stringify(a.recipients)],
+  );
+  for (const row of r.rows) {
+    const paths: string[] = Array.isArray(row.mms_image_paths) ? row.mms_image_paths.map(String) : [];
+    if (paths.length !== a.imageDigests.length) continue;
+    let digests: string[] | null = [];
+    for (const p of paths) {
+      try { digests.push(crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')); } catch { digests = null; break; }
+    }
+    if (digests) {
+      if (digests.every((d, i) => d === a.imageDigests[i])) return true;
+      continue;
+    }
+    const names: string[] = Array.isArray(row.image_names) ? row.image_names.map(String) : [];
+    if (names.length === a.imageNames.length && names.every((n, i) => n === a.imageNames[i])) return true;
+  }
+  return false;
+}
+
+/**
  * 표 파일들을 접수 단위로 가른다.
  *
  * ⛔ **다중은 "전원 자립형"에서만 열린다.** 자립형 = 한 파일에 요청서 시트와 고객리스트 시트가 다 있는 것.
@@ -691,7 +751,53 @@ const asUnit = (a: { filename?: string | undefined; content: Buffer }): IntakeUn
  */
 export function buildIntakeUnits(
   sheets: Array<{ filename?: string | undefined; content: Buffer }>,
+  /** ★ 2026-11-25 자식 프로세스가 미리 낸 파일마다 판정 + 이름표(없으면 이 자리에서 판정 = 순수 시험용) */
+  isolated?: IsolatedWorkbookPlan[],
 ): IntakeUnitsResult {
+  const r = buildIntakeUnitsCore(sheets, isolated);
+  if (!r.ok || !isolated) return r;
+  // 오늘 분기가 만든 단위에도 이름표를 싣는다(단위 = 파일 하나 · 파일 버퍼로 찾는다)
+  for (const u of r.units) {
+    if (u.imageNames) continue;
+    const i = sheets.findIndex((s) => s.content === u.formBuf);
+    if (i >= 0) u.imageNames = isolated[i]?.imageNames[0] ?? [];
+  }
+  return r;
+}
+
+function buildIntakeUnitsCore(
+  sheets: Array<{ filename?: string | undefined; content: Buffer }>,
+  isolated?: IsolatedWorkbookPlan[],
+): IntakeUnitsResult {
+  // ★ 2026-11-25 한 파일 여러 건(설계서 §6-2) — 파일마다 짝 판정. 모든 파일이 single 이면 아래 오늘 분기 그대로.
+  //   하나라도 짝 파일이면 모든 파일이 짝 파일이거나 자립형이어야 한다(별도 명단 두 파일 꼴과 섞으면 짝짓기가 파일 추론이 된다).
+  const plans: AgencyWorkbookPlan[] = isolated ? isolated.map((x) => x.plan) : sheets.map((a) => planAgencyWorkbook(a.content));
+  const invalid = plans.flatMap((pl, i) => (pl.kind === 'invalid' ? pl.reasons.map((r) => `${unitName(sheets[i], '대행발송요청서.xlsx')}: ${r}`) : []));
+  if (invalid.length > 0) return { ok: false, code: 'sheet_pairs_invalid', reasons: invalid };
+  if (plans.some((pl) => pl.kind === 'pairs')) {
+    const units: IntakeUnit[] = [];
+    for (let i = 0; i < sheets.length; i++) {
+      const pl = plans[i];
+      const name = unitName(sheets[i], '대행발송요청서.xlsx');
+      if (pl.kind === 'pairs') {
+        pl.pairs.forEach((pr, k) => {
+          units.push({
+            // 명단 이름 = 접수 행 file_name 이 된다 → 건마다 시트 이름을 붙여 목록 · 상세에서 다섯 건이 갈린다
+            formBuf: sheets[i].content, listBuf: sheets[i].content, listName: agencyUnitLabel(name, pr.formSheet), fileName: agencyUnitLabel(name, pr.formSheet),
+            formSheet: pr.formSheet, listSheet: pr.listSheet, ...(isolated ? { imageNames: isolated[i]?.imageNames[k] ?? [] } : {}),
+          });
+        });
+      } else if (looksLikeRequestForm(sheets[i].content) && hasRecipientSheet(sheets[i].content)) {
+        units.push({ ...asUnit(sheets[i]), ...(isolated ? { imageNames: isolated[i]?.imageNames[0] ?? [] } : {}) });
+      } else {
+        return { ok: false, code: 'form_not_identified', reasons: [`${name}: 요청서가 여러 건 든 파일과 함께 보낼 때는 파일마다 요청서 시트와 고객리스트 시트가 모두 들어 있어야 합니다.`] };
+      }
+    }
+    if (units.length > MAX_FORMS) {
+      return { ok: false, code: 'too_many_forms', reasons: [`요청서는 메일 한 통에 ${MAX_FORMS}건까지 보낼 수 있습니다. 지금은 ${units.length}건입니다. 나눠서 보내주세요.`] };
+    }
+    return { ok: true, units };
+  }
   const allStandalone = sheets.length > 0
     && sheets.every((a) => looksLikeRequestForm(a.content) && hasRecipientSheet(a.content));
 
@@ -908,7 +1014,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   /** 접수에 실을 이미지(맞춘 뒤의 바이트 · 첨부 순서 그대로). 저장은 아래 단건 경로에서만 한다 */
   let preparedImages: PreparedMailImage[] = [];
   if (imageAtts.length > 0) {
-    const prepared = await prepareMailMmsImages(imageAtts);
+    const prepared = await prepareMailMmsImages(imageAtts, LIMITS.mmsImageCount * MAX_FORMS);
     if (!prepared.ok) {
       await reject(prepared.reasons, 'mms_image_invalid');
       return;
@@ -920,7 +1026,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     return;
   }
   if (atts.length > MAX_ATTACH_FILES) {
-    await reject([`첨부가 ${atts.length}개입니다. 요청서 양식 파일 하나와 이미지 최대 ${LIMITS.mmsImageCount}장까지만 첨부해 주세요.`], 'too_many_files');
+    await reject([`첨부가 ${atts.length}개입니다. 요청서 파일과 이미지를 합쳐 ${MAX_ATTACH_FILES}개까지 첨부할 수 있습니다(이미지는 요청서 한 건에 ${LIMITS.mmsImageCount}장까지).`], 'too_many_files');
     return;
   }
   if (atts.reduce((a, b) => a + (b.size || b.content?.length || 0), 0) > MAX_ATTACH_TOTAL) {
@@ -932,7 +1038,10 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
   //   ★2026-09-05 §21-4 여기서 접수 **단위**를 만든다. 1개·2개 경로는 오늘 그대로이고,
   //   다중은 "표 파일 전원이 자립형"에서만 열린다(오늘 100% 반려되던 조합).
   const sheets = atts.filter((a) => /\.(xlsx|xls|csv)$/i.test(String(a.filename || '')));
-  const built = buildIntakeUnits(sheets.map((a) => ({ filename: a.filename, content: a.content as Buffer })));
+  // ★ 2026-11-25 파일마다 짝 판정 + 이름표를 자식 프로세스에서(큰 파일을 워커 프로세스에서 읽지 않는다 · Codex 설계 6R)
+  const sheetPlans: IsolatedWorkbookPlan[] = [];
+  for (const a of sheets) sheetPlans.push(await planAgencyWorkbookIsolated(a.content as Buffer));
+  const built = buildIntakeUnits(sheets.map((a) => ({ filename: a.filename, content: a.content as Buffer })), sheetPlans);
   if (!built.ok) {
     await reject(built.reasons, built.code);
     return;
@@ -942,12 +1051,29 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
 
   // ⛔ 다중 + 이미지 = 반려. 요청서가 여럿이면 "첨부 순서"로 어느 요청서의 이미지인지 정할 수 없다(불변 23).
   //   판정은 이미지 저장보다 **앞**이다 — 저장 뒤로 미루면 고아 파일 정리에 기대게 된다.
-  if (multi && imageAtts.length > 0) {
-    await reject([
-      '이미지가 들어가는 요청서는 메일 한 통에 하나씩 보내주세요.',
-      '요청서를 여러 개 함께 보내시면 어느 요청서에 붙일 이미지인지 알 수 없어 접수되지 않습니다. 메일을 나눠 보내시면 그대로 접수됩니다.',
-    ], 'multi_form_with_image');
+  // ★ 2026-11-25 건 하나 = 오늘 규칙(첨부 순서 · 3장) · 여러 건 + 이미지 = 요청서 「이미지 파일명」 칸과 첨부 이름으로 맞춘다(설계서 §7)
+  if (!multi && preparedImages.length > LIMITS.mmsImageCount) {
+    await reject([`이미지가 ${preparedImages.length}장입니다. 최대 ${LIMITS.mmsImageCount}장까지 첨부할 수 있습니다.`], 'mms_image_invalid');
     return;
+  }
+  /** 건마다 붙일 첨부 순번(여러 건 + 이미지일 때만) */
+  let unitImageAssign: number[][] | null = null;
+  if (multi && preparedImages.length > 0) {
+    // 이름표 = 자식 프로세스 판정이 함께 읽은 값(이 프로세스에서 파일을 다시 읽지 않는다)
+    const unitNames = units.map((u) => ({ label: u.fileName, names: u.imageNames ?? [] }));
+    if (unitNames.every((u) => u.names.length === 0)) {
+      await reject([
+        '요청서를 여러 개 함께 보내시면서 이미지를 붙이실 때는 요청서마다 「이미지 파일명」 칸에 붙일 이미지 파일 이름을 적어 주세요.',
+        '그 이름과 같은 이름의 이미지 파일을 메일에 함께 첨부하시면 요청서마다 맞춰 붙입니다.',
+      ], 'multi_form_with_image');
+      return;
+    }
+    const matched = matchAgencyUnitImages(unitNames, preparedImages.map((im) => im.name), LIMITS.mmsImageCount);
+    if (!matched.ok) {
+      await reject(matched.reasons, 'mms_image_unmatched');
+      return;
+    }
+    unitImageAssign = matched.assign;
   }
 
   // ── 8~10) 단위별 계획 수립 — DB 쓰기 0(이미지 디스크 저장만) ──
@@ -961,6 +1087,9 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     autoPickedPhoneColumn: boolean;
     /** 내용 4요소 해시 — 메일 안 형제 건과의 대조(3.5층) 전용 */
     dupKey: string;
+    /** ★ 2026-11-25 여러 건 + 이미지 = 이 건에 이름으로 맞춘 이미지(건 하나 = 빈 배열 · 오늘 경로의 savedImagePaths) */
+    imagePaths: string[];
+    imageNames: string[];
   }
   const plans: UnitPlan[] = [];
   const unitErrors: string[] = [];
@@ -985,7 +1114,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     // 8) 요청서 파싱 — 이메일 전용 사전 게이트(§18-3 · 확인 화면이 없는 경로의 추가 반려 규칙)
     // ★ 2026-09-26 한줄로 V2 S1-H03 — 요청서·명단을 한 번에 **별도 프로세스에서** 읽는다(워커가 API와 같은 프로세스라
     //   큰 명단을 여기서 읽으면 그동안 전부 멈췄다). 명단을 못 읽었으면 list = null(종전 catch와 같은 판정).
-    const parsedFiles = await parseAgencyFilesIsolated(u.formBuf, u.listBuf);
+    const parsedFiles = await parseAgencyFilesIsolated(u.formBuf, u.listBuf, { formSheet: u.formSheet, listSheet: u.listSheet });
     const form = parsedFiles.form ?? unreadableAgencyForm();
 
     // 8b) ★0827 §18-13 + ★0905 §21-2 발송 ID 확정.
@@ -1043,12 +1172,35 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     // ⛔ 이미지 파일명 칸 검사는 **단건·다중 공통**이다(★0905 Codex 1R 지적 ②).
     //   다중 분기 안에 두면 자립형 요청서 2장을 이미지 없이 보낸 메일이 이 검사를 건너뛰고,
     //   analyzeOneStep은 이미지 배열만 보므로 SMS/LMS로 결정되어 **이미지가 빠진 채 승인·발송**된다.
-    if (form.imageFileName && imageAtts.length === 0) {
+    // ★ 2026-11-25 ① 칸이 비고 ②③ 줄에만 적어도 이미지 지정이다(Codex 설계 7R)
+    if ((form.imageFileName || form.imageFileNames.length > 0) && imageAtts.length === 0) {
       fail(multi
-        ? '이미지 파일명이 적혀 있습니다. 이미지가 들어가는 요청서는 메일 한 통에 하나씩 보내주세요.'
+        ? `요청서에 이미지 파일명(${form.imageFileNames.join(', ') || form.imageFileName})이 적혀 있는데 같은 이름의 이미지가 첨부되어 있지 않습니다. 이미지 파일을 그 이름으로 함께 첨부해 주세요.`
         : '요청서에 이미지 파일명이 적혀 있는데 이미지가 첨부되어 있지 않습니다. 이미지 파일(JPG)을 메일에 함께 첨부해 다시 보내주세요.',
         'image_not_attached');
       continue;
+    }
+    /** ★ 2026-11-25 이 건에 붙는 이미지(여러 건 + 이미지 = 이름으로 맞춘 첨부 · 건 하나 = 아래 오늘 경로) */
+    const unitImagePaths: string[] = [];
+    const unitImageNames: string[] = [];
+    if (multi && unitImageAssign) {
+      for (const ai of unitImageAssign[ui]) {
+        const saved = saveMmsImageBuffer(unitAcct.companyId, preparedImages[ai].buffer);
+        savedImagePaths.push(saved.serverPath);
+        unitImagePaths.push(saved.serverPath);
+        unitImageNames.push(preparedImages[ai].name);
+        if (preparedImages[ai].converted) {
+          savedImageFitNotes.push(describeMmsFitNote(preparedImages[ai].name, preparedImages[ai].fromBytes, preparedImages[ai].toBytes));
+        }
+      }
+    }
+    // ★ 2026-11-25 여러 건 + 이미지 = 건마다 요청서가 적은 이미지 수와 이름으로 붙은 이미지 수가 같아야 한다(다른 건의 첨부가 이 건의 빠짐을 가리지 않게 · Codex 구현 1R)
+    if (multi && preparedImages.length > 0) {
+      const declared = form.imageFileNames.length > 0 ? form.imageFileNames.length : (form.imageFileName ? 1 : 0);
+      if (declared !== unitImagePaths.length) {
+        fail(`요청서의 이미지 파일명(${form.imageFileNames.join(', ') || form.imageFileName || '없음'})과 이 건에 붙은 이미지(${unitImageNames.join(', ') || '없음'})가 맞지 않습니다. 이미지 파일 이름을 요청서와 같게 맞춰 주세요.`, 'mms_image_unmatched');
+        continue;
+      }
     }
     if (!multi) {
       for (let i = 0; i < preparedImages.length; i++) {
@@ -1084,6 +1236,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     // 9) 분석(확정 경로 · AI 0 · 리드타임은 코어와 같은 상수) — 반려 사유는 전량 회신에 싣는다
     //   이미지가 있으면 분석·코어가 화면 접수와 같은 결정(타입 = MMS · validateMmsPayload)을 그대로 탄다
     if (!multi && savedImagePaths.length > 0) overridesRaw.mmsImagePaths = [...savedImagePaths];
+    if (multi && unitImagePaths.length > 0) overridesRaw.mmsImagePaths = [...unitImagePaths];
     const overrides = parseOneStepOverrides(overridesRaw);
     // ★2026-09-13 위 사전 게이트가 같은 버퍼로 읽은 요청서·명단을 넘긴다(큰 명단을 다시 파싱하지 않는다).
     //   명단을 못 읽었으면(list = null) 넘기지 않아 분석이 종전처럼 스스로 읽고 그 사유를 반려에 싣는다.
@@ -1095,6 +1248,17 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     }
     if (analysis.counts.valid === 0) {
       fail('보낼 수 있는 번호가 없습니다. 명단 파일에 휴대폰 번호가 든 행이 있는지 확인해 주세요.', 'no_recipients');
+      continue;
+    }
+    // ★ 2026-11-25 괄호 자리(「[소속매장명]」 꼴)가 남으면 이 건은 반려 — 필드 이름 꼴이라 채울 자리가 거의 확실하고 접수 뒤에는 그 열 값이 저장되지 않아 고칠 길이 없다(설계서 §8-3).
+    //   기호 꼴(OOO)은 알림만(오탐 탈출구 · 회의 합의).
+    const bracketBlanks = findAgencyBlanks(analysis.content).filter((b) => b.kind === 'bracket');
+    if (bracketBlanks.length > 0) {
+      const near = (text: string) => analysis.blanks.find((b) => b.text === text)?.candidates.map((c) => c.column) || [];
+      fail(bracketBlanks.map((b) => {
+        const cands = near(b.text);
+        return `문안의 ${b.text}에 맞는 명단 열이 없습니다. 고객리스트 열 이름을 ${b.text.slice(1, -1).replace(/\s+/g, '')}(으)로 맞춰 다시 보내 주세요.${cands.length > 0 ? ` 가까운 열: ${cands.join(', ')}` : ''}`;
+      }).join(' / '), 'bracket_blank', analysis.headers);
       continue;
     }
     // ★2026-09-13 회신번호 열 방식도 받는다(화면 원스텝과 같은 계약 · 불변 24). 접수는 하나이고 고객별 번호는
@@ -1110,9 +1274,20 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     // 10) 멱등 — 내용 4요소(회사·문안·시각·정렬된 번호 집합)
     //   고정 번호 방식에서 전체 수신자 = 유일한 그룹의 수신자라 종전 키와 같다.
     const phones = analysis.allRecipients.map((r) => r.phone).sort();
-    const recipientsHash = sha256(phones.join(','));
+    // ★ 2026-11-25 받는 사람 지문 = 실제로 나갈 것의 집합 — 번호 · **실제 발신번호**(행 번호 · 없으면 대표 번호) · 저장형 문안 값.
+    //   행 순서와 무관하고(대표 번호 = 첫 행이라 순서에 따라 바뀐다) · 값 · 번호만 바로잡은 재전송은 중복이 아니다(Codex 구현 1R ~ 3R 같은 부류 = 구조로 닫음)
+    const primaryDigits = String(analysis.primaryCallback || '').replace(/[^0-9]/g, '');
+    const dupRecipients = analysis.allRecipients.map((r) => ({
+      phone: r.phone, callback: String(r.callback || '').replace(/[^0-9]/g, '') || primaryDigits, vars: toStoredVars(r.vars),
+    }));
+    const sortedVars = (v: Record<string, unknown>) => JSON.stringify(Object.keys(v).sort().map((k) => [k, v[k]]));
+    const recipientsHash = sha256(dupRecipients.map((r) => `${r.phone}|${r.callback}|${sortedVars(r.vars)}`).sort().join('\n'));
     // 구분자 충돌을 피하려고 **고정 형식 값을 앞에** 둔다(uuid · ISO 시각 · 해시). 자유 문자열인 문안이 마지막이다
-    const dupKey = sha256([unitAcct.companyId, analysis.requestedAtIso, recipientsHash, analysis.content].join('|'));
+    // ★ 2026-11-25 제목 · 붙는 이미지 **바이트 지문**도 지문에(이미지만 다른 두 건이 서로 중복이 되지 않게 · 이름은 지문이 아니다 · Codex 설계 6R · 7R)
+    const dupImageIdx = multi ? (unitImageAssign?.[ui] ?? []) : preparedImages.map((_, i) => i);
+    const dupImageDigests = dupImageIdx.map((ai) => crypto.createHash('sha256').update(preparedImages[ai].buffer).digest('hex'));
+    const dupImageNames = dupImageIdx.map((ai) => preparedImages[ai].name);
+    const dupKey = sha256([unitAcct.companyId, analysis.requestedAtIso, recipientsHash, sha256(analysis.subject || ''), sha256(dupImageDigests.join(',')), analysis.content].join('|'));
 
     // 10-a) ★2026-09-05 §21-4 3.5층 = **메일 안** 중복. DB 조회로는 절대 못 잡는다(형제 건이 아직 커밋 전이다).
     //   ⛔ 조용히 하나를 버리지 않는다 — 같은 4요소 두 장은 "둘 중 어느 것이 의도인가"가 미확정이다.
@@ -1128,21 +1303,16 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     //      나머지가 중복이라 전량 반려되어 고친 건이 영영 안 들어온다(왕복 무한).
     // ★ 2026-10-25 원장 #4 — 받는 사람 지문도 SQL 조건으로(옛: 같은 회사 · 시각 · 문안 후보를 LIMIT 5 로 뽑은 뒤 명단을 JS 에서 비교 →
     //   같은 문안 · 시각의 다른 명단 접수가 5건 넘으면 진짜 중복을 못 봐 두 번 접수). 지문 = JS 와 같은 식(번호 정렬 · 쉼표 이음 · C 정렬 = JS 기본 정렬 · 해시 없이 이은 글자를 그대로 비교)
-    const dupHit = await query(
-      `SELECT id FROM agency_send_requests
-        WHERE company_id = $1::uuid AND ${dupTimeSql} AND original_content = $3 AND ${EMAIL_DUP_BLOCKING_SQL}
-          AND (SELECT string_agg(x.phone, ',' ORDER BY x.phone COLLATE "C")
-                 FROM agency_send_recipients x WHERE x.request_id = agency_send_requests.id) = $4
-        LIMIT 1`,
-      [unitAcct.companyId, analysis.requestedAtIso, analysis.content, phones.join(',')],
-    );
-    const alreadyAccepted = dupHit.rows.length > 0;
+    const alreadyAccepted = await findAcceptedEmailDuplicate({
+      companyId: unitAcct.companyId, requestedAtIso: analysis.requestedAtIso, content: analysis.content, phones,
+      subject: analysis.subject || '', imageDigests: dupImageDigests, imageNames: dupImageNames, dupTimeSql, recipients: dupRecipients,
+    });
     if (alreadyAccepted) {
       dupSkipped.push(u.fileName);
       continue;
     }
 
-    plans.push({ unit: u, acct: unitAcct, analysis, autoPickedPhoneColumn, dupKey });
+    plans.push({ unit: u, acct: unitAcct, analysis, autoPickedPhoneColumn, dupKey, imagePaths: unitImagePaths, imageNames: unitImageNames });
   }
 
   // ⛔ 오류가 하나라도 있으면 전량 반려. 스킵 계산은 여기서 통째로 버린다.
@@ -1218,9 +1388,9 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
         requestedAt: p.analysis.requestedAtIso,
         // ★2026-08-28 형태 = 화면 접수와 같은 절대경로 문자열 배열(발송 배관 계약 무변경)
         //   다중이면 이미지가 없다(위에서 반려) — 그래서 이 배열은 단건에서만 채워진다
-        mmsImagePaths: multi ? [] : savedImagePaths,
+        mmsImagePaths: multi ? p.imagePaths : savedImagePaths,
         // ★2026-09-10 첨부 원본 파일명(표시 전용 · 상세 미리보기가 이 이름을 보인다)
-        mmsImageNames: multi ? [] : savedImageNames,
+        mmsImageNames: multi ? p.imageNames : savedImageNames,
         fileName: p.analysis.fileName,
         phoneColumn: p.analysis.phoneColumn || '전화번호',
         varMapping: Object.fromEntries(p.analysis.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])),
@@ -1235,7 +1405,8 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
       }
       requestRows.push(result.request);
       requestKinds.push(result.callbackKinds);
-      requestNotices.push(result.notice);
+      // ★ 2026-11-25 서버가 스스로 한 일(괄호 변수 · 매장번호 열) + 코어 알림(빈 자리 · 점점 · 빈 값 · 글자 · 수신거부)
+      requestNotices.push([...p.analysis.autoNotes, ...result.notice]);
     }
     // accepted는 접수와 한 트랜잭션 — 성공 분기에서만(통과 스탬프 원칙 · §18-6)
     //   ⛔ 부분 커밋이 구조적으로 없다: 3번째에서 죽으면 1·2번도 롤백되어 재개 판정이 필요 없다.
@@ -1282,7 +1453,7 @@ export async function processMessage(ctx: TickCtx, seq: number, uidl: string): P
     callbackMissing: p.analysis.counts.callbackMissing,
     phoneColumn: p.analysis.phoneColumn || '전화번호', autoPickedPhoneColumn: p.autoPickedPhoneColumn,
     total: p.analysis.counts.total, valid: p.analysis.counts.valid, dup: p.analysis.counts.dup, invalid: p.analysis.counts.invalid,
-    imageNames: multi ? [] : savedImageNames,
+    imageNames: multi ? p.imageNames : savedImageNames,
     imageFitNotes: multi ? [] : savedImageFitNotes,
     billingLabel: describeAccountLabel(candidates, p.acct.userId),
     seq: multi ? { index: i + 1, total: plans.length, fileName: p.unit.fileName } : undefined,

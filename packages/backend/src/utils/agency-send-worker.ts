@@ -21,6 +21,7 @@
  *   미적재분 환불·`sentTables` 기록·적재 중 취소 감지는 전부 그쪽 CT가 소유한다.
  */
 import pool, { query, lockPool, type TxRun } from '../config/database';
+import { findAgencyBlanks, agencyBlankApprovalLine } from './agency-send-blanks';   // ★ 2026-11-25 승인 요청 문자의 빈 자리 줄
 // ★2026-09-12 수신자 회신번호 컬럼 존재 탐지 — 판정은 접수 코어와 같은 한 벌을 쓴다(인라인 재정의 금지)
 import { findUnregisteredRequestCallbacks, hasAgencyColumn, hasApprovalRequestedColumn } from './agency-send-intake';
 import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf, spamRejectionPlaces, isCharsRejection, spamSendRejectionReason, spamGatewayRejectionOf, readSpamTestOutcome, mergeAlternativeVerdicts, type SpamVerdict } from './spam-test-queue';
@@ -1200,12 +1201,14 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       const charLines = await readAgencyCharLines(row.id);
       // ★ 2026-11-13 C130 — 판정 글 = 이 자리 테스트 문자를 만든 finalContent(설계서 §4① A7)
       const optOutLine = agencyOptOutSmsLine({ content: finalContent, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
+      // ★ 2026-11-25 채우지 않은 자리 한 줄(판정 글 = 테스트 문자를 만든 그 글 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5-4)
+      const blankLine = agencyBlankApprovalLine(findAgencyBlanks(finalContent));
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine, blankLine }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine, blankLine }),
           row.company_id, row.id, linkRow, row.created_by ?? null),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
@@ -2702,12 +2705,14 @@ export async function sendAgencyApprovalRequest(requestId: string, opts: { withT
     const charLines = await readAgencyCharLines(row.id);
     // ★ 2026-11-13 C130 — 판정 글 = 지금 승인 대상 글(행의 current_content · 이 갈래는 테스트 문자를 다시 보내지 않는다 · 설계서 §4① A7)
     const optOutLine = agencyOptOutSmsLine({ content: row.current_content, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
+    // ★ 2026-11-25 채우지 않은 자리 한 줄(판정 글 = 지금 승인 대상 글 · 설계서 §5-4)
+    const blankLine = agencyBlankApprovalLine(findAgencyBlanks(row.current_content));
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
       callback: row.callback_number, title: '[대행발송] 승인 요청',
-      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine, overridden }),
+      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine, overridden, blankLine }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine, overridden }),
+        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine, overridden, blankLine }),
         row.company_id, row.id, linkRow, row.created_by ?? null),
     });
   } catch (err: any) {

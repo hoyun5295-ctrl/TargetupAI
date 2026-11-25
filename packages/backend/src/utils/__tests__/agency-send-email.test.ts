@@ -189,11 +189,14 @@ describe('메일 워커 배선 (소스 계약) — MMS 개통이 되돌아가지
 
   it('이미지 무조건 반려(has_image)가 되살아나지 않았다 — 맞춤 준비만 있다(★0910)', () => {
     expect(worker).not.toMatch(/'has_image'/);
-    expect(worker).toMatch(/prepareMailMmsImages\(imageAtts\)/);
+    // ★ 2026-11-25 장수 상한은 부르는 쪽이 정한다(한 파일 여러 건 = 건마다 3장 · 단건 3장은 단위가 정해진 뒤 따로 본다)
+    expect(worker).toMatch(/prepareMailMmsImages\(imageAtts, LIMITS\.mmsImageCount \* MAX_FORMS\)/);
+    expect(worker).toMatch(/!multi && preparedImages\.length > LIMITS\.mmsImageCount/);
     expect(worker).toMatch(/'mms_image_invalid'/);
   });
   it('이미지 파일명 칸만 있고 첨부 0장이면 반려한다(첨부 없는 이미지 지정 = 기대와 다른 발송)', () => {
-    expect(worker).toMatch(/form\.imageFileName && imageAtts\.length === 0/);
+    // ★ 2026-11-25 ① 칸이 비고 ②③ 줄에만 적어도 이미지 지정이다(Codex 설계 7R)
+    expect(worker).toMatch(/\(form\.imageFileName \|\| form\.imageFileNames\.length > 0\) && imageAtts\.length === 0/);
     expect(worker).toMatch(/'image_not_attached'/);
   });
   it('저장은 발송 계정 확정 뒤이고, 반려 시 저장 파일을 지운다(고아 방지)', () => {
@@ -206,19 +209,21 @@ describe('메일 워커 배선 (소스 계약) — MMS 개통이 되돌아가지
     expect(worker).toMatch(/savedImagePaths\.splice\(0\)/);
   });
   it('접수 코어에는 화면 접수와 같은 형태(절대경로 배열)로 넘긴다', () => {
-    // 다중이면 이미지가 애초에 반려되므로 그 경로에서만 빈 배열이다. 무조건 빈 배열 고정은 여전히 금지.
-    expect(worker).toMatch(/mmsImagePaths: multi \? \[\] : savedImagePaths/);
+    // ★ 2026-11-25 다중 = 건마다 이름으로 맞춘 이미지(p.imagePaths) · 단건 = 오늘 경로. 무조건 빈 배열 고정은 여전히 금지.
+    expect(worker).toMatch(/mmsImagePaths: multi \? p\.imagePaths : savedImagePaths/);
     expect(worker, 'SMS·LMS 전용 시절의 빈 배열 고정이 되살아났다').not.toMatch(/mmsImagePaths: \[\],/);
   });
   it('접수 완료 회신에 이미지 순서를 적는다(이 회신이 유일한 확인 자리다)', () => {
-    expect(worker).toMatch(/imageNames: multi \? \[\] : savedImageNames/);
+    expect(worker).toMatch(/imageNames: multi \? p\.imageNames : savedImageNames/);
     expect(worker).toMatch(/이 순서로 붙습니다/);
   });
-  it('★0905 다중 접수에는 이미지를 받지 않는다(첨부 순서로 귀속을 정할 수 없다)', () => {
-    expect(worker).toMatch(/multi && imageAtts\.length > 0/);
+  it('★0905 → ★1125 다중 접수 이미지는 첨부 순서가 아니라 요청서 「이미지 파일명」 칸과 첨부 이름으로 맞춘다(설계서 §7)', () => {
+    expect(worker).toMatch(/multi && preparedImages\.length > 0/);
+    expect(worker).toMatch(/matchAgencyUnitImages\(/);
     expect(worker).toMatch(/'multi_form_with_image'/);
+    expect(worker).toMatch(/'mms_image_unmatched'/);
     // 판정이 저장보다 앞이어야 고아 파일 정리에 기대지 않는다
-    expect(worker.indexOf("'multi_form_with_image'")).toBeLessThan(worker.indexOf('saveMmsImageBuffer(unitAcct.companyId'));
+    expect(worker.indexOf("'mms_image_unmatched'")).toBeLessThan(worker.indexOf('saveMmsImageBuffer(unitAcct.companyId'));
   });
   it('★0905 이미지 파일명 칸 검사는 단건·다중 공통이다(Codex 1R ② — 다중에서 건너뛰면 이미지가 빠진 채 발송된다)', () => {
     const check = worker.indexOf("'image_not_attached'");

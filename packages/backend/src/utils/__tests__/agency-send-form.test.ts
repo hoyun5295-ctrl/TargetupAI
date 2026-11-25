@@ -59,7 +59,8 @@ describe('대행발송 요청서 — 라벨 파싱', () => {
     const fields = f.errors.map((e) => e.field);
     expect(fields).toContain('문안');
     expect(fields).toContain('보낼 시각');
-    expect(fields).toContain('회신번호');
+    // ★ 2026-11-25 빈 회신번호 = analyzeOneStep 판정(명단 매장번호 열 · 설계서 §8-2) · 해석기 오류에서 빠짐
+    expect(fields).not.toContain('회신번호');
     expect(fields).toContain('담당자 번호');
   });
 
@@ -289,7 +290,8 @@ describe('대행발송 §17-5 계약 — 배포 양식 파서 왕복(재생성�
     expect(looksLikeRequestForm(buf)).toBe(true);
     expect(hasRecipientSheet(buf)).toBe(true);
     const f = parseAgencyRequestForm(buf);
-    expect(f.errors.map((e) => e.field).sort()).toEqual(['담당자 번호', '문안', '보낼 시각', '회신번호']);
+    // ★ 2026-11-25 빈 회신번호는 명단을 아는 analyzeOneStep 이 판정한다(명단 매장번호 열 · 설계서 §8-2) — 해석기 오류에서 빠졌다
+    expect(f.errors.map((e) => e.field).sort()).toEqual(['담당자 번호', '문안', '보낼 시각']);
     expect(f.isAd).toBe(true);
     expect(f.phoneColumnName).toBe('');
     // ★0826(3) 배포 양식 = 업체 실물 복제(헤더의 줄바꿈 부연까지 원문 보존)
@@ -393,7 +395,8 @@ describe('대행발송 통일 양식(★2026-08-26(2)) — 업계 레이아웃 �
     expect(f.callbackRaw).toBe('');
     expect(f.imageFileName).toBe('');
     expect(f.errors.some((e) => e.field === '보낼 시각')).toBe(true);
-    expect(f.errors.some((e) => e.field === '회신번호')).toBe(true);
+    // ★ 2026-11-25 빈 회신번호 = analyzeOneStep 판정(설계서 §8-2)
+    expect(f.errors.some((e) => e.field === '회신번호')).toBe(false);
   });
 
   it('문자타입이 알림톡·친구톡이면 반려하고, SMS·LMS·MMS·빈칸은 통과한다', () => {

@@ -19,14 +19,22 @@ import { validateMmsPayload } from './mms-validator';
 import { alignMmsImageNames } from './mms-image-util';
 import {
   parseAgencyRequestForm, parseAgencyRecipientList, pickPhoneColumn, resolveCallbackPlan, matchHeader,
-  hasRecipientSheet, MAX_LIST_ROWS, unreadableAgencyForm,
+  hasRecipientSheet, MAX_LIST_ROWS, unreadableAgencyForm, pickStoreCallbackColumn,
   type AgencyFormError, type CallbackPlan,
 } from './agency-send-form';
 // ★ 2026-09-26 한줄로 V2 S1-H03 — 엑셀 파싱은 별도 프로세스(CT)
-import { parseAgencyFilesIsolated } from './agency-send-parse-isolated';
+import { parseAgencyFilesIsolated, planAgencyWorkbookIsolated } from './agency-send-parse-isolated';
 import { normalizePhone, normalizeAgencyPhone } from './normalize-phone';
 import { validateRequestedAt } from './agency-send-state';
 import { buildSlotPlan, extractAgencyVars, resolveVarColumns, toStoredVars } from './agency-send-vars';
+// ★ 2026-11-25 대행 접수 실수 잡기 · 한 파일 여러 건(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md)
+import {
+  findAgencyBlanks, matchBlankColumns, findSuffixDup, countEmptyVarRows, convertBracketVars, applySlotFills,
+  agencyBlankIntakeLines, blankLabel, type AgencyBlank, type BlankColumnCandidate, type SlotFill,
+} from './agency-send-blanks';
+
+import { findVarTokens } from './var-tokens';
+import { agencyUnitLabel } from './agency-send-workbook';
 // ★ 2026-09-26 한줄로 V2 R1-08 — SMS/LMS는 실제로 나가는 문장의 바이트로(조립 CT 한 벌)
 import { measureAgencyMaxSmsBytes } from './agency-send-preview';
 import { likePattern } from './customer-timeline';   // ★ C142 검색어 LIKE escape CT
@@ -641,7 +649,10 @@ export async function createRequestCore(
   //   080 = 입구가 넘긴 값 → 없으면 자체 트랜잭션 입구만 여기서(연결을 돌려준 뒤) 읽는다 · 바깥 트랜잭션 입구는 '' (낱말만 붙는 꼬리 글).
   const opt080 = pre?.opt080 !== undefined ? pre.opt080 : (own ? await loadAgencyOpt080(auth.userId, auth.companyId) : '');
   const optOut = agencyOptOutNotice({ content: body, isAd: agencyAdTextApplies({ isAd, adText: adTextValue }), messageType: type, opt080, how: source === 'email' ? 'mail' : 'edit' });
-  return { ok: true, request, callbackKinds, notice: [...agencyCharNotice(charNotes), ...optOut] };
+  // ★ 2026-11-25 빈 자리 · 점점 · 빈 값 행 알림(세 입구 공통 · 접수한 글 · 명단 값 그대로 · 설계서 §4-5)
+  const recVars = rows.map((r: any) => r.vars);
+  const blankLines = agencyBlankIntakeLines({ blanks: findAgencyBlanks(body), suffixDups: findSuffixDup(body, recVars), emptyRows: countEmptyVarRows(body, recVars) });
+  return { ok: true, request, callbackKinds, notice: [...blankLines, ...agencyCharNotice(charNotes), ...optOut] };
 }
 
 /**
@@ -664,9 +675,25 @@ export interface OneStepGroup { callback: string; count: number; registered: boo
 /** 접수에 실제로 넘기는 수신자 한 명. `callback`은 고객별 회신번호(열 방식일 때만 채워진다) */
 export interface OneStepRecipient { phone: string; vars: Record<string, any>; callback: string | null }
 
+/** ★ 2026-11-25 확인 화면에 그리는 빈 자리(위치 = baseContent 기준 · slotFills 가 이 위치로 온다) */
+export interface OneStepBlankView extends AgencyBlank { label: string; candidates: BlankColumnCandidate[] }
+
 export interface OneStepAnalysis {
   subject: string;
   content: string;
+  /** ★ 2026-11-25 채우기 전 글(문자 정리 · 괄호 변수 바꾸기 뒤) = slotFills 위치 기준(설계서 §4-1) */
+  baseContent: string;
+  /** ★ 2026-11-25 baseContent 의 빈 자리 + 명단 후보 열(점 세기 = 명단 전체 행) */
+  blanks: OneStepBlankView[];
+  /** ★ 2026-11-25 접수 알림 줄(빈 자리 · 점점 · 빈 값 행 · 괄호 변수 바꿈 · 매장번호 열 고름) — 확인 화면 · 메일 회신 */
+  intakeNotes: string[];
+  /** ★ 2026-11-25 서버가 스스로 한 일 알림(괄호 변수 바꿈 · 매장번호 열 고름) — 접수 성공 알림 · 메일 회신에 코어 notice 와 함께 싣는다 */
+  autoNotes: string[];
+  /** ★ 2026-11-25 조정값 채우기를 받지 못한 사유(없으면 null) — 화면은 이 응답으로 상태를 바꾸지 않고 사유만 보인다(Codex 구현 2R) */
+  fillError: string | null;
+  /** ★ 2026-11-25 한 파일 여러 건(짝이 2 이상일 때만 · 화면 칩) */
+  pairs: Array<{ index: number; label: string }>;
+  pairIndex: number | null;
   isAd: boolean;
   requestedAtIso: string | null;
   /**
@@ -716,6 +743,10 @@ export function parseOneStepOverrides(raw: any): {
   varMapping?: Record<string, string>;
   /** ★2026-09-10 이미지 원본 파일명(표시 전용 · 코어가 경로 수에 맞춘다) */
   mmsImageNames?: string[];
+  /** ★ 2026-11-25 빈 자리 채우기(위치 = 미리보기 응답 baseContent · 설계서 §4-1) */
+  slotFills?: SlotFill[];
+  /** ★ 2026-11-25 한 파일 여러 건의 짝 차례(0부터 · 짝이 2 이상이면 확정에 필수 · 설계서 §6-3) */
+  pairIndex?: number;
 } {
   try {
     const o = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
@@ -730,6 +761,17 @@ export function parseOneStepOverrides(raw: any): {
     } else if (o.varMapping !== undefined) {
       delete o.varMapping;
     }
+    // ★ 2026-11-25 채우기 = 모양이 맞는 것만 남긴다(위치 정수 · before 문자열 · column 또는 text 문자열 · 최대 20개)
+    if (Array.isArray(o.slotFills)) {
+      o.slotFills = o.slotFills.filter((f: any) => f && typeof f === 'object'
+        && Number.isInteger(f.start) && Number.isInteger(f.end) && typeof f.before === 'string'
+        && (f.column === undefined || typeof f.column === 'string') && (f.text === undefined || typeof f.text === 'string'))
+        .slice(0, 20)
+        .map((f: any) => ({ start: f.start, end: f.end, before: f.before, ...(f.column !== undefined ? { column: f.column } : {}), ...(f.text !== undefined ? { text: f.text } : {}) }));
+    } else if (o.slotFills !== undefined) {
+      delete o.slotFills;
+    }
+    if (o.pairIndex !== undefined && !(Number.isInteger(o.pairIndex) && o.pairIndex >= 0)) delete o.pairIndex;
     return o;
   } catch {
     return {};
@@ -761,12 +803,42 @@ export async function analyzeOneStep(
     counts: { total: 0, valid: 0, dup: 0, invalid: 0, callbackMissing: 0 },
     groups: [], allRecipients: [], primaryCallback: '',
     sample: [], sampleRows: [], messageType: 'SMS', maxSmsBytes: null, fileName: listName, errors, charNotes: EMPTY_AGENCY_CHAR_NOTES,
+    baseContent: '', blanks: [], intakeNotes: [], autoNotes: [], pairs: [], pairIndex: null, fillError: null,
   };
   if (!formBuf) { errors.push({ field: '요청서', error: '요청서 파일을 올려 주세요.' }); return empty; }
+  // ★ 2026-11-25 한 파일 여러 건(설계서 §6-1 · §6-3) — 명단 파일이 따로 없고 분석 전 해석값도 없는 입구(원스텝 화면)만 여기서 가른다.
+  //   메일은 단위마다 짝 시트로 이미 읽어 pre 로 넘긴다. single = 오늘 경로 그대로(시트 이름 없음).
+  let sheetPick: { formSheet?: string; listSheet?: string } = {};
+  let pairs: Array<{ index: number; label: string }> = [];
+  let pairIndex: number | null = null;
+  if (!listBuf && !pre?.form && !pre?.list) {
+    // 판정도 자식 프로세스에서(큰 파일을 이 프로세스에서 읽지 않는다 · Codex 설계 6R)
+    const plan = (await planAgencyWorkbookIsolated(formBuf)).plan;
+    if (plan.kind === 'invalid') {
+      errors.push(...plan.reasons.map((error) => ({ field: '요청서', error })));
+      return empty;
+    }
+    if (plan.kind === 'pairs') {
+      if (plan.pairs.length > 1) {
+        pairs = plan.pairs.map((pr, i) => ({ index: i, label: pr.formSheet }));
+        // ⛔ 확정은 짝 차례가 꼭 있어야 한다(옛 화면이 첫 건만 접수하고 성공으로 끝나지 않게 · Codex 설계 1R)
+        if (overrides.pairIndex === undefined && !aiSuggest) {
+          errors.push({ field: '요청서', error: `이 파일에는 요청서가 ${plan.pairs.length}건 들어 있습니다. 접수할 건을 골라 주세요.` });
+          return { ...empty, pairs };
+        }
+        pairIndex = overrides.pairIndex ?? 0;
+        if (pairIndex >= plan.pairs.length) {
+          errors.push({ field: '요청서', error: '고르신 건이 파일에 없습니다. 파일을 다시 확인해 주세요.' });
+          return { ...empty, pairs };
+        }
+      }
+      sheetPick = plan.pairs[pairIndex ?? 0];
+    }
+  }
   // ★2026-08-26(2) 통일 양식 = 한 파일(시트1 내용 + 시트2 고객리스트). 명단 파일이 따로 없으면
   //   요청서 파일의 고객리스트 시트를 명단으로 쓴다(parseAgencyRecipientList가 시트 이름으로 골라 읽는다).
   //   별도 명단 파일이 오면 그 파일이 우선이다(구양식·두 파일 하위호환).
-  const effectiveListBuf = listBuf || (hasRecipientSheet(formBuf) ? formBuf : null);
+  const effectiveListBuf = listBuf || (sheetPick.listSheet || hasRecipientSheet(formBuf) ? formBuf : null);
   if (!effectiveListBuf) {
     errors.push({ field: '명단', error: '고객리스트 시트를 찾지 못했습니다. 새 요청서 양식(고객리스트 시트 포함)에 명단을 채우거나, 명단 파일을 함께 올려 주세요.' });
     return empty;
@@ -777,7 +849,7 @@ export async function analyzeOneStep(
   const needForm = !pre?.form;
   const needList = !pre?.list;
   const parsed = needForm || needList
-    ? await parseAgencyFilesIsolated(needForm ? formBuf : null, needList ? effectiveListBuf : null)
+    ? await parseAgencyFilesIsolated(needForm ? formBuf : null, needList ? effectiveListBuf : null, sheetPick)
     : null;
   const form = pre?.form ?? parsed?.form ?? unreadableAgencyForm();
   errors.push(...form.errors);
@@ -806,6 +878,48 @@ export async function analyzeOneStep(
     errors.push({ field: '명단', error: '명단 파일을 읽지 못했습니다. 엑셀 또는 CSV인지 확인해 주세요.' });
   }
   if (headers.length > 0 && rows.length === 0) errors.push({ field: '명단', error: '명단에 데이터 행이 없습니다.' });
+
+  // ★ 2026-11-25 괄호 변수 · 빈 자리 채우기(설계서 §4-1 · §8-3) — 명단 열 이름을 안 뒤 · 항목 뽑기 앞.
+  //   글 차례 = 문자 정리 → 괄호 변수 = baseContent(채우기 위치 기준) → 채우기 → 문자 정리 한 번 더 = 분석 글(미리보기 · 확정 같은 글).
+  const bracket = convertBracketVars(formContent, headers);
+  const baseContent = bracket.content;
+  let analysisContent = baseContent;
+  let varMappingIn = overrides.varMapping;
+  let fillCharLines: string[] = [];
+  let fillError: string | null = null;
+  if (overrides.slotFills && overrides.slotFills.length > 0) {
+    const filled = applySlotFills(baseContent, overrides.slotFills, headers);
+    if (!filled.ok) {
+      fillError = filled.error;
+      errors.push({ field: '문안', error: filled.error });
+    } else {
+      // 이름 충돌 대조(Codex 설계 2R · 3R): 조정값이 그 이름을 다른 열에 잇거나 · 채우기 전 글에 이미 있던 같은 이름 변수의 연결 열이 다르면 반려
+      const baseVarNames = new Set(findVarTokens(baseContent).map((t) => t.name));
+      let conflict: string | null = null;
+      for (const [name, col] of Object.entries(filled.mapping)) {
+        const pickedOverride = overrides.varMapping?.[name];
+        const linked = baseVarNames.has(name) ? resolveVarColumns([name], headers, overrides.varMapping).resolved[0]?.column : null;
+        if ((pickedOverride && pickedOverride !== col) || (linked && linked !== col)) {
+          conflict = `%${name}% 항목은 이미 「${pickedOverride || linked}」 열에 이어져 있어 「${col}」 열로 채울 수 없습니다. 한 열만 골라 주세요.`;
+          break;
+        }
+      }
+      if (conflict) {
+        fillError = conflict;
+        errors.push({ field: '문안 항목', error: conflict });
+      } else {
+        const reprep = prepareAgencyCopy({ content: filled.content, subject: formSubject });
+        if (!reprep.ok) {
+          fillError = reprep.error;
+          errors.push({ field: '문안', error: reprep.error });
+        } else {
+          analysisContent = reprep.content;
+          fillCharLines = reprep.lines;
+          varMappingIn = { ...(overrides.varMapping || {}), ...filled.mapping };
+        }
+      }
+    }
+  }
 
   // 수신자 열: 확인 화면에서 직접 고를 수 있다(값 비율 자동 선정이 애매한 파일 대비).
   // ⛔ 지정했는데 명단에 없으면 자동 선정으로 **폴백하지 않는다**(★2R — 사용자가 본 것과 다른 열 금지)
@@ -859,10 +973,26 @@ export async function analyzeOneStep(
   if (callback.mode === 'none' && form.callbackRaw) {
     errors.push({ field: '회신번호', error: `회신번호 칸의 "${form.callbackRaw}"를 번호로도 명단의 열 이름으로도 읽지 못했습니다.` });
   }
+  // ★ 2026-11-25 빈 발신번호 = 명단 매장번호 열(Harold 「매장번호 있잖아? 거기 항상 채워서 줘」 · 설계서 §8-2) — 조정값이 없을 때만
+  let storeCallbackNote: string | null = null;
+  if (overrides.callback === undefined && !form.callbackRaw) {
+    const store = pickStoreCallbackColumn(headers, rows, phoneColumn);
+    if (store.column) {
+      callback = { mode: 'column', column: store.column };
+      storeCallbackNote = `발신번호 칸이 비어 있어 명단의 「${store.column}」 열 번호로 고객마다 보냅니다.`;
+    } else {
+      errors.push({
+        field: '회신번호',
+        error: store.candidates.length > 0
+          ? `회신번호 칸이 비어 있습니다. 명단의 ${store.candidates.map((c) => `「${c}」`).join(', ')} 가운데 발신번호로 쓸 열 이름이나 번호를 적어 주세요.`
+          : '회신번호 칸이 비어 있습니다. 번호 또는 명단의 열 이름을 적어 주세요.',
+      });
+    }
+  }
 
   // 문안 항목 ↔ 명단 열: 확인 화면 조정값 > 같은 이름(화면 접수와 같은 규칙 · CT 소유)
-  const usedVars = extractAgencyVars(formContent);
-  const varResolution = resolveVarColumns(usedVars, headers, overrides.varMapping);
+  const usedVars = extractAgencyVars(analysisContent);
+  const varResolution = resolveVarColumns(usedVars, headers, varMappingIn);
   let varsMatched: OneStepAnalysis['varsMatched'] = varResolution.resolved;
   // 이름이 다른 항목은 **미리보기 초회 분석에서만** AI가 열을 추천해 미리 골라 둔다(★2026-08-25 §17-6).
   //   추천은 확정이 아니다 — 화면이 이 매핑을 조정값으로 다시 보내야 접수된다. 확정 경로는
@@ -989,12 +1119,29 @@ export async function analyzeOneStep(
   //   이미지 = MMS · 제목이 있으면 LMS(종전 그대로) · 그 밖은 SMS로 조립해 90바이트를 넘으면 LMS.
   const maxSmsBytes = images.length > 0 || formSubject.trim()
     ? null
-    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: formContent.trim(), isAd: form.isAd, adText: pre?.adText, recipients: allRecipients });
+    : await measureAgencyMaxSmsBytes({ companyId: auth.companyId, userId: auth.userId, content: analysisContent.trim(), isAd: form.isAd, adText: pre?.adText, recipients: allRecipients });
   const messageType: 'SMS' | 'LMS' | 'MMS' = images.length > 0
     ? 'MMS' : (formSubject.trim() || (maxSmsBytes !== null && maxSmsBytes > SMS_MAX_BYTES) ? 'LMS' : 'SMS');
 
+  const autoNotes = [
+    ...bracket.converted.map((c) => `문안의 ${c.from} 자리는 명단 「${c.column}」 열 값으로 고객마다 채웁니다.`),
+    ...(storeCallbackNote ? [storeCallbackNote] : []),
+  ];
   return {
-    subject: formSubject, content: formContent, isAd: form.isAd, requestedAtIso,
+    subject: formSubject, content: analysisContent, isAd: form.isAd, requestedAtIso,
+    baseContent,
+    // ★ 2026-11-25 빈 자리(채우기 위치 = baseContent) · 후보 열(점 세기 = 명단 전체 행) · 접수 알림 줄
+    blanks: findAgencyBlanks(baseContent).map((b) => ({ ...b, label: blankLabel(b), candidates: matchBlankColumns(b, headers, rows) })),
+    autoNotes,
+    intakeNotes: [
+      ...autoNotes,
+      ...agencyBlankIntakeLines({
+        blanks: findAgencyBlanks(analysisContent),
+        suffixDups: findSuffixDup(analysisContent, allRecipients.map((r) => r.vars)),
+        emptyRows: countEmptyVarRows(analysisContent, allRecipients.map((r) => r.vars)),
+      }),
+    ],
+    pairs, pairIndex, fillError,
     timeShifted, shiftedAtIso,
     managerPhones, callback, headers, phoneColumn, varsMatched,
     counts: { total: rows.length, valid, dup, invalid, callbackMissing },
@@ -1004,8 +1151,9 @@ export async function analyzeOneStep(
     primaryCallback: callback.mode === 'fixed' ? callback.number : firstCallback,
     sample,
     sampleRows: rows.slice(0, 50).map((r) => headers.map((h) => r[h] ?? null)),
-    messageType, maxSmsBytes, fileName: listName, errors,
-    charNotes: { content: copyPrep.ok ? copyPrep.lines : [], recipients: recipientPrep.ok ? recipientPrep.recipients : { count: 0, examples: [] } },
+    // ★ 2026-11-25 한 파일 여러 건 = 건마다 요청서 시트 이름을 붙여 다섯 건이 목록에서 갈린다(file_name 200자)
+    messageType, maxSmsBytes, fileName: sheetPick.formSheet ? agencyUnitLabel(listName || '요청서', sheetPick.formSheet) : listName, errors,
+    charNotes: { content: copyPrep.ok ? [...new Set([...copyPrep.lines, ...fillCharLines])] : [], recipients: recipientPrep.ok ? recipientPrep.recipients : { count: 0, examples: [] } },
   };
 }
 
@@ -1020,4 +1168,16 @@ export async function hasApprovalRequestedColumn(): Promise<boolean> {
     console.warn('[agency-send] approval_requested_at 탐지 실패(24시간 규칙 쉼):', err?.message);
     return false;
   }
+}
+
+/**
+ * ★ 2026-11-25 지금 문안 항목(≤4)마다 값이 빈 수신자 수(승인 링크 · 상세 화면이 읽을 때 셈 · 설계서 §5-3).
+ *   판정 = 발송 적재와 같은 키(vars->>이름) · 공백만 = 빈 값. 확인 조건에는 쓰지 않는다(잠금 쥔 채 전체 행 읽기 0).
+ */
+export async function loadAgencyEmptyVarRows(row: { id: string; current_content?: string | null }): Promise<Array<{ name: string; count: number }>> {
+  const names = extractAgencyVars(String(row.current_content || '')).slice(0, 4);
+  if (names.length === 0) return [];
+  const cols = names.map((_, i) => `COUNT(*) FILTER (WHERE COALESCE(btrim(vars->>$${i + 2}), '') = '')::int AS c${i}`).join(', ');
+  const r = await query(`SELECT ${cols} FROM agency_send_recipients WHERE request_id = $1::uuid`, [row.id, ...names]);
+  return names.map((name, i) => ({ name, count: Number(r.rows[0]?.[`c${i}`] || 0) })).filter((x) => x.count > 0);
 }

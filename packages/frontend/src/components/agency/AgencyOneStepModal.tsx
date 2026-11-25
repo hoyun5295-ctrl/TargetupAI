@@ -7,12 +7,14 @@
  * 접수하기를 누르면 같은 파일을 다시 보내 서버가 같은 분석을 거쳐 접수를 만든다(중간 상태 없음).
  *
  * ⛔ 문안·제목·광고는 요청서가 진실이다 — 여기서 고치지 않는다(고치려면 요청서를 고쳐 다시 올린다).
+ *   ★ 2026-11-25 예외 하나 = 서버가 찾은 「채우지 않은 자리」 채우기(slotFills · 서버가 다시 분석 = 미리보기 = 접수 같은 글 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §4).
+ * ★ 2026-11-25 한 파일에 요청서가 여러 건이면(시세이도 꼴) 건 칩으로 골라 한 건씩 확인 · 접수한다(설계서 §6-3).
  *   확인 화면에서 바꿀 수 있는 것 = 보낼 시각 · 회신번호 선택 · 담당자 번호 · 이미지.
  * ⛔ 회신번호를 열로 지정해도 접수는 하나다(★2026-09-12) — 고객마다 그 번호로 나간다.
  *   종류와 건수는 화면이 숫자로 보여 주되, "나뉜다"고 적지 않는다.
  * ⛔ 문구에 줄표 0. 톤 = 인디고 콘솔(CUI_*).
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 // (useRef = 파일 입력과 분석 세대 가드에 쓴다)
 import { createPortal } from 'react-dom';
 import {
@@ -22,6 +24,7 @@ import {
 import { useToast } from '../ToastProvider';
 import { useMmsUpload } from '../../hooks/useMmsUpload';
 import MmsUploadModal from '../MmsUploadModal';
+import AgencyBlankFixBox from './AgencyBlankFixBox';
 import {
   CUI_BTN_GHOST, CUI_BTN_OUTLINE, CUI_BTN_PRIMARY, CUI_DANGER_BOX, CUI_DANGER_ICON, CUI_DANGER_TEXT,
   CUI_HINT, CUI_INPUT, CUI_LABEL, CUI_MODAL, CUI_MODAL_BODY, CUI_MODAL_CLOSE, CUI_MODAL_DESC,
@@ -29,7 +32,7 @@ import {
 } from '../../utils/console-ui';
 import {
   AGENCY_MMS_UPLOAD, formatWhen, previewOneStep, submitOneStep, toLocalInput,
-  type AgencySendRequest, type OneStepAnalysisView, type OneStepOverrides,
+  type AgencySendRequest, type OneStepAnalysisView, type OneStepOverrides, type AgencySlotFill,
 } from './agency-send-api';
 
 interface SenderNumber { phone_number?: string; phone?: string; is_default?: boolean }
@@ -109,12 +112,19 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
   const mms = useMmsUpload((m) => toast.error(m), { ...AGENCY_MMS_UPLOAD, onNotice: (m) => toast.info(m) });
   // 재분석 응답의 세대 번호 — 늦게 도착한 옛 응답이 최신 화면을 덮지 못하게 한다
   const analyzeSeq = useRef(0);
+  // ★ 2026-11-25 채우지 않은 자리 채우기(위치 = 미리보기 baseContent) · 한 파일 여러 건의 고른 건 · 접수한 건
+  const [slotFills, setSlotFills] = useState<AgencySlotFill[]>([]);
+  // ⛔ 고른 건은 따로 두지 않는다 = 화면에 보이는 분석의 건(analysis.pairIndex)이 곧 접수할 건(실패한 건 바꾸기가 접수 대상을 바꾸지 않게 · Codex 설계 7R)
+  const [confirmedPairs, setConfirmedPairs] = useState<Set<number>>(new Set());
+  // ★ 2026-11-25 마지막으로 성공한 분석의 채우기 · 열 연결(반려 응답이 오면 이 값으로 되돌린다 = 보이는 글 · 상자 · 접수 값이 갈리지 않게 · Codex 구현 2R · 3R)
+  const lastGood = useRef<{ fills: AgencySlotFill[]; varMapping: Record<string, string> }>({ fills: [], varMapping: {} });
 
   const reset = () => {
     setPhase('upload'); setFormFile(null); setAnalysis(null);
     setRequestedAt(''); setCallbackChoice(''); setPhoneColumnChoice(''); setManagerPhones([]); setManagerInput('');
     setVarMapping({}); setAiPickedVars(new Set());
     setSamplePage(0); setPreviewOpen(false); mms.setMmsUploadedImages([]);
+    setSlotFills([]); setConfirmedPairs(new Set());
     analyzeSeq.current += 1;
   };
   const close = () => {
@@ -128,6 +138,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
     analyzeSeq.current += 1;
     setAnalysis(null);
     setFormFile(f);
+    setSlotFills([]); setConfirmedPairs(new Set());
   };
 
   const loadSenders = async () => {
@@ -156,6 +167,9 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
       varMapping,
     };
     if (phoneColumnChoice) o.phoneColumn = phoneColumnChoice;
+    // ★ 2026-11-25 채우기 · 고른 건(짝이 2 이상일 때만 · 접수에 필수)
+    if (slotFills.length > 0) o.slotFills = slotFills;
+    if (a?.pairs && a.pairs.length > 1 && a.pairIndex != null) o.pairIndex = a.pairIndex;
     if (callbackChoice) {
       o.callback = callbackChoice.startsWith('col:')
         ? { mode: 'column', column: callbackChoice.slice(4) }
@@ -166,17 +180,67 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
     return o;
   };
 
-  const analyze = async (withOverrides: boolean) => {
+  // ★ 2026-11-25 마지막 분석 요청을 보낸 뒤 화면 값이 바뀌었는가 — 포커스만 빠진 onBlur 로 다시 분석해 잠금이 다음 클릭을 먹지 않게(Codex 구현 6R · 7R).
+  //   바뀜 = 확인 화면 입력의 change(fieldset 하나가 받는다) · 이미지 목록이 보낸 것과 달라짐(창은 포탈이라 따로) · 요청 실패
+  const dirty = useRef(true);
+  const sentImages = useRef('[]');
+  useEffect(() => {
+    if (JSON.stringify(mms.mmsUploadedImages.map((i) => i.serverPath)) !== sentImages.current) dirty.current = true;
+  }, [mms.mmsUploadedImages]);
+
+  /**
+   * withOverrides = 지금 화면 값으로 다시 분석 · false = 새 건(파일 처음 · 다른 건 고름)을 그 건 값으로 처음부터.
+   * ★ 2026-11-25 fills = 채우기를 바꾼 직후(상태 반영 전 값으로 보낸다) · freshPair = 고른 건(새 건 분석)
+   */
+  const analyze = async (withOverrides: boolean, opts: { fills?: AgencySlotFill[]; freshPair?: number } = {}) => {
     if (saving) return;
     if (!formFile) { toast.error('요청서 파일을 올려 주세요.'); return; }
+    // 걸린 건이 바뀌는 길은 처음부터 분석(건 바꾸기 · 파일 다시 확인 · 다음 건으로) 하나다 — 이미지 창이 열려 있거나 올리는 중이면 받지 않는다
+    //   = 앞 건에 넣으려던 이미지가 다음 건에 붙지 않게(창은 포탈이라 잠금 밖 · 키보드로 건 칩을 누를 수 있다 · Codex 구현 2R · 3R · 6R)
+    if (!withOverrides && (mms.mmsUploading || mmsOpen)) {
+      toast.error(mms.mmsUploading ? '이미지를 올리는 중입니다. 끝난 뒤 다시 눌러 주세요.' : '이미지 창을 닫은 뒤 다시 눌러 주세요.');
+      return;
+    }
+    // 분석이 걸린 동안 입력은 잠겨 있다(fieldset) — 그 사이 온 다시 분석(잠기며 포커스를 잃은 onBlur 등)이 걸린 건 바꾸기를 앞지르지 않게 받지 않는다
+    if (withOverrides && loading) return;
+    // 화면 값이 그대로면 다시 분석하지 않는다 — 단 반려가 남은 분석은 늘 다시 확인한다(다른 탭에서 발신번호를 등록하고 돌아온 경우 등)
+    if (withOverrides && !opts.fills && !dirty.current && analysis && analysis.errors.length === 0) return;
     const seq = ++analyzeSeq.current;
+    let adopted = false;
     setLoading(true);
     try {
-      const a = await previewOneStep(formFile, null, withOverrides ? currentOverrides(analysis) : { mmsImagePaths: mms.mmsUploadedImages.map((i) => i.serverPath) });
+      const base = withOverrides
+        ? { ...currentOverrides(analysis), ...(opts.fills ? { slotFills: opts.fills } : {}) }
+        // ★ 처음부터 분석(파일 확인 · 다른 건 고름)은 이미지를 싣지 않는다 = 이미지는 그 건 확인 화면에서 넣는다
+        //   (파일 다시 고르기로 돌아와 다시 확인할 때 다른 건의 이미지가 따라붙지 않게 · 올린 이미지는 분석이 성공한 뒤에만 비운다 · Codex 구현 1R)
+        : { mmsImagePaths: [], ...(opts.freshPair !== undefined ? { pairIndex: opts.freshPair } : {}) };
+      dirty.current = false;
+      sentImages.current = JSON.stringify(base.mmsImagePaths ?? []);
+      const a = await previewOneStep(formFile, null, base);
       if (seq !== analyzeSeq.current) return; // 그 사이 새 분석이 시작됐다 — 이 응답은 버린다
+      // 채우기 · 열 연결을 서버가 받지 못했으면(fillError) 이 응답으로 화면을 바꾸지 않고, 바꾸려던 채우기 · 열 연결을 마지막 성공 값으로 되돌린다
+      if (withOverrides && a.fillError) {
+        toast.error(a.fillError);
+        setSlotFills(lastGood.current.fills);
+        setVarMapping(lastGood.current.varMapping);
+        return;
+      }
       setAnalysis(a);
+      adopted = true;
       setSamplePage(0);
-      if (!withOverrides) {
+      if (withOverrides) {
+        // ★ 2026-11-25 채우기는 그 채우기로 다시 분석이 성공했을 때만 화면 상태가 된다(실패하면 지금 보이는 글의 채우기 그대로 · Codex 구현 1R)
+        const fills = opts.fills ?? slotFills;
+        if (opts.fills) setSlotFills(opts.fills);
+        // 채우기로 새로 생긴 항목의 열(서버가 명시로 이은 열)을 화면 매핑에도 싣는다(접수 = 화면이 보인 열 그대로)
+        const vm = { ...varMapping };
+        for (const v of a.varsMatched) if (v.column && vm[v.name] === undefined) vm[v.name] = v.column;
+        setVarMapping(vm);
+        lastGood.current = { fills, varMapping: vm };
+      } else {
+        setSlotFills([]);
+        mms.setMmsUploadedImages([]);
+        lastGood.current = { fills: [], varMapping: Object.fromEntries(a.varsMatched.filter((v) => v.column).map((v) => [v.name, v.column!])) };
         setRequestedAt(a.requestedAt ? toLocalInput(new Date(a.requestedAt)) : '');
         setManagerPhones(a.managerPhones);
         setCallbackChoice(a.callback.mode === 'fixed' ? a.callback.number : a.callback.mode === 'column' ? `col:${a.callback.column}` : '');
@@ -191,13 +255,18 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
     } catch (e: any) {
       if (seq === analyzeSeq.current) toast.error(e?.message || '파일을 분석하지 못했습니다.');
     } finally {
+      // 응답을 화면에 받지 않았으면(요청 실패 · 채우기 반려 fillError) 보낸 값은 아직 분석에 반영되지 않았다 = 다음 포커스 빠짐에 다시 분석(Codex 구현 8R)
+      if (seq === analyzeSeq.current && !adopted) dirty.current = true;
       if (seq === analyzeSeq.current) setLoading(false);
     }
   };
 
   const submit = async () => {
     if (saving || loading || !formFile || !analysis) return;
+    if (mms.mmsUploading) { toast.error('이미지를 올리는 중입니다. 끝난 뒤 접수해 주세요.'); return; }
     if (analysis.errors.length > 0) { toast.error('반려 사유를 먼저 해결해 주세요.'); return; }
+    // ★ 2026-11-25 한 파일 여러 건 = 이미 접수한 건은 다시 접수하지 않는다(다음 건 분석이 실패해 화면에 남은 경우)
+    if (analysis.pairIndex != null && confirmedPairs.has(analysis.pairIndex)) { toast.error('이 건은 이미 접수했습니다. 다른 건을 골라 주세요.'); return; }
     const seq = analyzeSeq.current; // 제출은 지금 보고 있는 분석 세대에 묶인다
     setSaving(true);
     try {
@@ -206,6 +275,19 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
       toast.success(`${created.length}건 접수했습니다. 스팸 검사를 마치면 담당자 번호로 문자를 보내 드립니다.`);
       for (const n of notice) toast.info(n);   // ★ 2026-11-06 C109
       onCreated(created);
+      // ★ 2026-11-25 한 파일 여러 건 = 접수한 건을 표시하고 다음 건으로(같은 파일 · 그 건의 값으로 새로 분석)
+      const pairs = analysis.pairs || [];
+      const submitted = analysis.pairIndex;
+      if (pairs.length > 1 && submitted != null) {
+        const done = new Set([...confirmedPairs, submitted]);
+        setConfirmedPairs(done);
+        const next = pairs.find((p) => !done.has(p.index));
+        if (next) {
+          setSaving(false);
+          await analyze(false, { freshPair: next.index });
+          return;
+        }
+      }
       close();
     } catch (e: any) {
       if (seq !== analyzeSeq.current) return;
@@ -276,9 +358,34 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
               <p className={CUI_HINT}>이미지 문자가 필요하면 다음 화면에서 이미지를 넣을 수 있습니다.</p>
             </div>
           ) : a && (
+            // ★ 2026-11-25 분석이 걸린 동안 = 확인 화면 입력 전체 잠금(건 바꾸기 · 다시 분석 응답이 발송 시각 · 담당자 · 발신번호 · 열 연결 · 채우기를 되써 넣는다
+            //   = 그 사이 바꾼 값을 늦은 응답이 덮지 않게 · 입력마다 막던 것을 한 곳으로 · Codex 구현 3R ~ 5R)
+            <fieldset disabled={saving || loading} className="min-w-0" onChange={() => { dirty.current = true; }}>
             <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_320px] gap-6">
               {/* ══ 왼쪽: 요청서 내용 확인 ══ */}
               <div className="space-y-5 min-w-0">
+                {/* ★ 2026-11-25 한 파일 여러 건 — 건을 골라 한 건씩 확인 · 접수(접수한 건은 표시 · 다시 접수 단추 없음) */}
+                {(a.pairs || []).length > 1 && (
+                  <div className="rounded-xl border border-indigo-600/15 bg-indigo-50 px-4 py-3 break-keep">
+                    <p className="text-[13px] font-bold text-indigo-900">이 파일에 요청서가 {(a.pairs || []).length}건 들어 있어요. 한 건씩 확인하고 접수합니다.</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {(a.pairs || []).map((p) => {
+                        const done = confirmedPairs.has(p.index);
+                        const cur = a.pairIndex === p.index;
+                        return (
+                          <button key={p.index} type="button" disabled={loading || saving || done || cur || mms.mmsUploading}
+                            onClick={() => { void analyze(false, { freshPair: p.index }); }}
+                            className={`inline-flex items-center gap-1 h-8 px-3 rounded-lg text-[12.5px] font-semibold ring-1 transition ${
+                              cur ? 'bg-indigo-600 text-white ring-indigo-600' : done ? 'bg-emerald-50 text-emerald-700 ring-emerald-200' : 'bg-white text-indigo-700 ring-indigo-200 hover:bg-indigo-100'
+                            }`}>
+                            {done && <Check className="w-3.5 h-3.5" strokeWidth={2.25} />}
+                            <span className="truncate max-w-[180px]">{p.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {a.errors.length > 0 && (
                   <div className={CUI_DANGER_BOX}>
                     <AlertTriangle className={CUI_DANGER_ICON} size={16} strokeWidth={2} />
@@ -312,6 +419,22 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                   </div>
                   <div className="mt-2 rounded-xl bg-neutral-100 px-4 py-3 text-[13px] leading-relaxed text-neutral-900 max-h-[150px] overflow-y-auto">
                     <p className="whitespace-pre-wrap break-words">{a.content}</p>
+                  </div>
+                  {/* ★ 2026-11-25 서버가 한 일 · 빈 자리 · 점점 · 빈 값 알림(접수 전) */}
+                  {(a.intakeNotes || []).length > 0 && (
+                    <div className="mt-2 text-[12.5px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-0.5 break-keep">
+                      {(a.intakeNotes || []).map((n, i) => <p key={i}>{n}</p>)}
+                    </div>
+                  )}
+                  <div className="mt-2">
+                    <AgencyBlankFixBox
+                      blanks={a.blanks || []}
+                      fills={slotFills}
+                      onChange={(next) => { void analyze(true, { fills: next }); }}
+                      varCount={a.varsMatched.length}
+                      disabled={loading || saving}
+                      onRedoFile={() => { reset(); }}
+                    />
                   </div>
                   <p className={CUI_HINT}>
                     문안과 제목을 고치려면 요청서를 고쳐 다시 올려 주세요.
@@ -473,6 +596,7 @@ export default function AgencyOneStepModal({ show, onClose, onCreated }: Props) 
                 </div>
               </div>
             </div>
+            </fieldset>
           )}
         </div>
 

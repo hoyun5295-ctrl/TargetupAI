@@ -44,6 +44,11 @@ export interface ParsedAgencyForm {
    */
   imageFileName: string;
   /**
+   * ★ 2026-11-25 「이미지 파일명」 칸 ① 줄 값 + 그 아래 ②③ 줄(번호표 · 앞뒤 공백 뺌 · 순서 = ①②③ · 빈 줄 뺌).
+   *   메일 다건 접수가 첨부 이미지를 이름으로 맞출 때 쓴다(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §7).
+   */
+  imageFileNames: string[];
+  /**
    * ★2026-08-27 §18-13 "청구 계정" 칸(선택). 한 이메일 주소가 여러 귀속(청구 계정)에 등록된 경우
    * 어느 계정 명의로 접수·청구할지 담당자가 지정한다. 대조는 워커가 matchBillingTarget으로 한다.
    * 선택 항목이라 비면 '' (귀속이 1개인 대부분 업체는 적을 필요가 없다).
@@ -211,13 +216,113 @@ function parseIsAd(text: string): boolean {
 export function unreadableAgencyForm(): ParsedAgencyForm {
   return {
     subject: '', content: '', requestedAtText: '', requestedAt: null, callbackRaw: '',
-    isAd: true, managerPhones: [], phoneColumnName: '', imageFileName: '', billingTarget: '',
+    isAd: true, managerPhones: [], phoneColumnName: '', imageFileName: '', imageFileNames: [], billingTarget: '',
     errors: [{ field: '요청서', error: '요청서 파일을 읽지 못했습니다. 양식 그대로인지 확인해 주세요.' }],
   };
 }
 
-/** 요청서 시트를 라벨 기준으로 읽는다 */
-export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
+/** ★ 2026-11-25 문안 칸 라벨(요청서 시트 판정 · planAgencyWorkbook 과 해석기가 같은 표를 쓴다) */
+const CONTENT_LABELS = ['문안', '문안내용', '내용', '메시지 내용'];
+const WHEN_LABELS = ['보낼 시각', '발송일시', '발송 시각', '요청발송일시', '발송날짜 및 시간', '발송 날짜', '발송날짜'];
+/** ★ 2026-11-25 명단 시트 이름 꼴(한 파일 여러 건 · 「고객리스트1」 · 공백 뺀 이름) */
+export const AGENCY_LIST_SHEET_RE = /^(고객리스트|고객명단)(\d*)$/;
+
+/** 시트 이름(공백 뺌) — 시트 판정 공용 */
+export const agencySheetKey = (name: string) => normLabel(name);
+
+/**
+ * ★ 2026-11-25 이 시트 행들이 요청서로 보이는가(문안 라벨 행이 있음 · 라벨 = 행의 첫 비어 있지 않은 칸 · 해석기와 같은 규칙).
+ *   한 파일 여러 건 판정(planAgencyWorkbook)이 쓴다.
+ */
+export function agencyRowsLookLikeRequest(rows: any[][]): boolean {
+  // 문안 라벨(값 있음)과 보낼 시각 라벨이 둘 다 있어야 요청서(안내 · 메모 탭의 라벨만 적힌 줄로 요청서가 되지 않게 · Codex 설계 3R · 4R)
+  const contentKeys = new Set(CONTENT_LABELS.map(labelKey));
+  const whenKeys = new Set(WHEN_LABELS.map(labelKey));
+  let content = false; let when = false;
+  for (const r of rows) {
+    if (!Array.isArray(r)) continue;
+    const li = r.findIndex((c) => String(c ?? '').trim() !== '');
+    if (li < 0) continue;
+    const k = labelKey(r[li]);
+    if (contentKeys.has(k) && String(r[li + 1] ?? '').trim() !== '') content = true;
+    if (whenKeys.has(k)) when = true;
+  }
+  return content && when;
+}
+
+/**
+ * ★ 2026-11-25 「테스트 명단」 옆 표에서 담당자(테스트) 번호를 읽는다(설계서 §8-1 · 시세이도 실물 「(오른쪽 테스트 명단 참고) →」).
+ *   「테스트 명단」 칸 아래 첫 머리줄에서 휴대폰 · 핸드폰 열을 먼저, 없으면 전화 · 연락처 · 번호 열을 고르고 아래로 빈칸 전까지.
+ */
+function readTestListPhones(rows: any[][]): string[] {
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+    const c0 = row.findIndex((c) => normLabel(c) === '테스트명단');
+    if (c0 < 0) continue;
+    for (let h = r + 1; h < Math.min(rows.length, r + 4); h++) {
+      const head = rows[h];
+      if (!Array.isArray(head)) continue;
+      const cols = head.map((c, i) => ({ i, k: normLabel(c) })).filter((x) => x.i >= c0 && x.k);
+      const pick = cols.find((x) => /휴대폰|핸드폰/.test(x.k)) || cols.find((x) => /전화|연락처|번호/.test(x.k) && !/매장|지점|점포/.test(x.k));
+      if (!pick) continue;
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (let d = h + 1; d < rows.length; d++) {
+        const v = Array.isArray(rows[d]) ? rows[d][pick.i] : null;
+        if (v === null || v === undefined || String(v).trim() === '') break;
+        const phone = normalizeAgencyPhone(String(v));
+        if (!phone || phone.length < 10 || seen.has(phone)) continue;
+        seen.add(phone);
+        out.push(phone);
+        if (out.length >= 10) break;
+      }
+      return out;
+    }
+  }
+  return [];
+}
+
+/**
+ * ★ 2026-11-25 이미지 파일명 칸 ① 줄 + 그 아래 ②③ 줄(번호표 · 앞뒤 공백 뺌).
+ *   라벨 줄이 여럿이면(빈 「이미지 파일명」 + 값 있는 「이미지파일명」) 모두 모은다 — 일반 해석기(imageFileName)와 같은 값을 놓치지 않게(Codex 구현 1R).
+ */
+function readImageFileNames(rows: any[][]): string[] {
+  const stripNo = (s: string) => s.replace(/^[①②③④⑤]\s*/, '').trim();
+  const key = labelKey('이미지 파일명');
+  let out: string[] = [];
+  const seenBlocks = new Set<string>();
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+    const li = row.findIndex((c) => String(c ?? '').trim() !== '');
+    if (li < 0 || labelKey(row[li]) !== key) continue;
+    // 라벨 묶음 하나(① 줄 + 아래 ②③) = 자리 차례 그대로(같은 이름 두 자리도 남긴다 = 맞추기가 「같은 첨부 두 자리」로 반려 · Codex 구현 2R)
+    const block: string[] = [];
+    const firstRaw = cellText(row[li + 1]);
+    const first = isPlaceholderValue(firstRaw) ? '' : stripNo(firstRaw);
+    if (first) block.push(first);
+    for (let n = r + 1; n < rows.length; n++) {
+      const next = rows[n];
+      const ni = Array.isArray(next) ? next.findIndex((c) => String(c ?? '').trim() !== '') : -1;
+      if (ni < 0) break;
+      const t = cellText(next[ni]);
+      if (!/^[②③④⑤]/.test(t)) break;
+      const name = stripNo(t) || stripNo(cellText(next[ni + 1]));
+      if (name) block.push(name);
+    }
+    // 라벨 묶음이 여럿이면(빈 줄 + 값 있는 줄) 처음 나온 묶음만 잇는다(같은 묶음 반복 = 한 번 · 묶음 안 같은 이름 · 자리 차례는 보존)
+    const blockKey = block.join('\u0000');
+    if (block.length > 0 && !seenBlocks.has(blockKey)) { seenBlocks.add(blockKey); out = [...out, ...block]; }
+  }
+  return out;
+}
+
+/**
+ * 요청서 시트를 라벨 기준으로 읽는다.
+ * ★ 2026-11-25 opts.formSheet = 한 파일 여러 건의 짝 시트 이름(planAgencyWorkbook). 없으면 종전 고르기 규칙 그대로.
+ */
+export function parseAgencyRequestForm(buffer: Buffer, opts: { formSheet?: string | null } = {}): ParsedAgencyForm {
   const errors: AgencyFormError[] = [];
   let rows: any[][] = [];
   try {
@@ -225,9 +330,11 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
     //   워크북 전체를 읽으면 명단을 한 번 더 파싱한다(0913 실측 20만 행: 전체 4,174ms · 시트 이름만 2ms · 요청서 시트만 1ms).
     //   시트 고르는 규칙은 종전 그대로이고, 형식상 시트만 골라 읽기가 안 되면 종전처럼 전체를 읽는다.
     const names = XLSX.read(buffer, { type: 'buffer', bookSheets: true }).SheetNames;
+    if (opts.formSheet && !names.includes(opts.formSheet)) return unreadableAgencyForm();
     // ⛔ 시트는 이름으로 먼저 찾는다(★Codex 적대 1R) — 첫 시트만 읽으면 숨김·잔여 시트가
     //   보이는 값과 다른 값을 진실로 만들 수 있다. "요청서"(구양식) → "내용"(통일 양식) → 첫 시트.
-    const sheetName = names.find((n) => normLabel(n) === '요청서')
+    const sheetName = opts.formSheet
+      || names.find((n) => normLabel(n) === '요청서')
       || names.find((n) => normLabel(n) === '내용')
       || names[0];
     let sheet = XLSX.read(buffer, { ...SHEET_READ_OPTS, sheets: [sheetName] }).Sheets[sheetName];
@@ -249,7 +356,8 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
     { field: '보낼 시각', labels: ['보낼 시각', '발송일시', '발송 시각', '요청발송일시', '발송날짜 및 시간', '발송 날짜', '발송날짜'] },
     { field: '회신번호', labels: ['회신번호', '발신번호', '보내는 번호'] },
     { field: '광고 여부', labels: ['광고 여부', '광고'] },
-    { field: '담당자 번호', labels: ['담당자 번호', '담당자', '담당자번호', '테스트 문자 받을 번호', '테스트문자받을번호'] },
+    // ★ 2026-11-25 업계 양식 「테스트번호 (여러 개 가능)」(시세이도 실물 · 설계서 §8-1) 별칭 합류
+    { field: '담당자 번호', labels: ['담당자 번호', '담당자', '담당자번호', '테스트 문자 받을 번호', '테스트문자받을번호', '테스트번호', '테스트 번호', '테스트 수신번호'] },
     // ★2026-08-26 §18-4 신설(선택) — 명단에서 받는 사람 번호가 든 열의 이름. 있으면 자동 선정을 안 한다
     { field: '수신자 열 이름', labels: ['수신자 열 이름', '수신자 열', '수신자열', '전화번호 열', '전화번호열'] },
     // ★2026-08-26(2) 업계 양식 칸 — 문자타입은 알림톡·친구톡 반려 판정에만 쓴다(타입 자체는 배관이 정한다)
@@ -317,18 +425,20 @@ export function parseAgencyRequestForm(buffer: Buffer): ParsedAgencyForm {
       managerPhones.push(phone);
       if (managerPhones.length >= 10) break;
     }
+    // ★ 2026-11-25 칸에 번호가 없으면(「(오른쪽 테스트 명단 참고) →」 · 빈칸) 시트의 「테스트 명단」 표에서 읽는다(설계서 §8-1)
+    if (managerPhones.length === 0) managerPhones.push(...readTestListPhones(rows));
   }
 
   if (!content) errors.push({ field: '문안', error: '문안 칸이 비어 있습니다.' });
   const requestedAt = requestedAtText ? parseWhenText(requestedAtText) : null;
   if (!requestedAtText) errors.push({ field: '보낼 시각', error: '보낼 시각 칸이 비어 있습니다.' });
   else if (!requestedAt) errors.push({ field: '보낼 시각', error: `보낼 시각을 읽지 못했습니다: "${requestedAtText}". 예: 8월 30일 10시 30분 또는 2026-09-01 14:00` });
-  if (!callbackRaw) errors.push({ field: '회신번호', error: '회신번호 칸이 비어 있습니다. 번호 또는 명단의 열 이름을 적어 주세요.' });
+  // ★ 2026-11-25 빈 회신번호 판정은 명단을 아는 analyzeOneStep 이 한다(명단 매장번호 열 · 설계서 §8-2 · 같은 문장)
   if (managerPhones.length === 0) errors.push({ field: '담당자 번호', error: '테스트 문자를 받을 담당자 휴대폰 번호가 없습니다.' });
 
   return {
     subject, content, requestedAtText, requestedAt, callbackRaw, isAd, managerPhones, phoneColumnName,
-    imageFileName, billingTarget: pick('청구 계정'), errors,
+    imageFileName, imageFileNames: readImageFileNames(rows), billingTarget: pick('청구 계정'), errors,
   };
 }
 
@@ -356,7 +466,7 @@ export const MAX_LIST_COLUMNS = 100;
  *   그대로 두면 첫 고객이 열 이름으로 소비돼 **조용히 1명 유실**된다(Harold 실물 명단 실측).
  *   열 이름을 "열1·열2…"로 합성하고 첫 줄부터 데이터로 읽는다(자리 보존 원칙 동일).
  */
-export function parseAgencyRecipientList(buffer: Buffer): {
+export function parseAgencyRecipientList(buffer: Buffer, opts: { listSheet?: string | null } = {}): {
   headers: string[]; rows: Record<string, any>[]; duplicates: string[]; truncated: boolean; columnsOverflow: boolean;
   /** 첫 줄이 데이터(무헤더)로 판정됐는가. 열 이름은 합성("열N")이다 */
   headerless: boolean;
@@ -364,7 +474,9 @@ export function parseAgencyRecipientList(buffer: Buffer): {
   const wb = XLSX.read(buffer, SHEET_READ_OPTS);
   // ★2026-08-26(2) 통일 양식(한 파일)은 "고객리스트" 시트가 명단이다. 이름 정확 일치가 없을 때만
   //   첫 시트(별도 명단 파일 = 구양식·자유형 하위호환). "고객 명단 예시" 같은 예시 시트는 일치하지 않는다.
-  const sheetName = wb.SheetNames.find((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n))) || wb.SheetNames[0];
+  // ★ 2026-11-25 opts.listSheet = 한 파일 여러 건의 짝 명단 시트(planAgencyWorkbook) · 없으면 종전 규칙 · 지정했는데 없으면 빈 명단(엉뚱한 시트로 폴백 0)
+  if (opts.listSheet && !wb.SheetNames.includes(opts.listSheet)) return { headers: [], rows: [], duplicates: [], truncated: false, columnsOverflow: false, headerless: false };
+  const sheetName = opts.listSheet || wb.SheetNames.find((n) => RECIPIENT_SHEET_NAMES.has(normLabel(n))) || wb.SheetNames[0];
   const sheet = wb.Sheets[sheetName];
   // ★2026-09-13(3) 날짜 셀 = 엑셀에 보이는 벽시계 글자(SHEET_READ_OPTS 주석 · 종전에는 UTC ISO로 저장돼 문자에 들어갔다)
   sheetDatesToText(sheet);
@@ -482,6 +594,26 @@ export function matchHeader(name: string, headers: string[]): string | null {
 }
 
 /** 회신번호 칸 해석 — 번호(8자리 이상 숫자)면 직접, 명단 열 이름과 맞으면 열 방식 */
+/**
+ * ★ 2026-11-25 빈 발신번호 = 명단의 매장 전화 열(Harold 「매장번호 있잖아? 거기 항상 채워서 줘」 · 설계서 §8-2).
+ *   이름(공백 뺌)이 (매장|지점|점포|가맹점) 과 (번호|전화|연락처) 를 함께 품은 열 = 후보.
+ *   후보가 정확히 하나이고 · 수신자 열이 아니며 · 휴대폰 값 비율 < 0.5(매장 전화 = 유선 · Codex 설계 1R)일 때만 그 열.
+ *   그 밖 = null(부르는 쪽이 「회신번호 칸이 비어 있습니다」 + 후보 이름으로 반려).
+ */
+export function pickStoreCallbackColumn(
+  headers: string[], rows: Record<string, any>[], phoneColumn: string | null,
+): { column: string | null; candidates: string[] } {
+  const candidates = headers.filter((h) => {
+    const k = normLabel(h);
+    return /(매장|지점|점포|가맹점)/.test(k) && /(번호|전화|연락처)/.test(k);
+  });
+  if (candidates.length !== 1) return { column: null, candidates };
+  const col = candidates[0];
+  if (col === phoneColumn) return { column: null, candidates };
+  const ratio = scorePhoneColumns([col], rows)[0]?.ratio ?? 0;
+  return { column: ratio < 0.5 ? col : null, candidates };
+}
+
 export function resolveCallbackPlan(callbackRaw: string, headers: string[]): CallbackPlan {
   const raw = String(callbackRaw || '').trim();
   if (!raw) return { mode: 'none' };

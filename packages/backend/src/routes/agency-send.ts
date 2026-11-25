@@ -23,6 +23,7 @@ import { extractAgencyVars } from '../utils/agency-send-vars';
 import { AGENCY_PREVIEW_LIMIT, buildRenderedSamples, measureAgencyMaxSmsBytes, AGENCY_SMS_BYTES_MAX_CANDIDATES, measureAgencyRequestSmsBytes, agencySmsBytesOverText } from '../utils/agency-send-preview';
 import { SMS_MAX_BYTES } from '../utils/message-byte';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
+import { findAgencyBlanks, blankLabel, matchBlankColumns } from '../utils/agency-send-blanks';   // ★ 2026-11-25 빈 자리 판정 CT
 import { senderAuthRejection } from '../utils/sender-auth';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { editAgencyContentTx, rescheduleAgencyRequestTx, overrideSpamBlockTx } from '../utils/agency-send-change';
@@ -36,7 +37,7 @@ import { parsePageParams, parseOffsetParam } from '../utils/normalize';   // ★
 // ★2026-08-26 §18 승격 — 접수 코어·원스텝 분석은 CT(utils/agency-send-intake.ts)가 소유한다.
 //   입구 = 화면 접수 · 원스텝 · 이메일 접수 워커. 이 파일에 코어를 다시 정의하지 마라(두 벌 금지).
 import {
-  analyzeOneStep, createRequestCore, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
+  analyzeOneStep, createRequestCore, loadAgencyEmptyVarRows, hasAgencyColumn, kickFirstTest, loadSendWindow, logEvent, parseOneStepOverrides,
   loadAgencyCallbackKinds, type AgencyCallbackKinds,
   MAX_CONTENT, type OneStepAnalysis,
 } from '../utils/agency-send-intake';
@@ -139,6 +140,8 @@ function toPublic(row: any) {
     contentVersion: row.content_version,
     // ★2026-09-25 지금 문안의 맞춤법 확인 목록(버전이 다르거나 검사가 실패했으면 null · 컬럼 전이면 null)
     spellIssues: readAgencySpell(row),
+    // ★ 2026-11-25 지금 문안의 채우지 않은 자리(문안만으로 판정 · 승인 확인과 같은 함수 · 설계서 §4-5 · §5)
+    blanks: findAgencyBlanks(row.current_content).map((b) => ({ ...b, label: blankLabel(b) })),
     // 행 수정 번호. 화면이 이 값을 되돌려주고 서버가 조건으로 쓴다(낙관적 잠금).
     revision: row.revision,
     mmsImagePaths: row.mms_image_paths || [],
@@ -338,6 +341,8 @@ function toAnalysisView(a: OneStepAnalysis, optOutNotice: string[] = []) {
     charNotice: agencyCharNotice(a.charNotes),
     // ★ 2026-11-13 C130 — 「무료」 없는 수신거부 줄 겹침 안내(확인 창 · 접수 전 · 설계서 §2 A1)
     optOutNotice,
+    // ★ 2026-11-25 빈 자리 · 채우기 위치 기준 글 · 알림 · 한 파일 여러 건(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §4 · §6-3)
+    baseContent: a.baseContent, blanks: a.blanks, intakeNotes: a.intakeNotes, pairs: a.pairs, pairIndex: a.pairIndex, fillError: a.fillError,
   };
 }
 
@@ -442,7 +447,8 @@ router.post('/one-step', requireAgencySendMw, oneStepUpload, async (req: Request
       }
       created.push(result.request);
       createdKinds.push(result.callbackKinds);
-      createdNotice.push(...result.notice);
+      // ★ 2026-11-25 서버가 스스로 한 일(괄호 변수 · 매장번호 열) + 코어 알림(빈 자리 · 점점 · 빈 값 · 글자 · 수신거부)
+      createdNotice.push(...analysis.autoNotes, ...result.notice);
       await client.query('COMMIT');
     } catch (txErr) {
       await client.query('ROLLBACK').catch(() => {});
@@ -549,6 +555,24 @@ router.post('/spell-check', async (req: Request, res: Response) => {
 });
 
 // ════════════════════════════════════════════════════════════
+// POST /api/agency-send/blank-check — 화면 접수의 채우지 않은 자리 판정 (★ 2026-11-25 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §4-4)
+//   판정 = 접수 코어 · 승인 확인과 같은 CT 한 벌(화면 미러 0). 저장 0 · 크레딧 0 · AI 0.
+//   화면은 문안 · 명단 열 이름 · 행 일부(최대 200행 · 후보 열 고르기 재료)만 보낸다. 점 세기 전체 수는 화면이 가진 행으로 다시 센다.
+// ════════════════════════════════════════════════════════════
+router.post('/blank-check', async (req: Request, res: Response) => {
+  const auth = await requireAgencySend(req, res);
+  if (!auth) return;
+  const content = String(req.body?.content ?? '');
+  if (content.length > MAX_CONTENT) return res.status(400).json({ success: false, error: `문안은 ${MAX_CONTENT}자까지 넣을 수 있습니다.` });
+  const headers = Array.isArray(req.body?.headers) ? req.body.headers.filter((h: unknown) => typeof h === 'string').slice(0, 100) : [];
+  const rows = Array.isArray(req.body?.rows)
+    ? req.body.rows.slice(0, 200).filter((r: unknown) => r && typeof r === 'object' && !Array.isArray(r))
+    : [];
+  const blanks = findAgencyBlanks(content).map((b) => ({ ...b, label: blankLabel(b), candidates: matchBlankColumns(b, headers, rows) }));
+  return res.json({ success: true, blanks });
+});
+
+// ════════════════════════════════════════════════════════════
 // POST /api/agency-send/sms-bytes — 접수 화면 SMS/LMS 판정 (★2026-09-26 한줄로 V2 R1-08 · Codex 8차 1R high)
 //   화면이 자체 추정으로 LMS를 강제하지 않게, 실제 발송·미리보기·접수 코어와 **같은 조립 CT**로 잰 값을 돌려준다.
 //   화면은 명단 전체가 아니라 가중 점수 상위 후보(실제 수신자 조합 그대로 · 최대 20명)만 보낸다. 저장 0 · 크레딧 0.
@@ -595,7 +619,9 @@ router.get('/:id', async (req: Request, res: Response) => {
     const optOutNotice = agencyAdTextApplies({ isAd: row0.is_ad, adText: row0.ad_text })   // ★ C132 이메일 접수 = 표기 없음 = 안내 0
       ? agencyOptOutNotice({ content: row0.current_content, isAd: true, messageType: row0.message_type, opt080: await loadAgencyOpt080(row0.created_by, row0.company_id), how: 'edit' })
       : [];
-    return res.json({ success: true, request: await toPublicWithKinds(row0), events: events.rows, optOutNotice });
+    // ★ 2026-11-25 문안 항목 값이 빈 수신자 수(읽을 때 셈 · 실패 = 줄 안 그림 · 설계서 §5-3)
+    const emptyVarRows = await loadAgencyEmptyVarRows(row0).catch(() => []);
+    return res.json({ success: true, request: { ...(await toPublicWithKinds(row0)), emptyVarRows }, events: events.rows, optOutNotice });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);
     console.error('[agency-send] 상세 조회 실패:', err);
@@ -715,6 +741,8 @@ router.post('/:id/approve', async (req: Request, res: Response) => {
       approvedBy: auth.userId,
       via: 'screen',
       req: { ip: req.ip, headers: req.headers },
+      // ★ 2026-11-25 「채우지 않은 자리 그대로 승인」 확인(설계서 §5)
+      blankAck: req.body?.blankAck === true,
     });
     if (!outcome.ok) {
       if (outcome.senderAuth) return res.status(403).json(senderAuthRejection(outcome.senderAuth));

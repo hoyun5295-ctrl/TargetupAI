@@ -186,7 +186,8 @@ describe('배선(소스 계약)', () => {
     expect(buildTooTightNotify(ctx)).toMatch(/검사를 통과했지만/);
     const fn = worker.slice(worker.indexOf('export async function sendAgencyApprovalRequest('));
     expect(fn).toContain('const overridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version));');
-    expect((fn.match(/overridden \}\)/g) || []).length).toBe(3);   // 촉박 · 승인 요청 본문 · 담당자별 링크 문장
+    // ★ 2026-11-25 승인 요청 두 문장에 빈 자리 줄(blankLine)이 붙는다(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5-4)
+    expect((fn.match(/overridden(?:, blankLine)? \}\)/g) || []).length).toBe(3);   // 촉박 · 승인 요청 본문 · 담당자별 링크 문장
     expect(worker).toContain('const overridden = await isSpamOverriddenVersion(target.id, Number(target.content_version));');
     const route = be('routes/agency-send.ts');
     expect(route).toContain('const spamOverridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version)).catch(() => null);');
