@@ -98,13 +98,17 @@ function removedTokens(parentText: string, variantText: string): string[] {
 
 export interface DiagCheckRow { testId: string; variant: 1 | 2; carrier: string; state: DiagCheckState; removed: string[] }
 
-/** 이 부모의 확인 판(통신사마다 판 ① · ②) — 칸이 없으면 빈 목록 */
+/**
+ * 이 부모의 확인 판(통신사마다 판 ① · ②) — 칸이 없으면 빈 목록
+ *   ★ 2026-11-26 읽기 울타리(재작성 설계서 docs/2026-11-25-spam-diag-rewrite-design.md §15 배포 A) — 이 읽기가 아는 판 = 통신사 글자 + 판 번호(K1 · L2 …)뿐.
+ *   다른 이름표의 판(재작성 판 R1 ~ R3)은 판으로 보지 않는다(옛: 끝 글자가 2 가 아니면 판 ① → 도착한 R1 이 「주소를 빼니 도착」 4a 로 확정될 수 있었다).
+ */
 export async function readDiagChecks(parentTestId: string, parentText: string, run: SqlRun = query): Promise<{ rows: DiagCheckRow[]; byCarrier: Record<string, CarrierChecks> }> {
   if (!(await hasDiagColumn(run))) return { rows: [], byCarrier: {} };
   const res = await run(
     `SELECT t.id, t.variant_id, t.status, t.message_content_sms, t.message_content_lms, r.carrier, r.message_type, r.result
        FROM spam_filter_tests t JOIN spam_filter_test_results r ON r.test_id = t.id
-      WHERE t.diag_of = $1::uuid AND t.source = '${SPAM_DIAG_SOURCE}'`,
+      WHERE t.diag_of = $1::uuid AND t.source = '${SPAM_DIAG_SOURCE}' AND t.variant_id ~ '^[SKL][12]$'`,
     [parentTestId],
   );
   const rows: DiagCheckRow[] = [];

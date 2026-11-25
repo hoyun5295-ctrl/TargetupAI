@@ -137,6 +137,24 @@ describe('읽기 · 닫기', () => {
     expect(spamHintLine(h2!)).toBe('확인을 마치지 못했어요.');
   });
 
+  it('★ 1126 읽기 울타리(재작성 설계서 docs/2026-11-25-spam-diag-rewrite-design.md §15 배포 A) — 이름표가 R 로 시작하는 새 판은 지금 판 읽기가 판으로 보지 않는다(도착한 R1 을 판 ① 도착으로 읽어 「주소를 빼니 도착」으로 확정하지 않는다)', async () => {
+    const p = await parent();
+    const r1 = randomUUID();
+    // 새 판 행(재작성 판이 만들 꼴 · 주소를 그대로 둔 채 표현만 바꾼 글) — 발신번호는 이 파일의 하루 상한 셈에 안 걸리게 다른 합성 번호
+    await pool.query(
+      `INSERT INTO spam_filter_tests (id, company_id, user_id, callback_number, message_content_lms, message_hash, status, source, variant_id, diag_of, first_recipient, completed_at)
+       VALUES ($1, $2, $3, '0221231126', $4, $5, 'completed', 'spam_diag', 'R1', $6::uuid, $7, NOW())`,
+      [r1, CO, US, '(광고) 하늘몰 겨울 소식\n>https://tinyurl.example/zz9\n■ 최대 35% 할인\n무료 수신거부 080-000-0000', `h-${r1.slice(0, 8)}`, p, JSON.stringify({ [RENDERED_SAMPLE_MARK]: true })],
+    );
+    await pool.query(`INSERT INTO spam_filter_test_results (test_id, carrier, message_type, phone, received, result) VALUES ($1, 'KT', 'LMS', '01000001122', true, 'pass')`, [r1]);
+    const read = await readDiagChecks(p, TEXT);
+    expect(read.rows).toEqual([]);
+    expect(read.byCarrier).toEqual({});
+    const h = await buildSpamBlockHints(p);
+    expect(h?.carriers[0]).toMatchObject({ carrier: 'KT', checks: {}, next: 1 });
+    expect(spamHintLine(h!)).toBe('막혔을 수 있는 부분: 글 속 주소');
+  });
+
   it('★ 배포 3 Codex 1R — 회사 스위치 끄기 저장이 관문보다 먼저 커밋되면 검사 문자 관문은 꺼짐을 읽는다(관문이 끄기 커밋을 기다림 · 적재 0)', async () => {
     const p = await parent();
     const r = await registerDiag({ parentTestId: p, carrier: 'KT', variant: 1, actorUserId: US });
