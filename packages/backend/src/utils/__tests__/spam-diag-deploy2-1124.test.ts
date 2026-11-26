@@ -381,6 +381,9 @@ describe('★ 1124 회사 스위치(슈퍼관리자 · companies.spam_diag_enabl
     expect(sw).toContain('fetch(`/api/admin/companies/${companyId}/spam-diag`, { headers');
     expect(sw).toContain("method: 'PATCH'");
     expect(sw).not.toMatch(/window\.(alert|confirm)|\balert\(|confirm\(/);
+    // ★ 1126 C164 뒤 — 스위치 설명 글 = 지금 동작(표현을 바꾼 글로 닿는 글 찾기) · 옛 동작(의심 부분을 뺀 글 · 원인 좁히기) 문구 0
+    expect(sw).toContain('표현을 바꾼 글을 막힌 통신사로 보내 닿는 글을 찾습니다');
+    expect(sw).not.toMatch(/뺀 글|원인을 좁힙/);
     const card = fe('components/SpamBlockHintCard.tsx');
     // ★ 1126 C164 — 꺼진 회사 = 서버가 hidden 으로(단추 · 사유 줄 0) · 카드는 idle + start + 원문을 받은 창일 때만 찾기 단추
     expect(read('utils/spam-diag.ts')).toContain("card.state = el.reason === 'off' ? 'hidden' : 'idle';");
