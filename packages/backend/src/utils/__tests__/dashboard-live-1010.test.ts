@@ -252,7 +252,9 @@ describe('Codex 1R 정정(2026-10-10)', () => {
 
   it('크레딧 조회 사이 차감이 끼면 응답을 버리지 않고 그 사이 가장 작은 잔여로 눌러 쓴다 · 옛 조회는 새 조회를 덮지 않는다(2R)', () => {
     expect(dash).toContain('const during = creditEvents.current.filter((e) => e.gen > gen).map((e) => e.balance);');
-    expect(dash).toContain('setCreditInfo(cap !== null && Number(d.total) > cap ? { ...d, total: cap } : d);');
+    // ★ 2026-11-26 R109 — 같은 식을 capCredit 로 빼 조회 · 다시 채우기가 함께 쓴다(식 · 조회 적용 둘 다 그대로 잠금)
+    expect(dash).toContain('return cap !== null && Number(d.total) > cap ? { ...d, total: cap } : d;');
+    expect(dash).toContain('setCreditInfo(capCredit(d, gen));');
     // 4R — 조회는 하나씩(서버 읽기 순서 = 반영 순서) · 순번 비교 없음
     expect(dash).toContain('const loadCredit = useRef(serialRunner(async () => {');
     expect(dash).not.toContain('creditApplied');

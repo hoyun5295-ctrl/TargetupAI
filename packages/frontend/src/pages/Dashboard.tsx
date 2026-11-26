@@ -95,6 +95,7 @@ import { diagnosisApi, type DiagnosisStateDto } from '../components/marketing-di
 import { normalizeAiMessageChannel, type AiMessageChannel } from '../utils/campaign-axis';
 import DashboardActionRow, { type DashboardAction } from '../components/dashboard/DashboardActionRow';   // ★ 2026-10-18 맨 위 버튼 줄
 import { fetchAiOperatorAccess } from '../utils/ai-operator-access';
+import { isRestartGap, isRestartGapAxiosError, refillWhenServerBack, jsonRefillRead, RestartGapError, RESTART_GAP_SEND_ERROR, type RefillRead } from '../lib/restart-gap';   // ★ 2026-11-26 R109 재시작 공백
 import { AI_LINE_ALIMTALK_HANDOFF, aiLineOwner, type AiLineAlimtalkHandoff } from '../utils/ai-line';   // ★ 2026-10-18 알림톡 갈래 넘기기
 
 
@@ -478,14 +479,19 @@ export default function Dashboard() {
   //   조회하는 사이 이 창에 차감 이벤트가 끼면 응답이 차감 전 값일 수 있다 → 버리지 않고 그 사이 차감 잔여의 최솟값보다 크게 쓰지 않는다.
   const creditGen = useRef(0);
   const creditEvents = useRef<{ gen: number; balance: number }[]>([]);
-  const loadCredit = useRef(serialRunner(async () => {
-    const gen = creditGen.current;
-    const r = await fetchJson('/api/companies/my-credit');
-    const d = r.body;
-    if (!r.ok || !d || d.success === false) return; // 조회 실패 시 카드 숨김(처음) · 직전 값 유지(그 뒤)
+  /** 조회를 시작한 세대(gen) 뒤에 온 차감 사건의 잔여보다 크게 쓰지 않는다(조회 · ★ R109 다시 채우기가 함께 쓰는 식) */
+  const capCredit = (d: any, gen: number) => {
     const during = creditEvents.current.filter((e) => e.gen > gen).map((e) => e.balance);
     const cap = during.length ? Math.min(...during) : null;
-    setCreditInfo(cap !== null && Number(d.total) > cap ? { ...d, total: cap } : d);
+    return cap !== null && Number(d.total) > cap ? { ...d, total: cap } : d;
+  };
+  const loadCredit = useRef(serialRunner(async () => {
+    const gen = creditGen.current;
+    const sentToken = localStorage.getItem('token');
+    const r = await fetchJson('/api/companies/my-credit');
+    const d = r.body;
+    if (!r.ok || !d || d.success === false) { if (r.gap) refillCredit(sentToken); return; } // 조회 실패 시 카드 숨김(처음) · 직전 값 유지(그 뒤) · ★ R109 재시작 공백이면 비어 있을 때만 다시 채운다
+    setCreditInfo(capCredit(d, gen));
   })).current;
   useEffect(() => { void loadCredit(); }, []);
   // 지금 화면의 잔여(이벤트 판정용 · 렌더마다 갱신)
@@ -508,6 +514,37 @@ export default function Dashboard() {
     window.addEventListener('credit:used', onCredit);
     return () => window.removeEventListener('credit:used', onCredit);
   }, []);
+  // ★ 2026-11-26 R109 재시작 공백 다시 채우기(설계서 docs/2026-11-26-restart-gap-reread-design.md §3-2) — 표시에만 쓰는 값 셋(발송 현황 · DB 현황 · AI 크레딧)만.
+  //   원래 요청은 오늘처럼 끝낸다(늦추지 않음) · 그 주소만 실패한 토큰으로 다시 읽어 **비어 있을 때만** 채운다(어떤 길이 채운 값도 덮지 않는다).
+  //   요금제 · 충전 잔액(직접발송 판단에 쓰임) · 알림 · 새로고침은 다시 돌리지 않는다 · 중복 막기 = 이 화면 안 집합 · 화면이 내려가거나 로그인이 바뀌면 멈춘다.
+  const refillAlive = useRef(true);
+  useEffect(() => { refillAlive.current = true; return () => { refillAlive.current = false; }; }, []);
+  const refillBusy = useRef(new Set<string>());
+  const dashboardCardsNow = useRef(dashboardCards);
+  dashboardCardsNow.current = dashboardCards;
+  const refillShown = <T,>(path: string, token: string | null, read: RefillRead<T>, fill: (v: T) => void) => {
+    if (refillBusy.current.has(path)) return;
+    refillBusy.current.add(path);
+    void refillWhenServerBack<T>({ token, read, fill, ok: () => refillAlive.current && localStorage.getItem('token') === token })
+      .finally(() => { refillBusy.current.delete(path); });
+  };
+  const refillStats = (token: string | null) => refillShown('/api/customers/stats', token,
+    jsonRefillRead('/api/customers/stats', (b: any) => b?.stats ?? undefined),
+    (v: Stats) => setStats((prev) => prev ?? v));
+  const refillCards = (token: string | null) => refillShown('/api/companies/dashboard-cards', token,
+    jsonRefillRead('/api/companies/dashboard-cards', (b: any) => (b ? (b as DashboardCardsResponse) : undefined)),
+    (v: DashboardCardsResponse) => {
+      if (dashboardCardsNow.current) return;
+      setDashboardCards((prev) => prev ?? v);
+      setDbAsOf((prev) => prev ?? (typeof v?.asOf === 'number' ? new Date(v.asOf) : null));
+    });
+  const refillCredit = (token: string | null) => {
+    const read = jsonRefillRead('/api/companies/my-credit', (b: any) => (b && b.success !== false ? b : undefined));
+    refillShown<{ d: any; gen: number }>('/api/companies/my-credit', token,
+      async (t, signal) => { const gen = creditGen.current; const r = await read(t, signal); return r.gap || r.value === undefined ? r : { gap: false, value: { d: r.value, gen } }; },
+      (v) => setCreditInfo((prev: any) => prev ?? capCredit(v.d, v.gen)));
+  };
+  // ★ 2026-11-26 R109 끝
   // ★ D162-4 (2026-05-15) PDF 0515 알림톡 #1+#3 후속: 알림톡 발송 전용 풀 화면 모달 진입 state.
   //   Harold님 명시 의도 — 직접발송 모달에 알림톡 squeeze 사고 영구 종결. AlimtalkSendModal 별도 풀 화면.
   const [showAlimtalkSend, setShowAlimtalkSend] = useState(false);
@@ -813,6 +850,8 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(commitBody),
       });
+      // ★ 2026-11-26 R109 — 문자 발송이 nginx 가 백엔드에 못 닿아 낸 응답을 받으면 오늘처럼 아래 catch 로(다시 보내지 않음 · 닫기 · 해제 차례 그대로) · 문장만 「접수 여부 먼저 확인」 · 알림톡은 오늘 그대로(★ Codex 구현 1R · 설계 §8)
+      if (!isAlimtalk && isRestartGap(res.status, res.headers.get('content-type'))) throw new RestartGapError();
       const data = await res.json();
       if (res.status === 402 && data.insufficientBalance) {
         setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
@@ -882,7 +921,7 @@ export default function Dashboard() {
     } catch (err: any) {
       const errMsg = err?.message || String(err) || '알 수 없는 오류';
       console.error('[direct-send] 실패:', err);
-      setToast({show: true, type: 'error', message: `발송 실패: ${errMsg.substring(0, 120)}`, duration: 6000});
+      setToast({show: true, type: 'error', message: err instanceof RestartGapError ? RESTART_GAP_SEND_ERROR : `발송 실패: ${errMsg.substring(0, 120)}`, duration: 6000});
     } finally {
       setDirectSending(false);
     }
@@ -1032,6 +1071,8 @@ export default function Dashboard() {
           } : {}),
         })
       });
+      // ★ 2026-11-26 R109 — 직접발송 확정과 같은 판정(오늘과 같은 catch · 문장만 · 문자만 · 알림톡은 오늘 그대로)
+      if (!isTargetAlimtalk && isRestartGap(res.status, res.headers.get('content-type'))) throw new RestartGapError();
       const data = await res.json();
       if (res.status === 402 && data.insufficientBalance) {
         setSendConfirm({show: false, type: 'immediate', count: 0, unsubscribeCount: 0});
@@ -1077,7 +1118,7 @@ export default function Dashboard() {
         setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
       }
     } catch (err) {
-      setToast({show: true, type: 'error', message: '발송 실패'});
+      setToast({show: true, type: 'error', message: err instanceof RestartGapError ? RESTART_GAP_SEND_ERROR : '발송 실패'});
       setTimeout(() => setToast({show: false, type: 'error', message: ''}), 3000);
     } finally {
       setTargetSending(false);
@@ -1522,6 +1563,7 @@ export default function Dashboard() {
   }, [targetMessage, targetMsgType, adTextEnabled, optOutNumber, showTargetSend, targetExtraction, targetSendChannel, targetFieldsMeta]);
 
   const loadStats = async () => {
+    const sentToken = localStorage.getItem('token');   // ★ R109 다시 채우기는 이 토큰만 싣는다
     try {
       const response = await customersApi.stats();
       setStats(response.data.stats);
@@ -1582,6 +1624,8 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error('통계 로드 실패:', error);
+      // ★ 2026-11-26 R109 — stats 가 재시작 공백으로 던졌으면(뒤 요청은 불리지 않았다) 표시 값 둘만 비어 있을 때 다시 채운다(요금제 · 잔액 · 승인은 그대로)
+      if (isRestartGapAxiosError(error)) { refillStats(sentToken); refillCards(sentToken); }
     } finally {
       setLoading(false);
     }
@@ -1589,8 +1633,9 @@ export default function Dashboard() {
   // D41 대시보드 동적 카드 조회 — ★ 2026-10-10 함수로 뺐다(첫 업로드 공개 때 이것만 다시 부른다)
   //   읽기는 하나씩만(serialRunner · 크레딧과 같은 규칙) — 첫 진입 읽기와 첫 업로드 공개 읽기가 겹쳐도 순서가 뒤집히지 않는다
   const loadDashboardCards = useRef(serialRunner(async () => {
+    const sentToken = localStorage.getItem('token');
     const r = await fetchJson('/api/companies/dashboard-cards');
-    if (!r.ok || !r.body) return;
+    if (!r.ok || !r.body) { if (r.gap) refillCards(sentToken); return; }   // ★ R109 재시작 공백이면 비어 있을 때만 다시 채운다
     const cardsData = r.body as DashboardCardsResponse;
     setDashboardCards(cardsData);
     // ★ 2026-10-10 서버가 이 숫자를 계산한 시각(캐시면 그때). 없으면 기준 시각을 숨긴다

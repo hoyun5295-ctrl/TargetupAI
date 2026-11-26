@@ -4,6 +4,7 @@
  *   발송 중 · 예약 대기는 캠페인 상태라 띠에 함께 보이지만 개수에는 넣지 않는다.
  *   잠금 = backend `__tests__/dashboard-live-1010.test.ts`.
  */
+import { isRestartGap } from '../lib/restart-gap';
 
 /** GET /api/ai/operator/continuous 의 operators[] 중 쓰는 칸 */
 export interface LiveOperatorRow { name?: string | null; status?: string | null; nextRunAt?: string | null }
@@ -104,14 +105,16 @@ export const resetDashboardIntro = (): void => { dashboardIntroDone = false; };
  *   ② 같은 값을 읽는 요청은 하나씩만 — 도는 동안 들어온 요청은 끝난 뒤 한 번으로 합쳐 다시 보낸다.
  *      서버를 읽는 순서 = 화면에 반영하는 순서가 되어, 늦게 온 옛 응답이 새 값을 덮는 경로가 없다.
  */
-export type Fetched = { ok: boolean; status: number; body: any };
+/** gap = nginx 가 백엔드에 못 닿아 낸 응답(재시작 공백 · ★ 2026-11-26 R109 · lib/restart-gap) — 읽는 쪽이 비어 있는 표시 값을 다시 채울지 정한다 */
+export type Fetched = { ok: boolean; status: number; body: any; gap?: boolean };
 
 export async function fetchJson(url: string, timeoutMs = 10_000): Promise<Fetched> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const r = await fetch(url, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }, signal: ctl.signal });
-    return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : null };
+    const gap = isRestartGap(r.status, r.headers?.get?.('content-type'));   // 머리 없는 꼴(시험의 가짜 응답)도 오늘처럼 읽는다
+    return { ok: r.ok, status: r.status, body: r.ok ? await r.json() : null, ...(gap ? { gap } : {}) };
   } catch {
     return { ok: false, status: 0, body: null };
   } finally {
