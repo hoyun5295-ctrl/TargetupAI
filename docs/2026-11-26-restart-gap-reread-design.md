@@ -135,6 +135,7 @@ export const RESTART_GAP_SEND_ERROR = '접수 여부를 확인하지 못했어�
 ## §9 미검증 · 위험
 
 - 운영 nginx 의 502 본문이 `text/html` 인지(운영에 `error_page` 를 JSON 으로 둔 설정이 있으면 판정이 거짓 → 처방이 오늘과 같게 돈다 = 위험 아님 · 효과 0) · 확인 = 배포 전 Harold 서버 명령(`grep -rn "error_page" /etc/nginx/` · 읽기만).
+  - 결과 = 1126 Harold 서버 출력 = `grep -rn "error_page\|proxy_intercept_errors" /etc/nginx/` 0줄(`/etc/nginx/` 아래 설정에 사용자 정의 오류 화면 · 백엔드 실패 가로채기 없음) → 공백 때 502 는 nginx 기본 오류 화면 · 서버가 스스로 낸 실패(JSON)는 그대로 지나간다 · 판정이 실제 재시작에서 서는지 = C165-S1(숫자가 돌아오는지)
 
 ## §10 Codex 설계 리뷰 (gpt-6.2-sol · high · 하위 0 · 라운드마다 로그 대조)
 
