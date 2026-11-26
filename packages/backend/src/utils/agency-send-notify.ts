@@ -48,6 +48,8 @@ export interface AgencyNotifyContext {
   overridden?: boolean;
   /** ★ 2026-11-25 「문안에 채우지 않은 자리(OOO점)가 있습니다. 승인 전에 확인해 주세요.」(agencyBlankApprovalLine · 없으면 '' · 설계서 §5-4) */
   blankLine?: string;
+  /** ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §9-2 · §10-2) — 스팸 검사에서 찾은 글을 거친 접수의 「바꾼 곳」 줄(agency-spam-diag agencyFixLines · 승인 = 이 바꿈에 대한 동의) */
+  fixLines?: string[];
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -86,6 +88,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
       ...(ctx.charLines || []),
       ctx.optOutLine || '',
     ctx.blankLine || '',
+    ...(ctx.fixLines || []),
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
       ctx.approveUrl
         ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
@@ -102,6 +105,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     ...(ctx.charLines || []),
     ctx.optOutLine || '',
     ctx.blankLine || '',
+    ...(ctx.fixLines || []),
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
     ctx.approveUrl
       ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
@@ -216,21 +220,11 @@ export function buildTestFailedNotify(ctx: AgencyNotifyContext & {
   carriers?: string[];
   /** 확정된 확인 판 결과 문장 · 없으면 의심 부분 한 줄(「막혔을 수 있는 부분: …」) · 없으면 줄 없음 */
   resultLine?: string;
-  /** 4a = 막힌 통신사 전부에서 주소만 뺀 글이 도착(주소를 바꿔야 한다 · 한 차례에서 멈춘 건) */
-  addressCause?: boolean;
 }): string {
-  // ★ 2026-11-24 「세 차례」 낱말은 뺀다 — 주소가 원인이면 한 차례에서 멈춘다(다듬기는 주소를 못 바꾼다)
+  // ★ 2026-11-24 「세 차례」 낱말은 뺀다 · ★ 2026-11-26 C164 주소 원인으로 한 차례에서 멈추던 갈래(4a)는 없앴다(주소는 우리가 짧은 주소로 바꿔 본다)
   const names = (ctx.carriers || []).filter(Boolean).join(', ');
+  // ★ 2026-11-24 로그인 화면에서 「그대로 보내기」도 고를 수 있다(설계서 docs/2026-11-24-agency-spam-override-design.md · 문자에 링크 0)
   const login = `${String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/^https?:\/\//, '').replace(/\/+$/, '')}/agency-send`;
-  if (ctx.addressCause && names) {
-    return compose([
-      `${HEAD} 문안이 ${names} 스팸 검사에 걸렸습니다.`,
-      `건: ${shortLabel(ctx.label)}`,
-      `글 속 주소를 빼니 ${names}에 도착했습니다. 주소를 바꿔 주세요.`,
-      // ★ 2026-11-24 로그인 화면에서 「그대로 보내기」도 고를 수 있다(설계서 docs/2026-11-24-agency-spam-override-design.md · 문자에 링크 0)
-      `로그인하면 주소를 바꾸거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: ${login}`,
-    ]);
-  }
   return compose([
     `${HEAD} 문안이 스팸 검사에 걸렸습니다${names ? `(${names})` : ''}.`,
     `건: ${shortLabel(ctx.label)}`,

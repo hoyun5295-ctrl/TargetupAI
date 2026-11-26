@@ -40,7 +40,10 @@ export interface SendPrecheckInput {
   recipientsKey: unknown;
   hasRecipients: boolean;
   /** 스팸 검사에 싣는 글 — 검사 창과 최근 검사 조회가 같은 계산을 쓴다(두 벌이면 "검사했는데 안 했다"가 된다) */
-  buildSpamTestContent: () => { smsMsg: string; lmsMsg: string; firstR: any };
+  /** ★ 2026-11-26 C164 — body 를 주면 그 글로 계산한다(스팸 검사에서 찾은 글을 넣은 직후 · 작성 칸 상태가 아직 안 바뀐 때) */
+  buildSpamTestContent: (body?: string) => { smsMsg: string; lmsMsg: string; firstR: any };
+  /** ★ 2026-11-26 C164 — 제목 넣기(스팸 검사에서 찾은 글이 제목도 바꿨을 때) */
+  setSubject?: (s: string) => void;
   /** 단문 바이트(명단 최장 값 · (광고) · 수신거부 줄 포함) — 맞춤법 고치기 잠금 판정용 */
   measureSmsBytes: (text: string) => number;
   /** 스팸 검사 창이 열려 있는가 — 닫히면 점검 칸이 검사 원장을 다시 본다 */
@@ -73,7 +76,7 @@ export interface SendPrecheck {
 
 export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
   const {
-    message, setMessage, subject, msgType, callback, useIndividualCallback, adTextEnabled, optOutNumber,
+    message, setMessage, subject, setSubject, msgType, callback, useIndividualCallback, adTextEnabled, optOutNumber,
     recipientsKey, hasRecipients, buildSpamTestContent, measureSmsBytes,
     spamModalOpen, isSpamFilterLocked, isAiMessagingLocked, onLockedFeature,
     setSpamFilterData, setShowSpamFilter, setToast, onSendAnyway,
@@ -329,7 +332,21 @@ export function useSendPrecheck(input: SendPrecheckInput): SendPrecheck {
     }
     const cb = callback || '';
     const { smsMsg, lmsMsg, firstR } = buildSpamTestContent();
-    setSpamFilterData({ sms: smsMsg, lms: lmsMsg, callback: cb, msgType: msgType, subject: subject || '', isAd: adTextEnabled, firstRecipient: firstR || undefined });
+    setSpamFilterData({
+      sms: smsMsg, lms: lmsMsg, callback: cb, msgType: msgType, subject: subject || '', isAd: adTextEnabled, firstRecipient: firstR || undefined,
+      // ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §6-1 · §9-1) — 닿는 글 찾기의 원문(변수 칸 그대로인 지금 작성 칸 글 · 제목)
+      template: { body: message, subject: subject || '' },
+      // 받기 — 바꾼 글을 작성 칸 · 제목에 넣고 그 글의 검사 글을 돌려준다(검사 창이 그 글로 다시 검사) · 단문 길이를 넘으면 null(넣지 않는다)
+      onApplyFix: (body: string, nextSubject: string | null) => {
+        if (msgType === 'SMS' && measureSmsBytesRef.current(body) > 90) return null;
+        const sub = nextSubject ?? (subject || '');
+        setMessage(body);
+        if (setSubject && sub !== (subject || '')) setSubject(sub);
+        const built = buildSpamTestContent(body);
+        setToast({ show: true, type: 'success', message: '바꾼 글을 넣었어요. 이 글로 다시 검사할게요.' });
+        return { sms: built.smsMsg, lms: built.lmsMsg, subject: sub, template: { body, subject: sub } };
+      },
+    });
     setShowSpamFilter(true);
   };
   const onSpamTile = () => {

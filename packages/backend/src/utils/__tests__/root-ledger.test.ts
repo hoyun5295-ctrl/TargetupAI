@@ -99,7 +99,9 @@ const MONEY_ROUTE_EXEMPT: Record<string, string> = {
   'campaigns.ts POST /direct-send/commit': '직접 발송 축 = 전 요금제 기본 기능 · 통제 = 선불 잔액',
   'campaigns.ts POST /brand-send': '직접 발송 축(브랜드 메시지) = 요금제 문 대상 아님 · 통제 = 선불 잔액 · 채널 등록',
   'spam-filter.ts POST /test': '스팸 검사 = 요금제 칸 OR 대행 스위치(plan-guard SPAM_FILTER_OPEN_SQL · ★1026)를 주소 안에서 판정 · 닫힌 회사 = 체험 횟수',
-  'spam-filter.ts POST /tests/:id/diagnose': '★1124 확인 판 = 고객 무료(차감 0) · 이미 요금제 칸 · 체험으로 허락돼 사람이 건 막힌 검사의 부가 확인만 · 등록 문 = 운영 스위치 · 하루 상한 · 엄격 발신번호 권한(spam-diag registerDiag · 설계서 §6-2)',
+  // ★ 2026-11-26 C164 — 옛 /diagnose(의심 부분을 뺀 글)를 이은 두 입구 · 같은 성격: 이미 요금제 칸 · 체험으로 허락돼 사람이 건 막힌 검사의 부가 확인(고객 무료 · 차감 0)
+  'spam-filter.ts POST /tests/:id/rewrite': '닿는 글 찾기 시작 = 고객 무료(차감 0) · 사람이 건 막힌 검사에만(소유 확인 CT) · 문 = 회사 스위치(슈퍼관리자 · 기본 꺼짐) · 글당 3판 · 발신번호 하루 10판 · 전체 하루 100판 · 엄격 발신번호 권한(spam-diag advanceRewrite · 재작성 설계서 §5-3 · §13)',
+  'spam-filter.ts POST /tests/:id/rewrite/next': '주소 물음의 답(같은 찾기의 다음 판) = 위와 같은 문 · 짧은 주소는 「내 단축 주소」 CT 의 회사 하루 상한 안(라우트를 거치지 않아 크레딧 0 · 재작성 설계서 §7)',
   'event-campaigns.ts POST /extract-image': '사진 판독 = 입력칸 공용(AI 한줄로 · DM · 이메일 · 인앱) · 크레딧 확인 뒤 성공 때만 걷는다(원장 §4-G 결함 아님)',
   'event-campaigns.ts POST /materials/quote': '견적 = 금액 계산 · 잔액 읽기만(돈을 쓰지 않는다)',
   'mall-products.ts POST /cards': '몰 상품 조회만(AI 0 · 차감 0) · 기계 추적이 같은 이름(lookupMall)을 돈 함수로 본다',

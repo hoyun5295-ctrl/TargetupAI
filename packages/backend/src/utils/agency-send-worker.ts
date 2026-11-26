@@ -28,11 +28,10 @@ import { autoSpamTestWithRegenerate, spamVerdictOf, isSpamHold, spamRejectionOf,
 import { cleanSmsTextAll } from './message-sanitizer';   // ★ 2026-11-06 C109 다듬은 문안(AI) 글자 정리
 import { refineForSpam } from './agency-send-refine';
 import {
-  diagHoldOf, diagHoldJson, startAgencyDiag, stepAgencyDiag, settleAgencyDiag4a, releaseAgencyDiag, agencyBlockSummary, SPAM_HINT_EVENT, type DiagHold,
-  spamOverrideMarker,   // ★ 2026-11-24 그대로 보내기 표식(진단 CT 가 소유 · 워커 · 4a 가 같은 함수)
-} from './agency-spam-diag';   // ★ 2026-11-24 막힌 부분 짚어 보기(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7)
+  diagHoldOf, diagHoldJson, diagFixOf, recoverAgencyHold, startAgencyDiag, stepAgencyDiag, releaseAgencyDiag, agencyBlockSummary, agencyFixLines, SPAM_HINT_EVENT, type DiagHold, type DiagFix,
+  spamOverrideMarker,   // ★ 2026-11-24 그대로 보내기 표식(진단 CT 가 소유)
+} from './agency-spam-diag';   // ★ 2026-11-24 막힌 부분 짚어 보기 · ★ 2026-11-26 C164 닿는 글 찾기(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §8 · §9-2)
 import { closeDiagnosis } from './spam-diag';
-import { getCarrierLabel } from './sms-result-map';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
@@ -146,7 +145,8 @@ async function setStatus(
   requestId: string, status: AgencySendStatus, extra: Record<string, any>, token: string,
   // ★2026-09-13(2) lock 복구 전용. 켜면 **시도 키 잠금이 비어 있을 때만** 바꾼다(아래 `runLockRecovery` 주석)
   // ★ 2026-11-24 spamOverridable = 통신사 막힘 갈래만 넘긴다(결과 칸에 「그대로 보낼 수 있음」 표식 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3)
-  opts: { onlyIfAttemptIdle?: boolean; spamOverridable?: { version: number; submitted: string; checkedAt: string; submittedTested: boolean } } = {},
+  // ★ 2026-11-26 C164 dropDiagFix = 결과 칸을 안 쓰는 두 반려(SMS 길이 · 접수 거절)만 넘긴다(끝난 갈래에 찾은 글이 남지 않게 · 같은 칸 대입은 아래 한 줄뿐)
+  opts: { onlyIfAttemptIdle?: boolean; spamOverridable?: { version: number; submitted: string; checkedAt: string; submittedTested: boolean }; dropDiagFix?: boolean } = {},
 ): Promise<boolean> {
   // ⛔ 토큰은 **필수**다(★2026-08-23 Codex 3R high). 선택으로 두면 "토큰 없이 부르는 자리"가 생기고,
   //   그 자리가 워커가 잡아 둔 행을 덮는다(만료 단계가 정확히 그랬다). 토큰 없는 전이는 각자
@@ -187,7 +187,7 @@ async function setStatus(
       params.push(JSON.stringify(opts.spamOverridable));
       i += 1;
     } else if (!('last_test_result' in extra)) {
-      sets.push(`last_test_result = last_test_result - 'spamOverridable'`);
+      sets.push(opts.dropDiagFix ? `last_test_result = last_test_result - 'spamOverridable' - 'diagFix'` : `last_test_result = last_test_result - 'spamOverridable'`);
     }
     params.push(token);
     // 잠금 조건은 **같은 UPDATE 한 문장 안에** 둔다. 행의 현재 시도 키로 트랜잭션 잠금을 시도하므로, 살아 있는 시도가
@@ -401,9 +401,10 @@ async function sendRejectionOfTests(testIds: ReadonlyArray<unknown>): Promise<st
 
 /**
  * ★ 2026-11-24 진단(설계서 §7) — opts.diag = 워커 A 첫 검사만(이 버전 첫 막힘에 확인 판 · 진단 대기) ·
- *   opts.resume = 진단 대기를 마친 뒤 이어 보기(T 의 글 · 회차 · T 를 같은 검사 이어 보기로 다시 읽음 · 4b 면 첫 다듬기에 avoid).
+ *   opts.resume = 진단 대기를 마친 뒤 이어 보기(T 의 글 · 회차 · T 를 같은 검사 이어 보기로 다시 읽음).
+ *   ★ 2026-11-26 C164 — 찾은 글(row.last_test_result.diagFix · 같은 문안 버전)이 있으면 그 글부터 3사 일반 검사(재개 우선순위 = 검사 중이던 후보 > 찾은 글 > 지금 글).
  */
-interface SpamRoundOpts { diag?: boolean; resume?: { content: string; rounds: number; preferTestId: string; avoid?: string[]; passed?: boolean } }
+interface SpamRoundOpts { diag?: boolean; resume?: { content: string; rounds: number; preferTestId: string; passed?: boolean } }
 async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = {}): Promise<{
   /** ★ 2026-10-24 판정 3분할(뿌리 대장 R7) — error = 검사 장애(통과도 반려도 아니다 · 다듬은 문장은 검사받지 못해 버린다) */
   verdict: SpamVerdict;
@@ -438,7 +439,6 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
   }
   // ★ 2026-11-24 진단 대기를 마친 뒤 = T 의 글 · 회차부터(첫 회차는 T 를 같은 검사 이어 보기로 다시 읽는다 · 새 검사 0)
   let resumePrefer: string | undefined;
-  let resumeAvoid: string[] | undefined;
   if (opts.resume) {
     // ★ 배포 2 Codex 1R — 대기 사이 T 가 통과(늦은 보고)면 다시 검사하지 않고 T 가 근거인 통과(자정을 넘겨 같은 검사 이어 보기가 안 되는 날에도 T 그대로)
     if (opts.resume.passed) {
@@ -447,7 +447,13 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
     content = opts.resume.content;
     rounds = Math.max(startRound, Math.min(MAX_TEST_ROUNDS - 1, (Number(opts.resume.rounds) || 1) - 1));
     resumePrefer = opts.resume.preferTestId;
-    resumeAvoid = opts.resume.avoid && opts.resume.avoid.length > 0 ? opts.resume.avoid : undefined;
+  } else if (content === original) {
+    // ★ 1126 C164 §9-2 — 찾은 글 = 이 버전 첫 3사 일반 검사의 시작 글(T 다음 회차 · 찾은 판의 도착은 T 의 통과가 아니라 반드시 검사한다 · 장애로 돌아온 주기도 이어받는다)
+    const fix = diagFixOf(row);
+    if (fix && fix.content !== original) {
+      content = fix.content;
+      rounds = Math.max(startRound, Math.min(MAX_TEST_ROUNDS - 1, fix.rounds));
+    }
   }
 
   let firstTest: { content: string; createdAt: string | null } | null | undefined;   // ★ 2026-11-24 첫 회차의 글 · 검사 행 시각(막힘 반환에 싣는다)
@@ -525,8 +531,7 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
       }
       if (rounds >= MAX_TEST_ROUNDS) break;
 
-      const refined = await refineForSpam({ companyId: row.company_id, original: content, round: rounds, avoid: resumeAvoid });
-      resumeAvoid = undefined;   // 피할 표현은 진단 뒤 첫 다듬기에만
+      const refined = await refineForSpam({ companyId: row.company_id, original: content, round: rounds });
       if (!refined.ok || !refined.content) {
         await logEvent(row.id, 'refine_failed', { round: rounds, reason: refined.reason });
         // ★ 2026-10-24 다듬기 AI 장애는 내용 반려가 아니다(B-0823-1 나) — 검사 장애와 같은 갈래(원문 그대로 · 다시 시도)
@@ -661,7 +666,7 @@ export async function readAgencyCharLines(requestId: string): Promise<string[]> 
  *   (test_failed · 장애 셈 0 · 다시 검사 0 · 문안을 고치면 접수 수정 배관이 다시 검사를 연다) · 이력 · 담당자 문자 한 통(길이 안내).
  */
 async function settleSmsBytesOver(row: any, token: string, phase: 'first' | 'final', bytes: number): Promise<void> {
-  if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+  if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token, { dropDiagFix: true })) return;
   await logEvent(row.id, 'test_failed', { reason: 'sms_bytes', bytes, phase, version: Number(row.content_version || 0) });
   await notifyManager({
     companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
@@ -677,7 +682,7 @@ async function settleSpamRejected(row: any, token: string, phase: 'first' | 'fin
   // ★ C159 — 접수 거절 = 정본 문장에서 사유만 뽑아 쓴다(문자의 「사유:」 줄 · 진행 기록 · 대행 글은 합니다체라 문장을 그대로 싣지 않는다)
   const reason = chars ? null : (spamSendRejectionReason(message) || message);
   const label = shortLabel(row.file_name || row.original_content);
-  if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token)) return;
+  if (!await setStatus(row.id, 'test_failed', { ...RELEASE }, token, { dropDiagFix: true })) return;
   await logEvent(row.id, chars ? 'spam_rejected_chars' : 'spam_rejected', { phase, version: Number(row.content_version || 0), message: chars ? message : reason });
   await logEvent(row.id, 'test_failed', { reason: chars ? 'unsupported_chars' : 'send_rejected', phase });
   await notifyManager({
@@ -729,24 +734,6 @@ async function settleDiagHold(row: any, token: string, hold: DiagHold): Promise<
       return false;
     });
   if (back) console.log(`${LOG} 스팸 검사 진단 대기 request=${row.id} parent=${hold.parentTestId} — 다음 주기에 판 결과를 본다`);
-}
-
-/** ★ 2026-11-24 4a = 막힌 통신사 전부 주소만 뺀 글 도착 → 한 트랜잭션 확정(test_failed + 진단 닫기) 뒤 사건 · 담당자 문자(메일 접수면 회신 패스가 메일) */
-async function settleDiag4a(row: any, token: string, hold: DiagHold): Promise<void> {
-  const r = await settleAgencyDiag4a(row, token, hold, diagHoldJson(row, null)).catch((e: any) => {
-    console.warn(`${LOG} 4a 확정 실패 request=${row.id}(잠금 복구가 되돌린다):`, e?.message || e);
-    return { status: 'error' as const };
-  });
-  if (r.status === 'changed') { await setStatus(row.id, 'received', { ...RELEASE }, token).catch(() => false); return; }   // 다음 주기에 다시 판정
-  if (r.status !== 'ok') return;
-  // ★ 배포 2 Codex 1R — 통신사 · 문장 = 잠근 값으로 다시 판정한 것(잠금 앞 판정이 아니라)
-  const { carriers } = r;
-  // 확정 사건 둘(spam_hint 4a · test_failed)은 settleAgencyDiag4a 가 상태와 같은 트랜잭션에 남겼다(★ 배포 2 Codex 3R) · 여기는 커밋 뒤 담당자 문자만
-  await notifyManager({
-    companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
-    callback: row.callback_number, title: '[대행발송] 문안 확인 요청',
-    text: buildTestFailedNotify({ label: shortLabel(row.file_name || row.original_content), carriers: carriers.map(getCarrierLabel), addressCause: true }),
-  });
 }
 
 /** (순수) 회차 결과의 마지막 검사 id · 막힌 통신사(담당자 문자 요약 재료) */
@@ -1083,21 +1070,28 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
     try {
       // ★ 2026-09-27 m025 — 이 행을 시작하는 지금 선점 시각을 새로 찍는다(잃었으면 건너뛴다)
       if (!(await touchTestingLock(row.id, token))) continue;
-      // ★ 2026-11-24 진단 대기 이어 보기(설계서 §7 절차 2 · 3) — 대기 = 다시 보류 · 4a = 한 트랜잭션 확정 · 그 밖 = 진단 닫고 T 부터 이어 보기
+      // ★ 2026-11-24 진단 대기 이어 보기(설계서 §7 절차 2 · 3) — 대기 = 다시 보류 · 그 밖 = 진단 닫고 이어 보기
+      // ★ 2026-11-26 C164 — 대기가 없으면 판에서 되찾는다(첫 판 등록 뒤 대기 저장 전에 죽은 경우) · 찾음 = 진단을 닫는 같은 저장에 찾은 글(diagFix) → 그 글로 3사 일반 검사
       let resume: SpamRoundOpts['resume'];
-      const hold = diagHoldOf(row);
+      // 찾은 글을 거친 접수인가(이 문안 버전) — 통과하면 승인 문자에 바꾼 곳 줄을 싣는다(뒤 주기에 다듬은 후보가 통과해도 줄 = 고객이 낸 글 ↔ 실제 승인 대상)
+      let viaFix = diagFixOf(row) !== null;
+      const hold = diagHoldOf(row) ?? await recoverAgencyHold(row).catch(() => null);
       if (hold) {
         const step = await stepAgencyDiag(row, hold);
         if (step.kind === 'wait') { await settleDiagHold(row, token, hold); continue; }
-        if (step.kind === '4a') { await settleDiag4a(row, token, hold); continue; }
-        const released = await releaseAgencyDiag(row, token, hold, diagHoldJson(row, null)).catch((e: any) => {
+        const fix: DiagFix | null = step.kind === 'found' ? { version: hold.version, content: step.content, plateTestId: step.plateTestId, rounds: hold.rounds } : null;
+        const released = await releaseAgencyDiag(row, token, hold, diagHoldJson(row, null, fix)).catch((e: any) => {
           console.warn(`${LOG} 진단 닫기 실패 request=${row.id}(잠금 복구가 되돌린다):`, e?.message || e);
           return false;
         });
         if (!released) continue;
-        if (step.kind !== 'pass' && step.sentence) await logEvent(row.id, SPAM_HINT_EVENT, { version: hold.version, parentTestId: hold.parentTestId, branch: step.kind, sentence: step.sentence });
-        row.last_test_result = row.last_test_result && typeof row.last_test_result === 'object' ? { ...row.last_test_result, diagHold: undefined } : row.last_test_result;
-        resume = { content: hold.content, rounds: hold.rounds, preferTestId: hold.parentTestId, avoid: step.kind === '4b' ? step.avoid : undefined, passed: step.kind === 'pass' };
+        if (step.kind === 'found') await logEvent(row.id, SPAM_HINT_EVENT, { version: hold.version, parentTestId: hold.parentTestId, branch: 'found', plateTestId: step.plateTestId });
+        else if (step.kind === '4c' && step.sentence) await logEvent(row.id, SPAM_HINT_EVENT, { version: hold.version, parentTestId: hold.parentTestId, branch: step.kind, sentence: step.sentence });
+        // 같은 row 를 고친다(복사본 0) — 이 주기의 검사 · 보류 저장이 찾은 글을 그대로 본다(첫 보류 저장 뒤 결과 칸 = diagFix + heldCandidate · diagHold 없음)
+        row.last_test_result = { ...(row.last_test_result && typeof row.last_test_result === 'object' ? row.last_test_result : {}), diagHold: undefined, ...(fix ? { diagFix: fix } : {}) };
+        if (fix) viaFix = true;
+        // 찾은 판의 도착은 T 의 통과가 아니다 → 찾음은 이어 보기(resume)가 아니라 찾은 글의 새 3사 검사
+        else resume = { content: hold.content, rounds: hold.rounds, preferTestId: hold.parentTestId, passed: step.kind === 'pass' };
       }
       const { verdict, passed, finalContent, rounds, detail, heldContent, rejection, smsBytesOver, diagHold, firstTest } = await runSpamRound(row, 0, { diag: true, resume });
       if (diagHold) { await settleDiagHold(row, token, diagHold); continue; }
@@ -1191,7 +1185,9 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       //   주소는 통지 직전의 신선한 문안 버전으로 서명한다(이 tick의 다듬기로 버전이 올라 있을 수 있다)
       // ★2026-08-26(4) 주소는 단축으로 싣고(실패 시 원본 폴백), 요청 건수를 함께 안내한다(Harold)
       // ★2026-08-26(6) 시각이 자동 조정된 건은 문안이 갈린다(원본 시각을 함께 알린다)
-      const linkRow = (await freshLinkFields(row.id)) || row;
+      // ★ 2026-11-26 C164 §9-2 — 서명 버전 = 테스트 문자 · 바꾼 곳 줄이 보여 준 글의 버전(savedVersion) · 보내는 곳 · 시각만 신선한 값.
+      //   그 사이 문안이 바뀌었으면 이 링크는 승인 라우트의 버전 대조가 거절하고, 고친 글은 자기 주기에서 새 승인 문자를 받는다(옛 글 문자 + 새 버전 링크 0)
+      const linkRow = { ...((await freshLinkFields(row.id)) || row), content_version: savedVersion };
       // ★2026-09-25 맞춤법 건수는 **안내 직전 최신 저장값**에서 센다 — 그 사이 문안이 바뀌면 0(옛 건수를 새 버전 안내에 싣지 않는다)
       const spellCount = await readAgencySpellCount(row.id);
       const count = Number(row.recipient_count || 0);
@@ -1203,12 +1199,15 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       const optOutLine = agencyOptOutSmsLine({ content: finalContent, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
       // ★ 2026-11-25 채우지 않은 자리 한 줄(판정 글 = 테스트 문자를 만든 그 글 · 설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5-4)
       const blankLine = agencyBlankApprovalLine(findAgencyBlanks(finalContent));
+      // ★ 1126 C164 — 찾은 글을 거친 접수 = 바꾼 곳 줄(고객이 낸 글 ↔ 통과해 저장한 글 · 승인 = 이 바꿈에 대한 동의) · 진행 기록
+      const fixLines = viaFix ? agencyFixLines(String(row.original_content || ''), finalContent) : [];
+      if (fixLines.length > 0) await logEvent(row.id, 'spam_fixed', { version: savedVersion, rounds });
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine, blankLine }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine, blankLine, fixLines }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine, blankLine }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine, blankLine, fixLines }),
           row.company_id, row.id, linkRow, row.created_by ?? null),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);

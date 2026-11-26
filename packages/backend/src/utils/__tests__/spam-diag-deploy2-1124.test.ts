@@ -1,6 +1,7 @@
 /**
  * 막힌 부분 짚어 보기 배포 2(★2026-11-24 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7 · §8 · §11)
  *   정본 문구(조사까지 · 두 말투) · 진단 대기 칸 · 담당자 문자 · 배선(워커 A 만 진단 · 문안 수정 = 같은 트랜잭션 닫기 · 메일 틱 · 화면) · 고객 문구 금지 낱말.
+ *   ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md) — 판 = 「뺀 글」에서 「목적을 지킨 채 바꾼 글」로 · 4a 없앰 · 찾은 글 이어받기(diagFix) · 새 화면 입구 셋. 옛 판 문구 · 4a 계약은 새 계약으로 바꿨다.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'fs';
@@ -8,32 +9,46 @@ import { join } from 'path';
 
 vi.mock('../../config/database', () => ({ default: { connect: vi.fn(), query: vi.fn() }, query: vi.fn(async () => ({ rows: [] })), mysqlQuery: vi.fn() }));
 
-import { diagStateSentence, diagReasonText, markedTemplateLines, type SpamBlockHints } from '../spam-diag';
-import { diagHoldOf, diagHoldJson } from '../agency-spam-diag';
+import { plateName, plateStateText, triedPlatesLine, diagReasonText, markedTemplateLines, assemblerLegalLine, screenRenderer, SPAM_FIX_TEXT, type SpamBlockHints, type Plate } from '../spam-diag';
+import { editableLines } from '../spam-block-hint';
+import { buildAdMessage } from '../messageUtils';
+import { diagHoldOf, diagHoldJson, diagFixOf, agencyFixLines } from '../agency-spam-diag';
 import { buildTestFailedNotify } from '../agency-send-notify';
 
 const SRC = join(__dirname, '..', '..');
 const read = (p: string) => readFileSync(join(SRC, p), 'utf8');
 
 describe('정본 문구(설계서 §8-4)', () => {
-  it('화면 = 해요체 · 문자 · 메일 = 합니다체 · 통신사 표시명(LG U+)', () => {
-    expect(diagStateSentence('KT', 1, 'arrived')).toBe('글 속 주소를 빼니 KT에 도착했어요. 주소를 바꿔 보세요.');
-    expect(diagStateSentence('LGU', 1, 'blocked')).toBe('글 속 주소를 빼도 LG U+에서 막혔어요. 주소만의 문제는 아니에요.');
-    expect(diagStateSentence('SKT', 2, 'arrived')).toBe('표시한 줄을 빼니 SKT에 도착했어요. 그 줄의 표현을 바꿔 보세요.');
-    expect(diagStateSentence('KT', 2, 'blocked')).toBe('표시한 줄을 빼도 KT에서 막혔어요.');
-    expect(diagStateSentence('KT', 1, 'checking')).toBe('KT로 보내 확인하고 있어요.');
-    expect(diagStateSentence('KT', 1, 'unknown')).toBe('확인을 마치지 못했어요.');
-    expect(diagStateSentence('KT', 1, 'arrived', true)).toBe('글 속 주소를 빼니 KT에 도착했습니다. 주소를 바꿔 주세요.');
+  const plate = (kind: Plate['plan']['kind'], results: Plate['results']): Plate => ({ testId: 't', n: 1, userId: 'u', plan: { kind } as any, text: '', subject: null, createdAt: '', results });
+  it('판 이름 넷 · 판 상태 = 확인 중 · 닿음(보낸 통신사 전부) · 막힘(막은 통신사만) · 확인 못 함 · 화면 = 해요체 · 문자 · 메일 = 합니다체 · 통신사 표시명(LG U+)', () => {
+    expect([plateName('w1'), plateName('w1u'), plateName('w2'), plateName('w2u')]).toEqual(['표현을 바꾼 글', '주소도 바꾼 글', '글을 새로 쓴 글', '새로 쓴 글에 주소도 바꾼 글']);
+    expect(plateStateText(plate('w1', [{ carrier: 'KT', state: 'checking' }, { carrier: 'LGU', state: 'arrived' }]))).toBe('확인하고 있어요');
+    expect(plateStateText(plate('w1', [{ carrier: 'KT', state: 'arrived' }, { carrier: 'LGU', state: 'arrived' }]))).toBe('KT, LG U+에 닿았어요');
+    expect(plateStateText(plate('w1', [{ carrier: 'KT', state: 'blocked' }, { carrier: 'LGU', state: 'arrived' }]))).toBe('KT에서 막혔어요');
+    expect(plateStateText(plate('w1', [{ carrier: 'KT', state: 'blocked' }, { carrier: 'LGU', state: 'unknown' }]))).toBe('확인을 마치지 못했어요');
+    expect(plateStateText(plate('w1', [{ carrier: 'KT', state: 'blocked' }]), true)).toBe('KT에서 막혔습니다');
+    expect(plateStateText(plate('w1', [{ carrier: 'SKT', state: 'arrived' }]), true)).toBe('SKT에 닿았습니다');
+  });
+  it('해 본 것 한 줄 = 결과가 정해진 판만(확인 중은 뺀다) · 받기 실패 문장 둘', () => {
+    const plates = [plate('w1', [{ carrier: 'KT', state: 'blocked' }]), plate('w1u', [{ carrier: 'KT', state: 'checking' }])];
+    expect(triedPlatesLine(plates, true)).toBe('표현을 바꾼 글: KT에서 막혔습니다.');
+    expect(triedPlatesLine([plates[1]])).toBe('');
+    expect(SPAM_FIX_TEXT).toEqual({ changed: '글이 바뀌어 넣을 수 없어요. 지금 글로 다시 검사해 주세요.', smsTooLong: '바꾼 글이 SMS 길이를 넘어 넣을 수 없어요.' });
   });
   it('자격 사유 = 정본 셋', () => {
     expect(diagReasonText('permission')).toBe('이 발신번호로는 다시 확인할 수 없어요.');
     expect(diagReasonText('cap')).toBe('오늘은 더 확인할 수 없어요. 내일 다시 해 주세요.');
     expect(diagReasonText('off')).toBe('지금은 다시 확인할 수 없어요.');
     expect(diagReasonText('not_sendable')).toBe('지금은 다시 확인할 수 없어요.');
+    // ★ 1126 C164 — 새 사유 둘(고칠 줄 없음 · 주소를 못 바꿈) · 소유 · 닫힘은 같은 문장
+    expect(diagReasonText('no_editable')).toBe('이 글은 바꿔 볼 줄이 없어요.');
+    expect(diagReasonText('url')).toBe('주소는 바꾸지 못했어요.');
+    expect(diagReasonText('owned')).toBe('지금은 다시 확인할 수 없어요.');
+    expect(diagReasonText('closed')).toBe('지금은 다시 확인할 수 없어요.');
   });
   it('회신 메일 원문 = 의심 조각이 든 줄 앞 ▶ · 뒤로 민 조각 · 그 밖 조각은 표시 0', () => {
-    const h: SpamBlockHints = { parent: {} as any, sentText: '', sendable: true, carriers: [{
-      carrier: 'KT', baseline: null, checks: {}, next: 1, nextBasis: 'url', nextLines: [],
+    const h: SpamBlockHints = { parent: {} as any, sentText: '', sendable: true, plates: [], carriers: [{
+      carrier: 'KT', baseline: null,
       suspects: [{ token: 'https://a.example/x', kind: 'url', line: 1 }, { token: '단독', kind: 'other', line: 2 }, { token: '혜택', kind: 'rule', line: 2, demoted: true }],
     }] };
     expect(markedTemplateLines('(광고) 하늘몰\n>https://a.example/x\n단독 혜택', h)).toEqual(['(광고) 하늘몰', '▶ >https://a.example/x', '단독 혜택']);
@@ -51,14 +66,38 @@ describe('진단 대기 칸(last_test_result.diagHold)', () => {
     expect(JSON.parse(diagHoldJson({ last_test_result: on }, null)!)).toEqual({ other: 1 });
     expect(diagHoldJson({ last_test_result: { diagHold: hold } }, null)).toBeNull();
   });
+  it('★ 1126 C164 찾은 글(diagFix) = 대기를 지우는 같은 값에 얹는다 · 지금 문안 버전만 · 그 뒤 대기를 지워도(장애 재시도) 남는다', () => {
+    const hold = { parentTestId: 't1', version: 3, content: '글', rounds: 1, startedAt: '2026-11-26T00:00:00Z' };
+    const fix = { version: 3, content: '바꾼 글', plateTestId: 'p1', rounds: 1 };
+    const on = JSON.parse(diagHoldJson({ last_test_result: { diagHold: hold, other: 1 } }, null, fix)!);
+    expect(on).toEqual({ other: 1, diagFix: fix });
+    expect(diagFixOf({ content_version: 3, last_test_result: on })).toEqual(fix);
+    expect(diagFixOf({ content_version: 4, last_test_result: on })).toBeNull();
+    expect(JSON.parse(diagHoldJson({ last_test_result: on }, null)!)).toEqual({ other: 1, diagFix: fix });
+  });
+});
+
+describe('★ 1126 C164 승인 문자의 바꾼 곳 줄(설계서 §10-2 · 고객이 낸 글 ↔ 통과해 저장한 글)', () => {
+  it('줄마다 「원래 → 바꾼」 · 주소를 바꿨으면 주소 줄 · 글이 같으면 줄 없음', () => {
+    process.env.DM_SHORT_LINK_BASE = 'https://hlj.kr';
+    expect(agencyFixLines('겨울 혜택 안내\n>https://tinyurl.example/zz9\n매장에서 만나요', '겨울 소식 안내\n>https://hlj.kr/Ab12cd\n매장에서 만나요')).toEqual([
+      '스팸 검사에 걸려 아래처럼 바꿨습니다. 승인하시면 바꾼 글로 보냅니다.',
+      '겨울 혜택 안내 → 겨울 소식 안내',
+      '>https://tinyurl.example/zz9 → >https://hlj.kr/Ab12cd',
+      '글 속 주소는 같은 곳으로 가는 한줄로 짧은 주소로 바꿨습니다.',
+    ]);
+    expect(agencyFixLines('같은 글', '같은 글')).toEqual([]);
+    // 줄 수가 달라진 글(다듬기가 줄을 합침) = 줄 대조 없이 머리 줄만
+    expect(agencyFixLines('첫 줄\n둘째 줄', '한 줄로 합친 글')).toEqual(['스팸 검사에 걸려 아래처럼 바꿨습니다. 승인하시면 바꾼 글로 보냅니다.']);
+  });
 });
 
 describe('담당자 문자(M2)', () => {
-  it('4a = 통신사 · 주소를 바꿔 주세요 · 로그인 주소 · 「세 차례」 0', () => {
-    const t = buildTestFailedNotify({ label: '하늘몰 겨울 대축제', carriers: ['KT'], addressCause: true });
-    expect(t).toBe('[대행발송] 문안이 KT 스팸 검사에 걸렸습니다.\n건: 하늘몰 겨울 대축제\n글 속 주소를 빼니 KT에 도착했습니다. 주소를 바꿔 주세요.\n로그인하면 주소를 바꾸거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: hanjul.ai/agency-send');   // ★ 2026-11-24 그대로 보내기 안내
+  it('★ 1126 C164 — 「주소를 바꿔 주세요」로 멈추는 문자(4a)는 없다(문구 · 인자 0)', () => {
+    const notify = read('utils/agency-send-notify.ts');
+    expect(notify).not.toMatch(/addressCause|주소를 바꿔 주세요/);
   });
-  it('그 밖 = 통신사 괄호 · 결과 한 줄(있을 때) · 「세 차례」 0', () => {
+  it('막힘 문자 = 통신사 괄호 · 결과 한 줄(있을 때) · 「세 차례」 0', () => {
     const t = buildTestFailedNotify({ label: '건', carriers: ['KT', 'LG U+'], resultLine: '막혔을 수 있는 부분: 글 속 주소' });
     expect(t).toBe('[대행발송] 문안이 스팸 검사에 걸렸습니다(KT, LG U+).\n건: 건\n막혔을 수 있는 부분: 글 속 주소\n로그인하면 문안을 고치거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: hanjul.ai/agency-send');   // ★ 2026-11-24 그대로 보내기 안내
     expect(buildTestFailedNotify({ label: '건' })).not.toMatch(/세 차례/);
@@ -72,7 +111,7 @@ describe('배선(소스 계약)', () => {
   it('워커 A 만 진단(diag: true) · 워커 B 는 진단 0 · 진단 대기 이어 보기가 runSpamRound 앞', () => {
     expect(worker.match(/runSpamRound\([^)]*\{ diag: true/g)?.length).toBe(1);
     expect(worker).toContain('await runSpamRound(target, overridden ? MAX_TEST_ROUNDS - 1 : 0);');   // ★ 2026-11-24 그대로 보내기 버전 = 한 차례 · 진단 옵션 없음은 그대로
-    const a = worker.indexOf('const hold = diagHoldOf(row);');
+    const a = worker.indexOf('const hold = diagHoldOf(row) ?? await recoverAgencyHold(row).catch(() => null);');   // ★ 1126 C164 — 대기가 없으면 판에서 되찾는다
     expect(a).toBeGreaterThan(-1);
     expect(a).toBeLessThan(worker.indexOf("await runSpamRound(row, 0, { diag: true, resume });"));
   });
@@ -85,18 +124,65 @@ describe('배선(소스 계약)', () => {
     expect(worker).toContain("const sameDaySend = detail?.resumedFrom !== 'diag' && isSameKstDay(passedAt, new Date(row.requested_at));");
     expect(worker).toContain("testIds: [opts.resume.preferTestId], resumedFrom: 'diag'");
   });
-  it('★ 배포 2 Codex 2R — 화면 등록 = 사람 검사 · 대행 소유 진단 0(앞 확인 + 등록 트랜잭션 guard)', () => {
+  it('★ 배포 2 Codex 2R · ★ 1126 C164 — 화면 입구 셋 = 사람 검사(소유 확인 CT · DB 정본 id) · 대행 소유 진단 0(앞 확인 + 등록 트랜잭션 guard) · 옛 /diagnose 0', () => {
     const route = read('routes/spam-filter.ts');
-    const a = route.indexOf("router.post('/tests/:id/diagnose'");
-    const body = route.slice(a, route.indexOf('router.', a + 10));
-    expect(body).toContain("${notAutoSpamSourceSql('t.source')}");
-    // ★ 배포 2 Codex 3R — 소유 확인 뒤는 DB 정본 id 만(요청의 대문자 id 로 대행 소유 · 잠금 키가 어긋나지 않게)
-    const after = body.slice(body.indexOf('const parentId = String(own.rows[0].id);'));
-    expect(after.length).toBeLessThan(body.length);
-    expect(after).toContain('if (await agencyOwnsDiag(parentId))');
-    expect(after).toContain('registerDiag({ parentTestId: parentId,');
-    expect(after).toContain('guard: async (run) => !(await agencyOwnsDiag(parentId, run))');
-    expect(after).not.toMatch(/[(\s]testId[,)]/);   // 요청 id 를 인자로 넘기는 자리 0(r.testId 응답 칸은 제외)
+    expect(route).not.toContain("'/tests/:id/diagnose'");
+    for (const path of ["router.post('/tests/:id/rewrite', authenticate, demoBlock,", "router.post('/tests/:id/rewrite/next', authenticate, demoBlock,", "router.post('/tests/:id/fix-apply', authenticate,"]) {
+      const a = route.indexOf(path);
+      expect(a, path).toBeGreaterThan(-1);
+      const body = route.slice(a, route.indexOf('\nrouter.', a + 10));
+      // 소유 확인 뒤는 DB 정본 id 만(요청의 대문자 id 로 대행 소유 · 잠금 키가 어긋나지 않게)
+      expect(body).toContain("const parentId = await ownManualSpamTestId((req as any).user.companyId, String(req.params.id || ''), resolveOwnerScope(req));");
+      expect(body).toContain('parentTestId: parentId');
+      expect(body).not.toMatch(/parentTestId: (?!parentId)/);
+      expect(body).toContain("migrationPendingBody('spam_filter_tests ALTER(diag_plan)')");
+    }
+    const sd = read('utils/spam-diag.ts');
+    const own = sd.slice(sd.indexOf('export async function ownManualSpamTestId('), sd.indexOf('\n}\n', sd.indexOf('export async function ownManualSpamTestId(')));
+    expect(own).toContain("${spamCustomerTestSql('t')} AND ${notAutoSpamSourceSql('t.source')}");
+    expect(own).toContain('return own.rows[0] ? String(own.rows[0].id) : null;');
+    // 화면 등록 = 대행 소유를 앞에서 보고 · 등록 트랜잭션의 부모 진단 잠금 아래에서 한 번 더(screenGuard)
+    const start = sd.slice(sd.indexOf('export async function startScreenRewrite('), sd.indexOf('export async function nextScreenRewrite('));
+    expect(start).toContain("if (await agencyOwnsDiag(h.parent.id)) return { ok: false, reason: 'owned' };");
+    expect(start).toContain('guard: screenGuard(h.parent.id)');
+    expect(sd).toContain('const screenGuard = (parentTestId: string) => async (run: SqlRun) => !(await agencyOwnsDiag(parentTestId, run));');
+    const next = sd.slice(sd.indexOf('export async function nextScreenRewrite('), sd.indexOf('export async function applyScreenFix('));
+    expect(next).toContain('guard: screenGuard(h.parent.id)');
+    // 자격(스위치 · 소유 · 닫힘 · 발신번호 권한) = 판을 만드는 길 전부가 지나는 한 곳
+    const adv = sd.slice(sd.indexOf('export async function advanceRewrite('), sd.indexOf('// ─────────────── 화면 소유(직접발송)'));
+    expect(adv.indexOf('await rewriteEligibility({ hint: i.hint, owner: i.owner, actorUserId: i.actorUserId })')).toBeGreaterThan(-1);
+    expect(adv.indexOf('await rewriteEligibility(')).toBeLessThan(adv.indexOf('await buildPlate('));
+    expect((sd.match(/await registerPlate\(/g) || []).length).toBe(1);   // 등록은 advanceRewrite 안 한 곳
+  });
+  it('★ 1126 C164 Codex 구현 1R — 화면 입구 셋 · 판 만들기 = 판 칸 준비를 맨 먼저 본다(없으면 칸 없음으로 던져 503 · 판 상태 충돌로 보이지 않는다) · 새 링크는 주소 판에서만 · 닫힌 창의 늦은 받기 응답은 버린다', () => {
+    const sd = read('utils/spam-diag.ts');
+    for (const [fn, end] of [['export async function startScreenRewrite(', 'export async function nextScreenRewrite('], ['export async function nextScreenRewrite(', 'export async function applyScreenFix('], ['export async function applyScreenFix(', 'let rewriteCycleRunning']] as const) {
+      const body = sd.slice(sd.indexOf(fn), sd.indexOf(end));
+      const first = body.slice(body.indexOf('{\n') + 2).trimStart();
+      expect(first.startsWith('await requirePlanColumn();'), fn).toBe(true);
+    }
+    const adv = sd.slice(sd.indexOf('export async function advanceRewrite('), sd.indexOf('// ─────────────── 화면 소유(직접발송)'));
+    expect(adv.indexOf('await requirePlanColumn();')).toBeGreaterThan(-1);
+    expect(adv.indexOf('await requirePlanColumn();')).toBeLessThan(adv.indexOf('await buildPlate('));
+    expect(sd).toContain("if (!(await hasDiagColumn()) || !(await hasPlanColumn())) throw Object.assign(new Error('column diag_plan does not exist'), { code: '42703' });");
+    // 새 링크 = 주소 판(w1u · w2u)에서만 · 그 밖의 판은 앞에서 만든 링크만
+    expect(sd).toContain("create: i.kind === 'w1u' || i.kind === 'w2u'");
+    expect(read('utils/spam-link-swap.ts')).toContain('if (!i.create) return null;');
+    // 받기 = 회사 스위치를 본다 · 카드의 받기 단추도 자격이 될 때만
+    const apply = sd.slice(sd.indexOf('export async function applyScreenFix('), sd.indexOf('let rewriteCycleRunning'));
+    expect(apply).toContain("if (!parent || !(await diagEnabledFor(parent.companyId))) return { ok: false, reason: 'not_found' };");
+    expect(sd).toContain("applyLabel: auto || !el.ok ? '' : '이 글로 바꾸고 다시 검사',");
+    // 화면 — 카드가 사라진 뒤 온 응답은 버리고 · 검사 창은 그 검사를 아직 보고 있을 때만 작성 칸에 넣는다
+    const FE = join(SRC, '..', '..', 'frontend', 'src');
+    const card = readFileSync(join(FE, 'components', 'SpamBlockHintCard.tsx'), 'utf8').replace(/\r\n/g, '\n');
+    const post = card.slice(card.indexOf('const post = async ('), card.indexOf('const start = async ()'));
+    expect(post.indexOf('if (!alive.current) return null;')).toBeGreaterThan(post.indexOf('await res.json()'));
+    expect(post.indexOf('if (!alive.current) return null;')).toBeLessThan(post.indexOf('return data;'));
+    expect(card).toContain('useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);');
+    const modal = readFileSync(join(FE, 'components', 'SpamFilterTestModal.tsx'), 'utf8').replace(/\r\n/g, '\n');
+    const on = modal.slice(modal.indexOf('onApply={onApplyFix ? (body, sub, smsTooLongText) => {'));
+    expect(on.indexOf('if (!mountedRef.current || liveIdRef.current !== testId) return null;')).toBeGreaterThan(-1);
+    expect(on.indexOf('if (!mountedRef.current || liveIdRef.current !== testId) return null;')).toBeLessThan(on.indexOf('const next = onApplyFix(body, sub);'));
   });
   it('★ 배포 2 Codex 3R — 재개 첫 회차가 T 를 이어 본 통과도 진단 재개 표시(당일 검사 0)', () => {
     const a = worker.indexOf('const resumedT = ');
@@ -104,19 +190,35 @@ describe('배선(소스 계약)', () => {
     expect(mark).toBeGreaterThan(a);
     expect(mark).toBeLessThan(worker.indexOf("if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };", a));
   });
-  it('★ 배포 2 Codex 3R — 4a 확정 사건 둘 = 상태와 같은 트랜잭션 COMMIT 앞 · 워커는 커밋 뒤 담당자 문자만', () => {
+  it('★ 1126 C164 — 찾음 = 진단을 닫는 같은 트랜잭션에 찾은 글(diagFix) · 같은 row 에 얹어 이 주기의 검사 · 보류 저장이 본다 · 찾은 글은 이어 보기(resume)가 아니라 새 3사 검사 · 4a 0', () => {
     const diag = read('utils/agency-spam-diag.ts');
-    const fn = diag.slice(diag.indexOf('export async function settleAgencyDiag4a('), diag.indexOf('export async function releaseAgencyDiag('));
-    const commit = fn.indexOf("await client.query('COMMIT');");
-    const hint = fn.indexOf("branch: '4a'");
-    const failed = fn.indexOf("agencyEvent(row.id, 'test_failed', { rounds: hold.rounds, reason: 'spam_address' }, run);");
-    expect(hint).toBeGreaterThan(fn.indexOf("SET status = 'test_failed'"));
-    expect(failed).toBeGreaterThan(-1);
-    expect(Math.max(hint, failed)).toBeLessThan(commit);
-    expect(fn).toContain('arrived: locked.arrived');
-    const w = worker.slice(worker.indexOf('async function settleDiag4a('), worker.indexOf('export function lastSpamTestId('));
-    expect(w).not.toMatch(/logEvent\(/);
-    expect(w).toContain('await notifyManager(');
+    expect(diag).not.toMatch(/settleAgencyDiag4a|kind: '4a'|kind: '4b'/);
+    const rel = diag.slice(diag.indexOf('export async function releaseAgencyDiag('), diag.indexOf('export async function agencyBlockSummary('));
+    const upd = rel.indexOf('UPDATE agency_send_requests SET last_test_result = $3::jsonb');
+    const close = rel.indexOf('await closeDiagnosis(hold.parentTestId, run);');
+    expect(upd).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(upd);
+    expect(close).toBeLessThan(rel.indexOf("await client.query('COMMIT');"));
+    const a = worker.indexOf('const hold = diagHoldOf(row) ?? await recoverAgencyHold(row).catch(() => null);');
+    const blk = worker.slice(a, worker.indexOf('await runSpamRound(row, 0, { diag: true, resume });', a));
+    expect(blk).toContain("const fix: DiagFix | null = step.kind === 'found' ? { version: hold.version, content: step.content, plateTestId: step.plateTestId, rounds: hold.rounds } : null;");
+    expect(blk).toContain('await releaseAgencyDiag(row, token, hold, diagHoldJson(row, null, fix))');
+    expect(blk).toContain("row.last_test_result = { ...(row.last_test_result && typeof row.last_test_result === 'object' ? row.last_test_result : {}), diagHold: undefined, ...(fix ? { diagFix: fix } : {}) };");
+    expect(blk).toContain("else resume = { content: hold.content, rounds: hold.rounds, preferTestId: hold.parentTestId, passed: step.kind === 'pass' };");
+    expect(worker).not.toMatch(/settleDiag4a|resumeAvoid/);
+    // 재개 우선순위 = 검사 중이던 후보 > 찾은 글 > 지금 글(찾은 글은 후보 · 이어 보기가 없을 때만)
+    const round = worker.slice(worker.indexOf('async function runSpamRound('), worker.indexOf('let firstTest:'));
+    const held = round.indexOf('content = held.content;');
+    const fixAt = round.indexOf('const fix = diagFixOf(row);');
+    expect(held).toBeGreaterThan(-1);
+    expect(fixAt).toBeGreaterThan(held);
+    expect(round.slice(0, fixAt)).toContain('} else if (content === original) {');
+    // 결과 칸을 안 쓰는 두 반려만 찾은 글을 지운다(같은 칸 대입은 한 줄) · 장애 갈래는 지우지 않는다
+    expect((worker.match(/\{ dropDiagFix: true \}/g) || []).length).toBe(2);
+    expect(worker).toContain("sets.push(opts.dropDiagFix ? `last_test_result = last_test_result - 'spamOverridable' - 'diagFix'` : `last_test_result = last_test_result - 'spamOverridable'`);");
+    // 승인 링크 = 보여 준 글의 버전(savedVersion)으로 서명 · 바꾼 곳 줄 = 찾은 글을 거친 접수만 · 고객이 낸 글 ↔ 통과해 저장한 글
+    expect(worker).toContain('const linkRow = { ...((await freshLinkFields(row.id)) || row), content_version: savedVersion };');
+    expect(worker).toContain("const fixLines = viaFix ? agencyFixLines(String(row.original_content || ''), finalContent) : [];");
   });
   it('★ 배포 2 Codex 5R 구조 — 확인 문자 · 결과 행을 쓰는 문장(서버 전수) = 한 줄 키(id = $n) · 여러 줄은 판 행을 먼저 잠근 진단 닫기와 한 단말 한 줄 보고뿐', () => {
     const walk = (dir: string): string[] => readdirSync(join(SRC, dir), { withFileTypes: true }).flatMap((d) =>
@@ -150,9 +252,8 @@ describe('배선(소스 계약)', () => {
     expect(probe).toContain("WHERE t.id = $3 AND p.result_id = t.id AND p.status IN ('received', 'expired')");
     expect(probe).toContain("WHERE p.id = $1 AND p.result_id = r.id AND p.status = 'claimed'");
     expect(read('utils/spam-test-queue.ts')).toContain('WHERE id = $1 AND received = false AND result IS NULL');
-    // 진단 쪽 T 결과 행 = id 순(4a · 등록)
-    expect(read('utils/agency-spam-diag.ts')).toContain('SELECT id FROM spam_filter_test_results WHERE test_id = $1::uuid ORDER BY id FOR UPDATE');
-    expect(read('utils/spam-test-queue.ts')).toContain('SELECT result FROM spam_filter_test_results WHERE test_id = $1::uuid AND carrier = $2 ORDER BY id FOR UPDATE');
+    // 등록 = 부모의 대상 통신사 결과 행 전부를 id 순으로(★ 1126 C164 판 하나를 막힌 통신사 전부에)
+    expect(read('utils/spam-test-queue.ts')).toContain('SELECT carrier, result FROM spam_filter_test_results WHERE test_id = $1::uuid AND carrier = ANY($2::text[]) ORDER BY id FOR UPDATE');
   });
   it('★ 배포 2 Codex 3R · 4R 구조 — 판 행 잠금 순서 = lockDiagResultRows 한 곳(진단 잠금 → 확인 문자 → 결과 행 · 기한 처리와 같은 순) · 진단 닫기 · 4a 확정이 그것만 거친다', () => {
     const sd = read('utils/spam-diag.ts');
@@ -160,17 +261,15 @@ describe('배선(소스 계약)', () => {
     expect(lk.indexOf('DIAG_LOCK_SQL')).toBeGreaterThan(-1);
     expect(lk.indexOf('FROM spam_test_probes p')).toBeGreaterThan(lk.indexOf('DIAG_LOCK_SQL'));
     expect(lk.indexOf('FOR UPDATE OF r')).toBeGreaterThan(lk.indexOf('FROM spam_test_probes p'));
-    const fn = sd.slice(sd.indexOf('export async function closeDiagnosis('), sd.indexOf('export function diagStateSentence('));
+    const fn = sd.slice(sd.indexOf('export async function closeDiagnosis('), sd.indexOf('// ─────────────── 보이는 문장'));
     const firstWrite = Math.min(...['UPDATE spam_test_probes', 'UPDATE spam_filter_test_results', 'UPDATE spam_filter_tests'].map((k) => fn.indexOf(k)).filter((i) => i >= 0));
     expect(fn.indexOf('await lockDiagResultRows(parentTestId, run)')).toBeGreaterThan(-1);
     expect(fn.indexOf('await lockDiagResultRows(parentTestId, run)')).toBeLessThan(firstWrite);
     expect(fn).not.toContain('DIAG_LOCK_SQL');   // 진단 잠금도 그 함수가 잡는다
-    // 판 결과 행을 직접 잠그는 자리는 그 함수뿐(4a 확정은 그 함수를 부른다)
+    // 판 결과 행을 직접 잠그는 자리는 그 함수뿐 · 닫힘 표시(diag_plan.closed)도 그 잠금 뒤 같은 닫기 안
     expect((sd.match(/FOR UPDATE OF r/g) || []).length).toBe(1);
-    const diag = read('utils/agency-spam-diag.ts');
-    const s4a = diag.slice(diag.indexOf('export async function settleAgencyDiag4a('), diag.indexOf('export async function releaseAgencyDiag('));
-    expect(s4a).toContain('await lockDiagResultRows(hold.parentTestId, run);');
-    expect(s4a).not.toMatch(/spam_test_probes/);
+    expect(fn.indexOf("jsonb_set(diag_plan, '{closed}', 'true'::jsonb)")).toBeGreaterThan(fn.indexOf('await lockDiagResultRows(parentTestId, run)'));
+    expect(read('utils/agency-spam-diag.ts')).not.toMatch(/spam_test_probes|FOR UPDATE/);
     const probe2 = read('utils/spam-probe.ts');
     const cp = probe2.slice(probe2.indexOf('async function closeProbes('));
     expect(cp.indexOf('UPDATE spam_test_probes')).toBeLessThan(cp.indexOf('UPDATE spam_filter_test_results'));
@@ -283,7 +382,56 @@ describe('★ 1124 회사 스위치(슈퍼관리자 · companies.spam_diag_enabl
     expect(sw).toContain("method: 'PATCH'");
     expect(sw).not.toMatch(/window\.(alert|confirm)|\balert\(|confirm\(/);
     const card = fe('components/SpamBlockHintCard.tsx');
-    expect(card).toContain("const off = !h.eligible && h.reason === 'off';");
-    expect(card).toContain('{(last || (idleText && !off)) && (');
+    // ★ 1126 C164 — 꺼진 회사 = 서버가 hidden 으로(단추 · 사유 줄 0) · 카드는 idle + start + 원문을 받은 창일 때만 찾기 단추
+    expect(read('utils/spam-diag.ts')).toContain("card.state = el.reason === 'off' ? 'hidden' : 'idle';");
+    expect(card).toContain("{state === 'idle' && rw?.start && canAct && (");
+    expect(card).toContain('const canAct = !!template && !!onApply;');
+    expect(card).not.toMatch(/\/diagnose|주소 빼고|줄 빼고|빼니 도착|빼도 /);
+  });
+});
+
+describe('★ Codex 구현 3R — 발송 조립기가 법정 줄로 인정하는 줄은 고칠 줄이 아니다(조립기의 판정 그대로)', () => {
+  const HEADS = ['(광고) 매장 소식', '( 광고 ) 매장 소식', '（광고）매장 소식', '  (광고)매장 소식'];
+  const FOOTS = ['무료수신거부 080-000-0000', '무료 수신 거부 080-000-0000', '무료거부0800000000', '무료 거부 080'];
+  const PLAIN = ['매장 소식', '광고 문의는 매장으로', '수신 설정 안내'];
+
+  it('조립기가 머리말 · 꼬리말을 더 붙이지 않는 꼴 = 법정 줄 · 붙이는 꼴 = 아님(기대값 = 조립기의 실제 결과)', () => {
+    for (const l of HEADS) {
+      expect(buildAdMessage(l, 'LMS', true, '080-000-0000').startsWith(l)).toBe(true);   // 독립 출처 = 조립기가 머리말을 더 붙이지 않는다
+      expect(assemblerLegalLine(l)).toBe(true);
+    }
+    for (const l of FOOTS) {
+      expect(buildAdMessage(`행사\n${l}`, 'LMS', true, '080-000-0000')).toBe(`(광고) 행사\n${l}`);   // 꼬리말을 더 붙이지 않는다
+      expect(assemblerLegalLine(l)).toBe(true);
+    }
+    for (const l of PLAIN) {
+      expect(buildAdMessage(l, 'LMS', true, '080-000-0000')).toBe(`(광고) ${l}\n무료수신거부 080-000-0000`);
+      expect(assemblerLegalLine(l)).toBe(false);
+    }
+  });
+
+  it('원문에 직접 쓴 띄어 쓴 머리말 · 단문 꼬리말 줄은 고정(고칠 줄 = 본문 줄만)', () => {
+    const t = '( 광고 ) 매장 소식\n겨울 행사 안내\n무료거부0800000000';
+    expect(editableLines(t, t, assemblerLegalLine)).toEqual([{ sentLine: 1, tplLine: 1 }]);
+    const u = '（광고）매장 소식\n겨울 행사 안내\n무료 수신 거부 080-000-0000';
+    expect(editableLines(u, u, assemblerLegalLine)).toEqual([{ sentLine: 1, tplLine: 1 }]);
+  });
+});
+
+describe('★ Codex 구현 4R — 원문을 검사 글로 조립하는 조합이 여럿이면 전부가 같은 글을 낼 때만 그 글(어느 조합이 그 화면의 것인지 모른다)', () => {
+  // 머리말 · 꼬리말을 이미 가진 글 = 광고 표기를 켜도 끄도 원문 그대로 나온다(맞는 조합이 여럿)
+  const T = '(광고\n) 하늘몰\n■ 최대 35% 할인\n무료 수신거부 080-000-0000';
+  const parent = { companyId: '00000000-0000-0000-0000-0000000000aa', userId: '00000000-0000-0000-0000-0000000000ab', messageType: 'LMS', callback: '0212345678', firstRecipient: null } as any;
+
+  it('표기를 그대로 둔 바꿈 = 어느 조합이든 같은 글 → 그 글 · 머리말이 깨진 바꿈 = 켬(머리말을 새로 붙임) 과 끔(그대로)이 다른 글 → null', async () => {
+    const render = await screenRenderer({ parent, sentText: T }, T);
+    expect(render(T)).toBe(T);
+    expect(render(T.replace('할인', '세일'))).toBe(T.replace('할인', '세일'));
+    expect(render('(광고\n하늘몰 소식\n■ 최대 35% 할인\n무료 수신거부 080-000-0000')).toBeNull();
+  });
+
+  it('어느 조합으로도 검사 글이 안 나오면 늘 null', async () => {
+    const render = await screenRenderer({ parent, sentText: T + ' ' }, T);
+    expect(render(T)).toBeNull();
   });
 });

@@ -1,20 +1,27 @@
 /**
- * agency-spam-diag.ts — 대행발송 스팸 검사 루프의 「막힌 부분 짚어 보기」(★2026-11-24 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7)
+ * agency-spam-diag.ts — 대행발송 스팸 검사 루프의 「닿는 글 찾기」(★2026-11-24 · 설계서 docs/2026-11-23-spam-block-cause-hint-design.md §7
+ *   ★2026-11-26 C164 재작성 · 설계서 docs/2026-11-25-spam-diag-rewrite-design.md §8 · §9-2)
  *
- * 문안 버전에서 처음 막힌 글(T)에 확인 판을 걸고, 루프 안에서 기다리지 않고 접수를 받기 전 상태로 돌려 둔다(진단 대기 · last_test_result.diagHold).
- * 다음 주기에 그 판의 확정 결과로 갈래를 정한다: 대기 / 4a(막힌 통신사 전부 주소만 뺀 글 도착 = 사람 판단) / 4b(표시한 줄 뺀 글 도착 = 그 표현을 피해 다듬기) /
- *   4c(그 밖 · 30분 넘음 = 지금처럼 다듬기) / 통과(대기 사이 늦은 보고로 T 통과).
- * 4a 는 한 트랜잭션으로 확정한다(접수 행 → T 결과 행 → 진단 잠금 → 판 결과 행 · 잠근 값으로 다시 판정해 4a 일 때만 test_failed + 진단 닫기).
- * 그 밖 갈래는 진단 대기를 지우고 진단을 닫은 뒤(한 트랜잭션) 루프가 T 를 같은 검사 이어 보기로 다시 읽어 간다 — T 가 그 사이 통과로 바뀌었으면
- *   루프가 통과 갈래로 간다(잠금 아래 다시 판정할 일이 없다 · 판정은 루프의 한 곳).
+ * 문안 버전에서 처음 막힌 글(T)에 「표현을 바꾼 글」 판을 걸고, 루프 안에서 기다리지 않고 접수를 받기 전 상태로 돌려 둔다(진단 대기 · last_test_result.diagHold).
+ * 다음 주기에 그 판의 확정 결과로 갈래를 정한다: 대기 / 다음 판(주소도 바꾼 글 · 새로 쓴 글 = 화면 앞에 고객이 없어 자동 · 동의 = 승인 문자 1클릭) /
+ *   찾음(막힌 통신사 전부 도착 = 그 바꿈을 이 버전 글에 넣은 글로 3사 일반 검사 · last_test_result.diagFix) /
+ *   4c(못 찾음 · 확인 못 함 · 30분 넘음 = 지금처럼 다듬기) / 통과(대기 사이 늦은 보고로 T 통과).
+ * 어느 갈래든 진단 대기를 지우고 진단을 닫은 뒤(한 트랜잭션 · 찾음이면 같은 트랜잭션에 diagFix) 루프가 이어 간다.
+ *   「주소를 바꿔 주세요」로 멈추던 갈래(4a)는 없다 — 주소는 우리가 같은 곳으로 가는 짧은 주소로 바꿔 본다.
  * ⛔ 진단은 부가 동작이다(fail-open) — 힌트 · 판 읽기 · 판 등록이 던지면 4c 와 같다. 일반 검사의 판정 · 장애 셈 · 보류는 건드리지 않는다.
+ * ⛔ 찾은 판의 도착은 T 의 통과가 아니다 — 찾은 글은 반드시 3사 일반 검사를 거친 뒤에만 승인 문자로 간다.
  */
 import pool, { query } from '../config/database';
 import { readSpamTestOutcome } from './spam-test-queue';
-import { classifyDiag, tokenizeSpamText, type CarrierChecks } from './spam-block-hint';
+import { classifyRewrite, applySpamFixes, type PlateKind } from './spam-block-hint';
 import {
-  buildSpamBlockHints, registerDiag, closeDiagnosis, lockDiagResultRows, readDiagParent, readDiagChecks, diagSentText, diagStateSentence, spamHintLine, markedTemplateLines,
+  buildSpamBlockHints, advanceRewrite, rewriteStepOf, closeDiagnosis, readDiagParent, readPlates, plateStatesOf, triedPlatesLine, diagSentText, spamHintLine, markedTemplateLines,
+  hasDiagColumn, hasPlanColumn,
 } from './spam-diag';
+import { swappableUrls } from './spam-link-swap';
+import { customShortLinkUrl } from './dm/dm-custom-short-link';
+import { sampleRendererOf } from './agency-send-preview';
+import { SPAM_DIAG_SOURCE } from './spam-trial';
 import { getCarrierLabel } from './sms-result-map';
 
 type SqlRun = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
@@ -28,11 +35,12 @@ export const DIAG_MIN_LEAD_MINUTES = 120;
 export const SPAM_HINT_EVENT = 'spam_hint';
 
 export interface DiagHold { parentTestId: string; version: number; content: string; rounds: number; startedAt: string }
+/** 찾은 글(이 문안 버전의 글에 바꿈을 넣은 글) — 그 버전 첫 3사 일반 검사의 시작 글 · 장애로 돌아가도 이어받는다(§9-2) */
+export interface DiagFix { version: number; content: string; plateTestId: string; rounds: number }
 export type DiagStep =
   | { kind: 'wait' }
   | { kind: 'pass' }
-  | { kind: '4a'; carriers: string[]; arrived: string[]; sentence: string; /** ★ 2026-11-24 판정에서 이미 읽은 T 행 시각(그대로 보내기 표식 · 다시 읽기 0) */ parentCreatedAt?: string }
-  | { kind: '4b'; avoid: string[]; sentence: string }
+  | { kind: 'found'; content: string; plateTestId: string }
   | { kind: '4c'; sentence: string };
 
 /** (순수) 지금 문안 버전의 진단 대기 표시 · 다른 버전이면 없음 */
@@ -42,12 +50,22 @@ export function diagHoldOf(row: { last_test_result?: any; content_version?: any 
   return { parentTestId: h.parentTestId, version: Number(h.version), content: h.content, rounds: Number(h.rounds) || 1, startedAt: String(h.startedAt || '') };
 }
 
-/** (순수) 결과 칸에 진단 대기를 얹거나(hold) 지운 값(null) · 남는 것이 없으면 null — heldResultJson 과 같은 꼴(대기를 얹으면 검사 중 후보는 지운다) */
-export function diagHoldJson(row: { last_test_result?: any }, hold: DiagHold | null): string | null {
+/** (순수) 지금 문안 버전의 찾은 글 · 다른 버전이면 없음(취소 · 만료 · 문안 수정 뒤 남은 값은 아무 길에서도 쓰이지 않는다) */
+export function diagFixOf(row: { last_test_result?: any; content_version?: any }): DiagFix | null {
+  const f = row.last_test_result && typeof row.last_test_result === 'object' ? row.last_test_result.diagFix : null;
+  if (!f || Number(f.version) !== Number(row.content_version || 0) || typeof f.content !== 'string' || !f.content.trim()) return null;
+  return { version: Number(f.version), content: f.content, plateTestId: String(f.plateTestId || ''), rounds: Number(f.rounds) || 1 };
+}
+
+/**
+ * (순수) 결과 칸에 진단 대기를 얹거나(hold) 지운 값(null) · 남는 것이 없으면 null — heldResultJson 과 같은 꼴(대기를 얹으면 검사 중 후보는 지운다).
+ *   fix = 찾은 글을 함께 얹는다(진단을 닫는 같은 저장). 그 밖의 키(이미 있는 diagFix 포함)는 그대로 둔다.
+ */
+export function diagHoldJson(row: { last_test_result?: any }, hold: DiagHold | null, fix?: DiagFix | null): string | null {
   const prev: Record<string, any> = row.last_test_result && typeof row.last_test_result === 'object' && !Array.isArray(row.last_test_result) ? { ...row.last_test_result } : {};
   delete prev.diagHold;
   if (hold) delete prev.heldCandidate;
-  const next = hold ? { ...prev, diagHold: hold } : prev;
+  const next = { ...prev, ...(hold ? { diagHold: hold } : {}), ...(fix ? { diagFix: fix } : {}) };
   return Object.keys(next).length > 0 ? JSON.stringify(next) : null;
 }
 
@@ -61,39 +79,36 @@ export async function diagStartedFor(requestId: string, version: number): Promis
 }
 
 async function hintEvent(requestId: string, payload: Record<string, any>, run: SqlRun = query): Promise<void> {
-  await agencyEvent(requestId, SPAM_HINT_EVENT, payload, run);
-}
-async function agencyEvent(requestId: string, kind: string, payload: Record<string, any>, run: SqlRun): Promise<void> {
-  await run(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, $2, $3::jsonb)`, [requestId, kind, JSON.stringify(payload)]);
+  await run(`INSERT INTO agency_send_events (request_id, kind, payload) VALUES ($1::uuid, $2, $3::jsonb)`, [requestId, SPAM_HINT_EVENT, JSON.stringify(payload)]);
 }
 
 /**
  * ★ 배포 2 Codex 1R — 판 등록의 부르는 쪽 조건(부모 진단 잠금 아래 · enqueueSpamTest diag.guard): 이 워커가 아직 그 접수를 쥐고(선점 토큰) 같은 문안 버전이다.
- *   withHold = 진단 대기 중 판 ② 등록 = 결과 칸의 진단 대기가 아직 그 T 다. 문안 수정 · 진단 닫기가 먼저 커밋됐으면 거짓 = 등록 0 ·
- *   등록이 먼저면 뒤에 오는 수정의 진단 닫기가 진단 잠금을 기다렸다가 이 판까지 닫는다.
+ *   결과 칸에 진단 대기가 있으면 그 T 의 대기여야 한다(다른 검사의 진단이 진행 중이면 등록 0). 대기가 없는 것은 막지 않는다 —
+ *   첫 판 등록 때와, 첫 판 등록 뒤 대기를 저장하기 전에 죽어 판에서 되찾은 대기(★ Codex 구현 1R · 결과 칸에는 아직 없다)가 그 꼴이다.
+ *   문안 수정은 토큰을 지우고 버전을 올려 거짓이 되고, 닫힌 진단은 판 행의 닫힘 표시를 등록이 같은 잠금 아래에서 본다(spam-diag registerPlate).
  */
-function regGuard(row: any, version: number, parentTestId: string, withHold: boolean) {
+function regGuard(row: any, version: number, parentTestId: string) {
   return async (run: SqlRun): Promise<boolean> => {
     const r = await run(
       `SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND lock_token = $2::uuid AND content_version = $3
-         ${withHold ? `AND last_test_result -> 'diagHold' ->> 'parentTestId' = $4` : ''}`,
-      withHold ? [row.id, row.lock_token, version, parentTestId] : [row.id, row.lock_token, version],
+          AND COALESCE(last_test_result -> 'diagHold' ->> 'parentTestId', $4) = $4`,
+      [row.id, row.lock_token, version, parentTestId],
     );
     return r.rows.length > 0;
   };
 }
 
-/** 확정 결과 문장(진행 기록 · 담당자 문자 · 회신 메일 = 합니다체) — 통신사마다 그 판의 상태 */
-function sentenceOf(checks: Readonly<Record<string, CarrierChecks>>, carriers: ReadonlyArray<string>, variant: 1 | 2): string {
-  return carriers.map((c) => {
-    const st = checks[c]?.[variant === 1 ? 'v1' : 'v2'];
-    return st ? diagStateSentence(c, variant, st, true) : '';
-  }).filter(Boolean).join(' ');
+/** 그 접수의 실물 조립기(검사 글 T 를 만든 것과 같은 조립 · 못 만들면 null) — 판 글이 「바꿈을 넣은 글의 조립」과 글자 그대로 같은지 보는 데 쓴다 */
+async function agencyRender(row: any): Promise<(content: string) => string | null> {
+  const render = await sampleRendererOf(row);
+  return (content) => { try { return render(content); } catch { return null; } };
 }
 
 /**
- * T 가 막혔다 — 이 버전 첫 막힘이고 발송까지 2시간 이상이면 막힌 통신사마다 첫 판을 등록한다.
- *   등록한 판이 하나라도 있으면 진단 대기(hold)를 돌려준다(부르는 쪽 = 다듬지 않고 접수를 받기 전 상태로) · 없으면 null(지금처럼 다듬기).
+ * T 가 막혔다 — 이 버전 첫 막힘이고 발송까지 2시간 이상이면 첫 판(표현을 바꾼 글)을 막힌 통신사 전부로 한 판 등록한다.
+ *   등록했으면 진단 대기(hold)를 돌려준다(부르는 쪽 = 다듬지 않고 접수를 받기 전 상태로) · 없으면 null(지금처럼 다듬기).
+ *   판 행에 소유(agency) · 접수 · 버전 · 회차를 싣는다(소유가 사건보다 먼저 행에 선다 · 대기 저장 전에 죽어도 되찾는다 = recoverAgencyHold).
  *   사건 spam_hint 는 판이 없어도 남긴다(그 뒤 막힘엔 진단 0 · 문안 버전당 한 번).
  */
 export async function startAgencyDiag(row: any, parentTestId: string, content: string, rounds: number, now = new Date()): Promise<DiagHold | null> {
@@ -106,12 +121,19 @@ export async function startAgencyDiag(row: any, parentTestId: string, content: s
       return null;
     }
     const hint = await buildSpamBlockHints(parentTestId, { templateText: content });
-    const sentTo: string[] = [];
-    for (const c of hint?.carriers || []) {
-      if (!c.next) continue;
-      const r = await registerDiag({ parentTestId, carrier: c.carrier, variant: c.next, actorUserId: String(row.created_by || ''), hint: hint!, guard: regGuard(row, version, parentTestId, false) })
-        .catch((e: any) => { console.warn(`${LOG} 판 등록 실패 request=${row.id} carrier=${c.carrier}:`, e?.message || e); return null; });
-      if (r?.ok) sentTo.push(c.carrier);
+    let sentTo: string[] = [];
+    // 이미 판이 있는 검사(사람이 화면에서 찾기를 누른 같은 날 같은 글)는 그쪽 소유 = 대행은 판을 더하지 않는다
+    if (hint && hint.plates.length === 0) {
+      const template = { body: content, subject: hint.parent.subject };
+      const s = rewriteStepOf(hint, 'agency', template);
+      if (s.editable.length > 0) {
+        const render = await agencyRender(row);
+        const r = await advanceRewrite({
+          hint, owner: 'agency', actorUserId: String(row.created_by || ''), candidates: ['w1'], template, editable: s.editable, render,
+          agency: { requestId: String(row.id), version, rounds }, guard: regGuard(row, version, parentTestId),
+        }).catch((e: any) => { console.warn(`${LOG} 판 등록 실패 request=${row.id}:`, e?.message || e); return null; });
+        if (r?.ok) sentTo = hint.carriers.map((c) => c.carrier);
+      }
     }
     await hintEvent(String(row.id), { version, parentTestId, sentTo });
     return sentTo.length > 0 ? { parentTestId, version, content, rounds, startedAt: now.toISOString() } : null;
@@ -123,47 +145,93 @@ export async function startAgencyDiag(row: any, parentTestId: string, content: s
 }
 
 /**
- * 판정 — T 의 지금 결과 · 판의 확정 결과로 갈래. 잠금 안에서도 부르므로 run 한 연결만 쓴다(풀 · 규칙 캐시 0).
- *   판 ② 등록이 필요하면(register_v2) 여기서 갈래만 알리고, 등록은 잠금 밖 stepAgencyDiag 가 한다.
+ * ★ 1126 C164 §8 — 진단 대기 되찾기. 첫 판을 등록한 뒤 대기를 저장하기 전에 죽었으면 접수의 결과 칸에는 대기가 없고 판만 있다.
+ *   그 접수 · 지금 문안 버전의 대행 소유 판이 있고 닫히지 않았으면 그 판으로 대기를 되살린다(대기 글 = 판에 저장한 원문 · 시작 시각 = 첫 판을 만든 시각 → 30분 상한이 그대로 걸린다).
+ *   읽기만 한다(행 잠금 0) · 저장은 부르는 쪽의 토큰 기반 대기 저장 길.
  */
-async function decide(hold: DiagHold, run: SqlRun): Promise<DiagStep | { kind: 'register_v2'; carriers: string[]; checks: Record<string, CarrierChecks> }> {
+export async function recoverAgencyHold(row: any): Promise<DiagHold | null> {
+  if (!(await hasDiagColumn()) || !(await hasPlanColumn())) return null;
+  const version = Number(row.content_version || 0);
+  const r = await query(
+    `SELECT t.diag_of, t.created_at, t.diag_plan FROM spam_filter_tests t
+      WHERE t.diag_of IS NOT NULL AND t.source = '${SPAM_DIAG_SOURCE}' AND t.variant_id = 'R1'
+        AND t.diag_plan -> 'agency' ->> 'requestId' = $1 AND t.diag_plan -> 'agency' ->> 'version' = $2
+      ORDER BY t.created_at DESC LIMIT 1`,
+    [String(row.id), String(version)],
+  );
+  const x = r.rows[0];
+  if (!x || x.diag_plan?.closed || x.diag_plan?.owner !== 'agency' || typeof x.diag_plan?.template?.body !== 'string') return null;
+  return {
+    parentTestId: String(x.diag_of), version, content: x.diag_plan.template.body, rounds: Number(x.diag_plan.agency?.rounds) || 1,
+    startedAt: x.created_at instanceof Date ? x.created_at.toISOString() : String(x.created_at),
+  };
+}
+
+/**
+ * 판정 — T 의 지금 결과 · 판의 확정 결과로 갈래. run 한 연결만 쓴다(풀 · 규칙 캐시 0).
+ *   다음 판이 필요하면(next) 여기서 갈래만 알리고, 판 글 만들기(AI) · 등록은 stepAgencyDiag 가 한다.
+ */
+async function decide(hold: DiagHold, run: SqlRun): Promise<DiagStep | { kind: 'next'; candidates: PlateKind[] }> {
   const outcome = await readSpamTestOutcome(hold.parentTestId, run);
   if (outcome.outcome === 'pass') return { kind: 'pass' };
   const blocked = [...new Set(outcome.carrierResults.filter((r) => r.result === 'blocked').map((r) => r.carrier))].sort();
   if (outcome.outcome !== 'blocked' || blocked.length === 0) return { kind: '4c', sentence: '' };
   const parent = await readDiagParent(hold.parentTestId, run);
-  if (!parent) return { kind: '4c', sentence: '' };
-  const { byCarrier } = await readDiagChecks(hold.parentTestId, diagSentText(parent).sentText, run);
-  const cls = classifyDiag({ blockedCarriers: blocked, checks: byCarrier });
-  if (cls.branch === 'wait') return { kind: 'wait' };
-  if (cls.branch === 'register_v2') return { kind: 'register_v2', carriers: cls.registerV2Carriers || [], checks: byCarrier };
-  if (cls.branch === '4a') {
-    // ★ 배포 2 Codex 3R — 도착 = T 에서 실제로 통과한 통신사만(시간 초과 · 확인 못 함은 도착이 아니다 · 회신 메일 상태 줄)
-    const arrived = [...new Set(outcome.carrierResults.filter((r) => r.result === 'pass').map((r) => r.carrier))].filter((c) => !blocked.includes(c)).sort();
-    return { kind: '4a', carriers: blocked, arrived, sentence: sentenceOf(byCarrier, blocked, 1), parentCreatedAt: parent.createdAt };
+  const plates = parent ? await readPlates(hold.parentTestId, run) : [];
+  if (!parent || plates.length === 0 || plates.some((p) => p.plan.owner !== 'agency')) return { kind: '4c', sentence: '' };
+  const hasUrl = swappableUrls(diagSentText(parent).sentText, plates[0].plan.editable).length > 0;
+  const step = classifyRewrite({ plates: plateStatesOf(plates), owner: 'agency', hasUrl });
+  if (step.kind === 'wait') return { kind: 'wait' };
+  if (step.kind === 'next') return { kind: 'next', candidates: step.candidates };
+  if (step.kind === 'found') {
+    // 찾은 판의 바꿈(본문만 · 대행은 제목을 바꾸지 않는다)을 이 문안 버전의 글에 넣는다 — 못 넣으면 4c
+    const plan = plates[step.plate].plan;
+    const applied = applySpamFixes({ body: hold.content, subject: null }, { body: plan.template.body, subject: null }, plan.fixes.filter((f) => f.field === 'body'));
+    if (applied.ok && applied.body !== hold.content) return { kind: 'found', content: applied.body, plateTestId: plates[step.plate].testId };
   }
-  if (cls.branch === '4b') {
-    // ★ 배포 2 Codex 1R — 피할 표현 = 원문(이 문안 버전의 글)에도 있는 조각만(보낸 글은 표본 고객 값이 치환된 글 · 이름 같은 값이 다듬기 AI 로 가지 않게)
-    const tpl = new Set(tokenizeSpamText(hold.content).tokens.map((t) => t.token));
-    return { kind: '4b', avoid: (cls.avoid || []).filter((t) => tpl.has(t)), sentence: sentenceOf(byCarrier, blocked.filter((c) => byCarrier[c]?.v2 === 'arrived'), 2) };
-  }
-  return { kind: '4c', sentence: sentenceOf(byCarrier, blocked, blocked.some((c) => byCarrier[c]?.v2 !== undefined) ? 2 : 1) };
+  return { kind: '4c', sentence: triedPlatesLine(plates, true) };
 }
 
-/** 진단 대기 이어 보기(다음 주기 · 잠금 없이) — 판 ② 가 필요하면 등록하고 대기 · 30분 넘으면 4c · 던지면 4c(fail-open) */
+const clipLine = (l: string) => { const t = l.trim(); return t.length > 40 ? `${t.slice(0, 40)}…` : t; };
+/** 승인 문자에 줄마다 싣는 바꿈 수 상한(그 밖은 한 줄로 수만) */
+const FIX_LINES_MAX = 5;
+
+/**
+ * (순수) 승인 문자의 「바꾼 곳」 줄(설계서 §9-2 · §10-2 정본 문구 · 합니다체) — 고객이 낸 글과 통과해 저장한 글의 줄 대조.
+ *   바꿈 목록이 아니라 실제 승인 대상 글로 만든다(찾은 글이 다시 막혀 다듬은 글이 통과해도 줄 = 나갈 글). 줄 수가 같을 때만 줄마다 「원래 → 바꾼」.
+ *   글이 같으면 빈 목록(줄 없음).
+ */
+export function agencyFixLines(original: string, final: string): string[] {
+  if (original === final) return [];
+  const a = String(original || '').split('\n');
+  const b = String(final || '').split('\n');
+  const out = ['스팸 검사에 걸려 아래처럼 바꿨습니다. 승인하시면 바꾼 글로 보냅니다.'];
+  if (a.length === b.length) {
+    const pairs = a.map((l, i) => [l, b[i]] as const).filter(([x, y]) => x !== y);
+    for (const [x, y] of pairs.slice(0, FIX_LINES_MAX)) out.push(`${clipLine(x)} → ${clipLine(y)}`);
+    if (pairs.length > FIX_LINES_MAX) out.push(`그 밖에 ${pairs.length - FIX_LINES_MAX}곳을 더 바꿨습니다.`);
+  }
+  const shortBase = customShortLinkUrl('');
+  if (shortBase && final.includes(shortBase) && !original.includes(shortBase)) out.push('글 속 주소는 같은 곳으로 가는 한줄로 짧은 주소로 바꿨습니다.');
+  return out;
+}
+
+/** 진단 대기 이어 보기(다음 주기 · 잠금 없이) — 다음 판이 필요하면 만들어 등록하고 대기 · 30분 넘으면 4c · 던지면 4c(fail-open) */
 export async function stepAgencyDiag(row: any, hold: DiagHold, now = new Date()): Promise<DiagStep> {
   try {
     const d = await decide(hold, query);
     const started = Date.parse(hold.startedAt);
     const overdue = Number.isFinite(started) && now.getTime() - started > DIAG_HOLD_MAX_MINUTES * 60_000;
-    if (d.kind === 'register_v2') {
-      if (overdue) return { kind: '4c', sentence: sentenceOf(d.checks, d.carriers, 1) };
-      let sent = 0;
-      for (const c of d.carriers) {
-        const r = await registerDiag({ parentTestId: hold.parentTestId, carrier: c, variant: 2, actorUserId: String(row.created_by || ''), templateText: hold.content, guard: regGuard(row, hold.version, hold.parentTestId, true) }).catch(() => null);
-        if (r?.ok) sent += 1;
-      }
-      return sent > 0 ? { kind: 'wait' } : { kind: '4c', sentence: sentenceOf(d.checks, d.carriers, 1) };
+    if (d.kind === 'next') {
+      const h = overdue ? null : await buildSpamBlockHints(hold.parentTestId, { templateText: hold.content });
+      const s = h ? rewriteStepOf(h, 'agency') : null;
+      if (!h || !s || s.step.kind !== 'next' || !s.template) return { kind: '4c', sentence: h ? spamHintLine(h, true) : '' };
+      const render = await agencyRender(row);
+      const r = await advanceRewrite({
+        hint: h, owner: 'agency', actorUserId: String(row.created_by || ''), candidates: s.step.candidates, template: s.template, editable: s.editable, render,
+        agency: { requestId: String(row.id), version: hold.version, rounds: hold.rounds }, guard: regGuard(row, hold.version, hold.parentTestId), markEnded: true,
+      });
+      return r.ok ? { kind: 'wait' } : { kind: '4c', sentence: spamHintLine(h, true) };
     }
     if (d.kind === 'wait' && overdue) return { kind: '4c', sentence: '' };
     return d;
@@ -185,50 +253,7 @@ export function spamOverrideMarker(version: number, submitted: string, firstTest
   return { version, submitted, checkedAt: (ok ? at! : new Date()).toISOString(), submittedTested: ok };
 }
 
-/**
- * 4a 확정 = 한 트랜잭션(설계서 §7 절차 3) — 접수 행 FOR UPDATE(선점 토큰 · 버전) → T 결과 행 FOR UPDATE → 진단 잠금 · 판 결과 행 FOR UPDATE →
- *   잠근 값으로 다시 판정해 4a 일 때만 test_failed(진단 대기 지움) + 진단 닫기 + 확정 사건 둘(spam_hint 4a · test_failed spam_address) → 커밋.
- *   돌려줌 = 'ok' | 'changed'(다시 판정이 4a 가 아님 · 되돌림) | 'lost'(소유권 · 버전이 바뀜).
- */
-export async function settleAgencyDiag4a(row: any, token: string, hold: DiagHold, lastTestResult: string | null): Promise<{ status: 'ok'; carriers: string[]; sentence: string } | { status: 'changed' | 'lost' }> {
-  const client = await pool.connect();
-  const run: SqlRun = (sql, params) => client.query(sql, params);
-  try {
-    await client.query('BEGIN');
-    const own = await run(`SELECT content_version FROM agency_send_requests WHERE id = $1::uuid AND lock_token = $2::uuid FOR UPDATE`, [row.id, token]);
-    if (own.rows.length === 0 || Number(own.rows[0].content_version) !== hold.version) { await client.query('ROLLBACK'); return { status: 'lost' }; }
-    await run(`SELECT id FROM spam_filter_test_results WHERE test_id = $1::uuid ORDER BY id FOR UPDATE`, [hold.parentTestId]);
-    await lockDiagResultRows(hold.parentTestId, run);
-    // ★ 배포 2 Codex 1R — 사건 · 담당자 문자 = 잠근 값으로 다시 판정한 통신사 · 문장(잠금 앞 판정의 통신사가 아니라)
-    const locked = await decide(hold, run);
-    if (locked.kind !== '4a') { await client.query('ROLLBACK'); return { status: 'changed' }; }
-    // 그대로 보내기 표식 = 판정(decide)이 이 트랜잭션에서 이미 읽은 T 행의 시각 그대로(다시 읽기 0 · 판정 뒤 추가 조회 0 · Codex 구현 9R)
-    const marker = spamOverrideMarker(hold.version, String(row.original_content || ''), { content: hold.content, createdAt: locked.parentCreatedAt });
-    // ★ 2026-11-24 주소 원인 막힘(4a)도 통신사 막힘 = 「그대로 보낼 수 있음」 표식(보낼 글 = 담당자가 마지막으로 넣은 글 · 버전 · 확정 시각 ·
-    //   이 갈래는 last_test_at 을 쓰지 않아 당일 판정은 이 시각으로 한다 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3)
-    //   ★ Codex 구현 1R ~ 4R — 당일 근거 = 막힌 검사(T) 행의 시각 · 보낼 글이 T 가 본 글일 때만(워커와 같은 함수 · 잠금을 쥔 연결로 읽는다)
-    await run(
-      `UPDATE agency_send_requests SET status = 'test_failed',
-              last_test_result = jsonb_set(COALESCE($3::jsonb, '{}'::jsonb), '{spamOverridable}', $4::jsonb),
-              lock_at = NULL, lock_token = NULL, revision = revision + 1, updated_at = NOW()
-        WHERE id = $1::uuid AND lock_token = $2::uuid`,
-      [row.id, token, lastTestResult, JSON.stringify(marker)],
-    );
-    await closeDiagnosis(hold.parentTestId, run);
-    // ★ 배포 2 Codex 3R — 확정 사건 둘 = 상태와 같은 트랜잭션(사건이 못 남으면 상태째 되돌림 · 회신 메일 대상 SQL 이 이 사건으로 고른다)
-    await hintEvent(row.id, { version: hold.version, parentTestId: hold.parentTestId, branch: '4a', sentence: locked.sentence, carriers: locked.carriers, arrived: locked.arrived }, run);
-    await agencyEvent(row.id, 'test_failed', { rounds: hold.rounds, reason: 'spam_address' }, run);
-    await client.query('COMMIT');
-    return { status: 'ok', carriers: locked.carriers, sentence: locked.sentence };
-  } catch (err) {
-    await client.query('ROLLBACK').catch(() => undefined);
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/** 그 밖 갈래(통과 · 4b · 4c) — 진단 대기를 지우고 진단을 닫는다(한 트랜잭션 · 접수 행 → 진단 잠금 순) · 소유권을 잃었으면 false */
+/** 갈래를 정한 뒤(통과 · 찾음 · 4c) — 진단 대기를 지우고 진단을 닫는다(한 트랜잭션 · 접수 행 → 진단 잠금 순 · 찾음이면 lastTestResult 에 찾은 글이 함께 실린다) · 소유권을 잃었으면 false */
 export async function releaseAgencyDiag(row: any, token: string, hold: DiagHold, lastTestResult: string | null): Promise<boolean> {
   const client = await pool.connect();
   const run: SqlRun = (sql, params) => client.query(sql, params);

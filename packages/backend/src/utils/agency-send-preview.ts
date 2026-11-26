@@ -76,6 +76,21 @@ export async function buildRenderedSample(row: any): Promise<{ text: string; sub
 }
 
 /**
+ * ★ 2026-11-26 C164 — 그 접수의 첫 수신자 기준 실물 문장을 **글만 바꿔** 다시 조립하는 함수(재료는 여기서 한 번 읽는다 · 돌려준 함수는 읽기 0).
+ *   스팸 검사의 「닿는 글 찾기」가 「바꿈을 넣은 글을 조립하면 판 글과 글자 그대로 같은가」를 보는 데 쓴다(조립 = buildRenderedSample 과 같은 renderOne).
+ */
+export async function sampleRendererOf(row: any): Promise<(content: string) => string> {
+  const first = await query(
+    `SELECT phone, vars FROM agency_send_recipients WHERE request_id = $1::uuid ORDER BY row_no LIMIT 1`,
+    [row.id],
+  );
+  const base = await loadRenderCtx(row);
+  const phone = String(first.rows[0]?.phone || '');
+  const vars = first.rows[0]?.vars;
+  return (content) => renderOne({ ...base, plan: buildSlotPlan(content) }, row, phone, vars).text;
+}
+
+/**
  * 접수 상세 미리보기: 상위 N명 각자의 실물 문장.
  * 수신자 0건이면 빈 배열(미리보기는 보여 줄 사람이 있어야 의미가 있다 · 1행 함수와 다른 점).
  */

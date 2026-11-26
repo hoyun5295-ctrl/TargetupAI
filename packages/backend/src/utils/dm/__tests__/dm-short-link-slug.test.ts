@@ -29,7 +29,7 @@ describe('한글 주소 — 두 입구가 같은 규칙을 쓴다', () => {
 
   it('CT가 지정 주소일 때만 선점을 보고, 미지정이면 종전 난수다', () => {
     expect(ctSrc).toContain('if (wanted && !(await isSlugAvailable(wanted, null))) throw new ShortLinkSlugTakenError(wanted)');
-    expect(ctSrc, '미지정 경로가 난수 발급기를 잃으면 안 된다').toContain('const code = wanted || await issueUniqueCode()');
+    expect(ctSrc, '미지정 경로가 난수 발급기를 잃으면 안 된다').toContain('const code = wanted || await issueUniqueCode(run);');   // ★ 1126 C164 — 부르는 쪽 트랜잭션 연결(run · 기본 = 풀)
   });
 
   it('선점과 경합이 같은 예외로 모인다 — 호출부가 한 가지만 처리한다', () => {

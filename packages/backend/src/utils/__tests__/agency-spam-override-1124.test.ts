@@ -80,7 +80,7 @@ describe('배선(소스 계약)', () => {
     expect(fn).toContain("jsonb_set(COALESCE(last_test_result, '{}'::jsonb), '{spamOverridable}', $${i}::jsonb)");
     expect(fn).toContain("last_test_result = last_test_result - 'spamOverridable'");
   });
-  it('표식을 넘기는 setStatus = 1차 · 2시간 전 막힘 둘뿐 · 4a 는 진단 트랜잭션 UPDATE', () => {
+  it('표식을 넘기는 setStatus = 1차 · 2시간 전 막힘 둘뿐(★ 2026-11-26 C164 — 「주소를 바꿔 주세요」로 멈추던 4a 는 없앴다 = 진단 트랜잭션의 표식 UPDATE 0)', () => {
     const calls = worker.match(/spamOverridable: /g) || [];
     expect(calls.length).toBe(2);
     const diag = be('utils/agency-spam-diag.ts');
@@ -91,27 +91,8 @@ describe('배선(소스 계약)', () => {
     // ★ 1R ~ 4R 같은 뿌리의 구조 답 — 당일 근거 = 보낼 글을 본 검사 행의 시각(셋 다 같은 함수 · 짐작 0)
     expect(worker).toContain('const marker = spamOverrideMarker(savedVersion, submitted, firstTest);');
     expect(worker).toContain('const finalMarker = spamOverrideMarker(version, finalSubmitted, firstTest);');
-    // ★ 9R — 4a 표식 = 판정이 이미 읽은 T 행 시각(판정 뒤 추가 조회 0)
-    expect(diag).toContain("return { kind: '4a', carriers: blocked, arrived, sentence: sentenceOf(byCarrier, blocked, 1), parentCreatedAt: parent.createdAt };");
-    // ★ 10R — 자리마다 있는지 먼저(없으면 -1 이라 순서 비교가 거짓 통과) · 판정 = 잠금 트랜잭션 연결(run)
-    const s4aAt = diag.indexOf('export async function settleAgencyDiag4a(');
-    expect(s4aAt).toBeGreaterThan(0);
-    const s4a = diag.slice(s4aAt);
-    const closeAt = s4a.indexOf('await closeDiagnosis(');
-    expect(closeAt).toBeGreaterThan(0);
-    expect(s4a.slice(0, closeAt)).not.toMatch(/readDiagParent\(/);
-    const beginAt = s4a.indexOf("await client.query('BEGIN');");
-    const decideAt = s4a.indexOf('const locked = await decide(hold, run);');
-    const mk = s4a.indexOf("const marker = spamOverrideMarker(hold.version, String(row.original_content || ''), { content: hold.content, createdAt: locked.parentCreatedAt });");
-    // ★ 11R — run = BEGIN 을 실행한 그 연결(client.query)에 묶였는가(모듈 query 로 바꾸면 빨강)
-    const clientAt = s4a.indexOf('const client = await pool.connect();');
-    const runAt = s4a.indexOf('const run: SqlRun = (sql, params) => client.query(sql, params);');
-    for (const at of [clientAt, runAt, beginAt, decideAt, mk]) expect(at).toBeGreaterThan(0);
-    expect(clientAt).toBeLessThan(runAt);
-    expect(runAt).toBeLessThan(beginAt);
-    expect((s4a.slice(0, closeAt).match(/const run: SqlRun = /g) || []).length).toBe(1);   // 다른 run 정의로 가리지 않는다
-    expect(beginAt).toBeLessThan(decideAt);
-    expect(decideAt).toBeLessThan(mk);
+    expect(diag).not.toMatch(/settleAgencyDiag4a|kind: '4a'/);
+    expect(worker).not.toMatch(/settleDiag4a|addressCause/);
     const fnAt = diag.indexOf('export function spamOverrideMarker(');
     expect(fnAt).toBeGreaterThan(0);
     const fn = diag.slice(fnAt, diag.indexOf('\n}\n', fnAt) + 3);
@@ -125,7 +106,6 @@ describe('배선(소스 계약)', () => {
     expect((q.match(/testIds,\n\s+testCreatedAt,/g) || []).length).toBe(2);   // 두 반환 모두
     expect(worker).toContain("return { verdict: 'blocked', passed: false, finalContent: content, rounds, detail, firstTest: firstTest ?? null };");
 
-    expect(diag).toContain("last_test_result = jsonb_set(COALESCE($3::jsonb, '{}'::jsonb), '{spamOverridable}', $4::jsonb)");
   });
   it('2시간 전 재검사 = 고른 버전이면 한 차례 · 막힘이면 당일 검사 받아들이기(한 트랜잭션) 뒤에만 적재', () => {
     const fn = worker.slice(worker.indexOf('async function finalTestRow('), worker.indexOf('async function dispatchToPipeline('));
@@ -140,9 +120,9 @@ describe('배선(소스 계약)', () => {
     expect(tx).toContain("'spam_override_final'");
     expect(tx).toContain("if ((u.rowCount || 0) === 0) { await client.query('ROLLBACK'); return false; }");
   });
-  it('막힘 문자 셋 = 승인 토큰 발급 0(perPhoneTexts · buildApproveTexts 를 싣지 않는다 · 설계 2R #2)', () => {
+  it('막힘 문자 둘 = 승인 토큰 발급 0(perPhoneTexts · buildApproveTexts 를 싣지 않는다 · 설계 2R #2)', () => {
     const notifyBlocks = worker.split('text: buildTestFailedNotify(').slice(1).map((b) => b.slice(0, 300));
-    expect(notifyBlocks.length).toBe(3);
+    expect(notifyBlocks.length).toBe(2);   // ★ 1126 C164 — 1차 · 2시간 전 막힘 둘(4a 문자는 없앴다)
     for (const b of notifyBlocks) expect(b.split('});')[0]).not.toMatch(/perPhoneTexts|buildApproveTexts/);
   });
   it('입구 = 로그인 화면 라우트 하나(소유자 술어) · 링크 라우트에 그대로 보내기 0', () => {

@@ -348,8 +348,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // ============================================================
 
   /** 스팸 검사에 싣는 글 — 검사 창과 최근 검사 조회가 같은 계산을 쓴다(두 벌이면 "검사했는데 안 했다"가 된다) */
-  const buildSpamTestContent = () => {
-    const msg = directMessage || '';
+  const buildSpamTestContent = (body?: string) => {
+    const msg = body ?? (directMessage || '');
     const firstR = directRecipients[0];
     const replaceVars = (text: string) => {
       if (!text || !firstR) return text;
@@ -363,7 +363,7 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   };
 
   const precheck = useSendPrecheck({
-    message: directMessage, setMessage: setDirectMessage, subject: directSubject, msgType: directMsgType,
+    message: directMessage, setMessage: setDirectMessage, subject: directSubject, setSubject: setDirectSubject, msgType: directMsgType,
     callback: selectedCallback, useIndividualCallback, adTextEnabled, optOutNumber,
     recipientsKey: directRecipients, hasRecipients: directRecipients.length > 0,
     buildSpamTestContent,

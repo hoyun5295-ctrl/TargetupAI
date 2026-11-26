@@ -42,10 +42,10 @@ function mapRow(r: any): CustomShortLink {
  * 코드 발급 — 3축(수신자 토큰·발행 페이지·커스텀) 전부 미사용인 코드만 채택.
  * /s/:code 조회가 토큰 → 페이지 → 커스텀 순이라, 타 축과 겹치면 커스텀 링크가 영구히 가려진다.
  */
-async function issueUniqueCode(): Promise<string> {
+async function issueUniqueCode(run: TxRun = query): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateDmShortCode();
-    const dup = await query(
+    const dup = await run(
       `SELECT 1 FROM dm_recipient_tokens WHERE short_code = $1
        UNION ALL SELECT 1 FROM dm_pages WHERE short_code = $1
        UNION ALL SELECT 1 FROM dm_custom_short_links WHERE code = $1
@@ -82,13 +82,16 @@ export async function createCustomShortLink(input: {
   title: string | null;
   /** 사용자 지정 주소 — `validateCustomSlug` 통과값(NFC). 미지정이면 난수 발급 */
   slug?: string | null;
+  /** ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §7) — 부르는 쪽 트랜잭션 연결. 주면 난수 코드 조회 · INSERT 가 모두 그 연결로 간다(되돌리면 링크도 사라진다 · 잠금을 쥔 채 풀을 기다리지 않는다). 지정 주소(slug)와는 함께 쓰지 않는다 */
+  run?: TxRun;
 }): Promise<CustomShortLink | null> {
+  const run = input.run || query;
   const wanted = String(input.slug || '').trim();
   if (wanted && !(await isSlugAvailable(wanted, null))) throw new ShortLinkSlugTakenError(wanted);
-  const code = wanted || await issueUniqueCode();
+  const code = wanted || await issueUniqueCode(run);
   let r;
   try {
-    r = await query(
+    r = await run(
       `INSERT INTO dm_custom_short_links (company_id, created_by, code, target_url, title)
        SELECT $1::uuid, $2, $3, $4, $5
         WHERE (SELECT COUNT(*) FROM dm_custom_short_links
@@ -105,6 +108,12 @@ export async function createCustomShortLink(input: {
   }
   if (r.rows.length === 0) return null;
   return mapRow(r.rows[0]);
+}
+
+/** 짧은 주소 글자(단축 도메인 설정 = DM_SHORT_LINK_BASE · 없으면 null = 이 서버는 짧은 주소를 내지 못한다) */
+export function customShortLinkUrl(code: string): string | null {
+  const base = String(process.env.DM_SHORT_LINK_BASE || '').trim().replace(/\/+$/, '');
+  return base ? `${base}/${code}` : null;
 }
 
 /** 공개 리다이렉트 조회 — 활성 링크만. 미존재/비활성 = null(라우트가 홈 폴백).

@@ -330,6 +330,7 @@ describe('계약 — 길목 · 미러 · 일꾼 배선', () => {
       'utils/dm/dm-alert-msg-type.ts': '바이트 판정 · 발송은 공용 길',
       'utils/dm/dm-variable-resolver.ts': 'DM 페이지 · 문자 아님',
       'utils/journey-message-render.ts': '여정(journeyCopyIssue)',
+      'utils/spam-diag.ts': '확인 판의 조립 대조(screenRenderer · 조립한 글은 검사 글 · 판 글과 글자 대조에만 쓴다) · 발송 아님',
       'utils/spam-test-queue.ts': '검사 · 발송 아님',
     };
     const files = Object.keys(CLASSIFIED);

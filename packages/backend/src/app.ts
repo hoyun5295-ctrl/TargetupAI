@@ -129,6 +129,7 @@ import { startAutoCampaignScheduler } from './utils/auto-campaign-worker';
 import { ensureMonthlyLogTables } from './utils/sms-queue';
 import { startSpamTestQueueWorker } from './utils/spam-test-queue';
 import { startSpamProbeWorker } from './utils/spam-probe';
+import { startSpamRewriteWorker } from './utils/spam-diag';   // ★ 2026-11-26 C164 닿는 글 찾기 이어 돌리기
 import { startAlimtalkScheduler } from './utils/alimtalk-jobs';
 // ★ D218+ (2026-05-26) 여정 발송 2시간 전 담당자 알림 + 7일 KPI 학습 worker
 import { startJourneyPretestNotifierWorker } from './utils/journey-pretest-notifier-worker';
@@ -654,6 +655,7 @@ app.listen(PORT, () => {
   // ★ D78: 스팸테스트 큐 워커 시작 (3초 간격)
   startSpamTestQueueWorker();
   startSpamProbeWorker();   // ★ 2026-11-01 B1-4 — 확인 문자 주기 + 하루 측정(R36)
+  startSpamRewriteWorker();   // ★ 2026-11-26 C164 — 막힌 글의 다음 표현 판(화면 소유 · 30초 · 주소 판은 사람이 눌러야 만든다)
 
   // ★ D130: 알림톡 배치 스케줄러 (카테고리=매일 03:00 KST, 템플릿상태=5분, 발신프로필=1시간)
   startAlimtalkScheduler();

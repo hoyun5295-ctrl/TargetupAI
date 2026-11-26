@@ -547,8 +547,10 @@ describe('③ 소스 계약', () => {
   it('수동 검사 진행 중 판정 · 창 복원 = 자동 검사 제외(진행 중 3곳 = 수락 규칙 CT 문장 · 창 복원 1곳)', () => {
     // ★ 2026-11-05 C103 F1 — 진행 중 판정 3곳(빠른 확인 · 체험 · 유료)은 spam-test-queue 의 MANUAL_SPAM_IN_PROGRESS_SQL 한 문장
     const s = read('routes/spam-filter.ts');
-    // ★ 2026-11-24 +1 = 확인 판 단추(POST /tests/:id/diagnose)가 사람 검사만 받는다(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-1 D2)
-    expect((s.match(/notAutoSpamSourceSql\(/g) || []).length).toBe(2);
+    // ★ 2026-11-24 확인 판 단추가 사람 검사만 받는다 · ★ 2026-11-26 C164 — 그 판정은 판 CT 의 소유 확인(ownManualSpamTestId) 한 곳으로 옮겼다(새 입구 셋이 같이 쓴다)
+    expect((s.match(/notAutoSpamSourceSql\(/g) || []).length).toBe(1);
+    expect((s.match(/await ownManualSpamTestId\(/g) || []).length).toBe(3);
+    expect(read('utils/spam-diag.ts')).toContain("${spamCustomerTestSql('t')} AND ${notAutoSpamSourceSql('t.source')}");
     expect((s.match(/MANUAL_SPAM_IN_PROGRESS_SQL, \[userId\]|manualSpamInProgressInTx\(/g) || []).length).toBe(3);
     expect(read('utils/spam-test-queue.ts')).toMatch(/export const MANUAL_SPAM_IN_PROGRESS_SQL = `[^`]*\$\{notAutoSpamSourceSql\(\)\}/);
   });

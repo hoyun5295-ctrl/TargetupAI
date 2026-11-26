@@ -103,16 +103,22 @@ export interface SpamTestEnqueueParams {
    */
   rendered?: boolean;
   /**
-   * ★ 2026-11-24 확인 판 등록(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-3) — 부모 검사 · 통신사 하나 · 하루 상한.
-   *   있으면: 단말 = 그 통신사 하나(결과 행 · 발송 건수가 같은 목록) · 출처 spam_diag · 차감 0(skipPrepaid 와 함께) ·
-   *   한 트랜잭션에서 고정 키 잠금 → 같은 판이 있으면 그 판(상한 소모 0) → 상한 셈(발신번호 · 전체 · 한국 날짜) →
-   *   INSERT … ON CONFLICT (diag_of, variant_id) DO NOTHING(유일 부분 인덱스 · 무효면 오류 = 판 없음) → 결과 행.
-   *   상한 = errorCode DIAG_CAP · error 'callback' | 'total'.
+   * ★ 2026-11-24 확인 판 등록(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-3) — 부모 검사 · 하루 상한.
+   * ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §5-2 · §7 · §8) — 판 하나를 막힌 통신사 전부에 · 판 계획(diag_plan) 저장 · 등록 직전 링크 만들기.
+   *   있으면: 출처 spam_diag · 차감 0(skipPrepaid 와 함께) · 한 트랜잭션에서
+   *   부모의 그 통신사 결과 행 FOR UPDATE(id 순) → 부모 진단 잠금 → 대상 = 지금도 막힘인 통신사(0 이면 등록 0 = DIAG_NOT_BLOCKED) → guard →
+   *   고정 키 잠금 → 같은 판이 있으면 그 판(상한 소모 0) → 상한 셈(발신번호 · 전체 · 한국 날짜) → prepare(판 글 · 계획 확정 · 주소 판의 링크) →
+   *   INSERT … ON CONFLICT (diag_of, variant_id) DO NOTHING(유일 부분 인덱스 · 무효면 오류 = 판 없음) → 결과 행 = 대상 통신사마다 단말 한 대.
+   *   상한 = errorCode DIAG_CAP · error 'callback' | 'total'. 어디서 멈추든 같은 ROLLBACK 이라 prepare 가 만든 링크도 함께 사라진다.
    */
   diag?: {
-    parentTestId: string; carrier: string; capPerCallback: number; capTotal: number;
-    /** ★ 배포 2 Codex 1R — 부모 진단 잠금 아래에서 부르는 쪽 조건(대행 = 접수 토큰 · 문안 버전 · 진단 대기) · 거짓 = 등록 0(DIAG_CLOSED) */
+    parentTestId: string; carriers: string[]; capPerCallback: number; capTotal: number;
+    /** 판 계획(소유 · 종류 · 원문 · 고칠 줄 · 바꿈 목록 …) — 등록이 targets(실제 보낸 통신사)를 채워 diag_plan 칸에 저장한다 */
+    plan: Record<string, any>;
+    /** ★ 배포 2 Codex 1R — 부모 진단 잠금 아래에서 부르는 쪽 조건(소유 · 닫힘 · 직전 판 상태 · 대행 = 접수 토큰 · 문안 버전 · 진단 대기) · 거짓 = 등록 0(DIAG_CLOSED) */
     guard?: (run: SqlRun) => Promise<boolean>;
+    /** 잠금 · 상한을 지난 뒤 INSERT 직전 — 이 연결로 판 글 · 계획을 확정한다(주소 판 = 짧은 주소 만들기) · null = 등록 0(DIAG_PREPARE) */
+    prepare?: (run: SqlRun) => Promise<{ text: string; plan: Record<string, any> } | null>;
   };
 }
 
@@ -692,7 +698,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     source = 'manual', variantId, batchId, skipPrepaid = false, reuseSameDay = false, reuseDays, manualAdmission, rendered = false, preferTestId, diag,
   } = params;
   // ★ 1124 확인 판 = 출처 · 차감 · 이어 보기가 정해진 값이어야 한다(부르는 쪽 실수로 청구 · 이어 보기가 섞이지 않게)
-  if (diag && (source !== SPAM_DIAG_SOURCE || !skipPrepaid || reuseSameDay || manualAdmission || !variantId)) {
+  if (diag && (source !== SPAM_DIAG_SOURCE || !skipPrepaid || reuseSameDay || manualAdmission || !variantId || !rendered || diag.carriers.length === 0)) {
     return { ok: false, errorCode: 'ENQUEUE_FAILED', error: '스팸 검사를 시작하지 못했어요. 잠시 뒤 다시 시도해 주세요.' };
   }
 
@@ -726,9 +732,10 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     // 2) 디바이스 조회 + 발송 건수 계산
     // ★ 1124 확인 판 = 그 통신사 단말만(결과 행 · 발송 건수가 같은 목록에서 나온다 · 설계서 §6-3)
     const devices = diag
-      ? await query(`SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true AND carrier = $1 ORDER BY id LIMIT 1`, [diag.carrier])   // ★ 배포 2 Codex 1R — 단말 한 대(결과 행 · 적재 · 판정 하나)
+      ? await query(`SELECT DISTINCT ON (carrier) id, carrier, phone FROM spam_filter_devices WHERE is_active = true AND carrier = ANY($1::text[]) ORDER BY carrier, id`, [diag.carriers])   // ★ 배포 2 Codex 1R — 통신사마다 단말 한 대(결과 행 · 적재 · 판정 하나)
       : await query(`SELECT id, carrier, phone FROM spam_filter_devices WHERE is_active = true ORDER BY carrier`);
-    if (devices.rows.length === 0) {
+    // 확인 판 = 보내려는 통신사 전부에 단말이 있어야 한다(한 곳이라도 못 보내면 그 판으로 「전부 도착」을 확인할 수 없다)
+    if (devices.rows.length === 0 || (diag && diag.carriers.some((c) => !devices.rows.some((d: any) => d.carrier === c)))) {
       return { ok: false, error: '지금은 스팸 검사를 할 수 없습니다. 관리자에게 문의하세요.', errorCode: 'NO_TEST_DEVICE' };
     }
 
@@ -792,6 +799,9 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
     const storedSource = diag ? SPAM_DIAG_SOURCE : source === 'auto_ai' && skipPrepaid ? SPAM_AUTO_FREE_SOURCE : source;
     const client = await pool.connect();
     let testId = '';
+    let diagTargets: string[] = [];
+    let diagText: string | null = null;
+    let diagPlan: Record<string, any> = diag ? diag.plan : {};
     try {
       await client.query('BEGIN');
       // ★ 2026-11-05 C103 F1 — 사람이 누른 검사 = 사용자 잠금 → 진행 중 1건 확인(키 잠금 · 회사 잠금보다 먼저 · 이 길만 사용자 잠금을 잡는다)
@@ -821,11 +831,13 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
         //   부모의 그 통신사가 아직 막혔나 · 부르는 쪽 조건(대행 = 접수 토큰 · 문안 버전) — 닫기가 먼저면 등록 0, 등록이 먼저면 닫기가 이 판까지 닫는다
         //   ★ 배포 2 Codex 2R — 부모의 그 통신사 결과 행을 먼저 잠근다(늦은 보고 갱신과 직렬화 · 순서 = 부모 결과 행 → 진단 잠금 → 고정 키 = 대행 4a 확정과 같은 순서 · 교착 0)
         const still = await client.query(
-          `SELECT result FROM spam_filter_test_results WHERE test_id = $1::uuid AND carrier = $2 ORDER BY id FOR UPDATE`,
-          [diag.parentTestId, diag.carrier],
+          `SELECT carrier, result FROM spam_filter_test_results WHERE test_id = $1::uuid AND carrier = ANY($2::text[]) ORDER BY id FOR UPDATE`,
+          [diag.parentTestId, diag.carriers],
         );
         await client.query(DIAG_LOCK_SQL, [diagLockKey(diag.parentTestId)]);
-        if (!still.rows.some((r: any) => r.result === SPAM_RESULT.BLOCKED)) { await client.query('ROLLBACK'); return { ok: false, errorCode: 'DIAG_NOT_BLOCKED', error: 'not_blocked' }; }
+        // ★ 1126 C164 §5-2 — 대상 = 잠금 아래 부모가 아직 막힘인 통신사 전부(늦은 보고로 통과가 된 통신사는 빠진다 · 0 이면 등록 0)
+        diagTargets = diag.carriers.filter((c) => still.rows.some((r: any) => r.carrier === c && r.result === SPAM_RESULT.BLOCKED));
+        if (diagTargets.length === 0) { await client.query('ROLLBACK'); return { ok: false, errorCode: 'DIAG_NOT_BLOCKED', error: 'not_blocked' }; }
         if (diag.guard && !(await diag.guard((sql, params) => client.query(sql, params)))) {
           await client.query('ROLLBACK');
           return { ok: false, errorCode: 'DIAG_CLOSED', error: 'closed' };
@@ -846,10 +858,21 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
           await client.query('ROLLBACK');
           return { ok: false, errorCode: 'DIAG_CAP', error: over };
         }
+        // ★ 1126 C164 §7 — 판 글 · 계획 확정(주소 판의 링크는 여기서 · 이 연결로 만든다 → 아래 INSERT 가 충돌 · 실패하면 같은 되돌림으로 링크도 사라진다)
+        if (diag.prepare) {
+          const ready = await diag.prepare((sql, params) => client.query(sql, params));
+          if (!ready) { await client.query('ROLLBACK'); return { ok: false, errorCode: 'DIAG_PREPARE', error: 'prepare' }; }
+          if (!isLmsType && smsRowOverLimit('S', ready.text)) { await client.query('ROLLBACK'); return { ok: false, errorCode: 'SMS_TOO_LONG', error: smsTooLongText(eucKrByteLength(ready.text)) }; }
+          diagText = ready.text;
+          diagPlan = ready.plan;
+        }
       }
+      // 확인 판 = 렌더가 끝난 글 → prepare 가 글을 바꿨으면 지문도 그 글의 것(수신 보고가 이 지문으로 판을 찾는다)
+      const bodySms = diagText !== null && !isLmsType ? diagText : messageContentSms;
+      const bodyLms = diagText !== null && isLmsType ? diagText : messageContentLms;
       const insertValues = [companyId, userId, callbackNumber,
-         messageContentSms || null, messageContentLms || null,
-         messageHash || null, spamCheckNumber,
+         bodySms || null, bodyLms || null,
+         (diagText !== null ? computeMessageHash(diagText) : messageHash) || null, spamCheckNumber,
          storedSource, variantId || null, batchId || null, subject || null,
          // ★ 2026-11-06 C109 — 렌더가 끝난 글 = 표식(워커가 다시 치환하지 않는다) · 그 밖 = 표본 고객(정리된 사본)
          rendered ? JSON.stringify({ [RENDERED_SAMPLE_MARK]: true }) : (firstCustomer && Object.keys(firstCustomer).length > 0 ? JSON.stringify(firstCustomer) : null)];
@@ -859,11 +882,11 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
         ? await client.query(
           `INSERT INTO spam_filter_tests
            (company_id, user_id, callback_number, message_content_sms, message_content_lms,
-            message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient, diag_of)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13::uuid)
+            message_hash, spam_check_number, status, source, variant_id, batch_id, subject, first_recipient, diag_of, diag_plan)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'queued', $8, $9, $10, $11, $12, $13::uuid, $14::jsonb)
            ON CONFLICT (diag_of, variant_id) WHERE diag_of IS NOT NULL DO NOTHING
            RETURNING id, created_at`,
-          [...insertValues, diag.parentTestId],
+          [...insertValues, diag.parentTestId, JSON.stringify({ ...diagPlan, targets: diagTargets })],
         )
         : await client.query(
           `INSERT INTO spam_filter_tests
@@ -882,6 +905,7 @@ export async function enqueueSpamTest(params: SpamTestEnqueueParams): Promise<Sp
 
       // 결과 행 — 커밋 전이라 워커가 이 검사를 집을 때는 늘 전부 있다
       for (const device of devices.rows) {
+        if (diag && !diagTargets.includes(device.carrier)) continue;
         for (const msgType of messageTypes) {
           await client.query(
             `INSERT INTO spam_filter_test_results (test_id, carrier, message_type, phone)
@@ -1254,7 +1278,12 @@ export async function sendDiagTestRow(p: {
       }
     } else if (decided === 'reject') {
       await decideSpamResult(SPAM_RESULT.ERROR, p.rowId, run, stamped);
-      await client.query(`UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW() WHERE id = $1 AND status = 'active'`, [p.testId]);
+      // ★ 1126 C164(Codex 구현 1R) — 판 하나에 통신사 여럿: 이 행의 거부로 판을 닫는 것은 열린 행이 더 없을 때만(나머지 행은 자기 관문을 지나 닫히거나 나간다 · 빈 채 남는 결과 0)
+      await client.query(
+        `UPDATE spam_filter_tests SET status = 'completed', completed_at = NOW()
+          WHERE id = $1 AND status = 'active' AND NOT EXISTS (SELECT 1 FROM spam_filter_test_results WHERE test_id = $1 AND result IS NULL)`,
+        [p.testId],
+      );
       console.log(`[SpamTestQueue] 확인 판 관문 거부 — 보내지 않고 닫음 testId=${p.testId} parent=${p.parentTestId || '-'}`);
     }
     await client.query('COMMIT');
@@ -1326,13 +1355,14 @@ async function executeSpamTest(testId: string, isAuto: boolean, companyId: strin
           testId, parentTestId: test.diag_of ? String(test.diag_of) : null, companyId: String(test.company_id), userId: String(test.user_id),
           callback: String(test.callback_number || ''), rowId: String(row.id), phone: row.phone, messageType: row.message_type, content, title: titleStr,
         });
-        if (!sent) return;
-        sentCount += 1;
+        // ★ 1126 C164 — 판 하나에 통신사 여럿: 한 행이 관문에서 멈춰도(닫힘 · 내 것 아님) 나머지 행은 자기 판정을 지난다(열린 채 남는 행 0)
+        if (sent) sentCount += 1;
         continue;
       }
       await insertTestSmsQueue(row.phone, test.callback_number, content, row.message_type, testId, titleStr);
       sentCount += 1;
     }
+    if (isDiagTest(test.source) && sentCount === 0) return;
 
     // grace period 결정
     const graceMs = isAuto ? AUTO_GRACE_MS : MANUAL_GRACE_MS;

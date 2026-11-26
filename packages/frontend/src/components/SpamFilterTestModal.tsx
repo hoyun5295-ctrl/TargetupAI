@@ -30,6 +30,10 @@ interface SpamFilterTestModalProps {
   onEdit?: () => void;
   /** ★ 2026-11-05 C103 F1 — 여정 칸 모드(검사 글 · 결과 = 여정 칸 검사 주소) */
   journeyStep?: { journeyId: string; stepId: string; variantId?: string | null };
+  /** ★ 2026-11-26 C164 — 닿는 글 찾기의 원문(변수 칸 그대로인 작성 칸 글 · 제목) · 넘기는 화면(직접발송 · 타겟 발송)에서만 찾기 · 받기 단추가 보인다 */
+  template?: { body: string; subject: string };
+  /** 받기 — 바꾼 글을 작성 칸에 넣고 그 글의 검사 글을 돌려준다 · 단문 길이를 넘으면 null */
+  onApplyFix?: (body: string, subject: string | null) => { sms: string; lms: string; subject: string; template: { body: string; subject: string } } | null;
 }
 
 /** 여정 칸 검사 주소의 안전 보기(서버 utils/spam-test-view.ts SpamCheckView 와 같은 꼴) */
@@ -76,17 +80,26 @@ const CARRIERS = ['SKT', 'KT', 'LGU'];
 
 export default function SpamFilterTestModal({
   onClose,
-  messageContentSms,
-  messageContentLms,
+  messageContentSms: openedSms,
+  messageContentLms: openedLms,
   callbackNumber,
   messageType,
-  subject,
+  subject: openedSubject,
   isAd,
   firstRecipient,
   onEdit,
   journeyStep,
+  template: openedTemplate,
+  onApplyFix,
 }: SpamFilterTestModalProps) {
   const token = useAuthStore((s) => s.token);
+  // ★ 2026-11-26 C164 — 찾은 글을 받았으면 그 글이 이 창의 검사 글 · 원문이다(열 때 받은 값 대신)
+  const [applied, setApplied] = useState<{ sms: string; lms: string; subject: string; template: { body: string; subject: string } } | null>(null);
+  const [applySeq, setApplySeq] = useState(0);
+  const messageContentSms = applied ? applied.sms : openedSms;
+  const messageContentLms = applied ? applied.lms : openedLms;
+  const subject = applied ? applied.subject : openedSubject;
+  const template = applied ? applied.template : openedTemplate;
   // ★ C103 F1 여정 칸 모드 — 주소 · 서버 보기 · 서버 검사 글
   const jKey = journeyStep ? `${journeyStep.journeyId}/${journeyStep.stepId}/${journeyStep.variantId || ''}` : '';
   const jUrl = journeyStep ? `/api/ai/operator/journeys/${encodeURIComponent(journeyStep.journeyId)}/steps/${encodeURIComponent(journeyStep.stepId)}/spam-check` : '';
@@ -376,6 +389,12 @@ export default function SpamFilterTestModal({
 
     } catch (err) { setErrorKind('generic'); setError('네트워크 오류가 발생했습니다.'); setStatus('ready'); }
   };
+
+  // ★ 2026-11-26 C164 — 찾은 글을 받은 뒤 = 그 글로 바로 검사를 시작한다(받은 값이 화면 상태에 들어간 다음 차례에)
+  useEffect(() => {
+    if (applySeq > 0) void startTest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applySeq]);
 
   // ★ 2026-11-24 15초 다시 읽기 = 한 곳에서만 건다 · 타이머는 검사 id 를 붙잡지 않고 매 틱 지금 검사(liveIdRef)를 읽는다
   //   (옛 검사의 늦은 콜백이 건 타이머도 지금 검사를 읽는다 · 「다시 검사」 = clearTimers 가 끄고 liveIdRef 를 비운다 · Codex 2R · 3R 같은 부류 = 늦은 콜백의 옛 id)
@@ -670,7 +689,19 @@ export default function SpamFilterTestModal({
               </div>
 
               {verdict === 'block' && hints && testId ? (
-                <SpamBlockHintCard testId={testId} token={token} hints={hints} onSent={() => {
+                <SpamBlockHintCard testId={testId} token={token} hints={hints} template={journeyStep ? null : template}
+                  onApply={onApplyFix ? (body, sub, smsTooLongText) => {
+                    // 받기 — 작성 칸에 넣고(연 화면) 그 글로 이 창이 다시 검사한다(지금 [다시 검사]와 같은 길 · 요금 같음)
+                    // 이 창이 아직 그 검사를 보고 있을 때만(닫혔거나 「다시 검사」로 바뀐 뒤의 늦은 응답은 작성 칸을 건드리지 않는다 · ★ Codex 구현 1R)
+                    if (!mountedRef.current || liveIdRef.current !== testId) return null;
+                    const next = onApplyFix(body, sub);
+                    if (!next) return smsTooLongText || '바꾼 글을 넣을 수 없어요.';
+                    setApplied(next);
+                    resetForRetest();
+                    setApplySeq((n) => n + 1);
+                    return null;
+                  } : undefined}
+                  onSent={() => {
                   // 판을 보냈다 = 결과가 날 때까지 15초 읽기(창을 닫아도 확인은 서버가 이어 간다) · 그 사이 「다시 검사」로 바뀐 창이면 아무것도 안 함(Codex 3R)
                   if (liveIdRef.current !== testId) return;
                   void pollResults(testId);

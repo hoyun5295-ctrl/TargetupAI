@@ -59,7 +59,10 @@ const INTERNAL_READS: Record<string, { n: number; why: string }> = {
   'utils/monthly-usage.ts': { n: 1, why: '차감 거래 기준 집계 · 확인 판은 차감 0' },
   'utils/precheck-usage.ts': { n: 1, why: '아이디로 한 건 읽기' },
   'utils/spam-probe.ts': { n: 3, why: '확인 문자 다시 보내기 · 첫 선점 · sendProbe 의 출처 읽기(확인 판도 같은 길 · 관문은 sendProbe 안)' },
-  'utils/spam-diag.ts': { n: 7, why: '확인 판 CT 자체(부모 읽기 · 판 읽기 · 있는 판 찾기 · 판 행 잠금 둘(확인 문자 → 결과 행 · ★ Codex 4R) · 닫기 둘) · 지난 통과 글 읽기는 조각을 쓴다' },
+  // ★ 2026-11-26 C164 — 판 CT 자체: 부모 읽기 · 판 읽기(R1 ~ R3) · 끝 사유 쓰기 · 화면 소유 확인(사람이 건 검사 = 조각 둘을 함께 쓴다) · 이어 돌리기 일꾼의 열린 부모 훑기 ·
+  //   판 행 잠금 둘(확인 문자 → 결과 행 · ★ Codex 4R) · 닫기 넷(확인 문자 · 결과 · 판 상태 · 닫힘 표시) · 지난 통과 글 읽기는 조각을 쓴다
+  'utils/spam-diag.ts': { n: 7, why: '확인 판 CT 자체(부모 읽기 · 판 읽기 · 끝 사유 쓰기 · 일꾼의 열린 부모 훑기 · 판 행 잠금 둘 · 닫기)' },
+  'utils/agency-spam-diag.ts': { n: 1, why: '대행 진단 대기 되찾기(그 접수 · 문안 버전의 대행 소유 첫 판 = 판 행만 읽는다)' },
   'utils/spam-test-queue.ts': { n: 18, why: '확인 판 등록(같은 판 찾기 · 하루 상한 셈 · 충돌 뒤 다시 찾기) · 수신 보고 귀속 · 대기열 집기 · 멈춘 검사 정리 · 실행 · 확인 판 관문의 판 읽기 · 기다림 · 아이디 · 묶음 읽기(확인 판도 같은 길)' },
   'utils/spam-test-view.ts': { n: 1, why: '대기열 앞사람 수(확인 판도 실제로 줄을 선다)' },
   'utils/spam-trial.ts': { n: 2, why: "체험 셈(source = 'trial' 행만)" },

@@ -17,7 +17,7 @@ import { isManualSpamCallbackAllowed, manualSpamInProgressInTx, MANUAL_SPAM_IN_P
 import { getSampleCustomerScope } from '../utils/store-scope';
 import { recoverAgencySpamErrors } from '../utils/agency-send-worker';   // ★ 2026-11-11 C125 늦은 보고 → 대행발송 대기 해제
 import { resolveOwnerScope } from '../utils/owner-scope';
-import { buildSpamBlockHints, spamHintsResponse, spamHintLine, registerDiag, isDiagColumnMissing, diagReasonText, textHasUrl, agencyOwnsDiag } from '../utils/spam-diag';
+import { buildSpamBlockHints, spamHintsResponse, spamHintLine, isDiagColumnMissing, diagReasonText, textHasUrl, ownManualSpamTestId, startScreenRewrite, nextScreenRewrite, applyScreenFix, SPAM_FIX_TEXT } from '../utils/spam-diag';
 import { migrationPendingBody } from '../utils/db-errors';   // ★ 2026-11-24 막힌 부분 짚어 보기(D1 ~ D4)
 // ★2026-09-25 미가입 회사 무료 체험 3회(차감 0 · 청구 집계 제외) · 검사 판정 한 벌
 import {
@@ -938,41 +938,63 @@ router.get('/tests/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // ============================================================
-// [POST] /api/spam-filter/tests/:id/diagnose — 막힌 통신사로 의심 부분을 뺀 글 한 통(확인 판 · ★2026-11-24 D2)
-//   설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6 · §8-1 — 사람이 누르는 발송 입구라 demoBlock · 사용자 범위 = /tests/:id 와 같다 ·
-//   자격(스위치 · 부모 · 보낸 글 · 판 순서 · 발신번호 권한 · 하루 상한)은 registerDiag 한 곳 · 고객 무료(차감 0).
+// ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §8 · §9-1) — 막힌 글의 「닿는 글 찾기」
+//   [POST] /tests/:id/rewrite { body, subject }       지금 작성 칸 글 · 제목을 원문으로 첫 판(표현을 바꾼 글)을 막힌 통신사로 보낸다 · 그 뒤는 서버가 이어 돌린다
+//   [POST] /tests/:id/rewrite/next { choice }          주소 물음의 답(url = 주소도 바꿔서 확인 · rewrite = 주소는 그대로 두고 글을 새로 써서 확인)
+//   [POST] /tests/:id/fix-apply { body, subject }      찾은 글의 바꿈을 지금 작성 칸 글에 넣은 글을 돌려준다(저장 0 · 보내기 0)
+//   사람이 누르는 발송 입구라 demoBlock · 사용자 범위 = /tests/:id 와 같다(사람이 건 검사만 · 자동 검사의 진단은 그 길이 맡는다) ·
+//   자격(스위치 · 부모 · 보낸 글 · 소유 · 닫힘 · 발신번호 권한 · 하루 상한)은 판 CT 한 곳 · 고객 무료(차감 0). 옛 /diagnose(의심 부분을 뺀 글)는 없앴다.
 // ============================================================
-router.post('/tests/:id/diagnose', authenticate, demoBlock, async (req: Request, res: Response) => {
+router.post('/tests/:id/rewrite', authenticate, demoBlock, async (req: Request, res: Response) => {
   try {
-    const companyId = (req as any).user.companyId;
-    const userId = String((req as any).user.userId);
-    const testId = String(req.params.id || '');
-    const carrier = String(req.body?.carrier || '');
-    const variant = Number(req.body?.variant);
-    if (!/^[0-9a-f-]{36}$/i.test(testId) || !['SKT', 'KT', 'LGU'].includes(carrier) || (variant !== 1 && variant !== 2)) {
-      return res.status(400).json({ ok: false, error: '다시 확인할 수 없는 요청이에요.' });
-    }
-    const ownerId = resolveOwnerScope(req);
-    // ★ 배포 2 Codex 1R — 화면 단추는 사람이 건 검사(직접발송 · 체험)만 · 자동 검사(대행 · 여정 · 자동마케팅)의 진단은 그 길(대행 = 진단 대기)이 맡는다(닫힌 진단에 화면이 판을 더하지 않게)
-    const own = await query(
-      `SELECT t.id FROM spam_filter_tests t WHERE t.id = $1 AND t.company_id = $2${ownerId ? ' AND t.user_id = $3' : ''} AND ${spamCustomerTestSql('t')} AND ${notAutoSpamSourceSql('t.source')}`,
-      ownerId ? [testId, companyId, ownerId] : [testId, companyId],
-    );
-    if (own.rows.length === 0) return res.status(404).json({ ok: false, error: '검사를 찾을 수 없어요.' });
-    // ★ 배포 2 Codex 3R — 이 아래는 DB 가 돌려준 정본 id 만 쓴다(대문자 id 로 소유 · 잠금 키 · 대행 소유 대조가 어긋나지 않게)
-    const parentId = String(own.rows[0].id);
-    // ★ 배포 2 Codex 2R — 대행이 이어 본 검사의 진단은 대행이 소유(화면 등록 0 · spam-diag agencyOwnsDiag)
-    if (await agencyOwnsDiag(parentId)) return res.status(409).json({ ok: false, reason: 'off', error: diagReasonText('off') });
-    // 등록 트랜잭션의 부모 진단 잠금 아래에서 한 번 더(그 사이 대행이 진단을 시작 · 닫은 경우 = 등록 0)
-    const r = await registerDiag({ parentTestId: parentId, carrier, variant: variant as 1 | 2, actorUserId: userId, guard: async (run) => !(await agencyOwnsDiag(parentId, run)) });
-    if (r.ok) return res.json({ ok: true, testId: r.testId, reused: r.reused });
+    const parentId = await ownManualSpamTestId((req as any).user.companyId, String(req.params.id || ''), resolveOwnerScope(req));
+    const body = typeof req.body?.body === 'string' ? req.body.body : '';
+    const subject = typeof req.body?.subject === 'string' && req.body.subject.trim() ? req.body.subject : null;
+    if (!parentId || !body.trim() || body.length > 5000) return res.status(parentId ? 400 : 404).json({ ok: false, error: parentId ? diagReasonText(null) : '검사를 찾을 수 없어요.' });
+    const r = await startScreenRewrite({ parentTestId: parentId, actorUserId: String((req as any).user.userId), template: { body, subject } });
+    if (r.ok) return res.json({ ok: true });
     return res.status(409).json({ ok: false, reason: r.reason, error: diagReasonText(r.reason) });
   } catch (err: any) {
     if (isDiagColumnMissing(err)) {
-      return res.status(503).json({ ok: false, ...migrationPendingBody('spam_filter_tests ALTER(diag_of)') });   // db_alter_safety_net · 공용 문장(줄표 0)
+      return res.status(503).json({ ok: false, ...migrationPendingBody('spam_filter_tests ALTER(diag_plan)') });   // db_alter_safety_net · 공용 문장(줄표 0)
     }
-    console.error('[SpamFilter] 확인 판 등록 오류:', err?.message || err);
-    return res.status(500).json({ ok: false, error: '지금은 다시 확인할 수 없어요.' });
+    console.error('[SpamFilter] 닿는 글 찾기 시작 오류:', err?.message || err);
+    return res.status(500).json({ ok: false, error: diagReasonText(null) });
+  }
+});
+
+router.post('/tests/:id/rewrite/next', authenticate, demoBlock, async (req: Request, res: Response) => {
+  try {
+    const parentId = await ownManualSpamTestId((req as any).user.companyId, String(req.params.id || ''), resolveOwnerScope(req));
+    const choice = req.body?.choice;
+    if (!parentId || (choice !== 'url' && choice !== 'rewrite')) return res.status(parentId ? 400 : 404).json({ ok: false, error: parentId ? diagReasonText(null) : '검사를 찾을 수 없어요.' });
+    const r = await nextScreenRewrite({ parentTestId: parentId, actorUserId: String((req as any).user.userId), choice });
+    if (r.ok) return res.json({ ok: true });
+    return res.status(409).json({ ok: false, reason: r.reason, error: diagReasonText(r.reason) });
+  } catch (err: any) {
+    if (isDiagColumnMissing(err)) {
+      return res.status(503).json({ ok: false, ...migrationPendingBody('spam_filter_tests ALTER(diag_plan)') });   // db_alter_safety_net
+    }
+    console.error('[SpamFilter] 닿는 글 찾기 다음 판 오류:', err?.message || err);
+    return res.status(500).json({ ok: false, error: diagReasonText(null) });
+  }
+});
+
+router.post('/tests/:id/fix-apply', authenticate, async (req: Request, res: Response) => {
+  try {
+    const parentId = await ownManualSpamTestId((req as any).user.companyId, String(req.params.id || ''), resolveOwnerScope(req));
+    const body = typeof req.body?.body === 'string' ? req.body.body : '';
+    const subject = typeof req.body?.subject === 'string' ? req.body.subject : null;
+    if (!parentId) return res.status(404).json({ ok: false, error: '검사를 찾을 수 없어요.' });
+    const r = await applyScreenFix({ parentTestId: parentId, current: { body, subject } });
+    if (r.ok) return res.json({ ok: true, body: r.body, subject: r.subject, smsTooLongText: SPAM_FIX_TEXT.smsTooLong });
+    return res.status(409).json({ ok: false, reason: r.reason, error: r.reason === 'changed' ? SPAM_FIX_TEXT.changed : diagReasonText(null) });
+  } catch (err: any) {
+    if (isDiagColumnMissing(err)) {
+      return res.status(503).json({ ok: false, ...migrationPendingBody('spam_filter_tests ALTER(diag_plan)') });   // db_alter_safety_net
+    }
+    console.error('[SpamFilter] 찾은 글 받기 오류:', err?.message || err);
+    return res.status(500).json({ ok: false, error: diagReasonText(null) });
   }
 });
 

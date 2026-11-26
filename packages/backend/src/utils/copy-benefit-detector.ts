@@ -598,17 +598,31 @@ export function replaceInventedBenefits(output: string, ground: string): string 
  *   숫자는 **값으로** 비교한다 — 금액 · 비율은 값 키로 바꾼 뒤 숫자를 뽑는다("1만원" = "10,000원" · "30퍼센트" = "30%" · 전각 = 반각)(Codex 0930 3R).
  *   허용 = 원문의 숫자 · 지금 달의 "N월" 표현 · %변수% 안.
  */
+/** 숫자를 값으로 읽기 위한 꼴(금액 · 비율 = 값 키 · %변수% 안은 뺀다) — 새 숫자 · 사라진 숫자 판정이 같이 쓴다 */
+const valueForm = (t: string, pctRe: RegExp) => toHalfwidth(String(t || ''))
+  .replace(/%[^%\s]{1,20}%/g, ' ')
+  .replace(pctRe, pctPad)
+  .replace(FIGURE_AMOUNT_RE, (m: string) => ` ${figureKey(m)} `);
+const nums = (t: string) => Array.from(t.matchAll(/\d+(?:[.,]\d+)*/g)).map((m) => m[0].replace(/,/g, ''));
+
 export function findNewNumbers(output: string, source: string, now: Date = new Date()): string[] {
-  const valueForm = (t: string, pctRe: RegExp) => toHalfwidth(String(t || ''))
-    .replace(/%[^%\s]{1,20}%/g, ' ')
-    .replace(pctRe, pctPad)
-    .replace(FIGURE_AMOUNT_RE, (m: string) => ` ${figureKey(m)} `);
-  const nums = (t: string) => Array.from(t.matchAll(/\d+(?:[.,]\d+)*/g)).map((m) => m[0].replace(/,/g, ''));
   const allowed = new Set(nums(valueForm(source, PCT_GROUND_RE)));
   // 지금 달은 "9월" 같은 **달 표현일 때만** 허용한다(Codex 0930 1R: 숫자 자체를 허용하면 "선착순 9명" · "9일 한정"도 통과했다).
   const kstMonth = new Date(now.getTime() + 9 * 3600 * 1000).getUTCMonth() + 1;
   const out = valueForm(output, PCT_OUTPUT_RE).replace(new RegExp(`(?<![\\d.,])${kstMonth}\\s*월`, 'g'), ' ');
   return Array.from(new Set(nums(out).filter((n) => !allowed.has(n))));
+}
+
+/**
+ * ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §6-2 ⑤) — **다시 쓴 문안에서 원문의 숫자가 사라졌는가.**
+ *   값 읽기는 findNewNumbers 와 같은 꼴(「35%」 = 「35퍼센트」 · 「1만원」 = 「10,000원」). 다른 점 둘:
+ *   이번 달 「N월」 예외가 없다(「11월 회원 한정」에서 「11월」을 지우면 조건이 사라진 것) · 같은 숫자가 여러 번이면 개수까지 본다.
+ *   돌려줌 = 줄어든 값 목록(없으면 []). 늘어난 숫자는 findNewNumbers 가 본다.
+ */
+export function findLostNumbers(original: string, refined: string): string[] {
+  const count = (list: string[]) => list.reduce((m, n) => m.set(n, (m.get(n) || 0) + 1), new Map<string, number>());
+  const after = count(nums(valueForm(refined, PCT_OUTPUT_RE)));
+  return [...count(nums(valueForm(original, PCT_GROUND_RE)))].filter(([n, c]) => (after.get(n) || 0) < c).map(([n]) => n);
 }
 
 /*

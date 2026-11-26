@@ -92,6 +92,7 @@ const EVENT_LABEL: Record<string, string> = {
   // ★ 2026-11-24 막힌 부분 짚어 보기(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §8-2 M4 · 서버 agency-send-worker 와 같은 커밋 · 문장은 아래가 붙인다)
   spam_hint: '막혔을 수 있는 부분을 짚어 두었습니다',
   spam_result_mail: '검사 결과를 메일로 알렸습니다',
+  spam_fixed: '스팸 검사에 닿도록 글을 바꿨습니다',   // ★ 2026-11-26 C164 찾은 글로 통과(승인 문자에 바꾼 곳)
   // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」(설계서 docs/2026-11-24-agency-spam-override-design.md · 서버 agency-send-change · worker 와 같은 커밋)
   spam_override: '스팸 검사 결과와 관계없이 그대로 보내기로 했습니다',
   spam_override_final: '발송 직전 검사에 걸렸지만 담당자 선택대로 진행합니다',
@@ -148,6 +149,7 @@ export function describeAgencyEvent(e: AgencySendEvent): string {
     if (blocked.length > 0) return `${EVENT_LABEL[e.kind]} (${blocked.join(', ')} 막힘)`;
   }
   if (e.kind === 'spam_hint') {
+    if (e.payload?.branch === 'found') return '막힌 통신사에 닿는 글을 찾았습니다';
     if (typeof e.payload?.sentence === 'string' && e.payload.sentence) return e.payload.sentence;
     const sentTo = Array.isArray(e.payload?.sentTo) ? (e.payload.sentTo as unknown[]).map((c) => carrierLabel(String(c))) : [];
     if (sentTo.length > 0) return `막힌 부분을 확인하려고 고친 글을 ${sentTo.join(', ')}로 다시 보냈습니다`;

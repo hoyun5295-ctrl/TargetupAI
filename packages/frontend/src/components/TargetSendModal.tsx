@@ -373,13 +373,13 @@ export default function TargetSendModal({
 
   // ====== ★ 2026-09-29 R112 보내기 전 점검 = 직접발송과 같은 공용 훅(스팸 검사 · 맞춤법 검사 · 발송 전 경고) ======
   const precheck = useSendPrecheck({
-    message: targetMessage, setMessage: setTargetMessage, subject: targetSubject, msgType: targetMsgType,
+    message: targetMessage, setMessage: setTargetMessage, subject: targetSubject, setSubject: setTargetSubject, msgType: targetMsgType,
     callback: selectedCallback, useIndividualCallback, adTextEnabled, optOutNumber,
     recipientsKey: `${extraction?.extractionId || ''}:${count}`,
     hasRecipients: count > 0 && !extractionExpired,
     // 스팸 검사에 싣는 글 = 첫 수신자 값으로 치환(옛 스팸필터 버튼과 같은 계산)
-    buildSpamTestContent: () => {
-      const msg = targetMessage || '';
+    buildSpamTestContent: (body?: string) => {
+      const msg = body ?? (targetMessage || '');
       const firstR = sample[0];
       const smsRaw = buildAdMessageFront(msg, 'SMS', adTextEnabled, optOutNumber);
       const lmsRaw = buildAdMessageFront(msg, 'LMS', adTextEnabled, optOutNumber);

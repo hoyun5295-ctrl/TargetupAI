@@ -245,6 +245,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   if (!requestId) return null;
 
   const refined = !!req && req.currentContent !== req.originalContent;
+  // ★ 2026-11-26 C164 — 글 속 주소가 처음 접수한 글과 같은가(스팸 검사에서 같은 곳으로 가는 짧은 주소로 바꿨으면 다르다)
+  const urlsOf = (t: string) => (String(t || '').match(/https?:\/\/[^\s<>"]+/g) || []).join('\n');
+  const linkKept = !!req && urlsOf(req.currentContent) === urlsOf(req.originalContent);
   // ★2026-09-13(3) 예약이 한 번이라도 만들어진 접수는 서버가 문안·시각 변경을 막는다(시도 키 보존 · 두 벌 발송 차단).
   //   누르고 거절당하지 않게 버튼을 처음부터 보이지 않는다. 판정 원본은 서버다(이 값이 비어 있어도 서버가 막는다).
   // ★ 2026-10-19 보낼 시각 15분 전 잠금 — 승인 · 취소 · 시각 변경 · 문안 수정 버튼을 내지 않는다(서버도 같은 판정)
@@ -461,7 +464,9 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                   <div className="mt-1.5 rounded-lg border border-neutral-200 bg-white p-3.5 text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed">
                     {req.originalContent}
                   </div>
-                  <p className={CUI_HINT}>스팸 검사에 걸려 표현을 다듬었습니다. 날짜와 번호, 링크는 그대로입니다.</p>
+                  <p className={CUI_HINT}>{linkKept
+                    ? '스팸 검사에 걸려 표현을 다듬었습니다. 날짜와 번호, 링크는 그대로입니다.'
+                    : '스팸 검사에 걸려 표현을 다듬었습니다. 날짜와 번호는 그대로이고, 링크는 같은 곳으로 가는 한줄로 짧은 주소로 바꿨습니다.'}</p>
                 </div>
               )}
 
