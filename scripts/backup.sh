@@ -32,6 +32,12 @@ MIN_MYSQL_BYTES=10000      # 10KB 미만 = 빈/실패 덤프로 간주
 ### ───────────────────────────────────────────────────────────────────────
 
 [[ -f "${BACKUP_DIR}/.env" ]] && { set -a; source "${BACKUP_DIR}/.env"; set +a; }
+# 암호문 판정 = `file` 이름표. 같은 키 · 같은 암호문 꼴이라도 첫 패킷(세션 키) 길이 바이트에 따라 이름이 둘로 갈린다
+#   85 02 0c 03 … → "PGP RSA encrypted session key - keyid …" / 85 02 0b 03 … → "GPG encrypted data"
+#   (2026-11-27 03:00 MySQL 산출물이 뒤의 꼴이라 옛 문구 "PGP.*encrypted" 가 암호문을 실패로 판정 · ROOT-LEDGER R110)
+#   gzip · 평문은 어느 쪽에도 안 걸린다. 문구는 이 함수 안 글자로만 둔다(변수로 두면 .env 가 덮을 수 있다) · .env 를 읽은 뒤 정의
+#   시험 = scripts/tests/backup-pgp-label.test.sh(이 줄을 그대로 실행해 실제 file 로 판정)
+is_pgp_ciphertext() { file -b "$1" | grep -qiE 'PGP.*encrypted|GPG encrypted data'; }
 : "${MYSQL_BACKUP_PASS:?MYSQL_BACKUP_PASS 미설정 (.env 확인)}"
 
 TS=$(date +%Y%m%d_%H%M%S)
@@ -70,8 +76,8 @@ log "MySQL 완료: $(numfmt --to=iec "${MY_SZ}" 2>/dev/null || echo "${MY_SZ}B")
 
 # 3) 형식 검증 — 서버엔 개인키가 없어 복호화 불가. PGP 암호문 구조만 확인
 #    (완전 무결성 = 복원 테스트에서 개인키로 복호+gunzip -t 검증)
-file -b "${PG_OUT}" | grep -qi "PGP.*encrypted" || { alert "PG 산출물이 PGP 암호문 아님(암호화 실패 의심)"; exit 1; }
-file -b "${MY_OUT}" | grep -qi "PGP.*encrypted" || { alert "MySQL 산출물이 PGP 암호문 아님(암호화 실패 의심)"; exit 1; }
+is_pgp_ciphertext "${PG_OUT}" || { alert "PG 산출물이 PGP 암호문 아님(암호화 실패 의심)"; exit 1; }
+is_pgp_ciphertext "${MY_OUT}" || { alert "MySQL 산출물이 PGP 암호문 아님(암호화 실패 의심)"; exit 1; }
 
 # 4) 오프사이트 전송 (암호문 → 59 안전)
 log "59 오프사이트 전송..."
