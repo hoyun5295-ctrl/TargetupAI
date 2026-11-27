@@ -25,6 +25,7 @@ import { sendSystemAlert } from './system-alert';
 // ★ 2026-09-12 검수상태 정규화는 5분 폴링과 **같은 함수**를 쓴다 — 두 경로가 다른 어휘를 쓰면 갈린다
 import { normalizeImcTemplateStatus } from './alimtalk-jobs';
 import { isImcStatusColumnKnownMissing, isImcStatusColumnMissingError, markImcStatusColumnMissing } from './kakao-template-guard';
+import { isImcInternalTemplateKey } from './kakao-template-guard-core';
 
 /** IMC 검수 진행 중 상태 — 이 상태의 행만 목록 안전망이 건드린다(종결 행 뒤집기 금지) */
 const IMC_IN_PROGRESS_STATUSES = new Set(['REQUESTED', 'REVIEWING', 'REG', 'REQ', 'REV', 'KREQ']);
@@ -416,7 +417,7 @@ export async function syncSingleTemplateCode(
 ): Promise<{ updated: boolean; oldCode?: string; newCode?: string }> {
   const imcCode: string | null = imcResponseData?.templateCode || null;
   if (!imcCode) return { updated: false };
-  if (imcCode.startsWith('Tm')) return { updated: false }; // ★ 버그5: IMC 응답도 Tm* 키(Tmp/Tmo/Tmq)면 진짜 카카오 코드 아님 — 저장 X (실코드=B_)
+  if (isImcInternalTemplateKey(imcCode)) return { updated: false }; // ★ 버그5: IMC 응답도 Tm* 키(Tmp/Tmo/Tmq)면 진짜 카카오 코드 아님 — 저장 X (실코드=B_)
 
   const cur = await query(
     `SELECT template_code FROM kakao_templates WHERE id = $1::uuid LIMIT 1`,
@@ -425,7 +426,7 @@ export async function syncSingleTemplateCode(
   if (cur.rows.length === 0) return { updated: false };
   const oldCode: string = cur.rows[0].template_code;
   if (oldCode === imcCode) return { updated: false };
-  if (!oldCode.startsWith('Tm')) return { updated: false }; // ★ 버그5: 로컬 코드가 Tm* 키가 아니면 이미 실코드(B_) = skip (Tmq도 backfill 대상)
+  if (!isImcInternalTemplateKey(oldCode)) return { updated: false }; // ★ 버그5: 로컬 코드가 Tm* 키가 아니면 이미 실코드(B_) = skip (Tmq도 backfill 대상)
 
   try {
     await query(

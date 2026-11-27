@@ -11,6 +11,15 @@ export interface KakaoTemplateSendableDecision {
   code?: 'TEMPLATE_INACTIVE' | 'TEMPLATE_STOPPED' | 'TEMPLATE_DELETED';
 }
 
+/**
+ * 진짜 카카오 템플릿 코드가 아닌 IMC 내부 키(Tmp · Tmo · Tmq 등 Tm 으로 시작)인가 — 판정 한 곳(★2026-11-27 비토 템플릿 자동 연결).
+ *   검수 진입 뒤 IMC 가 진짜 코드(B_…)를 주기 전까지 template_code 에 내부 키가 남는다(kakao-template-sync.ts 머리주석).
+ *   고객 행은 진짜 코드로 오므로 내부 키는 발송 연결 대상이 아니다. SQL 쪽 같은 판정(LIKE 'Tm%')은 kakao-template-sync.ts 스캔 한 곳.
+ */
+export function isImcInternalTemplateKey(code: string): boolean {
+  return code.startsWith('Tm');
+}
+
 /** IMC 템플릿 활성상태(A/R/S/D) 기반 발송 가능 판정 — 순수 함수 */
 export function decideKakaoTemplateSendable(
   imcTemplateStatus: string | null | undefined

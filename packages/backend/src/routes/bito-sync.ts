@@ -8,6 +8,7 @@
 
 import { Router, Request, Response } from 'express';
 import { checkBitoSyncCaller, listBitoSenderCompanies, parseBitoSyncResults, saveBitoSyncResults } from '../utils/bito-sender-sync';
+import { listBitoTemplateCompanies, parseBitoTemplateResults, reportBitoTemplateResults } from '../utils/bito-template-sync';
 
 const router = Router();
 
@@ -47,6 +48,26 @@ router.post('/sender-numbers/results', async (req: Request, res: Response) => {
     console.error('[bito-sync] 결과 저장 실패:', msg);
     res.status(500).json({ error: 'save failed' });
   }
+});
+
+// GET /api/bito-sync/kakao-templates — V 발송ID 회사마다 승인 알림톡 템플릿(★2026-11-27 · 설계서 docs/2026-11-27-bito-template-auto-link-design.md §3-1)
+router.get('/kakao-templates', async (req: Request, res: Response) => {
+  if (denied(req, res)) return;
+  try {
+    res.json({ companies: await listBitoTemplateCompanies() });
+  } catch (err: any) {
+    console.error('[bito-sync] 템플릿 목록 실패:', err?.message || err);
+    res.status(500).json({ error: 'list failed' });
+  }
+});
+
+// POST /api/bito-sync/kakao-templates/results — 비토 결과(저장 0 · 응답 뒤 경보)
+router.post('/kakao-templates/results', (req: Request, res: Response) => {
+  if (denied(req, res)) return;
+  const parsed = parseBitoTemplateResults(req.body);
+  if (!parsed) return res.status(400).json({ error: 'bad body' });
+  res.json({ received: parsed.accounts.length + parsed.templates.length });
+  reportBitoTemplateResults(parsed).catch((err: any) => console.error('[bito-sync] 템플릿 결과 경보 실패:', err?.message || err));
 });
 
 export default router;
