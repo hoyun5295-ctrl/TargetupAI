@@ -124,7 +124,7 @@ describe('작업 화면 — 옛 창 기능 이사 · 저장 규칙', () => {
 describe('큰 휴대폰 한 벌', () => {
   const phone = FE('components/journey/PhoneComposer.tsx');
   it('바이트 = (광고) · 무료수신거부 합성 그대로 · 제목 상한 = 공용 40 · 받는 모습 = 서버 미리보기', () => {
-    expect(phone).toContain('buildAdMessageFront(body || \'\', msgType, isAd, opt080Number)');
+    expect(phone).toContain('adLockedPartsFront(body || \'\', msgType, isAd, opt080Number)');   // ★ 2026-11-27 C167-A 공용 잠금 줄 · 합성
     expect(phone).toContain('calculateSmsBytes(composed)');
     expect(phone).toContain('LMS_SUBJECT_MAX_CHARS');
     expect(phone).toContain("fetch('/api/ai/operator/journeys/preview-message'");

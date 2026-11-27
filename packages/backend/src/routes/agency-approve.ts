@@ -26,15 +26,15 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database';
 import { loadAgencyCallbackKinds } from '../utils/agency-send-intake';
 import {
-  AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, linkCancelReason,
+  AGENCY_APPROVE_TOKEN_HEADER, agencyManagerPhones, verifyAgencyApproveToken, linkCancelReason, buildShortAgencyApproveUrl,
 } from '../utils/agency-send-link';
 import { approveAgencyRequestTx } from '../utils/agency-send-approve';
 import { findAgencyBlanks, blankLabel } from '../utils/agency-send-blanks';   // ★ 2026-11-25 빈 자리 판정 CT
 import { loadAgencyEmptyVarRows } from '../utils/agency-send-intake';
 import { notifyManager, sendAgencyApprovalRequest, isSpamOverriddenVersion } from '../utils/agency-send-worker';
 import { buildLinkActionNotify, buildLinkApprovedNotify, formatWhen } from '../utils/agency-send-notify';
-import { agencyActions } from '../utils/agency-send-actions';
-import { editAgencyContentTx, rescheduleAgencyRequestTx } from '../utils/agency-send-change';
+import { agencyActions, spamOverrideOf } from '../utils/agency-send-actions';
+import { editAgencyContentTx, rescheduleAgencyRequestTx, overrideSpamBlockTx } from '../utils/agency-send-change';
 import { cancelAgencyRequestTx } from '../utils/agency-send-cancel';
 import { logEvent } from '../utils/agency-send-intake';
 import { recordAuditLog } from '../utils/audit-log';
@@ -85,6 +85,8 @@ function toApprovalView(row: any) {
     blanks: findAgencyBlanks(row.current_content).map((b) => ({ ...b, label: blankLabel(b) })),
     // ★2026-10-18 이 링크로 할 수 있는 조작 · 승인 마감(서버 판정 한 벌)
     actions: agencyActions('link', row),
+    // ★ 2026-11-27 C167-C(R113) — 처음 접수한 문안 그대로 승인 = 판정 · 표시 재료(shown 은 ok 와 따로 · 처음 문안 글은 문안이라 이 경로가 내보내는 것의 범위 안)
+    choice: (() => { const o = spamOverrideOf(row); return { ok: o.ok, reason: o.reason, retime: o.retime, shown: o.shown }; })(),
     // ★ 2026-11-24 발송일 당일 검사를 이미 마쳤는가(마지막 검사 중 · 예약 준비 중을 화면이 가른다 · Codex 구현 4R #2)
     finalTested: !!row.final_test_at,
   };
@@ -183,6 +185,63 @@ router.post('/approve', async (req: Request, res: Response) => {
   } catch (err: any) {
     if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
     console.error('[agency-approve] 승인 실패:', err);
+    return res.status(500).json({ success: false, error: '승인하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
+  }
+});
+
+// ★ 2026-11-27 C167-C(R113 · 설계서 docs/2026-11-27-c167-agency-spam-choice-design.md §5-3 · Harold 1127 「추천대로」)
+//   POST /api/agency-approve/spam-override — 「{처음 접수한 문안} 그대로 승인」(글 교체 + 승인 한 트랜잭션 · 로그인 화면과 같은 CT)
+//   가드 = agencyActions('link').spamOverride(판정 한 벌) · approve: true 필수 · 뒤처리 = 링크 승인과 같은 담당자 전원 통보 · 감사 원장(이력 = 트랜잭션 안 사건).
+router.post('/spam-override', async (req: Request, res: Response) => {
+  try {
+    const resolved = await resolveToken(req);
+    if (!resolved) return res.status(404).json({ success: false, error: '유효하지 않거나 만료된 주소입니다.' });
+    if (req.body?.approve !== true) return res.status(409).json({ success: false, error: '화면을 새로 고친 뒤 다시 골라 주세요.', code: 'REFRESH_REQUIRED' });
+    const allowed = agencyActions('link', resolved.row).spamOverride;
+    if (!allowed.ok) {
+      return res.status(409).json({ success: false, error: allowed.reason, code: 'SPAM_OVERRIDE_UNAVAILABLE', request: { ...toApprovalView(resolved.row), ...(await loadLinkExtras(resolved.row)) } });
+    }
+    const shownLabel = spamOverrideOf(resolved.row).shown?.label || '처음 접수한 문안';   // 승인 완료 문자의 「무엇으로」(판정과 같은 이름)
+    const out = await overrideSpamBlockTx({
+      requestId: String(resolved.row.id), companyId: null, revision: req.body?.revision, blankAck: req.body?.blankAck === true,
+      actor: { via: 'link', phone: resolved.phone, contentVersion: resolved.contentVersion, ip: String(req.ip || ''), ua: String(req.headers['user-agent'] || '') },
+      req: { ip: req.ip, headers: req.headers },
+    });
+    if (!out.ok) {
+      const current = 'current' in out && out.current ? { request: { ...toApprovalView(out.current), ...(await loadLinkExtras(out.current)) } } : {};
+      return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}), ...current });
+    }
+    console.log(`[agency-approve] 링크 처음 문안 그대로 승인 request=${resolved.row.id} phone=${resolved.phone}`);
+    const approved = out.row;
+    // 링크 승인과 같은 뒤처리 — 담당자 전원 통보(발각 경로 · 영수증) · 감사 원장
+    //   ★ Codex 구현 1R #1 — 글 버전이 올라 옛 주소가 닫히므로 담당자마다 새 버전 주소를 싣는다(보내기 전 취소 길 · 취소 잠금은 그 화면의 서버 판정 그대로)
+    const doneCtx = {
+      label: String(approved.file_name || approved.current_content || ''),
+      whenText: approved.requested_at ? formatWhen(new Date(approved.requested_at)) : undefined,
+      approvedTail: resolved.phone.slice(-4),
+      submittedLabel: shownLabel,
+    };
+    void (async () => {
+      const phones = agencyManagerPhones(approved);
+      const perPhoneTexts: Array<{ phone: string; text: string }> = [];
+      for (const phone of phones) {
+        const url = await buildShortAgencyApproveUrl(String(approved.company_id), String(approved.id), phone, Number(approved.content_version), new Date(approved.requested_at)).catch(() => '');
+        perPhoneTexts.push({ phone, text: buildLinkApprovedNotify({ ...doneCtx, ...(url ? { approveUrl: url } : {}) }) });
+      }
+      await notifyManager({
+        companyId: String(approved.company_id), requestId: String(approved.id), phones, callback: String(approved.callback_number || ''),
+        title: '[대행발송] 승인 완료', text: buildLinkApprovedNotify(doneCtx), perPhoneTexts,
+      });
+    })().catch(() => {});
+    void recordAuditLog({
+      action: 'agency_link_spam_override', targetType: 'agency_send_request', targetId: String(approved.id),
+      details: { phone: resolved.phone, label: String(approved.file_name || '').slice(0, 40), contentVersion: resolved.contentVersion },
+      req,
+    });
+    return res.json({ success: true, request: { ...toApprovalView(approved), ...(await loadLinkExtras(approved)) } });
+  } catch (err: any) {
+    if (isMissingRelation(err)) return res.status(503).json({ success: false, error: '잠시 후 다시 시도해 주세요.' });
+    console.error('[agency-approve] 처음 문안 그대로 승인 실패:', err);
     return res.status(500).json({ success: false, error: '승인하지 못했습니다. 잠시 후 다시 시도해 주세요.' });
   }
 });

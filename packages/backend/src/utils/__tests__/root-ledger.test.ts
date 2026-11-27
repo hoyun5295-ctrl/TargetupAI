@@ -5229,3 +5229,95 @@ describe('R108 받는 값을 칸에 넣는 자리는 칸 폭을 본다 — 번�
     }
   });
 });
+
+describe('R112 접수 이미지를 건에 나누는 판정은 저장이 요구하지 않는 짝 제약을 더하지 않는다 — 같은 첨부 = 여러 건(C167-B)', () => {
+  it('1 같은 첨부를 다른 건 둘이 적으면 받는다 · 두 건이 같은 첨부 순번을 가진다 · 같은 건 안 두 번만 반려', async () => {
+    const { matchAgencyUnitImages } = await import('../agency-send-workbook');
+    expect(matchAgencyUnitImages([{ label: '내용13', names: ['①12-RD4'] }, { label: '내용14', names: ['①12-RD4'] }], ['12-RD4.jpg'], 3))
+      .toEqual({ ok: true, assign: [[0], [0]] });
+    expect(matchAgencyUnitImages([{ label: '내용13', names: ['①12-RD4', '②12-RD4'] }], ['12-RD4.jpg'], 3).ok).toBe(false);
+  });
+
+  it('2 호출부는 건마다 새 파일로 저장한다(같은 첨부를 공유해도 건의 이미지 경로가 겹치지 않는다)', () => {
+    const w = stripComments(be('utils/agency-send-mail-worker.ts'));
+    expect(w).toMatch(/for \(const ai of unitImageAssign\[ui\]\) \{\s*const saved = saveMmsImageBuffer\(unitAcct\.companyId, preparedImages\[ai\]\.buffer\);/);
+  });
+});
+
+describe('R111 받는 분 화면은 나가는 글을 만드는 공용 합성(formatDate · 서버 messageUtils 거울)을 지난다 — 화면이 (광고) · 수신거부 줄을 따로 만들지 않는다(C167-A)', () => {
+  // 꼬리 = 「무료(수신)거부」 바로 뒤 번호 끼움 · 머리 끼움 = 「(광고)」 바로 뒤 본문 끼움 · 머리 두 꼴 = SMS · LMS 머리 글자 둘을 한 줄에서 고름
+  const FOOT = /무료\s*(수신)?\s*거부\s*(\$\{|['"`]\s*\+)/;
+  const HEAD = /\(광고\)\s?(\n)?\$\{/;
+  const PAIR = /['"`]\(광고\)['"`][\s\S]*['"`]\(광고\) ['"`]|['"`]\(광고\) ['"`][\s\S]*['"`]\(광고\)['"`]/;
+  const OWNER = 'utils/formatDate.ts';
+
+  it('1 화면 소스(시험 밖)에 인라인 머리 · 꼬리 합성 0줄 · 주인 = formatDate 한 곳', () => {
+    const hits: string[] = [];
+    for (const f of sourceFiles(FE, /\.(ts|tsx)$/)) {
+      if (f === OWNER) continue;
+      read(join(FE, f)).split('\n').forEach((l, i) => {
+        const code = l.replace(/^\s*(\/\/|\*).*$/, '');
+        if (FOOT.test(code) || HEAD.test(code) || PAIR.test(code)) hits.push(`${f}:${i + 1}`);
+      });
+    }
+    expect(hits).toEqual([]);
+    const owner = read(join(FE, OWNER));
+    expect(owner).toMatch(/export function adPrefixFront\(/);
+    expect(owner).toMatch(/export function adFooterFront\(/);
+    expect(owner).toMatch(/const adPrefix = adPrefixFront\(msgType\);/);   // buildAdMessageFront 가 조각 함수를 지난다
+  });
+
+  it('2 한줄로 묻기 받는 분 화면 · 바이트 = 실제 080 · 보낼 본문으로 합성(가짜 번호 0)', () => {
+    const page = read(join(FE, 'pages/AiAskPage.tsx'));
+    expect(page).not.toContain("'0800000000'");
+    expect(page).toContain('buildAdMessageFront(askSendBody(pickedBody), sendChannel, true, opt080.value)');
+  });
+});
+
+describe('R113 사람이 낸 글을 시스템이 바꿔 승인을 받을 때 바꾸기 전 글로 승인할 자리가 그 갈래마다 있다 — 판정 한 곳 · 승인 대기 · 재승인 부름마다 표식(C167-C)', () => {
+  /** setStatus( 부름 본문(괄호 짝) 목록 — 정의 줄은 뺀다 */
+  const setStatusCalls = (src: string): string[] => {
+    const out: string[] = [];
+    let at = src.indexOf('setStatus(');
+    while (at >= 0) {
+      if (!src.slice(Math.max(0, at - 15), at).includes('function ')) {
+        let depth = 0; let i = at + 'setStatus'.length;
+        for (; i < src.length; i++) { const c = src[i]; if (c === '(') depth++; else if (c === ')') { depth--; if (depth === 0) break; } }
+        out.push(src.slice(at, i + 1));
+      }
+      at = src.indexOf('setStatus(', at + 1);
+    }
+    return out;
+  };
+
+  it('1 워커가 승인 대기 · 재승인으로 바꾸는 부름마다 spamOverridable 키(고친 글이면 표식 · 아니면 null)', () => {
+    const w = stripComments(be('utils/agency-send-worker.ts'));
+    const toApproval = setStatusCalls(w).filter((c) => /^setStatus\(\s*[\w.]+\s*,\s*'(awaiting_approval|reapproval)'/.test(c));
+    expect(toApproval.length).toBeGreaterThanOrEqual(3);
+    for (const c of toApproval) expect(c, c.slice(0, 80)).toMatch(/spamOverridable:/);
+    expect(w).toContain("rewriteChoiceMarker(savedVersion, String(row.original_content || ''), finalContent, firstTest)");
+    expect(w).toContain("rewriteChoiceMarker(version, String(target.current_content || ''), finalContent, firstTest)");
+  });
+
+  it('2 고르는 판정 = spamOverrideOf 한 곳 · 로그인 · 링크 두 입구가 같은 CT(overrideSpamBlockTx · 한 트랜잭션 승인)', async () => {
+    const { spamOverrideOf } = await import('../agency-send-actions');
+    const mk = (status: string, current: string) => ({ status, content_version: 2, revision: 1, campaign_id: null, original_content: '처음', current_content: current,
+      requested_at: new Date(Date.now() + 3 * 86_400_000), approval_requested_at: new Date(),
+      last_test_result: { spamOverridable: { version: 2, submitted: '처음', checkedAt: new Date().toISOString(), submittedTested: true } } });
+    for (const s of ['test_failed', 'awaiting_approval', 'reapproval']) expect(spamOverrideOf(mk(s, '고친 글')).ok, s).toBe(true);
+    expect(spamOverrideOf(mk('awaiting_approval', '처음')).ok).toBe(false);
+    const screen = stripComments(be('routes/agency-send.ts'));
+    const link = stripComments(be('routes/agency-approve.ts'));
+    expect(screen.slice(screen.indexOf("router.post('/:id/spam-override'"))).toMatch(/overrideSpamBlockTx\(\{[\s\S]*?via: 'screen'/);
+    expect(link.slice(link.indexOf("router.post('/spam-override'"))).toMatch(/overrideSpamBlockTx\(\{[\s\S]*?via: 'link'/);
+    const change = stripComments(be('utils/agency-send-change.ts'));
+    const fn = change.slice(change.indexOf('export async function overrideSpamBlockTx('));
+    expect(fn).toContain("status = 'approved'");
+    expect(fn).toContain("status IN ('test_failed','awaiting_approval','reapproval')");
+  });
+
+  it('3 화면 두 곳(링크 · 로그인)이 같은 표시 함수(agencyChoiceView)를 쓴다', () => {
+    expect(read(join(FE, 'pages/AgencyApprovePage.tsx'))).toContain('agencyChoiceView(r.status, r.choice, r.content)');
+    expect(read(join(FE, 'components/agency/AgencySendDetail.tsx'))).toContain('agencyChoiceView(req.status, req.spamOverride, req.currentContent)');
+  });
+});

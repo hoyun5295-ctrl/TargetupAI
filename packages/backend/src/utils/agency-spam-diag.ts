@@ -23,6 +23,7 @@ import { customShortLinkUrl } from './dm/dm-custom-short-link';
 import { sampleRendererOf } from './agency-send-preview';
 import { SPAM_DIAG_SOURCE } from './spam-trial';
 import { getCarrierLabel } from './sms-result-map';
+import { spamOverrideOf } from './agency-send-actions';   // ★ 2026-11-27 C167-C 결과 메일의 「그대로 승인」 줄 = 화면 · 링크와 같은 판정
 
 type SqlRun = (sql: string, params?: any[]) => Promise<{ rows: any[]; rowCount?: number | null }>;
 const LOG = '[agency-send][spam-diag]';
@@ -253,6 +254,15 @@ export function spamOverrideMarker(version: number, submitted: string, firstTest
   return { version, submitted, checkedAt: (ok ? at! : new Date()).toISOString(), submittedTested: ok };
 }
 
+/**
+ * ★ 2026-11-27 C167-C(R113 · 설계서 docs/2026-11-27-c167-agency-spam-choice-design.md §5-1) — 고친 글로 통과해 승인을 물을 때의 표식.
+ *   통과한 글(finalContent)이 바꾸기 전 글(submitted)과 다르면 = 바꾸기 전 글이 막혀 한줄로가 고친 것 → 그 글로 승인할 길을 남긴다(spamOverrideMarker 그대로) · 같으면 null(고를 것 없음 = 지움).
+ *   승인 대기 · 재승인으로 바꾸는 모든 부름이 이 값을 넘긴다(계약 시험 R113).
+ */
+export function rewriteChoiceMarker(version: number, submitted: string, finalContent: string, firstTest: { content: string; createdAt?: string | Date | null } | null | undefined) {
+  return finalContent !== submitted ? spamOverrideMarker(version, submitted, firstTest) : null;
+}
+
 /** 갈래를 정한 뒤(통과 · 찾음 · 4c) — 진단 대기를 지우고 진단을 닫는다(한 트랜잭션 · 접수 행 → 진단 잠금 순 · 찾음이면 lastTestResult 에 찾은 글이 함께 실린다) · 소유권을 잃었으면 false */
 export async function releaseAgencyDiag(row: any, token: string, hold: DiagHold, lastTestResult: string | null): Promise<boolean> {
   const client = await pool.connect();
@@ -321,6 +331,9 @@ export async function buildSpamResultMail(row: any): Promise<{ subject: string; 
     ? (Array.isArray(hintEv.arrived) ? (hintEv.arrived as unknown[]).map(String).filter((c) => !fixed4a.includes(c)) : [])
     : [...new Set(cr.filter((c) => c.result === 'pass').map((c) => String(c.carrier)))].filter((c) => !blocked.includes(c));
   const templateText = String(row.current_content || '');
+  // ★ 2026-11-27 C167-C(R113 · 서수란 접수 재오픈 3) — 「보내 주신 문안」 = 고객이 낸 글(original_content) · 한줄로가 고친 글은 따로 이름을 달아 보인다(옛: 고친 글을 「보내 주신 글」로 보였다)
+  const submittedText = String(row.original_content ?? templateText);
+  const rewritten = templateText !== submittedText;
   const hint = hintEv?.parentTestId ? await buildSpamBlockHints(String(hintEv.parentTestId), { templateText }).catch(() => null) : null;
   const names = blocked.map(getCarrierLabel).join(', ');
   const status = [...blocked.map((c) => `${getCarrierLabel(c)} 막힘`), ...arrived.map((c) => `${getCarrierLabel(c)} 도착`)].join('   ');
@@ -337,10 +350,14 @@ export async function buildSpamResultMail(row: any): Promise<{ subject: string; 
     '확인한 내용',
     line || '통신사는 막은 이유를 알려 주지 않아 고칠 곳을 좁히지 못했습니다.',
     '',
-    `보내 주신 글${hint ? ' (▶ 표시가 확인한 부분입니다)' : ''}`,
-    ...markedTemplateLines(templateText, hint),
+    // ▶ 표시는 확인 근거 글(= 지금 버전의 글 = current_content)에만 그린다
+    `보내 주신 문안${hint && !rewritten ? ' (▶ 표시가 확인한 부분입니다)' : ''}`,
+    ...(rewritten ? submittedText.split('\n') : markedTemplateLines(templateText, hint)),
+    ...(rewritten ? ['', `한줄로가 고쳐 본 문안 (이 문안도 스팸 검사에 걸렸습니다${hint ? ' · ▶ 표시가 확인한 부분입니다' : ''})`, ...markedTemplateLines(templateText, hint)] : []),
     '',
-    '통신사는 막은 이유를 알려 주지 않습니다. 위 내용은 한줄로가 기록과 다시 보낸 결과로 좁힌 것입니다.',
+    '통신사는 막은 이유를 알려 주지 않습니다. 「확인한 내용」은 한줄로가 다시 보내 본 결과로 좁힌 것입니다.',
+    // 고를 수 있을 때만(판정 = 화면 · 링크와 같은 spamOverrideOf)
+    ...(spamOverrideOf(row).ok ? [`담당자 휴대폰으로 보낸 문자의 주소에서 로그인 없이 ${spamOverrideOf(row).shown?.label || '보내 주신 문안'} 그대로 승인할 수 있습니다.`] : []),
     `로그인하여 고치기: ${base}/agency-send`,
   ].join('\n');
   return { subject: `[한줄로] 문안이 ${names} 스팸 검사에 걸렸습니다`, text };

@@ -1090,6 +1090,41 @@ const AD_REJECT_FOOTER_RE = /무료\s*수신\s*거부|무료\s*거부/;
  * @param optOutNumber 080 수신거부번호
  * @returns (광고)+본문+무료거부 조합 메시지. 광고 아니면 원본 반환.
  */
+/**
+ * ★ 2026-11-27 C167-A(R111 · 설계서 docs/2026-11-27-c167-ad-preview-ct-design.md) — 광고 머리 글(서버 buildAdMessage 의 adPrefix 거울).
+ *   SMS = 「(광고)」 · LMS · MMS = 「(광고) 」. 잠긴 머리를 따로 그리는 화면도 이 함수만 쓴다(인라인 0 = 뿌리 시험 R111).
+ */
+export function adPrefixFront(msgType: string): string {
+  return msgType === 'SMS' ? '(광고)' : '(광고) ';
+}
+
+/**
+ * ★ 2026-11-27 C167-A(R111) — 광고 꼬리 글(서버 adRejectFooterText 거울 · 번호 = 저장값 그대로 · SMS 는 숫자만 · 번호 없음 = 낱말만).
+ *   잠긴 꼬리를 따로 그리는 화면도 이 함수만 쓴다(하이픈을 넣어 그리면 나가는 글과 달라진다).
+ */
+export function adFooterFront(msgType: string, optOutNumber: string): string {
+  const isSms = msgType === 'SMS';
+  return optOutNumber
+    ? (isSms ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`)
+    : (isSms ? '무료거부' : '무료수신거부');
+}
+
+/**
+ * ★ 2026-11-27 C167-A(R111 · S3) — 서버 messageUtils stripAdPartsDeep 거울(DM 광고 발송이 문안 속 (광고) · 수신거부 문구를 걷은 뒤 합성한다 · routes/dm.ts).
+ *   식은 서버와 글자 그대로(거울 시험 = backend c167-ad-preview-1127.test.ts).
+ */
+export function stripAdPartsDeepFront(text: string): string {
+  if (!text) return '';
+  let result = text;
+  result = result.replace(/\s*\n?\s*무료수신거부\s*[\d-]+\s*$/g, '');
+  result = result.replace(/\s*\n?\s*무료거부\d+\s*$/g, '');
+  result = result.replace(/^\s*[(（]\s*광고\s*[)）]\s*/g, '');
+  result = result.replace(/[ \t]*(?:무료\s*수신\s*거부|무료거부)[ \t]*[:：]?[ \t]*[\d-]*[ \t]*/g, '');
+  result = result.replace(/[(（]\s*광고\s*[)）][ \t]*/g, '');
+  result = result.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return result;
+}
+
 export function buildAdMessageFront(
   message: string,
   msgType: string,
@@ -1098,9 +1133,7 @@ export function buildAdMessageFront(
 ): string {
   if (!isAd) return message;
 
-  const isSms = msgType === 'SMS';
-  const isLms = !isSms; // LMS/MMS
-  const adPrefix = isSms ? '(광고)' : '(광고) ';
+  const adPrefix = adPrefixFront(msgType);
 
   // ★ D137 (0423 D2 근본): 백엔드 messageUtils.ts buildAdMessage와 완전 동일 규칙 (미러).
   //   - minBreaks=1 통일 (D136까지 LMS/MMS=2 강제 → D137 완화, 사용자 직접발송 빈 줄 제거)
@@ -1116,14 +1149,24 @@ export function buildAdMessageFront(
   const minBreaks = 1;
   const actualBreaks = Math.max(trailingCount, minBreaks);
 
-  const rejectText = optOutNumber
-    ? (isSms ? `무료거부${optOutNumber.replace(/-/g, '')}` : `무료수신거부 ${optOutNumber}`)
-    : (isSms ? `무료거부` : `무료수신거부`);
-
-  const finalFooter = hasRejectFooter ? '' : `${'\n'.repeat(actualBreaks)}${rejectText}`;
+  const finalFooter = hasRejectFooter ? '' : `${'\n'.repeat(actualBreaks)}${adFooterFront(msgType, optOutNumber)}`;
   const body = finalFooter ? message.replace(/\n+$/, '') : message;
 
   return `${finalPrefix}${body}${finalFooter}`;
+}
+
+/**
+ * ★ 2026-11-27 C167-A(R111) — 편집칸이 잠긴 머리 · 꼬리를 따로 그릴 때 = 합성(buildAdMessageFront)이 **실제로 붙인 것만**.
+ *   본문이 이미 (광고)로 시작하면 머리 없음 · 본문에 수신거부 문구가 있으면 꼬리 없음(서버와 같은 판정) · composed = 받는 분에게 나가는 글.
+ *   옛 PhoneComposer 의 같은 계산을 여기로 올렸다(한줄로 묻기 · 여정 편집칸이 같이 쓴다).
+ */
+export function adLockedPartsFront(body: string, msgType: string, isAd: boolean, optOutNumber: string): { head: string; footer: string; composed: string } {
+  const text = body || '';
+  const composed = buildAdMessageFront(text, msgType, isAd, optOutNumber);
+  if (!isAd) return { head: '', footer: '', composed };
+  const head = startsWithAdMark(text) ? '' : adPrefixFront(msgType);
+  const rest = composed.slice((head + text.replace(/\n+$/, '')).length);
+  return { head, footer: rest.startsWith('\n') ? rest.trim() : '', composed };
 }
 
 /**

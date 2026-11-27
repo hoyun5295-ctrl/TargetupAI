@@ -99,7 +99,8 @@ describe('담당자 문자(M2)', () => {
   });
   it('막힘 문자 = 통신사 괄호 · 결과 한 줄(있을 때) · 「세 차례」 0', () => {
     const t = buildTestFailedNotify({ label: '건', carriers: ['KT', 'LG U+'], resultLine: '막혔을 수 있는 부분: 글 속 주소' });
-    expect(t).toBe('[대행발송] 문안이 스팸 검사에 걸렸습니다(KT, LG U+).\n건: 건\n막혔을 수 있는 부분: 글 속 주소\n로그인하면 문안을 고치거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: hanjul.ai/agency-send');   // ★ 2026-11-24 그대로 보내기 안내
+    // ★ 2026-11-27 C167-C — 그대로 승인 = 담당자 주소(고를 수 있을 때 · 아래 C167 시험) · 로그인 주소 = 문안 고치기만
+    expect(t).toBe('[대행발송] 문안이 스팸 검사에 걸렸습니다(KT, LG U+).\n건: 건\n막혔을 수 있는 부분: 글 속 주소\n문안을 고치려면 로그인해 주세요: hanjul.ai/agency-send');
     expect(buildTestFailedNotify({ label: '건' })).not.toMatch(/세 차례/);
   });
 });
@@ -188,7 +189,7 @@ describe('배선(소스 계약)', () => {
     const a = worker.indexOf('const resumedT = ');
     const mark = worker.indexOf("if (resumedT) detail.resumedFrom = 'diag';");
     expect(mark).toBeGreaterThan(a);
-    expect(mark).toBeLessThan(worker.indexOf("if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };", a));
+    expect(mark).toBeLessThan(worker.indexOf("if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail, firstTest: firstTest ?? null };", a));   // ★ C167 통과에도 첫 회차
   });
   it('★ 1126 C164 — 찾음 = 진단을 닫는 같은 트랜잭션에 찾은 글(diagFix) · 같은 row 에 얹어 이 주기의 검사 · 보류 저장이 본다 · 찾은 글은 이어 보기(resume)가 아니라 새 3사 검사 · 4a 0', () => {
     const diag = read('utils/agency-spam-diag.ts');

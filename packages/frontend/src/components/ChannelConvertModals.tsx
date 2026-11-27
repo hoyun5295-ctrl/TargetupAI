@@ -1,4 +1,4 @@
-import { buildAdMessageFront } from '../utils/formatDate';
+import { buildAdMessageFront, adFooterFront } from '../utils/formatDate';
 
 interface LmsConvertModalProps {
   show: boolean;
@@ -41,9 +41,7 @@ export function LmsConvertModal({
   // ★ D102: buildAdMessageFront 컨트롤타워 사용
   const fullMsg = buildAdMessageFront(rawMsg, activeMsgType, adTextEnabled, optOutNumber);
   // optOutText는 truncation 후 잘림 여부 검사용
-  const optOutText = activeMsgType === 'SMS'
-    ? `무료거부${optOutNumber.replace(/-/g, '')}`
-    : `무료수신거부 ${optOutNumber}`;
+  const optOutText = adFooterFront(activeMsgType, optOutNumber);   // ★ 2026-11-27 C167-A(R111 S8) 공용 함수
 
   // ★ 2026-11-18 C143 W1(뿌리 R56 안내 = 실제 · R68 길이 축) — 판정 식은 그대로(광고 = 90바이트 자리에서 무료거부 줄이 끊기면 SMS 불가).
   //   잘린 글은 판정에만 쓴다 — 통신사는 90바이트를 넘는 SMS 를 잘라 보내지 않고 통째로 실패시킨다(1118 실측). 옛 잘린 미리보기와 「뒤가 잘려 받는다」는 거짓 약속을 걷었다.

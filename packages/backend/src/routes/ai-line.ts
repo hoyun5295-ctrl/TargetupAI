@@ -33,7 +33,7 @@ import {
   askChannelOf, askAudienceWhere, askCellsOf, askAmount, stageAskAudience, dropAskStaging,
 } from '../utils/ask-segments';
 import { sendableCustomerSql } from '../utils/product-signal';
-import { prepareFieldMappings } from '../utils/messageUtils';
+import { prepareFieldMappings, getOpt080Number } from '../utils/messageUtils';
 import { sendBodyVars } from '../utils/var-tokens';
 import { sealServerStaging } from '../utils/operator-recipients';
 import { branchOfDirect } from '../utils/ad-send-gate-core';
@@ -289,11 +289,12 @@ router.get('/ask/segments', async (req: Request, res: Response) => {
     const v = await lineGate(req, res);
     if (!v) return;
     // ★ 2026-11-22 C157 — unitPrices = 문자 종류 셋의 1통 값(2단계 종류 칩) · varNames = 발송 치환이 쓰는 매핑 이름들(화면이 「칼럼이 든 SMS = LMS」를 미리 보여 줄 때 쓰는 거울 · 주인은 적재 주소)
-    const [counted, prices, learned, mappings] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrices(v.companyId), voiceLearned(v.companyId, 'marketing'), prepareFieldMappings(v.companyId)]);
+    // ★ 2026-11-27 C167-A(R111) — opt080 = 보내는 계정의 080(확정 direct-send 와 같은 getOpt080Number · 같은 인자 · 화면 받는 분 화면 · 바이트가 이 값으로 합성)
+    const [counted, prices, learned, mappings, opt080] = await Promise.all([countAskCells(v.companyId, v.userId), readAskPrices(v.companyId), voiceLearned(v.companyId, 'marketing'), prepareFieldMappings(v.companyId), getOpt080Number(v.userId || null, v.companyId)]);
     const price = prices.LMS;   // 옛 화면이 읽는 칸(unitPrice = LMS)
     // ★ 2026-11-22 C153 D3 — 종류 칩 이름(목소리를 배운 회사 = 서버 이름 · 문안 카드 이름과 같은 판정 = 광고 문자 목소리) · 아니면 null = 화면 기본 이름
     const typeNames = learned ? (([a, b, c]) => ({ emo: a, benefit: b, mz: c }))(variantNamesFor(true, '')) : null;
-    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price, unitPrices: prices, varNames: Object.keys(mappings), typeNames });
+    return res.json({ success: true, groups: askGroupMeta(), ...counted, unitPrice: price, unitPrices: prices, varNames: Object.keys(mappings), typeNames, opt080: String(opt080 || '') });
   } catch (err: any) {
     return fail(res, err, 'ask-segments');
   }

@@ -46,7 +46,9 @@ describe('광고 합성분은 바이트에 든다', () => {
 describe('스튜디오가 그 축을 쓴다', () => {
   it('바이트는 광고 합성 결과로 잰다 (순수 본문 계산으로 되돌리면 실패)', () => {
     const src = phoneSrc();
-    expect(src).toMatch(/const composed = useMemo\(\(\) => buildAdMessageFront\(body \|\| '', msgType, isAd, opt080Number\)/);
+    // ★ 2026-11-27 C167-A(R111) — 받는 글 · 잠금 줄 = 공용 adLockedPartsFront(안에서 buildAdMessageFront 합성)
+    expect(src).toMatch(/const locked = useMemo\(\(\) => adLockedPartsFront\(body \|\| '', msgType, isAd, opt080Number\)/);
+    expect(src).toContain('const composed = locked.composed;');
     expect(src).toMatch(/calculateSmsBytes\(composed\)/);
     expect(
       src,

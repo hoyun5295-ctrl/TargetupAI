@@ -22,6 +22,7 @@ import {
 import { insertAtCursor } from '../utils/textInsert';
 import { SMS_SAFE_CHARS, koreanBytes, isSmsEncodableChar } from '../utils/smsSafeChars';
 import { highlightVars, mergeAndHighlightVars } from '../utils/highlightVars';
+import { buildAdMessageFront } from '../utils/formatDate';   // ★ 2026-11-27 C167-A(R111) 받는 모습 = 발송과 같은 합성
 import BrandLinkChips from './BrandLinkChips';
 import SmsCharsetNotice from './SmsCharsetNotice';
 
@@ -110,9 +111,8 @@ export default function MessageEditorModal({
 
   if (!open) return null;
 
-  const previewBody = isAd && draft
-    ? `(광고)\n${draft}${rejectNumber ? `\n무료거부 ${rejectNumber}` : ''}`
-    : draft;
+  // ★ 2026-11-27 C167-A(R111 S2) — 받는 모습 = 발송과 같은 합성(공용 buildAdMessageFront · 이 창의 종류 · 저장된 번호 그대로 · 옛 인라인 꼴 걷음)
+  const previewBody = isAd && draft ? buildAdMessageFront(draft, channelUpper, true, rejectNumber || '') : draft;
 
   // 회사 이모지는 문자로 보낼 수 있는 것만 싣는다 — 특수문자함은 "문자 발송 안전 기호만"을 약속한다(2026-09-10).
   const brandSafe = brandExpr ? brandExpr.emojiWhitelist.filter((c) => Array.from(c).every(isSmsEncodableChar)) : [];

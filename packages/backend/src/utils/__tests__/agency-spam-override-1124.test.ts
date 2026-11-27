@@ -33,7 +33,11 @@ describe('판정 spamOverrideOf', () => {
     expect(o.finalTestedAt).toBeNull();
   });
   it('막힘 아닌 상태 · 표식 없음 · 버전 다름 · 글 없음 · 이미 적재 = 불가', () => {
-    expect(spamOverrideOf(row({ status: 'awaiting_approval' }), NOW).ok).toBe(false);
+    // ★ 2026-11-27 C167-C — 승인 대기 · 재승인은 「고친 글로 승인을 묻는 중」(표식 글 ≠ 지금 글)일 때만 열린다 · 승인 완료 = 닫힘
+    expect(spamOverrideOf(row({ status: 'awaiting_approval', current_content: '(광고) 겨울 행사 안내' }), NOW).ok).toBe(false);
+    expect(spamOverrideOf(row({ status: 'approved', current_content: '고친 글' }), NOW).ok).toBe(false);
+    expect(spamOverrideOf(row({ status: 'awaiting_approval', current_content: '고친 글' }), NOW).ok).toBe(true);
+    expect(spamOverrideOf(row({ status: 'reapproval', current_content: '고친 글' }), NOW).ok).toBe(true);
     expect(spamOverrideOf(row({ last_test_result: { round: 3 } }), NOW).ok).toBe(false);
     expect(spamOverrideOf(row({ last_test_result: null }), NOW).ok).toBe(false);
     expect(spamOverrideOf(row({ content_version: 4 }), NOW).ok).toBe(false);
@@ -65,9 +69,10 @@ describe('판정 spamOverrideOf', () => {
     const o = spamOverrideOf(row({ requested_at: kst(2026, 11, 25, 12, 10) }), NOW);
     expect(o).toMatchObject({ ok: false, retime: true });
   });
-  it('조작 주체 = 로그인 화면만(링크 · 운영 불가)', () => {
+  // ★ 2026-11-27 C167-C(Harold 1127 「추천대로」) — 담당자 링크에서도 고른다(메일 접수 고객의 입구) · 운영 = 불가
+  it('조작 주체 = 로그인 화면 · 담당자 링크(운영 불가)', () => {
     expect(agencyActions('user', row(), NOW).spamOverride.ok).toBe(true);
-    expect(agencyActions('link', row(), NOW).spamOverride.ok).toBe(false);
+    expect(agencyActions('link', row(), NOW).spamOverride.ok).toBe(true);
     expect(agencyActions('staff', row(), NOW).spamOverride.ok).toBe(false);
   });
 });
@@ -81,8 +86,9 @@ describe('배선(소스 계약)', () => {
     expect(fn).toContain("last_test_result = last_test_result - 'spamOverridable'");
   });
   it('표식을 넘기는 setStatus = 1차 · 2시간 전 막힘 둘뿐(★ 2026-11-26 C164 — 「주소를 바꿔 주세요」로 멈추던 4a 는 없앴다 = 진단 트랜잭션의 표식 UPDATE 0)', () => {
+    // ★ 2026-11-27 C167-C — 막힘 둘 + 고친 글 통과 승인 대기 · 재승인 둘 + 승인 버전 대조 재승인(표식 유지) = 다섯(R113 계약 시험이 승인 대기 · 재승인 부름마다 키를 센다)
     const calls = worker.match(/spamOverridable: /g) || [];
-    expect(calls.length).toBe(2);
+    expect(calls.length).toBe(5);
     const diag = be('utils/agency-spam-diag.ts');
     expect(worker).toContain("setStatus(row.id, 'test_failed', { ...RELEASE }, token, { spamOverridable: marker })");
     expect(worker).toContain("setStatus(target.id, 'test_failed', { ...RELEASE }, token, { spamOverridable: finalMarker })");
@@ -120,20 +126,30 @@ describe('배선(소스 계약)', () => {
     expect(tx).toContain("'spam_override_final'");
     expect(tx).toContain("if ((u.rowCount || 0) === 0) { await client.query('ROLLBACK'); return false; }");
   });
-  it('막힘 문자 둘 = 승인 토큰 발급 0(perPhoneTexts · buildApproveTexts 를 싣지 않는다 · 설계 2R #2)', () => {
-    const notifyBlocks = worker.split('text: buildTestFailedNotify(').slice(1).map((b) => b.slice(0, 300));
-    expect(notifyBlocks.length).toBe(2);   // ★ 1126 C164 — 1차 · 2시간 전 막힘 둘(4a 문자는 없앴다)
-    for (const b of notifyBlocks) expect(b.split('});')[0]).not.toMatch(/perPhoneTexts|buildApproveTexts/);
+  // ★ 2026-11-27 C167-C(서수란 접수 재오픈 4) — 막힘 문자 = 한 함수(notifyTestFailed) · 고를 수 있거나 시각만 바꾸면 고를 수 있을 때 담당자 주소(그 버전 · 상태일 때만)
+  it('막힘 문자 둘 = notifyTestFailed 한 함수 · 담당자 주소는 고를 길이 있고 행이 그 버전 · 상태일 때만', () => {
+    expect((worker.match(/text: buildTestFailedNotify\(/g) || []).length).toBe(1);
+    expect((worker.match(/await notifyTestFailed\(/g) || []).length).toBe(2);
+    const fn = worker.slice(worker.indexOf('async function notifyTestFailed('), worker.indexOf('async function freshLinkFields('));
+    expect(fn).toContain("linkRow.status === 'test_failed' && Number(linkRow.content_version) === Number(version)");
+    expect(fn).toContain('(rewrite.choosable || rewrite.retime)');
+    expect(fn).toContain('...(linkable ? {');
   });
   it('입구 = 로그인 화면 라우트 하나(소유자 술어) · 링크 라우트에 그대로 보내기 0', () => {
     const route = be('routes/agency-send.ts');
     const blk = route.slice(route.indexOf("router.post('/:id/spam-override'"), route.indexOf("router.post('/:id/reschedule'"));
     expect(blk).toContain('ownerUserId: ownerParam(auth)');
-    expect(blk).toContain('sendAgencyApprovalRequest(String(out.row.id), { withTest: true, version: Number(out.row.content_version) })');
+    // ★ 2026-11-27 C167-C — 한 단추 = 글 교체 + 승인(한 트랜잭션 · 테스트 문자 · 승인 요청 재발송 0) · 옛 화면 두 단계 요청 = 409 새로 고침(approve 값 없음)
+    expect(blk).not.toContain('sendAgencyApprovalRequest(');
+    expect(blk).toContain('if (req.body?.approve !== true) {');
     // ★ Codex 구현 1R #1 — 발신 인증 = 승인과 같은 관문 · 같은 403 몸통
     expect(blk).toContain("if ('senderAuth' in out) return res.status(403).json(senderAuthRejection(out.senderAuth));");
     expect(blk).toContain('req: { ip: req.ip, headers: req.headers }');
-    expect(be('routes/agency-approve.ts')).not.toMatch(/spam-override|overrideSpamBlockTx/);
+    // ★ 2026-11-27 C167-C — 링크 입구 = 같은 CT · 가드 = agencyActions('link').spamOverride
+    const link = be('routes/agency-approve.ts');
+    const lb = link.slice(link.indexOf("router.post('/spam-override'"));
+    expect(lb).toContain("agencyActions('link', resolved.row).spamOverride");
+    expect(lb).toContain("actor: { via: 'link', phone: resolved.phone, contentVersion: resolved.contentVersion");
   });
   it('발신 인증 관문 = 승인 · 그대로 보내기가 같은 함수 · 그대로 보내기는 트랜잭션 앞에서(막히면 상태 변경 0 · Codex 구현 1R #1)', () => {
     const approve = be('utils/agency-send-approve.ts');
@@ -141,7 +157,7 @@ describe('배선(소스 계약)', () => {
     expect((approve.match(/checkSenderAuthGate\(/g) || []).length).toBe(1);   // 관문 호출 = 공용 함수 한 곳
     const change = be('utils/agency-send-change.ts');
     const fn = change.slice(change.indexOf('export async function overrideSpamBlockTx('));
-    const gate = fn.indexOf('const gate = await agencySenderAuthGate(row, input.actorUserId, input.req);');
+    const gate = fn.indexOf('const gate = await agencySenderAuthGate(row, actor.userId, input.req);');
     expect(gate).toBeGreaterThan(0);
     expect(fn.indexOf('const client = await pool.connect();')).toBeGreaterThan(gate);
     expect(fn.indexOf('const pre = spamOverrideOf(row')).toBeLessThan(gate);   // 판정을 지난 건에만 인증번호
@@ -167,7 +183,7 @@ describe('배선(소스 계약)', () => {
     const fn = worker.slice(worker.indexOf('export async function sendAgencyApprovalRequest('));
     expect(fn).toContain('const overridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version));');
     // ★ 2026-11-25 승인 요청 두 문장에 빈 자리 줄(blankLine)이 붙는다(설계서 docs/2026-11-25-agency-intake-slip-multisheet-design.md §5-4)
-    expect((fn.match(/overridden(?:, blankLine)? \}\)/g) || []).length).toBe(3);   // 촉박 · 승인 요청 본문 · 담당자별 링크 문장
+    expect((fn.match(/overridden(?:, blankLine)?(?:, rewrite)? \}\)/g) || []).length).toBe(3);   // 촉박 · 승인 요청 본문 · 담당자별 링크 문장(★ C167 rewrite 칸)
     expect(worker).toContain('const overridden = await isSpamOverriddenVersion(target.id, Number(target.content_version));');
     const route = be('routes/agency-send.ts');
     expect(route).toContain('const spamOverridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version)).catch(() => null);');
@@ -178,7 +194,7 @@ describe('배선(소스 계약)', () => {
     expect(detail).toContain('{req.spamOverridden === true');
     expect(detail).toContain("(req.spamOverridden === false ? ' 검사는 이미 통과했으니");   // null = 확인 못 함 = 통과 문구 0
     expect(detail).toContain('{req.finalTestRequired && req.spamOverridden === false ?');
-    expect(detail).toContain('if (senderAuth.handleResponse(e?.data, () => { void doSpamOverride(); })) return;');
+    expect(detail).toContain('if (senderAuth.handleResponse(e?.data, () => { void doSpamOverride(blankAck); })) return;');
     const page = read(join(FE, 'pages/AgencyApprovePage.tsx'));
     expect(page).toContain('...(r.spamOverridden === true ? [{ tone: ');
     expect(page).toContain('overridden: r.spamOverridden === true, finalTested: r.finalTested === true });');

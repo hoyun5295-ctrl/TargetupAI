@@ -1574,11 +1574,10 @@ export default function AiLinePage() {
               //   원본(rawActiveBody)은 다듬기/발송 시 그대로 사용. 표시(activeBody)만 합성 — 실 발송은 /direct-send가 adEnabled=true로 자동 처리.
               const isAd = adEnabled; // ★ 2026-07-22 광고표기 토글 상태 — 본문·제목 (광고) 표시 + 발송 유형 단일 소스
               const rawReject = proposal.channel.rejectNumber || '';
-              const formattedReject = rawReject
-                ? rawReject.replace(/[^0-9]/g, '').replace(/^(\d{3,4})(\d{3,4})(\d{4})$/, '$1-$2-$3')
-                : '';
-              const activeBody = (isAd && rawReject && rawActiveBody)
-                ? `(광고)\n${rawActiveBody}\n무료거부 ${formattedReject || rawReject}`
+              // ★ 2026-11-27 C167-A(R111 S1) — 받는 모습 = 발송과 같은 합성(공용 buildAdMessageFront · 지금 종류 · 저장된 번호 그대로).
+              //   옛: 「(광고)⏎본문⏎무료거부 080-…」을 종류와 무관하게 화면이 이어 붙여 실제 LMS(「(광고) 본문⏎무료수신거부 …」)와 달랐다.
+              const activeBody = (isAd && rawActiveBody)
+                ? buildAdMessageFront(rawActiveBody, activeChannel, true, rawReject)
                 : rawActiveBody;
               const bytesLen = (s: string) => {
                 let bytes = 0;
@@ -1804,7 +1803,7 @@ export default function AiLinePage() {
                           originalText={baseBody}
                           channel={activeChannel}
                           isAd={isAd}
-                          rejectNumber={formattedReject || rawReject}
+                          rejectNumber={rawReject}
                           variables={dataProfileVars}
                           sampleCustomer={sampleCustomer}
                           sampleCustomerFields={sampleCustomerFields}

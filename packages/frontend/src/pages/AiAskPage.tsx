@@ -22,7 +22,7 @@ import {
 } from '../utils/ai-line';
 import { newAttemptToken } from '../utils/one-line';
 import { useSendPolicy, isNightAdTime, sendWindowText } from '../utils/send-policy';
-import { LMS_SUBJECT_MAX_CHARS, buildAdMessageFront, calculateSmsBytes } from '../utils/formatDate';
+import { LMS_SUBJECT_MAX_CHARS, buildAdMessageFront, buildAdSubjectFront, adPrefixFront, adFooterFront, adLockedPartsFront, startsWithAdMark, calculateSmsBytes } from '../utils/formatDate';
 import { hasUnsupportedSmsChars, SMS_CHARSET_BLOCK_MESSAGE } from '../utils/smsSafeChars';
 import { useSenderAuth } from '../hooks/useSenderAuth';
 import LineResultCards from '../components/ai-line/LineResultCards';
@@ -39,6 +39,7 @@ import {
   ASK_QUESTION_MAX, ASK_THREAD_MAX, askHistoryOf, askFollowChips, type AskTurn, askAnswerAttemptKey, askGroupSpend, askSpendText,
   type AskAnswer, type AskCopyType, type AskCount, type AskGroupKey, type AskOrder, type AskPlace, type AskPlan, type AskSegments,
   ASK_CHANNELS, askBusyGate, askSendChannel, askSendFp, askSplitError, askStageLines, type AskChannel, type AskStage,
+  askSendBody, askSendSubject, askOpt080Of,
 } from '../utils/ai-ask';
 
 type Step = 0 | 1 | 2 | 3 | 4;
@@ -50,11 +51,12 @@ interface SendJob { body: Record<string, unknown>; shown: number; token: string;
 const COMPOSE_COST = creditCost('ai-line-compose');
 /** 답 받기 한 번(서버 단가표 ai-operator-explain 과 같은 표) */
 const ANSWER_COST = creditCost('ai-operator-explain');
-/** 문자 한도(서버 message-byte 와 같은 값) · 셈 = 실제로 나가는 글((광고) · 수신거부 꼬리 포함 · 번호는 가장 긴 꼴로) · 종류 = 나가는 종류 */
+/** 문자 한도(서버 message-byte 와 같은 값) · 셈 = 실제로 나가는 글((광고) · 수신거부 꼬리 포함 · 번호 = 보내는 계정의 080 · 모르면 옛 10자리) · 종류 = 나가는 종류 */
 const LMS_MAX_BYTES = 2000;
 const SMS_MAX_BYTES = 90;
 const maxBytesOf = (ch: AskChannel) => (ch === 'SMS' ? SMS_MAX_BYTES : LMS_MAX_BYTES);
-const sendBytes = (body: string, ch: AskChannel) => calculateSmsBytes(buildAdMessageFront(body, ch, true, '0800000000'));
+// ★ 2026-11-27 C167-A(R111) — 셈 = 보낼 본문(askSendBody) · 실제 080 으로 합성한 글(가짜 번호 상수 걷음)
+const sendBytes = (body: string, ch: AskChannel, opt080: string) => calculateSmsBytes(buildAdMessageFront(askSendBody(body), ch, true, opt080));
 /** 발신번호 고르기의 「고객별 매장 번호」(AI 한줄로와 같은 뜻 = 고객의 매장 번호로 보낸다) */
 const INDIVIDUAL_CB = '__individual__';
 const priceWon = (n: number) => `${n.toLocaleString('ko-KR', { maximumFractionDigits: 2 })}원`;
@@ -150,6 +152,10 @@ export default function AiAskPage() {
   /** 카드마다 나가는 종류(그 카드의 본문에서) — 도착 확인은 카드마다 자기 종류로 건다(고른 카드의 종류가 다른 카드의 검사를 바꾸지 않는다 · 구현 Codex 1R) */
   const channelAt = (t: AiLineType): AskChannel => askSendChannel(channel, bodyAt(t), seg?.varNames ?? []);
   const sendChannel = pickedType ? channelAt(pickedType) : channel;
+  // ★ 2026-11-27 C167-A — 보내는 계정의 080(서버 · 확정과 같은 함수) · 모르면(옛 서버) 꼬리 「번호 확인 중」 · 바이트는 옛 10자리
+  const opt080 = askOpt080Of(seg);
+  /** 3단계 편집칸의 잠긴 머리 · 꼬리(합성이 실제로 붙이는 것만 · 보낼 본문 기준) */
+  const pickedLocked = adLockedPartsFront(askSendBody(pickedBody), sendChannel, true, opt080.value);
   const basePlan = useMemo(() => ({ groups: groupsInOrder, mode, budget: mode === 'budget' ? budget : null, order }), [groupsInOrder, mode, budget, order]);
   /** plan = 사람이 고른 종류(문안 만들기 · 적재 요청에 싣는다) · countPlan = 나가는 종류(세기) · LMS 는 싣지 않는다(옛 요청과 같은 몸) */
   const plan: AskPlan = useMemo(() => (channel === 'LMS' ? basePlan : { ...basePlan, channel }), [basePlan, channel]);
@@ -638,13 +644,14 @@ export default function AiAskPage() {
     if (sendLock.current || sending) return;
     if (heldRef.current) { void recheckSend(heldRef.current); return; }
     if (block || !pickedType || !count || sendLocked) return;
-    const body = pickedBody.trim();
-    const subject = sendChannel === 'SMS' ? '' : pickedSubject.trim().slice(0, LMS_SUBJECT_MAX_CHARS);
+    // ★ 2026-11-27 C167-A — 보낼 본문 · 제목 = 한 함수(끝 줄바꿈 보존 = 수신거부 줄 앞 간격 · 받는 분 화면 · 바이트와 같은 글) · 최소 길이 = trim 길이
+    const body = askSendBody(pickedBody);
+    const subject = askSendSubject(sendChannel, pickedSubject);
     const we = whenError();
-    const pre = body.length < 5 ? '문안이 비어 있어요. 3단계에서 문안을 확인해 주세요.'
+    const pre = body.trim().length < 5 ? '문안이 비어 있어요. 3단계에서 문안을 확인해 주세요.'
       : sendChannel !== 'SMS' && !subject ? '제목이 비어 있어요. 3단계에서 제목을 적어 주세요.'
         : hasUnsupportedSmsChars(body, subject) ? SMS_CHARSET_BLOCK_MESSAGE
-          : sendBytes(body, sendChannel) > maxBytesOf(sendChannel) ? `문안이 ${sendChannel} 한도(${fmtNum(maxBytesOf(sendChannel))}바이트)를 넘어요. 3단계에서 줄여 주세요.`
+          : sendBytes(body, sendChannel, opt080.forBytes) > maxBytesOf(sendChannel) ? `문안이 ${sendChannel} 한도(${fmtNum(maxBytesOf(sendChannel))}바이트)를 넘어요. 3단계에서 줄여 주세요.`
             : sendChannel === 'MMS' && images.length === 0 ? 'MMS 는 이미지가 있어야 보낼 수 있어요. 3단계에서 이미지를 붙여 주세요.'
               : !cbChoice ? '등록된 발신번호가 없어요. 발신번호를 등록한 뒤 다시 눌러 주세요.'
                 : splitErr || we;
@@ -1214,15 +1221,28 @@ export default function AiAskPage() {
                       {pickedType && (
                         <div className="rounded-2xl bg-[#F2F4F6] px-4 py-3.5">
                           <small className="mb-2 block text-[12.5px] font-semibold text-[#4E5968]">받는 분 화면 · 고칠 수 있어요</small>
-                          {sendChannel !== 'SMS' && <input value={pickedSubject} disabled={decorating} onChange={(e) => setRun((r) => (r && pickedType ? setSubject(r, pickedType, e.target.value) : r))} maxLength={LMS_SUBJECT_MAX_CHARS}
-                            placeholder="제목" aria-label="제목"
-                            className="mb-2 block h-10 w-full rounded-lg border border-[#D1D6DB] bg-white px-3 text-[14.5px] font-bold outline-none focus:border-[#191F28] disabled:bg-[#F9FAFB]" />}
+                          {/* ★ 2026-11-27 C167-A(R111 · 임은지 접수) — 회색 = 보낼 때 붙는 글(합성이 실제로 붙이는 것만 · 고칠 수 없음) · 번호 = 보내는 계정의 080 */}
+                          {sendChannel !== 'SMS' && (
+                            <div className="mb-2 flex items-center gap-2">
+                              {!startsWithAdMark(pickedSubject) && <span className="shrink-0 text-[14.5px] font-bold text-[#8B95A1]" title="보낼 때 붙어요">{adPrefixFront(sendChannel).trim()}</span>}
+                              <input value={pickedSubject} disabled={decorating} onChange={(e) => setRun((r) => (r && pickedType ? setSubject(r, pickedType, e.target.value) : r))} maxLength={LMS_SUBJECT_MAX_CHARS}
+                                placeholder="제목" aria-label="제목"
+                                className="block h-10 min-w-0 flex-1 rounded-lg border border-[#D1D6DB] bg-white px-3 text-[14.5px] font-bold outline-none focus:border-[#191F28] disabled:bg-[#F9FAFB]" />
+                            </div>
+                          )}
+                          {pickedLocked.head && <p className="mb-1 px-3 text-[14.5px] leading-[1.65] text-[#8B95A1]" title="보낼 때 붙어요">{pickedLocked.head.trim()}</p>}
                           <textarea ref={bodyRef} value={pickedBody} disabled={decorating} onChange={(e) => setRun((r) => (r && pickedType ? setBody(r, pickedType, e.target.value) : r))} rows={12} maxLength={2000}
                             aria-label="문안"
                             className="block w-full resize-y rounded-lg border border-[#D1D6DB] bg-white px-3 py-2.5 text-[14.5px] leading-[1.65] outline-none focus:border-[#191F28] disabled:bg-[#F9FAFB]" />
+                          {pickedLocked.footer && (
+                            <p className="mt-1 px-3 text-[14.5px] leading-[1.65] text-[#8B95A1]" title="보낼 때 붙어요">
+                              {opt080.known ? pickedLocked.footer : adFooterFront(sendChannel, '')} {opt080.known ? '' : <span className="text-[12.5px]">(번호 확인 중)</span>}
+                            </p>
+                          )}
+                          {opt080.known && !opt080.value && <p className="mt-1 px-3 text-[12.5px] font-semibold text-[#B45309]">수신거부 번호(080)가 없어요. 회사 설정에서 등록해 주세요.</p>}
                           <p className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[12px] text-[#636D7A]">
-                            <span>보낼 때 (광고) 표기와 수신거부 번호가 붙어요.</span>
-                            <span className={`tabular-nums ${sendBytes(pickedBody, sendChannel) > maxBytesOf(sendChannel) ? 'font-semibold text-[#B91C1C]' : ''}`}>{fmtNum(sendBytes(pickedBody, sendChannel))} / {fmtNum(maxBytesOf(sendChannel))}바이트</span>
+                            <span>한줄로 묻기는 혜택과 방문을 알리는 문자라 늘 광고로 보내요. 회색 글은 보낼 때 붙어요. 수신거부 줄과 한 줄 띄우려면 문안 끝에서 줄을 두 번 바꿔 주세요.</span>
+                            <span className={`tabular-nums ${sendBytes(pickedBody, sendChannel, opt080.forBytes) > maxBytesOf(sendChannel) ? 'font-semibold text-[#B91C1C]' : ''}`}>{fmtNum(sendBytes(pickedBody, sendChannel, opt080.forBytes))} / {fmtNum(maxBytesOf(sendChannel))}바이트</span>
                           </p>
                         </div>
                       )}
@@ -1325,9 +1345,12 @@ export default function AiAskPage() {
                 </div>
                 <div className="rounded-2xl bg-[#F2F4F6] px-4 py-3.5">
                   <small className="mb-2 block text-[12.5px] font-semibold text-[#4E5968]">받는 분 화면</small>
-                  {pickedSubject && <p className="mb-1.5 text-[14.5px] font-bold">{pickedSubject}</p>}
-                  <pre className="m-0 max-h-[360px] overflow-y-auto whitespace-pre-wrap font-[inherit] text-[14.5px] leading-[1.65]">{pickedBody}</pre>
-                  <p className="mt-2.5 text-[12px] text-[#636D7A]">보낼 때 (광고) 표기와 수신거부 번호가 붙어요. 고치려면 「이전」으로 돌아가 주세요.</p>
+                  {/* ★ 2026-11-27 C167-A(R111) — 나가는 글 그대로(확정과 같은 보낼 제목 · 본문 · 같은 합성 · 보내는 계정의 080) */}
+                  {sendChannel !== 'SMS' && <p className="mb-1.5 text-[14.5px] font-bold">{buildAdSubjectFront(askSendSubject(sendChannel, pickedSubject), sendChannel, true)}</p>}
+                  <pre className="m-0 max-h-[360px] overflow-y-auto whitespace-pre-wrap font-[inherit] text-[14.5px] leading-[1.65]">{buildAdMessageFront(askSendBody(pickedBody), sendChannel, true, opt080.value)}</pre>
+                  {!opt080.known && <p className="mt-1.5 text-[12px] text-[#636D7A]">수신거부 번호를 확인하고 있어요.</p>}
+                  {opt080.known && !opt080.value && <p className="mt-1.5 text-[12.5px] font-semibold text-[#B45309]">수신거부 번호(080)가 없어요. 회사 설정에서 등록해 주세요.</p>}
+                  <p className="mt-2.5 text-[12px] text-[#636D7A]">이 모습 그대로 나가요. 칼럼 자리는 받는 분마다 바뀌어요. 고치려면 「이전」으로 돌아가 주세요.</p>
                 </div>
               </div>
             </>

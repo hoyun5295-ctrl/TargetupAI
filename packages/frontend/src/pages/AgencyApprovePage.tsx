@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, CalendarClock, Check, Loader2, RotateCcw, Send, SpellCheck2, X } from 'lucide-react';
 import {
   agencyCallbackLabel, formatWhen, linkApprovedCard, lockLinkActions, sendChangeLockStartsAt, toLocalInput, STATUS_LABEL, STATUS_TONE,
-  type AgencyLinkActions, type AgencySendStatus,
+  agencyChoiceView, type AgencyLinkActions, type AgencySendStatus, type AgencySpamChoice,
 } from '../components/agency/agency-send-api';
 import { useClockTick } from '../hooks/useClockTick';
 import { CUI_BTN_PRIMARY, CUI_PILL_BASE, CUI_PILL_TONE } from '../utils/console-ui';
@@ -55,9 +55,11 @@ interface ApprovalView {
   blanks?: Array<{ start: number; label: string }>;
   /** ★ 2026-11-25 문안 항목 값이 빈 수신자 수 */
   emptyVarRows?: Array<{ name: string; count: number }>;
+  /** ★ 2026-11-27 C167-C 처음 접수한 문안 그대로 승인(서버 판정 · 표시 재료 · 옛 서버 = 없음) */
+  choice?: AgencySpamChoice;
 }
 
-type Sheet = 'approve' | 'cancel' | 'reschedule' | 'resume' | 'spell' | null;
+type Sheet = 'approve' | 'submitted' | 'cancel' | 'reschedule' | 'resume' | 'spell' | null;
 
 type ViewState =
   | { kind: 'loading' }
@@ -179,6 +181,25 @@ export default function AgencyApprovePage() {
     }
   };
 
+  // ★ 2026-11-27 C167-C(R113) — 「{처음 접수한 문안} 그대로 승인」 = 글 교체 + 승인 한 번(서버 한 트랜잭션) · 빈 자리면 이 확인 창 단추가 곧 확인
+  const approveSubmitted = async () => {
+    if (working || state.kind !== 'ready' || state.forToken !== token) return;
+    setWorking(true);
+    try {
+      const blanks = state.request.choice?.shown?.blanks || [];
+      const out = await post('spam-override', { revision: state.request.revision, approve: true, ...(blanks.length > 0 ? { blankAck: true } : {}) });
+      if (!out) return;
+      setSheet(null);
+      if (!out.failed) { setState({ kind: 'done', request: out.request }); return; }
+      if (!out.data?.request) await load(out.data?.error || '내용이 바뀌어 다시 불러왔습니다. 확인 후 다시 골라 주세요.');
+    } catch {
+      setSheet(null);
+      await load('잠시 문제가 있었습니다. 다시 시도해 주세요.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const runAction = async (path: 'cancel' | 'reschedule' | 'spell-fix', body: Record<string, unknown>) => {
     if (working || state.kind !== 'ready' || state.forToken !== token) return;
     setWorking(true);
@@ -226,6 +247,10 @@ export default function AgencyApprovePage() {
   const card = linkApprovedCard({ justApproved: state.kind === 'done', status: r.status, when: formatWhen(r.requestedAt), cancel: a?.cancel, overridden: r.spamOverridden === true, finalTested: r.finalTested === true });
   const fixable = (r.spellIssues || []).filter((i) => !i.blocked);
   const ready = state.kind === 'ready';
+  // ★ 2026-11-27 C167-C — 글 칸 · 「그대로 승인」 단추 = 공용 함수(서버 재료만) · 단추는 지금 시각 잠금(a.spamOverride)까지 본다
+  const cv = agencyChoiceView(r.status, r.choice, r.content);
+  const canSubmitted = !!cv.submitted?.ok && !!a?.spamOverride?.ok;
+  const submittedBlankLabels = (cv.submitted?.blanks || []).join(', ');
 
   const summaryRows = [
     { label: '건', value: r.label },
@@ -259,7 +284,17 @@ export default function AgencyApprovePage() {
                 // ★2026-11-16 C137 표기 칸까지 본다(이메일 접수 = 받으신 테스트 문자처럼 고객 문안 그대로 · 재오픈 cmwd36hnr1)
                 <p className="font-extrabold mb-1.5">{buildAdSubjectFront(r.subject || '', r.messageType, adTextOnFront(r.isAd, r.adText))}</p>
               )}
-              <p className="whitespace-pre-wrap break-words">{r.content}</p>
+              {cv.blocks.length > 0 ? (
+                // ★ 2026-11-27 C167-C(R113 · 서수란 접수 재오픈 5) — 두 글을 이름으로 가른다(스팸 통과 문안 · 처음 접수한 문안)
+                cv.blocks.map((b) => (
+                  <div key={b.kind} className="mt-2 first:mt-0">
+                    <p className={`text-[12px] font-bold ${b.kind === 'submitted' ? 'text-amber-800' : 'text-neutral-600'}`}>{b.label}</p>
+                    <p className="mt-1 whitespace-pre-wrap break-words">{b.text}</p>
+                  </div>
+                ))
+              ) : (
+                <p className="whitespace-pre-wrap break-words">{r.content}</p>
+              )}
               <p className="mt-2.5 text-[11.5px] text-neutral-500">
                 받는 분마다 항목 값이 다르게 들어갑니다. 실제 모습은 받으신 테스트 문자와 같습니다.
                 {adTextOnFront(r.isAd, r.adText) ? ' 광고 표시와 무료 수신거부 번호는 자동으로 붙습니다.' : ''}
@@ -341,10 +376,34 @@ export default function AgencyApprovePage() {
                 <>
                   <button type="button" onClick={() => setSheet('approve')} disabled={working} className={`${CUI_BTN_PRIMARY} w-full h-12 text-[15px] justify-center`}>
                     {working ? <Loader2 className="w-[17px] h-[17px] animate-spin" /> : <Check className="w-[17px] h-[17px]" strokeWidth={2.4} />}
-                    이 문안 그대로 승인하기
+                    {cv.primaryLabel || '이 문안 그대로 승인하기'}
                   </button>
+                  {/* ★ 2026-11-27 C167-C — 처음 접수한 문안 그대로 승인(주 단추와 따로 열리고 닫힌다 · Codex 설계 4R #1) */}
+                  {canSubmitted && cv.submitted && (
+                    <button type="button" onClick={() => setSheet('submitted')} disabled={working}
+                      className="w-full h-12 rounded-xl border border-amber-300 bg-white text-[14.5px] font-semibold text-amber-900 inline-flex items-center justify-center gap-1.5 hover:bg-amber-50">
+                      <Send className="w-4 h-4" />{cv.submitted.label} 그대로 승인
+                    </button>
+                  )}
+                  {cv.submitted && !canSubmitted && cv.submitted.reason && (
+                    <p className="text-center text-[12.5px] text-amber-800 leading-relaxed">{cv.submitted.label} 그대로: {cv.submitted.reason}</p>
+                  )}
                   <p className="text-center text-[12.5px] text-neutral-500">누르면 확인 창이 한 번 더 떠요 · 승인하면 <b className="tabular-nums">{r.recipientCount.toLocaleString()}명</b> 발송이 확정됩니다</p>
                 </>
+              ) : ready && cv.submitted ? (
+                // ★ 2026-11-27 C167-C — 끝내 막힘 = 처음 접수한 문안 그대로 승인(지금 화면은 이 길만 열려 있다 · 시각 바꾸기 · 취소는 아래 그대로)
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-2.5">
+                  <p className="text-[13.5px] font-semibold text-amber-900 break-keep">문안이 스팸 검사에 걸렸어요. 검사 결과와 관계없이 {cv.submitted.label} 그대로 보낼 수 있어요.</p>
+                  {canSubmitted ? (
+                    <button type="button" onClick={() => setSheet('submitted')} disabled={working} className={`${CUI_BTN_PRIMARY} w-full h-12 text-[15px] justify-center`}>
+                      {working ? <Loader2 className="w-[17px] h-[17px] animate-spin" /> : <Send className="w-[17px] h-[17px]" />}
+                      {cv.submitted.label} 그대로 승인
+                    </button>
+                  ) : (
+                    <p className="text-[12.5px] text-amber-800 leading-relaxed">{a?.spamOverride?.reason || cv.submitted.reason || '지금은 그대로 보낼 수 없어요.'}</p>
+                  )}
+                  <p className="text-[12px] text-amber-800 leading-relaxed">문안을 고치려면 한줄로에 로그인해 대행발송 상세에서 고쳐 주세요.</p>
+                </div>
               ) : !doneByStatus && (
                 <div className="rounded-xl border border-neutral-200 bg-white p-5 text-center">
                   <p className="text-[13.5px] font-semibold text-neutral-800">지금은 승인할 수 있는 상태가 아닙니다</p>
@@ -378,7 +437,7 @@ export default function AgencyApprovePage() {
       </Shell>
 
       {/* ── 확인 창(Harold ① · 버튼마다 한 번 더 · 위험 동작 자동 포커스 끔) ── */}
-      <LinkConfirmSheet open={sheet === 'approve'} title="이 문안 그대로 승인할까요?" rows={summaryRows} tone="primary" busy={working}
+      <LinkConfirmSheet open={sheet === 'approve'} title={cv.primaryLabel ? '스팸 통과 문안으로 승인할까요?' : '이 문안 그대로 승인할까요?'} rows={summaryRows} tone="primary" busy={working}
         notes={[
           ...(r.spamOverridden === true ? [{ tone: 'warn' as const, text: '이 문안은 스팸 검사에 걸렸지만 담당자가 그대로 보내기로 했어요. 걸린 통신사를 쓰시는 분께는 닿지 않을 수 있어요.' }] : []),
           // ★ 2026-11-25 빈 자리 = 이 창의 단추가 곧 확인(설계서 §5-2)
@@ -388,6 +447,22 @@ export default function AgencyApprovePage() {
         confirmLabel={(r.blanks || []).length > 0
           ? `${(r.blanks || []).length === 1 ? blankLabels : '빈 자리'} 그대로 두고 승인하기`
           : `승인하기 · ${r.recipientCount.toLocaleString()}명`} onConfirm={() => { void approve(); }} onCancel={() => setSheet(null)} />
+      {/* ★ 2026-11-27 C167-C — 처음 접수한 문안 그대로 승인 확인(글 전문 · 닿지 않을 수 있음 · 빈 자리 = 이 단추가 곧 확인) */}
+      <LinkConfirmSheet open={sheet === 'submitted'} title={`${cv.submitted?.label || '처음 접수한 문안'} 그대로 승인할까요?`} rows={summaryRows} tone="primary" busy={working}
+        notes={[
+          { tone: 'warn', text: '스팸 검사에 걸린 문안이에요. 걸린 통신사를 쓰시는 분께는 문자가 닿지 않을 수 있어요.' },
+          { tone: 'info', text: `${cv.submitted?.label || '처음 접수한 문안'}은 테스트 문자를 따로 보내지 않았어요. 받는 분마다 항목 값만 바뀌어 나가요.` },
+          ...(submittedBlankLabels ? [{ tone: 'warn' as const, text: `${submittedBlankLabels} 자리가 채워지지 않았어요. 받는 분 모두에게 이 글자 그대로 나가요.` }] : []),
+          // ★ Codex 구현 1R #1 — 글 버전이 올라 이 주소는 닫힌다 · 취소 길 = 승인 완료 문자의 새 주소
+          { tone: 'info', text: '승인하면 정해진 시각에 이 글 그대로 나갑니다. 보내기 전에 취소하려면 승인 완료 문자로 새로 보내 드리는 주소를 열어 주세요.' },
+        ]}
+        confirmLabel={submittedBlankLabels ? '빈 자리 그대로 두고 승인하기' : `승인하기 · ${r.recipientCount.toLocaleString()}명`}
+        onConfirm={() => { void approveSubmitted(); }} onCancel={() => setSheet(null)}>
+        {/* ★ Codex 구현 1R #3 — 승인할 글 전문(테스트 문자를 따로 보내지 않는 승인의 마지막 확인) */}
+        <div className="max-h-[38vh] overflow-y-auto rounded-xl bg-neutral-100 px-3.5 py-3 text-[13px] leading-relaxed text-neutral-900 whitespace-pre-wrap break-words">
+          {cv.blocks.find((b) => b.kind === 'submitted')?.text || ''}
+        </div>
+      </LinkConfirmSheet>
       <LinkConfirmSheet open={sheet === 'cancel'} title="이 발송을 취소할까요?" rows={summaryRows} tone="danger" busy={working}
         notes={[
           { tone: 'warn', text: '취소하면 되돌릴 수 없어요. 다시 보내려면 새로 접수해야 해요.' },

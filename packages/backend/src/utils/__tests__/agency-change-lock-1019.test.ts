@@ -94,7 +94,8 @@ describe('효과 CT · 직접발송 = 같은 판정(소스 계약)', () => {
     expect(c).toContain("${sendChangeLockFreeSql('agency_send_requests.requested_at', 7)}");
     expect(c).toContain("${sendChangeLockFreeSql('agency_send_requests.requested_at', 8)}");
     // ★ 2026-11-24 셋째 = 그대로 보내기 CT(overrideSpamBlockTx · 같은 UPDATE 조건 sendChangeLockFreeSql · 0행 = 같은 응답)
-    expect((c.match(/return staleFail\(input\.requestId, input\.companyId\)/g) || []).length).toBe(3);
+    // ★ 2026-11-27 C167-C — 셋째(그대로 승인 CT)는 링크 주체면 회사 범위가 행에서 온다(input.companyId || 행의 회사)
+    expect((c.match(/return staleFail\(input\.requestId, input\.companyId/g) || []).length).toBe(3);
     // Codex L3 — 두 CT 모두 행 잠금(FOR UPDATE)을 쥔 뒤 UPDATE(잠금을 기다린 UPDATE 는 조건을 다시 보지 않는다)
     const lockSql = 'SELECT 1 FROM agency_send_requests WHERE id = $1::uuid AND company_id = $2::uuid FOR UPDATE';
     // ★ 2026-11-24 문안 수정 = 같은 행 잠금에서 진단 대기(last_test_result.diagHold)도 함께 읽는다(설계서 docs/2026-11-23-spam-block-cause-hint-design.md §6-2-2)

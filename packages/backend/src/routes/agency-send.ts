@@ -166,7 +166,8 @@ function toPublic(row: any) {
      */
     finalTestRequired: !row.final_test_at,
     // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 판정(서버 한 곳 · 화면은 이 값으로 단추 · 불가 사유를 그린다 · text = 그대로 보낼 글)
-    spamOverride: (() => { const o = spamOverrideOf(row); return { ok: o.ok, reason: o.reason, text: o.ok ? o.text : null, retime: o.retime }; })(),
+    // ★ 2026-11-27 C167-C — shown = 표시 재료(ok 와 따로 · 처음 문안 글 · 이름 · 빈 자리) · text = 옛 계약 그대로(배포 중 옛 화면)
+    spamOverride: (() => { const o = spamOverrideOf(row); return { ok: o.ok, reason: o.reason, text: o.ok ? o.text : null, retime: o.retime, shown: o.shown }; })(),
     // ★ 2026-11-24 지금 문안 버전 = 그대로 보내기를 고른 글(단건 응답에만 · 화면이 「통과」라고 쓰지 않는다 · Codex 구현 1R #4)
     ...(row.spam_overridden !== undefined ? { spamOverridden: row.spam_overridden === null ? null : !!row.spam_overridden } : {}),
     reapprovalCount: row.reapproval_count,
@@ -791,8 +792,14 @@ router.post('/:id/spam-override', async (req: Request, res: Response) => {
   const auth = await requireAgencySend(req, res);
   if (!auth) return;
   try {
+    // ★ 2026-11-27 C167-C(R113) — 이 요청 = 「{처음 접수한 문안} 그대로 승인」(글 교체 + 승인 한 트랜잭션) · 새 화면만 approve: true 를 보낸다.
+    //   없으면 = 배포 때 열려 있던 옛 화면의 두 단계 요청(옛 약속 = 테스트 문자 뒤 따로 승인) → 상태 변경 0 · 새로 고침 안내(Codex 설계 2R #1)
+    if (req.body?.approve !== true) {
+      return res.status(409).json({ success: false, error: '화면을 새로 고친 뒤 다시 골라 주세요.', code: 'REFRESH_REQUIRED' });
+    }
     const out = await overrideSpamBlockTx({
-      requestId: req.params.id, companyId: auth.companyId, ownerUserId: ownerParam(auth), revision: req.body?.revision, actorUserId: auth.userId,
+      requestId: req.params.id, companyId: auth.companyId, revision: req.body?.revision, blankAck: req.body?.blankAck === true,
+      actor: { via: 'screen', userId: auth.userId, ownerUserId: ownerParam(auth) },
       req: { ip: req.ip, headers: req.headers },
     });
     if (!out.ok) {
@@ -800,8 +807,6 @@ router.post('/:id/spam-override', async (req: Request, res: Response) => {
       if ('senderAuth' in out) return res.status(403).json(senderAuthRejection(out.senderAuth));
       return res.status(out.status).json({ success: false, error: out.error, ...(out.code ? { code: out.code } : {}) });
     }
-    // 테스트 문자 · 승인 링크 = 방금 커밋한 버전에만(그 사이 바뀌면 보내지 않는다 · Codex 구현 1R #3)
-    void sendAgencyApprovalRequest(String(out.row.id), { withTest: true, version: Number(out.row.content_version) });
     return res.json({ success: true, request: await toPublicWithKinds(out.row) });
   } catch (err: any) {
     if (isMissingRelation(err)) return migrationPending(res);

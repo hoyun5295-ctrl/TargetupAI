@@ -197,7 +197,8 @@ describe('④ 인증번호 확인 응답 = CT 함수 하나', () => {
 describe('배선 — 발급 · 링크 열기 · 승인 라우트', () => {
   it('승인 링크 발급 = 워커 분기 공통 함수 하나(세 분기 + 축 4 두 곳)', () => {
     const w = src('utils/agency-send-worker.ts');
-    expect((w.match(/buildApproveTexts\(managerPhonesOf\(/g) || []).length).toBe(5);
+    // ★ 2026-11-27 C167-C — 여섯째 = 끝내 막힘 안내(notifyTestFailed · 담당자 주소에서 처음 문안 그대로 승인 · 시각 바꾸기)
+    expect((w.match(/buildApproveTexts\(managerPhonesOf\(/g) || []).length).toBe(6);
   });
 
   it('링크 열기 = 토큰 번호가 지금도 담당자 · 문안 버전 같음(계정 판정 없음)', () => {

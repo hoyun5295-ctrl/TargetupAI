@@ -431,22 +431,12 @@ const STATUS_BADGE: Record<JourneyStatus, { label: string; cls: string }> = {
   ended:  { label: JOURNEY_STATUS_LABEL.ended,  cls: 'neutral' },
 };
 
-// ★ 2026-06-25: (광고) 접두사 / 무료거부 문구를 단일 출처로 — 발송 미리보기와 원본 편집이 같은 합성을 보이게.
-//   원본 편집에는 읽기 전용으로만 표시하고 저장 본문(messageTemplate)에는 넣지 않는다(발송 시 1회만 합성 = 이중 부착 차단).
-function adPrefixFor(channel: ChannelType): string {
-  return (channel === 'lms' || channel === 'mms') ? '(광고) ' : '(광고)';
-}
-function adRejectFor(channel: ChannelType, opt080: string): string {
-  const isLms = channel === 'lms' || channel === 'mms';
-  if (opt080) return isLms ? `무료수신거부 ${opt080}` : `무료거부${opt080.replace(/-/g, '')}`;
-  return isLms ? '무료수신거부' : '무료거부';
-}
-
+// ★ 2026-11-27 C167-A(R111 S9) — 여정 문자 카드 미리보기 = 발송과 같은 합성(공용 buildAdMessageFront = 서버 buildAdMessage 거울).
+//   옛: 머리 · 꼬리를 화면이 따로 이어 붙여 끝 줄바꿈 · 이미 있는 수신거부 줄이 서버와 달랐다. 저장 본문(messageTemplate)에는 넣지 않는다(발송 시 1회만 합성).
 function buildPreview(message: string, isAd: boolean, channel: ChannelType, opt080: string): string {
   if (!isAd || !message) return message;
-  // 본문에 이미 (광고) 마커(반각/전각)가 있으면 제거 후 표준 1회 부착 — 이중부착 방지
-  const pure = message.replace(/^\s*[(（]\s*광고\s*[)）]\s*/, '');
-  return `${adPrefixFor(channel)}${pure}\n${adRejectFor(channel, opt080)}`;
+  // 카카오 단계 = 옛 꼴(SMS 머리 · 꼬리) 그대로 — 카카오 미리보기 꼴은 이번 범위 밖
+  return buildAdMessageFront(message, channel === 'lms' || channel === 'mms' ? channel.toUpperCase() : 'SMS', true, opt080);
 }
 
 // ★ 2026-06-22: 스텝 타임라인 지연 표시 — 이전 스텝 후 대기 시간을 사람이 읽기 쉽게

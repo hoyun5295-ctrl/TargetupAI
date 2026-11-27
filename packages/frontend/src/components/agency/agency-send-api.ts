@@ -72,7 +72,7 @@ export interface AgencySendRequest {
    * ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 판정(서버 한 곳 · 화면은 그대로 그린다).
    *   ok = 고를 수 있음 · text = 그대로 보낼 글 · retime = 시각만 바꾸면 고를 수 있음(사유 = reason).
    */
-  spamOverride?: { ok: boolean; reason: string | null; text: string | null; retime: boolean };
+  spamOverride?: AgencySpamChoice & { text: string | null };
   reapprovalCount: number;
   queuedAt: string | null;
   campaignId: string | null;
@@ -281,12 +281,56 @@ export async function createAgencyRequest(input: CreateAgencyRequestInput): Prom
   return { request: data.request, notice: Array.isArray(data.notice) ? data.notice : [] };
 }
 
-/** ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 — 승인 대기로 돌아가고 테스트 문자 · 승인 요청을 다시 받는다 */
-export async function overrideAgencySpamBlock(id: string, revision: number): Promise<AgencySendRequest> {
+/**
+ * ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 · ★ 2026-11-27 C167-C = 「{처음 접수한 문안} 그대로 승인」(글 교체 + 승인 한 번 · approve: true = 새 화면 표시 ·
+ *   빈 자리가 있으면 blankAck · 발신 인증 403 은 화면 인증 창).
+ */
+export async function overrideAgencySpamBlock(id: string, revision: number, blankAck = false): Promise<AgencySendRequest> {
   const res = await fetch(`/api/agency-send/${id}/spam-override`, {
-    method: 'POST', headers: json(), body: JSON.stringify({ revision }),
+    method: 'POST', headers: json(), body: JSON.stringify({ revision, approve: true, ...(blankAck ? { blankAck: true } : {}) }),
   });
   return (await unwrap(res)).request;
+}
+
+/** ★ 2026-11-27 C167-C(R113) — 서버 spamOverrideOf 의 판정 · 표시 재료(shown 은 ok 와 따로 · 링크 choice · 로그인 spamOverride 같은 꼴) */
+export interface AgencySpamChoice {
+  ok: boolean;
+  reason: string | null;
+  retime: boolean;
+  shown?: { label: string; submitted: string; blanks: string[] } | null;
+}
+
+/** 고르는 자리 화면 재료 — 글 칸(차례대로) · 「{이름} 그대로 승인」 단추 */
+export interface AgencyChoiceView {
+  /** 비면 고를 자리 없음 = 지금 화면 그대로 */
+  blocks: Array<{ kind: 'current' | 'submitted'; label: string; text: string }>;
+  /** 「{label} 그대로 승인」 · ok = 단추 · 아니면 reason(시각 · 마감) */
+  submitted: { label: string; ok: boolean; reason: string | null; retime: boolean; blanks: string[] } | null;
+  /** 승인 가능 상태의 주 단추 이름(고를 자리 있음 = 「스팸 통과 문안으로 승인」 · 없음 = null = 지금 이름) */
+  primaryLabel: string | null;
+}
+
+/**
+ * ★ 2026-11-27 C167-C(R113 · 설계서 docs/2026-11-27-c167-agency-spam-choice-design.md §5-6) — 링크 · 로그인 두 화면이 같이 쓰는 한 함수(순수).
+ *   재료는 서버 shown 만(짐작 0 · Codex 설계 1R #4 · 2R #2 · 3R #1) · 주 단추는 여기서 열지 않는다(일반 승인 조건 그대로 · 4R #1).
+ *   승인 대기 · 재승인 = 「스팸 통과 문안」 + 「{이름}(스팸 검사에 걸렸어요)」 · test_failed = 「{이름}(스팸 검사에 걸렸어요)」 + 지금 글이 다를 때만 「한줄로가 고쳐 본 문안」.
+ */
+export function agencyChoiceView(status: AgencySendStatus, choice: AgencySpamChoice | null | undefined, currentContent: string): AgencyChoiceView {
+  const shown = choice?.shown;
+  if (!choice || !shown) return { blocks: [], submitted: null, primaryLabel: null };
+  const submittedBlock = { kind: 'submitted' as const, label: `${shown.label}(스팸 검사에 걸렸어요)`, text: shown.submitted };
+  const submitted = { label: shown.label, ok: choice.ok, reason: choice.ok ? null : choice.reason, retime: choice.retime, blanks: shown.blanks || [] };
+  if (status === 'test_failed') {
+    const blocks = currentContent !== shown.submitted
+      ? [submittedBlock, { kind: 'current' as const, label: '한줄로가 고쳐 본 문안(이 문안도 걸렸어요)', text: currentContent }]
+      : [submittedBlock];
+    return { blocks, submitted, primaryLabel: null };
+  }
+  return {
+    blocks: [{ kind: 'current', label: '스팸 통과 문안(받으신 테스트 문자)', text: currentContent }, submittedBlock],
+    submitted,
+    primaryLabel: '스팸 통과 문안으로 승인',
+  };
 }
 
 /** ★ 2026-11-25 blankAck = 「채우지 않은 자리 그대로 승인」 확인(빈 자리가 있으면 서버가 이 값 없이는 409 BLANK_ACK_REQUIRED) */
@@ -549,9 +593,11 @@ export interface AgencyLinkActionState { ok: boolean; reason: string | null }
 export interface AgencyLinkActions {
   approve: AgencyLinkActionState; cancel: AgencyLinkActionState; reschedule: AgencyLinkActionState;
   resume: AgencyLinkActionState; spellFix: AgencyLinkActionState; editText: AgencyLinkActionState;
+  /** ★ 2026-11-27 C167-C 처음 접수한 문안 그대로 승인(링크도 · 서버 agencyActions 한 벌) */
+  spamOverride: AgencyLinkActionState;
   approveBy: string | null;
 }
-const LINK_ACTION_KEYS = ['approve', 'cancel', 'reschedule', 'resume', 'spellFix', 'editText'] as const;
+const LINK_ACTION_KEYS = ['approve', 'cancel', 'reschedule', 'resume', 'spellFix', 'editText', 'spamOverride'] as const;
 
 /**
  * ★ 2026-10-20 링크 화면 조작 = 서버가 준 actions 에 「지금 시각」 15분 잠금을 덧씌운다(서수란 접수 cmvgfv8r51).

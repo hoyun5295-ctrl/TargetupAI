@@ -28,7 +28,7 @@ import {
 import {
   agencyCallbackLabel, applyAgencySpellToDraft, approveAgencyRequest, cancelAgencyRequest, fetchAgencyPreview, fetchAgencyRequest, formatWhen,
   isApprovable, isCancelable, isEditableStatus, isInSendChangeLock, rescheduleAgencyRequest, SEND_CHANGE_LOCK_REASON, SOURCE_LABEL, STATUS_LABEL,
-  STATUS_TONE, toLocalInput, updateAgencyContent, measureAgencySmsBytes, overrideAgencySpamBlock, type AgencyPreviewSample, type AgencySendEvent,
+  STATUS_TONE, toLocalInput, updateAgencyContent, measureAgencySmsBytes, overrideAgencySpamBlock, agencyChoiceView, type AgencyPreviewSample, type AgencySendEvent,
   type AgencySendRequest,
 } from './agency-send-api';
 
@@ -211,20 +211,27 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
     } finally { setBusy(false); }
   };
 
-  // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 — 승인 대기로 돌아가고 테스트 문자 · 승인 요청을 다시 받는다(설계서 docs/2026-11-24-agency-spam-override-design.md)
-  const doSpamOverride = async () => {
+  // ★ 2026-11-24 통신사 스팸 막힘 「그대로 보내기」 · ★ 2026-11-27 C167-C(R113) = 「{처음 접수한 문안} 그대로 승인」(글 교체 + 승인 한 번 · 서버 한 트랜잭션)
+  //   빈 자리가 있으면 확인 창 단추가 곧 확인(blankAck) · 발신 인증 403 = 승인과 같은 인증 창 · 통과하면 같은 요청을 다시 보낸다(서버가 막으면 상태 변경 0)
+  const doSpamOverride = async (blankAck = false) => {
     if (!req || busy) return;
     setBusy(true);
     try {
-      apply(await overrideAgencySpamBlock(req.id, req.revision));
-      toast.success('테스트 문자와 승인 요청을 다시 보내 드렸어요. 확인하고 승인해 주세요.');
+      apply(await overrideAgencySpamBlock(req.id, req.revision, blankAck));
+      toast.success('승인했습니다. 요청한 시각에 나가도록 예약됩니다.');
     } catch (e: any) {
-      // 발신 인증(3.5) = 승인과 같은 인증 창 · 통과하면 이 요청을 다시 보낸다(서버가 막으면 상태 변경 · 문자 0)
-      if (senderAuth.handleResponse(e?.data, () => { void doSpamOverride(); })) return;
-      toast.error(e?.message || '그대로 보내기를 처리하지 못했습니다.');
+      if (senderAuth.handleResponse(e?.data, () => { void doSpamOverride(blankAck); })) return;
+      toast.error(e?.message || '승인하지 못했습니다.');
       await refresh();
     } finally { setBusy(false); }
   };
+  /** 「{이름} 그대로 승인」 확인 창(글 전문 · 닿지 않을 수 있음 · 빈 자리 = 단추가 곧 확인) */
+  const askSubmitted = (label: string, text: string, blanks: string[]) => setConfirm({
+    mode: 'warning', title: `${label} 그대로 승인할까요?`,
+    description: `스팸 검사에 걸린 문안이에요. 걸린 통신사를 쓰는 분께는 문자가 닿지 않을 수 있어요.\n${label}은 테스트 문자를 따로 보내지 않았어요. 승인하면 요청한 시각에 이 글로 나가요.${blanks.length > 0 ? `\n${blanks.join(', ')} 자리가 채워지지 않았어요. 받는 분 모두에게 이 글자 그대로 나가요.` : ''}\n\n${text}`,
+    confirmLabel: blanks.length > 0 ? '빈 자리 그대로 두고 승인하기' : `${label} 그대로 승인`, cancelLabel: '닫기',
+    onConfirm: () => { setConfirm(null); void doSpamOverride(blanks.length > 0); },
+  });
 
   const doCancel = async () => {
     if (!req || busy) return;
@@ -244,10 +251,15 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
   const closeConfirm = useCallback(() => setConfirm(null), []);
   if (!requestId) return null;
 
-  const refined = !!req && req.currentContent !== req.originalContent;
-  // ★ 2026-11-26 C164 — 글 속 주소가 처음 접수한 글과 같은가(스팸 검사에서 같은 곳으로 가는 짧은 주소로 바꿨으면 다르다)
+  // ★ 2026-11-27 C167-C(R113) — 고르는 자리 = 링크 화면과 같은 한 함수(서버 재료만 · 주 단추는 일반 승인 조건 그대로)
+  const cv = req ? agencyChoiceView(req.status, req.spamOverride, req.currentContent) : agencyChoiceView('received', null, '');
+  const submittedBlock = cv.blocks.find((b) => b.kind === 'submitted') || null;
+  // ★ 2026-11-27 C167-C — 지금 글과 견줄 글 = 고를 자리의 글(서버 shown) · 없으면 처음 접수한 문안 · 두 글이 같으면 칸 · 「다듬었습니다」 0(같은 글 두 번 0 · Codex 구현 2R #1)
+  const compareText = submittedBlock ? submittedBlock.text : (req?.originalContent ?? '');
+  const showCompare = !!req && compareText !== req.currentContent;
+  // ★ 2026-11-26 C164 — 글 속 주소가 견줄 글과 같은가(스팸 검사에서 같은 곳으로 가는 짧은 주소로 바꿨으면 다르다)
   const urlsOf = (t: string) => (String(t || '').match(/https?:\/\/[^\s<>"]+/g) || []).join('\n');
-  const linkKept = !!req && urlsOf(req.currentContent) === urlsOf(req.originalContent);
+  const linkKept = !!req && urlsOf(req.currentContent) === urlsOf(compareText);
   // ★2026-09-13(3) 예약이 한 번이라도 만들어진 접수는 서버가 문안·시각 변경을 막는다(시도 키 보존 · 두 벌 발송 차단).
   //   누르고 거절당하지 않게 버튼을 처음부터 보이지 않는다. 판정 원본은 서버다(이 값이 비어 있어도 서버가 막는다).
   // ★ 2026-10-19 보낼 시각 15분 전 잠금 — 승인 · 취소 · 시각 변경 · 문안 수정 버튼을 내지 않는다(서버도 같은 판정)
@@ -313,17 +325,14 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                     <p className={CUI_DANGER_TEXT}>
                       문안이 스팸 검사를 통과하지 못했습니다. 아래에서 문안을 고치면 검사를 다시 시작합니다.
                     </p>
-                    {/* ★ 2026-11-24 통신사 막힘이면 검사 결과와 관계없이 그대로 보낼 수 있다(판정 = 서버 spamOverride · 승인은 그대로 거친다) */}
-                    {req.spamOverride?.ok && req.spamOverride.text ? (
+                    {/* ★ 2026-11-24 통신사 막힘이면 검사 결과와 관계없이 그대로 보낼 수 있다 · ★ 2026-11-27 C167-C 한 단추 = 승인(판정 · 재료 = 서버 spamOverride · 화면 함수 agencyChoiceView) */}
+                    {cv.submitted?.ok && !locked ? (
                       <button type="button" disabled={busy} className={`${CUI_BTN_GHOST} mt-2`}
-                        onClick={() => setConfirm({
-                          mode: 'warning', title: '검사 결과와 관계없이 이 글 그대로 보낼까요?',
-                          description: `스팸 검사에 걸린 통신사를 쓰는 분께는 문자가 닿지 않을 수 있어요.\n고르면 아래 글로 테스트 문자와 승인 요청을 다시 보내 드리고, 승인해야 예약돼요.\n\n${req.spamOverride!.text}`,
-                          confirmLabel: '그대로 보내기', cancelLabel: '닫기',
-                          onConfirm: () => { setConfirm(null); void doSpamOverride(); },
-                        })}>검사 결과와 관계없이 이 글 그대로 보내기</button>
-                    ) : req.spamOverride?.retime && req.spamOverride.reason ? (
-                      <p className={`${CUI_DANGER_TEXT} mt-1`}>{req.spamOverride.reason}</p>
+                        onClick={() => askSubmitted(cv.submitted!.label, req.spamOverride?.shown?.submitted || '', cv.submitted!.blanks)}>
+                        검사 결과와 관계없이 {cv.submitted.label} 그대로 승인
+                      </button>
+                    ) : cv.submitted?.reason ? (
+                      <p className={`${CUI_DANGER_TEXT} mt-1`}>{cv.submitted.reason}</p>
                     ) : null}
                   </div>
                 </div>
@@ -458,15 +467,22 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 </div>
               )}
 
-              {refined && !editing && (
+              {showCompare && !editing && (
                 <div>
-                  <h4 className={CUI_SEC_TITLE}>처음 접수한 문안</h4>
+                  {/* ★ 2026-11-27 C167-C(R113) — 고를 자리가 있으면 그 글(표식 글 · 이름 = 서버 shown · test_failed 포함 = 당일 재검사에 막힌 「승인하셨던 문안」 · Codex 구현 1R #4) · 없으면 지금처럼 처음 접수한 문안 */}
+                  <h4 className={CUI_SEC_TITLE}>{submittedBlock ? submittedBlock.label : '처음 접수한 문안'}</h4>
                   <div className="mt-1.5 rounded-lg border border-neutral-200 bg-white p-3.5 text-[13px] text-neutral-500 whitespace-pre-wrap leading-relaxed">
-                    {req.originalContent}
+                    {submittedBlock ? submittedBlock.text : req.originalContent}
                   </div>
                   <p className={CUI_HINT}>{linkKept
                     ? '스팸 검사에 걸려 표현을 다듬었습니다. 날짜와 번호, 링크는 그대로입니다.'
                     : '스팸 검사에 걸려 표현을 다듬었습니다. 날짜와 번호는 그대로이고, 링크는 같은 곳으로 가는 한줄로 짧은 주소로 바꿨습니다.'}</p>
+                  {cv.submitted && req.status !== 'test_failed' && (cv.submitted.ok && !locked ? (
+                    <button type="button" disabled={busy} className={`${CUI_BTN_GHOST} mt-2`}
+                      onClick={() => askSubmitted(cv.submitted!.label, req.spamOverride?.shown?.submitted || '', cv.submitted!.blanks)}>
+                      {cv.submitted.label} 그대로 승인
+                    </button>
+                  ) : cv.submitted.reason ? <p className={`${CUI_HINT} mt-1`}>{cv.submitted.label} 그대로: {cv.submitted.reason}</p> : null)}
                 </div>
               )}
 
@@ -527,7 +543,7 @@ export default function AgencySendDetail({ requestId, onClose, onChanged }: Prop
                 });
               }}>
               {busy ? <Loader2 className="w-[15px] h-[15px] animate-spin" /> : <Check className="w-[15px] h-[15px]" />}
-              승인하고 예약하기
+              {cv.primaryLabel || '승인하고 예약하기'}
             </button>
           )}
         </div>

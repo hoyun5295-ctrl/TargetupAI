@@ -50,6 +50,27 @@ export interface AgencyNotifyContext {
   blankLine?: string;
   /** ★ 2026-11-26 C164(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §9-2 · §10-2) — 스팸 검사에서 찾은 글을 거친 접수의 「바꾼 곳」 줄(agency-spam-diag agencyFixLines · 승인 = 이 바꿈에 대한 동의) */
   fixLines?: string[];
+  /**
+   * ★ 2026-11-27 C167-C(R113 · 설계서 docs/2026-11-27-c167-agency-spam-choice-design.md §5-4) — 바꾸기 전 글이 막혀 한줄로가 고친 글로 승인을 묻는다.
+   *   값 = spamOverrideOf 의 표시 재료 · 판정(label · choosable = ok · retime) · 고를 수 있는지와 따로 첫 줄은 늘 「무엇이 막혔는지」를 말한다.
+   */
+  rewrite?: { label: string; choosable: boolean; retime: boolean } | null;
+}
+
+/**
+ * ★ 2026-11-27 C167-C — spamOverrideOf 결과 → 알림 칸(표시 재료가 있을 때만).
+ *   retime(「시각을 먼저 바꿔 주세요」) = 담당자 링크에서 시각 변경이 실제로 열려 있을 때만(canReschedule = agencyActions('link').reschedule.ok ·
+ *   15분 잠금이면 시각도 못 바꾼다 = 못 하는 일을 안내하지 않는다 · Codex 구현 1R #2).
+ */
+export function agencyRewriteOf(offer: { ok: boolean; retime: boolean; shown: { label: string } | null }, canReschedule: boolean): AgencyNotifyContext['rewrite'] {
+  return offer.shown ? { label: offer.shown.label, choosable: offer.ok, retime: offer.retime && canReschedule } : null;
+}
+
+/** ★ 2026-11-27 C167-C — 고친 글 승인 요청의 승인 줄(주소 · 로그인 · 고를 수 있음 · 시각 때문에 못 고름) */
+function rewriteApproveLine(r: NonNullable<AgencyNotifyContext['rewrite']>, viaUrl: boolean): string {
+  const where = viaUrl ? '아래 주소에서' : '로그인하여';
+  if (r.choosable) return `방금 보내 드린 문자는 고친 문안입니다. ${where} 고친 문안으로 승인하거나 ${r.label} 그대로 승인할 수 있습니다.`;
+  return `방금 보내 드린 문자는 고친 문안입니다. ${where} 승인해 주세요.${r.retime ? ` ${r.label} 그대로 보내려면 시각을 먼저 바꿔 주세요.` : ''}`;
 }
 
 /** 문자 앞머리. 담당자가 받은 문자가 무엇인지 한눈에 알게 한다 */
@@ -57,9 +78,10 @@ const HEAD = '[대행발송]';
 
 /** 승인 요청 첫머리(통과 · 그대로 보내기를 가른다) */
 function passedHead(ctx: AgencyNotifyContext): string[] {
-  return ctx.overridden
-    ? [`${HEAD} 스팸 검사에 걸린 문안을 담당자 선택대로 그대로 보내기로 했습니다.`, '걸린 통신사를 쓰시는 분께는 문자가 닿지 않을 수 있습니다.']
-    : [`${HEAD} 스팸 검사를 통과했습니다.`];
+  if (ctx.overridden) return [`${HEAD} 스팸 검사에 걸린 문안을 담당자 선택대로 그대로 보내기로 했습니다.`, '걸린 통신사를 쓰시는 분께는 문자가 닿지 않을 수 있습니다.'];
+  // ★ 2026-11-27 C167-C(서수란 접수 재오픈 1) — 고친 글로 통과한 건을 「통과했습니다」라고만 하지 않는다
+  if (ctx.rewrite) return [`${HEAD} ${ctx.rewrite.label}이 스팸 검사에 걸려, 한줄로가 고친 문안으로 통과했습니다.`];
+  return [`${HEAD} 스팸 검사를 통과했습니다.`];
 }
 
 function compose(lines: string[]): string {
@@ -90,6 +112,7 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     ctx.blankLine || '',
     ...(ctx.fixLines || []),
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
+      ctx.rewrite ? rewriteApproveLine(ctx.rewrite, !!ctx.approveUrl) : '',
       ctx.approveUrl
         ? '이 시각이 괜찮으시면 아래 주소에서 승인해 주세요.'
         : '이 시각이 괜찮으시면 로그인하여 승인해 주세요.',
@@ -107,9 +130,11 @@ export function buildPassedNotify(ctx: AgencyNotifyContext): string {
     ctx.blankLine || '',
     ...(ctx.fixLines || []),
     ctx.spellCount && ctx.spellCount > 0 ? `맞춤법을 확인할 곳이 ${Number(ctx.spellCount).toLocaleString()}곳 있습니다. 승인 전에 확인해 주세요.` : '',
-    ctx.approveUrl
-      ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
-      : '방금 보내 드린 문자를 확인하시고, 로그인하여 승인해 주세요.',
+    ctx.rewrite
+      ? rewriteApproveLine(ctx.rewrite, !!ctx.approveUrl)
+      : ctx.approveUrl
+        ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 바로 승인해 주세요.'
+        : '방금 보내 드린 문자를 확인하시고, 로그인하여 승인해 주세요.',
     ctx.approveUrl || '',
     '승인하지 않으면 발송되지 않습니다.',
   ]);
@@ -139,7 +164,8 @@ export function buildTooTightNotify(ctx: AgencyNotifyContext): string {
 export function buildFinalBlockedNotify(ctx: AgencyNotifyContext): string {
   return compose([
     `${HEAD} 기존에 예약된 대행발송이 스팸필터테스트에 걸려서 예약취소 되었습니다.`,
-    '곧, 다시 문안 안내 드릴테니 로그인 하시어 승인 바랍니다.',
+    // ★ 2026-11-27 C167-C — 뒤따르는 안내 문자의 주소에서 고른다(옛: 「로그인 하시어 승인」 = 링크 승인과 다른 말)
+    '곧 다시 안내해 드립니다. 받으신 문자의 주소에서 고를 수 있어요.',
     `건: ${shortLabel(ctx.label)}`,
   ]);
 }
@@ -147,14 +173,17 @@ export function buildFinalBlockedNotify(ctx: AgencyNotifyContext): string {
 /** ③ 다듬은 문안이 재검사를 통과했다. 재승인을 받는다 */
 export function buildReapprovalNotify(ctx: AgencyNotifyContext): string {
   return compose([
-    `${HEAD} 수정한 문안이 스팸 검사를 통과했습니다.`,
+    // ★ 2026-11-27 C167-C — 승인했던 글이 막혀 고친 글로 통과 = 무엇이 막혔는지 · 그대로 승인 길(고를 수 있을 때)
+    ctx.rewrite ? `${HEAD} ${ctx.rewrite.label}이 발송 전 스팸 검사에 걸려, 한줄로가 고친 문안으로 통과했습니다.` : `${HEAD} 수정한 문안이 스팸 검사를 통과했습니다.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.count ? `요청 건수: ${Number(ctx.count).toLocaleString()}건` : '',
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
     ctx.optOutLine || '',
-    ctx.approveUrl
-      ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 다시 승인해 주세요.'
-      : '방금 보내 드린 문자를 확인하시고, 로그인하여 다시 승인해 주세요.',
+    ctx.rewrite
+      ? rewriteApproveLine(ctx.rewrite, !!ctx.approveUrl)
+      : ctx.approveUrl
+        ? '방금 보내 드린 문자를 확인하시고, 아래 주소에서 다시 승인해 주세요.'
+        : '방금 보내 드린 문자를 확인하시고, 로그인하여 다시 승인해 주세요.',
     ctx.approveUrl || '',
   ]);
 }
@@ -223,13 +252,19 @@ export function buildTestFailedNotify(ctx: AgencyNotifyContext & {
 }): string {
   // ★ 2026-11-24 「세 차례」 낱말은 뺀다 · ★ 2026-11-26 C164 주소 원인으로 한 차례에서 멈추던 갈래(4a)는 없앴다(주소는 우리가 짧은 주소로 바꿔 본다)
   const names = (ctx.carriers || []).filter(Boolean).join(', ');
-  // ★ 2026-11-24 로그인 화면에서 「그대로 보내기」도 고를 수 있다(설계서 docs/2026-11-24-agency-spam-override-design.md · 문자에 링크 0)
   const login = `${String(process.env.HANJUL_BASE_URL || 'https://hanjul.ai').replace(/^https?:\/\//, '').replace(/\/+$/, '')}/agency-send`;
+  // ★ 2026-11-27 C167-C(서수란 접수 재오픈 4 · Harold 1127 「추천대로」) — 담당자 주소(로그인 없음)에서 그대로 승인 · 시각 바꾸기 · 취소 · 로그인 주소 = 문안 고치기만
+  const r = ctx.rewrite;
+  const choiceLine = !ctx.approveUrl || !r ? ''
+    : r.choosable ? `검사 결과와 관계없이 ${r.label} 그대로 보내려면 아래 주소에서 승인할 수 있어요.`
+      : r.retime ? `보낼 시각이 가까워 그대로 보내려면 아래 주소에서 시각을 먼저 바꿔 주세요.` : '';
   return compose([
     `${HEAD} 문안이 스팸 검사에 걸렸습니다${names ? `(${names})` : ''}.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.resultLine || '',
-    `로그인하면 문안을 고치거나 검사 결과와 관계없이 그대로 보내기를 고를 수 있어요: ${login}`,
+    choiceLine,
+    choiceLine ? ctx.approveUrl || '' : '',
+    `문안을 고치려면 로그인해 주세요: ${login}`,
   ]);
 }
 
@@ -306,13 +341,16 @@ export function buildStaffCancelledNotify(ctx: AgencyNotifyContext): string {
  * 담당자 전원이 같은 문자를 받는다. 승인 링크가 새서 남이 눌렀다면 이 문자가 유일한 발각
  * 경로이고(본인 아닌 승인의 즉시 인지), 본인 승인에게는 영수증이 된다.
  */
-export function buildLinkApprovedNotify(ctx: AgencyNotifyContext & { approvedTail: string }): string {
+export function buildLinkApprovedNotify(ctx: AgencyNotifyContext & { approvedTail: string; submittedLabel?: string }): string {
   return compose([
-    `${HEAD} 발송이 승인되었습니다.`,
+    // ★ 2026-11-27 C167-C — 처음 접수한 문안 그대로 승인 = 무엇으로 승인했는지 · 새 주소(글 버전이 올라 옛 주소는 닫힌다 · 보내기 전 취소 길 · Codex 구현 1R #1)
+    ctx.submittedLabel ? `${HEAD} ${ctx.submittedLabel} 그대로 발송이 승인되었습니다.` : `${HEAD} 발송이 승인되었습니다.`,
     `건: ${shortLabel(ctx.label)}`,
     ctx.whenText ? `보낼 시각: ${ctx.whenText}` : '',
     `끝자리 ${ctx.approvedTail} 번호의 링크로 승인되었습니다.`,
     '본인이나 동료의 승인이 아니면 즉시 한줄로 담당자에게 알려 주세요.',
+    ctx.approveUrl ? '보내기 전에 취소하려면 아래 주소를 열어 주세요.' : '',
+    ctx.approveUrl || '',
   ]);
 }
 

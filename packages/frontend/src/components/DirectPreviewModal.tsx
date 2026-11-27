@@ -1,5 +1,5 @@
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { replaceDirectVars, replaceVarsByFieldMeta, resolveRecipientCallback } from '../utils/formatDate';
+import { replaceDirectVars, replaceVarsByFieldMeta, resolveRecipientCallback, buildAdSubjectFront } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 
 interface DirectPreviewModalProps {
@@ -51,9 +51,8 @@ export default function DirectPreviewModal({
   if (!show) return null;
 
   // ★ D137 UI: 제목에 (광고) 자동 prefix — 이미 포함되어 있으면 중복 방지
-  const subjectWithAd = adTextEnabled && directSubject
-    ? (/^\s*[(（]\s*광고\s*[)）]/.test(directSubject.trim()) ? directSubject : `(광고) ${directSubject}`)
-    : directSubject;
+  // ★ 2026-11-27 C167-A(R111 S12) — 서버 buildAdSubject 거울 한 곳(빈 제목 = 「(광고)」 · 이미 있으면 그대로)
+  const subjectWithAd = buildAdSubjectFront(directSubject, directMsgType, adTextEnabled);
 
   // ★ D137 (0424): formatDate.ts resolveRecipientCallback 컨트롤타워 사용 (원칙 3 준수).
   // 인라인 중복 제거 — custom_fields JSONB 내부 키(custom_1~15) 지원 + fallbackCallback=selectedCallback.

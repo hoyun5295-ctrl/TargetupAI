@@ -182,8 +182,10 @@ export function agencyImageNameKey(name: string): string {
 }
 
 /**
- * ★ 2026-11-25 한 메일 여러 건의 이미지 맞추기(설계서 §7) — 자리(건 · 순번) 하나 = 첨부 정확히 하나 · 첨부 하나 = 자리 정확히 하나.
+ * ★ 2026-11-25 한 메일 여러 건의 이미지 맞추기(설계서 §7) — 자리(건 · 순번) 하나 = 첨부 정확히 하나.
  *   반환 = 건마다 첨부 순번 목록(요청서 칸 ①②③ 차례). 어긋나면 사유(시트 · 파일 이름)를 모두 모은다.
+ * ★ 2026-11-27 C167-B(R112 · 설계서 docs/2026-11-27-c167-agency-mms-image-share-design.md) — 같은 첨부를 **다른 건 여럿**이 쓴다(대표 이미지 한 장 · 문안만 다른 다건).
+ *   겹침 판정 = 건마다(같은 건의 ①② 가 같은 첨부 = 반려) · 안 쓰인 첨부 = 메일 전체 · 저장은 호출부가 건마다 새 파일로 한다.
  */
 export function matchAgencyUnitImages(
   units: Array<{ label: string; names: string[] }>, attachmentNames: string[], perUnitMax: number,
@@ -194,7 +196,7 @@ export function matchAgencyUnitImages(
     const j = keys.indexOf(k);
     if (j !== i && j >= 0) reasons.push(`첨부 「${attachmentNames[j]}」와 「${attachmentNames[i]}」의 이름이 같아 어느 요청서 이미지인지 정할 수 없습니다. 이미지 파일 이름을 서로 다르게 바꿔 주세요.`);
   });
-  const usedBy = new Map<number, string>();
+  const used = new Set<number>();
   const assign = units.map((u) => {
     if (u.names.length > perUnitMax) reasons.push(`${u.label}: 이미지는 한 건에 ${perUnitMax}장까지입니다. 지금 ${u.names.length}장이 적혀 있습니다.`);
     const out: number[] = [];
@@ -202,15 +204,14 @@ export function matchAgencyUnitImages(
       const hits = keys.map((k, i) => (k === agencyImageNameKey(name) ? i : -1)).filter((i) => i >= 0);
       if (hits.length === 0) { reasons.push(`${u.label}: 이미지 파일명 「${name}」과 같은 이름의 첨부가 없습니다.`); continue; }
       const at = hits[0];
-      const prev = usedBy.get(at);
-      if (prev !== undefined) { reasons.push(`첨부 「${attachmentNames[at]}」가 ${prev}와 ${u.label} 두 곳에 적혀 있습니다. 한 곳에만 쓰도록 이미지를 나눠 주세요.`); continue; }
-      usedBy.set(at, u.label);
+      if (out.includes(at)) { reasons.push(`${u.label}: 첨부 「${attachmentNames[at]}」가 한 요청서에 두 번 적혀 있습니다. 이미지 파일명 칸에 한 번만 적어 주세요.`); continue; }
+      used.add(at);
       out.push(at);
     }
     return out;
   });
   attachmentNames.forEach((n, i) => {
-    if (!usedBy.has(i)) reasons.push(`첨부 「${n}」는 어느 요청서의 이미지 파일명과도 맞지 않습니다. 요청서의 이미지 파일명 칸에 이 파일 이름을 적어 주세요.`);
+    if (!used.has(i)) reasons.push(`첨부 「${n}」는 어느 요청서의 이미지 파일명과도 맞지 않습니다. 요청서의 이미지 파일명 칸에 이 파일 이름을 적어 주세요.`);
   });
   return reasons.length > 0 ? { ok: false, reasons: [...new Set(reasons)] } : { ok: true, assign };
 }

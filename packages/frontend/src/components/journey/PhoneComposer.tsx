@@ -10,7 +10,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Eye, Image as ImageIcon, Loader2, Lock, PenLine, User } from 'lucide-react';
-import { buildAdMessageFront, buildAdSubjectFront, calculateSmsBytes, LMS_SUBJECT_MAX_CHARS, startsWithAdMark } from '../../utils/formatDate';
+import { buildAdMessageFront, buildAdSubjectFront, calculateSmsBytes, LMS_SUBJECT_MAX_CHARS, startsWithAdMark, adLockedPartsFront } from '../../utils/formatDate';
 import { highlightVars, mergeVarsPlain } from '../../utils/highlightVars';
 import { renderLiquid, flattenCustomerForLiquid } from '../../utils/liquid-templating';
 import { stepChannelLabel } from '../../utils/journey-labels';
@@ -66,19 +66,15 @@ export default function PhoneComposer({
   // ★ 2026-11-13 C133 F2 ① — 추천 상품 판을 바꾸면 지난 판의 응답 · 진행 중 요청을 버리고, 받는 모습을 보는 중이면 그 판으로 다시 묻는다(openSee 가 차례를 올리고 지난 글을 지운다)
   useEffect(() => { reqSeq.current++; setServer(null); setServerErr(null); setServerBusy(false); if (mode === 'see') void openSee(); }, [recoIndex]);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const composed = useMemo(() => buildAdMessageFront(body || '', msgType, isAd, opt080Number), [body, msgType, isAd, opt080Number]);
+  // ★ 2026-11-27 C167-A(R111) — 잠금 줄 · 받는 글 = 공용 함수 하나(합성이 실제로 붙인 것만 · 옛 인라인 머리 식 걷음)
+  const locked = useMemo(() => adLockedPartsFront(body || '', msgType, isAd, opt080Number), [body, msgType, isAd, opt080Number]);
+  const composed = locked.composed;
   // ★ 2026-11-13 C133 F2 ① — 추천 상품 자리가 든 글의 바이트 = 완성된 판(후보마다 + 대체 문장) 가운데 가장 큰 것. 판은 서버와 같은 순서로 만든다
   //   (자리 표식 → 광고 합성 → 판마다 채움 · recoComposedVersions). 자리가 없거나 꼴이 틀리면 null = composed 그대로.
   const hasReco = hasRecoMark(body);
   const recoVersions = useMemo(() => (hasReco ? recoComposedVersions(body || '', (masked) => buildAdMessageFront(masked, msgType, isAd, opt080Number)) : null), [hasReco, body, msgType, isAd, opt080Number]);
-  // 잠금 줄 = 합성이 실제로 붙인 것만(본문에 이미 있으면 다시 그리지 않는다).
-  const adPrefix = isAd && !startsWithAdMark(body || '') ? (channel === 'sms' ? '(광고)' : '(광고) ') : '';
-  const footerLine = useMemo(() => {
-    if (!isAd) return '';
-    const trimmed = (body || '').replace(/\n+$/, '');
-    const rest = composed.slice((adPrefix + trimmed).length);
-    return rest.startsWith('\n') ? rest.trim() : '';
-  }, [composed, body, adPrefix, isAd]);
+  const adPrefix = locked.head;
+  const footerLine = locked.footer;
   const bytes = useMemo(() => (recoVersions !== null ? Math.max(...recoVersions.map((v) => calculateSmsBytes(v))) : calculateSmsBytes(composed)), [recoVersions, composed]);
   const maxBytes = MAX_BYTES[channel];
   const serverBytes = server ? calculateSmsBytes(server.message) : null;

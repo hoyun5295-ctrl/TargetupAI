@@ -16,7 +16,7 @@ import { useSendPolicy, hh, type SendPolicy } from '../utils/send-policy';
 import { useEffect, useState, useMemo, useRef } from 'react';
 import { aiApi } from '../api/client';
 import { fetchOneLineGaps, type LineRecurringNote } from '../utils/one-line';   // ★ 2026-10-23 한줄 CT 반복 발송 점검
-import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, replaceMessageVars, formatPhoneNumber, getMaxByteMessage } from '../utils/formatDate';
+import { calculateSmsBytes, buildAdMessageFront, buildAdSubjectFront, adFooterFront, replaceMessageVars, formatPhoneNumber, getMaxByteMessage } from '../utils/formatDate';
 import MmsImagePreview from './shared/MmsImagePreview';
 import { insertAtCursorPos } from '../utils/textInsert';
 import AiMessageSuggestModal from './AiMessageSuggestModal';
@@ -359,12 +359,8 @@ export default function AutoSendFormModal({ campaign, aiPremiumEnabled, onClose,
   const formatRejectNumber = formatPhoneNumber;
 
   // 광고 접미사 텍스트 — ★ PPT#3: 080번호 없어도 무료거부까지 표시
-  const getAdSuffix = () => {
-    if (!isAd) return '';
-    return messageType === 'SMS'
-      ? `무료거부${optOutNumber ? optOutNumber.replace(/-/g, '') : ''}`
-      : `무료수신거부${optOutNumber ? ` ${formatRejectNumber(optOutNumber)}` : ''}`;
-  };
+  // ★ 2026-11-27 C167-A(R111 S7) — 꼬리 = 공용 함수(번호 = 저장값 그대로 = 실제 발송과 같은 글)
+  const getAdSuffix = () => (isAd ? adFooterFront(messageType, optOutNumber || '') : '');
 
   // ★ D86: AI 기반 타겟 자동 추출 — recommend-target 컨트롤타워 재활용 (한줄로와 동일 로직)
   const parseTargetCondition = async () => {

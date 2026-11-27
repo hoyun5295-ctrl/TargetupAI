@@ -30,12 +30,15 @@ import { refineForSpam } from './agency-send-refine';
 import {
   diagHoldOf, diagHoldJson, diagFixOf, recoverAgencyHold, startAgencyDiag, stepAgencyDiag, releaseAgencyDiag, agencyBlockSummary, agencyFixLines, SPAM_HINT_EVENT, type DiagHold, type DiagFix,
   spamOverrideMarker,   // ★ 2026-11-24 그대로 보내기 표식(진단 CT 가 소유)
+  rewriteChoiceMarker,   // ★ 2026-11-27 C167-C 고친 글로 승인을 물을 때의 표식(R113)
 } from './agency-spam-diag';   // ★ 2026-11-24 막힌 부분 짚어 보기 · ★ 2026-11-26 C164 닿는 글 찾기(설계서 docs/2026-11-25-spam-diag-rewrite-design.md §8 · §9-2)
+import { spamOverrideOf, spamOverrideMarkerOf, agencyActions } from './agency-send-actions';   // ★ 2026-11-27 C167-C 알림의 「무엇이 막혔는지 · 고를 수 있는지」 = 화면 · 링크와 같은 판정
 import { closeDiagnosis } from './spam-diag';
 import {
   buildApprovedExpiredNotify, buildApprovalTimeoutNotify, buildExpiredNotify, buildFinalBlockedNotify, buildPassedNotify,
   buildQueueFailedNotify, buildReapprovalNotify, buildTestErrorNotify, buildTestFailedNotify, buildTooTightNotify, formatWhen, shortLabel,
   buildLinkActionNotify, buildUnsupportedCharsNotify, buildSendRejectedNotify, buildAdGateExcludedNotify, buildAdGateAllExcludedNotify, buildSmsBytesNotify,
+  agencyRewriteOf,
 } from './agency-send-notify';
 import { agencyManagerPhones, buildShortAgencyApproveUrl, linkCancelTailOf } from './agency-send-link';
 import {
@@ -146,7 +149,8 @@ async function setStatus(
   // ★2026-09-13(2) lock 복구 전용. 켜면 **시도 키 잠금이 비어 있을 때만** 바꾼다(아래 `runLockRecovery` 주석)
   // ★ 2026-11-24 spamOverridable = 통신사 막힘 갈래만 넘긴다(결과 칸에 「그대로 보낼 수 있음」 표식 · 설계서 docs/2026-11-24-agency-spam-override-design.md §3)
   // ★ 2026-11-26 C164 dropDiagFix = 결과 칸을 안 쓰는 두 반려(SMS 길이 · 접수 거절)만 넘긴다(끝난 갈래에 찾은 글이 남지 않게 · 같은 칸 대입은 아래 한 줄뿐)
-  opts: { onlyIfAttemptIdle?: boolean; spamOverridable?: { version: number; submitted: string; checkedAt: string; submittedTested: boolean }; dropDiagFix?: boolean } = {},
+  // ★ 2026-11-27 C167-C(R113) — 승인 대기 · 재승인으로 바꾸는 부름은 이 키를 반드시 넘긴다(값 = 고친 글로 승인을 물을 때의 표식 · null = 지움 = 기본 동작)
+  opts: { onlyIfAttemptIdle?: boolean; spamOverridable?: { version: number; submitted: string; checkedAt: string; submittedTested: boolean } | null; dropDiagFix?: boolean } = {},
 ): Promise<boolean> {
   // ⛔ 토큰은 **필수**다(★2026-08-23 Codex 3R high). 선택으로 두면 "토큰 없이 부르는 자리"가 생기고,
   //   그 자리가 워커가 잡아 둔 행을 덮는다(만료 단계가 정확히 그랬다). 토큰 없는 전이는 각자
@@ -302,6 +306,41 @@ const managerPhonesOf = agencyManagerPhones;
  * 승인 링크를 만들기 직전의 **신선한** 행(★2026-08-25). tick 시작 때 읽은 row는 이 tick 안의
  * 다듬기로 문안 버전이 올라 있을 수 있다 — 낡은 버전으로 서명하면 링크가 도착 즉시 죽는다.
  */
+/**
+ * ★ 2026-11-27 C167-C(R113) — 알림의 「무엇이 막혔는지 · 그대로 승인 길」 = 지금 행으로 spamOverrideOf(화면 · 링크와 같은 판정 · 읽기 한 번).
+ *   읽기가 실패하면 null(알림은 그 줄 없이 나간다 · 알림을 막지 않는다).
+ */
+async function rewriteNoticeOf(requestId: string): Promise<ReturnType<typeof agencyRewriteOf>> {
+  try {
+    const r = await query(`SELECT * FROM agency_send_requests WHERE id = $1::uuid`, [requestId]);
+    return r.rows[0] ? agencyRewriteOf(spamOverrideOf(r.rows[0]), agencyActions('link', r.rows[0]).reschedule.ok) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * ★ 2026-11-27 C167-C(R113 · 서수란 접수 재오픈 4) — 끝내 막힘 안내 = 담당자마다 그 버전으로 서명한 주소(로그인 없이 그대로 승인 · 시각 바꾸기 · 취소).
+ *   주소는 고를 수 있거나(ok) 시각만 바꾸면 고를 수 있을 때(retime)만 · 행이 그 사이 바뀌었으면(버전 · 상태) 주소 없이(옛 안내 그대로).
+ *   첫 검사 · 당일 재검사의 끝내 막힘 두 자리가 이 함수 하나를 부른다.
+ */
+async function notifyTestFailed(row: any, version: number, label: string, sum: { carriers: string[]; resultLine: string }): Promise<void> {
+  const rewrite = await rewriteNoticeOf(row.id);
+  const linkRow = await freshLinkFields(row.id);
+  const linkable = !!rewrite && (rewrite.choosable || rewrite.retime)
+    && !!linkRow && linkRow.status === 'test_failed' && Number(linkRow.content_version) === Number(version);
+  const base = { label, carriers: sum.carriers, resultLine: sum.resultLine, rewrite };
+  await notifyManager({
+    companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkable ? linkRow : row),
+    callback: row.callback_number, title: '[대행발송] 문안 확인 요청',
+    text: buildTestFailedNotify(base),
+    ...(linkable ? {
+      perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) => buildTestFailedNotify({ ...base, approveUrl }),
+        row.company_id, row.id, linkRow, row.created_by ?? null),
+    } : {}),
+  });
+}
+
 async function freshLinkFields(requestId: string): Promise<any | null> {
   const r = await query(
     `SELECT content_version, requested_at, manager_phones, manager_phone, status FROM agency_send_requests WHERE id = $1::uuid`,
@@ -519,7 +558,8 @@ async function runSpamRound(row: any, startRound: number, opts: SpamRoundOpts = 
       if (verdict === 'rejected') return { verdict, passed: false, finalContent: original, rounds, detail, rejection: spamRejectionOf(v) };
       // ★ 2026-11-01 B1-4 — 확인 중 · 검사 중 = 원문 그대로 잡기 전 상태로(장애 횟수에 안 셈) · 다듬은 문장이면 그 글을 남겨 다음 주기에 이어 본다
       if (isSpamHold(verdict)) return { verdict, passed: false, finalContent: original, rounds, detail, heldContent: content !== original ? content : null };
-      if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail };
+      // ★ 2026-11-27 C167-C — 통과에도 첫 회차 글 · 시각을 싣는다(고친 글로 통과 = 바꾸기 전 글 그대로 승인 길의 당일 근거)
+      if (verdict === 'pass') return { verdict, passed: true, finalContent: content, rounds, detail, firstTest: firstTest ?? null };
       void (verdict satisfies 'blocked');
 
       if (!resumedT) await logEvent(row.id, 'spam_blocked', { round: rounds, carriers: v.carrierResults });
@@ -1117,11 +1157,7 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
         await logEvent(row.id, 'test_failed', { rounds });
         // ★ 2026-11-24 M2 — 막힌 통신사 · 확정된 확인 판 결과(없으면 의심 부분) 한 줄 · 「세 차례」 낱말 0
         const sum = await agencyBlockSummary(row, lastSpamTestId(detail), blockedCarriersOf(detail));
-        await notifyManager({
-          companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(row),
-          callback: row.callback_number, title: '[대행발송] 문안 확인 요청',
-          text: buildTestFailedNotify({ label, carriers: sum.carriers, resultLine: sum.resultLine }),
-        });
+        await notifyTestFailed(row, savedVersion, label, sum);
         continue;
       }
 
@@ -1142,10 +1178,12 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       const sameDaySend = detail?.resumedFrom !== 'diag' && isSameKstDay(passedAt, new Date(row.requested_at));
       // ★2026-10-18 축 4 — 승인 요청 시각 = 상태를 바꾸는 바로 그 UPDATE(24시간 승인 대기의 시작 · 컬럼 전 = 쉼)
       const askStamp = (await hasApprovalRequestedColumn()) ? { approval_requested_at: passedAt } : {};
+      // ★ 2026-11-27 C167-C(R113) — 고친 글로 통과 = 처음 접수한 문안(original_content)이 막힌 것 → 그 글로 승인할 길(표식) · 같은 글이면 null(지움)
       if (!await setStatus(
         row.id, 'awaiting_approval',
         sameDaySend ? { ...RELEASE, ...askStamp, final_test_at: passedAt } : { ...RELEASE, ...askStamp },
         token,
+        { spamOverridable: rewriteChoiceMarker(savedVersion, String(row.original_content || ''), finalContent, firstTest) },
       )) continue;
       await logEvent(row.id, 'awaiting_approval', { rounds, sameDaySend });
 
@@ -1202,12 +1240,14 @@ async function runFirstTest(onlyRequestId?: string): Promise<void> {
       // ★ 1126 C164 — 찾은 글을 거친 접수 = 바꾼 곳 줄(고객이 낸 글 ↔ 통과해 저장한 글 · 승인 = 이 바꿈에 대한 동의) · 진행 기록
       const fixLines = viaFix ? agencyFixLines(String(row.original_content || ''), finalContent) : [];
       if (fixLines.length > 0) await logEvent(row.id, 'spam_fixed', { version: savedVersion, rounds });
+      // ★ 2026-11-27 C167-C — 무엇이 막혔는지 · 처음 문안 그대로 승인할 수 있는지 = 지금 행으로 같은 판정(spamOverrideOf · 화면 · 링크와 한 벌)
+      const rewrite = await rewriteNoticeOf(row.id);
       await notifyManager({
         companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
         callback: row.callback_number, title: '[대행발송] 승인 요청',
-        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine, blankLine, fixLines }),
+        text: buildPassedNotify({ label, whenText, count, originalWhenText, spellCount, charLines, optOutLine, blankLine, fixLines, rewrite }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine, blankLine, fixLines }),
+          buildPassedNotify({ label, whenText, count, originalWhenText, approveUrl, spellCount, charLines, optOutLine, blankLine, fixLines, rewrite }),
           row.company_id, row.id, linkRow, row.created_by ?? null),
       });
       console.log(`${LOG} 1차 검사 통과 request=${row.id} rounds=${rounds}`);
@@ -1333,6 +1373,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
 
     if (passed) {
       // 다듬어서 통과했다 = 담당자가 못 본 문장이다. 재승인을 받는다(불변 7)
+      // ★ 2026-11-27 C167-C(R113) — 승인했던 글(target.current_content = 재검사를 시작한 글)이 막혀 고친 글로 통과 → 그 글로 승인할 길(표식)
       if (!await setStatus(target.id, 'reapproval', {
         ...RELEASE,
         approved_at: null,
@@ -1340,7 +1381,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
         approval_version: null,
         reapproval_count: Number(target.reapproval_count || 0) + 1,
         ...((await hasApprovalRequestedColumn()) ? { approval_requested_at: new Date() } : {}),   // ★2026-10-18 축 4
-      }, token)) return;
+      }, token, { spamOverridable: rewriteChoiceMarker(version, String(target.current_content || ''), finalContent, firstTest) })) return;
       await logEvent(target.id, 'reapproval', { rounds, version });
 
       await notifyManager({
@@ -1363,12 +1404,13 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
       const reappCount = Number(target.recipient_count || 0);
       // ★ 2026-11-13 C130 — 판정 글 = 1020 테스트 문자를 만든 finalContent(설계서 §4① A8 · Codex 설계 1R #4)
       const reappOptOut = agencyOptOutSmsLine({ content: finalContent, isAd: agencyAdTextApplies({ isAd: target.is_ad, adText: target.ad_text }) });
+      const reappRewrite = await rewriteNoticeOf(target.id);   // ★ 2026-11-27 C167-C 무엇이 막혔는지 · 그대로 승인 길(화면 · 링크와 같은 판정)
       await notifyManager({
         companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(reappRow),
         callback: target.callback_number, title: '[대행발송] 재승인 요청',
-        text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)), count: reappCount, optOutLine: reappOptOut }),
+        text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(target.requested_at)), count: reappCount, optOutLine: reappOptOut, rewrite: reappRewrite }),
         perPhoneTexts: await buildApproveTexts(managerPhonesOf(reappRow), (approveUrl) =>
-          buildReapprovalNotify({ label, whenText: formatWhen(new Date(reappRow.requested_at)), count: reappCount, approveUrl, optOutLine: reappOptOut }),
+          buildReapprovalNotify({ label, whenText: formatWhen(new Date(reappRow.requested_at)), count: reappCount, approveUrl, optOutLine: reappOptOut, rewrite: reappRewrite }),
           target.company_id, target.id, reappRow, target.created_by ?? null),
       });
       return;
@@ -1398,11 +1440,7 @@ async function finalTestRow(row: any, now: Date): Promise<void> {
       text: buildFinalBlockedNotify({ label }),
     });
     const sumB = await agencyBlockSummary(target, lastSpamTestId(detail), blockedCarriersOf(detail));   // ★ 2026-11-24 M2
-    await notifyManager({
-      companyId: target.company_id, requestId: target.id, phones: managerPhonesOf(target),
-      callback: target.callback_number, title: '[대행발송] 문안 확인 요청',
-      text: buildTestFailedNotify({ label, carriers: sumB.carriers, resultLine: sumB.resultLine }),
-    });
+    await notifyTestFailed(target, version, label, sumB);   // ★ 2026-11-27 C167-C 담당자 주소(그대로 승인 · 시각 바꾸기)
   } catch (err: any) {
     console.error(`${LOG} 당일 재검사 실패 request=${target.id}:`, err);
     // 되돌려 둔다. 다음 tick이 다시 잡거나, 시각이 지나면 만료 단계가 맡는다
@@ -1687,10 +1725,16 @@ async function dispatchAttempt(
     // ⛔ 소유권을 반납한다(★2026-08-23 Codex 4R). 토큰을 남기면 `reapproval`은 lock 복구 대상이 아니라
     //   만료도 취소도 그 토큰 때문에 영원히 걸리지 않는다.
     // ⛔ 상태가 실제로 바뀐 뒤에만 알린다 — 아니면 바뀌지도 않은 건에 재승인 요청 문자가 나간다.
+    // ★ 2026-11-27 C167-C(R113) — 글은 그대로 = 이 버전의 고르는 표식이 있으면 그대로 둔다(옛 버전 표식 = 지움)
+    const keptMarker = spamOverrideMarkerOf(row);
     if (!await setStatus(row.id, 'reapproval', {
       ...RELEASE, approved_at: null, approved_by: null, approval_version: null,
       ...((await hasApprovalRequestedColumn()) ? { approval_requested_at: new Date() } : {}),   // ★2026-10-18 축 4
-    }, token)) return;
+    }, token, {
+      spamOverridable: keptMarker && keptMarker.version === Number(row.content_version)
+        ? { version: keptMarker.version, submitted: keptMarker.submitted, checkedAt: keptMarker.checkedAt.toISOString(), submittedTested: keptMarker.submittedTested }
+        : null,
+    })) return;
     await logEvent(row.id, 'dispatch_unapproved_version', {
       approvalVersion: row.approval_version, contentVersion: row.content_version,
     });
@@ -1715,12 +1759,13 @@ async function dispatchAttempt(
     const unappCount = Number(row.recipient_count || 0);
     // ★ 2026-11-13 C130 — 판정 글 = 이 갈래 테스트 문자를 만든 row.current_content(buildSample(row) · 설계서 §4① A8)
     const unappOptOut = agencyOptOutSmsLine({ content: row.current_content, isAd: agencyAdTextApplies({ isAd: row.is_ad, adText: row.ad_text }) });
+    const unappRewrite = await rewriteNoticeOf(row.id);   // ★ 2026-11-27 C167-C 이 버전 표식이 남아 있으면 그대로 승인 길도 알린다
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(unappRow),
       callback: row.callback_number, title: '[대행발송] 재승인 요청',
-      text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)), count: unappCount, optOutLine: unappOptOut }),
+      text: buildReapprovalNotify({ label, whenText: formatWhen(new Date(row.requested_at)), count: unappCount, optOutLine: unappOptOut, rewrite: unappRewrite }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(unappRow), (approveUrl) =>
-        buildReapprovalNotify({ label, whenText: formatWhen(new Date(unappRow.requested_at)), count: unappCount, approveUrl, optOutLine: unappOptOut }),
+        buildReapprovalNotify({ label, whenText: formatWhen(new Date(unappRow.requested_at)), count: unappCount, approveUrl, optOutLine: unappOptOut, rewrite: unappRewrite }),
         row.company_id, row.id, unappRow, row.created_by ?? null),
     });
     return;
@@ -2670,6 +2715,8 @@ export async function sendAgencyApprovalRequest(requestId: string, opts: { withT
     if (opts.version !== undefined && Number(row.content_version) !== opts.version) return;
     // ★ 2026-11-24 그대로 보내기를 고른 버전 = 통과한 것처럼 쓰지 않는다(Codex 구현 1R #4 · 시각 변경 뒤 다시 보내는 승인 요청도 같은 판정)
     const overridden = await isSpamOverriddenVersion(String(row.id), Number(row.content_version));
+    // ★ 2026-11-27 C167-C — 시각을 바꿔 승인 대기로 돌아온 고친 글도 무엇이 막혔는지 · 그대로 승인 길을 함께(이 행으로 같은 판정)
+    const rewrite = agencyRewriteOf(spamOverrideOf(row), agencyActions('link', row).reschedule.ok);
     const label = shortLabel(row.file_name || row.original_content);
     const whenText = formatWhen(new Date(row.requested_at));
     if (isApprovalExpired('awaiting_approval', new Date(row.requested_at), new Date(),
@@ -2709,9 +2756,9 @@ export async function sendAgencyApprovalRequest(requestId: string, opts: { withT
     await notifyManager({
       companyId: row.company_id, requestId: row.id, phones: managerPhonesOf(linkRow),
       callback: row.callback_number, title: '[대행발송] 승인 요청',
-      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine, overridden, blankLine }),
+      text: buildPassedNotify({ label, whenText, count, spellCount, charLines, optOutLine, overridden, blankLine, rewrite }),
       perPhoneTexts: await buildApproveTexts(managerPhonesOf(linkRow), (approveUrl) =>
-        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine, overridden, blankLine }),
+        buildPassedNotify({ label, whenText, count, approveUrl, spellCount, charLines, optOutLine, overridden, blankLine, rewrite }),
         row.company_id, row.id, linkRow, row.created_by ?? null),
     });
   } catch (err: any) {

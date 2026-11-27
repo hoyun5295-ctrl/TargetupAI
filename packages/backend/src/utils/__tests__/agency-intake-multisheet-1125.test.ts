@@ -130,12 +130,22 @@ describe('matchAgencyUnitImages — 자리 ↔ 첨부 1:1(설계서 §7)', () =>
     );
     expect(r).toEqual({ ok: true, assign: [[1], [0]] });
   });
-  it('맞는 첨부 없음 · 남는 첨부 · 두 곳에 쓰임 · 이름 겹침 = 반려', () => {
+  it('맞는 첨부 없음 · 남는 첨부 · 같은 건 안 두 번 · 이름 겹침 = 반려', () => {
     expect(matchAgencyUnitImages([{ label: 'A', names: ['x'] }], ['y.jpg'], 3).ok).toBe(false);
     expect(matchAgencyUnitImages([{ label: 'A', names: ['x'] }], ['x.jpg', 'z.jpg'], 3).ok).toBe(false);
-    expect(matchAgencyUnitImages([{ label: 'A', names: ['x'] }, { label: 'B', names: ['x'] }], ['x.jpg'], 3).ok).toBe(false);
-    expect(matchAgencyUnitImages([{ label: 'A', names: ['x', 'x'] }], ['x.jpg'], 3).ok).toBe(false);
+    const twice = matchAgencyUnitImages([{ label: 'A', names: ['x', 'x'] }], ['x.jpg'], 3);
+    expect(twice.ok).toBe(false);
+    if (!twice.ok) expect(twice.reasons.join('\n')).toContain('한 요청서에 두 번');
     expect(matchAgencyUnitImages([{ label: 'A', names: ['x'] }], ['x.jpg', 'X.png'], 3).ok).toBe(false);
+  });
+  // ★ 2026-11-27 C167-B(R112 · 남지현 접수 cmwx5sfdt2qmfjnscw4iftl0j) — 대표 이미지 한 장을 여러 건이 쓴다(건마다 저장은 호출부가 따로 한다)
+  it('같은 첨부를 다른 건 여럿이 적으면 건마다 붙인다', () => {
+    expect(matchAgencyUnitImages([{ label: 'A', names: ['x'] }, { label: 'B', names: ['x'] }], ['x.jpg'], 3)).toEqual({ ok: true, assign: [[0], [0]] });
+    const five = matchAgencyUnitImages(
+      ['내용11', '내용12', '내용13', '내용14', '내용15'].map((label, i) => ({ label, names: ['①12-RD4', `②${label}-sub`] })),
+      ['12-RD4.jpg', '내용11-sub.jpg', '내용12-sub.jpg', '내용13-sub.jpg', '내용14-sub.jpg', '내용15-sub.jpg'], 3,
+    );
+    expect(five).toEqual({ ok: true, assign: [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5]] });
   });
 });
 

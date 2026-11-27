@@ -26,7 +26,7 @@ import ConfirmModal, { type ConfirmState } from './ConfirmModal';
 import CreditConfirmModal from './credit/CreditConfirmModal';
 import { DateTimeField, isoToLocalInput, localInputToIso } from './DateTimeField';
 // 광고 제목 합성은 화면마다 다시 쓰지 않는다 — 발송 CT(백엔드 buildAdSubject)와 같은 판정의 프론트 CT.
-import { buildAdSubjectFront } from '../utils/formatDate';
+import { buildAdSubjectFront, buildAdMessageFront, stripAdPartsDeepFront } from '../utils/formatDate';
 
 /** 발신번호 select 특수값 — 고객별 등록매장 번호(개별 회신) */
 const INDIVIDUAL_CB = '__individual__';
@@ -335,10 +335,10 @@ export default function DmSendAndTrackModal({ dmId, dmTitle, show, onClose, init
 
   // ★ 2026-07-02(5) 광고성이면 실발송과 동일하게 (광고)+무료수신거부 080까지 합성해 미리보기 —
   //   어떤 번호가 붙는지 발송 전에 눈으로 확인 (백엔드 buildAdMessage와 동일 형식)
-  const previewBody = substituteVars(messageText, sample, 'https://hanjul.ai/dm(개인화)');
-  const previewText = isAd && previewBody.trim()
-    ? `(광고) ${previewBody}\n무료수신거부 ${opt080 || '(080 미등록, 수신거부번호 설정 필요)'}`
-    : previewBody;
+  // ★ 2026-11-27 C167-A(R111 S3) — 서버(routes/dm.ts 발송)와 같은 차례: 광고면 문안 trim · 붙여 넣은 (광고) · 수신거부 문구 걷기 → 견본 치환 · 링크 → 공용 합성
+  //   (옛: 화면이 머리 · 꼬리를 따로 이어 붙여 붙여 넣은 옛 수신거부 줄과 설정 번호가 함께 보였다 · 080 없음 안내는 위 080 칸이 보인다)
+  const previewBody = substituteVars(isAd ? stripAdPartsDeepFront(messageText.trim()) : messageText, sample, 'https://hanjul.ai/dm(개인화)');
+  const previewText = isAd && previewBody.trim() ? buildAdMessageFront(previewBody, 'LMS', true, opt080) : previewBody;
   // ★ 2026-09-12 미리보기 제목도 실발송과 같은 CT를 거친다(광고면 (광고) 접두 · 이미 있으면 중복 없음).
   //   ★ 2026-10-25 원장 #66 — 짧게(단문)를 고른 발송은 90바이트 안이면 단문으로 나가 제목이 보이지 않는다(아래 칸 안내). 장문일 때의 제목을 보여 준다.
   const previewSubject = buildAdSubjectFront(subject.trim(), 'LMS', isAd);

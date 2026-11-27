@@ -325,19 +325,19 @@ describe('S4 화면 — 보내기 앞의 잠금 · 확정 건의 묶음', () => 
     // ★ 구현 Codex 3R — 문 = 순수 함수 하나(아래 「떠 있는 작업 수를 세는 문」 시험이 동작을 잰다) · 화면은 올림 · 내림만 넘긴다
     expect(page).toContain('const attach = askBusyGate(() => setAttachBusy((n) => n + 1), () => setAttachBusy((n) => Math.max(0, n - 1)));');
     expect(page).not.toMatch(/Promise\.resolve\(\)\.then\(\(\) => fn\(/);
-    expect(between(page, 'const prepareSend = async', 'const body = pickedBody.trim();')).toContain('if (block || !pickedType || !count || sendLocked) return;');
+    expect(between(page, 'const prepareSend = async', 'const body = askSendBody(pickedBody);')).toContain('if (block || !pickedType || !count || sendLocked) return;');
     expect(page).toContain('disabled={answering || making || sending || !!unknown || sendLocked} onClick');
     expect(page).toContain('disabled={making || sending || !!unknown || sendLocked} onClick={() => go((step - 1) as Step)}');
     expect(page).toContain('<textarea ref={bodyRef} value={pickedBody} disabled={decorating} onChange=');
-    expect(page).toContain("{sendChannel !== 'SMS' && <input value={pickedSubject} disabled={decorating} onChange=");
+    expect(page).toContain('<input value={pickedSubject} disabled={decorating} onChange=');   // ★ C167-A 잠긴 (광고) 머리와 한 줄
   });
 
   it('보내기 앞 검사 = 나가는 종류로(단문은 제목 없음 · 한도 90바이트 · MMS 는 이미지) · 고객별 매장 번호 · 나눠 보내기 값', () => {
     const send = between(page, 'const prepareSend = async', 'const bodyRef = useRef');
     inOrder(send,
-      "const subject = sendChannel === 'SMS' ? '' : pickedSubject.trim().slice(0, LMS_SUBJECT_MAX_CHARS);",
+      'const subject = askSendSubject(sendChannel, pickedSubject);',   // ★ C167-A 보낼 제목 한 함수(SMS = 빈 글 · trim 뒤 40자)
       "sendChannel !== 'SMS' && !subject ?",
-      'sendBytes(body, sendChannel) > maxBytesOf(sendChannel) ?',
+      'sendBytes(body, sendChannel, opt080.forBytes) > maxBytesOf(sendChannel) ?',
       "sendChannel === 'MMS' && images.length === 0 ?",
       ': splitErr || we;');
     expect(page).toContain("const maxBytesOf = (ch: AskChannel) => (ch === 'SMS' ? SMS_MAX_BYTES : LMS_MAX_BYTES);");

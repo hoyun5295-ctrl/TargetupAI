@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Smartphone, FileDown, AlertTriangle } from 'lucide-react';
-import { buildAdMessageFront, calculateSmsBytes } from '../../utils/formatDate';
+import { adLockedPartsFront, calculateSmsBytes } from '../../utils/formatDate';
 
 export interface FallbackOption {
   code: string;
@@ -73,10 +73,12 @@ export default function FallbackPhoneModal({
   const kind = opt?.kind || 'none';
   // 실제로 나갈 글 = (편집 칸 · 비면 본문 재사용) + 광고 표기(서버와 같은 함수 미러)
   const effectiveBody = opt?.editable ? (draft.contents.trim() ? draft.contents : (opt.reuseBodyWhenEmpty ? bodyText : '')) : bodyText;
-  const finalText = useMemo(
-    () => (kind === 'none' ? '' : buildAdMessageFront(effectiveBody || '', kind, isAd, optOutNumber || '')),
+  // ★ 2026-11-27 C167-A(R111) — 받는 글 · 고정 줄 = 공용 함수 하나(합성이 실제로 붙인 것만 · 본문에 이미 있으면 다시 그리지 않는다)
+  const locked = useMemo(
+    () => (kind === 'none' ? { head: '', footer: '', composed: '' } : adLockedPartsFront(effectiveBody || '', kind, isAd, optOutNumber || '')),
     [kind, effectiveBody, isAd, optOutNumber],
   );
+  const finalText = locked.composed;
   const bytes = calculateSmsBytes(finalText);
   const limit = kind === 'SMS' ? SMS_MAX : LMS_MAX;
   const over = kind !== 'none' && bytes > limit;
@@ -90,8 +92,8 @@ export default function FallbackPhoneModal({
         : '';
 
   // 겉모양 — 고정 줄((광고) · 무료거부)은 말풍선 안에서 고칠 수 없는 줄로 보인다
-  const adHead = isAd && kind !== 'none' ? (kind === 'SMS' ? '(광고)' : '(광고) ') : '';
-  const adTail = isAd && kind !== 'none' ? finalText.slice(finalText.lastIndexOf('\n') + 1) : '';
+  const adHead = locked.head;
+  const adTail = locked.footer;
   const ring = accent === 'amber' ? 'focus:ring-amber-300' : accent === 'indigo' ? 'focus:ring-indigo-300' : 'focus:ring-violet-300';
   const onTone = accent === 'amber' ? 'bg-amber-500 text-white' : accent === 'indigo' ? 'bg-indigo-600 text-white' : 'bg-violet-600 text-white';
 

@@ -4,7 +4,7 @@ import { creditText } from '../constants/credit';
 import { CUI_PILL_BASE, CUI_PANEL, CUI_SCROLL_X, CUI_THEAD, CUI_TH, CUI_TR, CUI_TD, CUI_CELL_DATA, CUI_BTN_GHOST, CUI_BTN_OUTLINE } from '../utils/console-ui';
 import { useEffect, useRef, useState } from 'react';
 import type { FieldMeta } from './DirectTargetFilterModal';
-import { formatByType, buildAdMessageFront, replaceVarsByFieldMeta, getMaxByteMessage, cellToString } from '../utils/formatDate';
+import { formatByType, buildAdMessageFront, adFooterFront, replaceVarsByFieldMeta, getMaxByteMessage, cellToString } from '../utils/formatDate';
 import { insertAtCursor } from '../utils/textInsert';
 import { useInboxEntry } from '../utils/inbox-status';   // ★ 2026-11-14 C133 F5 답장 상담
 import { formatPhoneNumber as formatInboxNumber } from '../utils/formatDate';
@@ -596,9 +596,8 @@ export default function TargetSendModal({
             </div>
             {adTextEnabled && (
               <div className="text-[12.5px] text-slate-500 mt-1 select-none">
-                {targetMsgType === 'SMS'
-                  ? `무료거부${optOutNumber.replace(/-/g, '')}`
-                  : `무료수신거부 ${formatRejectNumber(optOutNumber)}`}
+                {/* ★ 2026-11-27 C167-A(R111 S6) — 꼬리 = 공용 함수(번호 = 저장값 그대로 = 실제 발송과 같은 글) */}
+                {adFooterFront(targetMsgType, optOutNumber)}
               </div>
             )}
           </div>

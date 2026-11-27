@@ -41,6 +41,7 @@ import {
   DIRECT_MAPPING_FIELDS,
   replaceDirectVars,
   buildAdMessageFront,
+  adFooterFront,
   detectPhoneHeaders,
   normalizePhoneKr,
   cellToString,
@@ -391,11 +392,8 @@ export default function DirectSendPanel(props: DirectSendPanelProps) {
   // 헬퍼
   // ============================================================
   const calculateBytes = calculateSmsBytes;
-  const getAdSuffix = () => {
-    return directMsgType === 'SMS'
-      ? `무료거부${optOutNumber.replace(/-/g, '')}`
-      : `무료수신거부 ${formatRejectNumber(optOutNumber)}`;
-  };
+  // ★ 2026-11-27 C167-A(R111 S5) — 꼬리 = 공용 함수(번호 = 저장값 그대로 = 폰 미리보기 · 실제 발송과 같은 글 · 옛: 하이픈을 넣어 그림)
+  const getAdSuffix = () => adFooterFront(directMsgType, optOutNumber);
 
   // 바이트 진행도 — 0~1
   const byteRatio = Math.min(messageBytes / Math.max(1, maxBytes), 1);

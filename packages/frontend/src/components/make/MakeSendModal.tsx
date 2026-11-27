@@ -27,6 +27,7 @@ import { defaultDmSmsText, fixItemsOf, type FixItem } from '../../utils/make-flo
 import { useSendPolicy, isNightAdTime, nightRangeText, getSendPolicy } from '../../utils/send-policy';
 import '../../styles/make.css';   // ★ 2026-10-10 mk-max-h-94(휴대폰 보이는 높이)
 import { MK_BTN_OUTLINE, MK_BTN_PRIMARY, MK_MODAL, MK_MODAL_BACKDROP } from '../../utils/make-ui';
+import { adPrefixFront, adFooterFront, stripAdPartsDeepFront } from '../../utils/formatDate';   // ★ 2026-11-27 C167-A(R111) 광고 머리 · 꼬리 공용 함수
 
 export interface SendDm { id: string; title: string; brand?: string | null; heroSub?: string | null }
 export interface SendEmail { id: string; name: string; subject: string; isAd: boolean; completed: boolean; hasPlaceholder?: boolean }
@@ -310,9 +311,11 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced, onGoFix }: { dm: SendD
   };
 
   const bubble = useMemo(() => {
-    const body = message.trim();
+    // ★ 2026-11-27 C167-A(R111 · Codex 구현 1R #2) — 광고면 서버(routes/dm.ts 발송)와 같이 붙여 넣은 (광고) · 수신거부 문구를 걷고 합성한다
+    const body = isAd ? stripAdPartsDeepFront(message.trim()) : message.trim();
     const parts = body.split('%DM링크%');
-    return { ad: isAd, parts, tail: isAd ? `무료수신거부 ${opt080 || '080 번호 필요'}` : '' };
+    // ★ 2026-11-27 C167-A(R111 S4) — 머리 · 꼬리 = 공용 함수(LMS 꼴 · 번호 = 저장값 그대로 · 080 없음 안내는 위 확인 줄이 맡는다)
+    return { ad: isAd, head: isAd ? adPrefixFront('LMS') : '', parts, tail: isAd ? adFooterFront('LMS', opt080 || '') : '' };
   }, [message, isAd, opt080]);
 
   return (
@@ -344,7 +347,7 @@ function DmCard({ dm, beforeSend, onSent, onOpenAdvanced, onGoFix }: { dm: SendD
         ) : (
           <div>
             <div className="rounded-2xl bg-slate-200 text-slate-900 px-4 py-3 text-[13px] leading-[1.7] max-w-[340px] whitespace-pre-wrap">
-              {bubble.ad ? '(광고)' : ''}{bubble.parts.map((p, i) => (
+              {bubble.head}{bubble.parts.map((p, i) => (
                 <span key={i}>{p}{i < bubble.parts.length - 1 && <span className="inline-block align-middle mx-0.5 px-1.5 py-0.5 rounded-md bg-violet-200 text-violet-800 text-[11px] font-bold">DM 링크 자동</span>}</span>
               ))}
               {bubble.parts.length === 1 && <span className="inline-block align-middle ml-1 px-1.5 py-0.5 rounded-md bg-violet-200 text-violet-800 text-[11px] font-bold">DM 링크 자동</span>}

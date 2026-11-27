@@ -5,7 +5,7 @@
  * 숫자는 서버가 준 값만 그린다(지어내지 않는다) · 묶음 이름 · 설명 = 서버 한 곳(askGroupMeta).
  * ⛔ 모델명 0 · 검사 방식 낱말 0 · 줄표 0.
  */
-import { findVarTokens, hasLiteralVar } from './formatDate';
+import { findVarTokens, hasLiteralVar, LMS_SUBJECT_MAX_CHARS } from './formatDate';
 import { detectLiquidSyntax } from './liquid-templating';
 import { SPLIT_COUNT_RANGE, SPLIT_INTERVAL_RANGE } from './split-send';
 import { sendRejectionReasonOf, type AiLineColumn } from './ai-line';
@@ -35,6 +35,33 @@ export interface AskSegments {
   /** ★ C157 종류 셋의 1통 값 · 발송 치환이 쓰는 칼럼 이름들(나가는 종류 거울 askSendChannel 의 입력) · 옛 서버 응답에는 없다 */
   unitPrices?: Record<AskChannel, AskPrice>;
   varNames?: string[];
+  /** ★ 2026-11-27 C167-A 보내는 계정의 080(확정과 같은 getOpt080Number · 빈 글 = 미등록) · 옛 서버 응답에는 없다 = 모름 */
+  opt080?: string;
+}
+
+/**
+ * ★ 2026-11-27 C167-A(R111 · 설계서 docs/2026-11-27-c167-ad-preview-ct-design.md §4-2) — 보낼 본문 한 곳.
+ *   앞 공백 · 끝의 줄바꿈 아닌 공백만 걷고 끝 줄바꿈은 둔다(서버 buildAdMessage 가 그 수만큼 수신거부 줄을 띄운다 = 간격 조절).
+ *   바이트 · 4단계 받는 분 화면 · 적재 · 확정이 이 값을 쓴다(따로 trim 0). 빈 문안 · 최소 길이 판정 = 이 값의 trim 길이.
+ */
+export function askSendBody(raw: string): string {
+  return String(raw ?? '').replace(/^\s+/, '').replace(/[^\S\n]+$/, '');
+}
+
+/** ★ 2026-11-27 C167-A — 보낼 제목 한 곳(SMS = 빈 글 · 그 밖 = trim 뒤 상한 자르기) · 확정 · 4단계 · 편집칸 미리보기가 같이 쓴다 */
+export function askSendSubject(channel: AskChannel, raw: string): string {
+  return channel === 'SMS' ? '' : String(raw ?? '').trim().slice(0, LMS_SUBJECT_MAX_CHARS);
+}
+
+/**
+ * ★ 2026-11-27 C167-A — 080 읽기 한 곳. known = 서버가 칸을 실어 줬는가(옛 서버 = 모름 · 빈 글 = 미등록).
+ *   forBytes = 번호가 있으면 그 값 · 모르거나 미등록이면 지금까지 쓰던 10자리 값(옛 화면과 같은 막기 판정 · Codex 설계 2R #3 ·
+ *   미등록으로 연 화면에서 다른 곳에서 번호를 등록하면 발송은 번호를 붙여 합성한다 = 넉넉히 센다 · Codex 구현 1R #1).
+ */
+export function askOpt080Of(seg: Pick<AskSegments, 'opt080'> | null | undefined): { known: boolean; value: string; forBytes: string } {
+  const known = typeof seg?.opt080 === 'string';
+  const value = known ? String(seg!.opt080) : '';
+  return { known, value, forBytes: value || '0800000000' };
 }
 /** channel = 문자 종류(없으면 LMS = 옛 요청 그대로) */
 export interface AskPlan { groups: AskGroupKey[]; mode: 'all' | 'budget'; budget: number | null; order: AskOrder; channel?: AskChannel }

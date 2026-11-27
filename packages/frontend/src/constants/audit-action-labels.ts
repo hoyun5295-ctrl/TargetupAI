@@ -128,6 +128,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   // ★ 2026-08-30 승인 링크 보안 보강 — 무로그인 링크로 실행된 승인의 감사 노출
   charge_link_approved: '충전 링크 승인',
   agency_link_approved: '대행발송 링크 승인',
+  // ★ 2026-11-27 C167-C 담당자 링크에서 처음 접수한 문안 그대로 승인(스팸 검사 결과와 관계없이)
+  agency_link_spam_override: '대행발송 링크 처음 문안 그대로 승인',
   // ★ 2026-10-18 담당자 링크 조작(대행 취소 · 시각 변경 · 맞춤법 · 자동마케팅 멈춤) — 무로그인 링크로 실행된 일의 감사 노출
   agency_link_cancel: '대행발송 링크 취소',
   agency_link_reschedule: '대행발송 링크 시각 변경',
@@ -169,6 +171,7 @@ export const AUDIT_ACTION_COLOR: Record<string, string> = {
   company_terminated: 'bg-red-100 text-red-700',
   charge_link_approved: 'bg-green-100 text-green-700',
   agency_link_approved: 'bg-green-100 text-green-700',
+  agency_link_spam_override: 'bg-amber-100 text-amber-800',
   agency_link_cancel: 'bg-red-100 text-red-700',
   agency_link_reschedule: 'bg-blue-100 text-blue-700',
   agency_link_spell: 'bg-blue-100 text-blue-700',
@@ -482,6 +485,7 @@ export function formatAuditDetail(action: string, details: any): string {
       return [d.companyName, d.amount != null && `${Number(d.amount).toLocaleString()}원`, d.phone && `승인 번호 ${d.phone}`]
         .filter(Boolean).join(' · ');
     case 'agency_link_approved':
+    case 'agency_link_spam_override':
       return [d.label, d.phone && `승인 번호 ${d.phone}`].filter(Boolean).join(' · ');
     case 'agency_link_cancel':
     case 'agency_link_reschedule':
