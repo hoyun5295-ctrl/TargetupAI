@@ -85,6 +85,7 @@ import adminSyncRoutes from './routes/admin-sync';
 import adminRoutes from './routes/admin';
 import smsTemplatesRoutes from './routes/sms-templates';
 import internalAlertRoutes from './routes/internal-alert'; // ★ D145 (2026-05-07): 시스템 알림 SMS (localhost 전용)
+import { teamBridgeInternalRoutes, teamBridgeAdminRoutes } from './routes/team-bridge'; // ★ 2026-11-26 Team 한줄로 다리(같은 서버 Team 서버 전용 · 슈퍼관리자 스위치)
 import bitoSyncRoutes from './routes/bito-sync'; // ★ 2026-11-24 B-1124-3 비토엔진 발신번호 거울 입구(토큰 + 출발지 · ENV 없으면 503)
 import mmsImagesRoutes from './routes/mms-images';
 import spamFilterRoutes from './routes/spam-filter';
@@ -549,11 +550,13 @@ app.use('/api/admin/ops-records', adminOpsRecordsRoutes);
 app.use('/api/admin/marketing-diagnosis', marketingDiagnosisAdminRoutes);
 // ★ 2026-10-04 선불 이용 기간 슈퍼관리자 — /api/admin 와일드카드 위
 app.use('/api/admin/companies/:id/plan-term', planTermAdminRoutes);
+app.use('/api/admin/team-bridge', teamBridgeAdminRoutes); // ★ 2026-11-26 Team 한줄로 데이터 주기 스위치 — /api/admin 보다 앞
 app.use('/api/admin/inbound', adminInboundRoutes);   // ★ 2026-11-14 C133 F5 답장 상담 운영자(슈퍼관리자) — /api/admin 보다 앞
 app.use('/api/admin', adminRoutes);
 app.use('/api/test-contacts', testContactsRoutes);
 app.use('/api/sms-templates', smsTemplatesRoutes);
 app.use('/api/internal', internalAlertRoutes); // ★ D145: localhost 전용 시스템 알림
+app.use('/internal/team-bridge', teamBridgeInternalRoutes); // ★ 2026-11-26 Team 한줄로 다리 문(루프백 + 서비스 키 · /api 밖)
 app.use('/api/bito-sync', bitoSyncRoutes); // ★ 2026-11-24 B-1124-3 비토 동기화 작업자 전용
 app.use('/api/mms-images', mmsImagesRoutes);
 app.use('/api/auto-campaigns', autoCampaignsRoutes);

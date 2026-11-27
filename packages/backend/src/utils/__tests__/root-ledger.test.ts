@@ -1430,7 +1430,7 @@ const ONE_LINE_ROUTERS = new Set([
 ]);
 const OUT_OF_AXIS = (reason: string, files: string[]) => Object.fromEntries(files.map((f) => [f, reason]));
 const OUT_OF_AXIS_ROUTERS: Record<string, string> = {
-  ...OUT_OF_AXIS('슈퍼관리자 · 직원 도구', ['admin.ts', 'admin-ops-records.ts', 'admin-sync.ts', 'admin/login-blocks.ts', 'billing.ts', 'gateway-templates.ts', 'pay-mappings.ts', 'marketing-diagnosis-admin.ts', 'sales-outreach.ts']),
+  ...OUT_OF_AXIS('슈퍼관리자 · 직원 도구', ['admin.ts', 'admin-ops-records.ts', 'admin-sync.ts', 'admin/login-blocks.ts', 'billing.ts', 'gateway-templates.ts', 'pay-mappings.ts', 'marketing-diagnosis-admin.ts', 'sales-outreach.ts', 'team-bridge.ts']),
   ...OUT_OF_AXIS('결제 · 정산 · 요금제', ['payments.ts', 'balance.ts', 'charge-approve.ts', 'agent-charge-orders.ts', 'plans.ts', 'plan-term.ts', 'invoice-public.ts', 'popbill-webhook.ts']),
   ...OUT_OF_AXIS('문자 · 알림톡 직접 발송 축', ['campaigns.ts', 'results.ts', 'alimtalk.ts', 'sms-templates.ts', 'spam-filter.ts', 'send-checks.ts', 'mms-images.ts', 'unsubscribes.ts', 'test-contacts.ts', 'manage-scheduled.ts', 'auto-campaigns.ts', 'sender-registration.ts', 'manage-callbacks.ts', 'short-url.ts']),
   ...OUT_OF_AXIS('대행(계약 기능)', ['agency-send.ts', 'agency-approve.ts', 'campaign-agency.ts']),

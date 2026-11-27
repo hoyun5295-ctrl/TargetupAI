@@ -15,6 +15,7 @@ import {
   ADMIN_TABLE, AdminLongText, ADMIN_THEAD, ADMIN_TH, ADMIN_TH_FIRST, ADMIN_TBODY, ADMIN_TR, ADMIN_TD, ADMIN_TD_FIRST, ADMIN_NUM,
   ADMIN_BTN_PRIMARY, ADMIN_BTN_SM, ADMIN_BTN_SM_DANGER, ADMIN_INPUT, ADMIN_BTN, ADMIN_BTN_DANGER, AdminDetailModal,
 } from '../ui/admin-ui';
+import { useTeamBridgeIds, TeamBridgePill, TeamBridgeButton, TeamBridgeModal } from '../TeamBridgeSwitch'; // ★ 2026-11-26 Team 한줄로로 데이터 주기
 
 /**
  * ★ 2026-10-21 실사 준비 S3 — 해지 사유. ⛔ 원본은 백엔드 `utils/company-terminate.ts` `TERMINATE_REASONS`
@@ -271,6 +272,9 @@ export default function CompaniesTab(props: CompaniesTabProps) {
   }).length;
 
   const resetPage = () => setCompanyPage(1);
+  // ★ 2026-11-26 Team 한줄로로 데이터 주기 — 켠 회사 id(못 읽으면 null = 표 · 단추 숨김)
+  const { ids: teamIds, reload: reloadTeam } = useTeamBridgeIds();
+  const [teamTarget, setTeamTarget] = useState<Company | null>(null);
 
   const planCell = (company: Company) => {
     const state = companyPlanState(company);
@@ -379,7 +383,7 @@ export default function CompaniesTab(props: CompaniesTabProps) {
                     <td className={`${ADMIN_TD_FIRST} font-semibold text-gray-900`}>{company.company_code}</td>
                     <td className={`${ADMIN_TD} font-medium text-gray-900`}><AdminLongText text={company.company_name} max={200} label="회사명" /></td>
                     <td className={ADMIN_TD}>{company.contact_name || <span className="text-gray-300">-</span>}</td>
-                    <td className={`${ADMIN_TD} text-center`}>{usageCell(company)}</td>
+                    <td className={`${ADMIN_TD} text-center`}><span className="inline-flex items-center gap-1">{usageCell(company)}<TeamBridgePill on={!!teamIds?.has(company.id)} /></span></td>
                     <td className={ADMIN_TD}>{planCell(company)}</td>
                     <td className={`${ADMIN_TD} text-center`}>{getStatusBadge(company.status)}</td>
                     <td className={`${ADMIN_TD} ${ADMIN_NUM}`}>{company.total_customers?.toLocaleString() || 0}</td>
@@ -387,6 +391,9 @@ export default function CompaniesTab(props: CompaniesTabProps) {
                     <td className={`${ADMIN_TD} text-right pr-5`}>
                       <span className="inline-flex gap-1">
                         <button type="button" onClick={() => handleEditCompany(company)} className={ADMIN_BTN_SM}>수정</button>
+                        {teamIds && company.status !== 'terminated' && (
+                          <TeamBridgeButton on={teamIds.has(company.id)} onClick={() => setTeamTarget(company)} />
+                        )}
                         {company.status !== 'terminated' && (
                           <button type="button" onClick={() => handleDeactivateCompany(company)} className={ADMIN_BTN_SM_DANGER}>해지</button>
                         )}
@@ -407,6 +414,15 @@ export default function CompaniesTab(props: CompaniesTabProps) {
         accent="emerald"
       />
       <AdminSource>화면을 연 시점에 불러온 목록 기준</AdminSource>
+      {teamTarget && teamIds && (
+        <TeamBridgeModal
+          company={teamTarget}
+          on={teamIds.has(teamTarget.id)}
+          onClose={() => setTeamTarget(null)}
+          onDone={async () => { setTeamTarget(null); await reloadTeam(); }}
+          showAlert={showAlert}
+        />
+      )}
       {terminateTarget && (
         <AdminDetailModal
           title={`고객사 해지 · ${terminateTarget.company_name}`}

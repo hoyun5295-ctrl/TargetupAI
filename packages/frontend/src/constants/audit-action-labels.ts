@@ -140,6 +140,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   customer_notice_shown: '보안 공지 카드 표시',
   customer_notice_report: '보안 점검 기록 열람',
   customer_notice_ack: '보안 공지 확인',
+  // ★ 2026-11-26 Team 한줄로로 데이터 주기 스위치(C166 · backend routes/team-bridge.ts)
+  team_bridge_set: 'Team 데이터 주기 변경',
 };
 
 /** 액션 → 뱃지 색(등록 없으면 회색). 성공=초록 · 실패·차단·파기=빨강 · 감지·주의=호박 · 인계·변경=파랑 */
